@@ -88,8 +88,8 @@ root=backplane-kicad-$platform-$version
 case "$pinned" in ''|*[!0-9a-f]*) fail 'Invalid pinned digest' ;; esac
 [ "${#pinned}" -eq 64 ] || fail 'Invalid pinned digest'
 # curl, else wget: a stock Ubuntu desktop has wget and no curl
-if command -v curl >/dev/null 2>&1; then get() { curl --proto '=https' --tlsv1.2 -fsSL -o "$1" "$2"; }
-elif command -v wget >/dev/null 2>&1; then get() { wget -q --https-only -O "$1" "$2"; }
+if command -v curl >/dev/null 2>&1; then get() { curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 30 --speed-limit 1024 --speed-time 30 -o "$1" "$2"; }
+elif command -v wget >/dev/null 2>&1; then get() { wget -q --https-only --connect-timeout=30 --read-timeout=30 -O "$1" "$2"; }
 else fail 'curl or wget is needed to download KiCad, and neither was found'; fi
 dir=$parent/$version
 # Never unpack over an existing runtime (including an incomplete old install).
@@ -198,11 +198,13 @@ pub fn tools() -> Result<Tools, String> {
     tools_in(cfg!(windows), std::env::var_os("SystemRoot").map(PathBuf::from).as_deref(), &path)
 }
 /// The arguments for one download of `url` into `to`, resuming what a cut earlier try left there and retrying cut connections itself.
+/// A connection that stays open with nothing coming (the network went away under it) ends after 30 s under 1 KB/s and is tried again; without
+/// that the row said "Downloading" at 0 B/s for as long as the hub ran and Install was refused as already running (0.16.0 release check).
 pub fn get_args(g: &Getter, url: &str, to: &Path) -> Vec<String> {
     let to = to.to_string_lossy().into_owned();
     match g {
-        Getter::Curl(_) => ["--proto", "=https", "--tlsv1.2", "-fsSL", "--retry", "3", "--retry-delay", "2", "--retry-connrefused", "-C", "-", "-o", &to, url].iter().map(|s| s.to_string()).collect(),
-        Getter::Wget(_) => ["-q", "--https-only", "-c", "--tries=3", "--waitretry=2", "-O", &to, url].iter().map(|s| s.to_string()).collect(),
+        Getter::Curl(_) => ["--proto", "=https", "--tlsv1.2", "-fsSL", "--connect-timeout", "30", "--speed-limit", "1024", "--speed-time", "30", "--retry", "2", "--retry-delay", "2", "--retry-connrefused", "-C", "-", "-o", &to, url].iter().map(|s| s.to_string()).collect(),
+        Getter::Wget(_) => ["-q", "--https-only", "-c", "--tries=3", "--waitretry=2", "--connect-timeout=30", "--read-timeout=30", "-O", &to, url].iter().map(|s| s.to_string()).collect(),
     }
 }
 /// The package's fields as SCRIPT checks them (they come only from the catalog, but a pin is a one-line change and is checked here too).
@@ -965,8 +967,8 @@ cp \"$f\" \"$out\"
     }
     #[test] fn a_download_resumes_and_retries() {
         let a = get_args(&Getter::Curl("/c".into()), "https://h/f", Path::new("/t/f")).join(" ");
-        assert!(a.contains("-C - ") && a.contains("--retry 3") && a.contains("--proto =https") && a.ends_with("-o /t/f https://h/f"), "{a}");
-        assert_eq!(get_args(&Getter::Wget("/w".into()), "https://h/f", Path::new("/t/f")).join(" "), "-q --https-only -c --tries=3 --waitretry=2 -O /t/f https://h/f");
+        assert!(a.contains("-C - ") && a.contains("--retry 2") && a.contains("--speed-limit 1024 --speed-time 30") && a.contains("--connect-timeout 30") && a.contains("--proto =https") && a.ends_with("-o /t/f https://h/f"), "{a}");
+        assert_eq!(get_args(&Getter::Wget("/w".into()), "https://h/f", Path::new("/t/f")).join(" "), "-q --https-only -c --tries=3 --waitretry=2 --connect-timeout=30 --read-timeout=30 -O /t/f https://h/f");
     }
     #[test] fn windows_uses_its_own_curl_and_unzips_itself() {
         let r = tmp("rf-win"); let s = r.join("System32"); std::fs::create_dir_all(&s).unwrap();
@@ -1018,7 +1020,7 @@ cp \"$f\" \"$out\"
         assert!(!ok && out.trim_end().ends_with("curl or wget is needed to download KiCad, and neither was found"), "{out}");
         let (ok, out) = only(&no_curl(&r, &bin, true));
         assert!(ok, "{out}"); assert!(parent.join("0.0.1-bp.1/bin/kicad-cli").is_file());
-        let a = std::fs::read_to_string(r.join("wget.args")).unwrap(); assert!(a.lines().count() == 2 && a.lines().all(|l| l.starts_with("-q --https-only -O ")), "{a}");
+        let a = std::fs::read_to_string(r.join("wget.args")).unwrap(); assert!(a.lines().count() == 2 && a.lines().all(|l| l.starts_with("-q --https-only --connect-timeout=30 --read-timeout=30 -O ")), "{a}");
     }
     #[cfg(unix)] #[test] fn the_real_script_refuses_a_digest_that_is_not_pinned_or_a_wrong_manifest_and_leaves_nothing() {
         let r = tmp("bad"); let (mut p, bin) = fixture(&r, false); let parent = r.join("home/kicad");

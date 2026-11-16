@@ -51,6 +51,8 @@ final class DataClient {
     let ring = RingModel()
     let devices = DevicesModel()
     let terms = TermStore()
+    /// Bots' cats (feature cats): rigs kept by look, colour and mood.
+    let cats = CatStore()
     private(set) var shot = 0
     private(set) var shotBot = ""
     private(set) var bots: [DBot] = []
@@ -156,6 +158,7 @@ final class DataClient {
         ring.client = self
         devices.client = self
         terms.client = self
+        cats.client = self
         #if DEBUG
         // a simulator has no taps: what the form's Pair and the question's buttons call, from the environment
         let env = ProcessInfo.processInfo.environment

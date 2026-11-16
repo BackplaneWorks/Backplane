@@ -80,7 +80,7 @@ fn bot_rows(st: &State, hub: &str, now: u64, uber: &str, mark: &Value) -> Vec<Va
             } else if t.map_or(false,|t|t.turn==crate::state::Turn::Failed) { ("error","failed") }
             else if now>t.map_or(0,|t|t.activity).saturating_add(900) { ("sleep","asleep") }else{("idle","ready")};
         json!({"id":format!("{hub}|{id}"),"name":name,"title":name,"act":if b.thread.is_empty(){"remote"}else{"bot"},
-            "look":b.look,"mood":mood,"note":note,"uber":!uber.is_empty()&&**id==uber,"sel":false,"remote":false,"peer":"","cat":format!("{}:{mood}",b.look),"key":id,"link":"",
+            "look":b.look,"color":b.color,"mood":mood,"note":note,"uber":!uber.is_empty()&&**id==uber,"sel":false,"remote":false,"peer":"","cat":format!("{}:{mood}",b.look),"key":id,"link":"",
             "nav":if b.thread.is_empty(){format!("@remote:{id}")}else{format!("{hub}|{}",b.thread)},"mark":mark,"menu":bot_menu(id,!far && **id!=uber)})
     }).collect()
 }
@@ -610,6 +610,24 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             session["rid"]=json!(rid+1);
             if let Some(o)=session.as_object_mut() { o.remove("route"); }
             return Some(json!({"remoteReady":false,"nextTarget":{"kind":"recent","id":""},"session":session,"cmds":cmds,"local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
+        },
+        // the bot's name and cat (Settings' cat control: bots/api.rs `catpick`; `cat` is the header's look:mood): `color\u{1f}#rrggbb` ("" the coat's own), `custom\u{1f}<typed>`,
+        // `shuffle` (the next coat after the one shown), `auto` (the name's cat again), `go\u{1f}<name>` (Save name); each is one `bots.edit`
+        "bot-cat" if bot_page.is_object() => {
+            let bot=text(&p["target"],"id"); if bot.is_empty() || bot_page["catpick"].is_null() { return refused("action.bot-cat-unoffered") }
+            let (k,v)=value.split_once('\u{1f}').unwrap_or((value,""));
+            let look=bot_page["look"].as_u64().unwrap_or(0);
+            let q=match k {
+                "color" if v.is_empty() => json!({"bot":bot,"color":""}),
+                "color"|"custom" => match crate::bots::cat::parse_color(v) { Some(c) => json!({"bot":bot,"color":crate::bots::cat::color_hex(c)}), None => return refused("action.bot-cat-color") },
+                "shuffle" => json!({"bot":bot,"look":crate::bots::cat::shuffled(look)}),
+                "auto" => json!({"bot":bot,"auto":true}),
+                "go" if !v.trim().is_empty() => json!({"bot":bot,"name":v.trim()}),
+                _ => return refused("action.bot-cat-unknown"),
+            };
+            let rid=session["rid"].as_u64().unwrap_or(0);
+            cmds.push(json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"bots.edit","p":q}).to_string()}));
+            session["rid"]=json!(rid+1);
         },
         "hook-refresh" if bot_page.is_object() => {},
         "task-run"|"task-del" if bot_page.is_object() => {

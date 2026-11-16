@@ -1,5 +1,9 @@
 package dev.backplane.mobile
 
+import android.content.Context
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
@@ -7,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
@@ -140,14 +145,29 @@ fun DrawScope.drawCat(rig: List<CatPart>, ms: Long) {
     }
 }
 
+/** Whether the system asks for no animation: its animator duration scale is 0 (Developer options, or Accessibility's Remove animations,
+ *  which sets it). Read live, so a cat stops or starts as the setting changes; one watcher for the whole app. */
+object Motion {
+    var off by mutableStateOf(false); private set
+    private var watching = false
+    fun watch(context: Context) {
+        if (watching) return
+        watching = true
+        val cr = context.applicationContext.contentResolver
+        fun read() = Settings.Global.getFloat(cr, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+        off = read()
+        cr.registerContentObserver(Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE), false,
+            object : ContentObserver(Handler(Looper.getMainLooper())) { override fun onChange(selfChange: Boolean) { off = read() } })
+    }
+}
+@Composable
+fun motionOff(): Boolean { val c = LocalContext.current; remember { Motion.watch(c) }; return Motion.off }
+
 // A cat of size x size. It animates while any part moves, unless the
 // system asks for no animation (then it holds its first pose).
 @Composable
 fun CatView(rig: List<CatPart>, size: Dp, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    val still = remember {
-        Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
-    }
+    val still = motionOff()
     val moving = !still && rig.any { it.anims.isNotEmpty() }
     var ms by remember(rig) { mutableLongStateOf(0L) }
     if (moving) {
@@ -158,6 +178,6 @@ fun CatView(rig: List<CatPart>, size: Dp, modifier: Modifier = Modifier) {
     }
     Canvas(modifier.size(size)) {
         val s = this.size.minDimension / 64f
-        withTransform({ scale(s, s, Offset.Zero) }) { drawCat(rig, ms) }
+        withTransform({ scale(s, s, Offset.Zero) }) { drawCat(rig, if (moving) ms else 0L) }
     }
 }

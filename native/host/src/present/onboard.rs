@@ -1,4 +1,4 @@
-//! The first-run setup on a computer: five steps (Welcome, Agents, Design tools, Where your uberbot lives, First project), then Done. Phones have none:
+//! The first-run setup on a computer: six steps (Welcome, Agents, Design tools, Your uberbot (present/onboard_uber.rs), Where your uberbot lives, First project), then Done. Phones have none:
 //! they pair and open the uberbot (docs/ALWAYS-ON.md, D9). Pure: `view` turns the state, the
 //! session and the hub's info into what a client draws, `act` turns a press into a session patch and hub requests. Nothing here runs a program;
 //! `settings/onboard.rs` runs the checks and keeps them in the setting `onboard.checks`, so a result redraws every client and outlives a restart.
@@ -31,12 +31,12 @@ pub enum Mark { Done, Skipped, Todo }
 impl Mark { pub fn word(self) -> &'static str { match self { Mark::Done => "done", Mark::Skipped => "skipped", Mark::Todo => "todo" } } }
 
 /// One step as drawn. `task`: it has something to finish, so Next reads Skip step until it is done. `accept`: Next takes what is preselected
-/// (step 4's Stay on this computer), so it reads Next. `group` is drawn above the step in the rail when it changes; five steps need none.
+/// (step 4's Stay on this computer), so it reads Next. `group` is drawn above the step in the rail when it changes; six steps need none.
 pub struct Step { pub id: &'static str, pub group: &'static str, pub title: String, pub body: String, pub rows: Vec<Value>, pub choices: Vec<Value>, pub panel: String, pub done: bool, pub task: bool, pub accept: bool }
 
 /// The steps' ids in order. Ids of the old setup (install, home, usage, claude, codex, others, kicad, freecad, machine, phone, remote, thread,
 /// the tour's pages, uber) are ignored where they are kept (`onboard.step`, `onboard.skipped`, `onboard.seen`).
-pub const STEPS: &[&str] = &["welcome", "agents", "tools", "alwayson", "project", "done"];
+pub const STEPS: &[&str] = &["welcome", "agents", "tools", "uber", "alwayson", "project", "done"];
 
 fn s<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 fn set<'a>(st: &'a State, k: &str) -> &'a str { st.settings.get(k).map(String::as_str).unwrap_or("") }
@@ -146,7 +146,7 @@ impl<'a> Ask<'a> {
 // ---- the steps ----
 
 fn welcome(f: &Facts, c: &Client) -> Step {
-    let body = "Backplane runs coding agents on your boards, schematics and mechanical parts. Five short steps set it up, and each one can be skipped. Finish later closes setup until the next launch.".to_string();
+    let body = "Backplane runs coding agents on your boards, schematics and mechanical parts. Six short steps set it up, and each one can be skipped. Finish later closes setup until the next launch.".to_string();
     let mut folder = row("Data folder", &format!("{}. Your threads, settings, bots and keys are kept here, and the hub runs your agents from it.", f.home), vec![]);
     if c.launcher { folder["buttons"] = json!([btn("Choose another", "ob-home", "", false)]); }
     let mut rows = vec![folder, usage_row(f)];
@@ -462,7 +462,7 @@ fn tools_with(f: &Facts, st: &State, session: &Value, pkg: Option<&crate::files:
 pub const UBERBOT: &str = "Your uberbot is the assistant you talk to first. It answers you, starts and follows your threads and bots across projects and machines, and keeps your reminders and phone alerts going.";
 /// Step 4. The frame is this file's; its rows and presses are present/onboard_alwayson.rs's.
 fn alwayson(f: &Facts, session: &Value, c: &Client) -> Step {
-    let body = format!("{} Always-on keeps your uberbot, reminders, bots and phone alerts running while this computer sleeps. Hardware and code still run here.", UBERBOT);
+    let body = "Always-on keeps your uberbot, reminders, bots and phone alerts running while this computer sleeps. Hardware and code still run here.".to_string();
     let rows = super::onboard_alwayson::rows(f, session, c);
     Step { id: "alwayson", group: "", title: "Where your uberbot lives".into(), body, rows, choices: vec![], panel: String::new(), done: super::onboard_alwayson::done(f), task: true, accept: true }
 }
@@ -535,7 +535,7 @@ fn finish(marks: &[(String, String, Mark)]) -> Step {
 }
 
 fn all(f: &Facts, st: &State, session: &Value, c: &Client, user_home: &str) -> Vec<Step> {
-    vec![welcome(f, c), agents(f, session), tools(f, st, session), alwayson(f, session, c), project(f, session, user_home)]
+    vec![welcome(f, c), agents(f, session), tools(f, st, session), super::onboard_uber::step(f, session), alwayson(f, session, c), project(f, session, user_home)]
 }
 
 fn mark(st: &State, x: &Step) -> Mark {
@@ -581,7 +581,7 @@ pub fn page(st: &State, session: &Value, info: &Value, c: &Client, user_home: &s
     let f = Facts::of(st, info);
     let (steps, marks, i) = walk(&f, st, session, c, user_home);
     let x = &steps[i]; let last = i + 1 == steps.len();
-    let next = if last { "Done" } else if x.task && !x.done && !x.accept { "Skip step" } else { "Next" };
+    let next = if last { "Done" } else if let Some(l) = (x.id == "uber").then(|| super::onboard_uber::next_label(&f)).flatten() { l } else if x.task && !x.done && !x.accept { "Skip step" } else { "Next" };
     // while KiCad downloads on its step, Skip is not the thing to press: drawn quiet (still there)
     let quiet_next = x.id == "tools" && kicad_installing(info);
     let rail: Vec<Value> = steps.iter().zip(marks.iter()).map(|(x, m)| json!({"id": x.id, "title": x.title, "group": x.group, "state": m.2.word()})).collect();
@@ -597,7 +597,7 @@ pub fn settings_rows(st: &State, session: &Value, info: &Value, c: &Client, user
     let done = set(st, "onboard.done") == "1";
     let mut v = vec![if done { row("Setup is finished", &format!("{}. Run it again to check what changed.", s(&p, "progress")), vec![btn("Run setup again", "ob-open", "start", true)]) }
         else if !set(st, "onboard.step").is_empty() { row("Setup is not finished", &s(&p, "progress").to_string(), vec![btn("Resume setup", "ob-open", "resume", true), btn("Start again", "ob-open", "start", false)]) }
-        else { row("Setup", "Five short steps: your data folder, agents, design tools, where your uberbot lives and a first project.", vec![btn("Run setup", "ob-open", "start", true)]) }];
+        else { row("Setup", "Six short steps: agents, design tools, your uberbot's name, where it lives and a first project.", vec![btn("Run setup", "ob-open", "start", true)]) }];
     for x in p["steps"].as_array().into_iter().flatten().filter(|x| s(x, "id") != "done") {
         let word = match s(x, "state") { "done" => "Done", "skipped" => "Skipped", _ => "Not done" };
         v.push(row(s(x, "title"), word, vec![btn("Go", "ob-go", s(x, "id"), false)]));
@@ -627,7 +627,7 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
     if !action.starts_with("ob-") && action != "bfield" && !(step4_press(action) && due(st, session)) { return None }
     if action == "bfield" {
         let (name, text) = value.split_once('\u{1f}')?;
-        if !(matches!(name, "obkicad" | "obfreecad" | "obproject" | "obfirst") || name.starts_with("obaon")) { return None }
+        if !(matches!(name, "obkicad" | "obfreecad" | "obproject" | "obfirst" | "obubername" | "obubercustom") || name.starts_with("obaon")) { return None }
         return Some(Out { patch: json!({"drafts": {format!("@f.{name}"): text}}), cmds: vec![] })
     }
     let mut ask = Ask { hub, rid: session["rid"].as_u64().unwrap_or(1), cmds: vec![] };
@@ -644,7 +644,9 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
     let mut patch = if let Some(p) = super::onboard_alwayson::act(&f, session, c, action, value, &mut ask) { p } else { match action {
         "ob-next" => {
             let x = &steps[i];
-            if i + 1 == steps.len() { end(&mut ask) } else {
+            // Your uberbot: Next is Say hello until the uberbot is made, and stays for its arrival
+            let hello = if x.id == "uber" { super::onboard_uber::next(&f, session, &mut ask) } else { None };
+            if let Some(p) = hello { p } else if i + 1 == steps.len() { end(&mut ask) } else {
                 if x.id == "alwayson" { super::onboard_alwayson::next(&f, session, &mut ask); }
                 else if x.task && !x.done { ask.put("onboard.skipped", &with(set(st, "onboard.skipped"), x.id)); }
                 else if !x.task { ask.put("onboard.seen", &with(set(st, "onboard.seen"), x.id)); }
@@ -652,6 +654,7 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
             }
         }
         "ob-back" => go(steps[i.saturating_sub(1)].id, &mut ask),
+        "ob-uber" => super::onboard_uber::act(&f, session, value, &mut ask)?,
         // a page with nothing to do (Welcome) is seen once it was on screen, however it is left: by the list as by Next (else Done says "Not done." of it)
         "ob-go" => { if !steps.iter().any(|x| x.id == value) { return None } if !steps[i].task && steps[i].id != value && due(st, session) { ask.put("onboard.seen", &with(set(st, "onboard.seen"), steps[i].id)); } let mut p = go(value, &mut ask); p["drafts"]["@ob.open"] = json!("1"); p["drafts"]["@ob.closed"] = json!(""); p["open"] = json!({"settings": false}); p }
         // Finish later: closed here until the next launch, the step kept
@@ -739,10 +742,10 @@ mod tests {
     fn row_of(p: &Value, label: &str) -> Value { p["rows"].as_array().unwrap().iter().find(|r| r["label"] == label).cloned().unwrap_or_else(|| panic!("no {label} row in {}", p["rows"])) }
     fn actions(p: &Value) -> Vec<String> { p["rows"].as_array().unwrap().iter().flat_map(|r| r["buttons"].as_array().into_iter().flatten()).map(|b| s_(b, "action")).collect() }
 
-    #[test] fn five_steps_then_done_and_nothing_of_the_tour() {
+    #[test] fn six_steps_then_done_and_nothing_of_the_tour() {
         let d = at(&cst(blank(), &[]), "welcome", &info("linux"), &desk());
         assert_eq!(ids(&d), STEPS);
-        assert_eq!(d["count"], 6); assert_eq!(d["counter"], "1 of 6");
+        assert_eq!(d["count"], 7); assert_eq!(d["counter"], "1 of 7");
         let mut every = String::new();
         for id in STEPS { every.push_str(&at(&cst(blank(), &[]), id, &info("linux"), &desk()).to_string()); }
         for gone in ["Ctrl+K", "Palette", "Routines", "Rooms", "Restarts and updates", "tour"] { assert!(!every.contains(gone), "{gone:?} left in setup"); }
@@ -924,7 +927,7 @@ mod tests {
         let (s0, i) = (cst(blank(), &[]), info("linux"));
         let p = at(&s0, "alwayson", &i, &desk());
         assert_eq!(p["title"], "Where your uberbot lives"); assert_eq!(p["next"], "Next", "the preselected choice is an answer");
-        assert!(p["body"].as_str().unwrap().starts_with("Your uberbot is the assistant you talk to first.") && p["body"].as_str().unwrap().contains("while this computer sleeps"));
+        assert!(p["body"].as_str().unwrap().starts_with("Always-on keeps") && p["body"].as_str().unwrap().contains("while this computer sleeps"), "what the uberbot is, said on Your uberbot, the step before");
         assert_ne!(p["state"], "done", "not done before a choice is saved: a new install showed it ticked before it was seen");
         let labels: Vec<String> = p["rows"].as_array().unwrap().iter().map(|r| s_(r, "label")).collect();
         for l in ["Stay on this computer", "An always-on Boat", "Another machine of yours"] { assert!(labels.contains(&l.to_string()), "{l}"); }
@@ -970,7 +973,7 @@ mod tests {
         assert_eq!(page(&half, &sess(json!({})), &i, &desk(), "/h")["id"], "tools", "welcome seen, agents done: tools is next");
         let fresh_ids = cst(c, &[("onboard.step", "palette")]);
         assert_eq!(page(&fresh_ids, &sess(json!({})), &i, &desk(), "/h")["id"], "welcome", "welcome not seen yet");
-        let o = act(&half, "h", &sess(json!({})), &i, &desk(), "/h", "ob-next", "").unwrap(); assert_eq!(setting_of(&o, "onboard.step").as_deref(), Some("alwayson"), "Next from where it resumed");
+        let o = act(&half, "h", &sess(json!({})), &i, &desk(), "/h", "ob-next", "").unwrap(); assert_eq!(setting_of(&o, "onboard.step").as_deref(), Some("uber"), "Next from where it resumed");
         let r = act(&half, "h", &sess(json!({"@ob.closed": "1"})), &i, &desk(), "/h", "ob-open", "resume").unwrap(); assert_eq!(r.patch["drafts"]["@ob.step"], "tools");
     }
     #[test] fn the_import_card_runs_without_a_close_and_ends_with_the_summary_until_seen() {
@@ -1056,7 +1059,7 @@ mod tests {
         let (s0, i) = (cst(blank(), &[]), info("linux"));
         let p = at(&s0, "tools", &i, &desk()); assert_eq!(p["next"], "Skip step"); assert_eq!(p["state"], "todo");
         let o = act(&s0, "h", &sess(json!({"@ob.step": "tools"})), &i, &desk(), "/h", "ob-next", "").unwrap();
-        assert_eq!(setting_of(&o, "onboard.skipped").as_deref(), Some("tools")); assert_eq!(setting_of(&o, "onboard.step").as_deref(), Some("alwayson")); assert_eq!(o.patch["drafts"]["@ob.step"], "alwayson");
+        assert_eq!(setting_of(&o, "onboard.skipped").as_deref(), Some("tools")); assert_eq!(setting_of(&o, "onboard.step").as_deref(), Some("uber")); assert_eq!(o.patch["drafts"]["@ob.step"], "uber");
         assert_eq!(at(&cst(blank(), &[("onboard.skipped", "tools")]), "tools", &i, &desk())["state"], "skipped");
     }
     #[test] fn finish_later_keeps_the_step_and_end_setup_is_final() {
@@ -1137,6 +1140,71 @@ mod tests {
             if !t.contains("://") && !t.contains("--") { assert!(!(t.contains(" (") && t.contains(')')), "parentheses in {t:?}"); }
             assert!(!t.contains('!'), "an exclamation in {t:?}");
         }
+    }
+    fn with_uber(mut x: State, name: &str, extra: Value) -> State {
+        let mut e = json!({"$": "BotSet", "id": "b1", "name": name, "thread": "t1", "look": 5, "persona": "", "at": 1});
+        if let (Some(o), Some(m)) = (e.as_object_mut(), extra.as_object()) { o.extend(m.clone()) }
+        x.apply(&e); x.apply(&json!({"$": "UberSet", "bot": "b1", "uid": "u", "at": 2})); x
+    }
+    fn press(x: &State, d: Value, action: &str, value: &str) -> Out { act(x, "h", &sess(d), &info("linux"), &desk(), "/h", action, value).unwrap() }
+    #[test] fn your_uberbot_names_it_with_a_live_cat_and_say_hello_makes_it_and_stays_for_its_arrival() {
+        let s0 = cst(blank(), &[]);
+        let p = at(&s0, "uber", &info("linux"), &desk());
+        assert_eq!((p["title"].as_str(), p["next"].as_str(), p["state"].as_str()), (Some("Your uberbot"), Some("Say hello"), Some("todo")));
+        assert!(p["body"].as_str().unwrap().starts_with(UBERBOT), "where the uberbot is first named, what it is");
+        let r = &p["rows"][0];
+        assert_eq!((r["kind"].as_str(), r["fields"][0]["name"].as_str(), r["fields"][0]["value"].as_str()), (Some("cat"), Some("obubername"), Some("Bub")), "prefilled");
+        assert!(r["look"].is_null() && r["color"] == "" && r["spawn"] == "" && r["go"].is_null(), "the name's cat, its own colour, nothing arrived yet: {r}");
+        assert_eq!(r["presets"].as_array().unwrap().len(), crate::bots::cat::PRESETS.len());
+        // typing reaches the drafts; a colour, Different cat, back to the name's
+        let typed = json!({"@ob.step": "uber", "@f.obubername": "Mochi"});
+        assert_eq!(press(&s0, json!({}), "bfield", "obubername\u{1f}Mochi").patch["drafts"]["@f.obubername"], "Mochi");
+        assert_eq!(press(&s0, typed.clone(), "ob-uber", "color\u{1f}#6FB3F2").patch["drafts"]["@ob.uber.color"], "#6fb3f2");
+        assert_eq!(press(&s0, typed.clone(), "ob-uber", "color\u{1f}").patch["drafts"]["@ob.uber.color"], "none");
+        let sh = press(&s0, typed.clone(), "ob-uber", "shuffle").patch; let picked = crate::bots::cat::shuffled(crate::bots::cat::look_of("Mochi"));
+        assert_eq!(sh["drafts"]["@ob.uber.look"], picked.to_string(), "Different cat: the next coat after the name's");
+        let mut d = typed.clone(); d["@ob.uber.look"] = json!(picked.to_string()); d["@ob.uber.color"] = json!("#6fb3f2");
+        let p = page(&s0, &sess(d.clone()), &info("linux"), &desk(), "/h"); assert_eq!((p["rows"][0]["look"].as_u64(), p["rows"][0]["picked"].as_bool()), (Some(picked), Some(true)));
+        assert_eq!(press(&s0, d.clone(), "ob-uber", "auto").patch["drafts"]["@ob.uber.look"], "auto");
+        let mut bad = typed.clone(); bad["@f.obubercustom"] = json!("blue");
+        assert_eq!(press(&s0, bad, "ob-uber", "custom").patch["drafts"]["@ob.uber.err"], "Type a colour like #6fb3f2.");
+        // Say hello (the step's Next): made with the name, the colour and the pick, and the step stays for the arrival
+        let o = press(&s0, d.clone(), "ob-next", "");
+        assert_eq!(sent(&o, "bots.create"), vec![json!({"name": "Mochi", "uber": true, "color": "#6fb3f2", "look": picked})]);
+        assert_eq!(o.patch["drafts"]["@ob.uber.made"], "1"); assert!(o.patch["drafts"]["@ob.step"].is_null(), "it stays on the step");
+        let mut bad = typed.clone(); bad["@f.obubername"] = json!("two words");
+        let o = press(&s0, bad, "ob-next", ""); assert!(sent(&o, "bots.create").is_empty()); assert_eq!(o.patch["drafts"]["@ob.uber.err"], "Use 1 to 24 letters, digits, - or _.");
+        // made: the row names it, so the window plays its arrival once; then Next goes on, and the step is done
+        let s1 = with_uber(cst(blank(), &[]), "Mochi", json!({"look": picked, "color": "#6fb3f2"}));
+        let mut made = d.clone(); made["@ob.uber.made"] = json!("1");
+        let p = page(&s1, &sess(made.clone()), &info("linux"), &desk(), "/h");
+        assert_eq!((p["rows"][0]["spawn"].as_str(), p["next"].as_str(), p["state"].as_str()), (Some(format!("b1:Mochi:{picked}:#6fb3f2").as_str()), Some("Next"), Some("done")));
+        assert_eq!(press(&s1, made, "ob-next", "").patch["drafts"]["@ob.step"], "alwayson");
+    }
+    #[test] fn your_uberbot_when_there_is_one_shows_it_and_save_renames_and_recolours_it() {
+        let s1 = with_uber(cst(blank(), &[]), "Pip", json!({"auto": true, "color": "#a98bf0"}));
+        let p = at(&s1, "uber", &info("linux"), &desk()); let r = &p["rows"][0];
+        assert_eq!((r["fields"][0]["value"].as_str(), r["color"].as_str(), r["go"]["label"].as_str(), r["spawn"].as_str()), (Some("Pip"), Some("#a98bf0"), Some("Save"), Some("")));
+        assert!(r["look"].is_null(), "it follows its name");
+        let o = press(&s1, json!({"@ob.step": "uber", "@f.obubername": "Pippa", "@ob.uber.color": "none"}), "ob-uber", "go");
+        assert_eq!(sent(&o, "bots.edit"), vec![json!({"bot": "b1", "name": "Pippa", "color": "", "auto": true})]);
+        // Save keeps what was typed (the box never shows the old name back) and plays the arrival once the bot has changed
+        assert_eq!(o.patch["drafts"], json!({"@ob.uber.err": "", "@ob.uber.made": "1"}));
+        let mut s3 = with_uber(cst(blank(), &[]), "Pip", json!({"auto": true, "color": "#a98bf0"}));
+        let saved = json!({"@ob.step": "uber", "@f.obubername": "Pippa", "@ob.uber.made": "1"});
+        let before = page(&s3, &sess(saved.clone()), &info("linux"), &desk(), "/h")["rows"][0]["spawn"].clone();
+        s3.apply(&json!({"$": "BotSet", "id": "b1", "name": "Pippa", "thread": "", "look": 0, "auto": true, "color": "#a98bf0", "persona": "", "at": 5}));
+        let after = page(&s3, &sess(saved), &info("linux"), &desk(), "/h")["rows"][0]["spawn"].clone();
+        assert!(before != after && after.as_str().unwrap().starts_with("b1:Pippa:"), "{before} -> {after}");
+        // an uberbot made by name before cats could be picked (the onboarding test home: Bub, look 306440) follows its name: the window hashes each letter
+        let old = { let mut x = cst(blank(), &[]); x.apply(&json!({"$": "BotSet", "id": "b1", "name": "Bub", "thread": "t1", "look": 306440, "persona": "", "at": 1})); x.apply(&json!({"$": "UberSet", "bot": "b1", "uid": "u", "at": 2})); x };
+        let r = &at(&old, "uber", &info("linux"), &desk())["rows"][0]; assert!(r["look"].is_null() && r["picked"] == false, "{r}");
+        assert_eq!(sent(&press(&old, json!({"@ob.step": "uber", "@f.obubername": "Chuck"}), "ob-uber", "go"), "bots.edit"), vec![json!({"bot": "b1", "name": "Chuck", "color": "", "auto": true})]);
+        // its own name in another case is its own; another bot's is not
+        let mut s2 = with_uber(cst(blank(), &[]), "Pip", json!({"auto": true, "color": "#a98bf0"})); s2.apply(&json!({"$": "BotSet", "id": "b2", "name": "Scout", "thread": "t2", "look": 1, "persona": "", "at": 3}));
+        assert!(sent(&press(&s2, json!({"@ob.step": "uber", "@f.obubername": "PIP"}), "ob-uber", "go"), "bots.edit").len() == 1);
+        assert_eq!(press(&s2, json!({"@ob.step": "uber", "@f.obubername": "scout"}), "ob-uber", "go").patch["drafts"]["@ob.uber.err"], "A bot named scout already exists.");
+        assert_eq!(press(&s1, json!({"@ob.step": "uber"}), "ob-next", "").patch["drafts"]["@ob.step"], "alwayson", "with one there, Next goes on");
     }
     #[test] fn sentences_stay_short() {
         for t in all_text() { for sent in t.split(". ") { assert!(sent.split_whitespace().count() <= 40, "{sent:?}"); } }

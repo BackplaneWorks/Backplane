@@ -58,7 +58,7 @@ async fn bot(hub: &Arc<Hub>, name: &str) -> String {
     assert_eq!(r["ok"], true); let b = r["bot"].as_str().unwrap().to_string();
     let ev: Vec<Value> = log(&hub).into_iter().filter(|e| e["$"] != "SettingSet").collect(); // the hub's own start-up settings come first
     assert_eq!(ev[0]["$"], "ThreadCreated"); assert_eq!((ev[0]["title"].as_str().unwrap(), ev[0]["env"].as_str().unwrap(), ev[0]["project"].as_str().unwrap()), ("Ada", "local", ""));
-    assert_eq!(ev[1]["$"], "BotSet"); assert_eq!(ev[1]["id"], b.as_str()); assert_eq!(ev[1]["thread"], ev[0]["id"]); assert_eq!(ev[1]["look"], seed("Ada"));
+    assert_eq!(ev[1]["$"], "BotSet"); assert_eq!(ev[1]["id"], b.as_str()); assert_eq!(ev[1]["thread"], ev[0]["id"]); assert_eq!(ev[1]["look"], seed("Ada") % 72); assert_eq!(ev[1]["auto"], true, "no look given: the name's");
     assert!(log(&hub).iter().any(|e| e["$"] == "WorktreeSet"), "the folder is made before the reply: a message sent at once to a new bot has somewhere to run");
     until(&hub, |l| l.iter().any(|e| e["$"] == "WorktreeSet")).await;
     let w = log(&hub).into_iter().find(|e| e["$"] == "WorktreeSet").unwrap();
@@ -91,6 +91,31 @@ async fn bot(hub: &Arc<Hub>, name: &str) -> String {
     assert_eq!(rpc(&hub, "bots.uber", json!({"bot":"nope"})).await["error"], "only a bot on this machine can be the uberbot");
     assert_eq!(rpc(&hub, "bots.uber", json!({"bot":""})).await["ok"], true);
     assert_eq!(log(&hub).iter().filter(|e| e["$"] == "UberSet").count(), 2);
+}
+
+#[tokio::test] async fn a_bots_cat_follows_its_name_until_one_is_picked_and_a_rename_retitles_its_chat() {
+    let (hub, bots, _rec) = start("cat", "").await;
+    let cat = |w: &crate::bots::world::World, id: &str| { let b = w.bot(id).unwrap(); (b.name.clone(), b.look, b.auto, b.color.clone()) };
+    let b = rpc(&hub, "bots.create", json!({"name":"Pip","color":"#6FB3F2"})).await["bot"].as_str().unwrap().to_string();
+    assert_eq!(cat(&*bots.world().await, &b), ("Pip".into(), super::cat::look_of("Pip"), true, "#6fb3f2".into()), "made with no look: the name's");
+    // a rename: the look moves with the name, the chat's title too
+    assert_eq!(rpc(&hub, "bots.edit", json!({"bot":b,"name":"Mochi"})).await["ok"], true);
+    assert_eq!(cat(&*bots.world().await, &b), ("Mochi".into(), super::cat::look_of("Mochi"), true, "#6fb3f2".into()));
+    assert!(log(&hub).iter().any(|e| e["$"] == "ThreadRenamed" && e["title"] == "Mochi"), "its chat is titled with the new name");
+    // Different cat: kept through a rename; Use the name's cat gives it back; "" gives the coat's own colour back
+    let picked = super::cat::shuffled(super::cat::look_of("Mochi"));
+    rpc(&hub, "bots.edit", json!({"bot":b,"look":picked})).await; rpc(&hub, "bots.edit", json!({"bot":b,"name":"Miso"})).await;
+    assert_eq!(cat(&*bots.world().await, &b), ("Miso".into(), picked, false, "#6fb3f2".into()), "a picked cat stays whatever the name");
+    rpc(&hub, "bots.edit", json!({"bot":b,"auto":true,"color":""})).await;
+    assert_eq!(cat(&*bots.world().await, &b), ("Miso".into(), super::cat::look_of("Miso"), true, String::new()));
+    // names: taken or malformed are refused, the bot keeps its own
+    rpc(&hub, "bots.create", json!({"name":"Taken"})).await;
+    assert_eq!(rpc(&hub, "bots.edit", json!({"bot":b,"name":"taken"})).await["error"], "a bot named taken already exists");
+    assert!(rpc(&hub, "bots.edit", json!({"bot":b,"name":"two words"})).await["error"].as_str().unwrap().contains("1 to 24"));
+    assert_eq!(rpc(&hub, "bots.edit", json!({"bot":b,"name":"MISO"})).await["ok"], true, "its own name in another case is its own");
+    // its Settings tab carries the cat control, its presses `bot-cat`
+    let pg = crate::bots::bot_page_from(&hub, &b, "settings", 1000, 0).await.unwrap();
+    assert_eq!((pg["catpick"]["kind"].as_str(), pg["catpick"]["act"].as_str(), pg["catpick"]["fields"][0]["value"].as_str()), (Some("cat"), Some("bot-cat"), Some("MISO")), "{pg}");
 }
 
 #[tokio::test] async fn bots_edit_keeps_what_is_not_given_and_delete_stops_the_thread_after_the_commit() {
@@ -281,7 +306,12 @@ fn filter(ev: &[Value]) -> Vec<Value> {
 fn norm(ev: &[Value]) -> Vec<String> {
     let mut seen: Vec<String> = vec![];
     ev.iter().map(|e| {
-        let s = serde_json::to_string(e).unwrap();
+        // a BotSet's cat since setup's Your uberbot (bots/cat.rs): the recordings stored the name's raw seed as `look` and had no `auto` or
+        // `color`; the look shown is that seed mod 72 either way, so the cat is compared as drawn
+        let mut e = e.clone();
+        if e["$"] == "BotSet" { if let Some(o) = e.as_object_mut() { o.remove("auto"); o.remove("color"); if let Some(l) = o.get("look").and_then(Value::as_u64) { o.insert("look".into(), json!(l % 72)); } } }
+        if e["$"] == "UberOp" { if let Ok(mut op) = serde_json::from_str::<Value>(e["op"].as_str().unwrap_or("")) { if op["k"] == "who" { if let Some(l) = op["look"].as_u64() { op["look"] = json!(l % 72); e["op"] = json!(op.to_string()); } } } }
+        let s = serde_json::to_string(&e).unwrap();
         let s = match s.rfind("/bots/") { Some(i) if s[..i].contains("\"worktree\":\"") => { let a = s.rfind("\"worktree\":\"").unwrap() + 12; format!("{}<home>{}", &s[..a], &s[i..]) } _ => s };
         let cs: Vec<char> = s.chars().collect(); let mut out = String::new(); let mut i = 0;
         while i < cs.len() {
@@ -564,7 +594,7 @@ const JS_UBER2_EVENTS: &str = include_str!("../../../../test/bots/fixtures/js-ub
     let ops: Vec<Value> = log(&hub).into_iter().filter(|e| e["$"] == "UberOp").collect();
     let bodies: Vec<&str> = ops.iter().map(|e| e["op"].as_str().unwrap()).collect();
     assert_eq!(bodies, vec![
-        r#"{"k":"who","name":"bub","look":0,"persona":""}"#.replace("\"look\":0", &format!("\"look\":{}", seed("bub"))).as_str(),
+        r#"{"k":"who","name":"bub","look":0,"persona":""}"#.replace("\"look\":0", &format!("\"look\":{}", seed("bub") % 72)).as_str(),
         r#"{"k":"mem","key":"k","kind":"fact","text":"t","tags":""}"#,
         r#"{"k":"space","spec":"{\"title\":\"Home\"}"}"#,
         r#"{"k":"page","html":"<p>hi</p>"}"#,
@@ -1169,7 +1199,7 @@ impl mail::owner::OwnerLink for Held {
     until(&hub, |l| l.iter().any(|e| e["$"] == "WorktreeSet" && e["id"] == thread_of(&kid).as_str())).await;
     assert_eq!(hub.setting(&format!("bot.parent.{kid}")).await.as_deref(), Some(top.as_str()));
     let l = log(&hub); let tc = l.iter().find(|e| e["$"] == "ThreadCreated" && e["title"] == "kid1").unwrap(); assert_eq!((tc["provider"].as_str().unwrap(), tc["project"].as_str().unwrap()), ("claude", ""));
-    let bs = l.iter().find(|e| e["$"] == "BotSet" && e["id"] == kid.as_str()).unwrap(); assert_eq!((bs["persona"].as_str().unwrap(), bs["look"].clone()), ("p", json!(seed("kid1"))));
+    let bs = l.iter().find(|e| e["$"] == "BotSet" && e["id"] == kid.as_str()).unwrap(); assert_eq!((bs["persona"].as_str().unwrap(), bs["look"].clone()), ("p", json!(seed("kid1") % 72)));
     // the sub-bot's own sub-bot is the second level; a third is refused
     let (ok, r2) = bots.tool_call(&thread_of(&kid), "bot_create", &json!({"name":"kid2"})).await; assert!(ok, "{r2}");
     let kid2 = r2["bot"].as_str().unwrap().to_string();
