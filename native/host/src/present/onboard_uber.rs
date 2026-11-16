@@ -3,7 +3,7 @@
 //! While the name is typed the window works out the look itself, each letter (bots/cat.rs, the same file in both crates), so nothing waits on
 //! the hub; `look` set in the row is a picked one. Say hello (the step's Next until it is made, or Enter in the name) makes the uberbot with
 //! that name, colour and pick; when the bot is there the row's `spawn` names it and the window plays the cat's arrival once.
-//! The bot's own Settings tab draws the same row (bots/api.rs `cat`), its presses `bot-cat` (present/screen.rs).
+//! The bot's own Settings tab draws the same row (bots/api.rs `catpick`), its presses `bot-cat` (present/screen.rs).
 //!
 //! Drafts: `@f.obubername` (the name typed, from `bfield`), `@f.obubercustom` (a custom colour typed), `@ob.uber.color` ("#rrggbb", "none"
 //! for the coat's own, unset: as kept), `@ob.uber.look` (a number: picked; "auto": the name's; unset: as kept), `@ob.uber.err` (the last

@@ -113,6 +113,9 @@ async fn bot(hub: &Arc<Hub>, name: &str) -> String {
     assert_eq!(rpc(&hub, "bots.edit", json!({"bot":b,"name":"taken"})).await["error"], "a bot named taken already exists");
     assert!(rpc(&hub, "bots.edit", json!({"bot":b,"name":"two words"})).await["error"].as_str().unwrap().contains("1 to 24"));
     assert_eq!(rpc(&hub, "bots.edit", json!({"bot":b,"name":"MISO"})).await["ok"], true, "its own name in another case is its own");
+    // its Settings tab carries the cat control, its presses `bot-cat`
+    let pg = crate::bots::bot_page_from(&hub, &b, "settings", 1000, 0).await.unwrap();
+    assert_eq!((pg["catpick"]["kind"].as_str(), pg["catpick"]["act"].as_str(), pg["catpick"]["fields"][0]["value"].as_str()), (Some("cat"), Some("bot-cat"), Some("MISO")), "{pg}");
 }
 
 #[tokio::test] async fn bots_edit_keeps_what_is_not_given_and_delete_stops_the_thread_after_the_commit() {

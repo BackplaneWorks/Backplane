@@ -69,7 +69,7 @@ pub async fn page_from(hub: &Arc<Hub>, bot: &str, tab: &str, now: u64, from: usi
     // Delete bot: any bot of this hub but the uberbot (it is taken back first); the clients ask before they send it
     if !uber { v["delete"] = json!({"label":"Delete bot","action":"bot-delete","value":bot}); }
     // Settings: its name and cat, the control setup's Your uberbot draws (present/onboard_uber.rs), its presses `bot-cat` (present/screen.rs)
-    if on == "settings" { v["cat"] = crate::present::onboard_uber::cat_row(&format!("bcn.{bot}"), &format!("bcc.{bot}"), &me.name, "", (!me.auto).then_some(me.look), &me.color, "bot-cat", Some("Save name"), ""); }
+    if on == "settings" { v["catpick"] = crate::present::onboard_uber::cat_row(&format!("bcn.{bot}"), &format!("bcc.{bot}"), &me.name, "", (!me.auto).then_some(me.look), &me.color, "bot-cat", Some("Save name"), ""); }
     if tab_of_world(&w, bot, on, now, from, &mut v) {
         // Settings: the memory tree's state (its engine reads the world itself)
         if on == "settings" && v["recall"].is_object() { drop(w); if let Some(rc) = b.recall.get() { let (n, lines, left) = rc.stats(&me.thread).await; v["recall"]["messages"] = json!(n); v["recall"]["lines"] = json!(lines); v["recall"]["left"] = json!(left); } }
