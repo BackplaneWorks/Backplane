@@ -151,6 +151,32 @@ pub fn tokio_cmd_in<S: AsRef<OsStr>>(kind: Kind, program: S, wrap: Option<Vec<St
     if let Some(d) = userbase_for(kind) { c.env("PYTHONUSERBASE", d); }
     c
 }
+/// A probe of a KiCad (`--version`, `api-server --describe`): its settings go to a throwaway folder (`KICAD_CONFIG_HOME`), never the
+/// person's. KiCad loads (and migrates, or creates) its settings even for `--version`: measured Nov 16 on stock 10.0.8, Linux created
+/// ~/.config/kicad/10.0 when absent and rewrote an older kicad_common.json, macOS rewrote a current one on every call; with the variable
+/// set it prints the same version and touches nothing of the person's. The folder goes when the guard is dropped (after the probe ran).
+/// Our own runtime's probes too: they would share the 10.99 folder with the person's sessions.
+pub struct ProbeHome(std::path::PathBuf);
+impl ProbeHome {
+    pub fn new() -> Self {
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let d = std::env::temp_dir().join(format!("bp-kicad-probe-{}-{n}", std::process::id()));
+        let _ = std::fs::create_dir_all(&d);
+        ProbeHome(d)
+    }
+    pub fn path(&self) -> &std::path::Path { &self.0 }
+}
+impl Drop for ProbeHome { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+/// `std_cmd` for a probe of the KiCad at `cli`, with its throwaway settings folder (keep the guard until the probe has run).
+pub fn kicad_probe<S: AsRef<OsStr>>(cli: S) -> (std::process::Command, ProbeHome) {
+    let h = ProbeHome::new(); let mut c = std_cmd(Kind::Local, cli); c.env("KICAD_CONFIG_HOME", h.path()); (c, h)
+}
+/// `kicad_probe` as a tokio command.
+#[allow(dead_code)] // bp-plot includes this file
+pub fn kicad_probe_tokio<S: AsRef<OsStr>>(cli: S) -> (tokio::process::Command, ProbeHome) {
+    let h = ProbeHome::new(); let mut c = tokio_cmd(Kind::Local, cli); c.env("KICAD_CONFIG_HOME", h.path()); (c, h)
+}
 /// `std::process::Command::new`, gated.
 pub fn std_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> std::process::Command {
     let p = program.as_ref().to_string_lossy().into_owned();

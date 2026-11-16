@@ -1059,9 +1059,8 @@ fn describe_cli(cli: &str) -> Option<Value> {
     if let Some(cached) = CACHE.get_or_init(Default::default).lock().unwrap().get(cli).cloned() {
         return cached;
     }
-    let out = crate::proc::std_cmd(crate::proc::Kind::Local, cli)
-        .args(["api-server", "--describe"])
-        .stdin(Stdio::null()).stderr(Stdio::null()).output().ok();
+    let (mut c, _home) = crate::proc::kicad_probe(cli);
+    let out = c.args(["api-server", "--describe"]).stdin(Stdio::null()).stderr(Stdio::null()).output().ok();
     let parsed = out.filter(|o| o.status.success())
         .and_then(|o| serde_json::from_slice::<Value>(&o.stdout).ok());
     CACHE.get_or_init(Default::default).lock().unwrap().insert(cli.to_string(), parsed.clone());
@@ -3135,6 +3134,26 @@ pub fn stand_in_route(pro: &str) -> (GuiRoute, mpsc::UnboundedReceiver<(String, 
 
 #[cfg(test)]
 mod tests {
+    /// A stand-in kicad-cli that, like KiCad, writes its settings: to $KICAD_CONFIG_HOME when set, else to `person` (the person's
+    /// kicad_common.json); it logs the folder it was given and answers --version and api-server --describe.
+    #[cfg(unix)] fn writing_cli(dir: &std::path::Path, person: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let (cli, log) = (dir.join("kicad-cli"), dir.join("probe.log"));
+        std::fs::write(&cli, format!("#!/bin/sh\necho \"$KICAD_CONFIG_HOME\" >> '{log}'\nif [ -n \"$KICAD_CONFIG_HOME\" ]; then mkdir -p \"$KICAD_CONFIG_HOME/10.0\"; echo rewritten > \"$KICAD_CONFIG_HOME/10.0/kicad_common.json\"; else echo rewritten > '{person}'; fi\nif [ \"$1\" = api-server ]; then echo '{{\"version\":\"10.99.0-bp.13\"}}'; else echo 10.0.8; fi\n", log = log.display(), person = person.display())).unwrap();
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (cli, log)
+    }
+
+    #[cfg(unix)] #[test] fn describing_a_kicad_never_writes_the_persons_settings() {
+        let t = crate::plat::tmp::dir("kdescribe");
+        let person = t.path().join("kicad_common.json"); std::fs::write(&person, "{\"mine\": 1}").unwrap();
+        let (cli, log) = writing_cli(t.path(), &person);
+        assert_eq!(describe_cli(&cli.to_string_lossy()).and_then(|v| v["version"].as_str().map(String::from)).as_deref(), Some("10.99.0-bp.13"));
+        assert_eq!(std::fs::read_to_string(&person).unwrap(), "{\"mine\": 1}");
+        let d = std::fs::read_to_string(&log).unwrap(); let d = d.trim();
+        assert!(d.contains("bp-kicad-probe-") && !std::path::Path::new(d).exists(), "{d:?}");
+    }
+
     /// The open KiCad of a project is found however the project's path is spelled: an agent naming it through a symlinked folder
     /// reaches the open editor (co-edit, the unsaved-changes rule) instead of going around it to the headless server.
     #[cfg(unix)] #[tokio::test] async fn the_open_editor_is_found_through_a_symlinked_project_folder() {

@@ -34,7 +34,7 @@ pub fn version_of(cli: &str) -> Option<String> {
     static SEEN: OnceLock<Mutex<HashMap<String, (Option<std::time::SystemTime>, Option<String>)>>> = OnceLock::new();
     let at = std::fs::metadata(cli).and_then(|m| m.modified()).ok();
     if let Some((t, v)) = SEEN.get_or_init(Default::default).lock().unwrap().get(cli).cloned() { if t == at { return v } }
-    let out = crate::proc::std_cmd(crate::proc::Kind::Local, cli).arg("--version").stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().ok();
+    let out = crate::files::kicad::ipc::cli_version_output(cli);
     let v = out.filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
     SEEN.get_or_init(Default::default).lock().unwrap().insert(cli.into(), (at, v.clone()));
     v
