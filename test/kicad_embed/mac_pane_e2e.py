@@ -156,6 +156,16 @@ if os.environ.get('MAC_MODE') == 'libs':
         for dp, _, fs in os.walk(root):
             for t in ('sym-lib-table', 'fp-lib-table', 'design-block-lib-table'):
                 if t in fs: os.unlink(os.path.join(dp, t))
+    # the fresh design (lib/libgate_design.py) is the pane's own project, so the agent edits the documents open in the embedded KiCad and
+    # the editor's checks run there (in a subfolder project the hub served them headless: GetMarkers is not available there)
+    sys.path.insert(0, os.path.join(REPO, 'test/kicad_embed/lib'))
+    import libgate_design as LG
+    _p = os.path.join(OUT, 'proj'); _seed = os.path.join(OUT, 'seed'); os.makedirs(_seed, exist_ok=True)
+    for _e in ('kicad_pro', 'kicad_pcb', 'kicad_sch'): shutil.copy(os.path.join(_p, f'ecc83-pp.{_e}'), os.path.join(_seed, f'ecc83-pp.{_e}'))
+    _gd = os.path.join(OUT, 'libgate-new'); LG.make_project(_gd, *(os.path.join(_seed, f'ecc83-pp.{_e}') for _e in ('kicad_pro', 'kicad_pcb', 'kicad_sch')))
+    for _e in ('kicad_pcb', 'kicad_sch'): shutil.copy(os.path.join(_gd, f'libgate.{_e}'), os.path.join(_p, f'ecc83-pp.{_e}'))
+    subprocess.run(['git', '-C', _p, 'commit', '-qam', 'libs gate: a new design'], capture_output=True)
+    subprocess.run(['git', '-C', _p, 'push', '-q', 'origin', 'HEAD'], capture_output=True)
     # the Mac has no bun for the stand-in agent: the Python one, same mcpcall protocol
     with open(os.path.join(OUT, 'bin/claude'), 'w') as f:
         f.write('#!/bin/sh\nexec /usr/bin/python3 ' + os.path.join(REPO, 'test/kicad_embed/mac/standin_agent.py') + ' "$@"\n')
@@ -361,9 +371,8 @@ try:
                 except ValueError: return t
             except Exception: return line
         proj = os.path.join(OUT, 'proj')
-        gd = os.path.join(proj, 'libgate')
-        gpro, gsch, gpcb = LG.make_project(gd, os.path.join(proj, 'ecc83-pp.kicad_pro'), os.path.join(proj, 'ecc83-pp.kicad_pcb'), os.path.join(proj, 'ecc83-pp.kicad_sch'))
-        subprocess.run(['git', '-C', proj, 'add', 'libgate'], capture_output=True); subprocess.run(['git', '-C', proj, 'commit', '-qm', 'libs gate: a new project'], capture_output=True)
+        gd = proj
+        gsch, gpcb = os.path.join(proj, 'ecc83-pp.kicad_sch'), os.path.join(proj, 'ecc83-pp.kicad_pcb')
         a1 = ask('kicad_edit', {'path': gsch, 'message': 'libs gate: C1, C2 in parallel', 'ops': LG.schematic_ops()}, 'sch')
         st = open(gsch, errors='replace').read()
         check(st.count('(lib_id "Device:C")') >= 2 and '"Capacitor_SMD:C_0603_1608Metric"' in st and '"Backplane_Passives_Nominal:C_0805_2012Metric"' in st and '"N1"' in st and '"N2"' in st,
