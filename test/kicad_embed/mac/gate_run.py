@@ -39,6 +39,25 @@ def state():
     return st, code
 
 
+# the person's own KiCad folders: a gate run must leave them exactly as they were (KiCad on macOS reads the account's real home, not
+# $HOME: a run without KICAD_CONFIG_HOME seeded the person's 10.99 tables once, Nov 16)
+GUARDED = [os.path.expanduser('~/Library/Preferences/kicad'), os.path.expanduser('~/Documents/KiCad')]
+
+
+def snapshot():
+    out = {}
+    for root in GUARDED:
+        for dp, dns, fns in os.walk(root):
+            for n in dns + fns:
+                p = os.path.join(dp, n)
+                try:
+                    st = os.lstat(p)
+                    out[p] = (st.st_size if n in fns else -1, int(st.st_mtime))
+                except OSError:
+                    pass
+    return out
+
+
 def main():
     a = sys.argv[1:]
     log, a = a[0], a[1:]
@@ -49,6 +68,7 @@ def main():
         a = a[2:]
     if a and a[0] == '--':
         a = a[1:]
+    before = snapshot()
     down()  # a run left behind by an interrupted gate
     os.makedirs(os.path.dirname(PLIST), exist_ok=True)
     with open(PLIST, 'wb') as f:
@@ -69,6 +89,13 @@ def main():
                 break
             time.sleep(3)
         print(f'{LABEL}: {st}, last exit code {code}', flush=True)
+        after = snapshot()
+        changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
+        if changed:
+            print('GUARD FAIL: the person\'s own KiCad folders changed during the run: ' + '; '.join(
+                f'{k} {before.get(k)} -> {after.get(k)}' for k in changed[:20]), flush=True)
+            return 3
+        print(f'guard: the person\'s KiCad folders unchanged ({len(after)} entries)', flush=True)
         try:
             return int(str(code).split()[0])
         except (TypeError, ValueError):

@@ -190,7 +190,10 @@ env = dict(os.environ, HOME=os.path.join(OUT, 'fh'), TMPDIR=tmp, BACKPLANE_KICAD
            # the Mac mini gate: KiCad's documents folder in the test home. Its default, ~/Documents/KiCad, makes macOS ask the hub (KiCad's
            # responsible process) for the Documents folder, and KiCad's UI thread waits on the answer: first Edit stalled 30 s, then
            # "KiCad could not start" (a person's first Edit meets the same prompt; the runner has TCC granted)
-           **({'KICAD_DOCUMENTS_HOME': os.path.join(OUT, 'fh', 'Documents')} if DRIVER == 'vnc' else {}))
+           **({'KICAD_DOCUMENTS_HOME': os.path.join(OUT, 'fh', 'Documents')} if DRIVER == 'vnc' else {}),
+           # KiCad on macOS takes its config folder from the account's real home, not $HOME: without this the gate's KiCad seeded and wrote
+           # the person's own ~/Library/Preferences/kicad/10.99 (the Mac mini, Nov 16). The hub reads $HOME, so both point at the test home.
+           KICAD_CONFIG_HOME=os.path.join(OUT, 'fh', 'Library', 'Preferences', 'kicad'))
 hub = subprocess.Popen([HUB, '--home', os.path.join(OUT, 'home'), '--port', str(port), '--host', '127.0.0.1', '--no-tailscale', '--foreground'],
                        env=env, stdout=open(os.path.join(OUT, 'hub.log'), 'w'), stderr=subprocess.STDOUT); procs.append(hub)
 wait_for(lambda: subprocess.run(['curl', '-s', '-m1', '-o', '/dev/null', f'http://127.0.0.1:{port}/hello']).returncode == 0, 30)
