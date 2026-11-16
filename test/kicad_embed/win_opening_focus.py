@@ -2149,8 +2149,16 @@ def run(h):
                 import subprocess as _sp
                 _sp.run(["taskkill", "/F", "/PID", str(kpid)], capture_output=True)
                 time.sleep(2.0)
+                # Climb J, 276b1dd1e: the hub says closed_unexpectedly ("KiCad closed unexpectedly (<how>)", how from the exit code on
+                # Windows), the pane its message and one button, Open the editor again (kicad:open-again)
+                time.sleep(2.0)
+                infos = [json.loads(l[l.index("{"):]) for l in log_lines(h, "client.log") if '"kicad_info"' in l]
+                said = next((i for i in reversed(infos) if i.get("state") == "closed_unexpectedly"), None)
+                h.check("lock2: the hub says KiCad closed unexpectedly (state closed_unexpectedly, the reason in words, not 'could not start')",
+                        bool(said) and "closed unexpectedly" in (said.get("reason") or "").lower(), {"last_states": [i.get("state") for i in infos[-6:]], "reason": (said or {}).get("reason")})
                 ctl = h.controls()
-                which = next((c for c in ("ui:Edit", "kicad:retry", "kicad:start") if c in ctl), "ui:Edit")
+                which = next((c for c in ("kicad:open-again", "ui:Edit", "kicad:retry", "kicad:start") if c in ctl), "kicad:open-again")
+                h.check("lock2: the pane offers Open the editor again (kicad:open-again)", "kicad:open-again" in ctl, sorted(c for c in ctl if c.startswith("kicad:") or c.startswith("ui:")))
                 t0 = time.monotonic()
                 clicked = h.click_control(top, which)
                 ms_ = wait_painted(top, t0)
