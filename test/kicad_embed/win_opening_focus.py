@@ -783,10 +783,22 @@ def run(h):
             E.key_tap("Return")
             time.sleep(1.5)
             l4 = focus_snapshot(frame)
+            fgw = l4.get("foreground") or 0
+            l4["foreground_title"] = window_title(fgw) if fgw else ""
+            l4["foreground_class"] = E.hwnd_class(fgw) if fgw else ""
+            l4["foreground_pid"] = E.hwnd_pid(fgw) if fgw and hasattr(E, "hwnd_pid") else None
+            # do typed keys reach Backplane? (its window left of the pane changes)
+            ta, tb = h.p("lend_l4_k0.png"), h.p("lend_l4_k1.png")
+            E.grab_screen(ta)
+            for ch in "zq":
+                E.key_tap(ch)
+            time.sleep(0.6)
+            E.grab_screen(tb)
+            l4["typed_px"] = E.img_diff_box(ta, tb, *box)["changed_pixels"]
             went = any(f'"thread":"{other}"' in l for l in log_since(n2))
             back4 = [l.strip()[:200] for l in log_since(n2) if "kicad_loan_back" in l]
             h.check("lend L4: Ctrl+K then another thread: the keyboard stays with Backplane",
-                    went and not l4["inside_frame"] and l4["focus_pid"] == cp.pid, {"from": cur, "to": other, "went": went, "loan_back": back4[-1:], **l4})
+                    went and not l4["inside_frame"] and l4["focus_pid"] == cp.pid and l4["typed_px"] > 20, {"from": cur, "to": other, "went": went, "loan_back": back4[-1:], **l4})
             return h.finish()
         if only == "prewarm_idle":
             # F5: Edit, keys in the PCB canvas, then nothing but the pre-warm: does the PCB editor keep the keys?
