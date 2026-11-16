@@ -378,7 +378,8 @@ impl KicadPane {
         if info == self.info { return }
         // (only a frame this pane has shown: a new pane, Edit pressed again, starts from the hub's last word, which may still list the
         // frame closed before it and not yet the one KiCad opens anew)
-        let closed = closed_frame(&self.info, &info, self.wanted_kind()).filter(|_| self.first_placed.is_some()).map(|k| { let next = after_close(&k, frame_for(&self.open), &info); (k, next) });
+        // (macOS: KiCad places its own frames, nothing is mapped locally and first_placed stays unset; a frame on show is the mark there)
+        let closed = closed_frame(&self.info, &info, self.wanted_kind()).filter(|_| self.first_placed.is_some() || (cfg!(target_os = "macos") && self.placed.as_ref().is_some_and(|p| p.1.is_some()))).map(|k| { let next = after_close(&k, frame_for(&self.open), &info); (k, next) });
         let was_tab = self.tab(); let mut cause = String::from("hub info"); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
         if info["pid"] != self.info["pid"] { self.ever_shown.clear(); }
         // shown once, or realized (bp.9: KiCad says the client may map it itself, e.g. a pre-warmed editor): the client's to map
