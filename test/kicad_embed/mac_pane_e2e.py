@@ -320,6 +320,60 @@ try:
         p, k = last_push(), kicad_frame()
         check(bool(got), f'{tag}: KiCad\'s frame is the pane\'s rect within 1 px ({k and k[3]} vs {p and p[0]})')
     matches('at first show')
+    # ---- MAC_MODE=first: a fresh home's first Edit puts KiCad over the pane within 30 s (the checks above), and stops ----
+    if os.environ.get('MAC_MODE') == 'first':
+        check(RES['edit_to_frame_s'] <= 30, f'first Edit on a fresh home: KiCad over the pane within 30 s ({RES["edit_to_frame_s"]} s)')
+        raise SystemExit(1 if FAILS else 0)
+    # ---- MAC_MODE=restart: Backplane killed mid-edit, restarted: Edit painted, no dialog; KiCad killed: Edit brings a new one;
+    # Backplane started with KiCad gone and Edit at once: one KiCad ----
+    if os.environ.get('MAC_MODE') == 'restart':
+        def kicads():
+            kids = {}
+            for l in subprocess.run(['ps', '-axo', 'pid=,ppid=,comm='], capture_output=True, text=True).stdout.splitlines():
+                parts = l.split(None, 2)
+                if len(parts) == 3: kids.setdefault(int(parts[1]), []).append((int(parts[0]), parts[2]))
+            out, todo = [], [hub.pid]
+            while todo:
+                for pid, comm in kids.get(todo.pop(), []):
+                    todo.append(pid)
+                    if comm.rsplit('/', 1)[-1] in ('kicad', 'pcbnew', 'eeschema'): out.append(pid)
+            return out
+        def start_client(tag):
+            c = subprocess.Popen([CLIENT, '--url', f'http://127.0.0.1:{port}', '--token-file', os.path.join(OUT, 'home/token'), '--script', os.path.join(OUT, 'script.json'), '--exit-after', '600'],
+                                 env=cenv, stdout=open(os.path.join(OUT, f'client-{tag}.log'), 'w'), stderr=subprocess.STDOUT); procs.append(c)
+            return c
+        # R1: Backplane killed in the middle of an edit (a selection made in KiCad), started again: Edit shows the editor, no dialog
+        p = last_push(); click(p[0][0] + p[0][2] * 0.1, p[0][1] + p[0][3] * 0.9); time.sleep(0.5); key(K_A, CMD); time.sleep(0.8)
+        d0 = hub_log().count('ET_DIALOG_OPENED')
+        client.kill(); client.wait(10)
+        gone = wait_for(lambda: not kicad_frame(), 5, 0.1)
+        client = start_client('r1'); t0 = time.time()
+        cw = wait_for(lambda: max((w for w in wins() if w[1] == client.pid), key=lambda w: w[3][2] * w[3][3], default=None), 60)
+        f = wait_for(kicad_frame, 60, 0.25); RES['r1_edit_s'] = round(time.time() - t0, 1)
+        shot('r1-after-restart')
+        check(bool(gone), 'restart 1: Backplane killed mid-edit: KiCad\'s frame leaves the screen')
+        check(bool(f) and hub_log().count('ET_DIALOG_OPENED') == d0, f'restart 1: Backplane started again, Edit shows the editor over the pane with no dialog ({RES["r1_edit_s"]} s)')
+        # R2: KiCad killed: Edit brings a new one over the pane
+        old = kicads(); print(f'INFO KiCad processes before the kill: {old}', flush=True)
+        for pid in old:
+            try: os.kill(pid, 9)
+            except OSError: pass
+        wait_for(lambda: not kicad_frame(), 10, 0.2); time.sleep(3)
+        e = rects().get('ui:Edit') or rects().get('kicad:try-again'); cw2 = next((w for w in wins() if w[0] == cw[0]), cw)
+        if e: click(cw2[3][0] + e['x'] + e['w'] / 2, cw2[3][1] + 28 + e['y'] + e['h'] / 2)
+        f2 = wait_for(lambda: (k := kicad_frame()) and k[1] not in old and k, 90, 0.5); shot('r2-after-kill')
+        check(bool(f2), f'restart 2: KiCad killed: Edit brings a new KiCad over the pane ({e and e["id"]})')
+        # R3: Backplane and KiCad both gone; Backplane started, its script presses Edit at once: one KiCad process for the project
+        client.kill(); client.wait(10)
+        for pid in kicads():
+            try: os.kill(pid, 9)
+            except OSError: pass
+        time.sleep(3)
+        client = start_client('r3')
+        f3 = wait_for(kicad_frame, 90, 0.5); time.sleep(8)
+        n = kicads(); RES['r3_kicads'] = n; shot('r3-warm-edit')
+        check(bool(f3) and len(n) == 1, f'restart 3: Backplane started with Edit at once: KiCad over the pane, one KiCad process ({n})')
+        raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=bs: ⌫ in the embedded editor (fork embed's fix/mac-backspace-delete): 1 Cmd+A then ⌫ deletes (board, schematic),
     # 2 ⌫ with nothing selected deletes what is under the pointer, 3 ⌫ while routing takes back the last segment (screenshots),
     # 4 ⌫ in a text field edits the text (Find's field; screenshot), 5 fn+delete still deletes. KiCad's edit events judge 1, 2, 5.
