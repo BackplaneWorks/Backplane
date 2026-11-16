@@ -16,6 +16,9 @@ The person's bar: "DRC and ERC are clean", on a fresh small design that uses a s
      - kicad-cli pcb drc --schematic-parity (all severities): 0 violations, 0 unconnected, 0 parity;
      - in the editor: the agent's kicad_ipc RunChecks (FK_PCB with parity, then FK_SCH), then GetMarkers for each: no marker.
      (`count_cli`, `count_markers`.)
+  6. The 3D model is in the board's STEP, a positive check: kicad-cli pcb export step of the board, and once with --board-only;
+     the full export must hold C2's model, by a product name the model file itself carries, or else by having at least two more
+     solids than the board-only export (C1's and C2's bodies) (`step_has_model`).
 
 Each platform's harness drives it with its own `mcp(name, args) -> the tool's answer text` (the stand-in agent's MCP call) and
 its own kicad-cli; the steps, part ids, nets, places and the pass bar are this file's, so the three platforms run the same thing.
@@ -159,3 +162,22 @@ def count_markers(answer):
     if m is None:
         return None
     return {"count": len(m), "types": sorted({x.get("type", "") for x in m})}
+
+
+def _step_products(text):
+    return set(re.findall(r"PRODUCT\s*\(\s*'([^']*)'", text))
+
+
+def _step_solids(text):
+    return len(re.findall(r"MANIFOLD_SOLID_BREP\s*\(", text)) + len(re.findall(r"BREP_WITH_VOIDS\s*\(", text))
+
+
+def step_has_model(full_step_text, board_only_step_text, model_step_text):
+    """Whether the board's STEP holds the model: {ok, by, model_products, found, solids_full, solids_board}."""
+    want = {p for p in _step_products(model_step_text) if p and p.lower() not in ("", "open cascade step translator 7.8 1", "pcb")}
+    have = _step_products(full_step_text)
+    found = sorted(want & have)
+    sf, sb = _step_solids(full_step_text), _step_solids(board_only_step_text)
+    ok_name, ok_solids = bool(found), sf >= sb + 2
+    return {"ok": ok_name or ok_solids, "by": "product name" if ok_name else ("solid count" if ok_solids else "neither"),
+            "model_products": sorted(want)[:6], "found": found[:6], "solids_full": sf, "solids_board": sb}

@@ -1953,13 +1953,13 @@ def run(h):
             h.check("libs: the agent places both inside the board outline and routes N1 and N2", bt.count("(segment") >= 2 and "failed" not in a3, {"answer": a3[:900]})
             h.check("libs: the Backplane footprint brings its 3D model (${BACKPLANE_KICAD_LIBRARY}/3dmodels/Capacitor_SMD.3dshapes/C_0805_2012Metric.step)",
                     "Capacitor_SMD.3dshapes/C_0805_2012Metric.step" in bt, "present" if "C_0805_2012Metric.step" in bt else "absent")
-            step = h.p("libgate.step")
+            step, bstep = h.p("libgate.step"), h.p("libgate_board.step")
             ex = subprocess.run([h.kicad_cli, "pcb", "export", "step", "--force", "-o", step, gpcb], capture_output=True, text=True, env=env, timeout=600)
-            out = ex.stdout + ex.stderr
-            size = os.path.getsize(step) if os.path.isfile(step) else 0
-            bad = [l for l in out.splitlines() if "C_0805_2012Metric" in l]
-            h.check("libs: the STEP export includes the Backplane 3D model (export succeeds, nothing says that model is missing)",
-                    ex.returncode == 0 and size > 0 and not bad, {"rc": ex.returncode, "bytes": size, "model_lines": bad[:4], "out": out[-500:]})
+            exb = subprocess.run([h.kicad_cli, "pcb", "export", "step", "--force", "--board-only", "-o", bstep, gpcb], capture_output=True, text=True, env=env, timeout=600)
+            rd = lambda f: open(f, encoding="utf-8", errors="replace").read() if os.path.isfile(f) else ""
+            res = LG.step_has_model(rd(step), rd(bstep), rd(model))
+            h.check("libs: the board's STEP includes C2's Backplane 3D model (its product name, or two more solids than the board alone)",
+                    ex.returncode == 0 and exb.returncode == 0 and res["ok"], {**res, "rc": [ex.returncode, exb.returncode], "out": (ex.stdout + ex.stderr)[-400:]})
             rc, rpt, o = cli_report("sch", gsch, h.p("libgate_erc.json"))
             n = LG.count_cli(rpt) if rpt else None
             h.check("libs: kicad-cli ERC of the fresh design: 0 errors, 0 warnings", bool(n) and n["violations"] == 0, {"rc": rc, "count": n, "out": o})
