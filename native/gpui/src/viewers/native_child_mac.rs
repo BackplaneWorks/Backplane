@@ -135,6 +135,11 @@ pub fn focus(w: u64) {
             let nw = ns_window(w); if !nw.is_null() { send0(nw, c"makeKeyWindow"); }
         } else {
             let other = running_app(pid); if other.is_null() { return }
+            // macOS 14+: hand activation over first (the active app's consent), then activate KiCad; its frame becomes key and wx gives
+            // the canvas the focus (proved on real KiCad: scripts/backplane-embed-macos-check.py in the fork)
+            let a = app();
+            let responds: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> bool = std::mem::transmute(objc_msgSend as *const ());
+            if responds(a, sel(c"respondsToSelector:"), sel(c"yieldActivationToApplication:")) { send_obj(a, c"yieldActivationToApplication:", other); }
             // NSApplicationActivateAllWindows is not wanted: only the frame on show is ours to raise, and KiCad orders it itself
             let f: unsafe extern "C" fn(*mut c_void, *mut c_void, usize) -> bool = std::mem::transmute(objc_msgSend as *const ());
             f(other, sel(c"activateWithOptions:"), 0);
