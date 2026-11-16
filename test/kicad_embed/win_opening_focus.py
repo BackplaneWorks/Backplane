@@ -14,6 +14,10 @@ Set BP_OPENING_FOCUS_ONLY=close for KiCad's own Close (Ctrl+W) in the editor the
 Cancel and Save. BP_OPENING_FOCUS_ONLY=savegate for the hub's save gate (embed_load_migration_e2e.sh):
 a Board Setup press on a board KiCad migrated on load is not saved, a BOM edit is (no Edit pressed;
 KEMBED_PROJ_SRC=<a project folder> seeds another project, as on Linux).
+Set BP_OPENING_FOCUS_ONLY=checks for the Checks panel (Linux embed_checks_panel_e2e.sh): the panel opened by a
+click, Run in it (RunChecks in KiCad, its answer and ET_CHECKS_DONE), the rows listed, a click on a DRC row and an
+ERC row cross-probing into KiCad, Down, Fix with agent, and KiCad's DRC marker clicked (ClickMarker) naming its row.
+It seeds a dangling label into the schematic before the hub starts.
 Set BP_OPENING_FOCUS_HOST_FG=1 to make Backplane's window foreground from the
 harness before that click when the handback left KiCad foreground, so clients
 are compared from the same Backplane-foreground state.
@@ -543,11 +547,215 @@ def mouse_return_check(h, cp, frame, children, timeline, rounds=None, kpid=0):
     return h.finish()
 
 
+# ---- checks: the Checks panel and KiCad's markers (embed_checks_panel_e2e.sh and the marker click of embed_editor_checks_e2e.sh) ----
+
+def checks_project(h):
+    """The seeded project's .kicad_pro (the seed puts it at the root or under boards/ecc83-pp)."""
+    pro = h.p("proj", "ecc83-pp.kicad_pro")
+    return pro if os.path.isfile(pro) else h.p("proj", "boards", "ecc83-pp", "ecc83-pp.kicad_pro")
+
+
+def checks_seed(h):
+    """embed_checks_panel_e2e.sh's seed: a dangling label in the schematic (ERC label_dangling), committed. The board's own DRC
+    findings (the seed board has several naming a part) are the DRC rows. Runs before the hub starts, so its first checks see it."""
+    import subprocess
+    sch = checks_project(h)[:-len(".kicad_pro")] + ".kicad_sch"
+    with open(sch, encoding="utf-8", newline="") as f:
+        s = f.read()
+    nl = "\r\n" if "\r\n" in s else "\n"
+    lab = ('\t(label "DANGLE"\n\t\t(at 30.48 30.48 0)\n\t\t(effects\n\t\t\t(font\n\t\t\t\t(size 1.27 1.27)\n\t\t\t)\n\t\t\t(justify left bottom)\n\t\t)\n'
+           '\t\t(uuid "5b0c1e6e-0000-4000-8000-00000000d00d")\n\t)\n').replace("\n", nl)
+    put = "\t(sheet_instances" in s
+    with open(sch, "w", encoding="utf-8", newline="") as f:
+        f.write(s.replace("\t(sheet_instances", lab + "\t(sheet_instances", 1))
+    try:
+        d = os.path.dirname(sch)
+        subprocess.run(["git", "add", "-A"], cwd=d, capture_output=True, timeout=30)
+        subprocess.run(["git", "commit", "-qm", "a dangling label"], cwd=d, capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return {"schematic": sch, "label_added": put}
+
+
+def log_lines(h, name="client.log"):
+    try:
+        with open(h.p(name), encoding="utf-8", errors="replace") as f:
+            return f.read().splitlines()
+    except OSError:
+        return []
+
+
+def checks_watch(h, pro):
+    """The Checks panel's data as the hub gives the client (mgmt.watch's data.checks), {} when none."""
+    for p in (pro, pro.replace("\\", "/")):
+        out = h.hub_rpc([{"method": "mgmt.watch", "params": {"project": p}}])
+        line = next((l for l in out.splitlines() if l.startswith("{")), "{}")
+        try:
+            d = ((json.loads(line).get("result") or {}).get("data") or {}).get("checks") or {}
+        except ValueError:
+            d = {}
+        if d:
+            return d
+    return {}
+
+
+def checks_fresh(d):
+    return (d.get("drc") or {}).get("state") == "fresh" and (d.get("erc") or {}).get("state") == "fresh"
+
+
+def ctl_point(h, top, cid):
+    """A drawn control's screen point (the newest controls metric naming it), as the Linux rect_xy: its left part (min(w/2, 60) in),
+    clear of the row's Fix button; None when not drawn."""
+    c = h.controls().get(cid)
+    r = c.get("rect") if c else None
+    if not isinstance(r, dict) or "x" not in r:
+        return None
+    ox, oy = E.client_origin(top)
+    return int(ox + r["x"] + min(r["w"] / 2, 60)), int(oy + r["y"] + r["h"] / 2)
+
+
+def ipc_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("gui_ipc_probe", E.IPC_PY)
+    g = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(g)
+    return g
+
+
+def click_and_wait_selected(h, g, sock, xy, kind, want, secs=6.0):
+    """embed_checks_panel_e2e.sh's click_and_wait: a real click at xy, then KiCad's GetSelection (one IPC client, polled) until it holds
+    `want` (a reference), or anything when want is empty. {ok, ms, sel}."""
+    import re
+    cli = g.KiCadIpc(sock)
+
+    def sel():
+        _, val = cli.call("kiapi.common.commands.GetSelection", g.pb_field_msg(1, g.pb_field_msg(1, cli.first_open_doc_bytes(kind))), retries=1)
+        refs, n = set(), 0
+
+        def walk(buf, depth):
+            if depth > 12:
+                return
+            try:
+                fields = g.pb_decode_fields(buf)
+            except Exception:
+                return
+            for vals in fields.values():
+                for v in vals:
+                    if not isinstance(v, (bytes, bytearray)):
+                        continue
+                    try:
+                        if re.fullmatch(r"[A-Z]{1,6}[0-9]{1,6}[A-Z]?", v.decode("utf-8")):
+                            refs.add(v.decode("utf-8"))
+                    except UnicodeDecodeError:
+                        pass
+                    walk(v, depth + 1)
+        for item in g.pb_decode_fields(val).get(1, []):
+            n += 1
+            walk(item, 0)
+        return {"count": n, "refs": sorted(refs)}
+    if not xy:
+        return {"ok": False, "why": "the row is not drawn"}
+    E.screen_click(*xy)
+    t1, s = time.monotonic(), {}
+    while time.monotonic() - t1 < secs:
+        try:
+            s = sel()
+        except Exception as e:
+            s = {"error": str(e)[:160]}
+        if (want and want in s.get("refs", [])) or (not want and s.get("count", 0) > 0):
+            return {"ok": True, "ms": int((time.monotonic() - t1) * 1000), "sel": s}
+        time.sleep(0.005)
+    return {"ok": False, "sel": s}
+
+
+def hub_infos(text, prefix):
+    """hub_rpc's INFO lines whose key starts with prefix: [(key, value)] in order (value parsed when it is JSON)."""
+    out = []
+    for l in text.splitlines():
+        if not l.startswith("INFO "):
+            continue
+        try:
+            o = json.loads(l[5:])
+        except ValueError:
+            continue
+        if str(o.get("key", "")).startswith(prefix):
+            v = o.get("value")
+            if isinstance(v, str):
+                try:
+                    v = json.loads(v)
+                except ValueError:
+                    pass
+            out.append((o["key"], v if v is not None else o.get("raw")))
+    return out
+
+
+def standin_ask(h, name, args, tag):
+    """The Linux suites' ask(): one Backplane MCP call made by the stand-in agent on thread t1 ("mcpcall:"), its MCPCALL line."""
+    def n_calls():
+        return sum(1 for l in log_lines(h, "standin.log") if l.startswith("MCPCALL"))
+    before = n_calls()
+    text = "mcpcall:" + json.dumps({"name": name, "arguments": args})
+    out = h.hub_rpc([{"method": "turn.start", "params": {"thread": "t1", "text": text, "msg": f"mchk-{tag}-{time.time_ns()}"}}])
+    with open(h.p("rpc.log"), "a", encoding="utf-8") as f:
+        f.write(out)
+    end = time.monotonic() + 120
+    while time.monotonic() < end and n_calls() <= before:
+        time.sleep(0.25)
+    time.sleep(2)
+    return next((l for l in reversed(log_lines(h, "standin.log")) if l.startswith(f"MCPCALL {name} ")), "")
+
+
+def find_markers(v):
+    """K5's find(): the "markers" list anywhere in an MCP answer (nested objects, or JSON inside a string)."""
+    if isinstance(v, dict):
+        if "markers" in v:
+            return v["markers"]
+        for x in v.values():
+            r = find_markers(x)
+            if r is not None:
+                return r
+    if isinstance(v, str) and "markers" in v:
+        try:
+            return find_markers(json.loads(v))
+        except ValueError:
+            return None
+    if isinstance(v, list):
+        for x in v:
+            r = find_markers(x)
+            if r is not None:
+                return r
+    return None
+
+
+def checks_list(h, pro, source):
+    """kicad.checks.list, every page: the findings of one check."""
+    out, off = [], 0
+    while True:
+        r = h.hub_rpc([{"method": "kicad.checks.list", "params": {"project": pro, "source": source, "offset": off, "limit": 25}}])
+        line = next((l for l in r.splitlines() if l.startswith("{")), "{}")
+        try:
+            res = json.loads(line).get("result") or {}
+        except ValueError:
+            res = {}
+        fs = res.get("findings") or []
+        out += fs
+        off += len(fs)
+        if not fs or off >= res.get("total", 0):
+            return out
+
+
 def run(h):
     only = os.environ.get("BP_OPENING_FOCUS_ONLY", "")
     only_click = only == "click_control"
     only_ctrl_k = only == "ctrl_k"
     h.init_dirs()
+    seeded = None
+    if only == "checks":
+        seeded = checks_seed(h)
+        # the hub logs each request it sends KiCad (RunChecks) and KiCad's events (ET_PROGRESS, ET_CHECKS_DONE); the stand-in's
+        # MCPCALL lines whole (GetMarkers' answer is long). base_env copies os.environ into the hub and so into the stand-in.
+        os.environ["BACKPLANE_KICAD_DEBUG"] = "1"
+        os.environ["BP_STANDIN_MCPCALL_MAX"] = "200000"
     timeline = []
     try:
         provenance = {}
@@ -833,6 +1041,194 @@ def run(h):
             pre["inside_frame"] = pre["inside_frame"] and bool(zoomed)
             timeline.append({"stage": "before_ctrl_k_from_edit", **pre})
             ctrl_k_round(h, cp, frame, rep, timeline, 1, 1, pre=pre)
+            return h.finish()
+        if only == "checks":
+            # The Checks panel under the embedded PCB editor and KiCad's markers: embed_checks_panel_e2e.sh (P1-P5) plus the Run in the
+            # panel (RunChecks in KiCad, as embed_marker_click_e2e.sh starts it with kicad.checks.run) and K5 of embed_editor_checks_e2e.sh
+            # (KiCad's DRC marker clicked: the panel names its row). embed_review_markers_e2e.sh has no click of its own (it checks the
+            # design review's host markers by GetMarkers); the marker click its brief names is K5's. Linux steps not ported:
+            #   - the Linux suite's script waits for the editor and opens the panel itself; here the opening loop above did Edit and the
+            #     panel is opened by a real click on mgmt:checks (the same control id), so "the panel opened" is a check of its own here.
+            #   - shot names follow Linux (p1_panel ...); the X display's window list (xwininfo) is E.client_origin here.
+            import re
+            top = E.find_main_window(cp.pid)
+            sock = rep.get("sock") or first.get("sock") or ""
+            pro = checks_project(h)
+            pcb = pro[:-len(".kicad_pro")] + ".kicad_pcb"
+            h.check("checks: the seed put a dangling label in the schematic", bool(seeded and seeded["label_added"]), seeded)
+            h.check("checks: KiCad's IPC answers", h.wait_for_ipc(sock, 80), {"sock": sock})
+            # C1 (Linux: the script's click on mgmt:checks): the panel opens, its Run button drawn
+            n0 = len(log_lines(h))
+            opened_click = h.click_control(top, "mgmt:checks")
+            end = time.monotonic() + 10
+            while time.monotonic() < end and "mgmt:checks:run" not in h.controls():
+                time.sleep(0.2)
+            toggles = [l[9:200] for l in log_lines(h)[n0:] if l.startswith("GPUI_LOG ") and "mgmt" in l and "checks" in l][-2:]
+            h.check("checks: a click on Checks opens the panel (its Run button is drawn)", opened_click and "mgmt:checks:run" in h.controls(),
+                    {"clicked": opened_click, "log": toggles})
+            # P1: the panel's data is the hub's, both checks fresh
+            d, end = {}, time.monotonic() + 120
+            while time.monotonic() < end:
+                d = checks_watch(h, pro)
+                if checks_fresh(d):
+                    break
+                time.sleep(1)
+            h.check("checks P1: the panel's data is the hub's, both checks fresh",
+                    (d.get("drc") or {}).get("state") == "fresh" and d.get("total", 0) > 0 and (d.get("badge") or {}).get("n", 0) > 0,
+                    {"chip": d.get("chip", ""), "drc": (d.get("drc") or {}).get("state"), "erc": (d.get("erc") or {}).get("state"),
+                     "total": d.get("total"), "badge": d.get("badge")})
+            time.sleep(1.5)
+            h.shot("p1_panel")
+            # Run in the panel: the hub sends KiCad RunChecks (its answer: the run's progress id) and waits for ET_CHECKS_DONE (the finish);
+            # the panel's DRC result is then the editor's (in_editor), newer than the press. Read from the hub's BACKPLANE_KICAD_DEBUG
+            # lines and, beside them, KiCad's own event queue (NextEvents; reading it takes nothing from the hub).
+            hub_n = len(log_lines(h, "hub.log"))
+            try:
+                since = int(h.ipc_cmd("events", sock, "0").get("next", 0))
+            except Exception:
+                since = None
+            t0ms = int(time.time() * 1000)
+            ran_click = h.click_control(top, "mgmt:checks:run")
+            states, d, end = [], {}, time.monotonic() + 300
+            while time.monotonic() < end:
+                d = checks_watch(h, pro)
+                st = ((d.get("drc") or {}).get("state"), bool((d.get("drc") or {}).get("in_editor")))
+                if not states or states[-1] != st:
+                    states.append(st)
+                if checks_fresh(d) and int((d.get("drc") or {}).get("at") or 0) > t0ms:
+                    break
+                time.sleep(0.5)
+            new = log_lines(h, "hub.log")[hub_n:]
+            req = [l[:200] for l in new if "request kiapi.backplane.embed.RunChecks" in l and "FK_PCB" in l]
+            started = [l[:200] for l in new if "checks: drc in KiCad starts" in l]
+            to_cli = [l[:200] for l in new if "checks: drc with kicad-cli" in l]
+            done = [l for l in new if "kicad embed event:" in l and ("ET_CHECKS_DONE" in l or '"type":27' in l)]
+            done_ids = [m.group(1) for l in done for m in [re.search(r'"progress_id"\s*:\s*"?([0-9]+)', l)] if m and m.group(1) != "0"]
+            kev = []
+            if since is not None:
+                try:
+                    kev = [e for e in h.ipc_cmd("events", sock, str(since)).get("events", []) if e.get("type") == 27]
+                except Exception as e:
+                    kev = [{"error": str(e)[:120]}]
+            h.check("checks: Run in the panel sends KiCad RunChecks for the board", ran_click and bool(req) and bool(started),
+                    {"clicked": ran_click, "request": req[-1:], "start": started[-1:]})
+            h.check("checks: KiCad takes the run (RunChecks answered with a progress id, no fall back to kicad-cli)",
+                    bool(done_ids) and not to_cli, {"progress_ids": done_ids[-2:], "kicad_cli": to_cli[-1:]})
+            dd = d.get("drc") or {}
+            h.check("checks: the run finishes (ET_CHECKS_DONE) and the panel shows the editor's result, newer than the press",
+                    bool(done) and dd.get("state") == "fresh" and bool(dd.get("in_editor")) and int(dd.get("at") or 0) > t0ms,
+                    {"done": [l[l.find("{"):][:160] for l in done[-1:]], "kicad_events": [e.get("checks", e) for e in kev[-1:]],
+                     "states": states, "drc": {k: dd.get(k) for k in ("state", "in_editor", "unsaved", "at", "took_ms", "counts")}})
+            time.sleep(1.0)
+            h.shot("run_done")
+            # the results listed: a DRC row naming a part and the ERC dangling label, among the rows a shut group shows (3, SHUT_ROWS)
+            rows = [r for g_ in d.get("groups") or [] for r in (g_.get("rows") or [])[:3]]
+            drc = next((r for r in rows if r.get("source") == "drc" and re.search(r"\b[A-Z]{1,4}[0-9]+\b", r.get("names") or "")), None)
+            erc = next((r for r in rows if r.get("source") == "erc" and r.get("rule") == "label_dangling"), None)
+            drc_id, erc_id = (drc or {}).get("id", ""), (erc or {}).get("id", "")
+            drc_ref = re.search(r"\b([A-Z]{1,4}[0-9]+)\b", drc["names"]).group(1) if drc else ""
+            print(f"INFO rows: drc {drc_id} ({drc_ref}), erc {erc_id}", flush=True)
+            h.check("checks: the results are listed (a DRC row naming a part, the ERC dangling label)", bool(drc and erc),
+                    {"drc": drc_id, "ref": drc_ref, "erc": erc_id, "rows": [(r.get("source"), r.get("rule")) for r in rows][:8]})
+            end = time.monotonic() + 5
+            while time.monotonic() < end and not (ctl_point(h, top, f"mgmt:checks:row:{drc_id}") and ctl_point(h, top, f"mgmt:checks:row:{erc_id}")):
+                time.sleep(0.2)
+            h.check("checks P1: the DRC and ERC rows are drawn",
+                    bool(drc and erc and ctl_point(h, top, f"mgmt:checks:row:{drc_id}") and ctl_point(h, top, f"mgmt:checks:row:{erc_id}")),
+                    {"drc": ctl_point(h, top, f"mgmt:checks:row:{drc_id}"), "erc": ctl_point(h, top, f"mgmt:checks:row:{erc_id}")})
+            if not (drc and erc):
+                return h.finish()
+            # K5: KiCad's own DRC marker clicked (ClickMarker, click-marker): the hub names its row to the panel (review.clicked.<digest>)
+            try:
+                caps = json.dumps(h.ipc_cmd("caps", sock))
+            except Exception as e:
+                caps = str(e)
+            ans = standin_ask(h, "kicad_ipc", {"path": pcb, "type": "kiapi.backplane.embed.GetMarkers", "message": {"kind": "FK_PCB"}}, "markers")
+            try:
+                allm = [m for m in (find_markers(json.loads(ans[ans.find("{"):])) or []) if m.get("at_nm")]
+            except ValueError:
+                allm = []
+            errs = [m for m in allm if m.get("severity") == "error" and m.get("items") and not m.get("excluded")]
+            xy = lambda m: (int(m["at_nm"].get("x_nm", 0)), int(m["at_nm"].get("y_nm", 0)))
+            alone = [m for m in errs if all(n is m or (xy(n)[0] - xy(m)[0]) ** 2 + (xy(n)[1] - xy(m)[1]) ** 2 > 3000000 ** 2 for n in allm)]
+            mk = (alone or errs or [None])[0]
+            mid, want = "", ""
+            if mk:
+                mid, mtype = (mk.get("id") or {}).get("value") or "", mk.get("type", "")
+                items = {x.get("value") for x in mk["items"]}
+                want = next((f["id"] for f in checks_list(h, pro, "drc") if f.get("rule") == mtype
+                             and {a.get("uuid") for a in f.get("anchors") or [] if a.get("uuid")} == items), "")
+                print(f"INFO the marker to click: {mtype} {mid} at {xy(mk)} nm, items {sorted(items)}; its row {want}", flush=True)
+            if mk and mid and "click-marker" in caps:
+                cn = len(log_lines(h))
+                ckr = standin_ask(h, "kicad_ipc", {"path": pcb, "type": "kiapi.backplane.embed.ClickMarker",
+                                                   "message": {"kind": "FK_PCB", "marker": {"value": mid}}}, "click")
+                got, end = "", time.monotonic() + 10
+                while time.monotonic() < end and not got:
+                    rpc_txt = "\n".join(log_lines(h, "rpc.log")) + "\n" + h.hub_rpc([])
+                    clk = hub_infos(rpc_txt, "review.clicked.")
+                    got = ((clk[-1][1] or {}).get("id") or "") if clk and isinstance(clk[-1][1], dict) else ""
+                    if not got:
+                        time.sleep(0.5)
+                rev = [l[9:120] for l in log_lines(h)[cn:] if l.startswith("GPUI_LOG ") and "checks_reveal" in l]
+                hub_said = [l[:160] for l in log_lines(h, "hub.log") if "marker clicked" in l][-1:]
+                h.check("checks K5: ClickMarker on KiCad's DRC marker shows its row in the panel",
+                        bool(want) and got == want, {"want": want, "showed": got or "none", "reveal": rev[-1:], "hub": hub_said, "answer": ckr[:120]})
+                h.shot("k5_marker")
+            elif mk:
+                # Linux makes the real click informational too: it is placed by colour on a centred view and does not reliably land
+                # on the marker (markers stacked on vias); the marker-to-row step is unit-tested (edchecks row_of)
+                print(f"INFO K5 (not a check): this KiCad has no click-marker; marker {mid}, row {want}", flush=True)
+            else:
+                print(f"INFO no error marker with a place and items (GetMarkers: {ans[:200]}): the marker click is left to the unit tests", flush=True)
+            # P2: a real click on the DRC row selects its part in the PCB editor (GetSelection over KiCad's IPC); click -> selected in ms
+            g = ipc_module()
+            try:
+                h.ipc_cmd("run-action", sock, "common.Interactive.selectionClear")
+            except Exception:
+                pass
+            r2 = click_and_wait_selected(h, g, sock, ctl_point(h, top, f"mgmt:checks:row:{drc_id}"), "pcb", drc_ref)
+            h.check(f"checks P2: clicking the DRC row selected {drc_ref} in the PCB editor", r2["ok"], r2)
+            time.sleep(1)
+            h.shot("p2_drc_row")
+            # P3: the ERC row: the editor switches to the schematic with the label selected
+            r3 = click_and_wait_selected(h, g, sock, ctl_point(h, top, f"mgmt:checks:row:{erc_id}"), "sch", "")
+            time.sleep(1.5)
+            ed = hub_infos(h.hub_rpc([]), "editor.kicad.")
+            active = next(((v or {}).get("active", "") for _, v in reversed(ed) if isinstance(v, dict)), "")
+            h.check("checks P3: clicking the ERC row showed the schematic with the label selected", r3["ok"] and active == "SCH",
+                    {"active": active, **r3})
+            h.shot("p3_erc_row")
+            # P4: Down from the DRC row goes to the next row and cross-probes it
+            pt = ctl_point(h, top, f"mgmt:checks:row:{drc_id}")
+            if pt:
+                E.screen_click(*pt)
+            time.sleep(1.2)
+            n4 = len(log_lines(h))
+            E.key_tap("Down")
+            time.sleep(1.2)
+            nxt = {}
+            for l in log_lines(h)[n4:]:
+                if l.startswith("GPUI_LOG ") and '"checks_select"' in l:
+                    try:
+                        nxt = json.loads(l[9:])
+                    except ValueError:
+                        pass
+            h.check("checks P4: Down moved to the next row and cross-probed it", bool(nxt.get("id")) and nxt.get("id") != drc_id,
+                    {"from": drc_id, "to": nxt.get("id"), "focus": focus_snapshot(frame)})
+            # P5: Fix with agent: the stand-in agent gets the finding
+            pt = ctl_point(h, top, f"mgmt:checks:row:{erc_id}")
+            if pt:
+                E.screen_move(*pt)
+            time.sleep(0.6)
+            fixed = h.click_control(top, f"mgmt:checks:fix:{erc_id}")
+            got5, end = False, time.monotonic() + 20
+            while time.monotonic() < end and not got5:
+                got5 = any(erc_id in l for l in log_lines(h, "standin.log")) or any(erc_id in l for l in log_lines(h, os.path.join("home", "events.jsonl")))
+                if not got5:
+                    time.sleep(0.5)
+            h.check("checks P5: Fix with agent sent the finding to the thread's agent", got5, {"id": erc_id, "fix_clicked": fixed})
+            h.shot("p5_fix")
             return h.finish()
         if only == "lend":
             # A5 / Climb B's lend (e9af1ffe5): a reserved key pressed in KiCad lends Backplane the keyboard, and the palette
