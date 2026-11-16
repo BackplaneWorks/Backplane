@@ -11,7 +11,8 @@ const [bin,rt,port,work]=process.argv.slice(2);const expect=process.env.EXPECT_V
 rmSync(work,{recursive:true,force:true});for(const d of ['bin','proj','user/Library/Preferences'])mkdirSync(`${work}/${d}`,{recursive:true});
 // the ecc83 board from the repo's fixtures (the macOS package carries no demos), as the embed suites seed it
 const fx=new URL('../files/fixtures/plot/',import.meta.url).pathname;
-for(const e of ['kicad_pro','kicad_pcb','kicad_sch']){const p=`${work}/proj/ecc83-pp.${e}`;copyFileSync(`${fx}ecc83-pp.${e}`,p);chmodSync(p,0o644)}
+for(const e of ['kicad_pcb','kicad_sch']){const p=`${work}/proj/ecc83-pp.${e}`;copyFileSync(`${fx}ecc83-pp.${e}`,p);chmodSync(p,0o644)}
+writeFileSync(`${work}/proj/ecc83-pp.kicad_pro`,'{}\n'); // the fixtures have no project file: a minimal one, as seed_project.py writes
 const pcb=`${work}/proj/ecc83-pp.kicad_pcb`;
 makeStandins(`${work}/bin`);
 writeFileSync(`${work}/bin/claude`,`#!/usr/bin/env python3
