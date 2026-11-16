@@ -287,12 +287,19 @@ pub(super) fn button(cx: &mut Context<Backplane>, light: bool, id: String, label
     d.child(crate::i18n::trs(label)).on_click(cx.listener(move |this, _, _, cx| { on(this, cx); cx.notify(); })).into_any_element()
 }
 
+/// A sign-in link whose redirect comes back to this computer (a CLI's own loopback listener, as Codex's login): it completes without a pasted code.
+pub fn returns_here(url: &str) -> bool {
+    url.split(['?', '&']).filter_map(|p| p.strip_prefix("redirect_uri=")).any(|r| { let r = r.to_ascii_lowercase(); r.starts_with("http%3a%2f%2f127.0.0.1") || r.starts_with("http%3a%2f%2flocalhost") || r.starts_with("http://127.0.0.1") || r.starts_with("http://localhost") })
+}
+
 fn attempt_panel(cx: &mut Context<Backplane>, light: bool, st: &Accounts, a: &Value, pid: &str) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let (aid, url, code, msg) = (string(a, "id"), string(a, "url"), string(a, "userCode"), string(a, "message"));
     let mut col = div().flex().flex_col().gap_2().mt_3().p_3().bg(c("panel")).border_1().border_color(c("line"));
     let ready = !url.is_empty();
-    let help = if !ready { trs("Generating the sign-in link…") } else if code.is_empty() { trs("Open the link, sign in to Claude, then paste the code it shows.") } else { trs("Open the link and enter this code.") };
+    // a link that comes back to this computer (Codex: redirect_uri on 127.0.0.1) finishes by itself: no code to paste
+    let back_here = returns_here(&url);
+    let help = if !ready { trs("Generating the sign-in link…") } else if !code.is_empty() { trs("Open the link and enter this code.") } else if back_here { trs("Open the link and sign in. Setup carries on by itself when you're done.") } else { trs("Open the link, sign in to Claude, then paste the code it shows.") };
     col = col.child(div().text_size(crate::scale::tpx(12.)).text_color(c(if ready { "dim" } else { "accent" })).child(help));
     if !code.is_empty() { col = col.child(div().text_size(crate::scale::tpx(20.)).font_weight(FontWeight::BOLD).child(code.clone())); }
     if !url.is_empty() {
@@ -302,7 +309,7 @@ fn attempt_panel(cx: &mut Context<Backplane>, light: bool, st: &Accounts, a: &Va
             .child(button(cx, light, format!("acct-open-{aid}"), &trs("Open"), true, false, move |_, cx| cx.open_url(&u1)))
             .child(button(cx, light, format!("acct-copy-{aid}"), &trs("Copy link"), false, false, move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(u2.clone())))));
     }
-    if let Some(input) = st.codes.get(&aid).filter(|_| code.is_empty() && ready) {
+    if let Some(input) = st.codes.get(&aid).filter(|_| code.is_empty() && ready && !back_here) {
         let (a1, a2, p2) = (aid.clone(), aid.clone(), pid.to_string());
         let _ = (&a2, &p2);
         col = col.child(div().flex().items_center().gap_2()
@@ -634,6 +641,8 @@ mod tests {
         let ps = profiles(&snap()); assert_eq!(identity(&ps[0]), "Claude · a@b.com · max"); assert_eq!(identity(&ps[1]), "Claude");
         assert_eq!(allowance(&ps[0]), "62% of 5-hour used"); assert_eq!(allowance(&ps[1]), "");
         assert!(is_default(&snap(), &ps[0]) && !is_default(&snap(), &ps[1]));
+        assert!(returns_here("https://auth.openai.com/oauth/authorize?response_type=code&client_id=x&redirect_uri=http%3A%2F%2F127.0.0.1%3A1455%2Fauth%2Fcallback&scope=y"), "Codex comes back to this computer");
+        assert!(!returns_here("https://claude.com/cai/oauth/authorize?code=true&client_id=x&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback"), "Claude's page shows a code to paste");
         assert_eq!(badge("connected"), ("Connected", "ok")); assert_eq!(badge("expired"), ("Sign-in expired", "bad")); assert_eq!(badge("whatever").0, "Not connected");
     }
     #[test] fn the_page_asks_again_only_while_something_waits() {
