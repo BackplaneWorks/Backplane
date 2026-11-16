@@ -57,6 +57,9 @@ again, then the panel's `BP-AGAIN` must apply; any miss exits 1). It needs `KEMB
 root coordinates (Collar on the GPU display: `1126,700`): a screenshot taken just before the click must show canvas background there, on a
 span of at least 300 px each way, else the journey fails without pressing a key (the pane's toolbars and the message panel are no canvas, and
 GTK3 gives the canvas no X window to measure). `KEMBED_UNDO_NO_CTRL_Y=1` leaves out the Ctrl+Y only (a diagnostic: what happens without it).
+The plan journey turns plan view off and on before its corridor click: after a layer change with + the plan tool ignores a click on that
+layer's corridor until plan view is entered again (bp.13 batch 9, 5/5; fork subthread t1794827460-18). `KEMBED_PLAN_NO_TOGGLE=1` leaves the
+toggle out, to check the fork's fix.
 Between Ctrl+Z and Ctrl+Y it idles `KEMBED_UNDO_IDLE_S` seconds (10 by default, 0 leaves it out) after one agent track on the board: no
 key and no IPC read, so the hub's automatic DRC runs in KiCad while the person is on the schematic. It must have run
 (`undo_idle_ran_a_drc_in_kicad`, else the idle proved nothing) and the schematic must still be KiCad's focused, shown frame with the board
