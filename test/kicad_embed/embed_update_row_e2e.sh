@@ -57,7 +57,7 @@ if [ -n "$AT" ]; then
   python3 "$XINPUT_PY" click $((OX + AX)) $((OY + AY)); sleep 1.5
 fi
 GONE=$(python3 -c 'import json,sys; print(int("kicad-update" not in json.loads(sys.argv[1]).get("_ids",[])))' "$(rects)")
-KEPT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("kicad_update_later",""))' "$OUT/local-settings.json" 2>/dev/null || echo "")
+KEPT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("kicad_update_later","").split("|")[0])' "$OUT/local-settings.json" 2>/dev/null || echo "")
 check "U3 Not now puts the row away and keeps the version on this device" "$([ "$GONE" = 1 ] && [ "$KEPT" = "10.99.0-bp.13" ] && echo 1 || echo 0)" "row gone $GONE, kept \"$KEPT\""
 kill "$CP" 2>/dev/null || true
 finish_suite "embed_update_row_e2e ($EMBED_MODE)"

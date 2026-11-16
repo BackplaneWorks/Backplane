@@ -31,8 +31,17 @@ pub enum Row { None, Offer { to: String, words: String }, Progress { words: Stri
 fn s(v: &Value, k: &str) -> String { v[k].as_str().unwrap_or("").to_string() }
 fn parse(text: &str) -> Value { serde_json::from_str(text).unwrap_or(Value::Null) }
 
-/// The row from the hub's two infos, this device's "Not now" (the version put off), and whether the pane's KiCad has unsaved edits.
-pub fn row(offer: &Value, install: &Value, refused: &str, not_now: &str, unsaved: bool) -> Row {
+/// How long "Not now" puts the offer away: it comes back after a day (Settings → CAD offers it always).
+pub const LATER_S: u64 = 24 * 3600;
+/// Whether "Not now" (kept as "<version>|<epoch s>") still holds for `to` at `now` (epoch s).
+pub fn put_off(later: &str, to: &str, now: u64) -> bool {
+    let (v, at) = later.split_once('|').unwrap_or((later, "0"));
+    v == to && at.parse::<u64>().is_ok_and(|t| now.saturating_sub(t) < LATER_S)
+}
+fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) }
+
+/// The row from the hub's two infos, whether "Not now" holds for its version now, and whether the pane's KiCad has unsaved edits.
+pub fn row(offer: &Value, install: &Value, refused: &str, later: bool, unsaved: bool) -> Row {
     let to = s(offer, "to");
     match install["state"].as_str().unwrap_or("") {
         "running" => {
@@ -46,7 +55,7 @@ pub fn row(offer: &Value, install: &Value, refused: &str, not_now: &str, unsaved
         _ => {}
     }
     if !refused.is_empty() { return Row::Failed(refused.to_string()) }
-    if offer["offer"] != true || to.is_empty() || to == not_now { return Row::None }
+    if offer["offer"] != true || to.is_empty() || later { return Row::None }
     let size = s(offer, "size");
     let words = if size.is_empty() { s(offer, "reason") } else { format!("{} ({size})", s(offer, "reason")) }; // i18n-ok: the hub's words joined
     Row::Offer { to, words }
@@ -90,7 +99,7 @@ fn reopen(app: &mut Backplane, cx: &mut Context<Backplane>) {
 pub fn view(app: &mut Backplane, cx: &mut Context<Backplane>) -> Option<AnyElement> {
     let unsaved = unsaved(app, cx);
     let u = &app.screens.kicad_update;
-    let r = row(&u.offer, &u.install, &u.refused, &app.local.kicad_update_later, unsaved);
+    let r = row(&u.offer, &u.install, &u.refused, put_off(&app.local.kicad_update_later, &s(&u.offer, "to"), now_s()), unsaved);
     if r == Row::None { return None }
     let light = app.light();
     let c = |n: &str| theme::color(light, n);
@@ -103,7 +112,7 @@ pub fn view(app: &mut Backplane, cx: &mut Context<Backplane>) -> Option<AnyEleme
         Row::Offer { to, words } => {
             row_el = row_el.child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(words))
                 .child(btn("kicad-update:go", trs("Update"), true).on_click(cx.listener(|this, _, _, cx| { install(this); cx.notify(); })))
-                .child(btn("kicad-update:later", trs("Not now"), false).on_click(cx.listener(move |this, _, _, cx| { this.local.kicad_update_later = to.clone(); this.local.save(); cx.notify(); })));
+                .child(btn("kicad-update:later", trs("Not now"), false).on_click(cx.listener(move |this, _, _, cx| { this.local.kicad_update_later = format!("{to}|{}", now_s()); this.local.save(); cx.notify(); })));
         }
         Row::Progress { words, fraction } => {
             row_el = row_el.child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(words))
@@ -128,17 +137,21 @@ mod tests {
     use core::prelude::v1::test;
     fn offer() -> Value { json!({"offer": true, "from": "10.99.0-bp.12.4", "to": "10.99.0-bp.13", "reason": "Backplane KiCad bp.13 is out: panels that fit the pane", "mb": 1083, "size": "about 1.1 GB"}) }
     #[test] fn the_update_row_says_what_the_hub_says_and_goes_when_put_off() {
-        assert_eq!(row(&offer(), &Value::Null, "", "", false), Row::Offer { to: "10.99.0-bp.13".into(), words: "Backplane KiCad bp.13 is out: panels that fit the pane (about 1.1 GB)".into() });
-        assert_eq!(row(&offer(), &Value::Null, "", "10.99.0-bp.13", false), Row::None, "Not now for this version");
-        assert!(matches!(row(&offer(), &Value::Null, "", "10.99.0-bp.12.9", false), Row::Offer { .. }), "a newer one is offered again");
-        assert_eq!(row(&json!(""), &Value::Null, "", "", false), Row::None, "no offer");
+        assert_eq!(row(&offer(), &Value::Null, "", false, false), Row::Offer { to: "10.99.0-bp.13".into(), words: "Backplane KiCad bp.13 is out: panels that fit the pane (about 1.1 GB)".into() });
+        assert_eq!(row(&offer(), &Value::Null, "", true, false), Row::None, "Not now");
+        let t = 1_800_000_000;
+        assert!(put_off(&format!("10.99.0-bp.13|{t}"), "10.99.0-bp.13", t + 3600), "within the day");
+        assert!(!put_off(&format!("10.99.0-bp.13|{t}"), "10.99.0-bp.13", t + LATER_S), "a day later: offered again");
+        assert!(!put_off(&format!("10.99.0-bp.13|{t}"), "10.99.0-bp.14", t + 60), "a newer one: offered at once");
+        assert!(!put_off("10.99.0-bp.13", "10.99.0-bp.13", t), "an old setting without its day: offered");
+        assert_eq!(row(&json!(""), &Value::Null, "", false, false), Row::None, "no offer");
         let dl = json!({"state": "running", "version": "10.99.0-bp.13", "note": "Downloading…", "phase": "download", "done": 250, "total": 1000});
-        assert_eq!(row(&offer(), &dl, "", "", false), Row::Progress { words: "Downloading…".into(), fraction: Some(0.25) });
-        assert_eq!(row(&offer(), &json!({"state": "running", "note": "Unpacking…"}), "", "", false), Row::Progress { words: "Unpacking…".into(), fraction: None });
-        assert_eq!(row(&offer(), &json!({"state": "failed", "note": "no space"}), "", "", false), Row::Failed("no space".into()));
-        assert_eq!(row(&offer(), &Value::Null, "KiCad is being installed already", "", false), Row::Failed("KiCad is being installed already".into()));
+        assert_eq!(row(&offer(), &dl, "", false, false), Row::Progress { words: "Downloading…".into(), fraction: Some(0.25) });
+        assert_eq!(row(&offer(), &json!({"state": "running", "note": "Unpacking…"}), "", false, false), Row::Progress { words: "Unpacking…".into(), fraction: None });
+        assert_eq!(row(&offer(), &json!({"state": "failed", "note": "no space"}), "", false, false), Row::Failed("no space".into()));
+        assert_eq!(row(&offer(), &Value::Null, "KiCad is being installed already", false, false), Row::Failed("KiCad is being installed already".into()));
         let done = json!({"state": "done", "version": "10.99.0-bp.13", "note": "Installed"});
-        assert_eq!(row(&json!(""), &done, "", "", false), Row::None, "installed, nothing unsaved: reopened by itself, nothing to say");
-        assert_eq!(row(&json!(""), &done, "", "", true), Row::Reopen("10.99.0-bp.13".into()), "unsaved edits: the person reopens it");
+        assert_eq!(row(&json!(""), &done, "", false, false), Row::None, "installed, nothing unsaved: reopened by itself, nothing to say");
+        assert_eq!(row(&json!(""), &done, "", false, true), Row::Reopen("10.99.0-bp.13".into()), "unsaved edits: the person reopens it");
     }
 }
