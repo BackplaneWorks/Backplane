@@ -73,7 +73,7 @@ hub = subprocess.Popen([HUB, '--home', os.path.join(OUT, 'home'), '--port', str(
 wait_for(lambda: subprocess.run(['curl', '-s', '-m1', '-o', '/dev/null', f'http://127.0.0.1:{port}/hello']).returncode == 0, 30)
 script = [{"select": 0}, {"wait": 2500}, {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit"}, {"wait": 900000}]
 json.dump(script, open(os.path.join(OUT, 'script.json'), 'w'))
-cenv = dict(os.environ, HOME=os.path.join(OUT, 'fh'), BACKPLANE_GPUI_ASSETS=ASSETS, BACKPLANE_GPUI_RECTS='1')
+cenv = dict(os.environ, HOME=os.path.join(OUT, 'fh'), BACKPLANE_GPUI_ASSETS=ASSETS, BACKPLANE_GPUI_RECTS='1', BACKPLANE_KICAD_DEBUG='1')
 client = subprocess.Popen([CLIENT, '--url', f'http://127.0.0.1:{port}', '--token-file', os.path.join(OUT, 'home/token'), '--script', os.path.join(OUT, 'script.json'), '--exit-after', '900'],
                           env=cenv, stdout=open(os.path.join(OUT, 'client.log'), 'w'), stderr=subprocess.STDOUT); procs.append(client)
 
@@ -94,10 +94,13 @@ def last_push():
 
 
 def rects():
+    """The client's control rects (BACKPLANE_GPUI_RECTS: lists of {id, x, y, w, h} in window points, from the content's top-left), latest."""
     r = {}
     for l in client_log().splitlines():
-        if 'GPUI_METRIC ' in l and '"layout"' in l:
-            try: r.update(json.loads(l.split('GPUI_METRIC ', 1)[1]).get('rects', {}))
+        if 'GPUI_METRIC ' in l and '"rects"' in l:
+            try:
+                for e in json.loads(l.split('GPUI_METRIC ', 1)[1]).get('rects', []) or []:
+                    if isinstance(e, dict) and 'id' in e: r[e['id']] = e
             except Exception: pass
     return r
 
@@ -109,13 +112,22 @@ def click(x, y, button='left'):
         Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, k, pt, b)); time.sleep(0.05)
 
 
-def osa(src): return subprocess.run(['osascript', '-e', src], capture_output=True, text=True).stdout.strip()
+def osa(src):
+    r = subprocess.run(['osascript', '-e', src], capture_output=True, text=True)
+    if r.returncode != 0: print('osascript: ' + r.stderr.strip()[:300], flush=True)
+    return r.stdout.strip()
 def win_of(pid): return f'(first window of (first process whose unix id is {pid}))'
 
 
 try:
     cw = wait_for(lambda: max((w for w in wins() if w[1] == client.pid), key=lambda w: w[3][2] * w[3][3], default=None), 60)
     check(bool(cw), 'the client window is on screen')
+    # the client opens 1400x900, larger than the runner's 1024x768 display: put it on screen whole, so every click lands
+    osa(f'tell application "System Events" to set position of {win_of(client.pid)} to {{0, 25}}')
+    osa(f'tell application "System Events" to set size of {win_of(client.pid)} to {{1000, 700}}')
+    time.sleep(1.5)
+    cw = next((w for w in wins() if w[1] == client.pid and w[0] == cw[0]), cw)
+    print(f'client window now {cw and cw[3]}', flush=True)
     # ---- Edit: KiCad's frame over the pane, directly above our window ----
     def kicad_frame():
         order = wins(); ours = next((i for i, w in enumerate(order) if cw and w[0] == cw[0]), None)

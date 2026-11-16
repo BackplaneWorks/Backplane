@@ -134,6 +134,7 @@ pub fn holes(_container: u64, _keep: Option<&[R]>) {}
 /// app may hand activation to another; KiCad then makes its frame key and wx gives its canvas the focus back).
 pub fn focus(w: u64) {
     let pid = owner(w);
+    eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_focus": {"window": w, "owner": pid, "ours": pid == 0 || pid == own_pid(), "front_before": frontmost_pid()}}));
     unsafe {
         if pid == 0 || pid == own_pid() {
             send_activate_self(app());
