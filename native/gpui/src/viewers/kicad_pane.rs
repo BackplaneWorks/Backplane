@@ -158,7 +158,7 @@ pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<Strin
         // the hub has already tried a missed start window once more (embed.rs start_retry); the pane's Try again under this starts it again
         "failed" => Some(format!("{} {}", crate::i18n::trs("KiCad could not start:"), info["reason"].as_str().unwrap_or(""))),
         // KiCad died after it was ready (a crash, a kill): not a failed start; what it means for the person's work, in plain words
-        "closed_unexpectedly" => Some(crate::i18n::trs(if info["autosaves"].as_array().is_some_and(|a| !a.is_empty()) { CLOSED_KEPT } else { CLOSED_LOST })),
+        "closed_unexpectedly" => Some(crate::i18n::t(if info["autosaves"].as_array().is_some_and(|a| !a.is_empty()) { "gpui.c.kicad.closed.kept" } else { "gpui.c.kicad.closed.lost" })),
         "unresponsive" => Some(crate::i18n::trs("KiCad is not responding.")),
         "stopped" => Some(crate::i18n::trs("KiCad was closed.")),
         _ if have_frame => None,
@@ -223,8 +223,6 @@ pub fn try_again(info: &Value) -> bool { info["state"] == "failed" }
 pub fn open_again(info: &Value) -> bool { info["state"] == "closed_unexpectedly" }
 /// What the pane says when KiCad died after it was ready, by what is on disk (the hub's `autosaves`): saved files are as last saved;
 /// KiCad's autosave of unsaved changes (_autosave-* beside the files, kept by the hub) is offered back when it opens the file again.
-pub const CLOSED_KEPT: &str = "KiCad closed unexpectedly. Your saved files are intact, and KiCad kept a copy of the changes you had not saved: it offers it back when the editor opens again.";
-pub const CLOSED_LOST: &str = "KiCad closed unexpectedly. Your saved files are intact. Changes made since the last save were not kept.";
 
 /// The pane offers the KiCad app under its message where the editor cannot be in the pane: its start failed (no window to hold it, no
 /// KiCad that starts), or this is stock KiCad on Windows. The app opens only on that press: the pane never falls back to it by itself.
@@ -1172,7 +1170,7 @@ impl Render for KicadPane {
             .when_some(say, |d, s| d.child(div().absolute().inset_0().flex().flex_col().gap_2().items_center().justify_center().text_color(c("faint")).child(s)
                 .when_some(notice, |d, n| d.child(crate::ui::with_rect(div().id("kicad-notice-start"), || "kicad:notice-start".to_string()).max_w(px(520.)).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(n)))
                 .when(again, |d| d.child(crate::ui::with_rect(div().id("kicad-open-again"), || "kicad:open-again".to_string()).px_3().py_1().rounded_md().cursor_pointer()
-                    .bg(c("accent")).text_color(c("text")).child(crate::i18n::trs("Open the editor again"))
+                    .bg(c("accent")).text_color(c("text")).child(crate::i18n::t("gpui.c.kicad.open.again"))
                     .on_click(cx.listener(|this, _, _, cx| { this.reattach(); cx.notify(); }))))
                 .when(failed, |d| d.child(crate::ui::with_rect(div().id("kicad-retry"), || "kicad:retry".to_string()).px_3().py_1().rounded_md().cursor_pointer()
                     .bg(c("raise")).hover(|x| x.bg(c("line"))).text_color(c("text")).child(crate::i18n::trs("Try again"))
