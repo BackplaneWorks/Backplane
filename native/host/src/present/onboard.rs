@@ -1178,7 +1178,7 @@ mod tests {
         let s1 = with_uber(cst(blank(), &[]), "Mochi", json!({"look": picked, "color": "#6fb3f2"}));
         let mut made = d.clone(); made["@ob.uber.made"] = json!("1");
         let p = page(&s1, &sess(made.clone()), &info("linux"), &desk(), "/h");
-        assert_eq!((p["rows"][0]["spawn"].as_str(), p["next"].as_str(), p["state"].as_str()), (Some("b1"), Some("Next"), Some("done")));
+        assert_eq!((p["rows"][0]["spawn"].as_str(), p["next"].as_str(), p["state"].as_str()), (Some(format!("b1:Mochi:{picked}:#6fb3f2").as_str()), Some("Next"), Some("done")));
         assert_eq!(press(&s1, made, "ob-next", "").patch["drafts"]["@ob.step"], "alwayson");
     }
     #[test] fn your_uberbot_when_there_is_one_shows_it_and_save_renames_and_recolours_it() {
@@ -1188,6 +1188,18 @@ mod tests {
         assert!(r["look"].is_null(), "it follows its name");
         let o = press(&s1, json!({"@ob.step": "uber", "@f.obubername": "Pippa", "@ob.uber.color": "none"}), "ob-uber", "go");
         assert_eq!(sent(&o, "bots.edit"), vec![json!({"bot": "b1", "name": "Pippa", "color": "", "auto": true})]);
+        // Save keeps what was typed (the box never shows the old name back) and plays the arrival once the bot has changed
+        assert_eq!(o.patch["drafts"], json!({"@ob.uber.err": "", "@ob.uber.made": "1"}));
+        let mut s3 = with_uber(cst(blank(), &[]), "Pip", json!({"auto": true, "color": "#a98bf0"}));
+        let saved = json!({"@ob.step": "uber", "@f.obubername": "Pippa", "@ob.uber.made": "1"});
+        let before = page(&s3, &sess(saved.clone()), &info("linux"), &desk(), "/h")["rows"][0]["spawn"].clone();
+        s3.apply(&json!({"$": "BotSet", "id": "b1", "name": "Pippa", "thread": "", "look": 0, "auto": true, "color": "#a98bf0", "persona": "", "at": 5}));
+        let after = page(&s3, &sess(saved), &info("linux"), &desk(), "/h")["rows"][0]["spawn"].clone();
+        assert!(before != after && after.as_str().unwrap().starts_with("b1:Pippa:"), "{before} -> {after}");
+        // an uberbot made by name before cats could be picked (the onboarding test home: Bub, look 306440) follows its name: the window hashes each letter
+        let old = { let mut x = cst(blank(), &[]); x.apply(&json!({"$": "BotSet", "id": "b1", "name": "Bub", "thread": "t1", "look": 306440, "persona": "", "at": 1})); x.apply(&json!({"$": "UberSet", "bot": "b1", "uid": "u", "at": 2})); x };
+        let r = &at(&old, "uber", &info("linux"), &desk())["rows"][0]; assert!(r["look"].is_null() && r["picked"] == false, "{r}");
+        assert_eq!(sent(&press(&old, json!({"@ob.step": "uber", "@f.obubername": "Chuck"}), "ob-uber", "go"), "bots.edit"), vec![json!({"bot": "b1", "name": "Chuck", "color": "", "auto": true})]);
         // its own name in another case is its own; another bot's is not
         let mut s2 = with_uber(cst(blank(), &[]), "Pip", json!({"auto": true, "color": "#a98bf0"})); s2.apply(&json!({"$": "BotSet", "id": "b2", "name": "Scout", "thread": "t2", "look": 1, "persona": "", "at": 3}));
         assert!(sent(&press(&s2, json!({"@ob.step": "uber", "@f.obubername": "PIP"}), "ob-uber", "go"), "bots.edit").len() == 1);

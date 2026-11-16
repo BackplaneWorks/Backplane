@@ -7,7 +7,8 @@
 //!
 //! Drafts: `@f.obubername` (the name typed, from `bfield`), `@f.obubercustom` (a custom colour typed), `@ob.uber.color` ("#rrggbb", "none"
 //! for the coat's own, unset: as kept), `@ob.uber.look` (a number: picked; "auto": the name's; unset: as kept), `@ob.uber.err` (the last
-//! refusal), `@ob.uber.made` ("1": Say hello was pressed in this view, so its arrival plays).
+//! refusal), `@ob.uber.made` ("1": Say hello or Save was pressed in this view, so the cat's arrival plays each time the bot changes: `spawn` is
+//! the bot with its name, look and colour). A Save keeps what was typed and picked as drafts: the box never shows the old name back.
 use super::onboard::{draft, Ask, Facts, Step};
 use crate::bots::cat;
 use serde_json::{json, Value};
@@ -49,7 +50,8 @@ fn shown(f: &Facts, session: &Value) -> (String, Option<u64>, String) {
 pub fn step(f: &Facts, session: &Value) -> Step {
     let (name, look, color) = shown(f, session);
     let u = uber(f);
-    let spawn = if draft(session, "@ob.uber.made") == "1" { u.map_or("", |(id, _)| id) } else { "" };
+    let spawn = if draft(session, "@ob.uber.made") == "1" { u.map_or(String::new(), |(id, b)| format!("{id}:{}:{}:{}", b.name, b.look, b.color)) } else { String::new() };
+    let spawn = spawn.as_str();
     let mut r = cat_row("obubername", "obubercustom", &name, draft(session, "@f.obubercustom"), look, &color, "ob-uber", u.map(|_| "Save"), spawn);
     let err = draft(session, "@ob.uber.err");
     if !err.is_empty() { r["note"] = json!(err); r["tone"] = json!("warn"); }
@@ -78,7 +80,7 @@ fn go(f: &Facts, session: &Value, ask: &mut Ask) -> Result<Value, Value> {
             let mut p = json!({"bot": id, "name": name, "color": color});
             match look { Some(l) => p["look"] = json!(l), None => p["auto"] = json!(true) }
             ask.send("bots.edit", p);
-            Ok(json!({"drafts": {"@ob.uber.err": "", "@ob.uber.color": Value::Null, "@ob.uber.look": Value::Null, "@f.obubername": Value::Null}}))
+            Ok(json!({"drafts": {"@ob.uber.err": "", "@ob.uber.made": "1"}}))
         }
     }
 }
