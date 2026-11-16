@@ -149,7 +149,9 @@ impl Agents {
             if let Some(p) = crate::files::kicad::coedit::person_now(&crate::files::kicad::ipc::pro_of(path)) { return (false, json!({"error": kedit::person_first(&p), "person": p})) }
         }
         let via = Via { ag: self, thread, path, person: std::sync::Mutex::new(Value::Null), caps: crate::files::kicad::ipc::runtime(&self.hub).await.caps };
-        match kedit::run(&via, path, a).await {
+        let r = kedit::run(&via, path, a).await;
+        if kedit::writes(&a["ops"]) { crate::files::kicad::coedit::agent_wrote(&crate::files::kicad::ipc::pro_of(path)) }
+        match r {
             Ok(mut v) => {
                 let p = via.person.lock().unwrap().clone(); if !p.is_null() { v["person"] = p }
                 // a saved edit is shown: the person's viewer turns to the document, as `viewer_show` after the save would have it (show: false leaves it)

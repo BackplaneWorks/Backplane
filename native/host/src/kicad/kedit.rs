@@ -55,6 +55,9 @@ impl Call for Patient<'_> {
     fn nets<'a>(&'a self) -> Fut<'a> { self.c.nets() }
     fn caps(&self) -> Vec<String> { self.c.caps() }
 }
+/// A route's net name against a board net: as written, or a root-sheet net without its sheet's "/" ("N1" for "/N1", the name the
+/// person and the schematic's label give it).
+pub fn net_match(p: &str, n: &str) -> bool { glob(p, n) || (!p.starts_with('/') && n.starts_with('/') && !n[1..].contains('/') && glob(p, &n[1..])) }
 /// Whether the ops change anything (a call of finds and raw reads alone does not).
 pub fn writes(ops: &Value) -> bool {
     ops.as_array().into_iter().flatten().any(|o| match verb(o) { "find" | "" => false, "ipc" => !super::ipc::is_read(&full_type(o["ipc"]["type"].as_str().unwrap_or(""))), _ => true })
@@ -827,10 +830,10 @@ impl Run<'_> {
                 let pats: Vec<String> = match &op["route"] { Value::String(s) => vec![s.clone()], Value::Array(a) => a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect(), _ => vec![] };
                 if pats.is_empty() || !self.board { return Err("route takes a board's net names: \"/LED*\" or [\"/SDA\", \"/SCL\"]".into()) }
                 self.settle(i).await?; let (mut board, classes) = self.model().await?;
-                let mut nets: Vec<String> = classes.as_object().into_iter().flatten().map(|(n, _)| n.clone()).filter(|n| pats.iter().any(|p| glob(p, n))).collect();
+                let mut nets: Vec<String> = classes.as_object().into_iter().flatten().map(|(n, _)| n.clone()).filter(|n| pats.iter().any(|p| net_match(p, n))).collect();
                 let mut of_parts: Vec<String> = vec![];
                 // a part ("R3") or one of its pads ("R3.2") stands for the nets on it
-                let known = nets.clone(); for p in pats.iter().filter(|p| !known.iter().any(|n| glob(p, n))) { let (r, pad) = p.rsplit_once('.').map_or((p.as_str(), None), |(r, n)| (r, Some(n)));
+                let known = nets.clone(); for p in pats.iter().filter(|p| !known.iter().any(|n| net_match(p, n))) { let (r, pad) = p.rsplit_once('.').map_or((p.as_str(), None), |(r, n)| (r, Some(n)));
                     let of: Vec<String> = board.items.iter().filter(|i| i.kind == kr::Kind::Pad && !i.net.is_empty() && ((i.of.0 == *p) || (i.of.0 == r && pad == Some(i.of.1.as_str())))).map(|i| i.net.clone()).collect();
                     if of.is_empty() { return Err(format!("no net or part matches `{p}`")) } for n in of { if !of_parts.contains(&n) { of_parts.push(n.clone()) } if !nets.contains(&n) { nets.push(n) } } }
                 // a part named here has its pads made clean: another net's track that now lies on one of them (a footprint was exchanged, a part
@@ -1185,6 +1188,11 @@ mod tests {
         // KiCad said OK but the saved sheet still has the old text: never reported as done
         let mut f = fake(None); f.texts = Some(vec![sheet("10K", "X1")]);
         let e = go_on(&f, "/p/b.kicad_sch", op).unwrap_err(); assert!(e.starts_with("saved, but the schematic's files do not show: R1 Value"), "{e}");
+    }
+    #[test] fn a_route_names_a_root_sheet_net_with_or_without_its_slash() {
+        assert!(net_match("N1", "/N1") && net_match("/N1", "/N1") && net_match("N*", "/N2") && net_match("GND", "GND"));
+        assert!(!net_match("N1", "/sub/N1"), "a sub-sheet's net keeps its path");
+        assert!(!net_match("N1", "/N10"));
     }
     #[test] fn a_writing_call_is_told_of_the_person_first() {
         assert!(writes(&json!([{"find": "zone"}, {"move": "R1", "by": [1, 0]}])) && writes(&json!([{"ipc": {"type": "RefillZones"}}])) && !writes(&json!([{"find": "zone"}, {"ipc": {"type": "GetNets"}}])));
