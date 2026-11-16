@@ -1015,7 +1015,10 @@ impl KicadPane {
         let now = rect.map(|(x, y, w, h)| (x, y, w, h, visible)).or_else(|| self.host_sent.map(|(x, y, w, h, _)| (x, y, w, h, false)));
         let raised = visible && show.is_some_and(|f| nc::keep_below(self.toplevel, f));
         if now.is_some() && (now != self.host_sent || raised) {
-            if let Some((x, y, w, h, v)) = now { self.rpc("editor.kicad.host", json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": v, "raise": raised})); }
+            if let Some((x, y, w, h, v)) = now {
+                eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [x, y, w, h], "visible": v, "raise": raised, "changed": now != self.host_sent, "pane_px": at.map(|r| [r.x, r.y, r.w, r.h]), "frame": show}));
+                self.rpc("editor.kicad.host", json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": v, "raise": raised}));
+            }
             self.host_sent = now;
         }
     }
@@ -1369,6 +1372,7 @@ impl crate::Backplane {
             return;
         }
         // macOS: a host rect KiCad could not take yet (it was still starting) is pushed again on the next frame
+        if method == "editor.kicad.host" { eprintln!("GPUI_LOG {}", json!({"kicad_host_reply": reply["applied"], "why": reply["why"], "error": reply["error"]})); }
         if method == "editor.kicad.host" && reply["applied"] == false {
             if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, cx| { p.host_sent = None; cx.notify(); }); }
             return;
