@@ -16,16 +16,111 @@ Checks, as a person meets them first:
 
 usage: mac_pane_e2e.py CLIENT HUB ASSETS RUNTIME OUT
 """
-import json, os, shutil, subprocess, sys, tempfile, time
-import Quartz
-from AppKit import NSWorkspace, NSRunningApplication
+import json, os, shutil, socket, subprocess, sys, tempfile, time
 
+# The driver: `quartz` (the e2e-macos runner: Quartz events, osascript, screencapture; TCC granted there) or `vnc` (the Mac mini gate:
+# the harness runs in h's GUI session as a LaunchAgent, its input and screen go through a loopback Screen Sharing relay
+# (mac/vnc_relay.py) and the window list through the gate helper (mac/gate_helper.m): no Accessibility or Screen Recording grant)
+DRIVER = os.environ.get('MAC_DRIVER', 'quartz')
+# event flags as Quartz numbers (kCGEventFlagMask*), so neither driver needs the other's modules
+CMD, CTRL, SHIFT, ALT = 0x100000, 0x40000, 0x20000, 0x80000
 
-def active(pid):
-    """The app is the active one (an accessory KiCad is active while it holds the keyboard, though NSWorkspace's frontmost app, the
-    menu bar's owner, stays Backplane)."""
-    a = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
-    return bool(a and a.isActive())
+if DRIVER == 'quartz':
+    import Quartz
+    from AppKit import NSRunningApplication
+
+    def active(pid):
+        """The app is the active one (an accessory KiCad is active while it holds the keyboard, though NSWorkspace's frontmost app, the
+        menu bar's owner, stays Backplane)."""
+        a = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+        return bool(a and a.isActive())
+
+    def wins():
+        out = []
+        for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID):
+            if w.get('kCGWindowLayer', 0) != 0: continue
+            b = w['kCGWindowBounds']
+            out.append((int(w['kCGWindowNumber']), int(w['kCGWindowOwnerPID']), w.get('kCGWindowOwnerName', ''), (round(b['X']), round(b['Y']), round(b['Width']), round(b['Height']))))
+        return out
+
+    def key(code, flags=0):
+        for down in (True, False):
+            e = Quartz.CGEventCreateKeyboardEvent(None, code, down); Quartz.CGEventSetFlags(e, flags); Quartz.CGEventPost(Quartz.kCGHIDEventTap, e); time.sleep(0.03)
+
+    def click(x, y, button='left'):
+        down, up, b = (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp, Quartz.kCGMouseButtonLeft) if button == 'left' else (Quartz.kCGEventRightMouseDown, Quartz.kCGEventRightMouseUp, Quartz.kCGMouseButtonRight)
+        pt = Quartz.CGPointMake(x, y)
+        for k in (Quartz.kCGEventMouseMoved, down, up):
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, k, pt, b)); time.sleep(0.05)
+
+    def shot_to(path): subprocess.run(['screencapture', '-x', path])
+
+    def osa(src):
+        r = subprocess.run(['osascript', '-e', src], capture_output=True, text=True)
+        if r.returncode != 0: print('osascript: ' + r.stderr.strip()[:300], flush=True)
+        return r.stdout.strip()
+
+    def win_of(pid):
+        """The client's main window for System Events: its largest (after a palette or a popup, `first window` was another one)."""
+        sizes = osa(f'tell application "System Events" to get size of every window of (first process whose unix id is {pid})')
+        nums = [int(float(v)) for v in sizes.replace('{', '').replace('}', '').split(',') if v.strip()] if sizes else []
+        areas = [nums[i] * nums[i + 1] for i in range(0, len(nums) - 1, 2)]
+        i = (areas.index(max(areas)) + 1) if areas else 1
+        return f'(window {i} of (first process whose unix id is {pid}))'
+
+    def win_move(pid, x, y): osa(f'tell application "System Events" to set position of {win_of(pid)} to {{{x}, {y}}}')
+    def win_size(pid, w, h): osa(f'tell application "System Events" to set size of {win_of(pid)} to {{{w}, {h}}}')
+    def win_full(pid, on): osa(f'tell application "System Events" to set value of attribute "AXFullScreen" of {win_of(pid)} to {"true" if on else "false"}')
+    def win_close(pid, bounds):
+        osa(f'tell application "System Events" to tell (first process whose unix id is {pid}) to click (first button of (first window whose position is {{{bounds[0]}, {bounds[1]}}}) whose subrole is "AXCloseButton")')
+else:
+    GATE = os.path.expanduser(os.environ.get('MAC_GATE_DIR', '~/bp-gate-m'))
+
+    def _ask(path, line):
+        c = socket.socket(socket.AF_UNIX); c.settimeout(60); c.connect(path)
+        c.sendall((line + '\n').encode()); r = c.makefile().readline(); c.close()
+        return r
+
+    def helper(req): return json.loads(_ask(os.path.join(GATE, 'helper.sock'), req) or 'null')
+
+    def relay(**op):
+        r = json.loads(_ask(os.path.join(GATE, 'vnc.sock'), json.dumps(op)))
+        if not r.get('ok'): print(f'relay {op.get("op")}: {r.get("error")}', flush=True)
+        return r
+
+    def active(pid): return bool((helper(f'active {pid}') or {}).get('active'))
+
+    def wins():
+        return [(int(w['number']), int(w['pid']), w['owner'], tuple(round(v) for v in w['bounds'])) for w in helper('windows') or [] if w['layer'] == 0]
+
+    # macOS virtual key codes the checks use, to the keysym names the relay types (Screen Sharing: Super is Command)
+    KEYNAME = {0: 'a', 40: 'k', 53: 'escape', 11: 'b', 38: 'j', 8: 'c', 48: 'tab', 51: 'backspace', 3: 'f', 43: ',', 13: 'w', 36: 'return'}
+
+    def key(code, flags=0):
+        mods = [m for m, bit in (('ctrl', CTRL), ('alt', ALT), ('shift', SHIFT), ('cmd', CMD)) if flags & bit]
+        relay(op='chord', combo='+'.join(mods + [KEYNAME[code]]))
+
+    def click(x, y, button='left'): relay(op='click', x=x, y=y, button=1 if button == 'left' else 3)
+    def shot_to(path): relay(op='png', path=path)
+
+    # windows by hand, as a person moves them (the title bar's empty part left of the title, the bottom-right corner, the green and red
+    # buttons: 13 pt below the top, at 12, 32 and 52 pt from the left)
+    def _main(pid): return max((w for w in wins() if w[1] == pid), key=lambda w: w[3][2] * w[3][3], default=None)
+
+    def win_move(pid, x, y):
+        b = _main(pid)[3]; relay(op='drag', x0=b[0] + 120, y0=b[1] + 12, x1=x + 120, y1=y + 12, seconds=0.8); time.sleep(0.5)
+
+    def win_size(pid, w, h):
+        b = _main(pid)[3]; relay(op='drag', x0=b[0] + b[2] - 2, y0=b[1] + b[3] - 2, x1=b[0] + w - 2, y1=b[1] + h - 2, seconds=0.8); time.sleep(0.5)
+
+    def win_full(pid, on):
+        if on:
+            b = _main(pid)[3]; relay(op='click', x=b[0] + 52, y=b[1] + 13)
+        else:
+            relay(op='chord', combo='ctrl+cmd+f')
+
+    def win_close(pid, bounds): relay(op='click', x=bounds[0] + 12, y=bounds[1] + 13)
+
 
 CLIENT, HUB, ASSETS, RT, OUT = sys.argv[1:6]
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -47,24 +142,6 @@ def wait_for(f, s, step=0.1):
     return f()
 
 
-def wins():
-    out = []
-    for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID):
-        if w.get('kCGWindowLayer', 0) != 0: continue
-        b = w['kCGWindowBounds']
-        out.append((int(w['kCGWindowNumber']), int(w['kCGWindowOwnerPID']), w.get('kCGWindowOwnerName', ''), (round(b['X']), round(b['Y']), round(b['Width']), round(b['Height']))))
-    return out
-
-
-def key(code, flags=0):
-    for down in (True, False):
-        e = Quartz.CGEventCreateKeyboardEvent(None, code, down); Quartz.CGEventSetFlags(e, flags); Quartz.CGEventPost(Quartz.kCGHIDEventTap, e); time.sleep(0.03)
-
-
-CMD = Quartz.kCGEventFlagMaskCommand
-K_A, K_K, K_ESC, K_B, K_J, K_C, K_TAB, K_DEL, K_F, K_COMMA = 0, 40, 53, 11, 38, 8, 48, 51, 3, 43
-CTRL, SHIFT, ALT = Quartz.kCGEventFlagMaskControl, Quartz.kCGEventFlagMaskShift, Quartz.kCGEventFlagMaskAlternate
-
 # ---- the project, the hub's home, KiCad's settings where KiCad on macOS reads them ----
 os.makedirs(OUT, exist_ok=True)
 subprocess.run([sys.executable, os.path.join(REPO, 'test/kicad_embed/lib/seed_project.py'), OUT, REPO], check=True)
@@ -85,7 +162,7 @@ client = subprocess.Popen([CLIENT, '--url', f'http://127.0.0.1:{port}', '--token
                           env=cenv, stdout=open(os.path.join(OUT, 'client.log'), 'w'), stderr=subprocess.STDOUT); procs.append(client)
 
 
-def shot(name): subprocess.run(['screencapture', '-x', os.path.join(OUT, name + '.png')])
+def shot(name): shot_to(os.path.join(OUT, name + '.png'))
 def hub_log(): return open(os.path.join(OUT, 'hub.log'), errors='replace').read()
 def client_log(): return open(os.path.join(OUT, 'client.log'), errors='replace').read()
 
@@ -112,32 +189,12 @@ def rects():
     return r
 
 
-def click(x, y, button='left'):
-    down, up, b = (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp, Quartz.kCGMouseButtonLeft) if button == 'left' else (Quartz.kCGEventRightMouseDown, Quartz.kCGEventRightMouseUp, Quartz.kCGMouseButtonRight)
-    pt = Quartz.CGPointMake(x, y)
-    for k in (Quartz.kCGEventMouseMoved, down, up):
-        Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, k, pt, b)); time.sleep(0.05)
-
-
-def osa(src):
-    r = subprocess.run(['osascript', '-e', src], capture_output=True, text=True)
-    if r.returncode != 0: print('osascript: ' + r.stderr.strip()[:300], flush=True)
-    return r.stdout.strip()
-def win_of(pid):
-    """The client's main window for System Events: its largest (after a palette or a popup, `first window` was another one)."""
-    sizes = osa(f'tell application "System Events" to get size of every window of (first process whose unix id is {pid})')
-    nums = [int(float(v)) for v in sizes.replace('{', '').replace('}', '').split(',') if v.strip()] if sizes else []
-    areas = [nums[i] * nums[i + 1] for i in range(0, len(nums) - 1, 2)]
-    i = (areas.index(max(areas)) + 1) if areas else 1
-    return f'(window {i} of (first process whose unix id is {pid}))'
-
-
 try:
     cw = wait_for(lambda: max((w for w in wins() if w[1] == client.pid), key=lambda w: w[3][2] * w[3][3], default=None), 60)
     check(bool(cw), 'the client window is on screen')
     # the client opens 1400x900, larger than the runner's 1024x768 display: put it on screen whole, so every click lands
-    osa(f'tell application "System Events" to set position of {win_of(client.pid)} to {{0, 25}}')
-    osa(f'tell application "System Events" to set size of {win_of(client.pid)} to {{1000, 700}}')
+    win_move(client.pid, 0, 25)
+    win_size(client.pid, 1000, 700)
     time.sleep(1.5)
     cw = next((w for w in wins() if w[1] == client.pid and w[0] == cw[0]), cw)
     print(f'client window now {cw and cw[3]}', flush=True)
@@ -215,13 +272,13 @@ try:
     check(bool(wait_for(lambda: active(kpid), 4)), 'a click on the board gives KiCad the keyboard again')
     # ---- our window moved: the frame follows ----
     before = kicad_frame(); wb = next((w for w in wins() if w[0] == cw[0]), cw)
-    osa(f'tell application "System Events" to set position of {win_of(client.pid)} to {{{wb[3][0] + 60}, {wb[3][1] + 40}}}')
+    win_move(client.pid, wb[3][0] + 60, wb[3][1] + 40)
     moved = wait_for(lambda: (k := kicad_frame()) and before and (k[3][0] - before[3][0], k[3][1] - before[3][1]) == (60, 40) and k, 5)
     print(f'client window {wb[3]} -> {next((w for w in wins() if w[0] == cw[0]), cw)[3]}', flush=True)
     check(bool(moved), f'Backplane\'s window moved: KiCad\'s frame follows it ({before and before[3]} -> {(kicad_frame() or [None]*4)[3]})')
     matches('after the move')
     cw = next((w for w in wins() if w[0] == cw[0]), cw)
-    osa(f'tell application "System Events" to set size of {win_of(client.pid)} to {{{cw[3][2] - 120}, {cw[3][3] - 60}}}'); time.sleep(1.5)
+    win_size(client.pid, cw[3][2] - 120, cw[3][3] - 60); time.sleep(1.5)
     matches('after a resize')
     # Backplane's own keys: a click in its window outside the pane (the sidebar's edge) gives them back first
     cw = next((w for w in wins() if w[0] == cw[0]), cw)
@@ -251,14 +308,14 @@ try:
     key(K_TAB, CTRL | SHIFT); time.sleep(3)
     f = kicad_frame() or f
     # ---- full screen: hidden, then back over the pane ----
-    osa(f'tell application "System Events" to set value of attribute "AXFullScreen" of {win_of(client.pid)} to true')
+    win_full(client.pid, True)
     time.sleep(3)
     hidden = not any(w[0] == f[0] for w in wins())
     shot('03-full-screen')
     check(hidden, 'Backplane full screen: KiCad\'s frame leaves the screen')
     line = wait_for(lambda: rects().get('kicad:pop-full'), 5)
     check(bool(line), 'full screen: the pane says so and offers Pop out')
-    osa(f'tell application "System Events" to set value of attribute "AXFullScreen" of {win_of(client.pid)} to false')
+    win_full(client.pid, False)
     back = wait_for(kicad_frame, 8, 0.25)
     check(bool(back), 'out of full screen: KiCad\'s frame is back over the pane, above Backplane')
     shot('04-back')
@@ -267,8 +324,8 @@ try:
     before_wins = {w[0] for w in wins() if w[1] == client.pid}
     # the window back to its first size (the strip's buttons at a narrow width may sit past its edge)
     # and on screen (run 18: at x=-376 after full screen, so the click meant to make Backplane active fell off the screen)
-    osa(f'tell application "System Events" to set position of {win_of(client.pid)} to {{20, 30}}'); time.sleep(0.8)
-    osa(f'tell application "System Events" to set size of {win_of(client.pid)} to {{1000, 700}}'); time.sleep(1.5)
+    win_move(client.pid, 20, 30); time.sleep(0.8)
+    win_size(client.pid, 1000, 700); time.sleep(1.5)
     pop = rects().get('kicad:popout')
     print(f'pop-out button {pop} in window {next((w for w in wins() if w[0] == cw[0]), cw)[3]}', flush=True)
     cw = next((w for w in wins() if w[0] == cw[0]), cw)
@@ -285,7 +342,7 @@ try:
         check(bool(wait_for(lambda: above(newwin[0]), 8, 0.25)), 'popped out: KiCad\'s frame is over the new window')
         shot('05-popped')
         # its close button (closing the popped-out window puts the editor back in the pane)
-        osa(f'tell application "System Events" to tell (first process whose unix id is {client.pid}) to click (first button of (first window whose position is {{{newwin[3][0]}, {newwin[3][1]}}}) whose subrole is "AXCloseButton")')
+        win_close(client.pid, newwin[3])
         time.sleep(3)
         check(bool(wait_for(kicad_frame, 8, 0.25)), 'popped back in: KiCad\'s frame is over the pane again')
     # ---- Cmd+W in KiCad: the pane follows KiCad (lane B's 47b00d199) ----
