@@ -989,10 +989,11 @@ impl KicadPane {
         if (self.keys || self.want_keys) && show != prev_show && !kicad_dialog_has_keys {
             if let Some(w) = show {
                 if self.want_keys && nc::button_over(w) == Some(false) { self.press_gave_keys = true; }
+                #[cfg(not(target_os = "macos"))]
                 nc::focus(w);
-                // macOS: KiCad's app is active now; ShowFrame{focus} makes the frame key and puts the keyboard on its canvas
+                // macOS: consent, then ShowFrame{focus}: KiCad activates itself and puts the keyboard on its canvas (nc::yield_to)
                 #[cfg(target_os = "macos")]
-                self.rpc("editor.kicad.show", json!({"project": self.project, "frame": self.wanted_kind(), "focus": true}));
+                { nc::yield_to(w); self.rpc("editor.kicad.show", json!({"project": self.project, "frame": self.wanted_kind(), "focus": true})); }
                 if cfg!(windows) { self.verify_handin = Some((w, std::time::Instant::now())); self.unexplained_reposted = false; cx.notify(); }
                 if cfg!(windows) && !nc::frame_visible(c, w) { self.refocus = Some((w, std::time::Instant::now())); cx.notify(); }
                 if self.want_keys && !self.keys { self.keys = true; nc::grab_escape(self.toplevel, true); self.grab_click(c, false); self.touched(); }
@@ -1002,9 +1003,10 @@ impl KicadPane {
             // already on show (Full size, the tab of the editor shown): the keyboard to it now
             let w = show.unwrap();
             if nc::button_over(w) == Some(false) { self.press_gave_keys = true; }
+            #[cfg(not(target_os = "macos"))]
             nc::focus(w);
             #[cfg(target_os = "macos")]
-            self.rpc("editor.kicad.show", json!({"project": self.project, "frame": self.wanted_kind(), "focus": true}));
+            { nc::yield_to(w); self.rpc("editor.kicad.show", json!({"project": self.project, "frame": self.wanted_kind(), "focus": true})); }
             if cfg!(windows) { self.verify_handin = Some((w, std::time::Instant::now())); self.unexplained_reposted = false; cx.notify(); }
             if cfg!(windows) && !nc::frame_visible(c, w) { self.refocus = Some((w, std::time::Instant::now())); cx.notify(); }
             if !self.keys { self.keys = true; nc::grab_escape(self.toplevel, true); self.grab_click(c, false); self.touched(); }
