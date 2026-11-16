@@ -2,7 +2,9 @@
 """A stand-in `claude` for the bare gate (no model): on its first turn it co-edits the open board through the hub's own MCP tools, as an agent
 would, and writes what each call answered to $BARE_COEDIT_OUT (JSON). The calls: kicad_ipc_status; OpenDocument; GetItems (tracks) before;
 CreateItems one F.Cu track beside the first footprint; GetItems after; SaveDocument; review_comment add (a comment on the board at that spot);
-review_comments. $BARE_COEDIT_PCB names the board. Pattern from test/files/kipc_hub_e2e.mjs."""
+review_comments. $BARE_COEDIT_PCB names the board. Pattern from test/files/kipc_hub_e2e.mjs.
+A turn whose text holds `mcpcall:{"name":..,"arguments":..}` makes that one MCP call and appends "MCPCALL <name> <the reply, one line>" to
+the conf's `standin_log` (the libraries row, test/kicad_embed/libraries_row.py, drives its agent steps so: test/tools/claude_standin.ts)."""
 import json, os, sys, urllib.request
 a = sys.argv
 def mcp_url():
@@ -50,8 +52,32 @@ def tool(name, args):
 C = 'kiapi.common.commands.'
 ipc = lambda ty, m={}: tool('kicad_ipc', {'path': pcb, 'type': ty, 'message': m})
 msg = lambda r: r['body'].get('message', {}) if isinstance(r['body'], dict) else {}
+def raw_call(name, args):
+    """One MCP call, its JSON-RPC reply as one line (what libraries_row.py reads)."""
+    n[0] += 1
+    r = urllib.request.Request(url, json.dumps({'jsonrpc': '2.0', 'id': n[0], 'method': 'tools/call', 'params': {'name': name, 'arguments': args}}).encode(),
+                               {'content-type': 'application/json', 'accept': 'application/json'})
+    try: body = urllib.request.urlopen(r, timeout=600).read().decode('utf-8', 'replace')
+    except Exception as e: return json.dumps({'error': f'transport: {e}'})
+    try: return json.dumps(json.loads(body))
+    except ValueError: return body.replace('\n', ' ')
+def mcpcall(text):
+    """The `mcpcall:{json}` in a turn's text (the hub may append open review comments after it), or None."""
+    i = text.find('mcpcall:')
+    if i < 0: return None
+    try: return json.JSONDecoder().raw_decode(text[i + len('mcpcall:'):].lstrip())[0]
+    except ValueError: return None
 def turn(text, out):
     r = {}
+    call = mcpcall(text) if url else None
+    if call:
+        got = raw_call(call.get('name', ''), call.get('arguments') or {})
+        log = read_conf().get('standin_log') or os.path.expanduser('~/standin.log')
+        # each answer on its own line, after a newline (the row counts "\nMCPCALL ")
+        with open(log, 'a') as f: f.write(f"\nMCPCALL {call.get('name', '')} {got}\n")
+        say({'type': 'assistant', 'message': {'role': 'assistant', 'content': [{'type': 'text', 'text': f"MCPRESULT {got[:1500]}"}]}, 'session_id': 'bare-standin'})
+        say({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'done', 'session_id': 'bare-standin'})
+        return
     # The full journey supplies the plan after the co-edit and comment turns, while this process stays alive.
     plan = read_conf().get('plan')
     if url and pcb and 'plan-propose' in text:
