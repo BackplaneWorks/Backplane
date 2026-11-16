@@ -38,7 +38,7 @@ else
   sleep 2; shot 30-update-offer
   K=$(krun); echo "kicad at Edit: $K" >"$OUT/logs/update-kicad-old.txt"
   case $K in *"/kicad/$UPDATE_FROM/"*) ok "U1 Edit opens on the home's runtime ($UPDATE_FROM)";; *) bad "U1 Edit did not run the home's $UPDATE_FROM ($(echo "$K" | cut -c1-200))";; esac
-  hub info kicad.update >"$OUT/logs/update-offer.json"
+  timeout 30 bun "$HERE/hub_info.mjs" "$(hub_port)" "$HUBH/token" kicad.update >"$OUT/logs/update-offer.json"   # a plain socket: the view one carries no info
   OFFER=$(python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get("kicad.update") or {}; v=json.loads(v) if isinstance(v,str) and v else v
 print(json.dumps(v) if isinstance(v,dict) else "")' "$OUT/logs/update-offer.json" 2>/dev/null)
   python3 -c 'import json,sys; v=json.loads(sys.argv[1] or "{}"); sys.exit(0 if v.get("offer") and v.get("from")==sys.argv[2] and v.get("to")==sys.argv[3] and v.get("reason") else 1)' "$OFFER" "$UPDATE_FROM" "$NEWV" \
