@@ -161,6 +161,19 @@ subprocess.run([sys.executable, os.path.join(REPO, 'test/kicad_embed/lib/seed_pr
 for v in ('10.0', '10.99'):
     src = os.path.join(OUT, 'fh/.config/kicad', v)
     if os.path.isdir(src): shutil.copytree(src, os.path.join(OUT, 'fh/Library/Preferences/kicad', v), dirs_exist_ok=True)
+if DRIVER == 'vnc' and os.environ.get('MAC_MODE') != 'libs':
+    with open(os.path.join(OUT, 'bin/claude'), 'w') as f:
+        f.write('#!/bin/sh\nexec /usr/bin/python3 ' + os.path.join(REPO, 'test/kicad_embed/mac/standin_agent.py') + ' "$@"\n')
+    os.chmod(os.path.join(OUT, 'bin/claude'), 0o755)
+if os.environ.get('FRESH_AGENT') == 'during':
+    # lane B's embed_fresh_edit_e2e: KiCad's launcher 12 s late, in a clone of the runtime where the hub's installer puts it
+    _ver = json.load(open(os.path.join(RT, 'manifest.json')))['version']
+    _m = os.path.join(OUT, 'home', 'kicad', _ver)
+    if not os.path.isdir(_m):
+        os.makedirs(os.path.dirname(_m), exist_ok=True); subprocess.run(['cp', '-cR', RT, _m], check=True)
+    _l = os.path.join(_m, 'bin', 'kicad'); os.rename(_l, _l + '.real')
+    open(_l, 'w').write('#!/bin/sh\nsleep 12\nexec "$(dirname "$0")/kicad.real" "$@"\n'); os.chmod(_l, 0o755)
+    RT = _m
 if os.environ.get('MAC_MODE') == 'libs':
     for root in (os.path.join(OUT, 'fh/.config/kicad'), os.path.join(OUT, 'fh/Library/Preferences/kicad')):
         for dp, _, fs in os.walk(root):
@@ -311,6 +324,14 @@ try:
         k = [w for w in order[:ours] if w[1] not in (client.pid, hub.pid) and 'kicad' in w[2].lower()]
         return k[0] if k and order.index(k[0]) == ours - 1 else None
     t0 = time.time()
+    if os.environ.get('FRESH_AGENT') == 'during':
+        import threading
+        sys.path.insert(0, os.path.join(REPO, 'test/kicad_embed/mac')); import hub_ws
+        def _agent():
+            time.sleep(4)
+            hub_ws.send(port, open(os.path.join(OUT, 'home/token')).read().strip(), 'turn.start',
+                        {'thread': 't1', 'text': 'mcpcall:' + json.dumps({'name': 'kicad_ipc_status', 'arguments': {'path': os.path.join(OUT, 'proj', 'ecc83-pp.kicad_pcb')}}), 'msg': f'fresh-{time.time_ns()}'})
+        threading.Thread(target=_agent, daemon=True).start()
     f = wait_for(kicad_frame, 180, 0.25)
     RES['edit_to_frame_s'] = round(time.time() - t0, 1)
     shot('01-edit')
@@ -379,6 +400,13 @@ try:
     # ---- MAC_MODE=first: a fresh home's first Edit puts KiCad over the pane within 30 s (the checks above), and stops ----
     if os.environ.get('MAC_MODE') == 'first':
         check(RES['edit_to_frame_s'] <= 30, f'first Edit on a fresh home: KiCad over the pane within 30 s ({RES["edit_to_frame_s"]} s)')
+        if os.environ.get('FRESH_AGENT') == 'during':
+            check('File Open Warning' not in hub_log(), 'fresh Edit with an agent during the start: no "File Open Warning" dialog')
+            lck = os.path.join(OUT, 'proj', '~ecc83-pp.kicad_pro.lck')
+            holders = subprocess.run(['lsof', '-t', '--', lck], capture_output=True, text=True).stdout.split() if os.path.exists(lck) else []
+            check(len(holders) <= 1, f'fresh Edit with an agent during the start: at most one process holds the project lock ({holders})')
+            sl = open(os.path.join(OUT, 'standin.log'), errors='replace').read() if os.path.isfile(os.path.join(OUT, 'standin.log')) else ''
+            check('MCPCALL kicad_ipc_status' in sl, 'fresh Edit with an agent during the start: the agent\'s kicad_ipc_status was answered')
         raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=restart: Backplane killed mid-edit, restarted: Edit painted, no dialog; KiCad killed: Edit brings a new one;
     # Backplane started with KiCad gone and Edit at once: one KiCad ----
