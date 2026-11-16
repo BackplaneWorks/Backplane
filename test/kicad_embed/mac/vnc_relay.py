@@ -50,6 +50,21 @@ def serve(path, client, scale):
                 elif op == 'png':
                     client.refresh()
                     client.png(r['path'])
+                elif op == 'crop':
+                    # raw RGB of a rect in points (the harness's canvas finder): "<w> <h>\n" then w*h*3 bytes
+                    client.refresh()
+                    x0, y0, w, h = px(r['x']), px(r['y']), px(r['w']), px(r['h'])
+                    x0, y0 = max(0, x0), max(0, y0)
+                    w, h = max(0, min(w, client.width - x0)), max(0, min(h, client.height - y0))
+                    rows = []
+                    for y in range(y0, y0 + h):
+                        line = client.fb[(y * client.width + x0) * 4:(y * client.width + x0 + w) * 4]
+                        rgb = bytearray(w * 3)
+                        rgb[0::3], rgb[1::3], rgb[2::3] = line[2::4], line[1::4], line[0::4]
+                        rows.append(bytes(rgb))
+                    with open(r['path'], 'wb') as out_f:
+                        out_f.write(f'{w} {h}\n'.encode() + b''.join(rows))
+                    out.update(width=w, height=h)
                 elif op == 'size':
                     out.update(width=client.width, height=client.height, scale=scale)
                 elif op == 'quit':
