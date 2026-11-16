@@ -3779,6 +3779,11 @@ android.swarm.gone = そのスウォームはこのハブにありません。
 android.swarm.provider = プロバイダー
 android.swarm.model = モデル
 android.buy.ask = {project} の購入スレッドを開始しますか？
+cat.cat = 猫
+cat.own = 元の色
+cat.different = 別の猫
+cat.auto = 名前の猫
+cat.color.bad = #6fb3f2 のように色を入力してください。
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number}件実行中
 ios.alerts.ask = スレッドがあなたを必要とするとき、Bub が通知できます。
