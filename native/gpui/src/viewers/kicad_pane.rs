@@ -170,7 +170,9 @@ pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<Strin
         // KiCad has a dialog of its own open (a notice from loading a file, its own progress): said, not a silent "Starting KiCad…"
         _ if info["dialogs"].as_array().is_some_and(|d| !d.is_empty()) => {
             let title = info["dialogs"].as_array().and_then(|d| d.last()).and_then(Value::as_str).unwrap_or("");
-            Some(crate::i18n::tf("gpui.c.kicad.dialog", &[("title", title.to_string().into())]))
+            // KiCad's own question to the person (its offer to recover unsaved work after a crash): said as a question for them
+            let key = if title.to_ascii_lowercase().contains("recover") { "gpui.c.kicad.asking" } else { "gpui.c.kicad.dialog" };
+            Some(crate::i18n::tf(key, &[("title", title.to_string().into())]))
         }
         // KiCad's check or refill holds the switch (task-gate-reads): said, so the pane does not look dead; the hub sends it when it ends
         // macOS: KiCad's start waits on a system prompt that names Backplane (the hub's mac_prompt_wait): said, so the person looks for it
@@ -1346,6 +1348,8 @@ mod tests {
         assert!(say.starts_with("KiCad closed unexpectedly.") && say.contains("were not kept") && !say.contains("could not start") && !say.contains("Fontconfig"), "{say}");
         let kept = json!({"state": "closed_unexpectedly", "reason": "x", "frames": [], "autosaves": ["_autosave-a.kicad_pcb"]});
         assert!(super::waiting_on(&kept, false, false).unwrap().contains("kept a copy"), "an autosave is offered back");
+        let asking = json!({"state": "starting", "frames": [], "dialogs": ["Recover Unsaved Changes"]});
+        assert_eq!(super::waiting_on(&asking, false, false).as_deref(), Some("KiCad is asking: Recover Unsaved Changes"));
         // a stock KiCad in the pane: the strip offers Backplane KiCad (Linux; Windows says it in the pane's middle), a fork's never
         assert!(super::stock_hint(&json!({"mode": "stock", "state": "ready"}), false) && super::stock_hint(&json!({"mode": "stock", "state": "starting"}), false));
         assert!(!super::stock_hint(&json!({"mode": "fork", "state": "ready"}), false) && !super::stock_hint(&json!({"mode": "stock", "state": "ready"}), true) && !super::stock_hint(&json!({"mode": "stock", "state": "stopped"}), false) && !super::stock_hint(&Value::Null, false));
