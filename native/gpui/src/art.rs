@@ -336,7 +336,14 @@ pub fn layout_snapshot() -> String {
 }
 
 // ---- control rectangles (G6): the window rectangle of each registered control, in check mode only ------------
-static CTL_RECTS: std::sync::Mutex<Option<std::collections::HashMap<String, [f32; 4]>>> = std::sync::Mutex::new(None);
+static CTL_RECTS: std::sync::Mutex<Option<std::collections::HashMap<String, ([f32; 4], u64)>>> = std::sync::Mutex::new(None);
+/// The frame the probes now painted belong to; the last whole frame's are what is on screen (drawn_marks closes a frame). A control no longer
+/// drawn is no longer reported: before, its last place stayed, and a test pressed where it had been (real_use clicked the sidebar's row of
+/// the other thread where the shown thread's row now is)
+static PROBE_FRAME: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+static PROBE_DONE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// A frame was painted: what it drew is what is on screen.
+pub fn probes_frame_done() { let f = PROBE_FRAME.fetch_add(1, std::sync::atomic::Ordering::SeqCst); PROBE_DONE.store(f, std::sync::atomic::Ordering::SeqCst); }
 /// An invisible overlay recording its parent control's rectangle (physical window px) under the control's id.
 pub fn probe_rect(id: String) -> AnyElement {
     canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
@@ -344,13 +351,17 @@ pub fn probe_rect(id: String) -> AnyElement {
         let mut g = CTL_RECTS.lock().unwrap();
         let m = g.get_or_insert_with(Default::default);
         if m.len() > 2048 { m.clear(); }
-        m.insert(id, [f32::from(b.origin.x) * s, f32::from(b.origin.y) * s, f32::from(b.size.width) * s, f32::from(b.size.height) * s]);
+        m.insert(id, ([f32::from(b.origin.x) * s, f32::from(b.origin.y) * s, f32::from(b.size.width) * s, f32::from(b.size.height) * s], PROBE_FRAME.load(std::sync::atomic::Ordering::SeqCst)));
     }).absolute().top_0().left_0().size_full().into_any_element()
 }
 /// A menu that closed (or opened anew): its entries' probes go, so a test never presses where an entry of an earlier menu was drawn (a stale
 /// `run-on:New thread on boat-hub` over what is now another entry).
 pub fn forget_probes(prefix: &str) { if let Some(m) = CTL_RECTS.lock().unwrap().as_mut() { m.retain(|k, _| !k.starts_with(prefix)); } }
-pub fn ctl_rects() -> std::collections::HashMap<String, [f32; 4]> { CTL_RECTS.lock().unwrap().clone().unwrap_or_default() }
+/// The controls on screen: those the last whole painted frame drew (and any drawn since).
+pub fn ctl_rects() -> std::collections::HashMap<String, [f32; 4]> {
+    let done = PROBE_DONE.load(std::sync::atomic::Ordering::SeqCst);
+    CTL_RECTS.lock().unwrap().as_ref().map(|m| m.iter().filter(|(_, (_, f))| *f >= done).map(|(k, (r, _))| (k.clone(), *r)).collect()).unwrap_or_default()
+}
 
 #[cfg(test)]
 mod generated_assets_tests {

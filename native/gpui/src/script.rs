@@ -79,6 +79,8 @@ impl Backplane {
     /// After each painted frame (check mode): the layout, the controls, the shown thread, the probes and the links, each on change.
     pub fn drawn_marks(&mut self) {
         let started = self.started;
+        // the frame just painted is what is on screen: the controls and probes read below are its own (art::ctl_rects)
+        crate::art::probes_frame_done();
         if crate::art::rects_on() {
             // G3: the stable regions' rectangles (as this frame painted them), on change
             let snap = crate::art::layout_snapshot();

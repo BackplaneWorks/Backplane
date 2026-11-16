@@ -43,10 +43,20 @@ def metrics(event):
             except Exception: pass
     return out
 def control(cid):
-    for m in reversed(metrics("controls")):
-        for c in m.get("controls", []):
-            if c.get("id") == cid and c.get("rect"): return c["rect"]
-    return None
+    """Where control `cid` is now. The client's rects (BACKPLANE_GPUI_RECTS: the `probes` metric, written whenever what it draws moves) come
+    first: the `controls` metric is written only at the client script's own steps, so a rect taken from it can be from another layout (Full
+    size's, read from an earlier layout, was clicked where Full screen had come to be: the editor stayed full screen and every later journey
+    read it as gone). An id the rects have had but not drawn now is not on screen: None, never an old place."""
+    probes = metrics("probes")
+    if probes and any(r.get("id") == cid for m in probes for r in m.get("rects", [])):
+        r = next((r for r in probes[-1].get("rects", []) if r.get("id") == cid), None)
+        if r is None: print(f"DIAG {cid} is not drawn now", flush=True); return None
+        return {k: r[k] for k in ("x", "y", "w", "h")}
+    # the controls as they are now (the latest snapshot): one listed without a rect, or not listed, is not on screen (the sidebar lists the
+    # other thread only while it is not the one shown: its old row was clicked and nothing changed)
+    ctl = metrics("controls")
+    c = next((c for c in (ctl[-1].get("controls", []) if ctl else []) if c.get("id") == cid), None)
+    return c.get("rect") if c else None
 def controls_like(pat):
     for m in reversed(metrics("controls")):
         return [c for c in m.get("controls", []) if re.search(pat, c.get("id", "")) and c.get("rect")]
@@ -57,7 +67,13 @@ WARNED = set()
 # the editor's tabs register no control rects (kicad_pane.rs): their place over the pane, measured from a screenshot at 1800x1050
 TAB_AT = {"PCB": 31, "SCH": 92, "PCB_3D": 146}
 def click_ctl(cid):
-    r = control(cid)
+    # a rect that held still: the strip's buttons jump 66 px for a frame or two when what is beside them changes width (the checks
+    # chip), and Full size read during one of those was clicked where Full screen is (the editor stayed full screen for every later journey)
+    r = control(cid); t = time.time()
+    while r and time.time() - t < 3:
+        time.sleep(0.3); r2 = control(cid)
+        if r2 == r: break
+        r = r2
     if not r and cid in ("kicad:full", "kicad:screen", "kicad:popout"):
         # the strip's buttons have their rects (kicad_pane.rs strip); a client without them is not guessed at: a place measured once from the
         # pane's edge became Full screen's when it was added beside Full size, and every later journey read the editor as gone
@@ -127,6 +143,7 @@ def gal_bounds(png, x, y, need=300):
 def shot(name): sh("import", "-window", "root", os.path.join(OUT, "shots", f"{name}.png"), timeout=20)
 # --- dialogs: KiCad windows that are neither an editor frame nor embedded: recorded, then Return
 STOP = threading.Event(); KNOWN = set(); PAUSE = threading.Event()  # PAUSE: a journey opens KiCad's dialogs on purpose
+MESSAGE_BOXES = ("Load Schematic", "Load PCB", "Error", "Warning", "Confirmation", "Information", "File Open Warning", "Question")
 def dialog_watch():
     while not STOP.is_set():
         if PAUSE.is_set(): STOP.wait(0.25); continue
@@ -136,13 +153,16 @@ def dialog_watch():
                 if "kicad" not in w.get("wm_class", "").lower(): continue
                 t = w.get("title", "")
                 if re.search(r"(PCB Editor|Schematic Editor|3D Viewer|Footprint Editor|Symbol Editor)$", t) or w["xid"] in KNOWN: continue
-                if not w.get("transient_for") and t not in ("Load Schematic", "Load PCB", "Error", "Warning", "Confirmation", "Information", "File Open Warning"): continue
+                if not w.get("transient_for") and t not in MESSAGE_BOXES: continue
                 KNOWN.add(w["xid"]); DIALOGS.append({"t": now(), "title": t, "w": w["w"], "h": w["h"]})
                 # KEMBED_DIALOG_WATCH=0: recorded, never answered (to see what an answered dialog would have hidden: a journey that passed
                 # only because the watcher pressed Return for it, as 0a's Escape did)
                 answer = os.environ.get("KEMBED_DIALOG_WATCH", "1") != "0"
-                print(f"DIALOG {t!r} {w['w']}x{w['h']} ({'Return' if answer else 'left open'})", flush=True); shot(f"dialog{len(DIALOGS)}")
-                if answer: sh("python3", os.path.join(os.environ["REPO_ROOT"], "test/cef/xinput.py"), "focus", t); rt("key", "Return")
+                # a message box is answered (Return: its OK); any other dialog (KiCad's tools: ERC, DRC, Plot) is closed with Escape: Return there
+                # pressed its default button, and an ERC dialog that came back answered with Return opened Save Report File, then Annotate
+                key = "Return" if t.lstrip("*") in MESSAGE_BOXES else "Escape"
+                print(f"DIALOG {t!r} {w['w']}x{w['h']} ({key if answer else 'left open'})", flush=True); shot(f"dialog{len(DIALOGS)}")
+                if answer: sh("python3", os.path.join(os.environ["REPO_ROOT"], "test/cef/xinput.py"), "focus", t); rt("key", key)
         except Exception as e: print("DIAG dialog watch", e, flush=True)
         STOP.wait(0.25)
 
@@ -304,13 +324,15 @@ _sn = (metrics("shown") or [{}])[-1]
 if _sn.get("thread") != "t1" or _sn.get("open") != "board":
     print(f"FAIL the editor is not open on t1 (Embedded KiCad E2E): shown={_sn}", flush=True); sys.exit(1)
 
-def editor_up():  # a KiCad editor frame mapped over the pane (the X tree, not the client's word)
+def editor_up():  # a KiCad editor frame mapped over the pane as it is now (the X tree, not the client's word; a panel narrows the pane)
+    P = pane_rect()
     for w in windows():
-        if w.get("shown") and "kicad" in w.get("wm_class", "").lower() and w["w"] > 200 and abs(w["root_x"] - PANE["x"]) < 40 and abs(w["root_y"] - PANE["y"]) < 60: return True
+        if w.get("shown") and "kicad" in w.get("wm_class", "").lower() and w["w"] > 200 and abs(w["root_x"] - P["x"]) < 40 and abs(w["root_y"] - P["y"]) < 60: return True
     return False
 def container_now():  # the X parent of the KiCad frame over the pane: Backplane's container (a reopen makes a new one)
+    P = pane_rect()
     for w in windows():
-        if w.get("shown") and "kicad" in w.get("wm_class", "").lower() and w["w"] > 200 and abs(w["root_x"] - PANE["x"]) < 40 and abs(w["root_y"] - PANE["y"]) < 60:
+        if w.get("shown") and "kicad" in w.get("wm_class", "").lower() and w["w"] > 200 and abs(w["root_x"] - P["x"]) < 40 and abs(w["root_y"] - P["y"]) < 60:
             return int(w["parent"], 16) if isinstance(w["parent"], str) else w["parent"]
     return CONT
 def restore(after):
@@ -318,12 +340,20 @@ def restore(after):
     print(f"LOST editor after {after}: reopening (Board, Edit)", flush=True); RESULTS[f"lost_after_{after}"] = {"ms": None, "lost": 1}
     click_ctl("rail:Board"); time.sleep(2); click_ctl("ui:Edit"); time.sleep(4)
 TITLE_KIND = [("PCB Editor", "PCB"), ("Schematic Editor", "SCH"), ("3D Viewer", "PCB_3D"), ("Symbol Editor", "SYMBOL_EDITOR"), ("Footprint Editor", "FOOTPRINT_EDITOR"), ("Gerber Viewer", "GERBVIEW")]
+def pane_rect():
+    """The pane as the client draws it now (its `kicad:pane` rect, outline included), in root coordinates; else the pane measured at the
+    start. A management panel, Full size or Full screen change it: a KiCad frame is judged against the pane as it is, not as it was."""
+    probes = metrics("probes")
+    r = next((r for r in (probes[-1].get("rects", []) if probes else []) if r.get("id") == "kicad:pane"), None)
+    return {"x": GX + r["x"], "y": GY + r["y"], "w": r["w"], "h": r["h"]} if r else PANE
 def on_show():
-    """The kinds of the KiCad frames shown at the pane's place now (from the X tree, not the client's word)."""
+    """The kinds of the KiCad frames shown in the pane now (the X tree, not the client's word): mapped, and inside the pane's rect within its
+    2 px outline (the pane as the client draws it now)."""
     out = []
+    P = pane_rect()
     for w in windows():
-        if not w.get("shown") or "kicad" not in w.get("wm_class", "").lower() or not PANE: continue
-        if abs(w["root_x"] - PANE["x"]) > 2 or abs(w["root_y"] - PANE["y"]) > 2: continue
+        if not w.get("shown") or "kicad" not in w.get("wm_class", "").lower() or not P: continue
+        if abs(w["root_x"] - P["x"]) > 3 or abs(w["root_y"] - P["y"]) > 3 or abs(w["root_x"] + w["w"] - P["x"] - P["w"]) > 3 or abs(w["root_y"] + w["h"] - P["y"] - P["h"]) > 3: continue
         t = (w.get("title") or "").rstrip()
         out += [k for (s, k) in TITLE_KIND if t.endswith(s) or (s == "3D Viewer" and t.startswith("3D Viewer"))]
     return out
@@ -341,7 +371,7 @@ def tab(kind, tag, settle=1.4, check=True):
                 # what on_show saw: every KiCad window shown, against the pane's place
                 for w in windows():
                     if w.get("shown") and "kicad" in w.get("wm_class", "").lower() and w["w"] > 100:
-                        print(f"DIAG {tag}: {w.get('xid')} {w.get('wm_class')!r} {w.get('title')!r} at {w.get('root_x')},{w.get('root_y')} {w['w']}x{w['h']} (pane {PANE})", flush=True)
+                        print(f"DIAG {tag}: {w.get('xid')} {w.get('wm_class')!r} {w.get('title')!r} at {w.get('root_x')},{w.get('root_y')} {w['w']}x{w['h']} (pane now {pane_rect()}, at the start {PANE})", flush=True)
             else: print(f"JANK {tag}: {kind} on show only after {settle + 3:.1f} s", flush=True)
 
 XIN = os.path.join(os.environ["REPO_ROOT"], "test/cef/xinput.py")
