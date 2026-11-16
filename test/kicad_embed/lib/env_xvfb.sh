@@ -131,6 +131,33 @@ stop_pid() {
   kill -KILL "$p" 2>/dev/null || true
 }
 
+# Every process of this run, found by what proves it is the run's: its XDG_RUNTIME_DIR or HOME under $OUT (the GPU display's headless
+# GNOME session and everything its buses start: gvfs, ibus, evolution, goa, portals, at-spi; they are not in our process groups), or
+# $OUT on its command line (i3, the hub). Then the document portal's FUSE mount under it. Never anything outside $OUT.
+sweep_out_dir() {
+  local dir=$1 p e pids=()
+  [ -n "$dir" ] && [ -d "$dir" ] || return 0
+  for p in $(ls /proc | grep -E '^[0-9]+$'); do
+    [ "$p" = "$$" ] && continue
+    e=$(tr '\0' '\n' < /proc/$p/environ 2>/dev/null | grep -aE "^(XDG_RUNTIME_DIR|HOME)=$dir/" | head -1)
+    if [ -n "$e" ] || tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null | grep -aqF "$dir/"; then pids+=("$p"); fi
+  done
+  if [ "${#pids[@]}" -gt 0 ]; then
+    kill -TERM "${pids[@]}" 2>/dev/null; sleep 1
+    for p in "${pids[@]}"; do [ -d /proc/$p ] && kill -KILL "$p" 2>/dev/null; done
+  fi
+  local m; for m in $(awk -v d="$dir/" 'index($2, d) == 1 {print $2}' /proc/mounts 2>/dev/null); do fusermount3 -u -z "$m" 2>/dev/null || fusermount -u -z "$m" 2>/dev/null; done
+  return 0
+}
+# A watcher outside the run's process groups: when the run's shell is gone (a normal exit, a signal, or a SIGKILL that skips every trap,
+# as a cancelled job's does) it sweeps $OUT. Nov 16: a cancelled real_use run left its headless GNOME session up (26 processes, 16 of the
+# user's 128 inotify instances) and KiCads elsewhere failed with "Unable to create inotify instance".
+start_out_reaper() {
+  local me=$$ dir=$OUT
+  ( setsid bash -c "$(declare -f sweep_out_dir); while kill -0 $me 2>/dev/null; do sleep 2; done; sweep_out_dir '$dir'" >/dev/null 2>&1 & )
+}
+[ "${KEMBED_NO_REAPER:-0}" = 1 ] || start_out_reaper
+
 kembed_cleanup() {
   local rc=$?
   set +e
@@ -144,6 +171,7 @@ kembed_cleanup() {
     kill -KILL "$p" 2>/dev/null || true
   done
   own_stop || true
+  sweep_out_dir "$OUT"
   exit "$rc"
 }
 trap kembed_cleanup EXIT INT TERM
