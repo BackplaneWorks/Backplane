@@ -26,6 +26,9 @@ pub fn grey(c: u32) -> u32 {
 pub fn seed(name: &str) -> u64 { name.to_lowercase().chars().fold(7u64, |acc, c| (acc * 31 + c as u64) % 4294967291) }
 /// The look a name gives: leading and trailing spaces do not count, case does not either.
 pub fn look_of(name: &str) -> u64 { seed(name.trim()) % LOOKS }
+/// Whether a bot's look follows its name, from its BotSet line's `auto` (None: a line from before it). A line from before `auto` stored the
+/// raw seed of the name it was made with (bots made by name): that cat is the name's and follows it; any other look there was given.
+pub fn follows_name(auto: Option<bool>, look: u64, name: &str) -> bool { auto.unwrap_or_else(|| look == seed(name.trim())) }
 pub fn coat(look: u64) -> u64 { look % COATS }
 pub fn collar(look: u64) -> u64 { (look / COATS) % COLLARS }
 /// Different cat: the next coat, the same collar (twelve presses go round to the start).
@@ -94,6 +97,9 @@ mod tests {
         // pinned: a change here changes every unpicked cat; the clients' copies and the phones' answers rest on these
         assert_eq!([look_of("Bub"), look_of("Pebble"), look_of("Scout"), look_of("Ada"), look_of("猫")], [8, 39, 7, 31, 36]);
         assert!(look_of("") < LOOKS);
+        // the onboarding test home (Nov 16): Bub made by name before `auto` (look 306440 = seed("bub")) froze as if picked; it follows its name
+        assert!(follows_name(None, seed("bub"), "Bub") && follows_name(None, 306440, "Bub"));
+        assert!(!follows_name(None, 5, "Bub"), "a look given then stays"); assert!(!follows_name(Some(false), seed("bub"), "Bub")); assert!(follows_name(Some(true), 0, "x"));
     }
     #[test] fn looks_split_into_coat_and_collar_and_different_cat_keeps_the_collar() {
         assert_eq!((coat(8), collar(8)), (8, 0)); assert_eq!((coat(39), collar(39)), (3, 3));

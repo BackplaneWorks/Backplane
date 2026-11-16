@@ -51,7 +51,7 @@ pub fn answer(p: &Value) -> Value {
 /// again here, so the line's own `look` is only for hubs that know no `auto`); a line from before `auto` keeps the look it stored.
 /// `color` "#rrggbb", or "" for the coat's own.
 pub fn of_event(e: &Value) -> (u64, bool, String) {
-    let auto = e["auto"] == true;
+    let auto = cat::follows_name(e["auto"].as_bool(), e["look"].as_u64().unwrap_or(0), e["name"].as_str().unwrap_or(""));
     let look = if auto { cat::look_of(e["name"].as_str().unwrap_or("")) } else { e["look"].as_u64().unwrap_or(0) % cat::LOOKS };
     (look, auto, e["color"].as_str().and_then(cat::parse_color).map(cat::color_hex).unwrap_or_default())
 }
@@ -80,7 +80,8 @@ mod tests {
     }
     #[test] fn a_line_says_whether_the_look_follows_the_name() {
         assert_eq!(of_event(&json!({"name": "Bub", "look": 3, "auto": true, "color": "#AABBCC"})), (cat::look_of("Bub"), true, "#aabbcc".into()), "auto: the name's look, whatever was stored");
-        assert_eq!(of_event(&json!({"name": "Bub", "look": 4294967290u64})), (4294967290 % 72, false, String::new()), "an old line keeps its look");
+        assert_eq!(of_event(&json!({"name": "Bub", "look": 4294967290u64})), (4294967290 % 72, false, String::new()), "an old line keeps a look it was given");
+        assert_eq!(of_event(&json!({"name": "Bub", "look": cat::seed("bub")})), (cat::look_of("Bub"), true, String::new()), "an old line made by name follows it");
         assert_eq!(with(json!({"$": "BotSet", "look": 1}), 9, false, "#000000")["look"], 9);
     }
 }
