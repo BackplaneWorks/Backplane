@@ -256,7 +256,7 @@ def l8(c):
 
 def l9(c):
     """The manifest's backplaneLibrary pin against KICAD_LIBRARY_SOURCES.txt's block for that repository: every key both name agrees
-    (repository, version, commit). The pin's sha256 is the library archive's, which the sources file does not list: shown, not compared."""
+    (repository, version, commit); the pin's sha256 (which the sources file does not list) against the library's own SHA256SUMS."""
     m = json.load(open(os.path.join(c["runtime_root"], "manifest.json")))
     pin = m.get("backplaneLibrary")
     if not pin: say("SKIP", "L9", "the manifest has no backplaneLibrary pin yet (batch 14)"); return
@@ -273,7 +273,13 @@ def l9(c):
     shared = [k for k in pin if k in src]
     diff = {k: (pin[k], src[k]) for k in shared if str(pin[k]) != src[k]}
     check("L9", f"the manifest's backplaneLibrary pin matches KICAD_LIBRARY_SOURCES.txt ({', '.join(shared)})", len(shared) >= 2 and not diff, json.dumps(diff))
-    if pin.get("sha256"): say("INFO", "L9", f"the pinned archive's sha256 {pin['sha256'][:16]}... (not in the sources file)")
+    # the pin's sha256 is the library's own SHA256SUMS file's (inside the runtime's backplane-library), not in the sources file
+    sha = str(pin.get("sha256") or "")
+    check("L9", "the pin's sha256 is 64 hex digits", bool(re.fullmatch(r"[0-9a-f]{64}", sha)), sha or "none")
+    lib = os.path.dirname(PLATFORM_HOOKS["runtime_paths"](c)["Backplane footprint libraries"][0])
+    sums = os.path.join(lib, "SHA256SUMS")
+    got = __import__("hashlib").sha256(open(sums, "rb").read()).hexdigest() if os.path.isfile(sums) else ""
+    check("L9", "it is the sha256 of the library's own SHA256SUMS", bool(got) and got == sha, f"{sums}: {got or 'missing'}")
 
 
 # ---- platform hooks (Linux here; macOS and Windows fill theirs) -------------------------------------------------------------
