@@ -582,6 +582,8 @@ try:
     key(K_W, CMD); time.sleep(1.5); key(K_RETURN)
     saved = wait_for(lambda: open(board, 'rb').read() != before, 8)
     check(bool(saved) and bool(wait_for(lambda: not kicad_frame(), 6)) and bool(wait_for(lambda: rects().get('ui:Edit'), 6)), 'Cmd+W with an unsaved edit, then Save: written, the editor closes, the pane is back to View')
+    # the board back as it was (the Save above wrote it with everything deleted: the quit case below needs parts to delete)
+    subprocess.run(['git', '-C', os.path.join(OUT, 'proj'), 'checkout', '--', '.'], capture_output=True)
     check(bool(edit_again()), 'and Edit opens it again')
     # ---- quitting Backplane with unsaved changes: KiCad keeps them, nothing is written, Edit brings them back ----
     board = os.path.join(OUT, 'proj', 'ecc83-pp.kicad_pcb'); before_bytes = open(board, 'rb').read()
