@@ -227,7 +227,7 @@ pub struct KicadPane {
     /// when this pane was made (the first Edit's), its warm hand-over's end (the frame placed + HANDOFF_PAINT), and whether it is over
     born: std::time::Instant, handoff_placed: Option<(std::time::Instant, u64)>, handoff_over: bool,
     /// macOS: the pane's screen rect (points) and our window's visibility last pushed to KiCad (`editor.kicad.host`)
-    host_sent: Option<(i32, i32, i32, i32, bool)>,
+    pub host_sent: Option<(i32, i32, i32, i32, bool)>,
     /// the .kicad_pro the hub resolved this pane's project to (its attach reply), "" until then
     pub bound: String,
     pub project: String, pub root: String, pub project_id: String, pub open: String, last_hub_open: String, hub: tokio::sync::mpsc::Sender<Command>,
@@ -389,6 +389,8 @@ impl KicadPane {
             if had_pid { self.pending_show = None; }
         }
         if matches!(info["state"].as_str(), Some("failed" | "stopped")) { self.pending_show = None; }
+        // macOS: a KiCad that became ready, or another one (a restart), has not had this pane's rect: pushed again on the next frame
+        if info["state"] != self.info["state"] || info["pid"] != self.info["pid"] { self.host_sent = None; }
         if let Some(act) = info["active"].as_str().filter(|a| !a.is_empty()) {
             if self.pending_show.as_deref() == Some(act) {
                 self.pending_show = None;
@@ -981,6 +983,9 @@ impl KicadPane {
             if let Some(w) = show {
                 if self.want_keys && nc::button_over(w) == Some(false) { self.press_gave_keys = true; }
                 nc::focus(w);
+                // macOS: KiCad's app is active now; ShowFrame{focus} makes the frame key and puts the keyboard on its canvas
+                #[cfg(target_os = "macos")]
+                self.rpc("editor.kicad.show", json!({"project": self.project, "frame": self.wanted_kind(), "focus": true}));
                 if cfg!(windows) { self.verify_handin = Some((w, std::time::Instant::now())); self.unexplained_reposted = false; cx.notify(); }
                 if cfg!(windows) && !nc::frame_visible(c, w) { self.refocus = Some((w, std::time::Instant::now())); cx.notify(); }
                 if self.want_keys && !self.keys { self.keys = true; nc::grab_escape(self.toplevel, true); self.grab_click(c, false); self.touched(); }
@@ -991,6 +996,8 @@ impl KicadPane {
             let w = show.unwrap();
             if nc::button_over(w) == Some(false) { self.press_gave_keys = true; }
             nc::focus(w);
+            #[cfg(target_os = "macos")]
+            self.rpc("editor.kicad.show", json!({"project": self.project, "frame": self.wanted_kind(), "focus": true}));
             if cfg!(windows) { self.verify_handin = Some((w, std::time::Instant::now())); self.unexplained_reposted = false; cx.notify(); }
             if cfg!(windows) && !nc::frame_visible(c, w) { self.refocus = Some((w, std::time::Instant::now())); cx.notify(); }
             if !self.keys { self.keys = true; nc::grab_escape(self.toplevel, true); self.grab_click(c, false); self.touched(); }
@@ -1359,6 +1366,11 @@ impl crate::Backplane {
                     p.update(cx, |p, cx| p.set_info(json!({"state": "failed", "reason": why}), cx));
                 }
             }
+            return;
+        }
+        // macOS: a host rect KiCad could not take yet (it was still starting) is pushed again on the next frame
+        if method == "editor.kicad.host" && reply["applied"] == false {
+            if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, cx| { p.host_sent = None; cx.notify(); }); }
             return;
         }
         if method == "editor.kicad.attach" && reply["state"].is_string() {
