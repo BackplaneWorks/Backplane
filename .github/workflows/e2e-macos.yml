@@ -81,6 +81,7 @@ jobs:
         with: { python-version: '3.12' }
       - name: agent edits, Open in KiCad, the detached-KiCad warning; checks and exports
         run: |
+          set -o pipefail
           python -m pip install --quiet pyobjc-framework-Quartz
           ok=0
           EXPECT_VERSION="$KV" node test/e2e/mac-kicad-runtime.mjs "$HUB" "$RT" 3890 "$RUNNER_TEMP/kr" 2>&1 | tee out/kicad-runtime.txt || ok=1
