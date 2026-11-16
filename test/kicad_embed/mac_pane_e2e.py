@@ -26,6 +26,7 @@ DRIVER = os.environ.get('MAC_DRIVER', 'quartz')
 CMD, CTRL, SHIFT, ALT = 0x100000, 0x40000, 0x20000, 0x80000
 # macOS virtual key codes
 K_A, K_K, K_ESC, K_B, K_J, K_C, K_TAB, K_DEL, K_F, K_COMMA = 0, 40, 53, 11, 38, 8, 48, 51, 3, 43
+K_FDEL = 117  # forward delete (fn+delete)
 
 if DRIVER == 'quartz':
     import Quartz
@@ -96,7 +97,7 @@ else:
         return [(int(w['number']), int(w['pid']), w['owner'], tuple(round(v) for v in w['bounds'])) for w in helper('windows') or [] if w['layer'] == 0]
 
     # macOS virtual key codes the checks use, to the keysym names the relay types (Screen Sharing: Super is Command)
-    KEYNAME = {0: 'a', 40: 'k', 53: 'escape', 11: 'b', 38: 'j', 8: 'c', 48: 'tab', 51: 'backspace', 3: 'f', 43: ',', 13: 'w', 36: 'return'}
+    KEYNAME = {0: 'a', 40: 'k', 53: 'escape', 11: 'b', 38: 'j', 8: 'c', 48: 'tab', 51: 'backspace', 3: 'f', 43: ',', 13: 'w', 36: 'return', 117: 'delete'}
 
     def key(code, flags=0):
         mods = [m for m, bit in (('ctrl', CTRL), ('alt', ALT), ('shift', SHIFT), ('cmd', CMD)) if flags & bit]
@@ -106,7 +107,7 @@ else:
     def shot_to(path): relay(op='png', path=path)
 
     # windows by hand, as a person moves them (the title bar's empty part left of the title, the bottom-right corner, the green and red
-    # buttons: 13 pt below the top, at 12, 32 and 52 pt from the left)
+    # buttons: 13 pt below the top, at 14, 36 and 58 pt from the left on macOS 26)
     def _main(pid): return max((w for w in wins() if w[1] == pid), key=lambda w: w[3][2] * w[3][3], default=None)
 
     def win_move(pid, x, y):
@@ -118,11 +119,11 @@ else:
     def win_full(pid, on):
         if on:
             # the window active first (its title bar): a click on an inactive window's green button only activates it
-            b = _main(pid)[3]; relay(op='click', x=b[0] + 120, y=b[1] + 12); time.sleep(0.6); relay(op='click', x=b[0] + 52, y=b[1] + 13)
+            b = _main(pid)[3]; relay(op='click', x=b[0] + 120, y=b[1] + 12); time.sleep(0.6); relay(op='click', x=b[0] + 58, y=b[1] + 13)
         else:
             relay(op='chord', combo='ctrl+cmd+f')
 
-    def win_close(pid, bounds): relay(op='click', x=bounds[0] + 12, y=bounds[1] + 13)
+    def win_close(pid, bounds): relay(op='click', x=bounds[0] + 14, y=bounds[1] + 13)
 
 
 CLIENT, HUB, ASSETS, RT, OUT = sys.argv[1:6]
@@ -427,8 +428,11 @@ try:
     # ---- our window moved: the frame follows ----
     before = kicad_frame(); wb = next((w for w in wins() if w[0] == cw[0]), cw)
     win_move(client.pid, wb[3][0] + 60, wb[3][1] + 40)
-    moved = wait_for(lambda: (k := kicad_frame()) and before and (k[3][0] - before[3][0], k[3][1] - before[3][1]) == (60, 40) and k, 5)
-    print(f'client window {wb[3]} -> {next((w for w in wins() if w[0] == cw[0]), cw)[3]}', flush=True)
+    wa = lambda: next((w for w in wins() if w[0] == cw[0]), cw)[3]
+    # the frame follows by as much as the window really moved (a drag near the screen's edge may move it less than asked)
+    moved = wait_for(lambda: (k := kicad_frame()) and before and (wa()[0], wa()[1]) != (wb[3][0], wb[3][1])
+                     and (k[3][0] - before[3][0], k[3][1] - before[3][1]) == (wa()[0] - wb[3][0], wa()[1] - wb[3][1]) and k, 5)
+    print(f'client window {wb[3]} -> {wa()}', flush=True)
     check(bool(moved), f'Backplane\'s window moved: KiCad\'s frame follows it ({before and before[3]} -> {(kicad_frame() or [None]*4)[3]})')
     matches('after the move')
     cw = next((w for w in wins() if w[0] == cw[0]), cw)
@@ -506,9 +510,16 @@ try:
         e = rects().get('ui:Edit'); cw2 = next((w for w in wins() if w[0] == cw[0]), cw)
         if e: click(cw2[3][0] + e['x'] + e['w'] / 2, cw2[3][1] + 28 + e['y'] + e['h'] / 2)
         return wait_for(kicad_frame, 60, 0.25)
+    def delete_selection(tag):
+        """Delete what is selected as a Mac person does: the keyboard's delete key (Backspace); forward delete if KiCad did not take it."""
+        m0 = hub_log().count('ET_MODIFIED_CHANGED') + hub_log().count('ET_DOCUMENT_EDITED')
+        key(K_DEL)
+        if wait_for(lambda: hub_log().count('ET_MODIFIED_CHANGED') + hub_log().count('ET_DOCUMENT_EDITED') > m0, 2.5): RES[f'delete_{tag}'] = 'backspace'; return
+        key(K_FDEL); RES[f'delete_{tag}'] = 'forward delete' if wait_for(lambda: hub_log().count('ET_MODIFIED_CHANGED') + hub_log().count('ET_DOCUMENT_EDITED') > m0, 2.5) else 'neither'
+        print(f'INFO delete ({tag}): Backspace did not delete the selection in KiCad; {RES[f"delete_{tag}"]} did', flush=True)
     def unsaved_edit():
         p = last_push(); click(p[0][0] + p[0][2] * 0.1, p[0][1] + p[0][3] * 0.9); time.sleep(0.6)
-        key(K_A, CMD); time.sleep(0.5); key(K_DEL); time.sleep(1.2)
+        key(K_A, CMD); time.sleep(0.5); delete_selection('cmd-w'); time.sleep(0.6)
     # nothing unsaved: Cmd+W closes the editor, the pane goes back to View, Edit opens a fresh one
     p = last_push(); click(p[0][0] + p[0][2] * 0.1, p[0][1] + p[0][3] * 0.9); time.sleep(0.6)
     fr = kicad_frame(); key(K_W, CMD)
@@ -529,7 +540,7 @@ try:
     p = last_push()
     if p: click(p[0][0] + p[0][2] * 0.1, p[0][1] + p[0][3] * 0.9); time.sleep(0.6)
     m0 = hub_log().count('ET_MODIFIED_CHANGED')
-    key(K_A, CMD); time.sleep(0.6); key(K_DEL); time.sleep(1.5)
+    key(K_A, CMD); time.sleep(0.6); delete_selection('quit'); time.sleep(1.0)
     check(bool(wait_for(lambda: hub_log().count('ET_MODIFIED_CHANGED') > m0, 5)), 'the person\'s edit leaves the board unsaved in KiCad')
     fr = kicad_frame()
     client.terminate(); client.wait(10)
