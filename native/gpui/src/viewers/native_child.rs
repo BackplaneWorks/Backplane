@@ -289,7 +289,7 @@ mod imp {
     /// titles of the program's dialogs on screen now: a modal one stops KiCad's API (no events, no pings), so this is how Backplane knows.
     pub fn centre_dialogs(pid: u32, over: R) -> Vec<String> {
         static DONE: Mutex<Vec<u32>> = Mutex::new(Vec::new());
-        let mut open = Vec::new();
+        let mut open = Vec::new(); let mut seen_now = Vec::new();
         let Some(g) = conn() else { return open }; let c = g.as_ref().unwrap();
         let Some(root) = root(c) else { return open };
         let pid_atom = atom(c, "_NET_WM_PID"); // i18n-ok: X11 atom name
@@ -302,7 +302,7 @@ mod imp {
                 if prop32(c, w, u32::from(AtomEnum::WM_TRANSIENT_FOR), AtomEnum::WINDOW).is_empty() { continue }
                 let Some(at) = c.get_window_attributes(w).ok().and_then(|r| r.reply().ok()) else { continue };
                 if at.override_redirect || at.map_state != MapState::VIEWABLE { continue }
-                open.push(title(c, w));
+                open.push(title(c, w)); seen_now.push(w);
                 if done.contains(&w) || over.w <= 0 { continue }
                 let Some(geo) = c.get_geometry(w).ok().and_then(|r| r.reply().ok()) else { continue };
                 let (x, y) = (over.x + (over.w - geo.width as i32) / 2, over.y + (over.h - geo.height as i32) / 2);
@@ -312,7 +312,50 @@ mod imp {
         }
         if done.len() > 256 { done.drain(..128); }
         if moved { let _ = c.flush(); }
+        // the dialogs that became viewable since the last call (a dialog shown again counts again): take_new_dialogs
+        let mut on = DIALOGS_ON.lock().unwrap();
+        NEW_DIALOGS.lock().unwrap().extend(seen_now.iter().filter(|w| !on.contains(w)).map(|w| *w as u64));
+        *on = seen_now;
         open
+    }
+    /// The program's dialogs on screen now (viewable top-levels of `pid` with WM_TRANSIENT_FOR), in stacking order, the top last.
+    pub fn open_dialogs(pid: u32) -> Vec<u64> {
+        let mut out = Vec::new();
+        if pid == 0 { return out }
+        let Some(g) = conn() else { return out }; let c = g.as_ref().unwrap();
+        let Some(root) = root(c) else { return out };
+        let pid_atom = atom(c, "_NET_WM_PID"); // i18n-ok: X11 atom name
+        let kids = |w: Window| c.query_tree(w).ok().and_then(|r| r.reply().ok()).map(|t| t.children).unwrap_or_default();
+        for a in kids(root) {
+            for w in std::iter::once(a).chain(kids(a)) {
+                if prop32(c, w, pid_atom, AtomEnum::CARDINAL).first() != Some(&pid) { continue }
+                if prop32(c, w, u32::from(AtomEnum::WM_TRANSIENT_FOR), AtomEnum::WINDOW).is_empty() { continue }
+                let Some(at) = c.get_window_attributes(w).ok().and_then(|r| r.reply().ok()) else { continue };
+                if !at.override_redirect && at.map_state == MapState::VIEWABLE { out.push(w as u64); }
+            }
+        }
+        out
+    }
+    static DIALOGS_ON: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+    static NEW_DIALOGS: Mutex<Vec<u64>> = Mutex::new(Vec::new());
+    /// The program's dialogs that came up since the last take, in the order seen (centre_dialogs finds them).
+    pub fn take_new_dialogs() -> Vec<u64> { std::mem::take(&mut *NEW_DIALOGS.lock().unwrap()) }
+    /// A KiCad dialog given the keyboard as a window the person brought up: the window manager asked to activate it (_NET_ACTIVE_WINDOW,
+    /// source 2, so a manager's focus-stealing rules let it through: i3 and mutter honour it) and X's focus set on it once it is viewable.
+    /// A dialog that maps while the keyboard is in KiCad was, at times, never given it (the journey order of real_use's focus journey, 2 of
+    /// 5 runs on i3: X focus stayed on the frame behind it and Escape reached the editor).
+    #[track_caller]
+    pub fn activate(w: u64) {
+        if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {{\"kicad_activate\":{w},\"at\":\"{}\"}}", std::panic::Location::caller()); }
+        let w = w as u32;
+        let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
+        let Some(root) = root(c) else { return };
+        let active = atom(c, "_NET_ACTIVE_WINDOW"); // i18n-ok: X11 atom name
+        let ev = ClientMessageEvent::new(32, w, active, [2u32, x11rb::CURRENT_TIME, 0, 0, 0]);
+        let _ = c.send_event(false, root, EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY, ev);
+        let viewable = c.get_window_attributes(w).ok().and_then(|r| r.reply().ok()).map_or(false, |a| a.map_state == MapState::VIEWABLE);
+        if viewable { let _ = c.set_input_focus(InputFocus::PARENT, w, x11rb::CURRENT_TIME); }
+        let _ = c.flush();
     }
 
     /// The frames in the container: its children, or (the fork) the children of KiCad's holder window, an override-redirect child of the container.
@@ -994,6 +1037,10 @@ mod imp {
     pub fn adopt(_pid: u32, _container: u64, _toplevel: u64) -> Vec<u64> { vec![] }
     /// Windows: `dialogs` already centres them over Backplane's window.
     pub fn centre_dialogs(_pid: u32, _over: R) -> Vec<String> { vec![] }
+    /// Windows: the dialogs' activation is Windows' own (its foreground rules; the F5 guards), never this.
+    pub fn take_new_dialogs() -> Vec<u64> { vec![] }
+    pub fn activate(_w: u64) {}
+    pub fn open_dialogs(_pid: u32) -> Vec<u64> { vec![] }
 
     /// Own and centre floating KiCad dialogs (`floating_dialog`: captioned, non-child top-levels of `pid`, never menus or tooltips) over
     /// Backplane's `toplevel` HWND asynchronously.
@@ -1822,6 +1869,9 @@ mod imp {
     pub fn adopt(_pid: u32, _container: u64, _toplevel: u64) -> Vec<u64> { vec![] }
     pub fn dialogs(_pid: u32, _container: u64, _toplevel: u64) {}
     pub fn centre_dialogs(_pid: u32, _over: super::R) -> Vec<String> { vec![] }
+    pub fn take_new_dialogs() -> Vec<u64> { vec![] }
+    pub fn activate(_w: u64) {}
+    pub fn open_dialogs(_pid: u32) -> Vec<u64> { vec![] }
     pub fn frames(_container: u64) -> Vec<Frame> { vec![] }
     pub fn place(_container: u64, _r: Option<R>, _show: Option<u64>, _managed: Option<&[u64]>, _last_root: &mut (i32, i32)) {}
     pub fn place_local(_container: u64, _r: Option<R>, _show: Option<u64>, _mine: &[u64], _last_root: &mut (i32, i32)) {}

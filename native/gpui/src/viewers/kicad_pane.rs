@@ -628,6 +628,12 @@ impl KicadPane {
                 // which are open (a modal one stops KiCad's API: no events, no pings), so the pane names it and KiCad is not called hung
                 let over = match (&self.placed, self.last_root.0 != i32::MIN) { (Some((Some(at), _, _)), true) => nc::R { x: self.last_root.0, y: self.last_root.1, w: at.w, h: at.h }, _ => nc::R { x: 0, y: 0, w: 0, h: 0 } };
                 let open = nc::centre_dialogs(pid as u32, over);
+                // a dialog KiCad brought up while the keyboard was KiCad's (its frame, or another of its dialogs: a dialog of a dialog) is given
+                // the keyboard; one that comes up while the person types in Backplane is left as the window manager places it (X11 only)
+                if let Some(&w) = nc::take_new_dialogs().last() {
+                    if nc::has_focus(c) || nc::focus_in_pid(pid as u32) { nc::activate(w); }
+                    else if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_dialog_not_activated": w, "why": "the keyboard is not KiCad's"})); }
+                }
                 if open != self.dialogs_open { self.dialogs_open = open; self.rpc("editor.kicad.dialogs", json!({"project": self.project, "open": self.dialogs_open})); cx.notify(); }
             } else if !cfg!(windows) && !nc::adopt(pid as u32, c, self.toplevel).is_empty() {
                 self.placed = None; cx.notify();
@@ -753,8 +759,13 @@ impl KicadPane {
                 has = true;
             }
         }
+        // a KiCad dialog closed with the keyboard in it: to the dialog still open under it (a dialog of a dialog closed: back to its parent),
+        // else to the editor's frame
         if std::mem::replace(&mut self.was_dialog, in_dialog) && !has {
-            if let Some(w) = self.want() { nc::focus(w); has = true; }
+            // (never when the person went to Backplane itself: the focus is then in our window, outside KiCad's container)
+            let to_dialog = if nc::has_focus(self.toplevel) { None } else { nc::open_dialogs(self.info["pid"].as_u64().unwrap_or(0) as u32).last().copied() };
+            if let Some(d) = to_dialog { nc::activate(d); self.was_dialog = true; has = true; }
+            else if let Some(w) = self.want() { nc::focus(w); has = true; }
         }
         // KiCad took the keyboard on a click (`_BACKPLANE_FOCUS`) and a window manager that focuses on click (i3) gave it straight back to
         // Backplane's window: the click was KiCad's, so is the keyboard (once, within moments of it)
@@ -902,7 +913,10 @@ impl KicadPane {
         }
         if local { nc::place_local(c, at, show, &self.ever_shown, &mut self.last_root); } else { nc::place(c, at, show, managed.as_deref(), &mut self.last_root); }
         if let (Some(w), Some(_), false, None) = (show, at, self.handoff_over, self.handoff_placed) { self.handoff_placed = Some((std::time::Instant::now(), w)); }
-        if (self.keys || self.want_keys) && show != prev_show {
+        // a KiCad dialog with the keyboard keeps it: the shown frame can change under an open dialog (a dialog of a dialog, Change
+        // Footprints over Footprint Properties, re-placed the frame twice), and the hand-in took the keyboard from the dialog to the frame
+        let kicad_dialog_has_keys = self.info["mode"] == "fork" && nc::focus_in_pid(self.info["pid"].as_u64().unwrap_or(0) as u32) && !nc::has_focus(c);
+        if (self.keys || self.want_keys) && show != prev_show && !kicad_dialog_has_keys {
             if let Some(w) = show {
                 if self.want_keys && nc::button_over(w) == Some(false) { self.press_gave_keys = true; }
                 nc::focus(w);
