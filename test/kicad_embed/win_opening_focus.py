@@ -1846,6 +1846,49 @@ def run(h):
             h.check("checks P5: Fix with agent sent the finding to the thread's agent", got5, {"id": erc_id, "fix_clicked": fixed})
             h.shot("p5_fix")
             return h.finish()
+        if only == "libs":
+            # bp.13 gate (lead, Nov 16): on a clean home with only the managed runtime (this harness's own APPDATA, LOCALAPPDATA and
+            # KICAD_CONFIG_HOME; no other KiCad), an agent's kicad_edit places a library symbol with a library footprint, and the
+            # embedded editors' symbol and footprint choosers list libraries. The bp.10..bp.13 batch 12 Windows packages carry none.
+            import re as _re
+            top = int(rep.get("toplevel") or 0) or E.find_main_window(cp.pid)
+            sch = checks_project(h)[:-len(".kicad_pro")] + ".kicad_sch"
+            share = os.path.join(h.kicad_bin if os.path.isdir(h.kicad_bin) else os.path.dirname(os.path.dirname(h.kicad_bin)), "share", "kicad")
+            listing = sorted(os.listdir(share)) if os.path.isdir(share) else []
+            h.check("libs: the runtime's share\\kicad has symbols, footprints and the global sym-lib-table and fp-lib-table",
+                    all(x in listing for x in ("symbols", "footprints")) and any(os.path.isfile(os.path.join(share, d, t)) for d in ("", "template") for t in ("sym-lib-table",))
+                    and any(os.path.isfile(os.path.join(share, d, t)) for d in ("", "template") for t in ("fp-lib-table",)), {"share": share, "has": listing})
+            line = standin_ask(h, "kicad_edit", {"path": sch, "message": "libs gate", "ops": [{"add": [{"symbol": {
+                "lib": "Device:C", "ref": "C99", "value": "100n", "at": [30.48, 30.48], "footprint": "Capacitor_SMD:C_0603_1608Metric"}}]}]}, "libs")
+            try:
+                text = open(sch, encoding="utf-8", errors="replace").read()
+            except OSError:
+                text = ""
+            placed = '(lib_id "Device:C")' in text and '"C99"' in text
+            fp_set = '"Capacitor_SMD:C_0603_1608Metric"' in text
+            h.check("libs: an agent's kicad_edit places Device:C from the library into the schematic", placed, {"answer": line[:600]})
+            h.check("libs: and its library footprint (Capacitor_SMD:C_0603_1608Metric) is set on it", placed and fp_set, {"answer": line[:300]})
+            def chooser(tab, prefix):
+                h.click_control(top, tab)
+                time.sleep(4.0)
+                E.key_tap("a")
+                found, end = None, time.monotonic() + 20
+                while time.monotonic() < end and not found:
+                    found = next((w for w in kicad_toplevels() if w["visible"] and (w["title"] or "").startswith(prefix)), None)
+                    time.sleep(0.5)
+                time.sleep(3.0)  # the count in the title grows while it loads
+                title = window_title(found["hwnd"]) if found else ""
+                m = _re.search(r"\((\d+) items? loaded\)", title)
+                n = int(m.group(1)) if m else (0 if found else None)
+                if found:
+                    E.key_tap("Escape")
+                    time.sleep(0.8)
+                return {"title": title, "items": n}
+            sym = chooser("kicad-tab:SCH", "Choose Symbol")
+            h.check("libs: the embedded schematic editor's symbol chooser lists libraries (more than 100 symbols)", (sym["items"] or 0) > 100, sym)
+            fp = chooser("kicad-tab:PCB", "Footprint Chooser")
+            h.check("libs: the embedded board editor's footprint chooser lists libraries (more than 100 footprints)", (fp["items"] or 0) > 100, fp)
+            return h.finish()
         if only == "lend":
             # A5 / Climb B's lend (e9af1ffe5): a reserved key pressed in KiCad lends Backplane the keyboard, and the palette
             # dismissed where it was opened gives it back (embed_lend_e2e.sh on Linux):
