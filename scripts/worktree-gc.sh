@@ -7,6 +7,7 @@
 #   - top-level entries of $BP_TMP (~/.cache/bp-tmp: lanes' scratch targets, temp homes, logs) that nothing has written to for --tmp-hours (24) are deleted;
 #   - test leftovers in /tmp and $BP_TMP (bp-<area>-<pid>-*, bpt-XXXXXX) whose owner is dead go after 30 minutes (--tmp-minutes);
 #   - the sccache cache is trimmed, oldest first, to its cap (--sccache-size, else SCCACHE_CACHE_SIZE, else 20G; K, M, G or T) when it has grown past it.
+# A .bp-keep file at the top of a bp-tmp entry or a worktree keeps it whole, idle or not: what release gates come back to between runs (forkgate/, pp-tests/: Nov 16, a cleanup took a gate's checkout mid-run).
 # Nothing is touched that a process has as its cwd, executable, open file, TMPDIR or CARGO_TARGET_DIR (Nov 11: 157 GB of bp-tmp and 137 GB of lanes' targets filled the disk).
 # Never touches the main checkout, a locked worktree, a worktree with unlanded commits or edits (only its target/), a file not this user's, or across a mount.
 # Dry run unless --apply. Every run prints what it frees (or would) and a total; --quiet prints the total only. One run at a time (a second one leaves at once).
@@ -50,6 +51,7 @@ git -C "$REPO" worktree list --porcelain | awk '/^worktree /{w=substr($0,10); b=
 while IFS=$'\t' read -r w ref locked; do
   case "$w" in */.backplane/worktrees/*) ;; *) continue;; esac
   [ -d "$w" ] || continue; held "$w" && continue   # a running thread, build or shell works in it
+  [ -e "$w/.bp-keep" ] && continue                  # kept on purpose (a gate's checkout), target/ dirs too
   b=${ref#refs/heads/}; lnd=0; [ -n "$ref" ] && landed "$b" && lnd=1
   clean=0; [ -z "$(git --no-optional-locks -C "$w" status --porcelain 2>/dev/null)" ] && clean=1   # never the index refresh: it would make the worktree look used
   if [ "$lnd" = 1 ] && [ "$clean" = 1 ] && [ "$locked" = 0 ] && ! recent "$w" "$MMIN" && ! recent "$(git -C "$w" rev-parse --absolute-git-dir 2>/dev/null || echo "$w")" "$MMIN"; then
@@ -75,6 +77,7 @@ if [ -d "$BP_TMP" ]; then
     case "$n" in sccache|claude) continue;; esac
     [ "$e" -ef "$LOCK" ] && continue
     [ -O "$e" ] || continue; [ -n "${busy_t[$n]:-}" ] && continue; [ -n "${fresh_t[$n]:-}" ] && continue
+    [ -e "$e/.bp-keep" ] && continue   # kept on purpose (a gate's scripts, venv, fixtures)
     note tmp "$e" "idle ${TMPH} h"; N_TMP=$((N_TMP + 1)); wipe "$e"
   done
 fi
@@ -93,7 +96,7 @@ for base in ${GC_TMP_BASES:-/tmp $BP_TMP}; do [ -d "$base" ] || continue
       bp-chrome-*) continue;;
       *) [[ $b =~ $re ]] && [ ! -e "/proc/${BASH_REMATCH[1]}" ] || continue;;
     esac
-    [ -n "${act[$b]:-}" ] && continue; held "$d" && continue
+    [ -n "${act[$b]:-}" ] && continue; held "$d" && continue; [ -e "$d/.bp-keep" ] && continue
     note tmp "$d" "test leftover, owner gone"; N_TMP=$((N_TMP + 1)); wipe "$d"
   done
 done
