@@ -1368,6 +1368,11 @@ def run(h):
     only_ctrl_k = only == "ctrl_k"
     h.init_dirs()
     seeded = None
+    if only == "panels" and os.environ.get("BP_PANE_PX"):
+        # the pane's width as the person sets it (the client's local setting viewer_px), the same way the Linux and macOS runs set it
+        with open(h.p("gpui-local.json"), "w", encoding="utf-8") as f:
+            json.dump({"viewer_px": int(os.environ["BP_PANE_PX"])}, f)
+        os.environ["BACKPLANE_GPUI_LOCAL"] = h.p("gpui-local.json")
     if only == "libtable":
         # the person's own global tables, from before Backplane's library: KiCad's nested table and a library of theirs, no Backplane entries
         cfg = h.p("fh", "AppData", "Roaming", "kicad", "10.99")
@@ -1905,52 +1910,48 @@ def run(h):
             h.shot("p5_fix")
             return h.finish()
         if only == "panels":
-            # the release check on bp.10 (rel016 win-j3): in a 611 px pane the Properties and Appearance panels filled it and the board
-            # canvas was a sliver. bp.13's embed-autopanels: at 611, 480 and 1000 px the canvas takes at least 60 % of the pane's width,
-            # for the board and the schematic editor; Full size brings the side panels back.
+            # Climb B's narrow-pane rule (shared with Linux embed_narrow_pane_e2e.sh and macOS): fresh profile, the pane's width from the
+            # client's viewer_px (BP_PANE_PX -> BACKPLANE_GPUI_LOCAL), after Edit the board canvas is at least 60 % of the pane's width, the
+            # schematic editor the same; at Full size the frame is at least 150 px wider than the canvas (the side panels back). Measured on
+            # the frame's own picture with lib/canvas_box.py (the canvas by its background); a box of the whole frame is "no measure".
+            sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+            import numpy as np
+            from PIL import Image
+            from canvas_box import canvas_box
             top = int(rep.get("toplevel") or 0) or E.find_main_window(cp.pid)
-            def container():
-                c = [w for w in E.list_child_windows(top) if w["class"] == "BackplaneKicadContainer" and w["visible"]]
-                return max(c, key=lambda w: w["w"]) if c else None
-            def canvas_share():
-                c = container()
-                if not c:
-                    return None
-                kids = [w for w in E.list_child_windows(top) if w["visible"] and c["root_x"] <= w["root_x"] < c["root_x"] + c["w"]]
-                cv = [w for w in kids if w["class"] == "wxGLCanvas"] or [w for w in kids if w["class"] == "wxWindowNR" and w["h"] > c["h"] * 0.5]
-                big = max(cv, key=lambda w: w["w"] * w["h"]) if cv else None
-                panels = sorted({w["title"] for w in kids if w["title"] and w["w"] > 80 and any(k in w["title"] for k in ("Properties", "Appearance", "Selection Filter", "Hierarchy", "Net Navigator", "Layers"))})
-                return {"pane_w": c["w"], "canvas_w": big["w"] if big else 0, "share": round((big["w"] if big else 0) / max(1, c["w"]), 3), "panels": panels}
-            def set_pane(width):
-                for _ in range(6):
-                    c = container()
-                    if not c:
-                        return None
-                    r = E.W.RECT(); E.u32.GetWindowRect(top, E.ctypes.byref(r))
-                    dw = width - c["w"]
-                    if abs(dw) <= 6:
-                        break
-                    E.u32.SetWindowPos(top, 0, 0, 0, max(500, r.right - r.left + dw), r.bottom - r.top, 0x0002 | 0x0004 | 0x0010)
-                    time.sleep(1.5)
-                time.sleep(2.0)
-                return container()
+            want = int(os.environ.get("BP_PANE_PX", "611") or 611)
+            def frame_of(kind):
+                word = "PCB Editor" if kind == "PCB" else "Schematic Editor"
+                fr = [w for w in E.list_child_windows(top) if w["visible"] and word in (w["title"] or "")]
+                return max(fr, key=lambda w: w["w"] * w["h"]) if fr else None
+            def measure(kind, tag):
+                fr = frame_of(kind)
+                if not fr:
+                    return {"frame": None}
+                shot = h.p(f"panels_{tag}.png")
+                E.grab_screen(shot)
+                im = Image.open(shot).convert("RGB").crop((fr["root_x"], fr["root_y"], fr["root_x"] + fr["w"], fr["root_y"] + fr["h"]))
+                im.save(h.p(f"panels_{tag}_frame.png"))
+                a = np.asarray(im)
+                x0, y0, x1, y1 = canvas_box(a)
+                whole = (x0, y0, x1, y1) == (0, 0, a.shape[1] - 1, a.shape[0] - 1)
+                pane_w = int(((h.last_kicad_report("settled") or {}).get("pane") or {}).get("w") or 0) or fr["w"]
+                gl = [w for w in E.list_child_windows(fr["hwnd"]) if w["visible"] and w["class"] == "wxGLCanvas"]
+                return {"frame_w": fr["w"], "pane_w": pane_w, "canvas_w": None if whole else x1 - x0, "share": None if whole else round((x1 - x0) / max(1, pane_w), 3),
+                        "no_measure": whole, "glcanvas_w": max((w["w"] for w in gl), default=None)}
             for kind, tab in (("PCB", "kicad-tab:PCB"), ("SCH", "kicad-tab:SCH")):
                 h.click_control(top, tab)
-                time.sleep(4.0)
-                for width in (611, 480, 1000):
-                    set_pane(width)
-                    m = canvas_share()
-                    h.shot(f"panels_{kind}_{width}")
-                    h.check(f"panels: {kind} in a {width} px pane: the canvas takes at least 60 % of the pane's width (as published, fresh profile)",
-                            bool(m) and m["share"] >= 0.60, m)
-                set_pane(611)
-                full = h.click_control(top, "kicad:full")
-                time.sleep(3.0)
-                mf = canvas_share()
-                h.shot(f"panels_{kind}_full")
-                h.check(f"panels: {kind} at Full size the side panels come back", full and bool(mf) and bool(mf["panels"]), {"clicked": full, **(mf or {})})
-                h.click_control(top, "kicad:full")
-                time.sleep(2.0)
+                time.sleep(5.0)
+                m = measure(kind, f"{kind}_{want}")
+                h.check(f"panels: {kind} in a {want} px pane: the canvas takes at least 60 % of the pane's width", bool(m.get("share")) and m["share"] >= 0.60, m)
+                if os.environ.get("BP_PANELS_FULL", "1") == "1":
+                    full = h.click_control(top, "kicad:full")
+                    time.sleep(3.0)
+                    mf = measure(kind, f"{kind}_full")
+                    h.check(f"panels: {kind} at Full size the side panels come back (the frame at least 150 px wider than the canvas)",
+                            full and mf.get("canvas_w") is not None and mf["frame_w"] - mf["canvas_w"] >= 150, {"clicked": full, **mf})
+                    h.click_control(top, "kicad:full")
+                    time.sleep(2.0)
             return h.finish()
         if only == "libtable":
             # a person whose global tables predate Backplane's library: the hub adds the runtime's Backplane entries, nothing else changes
