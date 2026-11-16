@@ -12,6 +12,8 @@ pub struct Kicad { pub status: String, pub cli: String, pub version: String, pub
 #[derive(Clone, Debug)]
 pub struct PromptEnv {
     pub fc: String, pub render: String, pub kicad: Kicad, pub kicad_ipc: bool, pub models: String, pub may_delegate: bool, pub orders_on: bool,
+    /// The person turned on Plan before routing (plan/mod.rs `SETTING`).
+    pub routing_plan: bool,
     pub root: String, pub pro: String, pub pcb: String, pub sch: String, pub all: String,
     /// Where this thread's design files and code go, and the document locks (`design_words`).
     pub design: String,
@@ -20,7 +22,7 @@ pub struct PromptEnv {
     pub skills: Vec<(String, String, String)>,
 }
 impl Default for PromptEnv {
-    fn default() -> Self { PromptEnv { fc: String::new(), render: String::new(), kicad: Kicad { status: "missing".into(), ..Default::default() }, kicad_ipc: true, models: String::new(), may_delegate: true, orders_on: true,
+    fn default() -> Self { PromptEnv { fc: String::new(), render: String::new(), kicad: Kicad { status: "missing".into(), ..Default::default() }, kicad_ipc: true, models: String::new(), may_delegate: true, orders_on: true, routing_plan: false,
         root: String::new(), pro: String::new(), pcb: String::new(), sch: String::new(), all: String::new(), design: String::new(), keys: String::new(), machines: String::new(), buy: false, lang: String::new(), skills: vec![] } }
 }
 
@@ -130,8 +132,8 @@ pub fn build(e: &PromptEnv) -> String {
     if !e.skills.is_empty() { s += "\n\n"; s += &bundled_skills(&e.skills) }
     if !e.keys.is_empty() { s += "\n\n"; s += &e.keys }
     if !e.machines.is_empty() { s += "\n\n"; s += &e.machines }
-    // a board on Backplane KiCad: plan before copper (plan/mod.rs)
-    if !e.pcb.is_empty() && crate::plan::plans(&e.kicad.status, &e.kicad.version, &crate::files::kicad::ipc::read_runtime(std::path::Path::new(&e.kicad.cli)).caps) { s += "\n\n"; s += &crate::plan::guidance() }
+    // a board on Backplane KiCad: plan before copper when the person turned it on, else route as asked (plan/mod.rs)
+    if !e.pcb.is_empty() && crate::plan::plans(&e.kicad.status, &e.kicad.version, &crate::files::kicad::ipc::read_runtime(std::path::Path::new(&e.kicad.cli)).caps) { s += "\n\n"; s += &if e.routing_plan { crate::plan::guidance() } else { crate::plan::guidance_off().to_string() } }
     // RunAction's target editor (bp.13 batch 6, runaction-frame): what an agent's kicad_ipc may name, or where a shared action goes without it
     if e.kicad.status == "ok" && e.kicad_ipc { s += "\n\n"; s += crate::files::kicad::ipc::runaction_guidance(&crate::files::kicad::ipc::read_runtime(std::path::Path::new(&e.kicad.cli)).caps) }
     if e.buy { s += "\n\n"; s += &T::ORDER_PROMPT_BUY.concat() } // every piece: the opening line alone ([0]) left a buy thread without its steps
@@ -156,7 +158,9 @@ pub(crate) mod tests {
     #[test] fn kicad_words_follow_the_status() {
         let k = |s: &str| Kicad { status: s.into(), cli: "/k".into(), version: "1".into(), commit: "abc".into(), why: "no\nmore".into() };
         assert!(kicad(&k("ok"), true).contains("blob/abc/BACKPLANE_IPC.md")); assert!(kicad(&k("ok"), false).contains("turned off")); assert!(kicad(&k("broken"), true).contains("doesn't run (no)"));
-        { let mut e = PromptEnv { pcb: "/p/b.kicad_pcb".into(), ..Default::default() }; e.kicad.status = "ok".into(); e.kicad.version = "10.99.0-bp.11".into(); assert!(build(&e).contains("<backplane_routing_plan>")); e.kicad.version = "10.99.0-bp.10".into(); assert!(!build(&e).contains("<backplane_routing_plan>"), "the plan API came with bp.11"); e.kicad.status = "stock".into(); assert!(!build(&e).contains("<backplane_routing_plan>"), "stock KiCad has no plan API"); }
+        { let mut e = PromptEnv { pcb: "/p/b.kicad_pcb".into(), ..Default::default() }; e.kicad.status = "ok".into(); e.kicad.version = "10.99.0-bp.11".into(); assert!(build(&e).contains("<backplane_routing_plan>"));
+            assert!(build(&e).contains("Plan before routing is off") && !build(&e).contains("plan_approve"), "off unless the person turns it on: route as asked");
+            e.routing_plan = true; assert!(build(&e).contains("plan_approve") && !build(&e).contains("is off")); e.routing_plan = false; e.kicad.version = "10.99.0-bp.10".into(); assert!(!build(&e).contains("<backplane_routing_plan>"), "the plan API came with bp.11"); e.kicad.status = "stock".into(); assert!(!build(&e).contains("<backplane_routing_plan>"), "stock KiCad has no plan API"); }
         assert!(kicad(&k("missing"), true).contains("isn't installed") && kicad(&k("missing"), true).starts_with("<kicad_runtime>The selected KiCad CLI path is `/k`.")); assert!(kicad(&k("old"), true).contains(min_version()));
     }
     #[test] fn project_lists_the_files_it_has() {

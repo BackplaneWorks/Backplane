@@ -51,7 +51,7 @@ pub fn toggle(this: &mut Backplane, window: &mut Window, cx: &mut Context<Backpl
     let _ = this.tx.try_send(Command::Action("view-boards".into(), String::new()));
     cx.notify();
 }
-fn pick(this: &mut Backplane, value: String, cx: &mut Context<Backplane>) {
+pub fn pick(this: &mut Backplane, value: String, cx: &mut Context<Backplane>) {
     this.screens.plotview.boards.open = false;
     // KiCad is in the pane (Open in KiCad): it follows to the picked board once the hub shows that board (edit_due)
     let on = list(&this.data["thread"]["viewer"]).iter().any(|b| b.on && b.value == value);
