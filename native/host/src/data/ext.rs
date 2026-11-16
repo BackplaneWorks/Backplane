@@ -264,6 +264,11 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
         // `fab.look` card) as `{label, tip}`; `order.buy {thread}` → `{thread}`: the buy thread made (or the one just made by another press), for the app to open
         // `thread.buy {project}` → `{buy}` with `thread`: Buy it on the project's page, the same button for the thread the hub buys from (`fab.look {project}` → `buy`,
         // present/ready.rs `page_button`); the app sends that thread to `order.buy`
+        // feature "projectcard": the top of a project's page on the phones, as the desktop's project page opens: `project.card {project}` → `{goal, boards}`, the
+        // goal from `.backplane/intent.md` and the board names (file stems), from the hub's own `fab.look` card
+        "project.card" => { let pr = s(p, "project"); if pr.is_empty() { return Some(Err(err("project"))) }
+            let card = rpc(hub, c, "fab.look", json!({"project":pr})).await.map(|r| r["result"].clone()).unwrap_or(Value::Null);
+            Ok(project_card(&card)) }
         "thread.buy" if s(p, "thread").is_empty() && !s(p, "project").is_empty() => {
             let card = rpc(hub, c, "fab.look", json!({"project":s(p, "project")})).await.map(|r| r["result"].clone()).unwrap_or(Value::Null);
             let b = &card["buy"];
@@ -425,6 +430,12 @@ async fn mentions(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
 pub fn notify_of(e: &Value) -> Value { json!({"kind":e["kind"],"thread":e["thread"],"ask":e["ask"],"key":e["key"],"title":e["title"],"body":e["body"],"badge":e["badge"],"through":e["through"],"link":e["link"].as_str().unwrap_or("")}) }
 
 
+/// `project.card`'s answer from a `fab.look` card: the goal, and the boards by name (the project's own first, as the card lists them).
+pub fn project_card(card: &Value) -> Value {
+    let boards: Vec<String> = card["board_files"].as_array().into_iter().flatten().filter_map(Value::as_str)
+        .map(|f| f.rsplit('/').next().unwrap_or(f).trim_end_matches(".kicad_pcb").to_string()).filter(|n| !n.is_empty()).collect();
+    json!({"goal": card["goal"].as_str().unwrap_or(""), "boards": boards})
+}
 // ---- viewers, files, browser (each the hub's own request, for the folder of the thread) ----
 async fn root_of(hub: &Arc<Hub>, thread: &str) -> Result<String, Value> {
     // a thread of a linked machine: the folder over there (its mirror holds the project's root and the thread's worktree)

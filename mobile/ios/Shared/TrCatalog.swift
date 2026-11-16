@@ -4232,6 +4232,11 @@ gpui.mgmt.plan.offwords	Agents route as you ask. Turn it on to have them propose
 gpui.mgmt.plan.elsewhere	A routing plan for {board} awaits your approval	{board}の配線計画が承認を待っています
 gpui.mgmt.plan.openboard	Open board	基板を開く
 gpui.mgmt.plan.noboard	No routing plan for this board.	この基板の配線計画はありません。
+gpui.mgmt.plan.drawn	The plan's corridors and planes are drawn on the board while this panel is open. Close it to hide them.	計画の配線経路とプレーンは、このパネルを開いている間だけ基板上に表示されます。閉じると消えます。
+gpui.mgmt.bom.stocknote	Stock and prices come from one distributor's catalogue. To check others, add their API keys in Settings › API keys and ask your agent.	在庫と価格は一つの販売店のカタログから取得しています。他の販売店を確認するには、設定 › API キーでその API キーを追加し、エージェントに頼んでください。
+hub.order.pick.more	More parts of the project (optional)	プロジェクトの他の部品（任意）
+hub.order.pick.phone	Answer "all", or say what to leave out and any parts to add.	「all」と答えるか、外すものと追加する部品を書いてください。
+hub.order.pick.go	Add and continue	追加して続ける
 gpui.plan.before.routing.desc	On: before routing a board with 4 or more copper layers or more than 60 nets, the agent proposes a routing plan and routes only what you approve in the Plan panel beside the board. Off: agents route as you ask.	オン：銅箔層が4層以上、またはネットが60本を超える基板では、配線の前にエージェントが配線計画を提案し、基板の横の計画パネルで承認したものだけを配線します。オフ：エージェントは指示どおりに配線します。
 gpui.mgmt.bom.shared	Its sheet is used more than once and KiCad keeps one value for all of them: {others} has it too.	このシートは複数回使われており、KiCadはすべてに同じ値を持たせます：{others}にも同じ値が入りました。
 gpui.mgmt.fab.review	Review: {must} must · {should} should · {notes} notes	レビュー：必須{must}・推奨{should}・メモ{notes}

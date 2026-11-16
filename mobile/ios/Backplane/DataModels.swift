@@ -320,6 +320,10 @@ struct DBuy: Decodable, Equatable { var label = ""; var tip = ""
     var thread = "" // a project page's Buy it: the thread the hub buys from (`thread.buy {project}`)
     enum K: String, CodingKey { case label, tip, thread }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: K.self); label = c.str(.label); tip = c.str(.tip); thread = c.str(.thread) } }
+/// The top of a project's page (feature projectcard, `project.card`): its goal and its boards by name.
+struct DProjectCard: Decodable, Equatable { var goal = ""; var boards: [String] = []
+    enum K: String, CodingKey { case goal, boards }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: K.self); goal = c.str(.goal); boards = ((try? c.decode([String].self, forKey: .boards)) ?? []).filter { !$0.isEmpty } } }
 struct DBuyReply: Decodable { var buy: DBuy?
     enum K: String, CodingKey { case buy }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: K.self); buy = try? c.decode(DBuy.self, forKey: .buy) } }

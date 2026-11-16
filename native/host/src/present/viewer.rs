@@ -247,7 +247,8 @@ fn boards_menu(session: &Value, sel: &str, root: &str) -> Option<Value> {
     let chosen = chosen_board(&session["drafts"], sel);
     let on_abs = s(&session["drafts"], &format!("@view.file:{sel}"));
     let on = if !chosen.is_empty() { chosen } else if !on_abs.is_empty() && on_abs.ends_with(".kicad_pcb") { on_abs.strip_prefix(&format!("{root}/")).unwrap_or(on_abs).to_string() } else { own.to_string() };
-    let on = if on.is_empty() { list[0].to_string() } else { on };
+    // nothing known of the board on show (the project's own not read yet): no row is lit and the picker says "Select board". It lit the first
+    // board by name, which was not the board the page drew (Nov 16: "it shows a board other than the one picked there on top")
     Some(Value::Array(list.iter().map(|p| json!({"label": p.strip_suffix(".kicad_pcb").unwrap_or(p), "value": p, "on": **p == *on, "default": !own.is_empty() && *p == own})).collect()))
 }
 /// `view-board <path from the root>`: another of the project's boards on the Board, Schematic, 3D or Split page (its schematic is the one beside it), kept as the
@@ -834,6 +835,9 @@ mod tests {
         let mut s1 = sess(&th, json!({})); let o = view_action(&st, "h", &s1, "board").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
         assert!(viewer_json(&st, &template, &s1).unwrap().get("boards").is_none(), "one board: no menu");
         crate::session::patch::merge(&mut s1, &json!({"info": {format!("fab.boards:{th}"): "a/a.kicad_pcb\nb/b.kicad_pcb", format!("fab.board:{th}"): "b/b.kicad_pcb"}}));
+        let mut unknown = s1.clone(); crate::session::patch::merge(&mut unknown, &json!({"info": {format!("fab.board:{th}"): ""}}));
+        let u = viewer_json(&st, &template, &unknown).unwrap()["boards"].clone();
+        assert!(u.as_array().unwrap().iter().all(|r| r["on"] == false), "the board on show not known yet: none is lit (the first by name was not the one drawn): {u}");
         let b = viewer_json(&st, &template, &s1).unwrap()["boards"].clone();
         assert_eq!((b[0]["on"].as_bool(), b[1]["on"].as_bool(), b[1]["label"].as_str()), (Some(false), Some(true), Some("b/b")));
         assert!(board_action(&st, "h", &s1, "c/c.kicad_pcb").is_none(), "only a listed board");
