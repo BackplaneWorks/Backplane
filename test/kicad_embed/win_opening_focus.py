@@ -727,6 +727,65 @@ def run(h):
             timeline.append({"stage": "before_ctrl_k_from_edit", **pre})
             ctrl_k_round(h, cp, frame, rep, timeline, 1, 1, pre=pre)
             return h.finish()
+        if only == "lend":
+            # A5 / Climb B's lend (e9af1ffe5): a reserved key pressed in KiCad lends Backplane the keyboard, and the palette
+            # dismissed where it was opened gives it back (embed_lend_e2e.sh on Linux):
+            #   L1 Ctrl+K in KiCad opens the palette, Backplane has the keys; L2 Escape shuts it and a plain F2 acts in KiCad
+            #   with no click; L3 a second Escape goes to KiCad (the viewer stays); L4 Ctrl+K, another thread: keys stay Backplane's
+            gls = [w for w in children if w["visible"] and w["class"] == "wxGLCanvas"]
+            gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
+            top = int(rep.get("toplevel") or 0) or E.find_main_window(cp.pid)
+            px0, zoomed0 = plain_key_acts(h, gl, "lend_pre", frame) if gl else (0, False)
+            pre = focus_snapshot(frame)
+            h.check("lend: the editor has the keys after Edit (F2 acts, no click)", bool(zoomed0) and pre["inside_frame"], {"f2_px": px0, **pre})
+            wx, wy, ww, wh = window_box(top)
+            pane_x = int((rep.get("container") or {}).get("root_x") or (wx + ww))
+            box = (wx, wy, max(1, pane_x - wx), min(wh, 480))
+            a, b = h.p("lend_0.png"), h.p("lend_1.png")
+            n0 = len(open(h.p("client.log"), encoding="utf-8", errors="replace").read().splitlines())
+            E.grab_screen(a)
+            E.key_chord("ctrl", "k")
+            time.sleep(1.0)
+            E.grab_screen(b)
+            l1 = focus_snapshot(frame)
+            opened = E.img_diff_box(a, b, *box)["changed_pixels"]
+            def log_since(n):
+                return open(h.p("client.log"), encoding="utf-8", errors="replace").read().splitlines()[n:]
+            disp = any('"kicad_key_dispatch":"ctrl-k"' in l for l in log_since(n0))
+            h.check("lend L1: Ctrl+K pressed in KiCad opens the palette and Backplane has the keys",
+                    opened > 500 and not l1["inside_frame"] and l1["foreground"] == top, {"palette_px": opened, "dispatch_logged": disp, **l1})
+            E.key_tap("Escape")
+            time.sleep(0.8)
+            l2 = focus_snapshot(frame)
+            back = [l.strip()[:200] for l in log_since(n0) if "kicad_loan_back" in l]
+            h.check("lend L2: Escape shuts the palette and KiCad has the keyboard again", l2["inside_frame"] and l2["foreground"] == top, {"loan_back": back[-1:], **l2})
+            px2, zoomed2 = plain_key_acts(h, gl, "lend_l2", frame) if gl else (0, False)
+            h.check("lend L2: then a plain F2 acts in KiCad's canvas with no click", bool(zoomed2), {"f2_px": px2})
+            E.key_tap("Escape")
+            time.sleep(1.2)
+            l3 = focus_snapshot(frame)
+            still = bool(frame and E.u32.IsWindow(frame) and E.u32.IsWindowVisible(frame))
+            h.check("lend L3: a second Escape goes to KiCad: the viewer stays open", still and l3["inside_frame"], {"frame_visible": still, **l3})
+            n2 = len(log_since(0))
+            E.key_chord("ctrl", "k")
+            time.sleep(0.8)
+            cur = None
+            for l in log_since(0):
+                m = __import__("re").search(r'"thread":"(t[0-9]+)","open":"board"', l)
+                if m:
+                    cur = m.group(1)
+            other, word = ("t1", "embedded") if cur == "t2" else ("t2", "other")  # one word of its title: letters only (vk_of)
+            for ch in word:
+                E.key_tap(ch)
+            time.sleep(0.8)
+            E.key_tap("Return")
+            time.sleep(1.5)
+            l4 = focus_snapshot(frame)
+            went = any(f'"thread":"{other}"' in l for l in log_since(n2))
+            back4 = [l.strip()[:200] for l in log_since(n2) if "kicad_loan_back" in l]
+            h.check("lend L4: Ctrl+K then another thread: the keyboard stays with Backplane",
+                    went and not l4["inside_frame"] and l4["focus_pid"] == cp.pid, {"from": cur, "to": other, "went": went, "loan_back": back4[-1:], **l4})
+            return h.finish()
         if only == "prewarm_idle":
             # F5: Edit, keys in the PCB canvas, then nothing but the pre-warm: does the PCB editor keep the keys?
             gls = [w for w in children if w["visible"] and w["class"] == "wxGLCanvas"]
