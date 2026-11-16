@@ -165,6 +165,12 @@ if DRIVER == 'vnc' and os.environ.get('MAC_MODE') != 'libs':
     with open(os.path.join(OUT, 'bin/claude'), 'w') as f:
         f.write('#!/bin/sh\nexec /usr/bin/python3 ' + os.path.join(REPO, 'test/kicad_embed/mac/standin_agent.py') + ' "$@"\n')
     os.chmod(os.path.join(OUT, 'bin/claude'), 0o755)
+if os.environ.get('MAC_MODE') == 'autosave':
+    for v in ('10.99',):
+        kc = os.path.join(OUT, 'fh/Library/Preferences/kicad', v, 'kicad_common.json')
+        j = json.load(open(kc)) if os.path.isfile(kc) else {}
+        j.setdefault('system', {})['local_history_debounce'] = 3; j.setdefault('auto_backup', {})['enabled'] = True
+        os.makedirs(os.path.dirname(kc), exist_ok=True); json.dump(j, open(kc, 'w'))
 if os.environ.get('MAC_MODE') == 'lock':
     # another live KiCad has the project open: a stand-in writes KiCad's lock JSON and holds its flock (lane B's embed_foreign_lock_e2e)
     LCK = os.path.join(OUT, 'proj', '~ecc83-pp.kicad_pro.lck')
@@ -474,6 +480,53 @@ try:
         p, k = last_push(), kicad_frame()
         check(bool(got), f'{tag}: KiCad\'s frame is the pane\'s rect within 1 px ({k and k[3]} vs {p and p[0]})')
     matches('at first show')
+    # ---- MAC_MODE=autosave: with the keyboard in Backplane (KiCad not the active app), an agent commits a change over the API; a .history
+    # snapshot appears within the debounce (3 s here); KiCad killed; Open the editor again: KiCad offers the recovery, and the pane names it ----
+    if os.environ.get('MAC_MODE') == 'autosave':
+        sys.path.insert(0, os.path.join(REPO, 'test/kicad_embed/mac')); import hub_ws
+        token = open(os.path.join(OUT, 'home/token')).read().strip(); pcb = os.path.join(OUT, 'proj', 'ecc83-pp.kicad_pcb')
+        def mcalls(): return [l for l in open(os.path.join(OUT, 'standin.log'), errors='replace').read().splitlines() if l.startswith('MCPCALL')] if os.path.isfile(os.path.join(OUT, 'standin.log')) else []
+        def ask(name, args, wait=120):
+            n0 = len(mcalls())
+            hub_ws.send(port, token, 'turn.start', {'thread': 't1', 'text': 'mcpcall:' + json.dumps({'name': name, 'arguments': args}), 'msg': f'as-{time.time_ns()}'})
+            wait_for(lambda: len(mcalls()) > n0, wait, 0.3)
+            l = mcalls()[-1] if len(mcalls()) > n0 else ''
+            try: return json.loads(json.loads(l.split(' ', 2)[2])['result']['content'][0]['text'])
+            except Exception: return {'raw': l[:300]}
+        hist = os.path.join(OUT, 'proj', '.history')
+        snaps = lambda: int(subprocess.run(['git', '-C', hist, 'rev-list', '--all', '--count'], capture_output=True, text=True).stdout.strip() or 0) if os.path.isdir(hist) else 0
+        # the keyboard to Backplane: a click in its chrome
+        cwa = next((w for w in wins() if w[0] == cw[0]), cw)
+        click(cwa[3][0] + 200, cwa[3][1] + 28 + 300); time.sleep(1)
+        check(not active(kpid), 'autosave: the keyboard is in Backplane (KiCad is not the active app)')
+        C = 'kiapi.common.commands.'
+        docs = ask('kicad_ipc', {'path': pcb, 'type': C + 'GetOpenDocuments', 'message': {'type': 'DOCTYPE_PCB'}})
+        doc = ((docs.get('message') or {}).get('documents') or [None])[0]
+        h = {'document': doc}
+        s0 = snaps()
+        b = ask('kicad_ipc', {'path': pcb, 'type': C + 'BeginCommit', 'message': {'header': h}})
+        tid = (b.get('message') or {}).get('id')
+        ask('kicad_ipc', {'path': pcb, 'type': C + 'CreateItems', 'message': {'header': h, 'items': [{'@type': 'type.googleapis.com/kiapi.board.types.Track', 'id': {'value': str(__import__('uuid').uuid4())},
+            'start': {'x_nm': 120000000, 'y_nm': 100000000}, 'end': {'x_nm': 140000000, 'y_nm': 100000000}, 'width': {'value_nm': 300000}, 'layer': 'BL_F_Cu'}]}})
+        e = ask('kicad_ipc', {'path': pcb, 'type': C + 'EndCommit', 'message': {'header': h, 'id': tid, 'action': 'CMA_COMMIT', 'message': 'agent add track'}})
+        RES['autosave_commit'] = {'doc': bool(doc), 'tid': bool(tid), 'end': str(e)[:160]}
+        got = wait_for(lambda: snaps() > s0, 3 + 12, 0.5)
+        check(bool(got), f'autosave: a .history snapshot within the debounce after the agent\'s commit ({s0} -> {snaps()}; {RES["autosave_commit"]})')
+        # KiCad killed; Open the editor again; KiCad offers the recovery
+        kk = []
+        for l in subprocess.run(['ps', '-axo', 'pid=,command='], capture_output=True, text=True).stdout.splitlines():
+            if '--parent-pid' in l and '--embedded' in l and OUT in l: kk.append(int(l.split()[0]))
+        for p in kk:
+            try: os.kill(p, 9)
+            except OSError: pass
+        oa = wait_for(lambda: rects().get('kicad:open-again'), 20, 0.5); shot('autosave-1-closed')
+        if oa:
+            b2 = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b2[0] + oa['x'] + oa['w'] / 2, b2[1] + 28 + oa['y'] + oa['h'] / 2)
+        rec = wait_for(lambda: 'Recover Unsaved Changes' in hub_log(), 90, 0.5); time.sleep(2); shot('autosave-2-recovery')
+        named = 'Recover Unsaved Changes' in client_log()
+        check(bool(oa) and bool(rec), f'autosave: KiCad killed, Open the editor again: KiCad offers Recover Unsaved Changes (open-again {bool(oa)})')
+        check(named, 'autosave: the pane names it ("KiCad is asking: Recover Unsaved Changes")')
+        raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=first: a fresh home's first Edit puts KiCad over the pane within 30 s (the checks above), and stops ----
     if os.environ.get('MAC_MODE') == 'first':
         check(RES['edit_to_frame_s'] <= 30, f'first Edit on a fresh home: KiCad over the pane within 30 s ({RES["edit_to_frame_s"]} s)')
