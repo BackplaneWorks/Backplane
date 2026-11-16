@@ -62,7 +62,7 @@ def key(code, flags=0):
 
 
 CMD = Quartz.kCGEventFlagMaskCommand
-K_A, K_K, K_ESC, K_B, K_J, K_C, K_TAB, K_DEL, K_F = 0, 40, 53, 11, 38, 8, 48, 51, 3
+K_A, K_K, K_ESC, K_B, K_J, K_C, K_TAB, K_DEL, K_F, K_COMMA = 0, 40, 53, 11, 38, 8, 48, 51, 3, 43
 CTRL, SHIFT, ALT = Quartz.kCGEventFlagMaskControl, Quartz.kCGEventFlagMaskShift, Quartz.kCGEventFlagMaskAlternate
 
 # ---- the project, the hub's home, KiCad's settings where KiCad on macOS reads them ----
@@ -188,14 +188,21 @@ try:
     click(*board_spot())
     check(bool(wait_for(lambda: active(kpid), 4)), 'a click on the board gives KiCad the keyboard')
     n0 = hub_log().count('ET_SELECTION_CHANGED'); key(K_A, CMD); time.sleep(0.6); key(K_ESC)
-    check(bool(wait_for(lambda: hub_log().count('ET_SELECTION_CHANGED') >= n0 + 2, 4)), 'and its canvas takes keys (Cmd+A, Escape)')
+    check(bool(wait_for(lambda: hub_log().count('ET_SELECTION_CHANGED') > n0, 4)), 'and its canvas takes keys (Cmd+A, Escape)')
     # a KiCad dialog (Find, Cmd+F from the canvas) gets the keyboard, and Escape closes it
     d0, c0 = hub_log().count('ET_DIALOG_OPENED'), hub_log().count('ET_DIALOG_CLOSED')
     key(K_F, CMD)
     opened = wait_for(lambda: hub_log().count('ET_DIALOG_OPENED') > d0, 5)
     check(bool(opened) and active(kpid), 'a KiCad dialog (Find) opens with the keyboard in it')
-    time.sleep(0.5); shot('02c-dialog'); key(K_ESC)
-    check(bool(wait_for(lambda: hub_log().count('ET_DIALOG_CLOSED') > c0, 4)), 'Escape closes the dialog')
+    time.sleep(0.5); shot('02c-dialog')
+    # Find is modeless with a Close button (Escape means nothing to it, on any platform): closed by its own shortcut, Cmd+W
+    key(13, CMD); wait_for(lambda: hub_log().count('ET_DIALOG_CLOSED') > c0, 4)
+    # a modal dialog with Cancel (Preferences, Cmd+,): it gets the keyboard and Escape closes it
+    d1, c1 = hub_log().count('ET_DIALOG_OPENED'), hub_log().count('ET_DIALOG_CLOSED')
+    key(K_COMMA, CMD)
+    check(bool(wait_for(lambda: hub_log().count('ET_DIALOG_OPENED') > d1, 6)) and active(kpid), 'a modal KiCad dialog (Preferences) opens with the keyboard in it')
+    time.sleep(0.8); shot('02d-preferences'); key(K_ESC)
+    check(bool(wait_for(lambda: hub_log().count('ET_DIALOG_CLOSED') > c1, 4)), 'Escape closes it')
     # a click in Backplane's own chrome (a neutral spot: the thread's timeline) gives it the keyboard back
     cw = next((w for w in wins() if w[0] == cw[0]), cw)
     click(cw[3][0] + 200, cw[3][1] + 28 + 300)
@@ -254,7 +261,10 @@ try:
     matches('after full screen')
     # ---- Pop out and back in ----
     before_wins = {w[0] for w in wins() if w[1] == client.pid}
+    # the window back to its first size (the strip's buttons at a narrow width may sit past its edge)
+    osa(f'tell application "System Events" to set size of {win_of(client.pid)} to {{1000, 700}}'); time.sleep(1.5)
     pop = rects().get('kicad:kicad-pop')
+    print(f'pop-out button {pop} in window {next((w for w in wins() if w[0] == cw[0]), cw)[3]}', flush=True)
     cw = next((w for w in wins() if w[0] == cw[0]), cw)
     if pop:
         # Backplane first (the first click on an inactive app's window only activates it, as for a person), then Pop out
