@@ -137,8 +137,11 @@ def dialog_watch():
                 if re.search(r"(PCB Editor|Schematic Editor|3D Viewer|Footprint Editor|Symbol Editor)$", t) or w["xid"] in KNOWN: continue
                 if not w.get("transient_for") and t not in ("Load Schematic", "Load PCB", "Error", "Warning", "Confirmation", "Information", "File Open Warning"): continue
                 KNOWN.add(w["xid"]); DIALOGS.append({"t": now(), "title": t, "w": w["w"], "h": w["h"]})
-                print(f"DIALOG {t!r} {w['w']}x{w['h']} (Return)", flush=True); shot(f"dialog{len(DIALOGS)}")
-                sh("python3", os.path.join(os.environ["REPO_ROOT"], "test/cef/xinput.py"), "focus", t); rt("key", "Return")
+                # KEMBED_DIALOG_WATCH=0: recorded, never answered (to see what an answered dialog would have hidden: a journey that passed
+                # only because the watcher pressed Return for it, as 0a's Escape did)
+                answer = os.environ.get("KEMBED_DIALOG_WATCH", "1") != "0"
+                print(f"DIALOG {t!r} {w['w']}x{w['h']} ({'Return' if answer else 'left open'})", flush=True); shot(f"dialog{len(DIALOGS)}")
+                if answer: sh("python3", os.path.join(os.environ["REPO_ROOT"], "test/cef/xinput.py"), "focus", t); rt("key", "Return")
         except Exception as e: print("DIAG dialog watch", e, flush=True)
         STOP.wait(0.25)
 
@@ -391,6 +394,9 @@ if "focus" in JOURNEYS:
 if "focus" in JOURNEYS and SOCK:
     refs = [r for r in re.findall(r'\(property "Reference" "([A-Z]+[0-9]+)"', open(PCB, errors="ignore").read()) if r[0] in "URCJ"] if PCB else []
     if refs:
+        # this journey's own dialog: the watcher (dialog_watch) is paused over it, as the other journeys' are, so it is neither counted as
+        # one KiCad raised by itself nor answered with Return before this journey's Escape (one pass of the watcher may be under way: 0.3 s)
+        PAUSE.set(); time.sleep(0.3)
         rt("click", EX, EY); time.sleep(0.5)
         ipc("select-items", SOCK, "pcb", refs[0], "1"); time.sleep(0.8)
         rt("key", "e"); dlg = None
@@ -401,14 +407,17 @@ if "focus" in JOURNEYS and SOCK:
         if not dlg:
             print(f"DIAG dialog escape: no properties dialog for {refs[0]} after `e`", flush=True); RESULTS["dialog_escape"] = {"ms": None, "ok": 0, "opened": 0}
         else:
-            time.sleep(0.8); t0 = rt("key", "Escape").get("t0"); gone_ms = None
+            time.sleep(0.8)
+            print(f"INFO dialog escape: {dlg.get('title')!r} xid {dlg.get('xid')}, X focus before Escape {xfocus()}", flush=True)
+            t0 = rt("key", "Escape").get("t0"); gone_ms = None
             for _ in range(30):
                 if not any(w.get("xid") == dlg["xid"] and w.get("shown") for w in windows()): gone_ms = round(now() - t0); break
                 time.sleep(0.1)
             RESULTS["dialog_escape"] = {"ms": gone_ms, "ok": int(gone_ms is not None), "opened": 1, "title": dlg.get("title")}
             print(f"PERF dialog_escape {gone_ms}ms title={dlg.get('title')!r}", flush=True)
             if gone_ms is None:
-                print(f"JANK {dlg.get('title')!r}: Escape did not close it (3 s): clicking its Cancel", flush=True); rt("key", "Escape")
+                print(f"JANK {dlg.get('title')!r}: Escape did not close it (3 s; X focus now {xfocus()}): Escape again", flush=True); rt("key", "Escape")
+        PAUSE.clear()
 # 0b. popup keys (bp.13 batch 4, embed-popup-keys): a KiCad popup (a right-click menu) holds the keyboard; Ctrl+K and Ctrl+; pressed then close
 # it and reach Backplane. The menu is confirmed up first (another client holds the keyboard: an XGrabKeyboard from here is refused)
 def kb_held():
