@@ -18,6 +18,9 @@ on:
       rows:
         description: "client rows to run (space separated, empty: all)"
         default: ""
+      kicad_tag:
+        description: "kicad-runtime job: the Backplane KiCad release whose darwin-arm64 package it tests (e.g. backplane-kicad-v10.99.0-bp.12.5)"
+        default: ""
 permissions:
   contents: read
   actions: read
@@ -44,6 +47,47 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: probe, path: out }
+
+  kicad-runtime:
+    # What a Mac gets from a macOS Backplane KiCad release before the MAC pin moves to it: the package fetched and checked as the hub's
+    # install does (SHA256SUMS, plain tar, no quarantine, minOs), an agent's kicad_ipc through a hub built from this checkout, Open in KiCad
+    # as its own window and the detached-KiCad warning (test/e2e/mac-kicad-runtime.mjs), and checks and exports through its kicad-cli
+    # (test/e2e/cad-rows.mjs). Not in all.
+    if: inputs.jobs == 'kicad-runtime'
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - name: the release package, fetched and checked as the hub's install does
+        run: |
+          set -eu; T=${{ inputs.kicad_tag }}; V=${T#backplane-kicad-v}; A=backplane-kicad-darwin-arm64-$V.tar.gz
+          mkdir -p "$RUNNER_TEMP/k" out; cd "$RUNNER_TEMP/k"
+          curl -fsSL -o "$A" "https://github.com/BackplaneWorks/Backplane_KiCad/releases/download/$T/$A"
+          curl -fsSL -o SHA256SUMS "https://github.com/BackplaneWorks/Backplane_KiCad/releases/download/$T/SHA256SUMS"
+          grep -E "  (\./)?$A\$" SHA256SUMS | sed 's#  \./#  #' | shasum -a 256 -c -
+          tar xzf "$A"; R="$RUNNER_TEMP/k/backplane-kicad-darwin-arm64-$V"
+          echo "quarantine attributes: $(xattr -r "$R" 2>/dev/null | grep -c quarantine || true)"
+          python3 -c "import json,sys;m=json.load(open(sys.argv[1]));print('manifest:',m['version'],m['platform'],m.get('minOs'),len(m['capabilities']),'capabilities')" "$R/manifest.json"
+          codesign --verify --deep --strict "$R/KiCad.app" && echo "KiCad.app signature verifies"
+          ls "$R/bin"; "$R/bin/kicad-cli" --version
+          echo "RT=$R" >> "$GITHUB_ENV"; echo "KV=$V" >> "$GITHUB_ENV"
+      - name: the hub, built from this checkout
+        run: |
+          cd native/host && cargo build --profile fast 2>&1 | tail -3
+          echo "HUB=$PWD/target/fast/backplane-hub" >> "$GITHUB_ENV"
+      - name: agent edits, Open in KiCad, the detached-KiCad warning; checks and exports
+        run: |
+          python3 -m pip install --quiet pyobjc-framework-Quartz
+          ok=0
+          EXPECT_VERSION="$KV" node test/e2e/mac-kicad-runtime.mjs "$HUB" "$RT" 3890 "$RUNNER_TEMP/kr" 2>&1 | tee out/kicad-runtime.txt || ok=1
+          KICAD_CLI="$RT/bin/kicad-cli" node test/e2e/cad-rows.mjs "$HUB" "$PWD/out/cad" 3870 2>&1 | tee out/cad-rows.txt || ok=1
+          cp "$RUNNER_TEMP"/kr/*.png out/ 2>/dev/null || true; cp "$RUNNER_TEMP"/kr/hub.log out/ 2>/dev/null || true
+          exit $ok
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: kicad-runtime, path: out, include-hidden-files: true }
 
   kicad-proto:
     # KiCad in the pane on macOS, option (b) measured before it is built: test/kicad_embed/mac/proto/run.sh
