@@ -23,6 +23,13 @@ fi
 [ "${1:-}" != "" ] && CLIENT_BIN=$1
 [ "${2:-}" != "" ] && HUB_BIN=$2
 discover_bins; [ -x "$REAL_HOME/.bun/bin/bun" ] && PATH="$REAL_HOME/.bun/bin:$PATH"; discover_kicad; init_isolated_dirs
+SLOW=${FRESH_SLOW_S:-$([ "${FRESH_AGENT:-}" = during ] && echo 12 || echo 0)}
+if [ "$SLOW" != 0 ]; then
+  RT_ROOT=$(dirname "$(dirname "$KICAD_BIN")"); SLOW_RT="$OUT/rt-slow/$(basename "$RT_ROOT")"; mkdir -p "$OUT/rt-slow"; cp -al "$RT_ROOT" "$SLOW_RT"; rm "$SLOW_RT/bin/kicad"
+  { head -1 "$RT_ROOT/bin/kicad"; echo "sleep $SLOW"; tail -n +2 "$RT_ROOT/bin/kicad"; } >"$SLOW_RT/bin/kicad"; chmod +x "$SLOW_RT/bin/kicad"
+  KICAD_BIN="$SLOW_RT/bin/kicad"; KICAD_CLI="$SLOW_RT/bin/kicad-cli"; export KICAD_BIN KICAD_CLI BACKPLANE_KICAD_BIN="$KICAD_BIN" BACKPLANE_KICAD_CLI="$KICAD_CLI"
+  echo "INFO KiCad starts $SLOW s late: $SLOW_RT"
+fi
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 # fresh: none of the harness's KiCad seed (its settings, tables), nothing of KiCad's anywhere in this home
 rm -rf "$OUT/fh/.config/kicad" "$OUT/fh/.local/share/kicad" "$OUT/fh/.cache/kicad" "$OUT/fh/AppData"
@@ -40,13 +47,6 @@ if [ "${FRESH_MANAGED:-}" = 1 ]; then
   mkdir -p "$OUT/home/kicad"; cp -al "$RT_ROOT" "$OUT/home/kicad/$RT_VER"
   unset BACKPLANE_KICAD_BIN BACKPLANE_KICAD_CLI; KICAD_CLI=""; export BACKPLANE_KICAD_NO_SYSTEM=1
   echo "INFO the managed runtime: $OUT/home/kicad/$RT_VER"
-fi
-SLOW=${FRESH_SLOW_S:-$([ "${FRESH_AGENT:-}" = during ] && echo 12 || echo 0)}
-if [ "$SLOW" != 0 ]; then
-  RT_ROOT=$(dirname "$(dirname "$KICAD_BIN")"); SLOW_RT="$OUT/rt-slow/$(basename "$RT_ROOT")"; mkdir -p "$OUT/rt-slow"; cp -al "$RT_ROOT" "$SLOW_RT"; rm "$SLOW_RT/bin/kicad"
-  { head -1 "$RT_ROOT/bin/kicad"; echo "sleep $SLOW"; tail -n +2 "$RT_ROOT/bin/kicad"; } >"$SLOW_RT/bin/kicad"; chmod +x "$SLOW_RT/bin/kicad"
-  KICAD_BIN="$SLOW_RT/bin/kicad"; KICAD_CLI="$SLOW_RT/bin/kicad-cli"; export BACKPLANE_KICAD_BIN="$KICAD_BIN" BACKPLANE_KICAD_CLI="$KICAD_CLI"
-  echo "INFO KiCad starts $SLOW s late: $SLOW_RT"
 fi
 LIMIT=${FRESH_EDIT_S:-30}
 export BACKPLANE_KICAD_DEBUG=1
