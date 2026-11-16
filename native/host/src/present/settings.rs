@@ -370,7 +370,8 @@ fn invitation(inv: &Value, default_link: &str, until: &str, want: &str, list: &V
         let link = s(&shown, "link");
         let code = s(inv, "code");
         let mut row_l = row("Pairing link", link, vec![btn("Copy link", "copy", link, false), btn("Copy code", "copy", code, false), btn("Add another", "device-invite", "", false)]);
-        row_l["qr"] = json!(crate::net::qr::text(link).lines().map(str::to_string).collect::<Vec<_>>());
+        // the app's own link (backplane://pair?url=...): a phone's camera opens the app, never the hub's page in a browser
+        row_l["qr"] = json!(crate::net::qr::text(&crate::net::qr::link(link)).lines().map(str::to_string).collect::<Vec<_>>());
         let hub = s(&shown, "url").trim_start_matches("http://").trim_start_matches("https://");
         row_l["qrnote"] = json!(format!("Code {code} · hub {hub} · works once, until {until}"));
         r.push(row_l);
@@ -1033,7 +1034,7 @@ mod tests {
         assert!(pick["note"].as_str().unwrap().contains("Tailscale"));
         let l = by(&r, "Pairing link");
         assert_eq!(l["note"], "http://100.101.102.103:3871/pair#invite=t&routes=a");
-        assert_eq!(l["qr"], json!(crate::net::qr::text("http://100.101.102.103:3871/pair#invite=t&routes=a").lines().collect::<Vec<_>>()), "the QR code of that address's own link");
+        assert_eq!(l["qr"], json!(crate::net::qr::text("backplane://pair?url=http://100.101.102.103:3871/pair%23invite=t%26routes=a").lines().collect::<Vec<_>>()), "the QR code of the app's link to that address: a camera opens the app");
         let qn = l["qrnote"].as_str().unwrap();
         assert!(qn.starts_with("Code GZCYJVVP · hub 100.101.102.103:3871 · works once, until "), "{qn}");
         let acts: Vec<(&str, &str)> = l["buttons"].as_array().unwrap().iter().map(|b| (b["action"].as_str().unwrap(), b["value"].as_str().unwrap())).collect();
