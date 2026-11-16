@@ -179,9 +179,14 @@ try:
     check(bool(got), 'Cmd+K pressed in KiCad reaches Backplane (the client takes the reserved chord)')
     time.sleep(1); shot('02-cmd-k')
     check(bool(wait_for(lambda: active(client.pid), 3)), 'with the palette open, Backplane has the keyboard')
-    # one Escape closes the palette; the keyboard stays with Backplane, as on Linux and Windows (a second Escape there closes the viewer)
+    # the palette was opened from KiCad and closed with nothing chosen: the keyboard goes back to KiCad (lane B's e9af1ffe5, every platform),
+    # and a second Escape is KiCad's (it keeps the viewer open)
+    key(K_ESC)
+    check(bool(wait_for(lambda: active(kpid), 4)), 'Escape closes the palette and the keyboard is back in KiCad')
+    n0 = hub_log().count('ET_SELECTION_CHANGED'); key(K_A, CMD)
+    check(bool(wait_for(lambda: hub_log().count('ET_SELECTION_CHANGED') > n0, 4)), 'and KiCad\'s canvas takes keys again (Cmd+A)')
     key(K_ESC); time.sleep(0.8)
-    check(active(client.pid), 'Escape closes the palette; Backplane keeps the keyboard (as on Linux and Windows)')
+    check(bool(kicad_frame()), 'a second Escape stays in KiCad: the viewer stays open')
     p = last_push()
     board_spot = lambda: (p[0][0] + p[0][2] * 0.1, p[0][1] + p[0][3] * 0.9)
     # a click on the board gives KiCad the keyboard; its canvas takes keys (Cmd+A, then a plain Escape inside KiCad)
@@ -263,7 +268,7 @@ try:
     before_wins = {w[0] for w in wins() if w[1] == client.pid}
     # the window back to its first size (the strip's buttons at a narrow width may sit past its edge)
     osa(f'tell application "System Events" to set size of {win_of(client.pid)} to {{1000, 700}}'); time.sleep(1.5)
-    pop = rects().get('kicad:kicad-pop')
+    pop = rects().get('kicad:popout')
     print(f'pop-out button {pop} in window {next((w for w in wins() if w[0] == cw[0]), cw)[3]}', flush=True)
     cw = next((w for w in wins() if w[0] == cw[0]), cw)
     if pop:
