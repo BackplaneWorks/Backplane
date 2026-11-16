@@ -74,7 +74,7 @@ for v in ('10.0', '10.99'):
 tmp = tempfile.mkdtemp(prefix='bpk-', dir='/tmp')   # a Unix socket path is at most 104 bytes on macOS
 port = 3893
 env = dict(os.environ, HOME=os.path.join(OUT, 'fh'), TMPDIR=tmp, BACKPLANE_KICAD_CLI=os.path.join(RT, 'bin/kicad-cli'),
-           BACKPLANE_AGENTS=os.path.join(OUT, 'bin'), BACKPLANE_NO_UPDATE='1', BACKPLANE_KICAD_DEBUG='1', FAKE_LOG=os.path.join(OUT, 'standin.log'))
+           BACKPLANE_AGENTS=os.path.join(OUT, 'bin'), BACKPLANE_NO_UPDATE='1', BACKPLANE_KICAD_DEBUG='1', BACKPLANE_KICAD_EMBED_TRACE=os.path.join(OUT, 'kicad-embed-trace.log'), FAKE_LOG=os.path.join(OUT, 'standin.log'))
 hub = subprocess.Popen([HUB, '--home', os.path.join(OUT, 'home'), '--port', str(port), '--host', '127.0.0.1', '--no-tailscale', '--foreground'],
                        env=env, stdout=open(os.path.join(OUT, 'hub.log'), 'w'), stderr=subprocess.STDOUT); procs.append(hub)
 wait_for(lambda: subprocess.run(['curl', '-s', '-m1', '-o', '/dev/null', f'http://127.0.0.1:{port}/hello']).returncode == 0, 30)
@@ -123,7 +123,13 @@ def osa(src):
     r = subprocess.run(['osascript', '-e', src], capture_output=True, text=True)
     if r.returncode != 0: print('osascript: ' + r.stderr.strip()[:300], flush=True)
     return r.stdout.strip()
-def win_of(pid): return f'(first window of (first process whose unix id is {pid}))'
+def win_of(pid):
+    """The client's main window for System Events: its largest (after a palette or a popup, `first window` was another one)."""
+    sizes = osa(f'tell application "System Events" to get size of every window of (first process whose unix id is {pid})')
+    nums = [int(float(v)) for v in sizes.replace('{', '').replace('}', '').split(',') if v.strip()] if sizes else []
+    areas = [nums[i] * nums[i + 1] for i in range(0, len(nums) - 1, 2)]
+    i = (areas.index(max(areas)) + 1) if areas else 1
+    return f'(window {i} of (first process whose unix id is {pid}))'
 
 
 try:
@@ -245,7 +251,11 @@ try:
     before_wins = {w[0] for w in wins() if w[1] == client.pid}
     pop = rects().get('kicad:kicad-pop')
     cw = next((w for w in wins() if w[0] == cw[0]), cw)
-    if pop: click(cw[3][0] + pop['x'] + pop['w'] / 2, cw[3][1] + 28 + pop['y'] + pop['h'] / 2)
+    if pop:
+        # Backplane first (the first click on an inactive app's window only activates it, as for a person), then Pop out
+        rail = rects().get('rail:Files') or rects().get('rail:Board')
+        if rail: click(cw[3][0] + rail['x'] + rail['w'] / 2, cw[3][1] + 28 + rail['y'] + rail['h'] / 2); time.sleep(0.6)
+        click(cw[3][0] + pop['x'] + pop['w'] / 2, cw[3][1] + 28 + pop['y'] + pop['h'] / 2)
     newwin = wait_for(lambda: next((w for w in wins() if w[1] == client.pid and w[0] not in before_wins), None), 10)
     check(bool(pop) and bool(newwin), f'Pop out opens the editor in a window of its own ({pop})')
     if newwin:

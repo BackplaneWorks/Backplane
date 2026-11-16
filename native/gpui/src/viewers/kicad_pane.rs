@@ -1019,7 +1019,7 @@ impl KicadPane {
     fn mac_host(&mut self, at: Option<nc::R>, show: Option<u64>) -> bool {
         let full = nc::host_full_screen(self.toplevel);
         let redraw = full != self.mac_full;
-        if redraw { self.mac_full = full; }
+        if redraw { self.mac_full = full; eprintln!("GPUI_LOG {}", json!({"kicad_mac_full_screen": full})); }
         let visible = show.is_some() && nc::host_visible(self.toplevel);
         // a frame in which the pane's hitbox was not found (our window inactive while KiCad has the keyboard draws such frames) keeps
         // the last rect: leaving the pane goes through detach, and an unseen window through host_visible (run 5: hidden for good here)
