@@ -204,21 +204,9 @@ try:
     opened = wait_for(lambda: hub_log().count('ET_DIALOG_OPENED') > d0, 5)
     check(bool(opened) and active(kpid), 'a KiCad dialog (Find) opens with the keyboard in it')
     time.sleep(0.5); shot('02c-dialog')
-    # Find's own Close button (Cmd+W would close the board editor itself), then Find again: Escape closes it
-    def find_dialog():
-        return next((w for w in wins() if w[1] == kpid and w[0] != f[0] and w[3][2] < 900), None)
-    fd = wait_for(find_dialog, 3)
-    if fd: click(fd[3][0] + fd[3][2] - 65, fd[3][1] + 136)
-    check(bool(wait_for(lambda: hub_log().count('ET_DIALOG_CLOSED') > c0, 4)), 'its Close button closes it')
-    d1, c1 = hub_log().count('ET_DIALOG_OPENED'), hub_log().count('ET_DIALOG_CLOSED')
-    p = last_push(); click(*board_spot()); time.sleep(0.6); key(K_F, CMD)
-    check(bool(wait_for(lambda: hub_log().count('ET_DIALOG_OPENED') > d1, 5)) and active(kpid), 'Find again, with the keyboard in it')
-    time.sleep(0.6); key(K_ESC)
-    esc = wait_for(lambda: hub_log().count('ET_DIALOG_CLOSED') > c1, 4)
-    check(bool(esc), 'Escape closes it')
-    if not esc:
-        fd = find_dialog()
-        if fd: click(fd[3][0] + fd[3][2] - 65, fd[3][1] + 136); time.sleep(0.6)
+    # Escape closes it (KiCad has the keyboard; a click aimed at its Close button once hit Backplane's own close and shut the viewer)
+    key(K_ESC)
+    check(bool(wait_for(lambda: hub_log().count('ET_DIALOG_CLOSED') > c0, 4)), 'Escape closes it')
     # a click in Backplane's own chrome (a neutral spot: the thread's timeline) gives it the keyboard back
     cw = next((w for w in wins() if w[0] == cw[0]), cw)
     click(cw[3][0] + 200, cw[3][1] + 28 + 300)
