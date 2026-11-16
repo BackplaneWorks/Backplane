@@ -120,7 +120,9 @@ def click_ctl(cid):
     LAST_FROM[0] = "release"; return c.get("t1") or c.get("t0")
 # the controls that act as the button goes down (the rest act on its release)
 def acts_on_press(cid):
-    return cid.startswith("kicad-tab:") or (re.fullmatch(r"mgmt:[a-z]+", cid) is not None and cid not in ("mgmt:right", "mgmt:bottom", "mgmt:left", "mgmt:close", "mgmt:shut"))
+    # ui:Edit / ui:View: the viewer's one button acts on mouse-down (screens/viewer.rs on_mouse_down): from the release, reopen0-2 read
+    # no change at all (the switch was already drawn)
+    return cid.startswith("kicad-tab:") or cid in ("ui:Edit", "ui:View") or (re.fullmatch(r"mgmt:[a-z]+", cid) is not None and cid not in ("mgmt:right", "mgmt:bottom", "mgmt:left", "mgmt:close", "mgmt:shut"))
 def pane_now():
     """The pane as it is now: the widest KiCad frame mapped near the pane's top (Full size widens it); else PANE."""
     best = None
@@ -567,9 +569,10 @@ if "focus" in JOURNEYS and SOCK:
 # 1. open: the pane closed (View) and reopened (Edit) with KiCad warm
 if "open" in JOURNEYS:
     for i in range(3):
-        click_ctl("ui:View"); time.sleep(1.5)
+        click_ctl("ui:View"); time.sleep(1.5); shot(f"reopen{i}_view")
         t0 = click_ctl("ui:Edit")
         if t0: EVENTS.append({"kind": "switch", "t0": t0, "tag": f"reopen{i}", "window_ms": 3000}); time.sleep(3)
+        shot(f"reopen{i}_edit")
 # 2. switch: Board <-> Schematic <-> 3D, then threads away and back
 if "switch" in JOURNEYS:
     seq = ["SCH", "PCB", "PCB_3D", "PCB", "SCH", "PCB_3D", "SCH", "PCB"] * 2

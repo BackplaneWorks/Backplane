@@ -434,3 +434,60 @@ Misses, ranked:
 
 Better on batch 9: Collar's kicad-cli DRC/ERC 30 % faster (parity loads like the editor), Ctrl+E's footprint editor 1467 -> 742 ms,
 the Plot dialog 540 -> 316 ms, reopen 25-40 % faster.
+
+## bp.13 batch 11 (59c2846b2b, the release candidate) against batch 10 (f1eb188413), 2026-11-16
+
+**Nothing here should hold bp.13 on Linux.** Every strict miss of the run was the harness's (below), batch 10 has the same ones, and
+no journey found a KiCad defect new in batch 11.
+
+Both runtimes by their builds/ path in one sitting, client and hub main 0d242bed8 (copied, links resolved), GPU display, i3, both
+boards, every journey and the plan copies; one run per runtime and board, so a difference under ~30 % is noise. Budget misses 54 -> 49
+(strict 6 -> 6, all six `reopen0-2`: the harness, below).
+
+| measure (Hubble / Collar) | batch 10 | batch 11 | budget |
+|---|---|---|---|
+| reopen View -> Edit (rerun from the press) | - | Collar 18-30 ms | 300 |
+| cold Edit, first pixels | 210 / 117 ms | 209 / 126 ms | - |
+| tab switch Board <-> Schematic | 25-35 / 28-34 ms | 19-21 / 22-32 ms | 50 |
+| first 3D | 1165 / 1388 ms | 1315 / 1165 ms | first-time |
+| thread back from the sidebar (from the release) | 46 / 38 ms | 20 / 21 ms | 50 |
+| pan 10 s / zoom 10 s, max frame | 21, 23 / 20, 24 ms | 23, 25 / 21, 20 ms | 25 |
+| pan during in-editor DRC, max frame | 132 / 68 ms | **245** / 67 ms | 50 |
+| route a track, max frame | 232 / 92 ms | **338** / 93 ms | 50 |
+| schematic pan 6 s, max frame | 36 / 33 ms | 33 / 23 ms | 50 |
+| schematic move symbol / wire, max frame | 231, 317 / 40, 142 ms | 234, 300 / 45, 137 ms | 50 |
+| cross-probe C32 (Hubble) / C5 (Collar) | 1638 / 93 ms | 1816 / 53 ms | 100 |
+| in-editor DRC / ERC | 447, 187 / 192, 42 ms | 600, 162 / 178, 38 ms | - |
+| kicad-cli DRC / ERC | 904, 2516 / 572, 1927 ms | 945, 2840 / 573, 2024 ms | - |
+| Ctrl+E footprint editor | 773 / 708 ms | 796 / 767 ms | 1000 |
+| back to the board from the footprint editor | 207 / 204 ms | 23 / 24 ms | - |
+| BOM panel open / close | 54, 427 / 56, 66 ms | 58, **711** / 63, 57 ms | 100 |
+| project page open | 19 / 17 ms | 20 / 16 ms | 60 |
+| KiCad RSS peak | 5.14 / 4.48 GB | 5.57 / 4.60 GB | - |
+| tab switches show the asked frame | ok / ok | ok / ok | strict |
+| KiCad dialogs left up (the ERC dialog) | 1 / 1 | **0 / 0** | 0 |
+| plan journey (corridor click, W/A/R, drags) | partly | Collar all; Hubble click/W/A/R, drags missed (harness) | - |
+
+Undo/redo on batch 11 in the matrix: Hubble 2.2uF -> BP-REDO -> Ctrl+Z 2.2uF -> Ctrl+Y BP-REDO -> BP-AGAIN. Collar's did not run: its
+fixed click point (1126,700) was on a symbol in the view the earlier journeys left (the harness, below).
+
+Under mutter: no results. real_use's driver reads the root picture (XGetImage) for its frame times and pixel checks, which mutter's
+rootless Xwayland refuses (BadMatch), and the driver exits at the first one; only start-up ran. real_use is i3-only until its grab and
+sampler read windows instead of the root (lane B's wm_ctl.py screenshot does that for single pictures).
+
+Misses, ranked:
+1. **Harness: reopen0-2 read no change** (the six strict misses, batches 10 and 11 alike). The viewer's Edit/View button acts on
+   mouse-down (screens/viewer.rs), and since 55bdbb302 real_use measured it from the release, after the switch was drawn. Fixed: measured
+   from the press, reopen 18-30 ms on Collar batch 11.
+2. **Harness: real_use does not run under mutter** (above). Owner: lane A.
+3. **Hubble: pan during an in-editor DRC 245 ms max frame (132 on batch 10), routing 338 ms (232), BOM panel close 711 ms (427).** One
+   run each: to repeat before they go anywhere; none is a correctness miss. Owner: lane A to repeat, then fork / lane B.
+4. **Harness: the plan journey's board-to-screen calibration flips between two answers** (Hubble batch 11: 130 px off, so its vertex
+   drags missed while the corridor click, W, Shift+W, A and R applied). Owner: lane A.
+5. **Harness: Collar's undo click point is fixed**; in the full list it lands on a symbol. Owner: lane A (find an empty canvas spot as the
+   plan journey finds the band).
+6. Known, on the fork's after-release list: schematic wire drawing and symbol moves (Hubble 230-320 ms frames), Hubble cross-probe C32
+   1.6-1.8 s, Hubble KiCad RSS 5.1-5.6 GB.
+
+Better on batch 11: the ERC dialog no longer comes back (0 dialogs on both boards), plan view answers the API (no AS_BUSY; GetPlan's
+in_plan_view), back to the board from the footprint editor 205 -> 23 ms, Collar's Plot dialog 320 -> 218 ms.
