@@ -51,7 +51,9 @@ jobs:
     name: build ${{ matrix.target }}
     # a nightly may build on faster machines, named by repo variables (unset: GitHub's): NIGHTLY_LINUX_RUNNER (Boat CI: boat), NIGHTLY_MAC_RUNNER (the Mac mini's
     # self-hosted runner label), NIGHTLY_WIN_RUNNER. A tag release always builds on GitHub's images above.
-    runs-on: ${{ (inputs.nightly && matrix.target == 'linux-x64' && vars.NIGHTLY_LINUX_RUNNER) || (inputs.nightly && matrix.target == 'darwin-arm64' && vars.NIGHTLY_MAC_RUNNER) || (inputs.nightly && matrix.target == 'windows-x64' && vars.NIGHTLY_WIN_RUNNER) || matrix.os }}
+    # RELEASE_MAC_RUNNER (repo variable, a self-hosted runner's label: the Mac mini's bp-mac) builds darwin-arm64 there for any run while it is set (0.16.0:
+    # "just build on our Mac"); unset, GitHub's image as before
+    runs-on: ${{ (matrix.target == 'darwin-arm64' && vars.RELEASE_MAC_RUNNER) || (inputs.nightly && matrix.target == 'linux-x64' && vars.NIGHTLY_LINUX_RUNNER) || (inputs.nightly && matrix.target == 'darwin-arm64' && vars.NIGHTLY_MAC_RUNNER) || (inputs.nightly && matrix.target == 'windows-x64' && vars.NIGHTLY_WIN_RUNNER) || matrix.os }}
     defaults:
       run:
         shell: bash
@@ -121,6 +123,8 @@ jobs:
         shell: bash
         run: |
           export BACKPLANE_COMMIT=$(git rev-parse --short HEAD)   # compiled into the hub: the guard checks an update against it
+          # macOS: the floor the docs and install.sh state (13: CEF and Bun need it), whatever the build machine runs (the mini is on macOS 26); checked after packaging
+          [ "${{ runner.os }}" != macOS ] || export MACOSX_DEPLOYMENT_TARGET=13.0
           if [ "$GITHUB_EVENT_NAME" = push ] || [ -n "$NIGHTLY" ]; then
             if [ -z "$TM_KID" ] || [ -z "$TM_KEY" ]; then echo "::warning::no telemetry key: this release's hub sends no telemetry"
             elif [[ ! "$TM_KID" =~ ^rel-[a-z0-9-]{1,28}$ ]] || [[ ! "$TM_KEY" =~ ^[0-9a-f]{64}$ ]]; then echo "::error::BACKPLANE_TELEMETRY_KID/KEY are malformed (want rel-..., 64 lowercase hex)"; exit 1
@@ -231,6 +235,18 @@ jobs:
             grep -aq NotoSansCJKjp-Bold $d/backplane-gpui || { echo "::error::backplane-gpui lacks the bundled Noto Sans CJK JP"; exit 1; };;
             darwin-*) need="$need licenses/cef/LICENSE.txt licenses/cef/CREDITS.html";; esac
           for f in $need; do [ -e "$d/$f" ] || { echo "::error::$f missing from the ${{ matrix.target }} archive"; exit 1; }; done
+          # macOS: no Mach-O in the archive may ask for a newer macOS than the floor install.sh and the docs state (MAC_FLOOR); a build on a newer Mac
+          # (the mini runs macOS 26) that let one through would install and then fail to start on older ones
+          if [ "${{ runner.os }}" = macOS ]; then
+            MAC_FLOOR=13.0; worst=0
+            while IFS= read -r -d '' f; do
+              file -b "$f" | grep -q Mach-O || continue
+              m=$(otool -l "$f" 2>/dev/null | awk '/LC_BUILD_VERSION/{b=1} b&&/minos/{print $2; exit} /LC_VERSION_MIN_MACOSX/{v=1} v&&/version/{print $2; exit}')
+              [ -n "$m" ] || continue
+              if [ "$(printf '%s\n%s\n' "$m" "$MAC_FLOOR" | sort -V | tail -1)" != "$MAC_FLOOR" ]; then echo "::error::$f needs macOS $m, above the stated floor $MAC_FLOOR"; worst=1; fi
+            done < <(find "$d" -type f \( -perm -u+x -o -name '*.dylib' -o -path '*.framework/*' \) -print0)
+            [ $worst = 0 ] || exit 1; echo "every Mach-O runs on macOS $MAC_FLOOR"
+          fi
           # macOS's engine has spaces in its names: checked one by one
           case "${{ matrix.target }}" in darwin-*) for f in "Chromium Embedded Framework.framework/Chromium Embedded Framework" "Chromium Embedded Framework.framework/Resources/icudtl.dat" \
               "Backplane Helper.app/Contents/MacOS/Backplane Helper" "Backplane Helper (Renderer).app/Contents/MacOS/Backplane Helper (Renderer)" "Backplane Helper (GPU).app/Contents/MacOS/Backplane Helper (GPU)"; do
@@ -517,7 +533,7 @@ jobs:
           - { target: darwin-arm64, os: macos-latest }
           - { target: windows-x64, os: windows-latest }
     name: smoke ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ (matrix.target == 'darwin-arm64' && vars.RELEASE_MAC_RUNNER) || matrix.os }}
     permissions:
       contents: read
       actions: read
