@@ -552,6 +552,10 @@ def mouse_return_check(h, cp, frame, children, timeline, rounds=None, kpid=0):
 
 # ---- checks: the Checks panel and KiCad's markers (embed_checks_panel_e2e.sh and the marker click of embed_editor_checks_e2e.sh) ----
 
+LIBTABLE_MINE = {}
+BP_LIBS = ["Backplane_Logo", "Backplane_MountingHole", "Backplane_Passives_Least", "Backplane_Passives_Most", "Backplane_Passives_Nominal", "Backplane_Shoggoth"]
+
+
 def checks_project(h):
     """The seeded project's .kicad_pro (the seed puts it at the root or under boards/ecc83-pp)."""
     pro = h.p("proj", "ecc83-pp.kicad_pro")
@@ -1364,6 +1368,17 @@ def run(h):
     only_ctrl_k = only == "ctrl_k"
     h.init_dirs()
     seeded = None
+    if only == "libtable":
+        # the person's own global tables, from before Backplane's library: KiCad's nested table and a library of theirs, no Backplane entries
+        cfg = h.p("fh", "AppData", "Roaming", "kicad", "10.99")
+        os.makedirs(cfg, exist_ok=True)
+        LIBTABLE_MINE["fp-lib-table"] = ('(fp_lib_table\n\t(version 7)\n\t(lib (name "KiCad")(type "Table")(uri "${KICAD10_TEMPLATE_DIR}/fp-lib-table")(options "")(descr "KiCad Default Libraries"))\n'
+                                         '\t(lib (name "My_Footprints")(type "KiCad")(uri "C:/Users/me/kicad/My_Footprints.pretty")(options "")(descr "mine"))\n)\n')
+        LIBTABLE_MINE["sym-lib-table"] = ('(sym_lib_table\n\t(version 7)\n\t(lib (name "KiCad")(type "Table")(uri "${KICAD10_TEMPLATE_DIR}/sym-lib-table")(options "")(descr "KiCad Default Libraries"))\n'
+                                          '\t(lib (name "My_Symbols")(type "KiCad")(uri "C:/Users/me/kicad/My_Symbols.kicad_sym")(options "")(descr "mine"))\n)\n')
+        for t, text in LIBTABLE_MINE.items():
+            with open(os.path.join(cfg, t), "w", encoding="utf-8", newline="") as f:
+                f.write(text)
     if only == "checks":
         seeded = checks_seed(h)
         # the hub logs each request it sends KiCad (RunChecks) and KiCad's events (ET_PROGRESS, ET_CHECKS_DONE); the stand-in's
@@ -1846,28 +1861,112 @@ def run(h):
             h.check("checks P5: Fix with agent sent the finding to the thread's agent", got5, {"id": erc_id, "fix_clicked": fixed})
             h.shot("p5_fix")
             return h.finish()
+        if only == "libtable":
+            # a person whose global tables predate Backplane's library: the hub adds the runtime's Backplane entries, nothing else changes
+            cfg = h.p("fh", "AppData", "Roaming", "kicad", "10.99")
+            time.sleep(3)
+            fp = open(os.path.join(cfg, "fp-lib-table"), encoding="utf-8", newline="").read()
+            sym = open(os.path.join(cfg, "sym-lib-table"), encoding="utf-8", newline="").read()
+            mine_fp = LIBTABLE_MINE["fp-lib-table"]
+            head = mine_fp.rstrip()[:-1].rstrip("\n\r\t ")
+            added = [n for n in BP_LIBS if f'(name "{n}")' in fp]
+            h.check("libtable: the hub added every Backplane footprint library to the person's fp-lib-table", added == BP_LIBS, {"added": added, "table": fp[-1500:]})
+            h.check("libtable: the person's own entries are kept as they were (KiCad's table, My_Footprints, byte for byte)", fp.startswith(head), {"start": fp[:400]})
+            extra = [l for l in fp[len(head):].splitlines() if l.strip() and l.strip() != ")" and not any(f'(name "{n}")' in l for n in BP_LIBS)]
+            h.check("libtable: nothing else is added or changed in fp-lib-table", not extra, extra)
+            h.check("libtable: sym-lib-table is unchanged (the Backplane library has no symbols)", sym == LIBTABLE_MINE["sym-lib-table"], sym[-600:])
+            backups = glob.glob(h.p("home", "backups", "kicad-libtables", "*"))
+            h.check("libtable: a copy of the person's table was kept before it was changed", bool(backups), backups[:4])
+            return h.finish()
         if only == "libs":
-            # bp.13 gate (lead, Nov 16): on a clean home with only the managed runtime (this harness's own APPDATA, LOCALAPPDATA and
-            # KICAD_CONFIG_HOME; no other KiCad), an agent's kicad_edit places a library symbol with a library footprint, and the
-            # embedded editors' symbol and footprint choosers list libraries. The bp.10..bp.13 batch 12 Windows packages carry none.
+            # bp.13 / 0.16.0 gate (the person, Nov 16): on a clean home with only the managed runtime (this harness's own APPDATA,
+            # LOCALAPPDATA and KICAD_CONFIG_HOME, no other KiCad; KICAD = the runtime the hub's own installer put in place), the standard
+            # libraries and Backplane's own (Backplane_KiCad_Library, footprints and 3D models) are there, registered, and usable:
+            # an agent's kicad_edit places a standard part and a Backplane-library footprint, the 3D model is found and exported,
+            # both choosers list libraries, and KiCad's checks find nothing about libraries.
             import re as _re
+            import subprocess
             top = int(rep.get("toplevel") or 0) or E.find_main_window(cp.pid)
-            sch = checks_project(h)[:-len(".kicad_pro")] + ".kicad_sch"
-            share = os.path.join(h.kicad_bin if os.path.isdir(h.kicad_bin) else os.path.dirname(os.path.dirname(h.kicad_bin)), "share", "kicad")
+            pro = checks_project(h)
+            sch, pcb = pro[:-len(".kicad_pro")] + ".kicad_sch", pro[:-len(".kicad_pro")] + ".kicad_pcb"
+            root = h.kicad_dir
+            share = os.path.join(root, "share", "kicad")
             listing = sorted(os.listdir(share)) if os.path.isdir(share) else []
-            h.check("libs: the runtime's share\\kicad has symbols, footprints and the global sym-lib-table and fp-lib-table",
-                    all(x in listing for x in ("symbols", "footprints")) and any(os.path.isfile(os.path.join(share, d, t)) for d in ("", "template") for t in ("sym-lib-table",))
-                    and any(os.path.isfile(os.path.join(share, d, t)) for d in ("", "template") for t in ("fp-lib-table",)), {"share": share, "has": listing})
-            line = standin_ask(h, "kicad_edit", {"path": sch, "message": "libs gate", "ops": [{"add": [{"symbol": {
-                "lib": "Device:C", "ref": "C99", "value": "100n", "at": [30.48, 30.48], "footprint": "Capacitor_SMD:C_0603_1608Metric"}}]}]}, "libs")
+            bpl = os.path.join(share, "backplane-library")
+            pretty = sorted(os.listdir(os.path.join(bpl, "libraries"))) if os.path.isdir(os.path.join(bpl, "libraries")) else []
+            model = os.path.join(bpl, "3dmodels", "Capacitor_SMD.3dshapes", "C_0805_2012Metric.step")
+            def read(pth):
+                try:
+                    return open(pth, encoding="utf-8", errors="replace").read()
+                except OSError:
+                    return ""
+            dfp, dsym = read(os.path.join(share, "fp-lib-table")), read(os.path.join(share, "sym-lib-table"))
+            h.check("libs: the runtime has the standard symbols, footprints and template", all(x in listing for x in ("symbols", "footprints", "template")), {"share": share, "has": listing})
+            h.check("libs: the runtime's default global tables hold the standard KiCad table and every Backplane footprint library",
+                    '(name "KiCad")' in dfp and '(name "KiCad")' in dsym and all(f'(name "{n}")' in dfp for n in BP_LIBS),
+                    {"fp": dfp[-1200:], "sym": dsym[-400:]})
+            h.check("libs: the Backplane library is packaged (6 .pretty) with its 3D model C_0805_2012Metric.step",
+                    len([x for x in pretty if x.endswith(".pretty")]) >= 6 and os.path.isfile(model), {"pretty": pretty, "model": model, "model_found": os.path.isfile(model)})
             try:
-                text = open(sch, encoding="utf-8", errors="replace").read()
-            except OSError:
-                text = ""
-            placed = '(lib_id "Device:C")' in text and '"C99"' in text
-            fp_set = '"Capacitor_SMD:C_0603_1608Metric"' in text
-            h.check("libs: an agent's kicad_edit places Device:C from the library into the schematic", placed, {"answer": line[:600]})
-            h.check("libs: and its library footprint (Capacitor_SMD:C_0603_1608Metric) is set on it", placed and fp_set, {"answer": line[:300]})
+                man = json.load(open(os.path.join(root, "manifest.json"), encoding="utf-8"))
+            except (OSError, ValueError):
+                man = {}
+            bl = man.get("backplaneLibrary") or {}
+            srcs = read(os.path.join(root, "KICAD_LIBRARY_SOURCES.txt")) or read(os.path.join(share, "KICAD_LIBRARY_SOURCES.txt"))
+            h.check("libs: manifest backplaneLibrary matches KICAD_LIBRARY_SOURCES.txt (ref, commit, sha256)",
+                    bool(bl) and all(str(bl.get(k, "")) and str(bl.get(k)) in srcs for k in ("ref", "commit", "sha256")), {"backplaneLibrary": bl, "sources": srcs[:800]})
+            cfg = h.p("fh", "AppData", "Roaming", "kicad", "10.99")
+            ufp, usym = read(os.path.join(cfg, "fp-lib-table")), read(os.path.join(cfg, "sym-lib-table"))
+            h.check("libs: the person's global tables (made at first launch) contain the standard and the Backplane libraries",
+                    '(name "KiCad")' in ufp and '(name "KiCad")' in usym and all(f'(name "{n}")' in ufp for n in BP_LIBS), {"fp": ufp[-1200:], "sym": usym[-400:]})
+            # an agent's edits, as an agent makes them (kicad_edit through the stand-in's MCP)
+            sline = standin_ask(h, "kicad_edit", {"path": sch, "message": "libs gate", "ops": [{"add": [
+                {"symbol": {"lib": "Device:C", "ref": "C98", "value": "100n", "at": [30.48, 30.48], "footprint": "Capacitor_SMD:C_0603_1608Metric"}},
+                {"symbol": {"lib": "Device:C", "ref": "C99", "value": "1u", "at": [40.64, 30.48], "footprint": "Backplane_Passives_Nominal:C_0805_2012Metric"}}]}]}, "libs-sch")
+            text = read(sch)
+            h.check("libs: kicad_edit places Device:C from the standard library (C98) with the standard footprint Capacitor_SMD:C_0603_1608Metric",
+                    '(lib_id "Device:C")' in text and '"C98"' in text and '"Capacitor_SMD:C_0603_1608Metric"' in text, {"answer": sline[:600]})
+            h.check("libs: and C99 with the Backplane library's footprint Backplane_Passives_Nominal:C_0805_2012Metric",
+                    '"C99"' in text and '"Backplane_Passives_Nominal:C_0805_2012Metric"' in text, {"answer": sline[-400:]})
+            ptext0 = read(pcb)
+            refs = _re.findall(r'\(property "Reference" "(C\d+)"', ptext0)
+            ref = refs[0] if refs else "C1"
+            pline = standin_ask(h, "kicad_edit", {"path": pcb, "message": "libs gate", "ops": [{"set": ref, "footprint": "Backplane_Passives_Nominal:C_0805_2012Metric"}]}, "libs-pcb")
+            ptext = read(pcb)
+            h.check(f"libs: kicad_edit sets the Backplane footprint on the board's {ref} (KiCad loads it through the global table)",
+                    "Backplane_Passives_Nominal:C_0805_2012Metric" in ptext, {"answer": pline[:600]})
+            h.check("libs: the footprint brings its 3D model reference (${BACKPLANE_KICAD_LIBRARY}/3dmodels/Capacitor_SMD.3dshapes/C_0805_2012Metric.step)",
+                    "Capacitor_SMD.3dshapes/C_0805_2012Metric.step" in ptext, ptext[ptext.find("C_0805_2012Metric.step") - 200: ptext.find("C_0805_2012Metric.step") + 60] if "C_0805_2012Metric.step" in ptext else "absent")
+            env = h.base_env()
+            step = h.p("libs_board.step")
+            ex = subprocess.run([h.kicad_cli, "pcb", "export", "step", "--force", "-o", step, pcb], capture_output=True, text=True, env=env, timeout=600)
+            out = (ex.stdout + ex.stderr)[-1500:]
+            body = read(step)
+            size = os.path.getsize(step) if os.path.isfile(step) else 0
+            missing = [l for l in out.splitlines() if "C_0805_2012Metric" in l or ("3D model" in l and ("not" in l.lower() or "could" in l.lower()))]
+            h.check("libs: a STEP export of the board includes the Backplane 3D model (export succeeds, nothing says the model is missing)",
+                    ex.returncode == 0 and size > 0 and not missing, {"rc": ex.returncode, "step_bytes": size, "model_lines": missing[:4], "out": out[-600:],
+                                                                      "step_names_model": "C_0805" in body})
+            # KiCad's own checks: nothing about libraries (the seed board has other findings of its own, counted as information)
+            def kicad_check(kind, path, outp):
+                cmd = [h.kicad_cli, kind, "erc" if kind == "sch" else "drc", "--format", "json", "-o", outp, path] + (["--schematic-parity"] if kind == "pcb" else [])
+                r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=600)
+                try:
+                    j = json.load(open(outp, encoding="utf-8"))
+                except (OSError, ValueError):
+                    return r.returncode, None
+                found = []
+                for key in ("violations", "unconnected_items", "schematic_parity"):
+                    found += [v.get("type", "") for v in j.get(key, []) or []]
+                for sh in j.get("sheets", []) or []:
+                    found += [v.get("type", "") for v in sh.get("violations", []) or []]
+                return r.returncode, found
+            LIB = ("lib_symbol_issues", "lib_symbol_mismatch", "lib_footprint_issues", "lib_footprint_mismatch", "footprint_symbol_mismatch", "footprint_type_mismatch", "missing_footprint")
+            for kind, path in (("sch", sch), ("pcb", pcb)):
+                rc, found = kicad_check(kind, path, h.p(f"libs_{kind}.json"))
+                libf = [t for t in (found or []) if t in LIB or "lib" in t]
+                print(f"INFO libs {kind} findings: " + json.dumps(sorted(set(found or []))), flush=True)
+                h.check(f"libs: KiCad's {'ERC' if kind == 'sch' else 'DRC'} on the edited design finds nothing about libraries", found is not None and not libf, {"rc": rc, "library_findings": libf})
             def chooser(tab, prefix):
                 h.click_control(top, tab)
                 time.sleep(4.0)
@@ -1876,18 +1975,20 @@ def run(h):
                 while time.monotonic() < end and not found:
                     found = next((w for w in kicad_toplevels() if w["visible"] and (w["title"] or "").startswith(prefix)), None)
                     time.sleep(0.5)
-                time.sleep(3.0)  # the count in the title grows while it loads
+                time.sleep(4.0)  # the count in the title grows while it loads
                 title = window_title(found["hwnd"]) if found else ""
                 m = _re.search(r"\((\d+) items? loaded\)", title)
                 n = int(m.group(1)) if m else (0 if found else None)
+                shot = h.p(f"libs_{prefix.split()[0].lower()}.png")
+                E.grab_screen(shot)
                 if found:
                     E.key_tap("Escape")
                     time.sleep(0.8)
-                return {"title": title, "items": n}
+                return {"title": title, "items": n, "shot": shot}
             sym = chooser("kicad-tab:SCH", "Choose Symbol")
-            h.check("libs: the embedded schematic editor's symbol chooser lists libraries (more than 100 symbols)", (sym["items"] or 0) > 100, sym)
-            fp = chooser("kicad-tab:PCB", "Footprint Chooser")
-            h.check("libs: the embedded board editor's footprint chooser lists libraries (more than 100 footprints)", (fp["items"] or 0) > 100, fp)
+            h.check("libs: the embedded schematic editor's symbol chooser lists the standard libraries (more than 1000 symbols)", (sym["items"] or 0) > 1000, sym)
+            fpc = chooser("kicad-tab:PCB", "Footprint Chooser")
+            h.check("libs: the embedded board editor's footprint chooser lists the standard and Backplane libraries (more than 1000 footprints)", (fpc["items"] or 0) > 1000, fpc)
             return h.finish()
         if only == "lend":
             # A5 / Climb B's lend (e9af1ffe5): a reserved key pressed in KiCad lends Backplane the keyboard, and the palette
