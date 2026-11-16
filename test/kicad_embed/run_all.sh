@@ -39,6 +39,9 @@ SUITES=(
   "embed_lend_e2e.sh:lend"
   # KiCad's own Close (Ctrl+W) in the editor: the pane follows it back to View; Cancel in KiCad's save prompt keeps the editor (fork)
   "embed_close_e2e.sh:close"
+  # a fresh profile's editors in a narrow pane (bp.13 autopanels): the canvas at least 60 % at 611, 480, 1000 px; the panels back at Full
+  # size; a closed panel stays closed (fork)
+  "embed_narrow_pane_e2e.sh:narrow-pane"
   # a click on one of KiCad's DRC markers keeps the editor where it is; Escape shuts a side panel before the viewer (fork; skips without Hubble_DK)
   "embed_marker_click_e2e.sh:marker-click"
   "embed_thread_e2e.sh:thread"

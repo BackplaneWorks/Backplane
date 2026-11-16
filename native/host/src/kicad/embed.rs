@@ -609,6 +609,18 @@ pub fn wheel_zoom_once(dir: &Path) {
     if wrote { let _ = std::fs::write(&mark, ""); }
 }
 
+/// The side panels a seeded profile starts with hidden, by KiCad 10's own keys.
+static SEEDED_AUI: std::sync::LazyLock<Value> = std::sync::LazyLock::new(|| json!({
+    "design_blocks_panel_docked_width": 120,
+    "design_blocks_show": false,
+    "show_layer_manager": false,
+    "show_net_inspector": false,
+    "show_properties": false,
+    "show_search": false,
+    "show_schematic_hierarchy": false,
+    "hierarchy_panel_docked_width": 120
+}));
+
 /// Seed an isolated `XDG_CONFIG_HOME` for stock KiCad so the IPC API server is enabled, first-run / update wizards
 /// stay silent, GAL (`canvas_type: 0`) is selected, and side AUI docks start collapsed for small embedded viewports.
 pub fn seed_stock_config(cfg_home: &Path) -> Result<(), String> {
@@ -635,16 +647,10 @@ pub fn seed_stock_config(cfg_home: &Path) -> Result<(), String> {
     let editor = |filename: &str, version: u32| json!({
         "meta": { "filename": filename, "version": version },
         "appearance": { "canvas_type": 0 },
-        "aui": {
-            "design_blocks_panel_docked_width": 120,
-            "show_design_blocks_panel": false,
-            "show_layer_manager": false,
-            "show_net_inspector": false,
-            "show_properties_panel": false,
-            "show_search_panel": false,
-            "hierarchy_panel_docked_width": 120,
-            "show_hierarchy_panel": false
-        },
+        // KiCad 10's own keys (as it writes them in pcbnew.json / eeschema.json): the side panels hidden, the canvas the pane (stock
+        // KiCad has no embed-autopanels). The names before Nov 16 (show_properties_panel, show_search_panel, show_design_blocks_panel,
+        // show_hierarchy_panel) were not KiCad's: only the layer manager and the net inspector were hidden
+        "aui": SEEDED_AUI.clone(),
         "window": {
             "maximized": false,
             "pos_x": 0, "pos_y": 0,
@@ -3332,6 +3338,11 @@ mod tests {
             assert_eq!(c["system"]["first_run_shown"], json!(true));
             let p: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("kicad").join(ver).join("pcbnew.json")).unwrap()).unwrap();
             assert_eq!(p["appearance"]["canvas_type"], json!(0));
+            // the side panels hidden by the keys KiCad 10 reads (it ignored show_properties_panel and the like: Properties stayed shown)
+            for k in ["show_layer_manager", "show_properties", "show_search", "show_net_inspector", "design_blocks_show"] { assert_eq!(p["aui"][k], json!(false), "{ver} pcbnew {k}"); }
+            let e: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("kicad").join(ver).join("eeschema.json")).unwrap()).unwrap();
+            for k in ["show_properties", "show_search", "show_schematic_hierarchy", "design_blocks_show"] { assert_eq!(e["aui"][k], json!(false), "{ver} eeschema {k}"); }
+            assert!(p["aui"].get("show_properties_panel").is_none(), "no name KiCad does not read");
             assert!(dir.join("kicad").join(ver).join("sym-lib-table").is_file());
         }
     }
