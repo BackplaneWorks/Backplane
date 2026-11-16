@@ -15,9 +15,22 @@ start_gpu_display() {
   for _ in $(seq 30); do [ -S "$gs/sysbus" ] && break; sleep 0.1; done
   own env -i PATH=/usr/bin:/bin HOME="$gs/home" XDG_RUNTIME_DIR="$gs/run" XDG_CONFIG_HOME="$gs/home/.config" \
     DBUS_SYSTEM_BUS_ADDRESS="unix:path=$gs/sysbus" GVFS_DISABLE_FUSE=1 GIO_USE_VFS=local \
-    dbus-run-session -- gnome-shell --headless --wayland --no-x11 --virtual-monitor "$geo" --wayland-display bpwl >"$gs/shell.log" 2>&1
+    dbus-run-session -- gnome-shell --headless --wayland $([ "${KEMBED_WM:-i3}" = mutter ] || echo --no-x11) --virtual-monitor "$geo" --wayland-display bpwl >"$gs/shell.log" 2>&1
   for _ in $(seq 150); do [ -S "$gs/run/bpwl" ] && grep -q "GNOME Shell started" "$gs/shell.log" 2>/dev/null && break; sleep 0.1; done
   [ -S "$gs/run/bpwl" ] || { echo "FAIL gpu display: headless shell did not start ($gs/shell.log)"; return 1; }
+  # KEMBED_WM=mutter: the person's GNOME desktop as it is: mutter's own (rootless) Xwayland, mutter the X window manager; no Xwayland or i3
+  # of ours (env_xvfb starts no i3 then)
+  if [ "${KEMBED_WM:-i3}" = mutter ]; then
+    for _ in $(seq 100); do grep -q "Using public X11 display" "$gs/shell.log" 2>/dev/null && break; sleep 0.1; done
+    DISP=$(grep -o "Using public X11 display :[0-9]*" "$gs/shell.log" | head -1 | grep -o ":[0-9]*")
+    [ -n "$DISP" ] || { echo "FAIL gpu display: mutter gave no X11 display ($gs/shell.log)"; return 1; }
+    # mutter's Xwayland lets in only the clients with its cookie (its Xauthority file in the shell's runtime folder)
+    for _ in $(seq 50); do ls "$gs/run"/.mutter-Xwaylandauth.* >/dev/null 2>&1 && break; sleep 0.1; done
+    XAUTHORITY=$(ls "$gs/run"/.mutter-Xwaylandauth.* 2>/dev/null | head -1)
+    [ -n "$XAUTHORITY" ] || { echo "FAIL gpu display: mutter's Xwayland has no Xauthority file in $gs/run"; return 1; }
+    export DISPLAY="$DISP" XAUTHORITY; echo "INFO gpu display: mutter's Xwayland $DISP is the X server, mutter the window manager ($XAUTHORITY)"
+    return 0
+  fi
   d=$((720 + $$ % 200))
   while [ -e "/tmp/.X11-unix/X$d" ] || [ -e "/tmp/.X$d-lock" ]; do d=$((d + 1)); done
   DISP=":$d"

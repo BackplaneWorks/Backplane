@@ -351,11 +351,38 @@ mod imp {
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let Some(root) = root(c) else { return };
         let active = atom(c, "_NET_ACTIVE_WINDOW"); // i18n-ok: X11 atom name
-        let ev = ClientMessageEvent::new(32, w, active, [2u32, x11rb::CURRENT_TIME, 0, 0, 0]);
+        // the X server's time now, not CurrentTime: a window manager that weighs activations by their time (mutter's focus-stealing
+        // prevention) must see this as the newest thing the person did; CurrentTime only where the time cannot be had
+        let t = server_time().unwrap_or(x11rb::CURRENT_TIME);
+        let ev = ClientMessageEvent::new(32, w, active, [2u32, t, 0, 0, 0]);
         let _ = c.send_event(false, root, EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY, ev);
         let viewable = c.get_window_attributes(w).ok().and_then(|r| r.reply().ok()).map_or(false, |a| a.map_state == MapState::VIEWABLE);
-        if viewable { let _ = c.set_input_focus(InputFocus::PARENT, w, x11rb::CURRENT_TIME); }
+        if viewable { let _ = c.set_input_focus(InputFocus::PARENT, w, t); }
         let _ = c.flush();
+        if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {{\"kicad_activate_time\":{t}}}"); }
+    }
+    /// The X server's time now (ICCCM: a zero-length property appended to a window of ours, and the PropertyNotify it causes), on a connection
+    /// of its own so the client's event reader never takes the event; None when it does not come within 200 ms.
+    pub fn server_time() -> Option<u32> {
+        let (c, n) = RustConnection::connect(None).ok()?;
+        let root = c.setup().roots.get(n)?.root;
+        let w = c.generate_id().ok()?;
+        c.create_window(0, w, root, -10, -10, 1, 1, 0, WindowClass::INPUT_ONLY, x11rb::COPY_FROM_PARENT, &CreateWindowAux::new().event_mask(EventMask::PROPERTY_CHANGE)).ok()?;
+        let a = c.intern_atom(false, b"_BACKPLANE_TIME").ok()?.reply().ok()?.atom; // i18n-ok: X11 atom name
+        c.change_property8(PropMode::APPEND, w, a, AtomEnum::STRING, &[]).ok()?;
+        c.flush().ok()?;
+        let until = std::time::Instant::now() + std::time::Duration::from_millis(200);
+        let mut got = None;
+        while got.is_none() && std::time::Instant::now() < until {
+            match c.poll_for_event() {
+                Ok(Some(x11rb::protocol::Event::PropertyNotify(e))) if e.window == w => got = Some(e.time),
+                Ok(Some(_)) => {}
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(1)),
+                Err(_) => break,
+            }
+        }
+        let _ = c.destroy_window(w); let _ = c.flush();
+        got
     }
 
     /// The frames in the container: its children, or (the fork) the children of KiCad's holder window, an override-redirect child of the container.

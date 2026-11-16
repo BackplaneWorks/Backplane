@@ -237,8 +237,10 @@ default_border none
 hide_edge_borders both
 ipc-socket $OUT/i3.sock
 EOF
+  if [ "${KEMBED_WM:-i3}" != mutter ]; then
   own env DISPLAY="$DISP" XDG_RUNTIME_DIR="$OUT/run" i3 -c "$OUT/i3.conf" >"$OUT/i3.log" 2>&1
   for _ in $(seq 30); do [ -S "$OUT/i3.sock" ] && break; sleep 0.1; done
+  fi
 
   export GDK_BACKEND=x11
   export GDK_SCALE=1
