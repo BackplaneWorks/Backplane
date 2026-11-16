@@ -4213,6 +4213,13 @@ gpui.mgmt.plan.keysnote	On this KiCad version, approve from this panel: in plan 
 gpui.mgmt.plan.reference	over {layer}	基準 {layer}
 gpui.mgmt.plan.nets	{n, plural, one {# net} other {# nets}}	ネット{n}本
 gpui.mgmt.plan.tab	Plan	計画
+gpui.mgmt.plan.before	Plan before routing	配線前に計画する
+gpui.mgmt.plan.onwords	Before routing a board with 4 or more copper layers or more than 60 nets, the agent proposes corridors and plane regions here. It routes only what you approve.	銅箔層が4層以上、またはネットが60本を超える基板では、配線の前にエージェントがここで配線経路とプレーン領域を提案します。承認したものだけを配線します。
+gpui.mgmt.plan.offwords	Agents route as you ask. Turn it on to have them propose a routing plan first and route only what you approve here.	エージェントは指示どおりに配線します。オンにすると、まず配線計画を提案し、ここで承認したものだけを配線します。
+gpui.mgmt.plan.elsewhere	A routing plan for {board} awaits your approval	{board}の配線計画が承認を待っています
+gpui.mgmt.plan.openboard	Open board	基板を開く
+gpui.mgmt.plan.noboard	No routing plan for this board.	この基板の配線計画はありません。
+gpui.plan.before.routing.desc	On: before routing a board with 4 or more copper layers or more than 60 nets, the agent proposes a routing plan and routes only what you approve in the Plan panel beside the board. Off: agents route as you ask.	オン：銅箔層が4層以上、またはネットが60本を超える基板では、配線の前にエージェントが配線計画を提案し、基板の横の計画パネルで承認したものだけを配線します。オフ：エージェントは指示どおりに配線します。
 gpui.mgmt.bom.shared	Its sheet is used more than once and KiCad keeps one value for all of them: {others} has it too.	このシートは複数回使われており、KiCadはすべてに同じ値を持たせます：{others}にも同じ値が入りました。
 gpui.mgmt.fab.review	Review: {must} must · {should} should · {notes} notes	レビュー：必須{must}・推奨{should}・メモ{notes}
 gpui.mgmt.fab.stackup	stackup {id}, 50 Ω outer line {w} mm	層構成 {id}、外層50 Ωの線幅 {w} mm
@@ -6966,6 +6973,9 @@ gpui.streamer.win	Windows does not tell an app that the screen is being captured
 
     /// gpui.mgmt.plan.nets = {n, plural, one {# net} other {# nets}}
     static func gpui_mgmt_plan_nets(n: Int) -> String { f("gpui.mgmt.plan.nets", ["n": String(n)]) }
+
+    /// gpui.mgmt.plan.elsewhere = A routing plan for {board} awaits your approval
+    static func gpui_mgmt_plan_elsewhere(board: String) -> String { f("gpui.mgmt.plan.elsewhere", ["board": board]) }
 
     /// gpui.mgmt.bom.shared = Its sheet is used more than once and KiCad keeps one value for all of them: {others} has it too.
     static func gpui_mgmt_bom_shared(others: String) -> String { f("gpui.mgmt.bom.shared", ["others": others]) }

@@ -598,6 +598,7 @@ fn cad_with(st: &State, session: &Value, info: &Value, pkg: Option<&crate::files
     v.extend(freecad_install_row(session, info, fc_here));
     v.extend([
         row("KiCad over its API", "Lets agents edit a board in a running KiCad. Off uses the files only.", chips(&["on", "off"], set(st, "kicad.ipc", "on"), "kicad.ipc")),
+        row("Plan before routing", "On: before routing a board with 4 or more copper layers or more than 60 nets, the agent proposes a routing plan and routes only what you approve in the Plan panel beside the board. Off: agents route as you ask.", chips(&["on", "off"], onoff(crate::plan::is_on(set(st, crate::plan::SETTING, ""))), crate::plan::SETTING)),
         row("Board 3D", "How a board's 3D model is made: natively, the board at once and its parts as they convert, or by kicad-cli, all at the end.", chips(&["native", "kicad-cli"], set(st, "viewer.board3d", "native"), "viewer.board3d")),
     ]);
     v

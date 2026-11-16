@@ -26,6 +26,11 @@ pub fn plans(status: &str, version: &str, caps: &[String]) -> bool {
     // the version by the one reader (ks::bp_number): a test build ("-bp.12-851cbefda6") and a describe name ("...-dirty-bp.13") alike
     status == "ok" && (caps.iter().any(|c| c == CAP) || (caps.is_empty() && crate::files::kicad::kserve::bp_number(version) >= 11))
 }
+/// The person's switch for planning before routing (Settings › CAD, the Plan panel): off unless they turn it on. Off, agents route as
+/// asked and are told to use the plan_* tools only when the person asks for a routing plan; on, they plan first and route only what the
+/// person approved (`guidance`).
+pub const SETTING: &str = "plan.routing";
+pub fn is_on(v: &str) -> bool { v == "on" }
 pub fn needs_plan(copper_layers: usize, nets: usize) -> bool { copper_layers >= LAYERS || nets > NETS }
 /// In plan view the plan tool's keys (A, R, W, Shift+W, [, ], N, L) are its own, never KiCad's defaults: the fork's `plan-keys` (bp.12.2,
 /// bp.13 batch 6). Without it (bp.12.1: the tool registered as pcbnew.PlanTool, its actions pcbnew.Plan.*) A opens Add Footprint and R
@@ -49,7 +54,11 @@ pub fn not_recorded(plan: &Value, layer: &str, ids: &[String]) -> Vec<String> {
 }
 /// The agents' instructions for a project with a KiCad board on Backplane KiCad (agents/prompt.rs adds it).
 pub fn guidance() -> String {
-    format!("<backplane_routing_plan>Plan before copper on a board with {LAYERS} or more copper layers or more than {NETS} nets (fewer: route as asked): before routing anything, read the stackup with the backplane tool `fab_profile` (its `stackup.layers`: each copper layer's reference planes above and below with the dielectric height and Er, and the trace widths for the project's impedances) and the plan with `plan_get`; then propose with `plan_propose`: on signal layers, one corridor per bus or net group (its nets, the parts it runs between, a path and a width, vias and escapes, the routing order), each next to a solid reference plane, impedance nets at the stackup's widths; on power layers, plane regions per net with their reference; one layer at a time is fine. Ask the person to approve with `plan_approve` and end your turn: Backplane tells you when they have decided. Their edits, locks, notes and constraints win: read `changes` from `plan_get` and never undo them. Route only what they approved, with `plan_route` (one step per call, until done), inside its corridor; nothing else, and no copper outside the plan. `plan_stop` stops; `plan_verify` checks the routed groups. The plan needs the board open in KiCad.</backplane_routing_plan>")
+    format!("<backplane_routing_plan>The person turned on Plan before routing (Settings › CAD, or the Plan panel beside the board). Plan before copper on a board with {LAYERS} or more copper layers or more than {NETS} nets (fewer: route as asked): before routing anything, read the stackup with the backplane tool `fab_profile` (its `stackup.layers`: each copper layer's reference planes above and below with the dielectric height and Er, and the trace widths for the project's impedances) and the plan with `plan_get`; then propose with `plan_propose`: on signal layers, one corridor per bus or net group (its nets, the parts it runs between, a path and a width, vias and escapes, the routing order), each next to a solid reference plane, impedance nets at the stackup's widths; on power layers, plane regions per net with their reference; one layer at a time is fine. Ask the person to approve with `plan_approve` and end your turn: Backplane tells you when they have decided. Their edits, locks, notes and constraints win: read `changes` from `plan_get` and never undo them. Route only what they approved, with `plan_route` (one step per call, until done), inside its corridor; nothing else, and no copper outside the plan. `plan_stop` stops; `plan_verify` checks the routed groups. The plan needs the board open in KiCad.</backplane_routing_plan>")
+}
+/// The agents' words while the person has Plan before routing off (the default).
+pub fn guidance_off() -> &'static str {
+    "<backplane_routing_plan>Plan before routing is off (the person's choice; Settings › CAD or the Plan panel turns it on): route a board as the person asks, without proposing a routing plan or waiting for an approval first. Use the plan_* tools only when the person asks for a routing plan.</backplane_routing_plan>"
 }
 const NS: &str = "kiapi.backplane.plan.";
 
@@ -262,10 +271,17 @@ pub fn refused(err: &str) -> String {
 }
 pub struct Rpc;
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["plan.approve", "plan.stop", "plan.get", "plan.focus"] }
+    fn methods(&self) -> &'static [&'static str] { &["plan.approve", "plan.stop", "plan.get", "plan.focus", "plan.enable"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let path = if !sv(p, "pro").is_empty() { sv(p, "pro") } else { sv(p, "path") };
+            if m == "plan.enable" {
+                // the person's switch: kept as a setting, the Plan panel of the project shown follows at once
+                let v = if p["on"] == true { "on" } else { "off" };
+                let r = hub.commit(&json!({"$": "SettingSet", "key": SETTING, "value": v, "at": crate::agents::now_s()})).await;
+                if !sv(p, "pro").is_empty() { panel::publish(hub, sv(p, "pro")).await }
+                return vec![match r { Ok(_) => json!({"t": "reply", "id": id, "ok": true, "result": {"on": v == "on"}}), Err(e) => json!({"t": "reply", "id": id, "ok": false, "error": e.to_string()}) }]
+            }
             let r = async {
                 if crate::copy::on() && m != "plan.get" { return Err(crate::copy::HOME_ONLY.to_string()) }
                 let pcb = board_of(hub, "", path).await?;
@@ -303,6 +319,11 @@ mod tests {
         assert_eq!(route_busy("no plan"), "no plan");
     }
     #[test] fn plan_needs_a_plan_on_big_boards() { assert!(needs_plan(4, 10)); assert!(needs_plan(2, 61)); assert!(!needs_plan(2, 60)); assert!(guidance().contains("plan_approve") && guidance().contains("fab_profile")); }
+    #[test] fn plan_before_routing_is_off_unless_turned_on() {
+        assert!(!is_on("") && !is_on("off") && is_on("on"));
+        assert!(guidance_off().contains("only when the person asks") && !guidance_off().contains("plan_approve"));
+        assert!(guidance().contains("turned on Plan before routing"));
+    }
     #[test] fn plan_api_told_by_capability_then_version() {
         let caps = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert!(plans("ok", "10.99.0-unknown-bp.13", &caps(&["embed", "routing-plan"])));

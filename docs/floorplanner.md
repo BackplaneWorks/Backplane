@@ -48,9 +48,17 @@ All hub data: `mgmt.plan.<digest>` (the panel and the bands) and `plan.<digest>`
 
 ## What agents are told
 
-A project with a KiCad board on Backplane KiCad bp.11+ gets `<backplane_routing_plan>` (`plan::guidance`): on boards with 4 or more copper
+Planning before routing is the person's choice and is **off** by default: the setting `plan.routing` (`on`/`off`), switched in
+Settings › CAD ("Plan before routing") or at the top of the Plan panel (`plan.enable {on, pro}`). It is not Claude's plan mode
+(the thread's interaction mode) and never stops a task the person asked for unless they turned it on.
+
+Off, a project with a KiCad board on Backplane KiCad bp.11+ gets `plan::guidance_off`: route as the person asks, and use the plan_*
+tools only when they ask for a routing plan. On, it gets `<backplane_routing_plan>` (`plan::guidance`): on boards with 4 or more copper
 layers or more than 60 nets, plan before copper: the stackup from `fab_profile` (reference planes and impedance widths per layer), propose,
 ask, end the turn, respect the person's edits, route only what was approved, inside its corridor.
+
+The Plan panel shows the plan of the board in the viewer. When an agent asks for approval of another board's plan in the same project
+(the folder with `.git` or `.backplane.json` above it), the panel names that board with Open board, which shows it with its Plan panel.
 
 ## The person's edits in KiCad's plan view (bp.13)
 

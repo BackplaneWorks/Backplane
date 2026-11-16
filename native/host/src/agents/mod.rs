@@ -160,9 +160,9 @@ impl Agents {
         format!("{}{bot}", self.prompt_base(th, cwd).await)
     }
     async fn prompt_base(&self, th: &str, cwd: &str) -> String {
-        let (ipc, orders, lang, buy, code) = { let w = self.world().await;
+        let (ipc, orders, lang, buy, code, plan) = { let w = self.world().await;
             let code = w.threads.get(th).filter(|_| w.setting(&format!("kicad.main.{th}")) == "on").map(|t| (t.worktree.clone(), t.branch.clone()));
-            (w.setting("kicad.ipc") != "off", w.setting("order.enabled") != "off", w.setting("agent.lang").to_string(), !w.setting(&format!("buy.{th}")).is_empty(), code) };
+            (w.setting("kicad.ipc") != "off", w.setting("order.enabled") != "off", w.setting("agent.lang").to_string(), !w.setting(&format!("buy.{th}")).is_empty(), code, crate::plan::is_on(w.setting(crate::plan::SETTING))) };
         let (root, home, mut host) = (cwd.to_string(), self.host.home.clone(), self.host.clone());
         // the KiCad the hub has selected, resolved for this turn: the prompt names it, and the turn runs with its env and shims (kicadsel.rs)
         if host.live_kicad {
@@ -179,7 +179,7 @@ impl Agents {
             let locks: Vec<(String, String)> = [&f.pcb, &f.sch].into_iter().filter(|d| !d.is_empty()).map(|d| (d.clone(), crate::files::kicad::canonical::doc_lock(d))).collect();
             let design = if f.pcb.is_empty() && f.sch.is_empty() { String::new() } else { prompt::design_words(&main, code.as_ref().filter(|c| !c.0.is_empty()).map(|c| (c.0.as_str(), c.1.as_str())), &locks) };
             let keys = prompt::api_keys(&keys_path.to_string_lossy(), &prompt::key_names(&std::fs::read_to_string(&keys_path).unwrap_or_default())) + &prompt::secrets(&crate::settings::vault::names());
-            prompt::build(&prompt::PromptEnv { fc: crate::files::kicad::stepglb::told_freecad(&host.home, &host.fc), render: host.render.clone(), kicad: host.kicad.clone(), kicad_ipc: ipc, models: host.models_text(), may_delegate: true, orders_on: orders,
+            prompt::build(&prompt::PromptEnv { fc: crate::files::kicad::stepglb::told_freecad(&host.home, &host.fc), render: host.render.clone(), kicad: host.kicad.clone(), kicad_ipc: ipc, models: host.models_text(), may_delegate: true, orders_on: orders, routing_plan: plan,
                 root, pro: f.pro, pcb: f.pcb, sch: f.sch, all: f.all, design, keys, machines, buy, lang, skills: host.bundled.as_deref().map(bundled::list).unwrap_or_default() })
         }).await.unwrap_or_default()
     }

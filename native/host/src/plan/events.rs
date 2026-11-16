@@ -9,6 +9,8 @@ pub fn info_key(pcb: &str) -> String { format!("plan.{}", crate::files::kicad::k
 static ASKS: OnceLock<Mutex<HashMap<String, Vec<Value>>>> = OnceLock::new();
 fn asks() -> &'static Mutex<HashMap<String, Vec<Value>>> { ASKS.get_or_init(Default::default) }
 pub fn open_asks(pcb: &str) -> Vec<Value> { asks().lock().unwrap().get(pcb).cloned().unwrap_or_default() }
+/// The boards with an open request for approval.
+pub fn asking_boards() -> Vec<String> { asks().lock().unwrap().iter().filter(|(_, v)| !v.is_empty()).map(|(k, _)| k.clone()).collect() }
 
 /// An agent asks the person to approve: kept (one per thread and thing), said in the thread's activity, published.
 pub async fn ask(hub: &Arc<Hub>, thread: &str, pcb: &str, what: &str, note: &str) {
