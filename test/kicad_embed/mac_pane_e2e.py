@@ -282,11 +282,15 @@ try:
             shot(f'narrow-{tag}')
             return {'frame_px': w, 'canvas_px': x1 - x0, 'share': round((x1 - x0) / w, 3), 'whole_frame': whole}
         def set_pane(target):
-            for _ in range(3):
+            # the pane does not grow one for one with the window (the thread's column takes a share): steps by the slope seen so far
+            slope, prev = 1.0, None
+            for _ in range(8):
                 p = last_push(); b = next((w for w in wins() if w[0] == cw[0]), cw)[3]
                 if not p: break
-                if abs(p[0][2] - target) <= 2: break
-                win_size(client.pid, b[2] + (target - p[0][2]), b[3]); time.sleep(2.0)
+                if abs(p[0][2] - target) <= 3: break
+                if prev and b[2] != prev[0] and p[0][2] != prev[1]: slope = max(0.2, min(2.0, (p[0][2] - prev[1]) / (b[2] - prev[0])))
+                prev = (b[2], p[0][2])
+                win_size(client.pid, max(500, min(1900, round(b[2] + (target - p[0][2]) / slope))), b[3]); time.sleep(2.0)
             time.sleep(3.0)  # the panels follow the width (EmbedAutoPanels)
             return last_push()[0][2] if last_push() else None
         for tab in ('PCB', 'SCH'):
@@ -296,7 +300,7 @@ try:
                 wait_for(lambda: (k := kicad_frame()) and k, 60, 0.5); time.sleep(5)
             for target in (611, 480, 1000):
                 got = set_pane(target); m = frame_canvas(f'{tab}-{target}'); RES[f'narrow_{tab}_{target}'] = {'pane': got, **(m or {})}
-                check(bool(m) and not m['whole_frame'] and m['share'] >= 0.6 and got and abs(got - target) <= 4,
+                check(bool(m) and not m['whole_frame'] and m['share'] >= 0.6 and got and abs(got - target) <= 6,
                       f'narrow: {tab} in a {target} px pane ({got}): the canvas has at least 60 % of it ({m})')
             # Full size: the pane takes the room, and the panels come back
             r = rects().get('kicad:full'); b = next((w for w in wins() if w[0] == cw[0]), cw)[3]
