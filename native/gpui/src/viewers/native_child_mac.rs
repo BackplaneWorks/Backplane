@@ -100,9 +100,14 @@ pub fn host_full_screen(top: u64) -> bool {
 /// frame directly above us otherwise). True when it re-ordered.
 pub fn keep_below(top: u64, frame: u64) -> bool {
     if frame == 0 { return false }
-    // the nearest normal window above ours: the frame, or nothing to do
-    let above = list(ON_SCREEN_ABOVE | EXCLUDE_DESKTOP, top).into_iter().rev().find(|e| e.2 == 0);
-    if above.map(|e| e.0) == Some(frame) { return false }
+    // the normal windows just above ours, nearest first: KiCad's own (its dialogs, over the frame) up to the frame, or nothing to do.
+    // A KiCad dialog between ours and the frame counted as another app's window: ours went below the frame and buried the dialog under
+    // it (run 18: Find open but unseen, its Escape never reached it)
+    let kicad = match owner(frame) { 0 => KICAD_PID.load(std::sync::atomic::Ordering::Relaxed), p => p };
+    for e in list(ON_SCREEN_ABOVE | EXCLUDE_DESKTOP, top).into_iter().rev().filter(|e| e.2 == 0) {
+        if e.0 == frame { return false }
+        if e.1 != kicad { break }
+    }
     // only when the frame is on screen at all (hidden by KiCad or by us: nothing to order)
     if !list(ON_SCREEN_ABOVE | EXCLUDE_DESKTOP, 0).iter().any(|e| e.0 == frame) { return false }
     unsafe { let w = ns_window(top); if w.is_null() { return false } send_order(w, c"orderWindow:relativeTo:", -1 /* NSWindowBelow */, frame as isize); }
