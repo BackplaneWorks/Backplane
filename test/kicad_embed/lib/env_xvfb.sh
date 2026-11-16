@@ -242,6 +242,12 @@ EOF
   for _ in $(seq 30); do [ -S "$OUT/i3.sock" ] && break; sleep 0.1; done
   fi
 
+  # mutter places a client where it likes at the size it asked for (1400x900, centred); i3 tiles it over the screen. Under mutter each
+  # client window is maximized as it appears, so a suite sees the same pane as under i3 (KEMBED_WM_KEEP_MAX=0 leaves it as GNOME puts it)
+  if [ "${KEMBED_WM:-i3}" = mutter ] && [ "${KEMBED_WM_KEEP_MAX:-1}" = 1 ]; then
+    own env DISPLAY="$DISP" python3 "$KEMBED_LIB/wm_ctl.py" keep-maximized 3600 >"$OUT/wm_ctl.log" 2>&1
+  fi
+
   export GDK_BACKEND=x11
   export GDK_SCALE=1
   if [ "${REAL_HARDWARE:-0}" != "1" ]; then
@@ -251,6 +257,22 @@ EOF
     export LP_NUM_THREADS=2
     [ -n "$icd" ] && export VK_ICD_FILENAMES="$icd"
   fi
+}
+
+# A click on a top-level window that should give it the keyboard, as a person's click does: under mutter an XTest click goes into
+# Xwayland straight and never through the compositor, so mutter's click-to-focus is done for it (_NET_ACTIVE_WINDOW)
+click_to_focus() {
+  local xid=$1 x=$2 y=$3
+  python3 "$XINPUT_PY" click "$x" "$y"
+  if [ "${KEMBED_WM:-i3}" = mutter ]; then echo "INFO activate $xid: $(python3 "$KEMBED_LIB/wm_ctl.py" activate "$xid" 2>&1 | tail -1)"; fi
+}
+
+# Backplane's client window to X,Y (and W x H) as the window manager does it: i3's own command, or _NET_MOVERESIZE_WINDOW under mutter
+wm_moveresize() {
+  local x=$1 y=$2 w=${3:-} h=${4:-}
+  if [ "${KEMBED_WM:-i3}" = mutter ]; then python3 "$KEMBED_LIB/wm_ctl.py" moveresize "$x" "$y" $w $h
+  elif [ -n "$w" ]; then i3-msg -s "$OUT/i3.sock" "floating enable, resize set $w $h, move position $x $y"
+  else i3-msg -s "$OUT/i3.sock" "move position $x $y"; fi
 }
 
 start_hub() {
@@ -304,9 +326,25 @@ check() {
   fi
 }
 
+# Where the keyboard is: the X focus window and its ancestors (id:name), for a log line
+xfocus_chain() { python3 -c 'import ctypes,ctypes.util,os
+x=ctypes.CDLL(ctypes.util.find_library("X11")); x.XOpenDisplay.restype=ctypes.c_void_p; d=ctypes.c_void_p(x.XOpenDisplay(os.environ["DISPLAY"].encode()))
+w=ctypes.c_ulong(); r=ctypes.c_int(); x.XGetInputFocus(d, ctypes.byref(w), ctypes.byref(r)); f=w.value
+root=ctypes.c_ulong(); par=ctypes.c_ulong(); ch=ctypes.POINTER(ctypes.c_ulong)(); n=ctypes.c_uint(); out=[]
+for _ in range(8):
+    nm=ctypes.c_char_p(); x.XFetchName(d, ctypes.c_ulong(f), ctypes.byref(nm)); out.append(f"{f:#x}:{(nm.value or b"").decode(errors="replace")[:30]}")
+    if f < 2 or not x.XQueryTree(d, ctypes.c_ulong(f), ctypes.byref(root), ctypes.byref(par), ctypes.byref(ch), ctypes.byref(n)) or par.value in (0, root.value): break
+    f = par.value
+print(" < ".join(out))' 2>/dev/null; }
+
+# The screen's picture: the root's under i3; under mutter (its rootless Xwayland's root has none) the windows' own, each where it is
+screen_shot() {
+  if [ "${KEMBED_WM:-i3}" = mutter ]; then python3 "$KEMBED_LIB/wm_ctl.py" screenshot "$1"; else import -window root "$1"; fi
+}
+
 shot() {
   local name=$1
-  import -window root "$OUT/shots/$name.png" 2>/dev/null || true
+  screen_shot "$OUT/shots/$name.png" 2>/dev/null || true
   xwininfo -root -tree >"$OUT/shots/$name.tree" 2>&1 || true
 }
 
@@ -544,8 +582,9 @@ print(good[0]["xid"] if good else "")
     fi
     sleep 0.25
   done
-  echo "DIAG timeout waiting for embedded frame '$sub' (pid=$pid cont=$cont_xid); current X11 windows:" >&2
+  echo "DIAG timeout waiting for embedded frame '$sub' (pid=$pid cont=$cont_xid); the last report: $(echo "$rpt" | cut -c1-2500); current X11 windows:" >&2
   python3 "$DRIVER_PY" list-windows >&2 || true
+  [ -n "$xid" ] && import -window "$xid" "$OUT/timeout_frame.png" 2>/dev/null || true
   return 1
 }
 

@@ -59,5 +59,20 @@ for entry in "${SUITES[@]}"; do
   fi
 done
 
-echo "=== Summary: $((${#SUITES[@]} - FAILED))/${#SUITES[@]} suites passed (artifacts: $OUT_ROOT) ==="
+# the second column: the core suites again under GNOME's own window manager (KEMBED_WM=mutter: a private headless gnome-shell and its
+# rootless Xwayland, as the person's desktop runs; never their :0). It needs the GPU display, so it runs with REAL_HARDWARE=1 unless
+# KEMBED_WMS says otherwise ("i3" only, or "i3 mutter"). About 9 more minutes (window, click, editors, handoff, fullsize, strip_narrow,
+# dialog_focus, ux, lend: 542 s under mutter against 525 s under i3, batch 10)
+WMS=${KEMBED_WMS:-$([ "${REAL_HARDWARE:-0}" = 1 ] && echo "i3 mutter" || echo i3)}
+TOTAL=${#SUITES[@]}
+if [ "${EMBED_MODE:-spike}" = fork ] && [[ " $WMS " == *" mutter "* ]]; then
+  for script in embed_window_e2e.sh embed_click_e2e.sh embed_editors_e2e.sh embed_handoff_e2e.sh embed_fullsize_e2e.sh embed_strip_narrow_e2e.sh embed_dialog_focus_e2e.sh embed_ux_e2e.sh embed_lend_e2e.sh; do
+    tag="mutter-${script#embed_}"; tag=${tag%_e2e.sh}; TOTAL=$((TOTAL + 1))
+    echo "=== Running $script under mutter -> $OUT_ROOT/$tag ==="
+    if env KEMBED_WM=mutter REAL_HARDWARE=1 OUT="$OUT_ROOT/$tag" "$HERE/$script"; then echo "=== OK $script (mutter) ==="
+    else echo "=== FAILED $script (mutter) ==="; FAILED=$((FAILED + 1)); fi
+  done
+fi
+
+echo "=== Summary: $((TOTAL - FAILED))/$TOTAL suites passed (artifacts: $OUT_ROOT) ==="
 [ "$FAILED" -eq 0 ]

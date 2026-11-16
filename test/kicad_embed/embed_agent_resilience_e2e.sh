@@ -80,11 +80,11 @@ EOF
   sleep 0.6
 
   N0=$(python3 "$IPC_PY" items-count "$API_SOCK" pcb 11 | python3 -c 'import json,sys; print(json.load(sys.stdin)["count"])')
-  import -window root "$OUT/shots/01a_before_agent_commit.png"
+  screen_shot "$OUT/shots/01a_before_agent_commit.png"
 
   ADD_RES=$(python3 "$IPC_PY" agent-add-track "$API_SOCK" 28.0 94.0 155.0 132.0 2.8 3)
   sleep 0.7
-  import -window root "$OUT/shots/01b_after_agent_commit.png"
+  screen_shot "$OUT/shots/01b_after_agent_commit.png"
 
   N1=$(python3 "$IPC_PY" items-count "$API_SOCK" pcb 11 | python3 -c 'import json,sys; print(json.load(sys.stdin)["count"])')
   MOD1=$(is_doc_modified "$API_SOCK" pcb "$PCB_XID")
@@ -257,11 +257,11 @@ python3 "$XINPUT_PY" key Home
 sleep 0.6
 
 N0=$(python3 "$IPC_PY" items-count "$API_SOCK" pcb 11 | python3 -c 'import json,sys; print(json.load(sys.stdin)["count"])')
-import -window root "$OUT/shots/01a_before_agent_commit.png"
+screen_shot "$OUT/shots/01a_before_agent_commit.png"
 
 ADD_RES=$(python3 "$IPC_PY" agent-add-track "$API_SOCK" 28.0 94.0 155.0 132.0 2.8 3)
 sleep 0.7
-import -window root "$OUT/shots/01b_after_agent_commit.png"
+screen_shot "$OUT/shots/01b_after_agent_commit.png"
 
 N1=$(python3 "$IPC_PY" items-count "$API_SOCK" pcb 11 | python3 -c 'import json,sys; print(json.load(sys.stdin)["count"])')
 MOD1=$(is_doc_modified "$API_SOCK" pcb "$PCB_XID")

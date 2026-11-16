@@ -204,7 +204,7 @@ while kill -0 "$CP" 2>/dev/null; do
           record_spike_report "sidebar_folded" "$PCB_XID" "{\"pane_x\":$VX,\"pane_y\":$VY,\"pane_w\":$VW,\"pane_h\":$VH}"
           ;;
         pre_resize)
-          i3-msg -s "$OUT/i3.sock" 'floating enable, resize set 1480 880, move position 40 30' >"$OUT/i3_resize.json" 2>&1 || true
+          wm_moveresize 40 30 1480 880 >"$OUT/wm_resize.json" 2>&1 || true
           ;;
         resized)
           read_pane ""
@@ -214,7 +214,7 @@ while kill -0 "$CP" 2>/dev/null; do
           record_spike_report "resized" "$PCB_XID" "{\"pane_x\":$VX,\"pane_y\":$VY,\"pane_w\":$VW,\"pane_h\":$VH}"
           ;;
         pre_move)
-          i3-msg -s "$OUT/i3.sock" 'move position 210 130' >"$OUT/i3_move.json" 2>&1 || true
+          wm_moveresize 210 130 >"$OUT/wm_move.json" 2>&1 || true
           ;;
         pure_moved)
           read_pane ""
@@ -287,9 +287,11 @@ while kill -0 "$CP" 2>/dev/null; do
           if [ "$EMBED_MODE" = fork ]; then
             HX=$((RX + PW * 3 / 4)); HY=$((RY + PH / 2))
             python3 "$XINPUT_PY" move "$HX" "$HY"; sleep 0.4
-            import -window root -crop "$((PW / 2))x$((PH / 2))+$((RX + PW / 2 - PW / 4))+$((RY + PH / 4))" "$OUT/hotkey_before.png" 2>/dev/null || true
+            # the frame's own picture (the screen's root has none under mutter's rootless Xwayland), its middle quarter
+            SHOWN_XID=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("shown") or 0)' "$R_SHOWN")
+            import -window "$SHOWN_XID" -crop "$((PW / 2))x$((PH / 2))+$((PW / 4))+$((PH / 4))" "$OUT/hotkey_before.png" 2>/dev/null || true
             python3 "$XINPUT_PY" key F2; sleep 1.2
-            import -window root -crop "$((PW / 2))x$((PH / 2))+$((RX + PW / 2 - PW / 4))+$((RY + PH / 4))" "$OUT/hotkey_after.png" 2>/dev/null || true
+            import -window "$SHOWN_XID" -crop "$((PW / 2))x$((PH / 2))+$((PW / 4))+$((PH / 4))" "$OUT/hotkey_after.png" 2>/dev/null || true
             python3 -c 'import sys
 from PIL import Image, ImageChops
 a, b = (Image.open(f).convert("RGB") for f in sys.argv[1:3])
@@ -305,10 +307,10 @@ print(d.histogram()[255])' "$OUT/hotkey_before.png" "$OUT/hotkey_after.png" >"$O
           sleep 0.25
           ;;
         pre_resize)
-          i3-msg -s "$OUT/i3.sock" 'floating enable, resize set 1480 880, move position 40 30' >"$OUT/i3_resize.json" 2>&1 || true
+          wm_moveresize 40 30 1480 880 >"$OUT/wm_resize.json" 2>&1 || true
           ;;
         pre_move)
-          i3-msg -s "$OUT/i3.sock" 'move position 210 130' >"$OUT/i3_move.json" 2>&1 || true
+          wm_moveresize 210 130 >"$OUT/wm_move.json" 2>&1 || true
           ;;
         pure_moved)
           R_MV=$(last_kicad_report "$OUT/client.log" "moved_pre_popup")

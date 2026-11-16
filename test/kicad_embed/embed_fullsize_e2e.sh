@@ -28,11 +28,14 @@ SOCK=$(last_kicad_report "$OUT/client.log" sock | python3 -c 'import json,sys; p
 [ -n "$SOCK" ] && { sleep 2; python3 "$IPC_PY" run-action "$SOCK" "pcbnew.ZoneFiller.zoneFillAll" >/dev/null 2>&1 || true; }
 for tag in before full_on full_off screen_on screen_off; do
   for _ in $(seq 1200); do grep -q "\"name\":\"$tag\",\"event\":\"mark\"" "$OUT/client.log" 2>/dev/null && break; kill -0 "$CP" 2>/dev/null || break; sleep 0.1; done
-  import -window root "$OUT/shots/$tag.png" 2>/dev/null || true
+  screen_shot "$OUT/shots/$tag.png" 2>/dev/null || true
 done
-geo() {  # the report's pane rect and the shown frame's place on screen: "px py pw ph fx fy fw fh"
+geo() {  # the report's pane rect on screen and the shown frame's place on screen: "px py pw ph fx fy fw fh"
+  # (the pane is in the client window's own coordinates: the window's place on the screen is added, read off the container, which is
+  # the window's child; under i3 the window fills the screen from 0,0, under mutter it sits where mutter put it)
   python3 -c 'import json,sys; r=json.loads(sys.argv[1] or "{}"); p=r.get("pane") or {}; f=next((f for f in r.get("frames",[]) if f.get("xid")==r.get("shown")),{})
-print(p.get("x",-1), p.get("y",-1), p.get("w",-1), p.get("h",-1), f.get("root_x",-1), f.get("root_y",-1), f.get("w",-1), f.get("h",-1))' "$(last_kicad_report "$OUT/client.log" "$1")"; }
+c=r.get("container") or {}; ox=c.get("root_x",0)-c.get("x",0) if "root_x" in c else 0; oy=c.get("root_y",0)-c.get("y",0) if "root_y" in c else 0
+print(p.get("x",-1)+ox if p else -1, p.get("y",-1)+oy if p else -1, p.get("w",-1), p.get("h",-1), f.get("root_x",-1), f.get("root_y",-1), f.get("w",-1), f.get("h",-1))' "$(last_kicad_report "$OUT/client.log" "$1")"; }
 for tag in before full_on full_off screen_on screen_off; do
   read -r PX PY PW PH FX FY FW FH < <(geo $tag)
   echo "INFO $tag: pane $PX,$PY ${PW}x$PH; KiCad's frame $FX,$FY ${FW}x$FH"

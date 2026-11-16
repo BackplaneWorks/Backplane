@@ -268,7 +268,7 @@ GONE=$(python3 -c 'import sys; a=set(sys.argv[1].split()); b=set(sys.argv[2].spl
 check "The earlier rows keep their ids; the new track's finding joins ($NEW)" "$([ -n "$NEW" ] && [ -z "$GONE" ] && echo 1 || echo 0)" "new: $NEW gone: $GONE"
 [ "${CHECKS_STALE_EXCLUSION:-}" = 1 ] && check "The project file keeps its bytes through the checks (the stale exclusion kept, not dropped)" "$([ "$(sha256sum "$PRO" | cut -d' ' -f1)" = "$PRO_SHA0" ] && echo 1 || echo 0)"
 check "Nothing was written to the board file" "$([ "$(sha256sum "$PCB" | cut -d' ' -f1)" = "$SHA0" ] && echo 1 || echo 0)"
-import -window root "$OUT/shots/k3_unsaved.png" 2>/dev/null || true
+screen_shot "$OUT/shots/k3_unsaved.png" 2>/dev/null || true
 
 # K4: a focus selects the finding's exact items in KiCad
 FID=$(python3 -c 'import json,sys; fs=json.load(open(sys.argv[1]))["result"]["findings"]; new=set(sys.argv[2].split())
@@ -279,7 +279,7 @@ sleep 1
 SEL=$(python3 "$IPC_PY" selection "$SOCK" pcb 2>>"$OUT/ipc.err" || echo '{}')
 check "A focus on $FID selects its items in KiCad by id (SelectItems ids: $(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1])["result"]["select"]["ids"]))' "$FO" 2>/dev/null || echo 0), selected $(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("count",0))' "$SEL" 2>/dev/null || echo 0))" \
   "$(python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; s=json.loads(sys.argv[2]); print(int(r["kicad"] and len(r["select"]["ids"])>0 and r.get("ids_not_found",0)==0 and s.get("count",0)>=1))' "$FO" "$SEL" 2>/dev/null || echo 0)" "$(echo "$FO" | cut -c1-300) / $SEL"
-import -window root "$OUT/shots/k4_focus.png" 2>/dev/null || true
+screen_shot "$OUT/shots/k4_focus.png" 2>/dev/null || true
 # K4 timing: ten focuses on different findings with board items, each step's time in the hub (the reply's timing): where a row's press goes
 python3 - "$L3D" >"$OUT/focus_timing.txt" <<'PY' || true
 import json, os, subprocess, sys, statistics
@@ -361,7 +361,7 @@ elif [ "${MX:-0}" != 0 ]; then
   sleep 1.5
   R=$(last_kicad_report "$OUT/client.log" ready)
   read -r FX FY FW FH < <(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); f=next((f for f in r.get("frames",[]) if f.get("xid")==r.get("shown")),{}); print(f.get("root_x",0), f.get("root_y",0), f.get("w",0), f.get("h",0))' "$R")
-  import -window root "$OUT/shots/k5_marker.png" 2>/dev/null || true
+  screen_shot "$OUT/shots/k5_marker.png" 2>/dev/null || true
   read -r CX CY < <(python3 - "$OUT/shots/k5_marker.png" "$FX" "$FY" "$FW" "$FH" <<'PY'
 import sys
 import numpy as np

@@ -467,6 +467,29 @@ int kembed_win_info(
             if (sw > 900) sw = 900;
             if (sh > 700) sh = 700;
             XImage *img = XGetImage(d, DefaultRootWindow(d), x1, y1, (unsigned int)sw, (unsigned int)sh, AllPlanes, ZPixmap);
+            /* a rootless X server (mutter's Xwayland, GNOME as the person runs it) has nothing on its root: the picture is the top-level's
+               own, the window under the root this one is in (its children drawn into it) */
+            {
+                int lit = 0;
+                if (img) for (int py = 12; py < sh - 12 && !lit; py += 37) for (int px = 12; px < sw - 12; px += 41) if (XGetPixel(img, px, py) & 0xffffff) { lit = 1; break; }
+                /* each window from this one up to the root, until one has the picture (the client's top-level does: mutter's frame
+                   round it is a window of its own, redirected apart from it) */
+                Window w = xid, root_ret = 0, par = 0, *kids = NULL; unsigned int nk = 0;
+                while (!lit && w) {
+                    int tx = 0, ty = 0; Window tdummy = 0;
+                    if (XTranslateCoordinates(d, DefaultRootWindow(d), w, x1, y1, &tx, &ty, &tdummy)) {
+                        XImage *img2 = XGetImage(d, w, tx, ty, (unsigned int)sw, (unsigned int)sh, AllPlanes, ZPixmap);
+                        if (img2) {
+                            for (int py = 12; py < sh - 12 && !lit; py += 37) for (int px = 12; px < sw - 12; px += 41) if (XGetPixel(img2, px, py) & 0xffffff) { lit = 1; break; }
+                            if (lit) { if (img) XDestroyImage(img); img = img2; } else XDestroyImage(img2);
+                        }
+                    }
+                    if (!XQueryTree(d, w, &root_ret, &par, &kids, &nk)) break;
+                    if (kids) XFree(kids); kids = NULL;
+                    if (par == 0 || par == root_ret) break;
+                    w = par;
+                }
+            }
             if (img) {
                 unsigned int seen[8];
                 int nseen = 0;
