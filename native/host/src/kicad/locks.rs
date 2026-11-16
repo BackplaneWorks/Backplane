@@ -77,7 +77,7 @@ pub fn inspect(doc: &str) -> Option<Seen> {
 /// A process's command line, its arguments split by NUL (Linux /proc; elsewhere `ps`, split at spaces).
 fn cmdline_of(pid: u32) -> String {
     if let Ok(b) = std::fs::read(format!("/proc/{pid}/cmdline")) { return String::from_utf8_lossy(&b).to_string() }
-    std::process::Command::new("ps").args(["-o", "command=", "-p", &pid.to_string()]).output().ok()
+    crate::proc::std_cmd(crate::proc::Kind::Local, "ps").args(["-o", "command=", "-p", &pid.to_string()]).output().ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().replace(' ', "\0")).unwrap_or_default()
 }
 
@@ -131,7 +131,7 @@ fn holder_pid(path: &Path) -> Option<u32> {
     #[cfg(target_os = "macos")]
     {
         let me = std::process::id();
-        let out = std::process::Command::new("lsof").arg("-t").arg("--").arg(path).output().ok()?;
+        let out = crate::proc::std_cmd(crate::proc::Kind::Local, "lsof").arg("-t").arg("--").arg(path).output().ok()?;
         return String::from_utf8_lossy(&out.stdout).lines().filter_map(|l| l.trim().parse::<u32>().ok()).find(|p| *p != me);
     }
     #[allow(unreachable_code)]
