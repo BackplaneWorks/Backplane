@@ -210,6 +210,14 @@ impl Session {
     }
 }
 
+/// macOS: why this KiCad cannot be in the pane (None: it can). Its frames are other windows over ours, which needs the fork's
+/// macOS embedding (`SetHostGeometry`, capability embed-macos); stock KiCad and older forks (bp.6) open as the KiCad app instead.
+pub fn mac_refusal(macos: bool, mode: &str, desc: &str) -> Option<String> {
+    if !macos { return None }
+    if mode == "fork" && !desc.is_empty() && proto::load(desc).has_own("kiapi.backplane.embed.SetHostGeometry") { return None }
+    Some(if mode == "fork" { "this Backplane KiCad cannot be shown in the pane on macOS: Update KiCad in Settings, CAD (it needs embed-macos)" } else { "only Backplane KiCad can be shown in the pane on macOS" }.into())
+}
+
 /// Whether a show of the session's `active` frame is the client's own map (bp.9+ local map, the frame realized), with nothing else asked
 /// (`plain`: no document, item or remount).
 pub fn local_switch(s: &Session, local_map: bool, plain: bool) -> bool {
@@ -1410,6 +1418,16 @@ impl Actor {
         };
         sess.desc = desc.clone();
         sess.caps = env.caps.clone();
+
+        // macOS: only a fork with the macOS embedding (embed-macos: SetHostGeometry) can be in the pane; any other KiCad (stock, bp.6)
+        // fails at once, so the pane offers the KiCad app as it did before (native_child_mac.rs)
+        if let Some(why) = mac_refusal(cfg!(target_os = "macos"), mode, &desc) {
+            sess.state = "failed".into(); sess.reason = why;
+            let out = sess.info_json();
+            self.sessions.insert(pro.clone(), sess.clone());
+            self.publish_and_reply(&sess, Some(client), reply, Ok(out));
+            return;
+        }
 
         // On Windows, cross-process top-level stock windows are never adopted; publish stock mode ready without spawning a floating window.
         if cfg!(windows) && mode == "stock" {
@@ -3068,6 +3086,9 @@ mod tests {
         assert_eq!(stock_action_for("SCH"), Some("pcbnew.EditorControl.showEeschema"));
         assert_eq!(stock_action_for("PCB_3D"), Some("common.Control.show3DViewer"));
 
+        assert_eq!(mac_refusal(false, "stock", ""), None, "not macOS: nothing changes");
+        assert!(mac_refusal(true, "stock", "").is_some_and(|w| w.contains("only Backplane KiCad")));
+        assert!(mac_refusal(true, "fork", "").is_some_and(|w| w.contains("Update KiCad")), "a fork with no descriptor (bp.6 on macOS)");
         let stock_env = Env { cli: "/usr/bin/kicad-cli".into(), status: "stock".into(), ..Default::default() };
         assert_eq!(mode_with(None, &stock_env, false, None), "stock");
         assert_eq!(mode_with(Some("fork"), &stock_env, false, None), "fork");
