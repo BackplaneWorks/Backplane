@@ -611,10 +611,10 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             if let Some(o)=session.as_object_mut() { o.remove("route"); }
             return Some(json!({"remoteReady":false,"nextTarget":{"kind":"recent","id":""},"session":session,"cmds":cmds,"local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
         },
-        // the bot's name and cat (Settings' cat control: bots/api.rs `cat`): `color\u{1f}#rrggbb` ("" the coat's own), `custom\u{1f}<typed>`,
+        // the bot's name and cat (Settings' cat control: bots/api.rs `catpick`; `cat` is the header's look:mood): `color\u{1f}#rrggbb` ("" the coat's own), `custom\u{1f}<typed>`,
         // `shuffle` (the next coat after the one shown), `auto` (the name's cat again), `go\u{1f}<name>` (Save name); each is one `bots.edit`
         "bot-cat" if bot_page.is_object() => {
-            let bot=text(&p["target"],"id"); if bot.is_empty() || bot_page["cat"].is_null() { return refused("action.bot-cat-unoffered") }
+            let bot=text(&p["target"],"id"); if bot.is_empty() || bot_page["catpick"].is_null() { return refused("action.bot-cat-unoffered") }
             let (k,v)=value.split_once('\u{1f}').unwrap_or((value,""));
             let look=bot_page["look"].as_u64().unwrap_or(0);
             let q=match k {
