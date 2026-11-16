@@ -1421,7 +1421,8 @@ impl Actor {
 
         // macOS: only a fork with the macOS embedding (embed-macos: SetHostGeometry) can be in the pane; any other KiCad (stock, bp.6)
         // fails at once, so the pane offers the KiCad app as it did before (native_child_mac.rs)
-        if let Some(why) = mac_refusal(cfg!(target_os = "macos"), mode, &desc) {
+        // (not in the hub's tests: their stand-in runtimes exercise the attach logic every platform shares; mac_refusal has its own test)
+        if let Some(why) = mac_refusal(cfg!(target_os = "macos") && !cfg!(test), mode, &desc) {
             sess.state = "failed".into(); sess.reason = why;
             let out = sess.info_json();
             self.sessions.insert(pro.clone(), sess.clone());
