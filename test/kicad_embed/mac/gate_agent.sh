@@ -25,6 +25,7 @@ up)
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key><array><string>$DIR/gate_helper</string><string>serve</string><string>$SOCK</string></array>
   <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
   <key>ProcessType</key><string>Interactive</string>
   <key>StandardErrorPath</key><string>$DIR/helper.log</string>
 </dict></plist>

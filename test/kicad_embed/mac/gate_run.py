@@ -27,11 +27,14 @@ def state():
     if r.returncode:
         return None, None
     st = code = None
-    for line in r.stdout.splitlines():
-        line = line.strip()
-        if line.startswith('state = '):
+    for raw in r.stdout.splitlines():
+        # the job's own lines are indented once; nested sections (its endpoints, spawn) have their own "state = active"
+        if not raw.startswith('\t') or raw.startswith('\t\t'):
+            continue
+        line = raw.strip()
+        if line.startswith('state = ') and st is None:
             st = line.split('= ', 1)[1]
-        elif line.startswith('last exit code = '):
+        elif line.startswith('last exit code = ') and code is None:
             code = line.split('= ', 1)[1]
     return st, code
 
@@ -59,9 +62,10 @@ def main():
             print(f'bootstrap failed: {r.stderr.strip()}', file=sys.stderr)
             return 2
         time.sleep(2)
+        # launchd says "active" or "running" while it runs (and "spawn scheduled" before); done once it has an exit code
         while True:
             st, code = state()
-            if st != 'running':
+            if st is None or (st not in ('running', 'active', 'spawn scheduled') and code not in (None, '(never exited)')):
                 break
             time.sleep(3)
         print(f'{LABEL}: {st}, last exit code {code}', flush=True)

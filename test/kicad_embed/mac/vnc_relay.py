@@ -62,8 +62,11 @@ def serve(path, client, scale):
                     out = {'ok': False, 'error': f'unknown op {op!r}'}
             except Exception as e:  # one bad request never ends the relay
                 out = {'ok': False, 'error': f'{type(e).__name__}: {e}'}
-            f.write(json.dumps(out) + '\n')
-            f.flush()
+            try:
+                f.write(json.dumps(out) + '\n')
+                f.flush()
+            except OSError:  # the asker left before its answer
+                break
         conn.close()
 
 

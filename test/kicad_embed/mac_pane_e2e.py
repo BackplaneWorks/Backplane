@@ -24,6 +24,8 @@ import json, os, shutil, socket, subprocess, sys, tempfile, time
 DRIVER = os.environ.get('MAC_DRIVER', 'quartz')
 # event flags as Quartz numbers (kCGEventFlagMask*), so neither driver needs the other's modules
 CMD, CTRL, SHIFT, ALT = 0x100000, 0x40000, 0x20000, 0x80000
+# macOS virtual key codes
+K_A, K_K, K_ESC, K_B, K_J, K_C, K_TAB, K_DEL, K_F, K_COMMA = 0, 40, 53, 11, 38, 8, 48, 51, 3, 43
 
 if DRIVER == 'quartz':
     import Quartz
@@ -115,7 +117,8 @@ else:
 
     def win_full(pid, on):
         if on:
-            b = _main(pid)[3]; relay(op='click', x=b[0] + 52, y=b[1] + 13)
+            # the window active first (its title bar): a click on an inactive window's green button only activates it
+            b = _main(pid)[3]; relay(op='click', x=b[0] + 120, y=b[1] + 12); time.sleep(0.6); relay(op='click', x=b[0] + 52, y=b[1] + 13)
         else:
             relay(op='chord', combo='ctrl+cmd+f')
 
@@ -151,7 +154,11 @@ for v in ('10.0', '10.99'):
 tmp = tempfile.mkdtemp(prefix='bpk-', dir='/tmp')   # a Unix socket path is at most 104 bytes on macOS
 port = 3893
 env = dict(os.environ, HOME=os.path.join(OUT, 'fh'), TMPDIR=tmp, BACKPLANE_KICAD_CLI=os.path.join(RT, 'bin/kicad-cli'),
-           BACKPLANE_AGENTS=os.path.join(OUT, 'bin'), BACKPLANE_NO_UPDATE='1', BACKPLANE_KICAD_DEBUG='1', BACKPLANE_KICAD_EMBED_TRACE=os.path.join(OUT, 'kicad-embed-trace.log'), FAKE_LOG=os.path.join(OUT, 'standin.log'))
+           BACKPLANE_AGENTS=os.path.join(OUT, 'bin'), BACKPLANE_NO_UPDATE='1', BACKPLANE_KICAD_DEBUG='1', BACKPLANE_KICAD_EMBED_TRACE=os.path.join(OUT, 'kicad-embed-trace.log'), FAKE_LOG=os.path.join(OUT, 'standin.log'),
+           # the Mac mini gate: KiCad's documents folder in the test home. Its default, ~/Documents/KiCad, makes macOS ask the hub (KiCad's
+           # responsible process) for the Documents folder, and KiCad's UI thread waits on the answer: first Edit stalled 30 s, then
+           # "KiCad could not start" (a person's first Edit meets the same prompt; the runner has TCC granted)
+           **({'KICAD_DOCUMENTS_HOME': os.path.join(OUT, 'fh', 'Documents')} if DRIVER == 'vnc' else {}))
 hub = subprocess.Popen([HUB, '--home', os.path.join(OUT, 'home'), '--port', str(port), '--host', '127.0.0.1', '--no-tailscale', '--foreground'],
                        env=env, stdout=open(os.path.join(OUT, 'hub.log'), 'w'), stderr=subprocess.STDOUT); procs.append(hub)
 wait_for(lambda: subprocess.run(['curl', '-s', '-m1', '-o', '/dev/null', f'http://127.0.0.1:{port}/hello']).returncode == 0, 30)
@@ -177,8 +184,22 @@ def last_push():
     return v
 
 
+def backing_scale():
+    """The client window's pixels per point: its own log says the pane in pixels (pane_px) beside the rect pushed to KiCad in points
+    (1 on the e2e-macos runner, 2 on a Retina Mac: the mini's rects were twice their point positions and every rect click missed)."""
+    s = 1.0
+    for l in client_log().splitlines():
+        if '"kicad_host_push"' in l:
+            try:
+                j = json.loads(l.split('GPUI_LOG ', 1)[1])
+                if j.get('pane_px') and j['kicad_host_push'][2]: s = j['pane_px'][2] / j['kicad_host_push'][2]
+            except Exception: pass
+    return round(s * 4) / 4 or 1.0
+
+
 def rects():
-    """The client's control rects (BACKPLANE_GPUI_RECTS: lists of {id, x, y, w, h} in window points, from the content's top-left), latest."""
+    """The client's control rects (BACKPLANE_GPUI_RECTS: lists of {id, x, y, w, h} in window pixels, from the content's top-left), latest,
+    in window points."""
     r = {}
     for l in client_log().splitlines():
         if 'GPUI_METRIC ' in l and '"rects"' in l:
@@ -186,7 +207,8 @@ def rects():
                 for e in json.loads(l.split('GPUI_METRIC ', 1)[1]).get('rects', []) or []:
                     if isinstance(e, dict) and 'id' in e: r[e['id']] = e
             except Exception: pass
-    return r
+    k = backing_scale()
+    return {i: dict(e, x=e['x'] / k, y=e['y'] / k, w=e['w'] / k, h=e['h'] / k) for i, e in r.items()} if k != 1 else r
 
 
 try:
@@ -211,7 +233,7 @@ try:
     cw = next((w for w in wins() if cw and w[0] == cw[0]), cw)
     inside = f and cw and cw[3][0] <= f[3][0] and cw[3][1] <= f[3][1] and f[3][0] + f[3][2] <= cw[3][0] + cw[3][2] + 1 and f[3][1] + f[3][3] <= cw[3][1] + cw[3][3] + 1
     check(bool(f) and bool(inside), f'Edit: KiCad\'s board editor is over the pane, directly above Backplane ({f and f[3]} in {cw and cw[3]}, {RES["edit_to_frame_s"]} s)')
-    if not f: raise SystemExit
+    if not f: raise SystemExit(1)
     kpid = f[1]
     # ---- the frame's rect is the pane's, within 1 px, at first show and after each layout change ----
     def matches(tag):
