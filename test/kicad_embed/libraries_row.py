@@ -283,7 +283,34 @@ def linux_runtime_paths(c):
             "Backplane footprint libraries": (os.path.join(bl, "libraries"), r"^Backplane_.*\.pretty$", 6), "Backplane 3D models": (os.path.join(bl, "3dmodels"), r"\.3dshapes$", 3)}
 
 
+def macos_runtime_defaults(c):
+    ss = os.path.join(c["runtime_root"], "KiCad.app", "Contents", "SharedSupport")
+    d = {"BACKPLANE_KICAD_LIBRARY": (os.path.join(ss, "backplane-library"), "KiCad's built-in default for the bundle (global-tables-seeded): <SharedSupport>/backplane-library; "
+                                     "KiCad.app started by the hub has no shell environment, so nothing else sets it")}
+    for k, sub in (("KICAD10_SYMBOL_DIR", "symbols"), ("KICAD10_FOOTPRINT_DIR", "footprints"), ("KICAD10_3DMODEL_DIR", "3dmodels"), ("KICAD10_TEMPLATE_DIR", "template")):
+        d[k] = (os.path.join(ss, sub), "KiCad's default (the bundle's SharedSupport)")
+    return d
+
+
+def macos_runtime_paths(c):
+    ss = os.path.join(c["runtime_root"], "KiCad.app", "Contents", "SharedSupport"); bl = os.path.join(ss, "backplane-library")
+    return {"standard symbols": (os.path.join(ss, "symbols"), r"\.kicad_sym(dir)?$", 50), "standard footprints": (os.path.join(ss, "footprints"), r"\.pretty$", 50),
+            "standard 3D models": (os.path.join(ss, "3dmodels"), r"\.3dshapes$", 20), "templates": (os.path.join(ss, "template"), r".", 1),
+            "default global tables": (ss, r"^(sym|fp)-lib-table$", 2),
+            "Backplane footprint libraries": (os.path.join(bl, "libraries"), r"^Backplane_.*\.pretty$", 6), "Backplane 3D models": (os.path.join(bl, "3dmodels"), r"\.3dshapes$", 3)}
+
+
+def macos_sign_check(c):
+    app = os.path.join(c["runtime_root"], "KiCad.app")
+    q = subprocess.run(["xattr", "-r", c["runtime_root"]], capture_output=True, text=True).stdout.count("com.apple.quarantine")
+    cs = subprocess.run(["codesign", "--verify", "--deep", "--strict", app], capture_output=True, text=True)
+    return [("PASS" if q == 0 else "FAIL", "nothing in the runtime is quarantined", f"{q} quarantined"),
+            ("PASS" if cs.returncode == 0 else "FAIL", "KiCad.app passes codesign --verify --deep --strict, the libraries inside", (cs.stderr or "").strip()[:300])]
+
+
 PLATFORM = {
+    "macos": {"runtime_defaults": macos_runtime_defaults, "runtime_paths": macos_runtime_paths, "sign_check": macos_sign_check,
+              "chooser_lists": lambda c: [("SKIP", "the choosers are opened in the pane by mac_pane_e2e.py (MAC_MODE=libs, its L6 rows and screenshots)", "")]},
     "linux": {"runtime_defaults": linux_runtime_defaults, "runtime_paths": linux_runtime_paths,
               "sign_check": lambda c: [("SKIP", "signing (macOS and Windows only)", "")],
               "chooser_lists": lambda c: [("SKIP", "the choosers' lists are read on the GUI rows (macOS, Windows); Linux reads the tables (L3)", "")]},

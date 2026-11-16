@@ -166,6 +166,13 @@ if os.environ.get('MAC_MODE') == 'libs':
     for _e in ('kicad_pcb', 'kicad_sch'): shutil.copy(os.path.join(_gd, f'libgate.{_e}'), os.path.join(_p, f'ecc83-pp.{_e}'))
     subprocess.run(['git', '-C', _p, 'commit', '-qam', 'libs gate: a new design'], capture_output=True)
     subprocess.run(['git', '-C', _p, 'push', '-q', 'origin', 'HEAD'], capture_output=True)
+    # the runtime where the hub's installer puts it, <home>/kicad/<version> (L1: the hub's managed one): an APFS clone, instant, no space
+    _ver = json.load(open(os.path.join(RT, 'manifest.json')))['version']
+    _managed = os.path.join(OUT, 'home', 'kicad', _ver)
+    if not os.path.isdir(_managed):
+        os.makedirs(os.path.dirname(_managed), exist_ok=True)
+        subprocess.run(['cp', '-cR', RT, _managed], check=True)
+    RT = _managed
     # the Mac has no bun for the stand-in agent: the Python one, same mcpcall protocol
     with open(os.path.join(OUT, 'bin/claude'), 'w') as f:
         f.write('#!/bin/sh\nexec /usr/bin/python3 ' + os.path.join(REPO, 'test/kicad_embed/mac/standin_agent.py') + ' "$@"\n')
@@ -320,97 +327,18 @@ try:
         token = open(os.path.join(OUT, 'home/token')).read().strip()
         cli = os.path.join(RT, 'bin/kicad-cli')
         SS = os.path.join(RT, 'KiCad.app/Contents/SharedSupport')
-        # L1: the installed copy as macOS sees it
-        q = subprocess.run(['xattr', '-r', RT], capture_output=True, text=True).stdout.count('com.apple.quarantine')
-        cs = subprocess.run(['codesign', '--verify', '--deep', '--strict', os.path.join(RT, 'KiCad.app')], capture_output=True, text=True)
-        check(q == 0 and cs.returncode == 0, f'L1: nothing quarantined ({q}) and KiCad.app passes codesign --verify --deep --strict ({(cs.stderr or "ok").strip()[:200]})')
-        # L2: the libraries inside the signed bundle
-        lsd = lambda d: os.listdir(d) if os.path.isdir(d) else []
-        syms = [n for n in lsd(os.path.join(SS, 'symbols')) if n.endswith(('.kicad_sym', '.kicad_symdir'))]
-        fps = [n for n in lsd(os.path.join(SS, 'footprints')) if n.endswith('.pretty')]
-        m3d = [n for n in lsd(os.path.join(SS, '3dmodels')) if n.endswith('.3dshapes')]
-        bpl = os.path.join(SS, 'backplane-library')
-        bfps = [d for r, ds, _ in os.walk(bpl) for d in ds if d.endswith('.pretty')]
-        bstep = [f for r, _, fs in os.walk(bpl) for f in fs if f.lower().endswith(('.step', '.stp'))]
-        tbl = {t: os.path.isfile(os.path.join(SS, 'template', t)) for t in ('sym-lib-table', 'fp-lib-table')}
-        RES['L2'] = {'symbol_libs': len(syms), 'footprint_libs': len(fps), 'model_dirs': len(m3d), 'backplane_pretty': len(bfps), 'backplane_step': len(bstep), 'template_tables': tbl}
-        print('L2 ' + json.dumps(RES['L2']), flush=True)
-        check(len(syms) > 100 and len(fps) > 100 and all(tbl.values()), f'L2: the standard symbols ({len(syms)}) and footprints ({len(fps)}) and the template tables are inside KiCad.app')
-        check(len(m3d) > 50, f'L2: the standard 3D models are inside KiCad.app ({len(m3d)} .3dshapes)')
-        check(len(bfps) >= 6 and len(bstep) > 0, f'L2: the Backplane library ({len(bfps)} footprint libraries, {len(bstep)} STEP models) is inside KiCad.app')
-        # L3: the global tables KiCad seeded on this clean profile, every URI resolved from the runtime's defaults
-        gdir = os.path.join(OUT, 'fh/Library/Preferences/kicad/10.99')
-        VARS = {'KICAD10_TEMPLATE_DIR': os.path.join(SS, 'template'), 'KICAD10_SYMBOL_DIR': os.path.join(SS, 'symbols'), 'KICAD10_FOOTPRINT_DIR': os.path.join(SS, 'footprints'),
-                'KICAD10_3DMODEL_DIR': os.path.join(SS, '3dmodels'), 'BACKPLANE_KICAD_LIBRARY': bpl, 'KICAD9_TEMPLATE_DIR': os.path.join(SS, 'template'),
-                'KICAD9_SYMBOL_DIR': os.path.join(SS, 'symbols'), 'KICAD9_FOOTPRINT_DIR': os.path.join(SS, 'footprints')}
-        def entries(path, seen=None):
-            seen = seen or set()
-            if path in seen or not os.path.isfile(path): return []
-            seen.add(path); out = []
-            for name, uri in _re.findall(r'\(lib\s+\(name\s+"([^"]+)"\)\s*\(type\s+"[^"]*"\)\s*\(uri\s+"([^"]+)"\)', open(path, errors='replace').read()):
-                real = _re.sub(r'\$\{(\w+)\}', lambda m: VARS.get(m.group(1), '${' + m.group(1) + '}'), uri)
-                out.append((name, uri, real))
-                if real.endswith('-lib-table'): out += entries(real, seen)
-            return out
-        ok3 = True
-        for t in ('sym-lib-table', 'fp-lib-table'):
-            p = os.path.join(gdir, t); e = entries(p)
-            bp = [n for n, u, _ in e if 'BACKPLANE_KICAD_LIBRARY' in u]
-            missing = [(n, r) for n, u, r in e if not r.endswith('-lib-table') and not os.path.exists(r)]
-            RES[f'L3_{t}'] = {'exists': os.path.isfile(p), 'entries': len(e), 'backplane': bp, 'unresolved': missing[:5]}
-            print(f'L3 {t} ' + json.dumps(RES[f'L3_{t}']), flush=True)
-            ok3 = ok3 and os.path.isfile(p) and len(e) > 50 and not missing and (t == 'sym-lib-table' or len(bp) == 6)
-        check(ok3, 'L3: the global tables KiCad seeded on a clean profile list the standard libraries and the 6 Backplane footprint libraries, every URI resolving')
-        # L4, L5, L7: the shared design (lib/libgate_design.py) by the stand-in agent's kicad_edit and kicad_ipc
-        def mcpcalls(): return [l.rstrip('\n') for l in open(os.path.join(OUT, 'standin.log'), errors='replace')] if os.path.isfile(os.path.join(OUT, 'standin.log')) else []
-        def ask(name, args, tag, wait=900):
-            n0 = sum(1 for l in mcpcalls() if l.startswith('MCPCALL'))
-            hub_ws.send(port, token, 'turn.start', {'thread': 't1', 'text': 'mcpcall:' + json.dumps({'name': name, 'arguments': args}), 'msg': f'lg-{tag}-{time.time_ns()}'})
-            wait_for(lambda: sum(1 for l in mcpcalls() if l.startswith('MCPCALL')) > n0, wait, 0.5)
-            return next((l for l in reversed(mcpcalls()) if l.startswith(f'MCPCALL {name} ')), '')
-        def answer(line):
-            try:
-                j = json.loads(line.split(' ', 2)[2]); t = j['result']['content'][0]['text']
-                try: return json.loads(t)
-                except ValueError: return t
-            except Exception: return line
         proj = os.path.join(OUT, 'proj')
-        gd = proj
         gsch, gpcb = os.path.join(proj, 'ecc83-pp.kicad_sch'), os.path.join(proj, 'ecc83-pp.kicad_pcb')
-        a1 = ask('kicad_edit', {'path': gsch, 'message': 'libs gate: C1, C2 in parallel', 'ops': LG.schematic_ops()}, 'sch')
-        st = open(gsch, errors='replace').read()
-        check(st.count('(lib_id "Device:C")') >= 2 and '"Capacitor_SMD:C_0603_1608Metric"' in st and '"Backplane_Passives_Nominal:C_0805_2012Metric"' in st and '"N1"' in st and '"N2"' in st,
-              f'L4: the agent\'s kicad_edit puts C1 (Device:C, C_0603) and C2 (Device:C, Backplane_Passives_Nominal:C_0805) in parallel on N1/N2 ({a1[:300]})')
-        net = os.path.join(gd, 'libgate.net')
-        ex = subprocess.run([cli, 'sch', 'export', 'netlist', '--format', 'kicadsexpr', '-o', net, gsch], capture_output=True, text=True, env=env, timeout=300)
-        a2 = ask('kicad_edit', {'path': gpcb, 'message': 'libs gate: update from the schematic', 'ops': LG.netlist_ops(net)}, 'net')
-        a3 = ask('kicad_edit', {'path': gpcb, 'message': 'libs gate: place and route', 'ops': LG.board_ops()}, 'pcb')
-        bt = open(gpcb, errors='replace').read()
-        check('Capacitor_SMD:C_0603_1608Metric' in bt and 'Backplane_Passives_Nominal:C_0805_2012Metric' in bt, f'L4: the board is updated from the schematic, both footprints from their libraries (netlist rc {ex.returncode}; {a2[:300]})')
-        check(bt.count('(segment') >= 2 and '"failed"' not in a3, f'L4: the agent places both inside the outline and routes N1 and N2 ({a3[:300]})')
-        step, bstp = os.path.join(OUT, 'libgate.step'), os.path.join(OUT, 'libgate_board.step')
-        e1 = subprocess.run([cli, 'pcb', 'export', 'step', '--force', '-o', step, gpcb], capture_output=True, text=True, env=env, timeout=900)
-        e2 = subprocess.run([cli, 'pcb', 'export', 'step', '--force', '--board-only', '-o', bstp, gpcb], capture_output=True, text=True, env=env, timeout=900)
-        rd = lambda f: open(f, errors='replace').read() if os.path.isfile(f) else ''
-        bmodel = os.path.join(bpl, '3dmodels/Capacitor_SMD.3dshapes/C_0805_2012Metric.step')
-        smodel = os.path.join(SS, '3dmodels/Capacitor_SMD.3dshapes/C_0603_1608Metric.step')
-        r5 = LG.step_has_model(rd(step), rd(bstp), rd(bmodel)); RES['L5_backplane'] = r5
-        check(e1.returncode == 0 and e2.returncode == 0 and os.path.isfile(bmodel) and r5['ok'], f'L5: the board\'s STEP includes C2\'s Backplane 3D model, inside the bundle ({json.dumps(r5)[:300]}; {(e1.stdout + e1.stderr)[-200:]})')
-        r5s = LG.step_has_model(rd(step), rd(bstp), rd(smodel)) if os.path.isfile(smodel) else {'ok': False, 'by': 'no standard model ' + smodel}; RES['L5_standard'] = r5s
-        check(os.path.isfile(smodel) and r5s['ok'] and r5s.get('by') == 'product name', f'L5: a standard footprint\'s 3D model (C1\'s C_0603_1608Metric) resolves in the STEP export ({json.dumps(r5s)[:300]})')
-        for kind, path in (('sch', gsch), ('pcb', gpcb)):
-            rpt = os.path.join(OUT, f'libgate_{kind}.json')
-            args = [cli, kind, 'erc' if kind == 'sch' else 'drc', '--severity-all', '--format', 'json', '-o', rpt] + (['--schematic-parity'] if kind == 'pcb' else []) + [path]
-            o = subprocess.run(args, capture_output=True, text=True, env=env, timeout=600)
-            n = LG.count_cli(json.load(open(rpt))) if os.path.isfile(rpt) else None; RES[f'L7_cli_{kind}'] = n
-            check(bool(n) and n['violations'] == 0 and n.get('unconnected', 0) == 0 and n.get('parity', 0) == 0,
-                  f'L7: kicad-cli {"ERC" if kind == "sch" else "DRC with schematic parity"} of the fresh design: nothing found ({n}; rc {o.returncode})')
-        for kind, path, extra in (('FK_PCB', gpcb, {'parity': True}), ('FK_SCH', gsch, {})):
-            ask('kicad_ipc', {'path': path, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': kind, **extra}}, f'run-{kind}')
-            time.sleep(20)
-            ans = ask('kicad_ipc', {'path': path, 'type': 'kiapi.backplane.embed.GetMarkers', 'message': {'kind': kind}}, f'mk-{kind}')
-            m = LG.count_markers(answer(ans)); RES[f'L7_editor_{kind}'] = m
-            check(m is not None and m['count'] == 0, f'L7: in the editor, KiCad\'s {"DRC with parity" if kind == "FK_PCB" else "ERC"} of the fresh design leaves no marker ({m}; {ans[:200]})')
+        # L1-L5, L7, L9: lane J's libraries_row.py (one definition for the three platforms; its macOS hooks), on this pane's project
+        cfgp = os.path.join(OUT, 'libraries_row.json')
+        json.dump({'out': OUT, 'port': port, 'token_file': os.path.join(OUT, 'home/token'), 'hub_rpc': ['/usr/bin/python3', os.path.join(REPO, 'test/kicad_embed/mac/hub_rpc.py')],
+                   'standin_log': os.path.join(OUT, 'standin.log'), 'thread': 't1', 'runtime_root': RT, 'kicad_cli': cli, 'managed_parent': os.path.join(OUT, 'home', 'kicad'),
+                   'config_root': os.path.join(OUT, 'fh/Library/Preferences/kicad'), 'settings_version': '10.99', 'project_dir': proj,
+                   'pcb': gpcb, 'sch': gsch, 'platform': 'macos'}, open(cfgp, 'w'))
+        r = subprocess.run([sys.executable, os.path.join(REPO, 'test/kicad_embed/libraries_row.py'), 'a', cfgp], capture_output=True, text=True, env=env, timeout=3600)
+        for line in (r.stdout + r.stderr).splitlines():
+            print('  ' + line, flush=True)
+            if line.startswith(('PASS ', 'FAIL ')): check(line.startswith('PASS '), 'libraries_row ' + line.split(' ', 1)[1][:300])
         # L6: the embedded choosers list the libraries (their titles say how many items loaded: read from the screenshots)
         cwp = next((w for w in wins() if w[0] == cw[0]), cw)
         def chooser(tab, key_name, name):
