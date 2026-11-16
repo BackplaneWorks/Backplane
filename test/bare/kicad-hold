@@ -1,0 +1,1 @@
+10.99.0-bp.12.4 bp.12.5 adds only the macOS build: Linux has no change in function from bp.12.4, so install.rs keeps LINUX on bp.12.4 (integrator, Nov 16)
