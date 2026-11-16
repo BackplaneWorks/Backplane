@@ -348,7 +348,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
         if (projects.isEmpty() && threads.isEmpty() && hist.count == 0) {
             // no project yet: Bub (and what the hub's sections hold, Needs you) still lead the list; the empty state and Add a project come under them
             LazyColumn(Modifier.fillMaxSize().testTag("home.list")) {
-                items(DataClient.bots.filter { it.uber && it.thread.isNotEmpty() }, key = { "u:${it.id}" }) { b -> SidebarRow("@", b.name, onMachine(Msg.android_kind_uberbot, b.mark)) { open(b.thread) } }
+                items(DataClient.bots.filter { it.uber && it.thread.isNotEmpty() }, key = { "u:${it.id}" }) { b -> SidebarRow("@", b.name, onMachine(Msg.android_kind_uberbot, b.mark), lead = botCat(b)) { open(b.thread) } }
                 if (DataClient.has("sections") && DataClient.sections.isNotEmpty()) sectionItems(open, { secPage = it }, { secMenu = it }, { secRename = it }, openSwarm)
                 item("empty") {
                     Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -359,7 +359,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             }
         } else LazyColumn(Modifier.fillMaxSize().testTag("home.list"), state = listState) {
             val uber = DataClient.bots.filter { it.uber && it.thread.isNotEmpty() }
-            items(uber, key = { "u:${it.id}" }) { b -> SidebarRow("@", b.name, onMachine(b.note.ifEmpty { Msg.android_kind_uberbot }, b.mark)) { open(b.thread) } }
+            items(uber, key = { "u:${it.id}" }) { b -> SidebarRow("@", b.name, onMachine(b.note.ifEmpty { Msg.android_kind_uberbot }, b.mark), lead = botCat(b)) { open(b.thread) } }
             var at = uber.size; rowOf.clear()
             // a hub with sections (docs/ALWAYS-ON.md section 8): Needs you, Pinned, Active, the groups, Quiet, as it presents them; else every project
             val sectioned = DataClient.has("sections") && DataClient.sections.isNotEmpty()
@@ -431,7 +431,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             }
             val bots = DataClient.bots.filter { !it.uber }
             if (bots.isNotEmpty()) { item("bots") { DMono(Msg.plane_heading_bots, dfaint, 11, Modifier.fillMaxWidth().padding(start = 12.dp, top = 12.dp, bottom = 4.dp)) }
-                items(bots, key = { "b:${it.id}" }) { b -> SidebarRow("@", b.name, onMachine(Msg.android_kind_bot, b.mark), onLong = if (b.delete) ({ botDelete = b }) else null) { if (b.thread.isNotEmpty()) open(b.thread) } } }
+                items(bots, key = { "b:${it.id}" }) { b -> SidebarRow("@", b.name, onMachine(Msg.android_kind_bot, b.mark), onLong = if (b.delete) ({ botDelete = b }) else null, lead = botCat(b)) { if (b.thread.isNotEmpty()) open(b.thread) } } }
             if (DataClient.rooms.isNotEmpty()) { item("rooms") { DMono(Msg.plane_heading_rooms, dfaint, 11, Modifier.fillMaxWidth().padding(start = 12.dp, top = 12.dp, bottom = 4.dp)) }
                 items(DataClient.rooms, key = { "r:${it.id}" }) { r -> SidebarRow("#", r.name, onMachine(Msg.android_kind_room, r.mark), onLong = if (r.delete) ({ roomDelete = r }) else null) { openRoom(r) } } }
         }
@@ -881,6 +881,10 @@ private fun AskCard(tid: String, e: DEntry) {
     }
 }
 
+/** A bot row's cat (feature cats; the uberbot's larger, as the desktop's sidebar has it), or null: the row keeps its @. */
+private fun botCat(b: DataClient.Bot): (@Composable () -> Unit)? =
+    if (!DataClient.has("cats")) null else ({ BotCat(b.look, b.color, if (b.uber) 56.dp else 28.dp) })
+
 // ---- settings, folders, new thread
 @Composable
 private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Unit, mcp: () -> Unit, improve: () -> Unit) {
@@ -906,6 +910,8 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
                 DBtn(Msg.android_hub, false, modifier = Modifier.testTag("settings.hub"), onClick = hub)
                 DBtn(Msg.android_hub_add, false, modifier = Modifier.testTag("settings.hub.add")) { DataClient.pairingError = ""; DataClient.adding = true }
             }
+            // the uberbot's name and cat (feature cats), beside the agents' settings
+            if (DataClient.has("cats")) UberSettings()
             // the agents' accounts, and the MCP servers every agent gets (feature mcpsettings)
             if (DataClient.has("accounts") || DataMcp.available) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (DataClient.has("accounts")) DBtn(Msg.android_accounts, false, modifier = Modifier.testTag("settings.accounts"), onClick = accounts)

@@ -4100,6 +4100,11 @@ android.swarm.gone	That swarm is not on this hub.	そのスウォームはこの
 android.swarm.provider	Provider	プロバイダー
 android.swarm.model	Model	モデル
 android.buy.ask	Start a buy thread for {project}?	{project} の購入スレッドを開始しますか？
+cat.cat	Cat	猫
+cat.own	Its own	元の色
+cat.different	Different cat	別の猫
+cat.auto	The name's cat	名前の猫
+cat.color.bad	Type a colour like #6fb3f2.	#6fb3f2 のように色を入力してください。
 sidebar.sections.needs	Needs you	対応が必要
 sidebar.sections.pinned	Pinned	ピン留め
 sidebar.sections.active	Active	進行中

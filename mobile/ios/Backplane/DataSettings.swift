@@ -32,7 +32,7 @@ struct DataSettingsView: View {
         if client.has("accounts") { top.append(DSettingsGroup(id: "settings.accounts", icon: "person.2", title: Tr.t("Accounts & Usage"), page: DPage(name: "accounts"))) }
         top.append(DSettingsGroup(id: "settings.hubs", icon: "server.rack", title: Tr.t("Hubs"), page: DPage(name: DSettingsPage.hubs.rawValue)))
         var work: [DSettingsGroup] = []
-        if client.has("mcpsettings") || client.has("voice") { work.append(DSettingsGroup(id: "settings.agents", icon: "cpu", title: Tr.t("Agents"), page: DPage(name: DSettingsPage.agents.rawValue))) }
+        if client.has("mcpsettings") || client.has("voice") || client.has("cats") { work.append(DSettingsGroup(id: "settings.agents", icon: "cpu", title: Tr.t("Agents"), page: DPage(name: DSettingsPage.agents.rawValue))) }
         if client.has("machines") || client.has("devices") { work.append(DSettingsGroup(id: "settings.machines", icon: "desktopcomputer", title: Tr.t("Machines & devices"), page: DPage(name: DSettingsPage.machines.rawValue))) }
         let phone = [DSettingsGroup(id: "settings.notifications", icon: "bell", title: Tr.t("Notifications"), page: DPage(name: DSettingsPage.notifications.rawValue)),
                      DSettingsGroup(id: "settings.appearance", icon: "textformat", title: Tr.t("Appearance"), page: DPage(name: DSettingsPage.appearance.rawValue))]
@@ -55,6 +55,7 @@ struct DataSettingsView: View {
         ]
         if client.has("notifysettings") { all.append(e(Tr.t("Notifications"), notify)) }
         if client.has("ring") { all.append(e(Tr.t("Ring"), notify)) }
+        if client.has("cats") { all += [e(Tr.t("Your uberbot"), agents), e(Tr.t("Name"), agents), e(Tr.t("Colour"), agents), e(Tr.t("Cat"), agents)] }
         if client.has("mcpsettings") { all.append(e(Tr.t("MCP servers"), agents)) }
         if client.has("voice") { all.append(e(Tr.t("Voice"), agents)) }
         if client.has("machines") { all.append(e(Tr.t("Machines"), machines)) }
@@ -167,6 +168,7 @@ struct DataSettingsPageView: View {
                 case .notifications: notifications
                 case .hubs: hubs
                 case .agents:
+                    if client.has("cats") { DataUberSection(client: client); if client.has("mcpsettings") || client.has("voice") { DLine() } }
                     if client.has("mcpsettings") { NavigationLink(value: DPage(name: "mcp")) { Text(Tr.t("MCP servers")) }.buttonStyle(DButton()).accessibilityIdentifier("settings.mcp") }
                     if client.has("voice") { if client.has("mcpsettings") { DLine() }; DataVoiceSection(client: client) }
                 case .machines:

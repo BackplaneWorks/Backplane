@@ -33,4 +33,5 @@ run google-loop GoogleLoopTests.swift "" GoogleLoopLogic.swift
 run swarm-model SwarmModelTests.swift "" SwarmModel.swift
 run section-menu SectionMenuTests.swift "" SectionMenu.swift
 run mcp-page McpPageTests.swift "" McpPage.swift
+run cat-pick CatPickTests.swift "" CatPick.swift
 sh "$ROOT/scripts/mobile/ios-outbox-test.sh" && echo "ok outbox"

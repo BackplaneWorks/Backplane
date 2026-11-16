@@ -3756,6 +3756,11 @@ android.swarm.gone = That swarm is not on this hub.
 android.swarm.provider = Provider
 android.swarm.model = Model
 android.buy.ask = Start a buy thread for {project}?
+cat.cat = Cat
+cat.own = Its own
+cat.different = Different cat
+cat.auto = The name's cat
+cat.color.bad = Type a colour like #6fb3f2.
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number} running
 ios.alerts.ask = Bub can alert you when a thread needs you.
