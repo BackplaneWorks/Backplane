@@ -42,6 +42,9 @@ final class DataClient {
     private(set) var settledMore: [String: String] = [:]   // a project's next page of settled threads
     private(set) var settledBusy: Set<String> = []
     let plots = PlotStore()
+    /// The sheets of the schematic on show (the hub's `sheets`), top first.
+    var sheets: [DSheet] = []
+    var sheetsGen: Int64 = 0
     let voice = VoiceModel()
     let machines = MachinesModel()
     let notify = NotifyModel()
@@ -417,6 +420,8 @@ final class DataClient {
         case "d": push(o)
         case "voice": voice.frame(o)
         case "plot": plots.receiveJSON(o) // why a view has nothing to show (the plots themselves come as binary frames)
+        // a schematic's sheets (kicad/watch.rs `sheets`): the newest tree only (`gen` only grows)
+        case "sheets": let g = Int64(o["gen"] as? String ?? "") ?? 0; if g >= sheetsGen { sheetsGen = g; sheets = DSheet.rows(o["rows"] as? String ?? "") }
         case "star": star = DStarOffer.of(o["offer"])
         case "telemetry.notice": telemetryNotice = DTelemetryNotice.of(o["notice"])
         case "migrating": heardMigration(o)

@@ -43,12 +43,20 @@ struct DInfo: Decodable { var info: String
     enum CodingKeys: String, CodingKey { case info }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); info = c.str(.info) } }
 
+/// One sheet of the schematic on show: its depth in the hierarchy, whether it has none of its own, its name and its file.
+struct DSheet: Identifiable, Equatable { var depth: Int; var leaf: Bool; var name: String; var file: String; var id: String { file + "|" + name }
+    /// The rows of a `sheets` message: `depth TAB leaf TAB name TAB file` a line (the desktop's plot.rs `sheet_rows`).
+    static func rows(_ text: String) -> [DSheet] { text.split(separator: "\n").compactMap { l in let f = l.split(separator: "\t", omittingEmptySubsequences: false).map(String.init); return f.count < 4 ? nil : DSheet(depth: Int(f[0]) ?? 0, leaf: f[1] == "1", name: f[2], file: f[3]) } }
+}
+/// A board's name (its file's stem) and the folder it is in, from the hub's label (`Nodes/NodeGimbal/X/X`): the name always shows whole.
+func boardName(_ label: String) -> (String, String) { if let i = label.lastIndex(of: "/") { return (String(label[label.index(after: i)...]), String(label[..<i])) }; return (label, "") }
+
 extension DataClient {
     func viewerFiles(_ thread: String) async -> DProjectFiles? { try? await call("viewer.files", ["thread": thread]) }
     /// A viewer (tab, file, thread) opens: the last one's plots go at once and late ones for it are dropped (PlotStore.begin/shown);
     /// a 3D view shows its own cached model once the hub names that model's file among the view's.
-    func watch(_ thread: String, kind: String, path: String = "", board: String = "") async throws {
-        var p: [String: Any] = ["thread": thread, "kind": kind]; if !path.isEmpty { p["path"] = path }; if !board.isEmpty { p["board"] = board }
+    func watch(_ thread: String, kind: String, path: String = "", board: String = "", tree: String = "") async throws {
+        var p: [String: Any] = ["thread": thread, "kind": kind]; if !path.isEmpty { p["path"] = path }; if !board.isEmpty { p["board"] = board }; if !tree.isEmpty { p["tree"] = tree }
         let slot = kind.hasPrefix("3d") ? [hubName, thread, kind, path].joined(separator: "|") : ""
         // (a stop changes nothing here: it may come after the next viewer has begun, and that one drops the last one's plots itself)
         var serial = 0
@@ -103,6 +111,8 @@ struct DataViewerView: View {
     @State private var files: DProjectFiles?
     // the project's boards (two or more: the hub's `boards`): a pick shows that board on Board, Schematic, 3D and Split, as the desktop's Boards menu does
     @State private var boardPick = ""
+    @State private var sheetPick = ""
+    @State private var choosing: String?
     init(client: DataClient, thread: DThread, openFile: String = "", line: Int = 0) {
         self.client = client; self.thread = thread; self.openFile = openFile; self.line = line
         // a linked file opens where it belongs: a board or schematic in its tab, a model in Mech, anything else previewed in Files
@@ -123,21 +133,20 @@ struct DataViewerView: View {
             DLine()
             let board = files?.board(boardPick)
             if let on = board, ["Board", "Schematic", "3D", "Split"].contains(tab) {
-                // the board on show and, behind it, the project's other boards (the hub's list)
-                Menu {
-                    ForEach(files?.boards ?? []) { b in
-                        Button { boardPick = b.value; target = nil } label: { if b.value == on.value { Label(b.isDefault ? b.label + " · " + Tr.t("Default board") : b.label, systemImage: "checkmark") } else { Text(b.isDefault ? b.label + " · " + Tr.t("Default board") : b.label) } }
-                    }
-                } label: {
-                    HStack { Text(on.label).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1); Spacer(); Image(systemName: "chevron.down").font(.system(size: 11)).foregroundStyle(BackplaneDesign.dim) }
-                        .padding(.horizontal, 12).padding(.vertical, 9).contentShape(Rectangle())
-                }.accessibilityIdentifier("data.viewer.boards")
-                DLine()
+                // the board on show, its name whole and its folder under it; Change lists every board of the project (the hub's list)
+                let bn = boardName(on.label)
+                DataPickerHead(what: Tr.t("Board"), name: bn.0, sub: bn.1) { choosing = "boards" }.accessibilityIdentifier("data.viewer.boards")
+            }
+            let schPath = target?.tab == "Schematic" ? target!.path : (sheetPick.isEmpty ? (board?.sch ?? "") : sheetPick)
+            if tab == "Schematic", client.sheets.count > 1 {
+                // the sheet on show (the hub's `sheets`, read from the board's top sheet); Change lists the hierarchy
+                let on = client.sheets.first { $0.file == schPath } ?? client.sheets[0]
+                DataPickerHead(what: Tr.t("Sheet"), name: on.name, sub: Tr.ios_viewer_sheets_n(n: client.sheets.count)) { choosing = "sheets" }.accessibilityIdentifier("data.viewer.sheets")
             }
             Group {
                 switch tab {
                 case "Board": DataPlotTab(client: client, thread: thread, kind: "board", path: target?.tab == "Board" ? target!.path : (board?.pcb ?? ""), has: files == nil || !(files?.pcb ?? "").isEmpty || board != nil || target != nil, none: "No board in this project yet")
-                case "Schematic": DataPlotTab(client: client, thread: thread, kind: "schematic", path: target?.tab == "Schematic" ? target!.path : (board?.sch ?? ""), has: files == nil || !(files?.sch ?? "").isEmpty || board != nil || target != nil, none: "No schematic in this project yet")
+                case "Schematic": DataPlotTab(client: client, thread: thread, kind: "schematic", path: schPath, has: files == nil || !(files?.sch ?? "").isEmpty || board != nil || target != nil, none: "No schematic in this project yet", tree: board?.sch ?? "")
                 // unknown files (no hub yet) still open the 3D view: it shows the model it showed last
                 case "3D": DataPlotTab(client: client, thread: thread, kind: "3d", path: board?.pcb ?? "", has: files == nil || !(files?.pcb ?? "").isEmpty || board != nil, none: "No board in this project yet")
                 case "Split": DataSplitTab(client: client, thread: thread, files: files, board: board)
@@ -162,6 +171,66 @@ struct DataViewerView: View {
             #endif
         }
         .onDisappear { Task { try? await client.watch(thread.id, kind: "") } }
+        .onChange(of: boardPick) { _, _ in sheetPick = "" }
+        .sheet(isPresented: Binding(get: { choosing != nil }, set: { if !$0 { choosing = nil } })) {
+            if choosing == "boards", let on = files?.board(boardPick) {
+                DataPickerList(title: Tr.t("Boards"), search: (files?.boards.count ?? 0) > 6, rows: (files?.boards ?? []).map { b in let (n, f) = boardName(b.label); return DataPickerRow(id: b.value, name: n, sub: [f, b.isDefault ? Tr.t("Default board") : ""].filter { !$0.isEmpty }.joined(separator: " · "), on: b.value == on.value, depth: 0) }) { v in boardPick = v; target = nil; choosing = nil }
+            } else {
+                let cur = target?.tab == "Schematic" ? target!.path : (sheetPick.isEmpty ? (files?.board(boardPick)?.sch ?? "") : sheetPick)
+                let onFile = (client.sheets.first { $0.file == cur } ?? client.sheets.first)?.file ?? ""
+                DataPickerList(title: Tr.t("Sheets"), search: client.sheets.count > 10, rows: client.sheets.map { DataPickerRow(id: $0.file, name: $0.name, sub: ($0.file as NSString).lastPathComponent, on: $0.file == onFile, depth: $0.depth) }) { v in sheetPick = v == client.sheets.first?.file ? "" : v; target = nil; choosing = nil }
+            }
+        }
+    }
+}
+
+/// The bar a picker shows on the page: what it is, the choice whole, a line under it, and Change.
+struct DataPickerHead: View {
+    let what: String; let name: String; let sub: String; let press: () -> Void
+    var body: some View {
+        Button(action: press) {
+            HStack(spacing: 10) {
+                Text(what.uppercased()).dmono(10).foregroundStyle(BackplaneDesign.dim)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name).dmono(13, bold: true).foregroundStyle(BackplaneDesign.text).lineLimit(2)
+                    if !sub.isEmpty { Text(sub).dmono(10).foregroundStyle(BackplaneDesign.dim).lineLimit(1).truncationMode(.head) }
+                }
+                Spacer(minLength: 0)
+                Text(Tr.t("Change")).dmono(12, bold: true).foregroundStyle(BackplaneDesign.accent)
+            }.padding(.horizontal, 12).padding(.vertical, 8).contentShape(Rectangle())
+        }.buttonStyle(.plain)
+        DLine()
+    }
+}
+struct DataPickerRow: Identifiable { let id: String; let name: String; let sub: String; let on: Bool; let depth: Int }
+/// A picker's list in a sheet from the bottom: its title and Done, a search field when there are many, the rows (two lines each, indented by depth, the one on show ticked).
+struct DataPickerList: View {
+    let title: String; let search: Bool; let rows: [DataPickerRow]; let pick: (String) -> Void
+    @State private var q = ""
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack { Text(title.uppercased()).dmono(11).foregroundStyle(BackplaneDesign.dim); Spacer(); Button { dismiss() } label: { Text(Tr.t("Done")).dmono(13, bold: true).foregroundStyle(BackplaneDesign.accent) } }
+                .padding(.horizontal, 14).frame(height: 48)
+            if search { TextField(Tr.t("Search"), text: $q).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled().padding(10).background(BackplaneDesign.panel).padding(.horizontal, 14).padding(.bottom, 6) }
+            DLine()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(rows.filter { q.trimmingCharacters(in: .whitespaces).isEmpty || $0.name.localizedCaseInsensitiveContains(q.trimmingCharacters(in: .whitespaces)) || $0.sub.localizedCaseInsensitiveContains(q.trimmingCharacters(in: .whitespaces)) }) { r in
+                        Button { pick(r.id) } label: {
+                            HStack(alignment: .center, spacing: 8) {
+                                Text(r.on ? "✓" : "").dmono(13).foregroundStyle(BackplaneDesign.accent).frame(width: 18)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(r.name).dmono(13, bold: r.on).foregroundStyle(r.on ? BackplaneDesign.accent : BackplaneDesign.text).lineLimit(3).multilineTextAlignment(.leading)
+                                    if !r.sub.isEmpty { Text(r.sub).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(2).multilineTextAlignment(.leading) }
+                                }
+                                Spacer(minLength: 0)
+                            }.padding(.leading, CGFloat(14 + 14 * min(r.depth, 6))).padding(.trailing, 14).padding(.vertical, 6).frame(minHeight: 48).contentShape(Rectangle())
+                        }.buttonStyle(.plain).background(r.on ? BackplaneDesign.panel : Color.clear).accessibilityIdentifier("data.pick." + r.id)
+                    }
+                }
+            }
+        }.background(BackplaneDesign.background).presentationDetents([.large])
     }
 }
 
@@ -190,6 +259,8 @@ struct DataPlotTab: View {
     let path: String
     let has: Bool
     let none: String
+    /// The schematic whose sheets the hub reads (a picked board's top sheet; "" the project's own).
+    var tree: String = ""
     @State private var layers: DLayers?
     @State private var refs: [DRef]?
     @State private var comparing = ""
@@ -260,7 +331,7 @@ struct DataPlotTab: View {
         .task(id: kind + "|" + path + "|\(has)|\(client.conn == .online)") {
             guard has else { return }
             error = ""; layers = nil; refs = nil; comparing = ""; info = ""; picked = ""
-            do { try await client.watch(thread.id, kind: kind, path: path) } catch { self.error = error.localizedDescription }
+            do { try await client.watch(thread.id, kind: kind, path: path, tree: tree) } catch { self.error = error.localizedDescription }
         }
         .task(id: "\(kind)|\(path)|\(bits)") { if !three && bits != 0 { act("", "", bits) } }
     }
@@ -282,7 +353,7 @@ struct DataPlotTab: View {
     }
     private func close() {
         comparing = ""
-        Task { do { try await client.watch(thread.id, kind: kind, path: path) } catch { self.error = error.localizedDescription } }
+        Task { do { try await client.watch(thread.id, kind: kind, path: path, tree: tree) } catch { self.error = error.localizedDescription } }
     }
 }
 
