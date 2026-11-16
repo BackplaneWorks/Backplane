@@ -774,10 +774,12 @@ def run(h):
                 m = __import__("re").search(r'"thread":"(t[0-9]+)","open":"board"', l)
                 if m:
                     cur = m.group(1)
-            other, word = ("t1", "embedded") if cur == "t2" else ("t2", "other")  # one word of its title: letters only (vk_of)
-            for ch in word:
-                E.key_tap(ch)
+            # the whole title, as the Linux step types it ("embedded" alone did not reach t1: lend2/lend3, Nov 16)
+            other, title = ("t1", "Embedded KiCad E2E") if cur == "t2" else ("t2", "Other thread 2")
+            for ch in title.lower():
+                E.key_tap("space" if ch == " " else ch)
             time.sleep(0.8)
+            E.grab_screen(h.p("lend_l4_typed.png"))
             E.key_tap("Return")
             time.sleep(1.5)
             l4 = focus_snapshot(frame)
