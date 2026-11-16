@@ -242,6 +242,7 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
                 let Some(slot) = this.screens.fields.get_mut(&field.name) else { return };
                 if slot.echo.sent() == text { return; }
                 slot.pending = Some(text);
+                cx.notify(); // the cat beside a name box follows each letter (screens/catpick.rs)
                 send_field(this, &field, cx);
             }).detach();
         }

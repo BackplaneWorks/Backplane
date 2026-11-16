@@ -29,6 +29,10 @@ mod ui;
 mod viewers;
 mod theme;
 mod wire;
+/// The bots' cats (which look a name gives, Different cat, the fur's tint), shared by path with the hub, so a name gives one cat on both.
+#[allow(dead_code)]
+#[path = "../../host/src/bots/cat.rs"]
+mod cat;
 /// The hub's terminal emulator, shared by path: the floating terminal draws the shell with it (screens/term.rs).
 #[allow(dead_code)]
 #[path = "../../host/src/term/vt.rs"]

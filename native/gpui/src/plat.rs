@@ -140,3 +140,31 @@ mod display_tests {
         assert!(super::display_problem(Some(""), None).unwrap().contains("No display"));
     }
 }
+
+/// The system asks for less motion: the cats' arrival and letter changes are then a plain fade (screens/catpick.rs). Read once, off the
+/// render path: GNOME's enable-animations (Linux), Reduce motion (macOS, com.apple.universalaccess), client-area animations off (Windows).
+/// `BACKPLANE_REDUCE_MOTION=1` or `=0` decides it instead (the checks and recordings set it).
+pub fn reduce_motion() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| match std::env::var("BACKPLANE_REDUCE_MOTION").as_deref() { Ok("1") => true, Ok("0") => false, _ => system_reduce_motion() })
+}
+#[cfg(target_os = "linux")]
+fn system_reduce_motion() -> bool {
+    std::process::Command::new("gsettings").args(["get", "org.gnome.desktop.interface", "enable-animations"]).output()
+        .map_or(false, |o| o.status.success() && String::from_utf8_lossy(&o.stdout).trim() == "false")
+}
+#[cfg(target_os = "macos")]
+fn system_reduce_motion() -> bool {
+    std::process::Command::new("defaults").args(["read", "com.apple.universalaccess", "reduceMotion"]).output()
+        .map_or(false, |o| o.status.success() && String::from_utf8_lossy(&o.stdout).trim() == "1")
+}
+#[cfg(target_os = "windows")]
+fn system_reduce_motion() -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_GETCLIENTAREAANIMATION};
+    let mut on: i32 = 1;
+    // SAFETY: SPI_GETCLIENTAREAANIMATION writes one BOOL to the pointer given
+    let ok = unsafe { SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &mut on as *mut i32 as *mut core::ffi::c_void, 0) };
+    ok != 0 && on == 0
+}
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn system_reduce_motion() -> bool { false }

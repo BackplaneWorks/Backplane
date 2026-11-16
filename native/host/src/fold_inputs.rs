@@ -6,7 +6,7 @@
 #![allow(dead_code)]
 
 const STATE: &[&str] = &["state/mod.rs", "state/autosettle.rs", "state/ext.rs", "state/fam.rs", "state/host.rs", "state/json.rs", "state/liveness.rs", "state/policy.rs", "state/star.rs",
-    "state/summary.rs", "state/todo.rs", "state/turnend.rs", "state/uber.rs", "state/visible.rs", "state/watchdog.rs", "shelf.rs", "signal.rs"];
+    "state/summary.rs", "state/todo.rs", "state/turnend.rs", "state/uber.rs", "state/visible.rs", "state/watchdog.rs", "shelf.rs", "signal.rs", "bots/cat.rs"];
 
 /// Checkpoint name, then the files (from `src/`) its fold reads. `extra` lists are joined with `STATE` by `inputs`.
 pub const FOLDS: &[(&str, &[&str], bool)] = &[
@@ -14,7 +14,7 @@ pub const FOLDS: &[(&str, &[&str], bool)] = &[
     ("STATE", &[], true),
     ("COMMANDS", &["commands/fold.rs", "session/event_type.rs"], false),
     ("AGENTS", &["agents/world.rs", "agents/lines.rs", "agents/bg.rs", "session/event_type.rs"], false),
-    ("BOTS", &["bots/world.rs", "bots/recall/kept.rs", "bots/recall/tree.rs", "bots/gate.rs", "bots/mail/mod.rs", "bots/mail/mailbox.rs", "session/event_type.rs"], true),
+    ("BOTS", &["bots/world.rs", "bots/catrig.rs", "bots/cat.rs", "bots/recall/kept.rs", "bots/recall/tree.rs", "bots/gate.rs", "bots/mail/mod.rs", "bots/mail/mailbox.rs", "session/event_type.rs"], true),
     ("WAKES", &["agents/wake.rs", "session/event_type.rs"], false),
     ("FEED", &["net/feed.rs", "net/far.rs"], false),
     ("PEERS", &["net/peers.rs", "net/machines.rs"], false),
