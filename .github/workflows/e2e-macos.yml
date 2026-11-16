@@ -77,9 +77,11 @@ jobs:
         run: |
           cd native/host && cargo build --profile fast 2>&1 | tail -3
           echo "HUB=$PWD/target/fast/backplane-hub" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
       - name: agent edits, Open in KiCad, the detached-KiCad warning; checks and exports
         run: |
-          python3 -m pip install --quiet pyobjc-framework-Quartz
+          python -m pip install --quiet pyobjc-framework-Quartz
           ok=0
           EXPECT_VERSION="$KV" node test/e2e/mac-kicad-runtime.mjs "$HUB" "$RT" 3890 "$RUNNER_TEMP/kr" 2>&1 | tee out/kicad-runtime.txt || ok=1
           KICAD_CLI="$RT/bin/kicad-cli" node test/e2e/cad-rows.mjs "$HUB" "$PWD/out/cad" 3870 2>&1 | tee out/cad-rows.txt || ok=1
