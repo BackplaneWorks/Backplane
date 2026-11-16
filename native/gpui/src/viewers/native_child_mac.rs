@@ -180,6 +180,19 @@ pub fn yield_to(w: u64) {
         else { let f: unsafe extern "C" fn(*mut c_void, *mut c_void, usize) -> bool = std::mem::transmute(objc_msgSend as *const ()); f(other, sel(c"activateWithOptions:"), 0); }
     }
     eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_yield": {"window": w, "to": pid}}));
+    // KiCad activates itself on the focused show; when Backplane's own window became key again meanwhile (a palette closing), the consent
+    // was gone and KiCad stayed in the background with Backplane holding the keys (client runs 16, 17). Then, 400 ms on, Backplane (still
+    // the active app) activates KiCad itself: wx gives back the focus KiCad had, its canvas. NSRunningApplication is thread-safe.
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        if app_active(pid) { return }
+        unsafe {
+            let other = running_app(pid); if other.is_null() { return }
+            let f: unsafe extern "C" fn(*mut c_void, *mut c_void, usize) -> bool = std::mem::transmute(objc_msgSend as *const ());
+            f(other, sel(c"activateWithOptions:"), 0);
+        }
+        eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_yield_fallback": {"to": pid, "active_after": app_active(pid)}}));
+    });
 }
 pub fn activated_after_close(_main: u64, _popped: u64) -> bool { true }
 pub fn note_pane_keys(_kicad: bool) {}
