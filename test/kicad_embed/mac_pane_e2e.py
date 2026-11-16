@@ -247,7 +247,8 @@ client = subprocess.Popen([CLIENT, '--url', f'http://127.0.0.1:{port}', '--token
 
 def shot(name): shot_to(os.path.join(OUT, name + '.png'))
 def hub_log(): return open(os.path.join(OUT, 'hub.log'), errors='replace').read()
-def client_log(): return open(os.path.join(OUT, 'client.log'), errors='replace').read()
+CLIENT_LOG = [os.path.join(OUT, 'client.log')]  # the running client's log (a restarted client writes its own)
+def client_log(): return open(CLIENT_LOG[0], errors='replace').read()
 
 
 def last_push():
@@ -455,8 +456,9 @@ try:
                     if comm.rsplit('/', 1)[-1] in ('kicad', 'pcbnew', 'eeschema'): out.append(pid)
             return out
         def start_client(tag):
+            CLIENT_LOG[0] = os.path.join(OUT, f'client-{tag}.log')
             c = subprocess.Popen([CLIENT, '--url', f'http://127.0.0.1:{port}', '--token-file', os.path.join(OUT, 'home/token'), '--script', os.path.join(OUT, 'script.json'), '--exit-after', '600'],
-                                 env=cenv, stdout=open(os.path.join(OUT, f'client-{tag}.log'), 'w'), stderr=subprocess.STDOUT); procs.append(c)
+                                 env=cenv, stdout=open(CLIENT_LOG[0], 'w'), stderr=subprocess.STDOUT); procs.append(c)
             return c
         # R1: Backplane killed in the middle of an edit (a selection made in KiCad), started again: Edit shows the editor, no dialog
         p = last_push(); click(p[0][0] + p[0][2] * 0.1, p[0][1] + p[0][3] * 0.9); time.sleep(0.5); key(K_A, CMD); time.sleep(0.8)
