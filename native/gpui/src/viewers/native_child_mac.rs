@@ -166,6 +166,21 @@ unsafe fn send_activate_self(a: *mut c_void) {
     else { let f: unsafe extern "C" fn(*mut c_void, *mut c_void, bool) = std::mem::transmute(objc_msgSend as *const ()); f(a, sel(c"activateIgnoringOtherApps:"), true); }
 }
 pub fn hand_back(w: u64) { focus(w) }
+/// Consent for KiCad to activate itself (macOS 14+), without activating it: the hub's ShowFrame{focus} then has KiCad take the keyboard
+/// onto its canvas (TakeFocusForClick). Activating KiCad from here first put wx's focus on a toolbar field, and ShowFrame{focus} leaves a
+/// focus already inside the frame where it is: the canvas never had the keys (client runs 9, 10).
+pub fn yield_to(w: u64) {
+    let pid = match owner(w) { 0 => KICAD_PID.load(std::sync::atomic::Ordering::Relaxed), p => p };
+    if pid <= 0 || pid == own_pid() { return }
+    unsafe {
+        let other = running_app(pid); if other.is_null() { return }
+        let a = app();
+        let responds: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> bool = std::mem::transmute(objc_msgSend as *const ());
+        if responds(a, sel(c"respondsToSelector:"), sel(c"yieldActivationToApplication:")) { send_obj(a, c"yieldActivationToApplication:", other); }
+        else { let f: unsafe extern "C" fn(*mut c_void, *mut c_void, usize) -> bool = std::mem::transmute(objc_msgSend as *const ()); f(other, sel(c"activateWithOptions:"), 0); }
+    }
+    eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_yield": {"window": w, "to": pid}}));
+}
 pub fn activated_after_close(_main: u64, _popped: u64) -> bool { true }
 pub fn note_pane_keys(_kicad: bool) {}
 pub fn shield(_container: u64, _on: bool) {}
