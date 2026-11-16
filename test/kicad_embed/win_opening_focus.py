@@ -1720,6 +1720,10 @@ def run(h):
                     all(b.get("hub_dialogs") for b in nogpu_boxes), nogpu_boxes)
             h.check("nogpu: after the boxes the editor comes up (first paint, the opening settled)", settled, {"settled": settled})
             frame_ = int((h.last_kicad_report("settled") or {}).get("shown") or 0)
+            if not frame_:
+                # the settled report may name no frame (the box held the opening): the PCB Editor frame in Backplane's window
+                fr_ = [w for w in E.list_child_windows(E.find_main_window(cp.pid)) if w["visible"] and "PCB Editor" in (w["title"] or "") and w["w"] > 300]
+                frame_ = max(fr_, key=lambda w: w["w"] * w["h"])["hwnd"] if fr_ else 0
             allk = E.list_child_windows(frame_)
             with open(h.p("nogpu_children.json"), "w", encoding="utf-8") as f:
                 json.dump({"frame": frame_, "children": allk}, f, indent=1)
