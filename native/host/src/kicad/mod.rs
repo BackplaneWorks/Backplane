@@ -13,6 +13,7 @@ pub mod kroute;
 pub mod kexport;
 pub mod kipc;
 pub mod kserve;
+pub mod locks;
 pub mod nng;
 pub mod proto;
 pub mod boards;
