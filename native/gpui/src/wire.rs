@@ -25,6 +25,9 @@ pub fn encode(value: &Value) -> Vec<u8> {
     }
     let mut bytes = Vec::new(); go(value, &mut bytes); bytes
 }
+/// Values a frame may hold: every value takes at least a byte, so the frame's own cap (MAX_FRAME) already bounds it; this only stops a malformed frame early.
+/// It was 50 000, and a long thread's view (Nov 16: the Thalassa thread, under 512 KiB) went over it: the window dropped the connection and reconnected forever.
+pub const NODE_BUDGET: usize = MAX_FRAME + 1;
 pub fn decode(bytes: &[u8]) -> Result<Value> {
     /* i18n-ok: decoder errors, logged */ ensure!(bytes.len() <= MAX_FRAME, "hub frame exceeds 512 KiB");
     struct Reader<'a> { bytes: &'a [u8], at: usize, nodes: usize }
@@ -32,7 +35,7 @@ pub fn decode(bytes: &[u8]) -> Result<Value> {
         /* i18n-ok: decoder errors, logged */ fn byte(&mut self) -> Result<u8> { let b = *self.bytes.get(self.at).ok_or_else(|| anyhow::anyhow!("truncated CBOR"))?; self.at += 1; Ok(b) }
         /* i18n-ok: decoder errors, logged */ fn arg(&mut self, ai:u8) -> Result<usize> { Ok(match ai {0..=23=>ai as usize,24=>self.byte()? as usize,25=>(self.byte()? as usize)<<8|self.byte()? as usize,26=>{let mut n=0;for _ in 0..4 {n=(n<<8)|self.byte()? as usize;}n},_=>bail!("unsupported CBOR width")}) }
         fn item(&mut self, depth:usize) -> Result<Value> {
-            /* i18n-ok: decoder errors, logged */ self.nodes+=1;ensure!(depth<64 && self.nodes<50000,"CBOR nesting/node budget");
+            /* i18n-ok: decoder errors, logged */ self.nodes+=1;ensure!(depth<64 && self.nodes<=NODE_BUDGET,"CBOR nesting/node budget");
             let h=self.byte()?;let major=h>>5;let ai=h&31;
             /* i18n-ok: decoder errors, logged */ if major==7 {return Ok(match ai {20=>Value::Bool(false),21=>Value::Bool(true),22=>Value::Null,_=>bail!("unsupported CBOR scalar")});}
             /* i18n-ok: decoder errors, logged */ if major==6 {ensure!(ai==6||ai==7,"unknown CBOR tag");let v=self.item(depth+1)?;return match ai {6=>Ok(Value::String(WORDS.get(v.as_u64().ok_or_else(||anyhow::anyhow!("invalid word"))? as usize).ok_or_else(||anyhow::anyhow!("unknown word"))?.to_string())),7=>Ok(Value::Number(v.as_str().ok_or_else(||anyhow::anyhow!("invalid number"))?.parse::<Number>()?)),_=>unreachable!()};}
@@ -49,7 +52,12 @@ pub fn decode(bytes: &[u8]) -> Result<Value> {
     /* i18n-ok: decoder errors, logged */ let mut r=Reader{bytes,at:0,nodes:0};let value=r.item(0)?;ensure!(r.at==bytes.len(),"trailing CBOR");Ok(value)
 }
 #[cfg(test)] mod tests {
-    use super::*;use serde_json::json;
+
+    #[test] fn a_long_view_under_the_frame_cap_decodes() {
+        // an array of 100 000 small integers (one byte each) is 100 KB: over the old 50 000-value budget, well under the frame cap
+        let mut b = vec![0x9a, 0x00, 0x01, 0x86, 0xa0]; b.extend(std::iter::repeat(0x01u8).take(100_000));
+        assert_eq!(super::decode(&b).unwrap().as_array().map(|a| a.len()), Some(100_000));
+    }    use super::*;use serde_json::json;
     #[test] fn unicode_large_ids_and_dictionaries() {
         let v=json!({"id":140737488355429_u64,"m":"view.open","p":{"text":"日本語🙂","ok":true}});
         assert_eq!(decode(&encode(&v)).unwrap(),v);
