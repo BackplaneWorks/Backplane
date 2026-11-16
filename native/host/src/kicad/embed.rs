@@ -696,6 +696,9 @@ pub struct GuiRoute {
 }
 
 fn norm_pro_key(pro: &str) -> String {
+    // one project however its path is spelled (a symlinked folder, macOS's /var for /private/var): the open KiCad's route, its unsaved
+    // state and its frames are found from any spelling, so an agent's write never misses the open editor and goes around it
+    let pro = &super::canonical::same_file(pro);
     let mut n = pro.replace('\\', "/");
     while n.len() > 1 && n.ends_with('/') && !(n.len() == 3 && n.as_bytes()[1] == b':') {
         n.pop();
@@ -2870,6 +2873,18 @@ pub fn stand_in_route(pro: &str) -> (GuiRoute, mpsc::UnboundedReceiver<(String, 
 
 #[cfg(test)]
 mod tests {
+    /// The open KiCad of a project is found however the project's path is spelled: an agent naming it through a symlinked folder
+    /// reaches the open editor (co-edit, the unsaved-changes rule) instead of going around it to the headless server.
+    #[cfg(unix)] #[tokio::test] async fn the_open_editor_is_found_through_a_symlinked_project_folder() {
+        let real = crate::plat::tmp::uncreated("route-real"); std::fs::create_dir_all(&real).unwrap();
+        let link = crate::plat::tmp::uncreated("route-link"); std::os::unix::fs::symlink(&real, &link).unwrap();
+        let pro = format!("{}/b.kicad_pro", real.display()); std::fs::write(&pro, "{}").unwrap();
+        let (route, _rx) = stand_in_route(&pro);
+        routes().lock().unwrap().insert(norm_pro_key(&pro), route);
+        assert!(gui_route(&format!("{}/b.kicad_pro", link.display())).is_some(), "the link's spelling finds the open editor");
+        routes().lock().unwrap().remove(&norm_pro_key(&pro));
+        let _ = std::fs::remove_file(&link); let _ = std::fs::remove_dir_all(&real);
+    }
     /// A named client's request holds the checks while in flight and a moment after; the hub's unnamed reads only while in flight.
     #[tokio::test] async fn others_busy_counts_named_clients_after_and_polls_only_during() {
         let (route, mut rx) = stand_in_route("/p/busy.kicad_pro");

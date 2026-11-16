@@ -117,8 +117,24 @@ pub fn design_root(root: &str) -> String {
     if m != root && hardware_cached(&m) { m } else { root.to_string() }
 }
 
-/// The named lock of one board or schematic: `kicad-<stem>-<pcb|sch>-<digest8>` (64 at most).
+/// One file, however it is named: the path with every symlink resolved (macOS's `/var` is `/private/var`; a symlinked home, a
+/// project folder linked elsewhere), or, for a file not there yet, its folder resolved and its name as given; else the path as given.
+/// Locks and "the same document" compare this, so two spellings of one board are never two documents.
+pub fn same_file(p: &str) -> String {
+    // Windows: canonicalize answers `\\?\` paths the hub's keys do not use; its paths are taken as given
+    if cfg!(windows) { return p.to_string() }
+    let path = std::path::Path::new(p);
+    if let Ok(c) = path.canonicalize() { return c.to_string_lossy().into_owned() }
+    match (path.parent(), path.file_name()) {
+        (Some(d), Some(n)) if !d.as_os_str().is_empty() => d.canonicalize().map(|cd| cd.join(n).to_string_lossy().into_owned()).unwrap_or_else(|_| p.to_string()),
+        _ => p.to_string(),
+    }
+}
+
+/// The named lock of one board or schematic: `kicad-<stem>-<pcb|sch>-<digest8>` (64 at most), of the file itself (`same_file`):
+/// two spellings of one board are one lock, so they can never let two writers in.
 pub fn doc_lock(doc: &str) -> String {
+    let doc = &same_file(doc);
     let file = doc.rsplit('/').next().unwrap_or("board");
     let (stem, kind) = file.rsplit_once('.').map_or((file, "doc"), |(s, x)| (s, x.strip_prefix("kicad_").unwrap_or(x)));
     let stem: String = stem.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' }).take(40).collect();
@@ -202,7 +218,9 @@ pub async fn commit_design(root: &str, msg: &str, skip: &[String]) -> Result<Rec
     let r = git::run_ro(&top, &["symbolic-ref", "--short", "-q", "HEAD"]).await;
     if r.code != 0 || r.out.trim().is_empty() { return Err("the main checkout is not on a branch".into()) }
     let branch = r.out.trim().to_string();
-    let skipped = |p: &str| { let abs = format!("{top}/{p}"); skip.iter().any(|d| abs == *d || abs.starts_with(&format!("{d}.")) ) };
+    // git names the checkout with its symlinks resolved (`--show-toplevel`): the held documents are compared as files, not spellings
+    let skip: Vec<String> = skip.iter().map(|d| same_file(d)).collect();
+    let skipped = |p: &str| { let abs = same_file(&format!("{top}/{p}")); skip.iter().any(|d| abs == *d || abs.starts_with(&format!("{d}.")) ) };
     let files: Vec<String> = dirty_design(&top).await?.into_iter().filter(|p| !skipped(p)).collect();
     if files.is_empty() { return Ok(Recorded::default()) }
     // the board families this commit adds or removes, seen before it is made (usage counting: settings/telemetry_usage.rs)
@@ -433,6 +451,32 @@ mod tests {
         // a design path the thread names from its worktree is main's
         assert_eq!(route(&format!("{wt}/boards/main/main.kicad_pcb")), format!("{main}/boards/main/main.kicad_pcb"));
         assert_eq!(design_root(&wt), main);
+    }
+
+    #[cfg(unix)] #[test] fn two_spellings_of_one_board_are_one_lock_and_one_held_document() {
+        let real = crate::plat::tmp::uncreated("samefile-real"); std::fs::create_dir_all(real.join("boards")).unwrap();
+        let link = crate::plat::tmp::uncreated("samefile-link"); std::os::unix::fs::symlink(&real, &link).unwrap();
+        let (r, l) = (format!("{}/boards/b.kicad_pcb", real.display()), format!("{}/boards/b.kicad_pcb", link.display()));
+        std::fs::write(&r, "(pcb)").unwrap();
+        assert_eq!(doc_lock(&r), doc_lock(&l), "a symlinked project folder names the same board");
+        assert_eq!(same_file(&l), same_file(&r));
+        // a document not written yet: its folder resolved, its name kept
+        let (rn, ln) = (format!("{}/boards/new.kicad_sch", real.display()), format!("{}/boards/new.kicad_sch", link.display()));
+        assert_eq!(doc_lock(&rn), doc_lock(&ln));
+        assert_ne!(doc_lock(&r), doc_lock(&rn), "two documents stay two");
+        assert_eq!(same_file("/no/such/dir/x.kicad_pcb"), "/no/such/dir/x.kicad_pcb", "nothing there: the path as given");
+        let _ = std::fs::remove_file(&link); let _ = std::fs::remove_dir_all(&real);
+    }
+
+    #[cfg(unix)] #[tokio::test] async fn a_held_document_named_through_a_symlink_is_still_left_for_its_holder() {
+        let (_r, main) = mixed("symheld");
+        let link = crate::plat::tmp::uncreated("symheld-link"); std::os::unix::fs::symlink(&main, &link).unwrap();
+        std::fs::write(format!("{main}/boards/main/main.kicad_pcb"), "(pcb other thread)").unwrap();
+        std::fs::write(format!("{main}/boards/main/main.kicad_sch"), "(sch mine)").unwrap();
+        // the holder named the board through the link; git names the checkout by its real folder
+        let rec = commit_design(&main, "design: mine", &[format!("{}/boards/main/main.kicad_pcb", link.display())]).await.unwrap();
+        assert_eq!(rec.files, vec!["boards/main/main.kicad_sch"], "the held board is not swept into another thread's commit");
+        let _ = std::fs::remove_file(&link);
     }
 
     #[tokio::test] async fn a_document_another_thread_holds_is_left_for_it_and_main_pushes_to_its_upstream() {
