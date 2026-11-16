@@ -1495,7 +1495,7 @@ async fn lock_now(ag: &Arc<Agents>, name: &str) -> Value { ag.tool_lock_list().a
     let (_, b) = ag.tool_work_run(T2, &json!({"command":format!("sleep 30; touch '{}'", mark("b").display()),"lock":"x","note":"cancelled running"})).await; let bid = b["id"].as_str().unwrap().to_string();
     // cancelled in the queue: never launches, and its row and place go
     let (_, c) = ag.tool_work_run(T3, &json!({"command":format!("touch '{}'", mark("c").display()),"lock":"x","note":"cancelled queued"})).await; let cid = c["id"].as_str().unwrap().to_string();
-    let (_, d) = ag.tool_work_run(T3, &json!({"command":format!("sleep 2; touch '{}'", mark("d").display()),"lock":"x","note":"times out","timeoutSec":1})).await; assert_eq!(d["state"], "waiting for lock x (3rd)", "{d}");
+    let (_, d) = ag.tool_work_run(T3, &json!({"command":format!("sleep 6; touch '{}'", mark("d").display()),"lock":"x","note":"times out","timeoutSec":1})).await; assert_eq!(d["state"], "waiting for lock x (3rd)", "{d}");
     let (ok, r) = ag.tool_work_cancel(T3, &json!({"id":cid})).await; assert!(ok && r["state"] == "cancelled", "{r}"); std::fs::write(mark("go"), "").unwrap(); // the first job ends only once the queue is built
     let ev = until(&hub, from, 20, |ev| said(ev, T1, "\"fails\" ended: exit 3") && said(ev, T3, "\"cancelled queued\" ended: cancelled")).await; assert!(!ev.is_empty());
     until(&hub, from, 10, |ev| ev.iter().any(|e| is(e, "WorkSet") && e["thread"] == T2 && e["rows"].as_str().map_or(false, |r| r.contains("\twatching")|| r.contains("watching\t")))).await;
