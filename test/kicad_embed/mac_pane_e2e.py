@@ -359,6 +359,11 @@ try:
         RES['docs_prompt'] = pr and {'owner': pr['owner'], 'bounds': pr['bounds']}
         shot('docs-1-prompt')
         check(bool(pr), f'docs: a project in ~/Documents makes macOS ask for Backplane ({RES["docs_prompt"]})')
+        if not pr:
+            ws = helper('windows') or []
+            print('INFO docs: no prompt; on screen: ' + json.dumps(sorted({(w['owner'], w['layer']) for w in ws})), flush=True)
+            hl = [l for l in hub_log().splitlines() if 'Documents' in l or 'Operation not permitted' in l or 'denied' in l.lower()]
+            print('INFO docs: hub lines about it: ' + json.dumps(hl[:5]), flush=True)
         if pr:
             time.sleep(12)  # past the hub's 5 s "not ready" and its old 30 s restart point would come later: the message is said meanwhile
             said = 'mac-permission-prompt' in client_log() or 'macOS is asking for permission' in client_log()
