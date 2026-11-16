@@ -1421,7 +1421,7 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
         let title = j["title"].as_str().unwrap_or("").to_string(); let detail = j["detail"].as_str().unwrap_or("").to_string();
         let text = if detail.is_empty() { crate::i18n::trs(&title) } else { format!("{} · {detail}", crate::i18n::trs(&title)) };
         let w = 120.0f32; let p = pane.clone();
-        mid = mid.child(div().id("kicad-progress").ml_2().flex().items_center().gap_1().text_size(crate::scale::tpx(11.)).text_color(c("dim"))
+        mid = mid.child(crate::ui::with_rect(div().id("kicad-progress"), || "kicad:progress".to_string()).ml_2().flex().items_center().gap_1().text_size(crate::scale::tpx(11.)).text_color(c("dim"))
             .child(div().max_w(px(220.)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(text))
             .child(div().w(px(w)).h(px(4.)).bg(c("line")).child(div().h_full().bg(c("accent")).w(px(if f >= 0.0 { w * f.min(1.0) as f32 } else { w * 0.3 }))))
             .when(jobs.len() > 1, |d| d.child(format!("+{}", jobs.len() - 1)))
