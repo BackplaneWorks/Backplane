@@ -141,6 +141,8 @@ pub fn pick_local(want: &str, info: &Value, frames: &[nc::Frame], ever: &[u64]) 
     }
     if info["mode"] == "fork" {
         let hub = info["frames"].as_array().into_iter().flatten().find(|f| f["kind"] == want && f["shown"] != false).and_then(|f| f["xid"].as_u64());
+        // macOS: KiCad's frames are another process's windows, never children of ours (nc::frames lists none): the hub's word is the list
+        if cfg!(target_os = "macos") { return hub }
         return hub.filter(|x| frames.iter().any(|f| f.window == *x));
     }
     let hub = info["frames"].as_array().into_iter().flatten().find(|f| f["kind"] == want).and_then(|f| f["xid"].as_u64());
