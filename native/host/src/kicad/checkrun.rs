@@ -217,14 +217,14 @@ pub fn editor_hold(now: u64, edit_at: u64, last_end: u64, others_busy: bool, dem
 /// Edits in an editor that checks itself, per project: [board, schematic].
 static EDITS: OnceLock<Mutex<HashMap<String, [u64; 2]>>> = OnceLock::new();
 fn edits(pro: &str) -> [u64; 2] { EDITS.get_or_init(Default::default).lock().unwrap().get(pro).copied().unwrap_or_default() }
-/// The row of a clicked DRC/ERC marker, published as J's review markers publish theirs (info `review.clicked.<digest>`), the panel opened.
 /// The row of a clicked KiCad DRC/ERC marker (ET_MARKER_CLICKED's `drc_marker`) among the project's findings: (check, id).
-fn clicked_row(pro: &str, ev: &Value, read: &dyn Fn(&str) -> Option<String>) -> Option<(&'static str, String)> {
+fn clicked_row(pro: &str, ev: &Value, read: &dyn Fn(&str) -> Option<String>) -> Option<(&'static str, String, String)> {
     let m = &ev["drc_marker"];
     let kind = if ev["frame"]["kind"] == "FK_SCH" || ev["frame"]["kind"].as_i64() == Some(2) || !m["sheet_path"].as_str().unwrap_or("").is_empty() { "erc" } else { "drc" };
     let sch = with(pro, |p| p.files.sch.clone()).unwrap_or_default();
     let sheets = if kind == "erc" { super::edchecks::sheets(&sch, read) } else { HashMap::new() };
-    with(pro, |p| super::edchecks::row_of(kind, m, &sheets, if kind == "drc" { &p.drc.findings } else { &p.erc.findings })).flatten().map(|id| (kind, id))
+    with(pro, |p| { let fs = if kind == "drc" { &p.drc.findings } else { &p.erc.findings };
+        super::edchecks::row_of(kind, m, &sheets, fs).map(|id| { let t = fs.iter().find(|f| f.id == id).map(|f| f.title.clone()).unwrap_or_default(); (kind, id, t) }) }).flatten()
 }
 fn marker_clicked(pro: &str, ev: &Value) {
     let (pro, ev) = (pro.to_string(), ev.clone());
@@ -232,12 +232,12 @@ fn marker_clicked(pro: &str, ev: &Value) {
     let hub = ag.hub.clone();
     tokio::spawn(async move {
         let (p2, e2) = (pro.clone(), ev.clone());
-        let Some((kind, id)) = tokio::task::spawn_blocking(move || clicked_row(&p2, &e2, &|f| std::fs::read_to_string(f).ok())).await.ok().flatten() else { eprintln!("checks: KiCad's marker clicked: no row of it in {pro}"); return };
-        // the row first (the panel selects it as it opens), then the panel
-        let _ = hub.set_info(&format!("review.clicked.{}", ks::digest(&pro)), &json!({"id": id, "at": now_ms()}).to_string()).await;
+        let Some((kind, id, title)) = tokio::task::spawn_blocking(move || clicked_row(&p2, &e2, &|f| std::fs::read_to_string(f).ok())).await.ok().flatten() else { eprintln!("checks: KiCad's marker clicked: no row of it in {pro}"); return };
+        // the row only, not the panel: opening it beside the editor narrowed KiCad and slid the canvas under the person's pointer (their
+        // next press, meant for the board, landed on the panel: Hubble, real_use). The client selects it in an open Checks panel, else
+        // shows its title on the strip's checks chip, and the panel opens on it when the chip (or its tab) is pressed.
+        let _ = hub.set_info(&format!("review.clicked.{}", ks::digest(&pro)), &json!({"id": id, "title": title, "at": now_ms()}).to_string()).await;
         eprintln!("checks: KiCad's {kind} marker clicked: row {id}");
-        use crate::api::RpcHandler;
-        let _ = super::mgmt::MgmtRpc.call(&hub, &Caller { gen: String::new(), client: 0 }, &json!(0), "mgmt.panel", &json!({"project": pro, "open": "checks"})).await;
     });
 }
 /// The person's last action in each project's KiCad (ms).
@@ -984,10 +984,10 @@ mod tests {
             "items_detail":[{"id":{"value":"c9f15f8a-bf39-4aea-963b-9c8e4dd436e9"},"description":"Track [<no net>] on F.Cu, length 10.0000 mm","at_nm":{"x_nm":"95000000","y_nm":"99690945"}},{"id":{"value":"d91667ae-f923-50be-ade8-fe5056fa2eb3"},"description":"Pad 2 [GND] of U3 on F.Cu","at_nm":{"x_nm":"98170000","y_nm":"99350000"}}],"group":"violation"}}"#).unwrap();
         let rep = super::super::edchecks::report("drc", &[ev["drc_marker"].clone(), json!({"type": "track_dangling", "severity": "warning", "message": "Track has unconnected end", "items": [{"value": "c9f15f8a-bf39-4aea-963b-9c8e4dd436e9"}]})], &super::super::edchecks::detail_of_markers(&[ev["drc_marker"].clone()]), &HashMap::new());
         let fs = fd::drc(&rep.to_string()).unwrap();
-        let want = fs.iter().find(|f| f.rule == "clearance").unwrap().id.clone();
+        let hit = fs.iter().find(|f| f.rule == "clearance").unwrap(); let (want, title) = (hit.id.clone(), hit.title.clone());
         let pro = "/c/collar_main.kicad_pro";
         { let mut m = state().lock().unwrap(); let mut p = Proj::default(); p.files.pcb = "/c/collar_main.kicad_pcb".into(); p.drc.findings = fs; m.insert(pro.into(), p); }
-        assert_eq!(clicked_row(pro, &ev, &|_| None), Some(("drc", want)));
+        assert_eq!(clicked_row(pro, &ev, &|_| None), Some(("drc", want, title)), "its row and its title (the strip's chip says it while the Checks panel is shut)");
         assert_eq!(clicked_row("/other.kicad_pro", &ev, &|_| None), None, "another project's");
         state().lock().unwrap().remove(pro);
     }

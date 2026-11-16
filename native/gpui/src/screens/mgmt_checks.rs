@@ -38,6 +38,10 @@ pub struct Ui {
     pub sources: Value,
     /// a finding to show (a click on its marker in KiCad): its id, and whether its group was asked for
     pub want: Option<(String, bool)>,
+    /// a marker click while the panel was shut: the finding's title on the strip's chip, from when (FLASH long)
+    pub flash: Option<(String, std::time::Instant)>,
+    /// the repaint that ends the chip's flash is asked for
+    pub flash_timer: bool,
 }
 /// One line of the list: a group's heading, a finding, a group's "n more" / "Fewer", or a word (searching, nothing found...).
 #[derive(Clone, Debug, PartialEq)]
@@ -361,6 +365,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     let n = its.len();
     let scroll = ui(|u| u.scroll.get_or_insert_with(UniformListScrollHandle::new).clone());
     // a finding named by a KiCad marker click: selected and scrolled to once its row is in the list; else its group is found and opened
+    ui(|u| u.flash = None);
     if let Some((want, asked)) = ui(|u| u.want.clone()) {
         if let Some(ix) = its.iter().position(|i| matches!(i, Item::Row(f) if s(f, "id") == want)) {
             ui(|u| { u.want = None; u.sel = Some(want.clone()); });
@@ -408,11 +413,15 @@ pub fn chip_tone(d: &Value) -> &'static str {
     else if n("drc", "warning") + n("erc", "warning") + n("drc", "info") + n("erc", "info") > 0 { "warn" } else { "faint" }
 }
 /// A `mgmt.*` info arrived (main.rs): the chip of its project, when it is the Checks panel's.
-pub fn seen(key: &str, text: &str) {
+/// `open`: the Checks panel is open now (the state asked for or the hub's).
+pub fn seen(key: &str, text: &str, open: bool) {
     // a click on a review marker in KiCad (bp.13; lane J's review/markers.rs): that finding is the one to show
     if key.starts_with("review.clicked.") {
         let v: Value = serde_json::from_str(text).unwrap_or(Value::Null);
-        if let Some(id) = v["id"].as_str().filter(|i| !i.is_empty()) { ui(|u| { u.want = Some((id.to_string(), false)); u.sev.clear(); u.src.clear(); u.found = None; u.asked = None; }); }
+        if let Some(id) = v["id"].as_str().filter(|i| !i.is_empty()) {
+            let fresh = v["at"].as_u64().is_some_and(|at| (super::kcomment::epoch_ms() as u64).abs_diff(at) < 10_000); // not one the hub kept from before
+            ui(|u| { clicked(u, id, s(&v, "title"), fresh, open, std::time::Instant::now()); });
+        }
         return
     }
     if !key.starts_with("mgmt.checks.") { return }
@@ -421,6 +430,26 @@ pub fn seen(key: &str, text: &str) {
     if pro.is_empty() { return }
     CHIPS.with(|m| { let mut m = m.borrow_mut(); if chip.is_empty() { m.remove(&pro); } else { m.insert(pro, (chip, chip_tone(&v))); } });
 }
+/// How long the chip says a clicked marker's finding.
+pub const FLASH: std::time::Duration = std::time::Duration::from_secs(4);
+/// A KiCad marker was clicked (`review.clicked`): its row is the one the panel shows, now if it is open, else when it next opens; with
+/// the panel shut the strip's chip says its title for FLASH (the panel is not opened: it narrowed the editor and slid the canvas under the
+/// person's pointer, and their next press, meant for the board, landed on the panel). `fresh`: clicked just now, not replayed by the hub.
+pub fn clicked(u: &mut Ui, id: &str, title: &str, fresh: bool, open: bool, now: std::time::Instant) {
+    u.want = Some((id.to_string(), false)); u.sev.clear(); u.src.clear(); u.found = None; u.asked = None;
+    u.flash = (fresh && !open).then(|| (title.to_string(), now)); u.flash_timer = false;
+}
+/// The chip's flash now: the clicked finding's title ("" when the hub gave none) and how long it stays.
+pub fn flash_in(u: &Ui, now: std::time::Instant) -> Option<(String, std::time::Duration)> {
+    let (t, at) = u.flash.as_ref()?; FLASH.checked_sub(now.duration_since(*at)).filter(|d| !d.is_zero()).map(|d| (t.clone(), d))
+}
+/// The chip's flash, and whether the repaint that ends it is still to be asked for (asked once).
+pub fn chip_flash() -> Option<(String, std::time::Duration, bool)> {
+    let f = ui(|u| { let f = flash_in(u, std::time::Instant::now())?; let ask = !u.flash_timer; u.flash_timer = true; Some((f.0, f.1, ask)) })?;
+    if f.2 { log("checks_chip_flash", json!({"title": f.0})); }
+    Some(f)
+}
+
 /// The chip for a project (its .kicad_pro), once the hub has published its checks.
 /// `project`: the editor's (its .kicad_pro, board or schematic, or the project's folder).
 pub fn chip_for(project: &str) -> Option<(String, &'static str)> {
@@ -462,15 +491,29 @@ mod tests {
         assert_eq!(ids(visible(&d, Some(&[r("z")]), &more, &BTreeSet::new())), ["z"]);
         assert_eq!(group_key(&d["groups"][0]), k);
     }
+    #[test] fn a_marker_click_with_the_panel_shut_says_its_finding_on_the_chip_and_the_panel_opens_on_it_later() {
+        let t0 = std::time::Instant::now(); let ms = std::time::Duration::from_millis;
+        let mut u = Ui::default();
+        clicked(&mut u, "drc:1", "Clearance violation", true, false, t0);
+        assert_eq!(u.want, Some(("drc:1".to_string(), false)), "the row the panel lands on when it opens, later");
+        assert_eq!(flash_in(&u, t0 + ms(1000)), Some(("Clearance violation".to_string(), FLASH - ms(1000))), "the chip says it");
+        assert_eq!(flash_in(&u, t0 + FLASH), None, "for a few seconds");
+        let mut u = Ui::default();
+        clicked(&mut u, "drc:2", "Clearance violation", true, true, t0);
+        assert!(u.flash.is_none() && u.want.is_some(), "the panel open: its row is selected there, the chip stays as it is");
+        let mut u = Ui::default();
+        clicked(&mut u, "drc:4", "t", false, false, t0);
+        assert!(u.flash.is_none() && u.want.is_some(), "the hub's last click, replayed on connecting: remembered, not said");
+    }
     #[test] fn the_chip() {
         let d = |de: u64, dw: u64, ee: u64, st: &str| json!({"project": "/p/a.kicad_pro", "chip": "DRC 1 · ERC 0", "drc": {"state": st, "counts": {"error": de, "warning": dw}}, "erc": {"state": "fresh", "counts": {"error": ee, "warning": 0}}});
         assert_eq!(chip_tone(&d(1, 0, 0, "fresh")), "bad"); assert_eq!(chip_tone(&d(0, 4, 0, "fresh")), "warn"); assert_eq!(chip_tone(&d(0, 0, 0, "fresh")), "faint");
         assert_eq!(chip_tone(&d(0, 0, 0, "failed")), "bad"); assert_eq!(chip_tone(&d(0, 0, 2, "fresh")), "bad");
-        seen("mgmt.checks.abc", &d(0, 2, 0, "fresh").to_string());
+        seen("mgmt.checks.abc", &d(0, 2, 0, "fresh").to_string(), false);
         assert_eq!(chip_for("/p/a.kicad_pro"), Some(("DRC 1 · ERC 0".to_string(), "warn")));
         assert!(chip_for("/p/a.kicad_pcb").is_some() && chip_for("/p").is_some() && chip_for("/p/").is_some() && chip_for("/q/a.kicad_pcb").is_none());
         assert!(same_project("C:\\p\\a.kicad_pro", "C:/p/a.kicad_sch") && !same_project("/p/a.kicad_pro", "/p/ab.kicad_pcb"));
-        seen("mgmt.bom.abc", "{}"); assert!(chip_for("/p/b.kicad_pro").is_none());
+        seen("mgmt.bom.abc", "{}", false); assert!(chip_for("/p/b.kicad_pro").is_none());
     }
     #[test] fn sources_by_name() {
         let d = json!({"sources": {"fab": {"label": "Fab rules", "judged": false}, "datasheet": {"label": "Datasheets", "judged": true}}});
@@ -503,9 +546,9 @@ mod tests {
     }
     #[test] fn a_marker_click_names_the_finding_to_show() {
         ui(|u| { u.sev = "error".into(); u.src = "drc".into(); u.want = None; });
-        seen("review.clicked.abc", r#"{"id":"review:1f","at":5}"#);
+        seen("review.clicked.abc", r#"{"id":"review:1f","at":5}"#, true);
         assert_eq!(ui(|u| (u.want.clone(), u.sev.clone(), u.src.clone())), (Some(("review:1f".to_string(), false)), String::new(), String::new()), "the filters that could hide it are cleared");
-        seen("review.clicked.abc", r#"{"id":""}"#); assert!(ui(|u| u.want.is_some()), "an empty one changes nothing");
+        seen("review.clicked.abc", r#"{"id":""}"#, true); assert!(ui(|u| u.want.is_some()), "an empty one changes nothing");
         ui(|u| u.want = None);
     }
     #[test] fn up_and_down() {
