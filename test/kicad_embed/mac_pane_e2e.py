@@ -193,10 +193,10 @@ try:
     time.sleep(0.5); shot('02c-dialog'); key(K_ESC)
     check(bool(wait_for(lambda: hub_log().count('ET_DIALOG_CLOSED') > c0, 4)), 'Escape closes the dialog')
     # a click in Backplane's own chrome (the rail, outside the pane) gives the keyboard back to Backplane
-    rail = rects().get('rail:Files') or rects().get('rail:Board')
+    # a neutral spot: the thread's timeline on the left (a rail button would change the page)
     cw = next((w for w in wins() if w[0] == cw[0]), cw)
-    if rail: click(cw[3][0] + rail['x'] + rail['w'] / 2, cw[3][1] + 28 + rail['y'] + rail['h'] / 2)
-    check(bool(rail) and bool(wait_for(lambda: active(client.pid), 4)), 'a click in Backplane\'s chrome gives it the keyboard back')
+    click(cw[3][0] + 200, cw[3][1] + 28 + 300)
+    check(bool(wait_for(lambda: active(client.pid), 4)), 'a click in Backplane\'s chrome gives it the keyboard back')
     # and the pane again: one click on KiCad's canvas gives KiCad the keyboard
     p = last_push()
     if p: click(p[0][0] + p[0][2] * 0.1, p[0][1] + p[0][3] * 0.9)
@@ -217,9 +217,12 @@ try:
     matches('after the sidebar is folded')
     key(K_B, CMD); time.sleep(1.5)
     matches('after the sidebar is back')
-    key(K_C, ALT | SHIFT); time.sleep(2)
-    matches('after a side panel (Checks) opens')
-    key(K_C, ALT | SHIFT); time.sleep(1.5)
+    # the Checks panel, by its chip in the editor's strip (Alt+Shift+C types "Ç" on a Mac)
+    chip = rects().get('kicad:checks-chip')
+    cw = next((w for w in wins() if w[0] == cw[0]), cw)
+    if chip: click(cw[3][0] + chip['x'] + chip['w'] / 2, cw[3][1] + 28 + chip['y'] + chip['h'] / 2); time.sleep(2)
+    matches(f'after a side panel (Checks) opens ({bool(chip)})')
+    if chip: click(cw[3][0] + chip['x'] + chip['w'] / 2, cw[3][1] + 28 + chip['y'] + chip['h'] / 2); time.sleep(1.5)
     # ---- the reserved chords from inside KiCad: Cmd+J, and Ctrl+Tab (the physical Ctrl key: Cmd+Tab is macOS's) ----
     p = last_push()
     if p: click(p[0][0] + p[0][2] * 0.1, p[0][1] + p[0][3] * 0.9); time.sleep(0.6)
@@ -253,8 +256,7 @@ try:
     cw = next((w for w in wins() if w[0] == cw[0]), cw)
     if pop:
         # Backplane first (the first click on an inactive app's window only activates it, as for a person), then Pop out
-        rail = rects().get('rail:Files') or rects().get('rail:Board')
-        if rail: click(cw[3][0] + rail['x'] + rail['w'] / 2, cw[3][1] + 28 + rail['y'] + rail['h'] / 2); time.sleep(0.6)
+        click(cw[3][0] + 200, cw[3][1] + 28 + 300); time.sleep(0.6)
         click(cw[3][0] + pop['x'] + pop['w'] / 2, cw[3][1] + 28 + pop['y'] + pop['h'] / 2)
     newwin = wait_for(lambda: next((w for w in wins() if w[1] == client.pid and w[0] not in before_wins), None), 10)
     check(bool(pop) and bool(newwin), f'Pop out opens the editor in a window of its own ({pop})')
