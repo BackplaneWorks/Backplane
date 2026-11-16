@@ -139,6 +139,21 @@ def swap_fp(d, fx, cli):
         if s["symbols"].get(k) != v: bad.append(f"symbol {k} changed"); break
     return bad[:10]
 
+DRV = [f"Net-(D{i}-1)" for i in range(15, 22)]
+def route_drv(d, fx, cli):
+    """the head-to-head's third routing task: seven three-pad nets across the board, bottom to top"""
+    bad = []; pcb = f"{d}/StickHub.kicad_pcb"; b = base(fx, "sh_drv")
+    ss = segs(pcb, set(DRV))
+    for k, n, w in ss:
+        if w < 0.15 - 0.001: bad.append(f"{n} {k} {w} mm wide"); break
+    for n in DRV:
+        if not any(x[1] == n for x in ss): bad.append(f"{n} has no copper")
+    r = kx.drc(cli, pcb)
+    if r["unconnected_items"]: bad.append(f"{len(r['unconnected_items'])} unconnected: " + "; ".join(kx.nettag(u["items"][0]["description"]) for u in r["unconnected_items"][:4]))
+    bad += [f"DRC {v['type']}: {v['description'][:60]}" for v in r["violations"]][:6]
+    bad += moved(norm.board(pcb)["footprints"], b["footprints"], ())
+    return bad
+
 HNETS = ["Net-(U9-B1)", "Net-(U9-B2)", "Net-(U9-B3)", "/Debugger/DBG_LS_OE"]
 def hubble_route(d, fx, cli):
     bad = []; pcb = f"{d}/Hubble_DK.kicad_pcb"; b = base(fx, "hubble")

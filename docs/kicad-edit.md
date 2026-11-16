@@ -41,12 +41,18 @@ and tested without a KiCad; the driver in `kedit.rs` feeds it KiCad's own items)
   touches; a pour's outline joins what stands in it) are joined by an A* search on a grid a quarter of the track or
   finer (0.0125 to 0.025 mm), in 45 degree steps, with the clearance of the net's class and of each neighbour's, the
   edge clearance and the hole clearance. Vias are the kinds the board already has (a through via, or the micro via of
-  each layer pair, made like one of the board's own: filled, capped, tented as they are); a micro via may stand in a pad
-  of its net. Plane layers (an inner layer with a zone and next to no tracks) are left alone unless a net has no other
-  way, and a track through another net's pour on an inner layer costs three times its length. Short nets go first; a
+  each layer pair, made like one of the board's own: filled, capped, tented as they are), each at a price by how rare
+  it is on the board, so a board of laser micro vias gets micro vias; a drilled via under a part of eight pads or
+  more costs more, and a micro via may stand in a pad of its net. A layer the board hardly routes on costs a quarter
+  more; a plane layer (an inner layer with a zone and next to no tracks) is open to a stack of micro vias passing
+  through and, at two and a half times the length, to a track; a track through another net's pour on an inner layer
+  costs three times its length. A track keeps a little room over its clearance where there is room, and the way found
+  on the grid is pulled into straight runs at 0, 45 and 90 degrees with no corner sharper than a right angle. A new
+  track that ends part way along another of its net breaks that one there, as KiCad's own router does. Short nets go first; a
   net with no way goes first in the next try (four at most). `ripup: true` takes the nets' old tracks up first. A part
   named in place of a net stands for the nets on its pads, and another net's track lying on one of those pads is taken
-  up with its net and routed again (what a footprint exchange leaves).
+  up with its net and routed again, and an old track's end where a pad stood before the exchange is cut back to where it
+  still joins something (what a footprint exchange leaves).
 - **`place`.** A part goes next to a pin: its pad on the pin's net lands within `within` mm, at one of the four
   rotations square to the pin's part, at the nearest place where its courtyard overlaps no other and its pads keep
   their clearance. A courtyard that overlaps is pushed out the shortest way and centred in a slot between two parts; a
@@ -67,8 +73,8 @@ What this model does not know (a custom rule, a rule area's condition) KiCad's c
 ## The check
 
 Before the first change and after the save the hub runs `kicad-cli pcb drc --schematic-parity` (a board) or `sch erc` (the root schematic)
-and answers `check: {by, new: [the findings this edit added, 12 at most], more, left, gone}` (`kedit::check_delta`,
-`checkrun::report_of`): each finding is its kind, its items and its place. About two seconds each on the boards tried
+and answers `check: {by, new: [the findings this edit added, 12 at most], more, elsewhere, left, gone}` (`kedit::check_delta`,
+`checkrun::report_of`): each finding is its kind, its items and its place. Two findings are the same one when only a track's length, the place or the items' order differs (a refill changes those); and on a board, a new finding that names none of the nets or parts the call worked on is set apart as `elsewhere` (its count and the first three), since a refill or a file's first save moves such findings about on a large board. About two seconds each on the boards tried
 (Hubble_DK, 8 layers: 2.0 s). `check: false` leaves it out; a call that changes nothing or does not save is not
 checked. After a schematic edit, `nets` is the saved netlist's net of every pin of the parts the call added, moved or
 wired by pin (`checkrun::netlist_of`), so no netlist is exported to see that a pin landed on its net.
