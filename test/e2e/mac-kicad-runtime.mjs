@@ -7,7 +7,7 @@
 import {copyFileSync,chmodSync,existsSync,mkdirSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {startHub,stopHub,client,makeStandins,sleep} from '../perf/lib.mjs';
-const [bin,rt,port,work]=process.argv.slice(2);const expect=process.env.EXPECT_VERSION||'';
+const [bin,rt,port,work]=process.argv.slice(2);const expect=process.env.EXPECT_VERSION||'';process.env.NO_SCOPE='1'; // no systemd-run on macOS
 rmSync(work,{recursive:true,force:true});for(const d of ['bin','proj','user/Library/Preferences'])mkdirSync(`${work}/${d}`,{recursive:true});
 // the ecc83 board from the repo's fixtures (the macOS package carries no demos), as the embed suites seed it
 const fx=new URL('../files/fixtures/plot/',import.meta.url).pathname;
