@@ -165,6 +165,12 @@ if DRIVER == 'vnc' and os.environ.get('MAC_MODE') != 'libs':
     with open(os.path.join(OUT, 'bin/claude'), 'w') as f:
         f.write('#!/bin/sh\nexec /usr/bin/python3 ' + os.path.join(REPO, 'test/kicad_embed/mac/standin_agent.py') + ' "$@"\n')
     os.chmod(os.path.join(OUT, 'bin/claude'), 0o755)
+if os.environ.get('MAC_MODE') == 'lock':
+    # another live KiCad has the project open: a stand-in writes KiCad's lock JSON and holds its flock (lane B's embed_foreign_lock_e2e)
+    LCK = os.path.join(OUT, 'proj', '~ecc83-pp.kicad_pro.lck')
+    holder = subprocess.Popen([sys.executable, '-c', 'import fcntl,json,sys,time\nf=open(sys.argv[1],"w");json.dump({"hostname":sys.argv[2],"username":sys.argv[3],"token":"other"},f);f.flush()\nfcntl.flock(f.fileno(),fcntl.LOCK_EX)\ntime.sleep(3600)',
+                               LCK, os.uname().nodename.split('.')[0], os.environ.get('USER', 'h')])
+    procs.append(holder); time.sleep(1)
 if os.environ.get('MAC_MODE') == 'update':
     # the starting state: bp.12.5 installed by the hub's installer (placed where it puts it; an APFS clone of the published runtime)
     _ver = json.load(open(os.path.join(RT, 'manifest.json')))['version']
@@ -375,6 +381,39 @@ try:
                 stuck = '"state":"starting"' in last and 'mac-permission-prompt' not in last
                 check(not stuck, f'docs: Don\'t Allow: the pane says what to do rather than hanging on "Starting KiCad…" ({last[:200]})')
                 print('INFO docs deny: the pane as shown in docs-4-denied.png', flush=True)
+        raise SystemExit(1 if FAILS else 0)
+    if os.environ.get('MAC_MODE') == 'lock':
+        def rect_since(i, line):
+            r = None
+            for l in client_log().splitlines()[line:]:
+                if 'GPUI_METRIC ' in l and '"rects"' in l:
+                    try:
+                        for e in json.loads(l.split('GPUI_METRIC ', 1)[1]).get('rects', []) or []:
+                            if isinstance(e, dict) and e.get('id') == i: r = e
+                    except Exception: pass
+            k = backing_scale()
+            return r and dict(r, x=r['x'] / k, y=r['y'] / k, w=r['w'] / k, h=r['h'] / k)
+        def press(r):
+            b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2)
+        def kicads():
+            out = []
+            for l in subprocess.run(['ps', '-axo', 'pid=,command='], capture_output=True, text=True).stdout.splitlines():
+                if '--parent-pid' in l and '--embedded' in l and OUT in l: out.append(l.split()[0])
+            return out
+        holders = lambda: subprocess.run(['lsof', '-t', '--', LCK], capture_output=True, text=True).stdout.split()
+        fow = lambda: 'File Open Warning' in hub_log()
+        o = wait_for(lambda: rect_since('kicad:lock-open', 0), 60, 0.5); c = rect_since('kicad:lock-cancel', 0); time.sleep(1); shot('lock-1-asked')
+        check(bool(o) and bool(c) and not kicads() and not fow(), f'lock L1: the pane asks Open anyway or Cancel; no KiCad started, no File Open Warning (KiCads {kicads()})')
+        mark = len(client_log().splitlines())
+        if c: press(c)
+        time.sleep(2.5); rt = wait_for(lambda: rect_since('kicad:retry', mark), 10, 0.5); shot('lock-2-cancelled')
+        check(not kicads() and bool(rt) and str(holder.pid) in holders(), f'lock L2: Cancel: no KiCad starts, Try again offered, the other KiCad still holds its lock ({holders()})')
+        mark = len(client_log().splitlines())
+        if rt: press(rt)
+        o2 = wait_for(lambda: rect_since('kicad:lock-open', mark), 30, 0.5)
+        if o2: press(o2)
+        f = wait_for(kicad_frame, 90, 0.5); shot('lock-3-opened')
+        check(bool(o2) and bool(f) and not fow(), f'lock L3: Try again asks again; Open anyway paints the editor, no File Open Warning (holders now {holders()})')
         raise SystemExit(1 if FAILS else 0)
     if os.environ.get('MAC_MODE') == 'update':
         row = wait_for(lambda: rects().get('kicad-update'), 120, 0.5)
