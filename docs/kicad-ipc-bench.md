@@ -316,6 +316,27 @@ saved path ... verify the viewer and history" sentence replaced by "the answer i
 own MCP servers switched off for the process by Grok's config overlay (`KIPC_BENCH_GROK_CLEAN`, `GROK_CONFIG`). Also
 open: a second run a cell, and the raw-file Hubble run.
 
+Parked on 2026-11-16 at the person's word ("forget Grok for now"); nothing more was spent. To take it up again, with
+a Grok sign-in that has balance (the CLI answered HTTP 402 "Grok Build usage balance exhausted"):
+
+1. Fixtures: `mkfix.sh` and `mkfix2.py` as in `test/kipc_bench/README.md` (the ones used were scratch and are gone).
+2. Grok in Backplane with the hint, 5 tasks, one run (about $6 to $8 at list price; before: 5/5, 7.54M context, 195
+   calls, 1,747 s, $5.53): a hub by `hub.mjs` with `KIPC_BENCH_PROMPT=test/kipc_bench/prompts/grok.json
+   KIPC_BENCH_GROK_CLEAN=1`, then `KIPC_BENCH_PROVIDER=grok KIPC_BENCH_THREAD_MODEL=grok-4.7 KIPC_BENCH_SEAL=1
+   KIPC_BENCH_TASKS=test/kipc_bench/tasks2.json python3 test/kipc_bench/bench.py run WORK grok-bp2 --runs 1 --par 2`.
+   What to look for in the trace: no `search_tool` before the first `use_tool`, no greps of the disk or the hub's
+   binary, nothing after the last `kicad_edit` but the answer.
+3. The one cell of the table still empty: Grok on raw files, `hubble_route` (`KIPC_BENCH_NOMCP=1
+   KIPC_BENCH_PROMPT=test/kipc_bench/prompts/rawfile.json`, `--tasks hubble_route`; its four sister runs cost $4 to $6
+   each).
+4. If the hint pays: it belongs in the hub's prompt for Grok threads (the block of `prompts/grok.json` after
+   Backplane's instructions, where `providers/acp.rs` `say` builds a new session's first prompt, and the softer
+   verify line in `PROMPT_BOARD` for Grok only), with a test, then the same five tasks once more on that build.
+5. A second run a cell for the whole table (about $40) only after that: the single runs already say which way each
+   comparison goes.
+
+The first round's results and transcripts: `~/Documents/Backplane/bench-artifacts/grok-fable-2x2/` on the desktop.
+
 ## What was tried
 
 | variant | what | passes | context tokens | tool calls | cost $ |
