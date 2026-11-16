@@ -1573,7 +1573,7 @@ def run(h):
                 # a box that waits for someone fails the start; a progress window that goes by itself does not (bp.10's
                 # "Load PCB / Finalizing board / Elapsed time", gone in 1.1-1.3 s, 4 of 10 opens Nov 15): failed once up 3 s
                 box_since = (box_since or time.monotonic()) if box else None
-                if only == "nogpu" and box and time.monotonic() - box_since >= 2.0:
+                if (only == "nogpu" or os.environ.get("BP_ANSWER_BOXES") == "1") and box and time.monotonic() - box_since >= 2.0:
                     # no GPU, fresh profile (lead, Nov 16): each box KiCad shows is answered as a person would (its OK), after
                     # recording what the pane and the hub say while it waits
                     infos = [l for l in log_lines(h, "client.log") if '"kicad_info"' in l]
@@ -1591,7 +1591,7 @@ def run(h):
                     time.sleep(1.0)
                     box_since = None
                     continue
-                if box and not observe and only != "nogpu" and time.monotonic() - box_since >= 3.0:
+                if box and not observe and only != "nogpu" and os.environ.get("BP_ANSWER_BOXES") != "1" and time.monotonic() - box_since >= 3.0:
                     print("DIAG startup_box " + json.dumps(box), flush=True)
                     h.shot("startup_box")
                     h.check(f"KiCad starts without a box before its first frame (it showed {box['title']!r}: {' | '.join(box['text'])[:200]})", False, box)
@@ -1605,6 +1605,8 @@ def run(h):
                 settled = True
                 break
             time.sleep(0.02 if trace_idle else 0.05)
+        if nogpu_boxes and only != "nogpu":
+            print("DIAG boxes_answered " + json.dumps(nogpu_boxes), flush=True)
         if only == "nogpu":
             # what a person gets with no GPU and a fresh profile: every box answered, the pane never claiming "not responding" while one
             # waits, the box named to the hub (so the pane can say it), then a usable editor
