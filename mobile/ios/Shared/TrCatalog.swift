@@ -2610,6 +2610,7 @@ gpui.to.do	TO-DO	ToDo
 gpui.subagents	SUBAGENTS	サブエージェント
 gpui.add.an.item	Add an item	項目を追加
 gpui.panels.subagents	SUBAGENTS · {word}	サブエージェント · {word}
+gpui.panels.kind.task	task	タスク
 gpui.runs	Runs	実行場所
 gpui.doing	Doing	作業中
 gpui.asked	Asked	依頼内容

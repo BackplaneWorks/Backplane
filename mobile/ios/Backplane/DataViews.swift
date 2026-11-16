@@ -1144,7 +1144,7 @@ struct DataWorkPanel: View {
                         Spacer()
                         }
                         if let label = r.label, !label.isEmpty {
-                            Button { client.workAct(thread, r) } label: { Text(Tr.t(label)).dmono(12) }.accessibilityIdentifier("data.work.\(r.act ?? "").\(r.value ?? "")")
+                            Button { if r.act == "open-thread", let u = URL(string: "backplane://thread/\(r.value ?? "")") { client.openLink(u, thread: thread) } else { client.workAct(thread, r) } } label: { Text(Tr.t(label)).dmono(12) }.accessibilityIdentifier("data.work.\(r.act ?? "").\(r.value ?? "")")
                         }
                     }
                 }

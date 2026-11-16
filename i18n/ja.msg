@@ -2280,6 +2280,7 @@ gpui.to.do = ToDo
 gpui.subagents = サブエージェント
 gpui.add.an.item = 項目を追加
 gpui.panels.subagents = サブエージェント · {word}
+gpui.panels.kind.task = タスク
 gpui.runs = 実行場所
 gpui.doing = 作業中
 gpui.asked = 依頼内容
