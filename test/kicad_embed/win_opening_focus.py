@@ -794,7 +794,7 @@ def run(h):
                 E.key_tap(ch)
             time.sleep(0.6)
             E.grab_screen(tb)
-            l4["typed_px"] = E.img_diff_box(ta, tb, *box)["changed_pixels"]
+            l4["typed_px"] = E.img_diff_box(ta, tb, wx, wy + wh * 3 // 4, max(1, pane_x - wx), wh // 4)["changed_pixels"]  # the composer, low down (not the header: its Buy it button changes on a thread jump)
             went = any(f'"thread":"{other}"' in l for l in log_since(n2))
             back4 = [l.strip()[:200] for l in log_since(n2) if "kicad_loan_back" in l]
             h.check("lend L4: Ctrl+K then another thread: the keyboard stays with Backplane",
