@@ -449,6 +449,9 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     let sel_st: &State=far.iter().map(|(_,f)|*f).find(|f|sel_id.contains('~') && f.threads.contains_key(sel_id.as_str())).unwrap_or(st);
     match action {
         "" | "native-sidebar-page" => {},
+        // a delegated task's Open (present/panels.rs `task_rows`): the window shows that thread itself (a client that sends it here anyway, an older one
+        // or a control press, must never lose its view over it: an unknown action refuses the whole view)
+        "open-thread" => {},
         // the sidebar's search box: the query is kept in the session (`@f.pq`); "proj-find" (the phones' toggle) changes nothing here
         "proj-find-q" => { session["drafts"]["@f.pq"]=json!(value); },
         "proj-find" => {},
