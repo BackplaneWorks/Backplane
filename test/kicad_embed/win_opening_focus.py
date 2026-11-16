@@ -18,6 +18,9 @@ Set BP_OPENING_FOCUS_ONLY=checks for the Checks panel (Linux embed_checks_panel_
 click, Run in it (RunChecks in KiCad, its answer and ET_CHECKS_DONE), the rows listed, a click on a DRC row and an
 ERC row cross-probing into KiCad, Down, Fix with agent, and KiCad's DRC marker clicked (ClickMarker) naming its row.
 It seeds a dangling label into the schematic before the hub starts.
+Set BP_OPENING_FOCUS_ONLY=plan for the person's Approve in KiCad's plan view (embed_plan_person_e2e.sh's port):
+an agent's plan proposed, plan view on, A/L/W/R on its corridors, then plan_get, the Plan panel and the agent's wake
+(see plan_check for the BP_PLAN_* options).
 Set BP_OPENING_FOCUS_HOST_FG=1 to make Backplane's window foreground from the
 harness before that click when the handback left KiCad foreground, so clients
 are compared from the same Backplane-foreground state.
@@ -743,6 +746,617 @@ def checks_list(h, pro, source):
         if not fs or off >= res.get("total", 0):
             return out
 
+# ---- plan: the person's Approve in KiCad's plan view (port of embed_plan_person_e2e.sh, the Linux suite) ----
+# Q1 the agent's plan (wide corridors c-p, c-q on F.Cu either side of the board's centre, c-r below, a B.Cu plane) is in KiCad,
+#    awaiting approval; plan_approve only asks the person
+# Q2 in plan view the person clicks c-p and presses A (approve), L (lock), W (wider); clicks c-q and presses R (reject)
+# Q3 plan_get `changes`: c-p approved, locked, edited by the person; c-q rejected
+# Q4 the Plan panel (mgmt.plan) shows c-p approved and locked, c-q rejected, live; its keys note matches plan-keys
+# Q5 the agent that asked is woken with the person's decision
+# Q6 layer approval: KiCad's right-click "Approve Layer" (B.Cu), an agent's RunAction approveLayer / ApprovePlan refused (hub and,
+#    from bp.13 batch 4, KiCad itself), its plan_approve only asks, the Plan panel's Approve (plan.approve) approves F.Cu
+# Q7 (bp.13 batch 4, rules-insert-position) a click on an F.Cu corridor with B.Cu active selects it, W widens; W with nothing selected
+#    changes nothing
+# Q9 (plan-view-api) plan view passive to the API: SetActiveLayer, layerNext, togglePlanView done in plan view, the mode read from KiCad
+# Q8 Escape with nothing selected: bp.13 leaves plan view and the hotkey starts it again; bp.12.x ends the plan tool (board colours
+#    back, plan fainter, A is KiCad's Add Footprint), the hotkey makes A the plan's again
+# Env: BP_PLAN_VIA=key (plan view by the hotkey, no canvas click first; default RunAction togglePlanView), BP_PLAN_KEYS=0 (decide from
+# the Plan panel, no keys in KiCad), BP_PLAN_FORCE=1 (run without plan-keys), BP_PLAN_XLAYER / BP_PLAN_PASSIVE / BP_PLAN_ESC=expect|xfail.
+
+PLAN_DOC = {
+    "layers": [{"layer": "F.Cu", "role": "signal", "status": "proposed"}, {"layer": "B.Cu", "role": "plane", "status": "proposed"}],
+    "groups": [{"id": "g-k", "name": "Cathodes", "color": "#e8a33d", "nets": ["Net-(U1A-K)", "Net-(U1B-K)"], "status": "proposed"},
+               {"id": "g-r", "name": "Spare", "color": "#3de86b", "nets": ["Net-(U1A-G)"], "status": "proposed"}],
+    "corridors": [{"id": "c-p", "group": "g-k", "layer": "F.Cu", "order": 1, "path": [[122, 113.3], [140, 113.3]], "width": 12.0, "status": "proposed"},
+                  {"id": "c-q", "group": "g-k", "layer": "F.Cu", "order": 2, "path": [[155, 113.3], [173, 113.3]], "width": 12.0, "status": "proposed"},
+                  {"id": "c-r", "group": "g-r", "layer": "F.Cu", "order": 3, "path": [[136, 129], [159, 129]], "width": 3.0, "status": "proposed"}],
+    "planes": [{"id": "p-gnd", "net": "GND", "layer": "B.Cu", "outline": [[[122, 91], [173, 91], [173, 108], [122, 108]]], "priority": 1, "status": "proposed"}],
+}
+PLAN_ENV = {"BP_STREAM_N": "1", "BP_STREAM_MS": "10", "BP_STANDIN_MCPCALL_MAX": "200000"}
+
+
+def plan_ask(h, name, args):
+    """One Backplane MCP call made by the stand-in agent of thread t1 (a turn "mcpcall:{json}"): its MCPCALL line from standin.log."""
+    def calls():
+        try:
+            return [l.rstrip("\r\n") for l in open(h.p("standin.log"), encoding="utf-8", errors="replace") if l.startswith("MCPCALL")]
+        except OSError:
+            return []
+    before = len(calls())
+    text = "mcpcall:" + json.dumps({"name": name, "arguments": args})
+    out = h.hub_rpc([{"method": "turn.start", "params": {"thread": "t1", "text": text, "msg": f"mperson{name}-{time.time_ns()}"}}])
+    with open(h.p("rpc.log"), "a", encoding="utf-8") as f:
+        f.write(out or "")
+    end = time.monotonic() + 60
+    while time.monotonic() < end and len(calls()) <= before:
+        time.sleep(0.25)
+    time.sleep(2)
+    return next((l for l in reversed(calls()) if l.startswith(f"MCPCALL {name} ")), "")
+
+
+def plan_payload(line):
+    """The tool's own answer inside an MCPCALL line (JSON-RPC result -> content[0].text, decoded), or {}."""
+    try:
+        o = json.loads(line.split(" ", 2)[2])
+        return json.loads(o["result"]["content"][0]["text"])
+    except (IndexError, KeyError, TypeError, ValueError):
+        return {}
+
+
+def plan_layer_status(h, layer):
+    """A layer's status from plan_get: the plan's layers list (corridors name layers too, so found by shape, not a regex)."""
+    def walk(o):
+        if isinstance(o, str):
+            try:
+                o = json.loads(o)
+            except ValueError:
+                return None
+            return walk(o) if isinstance(o, (dict, list)) else None
+        if isinstance(o, dict):
+            ls = o.get("layers")
+            if isinstance(ls, list) and ls and all(isinstance(l, dict) and "layer" in l and "id" not in l for l in ls):
+                return ls
+            o = list(o.values())
+        if isinstance(o, list):
+            for v in o:
+                r = walk(v)
+                if r:
+                    return r
+        return None
+    line = plan_ask(h, "plan_get", {})
+    try:
+        ls = walk(json.loads(line.split(" ", 2)[2])) or []
+    except (IndexError, ValueError):
+        ls = []
+    return next((l.get("status", "?") for l in ls if l.get("layer") == layer), "?")
+
+
+def plan_field(h, what):
+    """plan_get: the plan's revision ("rev") or a corridor's width, "?" when unreadable."""
+    r = plan_payload(plan_ask(h, "plan_get", {}))
+    if not r:
+        return "?"
+    if what == "rev":
+        return str((r.get("summary") or {}).get("revision", "?"))
+    return str(next((c.get("width") for c in (r.get("plan") or {}).get("corridors", []) if c.get("id") == what), "?"))
+
+
+def plan_wider(a, b):
+    try:
+        return a != "?" and b != "?" and float(b) > float(a) + 1e-9
+    except ValueError:
+        return False
+
+
+def plan_info(h, pro):
+    """The Plan panel's data (mgmt.watch -> mgmt.plan), as the client gets it."""
+    f = {}
+    for l in h.hub_rpc([{"method": "mgmt.watch", "params": {"project": pro}}]).splitlines():
+        try:
+            o = json.loads(l)
+        except ValueError:
+            continue
+        if isinstance(o, dict):
+            f = ((o.get("result") or {}).get("data") or {}).get("plan", f)
+    return f if isinstance(f, dict) else {}
+
+
+def plan_dialogs(h):
+    """KiCad's dialogs now, the client's last word (its kicad_info lines), with any visible KiCad dialog top-level beside it."""
+    last = []
+    try:
+        for l in open(h.p("client.log"), encoding="utf-8", errors="replace"):
+            if '"kicad_info"' in l and '"dialogs"' in l:
+                try:
+                    last = json.loads(l[l.index("{"):]).get("dialogs") or []
+                except ValueError:
+                    pass
+    except OSError:
+        pass
+    native = [w["title"] for w in kicad_toplevels() if w["visible"] and w["class"] in ("#32770", "wxWindowNR")
+              and "Editor" not in w["title"] and "KiCad" not in w["title"] and w["title"]]
+    return "; ".join(list(last) + [t for t in native if t not in last])
+
+
+def plan_grab(h, name, box):
+    """A screenshot of `box` (screen x, y, w, h), saved under shots/; the PIL image."""
+    from PIL import Image
+    x, y, w, hh = box
+    path = h.p("shots", f"{name}.png")
+    E.grab_screen(path, bbox=(x, y, x + w, y + hh))
+    return Image.open(path).convert("RGB")
+
+
+def _orange(r, g, b):
+    # the group's #e8a33d as KiCad draws it (the Linux suite's mask)
+    return r > 120 and r - b > 70 and g > 60 and g < r - 10 and g > b + 20
+
+
+def _green(r, g, b):
+    return g > 150 and g - r > 60 and g - b > 30
+
+
+def plan_spots(img, ox, oy):
+    """c-p and c-q on the screen: the corridor colour's pixels in the canvas image, its columns split into runs (gaps <= 30 px merged),
+    the two biggest kept in x order; each the median of its pixels, in screen coordinates. [] when not two."""
+    w, hh = img.size
+    raw = img.tobytes()
+    cols = [0] * w
+    ys = [[] for _ in range(w)]
+    for y in range(4, hh - 4):
+        row = y * w * 3
+        for x in range(4, w - 4):
+            i = row + x * 3
+            if _orange(raw[i], raw[i + 1], raw[i + 2]):
+                cols[x] += 1
+                ys[x].append(y)
+    if sum(cols) < 50:
+        return []
+    runs, start = [], None
+    for x, v in enumerate([c > 3 for c in cols] + [False]):
+        if v and start is None:
+            start = x
+        if not v and start is not None:
+            runs.append((start, x))
+            start = None
+    merged = []
+    for r0, r1 in runs:
+        if merged and r0 - merged[-1][1] <= 30:
+            merged[-1] = (merged[-1][0], r1)
+        else:
+            merged.append((r0, r1))
+    runs = sorted(sorted(merged, key=lambda r: -sum(cols[r[0]:r[1]]))[:2])
+    if len(runs) < 2:
+        return []
+    out = []
+    for x0, x1 in runs:
+        xs_ = sorted(x for x in range(x0, x1) for _ in range(cols[x]))
+        ys_ = sorted(y for x in range(x0, x1) for y in ys[x])
+        out.append((xs_[len(xs_) // 2] + ox, ys_[len(ys_) // 2] + oy))
+    return out
+
+
+def plan_px(img):
+    """The plan's pixels in the canvas image: the corridors' orange and green."""
+    raw = img.tobytes()
+    return sum(1 for i in range(0, len(raw), 3) if _orange(raw[i], raw[i + 1], raw[i + 2]) or _green(raw[i], raw[i + 1], raw[i + 2]))
+
+
+def plan_lum(img):
+    raw = img.tobytes()
+    return int(sum(raw) / max(1, len(raw)))
+
+
+def plan_diff(a, b, thr=60):
+    from PIL import ImageChops
+    raw = ImageChops.difference(a, b).tobytes()
+    return sum(1 for i in range(0, len(raw), 3) if raw[i] + raw[i + 1] + raw[i + 2] > thr)
+
+
+def plan_canvas(frame):
+    """KiCad's GL canvas in the shown frame (on Windows a child window of its own): its screen box, or None."""
+    gls = [w for w in E.list_child_windows(frame) if w["visible"] and w["class"] == "wxGLCanvas"]
+    gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
+    return (int(gl["root_x"]), int(gl["root_y"]), int(gl["w"]), int(gl["h"])) if gl else None
+
+
+def plan_check(h, cp, frame, rep, timeline):
+    top = int(rep.get("toplevel") or 0) or E.find_main_window(cp.pid)
+    proj = h.p("proj")
+    pcb, pro = os.path.join(proj, "ecc83-pp.kicad_pcb"), os.path.join(proj, "ecc83-pp.kicad_pro")
+    bindir = os.path.join(h.kicad_dir, "bin")
+    kiface = b""
+    for name in ("_pcbnew.kiface", "_pcbnew.dll"):
+        try:
+            with open(os.path.join(bindir, name), "rb") as f:
+                kiface = f.read()
+            break
+        except OSError:
+            pass
+    try:
+        manifest = open(os.path.join(h.kicad_dir, "manifest.json"), encoding="utf-8", errors="replace").read()
+    except OSError:
+        manifest = ""
+    sock = rep.get("sock") or ""
+    try:
+        caps = h.ipc_cmd("caps", sock).get("capabilities") or [] if sock else []
+    except Exception:  # noqa: BLE001
+        caps = []
+    has = lambda cap: f'"{cap}"' in manifest or cap in caps  # noqa: E731
+    edits = b"planAccept" in kiface or b"Plan.accept" in kiface
+    keys_env = os.environ.get("BP_PLAN_KEYS", "1") != "0"
+    plan_keys = has("plan-keys")
+    rt = {"kiface": bool(kiface), "plan_view_edits": edits, "plan-keys": plan_keys, "plan-view-api": has("plan-view-api"),
+          "rules-insert-position": has("rules-insert-position"), "sock": sock}
+    print("DIAG plan_runtime " + json.dumps(rt), flush=True)
+    timeline.append({"stage": "plan_runtime", **rt})
+    if not h.check("plan: this KiCad has plan view edits (pcbnew.Plan.accept, bp.13+)", edits, rt):
+        return
+    if keys_env and not plan_keys and os.environ.get("BP_PLAN_FORCE") != "1":
+        # bp.12.1 registered the plan tool as pcbnew.PlanTool: A opened Add Footprint (Linux: Nov 13)
+        h.check("plan: the runtime has plan-keys (A, R, L, W are the plan view's; BP_PLAN_KEYS=0 decides from the Plan panel)", False, rt)
+        return
+
+    # the editor full size, as on Linux (the pane's Full control), then its canvas
+    full = h.click_control(top, "kicad:full")
+    time.sleep(2.5)
+    fx, fy, fw, fh = window_box(frame)
+    cv = plan_canvas(frame)
+    if not cv:
+        h.shot("plan_no_canvas")
+        h.check("plan: the board is open in KiCad's editor (its GL canvas found)", False, {"frame": frame, "box": [fx, fy, fw, fh]})
+        return
+    gx, gy, gw, gh = cv
+    h.check("plan: the board editor is shown full size", fw > 700, {"full_clicked": full, "frame": [fx, fy, fw, fh], "canvas": list(cv)})
+
+    # Q1
+    r1 = plan_ask(h, "plan_propose", {"plan": PLAN_DOC, "mode": "merge"})
+    print("INFO plan_propose " + r1[:200], flush=True)
+    r2 = plan_ask(h, "plan_get", {})
+    h.check("plan: the agent's plan is in KiCad, awaiting approval", "c-q" in r2 and "awaiting_approval" in r2, r2[:300])
+    r3 = plan_ask(h, "plan_approve", {"ids": ["c-p", "c-q"], "note": "the two cathode corridors"})
+    h.check("plan: plan_approve only asks the person", "asked" in r3, r3[:300])
+    time.sleep(3)
+
+    hotkey_name = "Ctrl+Shift+R" if b"Routing Plan View" in kiface else "Alt+P"
+
+    def hotkey():
+        if hotkey_name == "Ctrl+Shift+R":
+            E.key_chord("ctrl", "shift", "r")
+        else:
+            E.key_chord("alt", "p")
+        time.sleep(0.7)
+
+    def key(name, wait=0.7):
+        E.key_tap(name)
+        time.sleep(wait)
+
+    def click(x, y, button=1, wait=0.7):
+        E.screen_click(int(x), int(y), button)
+        time.sleep(wait)
+
+    def step_ok(what):
+        """A step that types into KiCad starts only with no KiCad dialog open; with one it fails, naming it, and types nothing."""
+        d = plan_dialogs(h)
+        if not d:
+            return True
+        h.check(f"plan {what}: no KiCad dialog is open when it starts", False, f"KiCad shows: {d}")
+        return False
+
+    def kicad_ipc(type_, message):
+        return plan_ask(h, "kicad_ipc", {"path": pcb, "type": type_, "message": message})
+
+    def panel(params):
+        out = h.hub_rpc([{"method": "plan.approve", "params": {"pro": pro, **params}}])
+        return "\n".join([l for l in out.splitlines() if not l.startswith("INFO")][-2:])
+
+    # plan view, as the Linux suite reaches it
+    if os.environ.get("BP_PLAN_VIA", "action") == "key":
+        hotkey()  # straight after the editor opened: no canvas click first
+        via = f"{hotkey_name} (pressed without a canvas click)"
+    else:
+        # the keyboard to KiCad: a click on the canvas's centre (the board's: nothing of the plan there), then Escape
+        click(gx + gw // 2, gy + gh // 2)
+        key("Escape")
+        ra = kicad_ipc("kiapi.common.commands.RunAction", {"action": "pcbnew.Plan.togglePlanView"})
+        print("INFO RunAction togglePlanView: " + (re.search(r"RAS_[A-Z_]*", ra) or [""])[0], flush=True)
+        if "RAS_OK" in ra:
+            via = "action"
+        else:
+            via = hotkey_name
+            hotkey()
+    print(f"INFO plan view by {via}", flush=True)
+    time.sleep(1.5)
+    key("Home", 1.5)  # zoom to fit
+    img = plan_grab(h, "q1_plan_view", cv)
+    spots = plan_spots(img, gx, gy)
+    (px_, py_), (qx_, qy_) = spots if len(spots) == 2 else ((0, 0), (0, 0))
+    print(f"INFO corridors on screen: c-p ({px_},{py_}) c-q ({qx_},{qy_})", flush=True)
+    timeline.append({"stage": "plan_view", "via": via, "c_p": [px_, py_], "c_q": [qx_, qy_]})
+    if not h.check("plan: both corridors are drawn in KiCad's plan view", px_ > 0 and qx_ > px_, "see shots/q1_plan_view.png"):
+        return
+    s = max(1, (qx_ - px_) // 33)  # screen px per mm: c-p's middle at x 131, c-q's at 164
+    off_x = max(gx + 30, px_ - 22 * s)  # left of the board: nothing of the plan there
+
+    # Q2: the person's Approve (A), lock (L), wider (W) on c-p; reject (R) on c-q
+    if keys_env:
+        if step_ok("Q2 A, L, W on c-p"):
+            click(px_, py_)
+            key("a")
+        if step_ok("Q2 L after A"):
+            key("l")
+        if step_ok("Q2 W after L"):
+            key("w")
+        time.sleep(1)
+        plan_grab(h, "q2_cp_done", cv)
+        if step_ok("Q3 R on c-q"):
+            click(qx_, qy_)
+            key("r")
+        time.sleep(2)
+        plan_grab(h, "q3_cq_rejected", cv)
+    else:
+        print("INFO panel approve c-p: " + panel({"ids": ["c-p"], "approve": True})[:300], flush=True)
+        print("INFO panel reject c-q: " + panel({"ids": ["c-q"], "approve": False})[:300], flush=True)
+        time.sleep(2)
+
+    # Q3: what Approve led to, in the agent's plan_get
+    r4 = plan_ask(h, "plan_get", {})
+    j = r4[len("MCPCALL plan_get "):]
+    h.check("plan: plan_get: the person approved c-p in KiCad", "c-p" in j and "approved" in j, r4[:300])
+    if keys_env:
+        h.check("plan: plan_get: the person locked c-p",
+                bool(re.search(r"c-p[^}]*locked", j)), r4[:300])
+        h.check("plan: plan_get: c-p edited by the person (wider)",
+                bool(re.search(r"c-p[^}]*edited by the person", j) or re.search(r"constraint[^}]*wide", j)), r4[:300])
+    h.check("plan: plan_get: the person rejected c-q", "rejected" in j and "c-q" in j, r4[:300])
+
+    # Q4: the Plan panel, live
+    pinfo = plan_info(h, pro)
+    items = {i.get("id"): i for l in pinfo.get("layers", []) for i in (l.get("items") or [])}
+    p, q = items.get("c-p", {}), items.get("c-q", {})
+    h.check("plan: the Plan panel shows c-p approved and locked, c-q rejected (live)",
+            p.get("state") == "approved" and (p.get("locked") is True or not keys_env) and q.get("state") == "rejected",
+            json.dumps(pinfo)[:400])
+    kn = pinfo.get("keys_note") or ""
+    if not plan_keys:
+        h.check("plan: the Plan panel says to approve there (no plan-keys)", "approve from this panel" in kn, f"keys_note: {kn}")
+    else:
+        h.check("plan: the Plan panel has no keys note (plan-keys)", not kn, f"keys_note: {kn}")
+
+    # Q5: the agent that asked is woken
+    def standin():
+        try:
+            return open(h.p("standin.log"), encoding="utf-8", errors="replace").read()
+        except OSError:
+            return ""
+    end = time.monotonic() + 30
+    while time.monotonic() < end and "The person judged" not in standin():
+        time.sleep(0.5)
+    woke = re.findall(r'The person judged[^"\n]*', standin())
+    h.check("plan: the agent that asked is woken with the person's decision in KiCad",
+            bool(re.search(r"The person judged.*c-p", standin())), woke[:2])
+    h.shot("q4_panel")
+
+    # Q6: layer approval
+    if b"pcbnew.Plan.approveLayer" in kiface:
+        key("Escape", 0.5)
+        key("Page_Down", 1)  # B.Cu active
+        if not keys_env:
+            print("INFO Q6 right-click Approve Layer not tried: without plan-keys the menu is the selection tool's", flush=True)
+        elif step_ok("Q6 right-click Approve Layer"):
+            # nothing selected (off the board), then the menu by keyboard: Cancel, Add Note, Draw Corridor, Draw Plane Region, Approve Layer
+            click(off_x, py_, 3, 1)
+            h.shot("q5_menu")
+            for _ in range(5):
+                key("Down", 0.15)
+            time.sleep(0.5)
+            h.shot("q5_menu_approve")
+            key("Return", 2)
+            h.shot("q5_layer_b")
+        lb = plan_layer_status(h, "B.Cu")
+        if keys_env:
+            h.check("plan: layer approval from KiCad's right-click menu (Approve Layer on B.Cu)", lb == "approved", f"B.Cu: {lb} (shots/q5_menu_approve.png)")
+        key("Page_Up", 1)  # F.Cu stays the person's
+        ra = kicad_ipc("kiapi.common.commands.RunAction", {"action": "pcbnew.Plan.approveLayer"})
+        h.check("plan: an agent's RunAction pcbnew.Plan.approveLayer is refused", "the person's alone" in ra, ra[:200])
+        rb = kicad_ipc("kiapi.backplane.plan.ApprovePlan", {"board": {"type": "DOCTYPE_PCB"}, "layer": "F.Cu", "approve": True})
+        h.check("plan: an agent's ApprovePlan is refused", "the person's alone" in rb, rb[:200])
+        # past the hub's guard, straight to KiCad as an agent's client: the fork refuses (bp.13 batch 4); earlier builds not sent
+        b4 = "rules-insert-position" in kicad_ipc("kiapi.backplane.GetCapabilities", {})
+        if b4 and sock:
+            for act in ("pcbnew.Plan.approveLayer", "pcbnew.Plan.rejectLayer", "pcbnew.Plan.accept", "pcbnew.Plan.reject"):
+                try:
+                    a = __import__("subprocess").run([sys.executable, os.path.join(E.HERE, "lib", "agent_runaction.py"), sock, act, "agent:t1"],
+                                                     capture_output=True, text=True, timeout=30)
+                    out = ((a.stdout or "") + (a.stderr or "")).strip().splitlines()
+                    a = out[-1] if out else ""
+                except Exception as e:  # noqa: BLE001
+                    a = f"error: {e}"
+                h.check(f"plan: KiCad itself refuses an agent's RunAction {act}", "approval is the person's" in a, a[:200])
+        else:
+            print(f"XFAIL KiCad itself refusing an agent's approval actions: not this build (bp.13 batch 4), or no socket ({sock})", flush=True)
+        plan_ask(h, "plan_approve", {"layer": "F.Cu", "note": "F.Cu"})
+        time.sleep(2)
+        lf0 = plan_layer_status(h, "F.Cu")
+        h.check("plan: F.Cu is still not approved after the agent's attempts and its plan_approve", lf0 != "approved", f"F.Cu: {lf0}")
+        step_ok("Q6 the Plan panel's Approve")
+        pa = panel({"layer": "F.Cu", "approve": True})
+        time.sleep(2)
+        lf = plan_layer_status(h, "F.Cu")
+        h.shot("q6_layers")
+        h.check("plan: the Plan panel's Approve (ApprovePlan as the person) approves F.Cu in plan view", lf == "approved",
+                f"F.Cu: {lf}; plan.approve: {pa[:200]}")
+    else:
+        print("SKIP layer approval: this KiCad has no pcbnew.Plan.approveLayer", flush=True)
+
+    # Q7: the plan's other layers are hit (bp.13 batch 4)
+    caps7 = kicad_ipc("kiapi.backplane.GetCapabilities", {})
+    xl = os.environ.get("BP_PLAN_XLAYER") or ("expect" if "rules-insert-position" in caps7 else "xfail")
+    board = {"type": "DOCTYPE_PCB", "board_filename": "ecc83-pp.kicad_pcb", "project": {"name": "ecc83-pp", "path": proj}}
+
+    def active_layer():
+        m = re.search(r"BL_[A-Za-z_]*", kicad_ipc("kiapi.board.commands.GetActiveLayer", {"board": board}))
+        return m.group(0) if m else ""
+
+    def xcheck(what, ok, ev):
+        if xl == "expect" or ok:
+            h.check(what, ok, ev)
+        else:
+            print(f"XFAIL {what} (this build's hit test sees only the active layer; fixed in bp.13 batch 4): {ev}", flush=True)
+
+    key("Page_Down", 1)  # B.Cu active, nothing selected (no Escape: it would end the plan tool)
+    rx, ry = round(px_ + (147.5 - 131) * s), round(py_ + (129 - 113.3) * s)  # c-r's middle; the B.Cu plane stops at y 108
+    w0, l0 = plan_field(h, "c-r"), active_layer()
+    print(f"INFO Q7 ({xl}): c-r at ({rx},{ry}), width {w0}, active {l0}", flush=True)
+    click(rx, ry, wait=0.8)
+    key("w", 1.5)
+    plan_grab(h, "q7_cross_layer", cv)
+    w1, l1 = plan_field(h, "c-r"), active_layer()
+    xcheck("plan: with B.Cu active, a click on an F.Cu corridor and W widen it", plan_wider(w0, w1), f"c-r width {w0} -> {w1}")
+    xcheck("plan: the click makes the corridor's layer (F.Cu) active", l1 == "BL_F_Cu", f"active {l0} -> {l1}")
+    click(off_x, py_, wait=0.8)  # nothing selected
+    rev1 = plan_field(h, "rev")
+    band = (gx + 40, max(fy, gy - 10), max(1, gw - 80), 60)  # the infobar opens at the top of the canvas
+    ib0 = plan_grab(h, "q7_before_w", band)
+    key("w", 1.0)
+    ib1 = plan_grab(h, "q7_after_w", band)
+    rev2 = plan_field(h, "rev")
+    bpx = plan_diff(ib0, ib1)
+    xcheck("plan: W with nothing selected says so on KiCad's infobar", bpx > 1500, f"{bpx} pixels changed at the top of the canvas")
+    h.check("plan: W with nothing selected changes nothing in the plan", rev1 != "?" and rev1 == rev2, f"revision {rev1} -> {rev2}")
+
+    # Q9: plan view passive to the API (plan-view-api)
+    def ipc_status(type_, message):
+        o = kicad_ipc(type_, message)
+        if '"isError":true' in o:
+            m = re.search(r"AS_[A-Z_]*", o)
+            return "REFUSED " + (m.group(0) if m else "")
+        m = re.search(r"RAS_[A-Z_]*", o)
+        if m and "RAS_OK" not in o:
+            return "REFUSED " + m.group(0)
+        return "OK"
+
+    passive = os.environ.get("BP_PLAN_PASSIVE") or ("expect" if "plan-view-api" in caps7 else "xfail")
+
+    def plan_mode():
+        """KiCad's own word on plan view: GetPlan's in_plan_view (proto3 leaves a false bool out: off where the build has it)."""
+        r = plan_payload(kicad_ipc("kiapi.backplane.plan.GetPlan", {"board": board, "derived": False}))
+        if not r:
+            return "?"
+        m = r.get("message", r)
+        v = m.get("in_plan_view") if isinstance(m, dict) else None
+        if v is None and isinstance(m, dict):
+            try:
+                v = json.loads(m.get("json", "{}")).get("in_plan_view")
+            except ValueError:
+                v = None
+        return ("off" if passive == "expect" else "?") if v is None else ("on" if v else "off")
+
+    def pcheck(what, ok, ev):
+        if passive == "expect" or ok:
+            h.check(what, ok, ev)
+        else:
+            print(f"XFAIL {what} (plan view is busy to the API before bp.13 batch 11, plan-view-api): {ev}", flush=True)
+
+    if passive != "expect":
+        print(f"INFO Q9: the runtime lacks plan-view-api; its checks are told as XFAIL", flush=True)
+    la, m0 = active_layer(), plan_mode()
+    print(f"INFO Q9 ({passive}): plan view {m0}, active {la}", flush=True)
+    s1 = ipc_status("kiapi.board.commands.SetActiveLayer", {"board": board, "layer": "BL_B_Cu"})
+    l1 = active_layer()
+    pcheck("plan: in plan view SetActiveLayer(B.Cu) is done", s1 == "OK" and l1 == "BL_B_Cu", f"{s1}, active {la} -> {l1}")
+    if s1 != "OK":
+        h.check("plan: a refused SetActiveLayer left the layer as it was", l1 == la, f"{s1}, active {la} -> {l1}")
+    s2 = ipc_status("kiapi.common.commands.RunAction", {"action": "pcbnew.Control.layerNext"})
+    l2 = active_layer()
+    pcheck("plan: in plan view RunAction layerNext is done (the layer moves)", s2 == "OK" and l2 != l1, f"{s2}, active {l1} -> {l2}")
+    if s2 != "OK":
+        h.check("plan: a refused layerNext left the layer as it was", l2 == l1, f"{s2}, active {l1} -> {l2}")
+    s3 = ipc_status("kiapi.board.commands.SetActiveLayer", {"board": board, "layer": "BL_F_Cu"})
+    if s3 != "OK":
+        key("Page_Up")
+    time.sleep(0.5)
+    w3 = plan_field(h, "c-r")
+    click(rx, ry, wait=0.8)
+    key("w", 1.5)
+    w4 = plan_field(h, "c-r")
+    pcheck("plan: after the API changed the layer, a click on that layer's corridor selects it (W widens it)", plan_wider(w3, w4), f"{s3}; c-r width {w3} -> {w4}")
+    s4 = ipc_status("kiapi.common.commands.RunAction", {"action": "pcbnew.Plan.togglePlanView"})
+    time.sleep(1)
+    m4 = plan_mode()
+    pcheck("plan: RunAction togglePlanView turns plan view off (KiCad says so)", s4 == "OK" and m4 == "off", f"{s4}, plan view {m0} -> {m4}")
+    if s4 == "OK":
+        click(gx + gw // 2, gy + gh // 2, wait=0.8)  # U1, the board's centre
+        sel = kicad_ipc("kiapi.common.commands.GetSelection", {"header": {"document": board}})
+        w5 = plan_field(h, "c-r")
+        key("w", 1)
+        w6 = plan_field(h, "c-r")
+        kinds = sorted(set(re.findall(r"kiapi\.board\.types\.[A-Za-z]*", sel)))
+        pcheck("plan: with plan view off a click selects a board item, not a corridor",
+               ("FootprintInstance" in sel or "kiapi.board.types" in sel) and w5 == w6, f"selection: {' '.join(kinds)}; c-r {w5} -> {w6} on W")
+        key("Escape", 0.3)
+        s5 = ipc_status("kiapi.common.commands.RunAction", {"action": "pcbnew.Plan.togglePlanView"})
+        time.sleep(1)
+        m5 = plan_mode()
+        pcheck("plan: RunAction togglePlanView turns plan view on again", s5 == "OK" and m5 == "on", f"{s5}, plan view {m4} -> {m5}")
+        if m5 != "on":
+            hotkey()
+            time.sleep(0.5)
+    else:
+        h.check("plan: a refused togglePlanView left plan view as it was", m4 == m0, f"{s4}, plan view {m0} -> {m4}")
+
+    # Q8: Escape with nothing selected
+    click(off_x, py_, wait=0.6)  # nothing selected (Escape would end the tool)
+    key("Page_Up", 0.8)  # F.Cu active again: its corridors drawn
+    i0 = plan_grab(h, "q8_before_esc", cv)
+    p0, lum0 = plan_px(i0), plan_lum(i0)
+    if step_ok("Q8 Escape with nothing selected"):
+        key("Escape")
+    time.sleep(1.2)
+    i1 = plan_grab(h, "q8_after_esc", cv)
+    p1, lum1 = plan_px(i1), plan_lum(i1)
+    if "rules-insert-position" in caps7:
+        esc = os.environ.get("BP_PLAN_ESC", "xfail")
+        print(f"INFO Q8 bp.13 ({esc}): plan pixels {p0} before Escape, {p1} after", flush=True)
+        if esc == "expect" or p1 < p0 // 10 + 1:
+            h.check("plan: Escape with nothing selected leaves plan view (the plan no longer drawn)", p0 > 500 and p1 < p0 // 10 + 1,
+                    f"plan pixels {p0} -> {p1} (q8_before_esc, q8_after_esc)")
+            hotkey()
+            time.sleep(0.5)
+            p2 = plan_px(plan_grab(h, "q8_again", cv))
+            h.check(f"plan: {hotkey_name} starts plan view again", p2 > p0 // 2, f"plan pixels {p2}")
+        else:
+            print(f"XFAIL Escape with nothing selected leaves plan view (bp.13 batch 5): this build ends only the tool; the plan stays drawn ({p0} -> {p1})", flush=True)
+    elif keys_env:
+        print(f"INFO Q8 bp.12.x: plan pixels {p0} -> {p1}, canvas luminance {lum0} -> {lum1}", flush=True)
+        h.check("plan: Escape with nothing selected brings the board's colours back (bp.12.x)", lum1 > lum0 * 6 // 5,
+                f"canvas luminance {lum0} -> {lum1} (q8_before_esc, q8_after_esc)")
+        h.check("plan: the plan stays drawn, fainter (bp.12.x)", 0 < p1 < p0 * 4 // 5, f"plan pixels {p0} -> {p1}")
+        key("a")  # the plan tool has ended: A is KiCad's own (Add Footprint)
+        dl = ""
+        for _ in range(20):
+            dl = plan_dialogs(h)
+            if dl:
+                break
+            time.sleep(0.25)
+        h.shot("q8_a_after_esc")
+        h.check("plan: the plan tool has ended: A opens KiCad's Footprint Chooser (bp.12.x)", "footprint" in dl.lower(), f"KiCad shows: {dl or 'nothing'}")
+        if dl:
+            key("Escape")
+            for _ in range(20):
+                if not plan_dialogs(h):
+                    break
+                time.sleep(0.25)
+        if step_ok("Q8 plan view again"):
+            hotkey()
+            time.sleep(0.5)
+            key("a", 2)
+            dl2 = plan_dialogs(h)
+            h.shot("q8_again")
+            h.check("plan: plan view again: A is the plan's (no KiCad dialog) (bp.12.x)", not dl2, f"KiCad shows: {dl2}")
+            if dl2:
+                key("Escape")
+
 
 def run(h):
     only = os.environ.get("BP_OPENING_FOCUS_ONLY", "")
@@ -862,6 +1476,8 @@ def run(h):
             print("INFO BOM edit's format line: " + (m.group(0) if m else "none (the files were current)"), flush=True)
             h.check("savegate: the board is untouched by the BOM edit", sha(pcb) == h1, {"before": h1, "after": sha(pcb)})
             return h.finish()
+        if only == "plan":
+            os.environ.update(PLAN_ENV)  # the stand-in's MCP answers whole in standin.log, as on Linux
         h.start_hub(embed_mode="fork")
         cp = h.start_client([
             {"select": 0}, {"wait": 2800}, {"click": "rail:Board"},
@@ -869,7 +1485,7 @@ def run(h):
             {"kicad": {"wait_painted": 45000, "kind": "PCB", "tag": "first_paint"}},
             {"wait": 2000}, {"kicad": {"report": True, "tag": "settled"}},
             {"mark": "opening_settled"},
-        ], hold=True, exit_after=600)  # a safety net only (cleanup ends it): mouse_return x5 with a 40 s pre-warm wait outlived 120 s (MS)
+        ], hold=True, exit_after=900 if only == "plan" else 600)  # a safety net only (cleanup ends it): mouse_return x5 with a 40 s pre-warm wait outlived 120 s (MS)
         started = time.monotonic()
         previous = None
         settled = False
@@ -2117,6 +2733,9 @@ def run(h):
                     armed_n >= 3, {"armed_rounds": armed_n})
             h.check("Canvas click, then the composer under 600 ms after KiCad's focus notice, and typing: the text lands in the composer, 5/5",
                     all(r["ok"] for r in rows), rows)
+            return h.finish()
+        if only == "plan":
+            plan_check(h, cp, frame, rep, timeline)
             return h.finish()
         if only == "f6":
             return f6_check(h, cp, frame, children, timeline, pid)
