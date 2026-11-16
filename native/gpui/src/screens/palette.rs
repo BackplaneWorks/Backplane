@@ -193,6 +193,7 @@ impl Backplane {
         /* i18n-ok: placeholders drawn through trs by the input, and the text through trs */ if let Some(i) = self.screens.palette.input.clone() { i.update(cx, |i, _| i.set_placeholder("Type a word said in any thread")); }
     }
     pub(crate) fn palette_open(&mut self, cx: &mut Context<Self>) {
+        self.kicad_lend(cx);
         if self.screens.palette.input.is_none() {
             let input = cx.new(|cx| Composer::with_context(cx, "PickInput"));
             /* i18n-ok: hints, drawn through trs by the composer */ input.update(cx, |i, _| { i.set_placeholder("Jump to a thread or run a command"); });
@@ -213,13 +214,17 @@ impl Backplane {
     }
     pub(crate) fn palette_close(&mut self, cx: &mut Context<Self>) -> bool {
         let was = self.screens.palette.open; self.screens.palette.open = false;
-        if was { self.want_focus = true; cx.notify(); } was
+        if was { self.want_focus = true; self.kicad_return(cx); cx.notify(); } was
     }
     /// Do the highlighted item (or the one at `i`) and shut the box.
     fn palette_run(&mut self, i: Option<usize>, cx: &mut Context<Self>) {
         let list = listed(&self.data, &self.screens.palette);
         let Some(it) = list.get(i.unwrap_or(self.screens.palette.ix)).cloned() else { return };
         self.screens.palette.open = false; self.want_focus = true;
+        // the keyboard goes back to KiCad after a choice that leaves the editor on show and wants none itself (a thread: only when it is
+        // the one on show; the sidebar, streamer mode); one that opens something to type in (settings, the model picker, a find, the hub's
+        // actions) keeps it
+        let gives_back = matches!(it.what, Do::Thread(_) | Do::Prev | Do::Next | Do::Sidebar | Do::Streamer);
         match it.what {
             // a thread of this hub: as its sidebar row does (the thread drawn at once from the cache, its viewer and editor as they were left);
             // the hub's `select` action left a thread with its viewer open closed (the embedded KiCad gone with it)
@@ -243,6 +248,7 @@ impl Backplane {
             Do::Streamer => self.streamer_toggle(cx),
             Do::Hub(a) => self.hub_click(&a, cx),
         }
+        if gives_back { self.kicad_return(cx) } else { self.kicad_release(cx) }
         cx.notify();
     }
 }

@@ -231,6 +231,8 @@ pub struct KicadPane {
     focus: FocusHandle, keys: bool, pub light: bool, _subs: Vec<Subscription>,
     /// the fork's holder already in our save-set; reserved chords pressed in KiCad, waiting to be pressed in gpui
     kept: u64, pub press: Vec<String>,
+    /// when a reserved key pressed in KiCad (Ctrl+K, Ctrl+J...) last went to Backplane's own actions (`lent`)
+    lent_at: Option<std::time::Instant>,
     /// stock KiCad: the editor last asked for with its shortcut, and when; auxiliary frame (Symbol/Footprint/3D) opened from inside KiCad
     poked: Option<(String, std::time::Instant)>, unmapped_since: Option<(u64, std::time::Instant)>, unshown_since: Option<(String, std::time::Instant)>, override_kind: Option<String>, pending_show: Option<String>,
     /// the theme told to the hub at least once; the main window (its first home), where Pop back in returns it
@@ -333,7 +335,7 @@ impl KicadPane {
             let _ = drained_tx.send(());
         } }).detach();
         KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
@@ -557,6 +559,11 @@ impl KicadPane {
         nc::input_off(c, on);
         if on && self.keys { nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true); }
     }
+    /// Whether the keyboard came from KiCad just now: a reserved key pressed there went to Backplane's own action (an overlay it opens
+    /// gives the keyboard back to KiCad when it is dismissed: `Backplane::kicad_lend`, `kicad_return`).
+    pub fn lent_recently(&self) -> bool { self.lent_at.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(1500)) }
+    /// The pointer's input given back to the editor (`hold_keys` took it), the keyboard left where it is.
+    pub fn release_hold(&mut self) { if let Some(c) = self.container { nc::input_off(c, false); } }
     /// The keyboard back to the editor on show (a comment posted or cancelled), as a click on it gives it.
     pub fn give_keys(&mut self, cx: &mut Context<Self>) {
         let Some(c) = self.container else { return };
@@ -847,6 +854,7 @@ impl KicadPane {
     fn after_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // a window this pane left (popped out, or back in) places nothing
         if top_of(window) != Some(self.toplevel) { return }
+        if !self.press.is_empty() { self.lent_at = Some(std::time::Instant::now()); }
         for k in std::mem::take(&mut self.press) { if let Ok(k) = Keystroke::parse(&k) { eprintln!("GPUI_LOG {}", json!({"kicad_key_dispatch": k.unparse(), "at_ms": crate::screens::kcomment::epoch_ms() as u64})); window.defer(cx, move |window, cx| { window.dispatch_keystroke(k, cx); }); } }
         let Some(c) = self.container else { return };
         let seen = self.marker.lock().unwrap().and_then(|id| window.hitbox_drawn_after(id));
@@ -1072,6 +1080,15 @@ mod tests {
     }
     use super::{belongs_to, edit_target, frame_for, hub_open_step, nc, path_stem, pick, project_of, root_of, waiting, waiting_on, warm_target};
     use serde_json::{json, Value};
+    #[test] fn an_overlay_from_a_key_in_kicad_gives_the_keyboard_back_only_where_it_was_opened() {
+        use super::{loan_back, Loan};
+        let at = Loan { thread: "t1".into(), view: "board|0|/p|".into(), page: None };
+        assert!(loan_back(&at, &at.clone(), true), "Escape, a click away, a choice that left the editor on show: back to KiCad");
+        assert!(!loan_back(&at, &Loan { thread: "t2".into(), ..at.clone() }, true), "another thread: the keyboard stays with Backplane");
+        assert!(!loan_back(&at, &Loan { view: "schematic|0|/p|".into(), ..at.clone() }, true), "another view");
+        assert!(!loan_back(&at, &Loan { page: Some("p1".into()), ..at.clone() }, true), "a project's page over it");
+        assert!(!loan_back(&at, &at.clone(), false), "the editor not on show");
+    }
     #[test] fn ctrl_tab_goes_round_the_editor_tabs() {
         assert_eq!(super::next_tab("PCB", 1), "SCH"); assert_eq!(super::next_tab("PCB", -1), "GERBVIEW"); assert_eq!(super::next_tab("FOOTPRINT_EDITOR", 1), "GERBVIEW"); assert_eq!(super::next_tab("GERBVIEW", 1), "PCB"); assert_eq!(super::next_tab("?", 1), "SCH");
     }
@@ -1543,5 +1560,42 @@ impl crate::Backplane {
         let mut p = v.clone(); p["thread"] = json!(th);
         let _ = self.tx.try_send(Command::Rpc("kicad.comment.post".into(), Secret(p), "kicad"));
         cx.notify();
+    }
+}
+
+/// Where the person was when a reserved key pressed in KiCad opened one of Backplane's overlays (the palette, the terminal): the thread,
+/// what its viewer showed, the project page if one was over it. The keyboard goes back to KiCad when the overlay is dismissed with this
+/// unchanged (Escape, a click away, an action that leaves the editor on show), and stays with Backplane when the choice went elsewhere.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Loan { pub thread: String, pub view: String, pub page: Option<String> }
+/// Whether the keyboard goes back to KiCad: the same place as when it was lent, with the editor on show.
+pub fn loan_back(lent: &Loan, now: &Loan, editor_shown: bool) -> bool { editor_shown && lent == now }
+
+impl crate::Backplane {
+    fn kicad_place(&self) -> Loan {
+        let v = &self.data["thread"]["viewer"];
+        Loan { thread: self.selected.clone(), view: format!("{}|{}", v["open"].as_str().unwrap_or(""), crate::screens::viewer::shown_key(v)), page: self.project_page.clone() }
+    }
+    /// An overlay opens: when a reserved key in KiCad opened it, where the person was is kept (`kicad_return` gives the keyboard back).
+    pub fn kicad_lend(&mut self, cx: &mut Context<Self>) {
+        let lent = self.screens.kicad.as_ref().is_some_and(|p| p.read(cx).lent_recently());
+        self.screens.kicad_loan = lent.then(|| self.kicad_place());
+        // while the overlay is up the editor takes no input: X hands a key to the window under the pointer when it is inside the focus
+        // window, so with the pointer resting over KiCad every key typed into the palette (and its Escape) went to KiCad (lend e2e)
+        if lent { if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| p.hold_keys(true)); } }
+    }
+    /// An overlay's choice wants the keyboard itself: the loan ends, the editor takes the pointer again, Backplane keeps the keyboard.
+    pub fn kicad_release(&mut self, cx: &mut Context<Self>) {
+        if self.screens.kicad_loan.take().is_none() { return }
+        if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| p.release_hold()); }
+    }
+    /// An overlay was dismissed: the keyboard back to KiCad when nothing moved (the platform's own hand-over: `give_keys`).
+    pub fn kicad_return(&mut self, cx: &mut Context<Self>) {
+        let Some(lent) = self.screens.kicad_loan.take() else { return };
+        let now = self.kicad_place();
+        let shown = crate::screens::mgmt::shows(self.data["thread"]["viewer"]["open"].as_str().unwrap_or("")) && self.project_page.is_none();
+        let back = loan_back(&lent, &now, shown);
+        eprintln!("GPUI_LOG {}", json!({"kicad_loan_back": back, "moved": lent != now}));
+        if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, cx| if back { p.give_keys(cx) } else { p.release_hold() }); }
     }
 }
