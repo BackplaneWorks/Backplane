@@ -503,8 +503,41 @@ fn action_button(cx: &mut Context<Backplane>, light: bool, id: &'static str, ico
 }
 /// A project's page, from the sidebar's own rows (no round trip): its name and folder with the actions (New thread, Open folder, the viewers), its threads, the README,
 /// the goal and notes, the mechanical parts (assembly first), the parts to order and the boards.
-pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool, data: &Value, home: &Home, pid: &str, ctl: &mut Vec<crate::script::CtlEntry>, doc: &super::timeline::Doc) -> Vec<AnyElement> {
+/// The page's parts as its list draws them: what comes before the README (its name, actions, threads and the README's heading), and what
+/// comes after it (the goal, the parts, the boards); the README's blocks are items of their own (`readme_block`).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Part { Head, Tail }
+/// The list's items for a page whose README has `n` blocks: the head, each block, the tail.
+pub fn items(n: usize) -> usize { n + 2 }
+/// What item `ix` of that list is.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum PageItem { Head, Block(usize), Tail }
+pub fn item(ix: usize, n: usize) -> PageItem { if ix == 0 { PageItem::Head } else if ix <= n { PageItem::Block(ix - 1) } else { PageItem::Tail } }
+/// The top-level README block each anchor (`#usage`) is in, so a `#` link scrolls the list to it though it is not drawn.
+pub fn anchors(blocks: &[super::md::Block]) -> std::collections::HashMap<String, usize> {
+    use super::md::Block as B;
+    fn walk(b: &B, i: usize, out: &mut std::collections::HashMap<String, usize>) {
+        match b {
+            B::Anchor(id) => { out.entry(id.clone()).or_insert(i); }
+            B::Aligned(_, bs) | B::Callout(_, bs) | B::Details { blocks: bs, .. } => for x in bs { walk(x, i, out) },
+            _ => {}
+        }
+    }
+    let mut out = Default::default();
+    for (i, b) in blocks.iter().enumerate() { walk(b, i, &mut out) }
+    out
+}
+/// One README block, as the page's list draws it.
+pub fn readme_block(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool, home: &Home, i: usize, doc: &super::timeline::Doc) -> AnyElement {
+    let Some(b) = home.readme.get(i) else { return div().into_any_element() };
+    let key = format!("home-readme-{i}");
+    reg.borrow_mut().enter(i + 1, &key);
+    div().id(SharedString::from(key.clone())).pb_3().text_size(crate::scale::tpx(14.)).child(super::timeline::block_el(cx, reg, light, b, &key, Some(doc))).into_any_element()
+}
+
+pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool, data: &Value, home: &Home, pid: &str, ctl: &mut Vec<crate::script::CtlEntry>, doc: &super::timeline::Doc, part: Part) -> Vec<AnyElement> {
     use crate::script::CtlEntry;
+    let ctl_at = ctl.len();
     let Some(p) = find(data, pid) else { return vec![] };
     let c = |n: &str| theme::color(light, n);
     let threads: Vec<&Value> = p["threads"].as_array().into_iter().flatten().chain(p["settled"].as_array().into_iter().flatten()).collect();
@@ -565,13 +598,15 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
                 .on_click(cx.listener(move |this, _, window, cx| this.select(id.clone(), window, cx))).into_any_element());
         }
     }
-    if !loaded { return out }
-    // the README, drawn from its Markdown as GitHub draws it (pictures, alignment, alerts, details: the hub's md/doc.rs)
-    if !home.readme.is_empty() {
-        out.push(section(light, crate::i18n::trs("README"), None));
-        reg.borrow_mut().enter(0, "home-readme");
-        out.push(div().id("home-readme").flex().flex_col().gap_3().py_2().text_size(crate::scale::tpx(14.)).children(super::timeline::doc_blocks(cx, reg, light, &home.readme, "home-readme", doc)).into_any_element());
+    if !loaded { return if part == Part::Head { out } else { ctl.truncate(ctl_at); vec![] } }
+    // the README, drawn from its Markdown as GitHub draws it (pictures, alignment, alerts, details: the hub's md/doc.rs): its heading here,
+    // its blocks items of the list (readme_block), so only those on screen are laid out (Hubble_DK's: 15,600 px, 135 ms a frame drawn whole)
+    if part == Part::Head {
+        if !home.readme.is_empty() { out.push(section(light, crate::i18n::trs("README"), None)); }
+        return out;
     }
+    let _ = doc;
+    out.clear(); ctl.truncate(ctl_at);
     // the goal and notes
     let intent = { let i = string(&card, "intent"); if i.is_empty() && snap["artifacts"].as_array().map_or(false, |a| a.iter().any(|x| x["kind"] == "intent")) { string(&snap, "intent") } else { i } };
     let edit = top.clone().map(|top| {
@@ -650,6 +685,16 @@ pub fn controls(data: &Value) -> Vec<(String, String, Ctl)> {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_pages_list_is_its_head_each_readme_block_and_its_tail_and_an_anchor_finds_its_block() {
+        use super::{item, items, anchors, PageItem as I};
+        use crate::screens::md::{Align, Block as B};
+        assert_eq!(items(0), 2); assert_eq!(items(3), 5);
+        assert_eq!((0..5).map(|i| item(i, 3)).collect::<Vec<_>>(), [I::Head, I::Block(0), I::Block(1), I::Block(2), I::Tail]);
+        assert_eq!((0..2).map(|i| item(i, 0)).collect::<Vec<_>>(), [I::Head, I::Tail], "no README yet");
+        let bs = vec![B::Anchor("intro".into()), B::Rule, B::Aligned(Align::Center, vec![B::Anchor("usage".into())]), B::Details { summary: vec![], open: false, blocks: vec![B::Anchor("more".into())] }];
+        let a = anchors(&bs);
+        assert_eq!((a["intro"], a["usage"], a["more"]), (0, 2, 3), "an anchor inside an aligned block or details goes to that block");
+    }
     #[test] fn going_to_a_bot_a_room_a_link_or_a_thread_leaves_the_project_page() {
         for a in ["bot", "room", "link-open", "link-file", "select"] { assert!(super::leaves_page(a), "{a}"); }
         for a in ["flag", "new-thread", "proj-find-q", ""] { assert!(!super::leaves_page(a), "{a}"); }

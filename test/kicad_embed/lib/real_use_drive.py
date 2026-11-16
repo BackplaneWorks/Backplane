@@ -527,6 +527,26 @@ if "switch" in JOURNEYS:
             if not up3: print(f"JANK {tag}{i}: back on t1 but the editor is not there (viewer={op3})", flush=True); restore(f"{tag}{i}")
     away_back("thread_back", lambda: jump("Other thread 2"), lambda: jump("Embedded KiCad E2E"))
     away_back("thread_side_back", lambda: side("t2"), lambda: side("t1"))
+    # the project's page (its README laid out whole was 135 ms a frame on Hubble_DK, every hover): its frames while it opens, while the
+    # pointer moves over it and while it scrolls, from the client's BACKPLANE_GPUI_FRAMETIME (frames of 8 ms or more); then back to t1
+    def frames_since(t0):
+        out = []
+        for l in open(CLOG, errors="ignore"):
+            if l.startswith("GPUI_FRAME "):
+                try: f = json.loads(l[len("GPUI_FRAME "):])
+                except Exception: continue
+                if f.get("phase") == "draw" and f.get("epoch_ms", 0) >= t0: out.append(f["ms"])
+        return out
+    if control("project:p1"):
+        t0 = time.time() * 1000; click_ctl("project:p1"); time.sleep(2.0)
+        opened = frames_since(t0)
+        t1 = time.time() * 1000
+        for i in range(30): sh("python3", XIN, "move", GX + 300 + (i * 37) % 900, GY + 150 + (i * 53) % 700)
+        for b in [-1] * 30 + [1] * 30: sh("python3", XIN, "wheel", GX + 900, GY + 500, b)
+        time.sleep(0.5); moved = frames_since(t1)
+        perf("project_page_open", max(opened or [0]), frames=len(opened))
+        perf("project_page_frame", max(moved or [0]), slow_frames=len(moved))
+        side("t1"); time.sleep(2.5); where("after the project page")
 shot("after_switch")
 # 3. edit: pan and zoom 10 s each, a click (select), a drag (move), Delete, Ctrl+Z, a short interactive track
 if "edit" in JOURNEYS:

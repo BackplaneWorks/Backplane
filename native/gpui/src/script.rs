@@ -271,6 +271,7 @@ impl Backplane {
             Step::Scroll(n) => {
                 self.begin(format!("scroll:{n}"), Goal::Frame, cx);
                 // a project's page scrolls its own column
+                if !self.screens.home_list_key.is_empty() { let l = &self.screens.home_list; let top = l.logical_scroll_top(); self.m("home_scroll", json!({"item": top.item_ix, "px": f32::from(top.offset_in_item), "items": l.item_count()})); l.scroll_by(px(n)); self.ui_epoch += 1; cx.notify(); return; }
                 if self.project_page.is_some() || self.data["projectHome"].is_object() { let h = &self.screens.home_scroll; self.m("home_scroll", json!({"y": f32::from(h.offset().y), "max": f32::from(h.max_offset().height)})); let o = h.offset(); h.set_offset(point(o.x, (o.y - px(n)).min(px(0.)).max(-h.max_offset().height))); self.ui_epoch += 1; cx.notify(); return; }
                 // at the end the list's own top is past its last row, a screen below where the wheel starts from
                 let at_end = self.timeline.logical_scroll_top().item_ix >= self.timeline.item_count();

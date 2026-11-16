@@ -410,6 +410,19 @@
    "field": "ok",
    "min": 1,
    "what": "a click on a corridor of another plan layer makes its layer active"
+  },
+  {
+   "re": "^project_page_open$",
+   "field": "ms",
+   "max": 60,
+   "strict": true,
+   "what": "a project's page opening: its longest frame drawn (the README laid out whole: 135-145 ms on Hubble_DK before the list, 21-29 ms after)"
+  },
+  {
+   "re": "^project_page_frame$",
+   "field": "ms",
+   "max": 16,
+   "what": "a project's page under the pointer and scrolled: its longest frame drawn, one frame at 60 Hz (28-30 ms on Hubble_DK before the list; 19-21 ms after it with KiCad open beside, 11-12 ms without)"
   }
  ]
 }

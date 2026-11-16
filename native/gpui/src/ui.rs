@@ -214,6 +214,25 @@ impl Backplane {
 
 impl Backplane {
     /// One row of the timeline, as the list asks for it: only rows on screen are drawn.
+    /// Item `ix` of a project's page (screens/projects.rs `item`): its head, a README block, its tail; in the page's column.
+    pub(crate) fn page_item(&mut self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+        use crate::screens::projects::{self as pr, PageItem as Item, Part};
+        let light = self.light();
+        let Some(pid) = self.project_page.clone() else { return div().into_any_element() };
+        let home = &self.screens.projects.home;
+        let n = if home.pid == pid { home.readme.len() } else { 0 };
+        let reg = self.screens.reg.clone();
+        // (its width as the page's render measured it: the list's own state is borrowed while it lays out its items)
+        let doc = crate::screens::timeline::Doc { imgs: &self.screens.images, target: self.screens.attacher.target.as_ref(), width: self.screens.home_doc_w };
+        let mut ctl = Vec::new();
+        let el = match pr::item(ix, n) {
+            Item::Head => div().flex().flex_col().gap_3().pb_3().children(pr::page(cx, &reg, light, &self.data, home, &pid, &mut ctl, &doc, Part::Head)).into_any_element(),
+            Item::Block(i) => pr::readme_block(cx, &reg, light, home, i, &doc),
+            Item::Tail => div().flex().flex_col().gap_3().children(pr::page(cx, &reg, light, &self.data, home, &pid, &mut ctl, &doc, Part::Tail)).into_any_element(),
+        };
+        // the page's column: 930 at most, centred
+        div().w_full().flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().when(ix == 0, |d| d.pt_4()).when(matches!(pr::item(ix, n), Item::Tail), |d| d.pb_4()).child(el)).into_any_element()
+    }
     pub(crate) fn timeline_row(&mut self, ei: usize, cx: &mut Context<Self>) -> AnyElement {
         let light = self.light();
         let c = |name: &str| theme::color(light, name);
@@ -622,7 +641,21 @@ impl Render for Backplane {
         let has_home = home.is_object() || page.is_some();
         // the project home replaces the rows' part: what it drew last is not on screen (its controls, its text for selection)
         if has_home { self.screens.parts.rows_ctl.clear(); self.screens.reg.borrow_mut().begin_rows(); }
-        let home_els: Vec<AnyElement> = if let (false, Some(p)) = (home.is_object(), page.as_ref()) { crate::screens::projects::page(cx, &self.screens.reg.clone(), light, &self.data, &self.screens.projects.home, p, &mut ctl, &crate::screens::timeline::Doc { imgs: &self.screens.images, target: self.screens.attacher.target.as_ref(), width: (f32::from(self.screens.home_scroll.bounds().size.width).min(930.) - 32.).max(300.) }) } else if has_home {
+        // a project's page: a list, so only what is on screen is laid out and painted (Hubble_DK's README drawn whole: 135 ms a frame,
+        // every hover); its controls are all listed for the drivers, drawn or not
+        let page_list = if let (false, Some(p)) = (home.is_object(), page.as_ref()) {
+            self.screens.home_doc_w = page_doc_w(&self.screens.home_list);
+            let doc = crate::screens::timeline::Doc { imgs: &self.screens.images, target: self.screens.attacher.target.as_ref(), width: self.screens.home_doc_w };
+            for part in [crate::screens::projects::Part::Head, crate::screens::projects::Part::Tail] { let _ = crate::screens::projects::page(cx, &self.screens.reg.clone(), light, &self.data, &self.screens.projects.home, p, &mut ctl, &doc, part); }
+            let n = if self.screens.projects.home.pid == *p { self.screens.projects.home.readme.len() } else { 0 };
+            let want = crate::screens::projects::items(n);
+            let st = &self.screens.home_list;
+            if self.screens.home_list_key != *p { st.reset(want); self.screens.home_list_key = p.clone(); }
+            else if st.item_count() != want { let old = st.item_count(); st.splice(1..old.saturating_sub(1).max(1), n); }
+            self.screens.home_anchors = crate::screens::projects::anchors(if n > 0 { &self.screens.projects.home.readme } else { &[] });
+            true
+        } else { self.screens.home_list_key.clear(); false };
+        let home_els: Vec<AnyElement> = if page_list { Vec::new() } else if has_home {
             home["cards"].as_array().into_iter().flatten().take(60).enumerate().map(|(i, k)| node_el(cx, k, light, 0, &format!("h{i}"), &mut ctl)).collect()
         } else { Vec::new() };
         // popup
@@ -825,7 +858,8 @@ impl Render for Backplane {
                     .children(crate::screens::bots::bar(cx, light, &self.data["bot"]))
                     .children(head_row)
                     .children(crate::screens::panels::dock(cx, light, &self.screens.fields, &self.screens.panels, thread))
-                    .when(has_home, |d| d.child(div().id("home").track_scroll(&self.screens.home_scroll).overflow_y_scroll().flex_1().min_h_0().flex().flex_col().items_center().child(div().w_full().flex_none().max_w(px(930.)).p_4().flex().flex_col().gap_3().children(home_els))))
+                    .when(page_list, |d| d.child(list(self.screens.home_list.clone(), cx.processor(|this, ix, _, cx| this.page_item(ix, cx))).flex_1().min_h_0()))
+                    .when(has_home && !page_list, |d| d.child(div().id("home").track_scroll(&self.screens.home_scroll).overflow_y_scroll().flex_1().min_h_0().flex().flex_col().items_center().child(div().w_full().flex_none().max_w(px(930.)).p_4().flex().flex_col().gap_3().children(home_els))))
                     // a list: only the rows on screen are drawn, however much of the thread is held, and it keeps the reader's place as rows land above them
                     .when(!has_home, |d| d.child(self.screens.parts.el(Backplane::timeline_part, StyleRefinement::default().flex_1().min_h_0(), cx)))
                     .when(!self.error.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("bad")).child(crate::i18n::trs(&self.error))))
@@ -935,3 +969,5 @@ impl Render for Backplane {
 pub struct Ghost(pub String);
 impl Render for Ghost { fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement { div().px_3().py_1().bg(gpui::rgb(0x2a2f3a)).border_1().border_color(gpui::rgb(0x4a5060)).text_color(gpui::rgb(0xe6e8ee)).text_size(crate::scale::tpx(12.)).child(self.0.clone()) } }
 
+/// The width a project page's README is laid out to: the list's, in the page's 930 px column less its padding.
+pub fn page_doc_w(l: &ListState) -> f32 { (f32::from(l.viewport_bounds().size.width).min(930.) - 32.).max(300.) }
