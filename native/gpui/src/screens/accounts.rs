@@ -37,6 +37,10 @@ pub struct Accounts {
     pub add_provider: String,
     /// The composer row's width as last drawn (screens/combo.rs picks the chip's words from it; 0 before the first frame).
     pub bar_w: std::rc::Rc<std::cell::Cell<f32>>,
+    /// Setup's Connect was pressed for this account (its id): its sign-in link opens in the browser as soon as the hub has it, once.
+    pub opening: String,
+    /// The sign-in attempts whose link was opened that way (so a later snapshot does not open it again).
+    pub opened: std::collections::HashSet<String>,
 }
 
 // ---- pure: what the snapshot says -----------------------------------------------------------------------------------------------------------------------
@@ -163,10 +167,28 @@ pub fn thread_changed(this: &mut Backplane, selected: &str) {
     if !selected.is_empty() { list(this) }
 }
 
+/// Setup's Connect for `provider`: one request, `onboard.connect`, whose answer is the snapshot (it comes back as `acct`): the CLI's own
+/// login is used when there is one, else the account "Default" starts its sign-in and `got` opens its link. No name is asked for.
+pub fn connect(this: &mut Backplane, provider: &str) {
+    this.screens.acct.notice.clear();
+    /* i18n-ok: drawn through tr */ if this.tx.try_send(Command::Rpc("onboard.connect".into(), Secret(json!({"provider": provider})), "acct")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); }
+}
+/// The link to open now for setup's Connect: the newest live attempt of the account `opening` that has its link and was not opened yet.
+pub fn link_to_open(snap: &Value, opening: &str, opened: &std::collections::HashSet<String>) -> Option<(String, String)> {
+    if opening.is_empty() { return None }
+    attempts_of(snap, opening).into_iter().rev().find(|a| !string(a, "url").is_empty() && !opened.contains(&string(a, "id"))).map(|a| (string(&a, "id"), string(&a, "url")))
+}
+
 /// The hub's snapshot: kept, code boxes made for the sign-ins waiting, and polling started while something waits.
 pub fn got(this: &mut Backplane, v: Value, cx: &mut Context<Backplane>) {
     if !v.is_object() { return }
     this.screens.acct.notice = v["error"].as_str().unwrap_or("").to_string();
+    // setup's Connect answered: signed in already (the CLI's own login), so setup moves on; or the account whose link is to open
+    if v["onboard"].is_object() {
+        if v["onboard"]["connected"] == true { this.screens.acct.opening.clear(); if this.data["tour"]["id"] == "agents" { let _ = this.tx.try_send(Command::Action("ob-next".into(), String::new())); } }
+        else { let pid = string(&v["onboard"], "profile"); for a in attempts_of(&v, &pid) { this.screens.acct.opened.remove(&string(&a, "id")); } this.screens.acct.opening = pid; }
+    }
+    if let Some((aid, url)) = link_to_open(&v, &this.screens.acct.opening, &this.screens.acct.opened) { cx.open_url(&url); this.screens.acct.opened.insert(aid); this.screens.acct.opening.clear(); }
     for a in v["attempts"].as_array().into_iter().flatten().filter(|a| is_live(a)) {
         let id = a["id"].as_str().unwrap_or("").to_string();
         if id.is_empty() || this.screens.acct.codes.contains_key(&id) { continue }
@@ -223,7 +245,7 @@ fn poll(this: &mut Backplane, cx: &mut Context<Backplane>) {
 pub fn open_page(this: &mut Backplane, cx: &mut Context<Backplane>) {
     if this.screens.acct.label.is_none() {
         let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
-        input.update(cx, |i, _| i.set_placeholder(&trs("Account label (e.g. Work)")));
+        input.update(cx, |i, _| i.set_placeholder(&trs("Account name (optional: its email once signed in)")));
         cx.subscribe(&input, |this, _, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) { add(this, cx) }).detach();
         this.screens.acct.label = Some(input);
     }
@@ -234,9 +256,9 @@ pub fn open_page(this: &mut Backplane, cx: &mut Context<Backplane>) {
 fn add(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let Some(input) = this.screens.acct.label.clone() else { return };
     let label = input.read(cx).content.to_string();
-    /* i18n-ok: drawn through tr */ if label.trim().is_empty() { this.screens.acct.notice = "Name the account first, e.g. Work or Personal.".into(); return }
     let provider = if this.screens.acct.add_provider == "codex" { "codex" } else { "claude" };
-    ask(this, json!({"op": "add", "provider": provider, "label": label.trim()}));
+    // no name given: the hub names it after its email once it is signed in
+    ask(this, json!({"op": "add", "provider": provider, "label": label.trim(), "unnamed": label.trim().is_empty()}));
     input.update(cx, |i, cx| i.set(String::new(), cx));
 }
 /// Add account → Claude (sync): a sync account named in the box, its `claude setup-token` started at once on the hub.
@@ -500,12 +522,8 @@ pub fn panel(cx: &mut Context<Backplane>, light: bool, st: &Accounts, provider: 
     let c = |n: &str| theme::color(light, n);
     let mut out: Vec<AnyElement> = vec![];
     if !st.notice.is_empty() { out.push(div().p_3().bg(c("raise")).text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(trs(&st.notice)).into_any_element()); }
+    // the accounts of this provider and their sign-ins; adding another, named account is Settings › Accounts' alone
     for (i, p) in profiles(&st.snap).iter().enumerate().filter(|(_, p)| p["provider"] == provider) { out.push(card(cx, light, st, p, i, false)); }
-    if let Some(input) = &st.label {
-        let word = if provider == "codex" { trs("Add Codex account") } else { trs("Add Claude account") };
-        out.push(div().flex().items_center().gap_2().child(div().flex_1().h(crate::scale::tpx(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone()))
-            .child(button(cx, light, "acct-add".into(), &word, true, false, |this, cx| add(this, cx))).into_any_element());
-    }
     out
 }
 
@@ -653,6 +671,18 @@ mod tests {
         let ps: Vec<Value> = (0..11).map(|i| json!({"id":format!("p{i}"),"provider":"claude","label":format!("A{i}"),"epoch":1,"state":"connected","identity":{}})).chain([json!({"id":"c","provider":"codex","label":"C","epoch":1,"state":"connected"})]).collect();
         let r = menu_rows(&json!({"profiles":ps,"thread":{"provider":"claude","binding":""}}), 0); assert_eq!(r.len(), 12, "the default and eleven: codex's is not this thread's"); assert_eq!((r[8].key, r[9].key), (Some(9), None)); assert!(r[0].on, "no binding is the default account");
         let c = menu_rows(&json!({"profiles":[{"id":"c","provider":"codex","label":"C","epoch":1,"state":"connected"}],"thread":{"provider":"codex","binding":"{\"id\":\"c\",\"epoch\":1}"},"default_allowance":{"windows":[{"scope":"five_hour","used_percent":1.0}]}}), 0); assert_eq!(c[0].left, "", "the kept default reading is Claude's"); assert!(c[1].on);
+    }
+    #[test] fn setup_connect_opens_the_newest_live_link_of_its_account_once() {
+        let snap = json!({"attempts": [
+            {"id": "old", "profile": "d", "state": "expired", "url": "https://x/old"},
+            {"id": "a1", "profile": "d", "state": "starting", "url": ""},
+            {"id": "o", "profile": "other", "state": "waiting", "url": "https://x/other"}]});
+        let mut opened = std::collections::HashSet::new();
+        assert_eq!(link_to_open(&snap, "d", &opened), None, "no link yet: nothing opens (the next snapshot has it)");
+        assert_eq!(link_to_open(&snap, "", &opened), None, "no Connect pressed: nothing opens");
+        let snap = json!({"attempts": [{"id": "a1", "profile": "d", "state": "waiting", "url": "https://claude.com/cai/oauth/authorize?x"}]});
+        assert_eq!(link_to_open(&snap, "d", &opened), Some(("a1".into(), "https://claude.com/cai/oauth/authorize?x".into())));
+        opened.insert("a1".to_string()); assert_eq!(link_to_open(&snap, "d", &opened), None, "once");
     }
     #[test] fn a_pick_carries_the_binding_the_menu_was_drawn_from() {
         let p = select_params("t1", "w", 3, &snap()); assert_eq!((p["thread"].clone(), p["profile"].clone(), p["epoch"].clone()), (json!("t1"), json!("w"), json!(3))); assert_eq!(p["expected"], "{\"id\":\"w\",\"epoch\":3}");

@@ -110,6 +110,9 @@ fn accounts(info: &Value) -> Value {
 }
 
 
+/// The name of the account the Agents step's Connect makes: the person is never asked for one there (Settings › Accounts adds more).
+pub const DEFAULT: &str = "Default";
+
 pub struct OnboardRpc;
 impl OnboardRpc {
     async fn check(hub: &Arc<Hub>, p: &Value) {
@@ -162,6 +165,38 @@ impl OnboardRpc {
         let Some(h) = hub.rpc_for(m) else { return json!({"ok": false, "error": "not available on this hub"}) };
         h.call(hub, who, &json!(0), m, &p).await.into_iter().next().unwrap_or(Value::Null)
     }
+    /// `onboard.connect {provider}`: the Agents step's Connect, in one press. The CLI's own login, when there is one, is used as it is
+    /// (the checks run again so the step turns done, and the answer says `connected`, so the window moves on); else the account "Default"
+    /// (made, or the one an earlier press made) starts its sign-in at once, and the window opens its link as soon as the CLI gives it.
+    /// The answer is the accounts snapshot (the window's `acct` answer) with `onboard: {provider, connected}`.
+    async fn connect(hub: &Arc<Hub>, who: &Caller, provider: &str) -> Value {
+        if !matches!(provider, "claude" | "codex") { return json!({"error": "Only Claude and Codex connect from here."}) }
+        let signed = match crate::agents::proc::Cli::from_env().resolve(provider) {
+            Ok(p) if provider == "claude" => run(Kind::Agent, &p, &["auth", "status"], TIMEOUT).await.map_or("unknown", |r| claude_signed(r.0, &r.1).0) == "yes",
+            Ok(p) => run(Kind::Agent, &p, &["login", "status"], TIMEOUT).await.map_or("unknown", |r| codex_signed(r.0, &r.1, &r.2)) == "yes",
+            Err(_) => return json!({"error": "Install it first."}),
+        };
+        if signed {
+            Self::check(hub, &json!({})).await;
+            let mut snap = Self::inner(hub, who, "accounts", json!({"op": "list"})).await["result"].take();
+            snap["onboard"] = json!({"provider": provider, "connected": true});
+            return snap
+        }
+        let list = Self::inner(hub, who, "accounts", json!({"op": "list"})).await;
+        let mine = |v: &Value| v["result"]["profiles"].as_array().into_iter().flatten()
+            .find(|p| p["provider"] == provider && p["label"] == DEFAULT && p["kind"].as_str().unwrap_or("").is_empty()).cloned();
+        let pid = match mine(&list) {
+            Some(p) => p["id"].as_str().unwrap_or("").to_string(),
+            None => { let made = Self::inner(hub, who, "accounts", json!({"op": "add", "provider": provider, "label": DEFAULT})).await; made["result"]["made"].as_str().unwrap_or("").to_string() }
+        };
+        if pid.is_empty() { return json!({"error": "The account could not be made here."}) }
+        // a sign-in already going (a second press) is kept: its link opens again
+        let r = Self::inner(hub, who, "accounts", json!({"op": "login", "profile": pid, "mode": "browser"})).await;
+        let mut snap = if r["result"].is_object() { r["result"].clone() } else { Self::inner(hub, who, "accounts", json!({"op": "list"})).await["result"].take() };
+        if snap["error"] == super::accounts_io::SIGNING_IN { snap["error"] = json!("") }
+        snap["onboard"] = json!({"provider": provider, "connected": false, "profile": pid});
+        snap
+    }
     /// The uberbot for a home with no bots: Bub, or a name that is free.
     async fn uber(hub: &Arc<Hub>, who: &Caller) {
         for name in ["Bub", "Bub2", "Bub3"] { if Self::inner(hub, who, "bots.create", json!({"name": name, "uber": true})).await["ok"] == true { break } }
@@ -179,7 +214,7 @@ impl OnboardRpc {
     }
 }
 impl RpcHandler for OnboardRpc {
-    fn methods(&self) -> &'static [&'static str] { &["onboard.check", "onboard.install", "onboard.uber", "onboard.view", "onboard.act"] }
+    fn methods(&self) -> &'static [&'static str] { &["onboard.check", "onboard.install", "onboard.connect", "onboard.uber", "onboard.view", "onboard.act"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let ok = json!({"t":"reply","id":id,"ok":true});
@@ -187,6 +222,7 @@ impl RpcHandler for OnboardRpc {
                 "onboard.check" => { let (h, q) = (hub.clone(), p.clone()); tokio::spawn(async move { OnboardRpc::check(&h, &q).await }); vec![ok] }
                 "onboard.install" => match OnboardRpc::install(hub, p["tool"].as_str().unwrap_or("")).await { Ok(m) => vec![json!({"t":"reply","id":id,"ok":true,"result":{"message":m}})], Err(e) => vec![json!({"t":"reply","id":id,"ok":false,"error":e})] },
                 "onboard.uber" => { OnboardRpc::uber(hub, who).await; vec![ok] }
+                "onboard.connect" => { let r = OnboardRpc::connect(hub, who, p["provider"].as_str().unwrap_or("")).await; vec![json!({"t":"reply","id":id,"ok":r["error"].as_str().unwrap_or("").is_empty(),"result":r})] }
                 // phones have no setup (D9): no step to draw; a press is the import card's
                 "onboard.act" => { OnboardRpc::card_press(hub, who, p).await; vec![json!({"t":"reply","id":id,"ok":true,"result":{"tour":null}})] }
                 _ => vec![json!({"t":"reply","id":id,"ok":true,"result":{"tour":null}})],
