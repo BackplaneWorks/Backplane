@@ -15,7 +15,32 @@ def turn(work, d, text, ms=int(os.environ.get("KIPC_BENCH_TURN_MS", "600000"))):
     except Exception: return {"state": "driver-failed", "err": (r.stdout + r.stderr)[-300:]}
 def fresh(work, name, fixture):
     d = f"{work}/runs/{name}"; shutil.rmtree(d, ignore_errors=True); shutil.copytree(f"{env(work)['fixtures']}/{fixture}", d); return d
+# what a provider charges per million tokens (input, cached input, output), for a CLI that does not say its cost itself: xAI's list price
+# for requests under 200k prompt tokens (docs.x.ai/docs/models, read 2026-11-16)
+PRICE = {"grok-4.7": (2.00, 0.50, 6.00), "grok-4.6": (2.00, 0.50, 6.00), "grok-4.5": (2.00, 0.30, 6.00)}
+def usage_acp(log):
+    """Grok's turn from its ACP lines (the `grok` wrapper's log): tool calls by title, tokens from the prompt's answer (the whole turn's), the
+    cost at the list price."""
+    o = {"tools": {}, "calls": 0, "tool_result_chars": 0}; seen = set()
+    for l in open(log):
+        try: _, j = l.split("\t", 1); j = json.loads(j)
+        except ValueError: continue
+        m = j.get("msg"); m = m if isinstance(m, dict) else {}
+        u = (m.get("params") or {}).get("update") or {}
+        if j.get("dir") == "from" and u.get("sessionUpdate") == "tool_call" and u.get("toolCallId") not in seen:
+            seen.add(u.get("toolCallId")); raw = u.get("rawInput") or {}; n = str(u.get("title") or u.get("kind") or "tool")
+            n = "kicad_edit" if "kicad_edit" in n else "kicad_ipc" if "kicad_ipc" in n else n.split(" ")[0].split("(")[0][:24]
+            o["tools"][n] = o["tools"].get(n, 0) + 1; o["calls"] += 1
+        if j.get("dir") == "from" and u.get("sessionUpdate") == "tool_call_update": o["tool_result_chars"] += len(json.dumps(u.get("content") or u.get("rawOutput") or ""))
+        r = m.get("result") if j.get("dir") == "from" and m.get("id") == 3 else None
+        if isinstance(r, dict):
+            meta = r.get("_meta") or {}; us = r.get("usage") or meta.get("usage") or {}; g = lambda *ks: next((us[k] for k in ks if isinstance(us.get(k), (int, float))), 0)
+            inp, cached, outp = g("inputTokens"), g("cachedReadTokens"), g("outputTokens"); model = meta.get("modelId") or ""
+            pi, pc, po = PRICE.get(model, PRICE["grok-4.7"])
+            o.update(input=inp - cached, cache_write=0, cache_read=cached, output=outp, context=inp, cost=((inp - cached) * pi + cached * pc + outp * po) / 1e6, api_turns=0, models=[model], is_error=r.get("stopReason") not in (None, "end_turn"), stop=r.get("stopReason"))
+    return o
 def usage(log):
+    if '"dir": "' in open(log).readline(): return usage_acp(log)
     """Tokens, tool calls and time from the CLI's stream: its `result` line's totals, and each tool call by name."""
     o = {"tools": {}, "calls": 0, "tool_result_chars": 0}; seen = set()
     for l in open(log):
@@ -47,6 +72,9 @@ def one(work, variant, task, n):
         import checks; df = checks.check(task["check"], d, env(work)["fixtures"], env(work)["cli"])
     else: df = norm.diff(json.load(open(f"{work}/ref/{task['id']}.json")), norm.norm(d, env(work)["cli"]))
     o["pass"] = not df and r.get("state") == "completed"; o["diff"] = df[:6]
+    # KIPC_BENCH_SEAL: a finished run's folder is closed (mode 0), so a later run of an agent that searches the disk for an answer (Grok greps
+    # its way round the benchmark's own folders) does not find this one's board; chmod it back to score or look at it
+    if os.environ.get("KIPC_BENCH_SEAL"): os.chmod(d, 0)
     open(work + "/results.jsonl", "a").write(json.dumps(o) + "\n")
     print(f"{name}: {'PASS' if o['pass'] else 'FAIL'} ctx={o.get('context')} out={o.get('output')} calls={o.get('calls')} wall={o['wall_s']}s ${o.get('cost', 0):.2f} {o['diff'][:2] if df else ''}", flush=True)
     return o

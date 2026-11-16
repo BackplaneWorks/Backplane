@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""The benchmark's `grok` (docs/kicad-ipc-bench.md): the hub starts it as its Grok CLI (`grok agent ... stdio`, ACP: JSON-RPC lines over stdio)
+with the arguments a real thread gets. It runs the real Grok CLI (KIPC_BENCH_GROK) and passes the lines both ways, copying them to
+$KIPC_BENCH_OUT/<cwd name>.jsonl as {"dir": "to"|"from", "msg": ...}. Two things it changes on the way in, as the `claude` wrapper does:
+the raw file variant (KIPC_BENCH_NOMCP) gives the session no MCP server, and KIPC_BENCH_PROMPT's replacements are made in Backplane's
+instructions (which Grok gets at the head of the first prompt). The effort is fixed (KIPC_BENCH_EFFORT). Grok signs in from the person's
+own ~/.grok (its sessions are kept there too)."""
+import json, os, re, subprocess, sys, threading, time
+a = sys.argv[1:]; out = os.environ.get("KIPC_BENCH_OUT", "/tmp"); name = os.path.basename(os.getcwd())
+open(os.path.join(out, name + ".argv.json"), "w").write(json.dumps(a))
+if "--reasoning-effort" not in a and "stdio" in a: i = a.index("stdio"); a[i:i] = ["--reasoning-effort", os.environ.get("KIPC_BENCH_EFFORT", "medium")]
+reps = json.load(open(os.environ["KIPC_BENCH_PROMPT"])) if os.environ.get("KIPC_BENCH_PROMPT") else []
+home = os.environ.get("KIPC_BENCH_REALHOME", os.environ.get("HOME", ""))
+env = {k: v for k, v in os.environ.items() if not (k.startswith("CLAUDE") or k in ("ANTHROPIC_API_KEY", "BACKPLANE_AGENT_OWNER") or k.startswith("XDG_"))}
+env["HOME"] = home
+p = subprocess.Popen([os.environ["KIPC_BENCH_GROK"]] + a, stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env, text=True, bufsize=1)
+log = open(os.path.join(out, name + ".jsonl"), "w"); t0 = time.time(); lock = threading.Lock()
+def note(d, l):
+    with lock:
+        try: m = json.loads(l)
+        except ValueError: m = l.strip()
+        log.write(json.dumps({"t": round(time.time() - t0, 3)}) + "\t" + json.dumps({"dir": d, "msg": m}) + "\n"); log.flush()
+def change(l):
+    try: m = json.loads(l)
+    except ValueError: return l
+    if m.get("method") in ("session/new", "session/load") and os.environ.get("KIPC_BENCH_NOMCP"): m["params"]["mcpServers"] = []
+    if m.get("method") == "session/prompt" and reps:
+        for b in m["params"].get("prompt", []):
+            if b.get("type") == "text":
+                for r in reps:
+                    old, new = r[-2:]
+                    if len(r) == 3: b["text"], k = re.subn(old, lambda _: new, b["text"], flags=re.S)
+                    else: k = b["text"].count(old); b["text"] = b["text"].replace(old, new)
+                    if not k and "<backplane_instructions>" in b["text"]: sys.stderr.write("kipc bench: prompt text to replace not found: %r\n" % old[:60])
+                if "<backplane_instructions>" in b["text"]: open(os.path.join(out, name + ".prompt.txt"), "w").write(b["text"])
+    return json.dumps(m) + "\n"
+def feed():
+    try:
+        for l in sys.stdin:
+            l = change(l); note("to", l); p.stdin.write(l); p.stdin.flush()
+    except Exception: pass
+    try: p.stdin.close()
+    except Exception: pass
+threading.Thread(target=feed, daemon=True).start()
+for l in p.stdout:
+    note("from", l); sys.stdout.write(l); sys.stdout.flush()
+sys.exit(p.wait())
