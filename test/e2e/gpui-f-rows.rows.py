@@ -77,6 +77,108 @@ if want('F15') or want('F15L'):
         'the pasted 64x48 picture opened large=%s at its own size=%s (lb-open.png); Ctrl+= made it 80 px wide=%s; a double click toggled to 2x (fit is 100%% here)=%s; 14 more Ctrl+= gave %s px (lb-zoomed.png) in an area %s px wide; a drag moved it=%s (x %s -> %s); a click on it kept it open=%s; its right-click menu had Save image as=%s (lb-menu.png) and the file written equals the stored attachment=%s; Esc closed it=%s; reopened=%s and a click on the dimmed page closed it=%s'
         % (opened, fit_ok, step_ok, toggle_ok, round(big.get('w', 0)), round(area.get('w', 0)), pan_ok, round(big.get('x', 0)), round(moved.get('x', 0)), stays, has_save, same, esc_ok, reopened, bg_ok))
 
+# ---- F15C Copy image (the person's report: it put nothing usable on the clipboard; gpui offered every copy as text, a picture as an empty
+# string). A picture an agent's reply draws from its absolute path, right-clicked, Copy image: the X clipboard offers image/png with the file's
+# own bytes and nothing else (no text, no uri-list: snap Firefox pasted a uri-list's file over the image); Ctrl+V in the composer attaches it; Chrome, Firefox and GIMP
+# each paste a picture of its size. A 20 MB picture (past one X request: sent in INCR segments; drawn from a smaller copy) copies whole.
+def xclip_out(target, timeout=20):
+    try: return subprocess.run(['xclip', '-selection', 'clipboard', '-o', '-t', target], env=denv, capture_output=True, timeout=timeout).stdout
+    except Exception: return b''
+def say_picture(path):
+    r = rects()['composer']; xin('click', int(r['x'] + r['w'] / 2), int(r['y'] + 30)); pause(0.5)
+    xin('type', 'zqecho'); chord('shift Return'); xin('type', path); pause(0.3); xin('key', 'Return')
+    return until(lambda: ('img:' + os.path.basename(path)) in probes(), 30)
+def copy_picture(name):
+    t = probes().get('img:' + name)
+    if not t: return False
+    xin('click', int(t['x'] + t['w'] / 2), int(t['y'] + t['h'] / 2), 3); pause(1)
+    return click_ctl('ctx:Copy image')
+def browser_paste(which, html):
+    """Chrome or Firefox on this display, a page that logs what a Ctrl+V gave it (its items and the picture's size); None when it could not run."""
+    page = 'data:text/html;base64,' + __import__('base64').b64encode(html.encode()).decode()
+    if which == 'chrome':
+        prof = tempfile.mkdtemp(prefix='bpchr.', dir=OUT)
+        p = spawn(['google-chrome', '--user-data-dir=' + prof, '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--enable-logging=stderr', '--v=0', '--ozone-platform=x11', '--app=' + page], 'chrome.log', denv)
+        lg, title = P('chrome.log'), 'pastetest'
+    else:
+        prof = os.path.expanduser('~/snap/firefox/common/bp-copyimg-%d' % os.getpid()); os.makedirs(prof, exist_ok=True)   # the snap reads no dot folder
+        open(os.path.join(prof, 'user.js'), 'w').write('user_pref("devtools.console.stdout.content", true);\nuser_pref("browser.shell.checkDefaultBrowser", false);\nuser_pref("datareporting.policy.dataSubmissionEnabled", false);\nuser_pref("browser.aboutwelcome.enabled", false);\nuser_pref("dom.events.testing.asyncClipboard", true);\n')
+        open(os.path.join(prof, 'paste.html'), 'w').write(html)   # a data: page from the command line is refused as a top-level load
+        # the snap moves itself into a scope of its own through systemd on the session bus, so it gets the desktop's bus (a private one has no
+        # systemd); --no-remote --new-instance keep it apart from any Firefox the person runs
+        fenv = dict(denv, MOZ_ENABLE_WAYLAND='0'); fenv.update({k: os.environ[k] for k in ['DBUS_SESSION_BUS_ADDRESS'] if k in os.environ})
+        p = spawn(['firefox', '--no-remote', '--new-instance', '--profile', prof, 'file://' + os.path.join(prof, 'paste.html')], 'firefox.log', fenv)
+        lg, title = P('firefox.log'), 'pastetest'
+    got = lambda: [l.split('PASTE ', 1)[1].split('"')[0].rstrip() for l in open(lg, errors='replace') if 'PASTE ' in l]
+    seen = None
+    if until(lambda: 'READY' in open(lg, errors='replace').read(), 40):
+        for _ in range(3):
+            xin('focus', title); pause(1); chord('ctrl v')
+            if until(lambda: got(), 8): seen = got()[-1]; break
+    try: p.terminate(); p.wait(10)
+    except Exception: pass
+    if which == 'firefox': shutil.rmtree(prof, ignore_errors=True)
+    return seen
+PASTE_PAGE = '<title>pastetest</title><body style="margin:0"><div id=e contenteditable style="width:100vw;height:100vh">x</div><script>e.focus();console.log("READY");document.addEventListener("paste",ev=>{const it=[...ev.clipboardData.items].map(i=>i.kind+":"+i.type).join(",");const f=ev.clipboardData.files[0];const say=n=>console.log("PASTE items="+it+";size="+n);if(f){createImageBitmap(f).then(b=>say(b.width+"x"+b.height),e=>say("undecodable "+f.size+" bytes "+e))}else say("none")})</script>'
+def gimp_paste():
+    """GIMP on this display, its window given the keyboard, Edit > Paste as New Image (Ctrl+Shift+V): the share of the screen in the copied
+    picture's yellow before and after (GIMP's PDB paste reads its own buffer, not the system clipboard, so its window is driven)."""
+    from PIL import Image
+    p = spawn(['dbus-run-session', '--', 'gimp-3.2', '-n', '-d', '-f', '-s', '--no-splash'], 'gimp.log', dict(denv, HOME=P('fakehome')))
+    def yellow(n):   # in GIMP's half of the screen (i3 tiles it right of Backplane, which draws the same picture)
+        im = px(n); w, h = im.size
+        return sum(1 for c in im.crop((w // 2, 0, w, h)).getdata() if c[0] > 230 and 180 < c[1] < 220 and c[2] < 30)
+    up = until(lambda: subprocess.run(['python3', XIN, 'focus', 'GNU Image'], env=denv, capture_output=True).returncode == 0, 90)
+    pause(6)
+    if subprocess.run(['python3', XIN, 'focus', 'Welcome'], env=denv, capture_output=True).returncode == 0: xin('key', 'Escape'); pause(1)   # its Welcome dialog
+    xin('focus', 'GNU Image'); pause(1); shot('f15c-gimp-before'); chord('ctrl shift v'); pause(5); shot('f15c-gimp-pasted')
+    a, b = yellow('f15c-gimp-before'), yellow('f15c-gimp-pasted')
+    try: p.terminate(); p.wait(10)
+    except Exception: pass
+    return up, a, b
+if want('F15C'):
+    from PIL import Image
+    small = P('proj', 'copy-me.png'); im = Image.new('RGB', (96, 64), (30, 90, 200))
+    for x in range(30, 60):
+        for y in range(10, 50): im.putpixel((x, y), (250, 200, 0))
+    im.save(small); want_bytes = open(small, 'rb').read()
+    drawn = say_picture(small); pause(1); shot('f15c-drawn')
+    copied = drawn and copy_picture('copy-me.png'); pause(1.5)
+    targets = xclip_out('TARGETS').decode(errors='replace').split()
+    png = xclip_out('image/png')
+    clip_ok = sorted(targets) == ['SAVE_TARGETS', 'TARGETS', 'image/png'] and png == want_bytes
+    log('F15C-copy', copied and clip_ok, 'a 96x64 picture the reply drew from %s (f15c-drawn.png); right-click, Copy image=%s; the X clipboard offers %s (image/png only); its image/png is the file byte for byte=%s (%d bytes)'
+        % (os.path.relpath(small, OUT), copied, targets, png == want_bytes, len(png)))
+    # back into Backplane's own composer: Ctrl+V attaches it
+    r = rects()['composer']; xin('click', int(r['x'] + r['w'] / 2), int(r['y'] + 30)); pause(0.5); shot('f15c-before'); chord('ctrl v'); pause(2.5); shot('f15c-pasted')
+    chip = differs(px('f15c-before'), px('f15c-pasted'), (int(r['x']), int(r['y'] - 120), int(r['x'] + r['w']), int(r['y'] + r['h'])))
+    xin('type', 'zqecho pasted back'); pause(0.3); xin('key', 'Return')
+    sent = until(lambda: any(e['$'] == 'MessagePosted' and e.get('role') == 'user' and 'pasted back' in e.get('text', '') and 'attachments' in json.dumps(e) for e in events()), 20)
+    stored = sorted(glob.glob(P('home/attachments/*/*')), key=os.path.getmtime)
+    same = bool(stored) and open(stored[-1], 'rb').read() == want_bytes
+    log('F15C-composer', chip and sent and same, "Ctrl+V in Backplane's composer: an attachment appeared=%s (f15c-pasted.png); the message posted with it=%s; the attachment is the picture byte for byte=%s" % (chip, sent, same))
+    # each app that is installed here (a runner without one says so and is not judged on it)
+    have = {a: bool(shutil.which(b)) for a, b in (('chrome', 'google-chrome'), ('firefox', 'firefox'), ('gimp', 'gimp-3.2'))}
+    copy_picture('copy-me.png'); pause(1.5)
+    ch = browser_paste('chrome', PASTE_PAGE) if have['chrome'] else 'not installed'; copy_picture('copy-me.png'); pause(1.5)
+    ff = browser_paste('firefox', PASTE_PAGE) if have['firefox'] else 'not installed'; copy_picture('copy-me.png'); pause(1.5)
+    gup, gy0, gy1 = gimp_paste() if have['gimp'] else (False, 0, 0)
+    ch_ok = not have['chrome'] or bool(ch and 'file:image/png' in ch and ch.endswith('96x64'))
+    ff_ok = not have['firefox'] or bool(ff and 'image/png' in ff and ff.endswith('96x64'))
+    gp_ok = not have['gimp'] or (gup and gy1 > gy0 + 200)
+    log('F15C-apps', ch_ok and ff_ok and gp_ok,
+        'pasted into Chrome: %r; Firefox: %r (the page logs the clipboard items and the pasted file decoded); GIMP installed=%s, opened=%s and Paste as New Image drew the picture: yellow pixels %d -> %d (f15c-gimp-pasted.png)' % (ch, ff, have['gimp'], gup, gy0, gy1))
+    # a 20 MB picture: past one X request (INCR), drawn from a smaller copy (Copy image fetches the original)
+    big = P('proj', 'big-noise.png'); Image.frombytes('RGB', (2800, 2400), os.urandom(2800 * 2400 * 3)).save(big, compress_level=0); big_bytes = open(big, 'rb').read()
+    drawn_big = say_picture(big); pause(2); copy_picture('big-noise.png')
+    got_big = b''
+    for _ in range(20):
+        got_big = xclip_out('image/png', 60)
+        if got_big == big_bytes: break
+        time.sleep(1)
+    log('F15C-big', drawn_big and got_big == big_bytes, 'a %.1f MB 2800x2400 picture (drawn from a 2048 px copy): Copy image put the original on the clipboard and xclip read it whole (INCR)=%s (%d of %d bytes)'
+        % (len(big_bytes) / 1e6, got_big == big_bytes, len(got_big), len(big_bytes)))
+
 # ---- F06 cards in the client: the approval, question and plan cards of a thread, answered with the mouse; the agent hears each answer
 if want('F06'):
     fake = lambda: open(P('fake.log')).read() if os.path.exists(P('fake.log')) else ''

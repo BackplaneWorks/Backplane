@@ -1630,13 +1630,10 @@ impl LinuxClient for X11Client {
 
     fn write_to_clipboard(&self, item: crate::ClipboardItem) {
         let mut state = self.0.borrow_mut();
+        // every form the item has (a picture as image/png), not only its text (Backplane patch, PATCH.md)
         state
             .clipboard
-            .set_text(
-                std::borrow::Cow::Owned(item.text().unwrap_or_default()),
-                clipboard::ClipboardKind::Clipboard,
-                clipboard::WaitConfig::None,
-            )
+            .set_item(&item, clipboard::ClipboardKind::Clipboard, clipboard::WaitConfig::None)
             .context("X11: Failed to write to clipboard (clipboard)")
             .log_with_level(log::Level::Debug);
         state.clipboard_item.replace(item);

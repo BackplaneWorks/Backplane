@@ -38,7 +38,7 @@ use x11rb::{
     protocol::{
         Event,
         xproto::{
-            Atom, AtomEnum, ConnectionExt as _, CreateWindowAux, EventMask, PropMode, Property,
+            Atom, AtomEnum, ChangeWindowAttributesAux, ConnectionExt as _, CreateWindowAux, EventMask, PropMode, Property,
             PropertyNotifyEvent, SELECTION_NOTIFY_EVENT, SelectionNotifyEvent,
             SelectionRequestEvent, Time, WindowClass,
         },
@@ -190,6 +190,18 @@ struct Selection {
     /// This is associated with `Self::mutex`.
     data_changed: Condvar,
 }
+
+/// A reply being sent in INCR segments (`handle_selection_request`).
+struct IncrSend {
+    requestor: u32,
+    property: Atom,
+    target: Atom,
+    bytes: Vec<u8>,
+    at: usize,
+}
+
+/// The size of one INCR segment.
+const INCR_CHUNK: usize = 256 * 1024;
 
 #[derive(Debug, Clone)]
 struct ClipboardData {
@@ -663,14 +675,17 @@ impl Inner {
         Ok(false)
     }
 
-    fn handle_selection_request(&self, event: SelectionRequestEvent) -> Result<()> {
+    /// Answers a request; data too large for one request is sent INCRementally (ICCCM 2.7.2): the returned transfer is fed by
+    /// `incr_step` as the requestor deletes each segment (Backplane patch: upstream wrote it whole, which fails past the server's request size).
+    fn handle_selection_request(&self, event: SelectionRequestEvent) -> Result<Option<IncrSend>> {
+        let mut incr = None;
         let selection = match self.kind_of(event.selection) {
             Some(kind) => kind,
             None => {
                 log::warn!(
                     "Received a selection request to a selection other than the CLIPBOARD, PRIMARY or SECONDARY. This is unexpected."
                 );
-                return Ok(());
+                return Ok(None);
             }
         };
 
@@ -693,6 +708,7 @@ impl Inner {
                         // add all equivalent formats to the supported targets
                         targets.push(self.atoms.UTF8_MIME_0);
                         targets.push(self.atoms.UTF8_MIME_1);
+                        targets.push(self.atoms.TEXT_MIME_UNKNOWN);
                     }
                 }
             }
@@ -713,7 +729,39 @@ impl Inner {
             log::trace!("Handling request for (probably) the clipboard contents.");
             let data = self.selection_of(selection).data.read();
             if let Some(data_list) = &*data {
-                success = match data_list.iter().find(|d| d.format == event.target) {
+                let text = [self.atoms.UTF8_MIME_0, self.atoms.UTF8_MIME_1, self.atoms.TEXT_MIME_UNKNOWN].contains(&event.target);
+                let found = data_list
+                    .iter()
+                    .find(|d| d.format == event.target || (text && d.format == self.atoms.UTF8_STRING));
+                success = match found {
+                    Some(data) if data.bytes.len() > self.incr_threshold() => {
+                        log::trace!("Sending {} bytes INCRementally", data.bytes.len());
+                        self.server
+                            .conn
+                            .change_window_attributes(
+                                event.requestor,
+                                &ChangeWindowAttributesAux::new().event_mask(EventMask::PROPERTY_CHANGE),
+                            )
+                            .map_err(into_unknown)?;
+                        self.server
+                            .conn
+                            .change_property32(
+                                PropMode::REPLACE,
+                                event.requestor,
+                                event.property,
+                                self.atoms.INCR,
+                                &[data.bytes.len() as u32],
+                            )
+                            .map_err(into_unknown)?;
+                        incr = Some(IncrSend {
+                            requestor: event.requestor,
+                            property: event.property,
+                            target: event.target,
+                            bytes: data.bytes.clone(),
+                            at: 0,
+                        });
+                        true
+                    }
                     Some(data) => {
                         self.server
                             .conn
@@ -762,7 +810,33 @@ impl Inner {
             )
             .map_err(into_unknown)?;
 
-        self.server.conn.flush().map_err(into_unknown)
+        self.server.conn.flush().map_err(into_unknown)?;
+        Ok(incr)
+    }
+
+    /// Past this many bytes a reply goes INCRementally: what one ChangeProperty can carry, less room for its header.
+    fn incr_threshold(&self) -> usize {
+        x11rb::connection::RequestConnection::maximum_request_bytes(&self.server.conn).saturating_sub(1024)
+    }
+
+    /// The requestor deleted the last segment: write the next, or the empty one that ends the transfer. True when it has ended.
+    fn incr_step(&self, t: &mut IncrSend) -> Result<bool> {
+        let end = (t.at + INCR_CHUNK).min(t.bytes.len());
+        self.server
+            .conn
+            .change_property8(PropMode::REPLACE, t.requestor, t.property, t.target, &t.bytes[t.at..end])
+            .map_err(into_unknown)?;
+        self.server.conn.flush().map_err(into_unknown)?;
+        let done = t.at == end;
+        t.at = end;
+        if done {
+            let _ = self
+                .server
+                .conn
+                .change_window_attributes(t.requestor, &ChangeWindowAttributesAux::new().event_mask(EventMask::NO_EVENT));
+            let _ = self.server.conn.flush();
+        }
+        Ok(done)
     }
 
     fn ask_clipboard_manager_to_request_our_data(&self) -> Result<()> {
@@ -848,6 +922,7 @@ fn serve_requests(context: Arc<Inner>) -> Result<(), Box<dyn std::error::Error>>
 
     let mut written = false;
     let mut notified = false;
+    let mut incr: Vec<IncrSend> = Vec::new();
 
     loop {
         match context.server.conn.wait_for_event().map_err(into_unknown)? {
@@ -883,9 +958,13 @@ fn serve_requests(context: Arc<Inner>) -> Result<(), Box<dyn std::error::Error>>
                     context.atom_name(event.target),
                 );
                 // Someone is requesting the clipboard content from us.
-                context
+                if let Some(t) = context
                     .handle_selection_request(event)
-                    .map_err(into_unknown)?;
+                    .map_err(into_unknown)?
+                {
+                    incr.retain(|o| (o.requestor, o.property) != (t.requestor, t.property));
+                    incr.push(t);
+                }
 
                 // if we are in the progress of saving to the clipboard manager
                 // make sure we save that we have finished writing
@@ -932,6 +1011,16 @@ fn serve_requests(context: Arc<Inner>) -> Result<(), Box<dyn std::error::Error>>
                     // from the clipboard manager.
                     if written {
                         handover_finished(&context, handover_state);
+                    }
+                }
+            }
+            Event::PropertyNotify(event) if event.state == Property::DELETE && event.window != context.server.win_id => {
+                if let Some(i) = incr.iter().position(|t| (t.requestor, t.property) == (event.window, event.atom)) {
+                    // a requestor that went away mid-transfer: drop it rather than stop serving everyone
+                    match context.incr_step(&mut incr[i]) {
+                        Ok(false) => {}
+                        Ok(true) => { incr.remove(i); }
+                        Err(e) => { log::warn!("clipboard INCR transfer failed: {e}"); incr.remove(i); }
                     }
                 }
             }
@@ -988,6 +1077,33 @@ impl Clipboard {
         self.inner.write(data, selection, wait)
     }
 
+    /// Everything `item` is offered as (clipboard_offer.rs): a picture as image/png, its text as UTF8_STRING
+    /// (served under every text name). Backplane patch: upstream wrote every item as text, a picture as an empty string.
+    pub(crate) fn set_item(&self, item: &ClipboardItem, selection: ClipboardKind, wait: WaitConfig) -> Result<()> {
+        let atoms = &self.inner.atoms;
+        let data = super::super::clipboard_offer::offers(item)
+            .into_iter()
+            .map(|(mime, bytes)| {
+                let format = match mime {
+                    super::super::clipboard_offer::TEXT => atoms.UTF8_STRING,
+                    m => match ImageFormat::from_mime_type(m) {
+                        Some(ImageFormat::Png) => atoms.PNG__MIME,
+                        Some(ImageFormat::Jpeg) => atoms.JPEG_MIME,
+                        Some(ImageFormat::Webp) => atoms.WEBP_MIME,
+                        Some(ImageFormat::Gif) => atoms.GIF__MIME,
+                        Some(ImageFormat::Svg) => atoms.SVG__MIME,
+                        Some(ImageFormat::Bmp) => atoms.BMP__MIME,
+                        Some(ImageFormat::Tiff) => atoms.TIFF_MIME,
+                        None => return None,
+                    },
+                };
+                Some(ClipboardData { bytes, format })
+            })
+            .flatten()
+            .collect();
+        self.inner.write(data, selection, wait)
+    }
+
     #[allow(unused)]
     pub(crate) fn set_image(
         &self,
@@ -1006,7 +1122,7 @@ impl Clipboard {
         };
         let data = vec![ClipboardData {
             bytes: image.bytes,
-            format: self.inner.atoms.PNG__MIME,
+            format,
         }];
         self.inner.write(data, selection, wait)
     }

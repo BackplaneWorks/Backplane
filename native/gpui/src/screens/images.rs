@@ -321,10 +321,12 @@ impl Zoom {
 #[derive(Clone)]
 pub struct Save { pub img: Arc<Image>, pub name: String, pub src: Option<(Target, String)>, pub shrunk: bool }
 /// The file's bytes as they came: the copy in hand, or fetched again when that one was made smaller. Never the smaller copy.
-pub fn original_bytes(s: &Save) -> Result<Vec<u8>, String> {
-    if !s.shrunk { return Ok(s.img.bytes.clone()) }
+pub fn original_bytes(s: &Save) -> Result<Vec<u8>, String> { original(s).map(|i| i.bytes.clone()) }
+/// The picture as its file is (bytes and format): the copy in hand, or fetched again when that one was made smaller (Copy image, Save image as).
+pub fn original(s: &Save) -> Result<Arc<Image>, String> {
+    if !s.shrunk { return Ok(s.img.clone()) }
     let (t, url) = s.src.as_ref().ok_or_else(|| crate::i18n::t("gpui.c.image.err.nohub"))?;
-    fetch(t, url).map(|i| i.bytes.clone()).ok_or_else(|| crate::i18n::t("gpui.c.image.err.unsent"))
+    fetch(t, url).ok_or_else(|| crate::i18n::t("gpui.c.image.err.unsent"))
 }
 /// The file name offered: the picture's own name (no folders, nothing a file system refuses), with the extension of its format when it has none.
 pub fn save_name(name: &str, format: ImageFormat) -> String {
@@ -671,5 +673,47 @@ mod tests {
         assert_eq!(original_bytes(&small).unwrap(), vec![1, 2, 3]); assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), before);
         // kept smaller with no hub to ask: refused, never the smaller copy
         assert!(original_bytes(&Save { src: None, shrunk: true, ..small }).is_err());
+    }
+
+    /// What Linux programs are offered for a copied picture (vendor/gpui clipboard_offer.rs): upstream gpui offered every item as text only,
+    /// so a copied picture was an empty string there.
+    #[cfg(target_os = "linux")]
+    mod linux_offers {
+        use gpui::{linux_clipboard_bytes_for as bytes_for, linux_clipboard_offers as offers, ClipboardItem, Image, ImageFormat};
+        const PNG: &str = "image/png";
+        fn png_1x1() -> Vec<u8> {
+            let mut out = Vec::new();
+            image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 0, 255]))).write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png).unwrap();
+            out
+        }
+        fn mimes(o: &[(&'static str, Vec<u8>)]) -> Vec<&'static str> { o.iter().map(|(m, _)| *m).collect() }
+        #[test]
+        fn a_copied_picture_is_offered_as_png_not_as_empty_text() {
+            let png = png_1x1();
+            let o = offers(&ClipboardItem::new_image(&Image::from_bytes(ImageFormat::Png, png.clone())));
+            assert_eq!(mimes(&o), [PNG], "a picture alone: image/png and no text at all");
+            assert_eq!(bytes_for(&o, PNG), Some(png.as_slice()));
+            assert_eq!(bytes_for(&o, "UTF8_STRING"), None);
+        }
+        #[test]
+        fn a_jpeg_or_svg_is_also_offered_as_png() {
+            let mut jpg = Vec::new();
+            image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(4, 3, image::Rgb([0, 128, 0]))).write_to(&mut std::io::Cursor::new(&mut jpg), image::ImageFormat::Jpeg).unwrap();
+            let o = offers(&ClipboardItem::new_image(&Image::from_bytes(ImageFormat::Jpeg, jpg.clone())));
+            assert_eq!(mimes(&o), [PNG, "image/jpeg"]);
+            let png = image::load_from_memory_with_format(bytes_for(&o, PNG).unwrap(), image::ImageFormat::Png).unwrap();
+            assert_eq!((png.width(), png.height()), (4, 3));
+            assert_eq!(bytes_for(&o, "image/jpeg"), Some(jpg.as_slice()), "and as it is");
+            let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="5" height="2"><rect width="5" height="2" fill="blue"/></svg>"#;
+            let o = offers(&ClipboardItem::new_image(&Image::from_bytes(ImageFormat::Svg, svg.to_vec())));
+            let png = image::load_from_memory_with_format(bytes_for(&o, PNG).unwrap(), image::ImageFormat::Png).unwrap().to_rgba8();
+            assert_eq!((png.width(), png.height(), png.get_pixel(2, 1).0), (5, 2, [0, 0, 255, 255]));
+        }
+        #[test]
+        fn text_is_offered_under_every_text_name() {
+            let o = offers(&ClipboardItem::new_string("hi".into()));
+            for m in ["UTF8_STRING", "text/plain", "text/plain;charset=utf-8", "text/plain;charset=UTF-8"] { assert_eq!(bytes_for(&o, m), Some(b"hi".as_slice()), "{m}"); }
+            assert_eq!(bytes_for(&o, PNG), None);
+        }
     }
 }

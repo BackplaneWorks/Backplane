@@ -828,11 +828,12 @@ impl LinuxClient for WaylandClient {
             return;
         };
         if state.mouse_focused_window.is_some() || state.keyboard_focused_window.is_some() {
-            state.clipboard.set(item);
-            let serial = state.serial_tracker.get(SerialKind::KeyPress);
+            // every form the item has (a picture as image/png), not only text (Backplane patch, PATCH.md)
+            let mimes = state.clipboard.set(item);
+            let serial = state.serial_tracker.latest_input();
             let data_source = data_device_manager.create_data_source(&state.globals.qh, ());
-            for mime_type in TEXT_MIME_TYPES {
-                data_source.offer(mime_type.to_string());
+            for mime_type in mimes {
+                data_source.offer(mime_type);
             }
             data_source.offer(state.clipboard.self_mime());
             data_device.set_selection(Some(&data_source), serial);

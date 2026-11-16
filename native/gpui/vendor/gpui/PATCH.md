@@ -3,6 +3,13 @@ gpui 0.2.2 (Apache-2.0) vendored without `examples/` (and its `[[example]]` targ
 - `build.rs`: gpui's Windows step (`mod windows`) is behind the build host's cfg, so a Windows client built on Linux had no shader bytes to include and no manifest. `mod windows_cross` runs instead when the host is not Windows: for a target without debug assertions it copies `windows-shaders/shaders_bytes.rs` into `OUT_DIR`, refusing it unless its first line is the FNV-1a 64 of every `src/platform/windows/*.hlsl`; with `windows-manifest` it embeds the manifest through embed-resource (llvm-rc for -msvc, windres for -gnu*).
 - `Cargo.toml`: `embed-resource` is a build dependency on every host, not only Windows.
 - `src/platform/mac/platform.rs`: `GPUIApplication` answers Chromium's `isHandlingSendEvent` / `setHandlingSendEvent:` (CrAppControlProtocol) and keeps that flag set inside `-sendEvent:`, as CEF's own applications do, so the embedded Chromium of the Browser tab (feature `cef`) runs inside gpui's NSApplication.
+- Linux clipboard writes every form an item has (`src/platform/linux/clipboard_offer.rs`, used by `x11/clipboard.rs` `set_item` and `wayland/clipboard.rs`): upstream offered
+  every item as text only, so a copied picture was an empty string (the client's Copy image gave nothing to paste). A picture goes as `image/png` (transcoded from JPEG,
+  WebP, GIF, BMP, TIFF or SVG) and in its own format, its strings as text. No `text/uri-list` of a picture's file: snap Firefox took it over the image and
+  pasted a picture it could not decode. X11 serves the text aliases it advertises (upstream listed `text/plain;charset=utf-8` and answered nothing for
+  it), fixes `set_image`'s atom, and sends a reply too large for one request in INCR segments (ICCCM 2.7.2). Wayland names the newer of the last key press and the last
+  click as the selection's serial (`SerialTracker::latest_input`): a copy from a menu click named an older key press, which mutter refuses when another app copied since.
+  `linux_clipboard_offers` / `linux_clipboard_bytes_for` are public so the client tests them (this crate's own tests do not run).
 - `src/platform/windows/clipboard.rs`: a clipboard holding only a bitmap (CF_DIB: PrintScreen, many programs' Copy) reads as a PNG (`read_bitmap_as_png`, tried only when no PNG, GIF, JPEG or SVG is there); upstream read nothing from it.
 
 - `src/window.rs`: `Window::on_frame_drawn` (a listener run after every frame the window draws, for as long as it answers true) and `Window::hitbox_drawn_after` (in the
