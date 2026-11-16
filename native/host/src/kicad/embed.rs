@@ -186,6 +186,13 @@ impl Session {
         self.failed(&why)
     }
     pub fn closed_unexpectedly(&self) -> bool { self.state == CLOSED }
+    /// After a death: KiCad's autosaves of this project's unsaved changes (`_autosave-*` beside its files, bp.13's local history in the
+    /// project folder), which KiCad offers back when it opens the file again. The hub never removes them.
+    pub fn autosaves(&self) -> Vec<String> {
+        let dir = Path::new(&self.pro).parent().map(Path::to_path_buf).unwrap_or_default();
+        let mut v: Vec<String> = std::fs::read_dir(&dir).into_iter().flatten().flatten().filter_map(|e| e.file_name().into_string().ok()).filter(|n| n.starts_with("_autosave-")).collect();
+        v.sort(); v
+    }
     pub fn unsaved_docs(&self) -> Vec<String> {
         self.frames.iter().filter(|f| f.modified).map(|f| if !f.doc.is_empty() { f.doc.clone() } else { f.title.clone() }).collect()
     }
@@ -207,6 +214,7 @@ impl Session {
             "sock": self.sock,
             "display": self.display,
             "frames": self.frames.iter().map(Frame::to_json).collect::<Vec<_>>(),
+            "autosaves": if self.state == CLOSED { json!(self.autosaves()) } else { json!([]) },
             "dialogs": self.dialogs,
             "notices": self.notices,
             "drawn": self.drawn,

@@ -51,9 +51,13 @@ ST=$(python3 -c 'import json,sys; r=json.loads(sys.argv[1] or "{}"); print(r.get
 echo "INFO the hub after the kill: $ST"
 check "the hub says closed_unexpectedly, not a failed start" "$(echo "$ST" | grep -q '^closed_unexpectedly' && echo 1 || echo 0)" "$ST"
 check "its reason is how KiCad ended (signal 9), not KiCad's output" "$(echo "$ST" | grep -q 'signal 9' && ! echo "$ST" | grep -qi 'fontconfig\|could not start' && echo 1 || echo 0)" "$ST"
+SAYS=$(python3 -c 'import json,sys; r=json.loads(sys.argv[1] or "{}"); print(r.get("say") or "")' "$RC")
+echo "INFO the pane says: $SAYS"
+check "the pane says KiCad closed unexpectedly, not that it could not start" "$(echo "$SAYS" | grep -q '^KiCad closed unexpectedly' && ! echo "$SAYS" | grep -qi 'could not start' && echo 1 || echo 0)" "$SAYS"
+check "its words about unsaved work match what is on disk" "$( { [ -n "$(ls "$PROJ"/_autosave-* 2>/dev/null || true)" ] && echo "$SAYS" | grep -q 'kept a copy'; } || { [ -z "$(ls "$PROJ"/_autosave-* 2>/dev/null || true)" ] && echo "$SAYS" | grep -q 'were not kept'; } && echo 1 || echo 0)" "autosaves $(ls "$PROJ"/_autosave-* 2>/dev/null | wc -l); $SAYS"
 shot c2_closed
-SAY=$(grep -a '"kicad:open-again"' "$OUT/client.log" | grep -c '"rect":{' || true)
-check "the pane offers Open the editor again" "$([ "${SAY:-0}" -gt 0 ] && echo 1 || echo 0)" "kicad:open-again drawn $SAY times"
+SAY=$(grep -a 'GPUI_METRIC {"controls"' "$OUT/client.log" | grep -c '"kicad:open-again"' || true)
+check "the pane offers Open the editor again" "$([ "${SAY:-0}" -gt 0 ] && echo 1 || echo 0)" "kicad:open-again listed $SAY times"
 check "and no Try again nor Open the KiCad app beside it" "$(grep -a 'GPUI_METRIC {"controls"' "$OUT/client.log" | tail -1 | grep -q '"kicad:retry"\|"kicad:app"' && echo 0 || echo 1)"
 check "the board file on disk is as last saved" "$([ "$(sha256sum "$PCB" | cut -d' ' -f1)" = "$SHA0" ] && echo 1 || echo 0)"
 AUTO2=$(ls "$PROJ"/_autosave-* "$PROJ"/*autosave* 2>/dev/null | head -3 | tr '\n' ' ' || true)

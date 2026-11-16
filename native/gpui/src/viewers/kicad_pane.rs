@@ -158,7 +158,7 @@ pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<Strin
         // the hub has already tried a missed start window once more (embed.rs start_retry); the pane's Try again under this starts it again
         "failed" => Some(format!("{} {}", crate::i18n::trs("KiCad could not start:"), info["reason"].as_str().unwrap_or(""))),
         // KiCad died after it was ready (a crash, a kill): not a failed start; what it means for the person's work, in plain words
-        "closed_unexpectedly" => Some(crate::i18n::trs(CLOSED_WORDS)),
+        "closed_unexpectedly" => Some(crate::i18n::trs(if info["autosaves"].as_array().is_some_and(|a| !a.is_empty()) { CLOSED_KEPT } else { CLOSED_LOST })),
         "unresponsive" => Some(crate::i18n::trs("KiCad is not responding.")),
         "stopped" => Some(crate::i18n::trs("KiCad was closed.")),
         _ if have_frame => None,
@@ -221,9 +221,10 @@ pub fn handoff_holds(drawn_event: bool, drawn: bool, since_placed: std::time::Du
 pub fn try_again(info: &Value) -> bool { info["state"] == "failed" }
 /// KiCad closed unexpectedly after it was ready: the pane's one button opens the editor again (a new KiCad).
 pub fn open_again(info: &Value) -> bool { info["state"] == "closed_unexpectedly" }
-/// What the pane says when KiCad died after it was ready. Saved files are as last saved; KiCad keeps an autosave of unsaved board and
-/// schematic changes every few minutes (_autosave-*, kept by the hub), which it offers back when the file is opened again.
-pub const CLOSED_WORDS: &str = "KiCad closed unexpectedly. Your saved files are intact. Changes made since the last save may be offered back when KiCad opens the file again, if it had autosaved them.";
+/// What the pane says when KiCad died after it was ready, by what is on disk (the hub's `autosaves`): saved files are as last saved;
+/// KiCad's autosave of unsaved changes (_autosave-* beside the files, kept by the hub) is offered back when it opens the file again.
+pub const CLOSED_KEPT: &str = "KiCad closed unexpectedly. Your saved files are intact, and KiCad kept a copy of the changes you had not saved: it offers it back when the editor opens again.";
+pub const CLOSED_LOST: &str = "KiCad closed unexpectedly. Your saved files are intact. Changes made since the last save were not kept.";
 
 /// The pane offers the KiCad app under its message where the editor cannot be in the pane: its start failed (no window to hold it, no
 /// KiCad that starts), or this is stock KiCad on Windows. The app opens only on that press: the pane never falls back to it by itself.
@@ -629,7 +630,7 @@ impl KicadPane {
         }
         cx.emit(PaneShown); cx.notify();
     }
-    fn seen_info(&self) -> Value {
+    pub fn seen_info(&self) -> Value {
         let mut i = self.info.clone();
         if let Some(t) = self.starting_since { i["starting_for_s"] = json!(t.elapsed().as_secs()); }
         if !self.dialogs_open.is_empty() && i["dialogs"].as_array().map_or(true, |d| d.is_empty()) { i["dialogs"] = json!(self.dialogs_open); }
@@ -1325,7 +1326,9 @@ mod tests {
         let closed = json!({"state": "closed_unexpectedly", "reason": "KiCad closed unexpectedly (signal 9, SIGKILL)", "frames": []});
         assert!(super::open_again(&closed) && !super::try_again(&closed) && !super::app_instead(&closed, false), "a death offers Open the editor again, alone");
         let say = super::waiting_on(&closed, false, false).unwrap();
-        assert!(say.starts_with("KiCad closed unexpectedly.") && !say.contains("could not start") && !say.contains("Fontconfig"), "{say}");
+        assert!(say.starts_with("KiCad closed unexpectedly.") && say.contains("were not kept") && !say.contains("could not start") && !say.contains("Fontconfig"), "{say}");
+        let kept = json!({"state": "closed_unexpectedly", "reason": "x", "frames": [], "autosaves": ["_autosave-a.kicad_pcb"]});
+        assert!(super::waiting_on(&kept, false, false).unwrap().contains("kept a copy"), "an autosave is offered back");
         // a stock KiCad in the pane: the strip offers Backplane KiCad (Linux; Windows says it in the pane's middle), a fork's never
         assert!(super::stock_hint(&json!({"mode": "stock", "state": "ready"}), false) && super::stock_hint(&json!({"mode": "stock", "state": "starting"}), false));
         assert!(!super::stock_hint(&json!({"mode": "fork", "state": "ready"}), false) && !super::stock_hint(&json!({"mode": "stock", "state": "ready"}), true) && !super::stock_hint(&json!({"mode": "stock", "state": "stopped"}), false) && !super::stock_hint(&Value::Null, false));
