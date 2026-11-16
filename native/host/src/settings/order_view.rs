@@ -158,3 +158,21 @@ pub fn pay_shown(text: &str) -> String {
     }
     out.push_str(rest); out
 }
+
+// the pick list of what to order (order_ask with `pick`): pure, so here, where screen-audit (src/bin) gets settings::order from
+/// The list of what would be ordered (order_ask with `pick`): every item ticked until the person unticks it; a tap is a toggle, Continue answers.
+pub const PICK_TOOL: &str = "order_ask.pick";
+/// What the phones say under the list (they answer it by typing).
+pub const PICK_PHONE_HINT: &str = "Answer \"all\", or say what to leave out and any parts to add.";
+/// The setting holding a pick ask's unticked items (their indexes, a line each).
+pub fn pick_key(ask: &str) -> String { format!("order.pick.{ask}") }
+/// A tap on a pick ask's item: `toggle:<index>`.
+pub fn pick_toggle(answer: &str) -> Option<usize> { answer.strip_prefix("toggle:").and_then(|n| n.trim().parse().ok()) }
+/// The unticked set after a toggle of `i`, as the setting's text.
+pub fn pick_flip(off: &str, i: usize) -> String {
+    let mut v: Vec<usize> = off.lines().filter_map(|l| l.trim().parse().ok()).collect();
+    if let Some(k) = v.iter().position(|x| *x == i) { v.remove(k); } else { v.push(i); }
+    v.sort(); v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("\n")
+}
+/// The unticked indexes.
+pub fn pick_off(off: &str) -> Vec<usize> { off.lines().filter_map(|l| l.trim().parse().ok()).collect() }
