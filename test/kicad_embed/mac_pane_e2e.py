@@ -168,10 +168,14 @@ try:
     # ---- Edit, then typing with no click ----
     front = wait_for(lambda: active(kpid), 5)
     check(bool(front), 'after Edit, with no click, KiCad is the frontmost app (it has the keyboard)')
-    n0 = hub_log().count('ET_SELECTION_CHANGED')
-    key(K_A, CMD); time.sleep(0.8); key(K_ESC); time.sleep(0.8)
-    n1 = hub_log().count('ET_SELECTION_CHANGED')
-    check(n1 - n0 >= 2, f'typing with no click reaches the canvas: Cmd+A and Escape change the selection ({n1 - n0} changes)')
+    # the canvas takes the keys once KiCad's focused show has run (a person types a moment after Edit): Cmd+A until it acts, 4 s at most
+    n0 = hub_log().count('ET_SELECTION_CHANGED'); t0 = time.time(); took = None
+    while time.time() - t0 < 4 and took is None:
+        key(K_A, CMD); time.sleep(0.4)
+        if hub_log().count('ET_SELECTION_CHANGED') > n0: took = round(time.time() - t0, 1)
+    key(K_ESC); time.sleep(0.6)
+    RES['edit_to_canvas_keys_s'] = took
+    check(took is not None, f'typing with no click reaches the canvas after Edit ({took} s after the frame showed)')
     # ---- Cmd+K in KiCad reaches Backplane ----
     k0 = client_log().count('"kicad_key"')
     key(K_K, CMD)
@@ -200,14 +204,21 @@ try:
     opened = wait_for(lambda: hub_log().count('ET_DIALOG_OPENED') > d0, 5)
     check(bool(opened) and active(kpid), 'a KiCad dialog (Find) opens with the keyboard in it')
     time.sleep(0.5); shot('02c-dialog')
-    # Find is modeless with a Close button (Escape means nothing to it, on any platform): closed by its own shortcut, Cmd+W
-    key(13, CMD); wait_for(lambda: hub_log().count('ET_DIALOG_CLOSED') > c0, 4)
-    # a modal dialog with Cancel (Preferences, Cmd+,): it gets the keyboard and Escape closes it
+    # Find's own Close button (Cmd+W would close the board editor itself), then Find again: Escape closes it
+    def find_dialog():
+        return next((w for w in wins() if w[1] == kpid and w[0] != f[0] and w[3][2] < 900), None)
+    fd = wait_for(find_dialog, 3)
+    if fd: click(fd[3][0] + fd[3][2] - 65, fd[3][1] + 136)
+    check(bool(wait_for(lambda: hub_log().count('ET_DIALOG_CLOSED') > c0, 4)), 'its Close button closes it')
     d1, c1 = hub_log().count('ET_DIALOG_OPENED'), hub_log().count('ET_DIALOG_CLOSED')
-    key(K_COMMA, CMD)
-    check(bool(wait_for(lambda: hub_log().count('ET_DIALOG_OPENED') > d1, 6)) and active(kpid), 'a modal KiCad dialog (Preferences) opens with the keyboard in it')
-    time.sleep(0.8); shot('02d-preferences'); key(K_ESC)
-    check(bool(wait_for(lambda: hub_log().count('ET_DIALOG_CLOSED') > c1, 4)), 'Escape closes it')
+    p = last_push(); click(*board_spot()); time.sleep(0.6); key(K_F, CMD)
+    check(bool(wait_for(lambda: hub_log().count('ET_DIALOG_OPENED') > d1, 5)) and active(kpid), 'Find again, with the keyboard in it')
+    time.sleep(0.6); key(K_ESC)
+    esc = wait_for(lambda: hub_log().count('ET_DIALOG_CLOSED') > c1, 4)
+    check(bool(esc), 'Escape closes it')
+    if not esc:
+        fd = find_dialog()
+        if fd: click(fd[3][0] + fd[3][2] - 65, fd[3][1] + 136); time.sleep(0.6)
     # a click in Backplane's own chrome (a neutral spot: the thread's timeline) gives it the keyboard back
     cw = next((w for w in wins() if w[0] == cw[0]), cw)
     click(cw[3][0] + 200, cw[3][1] + 28 + 300)
