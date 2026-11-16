@@ -27,7 +27,7 @@ open(os.path.join(cfg, 'fp-lib-table'), 'w').write(person)
 open(os.path.join(cfg, 'sym-lib-table'), 'w').write(default_sym)
 before_sym = default_sym
 env = dict(os.environ, HOME=os.path.join(OUT, 'fh'), BACKPLANE_KICAD_CLI=os.path.join(RT, 'bin/kicad-cli'), BACKPLANE_NO_UPDATE='1',
-           KICAD_DOCUMENTS_HOME=os.path.join(OUT, 'fh/Documents'))
+           KICAD_DOCUMENTS_HOME=os.path.join(OUT, 'fh/Documents'), KICAD_CONFIG_HOME=os.path.join(OUT, 'fh/Library/Preferences/kicad'))
 hub = subprocess.Popen([HUB, '--home', os.path.join(OUT, 'home'), '--port', '3897', '--host', '127.0.0.1', '--no-tailscale', '--foreground'],
                        env=env, stdout=open(os.path.join(OUT, 'hub.log'), 'w'), stderr=subprocess.STDOUT)
 try:
