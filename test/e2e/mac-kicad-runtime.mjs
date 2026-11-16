@@ -59,7 +59,7 @@ const before=new Set(wins().map(w=>w[0]));
 // Open in KiCad: the board shown in the thread's viewer, as the viewer bar's button sends it
 const o=await c.rpc('kicad.open',{thread:th.id,key:`0|${work}/proj|${pcb}`},30000);
 check('Open in KiCad answers',o?.o?.ok===true,o?.o);
-let kicadWin=null;for(let i=0;i<120&&!kicadWin;i++){await sleep(500);kicadWin=wins().find(w=>!before.has(w[0])&&/pcbnew|kicad/i.test(w[1])&&w[2]===0)}
+let kicadWin=null;for(let i=0;i<120&&!kicadWin;i++){await sleep(500);kicadWin=wins().find(w=>!before.has(w[0])&&/pcbnew|kicad|PCB Editor|Schematic Editor/i.test(w[1])&&w[2]===0)}
 check('Open in KiCad shows the board editor in a window of its own',!!kicadWin,wins().slice(0,12));
 try{execFileSync('screencapture',['-x',`${work}/open-in-kicad.png`])}catch{}
 c.send('turn.start',{thread:th.id,text:'go'});
