@@ -166,6 +166,39 @@ def dialog_watch():
         except Exception as e: print("DIAG dialog watch", e, flush=True)
         STOP.wait(0.25)
 
+def kicad_dialogs():
+    """KiCad's windows on screen that are neither an editor frame nor a popup."""
+    return [w for w in windows() if w.get("shown") and not w.get("override_redirect") and w["w"] >= 120 and w["h"] >= 60
+            and "kicad" in w.get("wm_class", "").lower()
+            and not re.search(r"(PCB Editor|Schematic Editor|3D Viewer|Footprint Editor|Symbol Editor)$", w.get("title", ""))
+            and w.get("transient_for")]
+def close_kicad_dialogs(tag, secs=4.0):
+    """Every KiCad dialog closed the way a window manager's close button does (WM_DELETE_WINDOW: wx's close event, the dialog's own
+    Close), then checked gone. Escape did not close the ERC dialog the second time it came up (bp.13 batch 9). Returns what stayed."""
+    import ctypes, ctypes.util
+    left = kicad_dialogs()
+    if left:
+        x = ctypes.CDLL(ctypes.util.find_library("X11")); vp, ul = ctypes.c_void_p, ctypes.c_ulong
+        x.XOpenDisplay.restype = vp; x.XOpenDisplay.argtypes = [ctypes.c_char_p]; x.XInternAtom.restype = ul
+        x.XInternAtom.argtypes = [vp, ctypes.c_char_p, ctypes.c_int]
+        d = x.XOpenDisplay(os.environ.get("DISPLAY", ":0").encode())
+        class CM(ctypes.Structure):
+            _fields_ = [("type", ctypes.c_int), ("serial", ul), ("send_event", ctypes.c_int), ("display", vp), ("window", ul),
+                        ("message_type", ul), ("format", ctypes.c_int), ("l", ctypes.c_long * 5)]
+        class EV(ctypes.Union): _fields_ = [("xclient", CM), ("pad", ctypes.c_long * 24)]
+        proto, delete = x.XInternAtom(d, b"WM_PROTOCOLS", 0), x.XInternAtom(d, b"WM_DELETE_WINDOW", 0)
+        x.XSendEvent.argtypes = [vp, ul, ctypes.c_int, ctypes.c_long, ctypes.POINTER(EV)]
+        for w in left:
+            ev = EV(); ev.xclient.type = 33; ev.xclient.window = w["xid_int"]; ev.xclient.message_type = proto; ev.xclient.format = 32
+            ev.xclient.l[0] = delete; ev.xclient.l[1] = 0
+            x.XSendEvent(d, w["xid_int"], 0, 0, ctypes.byref(ev))
+        x.XFlush(d); x.XCloseDisplay(d)
+        t = time.time()
+        while time.time() - t < secs and kicad_dialogs(): time.sleep(0.2)
+    stayed = [w.get("title") for w in kicad_dialogs()]
+    RESULTS[f"{tag}_no_dialog"] = {"ms": None, "ok": int(not stayed), "closed": [w.get("title") for w in left], "stayed": stayed}
+    print(f"INFO {tag}: KiCad dialogs before {[w.get('title') for w in left]}, after closing {stayed}", flush=True)
+    return stayed
 # --- sampler over the pane
 SAMPLER = None
 def sampler_start(rect, name, min_ms=0):
@@ -928,6 +961,30 @@ def changed_centroid(before, after, min_px=20):
     ys, xs = np.nonzero(before != after)
     if len(xs) < min_px: return None
     return float(xs.mean()), float(ys.mean())
+def band_spot(png, color, png_off=None):
+    """The biggest patch of COLOR (#rrggbb, a plan group's) inside the pane: a corridor's label pill is drawn solid in it. (x, y) or None."""
+    try:
+        import numpy as np
+        from PIL import Image
+        c = [int(color[i:i + 2], 16) for i in (1, 3, 5)]
+        a = np.asarray(Image.open(png).convert("RGB")).astype(int)
+        x0, y0 = PANE["x"], PANE["y"]; a = a[y0:y0 + PANE["h"], x0:x0 + PANE["w"] - 40]  # not KiCad's right toolbar
+        m = (np.abs(a - np.array(c)).sum(axis=2) < 28)  # the pill is solid in the colour (Hubble: 221,159,66 for #e8a33d); its gold pads are ~31 away
+        if png_off:  # only what plan view adds
+            b = np.asarray(Image.open(png_off).convert("RGB")).astype(int)[y0:y0 + PANE["h"], x0:x0 + PANE["w"] - 40]
+            m &= np.abs(a - b).sum(axis=2) > 30
+        # the label pill: the longest unbroken run of the colour along a row (a pill is ~60-120 px wide; pads and courtyards that share
+        # the colour are short runs: Hubble's gold pads drew the densest cell)
+        best = (0, None)
+        for yy in range(m.shape[0]):
+            row = m[yy]
+            if not row.any(): continue
+            d = np.diff(np.concatenate(([0], row.astype(int), [0]))); st, en = np.nonzero(d == 1)[0], np.nonzero(d == -1)[0]
+            k = int((en - st).argmax()); L = int(en[k] - st[k])
+            if L > best[0]: best = (L, (int((st[k] + en[k]) // 2) + x0, yy + y0))
+        return best[1] if best[0] >= 30 else None
+    except Exception as e:
+        print(f"DIAG band_spot: {e}", flush=True); return None
 def corridor_pixel(png, x, y):
     """The plan view's corridor colour (embed_plan_person_e2e's mask: orange-red bands) nearest to (x, y) inside the pane:
     {x, y, dist} in root pixels, or None when the pane shows none."""
@@ -1108,19 +1165,32 @@ if "plan" in JOURNEYS and SOCK:
         shot("plan_view")
         cor = pj["corridors"][0]; cl = cor["layer"]
         order = sorted({l["layer"] for l in pj.get("layers", [])}, key=lambda n: 0 if n == "F.Cu" else (99 if n == "B.Cu" else int(re.sub(r"\D", "", n) or 50)))
-        def panel_click(layer, tag):  # the plan view's mini panel for LAYER, in stack order (L1 = F.Cu)
-            i = order.index(layer) if layer in order else 0
-            if len(order) <= 4: px, py = PANE["x"] + 708, PANE["y"] + 179 + 120 * i            # one column (measured at 1800x1050)
-            else: px, py = PANE["x"] + 679 + 52 * (i % 2), PANE["y"] + 185 + 135 * (i // 2)  # two columns: L1 L2 / L3 L4 ... (Hubble, 8 layers)
-            before = plan("layer", SOCK).get("layer")
-            r = rt("click", px, py)
-            EVENTS.append({"kind": "switch", "t0": r["t0"], "tag": tag, "window_ms": 1500}); time.sleep(1.5)
-            print(f"INFO plan layer after the {layer} panel (L{i + 1} at {px},{py}): {before} -> {plan('layer', SOCK).get('layer')}", flush=True)
+        def panel_click(layer, tag):
+            """LAYER made the active one with the keyboard (+ and -: KiCad's next and previous layer):
+            the plan view's mini panels were clicked at places measured at 1800x1050, where batch 9 draws none (the layer never changed)."""
+            before = plan("layer", SOCK).get("layer"); t0 = None; got = before
+            for key in (("plus", "shift"), ("minus",)):  # Switch to Next / Previous Layer (PageUp/PageDown only reach F.Cu and B.Cu)
+                for _ in range(len(order) + 1):
+                    if got == layer: break
+                    r = rt("key", *key); t0 = t0 or r["t0"]; time.sleep(0.35); got = plan("layer", SOCK).get("layer")
+                if got == layer: break
+            if t0: EVENTS.append({"kind": "switch", "t0": t0, "tag": tag, "window_ms": 1500})
+            RESULTS[f"{tag}_reached"] = {"ms": None, "ok": int(got == layer)}
+            print(f"INFO plan layer by keyboard: {before} -> {got} (wanted {layer})", flush=True)
         panel_click(cl, "plan_layer_corridor"); shot("plan_layer_corridor")
         if to_screen:
             path = cor["path"]; mid = ((path[0][0] + path[1][0]) / 2, (path[0][1] + path[1][1]) / 2)
             ly0 = plan("layer", SOCK).get("layer")
             mx, my = to_screen(*mid)
+            grp = next((g for g in pj.get("groups", []) if g.get("id") == cor.get("group")), {})
+            # plan view off and on again before the click: with it, Collar's corridor click, drag and W/A/R all applied (batch 9, 560074768);
+            # without it, the same click at the same point selected nothing. Why is open (the plan tool's state after the layer keys?).
+            action_toggle(); time.sleep(1.0); action_toggle(); time.sleep(1.2)
+            shot("plan_band"); band = band_spot(os.path.join(OUT, "shots", "plan_band.png"), grp.get("color", ""))
+            if band:  # the corridor as drawn (its group's colour, its label pill): clicked there, like embed_plan_person_e2e
+                print(f"INFO plan corridor {cor['id']} drawn in {grp.get('color')} at {band}; the calibration put it at {mx:.0f},{my:.0f}", flush=True)
+                mx, my = band
+            RESULTS["plan_corridor_found_on_screen"] = {"ms": None, "ok": int(bool(band)), "at": band, "color": grp.get("color")}
             # where the plan view draws corridors (embed_plan_person_e2e's colour test): the nearest such pixel to the computed point, and
             # whether the point itself is on one. Tells a calibration miss (the harness) from a hit test that ignores a good click (the fork).
             shot("plan_corridor_target"); near = corridor_pixel(os.path.join(OUT, "shots", "plan_corridor_target.png"), mx, my)
@@ -1434,9 +1504,16 @@ if "panels" in JOURNEYS and SOCK:
         print("DIAG panels: no Full size control found", flush=True)
 if "sch" in JOURNEYS:
     tab("SCH", "sch_tab", 1.5)
+    # nothing of KiCad's over the canvas: a dialog left up by an earlier journey (the ERC dialog, batch 9) takes the pan (one frame for 6 s)
+    close_kicad_dialogs("sch_pan"); shot("sch_before_pan")
+    hub_log = os.path.join(OUT, "hub.log"); log_at = os.path.getsize(hub_log) if os.path.exists(hub_log) else 0
     rt("click", CX, PANE["y"] + PANE["h"] - 40); time.sleep(0.3)
     r = rt("pan", CX, CY, min(PANE["w"], PANE["h"]) // 5, 6, 2, 120); EVENTS.append({"kind": "input", "t0": r["t0"], "t1": r["t1"], "tag": "sch_pan_6s"}); time.sleep(1)
     r = rt("wheel", CX, CY, 6, 60); EVENTS.append({"kind": "input", "t0": r["t0"], "t1": r["t1"], "tag": "sch_zoom_6s"}); time.sleep(1)
+    # a check the hub started in KiCad during the pan or zoom (a PCB check with parity treats a panning schematic as idle)
+    ran = [l for l in (open(hub_log, errors="ignore").read()[log_at:] if os.path.exists(hub_log) else "").splitlines() if "in KiCad starts" in l]
+    RESULTS["sch_pan_checks_in_kicad"] = {"ms": None, "count": len(ran), "lines": ran}
+    print(f"INFO sch pan/zoom: checks started in KiCad meanwhile: {ran}", flush=True); shot("sch_after_pan")
     # cross-probe: a symbol brought to the pane's middle (SelectItems with zoom), the person's click on it, its footprint selected on the board
     SREFS = []
     sch_files = glob.glob(os.path.join(PROJ_DIR, "**", "*.kicad_sch"), recursive=True)
