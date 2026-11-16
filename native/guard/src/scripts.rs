@@ -84,16 +84,17 @@ fn kills_by_name(line: &str) -> bool {
     let commit = |n: &str| { fs::write(wt(n).join(n), n).unwrap(); git(&wt(n), &["add", n]); git(&wt(n), &["commit", "-qm", n]); };
     let target = |n: &str| { let t = wt(n).join("native/host/target/fast/deps"); fs::create_dir_all(&t).unwrap(); fs::write(t.join("lib.rlib"), vec![0u8; 1 << 20]).unwrap(); };
     // landed: a commit of its own that origin/main now has; fresh: made from main, nothing done yet; mine: unlanded work; dirty: landed but with an edit; busy: landed, a shell in it
-    for n in ["landed", "fresh", "mine", "dirty", "busy", "recent"] { add(n) }
-    for n in ["landed", "dirty", "busy"] { commit(n) }
+    for n in ["landed", "fresh", "mine", "dirty", "busy", "recent", "kept"] { add(n) }
+    for n in ["landed", "dirty", "busy", "kept"] { commit(n) }
     git(&repo, &["checkout", "-q", "--detach"]);
-    for n in ["landed", "dirty", "busy"] { git(&repo, &["merge", "-q", "--no-edit", "--no-ff", n]); }
+    for n in ["landed", "dirty", "busy", "kept"] { git(&repo, &["merge", "-q", "--no-edit", "--no-ff", n]); }
     git(&repo, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
     commit("mine"); fs::write(wt("dirty").join("edit"), "x").unwrap();
-    for n in ["landed", "fresh", "mine", "dirty", "busy", "recent"] { target(n) }
+    for n in ["landed", "fresh", "mine", "dirty", "busy", "recent", "kept"] { target(n) }
+    fs::write(wt("kept").join(".bp-keep"), "").unwrap();   // (untracked, so "kept" is not clean either: its target staying is what the marker does)
     // bp-tmp: an old scratch target, an old one a process has open, a fresh one, the sccache server's dir, an old file
-    for (n, f) in [("aot-build", "big"), ("held", "log"), ("new", "x"), ("sccache", "s"), ("claude", "c")] { fs::create_dir_all(bt.join(n)).unwrap(); fs::write(bt.join(n).join(f), vec![0u8; 1 << 20]).unwrap(); }
-    fs::write(bt.join("old.log"), "x").unwrap();
+    for (n, f) in [("aot-build", "big"), ("held", "log"), ("new", "x"), ("sccache", "s"), ("claude", "c"), ("forkgate", "venv")] { fs::create_dir_all(bt.join(n)).unwrap(); fs::write(bt.join(n).join(f), vec![0u8; 1 << 20]).unwrap(); }
+    fs::write(bt.join("old.log"), "x").unwrap(); fs::write(bt.join("forkgate/.bp-keep"), "").unwrap();
     fs::create_dir_all(&scc).unwrap(); for i in 0..6 { fs::write(scc.join(format!("o{i}")), vec![1u8; 1 << 20]).unwrap(); }
     // age everything but what must look fresh (mtimes only: GC_CTIME=0, a test cannot age a ctime)
     let age = |p: &Path, when: &str| { let o = Command::new("find").arg(p).args(["-depth", "-exec", "touch", "-h", "-d", when, "{}", "+"]).output().unwrap(); assert!(o.status.success()); };
@@ -119,6 +120,8 @@ fn kills_by_name(line: &str) -> bool {
     assert!(wt("dirty").join("edit").exists() && !tg("dirty"), "a landed branch with an edit keeps the edit and loses its target");
     assert!(wt("busy").exists() && tg("busy"), "a worktree a process works in is left whole:\n{out}");
     assert!(tg("recent"), "a target built two hours ago stays");
+    assert!(wt("kept").exists() && tg("kept"), "a worktree with .bp-keep stays whole, landed and idle or not:\n{out}");
+    assert!(bt.join("forkgate/venv").exists(), "a bp-tmp entry with .bp-keep stays, idle or not:\n{out}");
     assert!(!bt.join("aot-build").exists() && !bt.join("old.log").exists(), "idle bp-tmp entries go:\n{out}");
     assert!(bt.join("held/log").exists() && bt.join("new").exists() && bt.join("sccache").exists() && bt.join("claude").exists(), "held, fresh, sccache's and claude's stay:\n{out}");
     let left: Vec<String> = fs::read_dir(&scc).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
