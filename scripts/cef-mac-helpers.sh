@@ -18,7 +18,8 @@ for s in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
 <key>LSUIElement</key><true/>
-<key>LSMinimumSystemVersion</key><string>11.0</string>
+<key>LSMinimumSystemVersion</key><string>12.0</string>
+<key>LSArchitecturePriority</key><array><string>arm64</string></array>
 <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
 </dict></plist>
 P
