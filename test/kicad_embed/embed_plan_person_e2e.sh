@@ -11,6 +11,8 @@
 #       nothing selected changes nothing. Batch 3's hit test looked only at the active layer: there the first case is expected to fail,
 #       so it is told (XFAIL) without failing the suite until the build has the fix (capability rules-insert-position marks batch 4;
 #       PLAN_XLAYER=expect runs it for real on any build)
+#   Q9  (bp.13 batch 11) plan view passive to the API: SetActiveLayer, layerNext and togglePlanView done in plan view, the mode read
+#       from KiCad, a refused call never taken as done; earlier batches XFAIL
 #   Q8  (bp.13 batch 5) Escape with nothing selected leaves plan view, and Ctrl+Shift+R starts it again; earlier builds XFAIL
 #   Q6  layer approval is the person's: KiCad's right-click menu "Approve Layer" on B.Cu (PageDown, then the menu by keyboard) approves
 #       it; an agent's kicad_ipc RunAction pcbnew.Plan.approveLayer and ApprovePlan are refused, its plan_approve only asks (F.Cu stays
@@ -293,6 +295,60 @@ PY
 xcheck "W with nothing selected says so on KiCad's infobar" "$([ "${BAND:-0}" -gt 1500 ] && echo 1 || echo 0)" "$BAND pixels changed at the top of the canvas (q7_before_w/q7_after_w)"
 check "W with nothing selected changes nothing in the plan" "$([ "$REV1" != "?" ] && [ "$REV1" = "$REV2" ] && echo 1 || echo 0)" "revision $REV1 -> $REV2"
 shot q7_nothing_selected
+# Q9 (bp.13 batch 11, plan view a passive mode): in plan view SetActiveLayer and RunAction layerNext are done (not AS_BUSY) and a click
+# on the active layer's corridor then selects it (W, read back from the plan); RunAction togglePlanView turns plan view off and the next
+# click selects a board item, not a corridor; then on again. The mode is read from KiCad (the plan's PLAN_VIEW_FIELD), never from
+# pixels, and a refused call is never taken as done. Batch 10 and earlier answer AS_BUSY to all three in plan view: told as XFAIL.
+# Gate: capability ${PLAN_PASSIVE_CAP:-plan-view-passive} (the fork names it in batch 11), or PLAN_PASSIVE=expect.
+BOARD_SPEC="{\"type\":\"DOCTYPE_PCB\",\"board_filename\":\"ecc83-pp.kicad_pcb\",\"project\":{\"name\":\"ecc83-pp\",\"path\":\"$PROJ\"}}"
+ipc_status() { # $1 type, $2 message: OK, or the refusal (AS_BUSY ...), from the call's own answer
+  local o; o=$(ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"$1\",\"message\":$2}")
+  if echo "$o" | grep -q '"isError":true'; then echo "REFUSED $(echo "$o" | grep -o 'AS_[A-Z_]*' | head -1)"
+  elif echo "$o" | grep -q 'RAS_[A-Z_]*' && ! echo "$o" | grep -q 'RAS_OK'; then echo "REFUSED $(echo "$o" | grep -o 'RAS_[A-Z_]*' | head -1)"
+  else echo OK; fi
+}
+plan_mode() { # KiCad's own word on plan view: the plan answer's PLAN_VIEW_FIELD (true/false), "?" when it has none
+  ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.backplane.plan.GetPlan\",\"message\":{\"board\":$BOARD_SPEC,\"derived\":false}}" | sed 's/^MCPCALL kicad_ipc //' | python3 -c '
+import json, sys
+f = sys.argv[1]
+try: o = json.loads(sys.stdin.read()); r = json.loads(o["result"]["content"][0]["text"]); m = r.get("message", r)
+except Exception: print("?"); sys.exit()
+v = m.get(f)
+if v is None:
+    try: v = json.loads(m.get("json", "{}")).get(f)
+    except Exception: v = None
+print("?" if v is None else ("on" if v else "off"))' "${PLAN_VIEW_FIELD:-in_plan_view}"; }
+PASSIVE=${PLAN_PASSIVE:-$(echo "$CAPS7" | grep -q "${PLAN_PASSIVE_CAP:-plan-view-passive}" && echo expect || echo xfail)}
+pcheck() { if [ "$PASSIVE" = expect ]; then check "$1" "$2" "$3"; elif [ "$2" = 1 ]; then check "$1" 1 "$3"; else echo "XFAIL $1 (plan view is busy to the API before bp.13 batch 11): $3"; fi; }
+LA=$(active_layer); M0=$(plan_mode); echo "INFO Q9 ($PASSIVE): plan view $M0, active $LA"
+S1=$(ipc_status kiapi.board.commands.SetActiveLayer "{\"board\":$BOARD_SPEC,\"layer\":\"BL_B_Cu\"}"); L1=$(active_layer)
+pcheck "in plan view SetActiveLayer(B.Cu) is done" "$([ "$S1" = OK ] && [ "$L1" = BL_B_Cu ] && echo 1 || echo 0)" "$S1, active $LA -> $L1"
+# a refusal is never taken as done: the layer did not move when KiCad refused
+[ "$S1" = OK ] || check "a refused SetActiveLayer left the layer as it was" "$([ "$L1" = "$LA" ] && echo 1 || echo 0)" "$S1, active $LA -> $L1"
+S2=$(ipc_status kiapi.common.commands.RunAction '{"action":"pcbnew.Control.layerNext"}'); L2=$(active_layer)
+pcheck "in plan view RunAction layerNext is done (the layer moves)" "$([ "$S2" = OK ] && [ "$L2" != "$L1" ] && echo 1 || echo 0)" "$S2, active $L1 -> $L2"
+[ "$S2" = OK ] || check "a refused layerNext left the layer as it was" "$([ "$L2" = "$L1" ] && echo 1 || echo 0)" "$S2, active $L1 -> $L2"
+# F.Cu active over the API, then c-r (F.Cu) clicked and widened
+S3=$(ipc_status kiapi.board.commands.SetActiveLayer "{\"board\":$BOARD_SPEC,\"layer\":\"BL_F_Cu\"}"); [ "$S3" = OK ] || X key Prior; sleep 0.5
+W3=$(plan_field c-r); X click "$RX" "$RY"; sleep 0.8; X key w; sleep 1.5; W4=$(plan_field c-r)
+pcheck "after the API changed the layer, a click on that layer's corridor selects it (W widens it)" "$(python3 -c 'import sys; a,b=sys.argv[1:]; print(int(a!="?" and b!="?" and float(b)>float(a)+1e-9))' "$W3" "$W4")" "$S3; c-r width $W3 -> $W4"
+# plan view off over the API, read back from KiCad; the next click selects a board item (U1, the board's centre), not a corridor
+S4=$(ipc_status kiapi.common.commands.RunAction '{"action":"pcbnew.Plan.togglePlanView"}'); sleep 1; M4=$(plan_mode)
+pcheck "RunAction togglePlanView turns plan view off (KiCad says so)" "$([ "$S4" = OK ] && [ "$M4" = off ] && echo 1 || echo 0)" "$S4, plan view $M0 -> $M4"
+if [ "$S4" = OK ]; then
+  X click "$((FX + FW / 2))" "$((FY + FH / 2))"; sleep 0.8
+  SEL=$(ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.common.commands.GetSelection\",\"message\":{\"header\":{\"document\":$BOARD_SPEC}}}")
+  W5=$(plan_field c-r); X key w; sleep 1; W6=$(plan_field c-r)
+  pcheck "with plan view off a click selects a board item, not a corridor" "$(echo "$SEL" | grep -q 'FootprintInstance\|kiapi.board.types' && [ "$W5" = "$W6" ] && echo 1 || echo 0)" "selection: $(echo "$SEL" | grep -o 'kiapi.board.types.[A-Za-z]*' | sort -u | tr '\n' ' '); c-r $W5 -> $W6 on W"
+  X key Escape; sleep 0.3
+  S5=$(ipc_status kiapi.common.commands.RunAction '{"action":"pcbnew.Plan.togglePlanView"}'); sleep 1; M5=$(plan_mode)
+  pcheck "RunAction togglePlanView turns plan view on again" "$([ "$S5" = OK ] && [ "$M5" = on ] && echo 1 || echo 0)" "$S5, plan view $M4 -> $M5"
+  [ "$M5" = on ] || { hotkey; sleep 1.2; }
+else
+  check "a refused togglePlanView left plan view as it was" "$([ "$M4" = "$M0" ] && echo 1 || echo 0)" "$S4, plan view $M0 -> $M4"
+fi
+# nothing selected for Q8 (a click off the board: Escape would end the tool)
+X click "$(( PX - 22 * S7 > FX + 60 ? PX - 22 * S7 : FX + 60 ))" "$PY"; sleep 0.6
 # Q8: Escape with nothing selected ends plan view's tool. From bp.13 batch 5 (b590534148) it leaves plan view too: the plan is no longer
 # drawn and the board's layers come back. Batch 4 and earlier end only the tool and leave the plan drawn: told (XFAIL), not failed.
 # Batch 5 has no capability of its own; PLAN_ESC=expect makes it count (set it once batch 5 is installed)
