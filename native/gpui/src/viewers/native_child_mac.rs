@@ -183,6 +183,10 @@ pub fn button_over(_w: u64) -> Option<bool> { None }
 pub fn grab_click(_container: u64, _on: bool) {}
 pub fn grab_escape(_top: u64, _on: bool) {}
 pub fn keep(_holder: u64) {}
+/// KiCad's dialogs are its own app's windows: a new one takes the keyboard by KiCad's activation, nothing for the client to hand over.
+pub fn take_new_dialogs() -> Vec<u64> { vec![] }
+pub fn activate(_w: u64) {}
+pub fn open_dialogs(_pid: u32) -> Vec<u64> { vec![] }
 /// The reserved chords KiCad sent through the hub (kicad_pane `set_info`), for the pane's event loop.
 static KEYS: std::sync::Mutex<Vec<super::Ev>> = std::sync::Mutex::new(Vec::new());
 pub fn push_key(chord: &str) { if let Ok(mut q) = KEYS.lock() { q.push(if chord == "ctrl-`" { super::Ev::Escape } else { super::Ev::Key(chord.to_string()) }); } }
