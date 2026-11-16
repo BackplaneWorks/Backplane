@@ -5,7 +5,8 @@
 #   L2  plan_route goes ahead in plan view and routes c-k (steps until done); plan view stays on
 #   L3  plan_verify: c-k's group has no DRC violation
 #   L4  only while the person holds a drag on a plan item does plan_route answer "Nothing was routed" with the reason; released, it goes on
-#   L5  the Plan panel's row (plan.focus) selects and zooms to c-k and makes its layer active, plan view staying on
+#   L5  the Plan panel's row (plan.focus) finds and zooms to c-k and makes its layer active, plan view staying on (the hub puts it back:
+#       selecting copper ends KiCad's plan tool)
 # Mode and layer are read from KiCad, never from pixels; pixels only find the item to drag. Copies only (seed_project.py). Fork mode;
 # skips on runtimes without plan-view-api.
 set -euo pipefail
@@ -117,7 +118,10 @@ FO=$(hub_rpc "[{\"method\":\"plan.focus\",\"params\":{\"pro\":\"$PRO\",\"id\":\"
 sleep 1; LF=$(active_layer); MF=$(in_plan_view); shot l5_focus
 echo "INFO plan.focus: $(echo "$FO" | cut -c1-300)"
 SEL=$(ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.common.commands.GetSelection\",\"message\":{\"header\":{\"document\":$BOARD_SPEC}}}")
-check "the Plan panel's row selects c-k's copper in KiCad (zoomed to it)" "$(echo "$FO" | grep -q '"ok":true' && echo "$SEL" | grep -q 'kiapi.board.types' && echo 1 || echo 0)" "focus: $(echo "$FO" | cut -c1-200); selection: $(echo "$SEL" | grep -o 'kiapi.board.types.[A-Za-z]*' | sort -u | tr '\n' ' ')"
+# KiCad found and zoomed to c-k's nets and parts (SelectItems' answer). Back in plan view the plan tool owns the selection, so the copper
+# is no longer selected there: KiCad has no API to select a plan item (asked of the fork); a selection seen is told, not required
+check "the Plan panel's row finds and zooms to c-k's nets and parts in KiCad" "$(echo "$FO" | python3 -c 'import json,sys; o=json.loads(sys.stdin.readline() or "{}"); r=o.get("result",{}); f=r.get("found",{}); print(int(o.get("ok") is True and r.get("via")=="SelectItems" and set(f.get("nets",[]))>={"Net-(U1A-K)","Net-(U1B-K)"} and "U1" in f.get("references",[])))')" "$(echo "$FO" | cut -c1-200)"
+echo "INFO selection in plan view after the row: $(echo "$SEL" | grep -o 'kiapi.board.types.[A-Za-z]*' | sort -u | tr '\n' ' ')"
 check "it makes c-k's layer (B.Cu) active" "$([ "$LF" = BL_B_Cu ] && echo 1 || echo 0)" "active $SL -> $LF"
 check "plan view stays on" "$([ "$MF" = on ] && echo 1 || echo 0)" "plan view $MF; the hub says $(echo "$FO" | grep -o '"plan_view":"[a-z]*"')"
 finish_suite "embed_plan_route_live_e2e ($EMBED_MODE)"
