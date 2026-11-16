@@ -1633,6 +1633,50 @@ def run(h):
             gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
             px, zoomed = plain_key_acts(h, gl, "nogpu", frame_) if gl else (0, False)
             h.check("nogpu: then the editor is usable: a plain F2 acts with no click", bool(zoomed), {"f2_px": px, "canvas": bool(gl)})
+            if os.environ.get("BP_NOGPU_STRICT") == "1":
+                # pass 2's bar (the person, Nov 16): on a clean Windows with no GPU or only software GL, Edit just works in the pane: no box,
+                # no click; the fallback said once to the host (ET_NOTICE kind graphics, embed-notice); board, schematic, symbol and
+                # footprint editors drawn and responsive; never "not responding"
+                h.check("nogpu strict: no top-level KiCad window (no box) at any point", not nogpu_boxes, nogpu_boxes)
+                sock = (h.last_kicad_report("settled") or {}).get("sock") or ""
+                try:
+                    caps = h.ipc_cmd("caps", sock).get("capabilities") if sock else None
+                except Exception as e:  # noqa: BLE001
+                    caps = f"error: {e}"
+                h.check("nogpu strict: GetCapabilities has embed-notice", isinstance(caps, list) and "embed-notice" in caps, {"caps": caps if isinstance(caps, str) else sorted(c for c in (caps or []) if c.startswith("embed"))})
+                top = E.find_main_window(cp.pid)
+                from PIL import Image, ImageStat
+                def drawn(fr, tag):
+                    shot = h.p(f"nogpu_{tag}.png")
+                    E.grab_screen(shot)
+                    im = Image.open(shot).convert("L").crop((fr["root_x"], fr["root_y"] + 80, fr["root_x"] + fr["w"], fr["root_y"] + fr["h"] - 40))
+                    return round(ImageStat.Stat(im).stddev[0], 1)
+                def frame_titled(word):
+                    fr = [w for w in E.list_child_windows(top) if w["visible"] and word in (w["title"] or "") and w["w"] > 300]
+                    return max(fr, key=lambda w: w["w"] * w["h"]) if fr else None
+                editors = {}
+                for kind, word, how in (("PCB", "PCB Editor", "kicad-tab:PCB"), ("SCH", "Schematic Editor", "kicad-tab:SCH"),
+                                        ("SYMBOL", "Symbol Editor", "common.Control.showSymbolEditor"), ("FOOTPRINT", "Footprint Editor", "common.Control.showFootprintEditor")):
+                    if how.startswith("kicad-tab:"):
+                        h.click_control(top, how)
+                    else:
+                        line = standin_ask(h, "kicad_ipc", {"path": checks_project(h), "type": "kiapi.common.commands.RunAction", "message": {"action": how}}, f"ng-{kind}")
+                        editors.setdefault("runaction", {})[kind] = line[-300:]
+                    time.sleep(8.0)
+                    fr = frame_titled(word)
+                    box = E.startup_box()
+                    sd = drawn(fr, kind) if fr else None
+                    editors[kind] = {"frame": bool(fr), "stddev": sd, "box": box}
+                    h.check(f"nogpu strict: the {kind} editor is drawn in the pane (not blank) with no box", bool(fr) and (sd or 0) > 8 and not box, editors[kind])
+                ra = standin_ask(h, "kicad_ipc", {"path": checks_project(h)[:-len(".kicad_pro")] + ".kicad_pcb", "type": "kiapi.common.commands.RunAction",
+                                                  "message": {"action": "common.Control.zoomFitScreen"}}, "ng-ra")
+                h.check("nogpu strict: an agent's RunAction is answered (not AS_BUSY)", bool(ra) and "AS_BUSY" not in ra and "error" not in ra.lower()[:200], ra[-400:])
+                ke = standin_ask(h, "kicad_edit", {"path": checks_project(h)[:-len(".kicad_pro")] + ".kicad_pcb", "ops": [{"find": {"kind": "footprint", "limit": 3}}], "save": False}, "ng-ke")
+                h.check("nogpu strict: an agent's kicad_edit is answered", bool(ke) and "AS_BUSY" not in ke, ke[-400:])
+                hub = log_lines(h, "hub.log")
+                notes = [l.strip()[:200] for l in hub if "notice" in l.lower() and "graphics" in l.lower()]
+                h.check("nogpu strict: the fallback is said once to the host (one notice of kind graphics)", len(notes) == 1, notes[:4])
+                print("DIAG nogpu_strict " + json.dumps(editors)[:3000], flush=True)
             return h.finish()
         if observe:
             fp = h.kicad_reports().get("first_paint") or {}
