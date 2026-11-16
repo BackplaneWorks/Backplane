@@ -24,7 +24,8 @@ def main():
         if cmd == "get":
             _, val = cli.call("kiapi.backplane.plan.GetPlan", doc)
             f = pb_decode_fields(val)
-            print(json.dumps({"revision": int(f.get(2, [0])[0]), "json": f.get(1, [b""])[0].decode("utf-8", "replace")}))
+            print(json.dumps({"revision": int(f.get(2, [0])[0]), "json": f.get(1, [b""])[0].decode("utf-8", "replace"),
+                              "in_plan_view": bool(f.get(3, [0])[0])}))  # plan-view-api (bp.13 batch 11): KiCad's own answer
         elif cmd == "propose":
             body = open(args[0]).read(); mode = 0 if (len(args) > 1 and args[1] == "merge") else 1
             _, val = cli.call("kiapi.backplane.plan.ProposePlan", doc + pb_field_str(2, body) + pb_field_varint(3, mode))
