@@ -730,7 +730,10 @@ impl KicadPane {
         // a KiCad dialog (its own top-level, outside the pane) has the keyboard: it stays there, Escape and all (lane D: Symbol Properties
         // could not be dismissed with Escape, the keyboard taken back to the frame and Backplane's window)
         let in_dialog = self.info["mode"] == "fork" && nc::focus_in_pid(self.info["pid"].as_u64().unwrap_or(0) as u32) && !nc::has_focus(c);
-        if let (Some(w), false) = (self.want(), in_dialog) {
+        // a press on another top-level over the pane (a KiCad dialog, another program) is not the editor's: nothing is taken or given
+        let elsewhere = self.want().is_some_and(|w| nc::button_over(w).is_some() && nc::pointer_on_other_window(w));
+        if elsewhere { self.press_focus = None; }
+        if let (Some(w), false, false) = (self.want(), in_dialog, elsewhere) {
             // BACKPLANE_KICAD_FOCUS_ON_PRESS: the old way (focus mid-press), to check a KiCad that must cope with it
             let fork = self.info["mode"] == "fork" && std::env::var_os("BACKPLANE_KICAD_FOCUS_ON_PRESS").is_none();
             match (nc::button_over(w), nc::has_focus(c)) {

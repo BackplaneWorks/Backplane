@@ -596,6 +596,22 @@ mod imp {
     }
     /// With a mouse button down now: whether the pointer is over `w` (a click there gives the editor the keyboard, a click elsewhere gives it back).
     /// None while no button is down.
+    /// Whether the pointer is over another top-level window than `w`'s (a KiCad dialog, or another program's window, over the editor):
+    /// a press there is not the editor's however the pane lies under it (under mutter the dialog takes the keyboard only as the press
+    /// ends, and the editor took it back on the release: Escape never reached the Plot or DRC dialog, editors e2e)
+    pub fn pointer_on_other_window(w: u64) -> bool {
+        let Some(g) = conn() else { return false }; let Some(c) = g.as_ref() else { return false };
+        let root = c.setup().roots[0].root;
+        let Some(under) = c.query_pointer(root).ok().and_then(|r| r.reply().ok()).map(|p| p.child) else { return false };
+        if under == x11rb::NONE { return false }
+        let mut t = w as u32;
+        for _ in 0..30 {
+            let Some(q) = c.query_tree(t).ok().and_then(|r| r.reply().ok()) else { return false };
+            if q.parent == root || q.parent == x11rb::NONE { break }
+            t = q.parent;
+        }
+        under != t
+    }
     pub fn button_over(w: u64) -> Option<bool> {
         let w = w as u32;
         let g = conn()?; let c = g.as_ref().unwrap();
@@ -1424,6 +1440,8 @@ mod imp {
         }
     }
 
+    /// Windows: the press handler reads the window under the pointer already (WindowFromPoint); never so here.
+    pub fn pointer_on_other_window(_w: u64) -> bool { false }
     /// When a mouse button is down inside Backplane's top-level window outside `container` (including inside a `SetWindowRgn` hole),
     /// return `Some(false)` so gpui reclaims keyboard focus. Left/middle clicks inside `container` return `Some(true)`; dialogs stay untouched.
     pub fn button_over(w: u64) -> Option<bool> {
@@ -1922,6 +1940,7 @@ mod imp {
     pub fn semicolon_held() -> Option<bool> { None }
     pub fn has_focus(_container: u64) -> bool { false }
     pub fn focus_in_pid(_pid: u32) -> bool { false }
+    pub fn pointer_on_other_window(_w: u64) -> bool { false }
     pub fn button_over(_w: u64) -> Option<bool> { None }
     pub fn grab_click(_container: u64, _on: bool) {}
 
