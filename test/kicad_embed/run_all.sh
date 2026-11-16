@@ -30,6 +30,8 @@ SUITES=(
   "embed_fab_e2e.sh:fab"
   # the person's edits in KiCad's plan view (bp.13+; skips itself on runtimes without them, and outside fork mode)
   "embed_plan_person_e2e.sh:plan-person"
+  # an agent routes in plan view; the Plan panel rows there (bp.13 batch 11 plan-view-api; skips itself without it)
+  "embed_plan_route_live_e2e.sh:plan-route-live"
   "embed_comment_e2e.sh:comment"
   "embed_prewarm_e2e.sh:prewarm"
   "embed_click_e2e.sh:click"

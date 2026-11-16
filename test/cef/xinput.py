@@ -67,6 +67,9 @@ elif cmd == 'drag':  # drag X0 Y0 X1 Y1: the left button down at the first point
     x0, y0, x1, y1 = [float(v) for v in a[:4]]; move(x0, y0); xt.XTestFakeButtonEvent(d, 1, 1, 0); x11.XSync(d, 0); time.sleep(0.08)
     for i in range(1, 11): move(x0 + (x1 - x0) * i / 10, y0 + (y1 - y0) * i / 10)
     xt.XTestFakeButtonEvent(d, 1, 0, 0); x11.XSync(d, 0); time.sleep(0.05)
+elif cmd == 'bdown':  # bdown X Y: the left button pressed there and held (a drag a test does something during); bup releases it
+    move(a[0], a[1]); xt.XTestFakeButtonEvent(d, 1, 1, 0); x11.XSync(d, 0); time.sleep(0.05)
+elif cmd == 'bup': xt.XTestFakeButtonEvent(d, 1, 0, 0); x11.XSync(d, 0); time.sleep(0.05)
 elif cmd == 'dblclick': move(a[0], a[1]); click(1); click(1)
 elif cmd == 'wheel': move(a[0], a[1]); click(4 if int(a[2]) > 0 else 5)
 x11.XFlush(d)

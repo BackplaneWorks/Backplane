@@ -118,18 +118,30 @@ pub fn elsewhere(asking: &[String], pcb: &str, top: &str) -> Vec<Value> {
 pub async fn focus(hub: &Arc<Hub>, pro: &str, id: &str) -> Result<Value, String> {
     let pcb = pcb_of(pro);
     let plan = super::read_plan(hub, None, &pcb, false).await?;
-    let (mut nets, mut refs): (Vec<Value>, Vec<Value>) = (vec![], vec![]);
+    let (mut nets, mut refs, mut layer): (Vec<Value>, Vec<Value>, String) = (vec![], vec![], String::new());
     if let Some(c) = plan["corridors"].as_array().into_iter().flatten().find(|c| st(c, "id") == id) {
         if let Some(g) = plan["groups"].as_array().into_iter().flatten().find(|g| st(g, "id") == st(c, "group")) { nets = g["nets"].as_array().cloned().unwrap_or_default() }
         for k in ["from", "to"] { refs.extend(c[k].as_array().cloned().unwrap_or_default()) }
-    } else if let Some(p) = plan["planes"].as_array().into_iter().flatten().find(|p| st(p, "id") == id) { nets.push(p["net"].clone()) }
+        layer = st(c, "layer").to_string();
+    } else if let Some(p) = plan["planes"].as_array().into_iter().flatten().find(|p| st(p, "id") == id) { nets.push(p["net"].clone()); layer = st(p, "layer").to_string() }
     else { return Err(format!("no item {id} in the plan")) }
-    crate::files::kicad::xprobe::select(hub, &json!({"project": pro, "references": refs, "nets": nets, "pins": [], "show": "PCB", "zoom": true})).await
+    let mut v = crate::files::kicad::xprobe::select(hub, &json!({"project": pro, "references": refs, "nets": nets, "pins": [], "show": "PCB", "zoom": true})).await?;
+    // the item's layer made active, so in plan view the person sees (and can click) the item itself; a KiCad that refuses it (plan view
+    // busy to the API before bp.13 batch 11) keeps its layer, and the answer says so
+    if let (false, Some(route)) = (layer.is_empty(), crate::files::kicad::embed::gui_route(pro)) {
+        let o = crate::files::kicad::embed::gui_call(&route, "kiapi.board.commands.SetActiveLayer", json!({"board": crate::fab::setup::spec(&pcb), "layer": board_layer(&layer)})).await;
+        v["layer"] = json!(layer); v["layer_active"] = json!(o["ok"].as_bool().unwrap_or(false));
+        if o["ok"] != true { v["layer_note"] = json!(format!("KiCad kept its layer: {}", o["error"].as_str().or(o["status"].as_str()).unwrap_or("no answer"))) }
+    }
+    Ok(v)
 }
+/// KiCad's API name of a board layer ("B.Cu" -> "BL_B_Cu", "In1.Cu" -> "BL_In1_Cu").
+pub fn board_layer(name: &str) -> String { format!("BL_{}", name.replace('.', "_")) }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn plan_panel_focus_names_kicads_layer() { assert_eq!(board_layer("B.Cu"), "BL_B_Cu"); assert_eq!(board_layer("In1.Cu"), "BL_In1_Cu"); assert_eq!(board_layer("F.Cu"), "BL_F_Cu") }
     #[test] fn plan_panel_states_layers_and_what_awaits_the_person() {
         let plan = json!({"revision": 4, "layers": [{"layer": "In1.Cu", "role": "signal", "status": "proposed"}, {"layer": "In2.Cu", "role": "power", "status": "approved"}],
             "groups": [{"id": "g1", "name": "DDR DQ0-7", "color": "#e8a33d", "nets": ["A", "B", "C"]}],
