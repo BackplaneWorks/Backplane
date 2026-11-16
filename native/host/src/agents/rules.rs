@@ -84,6 +84,8 @@ pub fn when(zone: &str, at: u64, now: u64) -> String {
     format!("{} {} {:02}:{:02}", ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][a.tm_mon.clamp(0, 11) as usize], a.tm_mday, a.tm_hour, a.tm_min)
 }
 pub fn restart_cut(zone: &str, at: u64) -> String { format!("Backplane restarted at {} during this turn.", clock(zone, at)) }
+/// A thread at rest whose agent's background work a restart stopped (agents/mod.rs `recover`).
+pub fn restart_bg(zone: &str, at: u64, titles: &[String]) -> String { format!("Backplane restarted at {} and stopped this thread's background work: {}.", clock(zone, at), titles.join(", ")) }
 /// Carry.cut
 pub const CARRY_CUT: &str = "If a tool call was running when it stopped, its result was lost, and what it started may still be running or have partly run: check its effect before running it again.";
 /// Rec.quote / Rec.unanswered: what went unanswered when the hub restarted.

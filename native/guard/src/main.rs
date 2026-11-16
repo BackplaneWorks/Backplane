@@ -74,10 +74,13 @@ fn start_guard(d: &Dir, safe: bool) -> Result<(), String> {
 
 fn local_token(home: &std::path::Path) -> String { fs::read_to_string(home.join("token")).unwrap_or_default().trim().to_string() }
 
-fn turns(addr: &str, token: &str) -> Option<u64> {
+/// The hub's running turns and its threads at rest still waiting on background work (a shell or a subagent of their agent, which a restart stops; 0 from a hub
+/// that does not say).
+fn turns(addr: &str, token: &str) -> Option<(u64, u64)> {
     let (c, b) = http::call(addr, "GET", "/dev/turns", token, "", Duration::from_secs(3))?;
     if c != 200 { return None }
-    serde_json::from_str::<Value>(&b).ok()?["running"].as_u64()
+    let v = serde_json::from_str::<Value>(&b).ok()?;
+    Some((v["running"].as_u64()?, v["background"].as_u64().unwrap_or(0)))
 }
 
 fn local_action(c: &Cli, action: &str, build: &str) -> i32 {
@@ -89,7 +92,10 @@ fn local_action(c: &Cli, action: &str, build: &str) -> i32 {
     }
     let st = d.json("status.json");
     if !c.now && matches!(action, "restart" | "normal" | "safe" | "rollback" | "use" | "update") {
-        if let Some(n) = turns(&format!("127.0.0.1:{}", st["port"]), &local_token(&home)) { if n > 0 { eprintln!("{n} running turn(s) would be cut (they carry on after the restart unless restart.continue is off). Again with --now to go ahead."); return 4 } }
+        if let Some((n, bg)) = turns(&format!("127.0.0.1:{}", st["port"]), &local_token(&home)) {
+            if n > 0 { eprintln!("{n} running turn(s) would be cut (they carry on after the restart unless restart.continue is off). Again with --now to go ahead."); return 4 }
+            if bg > 0 { eprintln!("{bg} thread(s) wait on background work (a shell or a subagent) that a restart would stop (their agents are told after it, unless restart.continue is off). Again with --now to go ahead."); return 4 }
+        }
     }
     let id = format!("c{}-{}", now(), std::process::id());
     if let Err(e) = d.ask(action, build, "local", &id) { eprintln!("cannot reach the guard: {e}"); return 1 }
