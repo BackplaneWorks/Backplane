@@ -1367,6 +1367,14 @@ def run(h):
     only_click = only == "click_control"
     only_ctrl_k = only == "ctrl_k"
     h.init_dirs()
+    if os.environ.get("BP_FRESH_PROFILE") == "1":
+        # a fresh KiCad profile, as a person has on a clean install: none of the seed's KiCad settings (its editors' panels hidden,
+        # its global tables written from the runtime's template, its prompts answered). Climb B, Nov 16: the seeded "aui" made bp.13
+        # look like it never shows panels; the libraries gate must see the tables KiCad itself makes at first launch.
+        import shutil
+        for d in (h.p("fh", "AppData", "Roaming", "kicad"), h.p("fh", ".config", "kicad")):
+            shutil.rmtree(d, ignore_errors=True)
+        print("INFO fresh KiCad profile: the seed's KiCad settings removed", flush=True)
     seeded = None
     if only == "panels" and os.environ.get("BP_PANE_PX"):
         # the pane's width as the person sets it (the client's local setting viewer_px), the same way the Linux and macOS runs set it
