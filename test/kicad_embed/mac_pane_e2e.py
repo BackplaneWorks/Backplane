@@ -298,6 +298,31 @@ try:
         osa(f'tell application "System Events" to tell (first process whose unix id is {client.pid}) to click (first button of (first window whose position is {{{newwin[3][0]}, {newwin[3][1]}}}) whose subrole is "AXCloseButton")')
         time.sleep(3)
         check(bool(wait_for(kicad_frame, 8, 0.25)), 'popped back in: KiCad\'s frame is over the pane again')
+    # ---- Cmd+W in KiCad: the pane follows KiCad (lane B's 47b00d199) ----
+    K_W, K_RETURN = 13, 36
+    board = os.path.join(OUT, 'proj', 'ecc83-pp.kicad_pcb')
+    def edit_again():
+        e = rects().get('ui:Edit'); cw2 = next((w for w in wins() if w[0] == cw[0]), cw)
+        if e: click(cw2[3][0] + e['x'] + e['w'] / 2, cw2[3][1] + 28 + e['y'] + e['h'] / 2)
+        return wait_for(kicad_frame, 60, 0.25)
+    def unsaved_edit():
+        p = last_push(); click(p[0][0] + p[0][2] * 0.1, p[0][1] + p[0][3] * 0.9); time.sleep(0.6)
+        key(K_A, CMD); time.sleep(0.5); key(K_DEL); time.sleep(1.2)
+    # nothing unsaved: Cmd+W closes the editor, the pane goes back to View, Edit opens a fresh one
+    p = last_push(); click(p[0][0] + p[0][2] * 0.1, p[0][1] + p[0][3] * 0.9); time.sleep(0.6)
+    fr = kicad_frame(); key(K_W, CMD)
+    gone = wait_for(lambda: not any(w[0] == (fr or [0])[0] for w in wins()), 6)
+    check(bool(gone) and bool(wait_for(lambda: rects().get('ui:Edit'), 6)), 'Cmd+W with nothing unsaved: the editor closes and the pane is back to View (Edit offered)')
+    check(bool(edit_again()), 'Edit opens a fresh editor over the pane')
+    # an unsaved edit, then Cancel in KiCad's prompt (Escape): the editor stays
+    unsaved_edit(); before = open(board, 'rb').read()
+    key(K_W, CMD); time.sleep(1.5); shot('07-close-prompt'); key(K_ESC); time.sleep(1.5)
+    check(bool(kicad_frame()) and open(board, 'rb').read() == before, 'Cmd+W with an unsaved edit, then Cancel: the editor stays, nothing written')
+    # the same, then Save (Return, the prompt's default): written, closed, the pane in View
+    key(K_W, CMD); time.sleep(1.5); key(K_RETURN)
+    saved = wait_for(lambda: open(board, 'rb').read() != before, 8)
+    check(bool(saved) and bool(wait_for(lambda: not kicad_frame(), 6)) and bool(wait_for(lambda: rects().get('ui:Edit'), 6)), 'Cmd+W with an unsaved edit, then Save: written, the editor closes, the pane is back to View')
+    check(bool(edit_again()), 'and Edit opens it again')
     # ---- quitting Backplane with unsaved changes: KiCad keeps them, nothing is written, Edit brings them back ----
     board = os.path.join(OUT, 'proj', 'ecc83-pp.kicad_pcb'); before_bytes = open(board, 'rb').read()
     p = last_push()
