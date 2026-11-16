@@ -138,6 +138,12 @@ async fn run(a: Args) -> Result<()> {
     let _lock = take_lock(&a.home, a.port)?;
     copy::mark(&a.home);
     ensure_token(&a.home)?;
+    // macOS: KiCad's documents folder under the hub's KiCad home, for every KiCad it starts (proc::KICAD_DOCUMENTS: no Documents prompt)
+    if cfg!(target_os = "macos") {
+        let d = a.home.join("kicad").join("documents");
+        let _ = std::fs::create_dir_all(&d);
+        let _ = proc::KICAD_DOCUMENTS.set(d);
+    }
     // the port first: a port that is taken must end the start before anything else happens (it used to be bound last, after every interrupted agent had been started again)
     let listen = format!("{}:{}", a.host, a.port);
     let l = TcpListener::bind(&listen).await.with_context(|| format!("bind {listen}"))?;

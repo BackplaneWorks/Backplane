@@ -135,6 +135,18 @@ macOS Apple Silicon install the published bp.6 packages. There is currently
 no managed Linux ARM64 or Intel macOS package, so those hubs offer a runtime
 path instead. The install action uses the same catalog as the backend.
 
+macOS privacy prompts: the hub is the responsible process of every KiCad it starts, so a folder macOS guards (Documents,
+Desktop, Downloads, a removable volume) that KiCad touches makes macOS ask for Backplane, and KiCad's UI thread waits on the
+answer. KiCad's own default documents folder is `~/Documents/KiCad`, so on macOS the hub gives every child but a person's own
+terminal `KICAD_DOCUMENTS_HOME=<home>/kicad/documents` (`proc::KICAD_DOCUMENTS`; never over a value the hub itself was started
+with): the embedded and headless KiCad, `kicad-cli`, Open in KiCad, and agents' own `kicad-cli`. KiCad's New Project lands
+there by default; a project the person keeps in `~/Documents` (or on the Desktop) still makes macOS ask once, legitimately.
+For that case a start that stalls is not restarted: when KiCad's API keeps answering "not ready" for 5 s with no dialog of
+its own open, the pane says "macOS is asking for permission for Backplane: answer the prompt to let KiCad start", and the
+hub waits up to 10 minutes before failing with that reason (`embed::mac_prompt_wait`; never a second KiCad into the same
+prompt, `start_retry` does not retry it). Found on the Mac mini gate (Nov 16): the first Edit stalled on the Documents
+prompt for 30 s, then a second KiCad met the same prompt.
+
 Downloads must match both the release checksum list and the compiled digest.
 The installer checks the archive format and runtime layout in a staging
 folder before moving it into the managed runtime directory. It refuses to

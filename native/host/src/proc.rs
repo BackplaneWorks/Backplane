@@ -55,6 +55,18 @@ pub const HUB_ONLY: &[&str] = &["BACKPLANE_BUILDS", "BACKPLANE_BUILD", "BACKPLAN
     "BACKPLANE_CARRY_WAIT", "BACKPLANE_FAULT", "BACKPLANE_STEP_BUDGET", "BACKPLANE_UPDATE_FEED", "BACKPLANE_RELEASE_KEY", "BACKPLANE_TEST_BUILDS", "BACKPLANE_TEST_NO_UPDATE",
     "BACKPLANE_HTTPS_PORT", "BACKPLANE_URL", "BACKPLANE_NAME", "BACKPLANE_HOOK_URL", "BACKPLANE_PEERS"];
 pub fn hub_only(name: &str) -> bool { HUB_ONLY.contains(&name) || name.starts_with("BACKPLANE_GUARD_") || name.starts_with("BACKPLANE_APNS_") }
+/// macOS: the documents folder every KiCad the hub starts gets (KICAD_DOCUMENTS_HOME), set once at startup (main: `<home>/kicad/documents`).
+/// KiCad's default, ~/Documents/KiCad, made macOS ask Backplane (KiCad's responsible process) for the Documents folder on the first Edit,
+/// with KiCad's UI thread waiting on the answer (the Mac mini gate, Nov 16). Given to every child but a person's own terminal (agents' and
+/// the hub's kicad-cli, the embedded and headless KiCad, Open in KiCad), and never over a value the hub itself was started with.
+pub static KICAD_DOCUMENTS: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+pub fn kicad_documents(macos: bool, kind: Kind, inherited: bool, dir: Option<&std::path::Path>) -> Option<&std::path::Path> {
+    if !macos || kind == Kind::Terminal || inherited { return None }
+    dir
+}
+fn documents_for(kind: Kind) -> Option<&'static std::path::Path> {
+    kicad_documents(cfg!(target_os = "macos"), kind, std::env::var_os("KICAD_DOCUMENTS_HOME").is_some_and(|v| !v.is_empty()), KICAD_DOCUMENTS.get().map(|p| p.as_path()))
+}
 /// The kinds that run what an agent or a person supplies.
 fn scrubbed(kind: Kind) -> bool { matches!(kind, Kind::Agent | Kind::PersonTurn | Kind::Shell | Kind::Terminal) }
 fn hub_only_present() -> Vec<std::ffi::OsString> { std::env::vars_os().map(|(k, _)| k).filter(|k| k.to_str().map_or(false, hub_only)).collect() }
@@ -68,6 +80,7 @@ pub fn tokio_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> tokio::process::Com
     // Windows: no console window for what the hub starts, whether or not the hub has a console to share (a guard's, a task's); own_group keeps it
     #[cfg(windows)] c.creation_flags(crate::plat::proc::NO_WINDOW);
     if scrubbed(kind) { for k in hub_only_present() { c.env_remove(k); } }
+    if let Some(d) = documents_for(kind) { c.env("KICAD_DOCUMENTS_HOME", d); }
     c
 }
 /// `tokio_cmd`, in a memory scope of its own when `wrap` is given (memscope.rs: systemd-run's arguments, the program after them). A refused
@@ -78,6 +91,7 @@ pub fn tokio_cmd_in<S: AsRef<OsStr>>(kind: Kind, program: S, wrap: Option<Vec<St
     let (prog, pre) = crate::plat::hub::launch(program.as_ref());
     let mut c = tokio::process::Command::new("systemd-run"); c.args(w).arg(prog).args(pre);
     if scrubbed(kind) { for k in hub_only_present() { c.env_remove(k); } }
+    if let Some(d) = documents_for(kind) { c.env("KICAD_DOCUMENTS_HOME", d); }
     c
 }
 /// `std::process::Command::new`, gated.
@@ -86,12 +100,24 @@ pub fn std_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> std::process::Command
     let mut c = match refusal(kind, &p) { None => { let (prog, pre) = crate::plat::hub::launch(program.as_ref()); let mut c = std::process::Command::new(prog); c.args(pre); c } Some(why) => std::process::Command::new(dead(&p, &why)) };
     #[cfg(windows)] { use std::os::windows::process::CommandExt; c.creation_flags(crate::plat::proc::NO_WINDOW); }
     if scrubbed(kind) { for k in hub_only_present() { c.env_remove(k); } }
+    if let Some(d) = documents_for(kind) { c.env("KICAD_DOCUMENTS_HOME", d); }
     c
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test] fn on_macos_every_child_but_a_terminal_gets_kicads_documents_folder_unless_the_hub_was_given_one() {
+        let d = std::path::Path::new("/h/kicad/documents");
+        for k in [Kind::Local, Kind::Agent, Kind::Shell, Kind::Net, Kind::Browser, Kind::PersonTurn] {
+            assert_eq!(kicad_documents(true, k, false, Some(d)), Some(d), "{k:?}");
+        }
+        assert_eq!(kicad_documents(true, Kind::Terminal, false, Some(d)), None, "a person's terminal: their own KiCad keeps its own folder");
+        assert_eq!(kicad_documents(true, Kind::Local, true, Some(d)), None, "the hub was started with one: it stays");
+        assert_eq!(kicad_documents(false, Kind::Local, false, Some(d)), None, "macOS only");
+        assert_eq!(kicad_documents(true, Kind::Local, false, None), None, "not set up (tests, bp-plot)");
+    }
 
     // side-by-side: the person's turn is the one real agent on a copy, and nothing else opens up with it
     #[test] fn a_person_turn_is_refused_on_a_copy_by_the_pure_rule_and_free_off_a_copy() {
