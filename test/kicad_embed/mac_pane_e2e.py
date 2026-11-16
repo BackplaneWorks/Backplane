@@ -327,6 +327,54 @@ try:
     time.sleep(1.5)
     cw = next((w for w in wins() if w[1] == client.pid and w[0] == cw[0]), cw)
     print(f'client window now {cw and cw[3]}', flush=True)
+    # ---- MAC_MODE=docs: a project kept in ~/Documents (the lead's OK: exactly ~/Documents/bp-gate-docs-test/, removed after): macOS asks
+    # Backplane for the Documents folder; while it waits the pane says so, the hub does not restart KiCad, there is one KiCad; then the
+    # answer (DOCS_ANSWER allow|deny): Allow, the editor opens; Don't Allow, the pane says what to do instead of hanging ----
+    if os.environ.get('MAC_MODE') == 'docs':
+        ans = os.environ.get('DOCS_ANSWER', 'allow')
+        def kicad_pids():
+            kids = {}
+            for l in subprocess.run(['ps', '-axo', 'pid=,ppid=,comm='], capture_output=True, text=True).stdout.splitlines():
+                parts = l.split(None, 2)
+                if len(parts) == 3: kids.setdefault(int(parts[1]), []).append((int(parts[0]), parts[2]))
+            out, todo = [], [hub.pid]
+            while todo:
+                for pid, comm in kids.get(todo.pop(), []):
+                    todo.append(pid)
+                    if comm.rsplit('/', 1)[-1] in ('kicad', 'pcbnew', 'eeschema'): out.append(pid)
+            return out
+        PROMPT_OWNERS = ('UserNotificationCenter', 'universalAccessAuthWarn', 'tccd', 'CoreServicesUIAgent', 'SecurityAgent')
+        def prompt():
+            for w in helper('windows') or []:
+                if any(o in w['owner'] for o in PROMPT_OWNERS) and w['bounds'][2] > 150: return w
+            return None
+        pr = wait_for(prompt, 90, 0.5)
+        RES['docs_prompt'] = pr and {'owner': pr['owner'], 'bounds': pr['bounds']}
+        shot('docs-1-prompt')
+        check(bool(pr), f'docs: a project in ~/Documents makes macOS ask for Backplane ({RES["docs_prompt"]})')
+        if pr:
+            time.sleep(12)  # past the hub's 5 s "not ready" and its old 30 s restart point would come later: the message is said meanwhile
+            said = 'mac-permission-prompt' in client_log() or 'macOS is asking for permission' in client_log()
+            waits = 'waiting on a macOS prompt' in hub_log()
+            n = kicad_pids(); RES['docs_kicads_waiting'] = n
+            shot('docs-2-waiting')
+            check(said, 'docs: while the prompt waits, the pane says macOS is asking for permission for Backplane')
+            check(waits and 'starting it once more' not in hub_log(), 'docs: the hub waits on the prompt and does not restart KiCad')
+            check(len(n) <= 1, f'docs: one KiCad while the prompt waits, never a second ({n})')
+            x, y, w, h = pr['bounds']
+            click(x + w * (0.73 if ans == 'allow' else 0.27), y + h * 0.85); time.sleep(1.5)
+            shot('docs-3-answered')
+            if ans == 'allow':
+                f = wait_for(kicad_frame, 90, 0.5); shot('docs-4-allowed')
+                check(bool(f), 'docs: Allow: the editor opens over the pane')
+            else:
+                time.sleep(20); shot('docs-4-denied')
+                info_lines = [l for l in client_log().splitlines() if '"kicad_info"' in l]
+                last = info_lines[-1] if info_lines else ''
+                stuck = '"state":"starting"' in last and 'mac-permission-prompt' not in last
+                check(not stuck, f'docs: Don\'t Allow: the pane says what to do rather than hanging on "Starting KiCad…" ({last[:200]})')
+                print('INFO docs deny: the pane as shown in docs-4-denied.png', flush=True)
+        raise SystemExit(1 if FAILS else 0)
     if os.environ.get('MAC_MODE') == 'update':
         row = wait_for(lambda: rects().get('kicad-update'), 120, 0.5)
         n = notices_outside('update-offer', 0)
@@ -376,54 +424,6 @@ try:
         p, k = last_push(), kicad_frame()
         check(bool(got), f'{tag}: KiCad\'s frame is the pane\'s rect within 1 px ({k and k[3]} vs {p and p[0]})')
     matches('at first show')
-    # ---- MAC_MODE=docs: a project kept in ~/Documents (the lead's OK: exactly ~/Documents/bp-gate-docs-test/, removed after): macOS asks
-    # Backplane for the Documents folder; while it waits the pane says so, the hub does not restart KiCad, there is one KiCad; then the
-    # answer (DOCS_ANSWER allow|deny): Allow, the editor opens; Don't Allow, the pane says what to do instead of hanging ----
-    if os.environ.get('MAC_MODE') == 'docs':
-        ans = os.environ.get('DOCS_ANSWER', 'allow')
-        def kicad_pids():
-            kids = {}
-            for l in subprocess.run(['ps', '-axo', 'pid=,ppid=,comm='], capture_output=True, text=True).stdout.splitlines():
-                parts = l.split(None, 2)
-                if len(parts) == 3: kids.setdefault(int(parts[1]), []).append((int(parts[0]), parts[2]))
-            out, todo = [], [hub.pid]
-            while todo:
-                for pid, comm in kids.get(todo.pop(), []):
-                    todo.append(pid)
-                    if comm.rsplit('/', 1)[-1] in ('kicad', 'pcbnew', 'eeschema'): out.append(pid)
-            return out
-        PROMPT_OWNERS = ('UserNotificationCenter', 'universalAccessAuthWarn', 'tccd', 'CoreServicesUIAgent', 'SecurityAgent')
-        def prompt():
-            for w in helper('windows') or []:
-                if any(o in w['owner'] for o in PROMPT_OWNERS) and w['bounds'][2] > 150: return w
-            return None
-        pr = wait_for(prompt, 90, 0.5)
-        RES['docs_prompt'] = pr and {'owner': pr['owner'], 'bounds': pr['bounds']}
-        shot('docs-1-prompt')
-        check(bool(pr), f'docs: a project in ~/Documents makes macOS ask for Backplane ({RES["docs_prompt"]})')
-        if pr:
-            time.sleep(12)  # past the hub's 5 s "not ready" and its old 30 s restart point would come later: the message is said meanwhile
-            said = 'mac-permission-prompt' in client_log() or 'macOS is asking for permission' in client_log()
-            waits = 'waiting on a macOS prompt' in hub_log()
-            n = kicad_pids(); RES['docs_kicads_waiting'] = n
-            shot('docs-2-waiting')
-            check(said, 'docs: while the prompt waits, the pane says macOS is asking for permission for Backplane')
-            check(waits and 'starting it once more' not in hub_log(), 'docs: the hub waits on the prompt and does not restart KiCad')
-            check(len(n) <= 1, f'docs: one KiCad while the prompt waits, never a second ({n})')
-            x, y, w, h = pr['bounds']
-            click(x + w * (0.73 if ans == 'allow' else 0.27), y + h * 0.85); time.sleep(1.5)
-            shot('docs-3-answered')
-            if ans == 'allow':
-                f = wait_for(kicad_frame, 90, 0.5); shot('docs-4-allowed')
-                check(bool(f), 'docs: Allow: the editor opens over the pane')
-            else:
-                time.sleep(20); shot('docs-4-denied')
-                info_lines = [l for l in client_log().splitlines() if '"kicad_info"' in l]
-                last = info_lines[-1] if info_lines else ''
-                stuck = '"state":"starting"' in last and 'mac-permission-prompt' not in last
-                check(not stuck, f'docs: Don\'t Allow: the pane says what to do rather than hanging on "Starting KiCad…" ({last[:200]})')
-                print('INFO docs deny: the pane as shown in docs-4-denied.png', flush=True)
-        raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=first: a fresh home's first Edit puts KiCad over the pane within 30 s (the checks above), and stops ----
     if os.environ.get('MAC_MODE') == 'first':
         check(RES['edit_to_frame_s'] <= 30, f'first Edit on a fresh home: KiCad over the pane within 30 s ({RES["edit_to_frame_s"]} s)')
