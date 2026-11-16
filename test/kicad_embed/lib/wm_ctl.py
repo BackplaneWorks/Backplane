@@ -139,6 +139,7 @@ if __name__ == "__main__":
     if sys.argv[1] == "screenshot": screenshot(sys.argv[2]); sys.exit(0)
     # a window activated as the window manager's own click would (_NET_ACTIVE_WINDOW from a pager, the time now): under mutter an XTest
     # click goes into Xwayland straight, never through the compositor, so its click-to-focus never runs (a person's click does)
+    if sys.argv[1] == "time": print(server_time()); sys.exit(0)  # the X server's time now
     if sys.argv[1] == "close":  # a window closed as its title bar's X would (_NET_CLOSE_WINDOW)
         w = int(sys.argv[2], 0); send(w, "_NET_CLOSE_WINDOW", server_time(), 2, 0, 0, 0); print(json.dumps({"ok": True, "closed": hex(w)})); sys.exit(0)
     if sys.argv[1] == "activate":
