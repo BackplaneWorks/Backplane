@@ -1770,7 +1770,24 @@ def run(h):
             h.check("nogpu: each box was told to the hub with its title, so the pane says what KiCad is asking",
                     all(b.get("hub_dialogs") for b in nogpu_boxes), nogpu_boxes)
             t_after = time.monotonic()
-            painted_ms = wait_painted(E.find_main_window(cp.pid), t_after, 60.0)
+            painted_ms = None
+            top_ = E.find_main_window(cp.pid)
+            while time.monotonic() - t_after < 60.0:
+                # a box after the opening (the release check saw two per editor) is answered and recorded too
+                b2 = E.startup_box()
+                if b2:
+                    time.sleep(1.0)
+                    nogpu_boxes.append({"ms": round((time.monotonic() - started) * 1000), "title": b2["title"], "text": b2["text"][:3], "after_opening": True})
+                    okb = next((c for c in E.list_child_windows(b2["hwnd"]) if c.get("visible") and c.get("class") == "Button" and (c.get("title") or "").replace("&", "").strip().upper() in ("OK", "YES", "CONTINUE")), None)
+                    if okb:
+                        r = E.W.RECT(); E.u32.GetWindowRect(okb["hwnd"], E.ctypes.byref(r)); E.screen_click((r.left + r.right) // 2, (r.top + r.bottom) // 2)
+                    time.sleep(1.0)
+                    continue
+                if editor_painted(top_):
+                    painted_ms = round((time.monotonic() - t_after) * 1000)
+                    break
+                time.sleep(0.25)
+            h.shot("nogpu_after_wait")
             h.check("nogpu: after the boxes the editor is drawn in the pane (within 60 s of the last box)", painted_ms is not None, {"settled_mark": settled, "drawn_after_ms": painted_ms})
             frame_ = int((h.last_kicad_report("settled") or {}).get("shown") or 0)
             if not frame_:
