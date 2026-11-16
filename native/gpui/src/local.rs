@@ -33,7 +33,7 @@ pub struct Local {
     /// Streamer mode (streamer.rs): on by the person's switch; and whether it turns on by itself while the screen is shared (a portal /
     /// PipeWire screen cast, where the platform can tell) or while a known recording app runs (an opt-in guess).
     pub streamer: bool, pub streamer_share: bool, pub streamer_apps: bool,
-    /// the Backplane KiCad update put off with "Not now" (its version): not offered again until a newer one
+    /// the Backplane KiCad update put off with "Not now": "<version>|<epoch s>" (offered again a day later, or a newer one at once)
     pub kicad_update_later: String,
 }
 impl Default for Local {
