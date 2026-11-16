@@ -8,7 +8,7 @@
 #   $BACKPLANE_PREFIX/CURRENT                                    the build that runs
 #   $BACKPLANE_PREFIX/backplane                                  the guard, outside any build so an update never replaces the program running it
 # and links `backplane` (the guard's commands: backplane hub status|restart|rollback...) and `backplane-app` (the desktop app of CURRENT) into
-# ~/.local/bin. The desktop app starts its home's hub under the guard. With no desktop app (a server), or with BACKPLANE_START=1, this starts the guard
+# ~/.local/bin; on macOS it also puts Backplane.app (which runs the desktop app of CURRENT) in ~/Applications. The desktop app starts its home's hub under the guard. With no desktop app (a server), or with BACKPLANE_START=1, this starts the guard
 # itself: home $BACKPLANE_HOME (~/.backplane/hub), port $BACKPLANE_PORT (the first free from 3800). Run again on a machine whose guard is running,
 # it hands the new build to that guard, which runs it on probation and goes back if it fails. No sudo, no shell files edited.
 # BACKPLANE_ARCHIVE=<file> installs that archive (still checked against its sha256) instead of downloading it.
@@ -150,6 +150,7 @@ mkdir "$tmp/build"
 bp_extract tar -xzf "$tmp/$name" -C "$tmp/build" --no-same-owner || fail "could not unpack $name; not installed"
 for f in backplane-hub backplane; do [ -x "$tmp/build/$f" ] || fail "this release has no $f for $os-$arch; not installed"; done
 if [ -z "${BACKPLANE_NO_DESKTOP_APP:-}" ] && [ ! -x "$tmp/build/backplane-gpui" ]; then fail "this release has no desktop app for $os-$arch (BACKPLANE_NO_DESKTOP_APP=1 installs the hub alone)"; fi
+if [ $os = darwin ] && [ -z "${BACKPLANE_NO_DESKTOP_APP:-}" ] && [ ! -x "$tmp/build/Backplane.app/Contents/MacOS/Backplane" ]; then fail "this release has no Backplane.app; not installed"; fi
 bp_done
 
 bp_begin 'Install'
@@ -191,6 +192,23 @@ if [ "$os" = linux ] && [ -z "${BACKPLANE_NO_DESKTOP:-}" ] && [ -z "${BACKPLANE_
   command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$data/applications" >/dev/null 2>&1 || true
   menu=1
 fi
+# macOS: Backplane.app in ~/Applications (BACKPLANE_NO_DESKTOP=1 skips it), so Backplane is in Launchpad, Spotlight and the Dock, and macOS asks
+# for Backplane, by name, before it opens Documents, Desktop or Downloads. Its program execs the client of CURRENT (deploy/mac/launcher.c), so an
+# update never rewrites it. A prefix other than the default is written into the app, which is then signed again (ad hoc, as the release made it).
+if [ "$os" = darwin ] && [ -z "${BACKPLANE_NO_DESKTOP:-}" ] && [ -z "${BACKPLANE_NO_DESKTOP_APP:-}" ]; then
+  apps="$HOME/Applications"; mkdir -p "$apps"
+  cp -R "$prefix/builds/$VER/Backplane.app" "$tmp/Backplane.app" || fail "could not copy Backplane.app"
+  if [ "$prefix" != "$HOME/.local/share/backplane" ]; then
+    printf '%s\n' "$prefix" > "$tmp/Backplane.app/Contents/Resources/prefix"
+    codesign --force -s - "$tmp/Backplane.app" >/dev/null 2>&1 || fail "could not sign Backplane.app for $prefix"
+  fi
+  # the old app set aside, the new one renamed in: never a half-copied app where Launchpad looks
+  rm -rf "$apps/.Backplane.app.old"; [ ! -e "$apps/Backplane.app" ] || mv "$apps/Backplane.app" "$apps/.Backplane.app.old"
+  mv "$tmp/Backplane.app" "$apps/Backplane.app" || fail "could not put Backplane.app in $apps"
+  rm -rf "$apps/.Backplane.app.old"
+  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$apps/Backplane.app" >/dev/null 2>&1 || true
+  menu=1
+fi
 bp_done
 
 bp_begin 'Start'
@@ -217,12 +235,14 @@ else
     mkdir -p "$home"
     nohup "$prefix/backplane" hub run --home "$home" --port "$port" --builds "$prefix" --default --log "$home/hub.log" -- --foreground ${BACKPLANE_HUB_ARGS:-} >> "$home/guard.log" 2>&1 < /dev/null &
     how="The guard runs the hub of $home on port $port (backplane hub status)."
+  elif [ -n "$menu" ] && [ "$os" = darwin ]; then how="Open Backplane from Applications or Launchpad (it starts its hub under the guard)."
   else how="Run: $app (it starts its hub under the guard)."; fi
 fi
 bp_done
 echo
 echo "  Backplane $VER is installed. $how"
-[ -n "$menu" ] && echo "  It is also in your applications menu."
+if [ -n "$menu" ] && [ "$os" = darwin ]; then echo "  Backplane.app is in $HOME/Applications: macOS asks you, for Backplane, before it opens Documents, Desktop or Downloads."
+elif [ -n "$menu" ]; then echo "  It is also in your applications menu."; fi
 case ":$PATH:" in
   *":$bin:"*) ;;
   *) echo "  ($bin is not on your PATH yet: many systems add it at the next login; or add it yourself)" ;;

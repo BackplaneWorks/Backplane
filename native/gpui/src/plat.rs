@@ -168,3 +168,17 @@ fn system_reduce_motion() -> bool {
 }
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 fn system_reduce_motion() -> bool { false }
+
+/// macOS: Backplane.app's launcher (deploy/mac/launcher.c) execs this client with `CFProcessPath` naming the app's program, so the main bundle is
+/// Backplane.app (its name, icon and usage descriptions). Fixes that bundle in CoreFoundation, then clears the variable: what this client starts (the
+/// hub, agents, KiCad, CEF's helpers) must find its own bundle. The app's path stays in `BACKPLANE_APP` for the words about folder access.
+#[cfg(target_os = "macos")]
+pub fn adopt_app_bundle() {
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" { fn CFBundleGetMainBundle() -> *const std::ffi::c_void; }
+    /* i18n-ok: environment names */ let Some(p) = std::env::var_os("CFProcessPath") else { return };
+    unsafe { CFBundleGetMainBundle(); }
+    // <app>/Contents/MacOS/Backplane -> <app>
+    if let Some(app) = std::path::Path::new(&p).ancestors().nth(3) { unsafe { std::env::set_var("BACKPLANE_APP", app) } }
+    unsafe { std::env::remove_var("CFProcessPath") }
+}

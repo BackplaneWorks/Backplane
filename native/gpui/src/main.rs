@@ -327,6 +327,7 @@ fn window_failed<T>(e: anyhow::Error) -> T { eprintln!("Backplane: cannot open i
 fn quit_later(cx: &mut App) { cx.spawn(async move |cx| { let _ = cx.update(|cx| cx.quit()); }).detach(); }
 
 fn main()->anyhow::Result<()> {
+    #[cfg(target_os="macos")] plat::adopt_app_bundle(); // Backplane.app's launcher named the app as this process's bundle (deploy/mac/launcher.c)
     #[cfg(feature="cef")]
     if let Some(code)=viewers::cef::subprocess(){std::process::exit(code);} // a CEF helper process (renderer, gpu...) is this executable run again
     // `--install [DIR]`: the headless install of an unpacked Windows release (install.rs); nothing else runs

@@ -13,7 +13,7 @@ else
   ! grep -q '@[A-Z_0-9]*@' rel/install.sh
   echo "installer: made from deploy/install.sh.in (no publish job in that run)"
 fi
-export BACKPLANE_ARCHIVE="$PWD/rel/backplane-$tag-darwin-arm64-native.tar.gz" BACKPLANE_PREFIX="$PWD/inst" BACKPLANE_HOME="$PWD/inst-home" BACKPLANE_NO_DESKTOP_APP=
+export BACKPLANE_ARCHIVE="$PWD/rel/backplane-$tag-darwin-arm64-native.tar.gz" BACKPLANE_PREFIX="$PWD/inst" BACKPLANE_HOME="$PWD/inst-home" BACKPLANE_NO_DESKTOP_APP= BACKPLANE_NO_DESKTOP=1   # no Backplane.app in the Mac's own ~/Applications
 sh rel/install.sh --quiet
 B="$PWD/inst/builds/$tag"; ls -l "$B"; echo "commit: $(cat "$B/COMMIT")"
 [ -z "${GITHUB_ENV:-}" ] || echo "BUILD=$B" >> "$GITHUB_ENV"

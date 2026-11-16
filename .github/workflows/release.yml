@@ -219,7 +219,9 @@ jobs:
             fw=$(find native/gpui/target/release/build -path '*cef-dll-sys*' -type d -name 'Chromium Embedded Framework.framework' -prune | head -1)
             [ -n "$fw" ] || { echo "::error::Chromium Embedded Framework.framework missing from the build"; exit 1; }
             scripts/cef-runtime-files.sh "$(dirname "$fw")" $d macos
-            scripts/cef-mac-helpers.sh $d native/gpui/target/release/backplane-cef-helper ;;
+            scripts/cef-mac-helpers.sh $d native/gpui/target/release/backplane-cef-helper
+            # Backplane.app, which install.sh puts in ~/Applications: its program execs the client of CURRENT (scripts/mac-app.sh, deploy/mac/launcher.c)
+            scripts/mac-app.sh $d "$TAG"; codesign --verify --strict $d/Backplane.app ;;
           esac
           cp -r assets $d/assets
           scripts/build-kistack.sh $d/kistack   # KiStack's skills beside the hub (deploy/kistack.lock; agents/host.rs looks in <exe dir>/kistack)
@@ -233,7 +235,7 @@ jobs:
           case "${{ matrix.target }}" in linux-*) need="$need libcef.so icudtl.dat resources.pak chrome_100_percent.pak v8_context_snapshot.bin locales/en-US.pak licenses/cef/LICENSE.txt licenses/cef/CREDITS.html licenses/fonts/noto-sans-cjk-jp/OFL.txt"
             # the Japanese font compiled into the Linux client (art.rs CJK_FACES): a machine with no CJK font draws Japanese with it
             grep -aq NotoSansCJKjp-Bold $d/backplane-gpui || { echo "::error::backplane-gpui lacks the bundled Noto Sans CJK JP"; exit 1; };;
-            darwin-*) need="$need licenses/cef/LICENSE.txt licenses/cef/CREDITS.html";; esac
+            darwin-*) need="$need licenses/cef/LICENSE.txt licenses/cef/CREDITS.html Backplane.app/Contents/MacOS/Backplane Backplane.app/Contents/Info.plist Backplane.app/Contents/Resources/Backplane.icns Backplane.app/Contents/_CodeSignature/CodeResources";; esac
           for f in $need; do [ -e "$d/$f" ] || { echo "::error::$f missing from the ${{ matrix.target }} archive"; exit 1; }; done
           # macOS: no Mach-O in the archive may ask for a newer macOS than the floor install.sh and the docs state (MAC_FLOOR); a build on a newer Mac
           # (the mini runs macOS 26) that let one through would install and then fail to start on older ones

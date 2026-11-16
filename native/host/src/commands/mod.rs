@@ -105,7 +105,7 @@ impl RpcHandler for Commands {
                     // `orAdd` (setup's one field: "a folder that exists to add it, or a new path to make it"): a folder that is there is added as it is
                     let there = if method == "project.new" && p["orAdd"] == true { fs::resolve(&path).await.ok().filter(|d| fs::is_dir(d)) } else { None };
                     let r = match there { Some(d) => Ok(d), None if method == "project.add" => fs::resolve(&path).await, None => fs::make(&path).await };
-                    match r { Ok(d) if fs::is_dir(&d) => Some(d), Ok(d) => return answer(json!({"error": format!("invalid project folder: {d}")})), Err(e) => return answer(e) }
+                    match r { Ok(d) if fs::is_dir(&d) => Some(d), Ok(d) => return answer(json!({"error": crate::plat::privacy_block(&d).unwrap_or_else(|| format!("invalid project folder: {d}"))})), Err(e) => return answer(e) }
                 }
                 "project.create" => Some(path.clone()),
                 _ => None,
