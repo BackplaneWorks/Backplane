@@ -2257,6 +2257,7 @@ gpui.to.do = TO-DO
 gpui.subagents = SUBAGENTS
 gpui.add.an.item = Add an item
 gpui.panels.subagents = SUBAGENTS · {word}
+gpui.panels.kind.task = task
 gpui.runs = Runs
 gpui.doing = Doing
 gpui.asked = Asked

@@ -43,6 +43,11 @@ pub fn cells(cx: &mut Context<Backplane>, light: bool, p: &Panels, thread: &Valu
     out
 }
 
+/// A row's button: a delegated task's Open shows its thread here; any other goes to the hub.
+fn press(this: &mut Backplane, act: &str, value: &str, cx: &mut Context<Backplane>) {
+    if act == "open-thread" { this.select_id(value.to_string(), cx); return }
+    let _ = this.tx.try_send(Command::Action(act.into(), value.into())); cx.notify();
+}
 fn field_none(fields: &std::collections::HashMap<String, super::settings::FieldSlot>, id: &str) -> bool { !fields.contains_key(&format!("todo.{id}")) }
 /// The fields the to-do list types into: each step's text and the new one's (typed through `bfield`, sent on Enter).
 pub fn form_fields(data: &Value) -> Vec<super::settings::Field> {
@@ -103,9 +108,11 @@ pub fn dock(cx: &mut Context<Backplane>, light: bool, fields: &std::collections:
                 let k = key.clone();
                 head = head.cursor_pointer().hover(|s| s.bg(c("raise"))).on_click(cx.listener(move |this, _, _, cx| this.sub_open(k.clone(), cx)));
             }
+            // a delegated task's row opens its own thread (as Open does)
+            let head = if string(r, "act") == "open-thread" { let v = string(r, "value"); head.cursor_pointer().hover(|s| s.bg(c("raise"))).on_click(cx.listener(move |this, _, _, cx| press(this, "open-thread", &v, cx))) } else { head };
             let head = head.when(!string(r, "act").is_empty(), |d| { let (act, value) = (string(r, "act"), string(r, "value"));
                 d.child(div().id(SharedString::from(format!("{act}-{value}"))).flex_shrink_0().px_1().cursor_pointer().text_color(c("accent")).child(trs(&string(r, "label")))
-                    .on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); let _ = this.tx.try_send(Command::Action(act.clone(), value.clone())); cx.notify(); }))) });
+                    .on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); press(this, &act, &value, cx); }))) });
             let line = |t: String, col_: Rgba| div().w_full().pl(px(22.)).flex().text_size(crate::scale::tpx(11.)).text_color(col_).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(t));
             let mut row = div().w_full().flex().flex_col().py(px(2.)).child(head);
             if detail {
