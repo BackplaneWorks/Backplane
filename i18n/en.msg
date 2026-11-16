@@ -4147,7 +4147,7 @@ gpui.f2.locate.freecad = Locate FreeCAD
 gpui.f2.locate.note = If it is installed somewhere else, give the full path to {tool}.
 gpui.f2.path.to = Path to {tool}
 gpui.f2.alwayson = Where your uberbot lives
-gpui.f2.alwayson.body = Your uberbot is the assistant you talk to first. It answers you, starts and follows your threads and bots across projects and machines, and keeps your reminders and phone alerts going. Always-on keeps your uberbot, reminders, bots and phone alerts running while this computer sleeps. Hardware and code still run here.
+gpui.f2.alwayson.body = Always-on keeps your uberbot, reminders, bots and phone alerts running while this computer sleeps. Hardware and code still run here.
 gpui.f2.aon.here = Stay on this computer
 gpui.f2.aon.here.note = Your uberbot runs here, while this computer is on. You can move it later in Settings, Machines.
 gpui.f2.aon.boat = An always-on Boat
@@ -4483,7 +4483,7 @@ gpui.streamer.win = Windows does not tell an app that the screen is being captur
 
 # setup's Your uberbot and a bot's cat (present/onboard_uber.rs, screens/catpick.rs)
 gpui.f2.uber.title = Your uberbot
-gpui.f2.uber.body = Your uberbot is the assistant you talk to first. Give it a name: the name picks its cat, and the same name gives the same cat on every device.
+gpui.f2.uber.body = Your uberbot is the assistant you talk to first. It answers you, starts and follows your threads and bots across projects and machines, and keeps your reminders and phone alerts going. Give it a name: the name picks its cat, and the same name gives the same cat on every device.
 gpui.f2.uber.say = Say hello
 gpui.f2.uber.here = Your uberbot is here. A new name or colour is saved with Save.
 gpui.f2.uber.err.name = Use 1 to 24 letters, digits, - or _.

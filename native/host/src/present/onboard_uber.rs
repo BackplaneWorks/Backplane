@@ -55,7 +55,7 @@ pub fn step(f: &Facts, session: &Value) -> Step {
     if !err.is_empty() { r["note"] = json!(err); r["tone"] = json!("warn"); }
     else if u.is_some() && spawn.is_empty() { r["note"] = json!("Your uberbot is here. A new name or colour is saved with Save."); }
     Step { id: "uber", group: "", title: "Your uberbot".into(),
-        body: "Your uberbot is the assistant you talk to first. Give it a name: the name picks its cat, and the same name gives the same cat on every device.".into(),
+        body: format!("{} Give it a name: the name picks its cat, and the same name gives the same cat on every device.", super::onboard::UBERBOT),
         rows: vec![r], choices: vec![], panel: String::new(), done: u.is_some(), task: true, accept: true }
 }
 

@@ -737,10 +737,10 @@ pub fn rows(uber: bool, at: &str, mv: &str, linked: &Value) -> Vec<Value> {
     let mv: Value = serde_json::from_str(mv).unwrap_or(Value::Null);
     let moving = gs(&mv, "state") == "moving";
     if !gs(&at, "name").is_empty() {
-        r.push(row("Home", &format!("{} Bub, the bots, rooms, push and the ring run on {}, which stays on when this machine sleeps.", crate::present::onboard::UBERBOT, gs(&at, "name")), if moving { vec![] } else { vec![btn("Move home back here", "back")] }));
+        r.push(row("Home", &format!("{} It, the bots, rooms, push and the ring run on {}, which stays on when this machine sleeps.", crate::present::onboard::UBERBOT, gs(&at, "name")), if moving { vec![] } else { vec![btn("Move home back here", "back")] }));
     } else if uber {
         let b: Vec<Value> = if moving { vec![] } else { linked.as_array().into_iter().flatten().filter(|l| gs(l, "state") == "paired").map(|l| btn(&format!("Move home to {}", gs(l, "name")), gs(l, "id"))).collect() };
-        r.push(row("Home", &format!("{} Bub, the bots, rooms, push and the ring run on this machine.", crate::present::onboard::UBERBOT), b));
+        r.push(row("Home", &format!("{} It, the bots, rooms, push and the ring run on this machine.", crate::present::onboard::UBERBOT), b));
     }
     if !gs(&mv, "state").is_empty() && gs(&mv, "state") != "idle" {
         let note = match gs(&mv, "state") { "moving" => format!("Moving: {} {}", gs(&mv, "step"), gs(&mv, "note")), "done" => format!("Moved to {}.", gs(&mv, "note")), _ => format!("The move did not finish: {}", gs(&mv, "note")) };
