@@ -391,7 +391,7 @@ fn kicad_row(f: &Facts, pkg: Option<&crate::files::kicad::install::Package>) -> 
             r
         }
         Action::Offer => yourself(row("KiCad", &format!("{} {} {}", found, offer_lead(status), offer_adds(status)).trim().replace("  ", " "), vec![btn("Install Backplane KiCad", "ob-kicad-install", "", true)])),
-        Action::NoPackage => row("KiCad", &if found.is_empty() { format!("{} No Backplane KiCad is published for this computer. Stock KiCad 9 or later works for viewing and export.", if f.checked { "Not found." } else { looking(f) }) } else { found.clone() }.trim().to_string(),
+        Action::NoPackage => row("KiCad", &if found.is_empty() { format!("{} {}. Stock KiCad 9 or later works for viewing and export.", if f.checked { "Not found." } else { looking(f) }, crate::files::kicad::install::none_here()) } else { found.clone() }.trim().to_string(),
             vec![link("Download KiCad", KICAD_STOCK), rel]),
     };
     (r, done)

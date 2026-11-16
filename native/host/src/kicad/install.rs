@@ -28,8 +28,38 @@ pub fn pick(os: &str, arch: &str) -> Option<&'static Package> {
     let arch = match arch.as_str() { "amd64" | "x64" => "x86_64", "aarch64" => "arm64", a => a };
     match (os.as_str(), arch) { ("linux", "x86_64") => Some(&LINUX), ("darwin", "arm64") => Some(&MAC), ("windows", "x86_64") => Some(&WINDOWS), _ => None }
 }
-/// This hub's package (the hub's own OS, never a connecting client's).
-pub fn package() -> Option<&'static Package> { pick(std::env::consts::OS, std::env::consts::ARCH) }
+/// This hub's package (the hub's own OS, never a connecting client's); None where none is published or this OS is older than the package's
+/// floor (`too_old`): a runtime that would not start is never installed.
+pub fn package() -> Option<&'static Package> { pick(std::env::consts::OS, std::env::consts::ARCH).filter(|p| too_old(p, &os_version()).is_none()) }
+/// The oldest OS version a package's programs start on, where it is above what Backplane itself runs on: the macOS runtime is built on
+/// macos-15 and its kicad and bundled dylibs say minos 15.0 (lane M, Nov 15; bp.6 was built the same way), while the client runs on 12.
+pub fn os_floor(p: &Package) -> Option<(&'static str, &'static [u32])> {
+    match p.platform { "darwin-arm64" => Some(("macOS", &[15, 0])), _ => None }
+}
+/// Why `p` cannot run on an OS of version `have` ("15.1", "14.7.2"), None when it can or `have` is not known (never refused on a guess).
+pub fn too_old(p: &Package, have: &str) -> Option<String> {
+    let (name, floor) = os_floor(p)?;
+    let v: Vec<u32> = have.trim().split('.').map(|x| x.parse().ok()).collect::<Option<_>>().filter(|v: &Vec<u32>| !v.is_empty())?;
+    let n = floor.len().max(v.len()); let pad = |a: &[u32]| (0..n).map(|i| a.get(i).copied().unwrap_or(0)).collect::<Vec<_>>();
+    let mut f = floor.to_vec(); while f.len() > 1 && f.last() == Some(&0) { f.pop(); } // 15.0 is said "15"
+    let f = f.iter().map(u32::to_string).collect::<Vec<_>>().join(".");
+    (pad(&v) < pad(floor)).then(|| format!("Backplane KiCad needs {name} {f} or later; this computer has {name} {}", have.trim()))
+}
+/// This hub's OS version where a package has a floor: macOS's product version (sysctl kern.osproductversion, no subprocess); "" elsewhere.
+pub fn os_version() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        let mut buf = [0u8; 64]; let mut len = buf.len();
+        let ok = unsafe { libc::sysctlbyname(c"kern.osproductversion".as_ptr(), buf.as_mut_ptr().cast(), &mut len, std::ptr::null_mut(), 0) } == 0;
+        if ok { return String::from_utf8_lossy(&buf[..len]).trim_end_matches('\0').trim().to_string() }
+    }
+    String::new()
+}
+/// What to say when this hub has no package: the OS floor it is under, or that none is published for it.
+pub fn none_here() -> String {
+    pick(std::env::consts::OS, std::env::consts::ARCH).and_then(|p| too_old(p, &os_version()))
+        .unwrap_or_else(|| format!("No Backplane KiCad is published for this computer ({})", this_computer()))
+}
 /// Where installs go: the folder `ipc::runtime` searches newest first. Windows: %LOCALAPPDATA%\Backplane\kicad, because the hub's home is in the
 /// roaming profile and a runtime of about a gigabyte does not belong there; everywhere else `<home>/kicad`.
 pub fn parent(home: &Path) -> PathBuf { managed_parent(cfg!(windows), std::env::var_os("LOCALAPPDATA").as_deref(), home) }
@@ -528,7 +558,7 @@ pub fn update_reason(have: &[&str]) -> Option<String> {
 pub fn refusal(found: &str, status: &str, version: &str, consent: bool, running: bool, p: Option<&Package>) -> Option<String> {
     if running { return Some("KiCad is being installed already".into()) }
     if status == "ok" && !p.map_or(false, |p| older(version, p)) { return Some(format!("Backplane KiCad is already installed: {found}")) }
-    let Some(p) = p else { return Some(format!("No Backplane KiCad is published for this computer ({}). Install KiCad from kicad.org, then set its path in Settings, CAD", this_computer())) };
+    let Some(p) = p else { return Some(format!("{}. Install KiCad from kicad.org, then set its path in Settings, CAD", none_here())) };
     if !consent { return Some(format!("Installing needs your consent: it downloads Backplane KiCad {} from {FROM}. Press Install in Settings, CAD", p.version)) }
     None
 }
@@ -648,6 +678,15 @@ mod tests {
         assert_eq!(pick("windows", "x86_64"), Some(&WINDOWS)); assert_eq!(pick("MINGW64_NT-10.0", "x86_64"), Some(&WINDOWS));
         assert_eq!(pick("linux", "aarch64"), None); assert_eq!(pick("macos", "x86_64"), None);
         for p in [&LINUX, &MAC, &WINDOWS] { assert_eq!(p.release, format!("backplane-kicad-v{}", p.version)); assert_eq!(p.asset, format!("backplane-kicad-{}-{}.{}", p.platform, p.version, p.format)); assert_eq!(p.sha256.len(), 64) }
+    }
+
+    #[test] fn a_mac_older_than_the_runtimes_floor_is_refused_with_its_reason() {
+        let why = too_old(&MAC, "14.7.2").expect("macOS 14 is under the runtime's minos 15.0");
+        assert_eq!(why, "Backplane KiCad needs macOS 15 or later; this computer has macOS 14.7.2");
+        for ok in ["15.0", "15", "15.1", "26.0.1"] { assert_eq!(too_old(&MAC, ok), None, "{ok}"); }
+        // an unreadable version is never a reason to refuse; Linux and Windows packages have no floor here
+        for unknown in ["", "fifteen", "15.x"] { assert_eq!(too_old(&MAC, unknown), None, "{unknown:?}"); }
+        assert_eq!(too_old(&LINUX, "1.0"), None); assert_eq!(too_old(&WINDOWS, "6.1"), None);
     }
     #[test] fn windows_installs_under_local_app_data_and_others_beside_the_home() {
         let home = Path::new("/h/hub");

@@ -526,7 +526,7 @@ pub fn install_row(session: &Value, info: &Value, pkg: Option<&crate::files::kic
     }
     // nothing is published for this computer: the KiCad it has stays, with nothing to say
     if beside && pkg.is_none() { return None }
-    let Some(p) = pkg else { return Some(row("Install KiCad", &format!("No Backplane KiCad is published for this computer ({}). Install KiCad from kicad.org, then set its path above.", crate::files::kicad::install::this_computer()), vec![])) };
+    let Some(p) = pkg else { return Some(row("Install KiCad", &format!("{}. Install KiCad from kicad.org, then set its path above.", crate::files::kicad::install::none_here()), vec![])) };
     let home = i("home"); let into = if home.is_empty() { "Backplane's own folder".to_string() } else { format!("{home}/kicad") };
     Some(match state {
         "running" => running_row(&format!("Installing Backplane KiCad {}", p.version), &st, p.version, note),
