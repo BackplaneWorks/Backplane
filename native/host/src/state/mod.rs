@@ -37,7 +37,7 @@ pub enum Override { None, ForcedSettled, ForcedActive }
 pub struct Project { pub title: String, pub root: String, pub created: u64, pub removed: bool }
 /// Navigation metadata only: no bot persona, posts, room history or second world fold.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct BotNav { pub name: String, pub thread: String, pub look: u64, #[serde(default)] pub color: String, pub created: u64, pub talked: u64 }
+pub struct BotNav { pub name: String, pub thread: String, pub look: u64, #[serde(default)] pub color: String, #[serde(default)] pub auto: bool, pub created: u64, pub talked: u64 }
 /// A RoomSet's life: (ephemeral, closed). A field left out keeps what the room had (`was`), so a line from before the fields, and a change
 /// that only renames or moves members (room_join, a ring, a linked machine's copy), never makes a room permanent or opens a closed one.
 /// A room made again after RoomDeleted starts from (false, false).
@@ -254,7 +254,7 @@ impl State {
             "BotSet" => { let (id, th) = (s(e, "id")?, s(e, "thread")?); // Bot.keep.k: an edit with an empty thread keeps the one the bot has
                 if !th.is_empty() || !self.bot_threads.contains_key(id) { self.bot_threads.insert(id.into(), th.into()); }
                 let old = self.bots_nav.get(id);
-                self.bots_nav.insert(id.into(), BotNav { name: s(e,"name")?.into(), thread: self.bot_threads[id].clone(), look:cat_look(e), color:cat::parse_color(s(e,"color")?).map(cat::color_hex).unwrap_or_default(),
+                self.bots_nav.insert(id.into(), BotNav { name: s(e,"name")?.into(), thread: self.bot_threads[id].clone(), look:cat_look(e), color:cat::parse_color(s(e,"color")?).map(cat::color_hex).unwrap_or_default(), auto:e["auto"]==true,
                     created:old.map_or(n(e,"at")?,|b|b.created), talked:old.map_or(0,|b|b.talked) }); }
             "BotDeleted" => { let id = s(e, "id")?; self.bot_threads.remove(id); self.bots_nav.remove(id); }
             "RoomSet" => { let id = s(e,"id")?; let old = self.rooms_nav.get(id).cloned(); let was = old.as_ref().map_or((false,false),|r|(r.ephemeral,r.closed)); let (ephemeral,closed) = room_life(e,was);
