@@ -1,6 +1,6 @@
 # Sourced by journey_project.sh after the libraries row: the ways a person's KiCad session ends or doubles, on the clean box.
 #   R1 warm and Edit together: showing the thread warms the project's KiCad and Edit is pressed under a second later: one KiCad
-#   R2 KiCad killed (as by a crash), then Edit: a new KiCad, painted in the pane
+#   R2 KiCad killed (as by a crash), then the pane's Open the editor again (kicad:open-again, 276b1dd1e): a new KiCad, painted
 #   R3 Backplane killed mid-edit (its window and its hub), then started again as a person does, then Edit: KiCad painted, and one KiCad
 # The client's script presses (Edit waits for its button, "within"); the harness kills between the script's marks.
 phase "restart rows"
@@ -10,11 +10,13 @@ kfield() { kinfo | python3 -c 'import json,sys; l=sys.stdin.read(); print(json.l
 kcount() { in_box sh -c "pgrep -af -- '--embedded' 2>/dev/null" | grep -v pgrep | grep -c "pic_programmer"; }
 WP=$(cat "$HH/.client.pid" 2>/dev/null); [ -n "$WP" ] && in_box kill "$WP" 2>/dev/null; sleep 2
 # KiCad from the sessions before is closed first (R1 is about a cold project): the hub's sessions end with their client
-in_box sh -c "pkill -f -- '--embedded' 2>/dev/null"; sleep 3
+# by their pids as the client reported them (kicad_info), never by name
+KPIDS=$(cat "$HH/win.log" "$OUT"/logs/win*.log 2>/dev/null | grep -o '"kicad_info"[^}]*' | grep -o '"pid":[0-9]*' | cut -d: -f2 | grep -v '^0$' | sort -u | tr '\n' ' ')
+[ -n "$KPIDS" ] && in_box kill $KPIDS 2>/dev/null; sleep 3
 cat >"$HH/restart.json" <<J
 [{"wait":3000},{"click":"project:$pid_"},{"wait":1500},{"click":"page-thread:$tid"},{"wait":300},{"click":"rail:Board"},{"wait":600},{"click":"ui:Edit"},
  {"kicad":{"wait_painted":120000,"kind":"PCB","tag":"r1"}},{"kicad":{"report":true,"tag":"r1"}},{"mark":"r1"},{"wait":20000},
- {"click":"ui:Edit","within":60000},{"kicad":{"wait_painted":120000,"kind":"PCB","tag":"r2"}},{"kicad":{"report":true,"tag":"r2"}},{"mark":"r2"},{"wait":1800000}]
+ {"click":"kicad:open-again","within":60000},{"kicad":{"wait_painted":120000,"kind":"PCB","tag":"r2"}},{"kicad":{"report":true,"tag":"r2"}},{"mark":"r2"},{"wait":1800000}]
 J
 : >"$HH/win.log"
 launch --url http://127.0.0.1:$(hub_port) --token-file $PH/.backplane/hub/token --script $PH/restart.json
@@ -24,7 +26,7 @@ if rmark r1 720; then sleep 3; n=$(kcount); P1=$(kfield pid); shot 40-r1
   # R2: KiCad dies; the script presses Edit again when its button is back
   in_box kill -9 "$P1" 2>/dev/null; t=$(date +%s)
   if rmark r2 720; then sleep 2; P2=$(kfield pid); S2=$(kfield state); F2=$(kfield frames); shot 41-r2
-    [ -n "$P2" ] && [ "$P2" != "$P1" ] && [ "$S2" = ready ] && [ "${F2:-0}" -ge 1 ] && ok "R2 after KiCad was killed, Edit shows a new KiCad (pid $P2, in $(( $(date +%s) - t )) s)" \
+    [ -n "$P2" ] && [ "$P2" != "$P1" ] && [ "$S2" = ready ] && [ "${F2:-0}" -ge 1 ] && ok "R2 after KiCad was killed, Open the editor again shows a new KiCad (pid $P2, in $(( $(date +%s) - t )) s)" \
       || { bad "R2 after KiCad was killed, Edit did not show a new KiCad (pid $P1 -> ${P2:-none}, $S2, frames $F2)"; cut_ 1 restart "after KiCad crashed, Edit did not bring it back"; }
   else bad "R2 after KiCad was killed, Edit never painted KiCad again ($(kinfo | cut -c1-200))"; cut_ 1 restart "after KiCad crashed, Edit did not bring it back"; fi
 else bad "R1 Edit never showed KiCad ($(kinfo | cut -c1-200))"; fi
