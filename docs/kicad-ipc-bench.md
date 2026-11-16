@@ -307,8 +307,14 @@ What the traces show (`h2h.py trace` reads Claude's logs; Grok's ACP lines were 
   sessions are kept there. It searches the disk for answers, so a finished run's folder is closed to it
   (`KIPC_BENCH_SEAL`).
 
-Open: why Grok does not trust the tool description it was handed (a shorter first answer from its tool search, or the
-ops as a schema it can check against, may save most of its calls), and a second run a cell.
+Can Grok be helped? Prepared, not yet measured (Grok's plan balance was still exhausted on 2026-11-16: every run ended
+in three seconds with HTTP 402): Grok CLI 1.0.77 has no way to hand the model an MCP tool directly (every MCP tool is
+behind its `search_tool` / `use_tool` pair, with no preload or allow-list), so the help is in the prompt
+(`prompts/grok.json`): a Grok-only block with the exact `use_tool` call for `backplane__kicad_edit`, its ops in one
+paragraph, "send the whole edit as your first call" and "the answer's `check` is the verification"; the "read back the
+saved path ... verify the viewer and history" sentence replaced by "the answer is the saved state"; and the person's
+own MCP servers switched off for the process by Grok's config overlay (`KIPC_BENCH_GROK_CLEAN`, `GROK_CONFIG`). Also
+open: a second run a cell, and the raw-file Hubble run.
 
 ## What was tried
 
