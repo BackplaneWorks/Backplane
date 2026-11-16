@@ -1020,10 +1020,26 @@ def corridor_pixel(png, x, y):
         a = np.asarray(Image.open(png).convert("RGB")).astype(int)
         x0, y0 = PANE["x"], PANE["y"]; a = a[y0:y0 + PANE["h"], x0:x0 + PANE["w"]]
         r, g, b = a[..., 0], a[..., 1], a[..., 2]
-        ys, xs = np.nonzero((r > 120) & (r - b > 70) & (g > 60) & (g < r - 10) & (g > b + 20))
+        band = (r > 120) & (r - b > 70) & (g > 60) & (g < r - 10) & (g > b + 20)
+        inner = band.copy()  # well inside a band: every pixel within 3 px is band too (not its edge, nor a stray pixel of the same colour)
+        for dy in (-3, 0, 3):
+            for dx in (-3, 0, 3): inner &= np.roll(np.roll(band, dy, 0), dx, 1)
+        ys, xs = np.nonzero(inner if inner.sum() >= 20 else band)
         if len(xs) < 20: return None
         d = (xs + x0 - x) ** 2 + (ys + y0 - y) ** 2; i = int(d.argmin())
-        return {"x": int(xs[i] + x0), "y": int(ys[i] + y0), "dist": round(float(d[i]) ** 0.5, 1)}
+        # the band that pixel belongs to (flood fill over the inner pixels), and its middle pixel: the corridor's middle, away from its
+        # ends (where it meets pads and other items)
+        m = band.copy()  # the band's pixels joined over its hatching and text (2 px either way)
+        for dy in (-2, 0, 2):
+            for dx in (-2, 0, 2): m |= np.roll(np.roll(band, dy, 0), dx, 1)
+        seen = {(int(ys[i]), int(xs[i]))}; todo = [(int(ys[i]), int(xs[i]))]
+        while todo and len(seen) < 200000:
+            yy, xx = todo.pop()
+            for ny, nx in ((yy + 1, xx), (yy - 1, xx), (yy, xx + 1), (yy, xx - 1)):
+                if 0 <= ny < m.shape[0] and 0 <= nx < m.shape[1] and m[ny, nx] and (ny, nx) not in seen: seen.add((ny, nx)); todo.append((ny, nx))
+        pts = np.array(sorted(seen)); cy, cx = pts.mean(axis=0)
+        j = int(((pts[:, 0] - cy) ** 2 + (pts[:, 1] - cx) ** 2).argmin())
+        return {"x": int(pts[j, 1] + x0), "y": int(pts[j, 0] + y0), "dist": round(float(d[i]) ** 0.5, 1), "band_px": len(seen)}
     except Exception as e:
         print(f"DIAG corridor_pixel: {e}", flush=True); return None
 def calibrate_markers():
