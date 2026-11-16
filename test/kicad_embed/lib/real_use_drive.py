@@ -795,10 +795,10 @@ def dialog_run(action, title, tag, run_secs=20, press_return=True):
     except Exception: call.kill()
 if "tools" in JOURNEYS and SOCK:
     PAUSE.set()
-    # focus into KiCad with a click, then Escape: on Hubble the click lands on U17's pad over its footprint and opens KiCad's "which
-    # item?" menu, which stayed open and held runDRC and Plot (no dialog in 20 s, then the Schematic tab left the board shown: 2 of 3 runs
-    # on batches 10 and 11 alike)
-    tab("PCB", "tools_board", 1.2); rt("click", CX, CY + PANE["h"] // 3); time.sleep(0.4); rt("key", "Escape"); time.sleep(0.3)
+    # focus into KiCad with a click on an empty canvas corner (the edit journey's): a click at the pane's lower third landed on Hubble's
+    # U17 pad over its footprint and opened KiCad's "which item?" menu, which Escape did not always close; it held runDRC and Plot (no
+    # dialog in 20 s, then the Schematic tab left the board shown: 2 of 3 runs on batches 10 and 11 alike)
+    tab("PCB", "tools_board", 1.2); rt("click", PANE["x"] + 60, PANE["y"] + PANE["h"] - 140); time.sleep(0.4); rt("key", "Escape"); time.sleep(0.5)
     m_ = [w for w in windows() if w.get("shown") and w.get("override_redirect") and 60 < w["w"] < 1200 and 40 < w["h"] < 900]
     if m_: print(f"JANK tools: a KiCad popup is still open after Escape {[[w['w'], w['h']] for w in m_]}", flush=True)
     dialog_run("pcbnew.DRCTool.runDRC", "Design Rules Checker", "drc_gui")
