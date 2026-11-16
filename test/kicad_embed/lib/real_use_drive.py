@@ -255,21 +255,36 @@ KPRO = PCB[:-len(".kicad_pcb")] + ".kicad_pro" if PCB else ""
 MEM["pid"] = int(geo.get("pid") or 0); threading.Thread(target=mem_watch, daemon=True).start()
 # the KiCad actually running (never the one asked for): its executable, its runtime's SOURCE_VERSION/SOURCE_COMMIT, and its API's version
 KICAD_RUN = {"api": ipc("version", SOCK).get("full_version") if SOCK else None}
-try:
-    exe = os.readlink(f"/proc/{MEM['pid']}/exe"); rt_dir = os.path.dirname(os.path.dirname(exe)); KICAD_RUN["exe"] = exe
-    for f in ("SOURCE_VERSION", "SOURCE_COMMIT", "BACKPLANE_COMMIT"):
-        if os.path.exists(os.path.join(rt_dir, f)): KICAD_RUN[f.lower()] = open(os.path.join(rt_dir, f)).read().strip()
-except Exception as e: KICAD_RUN["error"] = str(e)
 asked = os.environ.get("KICAD_BIN", "")
 KICAD_RUN["asked"] = asked
-if asked and KICAD_RUN.get("exe") and os.path.dirname(os.path.dirname(os.path.realpath(asked))) != os.path.dirname(os.path.dirname(KICAD_RUN["exe"])):
-    print(f"FAIL the KiCad running is not the one asked for: {KICAD_RUN}", flush=True); RESULTS["kicad_mismatch"] = {"ms": None, "ok": 0}
+# the runtime proved (lib/kicad_runtime.py): /proc/<pid>/exe is the computer's loader when the hub started KiCad through its hostlibs view
+# (e9371ff87), so its kicad.real is read from its command line, confirmed in its maps, and the view's recorded origin must agree
+rt_dir = ""
+try:
+    KICAD_RUN["exe"] = os.readlink(f"/proc/{MEM['pid']}/exe")
+    pr = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "kicad_runtime.py"), "pid", str(MEM["pid"]), asked], capture_output=True, text=True)
+    proof = json.loads(pr.stdout or "{}"); KICAD_RUN["proof"] = proof; rt_dir = proof.get("root", "")
+    for f in ("SOURCE_VERSION", "SOURCE_COMMIT", "BACKPLANE_COMMIT"):
+        if rt_dir and os.path.exists(os.path.join(rt_dir, f)): KICAD_RUN[f.lower()] = open(os.path.join(rt_dir, f)).read().strip()
+    if asked and pr.returncode != 0:
+        print(f"FAIL the KiCad running is not the one asked for: {KICAD_RUN}", flush=True); RESULTS["kicad_mismatch"] = {"ms": None, "ok": 0}
+except Exception as e:
+    KICAD_RUN["error"] = str(e)
+    if asked: print(f"FAIL the KiCad running could not be told: {KICAD_RUN}", flush=True); RESULTS["kicad_mismatch"] = {"ms": None, "ok": 0}
 # the runtime asked for is known by its BACKPLANE_COMMIT (bp.13 builds all read "10.99.0-unknown-bp.13"): the running one must carry the same
 want_bc = ""
 try: want_bc = open(os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(asked))), "BACKPLANE_COMMIT")).read().strip()
 except Exception: pass
 if want_bc and KICAD_RUN.get("backplane_commit") != want_bc:
     print(f"FAIL the KiCad running is BACKPLANE_COMMIT {KICAD_RUN.get('backplane_commit')}, asked for {want_bc}", flush=True); RESULTS["kicad_mismatch"] = {"ms": None, "ok": 0}
+# and its API says the asked runtime's version (its manifest's)
+want_v = ""
+try: want_v = json.load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(asked))), "manifest.json"))).get("version", "")
+except Exception: pass
+KICAD_RUN["asked_version"] = want_v
+if want_v and KICAD_RUN.get("api") and want_v not in KICAD_RUN["api"] and KICAD_RUN["api"] not in want_v:
+    print(f"FAIL the KiCad running says version {KICAD_RUN['api']}, the runtime asked for is {want_v}", flush=True); RESULTS["kicad_mismatch"] = {"ms": None, "ok": 0}
+if asked and "kicad_mismatch" not in RESULTS: RESULTS["kicad_mismatch"] = {"ms": None, "ok": 1, "root": KICAD_RUN.get("proof", {}).get("root"), "how": KICAD_RUN.get("proof", {}).get("how")}
 print(f"INFO kicad {KICAD_RUN}", flush=True)
 # after Edit and the other editors' pre-warm, before any edit: is any document marked modified (a pre-warm that "repairs" a file)?
 if SOCK:
