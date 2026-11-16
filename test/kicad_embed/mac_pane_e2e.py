@@ -434,6 +434,11 @@ try:
             check(len(holders) <= 1, f'fresh Edit with an agent during the start: at most one process holds the project lock ({holders})')
             sl = open(os.path.join(OUT, 'standin.log'), errors='replace').read() if os.path.isfile(os.path.join(OUT, 'standin.log')) else ''
             check('MCPCALL kicad_ipc_status' in sl, 'fresh Edit with an agent during the start: the agent\'s kicad_ipc_status was answered')
+            pro = os.path.join(OUT, 'proj', 'ecc83-pp.kicad_pro')
+            headless = [l for l in hub_log().splitlines() if l.startswith('kicad ipc: ') and pro in l and ' up' in l]
+            check(not headless, f'fresh Edit with an agent during the start: no headless KiCad opens the project meanwhile ({headless[:1]})')
+            ans = next((l for l in sl.splitlines() if l.startswith('MCPCALL kicad_ipc_status')), '')
+            check('gui (fork)' in ans, f'fresh Edit with an agent during the start: the agent is answered by the editor\'s KiCad, "gui (fork)" ({ans[:220]})')
         raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=restart: Backplane killed mid-edit, restarted: Edit painted, no dialog; KiCad killed: Edit brings a new one;
     # Backplane started with KiCad gone and Edit at once: one KiCad ----
