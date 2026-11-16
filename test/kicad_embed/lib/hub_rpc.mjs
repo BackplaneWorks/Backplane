@@ -26,6 +26,7 @@ ws.onmessage = ({ data }) => {
   if (x.info && typeof x.info === 'object') {
     for (const [k, v] of Object.entries(x.info)) {
       if (
+        (process.env.HUB_RPC_INFO_PREFIXES || '').split(',').some(p => p && k.startsWith(p)) ||
         k.startsWith('editor.kicad.') ||
         k.startsWith('kicad.sel.') ||
         k.startsWith('kicad.reload.') ||
