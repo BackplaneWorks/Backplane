@@ -3,10 +3,20 @@
 //! its project's thread and the viewer tab that draws it, never the system's app for a design file), anything else says so.
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Route { Web(String), Hub(String), File(String), /** a part, pin or net of the thread's design (screens/xprobe.rs) */ Design(String), Note(&'static str) }
+pub enum Route { Web(String), Hub(String), File(String), /** a part, pin or net of the thread's design (screens/xprobe.rs) */ Design(String), Note(&'static str),
+    /** an agent's plan review (`backplane://plan/<board from the project folder>`, the hub's plan/mod.rs `review_link`): that board with its Plan panel */ Plan(String) }
+
+/// `%XX` decoded (a link's path segments, as the hub's md/refs.rs `uri` writes them); a bad escape is kept as it is.
+fn unpct(s: &str) -> String {
+    let b = s.as_bytes(); let mut out = Vec::with_capacity(b.len()); let mut i = 0;
+    let hex = |c: u8| (c as char).to_digit(16).map(|d| d as u8);
+    while i < b.len() { if b[i] == b'%' && i + 3 <= b.len() { if let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) { out.push(h * 16 + l); i += 3; continue } } out.push(b[i]); i += 1 }
+    String::from_utf8_lossy(&out).into_owned()
+}
 
 pub fn route(href: &str, file: bool) -> Route {
     let h = href.trim();
+    if let Some(rel) = h.strip_prefix("backplane://plan/").map(|r| r.split(['#', '?']).next().unwrap_or("")).filter(|r| !r.is_empty()) { return Route::Plan(rel.split('/').map(unpct).collect::<Vec<_>>().join("/")) }
     if let Some(w) = h.strip_prefix(super::xprobe::HREF).filter(|w| !w.is_empty()) { return Route::Design(w.to_string()) }
     if h.starts_with("backplane://") || crate::pairing::is_open_link(h) { return Route::Hub(h.to_string()) }
     if h.starts_with("https://") || h.starts_with("http://") || h.starts_with("mailto:") { return Route::Web(h.to_string()) }
@@ -44,6 +54,11 @@ pub fn target(href: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_plan_review_link_opens_its_board_with_the_plan() {
+        assert_eq!(super::route("backplane://plan/Nodes/A%20b/A.kicad_pcb", false), super::Route::Plan("Nodes/A b/A.kicad_pcb".into()));
+        assert_eq!(super::route("backplane://plan/a.kicad_pcb#x", false), super::Route::Plan("a.kicad_pcb".into()));
+        assert_eq!(super::route("backplane://plan/", false), super::Route::Hub("backplane://plan/".into()), "no board: the hub's");
+    }
     use super::*;
     use core::prelude::v1::test;
     #[test] fn each_kind_of_link_has_its_route() {
