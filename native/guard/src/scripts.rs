@@ -146,7 +146,8 @@ fn walk_rs(d: &Path, out: &mut Vec<PathBuf>) {
     let r = root(); let mut files = vec![];
     for d in ["native/host/src", "native/guard/src", "native/gpui/src"] { walk_rs(&r.join(d), &mut files) }
     assert!(files.len() > 200, "walk found {} .rs files", files.len());
-    let allowed_prod_join = ["native/host/src/agents/locks.rs", "native/host/src/kicad/embed.rs", "native/host/src/mcpx/health.rs"];
+    // production code that makes its own temp folder, each with a drop guard (proc.rs: a KiCad probe's throwaway KICAD_CONFIG_HOME)
+    let allowed_prod_join = ["native/host/src/agents/locks.rs", "native/host/src/kicad/embed.rs", "native/host/src/mcpx/health.rs", "native/host/src/proc.rs"];
     let mut bad = vec![];
     for f in files {
         let rel = f.strip_prefix(&r).unwrap().to_string_lossy().replace('\\', "/");

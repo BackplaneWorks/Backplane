@@ -717,7 +717,7 @@ async fn remote_ready(hub: &Arc<Hub>) -> Option<Remote> {
     let key = (host.clone(), cli_set.clone(), rt.cli.clone());
     if let Some((k, v)) = PROBED.lock().unwrap().clone() { if k == key { return v } }
     let name = Path::new(&rt.cli).parent().and_then(Path::parent).and_then(|d| d.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let here = crate::proc::tokio_cmd(crate::proc::Kind::Local, &rt.cli).arg("--version").output().await.ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+    let here = { let (mut c, _home) = crate::proc::kicad_probe_tokio(&rt.cli); c.arg("--version").output().await.ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default() };
     let cands = if cli_set.is_empty() { format!("$HOME/.cache/bp-kembed-remote/kicad/{name}/bin/kicad-cli $HOME/.backplane-gpui-fresh/home/kicad/{name}/bin/kicad-cli") } else { cli_set.clone() };
     let script = format!("for c in {cands}; do if [ -x \"$c\" ]; then printf '%s\\t' \"$c\"; \"$c\" --version; exit 0; fi; done; exit 1");
     let out = ssh(&host, &script, 20).await;

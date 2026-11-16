@@ -297,12 +297,17 @@ fn newest_in(dirs: &[PathBuf]) -> Vec<PathBuf> {
     v.sort_by(|a, b| match (ks::version_ge(&a.0, &b.0), ks::version_ge(&b.0, &a.0)) { (true, true) => std::cmp::Ordering::Equal, (true, false) => std::cmp::Ordering::Less, _ => std::cmp::Ordering::Greater });
     v.into_iter().flat_map(|(n, d)| [d.join(&n).join("bin").join("kicad-cli"), d.join(n).join("bin").join("kicad-cli.exe")]).collect()
 }
+/// `<cli> --version`, its settings in a throwaway folder (proc::kicad_probe): the probe never writes the person's KiCad settings.
+pub fn cli_version_output(cli: &str) -> Option<std::process::Output> {
+    let (mut c, _home) = crate::proc::kicad_probe(cli);
+    c.arg("--version").stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().ok()
+}
 /// Publish what this machine has for Settings > CAD: info `kicad.cli`, `kicad.version`, `kicad.status`, `kicad.source` and `freecad` (empty when absent).
 pub async fn publish_cad(hub: &Arc<Hub>) {
     let env = runtime(hub).await;
     let cli = env.cli.clone();
     let probe = if cli.is_empty() { None } else {
-        tokio::task::spawn_blocking(move || crate::proc::std_cmd(crate::proc::Kind::Local, &cli).arg("--version").stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().ok()).await.ok().flatten()
+        tokio::task::spawn_blocking(move || cli_version_output(&cli)).await.ok().flatten()
     };
     let ran = probe.as_ref().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
     let (status, version) = cad_status(&env, ran.as_deref());
@@ -637,6 +642,34 @@ fn shown_version(manifest: &str, full: &str) -> String { if manifest.is_empty() 
 
 #[cfg(test)]
 mod tests {
+    /// A stand-in kicad-cli that, like KiCad, writes its settings: to $KICAD_CONFIG_HOME when set, else to `person` (the person's
+    /// kicad_common.json); it logs the folder it was given and answers --version and api-server --describe.
+    #[cfg(unix)] fn writing_cli(dir: &std::path::Path, person: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let (cli, log) = (dir.join("kicad-cli"), dir.join("probe.log"));
+        std::fs::write(&cli, format!("#!/bin/sh\necho \"$KICAD_CONFIG_HOME\" >> '{log}'\nif [ -n \"$KICAD_CONFIG_HOME\" ]; then mkdir -p \"$KICAD_CONFIG_HOME/10.0\"; echo rewritten > \"$KICAD_CONFIG_HOME/10.0/kicad_common.json\"; else echo rewritten > '{person}'; fi\nif [ \"$1\" = api-server ]; then echo '{{\"version\":\"10.99.0-bp.13\"}}'; else echo 10.0.8; fi\n", log = log.display(), person = person.display())).unwrap();
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (cli, log)
+    }
+
+    /// Every probe of a KiCad (start-up and Settings > CAD, an agent's KiCad selection, a check run's match) runs with its settings in a
+    /// throwaway folder: the person's kicad_common.json is byte-identical after it, and the folder is gone.
+    #[cfg(unix)] #[test] fn a_probe_never_writes_the_persons_kicad_settings() {
+        let t = crate::plat::tmp::dir("kprobe");
+        let person = t.path().join("kicad_common.json"); std::fs::write(&person, "{\"mine\": 1}").unwrap();
+        let (cli, log) = writing_cli(t.path(), &person);
+        let out = cli_version_output(&cli.to_string_lossy()).expect("ran");
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "10.0.8", "the probe still says the version");
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let v = rt.block_on(async { let (mut c, _h) = crate::proc::kicad_probe_tokio(&cli); c.arg("--version").output().await.unwrap() });
+        assert_eq!(String::from_utf8_lossy(&v.stdout).trim(), "10.0.8");
+        assert_eq!(std::fs::read_to_string(&person).unwrap(), "{\"mine\": 1}", "the person's settings are untouched");
+        let given: Vec<String> = std::fs::read_to_string(&log).unwrap().lines().map(String::from).collect();
+        assert_eq!(given.len(), 2, "{given:?}");
+        for d in &given { assert!(!d.is_empty() && d.contains("bp-kicad-probe-"), "a throwaway folder: {d:?}"); assert!(!std::path::Path::new(d).exists(), "removed after: {d}"); }
+        assert_ne!(given[0], given[1], "one folder per probe");
+    }
+
     #[test] fn the_backplane_library_is_said_by_its_bundle_label_and_short_commit() {
         let m = serde_json::json!({"version": "10.99.0-bp.13", "backplaneLibrary": {"repository": "https://github.com/BackplaneWorks/Backplane_KiCad_Library.git", "version": "2026.11.13", "commit": "314532f925fef0becc5a6eaf6be3b000f41cb0d0", "sha256": "x"}});
         assert_eq!(library_label(&m), "2026.11.13 (314532f)");
