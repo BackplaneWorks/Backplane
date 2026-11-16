@@ -153,7 +153,9 @@ struct DataViewerView: View {
         .dataBar(thread.title.isEmpty ? Tr.t("New thread") : thread.title)
         .task(id: client.conn == .online) {
             guard files == nil else { return }
-            files = await client.viewerFiles(thread.id); if !(files?.pcb ?? "").isEmpty && tab == "Files" && openFile.isEmpty { tab = "Board" }
+            // a slow or dropped answer is asked again (three tries): without it the picker and the pages' files never came until the viewer was reopened
+            for i in 0..<3 { files = await client.viewerFiles(thread.id); if files != nil { break }; try? await Task.sleep(nanoseconds: UInt64(1_500_000_000 * (i + 1))) }
+            if !(files?.pcb ?? "").isEmpty && tab == "Files" && openFile.isEmpty { tab = "Board" }
             #if DEBUG || BP_MEASURE
             // a check without hands: BACKPLANE_VTAB opens that tab (BACKPLANE_SELECT=viewer:<thread> opens the viewer)
             if let t = ProcessInfo.processInfo.environment["BACKPLANE_VTAB"], tabs.contains(t) { tab = t }
