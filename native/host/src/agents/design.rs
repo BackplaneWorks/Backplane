@@ -112,7 +112,7 @@ impl Agents {
     /// The MCP tool `kicad_edit` (kicad/kedit.rs): a whole edit in one call, each of its commands through [`Self::kicad_call`].
     pub async fn tool_kicad_edit(self: &Arc<Self>, thread: &str, a: &Value) -> (bool, Value) {
         use crate::files::kicad::kedit;
-        struct Via<'a> { ag: &'a Arc<Agents>, thread: &'a str, path: &'a str, person: std::sync::Mutex<Value> }
+        struct Via<'a> { ag: &'a Arc<Agents>, thread: &'a str, path: &'a str, person: std::sync::Mutex<Value>, caps: Vec<String> }
         impl kedit::Call for Via<'_> {
             fn call<'b>(&'b self, ty: &'b str, msg: Value) -> kedit::Fut<'b> { Box::pin(async move {
                 // the person's KiCad has the project: a document it has not opened is theirs to open (no window is opened or raised for an agent)
@@ -125,6 +125,7 @@ impl Agents {
                 for k in ["not_saved", "format_upgrade", "kicad_load_changes"] { if v[k].is_string() { if !m.is_object() { m = json!({}) } m[k] = v[k].clone() } }
                 Ok(m)
             }) }
+            fn caps(&self) -> Vec<String> { self.caps.clone() }
             fn sheet_texts(&self) -> Option<Vec<String>> {
                 if !self.path.ends_with(".kicad_sch") { return None }
                 fn walk(d: &std::path::Path, depth: u32, out: &mut Vec<String>) {
@@ -147,7 +148,7 @@ impl Agents {
         if kedit::writes(&a["ops"]) && a["person_seen"].as_bool() != Some(true) {
             if let Some(p) = crate::files::kicad::coedit::person_now(&crate::files::kicad::ipc::pro_of(path)) { return (false, json!({"error": kedit::person_first(&p), "person": p})) }
         }
-        let via = Via { ag: self, thread, path, person: std::sync::Mutex::new(Value::Null) };
+        let via = Via { ag: self, thread, path, person: std::sync::Mutex::new(Value::Null), caps: crate::files::kicad::ipc::runtime(&self.hub).await.caps };
         match kedit::run(&via, path, a).await {
             Ok(mut v) => {
                 let p = via.person.lock().unwrap().clone(); if !p.is_null() { v["person"] = p }

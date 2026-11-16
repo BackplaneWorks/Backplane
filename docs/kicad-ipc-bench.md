@@ -215,6 +215,34 @@ length. What differs is the price: without a router the model builds one. What t
 
 ![Hubble before and after](kicad-ipc-bench/hubble-route.png)
 
+The fork's router again, with its fixes (`SketchRoute` on the staged runtime 10.99.0-bp.13-apifix-dd9396cfd1, by hand,
+2026-11-16, `route_leds` after the net class is set): it now routes at the class's 0.2 mm and names each failure
+("no path keeps every clearance, after rip-up and retry"), in 0.09 s; it routed 5 of the 7 nets (`/LED2` and `/LED6`
+failed), at 1.323 x the shortest tree with 2 vias and the top layer, and left a solder mask bridge. The hub's router
+on the same board: 7 of 7, 1.065 x, no via, DRC clean, 4.5 s for the whole call with its two DRC runs. So `route`
+stays on the hub's router, and `sketch-route-width` switches nothing.
+
+### The fork's API fixes and the hub's way by capability (batch 10)
+
+Run by the fork's integrator (2026-11-16): `tasks2.json`, `claude-opus-5-5`, 2 runs a task, 30 runs, every one
+passing. c1: the batch 9 runtime (6a227fdd28) with main at 0c2569811; c2: the runtime with the fixes (d05f93cea6:
+`api-field-fixes`, `sketch-route-width`) with the same main; c3: that runtime with the hub's way by capability
+(kipc-caps 337d085b2: a new symbol as its library id and texts, Footprint a field by name, a footprint's value as
+that one field). One checker `kicad-cli` (d05f93cea6) for all three.
+
+| | passes | context tokens | tool calls | wall s | cost $ |
+|---|---|---|---|---|---|
+| c1 old runtime, main | 10/10 | 1.07M | 19 | 178 | 1.93 |
+| c2 new runtime, main | 10/10 | 1.22M | 22.5 | 191 | 1.90 |
+| c3 new runtime, by capability | 10/10 | 1.24M | 23 | 181 | 1.87 |
+
+No change outside the model's own variance at two runs (the spread is whether the agent checks its work afterwards:
+`sch_ldo` ran from 2 to 11 calls inside one column), and a `kicad_edit` call takes as long on both ways (KiCad's
+placement of a new symbol is read on both, for its pins). c3 did take the new way: its regulator's Footprint text sits
+where the library puts it. What the fixes buy is a simpler hub path on new runtimes and right results for raw
+`kicad_ipc`; the workarounds had already made `kicad_edit` right. SketchRoute still loses `route_leds` (5 of 7 nets,
+1.32 x, 2 vias) to the hub's router (7 of 7, 1.065 x).
+
 ## What was tried
 
 | variant | what | passes | context tokens | tool calls | cost $ |
