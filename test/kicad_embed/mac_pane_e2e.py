@@ -55,7 +55,7 @@ def key(code, flags=0):
 
 
 CMD = Quartz.kCGEventFlagMaskCommand
-K_A, K_K, K_ESC, K_B, K_J, K_C, K_TAB, K_DEL = 0, 40, 53, 11, 38, 8, 48, 51
+K_A, K_K, K_ESC, K_B, K_J, K_C, K_TAB, K_DEL, K_F = 0, 40, 53, 11, 38, 8, 48, 51, 3
 CTRL, SHIFT, ALT = Quartz.kCGEventFlagMaskControl, Quartz.kCGEventFlagMaskShift, Quartz.kCGEventFlagMaskAlternate
 
 # ---- the project, the hub's home, KiCad's settings where KiCad on macOS reads them ----
@@ -164,7 +164,31 @@ try:
     key(K_K, CMD)
     got = wait_for(lambda: client_log().count('"kicad_key"') > k0, 5)
     check(bool(got), 'Cmd+K pressed in KiCad reaches Backplane (the client takes the reserved chord)')
-    time.sleep(1); shot('02-cmd-k'); key(K_ESC); time.sleep(0.5)
+    time.sleep(1); shot('02-cmd-k')
+    front = lambda: NSWorkspace.sharedWorkspace().frontmostApplication().processIdentifier()
+    check(bool(wait_for(lambda: front() == client.pid, 3)), 'with the palette open, Backplane has the keyboard')
+    # the palette closed: the keyboard goes back to KiCad, and a canvas key acts again
+    key(K_ESC)
+    check(bool(wait_for(lambda: front() == kpid, 4)), 'the palette closed: the keyboard is back in KiCad')
+    n0 = hub_log().count('ET_SELECTION_CHANGED'); key(K_A, CMD)
+    check(bool(wait_for(lambda: hub_log().count('ET_SELECTION_CHANGED') > n0, 4)), 'and KiCad\'s canvas takes keys again (Cmd+A)')
+    key(K_ESC); time.sleep(0.5)
+    # a KiCad dialog (Find, Cmd+F from the canvas) gets the keyboard, and Escape closes it
+    d0, c0 = hub_log().count('ET_DIALOG_OPENED'), hub_log().count('ET_DIALOG_CLOSED')
+    key(K_F, CMD)
+    opened = wait_for(lambda: hub_log().count('ET_DIALOG_OPENED') > d0, 5)
+    check(bool(opened) and front() == kpid, 'a KiCad dialog (Find) opens with the keyboard in it')
+    time.sleep(0.5); shot('02c-dialog'); key(K_ESC)
+    check(bool(wait_for(lambda: hub_log().count('ET_DIALOG_CLOSED') > c0, 4)), 'Escape closes the dialog')
+    # a click in Backplane's own chrome (the rail, outside the pane) gives the keyboard back to Backplane
+    rail = rects().get('rail:Files') or rects().get('rail:Board')
+    cw = next((w for w in wins() if w[0] == cw[0]), cw)
+    if rail: click(cw[3][0] + rail['x'] + rail['w'] / 2, cw[3][1] + 28 + rail['y'] + rail['h'] / 2)
+    check(bool(rail) and bool(wait_for(lambda: front() == client.pid, 4)), 'a click in Backplane\'s chrome gives it the keyboard back')
+    # and the pane again: one click on KiCad's canvas gives KiCad the keyboard
+    p = last_push()
+    if p: click(p[0][0] + p[0][2] * 0.1, p[0][1] + p[0][3] * 0.9)
+    check(bool(wait_for(lambda: front() == kpid, 4)), 'a click on the board gives KiCad the keyboard again')
     # ---- our window moved: the frame follows ----
     before = kicad_frame()
     subprocess.run(['osascript', '-e', f'tell application "System Events" to set position of (first window of (first process whose unix id is {client.pid})) to {{{cw[3][0] + 60}, {cw[3][1] + 40}}}'], capture_output=True)
