@@ -443,7 +443,9 @@ try:
             try: os.kill(pid, 9)
             except OSError: pass
         wait_for(lambda: not kicad_frame(), 10, 0.2); time.sleep(3)
-        e = rects().get('ui:Edit') or rects().get('kicad:try-again'); cw2 = next((w for w in wins() if w[0] == cw[0]), cw)
+        wait_for(lambda: rects().get('kicad:retry'), 10, 0.5)
+        e = rects().get('kicad:retry') or rects().get('ui:Edit'); cw2 = next((w for w in wins() if w[0] == cw[0]), cw)
+        RES['r2_pressed'] = e and e['id']; shot('r2-offered')
         if e: click(cw2[3][0] + e['x'] + e['w'] / 2, cw2[3][1] + 28 + e['y'] + e['h'] / 2)
         f2 = wait_for(lambda: (k := kicad_frame()) and k[1] not in old and k, 90, 0.5); shot('r2-after-kill')
         check(bool(f2), f'restart 2: KiCad killed: Edit brings a new KiCad over the pane ({e and e["id"]})')
@@ -454,6 +456,7 @@ try:
             except OSError: pass
         time.sleep(3)
         client = start_client('r3')
+        cw = wait_for(lambda: max((w for w in wins() if w[1] == client.pid), key=lambda w: w[3][2] * w[3][3], default=None), 60)
         f3 = wait_for(kicad_frame, 90, 0.5); time.sleep(8)
         n = kicads(); RES['r3_kicads'] = n; shot('r3-warm-edit')
         check(bool(f3) and len(n) == 1, f'restart 3: Backplane started with Edit at once: KiCad over the pane, one KiCad process ({n})')
@@ -741,8 +744,9 @@ try:
         key(K_FDEL); RES[f'delete_{tag}'] = 'forward delete' if wait_for(lambda: hub_log().count('ET_MODIFIED_CHANGED') + hub_log().count('ET_DOCUMENT_EDITED') > m0, 2.5) else 'neither'
         print(f'INFO delete ({tag}): Backspace did not delete the selection in KiCad; {RES[f"delete_{tag}"]} did', flush=True)
     def unsaved_edit():
-        p = last_push(); click(p[0][0] + p[0][2] * 0.1, p[0][1] + p[0][3] * 0.9); time.sleep(0.6)
-        key(K_A, CMD); time.sleep(0.5); delete_selection('cmd-w'); time.sleep(0.6)
+        # one item: a click on the board's middle selects what is there (U1's footprint); the Save case then writes the board without it
+        p = last_push(); click(p[0][0] + p[0][2] * 0.5, p[0][1] + p[0][3] * 0.5); time.sleep(0.8)
+        delete_selection('cmd-w'); time.sleep(0.6)
     # nothing unsaved: Cmd+W closes the editor, the pane goes back to View, Edit opens a fresh one
     p = last_push(); click(p[0][0] + p[0][2] * 0.1, p[0][1] + p[0][3] * 0.9); time.sleep(0.6)
     fr = kicad_frame(); key(K_W, CMD)
@@ -757,8 +761,6 @@ try:
     key(K_W, CMD); time.sleep(1.5); key(K_RETURN)
     saved = wait_for(lambda: open(board, 'rb').read() != before, 8)
     check(bool(saved) and bool(wait_for(lambda: not kicad_frame(), 6)) and bool(wait_for(lambda: rects().get('ui:Edit'), 6)), 'Cmd+W with an unsaved edit, then Save: written, the editor closes, the pane is back to View')
-    # the board back as it was (the Save above wrote it with everything deleted: the quit case below needs parts to delete)
-    subprocess.run(['git', '-C', os.path.join(OUT, 'proj'), 'checkout', '--', '.'], capture_output=True)
     check(bool(edit_again()), 'and Edit opens it again')
     # ---- quitting Backplane with unsaved changes: KiCad keeps them, nothing is written, Edit brings them back ----
     board = os.path.join(OUT, 'proj', 'ecc83-pp.kicad_pcb'); before_bytes = open(board, 'rb').read()
