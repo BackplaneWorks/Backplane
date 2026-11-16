@@ -1,0 +1,5 @@
+Noto Sans CJK JP 2.004 (Regular, Bold), subset
+Source: https://github.com/notofonts/noto-cjk/raw/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/OTF/Japanese/NotoSansCJKjp-{Regular,Bold}.otf, licence https://github.com/notofonts/noto-cjk/raw/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/LICENSE
+Licence: SIL Open Font License 1.1 (OFL.txt), (c) 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'
+Subset by scripts/fetch-cjk-font.sh: JIS X 0208 (level 1 and 2), half-width kana, CJK symbols and kana blocks, ASCII, every character of i18n/ja.msg; layout features kept, hinting dropped. Family name unchanged (Noto Sans CJK JP), so the fallback finds it by name.
+Fetched: 2026-11-16
