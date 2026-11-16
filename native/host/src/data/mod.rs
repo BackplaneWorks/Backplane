@@ -20,7 +20,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -177,9 +177,13 @@ fn ask_options(kind: &str, tool: &str, options: &str) -> Value {
 }
 fn ask_entry(e: &Value, answered: Option<&str>) -> Value {
     let (kind, tool, detail) = (s(e, "kind"), s(e, "tool"), s(e, "detail"));
-    let q = if kind == "approval" && tool == "order_quote" { format!("Send these files for a quote?\n{detail}") }
+    // the list of what would be ordered (settings/order.rs PICK_TOOL): on the phones the items in the question and a typed answer ("all", or what to
+    // leave out or add); the hub writes the answer as the order list the desktop's ticks make
+    let pick = tool == crate::settings::order::PICK_TOOL;
+    let q = if pick { format!("{detail}\n{}\n{}", s(e, "options").lines().filter(|l| !l.trim().is_empty()).map(|l| format!("\u{2022} {}", l.trim())).collect::<Vec<_>>().join("\n"), crate::settings::order::PICK_PHONE_HINT) }
+        else if kind == "approval" && tool == "order_quote" { format!("Send these files for a quote?\n{detail}") }
         else if kind == "approval" { if detail.is_empty() { tool.to_string() } else { format!("{tool}: {detail}") } } else { detail.to_string() };
-    let mut ask = json!({"id":s(e,"id"),"state":if answered.is_some() {"answered"} else {"open"},"question":q,"options":ask_options(kind, tool, s(e, "options"))});
+    let mut ask = json!({"id":s(e,"id"),"state":if answered.is_some() {"answered"} else {"open"},"question":q,"options":if pick { json!([]) } else { ask_options(kind, tool, s(e, "options")) }});
     if let Some(a) = answered { ask["answered"] = json!(a) }
     json!({"id":format!("ask:{}",s(e,"id")),"kind":"ask","text":q,"at":ms(e["at"].as_u64().unwrap_or(0)),"ask":ask})
 }

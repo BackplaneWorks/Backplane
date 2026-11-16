@@ -34,7 +34,7 @@ pub fn lean_keeps(k: &str) -> bool {
     // a home move (net/homemove.rs): the uberbot's row says where it is going, and a moved chat is drawn from its new home
     if ["home.moving", "home.at"].contains(&k) { return true }
     if ["ui.theme", "sidebar.view", "sidebar.groups", "mail.on", "uber.bot", "order.enabled", "order.estimates", "import.v014.ack"].contains(&k)
-        || ["thread.tree.", "project.icon.", "project.color.", "project.pick.", "project.link.", "buy.", "order.quote.", "mail.private.owner.", "account.thread."].iter().any(|p| k.starts_with(p)) { return true }
+        || ["thread.tree.", "project.icon.", "project.color.", "project.pick.", "project.link.", "buy.", "order.quote.", "order.pick.", "mail.private.owner.", "account.thread."].iter().any(|p| k.starts_with(p)) { return true }
     // the Context panel's readings (present/tokstats.rs): one short string a thread, and the epoch that names the thread totals' key
     if ["tok.epoch", "tok.recount"].contains(&k) || ["turn.last.", "turn.speed.", "turn.models.", "turn.live."].iter().any(|p| k.starts_with(p)) || (k.starts_with("tok.") && [".t.", ".td.", ".tr.", ".bl."].iter().any(|p| k.starts_with(&format!("tok{p}")) || k.contains(p))) { return true }
     // the Settings pages' values (present/settings.rs): short strings, one per control

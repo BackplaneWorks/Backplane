@@ -63,8 +63,11 @@ pub fn data(ps: &[bom::Part], source: &str, at: u64, boards: u64, quote: &dyn Fn
     let more = ls.len().saturating_sub(MAX_LINES); ls.truncate(MAX_LINES);
     let n = miss + out;
     json!({"badge": {"n": n, "tone": if out > 0 { "bad" } else if n > 0 { "warn" } else { "" }}, "source": source, "at": at, "parts": ps.len(), "lines": ls,
-        "missing_mpn": miss, "out": out, "checking": checking, "dnp": dnp, "more": more, "boards": boards.max(1), "lookups": looked, "priced": priced, "paused": checking > 0 && parts::paused(), "cost": (cost * 10000.0).round() / 10000.0})
+        "missing_mpn": miss, "out": out, "checking": checking, "dnp": dnp, "more": more, "boards": boards.max(1), "lookups": looked, "priced": priced, "paused": checking > 0 && parts::paused(), "cost": (cost * 10000.0).round() / 10000.0, "stock_note": STOCK_NOTE})
 }
+/// Where the stock and prices come from, said under the panel's top row on every client (parts.rs: one parts catalogue, by MCP); other distributors are the
+/// agent's, by their API keys. Names no fab.
+pub const STOCK_NOTE: &str = "Stock and prices come from one distributor's catalogue. To check others, add their API keys in Settings › API keys and ask your agent.";
 /// A line's `lifecycle` {status: active|nrnd|eol|unknown, words (the distributor's own), source, checked} from its part's history, and
 /// `library` {class: basic|preferred|extended, checked} from its stock answer; neither when the part was never checked.
 pub fn annotate(l: &mut Value, hist: &HashMap<String, Vec<Value>>) {
@@ -275,6 +278,7 @@ mod tests {
         assert_eq!(by("C1")["stock"]["status"], "out", "3 in stock, 10 needed"); assert_eq!(by("C1")["key"], "fab:C5");
         assert!(by("U1")["stock"].is_null(), "nothing to look up"); assert!(by("R9")["stock"].is_null(), "DNP is not ordered");
         assert_eq!((d["out"].as_u64(), d["missing_mpn"].as_u64(), d["badge"]["n"].as_u64(), d["badge"]["tone"].as_str()), (Some(1), Some(2), Some(3), Some("bad")));
+        assert_eq!(d["stock_note"], STOCK_NOTE, "every client says where stock comes from");
         assert_eq!((d["boards"].as_u64(), d["lookups"].as_u64(), d["priced"].as_u64(), d["cost"].as_f64()), (Some(10), Some(2), Some(2), Some(0.22)));
         let checking = data(&ps, "file", 0, 1, &|_| None); assert_eq!(checking["checking"].as_u64(), Some(2));
     }
