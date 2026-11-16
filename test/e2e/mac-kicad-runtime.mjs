@@ -68,7 +68,7 @@ check('the stand-in agent finished',existsSync(out),readFileSync(`${work}/hub.lo
 const r=existsSync(out)?JSON.parse(readFileSync(out,'utf8')):{};
 const full=r.version?.body?.message?.version?.full_version||'';console.log('GetVersion through the hub:',full);
 check('status: the headless server is ready',/ready/.test(JSON.stringify(r.status?.body?.servers??r.status?.body)),r.status);
-check(`GetVersion is ${expect||'a Backplane KiCad'}`,expect?full.includes(expect):/bp\./.test(full),r.version);
+check(`GetVersion is ${expect||'a Backplane KiCad'}`,expect?full.endsWith(expect.slice(expect.lastIndexOf('-'))):/bp\./.test(full),r.version); // '10.99.0-unknown-bp.6' on older runtimes
 check('OpenDocument',!r.open?.error&&!!r.open?.body?.message?.document,r.open);
 check('a commit (BeginCommit, CreateItems, EndCommit)',!r.begin?.error&&!r.create?.error&&!r.end?.error,[r.begin,r.create,r.end]);
 check('the save writes the board',!r.save?.error,r.save);
@@ -78,7 +78,8 @@ const events=readFileSync(`${h.home}/events.jsonl`,'utf8').split('\n').filter(l=
 check('the person is told in the thread',events.some(l=>/own window/.test(l)&&/"warn"/.test(l)),events.slice(-2));
 const tracks=readFileSync(pcb,'utf8').match(/\(segment/g)?.length||0;check('the saved board has the agent\'s track on disk',tracks>0,tracks);
 if(kicadWin){try{process.kill(kicadWin[0],'SIGTERM')}catch{}}
-stopHub(h);await sleep(1500);
-const left=(()=>{try{return execFileSync('pgrep',['-f',`${rt}/`],{encoding:'utf8'}).trim()}catch{return ''}})();
+stopHub(h);
+const running=()=>{try{return execFileSync('pgrep',['-f',`${rt}/`],{encoding:'utf8'}).trim()}catch{return ''}};
+let left=running();for(let i=0;i<40&&left;i++){await sleep(250);left=running()} // --parent-pid is polled: give it 10 s
 check('nothing of this runtime is left running (the headless server ended with the hub)',!left,left);
 console.log(bad?`${bad} FAILED`:'all passed');process.exit(bad?1:0);
