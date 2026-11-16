@@ -9,12 +9,20 @@ Set BP_OPENING_FOCUS_ONLY=ctrl_k to run only the Ctrl+K-from-KiCad check, straig
 Edit (keys proven KiCad's by plain F2), with no click first.
 Set BP_OPENING_FOCUS_ONLY=mouse_return for the route with no hotkey hand-back: a real
 click in Backplane's composer, then a real click on the editor tab or the canvas, x3 each.
+Set BP_OPENING_FOCUS_ONLY=close for KiCad's own Close (Ctrl+W) in the editor the pane shows
+(embed_close_e2e.sh): the pane goes back to View, Edit gives a fresh frame, the save prompt's
+Cancel and Save. BP_OPENING_FOCUS_ONLY=savegate for the hub's save gate (embed_load_migration_e2e.sh):
+a Board Setup press on a board KiCad migrated on load is not saved, a BOM edit is (no Edit pressed;
+KEMBED_PROJ_SRC=<a project folder> seeds another project, as on Linux).
 Set BP_OPENING_FOCUS_HOST_FG=1 to make Backplane's window foreground from the
 harness before that click when the handback left KiCad foreground, so clients
 are compared from the same Backplane-foreground state.
 """
+import glob
+import hashlib
 import json
 import os
+import re
 import sys
 import time
 
@@ -547,6 +555,105 @@ def run(h):
             provenance[name] = {"path": path, "sha256": E.sha256_file(path)}
         with open(h.p("binaries.json"), "w", encoding="utf-8") as f:
             json.dump(provenance, f, indent=2)
+        if only == "savegate":
+            # embed_load_migration_e2e.sh (savegate.rs): what KiCad rewrites on its own is never saved by the hub. With the project's
+            # KiCad warmed by the shown thread (no Edit: the person never took it):
+            #   (2) the Board Setup press on a board KiCad migrated on load (3D .wrl -> .step, teardrops rebuilt: runtimes without
+            #       no-load-migration) is set in KiCad and not saved, saying what KiCad changed, the board byte-identical;
+            #   (3) a BOM edit, a real change, is saved and says when KiCad upgraded the file format in the same save.
+            # The seed is the harness's own (seed_project.py: ecc83-pp, 11 .wrl references, a 20241229 board and 20250114
+            # schematic); KEMBED_PROJ_SRC works here as on Linux (seed_project.py reads it on any OS), e.g. a copy of the fork's
+            # demos/complex_hierarchy for teardrops. Not ported: the Linux script's ask/asksave helpers (the stand-in agent's
+            # kicad_ipc saves) are defined there but never called; that case is the hub's unit test an_agents_save_writes_only_real_changes.
+            pros = []
+            for root, dirs, files in os.walk(h.p("proj")):
+                rel = os.path.relpath(root, h.p("proj"))
+                depth = 0 if rel == "." else rel.count(os.sep) + 1
+                dirs[:] = [d for d in dirs if d not in (".backplane", ".git")] if depth < 2 else []
+                pros += [os.path.join(root, f) for f in files if f.endswith(".kicad_pro") and "mic_flex" not in f]
+            pro = sorted(pros)[0] if pros else ""
+            if not pro:
+                h.check("savegate: the seeded project has a .kicad_pro", False, {"proj": h.p("proj")})
+                return h.finish()
+            pcb, kdir = pro[: -len(".kicad_pro")] + ".kicad_pcb", os.path.dirname(pro)
+            # a Board Setup suggestion to press: the clearance minimum under the fab's (committed, so the board is the same as git's)
+            with open(pro, encoding="utf-8") as f:
+                pj = json.load(f)
+            pj.setdefault("board", {}).setdefault("design_settings", {}).setdefault("rules", {})["min_clearance"] = 0.0
+            with open(pro, "w", encoding="utf-8", newline="\n") as f:
+                json.dump(pj, f, indent=2)
+            import subprocess
+            subprocess.run(["git", "-C", h.p("proj"), "commit", "-qam", "clearance under the fab's"], capture_output=True)
+
+            def sha(path, n=16):
+                with open(path, "rb") as f:
+                    return hashlib.sha256(f.read()).hexdigest()[:n]
+
+            def counts(path):
+                t = open(path, encoding="utf-8", errors="ignore").read()
+                return t.count(".wrl"), t.count(".step") + t.count(".STEP"), t.count("(teardrop")
+
+            def schs():
+                return " ".join(sha(p, 12) for p in sorted(glob.glob(os.path.join(kdir, "*.kicad_sch"))))
+
+            def rpc_line(out, method):
+                return next((l for l in out.splitlines() if l.startswith('{"m":"%s"' % method)), "")
+
+            w0, s0, t0 = counts(pcb)
+            h0, sh0 = sha(pcb), schs()
+            print("INFO board before: " + json.dumps({"wrl": w0, "step": s0, "teardrops": t0, "sha": h0, "pro": pro}), flush=True)
+            h.start_hub(embed_mode="fork")
+            cp = h.start_client([{"select": 0}, {"wait": 2000}, {"click": "rail:Board"}, {"wait": 2500}, {"mark": "shown"},
+                                 {"wait": 90000}, {"mark": "done"}], hold=True, exit_after=300)
+            # the project's KiCad warmed by the shown thread, its board loaded (the hub logs the same line on Windows)
+            warm_ms, t_warm = None, time.monotonic()
+            while time.monotonic() - t_warm < 120 and cp.poll() is None:
+                try:
+                    if re.search(r"kicad embed: start \+\d+ms ready", open(h.p("hub.log"), encoding="utf-8", errors="replace").read()):
+                        warm_ms = round((time.monotonic() - t_warm) * 1000)
+                        break
+                except OSError:
+                    pass
+                time.sleep(0.1)
+            time.sleep(4)
+            running = re.findall(r"kicad embed: running \S*", open(h.p("hub.log"), encoding="utf-8", errors="replace").read())
+            print("INFO KiCad: " + json.dumps({"warm_ms": warm_ms, "running": running[-1:]}), flush=True)
+            # (2) the Board Setup press
+            ap = rpc_line(h.hub_rpc([{"method": "fab.profile", "params": {"pro": pro, "action": "apply", "key": "min_clearance"}, "timeout_ms": 45000}]), "fab.profile")
+            print("INFO Board Setup press: " + ap[:500], flush=True)
+            time.sleep(2)
+            w1, s1, t1 = counts(pcb)
+            h1 = sha(pcb)
+            print("INFO board after: " + json.dumps({"wrl": w1, "step": s1, "teardrops": t1, "sha": h1}), flush=True)
+            m = re.search(r'KiCad changed the board when it opened it[^"]*', ap)
+            mig = m.group(0) if m else ""
+            print("INFO " + (f"KiCad migrated on load, said to the person: {mig}" if mig else "no load migration said on this runtime"), flush=True)
+            h.check("savegate: the board's 3D references are as before (no .wrl -> .step written)", w1 == w0 and s1 == s0, {"before": [w0, s0], "after": [w1, s1]})
+            h.check("savegate: the board's teardrops are as before", t1 == t0, {"before": t0, "after": t1})
+            try:
+                saved = json.loads(ap)["result"].get("saved")
+            except (ValueError, KeyError, TypeError, AttributeError):
+                saved = "?"
+            h.check("savegate: the Board Setup press saved only a board KiCad did not change on load",
+                    (bool(mig) and saved is False and h1 == h0) or (not mig and saved is True),
+                    {"saved": saved, "migration_said": bool(mig), "board_same": h1 == h0, "warm_ms": warm_ms})
+            h.check("savegate: the Board Setup press leaves the schematics alone", schs() == sh0, {"before": sh0, "after": schs()})
+            # (3) a BOM edit: a real change, saved (KiCad not on screen), saying when the format was upgraded with it
+            ref = ""
+            for p in sorted(glob.glob(os.path.join(kdir, "*.kicad_sch"))):
+                m = re.search(r'\(property "Reference" "([A-Z]+[0-9]+)"', open(p, encoding="utf-8", errors="ignore").read())
+                if m:
+                    ref = m.group(1)
+                    break
+            be = rpc_line(h.hub_rpc([{"method": "mgmt.bom.edit", "params": {"project": pro, "field": "mpn", "refs": [ref], "value": "E2E-SAVEGATE"}, "timeout_ms": 45000}]), "mgmt.bom.edit")
+            print(f"INFO BOM edit ({ref}): " + be[:400], flush=True)
+            time.sleep(2)
+            bom_saved = any("E2E-SAVEGATE" in open(p, encoding="utf-8", errors="ignore").read() for p in glob.glob(os.path.join(kdir, "*.kicad_sch")))
+            h.check("savegate: the BOM edit is saved", bom_saved, {"ref": ref, "reply": be[:200]})
+            m = re.search(r'KiCad also upgraded the file format[^"]*', be)
+            print("INFO BOM edit's format line: " + (m.group(0) if m else "none (the files were current)"), flush=True)
+            h.check("savegate: the board is untouched by the BOM edit", sha(pcb) == h1, {"before": h1, "after": sha(pcb)})
+            return h.finish()
         h.start_hub(embed_mode="fork")
         cp = h.start_client([
             {"select": 0}, {"wait": 2800}, {"click": "rail:Board"},
@@ -799,6 +906,119 @@ def run(h):
             back4 = [l.strip()[:200] for l in log_since(n2) if "kicad_loan_back" in l]
             h.check("lend L4: Ctrl+K then another thread: the keyboard stays with Backplane",
                     went and not l4["inside_frame"] and l4["focus_pid"] == cp.pid and l4["typed_px"] > 20, {"from": cur, "to": other, "went": went, "loan_back": back4[-1:], **l4})
+            return h.finish()
+        if only == "close":
+            # embed_close_e2e.sh (47b00d199): KiCad's own Close (Ctrl+W) in the embedded board editor; the pane follows KiCad,
+            # never "Starting KiCad…" for ever:
+            #   C1 nothing unsaved: Ctrl+W closes the PCB frame; the pane leaves Edit for View (Edit offered again); Edit opens a fresh frame
+            #   C2 an unsaved edit, Ctrl+W, KiCad's prompt answered Cancel (Escape): the editor stays, still modified, the pane in Edit
+            #   C3 the same, the prompt answered Save (Return, its default): the board is written, the frame closes, the pane goes to View
+            # Keys reach KiCad by the editor's tab (give_kicad_keys), as every Windows mode does, where Linux clicks the frame's canvas.
+            top = int(rep.get("toplevel") or 0) or E.find_main_window(cp.pid)
+            sock = rep.get("sock") or ""
+            pcbs = sorted(glob.glob(h.p("proj", "*.kicad_pcb"))) or sorted(glob.glob(h.p("proj", "boards", "*", "*.kicad_pcb")))
+            pcb = pcbs[0] if pcbs else ""
+
+            def log_since(n):
+                return open(h.p("client.log"), encoding="utf-8", errors="replace").read().splitlines()[n:]
+
+            def pcb_frame():
+                # the PCB frame on show now (the report's frame list is only taken at script steps: Win32's own list here),
+                # embedded under Backplane's window or, if KiCad put it out on its own, a top-level of KiCad's
+                ws = [w for w in E.list_child_windows(top, pid) if w["visible"] and "pcb editor" in w["title"].lower() and w["w"] > 300]
+                ws += [w for w in E.list_top_windows(pid) if "pcb editor" in w["title"].lower() and w["w"] > 300]
+                return int(ws[0]["hwnd"]) if ws else 0
+
+            def edit_rect():
+                # Edit drawn (offered) in the latest controls snapshot: the pane is in View
+                c = h.controls().get("ui:Edit") or {}
+                r = c.get("rect")
+                return r if isinstance(r, dict) and "x" in r else None
+
+            def modified():
+                try:
+                    return h.ipc_cmd("modified", sock, "pcb").get("modified")
+                except Exception as e:  # noqa: BLE001 - evidence, not a crash
+                    return f"? {e}"[:120]
+
+            def keys_to_kicad():
+                f = pcb_frame()
+                k = give_kicad_keys(h, cp, f) if f else {"tab_clicked": False, "target_missing": "no PCB frame on show"}
+                time.sleep(0.8)
+                return k
+
+            def wait_until(cond, s):
+                end = time.monotonic() + s
+                while time.monotonic() < end:
+                    if cond():
+                        return True
+                    time.sleep(0.1)
+                return bool(cond())
+
+            def closed_since(n):
+                return [l.strip()[:200] for l in log_since(n) if '"kicad_frame_closed":"PCB"' in l]
+
+            def prompt_windows():
+                # KiCad's save prompt: a shown top-level of KiCad's that is not an editor frame
+                return [{"hwnd": w["hwnd"], "title": w["title"], "class": w["class"], "foreground": int(E.u32.GetForegroundWindow() or 0) == w["hwnd"]}
+                        for w in E.list_top_windows(pid) if w["w"] > 200 and "editor" not in w["title"].lower()]
+
+            def sha_pcb():
+                with open(pcb, "rb") as f:
+                    return hashlib.sha256(f.read()).hexdigest()
+
+            # C1
+            n = h.log_line_count()
+            k1 = keys_to_kicad()
+            E.key_chord("ctrl", "w")
+            gone = wait_until(lambda: not pcb_frame(), 3)
+            h.shot("close_c1_after_ctrl_w")
+            h.check("close C1: Ctrl+W with nothing unsaved closes KiCad's board editor", gone, {"frame": pcb_frame(), **k1})
+            to_view = wait_until(lambda: bool(closed_since(n)) and bool(edit_rect()), 5)
+            h.check("close C1: the pane leaves Edit for View (Edit offered again), no wait for the frame", to_view,
+                    {"closed": closed_since(n)[:1], "edit_rect": edit_rect()})
+            fresh = 0
+            if edit_rect() and h.click_control(E.find_main_window(cp.pid), "ui:Edit"):
+                wait_until(lambda: bool(pcb_frame()), 30)
+                time.sleep(2)
+                fresh = pcb_frame()
+            h.shot("close_c1_edit_again")
+            h.check("close C1: Edit again opens a fresh board editor in the pane", bool(fresh), {"frame": fresh, "first_frame": frame})
+            # C2: an unsaved edit, Ctrl+W, Cancel
+            try:
+                add = h.ipc_cmd("agent-add-track", sock, "100", "100", "104", "100", "0.25", "3")
+            except Exception as e:  # noqa: BLE001 - Linux ignores it too (|| true); the modified state below tells
+                add = {"error": str(e)[:160]}
+            time.sleep(1)
+            print("INFO modified before Ctrl+W: " + json.dumps({"modified": modified(), "add": add}), flush=True)
+            n = h.log_line_count()
+            k2 = keys_to_kicad()
+            E.key_chord("ctrl", "w")
+            time.sleep(1.5)
+            prompt = prompt_windows()
+            print("INFO KiCad's save prompt: " + json.dumps(prompt or "none"), flush=True)
+            h.shot("close_c2_prompt")
+            E.key_tap("Escape")
+            time.sleep(1.5)
+            mod2 = modified()
+            h.check("close C2: Cancel in KiCad's save prompt keeps the editor: the frame shown, still modified, the pane in Edit",
+                    bool(pcb_frame()) and mod2 is True and not closed_since(n),
+                    {"prompt": prompt[:1], "modified": mod2, "frame": pcb_frame(), "closed": closed_since(n)[:1], **k2})
+            # C3: Ctrl+W, Save
+            sha0 = sha_pcb()
+            n = h.log_line_count()
+            k3 = keys_to_kicad()
+            E.key_chord("ctrl", "w")
+            time.sleep(1.5)
+            prompt = prompt_windows()
+            h.shot("close_c3_prompt")
+            E.key_tap("Return")
+            time.sleep(3)
+            written = sha_pcb() != sha0
+            to_view = wait_until(lambda: not pcb_frame() and bool(closed_since(n)) and bool(edit_rect()), 3)
+            h.check("close C3: Save in KiCad's prompt writes the board and closes the editor; the pane goes to View",
+                    written and to_view, {"board_written": written, "prompt": prompt[:1], "frame": pcb_frame(), "closed": closed_since(n)[:1],
+                                          "edit_rect": edit_rect(), **k3})
             return h.finish()
         if only == "prewarm_idle":
             # F5: Edit, keys in the PCB canvas, then nothing but the pre-warm: does the PCB editor keep the keys?
