@@ -60,6 +60,14 @@ pub fn guidance() -> String {
 pub fn guidance_off() -> &'static str {
     "<backplane_routing_plan>Plan before routing is off (the person's choice; Settings › CAD or the Plan panel turns it on): route a board as the person asks, without proposing a routing plan or waiting for an approval first. Use the plan_* tools only when the person asks for a routing plan.</backplane_routing_plan>"
 }
+/// The link a plan review is asked with (`backplane://plan/<the board from the project folder>`): the desktop draws it as a button that opens the board
+/// with its Plan panel (gpui screens/linkroute.rs `Route::Plan`).
+pub fn review_link(root: &str, pcb: &str) -> String {
+    let root = root.trim_end_matches('/');
+    let rel = if !root.is_empty() { pcb.strip_prefix(&format!("{root}/")).unwrap_or(pcb) } else { pcb };
+    let rel = rel.trim_start_matches('/');
+    crate::md::refs::uri(&crate::md::refs::Ref { kind: "plan".into(), rest: rel.split('/').filter(|x| !x.is_empty()).map(str::to_string).collect(), frag: String::new() })
+}
 const NS: &str = "kiapi.backplane.plan.";
 
 // ---- the plan, pure ----
@@ -203,7 +211,9 @@ pub async fn tool(hub: &Arc<Hub>, thread: &str, name: &str, a: &Value) -> Result
         // the agent asks; the person approves (the Plan panel, KiCad, a phone): nothing is approved here
         let what = if !sv(a, "layer").is_empty() { format!("layer {}", sv(a, "layer")) } else if let Some(ids) = a["ids"].as_array().filter(|x| !x.is_empty()) { ids.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ") } else { "the plan".into() };
         events::ask(hub, thread, &pcb, &what, sv(a, "note")).await;
-        return Ok(json!({"asked": true, "what": what, "next": "The person approves in the Plan panel or in KiCad. End your turn: once they have judged it, Backplane sends you a message saying what they approved or rejected (plan_get answers the details in `changes`)."}))
+        let root = crate::files::root_of(hub, thread).await.map(|r| crate::files::kicad::canonical::design_root(&r.to_string_lossy())).unwrap_or_default();
+        let link = review_link(&root, &pcb);
+        return Ok(json!({"asked": true, "what": what, "link": link, "next": format!("The person approves in the Plan panel beside the board or in KiCad. End your turn with one short line for them that ends with exactly this link (Backplane draws it as a button that opens the plan): [Review the routing plan]({link}). Once they have judged it, Backplane sends you a message saying what they approved or rejected (plan_get answers the details in `changes`).")}))
     }
     capable(hub, Some(thread), &pcb).await?;
     let ids: Vec<String> = a["ids"].as_array().map(|x| x.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
@@ -319,6 +329,11 @@ mod tests {
         assert_eq!(route_busy("no plan"), "no plan");
     }
     #[test] fn plan_needs_a_plan_on_big_boards() { assert!(needs_plan(4, 10)); assert!(needs_plan(2, 61)); assert!(!needs_plan(2, 60)); assert!(guidance().contains("plan_approve") && guidance().contains("fab_profile")); }
+    #[test] fn a_plan_review_is_asked_with_a_link_to_its_board() {
+        assert_eq!(review_link("/p", "/p/Nodes/A b/A.kicad_pcb"), "backplane://plan/Nodes/A%20b/A.kicad_pcb");
+        assert_eq!(review_link("/p/", "/p/a.kicad_pcb"), "backplane://plan/a.kicad_pcb");
+        assert!(crate::md::refs::parse(&review_link("/p", "/p/Nodes/A b/A.kicad_pcb")).is_some(), "a link the markdown keeps");
+    }
     #[test] fn plan_before_routing_is_off_unless_turned_on() {
         assert!(!is_on("") && !is_on("off") && is_on("on"));
         assert!(guidance_off().contains("only when the person asks") && !guidance_off().contains("plan_approve"));

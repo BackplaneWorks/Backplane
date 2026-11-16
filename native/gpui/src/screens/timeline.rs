@@ -162,7 +162,7 @@ impl SelText {
             if s.style.italic { font.style = FontStyle::Italic; }
             if s.style.code { font = mono.clone(); }
             // a link into Settings (an agent's "Open Settings › CAD"): drawn as a button, a filled label with no underline
-            let button = s.style.link.as_ref().is_some_and(|l| l.href.starts_with("backplane://settings/"));
+            let button = s.style.link.as_ref().is_some_and(|l| l.href.starts_with("backplane://settings/") || l.href.starts_with("backplane://plan/"));
             if button { font.weight = FontWeight::BOLD; }
             let color = if s.style.link.is_some() { c("accent") } else if self.kind == Kind::Quote || s.style.small { c("dim") } else { c("text") };
             runs.push(TextRun {
@@ -597,6 +597,8 @@ impl Backplane {
             super::linkroute::Route::Hub(u) => { self.note.clear(); self.go("link-open", u, cx); }
             super::linkroute::Route::Note(n) => self.note = n.to_string(),
             super::linkroute::Route::Design(w) => super::xprobe::clicked(self, &w),
+            // an agent's plan review: the board page, then (screens/mgmt.rs `host`) that board with its Plan panel open
+            super::linkroute::Route::Plan(rel) => { self.note.clear(); self.screens.mgmt.plan_next = Some((rel, std::time::Instant::now(), false)); let _ = self.tx.try_send(super::viewer::view_kind("board")); cx.notify(); }
         }
     }
     /// Scroll the document on screen (the project's README, or a note in the file viewer) so the anchor `id` is at its top.

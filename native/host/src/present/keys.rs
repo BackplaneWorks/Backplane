@@ -421,6 +421,8 @@ pub fn keys(st: &State, id: &str, now_s: u64, why: &str, models_text: Option<&st
     m.insert("picker".into(), picker_with(&t.provider, &t.model, get(format!("effort.{id}")), get(format!("usage.{id}")), mine.as_ref()));
     m.insert("pickerAgents".into(), agents);
     m.insert("claude".into(), json!(t.provider == "claude"));
+    // "Plan first, this turn only" set (commands/plan.rs thread.planonce): the picker's toggle is on until the turn it was set for ends
+    m.insert("planOnce".into(), json!(!get(format!("plan.once.{id}")).is_empty()));
     m.insert("allowance".into(), json!(allowance_text(&allowance_of(st, id, &t.provider), &t.provider, &t.model, now_s)));
     m.insert("combo".into(), combo_of(st, id, now_s));
     Some(m)

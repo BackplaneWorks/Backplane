@@ -3,7 +3,7 @@
 #[derive(Clone, Debug, PartialEq)]
 pub struct Ref { pub kind: String, pub rest: Vec<String>, pub frag: String }
 
-const KINDS: [&str; 17] = ["settings", "thread", "bot", "room", "person", "project", "routine", "task", "pr", "work", "file", "machine", "conv", "mail", "mailroom", "decision", "charter"];
+const KINDS: [&str; 18] = ["plan", "settings", "thread", "bot", "room", "person", "project", "routine", "task", "pr", "work", "file", "machine", "conv", "mail", "mailroom", "decision", "charter"];
 
 fn safe(c: char) -> bool { c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_' | '~') }
 
@@ -77,8 +77,8 @@ fn shape(k: &str, xs: &[String]) -> bool {
     match xs.len() {
         0 => k == "person",
         1 => !["person", "pr", "file", "mail", "decision"].contains(&k),
-        2 => ["pr", "file", "mail", "decision"].contains(&k),
-        _ => k == "file",
+        2 => ["pr", "file", "mail", "decision", "plan"].contains(&k),
+        _ => k == "file" || k == "plan",
     }
 }
 
@@ -134,6 +134,8 @@ mod tests {
         assert_eq!(uri(&parse("backplane://thread/t1-2#m3").unwrap()), "backplane://thread/t1-2#m3");
         assert!(parse("backplane://thread").is_none()); assert!(parse("backplane://person").is_some());
         // a Settings page (an agent's "Open Settings › CAD" when KiCad or FreeCAD is missing) is a link, written as a label too
+        // a routing plan's board (plan/mod.rs `review_link`): its path from the project folder, any depth
+        assert_eq!(uri(&parse("backplane://plan/Nodes/A%20b/A.kicad_pcb").unwrap()), "backplane://plan/Nodes/A%20b/A.kicad_pcb"); assert_eq!(parse("backplane://plan/a.kicad_pcb").unwrap().rest, ["a.kicad_pcb"]);
         assert_eq!(uri(&parse("backplane://settings/cad").unwrap()), "backplane://settings/cad"); assert!(parse("backplane://settings").is_none());
         let n = serde_json::to_string(&crate::md::nodes_json(&crate::md::render("FreeCAD is missing.\n\n[Open Settings › CAD](backplane://settings/cad)"))).unwrap();
         assert!(n.contains("backplane://settings/cad") && n.contains("Open Settings › CAD") && !n.contains("](backplane"), "{n}");

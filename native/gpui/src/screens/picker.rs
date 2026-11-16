@@ -257,6 +257,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool
     let provider = cur.provider.clone();
     let drill = f.mode == Mode::Drill;
     // a column's head: its title (cut short, never over its keys), its keys; in a one-column menu a back control to the column before
+    let plan_row = plan_once_row(cx, light, thread); // built before `head` borrows cx
     let head = |col: usize, title: &str| {
         let back = (drill && col > 0).then(|| div().id(SharedString::from(format!("pick-back-{col}"))).flex_shrink_0().pr_2().cursor_pointer().text_color(c("dim")).child("‹")
             .on_click(cx.listener(move |this, _, _, cx| this.picker_go(col - 1, cx))));
@@ -336,10 +337,30 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool
         Mode::Stack => div().flex().items_start().child(agents).child(div().flex_1().min_w_0().flex().flex_col().child(model_col).child(div().border_t_1().border_color(c("line")).child(effort_body))),
         Mode::Drill => div().flex().flex_col().child(match cur.col { 0 => agents.into_any_element(), 2 => effort_body.into_any_element(), _ => model_col.into_any_element() }),
     };
-    // as tall as the agent column in every mode (one column at a time too): stepping from column to column or a shorter list leaves the menu's height as it is
-    Some(body.id("picker").w_full().min_w_0().min_h(px(agents_h)).text_size(z(12.)).into_any_element())
+    // as tall as the agent column in every mode (one column at a time too): stepping from column to column or a shorter list leaves the menu's height as it is;
+    // "Plan first, this turn only" under the columns, in every mode
+    let body = body.id("picker").w_full().min_w_0().min_h(px(agents_h)).text_size(z(12.));
+    Some(div().w_full().min_w_0().flex().flex_col().child(body).children(plan_row.map(|r| div().pt_2().border_t_1().border_color(c("line")).child(r)).into_iter()).into_any_element())
 }
 
+/// "Plan first, this turn only" (a Claude thread): its plan mode for the next turn, then the thread goes back on its own (the hub's thread.planonce);
+/// lit while set. A press flips it.
+fn plan_once_row(cx: &mut Context<Backplane>, light: bool, thread: &Value) -> Option<AnyElement> {
+    if thread["claude"] != true { return None }
+    let c = |n: &str| theme::color(light, n);
+    let on = thread["planOnce"] == true;
+    Some(crate::ui::with_rect(div().id("pick-plan-once"), || "pick:plan-once".to_string()).mx_3().mb_2().px_2().py_1().flex().items_center().gap_2().cursor_pointer().border_1()
+        .border_color(c(if on { "accent" } else { "line" })).hover(|s| s.bg(c("raise")))
+        .child(div().w(px(12.)).text_color(c("accent")).child(if on { "\u{2713}" } else { "" }))
+        .child(div().flex_1().min_w_0().flex().flex_col()
+            .child(div().text_size(crate::scale::tpx(12.)).text_color(c(if on { "accent" } else { "text" })).child(crate::i18n::trs("Plan first, this turn only")))
+            .child(div().text_size(crate::scale::tpx(10.)).text_color(c("faint")).child(crate::i18n::trs("Claude proposes a plan and waits for Implement; the thread goes back to its own mode after."))))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            let th = this.selected.clone(); if th.is_empty() { return }
+            let _ = this.tx.try_send(crate::hub::Command::Rpc("thread.planonce".into(), super::settings::Secret(serde_json::json!({"thread": th, "on": !on})), "planonce"));
+            cx.notify();
+        })).into_any_element())
+}
 /// A hover with the whole text of a row, for what the row had to cut short.
 fn tip_of(text: String, light: bool) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static { move |_, cx| cx.new(|_| super::combo::Tip(text.clone(), light)).into() }
 

@@ -234,6 +234,16 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
             Some(Plan { events: ev, reply: ok(id), stop: None, wt: None, scratch: None, act: go.then(|| ("resume", th.clone(), text)) })
         }
         "thread.modes" => modes(f, at, id, p),
+        // the picker's "Plan first, this turn only" (Claude's plan mode for one turn): plan mode now, and `plan.once.<thread>` so the turn's end puts the
+        // thread back (agents/wake.rs `plan_once_end`). Set while a turn runs, it waits for that turn to end first ("2"), then counts the next one ("1")
+        "thread.planonce" => {
+            let Some(t) = f.threads.get(&th).cloned() else { return done(vec![], id) };
+            let on = p["on"] == true;
+            let rt = if t.runtime.is_empty() { "full-access".to_string() } else { t.runtime.clone() };
+            let flag = if !on { "" } else if running(f, &th) { "2" } else { "1" };
+            done(vec![json!({"$":"ModesSet","id":th,"runtime":rt,"interaction":if on { "plan" } else { "default" },"model":t.model,"at":at}),
+                json!({"$":"SettingSet","key":format!("plan.once.{th}"),"value":flag,"at":at})], id)
+        }
         "thread.effort" => {
             let provider = f.threads.get(&th).map(|t| t.provider.as_str()).unwrap_or("");
             done(vec![json!({"$":"SettingSet","key":format!("effort.{th}"),"value":effort_of(provider, &s(p, "effort", "")),"at":at})], id)

@@ -802,6 +802,19 @@ async fn recovered(extra: &str, state: &str) -> Vec<Value> {
     assert!(!log_from(&hub, n).await.iter().any(|e| is(e, "MessagePosted")), "it closes once");
     ag.shutdown();
 }
+/// "Plan first, this turn only" (commands/plan.rs thread.planonce): the thread in plan mode for one turn; that turn's end puts it back, once
+#[tokio::test(flavor = "multi_thread")] async fn plan_this_turn_only_goes_back_when_the_turn_ends() {
+    let sd = dir("planonce-bin"); perf_standin(&sd, 1);
+    let extra = format!("{{\"$\":\"ModesSet\",\"id\":\"{T1}\",\"runtime\":\"full-access\",\"interaction\":\"plan\",\"model\":\"\",\"at\":1700000050}}\n{{\"$\":\"SettingSet\",\"key\":\"plan.once.{T1}\",\"value\":\"1\",\"at\":1700000050}}\n");
+    let (hub, ag, _h, _w) = start("planonce", |w| base_log(w, 1, &extra), |_| Cli::standin(&sd)).await;
+    let from = len(&hub).await;
+    assert_eq!(rpc(&hub, "turn.start", json!({"thread":T1,"text":"plan it"})).await["ok"], true);
+    let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| is(e, "ModesSet") && e["id"] == T1 && e["interaction"] == "default")).await;
+    assert!(ev.iter().any(|e| turn_is(e, "completed")), "{ev:?}");
+    assert!(ev.iter().any(|e| is(e, "SettingSet") && e["key"] == format!("plan.once.{T1}") && e["value"] == ""), "spent: {ev:?}");
+    assert!(ev.iter().any(|e| is(e, "ModesSet") && e["id"] == T1 && e["interaction"] == "default" && e["runtime"] == "full-access"), "back to its own mode: {ev:?}");
+    ag.shutdown();
+}
 #[tokio::test(flavor = "multi_thread")] async fn recover_leaves_idle() { let ev = recovered("", "idle").await; assert!(!ev.iter().any(|e| turn_is(e, "interrupted")) && !ev.iter().any(|e| e["kind"] == "restart")) }
 #[tokio::test(flavor = "multi_thread")] async fn recover_empty_nothing() { let sd = dir("re-bin"); perf_standin(&sd, 1); let (hub, ag, _h, _w) = start("re", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let n = len(&hub).await; tokio::time::sleep(Duration::from_millis(300)).await; assert_eq!(len(&hub).await, n); ag.shutdown() }
 
