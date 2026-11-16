@@ -255,12 +255,25 @@ def l8(c):
 
 
 def l9(c):
+    """The manifest's backplaneLibrary pin against KICAD_LIBRARY_SOURCES.txt's block for that repository: every key both name agrees
+    (repository, version, commit). The pin's sha256 is the library archive's, which the sources file does not list: shown, not compared."""
     m = json.load(open(os.path.join(c["runtime_root"], "manifest.json")))
     pin = m.get("backplaneLibrary")
     if not pin: say("SKIP", "L9", "the manifest has no backplaneLibrary pin yet (batch 14)"); return
-    src = open(os.path.join(c["runtime_root"], "KICAD_LIBRARY_SOURCES.txt")).read()
-    want = [str(v) for v in (pin.values() if isinstance(pin, dict) else [pin]) if isinstance(v, str) and len(v) >= 7]
-    check("L9", "the manifest's backplaneLibrary pin matches KICAD_LIBRARY_SOURCES.txt", want and all(w in src for w in want), f"pin {pin}")
+    blocks, cur = [], {}
+    for line in open(os.path.join(c["runtime_root"], "KICAD_LIBRARY_SOURCES.txt")).read().splitlines():
+        if "=" not in line: continue
+        k, v = line.split("=", 1)
+        if k == "repository" and cur: blocks.append(cur); cur = {}
+        cur[k.strip()] = v.strip()
+    if cur: blocks.append(cur)
+    src = next((b for b in blocks if b.get("repository") == pin.get("repository")), None)
+    check("L9", "KICAD_LIBRARY_SOURCES.txt lists the pinned Backplane library repository", src is not None, f"pin {pin.get('repository')}")
+    if src is None: return
+    shared = [k for k in pin if k in src]
+    diff = {k: (pin[k], src[k]) for k in shared if str(pin[k]) != src[k]}
+    check("L9", f"the manifest's backplaneLibrary pin matches KICAD_LIBRARY_SOURCES.txt ({', '.join(shared)})", len(shared) >= 2 and not diff, json.dumps(diff))
+    if pin.get("sha256"): say("INFO", "L9", f"the pinned archive's sha256 {pin['sha256'][:16]}... (not in the sources file)")
 
 
 # ---- platform hooks (Linux here; macOS and Windows fill theirs) -------------------------------------------------------------
