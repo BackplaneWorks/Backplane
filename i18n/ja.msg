@@ -2102,6 +2102,7 @@ gpui.c.kicad.kicad.could.not.start = KiCad を起動できませんでした:
 gpui.c.kicad.try.again = 再試行
 gpui.c.kicad.open.the.app.instead = 代わりに KiCad アプリで開く
 gpui.c.kicad.mac.full.screen = macOS で Backplane が全画面のあいだ、KiCad はここに表示できません。別ウインドウにポップアウトするか、全画面を終了してください。
+gpui.c.kicad.mac.prompt = macOS が Backplane へのアクセス許可を求めています。表示されている確認に答えると KiCad が起動します。
 gpui.c.kicad.stock.tip = これは標準の KiCad です。独自のウィンドウで開くことがあり、エージェントは編集できません。Backplane KiCad はこの中で開きます。
 gpui.c.kicad.mac.prompt = macOS が Backplane へのアクセス許可を求めています。表示されている確認に答えると KiCad が起動します。
 gpui.c.kicad.kicad.is.not.responding = KiCad が応答していません。

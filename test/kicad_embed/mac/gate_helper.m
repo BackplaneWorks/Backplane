@@ -13,6 +13,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <signal.h>
 #include <unistd.h>
 
 // ---- CGVirtualDisplay (CoreGraphics, private; the same declarations Chromium's test utility uses) ----
@@ -184,6 +185,8 @@ int main( int argc, const char** argv )
     {
         if( argc > 2 && !strcmp( argv[1], "serve" ) )
         {
+            // a client gone before its answer is written: the write fails, the helper goes on (SIGPIPE ended it once)
+            signal( SIGPIPE, SIG_IGN );
             NSString* path = [NSString stringWithUTF8String:argv[2]];
             dispatch_async( dispatch_get_global_queue( 0, 0 ), ^{ serve( path.UTF8String ); } );
             CFRunLoopRun();

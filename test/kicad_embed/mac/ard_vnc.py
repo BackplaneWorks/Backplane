@@ -269,12 +269,16 @@ class Client:
         self.button(False, which)
 
     def drag(self, x0, y0, x1, y1, steps=30, seconds=0.6):
+        # held before the first move and after the last, as a hand does: a window drag that moved at once was taken as a click
+        # (the mini gate: a title-bar drag of (60, 40) moved the window by (6, 0))
         self.move(x0, y0)
-        time.sleep(0.05)
+        time.sleep(0.15)
         self.button(True)
+        time.sleep(0.25)
         for i in range(1, steps + 1):
-            self.move(x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps)
+            self.move(int(x0 + (x1 - x0) * i / steps), int(y0 + (y1 - y0) * i / steps))
             time.sleep(seconds / steps)
+        time.sleep(0.2)
         self.button(False)
 
     def count_dots(self, x0, x1, y, bright=140, min_run=6):
