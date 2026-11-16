@@ -17,7 +17,7 @@ impl P {
     pub fn dist(self, o: P) -> f64 { self.sub(o).len() }
 }
 fn pt(v: &Value) -> P { P(mm(&v["x_nm"]), mm(&v["y_nm"])) }
-fn seg_dist(p: P, a: P, b: P) -> f64 { p.dist(seg_near(p, a, b)) }
+pub fn seg_dist(p: P, a: P, b: P) -> f64 { p.dist(seg_near(p, a, b)) }
 fn seg_near(p: P, a: P, b: P) -> P {
     let d = b.sub(a); let l2 = d.0 * d.0 + d.1 * d.1;
     let t = if l2 == 0.0 { 0.0 } else { (((p.0 - a.0) * d.0 + (p.1 - a.1) * d.1) / l2).clamp(0.0, 1.0) };
@@ -98,7 +98,7 @@ pub enum Kind { Pad, Track, Via, Hole, Edge, KeepTracks, KeepVias }
 pub struct Item { pub shape: Shape, /** bit i: the board's i-th copper layer */ pub layers: u64, pub net: String, pub kind: Kind, /** the part and pad ("U1", "3"), a pad's */ pub of: (String, String), pub smd: bool }
 /// One kind of via the board may use between two copper layers.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Span { pub from: usize, pub to: usize, pub ty: String, pub size: f64, pub drill: f64, /** one of the board's own vias of this kind (KiCad's item): a new one is made like it (filled, capped, tented as the board's are) */ pub like: Value }
+pub struct Span { pub from: usize, pub to: usize, pub ty: String, pub size: f64, pub drill: f64, /** how many vias of this kind the board has (a kind the board hardly uses costs a route more) */ pub n: usize, /** one of the board's own vias of this kind (KiCad's item): a new one is made like it (filled, capped, tented as the board's are) */ pub like: Value }
 #[derive(Clone, Debug, Default)]
 pub struct Board {
     /// copper layers, top to bottom, as KiCad shows them ("F.Cu")
@@ -196,7 +196,7 @@ impl Board {
         // of each kind the size the board uses most; of sizes used alike often (within a quarter of the commonest) the larger, which every rule of the board allows
         let mut spans: HashMap<(usize, usize, String), Vec<(usize, f64, f64, Value)>> = HashMap::new();
         for ((a, z, ty, s, d), (n, like)) in seen { spans.entry((a, z, ty)).or_default().push((n, s as f64 / 1e6, d as f64 / 1e6, like)) }
-        b.spans = spans.into_iter().map(|((from, to, ty), mut v)| { let top = v.iter().map(|x| x.0).max().unwrap_or(0); v.retain(|x| x.0 * 4 >= top); v.sort_by(|a, z| z.1.partial_cmp(&a.1).unwrap()); let (_, size, drill, like) = v.remove(0); Span { from, to, ty, size, drill, like } }).collect(); b.spans.sort_by_key(|s| (s.from, s.to));
+        b.spans = spans.into_iter().map(|((from, to, ty), mut v)| { let top = v.iter().map(|x| x.0).max().unwrap_or(0); let n: usize = v.iter().map(|x| x.0).sum(); v.retain(|x| x.0 * 4 >= top); v.sort_by(|a, z| z.1.partial_cmp(&a.1).unwrap()); let (_, size, drill, like) = v.remove(0); Span { from, to, ty, size, drill, n, like } }).collect(); b.spans.sort_by_key(|s| (s.from, s.to));
         let mut zoned = 0u64;
         for z in zones {
             let ls = bits(&z["layers"]);
@@ -256,7 +256,9 @@ pub struct Opts { pub width: f64, /** copper layers to route on (indices); empty
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Routed { pub tracks: Vec<(P, P, usize)>, pub vias: Vec<(P, Span)>, pub length: f64 }
 
-const TRACK: u8 = 1; const VIA: u8 = 2; const POUR: u8 = 4; const OWNPAD: u8 = 8; const UVIA: u8 = 16;
+const TRACK: u8 = 1; const VIA: u8 = 2; const POUR: u8 = 4; const OWNPAD: u8 = 8; const UVIA: u8 = 16; const NEAR: u8 = 32; const COURT: u8 = 64;
+/// How much room a track is given over its clearance where there is room (a cell nearer than this to other copper costs more).
+const ROOM: f64 = 0.1;
 const DIRS: [(i32, i32); 8] = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)];
 struct Grid { x0: f64, y0: f64, g: f64, nx: usize, ny: usize, nl: usize, block: Vec<u8>, own: Vec<u32> }
 impl Grid {
@@ -265,6 +267,15 @@ impl Grid {
         let f = |v: f64, o: f64, n: usize| (((v - o) / self.g).floor().max(0.0) as usize).min(n - 1);
         (f(bb.0 - pad, self.x0, self.nx), f(bb.1 - pad, self.y0, self.ny), f(bb.2 + pad + self.g, self.x0, self.nx), f(bb.3 + pad + self.g, self.y0, self.ny))
     }
+}
+/// The cells inside a polygon, by scan lines (the crossings of the outline; the cells between each pair are inside).
+fn scan(gr: &Grid, poly: &[P], mut f: impl FnMut(usize)) {
+    if poly.len() < 3 { return }
+    let pb = Shape::Poly(poly.to_vec()).bbox(); let (cx0, cy0, cx1, cy1) = gr.cells(pb, 0.0);
+    for cy in cy0..=cy1 { let y = gr.y0 + cy as f64 * gr.g;
+        let mut xs: Vec<f64> = (0..poly.len()).filter_map(|i| { let (a, z) = (poly[i], poly[(i + 1) % poly.len()]); ((a.1 > y) != (z.1 > y)).then(|| a.0 + (y - a.1) / (z.1 - a.1) * (z.0 - a.0)) }).collect();
+        xs.sort_by(|a, z| a.partial_cmp(z).unwrap());
+        for w in xs.chunks(2) { if w.len() < 2 { break } let (a, z) = ((((w[0] - gr.x0) / gr.g).ceil().max(cx0 as f64)) as usize, (((w[1] - gr.x0) / gr.g).floor().min(cx1 as f64)) as usize); for cx in a..=z.min(gr.nx - 1) { f(cy * gr.nx + cx) } } }
 }
 #[derive(PartialEq)] struct Node(f32, u32);
 impl Eq for Node {}
@@ -297,14 +308,21 @@ fn step(b: &Board, net: &str, o: &Opts) -> Result<Option<Routed>, String> {
     let clr = b.net_clearance(net); let nl = b.layers.len();
     // the layers to route on: asked for, else every copper layer that is not a plane (the net's own layers always)
     let padl = own.iter().fold(0u64, |m, i| m | b.items[*i].layers);
-    let route: u64 = if o.layers.is_empty() { (((1u64 << nl) - 1) & !(if o.planes { 0 } else { b.planes })) | padl } else { o.layers.iter().fold(0, |m, l| m | 1 << l) | padl };
+    let route: u64 = if o.layers.is_empty() { (1u64 << nl) - 1 } else { o.layers.iter().fold(0, |m, l| m | 1 << l) | padl };
     let spans: Vec<Span> = if !o.vias { vec![] } else { let mut s: Vec<Span> = b.spans.clone();
-        if s.is_empty() && nl > 1 { s.push(Span { from: 0, to: nl - 1, ty: "VT_THROUGH".into(), size: 0.6, drill: 0.3, like: Value::Null }) }
+        if s.is_empty() && nl > 1 { s.push(Span { from: 0, to: nl - 1, ty: "VT_THROUGH".into(), size: 0.6, drill: 0.3, n: 0, like: Value::Null }) }
         if let Some((size, drill)) = o.via { for x in &mut s { x.size = size; x.drill = drill } } s };
     // drilled vias keep the board's hole clearance too; a laser micro via its copper's clearance (a board that asks more of them says so in its own rules, and KiCad's check in the same call)
     let micro = |s: &&Span| s.ty == "VT_MICRO";
     let viar = spans.iter().filter(|s| !micro(s)).map(|s| s.size / 2.0).fold(0.0, f64::max); let drillr = spans.iter().filter(|s| !micro(s)).map(|s| s.drill / 2.0).fold(0.0, f64::max);
     let uviar = spans.iter().filter(micro).map(|s| s.size / 2.0).fold(0.0, f64::max);
+    // the board's own conventions: a layer it hardly routes on costs a quarter more, a drilled via on a board of laser micro vias costs by how
+    // rare its kind is there
+    let per: Vec<usize> = (0..nl).map(|l| b.items.iter().filter(|i| i.kind == Kind::Track && i.layers == 1 << l).count()).collect(); let most = per.iter().copied().max().unwrap_or(0);
+    // (a plane layer is open to a stack of micro vias passing through and, at two and a half times the length, to a track with no other way)
+    let lm: Vec<f32> = (0..nl).map(|l| if !o.layers.is_empty() || padl & 1 << l != 0 { 1.0 } else if b.planes & 1 << l != 0 && !o.planes { 2.5 } else if per[l] * 10 >= most { 1.0 } else { 1.25 }).collect();
+    let (all_vias, has_micro) = (spans.iter().map(|s| s.n).sum::<usize>(), spans.iter().any(|s| s.ty == "VT_MICRO"));
+    let rare: Vec<f32> = spans.iter().map(|s| if has_micro && s.ty != "VT_MICRO" && all_vias > 0 { 6.0 * (1.0 - s.n as f32 / all_vias as f32) } else { 0.0 }).collect();
     let bb = own.iter().map(|i| b.items[*i].shape.bbox()).fold((f64::MAX, f64::MAX, f64::MIN, f64::MIN), |m, x| (m.0.min(x.0), m.1.min(x.1), m.2.max(x.2), m.3.max(x.3)));
     let mut last = String::new();
     for margin in [1.5, 5.0] {
@@ -328,19 +346,19 @@ fn step(b: &Board, net: &str, o: &Opts) -> Result<Option<Routed>, String> {
             }
             let c0 = b.clr(clr, it); let (kt, kv) = (it.kind != Kind::KeepVias, it.kind != Kind::KeepTracks);
             let (it_t, it_v, it_u) = (o.width / 2.0 + c0 + eps, (viar + c0).max(if it.kind == Kind::Edge { 0.0 } else { drillr + b.hole_clearance }) + eps, uviar + c0 + eps);
-            let (cx0, cy0, cx1, cy1) = gr.cells(ib, it_t.max(it_v));
+            let (cx0, cy0, cx1, cy1) = gr.cells(ib, (it_t + ROOM).max(it_v).max(it_u));
             for l in 0..nl { if it.layers & 1 << l == 0 { continue }
                 for cy in cy0..=cy1 { for cx in cx0..=cx1 { let c = cy * gr.nx + cx; let d = it.shape.dist(gr.at(c));
-                    if kt && d < it_t { gr.block[l * n + c] |= TRACK } if kv && d < it_v { gr.block[l * n + c] |= VIA } if kv && d < it_u { gr.block[l * n + c] |= UVIA } } } }
+                    if kt && d < it_t { gr.block[l * n + c] |= TRACK } else if kt && d < it_t + ROOM && matches!(it.kind, Kind::Pad | Kind::Track | Kind::Via) { gr.block[l * n + c] |= NEAR } if kv && d < it_v { gr.block[l * n + c] |= VIA } if kv && d < it_u { gr.block[l * n + c] |= UVIA } } } }
         }
         // another net's pour on an inner layer: a track through it cuts the plane, so it costs three times its length there
-        for (l, zn, poly) in &b.fills { if zn == net || *l == 0 || *l + 1 >= nl || poly.len() < 3 { continue }
-            let pb = Shape::Poly(poly.clone()).bbox(); if pb.2 < region.0 || pb.0 > region.2 || pb.3 < region.1 || pb.1 > region.3 { continue }
-            let (cx0, cy0, cx1, cy1) = gr.cells(pb, 0.0);
-            for cy in cy0..=cy1 { // one scan line: the crossings of the outline, cells between each pair are inside
-                let y = gr.y0 + cy as f64 * g; let mut xs: Vec<f64> = (0..poly.len()).filter_map(|i| { let (a, z) = (poly[i], poly[(i + 1) % poly.len()]); ((a.1 > y) != (z.1 > y)).then(|| a.0 + (y - a.1) / (z.1 - a.1) * (z.0 - a.0)) }).collect();
-                xs.sort_by(|a, z| a.partial_cmp(z).unwrap());
-                for w in xs.chunks(2) { if w.len() < 2 { break } let (a, z) = ((((w[0] - gr.x0) / g).ceil().max(cx0 as f64)) as usize, (((w[1] - gr.x0) / g).floor().min(cx1 as f64)) as usize); for cx in a..=z.min(gr.nx - 1) { gr.block[l * n + cy * gr.nx + cx] |= POUR } } } }
+        for (l, zn, poly) in &b.fills { if zn == net || *l == 0 || *l + 1 >= nl { continue }
+            let pb = Shape::Poly(poly.clone()).bbox(); if poly.len() < 3 || pb.2 < region.0 || pb.0 > region.2 || pb.3 < region.1 || pb.1 > region.3 { continue }
+            let mut cells = vec![]; scan(&gr, poly, |c| cells.push(c)); for c in cells { gr.block[l * n + c] |= POUR } }
+        // under a part with eight pads or more (an IC): a drilled via there costs more (kept on the first layer's cells: a drilled via is in every layer)
+        for (r, _, poly) in &b.courtyards { if b.items.iter().filter(|i| i.kind == Kind::Pad && i.of.0 == *r).count() < 8 { continue }
+            let pb = Shape::Poly(poly.clone()).bbox(); if poly.len() < 3 || pb.2 < region.0 || pb.0 > region.2 || pb.3 < region.1 || pb.1 > region.3 { continue }
+            let mut cells = vec![]; scan(&gr, poly, |c| cells.push(c)); for c in cells { gr.block[c] |= COURT } }
         // copper of the net's own zones joins what stands on it
         for (l, zn, poly) in &b.fills { if zn != net { continue } let mut first = None;
             for (me, k) in own.iter().enumerate() { let it = &b.items[*k]; if it.layers & 1 << l != 0 && inside(poly, it.shape.anchor(P(0.0, 0.0))) { match first { None => first = Some(me), Some(f) => { let (a, z) = (find(&mut uf, f), find(&mut uf, me)); uf[a] = z } } } } }
@@ -369,7 +387,7 @@ fn step(b: &Board, net: &str, o: &Opts) -> Result<Option<Routed>, String> {
                 if turn > 2 && gc > 0.0 { continue }
                 let (x, y) = (cx + dx, cy + dy); if x < 0 || y < 0 || x >= gr.nx as i32 || y >= gr.ny as i32 { continue }
                 let c2 = y as usize * gr.nx + x as usize; if gr.block[l * n + c2] & TRACK != 0 { continue }
-                let stepc = if dx * dy != 0 { 1.4142 * g } else { g } as f32 * if gr.block[l * n + c2] & POUR != 0 { 3.0 } else { 1.0 };
+                let fl = gr.block[l * n + c2]; let stepc = if dx * dy != 0 { 1.4142 * g } else { g } as f32 * lm[l] * if fl & POUR != 0 { 3.0 } else { 1.0 } * if fl & NEAR != 0 { 1.08 } else { 1.0 };
                 let nc = gc + stepc + if gc > 0.0 { [0.0, 0.08, 0.35][turn as usize] } else { 0.0 }; let s2 = (l * n + c2) * 8 + nd;
                 if nc < cost[s2] { cost[s2] = nc; from[s2] = s as u32; how[s2] = 0; heap.push(Node(nc + est(gr.at(c2)), s2 as u32)) }
             }
@@ -380,7 +398,7 @@ fn step(b: &Board, net: &str, o: &Opts) -> Result<Option<Routed>, String> {
                     if sp.ty == "VT_MICRO" && !(l2 == sp.from || l2 == sp.to) { continue }
                     if sp.ty == "VT_MICRO" && !(l == sp.from || l == sp.to) { continue }
                     // a via costs its detour's worth, more the more layers it drills through
-                    let nc = gc + 1.0 + 0.4 * (sp.to - sp.from) as f32; for nd in 0..8 { let s2 = (l2 * n + c) * 8 + nd; if nc < cost[s2] { cost[s2] = nc; from[s2] = s as u32; how[s2] = si as u8 + 1; heap.push(Node(nc + est(gr.at(c)), s2 as u32)) } } } }
+                    let nc = gc + 1.0 + 0.4 * (sp.to - sp.from) as f32 + rare[si] + if sp.ty != "VT_MICRO" && gr.block[c] & COURT != 0 { 3.0 } else { 0.0 }; for nd in 0..8 { let s2 = (l2 * n + c) * 8 + nd; if nc < cost[s2] { cost[s2] = nc; from[s2] = s as u32; how[s2] = si as u8 + 1; heap.push(Node(nc + est(gr.at(c)), s2 as u32)) } } } }
         }
         let Some(goal) = goal else { last = format!("{what}: no way for a {} mm track at {clr} mm clearance{}", o.width, if spans.is_empty() { " without vias" } else { "" }); continue };
         // the way back, as (point, layer)
@@ -398,16 +416,42 @@ fn step(b: &Board, net: &str, o: &Opts) -> Result<Option<Routed>, String> {
         let (head, tail) = (join(path[0]), join(*path.last().unwrap()));
         let lead = head.is_some() as usize;
         let mut pts: Vec<(P, usize)> = vec![]; if let Some(a) = head { pts.push((a, path[0].1)) } pts.extend(path); if let Some(a) = tail { let l = pts.last().unwrap().1; pts.push((a, l)) }
-        let mut r = Routed::default(); let mut i = 0;
-        while i + 1 < pts.len() {
-            let (a, l) = pts[i];
-            if pts[i + 1].1 != l { let sp = spans[via_at.get(&(i + 1 - lead)).copied().unwrap_or(0)].clone(); r.vias.push((a, sp)); i += 1; continue }
-            // run on while the direction holds
-            let mut j = i + 1; let dir = |p: P, q: P| { let d = q.sub(p); let n = d.len().max(1e-12); (d.0 / n, d.1 / n) };
-            let d0 = dir(a, pts[j].0);
-            while j + 1 < pts.len() && pts[j + 1].1 == l { let d1 = dir(pts[j].0, pts[j + 1].0); if (d0.0 - d1.0).abs() > 1e-6 || (d0.1 - d1.1).abs() > 1e-6 { break } j += 1 }
-            if a.dist(pts[j].0) > 1e-9 { r.length += a.dist(pts[j].0); r.tracks.push((a, pts[j].0, l)) }
-            i = j;
+        // the way as runs of points, one a layer, with the via between each two
+        let mut runs: Vec<(usize, Vec<P>)> = vec![(pts[0].1, vec![pts[0].0])]; let mut hops: Vec<usize> = vec![];
+        for i in 1..pts.len() { if pts[i].1 != pts[i - 1].1 { hops.push(via_at.get(&(i - lead)).copied().unwrap_or(0)); runs.push((pts[i].1, vec![pts[i].0])) } else { runs.last_mut().unwrap().1.push(pts[i].0) } }
+        // pulled tight: the grid's small steps become one or two straight tracks (0, 45 or 90 degrees) wherever those keep the clearance
+        // and a little over it, and no corner is made sharper than a right angle
+        let pb = pts.iter().fold((f64::MAX, f64::MAX, f64::MIN, f64::MIN), |m, (p, _)| (m.0.min(p.0), m.1.min(p.1), m.2.max(p.0), m.3.max(p.1)));
+        let by: Vec<&Item> = b.items.iter().filter(|it| it.net != net && it.kind != Kind::KeepVias && { let ib = it.shape.bbox(); ib.0 < pb.2 + 1.0 && ib.2 > pb.0 - 1.0 && ib.1 < pb.3 + 1.0 && ib.3 > pb.1 - 1.0 }).collect();
+        let free = |a: P, z: P, l: usize, extra: f64| { let k = (a.dist(z) / (g / 2.0)).ceil().max(1.0) as usize;
+            (0..=k).all(|i| { let p = P(a.0 + (z.0 - a.0) * i as f64 / k as f64, a.1 + (z.1 - a.1) * i as f64 / k as f64);
+                by.iter().all(|it| it.layers & 1 << l == 0 || it.shape.dist(p) >= o.width / 2.0 + if matches!(it.kind, Kind::KeepTracks) { 0.0 } else { b.clr(clr, it) + extra } - 1e-6) }) };
+        let dirv = |p: P, q: P| { let d = q.sub(p); let n = d.len().max(1e-12); P(d.0 / n, d.1 / n) };
+        let turn_ok = |u: Option<P>, v: P| u.map_or(true, |u| u.0 * v.0 + u.1 * v.1 >= -1e-6);
+        let ways = |a: P, z: P| -> Vec<Vec<P>> { let (dx, dy) = (z.0 - a.0, z.1 - a.1);
+            if dx.abs() < 1e-9 || dy.abs() < 1e-9 || (dx.abs() - dy.abs()).abs() < 1e-9 { return vec![vec![z]] }
+            let m = dx.abs().min(dy.abs()); let d = P(dx.signum() * m, dy.signum() * m); vec![vec![P(a.0 + d.0, a.1 + d.1), z], vec![P(z.0 - d.0, z.1 - d.1), z]] };
+        for (l, v) in runs.iter_mut() { for _pass in 0..3 { if v.len() < 3 { break } let before = v.len();
+            let mut out: Vec<P> = vec![v[0]]; let mut i = 0;
+            while i + 1 < v.len() {
+                let prev = (out.len() >= 2).then(|| dirv(out[out.len() - 2], out[out.len() - 1])); let mut took = None;
+                // (first with a little room over the clearance; where the way itself has none, at the clearance)
+                'far: for extra in [0.02, 0.003] { let stride = ((v.len() - i) / 80).max(1); for j in (i + 2..v.len()).rev().step_by(stride) {
+                    let after = (j + 1 < v.len()).then(|| dirv(v[j], v[j + 1]));
+                    for w in ways(v[i], v[j]) { let mut a = v[i]; let mut u = prev; let mut ok = true;
+                        for q in &w { if a.dist(*q) < 1e-9 { continue } let d = dirv(a, *q); if !turn_ok(u, d) || !free(a, *q, *l, extra) { ok = false; break } u = Some(d); a = *q }
+                        if ok && after.map_or(true, |d| turn_ok(u, d)) { took = Some((j, w)); break 'far } } } }
+                match took { Some((j, w)) => { out.extend(w); i = j } None => { out.push(v[i + 1]); i += 1 } }
+            }
+            out.dedup_by(|a, z| a.dist(*z) < 1e-9); *v = out; if v.len() >= before { break } } }
+        let mut r = Routed::default();
+        for (k, (l, v)) in runs.iter().enumerate() {
+            if k > 0 { r.vias.push((v[0], spans[hops[k - 1]].clone())) }
+            let mut i = 0;
+            while i + 1 < v.len() { let a = v[i]; let mut j = i + 1; if a.dist(v[j]) < 1e-9 { i = j; continue } let d0 = dirv(a, v[j]);
+                // run on while the direction holds
+                while j + 1 < v.len() { if v[j].dist(v[j + 1]) < 1e-9 { j += 1; continue } let d1 = dirv(v[j], v[j + 1]); if (d0.0 - d1.0).abs() > 1e-6 || (d0.1 - d1.1).abs() > 1e-6 { break } j += 1 }
+                r.length += a.dist(v[j]); r.tracks.push((a, v[j], *l)); i = j }
         }
         return Ok(Some(r));
     }
@@ -470,7 +514,7 @@ pub fn place(b: &Board, reference: &str, pad: &str, at: P, to: P, within: f64, t
 mod tests {
     use super::*;
     fn pad(r: &str, n: &str, net: &str, c: P, hx: f64, hy: f64, deg: f64) -> Item { Item { shape: Shape::Rect(c, hx, hy, deg, 0.0), layers: 1, net: net.into(), kind: Kind::Pad, of: (r.into(), n.into()), smd: true } }
-    fn board(items: Vec<Item>) -> Board { Board { layers: vec!["F.Cu".into(), "B.Cu".into()], items, min_clearance: 0.15, spans: vec![Span { from: 0, to: 1, ty: "VT_THROUGH".into(), size: 0.5, drill: 0.3, like: Value::Null }], ..Default::default() } }
+    fn board(items: Vec<Item>) -> Board { Board { layers: vec!["F.Cu".into(), "B.Cu".into()], items, min_clearance: 0.15, spans: vec![Span { from: 0, to: 1, ty: "VT_THROUGH".into(), size: 0.5, drill: 0.3, n: 1, like: Value::Null }], ..Default::default() } }
     fn opts() -> Opts { Opts { width: 0.2, layers: vec![], vias: true, via: None, planes: false } }
     /// every routed track keeps its clearance to every other net's copper (the model's own check, exact)
     fn clean(b: &Board, net: &str, r: &Routed, w: f64) -> bool {
@@ -510,6 +554,22 @@ mod tests {
         assert_eq!(r.vias.len(), 2, "{r:?}"); assert!(r.tracks.iter().any(|t| t.2 == 1)); assert!(clean(&b, "A", &r, 0.2));
         let e = route_net(&mut board(items), "A", &Opts { vias: false, ..opts() }).unwrap_err().1;
         assert!(e.contains("R1.1 and R2.1") && e.contains("without vias"), "{e}");
+    }
+    #[test] fn the_boards_own_vias_and_straight_runs() {
+        // nothing in the way: one diagonal and one straight track, not the grid's steps
+        let mut b = board(vec![pad("R1", "1", "A", P(0.0, 0.0), 0.2, 0.2, 0.0), pad("R2", "1", "A", P(5.0, 2.0), 0.2, 0.2, 0.0)]);
+        let r = route_net(&mut b, "A", &Opts { vias: false, ..opts() }).unwrap();
+        assert!(r.tracks.len() <= 2 && r.length < 5.9, "{r:?}");
+        // a board of laser micro vias (four layers, a through via used once): the wall is passed by micro vias, never the drilled one
+        let wall = Item { shape: Shape::Capsule(P(2.0, -30.0), P(2.0, 30.0), 0.1), layers: 1, net: "B".into(), kind: Kind::Track, of: Default::default(), smd: false };
+        let sp = |from, to, ty: &str, n| Span { from, to, ty: ty.into(), size: 0.25, drill: 0.1, n, like: Value::Null };
+        let mut b = Board { layers: ["F.Cu", "In1.Cu", "In2.Cu", "B.Cu"].iter().map(|l| l.to_string()).collect(), items: vec![pad("R1", "1", "A", P(0.0, 0.0), 0.2, 0.2, 0.0), pad("R2", "1", "A", P(4.0, 0.0), 0.2, 0.2, 0.0), wall],
+            min_clearance: 0.15, spans: vec![sp(0, 1, "VT_MICRO", 300), sp(1, 2, "VT_MICRO", 200), sp(0, 3, "VT_THROUGH", 1)], ..Default::default() };
+        let r = route_net(&mut b, "A", &opts()).unwrap();
+        assert!(r.vias.len() == 2 && r.vias.iter().all(|v| v.1.ty == "VT_MICRO") && r.tracks.iter().all(|t| t.2 <= 1), "{r:?}");
+        // the same board with through vias only: the drilled via is what there is
+        let mut b2 = board(vec![pad("R1", "1", "A", P(0.0, 0.0), 0.2, 0.2, 0.0), pad("R2", "1", "A", P(4.0, 0.0), 0.2, 0.2, 0.0), Item { shape: Shape::Capsule(P(2.0, -30.0), P(2.0, 30.0), 0.1), layers: 1, net: "B".into(), kind: Kind::Track, of: Default::default(), smd: false }]);
+        assert!(route_net(&mut b2, "A", &opts()).unwrap().vias.iter().all(|v| v.1.ty == "VT_THROUGH"));
     }
     #[test] fn three_pads_and_a_track_already_there() {
         let t = Item { shape: Shape::Capsule(P(0.0, 0.0), P(0.0, 2.0), 0.1), layers: 1, net: "A".into(), kind: Kind::Track, of: Default::default(), smd: false };

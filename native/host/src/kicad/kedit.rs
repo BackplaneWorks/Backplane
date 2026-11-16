@@ -16,6 +16,9 @@ const BT: &str = "type.googleapis.com/kiapi.board.types.";
 const ST: &str = "type.googleapis.com/kiapi.schematic.types.";
 /// Rows one `find` answers with when no `limit` is given.
 pub const ROWS: usize = 200;
+/// The characters one `find` answers with at most (about six thousand tokens): a board's every pad near a point was fifty thousand, more than a
+/// tool result may carry.
+pub const FIND_CHARS: usize = 24_000;
 
 pub type Fut<'a> = Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>>;
 /// One raw IPC command: (fully qualified type, message) -> the response's message.
@@ -76,13 +79,24 @@ pub fn findings(report: &Value) -> Vec<String> {
     for s in report["sheets"].as_array().into_iter().flatten() { for v in s["violations"].as_array().into_iter().flatten() { out.push(line("", v)) } }
     out
 }
+/// A finding without what a refill or a save changes in its words (a track's length, the place): what makes two findings the same one.
+fn finding_key(f: &str) -> String {
+    let mut k = f.split(" @").next().unwrap_or(f).to_string();
+    while let Some(i) = k.find(", length ") { let e = k[i..].find(" mm").map_or(k.len(), |e| i + e + 3); k.replace_range(i..e, "") }
+    // (the two items of a finding come in either order)
+    match k.split_once(": ") { Some((ty, items)) => { let mut v: Vec<&str> = items.split(" / ").collect(); v.sort(); format!("{ty}: {}", v.join(" / ")) } None => k }
+}
 /// What an edit changed in KiCad's check: the findings that are new (12 at most, then their count), how many went away and how many are left.
-pub fn check_delta(before: &Value, after: &Value) -> Value {
-    let (mut was, now) = (findings(before), findings(after)); let left = now.len(); let mut new = vec![];
-    for f in now { match was.iter().position(|w| *w == f) { Some(i) => { was.swap_remove(i); } None => new.push(f) } }
+/// `touched` (nets and references the edit worked on; empty: everything) keeps a finding on something else out of `new`: a refill or the first
+/// save of a file moves findings about on a large board (a pour's island elsewhere, a library warning), and those are `elsewhere`: their count and the first three.
+pub fn check_delta(before: &Value, after: &Value, touched: &[String]) -> Value {
+    let (mut was, now) = (findings(before).iter().map(|f| finding_key(f)).collect::<Vec<_>>(), findings(after)); let left = now.len(); let (mut new, mut elsewhere) = (vec![], vec![]);
+    let on = |f: &str| touched.is_empty() || touched.iter().any(|t| f.contains(&format!("[{t}]")) || f.split(|c: char| !(c.is_alphanumeric() || c == '#' || c == '_')).any(|w| w == t));
+    for f in now { match was.iter().position(|w| *w == finding_key(&f)) { Some(i) => { was.swap_remove(i); } None if on(&f) => new.push(f), None => elsewhere.push(f) } }
     let by = if after["sheets"].is_array() { "KiCad's ERC of the saved schematic" } else { "KiCad's DRC of the saved board, schematic parity included" };
     let mut o = json!({"by": by, "new": new.iter().take(12).collect::<Vec<_>>(), "left": left});
     if new.len() > 12 { o["more"] = json!(new.len() - 12) }
+    if !elsewhere.is_empty() { o["elsewhere"] = json!({"count": elsewhere.len(), "first": elsewhere.iter().take(3).collect::<Vec<_>>(), "note": "on items this edit did not work on: a refill or the file's first save moves such findings about; they are this edit's only if its copper cut a pour there"}) }
     if !was.is_empty() { o["gone"] = json!(was.len()) }
     o
 }
@@ -163,7 +177,12 @@ pub fn row(kind: &str, raw: &Value, with_fields: bool) -> Value {
 pub fn pad_rows(fp: &Value) -> Vec<Value> {
     let r = text3(&fp["reference_field"]);
     fp["definition"]["items"].as_array().into_iter().flatten().filter(|i| i["@type"].as_str().is_some_and(|t| t.ends_with(".Pad")))
-        .map(|p| json!({"id": p["id"]["value"].as_str().unwrap_or(""), "ref": r, "pad": p["number"].as_str().unwrap_or(""), "net": p["net"]["name"].as_str().unwrap_or(""), "at": xy(&p["position"]), "pin": p["symbol_pin"]["name"].as_str().unwrap_or("")})).collect()
+        .map(|p| { let st = &p["pad_stack"]; let c = &st["copper_layers"][0];
+            let layer = if p["type"] == "PT_PTH" { "*.Cu".to_string() } else { st["layers"].as_array().into_iter().flatten().filter_map(|l| l.as_str()).find(|l| l.ends_with("_Cu")).map(layer_name).unwrap_or_default() };
+            let mut row = json!({"id": p["id"]["value"].as_str().unwrap_or(""), "ref": r, "pad": p["number"].as_str().unwrap_or(""), "net": p["net"]["name"].as_str().unwrap_or(""), "at": xy(&p["position"]), "pin": p["symbol_pin"]["name"].as_str().unwrap_or("")});
+            // its copper: size, turn and side (what a hand-placed track must clear), so the board file is not read for them
+            if c["size"].is_object() { row["size"] = json!([mm(&c["size"]["x_nm"]), mm(&c["size"]["y_nm"])]); row["rot"] = json!(st["angle"]["value_degrees"].as_f64().unwrap_or(0.0)); row["layer"] = json!(layer) }
+            row }).collect()
 }
 
 fn close(a: f64, b: f64) -> bool { (a - b).abs() < 1e-6 }
@@ -428,6 +447,10 @@ struct Run<'a> { c: &'a dyn Call, doc: Value, board: bool, commit: Option<Value>
     planned: std::collections::HashMap<String, Value>, added: Vec<String>, libs: bool, lib_step: std::time::Duration,
     /// The highest #PWR number in use (new power symbols count on from it).
     pwr: Option<u64>,
+    /// The nets and references this call worked on (the check's `new` is about these), and whether something it did has no such list.
+    touched: Vec<String>, touch_all: bool,
+    /// Where a pad stood before its footprint was exchanged in this call (net, x, y): an old track's end there is cut back when the part is routed.
+    vacated: Vec<(String, f64, f64)>,
     /// What the saved sheet files must show (reference, property, text), and how many updates KiCad deferred (the person is editing those items).
     expect: Vec<(String, String, String)>, deferred: usize,
     /// Copper moved or was added (a route, a placement, a track): every zone is refilled before the save, so no pour is left over the new copper.
@@ -615,6 +638,8 @@ impl Run<'_> {
         for p in items.iter_mut().filter(|i| i["@type"].as_str().is_some_and(|t| t.ends_with(".Pad"))) { if let Some(n) = nets.get(p["number"].as_str().unwrap_or("")) { p["net"] = n.clone() } }
         items.extend(old["definition"]["items"].as_array().into_iter().flatten().filter(field).cloned());
         let mut new = old.clone(); new["position"] = t["position"].clone(); if t["attributes"].is_object() { new["attributes"] = t["attributes"].clone() }
+        let places = |fp: &Value| -> Vec<(String, f64, f64)> { fp["definition"]["items"].as_array().into_iter().flatten().filter(|i| i["@type"].as_str().is_some_and(|t| t.ends_with(".Pad"))).map(|p| (p["number"].as_str().unwrap_or("").to_string(), mm(&p["position"]["x_nm"]), mm(&p["position"]["y_nm"]))).collect() };
+        let now = places(&t); for (num, x, y) in places(old) { if !now.iter().any(|n| n.0 == num && (n.1 - x).abs() < 1e-4 && (n.2 - y).abs() < 1e-4) { if let Some(net) = nets.get(&num).and_then(|n| n["name"].as_str()).filter(|n| !n.is_empty()) { self.vacated.push((net.to_string(), x, y)) } } }
         new["definition"] = t["definition"].clone(); new["definition"]["items"] = json!(items);
         Ok(new)
     }
@@ -654,6 +679,12 @@ impl Run<'_> {
     }
     async fn update_body(&mut self, kind: &str, items: Vec<(Value, Value)>) -> Result<Value, String> { self.update(kind, items.into_iter().map(|(r, s)| (r, s, true)).collect()).await }
     async fn op(&mut self, i: usize, op: &Value) -> Result<Value, String> {
+        // what the check's `new` is about: the nets a route names, the parts placed, moved or set by reference, a new track's net; anything else
+        // (a delete, a rule, a selector) has no such list, and then every new finding is this edit's
+        match verb(op) { "find" | "route" | "place" => {}
+            v @ ("move" | "set") => match &op[v] { Value::String(r) => self.touched.push(r.clone()), Value::Array(a) => self.touched.extend(a.iter().filter_map(|x| x.as_str().map(str::to_string))), _ => self.touch_all = true },
+            "add" => for it in match &op["add"] { Value::Array(a) => a.clone(), o => vec![o.clone()] } { match it["track"]["net"].as_str().or(it["via"]["net"].as_str()).or(it["symbol"]["ref"].as_str()) { Some(n) if !n.is_empty() => self.touched.push(n.to_string()), _ => self.touch_all = true } },
+            _ => self.touch_all = true }
         match verb(op) {
             "find" => {
                 let sel = if let Some(k) = op["find"].as_str() { json!({"kind": k}) } else { selector(&op["find"], self.board) }; let kind = sel["kind"].as_str().unwrap_or("").to_string(); let limit = sel["limit"].as_u64().map_or(ROWS, |n| n as usize);
@@ -666,8 +697,10 @@ impl Run<'_> {
                         fps.iter().flat_map(|(f, _)| pad_rows(f)).filter(|r| matches(&sel, r)).collect() }
                     else if sel["raw"].as_bool().unwrap_or(false) { self.pick(&sel).await?.into_iter().map(|(raw, _)| raw).collect() }
                     else { self.pick(&sel).await?.iter().map(|(raw, _)| row(&kind, raw, wf)).collect() };
-                let n = rows.len(); let mut out = json!({"rows": rows.into_iter().take(limit).collect::<Vec<_>>()});
-                if n > limit { out["more"] = json!(format!("{} more: narrow the selector or give limit", n - limit)) }
+                let n = rows.len(); let (mut kept, mut size) = (vec![], 0usize);
+                for r in rows.into_iter().take(limit) { size += r.to_string().len(); if size > FIND_CHARS && !kept.is_empty() { break } kept.push(r) }
+                let shown = kept.len(); let mut out = json!({"rows": kept});
+                if n > shown { out["more"] = json!(format!("{} more: narrow the selector (ref, net, layer, a smaller near){}", n - shown, if shown < limit.min(n) { "" } else { " or give limit" })) }
                 Ok(out)
             }
             v @ ("move" | "set") => {
@@ -778,10 +811,11 @@ impl Run<'_> {
                 if pats.is_empty() || !self.board { return Err("route takes a board's net names: \"/LED*\" or [\"/SDA\", \"/SCL\"]".into()) }
                 self.settle(i).await?; let (mut board, classes) = self.model().await?;
                 let mut nets: Vec<String> = classes.as_object().into_iter().flatten().map(|(n, _)| n.clone()).filter(|n| pats.iter().any(|p| glob(p, n))).collect();
+                let mut of_parts: Vec<String> = vec![];
                 // a part ("R3") or one of its pads ("R3.2") stands for the nets on it
                 let known = nets.clone(); for p in pats.iter().filter(|p| !known.iter().any(|n| glob(p, n))) { let (r, pad) = p.rsplit_once('.').map_or((p.as_str(), None), |(r, n)| (r, Some(n)));
                     let of: Vec<String> = board.items.iter().filter(|i| i.kind == kr::Kind::Pad && !i.net.is_empty() && ((i.of.0 == *p) || (i.of.0 == r && pad == Some(i.of.1.as_str())))).map(|i| i.net.clone()).collect();
-                    if of.is_empty() { return Err(format!("no net or part matches `{p}`")) } for n in of { if !nets.contains(&n) { nets.push(n) } } }
+                    if of.is_empty() { return Err(format!("no net or part matches `{p}`")) } for n in of { if !of_parts.contains(&n) { of_parts.push(n.clone()) } if !nets.contains(&n) { nets.push(n) } } }
                 // a part named here has its pads made clean: another net's track that now lies on one of them (a footprint was exchanged, a part
                 // moved) is taken up with its whole net and routed again
                 let mut crossing: Vec<String> = vec![];
@@ -803,6 +837,7 @@ impl Run<'_> {
                 nets.sort_by(|a, z| span(a).partial_cmp(&span(z)).unwrap_or(std::cmp::Ordering::Equal));
                 let ws: Vec<f64> = nets.iter().map(|n| width(n)).collect(); if let Some(k) = ws.iter().position(|w| *w <= 0.0) { return Err(format!("{} has no track width: give width", nets[k])) }
                 let wof: std::collections::HashMap<String, f64> = nets.iter().cloned().zip(ws).collect(); let copper = board.layers.clone();
+                let stands: Vec<kr::Item> = board.items.iter().filter(|i| matches!(i.kind, kr::Kind::Pad | kr::Kind::Via) && self.vacated.iter().any(|v| v.0 == i.net)).cloned().collect();
                 type Res = Vec<(String, Result<kr::Routed, (kr::Routed, String)>)>;
                 let (res, wof) = tokio::task::spawn_blocking(move || { let mut order = nets; let mut best: Option<Res> = None;
                     let bad = |r: &Res| r.iter().filter(|x| x.1.is_err()).count();
@@ -816,7 +851,7 @@ impl Run<'_> {
                         if order.len() < 2 { break }
                         if n == 0 || next == order { break } order = next }
                     (best.unwrap_or_default(), wof) }).await.map_err(|e| format!("the router stopped: {e}"))?;
-                let (mut items, mut routed, mut failed) = (vec![], vec![], vec![]);
+                let (mut items, mut routed, mut failed) = (vec![], vec![], vec![]); self.touched.extend(wof.keys().cloned());
                 for (net, r) in res { let (r, why) = match r { Ok(r) => (r, None), Err((r, e)) => (r, Some(e)) };
                     for (a, z, l) in &r.tracks { items.push(json!({"@type": format!("{BT}Track"), "start": to_xy(a.0, a.1), "end": to_xy(z.0, z.1), "width": {"value_nm": nm(wof[&net])}, "layer": layer_enum(&copper[*l]), "net": {"name": net}})) }
                     for (p, s) in &r.vias { let (a, z) = (layer_enum(&copper[s.from]), layer_enum(&copper[s.to]));
@@ -827,11 +862,66 @@ impl Run<'_> {
                     let mut ls: Vec<&str> = r.tracks.iter().map(|t| copper[t.2].as_str()).collect(); ls.sort(); ls.dedup();
                     let row = json!({"net": net, "width": wof[&net], "length": (r.length * 1000.0).round() / 1000.0, "vias": r.vias.len(), "layers": ls});
                     match why { None => routed.push(row), Some(e) => failed.push(json!({"net": net, "why": e})) } }
+                // a part's nets (its pads moved: a footprint was exchanged): what is left of an old track past where it still joins something is
+                // cut back to there, or taken away when it joins nothing (KiCad calls it a dangling track)
+                let mut trimmed = 0usize;
+                if !self.vacated.is_empty() {
+                    let mut open: Vec<(String, kr::P)> = self.vacated.iter().map(|v| (v.0.clone(), kr::P(v.1, v.2))).collect();
+                    let pt = |v: &Value| kr::P(mm(&v["x_nm"]), mm(&v["y_nm"]));
+                    let mut old: Vec<(Value, kr::P, kr::P, f64, String, bool)> = self.items("track").await?.into_iter().map(|(r, _)| r).filter(|r| r["net"]["name"].as_str().is_some_and(|n| self.vacated.iter().any(|x| x.0 == n) && !rip.iter().any(|x| x == n)))
+                        .map(|r| { let (a, z, w, l) = (pt(&r["start"]), pt(&r["end"]), mm(&r["width"]["value_nm"]), format!("{}|{}", r["net"]["name"].as_str().unwrap_or(""), r["layer"].as_str().unwrap_or(""))); (r, a, z, w, l, true) }).collect();
+                    let new: Vec<(kr::P, kr::P, f64, String)> = items.iter().filter(|i| i["@type"].as_str().is_some_and(|t| t.ends_with(".Track"))).map(|i| (pt(&i["start"]), pt(&i["end"]), mm(&i["width"]["value_nm"]), format!("{}|{}", i["net"]["name"].as_str().unwrap_or(""), i["layer"].as_str().unwrap_or("")))).collect();
+                    let vias: Vec<(kr::P, f64, String)> = items.iter().filter(|i| i["@type"].as_str().is_some_and(|t| t.ends_with(".Via"))).map(|i| (pt(&i["position"]), mm(&i["pad_stack"]["copper_layers"][0]["size"]["x_nm"]) / 2.0, i["net"]["name"].as_str().unwrap_or("").to_string())).collect();
+                    let (mut gone, mut cut): (Vec<Value>, Vec<Value>) = (vec![], vec![]);
+                    for _ in 0..40 { let mut changed = false;
+                        for k in 0..old.len() { if !old[k].5 { continue } let (a, z, w, key) = (old[k].1, old[k].2, old[k].3, old[k].4.clone()); let net = key.split('|').next().unwrap_or("").to_string();
+                            // only a track with an end where a pad stood (or where a track taken away for that ended)
+                            let ends: Vec<bool> = [a, z].iter().map(|e| open.iter().any(|o| o.0 == net && o.1.dist(*e) < 0.02)).collect(); if !ends[0] && !ends[1] { continue } let li = copper.iter().position(|c| layer_enum(c) == key.split('|').nth(1).unwrap_or(""));
+                            // where along it (0 at its start, 1 at its end) something of its net joins it: another track's end, a pad, a via
+                            let mut at: Vec<f64> = vec![]; let len = a.dist(z).max(1e-9); let along = |q: kr::P| (((q.0 - a.0) * (z.0 - a.0) + (q.1 - a.1) * (z.1 - a.1)) / (len * len)).clamp(0.0, 1.0);
+                            for (j, o) in old.iter().enumerate() { if j != k && o.5 && o.4 == key { for q in [o.1, o.2] { if kr::seg_dist(q, a, z) <= w / 2.0 + 1e-3 { at.push(along(q)) } } for (q, t) in [(a, 0.0), (z, 1.0)] { if kr::seg_dist(q, o.1, o.2) <= o.3 / 2.0 + 1e-3 { at.push(t) } } } }
+                            for o in new.iter().filter(|o| o.3 == key) { for q in [o.0, o.1] { if kr::seg_dist(q, a, z) <= w / 2.0 + 1e-3 { at.push(along(q)) } } for (q, t) in [(a, 0.0), (z, 1.0)] { if kr::seg_dist(q, o.0, o.1) <= o.2 / 2.0 + 1e-3 { at.push(t) } } }
+                            for s in stands.iter().filter(|s| s.net == net && li.map_or(true, |l| s.layers & 1 << l != 0)) { let c = s.shape.anchor(a); let n = kr::P(a.0 + (z.0 - a.0) * along(c), a.1 + (z.1 - a.1) * along(c)); if s.shape.dist(n) <= 1e-3 { at.push(along(c)) } for (q, t) in [(a, 0.0), (z, 1.0)] { if s.shape.dist(q) <= 1e-3 { at.push(t) } } }
+                            for (c, r, vn) in vias.iter().filter(|v| v.2 == net) { if kr::seg_dist(*c, a, z) <= *r { at.push(along(*c)) } }
+                            let (lo, hi) = at.iter().fold((f64::MAX, f64::MIN), |m, t| (m.0.min(*t), m.1.max(*t)));
+                            // (the end that stood on the pad is the one cut back; the other end stays as it is)
+                            let (lo, hi) = (if ends[0] { lo } else { 0.0 }, if ends[1] { hi } else { 1.0 });
+                            if at.is_empty() || (hi - lo) * len < 0.01 { old[k].5 = false; gone.push(old[k].0["id"].clone()); changed = true; for (e, was) in [(a, ends[0]), (z, ends[1])] { if !was { open.push((net.clone(), e)) } } continue }
+                            if (ends[0] && lo * len > 0.01) || (ends[1] && (1.0 - hi) * len > 0.01) {
+                                let (na, nz) = (kr::P(a.0 + (z.0 - a.0) * lo, a.1 + (z.1 - a.1) * lo), kr::P(a.0 + (z.0 - a.0) * hi, a.1 + (z.1 - a.1) * hi));
+                                old[k].1 = na; old[k].2 = nz; old[k].0["start"] = to_xy(na.0, na.1); old[k].0["end"] = to_xy(nz.0, nz.1); cut.retain(|c: &Value| c["id"] != old[k].0["id"]); cut.push(old[k].0.clone()); changed = true }
+                        }
+                        if !changed { break } }
+                    cut.retain(|c| !gone.contains(&c["id"])); trimmed = gone.len() + cut.len(); self.vacated.clear();
+                    if trimmed > 0 { self.begin().await?; self.refill_all = true;
+                        if !cut.is_empty() { let r = self.c.call(&format!("{C}UpdateItems"), json!({"header": self.header(&Value::Null), "items": cut})).await?; if let Some(bad) = status_bad(&r, "updated_items") { return Err(bad) } }
+                        if !gone.is_empty() { self.c.call(&format!("{C}DeleteItems"), json!({"header": self.header(&Value::Null), "item_ids": gone})).await?; } }
+                }
+                // a new track that ends part way along another of its net: that one is broken there, as KiCad's own router breaks a track at a
+                // junction (an end on the middle of a track is a dangling end to KiCad's check)
+                let mut broken: Vec<Value> = vec![];
+                if !items.is_empty() {
+                    let pt = |v: &Value| kr::P(mm(&v["x_nm"]), mm(&v["y_nm"])); let is_track = |i: &Value| i["@type"].as_str().is_some_and(|t| t.ends_with(".Track"));
+                    let ends: Vec<(kr::P, String, String)> = items.iter().filter(|i| is_track(i)).flat_map(|i| [(pt(&i["start"]), i["net"]["name"].as_str().unwrap_or("").to_string(), i["layer"].as_str().unwrap_or("").to_string()), (pt(&i["end"]), i["net"]["name"].as_str().unwrap_or("").to_string(), i["layer"].as_str().unwrap_or("").to_string())]).collect();
+                    let mut lines: Vec<(Value, bool)> = self.items("track").await?.into_iter().map(|(r, _)| (r, true)).filter(|(r, _)| ends.iter().any(|e| r["net"]["name"] == e.1.as_str())).collect();
+                    lines.extend(items.iter().filter(|i| is_track(i)).cloned().map(|i| (i, false)));
+                    let mut k = 0; let mut extra: Vec<Value> = vec![]; let mut changed: Vec<usize> = vec![];
+                    while k < lines.len() { let (a, z) = (pt(&lines[k].0["start"]), pt(&lines[k].0["end"]));
+                        let hit = ends.iter().find(|e| lines[k].0["net"]["name"] == e.1.as_str() && lines[k].0["layer"] == e.2.as_str() && kr::seg_dist(e.0, a, z) < 1e-3 && e.0.dist(a) > 0.01 && e.0.dist(z) > 0.01).map(|e| e.0);
+                        match hit { Some(m) => { let mut rest = lines[k].0.clone(); if let Some(o) = rest.as_object_mut() { o.remove("id"); } rest["start"] = to_xy(m.0, m.1); lines[k].0["end"] = to_xy(m.0, m.1);
+                                if lines[k].1 && !changed.contains(&k) { changed.push(k) } lines.push((rest.clone(), false)); extra.push(rest) }
+                            None => k += 1 } }
+                    broken = changed.iter().map(|k| lines[*k].0.clone()).collect();
+                    // the new tracks as broken (those of this call), and the far halves of the old ones
+                    let n_new = items.iter().filter(|i| is_track(i)).count(); let old_n = lines.len() - n_new - extra.len();
+                    let mut fresh: Vec<Value> = lines[old_n..old_n + n_new].iter().map(|l| l.0.clone()).collect(); fresh.extend(extra); fresh.extend(items.iter().filter(|i| !is_track(i)).cloned()); items = fresh;
+                }
                 if !items.is_empty() { self.begin().await?; self.refill_all = true;
+                    if !broken.is_empty() { let r = self.c.call(&format!("{C}UpdateItems"), json!({"header": self.header(&Value::Null), "items": broken})).await?; if let Some(bad) = status_bad(&r, "updated_items") { return Err(bad) } }
                     let r = self.c.call(&format!("{C}CreateItems"), json!({"header": self.header(&Value::Null), "items": items})).await?; if let Some(bad) = status_bad(&r, "created_items") { return Err(bad) } }
                 // nets that were already whole are counted, not listed
                 let whole = routed.iter().filter(|r| r["length"] == 0.0).count(); routed.retain(|r| r["length"] != 0.0);
-                let mut out = json!({"routed": routed}); if ripped > 0 { out["ripped_up"] = json!(ripped) } if !crossing.is_empty() { out["rerouted_off_the_pads"] = json!(crossing) } if whole > 0 { out["already_connected"] = json!(whole) } if !failed.is_empty() { out["failed"] = json!(failed) }
+                let mut out = json!({"routed": routed}); if ripped > 0 { out["ripped_up"] = json!(ripped) } if !crossing.is_empty() { out["rerouted_off_the_pads"] = json!(crossing) } if trimmed > 0 { out["old_stubs_trimmed"] = json!(trimmed) } if whole > 0 { out["already_connected"] = json!(whole) } if !failed.is_empty() { out["failed"] = json!(failed) }
                 Ok(out)
             }
             "place" => {
@@ -843,7 +933,7 @@ impl Run<'_> {
                 let norm = |d: f64| { let x = d.rem_euclid(360.0); if x > 180.0 { x - 360.0 } else { x } };
                 let (mut ups, mut rows) = (vec![], vec![]);
                 for (r, target) in pairs {
-                    let (tref, tpad) = target.rsplit_once('.').ok_or(format!("{r}: the pin it goes next to is REF.PAD, e.g. U1.26"))?;
+                    let (tref, tpad) = target.rsplit_once('.').ok_or(format!("{r}: the pin it goes next to is REF.PAD, e.g. U1.26"))?; self.touched.push(r.clone());
                     let t = board.items.iter().find(|i| i.kind == kr::Kind::Pad && i.of.0 == tref && i.of.1 == tpad).ok_or(format!("no pad `{target}`"))?.clone();
                     let mut raw = fp(&r)?; let at = kr::P(mm(&raw["position"]["x_nm"]), mm(&raw["position"]["y_nm"])); let rot = raw["orientation"]["value_degrees"].as_f64().unwrap_or(0.0);
                     let trot = fp(tref)?["orientation"]["value_degrees"].as_f64().unwrap_or(0.0);
@@ -888,7 +978,7 @@ pub async fn run(c: &dyn Call, path: &str, a: &Value) -> Result<Value, String> {
     if let Some((i, _)) = ops.iter().enumerate().find(|(_, o)| verb(o).is_empty()) { return Err(format!("op {}: an op is one of find, move, set, add, delete, route, place, netclass, rule, refill, ipc", i + 1)) }
     let patient = Patient { c, step: BUSY_STEP, wait: BUSY_WAIT }; let c: &dyn Call = &patient;
     let doc = Run::open(c, path).await?;
-    let mut r = Run { c, expect: vec![], deferred: 0, refill_all: false, planned: Default::default(), added: vec![], libs: false, pwr: None, lib_step: std::time::Duration::from_millis(if cfg!(test) { 1 } else { 500 }), board: path.ends_with(".kicad_pcb"), doc, commit: None, sheets: None, refill: vec![], wrote: false, cache: Default::default(),
+    let mut r = Run { c, expect: vec![], deferred: 0, refill_all: false, planned: Default::default(), added: vec![], libs: false, pwr: None, touched: vec![], touch_all: false, vacated: vec![], lib_step: std::time::Duration::from_millis(if cfg!(test) { 1 } else { 500 }), board: path.ends_with(".kicad_pcb"), doc, commit: None, sheets: None, refill: vec![], wrote: false, cache: Default::default(),
         message: a["message"].as_str().unwrap_or("kicad_edit").to_string(), split: 0, templates: Default::default() };
     // KiCad's own check before the edit, so the answer can say what the edit added to it (check: false leaves it out)
     let checking = writes(&a["ops"]) && a["save"].as_bool().unwrap_or(true) && a["check"].as_bool().unwrap_or(true);
@@ -928,7 +1018,7 @@ pub async fn run(c: &dyn Call, path: &str, a: &Value) -> Result<Value, String> {
         } }
         // the parts this call added, with the net each pin is now on (the saved schematic's own netlist)
         if out["saved"].is_string() && !r.board && !r.added.is_empty() { if let Ok(all) = r.c.nets().await { let m: Map<String, Value> = r.added.iter().filter(|a| all[a.as_str()].is_object()).map(|a| (a.clone(), all[a.as_str()].clone())).collect(); if !m.is_empty() { out["nets"] = Value::Object(m) } } }
-        if out["saved"].is_string() && !before.is_null() { if let Ok(now) = r.c.check().await { if !now.is_null() { out["check"] = check_delta(&before, &now) } } }
+        if out["saved"].is_string() && !before.is_null() { if let Ok(now) = r.c.check().await { if !now.is_null() { out["check"] = check_delta(&before, &now, if r.touch_all || !r.board { &[] } else { &r.touched }) } } }
     }
     Ok(out)
 }
@@ -1162,17 +1252,24 @@ mod tests {
         let v = |ty: &str, a: &str| json!({"type": ty, "items": [{"description": a, "pos": {"x": 1.5, "y": 2}}]});
         let before = json!({"violations": [v("clearance", "Track [A]"), v("clearance", "Track [A]")], "unconnected_items": [v("x", "Pad 1 [N] of R1"), v("x", "Pad 1 [M] of R2")]});
         let after = json!({"violations": [v("clearance", "Track [A]"), v("shorting_items", "Via [B]")], "unconnected_items": [v("x", "Pad 1 [M] of R2")]});
-        assert_eq!(check_delta(&before, &after), json!({"by": "KiCad's DRC of the saved board, schematic parity included", "new": ["shorting_items: Via [B] @1.5,2"], "left": 3, "gone": 2}));
+        assert_eq!(check_delta(&before, &after, &[]), json!({"by": "KiCad's DRC of the saved board, schematic parity included", "new": ["shorting_items: Via [B] @1.5,2"], "left": 3, "gone": 2}));
         assert_eq!(findings(&json!({"sheets": [{"violations": [v("pin_not_connected", "Symbol U7 Pin 1")]}, {"violations": []}]})), ["pin_not_connected: Symbol U7 Pin 1 @1.5,2"]);
         let many = json!({"violations": (0..15).map(|i| v("clearance", &format!("T{i}"))).collect::<Vec<_>>()});
-        let d = check_delta(&json!({}), &many); assert_eq!((d["new"].as_array().unwrap().len(), d["more"].clone(), d["left"].clone()), (12, json!(3), json!(15)));
+        let d = check_delta(&json!({}), &many, &[]); assert_eq!((d["new"].as_array().unwrap().len(), d["more"].clone(), d["left"].clone()), (12, json!(3), json!(15)));
+        // a refill moves findings about on a large board: the same finding with another length or place is the same one, and one on a net
+        // the edit did not work on is counted, not listed
+        let u = |a: &str, x: f64| json!({"type": "unconnected_items", "items": [{"description": a, "pos": {"x": x, "y": 1}}]});
+        let (b4, aft) = (json!({"unconnected_items": [u("Track [/SCL] on F.Cu, length 2.8500 mm", 1.0)]}), json!({"unconnected_items": [u("Track [/SCL] on F.Cu, length 0.2915 mm", 7.0), u("Zone [GND] on In5.Cu", 2.0), u("Pad 1 [/LED1] of R7", 3.0)]}));
+        let d = check_delta(&b4, &aft, &["/LED1".to_string()]); assert_eq!((d["new"].clone(), d["left"].clone(), d.get("gone")), (json!(["unconnected: Pad 1 [/LED1] of R7 @3.0,1"]), json!(3), None), "{d}");
+        assert_eq!((d["elsewhere"]["count"].clone(), d["elsewhere"]["first"].clone()), (json!(1), json!(["unconnected: Zone [GND] on In5.Cu @2.0,1"])));
+        assert_eq!(check_delta(&b4, &aft, &["R7".to_string()])["new"].as_array().unwrap().len(), 1, "a part by its reference"); assert_eq!(check_delta(&b4, &aft, &[])["new"].as_array().unwrap().len(), 2, "no list: every new finding");
         // the driver: the check runs before the edit and after the save, and only a call that writes and saves is checked
         struct Checked(Fake, Mutex<u32>);
         impl Call for Checked { fn call<'a>(&'a self, ty: &'a str, msg: Value) -> Fut<'a> { self.0.call(ty, msg) }
             fn check<'a>(&'a self) -> Fut<'a> { Box::pin(async move { let mut n = self.1.lock().unwrap(); *n += 1; Ok(if *n == 1 { json!({"violations": []}) } else { json!({"violations": [{"type": "clearance", "items": [{"description": "Track [GND]"}]}]}) }) }) } }
         let c = Checked(fake(None), Mutex::new(0)); let rt = || tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
         let out = rt().block_on(run(&c, "/p/b.kicad_pcb", &json!({"ops": [{"move": "R1", "by": [1, 0]}]}))).unwrap();
-        assert_eq!((out["check"].clone(), *c.1.lock().unwrap()), (json!({"by": "KiCad's DRC of the saved board, schematic parity included", "new": ["clearance: Track [GND]"], "left": 1}), 2));
+        assert_eq!((out["check"].clone(), *c.1.lock().unwrap()), (json!({"by": "KiCad's DRC of the saved board, schematic parity included", "new": [], "left": 1, "elsewhere": {"count": 1, "first": ["clearance: Track [GND]"], "note": "on items this edit did not work on: a refill or the file's first save moves such findings about; they are this edit's only if its copper cut a pour there"}}), 2), "R1 was moved: a finding that does not name R1 is set apart, not hidden");
         let c = Checked(fake(None), Mutex::new(0)); let out = rt().block_on(run(&c, "/p/b.kicad_pcb", &json!({"ops": [{"find": "footprint"}]}))).unwrap(); assert_eq!((out.get("check"), *c.1.lock().unwrap()), (None, 0));
         let c = Checked(fake(None), Mutex::new(0)); rt().block_on(run(&c, "/p/b.kicad_pcb", &json!({"ops": [{"move": "R1", "by": [1, 0]}], "check": false}))).unwrap(); assert_eq!(*c.1.lock().unwrap(), 0);
     }

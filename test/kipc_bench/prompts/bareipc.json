@@ -1,0 +1,27 @@
+[
+ [
+  "re",
+  "\\. Edit and read boards and schematics with the backplane MCP tool `kicad_edit`.*?unsaved work is undone with EndCommit CMA_DROP\\.",
+  ". Edit boards and schematics through the backplane MCP tool `kicad_ipc` {path, type, message}: Backplane runs one headless KiCad per project and sends your command to it over KiCad's IPC API (type is the protobuf command, e.g. `kiapi.board.commands.GetItems`; message is its fields as JSON; `kicad_ipc_status` shows the server, its version and the commands it has). Headless KiCad has no selection or view state: always pass explicit item IDs (KIIDs from GetItems), wrap edits in BeginCommit/EndCommit, then SaveDocument; unsaved work is undone with EndCommit CMA_DROP."
+ ],
+ [
+  "Exports, and a check outside an edit, stay on the CLI above.",
+  "ERC/DRC and exports stay on the CLI above."
+ ],
+ [
+  "edit it live through kicad_edit (or kicad_ipc)",
+  "edit it live through kicad_ipc"
+ ],
+ [
+  "kicad_edit and kicad_ipc are the one way in",
+  "kicad_ipc is the one way in"
+ ],
+ [
+  "change design rules with kicad_edit's rule op (it adds, changes or removes rules by name and keeps everyone else's), net classes with its netclass op, and board setup through kicad_ipc",
+  "change design rules, net classes and board setup through kicad_ipc"
+ ],
+ [
+  "(kicad_edit saves by itself; after raw kicad_ipc edits send SaveDocument; a script's --save)",
+  "(after kicad_ipc edits send SaveDocument; a script's --save)"
+ ]
+]

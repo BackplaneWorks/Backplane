@@ -90,7 +90,13 @@ impl Agents {
             Ok(v) => (true, v),
             // its document is not open in this KiCad yet: open it and ask again
             // (never in the person's own KiCad: what it has open is theirs to decide, and no frame is shown or raised for an agent)
-            Err(e) if e.contains("no handler available for request") && !doc_kind.is_empty() && !matches!(short.as_str(), "OpenDocument" | "GetOpenDocuments")
+            // a command about a project sent without one (GetNetClasses {}): the document's own project, and asked again
+            Err(e) if (e.contains("a project name and path must be specified") || e.contains("the requested project  is not open")) && !doc_kind.is_empty() && crate::files::kicad::embed::gui_route(&crate::files::kicad::ipc::pro_of(path)).is_none() => {
+                match self.kicad_open(thread, path, doc_kind).await { Ok(d) => { let mut m = msg; if !m.is_object() { m = json!({}) } m["project"] = d["project"].clone();
+                        match self.kicad_call(thread, path, &ty, m).await { Ok(v) => (true, v), Err(e) => fail(&e) } }
+                    Err(_) => fail(&e) }
+            }
+            Err(e) if e.contains("no handler available for request") && !doc_kind.is_empty() && short != "OpenDocument"
                 && crate::files::kicad::embed::gui_route(&crate::files::kicad::ipc::pro_of(path)).is_none() => {
                 if let Err(e2) = self.kicad_open(thread, path, doc_kind).await { return fail(&format!("{e}; opening {path} failed: {e2}")) }
                 match self.kicad_call(thread, path, &ty, msg).await { Ok(v) => (true, v), Err(e) => fail(&e) }

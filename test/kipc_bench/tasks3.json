@@ -1,0 +1,20 @@
+[
+ {
+  "id": "route_leds",
+  "fixture": "sh_route",
+  "check": "route_leds",
+  "prompt": "On the board StickHub.kicad_pcb in this folder, the seven LED nets /LED1 to /LED7 (from U1 to the resistors R7 to R13) are not routed. Add a net class `LED` with a 0.2 mm track width and 0.15 mm clearance, assigned to the nets by the pattern `/LED*`, route all seven nets with 0.2 mm tracks (vias where you need them, at the default 0.5 mm / 0.3 mm), refill the copper pours and save. DRC must be clean afterwards: no unconnected items and no violations. Change nothing else."
+ },
+ {
+  "id": "route_drv",
+  "fixture": "sh_drv",
+  "check": "route_drv",
+  "prompt": "On the board StickHub.kicad_pcb in this folder, the seven LED driver nets Net-(D15-1) to Net-(D21-1) are not routed: each runs from a resistor (R7 to R13, pad 1, on the bottom side) to both pads GA and RK of its two-colour LED (D15 to D21, on the top side). Route all seven at their net class's track width (0.15 mm), with vias where you need them (0.5 mm / 0.3 mm), refill the copper pours and save. DRC must be clean afterwards: no unconnected items and no violations. Change nothing else."
+ },
+ {
+  "id": "hubble_route",
+  "fixture": "hubble",
+  "check": "hubble_route",
+  "prompt": "Hubble_DK.kicad_pcb in this folder is an 8-layer board part way through routing. Route these four debugger nets, which are not routed yet: Net-(U9-B1) (U9 pad 10 to R15), Net-(U9-B2) (U9 pad 9 to R16), Net-(U9-B3) (U9 pad 8 to R17) and /Debugger/DBG_LS_OE (U9 pad 12 to R18 and the copper already on that net), at their net class's track width or wider. Don't touch anything else and don't add DRC violations; save the board."
+ }
+]

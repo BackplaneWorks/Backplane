@@ -143,6 +143,78 @@ What a run still spends: every turn's first request lists the folder and looks f
 the prompt's asking), about 43 thousand tokens; then one request per `kicad_edit` call and one to answer. A task is
 two to four requests, so the floor is near 90 thousand tokens a task until the prompt and tool definitions shrink.
 
+## Routing three ways: bare IPC, `kicad_edit` without its router, `kicad_edit` with it
+
+Is the hub's router worth having, or would the model do as well with the API alone? Three routing tasks (`tasks3.json`:
+`route_leds`, `hubble_route`, and `route_drv`: seven three-pad nets across StickHub, a bottom-side resistor to both pads
+of a top-side LED, one via each), `claude-fable-5-2`, medium effort, two runs a task and variant, three hubs side by side
+(2026-11-15). (a) only raw `kicad_ipc`, the prompt's KiCad lines as before `kicad_edit` (`prompts/bareipc.json`,
+`KIPC_BENCH_DISALLOW`); (b) a build of `kicad_edit` that refuses `route` and `place` and does not describe them, so the
+model places tracks and vias through `add`; (c) main at 444bba150. Each run is scored by `h2h.py`: the rule check, each
+net's track length against the shortest tree over its pads, vias, layers, bends, acute corners, KiCad's DRC, and the
+clearance the new copper keeps over the rule (KiCad's own DRC asked again with a custom rule at the rule plus 0.01 to
+0.2 mm, pours left out); and its tool calls are read back (`h2h.py trace`).
+
+| variant | passes | context tokens | tool calls | wall s | cost $ |
+|---|---|---|---|---|---|
+| (a) bare IPC | 6/6 | 7,712,656 | 104 | 1,118 | 11.07 |
+| (b) `kicad_edit`, no router | 6/6 | 3,128,876 | 40 | 752 | 8.19 |
+| (c) `kicad_edit` with the router | 6/6 | 538,136 | 11 | 149 | 2.35 |
+
+| task | variant | context | calls | wall s | cost $ | length / shortest tree | vias | layers | bends | margin over the rule mm |
+|---|---|---|---|---|---|---|---|---|---|---|
+| route_leds | a / b / c | 2,246,439 / 500,117 / 113,602 | 33 / 6 / 2 | 321 / 197 / 28 | 3.29 / 2.24 / 0.69 | 1.06-1.09 / 1.07 / 1.057 | 0 | B | 12-16 / 13 / 19 | 0.01 |
+| route_drv | a / b / c | 2,212,983 / 1,209,613 / 91,074 | 32 / 18 / 2 | 336 / 258 / 28 | 3.14 / 2.85 / 0.69 | 1.22-1.23 / 1.15-1.26 / 1.186 | 7 | B, F | 49-190 / 43-55 / 52 | 0 |
+| hubble_route | a / b / c | 3,253,234 / 1,419,146 / 333,460 | 40 / 16 / 7 | 461 / 297 / 93 | 4.65 / 3.09 / 0.97 | 1.38-1.44 / 1.15-1.17 / 1.254 | 12 / 8-12 / 6 | B, In5 / B, In5 (In6) / B, F, In5, In6 | 18-20 / 11-12 / 13 | 0.01 / 0-0.025 / 0 |
+
+Every run passed and no run left a DRC finding on its nets; nobody leaves clearance to spare. The routes are alike in
+length. What differs is the price: without a router the model builds one. What the traces show:
+
+- (a) is not router-free. One `route_drv` run loaded KiStack's layout skill, found
+  `layout-placement/scripts/grid_router.py` (a placement check) and routed with it (190 bends); the other called the
+  fork's `SketchRoute`: "The auto-router connected 6 of the 14 links ... I'm now drawing the LED area to hand-route the
+  remaining 8." Every run parses the board file with a parser it writes (7 to 12 reads of the file, the first try
+  crashing more often than not), renders the area to a PNG and reads it back (single tool results of 110 to 307
+  thousand characters), and misuses the API two to eight times a run (`GetOpenDocuments` before a document is open,
+  `GetNetClasses` without a project, wrong field names).
+- (b) writes a router for anything but the shortest nets: "Fixing a small bug in my routing script, then computing the
+  seven routes" (a `route.py` with `heapq` and numpy, 7,500 characters). It still reads the board file for pad shapes
+  (`find` gave centres only), and one `find` near a point answered 52,966 characters, more than a tool result may be.
+  Its commits are one batched `add` and need no retry, and it takes the DRC in the answer at its word. Its tracks run at
+  any angle, which KiCad's check passes and a designer would not draw.
+- (c) is one call a task on StickHub. On Hubble it cost six to eight calls, and the routes were the worst of the three
+  to look at: a drilled via under the level shifter up to the top layer, on a board of laser micro vias, and the
+  check's `new` list named two findings on other nets that a refill had only moved ("I'm now checking that the two
+  'new' unconnected reports on other nets (/FEM.MD, /I2C.SCL) were already there before my edit").
+
+![route_drv three ways](kicad-ipc-bench/route-drv-three-ways.png)
+
+### What was fixed after it (no model runs; unit tests and the no-model end-to-end run)
+
+| what | before | now |
+|---|---|---|
+| Hubble's four nets (`route` by hand, `h2h.py quality`) | 1.254 x the shortest tree, 6 vias (drilled, under U9), B, F, In5, In6, 13 bends | 1.194 x, 10 laser micro vias as the board's own, B and In5 only, 14 bends; the agents' best by hand was 1.148 x with 12 |
+| route_drv | 1.186 x, 52 bends | 1.212 x, 49 bends |
+| route_leds | 1.057 x, 19 bends | 1.065 x, 15 bends |
+| the check's `new` on Hubble | two findings on nets the edit did not touch | none: the same finding with another length, place or item order is the same finding, and one on items the edit did not work on is counted under `elsewhere` |
+
+- The router follows the board: a via kind costs by how rare it is on the board (a drilled via on a board of micro
+  vias), a drilled via under a part of eight pads or more costs more, a layer the board hardly routes on costs a
+  quarter more, a plane layer is open to a stack of micro vias passing through and, at two and a half times the
+  length, to a track with no other way; a track takes a little room over its clearance where there is room; and the
+  grid's small steps are pulled into straight runs at 0, 45 and 90 degrees, no corner sharper than a right angle.
+- A new track that ends part way along another of its net breaks that track there (KiCad's check calls an end on the
+  middle of a track dangling); after a footprint exchange, the old track's end where the pad stood is cut back to
+  where it still joins something.
+- `find` stops at about 24 thousand characters and says how many rows are left; a pad's row has its copper's size,
+  turn and layer.
+- `kicad_ipc`: `GetOpenDocuments` opens the document when none is open (headless), and a project command sent without
+  a project is asked again with the document's own.
+- KiStack (2c6b542): the layout skill said to route by hand and never to use a router; it now says to route with
+  `kicad_edit`'s `route`, and layout-placement says its `grid_router.py` checks a placement and does not route a board.
+
+![Hubble before and after](kicad-ipc-bench/hubble-route.png)
+
 ## What was tried
 
 | variant | what | passes | context tokens | tool calls | cost $ |

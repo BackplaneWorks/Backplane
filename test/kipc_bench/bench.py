@@ -74,7 +74,7 @@ def main():
         sys.exit(1 if bad else 0)
     elif cmd == "run":
         variant = a[0]; runs = int(opt("--runs", "3")); par = int(opt("--par", "2"))
-        jobs = [(t, n) for n in range(1, runs + 1) for t in tasks]
+        first = int(os.environ.get("KIPC_BENCH_FIRST", "1")); jobs = [(t, n) for n in range(first, first + runs) for t in tasks]  # KIPC_BENCH_FIRST: more runs of a variant later, numbered on
         with concurrent.futures.ThreadPoolExecutor(par) as ex: list(ex.map(lambda j: one(work, variant, j[0], j[1]), jobs))
     elif cmd == "table":
         rs = [json.loads(l) for l in open(work + "/results.jsonl")]; vs = a or sorted({r["variant"] for r in rs}, key=lambda v: min(r["at"] for r in rs if r["variant"] == v))
