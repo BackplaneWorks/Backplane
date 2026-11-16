@@ -190,7 +190,9 @@ pub fn host(app: &mut Backplane, page: AnyElement, window: &mut Window, cx: &mut
             .when(on, |d| d.border_t_2().border_color(c("accent")))
             .child(trs(label))
             .children(badge(&data).map(|(n, tone)| div().px(px(4.)).h(px(14.)).flex().items_center().text_size(crate::scale::tpx(10.)).text_color(c(tone)).border_1().border_color(c(tone)).child(n)))
-            .on_click(cx.listener(move |this, _, _, cx| toggle(this, &idc, cx)));
+            // on the press, as the editor's own tabs beside it (kicad_pane.rs strip): the panel is there as the button goes down, not a
+            // click's length later (~50-100 ms of a person's click, all of the 100-145 ms real_use read for a panel opened by its tab)
+            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| { cx.stop_propagation(); toggle(this, &idc, cx) }));
         strip = strip.child(tab);
     }
     strip = strip.child(div().flex_1());
