@@ -165,6 +165,13 @@ if DRIVER == 'vnc' and os.environ.get('MAC_MODE') != 'libs':
     with open(os.path.join(OUT, 'bin/claude'), 'w') as f:
         f.write('#!/bin/sh\nexec /usr/bin/python3 ' + os.path.join(REPO, 'test/kicad_embed/mac/standin_agent.py') + ' "$@"\n')
     os.chmod(os.path.join(OUT, 'bin/claude'), 0o755)
+if os.environ.get('MAC_MODE') == 'update':
+    # the starting state: bp.12.5 installed by the hub's installer (placed where it puts it; an APFS clone of the published runtime)
+    _ver = json.load(open(os.path.join(RT, 'manifest.json')))['version']
+    _m = os.path.join(OUT, 'home', 'kicad', _ver)
+    if not os.path.isdir(_m):
+        os.makedirs(os.path.dirname(_m), exist_ok=True); subprocess.run(['cp', '-cR', RT, _m], check=True)
+    RT = _m
 if os.environ.get('FRESH_AGENT') == 'during':
     # lane B's embed_fresh_edit_e2e: KiCad's launcher 12 s late, in a clone of the runtime where the hub's installer puts it
     _ver = json.load(open(os.path.join(RT, 'manifest.json')))['version']
@@ -225,6 +232,9 @@ env = dict(os.environ, HOME=os.path.join(OUT, 'fh'), TMPDIR=tmp, BACKPLANE_KICAD
            # KiCad on macOS takes its config folder from the account's real home, not $HOME: without this the gate's KiCad seeded and wrote
            # the person's own ~/Library/Preferences/kicad/10.99 (the Mac mini, Nov 16). The hub reads $HOME, so both point at the test home.
            KICAD_CONFIG_HOME=os.path.join(OUT, 'fh', 'Library', 'Preferences', 'kicad'))
+if os.environ.get('MAC_MODE') == 'update':
+    env.pop('BACKPLANE_KICAD_CLI', None)
+    if os.environ.get('BACKPLANE_KICAD_FEED'): env['BACKPLANE_KICAD_FEED'] = os.environ['BACKPLANE_KICAD_FEED']
 hub = subprocess.Popen([HUB, '--home', os.path.join(OUT, 'home'), '--port', str(port), '--host', '127.0.0.1', '--no-tailscale', '--foreground'],
                        env=env, stdout=open(os.path.join(OUT, 'hub.log'), 'w'), stderr=subprocess.STDOUT); procs.append(hub)
 wait_for(lambda: subprocess.run(['curl', '-s', '-m1', '-o', '/dev/null', f'http://127.0.0.1:{port}/hello']).returncode == 0, 30)
@@ -317,6 +327,23 @@ try:
     time.sleep(1.5)
     cw = next((w for w in wins() if w[1] == client.pid and w[0] == cw[0]), cw)
     print(f'client window now {cw and cw[3]}', flush=True)
+    if os.environ.get('MAC_MODE') == 'update':
+        row = wait_for(lambda: rects().get('kicad-update'), 120, 0.5)
+        n = notices_outside('update-offer', 0)
+        check(bool(row), f'update: the first Edit with bp.12.5 offers the update in its row ({row})')
+        check(bool(row) and not n.get('kicad-update', (True,))[0], f'update: the row is outside the pane\'s rect ({n.get("kicad-update")})')
+        go = rects().get('kicad-update:go'); cwu = next((w for w in wins() if w[0] == cw[0]), cw)
+        if go: click(cwu[3][0] + go['x'] + go['w'] / 2, cwu[3][1] + 28 + go['y'] + go['h'] / 2)
+        kd = os.path.join(OUT, 'home', 'kicad')
+        new_cli = lambda: next((os.path.join(kd, d, 'bin', 'kicad-cli') for d in (os.listdir(kd) if os.path.isdir(kd) else []) if 'bp.13' in d and os.path.isfile(os.path.join(kd, d, 'bin', 'kicad-cli'))), None)
+        inst = wait_for(new_cli, 1200, 2); shot('update-2-installed')
+        check(bool(go) and bool(inst), f'update: Update installs bp.13 from the feed ({inst})')
+        ro = wait_for(lambda: rects().get('kicad-update:reopen'), 30, 0.5)
+        if ro: click(cwu[3][0] + ro['x'] + ro['w'] / 2, cwu[3][1] + 28 + ro['y'] + ro['h'] / 2)
+        f = wait_for(kicad_frame, 180, 0.5); shot('update-3-reopened')
+        p13 = [l for l in subprocess.run(['ps', '-axo', 'command='], capture_output=True, text=True).stdout.splitlines() if 'bp.13/' in l and OUT in l and 'kicad' in l.lower()]
+        check(bool(f) and bool(p13), f'update: the pane reopens on bp.13, KiCad over it ({"Reopen pressed" if ro else "no Reopen button"}; {len(p13)} bp.13 KiCad processes)')
+        raise SystemExit(1 if FAILS else 0)
     # ---- Edit: KiCad's frame over the pane, directly above our window ----
     def kicad_frame():
         order = wins(); ours = next((i for i, w in enumerate(order) if cw and w[0] == cw[0]), None)
