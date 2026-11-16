@@ -43,7 +43,7 @@ if [ "${FRESH_MANAGED:-}" = 1 ]; then
 fi
 SLOW=${FRESH_SLOW_S:-$([ "${FRESH_AGENT:-}" = during ] && echo 12 || echo 0)}
 if [ "$SLOW" != 0 ]; then
-  RT_ROOT=$(dirname "$(dirname "$KICAD_BIN")"); SLOW_RT="$OUT/rt-slow"; cp -al "$RT_ROOT" "$SLOW_RT"; rm "$SLOW_RT/bin/kicad"
+  RT_ROOT=$(dirname "$(dirname "$KICAD_BIN")"); SLOW_RT="$OUT/rt-slow/$(basename "$RT_ROOT")"; mkdir -p "$OUT/rt-slow"; cp -al "$RT_ROOT" "$SLOW_RT"; rm "$SLOW_RT/bin/kicad"
   { head -1 "$RT_ROOT/bin/kicad"; echo "sleep $SLOW"; tail -n +2 "$RT_ROOT/bin/kicad"; } >"$SLOW_RT/bin/kicad"; chmod +x "$SLOW_RT/bin/kicad"
   KICAD_BIN="$SLOW_RT/bin/kicad"; KICAD_CLI="$SLOW_RT/bin/kicad-cli"; export BACKPLANE_KICAD_BIN="$KICAD_BIN" BACKPLANE_KICAD_CLI="$KICAD_CLI"
   echo "INFO KiCad starts $SLOW s late: $SLOW_RT"
