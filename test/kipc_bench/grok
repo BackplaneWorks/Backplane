@@ -13,6 +13,11 @@ reps = json.load(open(os.environ["KIPC_BENCH_PROMPT"])) if os.environ.get("KIPC_
 home = os.environ.get("KIPC_BENCH_REALHOME", os.environ.get("HOME", ""))
 env = {k: v for k, v in os.environ.items() if not (k.startswith("CLAUDE") or k in ("ANTHROPIC_API_KEY", "BACKPLANE_AGENT_OWNER") or k.startswith("XDG_"))}
 env["HOME"] = home
+# KIPC_BENCH_GROK_CLEAN: the person's own MCP servers (their ~/.grok/config.toml) are switched off for this process, by Grok's config overlay
+if os.environ.get("KIPC_BENCH_GROK_CLEAN"):
+    try: names = re.findall(r"^\[mcp_servers\.([A-Za-z0-9_-]+)\]", open(os.path.join(home, ".grok", "config.toml")).read(), flags=re.M)
+    except OSError: names = []
+    env["GROK_CONFIG"] = json.dumps({"mcp_servers": {n: {"enabled": False} for n in names}})
 p = subprocess.Popen([os.environ["KIPC_BENCH_GROK"]] + a, stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env, text=True, bufsize=1)
 log = open(os.path.join(out, name + ".jsonl"), "w"); t0 = time.time(); lock = threading.Lock()
 def note(d, l):
