@@ -28,15 +28,22 @@ fn state() -> &'static Mutex<State> {
 
 /// The person's activity in one project's editors.
 #[derive(Default)]
-struct Person { selection: Option<(String, Value, Instant)>, edits: std::collections::VecDeque<(Instant, Value)> }
+struct Person { selection: Option<(String, Value, Instant)>, edits: std::collections::VecDeque<(Instant, Value)>, agent_wrote: Option<Instant> }
 
 /// How long the person's activity is news to an agent.
 const PERSON_RECENT: Duration = Duration::from_secs(120);
+/// How long after an agent's own edit a selection is taken for that edit's echo, not the person's.
+const AGENT_ECHO: Duration = Duration::from_secs(5);
+/// An agent's edit to this project ended now (kicad_edit): the selection KiCad reports right after is the edit's, not the person's.
+pub fn agent_wrote(pro: &str) { let mut s = state().lock().unwrap(); let p = s.person.entry(pro.to_string()).or_default(); p.agent_wrote = Some(Instant::now()); }
 
 /// The person selected something in KiCad (ET_SELECTION_CHANGED): `frame` "pcb"/"sch", `names` its ItemNames (empty: cleared).
 pub fn person_selected(pro: &str, frame: &str, names: Value) {
     let mut s = state().lock().unwrap();
     let p = s.person.entry(pro.to_string()).or_default();
+    // KiCad's selection event names no actor: a selection just after an agent's own edit is that edit's (a netlist import selects the
+    // parts it added), not the person at work, so it does not hold the agent's next call
+    if p.agent_wrote.is_some_and(|t| t.elapsed() < AGENT_ECHO) { p.selection = None; return }
     let empty = names.as_object().map(|o| o.values().all(|v| v.as_array().map(|a| a.is_empty()).unwrap_or(true))).unwrap_or(true);
     p.selection = if empty { None } else { Some((frame.to_string(), names, Instant::now())) };
 }
@@ -300,6 +307,12 @@ mod tests {
     }
     #[test] fn announcing_is_throttled() { assert!(due("ta1")); assert!(!due("ta1")); forget("ta1"); assert!(due("ta1")); }
     #[tokio::test] async fn an_unpaused_thread_never_waits() { assert_eq!(wait_resumed("tz").await, None); }
+    #[test] fn a_selection_right_after_an_agents_edit_is_not_the_persons() {
+        let pro = "/p/echo-test.kicad_pro";
+        agent_wrote(pro);
+        person_selected(pro, "pcb", json!({"references": ["C1", "C2"], "pins": [], "nets": []}));
+        assert!(person_now(pro).is_none(), "a netlist import's selection of the parts it added does not hold the agent");
+    }
     #[test] fn the_persons_selection_and_edits_reach_agents() {
         let pro = "/p/person-test.kicad_pro";
         assert!(person_now(pro).is_none());
