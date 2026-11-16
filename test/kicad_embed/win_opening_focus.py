@@ -1615,11 +1615,15 @@ def run(h):
             h.check("nogpu: each box was told to the hub with its title, so the pane says what KiCad is asking",
                     all(b.get("hub_dialogs") for b in nogpu_boxes), nogpu_boxes)
             h.check("nogpu: after the boxes the editor comes up (first paint, the opening settled)", settled, {"settled": settled})
-            kids = [w for w in E.list_child_windows(E.find_main_window(cp.pid)) if w["visible"]]
+            frame_ = int((h.last_kicad_report("settled") or {}).get("shown") or 0)
+            allk = E.list_child_windows(frame_)
+            with open(h.p("nogpu_children.json"), "w", encoding="utf-8") as f:
+                json.dump({"frame": frame_, "children": allk}, f, indent=1)
+            h.shot("nogpu_after_boxes")
+            kids = [w for w in allk if w["visible"]]
             # the fallback canvas (no OpenGL: KiCad's Cairo canvas) is not a wxGLCanvas: the largest visible canvas-like child then
             gls = [w for w in kids if w["class"] == "wxGLCanvas"] or [w for w in kids if w["class"] == "wxWindowNR"]
             gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
-            frame_ = int((h.last_kicad_report("settled") or {}).get("shown") or 0)
             px, zoomed = plain_key_acts(h, gl, "nogpu", frame_) if gl else (0, False)
             h.check("nogpu: then the editor is usable: a plain F2 acts with no click", bool(zoomed), {"f2_px": px, "canvas": bool(gl)})
             return h.finish()
