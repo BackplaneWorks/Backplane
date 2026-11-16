@@ -211,7 +211,7 @@ pub async fn tool(hub: &Arc<Hub>, thread: &str, name: &str, a: &Value) -> Result
             // the audit gate, here, before KiCad is asked
             let p = read_plan(hub, Some(thread), &pcb, false).await?;
             gate(&p, &ids)?;
-            call(hub, Some(thread), &pcb, "RoutePlan", json!({"board": spec(&pcb), "ids": ids, "max_nets": a["max_nets"].as_i64().unwrap_or(0)})).await?
+            call(hub, Some(thread), &pcb, "RoutePlan", json!({"board": spec(&pcb), "ids": ids, "max_nets": a["max_nets"].as_i64().unwrap_or(0)})).await.map_err(|e| route_busy(&e))?
         }
         "plan_stop" => call(hub, Some(thread), &pcb, "StopPlanRouting", json!({"board": spec(&pcb)})).await?,
         "plan_verify" => call(hub, Some(thread), &pcb, "VerifyPlan", json!({"board": spec(&pcb)})).await?,
@@ -246,6 +246,12 @@ pub async fn approve(hub: &Arc<Hub>, pcb: &str, layer: &str, ids: &[String], yes
         if !left.is_empty() { return Err(format!("KiCad accepted the {} but the plan did not record it: {} still awaiting approval. Update KiCad.", if yes { "approval" } else { "rejection" }, left.join(", "))) }
     }
     Ok(o)
+}
+/// RoutePlan refused AS_BUSY: nothing was routed. Before bp.13 batch 11 KiCad's plan view is busy to the API for as long as it is on
+/// (from batch 11 only while the person drags a plan item), and a dialog or a running tool does the same: said so, never as routed.
+pub fn route_busy(err: &str) -> String {
+    if !err.contains("AS_BUSY") { return err.to_string() }
+    format!("Nothing was routed: KiCad is busy ({}). Its plan view, a dialog or a tool the person is using holds it; plan view is the person's to leave (Ctrl+Shift+R). End your turn and call plan_route again when they are done; do not report this step as routed.", err.split("AS_BUSY").nth(1).unwrap_or("").trim_start_matches(':').trim())
 }
 /// KiCad's refusal of the person's ApprovePlan, said in the Plan panel: a dialog KiCad shows (AS_BUSY) is named with the way out.
 pub fn refused(err: &str) -> String {
@@ -291,6 +297,11 @@ mod tests {
         "corridors": [{"id": "c1", "group": "g1", "layer": "In1.Cu", "status": "approved"}, {"id": "c2", "group": "g1", "layer": "In1.Cu", "status": "proposed"},
             {"id": "c3", "group": "g2", "layer": "In1.Cu", "status": "approved"}, {"id": "c4", "group": "g1", "layer": "In2.Cu", "status": "approved"}],
         "planes": [{"id": "p1", "net": "GND", "layer": "In1.Cu", "status": "approved"}, {"id": "p2", "net": "+3V3", "layer": "In1.Cu", "status": "proposed"}]}) }
+    #[test] fn plan_route_refused_busy_is_never_routed() {
+        let m = route_busy("KiCad answered AS_BUSY: KiCad is busy and cannot respond to API requests right now");
+        assert!(m.starts_with("Nothing was routed") && m.contains("cannot respond") && m.contains("do not report"), "{m}");
+        assert_eq!(route_busy("no plan"), "no plan");
+    }
     #[test] fn plan_needs_a_plan_on_big_boards() { assert!(needs_plan(4, 10)); assert!(needs_plan(2, 61)); assert!(!needs_plan(2, 60)); assert!(guidance().contains("plan_approve") && guidance().contains("fab_profile")); }
     #[test] fn plan_api_told_by_capability_then_version() {
         let caps = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
