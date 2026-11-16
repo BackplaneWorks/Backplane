@@ -213,6 +213,12 @@ if [ -n "${UPDATE_FROM:-}" ]; then
     && [ -x "$HH/.backplane/hub/kicad/$UPDATE_FROM/bin/kicad-cli" ] && ok "the home starts with Backplane KiCad $UPDATE_FROM (placed where the installer puts it)" \
     || { bad "could not place Backplane KiCad $UPDATE_FROM in the home"; exit 1; }
 fi
+# the person's KiCad settings (stock 10.0 and ours, 10.99): a non-default value, an old mtime; the hub's probes must leave them as they are
+for v in 10.0 10.99; do mkdir -p "$HH/.config/kicad/$v"
+  printf '{\n  "meta": {"filename": "kicad_common.json", "version": 4},\n  "environment": {"vars": {"BARE_GATE_MARK": "/seeded/by/the/person"}}\n}\n' >"$HH/.config/kicad/$v/kicad_common.json"
+  touch -d '2026-01-01 00:00:00' "$HH/.config/kicad/$v/kicad_common.json"; done
+kset() { for v in 10.0 10.99; do f=$HH/.config/kicad/$v/kicad_common.json; printf '%s %s %s %s\n' "$v" "$(sha256sum "$f" 2>/dev/null | cut -c1-16)" "$(stat -c %Y "$f" 2>/dev/null)" "$(ls "$HH/.config/kicad/$v" 2>/dev/null | tr '\n' ',')"; done; }
+KSET0=$(kset)
 T0=$(date +%s.%N)
 launch
 for _ in $(seq 120); do pos first-use >/dev/null && break; sleep 0.5; done
@@ -241,7 +247,12 @@ if [ "$(kst)" = none ]; then
 else tm kicad-install-started "$(now)"; fi
 for _ in $(seq 1800); do case $(kst) in done|failed) break;; esac; sleep 0.5; done
 st=$(kst); echo "kicad install: $st; $(tail -1 "$KH/.install.log" 2>/dev/null)"; cp "$KH/.install.log" "$OUT/logs/kicad-install.log" 2>/dev/null
-case $st in done) tm kicad-installed "$(now)"; ok "KiCad installed ($(tail -1 "$KH/.install.log"))";;
+case $st in done) tm kicad-installed "$(now)"; ok "KiCad installed ($(tail -1 "$KH/.install.log"))"
+  # the hub has probed its new runtime (kicad-cli --version, at the install's end): the person's settings are as they were (before any thread
+  # warms a KiCad, which uses them as it should)
+  sleep 10; KSET1=$(kset); printf '%s\n---\n%s\n' "$KSET0" "$KSET1" >"$OUT/logs/kicad-settings.txt"
+  [ "$KSET0" = "$KSET1" ] && ok "the hub's probes left the person's KiCad settings as they were (10.0 and 10.99 kicad_common.json: same bytes, same mtime, no new file)" \
+    || { bad "the hub's probes changed the person's KiCad settings: $(diff <(echo "$KSET0") <(echo "$KSET1") | grep '^>' | tr '\n' ' ')"; cut_ 1 settings "probing KiCad rewrote the person's KiCad settings"; };;
   failed) bad "KiCad install failed: $(tail -1 "$KH/.install.log")"; cut_ 1 kicad-fetch "the KiCad install failed: $(tail -1 "$KH/.install.log")";;
   *) bad "KiCad install never ended ($st)"; cut_ 1 kicad-fetch "the KiCad install never started or ended in 15 min ($st)";; esac
 shot 03-kicad
