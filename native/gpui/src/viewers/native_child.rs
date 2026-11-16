@@ -523,6 +523,7 @@ mod imp {
     pub fn hand_back(w: u64) { focus(w) }
     /// X11: no activation takes the keys back after a close: hand in at once
     pub fn activated_after_close(_main: u64, _popped: u64) -> bool { true }
+    pub fn keep_focus(_top: u64) -> bool { false }
     pub fn note_pane_keys(_kicad: bool) {}
     /// Windows only (the F3 input shield): Linux has its button grab (grab_click).
     pub fn shield(_container: u64, _on: bool) {}
@@ -1326,6 +1327,22 @@ mod imp {
     pub fn hand_back(w: u64) { HANDED_BACK_AT.store(mono_ms().max(1), Ordering::SeqCst); focus_with(w, true) }
     /// After the popped-out window was closed by its X: it is gone and Windows has made Backplane's main window the
     /// foreground (the activation that otherwise takes the keys back from a hand-in made before it)
+    /// Backplane's window in front with no window of its thread holding the keyboard (`GetGUIThreadInfo`: no focus): typed keys
+    /// went nowhere. Seen on Windows after Ctrl+K from KiCad and a jump to a thread without the editor (the editor's window hidden
+    /// with the focus last inside it, bp-win Nov 16, 4 of 5): the keyboard to Backplane's own window. Never while KiCad has it.
+    pub fn keep_focus(top: u64) -> bool {
+        unsafe {
+            let h = hwnd(top);
+            if h.is_null() || windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() != h { return false }
+            let mut gti = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..std::mem::zeroed() };
+            if GetGUIThreadInfo(GetWindowThreadProcessId(h, null_mut()), &mut gti) == 0 || !gti.hwndFocus.is_null() { return false }
+            SetFocus(h);
+            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+                eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_focus_restored": {"window": top, "why": "foreground with no focus"}}));
+            }
+            true
+        }
+    }
     pub fn activated_after_close(main: u64, popped: u64) -> bool {
         unsafe { IsWindow(hwnd(popped)) == 0 && windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() == hwnd(main) }
     }
@@ -1925,6 +1942,7 @@ mod imp {
     pub fn focus(_w: u64) {}
     pub fn hand_back(_w: u64) {}
     pub fn activated_after_close(_main: u64, _popped: u64) -> bool { true }
+    pub fn keep_focus(_top: u64) -> bool { false }
     pub fn note_pane_keys(_kicad: bool) {}
     pub fn shield(_container: u64, _on: bool) {}
     pub fn shield_tick(_container: u64, _shown: Option<u64>) {}
