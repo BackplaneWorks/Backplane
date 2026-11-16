@@ -26,9 +26,26 @@ pub fn launch(bin: &Path, file: &str) -> Result<(), String> {
     crate::plat::proc::own_group(&mut c);
     let mut child = c.spawn().map_err(|e| format!("could not start {}: {e}", bin.display()))?;
     crate::plat::proc::adopt(child.id(), false);
+    note_detached(&super::ipc::pro_of(&super::canonical::route(file)), child.id(), file);
     std::thread::spawn(move || { let _ = child.wait(); });
     Ok(())
 }
+/// The KiCads this hub started detached (Open in KiCad), by project: (pid, the file it opened). Such a KiCad has no API server, so an
+/// agent's change through the headless server reaches the files but not its window, and its next save would replace the change.
+static DETACHED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, (u32, String)>>> = std::sync::OnceLock::new();
+fn detached() -> &'static std::sync::Mutex<std::collections::HashMap<String, (u32, String)>> { DETACHED.get_or_init(Default::default) }
+pub fn note_detached(pro: &str, pid: u32, file: &str) { if !pro.is_empty() { detached().lock().unwrap().insert(pro.to_string(), (pid, file.to_string())); } }
+/// The detached KiCad still open on `pro` (pid, file), forgotten once it has exited.
+pub fn detached_open(pro: &str) -> Option<(u32, String)> {
+    let mut m = detached().lock().unwrap();
+    match m.get(pro).cloned() { Some((pid, f)) if crate::plat::proc::alive(pid) => Some((pid, f)), Some(_) => { m.remove(pro); None } None => None }
+}
+/// What the person and the agent are told when an agent changed `file` through the headless server while a detached KiCad has it open.
+pub fn detached_warning(file: &str) -> String {
+    let name = Path::new(file).file_name().and_then(|n| n.to_str()).unwrap_or(file);
+    format!("KiCad is open in its own window on {name} and doesn't show this change: revert/reload it there before you save, or your save replaces the agent's edit")
+}
+
 /// The whole request on known paths: what was opened ("pcbnew /x/b.kicad_pcb"), or why not.
 pub fn open_in(cli: &str, root: &str) -> Result<String, String> {
     let Some((tool, file)) = pick(&project::read(root)) else { return Err("no KiCad project here".into()) };
@@ -79,6 +96,15 @@ pub async fn open(hub: &Arc<Hub>, thread: &str, key: &str) -> Result<String, Str
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_detached_kicad_is_remembered_while_it_runs_and_forgotten_once_it_exits() {
+        let me = std::process::id();
+        super::note_detached("/p/live.kicad_pro", me, "/p/live.kicad_pcb");
+        assert_eq!(super::detached_open("/p/live.kicad_pro"), Some((me, "/p/live.kicad_pcb".into())));
+        super::note_detached("/p/gone.kicad_pro", 0, "/p/gone.kicad_pcb");
+        assert_eq!(super::detached_open("/p/gone.kicad_pro"), None, "pid 0: never alive");
+        assert_eq!(super::detached_open("/p/other.kicad_pro"), None);
+        assert!(super::detached_warning("/p/live.kicad_pcb").starts_with("KiCad is open in its own window on live.kicad_pcb"));
+    }
     use super::*;
     fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("kopen-{n}")) }
     fn touch(p: PathBuf) { std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, "").unwrap() }

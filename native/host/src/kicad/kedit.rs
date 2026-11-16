@@ -1030,7 +1030,7 @@ pub async fn run(c: &dyn Call, path: &str, a: &Value) -> Result<Value, String> {
         let s = r.c.call(&format!("{C}SaveDocument"), json!({"document": r.doc})).await?;
         // the save gate's word (nothing to write; only KiCad's own load change) is not a save; a save says what else it wrote
         if s["not_saved"].is_string() { out["saved"] = json!(false); out["not_saved"] = s["not_saved"].clone() } else { out["saved"] = json!(path) }
-        for k in ["format_upgrade", "kicad_load_changes"] { if s[k].is_string() { out[k] = s[k].clone() } }
+        for k in ["format_upgrade", "kicad_load_changes", "detached_kicad"] { if s[k].is_string() { out[k] = s[k].clone() } }
         // what was set on symbols is read back from the saved sheet files, never taken on the API's word (a sub-sheet's symbol most of all)
         if out["saved"].is_string() && r.deferred == 0 { if let Some(texts) = r.c.sheet_texts() {
             let wrong: Vec<String> = r.expect.iter().filter(|(rf, n, v)| !file_prop(&texts, rf, n, v)).map(|(rf, n, _)| format!("{rf} {n}")).collect();
