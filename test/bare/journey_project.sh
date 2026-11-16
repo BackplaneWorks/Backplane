@@ -148,6 +148,8 @@ markt end 400; WP=$(cat "$HH/.client.pid" 2>/dev/null); [ -n "$WP" ] && in_box k
 
 # --- 5b. the management panels, cross-probe, comment window, Gerbers, plan tools (journey_more.sh) ---
 . "$HERE/journey_more.sh"
+# --- 5c. the libraries row on the clean box (journey_libraries.sh) ---
+. "$HERE/journey_libraries.sh"
 
 # --- 6. DRC with the runtime's kicad-cli on the saved board ---
 t=$(date +%s.%N)
