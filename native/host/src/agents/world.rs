@@ -49,8 +49,19 @@ pub fn carry_may(t: &T, restart_continue: &str) -> bool {
 }
 /// Carry.will: a turn the restart cut short carries on when it was running and may go on.
 pub fn carry_will(t: &T, restart_continue: &str) -> bool { t.turn == "running" && carry_may(t, restart_continue) }
+/// The background work (a shell, a subagent) a thread's agent left running after its turn ended, by title: it lives in the agent's process, so a
+/// restart of the hub stops it, and the agent, told it would hear when it ends, waits forever unless it is told.
+pub fn bg_live(bg: &str) -> Vec<String> { super::bg::lines(bg).iter().filter(|l| !super::bg::ended(l)).map(|l| super::bg::work_title(l)).collect() }
+/// The words a thread whose background work a restart stopped goes on with (`carry_on`).
+pub fn bg_lost_text(titles: &[String]) -> String {
+    let list = titles.iter().map(|t| format!("\u{201C}{}\u{201D}", t.chars().take(120).collect::<String>())).collect::<Vec<_>>().join(", ");
+    format!("{CARRY_BG} {list}. Nothing more will come from it: run what is still needed again (for a job longer than a few minutes, Backplane's work_run, which survives a restart and says when it ends), then carry on.")
+}
+pub const CARRY_BG: &str = "[Backplane] Backplane restarted after your turn ended, and that stopped the background work you were waiting for:";
 
 impl World {
+    /// Threads at rest whose agent still has background work running (`bg_live`): what a restart would stop.
+    pub fn bg_waiting(&self) -> Vec<String> { let mut v: Vec<String> = self.threads.iter().filter(|(th, t)| t.turn != "running" && !bg_live(self.setting(&format!("bg.{th}"))).is_empty()).map(|(th, _)| th.clone()).collect(); v.sort(); v }
     pub fn seen(&self) -> usize { self.seen }
     /// The bot a thread belongs to ("" for a thread that is no bot's).
     pub fn bot(&self, th: &str) -> &str { self.bot_of.get(th).map(String::as_str).unwrap_or("") }
@@ -231,6 +242,11 @@ mod tests {
     #[test] fn carry_every_provider_that_resumes() {
         for p in CARRIES { let mut t = th("running"); t.provider = p.into(); t.session = "S".into(); assert!(carry_will(&t, "on"), "{p}"); if p != "claude" { assert!(super::super::providers::driver(p).is_some(), "{p} is run here"); t.session.clear(); assert!(!carry_will(&t, "on"), "{p} has nothing to resume") } }
         let mut t = th("running"); t.provider = "nonesuch".into(); t.session = "S".into(); assert!(!carry_will(&t, "on"));
+    }
+    #[test] fn background_work_left_running_is_named() {
+        assert_eq!(bg_live(&format!("b1\tmeasuring\tc1\tRail widths\tshell\n{}", super::super::bg::line("b2", &format!("{}completed", super::super::bg::ENDED)))), ["Rail widths"]);
+        assert!(bg_live("").is_empty());
+        let t = bg_lost_text(&["Rail widths".into()]); assert!(t.starts_with(CARRY_BG) && t.contains("\u{201C}Rail widths\u{201D}") && t.contains("work_run"), "{t}");
     }
     #[test] fn carry_off_nothing() { assert!(!carry_will(&th("running"), "off")); }
     #[test] fn carry_once() { let mut t = th("running"); t.carry_text_last = true; assert!(!carry_will(&t, "on")); }
