@@ -67,6 +67,59 @@ pub fn kicad_documents(macos: bool, kind: Kind, inherited: bool, dir: Option<&st
 fn documents_for(kind: Kind) -> Option<&'static std::path::Path> {
     kicad_documents(cfg!(target_os = "macos"), kind, std::env::var_os("KICAD_DOCUMENTS_HOME").is_some_and(|v| !v.is_empty()), KICAD_DOCUMENTS.get().map(|p| p.as_path()))
 }
+/// Python's bytecode caches for every child but a person's own terminal (`PYTHONPYCACHEPREFIX`, set once at startup: `<home>/cache/pycache`),
+/// and never over a value the hub was started with. FreeCAD's Python wrote `__pycache__` inside FreeCAD.app when the hub (or an agent of it)
+/// ran freecadcmd, and macOS said "'backplane-hub' was prevented from modifying apps on your Mac" (0.16.0 release check). Every system: an
+/// installed FreeCAD's folder is not the place for them anywhere (Program Files is read-only to a user), and the caches still speed runs up.
+pub static PYCACHE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+pub fn pycache(kind: Kind, inherited: bool, dir: Option<&std::path::Path>) -> Option<&std::path::Path> {
+    if kind == Kind::Terminal || inherited { return None }
+    dir
+}
+fn pycache_for(kind: Kind) -> Option<&'static std::path::Path> {
+    pycache(kind, std::env::var_os("PYTHONPYCACHEPREFIX").is_some_and(|v| !v.is_empty()), PYCACHE.get().map(|p| p.as_path()))
+}
+/// macOS: a user base (`PYTHONUSERBASE`) whose `usercustomize` sets `sys.pycache_prefix` from PYTHONPYCACHEPREFIX. FreeCAD starts its Python
+/// isolated (Base/Interpreter.cpp: PyConfig_InitIsolatedConfig), so it reads no PYTHON* variable, but it keeps the user site on, and site.py takes
+/// the user base from PYTHONUSERBASE whatever the flags say: this is the one way in before FreeCAD imports its modules. FreeCAD.app ships with
+/// almost no bytecode (9878 of 10197 .py files on the Mac mini), so its first runs wrote __pycache__ into the bundle, and macOS said
+/// "'backplane-hub' was prevented from modifying apps on your Mac". The same rule as PYCACHE; set at startup with `write_userbase`.
+pub static PYUSERBASE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+fn userbase_for(kind: Kind) -> Option<&'static std::path::Path> {
+    if !cfg!(target_os = "macos") { return None }
+    pycache(kind, std::env::var_os("PYTHONUSERBASE").is_some_and(|v| !v.is_empty()), PYUSERBASE.get().map(|p| p.as_path()))
+}
+/// The usercustomize every Python started with PYUSERBASE runs: the cache prefix, then the person's own user site packages (their default
+/// user base's), which the moved user base would otherwise hide.
+pub const USERCUSTOMIZE: &str = r#"# Backplane (proc.rs PYUSERBASE): Python's bytecode caches go to PYTHONPYCACHEPREFIX, also in a Python that ignores the environment
+# (FreeCAD's), so nothing is written inside an installed app; the person's own user site packages stay importable.
+import os, sys
+_p = os.environ.get("PYTHONPYCACHEPREFIX")
+if _p and not sys.pycache_prefix:
+    sys.pycache_prefix = _p
+try:
+    import site
+    _v = "%d.%d" % sys.version_info[:2]
+    if sys.platform == "darwin" and getattr(sys, "_framework", None):
+        _u = os.path.expanduser("~/Library/Python/" + _v + "/lib/python/site-packages")
+    else:
+        _u = os.path.expanduser("~/.local/lib/python" + _v + "/site-packages")
+    if os.path.isdir(_u) and _u not in sys.path:
+        site.addsitedir(_u)
+except Exception:
+    pass
+"#;
+/// Where site.py looks for usercustomize under a user base, for the layouts it uses: a framework build's `lib/python/site-packages`, else
+/// `lib/pythonX.Y/site-packages` (FreeCAD's conda Python 3.11 among them).
+pub fn userbase_sites(base: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut v = vec![base.join("lib").join("python").join("site-packages")];
+    v.extend((8..=16).map(|m| base.join("lib").join(format!("python3.{m}")).join("site-packages")));
+    v
+}
+pub fn write_userbase(base: &std::path::Path) -> std::io::Result<()> {
+    for d in userbase_sites(base) { std::fs::create_dir_all(&d)?; let f = d.join("usercustomize.py"); if std::fs::read_to_string(&f).ok().as_deref() != Some(USERCUSTOMIZE) { std::fs::write(&f, USERCUSTOMIZE)?; } }
+    Ok(())
+}
 /// The kinds that run what an agent or a person supplies.
 fn scrubbed(kind: Kind) -> bool { matches!(kind, Kind::Agent | Kind::PersonTurn | Kind::Shell | Kind::Terminal) }
 fn hub_only_present() -> Vec<std::ffi::OsString> { std::env::vars_os().map(|(k, _)| k).filter(|k| k.to_str().map_or(false, hub_only)).collect() }
@@ -81,6 +134,8 @@ pub fn tokio_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> tokio::process::Com
     #[cfg(windows)] c.creation_flags(crate::plat::proc::NO_WINDOW);
     if scrubbed(kind) { for k in hub_only_present() { c.env_remove(k); } }
     if let Some(d) = documents_for(kind) { c.env("KICAD_DOCUMENTS_HOME", d); }
+    if let Some(d) = pycache_for(kind) { c.env("PYTHONPYCACHEPREFIX", d); }
+    if let Some(d) = userbase_for(kind) { c.env("PYTHONUSERBASE", d); }
     c
 }
 /// `tokio_cmd`, in a memory scope of its own when `wrap` is given (memscope.rs: systemd-run's arguments, the program after them). A refused
@@ -92,6 +147,8 @@ pub fn tokio_cmd_in<S: AsRef<OsStr>>(kind: Kind, program: S, wrap: Option<Vec<St
     let mut c = tokio::process::Command::new("systemd-run"); c.args(w).arg(prog).args(pre);
     if scrubbed(kind) { for k in hub_only_present() { c.env_remove(k); } }
     if let Some(d) = documents_for(kind) { c.env("KICAD_DOCUMENTS_HOME", d); }
+    if let Some(d) = pycache_for(kind) { c.env("PYTHONPYCACHEPREFIX", d); }
+    if let Some(d) = userbase_for(kind) { c.env("PYTHONUSERBASE", d); }
     c
 }
 /// `std::process::Command::new`, gated.
@@ -101,6 +158,8 @@ pub fn std_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> std::process::Command
     #[cfg(windows)] { use std::os::windows::process::CommandExt; c.creation_flags(crate::plat::proc::NO_WINDOW); }
     if scrubbed(kind) { for k in hub_only_present() { c.env_remove(k); } }
     if let Some(d) = documents_for(kind) { c.env("KICAD_DOCUMENTS_HOME", d); }
+    if let Some(d) = pycache_for(kind) { c.env("PYTHONPYCACHEPREFIX", d); }
+    if let Some(d) = userbase_for(kind) { c.env("PYTHONUSERBASE", d); }
     c
 }
 
@@ -117,6 +176,34 @@ mod tests {
         assert_eq!(kicad_documents(true, Kind::Local, true, Some(d)), None, "the hub was started with one: it stays");
         assert_eq!(kicad_documents(false, Kind::Local, false, Some(d)), None, "macOS only");
         assert_eq!(kicad_documents(true, Kind::Local, false, None), None, "not set up (tests, bp-plot)");
+    }
+
+    #[test] fn every_child_but_a_terminal_keeps_pythons_caches_in_the_hubs_folder_unless_the_hub_was_given_one() {
+        let d = std::path::Path::new("/h/cache/pycache");
+        for k in [Kind::Local, Kind::Agent, Kind::Shell, Kind::Net, Kind::Browser, Kind::PersonTurn] { assert_eq!(pycache(k, false, Some(d)), Some(d), "{k:?}"); }
+        assert_eq!(pycache(Kind::Terminal, false, Some(d)), None, "a person's terminal keeps their own Python's ways");
+        assert_eq!(pycache(Kind::Local, true, Some(d)), None, "the hub was started with one: it stays");
+        assert_eq!(pycache(Kind::Local, false, None), None, "not set up (tests, bp-plot)");
+        // the real builders carry it
+        let _ = PYCACHE.set(d.to_path_buf());
+        if std::env::var_os("PYTHONPYCACHEPREFIX").is_none() {
+            let c = std_cmd(Kind::Local, "freecadcmd");
+            assert!(c.get_envs().any(|(k, v)| k == "PYTHONPYCACHEPREFIX" && v == Some(d.as_os_str())));
+            assert!(!std_cmd(Kind::Terminal, "sh").get_envs().any(|(k, _)| k == "PYTHONPYCACHEPREFIX"));
+        }
+    }
+
+    #[test] fn the_user_base_sets_the_cache_prefix_in_every_layout_site_py_reads() {
+        let d = crate::plat::tmp::dir("pyub"); write_userbase(&d).unwrap();
+        for s in userbase_sites(&d) { assert_eq!(std::fs::read_to_string(s.join("usercustomize.py")).unwrap(), USERCUSTOMIZE); }
+        assert!(d.join("lib/python3.11/site-packages/usercustomize.py").is_file(), "FreeCAD's Python 3.11");
+        assert!(USERCUSTOMIZE.contains("sys.pycache_prefix = _p") && USERCUSTOMIZE.contains("site.addsitedir"));
+        // a real Python, isolated as FreeCAD starts its own (-I ignores PYTHON*), still takes the prefix through the user base: -E -s are
+        // FreeCAD's flags but for the user site, which FreeCAD keeps on, so run with -E alone
+        if let Ok(o) = std::process::Command::new("python3").args(["-E", "-c", "import sys; print(sys.pycache_prefix)"]).env("PYTHONUSERBASE", &*d).env("PYTHONPYCACHEPREFIX", "/x/pyc").output() {
+            if o.status.success() { assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "/x/pyc", "{}", String::from_utf8_lossy(&o.stderr)); }
+        }
+        let _ = std::fs::remove_dir_all(&*d);
     }
 
     // side-by-side: the person's turn is the one real agent on a copy, and nothing else opens up with it
