@@ -215,6 +215,12 @@ def l5(c):
     check("L5", "no missing-model message in the export", not missing, "; ".join(missing[:3]))
     r = D.step_has_model(open(step, errors="replace").read(), open(bare, errors="replace").read(), open(model, errors="replace").read() if os.path.isfile(model) else "")
     check("L5", f"the board's STEP holds C2's model (by {r['by']})", r["ok"], json.dumps(r))
+    # the standard part's model beside it: C1's from KiCad's own 3D library (${KICAD10_3DMODEL_DIR})
+    std = os.path.join(vars_.get("KICAD10_3DMODEL_DIR", ""), "Capacitor_SMD.3dshapes", "C_0603_1608Metric.step")
+    check("L5", "C1's standard 3D model is in the runtime", os.path.isfile(std), std)
+    if os.path.isfile(std):
+        r1 = D.step_has_model(open(step, errors="replace").read(), open(bare, errors="replace").read(), open(std, errors="replace").read())
+        check("L5", f"the board's STEP holds C1's standard model too (by {r1['by']})", r1["ok"], json.dumps(r1))
 
 
 def l6(c):
