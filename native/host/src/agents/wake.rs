@@ -131,6 +131,7 @@ impl Wakes {
         }
         self.book.lock().unwrap().at = total;
         for th in gone { let ids: Vec<String> = self.book.lock().unwrap().by(&th).iter().map(|w| w.id.clone()).collect(); if !ids.is_empty() { let at = now_s(); self.ag.commit_events(ids.into_iter().map(|id| json!({"$":"WakeDropped","id":id,"at":at})).collect()).await } }
+        for (th, end, _, _) in &ends { if *end > 0 { plan_once_end(&self.ag, th).await } }
         for (th, end, at, ask) in ends { self.fire(&th, end, at, ask).await }
     }
     async fn fire(&self, th: &str, end: u8, at: u64, ask: Option<(String, u64)>) {
@@ -236,5 +237,25 @@ mod tests {
         b.apply(r#"{"$":"SettingSet","key":"wake.seen.w1.end","value":"k","at":6}"#);
         assert_eq!(b.on("thread", "t").len(), 1); assert_eq!(b.by("a")[0].created, 5); assert_eq!(b.seen["wake.seen.w1.end"], "k");
         b.apply(r#"{"$":"WakeDropped","id":"w1","at":7}"#); assert!(b.on("thread", "t").is_empty());
+    }
+}
+
+/// The next flag of "plan this turn only" (`plan.once.<thread>`) at a turn's end: "2" (set while a turn ran) counts the next turn, "1" is spent.
+pub fn plan_once_next(flag: &str) -> Option<&'static str> { match flag { "2" => Some("1"), "1" => Some(""), _ => None } }
+/// A turn of a thread ended: "plan this turn only" set for it puts the thread back to its own mode (plan mode off), once.
+pub async fn plan_once_end(ag: &Arc<super::Agents>, th: &str) {
+    let (next, t) = { let w = ag.world().await; (plan_once_next(w.setting(&format!("plan.once.{th}"))), w.threads.get(th).cloned()) };
+    let (Some(next), Some(t)) = (next, t) else { return };
+    let now = now_s();
+    let mut ev = vec![json!({"$":"SettingSet","key":format!("plan.once.{th}"),"value":next,"at":now})];
+    if next.is_empty() && t.interaction == "plan" { ev.push(json!({"$":"ModesSet","id":th,"runtime":if t.runtime.is_empty() { "full-access".to_string() } else { t.runtime.clone() },"interaction":"default","model":t.model,"at":now})) }
+    ag.commit_events(ev).await;
+}
+#[cfg(test)]
+mod plan_once_tests {
+    #[test] fn plan_this_turn_only_counts_the_turn_it_was_set_for() {
+        assert_eq!(super::plan_once_next("1"), Some(""), "spent: plan mode off");
+        assert_eq!(super::plan_once_next("2"), Some("1"), "set during a running turn: the next one is the planned one");
+        assert_eq!(super::plan_once_next(""), None, "not set: the thread's mode stays");
     }
 }

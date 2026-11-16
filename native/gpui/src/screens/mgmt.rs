@@ -37,6 +37,19 @@ pub struct Mgmt {
     pub panel_w: f32,
     pub bom: super::mgmt_bom::Ui,
     pub life: super::mgmt_life::Ui,
+    /// a plan review link pressed (screens/linkroute.rs `Route::Plan`): its board (from the project folder), when, and whether that board was picked
+    pub plan_next: Option<(String, Instant, bool)>,
+}
+/// What a pressed plan review link does now, on the page drawn: open the Plan panel (the board shown is the plan's, or its board could not be shown
+/// within a few seconds: the panel then names the board whose plan waits), show its board first, or wait for the page.
+#[derive(Debug, PartialEq)]
+pub enum PlanStep { Open, Pick(String), Wait }
+pub fn plan_step(rel: &str, project: &str, boards: &[(String, bool)], picked: bool, waited: Duration, loaded: bool) -> PlanStep {
+    let pro = format!("{}.kicad_pro", rel.strip_suffix(".kicad_pcb").unwrap_or(rel));
+    if !loaded { return if waited > Duration::from_secs(8) { PlanStep::Open } else { PlanStep::Wait } }
+    if project.ends_with(&format!("/{pro}")) || project == pro { return PlanStep::Open }
+    if !picked { if let Some((v, _)) = boards.iter().find(|(v, on)| v == rel && !on) { return PlanStep::Pick(v.clone()) } }
+    if waited > Duration::from_secs(6) || (!picked && !boards.iter().any(|(v, _)| v == rel)) { PlanStep::Open } else { PlanStep::Wait }
 }
 
 /// The pages a panel sits beside: the design's (board, schematic, 3D, split; the embedded editor is on these too).
@@ -174,6 +187,18 @@ impl Render for Ghost { fn render(&mut self, _: &mut Window, _: &mut Context<Sel
 pub fn host(app: &mut Backplane, page: AnyElement, window: &mut Window, cx: &mut Context<Backplane>) -> AnyElement {
     let Some(project) = project_for(&app.data["thread"]) else { return page };
     want(app, &project);
+    // a plan review link pressed: its board, then the Plan panel (`plan_step`)
+    if let Some((rel, at, picked)) = app.screens.mgmt.plan_next.clone() {
+        let st = app.screens.mgmt.state();
+        let loaded = st["panels"].as_array().map_or(false, |p| p.iter().any(|x| x["id"] == "plan"));
+        let boards: Vec<(String, bool)> = crate::viewers::boards::list(&app.data["thread"]["viewer"]).into_iter().map(|b| (b.value, b.on)).collect();
+        match plan_step(&rel, &project, &boards, picked, at.elapsed(), loaded) {
+            PlanStep::Open => { app.screens.mgmt.plan_next = None; if loaded && st["open"] != "plan" { set(app, toggled(&st, "plan"), json!({"open": "plan"}), cx); } }
+            PlanStep::Pick(v) => { app.screens.mgmt.plan_next = Some((rel, at, true)); crate::viewers::boards::pick(app, v, cx); }
+            // looked at again in a second (the board's page or list may come with no other change to draw); a few seconds at most
+            PlanStep::Wait => { cx.spawn(async move |this, cx| { cx.background_executor().timer(Duration::from_secs(1)).await; let _ = this.update(cx, |_, cx| cx.notify()); }).detach(); }
+        }
+    }
     let st = app.screens.mgmt.state();
     let panels: Vec<(String, String)> = st["panels"].as_array().into_iter().flatten().map(|p| (p["id"].as_str().unwrap_or("").to_string(), p["label"].as_str().unwrap_or("").to_string())).collect();
     if panels.is_empty() { return page }
@@ -244,6 +269,17 @@ pub fn host(app: &mut Backplane, page: AnyElement, window: &mut Window, cx: &mut
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_plan_review_link_shows_its_board_then_opens_the_plan() {
+        use std::time::Duration as D;
+        let b = |v: &str, on: bool| (v.to_string(), on);
+        let boards = vec![b("A/A.kicad_pcb", true), b("N/B.kicad_pcb", false)];
+        assert_eq!(super::plan_step("N/B.kicad_pcb", "/p/A/A.kicad_pro", &boards, false, D::from_millis(10), true), super::PlanStep::Pick("N/B.kicad_pcb".into()));
+        assert_eq!(super::plan_step("N/B.kicad_pcb", "/p/A/A.kicad_pro", &boards, true, D::from_secs(1), true), super::PlanStep::Wait, "picked: wait for its page");
+        assert_eq!(super::plan_step("N/B.kicad_pcb", "/p/N/B.kicad_pro", &boards, true, D::from_secs(1), true), super::PlanStep::Open);
+        assert_eq!(super::plan_step("N/B.kicad_pcb", "/p/A/A.kicad_pro", &boards, true, D::from_secs(7), true), super::PlanStep::Open, "never longer than a few seconds");
+        assert_eq!(super::plan_step("X/X.kicad_pcb", "/p/A/A.kicad_pro", &boards, false, D::from_millis(10), true), super::PlanStep::Open, "a board not listed: the Plan panel here (it names the board)");
+        assert_eq!(super::plan_step("A/A.kicad_pcb", "/p/A/A.kicad_pro", &[], false, D::from_millis(10), false), super::PlanStep::Wait, "the panels not known yet");
+    }
     use super::*;
     use core::prelude::v1::test;
     #[test] fn panels_sit_beside_a_design_only() {
