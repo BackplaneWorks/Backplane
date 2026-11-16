@@ -10,6 +10,8 @@
 //!   are never added or rewritten: where the standard libraries are is the person's choice.
 //! - An entry the person's table already names, whatever its path, is theirs and is left alone (no duplicate name, no rewrite).
 //! - An entry the hub added once is never added again (`<hub home>/kicad-libtables.json`), so a library the person removed stays removed.
+//!   One the hub finds already there (the runtime seeded the table with it, or the person added it) is recorded the same way: removed
+//!   later, it is not put back either.
 //! - Stock KiCad is never synced: its settings folder (10.0, 9.0) is the person's KiCad, not ours.
 //! - A table the person does not have yet is not made here: the runtime copies the whole default at first launch.
 //! - The table is replaced whole (written beside it, then renamed) after a copy of it goes to `<hub home>/backups/kicad-libtables/`.
@@ -63,6 +65,13 @@ pub fn plan(default: &str, mine: &str, head: &str, offered: &[String]) -> Option
     (!add.is_empty()).then_some(add)
 }
 
+/// The default's Backplane entries the person's table already names and the record does not have yet (None-safe: [] when either is not
+/// a whole table).
+pub fn seen_here(default: &str, mine: &str, head: &str, offered: &[String]) -> Vec<String> {
+    let (Some(want), Some(have)) = (entries(default, head), entries(mine, head)) else { return vec![] };
+    let have: Vec<String> = have.into_iter().map(|e| e.name).collect();
+    want.into_iter().filter(|e| backplane_entry(e) && have.contains(&e.name) && !offered.contains(&e.name)).map(|e| e.name).collect()
+}
 /// The runtime's default global table `table` ("fp-lib-table"): `share/kicad/` in the package (Linux, Windows), else the macOS bundle's
 /// `KiCad.app/Contents/SharedSupport/` (the package root holds KiCad.app; a root that is the bundle itself has `Contents/`).
 pub fn default_table(root: &Path, table: &str) -> Option<PathBuf> {
@@ -90,13 +99,16 @@ pub fn sync(root: &Path, version: &str, config_root: &Path, hub_home: &Path) -> 
     let dir = config_root.join(&ver);
     let record_path = hub_home.join("kicad-libtables.json");
     let mut record: Value = std::fs::read_to_string(&record_path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| json!({}));
-    let mut said = vec![];
+    let (mut said, mut dirty) = (vec![], false);
     for (table, head) in TABLES {
         let Some(default_path) = default_table(root, table) else { continue };
         let mine_path = dir.join(table);
         let (Ok(default), Ok(mine)) = (std::fs::read_to_string(&default_path), std::fs::read_to_string(&mine_path)) else { continue };
         let key = mine_path.to_string_lossy().to_string();
-        let offered: Vec<String> = record[&key].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+        let mut offered: Vec<String> = record[&key].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+        // the Backplane entries the person's table already has count as offered (a seeded table has all of them), so removing one sticks
+        let seen = seen_here(&default, &mine, head, &offered);
+        if !seen.is_empty() { offered.extend(seen); record[&key] = json!(offered.clone()); dirty = true; }
         let Some(add) = plan(&default, &mine, head, &offered) else { continue };
         let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let backup = hub_home.join("backups/kicad-libtables").join(format!("{stamp}-{ver}-{table}"));
@@ -111,7 +123,7 @@ pub fn sync(root: &Path, version: &str, config_root: &Path, hub_home: &Path) -> 
         record[&key] = json!(all);
         said.push(format!("{table} {ver}: added {} (backup {})", names.join(", "), backup.display()));
     }
-    if !said.is_empty() { let _ = crate::ckpt::write_atomic(&record_path, &[serde_json::to_string_pretty(&record).unwrap_or_default().as_bytes()]); }
+    if dirty || !said.is_empty() { let _ = crate::ckpt::write_atomic(&record_path, &[serde_json::to_string_pretty(&record).unwrap_or_default().as_bytes()]); }
     said
 }
 
@@ -171,6 +183,24 @@ mod tests {
         let said = sync(&mac, "10.99.0-bp.13", &cfg, &home);
         assert_eq!(said.len(), 1, "{said:?}"); assert!(said[0].starts_with("fp-lib-table 10.99: added Backplane_Logo"), "{said:?}");
         assert!(sync(&mac, "10.99.0-bp.13", &cfg, &home).is_empty(), "a second pass adds nothing");
+    }
+    #[test] fn a_seeded_entry_the_person_removes_later_is_not_put_back() {
+        let t = crate::plat::tmp::dir("libtables-seeded");
+        let (root, cfg, home) = (t.path().join("rt"), t.path().join("cfg"), t.path().join("hub"));
+        std::fs::create_dir_all(root.join("share/kicad")).unwrap(); std::fs::create_dir_all(cfg.join("10.99")).unwrap();
+        std::fs::write(root.join("share/kicad/fp-lib-table"), DEFAULT).unwrap();
+        // KiCad seeded the person's table with the whole default: nothing to add, but its Backplane entries are recorded
+        std::fs::write(cfg.join("10.99/fp-lib-table"), DEFAULT).unwrap();
+        assert!(sync(&root, "10.99.0-bp.13", &cfg, &home).is_empty());
+        let rec: Value = serde_json::from_str(&std::fs::read_to_string(home.join("kicad-libtables.json")).unwrap()).unwrap();
+        let key = cfg.join("10.99/fp-lib-table").to_string_lossy().to_string();
+        assert_eq!(rec[&key], json!(["Backplane_Logo", "Backplane_Shoggoth"]), "{rec}");
+        assert_eq!(std::fs::read_to_string(cfg.join("10.99/fp-lib-table")).unwrap(), DEFAULT, "the table is not written");
+        // the person removes Backplane_Logo: it stays removed
+        let without: String = DEFAULT.lines().filter(|l| !l.contains("Backplane_Logo")).map(|l| format!("{l}\n")).collect();
+        std::fs::write(cfg.join("10.99/fp-lib-table"), &without).unwrap();
+        assert!(sync(&root, "10.99.0-bp.13", &cfg, &home).is_empty());
+        assert_eq!(std::fs::read_to_string(cfg.join("10.99/fp-lib-table")).unwrap(), without);
     }
     #[test] fn settings_versions() {
         assert_eq!(settings_version("10.99.0-bp.13").as_deref(), Some("10.99"));
