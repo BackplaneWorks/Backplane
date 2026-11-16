@@ -1516,6 +1516,7 @@ def run(h):
         # BP_STARTUP_BOX_OBSERVE=1 (the bp.10 self-lock rate, Nov 15): a box before the first frame is recorded, not the end
         # of the run: when it came, what it says, whether it went away, and whether the editor came up (the hub's retry)
         observe = os.environ.get("BP_STARTUP_BOX_OBSERVE") == "1"
+        nogpu_boxes = []
         box_obs = {}
         box_since = None
         while cp.poll() is None and time.monotonic() - started < (100 if observe else 65):
@@ -1572,7 +1573,25 @@ def run(h):
                 # a box that waits for someone fails the start; a progress window that goes by itself does not (bp.10's
                 # "Load PCB / Finalizing board / Elapsed time", gone in 1.1-1.3 s, 4 of 10 opens Nov 15): failed once up 3 s
                 box_since = (box_since or time.monotonic()) if box else None
-                if box and not observe and time.monotonic() - box_since >= 3.0:
+                if only == "nogpu" and box and time.monotonic() - box_since >= 2.0:
+                    # no GPU, fresh profile (lead, Nov 16): each box KiCad shows is answered as a person would (its OK), after
+                    # recording what the pane and the hub say while it waits
+                    infos = [l for l in log_lines(h, "client.log") if '"kicad_info"' in l]
+                    nogpu_boxes.append({"ms": round((time.monotonic() - started) * 1000), "title": box["title"], "text": box["text"][:3],
+                                        "hub_dialogs": (json.loads(infos[-1][infos[-1].index("{"):]).get("dialogs") if infos else None),
+                                        "strip": "kicad:asking" in h.controls()})
+                    h.shot(f"nogpu_box{len(nogpu_boxes)}")
+                    ok = next((c for c in E.list_child_windows(box["hwnd"]) if c.get("visible") and c.get("class") == "Button" and (c.get("title") or "").replace("&", "").strip().upper() in ("OK", "YES", "CONTINUE")), None)
+                    if ok:
+                        r = E.W.RECT(); E.u32.GetWindowRect(ok["hwnd"], E.ctypes.byref(r))
+                        E.screen_click((r.left + r.right) // 2, (r.top + r.bottom) // 2)
+                    else:
+                        E.u32.SetForegroundWindow(box["hwnd"]); time.sleep(0.2); E.key_tap("Return")
+                    nogpu_boxes[-1]["answered_with"] = "OK button" if ok else "Return"
+                    time.sleep(1.0)
+                    box_since = None
+                    continue
+                if box and not observe and only != "nogpu" and time.monotonic() - box_since >= 3.0:
                     print("DIAG startup_box " + json.dumps(box), flush=True)
                     h.shot("startup_box")
                     h.check(f"KiCad starts without a box before its first frame (it showed {box['title']!r}: {' | '.join(box['text'])[:200]})", False, box)
@@ -1586,6 +1605,24 @@ def run(h):
                 settled = True
                 break
             time.sleep(0.02 if trace_idle else 0.05)
+        if only == "nogpu":
+            # what a person gets with no GPU and a fresh profile: every box answered, the pane never claiming "not responding" while one
+            # waits, the box named to the hub (so the pane can say it), then a usable editor
+            states = [json.loads(l[l.index("{"):]).get("state") for l in log_lines(h, "client.log") if '"kicad_info"' in l]
+            print("DIAG nogpu " + json.dumps({"boxes": nogpu_boxes, "states_seen": sorted(set(x for x in states if x))}), flush=True)
+            h.check("nogpu: KiCad's box(es) on a machine with no GPU were seen and answered (the run records each)", bool(nogpu_boxes) or settled, nogpu_boxes)
+            h.check("nogpu: the pane never says KiCad is not responding while a box waits (no 'unresponsive' state)", "unresponsive" not in states, sorted(set(x for x in states if x)))
+            h.check("nogpu: each box was told to the hub with its title, so the pane says what KiCad is asking",
+                    all(b.get("hub_dialogs") for b in nogpu_boxes), nogpu_boxes)
+            h.check("nogpu: after the boxes the editor comes up (first paint, the opening settled)", settled, {"settled": settled})
+            kids = [w for w in E.list_child_windows(E.find_main_window(cp.pid)) if w["visible"]]
+            # the fallback canvas (no OpenGL: KiCad's Cairo canvas) is not a wxGLCanvas: the largest visible canvas-like child then
+            gls = [w for w in kids if w["class"] == "wxGLCanvas"] or [w for w in kids if w["class"] == "wxWindowNR"]
+            gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
+            frame_ = int((h.last_kicad_report("settled") or {}).get("shown") or 0)
+            px, zoomed = plain_key_acts(h, gl, "nogpu", frame_) if gl else (0, False)
+            h.check("nogpu: then the editor is usable: a plain F2 acts with no click", bool(zoomed), {"f2_px": px, "canvas": bool(gl)})
+            return h.finish()
         if observe:
             fp = h.kicad_reports().get("first_paint") or {}
             box_obs.update(settled=settled, first_paint_state=fp.get("state"), first_paint_say=(fp.get("say") or "")[:160],
