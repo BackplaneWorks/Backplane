@@ -139,8 +139,9 @@ sweep_out_dir() {
   [ -n "$dir" ] && [ -d "$dir" ] || return 0
   for p in $(ls /proc | grep -E '^[0-9]+$'); do
     [ "$p" = "$$" ] && continue
-    e=$(tr '\0' '\n' < /proc/$p/environ 2>/dev/null | grep -aE "^(XDG_RUNTIME_DIR|HOME)=$dir/" | head -1)
-    if [ -n "$e" ] || tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null | grep -aqF "$dir/"; then pids+=("$p"); fi
+    # (the shell itself opens /proc/$p/environ: its "Permission denied" goes to the braces' stderr, not tr's)
+    e=$({ tr '\0' '\n' < /proc/$p/environ; } 2>/dev/null | grep -aE "^(XDG_RUNTIME_DIR|HOME)=$dir/" | head -1)
+    if [ -n "$e" ] || { tr '\0' ' ' < /proc/$p/cmdline; } 2>/dev/null | grep -aqF "$dir/"; then pids+=("$p"); fi
   done
   if [ "${#pids[@]}" -gt 0 ]; then
     kill -TERM "${pids[@]}" 2>/dev/null; sleep 1
