@@ -1002,6 +1002,25 @@ def changed_centroid(before, after, min_px=20):
     ys, xs = np.nonzero(before != after)
     if len(xs) < min_px: return None
     return float(xs.mean()), float(ys.mean())
+def handle_spot(png, x, y, radius=45):
+    """The nearest drawn vertex handle to (x, y): pixels near white whose 5x5 neighbourhood is all near white (a handle square, not the
+    outline's thin line), within RADIUS. {x, y, dist} or None."""
+    try:
+        import numpy as np
+        from PIL import Image
+        a = np.asarray(Image.open(png).convert("RGB")).astype(int)
+        y0, x0 = max(0, int(y) - radius), max(0, int(x) - radius)
+        w = a[y0:int(y) + radius, x0:int(x) + radius]
+        wh = (w.min(axis=2) > 225)
+        core = wh.copy()
+        for dy in (-2, -1, 0, 1, 2):
+            for dx in (-2, -1, 0, 1, 2): core &= np.roll(np.roll(wh, dy, 0), dx, 1)
+        ys, xs = np.nonzero(core)
+        if not len(xs): return None
+        d = (xs + x0 - x) ** 2 + (ys + y0 - y) ** 2; i = int(d.argmin())
+        return {"x": int(xs[i] + x0), "y": int(ys[i] + y0), "dist": round(float(d[i]) ** 0.5, 1)}
+    except Exception as e:
+        print(f"DIAG handle_spot: {e}", flush=True); return None
 def band_spot(png, color, png_off=None):
     """The biggest patch of COLOR (#rrggbb, a plan group's) inside the pane: a corridor's label pill is drawn solid in it. (x, y) or None."""
     try:
@@ -1272,6 +1291,9 @@ if "plan" in JOURNEYS and SOCK:
             ly1 = plan("layer", SOCK).get("layer")
             selp = ipc("selection", SOCK, "pcb")
             if ly1 != cl and near and near["dist"] > 3:  # the computed point missed the band: the drawn one, clicked again
+                # a miss can select what lies under it on another layer (Collar's In2.Cu plane) and make that layer active: back to the
+                # corridor's layer first, or the second click hits the plane again
+                if ly1 != cl: rt("key", "Escape"); time.sleep(0.3); panel_click(cl, "plan_layer_corridor_again")
                 rt("click", near["x"], near["y"]); time.sleep(0.6); ly2 = plan("layer", SOCK).get("layer")
                 RESULTS["plan_corridor_click_on_drawn_band"] = {"ms": None, "ok": int(ly2 == cl), "at": [near["x"], near["y"]], "layer_after": ly2}
                 print(f"INFO plan corridor click on the drawn band {near['x']},{near['y']}: active layer -> {ly2}", flush=True)
@@ -1302,10 +1324,25 @@ if "plan" in JOURNEYS and SOCK:
             pl = next((q for q in pj.get("planes", []) if q.get("outline") and q["outline"][0]), None)
             if pl:
                 panel_click(pl["layer"], "plan_layer_plane")
+                # plan view, by KiCad's answer, before the plane's click (Escape with nothing selected leaves plan view, and the overlay then
+                # looks the same): entered again with the person's key when it is off
+                pv2 = in_plan_view()
+                if pv2 is False: press_plan_key(); time.sleep(1.5); pv2 = in_plan_view(); panel_click(pl["layer"], "plan_layer_plane2")
+                RESULTS["plan_view_before_plane_click"] = {"ms": None, "ok": int(pv2 is True), "kicad_says": pv2, "layer": plan("layer", SOCK).get("layer")}
+                print(f"INFO plan view before the plane click (KiCad): {pv2}, layer {plan('layer', SOCK).get('layer')}", flush=True)
                 ring = pl["outline"][0]; cx_ = sum(p_[0] for p_ in ring) / len(ring); cy_ = sum(p_[1] for p_ in ring) / len(ring)
-                px_, py_ = to_screen(cx_, cy_); rt("click", px_, py_); time.sleep(0.6); shot("plan_plane_selected")
+                px_, py_ = to_screen(cx_, cy_)
+                rt("click", px_, py_); time.sleep(0.6)
+                shot("plan_plane_selected"); print(f"INFO plan plane click at {px_:.0f},{py_:.0f} (its outline's centre)", flush=True)
                 vx, vy = to_screen(*ring[0])
+                # the vertex's handle as drawn (a small white square; the outline is a thinner white line): the calibration is ~20 px off
+                # (Collar, batch 10), enough to miss a handle where a corridor's wide band is still hit
+                hs = handle_spot(os.path.join(OUT, "shots", "plan_plane_selected.png"), vx, vy)
+                print(f"INFO plan plane vertex 0 at board {ring[0]} -> screen {vx:.0f},{vy:.0f}; drawn handle {hs}; outline {len(ring)} points", flush=True)
+                if hs: vx, vy = hs["x"], hs["y"]
+                RESULTS["plan_plane_vertex_handle_found"] = {"ms": None, "ok": int(bool(hs)), "at": hs}
                 r = rt("drag_circle", vx, vy, 25, 5, 1, 120); EVENTS.append({"kind": "input", "t0": r["t0"], "t1": r["t1"], "tag": "plan_drag_plane_vertex"}); time.sleep(1)
+                shot("plan_plane_after_drag")
                 after = json.loads(plan("get", SOCK).get("json") or "{}"); ap = next((q for q in after.get("planes", []) if q["id"] == pl["id"]), {})
                 RESULTS["plan_drag_plane_vertex_hit"] = {"ms": None, "ok": int(ap.get("outline") != pl["outline"])}
                 print(f"INFO plan plane vertex moved by the drag: {ap.get('outline') != pl['outline']}", flush=True)
