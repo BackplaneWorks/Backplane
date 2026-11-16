@@ -2081,7 +2081,6 @@ gpui.c.kicad.open.the.app.instead = Open the KiCad app instead
 gpui.c.kicad.mac.full.screen = KiCad cannot be shown here while Backplane is full screen on macOS. Pop it out into a window of its own, or leave full screen.
 gpui.c.kicad.mac.prompt = macOS is asking for permission for Backplane: answer the prompt to let KiCad start.
 gpui.c.kicad.stock.tip = This is stock KiCad: it can open in windows of its own, and agents cannot edit in it. Backplane KiCad opens in here.
-gpui.c.kicad.mac.prompt = macOS is asking for permission for Backplane: answer the prompt to let KiCad start.
 gpui.c.kicad.kicad.is.not.responding = KiCad is not responding.
 gpui.c.kicad.kicad.was.closed = KiCad was closed.
 gpui.c.kicad.starting.kicad = Starting KiCad…
