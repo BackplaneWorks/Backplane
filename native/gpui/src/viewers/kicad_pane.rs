@@ -573,6 +573,8 @@ impl KicadPane {
     }
     fn want(&self) -> Option<u64> { if self.info.is_null() || (cfg!(windows) && self.info["mode"] == "stock") { return None } pick_local(self.wanted_kind(), &self.info, &self.frames, &self.ever_shown) }
     fn tick(&mut self, cx: &mut Context<Self>) {
+        // Windows: Backplane in front with nothing holding the keyboard (a jump away from the editor it was lent from) gets it
+        if cfg!(windows) && !self.keys && self.toplevel != 0 { nc::keep_focus(self.toplevel); }
         if !self.handoff_over && !self.handoff() { self.end_handoff(cx); }
         if let Some((popped, at)) = self.await_close {
             let activated = nc::activated_after_close(self.toplevel, popped);
