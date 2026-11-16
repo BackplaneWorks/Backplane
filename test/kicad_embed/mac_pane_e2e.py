@@ -121,7 +121,11 @@ else:
             # the window active first (its title bar): a click on an inactive window's green button only activates it
             b = _main(pid)[3]; relay(op='click', x=b[0] + 120, y=b[1] + 12); time.sleep(0.6); relay(op='click', x=b[0] + 58, y=b[1] + 13)
         else:
-            relay(op='chord', combo='ctrl+cmd+f')
+            # as a person leaves full screen: the pointer at the screen's top shows the title bar, then its green button
+            # (Ctrl+Cmd+F needs an Exit Full Screen menu item; the client has none)
+            b = _main(pid)[3]
+            relay(op='move', x=b[0] + 300, y=1); time.sleep(1.8); relay(op='move', x=b[0] + 300, y=6); time.sleep(0.6)
+            relay(op='click', x=b[0] + 58, y=b[1] + 13); time.sleep(0.5)
 
     def win_close(pid, bounds): relay(op='click', x=bounds[0] + 14, y=bounds[1] + 13)
 
