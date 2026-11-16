@@ -70,7 +70,7 @@ for step in 1 2 3 4 5 6; do
   RR=$(ask plan_route '{"ids":["c-k"],"max_nets":2}'); LAST=$(echo "$RR" | answer)
   echo "INFO plan_route step $step: $(echo "$LAST" | cut -c1-200)"
   echo "$LAST" | grep -q "Nothing was routed" && break
-  echo "$LAST" | python3 -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); m=d.get("message",d); sys.exit(0 if m.get("done") else 1)' 2>/dev/null && { DONE=1; break; }
+  echo "$LAST" | python3 -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); m=d.get("reply") or d.get("message") or d; sys.exit(0 if m.get("done") or (m.get("corridor")=="c-k" and m.get("total") and m.get("routed")==m.get("total")) else 1)' 2>/dev/null && { DONE=1; break; }
 done
 check "plan_route goes ahead in plan view (KiCad is not busy to it)" "$(echo "$LAST" | grep -q "Nothing was routed\|AS_BUSY" && echo 0 || echo 1)" "$(echo "$LAST" | cut -c1-300)"
 check "plan_route routes c-k to done" "$DONE" "$(echo "$LAST" | cut -c1-300)"
@@ -80,7 +80,7 @@ shot l2_routed
 V=$(ask plan_verify '{}' | answer); echo "INFO plan_verify: $(echo "$V" | cut -c1-300)"
 check "plan_verify: c-k's group has no DRC violation" "$(echo "$V" | python3 -c '
 import json, sys
-d = json.loads(sys.stdin.read() or "{}"); m = d.get("message", d)
+d = json.loads(sys.stdin.read() or "{}"); m = d.get("reply") or d.get("message") or d
 try: rep = json.loads(m.get("report") or "{}")
 except Exception: rep = {}
 g = rep.get("g-k") or {}
@@ -88,7 +88,10 @@ print(int("drc" in g and int(g["drc"] or 0) == 0))')" "$(echo "$V" | cut -c1-300
 # L4: a drag held on c-d: RoutePlan busy, said as nothing routed with the reason; released, it goes on
 R=$(last_kicad_report "$OUT/client.log" placed)
 read -r FX FY FW FH < <(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); f=next((f for f in r.get("frames",[]) if f.get("xid")==r.get("shown")),{}); print(f.get("root_x",0), f.get("root_y",0), f.get("w",0), f.get("h",0))' "$R")
-X click "$((FX + 60))" "$((FY + FH / 2))"; X key Home; sleep 1.5; shot l4_plan
+# plan view draws the active layer's items: B.Cu (c-k, c-d) active over the API (served in plan view from batch 11); no click (a click on
+# the toolbar would end the plan tool); the canvas has the keyboard from the earlier presses, Home fits the board
+ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.board.commands.SetActiveLayer\",\"message\":{\"board\":$BOARD_SPEC,\"layer\":\"BL_B_Cu\"}}" >/dev/null
+RZ=$(run_action common.Control.zoomFitScreen); sleep 1.5; shot l4_plan
 read -r DX DY < <(python3 - "$OUT/shots/l4_plan.png" "$FX" "$FY" "$FW" "$FH" <<'PY'
 import sys
 import numpy as np
@@ -116,5 +119,5 @@ echo "INFO plan.focus: $(echo "$FO" | cut -c1-300)"
 SEL=$(ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.common.commands.GetSelection\",\"message\":{\"header\":{\"document\":$BOARD_SPEC}}}")
 check "the Plan panel's row selects c-k's copper in KiCad (zoomed to it)" "$(echo "$FO" | grep -q '"ok":true' && echo "$SEL" | grep -q 'kiapi.board.types' && echo 1 || echo 0)" "focus: $(echo "$FO" | cut -c1-200); selection: $(echo "$SEL" | grep -o 'kiapi.board.types.[A-Za-z]*' | sort -u | tr '\n' ' ')"
 check "it makes c-k's layer (B.Cu) active" "$([ "$LF" = BL_B_Cu ] && echo 1 || echo 0)" "active $SL -> $LF"
-check "plan view stays on" "$([ "$MF" = on ] && echo 1 || echo 0)" "plan view $MF"
+check "plan view stays on" "$([ "$MF" = on ] && echo 1 || echo 0)" "plan view $MF; the hub says $(echo "$FO" | grep -o '"plan_view":"[a-z]*"')"
 finish_suite "embed_plan_route_live_e2e ($EMBED_MODE)"

@@ -125,7 +125,18 @@ pub async fn focus(hub: &Arc<Hub>, pro: &str, id: &str) -> Result<Value, String>
         layer = st(c, "layer").to_string();
     } else if let Some(p) = plan["planes"].as_array().into_iter().flatten().find(|p| st(p, "id") == id) { nets.push(p["net"].clone()); layer = st(p, "layer").to_string() }
     else { return Err(format!("no item {id} in the plan")) }
+    // selecting the board's copper ends KiCad's plan tool, which (bp.13 batch 5 on) leaves plan view: a person who pressed the row in
+    // plan view is put back in it (bp.13 batch 11 `plan-view-api` serves the toggle there), the zoom kept
+    let in_view = |m: &Value| m["in_plan_view"] == true;
+    let was = super::call(hub, None, &pcb, "GetPlan", json!({"board": crate::fab::setup::spec(&pcb), "derived": false})).await.map_or(false, |m| in_view(&m));
     let mut v = crate::files::kicad::xprobe::select(hub, &json!({"project": pro, "references": refs, "nets": nets, "pins": [], "show": "PCB", "zoom": true})).await?;
+    if was {
+        let now = super::call(hub, None, &pcb, "GetPlan", json!({"board": crate::fab::setup::spec(&pcb), "derived": false})).await.map_or(true, |m| in_view(&m));
+        if !now { if let Some(route) = crate::files::kicad::embed::gui_route(pro) {
+            let o = crate::files::kicad::embed::gui_call(&route, "kiapi.common.commands.RunAction", json!({"action": "pcbnew.Plan.togglePlanView"})).await;
+            v["plan_view"] = json!(if o["ok"] == true { "kept" } else { "left" });
+        } } else { v["plan_view"] = json!("kept") }
+    }
     // the item's layer made active, so in plan view the person sees (and can click) the item itself; a KiCad that refuses it (plan view
     // busy to the API before bp.13 batch 11) keeps its layer, and the answer says so
     if let (false, Some(route)) = (layer.is_empty(), crate::files::kicad::embed::gui_route(pro)) {
