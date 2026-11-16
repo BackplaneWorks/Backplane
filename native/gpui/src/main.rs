@@ -224,7 +224,7 @@ impl Backplane {
         self.screens.projects.view_edit=Some((id.rsplit('|').next().unwrap_or("").to_string(),kind));
         let page=self.project_page.take();self.select_id(id,cx);self.project_page=page;}
     /// An action for the hub from a click or key; one that goes somewhere (projects::leaves_page) closes the project's page first.
-    pub fn go(&mut self,action:&str,value:String,cx:&mut Context<Self>){if screens::projects::leaves_page(action)&&self.project_page.take().is_some(){self.ui_epoch+=1;}let _=self.tx.try_send(Command::Action(action.into(),value));cx.notify();}
+    pub fn go(&mut self,action:&str,value:String,cx:&mut Context<Self>){if action=="open-thread" {if !value.is_empty() {self.select_id(value,cx);} return} if screens::projects::leaves_page(action)&&self.project_page.take().is_some(){self.ui_epoch+=1;}let _=self.tx.try_send(Command::Action(action.into(),value));cx.notify();}
     pub(crate) fn select_id(&mut self,id:String,cx:&mut Context<Self>) {self.project_page=None;self.ui_epoch+=1;self.screens.panels.sub_view=None;
         let raw=id.rsplit_once('|').map_or(id.as_str(),|(_,id)|id).to_string();
         
