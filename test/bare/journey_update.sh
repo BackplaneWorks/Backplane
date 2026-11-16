@@ -66,7 +66,9 @@ print(shown, apart)' "$R")"
       for _ in $(seq 360); do case $(krun) in *"/kicad/$NEWV/"*) break;; esac; sleep 0.5; done; K=$(krun); echo "kicad after update: $K" >"$OUT/logs/update-kicad-new.txt"; shot 31-update-done
       case $K in *"/kicad/$NEWV/"*) ok "U5 the pane reopened on $NEWV by itself"; tm update-reopen "$(( $(date +%s) - t ))";;
         *) bad "U5 the pane did not reopen on $NEWV within 3 min ($(echo "$K" | cut -c1-200))"; cut_ 1 update "after Update the pane stays on $UPDATE_FROM";; esac
-      sleep 3; urects | grep -q '"kicad-update"' && bad "U5 the update row is still shown after the update" || ok "U5 the update row is gone"
+      # the latest drawn ids only (urects keeps every rect it has seen)
+      sleep 3; python3 -c 'import json,sys; sys.exit(0 if "kicad-update" in json.loads(sys.argv[1]).get("_ids", []) else 1)' "$(urects)" \
+        && bad "U5 the update row is still shown after the update" || ok "U5 the update row is gone"
     else bad "U4 Update installed nothing in 30 min ($(tail -1 "$KH/.install.log" 2>/dev/null))"; cut_ 1 update "Update at Edit did not install $NEWV"; fi
   fi
 fi
