@@ -86,7 +86,12 @@ print(r.get("pid") or "", *[f.get("xid") for f in r.get("frames",[]) if f.get("x
   else cut_ 2 kicad-box "KiCad has a box up beside the pane ($1: $b), which the pane does not show"; fi
 }
 if markt board-view 120; then tm board-viewer "$(since)"; shot 06-board-view; ok "the project's board opens in the viewer"; else bad "the board viewer never came (thread:$tid, rail:Board)"; fi
-if markt pcb 600; then E_T=$(since); tms edit-pcb-painted ui:Edit pcb "$E_T"; sleep 1; shot 07-edit-pcb; set -- $(painted pcb)
+if markt pcb 600; then E_T=$(since); tms edit-pcb-painted ui:Edit pcb "$E_T"; sleep 1; shot 07-edit-pcb
+  # a fresh home's first Edit: from the press to KiCad's PCB editor painted in the pane, by the client's clock (0.16.0's bar: 30 s)
+  ES=$(step_s ui:Edit pcb); ES=${ES:-$E_T}
+  python3 -c "import sys; sys.exit(0 if float(sys.argv[1]) <= 30 else 1)" "$ES" && ok "a fresh home's first Edit shows KiCad in ${ES} s (within 30 s)" \
+    || { bad "a fresh home's first Edit took ${ES} s (more than 30 s)"; cut_ 1 edit "a fresh home's first Edit takes ${ES} s to show KiCad"; }
+  set -- $(painted pcb)
   if [ "${1:-}" = ready ] && [ "${2:-0}" -gt 50 ]; then ok "Edit: KiCad's PCB editor drawn in the pane (state $1, painted $2, $3)"; kicad_box pcb 0
   else bad "Edit: PCB not drawn ($(painted pcb))"; cut_ 1 edit "Edit did not draw KiCad's PCB editor: $(report pcb | cut -c1-300)"; kicad_box pcb 1; fi
 else bad "Edit never reported a painted PCB"; cut_ 1 edit "Edit never showed KiCad (no report in 150 s): $(grep -h 'kicad' "$HH/win.log" | tail -2 | cut -c1-300)"; kicad_box pcb 1; fi
@@ -152,6 +157,8 @@ markt end 400; WP=$(cat "$HH/.client.pid" 2>/dev/null); [ -n "$WP" ] && in_box k
 . "$HERE/journey_more.sh"
 # --- 5c. the libraries row on the clean box (journey_libraries.sh) ---
 . "$HERE/journey_libraries.sh"
+# --- 5d. restarts: warm and Edit together, KiCad killed, Backplane killed mid-edit (journey_restart.sh) ---
+. "$HERE/journey_restart.sh"
 
 # --- 6. DRC with the runtime's kicad-cli on the saved board ---
 t=$(date +%s.%N)

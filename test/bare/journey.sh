@@ -182,6 +182,12 @@ for p in $RT; do [ ! -s "$MAN" ] || on_desktop $p || cut_ 3 runtime "$p is not o
 # --- 2. first start, as from the applications menu ---
 ENVS=(-e DISPLAY=$DISP -e GDK_BACKEND=x11 -e XDG_RUNTIME_DIR=$PH/.run -e BACKPLANE_AGENTS=/opt/standins/bin -e BACKPLANE_NO_TAILSCALE=1 -e BACKPLANE_NO_UPDATE=1
       -e BACKPLANE_ORDER_SERVER=http://127.0.0.1:9 -e BACKPLANE_GPUI_RECTS=1 -e BACKPLANE_GPUI_LOOPTRACE=1 -e BACKPLANE_KICAD_DEBUG=1 -e LP_NUM_THREADS=2 -e LIBGL_ALWAYS_SOFTWARE=1 -e BARE_COEDIT_OUT=$PH/coedit.json -e BARE_COEDIT_PCB=$PH/Documents/pic_programmer/pic_programmer.kicad_pcb)
+if [ -n "${KICAD_FEED:-}" ] && [ -d "$KICAD_FEED" ]; then
+  FP=$((18500 + RANDOM % 500)); (cd "$KICAD_FEED" && exec python3 -m http.server "$FP" --bind 127.0.0.1 >"$OUT/logs/feed.log" 2>&1) & FEEDP=$!
+  for _ in $(seq 20); do curl -sf -m 1 "http://127.0.0.1:$FP/SHA256SUMS" >/dev/null && break; sleep 0.25; done
+  ENVS+=(-e BACKPLANE_KICAD_FEED=http://127.0.0.1:$FP/)
+  curl -sf -m 2 "http://127.0.0.1:$FP/SHA256SUMS" >/dev/null && ok "the staged KiCad feed is served (http://127.0.0.1:$FP: $(ls "$KICAD_FEED" | tr '\n' ' '))" || bad "the staged KiCad feed is not served"
+fi
 mkdir -p "$HH/.run"; chmod 700 "$HH/.run"
 launch() { docker exec -d -u person -w $PH -e HOME=$PH "${ENVS[@]}" "$C" sh -c "echo \$\$ > $PH/.client.pid; exec $PH/.local/bin/backplane-app $* >>$PH/win.log 2>&1"; }
 HUBH=$HH/.backplane/hub
@@ -251,6 +257,8 @@ if [ -n "$KDIR" ]; then
   HOLD=$(sed -n 1p "$HERE/kicad-hold" 2>/dev/null); HOLDV=${HOLD%% *}
   echo "fresh install got Backplane KiCad $KV; latest release $LATEST (${REPO:-?})${HOLD:+; hold: $HOLD}" | tee "$OUT/kicad-runtime.txt"
   if [ -n "${UPDATE_FROM:-}" ]; then [ "$KV" = "$UPDATE_FROM" ] && ok "setup kept the home's Backplane KiCad $KV (no install of its own)" || bad "setup installed $KV over the home's $UPDATE_FROM"
+  elif [ -n "${KICAD_FEED:-}" ]; then PINV=$(grep -o 'pub const LINUX: Package = Package { platform: "linux-x86_64", version: "[^"]*"' "$ROOT/native/host/src/kicad/install.rs" | sed 's/.*version: "//; s/"$//')
+    [ "$KV" = "$PINV" ] && ok "a fresh install gets the build's pin $KV from the staged feed (before its tag; GitHub's latest is $LATEST)" || bad "a fresh install got $KV, not the build's pin $PINV from the staged feed"
   elif [ -z "$LATEST" ]; then bad "could not read the latest Backplane KiCad release from GitHub (${REPO:-?})"
   elif [ "$KV" = "$LATEST" ]; then ok "a fresh install gets the latest Backplane KiCad release ($KV)"
     [ -n "$HOLD" ] && bad "test/bare/kicad-hold ($HOLD) is still there while the install is the latest: delete it"
