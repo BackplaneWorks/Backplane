@@ -477,8 +477,10 @@ try:
             try: os.kill(pid, 9)
             except OSError: pass
         wait_for(lambda: not kicad_frame(), 10, 0.2); time.sleep(3)
-        wait_for(lambda: rects().get('kicad:retry'), 10, 0.5)
-        e = rects().get('kicad:retry') or rects().get('ui:Edit'); cw2 = next((w for w in wins() if w[0] == cw[0]), cw)
+        wait_for(lambda: rects().get('kicad:open-again') or rects().get('kicad:retry'), 15, 0.5)
+        say_closed = 'closed_unexpectedly' in client_log()
+        e = rects().get('kicad:open-again') or rects().get('kicad:retry') or rects().get('ui:Edit'); cw2 = next((w for w in wins() if w[0] == cw[0]), cw)
+        check(say_closed and bool(rects().get('kicad:open-again')), 'restart 2: KiCad killed: the pane says KiCad closed unexpectedly and offers Open the editor again (no "could not start")')
         RES['r2_pressed'] = e and e['id']; shot('r2-offered')
         if e: click(cw2[3][0] + e['x'] + e['w'] / 2, cw2[3][1] + 28 + e['y'] + e['h'] / 2)
         f2 = wait_for(lambda: (k := kicad_frame()) and k[1] not in old and k, 90, 0.5); shot('r2-after-kill')
