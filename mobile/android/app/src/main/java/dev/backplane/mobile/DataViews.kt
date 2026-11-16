@@ -530,7 +530,7 @@ private fun WorkPanel(id: String, w: DWork) {
             Row(Modifier.fillMaxWidth().clickable(enabled = sub) { openSub(r.key) }.padding(top = 4.dp).testTag(if (sub) "thread.work.sub.${r.key}" else "thread.work.row"), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) { DMono(r.title, dcs.onSurface, 12); if (r.meta.isNotEmpty()) DMono(Tr.t(r.meta), dfaint, 11); DMono(Tr.t(r.doing.ifEmpty { "${r.kind} · ${r.state}" }), dfaint, 11) }
                 if (sub) { Icon(Icons.Default.ChevronRight, Msg.android_open, tint = dcs.primary, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)) }
-                if (r.label.isNotEmpty()) DBtn(Tr.t(r.label), false, modifier = Modifier.testTag("thread.work.${r.act}.${r.value}")) { DataClient.workAct(id, r) }
+                if (r.label.isNotEmpty()) DBtn(Tr.t(r.label), false, modifier = Modifier.testTag("thread.work.${r.act}.${r.value}")) { if (r.act == "open-thread") DataClient.openLink("backplane://thread/${r.value}", id) else DataClient.workAct(id, r) }
             }
         }
     }

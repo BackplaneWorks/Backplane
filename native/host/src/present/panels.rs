@@ -20,6 +20,23 @@ pub fn todos(st: &State, thread: &str) -> Value {
     json!({"count": count, "head": format!("To-do {count}"), "now": now, "rows": items.iter().map(|x| json!({"id": x["id"].as_str().unwrap_or(""), "text": x["text"].as_str().unwrap_or(""), "status": status(x)})).collect::<Vec<_>>()})
 }
 
+/// Subs.task.row: a task this thread delegated (its own thread, `delegate_task`) and not yet ended: the child's title, queued or working, what it
+/// does now and how long ago it last did anything (its liveness record: a task at work never looks frozen), and Open, which shows the child thread.
+fn task_rows(st: &State, thread: &str, now: u64) -> Vec<Value> {
+    let mut v: Vec<(&String, &String, &crate::state::TaskSt)> = st.tasks.iter().filter(|(_, (p, _, term, _))| p == thread && !*term).map(|(k, (_, c, _, s))| (k, c, s)).collect();
+    v.sort_by(|a, b| a.0.cmp(b.0));
+    v.into_iter().map(|(_, child, s)| {
+        let title = st.threads.get(child).map(|t| t.title.clone()).filter(|t| !t.is_empty()).unwrap_or_else(|| "Task".into());
+        let live: Value = serde_json::from_str(set(st, format!("liveness.{child}"))).unwrap_or(Value::Null);
+        let reason = live["reason"].as_str().unwrap_or("");
+        let doing = if matches!(reason, "" | "agent output" | "agent tool or stream output") { String::new() } else { reason.lines().next().unwrap_or("").chars().take(120).collect() };
+        let ago = live["last"].as_u64().filter(|l| *l > 0).map(|l| age(now, l)).unwrap_or_default();
+        let queued = *s == crate::state::TaskSt::Queued;
+        let mut r = acting(title, "task", if queued { "queued" } else { "working" }, doing, "open-thread", child, "Open");
+        if !ago.is_empty() && !queued { r["took"] = json!(format!("active {ago} ago")); }
+        r
+    }).collect()
+}
 /// A row of a thread's work the person may act on: `act` is what its button sends, with `value`; `label` the button's word.
 fn acting(title: String, kind: &str, state: &str, doing: String, act: &str, value: &str, label: &str) -> Value { json!({"title": title, "kind": kind, "state": state, "doing": doing, "act": act, "value": value, "label": label}) }
 /// Subs.watch.row: a job or a watch Backplane owns for the thread. Stop while it is at work and can still be stopped; a queued job's Stop takes it out of the queue.
@@ -128,7 +145,7 @@ pub fn subs(st: &State, thread: &str) -> Value { subs_at(st, thread, &Value::Nul
 pub fn subs_at(st: &State, thread: &str, log: &Value, now: u64) -> Value {
     let text = set(st, format!("bg.{thread}"));
     let lines = bg::lines(text);
-    let own: Vec<Value> = lock_rows(st, thread).into_iter().chain(watch_rows(st, thread)).collect();
+    let own: Vec<Value> = task_rows(st, thread, now).into_iter().chain(lock_rows(st, thread)).chain(watch_rows(st, thread)).collect();
     if lines.is_empty() && own.is_empty() && !log["calls"].as_object().map_or(false, |c| !c.is_empty()) { return Value::Null }
     // Sub.fg: a foreground subagent (an Agent call that is not backgrounded) is at work while its turn runs and it has not answered
     let running = st.threads.get(thread).map_or(false, |t| t.turn == crate::state::Turn::Running);
@@ -336,6 +353,20 @@ mod tests {
         assert_eq!(subs(&s, "t2")["rows"][0]["doing"], "position 1 · held by Board work");
         s.settings.insert("lock.a".into(), lock(r#"{"id":"w-1","kind":"work","thread":"t1","note":"","since":1,"lease":0}"#)); assert_eq!(subs(&s, "t2")["rows"][0]["doing"], "position 1 · held by a job in Board work");
         s.settings.insert("lock.a".into(), lock(r#"{"id":"pid:9","kind":"client","thread":"","note":"render","since":1,"lease":0}"#)); assert_eq!(subs(&s, "t2")["rows"][0]["doing"], "position 1 · held by render");
+    }
+    // 11-16: a delegated task is listed under its parent while it works, with what it does, how recently, and Open (its own thread)
+    #[test] fn a_delegated_task_is_listed_with_what_it_does_and_opens_its_thread() {
+        let mut s = State::new();
+        for l in [r#"{"$":"ProjectCreated","id":"p1","title":"P","folder":"/p","at":1}"#, r#"{"$":"ThreadCreated","id":"t1","project":"p1","title":"Parent","at":1}"#,
+            r#"{"$":"ThreadCreated","id":"t2","project":"p1","title":"Routing 1/2","at":2}"#, r#"{"$":"TaskDelegated","task":"k1","parent":"t1","child":"t2","depth":1,"provider":"claude","model":"fable","at":2}"#,
+            r#"{"$":"TaskStateSet","task":"k1","state":"running","summary":"","at":3}"#] { s.apply_line(l); }
+        s.settings.insert("liveness.t2".into(), r#"{"last":1000,"reason":"mcp__backplane__kicad_edit: /p/b.kicad_pcb"}"#.into());
+        let v = subs_at(&s, "t1", &Value::Null, 1012); let r = &v["rows"][0];
+        assert_eq!((r["title"].as_str(), r["kind"].as_str(), r["state"].as_str(), r["doing"].as_str(), r["took"].as_str()), (Some("Routing 1/2"), Some("task"), Some("working"), Some("mcp__backplane__kicad_edit: /p/b.kicad_pcb"), Some("active 12s ago")));
+        assert_eq!((r["act"].as_str(), r["value"].as_str(), r["label"].as_str(), v["live"].as_u64()), (Some("open-thread"), Some("t2"), Some("Open"), Some(1)));
+        s.apply_line(r#"{"$":"TaskStateSet","task":"k1","state":"done","summary":"routed","at":4}"#);
+        assert!(subs_at(&s, "t1", &Value::Null, 1012).is_null(), "an ended task reports in the thread and leaves the list");
+        assert!(subs_at(&s, "t2", &Value::Null, 1012).is_null());
     }
     #[test] fn a_threads_locks_and_jobs_carry_what_their_buttons_send() {
         let held = r#"{"holder":{"id":"t1","kind":"thread","thread":"t1","note":"","since":1,"lease":0},"waiters":[{"id":"t2","kind":"thread","thread":"t2","note":"","since":2,"lease":0}],"ready":true}"#;
