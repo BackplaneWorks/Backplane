@@ -387,11 +387,11 @@ gpui.f2.locate.freecad	Locate FreeCAD	FreeCADの場所を指定
 gpui.f2.locate.note	If it is installed somewhere else, give the full path to {tool}.	別の場所にインストールされている場合は、{tool} のフルパスを入力してください。
 gpui.f2.path.to	Path to {tool}	{tool} のパス
 gpui.f2.alwayson	Where your uberbot lives	メインボットの置き場所
-gpui.f2.alwayson.body	Always-on keeps your uberbot, reminders, bots and phone alerts running while this computer sleeps. Hardware and code still run here.	常時稼働にすると、このコンピュータがスリープ中もメインボット・リマインダー・ボット・スマホへの通知が動き続けます。ハードウェアとコードは引き続きここで動きます。
+gpui.f2.alwayson.body	Your uberbot is the assistant you talk to first. It answers you, starts and follows your threads and bots across projects and machines, and keeps your reminders and phone alerts going. Always-on keeps your uberbot, reminders, bots and phone alerts running while this computer sleeps. Hardware and code still run here.	メインボットは最初に話しかけるアシスタントです。返事をし、プロジェクトやマシンをまたいでスレッドとボットを始めて見守り、リマインダーとスマホへの通知を動かし続けます。常時稼働にすると、このコンピュータがスリープ中もメインボット・リマインダー・ボット・スマホへの通知が動き続けます。ハードウェアとコードは引き続きここで動きます。
 gpui.f2.aon.here	Stay on this computer	このコンピュータのまま
 gpui.f2.aon.here.note	Your uberbot runs here, while this computer is on. You can move it later in Settings, Machines.	メインボットはこのコンピュータが動いている間ここで動きます。後で 設定 → マシン から移せます。
 gpui.f2.aon.boat	An always-on Boat	常時稼働のBoat
-gpui.f2.aon.boat.note	A small server on your own Boat account runs your uberbot day and night. You pay Boat for it.	ご自身のBoatアカウントの小さなサーバーが、メインボットを昼も夜も動かします。費用はBoatに支払います。
+gpui.f2.aon.boat.note	A Boat is a small cloud server on your own Boat account. Backplane sets it up and looks after it, and it keeps your uberbot, bots, reminders and phone alerts running while this computer is off or asleep. Boat bills you, not Backplane: plans start at $20 a month, and a small Boat running all month uses about $13 of that. You can move your uberbot back here and delete the Boat in Settings, Machines.	Boatは、ご自身のBoatアカウント上の小さなクラウドサーバーです。BackplaneがBoatを用意して管理し、このコンピュータの電源が切れていてもスリープ中でも、メインボット・ボット・リマインダー・スマホへの通知を動かし続けます。請求はBackplaneではなくBoatから届きます。プランは月20ドルからで、小さなBoatを1か月動かし続けるとそのうち約13ドル分を使います。後で 設定 → マシン から、メインボットをここに戻してBoatを削除できます。
 gpui.f2.aon.machine	Another machine of yours	お持ちの別のマシン
 gpui.f2.aon.machine.note	A home server or a desktop that stays on runs your uberbot.	自宅サーバーや電源を入れたままのデスクトップがメインボットを動かします。
 gpui.f2.chosen	Chosen	選択中
@@ -3267,6 +3267,9 @@ gpui.f.quote.files	Send these files for a quote?	これらのファイルを送�
 gpui.f.dictate	Dictate with this device's microphone	このデバイスのマイクで音声入力
 gpui.f.inactive	Inactive: no confirmed active work	非アクティブ: 確認できる作業はありません
 gpui.f.tool.runs.nover	{name}  runs from {path}.	{name}が{path}で動作します。
+gpui.f2.aon.boat.learn	Learn more about Boat	Boatについて詳しく
+gpui.f2.uberbot.what	Your uberbot is the assistant you talk to first. It answers you, starts and follows your threads and bots across projects and machines, and keeps your reminders and phone alerts going.	メインボットは最初に話しかけるアシスタントです。返事をし、プロジェクトやマシンをまたいでスレッドとボットを始めて見守り、リマインダーとスマホへの通知を動かし続けます。
+gpui.acct.account.name.optional	Account name (optional: its email once signed in)	アカウントの名前（省略可：サインイン後はメールアドレス）
 android.mgmt.all	All	すべて
 android.mgmt.judged	agent-judged	エージェント判定
 android.mgmt.fix	Fix with agent	エージェントで直す

@@ -2918,6 +2918,9 @@ gpui.f.quote.files = Send these files for a quote?
 gpui.f.dictate = Dictate with this device's microphone
 gpui.f.inactive = Inactive: no confirmed active work
 gpui.f.tool.runs.nover = {name}  runs from {path}.
+gpui.f2.aon.boat.learn = Learn more about Boat
+gpui.f2.uberbot.what = Your uberbot is the assistant you talk to first. It answers you, starts and follows your threads and bots across projects and machines, and keeps your reminders and phone alerts going.
+gpui.acct.account.name.optional = Account name (optional: its email once signed in)
 
 # ---- android: new entries go here ----
 android.mgmt.all = All
@@ -4139,11 +4142,11 @@ gpui.f2.locate.freecad = Locate FreeCAD
 gpui.f2.locate.note = If it is installed somewhere else, give the full path to {tool}.
 gpui.f2.path.to = Path to {tool}
 gpui.f2.alwayson = Where your uberbot lives
-gpui.f2.alwayson.body = Always-on keeps your uberbot, reminders, bots and phone alerts running while this computer sleeps. Hardware and code still run here.
+gpui.f2.alwayson.body = Your uberbot is the assistant you talk to first. It answers you, starts and follows your threads and bots across projects and machines, and keeps your reminders and phone alerts going. Always-on keeps your uberbot, reminders, bots and phone alerts running while this computer sleeps. Hardware and code still run here.
 gpui.f2.aon.here = Stay on this computer
 gpui.f2.aon.here.note = Your uberbot runs here, while this computer is on. You can move it later in Settings, Machines.
 gpui.f2.aon.boat = An always-on Boat
-gpui.f2.aon.boat.note = A small server on your own Boat account runs your uberbot day and night. You pay Boat for it.
+gpui.f2.aon.boat.note = A Boat is a small cloud server on your own Boat account. Backplane sets it up and looks after it, and it keeps your uberbot, bots, reminders and phone alerts running while this computer is off or asleep. Boat bills you, not Backplane: plans start at $20 a month, and a small Boat running all month uses about $13 of that. You can move your uberbot back here and delete the Boat in Settings, Machines.
 gpui.f2.aon.machine = Another machine of yours
 gpui.f2.aon.machine.note = A home server or a desktop that stays on runs your uberbot.
 gpui.f2.chosen = Chosen

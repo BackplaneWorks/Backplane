@@ -2941,6 +2941,9 @@ gpui.f.quote.files = これらのファイルを送って見積もりを取り�
 gpui.f.dictate = このデバイスのマイクで音声入力
 gpui.f.inactive = 非アクティブ: 確認できる作業はありません
 gpui.f.tool.runs.nover = {name}が{path}で動作します。
+gpui.f2.aon.boat.learn = Boatについて詳しく
+gpui.f2.uberbot.what = メインボットは最初に話しかけるアシスタントです。返事をし、プロジェクトやマシンをまたいでスレッドとボットを始めて見守り、リマインダーとスマホへの通知を動かし続けます。
+gpui.acct.account.name.optional = アカウントの名前（省略可：サインイン後はメールアドレス）
 
 # ---- android: new entries go here ----
 android.mgmt.all = すべて
@@ -4162,11 +4165,11 @@ gpui.f2.locate.freecad = FreeCADの場所を指定
 gpui.f2.locate.note = 別の場所にインストールされている場合は、{tool} のフルパスを入力してください。
 gpui.f2.path.to = {tool} のパス
 gpui.f2.alwayson = メインボットの置き場所
-gpui.f2.alwayson.body = 常時稼働にすると、このコンピュータがスリープ中もメインボット・リマインダー・ボット・スマホへの通知が動き続けます。ハードウェアとコードは引き続きここで動きます。
+gpui.f2.alwayson.body = メインボットは最初に話しかけるアシスタントです。返事をし、プロジェクトやマシンをまたいでスレッドとボットを始めて見守り、リマインダーとスマホへの通知を動かし続けます。常時稼働にすると、このコンピュータがスリープ中もメインボット・リマインダー・ボット・スマホへの通知が動き続けます。ハードウェアとコードは引き続きここで動きます。
 gpui.f2.aon.here = このコンピュータのまま
 gpui.f2.aon.here.note = メインボットはこのコンピュータが動いている間ここで動きます。後で 設定 → マシン から移せます。
 gpui.f2.aon.boat = 常時稼働のBoat
-gpui.f2.aon.boat.note = ご自身のBoatアカウントの小さなサーバーが、メインボットを昼も夜も動かします。費用はBoatに支払います。
+gpui.f2.aon.boat.note = Boatは、ご自身のBoatアカウント上の小さなクラウドサーバーです。BackplaneがBoatを用意して管理し、このコンピュータの電源が切れていてもスリープ中でも、メインボット・ボット・リマインダー・スマホへの通知を動かし続けます。請求はBackplaneではなくBoatから届きます。プランは月20ドルからで、小さなBoatを1か月動かし続けるとそのうち約13ドル分を使います。後で 設定 → マシン から、メインボットをここに戻してBoatを削除できます。
 gpui.f2.aon.machine = お持ちの別のマシン
 gpui.f2.aon.machine.note = 自宅サーバーや電源を入れたままのデスクトップがメインボットを動かします。
 gpui.f2.chosen = 選択中
