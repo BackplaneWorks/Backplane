@@ -2,7 +2,8 @@
 use anyhow::{bail, ensure, Result};
 use serde_json::{Map, Value, Number};
 include!("wire_dict.rs");
-const MAX_FRAME: usize = 524288;
+/// A frame the window takes: 16 MiB. It was 512 KiB, and a long thread's view on a tall window went over it (Nov 16): the window dropped the connection and reconnected forever.
+const MAX_FRAME: usize = 16 << 20;
 fn arg(out: &mut Vec<u8>, major: u8, n: u32) {
     let h = major << 5;
     match n {
@@ -29,7 +30,7 @@ pub fn encode(value: &Value) -> Vec<u8> {
 /// It was 50 000, and a long thread's view (Nov 16: the Thalassa thread, under 512 KiB) went over it: the window dropped the connection and reconnected forever.
 pub const NODE_BUDGET: usize = MAX_FRAME + 1;
 pub fn decode(bytes: &[u8]) -> Result<Value> {
-    /* i18n-ok: decoder errors, logged */ ensure!(bytes.len() <= MAX_FRAME, "hub frame exceeds 512 KiB");
+    /* i18n-ok: decoder errors, logged */ ensure!(bytes.len() <= MAX_FRAME, "hub frame exceeds 16 MiB");
     struct Reader<'a> { bytes: &'a [u8], at: usize, nodes: usize }
     impl Reader<'_> {
         /* i18n-ok: decoder errors, logged */ fn byte(&mut self) -> Result<u8> { let b = *self.bytes.get(self.at).ok_or_else(|| anyhow::anyhow!("truncated CBOR"))?; self.at += 1; Ok(b) }
