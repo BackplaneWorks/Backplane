@@ -561,12 +561,28 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
     let gate = ks::gate(&env.status, &env.version, &env.why, &setting);
     if !gate.is_empty() { log_fallback(hub, thread, &gate).await; return Err(ks::unavailable(&gate, &env.cli)) }
     let Some(i) = IPC.get() else { let why = "this Backplane has no KiCad IPC helper"; log_fallback(hub, thread, why).await; return Err(ks::unavailable(why, &env.cli)) };
+    let msg_for_warning = msg.clone();
     let o = ask(i, &pro, &env, ty, msg).await;
     let lines = info_on(i).await; let argv = argv_on(i, &pro, &env).await;
     if o["fallback"].as_bool().unwrap_or(false) { log_fallback(hub, thread, o["why"].as_str().unwrap_or("")).await; return Err(o["error"].as_str().unwrap_or("").into()) }
     let ok = o["ok"].as_bool().unwrap_or(false);
     if status { return Ok(json!({"server":ks::note(&lines),"servers":lines,"argv":argv,"version":env.version,"capabilities":o["message"].clone(),"detail":if ok { String::new() } else { err_of(&o) }})) }
-    if ok { Ok(json!({"type":o["type"].as_str().unwrap_or(""),"message":o["message"].clone()})) } else { Err(err_of(&o)) }
+    if !ok { return Err(err_of(&o)) }
+    let mut out = json!({"type":o["type"].as_str().unwrap_or(""),"message":o["message"].clone()});
+    // a KiCad Open in KiCad started detached has this project open: it has no API server, so it does not show the agent's change, and
+    // its next save would replace it. Said to the agent here and to the person in the thread (no silent overwrite trap)
+    let short = ty.rsplit('.').next().unwrap_or(ty);
+    if matches!(short, "SaveDocument" | "SaveDocumentAs") || (short == "EndCommit" && msg_commits(&msg_for_warning)) {
+        if let Some((pid, file)) = super::open::detached_open(&pro) {
+            let warning = super::open::detached_warning(&file);
+            out["detached_kicad"] = json!(format!("{warning}. (KiCad pid {pid} has it open without Backplane's connection: tell the person; do not ask them to close it.)"));
+            if let Some(th) = thread.filter(|t| !t.is_empty()) {
+                let now = now_s() * 1000;
+                let _ = hub.commit(&json!({"$":"ActivityLogged","thread":th,"act":format!("kicad-detached:{pro}"),"tone":"warn","kind":"kicad","summary":warning,"at":now})).await;
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Whether an EndCommit request commits (CMA_COMMIT, the default) rather than drops.
