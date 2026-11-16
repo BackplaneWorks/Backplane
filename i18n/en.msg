@@ -2117,6 +2117,7 @@ gpui.kcomment.hint = Enter posts to the thread · Esc cancels
 gpui.kcomment.not.posted = The comment was not posted: {why}
 gpui.keys.kcomment = Comment on what is selected in KiCad, from Backplane or from inside the editor: Enter posts, Esc cancels
 gpui.c.kicad.dialog = KiCad has “{title}” open
+gpui.kicad.update.installed = Backplane KiCad {version} is installed: reopen KiCad on it (your unsaved changes are kept until you save or close)
 gpui.c.kicad.asking = KiCad is asking: {title}
 gpui.c.kicad.full.screen = Full screen
 gpui.c.kicad.exit.full.screen = Exit full screen

@@ -33,9 +33,11 @@ pub struct Local {
     /// Streamer mode (streamer.rs): on by the person's switch; and whether it turns on by itself while the screen is shared (a portal /
     /// PipeWire screen cast, where the platform can tell) or while a known recording app runs (an opt-in guess).
     pub streamer: bool, pub streamer_share: bool, pub streamer_apps: bool,
+    /// the Backplane KiCad update put off with "Not now" (its version): not offered again until a newer one
+    pub kicad_update_later: String,
 }
 impl Default for Local {
-    fn default() -> Self { Local { lang: "auto".into(), theme: "hub".into(), viewer_bg: "auto".into(), viewer_bg_rgb: VIEWER_BG_SWATCHES[0].1, text_pct: 100, font: FONTS[0].0.into(), sidebar_px: 264, viewer_px: 0, sidebar_open: true, notifications: true, default_view: "last".into(), favs: vec![], shortcuts: BTreeMap::new(), split_hide: String::new(), split_main: 0., split_side: 0., streamer: false, streamer_share: true, streamer_apps: false } }
+    fn default() -> Self { Local { lang: "auto".into(), theme: "hub".into(), viewer_bg: "auto".into(), viewer_bg_rgb: VIEWER_BG_SWATCHES[0].1, text_pct: 100, font: FONTS[0].0.into(), sidebar_px: 264, viewer_px: 0, sidebar_open: true, notifications: true, default_view: "last".into(), favs: vec![], shortcuts: BTreeMap::new(), split_hide: String::new(), split_main: 0., split_side: 0., streamer: false, streamer_share: true, streamer_apps: false, kicad_update_later: String::new() } }
 }
 
 pub fn path() -> Option<PathBuf> {
