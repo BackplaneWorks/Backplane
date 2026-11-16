@@ -358,7 +358,8 @@ pub fn usage(st: &State, id: &str, now: u64) -> Value {
     let lv = live(st, id); let sess = st.ext.sess.get(id).cloned().unwrap_or_default();
     let x = ts::In { provider: &t.provider, model: &t.model, usage: get(format!("usage.{id}")), last: get(format!("turn.last.{id}")), tv: get(format!("{tok}t.{id}")), speed: get(format!("turn.speed.{id}")),
         models: get(format!("turn.models.{id}")), live: &lv, ring: get(format!("{tok}tr.{id}")), today: get(format!("{tok}td.{id}")), day: &crate::state::fam::day_of(now),
-        began: sess.began, handed: (sess.handed, &sess.why), now, running: t.turn == crate::state::Turn::Running, bot };
+        began: sess.began, handed: (sess.handed, &sess.why), now, running: t.turn == crate::state::Turn::Running, bot,
+        tasks: { let kids = task_tree(st, id); let tvs: Vec<&str> = kids.iter().map(|k| get(format!("{tok}t.{k}"))).collect(); (ts::tv_sum(&tvs), kids.len()) } };
     ts::usage(&x)
 }
 /// An account's name for the panel: a saved account's label, else the CLI's own login
@@ -382,7 +383,19 @@ pub fn tok_chip(st: &State, id: &str) -> String {
     if !st.threads.contains_key(id) { return String::new() }
     let get = |k: String| st.settings.get(&k).map(String::as_str).unwrap_or("");
     let tok = { let ep = format!("{}{}", get("tok.epoch".into()), get("tok.recount".into())); if ep.is_empty() { "tok.".to_string() } else { format!("tok.{ep}.") } };
-    super::tokstats::chip(get(format!("usage.{id}")), get(format!("{tok}t.{id}")), &live(st, id))
+    // its delegated tasks counted in (each its own thread): the chip says what the thread's work cost, subagents' threads included
+    let kids = task_tree(st, id);
+    let mut tvs: Vec<&str> = vec![get(format!("{tok}t.{id}"))]; tvs.extend(kids.iter().map(|k| get(format!("{tok}t.{k}"))));
+    super::tokstats::chip(get(format!("usage.{id}")), &super::tokstats::tv_sum(&tvs), &live(st, id))
+}
+/// The threads a thread delegated tasks to, and the ones those delegated to, every one once (at most 500).
+pub fn task_tree(st: &State, id: &str) -> Vec<String> {
+    let mut out: Vec<String> = vec![]; let mut todo = vec![id.to_string()]; let mut seen = std::collections::HashSet::from([id.to_string()]);
+    while let Some(p) = todo.pop() {
+        let mut kids: Vec<&String> = st.tasks.values().filter(|(par, ..)| *par == p).map(|(_, c, ..)| c).filter(|c| !c.is_empty()).collect(); kids.sort();
+        for c in kids { if out.len() >= 500 { return out } if seen.insert(c.clone()) { out.push(c.clone()); todo.push(c.clone()); } }
+    }
+    out
 }
 
 /// `state`, `tools`, `menu`, `working`, `phase` for a thread at clock `now_s`, or None for a case not computed here.
@@ -431,6 +444,18 @@ pub fn keys(st: &State, id: &str, now_s: u64, why: &str, models_text: Option<&st
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Nov 16: a thread that handed most of its work to tasks showed only its own spend; its chip counts its tasks' threads (and theirs) too
+    #[test] fn a_threads_spend_counts_the_tasks_it_delegated() {
+        let mut st = State::new();
+        for l in [r#"{"$":"ProjectCreated","id":"p1","title":"P","folder":"/p","at":1}"#, r#"{"$":"ThreadCreated","id":"t1","project":"p1","title":"Lead","at":1}"#,
+            r#"{"$":"ThreadCreated","id":"t2","project":"p1","title":"Task","at":2}"#, r#"{"$":"ThreadCreated","id":"t3","project":"p1","title":"Sub-task","at":3}"#,
+            r#"{"$":"TaskDelegated","task":"k1","parent":"t1","child":"t2","depth":1,"provider":"claude","model":"","at":2}"#,
+            r#"{"$":"TaskDelegated","task":"k2","parent":"t2","child":"t3","depth":2,"provider":"claude","model":"","at":3}"#] { st.apply_line(l); }
+        for (k, v) in [("tok.t.t1", "1/1000/0/0/1000/0/1000000000/1/1"), ("tok.t.t2", "2/3000/0/0/1000/0/2000000000/2/2"), ("tok.t.t3", "1/500/0/0/500/0/500000000/1/1")] { st.settings.insert(k.into(), v.into()); }
+        assert_eq!(task_tree(&st, "t1"), ["t2", "t3"]); assert!(task_tree(&st, "t3").is_empty());
+        assert_eq!(tok_chip(&st, "t1"), "7k tok · $3.50", "its own 2k tokens and $1.00, and its tasks'");
+        assert_eq!(tok_chip(&st, "t2"), "5k tok · $2.50");
+    }
     #[test] fn allowance_is_the_least_remaining_window_and_never_invented() {
         let snap = json!({"provider":"claude","windows":[{"scope":"shared","shared":true,"used_permille":280},{"scope":"shared","shared":true,"used_permille":420},{"scope":"opus","shared":true,"used_permille":900}]});
         assert_eq!(allowance_text(&snap, "claude", "claude-sonnet-5-5", 100), "58% left · shared");
