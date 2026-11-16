@@ -199,6 +199,14 @@ for l in open(sys.argv[1], errors='replace'):
 print(v)
 EOF
 }
+# the update mode: the person's home already has an older Backplane KiCad, as one installed by an earlier Backplane would be
+if [ -n "${UPDATE_FROM:-}" ]; then
+  UA="backplane-kicad-linux-x86_64-$UPDATE_FROM"; mkdir -p "$HH/.backplane/hub/kicad/.old"
+  curl -fsSL "https://github.com/BackplaneWorks/Backplane_KiCad/releases/download/backplane-kicad-v$UPDATE_FROM/$UA.tar.gz" | tar -xzf - -C "$HH/.backplane/hub/kicad/.old" \
+    && mv "$HH/.backplane/hub/kicad/.old/$UA" "$HH/.backplane/hub/kicad/$UPDATE_FROM" && rmdir "$HH/.backplane/hub/kicad/.old" \
+    && [ -x "$HH/.backplane/hub/kicad/$UPDATE_FROM/bin/kicad-cli" ] && ok "the home starts with Backplane KiCad $UPDATE_FROM (placed where the installer puts it)" \
+    || { bad "could not place Backplane KiCad $UPDATE_FROM in the home"; exit 1; }
+fi
 T0=$(date +%s.%N)
 launch
 for _ in $(seq 120); do pos first-use >/dev/null && break; sleep 0.5; done
@@ -242,7 +250,8 @@ if [ -n "$KDIR" ]; then
   # exactly the held version; anything else still fails. The pin's bump deletes the file.
   HOLD=$(sed -n 1p "$HERE/kicad-hold" 2>/dev/null); HOLDV=${HOLD%% *}
   echo "fresh install got Backplane KiCad $KV; latest release $LATEST (${REPO:-?})${HOLD:+; hold: $HOLD}" | tee "$OUT/kicad-runtime.txt"
-  if [ -z "$LATEST" ]; then bad "could not read the latest Backplane KiCad release from GitHub (${REPO:-?})"
+  if [ -n "${UPDATE_FROM:-}" ]; then [ "$KV" = "$UPDATE_FROM" ] && ok "setup kept the home's Backplane KiCad $KV (no install of its own)" || bad "setup installed $KV over the home's $UPDATE_FROM"
+  elif [ -z "$LATEST" ]; then bad "could not read the latest Backplane KiCad release from GitHub (${REPO:-?})"
   elif [ "$KV" = "$LATEST" ]; then ok "a fresh install gets the latest Backplane KiCad release ($KV)"
     [ -n "$HOLD" ] && bad "test/bare/kicad-hold ($HOLD) is still there while the install is the latest: delete it"
   elif [ -n "$HOLD" ] && [ "$KV" = "$HOLDV" ]; then printf 'HOLD\t%s\n' "a fresh install gets $KV, held back from the latest $LATEST: ${HOLD#* }" >>"$OUT/checks.tsv"
