@@ -2111,6 +2111,7 @@ gpui.c.kicad.kicad.is.not.responding = KiCad が応答していません。
 gpui.c.kicad.kicad.was.closed = KiCad は閉じられました。
 gpui.c.kicad.closed.kept = KiCad が予期せず終了しました。保存済みのファイルは無事です。保存していなかった変更は KiCad が控えを残しており、エディタを再び開くと復元を提案します。
 gpui.c.kicad.closed.lost = KiCad が予期せず終了しました。保存済みのファイルは無事です。最後の保存以降の変更は残っていません。
+gpui.c.kicad.closed.agent = KiCad が予期せず終了しました。保存済みのファイルは無事ですが、まだ保存されていなかったエージェントの変更は失われました。
 gpui.c.kicad.open.again = エディタをもう一度開く
 gpui.c.kicad.starting.kicad = KiCad を起動しています…
 gpui.c.kicad.starting.slow = KiCad を起動しています: {what}（{secs} 秒）

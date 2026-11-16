@@ -163,6 +163,8 @@ pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<Strin
         // the hub has already tried a missed start window once more (embed.rs start_retry); the pane's Try again under this starts it again
         "failed" => Some(format!("{} {}", crate::i18n::trs("KiCad could not start:"), info["reason"].as_str().unwrap_or(""))),
         // KiCad died after it was ready (a crash, a kill): not a failed start; what it means for the person's work, in plain words
+        // an agent's change the hub knows was not on disk (it was asked not to save it yet) is said first: it is lost
+        "closed_unexpectedly" if info["agent_unsaved"].as_array().is_some_and(|a| !a.is_empty()) => Some(crate::i18n::t("gpui.c.kicad.closed.agent")),
         "closed_unexpectedly" => Some(crate::i18n::t(if info["autosaves"].as_array().is_some_and(|a| !a.is_empty()) { "gpui.c.kicad.closed.kept" } else { "gpui.c.kicad.closed.lost" })),
         "unresponsive" => Some(crate::i18n::trs("KiCad is not responding.")),
         "stopped" => Some(crate::i18n::trs("KiCad was closed.")),
@@ -1348,6 +1350,8 @@ mod tests {
         assert!(say.starts_with("KiCad closed unexpectedly.") && say.contains("were not kept") && !say.contains("could not start") && !say.contains("Fontconfig"), "{say}");
         let kept = json!({"state": "closed_unexpectedly", "reason": "x", "frames": [], "autosaves": ["_autosave-a.kicad_pcb"]});
         assert!(super::waiting_on(&kept, false, false).unwrap().contains("kept a copy"), "an autosave is offered back");
+        let agent = json!({"state": "closed_unexpectedly", "reason": "x", "frames": [], "autosaves": [], "agent_unsaved": ["a.kicad_pcb"]});
+        assert!(super::waiting_on(&agent, false, false).unwrap().contains("agent's change"), "an agent's unsaved change is said lost");
         let asking = json!({"state": "starting", "frames": [], "dialogs": ["Recover Unsaved Changes"]});
         assert_eq!(super::waiting_on(&asking, false, false).as_deref(), Some("KiCad is asking: Recover Unsaved Changes"));
         // a stock KiCad in the pane: the strip offers Backplane KiCad (Linux; Windows says it in the pane's middle), a fork's never
