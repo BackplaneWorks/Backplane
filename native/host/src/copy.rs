@@ -116,7 +116,7 @@ pub fn out_fate(copy: bool, kind: &str, job: &str, server: bool) -> Fate {
 /// The RPC methods that run git that writes or act on the machine (file.open is git job "open"; a release tags and
 /// publishes): refused on a copy and told, before any handler runs.
 pub fn rpc_refused(method: &str) -> bool { on() && rpc_refused_with(true, method) }
-pub fn rpc_refused_with(copy: bool, method: &str) -> bool { copy && has(&["git.act", "git.revert", "file.open", "review.release", "order.buy"], method) }
+pub fn rpc_refused_with(copy: bool, method: &str) -> bool { copy && has(&["git.act", "git.revert", "file.open", "review.release", "order.buy", "project.push"], method) }
 
 // ---- watch gate ---------------------------------------------------------------------------------------------
 

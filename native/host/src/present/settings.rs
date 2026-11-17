@@ -12,7 +12,7 @@ pub fn set_version(v: &str) { let _ = VERSION.set(v.to_string()); }
 pub fn version() -> &'static str { VERSION.get().map(String::as_str).unwrap_or("") }
 
 /// The ported pages in the order the desktop menu lists them (Settings.menu.pages): page id and title.
-pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("notifications", "Notifications"), ("agents", "Agents"), ("mcp", "MCP servers"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("machines", "Machines"), ("voice", "Voice"), ("ring", "Ring"), ("keys", "API keys"), ("timezone", "Time zone"), ("rules", "Rules and task board"), ("usage", "Usage"), ("setup", "Setup"), ("import", "Import from 0.14"), ("about", "About"), ("privacy", "Privacy"), ("developer", "Developer")];
+pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("git", "Projects and git"), ("notifications", "Notifications"), ("agents", "Agents"), ("mcp", "MCP servers"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("machines", "Machines"), ("voice", "Voice"), ("ring", "Ring"), ("keys", "API keys"), ("timezone", "Time zone"), ("rules", "Rules and task board"), ("usage", "Usage"), ("setup", "Setup"), ("import", "Import from 0.14"), ("about", "About"), ("privacy", "Privacy"), ("developer", "Developer")];
 
 pub struct Out { pub patch: Value, pub cmds: Vec<Value> }
 
@@ -104,6 +104,12 @@ fn threads(st: &State, session: &Value) -> Vec<Value> {
         row("Notify me for", "Which alerts reach you, quiet hours and phones are under Notifications.", vec![btn("Notifications ›", "settings-page", "notifications", false)]),
     ];
     v
+}
+
+/// Settings > Projects and git: whether the hub pushes the design commits it makes to the remote (settings/autopush.rs, #1171). Off unless turned on.
+fn git(st: &State) -> Vec<Value> {
+    vec![row("Push commits to the remote automatically", "Backplane commits design files locally at each turn's end. On: it also pushes them to the branch's remote. Off: a project's page shows the commits not pushed, with Push.",
+        chips(&["on", "off"], onoff(crate::settings::autopush::on(set(st, crate::settings::autopush::KEY, ""))), crate::settings::autopush::KEY))]
 }
 
 /// The quiet window's two ends as `(from, to)`: the setting's own, else the default; None when quiet hours are off.
@@ -759,7 +765,7 @@ fn mcp_patch(p: serde_json::Map<String, Value>) -> Value {
 
 /// One page's rows (without the way back).
 fn rows_of(st: &State, session: &Value, info: &Value, p: &str) -> Vec<Value> {
-    match p { "appearance" => appearance(st), "threads" => threads(st, session), "notifications" => notifications(st, session, info), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(st, session, info), "machines" => { let mut r = crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string());
+    match p { "appearance" => appearance(st), "threads" => threads(st, session), "git" => git(st), "notifications" => notifications(st, session, info), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(st, session, info), "machines" => { let mut r = crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string());
             r.extend(crate::net::homemove::rows(!set(st, "uber.bot", "").is_empty(), set(st, "home.at", ""), info["home.move"].as_str().unwrap_or(""), &info["machines"]["linked"]));
             r.extend(crate::net::alwayson::rows::machines_rows(info, set(st, crate::net::alwayson::other::STAYS_ON, "") == "on"));
             r.extend(super::signin_there::open_rows(info)); r }, "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "ring" => ring(st, session, info), "usage" => usage(st), "developer" => developer(st), "mcp" => mcp(session, info), _ => vec![] }
@@ -994,8 +1000,14 @@ mod tests {
 
     #[test] fn the_menu_lists_the_ported_pages_each_a_settings_page_button() {
         let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {}}), &json!({}));
-        assert_eq!(labels(&v), ["Appearance", "Threads", "Notifications", "Agents", "MCP servers", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Machines", "Voice", "Ring", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "Import from 0.14", "About", "Privacy", "Developer"]);
+        assert_eq!(labels(&v), ["Appearance", "Threads", "Projects and git", "Notifications", "Agents", "MCP servers", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Machines", "Voice", "Ring", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "Import from 0.14", "About", "Privacy", "Developer"]);
         assert_eq!(v["rows"][1]["buttons"][0]["action"], "settings-page"); assert_eq!(v["rows"][1]["buttons"][0]["value"], "threads");
+    }
+    #[test] fn projects_and_git_offers_auto_push_off_by_default() {
+        let lit = |s: &State| { let v = view(s, &json!({"open": {"settings": true}, "drafts": {"@settings.page": "git"}}), &json!({})); v["rows"][1]["buttons"].as_array().unwrap().iter().filter(|b| b["on"] == true).map(|b| b["value"].as_str().unwrap().to_string()).collect::<Vec<_>>() };
+        assert_eq!(lit(&st(&[])), ["git.auto_push=off"]);
+        assert_eq!(lit(&st(&[("git.auto_push", "on")])), ["git.auto_push=on"]);
+        assert_eq!(lit(&st(&[("git.auto_push", "off")])), ["git.auto_push=off"]);
     }
     #[test] fn about_says_what_this_windows_browser_tab_is() {
         let about = |client: Value| { let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {"@settings.page": "about"}}), &json!({"client": client})); labels(&v) };

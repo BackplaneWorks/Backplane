@@ -2369,6 +2369,8 @@ gpui.the.right.spelling = 正しい綴り
 gpui.star.on.github = GitHubでスターを付ける
 gpui.star.dont.ask = 今後表示しない
 gpui.star.why = スターは、ほかのハードウェア設計者がBackplaneを見つける助けになり、私たちが何を作り続けるべきかを知る手がかりにもなります。
+gpui.projects.unpushed = {upstream} にプッシュしていないコミット: {n} 件
+gpui.projects.push = プッシュ
 
 # ---- gpui-e: hub settings and panels ----
 gpui.e.files.max.mb = 添付の上限（MB）
@@ -2663,6 +2665,10 @@ gpui.e.freecad.ask.note = 最新のFreeCAD（約800 MB、展開後3 GB）をgith
 gpui.e.freecad.offer = このコンピュータ用のFreeCAD公式リリースです。エージェントはこれで機構部品を作ります。
 gpui.e.picker.clone.hint = リポジトリをクローンしてプロジェクトとして追加します
 gpui.e.picker.clone.typed = {origin}をクローン
+settings.git.page = プロジェクトと git
+settings.git.autopush = コミットを自動でリモートにプッシュ
+settings.git.autopush.note = Backplane は各ターンの終わりに設計ファイルをローカルにコミットします。オン: ブランチのリモートにもプッシュします。オフ: プロジェクトのページにプッシュしていないコミットと「プッシュ」ボタンを表示します。
+settings.git.notice = Backplane は自動でプッシュしなくなりました。必要なら設定でオンにしてください。
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = インストール

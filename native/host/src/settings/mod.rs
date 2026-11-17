@@ -5,6 +5,7 @@
 //! Secret.changes), `mask::json(&mut answer)` on every MCP answer (Mcp.masked), `mask::mask(line)` on every agent output line and every
 //! line to an agent, and `secret::prompt()` / `keys::prompt(..)` in the prompt. See docs/HUB-API.md.
 pub mod accounts;
+pub mod autopush;
 pub mod alerts;
 pub mod accounts_hub;
 pub mod binding;
@@ -93,6 +94,8 @@ mod read_tests {
 pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
     hub.register_rpc(Arc::new(set::SettingSet { agents: agents.clone() }));
     hub.register_rpc(Arc::new(telemetry::TelemetryRpc));
+    hub.register_rpc(Arc::new(autopush::AutoPushRpc));
+    { let h = hub.clone(); tokio::spawn(async move { autopush::boot(&h).await; autopush::changed(&h).await }); } // #1171: an upgraded install is told once that it no longer pushes
     telemetry_send::start(&hub); // the sender: nothing runs in a build with no baked endpoint and key (docs/telemetry.md)
     hub.register_rpc(Arc::new(diagnostics::DiagnosticsRpc));
     hub.register_rpc(Arc::new(zone::ZoneRpc));
