@@ -9,6 +9,7 @@ pub mod embed;
 pub mod hostlibs;
 pub mod ipc;
 pub mod kedit;
+pub mod ksim_parts;
 pub mod ksim_wave;
 pub mod kroute;
 pub mod kexport;
