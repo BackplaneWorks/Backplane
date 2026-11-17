@@ -21,6 +21,7 @@ table{width:100%;border-collapse:collapse}td{padding:6px 0;vertical-align:top}td
 tr.total td{border-top:1px solid var(--line);padding-top:10px;font-weight:700;font-size:17px}
 .muted{color:var(--muted)}.small{font-size:13px}
 button{background:var(--accent);color:#fff;border:0;border-radius:10px;padding:12px 20px;font-size:16px;font-weight:600;cursor:pointer;width:100%}
+ol.terms{margin:0;padding-left:22px}ol.terms li{margin:0 0 12px}a{color:var(--accent)}
 .bad{color:var(--bad)}.ok{color:var(--accent)}ul{margin:6px 0;padding-left:20px}
 .admin td{border-bottom:1px solid var(--line);padding:8px 6px;font-size:13px}.admin input,.admin select{font:inherit}
 """
@@ -63,6 +64,49 @@ def paused():
 
 def cancelled():
     return page("Payment", "<h1>Not paid</h1><p class=sub>Nothing was charged. You can close this tab; Buy now in Backplane opens it again.</p>")
+
+
+# The order terms a buyer agrees to on Stripe's checkout (a required box links
+# here). Changing them changes what every later buyer agrees to: bump the date.
+TERMS_DATE = "November 17, 2026"
+
+
+def terms_items():
+    contact = (f'<a href="mailto:{e(config.SUPPORT_EMAIL)}">{e(config.SUPPORT_EMAIL)}</a>' if config.SUPPORT_EMAIL
+               else "the support details on your Stripe receipt")
+    we = e(config.COMPANY)
+    return [
+        ("What we do", f"{we} (\"we\") orders your parts from an independent manufacturer as your purchasing agent. "
+                       "The manufacturer makes them from your files and ships them straight to you. "
+                       "Ownership passes from the manufacturer to you."),
+        ("Price", "The price at checkout is the full price: manufacturing, our fee, shipping, and any import duties and "
+                  "taxes shown. It is final."),
+        ("Your design", "You are responsible for your design and files. Parts are made exactly as submitted. We don't check "
+                        "that your design works, is safe, or suits your use. You keep all rights to your design; you let us "
+                        "and the manufacturer use your files only to make and ship this order."),
+        ("Lawful use", "You confirm the parts are legal to make, export, import and use, and that you, the recipient and the "
+                       "destination are not subject to US or UN sanctions. We don't ship to sanctioned countries or regions."),
+        ("Custom-made", "Every order is made to your specification, so it can't be cancelled or returned once it has been "
+                        "placed with the manufacturer. Where the law allows, this also excludes any right to withdraw from "
+                        "the purchase."),
+        ("Defects", "If what arrives doesn't match your files because of a manufacturing fault, tell us within 30 days of "
+                    "delivery, with photos. We will have it remade or refund that part of the order. This is your only "
+                    "remedy for defects."),
+        ("Delivery", "Delivery dates are estimates. We are not responsible for delays by couriers or customs, or for a wrong "
+                     "delivery address you gave."),
+        ("Limit of liability", "Our total liability for an order is the amount you paid for it. We are not liable for indirect "
+                               "or consequential losses, such as lost profits, lost data or damage to other equipment. "
+                               "Nothing here limits rights that the law says can't be limited."),
+        ("Law", "These terms are governed by the laws of the State of Delaware, USA."),
+        ("Contact", f"Questions or problems: {contact}."),
+    ]
+
+
+def terms():
+    items = "".join(f"<li><b>{e(h)}.</b> {t}</li>" for h, t in terms_items())
+    return page("Order terms", f"<h1>Order terms</h1><p class=sub>Last updated {e(TERMS_DATE)}. These are the terms of an "
+                               f"order placed through Backplane. By paying, you agree to them.</p>"
+                               f"<div class=card><ol class=terms>{items}</ol></div>")
 
 
 def error(code, msg):

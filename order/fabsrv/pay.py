@@ -17,6 +17,8 @@ from . import config, store
 
 API = "https://api.stripe.com/v1"
 
+TERMS_AGREE = ("I agree to the [Backplane order terms]({url}): parts are made to my files, the price shown is final, "
+               "and an order can't be cancelled or returned once it's placed.")
 TERMS = "Parts are made to your files and ship straight from the manufacturer. The price shown is the price you pay."
 
 
@@ -57,6 +59,9 @@ def checkout(row, quote):
             "phone_number_collection[enabled]": "true",
             "billing_address_collection": "auto",
             "custom_text[submit][message]": config.PILOT_NOTE if config.PILOT else TERMS,
+            # a required box: no payment without agreeing to the order terms; Stripe records the consent
+            "consent_collection[terms_of_service]": "required",
+            "custom_text[terms_of_service_acceptance][message]": TERMS_AGREE.format(url=f"{config.PUBLIC_URL}/terms"),
             "success_url": f"{config.PUBLIC_URL}/q/{qid}/done?s={{CHECKOUT_SESSION_ID}}",
             "cancel_url": f"{config.PUBLIC_URL}/q/{qid}/cancelled",
             "expires_at": str(int(min(time.time() + 23 * 3600, max(row["expires"], time.time() + 3600)))),
