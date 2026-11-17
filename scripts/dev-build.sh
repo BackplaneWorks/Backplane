@@ -98,11 +98,13 @@ boat_core() {
   if [ -n "$FEATURES" ]; then ver=$(sed -n 's/^pub const VERSION: &str = "\(.*\)";.*/\1/p' "$ROOT/native/gpui/src/viewers/cef.rs" | head -1); RT=${XDG_CACHE_HOME:-$HOME/.cache}/backplane/cef-runtime/$ver
     { [ -f "$RT/libcef.so" ] && [ -f "$RT/icudtl.dat" ]; } || pullcef=1; fi   # the Chromium runtime is already cached here, or it comes back with the window
   body="export BP_REMOTE_CORE=1 BQ_HELD=1 BP_PULL_CEF=$pullcef PROFILE=$PROFILE BACKPLANE_COMMIT=${BACKPLANE_COMMIT:-} BUILD_ROOT=\$HOME/ws/src GPUI_DEV_DIR=\$BP_JOB/dev CEF_PATH=\$HOME/.cache/backplane/cef-rs"
+  sk=; for k in hub window voice guard; do [ "${SKIP[$k]:-0}" = 1 ] && sk+="$k "; done; body+=" GATE_SKIP_SUITES='${sk% }'"
   body+=" HOST_TARGET=\$HOME/target/host GPUI_TARGET=\$HOME/target/gpui VOICE_TARGET=\$HOME/target/voice GUARD_TARGET=\$HOME/target/guard"$'\n'"exec bash ~/ws/src/scripts/dev-build.sh$([ "$GATE" = 1 ] && echo ' --gate') --no-cut"
   bo_run "$BOXID" "$BJOB" "" "$body" > "$LOG" 2>&1; rc=$?
   [ "$rc" = 98 ] && { bo_down "the build could not run on $BOXID"; exit 98; }
   [ "$rc" = 0 ] || fail "$(phase)"
   grep '^gate: ' "$LOG"
+  if [ "$GATE" = 1 ] && [ "${ok:-0}" = 1 ]; then [ "${SKIP[guard]:-0}" = 1 ] || gok_put guard "${KEY[guard]}" "$(git -C "$ROOT" rev-parse --short HEAD)" "gate: guard tests passed (on Boat bp-build-$BX)"; for k in hub window voice; do [ "${SKIP[$k]:-0}" = 1 ] || { g=$(grep "^gate: $k tests" "$LOG" | tail -1); case "$g" in *" 0 failed"*) gok_put "$k" "${KEY[$k]}" "$(git -C "$ROOT" rev-parse --short HEAD)" "$g (on Boat bp-build-$BX)";; esac; }; done; fi
   f=$(sed -n 's/^bp-features: //p' "$LOG" 2>/dev/null | tail -1); [ -z "$f" ] || FEATURES=$f   # (what the box ended up building the window with)
   mark "copying"; PULL=$(mktemp -d "$DEV/.pull.XXXX")
   bo_pull "$BOXID" "$BJOB" /home/user/target "$PULL" >> "$LOG" 2>&1 || { rm -rf "$PULL"; fail "copy from the box"; }
@@ -110,21 +112,30 @@ boat_core() {
   cpart host "$HT" backplane-hub; cpart gpui "$GT" backplane-gpui; cpart voice "$VT" backplane-voice; cpart guard "$UT" backplane
   [ "$pullcef" = 1 ] && cp -a "$PULL/gpui/$PROFILE/." "$GT/$PROFILE/"
   rm -rf "$PULL"; echo "built on Boat bp-build-$BX ($BOXID)" > "$DEV/.built-on-boat"; }
-if [ -n "$BX" ]; then boat_core
-elif [ "$GATE" = 1 ]; then
-  mark "guard tests"; CG "$ROOT/native/guard" "$UT" test $OFFLINE -j "$J" > "$LOG" 2>&1 || fail "guard tests"
-  # A suite whose inputs are byte-identical (git's index of its files, the compiler, this script) to the last time it passed is not run again: the log says "skip: ..." and names that run.
-  # Inputs are everything but what the suite cannot see (the other crates, mobile/, order/, the top-level docs); anything unknown counts as an input. GATE_FULL=1 runs everything.
-  GOK=$DEV/.gate-ok; mkdir -p "$GOK"; RV=$(rustc -V 2>/dev/null); ex=(':(exclude)mobile' ':(exclude)order' ':(exclude,glob)docs/*.md')
-  gkey() { local s=$1; shift; { printf '%s\n' "$s $RV $PROFILE"; git -C "$ROOT" ls-files -s -- "$@" scripts/dev-build.sh scripts/gate-skip.txt scripts/lib-buildslot.sh 2>/dev/null; } | sha1sum | cut -c1-16; }
+# The gate's record (docs/MAIN-BUILD.md, "One gate per commit"): a suite whose inputs are byte-identical (git's index of its files, the compiler, this script) to a run that passed is not
+# run again: the log says "skip: ..." and names that run. Every passed key is kept (one file per key in $GOK/<suite>.d, 7 days), not only the last, so main-build finds the key of the
+# commit land.sh gated, and a gate on a Boat box records its keys here too. Inputs are everything but what the suite cannot see (the other crates, mobile/, order/, the top-level docs);
+# anything unknown counts as an input. GATE_FULL=1 runs everything. BP_GATE_OK (default ~/.backplane-gpui-dev/.gate-ok) is shared by every lane and the main builder.
+GOK=${BP_GATE_OK:-$HOME/.backplane-gpui-dev/.gate-ok}; mkdir -p "$GOK"; RV=$(rustc -V 2>/dev/null); ex=(':(exclude)mobile' ':(exclude)order' ':(exclude,glob)docs/*.md')
+gkey() { local s=$1; shift; { printf '%s\n' "$s $RV $PROFILE"; git -C "$ROOT" ls-files -s -- "$@" scripts/dev-build.sh scripts/gate-skip.txt scripts/lib-buildslot.sh 2>/dev/null; } | sha1sum | cut -c1-16; }
+gok_get() { [ -n "$2" ] && [ -f "$GOK/$1.d/$2" ] && cat "$GOK/$1.d/$2" && return 0; [ -n "$2" ] && [ "$(head -1 "$GOK/$1" 2>/dev/null)" = "$2" ] && cat "$GOK/$1"; }   # (the one-file record before Nov 17 too)
+gok_put() { mkdir -p "$GOK/$1.d"; printf '%s\n%s\n%s\n' "$2" "$3" "$4" > "$GOK/$1.d/$2.$$" && mv -f "$GOK/$1.d/$2.$$" "$GOK/$1.d/$2"; cp -f "$GOK/$1.d/$2" "$GOK/$1"; find "$GOK/$1.d" -type f -mtime +7 -delete 2>/dev/null; }
+if [ "$GATE" = 1 ]; then
   git -C "$ROOT" rev-parse HEAD > /dev/null 2>&1 && ok=1 || ok=0
   if [ "$ok" = 1 ]; then
     KEY[hub]=$(gkey hub . "${ex[@]}" ':(exclude)native/gpui' ':(exclude)native/voice'); KEY[window]=$(gkey window . "${ex[@]}" ':(exclude)native/host' ':(exclude)native/voice' ':(exclude)native/guard')
-    KEY[voice]=$(gkey voice native/voice)
+    KEY[voice]=$(gkey voice native/voice); KEY[guard]=$(gkey guard native/guard)
   fi
-  for k in hub window voice; do SKIP[$k]=0
-    if [ -n "${KEY[$k]:-}" ] && [ -z "${GATE_FULL:-}" ] && [ "$(head -1 "$GOK/$k" 2>/dev/null)" = "${KEY[$k]}" ]; then SKIP[$k]=1
-      echo "skip: $k tests: inputs identical (${KEY[$k]}) to the run that passed at $(sed -n 2p "$GOK/$k"); $(sed -n 3p "$GOK/$k")"; fi; done
+  for k in hub window voice guard; do SKIP[$k]=0
+    # a Boat box runs only what the caller has no pass for (GATE_SKIP_SUITES, set by boat_core): nothing is tested twice for one tree
+    case " ${GATE_SKIP_SUITES:-} " in *" $k "*) SKIP[$k]=1; echo "skip: $k tests: the caller has a pass for these inputs"; continue;; esac
+    if [ -n "${KEY[$k]:-}" ] && [ -z "${GATE_FULL:-}" ] && r=$(gok_get "$k" "${KEY[$k]}"); then SKIP[$k]=1
+      echo "skip: $k tests: inputs identical (${KEY[$k]}) to the run that passed at $(printf '%s\n' "$r" | sed -n 2p); $(printf '%s\n' "$r" | sed -n 3p)"; fi; done
+fi
+if [ -n "$BX" ]; then boat_core
+elif [ "$GATE" = 1 ]; then
+  if [ "${SKIP[guard]:-0}" != 1 ]; then mark "guard tests"; CG "$ROOT/native/guard" "$UT" test $OFFLINE -j "$J" > "$LOG" 2>&1 || fail "guard tests"
+    [ "${ok:-0}" = 1 ] && gok_put guard "${KEY[guard]}" "$(git -C "$ROOT" rev-parse --short HEAD)" "gate: guard tests passed"; fi
   mark "compiling tests"; LH=$(mktemp "$DEV/.t.XXXX"); LW=$(mktemp "$DEV/.t.XXXX"); LV=$(mktemp "$DEV/.t.XXXX"); ph=; pw=; pv=
   [ "${SKIP[hub]}" = 1 ] || { CG "$ROOT/native/host" "$HT" test $OFFLINE -j "$J" --no-run > "$LH" 2>&1 & ph=$!; }
   [ "${SKIP[window]}" = 1 ] || { CG "$ROOT/native/gpui" "$GT" test $OFFLINE -j "$J" --no-run > "$LW" 2>&1 & pw=$!; }
@@ -147,7 +158,7 @@ elif [ "$GATE" = 1 ]; then
   # what ran, per suite (so two runs, here and on a Boat box, can be compared): "gate: hub tests 1234 passed, 0 failed, 3 ignored"
   GL=$(for n in "hub tests" "window tests" "voice tests"; do [ "${SKIP[${n% tests}]}" = 1 ] && continue; for i in "${!names[@]}"; do [ "${names[$i]}" = "$n" ] && cat "${logs[$i]}"; done | awk -v n="$n" '/^test result:/ {p+=$4; f+=$6; g+=$8} END {printf "gate: %s %d passed, %d failed, %d ignored\n", n, p, f, g}'; done); [ -z "$GL" ] || echo "$GL"
   rm -f "${logs[@]}"
-  if [ "$ok" = 1 ]; then for k in hub window voice; do [ "${SKIP[$k]}" = 1 ] || printf '%s\n%s\n%s\n' "${KEY[$k]}" "$(git -C "$ROOT" rev-parse --short HEAD)" "$(printf %s "$GL" | grep "^gate: $k tests")" > "$GOK/$k"; done; fi
+  if [ "$ok" = 1 ]; then for k in hub window voice; do [ "${SKIP[$k]}" = 1 ] || gok_put "$k" "${KEY[$k]}" "$(git -C "$ROOT" rev-parse --short HEAD)" "$(printf %s "$GL" | grep "^gate: $k tests")"; done; fi
   # the builds come after the tests, not beside them: a build at -j28 starves the timing-sensitive hub tests (reconnect_loses_nothing_under_streaming_load and others fail under that load)
   buildall
 else
@@ -207,11 +218,11 @@ esac
 if [ -z "${SKIP_SMOKE:-}" ] || [ -n "$BX" ]; then   # (a build made on a Boat box is always smoke-started here, whatever SKIP_SMOKE says)
   # the smoke start is fixed waits of 30 s or more: skipped when the hub's inputs and the guard's are those of the last smoke start that passed (the binaries differ only in the commit they name); logged
   SK=; [ -n "${KEY[hub]:-}" ] && SK=$(gkey smoke native/guard)-${KEY[hub]}
-  if [ -n "$SK" ] && [ -z "${GATE_FULL:-}" ] && [ -z "$BX" ] && [ "$(head -1 "$DEV/.gate-ok/smoke" 2>/dev/null)" = "$SK" ]; then echo "skip: smoke start: hub and guard inputs identical ($SK) to the smoke start that passed at $(sed -n 2p "$DEV/.gate-ok/smoke")"
+  if [ -n "$SK" ] && [ -z "${GATE_FULL:-}" ] && [ -z "$BX" ] && r=$(gok_get smoke "$SK"); then echo "skip: smoke start: hub and guard inputs identical ($SK) to the smoke start that passed at $(printf '%s\n' "$r" | sed -n 2p)"
   else
   mark "smoke start"; status building "Smoke start of $(cat "$D/COMMIT")" "$est" "$est"
   SMOKE_DIR="$DEV" "$HERE/smoke-start.sh" "$D" "$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)" > "$LOG" 2>&1 || fail "smoke start"
-  [ -z "$SK" ] || printf '%s\n%s\n' "$SK" "$(git -C "$ROOT" rev-parse --short HEAD)" > "$DEV/.gate-ok/smoke"
+  [ -z "$SK" ] || gok_put smoke "$SK" "$(git -C "$ROOT" rev-parse --short HEAD)" ""
   fi
 fi
 # --no-cut (land.sh's and e2e-linux.sh's gate): nothing reads the stage afterwards, so the EXIT trap removes it (it was kept, one 243 MB folder per land, and 535 piled up by Nov 16); KEEP_STAGE=1 keeps it
