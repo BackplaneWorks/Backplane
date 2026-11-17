@@ -5,6 +5,7 @@
 pub mod links;
 pub mod refs;
 pub mod doc;
+pub mod issues;
 mod html;
 mod inline;
 mod block;

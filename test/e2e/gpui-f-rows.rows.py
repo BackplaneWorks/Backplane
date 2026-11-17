@@ -339,3 +339,19 @@ if want('F22'):
     quoted = until(lambda: any(e['$'] == 'SettingSet' and e.get('key') == 'order.quote.t3' and e.get('value') for e in events()), 40); pause(3); shot('f22-quote')
     clean = not any('pay' in x[1] or 'buy' in x[1] or 'checkout' in x[1] for x in ORDER_SEEN)
     log('F22-card', bool(ask) and before == 0 and sent and quoted and clean, 'the files card (f22-files-card.png, buttons %s) opened with nothing uploaded before Send (no POST to the order server)=%s; Send pressed with the mouse: the hub uploaded to the stand-in order server and the quote card was set=%s (f22-quote.png); requests seen %s, none to pay or buy=%s' % (ids, before == 0, quoted, [x[0] + ' ' + x[1] for x in ORDER_SEEN], clean))
+
+# ---- ISSUE issue references are links: the project's origin on GitHub, a message with #1163 and OWNER/REPO#5; the window's links (its `links`
+# metric, as it painted them) go to the project's issue and the named repository's, and a # inside a word is none (code spans: md/issues.rs's
+# tests; XTest types no backtick here)
+if want('ISSUE'):
+    os.makedirs(P('proj/.git'), exist_ok=True); open(P('proj/.git/config'), 'w').write('[remote "origin"]\n\turl = git@github.com:BackplaneWorks/Backplane.git\n')
+    def links():
+        s = [m for m in metrics() if m.get('event') == 'links']; return [l.get('href') for l in (s[-1].get('links', []) if s else [])]
+    pause(61)   # the hub reads a folder's origin once a minute (mirror::origin_of_root): the rig's folder had none until now
+    sel(1); r = rects()['composer']; xin('click', int(r['x'] + r['w'] / 2), int(r['y'] + 30)); pause(0.5)
+    xin('type', 'zqecho see #1163 and other/thing#5 not page#7'); xin('key', 'Return')
+    want_ = ['https://github.com/BackplaneWorks/Backplane/issues/1163', 'https://github.com/other/thing/issues/5']
+    ok = until(lambda: all(h in links() for h in want_), 30); pause(1); shot('issue-links')
+    code = any(h and h.endswith('/issues/7') for h in links())
+    log('ISSUE-links', ok and not code, 'a message in a project whose origin is github.com/BackplaneWorks/Backplane: the window drew links %s; #1163 and other/thing#5 linked=%s, page#7 linked=%s (issue-links.png)' % ([h for h in links() if 'github' in (h or '')], ok, code))
+    shutil.rmtree(P('proj/.git'), ignore_errors=True)

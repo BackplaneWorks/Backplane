@@ -29,6 +29,8 @@ mod settings { pub mod order { pub use crate::order_view::*; } }
 #[path="../present/panels.rs"] mod panels;
 #[path="../present/ready.rs"] pub mod ready;
 mod present { pub use crate::ready; }
+// the issue links' repository (present/thread.rs): the audit reads no project's git config, so it links nothing
+mod mirror { pub fn origin_of_root(_: &str) -> String { String::new() } }
 #[path="../agents/bg.rs"] pub mod bg_;
 #[path="../agents/inputs.rs"] pub mod inputs_;
 #[path="../agents/skills.rs"] pub mod skills_;

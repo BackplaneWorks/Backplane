@@ -591,6 +591,9 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     o.insert("readingSeen".into(), json!(newest_id.as_deref().unwrap_or("-")));
     // a sent message's references (@bot >thread %project #room &model) as cards the client draws under it
     let mut entries = entries;
+    // `#123` and `OWNER/REPO#123` in the messages' text link to GitHub's issues, in a project whose origin is on GitHub (md/issues.rs)
+    let repo = st.projects.get(&t.project).and_then(|p| md::issues::repo_of(&crate::mirror::origin_of_root(&p.root))).unwrap_or_default();
+    if !repo.is_empty() { for e in entries.iter_mut() { if let Some(Value::Array(b)) = e.get_mut("blocks") { md::issues::link_nodes(b, &repo) } } }
     // halt cards (agents/halt.rs): a turn ended out of memory or out of context, its row drawn as a card with its actions
     for e in entries.iter_mut() { if e["kind"] == "act" { let id = e["id"].as_str().unwrap_or("").to_string();
         if let Some(c) = st.settings.get(&crate::agents::halt::key(thread, &id)).and_then(|c| serde_json::from_str::<Value>(c).ok()) { *e = crate::agents::halt::entry(&id, e["text"].as_str().unwrap_or(""), &c) } } }
