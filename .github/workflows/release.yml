@@ -501,7 +501,13 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           pre=; case "$TAG" in *-*) pre=--prerelease;; esac
-          gh release create "$TAG" $pre --draft --title "$TAG" --notes "" backplane-*.tar.gz backplane-*.zip backplane-$TAG-android.apk backplane-$TAG-android.aab install.sh SHA256SUMS
+          files="backplane-*.tar.gz backplane-*.zip backplane-$TAG-android.apk backplane-$TAG-android.aab install.sh SHA256SUMS"
+          # a draft made ahead for this tag (its title and notes written by hand, e.g. "Backplane 0.16.0") is filled and published as it is; else a new one
+          if [ -n "$(gh api "repos/$GH_REPO/releases" --paginate -q ".[] | select(.draft and .tag_name == \"$TAG\") | .id" | head -1)" ]; then
+            echo "filling the draft release made for $TAG"; gh release upload "$TAG" --clobber $files
+          else
+            gh release create "$TAG" $pre --draft --title "$TAG" --notes "" $files
+          fi
           # all three signed files, or the updater counts the release as half published and never offers it (update/run.rs SIGNED)
           gh release upload "$TAG" manifest.json manifest.json.sig manifest.json.keyid
           gh release edit "$TAG" --draft=false
