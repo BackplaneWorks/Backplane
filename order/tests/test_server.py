@@ -449,3 +449,30 @@ def test_the_order_list_flags_a_state_the_tax_was_not_quoted_for():
     row = {"result": json.dumps(q)}
     assert pay.shipped_state(row, {"country": "US", "state": "wa"}) == {"state": "WA", "quoted": "GA"}
     assert pay.shipped_state(row, {"country": "GR", "state": "Attica"}) == {}
+
+
+def test_paying_needs_the_order_terms_ticked(monkeypatch):
+    from fabsrv import config, pages, pay, store
+    with client() as c:
+        r = c.get("/terms")
+        assert r.status_code == 200 and "Order terms" in r.text and "Delaware" in r.text
+        assert "Stripe receipt" in r.text  # no support email set: the receipt's support details
+    monkeypatch.setattr(config, "SUPPORT_EMAIL", "help@example.com")
+    assert "mailto:help@example.com" in pages.terms()
+    sent = {}
+
+    class Fake:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def post(self, path, data=None, headers=None):
+            sent.update(data)
+            return type("R", (), {"status_code": 200, "json": lambda self: {"id": "cs_x", "url": "https://checkout/x", "amount_total": 100}})()
+    monkeypatch.setattr(pay, "_client", lambda: Fake())
+    monkeypatch.setattr(store, "q", lambda *a: [])
+    monkeypatch.setattr(store, "one", lambda *a: None)
+    monkeypatch.setattr(store, "create_order", lambda *a: None)
+    row = {"id": "q_x", "country": "US", "expires": 4102444800}
+    assert pay.checkout(row, {"lines": [{"label": "Manufacturing", "amount": 1.0}]}) == "https://checkout/x"
+    assert sent["consent_collection[terms_of_service]"] == "required"
+    assert f"({config.PUBLIC_URL}/terms)" in sent["custom_text[terms_of_service_acceptance][message]"]
+    assert len(sent["custom_text[terms_of_service_acceptance][message]"]) <= 1200

@@ -48,6 +48,10 @@ PILOT_NOTE = ("Pilot: ordering through Backplane is still being tested. This che
 PAUSED = env("FAB_PAUSED", "0") == "1"
 PAUSED_NOTE = env("FAB_PAUSED_NOTE") or ("Thanks for your interest. As of November 8 we have temporarily paused paying through here; we'll be back soon. "
                "You can ask Backplane to export the manufacturing files and order them directly from a PCB manufacturer.")
+# who the order terms (/terms) name, and where they send questions; without a
+# support email they point to the support details on the Stripe receipt
+COMPANY = env("FAB_COMPANY") or "Backplane"
+SUPPORT_EMAIL = env("FAB_SUPPORT_EMAIL")
 MOUSER_KEY = env("MOUSER_API_KEY")
 TI_KEY = env("TI_API_KEY")
 TI_SECRET = env("TI_API_SECRET")

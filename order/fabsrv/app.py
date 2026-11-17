@@ -227,6 +227,12 @@ async def quote_buy(qid: str, request: Request, t: str = ""):
     return RedirectResponse(url, status_code=303)
 
 
+@app.get("/terms", response_class=HTMLResponse)
+async def terms_page(request: Request):
+    limited("read", request)
+    return pages.terms()
+
+
 @app.get("/q/{qid}/done", response_class=HTMLResponse)
 async def quote_done(qid: str, request: Request, s: str = ""):
     limited("read", request)
