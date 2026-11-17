@@ -220,7 +220,8 @@ for v in 10.0 10.99; do mkdir -p "$HH/.config/kicad/$v"
 kset() { for v in 10.0 10.99; do f=$HH/.config/kicad/$v/kicad_common.json; printf '%s %s %s %s\n' "$v" "$(sha256sum "$f" 2>/dev/null | cut -c1-16)" "$(stat -c %Y "$f" 2>/dev/null)" "$(ls "$HH/.config/kicad/$v" 2>/dev/null | tr '\n' ',')"; done; }
 KSET0=$(kset)
 # the person's settings after the hub has probed its runtime: at the install's end on a fresh home, just after start on a home that
-# already had one (the update mode: there a shown thread warms a real KiCad soon after, which uses the settings as it should)
+# already had one (the update mode: as soon as the hub logs its probe, "kicad: runtime ...": a shown thread warms a real KiCad within
+# seconds there, which uses the settings as it should)
 kcheck() { local KSET1; KSET1=$(kset); printf '%s\n---\n%s\n' "$KSET0" "$KSET1" >"$OUT/logs/kicad-settings.txt"
   [ "$KSET0" = "$KSET1" ] && ok "the hub's probes left the person's KiCad settings as they were (10.0 and 10.99 kicad_common.json: same bytes, same mtime, no new file)" \
     || { bad "the hub's probes changed the person's KiCad settings: $(diff <(echo "$KSET0") <(echo "$KSET1") | grep '^>' | tr '\n' ' ')"; cut_ 1 settings "probing KiCad rewrote the person's KiCad settings"; }; }
@@ -230,7 +231,7 @@ for _ in $(seq 120); do pos first-use >/dev/null && break; sleep 0.5; done
 pos first-use >/dev/null && { tm first-window "$(now)"; ok "the first window asks for the data folder"; } || { bad "no first window in 60 s: $(tail -5 "$HH/win.log" | tr '\n' ' ')"; shot 00-nothing; exit 1; }
 shot 00-first; click_id first-use
 for _ in $(seq 240); do hub_up && break; sleep 0.5; done
-hub_up && { tm hub-up "$(now)"; ok "Use this folder started the hub (port $(hub_port))"; if [ -n "${UPDATE_FROM:-}" ]; then sleep 10; kcheck; fi; true; } || { bad "no hub in 120 s"; tail -20 "$HUBH/hub.log" 2>/dev/null; exit 1; }
+hub_up && { tm hub-up "$(now)"; ok "Use this folder started the hub (port $(hub_port))"; if [ -n "${UPDATE_FROM:-}" ]; then for _ in $(seq 120); do grep -aq "kicad: runtime " "$HUBH/hub.log" 2>/dev/null && break; sleep 0.25; done; kcheck; fi; true; } || { bad "no hub in 120 s"; tail -20 "$HUBH/hub.log" 2>/dev/null; exit 1; }
 sleep 4; shot 01-welcome
 
 # --- 3. setup: Welcome -> Agents -> Design tools (KiCad installs by itself there) ---
