@@ -765,10 +765,12 @@ fn held(ev: &[Value]) -> bool { ev.iter().any(|e| is(e, "TurnQueued") && !e["msg
     let ev = deliveries().await; let i = ev.iter().position(|e| is(e, "MessagePosted") && e["text"] == "three").unwrap();
     assert!(is(&ev[i + 1], "MessageFrom") && turn_is(&ev[i + 2], "running") && ev[i + 3]["key"].as_str().unwrap().starts_with("turn.from."))
 }
-async fn recovered(extra: &str, state: &str) -> Vec<Value> {
+async fn recovered(extra: &str, state: &str) -> Vec<Value> { recovered_when(extra, state, None).await }
+/// The log after a restart on `extra`: with `done`, once it holds (a carried turn's message comes from a task of its own, later on a loaded machine), else after a fixed 400 ms.
+async fn recovered_when(extra: &str, state: &str, done: Option<fn(&[Value]) -> bool>) -> Vec<Value> {
     let sd = dir(&format!("rc-{state}-bin")); perf_standin(&sd, 1);
     let (hub, ag, _h, _w) = start(&format!("rc-{state}"), |w| { let l = running_log(w, extra); if state == "idle" { l.replace("\"state\":\"running\"", "\"state\":\"completed\"") } else { l } }, |_| Cli::standin(&sd)).await;
-    tokio::time::sleep(Duration::from_millis(400)).await; let ev = log_from(&hub, 0).await; ag.shutdown(); ev
+    let ev = match done { Some(f) => until(&hub, 0, 180, f).await, None => { tokio::time::sleep(Duration::from_millis(400)).await; log_from(&hub, 0).await } }; ag.shutdown(); ev
 }
 #[tokio::test(flavor = "multi_thread")] async fn recover_interrupts_running() { let ev = recovered("{\"$\":\"SettingSet\",\"key\":\"restart.continue\",\"value\":\"off\",\"at\":1700000101}\n", "run").await; let last = ev.iter().rev().find(|e| is(e, "TurnChanged")).unwrap(); assert_eq!(last["state"], "interrupted") }
 #[tokio::test(flavor = "multi_thread")] async fn recover_closes_asks() { let ask = format!("{{\"$\":\"AskOpened\",\"id\":\"q9\",\"thread\":\"{T1}\",\"kind\":\"approval\",\"tool\":\"Bash\",\"detail\":\"ls\",\"options\":\"\",\"at\":1700000101}}\n"); let ev = recovered(&ask, "run").await; assert!(ev.iter().any(|e| is(e, "AskClosed") && e["id"] == "q9")) }
@@ -777,9 +779,12 @@ async fn recovered(extra: &str, state: &str) -> Vec<Value> {
 /// says so on the thread and tells the agent which work is gone
 #[tokio::test(flavor = "multi_thread")] async fn recover_tells_a_thread_its_background_work_stopped() {
     let bg = format!("{{\"$\":\"SettingSet\",\"key\":\"bg.{T1}\",\"value\":\"b1\\tmeasuring\\tc1\\tRail widths\\tshell\",\"at\":1700000101}}\n");
-    let ev = recovered(&bg, "idle").await;
-    assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "restart" && e["summary"].as_str().unwrap_or("").contains("background work: Rail widths")), "{ev:?}");
-    assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["text"].as_str().unwrap_or("").starts_with(world::CARRY_BG) && e["text"].as_str().unwrap_or("").contains("Rail widths")), "{ev:?}");
+    fn noted(ev: &[Value]) -> bool { ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "restart" && e["summary"].as_str().unwrap_or("").contains("background work: Rail widths")) }
+    fn told(ev: &[Value]) -> bool { ev.iter().any(|e| is(e, "MessagePosted") && e["text"].as_str().unwrap_or("").starts_with(world::CARRY_BG) && e["text"].as_str().unwrap_or("").contains("Rail widths")) }
+    // the note is in recovery's commit; the agent is told by the carried turn, started in a task of its own: wait for both, not a fixed while
+    let ev = recovered_when(&bg, "idle", Some(|ev| noted(ev) && told(ev))).await;
+    assert!(noted(&ev), "{ev:?}");
+    assert!(told(&ev), "{ev:?}");
     assert!(!ev.iter().any(|e| turn_is(e, "interrupted")), "nothing was running: no turn is marked cut");
 }
 /// Buy it's list of what would be ordered (order_ask with pick): a tap flips an item and closes nothing; Continue (or a typed answer) closes it once, and the
