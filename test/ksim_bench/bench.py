@@ -37,6 +37,15 @@ def answer_of(log):
                 if n in ("WebFetch", "WebSearch") or re.search(r"preview_(open|navigate)$", n) or (n == "Bash" and re.search(r"\b(curl|wget)\b|urllib|requests\.get|https?://", arg)): web += 1
         if j.get("type") == "result": text = j.get("result") or ""; err = bool(j.get("is_error"))
     return text, err, sims, web
+def is_claude(log):
+    """whether a run's transcript is the Claude CLI's (stream-json: a `type` on each line), not another provider's (ACP: `dir` and a JSON-RPC `msg`)"""
+    kinds = set()
+    for l in open(log):
+        try: _, j = l.split("\t", 1); j = json.loads(j)
+        except ValueError: continue
+        if "msg" in j and "dir" in j: return False
+        kinds.add(j.get("type"))
+    return bool(kinds & {"system", "assistant", "result"}) or not kinds - {"command_lifecycle", None}
 def simlog(work, thread, t0, t1):
     """what the hub's simulation log says about one run (<home>/logs/sim.jsonl, one line per simulation action; absent before kicad_sim exists):
     how many simulations ran, ngspice's run time and how many models were looked up"""
@@ -59,6 +68,10 @@ def one(work, variant, task, n):
     r = kb.turn(work, d, task["prompt"])
     if r.get("state") == "driver-failed":  # the hub is gone (or the driver): not a run, and none of the rest would be one either
         DEAD.append(name); print(f"{name}: NOT RUN, the turn could not be started: {str(r.get('err'))[-200:]}; the rest is left", flush=True); return None
+    # these runs are Claude's: a hub with no Claude login left answers a turn with another provider (its own fallback), and that is not a run
+    # of this benchmark, nor would the next be. The transcript says who answered: only the Claude wrapper writes the CLI's stream-json lines.
+    if os.path.exists(log) and not is_claude(log):
+        DEAD.append(name); os.rename(log, log + ".not-claude"); print(f"{name}: NOT RUN, another provider answered (no Claude login was usable); the rest is left", flush=True); return None
     o = {"variant": variant, "task": task["id"], "run": n, "state": r.get("state"), "wall_s": round(time.time() - t0, 1), "at": int(t0)}
     text, err = "", False
     if os.path.exists(log): o.update(kb.usage(log)); text, err, o["shell_sims"], o["web"] = answer_of(log)
