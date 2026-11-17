@@ -57,7 +57,8 @@
       "after": "undo",
       "works": "an edit with deleted > 0 (the delete again)",
       "wrong": "an edit with created > 0",
-      "gating": true
+      "gating": true,
+      "when": "pressed after KiCad's check that follows the undo has reported (ET_CHECKS_DONE), as a person who pauses would; bp.13 3a19ebb5bb empties the redo list there (redo at once still works)"
     },
     {
       "id": "redo_shift_z",
@@ -69,7 +70,8 @@
       "after": "undo",
       "works": "an edit with deleted > 0 (the delete again)",
       "wrong": "an edit with created > 0",
-      "gating": true
+      "gating": true,
+      "when": "pressed after KiCad's check that follows the undo has reported (ET_CHECKS_DONE), as a person who pauses would; bp.13 3a19ebb5bb empties the redo list there (redo at once still works)"
     },
     {
       "id": "copy_paste",
@@ -163,7 +165,8 @@
       "extra_zoom_in",
       "extra_zoom_out",
       "extra_close_window",
-      "extra_quit"
+      "extra_quit",
+      "extra_redo_at_once"
     ]
   }
 }
