@@ -18,8 +18,16 @@
 # Env: LAND_GH (the gh program), LAND_REPO (owner/name; default from origin), LAND_TRIES, LAND_TEST, LAND_MIN_FREE_GB, LAND_POLL_S (seconds between PR state reads, 2).
 # Any step that cannot be done fails loudly with "land: FAILED ..." and a non-zero exit; it never leaves local main ahead of origin.
 set -eu
+# sh reads a script as it runs: an edit, a rebase or this script's own fast-forward of a checkout would change what a running land reads next.
+# So it runs from a private copy (and `here` stays the real scripts dir).
+if [ -z "${LAND_COPY:-}" ]; then
+  real=$(cd "$(dirname "$0")" && pwd)
+  copy=$(mktemp "${TMPDIR:-/tmp}/land-run.XXXXXX") && cp "$0" "$copy" || { echo "land: FAILED: could not copy $0 to a temporary file" >&2; exit 1; }
+  LAND_COPY=$copy LAND_HERE=$real exec sh "$copy" "$@"
+fi
+trap 'rm -f "$LAND_COPY"' EXIT
 cd "$(git rev-parse --show-toplevel)"
-here=$(cd "$(dirname "$0")" && pwd)
+here=$LAND_HERE
 die() { echo "land: FAILED: $*" >&2; exit 1; }
 say() { echo "land: $*" >&2; }
 # A full disk fails a build or a dozen unrelated tests ("No space left on device"); say so first, plainly
@@ -50,7 +58,7 @@ pr_number() { ghi pr list -R "$repo" --head "$br" --state open --json number -q 
 # A stale copy of this script (a worktree made before main's land.sh changed) must not run: an older land.sh pushed straight to main. Refused when
 # origin/main's scripts/land.sh differs from this one AND this one is a version main has had (a copy ahead of main, a change being landed, is fine).
 git fetch -q origin main || die "git fetch origin main failed (offline?); nothing pushed"
-if mine=$(git hash-object "$here/land.sh") && cur=$(git rev-parse -q --verify origin/main:scripts/land.sh) && [ "$mine" != "$cur" ]; then
+if mine=$(git hash-object "$LAND_COPY") && cur=$(git rev-parse -q --verify origin/main:scripts/land.sh) && [ "$mine" != "$cur" ]; then
   for c in $(git log --format=%H origin/main -- scripts/land.sh); do
     [ "$(git rev-parse -q --verify "$c:scripts/land.sh" 2>/dev/null)" = "$mine" ] && die "this scripts/land.sh is older than origin/main's: rebase on origin/main (git rebase origin/main), then run it again"
   done
@@ -118,13 +126,15 @@ while :; do
   [ "$pstate" = MERGED ] || die "PR #$num was merged but GitHub does not say MERGED yet; run scripts/land.sh --resume"
   break
 done
-git fetch -q origin main || die "landed, but git fetch origin main failed; run: git fetch origin main && git -C <main checkout> merge --ff-only origin/main"
+# After the merge nothing may turn the result non-zero but a failed fast-forward of local main (and that says the merge is done).
+if ! git fetch -q origin main; then say "the merge of ${num:+PR #$num }is DONE, but git fetch origin main failed here; local main is not updated (run: git fetch origin main, then fast-forward main)"; exit 0; fi
 # local main follows what GitHub made of the commits (a rebase merge rewrites them: the branch's own shas are not main's): fast-forward it in the checkout that has it
 tip=$(git rev-parse origin/main)
 mainwt=$(git worktree list --porcelain | awk '/^worktree /{w=substr($0,10)} /^branch refs\/heads\/main$/{print w}')
 if git merge-base --is-ancestor main "$tip" 2>/dev/null; then
-  if [ -n "$mainwt" ]; then git -C "$mainwt" merge -q --ff-only "$tip" || die "merged, but local main in $mainwt cannot fast-forward (its working tree is in the way); run: git -C $mainwt merge --ff-only origin/main"
+  if [ -n "$mainwt" ]; then git -C "$mainwt" merge -q --ff-only "$tip" || { say "the merge is DONE (main is $(git rev-parse --short "$tip") on origin), but local main in $mainwt cannot fast-forward (its working tree is in the way); run: git -C $mainwt merge --ff-only origin/main"; exit 1; }
   else git update-ref refs/heads/main "$tip"; fi
-else die "merged, but local main has commits that are not on origin/main ($(git rev-list --count "$tip"..main)); land them from a branch (scripts/land.sh), never merge into main"
+else say "the merge is DONE (main is $(git rev-parse --short "$tip") on origin), but local main has commits that are not on origin/main ($(git rev-list --count "$tip"..main)); land them from a branch (scripts/land.sh), never merge into main"; exit 1
 fi
 say "landed $br${num:+ (PR #$num)}; main is $(git rev-parse --short "$tip"); scripts/main-build.sh status shows the build"
+exit 0
