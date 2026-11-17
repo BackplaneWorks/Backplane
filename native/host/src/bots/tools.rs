@@ -343,7 +343,7 @@ impl Bots {
             json!({"$":"SettingSet","key":format!("bot.parent.{bot}"),"value":b.id,"at":now})];
         let evs = self.accounts_created(evs).await;
         if let Err(e) = self.t_commit(w, now, evs).await { return fail(&e) }
-        let me = self.clone(); let (b2, t2) = (bot.clone(), th.clone()); tokio::spawn(async move { me.home_pub(&b2, &t2).await }); // BotFx home
+        let me = self.clone(); let (b2, t2) = (bot.clone(), th.clone()); self.job(async move { me.home_pub(&b2, &t2).await }); // BotFx home
         (true, json!({"bot":bot,"name":name,"note":format!("{name} is made: talk to it with bot_send")}))
     }
 

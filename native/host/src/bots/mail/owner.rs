@@ -173,7 +173,7 @@ impl Bots {
         if !evs.is_empty() { self.owner_commit(evs).await }
     }
     /// run the outbox in the background (the mail lane calls this when it files mail that belongs to the owner's other machine)
-    pub fn owner_kick(self: &Arc<Self>) { let me = self.clone(); tokio::spawn(async move { me.owner_outbox().await }); }
+    pub fn owner_kick(self: &Arc<Self>) { let me = self.clone(); self.job(async move { me.owner_outbox().await }); }
     async fn owner_commit(&self, evs: Vec<Value>) { if !evs.is_empty() { if let Err(e) = self.hub.commit_many(&evs).await { eprintln!("owner.mail: {e:#}") } } }
 
     /// Owner.plan: choose the recipient (the holder, for a machine that is not it) and persist it before IO

@@ -75,7 +75,8 @@ impl Inbox for Arc<Agents> {
 
 pub struct Bots { pub hub: Arc<Hub>, world: Mutex<World>, pub(super) inbox: Arc<dyn Inbox>, pub(crate) router: std::sync::OnceLock<Arc<dyn super::mail::file::Router>>, last_id: std::sync::Mutex<(u64, u64)>, pub(crate) owner_link: std::sync::OnceLock<Arc<dyn super::mail::owner::OwnerLink>>, pub(crate) owner_busy: std::sync::atomic::AtomicBool, star: std::sync::OnceLock<Arc<StarPrompt>>, threads: std::sync::RwLock<std::collections::HashMap<String, String>>, pub(crate) mail_lists: std::sync::RwLock<std::collections::HashMap<String, Vec<&'static str>>>, pub(super) far: super::far::FarState, pub(super) swarm: super::swarm::Give,
     /// the threads that run with infinite context (recall::on_threads), as last folded, and the memory tree's engine (Bots::start installs it)
-    pub(crate) recall_on: std::sync::RwLock<std::collections::HashSet<String>>, pub(crate) recall: std::sync::OnceLock<Arc<super::recall::Recall>> }
+    pub(crate) recall_on: std::sync::RwLock<std::collections::HashSet<String>>, pub(crate) recall: std::sync::OnceLock<Arc<super::recall::Recall>>,
+    #[cfg(test)] pub(crate) quiet: super::mail::run::Quiet }
 /// the state lane's star-nudge count for a human prompt (statehost::policies()?.star_prompt): the events to commit with the prompt and, on the fifth, the offer for its connection
 pub type StarPrompt = dyn Fn(&str, u64) -> (Vec<Value>, Option<Value>) + Send + Sync;
 
@@ -137,7 +138,7 @@ impl Bots {
         let store = hub.store.clone();
         let w = tokio::task::spawn_blocking(move || { let mut w = crate::ckpt::take("bots", &store, || World::load(&store)).unwrap_or_default(); if let Err(e) = w.sync(&store) { eprintln!("bots: reading the log: {e:#}") } w }).await.unwrap_or_default();
         let mut w = w; w.steps.clear(); // what the start folded was answered when it happened
-        let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox, router: Default::default(), last_id: Default::default(), owner_link: Default::default(), owner_busy: Default::default(), star: Default::default(), threads: Default::default(), mail_lists: Default::default(), far: Default::default(), swarm: Default::default(), recall_on: Default::default(), recall: Default::default() });
+        let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox, router: Default::default(), last_id: Default::default(), owner_link: Default::default(), owner_busy: Default::default(), star: Default::default(), threads: Default::default(), mail_lists: Default::default(), far: Default::default(), swarm: Default::default(), recall_on: Default::default(), recall: Default::default(), #[cfg(test)] quiet: Default::default() });
         { let g = b.world.lock().await; b.refresh_threads(&g); }
         { let me = b.clone(); crate::ckpt::register(move |store| me.world.blocking_lock().save(store)); }
         { let me = b.clone(); tokio::spawn(async move { loop { tokio::time::sleep(std::time::Duration::from_secs(20)).await; me.owner_outbox().await } }); } // OwnerJob: the outbox is walked again
@@ -157,7 +158,7 @@ impl Bots {
         hub.register_http(Arc::new(super::hooks::HookHttp { bots: b.clone(), seen: Default::default() }));
         hub.register_rpc(Arc::new(super::ring::RingRpc(b.clone()))); hub.register_http(Arc::new(super::ring::RingAudio)); b.ring_recover();
         super::mail::requests::register(&hub, &b);
-        let me = b.clone(); tokio::spawn(async move { let n = me.mail_recover().await; if n > 0 { eprintln!("bots: {n} mail header(s) recovered from the journal") } });
+        let me = b.clone(); b.job(async move { let n = me.mail_recover().await; if n > 0 { eprintln!("bots: {n} mail header(s) recovered from the journal") } });
         b
     }
     /// the threads that are live bots' (a tool list asks without waiting for the world lock). Refreshed only when the world catches up (`world()`): a path that starts a bot's agent
@@ -228,7 +229,7 @@ impl Bots {
         let uber = p.get("uber").and_then(Value::as_bool).unwrap_or(false);
         // the folder first, then the reply: a message sent at once to a new bot starts a turn that needs its folder (without it: "its folder  is gone")
         me.home(&b2, &t2).await;
-        if uber { tokio::spawn(async move { let _ = me.promote_job(&b2).await; }); }
+        if uber { let m2 = me.clone(); m2.job(async move { let _ = me.promote_job(&b2).await; }); }
         vec![json!({"t":"reply","id":id,"ok":true,"bot":bot})]
     }
 

@@ -199,7 +199,7 @@ impl Bots {
         drop(w);
         if let Err(e) = r { return vec![err(id, &format!("{e:#}"))] }
         let (me, b2, t2) = (self.clone(), bot.clone(), th.clone());
-        tokio::spawn(async move { me.home_pub(&b2, &t2).await });
+        self.job(async move { me.home_pub(&b2, &t2).await });
         vec![json!({"t":"reply","id":id,"ok":true,"bot":bot})]
     }
 }

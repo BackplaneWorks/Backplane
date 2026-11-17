@@ -9,19 +9,25 @@ use std::sync::{Arc, Weak};
 /// Ephemeral.is: a mail run's thread or a back office
 fn ephemeral(thread: &str) -> bool { thread.starts_with("run") || thread.starts_with("mailcoord-") }
 
+/// Test only: what the mailroom has in flight (`Bots::job`, `Bots::idle`), so a test waits for its reactions and never for wall time
+#[cfg(test)] #[derive(Default)] pub(crate) struct Quiet { pub(crate) busy: Arc<std::sync::atomic::AtomicUsize>, pub(crate) after: std::sync::atomic::AtomicUsize }
+#[cfg(test)] struct Busy(Arc<std::sync::atomic::AtomicUsize>);
+#[cfg(test)] impl Busy { fn new(n: &Arc<std::sync::atomic::AtomicUsize>) -> Busy { n.fetch_add(1, std::sync::atomic::Ordering::SeqCst); Busy(n.clone()) } }
+#[cfg(test)] impl Drop for Busy { fn drop(&mut self) { self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst); } }
+
 /// The router the lane installs: every filed header is routed once, after its commit
 pub struct MailRouter(pub Weak<Bots>);
 impl Router for MailRouter {
     fn routed(&self, body: &Body) {
         if crate::copy::on() { return } // a hub on a copy of a log starts no run
         let (Some(b), Ok(_)) = (self.0.upgrade(), tokio::runtime::Handle::try_current()) else { return };
-        let body = body.clone(); tokio::spawn(async move { b.route_body(body).await });
+        let body = body.clone(); let me = b.clone(); me.job(async move { b.route_body(body).await });
     }
     /// Mail.failure: only the kind of failure is said, never which conversation
     fn failed(&self, body: &Body, why: store::StoreError) {
         if crate::copy::on() { return }
         let (Some(b), Ok(_)) = (self.0.upgrade(), tokio::runtime::Handle::try_current()) else { return };
-        let body = body.clone(); tokio::spawn(async move { let outs = b.decide(&[], |c| c.mail_failure(&body, &why.to_string())).await; b.perform(outs).await });
+        let body = body.clone(); let me = b.clone(); me.job(async move { let outs = b.decide(&[], |c| c.mail_failure(&body, &why.to_string())).await; b.perform(outs).await });
     }
 }
 
@@ -72,8 +78,8 @@ impl Bots {
     pub(crate) fn perform(self: &Arc<Self>, outs: Vec<RouteOut>) -> crate::api::Fut<'_, ()> { Box::pin(async move {
         for o in outs {
             match o {
-                RouteOut::RunStart { thread, conv, head } => { let me = self.clone(); tokio::spawn(async move { me.run_start(thread, conv, head).await }); }
-                RouteOut::RunNext { bot, conv } => { let me = self.clone(); tokio::spawn(async move { me.run_next(bot, conv).await }); }
+                RouteOut::RunStart { thread, conv, head } => { let me = self.clone(); self.job(async move { me.run_start(thread, conv, head).await }); }
+                RouteOut::RunNext { bot, conv } => { let me = self.clone(); self.job(async move { me.run_next(bot, conv).await }); }
                 RouteOut::OwnerMail => self.owner_kick(),
                 RouteOut::Deliver { thread, msg, text, origin, system } => { if let Err(e) = self.inbox_deliver_role(system, &thread, &msg, &text, Some(origin)).await { eprintln!("mail: delivery to a run failed: {e}") } }
                 RouteOut::Note { thread, id, text } => { if let Err(e) = self.inbox_note(&thread, &id, &text).await { eprintln!("mail: a note could not ride: {e}") } }
@@ -124,8 +130,28 @@ impl Bots {
         let (me, mut rx) = (Arc::downgrade(self), self.hub.subscribe());
         tokio::spawn(async move { loop {
             match rx.recv().await { Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {} Err(_) => return }
-            let Some(b) = me.upgrade() else { return }; b.after_steps().await;
+            let Some(b) = me.upgrade() else { return };
+            #[cfg(test)] let n = b.hub.store.len();
+            b.after_steps().await;
+            #[cfg(test)] b.quiet.after.fetch_max(n, std::sync::atomic::Ordering::SeqCst);
         } });
+    }
+    /// A mailroom job in the background (a routed header, a run's start, the queue's next, the outbox walk). The same `tokio::spawn` outside tests; in a test it is counted, so `idle` knows when it is done.
+    pub(crate) fn job(self: &Arc<Self>, f: impl std::future::Future<Output = ()> + Send + 'static) {
+        #[cfg(test)] { let g = Busy::new(&self.quiet.busy); tokio::spawn(async move { let _g = g; f.await }); }
+        #[cfg(not(test))] { tokio::spawn(f); }
+    }
+    /// Test only: every reaction the mailroom owes is done. The follower has answered the log up to its current end (`after_steps`, with what it performed) and no counted job
+    /// (`job`) is in flight, twice in a row 30 ms apart. Bounded at 180 s: a stuck reaction fails the test instead of hanging it.
+    #[cfg(test)] pub(crate) async fn idle(&self) {
+        use std::sync::atomic::Ordering::SeqCst;
+        let quiet = || self.quiet.busy.load(SeqCst) == 0 && self.quiet.after.load(SeqCst) >= self.hub.store.len();
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(180); let mut calm = 0;
+        while std::time::Instant::now() < end {
+            calm = if quiet() { calm + 1 } else { 0 }; if calm >= 2 { return }
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        }
+        panic!("the mailroom never settled: {} job(s) in flight, followed to line {} of {}", self.quiet.busy.load(SeqCst), self.quiet.after.load(SeqCst), self.hub.store.len())
     }
     /// Run.recover, at a start: `cut` are the threads the restart interrupted. A run among them is told as cut off; a bound run whose end no step answered (a crash between the turn's end and
     /// its answer: answering again changes nothing once answered) is answered now; with the carry on a queue with nothing live goes on (Run.queue.recover).
