@@ -106,10 +106,14 @@ jobs:
           s2 = re.sub(r'^pub const MAC: Package = .*$', lambda m: line, s, count=1, flags=re.M); assert s2 != s; open(p, 'w').write(s2); print('this run pins', ver, sha[:12], size)
           PY
           gh release download ${{ inputs.update_from }} -R BackplaneWorks/Backplane_KiCad -p 'backplane-kicad-darwin-arm64-*.tar.gz' -D "$RUNNER_TEMP/from"
-          (cd "$RUNNER_TEMP/from" && tar xzf backplane-kicad-darwin-arm64-*.tar.gz)
+          (cd "$RUNNER_TEMP/from" && tar xzf backplane-kicad-darwin-arm64-*[0-9].tar.gz)
           F=$(ls -d "$RUNNER_TEMP"/from/backplane-kicad-darwin-arm64-*/ | head -1); echo "RT=${F%/}" >> "$GITHUB_ENV"
-          (cd "$RUNNER_TEMP/feed" && nohup python3 -m http.server 8123 --bind 127.0.0.1 > "$RUNNER_TEMP/feed.log" 2>&1 &)
-          echo "BACKPLANE_KICAD_FEED=http://127.0.0.1:8123" >> "$GITHUB_ENV"
+          # the installer's curl takes https only (--proto =https): the feed on 127.0.0.1 with a throwaway certificate, trusted by that curl alone
+          printf '[req]\ndistinguished_name=dn\nx509_extensions=v3\nprompt=no\n[dn]\nCN=127.0.0.1\n[v3]\nsubjectAltName=IP:127.0.0.1\nbasicConstraints=CA:TRUE\n' > "$RUNNER_TEMP/tls.cnf"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 2 -keyout "$RUNNER_TEMP/feed-key.pem" -out "$RUNNER_TEMP/feed-cert.pem" -config "$RUNNER_TEMP/tls.cnf" 2>/dev/null
+          (cd "$RUNNER_TEMP/feed" && nohup python3 -c "import http.server,ssl; s=http.server.HTTPServer(('127.0.0.1',8443), http.server.SimpleHTTPRequestHandler); c=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); c.load_cert_chain('$RUNNER_TEMP/feed-cert.pem','$RUNNER_TEMP/feed-key.pem'); s.socket=c.wrap_socket(s.socket, server_side=True); s.serve_forever()" > "$RUNNER_TEMP/feed.log" 2>&1 &)
+          sleep 2; CURL_CA_BUNDLE="$RUNNER_TEMP/feed-cert.pem" curl --proto =https -fsSI https://127.0.0.1:8443/SHA256SUMS | head -1
+          echo "BACKPLANE_KICAD_FEED=https://127.0.0.1:8443" >> "$GITHUB_ENV"; echo "CURL_CA_BUNDLE=$RUNNER_TEMP/feed-cert.pem" >> "$GITHUB_ENV"
       - name: build the hub and the client
         run: |
           export BACKPLANE_COMMIT=$(git rev-parse --short HEAD)
