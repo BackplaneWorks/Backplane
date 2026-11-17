@@ -50,10 +50,12 @@ jobs:
           - { target: windows-x64, os: windows-latest }
     name: build ${{ matrix.target }}
     # a nightly may build on faster machines, named by repo variables (unset: GitHub's): NIGHTLY_LINUX_RUNNER (Boat CI: boat), NIGHTLY_MAC_RUNNER (the Mac mini's
-    # self-hosted runner label), NIGHTLY_WIN_RUNNER. A tag release always builds on GitHub's images above.
-    # RELEASE_MAC_RUNNER (repo variable, a self-hosted runner's label: the Mac mini's bp-mac) builds darwin-arm64 there for any run while it is set (0.16.0:
-    # "just build on our Mac"); unset, GitHub's image as before
-    runs-on: ${{ (matrix.target == 'darwin-arm64' && vars.RELEASE_MAC_RUNNER) || (inputs.nightly && matrix.target == 'linux-x64' && vars.NIGHTLY_LINUX_RUNNER) || (inputs.nightly && matrix.target == 'darwin-arm64' && vars.NIGHTLY_MAC_RUNNER) || (inputs.nightly && matrix.target == 'windows-x64' && vars.NIGHTLY_WIN_RUNNER) || matrix.os }}
+    # self-hosted runner label), NIGHTLY_WIN_RUNNER; a RELEASE_* variable below, when set, comes first.
+    # RELEASE_MAC_RUNNER and RELEASE_WIN_RUNNER (repo variables, a self-hosted runner's label: the Mac mini's bp-mac, bp-win's bp-win-nightly) build darwin-arm64
+    # and windows-x64 there for any run while they are set, the tag's included: the secrets come with the job, so the hub gets its telemetry key there as on
+    # GitHub. Unset, GitHub's images as before. Linux and Android always build on GitHub's. Each runner refuses any job but release.yml's and nightly.yml's
+    # from main or a v* tag (scripts/runner-guard.sh, docs/release-runners.md); the variables are set only while a release uses them.
+    runs-on: ${{ (matrix.target == 'darwin-arm64' && vars.RELEASE_MAC_RUNNER) || (matrix.target == 'windows-x64' && vars.RELEASE_WIN_RUNNER) || (inputs.nightly && matrix.target == 'linux-x64' && vars.NIGHTLY_LINUX_RUNNER) || (inputs.nightly && matrix.target == 'darwin-arm64' && vars.NIGHTLY_MAC_RUNNER) || (inputs.nightly && matrix.target == 'windows-x64' && vars.NIGHTLY_WIN_RUNNER) || matrix.os }}
     defaults:
       run:
         shell: bash
@@ -536,7 +538,7 @@ jobs:
           - { target: darwin-arm64, os: macos-latest }
           - { target: windows-x64, os: windows-latest }
     name: smoke ${{ matrix.target }}
-    runs-on: ${{ (matrix.target == 'darwin-arm64' && vars.RELEASE_MAC_RUNNER) || matrix.os }}
+    runs-on: ${{ (matrix.target == 'darwin-arm64' && vars.RELEASE_MAC_RUNNER) || (matrix.target == 'windows-x64' && vars.RELEASE_WIN_RUNNER) || matrix.os }}
     permissions:
       contents: read
       actions: read
@@ -544,6 +546,9 @@ jobs:
       run:
         shell: bash
     steps:
+      # a self-hosted Windows runner (bp-win): Git's find and sort ahead of System32's, as in build
+      - if: runner.os == 'Windows' && runner.environment == 'self-hosted'
+        run: echo 'C:\Program Files\Git\usr\bin' >> "$GITHUB_PATH"
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { name: release-dry-run, path: rel }
