@@ -6,9 +6,10 @@ said is only used where the files cannot tell (finish, colour, material,
 bends) and a difference is reported as a warning.
 
 The person sees three lines and a total: manufacturing, shipping, and duties
-and taxes, and a US quote a fourth, its sales tax. Our fee (FEE of everything,
-FEE_CNC of CNC parts) is part of the manufacturing line, not a line of its own;
-shipping and taxes show what the fab is expected to charge for them.
+and taxes, and a US quote a fourth, its sales tax. Our fee (FEE of the goods
+and shipping, FEE_CNC of CNC parts; never of duties or taxes) is part of the
+manufacturing line, not a line of its own; shipping and taxes show what the fab
+is expected to charge for them.
 """
 import re
 import datetime
@@ -241,10 +242,9 @@ def price(manifest, measured, install=""):
     stax = duties.sales_tax(country, region, goods, ship.get("price", 0.0)) if parts_out else None
     if stax and not stax["known"]:
         warnings.append(f"Sales tax is estimated at {stax['rate']:g}%: the quote doesn't say which US state it ships to")
-    # the fee is folded into the manufacturing line (the same amount as when
-    # it was a line of its own, so the total does not change); it is a share of
-    # every line, taxes included, so a line the fab charges a little over is covered
-    fee = config.FEE * (mfg + ship["price"] + tax + (stax["amount"] if stax else 0.0)) + config.FEE_CNC * cnc
+    # the fee is folded into the manufacturing line; it is a share of the goods
+    # and shipping only, never of duties or taxes
+    fee = config.FEE * (mfg + ship["price"]) + config.FEE_CNC * cnc
     lines = [
         {"label": "Manufacturing", "amount": round(goods + fee, 2), "detail": made_of(parts_out)},
         {"label": "Shipping", "amount": round(ship["price"], 2), "detail": neutral(", ".join(x for x in (ship.get("method"), ship.get("days")) if x))},
@@ -297,6 +297,5 @@ def markdown(q):
         out += ["", "**Pilot:** ordering through Backplane is still being tested. Buy now opens a test checkout and your card "
                     "will not be charged. To get the parts made now, order them from any fabricator with the files exported to `mfg/`."]
         return "\n".join(out)
-    out += ["", f"Valid for {config.QUOTE_DAYS} days. Prices are estimates and not guaranteed: if the real cost turns out "
-                "higher we'll ask before charging more, and you can have a full refund instead; if it's lower, we refund the difference."]
+    out += ["", f"Valid for {config.QUOTE_DAYS} days. The quoted price is the price you pay."]
     return "\n".join(out)
