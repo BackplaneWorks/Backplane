@@ -93,7 +93,9 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libasound2-dev libwayland-dev libvulkan-dev
       # GitHub's runners: the Actions cache. Self-hosted: target/ persists, and sccache (its cache in the runner's SCCACHE_DIR, set in its .env) compiles
-      # what a changed crate needs; gpui's fat-LTO link (codegen-units=1) is never cached and runs in full every time.
+      # what a changed crate needs; gpui's fat-LTO link (codegen-units=1) is never cached and runs in full every time. Not on Windows: sccache 0.19 expands
+      # cargo's @argfile and spawns rustc with the whole line, which for gpui (360 -L dependency= paths in cargo's per-crate build dirs) is past Windows'
+      # 32K limit ("The filename or extension is too long"); there target/ alone keeps the build warm.
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
         with:
@@ -104,7 +106,7 @@ jobs:
             native/voice
           shared-key: release-${{ matrix.target }}
       - name: sccache (self-hosted)
-        if: runner.environment != 'github-hosted'
+        if: runner.environment != 'github-hosted' && runner.os != 'Windows'
         run: |
           [ -n "$SCCACHE_DIR" ] || { echo "::error::this self-hosted runner has no SCCACHE_DIR in its .env"; exit 1; }
           sccache --version && sccache --stop-server >/dev/null 2>&1 || true
@@ -159,7 +161,7 @@ jobs:
           (cd native/voice && cargo build --release --bin backplane-voice) & v=$!   # dictation's helper: the hub runs it from beside itself (voice/session.rs)
           wait $a; ra=$?; wait $b; rb=$?; wait $g; rg=$?; wait $v; rv=$?; exit $((ra | rb | rg | rv))
       - name: sccache stats (self-hosted)
-        if: always() && runner.environment != 'github-hosted'
+        if: always() && runner.environment != 'github-hosted' && runner.os != 'Windows'
         run: sccache --show-stats
       - name: no test trust in a release
         run: |
