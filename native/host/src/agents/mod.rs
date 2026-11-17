@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod account_tools; pub mod halt; pub mod halt_view; pub mod kicadsel; pub mod mcp_stdio; pub mod bundled; pub mod mailroom; pub mod recall; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod iconpick; pub mod groupname; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
+pub mod account_tools; pub mod halt; pub mod halt_view; pub mod kicadsel; pub mod mcp_stdio; pub mod bundled; pub mod kistack; pub mod mailroom; pub mod recall; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod iconpick; pub mod groupname; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
 #[cfg(test)] mod tests;
 #[cfg(test)] mod laws;
 
@@ -181,7 +181,7 @@ impl Agents {
             let design = if f.pcb.is_empty() && f.sch.is_empty() { String::new() } else { prompt::design_words(&main, code.as_ref().filter(|c| !c.0.is_empty()).map(|c| (c.0.as_str(), c.1.as_str())), &locks) };
             let keys = prompt::api_keys(&keys_path.to_string_lossy(), &prompt::key_names(&std::fs::read_to_string(&keys_path).unwrap_or_default())) + &prompt::secrets(&crate::settings::vault::names());
             prompt::build(&prompt::PromptEnv { fc: crate::files::kicad::stepglb::told_freecad(&host.home, &host.fc), render: host.render.clone(), kicad: host.kicad.clone(), kicad_ipc: ipc, models: host.models_text(), may_delegate: true, orders_on: orders, routing_plan: plan,
-                root, pro: f.pro, pcb: f.pcb, sch: f.sch, all: f.all, design, keys, machines, buy, lang, skills: host.bundled.as_deref().map(bundled::list).unwrap_or_default() })
+                root, pro: f.pro, pcb: f.pcb, sch: f.sch, all: f.all, design, keys, machines, buy, lang, skills: host.bundled.as_deref().map(bundled::list).unwrap_or_default(), kistack: host.kistack.as_deref().map(kistack::describe) })
         }).await.unwrap_or_default()
     }
     /// PendingChanged: the number of open asks on a thread, written after an ask opens or closes (`extra` asks counted on top).

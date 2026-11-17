@@ -32,6 +32,9 @@ fn read_json(p: &Path) -> Value { std::fs::read_to_string(p).ok().and_then(|t| s
 fn roots(env: &Env, cwd: &str) -> Vec<Root> {
     let home = PathBuf::from(&env.home); let mut v: Vec<Root> = vec![];
     let mut add = |dir: PathBuf, kind: Kind, group: &str, plugin: &str| if !v.iter().any(|r| r.dir == dir) { v.push(Root { dir, kind, group: group.into(), plugin: plugin.into() }) };
+    // Backplane's pinned KiStack first: a person's older copy of the same skill (~/.agents/skills, ~/.claude/skills, a project) never wins `$name`
+    if let Some(k) = &env.kistack { add(k.join("skills"), Kind::Hub, "Backplane", "") }
+    add(env.hub_home.join("kistack/skills"), Kind::Hub, "Backplane", "");
     // the folder and its parents, up to (not including) the person's home
     let mut d = PathBuf::from(cwd); let mut n = 0;
     while !cwd.is_empty() && n < 8 && d != home && d.parent().is_some() {
@@ -57,8 +60,7 @@ fn roots(env: &Env, cwd: &str) -> Vec<Root> {
     let codex = env.codex_home.as_ref().map(PathBuf::from).unwrap_or_else(|| home.join(".codex"));
     add(codex.join("skills"), Kind::Codex, "Codex · yours", "");
     add(home.join(".agents/skills"), Kind::Codex, "Agents · yours", "");
-    if let Some(k) = &env.kistack { add(k.join("skills"), Kind::Hub, "Backplane", "") }
-    add(env.hub_home.join("skills"), Kind::Hub, "Backplane", ""); add(env.hub_home.join("kistack/skills"), Kind::Hub, "Backplane", ""); add(env.hub_home.join("bundled/skills"), Kind::Hub, "Backplane", ""); // bundled.rs dir()
+    add(env.hub_home.join("skills"), Kind::Hub, "Backplane", ""); add(env.hub_home.join("bundled/skills"), Kind::Hub, "Backplane", ""); // bundled.rs dir()
     v
 }
 

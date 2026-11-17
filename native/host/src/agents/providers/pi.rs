@@ -235,6 +235,12 @@ pub fn args(sid: &str, ext: &str, prompt: &str, model_: &str, effort: &str) -> V
     v.extend(opt("--model", model(model_))); v.extend(effort_args(effort)); v
 }
 
+/// KiStack's pinned skills (agents/kistack.rs, `<home>/kistack/skills`) loaded as Pi's own skills; nothing when the hub has no copy.
+pub fn kistack_arg(home: &str) -> Vec<String> {
+    let d = crate::agents::kistack::dir(std::path::Path::new(home)).join("skills");
+    if d.is_dir() { vec!["--skill".into(), d.to_string_lossy().into_owned()] } else { vec![] }
+}
+
 /// PiRun.prompt: what `--append-system-prompt` is given. Windows (`windows`): a file of the instructions (pi takes text or a path), as no
 /// launcher there carries their newlines (agents/proc.rs `carries`); elsewhere the text.
 pub fn prompt_arg(dir: &std::path::Path, thread: &str, prompt: &str, windows: bool) -> String {
@@ -253,7 +259,8 @@ impl Driver for PiDriver {
         let dir = std::path::Path::new(&a.home).join("pi");
         let _ = write_atomic(&dir, "backplane.js", EXT);
         // Windows: the instructions go as a file (pi's --append-system-prompt takes text or a path): no launcher there carries their newlines (proc.rs `carries`)
-        args(&session(&a.session, &a.thread, &a.gen), &dir.join("backplane.js").to_string_lossy(), &prompt_arg(&dir, &a.thread, &a.prompt, cfg!(windows)), &a.model, &a.effort)
+        let mut v = args(&session(&a.session, &a.thread, &a.gen), &dir.join("backplane.js").to_string_lossy(), &prompt_arg(&dir, &a.thread, &a.prompt, cfg!(windows)), &a.model, &a.effort);
+        v.extend(kistack_arg(&a.home)); v
     }
     /// BACKPLANE_PI_MCP and BACKPLANE_PI_MODE: what Backplane's extension reads.
     fn env(&self, a: &TurnIn) -> Vec<(String, String)> { vec![("BACKPLANE_PI_MCP".into(), a.mcp_url.clone()), ("BACKPLANE_PI_MODE".into(), mode(&a.runtime).into())] }
@@ -409,5 +416,11 @@ mod tests {
         assert_eq!(m(0).unwrap(), "Pi is retrying (attempt 2 of 3): overloaded"); assert_eq!(m(1).unwrap(), "Pi is compacting the conversation (threshold)");
         assert!(m(2).is_none()); assert_eq!(m(3).unwrap(), "Pi could not compact the conversation: too big"); assert_eq!(m(4).unwrap(), "A Pi extension failed (tool_call): boom");
         assert!(r[5].plain().is_empty() && r[6].plain().is_empty());
+    }
+    #[test] fn pi_loads_the_pinned_kistack_as_its_own_skills() {
+        let h = crate::plat::tmp::dir("pi-kistack"); assert!(kistack_arg(&h.to_string_lossy()).is_empty(), "no copy, no flag");
+        crate::agents::kistack::install(&h).unwrap();
+        assert_eq!(kistack_arg(&h.to_string_lossy()), vec!["--skill".to_string(), h.join("kistack/skills").to_string_lossy().into_owned()]);
+        let _ = std::fs::remove_dir_all(&h);
     }
 }

@@ -20,10 +20,12 @@ pub struct PromptEnv {
     pub keys: String, pub machines: String, pub buy: bool, pub lang: String,
     /// Backplane's own skills (bundled.rs): (name, description, SKILL.md path)
     pub skills: Vec<(String, String, String)>,
+    /// KiStack's copy the agents get (kistack.rs); None when the hub has none, and then no prompt claims it
+    pub kistack: Option<crate::agents::kistack::Copy>,
 }
 impl Default for PromptEnv {
     fn default() -> Self { PromptEnv { fc: String::new(), render: String::new(), kicad: Kicad { status: "missing".into(), ..Default::default() }, kicad_ipc: true, models: String::new(), may_delegate: true, orders_on: true, routing_plan: false,
-        root: String::new(), pro: String::new(), pcb: String::new(), sch: String::new(), all: String::new(), design: String::new(), keys: String::new(), machines: String::new(), buy: false, lang: String::new(), skills: vec![] } }
+        root: String::new(), pro: String::new(), pcb: String::new(), sch: String::new(), all: String::new(), design: String::new(), keys: String::new(), machines: String::new(), buy: false, lang: String::new(), skills: vec![], kistack: None } }
 }
 
 /// Prompt.runtime
@@ -118,6 +120,14 @@ pub fn bundled_skills(ss: &[(String, String, String)]) -> String {
     let (b, l) = (T::PROMPT_BUNDLED, T::PROMPT_SKILL_LINE);
     format!("{}{}{}", b[0], ss.iter().map(|(n, d, p)| format!("{}{n}{}{d}{}{p}{}", l[0], l[1], l[2], l[3])).collect::<Vec<_>>().join("\n"), b[1])
 }
+/// The kistack_skills block: KiStack's copy, each skill and its SKILL.md, and that it is the one to use. Every provider gets it;
+/// Claude (`--plugin-dir`, as `kistack:<name>`) and Pi (`--skill`) also load the same folder as skills of their own.
+pub fn kistack_skills(c: &crate::agents::kistack::Copy) -> String {
+    let l = T::PROMPT_SKILL_LINE;
+    let which = if c.pinned { format!("pinned with this Backplane (KiStack commit {})", &c.rev[..12.min(c.rev.len())]) } else { format!("from BACKPLANE_KISTACK (KiStack {})", if c.rev.is_empty() { "of no recorded commit" } else { &c.rev }) };
+    let list = c.skills.iter().map(|(n, d, p)| format!("{}{n}{}{d}{}{p}{}", l[0], l[1], l[2], l[3])).collect::<Vec<_>>().join("\n");
+    format!("<kistack_skills>KiStack's KiCad skills, {which}, are in `{}`. Before KiCad work one of them covers (schematics, symbols, footprints, layout, BOM, exports, Gerbers, panels, renders), read its SKILL.md completely and follow it. Where your CLI lists them as skills of its own (Claude: `kistack:<name>`, e.g. `kistack:kicad-schematic`), they are these same files. Use only these copies: any other copy of these skills on this machine (in ~/.agents/skills, ~/.claude/skills, ~/.codex/skills, ~/.skills or a project folder) is older and not to be used.\n{list}</kistack_skills>", c.dir)
+}
 /// Where a hardware thread's work goes. `code`: its code worktree and branch when it works in the
 /// main checkout ("" for a thread still in an older worktree); `locks`: (document, its lock).
 pub fn design_words(main: &str, code: Option<(&str, &str)>, locks: &[(String, String)]) -> String {
@@ -130,7 +140,10 @@ pub fn design_words(main: &str, code: Option<(&str, &str)>, locks: &[(String, St
 }
 /// Hub.prompt.base then Prompt.lang.add
 pub fn build(e: &PromptEnv) -> String {
-    let mut s = [config_prompt(&e.fc, &e.render), kicad(&e.kicad, e.kicad_ipc), project_locked(&e.root, &e.pro, &e.pcb, &e.sch, &e.all, &e.design), orchestration(e.may_delegate, &e.models), background().to_string(), order_project(e.orders_on)].join("\n\n");
+    let orch = orchestration(e.may_delegate, &e.models);
+    let orch = match &e.kistack { Some(k) if !k.skills.is_empty() => orch, _ => orch.replace(" (KiStack's KiCad skills and the person's)", " (the person's)") }; // KiStack is claimed only when the agent has it
+    let mut s = [config_prompt(&e.fc, &e.render), kicad(&e.kicad, e.kicad_ipc), project_locked(&e.root, &e.pro, &e.pcb, &e.sch, &e.all, &e.design), orch, background().to_string(), order_project(e.orders_on)].join("\n\n");
+    if let Some(k) = e.kistack.as_ref().filter(|k| !k.skills.is_empty()) { s += "\n\n"; s += &kistack_skills(k) }
     if !e.skills.is_empty() { s += "\n\n"; s += &bundled_skills(&e.skills) }
     if !e.keys.is_empty() { s += "\n\n"; s += &e.keys }
     if !e.machines.is_empty() { s += "\n\n"; s += &e.machines }
@@ -181,6 +194,17 @@ pub(crate) mod tests {
         assert!(s.contains("<backplane_skills>Backplane's own skills, for every agent whatever its provider: before work one of them covers, read its SKILL.md completely and follow it.\n- sendcutsend: Design parts for SendCutSend. Read \"/h/bundled/skills/sendcutsend/SKILL.md\"</backplane_skills>"), "{s}");
         assert!(!build(&gold_env()).contains("<backplane_skills>"));
         assert!(order_project(true).contains("`sendcutsend` block") && !order_project(false).contains("sendcutsend"), "the review knows SendCutSend's check");
+    }
+    #[test] fn kistack_is_named_with_its_files_only_when_the_agent_has_it() {
+        let e = gold_env(); let s = build(&e);
+        assert!(!s.contains("<kistack_skills>") && !s.contains("KiStack's KiCad skills and") && s.contains("the same skills as you (the person's)"), "no copy, no claim");
+        let mut e = gold_env(); e.kistack = Some(crate::agents::kistack::Copy { dir: "/h/kistack".into(), rev: crate::agents::kistack::REV.into(), pinned: true,
+            skills: vec![("kicad-schematic".into(), "Draw schematics.".into(), "/h/kistack/skills/schematic/SKILL.md".into())] });
+        let s = build(&e);
+        assert!(s.contains(&format!("<kistack_skills>KiStack's KiCad skills, pinned with this Backplane (KiStack commit {}), are in `/h/kistack`.", &crate::agents::kistack::REV[..12])), "{s}");
+        assert!(s.contains("- kicad-schematic: Draw schematics. Read \"/h/kistack/skills/schematic/SKILL.md\"</kistack_skills>") && s.contains("is older and not to be used"));
+        assert!(s.contains("the same skills as you (KiStack's KiCad skills and the person's)"));
+        e.kistack.as_mut().unwrap().skills.clear(); assert!(!build(&e).contains("<kistack_skills>"), "an empty copy is no copy");
     }
     #[test] fn language_and_buy_blocks_are_added_after() { let mut e = gold_env(); e.lang = "en".into(); e.buy = true; let s = build(&e); assert!(s.ends_with("Keep code, commands, paths and identifiers as they are.")); assert!(s.contains("<backplane_buy>")); e.lang = "es".into(); assert!(build(&e).contains("Reply in Spanish")); e.lang = "fr".into(); assert!(!build(&e).contains("Reply in")); }
     /// e2e n1110: Buy it started a thread that exported Gerbers, guessed at a manifest and gave up ("I don't know the format it expects"): its prompt was the

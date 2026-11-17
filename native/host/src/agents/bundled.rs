@@ -19,13 +19,15 @@ pub const FILES: &[(&str, &str)] = &[
 
 pub fn dir(home: &Path) -> PathBuf { home.join("bundled") }
 
-fn put(p: &Path, text: &str) -> std::io::Result<()> {
-    if std::fs::read(p).ok().as_deref() == Some(text.as_bytes()) { return Ok(()) }
+/// Writes `p` only when it differs (kistack.rs installs the same way).
+pub(crate) fn put(p: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if std::fs::read(p).ok().as_deref() == Some(bytes) { return Ok(()) }
     if let Some(d) = p.parent() { std::fs::create_dir_all(d)? }
-    let tmp = p.with_extension("bp-new"); std::fs::write(&tmp, text)?; std::fs::rename(&tmp, p)
+    let tmp = p.with_extension("bp-new"); std::fs::write(&tmp, bytes)?; std::fs::rename(&tmp, p)
 }
 
-fn sweep(root: &Path, at: &Path, keep: &[PathBuf]) {
+/// Removes every file under `at` that `keep` does not name, and the folders left empty.
+pub(crate) fn sweep(root: &Path, at: &Path, keep: &[PathBuf]) {
     let Ok(rd) = std::fs::read_dir(at) else { return };
     for e in rd.flatten() {
         let p = e.path(); let Ok(t) = e.file_type() else { continue };
@@ -39,8 +41,8 @@ pub fn install(home: &Path) -> Option<PathBuf> {
     let d = dir(home);
     let mut keep = vec![d.join(".claude-plugin/plugin.json")];
     let r: std::io::Result<()> = (|| {
-        put(&keep[0], MANIFEST)?;
-        for (rel, text) in FILES { let p = d.join(rel); put(&p, text)?; keep.push(p); }
+        put(&keep[0], MANIFEST.as_bytes())?;
+        for (rel, text) in FILES { let p = d.join(rel); put(&p, text.as_bytes())?; keep.push(p); }
         Ok(())
     })();
     if let Err(e) = r { eprintln!("bundled skills: {}: {e}", d.display()); return None }

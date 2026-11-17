@@ -28,7 +28,7 @@ impl HostInfo {
         // KiCad is not looked for here (never PATH's): each turn takes the one the hub has selected, kicad::ipc::runtime via kicadsel.rs
         h.kicad = Kicad { status: "checking".into(), ..Default::default() }; h.live_kicad = true;
         if let Some(m) = std::env::var("BACKPLANE_MODELS").ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()) { h.models = m }
-        h.kistack = std::env::var("BACKPLANE_KISTACK").ok().map(PathBuf::from).or_else(|| std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("kistack")))).filter(|p| p.is_dir());
+        h.kistack = super::kistack::resolve(home); // KiStack's pinned skills, compiled in and written into this home (kistack.rs)
         h.bundled = super::bundled::install(home); // Backplane's own skills, in this home (bundled.rs)
         super::skills::set_env(super::skills::env_from(&h.user_home, home, h.kistack.as_deref()));
         h

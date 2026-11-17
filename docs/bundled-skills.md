@@ -1,6 +1,27 @@
 # Backplane's own skills
 
-Besides KiStack's KiCad skills (`deploy/kistack`, pinned by `deploy/kistack.lock`), Backplane ships skills of its own,
+## KiStack
+
+KiStack's KiCad skills (`deploy/kistack`, pinned by `deploy/kistack.lock`) are compiled into the hub (`native/host/build.rs`,
+`agents/kistack.rs`), so every build on every platform has exactly the pinned copy, whatever ships beside it. At start
+the hub writes it into its home as `<home>/kistack` (Backplane's plugin manifest `kistack`, `REVISION`, `LICENSE`,
+`skills/`; the shape `scripts/kistack.py check` accepts); a changed or extra file is put back to the pin.
+
+- **Claude** loads it with `--plugin-dir` and `--add-dir` (skills `kistack:<name>`); **Pi** with `--skill`.
+- **Every provider's prompt** (Codex, Grok, OpenCode, Antigravity, Oh My Pi, Muse, and Claude and Pi too) has a
+  `<kistack_skills>` block: the copy's folder and commit, each skill and its SKILL.md, and that other copies on the
+  machine (`~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.skills`, a project) are older and not to be
+  used. Codex has no setting for another skills folder and the person's are theirs, so nothing is written there.
+- **Only when it is there:** with no copy (the home could not be written) the block is left out and the delegation
+  words stop naming KiStack.
+- **The `$` popup and `$name`:** the pinned copy is listed first, so `$kicad-schematic` is Backplane's even when the
+  person has an older copy of the same name.
+- `BACKPLANE_KISTACK=<folder of the same shape>` replaces it, for a developer trying another KiStack; the prompt then
+  says it is that copy, not the pinned one.
+
+## Bundled
+
+Backplane also ships skills of its own,
 kept in `deploy/skills/<name>/` and compiled into the hub (`native/host/src/agents/bundled.rs`, `FILES`).
 
 - **Install:** at start the hub writes them into its home as `<home>/bundled`: a Claude plugin

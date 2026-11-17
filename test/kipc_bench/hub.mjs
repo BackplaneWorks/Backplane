@@ -1,5 +1,5 @@
 // A benchmark hub (docs/kicad-ipc-bench.md): bun hub.mjs HUB_BIN RUNTIME PORT WORK  -> starts it and prints {pid,port,home,run}; it stays up
-// until WORK/stop exists. Temp home, temp HOME/XDG for KiCad, the wrapper `claude` as the only agent, KiStack from this checkout.
+// until WORK/stop exists. Temp home, temp HOME/XDG for KiCad, the wrapper `claude` as the only agent, KiStack the hub's own pinned copy (KIPC_BENCH_KISTACK: another).
 import {mkdirSync,mkdtempSync,writeFileSync,chmodSync,copyFileSync,existsSync,rmSync} from 'node:fs';
 import {startHub,stopHub,sleep} from '../perf/lib.mjs';
 const [bin,rt,port,work]=process.argv.slice(2);const KS=process.env.KIPC_BENCH_KISTACK,CL=process.env.KIPC_BENCH_CLAUDE,LG=process.env.KIPC_BENCH_LOGIN,MD=process.env.KIPC_BENCH_MODEL,EF=process.env.KIPC_BENCH_EFFORT,UH=process.env.HOME,DIS=process.env.KIPC_BENCH_DISALLOW??'',PR=process.env.KIPC_BENCH_PROMPT??'',NM=process.env.KIPC_BENCH_NOMCP??'';const GC=process.env.KIPC_BENCH_GROK_CLEAN??'';const here=import.meta.dir;
@@ -15,7 +15,7 @@ for(const k of Object.keys(process.env))if(/^CLAUDE|^BACKPLANE_|^ANTHROPIC|^KIPC
 process.env.PATH=process.env.PATH.split(':').filter(d=>!/\/shims$/.test(d)).join(':');
 const h=await startHub({bin:wrapper,home:`${work}/home`,port:Number(port),standins:`${work}/bin`,cap:'14G', // (its output goes to hub.log by the wrapper's own redirect, never through a pipe to this launcher: a hub whose stderr reader has gone fails at its next line)
  
- extraEnv:{BACKPLANE_KICAD_CLI:`${rt}/bin/kicad-cli`,BACKPLANE_KISTACK:KS??`${here}/../../deploy/kistack`,KIPC_BENCH_OUT:`${work}/out`,
+ extraEnv:{BACKPLANE_KICAD_CLI:`${rt}/bin/kicad-cli`,...(KS?{BACKPLANE_KISTACK:KS}:{}),KIPC_BENCH_OUT:`${work}/out`,
   KIPC_BENCH_CLAUDE:CL??`${UH}/.local/bin/claude`,KIPC_BENCH_GROK:process.env.KIPC_BENCH_GROK_BIN??`${UH}/.grok/bin/grok`,KIPC_BENCH_REALHOME:UH,KIPC_BENCH_GROK_CLEAN:GC,KIPC_BENCH_LOGIN:LG??`${UH}/.claude`,
   KIPC_BENCH_MODEL:MD??'claude-fable-5-2',KIPC_BENCH_EFFORT:EF??'medium',KIPC_BENCH_DISALLOW:DIS,KIPC_BENCH_PROMPT:PR,KIPC_BENCH_NOMCP:NM}});
 writeFileSync(`${work}/hub.json`,JSON.stringify({pid:h.pid,port:h.port,home:h.home,run,token:h.token}));
