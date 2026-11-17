@@ -382,6 +382,26 @@ def encode_distance_mm(d_mm: float) -> bytes:
     return pb_field_varint(1, mm_to_nm(d_mm))
 
 
+ISC_NAMES = {0: "ISC_UNKNOWN", 1: "ISC_OK", 2: "ISC_INVALID_TYPE", 3: "ISC_EXISTING", 4: "ISC_NONEXISTENT", 5: "ISC_IMMUTABLE", 7: "ISC_INVALID_DATA"}
+
+
+def created_items(entries: list) -> tuple[list, list]:
+    """CreateItems' created_items (ItemCreationResult): the entries whose own status is ISC_OK, and the refused ones as
+    "<code>: <message>". The request's IRS_OK says nothing of each item: KiCad refuses one it cannot add (a track on no board layer:
+    ISC_INVALID_DATA) and does not add it."""
+    ok, refused = [], []
+    for raw in entries:
+        f = pb_decode_fields(raw)
+        st = pb_decode_fields(f.get(1, [b""])[0]) if 1 in f else {}
+        code = int(st.get(1, [0])[0]) if st else 0
+        msg = st.get(2, [b""])[0].decode("utf-8", "replace") if st and 2 in st else ""
+        if code == 1:
+            ok.append(raw)
+        else:
+            refused.append(f"{ISC_NAMES.get(code, code)}: {msg}".rstrip(": "))
+    return ok, refused
+
+
 def main() -> None:
     if len(sys.argv) < 3:
         sys.exit("usage: gui_ipc_probe.py <cmd> <sock_path> [args...]")
@@ -560,7 +580,7 @@ def main() -> None:
             _, ci_val = cli.call("kiapi.common.commands.CreateItems", ci_req)
             ci_f = pb_decode_fields(ci_val)
             irs = ci_f.get(2, [0])[0]
-            created = ci_f.get(3, [])
+            created, refused = created_items(ci_f.get(3, []))
 
             ec_req = (
                 pb_field_msg(1, kiid_bytes)
@@ -569,8 +589,8 @@ def main() -> None:
                 + pb_field_msg(4, item_hdr)
             )
             cli.call("kiapi.common.commands.EndCommit", ec_req)
-            print(json.dumps({"ok": irs == 1 and len(created) == 1, "irs": irs, "created": len(created)}))
-            sys.exit(0 if (irs == 1 and len(created) == 1) else 1)
+            print(json.dumps({"ok": irs == 1 and len(created) == 1 and not refused, "irs": irs, "created": len(created), "refused": refused}))
+            sys.exit(0 if (irs == 1 and len(created) == 1 and not refused) else 1)
 
         if cmd == "agent-add-wire":
             x1, y1, x2, y2 = map(float, args[:4])
@@ -590,7 +610,7 @@ def main() -> None:
             _, ci_val = cli.call("kiapi.common.commands.CreateItems", ci_req)
             ci_f = pb_decode_fields(ci_val)
             irs = ci_f.get(2, [0])[0]
-            created = ci_f.get(3, [])
+            created, refused = created_items(ci_f.get(3, []))
 
             ec_req = (
                 pb_field_msg(1, kiid_bytes)
@@ -599,8 +619,8 @@ def main() -> None:
                 + pb_field_msg(4, item_hdr)
             )
             cli.call("kiapi.common.commands.EndCommit", ec_req)
-            print(json.dumps({"ok": irs == 1 and len(created) == 1, "irs": irs, "created": len(created)}))
-            sys.exit(0 if (irs == 1 and len(created) == 1) else 1)
+            print(json.dumps({"ok": irs == 1 and len(created) == 1 and not refused, "irs": irs, "created": len(created), "refused": refused}))
+            sys.exit(0 if (irs == 1 and len(created) == 1 and not refused) else 1)
 
         if cmd == "select-items":
             fk = EMBED_KIND_MAP[args[0]]
