@@ -821,6 +821,22 @@ try:
                 if good and not (wrong and bad): return 'works', f'created {c}, deleted {d}'
                 if c or d: return 'wrong', f'created {c}, deleted {d}'
                 return 'nothing', 'no edit event'
+            def first_keys(E):
+                # the very first keys on a fresh frame, no click (Edit gives KiCad the keyboard): Cmd+A selects, Cmd+C puts the editor's
+                # text on the pasteboard, Cmd+V and a click paste every item (fork f71f546af8: a check no longer leaves the keys on a side panel)
+                subprocess.run(['pbcopy'], input=b'lane-m-before-copy')
+                n, t = press(K_A, CMD); wait_for(lambda: since(n, 'ET_SELECTION_CHANGED'), W); time.sleep(0.4)
+                sel = [e.get('selection') or {} for e in since(n, 'ET_SELECTION_CHANGED')]
+                k = max((len(x.get('references') or []) + len(x.get('nets') or []) for x in sel), default=0)
+                key(8, CMD); time.sleep(0.8); pb = subprocess.run(['pbpaste'], capture_output=True).stdout.decode(errors='replace')
+                kt = pb != 'lane-m-before-copy' and pb.lstrip().startswith('(')
+                key(K_ESC); time.sleep(0.4)
+                p = last_push(); relay(op='move', x=p[0][0] + p[0][2] * 0.5, y=p[0][1] + p[0][3] * 0.5); time.sleep(0.4)
+                m = seq(); key(K_V, CMD); time.sleep(1.0); board_click(0.5, 0.5); c, d = wait_ed(m, 'c'); settle(m); key(K_ESC); time.sleep(0.4)
+                ok = k > 1 and kt and c > 1
+                row(E, 'first_keys_no_click', 'works' if ok else ('nothing' if not (k or kt or c) else 'wrong'),
+                    f'Cmd+A selected {k} (refs+nets); the pasteboard after Cmd+C {"holds KiCad text (" + str(len(pb)) + " chars)" if kt else "has no KiCad text"}; Cmd+V and a click created {c}', t)
+                if c: m = seq(); key(K_Z, CMD); wait_ed(m, 'd'); settle(m)
             def table(E, f):
                 other_text = ''  # what KiCad's own Cmd+C puts on the pasteboard (copy_paste below records it): another KiCad's copy is the same text
                 canvas(); canvas()
@@ -966,6 +982,7 @@ try:
             t0 = len(tr()); kshot('bs-route-before'); key(K_DEL); time.sleep(1.0); kshot('bs-route-after')
             print(f'INFO bs 3: ⌫ while routing, pictures bs-route-before.png / bs-route-after.png of KiCad\'s frame; trace {[l.split("macos: ",1)[-1] for l in tr()[t0:]]}', flush=True)
             key(K_ESC); time.sleep(0.4); key(K_ESC); time.sleep(0.6)
+            first_keys('pcb')
             board_click(0.1, 0.9)
             go = table('pcb', pcbf)
             if go:  # per_actor_undo (PCB): the person deletes everything, an agent's track lands (save: false), the person's Cmd+Z
@@ -986,7 +1003,7 @@ try:
             if go:
                 r = rects().get('kicad-tab:SCH'); b = next((w for w in wins() if w[0] == cw[0]), cw)[3]
                 if r: click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2)
-                time.sleep(6); board_click(0.1, 0.9); table('sch', schf)  # Cmd+W and Cmd+Q last, in the schematic: they may end the editor
+                time.sleep(6); first_keys('sch'); board_click(0.1, 0.9); table('sch', schf)  # Cmd+W and Cmd+Q last, in the schematic: they may end the editor
             RES['edit_keys'] = ROWS
             raise SystemExit(1 if FAILS else 0)
         if os.environ.get('BS_PROBE') == 'order':  # the ⌫ cases ordered so none needs Cmd+Z to restore the board (undo is lost on macOS)
