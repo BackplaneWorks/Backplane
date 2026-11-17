@@ -1445,12 +1445,22 @@ const START_WINDOW_S: u64 = if cfg!(test) { 3 } else { 30 };
 /// The start window in force (BACKPLANE_KICAD_START_WINDOW_S for an e2e), and whether this start is one an e2e makes stall: its socket
 /// never seen (BACKPLANE_KICAD_TEST_STALLS=N, the first N starts of this hub; warm-before-Edit starts count, so such a run sets
 /// BACKPLANE_KICAD_WARM=0).
-fn start_window() -> (u64, bool) {
+fn start_window(pro: &str) -> (u64, bool) {
     static STARTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let window = std::env::var("BACKPLANE_KICAD_START_WINDOW_S").ok().and_then(|v| v.parse().ok()).filter(|v| *v > 0).unwrap_or(START_WINDOW_S);
+    let window = std::env::var("BACKPLANE_KICAD_START_WINDOW_S").ok().and_then(|v| v.parse().ok()).filter(|v| *v > 0).unwrap_or_else(|| test_window(pro).unwrap_or(START_WINDOW_S));
     let stalls = std::env::var("BACKPLANE_KICAD_TEST_STALLS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
     (window, STARTS.fetch_add(1, Ordering::SeqCst) < stalls)
 }
+
+/// A test that starts a real KiCad gives the projects under its own folder the window a real start needs (`test_window_for`); the stand-in tests keep the short one.
+/// Per folder, not an environment variable: the tests share one process, and the stand-ins' short window must stay theirs.
+#[cfg(test)] fn test_windows() -> &'static Mutex<Vec<(String, u64)>> { static W: OnceLock<Mutex<Vec<(String, u64)>>> = OnceLock::new(); W.get_or_init(|| Mutex::new(vec![])) }
+#[cfg(test)] pub(crate) fn test_window_for(dir: &Path, secs: u64) {
+    let mut w = test_windows().lock().unwrap();
+    for d in [Some(dir.to_path_buf()), dir.canonicalize().ok()].into_iter().flatten() { w.push((format!("{}/", d.to_string_lossy().trim_end_matches('/')), secs)); }
+}
+#[cfg(test)] fn test_window(pro: &str) -> Option<u64> { test_windows().lock().unwrap().iter().find(|(d, _)| pro.starts_with(d.as_str())).map(|(_, s)| *s) }
+#[cfg(not(test))] fn test_window(_pro: &str) -> Option<u64> { None }
 
 impl Actor {
     fn ensure_helper(&mut self) {
@@ -2950,7 +2960,7 @@ async fn spawn_gui_session(
     // Handshake: wait up to 30 s for the API socket, then Ping + GetVersion (retrying AS_NOT_READY while frames initialize).
     // If fork KiCad opens a startup modal dialog before `SetReadyToReply` (e.g. LocalHistory's "Recover Unsaved Changes" after a crash),
     // `<sock>.events` already reports `ET_DIALOG_OPENED`: extend `deadline` while the dialog is open so the hub never kills KiCad under the user.
-    let (window, stall) = start_window();
+    let (window, stall) = start_window(&pro);
     let mut deadline = tokio::time::Instant::now() + Duration::from_secs(window);
     let sock_rx = async move { if stall { std::future::pending::<()>().await; } sock_rx.await };
     let sock = match tokio::time::timeout_at(deadline, sock_rx).await {
@@ -4614,14 +4624,6 @@ mod tests {
             return;
         }
 
-        let Some(disp_num) = (190..290).find(|n| {
-            !Path::new(&format!("/tmp/.X11-unix/X{n}")).exists() && !Path::new(&format!("/tmp/.X{n}-lock")).exists()
-        }) else {
-            eprintln!("skipping real_stock_kicad_argv test: no free X display");
-            return;
-        };
-        let disp = format!(":{disp_num}");
-
         let base = crate::plat::tmp::short_dir("kr");
         let home_dir = base.join("h");
         let proj_dir = base.join("p");
@@ -4642,9 +4644,13 @@ mod tests {
         let argv = stock_argv("/usr/bin/kicad", &files);
         assert_eq!(argv, vec!["/usr/bin/kicad".to_string(), files.pro.clone()], "stock_argv must never pass --frame (crashes 10.0.7 with exit 139)");
 
+        // no wall clock (every wait is a bounded poll on its condition, 180 s): Xvfb picks a free display itself and says its number on stdout once it accepts
+        // clients (-displayfd), so two runs never race for one display and KiCad never starts before its display is up. (A display chosen here by its lock
+        // file raced other runs, and the range filled with the locks of Xvfbs ended by SIGKILL: the test skipped from then on.)
+        const BOUND: Duration = Duration::from_secs(180);
         let mut xvfb_cmd = crate::proc::std_cmd(crate::proc::Kind::Local, &xvfb_bin);
-        xvfb_cmd.args([&disp, "-screen", "0", "1280x800x24", "-nolisten", "tcp", "-xkbdir", "/usr/share/X11/xkb"])
-            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        xvfb_cmd.args(["-displayfd", "1", "-screen", "0", "1280x800x24", "-nolisten", "tcp", "-xkbdir", "/usr/share/X11/xkb"])
+            .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
         if !xvfb_ld.is_empty() { xvfb_cmd.env("LD_LIBRARY_PATH", &xvfb_ld); }
         let mut xvfb = xvfb_cmd.spawn().expect("spawn Xvfb");
         let xvfb_pid = xvfb.id();
@@ -4660,10 +4666,12 @@ mod tests {
         let kicad_pid = Arc::new(Mutex::new(0u32));
         let _guard = Guard { xvfb_pid, kicad_pid: kicad_pid.clone() };
 
-        for _ in 0..40 {
-            if Path::new(&format!("/tmp/.X11-unix/X{disp_num}")).exists() { break }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        let out = xvfb.stdout.take().unwrap();
+        let said = tokio::task::spawn_blocking(move || { let mut l = String::new(); let _ = std::io::BufRead::read_line(&mut std::io::BufReader::new(out), &mut l); l });
+        let said = tokio::time::timeout(BOUND, said).await.expect("Xvfb said no display within 180 s").unwrap();
+        let disp = format!(":{}", said.trim().parse::<u32>().unwrap_or_else(|_| panic!("Xvfb could not open a display (it said {said:?})")));
+        // the start window a real KiCad needs on a loaded machine: its socket and first answers are waited for (polled), bounded at 180 s; the stand-in tests keep their short one
+        test_window_for(&proj_dir, BOUND.as_secs()); assert_eq!(test_window(&files.pro), Some(BOUND.as_secs()), "this project's start has the long window");
 
         let cfg = crate::hub::Cfg {
             home: home_dir.clone(), version: "0.14.0".into(), commit: "test".into(),
@@ -4691,13 +4699,12 @@ mod tests {
 
         let cls = hub.request(&mut conn, &json!({"id": 2, "m": "editor.kicad.close", "p": {"project": files.pro, "save": "discard"}})).await;
         assert_eq!(cls[0]["ok"], json!(true), "{cls:?}");
-        for _ in 0..30 {
-            if !crate::plat::proc::alive(pid) { break }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+        let t = std::time::Instant::now();
+        while crate::plat::proc::alive(pid) && t.elapsed() < BOUND { tokio::time::sleep(Duration::from_millis(50)).await; }
         assert!(!crate::plat::proc::alive(pid), "stock KiCad pid={pid} should exit after close");
         *kicad_pid.lock().unwrap() = 0;
-        let _ = xvfb.kill();
+        // TERM, never KILL: Xvfb removes its lock file and socket only when it ends itself
+        let _ = crate::plat::proc::kill(xvfb_pid, crate::plat::proc::TERM);
         let _ = xvfb.wait();
     }
 
