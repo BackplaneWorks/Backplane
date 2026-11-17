@@ -749,7 +749,12 @@ try:
                 canvas(); key(K_A, CMD); time.sleep(0.5)
                 n, t = press(K_DEL); v = judge_cd(n, 'd', True); row(E, 'backspace', *v, t); settle(n)
                 if v[0] == 'works' and undo_ok: m = seq(); key(K_Z, CMD); wait_ed(m, 'c'); settle(m)
-                canvas(); key(K_A, CMD); time.sleep(0.5); key(8, CMD); time.sleep(0.5); key(K_ESC); time.sleep(0.4)
+                canvas(); key(K_A, CMD); time.sleep(0.5)
+                subprocess.run(['pbcopy'], input=b'lane-m-before-copy'); key(8, CMD); time.sleep(0.8)
+                pb = subprocess.run(['pbpaste'], capture_output=True).stdout.decode(errors='replace')
+                pb_kicad = pb != 'lane-m-before-copy' and ('(footprint' in pb or '(symbol' in pb or '(kicad_' in pb or '(segment' in pb or 'lib_symbols' in pb)
+                print(f'INFO {E} copy: after Cmd+C the pasteboard {"holds KiCad text" if pb_kicad else ("is unchanged" if pb == "lane-m-before-copy" else "changed but not to KiCad text")} ({len(pb)} chars: {pb[:60]!r})', flush=True)
+                key(K_ESC); time.sleep(0.4)
                 p = last_push(); relay(op='move', x=p[0][0] + p[0][2] * 0.5, y=p[0][1] + p[0][3] * 0.5); time.sleep(0.4)
                 n, t = press(K_V, CMD); time.sleep(1.0); board_click(0.5, 0.5); v = judge_cd(n, 'c', True); row(E, 'copy_paste', *v, t); settle(n)
                 if v[0] == 'works' and undo_ok: m = seq(); key(K_Z, CMD); wait_ed(m, 'd'); settle(m)
@@ -766,7 +771,7 @@ try:
                 row(E, 'find', 'works' if 'Find' in dl else ('wrong' if dl else 'nothing'), f'dialogs {dl}', t); key(K_ESC); time.sleep(1.0)
                 # the other menu chords: what they open or do (not gating; the trace says whether wx took them)
                 for name, code, fl, close in (('extra_print', 35, CMD, True), ('extra_preferences', 43, CMD, True), ('extra_open', 31, CMD, True),
-                                              ('extra_search_panel', 5, CMD, False), ('extra_zoom_in', 24, CMD, False), ('extra_zoom_out', 27, CMD, False)) + (
+                                              ('extra_search_panel', 5, CMD, False), ('extra_zoom_in', 24, CMD | SHIFT, False), ('extra_zoom_in_plain', 24, CMD, False), ('extra_zoom_out', 27, CMD, False)) + (
                                               (('extra_close_window', 13, CMD, False), ('extra_quit', 12, CMD, False)) if E == 'sch' else ()):
                     canvas(); n, t = press(code, fl); time.sleep(2.0)
                     dl = [e.get('detail') for e in since(n, 'ET_DIALOG_OPENED')]; c, d = ed(n)
