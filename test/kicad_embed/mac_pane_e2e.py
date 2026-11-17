@@ -962,11 +962,11 @@ try:
                         return subprocess.run(['pbpaste'], capture_output=True).stdout.decode(errors='replace')
                     def across(open_field, where):
                         canvas(); open_field(); time.sleep(1.2)
-                        n0 = seq(); relay(op='text', text='ab'); time.sleep(0.5)
+                        n0 = seq(); key(0); time.sleep(0.12); key(11); time.sleep(0.5)  # a, b as key presses (the runner's unicode events did not reach wx)
                         if field_text() != 'ab': key(K_ESC); time.sleep(0.6); return None
                         key(124); time.sleep(0.3)  # the caret to the end
                         n1 = seq(); rc = ask('kicad_ipc', {'path': f, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': 'FK_PCB'}}); cd = checks_idle(n1, 30)
-                        relay(op='text', text='cd'); time.sleep(0.5); got = field_text()
+                        key(8); time.sleep(0.12); key(2); time.sleep(0.5); got = field_text()  # c, d
                         canvas_ev = [e.get('type') for e in evs() if int(e.get('seq', 0)) > n0 and e.get('type') in ('ET_DOCUMENT_EDITED', 'ET_SELECTION_CHANGED')]
                         key(K_ESC); time.sleep(0.6)
                         return (got == 'abcd' and not canvas_ev and bool(cd)), f'{where}: the field holds {got!r} after "ab", a check ({"done" if cd else "no ET_CHECKS_DONE"}; RunChecks {"ok" if "message" in rc else str(rc)[:60]}), "cd"; canvas events {canvas_ev}'
