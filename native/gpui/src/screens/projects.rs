@@ -425,7 +425,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, p: &Projects, data: &Value
             .child(div().flex().flex_none().items_center().justify_between().pb_1().child(div().text_size(crate::scale::tpx(15.)).font_weight(FontWeight::SEMIBOLD).child(crate::i18n::trs("Add project"))).child(cancel))
             .children(p.folder.clone().map(|i| div().flex().flex_none().items_center().gap_2().w_full().h(crate::scale::tpx(36.)).px(px(10.)).border_1().border_color(c(if f.error.is_empty() { "line" } else { "bad" })).bg(c("view")).text_size(crate::scale::tpx(14.))
                 .child(crate::ui::ic(light, "folder", 15., "dim")).child(div().flex_1().min_w_0().child(i))))
-            .when(!f.error.is_empty(), |d| d.child(div().flex_none().px(px(10.)).text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(fit(&crate::i18n::trs(&f.error), 90))))
+            .when(!f.error.is_empty(), |d| d.child(div().flex_none().w_full().px(px(10.)).text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(crate::i18n::trs(&f.error))))
             .children(top)
             .child(list)
             // the keys sit right under the last row (the list takes only the height of its rows), not at the foot of the window

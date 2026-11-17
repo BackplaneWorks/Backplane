@@ -67,7 +67,7 @@ fn check(c: &Shared, dir: &str, name: &str) {
 /// What each child in `shown` of `dir` looks like: "KiCad", "git" or "". Those not known yet are looked at (outside the lock) and kept with the listing.
 fn tags(c: &Shared, dir: &str, shown: &[&str]) -> Vec<&'static str> {
     let mut out: Vec<Option<&'static str>> = { let g = lock(c); let l = g.dirs.get(dir); shown.iter().map(|n| l.and_then(|l| l.tags.get(*n).copied())).collect() };
-    let found: Vec<(usize, &'static str)> = out.iter().enumerate().filter(|(_, t)| t.is_none()).map(|(i, _)| (i, look(&format!("{dir}{}", shown[i])))).collect();
+    let found: Vec<(usize, &'static str)> = out.iter().enumerate().filter(|(_, t)| t.is_none()).map(|(i, _)| (i, if crate::plat::privacy_guarded(&format!("{dir}{}", shown[i])) { "" } else { look(&format!("{dir}{}", shown[i])) })).collect();
     if !found.is_empty() {
         let mut g = lock(c);
         for (i, t) in &found { out[*i] = Some(t); if let Some(l) = g.dirs.get_mut(dir) { l.tags.insert(shown[*i].to_string(), t); } }

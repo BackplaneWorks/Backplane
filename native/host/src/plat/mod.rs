@@ -30,6 +30,13 @@ pub fn privacy_block(path: &str) -> Option<String> {
     }
     None
 }
+/// macOS: `dir` is one of the folders its privacy settings guard (~/Desktop, ~/Documents, ~/Downloads), whose first read asks the person. A look
+/// inside that only tags a row (the folder picker's) must not: opening the picker at ~ asked for all three at once.
+pub fn privacy_guarded(dir: &str) -> bool { cfg!(target_os = "macos") && guarded_in(dir, &dirs::home_or_empty()) }
+fn guarded_in(dir: &str, home: &str) -> bool {
+    let h = home.trim_end_matches('/'); let d = dir.trim_end_matches('/');
+    !h.is_empty() && ["Documents", "Desktop", "Downloads"].iter().any(|n| d == format!("{h}/{n}"))
+}
 /// The words for `dir`, refused by macOS's privacy settings: the protected folder it is in (Documents, Desktop, Downloads, a drive) and where
 /// the person allows it; any other place is Full Disk Access's.
 pub fn privacy_words(dir: &str, home: &str) -> String {
@@ -49,6 +56,7 @@ pub fn privacy_words(dir: &str, home: &str) -> String {
         assert!(super::privacy_words("/Users/a/Desktop", "/Users/a/").contains("access to Desktop:"));
         assert!(super::privacy_words("/Users/a/Downloadsx/b", "/Users/a").contains("Full Disk Access"), "only the folder itself and what is in it");
         assert!(super::privacy_words("/Volumes/stick/p", "/Users/a").contains("removable or network volumes"));
+        assert!(super::guarded_in("/Users/a/Documents/", "/Users/a") && super::guarded_in("/Users/a/Desktop", "/Users/a/") && !super::guarded_in("/Users/a/Documents/x", "/Users/a") && !super::guarded_in("/Users/a/Music", "/Users/a"));
         // not macOS: never a word, whatever the folder
         if !cfg!(target_os = "macos") { assert_eq!(super::privacy_block("/root/x"), None); }
     }
