@@ -235,6 +235,14 @@ pub fn args(sid: &str, ext: &str, prompt: &str, model_: &str, effort: &str) -> V
     v.extend(opt("--model", model(model_))); v.extend(effort_args(effort)); v
 }
 
+/// PiRun.prompt: what `--append-system-prompt` is given. Windows (`windows`): a file of the instructions (pi takes text or a path), as no
+/// launcher there carries their newlines (agents/proc.rs `carries`); elsewhere the text.
+pub fn prompt_arg(dir: &std::path::Path, thread: &str, prompt: &str, windows: bool) -> String {
+    if !windows { return prompt.to_string() }
+    let n = format!("{}.prompt.md", safe(thread));
+    if write_atomic(dir, &n, prompt).is_ok() { dir.join(n).to_string_lossy().into_owned() } else { prompt.to_string() }
+}
+
 impl Driver for PiDriver {
     /// Proto.install
     fn install_hint(&self) -> Option<String> { Some("Install Pi (https://pi.dev), then sign in: run `pi` and use /login.".into()) }
@@ -244,7 +252,8 @@ impl Driver for PiDriver {
     fn argv(&self, a: &TurnIn) -> Vec<String> {
         let dir = std::path::Path::new(&a.home).join("pi");
         let _ = write_atomic(&dir, "backplane.js", EXT);
-        args(&session(&a.session, &a.thread, &a.gen), &dir.join("backplane.js").to_string_lossy(), &a.prompt, &a.model, &a.effort)
+        // Windows: the instructions go as a file (pi's --append-system-prompt takes text or a path): no launcher there carries their newlines (proc.rs `carries`)
+        args(&session(&a.session, &a.thread, &a.gen), &dir.join("backplane.js").to_string_lossy(), &prompt_arg(&dir, &a.thread, &a.prompt, cfg!(windows)), &a.model, &a.effort)
     }
     /// BACKPLANE_PI_MCP and BACKPLANE_PI_MODE: what Backplane's extension reads.
     fn env(&self, a: &TurnIn) -> Vec<(String, String)> { vec![("BACKPLANE_PI_MCP".into(), a.mcp_url.clone()), ("BACKPLANE_PI_MODE".into(), mode(&a.runtime).into())] }

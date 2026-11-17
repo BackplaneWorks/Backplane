@@ -67,6 +67,16 @@ pub fn prompt_to_file(args: &mut [String], file: &std::path::Path) -> std::io::R
     args[i] = "--append-system-prompt-file".into(); args[i + 1] = file.to_string_lossy().into_owned();
     Ok(())
 }
+/// Windows: Backplane's MCP config goes to Claude as a file (`--mcp-config <path>`, which Claude reads as it does inline JSON), so no
+/// launcher between the hub and Claude can change it (Git's sh made the JSON an empty argument: proc.rs `unshim`) and its tokens are on no
+/// command line. The file is private and goes when the process ends (`proc::RunFile`, held by its waiter). None: no `--mcp-config` to move.
+pub fn mcp_to_file(args: &mut [String], dir: &std::path::Path, name: &str) -> std::io::Result<Option<super::proc::RunFile>> {
+    let Some(i) = args.iter().position(|a| a == "--mcp-config") else { return Ok(None) };
+    if i + 1 >= args.len() || !args[i + 1].trim_start().starts_with('{') { return Ok(None) }
+    let f = super::proc::RunFile::private(dir, name, &args[i + 1])?;
+    args[i + 1] = f.path().to_string_lossy().into_owned();
+    Ok(Some(f))
+}
 /// AG.Effort.of("claude", e): the levels Claude takes.
 pub fn effort_ok(e: &str) -> bool { ["low", "medium", "high", "xhigh", "max"].contains(&e) }
 /// The MCP servers Claude is given: Backplane's own, and pcbparts (a free parts-search MCP).

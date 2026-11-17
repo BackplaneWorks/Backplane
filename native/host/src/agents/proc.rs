@@ -153,6 +153,98 @@ pub fn search_dirs() -> &'static [PathBuf] {
     })
 }
 
+// ---- Windows: what really runs for a CLI installed as a package manager's shim ----
+/// npm installs a CLI on Windows as three shims beside each other: `claude.cmd`, `claude.ps1` and an extensionless `#!/bin/sh` one (`claude`).
+/// `find_in` takes the extensionless one first, and a `#!` script runs through Git's sh (MSYS), which parses its arguments again: measured on
+/// bp-win (Nov 16), `{"a":1}` arrived as an EMPTY argument (so `--mcp-config <JSON>` gave Claude no MCP servers at all), `a"b` as `a\b`, `/k` as
+/// `K:/`, and a newline split an argument in two. The .cmd carries quotes but no newline, and no more than 8191 characters (cmd.exe). So an npm
+/// shim, either form, is resolved to what it starts: its program (`claude.exe`) or node with its script (`codex.js`), with neither cmd.exe
+/// nor sh between the hub and the agent. None: `p` is not an npm shim (it runs as it is, under [`carries`]' guard).
+/// `node`: where node is when the shim has none beside it.
+pub fn unshim(p: &Path, node: &dyn Fn() -> Option<PathBuf>) -> Option<(PathBuf, Vec<String>)> {
+    let cmd = match p.extension().map(|x| x.to_string_lossy().to_ascii_lowercase()) {
+        Some(x) if x == "cmd" || x == "bat" => p.to_path_buf(),
+        _ if launcher(p) == Some(Launcher::Sh) => ["cmd", "CMD"].iter().map(|x| p.with_extension(x)).find(|c| c.is_file())?,
+        _ => return None,
+    };
+    cmd_target(&std::fs::read_to_string(&cmd).ok()?, cmd.parent()?, node)
+}
+/// What an npm .cmd shim's text starts (see [`unshim`]): the last command that passes `%*` on, its `%dp0%` (the shim's folder) made real.
+/// Both of npm's forms: `"%dp0%\node_modules\...\claude.exe" %*` and `"%_prog%" "%dp0%\node_modules\...\codex.js" %*` (`_prog` is node);
+/// cmd-shim's older `"%~dp0\node.exe" "%~dp0\..\x.js" %*` too. Anything else (another variable, a program not there) is None.
+pub fn cmd_target(text: &str, dir: &Path, node: &dyn Fn() -> Option<PathBuf>) -> Option<(PathBuf, Vec<String>)> {
+    let line = text.lines().filter(|l| l.contains("%*")).last()?;
+    let head = &line[..line.rfind("%*")?]; let seg = head.rsplit('&').next()?.trim().trim_start_matches(['(', '@']).trim();
+    if !line[line.rfind("%*")? + 2..].trim().trim_end_matches(')').trim().is_empty() { return None } // something after %* (a redirection): not a plain shim
+    let mut toks: Vec<String> = vec![]; let mut cur = String::new(); let mut q = false; let mut any = false;
+    for c in seg.chars() { match c { '"' => { q = !q; any = true } c if c.is_whitespace() && !q => { if any || !cur.is_empty() { toks.push(std::mem::take(&mut cur)); any = false } } c => cur.push(c) } }
+    if q { return None } if any || !cur.is_empty() { toks.push(cur) }
+    let mut out: Vec<PathBuf> = vec![];
+    for (i, t) in toks.iter().enumerate() {
+        let low = t.to_ascii_lowercase();
+        let rest = ["%dp0%", "%~dp0"].iter().find_map(|v| low.starts_with(v).then(|| &t[v.len()..]));
+        let f = if let Some(rest) = rest {
+            let mut f = dir.to_path_buf(); for c in rest.split(['\\', '/']).filter(|c| !c.is_empty()) { f.push(c) }
+            if !f.is_file() { return None } f
+        } else if i == 0 && (low == "%_prog%" || low == "node" || low == "node.exe") {
+            let local = dir.join("node.exe"); if local.is_file() { local } else { node()? }
+        } else { return None };
+        out.push(f);
+    }
+    let mut it = out.into_iter(); let prog = it.next()?;
+    Some((prog, it.map(|f| f.to_string_lossy().into_owned()).collect()))
+}
+/// How a program that is no Windows executable is started there: a batch file through cmd.exe, a `#!` script through Git's sh.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Launcher { Batch, Sh }
+pub fn launcher(p: &Path) -> Option<Launcher> {
+    if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("cmd") || x.eq_ignore_ascii_case("bat")) { return Some(Launcher::Batch) }
+    if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("exe") || x.eq_ignore_ascii_case("com")) { return None }
+    let mut b = [0u8; 2]; let n = std::io::Read::read(&mut std::fs::File::open(p).ok()?, &mut b).ok()?;
+    (n == 2 && &b == b"#!").then_some(Launcher::Sh)
+}
+/// The most a batch file's command line holds (cmd.exe), with room for `cmd.exe /e:ON /v:OFF /d /c "<script>"`.
+pub const BATCH_LINE: usize = 8191 - 400;
+/// Whether `args` reach a program started through `l` exactly as given (measured on bp-win, Nov 16): through sh (MSYS) an argument with a `"`
+/// or a newline does not, nor one that starts with `/` (taken for a path); through cmd.exe a newline does not (Rust refuses it), nor a line past
+/// [`BATCH_LINE`]. Err names the first that does not, without its contents (it may hold a token).
+pub fn carries(l: Launcher, args: &[String]) -> Result<(), String> {
+    for (i, a) in args.iter().enumerate() {
+        let bad = a.contains(['\r', '\n']) || (l == Launcher::Sh && (a.contains('"') || a.starts_with('/')));
+        if bad { return Err(format!("argument {} of {} ({} characters) would not reach the agent intact through {}", i + 1, args.len(), a.chars().count(), if l == Launcher::Sh { "Git's sh" } else { "cmd.exe" })) }
+    }
+    let n: usize = args.iter().map(|a| a.len() + 3).sum();
+    if l == Launcher::Batch && n > BATCH_LINE { return Err(format!("its command line ({n} characters) is longer than cmd.exe takes ({BATCH_LINE})")) }
+    Ok(())
+}
+/// What runs for `program` and the arguments before the caller's, on Windows rules (`windows`): an npm shim is resolved ([`unshim`]); anything else
+/// that still goes through cmd.exe or sh must carry `args` ([`carries`]), else the start is refused with why, rather than an agent started without
+/// what it was given (its MCP servers, its instructions).
+pub fn plan(program: &Path, args: &[String], windows: bool, node: &dyn Fn() -> Option<PathBuf>) -> Result<(PathBuf, Vec<String>), String> {
+    if !windows { return Ok((program.to_path_buf(), vec![])) }
+    if let Some(t) = unshim(program, node) { return Ok(t) }
+    if let Some(l) = launcher(program) { carries(l, args).map_err(|e| format!("{} is a {} launcher: {e}; install the agent's own program (an .exe) or through npm", program.display(), if l == Launcher::Sh { "sh" } else { "batch" }))? }
+    Ok((program.to_path_buf(), vec![]))
+}
+
+/// A file an agent reads when it starts, holding what must not be on its command line (Claude's MCP config on Windows: it can hold tokens).
+/// Private (the folder 0700 and the file 0600 on Unix; on Windows under the hub's home in the person's profile, which only they, SYSTEM and
+/// administrators may read), never logged, and removed when the process it was made for ends (it is held by the process's waiter).
+pub struct RunFile(PathBuf);
+impl RunFile {
+    pub fn private(dir: &Path, name: &str, text: &str) -> std::io::Result<RunFile> {
+        use crate::plat::fs::{DirBuilderExt, OpenOptionsExt}; use std::io::Write;
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+        #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?; }
+        let f = dir.join(name); let _ = std::fs::remove_file(&f);
+        let r = RunFile(f.clone()); // removed again if the write fails
+        std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&f)?.write_all(text.as_bytes())?;
+        Ok(r)
+    }
+    pub fn path(&self) -> &Path { &self.0 }
+}
+impl Drop for RunFile { fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); } }
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Exit { pub code: Option<i32>, pub signal: Option<i32>, pub stderr: String }
 
@@ -278,14 +370,21 @@ pub fn reaper_main() -> i32 {
 
 /// What a person's real agent runs with (SIDE-BY-SIDE.md check 6): the real HOME and the PATH worked out from it; every `BACKPLANE_*` of this hub is removed from its environment.
 pub struct PersonChild { pub home: PathBuf, pub path: std::ffi::OsString }
-pub fn spawn(program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Path>, env: &[(String, String)]) -> std::io::Result<Proc> { spawn_with(crate::proc::Kind::Agent, None, program, args, cwd, extra_path, env) }
+pub fn spawn(program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Path>, env: &[(String, String)]) -> std::io::Result<Proc> { spawn_with(crate::proc::Kind::Agent, None, program, args, cwd, extra_path, env, vec![]) }
+/// `spawn`, holding `keep` (files the agent reads) until the process ends.
+pub fn spawn_holding(program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Path>, env: &[(String, String)], keep: Vec<RunFile>) -> std::io::Result<Proc> { spawn_with(crate::proc::Kind::Agent, None, program, args, cwd, extra_path, env, keep) }
 /// The only place a REAL agent CLI is made on a copy (`Kind::PersonTurn`, refused unless `copy::person_turn_allowed()`); the actor calls it only for a turn the person started.
-pub fn spawn_person(person: &PersonChild, program: &Path, args: &[String], cwd: &Path, env: &[(String, String)]) -> std::io::Result<Proc> { spawn_with(crate::proc::Kind::PersonTurn, Some(person), program, args, cwd, None, env) }
-fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Path>, env: &[(String, String)]) -> std::io::Result<Proc> {
-    // its own memory scope (memscope.rs): a runaway it starts is killed alone, never the hub's scope with every agent in it
-    let mut c = crate::proc::tokio_cmd_in(kind, program, crate::memscope::wrap("agent")); crate::memscope::raise_oom(&mut c);
+pub fn spawn_person(person: &PersonChild, program: &Path, args: &[String], cwd: &Path, env: &[(String, String)]) -> std::io::Result<Proc> { spawn_with(crate::proc::Kind::PersonTurn, Some(person), program, args, cwd, None, env, vec![]) }
+/// `spawn_person`, holding `keep` until the process ends.
+pub fn spawn_person_holding(person: &PersonChild, program: &Path, args: &[String], cwd: &Path, env: &[(String, String)], keep: Vec<RunFile>) -> std::io::Result<Proc> { spawn_with(crate::proc::Kind::PersonTurn, Some(person), program, args, cwd, None, env, keep) }
+#[allow(clippy::too_many_arguments)]
+fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Path>, env: &[(String, String)], keep: Vec<RunFile>) -> std::io::Result<Proc> {
     let args: Vec<String> = args.iter().map(|a| crate::settings::mask::mask(a)).collect(); // settings lane: Spawn.agent masks every launch argument
-    c.args(&args).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+    // Windows: an npm shim runs as what it starts, and nothing else goes through cmd.exe or sh with arguments they would change (`plan`)
+    let (program, pre) = plan(program, &args, cfg!(windows), &|| find_in(search_dirs(), "node", true)).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    // its own memory scope (memscope.rs): a runaway it starts is killed alone, never the hub's scope with every agent in it
+    let mut c = crate::proc::tokio_cmd_in(kind, &program, crate::memscope::wrap("agent")); crate::memscope::raise_oom(&mut c);
+    c.args(&pre).args(&args).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     // production: the agent runs with the merged PATH (its own children find node, git...); a test's stand-in folder comes first on the hub's own
     let mut path: Option<Vec<PathBuf>> = if person.is_none() && extra_path.is_none() { Some(search_dirs().to_vec()) } else { None };
     if let Some(d) = extra_path { let mut v = vec![d.to_path_buf()]; v.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())); path = Some(v) }
@@ -314,6 +413,7 @@ fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &P
     let tail = tokio::spawn(async move { let mut keep: Vec<u8> = Vec::new(); let mut b = [0u8; 4096]; loop { match stderr.read(&mut b).await { Ok(0) | Err(_) => break, Ok(n) => { keep.extend_from_slice(&b[..n]); if keep.len() > STDERR_TAIL { let cut = keep.len() - STDERR_TAIL; keep.drain(..cut); } } } } crate::settings::mask::mask(&String::from_utf8_lossy(&keep)) });
     tokio::spawn(async move {
         let st = child.wait().await; // always reaped
+        drop(keep); // the files it read at its start
         let err = tail.await.unwrap_or_default();
         let e = match st { Ok(s) => Exit { code: s.code(), signal: crate::plat::proc::signal(&s), stderr: err }, Err(e) => Exit { code: None, signal: None, stderr: e.to_string() } };
         if pid > 0 { crate::plat::proc::kill_group(pid, crate::plat::proc::KILL); } // the group: anything the agent left behind
@@ -504,5 +604,117 @@ mod tests {
         let d = dir("full"); script(&d, "deaf", "sleep 30"); let p = spawn(&d.join("deaf"), &[], &d, None, &[]).unwrap();
         let mut refused = false; for i in 0..(IN_QUEUE * 4) { if p.input.try_send("y".repeat(60_000) + &i.to_string()).is_err() { refused = true; break } }
         assert!(refused); terminate(p.pid, std::time::Duration::from_millis(100));
+    }
+
+    // ---- Windows: npm shims, launchers and the files an agent reads (the --mcp-config loss, Nov 16) ----
+    /// npm 11's shims, as `npm i -g @anthropic-ai/claude-code` and `@openai/codex` write them on Windows (bp-win, Nov 16).
+    pub const NPM_CLAUDE_CMD: &str = "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe\"   %*\r\n";
+    pub const NPM_CODEX_CMD: &str = "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\nIF EXIST \"%dp0%\\node.exe\" (\r\n  SET \"_prog=%dp0%\\node.exe\"\r\n) ELSE (\r\n  SET \"_prog=node\"\r\n  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n)\r\n\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js\" %*\r\n";
+    pub const NPM_SH: &str = "#!/bin/sh\nbasedir=$(dirname \"$(echo \"$0\" | sed -e 's,\\\\,/,g')\")\n\ncase `uname` in\n    *CYGWIN*|*MINGW*|*MSYS*)\n        if command -v cygpath > /dev/null 2>&1; then\n            basedir=`cygpath -w \"$basedir\"`\n        fi\n    ;;\nesac\n\nexec \"$basedir/node_modules/@anthropic-ai/claude-code/bin/claude.exe\"   \"$@\"\n";
+    fn touch(f: &Path) { std::fs::create_dir_all(f.parent().unwrap()).unwrap(); std::fs::write(f, "x").unwrap() }
+    /// An npm install of `cli` in `d`: its three shims and what they start.
+    pub fn npm_install(d: &Path, cli: &str) -> PathBuf {
+        let (cmd, target) = match cli { "codex" => (NPM_CODEX_CMD.to_string(), "node_modules/@openai/codex/bin/codex.js".to_string()), "claude" => (NPM_CLAUDE_CMD.to_string(), "node_modules/@anthropic-ai/claude-code/bin/claude.exe".to_string()),
+            other => (NPM_CODEX_CMD.replace("@openai\\codex\\bin\\codex.js", &format!("{other}\\bin\\{other}.js")), format!("node_modules/{other}/bin/{other}.js")) };
+        std::fs::create_dir_all(d).unwrap(); std::fs::write(d.join(format!("{cli}.cmd")), cmd).unwrap(); std::fs::write(d.join(cli), NPM_SH.replace("@anthropic-ai/claude-code/bin/claude.exe", &target["node_modules/".len()..])).unwrap(); std::fs::write(d.join(format!("{cli}.ps1")), "#").unwrap();
+        touch(&d.join(&target)); d.join(&target)
+    }
+    #[test] fn an_npm_shim_is_resolved_to_what_it_starts() {
+        let d = dir("npm"); let node = d.join("bin/node.exe"); touch(&node); let n = || Some(node.clone());
+        let claude = npm_install(&d, "claude"); let codex = npm_install(&d, "codex");
+        // both of npm's forms, from the .cmd and from the extensionless sh shim `find_in` takes first
+        for p in [d.join("claude.cmd"), d.join("claude")] { assert_eq!(unshim(&p, &n), Some((claude.clone(), vec![])), "{p:?}") }
+        for p in [d.join("codex.cmd"), d.join("codex")] { assert_eq!(unshim(&p, &n), Some((node.clone(), vec![codex.to_string_lossy().into_owned()])), "{p:?}") }
+        assert_eq!(find_in(&[d.to_path_buf()], "claude", true), Some(d.join("claude")), "the sh shim is what is found");
+        // node beside the shim comes first
+        touch(&d.join("node.exe")); assert_eq!(unshim(&d.join("codex.cmd"), &n).unwrap().0, d.join("node.exe")); std::fs::remove_file(d.join("node.exe")).unwrap();
+        // cmd-shim's older form
+        let old = "@IF EXIST \"%~dp0\\node.exe\" (\r\n  \"%~dp0\\node.exe\"  \"%~dp0\\node_modules\\@openai\\codex\\bin\\codex.js\" %*\r\n) ELSE (\r\n  @SETLOCAL\r\n  @SET PATHEXT=%PATHEXT:;.JS;=;%\r\n  node  \"%~dp0\\node_modules\\@openai\\codex\\bin\\codex.js\" %*\r\n)\r\n";
+        assert_eq!(cmd_target(old, &d, &n), Some((node.clone(), vec![codex.to_string_lossy().into_owned()])));
+        // not npm's: another program, another variable, a target not there, output redirected, no node
+        assert_eq!(cmd_target("@echo off\r\nbun \"%~dp0\\standin.ts\" %*\r\n", &d, &n), None);
+        assert_eq!(cmd_target("\"%MYTOOL%\\x.exe\" %*", &d, &n), None);
+        assert_eq!(cmd_target("\"%dp0%\\nothing\\here.exe\" %*", &d, &n), None);
+        assert_eq!(cmd_target("\"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe\" %* > log.txt", &d, &n), None);
+        assert_eq!(cmd_target(NPM_CODEX_CMD, &d, &|| None), None);
+        assert_eq!(unshim(&claude, &n), None, "an exe is itself");
+        let lone = dir("npm-lone"); std::fs::write(lone.join("pi"), "#!/bin/sh\nexec node x \"$@\"\n").unwrap(); assert_eq!(unshim(&lone.join("pi"), &n), None, "a sh script with no .cmd beside it");
+    }
+    #[test] fn what_a_launcher_cannot_carry_is_refused_not_mangled() {
+        let json = r#"{"mcpServers":{"backplane":{"type":"http","url":"http://127.0.0.1:1/mcp?t=a&g=b"}}}"#.to_string();
+        assert!(carries(Launcher::Batch, &["--mcp-config".into(), json.clone(), "a%b".into(), "x&y".into(), "C:\\x\\".into(), "".into()]).is_ok(), "cmd.exe carries quotes, %, & and the rest (bp-win)");
+        let e = carries(Launcher::Sh, &["--mcp-config".into(), json.clone()]).unwrap_err(); assert!(e.contains("argument 2 of 2") && e.contains("Git's sh") && !e.contains("127.0.0.1"), "{e}");
+        assert!(carries(Launcher::Sh, &["/k".into()]).is_err() && carries(Launcher::Batch, &["a\nb".into()]).is_err());
+        assert!(carries(Launcher::Batch, &["x".repeat(BATCH_LINE)]).unwrap_err().contains("longer than cmd.exe takes"));
+        let d = dir("plan"); let bat = d.join("mine.cmd"); std::fs::write(&bat, "@echo off\r\nbun \"%~dp0\\s.ts\" %*\r\n").unwrap();
+        let e = plan(&bat, &["a\nb".into()], true, &|| None).unwrap_err(); assert!(e.contains("mine.cmd is a batch launcher") && e.contains("argument 1"), "{e}");
+        assert_eq!(plan(&bat, &["--mcp-config".into(), json.clone()], true, &|| None).unwrap(), (bat.clone(), vec![]));
+        assert_eq!(plan(&bat, &["a\nb".into()], false, &|| None).unwrap(), (bat.clone(), vec![]), "elsewhere nothing changes");
+    }
+    #[test] fn a_run_file_is_private_and_goes_with_its_process() {
+        let d = dir("runfile"); let r = RunFile::private(&d.join("secrets/run"), "t-1.mcp.json", "{\"k\":1}").unwrap(); let f = r.path().to_path_buf();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "{\"k\":1}");
+        #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600); assert_eq!(std::fs::metadata(d.join("secrets/run")).unwrap().permissions().mode() & 0o777, 0o700); }
+        drop(r); assert!(!f.exists());
+    }
+    /// Every provider's command line on Windows rules, its CLI installed through npm: what runs is the CLI's own program (or node with its script),
+    /// never cmd.exe or sh; and Claude's, Grok's, Muse's, OpenCode's, Pi's and Oh My Pi's carry through any launcher (a person's own .cmd). Codex's
+    /// cannot (its instructions are ~20k characters of `-c developer_instructions=...` and the message is an argument): through a launcher that is
+    /// not npm's it is refused with why (`plan`), never started without them.
+    #[tokio::test] async fn every_providers_command_line_reaches_its_agent_on_windows() {
+        use crate::agents::{providers, rules};
+        let d = dir("argv-win"); let home = d.join("home"); std::fs::create_dir_all(&home).unwrap(); let node = d.join("node/node.exe"); touch(&node); let n = || Some(node.clone());
+        let prompt = "You are in Backplane.\nUse \"kicad_edit\" for 100% of edits & keep C:\\Users\\x\\.\n".repeat(200);
+        let text = "Route \"VBUS\"\nthen 50% & <check>";
+        let url = "http://127.0.0.1:41231/mcp/t1-2?token=abc&gen=1";
+        let mcp = crate::mcpx::svc::Launch { claude: rules::mcp_config(url), acp: serde_json::json!([{"name":"backplane","type":"http","url":url,"headers":[]}]), ..Default::default() };
+        let a = providers::TurnIn { thread: "t1-2".into(), cwd: d.to_string_lossy().into(), home: home.to_string_lossy().into(), model: "m".into(), session: "s-1".into(), runtime: "auto".into(), interaction: "default".into(), effort: "high".into(), think: true,
+            text: text.into(), images: vec![], prompt: prompt.clone(), mcp_url: url.into(), pcbparts_url: crate::mcpx::gen::PCBPARTS.into(), gen: "1".into(), settings: vec![], mcp };
+        // Claude: inline instructions and MCP config go to files, as the actor does on Windows
+        let dirs = vec!["C:\\Users\\x\\kistack".to_string()];
+        let mut ca = rules::claude_args(&rules::ArgsIn { model: "opus", session: "s", runtime: "auto", interaction: "default", prompt: &prompt, dirs: &dirs, effort: "high", think: true, plugins: &dirs, mcp_url: url, mcp_json: &a.mcp.claude, disallowed: &["mcp__x__y".to_string()] });
+        rules::prompt_to_file(&mut ca, &home.join("prompts/t1-2.md")).unwrap();
+        let f = rules::mcp_to_file(&mut ca, &home.join("secrets/run"), "t1-2-1.mcp.json").unwrap().expect("moved");
+        let i = ca.iter().position(|x| x == "--mcp-config").unwrap(); assert_eq!(ca[i + 1], f.path().to_string_lossy());
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(f.path()).unwrap()).unwrap()["mcpServers"]["backplane"]["url"], url, "Claude reads the same config from the file");
+        let mut lines: Vec<(&str, Vec<String>)> = vec![("claude", ca)];
+        for p in ["codex", "grok", "muse", "opencode", "pi", "omp"] {
+            let mut made = providers::driver(p).unwrap_or_else(|| panic!("{p}")); let _ = made.driver.prepare(&a);
+            let mut v = made.driver.argv(&a);
+            if p == "pi" { let i = v.iter().position(|x| x == "--append-system-prompt").unwrap(); v[i + 1] = providers::pi::prompt_arg(&home.join("pi"), &a.thread, &prompt, true) }
+            lines.push((made.cli, v));
+        }
+        for (cli, v) in &lines {
+            let bin = d.join(format!("npm-{cli}")); let target = npm_install(&bin, cli);
+            for found in [bin.join(cli), bin.join(format!("{cli}.cmd"))] {
+                let (prog, pre) = plan(&found, v, true, &n).unwrap_or_else(|e| panic!("{cli}: {e}"));
+                assert!(launcher(&prog).is_none(), "{cli} runs {prog:?}, not through cmd.exe or sh");
+                assert!(prog == target || (prog == node && pre == vec![target.to_string_lossy().into_owned()]), "{cli}: {prog:?} {pre:?}");
+            }
+            let own = d.join(format!("own-{cli}.cmd")); std::fs::write(&own, "@echo off\r\nbun \"%~dp0\\s.ts\" %*\r\n").unwrap();
+            match (*cli, plan(&own, v, true, &n)) {
+                ("codex", r) => assert!(r.unwrap_err().contains("batch launcher"), "codex through a launcher of its own is refused with why"),
+                (_, r) => { r.unwrap_or_else(|e| panic!("{cli}: {e}"));
+                    let win: Vec<String> = v.iter().map(|x| x.replace(&*d.to_string_lossy(), "C:\\Users\\x")).collect(); // this test's folders as Windows has them (a `/` path is Unix's)
+                    for l in [Launcher::Batch, Launcher::Sh] { carries(l, &win).unwrap_or_else(|e| panic!("{cli} through {l:?}: {e}")) } }
+            }
+        }
+    }
+    /// A real run through npm's own claude.cmd and its sh shim on Windows: the argv the agent logs is the argv the hub gave it, with the MCP config
+    /// read from its file. Uses node as the agent (a copy named claude.exe); skipped where there is none.
+    #[cfg(windows)]
+    #[tokio::test] async fn npm_claude_cmd_hands_the_agent_its_argv_on_windows() {
+        let Some(node) = find_in(search_dirs(), "node", true) else { eprintln!("no node: skipped"); return };
+        let d = dir("npm-real"); let target = npm_install(&d, "claude"); std::fs::copy(&node, &target).unwrap();
+        let home = d.join("home"); let mcp = crate::agents::rules::mcp_config("http://127.0.0.1:9/mcp/t?a=1&b=2");
+        let mut args: Vec<String> = vec!["-e".into(), "const a=process.argv.slice(1);const i=a.indexOf('--mcp-config');console.log(JSON.stringify({a,m:require('fs').readFileSync(a[i+1],'utf8')}))".into(), "--".into(), "--mcp-config".into(), mcp.clone(), "--add-dir".into(), "C:\\Program Files\\x\\".into(), "/k".into()];
+        let f = crate::agents::rules::mcp_to_file(&mut args, &home.join("secrets/run"), "t.mcp.json").unwrap().unwrap(); let path = f.path().to_path_buf();
+        for found in [d.join("claude"), d.join("claude.cmd")] {
+            let mut p = spawn(&found, &args, &d, None, &[]).unwrap();
+            let l = tokio::time::timeout(std::time::Duration::from_secs(30), p.lines.recv()).await.unwrap().unwrap();
+            let v: serde_json::Value = serde_json::from_str(&l).unwrap_or_else(|_| panic!("{l}"));
+            assert_eq!(v["m"], mcp.as_str(), "{found:?}"); assert_eq!(v["a"], serde_json::json!(["--", "--mcp-config", path.to_string_lossy(), "--add-dir", "C:\\Program Files\\x\\", "/k"]), "{found:?}");
+        }
+        drop(f); assert!(!path.exists());
     }
 }

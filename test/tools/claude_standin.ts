@@ -128,7 +128,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const rnd = () => crypto.randomUUID();
 const mcpAt = args.indexOf("--mcp-config");
 const mcpUrl = (() => {
-  try { return JSON.parse(args[mcpAt + 1]).mcpServers.backplane.url as string; } catch { return ""; }
+  // inline JSON, or (the hub on Windows) a file holding it
+  const v = args[mcpAt + 1] ?? "";
+  try { return JSON.parse(v.trim().startsWith("{") ? v : require("fs").readFileSync(v, "utf8")).mcpServers.backplane.url as string; } catch { return ""; }
 })();
 if (mcpUrl) log(`MCP ${process.pid} ${mcpUrl}`);
 
