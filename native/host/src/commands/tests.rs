@@ -320,7 +320,9 @@ fn interrupt_hubs() -> &'static std::sync::Mutex<std::collections::HashMap<Strin
 fn rec() -> &'static Arc<Rec> { static R: std::sync::OnceLock<Arc<Rec>> = std::sync::OnceLock::new(); R.get_or_init(|| { let r = Arc::new(Rec(Default::default(), Default::default())); super::seam::inject(Some(r.clone())); r }) }
 fn calls(th: &str) -> Vec<(&'static str, String)> { rec().0.lock().unwrap().iter().filter(|c| c.1 == th).map(|c| (c.0, c.2.clone())).collect() }
 async fn settled(h: &Arc<Hub>, n0: usize, want: usize) -> Vec<Value> {
-    for _ in 0..100 { if h.store.len() >= n0 + want { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
+    // waits for the events the job owes (every caller's are due), up to 180 s: 5 s ran out in a land gate whose hub took 31 s just to start
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(180);
+    while h.store.len() < n0 + want && std::time::Instant::now() < end { tokio::time::sleep(std::time::Duration::from_millis(40)).await }
     h.store.range(n0, h.store.len()).unwrap().iter().map(|l| serde_json::from_str(l).unwrap()).collect()
 }
 // Copy.git.wt: on a copy of a log the job runs on "/": the thread is told at once that it uses the project folder, and git writes nothing
