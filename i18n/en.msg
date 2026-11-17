@@ -2333,6 +2333,8 @@ gpui.the.right.spelling = The right spelling
 gpui.star.on.github = Star on GitHub
 gpui.star.dont.ask = Don't ask again
 gpui.star.why = Stars help other hardware designers find Backplane, and tell us what to keep building.
+gpui.projects.unpushed = {n, plural, one {# commit not pushed to {upstream}} other {# commits not pushed to {upstream}}}
+gpui.projects.push = Push
 
 # ---- gpui-e: hub settings and panels ----
 gpui.e.files.max.mb = Largest attachment (MB)
@@ -2627,6 +2629,10 @@ gpui.e.freecad.ask.note = Downloads the latest FreeCAD (about 800 MB, 3 GB unpac
 gpui.e.freecad.offer = FreeCAD's own release for this computer. Agents make mechanical parts with it.
 gpui.e.picker.clone.hint = Clones the repository and adds it as a project
 gpui.e.picker.clone.typed = Clone {origin}
+settings.git.page = Projects and git
+settings.git.autopush = Push commits to the remote automatically
+settings.git.autopush.note = Backplane commits design files locally at each turn's end. On: it also pushes them to the branch's remote. Off: a project's page shows the commits not pushed, with Push.
+settings.git.notice = Backplane no longer pushes automatically. Turn it on in Settings if you want it.
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = Install

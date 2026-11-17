@@ -2333,6 +2333,8 @@ gpui.the.right.spelling = La ortografía correcta
 gpui.star.on.github = Dar estrella en GitHub
 gpui.star.dont.ask = No preguntar de nuevo
 gpui.star.why = Las estrellas ayudan a otros diseñadores de hardware a encontrar Backplane y nos indican qué seguir construyendo.
+gpui.projects.unpushed = {n, plural, one {# commit sin enviar a {upstream}} other {# commits sin enviar a {upstream}}}
+gpui.projects.push = Enviar
 
 # ---- gpui-e: hub settings and panels ----
 gpui.e.files.max.mb = Adjunto más grande (MB)
@@ -2627,6 +2629,10 @@ gpui.e.freecad.ask.note = Descarga la última versión de FreeCAD (unos 800 MB, 
 gpui.e.freecad.offer = La versión propia de FreeCAD para este ordenador. Los agentes crean piezas mecánicas con él.
 gpui.e.picker.clone.hint = Clona el repositorio y lo añade como proyecto
 gpui.e.picker.clone.typed = Clonar {origin}
+settings.git.page = Proyectos y git
+settings.git.autopush = Enviar los commits al remoto automáticamente
+settings.git.autopush.note = Backplane hace commit de los archivos de diseño en local al final de cada turno. Activado: también los envía al remoto de la rama. Desactivado: la página del proyecto muestra los commits sin enviar, con Enviar.
+settings.git.notice = Backplane ya no envía automáticamente. Actívalo en Ajustes si lo quieres.
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = Instalar

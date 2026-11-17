@@ -938,6 +938,8 @@ impl Render for Backplane {
                 .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).children(crate::perf::mark("rail")).border_l_1().border_color(c("rule")).flex().flex_col().py_2().when(kscreen, |d| d.w(px(0.)).border_l_0().py_0().overflow_hidden()).children(rail)))
             // the one-time telemetry notice (screens/tmnotice.rs)
             .children({ let (n, shown) = (self.screens.tm_notice.clone(), self.screens.tm_shown.clone()); crate::screens::tmnotice::strip(cx, n.as_ref(), &shown, light) })
+            // the one-time notice that the hub no longer pushes on its own (#1171)
+            .children({ let n = self.screens.gp_notice.clone(); crate::screens::tmnotice::gp_strip(cx, n.as_ref(), light) })
             .children(crate::perf::mark("over"))
             // Settings over the whole window: its dialog is sized from the window (settings::fit), so it must not sit in the thread column
             .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus, &self.screens.settings_ui, &self.local, &self.screens.acct, crate::screens::settings::fit(f32::from(window.viewport_size().width), f32::from(window.viewport_size().height)),&self.hubs,self.screens.offers.on_home.as_deref()))

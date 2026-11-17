@@ -204,11 +204,12 @@ pub fn commit_refused(out: &str) -> String {
     format!("git commit: {}", out.trim())
 }
 /// Commit the design files changed in the main checkout of `root` straight onto its branch, as
-/// one commit, then push when the branch has an upstream. `skip`: documents another thread
+/// one commit, then, when `push` (the setting `git.auto_push`, off by default: settings/autopush.rs)
+/// and the branch has an upstream, push it. `skip`: documents another thread
 /// holds the lock of (their files stay for that thread's own commit). Only the main checkout
 /// (never a worktree), only on a branch, only design files: nothing else staged there is swept in.
 /// Err: what stopped it. Ok with no commit: nothing to record.
-pub async fn commit_design(root: &str, msg: &str, skip: &[String]) -> Result<Recorded, String> {
+pub async fn commit_design(root: &str, msg: &str, skip: &[String], push: bool) -> Result<Recorded, String> {
     use crate::files::git;
     if crate::copy::on() { return Err("a hub on a copy records no commits".into()) }
     if split_worktree(root).is_some() { return Err("that folder is a worktree, not the main checkout".into()) }
@@ -240,13 +241,38 @@ pub async fn commit_design(root: &str, msg: &str, skip: &[String]) -> Result<Rec
     let r = git::run(&top, &ci).await;
     if r.code != 0 { return Err(commit_refused(&r.out)) }
     let commit = git::run_ro(&top, &["rev-parse", "--short", "HEAD"]).await.out.trim().to_string();
-    let up = git::run_ro(&top, &["rev-parse", "--abbrev-ref", "-q", &format!("{branch}@{{upstream}}")]).await;
-    let pushed = if up.code == 0 && !up.out.trim().is_empty() {
-        let (remote, rb) = up.out.trim().split_once('/').map(|(a, b)| (a.to_string(), b.to_string())).unwrap_or_default();
-        let p = git::run(&top, &["push", "-q", &remote, &format!("{branch}:{rb}")]).await;
-        if p.code == 0 { up.out.trim().to_string() } else { format!("not pushed: {}", p.out.trim().lines().last().unwrap_or("")) }
-    } else { String::new() };
+    let pushed = if push { push_upstream(&top, &branch).await } else { String::new() };
     Ok(Recorded { commit, files, pushed, new_boards })
+}
+/// The upstream (`origin/main`) of `branch` in the checkout at `top`, "" for none.
+async fn upstream(top: &str, branch: &str) -> String {
+    let up = crate::files::git::run_ro(top, &["rev-parse", "--abbrev-ref", "-q", &format!("{branch}@{{upstream}}")]).await;
+    if up.code == 0 { up.out.trim().to_string() } else { String::new() }
+}
+/// Push `branch` of the checkout at `top` to its upstream: the upstream pushed to, "" when it has none, `not pushed: <why>` when git refused.
+pub async fn push_upstream(top: &str, branch: &str) -> String {
+    let up = upstream(top, branch).await;
+    if up.is_empty() { return up }
+    let (remote, rb) = up.split_once('/').map(|(a, b)| (a.to_string(), b.to_string())).unwrap_or_default();
+    let p = crate::files::git::run(top, &["push", "-q", &remote, &format!("{branch}:{rb}")]).await;
+    if p.code == 0 { up } else { format!("not pushed: {}", p.out.trim().lines().last().unwrap_or("")) }
+}
+/// The main checkout of `root`: its top folder and branch, None when it is no git checkout on a branch (or a worktree).
+pub async fn main_branch(root: &str) -> Option<(String, String)> {
+    use crate::files::git;
+    if split_worktree(root).is_some() { return None }
+    let top = git::run_ro(root, &["rev-parse", "--show-toplevel"]).await; if top.code != 0 { return None }
+    let top = top.out.trim().to_string();
+    let b = git::run_ro(&top, &["symbolic-ref", "--short", "-q", "HEAD"]).await; if b.code != 0 || b.out.trim().is_empty() { return None }
+    Some((top, b.out.trim().to_string()))
+}
+/// The commits on the main checkout's branch that its upstream lacks, and that upstream: None when there is no upstream (nothing to push to).
+pub async fn unpushed(root: &str) -> Option<(u64, String)> {
+    let (top, branch) = main_branch(root).await?;
+    let up = upstream(&top, &branch).await; if up.is_empty() { return None }
+    let n = crate::files::git::run_ro(&top, &["rev-list", "--count", &format!("{up}..{branch}")]).await;
+    if n.code != 0 { return None }
+    Some((n.out.trim().parse().unwrap_or(0), up))
 }
 
 /// A hardware thread's code worktree carries no design files: each tracked one is marked
@@ -434,7 +460,7 @@ mod tests {
         std::fs::write(format!("{wt}/firmware/src/main.c"), "int main(){return 1;}").unwrap();
         // a stray code edit in the main checkout is never swept into the design commit
         std::fs::write(format!("{main}/firmware/CMakeLists.txt"), "project(fw2)").unwrap();
-        let r = commit_design(&main, "design: test (t1)", &[]).await.unwrap();
+        let r = commit_design(&main, "design: test (t1)", &[], true).await.unwrap();
         assert_eq!(r.files, vec!["boards/main/main.kicad_pcb", "boards/main/main.kicad_pcb.backplane.json", "mech/case.step"]);
         assert_eq!(r.pushed, "", "no upstream: nothing pushed");
         assert_eq!(git(&main, &["show", "--name-only", "--format=%s", "HEAD"]), "design: test (t1)\n\nboards/main/main.kicad_pcb\nboards/main/main.kicad_pcb.backplane.json\nmech/case.step");
@@ -447,7 +473,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(format!("{main}/boards/main/main.kicad_pcb")).unwrap(), "(pcb v2)", "the merge kept main's board");
         assert_eq!(std::fs::read_to_string(format!("{main}/firmware/src/main.c")).unwrap(), "int main(){return 1;}");
         // nothing more to record
-        assert_eq!(commit_design(&main, "x", &[]).await.unwrap(), Recorded::default());
+        assert_eq!(commit_design(&main, "x", &[], true).await.unwrap(), Recorded::default());
         // a design path the thread names from its worktree is main's
         assert_eq!(route(&format!("{wt}/boards/main/main.kicad_pcb")), format!("{main}/boards/main/main.kicad_pcb"));
         assert_eq!(design_root(&wt), main);
@@ -474,7 +500,7 @@ mod tests {
         std::fs::write(format!("{main}/boards/main/main.kicad_pcb"), "(pcb other thread)").unwrap();
         std::fs::write(format!("{main}/boards/main/main.kicad_sch"), "(sch mine)").unwrap();
         // the holder named the board through the link; git names the checkout by its real folder
-        let rec = commit_design(&main, "design: mine", &[format!("{}/boards/main/main.kicad_pcb", link.display())]).await.unwrap();
+        let rec = commit_design(&main, "design: mine", &[format!("{}/boards/main/main.kicad_pcb", link.display())], false).await.unwrap();
         assert_eq!(rec.files, vec!["boards/main/main.kicad_sch"], "the held board is not swept into another thread's commit");
         let _ = std::fs::remove_file(&link);
     }
@@ -486,11 +512,34 @@ mod tests {
         git(&main, &["remote", "add", "origin", bare.to_str().unwrap()]); git(&main, &["push", "-q", "-u", "origin", "main"]);
         std::fs::write(format!("{main}/boards/main/main.kicad_pcb"), "(pcb other thread)").unwrap();
         std::fs::write(format!("{main}/boards/main/main.kicad_sch"), "(sch mine)").unwrap();
-        let rec = commit_design(&main, "design: mine (t2)", &[format!("{main}/boards/main/main.kicad_pcb")]).await.unwrap();
+        let rec = commit_design(&main, "design: mine (t2)", &[format!("{main}/boards/main/main.kicad_pcb")], true).await.unwrap();
         assert_eq!(rec.files, vec!["boards/main/main.kicad_sch"]);
         assert_eq!(rec.pushed, "origin/main");
         assert_eq!(git(bare.to_str().unwrap(), &["log", "-1", "--format=%s", "main"]), "design: mine (t2)");
         assert_eq!(git(&main, &["status", "--porcelain"]), "M boards/main/main.kicad_pcb", "the held board waits for its writer");
+    }
+
+    #[tokio::test] async fn with_auto_push_off_a_turn_commits_locally_and_pushes_nothing_until_push_is_pressed() {
+        let (_r, main) = mixed("nopush");
+        let bare = crate::plat::tmp::uncreated("nopush-remote");
+        git(&main, &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()]);
+        git(&main, &["remote", "add", "origin", bare.to_str().unwrap()]); git(&main, &["push", "-q", "-u", "origin", "main"]);
+        let before = git(bare.to_str().unwrap(), &["rev-parse", "main"]);
+        assert_eq!(unpushed(&main).await, Some((0, "origin/main".into())));
+        std::fs::write(format!("{main}/boards/main/main.kicad_pcb"), "(pcb local)").unwrap();
+        let rec = commit_design(&main, "design: local (t3)", &[], false).await.unwrap();
+        assert!(!rec.commit.is_empty() && rec.pushed.is_empty(), "committed, not pushed: {rec:?}");
+        assert_eq!(git(&main, &["log", "-1", "--format=%s"]), "design: local (t3)", "auto-commit is unchanged");
+        assert_eq!(git(bare.to_str().unwrap(), &["rev-parse", "main"]), before, "the remote did not move");
+        assert_eq!(unpushed(&main).await, Some((1, "origin/main".into())), "the project page says 1 commit not pushed");
+        // the page's Push: one deliberate click
+        let (top, branch) = main_branch(&main).await.unwrap();
+        assert_eq!(push_upstream(&top, &branch).await, "origin/main");
+        assert_eq!(git(bare.to_str().unwrap(), &["log", "-1", "--format=%s", "main"]), "design: local (t3)");
+        assert_eq!(unpushed(&main).await, Some((0, "origin/main".into())));
+        // no upstream: nothing to count or push
+        git(&main, &["branch", "-q", "--unset-upstream"]);
+        assert_eq!(unpushed(&main).await, None); assert_eq!(push_upstream(&top, &branch).await, "");
     }
 
     #[tokio::test] async fn an_older_worktree_brings_its_board_back_with_a_backup() {

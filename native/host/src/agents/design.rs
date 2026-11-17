@@ -227,14 +227,14 @@ impl Agents {
         kc::is_document(&abs).then_some(abs)
     }
     /// Commit the design files changed in the thread's main checkout straight to main (and push
-    /// when it has an upstream), leaving any document another thread holds for that thread.
+    /// when it has an upstream and `git.auto_push` is on: settings/autopush.rs), leaving any document another thread holds for that thread.
     /// `why`: "turn" (a turn's end) or "save" (a SaveDocument). Each commit is a line in the thread.
     pub async fn design_record(self: &Arc<Self>, th: &str, why: &str) { self.design_record_note(th, why, "").await }
     /// The same, `note` a line of the commit's body (a save that also upgraded the file's format says so: savegate.rs).
     pub async fn design_record_note(self: &Arc<Self>, th: &str, why: &str, note: &str) {
         if crate::copy::on() { return }
         let root = self.main_root(th).await; if root.is_empty() || !kc::hardware(&root) { return }
-        let (title, mine) = { let w = self.world().await; (w.threads.get(th).map(|t| t.title.clone()).unwrap_or_default(), w.setting(&main_key(th)) == "on") };
+        let (title, mine, push) = { let w = self.world().await; (w.threads.get(th).map(|t| t.title.clone()).unwrap_or_default(), w.setting(&main_key(th)) == "on", crate::settings::autopush::on(w.setting(crate::settings::autopush::KEY))) };
         if !mine && why == "turn" { return } // a thread still in an older worktree edits its own copies (bring_back moves them)
         let mut held: Vec<String> = vec![];
         for n in self.lock_names().await.into_iter().filter(|n| kc::is_doc_lock(n)) {
@@ -245,7 +245,7 @@ impl Agents {
         let f = kc::for_cwd(&root);
         let skip: Vec<String> = [f.pcb, f.sch].into_iter().filter(|d| !d.is_empty() && held.contains(&kc::doc_lock(d))).collect();
         let msg = format!("design: {} ({th}){}", if title.is_empty() || title == "New thread" { "KiCad work".to_string() } else { title.chars().take(72).collect() }, if note.is_empty() { String::new() } else { format!("\n\n{note}") });
-        match kc::commit_design(&root, &msg, &skip).await {
+        match kc::commit_design(&root, &msg, &skip, push).await {
             Ok(r) if r.commit.is_empty() => {}
             Ok(r) => {
                 crate::settings::telemetry_usage::bump(crate::settings::telemetry_usage::BOARDS_CREATED, r.new_boards);
@@ -324,7 +324,8 @@ impl Agents {
         let now = now_s();
         self.commit_events(vec![json!({"$":"SettingSet","key":main_key(&target),"value":"on","at":now}), json!({"$":"SettingSet","key":format!("kicad.offer.{target}"),"value":"done","at":now})]).await;
         let msg = format!("design: brought back from {} ({target})", if title.is_empty() { target.clone() } else { title.chars().take(60).collect() });
-        let rec = kc::commit_design(&main, &msg, &[]).await;
+        let push = { let w = self.world().await; crate::settings::autopush::on(w.setting(crate::settings::autopush::KEY)) };
+        let rec = kc::commit_design(&main, &msg, &[], push).await;
         let line = match &rec { Ok(r) if !r.commit.is_empty() => format!("Brought {} design file{} back to main as {} (backup {backup}); this thread now works in the main checkout for design files", moved.len(), if moved.len() == 1 { "" } else { "s" }, r.commit), Ok(_) => format!("No design changes to bring back; this thread now works in the main checkout for design files"), Err(e) => format!("Brought {} design files back to main (backup {backup}) but did not commit: {e}", moved.len()) };
         self.say(&target, "info", "git", line.clone()).await;
         (true, json!({"thread":target,"backup":backup,"files":moved,"stripped":stripped,"commit":rec.as_ref().map(|r| r.commit.clone()).unwrap_or_default(),"said":line}))

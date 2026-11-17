@@ -489,6 +489,11 @@ pub fn buy_button(card: &Value) -> Option<(String, String, String)> {
     if b["action"] != "fab-buy" || label.is_empty() || thread.is_empty() { return None }
     Some((label, string(b, "tip"), thread))
 }
+/// The page's "N commits not pushed" from the hub's card (`unpushed`: the main checkout's commits its upstream lacks), None when there are none.
+pub fn unpushed(card: &Value) -> Option<(u64, String)> {
+    let n = card["unpushed"]["count"].as_u64().unwrap_or(0);
+    (n > 0).then(|| (n, string(&card["unpushed"], "upstream")))
+}
 /// A thread of the page's project as the window selects it (`<hub>|<id>`): its row's id when the page lists it, else the project's hub with the id.
 fn page_thread(project: &Value, threads: &[&Value], raw: &str) -> String {
     if let Some(id) = threads.iter().map(|t| string(t, "id")).find(|i| i.rsplit('|').next() == Some(raw)) { return id }
@@ -587,6 +592,14 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
             .when(!est.is_empty(), |d| d.child(div().text_color(c("faint")).child(est)))
             .tooltip(crate::keys::tip(&tip, "", light))
             .on_click(cx.listener(move |this, _, window, cx| { this.screens.projects.buy_edit = Some(thread.clone()); this.select(id.clone(), window, cx); })));
+    }
+    // commits the remote lacks (the hub pushes on its own only when Settings > Projects and git says so, #1171): one deliberate Push
+    if let Some((n, up)) = if loaded { unpushed(&card) } else { None } {
+        let pid2 = pid.to_string();
+        bar = bar.child(div().w(px(1.)).h(px(18.)).mx_1().bg(c("line")))
+            .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.projects.unpushed", &[("n", n.into()), ("upstream", up.into())])))
+            .child(crate::ui::with_rect(action_button(cx, light, "page-push", "arrow-up", crate::i18n::trs("Push"), false), || "page-push".to_string())
+                .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Rpc("project.push".into(), super::settings::Secret(serde_json::json!({"project": pid2.clone()})), "project-push")); cx.notify(); })));
     }
     out.push(bar.into_any_element());
     // threads: the hub's lists for this project (running, needs you, recent, Done (n)), every machine's threads
