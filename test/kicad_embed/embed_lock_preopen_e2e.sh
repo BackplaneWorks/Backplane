@@ -30,11 +30,12 @@ time.sleep(3600)
 PY
 HOLDER=$!; track_pid "$HOLDER"
 for _ in $(seq 50); do [ -s "$OUT/holder.pid" ] && break; sleep 0.1; done
-holders() { lslocks -n -o PID,PATH 2>/dev/null | awk -v p="$1" '$2 == p {print $1}' | sort -u | tr '\n' ' '; }
+holders() { lslocks -n -u -o PID,PATH 2>/dev/null | awk -v p="$(readlink -f "$1")" '$2 == p {print $1}' | sort -u | tr '\n' ' '; }
 echo "INFO another KiCad (stand-in pid $HOLDER) holds $LCK; the BOM edit's reference: $REF"
 # the hub logs KiCad's events (P3 reads its "schematic shown")
 export BACKPLANE_KICAD_DEBUG=1
 start_xvfb_and_wm; start_hub
+HUB_PID=${OWN_GROUPS[${#OWN_GROUPS[@]}-1]}
 echo '[{"select":0},{"wait":2200},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},{"kicad":{"wait_painted":90000,"kind":"PCB","tag":"ready"}},{"mark":"ready"},{"wait":420000},{"mark":"done"}]' >"$OUT/script.json"
 HOME="$OUT/fh" BACKPLANE_GPUI_RECTS=1 BACKPLANE_KICAD_DEBUG=1 BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 480 >"$OUT/client.log" 2>&1 &
 CP=$!; track_pid "$CP"
@@ -78,7 +79,7 @@ AT=$(rect kicad:lock-open); [ -n "$AT" ] && { read -r X Y <<<"$AT"; python3 "$XI
 SHOWN=0
 for _ in $(seq 120); do grep -q 'ET_FRAME_SHOWN.*"kind":"FK_SCH"' "$OUT/hub.log" && { SHOWN=1; break; }; sleep 0.5; done
 sleep 3
-OURS=$(pgrep -n -u "$(id -u)" -f -- "--embedded.*--parent-pid" 2>/dev/null || true)
+OURS=$(pgrep -n -u "$(id -u)" -f -- "--embedded.*--parent-pid $HUB_PID([[:space:]]|$)" 2>/dev/null || true)
 DLG=$(xwininfo -root -tree 2>/dev/null | grep -c '"File Open Warning"' || true)
 check "P3 the switch to the schematic asks; Open anyway shows it, no File Open Warning, our KiCad holds its lock" "$([ $ASKED = 1 ] && [ $SHOWN = 1 ] && [ "${DLG:-0}" = 0 ] && echo " $(holders "$LCK") " | grep -q " $OURS " && echo 1 || echo 0)" "asked $ASKED, shown $SHOWN, dialogs $DLG, held by $(holders "$LCK") (ours $OURS); $(grep -o 'kicad locks: the person chose Open anyway.*' "$OUT/hub.log" | head -1 | cut -c1-160)"
 # P4
