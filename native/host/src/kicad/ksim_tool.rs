@@ -49,17 +49,17 @@ impl Agents {
         if !crate::plat::fs::is_abs(path) { return fail("path must be the absolute path of the schematic (.kicad_sch) to simulate") }
         let pro = super::ipc::pro_of(path); let env = super::ipc::runtime(&self.hub).await;
         // the KiCad this call goes to: the person's when it has the project, else the hub's headless one
-        let (caps, version) = match super::embed::gui_route(&pro) { Some(g) => (g.caps.clone(), g.version.clone()), None => (env.caps.clone(), env.version.clone()) };
+        let (caps, version, gui) = match super::embed::gui_route(&pro) { Some(g) => (g.caps.clone(), g.version.clone(), true), None => (env.caps.clone(), env.version.clone(), false) };
         if !caps.iter().any(|c| c == ksim::CAP) { return fail(&ksim::no_sim(&version)) }
         if ksim::writes(&a["ops"]) && a["person_seen"].as_bool() != Some(true) {
             if let Some(p) = super::coedit::person_now(&pro) { return (false, json!({"error": kedit::person_first(&p), "person": p})) }
         }
         let routed = kc::route(path);
         let project_dir = std::path::Path::new(if pro.is_empty() { routed.as_str() } else { pro.as_str() }).parent().map(|p| p.to_path_buf()).unwrap_or_default();
-        let libs: Vec<(std::path::PathBuf, &'static str)> = [("share/kicad/symbols", "kicad"), ("share/kicad/simulation", "kicad"), ("share/backplane/library", "library"), ("share/kicad/library", "library")].into_iter()
+        let libs: Vec<(std::path::PathBuf, &'static str)> = [("share/kicad/symbols", "kicad"), ("share/kicad/simulation", "kicad"), ("share/kicad/backplane-library", "library")].into_iter()
             .map(|(d, what)| (std::path::Path::new(&env.root).join(d), what)).filter(|(d, _)| d.is_dir()).collect();
         let log = ksim_log::file(&self.hub.cfg.home);
-        let ctx = ksim::Ctx { project_dir, libs, now: crate::agents::now_s(), log: Some(log.clone()) };
+        let ctx = ksim::Ctx { project_dir, libs, now: crate::agents::now_s(), log: Some(log.clone()), gui };
         let via = Via { ag: self, thread, path, person: std::sync::Mutex::new(Value::Null), caps };
         let (r, entries) = ksim::run(&via, path, a, &ctx).await;
         if ksim::writes(&a["ops"]) { super::coedit::agent_wrote(&pro) }

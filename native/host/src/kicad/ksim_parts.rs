@@ -234,6 +234,8 @@ pub const GROUPS: &[(&str, &[&str], &[&str])] = &[
     ("mechanical", &["HS", "MP", "LOGO", "G"], &["Mechanical:*", "Graphic:*"]),
     ("jumpers", &["JP", "SJ"], &["Jumper:*"]),
 ];
+/// The groups `exclude: "no_model"` takes together: what is on a schematic for the board's sake and has nothing to simulate.
+pub const NOT_ELECTRICAL: &[&str] = &["connectors", "mounting_holes", "test_points", "fiducials", "mechanical"];
 /// Whether a part is of a named group: by its library id when that says, else by its reference's letters.
 pub fn in_group(group: &str, reference: &str, lib_id: &str) -> Option<bool> {
     let (_, prefixes, libs) = GROUPS.iter().find(|g| g.0 == group)?;
@@ -259,6 +261,8 @@ pub fn problem_line(p: &Value) -> String {
         return format!("the model named for {part} is not in its library{}: name one the file has (import lists them), or give another file", after(msg, "model").map(|m| format!(" ({m})")).unwrap_or_default()) }
     if is(&["pin"]) || says(&["pin count", "number of pins", "too few nodes", "incorrect number of nodes", "wrong number of"]) {
         return format!("pins of {part} do not match its model's nodes: give the map with model (pins: {{pin: node}})") }
+    if says(&["annotat"]) { return "annotate the schematic first: parts without a number in their reference do not simulate".into() }
+    if says(&["has no ac value", "ac input not found"]) { return format!("the input source has no AC value{}: give it one (set: {{\"V1.ac\": 1}} for this run, or model params ac=1)", after(msg, "input source").map(|s| format!(" ({s})")).unwrap_or_default()) }
     if is(&["bad_param"]) { return format!("a value or parameter of {part} does not parse{}: set it with model (params), or correct the part's value", if short.is_empty() { String::new() } else { format!(" ({short})") }) }
     if is(&["no_ground"]) || says(&["no ground", "no node 0"]) { return "the circuit has no ground (node 0): put a GND power symbol on the return net".into() }
     if is(&["measure"]) { return format!("a measure gave no value{}", if short.is_empty() { String::new() } else { format!(": {short}") }) }
@@ -287,7 +291,7 @@ pub fn problem_line(p: &Value) -> String {
 pub fn problems_of_log(log: &str) -> Vec<Value> {
     let mut out: Vec<Value> = vec![];
     for l in log.lines() { let t = l.trim(); let low = t.to_ascii_lowercase();
-        let hit = ["singular matrix", "timestep too small", "no convergence", "iteration limit", "unknown subckt", "could not find a valid modelname", "unable to find definition of model", "no dc path", "floating", "gmin stepping failed", "source stepping failed", "syntax error", "unknown parameter", "unknown device", "no such file", "fatal error", "error:"];
+        let hit = ["singular matrix", "timestep too small", "no convergence", "iteration limit", "unknown subckt", "could not find a valid modelname", "unable to find definition of model", "no dc path", "floating", "gmin stepping failed", "source stepping failed", "syntax error", "unknown parameter", "unknown device", "no such file", "has no ac value", "ac input not found", "annotat", "fatal error", "error:"];
         if hit.iter().any(|h| low.contains(h)) && !out.iter().any(|o| o["message"] == t) { out.push(json!({"message": t})) }
         if out.len() >= 8 { break } }
     out
@@ -402,6 +406,8 @@ mod tests {
         assert!(l(json!({"message": "Warning: singular matrix:  check node out"})).starts_with("singular matrix at out: a loop of sources or inductors"));
         assert_eq!((l(json!({"kind": "PK_NO_GROUND"})), l(json!({"kind": "ME_BAD_PARAMS", "reference": "R4", "message": "cannot read 'abc'"})), l(json!({"kind": "PK_MEASURE_FAILED", "message": "tr: out of interval"}))),
             ("the circuit has no ground (node 0): put a GND power symbol on the return net".into(), "a value or parameter of R4 does not parse (cannot read 'abc'): set it with model (params), or correct the part's value".into(), "a measure gave no value: tr: out of interval".to_string()));
+        assert_eq!(l(json!({"kind": "PK_NETLIST", "message": "The schematic is not fully annotated"})), "annotate the schematic first: parts without a number in their reference do not simulate");
+        assert!(l(json!({"message": "Warning: Noise input source v1 has no AC value"})).starts_with("the input source has no AC value (v1): give it one"));
         assert_eq!(l(json!({"kind": "SPK_NETLIST", "reference": "V1", "message": "unknown parameter (foo)"})), "netlist error at V1: unknown parameter (foo)");
         assert_eq!((l(json!({"kind": "SPK_TIMEOUT"})).contains("did not finish"), l(json!({"kind": "SPK_SOMETHING_NEW", "reference": "R1"})), l(json!({"reference": "R9", "message": "odd thing"})), l(json!({}))), (true, "spk something new at R1".into(), "R9: odd thing".into(), "simulation problem".into()));
         for v in [json!({"kind": "SPK_NO_CONVERGENCE", "message": "x\ny\nz ".repeat(200)}), json!({"message": "a ".repeat(900)})] { let s = l(v); assert!(!s.contains('\n') && s.len() < 400, "{s}") }
