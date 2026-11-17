@@ -243,18 +243,30 @@ mod tests {
         let e = base64::engine::general_purpose::STANDARD;
         serde_json::to_vec(&serde_json::json!({"schema": 1, "keyid": keyid, "sig": e.encode(kp.sk.sign(body, None).as_ref()), "doc": e.encode(body)})).unwrap()
     }
-    fn good(seq: u64) -> Vec<u8> { seal(&body(seq, 2_000_000_000, serde_json::json!({"linux-x86_64": entry("linux-x86_64", "10.99.0-bp.13"), "darwin-arm64": entry("darwin-arm64", "10.99.0-bp.13"), "windows-x86_64": entry("windows-x86_64", "10.99.0-bp.13")})), &pair(3), "k1") }
+    fn good(seq: u64) -> Vec<u8> { seal(&body(seq, 2_000_000_000, serde_json::json!({"linux-x86_64": entry("linux-x86_64", feed()), "darwin-arm64": entry("darwin-arm64", feed()), "windows-x86_64": entry("windows-x86_64", feed())})), &pair(3), "k1") }
     const NOW: u64 = 1_800_000_000;
+    /// A feed pin's version above every compiled pin, by construction (the highest compiled pin with its last part bumped), and one above that:
+    /// the fixtures stay "newer than the compiled pin" through any pin bump (they were bp.13 and bp.14 when the compiled pins were below bp.13).
+    fn above(v: &str) -> String { let (base, last) = v.rsplit_once('.').unwrap(); format!("{base}.{}", last.parse::<u64>().unwrap() + 1) }
+    fn feed() -> &'static str {
+        static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+        V.get_or_init(|| { let top = [&install::LINUX, &install::MAC, &install::WINDOWS].iter().map(|p| p.version).fold(install::LINUX.version, |a, b| if install::older_than(a, b) { b } else { a }); above(top) })
+    }
+    fn later() -> &'static str { static V: std::sync::OnceLock<String> = std::sync::OnceLock::new(); V.get_or_init(|| above(feed())) }
+    #[test] fn the_fixture_versions_are_above_every_compiled_pin() {
+        for p in [&install::LINUX, &install::MAC, &install::WINDOWS] { assert!(install::older_than(p.version, feed()) && install::older_than(feed(), later()), "{} {}", p.version, feed()); }
+        assert_eq!(above("10.99.0-bp.13.1"), "10.99.0-bp.13.2"); assert_eq!(above("10.99.0-bp.12"), "10.99.0-bp.13");
+    }
 
     #[test] fn a_good_document_opens_with_every_platforms_pin() {
         let d = open(&good(4), &keys()).unwrap();
         assert_eq!((d.sequence, d.pins.len()), (4, 3));
         let l = d.pins.iter().find(|p| p.platform == "linux-x86_64").unwrap();
-        assert_eq!((l.version.as_str(), l.size, l.caps.len()), ("10.99.0-bp.13", 1_100_000_000, 2));
+        assert_eq!((l.version.as_str(), l.size, l.caps.len()), (feed(), 1_100_000_000, 2));
         assert_eq!(d.raw, good(4), "the envelope is what is cached");
     }
     #[test] fn a_bad_signature_or_another_key_is_refused() {
-        let mut b = body(4, 2_000_000_000, serde_json::json!({"linux-x86_64": entry("linux-x86_64", "10.99.0-bp.13")}));
+        let mut b = body(4, 2_000_000_000, serde_json::json!({"linux-x86_64": entry("linux-x86_64", feed())}));
         let sealed = seal(&b, &pair(3), "k1");
         // the body changed after signing: the signature no longer matches
         let mut v: Value = serde_json::from_slice(&sealed).unwrap(); b[10] ^= 1; v["doc"] = base64::engine::general_purpose::STANDARD.encode(&b).into();
@@ -285,13 +297,13 @@ mod tests {
         assert!(admit(Some(&d4), d5.clone(), NOW).is_ok(), "a higher sequence");
         assert!(admit(Some(&d5), d4.clone(), NOW).unwrap_err().contains("below the last one seen"), "an older document replayed");
         assert!(admit(Some(&d4), d4.clone(), NOW).is_ok(), "the same one again");
-        let other4 = open(&seal(&body(4, 2_000_000_000, serde_json::json!({"linux-x86_64": entry("linux-x86_64", "10.99.0-bp.14")})), &pair(3), "k1"), &keys()).unwrap();
+        let other4 = open(&seal(&body(4, 2_000_000_000, serde_json::json!({"linux-x86_64": entry("linux-x86_64", later())})), &pair(3), "k1"), &keys()).unwrap();
         assert!(admit(Some(&d4), other4, NOW).unwrap_err().contains("another pin document"));
         let old = open(&seal(&body(6, NOW - 1, serde_json::json!({})), &pair(3), "k1"), &keys()).unwrap();
         assert!(admit(Some(&d5), old.clone(), NOW).unwrap_err().contains("expired")); assert!(admit(None, old, NOW).is_err());
     }
     #[test] fn any_field_that_fails_the_packages_check_refuses_the_whole_document() {
-        let with = |f: &dyn Fn(&mut Value)| { let mut e = entry("linux-x86_64", "10.99.0-bp.13"); f(&mut e); open(&seal(&body(4, 2_000_000_000, serde_json::json!({"linux-x86_64": e, "darwin-arm64": entry("darwin-arm64", "10.99.0-bp.13")})), &pair(3), "k1"), &keys()) };
+        let with = |f: &dyn Fn(&mut Value)| { let mut e = entry("linux-x86_64", feed()); f(&mut e); open(&seal(&body(4, 2_000_000_000, serde_json::json!({"linux-x86_64": e, "darwin-arm64": entry("darwin-arm64", feed())})), &pair(3), "k1"), &keys()) };
         assert!(with(&|_| {}).is_ok());
         for (why, f) in [
             ("short sha", &(|e: &mut Value| e["sha256"] = "abc".into()) as &dyn Fn(&mut Value)),
@@ -307,9 +319,9 @@ mod tests {
             ("caps not names", &|e| e["caps"] = serde_json::json!(["Has Space"])),
             ("min_os junk", &|e| e["min_os"] = "fifteen".into()),
         ] { assert!(with(f).is_err(), "{why}"); }
-        let unknown = open(&seal(&body(4, 2_000_000_000, serde_json::json!({"freebsd-x86_64": entry("linux-x86_64", "10.99.0-bp.13")})), &pair(3), "k1"), &keys());
+        let unknown = open(&seal(&body(4, 2_000_000_000, serde_json::json!({"freebsd-x86_64": entry("linux-x86_64", feed())})), &pair(3), "k1"), &keys());
         assert!(unknown.unwrap_err().contains("unknown platform"));
-        let wrong_fmt = open(&seal(&body(4, 2_000_000_000, serde_json::json!({"windows-x86_64": entry("linux-x86_64", "10.99.0-bp.13")})), &pair(3), "k1"), &keys());
+        let wrong_fmt = open(&seal(&body(4, 2_000_000_000, serde_json::json!({"windows-x86_64": entry("linux-x86_64", feed())})), &pair(3), "k1"), &keys());
         assert!(wrong_fmt.unwrap_err().contains("Invalid runtime archive"), "a Linux tarball under Windows");
         for (k, v) in [("sequence", serde_json::json!(0)), ("expires", serde_json::json!(null)), ("kind", serde_json::json!("x")), ("schema", serde_json::json!(2))] {
             let mut b: Value = serde_json::from_slice(&body(4, 2_000_000_000, serde_json::json!({}))).unwrap(); b[k] = v; assert!(open(&seal(&serde_json::to_vec(&b).unwrap(), &pair(3), "k1"), &keys()).is_err(), "{k}");
@@ -317,18 +329,18 @@ mod tests {
     }
     #[test] fn a_pin_is_taken_only_newer_for_this_platform_and_this_hub() {
         let d = open(&good(4), &keys()).unwrap();
-        assert_eq!(choose(&d, &install::LINUX, "0.16.1", NOW, "").map(|p| p.version.as_str()), Some("10.99.0-bp.13"));
+        assert_eq!(choose(&d, &install::LINUX, "0.16.1", NOW, "").map(|p| p.version.as_str()), Some(feed()));
         assert_eq!(choose(&d, &install::WINDOWS, "0.17.0", NOW, "").map(|p| p.platform.as_str()), Some("windows-x86_64"), "each platform its own");
         assert_eq!(choose(&d, &install::LINUX, "0.16.0", NOW, ""), None, "min_hub above this hub");
         assert_eq!(choose(&d, &install::LINUX, "0.16.1-beta.2", NOW, ""), None, "a beta of min_hub is below it");
         assert_eq!(choose(&d, &install::LINUX, "0.16.1", 2_000_000_000, ""), None, "expired while the hub ran");
-        let newer = Package { version: "10.99.0-bp.14", release: "backplane-kicad-v10.99.0-bp.14", ..install::LINUX };
+        let newer = Package { version: later(), release: Box::leak(format!("backplane-kicad-v{}", later()).into_boxed_str()), ..install::LINUX };
         assert_eq!(choose(&d, &newer, "0.16.1", NOW, ""), None, "never older than the compiled pin");
-        let same = Package { version: "10.99.0-bp.13", ..install::LINUX };
+        let same = Package { version: feed(), ..install::LINUX };
         assert_eq!(choose(&d, &same, "0.16.1", NOW, ""), None, "nor the same");
-        let only_mac = open(&seal(&body(4, 2_000_000_000, serde_json::json!({"darwin-arm64": entry("darwin-arm64", "10.99.0-bp.13")})), &pair(3), "k1"), &keys()).unwrap();
+        let only_mac = open(&seal(&body(4, 2_000_000_000, serde_json::json!({"darwin-arm64": entry("darwin-arm64", feed())})), &pair(3), "k1"), &keys()).unwrap();
         assert_eq!(choose(&only_mac, &install::LINUX, "0.16.1", NOW, ""), None, "another platform's pin");
-        let mut e = entry("darwin-arm64", "10.99.0-bp.13"); e["min_os"] = "26.0".into();
+        let mut e = entry("darwin-arm64", feed()); e["min_os"] = "26.0".into();
         let mac26 = open(&seal(&body(4, 2_000_000_000, serde_json::json!({"darwin-arm64": e})), &pair(3), "k1"), &keys()).unwrap();
         assert_eq!(choose(&mac26, &install::MAC, "0.16.1", NOW, "15.4"), None, "a Mac below the pin's macOS");
         assert!(choose(&mac26, &install::MAC, "0.16.1", NOW, "26.1").is_some());
@@ -338,9 +350,9 @@ mod tests {
         let p = package_of(choose(&d, &install::WINDOWS, "0.16.1", NOW, "").unwrap(), &install::WINDOWS);
         assert_eq!((p.format, p.cli, p.platform), ("zip", "bin/kicad-cli.exe", "windows-x86_64"), "the platform's, never the document's");
         assert!(install::check_package(p).is_ok());
-        assert_eq!(install::base_url_from(p, None), "https://github.com/BackplaneWorks/Backplane_KiCad/releases/download/backplane-kicad-v10.99.0-bp.13/", "only from the KiCad release");
+        assert_eq!(install::base_url_from(p, None), format!("https://github.com/BackplaneWorks/Backplane_KiCad/releases/download/backplane-kicad-v{}/", feed()), "only from the KiCad release");
         let o = install::update_offer_os(Some(p), "ok", "10.99.0-bp.10", &["embed".into(), "drc-zone-guard".into()], "windows").expect("bp.10 is offered the feed's bp.13");
-        assert_eq!(o["to"], "10.99.0-bp.13"); assert!(o["reason"].as_str().unwrap().contains("narrow pane"), "{o}");
+        assert_eq!(o["to"], feed()); assert!(o["reason"].as_str().unwrap().contains("narrow pane"), "{o}");
     }
 
     /// A loopback web folder serving `files` (name, bytes) for `n` requests; a name not there answers 404.
@@ -368,18 +380,18 @@ mod tests {
         assert_eq!(f.taken(&install::LINUX, NOW), None);
         // the published one: taken, and kept on disk
         let (changed, w) = apply(&mut f, get("kicad-pins.json"), &k, &d, Some(&install::LINUX), NOW, "").unwrap();
-        assert!(changed && w.contains("10.99.0-bp.13"), "{w}");
-        assert_eq!(f.taken(&install::LINUX, NOW).map(|p| p.version), Some("10.99.0-bp.13"));
+        assert!(changed && w.contains(feed()), "{w}");
+        assert_eq!(f.taken(&install::LINUX, NOW).map(|p| p.version), Some(feed()));
         assert_eq!(std::fs::read(d.join("pins.json")).unwrap(), good(5));
         assert_eq!(apply(&mut f, get("kicad-pins.json"), &k, &d, Some(&install::LINUX), NOW, "").unwrap().0, false, "the same one again changes nothing");
         // a replay of an older one and a tampered newer one are refused, and the pin stays
         assert!(apply(&mut f, get("old.json"), &k, &d, Some(&install::LINUX), NOW, "").unwrap_err().contains("below the last one seen"));
         assert!(apply(&mut f, get("tampered.json"), &k, &d, Some(&install::LINUX), NOW, "").is_err());
-        assert_eq!(f.taken(&install::LINUX, NOW).map(|p| p.version), Some("10.99.0-bp.13")); assert_eq!(std::fs::read(d.join("pins.json")).unwrap(), good(5));
+        assert_eq!(f.taken(&install::LINUX, NOW).map(|p| p.version), Some(feed())); assert_eq!(std::fs::read(d.join("pins.json")).unwrap(), good(5));
         // a restart: the cached document holds the pin and its sequence, so the old one is still refused
         let mut g = Feed::new(); g.hub = "0.16.1".into();
         g.hold(open(&std::fs::read(d.join("pins.json")).unwrap(), &k).unwrap(), Some(&install::LINUX), NOW, "");
-        assert_eq!(g.taken(&install::LINUX, NOW).map(|p| p.version), Some("10.99.0-bp.13"));
+        assert_eq!(g.taken(&install::LINUX, NOW).map(|p| p.version), Some(feed()));
         assert!(apply(&mut g, get("old.json"), &k, &d, Some(&install::LINUX), NOW, "").unwrap_err().contains("below the last one seen"));
         // once the document expires the compiled pin is back, whatever was taken
         assert_eq!(g.taken(&install::LINUX, 2_000_000_000), None);
@@ -394,7 +406,7 @@ mod tests {
     }
     /// What the update row says comes from the pin's own capabilities where it carries them, not from its number.
     #[test] fn what_a_feed_pin_brings_is_said_from_its_capabilities() {
-        let pin = |plat: &'static str, caps: &[&str]| { let mut e = entry(plat, "10.99.0-bp.14"); e["caps"] = serde_json::json!(caps);
+        let pin = |plat: &'static str, caps: &[&str]| { let mut e = entry(plat, later()); e["caps"] = serde_json::json!(caps);
             let d = open(&seal(&body(4, 2_000_000_000, serde_json::json!({plat: e})), &pair(3), "k1"), &keys()).unwrap();
             package_of(&d.pins[0], compiled(plat).unwrap()) };
         // a bp.14 without global-tables-seeded is not said to bring bp.13's libraries; with it, it is
@@ -409,12 +421,12 @@ mod tests {
 
     /// min_hub and the expiry are required: a document or a pin without one is refused whole, never read as "any hub" or "never expires".
     #[test] fn a_document_without_min_hub_or_an_expiry_is_refused() {
-        let mut e = entry("linux-x86_64", "10.99.0-bp.13"); e.as_object_mut().unwrap().remove("min_hub");
+        let mut e = entry("linux-x86_64", feed()); e.as_object_mut().unwrap().remove("min_hub");
         assert!(open(&seal(&body(4, 2_000_000_000, serde_json::json!({"linux-x86_64": e})), &pair(3), "k1"), &keys()).unwrap_err().contains("no min_hub"));
-        let mut e = entry("linux-x86_64", "10.99.0-bp.13"); e["min_hub"] = "".into();
+        let mut e = entry("linux-x86_64", feed()); e["min_hub"] = "".into();
         assert!(open(&seal(&body(4, 2_000_000_000, serde_json::json!({"linux-x86_64": e})), &pair(3), "k1"), &keys()).is_err(), "an empty min_hub");
         for no in [serde_json::json!(null), serde_json::json!(0), serde_json::json!("2000000000"), serde_json::json!(-1)] {
-            let mut b: Value = serde_json::from_slice(&body(4, 2_000_000_000, serde_json::json!({"linux-x86_64": entry("linux-x86_64", "10.99.0-bp.13")}))).unwrap();
+            let mut b: Value = serde_json::from_slice(&body(4, 2_000_000_000, serde_json::json!({"linux-x86_64": entry("linux-x86_64", feed())}))).unwrap();
             if no.is_null() { b.as_object_mut().unwrap().remove("expires"); } else { b["expires"] = no.clone(); }
             assert!(open(&seal(&serde_json::to_vec(&b).unwrap(), &pair(3), "k1"), &keys()).unwrap_err().contains("no expiry"), "expires {no}");
         }
@@ -427,7 +439,7 @@ mod tests {
         assert!(rel::parse(manifest).is_ok(), "the manifest is a good one");
         assert!(open(&seal(manifest, &kp, "k1"), &keys()).unwrap_err().contains("not a pin document"));
         // the updater: a release v0.16.2 whose manifest.json is a pin document's signed body (or its whole envelope), signed with the trusted key
-        let pin_body = body(4, 2_000_000_000, serde_json::json!({"linux-x86_64": entry("linux-x86_64", "10.99.0-bp.13")}));
+        let pin_body = body(4, 2_000_000_000, serde_json::json!({"linux-x86_64": entry("linux-x86_64", feed())}));
         for (what, m) in [("the signed body", pin_body.clone()), ("the envelope", good(4))] {
             let d = crate::plat::tmp::dir("pins-dom"); let sig = kp.sk.sign(&m, None);
             let files: std::collections::HashMap<String, Vec<u8>> = [("manifest.json", m.clone()), ("manifest.json.sig", sig.as_ref().to_vec()), ("manifest.json.keyid", b"k1".to_vec())].into_iter().map(|(n, b)| (format!("mem://{n}"), b)).collect();
