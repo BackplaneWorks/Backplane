@@ -73,6 +73,16 @@ have seen what is sent.
   Settings, Privacy or setup's row, through the token-bound
   `telemetry.choice`. An existing install with an Off never sees the notice
   and sends nothing.
+- **A 0.14 Off comes across.** The 0.14 import brings 0.14's choice
+  (`telemetry.share`, `telemetry.asked`, `telemetry.usage.asked`, its revision
+  and receipts) as the first lines it writes. It skips them when the new home
+  has a choice of its own. A home that 0.15.x or 0.16.0 imported without them
+  is mended once at start, before the sender's first pass or the notice:
+  the import's result names the 0.14 home. If that home is still there and
+  its log says Off, the same Off as Settings' is recorded
+  (`import.v014.telemetry = off`). An On chosen here since (Settings, the
+  notice, setup) is never undone. When the old home is gone or unreadable,
+  nothing changes (`import014/telemetry.rs`).
 - Pressing **On** in Settings beside the full list also counts as having seen
   it (`telemetry.notice = chosen`).
 - **Reset id** rotates the identity only. The next pass makes a fresh id; the
@@ -255,7 +265,11 @@ before the acknowledgement is saved only causes an idempotent resend.
   - an existing install upgraded with no answer (the notice shows, then it
     sends);
   - an existing install with an explicit Off, or an earlier decline (it stays
-    off and sends nothing).
+    off and sends nothing);
+  - a home imported with its 0.14 Off lost (the Off is back before the first
+    pass, with the notice untouched or already drawn), an On chosen there
+    after the import (it stays on), and a home whose 0.14 home is gone, was On
+    or never answered (left as it is).
 - They also cover the notice's Turn off, outbox replay across a restart, and
   that no content, names, paths or keys ever appear in a request.
 

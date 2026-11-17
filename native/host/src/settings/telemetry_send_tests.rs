@@ -278,3 +278,79 @@ fn sent_kinds(r: &Recv) -> Vec<String> { r.bodies.lock().unwrap().iter().flat_ma
     // an unchanged snapshot is not sent again
     job(&h, &c).await; assert_eq!(r.bodies.lock().unwrap().iter().flat_map(|b| b["events"].as_array().cloned().unwrap_or_default()).filter(|e| e["e"] == "usage").count(), 1);
 }
+
+// ---- a 0.14 Off an import before 0.16.1 lost (import014/telemetry.rs) ----
+
+/// A 0.14 home whose log ends with these settings, in its own temp folder.
+fn old_014(name: &str, kv: &[(&str, &str)]) -> crate::plat::tmp::TempDir {
+    let d = crate::plat::tmp::dir(&format!("tm-old-{name}"));
+    let mut log = String::from("{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"Board\",\"root\":\"/x\",\"at\":1}\n");
+    for (k, v) in kv { log.push_str(&json!({"$":"SettingSet","key":k,"value":v,"at":2}).to_string()); log.push('\n'); }
+    std::fs::write(d.join("events.jsonl"), log).unwrap(); d
+}
+/// What Settings, Privacy shows as selected: On or Off.
+fn privacy_on(h: &Hub, st: &tc::State) -> bool {
+    let _ = h; let mut s = crate::state::State::new();
+    for (k, v) in [("telemetry.share", &st.share), ("telemetry.asked", &st.asked), ("telemetry.usage.asked", &st.usage_asked), ("onboard.usage", &st.onboard_usage), (tc::NOTICE, &st.notice)] { s.settings.insert(k.into(), v.clone()); }
+    let v = crate::present::settings::view(&s, &json!({"drafts": {"@settings.page": "privacy"}}), &json!({}));
+    let row = v["rows"].as_array().unwrap().iter().find(|r| r["buttons"].as_array().map_or(false, |b| b.iter().any(|x| x["action"] == "telemetry-on"))).cloned().unwrap();
+    assert_ne!(row["buttons"][0]["on"], row["buttons"][1]["on"]); row["buttons"][0]["on"] == true
+}
+/// A home 0.15.x or 0.16.0 imported from `old`: the result recorded, setup done, the project here, the 0.14 choice not.
+async fn imported_from(h: &Arc<Hub>, old: &std::path::Path) {
+    let done = json!({"state":"done","from":old.to_string_lossy(),"counts":{},"at":1}).to_string();
+    set(h, &[(crate::import014::DONE, &done), ("onboard.done", "1")]).await; project(h).await;
+}
+
+#[tokio::test] async fn an_imported_home_that_lost_its_0_14_off_gets_it_back_before_anything_is_sent() {
+    let _g = SERIAL.lock().await; let r = receiver().await; let c = tcfg(r.port);
+    let old = old_014("off", &[("telemetry.share", "off"), ("telemetry.asked", "1"), ("telemetry.usage.asked", "0"), ("telemetry.choice.revision", "1")]);
+    // the notice untouched, and the notice already drawn under 0.16.0 (it may send then): either way the first pass restores Off and sends nothing
+    for (n, notice) in [("lost-off", ""), ("lost-off-shown", "shown")] {
+        let h = hub(n).await; imported_from(&h, &old).await; if !notice.is_empty() { set(&h, &[(tc::NOTICE, notice)]).await; }
+        assert!(privacy_on(&h, &tc::state(&h).await), "the bug: the 0.14 Off is On here");
+        for _ in 0..3 { job(&h, &c).await; }
+        assert!(r.bodies.lock().unwrap().is_empty(), "{n}: nothing sent"); assert!(!dir(&h.cfg.home).join("state.json").exists(), "{n}: no id, no outbox");
+        let s = tc::state(&h).await; assert!(tc::off(&s.share, &s.usage_asked, &s.onboard_usage), "{n}: {s:?}");
+        assert_eq!((s.share.as_str(), s.asked.as_str(), s.usage_asked.as_str()), ("off", "1", "0"), "{n}: the same as Settings' Off");
+        assert!(!privacy_on(&h, &s), "{n}: Settings, Privacy shows Off"); assert!(tc::offer(&h).await.is_null(), "{n}: no notice");
+        assert_eq!(h.setting(crate::import014::telemetry::MENDED).await.as_deref(), Some("off"));
+        assert_eq!(crate::import014::telemetry::mend(&h).await, "", "{n}: once");
+    }
+}
+#[tokio::test] async fn the_notice_waits_for_the_restored_off() {
+    let _g = SERIAL.lock().await;
+    let old = old_014("off-notice", &[("telemetry.share", "off"), ("telemetry.asked", "1"), ("telemetry.usage.asked", "0")]);
+    let h = hub("lost-off-notice").await; imported_from(&h, &old).await;
+    // a client asking for the notice first gets none: the Off is restored before the answer
+    assert!(tc::offer(&h).await.is_null()); assert_eq!(h.setting("telemetry.share").await.as_deref(), Some("off"));
+}
+#[tokio::test] async fn an_on_the_person_chose_after_the_import_stays_on() {
+    let _g = SERIAL.lock().await; let r = receiver().await; let c = tcfg(r.port);
+    let old = old_014("off-then-on", &[("telemetry.share", "off"), ("telemetry.asked", "1"), ("telemetry.usage.asked", "0")]);
+    let h = hub("lost-off-chose-on").await; imported_from(&h, &old).await;
+    // Settings, Privacy, On (the chosen On records the disclosure)
+    let s = tc::state(&h).await; let rep = call(&h, "telemetry.choice", json!({"value":"on","expected":s.token(),"decision":"d1","popup":false})).await; assert_eq!(rep["ok"], true, "{rep}");
+    job(&h, &c).await; assert_eq!(sent_kinds(&r), ["install"], "On stays On");
+    assert_eq!(h.setting("telemetry.share").await.as_deref(), Some("on")); assert!(privacy_on(&h, &tc::state(&h).await));
+    assert_eq!(crate::import014::telemetry::mend(&h).await, ""); assert_eq!(h.setting(crate::import014::telemetry::MENDED).await.unwrap_or_default(), "");
+    // setup's own On is the person's too
+    let h2 = hub("lost-off-setup-on").await; imported_from(&h2, &old).await; set(&h2, &[("onboard.usage", "on")]).await;
+    assert_eq!(crate::import014::telemetry::mend(&h2).await, ""); assert!(privacy_on(&h2, &tc::state(&h2).await));
+}
+#[tokio::test] async fn an_imported_home_is_left_alone_when_it_cannot_know() {
+    let _g = SERIAL.lock().await;
+    // the 0.14 home is gone
+    let gone = { let d = old_014("gone", &[("telemetry.share", "off")]); d.to_path_buf() };
+    let h = hub("lost-off-gone").await; imported_from(&h, &gone).await;
+    assert_eq!(crate::import014::telemetry::mend(&h).await, ""); assert!(privacy_on(&h, &tc::state(&h).await));
+    assert_eq!(h.setting(crate::import014::telemetry::MENDED).await.unwrap_or_default(), "", "not decided: it could not know");
+    // 0.14 was On, or never answered: nothing changes
+    for (n, kv) in [("on", vec![("telemetry.share", "on"), ("telemetry.asked", "1"), ("telemetry.usage.asked", "1")]), ("unset", vec![])] {
+        let old = old_014(&format!("was-{n}"), &kv); let h = hub(&format!("lost-was-{n}")).await; imported_from(&h, &old).await;
+        assert_eq!(crate::import014::telemetry::mend(&h).await, "kept", "{n}"); let s = tc::state(&h).await;
+        assert!(privacy_on(&h, &s) && s.share.is_empty(), "{n}: {s:?}");
+    }
+    // a home that was never imported is not looked at
+    let h = hub("never-imported").await; set(&h, &[("onboard.done", "1")]).await; assert_eq!(crate::import014::telemetry::mend(&h).await, "");
+}

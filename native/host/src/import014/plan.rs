@@ -67,6 +67,8 @@ pub struct Plan {
     pub read: u64,
     /// the old log's threads that belong in this home, those already here from an earlier import included (their quotes and orders follow them)
     pub threads: HashSet<String>,
+    /// whether 0.14's telemetry choice comes across (its lines are the first)
+    pub choice: bool,
 }
 
 /// Opts: `secrets` (the person said keys may come: webhooks are kept only then), `keep` (false: count only, hold no lines).
@@ -107,7 +109,7 @@ fn ids_in(k: &str) -> Vec<&str> {
 }
 
 /// Whole lines of `path` up to `upto` bytes, cleaned as the store reads them; a torn tail is not a line.
-fn each_line(path: &Path, upto: u64, mut f: impl FnMut(&str)) -> std::io::Result<()> { each_line_at(path, upto, &|_| {}, &mut f) }
+pub(super) fn each_line(path: &Path, upto: u64, mut f: impl FnMut(&str)) -> std::io::Result<()> { each_line_at(path, upto, &|_| {}, &mut f) }
 /// `each_line`, telling `at` how many bytes it has read, about every 4 MB.
 fn each_line_at(path: &Path, upto: u64, at: &dyn Fn(u64), f: &mut dyn FnMut(&str)) -> std::io::Result<()> {
     let r = BufReader::with_capacity(1 << 20, std::fs::File::open(path)?.take(upto));
@@ -204,6 +206,13 @@ pub fn plan_with(log: &Path, have: &Have, o: Opts, read: &dyn Fn(u64, u64)) -> s
         c.lines += 1;
         if o.keep { out.push(line) }
     };
+    // the telemetry choice first, as one: before any project makes this an existing home (one the notice is offered on), so a 0.14 Off is
+    // here before anything could be sent; and not at all when this home has a choice of its own (super::telemetry)
+    let mut choice = false;
+    if !super::telemetry::chose_here(&have.settings) {
+        for k in super::telemetry::CHOICE { if let Some((v, at)) = settings.get(*k).filter(|(v, _)| !v.is_empty()) {
+            choice = true; emit(serde_json::json!({"$":"SettingSet","key":k,"value":v,"at":at}).to_string(), &mut c, Some("setting")) } }
+    }
     let mut seen_bot: HashSet<String> = HashSet::new(); let mut seen_room: HashSet<String> = HashSet::new(); let mut seen_routine: HashSet<String> = HashSet::new();
     each_line_at(log, upto, &|b| read(2 * upto + b, of), &mut |l: &str| {
         let Some(t) = crate::session::event_type(l) else { return };
@@ -252,5 +261,5 @@ pub fn plan_with(log: &Path, have: &Have, o: Opts, read: &dyn Fn(u64, u64)) -> s
     for (k, (v, at)) in keys { emit(serde_json::json!({"$":"SettingSet","key":k,"value":v,"at":at}).to_string(), &mut c, Some("setting")) }
     let mut bl: Vec<(String, String)> = bk.iter().map(|id| (id.clone(), bots[id].0.clone())).collect(); bl.sort();
     let mut hl: Vec<String> = hk.into_iter().collect(); hl.sort();
-    Ok(Plan { lines: out, counts: c, bots: bl, hooks: hl, routines_on: routines_on.len(), peers, read: upto, threads: tk })
+    Ok(Plan { lines: out, counts: c, bots: bl, hooks: hl, routines_on: routines_on.len(), peers, read: upto, threads: tk, choice })
 }

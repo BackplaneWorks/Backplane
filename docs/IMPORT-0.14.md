@@ -36,6 +36,7 @@ What is in a 0.14 home:
 - **Bots.** With their memory and their Space. Routines arrive switched off, so none fires twice while 0.14 still runs. Webhooks come only with keys. The uberbot comes when this home has none.
 - **Rooms.** With their posts.
 - **Settings that still mean something.** Agent and model choices, theme and sidebar, notifications, the voice device, thread summaries, effort and speed, task board and rules, project icons and fab settings. This home's own settings win.
+- **The anonymous usage choice.** 0.14's Off, On or no answer comes across as it was, written first, so an Off is here before anything could be sent. It does not come when this home has a choice of its own. A home imported before 0.16.1 lost it; see docs/telemetry.md, Consent.
 - **Paired devices and push registrations.** Each live 0.14 device's token hash joins this hub's registry, so a phone paired with 0.14 is let in without pairing again. Revoked devices and dropped push tokens stay behind.
 - **Account profiles.** The stores and session history always come. Without keys, the logins (`.credentials.json`, `auth.json`) stay behind and the profile asks for a sign-in. On macOS, Claude Code keeps its login in the keychain, so the person signs in again either way.
 - **With keys:** the vault's secrets, the voice key, webhook secrets and the logins.
@@ -89,6 +90,7 @@ A failure says what failed, that the 0.14 folder is untouched, and offers Retry,
   - a run after 0.14 wrote more adds only that;
   - the HTTP routes;
   - finding the home on each system's layout;
-  - the old home is byte for byte unchanged.
+  - the old home is byte for byte unchanged;
+  - 0.14's telemetry choice: Off, On, unset, and a home with its own choice (`the_0_14_telemetry_choice_comes_across_off_on_or_unset`, `an_import_with_0_14_off_is_off_here`).
 - `settings::vault::tests::another_homes_vault_is_read_with_its_own_key`, and `present::onboard` for the step and its words.
 - On a copy of a real 0.14 home, never the home and never committed: `BP_IMPORT_REAL=<read-only copy> cargo test real_home -- --ignored --nocapture`.
