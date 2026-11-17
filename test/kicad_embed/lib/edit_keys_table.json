@@ -143,13 +143,14 @@
       "keys": {
         "linux": "Ctrl+A, Delete, Ctrl+Z, Ctrl+Y, Ctrl+Z",
         "windows": "Ctrl+A, Delete, Ctrl+Z, Ctrl+Y, Ctrl+Z",
-        "macos": "Cmd+A, fn+Delete, Cmd+Z, Cmd+Y (or Cmd+Shift+Z), Cmd+Z"
+        "macos": "Cmd+A, fn+Delete, Cmd+Z, Cmd+Shift+Z (Cmd+Y is n/a on macOS), Cmd+Z"
       },
       "after": "a check run (DRC / ERC) so its markers are on the canvas and in select all",
       "works": "with a check run and an agent's read through the hub (kicad_ipc GetItems) between each step: every real item back at each undo (GetItems counts per kind, markers aside, equal to the start), all deleted at the delete and the redo, every agent read answered, and no new KiCad window (dialog) at any point",
       "wrong": "a real item missing after an undo, a dialog, or an agent read refused",
       "gating": true,
-      "since": "fork d2ce4ba5c6 (the undo-markers fix)"
+      "since": "fork d2ce4ba5c6 (the undo-markers fix)",
+      "how": "Linux and Windows count and check over KiCad's socket (GetItems, RunChecks); macOS reaches KiCad only through the hub, so its counts are the hub's kicad_ipc GetItems (that call is also the agent read) and its check the hub's RunChecks, else KiCad's own check after each edit (ET_CHECKS_DONE), the output saying which"
     }
   ],
   "extra_rows": {
