@@ -1028,6 +1028,7 @@ mod imp {
             );
             if c.is_null() { return None }
             let cid = id_of(c);
+            if let Ok(mut set) = all_containers().lock() { set.insert(cid); }
             CHILD_FOCUSED.store(false, Ordering::SeqCst);
             ACTIVE_CONTAINER.store(cid, Ordering::SeqCst);
             if !key.is_empty() {
@@ -1056,6 +1057,43 @@ mod imp {
                 let park = parking_parent();
                 if !park.is_null() && GetAncestor(oh, GA_PARENT) != park {
                     SetParent(oh, park);
+                }
+            }
+        }
+    }
+
+    /// Every container this client made (`container_for`), parked ones included: what `release_holders(None)` walks.
+    fn all_containers() -> &'static Mutex<HashSet<u64>> { static S: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new(); S.get_or_init(Default::default) }
+
+    /// KiCad's holder out of `container` (or out of every container, None) before anything can destroy it: a destroyed parent HWND destroys
+    /// its child HWNDs, KiCad's cross-process ones too, and KiCad then dies with whatever was not saved (the lead, Nov 16; X11 the same:
+    /// lane B). Each direct child of another process is hidden and made top-level (SetParent NULL): KiCad's frames live on, unseen, and the
+    /// next attach puts the holder under its new container. Lane B's one rule for both platforms: release_holders runs first in destroy,
+    /// in the window's close (before_exit) and in the app's quit hook.
+    pub fn release_holders(container: Option<u64>) {
+        let list: Vec<u64> = match container {
+            Some(c) => vec![c],
+            None => all_containers().lock().map(|s| s.iter().copied().collect()).unwrap_or_default(),
+        };
+        let me = std::process::id();
+        for c in list {
+            let ch = hwnd(c);
+            if ch.is_null() || unsafe { IsWindow(ch) } == 0 { continue }
+            let mut kids = vec![];
+            let mut k = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetWindow(ch, windows_sys::Win32::UI::WindowsAndMessaging::GW_CHILD) };
+            while !k.is_null() {
+                let mut pid = 0u32;
+                unsafe { GetWindowThreadProcessId(k, &mut pid); }
+                if pid != 0 && pid != me { kids.push(k) }
+                k = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetWindow(k, windows_sys::Win32::UI::WindowsAndMessaging::GW_HWNDNEXT) };
+            }
+            for k in kids {
+                unsafe {
+                    ShowWindowAsync(k, SW_HIDE);
+                    SetParent(k, null_mut());
+                }
+                if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+                    eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_holder_released": {"container": c, "holder": id_of(k), "parent_now": id_of(unsafe { GetAncestor(k, GA_PARENT) })}}));
                 }
             }
         }
