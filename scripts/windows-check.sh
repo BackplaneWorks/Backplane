@@ -27,7 +27,8 @@ if [ "${1:-}" = --xwin ]; then
   command -v lld-link >/dev/null || [ -x "$llvm/lld-link" ] || ln -sf "$tc/bin/lld-link" "$bin/lld-link"   # only lld-link from llvm-mingw, not its clang
   export PATH=$llvm:$bin:$PATH XWIN_ACCEPT_LICENSE=1 RC_x86_64_pc_windows_msvc=$llvm/llvm-rc
   unset CC_x86_64_pc_windows_gnu CXX_x86_64_pc_windows_gnu AR_x86_64_pc_windows_gnu
-  tgt=${CARGO_TARGET_DIR:-${BP_TMP:-$HOME/.cache/bp-tmp}/target-winmsvc}; export CARGO_TARGET_DIR=$tgt
+  # one folder per checkout: the programs carry no hash in their names, so a shared folder hands one worktree the .exe another built last
+  tgt=${CARGO_TARGET_DIR:-${BP_TMP:-$HOME/.cache/bp-tmp}/target-winmsvc-$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")}; export CARGO_TARGET_DIR=$tgt
   (cd "$HERE/native/host" && "$HERE/scripts/cargo-q" xwin build --offline --target x86_64-pc-windows-msvc --profile "$prof" --bin backplane-hub --bin bp-sh)
   (cd "$HERE/native/guard" && "$HERE/scripts/cargo-q" xwin build --offline --target x86_64-pc-windows-msvc --profile release)   # the guard has no fast profile
   # the client with the embedded Chromium (feature cef, as dev-build.sh and release.yml build it; GPUI_FEATURES= for none). The cef crate fetches CEF's

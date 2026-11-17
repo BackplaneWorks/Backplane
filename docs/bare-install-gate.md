@@ -116,7 +116,7 @@ Boats cost while they run: the gate deletes its gate box and its build box on ev
 The same journey and oracles; what differs is the clean machine, the driver and the install path. Neither runs until the lead says so
 (bp-win stays deallocated when not in use; the Mac mini only under the lock `mac-heavy`).
 
-**Windows (bp-win).** The clean machine: Windows Sandbox inside bp-win (a disposable stock Windows of the host's build: no Git, no Python,
+**Windows (bp-win).** Note (Nov 17): bp-win is Windows Server 2022, which has no Windows Sandbox (`Containers-DisposableClientVM` is a client feature); the gate needs a Windows 11 VM or Hyper-V with a client image. The plan as written: Windows Sandbox inside bp-win (a disposable stock Windows of the host's build: no Git, no Python,
 no VC++ redistributable beyond what Windows ships, nothing of ours); it needs bp-win's size to allow nested virtualization (Dv5 does) and the
 optional feature `Containers-DisposableClientVM`. A `.wsb` file maps one folder read-only (the archive, the harness's PowerShell agent and
 the fixtures) and one read-write (results), and its logon command starts the agent, which polls the results folder for jobs as

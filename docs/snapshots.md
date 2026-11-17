@@ -75,10 +75,16 @@ lost either way. A running turn is not restored under.
 
 ## Setup: Git
 
+On a Windows with no Git yet, adding, making and listing project folders run in Rust (their scripts need Git's sh), so the first
+project and its Install Git ask are reachable. The ask closes at the next turn once git runs. The hub's own asks alert with their text,
+never their tool id.
+
 Design tools has a Git row: its version, or Install.
 
 - Windows: winget `Git.Git`. Without winget, Git for Windows' pinned installer (`GIT_WIN`: version, address, size and sha256) is
-  downloaded and run silently for this user only into `%LOCALAPPDATA%\Programs\Git`.
+  downloaded and run silently: for this user into `%LOCALAPPDATA%\Programs\Git` from a hub that is not elevated, for all users into
+  Program Files from an elevated one (its installer ignores `/CURRENTUSER`). It is never run over a Git installed for all users: the
+  press says where that Git is and to update it there (on bp-win, running it over one moved the machine's Git into one user's folder).
 - macOS: Homebrew's git, else `xcode-select --install`.
 - Linux: the distribution's package through `pkexec` when a desktop can ask for the password, else the command to copy.
 

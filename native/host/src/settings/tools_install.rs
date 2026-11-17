@@ -34,7 +34,10 @@ pub struct WinInstaller { pub name: &'static str, pub version: &'static str, pub
 /// One line per pin; the tests check it.
 pub const FREECAD_WIN: WinInstaller = WinInstaller { name: "FreeCAD", version: "1.1.4", asset: "FreeCAD_1.1.4-Windows-x86_64-py311-installer.exe", url: "https://github.com/FreeCAD/FreeCAD/releases/download/1.1.4/FreeCAD_1.1.4-Windows-x86_64-py311-installer.exe", sha256: "845f7101d33faf257a82a0cadc5f4f3804441f46ee493eb32b92fcf9c7147a24", size: 519314976, args: &["/S", "/CurrentUser"] };
 /// Git for Windows' installer (its 64-bit release on GitHub; `git-for-windows/git` v2.56.1.windows.1, the digest GitHub publishes for the
-/// asset): Inno Setup, run silently for this user only (`/CURRENTUSER`: no administrator rights) into %LOCALAPPDATA%\Programs\Git
+/// asset): Inno Setup, run silently into %LOCALAPPDATA%\Programs\Git. Its install.iss has `PrivilegesRequired=none` and no override, so
+/// `/CURRENTUSER` decides nothing: a hub that is not elevated installs for this user only (no administrator rights), an elevated one
+/// installs for all users, so the hub then gives it Program Files and no `/DIR` (`elevated_line`); a Git already installed for all users
+/// is never run over (`machine_git`: the installer would move it into one user's folder; bp-win, Nov 17).
 /// (`install_dir`). For a Windows with no winget, as FreeCAD's. One line per pin; the tests check it.
 pub const GIT_WIN: WinInstaller = WinInstaller { name: "Git", version: "2.56.1", asset: "Git-2.56.1-64-bit.exe", url: "https://github.com/git-for-windows/git/releases/download/v2.56.1.windows.1/Git-2.56.1-64-bit.exe", sha256: "c330c72e10b408cc39994bfefdb63542b0d93d21699325c3e0bd874af8a5a559", size: 66870448, args: &["/VERYSILENT", "/NORESTART", "/NOCANCEL", "/SP-", "/SUPPRESSMSGBOXES", "/CURRENTUSER"] };
 /// Inno Setup (Git for Windows) rather than NSIS (FreeCAD): its switches, folder and registration differ.
@@ -104,10 +107,27 @@ pub fn registered_dir(reg_out: &str) -> Option<PathBuf> {
     v.rsplit_once(['\\', '/']).map(|(d, _)| d).filter(|d| !d.is_empty()).map(PathBuf::from)
 }
 /// Where this version is registered for this user, if it is (Windows' own reg.exe; None elsewhere or when it is not).
-async fn registered(p: &WinInstaller) -> Option<PathBuf> {
+async fn registered(p: &WinInstaller) -> Option<PathBuf> { registered_in("HKCU", p).await }
+/// A Git for Windows installed for all users (its machine registration): its folder. The pinned installer is not run over it.
+async fn machine_git() -> Option<PathBuf> {
+    if let Some(d) = registered_in("HKLM", &GIT_WIN).await { return Some(d) }
+    registered_in("HKLM\\Software\\WOW6432Node", &GIT_WIN).await
+}
+/// Whether this hub runs elevated (an administrator's full token): `fltmc` answers only then.
+async fn elevated() -> bool {
+    if !cfg!(windows) { return false }
+    let Some(f) = std::env::var_os("SystemRoot").map(|r| Path::new(&r).join("System32").join("fltmc.exe")) else { return false };
+    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, f); c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    matches!(tokio::time::timeout(std::time::Duration::from_secs(20), c.status()).await, Ok(Ok(s)) if s.success())
+}
+/// Git for Windows' command line from an elevated hub: its switches less `/CURRENTUSER` and no `/DIR`, so the all-users install it makes stays in Program Files.
+pub fn elevated_line(p: &WinInstaller) -> String { p.args.iter().filter(|a| **a != "/CURRENTUSER").copied().collect::<Vec<_>>().join(" ") }
+/// What the press says when Git is installed for all users already (too old, or not found on PATH).
+pub fn machine_git_note(dir: &Path) -> String { format!("Git for all users is installed in {}, and Backplane does not move it. Update it there (Git for Windows' installer from https://git-scm.com/download/win, as an administrator), then press Check again", dir.display()) }
+async fn registered_in(hive: &str, p: &WinInstaller) -> Option<PathBuf> {
     if !cfg!(windows) { return None }
     let reg = std::env::var_os("SystemRoot").map(|r| Path::new(&r).join("System32").join("reg.exe"))?;
-    let key = format!("HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{}", uninstall_key(p));
+    let key = if hive.contains('\\') { format!("{hive}\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{}", uninstall_key(p)) } else { format!("{hive}\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{}", uninstall_key(p)) };
     let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, reg); c.args(["query", &key, "/v", "UninstallString"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
     let o = tokio::time::timeout(std::time::Duration::from_secs(20), c.output()).await.ok()?.ok()?;
     registered_dir(&String::from_utf8_lossy(&o.stdout))
@@ -430,7 +450,13 @@ async fn direct(hub: &Arc<Hub>, tool: &str, p: &'static WinInstaller, dir: &Path
         return Err(format!("{why} (the download was removed; Try again downloads it anew)"))
     }
     let lad = std::env::var_os("LOCALAPPDATA").filter(|d| !d.is_empty()).ok_or("LOCALAPPDATA is not set")?;
-    let dest = install_dir(Path::new(&lad), p);
+    let mut dest = install_dir(Path::new(&lad), p);
+    // Git for Windows: never over a Git installed for all users; an elevated hub's install is an all-users one, into Program Files
+    let all_users = inno(p) && elevated().await;
+    if inno(p) {
+        if let Some(d) = machine_git().await { if placed(p, &d).is_file() { git_pick_up(); } return Err(machine_git_note(&d)) }
+        if all_users { if let Some(pf) = std::env::var_os("ProgramW6432").or_else(|| std::env::var_os("ProgramFiles")) { dest = Path::new(&pf).join("Git") } }
+    }
     // this version installed for this user already (the installer then quits at once, silently): that one is used
     if let Some(dir) = registered(p).await.filter(|d| placed(p, d).is_file()) {
         let cmd = placed(p, &dir).to_string_lossy().into_owned();
@@ -443,7 +469,7 @@ async fn direct(hub: &Arc<Hub>, tool: &str, p: &'static WinInstaller, dir: &Path
     let err = out.try_clone().map_err(|e| e.to_string())?;
     let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, &file);
     // the whole line as is: NSIS reads `/D=` only unquoted, and the folder may hold spaces
-    #[cfg(windows)] c.raw_arg(installer_line(p, &dest));
+    #[cfg(windows)] c.raw_arg(if all_users { elevated_line(p) } else { installer_line(p, &dest) });
     #[cfg(not(windows))] c.args(p.args).arg(format!("/D={}", dest.display()));
     c.stdin(Stdio::null()).stdout(Stdio::from(out)).stderr(Stdio::from(err)).kill_on_drop(false);
     crate::plat::proc::own_group_tokio(&mut c);
@@ -602,7 +628,9 @@ mod tests {
         check_pin(&GIT_WIN).unwrap();
         let d = install_dir(Path::new("C:\\Users\\A B\\AppData\\Local"), &GIT_WIN); assert!(d.ends_with("Programs/Git") || d.to_string_lossy().ends_with("Programs\\Git"), "{}", d.display());
         assert!(installer_line(&GIT_WIN, &d).starts_with("/VERYSILENT /NORESTART /NOCANCEL /SP- /SUPPRESSMSGBOXES /CURRENTUSER /DIR=\""));
-        assert_eq!(uninstall_key(&GIT_WIN), "Git_is1"); assert!(placed(&GIT_WIN, Path::new("G")).ends_with("cmd/git.exe") || placed(&GIT_WIN, Path::new("G")).to_string_lossy().ends_with("cmd\\git.exe"));
+        assert_eq!(uninstall_key(&GIT_WIN), "Git_is1");
+        assert_eq!(elevated_line(&GIT_WIN), "/VERYSILENT /NORESTART /NOCANCEL /SP- /SUPPRESSMSGBOXES", "elevated: no /CURRENTUSER, no /DIR");
+        assert!(machine_git_note(Path::new("C:/Program Files/Git")).starts_with("Git for all users is installed in C:/Program Files/Git, and Backplane does not move it.")); assert!(placed(&GIT_WIN, Path::new("G")).ends_with("cmd/git.exe") || placed(&GIT_WIN, Path::new("G")).to_string_lossy().ends_with("cmd\\git.exe"));
         assert_eq!(plan("git", "darwin", "arm64", false, false), Some(Plan::Sh(GIT_MAC_SH, vec![]))); assert_eq!(plan("git", "linux", "x64", false, false), Some(Plan::Sh(GIT_LINUX_SH, vec![])));
         let v = |k: &str| match k { "ProgramFiles" => Some("C:\\PF".into()), "LOCALAPPDATA" => Some("C:\\L".into()), _ => None };
         assert_eq!(git_dirs(v).len(), 2);

@@ -184,7 +184,8 @@ pub fn ask_say(tool: &str, detail: &str) -> String {
     // the files' approval: its question and where it ships, not its list of files
     if tool == "order_quote" { let mut l = detail.lines(); let q = l.next().unwrap_or("").trim(); let q = q.find('?').map_or(q, |i| &q[..=i]);
         return l.next().map(str::trim).filter(|s| !s.is_empty()).map_or(q.to_string(), |to| format!("{q} {to}")) }
-    let plain = tool.starts_with("order_ask") || tool == "order_quote" || tool == "checks_ok";
+    // the hub's own asks (agents/snapguard.rs: git missing, restore to before a turn, a mass deletion) say their text alone, never their tool id
+    let plain = tool.starts_with("order_ask") || tool == "order_quote" || tool == "checks_ok" || matches!(tool, "git_install" | "snapshot_restore" | "mass_delete");
     if plain || tool.is_empty() { detail.to_string() } else { format!("{tool} {detail}") }
 }
 /// Alerts.asks: the alert record of every ask the step opens (kind "ask", or the quiet record when the person turned the needs alerts off).
