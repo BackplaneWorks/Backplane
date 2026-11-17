@@ -56,7 +56,36 @@ if DRIVER == 'quartz':
         for k in (Quartz.kCGEventMouseMoved, down, up):
             Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, k, pt, b)); time.sleep(0.05)
 
-    def shot_to(path): subprocess.run(['screencapture', '-x', path])
+    def helper(req):
+        # the gate helper's `windows` answer, from Quartz: every on-screen window, any layer, front to back (no titles)
+        if req != 'windows': return None
+        out = []
+        for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements, Quartz.kCGNullWindowID):
+            b = w['kCGWindowBounds']
+            out.append({'number': int(w['kCGWindowNumber']), 'pid': int(w['kCGWindowOwnerPID']), 'owner': w.get('kCGWindowOwnerName', ''),
+                        'layer': int(w.get('kCGWindowLayer', 0)), 'bounds': [b['X'], b['Y'], b['Width'], b['Height']]})
+        return out
+
+    def _mouse(kind, x, y):
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, kind, Quartz.CGPointMake(x, y), Quartz.kCGMouseButtonLeft)); time.sleep(0.03)
+
+    def relay(**r):
+        # the VNC relay's ops, with Quartz events (the checks are written once for both drivers)
+        op = r.get('op')
+        if op == 'move': _mouse(Quartz.kCGEventMouseMoved, r['x'], r['y'])
+        elif op == 'click': click(r['x'], r['y'])
+        elif op == 'drag':
+            _mouse(Quartz.kCGEventLeftMouseDown, r['x0'], r['y0']); n = 20
+            for i in range(1, n + 1): _mouse(Quartz.kCGEventLeftMouseDragged, r['x0'] + (r['x1'] - r['x0']) * i / n, r['y0'] + (r['y1'] - r['y0']) * i / n); time.sleep(r.get('seconds', 0.6) / n)
+            _mouse(Quartz.kCGEventLeftMouseUp, r['x1'], r['y1'])
+        elif op == 'text':
+            for ch in r['text']:
+                for down in (True, False):
+                    e = Quartz.CGEventCreateKeyboardEvent(None, 0, down); Quartz.CGEventKeyboardSetUnicodeString(e, 1, ch); Quartz.CGEventPost(Quartz.kCGHIDEventTap, e); time.sleep(0.02)
+        elif op == 'png':
+            if not r.get('rect'): raise ValueError('png needs a rect (the test windows only): the whole screen is never saved')
+            x, y, w, h = (round(v) for v in r['rect']); subprocess.run(['screencapture', '-x', '-R', f'{x},{y},{w},{h}', r['path']])
+        return {'ok': True}
 
     def osa(src):
         r = subprocess.run(['osascript', '-e', src], capture_output=True, text=True)
@@ -103,31 +132,6 @@ else:
         mods = [m for m, bit in (('ctrl', CTRL), ('alt', ALT), ('shift', SHIFT), ('cmd', CMD)) if flags & bit]
         relay(op='chord', combo='+'.join(mods + [KEYNAME[code]]))
 
-    # never a click on the person's windows: the front-most window at the point (any layer) must be this run's Backplane or KiCad,
-    # else the run stops (the Mac mini gate, Nov 16: a lost window lookup sent clicks to the person's Chrome and Music)
-    def _our_pids():
-        ps = subprocess.run(['ps', '-axo', 'pid=,command='], capture_output=True, text=True).stdout.splitlines()
-        return {client.pid} | {int(l.split()[0]) for l in ps if OUT in l and 'kicad' in l.lower()}
-    def _guard(x, y, what):
-        # the client gone (its --exit-after, a crash): its window is gone too, and what is under the point now is the person's
-        if client.poll() is not None: raise SystemExit(f'REFUSED {what} at ({round(x)}, {round(y)}): the client has exited ({client.returncode})')
-        mine = _our_pids()
-        for w in helper('windows') or []:
-            bx, by, bw, bh = w['bounds']
-            if bx <= x < bx + bw and by <= y < by + bh and w.get('layer', 0) < 1000:
-                if int(w['pid']) in mine: return
-                raise SystemExit(f'REFUSED {what} at ({round(x)}, {round(y)}): the window there is {w.get("owner", "?")}\'s, not this run\'s')
-        raise SystemExit(f'REFUSED {what} at ({round(x)}, {round(y)}): no window of this run there')
-    def click(x, y, button='left'): _guard(x, y, 'a click'); relay(op='click', x=x, y=y, button=1 if button == 'left' else 3)
-    def shot_to(path):
-        # only the test's own windows (Backplane's and KiCad's), never the screen: their union's bounds
-        ours = [w for w in wins() if w[1] == client.pid or 'kicad' in w[2].lower() and OUT in ' '.join(subprocess.run(['ps', '-o', 'command=', '-p', str(w[1])], capture_output=True, text=True).stdout.split()[:1] or [''])]
-        ours = ours or [w for w in wins() if w[1] == client.pid]
-        if not ours: return
-        x0 = min(w[3][0] for w in ours); y0 = min(w[3][1] for w in ours)
-        x1 = max(w[3][0] + w[3][2] for w in ours); y1 = max(w[3][1] + w[3][3] for w in ours)
-        relay(op='png', path=path, rect=[x0, y0, x1 - x0, y1 - y0])
-
     # windows by hand, as a person moves them (the title bar's empty part left of the title, the bottom-right corner, the green and red
     # buttons: 13 pt below the top, at 14, 36 and 58 pt from the left on macOS 26)
     def _main(pid): return max((w for w in wins() if w[1] == pid), key=lambda w: w[3][2] * w[3][3], default=None)
@@ -158,6 +162,38 @@ else:
     def win_close(pid, bounds): _guard(bounds[0] + 14, bounds[1] + 13, 'a click'); relay(op='click', x=bounds[0] + 14, y=bounds[1] + 13)
 
 
+# ---- shared by both drivers: no input on the person's windows, pictures of our windows only ----
+# never a click on the person's windows: the front-most window at the point (any layer) must be this run's Backplane or KiCad,
+# else the run stops (the Mac mini gate, Nov 16: a lost window lookup sent clicks to the person's Chrome and Music)
+def _our_pids():
+    ps = subprocess.run(['ps', '-axo', 'pid=,command='], capture_output=True, text=True).stdout.splitlines()
+    return {client.pid} | {int(l.split()[0]) for l in ps if OUT in l and 'kicad' in l.lower()}
+def _guard(x, y, what):
+    # the client gone (its --exit-after, a crash): its window is gone too, and what is under the point now is the person's
+    if client.poll() is not None: raise SystemExit(f'REFUSED {what} at ({round(x)}, {round(y)}): the client has exited ({client.returncode})')
+    mine = _our_pids()
+    for w in helper('windows') or []:
+        bx, by, bw, bh = w['bounds']
+        if bx <= x < bx + bw and by <= y < by + bh and w.get('layer', 0) < 1000:
+            if int(w['pid']) in mine: return
+            raise SystemExit(f'REFUSED {what} at ({round(x)}, {round(y)}): the window there is {w.get("owner", "?")}\'s, not this run\'s')
+    raise SystemExit(f'REFUSED {what} at ({round(x)}, {round(y)}): no window of this run there')
+def shot_to(path):
+    # only the test's own windows (Backplane's and KiCad's), never the screen: their union's bounds
+    ours = [w for w in wins() if w[1] == client.pid or 'kicad' in w[2].lower() and OUT in ' '.join(subprocess.run(['ps', '-o', 'command=', '-p', str(w[1])], capture_output=True, text=True).stdout.split()[:1] or [''])]
+    ours = ours or [w for w in wins() if w[1] == client.pid]
+    if not ours: return
+    x0 = min(w[3][0] for w in ours); y0 = min(w[3][1] for w in ours)
+    x1 = max(w[3][0] + w[3][2] for w in ours); y1 = max(w[3][1] + w[3][3] for w in ours)
+    relay(op='png', path=path, rect=[x0, y0, x1 - x0, y1 - y0])
+
+if DRIVER == 'quartz':
+    _qclick = click
+    def click(x, y, button='left'): _guard(x, y, 'a click'); _qclick(x, y, button)
+else:
+    def click(x, y, button='left'): _guard(x, y, 'a click'); relay(op='click', x=x, y=y, button=1 if button == 'left' else 3)
+
+
 CLIENT, HUB, ASSETS, RT, OUT = sys.argv[1:6]
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 FAILS, RES, procs = [], {}, []
@@ -184,7 +220,7 @@ subprocess.run([sys.executable, os.path.join(REPO, 'test/kicad_embed/lib/seed_pr
 for v in ('10.0', '10.99'):
     src = os.path.join(OUT, 'fh/.config/kicad', v)
     if os.path.isdir(src): shutil.copytree(src, os.path.join(OUT, 'fh/Library/Preferences/kicad', v), dirs_exist_ok=True)
-if DRIVER == 'vnc' and os.environ.get('MAC_MODE') != 'libs':
+if os.environ.get('MAC_MODE') != 'libs':
     with open(os.path.join(OUT, 'bin/claude'), 'w') as f:
         f.write('#!/bin/sh\nexec /usr/bin/python3 ' + os.path.join(REPO, 'test/kicad_embed/mac/standin_agent.py') + ' "$@"\n')
     os.chmod(os.path.join(OUT, 'bin/claude'), 0o755)
@@ -726,7 +762,7 @@ try:
                 check(in_bp and not (c or d), f'focus: after a click in {where}, typing goes to Backplane (the message "{mark}" is in the thread{"" if in_bp else ": NOT found"}; KiCad edits {c + d})')
             raise SystemExit(1 if FAILS else 0)
         if os.environ.get('BS_PROBE') == 'keys':  # climb-j's edit-keys table (lib/edit_keys_table.json), same row ids, plus extra_* menu chords
-            KEYNAME.update({6: 'z', 7: 'x', 9: 'v', 16: 'y', 35: 'p', 31: 'o', 12: 'q', 5: 'g', 24: '=', 27: '-'})
+            if DRIVER == 'vnc': KEYNAME.update({6: 'z', 7: 'x', 9: 'v', 16: 'y', 35: 'p', 31: 'o', 12: 'q', 5: 'g', 24: '=', 27: '-'})
             K_Z, K_X, K_V, K_Y, K_S = 6, 7, 9, 16, 1
             W = 4
             sys.path.insert(0, os.path.join(REPO, 'test/kicad_embed/mac')); import hub_ws
