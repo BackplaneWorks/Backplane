@@ -93,15 +93,17 @@ fn detached(cmd: &mut std::process::Command) {
     // started from this window program with nothing, Windows would open a console window for the hub
     #[cfg(windows)] { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000 | 0x0000_0200); }
 }
-/// systemd-run's arguments for the hub's own scope, when a user systemd answers here (probed: a scope that runs `true`); None elsewhere, or with
-/// BACKPLANE_NO_SCOPE.
+/// systemd-run's arguments for the hub's own scope, when a user systemd answers here, with only the properties a probe scope took (an older
+/// systemd has no OOMPolicy, before 243, or ManagedOOMPreference, before 248: scopeprobe.rs); None elsewhere (no user manager, a container,
+/// WSL), or with BACKPLANE_NO_SCOPE, and then the hub starts unscoped.
 fn hub_scope() -> Option<Vec<String>> {
-    if !cfg!(target_os = "linux") || std::env::var_os("BACKPLANE_NO_SCOPE").is_some() { return None }
-    if !std::env::var_os("XDG_RUNTIME_DIR").map_or(false, |d| Path::new(&d).join("bus").exists()) { return None }
-    let mut c = std::process::Command::new("systemd-run").args(["--user", "--scope", "-q", "--collect", "--", "true"]).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().ok()?;
-    let t = Instant::now();
-    let ok = loop { if let Ok(Some(s)) = c.try_wait() { break s.success() } if t.elapsed() > Duration::from_secs(5) { let _ = c.kill(); let _ = c.wait(); break false } std::thread::sleep(Duration::from_millis(20)); };
-    /* i18n-ok: systemd-run arguments, never drawn */ ok.then(|| ["--user", "--scope", "-q", "--collect", "-p", "OOMPolicy=continue", "-p", "ManagedOOMPreference=avoid", "--"].iter().map(|s| s.to_string()).collect())
+    if !cfg!(target_os = "linux") { return None }
+    /* i18n-ok: systemd-run properties, never drawn */ let wanted: Vec<String> = ["OOMPolicy=continue", "ManagedOOMPreference=avoid"].iter().map(|s| s.to_string()).collect();
+    let s = crate::scopeprobe::probe(&|p| std::process::Command::new(p), &[], &wanted);
+    /* i18n-ok: a log line, never drawn */ eprintln!("launch: hub scope: {}", crate::scopeprobe::describe(&s, &wanted));
+    if !s.ok { return None }
+    /* i18n-ok: systemd-run arguments, never drawn */ let mut a: Vec<String> = ["--user", "--scope", "-q", "--collect"].iter().map(|s| s.to_string()).collect();
+    a.extend(crate::scopeprobe::p_args(&s.props)); a.push("--".into()); Some(a)
 }
 /// The end of the hub's log, for the words when it did not start.
 fn log_tail(log: &Path) -> String { let t = std::fs::read_to_string(log).unwrap_or_default(); t.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").chars().take(200).collect() }
@@ -122,16 +124,25 @@ pub fn ensure_hub(home: &Path) -> Result<(String, PathBuf)> {
     // Linux: the hub in a systemd scope of its own with OOMPolicy=continue, so the kernel killing one process there (a runaway the hub started) never
     // makes systemd stop the hub with it; oomd's last pick (ManagedOOMPreference=avoid). Agents and jobs get scopes of their own (host memscope.rs).
     let scoped = hub_scope();
-    let mut cmd = match &scoped { Some(pre) => { let mut c = std::process::Command::new("systemd-run"); c.args(pre).arg(&bin); c } None => std::process::Command::new(&bin) };
-    match &guarded {
-        // the guard starts the hub of CURRENT and owns it from here: restarts, updates, rollback (docs/deploy.md)
-        Some((_, prefix)) => { cmd.args(["hub", "run", "--home"]).arg(home).args(["--port", &port.to_string(), "--host", "127.0.0.1", "--builds"]).arg(prefix).arg("--default").args(["--", "--foreground"]); }
-        None => { cmd.arg("--home").arg(home).arg("--port").arg(port.to_string()).arg("--host").arg("127.0.0.1").arg("--foreground"); }
+    let build = |scope: Option<&Vec<String>>| -> Result<std::process::Command> {
+        let mut cmd = match scope { Some(pre) => { let mut c = std::process::Command::new(crate::scopeprobe::program()); c.args(pre).arg(&bin); c } None => std::process::Command::new(&bin) };
+        match &guarded {
+            // the guard starts the hub of CURRENT and owns it from here: restarts, updates, rollback (docs/deploy.md)
+            Some((_, prefix)) => { cmd.args(["hub", "run", "--home"]).arg(home).args(["--port", &port.to_string(), "--host", "127.0.0.1", "--builds"]).arg(prefix).arg("--default").args(["--", "--foreground"]); }
+            None => { cmd.arg("--home").arg(home).arg("--port").arg(port.to_string()).arg("--host").arg("127.0.0.1").arg("--foreground"); }
+        }
+        cmd.stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log.try_clone()?);
+        if std::env::var_os("BACKPLANE_NO_TAILSCALE").is_some() { cmd.arg("--no-tailscale"); }
+        detached(&mut cmd);
+        Ok(cmd)
+    };
+    let start = |c: &mut std::process::Command| c.spawn().with_context(|| crate::i18n::tf("gpui.launch.could.not.start", &[("path", bin.display().to_string().into())]));
+    let mut child = start(&mut build(scoped.as_ref())?)?;
+    // a scope systemd would not make (systemd-run ended before it started the hub): the hub again, unscoped, never a window with no hub
+    if scoped.is_some() && crate::scopeprobe::wait_exec(child.id(), || child.try_wait().map_or(true, |s| s.is_some()), Duration::from_secs(3)) == crate::scopeprobe::Launch::Failed {
+        /* i18n-ok: a log line, never drawn */ eprintln!("launch: the hub's scope could not be made ({}); starting it without one", log_tail(&log_path));
+        child = start(&mut build(None)?)?;
     }
-    cmd.stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log);
-    if std::env::var_os("BACKPLANE_NO_TAILSCALE").is_some() { cmd.arg("--no-tailscale"); }
-    detached(&mut cmd);
-    let mut child = cmd.spawn().with_context(|| crate::i18n::tf("gpui.launch.could.not.start", &[("path", bin.display().to_string().into())]))?;
     let t0 = Instant::now();
     while t0.elapsed() < Duration::from_secs(60) {
         if answering(port) && token.is_file() { return Ok((format!("http://127.0.0.1:{port}"), token)) }

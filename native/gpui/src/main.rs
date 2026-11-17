@@ -37,6 +37,9 @@ mod cat;
 #[allow(dead_code)]
 #[path = "../../host/src/term/vt.rs"]
 mod vt;
+/// What `systemd-run --user --scope` takes here, shared by path with the hub (the hub's own scope, launch.rs).
+#[path = "../../host/src/scopeprobe.rs"]
+mod scopeprobe;
 use gpui::{prelude::*, *, actions};
 use serde_json::Value;
 use std::{collections::{HashMap,VecDeque},time::{Duration,Instant}};

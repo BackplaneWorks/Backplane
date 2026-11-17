@@ -144,7 +144,9 @@ pub fn tokio_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> tokio::process::Com
 pub fn tokio_cmd_in<S: AsRef<OsStr>>(kind: Kind, program: S, wrap: Option<Vec<String>>) -> tokio::process::Command {
     let Some(w) = wrap.filter(|_| refusal(kind, &program.as_ref().to_string_lossy()).is_none()) else { return tokio_cmd(kind, program) };
     let (prog, pre) = crate::plat::hub::launch(program.as_ref());
-    let mut c = tokio::process::Command::new("systemd-run"); c.args(w).arg(prog).args(pre);
+    // BACKPLANE_SYSTEMD_RUN: a stand-in (a test hub's; scopeprobe.rs reads the same)
+    let sr = std::env::var("BACKPLANE_SYSTEMD_RUN").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| "systemd-run".into());
+    let mut c = tokio::process::Command::new(sr); c.args(w).arg(prog).args(pre);
     if scrubbed(kind) { for k in hub_only_present() { c.env_remove(k); } }
     if let Some(d) = documents_for(kind) { c.env("KICAD_DOCUMENTS_HOME", d); }
     if let Some(d) = pycache_for(kind) { c.env("PYTHONPYCACHEPREFIX", d); }

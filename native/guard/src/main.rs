@@ -1,5 +1,6 @@
 //! `backplane hub ...`: one command to look after a hub, the same on Windows, Linux and macOS.
 mod http; mod pair; mod plan; mod run; mod store; mod sys;
+#[path = "../../host/src/scopeprobe.rs"] mod scopeprobe; // what systemd-run --user --scope takes here, shared with the hub
 #[cfg(test)] mod tmp;
 #[cfg(all(test, unix))] mod scripts;
 use serde_json::{json, Value};
@@ -63,8 +64,9 @@ fn start_guard(d: &Dir, safe: bool) -> Result<(), String> {
     let extra: Vec<String> = l["hubArgs"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)).collect();
     if !extra.is_empty() { args.push("--".into()); args.extend(extra); }
     // a scope of its own (not the guard's), with no memory cap: `--mem` is accepted and ignored
-    let mut c = if cfg!(target_os = "linux") && Command::new("systemd-run").arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().map_or(false, |x| x.success()) {
-        let mut c = Command::new("systemd-run"); c.args(["--user", "--scope", "-q", "--"]).arg(&me); c
+    // only where a user systemd makes one (scopeprobe.rs: not in a container, WSL, or without a user manager; never with BACKPLANE_NO_SCOPE)
+    let mut c = if scopeprobe::probe(&|p| Command::new(p), &[], &[]).ok {
+        let mut c = Command::new(scopeprobe::program()); c.args(["--user", "--scope", "-q", "--"]).arg(&me); c
     } else { Command::new(&me) };
     c.args(&args).env_remove("BACKPLANE_AGENT_OWNER").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     for (k, v) in l["env"].as_object().into_iter().flatten() { if let Some(v) = v.as_str() { c.env(k, v); } }

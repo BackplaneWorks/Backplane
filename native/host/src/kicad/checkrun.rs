@@ -620,7 +620,7 @@ async fn run_cli(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &str, cancel:
     let parsed = if s == "drc" { fd::drc(&text) } else { fd::erc(&text) };
     let out = match parsed {
         Some(mut fs) => { if !full { fs.retain(|x| !fd::library_rule(s, &x.rule)) } Some(Ok(fs)) }
-        None if String::from_utf8_lossy(&o.stderr).contains("transient scope") && !NO_SCOPE.swap(true, std::sync::atomic::Ordering::Relaxed) => {
+        None if crate::scopeprobe::scope_failure(&String::from_utf8_lossy(&o.stderr)) && !NO_SCOPE.swap(true, std::sync::atomic::Ordering::Relaxed) => {
             eprintln!("checks: systemd made no scope ({}); runs go without one", String::from_utf8_lossy(&o.stderr).trim());
             return Box::pin(run_cli(hub, pro, f, s, cancel, full)).await
         }
@@ -693,10 +693,15 @@ fn lib_free_config(hub: &Hub, version: &str) -> PathBuf {
 /// below-normal priority on Windows. Its folder is the root: every path is absolute.
 fn low_priority(argv: &[String]) -> tokio::process::Command {
     #[cfg(unix)] let mut c = {
-        let scope = cfg!(target_os = "linux") && std::env::var_os("BACKPLANE_CHECKS_NO_SCOPE").is_none() && !NO_SCOPE.load(std::sync::atomic::Ordering::Relaxed) && on_path("systemd-run")
+        // only where the hub's probe found scopes usable (memscope.rs), with only the properties this systemd takes
+        let scope = cfg!(target_os = "linux") && std::env::var_os("BACKPLANE_CHECKS_NO_SCOPE").is_none() && !NO_SCOPE.load(std::sync::atomic::Ordering::Relaxed) && crate::memscope::usable() && on_path("systemd-run")
             && std::env::var_os("XDG_RUNTIME_DIR").map_or(false, |d| Path::new(&d).join("bus").exists());
         let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, if scope { "systemd-run" } else { "nice" });
-        if scope { c.args(["--user", "--scope", "-q", "--collect", "--slice=bpkicad.slice", "-p", "MemoryMax=50%", "-p", "ManagedOOMPreference=none", "--", "nice"]); }
+        if scope {
+            c.args(["--user", "--scope", "-q", "--collect", "--slice=bpkicad.slice"]);
+            for p in ["MemoryMax=50%", "ManagedOOMPreference=none"] { if crate::memscope::takes(p) { c.args(["-p", p]); } }
+            c.args(["--", "nice"]);
+        }
         c.arg("-n").arg("15").args(argv); c
     };
     #[cfg(windows)] let mut c = { const BELOW_NORMAL: u32 = 0x0000_4000; let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, &argv[0]); c.args(&argv[1..]); c.creation_flags(crate::plat::proc::NO_WINDOW | BELOW_NORMAL); c };

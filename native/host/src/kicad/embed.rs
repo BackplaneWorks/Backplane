@@ -2759,12 +2759,14 @@ async fn spawn_gui_session(
     let before = kipc::sockets_at(&req_sock);
     let cwd = Path::new(&pro).parent().filter(|p| !p.as_os_str().is_empty()).map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
     // a memory scope of its own (memscope.rs `wrap_helper`): KiCad killed for memory is killed alone, never with or instead of the hub
-    let mut c = crate::proc::tokio_cmd_in(crate::proc::Kind::Local, &argv[0], crate::memscope::wrap_helper("kicad")); crate::memscope::raise_oom(&mut c);
+    // a launch that fails for its scope (an older systemd, no user manager) starts again unscoped (memscope::spawn)
+    let build = |wrap: Option<Vec<String>>| {
+    let mut c = crate::proc::tokio_cmd_in(crate::proc::Kind::Local, &argv[0], wrap); crate::memscope::raise_oom(&mut c);
     c.args(&argv[1..])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .current_dir(cwd)
+        .current_dir(&cwd)
         .kill_on_drop(false);
     #[cfg(not(windows))]
     {
@@ -2794,10 +2796,11 @@ async fn spawn_gui_session(
     }
     // Own session + PDEATHSIG (Linux) / Job Object (Windows) / reaper (macOS) so stock KiCad never outlives a stopped or killed hub.
     crate::plat::proc::agent_group(&mut c);
+    c };
 
     let mut tries = 0;
     let mut child = loop {
-        match c.spawn() {
+        match crate::memscope::spawn(crate::memscope::wrap_helper("kicad"), crate::memscope::Evidence::Stderr, &build) {
             Ok(ch) => break ch,
             Err(e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) && tries < 40 => {
                 tries += 1; tokio::time::sleep(Duration::from_millis(25)).await;

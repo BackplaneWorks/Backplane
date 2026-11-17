@@ -83,14 +83,19 @@ impl Agents {
         let (so, se) = match std::fs::File::create(&outp).and_then(|f| f.try_clone().map(|g| (f, g))) { Ok(x) => x, Err(e) => { self.work_end(&th, &id, "gone", &format!("could not open the output file: {e}")).await; return } };
         // in a memory scope of its own (memscope.rs), the command in an inner sh: the outer one stays 0.6 s after it, so the scope is still there
         // when its watcher looks for a kill (a fast eater's sh ends with it, and the scope with them)
-        let scope = crate::memscope::wrap("work"); let scoped = scope.is_some();
-        let mut c = crate::proc::tokio_cmd_in(crate::proc::Kind::Shell, "sh", scope); crate::memscope::raise_oom(&mut c);
-        if scoped { c.args(["-c", "sh -c \"$0\"; e=$?; sleep 0.6; exit $e", cmd.as_str()]); } else { c.args(["-c", cmd.as_str()]); }
-        c.current_dir(if cwd.is_empty() { self.hub.cfg.home.clone() } else { PathBuf::from(&cwd) }).env("BACKPLANE_LOCK_HOME", &self.hub.cfg.home).stdin(Stdio::null()).stdout(so).stderr(se).kill_on_drop(false);
-        for (k, v) in super::kicadsel::job_env(&self.kicad_env.lock().unwrap(), std::env::var_os("PATH")) { c.env(k, v); } // the KiCad the agent was given (kicadsel.rs)
-        crate::plat::proc::own_group_tokio(&mut c);
-        if let Some(f) = &guard { crate::plat::proc::inherit(&mut c, f) } // the job inherits its lock's flock
-        let mut child = match c.spawn() { Ok(c) => c, Err(e) => { self.work_end(&th, &id, "gone", &format!("could not start: {e}")).await; return } };
+        let make = |scope: Option<Vec<String>>| { let scoped = scope.is_some();
+            if !scoped { use std::io::Seek; let _ = so.set_len(0); let _ = (&so).seek(std::io::SeekFrom::Start(0)); } // a failed scope's words are not the job's output
+            let mut c = crate::proc::tokio_cmd_in(crate::proc::Kind::Shell, "sh", scope); crate::memscope::raise_oom(&mut c);
+            if scoped { c.args(["-c", "sh -c \"$0\"; e=$?; sleep 0.6; exit $e", cmd.as_str()]); } else { c.args(["-c", cmd.as_str()]); }
+            let (o, e) = (so.try_clone().map(Stdio::from).unwrap_or_else(|_| Stdio::null()), se.try_clone().map(Stdio::from).unwrap_or_else(|_| Stdio::null()));
+            c.current_dir(if cwd.is_empty() { self.hub.cfg.home.clone() } else { PathBuf::from(&cwd) }).env("BACKPLANE_LOCK_HOME", &self.hub.cfg.home).stdin(Stdio::null()).stdout(o).stderr(e).kill_on_drop(false);
+            for (k, v) in super::kicadsel::job_env(&self.kicad_env.lock().unwrap(), std::env::var_os("PATH")) { c.env(k, v); } // the KiCad the agent was given (kicadsel.rs)
+            crate::plat::proc::own_group_tokio(&mut c);
+            if let Some(f) = &guard { crate::plat::proc::inherit(&mut c, f) } // the job inherits its lock's flock
+            c };
+        // a launch that fails for its scope starts again unscoped (memscope::spawn)
+        let spawned = crate::memscope::spawn(crate::memscope::wrap("work"), crate::memscope::Evidence::File(&outp), make); drop((so, se));
+        let mut child = match spawned { Ok(c) => c, Err(e) => { self.work_end(&th, &id, "gone", &format!("could not start: {e}")).await; return } };
         let pid = child.id().unwrap_or(0); crate::plat::proc::adopt(pid, false); crate::memscope::cap_job(pid, "work"); drop(guard);
         let killed: Arc<std::sync::Mutex<Option<String>>> = Arc::default(); // a process of the job killed for memory in its scope (memscope.rs): said with its end
         { let k = killed.clone(); crate::memscope::watch(pid, move |w| { *k.lock().unwrap() = Some(w.told()); }); }

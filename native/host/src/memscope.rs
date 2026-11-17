@@ -5,8 +5,10 @@
 //! kernel killing one runaway test client made systemd kill the hub and every agent with it (Nov 13 04:42: a 45 GB client). What they start also
 //! gets a higher `oom_score_adj` than the hub's, so a machine-wide OOM picks it first. The thread is told when one of its processes is killed.
 //!
-//! Off when there is no user systemd answering (no `systemd-run`, no user bus), on a copy, in tests, or with `BACKPLANE_NO_SCOPE`: then commands
-//! start as before. macOS has no equivalent (no cgroups; a memory cap per process tree would be a sampler that kills, not done); Windows' is a Job
+//! Off when there is no user systemd answering (no `systemd-run`, no user bus, a container or WSL without one), on a copy, in tests, or with
+//! `BACKPLANE_NO_SCOPE`: then commands start as before, with one log line. A scope gets only the properties a probe scope here took
+//! (`scopeprobe.rs`: systemd before 243 has no OOMPolicy, before 248 no ManagedOOMPreference), and a scoped launch that still fails is
+//! started again unscoped, and scopes stay off for the session (`spawn`). macOS has no equivalent (no cgroups; a memory cap per process tree would be a sampler that kills, not done); Windows' is a Job
 //! Object memory limit with the same caps (`cap_job`; allocations past it fail, nothing is killed or told). KiCad and the browser helper have
 //! scopes of their own (`wrap_helper`).
 use std::sync::OnceLock;
@@ -50,38 +52,98 @@ pub fn valid_size(v: &str) -> bool {
     !d.is_empty() && d.len() + 1 >= v.len() && d.chars().all(|c| c.is_ascii_digit())
 }
 
-/// Whether scopes are used. Decided once, by `init`; false until then.
-pub fn on() -> bool { *ON.get().unwrap_or(&false) }
+/// Whether scopes are used: decided once, by `init` (false until then), and off for the rest of the session once a scoped launch failed (`give_up`).
+pub fn on() -> bool { *ON.get().unwrap_or(&false) && !OFF.load(std::sync::atomic::Ordering::Relaxed) }
+static OFF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The properties this machine's systemd took in a scope (`scopeprobe::probe`): a subset of `WANTED`.
+static PROPS: OnceLock<Vec<String>> = OnceLock::new();
+/// Every scope's properties but its cap, each used only where systemd takes it (OOMPolicy came in 243, ManagedOOMPreference in 248).
+const WANTED: [&str; 3] = ["MemorySwapMax=1G", "OOMPolicy=continue", "ManagedOOMPreference=none"];
+fn wanted() -> Vec<String> { std::iter::once(format!("MemoryMax={}", scope_max())).chain(WANTED.iter().map(|s| s.to_string())).collect() }
+/// The properties a scope gets here: those the probe found (or every one, before it ran: only tests).
+fn props() -> Vec<String> { PROPS.get().cloned().unwrap_or_else(wanted) }
+/// A scoped launch failed for the scope (systemd-run ended before it started the command): every later one starts unscoped, said once.
+pub fn give_up(why: &str) {
+    if !OFF.swap(true, std::sync::atomic::Ordering::Relaxed) { eprintln!("memscope: a scoped launch failed ({why}): agents and jobs start without scopes for the rest of this session") }
+}
 
-/// At the hub's start (blocking: run it off the runtime): probe a scope once, then cap the slice.
+/// At the hub's start (blocking: run it off the runtime): probe a scope once, with the properties it should have, then cap the slice.
 pub fn init() {
-    let on = cfg!(target_os = "linux") && !cfg!(test) && std::env::var_os("BACKPLANE_NO_SCOPE").is_none() && !crate::copy::on() && bus() && probe();
+    let live = cfg!(target_os = "linux") && !cfg!(test);
+    let s = if !live { None } else if crate::copy::on() { None } else { Some(crate::scopeprobe::probe(&|p| crate::proc::std_cmd(crate::proc::Kind::Local, p), &[format!("--slice={}", slice())], &wanted())) };
+    let on = s.as_ref().map_or(false, |s| s.ok);
+    if let Some(s) = &s { let _ = PROPS.set(s.props.iter().filter(|p| !p.starts_with("MemoryMax=")).cloned().collect()); }
+    let capped = s.as_ref().map_or(false, |s| s.props.iter().any(|p| p.starts_with("MemoryMax=")));
     if on {
-        let s = crate::proc::std_cmd(crate::proc::Kind::Local, "systemctl").args(["--user", "set-property", "--runtime", &slice(), &format!("MemoryMax={}", slice_max()), "MemorySwapMax=2G"])
-            .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status();
-        eprintln!("memscope: agents and jobs run in scopes of their own in {} (each up to {}, all up to {}{})", slice(), scope_max(), slice_max(), if s.map_or(false, |s| s.success()) { "" } else { "; the slice's cap was not set" });
-    } else if cfg!(target_os = "linux") && !cfg!(test) {
-        eprintln!("memscope: off (no user systemd, a copy, or BACKPLANE_NO_SCOPE): agents and jobs run in the hub's own scope");
+        let mut sp = vec!["--user".to_string(), "set-property".into(), "--runtime".into(), slice(), format!("MemoryMax={}", slice_max())];
+        if props().iter().any(|p| p.starts_with("MemorySwapMax=")) { sp.push("MemorySwapMax=2G".into()) }
+        let st = crate::proc::std_cmd(crate::proc::Kind::Local, "systemctl").args(&sp).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status();
+        eprintln!("memscope: agents and jobs run in scopes of their own in {} (each up to {}, all up to {}{}; {})", slice(), scope_max(), slice_max(),
+            if st.map_or(false, |s| s.success()) { "" } else { "; the slice's cap was not set" }, crate::scopeprobe::describe(s.as_ref().unwrap(), &wanted()));
+    } else if live {
+        let why = match &s { Some(s) => crate::scopeprobe::describe(s, &wanted()), None => "a copy".into() };
+        eprintln!("memscope: off ({why}): agents and jobs start without scopes of their own");
     }
+    let _ = CAPPED.set(capped);
     let _ = ON.set(on);
 }
-fn bus() -> bool { std::env::var_os("XDG_RUNTIME_DIR").map_or(false, |d| std::path::Path::new(&d).join("bus").exists()) }
-fn probe() -> bool {
-    let Ok(mut c) = crate::proc::std_cmd(crate::proc::Kind::Local, "systemd-run").args(["--user", "--scope", "-q", "--collect", &format!("--slice={}", slice()), "--", "true"])
-        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn() else { return false };
-    let t = std::time::Instant::now();
-    while t.elapsed() < std::time::Duration::from_secs(5) {
-        if let Ok(Some(s)) = c.try_wait() { return s.success() }
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-    let _ = c.kill(); let _ = c.wait(); false
+/// Whether a scope can be made here: the probe found it so (and no scoped launch has failed since), or the probe has not run (a command-line
+/// use of the hub's code: try it, a failure falls back).
+pub fn usable() -> bool { ON.get().is_none() || on() }
+/// Whether this machine's systemd takes `prop` ("ManagedOOMPreference=none") in a scope; true before the probe ran.
+pub fn takes(prop: &str) -> bool {
+    let key = prop.split('=').next().unwrap_or(prop);
+    if key == "MemoryMax" { return capped() }
+    PROPS.get().map_or(true, |v| v.iter().any(|p| p.split('=').next() == Some(key)))
+}
+/// Whether systemd took MemoryMax in a scope here (else scopes go on, uncapped).
+static CAPPED: OnceLock<bool> = OnceLock::new();
+fn capped() -> bool { *CAPPED.get().unwrap_or(&true) }
+
+/// Where a scoped launch's systemd-run would have said why it failed: its stderr pipe (read, and put back when it was not that), the file its
+/// stderr went to (a job's output), or nowhere (`Assume`: a long-lived helper ending at once with systemd-run's exit code 1 is taken as one).
+pub enum Evidence<'a> { Stderr, File(&'a std::path::Path), Assume }
+/// Starts `make(wrap)`: in a scope when `wrap` is Some, and when systemd-run ended before it started the command saying it could not make the
+/// scope (an unknown property, the user manager gone: `scopeprobe::scope_failure`), the same launch again unscoped, once, and scopes off for
+/// the session (`give_up`). A command that ran and ended at once is never started twice. `make` builds the whole command each time (fresh
+/// pipes). Blocks until the scope is made (a few ms; at most 3 s).
+pub fn spawn(wrap: Option<Vec<String>>, ev: Evidence, mut make: impl FnMut(Option<Vec<String>>) -> tokio::process::Command) -> std::io::Result<tokio::process::Child> {
+    let scoped = wrap.is_some();
+    let mut child = make(wrap).spawn()?;
+    if !scoped { return Ok(child) }
+    let pid = child.id().unwrap_or(0);
+    let mut code = None;
+    let went = crate::scopeprobe::wait_exec(pid, || match child.try_wait() { Ok(Some(s)) => { code = s.code(); true } Ok(None) => false, Err(_) => true }, std::time::Duration::from_secs(3));
+    if went != crate::scopeprobe::Launch::Failed || code != Some(1) { return Ok(child) }
+    let said = match ev {
+        Evidence::Stderr => match child.stderr.take() { Some(e) => { let (b, back) = take_back(e); child.stderr = back; String::from_utf8_lossy(&b).into_owned() } None => String::new() },
+        Evidence::File(p) => std::fs::read_to_string(p).unwrap_or_default(),
+        Evidence::Assume => "Failed to start transient scope (systemd-run exited 1)".into(),
+    };
+    if !crate::scopeprobe::scope_failure(&said) { return Ok(child) }
+    give_up(said.lines().find(|l| crate::scopeprobe::scope_failure(l)).unwrap_or("systemd-run exited 1").trim());
+    make(None).spawn()
+}
+/// What an exited child wrote to its stderr pipe, and a pipe that gives the same bytes again to whoever reads it next.
+fn take_back(e: tokio::process::ChildStderr) -> (Vec<u8>, Option<tokio::process::ChildStderr>) {
+    use std::io::{Read, Write};
+    let Ok(fd) = e.into_owned_fd() else { return (vec![], None) };
+    let mut f = std::fs::File::from(fd); let mut b = Vec::new(); let mut buf = [0u8; 8192];
+    loop { match f.read(&mut buf) { Ok(0) => break, Ok(n) => b.extend_from_slice(&buf[..n]), Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue, Err(_) => break } } // non-blocking: what is there
+    let mut fds = [0i32; 2];
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 { return (b, None) }
+    use std::os::fd::FromRawFd;
+    let (r, mut w) = unsafe { (std::os::fd::OwnedFd::from_raw_fd(fds[0]), std::fs::File::from_raw_fd(fds[1])) };
+    let bytes = b.clone(); std::thread::spawn(move || { let _ = w.write_all(&bytes); });
+    let back = tokio::process::ChildStderr::from_std(std::process::ChildStderr::from(r)).ok();
+    (b, back)
 }
 
 /// systemd-run's arguments that start what follows them in a new scope (`what`: "agent" or "work", in its unit's name), or None when scopes are off.
 pub fn wrap(what: &str) -> Option<Vec<String>> {
     if !on() { return None }
     static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    Some(args(what, std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed), &scope_max(), &slice()))
+    Some(args_with(what, std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed), capped().then(scope_max).as_deref(), &slice(), &props()))
 }
 /// The hub's own long-lived helpers, each in a scope of its own outside the hub's (a kill there never stops the hub, and never takes the hub's
 /// other children with it): the embedded KiCad (`kicad`: in bpkicad.slice, BACKPLANE_KICAD_MEM_MAX, 12G by default: lane A's real boards peak at
@@ -90,7 +152,7 @@ pub fn wrap_helper(what: &str) -> Option<Vec<String>> {
     if !on() { return None }
     static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let (slice, max) = helper_cap(what);
-    Some(args(what, std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed), &max, &slice))
+    Some(args_with(what, std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed), capped().then_some(max.as_str()), &slice, &props()))
 }
 pub fn helper_cap(what: &str) -> (String, String) {
     let env = |k: &str, d: &str| std::env::var(k).ok().filter(|v| valid_size(v)).unwrap_or_else(|| d.into());
@@ -120,9 +182,14 @@ pub fn cap_job(pid: u32, what: &str) {
 }
 /// A helper's scope logged when the kernel kills a process in it for memory (the hub log; the KiCad pane's own "KiCad closed" handling follows).
 pub fn watch_helper(pid: u32, what: &'static str) { watch_as(pid, Some(what), move |w| eprintln!("memscope: {w}")) }
-pub fn args(what: &str, hub: u32, n: u64, max: &str, slice: &str) -> Vec<String> {
-    ["--user", "--scope", "-q", "--collect", &format!("--slice={slice}"), &format!("--unit=bp-{what}-{hub}-{n}"), "-p", &format!("MemoryMax={max}"), "-p", "MemorySwapMax=1G",
-     "-p", "OOMPolicy=continue", "-p", "ManagedOOMPreference=none", "--"].iter().map(|s| s.to_string()).collect()
+/// systemd-run's arguments for a scope with every property (a current systemd).
+pub fn args(what: &str, hub: u32, n: u64, max: &str, slice: &str) -> Vec<String> { args_with(what, hub, n, Some(max), slice, &WANTED.map(String::from)) }
+/// ... with only `props` (those this systemd takes) and the cap `max` when it takes MemoryMax.
+pub fn args_with(what: &str, hub: u32, n: u64, max: Option<&str>, slice: &str, props: &[String]) -> Vec<String> {
+    let mut a: Vec<String> = ["--user", "--scope", "-q", "--collect"].iter().map(|s| s.to_string()).collect();
+    a.push(format!("--slice={slice}")); a.push(format!("--unit=bp-{what}-{hub}-{n}"));
+    if let Some(m) = max { a.push("-p".into()); a.push(format!("MemoryMax={m}")); }
+    a.extend(crate::scopeprobe::p_args(props)); a.push("--".into()); a
 }
 
 /// What runs in a scope gets the hub's own `oom_score_adj` plus 300 (at most 1000): a machine-wide OOM takes it before the hub or the window.
@@ -278,5 +345,90 @@ mod tests {
         assert_eq!(cap_bytes("x", g), None);
         assert_eq!(cap_for("kicad", 64 * g), Some(12 * g)); assert_eq!(cap_for("browser", 64 * g), Some(8 * g)); assert_eq!(cap_for("agent", 100 * g), Some(40 * g));
     }
+    /// A scope systemd would not make (an older systemd's "Unknown assignment: OOMPolicy=continue"): the same launch again unscoped, and the
+    /// command runs; one that systemd made runs scoped.
+    #[cfg(target_os = "linux")]
+    #[tokio::test] async fn a_launch_whose_scope_fails_runs_unscoped() {
+        let (_d, f) = super::probe_tests::fake("memscope", 239, &["OOMPolicy"], false);
+        let tries = std::sync::Arc::new(std::sync::Mutex::new(Vec::<bool>::new()));
+        let run = |wrap: Option<Vec<String>>| {
+            let t = tries.clone(); let f = f.clone();
+            let child = spawn(wrap, Evidence::Stderr, move |w: Option<Vec<String>>| {
+                t.lock().unwrap().push(w.is_some());
+                let mut c = match w { Some(w) => { let mut c = tokio::process::Command::new(&f); c.args(w).arg("sh"); c } None => tokio::process::Command::new("sh") };
+                c.args(["-c", "echo ran"]).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()); c
+            }).unwrap();
+            child
+        };
+        let o = run(Some(args("agent", 1, 0, "40%", "t.slice"))).wait_with_output().await.unwrap();
+        assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "ran"); assert!(o.status.success());
+        assert_eq!(*tries.lock().unwrap(), vec![true, false], "scoped, then unscoped once");
+        assert!(OFF.load(std::sync::atomic::Ordering::Relaxed), "scopes off for the session");
+        tries.lock().unwrap().clear();
+        let o = run(Some(args_with("agent", 1, 1, Some("40%"), "t.slice", &["MemorySwapMax=1G".into()]))).wait_with_output().await.unwrap();
+        assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "ran"); assert_eq!(*tries.lock().unwrap(), vec![true], "a scope it takes: no retry");
+        // a command that fails at once by itself (exit 1, its own words) is never run twice, and its stderr is still there for the caller
+        tries.lock().unwrap().clear();
+        let ff = f.clone(); let t = tries.clone();
+        let o = spawn(Some(args_with("agent", 1, 2, None, "t.slice", &[])), Evidence::Stderr, move |w| { t.lock().unwrap().push(w.is_some());
+            let mut c = match w { Some(w) => { let mut c = tokio::process::Command::new(&ff); c.args(w).arg("sh"); c } None => tokio::process::Command::new("sh") };
+            c.args(["-c", "echo not logged in >&2; exit 1"]).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()); c }).unwrap().wait_with_output().await.unwrap();
+        assert_eq!(*tries.lock().unwrap(), vec![true], "run once"); assert_eq!(o.status.code(), Some(1)); assert_eq!(String::from_utf8_lossy(&o.stderr).trim(), "not logged in");
+        let a = args_with("work", 7, 3, None, "s.slice", &["MemorySwapMax=1G".into()]);
+        assert!(!a.iter().any(|x| x.starts_with("MemoryMax") || x.starts_with("OOMPolicy")) && a.iter().any(|x| x == "MemorySwapMax=1G"), "{a:?}");
+    }
     #[test] fn scopes_are_off_in_tests() { assert!(!on() && wrap("agent").is_none()) }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+pub mod probe_tests {
+    use crate::scopeprobe::*;
+    use std::process::{Command, Stdio};
+    use std::time::Duration;
+    /// A stand-in systemd-run: `version` for --version, rejecting every property in `rejects` the way systemd does ("Unknown assignment"),
+    /// else running what follows `--`. `None` for the version: one that cannot make any scope (no user manager).
+    /// (its folder, removed when dropped; the stand-in's path)
+    pub fn fake(name: &str, version: u32, rejects: &[&str], no_manager: bool) -> (crate::plat::tmp::TempDir, std::path::PathBuf) {
+        let d = crate::plat::tmp::dir(&format!("scopeprobe-{name}"));
+        let p = d.join("systemd-run");
+        let rej: String = rejects.iter().map(|r| format!("{r}=*) echo \"Unknown assignment: $a\" >&2; exit 1;; ")).collect();
+        let body = format!("#!/bin/sh\ncase \"$1\" in --version) echo \"systemd {version} (test)\"; echo +PAM; exit 0;; esac\n{}for a; do case \"$a\" in {rej}esac; done\nwhile [ $# -gt 0 ] && [ \"$1\" != -- ]; do shift; done; shift; exec \"$@\"\n",
+            if no_manager { "echo 'Failed to create bus connection: No such file or directory' >&2; exit 1\n" } else { "" });
+        std::fs::write(&p, body).unwrap();
+        use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // a fork elsewhere in this test process may still hold the file open for writing a moment (ETXTBSY): run it until it runs
+        for _ in 0..200 { match Command::new(&p).arg("--version").stdout(Stdio::null()).status() { Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) => std::thread::sleep(Duration::from_millis(10)), _ => break } }
+        (d, p)
+    }
+    fn w(v: &[&str]) -> Vec<String> { v.iter().map(|s| s.to_string()).collect() }
+    #[test] fn an_older_systemd_gets_a_scope_without_the_properties_it_rejects() {
+        let (_d, f) = fake("old", 239, &["OOMPolicy", "ManagedOOMPreference"], false);
+        let want = w(&["MemoryMax=40%", "MemorySwapMax=1G", "OOMPolicy=continue", "ManagedOOMPreference=none"]);
+        let s = probe_in(&|p| Command::new(p), f.to_str().unwrap(), true, &w(&["--slice=t.slice"]), &want);
+        assert!(s.ok, "{s:?}"); assert_eq!(s.version, Some(239));
+        assert_eq!(s.props, w(&["MemoryMax=40%", "MemorySwapMax=1G"]));
+        assert_eq!(describe(&s, &want), "systemd 239; without OOMPolicy=continue, ManagedOOMPreference=none (not supported here)");
+
+        let (_d, f) = fake("mid", 250, &["OOMPolicy"], false); // knows OOMPolicy, not for scopes: the probe, not the version, decides
+        assert_eq!(probe_in(&|p| Command::new(p), f.to_str().unwrap(), true, &[], &want).props, w(&["MemoryMax=40%", "MemorySwapMax=1G", "ManagedOOMPreference=none"]));
+        let (_d, f) = fake("new", 255, &[], false);
+        let s = probe_in(&|p| Command::new(p), f.to_str().unwrap(), true, &[], &want); assert_eq!(s.props, want); assert_eq!(describe(&s, &want), "systemd 255");
+    }
+    #[test] fn no_systemd_run_no_bus_or_no_manager_is_no_scope_never_an_error() {
+        let want = w(&["OOMPolicy=continue"]);
+        let s = probe_in(&|p| Command::new(p), "/nonexistent/systemd-run", true, &[], &want); assert!(!s.ok && s.why == "no systemd-run", "{s:?}");
+        let (_d, f) = fake("nobus", 255, &[], false);
+        let s = probe_in(&|p| Command::new(p), f.to_str().unwrap(), false, &[], &want); assert!(!s.ok && s.why == "no user session bus", "{s:?}");
+        let (_d, f) = fake("nomgr", 252, &[], true);
+        let s = probe_in(&|p| Command::new(p), f.to_str().unwrap(), true, &[], &want); assert!(!s.ok && s.why.contains("Failed to create bus connection"), "{s:?}");
+        assert!(describe(&s, &want).starts_with("systemd 252: no scopes ("), "{}", describe(&s, &want));
+    }
+    #[test] fn a_launch_is_seen_to_start_or_to_fail_for_its_scope() {
+        let (_d, f) = fake("exec", 239, &["OOMPolicy"], false); let prog = f.to_str().unwrap();
+        let mut ok = Command::new(prog).args(["--user", "--scope", "--", "sleep", "2"]).spawn().unwrap();
+        assert_eq!(wait_exec_of(prog, ok.id(), || ok.try_wait().map_or(true, |s| s.is_some()), Duration::from_secs(3)), Launch::Started);
+        let _ = ok.kill(); let _ = ok.wait();
+        let mut bad = Command::new(prog).args(["--user", "--scope", "-p", "OOMPolicy=continue", "--", "sleep", "2"]).stderr(Stdio::null()).spawn().unwrap();
+        assert_eq!(wait_exec_of(prog, bad.id(), || bad.try_wait().map_or(true, |s| s.is_some()), Duration::from_secs(3)), Launch::Failed);
+    }
 }

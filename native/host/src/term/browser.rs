@@ -101,8 +101,9 @@ impl Browser {
     async fn spawn(self: &Arc<Self>, st: &mut St) -> Option<mpsc::Sender<String>> {
         let exe = self.exe.clone()?; let home = &self.hub.cfg.home;
         let _ = std::fs::create_dir_all(home.join("shots"));
-        let mut child = crate::proc::tokio_cmd_in(crate::proc::Kind::Browser, exe, crate::memscope::wrap_helper("browser")).args(["--profile".into(), home.join("browser-profile").to_string_lossy().into_owned(), "--jpeg-dir".into(), home.join("shots").to_string_lossy().into_owned()])
-            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true).spawn().ok()?;
+        let make = |wrap: Option<Vec<String>>| { let mut c = crate::proc::tokio_cmd_in(crate::proc::Kind::Browser, &exe, wrap); c.args(["--profile".into(), home.join("browser-profile").to_string_lossy().into_owned(), "--jpeg-dir".into(), home.join("shots").to_string_lossy().into_owned()])
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true); c };
+        let mut child = crate::memscope::spawn(crate::memscope::wrap_helper("browser"), crate::memscope::Evidence::Assume, make).ok()?; // unscoped again when its scope fails
         let (mut stdin, stdout) = (child.stdin.take()?, child.stdout.take()?);
         st.gen += 1; let gen = st.gen;
         let (tx, mut rx) = mpsc::channel::<String>(64);

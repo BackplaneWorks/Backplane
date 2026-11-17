@@ -391,7 +391,9 @@ fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &P
     // Windows: an npm shim runs as what it starts, and nothing else goes through cmd.exe or sh with arguments they would change (`plan`)
     let (program, pre) = plan(program, &args, cfg!(windows), &|| find_in(search_dirs(), "node", true)).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
     // its own memory scope (memscope.rs): a runaway it starts is killed alone, never the hub's scope with every agent in it
-    let mut c = crate::proc::tokio_cmd_in(kind, &program, crate::memscope::wrap("agent")); crate::memscope::raise_oom(&mut c);
+    // a launch that fails for its scope (an older systemd, no user manager) starts again unscoped (memscope::spawn), never failing the agent
+    let make = |wrap: Option<Vec<String>>| {
+    let mut c = crate::proc::tokio_cmd_in(kind, &program, wrap); crate::memscope::raise_oom(&mut c);
     c.args(&pre).args(&args).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     // production: the agent runs with the merged PATH (its own children find node, git...); a test's stand-in folder comes first on the hub's own
     let mut path: Option<Vec<PathBuf>> = if person.is_none() && extra_path.is_none() { Some(search_dirs().to_vec()) } else { None };
@@ -408,7 +410,8 @@ fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &P
     }
     // Linux: the kernel kills the agent when the hub dies (PDEATHSIG); Windows: its Job Object does. Elsewhere the `reaper` watcher does (the whole group, grandchildren included).
     crate::plat::proc::agent_group(&mut c);
-    let mut child = c.spawn()?;
+    c };
+    let mut child = crate::memscope::spawn(crate::memscope::wrap("agent"), crate::memscope::Evidence::Stderr, make)?;
     let pid = child.id().unwrap_or(0);
     crate::plat::proc::adopt(pid, true); crate::memscope::cap_job(pid, "agent"); // Windows: its Job Object's memory limit (Linux: its scope)
     reaper::add(pid);
