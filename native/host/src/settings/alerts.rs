@@ -52,7 +52,11 @@ pub fn frame(thread: &str, title: &str, body: &str, kind: &str, key: &str) -> Va
 pub fn clear_frame(thread: &str, key: &str) -> Value { json!({"t":"notify.clear","thread":thread,"key":key}) }
 
 #[derive(Default)]
-pub struct Desks { looks: Mutex<HashMap<u64, Look>>, needs: Mutex<Needs> }
+pub struct Desks { looks: Mutex<HashMap<u64, Look>>, needs: Mutex<Needs>, secrets: Mutex<HashMap<String, (u64, String)>> }
+/// The desk notification of a secret an agent asked for (`secret.ask.<name>`): the secret, what for, the thread that waits; its key closes it when the request ends.
+pub fn secret_frame(name: &str, purpose: &str, thread: &str, title: &str) -> Value {
+    frame(thread, if title.is_empty() { "Backplane" } else { title }, &crate::push::secret_say(name, purpose, title, false).replace("Tap to enter it.", "Enter it in the masked box there."), "ask", &format!("secret-{name}"))
+}
 /// What a desk was told about asks: the open asks' threads, and per thread the desk and key of its ask notification (bounded).
 #[derive(Default)]
 pub struct Needs { open: HashMap<String, String>, told: HashMap<String, (u64, String)> }
@@ -105,6 +109,22 @@ impl Observer for Alerts {
             if e["$"] == "AskOpened" { if let (Some(id), Some(th)) = (e["id"].as_str(), e["thread"].as_str()) { self.0.needs.lock().unwrap().opened(id, th); } continue }
             if e["$"] == "AskClosed" { if let Some((th, c, key)) = e["id"].as_str().and_then(|id| self.0.needs.lock().unwrap().closed(id)) { hub.push(c, clear_frame(&th, &key)); } continue }
             if e["$"] != "SettingSet" { continue }
+            // a secret an agent waits on: the desk used last is told, whatever it shows (the box is easy to miss in a thread not open); its end closes the notification
+            if let Some(name) = e["key"].as_str().and_then(|k| k.strip_prefix(crate::push::SECRET)) {
+                let v = e["value"].as_str().unwrap_or("");
+                if v.is_empty() { if let Some((c, th)) = self.0.secrets.lock().unwrap().remove(name) { hub.push(c, clear_frame(&th, &format!("secret-{name}"))); } continue }
+                let b: Value = serde_json::from_str(v).unwrap_or(Value::Null);
+                let (name, thread, purpose) = (name.to_string(), b["thread"].as_str().unwrap_or("").to_string(), b["purpose"].as_str().unwrap_or("").to_string());
+                if self.0.secrets.lock().unwrap().contains_key(&name) || tokio::runtime::Handle::try_current().is_err() { continue }
+                let (hub, desks) = (hub.clone(), self.0.clone());
+                tokio::spawn(async move {
+                    let title = { let m = hub.model.lock().await; m.threads.get(&thread).map(|t| t.title.clone()).unwrap_or_default() };
+                    let Some(c) = lead(&desks.live(&hub)) else { return };
+                    hub.push(c, secret_frame(&name, &purpose, &thread, &title));
+                    let mut m = desks.secrets.lock().unwrap(); if m.len() > 256 { m.clear() } m.insert(name, (c, thread));
+                });
+                continue
+            }
             let Some(thread) = e["key"].as_str().and_then(|k| k.strip_prefix("alert.")) else { continue };
             let Some(v) = e["value"].as_str() else { continue };
             let (kind, key, text) = parse(v);
