@@ -584,18 +584,25 @@ async fn a_run(s: &S, n: usize) -> (String, String) {
 }
 
 #[tokio::test] async fn a_secret_request_alerts_the_phone_tells_bub_shows_on_the_plane_reminds_once_and_clears_when_set() {
+    // no wall clock: every wait is for a condition (bounded at 60 s), and the reminder comes by an explicit tick (`remind_now`), never by its hour passing
+    async fn eventually<F: std::future::Future<Output = bool>>(what: &str, f: impl Fn() -> F) { for _ in 0..2000 { if f().await { return } tokio::time::sleep(std::time::Duration::from_millis(30)).await } panic!("timed out waiting for {what}") }
     let s = setup("secret").await;
+    let book_of = || async { s.hub.setting(push::BOOK).await.and_then(|v| serde_json::from_str::<Book>(&v).ok()).unwrap_or_default() };
+    let cleared = |s: &S| log(&s.hub).iter().filter(|e| e["$"] == "PushCleared").count();
     s.hub.commit(&json!({"$":"ProjectCreated","id":"pw","title":"Builds","root":"/w","at":1})).await.unwrap();
     s.hub.commit(&json!({"$":"ThreadCreated","id":"tw","project":"pw","title":"Windows build VM","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap();
-    // what secret_request writes (settings/secret.rs `tool_request`), asked 3599 s ago so its reminder is due in a second
-    let at = now_s() - (push::SECRET_AGAIN_S - 1);
+    // what secret_request writes (settings/secret.rs `tool_request`), asked now: its reminder is an hour away
+    let at = now_s();
     let key = crate::settings::secret::ask_key("tailscale-winbuild");
     set(&s.hub, &key, &crate::settings::secret::ask_body("join the build VM to the tailnet", "tw", "tw", at)).await;
     // the phone: one needs_you alert in the uberbot's name, naming the secret, the purpose and the thread, opening that thread (its masked box)
-    let a = s.fake.wait(1).await;
+    let a = s.fake.wait(1).await; assert_eq!(a.len(), 1, "{a:?}");
     assert_eq!((a[0]["thread"].as_str(), a[0]["kind"].as_str()), (Some("tw"), Some("needs_you")), "{a:?}");
     assert_eq!(a[0]["aps"]["alert"]["body"].as_str(), Some("Windows build VM needs the secret tailscale-winbuild: join the build VM to the tailnet. Tap to enter it."));
     let ordered = log(&s.hub).into_iter().find(|e| e["$"] == "PushOrdered").unwrap(); assert_eq!((ordered["how"].as_str(), ordered["bot"].as_str()), (Some("notify"), Some(s.bub.as_str())));
+    // the reminder waits in the book for its hour, out of the badge
+    eventually("the first alert open and its reminder held", || async { let b = book_of().await; b.open.len() == 1 && b.held.len() == 1 }).await;
+    let b = book_of().await; assert!(b.held[0].id.ends_with("-again") && b.held[0].due == at + push::SECRET_AGAIN_S, "{b:?}"); assert_eq!(b.badge(0), 1);
     // Bub's conversation: a visible ask linking to the box
     let tell = log(&s.hub).into_iter().find(|e| e["$"] == "MessagePosted" && e["thread"] == s.chat.as_str() && e["msg"].as_str().unwrap_or("").starts_with("tell:secret-")).expect("a line in Bub's chat");
     let t = tell["text"].as_str().unwrap(); assert!(t.contains("`tailscale-winbuild`") && t.contains("(backplane://thread/tw)") && t.contains("masked box"), "{t}");
@@ -605,21 +612,19 @@ async fn a_run(s: &S, n: usize) -> (String, String) {
     // asking again while it waits adds nothing; looking at the thread is not answering it
     set(&s.hub, &key, &crate::settings::secret::ask_body("again", "tw", "tw", at)).await;
     s.push.seen("tw");
-    // the reminder, once, in place of the first alert
+    // the hour passes: the reminder, once, in place of the first alert (whose clear goes first)
+    s.push.remind_now();
     let a = s.fake.wait(2).await; assert_eq!(a.len(), 2, "{a:?}");
     assert!(a[1]["aps"]["alert"]["body"].as_str().unwrap().starts_with("Still waiting: Windows build VM needs the secret tailscale-winbuild"), "{a:?}");
-    until(&s.hub, |l| l.iter().any(|e| e["$"] == "PushCleared")).await;
-    let book_of = || async { serde_json::from_str::<Book>(&s.hub.setting(push::BOOK).await.unwrap()).unwrap() };
-    for _ in 0..200 { if book_of().await.open.iter().any(|i| i.id.ends_with("-again")) { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await }
-    let book = book_of().await;
-    assert_eq!((book.open.len(), book.held.len(), book.badge(0)), (1, 0, 1), "{book:?}");
-    // the secret is set: the request is emptied, and every alert of it goes
+    eventually("the reminder open alone", || async { let b = book_of().await; b.held.is_empty() && b.open.len() == 1 && b.open[0].id.ends_with("-again") }).await;
+    eventually("the first alert's clear", || async { cleared(&s) >= 1 }).await;
+    assert_eq!((cleared(&s), book_of().await.badge(0)), (1, 1));
+    // the secret is set: the request is emptied, and every alert of it goes (the book is saved before its clear is recorded: wait for both)
     set(&s.hub, &key, "").await;
-    for _ in 0..200 { let b: Book = serde_json::from_str(&s.hub.setting(push::BOOK).await.unwrap()).unwrap(); if b.open.is_empty() { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await }
-    let book: Book = serde_json::from_str(&s.hub.setting(push::BOOK).await.unwrap()).unwrap(); assert!(book.open.is_empty() && book.held.is_empty(), "{book:?}");
-    assert_eq!(log(&s.hub).iter().filter(|e| e["$"] == "PushCleared").count(), 2);
+    eventually("the book empty and the reminder's clear", || async { let b = book_of().await; b.open.is_empty() && b.held.is_empty() && cleared(&s) == 2 }).await;
     let (_, plane) = s.bots.tool_call(&s.chat, "plane_read", &json!({})).await; assert!(!plane["text"].as_str().unwrap_or("").contains("secret"), "{plane}");
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await; assert_eq!(s.fake.alerts().len(), 2, "no more alerts");
+    // nothing more is sent: the worker has handled the clear (the book is empty), and the reminder is gone from it
+    assert_eq!(s.fake.alerts().len(), 2, "no more alerts");
 }
 
 #[test] fn a_secret_alert_names_the_secret_the_purpose_and_the_thread() {

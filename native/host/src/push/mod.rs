@@ -263,13 +263,15 @@ pub fn hears(d: &Device, through: bool) -> bool { d.kind == "alert" && d.platfor
 pub enum Sent { Ok, Dead, Later(String) }
 pub trait Carrier: Send + Sync { fn send(self: Arc<Self>, hub: Arc<Hub>, d: Device, frame: apns::Frame) -> futures_util::future::BoxFuture<'static, Sent>; }
 
-enum Msg { Devices, Order(Value), Asked(String), Spoke(String), Seen(String), Clear, Prefs, SignIn(String, String), Secret(String, String) }
+enum Msg { Devices, Order(Value), Asked(String), Spoke(String), Seen(String), Clear, Prefs, SignIn(String, String), Secret(String, String), #[cfg(test)] RemindNow }
 pub struct Push { tx: mpsc::UnboundedSender<Msg> }
 impl Push {
     /// `push.seen`: a device opened the thread.
     pub fn seen(&self, thread: &str) { let _ = self.tx.send(Msg::Seen(thread.into())); }
     /// `push.clear`: everything waiting that is not an open ask leaves the book (the person cleared the badge; once, Nov 10, the backlog the desktop never marked seen).
     pub fn clear(&self) { let _ = self.tx.send(Msg::Clear); }
+    /// A test's explicit tick: every secret reminder waiting for its hour is due now, so no test waits on the clock.
+    #[cfg(test)] pub fn remind_now(&self) { let _ = self.tx.send(Msg::RemindNow); }
 }
 struct Watch(Arc<Push>);
 impl crate::api::Observer for Watch {
@@ -345,6 +347,7 @@ impl Worker {
             Msg::Spoke(t) | Msg::Seen(t) => self.deal(move |i| i.thread == t && i.ask.is_empty() && !secret_item(&i.id)).await,
             Msg::Clear => self.deal(|i| i.ask.is_empty() && !secret_item(&i.id)).await,
             Msg::Secret(name, v) => self.secret(&name, &v).await,
+            #[cfg(test)] Msg::RemindNow => { for i in &mut self.book.held { if i.id.ends_with("-again") { i.due = 0 } } self.flush().await }
             // the record of an expired sign-in: the alert, once; its clearing (the account is back) takes it off every phone
             Msg::SignIn(key, v) => {
                 let provider = key.strip_prefix(SIGNIN).unwrap_or("").to_string();
