@@ -957,6 +957,7 @@ try:
                 between = [w[2] for w in order[:ours] if w[1] != kpid]
                 k = next((w for w in order if w[1] == kpid and w[3][2] > 200), None)
                 print(f'INFO narrow {tag}: KiCad\'s frame is not directly above Backplane\'s window; above it: {between}; measured by its pid ({bool(k)})', flush=True)
+                print(f'INFO narrow {tag}: windows (number, pid, bounds), front first: {[(w[0], "client" if w[1] == client.pid else "kicad" if w[1] == kpid else "other", w[3]) for w in order if w[1] in (client.pid, kpid)]}; Backplane\'s was {cw[0]}; the last push {last_push()}', flush=True)
                 if not k: return None
             path = os.path.join(OUT, f'crop-{tag}.rgb')
             relay(op='crop', x=k[3][0], y=k[3][1], w=k[3][2], h=k[3][3], path=path)
