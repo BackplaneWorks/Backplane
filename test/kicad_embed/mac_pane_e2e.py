@@ -977,22 +977,26 @@ try:
                 if abs(p[0][2] - target) <= 3: break
                 if prev and b[2] != prev[0] and p[0][2] != prev[1]: slope = max(0.2, min(2.0, (p[0][2] - prev[1]) / (b[2] - prev[0])))
                 prev = (b[2], p[0][2])
-                win_size(client.pid, max(500, min(1900, round(b[2] + (target - p[0][2]) / slope))), b[3]); time.sleep(2.0)
+                ww = max(500, min(1900, round(b[2] + (target - p[0][2]) / slope))); mark(f'window width {ww}'); win_size(client.pid, ww, b[3]); time.sleep(2.0)
             p = last_push()
             if p and p[0][2] < target - 3 and not folded[0]:
                 # wider than the window allows with the sidebar open (a 1000 pt pane on a 1920 pt display): fold it (Cmd+B in Backplane)
                 b = next((w for w in wins() if w[0] == cw[0]), cw)[3]
-                click(b[0] + 20, b[1] + b[3] - 40); time.sleep(0.6); key(K_B, CMD); time.sleep(2.0); folded[0] = True
+                mark('fold: click in the sidebar'); click(b[0] + 20, b[1] + b[3] - 40); time.sleep(0.6); mark('fold: Cmd+B'); key(K_B, CMD); time.sleep(2.0); folded[0] = True
                 return set_pane(target)
             time.sleep(3.0)  # the panels follow the width (EmbedAutoPanels)
             return last_push()[0][2] if last_push() else None
+        TR0 = [time.time()]
+        if os.environ.get('ZTRACE'):
+            helper(f'trace {client.pid} {kpid} {os.path.join(OUT, "ztrace.txt")} 400'); TR0[0] = time.time()
+        mark = lambda what: print(f'INFO ztrace {round((time.time() - TR0[0]) * 1000)} ms: {what}', flush=True)
         for tab in ('PCB', 'SCH'):
             if tab == 'SCH':
                 r = rects().get('kicad-tab:SCH'); b = next((w for w in wins() if w[0] == cw[0]), cw)[3]
                 if r: click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2)
                 wait_for(lambda: (k := kicad_frame()) and k, 60, 0.5); time.sleep(5)
             for target in (611, 480, 1000):
-                got = set_pane(target); m = frame_canvas(f'{tab}-{target}'); RES[f'narrow_{tab}_{target}'] = {'pane': got, **(m or {})}
+                mark(f'{tab} set_pane {target}'); got = set_pane(target); mark(f'{tab} measure {target} (pane {got})'); m = frame_canvas(f'{tab}-{target}'); RES[f'narrow_{tab}_{target}'] = {'pane': got, **(m or {})}
                 check(bool(m) and not m['whole_frame'] and m['share'] >= 0.6 and got and abs(got - target) <= 6,
                       f'narrow: {tab} in a {target} px pane ({got}): the canvas has at least 60 % of it ({m})')
             # Full size: the pane takes the room, and the panels come back

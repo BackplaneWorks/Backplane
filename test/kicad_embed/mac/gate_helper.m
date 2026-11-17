@@ -5,6 +5,8 @@
 //   displays           the active displays: id, bounds in points, pixel size, main, and which ones this helper made
 //   virtual N WxH      N virtual displays of W x H points (CGVirtualDisplay, a private API: test rig only, never the product);
 //                      they live as long as this helper (or until `virtual 0`)
+//   trace A B PATH S   for S seconds, the stacking of pids A and B's windows (and any window between them) at 60 Hz, a line on each
+//                      change: ms, then front to back number:tag:alpha:bounds (tag a, b or o for another pid); never titles
 //   quit
 // clang -fobjc-arc -framework Foundation -framework AppKit -framework CoreGraphics gate_helper.m -o gate_helper
 //   ./gate_helper serve ~/bp-gate-m/helper.sock      (or one request: ./gate_helper windows)
@@ -112,6 +114,50 @@ static id makeVirtual( int count, unsigned w, unsigned h )
     return @{ @"made": @( s_virtual.count ) };
 }
 
+
+// the stacking of two apps' windows at 60 Hz, a line on each change (the blank-pane hunt: who re-orders last)
+static void traceOrder( int a, int b, NSString* path, double secs )
+{
+    FILE* f = fopen( path.UTF8String, "w" );
+    if( !f )
+        return;
+    NSString* last = @"";
+    CFAbsoluteTime t0 = CFAbsoluteTimeGetCurrent();
+    while( CFAbsoluteTimeGetCurrent() - t0 < secs )
+    {
+        CFArrayRef list = CGWindowListCopyWindowInfo( kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID );
+        NSMutableArray* parts = [NSMutableArray array];
+        BOOL seenA = NO, seenB = NO;
+        for( NSDictionary* w in (__bridge NSArray*) list )
+        {
+            int pid = [w[(id) kCGWindowOwnerPID] intValue];
+            if( [w[(id) kCGWindowLayer] intValue] != 0 )
+                continue;
+            BOOL mine = pid == a || pid == b;
+            if( !mine && !( seenA || seenB ) )
+                continue;
+            if( !mine && seenA && seenB )
+                break;
+            seenA |= pid == a; seenB |= pid == b;
+            CGRect r = CGRectZero;
+            CGRectMakeWithDictionaryRepresentation( (__bridge CFDictionaryRef) w[(id) kCGWindowBounds], &r );
+            [parts addObject:[NSString stringWithFormat:@"%@:%s:%.2f:%.0f,%.0f,%.0f,%.0f", w[(id) kCGWindowNumber], pid == a ? "a" : pid == b ? "b" : "o",
+                              [w[(id) kCGWindowAlpha] doubleValue], r.origin.x, r.origin.y, r.size.width, r.size.height]];
+        }
+        if( list )
+            CFRelease( list );
+        NSString* now = [parts componentsJoinedByString:@" "];
+        if( ![now isEqualToString:last] )
+        {
+            fprintf( f, "%.0f %s\n", ( CFAbsoluteTimeGetCurrent() - t0 ) * 1000, now.UTF8String );
+            fflush( f );
+            last = now;
+        }
+        usleep( 16000 );
+    }
+    fclose( f );
+}
+
 static NSString* answer( NSString* line )
 {
     NSArray* a = [line componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
@@ -119,6 +165,12 @@ static NSString* answer( NSString* line )
     id        out;
     if( [cmd isEqualToString:@"windows"] )
         out = windows();
+    else if( [cmd isEqualToString:@"trace"] && a.count > 4 )
+    {
+        int pa = [a[1] intValue], pb = [a[2] intValue]; NSString* path = a[3]; double secs = [a[4] doubleValue];
+        dispatch_async( dispatch_get_global_queue( 0, 0 ), ^{ traceOrder( pa, pb, path, secs ); } );
+        out = @{ @"trace": path };
+    }
     else if( [cmd isEqualToString:@"displays"] )
         out = displays();
     else if( [cmd isEqualToString:@"active"] && a.count > 1 )
