@@ -3,6 +3,7 @@
 #   C1  nothing unsaved: Ctrl+W closes the PCB frame; the pane leaves Edit for View (Edit offered again); Edit opens a fresh frame
 #   C2  an unsaved edit, Ctrl+W, KiCad's prompt answered Cancel (Escape): the editor stays, still modified, the pane in Edit
 #   C3  the same, the prompt answered Save (Return, its default): the board is written, the frame closes, the pane goes to View
+#   C4  Ctrl+W then Edit, CLOSE_REPS (20) times; C5  the same with a show pending as KiCad closes: never stuck, the editor back
 # XTest as a person types; fork only.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -15,8 +16,8 @@ discover_bins; discover_kicad; init_isolated_dirs
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 PCB=$(ls "$OUT"/proj/*.kicad_pcb | head -1)
 start_xvfb_and_wm; start_hub
-echo '[{"select":0},{"wait":2200},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},{"kicad":{"wait_painted":60000,"kind":"PCB","tag":"ready"}},{"mark":"ready"},{"wait":200000}]' >"$OUT/script.json"
-HOME="$OUT/fh" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 240 >"$OUT/client.log" 2>&1 &
+echo '[{"select":0},{"wait":2200},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},{"kicad":{"wait_painted":60000,"kind":"PCB","tag":"ready"}},{"mark":"ready"},{"wait":1500000}]' >"$OUT/script.json"
+HOME="$OUT/fh" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 1600 >"$OUT/client.log" 2>&1 &
 CP=$!; track_pid "$CP"
 wait_for_log "$OUT/client.log" '"name":"ready","event":"mark"' 480 || { echo "FAIL the board never opened in KiCad"; exit 1; }
 R=$(last_kicad_report "$OUT/client.log" ready)
@@ -68,5 +69,26 @@ N=$(wc -l <"$OUT/client.log"); keys_to_kicad
 python3 "$XINPUT_PY" chord ctrl w; sleep 1.5
 python3 "$XINPUT_PY" key Return; sleep 3
 check "C3 Save in KiCad's prompt writes the board and closes the editor; the pane goes to View" "$([ "$(sha256sum "$PCB" | cut -d' ' -f1)" != "$SHA0" ] && [ -z "$(pcb_frame)" ] && tail -n +"$N" "$OUT/client.log" | grep -q '"kicad_frame_closed":"PCB"' && [ -n "$(ctl_at ui:Edit)" ] && echo 1 || echo 0)" "board written $([ "$(sha256sum "$PCB" | cut -d' ' -f1)" != "$SHA0" ] && echo yes || echo no)"
+# C4: Ctrl+W, CLOSE_REPS times (20): each time the pane leaves Edit for View, and Edit brings a fresh board editor back (lane M's Mac
+# table: once in a while the pane stayed editing with no frame, and Edit did nothing). C5: the same with a show pending as KiCad closes
+# (the pane's own board tab pressed right after Ctrl+W): never stuck; the editor back, at once or through Edit.
+[ -n "$(pcb_frame)" ] || edit_again >/dev/null
+reps=${CLOSE_REPS:-20}
+cycle() { # $1 pending|plain: 1 when the board editor is back after the close
+  local n at
+  n=$(wc -l <"$OUT/client.log"); keys_to_kicad
+  python3 "$XINPUT_PY" chord ctrl w
+  if [ "$1" = pending ]; then sleep 0.15; at=$(ctl_at kicad-tab:PCB); [ -n "$at" ] && python3 "$XINPUT_PY" click $at; fi
+  for _ in $(seq 40); do
+    [ -n "$(pcb_frame)" ] && [ "$1" = pending ] && { echo 1; return; }
+    [ -z "$(pcb_frame)" ] && [ -n "$(ctl_at ui:Edit)" ] && break
+    sleep 0.25
+  done
+  [ -n "$(edit_again)" ] && echo 1 || echo 0
+}
+OK4=0; for i in $(seq "$reps"); do [ "$(cycle plain)" = 1 ] && OK4=$((OK4 + 1)) || echo "INFO C4 run $i: the editor did not come back"; done
+check "C4 Ctrl+W then Edit, $reps times: the pane follows each close and Edit brings the board editor back" "$([ "$OK4" = "$reps" ] && echo 1 || echo 0)" "$OK4 of $reps"
+OK5=0; for i in $(seq "$reps"); do [ "$(cycle pending)" = 1 ] && OK5=$((OK5 + 1)) || echo "INFO C5 run $i: the editor did not come back"; done
+check "C5 Ctrl+W with a show pending, $reps times: never stuck, the board editor back" "$([ "$OK5" = "$reps" ] && echo 1 || echo 0)" "$OK5 of $reps"
 kill "$CP" 2>/dev/null || true; wait "$CP" 2>/dev/null || true
 finish_suite "embed_close_e2e ($EMBED_MODE)"

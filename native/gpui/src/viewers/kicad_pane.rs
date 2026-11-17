@@ -372,6 +372,10 @@ pub struct KicadPane {
     prewarmed: Option<u64>,
     /// when the first editor was placed over the pane (the pre-warm waits 2 s after it)
     first_placed: Option<std::time::Instant>,
+    /// this pane has had a KiCad frame on show (any platform; until KiCad is another process): a later info without the frame it wants is
+    /// that frame closed in KiCad. Sticky: on macOS the frame's hiding reached the pane before its close, and the placement read at the
+    /// close already said nothing on show, so a Cmd+W left the pane editing with no frame and Edit did nothing (lane M's Mac table)
+    shown_once: bool,
     /// where the pane was last drawn (window coordinates): the comment window opens over it (screens/kcomment.rs)
     pub at_px: Option<Bounds<Pixels>>,
     /// KiCad's dialogs on screen now (their titles), as the client's X connection sees them
@@ -419,6 +423,10 @@ pub struct PaneFrameClosed(pub String);
 impl EventEmitter<PaneFrameClosed> for KicadPane {}
 /// The kind of the frame KiCad closed under the pane: the one it showed (`wanted`), in the old info and in the new one no longer, the
 /// same KiCad (pid) still ready. None while KiCad starts, restarts or is gone (those say so themselves).
+/// KiCad is up and has no frame of `kind` (closed in KiCad, or never opened).
+pub fn missing_frame(info: &Value, kind: &str) -> bool {
+    info["state"] == "ready" && !info["frames"].as_array().into_iter().flatten().any(|f| f["kind"] == kind)
+}
 pub fn closed_frame(old: &Value, new: &Value, wanted: &str) -> Option<String> {
     if old["pid"] != new["pid"] || new["state"] != "ready" || old["state"] != "ready" { return None }
     let has = |i: &Value| i["frames"].as_array().into_iter().flatten().any(|f| f["kind"] == wanted);
@@ -477,7 +485,16 @@ impl KicadPane {
             let _ = drained_tx.send(());
         } }).detach();
         KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_full: false, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
+    }
+    /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
+    pub fn edit_again(&mut self, cx: &mut Context<Self>) {
+        let want = self.wanted_kind().to_string();
+        if !missing_frame(&self.info, &want) { return }
+        eprintln!("GPUI_LOG {}", json!({"kicad_edit_again": want}));
+        self.placed = None; self.pending_show = Some(want.clone());
+        self.rpc("editor.kicad.show", json!({"project": self.project, "frame": want, "focus": true}));
+        cx.notify();
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
@@ -486,9 +503,9 @@ impl KicadPane {
         // (only a frame this pane has shown: a new pane, Edit pressed again, starts from the hub's last word, which may still list the
         // frame closed before it and not yet the one KiCad opens anew)
         // (macOS: KiCad places its own frames, nothing is mapped locally and first_placed stays unset; a frame on show is the mark there)
-        let closed = closed_frame(&self.info, &info, self.wanted_kind()).filter(|_| self.first_placed.is_some() || (cfg!(target_os = "macos") && self.placed.as_ref().is_some_and(|p| p.1.is_some()))).map(|k| { let next = after_close(&k, frame_for(&self.open), &info); (k, next) });
+        let closed = closed_frame(&self.info, &info, self.wanted_kind()).filter(|_| self.first_placed.is_some() || self.shown_once || self.placed.as_ref().is_some_and(|p| p.1.is_some())).map(|k| { let next = after_close(&k, frame_for(&self.open), &info); (k, next) });
         let was_tab = self.tab(); let mut cause = String::from("hub info"); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
-        if info["pid"] != self.info["pid"] { self.ever_shown.clear(); }
+        if info["pid"] != self.info["pid"] { self.ever_shown.clear(); self.shown_once = false; }
         // shown once, or realized (bp.9: KiCad says the client may map it itself, e.g. a pre-warmed editor): the client's to map
         for f in info["frames"].as_array().into_iter().flatten().filter(|f| f["shown"] == true || f["realized"] == true) { if let Some(x) = f["xid"].as_u64() { if !self.ever_shown.contains(&x) { self.ever_shown.push(x); } } }
         // KiCad became ready (a launch, a restart): it is told Backplane's theme again
@@ -1149,6 +1166,7 @@ impl KicadPane {
             self.want_keys = false;
         }
         match at { Some(p) if !over.is_empty() => nc::holes(c, Some(&nc::cut(p, &over))), _ => nc::holes(c, None) }
+        if key.1.is_some() { self.shown_once = true; }
         self.placed = Some(key);
     }
     /// macOS: KiCad's frame follows the pane by itself once it knows where the pane is on screen and whether our window can be seen
@@ -1538,6 +1556,7 @@ mod tests {
         let i = |pid: u64, st: &str, kinds: &[&str]| json!({"pid": pid, "state": st, "frames": kinds.iter().map(|k| json!({"kind": k})).collect::<Vec<_>>()});
         assert_eq!(closed_frame(&i(7, "ready", &["PCB", "SCH"]), &i(7, "ready", &["SCH"]), "PCB").as_deref(), Some("PCB"), "Ctrl+W on the board");
         assert_eq!(closed_frame(&i(7, "ready", &["PCB", "SCH"]), &i(7, "ready", &["PCB"]), "PCB"), None, "another frame closed");
+        use super::missing_frame; assert!(missing_frame(&i(7, "ready", &["SCH"]), "PCB") && !missing_frame(&i(7, "ready", &["PCB"]), "PCB") && !missing_frame(&i(7, "starting", &[]), "PCB"), "Edit asks again only for a frame KiCad no longer has");
         assert_eq!(closed_frame(&i(7, "ready", &["PCB"]), &i(8, "ready", &[]), "PCB"), None, "a new KiCad: its own wait");
         assert_eq!(closed_frame(&i(7, "ready", &["PCB"]), &i(7, "stopped", &[]), "PCB"), None, "KiCad gone: said as such");
         assert_eq!(closed_frame(&i(7, "starting", &[]), &i(7, "ready", &[]), "PCB"), None, "not open yet");
@@ -1823,9 +1842,11 @@ impl crate::Backplane {
             .filter(|k| matches!(k.as_str(), "board" | "schematic" | "3d")) // i18n-ok: rail page kinds
             .or_else(|| (!open_now.is_empty()).then(|| open_now.to_string()))
             .unwrap_or_else(|| "board".to_string()); // i18n-ok: rail page kinds
-        if let Some(p) = &self.screens.kicad {
+        if let Some(p) = self.screens.kicad.clone() {
             let pr = p.read(cx);
-            if belongs_to(&pr.project, &pr.root, &pr.project_id, &key, &pid) { return true }
+            // Edit on this design's own pane: if KiCad no longer has the editor it wants (its frame closed and the pane missed the close), it
+            // is asked for it again: never an Edit that does nothing
+            if belongs_to(&pr.project, &pr.root, &pr.project_id, &key, &pid) { p.update(cx, |p, cx| p.edit_again(cx)); return true }
         }
         let (hub, infos, hub_open) = (self.tx.clone(), self.screens.kicad_infos.clone(), open_now.to_string());
         let page = cx.new(move |cx| { let mut p = KicadPane::new(cx, project, root, pid, open, hub_open, hub); if let Some(v) = infos.values().find(|v| p.matches(v)).cloned() { p.info = v; } p });
