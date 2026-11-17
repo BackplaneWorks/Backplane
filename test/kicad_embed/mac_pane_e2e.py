@@ -613,32 +613,74 @@ try:
     if os.environ.get('MAC_MODE') == 'bs':
         K_X, K_Z = 7, 6
         KEYNAME.update({7: 'x', 6: 'z'}) if DRIVER == 'vnc' else None
-        edits = lambda: hub_log().count('ET_DOCUMENT_EDITED') + hub_log().count('ET_MODIFIED_CHANGED')
+        def evs():
+            out = []
+            for ln in hub_log().splitlines():
+                i = ln.find('kicad embed event: ')
+                if i < 0: continue
+                try: out.append(json.loads(ln[i + 19:]))
+                except ValueError: pass
+            return out
+        seq = lambda: max((int(e.get('seq', 0)) for e in evs()), default=0)
+        def edits_since(n, frame=None):  # KiCad's own edit events after seq n: (created, deleted) counts each
+            r = []
+            for e in evs():
+                if int(e.get('seq', 0)) > n and e.get('type') == 'ET_DOCUMENT_EDITED':
+                    try: d = json.loads(e.get('detail') or '{}')
+                    except ValueError: d = {}
+                    r.append((len(d.get('created') or []), len(d.get('deleted') or [])))
+            return r
+        def checks_idle(n, t=20):  # the checks KiCad runs after an edit have reported (ET_CHECKS_DONE after seq n)
+            return wait_for(lambda: any(int(e.get('seq', 0)) > n and e.get('type') == 'ET_CHECKS_DONE' for e in evs()), t)
+        def sel_refs():
+            for e in reversed(evs()):
+                if e.get('type') == 'ET_SELECTION_CHANGED': return (e.get('selection') or {}).get('references') or []
+            return []
         def board_click(fx=0.5, fy=0.5):
             p = last_push(); click(p[0][0] + p[0][2] * fx, p[0][1] + p[0][3] * fy); time.sleep(0.6)
         def deleted(after, tag):
-            e0 = edits(); after()
-            ok = bool(wait_for(lambda: edits() > e0, 3)); shot(f'bs-{tag}')
-            key(K_Z, CMD); time.sleep(1.2)  # undo: the next case starts from the same board
+            n = seq(); after()
+            ok = bool(wait_for(lambda: any(d for c, d in edits_since(n)), 4)); shot(f'bs-{tag}')
+            if ok:  # undo once KiCad's checks are done: the next case starts from the same board
+                checks_idle(n); m = seq(); key(K_Z, CMD); wait_for(lambda: any(c for c, d in edits_since(m)), 4); checks_idle(m)
             return ok
         trace = lambda: open(os.path.join(OUT, 'kicad-embed-trace.log'), errors='replace').read().count('Backspace handed to wx') if os.path.isfile(os.path.join(OUT, 'kicad-embed-trace.log')) else 0
-        # the menu chords (Edit > Undo, Redo, File > Save are menu key equivalents too, like Delete's ⌫): judged by KiCad's own events / the file
+        # the menu chords (Edit > Undo, Redo, File > Save are menu key equivalents too, like Delete's ⌫): judged by KiCad's own edit events
+        # (created = undo of a delete, deleted = redo), never by modified-flag events, which trail the edit itself
         board_click(0.1, 0.9)
-        e0 = edits(); key(K_A, CMD); time.sleep(0.6); key(K_DEL); d_ok = bool(wait_for(lambda: edits() > e0, 3))
+        n0 = seq(); key(K_A, CMD); time.sleep(0.6); key(K_DEL)
+        d_ok = bool(wait_for(lambda: any(d for c, d in edits_since(n0)), 4))
         check(d_ok, 'bs 1: Cmd+A then ⌫ deletes the selection in the embedded board editor')
-        e1 = edits(); key(K_Z, CMD)
-        check(bool(wait_for(lambda: edits() > e1, 3)), 'keys: Cmd+Z undoes in the embedded board editor (an edit event follows)')
-        e2 = edits(); key(K_Z, CMD | SHIFT)
-        check(bool(wait_for(lambda: edits() > e2, 3)), 'keys: Cmd+Shift+Z redoes in the embedded board editor')
-        key(K_Z, CMD); time.sleep(1.5)
+        # Cmd+Z at once after the delete (while KiCad's checks may still run), as a person would
+        n1 = seq(); key(K_Z, CMD)
+        u_fast = bool(wait_for(lambda: any(c for c, d in edits_since(n1)), 4))
+        check(u_fast, 'keys: Cmd+Z right after a delete undoes it (KiCad\'s checks still running)')
+        if not u_fast:
+            checks_idle(n0); n1 = seq(); key(K_Z, CMD)
+            u_late = bool(wait_for(lambda: any(c for c, d in edits_since(n1)), 4))
+            print(f'INFO keys: Cmd+Z once the checks are done: {"undoes" if u_late else "does nothing either"}', flush=True)
+        checks_idle(n1)
+        n2 = seq(); key(K_Z, CMD | SHIFT)
+        r_ok = bool(wait_for(lambda: any(d for c, d in edits_since(n2)), 4))
+        check(r_ok, 'keys: Cmd+Shift+Z redoes in the embedded board editor (the delete again)')
+        if r_ok:
+            checks_idle(n2); n3 = seq(); key(K_Z, CMD); wait_for(lambda: any(c for c, d in edits_since(n3)), 4); checks_idle(n3)
+        RES['bs_board_items_back'] = not edits_since(n0) or sum(c for c, d in edits_since(n0)) >= sum(d for c, d in edits_since(n0))
         pcbf = os.path.join(OUT, 'proj', 'ecc83-pp.kicad_pcb'); m0 = os.path.getmtime(pcbf)
-        board_click(0.1, 0.9); key(K_A, CMD); time.sleep(0.4); key(K_FDEL); time.sleep(1.0); key(16 if False else 1, CMD)  # Cmd+S (keycode 1 = s)
+        key(K_ESC); time.sleep(0.3); board_click(0.1, 0.9); time.sleep(0.4); key(1, CMD)  # Cmd+S (keycode 1 = s)
         saved = wait_for(lambda: os.path.getmtime(pcbf) > m0, 6)
         check(bool(saved), 'keys: Cmd+S saves the board in the embedded editor (the file on disk changes)')
-        if saved:  # the board back as it was: git, then KiCad reverts to it (File > Revert is not needed: undo then save)
-            key(K_Z, CMD); time.sleep(1.0); key(1, CMD); time.sleep(2)
-        key(K_ESC); time.sleep(0.5); board_click(0.5, 0.5); key(K_ESC); time.sleep(0.6)
-        check(deleted(lambda: key(K_DEL), 'pcb-hover'), 'bs 2: ⌫ with nothing selected deletes the item under the pointer')
+        # 2: find a point where a click selects exactly one footprint, clear the selection there, then ⌫ with the pointer still on it
+        spot = None
+        for fx, fy in ((0.5, 0.5), (0.35, 0.5), (0.65, 0.5), (0.5, 0.35), (0.5, 0.65), (0.35, 0.35), (0.65, 0.65), (0.35, 0.65), (0.65, 0.35), (0.25, 0.5), (0.75, 0.5)):
+            key(K_ESC); time.sleep(0.4); board_click(fx, fy); time.sleep(0.4)
+            if len(sel_refs()) == 1: spot = (fx, fy, sel_refs()[0]); break
+        key(K_ESC); time.sleep(0.6)
+        if spot:
+            print(f'INFO bs 2: the pointer on {spot[2]} at ({spot[0]}, {spot[1]}) of the canvas, nothing selected', flush=True)
+            check(deleted(lambda: key(K_DEL), 'pcb-hover'), 'bs 2: ⌫ with nothing selected deletes the item under the pointer')
+        else:
+            check(False, 'bs 2: no point of the canvas selected exactly one footprint (the case could not be set up)')
         board_click(0.1, 0.9)
         check(deleted(lambda: (key(K_A, CMD), time.sleep(0.6), key(K_FDEL)), 'pcb-fdel'), 'bs 5: fn+delete still deletes')
         # 3: routing from a pad (the board's middle has U1's pads), two clicks, then ⌫ takes back the last segment
