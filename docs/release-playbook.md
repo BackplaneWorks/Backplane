@@ -7,7 +7,7 @@ This page comes from docs/release-retro-0.16.0.md. Times are relative to the pla
 - [ ] **Write down the release bar once**: the platforms, the gate list below and the known-issue policy. Get the person's OK on it. Any change to the bar later goes in writing, with what it costs in time.
 - [ ] **The Backplane release doesn't wait for a new KiCad.** It ships on the KiCad pins already on main. A new KiCad (bp.N) ships on its own schedule and reaches installs through `kicad-pins.yml` (one `gh workflow run` per platform, docs/kicad-pins.md), with no Backplane point release needed. Hubs that read the feed (the first release after 0.16.1 and later) take it within 6 h. Bumping the compiled pins (`scripts/kicad-pin.py`) is an ordinary change, made whenever convenient.
 - [ ] **Credentials go in the vault now:** the Claude and OpenAI test tokens, plus anything else the gate rows need.
-- [ ] **Machines are ready:** ≥100 GB free on this desktop, ≥40 GB on the Mac mini, ≥30 GB on h@backplane and bp-win. Inotify `max_user_instances` is at least 1024 (put it in `sysctl.d`). Boat is signed in. bp-win's auto-shutdown is suspended for the release window. *(pending: #10)*
+- [ ] **Machines are ready:** ≥100 GB free on this desktop, ≥40 GB on the Mac mini, ≥30 GB on h@backplane and bp-win. Inotify `max_user_instances` is at least 1024 (put it in `sysctl.d`). Boat is signed in. bp-win's auto-shutdown is suspended for the release window, and its idle watchdog held (`scripts/winvm/winvm-hold.sh bp-win 6h`; [winbuild-vm.md](winbuild-vm.md)). *(pending: #10)*
 
 ## T-24 h: cut and freeze
 
@@ -49,7 +49,7 @@ This page comes from docs/release-retro-0.16.0.md. Times are relative to the pla
 ## After the tag
 
 - [ ] Smoke one update from the previous release on a machine other than the mini.
-- [ ] Lift the freeze. Re-enable `nightly.yml` if it was disabled. Unset `RELEASE_*` variables. Restore bp-win's shutdown.
+- [ ] Lift the freeze. Re-enable `nightly.yml` if it was disabled. Unset `RELEASE_*` variables. Restore bp-win's shutdown and end its hold (`scripts/winvm/winvm-hold.sh bp-win off`).
 - [ ] Clean up: delete the e2e run folders, drop worktrees that have landed, prune idle `target/` dirs.
 - [ ] Within 24 h, record in docs/release-retro-X.Y.0.md the run ids, job times, candidates and cache hits.
 
@@ -58,6 +58,6 @@ This page comes from docs/release-retro-0.16.0.md. Times are relative to the pla
 | Build | Cold | Warm |
 |---|---|---|
 | Backplane tag run | 58 min (darwin 53, linux-x64 46: cache misses) | est. ~30 min |
-| KiCad Windows | 2 h 06 min – 2 h 47 min (no compiler cache) | bp.13.2 measurement: 26.0 min with ccache enabled; [details](kicad-ci-cache-measurements.md) |
+| KiCad Windows | GitHub: 2 h 06 min – 2 h 47 min (no compiler cache). bp-winbuild: 53 min 30 s with empty caches (vcpkg 43 min, compile 8 min 36 s) | bp-winbuild: 5 min 53 s, fresh build folder (vcpkg 1 min 52 s, compile 1 min 49 s, ccache 99.96% hits); `scripts/winbuild-kicad.sh <commit>`, see [winbuild-vm.md](winbuild-vm.md) ; GitHub with ccache enabled (bp.13.2): 26.0 min, [details](kicad-ci-cache-measurements.md) |
 | KiCad macOS | 76–104 min | 8–20 min |
 | KiCad Linux | 83–131 min | 23–29 min |
