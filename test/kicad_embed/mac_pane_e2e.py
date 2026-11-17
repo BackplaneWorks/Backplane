@@ -661,19 +661,22 @@ try:
             def pt(fx, fy):
                 p = last_push(); return p[0][0] + p[0][2] * fx, p[0][1] + p[0][3] * fy
             def route(y, back):
+                # p1 → p2 across, p2 → p3 down: one track each. Without ⌫, finish at p3 (2 tracks). With ⌫ after p3, finish where the
+                # route then ends, p2: 1 track if ⌫ took the last segment back, 2 or more if it did not
                 key(K_ESC); time.sleep(0.3); key(K_ESC); time.sleep(0.3); key(K_X); time.sleep(0.8)
-                n = seq()
-                for fx, fy in ((0.22, y), (0.32, y), (0.32, y + 0.06)):
-                    click(*pt(fx, fy)); time.sleep(0.6)
-                if back: key(K_DEL); time.sleep(0.8)
-                x, yy = pt(0.42, y + 0.06); relay(op='move', x=x, y=yy); time.sleep(0.5)
-                click(x, yy); click(x, yy); time.sleep(1.5)  # a double click finishes the route
+                n = seq(); p1, p2, p3 = pt(0.22, y), pt(0.36, y), pt(0.36, y + 0.08)
+                for q in (p1, p2, p3): click(*q); time.sleep(0.7)
+                end = p3
+                if back: key(K_DEL); time.sleep(0.8); end = p2
+                relay(op='move', x=end[0], y=end[1]); time.sleep(0.5); click(*end); click(*end); time.sleep(1.5)
                 created = sum(c for c, d in edits_since(n)); key(K_ESC); time.sleep(0.3); key(K_ESC); time.sleep(0.6)
                 return created
             board_click(0.1, 0.9)
-            a = route(0.58, False); b = route(0.70, True)
-            print(f'INFO bs 3: a route of three clicks made {a} track items; the same with ⌫ after the third click made {b}', flush=True)
-            check(a > 0 and 0 < b < a, 'bs 3: ⌫ while routing takes back the last segment (fewer tracks committed)')
+            t0 = open(os.path.join(OUT, 'kicad-embed-trace.log'), errors='replace').read().count('Backspace handed')
+            a = route(0.56, False); b = route(0.70, True)
+            t1 = open(os.path.join(OUT, 'kicad-embed-trace.log'), errors='replace').read().count('Backspace handed')
+            print(f'INFO bs 3: without ⌫ the route committed {a} tracks; with ⌫ and finished where it then ends, {b} (⌫ handed to wx {t1 - t0} times)', flush=True)
+            check(a >= 2 and b == 1, 'bs 3: ⌫ while routing takes back the last segment (1 track committed, not 2)')
             # 4: Find's field: a, b, c as key presses, then ⌫; the field's text in a picture of Backplane's window only
             board_click(0.1, 0.9); key(K_F, CMD); time.sleep(1.5)
             for k in (0, 11, 8): key(k); time.sleep(0.15)
