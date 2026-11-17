@@ -2163,6 +2163,7 @@ gpui.acct.claude.code.did.not.say	Claude Code did not say who is signed in	Claud
 gpui.acct.anthropic.api.key.is.set	ANTHROPIC_API_KEY is set: Claude Code uses that key, not a sign-in	ANTHROPIC_API_KEYが設定されています: Claude Codeはサインインではなくそのキーを使います
 gpui.acct.the.cli.is.signed.in	The CLI is signed in but did not give an email	CLIはサインインしていますがメールアドレスを返しませんでした
 gpui.bots.name.rule	A bot's name is 1 to 24 letters, digits, - or _, with no spaces.	ボットの名前は、英字・数字・「-」・「_」で1〜24文字です（スペースは使えません）。
+gpui.acct.open.the.link.and.sign	Open the link and sign in. Setup carries on by itself when you're done.	リンクを開いてサインインしてください。終わるとセットアップは自動で続きます。
 gpui.send.the.message	Send the message	メッセージを送信
 gpui.new.line.in.the.message	New line in the message	メッセージ内で改行
 gpui.send.also	Send (also)	送信（別のキー）
@@ -2432,11 +2433,28 @@ gpui.c.pad.box	Box	枠
 gpui.c.pad.eraser	Eraser	消しゴム
 gpui.c.kicad.kicad.could.not.start	KiCad could not start:	KiCad を起動できませんでした:
 gpui.c.kicad.try.again	Try again	再試行
+gpui.c.kicad.open.anyway	Open anyway	それでも開く
+gpui.c.kicad.cancel	Cancel	キャンセル
 gpui.c.kicad.open.the.app.instead	Open the KiCad app instead	代わりに KiCad アプリで開く
+gpui.c.kicad.mac.full.screen	KiCad cannot be shown here while Backplane is full screen on macOS. Pop it out into a window of its own, or leave full screen.	macOS で Backplane が全画面のあいだ、KiCad はここに表示できません。別ウインドウにポップアウトするか、全画面を終了してください。
+gpui.c.kicad.mac.prompt	macOS is asking for permission for Backplane: answer the prompt to let KiCad start.	macOS が Backplane へのアクセス許可を求めています。表示されている確認に答えると KiCad が起動します。
+gpui.c.kicad.recover.prompt	KiCad is asking: Recover Unsaved Changes. Restore brings back the changes KiCad kept from the session that ended; Discard opens the files as they were last saved. Its question may be beside Backplane's window.	KiCad からの確認: 未保存の変更の復元 (Recover Unsaved Changes)。Restore で前回のセッションで KiCad が保持していた変更を戻し、Discard で最後に保存したファイルを開きます。確認は Backplane のウィンドウの横に表示されることがあります。
 gpui.c.kicad.stock.tip	This is stock KiCad: it can open in windows of its own, and agents cannot edit in it. Backplane KiCad opens in here.	これは標準の KiCad です。独自のウィンドウで開くことがあり、エージェントは編集できません。Backplane KiCad はこの中で開きます。
 gpui.c.kicad.kicad.is.not.responding	KiCad is not responding.	KiCad が応答していません。
 gpui.c.kicad.kicad.was.closed	KiCad was closed.	KiCad は閉じられました。
+gpui.c.kicad.closed.kept	KiCad closed unexpectedly. Your saved files are intact, and KiCad kept a copy of the changes you had not saved: it offers it back when the editor opens again.	KiCad が予期せず終了しました。保存済みのファイルは無事です。保存していなかった変更は KiCad が控えを残しており、エディタを再び開くと復元を提案します。
+gpui.c.kicad.closed.lost	KiCad closed unexpectedly. Your saved files are intact. Changes made since the last save were not kept.	KiCad が予期せず終了しました。保存済みのファイルは無事です。最後の保存以降の変更は残っていません。
+gpui.c.kicad.closed.agent	KiCad closed unexpectedly. Your saved files are intact, but an agent's change that was not saved yet was lost.	KiCad が予期せず終了しました。保存済みのファイルは無事ですが、まだ保存されていなかったエージェントの変更は失われました。
+gpui.c.kicad.open.again	Open the editor again	エディタをもう一度開く
 gpui.c.kicad.starting.kicad	Starting KiCad…	KiCad を起動しています…
+gpui.c.kicad.starting.slow	Starting KiCad: {what} ({secs} s)	KiCad を起動しています: {what}（{secs} 秒）
+gpui.c.kicad.lock.ask	{file} is open in {holder}. Open it here anyway? Then either KiCad may save over the other's changes.	{file} は {holder} で開かれています。ここでも開きますか？ どちらの KiCad も、もう一方の変更を上書き保存する可能性があります。
+gpui.c.kicad.phase.handover	an agent's KiCad edit is being saved first	エージェントの KiCad 編集を先に保存しています
+gpui.c.kicad.phase.none	waiting for KiCad to be started	KiCad の起動を待っています
+gpui.c.kicad.phase.spawned	KiCad is loading, its window not up yet	KiCad を読み込み中です（ウィンドウはまだ表示されていません）
+gpui.c.kicad.phase.socket	KiCad is up, waiting for it to answer	KiCad は起動しました。応答を待っています
+gpui.c.kicad.phase.answering	KiCad is opening the project	KiCad がプロジェクトを開いています
+gpui.c.kicad.phase.show	KiCad is drawing the editor	KiCad がエディターを表示しています
 gpui.c.kicad.task.wait	KiCad is running {what}; the editor follows when it ends.	KiCadが{what}を実行中です。終わるとエディターに切り替わります。
 gpui.c.kicad.notice	KiCad says: {what}	KiCadからの通知: {what}
 gpui.c.kicad.this.window.cannot.hold.another	this window cannot hold another program's (only X11 and XWayland for now)	このウィンドウには他のプログラムのウィンドウを入れられません（今は X11 と XWayland のみ）
@@ -2471,6 +2489,7 @@ gpui.kcomment.not.posted	The comment was not posted: {why}	コメントは投稿
 gpui.keys.kcomment	Comment on what is selected in KiCad, from Backplane or from inside the editor: Enter posts, Esc cancels	KiCad で選択中のものにコメント (Backplane からもエディタ内からも): Enter で投稿、Esc で取り消し
 gpui.c.kicad.dialog	KiCad has “{title}” open	KiCad で「{title}」が開いています
 gpui.c.kicad.asking	KiCad is asking: {title}	KiCad からの確認: {title}
+gpui.kicad.update.installed	Backplane KiCad {version} is installed: reopen KiCad on it (your unsaved changes are kept until you save or close)	Backplane KiCad {version} をインストールしました。KiCad を開き直すと新しい版になります（未保存の変更は保存か閉じるまで残ります）
 gpui.c.kicad.full.screen	Full screen	全画面
 gpui.c.kicad.exit.full.screen	Exit full screen	全画面を終了
 gpui.c.kicad.the.editor.takes.the.whole	The editor takes the whole window; only this row stays	エディタがウィンドウ全体を使います。この行だけが残ります
@@ -5506,6 +5525,12 @@ gpui.f2.uber.p.cherry	Cherry	チェリー
     /// gpui.c.pad.hint.eraser = Drag over what to erase · {undo} undoes
     static func gpui_c_pad_hint_eraser(undo: String) -> String { f("gpui.c.pad.hint.eraser", ["undo": undo]) }
 
+    /// gpui.c.kicad.starting.slow = Starting KiCad: {what} ({secs} s)
+    static func gpui_c_kicad_starting_slow(what: String, secs: String) -> String { f("gpui.c.kicad.starting.slow", ["what": what, "secs": secs]) }
+
+    /// gpui.c.kicad.lock.ask = {file} is open in {holder}. Open it here anyway? Then either KiCad may save over the other's changes.
+    static func gpui_c_kicad_lock_ask(file: String, holder: String) -> String { f("gpui.c.kicad.lock.ask", ["file": file, "holder": holder]) }
+
     /// gpui.c.kicad.task.wait = KiCad is running {what}; the editor follows when it ends.
     static func gpui_c_kicad_task_wait(what: String) -> String { f("gpui.c.kicad.task.wait", ["what": what]) }
 
@@ -5523,6 +5548,9 @@ gpui.f2.uber.p.cherry	Cherry	チェリー
 
     /// gpui.c.kicad.asking = KiCad is asking: {title}
     static func gpui_c_kicad_asking(title: String) -> String { f("gpui.c.kicad.asking", ["title": title]) }
+
+    /// gpui.kicad.update.installed = Backplane KiCad {version} is installed: reopen KiCad on it (your unsaved changes are kept until you save or close)
+    static func gpui_kicad_update_installed(version: String) -> String { f("gpui.kicad.update.installed", ["version": version]) }
 
     /// gpui.assets.missing = Assets missing in {dir}: {files}
     static func gpui_assets_missing(dir: String, files: String) -> String { f("gpui.assets.missing", ["dir": dir, "files": files]) }
