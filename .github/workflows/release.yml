@@ -91,6 +91,7 @@ jobs:
             native/guard
             native/voice
           shared-key: release-${{ matrix.target }}
+          save-if: ${{ !startsWith(github.ref, 'refs/tags/') }}   # a tag reads main's and writes no copy of its own: 0.16.0's tag copies (1-1.5 GB a target) evicted main's (docs/release-retro-0.16.0.md)
       - name: stamp the version
         run: |
           # the first `version = ` line of each crate (python, not sed: macOS's sed has no `0,/re/`, and its builds kept the old version, so the guard's
