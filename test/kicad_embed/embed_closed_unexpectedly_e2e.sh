@@ -93,6 +93,11 @@ echo "INFO the project folder after the kill: $(ls -A "$PROJ" | tr '\n' ' ')"
 find "$PROJ" -newer "$OUT/script.json" -type f ! -path '*/.git/*' 2>/dev/null | head -12 | sed 's/^/INFO written since the start: /' 
 [ -z "$AUTOSAVE" ] || check "KiCad's autosave is kept (not swept)" "$([ -n "$AUTO2" ] && echo 1 || echo 0)" "before: $AUTOSAVE"
 # C3: the press, and the editor painted within 30 s
+# the agent's track in KiCad's local history (what Recover Unsaved Changes offers back)
+if [ -d "$PROJ/.history/.git" ] && [ "${CLOSED_EDIT:-agent}" != person ]; then
+  HIST=$(git -C "$PROJ/.history" log --all --format=%H 2>/dev/null | while read -r c; do git -C "$PROJ/.history" show "$c:ecc83-pp.kicad_pcb" 2>/dev/null | grep -q '(start 120 100)' && { echo "$c"; break; }; done)
+  check "KiCad's local history holds the agent's track (what it offers back)" "$([ -n "$HIST" ] && echo 1 || echo 0)" "$(git -C "$PROJ/.history" log --all --oneline 2>/dev/null | head -3 | tr '\n' ' ')"
+fi
 wait_for_log "$OUT/client.log" '"name":"reopened","event":"mark"' 600 || true
 MS=$(python3 - "$OUT/client.log" <<'PY'
 import re, sys
