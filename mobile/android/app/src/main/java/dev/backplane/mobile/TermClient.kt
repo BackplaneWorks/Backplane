@@ -19,7 +19,7 @@ object Terms {
     /** The screen held for a terminal (a blank one until the hub answered). Read `rev` first so a view redraws when it changes. */
     fun screen(key: String): TermScreen = screens.getOrPut(key) { TermScreen() }
     fun rev(key: String): Int = revs[key] ?: 0
-    private fun bump(key: String) { revs[key] = (revs[key] ?: 0) + 1 }
+    private fun bump(key: String) { revs[key] = (revs[key] ?: 0) + 1; if (key in fills) tryFill(key) }
 
     private fun frame(o: JSONObject): TFrame {
         val b = if (o.has("b") && !o.isNull("b")) runCatching { android.util.Base64.decode(o.optString("b"), android.util.Base64.DEFAULT) }.getOrNull() ?: ByteArray(0) else ByteArray(0)
@@ -97,6 +97,35 @@ object Terms {
         val a = DataClient.call("term.list", JSONObject().apply { if (!project.isNullOrEmpty()) put("project", project) }).optJSONArray("terms") ?: return emptyList()
         return (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Row(it.optString("key"), it.optString("kind"), it.optString("title"), it.optString("state"), it.optBoolean("running"), it.optString("cwd"), it.optLong("at")) }
     }
+    // ---- a chat's own shell (feature termChat) and Run in terminal
+
+    /** Opens the chat's shell (`term.new {chat}`: the desktop's term.open, started or only resized) and hands its key to [then]; a refusal is said. */
+    fun openChat(chat: String, then: (String) -> Unit) {
+        scope.launch {
+            try {
+                val r = DataClient.call("term.new", JSONObject().put("chat", chat).put("cols", 80).put("rows", 24))
+                val key = r.optString("key").ifEmpty { chat }; val sc = screen(key); sc.read(frame(r)); bump(key); then(key)
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { DataClient.say(e.message ?: Msg.android_failed_generic) }
+        }
+    }
+    private class Fill(val cmd: String, val at: Long)
+    private val fills = HashMap<String, Fill>()
+    /** Run in terminal: type `cmd` into the shell `key` once it is at its prompt (RunInTerminal.ready), never an Enter. Looked at on each frame
+     *  that arrives, and a few times WAIT_MS apart for a shell that says nothing more. */
+    fun prefill(key: String, cmd: String) {
+        fills[key] = Fill(cmd, System.currentTimeMillis()); tryFill(key)
+        scope.launch { repeat(4) { delay(RunInTerminal.WAIT_MS); tryFill(key) } }
+    }
+    private fun tryFill(key: String) {
+        val f = fills[key] ?: return
+        val vt = screen(key).vt
+        when (RunInTerminal.ready(vt, System.currentTimeMillis() - f.at)) {
+            null -> { fills.remove(key); DataClient.say(Msg.android_copy_fullscreen) }
+            false -> {}
+            true -> { fills.remove(key); send(key, RunInTerminal.prefillBytes(f.cmd, vt)) }
+        }
+    }
+
     /** A shell of its own in the project's folder (the hub's home folder without one); its key. */
     suspend fun newShell(project: String?, cols: Int, rows: Int): String {
         val r = DataClient.call("term.new", JSONObject().apply { if (!project.isNullOrEmpty()) put("project", project) }.put("cols", cols).put("rows", rows))

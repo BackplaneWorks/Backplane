@@ -184,7 +184,6 @@ internal fun AccountScreen(id: String, start: Boolean, back: () -> Unit, moved: 
     var code by remember(id) { mutableStateOf("") }
     var confirm by remember(id) { mutableStateOf(false) }
     var started by remember(id) { mutableStateOf(false) }
-    var copied by remember(id) { mutableStateOf("") }
     val scope = rememberCoroutineScope(); val ctx = LocalContext.current
     suspend fun load() { try { a = DataClient.call("account.view", JSONObject().put("profile", id)).optJSONObject("account"); failure = "" } catch (e: Exception) { failure = e.message ?: "" } }
     suspend fun act(action: String, extra: JSONObject.() -> Unit = {}) {
@@ -198,7 +197,6 @@ internal fun AccountScreen(id: String, start: Boolean, back: () -> Unit, moved: 
             if (port != null) GoogleLoop.profile = a?.optString("id")?.ifEmpty { id } ?: id
         } catch (e: Exception) { if (port != null) GoogleLoop.stop(); failure = e.message ?: ""; load() }
     }
-    fun copy(label: String, text: String) { (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText(label, text)); copied = label }
     LaunchedEffect(id, DataClient.conn) {
         load()
         val x = a
@@ -229,12 +227,12 @@ internal fun AccountScreen(id: String, start: Boolean, back: () -> Unit, moved: 
                     val url = s.optString("url")
                     if (url.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         DBtn(Msg.android_signin_open, true, modifier = Modifier.testTag("account.signin.open")) { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                        DBtn(if (copied == "link") Msg.android_copied else Msg.menu_copylink, false) { copy("link", url) }
+                        CopyChip(Msg.menu_copylink, url, Modifier.testTag("account.signin.copylink"))
                     }
                     val c = s.optString("code")
                     if (c.isNotEmpty()) {
                         Text(c, color = dcs.onSurface, fontFamily = BpMono, fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.testTag("account.signin.code"))
-                        DBtn(if (copied == "code") Msg.android_copied else Msg.android_copy_code, false) { copy("code", c) }
+                        CopyChip(Msg.android_copy_code, c, Modifier.testTag("account.signin.copycode"))
                     }
                     if (s.optBoolean("paste")) {
                         DField(code, { code = it }, Msg.android_code_paste, Modifier.testTag("account.signin.field"))

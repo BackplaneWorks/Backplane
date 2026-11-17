@@ -3801,6 +3801,9 @@ cat.own = El suyo
 cat.different = Otro gato
 cat.auto = El gato del nombre
 cat.color.bad = Escribe un color como #6fb3f2.
+android.copy.run = Ejecutar en la terminal
+android.copy.fullscreen = La terminal está ejecutando un programa a pantalla completa: ciérralo y vuelve a intentarlo.
+android.term.chat.old = Este hub aún no tiene terminal para los chats. Actualízalo para usarla aquí.
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number} ejecutándose
 ios.alerts.ask = Bub puede avisarte cuando un hilo te necesite.

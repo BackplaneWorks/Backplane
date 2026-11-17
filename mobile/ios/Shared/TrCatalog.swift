@@ -2397,6 +2397,8 @@ gpui.c.term.expand	Expand	展開	Expandir
 gpui.c.term.pop	Pop out	パネルで開く	Sacar a ventana
 gpui.c.term.hint	{hide} hides · Shift+Esc back to the message · {copy} copy · {paste} paste	{hide}で隠す · Shift+Escでメッセージに戻る · {copy}でコピー · {paste}で貼り付け	{hide} oculta · Shift+Esc vuelve al mensaje · {copy} copiar · {paste} pegar
 gpui.c.term.back	{n, plural, one {# line back} other {# lines back}}	{n}行前	{n, plural, one {# línea atrás} other {# líneas atrás}}
+gpui.c.term.run	Run in terminal	ターミナルで実行	Ejecutar en la terminal
+gpui.c.term.busy	The terminal is running a full-screen program: quit it, then try again.	ターミナルで全画面のプログラムが動いています。終了してからもう一度お試しください。	La terminal está ejecutando un programa a pantalla completa: ciérralo y vuelve a intentarlo.
 gpui.c.cef.downloading	Downloading {name}	{name}をダウンロード中	Descargando {name}
 gpui.c.cef.downloaded	Downloaded {name} to {folder}	{name}を{folder}にダウンロードしました	Descargado {name} en {folder}
 gpui.c.cef.stopped	Download of {name} stopped	{name}のダウンロードが止まりました	Descarga de {name} detenida
@@ -4143,6 +4145,9 @@ cat.own	Its own	元の色	El suyo
 cat.different	Different cat	別の猫	Otro gato
 cat.auto	The name's cat	名前の猫	El gato del nombre
 cat.color.bad	Type a colour like #6fb3f2.	#6fb3f2 のように色を入力してください。	Escribe un color como #6fb3f2.
+android.copy.run	Run in terminal	ターミナルで実行	Ejecutar en la terminal
+android.copy.fullscreen	The terminal is running a full-screen program: quit it, then try again.	ターミナルで全画面のプログラムが動いています。終了してからもう一度お試しください。	La terminal está ejecutando un programa a pantalla completa: ciérralo y vuelve a intentarlo.
+android.term.chat.old	This hub has no terminal for chats yet. Update it to use one here.	このハブにはまだチャットのターミナルがありません。使うにはハブを更新してください。	Este hub aún no tiene terminal para los chats. Actualízalo para usarla aquí.
 sidebar.sections.needs	Needs you	対応が必要	Te necesita
 sidebar.sections.pinned	Pinned	ピン留め	Fijados
 sidebar.sections.active	Active	進行中	Activos

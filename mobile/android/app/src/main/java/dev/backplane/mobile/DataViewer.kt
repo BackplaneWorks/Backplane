@@ -784,18 +784,12 @@ object Probe {
 private fun ProbeCard(info: String, lit: Int, modifier: Modifier, close: () -> Unit) {
     val (head, rest) = Probe.lines(info)
     // the words can be selected (a long press), and Copy takes them all: what was picked and its values (the person: the value at the foot should copy)
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    var copied by remember(info) { mutableStateOf(false) }
-    LaunchedEffect(copied) { if (copied) { kotlinx.coroutines.delay(1500); copied = false } }
     Row(modifier.fillMaxWidth().background(dcs.surfaceVariant.copy(alpha = .94f)).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(start = 12.dp, top = 6.dp, bottom = 6.dp).testTag("viewer.info"), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f)) { androidx.compose.foundation.text.selection.SelectionContainer { Column {
             Text(head, color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             if (rest.isNotEmpty() || lit > 1) Text(listOf(rest, if (lit > 1) Msg.android_probe_lit(lit) else "").filter { it.isNotEmpty() }.joinToString(" · "), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 11.sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         } } }
-        Box(Modifier.size(44.dp).clickable {
-            (ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("Backplane", listOf(head, rest).filter { it.isNotEmpty() }.joinToString("\n")))
-            copied = true
-        }.testTag("viewer.info.copy"), contentAlignment = Alignment.Center) { Icon(if (copied) Icons.Default.Check else Icons.Default.ContentCopy, Msg.common_copy, tint = if (copied) dcs.primary else dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
+        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { CopyButton(listOf(head, rest).filter { it.isNotEmpty() }.joinToString("\n"), tag = "viewer.info.copy", size = 18) }
         Box(Modifier.size(44.dp).clickable(onClick = close).testTag("viewer.info.close"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Close, Msg.common_close, tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
     }
 }

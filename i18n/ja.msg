@@ -3824,6 +3824,9 @@ cat.own = 元の色
 cat.different = 別の猫
 cat.auto = 名前の猫
 cat.color.bad = #6fb3f2 のように色を入力してください。
+android.copy.run = ターミナルで実行
+android.copy.fullscreen = ターミナルで全画面のプログラムが動いています。終了してからもう一度お試しください。
+android.term.chat.old = このハブにはまだチャットのターミナルがありません。使うにはハブを更新してください。
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number}件実行中
 ios.alerts.ask = スレッドがあなたを必要とするとき、Bub が通知できます。
