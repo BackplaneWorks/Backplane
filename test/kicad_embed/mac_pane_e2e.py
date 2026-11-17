@@ -685,6 +685,24 @@ try:
             shot('bs-text-before'); key(K_DEL); time.sleep(0.6); shot('bs-text-field'); key(K_ESC); time.sleep(1.0)
             print('INFO bs 4: Find\'s field in bs-text-before.png ("abc") and bs-text-field.png ("ab")', flush=True)
             raise SystemExit(1 if FAILS else 0)
+        if os.environ.get('BS_PROBE') == 'focus':  # a click in Backplane takes the keyboard back from the embedded KiCad (the lead's item 5)
+            cwa = next((w for w in wins() if w[0] == cw[0]), cw)[3]
+            def home_has(text):
+                r = subprocess.run(['grep', '-rlF', text, os.path.join(OUT, 'home')], capture_output=True, text=True); return bool(r.stdout.strip())
+            for i, (where, at) in enumerate((('the chat box', (cwa[0] + 230, cwa[1] + 620)), ('the chat box after Cmd+A on the board', (cwa[0] + 230, cwa[1] + 620)))):
+                board_click(0.1, 0.9); time.sleep(0.5)
+                if i == 1: key(K_A, CMD); time.sleep(0.6)
+                k_active = active(kpid)
+                n = seq(); click(*at); time.sleep(1.0)
+                after_active = active(kpid)
+                mark = f'lanemfocus{i}{int(time.time()) % 100000}'
+                relay(op='text', text=mark); time.sleep(0.5); key(36); time.sleep(3)
+                in_bp = home_has(mark)
+                k_ev = sorted({e.get('type') for e in evs() if int(e.get('seq', 0)) > n} - {'ET_PROGRESS', 'ET_FRAME_DRAWN', 'ET_CHECKS_DONE'})
+                c, d = (sum(x) for x in zip(*edits_since(n))) if edits_since(n) else (0, 0)
+                print(f'INFO focus {i}: KiCad active before the click {k_active}, after {after_active}; KiCad events after the click {k_ev}; edits created {c} deleted {d}', flush=True)
+                check(in_bp and not (c or d), f'focus: after a click in {where}, typing goes to Backplane (the message "{mark}" is in the thread{"" if in_bp else ": NOT found"}; KiCad edits {c + d})')
+            raise SystemExit(1 if FAILS else 0)
         if os.environ.get('BS_PROBE') == 'keys':  # climb-j's edit-keys table (lib/edit_keys_table.json), same row ids, plus extra_* menu chords
             KEYNAME.update({6: 'z', 7: 'x', 9: 'v', 16: 'y', 35: 'p', 31: 'o', 12: 'q', 5: 'g', 24: '=', 27: '-'})
             K_Z, K_X, K_V, K_Y, K_S = 6, 7, 9, 16, 1
