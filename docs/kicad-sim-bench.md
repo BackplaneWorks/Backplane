@@ -7,8 +7,8 @@ no source). A run passes when its answer's numbers are within tolerance of the r
 is still the board's and now simulates. It is the sibling of [the KiCad-IPC benchmark](kicad-ipc-bench.md) and uses its
 harness.
 
-No model turn has been run yet: this page is the tasks, the references and the checks. The baseline (a hub from main
-with raw `kicad_ipc`, file edits and the shell; no `kicad_sim`, no simulation skill) and each variant go in "Result".
+The baseline is in "Result": a hub from main with raw `kicad_ipc`, `kicad_edit`, file edits and the shell; no
+`kicad_sim`, no simulation skill. Each variant of ops and skills goes beside it.
 
 ## Tasks
 
@@ -138,4 +138,55 @@ left out of the table and counted under it.
 
 ## Result
 
-Not run yet.
+### Baseline
+
+Raw use: the hub as on main at 4496e22d2 (no `kicad_sim`, no simulation skill; `kicad_ipc` with the fork's simulation
+commands, `kicad_edit`, the CLI's file and shell tools, the web), Backplane KiCad 10.99.0-bp.13.2 from the fork at
+9a500f789a (`sim-run`). `claude-fable-5-2`, medium effort, 3 runs a task, medians, a 30 minute turn cap (2026-11-17).
+No run was cut short. The 24 runs cost $50.65.
+
+| task | passes | context tokens | output tokens | tool calls | wall s | cost $ | simulations | web fetches |
+|---|---|---|---|---|---|---|---|---|
+| lc_corner | 3/3 | 1,016,016 | 8,767 | 18 | 257 | 1.61 | 3 | 0 |
+| opamp_gain_pm | 3/3 | 891,461 | 10,332 | 14 | 198 | 1.58 | 3 | 0 |
+| ldo_transient | 3/3 | 1,229,526 | 11,729 | 20 | 199 | 1.83 | 4 | 0 |
+| buck_ripple | 3/3 | 5,542,282 | 30,046 | 59 | 860 | 4.99 | 8 | 6 |
+| buck_blocked | 3/3 | 1,472,142 | 10,351 | 27 | 316 | 1.92 | 1 | 4 |
+| divider_tol | 3/3 | 842,052 | 7,360 | 14 | 140 | 1.37 | 2 | 0 |
+| tune_corner | 3/3 | 699,576 | 6,382 | 12 | 128 | 1.31 | 1 | 0 |
+| noise | 3/3 | 893,201 | 8,345 | 15 | 228 | 1.67 | 3 | 0 |
+| **all (sum of medians)** | 24/24 | 12,586,256 | 93,312 | 179 | 2,324 | 16.27 | 25 | 10 |
+
+Simulations are the `RunSimulation` calls plus the shell commands that ran ngspice (the hub has no simulation log
+yet, so no ngspice seconds and no model lookups). No run failed, so there is no list of reasons. One pilot run of
+`buck_blocked` was first scored a failure by the check, which then asked for the word sign-in; the agent had stopped
+and asked, with no number and no model in the part's place, and the run is scored again with the check as it is now.
+
+What the runs did (tool calls over the three runs of a task):
+
+| task | shell | `kicad_edit` | `kicad_ipc` simulation commands | other |
+|---|---|---|---|---|
+| lc_corner | 26 | 23 | 0 | 2 |
+| opamp_gain_pm | 29 | 19 | 13 (7 AssignSimulationModel, 3 RunSimulation) | 6 |
+| ldo_transient | 27 | 26 | 9 (5 AssignSimulationModel, 1 RunSimulation) | 6 |
+| buck_ripple | 89 | 27 | 23 (13 AssignSimulationModel, 3 RunSimulation, 3 GetSimulationResult) | 16 |
+| buck_blocked | 38 | 14 | 0 | 37 (the browser 20, web search and fetch 6) |
+| divider_tol | 19 | 21 | 0 | 1 |
+| tune_corner | 18 | 17 | 0 | 2 |
+| noise | 28 | 22 | 11 (4 AssignSimulationModel, 3 RunSimulation) | 5 |
+
+- The pass rate is not the room to climb: every run passed. The price is: 0.55 to 7.3 million context tokens a
+  task, 10 to 65 tool calls, two to sixteen minutes.
+- The shell does most of the simulating. Four tasks never used a simulation command: the agent wrote a driver for the
+  runtime's `libngspice` (as `tools/ngs.py` is) and ran KiCad's exported netlist. Where the simulation commands were
+  used it was for the model (`AssignSimulationModel`) more than for the run (`RunSimulation`: 10 calls in 24 runs).
+- `kicad_edit` carries the schematic work in every task: 14 to 27 calls a task over three runs, for the sources, the
+  load, the flags and the exclusions.
+- `buck_ripple` is a third of the whole: finding the solver options the manufacturer's model needs ("Try four solver
+  option sets in parallel"), the undefined `MBR340`, the capacitor's series resistance as a subcircuit.
+- `buck_blocked`: all three stopped and asked, after 25 to 34 calls spent finding out that the maker's only model is
+  encrypted for its own simulator.
+
+One weakness of a reference showed: `buck_ripple`'s is the peak-to-peak over the last millisecond (43.5 mV), which
+holds a few mV of cycle-to-cycle wander of the model in ngspice; the three runs answered 39.0, 39.8 and 40.4 mV, the
+first of them the ripple of one cycle (38.3 to 38.9 mV in every run). All are inside the 12 %, the first by 0.7 mV.
