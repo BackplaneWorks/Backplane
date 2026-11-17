@@ -793,8 +793,9 @@ try:
                 d = ask('kicad_ipc', {'path': f, 'type': C + 'GetOpenDocuments', 'message': {'type': 'DOCTYPE_PCB' if E == 'pcb' else 'DOCTYPE_SCHEMATIC'}})
                 doc = ((d.get('message') or {}).get('documents') or [None])[0]
                 r = ask('kicad_ipc', {'path': f, 'type': C + 'GetItems', 'message': {'header': {'document': doc}, 'types': REAL[E] + [MARK[E]]}})
-                items = (r.get('message') or {}).get('items')
-                if items is None: return {}, False, str(r)[:160]
+                msg = r.get('message') or {}
+                if 'items' not in msg and msg.get('status') != 'IRS_OK': return {}, False, str(r)[:160]
+                items = msg.get('items') or []
                 byk = {}
                 for it in items: k = str(it.get('@type', '?')).rsplit('.', 1)[-1]; byk[k] = byk.get(k, 0) + 1
                 return byk, True, ''
@@ -815,12 +816,17 @@ try:
                 if c or d: return 'wrong', f'created {c}, deleted {d}'
                 return 'nothing', 'no edit event'
             def table(E, f):
-                canvas()
+                canvas(); canvas()
                 n, t = press(K_A, CMD); wait_for(lambda: since(n, 'ET_SELECTION_CHANGED'), W); time.sleep(0.4)
                 sel = [e.get('selection') or {} for e in since(n, 'ET_SELECTION_CHANGED')]
                 many = any(len(x.get('references') or []) + len(x.get('nets') or []) > 1 or x.get('count', 0) > 1 for x in sel)
                 row(E, 'select_all', 'works' if many else ('wrong' if sel else 'nothing'), f'{len(sel)} selection events; last {str(sel[-1])[:90] if sel else "-"}', t)
-                n, t = press(K_FDEL); v = judge_cd(n, 'd', True); row(E, 'delete', *v, t); settle(n)
+                n, t = press(K_FDEL); v = judge_cd(n, 'd', True); row(E, 'delete', *v, t)
+                if v[0] == 'works':  # Cmd+Z at once, before KiCad's check: told apart from an undo list the check emptied
+                    n, t = press(K_Z, CMD); v2 = judge_cd(n, 'c', True); row(E, 'extra_undo_at_once', *v2, t); settle(n)
+                    if v2[0] == 'works':
+                        canvas(); key(K_A, CMD); time.sleep(0.6); n = seq(); key(K_FDEL); judge_cd(n, 'd', True)
+                settle(n)
                 # redo at once after the undo's edit (before KiCad's in-editor check runs), and again after ET_CHECKS_DONE: on bp.13 the
                 # check after an undo empties the redo list (climb-j, Linux), so a missing menu key and an emptied list are told apart
                 n, t = press(K_Z, CMD); v = judge_cd(n, 'c', True); row(E, 'undo', *v, t); undo_ok = v[0] == 'works'
