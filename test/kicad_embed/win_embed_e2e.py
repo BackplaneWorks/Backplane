@@ -883,7 +883,7 @@ class SuiteHarness:
             TMP=self.p("tmp"),
             TEMP=self.p("tmp"),
             TMPDIR=self.p("tmp"),
-            BACKPLANE_AGENTS=self.p("bin"),
+            BACKPLANE_AGENTS=os.environ.get("BP_AGENTS_DIR") or self.p("bin"),
             BACKPLANE_NO_UPDATE="1",
             BACKPLANE_KICAD_BIN=self.kicad_bin,
             BACKPLANE_KICAD_CLI=self.kicad_cli,
