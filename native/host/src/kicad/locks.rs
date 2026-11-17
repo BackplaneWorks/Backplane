@@ -280,6 +280,9 @@ mod tests {
         assert_eq!(s.held, Some(true)); assert_eq!(s.pid, Some(std::process::id()), "/proc/locks names the holder");
         assert!(!clear_stale(&doc.to_string_lossy(), "test"), "a held lock is never removed");
         drop(f);
+        // another test forking a child meanwhile shares this open file description until the child's exec closes it (close-on-exec):
+        // the flock is free once that brief window ends
+        for _ in 0..40 { if held(&lck) == Some(false) { break } std::thread::sleep(std::time::Duration::from_millis(50)); }
         assert!(clear_stale(&doc.to_string_lossy(), "test") && !lck.exists());
     }
 }
