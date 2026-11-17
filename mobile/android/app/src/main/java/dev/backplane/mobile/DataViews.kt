@@ -29,6 +29,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
@@ -1065,6 +1066,9 @@ private fun NewThreadScreen(project: String, back: () -> Unit, created: (String)
     // where it runs (D6): the hub's choice first ("runs on desktop"); the line opens the machine picker when the project is on more than one
     var target by remember { mutableStateOf(project) }
     var pickRun by remember { mutableStateOf(false) }
+    // the box is ready to type in as the screen opens (the keyboard comes up with it), as the desktop's composer is
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     val chosen = owner?.newOn?.firstOrNull { it.value == target }
     val where = if (owner != null && owner.runsOn.isNotEmpty() && (chosen == null || chosen == owner.newOn.firstOrNull())) owner.runsOn
         else chosen?.takeIf { owner!!.newOn.size > 1 || owner.mark != null }?.label ?: ""   // "New thread on desktop", "Wait for desktop"
@@ -1075,7 +1079,7 @@ private fun NewThreadScreen(project: String, back: () -> Unit, created: (String)
         DBar(Msg.android_thread_new_title(title), back)
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (where.isNotEmpty()) DMono(Tr.t(where) + if ((owner?.newOn?.size ?: 0) > 1) " ▾" else "", dfaint, 11, Modifier.testTag("new.where").clickable(enabled = (owner?.newOn?.size ?: 0) > 1) { pickRun = true })
-            DField(text, { text = it }, Msg.android_thread_new_hint, Modifier.heightIn(min = 120.dp).testTag("new.text"), 8, dcs.primary)
+            DField(text, { text = it }, Msg.android_thread_new_hint, Modifier.heightIn(min = 120.dp).focusRequester(focus).testTag("new.text"), 8, dcs.primary)
             if (err.isNotEmpty()) Text(Tr.t(err), color = dcs.error, fontFamily = BpMono, fontSize = 12.sp)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (DataClient.has("picker")) ModelChip(chip.ifEmpty { " " }, "new.model", Modifier.weight(1f)) { picking = true } else Spacer(Modifier.weight(1f))

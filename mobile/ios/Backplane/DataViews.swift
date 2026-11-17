@@ -607,6 +607,8 @@ struct DataNewThreadSheet: View {
     // where it runs (D6): the hub's choice first ("runs on desktop"); the line opens the machine picker when the project is on more than one
     @State private var target = ""
     @State private var pickRun = false
+    // the box is ready to type in as the sheet opens (the keyboard comes up with it), as the desktop's composer is
+    @FocusState private var typing: Bool
     private var runTo: String { target.isEmpty ? project : target }
     private var whereLine: String {
         guard let o = owner else { return "" }
@@ -628,7 +630,7 @@ struct DataNewThreadSheet: View {
                     .confirmationDialog(owner?.title ?? "", isPresented: $pickRun) { ForEach(owner?.newOn ?? [], id: \.value) { n in Button(dAway(Tr.t(n.label), n.away)) { target = n.value } } }
             }
             ZStack(alignment: .topLeading) {
-                TextEditor(text: $text).dmono(13).scrollContentBackground(.hidden).padding(6).accessibilityIdentifier("data.thread.new.text")
+                TextEditor(text: $text).dmono(13).scrollContentBackground(.hidden).padding(6).focused($typing).onAppear { typing = true }.accessibilityIdentifier("data.thread.new.text")
                 if text.isEmpty { Text(Tr.t("What should it do?")).dmono(13).foregroundStyle(BackplaneDesign.faint).padding(.horizontal, 11).padding(.vertical, 14).allowsHitTesting(false) }
             }.frame(minHeight: 120).dbox(BackplaneDesign.accent)
             if !error.isEmpty { Text(Tr.t(error)).dmono(12).foregroundStyle(BackplaneDesign.bad) }
