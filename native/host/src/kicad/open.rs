@@ -46,6 +46,33 @@ pub fn detached_warning(file: &str) -> String {
     format!("KiCad is open in its own window on {name} and doesn't show this change: revert/reload it there before you save, or your save replaces the agent's edit")
 }
 
+/// Open in KiCad on Backplane's own runtime, on a computer where it has never run: KiCad 10's first-run "KiCad Setup" wizard (a modal
+/// over everything, bp-win Nov 17) would ask about (1) settings: import a previous version's, or start from defaults, shown when the
+/// version's folder has no kicad_common.json; (2) libraries: default tables, import or blank, shown only when the global tables are not
+/// valid (Backplane KiCad seeds its own default tables before it asks, global-tables-seeded); (3) privacy: KiCad's update checks (KiCad
+/// and the plugin manager) and anonymous crash reporting, shown until both prompts are marked seen. The seed answers each: (1) defaults,
+/// nothing imported (a kicad_common.json of our own); (2) left to the runtime's own seeding; (3) both prompts marked seen with KiCad's and
+/// the plugin manager's update checks off and no crash-reporting opt-in file written (data collection stays off). Only into our own
+/// runtime's config version folder (10.99 for the fork), only when it has no kicad_common.json, never into a stock KiCad's (10.0 ...):
+/// that one's first run is the person's. Some(the folder) when written.
+pub fn seed_first_run(config_root: &Path, version: &str) -> Option<PathBuf> {
+    if !super::libtables::backplane_version(version) { return None }
+    let dir = config_root.join(super::libtables::settings_version(version)?);
+    if dir.join("kicad_common.json").exists() { return None }
+    std::fs::create_dir_all(&dir).ok()?;
+    let common = json!({"meta": {"filename": "kicad_common.json", "version": 7},
+        "do_not_show_again": {"data_collection_prompt": true, "update_check_prompt": true},
+        "input": {"center_on_zoom": false}, "system": {"first_run_shown": true}});
+    std::fs::write(dir.join("kicad_common.json"), serde_json::to_string_pretty(&common).ok()?).ok()?;
+    let kicad = dir.join("kicad.json");
+    if !kicad.exists() {
+        let k = json!({"meta": {"filename": "kicad.json", "version": 0}, "system": {"check_for_kicad_updates": false}, "pcm": {"check_for_updates": false}});
+        std::fs::write(&kicad, serde_json::to_string_pretty(&k).ok()?).ok()?;
+    }
+    eprintln!("kicad open: {} had no settings: seeded so KiCad's first-run wizard does not ask (defaults, update checks off, no data collection)", dir.display());
+    Some(dir)
+}
+
 /// The whole request on known paths: what was opened ("pcbnew /x/b.kicad_pcb"), or why not.
 pub fn open_in(cli: &str, root: &str) -> Result<String, String> {
     let Some((tool, file)) = pick(&project::read(root)) else { return Err("no KiCad project here".into()) };
@@ -79,7 +106,9 @@ const NOTHING: &str = "Nothing KiCad is on show in this thread's viewer: show a 
 /// `viewer.state` report), else the thread's design; the runtime, the launch, and its line in the thread.
 pub async fn open(hub: &Arc<Hub>, thread: &str, key: &str) -> Result<String, String> {
     if crate::copy::on() { return Err("a copy of the log opens nothing".into()) }
-    let cli = super::ipc::runtime(hub).await.cli;
+    let rt = super::ipc::runtime(hub).await; let cli = rt.cli.clone();
+    // Backplane's own runtime: never its first-run wizard on a press of Open in KiCad (seed_first_run; a stock KiCad's is left as it is)
+    if let Some(root) = super::libtables::config_root() { let v = rt.version.clone(); let _ = tokio::task::spawn_blocking(move || seed_first_run(&root, &v)).await; }
     let key = if key.is_empty() { super::watch::viewer_state(thread).1["key"].as_str().unwrap_or("").to_string() } else { key.to_string() };
     let root = crate::files::root_of(hub, thread).await.map(|r| r.to_string_lossy().to_string()).unwrap_or_default();
     let r = tokio::task::spawn_blocking(move || {
@@ -96,6 +125,22 @@ pub async fn open(hub: &Arc<Hub>, thread: &str, key: &str) -> Result<String, Str
 
 #[cfg(test)]
 mod tests {
+    #[test] fn open_in_kicad_seeds_only_our_runtimes_first_run_and_never_a_stock_kicads() {
+        let d = crate::plat::tmp::dir("kopen-seed");
+        let dir = super::seed_first_run(&d, "10.99.0-bp.13").expect("Backplane KiCad's 10.99 seeded");
+        assert_eq!(dir, d.join("10.99"));
+        let c: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("kicad_common.json")).unwrap()).unwrap();
+        assert!(c["do_not_show_again"]["data_collection_prompt"] == true && c["do_not_show_again"]["update_check_prompt"] == true, "the privacy page is not asked");
+        let k: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("kicad.json")).unwrap()).unwrap();
+        assert!(k["system"]["check_for_kicad_updates"] == false && k["pcm"]["check_for_updates"] == false, "no update check enabled by us");
+        assert!(!dir.join("sentry-optin").exists() && !d.join("10.99").read_dir().unwrap().any(|e| e.unwrap().file_name().to_string_lossy().to_lowercase().contains("sentry")), "no data collection opt-in");
+        // the person's own settings are never replaced
+        std::fs::write(dir.join("kicad_common.json"), "{\"mine\": 1}").unwrap();
+        assert!(super::seed_first_run(&d, "10.99.0-bp.13").is_none());
+        assert_eq!(std::fs::read_to_string(dir.join("kicad_common.json")).unwrap(), "{\"mine\": 1}");
+        // a stock KiCad's folder: its first run is the person's
+        assert!(super::seed_first_run(&d, "10.0.7").is_none() && !d.join("10.0").exists());
+    }
     #[test] fn a_detached_kicad_is_remembered_while_it_runs_and_forgotten_once_it_exits() {
         let me = std::process::id();
         super::note_detached("/p/live.kicad_pro", me, "/p/live.kicad_pcb");
