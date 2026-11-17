@@ -350,10 +350,13 @@ mod tests {
         // read again: the same items (from the cache); a file exported anew is read anew
         let again = read_set(&d.join("gerbers"));
         assert_eq!(again.items, read_set(&d.join("gerbers")).items);
-        std::fs::write(d.join("gerbers/b-PTH.drl"), "M48\nMETRIC\nT1C0.500\n%\nT1\nX1.0Y-2.0\nM30\n").unwrap();
+        // the stamp is size + mtime, and a same-size rewrite inside the filesystem's mtime tick (coarse on a loaded or odd box) would keep it:
+        // each rewrite here gets its own mtime, set outright, not waited for
+        let rewrite = |body: &str, secs: u64| { let p = d.join("gerbers/b-PTH.drl"); std::fs::write(&p, body).unwrap(); std::fs::File::options().write(true).open(&p).unwrap().set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(secs)).unwrap(); };
+        rewrite("M48\nMETRIC\nT1C0.500\n%\nT1\nX1.0Y-2.0\nM30\n", 10);
         let hole = |r: &Read| r.items.iter().find(|i| i.layer == board::layer_id("hole")).map(|i| i.prim.clone());
         assert_eq!(hole(&read_set(&d.join("gerbers"))), Some(Prim::Circ { c: Pt { x: 1.0, y: 2.0 }, r: 0.25, w: 0.0, fill: true }));
-        let s0 = set_stamp(&d); std::fs::write(d.join("gerbers/b-PTH.drl"), "M48\nMETRIC\nT1C0.400\n%\nT1\nX1.0Y-2.0\nM30\n").unwrap(); assert_ne!(set_stamp(&d), s0);
+        let s0 = set_stamp(&d); rewrite("M48\nMETRIC\nT1C0.400\n%\nT1\nX1.0Y-2.0\nM30\n", 20); assert_ne!(set_stamp(&d), s0);
         let _ = std::fs::remove_dir_all(&d);
     }
 }
