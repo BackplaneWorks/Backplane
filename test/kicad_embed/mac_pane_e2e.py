@@ -744,6 +744,15 @@ try:
                 if v[0] == 'works': m = seq(); key(K_Z, CMD); wait_ed(m, 'c'); settle(m)
                 n, t = press(K_Z, CMD | SHIFT); v = judge_cd(n, 'd', True); row(E, 'redo_shift_z', *v, t); settle(n)
                 if v[0] == 'works': m = seq(); key(K_Z, CMD); wait_ed(m, 'c'); settle(m)
+                # undo and redo every time: 10 of 10 each (the earlier 6-of-7 failures must not recur)
+                canvas(); key(K_A, CMD); time.sleep(0.5); m = seq(); key(K_FDEL); wait_ed(m, 'd'); settle(m)
+                nu = nr = 0
+                for _ in range(10):
+                    m = seq(); key(K_Z, CMD); c, d = wait_ed(m, 'c'); nu += bool(c and not d); settle(m)
+                    m = seq(); key(K_Z, CMD | SHIFT); c, d = wait_ed(m, 'd'); nr += bool(d and not c); settle(m)
+                m = seq(); key(K_Z, CMD); wait_ed(m, 'c'); settle(m)
+                row(E, 'undo_10', 'works' if nu == 10 else ('nothing' if nu == 0 else 'wrong'), f'Cmd+Z undid {nu} of 10')
+                row(E, 'redo_10', 'works' if nr == 10 else ('nothing' if nr == 0 else 'wrong'), f'Cmd+Shift+Z redid {nr} of 10')
                 if not undo_ok:
                     print(f'INFO {E}: undo is nothing, so the rows after it run on what is left (no restore): judge them with that in mind', flush=True)
                 canvas(); key(K_A, CMD); time.sleep(0.5)
@@ -771,16 +780,45 @@ try:
                 row(E, 'find', 'works' if 'Find' in dl else ('wrong' if dl else 'nothing'), f'dialogs {dl}', t); key(K_ESC); time.sleep(1.0)
                 # the other menu chords: what they open or do (not gating; the trace says whether wx took them)
                 for name, code, fl, close in (('extra_print', 35, CMD, True), ('extra_preferences', 43, CMD, True), ('extra_open', 31, CMD, True),
-                                              ('extra_search_panel', 5, CMD, False), ('extra_zoom_in', 24, CMD | SHIFT, False), ('extra_zoom_in_plain', 24, CMD, False), ('extra_zoom_out', 27, CMD, False)) + (
-                                              (('extra_close_window', 13, CMD, False), ('extra_quit', 12, CMD, False)) if E == 'sch' else ()):
+                                              ('extra_search_panel', 5, CMD, False), ('extra_zoom_in', 24, CMD | SHIFT, False), ('extra_zoom_in_plain', 24, CMD, False), ('extra_zoom_out', 27, CMD, False)):
                     canvas(); n, t = press(code, fl); time.sleep(2.0)
                     dl = [e.get('detail') for e in since(n, 'ET_DIALOG_OPENED')]; c, d = ed(n)
                     other = sorted({e.get('type') for e in evs() if int(e.get('seq', 0)) > n} - {'ET_PROGRESS', 'ET_FRAME_DRAWN', 'ET_CHECKS_DONE', 'ET_FOCUS_IN', 'ET_FOCUS_OUT'})
                     alive = bool(kicad_frame())
                     row(E, name, 'opened ' + ', '.join(map(str, dl)) if dl else ('edit' if c or d else 'no dialog, no edit'), f'events {other}; KiCad frame {"there" if alive else "GONE"}', t)
-                    if dl and close: key(K_ESC); time.sleep(1.2)
+                    if dl and close:
+                        m = seq(); key(K_ESC); closed = wait_for(lambda: since(m, 'ET_DIALOG_CLOSED'), W)
+                        print(f'INFO ROW {E} {name}: Escape {"closes it" if closed else "does NOT close it"}', flush=True)
+                        if not closed: key(K_ESC); time.sleep(1.0)
                     if not alive: print(f'INFO {E}: KiCad frame gone after {name}; the table stops here', flush=True); return False
+                if E == 'sch':  # last: Cmd+W (KiCad's Close: the pane goes back to View, Edit brings a fresh frame), then Cmd+Q (nothing or the save gate)
+                    canvas(); n, t = press(13, CMD)
+                    gone = wait_for(lambda: not kicad_frame(), 10); offered = wait_for(lambda: rects().get('ui:Edit'), 10)
+                    back = None
+                    if offered:
+                        r = rects().get('ui:Edit'); b = next((w for w in wins() if w[0] == cw[0]), cw)[3]
+                        click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2); back = wait_for(kicad_frame, 60, 0.5)
+                    dl = [e.get('detail') for e in since(n, 'ET_DIALOG_OPENED')]
+                    row(E, 'extra_close_window', 'works' if gone and offered and back else 'wrong', f'frame gone {bool(gone)}; the pane offers Edit {bool(offered)}; Edit brings it back {bool(back)}; dialogs {dl}', t)
+                    if back:
+                        time.sleep(4); board_click(0.1, 0.9); kp = {w[1] for w in wins() if 'kicad' in w[2].lower()}
+                        n, t = press(12, CMD); time.sleep(3)
+                        dl = [e.get('detail') for e in since(n, 'ET_DIALOG_OPENED')]; alive = bool(kicad_frame())
+                        v = 'nothing (KiCad stays)' if alive and not dl else (f'the save gate ({dl})' if alive else 'KiCad QUIT')
+                        row(E, 'extra_quit', v, f'frame there {alive}; dialogs {dl}', t)
+                        if dl: key(K_ESC); time.sleep(1.0)
                 return True
+            # ⌫ while routing, inside the board: pictures of KiCad's frame only, right before and after ⌫
+            def kshot(tag):
+                k = kicad_frame()
+                if k: relay(op='png', rect=list(k[3]), path=os.path.join(OUT, tag + '.png'))
+            key(K_ESC); time.sleep(0.3); board_click(0.1, 0.9); key(K_ESC); time.sleep(0.3); key(K_X); time.sleep(0.8)
+            q = [(0.30, 0.42), (0.55, 0.42), (0.55, 0.62)]
+            for fx, fy in q: board_click(fx, fy); time.sleep(0.3)
+            pp = last_push(); relay(op='move', x=pp[0][0] + pp[0][2] * 0.62, y=pp[0][1] + pp[0][3] * 0.66); time.sleep(0.8)
+            t0 = len(tr()); kshot('bs-route-before'); key(K_DEL); time.sleep(1.0); kshot('bs-route-after')
+            print(f'INFO bs 3: ⌫ while routing, pictures bs-route-before.png / bs-route-after.png of KiCad\'s frame; trace {[l.split("macos: ",1)[-1] for l in tr()[t0:]]}', flush=True)
+            key(K_ESC); time.sleep(0.4); key(K_ESC); time.sleep(0.6)
             board_click(0.1, 0.9)
             go = table('pcb', pcbf)
             if go:  # per_actor_undo (PCB): the person deletes everything, an agent's track lands (save: false), the person's Cmd+Z
