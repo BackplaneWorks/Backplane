@@ -1202,11 +1202,12 @@ fn describe_cli(cli: &str) -> Option<Value> {
     if let Some(cached) = CACHE.get_or_init(Default::default).lock().unwrap().get(cli).cloned() {
         return cached;
     }
-    let (mut c, _home) = crate::proc::kicad_probe(cli);
-    let out = c.args(["api-server", "--describe"]).stdin(Stdio::null()).stderr(Stdio::null()).output().ok();
+    // bounded (#1160): a describe that hangs is killed, asked once more, and not remembered, so a later attach asks again
+    let out = (0..2).find_map(|_| { let (mut c, _home) = crate::proc::kicad_probe(cli); c.args(["api-server", "--describe"]); crate::proc::probe_output(c, crate::proc::PROBE_LIMIT) });
+    let ran = out.is_some();
     let parsed = out.filter(|o| o.status.success())
         .and_then(|o| serde_json::from_slice::<Value>(&o.stdout).ok());
-    CACHE.get_or_init(Default::default).lock().unwrap().insert(cli.to_string(), parsed.clone());
+    if ran { CACHE.get_or_init(Default::default).lock().unwrap().insert(cli.to_string(), parsed.clone()); }
     parsed
 }
 

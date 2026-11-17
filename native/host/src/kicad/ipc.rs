@@ -298,9 +298,10 @@ fn newest_in(dirs: &[PathBuf]) -> Vec<PathBuf> {
     v.into_iter().flat_map(|(n, d)| [d.join(&n).join("bin").join("kicad-cli"), d.join(n).join("bin").join("kicad-cli.exe")]).collect()
 }
 /// `<cli> --version`, its settings in a throwaway folder (proc::kicad_probe): the probe never writes the person's KiCad settings.
-pub fn cli_version_output(cli: &str) -> Option<std::process::Output> {
-    let (mut c, _home) = crate::proc::kicad_probe(cli);
-    c.arg("--version").stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().ok()
+/// Bounded (proc::probe_output): a run that hangs (#1160, macOS) is killed and the probe asked once more, since only some runs hang.
+pub fn cli_version_output(cli: &str) -> Option<std::process::Output> { cli_version_within(cli, crate::proc::PROBE_LIMIT) }
+pub fn cli_version_within(cli: &str, limit: std::time::Duration) -> Option<std::process::Output> {
+    (0..2).find_map(|_| { let (mut c, _home) = crate::proc::kicad_probe(cli); c.arg("--version"); crate::proc::probe_output(c, limit) })
 }
 /// Publish what this machine has for Settings > CAD: info `kicad.cli`, `kicad.version`, `kicad.status`, `kicad.source` and `freecad` (empty when absent).
 pub async fn publish_cad(hub: &Arc<Hub>) {
@@ -693,6 +694,34 @@ mod tests {
         assert_eq!(given.len(), 2, "{given:?}");
         for d in &given { assert!(!d.is_empty() && d.contains("bp-kicad-probe-"), "a throwaway folder: {d:?}"); assert!(!std::path::Path::new(d).exists(), "removed after: {d}"); }
         assert_ne!(given[0], given[1], "one folder per probe");
+    }
+
+    /// #1160 (macOS): some `kicad-cli --version` runs never exit (KiCad waits on its Python lookup's child) and ignore SIGTERM; they piled
+    /// up under the hub. A stand-in that hangs the same way on its first run: that run is killed and reaped at the limit, the probe asks once
+    /// more and gets the version; one that always hangs gives None in bounded time and leaves no process behind.
+    #[cfg(unix)] #[test] fn a_probe_that_hangs_is_killed_reaped_and_asked_again() {
+        use std::os::unix::fs::PermissionsExt;
+        let t = crate::plat::tmp::dir("kprobe-hang");
+        let (cli, pids, once) = (t.path().join("kicad-cli"), t.path().join("pids"), t.path().join("hung-once"));
+        // the first run (or every run with ALWAYS) records its pid and hangs as the stuck probes did: SIGTERM ignored, the same pid (exec)
+        std::fs::write(&cli, format!("#!/bin/sh\necho $$ >> '{p}'\nif [ ! -e '{o}' ] || [ -e '{o}.always' ]; then touch '{o}'; trap '' TERM; exec sleep 60; fi\necho 10.99.0\n", p = pids.display(), o = once.display())).unwrap();
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let gone = |pid: &str| { let r = std::process::Command::new("kill").args(["-0", pid]).stderr(std::process::Stdio::null()).status().unwrap(); !r.success() };
+        let limit = std::time::Duration::from_millis(1500);
+        let at = std::time::Instant::now();
+        let out = cli_version_within(&cli.to_string_lossy(), limit).expect("the second run answers");
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "10.99.0");
+        assert!(at.elapsed() < limit * 2 + std::time::Duration::from_secs(5), "bounded: {:?}", at.elapsed());
+        let ran: Vec<String> = std::fs::read_to_string(&pids).unwrap().lines().map(String::from).collect();
+        assert_eq!(ran.len(), 2, "asked twice: {ran:?}");
+        assert!(gone(&ran[0]), "the hung run is killed and reaped, not left alive or a zombie: pid {}", ran[0]);
+
+        std::fs::write(once.with_extension("always"), "").unwrap(); std::fs::remove_file(&pids).unwrap();
+        let at = std::time::Instant::now();
+        assert!(cli_version_within(&cli.to_string_lossy(), limit).is_none(), "a KiCad that always hangs has no version");
+        assert!(at.elapsed() < limit * 2 + std::time::Duration::from_secs(5), "bounded: {:?}", at.elapsed());
+        let ran: Vec<String> = std::fs::read_to_string(&pids).unwrap().lines().map(String::from).collect();
+        assert_eq!(ran.len(), 2, "{ran:?}"); for p in &ran { assert!(gone(p), "pid {p} left behind"); }
     }
 
     #[test] fn the_backplane_library_is_said_by_its_bundle_label_and_short_commit() {
