@@ -116,7 +116,7 @@ untouched fixture fails (16 to 20 findings).
 
 ## The tasks by hand over raw `kicad_ipc`
 
-`oracles/<task>.py`: each task done with no model through a hub from main (4496e22d2) on the fork lane's runtime
+`oracles/<task>.py`: each task done with no model through a hub from main (015bb7ed5; 4496e22d2 before the history rewrite of 2026-11-17) on the fork lane's runtime
 (`sim-run`, e311092569): parts left out of simulation and models assigned with `AssignSimulationModel`, sources and
 loads placed with `CreateItems` (out of the BOM and off the board), saved, run with `RunSimulation`, and held to the
 same check. All seven pass, and their numbers are the references' (the eighth, `buck_blocked`, has nothing to do).
@@ -144,7 +144,7 @@ left out of the table and counted under it.
 
 ### Baseline
 
-Raw use: the hub as on main at 4496e22d2 (no `kicad_sim`, no simulation skill; `kicad_ipc` with the fork's simulation
+Raw use: the hub as on main at 015bb7ed5 (4496e22d2 before the history rewrite of 2026-11-17; no `kicad_sim`, no simulation skill; `kicad_ipc` with the fork's simulation
 commands, `kicad_edit`, the CLI's file and shell tools, the web), Backplane KiCad 10.99.0-bp.13.2 from the fork at
 9a500f789a (`sim-run`). `claude-fable-5-2`, medium effort, 3 runs a task, medians, a 30 minute turn cap (2026-11-17).
 No run was cut short. The 24 runs cost $50.65.
