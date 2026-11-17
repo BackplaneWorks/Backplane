@@ -88,10 +88,12 @@ fn state_frame(key: &str, sc: &Screen) -> Value { let mut f = frame(key, None, &
 impl Terms {
     fn send_to(&self, client: u64, f: Value) { if client == ALL { self.hub.push_all(&f) } else { self.hub.push(client, f); } }
 
-    /// Where a thread's shell works: its worktree, else its project's folder (Hub.cwd).
+    /// Where a thread's shell works: its worktree, else its project's folder (Hub.cwd). A chat with no folder (a bot's, the uberbot's)
+    /// works in the person's home folder, not wherever the hub was started.
     pub async fn cwd(&self, thread: &str) -> String {
         let m = self.hub.model().await;
-        match m.threads.get(thread) { Some(t) if !t.worktree.is_empty() => t.worktree.clone(), Some(t) => m.projects.get(&t.project).map(|p| p.root.clone()).unwrap_or_default(), None => String::new() }
+        let dir = match m.threads.get(thread) { Some(t) if !t.worktree.is_empty() => t.worktree.clone(), Some(t) => m.projects.get(&t.project).map(|p| p.root.clone()).unwrap_or_default(), None => String::new() };
+        if dir.is_empty() { crate::plat::dirs::home_or_empty() } else { dir }
     }
 
     /// Start `cmd args` on a pty and the tasks that move its bytes. Err is the text for the screen.
