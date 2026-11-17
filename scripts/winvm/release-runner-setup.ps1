@@ -68,6 +68,11 @@ $py = (Get-Command python -ErrorAction Stop).Source
 $py3 = Join-Path (Split-Path $py) 'python3.exe'
 if (-not (Test-Path $py3)) { Copy-Item $py $py3 }
 
+# fxc.exe (gpui's build compiles its HLSL shaders with it): the newest Windows SDK's; gpui looks only on PATH and in one SDK version's folder
+$fxc = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\fxc.exe' -ErrorAction SilentlyContinue |
+  Sort-Object { [version]($_.Directory.Parent.Name) } | Select-Object -Last 1
+if (-not $fxc) { throw 'no fxc.exe in any Windows 10/11 SDK: install the Windows SDK with Visual Studio Build Tools' }
+
 # The runner
 if (-not (Test-Path "$runner\config.cmd")) {
   $z = Get-Pinned "https://github.com/actions/runner/releases/download/v$($pins.runner.v)/actions-runner-win-x64-$($pins.runner.v).zip" $pins.runner.sha "$dl\runner.zip"
@@ -85,6 +90,7 @@ $path = @("$Root\cargo\bin", "$tools\bin", $nodeDir, "$sz\Files\7-Zip", 'C:\Prog
   "RUSTUP_HOME=$Root\rustup",
   "CARGO_HOME=$Root\cargo",
   "SCCACHE_DIR=$Root\sccache",
+  "GPUI_FXC_PATH=$($fxc.FullName)",
   'SCCACHE_CACHE_SIZE=20G',
   "ACTIONS_RUNNER_HOOK_JOB_STARTED=$runner\runner-guard.ps1",
   'LANG=en_US.UTF-8'
