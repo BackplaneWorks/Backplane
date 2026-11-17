@@ -1,6 +1,7 @@
 //! The phone push gate on a real hub with the real tools, and a carrier that only records. Stand-ins only: no agent runs and nothing leaves. The pure rules are at the end.
 use super::*;
-use super::triage::{settle, turn_said, uber};
+use super::triage::{turn_said, uber};
+use crate::settings::alerts::Desks;
 type Res = (bool, Value);
 use crate::push::{self, apns::{self, Frame}, Book, Carrier, Item, Sent};
 use crate::bots::world::Device;
@@ -16,16 +17,30 @@ impl Fake {
     fn clears(&self) -> Vec<Value> { self.sent.lock().unwrap().iter().filter(|x| x.1.push_type == "background").map(|x| x.1.payload.clone()).collect() }
     async fn wait(&self, n: usize) -> Vec<Value> { for _ in 0..2000 { if self.alerts().len() >= n { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await } self.alerts() }
 }
-struct S { bots: Arc<Bots>, rec: Arc<Rec>, bub: String, chat: String, fake: Arc<Fake>, push: Arc<push::Push>, hub: crate::hub::TestHub }
+struct S { bots: Arc<Bots>, rec: Arc<Rec>, bub: String, chat: String, fake: Arc<Fake>, push: Arc<push::Push>, hub: crate::hub::TestHub, desks: std::sync::OnceLock<Arc<Desks>> }
+impl S { /// the desk alerts (settings/alerts.rs) on this hub, kept so `settle` waits for their tasks too
+    fn desks(&self) -> Arc<Desks> { self.desks.get_or_init(|| crate::settings::alerts::start(&self.hub)).clone() } }
 async fn set(hub: &Arc<Hub>, k: &str, v: &str) { hub.commit(&json!({"$":"SettingSet","key":k,"value":v,"at":now_s()})).await.unwrap() ; }
 async fn device(hub: &Arc<Hub>, token: &str) { hub.commit(&json!({"$":"DeviceRegistered","token":token,"platform":"ios","kind":"alert","thread":"","env":"sandbox","bundle":"dev.backplane.mobile","at":now_s()})).await.unwrap(); }
 async fn setup_with(name: &str, fake: Fake) -> S {
     let (hub, bots, rec, bub, chat) = uber(&format!("push-{name}")).await;
     set(&hub, push::QUIET, "off").await; set(&hub, push::BURST, "0").await; device(&hub, "tok1").await;
     let fake = Arc::new(fake); let p = push::start_with(&hub, bots.clone(), fake.clone());
-    S { hub, bots, rec, bub, chat, fake, push: p }
+    S { hub, bots, rec, bub, chat, fake, push: p, desks: Default::default() }
 }
 async fn setup(name: &str) -> S { setup_with(name, Fake::default()).await }
+/// Every reaction the log so far owes is done: the mailroom's (`Bots::idle`), the desk alerts' tasks (an alert record's order), and the push worker's queue (`Push::drained`),
+/// round after round until a round commits nothing more (a push's PushSent and book are lines the mailroom follows too). A check that nothing reached a phone reads after this.
+async fn quiesce(hub: &Arc<Hub>, bots: &Bots, p: &push::Push, desks: Option<&Desks>) {
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(180);
+    loop {
+        let n = hub.store.len();
+        bots.idle().await; if let Some(d) = desks { d.idle().await } p.drained().await; bots.idle().await; if let Some(d) = desks { d.idle().await }
+        if hub.store.len() == n { return }
+        assert!(std::time::Instant::now() < end, "the hub never settled");
+    }
+}
+async fn settle(s: &S) { quiesce(&s.hub, &s.bots, &s.push, s.desks.get().map(|d| &**d)).await }
 /// a new message from the person: each call below is then a turn of its own
 async fn person(s: &S, n: u64) { s.hub.commit(&json!({"$":"MessagePosted","thread":"elsewhere","msg":format!("m{n}"),"role":"user","text":"hi","at":now_s()})).await.unwrap(); s.hub.commit(&json!({"$":"MessagePosted","thread":s.chat,"msg":format!("p{n}"),"role":"user","text":format!("go {n}"),"at":now_s() + n})).await.unwrap(); }
 async fn notify(s: &S, reason: &str, text: &str, at: u64) -> Res { s.bots.tool_call_at(&s.chat, "notify_person", &json!({"reason":reason,"text":text}), at).await }
@@ -71,7 +86,7 @@ async fn order(s: &S, how: &str, bot: &str) { s.hub.commit(&json!({"$":"PushOrde
     // a client writing the book
     let h = crate::settings::set::SettingSet { agents: None };
     let r = crate::api::RpcHandler::call(&h, &s.hub, &caller(), &json!(7), "setting.set", &json!({"key":push::BOOK,"value":"{}"})).await.remove(0); assert_eq!(r["ok"], false, "{r:?}");
-    settle().await; settle().await;
+    settle(&s).await; settle(&s).await;
     assert!(s.fake.sent.lock().unwrap().is_empty(), "nothing reached a phone: {:?}", s.fake.sent.lock().unwrap());
     assert!(!log(&s.hub).iter().any(|e| e["$"] == "PushSent"), "and no socket heard one either");
     // the gate's opposite: the same hub still delivers the uberbot's
@@ -108,7 +123,7 @@ async fn order(s: &S, how: &str, bot: &str) { s.hub.commit(&json!({"$":"PushOrde
     let s = setup("repeat").await; let now = now_s();
     set(&s.hub, "told.k1", &json!({"key":"k","text":"Bub: Approve the deploy to staging","channel":"alert","bot":"","at":now - 60}).to_string()).await;
     let r = notify(&s, "needs_you", "Approve the deploy to staging", now).await; assert!(!r.0 && r.1.to_string().contains("already told"), "{r:?}");
-    settle().await; assert!(s.fake.alerts().is_empty());
+    settle(&s).await; assert!(s.fake.alerts().is_empty());
     set(&s.hub, "told.k2", &json!({"key":"k2","text":"Bub: The nightly report is ready","channel":"alert","bot":"","at":now - 2 * 86400}).to_string()).await;
     let r = notify(&s, "needs_you", "The nightly report is ready", now).await; assert!(r.0, "older than a day is no repeat: {r:?}");
     assert_eq!(s.fake.wait(1).await.len(), 1);
@@ -136,15 +151,15 @@ fn quiet_window_around(m: u64) -> String {
 
 #[tokio::test] async fn quiet_hours_hold_until_they_end_and_a_needs_you_passes_only_if_allowed() {
     let s = setup("quiet").await;
-    let q = quiet_around_now(&s).await; set(&s.hub, push::QUIET, &q).await; settle().await;
+    let q = quiet_around_now(&s).await; set(&s.hub, push::QUIET, &q).await; settle(&s).await;
     s.hub.commit(&json!({"$":"ThreadCreated","id":"tw","project":"","title":"Worker","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap();
     // about a worker thread: the person writing in the uberbot's thread below deals with what is about that thread only
     let r = s.bots.tool_call_at(&s.chat, "notify_person", &json!({"reason":"needs_you","text":"Held while quiet","thread":"tw"}), now_s()).await; assert!(r.0, "{r:?}");
-    settle().await; assert!(s.fake.alerts().is_empty(), "held");
+    settle(&s).await; assert!(s.fake.alerts().is_empty(), "held");
     // the worker saves the book after it routes the order: wait for it rather than a fixed pause (a loaded machine is slower than settle)
     let mut held = 0; for _ in 0..2000 { held = s.hub.setting(push::BOOK).await.and_then(|v| serde_json::from_str::<Book>(&v).ok()).map_or(0, |b| b.held.len()); if held == 1 { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await }
     assert_eq!(held, 1, "and it survives a restart in the book");
-    set(&s.hub, push::QUIET_URGENT, "on").await; settle().await;
+    set(&s.hub, push::QUIET_URGENT, "on").await; settle(&s).await;
     person(&s, 1).await;
     let r = notify(&s, "needs_you", "This one passes", now_s() + 5).await; assert!(r.0, "{r:?}");
     let a = s.fake.wait(1).await; assert_eq!(a[0]["aps"]["alert"]["body"], "This one passes");
@@ -153,7 +168,7 @@ fn quiet_window_around(m: u64) -> String {
 }
 
 #[tokio::test] async fn a_burst_collapses_into_one() {
-    let s = setup("burst").await; set(&s.hub, push::BURST, "5").await; settle().await; // 5 s: wide enough that a loaded machine still sends the four inside it
+    let s = setup("burst").await; set(&s.hub, push::BURST, "5").await; settle(&s).await; // 5 s: wide enough that a loaded machine still sends the four inside it
     // about a worker thread, so the person's messages in the uberbot's thread (one per turn) deal with none of them
     s.hub.commit(&json!({"$":"ThreadCreated","id":"tw","project":"","title":"Worker","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap();
     for (i, t) in ["first thing", "second thing", "third thing", "fourth thing"].iter().enumerate() { person(&s, 10 * i as u64 + 5).await; let r = s.bots.tool_call_at(&s.chat, "notify_person", &json!({"reason":"needs_you","text":t,"thread":"tw"}), now_s() + 10 * (i as u64 + 1)).await; assert!(r.0, "{r:?}") }
@@ -166,9 +181,9 @@ fn quiet_window_around(m: u64) -> String {
     let s = setup("mute").await; device(&s.hub, "tok2").await;
     s.hub.commit(&json!({"$":"DevicePrefs","token":"tok1","mute":true,"at":now_s()})).await.unwrap();
     let r = notify(&s, "needs_you", "only the other phone", now_s()).await; assert!(r.0, "{r:?}");
-    s.fake.wait(1).await; settle().await;
+    s.fake.wait(1).await; settle(&s).await;
     assert_eq!(s.fake.sent.lock().unwrap().iter().map(|x| x.0.clone()).collect::<Vec<_>>(), vec!["tok2".to_string()]);
-    set(&s.hub, push::QUIET_URGENT, "on").await; settle().await; person(&s, 1).await;
+    set(&s.hub, push::QUIET_URGENT, "on").await; settle(&s).await; person(&s, 1).await;
     let r = notify(&s, "needs_you", "both phones", now_s() + 5).await; assert!(r.0, "{r:?}");
     assert_eq!(s.fake.wait(3).await.len(), 3);
 }
@@ -179,7 +194,7 @@ fn quiet_window_around(m: u64) -> String {
     s.hub.commit(&json!({"$":"AskOpened","id":"a1","thread":"tw","tool":"Bash","detail":"rm x","at":2})).await.unwrap();
     let r = s.bots.tool_call(&s.chat, "notify_person", &json!({"reason":"needs_you","text":"Approve the rm","ask":"a1"})).await; assert!(r.0, "{r:?}");
     let a = s.fake.wait(2).await; let key = a[0]["key"].as_str().unwrap().to_string(); assert_eq!(a[0]["aps"]["badge"], 1, "the ask counts once, not with its item too");
-    s.push.seen("tw"); settle().await; assert!(s.fake.clears().is_empty(), "opening an approval is not answering it");
+    s.push.seen("tw"); settle(&s).await; assert!(s.fake.clears().is_empty(), "opening an approval is not answering it");
     s.hub.commit(&json!({"$":"AskClosed","id":"a1","answer":"accept","at":3})).await.unwrap();
     for _ in 0..300 { if s.fake.clears().len() >= 2 { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await }
     let c = s.fake.clears(); assert_eq!(c.len(), 2, "both phones: {c:?}"); assert_eq!(c[0], json!({"aps":{"content-available":1,"badge":0},"clear":[key]}));
@@ -192,10 +207,10 @@ fn quiet_window_around(m: u64) -> String {
 }
 
 #[tokio::test] async fn a_desk_looking_at_a_thread_and_push_clear_take_items_off_the_badge() {
-    let s = setup("desk").await; crate::settings::alerts::start(&s.hub);
+    let s = setup("desk").await; s.desks();
     let rpc = |m: &'static str, p: Value| { let hub = s.hub.clone(); async move { let h = hub.rpc_for(m).expect("handler"); h.call(&hub, &crate::api::Caller { gen: "1".into(), client: 1 }, &json!(7), m, &p).await.remove(0) } };
     person(&s, 1).await; let r = notify(&s, "done", "Built it", now_s() + 5).await; assert!(r.0, "{r:?}"); s.fake.wait(1).await;
-    rpc("desk.look", json!({"thread":s.chat,"focused":false})).await; settle().await; assert!(s.fake.clears().is_empty(), "an unfocused desk has not seen it");
+    rpc("desk.look", json!({"thread":s.chat,"focused":false})).await; settle(&s).await; assert!(s.fake.clears().is_empty(), "an unfocused desk has not seen it");
     rpc("desk.look", json!({"thread":s.chat,"focused":true})).await;
     for _ in 0..300 { if !s.fake.clears().is_empty() { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await }
     let c = s.fake.clears(); assert_eq!(c.len(), 1, "{c:?}"); assert_eq!(c[0]["aps"]["badge"], 0, "read on the desktop: off the phone's badge");
@@ -205,10 +220,10 @@ fn quiet_window_around(m: u64) -> String {
     person(&s, 10).await; let r = notify(&s, "needs_you", "Approve rm", now_s() + 15).await; assert!(r.0, "{r:?}");
     person(&s, 20).await; let r = notify(&s, "done", "Another thing", now_s() + 25).await; assert!(r.0, "{r:?}"); s.fake.wait(3).await;
     let book = |hub: Arc<crate::hub::Hub>| async move { serde_json::from_str::<push::Book>(&hub.setting(push::BOOK).await.unwrap_or_default()).unwrap_or_default() };
-    settle().await; settle().await; // the thread alert records the notes wrote order pushes of their own (settings/alerts.rs): all of them in the book first
+    settle(&s).await; settle(&s).await; // the thread alert records the notes wrote order pushes of their own (settings/alerts.rs): all of them in the book first
     rpc("push.clear", json!({})).await;
     for _ in 0..300 { if s.fake.clears().len() >= 2 { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await }
-    assert_eq!(s.fake.clears().len(), 2); settle().await; let b = book(s.hub.clone()).await; assert!(b.open.is_empty() && b.held.is_empty(), "{b:?}");
+    assert_eq!(s.fake.clears().len(), 2); settle(&s).await; let b = book(s.hub.clone()).await; assert!(b.open.is_empty() && b.held.is_empty(), "{b:?}");
     assert_eq!(s.fake.clears()[1]["aps"]["badge"], 1, "the open ask still counts");
 }
 
@@ -225,7 +240,7 @@ fn quiet_window_around(m: u64) -> String {
     let n = s.rec.got.lock().unwrap().len();
     turn_said(&s.hub, "tw", "completed", "finished the layout").await;
     until(&s.hub, |l| l.iter().any(|e| e["$"] == "MailPosted" && e["id"].as_str().unwrap_or("").starts_with("triage-end:tw"))).await;
-    settle().await;
+    settle(&s).await;
     let m = log(&s.hub).into_iter().find(|e| e["$"] == "MailPosted" && e["id"].as_str().unwrap_or("").starts_with("triage-end:tw")).unwrap(); assert_eq!(m["want"], "fyi");
     let got = s.rec.got.lock().unwrap().clone(); assert_eq!(got.len(), n, "fyi wakes no turn: {:?}", &got[n..]);
     assert!(!log(&s.hub).iter().any(|e| e["$"] == "RunSet" && e["mail"] == m["id"]), "and starts no run");
@@ -237,7 +252,7 @@ fn quiet_window_around(m: u64) -> String {
     s.hub.commit(&json!({"$":"AskOpened","id":"a1","thread":"tw","tool":"Bash","detail":"rm x","at":2})).await.unwrap();
     until(&s.hub, |l| l.iter().any(|e| e["$"] == "MailPosted" && e["id"] == "triage-ask:a1")).await;
     assert_eq!(log(&s.hub).into_iter().find(|e| e["id"] == "triage-ask:a1").unwrap()["want"], "act");
-    settle().await; assert!(s.fake.alerts().is_empty());
+    settle(&s).await; assert!(s.fake.alerts().is_empty());
     s.hub.commit(&json!({"$":"AskOpened","id":"a2","thread":s.chat,"tool":"order_quote","detail":"Pay for the boards?","at":3})).await.unwrap();
     let a = s.fake.wait(1).await; assert_eq!((a[0]["ask"].as_str(), a[0]["aps"]["alert"]["body"].as_str()), (Some("a2"), Some("Pay for the boards?")));
 }
@@ -345,8 +360,9 @@ fn item(id: &str, th: &str, ask: &str, reason: &str) -> Item { Item { id: id.int
 #[tokio::test] async fn a_threads_alert_reaches_the_phone_unless_a_focused_desk_shows_it() {
     let (hub, bots, _rec) = start("push-alert", "").await;
     set(&hub, push::QUIET, "off").await; set(&hub, push::BURST, "0").await; device(&hub, "tok1").await;
-    let fake = Arc::new(Fake::default()); let _p = push::start_with(&hub, bots.clone(), fake.clone());
+    let fake = Arc::new(Fake::default()); let p = push::start_with(&hub, bots.clone(), fake.clone());
     let desks = crate::settings::alerts::start(&hub);
+    let settle = || quiesce(&hub, &bots, &p, Some(&*desks));
     for (id, title) in [("tw", "Worker"), ("tv", "Viewed")] { hub.commit(&json!({"$":"ThreadCreated","id":id,"project":"","title":title,"env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap(); }
     turn_said(&hub, "tw", "completed", "Done: the board is routed.\nMore below.").await;
     // a desk in use, focused on tv
@@ -390,7 +406,7 @@ async fn work(hub: &Arc<Hub>, th: &str, n: u64, end: &str, said: &str) {
     press(&s, "notify-quiet", "save", json!({"qfrom": from, "qto": to})).await.unwrap();
     assert_eq!(s.hub.setting(push::QUIET).await.as_deref(), Some(q.as_str()));
     let r = s.bots.tool_call_at(&s.chat, "notify_person", &json!({"reason":"needs_you","text":"Held while quiet","thread":"tw"}), now_s()).await; assert!(r.0, "{r:?}");
-    settle().await; assert!(s.fake.alerts().is_empty(), "quiet hours on: held");
+    settle(&s).await; assert!(s.fake.alerts().is_empty(), "quiet hours on: held");
     press(&s, "setting", "notify.quiet.urgent=on", json!({})).await.unwrap(); person(&s, 1).await;
     let r = notify(&s, "needs_you", "Urgent passes", now_s() + 5).await; assert!(r.0, "{r:?}");
     assert_eq!(s.fake.wait(1).await[0]["aps"]["alert"]["body"], "Urgent passes");
@@ -401,13 +417,13 @@ async fn work(hub: &Arc<Hub>, th: &str, n: u64, end: &str, said: &str) {
 }
 
 #[tokio::test] async fn the_pages_mute_silences_one_phone_and_urgent_lets_it_through() {
-    let s = setup("page-mute").await; device(&s.hub, "tok2").await; settle().await;
+    let s = setup("page-mute").await; device(&s.hub, "tok2").await; settle(&s).await;
     let h1 = push::page::handle("tok1");
     let said = { let w = s.bots.world().await; push::page::devices_info(w.devices.values()) };
     assert!(said.contains(&h1) && !said.contains("tok1") && !said.contains("tok2"), "a phone is a handle on the page, never its token: {said}");
     press(&s, "notify-mute", &format!("{h1}=on"), json!({})).await.unwrap();
     let r = notify(&s, "needs_you", "only the other phone", now_s()).await; assert!(r.0, "{r:?}");
-    s.fake.wait(1).await; settle().await;
+    s.fake.wait(1).await; settle(&s).await;
     assert_eq!(s.fake.sent.lock().unwrap().iter().map(|x| x.0.clone()).collect::<Vec<_>>(), vec!["tok2".to_string()], "muted from the page");
     press(&s, "setting", "notify.quiet.urgent=on", json!({})).await.unwrap(); person(&s, 1).await;
     let r = notify(&s, "needs_you", "urgent reaches both", now_s() + 5).await; assert!(r.0, "{r:?}");
@@ -425,13 +441,13 @@ async fn asks(hub: &Arc<Hub>, st: &mut crate::state::State, ev: Value) { for e i
 async fn flip(s: &S, st: &mut crate::state::State, k: &str, v: &str) { press(s, "setting", &format!("{k}={v}"), json!({})).await.unwrap(); st.apply_line(&json!({"$":"SettingSet","key":k,"value":v,"at":1}).to_string()); }
 
 #[tokio::test] async fn each_notify_switch_changes_whether_a_thread_alerts_the_phone() {
-    let s = setup("page-switch").await; worker(&s.hub, "tw").await; let _desks = crate::settings::alerts::start(&s.hub);
+    let s = setup("page-switch").await; worker(&s.hub, "tw").await; let _desks = s.desks();
     let mut st = crate::state::State::new();
     st.apply_line(r#"{"$":"ThreadCreated","id":"tw","project":"","title":"Worker","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}"#);
     let say = |n: u64, text: &str| json!({"$":"MessagePosted","thread":"tw","msg":format!("w{n}"),"role":"user","text":text,"at":n});
     let mut ask = 0u64;
     macro_rules! person { ($n:expr) => {{ let m = say($n, "go"); st.apply_line(&m.to_string()); s.hub.commit(&m).await.unwrap(); }} }
-    macro_rules! quiet { ($expect:expr, $why:expr) => {{ settle().await; assert_eq!(s.fake.alerts().len(), $expect, "{}", $why); }} }
+    macro_rules! quiet { ($expect:expr, $why:expr) => {{ settle(&s).await; assert_eq!(s.fake.alerts().len(), $expect, "{}", $why); }} }
     // Settled: the person's work finished, or failed
     person!(1); ends(&s.hub, &mut st, "tw", "completed").await; let a = s.fake.wait(1).await; assert_eq!(a.len(), 1, "on by default: {a:?}");
     flip(&s, &mut st, "notify.settled", "off").await;
@@ -457,7 +473,7 @@ async fn flip(s: &S, st: &mut crate::state::State, k: &str, v: &str) { press(s, 
     let s = setup("page-remind").await; let past = 1_000_000u64; let ada = bot(&s.hub, "ada").await;
     press(&s, "setting", "notify.reminders=off", json!({})).await.unwrap();
     for e in [json!({"$":"RoutineSet","id":"r1","bot":ada,"name":"water","cron":"","prompt":"drink water","on":true,"at":past}), json!({"$":"RoutinePlan","id":"r1","once":past + 10,"tz":"person","kind":"remind","at":past})] { s.hub.commit(&e).await.unwrap(); }
-    assert_eq!(s.bots.tick_at(past + 20).await, 1); settle().await; assert!(s.fake.alerts().is_empty(), "Reminders off: it fires and says nothing to the phone");
+    assert_eq!(s.bots.tick_at(past + 20).await, 1); settle(&s).await; assert!(s.fake.alerts().is_empty(), "Reminders off: it fires and says nothing to the phone");
     press(&s, "setting", "notify.reminders=on", json!({})).await.unwrap();
     for e in [json!({"$":"RoutineSet","id":"r2","bot":ada,"name":"stretch","cron":"","prompt":"stretch","on":true,"at":past}), json!({"$":"RoutinePlan","id":"r2","once":past + 30,"tz":"person","kind":"remind","at":past})] { s.hub.commit(&e).await.unwrap(); }
     assert_eq!(s.bots.tick_at(past + 40).await, 1); assert_eq!(s.fake.wait(1).await[0]["aps"]["alert"]["body"], "stretch");
@@ -485,32 +501,32 @@ async fn a_run(s: &S, n: usize) -> (String, String) {
     (r["thread"].as_str().unwrap().to_string(), r["mail"].as_str().unwrap().to_string())
 }
 #[tokio::test] async fn a_room_post_between_bots_and_the_run_it_starts_reach_no_phone() {
-    let s = setup("room").await; let _desks = crate::settings::alerts::start(&s.hub);
+    let s = setup("room").await; let _desks = s.desks();
     let ada = bot(&s.hub, "pebble").await; let ada_th = s.bots.world().await.bot(&ada).unwrap().thread.clone();
     assert_eq!(rpc(&s.hub, "bots.room", json!({"room":"r1","name":"ring-requests","members":format!("{ada}\n{}", s.bub)})).await["ok"], true);
     let (ok, r) = s.bots.tool_call(&ada_th, "room_post", &json!({"room":"ring-requests","text":"Ring note `n4d35`: when should I set the reminder?"})).await; assert!(ok, "{r}");
     // the post is filed for the uberbot and a run triages it; the run's end says it needs nothing
     let (run, _) = a_run(&s, 1).await;
     turn_said(&s.hub, &run, "completed", "The ring bot already asked the person for a time in #ring-requests, so this needs no action from me.").await;
-    settle().await; settle().await;
+    settle(&s).await; settle(&s).await;
     assert!(s.fake.alerts().is_empty(), "{:?}", s.fake.alerts());
     let l = log(&s.hub);
     assert!(!l.iter().any(|e| e["$"] == "PushOrdered"), "nothing was even ordered");
     let rec = l.iter().rev().find(|e| e["$"] == "SettingSet" && e["key"] == format!("alert.{run}").as_str()).map(|e| e["value"].as_str().unwrap().to_string());
     assert!(rec.as_ref().map_or(true, |v| v.starts_with('\t')), "a run's end is no alert record with a kind: {rec:?}");
     // and a record somebody writes for a run anyway is still no push
-    set(&s.hub, &format!("alert.{run}"), "done\tturn-x\tm\t1.1\tforged").await; settle().await; assert!(s.fake.alerts().is_empty());
+    set(&s.hub, &format!("alert.{run}"), "done\tturn-x\tm\t1.1\tforged").await; settle(&s).await; assert!(s.fake.alerts().is_empty());
 }
 #[tokio::test] async fn a_mailroom_run_that_fails_over_keeps_its_tools_and_its_failure_reaches_no_room_and_no_phone() {
-    let s = setup("failover").await; let _desks = crate::settings::alerts::start(&s.hub);
+    let s = setup("failover").await; let _desks = s.desks();
     assert_eq!(rpc(&s.hub, "bots.room", json!({"room":"r1","name":"ring-requests","members":s.bub.clone()})).await["ok"], true);
     assert_eq!(rpc(&s.hub, "bots.post", json!({"room":"r1","text":"remind me to get that couch off","msg":"p1"})).await["ok"], true);
     let (run, input) = a_run(&s, 1).await;
-    s.hub.commit(&json!({"$":"TurnChanged","thread":run,"state":"running","at":now_s()})).await.unwrap(); settle().await;
+    s.hub.commit(&json!({"$":"TurnChanged","thread":run,"state":"running","at":now_s()})).await.unwrap(); settle(&s).await;
     let tools = |w: &crate::bots::world::World| crate::bots::mail::tools::lists(w).get(&run).cloned().unwrap_or_default();
     assert!(tools(&*s.bots.world().await).contains(&"mail_dispose"), "a live run lists its tools");
     // the account ran out: the driver stops the turn to change accounts and starts it again at once (settings/driver.rs)
-    s.hub.commit(&json!({"$":"TurnChanged","thread":run,"state":"interrupted","failover":true,"at":now_s()})).await.unwrap(); settle().await;
+    s.hub.commit(&json!({"$":"TurnChanged","thread":run,"state":"interrupted","failover":true,"at":now_s()})).await.unwrap(); settle(&s).await;
     { let w = s.bots.world().await; assert!(w.mail.run_of(&run).map_or(false, |r| r.live), "the run goes on"); assert!(tools(&w).contains(&"mail_dispose"), "and the restarted session lists its tools: {:?}", tools(&w)); }
     assert_eq!(log(&s.hub).iter().filter(|e| e["$"] == "RunSet").count(), 1, "nothing was forwarded as undone");
     // a run that still ends without its disposition: its bot hears privately; no room and no phone does
@@ -519,17 +535,17 @@ async fn a_run(s: &S, n: usize) -> (String, String) {
     turn_said(&s.hub, &run, "completed", &format!("I couldn't dispose of input `{input}` in this run. The mailroom tools aren't in my tool list.")).await;
     let (lane, _) = a_run(&s, 2).await; assert!(lane.starts_with(&format!("mailcoord-{}-", s.bub)), "its bot's back office takes it: {lane}");
     turn_said(&s.hub, &lane, "completed", "Nothing for the person: the ring bot asks them itself.").await;
-    settle().await; settle().await;
+    settle(&s).await; settle(&s).await;
     assert_eq!(posts(&log(&s.hub)), before, "no room post");
     assert!(s.fake.alerts().is_empty(), "no push: {:?}", s.fake.alerts());
 }
 #[tokio::test] async fn the_uberbots_own_orders_are_not_pushed_twice_by_their_records() {
-    let s = setup("twice").await; let _desks = crate::settings::alerts::start(&s.hub);
+    let s = setup("twice").await; let _desks = s.desks();
     let r = notify(&s, "needs_you", "Approve the deploy?", now_s()).await; assert!(r.0, "{r:?}");
-    s.fake.wait(1).await; settle().await; settle().await;
+    s.fake.wait(1).await; settle(&s).await; settle(&s).await;
     assert_eq!(s.fake.alerts().len(), 1, "the note record notify_person wrote is no second push: {:?}", s.fake.alerts());
     // a tell_person from the back office is private-lane output: on screen, no phone
-    set(&s.hub, &format!("alert.{}", s.chat), "note\ttell-x\tm\t1.1\tThe [Boat thread](backplane://thread/t1) has answered my questions.").await; settle().await;
+    set(&s.hub, &format!("alert.{}", s.chat), "note\ttell-x\tm\t1.1\tThe [Boat thread](backplane://thread/t1) has answered my questions.").await; settle(&s).await;
     assert_eq!(s.fake.alerts().len(), 1);
 }
 #[test] fn a_push_body_is_plain_words() {

@@ -52,7 +52,20 @@ pub fn frame(thread: &str, title: &str, body: &str, kind: &str, key: &str) -> Va
 pub fn clear_frame(thread: &str, key: &str) -> Value { json!({"t":"notify.clear","thread":thread,"key":key}) }
 
 #[derive(Default)]
-pub struct Desks { looks: Mutex<HashMap<u64, Look>>, needs: Mutex<Needs>, secrets: Mutex<HashMap<String, (u64, String)>> }
+pub struct Desks { looks: Mutex<HashMap<u64, Look>>, needs: Mutex<Needs>, secrets: Mutex<HashMap<String, (u64, String)>>,
+    /// test only: the alert tasks in flight (`idle`)
+    #[cfg(test)] busy: Arc<std::sync::atomic::AtomicUsize> }
+/// Test only: an alert task in flight, counted from before it is spawned until it ends
+#[cfg(test)] struct Held(Arc<std::sync::atomic::AtomicUsize>);
+#[cfg(test)] impl Drop for Held { fn drop(&mut self) { self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst); } }
+#[cfg(test)] impl Desks {
+    fn held(&self) -> Held { self.busy.fetch_add(1, std::sync::atomic::Ordering::SeqCst); Held(self.busy.clone()) }
+    /// every alert task the records so far started is done (an order it makes is committed). Bounded at 180 s.
+    pub async fn idle(&self) {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(180);
+        while self.busy.load(std::sync::atomic::Ordering::SeqCst) > 0 { assert!(std::time::Instant::now() < end, "the desk alerts never settled"); tokio::time::sleep(std::time::Duration::from_millis(30)).await }
+    }
+}
 /// The desk notification of a secret an agent asked for (`secret.ask.<name>`): the secret, what for, the thread that waits; its key closes it when the request ends.
 pub fn secret_frame(name: &str, purpose: &str, thread: &str, title: &str) -> Value {
     frame(thread, if title.is_empty() { "Backplane" } else { title }, &crate::push::secret_say(name, purpose, title, false).replace("Tap to enter it.", "Enter it in the masked box there."), "ask", &format!("secret-{name}"))
@@ -117,7 +130,9 @@ impl Observer for Alerts {
                 let (name, thread, purpose) = (name.to_string(), b["thread"].as_str().unwrap_or("").to_string(), b["purpose"].as_str().unwrap_or("").to_string());
                 if self.0.secrets.lock().unwrap().contains_key(&name) || tokio::runtime::Handle::try_current().is_err() { continue }
                 let (hub, desks) = (hub.clone(), self.0.clone());
+                #[cfg(test)] let held = desks.held();
                 tokio::spawn(async move {
+                    #[cfg(test)] let _held = held;
                     let title = { let m = hub.model.lock().await; m.threads.get(&thread).map(|t| t.title.clone()).unwrap_or_default() };
                     let Some(c) = lead(&desks.live(&hub)) else { return };
                     hub.push(c, secret_frame(&name, &purpose, &thread, &title));
@@ -131,7 +146,9 @@ impl Observer for Alerts {
             if kind.is_empty() { continue }
             let (hub, desks, thread) = (hub.clone(), self.0.clone(), thread.to_string());
             if tokio::runtime::Handle::try_current().is_err() { continue }
+            #[cfg(test)] let held = desks.held();
             tokio::spawn(async move {
+                #[cfg(test)] let _held = held;
                 let title = { let m = hub.model.lock().await; m.threads.get(&thread).map(|t| t.title.clone()).unwrap_or_default() };
                 let title = if title.is_empty() { "Backplane".to_string() } else { title };
                 // Bot.backend: a bot's turn that was not the person's (a restart's wake, a report, another bot, a routine, a webhook) alerts no one by its end; the bot

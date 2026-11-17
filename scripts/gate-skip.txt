@@ -1,4 +1,2 @@
 # Tests the build gate leaves out. The side-by-side tests run against their own stand-in, so no test starts the real `claude` CLI.
 # Left out for now (2026-11-17, lane F sub-lane flaky6-a): each fails the gate under machine load and passes alone; each comes back out of this list with its fix.
-#   triage: its checks read state once after a fixed 300 ms settle() (3 failed in one land run)
-bots::tests::triage::
