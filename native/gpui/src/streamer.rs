@@ -480,10 +480,10 @@ impl crate::Backplane {
 mod tests {
     use super::*;
     fn m() -> Masker {
-        Masker::new(&Ids { emails: vec!["person@example.com".into(), "build@amemb.com".into()], names: vec!["boat-hub".into(), "deskbox".into(), "Alex Example".into()],
+        Masker::new(&Ids { emails: vec!["person@example.com".into(), "build@example.net".into()], names: vec!["boat-hub".into(), "deskbox".into(), "Alex Example".into()],
             users: vec!["h".into(), "i2cjak".into()], homes: vec!["/home/h".into()], labels: vec![] })
     }
-    fn none_left(out: &str) { for bad in ["alex", "backplaneworks", "amemb", "boat-hub", "deskbox", "/home/h", "i2cjak", "tail9f3a", "100.64.84.41", "sk-ant-", "K7QP2MXA", "555", "4155550123"] { assert!(!out.to_lowercase().contains(&bad.to_lowercase()), "{bad} left in {out:?}"); } }
+    fn none_left(out: &str) { for bad in ["person@", "example.com", "example.net", "boat-hub", "deskbox", "/home/h", "i2cjak", "tail9f3a", "100.64.84.41", "sk-ant-", "K7QP2MXA", "555", "4155550123"] { assert!(!out.to_lowercase().contains(&bad.to_lowercase()), "{bad} left in {out:?}"); } }
 
     #[test] fn each_identifier_type_is_masked_in_plain_text() {
         let m = m();

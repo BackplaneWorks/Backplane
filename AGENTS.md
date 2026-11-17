@@ -44,6 +44,7 @@ backplane-hub --home DIR --port N --no-tailscale --foreground   # run a hub (tem
 
 - Stand-in agents only in tests: set `BACKPLANE_AGENTS=<dir>` (the stand-ins go first on PATH; a missing CLI is blocked, never the real one). Real model turns only on temp homes, with the person's go.
 - Never write to live user data (`~/.backplane*`, `~/.local/share/backplane`). Tests use a temp home, a port 3799+ and `--no-tailscale`. A hub on a copy of a real log runs with `BACKPLANE_COPY=1` (`docs/COPY-GUARD.md`); it starts no turn the person did not send there, whatever `restart.continue` says (gate 5).
+- **The repo is public: never put a real person's name, email, account label or home folder in code, tests, docs or fixtures**, even copied from a live log. Use placeholders (`person@example.com`, Alex, Sam, `/home/user`).
 - Never run the installed `backplane`/`backplane-hub` to probe it; ask `/hello`.
 - Never kill processes by name or pattern; only PIDs you captured, or the process group you started (`test/e2e/lib/own-group.sh`: `own CMD`, `own_stop`). The guard tests fail on any `pkill`, `killall` or `kill $(pgrep -f …)` in scripts/, test/, deploy/ or tools/.
 - Persisted events stay decodable forever: add event variants, never change the meaning of one. CBOR dictionary entries are append-only.

@@ -131,7 +131,7 @@ pub fn sync(root: &Path, version: &str, config_root: &Path, hub_home: &Path) -> 
 mod tests {
     use super::*;
     const DEFAULT: &str = "(fp_lib_table\n  (version 7)\n  (lib (name \"KiCad\")(type \"Table\")(uri \"${KICAD10_TEMPLATE_DIR}/fp-lib-table\")(options \"\")(descr \"Official\"))\n  (lib (name \"Backplane_Logo\")(type \"KiCad\")(uri \"${BACKPLANE_KICAD_LIBRARY}/libraries/Backplane_Logo.pretty\")(options \"\")(descr \"Backplane\"))\n  (lib (name \"Backplane_Shoggoth\")(type \"KiCad\")(uri \"${BACKPLANE_KICAD_LIBRARY}/libraries/Backplane_Shoggoth.pretty\")(options \"\")(descr \"Backplane\"))\n)\n";
-    const MINE: &str = "(fp_lib_table\n\t(version 7)\n\t(lib (name \"KiCad\") (type \"Table\") (uri \"/usr/local/share/kicad/template/fp-lib-table\") (options \"\") (descr \"KiCad Default Libraries\"))\n\t(lib (name \"amemb\") (type \"Table\") (uri \"/home/h/lib/fp-lib-table\") (options \"\") (descr \"\"))\n\t(lib (name \"Backplane_Shoggoth\") (type \"KiCad\") (uri \"/mine/Shoggoth.pretty\") (options \"\") (descr \"\"))\n)\n";
+    const MINE: &str = "(fp_lib_table\n\t(version 7)\n\t(lib (name \"KiCad\") (type \"Table\") (uri \"/usr/local/share/kicad/template/fp-lib-table\") (options \"\") (descr \"KiCad Default Libraries\"))\n\t(lib (name \"mylib\") (type \"Table\") (uri \"/home/h/lib/fp-lib-table\") (options \"\") (descr \"\"))\n\t(lib (name \"Backplane_Shoggoth\") (type \"KiCad\") (uri \"/mine/Shoggoth.pretty\") (options \"\") (descr \"\"))\n)\n";
 
     #[test] fn adds_only_what_the_person_lacks_and_keeps_their_own() {
         let add = plan(DEFAULT, MINE, "fp_lib_table", &[]).unwrap();
@@ -140,7 +140,7 @@ mod tests {
         assert!(out.starts_with(&MINE[..MINE.len() - 2]), "every line they had is kept as it was: {out}");
         assert!(out.ends_with("\t(lib (name \"Backplane_Logo\")(type \"KiCad\")(uri \"${BACKPLANE_KICAD_LIBRARY}/libraries/Backplane_Logo.pretty\")(options \"\")(descr \"Backplane\"))\n)\n"));
         let names: Vec<String> = entries(&out, "fp_lib_table").unwrap().into_iter().map(|e| e.name).collect();
-        assert_eq!(names, ["KiCad", "amemb", "Backplane_Shoggoth", "Backplane_Logo"]);
+        assert_eq!(names, ["KiCad", "mylib", "Backplane_Shoggoth", "Backplane_Logo"]);
         assert_eq!(plan(DEFAULT, &out, "fp_lib_table", &[]), None, "a second pass adds nothing");
     }
     #[test] fn a_name_added_once_is_not_added_again_after_the_person_removes_it() {
@@ -219,7 +219,7 @@ mod tests {
         let said = sync(&root, "10.99.0-bp.13", &cfg, &home);
         assert_eq!(said.len(), 1, "{said:?}"); assert!(said[0].starts_with("fp-lib-table 10.99: added Backplane_Logo"), "{said:?}");
         let now = std::fs::read_to_string(cfg.join("10.99/fp-lib-table")).unwrap();
-        assert!(now.contains("(name \"Backplane_Logo\")") && now.contains("(name \"amemb\")"));
+        assert!(now.contains("(name \"Backplane_Logo\")") && now.contains("(name \"mylib\")"));
         assert_eq!(std::fs::read_to_string(cfg.join("10.0/fp-lib-table")).unwrap(), MINE);
         let backups: Vec<_> = std::fs::read_dir(home.join("backups/kicad-libtables")).unwrap().flatten().collect();
         assert_eq!(backups.len(), 1); assert_eq!(std::fs::read_to_string(backups[0].path()).unwrap(), MINE);
