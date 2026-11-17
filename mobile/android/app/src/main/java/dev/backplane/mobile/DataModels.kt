@@ -60,15 +60,21 @@ data class DThread(
     val swarm: String = "", // the swarm room this thread is a member of (feature swarm), "" for none: left out of its project's list, which shows the swarm once
 )
 // the picker under the composer (`thread.picker`): sections the hub lists, drawn in order; a press is `thread.pick`
-data class DChoice(val label: String, val value: String, val on: Boolean, val ok: Boolean, val why: String)
-data class DPickerSection(val title: String, val action: String, val choices: List<DChoice>)
+data class DChoice(val label: String, val value: String, val on: Boolean, val ok: Boolean, val why: String, val cost: String = "") // cost: a speed detent's against Normal
+data class DPickerSection(val title: String, val action: String, val choices: List<DChoice>, val dial: Boolean = false) // dial: the speed dial (issue #1166)
 data class DPicker(val chip: String, val sections: List<DPickerSection>)
 /** What a new thread will run with, chosen before it exists. */
-data class DNewThreadChoice(val provider: String? = null, val model: String? = null, val effort: String? = null, val runtime: String? = null) {
-    fun set(action: String, value: String) = when (action) { "provider" -> copy(provider = value, model = "", effort = ""); "model" -> copy(model = value); "effort" -> copy(effort = value); else -> copy(runtime = value) }
-    fun into(p: JSONObject, skipEmpty: Boolean = false): JSONObject { listOf("provider" to provider, "model" to model, "effort" to effort, "runtime" to runtime).forEach { (k, v) -> if (v != null && (v.isNotEmpty() || !skipEmpty)) p.put(k, v) }; return p }
+data class DNewThreadChoice(val provider: String? = null, val model: String? = null, val effort: String? = null, val runtime: String? = null, val speed: String? = null) {
+    fun set(action: String, value: String) = when (action) { "provider" -> copy(provider = value, model = "", effort = "", speed = ""); "model" -> copy(model = value); "effort" -> copy(effort = value); "speed" -> copy(speed = value); else -> copy(runtime = value) }
+    fun into(p: JSONObject, skipEmpty: Boolean = false): JSONObject { listOf("provider" to provider, "model" to model, "effort" to effort, "runtime" to runtime, "speed" to speed).forEach { (k, v) -> if (v != null && (v.isNotEmpty() || !skipEmpty)) p.put(k, v) }; return p }
 }
-fun parsePicker(o: JSONObject) = DPicker(o.str("chip"), o.optJSONArray("sections").list { s -> DPickerSection(s.str("title"), s.str("action"), s.optJSONArray("choices").list { c -> DChoice(c.str("label").ifEmpty { c.str("value") }, c.str("value"), c.optBoolean("on"), c.optBoolean("ok", true), c.str("why")) }) })
+fun parsePicker(o: JSONObject) = DPicker(o.str("chip"), o.optJSONArray("sections").list { s -> DPickerSection(s.str("title"), s.str("action"), s.optJSONArray("choices").list { c -> DChoice(c.str("label").ifEmpty { c.str("value") }, c.str("value"), c.optBoolean("on"), c.optBoolean("ok", true), c.str("why"), c.str("cost")) }, s.optBoolean("dial")) })
+/** The speed dial's geometry, the desktop's (native/gpui/src/screens/dial.rs): detents 90° apart within 240°, centred on twelve o'clock, clockwise positive. */
+object DialGeometry {
+    fun angles(n: Int): List<Double> { if (n <= 1) return if (n == 1) listOf(0.0) else emptyList(); val step = minOf(240.0 / (n - 1), 90.0); val from = -step * (n - 1) / 2; return (0 until n).map { from + step * it } }
+    fun nearest(n: Int, deg: Double): Int = angles(n).withIndex().minByOrNull { kotlin.math.abs(it.value - deg) }?.index ?: 0
+    fun angle(cx: Float, cy: Float, x: Float, y: Float): Double = Math.toDegrees(kotlin.math.atan2((x - cx).toDouble(), (cy - y).toDouble()))
+}
 
 fun parseOption(o: JSONObject) = DOption(o.str("id"), o.str("label").ifEmpty { o.str("id") })
 fun parseAsk(o: JSONObject) = DAsk(o.str("id"), o.str("state"), o.str("question"), o.optJSONArray("options").list(::parseOption), if (o.has("answered") && !o.isNull("answered")) o.str("answered") else null)

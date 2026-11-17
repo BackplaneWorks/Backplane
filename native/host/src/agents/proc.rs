@@ -689,13 +689,15 @@ mod tests {
         let url = "http://127.0.0.1:41231/mcp/t1-2?token=abc&gen=1";
         let mcp = crate::mcpx::svc::Launch { claude: rules::mcp_config(url), acp: serde_json::json!([{"name":"backplane","type":"http","url":url,"headers":[]}]), ..Default::default() };
         let a = providers::TurnIn { thread: "t1-2".into(), cwd: d.to_string_lossy().into(), home: home.to_string_lossy().into(), model: "m".into(), session: "s-1".into(), runtime: "auto".into(), interaction: "default".into(), effort: "high".into(), think: true,
-            text: text.into(), images: vec![], prompt: prompt.clone(), mcp_url: url.into(), pcbparts_url: crate::mcpx::gen::PCBPARTS.into(), gen: "1".into(), settings: vec![], mcp };
+            text: text.into(), images: vec![], prompt: prompt.clone(), mcp_url: url.into(), pcbparts_url: crate::mcpx::gen::PCBPARTS.into(), gen: "1".into(), settings: vec![], mcp, ..Default::default() };
         // Claude: inline instructions and MCP config go to files, as the actor does on Windows
         let dirs = vec!["C:\\Users\\x\\kistack".to_string()];
-        let mut ca = rules::claude_args(&rules::ArgsIn { model: "opus", session: "s", runtime: "auto", interaction: "default", prompt: &prompt, dirs: &dirs, effort: "high", think: true, plugins: &dirs, mcp_url: url, mcp_json: &a.mcp.claude, disallowed: &["mcp__x__y".to_string()] });
+        let mut ca = rules::claude_args(&rules::ArgsIn { model: "opus", session: "s", runtime: "auto", interaction: "default", prompt: &prompt, dirs: &dirs, effort: "high", think: true, plugins: &dirs, mcp_url: url, mcp_json: &a.mcp.claude, disallowed: &["mcp__x__y".to_string()], speed: "" });
         rules::prompt_to_file(&mut ca, &home.join("prompts/t1-2.md")).unwrap();
         let f = rules::mcp_to_file(&mut ca, &home.join("secrets/run"), "t1-2-1.mcp.json").unwrap().expect("moved");
         let i = ca.iter().position(|x| x == "--mcp-config").unwrap(); assert_eq!(ca[i + 1], f.path().to_string_lossy());
+        let g = rules::json_to_file(&mut ca, "--settings", &home.join("secrets/run"), "t1-2-1.settings.json").unwrap().expect("moved");
+        assert_eq!(std::fs::read_to_string(g.path()).unwrap(), r#"{"fastMode":false}"#, "Claude's settings go to a file too");
         assert_eq!(serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(f.path()).unwrap()).unwrap()["mcpServers"]["backplane"]["url"], url, "Claude reads the same config from the file");
         let mut lines: Vec<(&str, Vec<String>)> = vec![("claude", ca)];
         for p in ["codex", "grok", "muse", "opencode", "pi", "omp"] {

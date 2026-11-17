@@ -21,7 +21,8 @@ mod session { pub use crate::{composer, patch, select, pages}; }
 #[path="../present/tz.rs"] mod tz;
 #[path="../present/keys.rs"] mod keys;
 #[path="../settings/order_view.rs"] mod order_view;
-mod settings { pub mod order { pub use crate::order_view::*; } }
+// the speed dial's table (agents/speed.rs) asks for the detected models; the audit counts screens and detects none
+mod settings { pub mod order { pub use crate::order_view::*; } pub mod models { pub fn info() -> String { String::new() } } }
 #[path="../present/thread.rs"] mod thread;
 #[path="../present/window.rs"] mod window;
 #[path="../present/audit_files.rs"] mod files;
@@ -36,9 +37,10 @@ mod mirror { pub fn origin_of_root(_: &str) -> String { String::new() } }
 #[path="../agents/skills.rs"] pub mod skills_;
 #[path="../agents/lockrec.rs"] pub mod lockrec_;
 #[path="../agents/halt_view.rs"] pub mod halt_;
+#[path="../agents/speed.rs"] pub mod speed_;
 // (the audit draws this machine's threads only: a project on another machine has no listing here)
 mod net { pub mod farfiles { pub fn listing(_: &str, _: &str) -> Option<Result<String, String>> { None } pub fn copy(_: &str, _: &str) -> Option<Result<String, String>> { None } } }
-mod agents { pub use crate::bg_ as bg; pub use crate::inputs_ as inputs; pub use crate::skills_ as skills; pub use crate::lockrec_ as lockrec; pub use crate::halt_ as halt; }
+mod agents { pub use crate::bg_ as bg; pub use crate::inputs_ as inputs; pub use crate::skills_ as skills; pub use crate::lockrec_ as lockrec; pub use crate::halt_ as halt; pub use crate::speed_ as speed; }
 use serde_json::json;
 use std::{collections::{BTreeMap,HashSet},path::Path};
 fn main() -> anyhow::Result<()> {

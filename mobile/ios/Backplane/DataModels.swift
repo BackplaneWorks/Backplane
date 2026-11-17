@@ -318,13 +318,15 @@ struct DSearch: Decodable { var threads: [DThread]; var projects: [DProject]; va
 // the picker under the composer (`thread.picker`): sections the hub lists, drawn in order; a press is `thread.pick`
 struct DChoice: Decodable, Identifiable {
     var label: String; var value: String; var on: Bool; var ok: Bool; var why: String; var id: String { value }
-    enum CodingKeys: String, CodingKey { case label, value, on, ok, why }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); value = c.str(.value); label = c.str(.label).isEmpty ? c.str(.value) : c.str(.label); on = c.bool(.on); ok = (try? c.decode(Bool.self, forKey: .ok)) ?? true; why = c.str(.why) }
+    var cost: String // a speed detent's cost against Normal ("×2 cost"), "" when none is known
+    enum CodingKeys: String, CodingKey { case label, value, on, ok, why, cost }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); value = c.str(.value); label = c.str(.label).isEmpty ? c.str(.value) : c.str(.label); on = c.bool(.on); ok = (try? c.decode(Bool.self, forKey: .ok)) ?? true; why = c.str(.why); cost = c.str(.cost) }
 }
 struct DPickerSection: Decodable, Identifiable {
     var title: String; var action: String; var choices: [DChoice]; var id: String { action }
-    enum CodingKeys: String, CodingKey { case title, action, choices }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); title = c.str(.title); action = c.str(.action); choices = (try? c.decode([DChoice].self, forKey: .choices)) ?? [] }
+    var dial: Bool // the speed dial (issue #1166): its choices are detents, drawn as a knob
+    enum CodingKeys: String, CodingKey { case title, action, choices, dial }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); title = c.str(.title); action = c.str(.action); choices = (try? c.decode([DChoice].self, forKey: .choices)) ?? []; dial = c.bool(.dial) }
 }
 struct DPicker: Decodable { var chip: String; var sections: [DPickerSection]
     enum CodingKeys: String, CodingKey { case chip, sections }
@@ -375,13 +377,14 @@ struct DOrder: Decodable, Equatable {
 struct DOrderReply: Decodable { var order: DOrder? }
 /// What a new thread will run with, chosen before it exists.
 struct DNewThreadChoice: Equatable {
-    var provider: String?; var model: String?; var effort: String?; var runtime: String?
-    var params: [String: Any] { var p: [String: Any] = [:]; if let provider { p["provider"] = provider }; if let model { p["model"] = model }; if let effort { p["effort"] = effort }; if let runtime { p["runtime"] = runtime }; return p }
+    var provider: String?; var model: String?; var effort: String?; var runtime: String?; var speed: String?
+    var params: [String: Any] { var p: [String: Any] = [:]; if let provider { p["provider"] = provider }; if let model { p["model"] = model }; if let effort { p["effort"] = effort }; if let runtime { p["runtime"] = runtime }; if let speed { p["speed"] = speed }; return p }
     mutating func set(_ action: String, _ value: String) {
         switch action {
-        case "provider": provider = value; model = ""; effort = ""
+        case "provider": provider = value; model = ""; effort = ""; speed = ""
         case "model": model = value
         case "effort": effort = value
+        case "speed": speed = value
         default: runtime = value
         }
     }

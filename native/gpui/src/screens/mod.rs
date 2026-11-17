@@ -42,6 +42,7 @@ pub mod md;
 pub mod linkroute;
 pub mod order;
 pub mod picker;
+pub mod dial;
 pub mod pad;
 pub mod usage;
 pub mod padview;

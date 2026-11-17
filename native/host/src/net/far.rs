@@ -54,7 +54,7 @@ use K::*;
 /// Every variant `change` renames; the test below checks each field against codec's wire names.
 /// Requests to a thing elsewhere: only these may go to a linked machine (thread.delete is not one: law far_no_delete).
 pub const METHODS: &[&str] = &["turn.start", "turn.interrupt", "ask.answer", "queue.move", "queue.remove", "queue.resume", "queue.steer", "queue.edit",
-    "thread.settle", "thread.unsettle", "thread.back", "thread.rename", "thread.btw", "thread.modes", "thread.provider", "thread.effort", "bots.space", "bots.routine_run",
+    "thread.settle", "thread.unsettle", "thread.back", "thread.rename", "thread.btw", "thread.modes", "thread.provider", "thread.effort", "thread.speed", "bots.space", "bots.routine_run",
     "thread.create", "thread.fork", "thread.archive", "thread.unarchive", "thread.pin", "thread.unpin",
     "project.add", "project.new", "project.remove", "fs.list", "fs.mkdir", "fs.find", "thread.detach", "todos.edit", "kicad.open", "viewer.state", "boards.list",
     // the viewers of a thread whose project is there: its Diff and its Files (listing, and a file's bytes to show here)

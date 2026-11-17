@@ -78,13 +78,17 @@ pub fn codex_models(text: &str) -> Vec<String> {
 /// About.codex: "GPT-6.1-Sol · Latest workhorse model..." a model, and the reasoning levels each takes.
 pub fn codex_about(cli: &str, text: &str) -> Value {
     let v: Value = serde_json::from_str(text).unwrap_or(Value::Null);
-    let (mut labels, mut efforts) = (Map::new(), Map::new()); labels.insert("default".into(), json!("Codex's configured default"));
+    let (mut labels, mut efforts, mut speeds) = (Map::new(), Map::new(), Map::new()); labels.insert("default".into(), json!("Codex's configured default"));
     for o in v["models"].as_array().into_iter().flatten() {
         let s = gs(o, "slug"); if s.is_empty() { continue }
         labels.insert(s.into(), json!([gs(o, "display_name"), gs(o, "description")].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join(" · ")));
         if let Some(ls) = o.get("supported_reasoning_levels").and_then(Value::as_array) { efforts.insert(s.into(), Value::Array(ls.iter().filter_map(|l| l.get("effort").cloned()).collect())); }
+        // the speed tiers this account's catalog offers the model (agents/speed.rs): `additional_speed_tiers` ["fast", "ultrafast"], or a `service_tiers` row by that id
+        let tiers: Vec<Value> = crate::agents::speed::MODES.iter().filter(|m| o["additional_speed_tiers"].as_array().map_or(false, |a| a.iter().any(|x| x == *m))
+            || o["service_tiers"].as_array().map_or(false, |a| a.iter().any(|x| x["id"] == **m))).map(|m| json!(m)).collect();
+        if !tiers.is_empty() { speeds.insert(s.into(), Value::Array(tiers)); }
     }
-    json!({"cli": cli, "labels": labels, "efforts": efforts})
+    json!({"cli": cli, "labels": labels, "efforts": efforts, "speeds": speeds})
 }
 fn bullet(l: &str) -> Option<&str> { let t = l.trim(); t.strip_prefix("* ").or_else(|| t.strip_prefix("- ")).and_then(|r| r.split(' ').next()).filter(|s| !s.is_empty()) }
 /// `grok models`: "  * grok-4.6 (default)" / "  - grok-4.5" lines.
@@ -317,6 +321,10 @@ mod tests {
         assert_eq!(codex_models(t), ["gpt-6.1-sol"]); let a = codex_about("codex 1.2", t);
         assert_eq!(a["labels"]["gpt-6.1-sol"], "GPT-6.1-Sol · Latest workhorse"); assert_eq!(a["labels"]["default"], "Codex's configured default"); assert_eq!(a["efforts"]["gpt-6.1-sol"], json!(["low", "high"]));
         assert!(codex_models("not json").is_empty());
+        assert!(a["speeds"].get("gpt-6.1-sol").is_none(), "a model with no speed tier takes Normal only");
+        // the account's catalog: Fast by `additional_speed_tiers`, UltraFast by a `service_tiers` row
+        let t = r#"{"models":[{"slug":"gpt-6.1-sol","visibility":"list","service_tiers":[{"id":"priority","name":"Fast"},{"id":"ultrafast","name":"Ultrafast"}],"additional_speed_tiers":["fast"]},{"slug":"gpt-6-luna","visibility":"list","service_tiers":[{"id":"priority","name":"Fast"}],"additional_speed_tiers":["fast"]}]}"#;
+        let a = codex_about("codex 1.2", t); assert_eq!(a["speeds"]["gpt-6.1-sol"], json!(["fast", "ultrafast"])); assert_eq!(a["speeds"]["gpt-6-luna"], json!(["fast"]));
     }
     #[test] fn grok_reads_its_bullets() {
         let o = "You are not authenticated.\n\nDefault model: grok-4.6\n\nAvailable models:\n  - grok-4.7\n  * grok-4.6 (default)\n  - grok-4.5\n";

@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod account_tools; pub mod halt; pub mod halt_view; pub mod kicadsel; pub mod mcp_stdio; pub mod bundled; pub mod kistack; pub mod mailroom; pub mod recall; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod iconpick; pub mod groupname; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod snapguard; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
+pub mod account_tools; pub mod halt; pub mod halt_view; pub mod kicadsel; pub mod mcp_stdio; pub mod bundled; pub mod kistack; pub mod speed; pub mod mailroom; pub mod recall; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod iconpick; pub mod groupname; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod snapguard; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
 #[cfg(test)] mod tests;
 #[cfg(test)] mod laws;
 
@@ -644,6 +644,12 @@ impl Actor {
 
     async fn stop(&mut self) { if let Some(p) = self.live_proc.take() { proc::terminate(p.pid, Duration::from_secs(2)) } }
 
+    /// The speed a turn was started at (`turn.tier.<thread>`: "" Normal, "fast", "ultrafast"), for the thread's usage; Claude's result then says what it ran at (lines.rs).
+    async fn tier_set(&mut self, th: &str, mode: &str, now: u64) {
+        let k = format!("turn.tier.{th}");
+        if self.ag.world().await.setting(&k) != mode { self.commit(vec![set(k, mode.to_string(), now)]).await }
+    }
+
     async fn commit(&mut self, mut ev: Vec<Value>) {
         if ev.is_empty() { return }
         // halt.rs: a turn that ends on a full context says so in plain words, with its card
@@ -881,8 +887,13 @@ impl Actor {
         let (host, cwd2, text2, prov2) = (self.ag.host.clone(), cwd.to_string(), text.to_string(), t.provider.clone());
         let (body, imgs) = tokio::task::spawn_blocking(move || { let body = if text2.contains('$') { let ss = skills::scan_all(&skills::env_from(&host.user_home, &host.home, host.kistack.as_deref()), &cwd2); skills::prepare(&text2, &ss, &prov2, false) } else { text2.clone() }; (body, inputs::att_paths(&text2).into_iter().filter(|p| !inputs::mime(p).is_empty()).collect::<Vec<_>>()) }).await.unwrap_or_default();
         if self.ag.stopped.load(Relaxed) || !self.ag.hub.cfg.home.exists() { return }
-        let a = providers::TurnIn { thread: th.clone(), cwd: cwd.into(), home: self.ag.host.home.to_string_lossy().into_owned(), model: t.model.clone(), session, runtime: t.runtime.clone(), interaction: t.interaction.clone(), effort, think, text: body, images: imgs, prompt, mcp_url: url.clone(), pcbparts_url: String::new(), gen: gen.clone(), settings: { let w = self.ag.world().await; providers::SETTINGS.iter().map(|k| (k.to_string(), w.setting(k).to_string())).collect() }, mcp: crate::mcpx::svc::launch(&th, &t.provider, &url).await };
+        let a = providers::TurnIn { thread: th.clone(), cwd: cwd.into(), home: self.ag.host.home.to_string_lossy().into_owned(), model: t.model.clone(), session, runtime: t.runtime.clone(), interaction: t.interaction.clone(), effort, think, text: body, images: imgs, prompt, mcp_url: url.clone(), pcbparts_url: String::new(), gen: gen.clone(), settings: { let w = self.ag.world().await; providers::SETTINGS.iter().map(|k| (k.to_string(), w.setting(k).to_string())).collect() }, mcp: crate::mcpx::svc::launch(&th, &t.provider, &url).await, speed: String::new(), speed_args: vec![] };
         let a = providers::TurnIn { pcbparts_url: if a.mcp.pcbparts { crate::mcpx::gen::PCBPARTS.into() } else { String::new() }, ..a };
+        // the speed dial (agents/speed.rs): the mode the thread's model takes, passed the provider's way; recorded for the thread's usage (`turn.tier.<thread>`)
+        let a = { let info = speed::info_now(); let want = self.ag.world().await.setting(&format!("speed.{th}")).to_string();
+            let mode = speed::effective(&info, &t.provider, &t.model, &want); let how = speed::how(&info, &t.provider, &t.model, mode);
+            providers::TurnIn { model: how.model.unwrap_or(a.model.clone()), speed: mode.to_string(), speed_args: how.args, ..a } };
+        self.tier_set(&th, &a.speed, now).await;
         let mut driver = made.driver;
         if let Err(e) = driver.prepare(&a) { let hint = driver.install_hint().map(|h| format!(". {h}")).unwrap_or_default(); self.fail(format!("could not start {}: {e}{hint}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
         let (mut args, mut env, start) = (driver.argv(&a), driver.env(&a), driver.start(&a));
@@ -1010,7 +1021,10 @@ impl Actor {
         if crate::copy::turn_gated(self.pressed) { return } // Copy.turns: nothing but a person's turn writes to an agent on a copy
         let th = self.th.clone(); let (cwd, msg, text, mut agent_text) = (cwd.to_string(), msg.to_string(), text.to_string(), agent_text.to_string());
         // the thread's MCP servers are part of the key: a list changed in Settings > MCP (or by an agent) starts Claude again at its next turn, on the same session
-        let key = format!("{}|mcp:{}{}", rules::agent_key(&t.model, &t.runtime, &t.interaction, self.cx.think), crate::mcpx::svc::fingerprint(&th, "claude").await, if self.ag.in_review(&th).await { "|review" } else { "" }); // a review runs with deny rules for design files (snapguard.rs): a change of mode starts Claude again
+        // the speed dial too: a thread turned to Fast starts Claude again at its next turn with fast mode in its settings, on the same session
+        let want = self.ag.world().await.setting(&format!("speed.{th}")).to_string(); let tier = speed::effective(&speed::info_now(), "claude", &t.model, &want);
+        let key = format!("{}|speed:{tier}|mcp:{}{}", rules::agent_key(&t.model, &t.runtime, &t.interaction, self.cx.think), crate::mcpx::svc::fingerprint(&th, "claude").await, if self.ag.in_review(&th).await { "|review" } else { "" }); // a review runs with deny rules for design files (snapguard.rs): a change of mode starts Claude again
+        self.tier_set(&th, tier, now).await; self.cx.tier_want = tier.to_string(); self.cx.tier = tier.to_string();
         // a live process with a command still open (a turn in flight) is never replaced for a changed model/mode key: the message goes on its input (the CLI queues it) and the new key applies from the next process
         // infinite context (agents/recall.rs): a new turn (no command open: a message into a running turn goes on its input) starts a fresh session with the view
         let fresh = !self.person && !self.cmds.open("") && self.ag.recall_on(&th);
@@ -1199,16 +1213,18 @@ impl Actor {
         let own: Vec<String> = self.ag.host.kistack.iter().chain(self.ag.host.bundled.iter()).map(|k| k.to_string_lossy().into_owned()).collect(); // KiStack's and Backplane's own skills
         let mut dirs = own.clone(); dirs.push(self.ag.host.home.join("attachments").to_string_lossy().into_owned());
         let plugins = own;
-        let (effort, think) = { let w = self.ag.world().await; (w.setting(&format!("effort.{th}")).to_string(), self.cx.think) };
+        let (effort, think, want) = { let w = self.ag.world().await; (w.setting(&format!("effort.{th}")).to_string(), self.cx.think, w.setting(&format!("speed.{th}")).to_string()) };
+        let speed = speed::effective(&speed::info_now(), "claude", &t.model, &want);
         let url = self.ag.mcp.get().map(|m| m.url(&th, &gen)).unwrap_or_default();
         let mcp = crate::mcpx::svc::launch(&th, "claude", &url).await;
         let mut disallowed = mcp.disallowed.clone(); if self.ag.in_review(&th).await { disallowed.extend(snapguard::CLAUDE_DENY.iter().map(|x| x.to_string())) } // a review's design files are read-only to Claude's own tools too
-        let mut args = rules::claude_args(&rules::ArgsIn { model: &t.model, session: &session, runtime: &t.runtime, interaction: &t.interaction, prompt: &prompt, dirs: &dirs, effort: &effort, think, plugins: &plugins, mcp_url: &url, mcp_json: &mcp.claude, disallowed: &disallowed });
+        let mut args = rules::claude_args(&rules::ArgsIn { model: &t.model, session: &session, runtime: &t.runtime, interaction: &t.interaction, prompt: &prompt, dirs: &dirs, effort: &effort, think, plugins: &plugins, mcp_url: &url, mcp_json: &mcp.claude, disallowed: &disallowed, speed });
         let mut keep = vec![]; // Windows: the files Claude reads at its start, removed when it ends
         if cfg!(windows) {
             let name: String = th.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
             rules::prompt_to_file(&mut args, &self.ag.host.home.join("prompts").join(format!("{name}.md"))).map_err(|e| e.to_string())?;
             keep.extend(rules::mcp_to_file(&mut args, &proc::run_dir(&self.ag.host.home), &format!("{name}-{gen}.mcp.json")).map_err(|e| format!("could not write the MCP config for Claude: {e}"))?);
+            keep.extend(rules::json_to_file(&mut args, "--settings", &proc::run_dir(&self.ag.host.home), &format!("{name}-{gen}.settings.json")).map_err(|e| format!("could not write the settings for Claude: {e}"))?);
         }
         if !acct_args.is_empty() { acct_args.extend(args); args = acct_args }
         if self.person { args.extend(person::CLAUDE_STRICT.iter().map(|x| x.to_string())) } // only this hub's MCP config; the person's user-level hooks, MCP servers and rules do not load

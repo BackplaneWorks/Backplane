@@ -155,6 +155,11 @@ pub fn act<F: Facts>(f: &F, hub: &str, session: &Value, sel: &str, action: &str,
                 None => b.rpc("thread.effort", json!({"thread": sel, "effort": value})),
             }
         }
+        // the speed dial: Normal (""), Fast or UltraFast
+        "speed" => {
+            if sel.is_empty() || sel.contains('~') || sel.starts_with('@') || !crate::session::select::Facts::thread_exists(f, sel) { return None }
+            b.rpc("thread.speed", json!({"thread": sel, "speed": value}));
+        }
         // the desktop picker's cursor put on another agent (ModelPick.plan): one switch carrying `<provider>\u{1f}<model>`, then `\u{1f}<effort>` when the effort changed too; between turns the hub takes all of it or none
         "provider" => {
             if sel.is_empty() || sel.contains('~') || sel.starts_with('@') || !crate::session::select::Facts::thread_exists(f, sel) { return None }
@@ -314,6 +319,7 @@ mod tests {
         let o = run("provider", "codex\u{1f}gpt-6\u{1f}high", sess()).unwrap(); assert_eq!(text(&o, 0), format!("{{\"id\":5,\"m\":\"thread.provider\",\"p\":{{\"thread\":\"{T}\",\"provider\":\"codex\",\"model\":\"gpt-6\",\"effort\":\"high\"}}}}"));
         let o = run("provider", "codex\u{1f}", sess()).unwrap(); assert!(text(&o, 0).contains("\"model\":\"\"") && !text(&o, 0).contains("effort"), "an unchanged effort is not sent");
         assert!(run("provider", "", sess()).is_none());
+        let o = run("speed", "fast", sess()).unwrap(); assert!(text(&o, 0).contains("\"m\":\"thread.speed\"") && text(&o, 0).contains("\"speed\":\"fast\""));
         let o = run("effort", "", sess()).unwrap(); assert!(text(&o, 0).contains("\"effort\":\"\""), "auto is the empty effort");
     }
     #[test] fn find_open_modes() {

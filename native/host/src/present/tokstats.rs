@@ -69,6 +69,8 @@ pub struct Bot {
 #[derive(Default)]
 pub struct In<'a> {
     pub provider: &'a str, pub model: &'a str, pub usage: &'a str, pub last: &'a str, pub tv: &'a str, pub speed: &'a str, pub models: &'a str,
+    /// the speed dial's mode the last turn ran at (`turn.tier.<thread>`, agents/speed.rs): "" Normal
+    pub tier: &'a str,
     /// the running turn's numbers so far ("" when no turn runs)
     pub live: &'a str,
     /// the thread's last turns ("tok/cost/ctx ..." `tok.tr.`) and its day ("<day>|<totals>|" `tok.td.`), and today's day
@@ -136,6 +138,8 @@ pub fn usage(x: &In) -> Value {
         let mut meta = vec![model_nice(&last_model).0];
         if last_model.starts_with("claude|") && part(x.speed, 2) > 0 { meta.push(rate(part(x.speed, 3), part(x.speed, 2))); }
         if part(x.speed, 4) > 0 { meta.push(secs(part(x.speed, 4))) }
+        // a turn run past Normal says so where its cost is, with what that mode costs: "Fast ×2 cost"
+        if !x.tier.is_empty() { let c = crate::agents::speed::cost(x.provider, x.tier); meta.push(format!("{}{}", crate::agents::speed::label(x.tier), if c.is_empty() { String::new() } else { format!(" {c}") })) }
         meta.push(ago(x.now, part(x.last, 6)));
         let cost = if kn.contains('c') { money(part(x.last, 5)) } else { String::new() };
         if kn.is_empty() { turns.push(json!({"title": "Last turn", "live": false, "parts": [], "total": "", "cost": "", "meta": "Not counted: the session ran before Backplane counted turns"})) }
@@ -252,6 +256,7 @@ pub fn usage(x: &In) -> Value {
         assert_eq!(v["ctx"]["hint"], "50+ more turns at this rate", "growing 5k a turn: 177 turns of room");
         let t = &v["turns"][0]; assert_eq!(t["title"], "Last turn"); assert_eq!(t["parts"].as_array().unwrap().iter().map(|p| p["short"].as_str().unwrap()).collect::<Vec<_>>(), ["4", "95.3k", "4.9k", "7"]);
         assert_eq!(t["parts"][1]["exact"], "95,292 tokens"); assert_eq!(t["cost"], "$0.0966");
+        let f = usage(&In { tier: "fast", ..thread("100157/1000000", "") }); assert!(f["turns"][0]["meta"].as_str().unwrap().contains("Fast ×2 cost"), "{}", f["turns"][0]["meta"]);
         assert_eq!(tv_sum(&["2/10/20/30/40/0/500/2/2", "1/1/2/3/4/0/50/1/1"]), "3/11/22/33/44/0/550/3/3"); assert_eq!(tv_sum(&["", ""]), ""); assert_eq!(tv_sum(&["", "1/1/1/1/1/0/5/1/1"]), "1/1/1/1/1/0/5/1/1");
         assert_eq!(v["totals"][0]["title"], "This thread"); assert_eq!((v["totals"][0]["tokens"].as_str(), v["totals"][0]["cost"].as_str()), (Some("2.2M"), Some("$2.38")));
         assert_eq!(v["totals"][0]["spark"].as_array().unwrap().len(), 3); assert_eq!(v["totals"][1]["title"], "Today");

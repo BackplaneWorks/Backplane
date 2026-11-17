@@ -98,7 +98,7 @@ fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<Stri
     // the picker's title says it all)
     let chip = combo["short"].as_str().filter(|c| !c.is_empty()).map(str::to_string).unwrap_or_else(|| ext::chip(&t.provider, &model, &effort));
     Some(json!({"id":id,"project":t.project,"title":t.title,"state":state,"updatedAt":ms(t.activity.max(t.created)),"pinned":pinned,"pinOrder":pin_order,"settled":settled,"settledAt":settled_at,"archived":t.archived,
-        "provider":t.provider,"model":model,"effort":effort,"runtime":runtime,"chip":chip,"preview":preview,"waiting":waiting,"status":status,"parent":setting_of(&format!("thread.parent.{id}")),"history":t.project == crate::sidebar::SCRATCH,"swarm":swarm}))
+        "provider":t.provider,"model":model,"effort":effort,"speed":setting_of(&format!("speed.{id}")),"runtime":runtime,"chip":chip,"preview":preview,"waiting":waiting,"status":status,"parent":setting_of(&format!("thread.parent.{id}")),"history":t.project == crate::sidebar::SCRATCH,"swarm":swarm}))
 }
 fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) -> Option<Value> {
     let settled = m.threads.iter().filter(|(i, t)| t.project == id && !t.deleted && !t.archived && flags_of(i).1).count();
@@ -509,6 +509,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
             let runtime = if !s(p, "runtime").is_empty() { s(p, "runtime") } else if s(p, "permission") == "auto" { "full-access" } else { "approval-required" };
             rpc(hub, c, "thread.modes", json!({"thread":id,"runtime":runtime})).await?;
             if !s(p, "effort").is_empty() { rpc(hub, c, "thread.effort", json!({"thread":id,"effort":s(p, "effort")})).await?; }
+            if !s(p, "speed").is_empty() { rpc(hub, c, "thread.speed", json!({"thread":id,"speed":s(p, "speed")})).await?; }
             // (a thread just made on a linked machine is not in the mirror yet: its first message goes straight there)
             if !s(p, "text").is_empty() { if far { rpc(hub, c, "turn.start", json!({"thread":id,"text":s(p, "text"),"msg":format!("m{}-{}", now_ms(), hub.fresh_client())})).await?; } else { send_message(hub, c, &id, s(p, "text"), "", &Value::Null, &Value::Null).await?; } }
             let g = hub.model().await; let asks = open_ask_counts(hub);

@@ -35,7 +35,7 @@ pub struct Ask { pub thread: String, pub kind: String, pub tool: String, pub det
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct World { /** a thread's queued hand-overs (`handoff:*`), (msg, text): the conversation a switch or a fork owes the agent, which goes with its next turn */ #[serde(default)] pub handoffs: HashMap<String, Vec<(String, String)>>, pub home: String, pub bots: HashMap<String, (String, String, bool)>, pub rooms: HashMap<String, (String, bool)>, /** the bots' exchange rooms (bots/life.rs): a `#word` never names one */ #[serde(default)] pub eph_rooms: std::collections::HashSet<String>, pub bot_of: HashMap<String, String>, pub said_to: HashMap<String, std::collections::HashSet<String>>, pub reviews: HashMap<String, Vec<(String, String, u64)>>, pub queued: HashMap<String, Vec<String>>, pub parents: HashMap<String, String>, pub td_msgs: std::collections::HashSet<String>, pub launched: HashMap<String, (String, bool)>, pub projects: HashMap<String, (String, bool)>, pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
 
-const KEYS: &[&str] = &["halt.", "memory.agent.max", "far.launched.", "text.provider", "text.model", "lock.warning.", "locks.lease.minutes", "carry.wait.", "summary.", "rule.", "watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session.", "launch.n.", "uber.bot", "kicad.main.", "kicad.offer.", "review.ro.", "restore.ask.", "order.pick.", "plan.once."];
+const KEYS: &[&str] = &["halt.", "memory.agent.max", "far.launched.", "text.provider", "text.model", "lock.warning.", "locks.lease.minutes", "carry.wait.", "summary.", "rule.", "watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "speed.", "turn.tier.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session.", "launch.n.", "uber.bot", "kicad.main.", "kicad.offer.", "review.ro.", "restore.ask.", "order.pick.", "plan.once."];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) || k.starts_with("usage.") || k.starts_with("tok.key.") }
 
 pub const CARRY_TEXT: &str = "Backplane restarted while you were working. Continue where you left off.";
@@ -202,7 +202,7 @@ impl World {
             models: self.setting(&format!("turn.models.{th}")).into(), tok_epoch_set: !self.setting("tok.epoch").is_empty(), tok_recount_set: !self.setting("tok.recount").is_empty(),
             bg: super::bg::lines(self.setting(&format!("bg.{th}"))), bg_text: self.setting(&format!("bg.{th}")).to_string(),
             deadlines: self.deadlines.iter().filter(|k| k.starts_with(&format!("work.deadline.{th}."))).cloned().collect(), timeout_setting: self.setting("work.timeout.seconds").to_string(), allowance: self.setting("allowance.claude").to_string(), default_account: true,
-            limits: self.st.iter().filter(|(k, _)| k.starts_with("limit.claude.")).map(|(k, v)| (k.clone(), v.clone())).collect(), seq: 0, fg_subs: Default::default(), live: vec![], live_v: String::new() }
+            limits: self.st.iter().filter(|(k, _)| k.starts_with("limit.claude.")).map(|(k, v)| (k.clone(), v.clone())).collect(), seq: 0, fg_subs: Default::default(), live: vec![], live_v: String::new(), tier: self.setting(&format!("turn.tier.{th}")).into(), tier_want: String::new(), tier_why: String::new() }
     }
 }
 
@@ -228,6 +228,7 @@ mod tests {
         w.apply(r#"{"$":"ProviderSet","id":"t","provider":"codex","model":"m","at":6}"#);
         assert_eq!(w.threads["t"].session, "S-codex"); assert_eq!(w.setting("session.t.claude"), "S-claude");
     }
+    #[test] fn a_turn_reads_its_threads_speed() { assert!(tracked("speed.t1") && tracked("turn.tier.t1"), "the speed dial's setting reaches the turn (agents/speed.rs)"); }
     #[test] fn carry_continues() { assert!(carry_will(&th("running"), "")); assert!(carry_will(&th("running"), "on")); }
     #[test] fn a_hardware_thread_works_in_the_main_checkout_and_its_offer_is_remembered() {
         assert!(tracked("kicad.main.t1") && tracked("kicad.offer.t1"));

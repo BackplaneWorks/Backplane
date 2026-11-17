@@ -42,6 +42,9 @@ pub struct Cx {
     pub fg_subs: std::collections::HashSet<String>,
     /// Turn.live: this turn's model calls so far (message id, [input, cache read, cache write, output], model) and the `turn.live.<thread>` value last written
     pub live: Vec<(String, [u64; 4], String)>, pub live_v: String,
+    /// the speed dial (agents/speed.rs): the mode this process was started at, what its last result said it ran at (`turn.tier.<thread>`), and the last
+    /// reason given for not running fast (told once)
+    pub tier_want: String, pub tier: String, pub tier_why: String,
 }
 
 /// How a line is judged by the command ledger (cmds.rs): the legacy rule (the result ends the turn), or the ledger's:
@@ -171,6 +174,18 @@ impl Cx {
             let v = lines.join("\n");
             if !v.is_empty() && v != self.models { self.models = v.clone(); out.push(setting(format!("turn.models.{}", self.thread), v, at)) }
         }
+    }
+
+    /// Claude Code's result says what speed it served (`fast_mode_state` on | cooldown | off, `fast_mode_disabled_reason`): the thread's usage shows that, and
+    /// a thread turned to Fast that ran at standard speed says why, once a reason.
+    fn fast_state(&mut self, o: &Value, at: u64, out: &mut Vec<Value>) {
+        let Some(state) = o.get("fast_mode_state").and_then(Value::as_str) else { return };
+        let tier = if state == "on" { "fast" } else { "" };
+        if tier != self.tier { self.tier = tier.to_string(); out.push(setting(format!("turn.tier.{}", self.thread), tier.to_string(), at)) }
+        if self.tier_want != "fast" || state == "on" { return }
+        let why = match (state, s(o, "fast_mode_disabled_reason")) { ("cooldown", _) => "fast mode is cooling down after its rate limit".to_string(), (_, "") => "Claude Code did not turn it on".to_string(), (_, r) => r.replace('_', " ") };
+        if why != self.tier_why { self.tier_why = why.clone(); self.seq += 1;
+            out.push(json!({"$":"ActivityLogged","thread":self.thread,"act":hub_id("f", at, self.seq),"tone":"info","kind":"speed","summary":format!("This turn ran at standard speed: {why}."),"at":at})) }
     }
 
     /// Claude.result.why
@@ -369,7 +384,7 @@ impl Cx {
                     } else { ev.push(json!({"$":"TurnChanged","thread":self.thread,"state":"completed","at":at})) }
                     self.running = false;
                 }
-                self.window(o, at, &mut ev); self.turn_usage(o, at, &mut ev);
+                self.window(o, at, &mut ev); self.turn_usage(o, at, &mut ev); self.fast_state(o, at, &mut ev);
                 self.live.clear(); if !self.live_v.is_empty() { self.live_v.clear(); ev.push(setting(format!("turn.live.{}", self.thread), String::new(), at)) }
                 fx.events = ev;
             }
@@ -506,6 +521,15 @@ mod tests {
         let mut idle = Cx::new("t1"); assert_eq!(live(&run(&mut idle, r#"{"type":"assistant","message":{"id":"m3","content":[],"usage":{"output_tokens":4}}}"#)), None, "no turn running: nothing");
     }
     #[test] fn usage_same_nothing() { let mut c = Cx::new("t1"); c.used = 7; let a = run(&mut c, r#"{"type":"assistant","message":{"id":"m","content":[],"usage":{"output_tokens":7}}}"#); assert!(a.events.is_empty()); }
+    #[test] fn claudes_result_says_the_speed_it_served_and_why_not_fast() {
+        let mut cx = Cx::new("t1"); cx.tier_want = "fast".into();
+        let mut ev = vec![]; cx.fast_state(&json!({"fast_mode_state":"on"}), 5, &mut ev);
+        assert_eq!(ev, vec![setting("turn.tier.t1".into(), "fast".into(), 5)]);
+        let mut ev = vec![]; cx.fast_state(&json!({"fast_mode_state":"off","fast_mode_disabled_reason":"extra_usage_disabled"}), 6, &mut ev);
+        assert_eq!(ev[0], setting("turn.tier.t1".into(), "".into(), 6)); assert_eq!(ev[1]["summary"], "This turn ran at standard speed: extra usage disabled.");
+        let mut ev = vec![]; cx.fast_state(&json!({"fast_mode_state":"off","fast_mode_disabled_reason":"extra_usage_disabled"}), 7, &mut ev); assert!(ev.is_empty(), "said once");
+        let mut n = Cx::new("t2"); let mut ev = vec![]; n.fast_state(&json!({"fast_mode_state":"off","fast_mode_disabled_reason":"free"}), 8, &mut ev); assert!(ev.is_empty(), "a Normal thread is not told");
+    }
     #[test] fn result_completes_only_a_running_turn_and_failed_results_log_their_error() {
         let mut c = Cx::new("t1");
         assert!(run(&mut c, r#"{"type":"result","subtype":"success","is_error":false}"#).events.is_empty()); // claude_result_after_stop_quiet

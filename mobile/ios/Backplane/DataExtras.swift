@@ -135,6 +135,7 @@ struct DataPickerSheet: View {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(picker?.sections ?? []) { s in
                         DHeading(text: Tr.t(s.title)).padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 4)
+                        if s.dial { DSpeedDial(choices: s.choices) { c in press(s, c) }.padding(.horizontal, 14).padding(.vertical, 6) }
                         ForEach(s.choices) { c in
                             Button { press(s, c) } label: {
                                 HStack(spacing: 8) {
@@ -142,6 +143,7 @@ struct DataPickerSheet: View {
                                     VStack(alignment: .leading, spacing: 1) {
                                         Text(Tr.t(c.label)).dmono(13).foregroundStyle(c.ok ? BackplaneDesign.text : BackplaneDesign.faint)
                                         if !c.ok, !c.why.isEmpty { Text(Tr.t(c.why)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
+                                        if !c.cost.isEmpty { Text(Tr.t(c.cost)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
                                     }
                                     Spacer(minLength: 0)
                                 }.padding(.horizontal, 14).frame(minHeight: 44).background(c.on ? BackplaneDesign.raised : .clear).contentShape(Rectangle())
@@ -155,6 +157,60 @@ struct DataPickerSheet: View {
         .background(BackplaneDesign.panel)
         .presentationDetents([.medium, .large]).presentationDragIndicator(.visible).dataSheet()
         .task { await load() }
+    }
+}
+
+/// The speed dial (issue #1166): a knob with one detent per speed the model takes, as the hub sends them (Normal first). A drag points it at the nearest
+/// detent, a tap goes to the next one (back to Normal after the last), a hardware keyboard's arrows step it, and VoiceOver adjusts it; it always rests on a detent.
+/// The geometry is the desktop's (native/gpui/src/screens/dial.rs): detents 90° apart within 240°, centred on twelve o'clock.
+fileprivate extension Array { subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil } }
+enum DialGeometry {
+    static func angles(_ n: Int) -> [Double] {
+        if n <= 1 { return n == 1 ? [0] : [] }
+        let step = min(240 / Double(n - 1), 90); let from = -step * Double(n - 1) / 2
+        return (0..<n).map { from + step * Double($0) }
+    }
+    static func nearest(_ n: Int, _ deg: Double) -> Int { angles(n).enumerated().min(by: { abs($0.element - deg) < abs($1.element - deg) })?.offset ?? 0 }
+    static func angle(_ c: CGPoint, _ p: CGPoint) -> Double { atan2(Double(p.x - c.x), Double(c.y - p.y)) * 180 / .pi }
+}
+struct DSpeedDial: View {
+    let choices: [DChoice]
+    let pick: (DChoice) -> Void
+    @State private var dragged = false
+    private var at: Int { choices.firstIndex(where: { $0.on }) ?? 0 }
+    private func go(_ i: Int) { let i = max(0, min(choices.count - 1, i)); if i != at { pick(choices[i]) } }
+    var body: some View {
+        let n = choices.count, size: CGFloat = 64
+        HStack(spacing: 14) {
+            Canvas { g, sz in
+                let c = CGPoint(x: sz.width / 2, y: sz.height / 2), r = sz.width / 2 - 5
+                let pt = { (deg: Double, rr: CGFloat) -> CGPoint in let a = deg * .pi / 180; return CGPoint(x: c.x + rr * CGFloat(sin(a)), y: c.y - rr * CGFloat(cos(a))) }
+                g.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r)), with: .color(BackplaneDesign.faint), lineWidth: 1.5)
+                for (i, a) in DialGeometry.angles(n).enumerated() {
+                    var t = Path(); t.move(to: pt(a, r + 1)); t.addLine(to: pt(a, r + 5))
+                    g.stroke(t, with: .color(i == at ? BackplaneDesign.accent : BackplaneDesign.faint), lineWidth: 2)
+                }
+                let a = DialGeometry.angles(n)[safe: at] ?? 0
+                var p = Path(); p.move(to: pt(a, r * 0.2)); p.addLine(to: pt(a, r - 3))
+                g.stroke(p, with: .color(BackplaneDesign.accent), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+            }
+            .frame(width: size, height: size).contentShape(Circle())
+            .gesture(DragGesture(minimumDistance: 4).onChanged { v in
+                dragged = true
+                let c = CGPoint(x: size / 2, y: size / 2)
+                if hypot(v.location.x - c.x, v.location.y - c.y) > 6 { go(DialGeometry.nearest(n, DialGeometry.angle(c, v.location))) }
+            }.onEnded { _ in dragged = false })
+            .onTapGesture { if !dragged { pick(choices[(at + 1) % n]) } }
+            .focusable().onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow]) { k in go(at + (k.key == .rightArrow || k.key == .upArrow ? 1 : -1)); return .handled }
+            .accessibilityElement().accessibilityLabel(Tr.t("Speed")).accessibilityValue(Tr.t(choices[safe: at]?.label ?? ""))
+            .accessibilityAdjustableAction { d in go(at + (d == .increment ? 1 : -1)) }
+            .accessibilityIdentifier("data.pick.speed.dial")
+            VStack(alignment: .leading, spacing: 2) {
+                Text(Tr.t(choices[safe: at]?.label ?? "")).dmono(14, bold: true).foregroundStyle(BackplaneDesign.accent)
+                if let c = choices[safe: at], !c.cost.isEmpty { Text(Tr.t(c.cost)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
+            }
+            Spacer(minLength: 0)
+        }
     }
 }
 

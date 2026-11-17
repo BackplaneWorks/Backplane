@@ -248,6 +248,11 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
             let provider = f.threads.get(&th).map(|t| t.provider.as_str()).unwrap_or("");
             done(vec![json!({"$":"SettingSet","key":format!("effort.{th}"),"value":effort_of(provider, &s(p, "effort", "")),"at":at})], id)
         }
+        // the speed dial (agents/speed.rs): "" Normal, "fast", "ultrafast"; kept per thread, a turn runs it only where the thread's model takes it
+        "thread.speed" => {
+            let v = s(p, "speed", ""); let v = if crate::agents::speed::MODES.contains(&v.as_str()) { v } else { String::new() };
+            done(vec![json!({"$":"SettingSet","key":format!("speed.{th}"),"value":v,"at":at})], id)
+        }
         "thread.provider" => switch(f, at, id, p, cx, false),
         "fallback.switch" => switch(f, at, id, p, cx, true),
         "accounts.select" => account_select(f, at, id, p, cx, "person"),

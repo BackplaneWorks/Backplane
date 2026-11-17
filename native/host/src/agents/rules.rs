@@ -39,7 +39,7 @@ pub fn permission(runtime: &str, interaction: &str) -> &'static str {
 }
 
 /// Claude.args then Hub.agent_args: effort, thinking, plugins and the MCP config follow.
-pub struct ArgsIn<'a> { pub model: &'a str, pub session: &'a str, pub runtime: &'a str, pub interaction: &'a str, pub prompt: &'a str, pub dirs: &'a [String], pub effort: &'a str, pub think: bool, pub plugins: &'a [String], pub mcp_url: &'a str, /** the --mcp-config JSON (mcpx gen::claude); empty: Backplane's own and pcbparts */ pub mcp_json: &'a str, /** tools Claude is told not to use */ pub disallowed: &'a [String] }
+pub struct ArgsIn<'a> { pub model: &'a str, pub session: &'a str, pub runtime: &'a str, pub interaction: &'a str, pub prompt: &'a str, pub dirs: &'a [String], pub effort: &'a str, pub think: bool, pub plugins: &'a [String], pub mcp_url: &'a str, /** the --mcp-config JSON (mcpx gen::claude); empty: Backplane's own and pcbparts */ pub mcp_json: &'a str, /** tools Claude is told not to use */ pub disallowed: &'a [String], /** the speed dial's mode (agents/speed.rs): "fast" turns Claude Code's fast mode on */ pub speed: &'a str }
 pub fn claude_args(a: &ArgsIn) -> Vec<String> {
     let s = |x: &str| x.to_string();
     let mut v: Vec<String> = ["-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json", "--include-partial-messages", "--permission-mode"].iter().map(|x| s(x)).collect();
@@ -53,6 +53,7 @@ pub fn claude_args(a: &ArgsIn) -> Vec<String> {
     if effort_ok(a.effort) { v.push(s("--effort")); v.push(s(a.effort)); }
     if a.think { v.push(s("--thinking-display")); v.push(s("summarized")); }
     for d in a.plugins { v.push(s("--plugin-dir")); v.push(s(d)); }
+    v.push(s("--settings")); v.push(super::speed::claude_settings(a.speed));
     v.push(s("--mcp-config")); v.push(if a.mcp_json.is_empty() { mcp_config(a.mcp_url) } else { a.mcp_json.to_string() });
     v
 }
@@ -70,8 +71,10 @@ pub fn prompt_to_file(args: &mut [String], file: &std::path::Path) -> std::io::R
 /// Windows: Backplane's MCP config goes to Claude as a file (`--mcp-config <path>`, which Claude reads as it does inline JSON), so no
 /// launcher between the hub and Claude can change it (Git's sh made the JSON an empty argument: proc.rs `unshim`) and its tokens are on no
 /// command line. The file is private and goes when the process ends (`proc::RunFile`, held by its waiter). None: no `--mcp-config` to move.
-pub fn mcp_to_file(args: &mut [String], dir: &std::path::Path, name: &str) -> std::io::Result<Option<super::proc::RunFile>> {
-    let Some(i) = args.iter().position(|a| a == "--mcp-config") else { return Ok(None) };
+pub fn mcp_to_file(args: &mut [String], dir: &std::path::Path, name: &str) -> std::io::Result<Option<super::proc::RunFile>> { json_to_file(args, "--mcp-config", dir, name) }
+/// Windows: an inline JSON argument (`--mcp-config`, `--settings`) goes to Claude as a private file instead, for the reason above.
+pub fn json_to_file(args: &mut [String], flag: &str, dir: &std::path::Path, name: &str) -> std::io::Result<Option<super::proc::RunFile>> {
+    let Some(i) = args.iter().position(|a| a == flag) else { return Ok(None) };
     if i + 1 >= args.len() || !args[i + 1].trim_start().starts_with('{') { return Ok(None) }
     let f = super::proc::RunFile::private(dir, name, &args[i + 1])?;
     args[i + 1] = f.path().to_string_lossy().into_owned();
@@ -235,11 +238,13 @@ mod tests {
     #[test] fn titles_cut_at_sixty_characters() { assert_eq!(title_of("  hello\nworld"), "hello"); let t = title_of(&"é".repeat(80)); assert_eq!(t.chars().count(), 60); assert!(t.ends_with("...")); assert_eq!(title_of(&"a".repeat(60)).len(), 60); }
     #[test] fn modes_map_to_claudes_permission_flags() {
         assert_eq!(permission("full-access", "default"), "bypassPermissions"); assert_eq!(permission("approval-required", "default"), "default"); assert_eq!(permission("full-access", "plan"), "plan");
-        let mk = |m: &'static str, s: &'static str, r: &'static str| ArgsIn { model: m, session: s, runtime: r, interaction: "default", prompt: "P", dirs: &[], effort: "", think: false, plugins: &[], mcp_url: "http://u", mcp_json: "", disallowed: &[] };
-        let a = claude_args(&mk("opus", "S", "full-access")); assert!(!a.contains(&"--permission-prompt-tool".to_string())); assert_eq!(&a[a.len() - 6..a.len() - 2], ["--model", "opus", "--resume", "S"]);
+        let mk = |m: &'static str, s: &'static str, r: &'static str| ArgsIn { model: m, session: s, runtime: r, interaction: "default", prompt: "P", dirs: &[], effort: "", think: false, plugins: &[], mcp_url: "http://u", mcp_json: "", disallowed: &[], speed: "" };
+        let a = claude_args(&mk("opus", "S", "full-access")); assert!(!a.contains(&"--permission-prompt-tool".to_string())); assert_eq!(&a[a.len() - 8..a.len() - 4], ["--model", "opus", "--resume", "S"]);
+        assert_eq!(&a[a.len() - 4..a.len() - 2], ["--settings", r#"{"fastMode":false}"#], "Normal says fast mode off, whatever the person's own settings saved");
+        let mut f = mk("opus", "", "full-access"); f.speed = "fast"; let fa = claude_args(&f); assert_eq!(fa[fa.len() - 3], r#"{"fastMode":true}"#);
         assert!(claude_args(&mk("", "", "auto")).contains(&"--permission-prompt-tool".to_string()));
         let mut x = mk("", "", "full-access"); let dirs = vec!["/k".to_string(), "/h/attachments".to_string()]; x.dirs = &dirs; x.effort = "high"; x.think = true; x.plugins = &dirs[..1];
-        let a = claude_args(&x); assert_eq!(&a[a.len() - 12..a.len() - 2], ["--add-dir", "/k", "--add-dir", "/h/attachments", "--effort", "high", "--thinking-display", "summarized", "--plugin-dir", "/k"]); assert_eq!(a[a.len() - 2], "--mcp-config");
+        let a = claude_args(&x); assert_eq!(&a[a.len() - 14..a.len() - 4], ["--add-dir", "/k", "--add-dir", "/h/attachments", "--effort", "high", "--thinking-display", "summarized", "--plugin-dir", "/k"]); assert_eq!(a[a.len() - 2], "--mcp-config");
     }
     #[test] fn the_restart_note_reads_the_person_zone() {
         assert_eq!(clock("", 0), "00:00"); assert_eq!(clock("UTC", 3600 * 5 + 60 * 7), "05:07");

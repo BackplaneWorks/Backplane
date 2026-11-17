@@ -28,6 +28,9 @@ pub struct TurnIn {
     pub settings: Vec<(String, String)>,
     /// the thread's MCP servers in each provider's form (mcpx/svc.rs `launch`)
     pub mcp: crate::mcpx::svc::Launch,
+    /// the speed this turn runs at (agents/speed.rs `effective`: "" Normal, "fast", "ultrafast") and the arguments that pass it (Codex's `-c service_tier`,
+    /// Oh My Pi's `--service-tier`); a provider whose fast mode is a model of its own (Grok, OpenCode) has that model in `model` already
+    pub speed: String, pub speed_args: Vec<String>,
 }
 /// The settings the actor copies into `TurnIn.settings` (add a key here when a driver needs one).
 pub const SETTINGS: &[&str] = &["agy.auth", "agy.account", "agy.gcp.project", "agy.gcp.location", "agy.oauth.optin"];

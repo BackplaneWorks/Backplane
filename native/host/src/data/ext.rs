@@ -32,10 +32,11 @@ pub fn chip(provider: &str, model: &str, effort: &str) -> String { format!("{pro
 /// say when one cannot be used; a provider with no list offers its default. Pure: `models` is `settings::models::all`.
 pub fn picker_sections(models: &Value, provider: &str, model: &str, effort: &str, runtime: &str) -> Value {
     let info: Value = serde_json::from_str(&crate::settings::models::info()).unwrap_or(Value::Null);
-    picker_sections_of(&info, models, provider, model, effort, runtime)
+    picker_sections_of(&info, models, provider, model, effort, "", runtime)
 }
 /// `picker_sections` for the models info given (a thread's own account's catalog laid over the hub's, present/keys.rs `info_for_thread`).
-pub fn picker_sections_of(info: &Value, models: &Value, provider: &str, model: &str, effort: &str, runtime: &str) -> Value {
+/// `speed` is the thread's `speed.<thread>`: a model with a speed past Normal gets a Speed section, the dial's detents (agents/speed.rs), after Effort.
+pub fn picker_sections_of(info: &Value, models: &Value, provider: &str, model: &str, effort: &str, speed: &str, runtime: &str) -> Value {
     let k = crate::present::keys::picker_with(provider, model, effort, "", info.is_object().then_some(&info));
     let plain = |list: &Value, strip: bool| -> Vec<Value> { list.as_array().into_iter().flatten().map(|c| { let v = c["value"].as_str().unwrap_or(""); let ok = c["ok"].as_bool().unwrap_or(true);
         json!({"label":c["label"],"value":if strip { v.trim_start_matches('@') } else { v },"on":c["on"],"ok":ok,"why":if ok { "" } else { c["note"].as_str().unwrap_or("") }}) }).collect() };
@@ -45,9 +46,12 @@ pub fn picker_sections_of(info: &Value, models: &Value, provider: &str, model: &
     let efforts = plain(&k["efforts"], false);
     let mut sections = vec![json!({"title":"Model","action":"model","choices":rows})];
     if !efforts.is_empty() { sections.push(json!({"title":"Effort","action":"effort","choices":efforts})) }
+    let speeds = crate::agents::speed::detents(info, provider, model, speed);
+    if !speeds.is_empty() { sections.push(json!({"title":"Speed","action":"speed","dial":true,"choices":speeds.iter().map(|d| json!({"label":d["label"],"value":d["value"],"on":d["on"],"ok":true,"why":"","cost":d["cost"]})).collect::<Vec<_>>()})) }
     sections.push(json!({"title":"Provider","action":"provider","choices":plain(&k["providers"], true)}));
     sections.push(json!({"title":"Permissions","action":"runtime","choices":plain(&crate::present::keys::permissions(runtime)["choices"], false)}));
-    json!({"chip":chip(provider, model, effort),"sections":sections})
+    let now = crate::agents::speed::effective(info, provider, model, speed);
+    json!({"chip":format!("{}{}", chip(provider, model, effort), if now.is_empty() { String::new() } else { format!(" / {}", crate::agents::speed::label(now)) }),"sections":sections})
 }
 
 async fn picker(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
@@ -62,7 +66,7 @@ async fn picker(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     let info: Value = serde_json::from_str(&crate::settings::models::info()).unwrap_or(Value::Null);
     let info = if !th.is_empty() && p.get("provider").is_none() { crate::statehost::policies().and_then(|x| x.with_state(|st| crate::present::keys::info_for_thread(st, th, &info))).unwrap_or(info) } else { info };
     let models: Value = serde_json::from_str(&crate::settings::models::all_of(&info)).unwrap_or(Value::Null);
-    let mut out = picker_sections_of(&info, &models, &provider, &model, &pick("effort", String::new()), &pick("runtime", "approval-required".into()));
+    let mut out = picker_sections_of(&info, &models, &provider, &model, &pick("effort", String::new()), &pick("speed", String::new()), &pick("runtime", "approval-required".into()));
     // a thread's: its account and what that has left, the one chip's words as the desktop draws it (a new thread has no account yet)
     if !th.is_empty() && p.get("provider").is_none() {
         let (extra, combo) = crate::statehost::policies().and_then(|x| x.with_state(|st| { let n = crate::hub::now_ms() / 1000; (crate::present::keys::account_sections(st, th, n), crate::present::keys::combo_of(st, th, n)) })).unwrap_or_default();
@@ -221,6 +225,7 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
             let r = match s(p, "action") {
                 "model" => rpc(hub, c, "thread.modes", json!({"thread":th,"model":value})).await,
                 "effort" => rpc(hub, c, "thread.effort", json!({"thread":th,"effort":value})).await,
+                "speed" => rpc(hub, c, "thread.speed", json!({"thread":th,"speed":value})).await,
                 "provider" => rpc(hub, c, "thread.provider", json!({"thread":th,"provider":value})).await,
                 "runtime" => rpc(hub, c, "thread.modes", json!({"thread":th,"runtime":value})).await,
                 // the account the thread runs on: the desktop's accounts.select, as the binding is now

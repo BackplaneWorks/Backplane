@@ -26,6 +26,25 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -186,25 +205,63 @@ fun PickerSheet(thread: String?, choice: DNewThreadChoice, choose: (DNewThreadCh
         DLine()
         if (err.isNotEmpty()) Text(Tr.t(err), Modifier.padding(horizontal = 14.dp, vertical = 8.dp).testTag("picker.error"), color = dcs.error, fontFamily = BpMono, fontSize = 12.sp)
         Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 16.dp).testTag("models")) {
+            fun press(s: DPickerSection, c: DChoice) {
+                scope.launch {
+                    if (thread != null) { try { DataClient.pick(thread, s.action, c.value); load(choice) } catch (e: Exception) { err = e.message ?: "" } }
+                    else { val n = choice.set(s.action, c.value); choose(n); load(n) }
+                }
+            }
             picker?.sections?.forEach { s ->
                 DMono(Tr.t(s.title).uppercase(), dfaint, 11, Modifier.padding(start = 14.dp, top = 14.dp, bottom = 4.dp))
+                if (s.dial) SpeedDial(s.choices) { c -> press(s, c) }
                 s.choices.forEach { c ->
-                    Row(Modifier.fillMaxWidth().background(if (c.on) dcs.surfaceContainerHigh else Color.Transparent).clickable(enabled = c.ok) {
-                        scope.launch {
-                            if (thread != null) { try { DataClient.pick(thread, s.action, c.value); load(choice) } catch (e: Exception) { err = e.message ?: "" } }
-                            else { val n = choice.set(s.action, c.value); choose(n); load(n) }
-                        }
-                    }.heightIn(min = 44.dp).padding(horizontal = 14.dp, vertical = 6.dp).testTag("pick.${s.action}.${c.value}"), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().background(if (c.on) dcs.surfaceContainerHigh else Color.Transparent).clickable(enabled = c.ok) { press(s, c) }.heightIn(min = 44.dp).padding(horizontal = 14.dp, vertical = 6.dp).testTag("pick.${s.action}.${c.value}"), verticalAlignment = Alignment.CenterVertically) {
                         DMono(if (c.on) "✓" else "", dcs.primary, 13, Modifier.width(24.dp))
                         Column {
                             Text(Tr.t(c.label), color = if (c.ok) dcs.onSurface else dfaint, fontFamily = BpMono, fontSize = 13.sp)
                             if (!c.ok && c.why.isNotEmpty()) DMono(Tr.t(c.why), dfaint, 11)
+                            if (c.cost.isNotEmpty()) DMono(Tr.t(c.cost), dfaint, 11)
                         }
                     }
                 }
             }
         }
       }
+    }
+}
+
+/** The speed dial (issue #1166): a knob with one detent per speed the model takes, as the hub sends them (Normal first). A drag points it at the nearest detent,
+ *  a tap goes to the next (back to Normal after the last), a mouse wheel or a keyboard's arrows step it (up and right faster), and TalkBack adjusts it.
+ *  It always rests on a detent; nothing animates. */
+@Composable
+fun SpeedDial(choices: List<DChoice>, pick: (DChoice) -> Unit) {
+    val n = choices.size
+    val at = choices.indexOfFirst { it.on }.coerceAtLeast(0)
+    val now by rememberUpdatedState(at)
+    fun go(i: Int) { val j = i.coerceIn(0, n - 1); if (j != now) pick(choices[j]) }
+    val accent = dcs.primary; val faint = dfaint
+    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.foundation.Canvas(Modifier.size(64.dp).testTag("pick.speed.dial")
+            .pointerInput(n) { detectTapGestures { pick(choices[(now + 1) % n]) } }
+            .pointerInput(n) { detectDragGestures { ch, _ -> val c = size.width / 2f; val p = ch.position
+                if (kotlin.math.hypot(p.x - c, p.y - c) > 6f) go(DialGeometry.nearest(n, DialGeometry.angle(c, c, p.x, p.y))) } }
+            .pointerInput(n) { awaitPointerEventScope { while (true) { val e = awaitPointerEvent(); if (e.type == PointerEventType.Scroll) { val dy = e.changes.firstOrNull()?.scrollDelta?.y ?: 0f; if (dy != 0f) go(now + if (dy < 0) 1 else -1) } } } }
+            .onKeyEvent { k -> if (k.type != KeyEventType.KeyDown) false else when (k.key) { Key.DirectionRight, Key.DirectionUp -> { go(now + 1); true }; Key.DirectionLeft, Key.DirectionDown -> { go(now - 1); true }; else -> false } }
+            .focusable()
+            .semantics { contentDescription = Tr.t("Speed"); stateDescription = Tr.t(choices.getOrNull(now)?.label ?: ""); progressBarRangeInfo = ProgressBarRangeInfo(now.toFloat(), 0f..(n - 1).toFloat(), (n - 2).coerceAtLeast(0))
+                setProgress { v -> go(kotlin.math.round(v).toInt()); true } }
+        ) {
+            val c = Offset(size.width / 2, size.height / 2); val r = size.width / 2 - 5.dp.toPx()
+            fun pt(deg: Double, rr: Float) = Offset(c.x + rr * kotlin.math.sin(Math.toRadians(deg)).toFloat(), c.y - rr * kotlin.math.cos(Math.toRadians(deg)).toFloat())
+            drawCircle(faint, r, c, style = Stroke(1.5.dp.toPx()))
+            DialGeometry.angles(n).forEachIndexed { i, a -> drawLine(if (i == at) accent else faint, pt(a, r + 1.dp.toPx()), pt(a, r + 5.dp.toPx()), 2.dp.toPx()) }
+            val a = DialGeometry.angles(n).getOrNull(at) ?: 0.0
+            drawLine(accent, pt(a, r * 0.2f), pt(a, r - 3.dp.toPx()), 3.dp.toPx(), cap = StrokeCap.Round)
+        }
+        Column(Modifier.padding(start = 14.dp)) {
+            DMono(Tr.t(choices.getOrNull(at)?.label ?: ""), accent, 14, bold = true)
+            choices.getOrNull(at)?.cost?.takeIf { it.isNotEmpty() }?.let { DMono(Tr.t(it), faint, 11) }
+        }
     }
 }
 

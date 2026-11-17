@@ -161,6 +161,9 @@ async fn say(h: &Arc<Hub>, th: &str, role: &str, text: &str, n: u32) { h.commit(
     let h = hub("effort").await;
     let (e, r) = ask(&h, "thread.effort", json!({"thread":"t1","effort":"max"})).await; assert_eq!(r, ok()); assert_eq!(e, vec![json!({"$":"SettingSet","key":"effort.t1","value":"max","at":0})]);
     let (e, _) = ask(&h, "thread.effort", json!({"thread":"t1","effort":"minimal"})).await; assert_eq!(e[0]["value"], "");
+    // the speed dial: kept per thread, Normal by default and for anything it does not know
+    let (e, r) = ask(&h, "thread.speed", json!({"thread":"t1","speed":"fast"})).await; assert_eq!(r, ok()); assert_eq!(e, vec![json!({"$":"SettingSet","key":"speed.t1","value":"fast","at":0})]);
+    let (e, _) = ask(&h, "thread.speed", json!({"thread":"t1","speed":"warp"})).await; assert_eq!(e[0]["value"], "");
 }
 // Hub.switch.as + Switch.changes: between turns only; the new provider gets what it missed
 #[tokio::test] async fn a_provider_switch_hands_over_what_the_new_one_missed() {

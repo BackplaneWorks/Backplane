@@ -10,16 +10,19 @@ use gpui::{prelude::*, *};
 use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Choice { pub label: String, pub value: String, pub on: bool, pub note: String, pub ok: bool, pub efforts: Option<Vec<String>> }
+pub struct Choice { pub label: String, pub value: String, pub on: bool, pub note: String, pub ok: bool, pub efforts: Option<Vec<String>>,
+    /// a model row's speed dial: its detents (Normal first, each with its cost as `note`); None or empty: Normal only
+    pub speeds: Option<Vec<Choice>> }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Section { pub title: &'static str, pub action: &'static str, pub choices: Vec<Choice> }
 
 fn choices(v: &Value) -> Vec<Choice> {
-    v.as_array().into_iter().flatten().map(|c| Choice { label: string(c, "label"), value: string(c, "value"), on: c["on"].as_bool().unwrap_or(false), note: string(c, "note"), ok: c["ok"].as_bool().unwrap_or(true),
-        efforts: c["efforts"].as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()) }).collect()
+    v.as_array().into_iter().flatten().map(|c| Choice { label: string(c, "label"), value: string(c, "value"), on: c["on"].as_bool().unwrap_or(false),
+        note: { let n = string(c, "note"); if n.is_empty() { string(c, "cost") } else { n } }, ok: c["ok"].as_bool().unwrap_or(true),
+        efforts: c["efforts"].as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()), speeds: c["speeds"].as_array().map(|_| choices(&c["speeds"])) }).collect()
 }
 pub fn parse(picker: &Value) -> Vec<Section> {
-    /* i18n-ok: section titles, drawn through trs in head */ [("Agent", "provider", "providers"), ("Model", "model", "models"), ("Effort", "effort", "efforts")].into_iter()
+    /* i18n-ok: section titles, drawn through trs in head */ [("Agent", "provider", "providers"), ("Model", "model", "models"), ("Effort", "effort", "efforts"), ("Speed", "speed", "speeds")].into_iter()
         .map(|(title, action, key)| Section { title, action, choices: choices(&picker[key]) }).filter(|s| !s.choices.is_empty()).collect()
 }
 /// "@claude" (a provider row's value) as the hub names the agent.
@@ -38,7 +41,7 @@ pub fn for_provider(picker: &Value, agents: &Value, provider: &str) -> Vec<Secti
     let a = &agents[bare(provider)];
     let mut models = unmarked(&a["models"]);
     let ok = a["ok"].as_bool().unwrap_or(true);
-    if models.is_empty() && ok { models.push(Choice { label: "default".into(), value: String::new(), on: false, note: String::new(), ok: true, efforts: None }); }
+    if models.is_empty() && ok { models.push(Choice { label: "default".into(), value: String::new(), on: false, note: String::new(), ok: true, efforts: None, speeds: None }); }
     let mut out: Vec<Section> = own.into_iter().filter(|s| s.action == "provider").collect();
     /* i18n-ok: section titles, drawn through trs in head */ out.push(Section { title: "Model", action: "model", choices: models });
     let efforts = unmarked(&a["efforts"]);
@@ -57,27 +60,30 @@ pub fn agent_ok(rows: &[Section], provider: &str) -> bool {
     rows.iter().find(|s| s.action == "provider").and_then(|s| s.choices.iter().find(|c| c.value == provider)).map_or(true, |c| c.ok)
 }
 
-/// The columns, in the order Tab goes through them.
-pub const COLS: [&str; 3] = ["provider", "model", "effort"];
+/// The columns, in the order Tab goes through them; the speed dial's only while the cursor's model takes a speed past Normal (`ncols`).
+pub const COLS: [&str; 4] = ["provider", "model", "effort", "speed"];
+/// How many columns Tab goes round for the cursor's model: the dial's too when it has more than one detent.
+pub fn ncols(rows: &[Section], model: &str) -> usize { if detents(rows, model).len() > 1 { 4 } else { 3 } }
 pub fn col_of(action: &str) -> usize { COLS.iter().position(|c| *c == action).unwrap_or(1) }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Key { Tab, BackTab, Up, Down, Left, Right }
 /// What Enter would apply, and the column the keys are in; a draft until then.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Cursor { pub col: usize, pub provider: String, pub model: String, pub effort: String }
+pub struct Cursor { pub col: usize, pub provider: String, pub model: String, pub effort: String, pub speed: String }
 impl Cursor {
     /// The thread's own agent, model and effort, in the model column.
     pub fn own(all: &[Section]) -> Self {
         let on = |a: &str| all.iter().find(|s| s.action == a).and_then(|s| s.choices.iter().find(|c| c.on)).map(|c| c.value.clone()).unwrap_or_default();
-        Self { col: 1, provider: on("provider"), model: on("model"), effort: on("effort") }
+        Self { col: 1, provider: on("provider"), model: on("model"), effort: on("effort"), speed: on("speed") }
     }
-    fn value(&self, col: usize) -> &str { match col { 0 => &self.provider, 1 => &self.model, _ => &self.effort } }
+    fn value(&self, col: usize) -> &str { match col { 0 => &self.provider, 1 => &self.model, 2 => &self.effort, _ => &self.speed } }
     /// Another agent starts on its default model, the thread's agent on the thread's model; the effort stays.
     pub fn set(&mut self, col: usize, v: &str, own: &Cursor) {
         match col {
             0 => { if self.provider != v { self.model = if v == own.provider { own.model.clone() } else { String::new() }; self.provider = v.to_string(); } }
             1 => self.model = v.to_string(),
-            _ => self.effort = v.to_string(),
+            2 => self.effort = v.to_string(),
+            _ => self.speed = v.to_string(),
         }
     }
 }
@@ -118,6 +124,20 @@ fn step(c: &Cursor, ss: &[Step], more: bool) -> String {
     on[if more { (i + 1).min(on.len().saturating_sub(1)) } else { i.saturating_sub(1) }].to_string()
 }
 
+// ---- the speed dial (screens/dial.rs draws it) ----
+/// The detents of the cursor's model: its row's, as the hub sent them (agents/speed.rs); none for Normal only.
+pub fn detents(rows: &[Section], model: &str) -> Vec<Choice> {
+    rows.iter().find(|s| s.action == "model").and_then(|s| s.choices.iter().find(|c| c.value == model)).and_then(|c| c.speeds.clone()).unwrap_or_default()
+}
+/// The detent the dial rests on for speed `v`: its own, else Normal (the first).
+pub fn detent_at(ds: &[Choice], v: &str) -> usize { ds.iter().position(|d| d.value == v).unwrap_or(0) }
+/// The speed a cursor applies: its own when the model takes it, else Normal ("").
+pub fn speed_applied(c: &Cursor, rows: &[Section]) -> String { let ds = detents(rows, &c.model); ds.get(detent_at(&ds, &c.speed)).map(|d| d.value.clone()).unwrap_or_default() }
+fn turn(c: &Cursor, rows: &[Section], up: bool) -> String {
+    let ds = detents(rows, &c.model); if ds.len() < 2 { return c.speed.clone() }
+    ds[super::dial::step(ds.len(), detent_at(&ds, &c.speed), up)].value.clone()
+}
+
 /// The row of `s` the cursor is on.
 pub fn at(s: &Section, c: &Cursor) -> Option<usize> { s.choices.iter().position(|x| x.value == c.value(col_of(s.action))) }
 /// What a key does to the cursor over the rows on show. Tab and Shift+Tab go round the three columns; Up and Down go round the rows of the agent and model columns
@@ -125,9 +145,11 @@ pub fn at(s: &Section, c: &Cursor) -> Option<usize> { s.choices.iter().position(
 pub fn key(k: Key, c: &Cursor, rows: &[Section], own: &Cursor) -> Cursor {
     let mut n = c.clone();
     let ss = steps(&levels(rows, &c.model));
+    let nc = ncols(rows, &c.model);
     match k {
-        Key::Tab => n.col = (c.col + 1) % COLS.len(),
-        Key::BackTab => n.col = (c.col + COLS.len() - 1) % COLS.len(),
+        Key::Tab => n.col = (c.col.min(nc - 1) + 1) % nc,
+        Key::BackTab => n.col = (c.col.min(nc - 1) + nc - 1) % nc,
+        Key::Up | Key::Down | Key::Left | Key::Right if c.col == 3 => n.speed = turn(c, rows, matches!(k, Key::Up | Key::Right)),
         Key::Up | Key::Down if c.col == 2 => n.effort = step(c, &ss, k == Key::Up),
         Key::Up | Key::Down => if let Some(s) = rows.iter().find(|s| col_of(s.action) == c.col).filter(|s| !s.choices.is_empty()) {
             let len = s.choices.len() as i32; let d = if k == Key::Down { 1 } else { -1 };
@@ -136,6 +158,7 @@ pub fn key(k: Key, c: &Cursor, rows: &[Section], own: &Cursor) -> Cursor {
         },
         Key::Left | Key::Right => n.effort = step(c, &ss, k == Key::Right),
     }
+    if n.col == 3 && ncols(rows, &n.model) < 4 { n.col = 2 } // a model with Normal only has no dial to be in
     n
 }
 /// The search changed: the cursor goes to the first model it finds, which is what Enter then takes.
@@ -148,28 +171,35 @@ pub fn settle(c: &Cursor, rows: &[Section], own: &Cursor) -> Cursor {
 pub fn effort_applied(c: &Cursor, rows: &[Section]) -> String { lit(&steps(&levels(rows, &c.model)), &c.effort).unwrap_or_else(|| c.effort.clone()) }
 /// The requests that apply a cursor against the thread's own: another agent is one switch carrying the model and any new effort, the same agent asks for what changed, nothing changed asks for nothing.
 pub fn plan(c: &Cursor, now: &Cursor) -> Vec<Command> {
+    let speed = (c.speed != now.speed).then(|| Command::Action("speed".into(), c.speed.clone()));
     if c.provider != now.provider {
         let mut v = format!("{}\u{1f}{}", bare(&c.provider), c.model);
         if c.effort != now.effort { v.push('\u{1f}'); v.push_str(&c.effort); }
-        return vec![Command::Action("provider".into(), v)];
+        return std::iter::once(Command::Action("provider".into(), v)).chain(speed).collect();
     }
     let mut out = vec![];
     if c.model != now.model { out.push(Command::Action("model".into(), c.model.clone())); }
     if c.effort != now.effort { out.push(Command::Action("effort".into(), c.effort.clone())); }
+    out.extend(speed);
     out
 }
 /// The model list's row that shows the cursor's model (the list holds model rows only).
 pub fn child_of(rows: &[Section], c: &Cursor) -> Option<usize> { rows.iter().find(|s| s.action == "model").and_then(|s| at(s, c)) }
 /// The keycap in a column's head, read from the column the keys are in.
-pub fn cap(col: usize, here: usize) -> &'static str {
-    /* i18n-ok: a key name */ if col == 2 { "←→" } else if col == here { "↑↓" } else if col == (here + 1) % COLS.len() { "Tab" } else { "⇧Tab" }
+pub fn cap(col: usize, here: usize, n: usize) -> &'static str {
+    if col >= n { return "" } // a dial with Normal only: Tab does not go there
+    /* i18n-ok: a key name */ if col == 2 && here != 3 { "←→" } else if col == here { if col == 3 { "←→" } else { "↑↓" } } else if col == (here + 1) % n { "Tab" } else { "⇧Tab" }
 }
 
 /// What the menu keeps between frames: the search box, the scroll of the model list, the cursor once a key moved it (with its thread: a cursor moved on another thread is not this one's);
 /// where the chip and its row were last drawn (the menu floats from them, and a press on the chip is not a press outside the menu) and the height the open menu holds (screens/combo.rs `hold`).
 #[derive(Default)]
 pub struct Pick { pub search: Option<Entity<Composer>>, pub q: String, pub scroll: ScrollHandle, pub ascroll: ScrollHandle, pub cur: Option<(String, Cursor)>,
-    pub row: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>, pub chip: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>, pub held: std::rc::Rc<std::cell::Cell<[f32; 3]>> }
+    pub row: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>, pub chip: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>, pub held: std::rc::Rc<std::cell::Cell<[f32; 3]>>,
+    /// the speed dial: where its knob was drawn, the scroll not yet a detent, and whether the press now down has dragged it (then its click is not a click)
+    pub dial: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>, pub wheel: std::rc::Rc<std::cell::Cell<f32>>, pub dragged: std::rc::Rc<std::cell::Cell<bool>>,
+    /// the knob is held down (its own record: not every platform's pointer says which button a move carries)
+    pub held_dial: std::rc::Rc<std::cell::Cell<bool>> }
 
 /// The provider in force (the marked choice of the provider section), "" when the hub lists none.
 pub fn provider_of(sections: &[Section]) -> String {
@@ -260,12 +290,14 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool
     let drill = f.mode == Mode::Drill;
     // a column's head: its title (cut short, never over its keys), its keys; in a one-column menu a back control to the column before
     let plan_row = plan_once_row(cx, light, thread); // built before `head` borrows cx
+    let nc = ncols(&rows, &cur.model);
+    let speed_body = speed_dial(cx, light, &rows, &cur, &own, pick, f); // so is the dial
     let head = |col: usize, title: &str| {
         let back = (drill && col > 0).then(|| div().id(SharedString::from(format!("pick-back-{col}"))).flex_shrink_0().pr_2().cursor_pointer().text_color(c("dim")).child("‹")
             .on_click(cx.listener(move |this, _, _, cx| this.picker_go(col - 1, cx))));
         div().px_3().pt_2().pb_1().flex().items_center().gap_1().text_size(z(11.)).text_color(if col == cur.col { c("accent") } else { c("faint") })
             .children(back).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(crate::i18n::trs(title).to_uppercase()))
-            .child(div().flex_shrink_0().whitespace_nowrap().child(cap(col, cur.col)))
+            .child(div().flex_shrink_0().whitespace_nowrap().child(cap(col, cur.col, nc)))
     };
     let col_w = match f.mode { Mode::Wide => (f.w - f.agent_w - f.effort_w).max(120. * f.s), Mode::Stack => (f.w - f.agent_w).max(120. * f.s), Mode::Drill => f.w };
     // the agent column: each agent, what it is dim beside it; the cursor's row raised with the accent edge, the thread's own ticked
@@ -331,7 +363,8 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool
             .when(ok, |d| d.on_click(cx.listener(move |this, _, _, cx| this.picker_press(2, &level, cx)))));
     }
     /* i18n-ok: section titles, drawn through trs in head */ let effort_body = div().flex().flex_col().child(head(2, "Effort")).child(meter)
-        .child(div().px_3().pt_2().pb_2().text_size(z(11.)).text_color(c("faint")).child(meter_note(&ss, &cur.provider, &own)));
+        .child(div().px_3().pt_2().pb_2().text_size(z(11.)).text_color(c("faint")).child(meter_note(&ss, &cur.provider, &own)))
+        /* i18n-ok: section titles, drawn through trs in head */ .child(div().border_t_1().border_color(c("line")).child(head(3, "Speed")).child(speed_body));
     // an installed CLI older than Backplane supports: still offered, with what it needs and an Update button (the CLI's own updater, run by the hub)
     let update = update_note(&thread["pickerAgents"], &provider).map(|note| { let p = bare(&provider).to_string();
         div().mx_3().mb_1().px_2().py_1().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(z(11.))
@@ -343,13 +376,80 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool
         Mode::Wide => div().flex().items_start().child(agents).child(model_col)
             .child(div().id("picker-effort").w(px(f.effort_w)).flex_shrink_0().h(px(agents_h)).overflow_y_scroll().border_l_1().border_color(c("line")).child(effort_body)),
         Mode::Stack => div().flex().items_start().child(agents).child(div().flex_1().min_w_0().flex().flex_col().child(model_col).child(div().border_t_1().border_color(c("line")).child(effort_body))),
-        Mode::Drill => div().flex().flex_col().child(match cur.col { 0 => agents.into_any_element(), 2 => effort_body.into_any_element(), _ => model_col.into_any_element() }),
+        Mode::Drill => div().flex().flex_col().child(match cur.col { 0 => agents.into_any_element(), 2 | 3 => effort_body.into_any_element(), _ => model_col.into_any_element() }),
     };
     // as tall as the agent column in every mode (one column at a time too): stepping from column to column or a shorter list leaves the menu's height as it is;
     // "Plan first, this turn only" under the columns, in every mode
     let body = body.id("picker").w_full().min_w_0().min_h(px(agents_h)).text_size(z(12.));
     Some(div().w_full().min_w_0().flex().flex_col().child(body).children(plan_row.map(|r| div().pt_2().border_t_1().border_color(c("line")).child(r)).into_iter()).into_any_element())
 }
+
+/// The speed dial under the effort meter: the knob, and beside it each detent's name and cost (a press picks it); the one in force lit. With Normal only
+/// the knob is drawn dim with no pointer, and says on hover that the model runs at Normal speed only.
+fn speed_dial(cx: &mut Context<Backplane>, light: bool, rows: &[Section], cur: &Cursor, own: &Cursor, pick: &Pick, f: &Fit) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let z = |v: f32| px(v * f.s);
+    let ds = detents(rows, &cur.model);
+    let size = 56. * f.s;
+    let on = ds.len() > 1;
+    let at = detent_at(&ds, &cur.speed);
+    let knob = super::dial::knob(ds.len(), at, size, c("dim"), c("faint"), c("accent"), on, pick.dial.clone());
+    let model = if cur.model.is_empty() { crate::i18n::trs("default") } else { cur.model.clone() };
+    if !on {
+        let why = crate::i18n::tf("gpui.picker.speed.normal.only", &[("model", model.into())]);
+        return div().id("pick-speed").flex().items_center().gap_3().px_3().py_2().opacity(0.45)
+            .child(knob).child(div().flex_1().min_w_0().text_size(z(11.)).text_color(c("faint")).child(why.clone()))
+            .tooltip(tip_of(why, light)).into_any_element()
+    }
+    let (n, dial, wheel, dragged) = (ds.len(), pick.dial.clone(), pick.wheel.clone(), pick.dragged.clone());
+    let values: Vec<String> = ds.iter().map(|d| d.value.clone()).collect();
+    let (v1, v2, v3) = (values.clone(), values.clone(), values.clone());
+    let (dr1, dr2) = (dragged.clone(), dragged.clone());
+    let (h1, h2, h3, h4) = (pick.held_dial.clone(), pick.held_dial.clone(), pick.held_dial.clone(), pick.held_dial.clone());
+    let knob_box = crate::ui::with_rect(div().id("pick-speed-knob"), || "pick:speed-knob".to_string()).flex_shrink_0().cursor_pointer()
+        .child(knob)
+        // a press starts a turn; a drag points it at the nearest detent; a click that did not drag goes to the next detent, round
+        .on_mouse_down(MouseButton::Left, cx.listener(move |_, _: &MouseDownEvent, _, _| { dr1.set(false); h1.set(true) }))
+        .on_mouse_up(MouseButton::Left, cx.listener(move |_, _: &MouseUpEvent, _, _| h2.set(false)))
+        .on_mouse_up_out(MouseButton::Left, cx.listener(move |_, _: &MouseUpEvent, _, _| h3.set(false)))
+        .on_mouse_move(cx.listener(move |this, e: &MouseMoveEvent, _, cx| {
+            if !(e.dragging() || h4.get()) { return }
+            let b = dial.get(); let (x0, y0) = (f32::from(b.origin.x) + f32::from(b.size.width) / 2., f32::from(b.origin.y) + f32::from(b.size.height) / 2.);
+            let (x, y) = (f32::from(e.position.x), f32::from(e.position.y));
+            if (x - x0).hypot(y - y0) < 6. { return } // too near the centre to say an angle
+            dr2.set(true);
+            let i = super::dial::nearest(n, super::dial::angle_at(x0, y0, x, y));
+            if this.picker_cur_speed() != v1[i] { this.picker_press(3, &v1[i], cx) }
+        }))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            if dragged.replace(false) { return }
+            let i = super::dial::next(n, detent_at_value(&v2, &this.picker_cur_speed())); this.picker_press(3, &v2[i], cx)
+        }))
+        // the wheel: up is faster, a notch a detent, stopping at the ends
+        .on_scroll_wheel(cx.listener(move |this, e: &ScrollWheelEvent, _, cx| {
+            let (k, rest) = match e.delta { ScrollDelta::Lines(l) => (super::dial::notch(l.y), 0.), ScrollDelta::Pixels(p) => super::dial::wheel(wheel.get(), f32::from(p.y)) }; wheel.set(rest);
+            if k == 0 { return }
+            let mut i = detent_at_value(&v3, &this.picker_cur_speed());
+            for _ in 0..k.unsigned_abs() { i = super::dial::step(n, i, k > 0) }
+            if this.picker_cur_speed() != v3[i] { this.picker_press(3, &v3[i], cx) }
+            cx.stop_propagation();
+        }));
+    let mut names = div().flex_1().min_w_0().flex().flex_col().gap(z(2.));
+    for (i, d) in ds.iter().enumerate() {
+        let (lit, value) = (i == at, d.value.clone());
+        let here = cur.col == 3 && lit;
+        names = names.child(div().id(SharedString::from(format!("pick-s-{i}"))).flex().items_center().gap_2().px_1().cursor_pointer().hover(|s| s.bg(c("raise")))
+            .when(here, |d| d.border_l_2().border_color(c("accent")))
+            .child(div().w(z(10.)).flex_shrink_0().text_color(c("accent")).child(if d.value == own.speed && cur.provider == own.provider && cur.model == own.model { "✓" } else { "" }))
+            .child(div().flex_shrink_0().text_color(if lit { c("accent") } else { c("text") }).child(crate::i18n::trs(&d.label)))
+            .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(z(10.)).text_color(c("faint")).child(crate::i18n::trs(&d.note)))
+            .on_click(cx.listener(move |this, _, _, cx| this.picker_press(3, &value, cx))));
+    }
+    let now = &ds[at];
+    let tip = if now.note.is_empty() { crate::i18n::trs(&now.label) } else { format!("{}: {}", crate::i18n::trs(&now.label), crate::i18n::trs(&now.note)) };
+    div().id("pick-speed").flex().items_center().gap_3().px_3().py_2().child(knob_box.tooltip(tip_of(tip, light))).child(names).into_any_element()
+}
+fn detent_at_value(values: &[String], v: &str) -> usize { values.iter().position(|x| x == v).unwrap_or(0) }
 
 /// "Plan first, this turn only" (a Claude thread): its plan mode for the next turn, then the thread goes back on its own (the hub's thread.planonce);
 /// lit while set. A press flips it.
@@ -404,6 +504,8 @@ impl Backplane {
     pub(crate) fn picker_close(&mut self, cx: &mut Context<Self>) {
         self.screens.picker_open = false; self.screens.acct.menu = false; self.screens.pick.cur = None; self.want_focus = true; cx.notify();
     }
+    /// The speed the cursor is on now (the dial's handlers read it as it is, not as it was drawn).
+    fn picker_cur_speed(&self) -> String { self.picker_shown().map(|s| s.cur.speed).unwrap_or_default() }
     fn picker_shown(&self) -> Option<Shown> { shown(&self.data["thread"], &self.screens.pick, &self.local.favs) }
     fn picker_store(&mut self, c: Cursor) { self.screens.pick.cur = Some((string(&self.data["thread"], "id"), c)); self.picker_reveal(); }
     /// Scroll the cursor's model into view.
@@ -411,7 +513,7 @@ impl Backplane {
         let Some(s) = self.picker_shown() else { return };
         if let Some(ix) = child_of(&s.rows, &s.cur) { self.screens.pick.scroll.scroll_to_item(ix); }
         if let Some(ix) = s.rows.iter().find(|x| x.action == "provider").and_then(|x| x.choices.iter().position(|c| c.value == s.cur.provider)) { self.screens.pick.ascroll.scroll_to_item(ix + 1); }
-        self.m("pick", serde_json::json!({"col": COLS[s.cur.col], "provider": s.cur.provider, "model": s.cur.model, "effort": s.cur.effort, "child": child_of(&s.rows, &s.cur), "y": -f32::from(self.screens.pick.scroll.offset().y),
+        self.m("pick", serde_json::json!({"col": COLS[s.cur.col], "provider": s.cur.provider, "model": s.cur.model, "effort": s.cur.effort, "speed": s.cur.speed, "child": child_of(&s.rows, &s.cur), "y": -f32::from(self.screens.pick.scroll.offset().y),
             "models": s.rows.iter().find(|x| x.action == "model").map_or(0, |x| x.choices.len()), "hidden": s.hidden}));
     }
     fn picker_searched(&mut self) {
@@ -437,10 +539,10 @@ impl Backplane {
     }
     /// One column on its own (the one-column menu): the cursor keeps its agent, model and effort and the keys go to `col`.
     fn picker_go(&mut self, col: usize, cx: &mut Context<Self>) {
-        if let Some(s) = self.picker_shown() { let mut c = s.cur.clone(); c.col = col.min(2); self.picker_store(c); }
+        if let Some(s) = self.picker_shown() { let mut c = s.cur.clone(); c.col = col.min(ncols(&s.rows, &s.cur.model) - 1); self.picker_store(c); }
         cx.notify();
     }
-    /// A row pressed (0 agent, 1 model, 2 effort): the cursor moves there and applies at once; the menu stays open (0.14's Mpk.click).
+    /// A row pressed (0 agent, 1 model, 2 effort, 3 the speed dial): the cursor moves there and applies at once; the menu stays open (0.14's Mpk.click).
     fn picker_press(&mut self, col: usize, value: &str, cx: &mut Context<Self>) {
         if let Some(s) = self.picker_shown() {
             let mut c = s.cur.clone(); c.set(col, value, &s.own); c.col = col;
@@ -454,6 +556,7 @@ impl Backplane {
     fn picker_apply(&self, mut c: Cursor, all: &[Section], own: &Cursor) {
         if !agent_ok(all, &c.provider) { return }
         c.effort = effort_applied(&c, all);
+        c.speed = speed_applied(&c, all);
         for cmd in plan(&c, own) { let _ = self.tx.try_send(cmd); }
     }
 }
@@ -506,7 +609,7 @@ mod tests {
         assert_eq!(s.iter().map(|x| x.action).collect::<Vec<_>>(), ["model", "effort"]);
         assert!(s[0].choices[0].on && !s[0].choices[1].on); assert_eq!(s[0].choices[0].note, "Opus 5.5"); assert!(s[0].choices[1].ok, "ok unless the hub says otherwise");
         assert!(parse(&Value::Null).is_empty());
-        let (p, _) = fixture(); assert_eq!(parse(&p).iter().map(|x| x.action).collect::<Vec<_>>(), COLS); assert_eq!(parse(&p)[1].choices[2].efforts, Some(vec![]));
+        let (p, _) = fixture(); assert_eq!(parse(&p).iter().map(|x| x.action).collect::<Vec<_>>(), COLS[..3], "no speeds sent: no Speed section"); assert_eq!(parse(&p)[1].choices[2].efforts, Some(vec![]));
     }
     #[test] fn search_finds_every_word_in_the_id_or_label_starred_lead_and_the_other_columns_stay() {
         let (p, _) = fixture(); let s = parse(&p);
@@ -524,7 +627,7 @@ mod tests {
     }
     #[test] fn the_cursor_starts_on_the_threads_own_in_the_model_column() {
         let (p, _) = fixture(); let c = Cursor::own(&parse(&p));
-        assert_eq!(c, Cursor { col: 1, provider: "@claude".into(), model: "opus".into(), effort: "high".into() });
+        assert_eq!(c, Cursor { col: 1, provider: "@claude".into(), model: "opus".into(), effort: "high".into(), speed: String::new() });
     }
     #[test] fn up_and_down_go_round_the_agent_and_model_columns_and_step_the_effort() {
         let (p, _) = fixture(); let s = parse(&p); let own = Cursor::own(&s);
@@ -586,7 +689,7 @@ mod tests {
         assert!(plan(&own, &own).is_empty());
         let mut c = own.clone(); c.model = "sonnet".into(); assert_eq!(acts(plan(&c, &own)), [pair("model", "sonnet")]);
         c.effort = "".into(); assert_eq!(acts(plan(&c, &own)), [pair("model", "sonnet"), pair("effort", "")]);
-        let d = Cursor { col: 0, provider: "@codex".into(), model: "gpt".into(), effort: "high".into() }; assert_eq!(acts(plan(&d, &own)), [pair("provider", "codex\u{1f}gpt")]);
+        let d = Cursor { col: 0, provider: "@codex".into(), model: "gpt".into(), effort: "high".into(), speed: String::new() }; assert_eq!(acts(plan(&d, &own)), [pair("provider", "codex\u{1f}gpt")]);
         let d = Cursor { effort: "low".into(), ..d }; assert_eq!(acts(plan(&d, &own)), [pair("provider", "codex\u{1f}gpt\u{1f}low")]);
     }
     #[test] fn the_row_to_scroll_to_is_the_models_own() {
@@ -594,11 +697,11 @@ mod tests {
         assert_eq!(child_of(&s, &own), Some(1)); assert_eq!(child_of(&[], &own), None);
     }
     #[test] fn the_keycaps_read_from_the_column_the_keys_are_in() {
-        assert_eq!((cap(0, 1), cap(1, 1), cap(2, 1)), ("⇧Tab", "↑↓", "←→")); assert_eq!((cap(0, 2), cap(1, 2)), ("Tab", "⇧Tab")); assert_eq!(cap(1, 0), "Tab");
+        assert_eq!((cap(0, 1, 3), cap(1, 1, 3), cap(2, 1, 3)), ("⇧Tab", "↑↓", "←→")); assert_eq!((cap(0, 2, 3), cap(1, 2, 3)), ("Tab", "⇧Tab")); assert_eq!(cap(1, 0, 3), "Tab");
     }
     #[test] fn a_cursor_moved_on_another_thread_is_not_this_ones() {
         let (p, a) = fixture(); let t = serde_json::json!({"id": "h|t2", "picker": p, "pickerAgents": a});
-        let far = Cursor { col: 0, provider: "@codex".into(), model: "gpt".into(), effort: "low".into() };
+        let far = Cursor { col: 0, provider: "@codex".into(), model: "gpt".into(), effort: "low".into(), speed: String::new() };
         let pick = Pick { cur: Some(("h|t1".into(), far.clone())), ..Default::default() };
         let s = shown(&t, &pick, &[]).unwrap(); assert_eq!(s.cur, s.own);
         let pick = Pick { cur: Some(("h|t2".into(), far.clone())), ..Default::default() };
@@ -614,4 +717,28 @@ mod tests {
     #[test] fn vendor_marks_for_claude_and_opencode_only() { for p in ["claude", "opencode"] { assert!(crate::art::mark_path(p).map_or(false, |s| s.len() > 3), "{p}"); } for p in ["codex", "grok", "muse", "pi", "omp", "antigravity", "mystery"] { assert!(crate::art::mark_path(p).is_none(), "{p}"); } }
     #[test] fn paths_parse_relative_and_absolute() { use crate::art::{parse_d, Seg}; let s = parse_d("M22 24H2V0h20zM17 4.8H7v14.4h10z"); assert_eq!(s.len(), 10); assert!(matches!(s[3], Seg::L(x, y) if x == 22. && y == 0.)); assert!(matches!(s[8], Seg::L(x, y) if x == 17. && (y - 19.2).abs() < 1e-4)); }
     #[test] fn every_provider_has_a_mark() { for p in ["claude", "codex", "grok", "muse", "opencode", "pi", "omp", "antigravity", "mystery"] { assert!(!mark(p).1.is_empty()); } }
+    #[test] fn the_speed_dial_turns_by_keys_and_presses_and_applies_only_what_the_model_takes() {
+        let picker = serde_json::json!({"provider": "claude",
+            "providers": [{"label": "claude", "value": "@claude", "on": true, "ok": true}],
+            "models": [{"label": "default", "value": ""}, {"label": "opus", "value": "opus", "on": true, "speeds": [{"label": "Normal", "value": "", "cost": ""}, {"label": "Fast", "value": "fast", "cost": "×2 cost"}]},
+                {"label": "haiku", "value": "haiku"}],
+            "efforts": [{"label": "auto", "value": ""}, {"label": "high", "value": "high", "on": true}],
+            "speeds": [{"label": "Normal", "value": "", "on": true, "cost": ""}, {"label": "Fast", "value": "fast", "cost": "×2 cost"}]});
+        let rows = parse(&picker); let own = Cursor::own(&rows);
+        assert_eq!(own.speed, "", "Normal by default"); assert_eq!(detents(&rows, "opus")[1].note, "×2 cost", "the cost rides as the detent's note");
+        // Tab goes round four columns while the model has a dial, three when it has Normal only
+        assert_eq!(ncols(&rows, "opus"), 4); assert_eq!(ncols(&rows, "haiku"), 3);
+        let mut c = own.clone(); for _ in 0..2 { c = key(Key::Tab, &c, &rows, &own) } assert_eq!(c.col, 3, "model, effort, speed");
+        let c = key(Key::Right, &c, &rows, &own); assert_eq!(c.speed, "fast"); assert_eq!(key(Key::Right, &c, &rows, &own).speed, "fast", "stops at the fastest");
+        assert_eq!(key(Key::Down, &c, &rows, &own).speed, "", "Down is slower"); assert_eq!(c.effort, "high", "the dial leaves the effort alone");
+        assert_eq!(key(Key::Tab, &c, &rows, &own).col, 0, "and Tab goes round");
+        assert_eq!(acts(plan(&c, &own)), [pair("speed", "fast")]);
+        // a model with Normal only applies Normal, and the dial's column goes with it
+        let h = Cursor { model: "haiku".into(), ..c.clone() }; assert_eq!(speed_applied(&h, &rows), "");
+        assert_eq!(key(Key::Down, &Cursor { col: 3, ..h.clone() }, &rows, &own).col, 2);
+        // another agent: the switch, then the speed
+        let far = Cursor { provider: "@codex".into(), model: "gpt".into(), ..c };
+        assert_eq!(acts(plan(&far, &own)), [pair("provider", "codex\u{1f}gpt"), pair("speed", "fast")]);
+        assert_eq!(cap(3, 3, 4), "←→"); assert_eq!(cap(0, 3, 4), "Tab"); assert_eq!(cap(3, 1, 3), "", "no keycap for a dial Tab cannot reach");
+    }
 }

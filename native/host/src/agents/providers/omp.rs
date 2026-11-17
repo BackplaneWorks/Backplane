@@ -175,7 +175,8 @@ impl Driver for OmpDriver {
     fn argv(&self, a: &TurnIn) -> Vec<String> {
         if self.launch.borrow().is_none() { let _ = self.prepare_turn(a); }
         let files = self.launch.borrow().as_ref().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
-        args(mode(&a.runtime), &dir(&a.home, &a.thread), &files, pi::model(&a.model), effort(&a.effort))
+        let mut v = args(mode(&a.runtime), &dir(&a.home, &a.thread), &files, pi::model(&a.model), effort(&a.effort));
+        v.extend(a.speed_args.iter().cloned()); v // the speed dial: `--service-tier priority|ultrafast` (agents/speed.rs)
     }
     fn env(&self, a: &TurnIn) -> Vec<(String, String)> { vec![("BACKPLANE_OMP_MCP".into(), a.mcp_url.clone())] }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {

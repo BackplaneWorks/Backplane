@@ -2629,6 +2629,15 @@ gpui.picker.no.effort	{agent} takes no effort setting	{agent}には推論の強�
 gpui.picker.now	Now: {effort}	現在: {effort}	Ahora: {effort}
 gpui.no.models	No models	モデルがありません	Sin modelos
 gpui.picker.more	{n} more: search to find them	ほか{n}件: 検索して探してください	{n} más: busca para encontrarlos
+gpui.picker.speed	Speed	速度	Velocidad
+gpui.picker.speed.normal.only	{model} runs at Normal speed only	{model}は標準の速度でのみ動きます	{model} solo funciona a velocidad Normal
+gpui.speed.normal	Normal	標準	Normal
+gpui.speed.fast	Fast	高速	Rápido
+gpui.speed.ultrafast	UltraFast	超高速	Ultrarrápido
+gpui.speed.cost.x2	×2 cost	料金×2	coste ×2
+gpui.speed.usage.x2half	×2.5 usage	使用量×2.5	uso ×2,5
+gpui.speed.usage.x8	×8 usage	使用量×8	uso ×8
+gpui.speed.priority.rate	priority rate	優先料金	tarifa prioritaria
 gpui.search.models	Search models	モデルを検索	Buscar modelos
 gpui.to.do	TO-DO	ToDo	TAREAS
 gpui.subagents	SUBAGENTS	サブエージェント	SUBAGENTES
@@ -5651,6 +5660,9 @@ gpui.f2.uber.p.cherry	Cherry	チェリー	Cereza
 
     /// gpui.picker.more = {n} more: search to find them
     static func gpui_picker_more(n: String) -> String { f("gpui.picker.more", ["n": n]) }
+
+    /// gpui.picker.speed.normal.only = {model} runs at Normal speed only
+    static func gpui_picker_speed_normal_only(model: String) -> String { f("gpui.picker.speed.normal.only", ["model": model]) }
 
     /// gpui.panels.subagents = SUBAGENTS · {word}
     static func gpui_panels_subagents(word: String) -> String { f("gpui.panels.subagents", ["word": word]) }

@@ -168,11 +168,13 @@ pub fn tone(left: Option<u64>) -> &'static str { match left { Some(l) if l < 10 
 /// The combined chip of the composer (model, effort, account, the binding limit) and what its menu's Usage part lists, from the thread's allowance snapshot
 /// (`allowance_of`). `full`/`mid`/`short` are the chip's words at each width; `left` the least remaining percent of the windows that apply (None: no current
 /// reading); `windows` every window of the account with its reset (`zone` words it); `extra` the extra-usage line; `tip` all of it for the hover.
-pub fn combo(snapshot: &Value, provider: &str, model: &str, effort: &str, account: (&str, &str, bool), zone: &super::tz::Rule, now_s: u64) -> Value {
+pub fn combo(snapshot: &Value, provider: &str, model: &str, effort: &str, speed: &str, account: (&str, &str, bool), zone: &super::tz::Rule, now_s: u64) -> Value {
     let accounts = matches!(provider, "claude" | "codex");
     let left = allowance_text(snapshot, provider, model, now_s).split('%').next().and_then(|x| x.parse::<u64>().ok());
     let (m, e) = (model_short(model), if effort.is_empty() { "auto".to_string() } else { effort.to_string() });
     let mut full = vec![m.clone(), e.clone()]; let mut mid = vec![m.clone()]; let mut short = vec![m.clone()];
+    // the speed dial past Normal, at every width (agents/speed.rs): "Opus 5.5 · high · Fast"
+    if !speed.is_empty() { let l = crate::agents::speed::label(speed).to_string(); full.push(l.clone()); mid.push(l.clone()); short.push(l); }
     if accounts { full.push(account.0.to_string()); mid.push(account.0.to_string()); }
     if let Some(l) = left { full.push(format!("{l}% left")); mid.push(format!("{l}%")); short.push(format!("{l}%")); }
     let ml = model.to_lowercase();
@@ -194,7 +196,7 @@ pub fn combo(snapshot: &Value, provider: &str, model: &str, effort: &str, accoun
     for w in &windows { tip.push(format!("{}  {}% left{}", w["label"].as_str().unwrap_or(""), w["left"], w["resets"].as_str().filter(|r| !r.is_empty()).map(|r| format!(" · resets {r}")).unwrap_or_default())) }
     if !extra.is_empty() { tip.push(extra.clone()) }
     if !note.is_empty() { tip.push(note.clone()) }
-    json!({"model":m,"effort":e,"account":if accounts { account.0 } else { "" },"email":account.1,"saved":account.2,"left":left,"tone":tone(left),
+    json!({"model":m,"effort":e,"speed":speed,"account":if accounts { account.0 } else { "" },"email":account.1,"saved":account.2,"left":left,"tone":tone(left),
         "full":full.join(" · "),"mid":mid.join(" · "),"short":short.join(" · "),"windows":windows,"extra":extra,"note":note,"tip":tip.join("\n")})
 }
 /// The combined chip of a thread (`combo`), from the state.
@@ -203,7 +205,9 @@ pub fn combo_of(st: &State, id: &str, now_s: u64) -> Value {
     let snap = allowance_of(st, id, &t.provider);
     let acct = account_of(st, id, &t.provider, &snap);
     let effort = st.settings.get(&format!("effort.{id}")).map(String::as_str).unwrap_or("");
-    combo(&snap, &t.provider, &t.model, effort, (&acct.0, &acct.1, acct.2), &super::thread::person_zone(st).unwrap_or_else(super::tz::Rule::utc), now_s)
+    let want = st.settings.get(&format!("speed.{id}")).map(String::as_str).unwrap_or("");
+    let speed = if want.is_empty() { "" } else { crate::agents::speed::effective(&crate::agents::speed::info_now(), &t.provider, &t.model, want) };
+    combo(&snap, &t.provider, &t.model, effort, speed, (&acct.0, &acct.1, acct.2), &super::thread::person_zone(st).unwrap_or_else(super::tz::Rule::utc), now_s)
 }
 /// The phones' picker for a thread on an account provider: an Account section (the CLI's own login, then each saved account of the provider, with what it has
 /// left; a press is `thread.pick {action: account, value: "<profile>\u{1f}<epoch>"}`, "" the CLI's own) and a Usage section (the thread's account's windows with
@@ -312,6 +316,16 @@ pub fn picker_with(provider: &str, model: &str, effort: &str, reading: &str, mod
     json!({"label": label, "chip": chip(provider, model, effort, !es.is_empty()), "provider": provider, "models": menu, "efforts": efforts, "providers": providers})
 }
 pub fn picker(provider: &str, model: &str, effort: &str, reading: &str) -> Value { picker_with(provider, model, effort, reading, None) }
+/// The speed dial on a picker (agents/speed.rs): `speeds`, the thread's model's detents with the one in force marked (none: Normal only, no dial), and its chip
+/// and label saying a speed past Normal. `want` is the thread's `speed.<thread>`.
+pub fn with_speed(mut p: Value, models: Option<&Value>, provider: &str, model: &str, want: &str) -> Value {
+    let Some(info) = models else { p["speeds"] = json!([]); return p };
+    let d = crate::agents::speed::detents(info, provider, model, want);
+    let now = crate::agents::speed::effective(info, provider, model, want);
+    if !now.is_empty() { let l = crate::agents::speed::label(now);
+        for k in ["chip", "label"] { let x = format!("{}{}{l}", p[k].as_str().unwrap_or(""), if k == "chip" { " / " } else { " \u{b7} " }); p[k] = json!(x) } }
+    p["speeds"] = json!(d); p
+}
 
 /// The model menu once the hub's `models` info is known (Models.menu): the provider's default first, its models (each with its CLI's label as `note`, and the efforts it
 /// takes when they differ from the default's), and the thread's own when the list lacks it.
@@ -319,7 +333,8 @@ pub fn model_choices(models: &Value, provider: &str, model: &str) -> Value {
     let labels = &models["about"][provider]["labels"];
     let base = model_efforts(Some(models), provider, "");
     let choice = |v: &str| { let mut c = json!({"label": if v.is_empty() { "default" } else { v }, "value": v, "on": v == model, "note": labels[if v.is_empty() { "default" } else { v }].as_str().unwrap_or("")});
-        let es = model_efforts(Some(models), provider, v); if es != base { c["efforts"] = json!(es) } c };
+        let es = model_efforts(Some(models), provider, v); if es != base { c["efforts"] = json!(es) }
+        let sp = crate::agents::speed::detents(models, provider, v, ""); if !sp.is_empty() { c["speeds"] = json!(sp) } c };
     let mut v = vec![choice("")];
     for id in models[provider].as_array().into_iter().flatten().filter_map(Value::as_str).filter(|m| !m.is_empty() && *m != "default") { v.push(choice(id)); }
     if !model.is_empty() && !v.iter().any(|c| c["value"] == model) { v.push(choice(model)); }
@@ -329,10 +344,10 @@ pub fn model_choices(models: &Value, provider: &str, model: &str) -> Value {
 /// Every agent's models and efforts, by name: the desktop picker's cursor walks another agent's lists on the client, a key at a time, with no request (the thread's own lists stay in `picker`).
 pub fn picker_agents(models: Option<&Value>) -> Value {
     Value::Object(AGENTS.iter().map(|(p, _)| {
-        let k = picker_with(p, "", "", "", models);
+        let k = with_speed(picker_with(p, "", "", "", models), models, p, "", "");
         let (ok, why) = agent_ok(models, p);
         let update = support_note(models, p).filter(|n| n.1).map_or(Value::Null, |n| json!(n.0)); // the picker's Update line: an old CLI, still offered
-        (p.to_string(), json!({"models": if ok { k["models"].clone() } else { json!([]) }, "efforts": k["efforts"], "ok": ok, "why": why, "update": update}))
+        (p.to_string(), json!({"models": if ok { k["models"].clone() } else { json!([]) }, "efforts": k["efforts"], "speeds": k["speeds"], "ok": ok, "why": why, "update": update}))
     }).collect())
 }
 /// The picker as the helper recorded it (the test fixtures): the chip, the agent and each row's note, state and efforts are Backplane's own.
@@ -370,7 +385,7 @@ pub fn usage(st: &State, id: &str, now: u64) -> Value {
         ts::Bot { name: st.bots_nav.get(&b).map(|n| n.name.clone()).unwrap_or_default(), uber, routines_filed: uber || get("mail.on".into()) == "on", mems, waiting, lanes }
     });
     let lv = live(st, id); let sess = st.ext.sess.get(id).cloned().unwrap_or_default();
-    let x = ts::In { provider: &t.provider, model: &t.model, usage: get(format!("usage.{id}")), last: get(format!("turn.last.{id}")), tv: get(format!("{tok}t.{id}")), speed: get(format!("turn.speed.{id}")),
+    let x = ts::In { provider: &t.provider, model: &t.model, usage: get(format!("usage.{id}")), last: get(format!("turn.last.{id}")), tv: get(format!("{tok}t.{id}")), speed: get(format!("turn.speed.{id}")), tier: get(format!("turn.tier.{id}")),
         models: get(format!("turn.models.{id}")), live: &lv, ring: get(format!("{tok}tr.{id}")), today: get(format!("{tok}td.{id}")), day: &crate::state::fam::day_of(now),
         began: sess.began, handed: (sess.handed, &sess.why), now, running: t.turn == crate::state::Turn::Running, bot,
         tasks: { let kids = task_tree(st, id); let tvs: Vec<&str> = kids.iter().map(|k| get(format!("{tok}t.{k}"))).collect(); (ts::tv_sum(&tvs), kids.len()) } };
@@ -445,7 +460,7 @@ pub fn keys(st: &State, id: &str, now_s: u64, why: &str, models_text: Option<&st
     let get = |k: String| st.settings.get(&k).map(String::as_str).unwrap_or("");
     let (models, agents) = picker_agents_of(models_text);
     let mine = models.as_deref().map(|i| info_for_thread(st, id, i));
-    m.insert("picker".into(), picker_with(&t.provider, &t.model, get(format!("effort.{id}")), get(format!("usage.{id}")), mine.as_ref()));
+    m.insert("picker".into(), with_speed(picker_with(&t.provider, &t.model, get(format!("effort.{id}")), get(format!("usage.{id}")), mine.as_ref()), mine.as_ref(), &t.provider, &t.model, get(format!("speed.{id}"))));
     m.insert("pickerAgents".into(), agents);
     m.insert("claude".into(), json!(t.provider == "claude"));
     // "Plan first, this turn only" set (commands/plan.rs thread.planonce): the picker's toggle is on until the turn it was set for ends
@@ -491,7 +506,7 @@ mod tests {
         "extra":{"enabled":false,"used":"$0.00","limit":"$50.00","percent":0.0,"reason":"out_of_credits"}}) }
     #[test] fn the_one_chip_says_model_effort_account_and_the_binding_limit_at_every_width() {
         let now = 1_794_175_561; let utc = super::super::tz::Rule::utc();
-        let c = combo(&reading(), "claude", "claude-opus-5-5", "", ("alex", "alex@example.net", true), &utc, now);
+        let c = combo(&reading(), "claude", "claude-opus-5-5", "", "", ("alex", "alex@example.net", true), &utc, now);
         assert_eq!((c["full"].as_str().unwrap(), c["mid"].as_str().unwrap(), c["short"].as_str().unwrap()), ("Opus 5.5 · auto · alex · 36% left", "Opus 5.5 · alex · 36%", "Opus 5.5 · 36%"));
         assert_eq!((c["left"].clone(), c["tone"].clone()), (json!(36), json!("")));
         assert_eq!(c["windows"][0], json!({"label":"Weekly","left":36,"tone":"","applies":true,"resets_at":1_794_416_400u64,"resets":"Wed 11 Nov 17:00"}));
@@ -500,15 +515,15 @@ mod tests {
         assert_eq!(c["tip"], "alex@example.net (saved account)\nWeekly  36% left · resets Wed 11 Nov 17:00\nFable weekly  100% left · resets Wed 11 Nov 17:00\nExtra usage $0.00 of $50.00 · off (out of credits)");
         // a Fable thread is bound by the fuller of the two; low and out read in their colours
         let mut r = reading(); r["windows"][1]["used_percent"] = json!(95.5);
-        let f = combo(&r, "claude", "claude-fable-5-1", "high", ("default", "", false), &utc, now);
+        let f = combo(&r, "claude", "claude-fable-5-1", "high", "", ("default", "", false), &utc, now);
         assert_eq!((f["full"].as_str().unwrap(), f["tone"].as_str().unwrap()), ("Fable 5.1 · high · default · 4% left", "bad"));
         assert_eq!((tone(Some(24)), tone(Some(25)), tone(Some(0)), tone(None)), ("warn", "", "bad", ""));
         // no reading: no number is made up, and the tip says why
-        let n = combo(&json!({"provider":"claude","state":"unavailable","windows":[],"reason":"Claude is limiting usage reads right now (429); the last reading stays."}), "claude", "", "", ("work", "w@x.com", true), &utc, now);
+        let n = combo(&json!({"provider":"claude","state":"unavailable","windows":[],"reason":"Claude is limiting usage reads right now (429); the last reading stays."}), "claude", "", "", "", ("work", "w@x.com", true), &utc, now);
         assert_eq!((n["full"].as_str().unwrap(), n["short"].as_str().unwrap(), n["left"].clone()), ("default · auto · work", "default", Value::Null));
         assert!(n["tip"].as_str().unwrap().ends_with("(429); the last reading stays."));
         // an agent with no accounts: model and effort only
-        let g = combo(&Value::Null, "grok", "grok-4", "low", ("default", "", false), &utc, now);
+        let g = combo(&Value::Null, "grok", "grok-4", "low", "", ("default", "", false), &utc, now);
         assert_eq!((g["full"].as_str().unwrap(), g["account"].as_str().unwrap(), g["tip"].as_str().unwrap()), ("grok-4 · low", "", ""));
     }
     #[test] fn a_thread_reads_its_bound_accounts_numbers_or_the_cli_logins() {
@@ -603,6 +618,22 @@ mod tests {
         assert_eq!(p["models"][2]["efforts"], json!([]), "a model that takes no effort says so"); assert!(p["models"][1].get("efforts").is_none(), "the same as the default's: not repeated");
         assert_eq!(p["chip"], "claude / opus / high"); assert_eq!(p["provider"], "claude");
         assert_eq!(picker_with("claude", "haiku", "", "", Some(&m))["chip"], "claude / haiku", "no effort for a model that takes none"); assert_eq!(picker_with("claude", "haiku", "", "", Some(&m))["efforts"], json!([]));
+    }
+    #[test] fn the_picker_carries_the_speed_dial_for_a_model_with_a_fast_mode_only() {
+        let mut m = info(); m["about"]["codex"]["speeds"] = json!({"gpt-6.1-sol": ["fast", "ultrafast"]});
+        let p = with_speed(picker_with("claude", "opus", "high", "", Some(&m)), Some(&m), "claude", "opus", "fast");
+        assert_eq!(p["speeds"].as_array().unwrap().iter().map(|d| (d["value"].as_str().unwrap(), d["on"] == true)).collect::<Vec<_>>(), [("", false), ("fast", true)]);
+        assert_eq!(p["speeds"][1]["cost"], "×2 cost"); assert_eq!(p["chip"], "claude / opus / high / Fast");
+        let h = with_speed(picker_with("claude", "haiku", "", "", Some(&m)), Some(&m), "claude", "haiku", "fast");
+        assert_eq!(h["speeds"], json!([]), "Normal only: no dial"); assert_eq!(h["chip"], "claude / haiku", "a speed the model does not take is not claimed");
+        // every model row says its own detents, so the desktop's cursor turns the dial for a model before it is chosen
+        let rows = model_choices(&m, "codex", ""); let sol = rows.as_array().unwrap().iter().find(|r| r["value"] == "gpt-6.1-sol").unwrap();
+        assert_eq!(sol["speeds"].as_array().unwrap().len(), 3); assert_eq!(sol["speeds"][2]["label"], "UltraFast");
+        assert!(picker_agents(Some(&m))["claude"]["speeds"].as_array().unwrap().is_empty(), "Claude's default (no alias known) is Normal only");
+        // the chip says the speed at every width
+        let utc = super::super::tz::Rule::utc();
+        let c = combo(&Value::Null, "codex", "gpt-6.1-sol", "high", "ultrafast", ("default", "", false), &utc, 0);
+        assert_eq!((c["full"].as_str().unwrap(), c["short"].as_str().unwrap(), c["speed"].as_str().unwrap()), ("gpt-6.1-sol · high · UltraFast · default", "gpt-6.1-sol · UltraFast", "ultrafast"));
     }
     #[test] fn each_agent_state_shows_in_the_agent_column() {
         let m = info(); let p = picker_with("codex", "gpt-6.1-sol", "xhigh", "", Some(&m));
