@@ -27,7 +27,7 @@ choose it.
 `nightly.yml` runs at 08:23 UTC (00:23 Pacific) and again at 11:41 UTC in case GitHub dropped the first (it skips scheduled runs under load; the
 second builds nothing when the first built this main), or by hand from the Actions tab (`force` builds even when main has not moved).
 
-`release.yml`'s build jobs take a runner per target from repo variables, for nightlies only; a tag release always builds on GitHub's images:
+`release.yml`'s build jobs take a runner per target from repo variables. The `NIGHTLY_*` ones apply to nightlies only. The `RELEASE_*` ones (docs/release-runners.md) apply to every run while set, and come first:
 
 | variable | what | unset |
 | --- | --- | --- |
@@ -41,10 +41,9 @@ then went offline (the Azure VM is stopped outside these runs), so Windows build
 does not finish a nightly sooner while Windows builds on GitHub; bp-win (4 vCPU, 16 GB) is the size of GitHub's Windows runner. Linux moves to Boat once the
 Boat CI app is on the org and a Boat build is shown to run on Ubuntu 22.04's glibc (releases are built on 22.04 for that reason).
 
-A self-hosted runner on this public repo must refuse everything but the nightly: a fork's pull request runs its own copy of the workflows. The org is on
-GitHub Free, so runner groups cannot be limited to workflows; the runner itself refuses any job whose `GITHUB_WORKFLOW_REF` is not
-`BackplaneWorks/Backplane/.github/workflows/nightly.yml@refs/heads/main` from a schedule or workflow_dispatch (a job-started hook, which a pull request
-cannot change).
+A self-hosted runner on this public repo must refuse everything but the nightly and the release: a fork's pull request runs its own copy of the
+workflows. Each runner's job-started hook (`scripts/runner-guard.sh`, `scripts/runner-guard.ps1`) takes only nightly.yml on main and release.yml on main or a
+v* tag. docs/release-runners.md has the rules and the machines.
 
 ## The checks every night
 
