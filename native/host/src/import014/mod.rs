@@ -12,6 +12,7 @@
 pub mod files;
 pub mod plan;
 pub mod progress;
+pub mod telemetry;
 #[cfg(test)] mod tests;
 
 use crate::{api::{Caller, Fut, HttpHandler, HttpReply, RpcHandler}, auth::Req, hub::Hub};
@@ -94,6 +95,7 @@ pub fn start_auto(hub: &Arc<Hub>, from: Option<PathBuf>, auto: bool) -> Arc<Impo
     hub.register_rpc(me.clone()); hub.register_http(me.clone());
     let (h, m) = (hub.clone(), me.clone());
     tokio::spawn(async move {
+        telemetry::settle(&h).await; // a home imported before 0.16.1 gets its 0.14 Off back, before anything is sent
         let done = h.setting(DONE).await.unwrap_or_default();
         let v = match (&m.from, done.is_empty()) {
             (Some(f), true) => json!({"state":"found","from":f.to_string_lossy()}),
@@ -230,6 +232,9 @@ impl Importer {
                     prog.held(w, f); size = next_chunk(ch.len(), w.max(tf.elapsed().as_millis() as u64)); }
                 Err(e) => { err = format!("{e:#}"); break }
             }
+            // the first chunk begins with 0.14's telemetry choice: the sender and every client hear it now (these lines pass no observer)
+            if done == 0 && p.choice { let t = crate::settings::telemetry::state(hub).await;
+                crate::settings::telemetry_send::privacy_changed(&hub.cfg.home, crate::settings::telemetry::off(&t.share, &t.usage_asked, &t.onboard_usage)); crate::settings::telemetry::changed(hub).await; }
             done += ch.len(); prog.made(np, nt, cur); prog.at(done as u64, now());
             // tests only: a slow import on purpose, the same per 2,000 lines whatever the chunk
             if let Some(ms) = throttle { tokio::time::sleep(std::time::Duration::from_millis(ms * ch.len() as u64 / 2000)).await; }

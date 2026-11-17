@@ -272,6 +272,7 @@ fn random_hex(n: usize) -> String { let mut b = vec![0u8; n]; let _ = crate::pla
 /// One pass: plan, prove, save, send what is due, then the usage snapshots. `c` is the configuration (tests pass a loopback one).
 pub async fn job(hub: &Arc<Hub>, c: &Cfg) {
     let home = hub.cfg.home.clone();
+    crate::import014::telemetry::settle(hub).await; // nothing before the choice is settled (a 0.14 Off an older import lost is restored first)
     let (allowed, reset) = snapshot(hub).await;
     ALLOWED.store(allowed, Relaxed);
     if !allowed { HUMAN.store(0, Relaxed); crate::settings::telemetry_usage::clear(); forget(&home); hub.set_info("telemetry.id", "").await; return }

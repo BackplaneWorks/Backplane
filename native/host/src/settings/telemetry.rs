@@ -131,7 +131,7 @@ pub async fn existing_hub(hub: &Arc<Hub>) -> bool {
     hub.model().await.projects.values().any(|p| !p.removed)
 }
 /// The notice as the hub offers it now.
-pub async fn offer(hub: &Arc<Hub>) -> Value { let s = state(hub).await; notice_offer(&s, existing_hub(hub).await, crate::settings::telemetry_send::capable()) }
+pub async fn offer(hub: &Arc<Hub>) -> Value { crate::import014::telemetry::settle(hub).await; let s = state(hub).await; notice_offer(&s, existing_hub(hub).await, crate::settings::telemetry_send::capable()) }
 /// After a change: every client hears the notice as it now stands, and the sender looks again.
 pub async fn changed(hub: &Arc<Hub>) { let o = offer(hub).await; hub.push_all(&json!({"t":"telemetry.notice","notice":o})); crate::settings::telemetry_send::wake(); }
 

@@ -327,3 +327,49 @@ fn big_home(dir: &Path, p: u32, t: u32, l: u32) -> PathBuf {
     assert!(home.join("orders/q_kept.json").is_file()); assert_eq!(std::fs::read_to_string(home.join("orders/q_here.json")).unwrap(), "mine", "never over one that is here");
     use crate::plat::fs::PermissionsExt; assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(home.join("orders/q_kept.json")).unwrap().permissions().mode() & 0o777, 0o600), 0o600);
 }
+
+/// The fixture's log with these 0.14 settings at its end.
+fn with_settings(old: &Path, kv: &[(&str, &str)]) {
+    let log = old.join("events.jsonl"); let mut t = std::fs::read_to_string(&log).unwrap(); if !t.ends_with('\n') { t.push('\n') }
+    for (k, v) in kv { t.push_str(&json!({"$":"SettingSet","key":k,"value":v,"at":1790175999}).to_string()); t.push('\n'); }
+    std::fs::write(&log, t).unwrap();
+}
+const OFF_014: &[(&str, &str)] = &[("telemetry.share", "off"), ("telemetry.asked", "1"), ("telemetry.usage.asked", "0"), ("telemetry.choice.revision", "1"), ("telemetry.choice.receipts", "[\"x\"]")];
+const ON_014: &[(&str, &str)] = &[("telemetry.share", "on"), ("telemetry.asked", "1"), ("telemetry.usage.asked", "1"), ("telemetry.choice.revision", "1")];
+
+/// 0.14's anonymous usage choice comes across as it was (Off, On, or nothing when it was never answered), first, and only when this home has none of its own.
+#[test] fn the_0_14_telemetry_choice_comes_across_off_on_or_unset() {
+    let key = |l: &String| serde_json::from_str::<Value>(l).ok().and_then(|v| v["key"].as_str().map(String::from)).unwrap_or_default();
+    for (n, kv) in [("off", OFF_014), ("on", ON_014)] {
+        let d = tmp(&format!("tm-{n}")); let old = old_home(&d); with_settings(&old, kv);
+        let p = plan::plan(&old.join("events.jsonl"), &plan::Have::default(), plan::Opts { secrets: false, keep: true }).unwrap();
+        assert!(p.choice, "{n}");
+        let firsts: Vec<String> = p.lines.iter().take(kv.len()).map(key).collect(); let want: Vec<&str> = kv.iter().map(|(k, _)| *k).collect();
+        assert_eq!(firsts, want, "{n}: the choice is the first thing written");
+        let mut have = plan::Have::default(); for l in &p.lines { have.add(l) }
+        assert_eq!(plan::plan(&old.join("events.jsonl"), &have, plan::Opts { secrets: false, keep: true }).unwrap().counts.lines, 0, "{n}: once");
+        // a home that already has a choice keeps it, whatever 0.14 said
+        let mut own = plan::Have::default(); own.add(&json!({"$":"SettingSet","key":"telemetry.share","value":if n == "off" { "on" } else { "off" },"at":5}).to_string());
+        let q = plan::plan(&old.join("events.jsonl"), &own, plan::Opts { secrets: false, keep: true }).unwrap();
+        assert!(!q.choice && q.lines.iter().all(|l| !key(l).starts_with("telemetry.")), "{n}");
+    }
+    let d = tmp("tm-unset"); let old = old_home(&d);
+    let p = plan::plan(&old.join("events.jsonl"), &plan::Have::default(), plan::Opts { secrets: false, keep: true }).unwrap();
+    assert!(!p.choice && p.lines.iter().all(|l| !key(l).starts_with("telemetry.") && key(l) != "onboard.usage"), "never answered: nothing comes, the default stands");
+}
+/// Imported with 0.14 Off: the same state as an explicit Off here. No notice, nothing to send, Settings, Privacy shows Off; On and unset as they were.
+#[tokio::test] async fn an_import_with_0_14_off_is_off_here() {
+    for (n, kv) in [("off", OFF_014), ("on", ON_014), ("unset", &[][..])] {
+        let dir = tmp(&format!("tm-run-{n}")); let old = old_home(&dir); with_settings(&old, kv);
+        let r = rig_on(dir, old).await; crate::settings::telemetry_send::TEST_CAPABLE.store(true, SeqCst);
+        super::telemetry::settle(&r.hub).await; // (the start's settling: nothing imported yet, nothing to mend)
+        assert_eq!(r.imp.run(&r.hub, false).await["state"], "done", "{n}");
+        let s = crate::settings::telemetry::state(&r.hub).await; let off = crate::settings::telemetry::off(&s.share, &s.usage_asked, &s.onboard_usage);
+        assert_eq!(off, n == "off", "{n}: {s:?}");
+        let notice = crate::settings::telemetry::notice_offer(&s, true, true);
+        if n == "off" { assert_eq!((s.share.as_str(), s.asked.as_str(), s.usage_asked.as_str()), ("off", "1", "0")); assert!(notice.is_null() && !crate::settings::telemetry::may_send(&s.share, &s.usage_asked, &s.onboard_usage, "shown")); }
+        else { assert!(notice.is_object(), "{n}: the one-time notice as for any home this version is new to"); assert_eq!(s.share, if n == "on" { "on" } else { "" }); }
+        // nothing left for the mend: the import carried it
+        assert_eq!(super::telemetry::mend(&r.hub).await, if n == "unset" { "kept" } else { "" }, "{n}");
+    }
+}
