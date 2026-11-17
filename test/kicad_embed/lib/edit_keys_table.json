@@ -52,7 +52,7 @@
       "keys": {
         "linux": "Ctrl+Y",
         "windows": "Ctrl+Y",
-        "macos": "Cmd+Y (where KiCad binds it)"
+        "macos": "Cmd+Shift+Z (stock KiCad's redo on macOS; Cmd+Y is not bound)"
       },
       "after": "undo",
       "works": "an edit with deleted > 0 (the delete again)",
@@ -70,8 +70,13 @@
       "after": "undo",
       "works": "an edit with deleted > 0 (the delete again)",
       "wrong": "an edit with created > 0",
-      "gating": true,
-      "when": "pressed after KiCad's check that follows the undo has reported (ET_CHECKS_DONE), as a person who pauses would; bp.13 3a19ebb5bb empties the redo list there (redo at once still works)"
+      "gating": {
+        "macos": true,
+        "linux": false,
+        "windows": false
+      },
+      "when": "pressed after KiCad's check that follows the undo has reported (ET_CHECKS_DONE), as a person who pauses would; bp.13 3a19ebb5bb empties the redo list there (redo at once still works)",
+      "linux_windows": "informational: record what the chord did, never gate. Stock KiCad binds redo to Ctrl+Y on Linux and Windows and to Cmd+Shift+Z on macOS only; in the PCB editor Ctrl+Shift+Z is Draw Filled Zones (end it with Escape). The lead, Nov 17: no new binding."
     },
     {
       "id": "copy_paste",
@@ -153,6 +158,64 @@
       "gating": true,
       "since": "fork d2ce4ba5c6 (the undo-markers fix)",
       "how": "Linux and Windows count and check over KiCad's socket (GetItems, RunChecks); macOS reaches KiCad only through the hub, so its counts are the hub's kicad_ipc GetItems (that call is also the agent read) and its check the hub's RunChecks, else KiCad's own check after each edit (ET_CHECKS_DONE), the output saying which"
+    },
+    {
+      "id": "redo_after_check",
+      "keys": {
+        "linux": "Ctrl+A, Delete, Ctrl+Z, (the automatic check finishes), Ctrl+Y, (check), Ctrl+Z",
+        "windows": "same",
+        "macos": "Cmd+A, fn+Delete, Cmd+Z, (check), Cmd+Shift+Z, (check), Cmd+Z"
+      },
+      "when": "10 cycles, keys only (one click at the start; the Backplane trip's click back each cycle), each key once KiCad's check after the latest edit has reported; select all after every check covers the whole board or sheet",
+      "works": "edits (created, deleted): delete (0, N), undo (N, 0), redo (0, N), undo (N, 0)",
+      "nothing": "the redo makes no edit (bp.13 and bp.13.1 7038d2231b: the redo list unusable after the check until a click on the canvas)",
+      "gating": true,
+      "cycles": 10
+    },
+    {
+      "id": "redo_after_backplane",
+      "keys": {
+        "linux": "a click in Backplane's chat, a click back on the canvas, then as redo_after_check",
+        "windows": "same",
+        "macos": "same"
+      },
+      "works": "as redo_after_check",
+      "gating": true,
+      "cycles": 10,
+      "when": "10 cycles, keys only (one click at the start; the Backplane trip's click back each cycle), each key once KiCad's check after the latest edit has reported; select all after every check covers the whole board or sheet"
+    },
+    {
+      "id": "fresh_select_all",
+      "keys": {
+        "linux": "Ctrl+A",
+        "windows": "Ctrl+A",
+        "macos": "Cmd+A"
+      },
+      "when": "a freshly opened editor, no click on it at all, once its startup check has reported",
+      "works": "KiCad's selection holds more than one item",
+      "gating": true
+    },
+    {
+      "id": "fresh_copy",
+      "keys": {
+        "linux": "Ctrl+C",
+        "windows": "Ctrl+C",
+        "macos": "Cmd+C"
+      },
+      "when": "right after fresh_select_all, still no click",
+      "works": "the system clipboard holds KiCad's items (S-expression text)",
+      "gating": true
+    },
+    {
+      "id": "props_typing",
+      "keys": {
+        "linux": "typing in the Properties panel's Value field of R1",
+        "windows": "same",
+        "macos": "same"
+      },
+      "when": "A and B typed while a check runs (ET_PROGRESS, no ET_CHECKS_DONE yet), C after it reported, Enter",
+      "works": "the saved board's R1 has Value ABC: the caret stayed in the field and every keystroke landed there",
+      "gating": true
     }
   ],
   "extra_rows": {
