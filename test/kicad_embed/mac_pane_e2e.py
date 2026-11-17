@@ -174,6 +174,9 @@ def _guard(x, y, what):
     mine = _our_pids()
     for w in helper('windows') or []:
         bx, by, bw, bh = w['bounds']
+        # the Dock's own full-screen window (transparent, under its bar: the e2e-macos runner lists it over everything) takes no click;
+        # its bar, a smaller window of its own, still counts
+        if w.get('owner') == 'Dock' and bw >= 1000 and bh >= 600: continue
         if bx <= x < bx + bw and by <= y < by + bh and w.get('layer', 0) < 1000:
             if int(w['pid']) in mine: return
             raise SystemExit(f'REFUSED {what} at ({round(x)}, {round(y)}): the window there is {w.get("owner", "?")}\'s, not this run\'s')
