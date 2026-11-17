@@ -110,6 +110,11 @@ fn kills_by_name(line: &str) -> bool {
         assert!(o.status.success(), "{o:?}"); String::from_utf8_lossy(&o.stdout).to_string() };
     let run = |apply: bool| run_with(apply, &[("GC_PAUSE", d.join("no-pause").to_string_lossy().to_string())]);
     let dry = run(false); let dry2 = run(false);
+    // the guard runs it through a link ($DEV/janitor -> scripts/worktree-gc.sh): Nov 16 that failed ("lib-bptmp.sh: No such file", "not a git repository") when the disk was nearly full
+    let link = d.join("janitor"); std::os::unix::fs::symlink(&script, &link).unwrap();
+    let o = Command::new(&link).current_dir(&d).env_remove("GC_REPO").env("BP_TMP", &bt).env("GC_TMP_BASES", &bt).env("GC_LOCK", d.join("lock")).env("SCCACHE_DIR", &scc).env("GC_PAUSE", d.join("no-pause")).env("GC_CTIME", "0").output().unwrap();
+    let (lo, le) = (String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+    assert!(o.status.success() && lo.contains("would have freed") && !le.contains("No such file") && !le.contains("not a git repository"), "it runs through the guard's link:\n{lo}\n{le}");
     assert!(dry2.contains("worktree") && dry2.contains("/landed"), "a run does not make a worktree look used (git status writes no index):\n{dry2}");
     assert!(dry.contains("would have freed") && wt("landed").exists() && bt.join("aot-build").exists(), "a dry run changes nothing:\n{dry}");
     // paused (a release night): the /tmp and bp-tmp sweeps stop, and say why

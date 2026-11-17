@@ -17,14 +17,14 @@
 # Never touches the main checkout, a locked worktree, a worktree with unlanded commits or edits (only its target/), a file not this user's, or across a mount.
 # Dry run unless --apply. Every run prints what it frees (or would) and a total; --quiet prints the total only. One run at a time (a second one leaves at once).
 # Env for tests: GC_REPO (the clone), GC_UPSTREAM (default origin/main, else main), GC_TMP_BASES (default "/tmp $BP_TMP"), GC_LOCK, SCCACHE_DIR, GC_CTIME=0 (count only mtimes: a test cannot age a ctime).
-set -u; . "$(dirname "$0")/lib-bptmp.sh"
+set -u; HERE=$(cd "$(dirname "$(readlink -f "$0")")" && pwd); . "$HERE/lib-bptmp.sh"   # (the guard runs it through the link $DEV/janitor: beside the link is no lib-bptmp.sh and no clone)
 renice -n 19 $$ > /dev/null 2>&1; ionice -c3 -p $$ > /dev/null 2>&1   # never in the way of a build or the hub
 APPLY=0; HOURS=24; TMPH=24; MMIN=60; TMIN=1440; QUIET=0; SCC_SIZE=
 while [ $# -gt 0 ]; do case "$1" in
   --apply) APPLY=1;; --quiet) QUIET=1;; --hours) HOURS=$2; shift;; --days) HOURS=$(( $2 * 24 )); shift;; --tmp-hours) TMPH=$2; shift;;
   --merged-minutes) MMIN=$2; shift;; --tmp-minutes) TMIN=$2; shift;; --sccache-size) SCC_SIZE=$2; shift;;
 esac; shift; done
-REPO=${GC_REPO:-$(git -C "$(dirname "$0")" worktree list --porcelain | awk 'NR==1{print substr($0,10)}')}
+REPO=${GC_REPO:-$(git -C "$HERE" worktree list --porcelain | awk 'NR==1{print substr($0,10)}')}
 UP=${GC_UPSTREAM:-}; [ -n "$UP" ] || { git -C "$REPO" rev-parse -q --verify refs/remotes/origin/main > /dev/null && UP=origin/main || UP=${MAIN_BRANCH:-main}; }
 say() { [ "$QUIET" = 1 ] || echo "$@"; }
 LOCK=${GC_LOCK:-${XDG_CACHE_HOME:-$HOME/.cache}/bp-janitor.lock}; exec 9> "$LOCK"; flock -n 9 || { say "janitor: another run is at work"; exit 0; }
