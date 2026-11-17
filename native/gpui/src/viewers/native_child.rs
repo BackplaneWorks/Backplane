@@ -141,7 +141,7 @@ mod imp {
         c.create_window(scr.root_depth, id, parent, 0, 0, 1, 1, 0, WindowClass::INPUT_OUTPUT, scr.root_visual,
             &CreateWindowAux::new().background_pixmap(x11rb::NONE).border_pixel(scr.black_pixel).colormap(scr.default_colormap)
                 .event_mask(EventMask::SUBSTRUCTURE_NOTIFY)).ok()?.check().ok()?;
-        let _ = c.flush(); Some(id as u64)
+        let _ = c.flush(); containers().lock().unwrap().insert(id); Some(id as u64)
     }
     pub fn container_for(parent: u64, _key: &str) -> Option<u64> { container(parent) }
     /// Every child of `old` (stock KiCad's frames, or the fork's holder) moved into `new`, unmapped where it was not shown: a pane moved to
@@ -153,18 +153,35 @@ mod imp {
         for k in kids { let _ = c.reparent_window(k, new, 0, 0); }
         let _ = c.flush();
     }
+    /// Every container this client made for an editor (container / container_for), until it is destroyed: `release_holders(None)` at quit.
+    fn containers() -> &'static std::sync::Mutex<std::collections::HashSet<u32>> { static C: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<u32>>> = std::sync::OnceLock::new(); C.get_or_init(Default::default) }
+    /// KiCad's holder (every child) out of `container` (None: every container of this client) before anything can destroy it: unmapped,
+    /// moved to the root, and done in the X server (a round trip) when this returns. A container destroyed with the holder inside took
+    /// KiCad's own windows with it, and GDK's next request on one got BadWindow: KiCad _exit(1) (bp.13), SIGSEGV (bp.12.4) (the fork embed
+    /// thread under gdb, Nov 16). The fork sees the reparent to the root, parks its frames and says ET_DETACHED: no round trip to KiCad
+    /// (a hung KiCad is covered too). Nothing of KiCad's is destroyed or closed: only its parent changes.
+    pub fn release_holders(container: Option<u64>) {
+        let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
+        let Some(r) = root(c) else { return };
+        let list: Vec<u32> = match container { Some(x) => vec![x as u32], None => containers().lock().unwrap().iter().copied().collect() };
+        let kids = |w: u32| c.query_tree(w).ok().and_then(|q| q.reply().ok()).map(|t| t.children).unwrap_or_default();
+        for w in &list { for k in kids(*w) { let _ = c.unmap_window(k); let _ = c.reparent_window(k, r, -10000, -10000); } }
+        // a reply after the requests above comes after they are done
+        let _ = c.get_input_focus().ok().and_then(|q| q.reply().ok());
+        for w in &list {
+            let left = kids(*w);
+            debug_assert!(left.is_empty(), "container {w} still holds {left:?}");
+            if !left.is_empty() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_holder_left_in": w, "children": left})); }
+        }
+    }
+    /// The one way a container goes: never with KiCad's holder in it (release_holders first).
     pub fn destroy(container: u64) {
+        release_holders(Some(container));
         let container = container as u32;
+        containers().lock().unwrap().remove(&container);
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let _ = c.allow_events(Allow::REPLAY_POINTER, x11rb::CURRENT_TIME);
         let _ = c.ungrab_button(ButtonIndex::ANY, container, ModMask::ANY);
-        if let Some(r) = root(c) {
-            let kids = c.query_tree(container).ok().and_then(|q| q.reply().ok()).map(|t| t.children).unwrap_or_default();
-            for k in kids {
-                let _ = c.unmap_window(k);
-                let _ = c.reparent_window(k, r, 0, 0);
-            }
-        }
         let _ = c.destroy_window(container); let _ = c.flush();
     }
 
@@ -1061,6 +1078,8 @@ mod imp {
         }
     }
 
+    /// KiCad's holder out of `container` (None: every one) before anything can destroy it (X11: release_holders): Carbon's Windows half.
+    pub fn release_holders(_container: Option<u64>) {}
     /// Hide and park `container` without ever calling `DestroyWindow` or `SetParent(NULL)` on KiCad's cross-process child frames.
     pub fn destroy(container: u64) {
         unregister_escape();
@@ -1933,6 +1952,7 @@ mod imp {
     pub fn container_for(_parent: u64, _key: &str) -> Option<u64> { None }
     pub fn move_frames(_old: u64, _new: u64) {}
     pub fn destroy(_container: u64) {}
+    pub fn release_holders(_container: Option<u64>) {}
     pub fn adopt(_pid: u32, _container: u64, _toplevel: u64) -> Vec<u64> { vec![] }
     pub fn dialogs(_pid: u32, _container: u64, _toplevel: u64) {}
     pub fn centre_dialogs(_pid: u32, _over: super::R) -> Vec<String> { vec![] }

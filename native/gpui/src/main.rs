@@ -98,7 +98,7 @@ impl Backplane {
             if changed {this.send_draft(text,cx);}
         }).detach();
         cx.subscribe(&input,|this,_,event:&screens::composer::ComposerEvent,cx|this.attach_event(event,cx)).detach();
-        cx.on_app_quit(|this,_|{this.screens.drafts.flush();async{}}).detach();
+        cx.on_app_quit(|this,_|{crate::viewers::kicad_pane::release_all();this.screens.drafts.flush();async{}}).detach();
         // Closing the window ends the program at once (the window manager's close, Alt+F4): what must not be lost is put away first (the drafts
         // on disk, a screen recording stopped), then the process exits without gpui's teardown, which drew nothing and took a second or two
         // (the renderer's destroy before the window went, every entity's drop). The hub runs on; it sees the socket close.
@@ -107,7 +107,8 @@ impl Backplane {
         Self{pair,paired,hubs:hubs::load(),hub_menu:false,has_hub,input,data:Value::Null,status:"Connecting…".into(),note:String::new(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:saved.clone(),started,usable:false,first_frame:false,script_done:false,timeline:ListState::new(0,ListAlignment::Bottom,px(screens::timeline::RUNWAY)),cats:art::Cats::new(),links_sent:false,links_last:String::new(),sidebar_open:local.sidebar_open,models_pending:false,local,project_page:None,arm_new:None,echo_seq:0,thread_cache:Vec::new(),thread_source:"hub",confirm:None,ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),probes_last:String::new(),last_layout:String::new(),wake_at:None,reconnected:false,had_hello:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total,screens:{let mut s=screens::Screens::new(cx,target,drafts_path,saved);s.elsewhere=elsewhere;s}}
     }
     /// What the window's close keeps before the process exits: the drafts written (bounded, normally a few ms) and a screen recording ended.
-    fn before_exit(&mut self) {self.screens.drafts.flush();drop(self.screens.imp.take_recording());}
+    /// (KiCad's holders first: out of every container before the process ends, kicad_pane::release_all)
+    fn before_exit(&mut self) {crate::viewers::kicad_pane::release_all();self.screens.drafts.flush();drop(self.screens.imp.take_recording());}
     fn receive(&mut self,event:Event,cx:&mut Context<Self>) {
         let timed=perf::on().then(||(event.name(),Instant::now()));
         if let Some(s)=hub::status_for(&event){self.status=s.into();}

@@ -52,6 +52,12 @@ SUITES=(
   # another live KiCad holds the project's lock: the pane asks Open anyway / Cancel before KiCad opens it (no silent override, no hidden
   # File Open Warning); Cancel starts nothing; a stale lock is cleared and logged (fork)
   "embed_foreign_lock_e2e.sh:foreign-lock"
+  # a container is never destroyed with KiCad's holder in it: the window closed, killed, a non-keep detach (the schematic shown), and the
+  # window closed with a cold show pending: KiCad alive 20 s after (the same process), the next Edit adopts and paints it, 10 of 10 (fork)
+  "embed_client_exit_e2e.sh:client-close"
+  "embed_client_exit_e2e.sh:client-kill:CX_EXIT=kill"
+  "embed_client_exit_e2e.sh:client-detach:CX_EXIT=detach"
+  "embed_client_exit_e2e.sh:client-close-pending:CX_AT=pending"
   # a click on one of KiCad's DRC markers keeps the editor where it is; Escape shuts a side panel before the viewer (fork; skips without Hubble_DK)
   "embed_marker_click_e2e.sh:marker-click"
   "embed_thread_e2e.sh:thread"
