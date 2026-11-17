@@ -129,7 +129,7 @@ fn picks(cx: &mut Context<Backplane>, light: bool, id: &str, row: &Value, pa: &'
 
 struct Who { color: Option<Rgba> }
 thread_local! { /** the board's scroll, the swarm it shows and how many posts it last drew */ static BOARD: std::cell::RefCell<(ScrollHandle, String, usize)> = std::cell::RefCell::new((ScrollHandle::new(), String::new(), 0)); }
-fn post_el(light: bool, p: &Value, who: &HashMap<String, Who>, names: &HashMap<String, String>, claims: &HashMap<String, String>) -> AnyElement {
+fn post_el(light: bool, p: &Value, who: &HashMap<String, Who>, names: &HashMap<String, String>, claims: &HashMap<String, String>, app: &WeakEntity<crate::Backplane>, cx: &mut App) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let text = string(p, "text");
     if p["guard"] == true {
@@ -153,7 +153,9 @@ fn post_el(light: bool, p: &Value, who: &HashMap<String, Who>, names: &HashMap<S
     let claim = claims.get(&string(p, "id"));
     let files_el = (!files.is_empty()).then(|| div().flex().flex_wrap().gap_1().children(files.into_iter().map(|f| div().px_1().text_size(crate::scale::tpx(11.)).bg(c("raise")).border_1().border_color(c("line")).child(f)))
         .children(claim.filter(|s| s.as_str() == "waiting").map(|_| div().px_1().text_size(crate::scale::tpx(11.)).text_color(c("waiting")).border_1().border_color(c("waiting")).child(trs("waiting")))));
-    let d = div().flex().flex_col().gap_1().pl_3().pr_3().py_2().border_l_2().border_color(edge).child(head).child(div().text_color(c("text")).child(body)).children(files_el);
+    // the post's code (the hub's `copy`, md/copy.rs): each piece with its copy button, and Run in terminal for a command
+    let copies_el = super::copyable::pieces_with(light, &format!("post-{}", string(p, "id")), &p["copy"], app, cx);
+    let d = div().flex().flex_col().gap_1().pl_3().pr_3().py_2().border_l_2().border_color(edge).child(head).child(div().text_color(c("text")).child(body)).children(copies_el).children(files_el);
     let d = if synth { d.mt_2().mb_2().border_1().border_l_4().bg(c("raise")) } else { d };
     d.when(!held.is_empty(), |d| d.opacity(0.5)).into_any_element()
 }
@@ -220,7 +222,8 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
         if b.1 != key || (b.2 != n && at_end) { b.0.scroll_to_bottom(); } b.1 = key; b.2 = n; b.0.clone() });
     let mut list = div().id("swarm-board").flex_1().min_h_0().overflow_y_scroll().track_scroll(&h).flex().flex_col().gap_1().py_2();
     if posts.is_empty() { list = list.child(div().px_3().text_color(c("dim")).child(trs("No posts yet."))); }
-    for p in posts { list = list.child(post_el(light, p, &who, &names, &claims)); }
+    let app = cx.entity().downgrade();
+    for p in posts { list = list.child(post_el(light, p, &who, &names, &claims, &app, cx)); }
     let foot = if ended { div().px_3().py_2().border_t_1().border_color(c("line")).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs("This swarm is over.")).into_any_element() } else {
         div().flex().gap_2().items_end().p_3().border_t_1().border_color(c("line"))
             .child(div().flex_1().px_2().py_1().border_1().border_color(c("line")).bg(c("view")).children(fields.get("rpost").map(|s| s.input.clone())))

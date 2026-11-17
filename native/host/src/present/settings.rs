@@ -24,7 +24,12 @@ pub fn page(session: &Value) -> &str { let p = draft(session, "@settings.page");
 
 // ---- rows ----
 fn btn(label: &str, action: &str, value: &str, on: bool) -> Value { json!({"label": label, "action": action, "value": value, "on": on}) }
-fn row(label: &str, note: &str, buttons: Vec<Value>) -> Value { json!({"label": label, "note": note, "buttons": buttons}) }
+fn row(label: &str, note: &str, buttons: Vec<Value>) -> Value {
+    let mut r = json!({"label": label, "note": note, "buttons": buttons});
+    // a note that is a value (a path, an id, a link, a commit: md/copy.rs) has a copy button in every client
+    if crate::md::copy::inline_kind(note).is_some() { r["copy"] = json!(note) }
+    r
+}
 fn row_f(label: &str, note: &str, fields: Vec<Value>, buttons: Vec<Value>) -> Value { json!({"label": label, "note": note, "fields": fields, "buttons": buttons}) }
 fn field(name: &str, hint: &str, value: &str) -> Value { json!({"name": name, "hint": hint, "secret": false, "value": value}) }
 /// Mob.set.chips: one button per value, `setting key=value`, lit when it is the current one; the label is the value as VLabel.choice says it ("" is "default").

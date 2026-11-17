@@ -46,6 +46,8 @@ seed += [{'$': 'SettingSet', 'key': 'buy.t3', 'value': 't0', 'at': now + 3}, {'$
 # the sidebar shows only active threads (docs/ALWAYS-ON.md D11): the rows the trials press are pinned (a pin always shows), and t4 asks the person (Needs you)
 seed += [{'$': 'ThreadPinned', 'id': 't%d' % i, 'pinned': True, 'at': now + 4} for i in (1, 2, 3)]
 seed += [{'$': 'ThreadCreated', 'id': 't4', 'project': 'p1', 'title': 'Asks you', 'env': 'local', 'branch': '', 'worktree': '', 'provider': 'claude', 'model': '', 'at': now + 5}, {'$': 'PendingChanged', 'thread': 't4', 'count': 1, 'at': now + 5}]
+# a rows file of its own (gpui-copy-rows.py) seeds more first: ROWS_SEED names a script that adds to `seed`
+if os.environ.get('ROWS_SEED'): exec(open(os.environ['ROWS_SEED']).read())
 open(P('home/events.jsonl'), 'w').write(''.join(json.dumps(e) + '\n' for e in seed))
 env = dict(os.environ)
 for k in ['I3SOCK', 'DBUS_SESSION_BUS_ADDRESS', 'WAYLAND_DISPLAY']: env.pop(k, None)
@@ -128,6 +130,6 @@ def differs(a, b, box=None):
     return ImageChops.difference(a, b).getbbox() is not None
 def want(i):
     return not ONLY or i in ONLY
-exec(open(os.path.join(HERE, 'gpui-f-rows.rows.py')).read())
+exec(open(os.environ.get('ROWS_FILE') or os.path.join(HERE, 'gpui-f-rows.rows.py')).read())
 cleanup()
 sys.exit(0)

@@ -43,7 +43,12 @@ fn set<'a>(st: &'a State, k: &str) -> &'a str { st.settings.get(k).map(String::a
 pub fn draft<'a>(session: &'a Value, k: &str) -> &'a str { s(&session["drafts"], k) }
 fn list(v: &str) -> Vec<&str> { v.split(',').filter(|x| !x.is_empty()).collect() }
 pub fn btn(label: &str, action: &str, value: &str, on: bool) -> Value { json!({"label": label, "action": action, "value": value, "on": on}) }
-pub fn row(label: &str, note: &str, buttons: Vec<Value>) -> Value { json!({"label": label, "note": note, "buttons": buttons}) }
+pub fn row(label: &str, note: &str, buttons: Vec<Value>) -> Value {
+    let mut r = json!({"label": label, "note": note, "buttons": buttons});
+    // a note that is a value (a path, an id, a link, a commit: md/copy.rs) has a copy button in every client
+    if crate::md::copy::inline_kind(note).is_some() { r["copy"] = json!(note) }
+    r
+}
 pub fn copy(cmd: &str) -> Value { btn("Copy", "copy", cmd, false) }
 pub fn link(label: &str, url: &str) -> Value { btn(label, "open-url", url, false) }
 pub fn choice(label: &str, action: &str, value: &str) -> Value { json!({"label": label, "action": action, "value": value}) }

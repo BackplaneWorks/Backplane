@@ -398,6 +398,8 @@ impl Bots {
         let posts: Vec<Value> = posts.into_iter().map(|e| { let th = gs(&e, "thread"); let key = if th.is_empty() { String::new() } else { format!("{THREAD}{th}") };
             let mut p = json!({"id":e["id"],"from":e["from"],"thread":th,"color":color.get(&key).cloned().unwrap_or_default(),"text":e["text"],"tags":e.get("tags").cloned().unwrap_or(json!([])),"reply":e.get("reply").cloned().unwrap_or(json!("")),
                 "mentions":e.get("mentions").cloned().unwrap_or(json!([])),"files":e.get("files").cloned().unwrap_or(json!([])),"guard":e["guard"] == true,"held":e.get("held").cloned().unwrap_or(json!("")),"at":e["at"]});
+            // what a client draws a copy button (and Run in terminal) for: the post's code (md/copy.rs)
+            if !for_agent { let c = crate::md::copy::spans(e["text"].as_str().unwrap_or("")); if !c.is_empty() { p["copy"] = json!(c); } }
             if for_agent { let o = p.as_object_mut().unwrap(); o.retain(|k, v| !matches!(k.as_str(), "color") && !(v == &json!("") || v == &json!([]) || v == &json!(false))); } p }).collect();
         let claims: Vec<Value> = cl.into_iter().map(|(p, c)| json!({"post":p,"thread":c["thread"],"files":c["files"],"state":c["state"]})).collect();
         let _ = HashSet::<()>::new;
