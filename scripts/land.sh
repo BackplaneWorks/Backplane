@@ -47,6 +47,14 @@ repo=${LAND_REPO:-$(git remote get-url origin | sed -E 's#^.*github\.com[:/]([^/
 ghi() { GH_TOKEN=$("$gh_prog" auth token --user i2cjak 2>/dev/null) || GH_TOKEN=; [ -n "$GH_TOKEN" ] || die "no gh login for i2cjak (gh auth login as i2cjak; the active account is not used)"; export GH_TOKEN; "$gh_prog" "$@"; }
 "$gh_prog" auth token --user i2cjak >/dev/null 2>&1 || die "no gh login for i2cjak (gh auth login as i2cjak; the active account is not used)"
 pr_number() { ghi pr list -R "$repo" --head "$br" --state open --json number -q '.[0].number' 2>/dev/null || true; }
+# A stale copy of this script (a worktree made before main's land.sh changed) must not run: an older land.sh pushed straight to main. Refused when
+# origin/main's scripts/land.sh differs from this one AND this one is a version main has had (a copy ahead of main, a change being landed, is fine).
+git fetch -q origin main || die "git fetch origin main failed (offline?); nothing pushed"
+if mine=$(git hash-object "$here/land.sh") && cur=$(git rev-parse -q --verify origin/main:scripts/land.sh) && [ "$mine" != "$cur" ]; then
+  for c in $(git log --format=%H origin/main -- scripts/land.sh); do
+    [ "$(git rev-parse -q --verify "$c:scripts/land.sh" 2>/dev/null)" = "$mine" ] && die "this scripts/land.sh is older than origin/main's: rebase on origin/main (git rebase origin/main), then run it again"
+  done
+fi
 if [ "$resume" = 1 ]; then [ -n "$(pr_number)" ] || die "--resume: no open pull request for $br on $repo (run scripts/land.sh)"; fi
 while :; do
   n=$((n + 1))
@@ -65,6 +73,7 @@ while :; do
   sha=$(git rev-parse HEAD)
   # the branch, only after a green gate: forced with a lease (a rebase rewrote it; nothing else pushes to a lane's branch)
   git fetch -q origin "$br" 2>/dev/null || true
+  [ "$br" != main ] && [ "$br" != master ] || die "refusing to push $br: land.sh never pushes to main, only a lane's branch (main takes the pull request's merge)"
   git push -q --force-with-lease origin "HEAD:refs/heads/$br" || die "could not push $br to origin (see above); nothing landed"
   num=$(pr_number)
   if [ -z "$num" ]; then
