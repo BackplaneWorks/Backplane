@@ -92,6 +92,10 @@ pub fn not_a_project(dir: &Path, user_home: Option<&Path>) -> Option<String> {
     let d = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
     if d.parent().is_none() { return Some("it is the filesystem's root".into()) }
     if let Some(h) = user_home { if h.canonicalize().ok().as_deref() == Some(d.as_path()) { return Some("it is your home folder".into()) } }
+    // a system or temporary folder itself (a folder inside one, such as a test's project, may be one)
+    let tmp = std::env::temp_dir(); let tmp = tmp.canonicalize().unwrap_or(tmp);
+    let sys = ["/tmp", "/var/tmp", "/usr", "/etc", "/var", "/opt", "/bin", "/Applications", "/System", "/Library", "C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)"];
+    if d == tmp || sys.iter().any(|x| Path::new(x).canonicalize().ok().as_deref() == Some(d.as_path())) { return Some("it is a system folder".into()) }
     let n = count_files(&d, MAX_FILES + 1);
     if n > MAX_FILES { return Some(format!("it has more than {MAX_FILES} files")) }
     None
@@ -388,6 +392,8 @@ mod tests {
         assert_eq!(not_a_project(&d, Some(&d)).as_deref(), Some("it is your home folder"));
         assert_eq!(not_a_project(Path::new("/"), None).as_deref(), Some("it is the filesystem's root"));
         assert_eq!(not_a_project(&d, None), None);
+        assert_eq!(not_a_project(&std::env::temp_dir(), None).as_deref(), Some("it is a system folder"));
+        #[cfg(unix)] assert_eq!(not_a_project(Path::new("/usr"), None).as_deref(), Some("it is a system folder"));
     }
     #[test] fn the_lines_say_what_was_done() {
         let e = Ensured { top: "/p".into(), made: true, commit: "abc1234".into(), skipped: vec!["video.mp4".into()], not_made: String::new() };
