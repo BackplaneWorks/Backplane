@@ -102,7 +102,7 @@ def main():
         hub = os.path.exists(work + "/hub.json")
         for t in tasks:
             c = t["check"]; name = f"e2e-{t['id']}-{int(time.time()) % 100000}";  # a folder of its own each time: the hub's KiCad keeps a project it has open
-            oracle = f"{HERE}/oracles/{t['id']}.py"; say = []
+            oracle = f"{HERE}/{os.environ.get('KSIM_ORACLES', 'oracles')}/{t['id']}.py"; say = []
             if hub and os.path.exists(oracle):  # the edit made through the hub's own tool, no model
                 d = kb.fresh(work, name, t["fixture"]); kb.turn(work, d, f"ORACLE {oracle}", 600000); say.append("oracle through the hub")
             elif os.path.isdir(f"{fx}/{t['fixture']}.solved") and not c.get("blocked"):
