@@ -362,3 +362,12 @@ fn take_frames(rx: &Tap, key: &str, g: &mut u64, held: &mut u64, acc: &mut Vec<u
     let v = crate::present::thread::plain_act(&e); assert_eq!((v["kind"].as_str(), v["title"].as_str(), v["cols"].as_u64(), v["rows"].as_u64(), v["cmd"].as_str()), (Some("term"), Some("Build"), Some(100), Some(20), Some("make")));
     let p = crate::data::term::entry("t1", "x9", "Build\n100x20\nmake", 5); assert_eq!(p["kind"], "term"); assert_eq!(p["term"]["key"], "x:t1:x9"); assert_eq!(p["term"]["cmd"], "make");
 }
+
+/// A chat with no folder of its own (a bot's, the uberbot's) gets a shell in the person's home folder, not where the hub was started;
+/// a project's thread keeps its folder.
+#[tokio::test] async fn a_bot_chats_shell_works_in_the_home_folder() {
+    let (hub, _home, work) = hub_in("botcwd").await;
+    let t = get(&hub).unwrap();
+    assert_eq!(t.cwd("bot-chat-with-no-project").await, crate::plat::dirs::home_or_empty());
+    assert_eq!(t.cwd("t1").await, work.to_string_lossy());
+}

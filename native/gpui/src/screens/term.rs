@@ -60,6 +60,13 @@ pub struct Term {
     pub card_focused: Option<String>,
 }
 
+/// Which chat's shell the terminal shows: on a bot's page its chat thread (`bot.chat`), else the selected thread, without a `<hub>|` prefix.
+pub fn term_key_of(data: &serde_json::Value, selected: &str) -> String {
+    let bot = &data["bot"];
+    if bot["kind"] == "bot" { if let Some(c) = bot["chat"].as_str().filter(|c| !c.is_empty()) { return crate::screens::attach::raw_id(c).to_string() } }
+    crate::screens::attach::raw_id(selected).to_string()
+}
+
 /// What Ctrl+J (or a backtick) does now.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Toggle { Show, Focus, Hide }
@@ -227,8 +234,11 @@ impl Backplane {
         for chunk in bytes.chunks(MAX_INPUT) { self.term_rpc("term.input", json!({"thread": key, "b": chunk})); }
     }
     /// Show the open thread's shell and give it the keyboard (the hub starts it, or only resizes one that runs).
+    /// The chat on screen whose shell the terminal is: the thread selected, or on a bot's page (the uberbot's included) the bot's chat thread,
+    /// which the hub may not have selected under the page (term_key_of).
+    pub(crate) fn term_chat(&self) -> String { term_key_of(&self.data, &self.selected) }
     fn term_show(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let key = crate::screens::attach::raw_id(&self.selected).to_string();
+        let key = self.term_chat();
         if key.is_empty() { self.error = trs("Open a thread first: the terminal works in its folder."); cx.notify(); return }
         self.kicad_lend(cx);
         let t = &mut self.screens.term; t.open = true; t.key = key.clone(); t.sel = None; t.scroll = 0;
@@ -339,7 +349,7 @@ impl Backplane {
         if std::mem::take(&mut self.screens.term.focus_panel) { self.screens.term.take_keys(window) }
         let focused = self.screens.term.card_keys().find(|(_, f)| f.is_focused(window)).map(|(k, _)| k.clone()); self.screens.term.card_focused = focused;
         if !self.screens.term.open { return }
-        let key = crate::screens::attach::raw_id(&self.selected).to_string();
+        let key = self.term_chat();
         // the panel follows the thread on screen: its own shell, or a card of it popped out
         let shown = self.screens.term.key.clone();
         let of_thread = shown == key || shown.strip_prefix("x:").and_then(|r| r.rsplit_once(':')).map_or(false, |(th, _)| th == key);
@@ -584,6 +594,12 @@ mod tests {
         t.frame("x:t:1", None, b"", None, Some("done 0")); assert_eq!(t.state_of("x:t:1"), "done 0"); assert!(row_text(&t.screens["x:t:1"].vt, 0).starts_with("hi"));
         t.key = "t".into(); t.ensure("t"); t.resize(100, 30); assert_eq!((t.screens["x:t:1"].vt.cols(), t.screens["x:t:1"].vt.rows()), (60, 10), "the card is not the panel");
         assert_eq!(t.screens["t"].vt.cols(), 100);
+    }
+    #[test] fn the_terminal_belongs_to_the_chat_on_screen() {
+        let d = |v: &str| serde_json::from_str::<serde_json::Value>(v).unwrap();
+        assert_eq!(term_key_of(&d("{}"), "h1|t1"), "t1");
+        assert_eq!(term_key_of(&d(r#"{"bot":{"kind":"bot","id":"b1","chat":"tb"}}"#), "t1"), "tb");
+        assert_eq!(term_key_of(&d(r#"{"bot":{"kind":"bot","id":"b1","chat":""}}"#), "t1"), "t1");
     }
     #[test] fn a_selection_copies_its_text() {
         let mut vt = Vt::new(20, 3); vt.feed(b"one two\r\nthree   \r\nfour");
