@@ -170,7 +170,7 @@ mod imp {
         let _ = c.get_input_focus().ok().and_then(|q| q.reply().ok());
         for w in &list {
             let left = kids(*w);
-            debug_assert!(left.is_empty(), "container {w} still holds {left:?}");
+            debug_assert!(left.is_empty(), "container {w} still holds {left:?}"); // i18n-ok: a debug assertion, never drawn
             if !left.is_empty() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_holder_left_in": w, "children": left})); }
         }
     }
