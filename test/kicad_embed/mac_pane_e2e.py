@@ -667,7 +667,9 @@ try:
                 n = seq(); p1, p2, p3 = pt(0.22, y), pt(0.36, y), pt(0.36, y + 0.08)
                 for q in (p1, p2, p3): click(*q); time.sleep(0.7)
                 end = p3
-                if back: key(K_DEL); time.sleep(0.8); end = p2
+                if back:
+                    relay(op='move', x=p3[0] + 30, y=p3[1] + 25); time.sleep(0.8); shot('bs-route-before')
+                    key(K_DEL); time.sleep(0.8); shot('bs-route-after'); end = p2
                 relay(op='move', x=end[0], y=end[1]); time.sleep(0.5); click(*end); click(*end); time.sleep(1.5)
                 created = sum(c for c, d in edits_since(n)); key(K_ESC); time.sleep(0.3); key(K_ESC); time.sleep(0.6)
                 return created
