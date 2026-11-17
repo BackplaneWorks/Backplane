@@ -1487,7 +1487,9 @@ async fn lock_now(ag: &Arc<Agents>, name: &str) -> Value { ag.tool_lock_list().a
     // and a burst from many tasks at once: first come is whatever the queue says; never two at a time
     let mut hs = vec![]; for i in 6..14 { let (a, j, th) = (ag.clone(), job(i), ths[i % 3]); hs.push(tokio::spawn(async move { a.tool_work_run(th, &j).await })); } for h in hs { assert!(h.await.unwrap().0); }
     let order: Vec<String> = lock_now(&ag, "build").await["waiters"].as_array().unwrap().iter().map(|p| p["note"].as_str().unwrap().to_string()).collect();
-    until(&hub, from, 30, |ev| ev.iter().filter(|e| hub_says(e, "ended: exit 0")).count() == 14).await;
+    // 14 jobs one after another, each launched in a scope of its own that stays 0.6 s past its command: seconds on a quiet machine, much longer on a loaded one
+    let ev = until(&hub, from, 180, |ev| ev.iter().filter(|e| hub_says(e, "ended: exit 0")).count() == 14).await;
+    assert_eq!(ev.iter().filter(|e| hub_says(e, "ended: exit 0")).count(), 14, "every job ended well: {:?}", ev.iter().filter(|e| hub_says(e, "ended")).collect::<Vec<_>>());
     let lines: Vec<String> = std::fs::read_to_string(&tr).unwrap().lines().map(str::to_string).collect(); assert_eq!(lines.len(), 28, "{lines:?}");
     for p in lines.chunks(2) { let i = p[0].strip_prefix("start ").expect("a start, never two"); assert_eq!(p[1], format!("end {i}"), "{lines:?}"); }
     let ran: Vec<String> = lines.iter().filter_map(|l| l.strip_prefix("start ").map(|i| format!("job {i}"))).collect();
