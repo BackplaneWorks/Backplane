@@ -2083,6 +2083,7 @@ gpui.c.kicad.cancel = Cancel
 gpui.c.kicad.open.the.app.instead = Open the KiCad app instead
 gpui.c.kicad.mac.full.screen = KiCad cannot be shown here while Backplane is full screen on macOS. Pop it out into a window of its own, or leave full screen.
 gpui.c.kicad.mac.prompt = macOS is asking for permission for Backplane: answer the prompt to let KiCad start.
+gpui.c.kicad.mac.buried = macOS keeps KiCad's editor behind Backplane's window here. Pop it out into a window of its own.
 gpui.c.kicad.recover.prompt = KiCad is asking: Recover Unsaved Changes. Restore brings back the changes KiCad kept from the session that ended; Discard opens the files as they were last saved. Its question may be beside Backplane's window.
 gpui.c.kicad.stock.tip = This is stock KiCad: it can open in windows of its own, and agents cannot edit in it. Backplane KiCad opens in here.
 gpui.c.kicad.kicad.is.not.responding = KiCad is not responding.
