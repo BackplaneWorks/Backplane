@@ -58,7 +58,7 @@ if [ "$mac" = bp-mac ]; then
   "$here/bp-lock.sh" mac-heavy -- bash -c '
     ssh -o BatchMode=yes hs-mac-mini "cd ~/bp-runner && df -h ~ | tail -1 && nohup ./run.sh >> runner.log 2>&1 < /dev/null & echo \$! > runner.pid" && echo "release-dispatch: mini runner up"
     "$1" _wait "$2" darwin-arm64; r=$?
-    ssh -o BatchMode=yes hs-mac-mini "cd ~/bp-runner && kill \$(cat runner.pid) 2>/dev/null; rm -f runner.pid"; echo "release-dispatch: mini runner stopped"; exit $r' _ "$0" "$run" &
+    ssh -o BatchMode=yes hs-mac-mini "pkill -TERM -f bp-runner/bin/Runner.Listener; pkill -TERM -f bp-runner/run-helper.sh; pkill -TERM -f bp-runner/run.sh; rm -f ~/bp-runner/runner.pid"; echo "release-dispatch: mini runner stopped"; exit $r' _ "$0" "$run" &
   pids+=($!)
 fi
 if [ "$lin" = bp-linux-release ] && [ -n "$box" ]; then
