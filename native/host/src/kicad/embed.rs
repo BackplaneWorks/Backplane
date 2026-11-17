@@ -1003,6 +1003,25 @@ pub fn others_busy(sock: &str, quiet_ms: u64) -> bool {
 /// Forward one IPC command through the embed actor's shared `kipc::Native` transport so GUI requests and agent `kicad_ipc`
 /// requests serialize cleanly on one socket connection and share its `kicad_token`.
 pub async fn gui_call(route: &GuiRoute, ty: &str, msg: Value) -> Value { gui_call_as(route, ty, msg, "").await }
+
+/// Open the project's `kind` editor ("SCH", "PCB") hidden in its GUI KiCad (a pre-warm), for the hub's own edit of a document that KiCad
+/// has not opened: never a headless KiCad beside the editor's (it would hold the document's lock, and the editor's KiCad would open over
+/// it or ask outside the pane). `doc`'s lock is read first: another live KiCad's refuses (the hub's edit is not the person's to override).
+pub async fn open_hidden(gui: &GuiRoute, kind: &str, doc: &str) -> Result<(), String> {
+    if gui.mode != "fork" || gui.desc.is_empty() || !proto::load(&gui.desc).has_field("kiapi.backplane.embed.ShowFrame", "prewarm") {
+        return Err("this KiCad cannot open the document out of sight (Backplane KiCad bp.12 or later does): open it in the editor, then try again".into())
+    }
+    match lock_verdict(doc) {
+        v @ super::locks::Verdict::Foreign { .. } => return Err(format!("{} is open in {}: not changed", Path::new(doc).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default(), super::locks::holder_words(&v))),
+        super::locks::Verdict::Stale => { super::locks::clear_stale(doc, "before the editor's KiCad opens it out of sight"); }
+        _ => {}
+    }
+    hold_shows(&gui.pro, Duration::from_secs(60));
+    let r = gui_call(gui, "kiapi.backplane.embed.ShowFrame", json!({"kind": fk_of(kind), "prewarm": true})).await;
+    release_shows(&gui.pro);
+    if r["ok"] != true { return Err(format!("the editor's KiCad did not open it: {}", r["error"].as_str().unwrap_or(""))) }
+    Ok(())
+}
 /// The same, as `client` (an agent's actor, `agent:<thread>`): the fork's co-editing attributes, groups and undoes its changes by it.
 /// The hub's commands that never change KiCad's selection: they do not make a later selection the hub's.
 const NEVER_SELECTS: &[&str] = &["SetAgentActivity", "SetHostMarkers", "RunChecks", "HideFrame", "AttachToParent", "Shutdown", "SaveDocument", "SetVisibleLayers", "SetActiveLayer"];
