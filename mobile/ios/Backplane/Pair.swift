@@ -201,9 +201,9 @@ struct DeviceManagerView: View {
                                     Text(Tr.t("Expires ")).font(.footnote) + Text(invitation.expires, style: .relative).font(.footnote)
                                     QRCodeView(rows: invitation.qr).privacySensitive()
                                     HStack {
-                                        Button(Tr.t("Copy link")) { UIPasteboard.general.string = invitation.link }
+                                        DCopyButton(text: invitation.link, label: Tr.t("Copy link"))
                                         ShareLink(Tr.t("Share"), item: invitation.link)
-                                        Button(Tr.t("Copy code")) { UIPasteboard.general.string = invitation.code }
+                                        DCopyButton(text: invitation.code, label: Tr.t("Copy code"))
                                     }
                                 } else { Text(Tr.t("Expired — create a new invitation.")) }
                             }

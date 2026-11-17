@@ -76,11 +76,12 @@ struct DEntry: Codable, Equatable, Identifiable {
     var images: [String] = []   // the images a reply names (feature replyImages): drawn where they are named, read with message.image
     var replyTo: DReplyTo?   // the person's reply to a message (data/1 `replyTo`): the chip over the bubble
     var voice: DVoiceMark?   // spoken (data/1 `voice`): the mic on the bubble, the engine and its confidence
+    var copy: [DCopyPiece]?   // what to copy in it, as the hub lists it (`copy: [{text, cmd}]`, md/copy.rs); nil: the phone's own rules (Copyable)
     // phone-only, never on the wire: a message sent and not yet confirmed, or one the hub refused
     var sending = false
     var failed = false
     var localImages: [Data] = []   // the pictures of a message this phone is sending (JPEG), shown before the hub has them
-    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, images, replyTo, voice }
+    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, images, replyTo, voice, copy }
     init(id: String, kind: String, text: String, at: Int, clientId: String? = nil, live: Bool = false) {
         self.id = id; self.kind = kind; self.text = text; self.at = at; self.clientId = clientId; self.live = live
     }
@@ -98,6 +99,7 @@ struct DEntry: Codable, Equatable, Identifiable {
         attachments = (try? c.decode([DAttachment].self, forKey: .attachments)) ?? []
         images = (try? c.decode([String].self, forKey: .images)) ?? []
         replyTo = try? c.decode(DReplyTo.self, forKey: .replyTo)
+        copy = try? c.decode([DCopyPiece].self, forKey: .copy)
         voice = try? c.decode(DVoiceMark.self, forKey: .voice)
     }
 }
@@ -298,8 +300,9 @@ struct DDirectory: Decodable { var bots: [DBot]; var rooms: [DRoom]
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); bots = (try? c.decode([DBot].self, forKey: .bots)) ?? []; rooms = (try? c.decode([DRoom].self, forKey: .rooms)) ?? [] } }
 struct DPost: Decodable, Identifiable {
     var id: String; var from: String; var text: String; var at: Int
-    enum CodingKeys: String, CodingKey { case id, from, text, at }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); id = c.str(.id); from = c.str(.from); text = c.str(.text); at = c.int(.at) }
+    var copy: [DCopyPiece]?   // its code to copy, as the hub lists it; nil: the phone's own rules (Copyable.spans)
+    enum CodingKeys: String, CodingKey { case id, from, text, at, copy }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); id = c.str(.id); from = c.str(.from); text = c.str(.text); at = c.int(.at); copy = try? c.decode([DCopyPiece].self, forKey: .copy) }
 }
 struct DPosts: Decodable { var posts: [DPost]
     enum CodingKeys: String, CodingKey { case posts }

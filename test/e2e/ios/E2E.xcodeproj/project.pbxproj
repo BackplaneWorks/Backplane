@@ -12,6 +12,7 @@
 		E2000000000000000000001C /* PushTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000013 /* PushTests.swift */; };
 		E2000000000000000000001D /* FRowsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000014 /* FRowsTests.swift */; };
 		E200000000000000000000C2 /* CatsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E200000000000000000000C1 /* CatsTests.swift */; };
+		E200000000000000000000D2 /* CopyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E200000000000000000000D1 /* CopyTests.swift */; };
 		E2000000000000000000001E /* NotifyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000015 /* NotifyTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -21,6 +22,7 @@
 		E20000000000000000000013 /* PushTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushTests.swift; sourceTree = "<group>"; };
 		E20000000000000000000014 /* FRowsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FRowsTests.swift; sourceTree = "<group>"; };
 		E200000000000000000000C1 /* CatsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatsTests.swift; sourceTree = "<group>"; };
+		E200000000000000000000D1 /* CopyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopyTests.swift; sourceTree = "<group>"; };
 		E20000000000000000000015 /* NotifyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotifyTests.swift; sourceTree = "<group>"; };
 		E20000000000000000000012 /* BackplaneE2E.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BackplaneE2E.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -52,6 +54,7 @@
 				E20000000000000000000013 /* PushTests.swift */,
 				E20000000000000000000014 /* FRowsTests.swift */,
 				E200000000000000000000C1 /* CatsTests.swift */,
+				E200000000000000000000D1 /* CopyTests.swift */,
 				E20000000000000000000015 /* NotifyTests.swift */,
 			);
 			path = UITests;
@@ -122,6 +125,7 @@
 				E2000000000000000000001C /* PushTests.swift in Sources */,
 				E2000000000000000000001D /* FRowsTests.swift in Sources */,
 				E200000000000000000000C2 /* CatsTests.swift in Sources */,
+				E200000000000000000000D2 /* CopyTests.swift in Sources */,
 				E2000000000000000000001E /* NotifyTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

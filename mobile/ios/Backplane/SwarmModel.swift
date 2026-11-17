@@ -58,7 +58,8 @@ struct DSwarmPost: Decodable, Equatable, Identifiable {
     var tags: [String] = [], mentions: [String] = [], files: [String] = []
     var guardPost = false
     var at = 0
-    enum CodingKeys: String, CodingKey { case id, from, thread, color, text, tags, reply, mentions, files, guardPost = "guard", held, at }
+    var copy: [DCopyPiece]?   // its code to copy (the hub's `copy: [{text, cmd}]`, md/copy.rs); nil: Copyable.spans of the text
+    enum CodingKeys: String, CodingKey { case id, from, thread, color, text, tags, reply, mentions, files, guardPost = "guard", held, at, copy }
     init(id: String, from: String = "", text: String = "", tags: [String] = [], files: [String] = [], guardPost: Bool = false, held: String = "") {
         self.id = id; self.from = from; self.text = text; self.tags = tags; self.files = files; self.guardPost = guardPost; self.held = held
     }
@@ -66,6 +67,7 @@ struct DSwarmPost: Decodable, Equatable, Identifiable {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.s(.id); from = c.s(.from); thread = c.s(.thread); color = c.s(.color); text = c.s(.text); reply = c.s(.reply); held = c.s(.held)
         tags = c.list(.tags); mentions = c.list(.mentions); files = c.list(.files); guardPost = c.b(.guardPost); at = c.n(.at)
+        copy = try? c.decode([DCopyPiece].self, forKey: .copy)
     }
 }
 struct DSwarmClaim: Decodable, Equatable {

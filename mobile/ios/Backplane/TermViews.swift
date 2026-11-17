@@ -144,6 +144,8 @@ struct TermFullView: View {
                 Button { handle.surface?.pasteFromButton() } label: { Image(systemName: "doc.on.clipboard").frame(width: 36, height: 36).foregroundStyle(BackplaneDesign.dim) }.accessibilityLabel(Tr.t("Paste")).accessibilityIdentifier("term.paste")
                 if screen.live { Button { terms.stop(route.key) } label: { Text(Tr.t("Stop")).dmono(12, bold: true).foregroundStyle(BackplaneDesign.bad).padding(.horizontal, 10).frame(minHeight: 32).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1)) }.accessibilityIdentifier("term.stop") }
             }.padding(.horizontal, 8).frame(minHeight: 44).background(BackplaneDesign.panel)
+            // what Run in terminal could not do here
+            if !terms.notice.isEmpty { Text(Tr.t(terms.notice)).dmono(11).foregroundStyle(BackplaneDesign.warn).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10).padding(.vertical, 4).background(BackplaneDesign.panel).accessibilityIdentifier("term.notice") }
             TermInputRepresentable(key: route.key, screen: screen, rev: screen.rev, scroll: scroll, fontSize: font, terms: terms, handle: handle, onFont: { font = $0 }, onScroll: { scroll = $0 })
         }
         .background(Color(red: 0x0d / 255, green: 0x0f / 255, blue: 0x12 / 255))

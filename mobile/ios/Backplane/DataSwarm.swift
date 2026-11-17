@@ -52,6 +52,9 @@ struct DataSwarmView: View {
         }
         .background(BackplaneDesign.background)
         .dataBar(board.room.name.isEmpty ? route.name : board.room.name)
+        // the swarm's room has its own shell (`room:<id>`, in the swarm's project folder): Run in terminal and the bar's Terminal
+        .environment(\.runInTerminal, dRunIn(client, chat: ChatTerm.key(room: route.id), title: route.name))
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { DChatTermButton(client: client, chat: ChatTerm.key(room: route.id), title: route.name) } }
         .task { await read(all: true) }
         .onChange(of: client.swarmMoved[route.id] ?? 0) { _, _ in Task { await read() } }
         .onChange(of: client.conn) { _, c in if c == .online { Task { await read(all: true) } } }
@@ -113,7 +116,7 @@ struct DataSwarmView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     if !loaded { DLoading(text: Tr.t(client.conn == .online ? "Loading the thread…" : "Connecting to the hub…")) }
-                    ForEach(board.posts) { p in DataSwarmPost(post: p, claims: board.claims).id(p.id) }
+                    ForEach(board.posts) { p in DataSwarmPost(post: p, claims: board.claims, hubHasCopy: client.has("copy")).id(p.id) }
                 }.padding(.horizontal, 12).padding(.vertical, 10)
             }
             .defaultScrollAnchor(.bottom)
@@ -158,6 +161,7 @@ struct DataSwarmView: View {
 struct DataSwarmPost: View {
     let post: DSwarmPost
     let claims: [DSwarmClaim]
+    var hubHasCopy = false   // feature copy: the post's `copy` is the hub's whole list
     var body: some View {
         let look = Swarm.look(post)
         Group {
@@ -168,6 +172,7 @@ struct DataSwarmPost: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) { DHeading(text: Tr.t("synthesis")); Text(who).dmono(11, bold: true).foregroundStyle(dSwarmColor(post.color)) }
                     DLinkText(text: post.text)
+                    DCopyPieces(pieces: Copyable.pieces(hub: Copyable.list(post.copy, hubHasCopy: hubHasCopy), text: post.text))
                 }.padding(12).frame(maxWidth: .infinity, alignment: .leading).dbox(BackplaneDesign.accent, fill: BackplaneDesign.panel).padding(.vertical, 8)
             default:
                 HStack(alignment: .top, spacing: 8) {
@@ -180,6 +185,7 @@ struct DataSwarmPost: View {
                             Text(dAgo(Swarm.ms(post.at))).dmono(10).foregroundStyle(BackplaneDesign.faint)
                         }
                         DLinkText(text: post.text)
+                        DCopyPieces(pieces: Copyable.pieces(hub: Copyable.list(post.copy, hubHasCopy: hubHasCopy), text: post.text))
                         if !post.files.isEmpty { files }
                         if look == .held { Text(Tr.ios_swarm_held(why: Tr.t(post.held))).dmono(10).foregroundStyle(BackplaneDesign.faint) }
                     }

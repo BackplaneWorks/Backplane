@@ -1,9 +1,10 @@
 // bun test/e2e/ios/f-ctl.mjs HUB_BIN OUT PORT: the control port (PORT+1) the iOS F-rows test (FRowsTests.swift) asks, beside the private hub
 // test/e2e/pixel-hub.mjs runs on OUT/hub (state.json, events.jsonl, the stand-in's fake.log). Answers from those files, never from the test's say-so:
 //   GET /count?f=events|fake&re=REGEX -> {n}: matching lines
+//   GET /find?name=FILE -> {paths}: where a file of that name is under OUT/hub (relative), e.g. a marker a Run in terminal command wrote
 //   GET /kill -> the hub process is killed;  GET /restart -> started again on the same home, as pixel-f-rows.sh does;  GET /up -> {up}
 import {spawn} from 'node:child_process';
-import {existsSync,openSync,readFileSync} from 'node:fs';
+import {existsSync,openSync,readFileSync,readdirSync} from 'node:fs';
 const [BIN,OUT,PORT_]=process.argv.slice(2), PORT=Number(PORT_), H=OUT+'/hub';
 const files={events:H+'/home/events.jsonl',fake:H+'/fake.log'};
 const J=o=>new Response(JSON.stringify(o),{headers:{'content-type':'application/json'}});
@@ -21,6 +22,9 @@ Bun.serve({port:PORT+1,hostname:'127.0.0.1',idleTimeout:60,async fetch(r){
       const out=openSync(OUT+'/hub2.log','a');
       const p=spawn(BIN,['--home',H+'/home','--port',String(PORT),'--host','127.0.0.1','--no-tailscale','--foreground'],{env,stdio:['ignore',out,out],cwd:H+'/proj',detached:false});
       pid=p.pid;for(let i=0;i<300&&!await up();i++)await Bun.sleep(100);return J({pid,up:await up()})}
+    case '/find':{const want=q.name||'',hits=[];const walk=(d,rel)=>{let es=[];try{es=readdirSync(d,{withFileTypes:true})}catch{return}
+      for(const e of es){const r=rel?rel+'/'+e.name:e.name;if(e.isDirectory()&&!e.isSymbolicLink())walk(d+'/'+e.name,r);else if(e.name===want)hits.push(r)}};
+      if(want)walk(H,'');return J({paths:hits})}
     case '/up':return J({up:await up()});
     case '/stop':setTimeout(()=>{if(alive(pid))process.kill(pid,'SIGTERM');process.exit(0)},100);return J({stopping:true});
     default:return new Response('no',{status:404});

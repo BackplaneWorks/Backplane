@@ -263,7 +263,8 @@ struct DataRoomView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(p.from.isEmpty ? Tr.t("you") : p.from).dmono(11, bold: true).foregroundStyle(BackplaneDesign.accent)
                             DLinkText(text: p.text)
-                        }
+                            DCopyPieces(pieces: Copyable.pieces(hub: Copyable.list(p.copy, hubHasCopy: client.has("copy")), text: p.text))
+                        }.accessibilityElement(children: .contain).accessibilityIdentifier("data.room.post")
                     }
                 }.padding()
             }
@@ -276,6 +277,9 @@ struct DataRoomView: View {
         }
         .background(BackplaneDesign.background)
         .dataBar("#" + room.name)
+        // the room's own shell (`room:<id>`: home, or a swarm's project folder), for Run in terminal and the bar's Terminal
+        .environment(\.runInTerminal, dRunIn(client, chat: ChatTerm.key(room: room.id), title: "#" + room.name))
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { DChatTermButton(client: client, chat: ChatTerm.key(room: room.id), title: "#" + room.name) } }
         .task { while !Task.isCancelled { posts = await client.roomPosts(room.id); try? await Task.sleep(for: .seconds(2.5)) } }
     }
 }

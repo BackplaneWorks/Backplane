@@ -171,7 +171,6 @@ struct DataAccountView: View {
     @State private var code = ""
     @State private var confirmRemove = false
     @State private var started = false
-    @State private var copied = ""
 
     private func load() async {
         do { let r: DAccReply = try await client.call("account.view", ["profile": route.id]); a = r.account; failure = "" } catch { failure = error.localizedDescription }
@@ -243,12 +242,12 @@ struct DataAccountView: View {
         if !s.url.isEmpty, let u = URL(string: s.url) {
             HStack(spacing: 6) {
                 Button(Tr.t("Open sign-in page")) { openURL(u) }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("account.signin.open")
-                Button(Tr.t(copied == "link" ? "Copied" : "Copy link")) { UIPasteboard.general.string = s.url; copied = "link" }.buttonStyle(DButton())
+                DCopyButton(text: s.url, label: Tr.t("Copy link")).dbox()
             }
         }
         if !s.code.isEmpty {
             Text(s.code).font(.system(size: 28, weight: .bold, design: .monospaced)).foregroundStyle(BackplaneDesign.text).textSelection(.enabled).accessibilityIdentifier("account.signin.code")
-            Button(Tr.t(copied == "code" ? "Copied" : "Copy code")) { UIPasteboard.general.string = s.code; copied = "code" }.buttonStyle(DButton())
+            DCopyButton(text: s.code, label: Tr.t("Copy code")).dbox()
         }
         if s.paste {
             TextField(Tr.t("Paste the code here"), text: $code).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()

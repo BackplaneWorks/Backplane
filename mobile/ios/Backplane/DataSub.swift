@@ -60,7 +60,7 @@ private struct DataSubEntry: View {
                 DLinkText(text: entry.text, thread: thread).foregroundStyle(BackplaneDesign.text)
             }.padding(10).frame(maxWidth: .infinity, alignment: .leading).dbox(fill: BackplaneDesign.raised).padding(.vertical, 4).accessibilityIdentifier("data.sub.asked")
         case "assistant":
-            DataMarkdown(text: entry.text, thread: thread).padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading)
+            DataMarkdown(text: entry.text, thread: thread, copy: entry.copy).padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading)
         case "tool":
             let st = entry.tool?.state ?? "done"
             let (res, cut) = dSubResultLines(entry.tool?.result ?? "", open: open)

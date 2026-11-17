@@ -225,11 +225,13 @@ struct DataMarkdown: View {
     /// as the desktop draws them; a tap on its path opens it full size
     var entry = ""
     var images: [String] = []
+    /// what to copy, as the hub listed it (`copy: [{text, cmd}]`); nil: the same rules decide here (Copyable)
+    var copy: [DCopyPiece]? = nil
     @State private var full: DReplyPic?
     var body: some View {
         let blocks = dMdBlocks(text)
         let pics = images.isEmpty ? nil : DMdPicPlan(blocks: blocks, entry: entry, paths: images)
-        DMdBlocks(blocks: blocks, pics: pics)
+        DMdBlocks(blocks: blocks, pics: pics, copy: copy)
             .environment(\.openURL, OpenURLAction { url in
                 if let p = dPathFrom(url), images.contains(p) { full = DReplyPic(entry: entry, path: p); return .handled }
                 return dMdOpen(url, thread: thread)
@@ -326,6 +328,7 @@ struct DReplyFull: View {
 private struct DMdBlocks: View {
     let blocks: [DMdBlock]
     var pics: DMdPicPlan? = nil
+    var copy: [DCopyPiece]? = nil
     @ScaledMetric(relativeTo: .footnote) private var body13: CGFloat = 13
     private func head(_ n: Int) -> CGFloat { n <= 1 ? 18 : n == 2 ? 16 : n == 3 ? 14 : 13 }
     var body: some View {
@@ -339,7 +342,9 @@ private struct DMdBlocks: View {
     }
     @ViewBuilder private func block(_ b: DMdBlock) -> some View {
         switch b {
-        case .p(let s): Text(dMdInline(s, size: body13)).foregroundStyle(BackplaneDesign.text).lineSpacing(3).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+        case .p(let s):
+            Text(dMdInline(s, size: body13)).foregroundStyle(BackplaneDesign.text).lineSpacing(3).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+            DCopyPieces(pieces: Copyable.inlinePieces(s, hub: copy))
         case .h(let n, let s): Text(dMdInline(s, size: head(n) * body13 / 13, bold: true)).foregroundStyle(BackplaneDesign.text).padding(.top, 4).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
         case .li(let depth, let marker, let task, let s):
             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -350,8 +355,9 @@ private struct DMdBlocks: View {
                 } else { Text(marker).dmono(13).foregroundStyle(BackplaneDesign.dim).frame(minWidth: 16, alignment: .leading) }
                 Text(dMdInline(s, size: body13)).foregroundStyle(task == 1 ? BackplaneDesign.dim : BackplaneDesign.text).strikethrough(task == 1).lineSpacing(3).textSelection(.enabled)
             }.padding(.leading, CGFloat(depth) * 14).frame(maxWidth: .infinity, alignment: .leading)
-        case .code(let lang, let s): DMdCode(lang: lang, text: s)
-        case .quote(let inner): HStack(alignment: .top, spacing: 10) { Rectangle().fill(BackplaneDesign.dim).frame(width: 2); DMdBlocks(blocks: inner) }.fixedSize(horizontal: false, vertical: true)
+            DCopyPieces(pieces: Copyable.inlinePieces(s, hub: copy)).padding(.leading, CGFloat(depth) * 14 + 22)
+        case .code(let lang, let s): DMdCode(lang: lang, text: s, cmd: Copyable.blockCmd(s, lang: lang, hub: copy))
+        case .quote(let inner): HStack(alignment: .top, spacing: 10) { Rectangle().fill(BackplaneDesign.dim).frame(width: 2); DMdBlocks(blocks: inner, copy: copy) }.fixedSize(horizontal: false, vertical: true)
         case .table(let head, let aligns, let rows): DMdTable(head: head, aligns: aligns, rows: rows, size: body13 - 1)
         // a local path's image is the reply's own (drawn by the plan, through the hub); a web address is fetched here
         case .image(let alt, let url): if pics != nil && !url.hasPrefix("http") { EmptyView() } else { DMdImage(alt: alt, url: url) }
@@ -360,19 +366,18 @@ private struct DMdBlocks: View {
     }
 }
 
+/// A fenced block: always copyable, whole (the copy button with its word), and Run in terminal when it holds a command.
 private struct DMdCode: View {
     let lang: String, text: String
-    @State private var copied = false
+    var cmd = false
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
+            HStack(spacing: 2) {
                 Text(lang).dmono(11).foregroundStyle(BackplaneDesign.dim)
                 Spacer(minLength: 0)
-                Button(Tr.t(copied ? "Copied" : "Copy")) {
-                    UIPasteboard.general.string = text; copied = true
-                    Task { try? await Task.sleep(nanoseconds: 1_500_000_000); copied = false }
-                }.dmono(11).foregroundStyle(BackplaneDesign.accent).padding(.vertical, 6).accessibilityIdentifier("md.copy")
-            }.padding(.horizontal, 10)
+                if cmd { DRunButton(cmd: text, word: true) }
+                DCopyButton(text: text, word: true)
+            }.padding(.leading, 10).padding(.trailing, 4)
             ScrollView(.horizontal, showsIndicators: false) { Text(text).dmono(12).lineSpacing(2).fixedSize().textSelection(.enabled).padding(.horizontal, 10).padding(.bottom, 10) }
         }.frame(maxWidth: .infinity, alignment: .leading).dbox(fill: BackplaneDesign.panel)
     }
