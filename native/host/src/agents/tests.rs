@@ -2118,10 +2118,11 @@ impl mailroom::Mailroom for ChatRoom {
     let r = rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort Route the reset to PA0.","msg":"mv1","voice":{"via":"eot","stt":"parakeet-v2","conf":0.86,"doubt":["PA0"]}})).await; assert_eq!(r["ok"], true, "{r}");
     let accepted = t0.elapsed(); let posted = loop { if log_from(&hub, 0).await.iter().any(|e| is(e, "MessagePosted") && e["role"] == "user") { break t0.elapsed() } tokio::time::sleep(Duration::from_millis(2)).await };
     eprintln!("voice send: turn.start answered in {} ms, the message in the log at {} ms", accepted.as_millis(), posted.as_millis());
-    let from = len(&hub).await; until(&hub, 0, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    // `from` is taken once the first turn has ended: counted from before, its own `completed` passed for the typed turn's, and the log was read before the typed line was in it
+    until(&hub, 0, 180, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await; let from = len(&hub).await;
     let r = rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort typed this one","msg":"mt1"})).await; assert_eq!(r["ok"], true, "{r}");
-    until(&hub, from, 30, |ev| ev.iter().filter(|e| turn_is(e, "completed")).count() >= 1).await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    until(&hub, from, 180, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    let t = std::time::Instant::now(); while !std::fs::read_to_string(&log).unwrap_or_default().contains("typed this one") && t.elapsed() < Duration::from_secs(180) { tokio::time::sleep(Duration::from_millis(40)).await }
     let got = std::fs::read_to_string(&log).unwrap(); let ins: Vec<&str> = got.lines().filter(|l| l.starts_with("IN ")).collect();
     let spoken = ins.iter().find(|l| l.contains("Route the reset")).expect("the dictated one reached the agent");
     assert!(spoken.contains("<voice_message via=\\\"eot\\\" stt=\\\"parakeet-v2\\\" confidence=\\\"0.86\\\" doubt=\\\"PA0\\\" edited=\\\"no\\\">") && spoken.contains("Spoken and transcribed"), "{spoken}");

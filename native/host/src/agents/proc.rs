@@ -547,6 +547,10 @@ mod tests {
         let d = dir("pi-node"); script(&d, "fakenode-bp", "echo 1.4.0"); let real = d.join("pi-real"); std::fs::write(&real, "#!/usr/bin/env fakenode-bp\n").unwrap();
         { use crate::plat::fs::PermissionsExt; std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o755)).unwrap(); }
         let pi = script(&d, "pi", &format!("exec {} \"$@\"", real.display()));
+        // "Text file busy": a script written a moment ago is still open for writing in a child another test thread just forked (until that child's exec); the launcher chain would
+        // fail with 126 instead of the 127 or the version this test is about. Wait until each one execs (whatever it then answers), as stepglb.rs and kipc.rs do.
+        for f in [d.join("fakenode-bp"), real.clone(), pi.clone()] { let t = std::time::Instant::now();
+            while matches!(std::process::Command::new(&f).env_clear().stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status(), Err(ref e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY)) && t.elapsed() < std::time::Duration::from_secs(120) { std::thread::sleep(std::time::Duration::from_millis(25)) } }
         let run = |path: Option<std::ffi::OsString>| { let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, &pi); c.arg("--version").env_clear(); if let Some(p) = path { c.env("PATH", p); } else { c.env("PATH", "/usr/bin:/bin"); }
             c.output().ok().map(|o| (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned())) };
         let bare = run(None); assert_ne!(bare.as_ref().unwrap().0, 0, "without node: {bare:?}");
