@@ -48,8 +48,17 @@ def serve(path, client, scale):
                 elif op == 'drag':
                     client.drag(px(r['x0']), px(r['y0']), px(r['x1']), px(r['y1']), seconds=r.get('seconds', 0.6))
                 elif op == 'png':
+                    # never the whole screen: the person's own windows are never captured. A picture is the given rect only
+                    # (the test windows' bounds, in points), cut from the frame in memory before anything is written
+                    if not r.get('rect'):
+                        raise ValueError('png needs a rect (the test windows only): the whole screen is never saved')
                     client.refresh()
-                    client.png(r['path'])
+                    x0, y0, w, h = (px(v) for v in r['rect'])
+                    x0, y0 = max(0, x0), max(0, y0); w, h = max(1, min(w, client.width - x0)), max(1, min(h, client.height - y0))
+                    sub = ard_vnc.Client.__new__(ard_vnc.Client)
+                    sub.width, sub.height, sub._masked = w, h, client._masked
+                    sub.fb = bytearray(b''.join(bytes(client.fb[((y0 + row) * client.width + x0) * 4:((y0 + row) * client.width + x0 + w) * 4]) for row in range(h)))
+                    sub.png(r['path'])
                 elif op == 'crop':
                     # raw RGB of a rect in points (the harness's canvas finder): "<w> <h>\n" then w*h*3 bytes
                     client.refresh()
