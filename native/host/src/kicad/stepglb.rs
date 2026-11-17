@@ -147,10 +147,7 @@ pub fn freecad_gui(cmd: &str) -> String {
 }
 /// Helper.find: backplane-step2glb beside the hub, then at the install's top, then on PATH
 fn step2glb_beside() -> String {
-    let exe = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
-    let name = format!("backplane-step2glb{}", std::env::consts::EXE_SUFFIX);   // Windows: the .exe
-    let near = exe.iter().flat_map(|d| [d.join(&name), d.join("..").join(&name)]).find(|p| runnable(p));
-    near.map(|p| p.to_string_lossy().into_owned()).or_else(|| on_path("backplane-step2glb")).unwrap_or_default()
+    crate::plat::helper("backplane-step2glb").filter(|p| runnable(p)).map(|p| p.to_string_lossy().into_owned()).or_else(|| on_path("backplane-step2glb")).unwrap_or_default()
 }
 /// The tools on this machine, in order: what the two entry points use.
 pub fn machine(home: &Path) -> Vec<Mesher> {

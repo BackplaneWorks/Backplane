@@ -10,7 +10,8 @@ The hub (`native/host`, `backplane-hub.exe`) and the GPUI client (`native/gpui`,
 
 ## Needs on the Windows machine
 
-- Git for Windows. The hub's scripts are POSIX shell (git, folders, exports); `sh` and `bash` mean Git's (on PATH, or beside `git.exe`, or under Program Files). Agents on Windows need it anyway.
+- Git for Windows. The hub's scripts are POSIX shell (git, folders, exports); `sh` and `bash` mean Git's (on PATH, or beside `git.exe`, or under Program Files; or beside a `git.exe` on the registry's Path, so a Git installed while the hub runs is found without a restart). A shell not found is looked for again at the next `sh`; until then bp-sh says Git for Windows is missing. Agents on Windows need it anyway.
+- The hub's own helpers (`bp-sh`, `backplane-voice`, `backplane-step2glb`, `backplane-browser`) are started by full path from the hub's folder (`plat::helper`), never by name from PATH: an install's `builds\<tag>\` is not on PATH.
 - `bp-sh.exe` beside `backplane-hub.exe`. A Cygwin/MSYS program started by a Windows program splits its command line by its own rules, so every `sh` goes through `bp-sh`, which quotes for them (`src/bin/bp-sh.rs`).
 
 ## How the hub differs on Windows

@@ -279,9 +279,11 @@ pub mod hub {
     /// The hub's scripts are POSIX shell: `sh`/`bash` mean Git for Windows' (on PATH, or beside git.exe), which Windows agents need anyway.
     pub fn program(p: &std::ffi::OsStr) -> std::ffi::OsString {
         let name = match p.to_str() { Some("sh") | Some("/bin/sh") => "sh.exe", Some("bash") | Some("/bin/bash") => "bash.exe", _ => return p.to_os_string() };
-        static FOUND: std::sync::OnceLock<Vec<(String, std::ffi::OsString)>> = std::sync::OnceLock::new();
-        let found = FOUND.get_or_init(|| ["sh.exe", "bash.exe"].iter().filter_map(|n| shell_path(n).map(|f| (n.to_string(), f.into_os_string()))).collect());
-        found.iter().find(|(n, _)| n == name).map_or_else(|| name.into(), |(_, f)| f.clone())
+        // a miss is looked for again: Git installed from setup's button after the hub started is found without a restart (0.16.0: one
+        // look kept for the hub's life left every `sh` as a bare `sh.exe`, and bp-sh answered "program not found")
+        static SH: crate::plat::Found<std::path::PathBuf> = crate::plat::Found::new(); static BASH: crate::plat::Found<std::path::PathBuf> = crate::plat::Found::new();
+        let found = if name == "sh.exe" { &SH } else { &BASH };
+        found.get(|| shell_path(name)).map_or_else(|| name.into(), |f| f.into_os_string())
     }
     /// What to start for `p`, and the arguments that go before the caller's: a `#!` script (no Windows program by itself) runs through the
     /// interpreter its first line names, as a Unix kernel would; `sh`, `bash` and `/usr/bin/env sh` are Git for Windows' shell.
@@ -304,9 +306,25 @@ pub mod hub {
     /// Git's sh by way of `bp-sh` (beside this program, or one folder up for a test binary in target/*/deps), which passes its arguments
     /// unchanged; without it the shell is started directly.
     fn through_bp_sh(sh: std::ffi::OsString, pre: Vec<std::ffi::OsString>) -> (std::ffi::OsString, Vec<std::ffi::OsString>) {
-        static BP_SH: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
-        let t = BP_SH.get_or_init(|| { let me = std::env::current_exe().ok()?; let d = me.parent()?; [d.join("bp-sh.exe"), d.parent()?.join("bp-sh.exe")].into_iter().find(|f| f.is_file()) });
-        match t { Some(t) => { let mut a = vec![sh]; a.extend(pre); (t.clone().into_os_string(), a) } None => (sh, pre) }
+        static BP_SH: crate::plat::Found<std::path::PathBuf> = crate::plat::Found::new();
+        match BP_SH.get(|| crate::plat::helper("bp-sh")) { Some(t) => { let mut a = vec![sh]; a.extend(pre); (t.into_os_string(), a) } None => (sh, pre) }
+    }
+    /// The Path a new logon gets (the machine's, then the user's, `%VAR%`s expanded), read now: an installer's change after the hub started.
+    fn registry_path() -> Vec<std::path::PathBuf> {
+        use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
+        fn read(root: HKEY, key: &str) -> Option<String> {
+            let w = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>(); let (k, v) = (w(key), w("Path"));
+            let mut n: u32 = 0;
+            // RRF_RT_REG_SZ: a REG_EXPAND_SZ value comes expanded
+            unsafe {
+                if RegGetValueW(root, k.as_ptr(), v.as_ptr(), RRF_RT_REG_SZ, std::ptr::null_mut(), std::ptr::null_mut(), &mut n) != 0 { return None }
+                let mut b = vec![0u16; n as usize / 2 + 1];
+                if RegGetValueW(root, k.as_ptr(), v.as_ptr(), RRF_RT_REG_SZ, std::ptr::null_mut(), b.as_mut_ptr().cast(), &mut n) != 0 { return None }
+                Some(String::from_utf16_lossy(&b[..(n as usize / 2).min(b.len())]).trim_end_matches('\0').to_string())
+            }
+        }
+        [(HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"), (HKEY_CURRENT_USER, "Environment")].into_iter()
+            .filter_map(|(r, k)| read(r, k)).flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).filter(|d| !d.as_os_str().is_empty()).collect()
     }
     /// A file's `#!` line, without the `#!`.
     fn shebang(f: &std::path::Path) -> Option<String> {
@@ -317,12 +335,17 @@ pub mod hub {
     }
     fn shell_path(name: &str) -> Option<std::path::PathBuf> {
         let path = std::env::var_os("PATH").unwrap_or_default();
-        let dirs: Vec<std::path::PathBuf> = std::env::split_paths(&path).collect();
-        // git.exe in <Git>\cmd or <Git>\bin: its sh.exe is in <Git>\bin
-        let from_git = dirs.iter().filter(|d| d.join("git.exe").is_file()).filter_map(|d| d.parent().map(|g| g.join("bin")));
+        let own: Vec<std::path::PathBuf> = std::env::split_paths(&path).collect();
+        // and the Path a new logon would get: Git installed while the hub runs is on the registry's, not the hub's. Its folders count only as
+        // a Git's: <Git>\usr\bin\sh.exe started off the hub's PATH has no /usr/bin (no cygpath: "cannot resolve Windows folder", bp-win
+        // Nov 17), while <Git>\bin\sh.exe sets the shell's PATH up
+        let reg = registry_path();
+        // git.exe in <Git>\cmd or <Git>\bin, or the registry's <Git>\usr\bin: its sh.exe is in <Git>\bin
+        let from_git = own.iter().chain(&reg).filter(|d| d.join("git.exe").is_file()).filter_map(|d| d.parent().map(|g| g.join("bin")))
+            .chain(reg.iter().filter(|d| d.ends_with("usr/bin")).filter_map(|d| d.parent()?.parent().map(|g| g.join("bin"))));
         let installed = ["ProgramFiles", "ProgramW6432", "LOCALAPPDATA"].iter().filter_map(|v| std::env::var_os(v)).flat_map(|r| { let r = std::path::PathBuf::from(r); [r.join("Git").join("bin"), r.join("Programs").join("Git").join("bin")] });
         // PATH first, but not System32's bash.exe (WSL's, another machine's shell)
-        dirs.iter().filter(|d| !d.to_string_lossy().to_ascii_lowercase().contains("system32")).cloned().chain(from_git).chain(installed).map(|d| d.join(name)).find(|f| f.is_file())
+        own.iter().filter(|d| !d.to_string_lossy().to_ascii_lowercase().contains("system32")).cloned().chain(from_git).chain(installed).map(|d| d.join(name)).find(|f| f.is_file())
     }
 }
 

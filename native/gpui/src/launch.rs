@@ -73,7 +73,7 @@ fn free_port(first: u16, last: u16) -> Option<u16> { (first..=last).find(|p| std
 pub fn hub_bin() -> Result<PathBuf> {
     if let Some(p) = std::env::var_os("BACKPLANE_HUB_BIN").filter(|p| !p.is_empty()) { return Ok(p.into()) }
     let me = std::env::current_exe()?;
-    let p = me.parent().with_context(|| crate::i18n::trs("No folder for this program."))?.join("backplane-hub");
+    let p = me.parent().with_context(|| crate::i18n::trs("No folder for this program."))?.join(format!("backplane-hub{}", std::env::consts::EXE_SUFFIX)); // Windows: the .exe, or an unpacked release never found its hub
     if p.is_file() { Ok(p) } else { bail!("{}", crate::i18n::tf("gpui.launch.hub.missing", &[("dir", me.parent().unwrap().display().to_string().into())])) }
 }
 

@@ -33,7 +33,7 @@ fn helper_path() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("BACKPLANE_BROWSER") { if !p.is_empty() { return Some(PathBuf::from(p)) } }
     // beside the hub; else the installed one (a dev build ships only the hub and the window); else on PATH
     let name = format!("backplane-browser{}", std::env::consts::EXE_SUFFIX);   // Windows: the .exe
-    let me = std::env::current_exe().ok()?; let beside = me.parent()?.join(&name); if beside.exists() { return Some(beside) }
+    if let Some(beside) = crate::plat::helper("backplane-browser") { return Some(beside) }
     if let Some(h) = std::env::var_os("HOME") { let p = PathBuf::from(h).join(".local/share/backplane/backplane-browser"); if p.exists() { return Some(p) } }
     std::env::var_os("PATH").and_then(|path| std::env::split_paths(&path).map(|d| d.join(&name)).find(|p| p.is_file()))
 }

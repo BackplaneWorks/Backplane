@@ -9,7 +9,7 @@ pub struct Upload { child: Child, path: mpsc::Sender<String> }
 
 /// A hub reached on this machine records its own microphone.
 pub fn hub_here(url: &str) -> bool { let h = url.split("//").nth(1).unwrap_or(url); let h = h.rsplit_once(':').map_or(h, |(a, _)| a); matches!(h, "127.0.0.1" | "localhost" | "[::1]") }
-fn helper() -> Option<std::path::PathBuf> { std::env::var_os("BACKPLANE_VOICE_BIN").map(Into::into).or_else(|| { let b = std::env::current_exe().ok()?.parent()?.join("backplane-voice"); b.exists().then_some(b) }) }
+fn helper() -> Option<std::path::PathBuf> { std::env::var_os("BACKPLANE_VOICE_BIN").map(Into::into).or_else(|| { let b = std::env::current_exe().ok()?.parent()?.join(format!("backplane-voice{}", std::env::consts::EXE_SUFFIX)); b.exists().then_some(b) }) }
 /// One POST; the hub closes after its reply.
 fn post(addr: &str, target: &str, token: &str, body: &[u8]) -> bool {
     let Ok(mut c) = std::net::TcpStream::connect(addr) else { return false };

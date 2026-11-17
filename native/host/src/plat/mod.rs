@@ -8,6 +8,27 @@
 pub mod dirs;
 #[cfg(test)] pub mod tmp;
 
+/// A program Backplane ships, by its full path: beside this one (an install's `builds/<tag>/` folder), else one folder up (a test binary in
+/// `target/*/deps`). Never by bare name from PATH: an installed build's folder is not on PATH (0.16.0 on Windows), and a bare name would
+/// start whatever program of that name PATH has first.
+pub fn helper(name: &str) -> Option<std::path::PathBuf> { helper_in(&std::env::current_exe().ok()?, name, std::env::consts::EXE_SUFFIX) }
+/// `helper` for the program `exe` and the system's program suffix (`.exe` on Windows).
+pub fn helper_in(exe: &std::path::Path, name: &str, suffix: &str) -> Option<std::path::PathBuf> {
+    let file = format!("{name}{suffix}"); let d = exe.parent()?;
+    std::iter::once(d.join(&file)).chain(d.parent().map(|u| u.join(&file))).find(|f| f.is_file())
+}
+/// A lookup kept once it finds something; a miss is looked for again next time, so a program installed after the hub started (Git for
+/// Windows from setup's button) is found without a restart. A `OnceLock` kept the miss for the hub's life: every `sh` failed after Git came.
+pub struct Found<T>(std::sync::Mutex<Option<T>>);
+impl<T: Clone> Found<T> {
+    pub const fn new() -> Self { Found(std::sync::Mutex::new(None)) }
+    pub fn get(&self, find: impl FnOnce() -> Option<T>) -> Option<T> {
+        let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if g.is_none() { *g = find() }
+        g.clone()
+    }
+}
+
 /// A child's exit as the shell says it: its code, else 128 + the signal that ended it (Unix only has those).
 pub fn exit_code(s: &std::process::ExitStatus) -> i32 { s.code().unwrap_or_else(|| 128 + proc::signal(s).unwrap_or(0)) }
 
@@ -59,5 +80,32 @@ pub fn privacy_words(dir: &str, home: &str) -> String {
         assert!(super::guarded_in("/Users/a/Documents/", "/Users/a") && super::guarded_in("/Users/a/Desktop", "/Users/a/") && !super::guarded_in("/Users/a/Documents/x", "/Users/a") && !super::guarded_in("/Users/a/Music", "/Users/a"));
         // not macOS: never a word, whatever the folder
         if !cfg!(target_os = "macos") { assert_eq!(super::privacy_block("/root/x"), None); }
+    }
+}
+
+#[cfg(test)] mod helper_tests {
+    /// A shipped helper is the file beside the hub (or one folder up for a test binary), by full path, with the system's suffix; never a bare name.
+    #[test] fn a_helper_is_found_beside_the_hub_by_full_path() {
+        let d = super::tmp::dir("helper"); let build = d.join("builds").join("v0.16.0"); let deps = build.join("deps"); std::fs::create_dir_all(&deps).unwrap();
+        let hub = build.join("backplane-hub.exe");
+        assert_eq!(super::helper_in(&hub, "bp-sh", ".exe"), None, "nothing there: no helper, never a bare name to try on PATH");
+        std::fs::write(build.join("bp-sh.exe"), "x").unwrap();
+        assert_eq!(super::helper_in(&hub, "bp-sh", ".exe"), Some(build.join("bp-sh.exe")));
+        assert!(super::helper_in(&hub, "bp-sh", ".exe").unwrap().is_absolute());
+        assert_eq!(super::helper_in(&deps.join("t.exe"), "bp-sh", ".exe"), Some(build.join("bp-sh.exe")), "a test binary in target/*/deps finds it one folder up");
+        assert_eq!(super::helper_in(&hub, "bp-sh", ""), None, "the suffix is the system's: bp-sh is not bp-sh.exe");
+        // after an update the hub runs from the new build's folder, and its helpers are that folder's
+        let next = d.join("builds").join("v0.16.1"); std::fs::create_dir_all(&next).unwrap(); std::fs::write(next.join("bp-sh.exe"), "y").unwrap();
+        assert_eq!(super::helper_in(&next.join("backplane-hub.exe"), "bp-sh", ".exe"), Some(next.join("bp-sh.exe")));
+        // the real one: this test binary's own folder or the one above
+        if let Some(p) = super::helper("does-not-exist-anywhere") { panic!("found {p:?}") }
+    }
+    /// A miss is looked for again (Git installed while the hub runs); a hit is kept.
+    #[test] fn a_lookup_keeps_hits_not_misses() {
+        let f: super::Found<u32> = super::Found::new(); let n = std::cell::Cell::new(0);
+        assert_eq!(f.get(|| { n.set(n.get() + 1); None }), None);
+        assert_eq!(f.get(|| { n.set(n.get() + 1); Some(7) }), Some(7), "looked for again after a miss");
+        assert_eq!(f.get(|| { n.set(n.get() + 1); Some(9) }), Some(7), "kept once found");
+        assert_eq!(n.get(), 2);
     }
 }
