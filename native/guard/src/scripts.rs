@@ -108,7 +108,7 @@ fn kills_by_name(line: &str) -> bool {
     let script = root().join("scripts/worktree-gc.sh"); fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).ok();
     let run_with = |apply: bool, extra: &[(&str, String)]| { let mut c = Command::new(&script); if apply { c.arg("--apply"); }
         // never the machine's own: its data drive, shared targets, home bp-tmp, or its free space deciding what goes (Nov 17: under 150 GB free the pressure rule fired here)
-        c.env("BP_DATA", d.join("data")).env("BP_TARGET", d.join("bptarget")).env("GC_LEGACY_TMP", "").env("GC_LOW_GB", "0");
+        c.env("BP_DATA", d.join("data")).env("BP_TARGET", d.join("bptarget")).env("GC_LEGACY_TMP", "").env("GC_LOW_GB", "0").env("GC_WORK_NOTES", d.join("work"));
         let o = c.args(["--sccache-size", "3M"]).current_dir(&d).env("GC_REPO", &repo).env("GC_UPSTREAM", "origin/main").env("BP_TMP", &bt).env("GC_TMP_BASES", &bt)
             .env("GC_LOCK", d.join("lock")).env("SCCACHE_DIR", &scc).env("GC_CTIME", "0").env_remove("TMPDIR").env_remove("CLAUDE_CODE_TMPDIR").envs(extra.iter().map(|(k, v)| (*k, v.as_str()))).output().unwrap();
         assert!(o.status.success(), "{o:?}"); String::from_utf8_lossy(&o.stdout).to_string() };
@@ -144,12 +144,14 @@ fn kills_by_name(line: &str) -> bool {
     assert!(!bt.join("aot-build").exists() && !bt.join("old.log").exists(), "idle bp-tmp entries go:\n{out}");
     assert!(bt.join("held/log").exists() && bt.join("new").exists() && bt.join("sccache").exists() && bt.join("claude").exists(), "held, fresh, sccache's and claude's stay:\n{out}");
     // Nov 17 (bp-tmp at 160 GB, the disk at 98%): over its cap, the oldest unused entries go until it is under; under the free-space floor, every unused one may go, never a fresh one
-    let bt2 = d.join("bptmp2"); for (n, mb, when) in [("old1", 2usize, "5 days ago"), ("old2", 2, "3 days ago"), ("fresh", 1, "")] { fs::create_dir_all(bt2.join(n)).unwrap(); fs::write(bt2.join(n).join("f"), vec![0u8; mb << 20]).unwrap(); if !when.is_empty() { age(&bt2.join(n), when) } }
+    let bt2 = d.join("bptmp2"); for (n, mb, when) in [("old1", 2usize, "5 days ago"), ("old2", 2, "3 days ago"), ("fresh", 1, ""), ("noted", 0, "6 days ago")] { fs::create_dir_all(bt2.join(n)).unwrap(); fs::write(bt2.join(n).join("f"), vec![0u8; mb << 20]).unwrap(); if !when.is_empty() { age(&bt2.join(n), when) } }
     let p2 = |extra: &[(&str, &str)]| { let mut v: Vec<(&str, String)> = vec![("BP_TMP", bt2.to_string_lossy().to_string()), ("GC_TMP_BASES", bt2.to_string_lossy().to_string()), ("GC_PAUSE", d.join("pause").to_string_lossy().to_string()), ("GC_TMP_CAP", "4M".into())]; for (k, x) in extra { v.push((*k, x.to_string())) } run_with(true, &v) };
+    // a work_run of the last day names it (KiCad lead, Nov 17: a GUI test waiting on a window writes nothing for many minutes and may hold nothing open there)
+    let note = d.join("work/w-t1-1-1"); fs::create_dir_all(&note).unwrap(); fs::write(note.join("cmd"), format!("cd {} && ./gui-test.sh\n", bt2.join("noted").display())).unwrap();
     let capped = p2(&[]);
     assert!(!bt2.join("old1").exists() && bt2.join("old2").exists() && bt2.join("fresh").exists() && capped.contains("over its cap"), "over the cap the oldest unused goes, and only until it is under (even paused):\n{capped}");
     let low = p2(&[("GC_TMP_CAP", "1T"), ("GC_LOW_GB", "999999")]);
-    assert!(!bt2.join("old2").exists() && bt2.join("fresh").exists() && low.contains("nothing more it may remove"), "under the free-space floor the unused go, a fresh one stays, and it says so:\n{low}");
+    assert!(!bt2.join("old2").exists() && bt2.join("fresh").exists() && bt2.join("noted").exists() && low.contains("nothing more it may remove"), "under the free-space floor the unused go, a fresh one and one a work note names stay, and it says so:\n{low}");
     let left: Vec<String> = fs::read_dir(&scc).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
     assert!(left.len() <= 3 && left.iter().any(|n| n == "o5") && !left.iter().any(|n| n == "o0"), "sccache trimmed to its cap, oldest first: {left:?}\n{out}");
     assert!(out.contains("janitor: freed") && out.contains("aot-build") && paused.contains("landed"), "it says what it freed (the landed worktree went in the paused run: a pause stops only the tmp sweeps):\n{paused}\n{out}");

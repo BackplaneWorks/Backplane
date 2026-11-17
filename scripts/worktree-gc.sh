@@ -46,7 +46,10 @@ note() { local k; k=$(kb "$2"); k=${k:-0}; FREED=$((FREED + k)); say "$(printf '
 wipe() { [ "$APPLY" = 1 ] || return 0; if [ -L "$1" ] || [ ! -d "$1" ]; then rm -f -- "$1"; else chmod -R u+rwX -- "$1" 2>/dev/null; rm -rf --one-file-system -- "$1"; fi; }
 
 # What processes hold: cwd, executable, open files (what lsof lists), and the dirs their TMPDIR / CARGO_TARGET_DIR name. Read once.
-HELD=$(mktemp); ENVS=$(mktemp); trap 'rm -f "$HELD" "$ENVS"' EXIT
+HELD=$(mktemp); ENVS=$(mktemp); NOTED=$(mktemp); trap 'rm -f "$HELD" "$ENVS" "$NOTED"' EXIT
+# the hub's work notes (noted, below): GC_WORK_NOTES (dirs; tests), else the hub home its jobs are given, and every Backplane home of this user
+if [ -n "${GC_WORK_NOTES+x}" ]; then WN=$GC_WORK_NOTES; else WN="${BACKPLANE_LOCK_HOME:+$BACKPLANE_LOCK_HOME/work} ${BACKPLANE_HOME:+$BACKPLANE_HOME/work} $(ls -d "$HOME"/.backplane*/home/work "$HOME"/.backplane/work 2>/dev/null | tr '\n' ' ')"; fi
+for w in $WN; do [ -d "$w" ] && find "$w" -mindepth 2 -maxdepth 2 -name cmd -mmin -$(( ${GC_WORK_HOURS:-24} * 60 )) -exec cat {} + 2>/dev/null; done > "$NOTED"
 for e in /proc/[0-9]*/environ; do tr '\0' '\n' < "$e" 2>/dev/null | grep -aE '^(TMPDIR|CARGO_TARGET_DIR)='; done 2>/dev/null | sort -u > "$ENVS"
 { find /proc/[0-9]*/cwd /proc/[0-9]*/exe -maxdepth 0 -printf '%l\n'; find /proc/[0-9]*/fd -mindepth 1 -maxdepth 1 -printf '%l\n'; sed 's/^[A-Z_]*=//' "$ENVS"; } 2>/dev/null \
   | sed 's/ (deleted)$//' | grep '^/' | sort -u > "$HELD"
@@ -62,7 +65,14 @@ live() { local q=$1; kept "$q" && return 1
   grep -qsaE "^(TMPDIR|CARGO_TARGET_DIR)=$qre(/|$)" <(for e in /proc/[0-9]*/environ; do tr '\0' '\n' < "$e"; done 2>/dev/null) && return 1
   # a process naming it in its command line: an ssh master's ControlPath socket is no open file (Nov 17, bp-kembed-remote-*/cm of a running remote suite)
   grep -qsaE "(^|[=:[:space:]])$qre(/|[[:space:]]|$)" <(for c in /proc/[0-9]*/cmdline; do tr '\0' '\n' < "$c"; done 2>/dev/null) && return 1
+  noted "$q" && return 1
   return 0; }
+# noted PATH: a work_run note of the last GC_WORK_HOURS (24: background work runs 2 h at most) names it, as written ($HOME, ~) or through bp-tmp's link to the
+# data drive. A job can sit for many minutes writing nothing and with nothing open there (a GUI test waiting on a window: KiCad lead, Nov 17). The hub's work
+# notes are <home>/work/<id>/cmd; a lock a work_run holds carries that job's command, and a lock held by a shell (bp-lock.sh) is its process, checked above.
+noted() { local q=$1 a r; set -- "$q"; case "$q" in "$HOME"/*) set -- "$@" "~${q#"$HOME"}" "\$HOME${q#"$HOME"}" "\${HOME}${q#"$HOME"}";; esac
+  if [ -n "$LEGACY_TMP" ]; then case "$q" in "$LEGACY_TMP"/*) r=$BP_TMP/${q#"$LEGACY_TMP"/}; set -- "$@" "$r"; case "$r" in "$HOME"/*) set -- "$@" "~${r#"$HOME"}" "\$HOME${r#"$HOME"}" "\${HOME}${r#"$HOME"}";; esac;; esac; fi
+  for a in "$@"; do grep -qsF -- "$a" "$NOTED" && return 0; done; return 1; }
 held() { awk -v q="$1" 'BEGIN{p = q "/"} $0 == q || index($0, p) == 1 {f = 1; exit} END{exit !f}' "$HELD"; }
 # recent PATH MINUTES: something under it was written or made (ctime: a copy that kept old mtimes counts) in the last MINUTES; target/ dirs only count for themselves
 CT=1; [ "${GC_CTIME:-1}" = 0 ] && CT=0
