@@ -8,6 +8,10 @@ The real CLI gets the hub's argv unchanged but for --model/--effort (fixed, so e
 import json, os, subprocess, sys, threading, time
 
 a = sys.argv[1:]
+standin_only = bool(os.environ.get("KIPC_BENCH_STANDIN_ONLY"))
+if standin_only and "--version" in a:
+    print("2.0.0 (pool stand-in)")
+    sys.exit(0)
 out = os.environ.get("KIPC_BENCH_OUT", "/tmp"); name = os.path.basename(os.getcwd())
 say = lambda o: (sys.stdout.write(json.dumps(o) + "\n"), sys.stdout.flush())
 first = sys.stdin.readline()
@@ -36,6 +40,11 @@ if text.startswith("HOLD ") or text.startswith("ORACLE "):
         r = subprocess.run([sys.executable, arg, url, os.getcwd()], capture_output=True, text=True)
         open(os.path.join(out, name + ".oracle.log"), "w").write(r.stdout + r.stderr)
         done("oracle exit %d" % r.returncode)
+    sys.exit(0)
+
+if standin_only:
+    # Background probes (icons, model discovery) must never reach a real provider in functional tests.
+    done("")
     sys.exit(0)
 
 def setarg(k, v):

@@ -89,6 +89,14 @@ All in `native/host/src/kicad/`:
     writes the actor's state to `hub.log`: servers, requests out, requests waiting.
   The servers' state is the info key `kicad.ipc.servers` (`project|state|why`, one line each); Settings
   shows it under the KiCad IPC row, and a `failed` server is a notice with Retry (`kicad.retry`).
+  `test/kipc_bench/pool_e2e.py WORK HUB_BIN RUNTIME BOARD_DIR [PORT]` exercises these rules on a real
+  hub with held stand-in turns and headless KiCads, using staged copies of the board. Source
+  `scripts/lib-bptmp.sh` first and put `WORK` under `$BP_TMP`. It checks contention, the busy deadline,
+  crash recovery, requests during shutdown, one process per project, and idle retirement. Its
+  `BACKPLANE_KICAD_POOL_TEST` knob shortens the intervals and sets room for the contention cases;
+  production defaults are unchanged. The transport is in process, so killing a separate helper is
+  inapplicable; unit tests cover transport restart. Busy work uses back-to-back track reads, since
+  headless IPC requests are bounded to 30 seconds.
 - `kipc.rs` over `nng.rs` and `proto.rs`: the transport, in process. Pure-Rust nng and protobuf (the schema
   from the runtime's descriptor set; without one only `Ping` and `GetVersion` work). One task per socket
   owns its connection; a fresh socket in the project's private directory counts as readiness, including
