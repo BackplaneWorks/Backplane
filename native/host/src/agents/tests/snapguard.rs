@@ -151,3 +151,15 @@ async fn turn(hub: &Arc<Hub>, text: &str) -> Vec<Value> {
     let why = call.await.unwrap().unwrap_err(); assert!(why.contains("declined") && why.contains("nothing was deleted"), "{why}");
     ag.shutdown();
 }
+
+/// An Install Git ask a git-less turn opened closes at the next turn once git runs (installed from setup meanwhile): the thread is no
+/// longer "Needs you" for it (bp-win, Nov 17: it stayed open after Git was installed and the next turn had run).
+#[tokio::test(flavor = "multi_thread")] async fn an_install_git_ask_closes_once_git_runs() {
+    let bin = dir("sg5-bin"); script(&bin, "claude", DOER);
+    let (hub, ag, _home, _work) = start("sg-gitask", |w| { std::fs::write(w.join("a.txt"), "one\n").unwrap(); base_log(w, 1, "") }, |_| Cli::standin(&bin)).await;
+    hub.commit(&json!({"$":"AskOpened","id":"qgit1","thread":T1,"kind":"input","tool":crate::agents::snapguard::GIT_TOOL,"detail":crate::agents::snapguard::GIT_MISSING,"options":"Install Git\nNot now","at":1700000100})).await.unwrap();
+    let ev = turn(&hub, "hello").await;
+    assert!(ev.iter().any(|e| is(e, "AskClosed") && e["id"] == "qgit1"), "the ask closed: {ev:?}");
+    assert!(ev.iter().any(|e| turn_is(e, "completed")), "the turn ran: {ev:?}");
+    ag.shutdown();
+}

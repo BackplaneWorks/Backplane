@@ -85,6 +85,7 @@ impl Agents {
     pub async fn turn_guard_start(self: &Arc<Self>, th: &str, cwd: &str, text: Option<&str>) -> Result<(), String> {
         if crate::copy::on() || cwd.is_empty() { return Ok(()) }
         if !git_runs().await { self.git_missing(th).await; return Err(GIT_MISSING.into()) }
+        self.close_git_asks(th).await; // installed meanwhile (setup, or this ask's own press): the ask is done
         self.guard_begin(th, cwd, text, true).await; Ok(())
     }
     /// `turn_guard_start`; `new_turn` false for a guard taken late, at a write of a turn that has none (an earlier turn's restore ask stays open).
@@ -217,6 +218,11 @@ impl Agents {
         let now = now_s(); let id = hub_id("q", now, self.seq_n());
         let pend = self.pending_ev(th, 1, "", now).await;
         self.commit_events(vec![json!({"$":"AskOpened","id":id,"thread":th,"kind":"input","tool":GIT_TOOL,"detail":format!("{GIT_MISSING} {}", crate::present::onboard::GIT_WHY),"options":format!("{GIT_YES}\nNot now"),"at":now}), pend]).await;
+    }
+    /// Git runs now: this thread's open Install Git ask closes (else it stays "Needs you", and its phone alert open, after Git is installed).
+    async fn close_git_asks(&self, th: &str) {
+        let open: Vec<String> = { let w = self.world().await; w.asks.iter().filter(|(_, a)| a.thread == th && a.tool == GIT_TOOL).map(|(i, _)| i.clone()).collect() };
+        for id in open { let now = now_s(); let pend = self.pending_ev(th, 0, &id, now).await; self.commit_events(vec![json!({"$":"AskClosed","id":id,"answer":"Git is installed","at":now}), pend]).await }
     }
     /// The person answered the Install Git ask.
     pub async fn git_answer(self: &Arc<Self>, ask: &str, th: &str, answer: &str) -> Result<(), String> {
