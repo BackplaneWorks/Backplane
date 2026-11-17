@@ -189,6 +189,62 @@ pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<Strin
     }
 }
 
+/// macOS: how long KiCad's frame may stay behind our window, counted from the first check that found it there (through every re-order
+/// that did not hold), before the pane says so and offers Pop out; and how long it must then stay above to count as back.
+pub const KICAD_RAISE_BOUND: std::time::Duration = std::time::Duration::from_secs(2);
+pub const KICAD_RAISE_HELD: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// macOS: what the checks of the real window order have seen since the frame was last known above for good: how many found it behind
+/// (each one re-orders), since when, and since when it has been above again.
+#[derive(Debug, Default, PartialEq)] pub struct RaiseState { pub tries: u32, pub since: Option<std::time::Instant>, pub above_since: Option<std::time::Instant> }
+/// One check of the real window order (pure, for the tests). `Above`: all is well. `Idle`: the frame is not on screen (hidden by KiCad
+/// or by us), nothing to order. `Retry(n)`: on screen and not above ours, the n-th time: order again; past KICAD_RAISE_BOUND since the
+/// first, `buried` (the pane says so, and the tries go on). `Holding`: above again after a retry, watched until it has stayed there for
+/// KICAD_RAISE_HELD: an order that is undone a moment later (by the other side's own ordering) is the same failure, under the same
+/// bound, not a new one each time. `Verified(n)`: it stayed, after n tries.
+#[derive(Debug, PartialEq)] pub enum RaiseStep { Above, Idle, Retry(u32), Holding, Verified(u32) }
+pub fn raise_step(above: bool, on_screen: bool, st: &mut RaiseState, buried: &mut bool, now: std::time::Instant) -> RaiseStep {
+    if !above && !on_screen { *st = RaiseState::default(); *buried = false; return RaiseStep::Idle }
+    if above {
+        if st.tries == 0 { *buried = false; return RaiseStep::Above }
+        let held = *st.above_since.get_or_insert(now);
+        if now.duration_since(held) < KICAD_RAISE_HELD { return RaiseStep::Holding }
+        let n = st.tries; *st = RaiseState::default(); *buried = false;
+        return RaiseStep::Verified(n)
+    }
+    st.above_since = None;
+    let since = *st.since.get_or_insert(now); st.tries += 1;
+    if now.duration_since(since) >= KICAD_RAISE_BOUND { *buried = true; }
+    RaiseStep::Retry(st.tries)
+}
+/// macOS: whose a normal on-screen window is, for the order rule: this pane's own window is `Ours`, the frame on show `Frame`, KiCad's
+/// other windows (its dialogs) `Kicad`, our app's other windows `OurOther`, anyone else's `Other`.
+#[derive(Debug, Clone, Copy, PartialEq)] pub enum Who { Ours, Frame, Kicad, OurOther, Other }
+/// macOS: what may be done about the order, from the window server's list front to back (pure, for the tests). THE RULE: the client
+/// orders one window only, its own, and only past its own and its KiCad's windows. It never orders, raises or lowers a window that is
+/// not its own, and never moves its own window over or under another app's: with another app's window between ours and the frame (in
+/// either direction) the only one who may act is KiCad, on its own frame (`AskKicad`: it puts the frame just above ours).
+/// `Above`: the frame is above ours with nothing but KiCad's own windows between. `Idle`: the frame or our window is not on screen.
+/// `OursBelow`: the frame is behind ours with only our own and KiCad's windows between: ours goes just below the frame.
+#[derive(Debug, PartialEq)] pub enum OrderPlan { Above, Idle, OursBelow, AskKicad }
+pub fn order_plan(stack: &[Who]) -> OrderPlan {
+    let (Some(u), Some(f)) = (stack.iter().position(|w| *w == Who::Ours), stack.iter().position(|w| *w == Who::Frame)) else { return OrderPlan::Idle };
+    let between = &stack[u.min(f) + 1..u.max(f)];
+    if between.iter().any(|w| *w == Who::Other) { return OrderPlan::AskKicad }
+    if f < u { if between.iter().all(|w| *w == Who::Kicad) { OrderPlan::Above } else { OrderPlan::AskKicad } } else { OrderPlan::OursBelow }
+}
+/// macOS: whether a re-order of ours also asks KiCad to order its frame above our window (`raise` in editor.kicad.host). KiCad's own
+/// order only counts while KiCad is the active app: an inactive app's window is not let in front of the active app's key window, and a
+/// frame ordered "above" ours then lands behind it, after our own order had already put it right. So: while KiCad is active, both (as
+/// before); otherwise ours alone, and KiCad's too on every fourth try in case ours is the one that does not take.
+/// BACKPLANE_KICAD_MAC_RAISE=always|never fixes it either way (the gate's A/B).
+pub fn raise_also_kicad(policy: &str, kicad_active: bool, tries: u32) -> bool {
+    match policy { "always" => true, "never" => false, _ => kicad_active || (tries > 0 && tries % 4 == 0) }
+}
+/// macOS: the next check of the real order, in ms: quick while an order of ours is unproven or something just changed, once a second
+/// while the pane says the editor is behind, otherwise a steady look (another process orders its windows without telling us).
+pub fn raise_watch_ms(tries: u32, buried: bool, hot: bool) -> u64 { if buried { 1000 } else if tries > 0 || hot { 33 } else { 250 } }
+
 /// From this many seconds a start the pane is waiting on says what KiCad is doing and for how long.
 pub const STARTING_SAY: u64 = 10;
 
@@ -276,6 +332,13 @@ pub struct KicadPane {
     pub host_sent: Option<(i32, i32, i32, i32, bool)>,
     /// macOS: our window is in full screen, where KiCad's frame cannot be: the pane offers Pop out instead (a window of its own)
     mac_full: bool,
+    /// macOS: KiCad's frame is not above our window by the window server's own list though we ordered ours below it (the Mac mini gate,
+    /// Nov 16: a 1900 pt window on a 1920 pt display, the pane blank with the frame behind ours): the tries, since when, and whether the
+    /// bound passed, when the pane says so and offers Pop out rather than staying blank
+    mac_raise: RaiseState, mac_buried: bool, mac_watching: bool,
+    /// macOS: until when the watch looks every frame's time (a push, a re-order, an activation or a press of ours just happened), and
+    /// what was last seen, to tell a change (our window key, the frame on show)
+    mac_hot: Option<std::time::Instant>, mac_seen: (bool, Option<u64>), mac_pressed: bool, mac_looked: Option<std::time::Instant>,
     /// the .kicad_pro the hub resolved this pane's project to (its attach reply), "" until then
     pub bound: String,
     pub project: String, pub root: String, pub project_id: String, pub open: String, last_hub_open: String, hub: tokio::sync::mpsc::Sender<Command>,
@@ -413,7 +476,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_full: false, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
+        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_full: false, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
@@ -957,6 +1020,15 @@ impl KicadPane {
         // macOS: a move or resize of our window, or its activation, redraws nothing by itself; KiCad's frame must follow (after_frame)
         #[cfg(target_os = "macos")]
         { cx.observe_window_bounds(window, |_, _, cx| cx.notify()).detach(); cx.observe_window_activation(window, |_, _, cx| cx.notify()).detach(); }
+        // macOS: and the order of the two windows is watched between our frames (mac_watch): for as long as this pane lives
+        #[cfg(target_os = "macos")]
+        if !self.mac_watching {
+            self.mac_watching = true;
+            cx.spawn(async move |v, cx| loop {
+                let Ok(ms) = v.update(cx, |this: &mut Self, cx| this.mac_watch(cx)) else { break };
+                cx.background_executor().timer(std::time::Duration::from_millis(ms)).await;
+            }).detach();
+        }
         let display = std::env::var("DISPLAY").unwrap_or_default();
         let kind = frame_for(&self.open);
         self.pending_show = Some(kind.to_string());
@@ -1078,7 +1150,7 @@ impl KicadPane {
         self.placed = Some(key);
     }
     /// macOS: KiCad's frame follows the pane by itself once it knows where the pane is on screen and whether our window can be seen
-    /// (native_child_mac.rs); pushed when either changes, and our window ordered back below the frame after a click or an activation.
+    /// (native_child_mac.rs); pushed when either changes. The order (KiCad's frame above our window) is `mac_order`'s.
     #[cfg(target_os = "macos")]
     fn mac_host(&mut self, at: Option<nc::R>, show: Option<u64>) -> bool {
         let full = nc::host_full_screen(self.toplevel);
@@ -1089,15 +1161,85 @@ impl KicadPane {
         // the last rect: leaving the pane goes through detach, and an unseen window through host_visible (run 5: hidden for good here)
         let rect = at.and_then(|r| nc::screen_rect(self.toplevel, r)).or_else(|| self.host_sent.map(|(x, y, w, h, _)| (x, y, w, h)));
         let now = rect.map(|(x, y, w, h)| (x, y, w, h, visible));
-        let raised = visible && show.is_some_and(|f| nc::keep_below(self.toplevel, f));
-        if now.is_some() && (now != self.host_sent || raised) {
+        if now.is_some() && now != self.host_sent {
             if let Some((x, y, w, h, v)) = now {
-                eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [x, y, w, h], "visible": v, "raise": raised, "changed": now != self.host_sent, "pane_px": at.map(|r| [r.x, r.y, r.w, r.h]), "frame": show}));
-                self.rpc("editor.kicad.host", json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": v, "raise": raised}));
+                eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [x, y, w, h], "visible": v, "raise": false, "changed": true, "pane_px": at.map(|r| [r.x, r.y, r.w, r.h]), "frame": show}));
+                self.rpc("editor.kicad.host", json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": v, "raise": false}));
             }
             self.host_sent = now;
+            // KiCad places (and may order) its frame when this arrives, some ms from now: watched
+            self.mac_heat();
         }
-        redraw
+        let said = self.mac_order(show, visible, "frame"); // i18n-ok: a log word
+        redraw || said
+    }
+    /// macOS: the watch looks every frame's time for the next while (something that can change the order just happened).
+    #[cfg(target_os = "macos")]
+    fn mac_heat(&mut self) { self.mac_hot = Some(std::time::Instant::now() + std::time::Duration::from_millis(1500)); }
+    /// macOS: KiCad's frame must be above our window, by the window server's own list (never by what we last asked for, and never
+    /// only when gpui happens to draw: `mac_watch` calls this on a timer too). Found behind, our window is ordered just below it again
+    /// (ours to do whoever is active), KiCad is asked to order its own when that can help (`raise_also_kicad`), and it is checked
+    /// again a frame later; an order that does not hold within KICAD_RAISE_BOUND is said in the pane, with Pop out, and tried on
+    /// once a second. Each try is logged with the stacking before and after it. True when what the pane says changed (draw again).
+    /// (The Mac mini gate, Nov 16: a 1900 pt window, the pane blank with the frame behind ours: our own list had shown the frame
+    /// above after two orders, nothing was drawn after that, and the frame was behind a moment later.)
+    #[cfg(target_os = "macos")]
+    fn mac_order(&mut self, show: Option<u64>, visible: bool, by: &'static str) -> bool {
+        let was = self.mac_buried;
+        // our window became key or stopped being it, or another frame is on show: orders follow from both sides
+        let seen = (nc::host_key(self.toplevel), show);
+        if seen != self.mac_seen { self.mac_seen = seen; self.mac_heat(); }
+        let (true, Some(f)) = (visible, show) else { self.mac_raise = RaiseState::default(); self.mac_buried = false; return was };
+        let plan = order_plan(&nc::stack(self.toplevel, f));
+        match raise_step(plan == OrderPlan::Above, plan != OrderPlan::Idle, &mut self.mac_raise, &mut self.mac_buried, std::time::Instant::now()) {
+            RaiseStep::Retry(n) => {
+                let before = nc::stacking(self.toplevel, f);
+                // THE RULE (order_plan): ours goes below the frame only past our own and KiCad's windows; with another app's window
+                // between, nothing of ours moves, and KiCad is asked to bring its own frame to just above ours
+                let sunk = plan == OrderPlan::AskKicad;
+                let ordered = plan == OrderPlan::OursBelow && nc::order_below(self.toplevel, f);
+                let kicad_active = nc::has_focus(0);
+                let also = sunk || raise_also_kicad(&std::env::var("BACKPLANE_KICAD_MAC_RAISE").unwrap_or_default(), kicad_active, n);
+                if let (true, Some((x, y, w, h, v))) = (also, self.host_sent) {
+                    self.rpc("editor.kicad.host", json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": v, "raise": true}));
+                }
+                let said = self.mac_buried && !was;
+                if n <= 8 || n % 30 == 0 || said {
+                    eprintln!("GPUI_LOG {}", json!({"kicad_mac_order": {"try": n, "by": by, "ms": self.mac_raise.since.map_or(0, |t| t.elapsed().as_millis() as u64), "top": self.toplevel, "frame": f,
+                        "ordered": ordered, "others_between": sunk, "key": seen.0, "kicad_active": kicad_active, "raise_kicad": also, "before": before, "after": nc::stacking(self.toplevel, f), "at_ms": crate::screens::kcomment::epoch_ms() as u64}}));
+                }
+                if said { eprintln!("GPUI_LOG {}", json!({"kicad_mac_buried": {"tries": n, "top": self.toplevel, "frame": f, "stack": nc::stacking(self.toplevel, f)}})); }
+                self.mac_heat();
+            }
+            RaiseStep::Verified(n) => eprintln!("GPUI_LOG {}", json!({"kicad_mac_order_verified": {"tries": n, "by": by, "was_said": was, "stack": nc::stacking(self.toplevel, f), "at_ms": crate::screens::kcomment::epoch_ms() as u64}})),
+            RaiseStep::Above | RaiseStep::Holding | RaiseStep::Idle => {}
+        }
+        was != self.mac_buried
+    }
+    /// macOS: the watch's own look at the order, between gpui's frames (KiCad orders its windows when it handles a push, takes or loses
+    /// the keyboard or shows a frame: none of it draws a frame of ours). Answers when to look again, in ms.
+    #[cfg(target_os = "macos")]
+    fn mac_watch(&mut self, cx: &mut Context<Self>) -> u64 {
+        // BACKPLANE_KICAD_MAC_WATCH=off (the e2e's A/B only): no look between our frames, as before Nov 16
+        if std::env::var("BACKPLANE_KICAD_MAC_WATCH").is_ok_and(|v| v == "off") { return 1000 }
+        // a press brings our window in front of the frame, and one on the title bar or an edge draws no frame of ours (the gate's blank
+        // pane: a press on the resize corner of a window that could not grow): the button going down is seen here within a frame's time
+        let pressed = nc::mouse_down();
+        if pressed != self.mac_pressed { self.mac_pressed = pressed; self.mac_heat(); }
+        let hot = self.mac_hot.is_some_and(|t| t > std::time::Instant::now());
+        // the list itself is read at raise_watch_ms' pace; between its looks only the button is
+        let due = raise_watch_ms(self.mac_raise.tries, self.mac_buried, hot);
+        if self.mac_looked.is_some_and(|t| (t.elapsed().as_millis() as u64) + 5 < due) { return 33 }
+        self.mac_looked = Some(std::time::Instant::now());
+        // only a pane with its editor placed over it (not back in View, not before the first push)
+        if let (Some(_), Some((.., sent_visible))) = (self.container, self.host_sent) {
+            let show = self.want();
+            let visible = show.is_some() && nc::host_visible(self.toplevel);
+            // our window hidden or back (minimised, another Space) with no frame of ours drawn: the next frame pushes it
+            if visible != sent_visible { cx.notify(); }
+            else if self.mac_order(show, visible, "watch") { cx.notify(); } // i18n-ok: a log word
+        }
+        33
     }
     /// Back to the viewer: the editor's windows leave the pane (KiCad stays warm in the hub).
     pub fn detach(&mut self) {
@@ -1166,13 +1308,19 @@ impl Render for KicadPane {
         let failed = self.failed(); let app = app_instead(&self.seen_info(), cfg!(windows)); let again = open_again(&self.seen_info()); let asked = lock_asked(&self.info);
         // macOS: in full screen KiCad's frame cannot be over the pane; it says so and offers the editor in a window of its own
         let say = if self.mac_full && self.info["state"] == "ready" { Some(crate::i18n::trs("KiCad cannot be shown here while Backplane is full screen on macOS. Pop it out into a window of its own, or leave full screen.")) } else { say };
-        let full = self.mac_full && self.info["state"] == "ready";
+        // macOS: KiCad's frame stays behind our window though we ordered it above (mac_host's bound): said, with Pop out, never a blank pane
+        let buried = self.mac_buried && !self.mac_full && self.info["state"] == "ready";
+        let say = if buried { Some(crate::i18n::t("gpui.c.kicad.mac.buried")) } else { say };
+        let full = (self.mac_full || self.mac_buried) && self.info["state"] == "ready";
         let marker = self.marker.clone(); let focus = self.focus.clone();
         let keys = self.keys;
         // its rect as `kicad:pane` (an e2e judges KiCad's frame against the pane as it is drawn now: a panel, Full size, Full screen change it)
         crate::ui::with_rect(div().id("kicad-pane"), || "kicad:pane".to_string()).size_full().relative().when(!handoff, |d| d.bg(rgb(0x001023))).track_focus(&focus)
             .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                 this.took = None;
+                // macOS: a press on our window brings it in front of KiCad's frame: ordered back at once and watched (mac_order)
+                #[cfg(target_os = "macos")]
+                { this.mac_heat(); cx.notify(); }
                 if this.keys {
                     nc::focus(this.toplevel);
                     this.keys = false;
@@ -1214,6 +1362,98 @@ impl Render for KicadPane {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_frame_left_behind_our_window_is_tried_again_then_said_with_pop_out() {
+        use super::{raise_step, RaiseStep, RaiseState, KICAD_RAISE_BOUND, KICAD_RAISE_HELD};
+        let ms = std::time::Duration::from_millis;
+        let t0 = std::time::Instant::now(); let (mut st, mut buried) = (RaiseState::default(), false);
+        // above and never behind: nothing to do
+        assert_eq!(raise_step(true, true, &mut st, &mut buried, t0), RaiseStep::Above);
+        // behind: a try each check, not yet said
+        assert_eq!(raise_step(false, true, &mut st, &mut buried, t0), RaiseStep::Retry(1));
+        assert_eq!(raise_step(false, true, &mut st, &mut buried, t0 + ms(33)), RaiseStep::Retry(2));
+        assert!(!buried);
+        // still behind past the bound: said (the pane offers Pop out), and still tried
+        assert_eq!(raise_step(false, true, &mut st, &mut buried, t0 + KICAD_RAISE_BOUND), RaiseStep::Retry(3));
+        assert!(buried);
+        // above at last: watched until it has stayed there, then the tries reset and the pane shows the editor again
+        let t1 = t0 + KICAD_RAISE_BOUND * 2;
+        assert_eq!(raise_step(true, true, &mut st, &mut buried, t1), RaiseStep::Holding);
+        assert_eq!(raise_step(true, true, &mut st, &mut buried, t1 + KICAD_RAISE_HELD), RaiseStep::Verified(3));
+        assert!(!buried && st == RaiseState::default());
+        // a frame not on screen (hidden by KiCad or by us): nothing to order, nothing said
+        assert_eq!(raise_step(false, false, &mut st, &mut buried, t0), RaiseStep::Idle);
+        assert!(!buried && st.tries == 0);
+        // the words: the editor behind ours, and Pop out, never a blank pane
+        let w = crate::i18n::t("gpui.c.kicad.mac.buried");
+        assert!(w.contains("behind") && w.contains("Pop it out"), "{w}");
+    }
+    /// The gate's failure: our order takes (the next check reads "above"), then the other side's own order undoes it a moment later,
+    /// again and again. One failure under one bound, not a fresh first try each time.
+    #[test] fn an_order_undone_a_moment_later_is_the_same_failure_under_the_same_bound() {
+        use super::{raise_step, RaiseStep, RaiseState, KICAD_RAISE_BOUND};
+        let ms = std::time::Duration::from_millis;
+        let t0 = std::time::Instant::now(); let (mut st, mut buried) = (RaiseState::default(), false);
+        let mut t = t0; let mut n = 0;
+        while t < t0 + KICAD_RAISE_BOUND {
+            n += 1;
+            assert_eq!(raise_step(false, true, &mut st, &mut buried, t), RaiseStep::Retry(n));
+            assert_eq!(raise_step(true, true, &mut st, &mut buried, t + ms(33)), RaiseStep::Holding);
+            assert!(!buried);
+            t += ms(66);
+        }
+        assert_eq!(raise_step(false, true, &mut st, &mut buried, t), RaiseStep::Retry(n + 1));
+        assert!(buried, "flapping past the bound is said");
+    }
+    /// THE RULE: the client orders its own window only, and never over or under another app's.
+    #[test] fn the_client_orders_only_its_own_window_and_never_past_another_apps() {
+        use super::{order_plan, OrderPlan::*, Who::*};
+        // the frame above ours, KiCad's dialogs over it or between: well
+        assert_eq!(order_plan(&[Frame, Ours]), Above);
+        assert_eq!(order_plan(&[Kicad, Frame, Kicad, Ours, Other]), Above);
+        // behind ours (a press brought ours up), nothing or only our own and KiCad's windows between: ours goes below the frame
+        assert_eq!(order_plan(&[Ours, Frame]), OursBelow);
+        assert_eq!(order_plan(&[Other, Ours, OurOther, Kicad, Frame, Other]), OursBelow);
+        // another app's window between ours and the frame: ours would sink under it. Never: KiCad's to bring its frame up
+        assert_eq!(order_plan(&[Ours, Other, Frame]), AskKicad);
+        assert_eq!(order_plan(&[Ours, Kicad, Other, OurOther, Frame]), AskKicad);
+        // the frame above another app's window that is above ours: ours would jump over that window. Never: KiCad's to bring it down
+        assert_eq!(order_plan(&[Frame, Other, Ours]), AskKicad);
+        // one of our own other windows between the frame and ours: not ours to reorder under it by moving the main window; KiCad's
+        assert_eq!(order_plan(&[Frame, OurOther, Ours]), AskKicad);
+        // the frame or our window not on screen: nothing
+        assert_eq!(order_plan(&[Ours, Other]), Idle);
+        assert_eq!(order_plan(&[Other, Frame]), Idle);
+        assert_eq!(order_plan(&[]), Idle);
+        // every arrangement of five windows: ours is moved only when no other app's window lies between it and the frame, so the
+        // move (to just below the frame) crosses none
+        let all = [Ours, Frame, Kicad, OurOther, Other];
+        for a in 0..5 { for b in 0..5 { for c in 0..5 { for d in 0..5 { for e in 0..5 {
+            let st = [all[a], all[b], all[c], all[d], all[e]];
+            if st.iter().filter(|w| **w == Ours).count() != 1 || st.iter().filter(|w| **w == Frame).count() != 1 { continue }
+            let (u, f) = (st.iter().position(|w| *w == Ours).unwrap(), st.iter().position(|w| *w == Frame).unwrap());
+            if order_plan(&st) == OursBelow { assert!(u < f && !st[u + 1..f].contains(&Other), "{st:?}"); }
+        } } } } }
+    }
+    /// The only window the macOS module ever orders is our own: one call site, on our own NSWindow, below the frame.
+    #[test] fn the_macos_module_orders_no_window_but_ours() {
+        let src = include_str!("native_child_mac.rs");
+        let code: Vec<&str> = src.lines().filter(|l| !l.trim_start().starts_with("//")).collect();
+        let orders: Vec<&&str> = code.iter().filter(|l| l.contains("orderWindow:") || l.contains("orderFront") || l.contains("orderBack") || l.contains("orderOut") || l.contains("setLevel")).collect();
+        assert_eq!(orders.len(), 1, "{orders:?}");
+        assert!(orders[0].contains("ns_window(top)") && orders[0].contains("NSWindowBelow"), "{orders:?}");
+        // and it reaches a window only through our own app's table (windowWithWindowNumber: answers nil for anyone else's)
+        assert!(src.contains(r#"fn ns_window(n: u64) -> *mut c_void { unsafe { send_isize_arg(app(), c"windowWithWindowNumber:", n as isize) } }"#));
+    }
+    #[test] fn kicad_is_asked_to_order_its_frame_only_when_that_can_help() {
+        use super::{raise_also_kicad, raise_watch_ms};
+        // KiCad active: both sides order (as before). Backplane active: ours alone (KiCad's would land its frame behind our key window),
+        // and KiCad's too on every fourth try in case ours is the one that does not take
+        assert!(raise_also_kicad("", true, 1));
+        assert!(!raise_also_kicad("", false, 1) && !raise_also_kicad("", false, 3) && raise_also_kicad("", false, 4));
+        assert!(raise_also_kicad("always", false, 1) && !raise_also_kicad("never", true, 4));
+        // the watch: quick while unproven or just changed, slow once said, steady otherwise
+        assert_eq!((raise_watch_ms(1, false, false), raise_watch_ms(0, false, true), raise_watch_ms(0, false, false), raise_watch_ms(9, true, true)), (33, 33, 250, 1000));
+    }
     #[test] fn a_start_waiting_on_a_macos_prompt_says_so() {
         let i = |st: &str, reason: &str| json!({"state": st, "reason": reason, "mode": "fork", "frames": [], "dialogs": []});
         let say = super::waiting_on(&i("starting", "mac-permission-prompt"), false, false).unwrap();

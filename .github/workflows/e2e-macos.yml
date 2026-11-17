@@ -24,6 +24,9 @@ on:
       mac_mode:
         description: "kicad-pane job: mac_pane_e2e.py's MAC_MODE (empty: the default rows; bs, narrow, restart, lock, autosave, update, ...)"
         default: ""
+      pane_env:
+        description: "kicad-pane job: extra environment for the run, space separated NAME=value (e.g. FRONT_REPS=3; mac_mode front also writes the 60 Hz window-order trace into the artifact)"
+        default: ""
       bs_probe:
         description: "kicad-pane job with mac_mode bs: BS_PROBE (keys: the edit-keys table; route; order; undo)"
         default: ""
@@ -122,6 +125,8 @@ jobs:
         run: |
           set -o pipefail; mkdir -p out
           python -m pip install --quiet pyobjc-framework-Quartz pyobjc-framework-Cocoa
+          for kv in ${{ inputs.pane_env }}; do export "$kv"; done
+          [ "$MAC_MODE" != front ] || export ZTRACE=1
           python test/kicad_embed/mac_pane_e2e.py "$PWD/native/gpui/target/release/backplane-gpui" "$PWD/native/host/target/release/backplane-hub" "$PWD/assets" "$RT" "$PWD/out/pane" 2>&1 | tee out/pane.txt
       - uses: actions/upload-artifact@v4
         if: always()

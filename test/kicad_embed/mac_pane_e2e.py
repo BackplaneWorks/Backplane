@@ -312,7 +312,7 @@ if os.environ.get('MAC_MODE') == 'update':
 hub = subprocess.Popen([HUB, '--home', os.path.join(OUT, 'home'), '--port', str(port), '--host', '127.0.0.1', '--no-tailscale', '--foreground'],
                        env=env, stdout=open(os.path.join(OUT, 'hub.log'), 'w'), stderr=subprocess.STDOUT); procs.append(hub)
 wait_for(lambda: subprocess.run(['curl', '-s', '-m1', '-o', '/dev/null', f'http://127.0.0.1:{port}/hello']).returncode == 0, 30)
-script = [{"select": 0}, {"wait": 2500}, {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit"}, {"wait": 900000}]
+script = [{"select": 0}, {"wait": 2500}, {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit"}, {"wait": 5400000 if os.environ.get("MAC_MODE") == "front" else 900000}]
 json.dump(script, open(os.path.join(OUT, 'script.json'), 'w'))
 cenv = dict(os.environ, HOME=os.path.join(OUT, 'fh'), BACKPLANE_GPUI_ASSETS=ASSETS, BACKPLANE_GPUI_RECTS='1', BACKPLANE_KICAD_DEBUG='1')
 client = subprocess.Popen([CLIENT, '--url', f'http://127.0.0.1:{port}', '--token-file', os.path.join(OUT, 'home/token'), '--script', os.path.join(OUT, 'script.json'), '--exit-after', '5400' if os.environ.get('MAC_MODE') in ('bs', 'narrow', 'libs', 'front') else '900'],
@@ -1110,6 +1110,155 @@ try:
             r = rects().get('kicad:full')
             if r: click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2)
             time.sleep(2)
+        raise SystemExit(1 if FAILS else 0)
+    # ---- MAC_MODE=front: KiCad's frame is the front-most window over the pane's rect (the gate's blank pane, Nov 16: at a 967 pt pane
+    # in a 1900 pt window the frame sat at the pane's rect but behind Backplane's window). Pane widths 611, 967 and the widest the
+    # display allows, the sidebar folded and open, the board and the schematic; after Edit (View, then Edit), after a click in
+    # Backplane's chrome and one back in the pane, after two presses on Backplane's title bar and none back, after a tab switch and back: FRONT_REPS (10) of each, every one judged by the
+    # window server's list (the helper's, front first) three times over 0.6 s: the first normal window that touches the pane's rect
+    # is KiCad's, at the pane's rect within 2 pt. A width the display cannot give with the sidebar open is said, not failed.
+    if os.environ.get('MAC_MODE') == 'front':
+        REPS = int(os.environ.get('FRONT_REPS', '10'))
+        # the window never past the display's right edge
+        if os.environ.get('FRONT_SCREEN_W'): SCREEN_W = int(os.environ['FRONT_SCREEN_W'])
+        elif DRIVER == 'quartz': SCREEN_W = int(Quartz.CGDisplayPixelsWide(Quartz.CGMainDisplayID()))
+        else: SCREEN_W = 1920
+        WIDEST = min(1900, SCREEN_W - 20)
+        print(f'INFO front: display {SCREEN_W} pt wide, widest window {WIDEST}', flush=True)
+        def alive():
+            if client.poll() is not None: raise SystemExit(f'STOPPED front: the client has exited ({client.returncode}); nothing more is clicked or typed')
+        def ours():
+            # never the window's last known place: a window that is not in the list now is not clicked, sized or typed at (Nov 16: the
+            # lookup was lost and the run's clicks went to the person's own windows)
+            alive()
+            w = next((w for w in wins() if w[0] == cw[0] and w[1] == client.pid), None)
+            if not w: raise SystemExit(f"STOPPED front: Backplane's window {cw[0]} is not on screen; nothing more is clicked or typed")
+            return w[3]
+        def keys_ours(what):
+            # a chord goes to whichever app has the keyboard: only when that is this run's Backplane or KiCad
+            if not (active(client.pid) or active(kpid)): raise SystemExit(f'STOPPED front: {what}: neither Backplane nor KiCad of this run is the active app')
+        def touches(a, b): return a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and a[1] < b[1] + b[3] and b[1] < a[1] + a[3]
+        def front_once():
+            """None when KiCad's frame is the front-most normal window over the pane's rect and at it; else what is wrong, in words."""
+            p = last_push()
+            if not p or not p[1]: return f'the client has not pushed a visible pane ({p})'
+            top = next((w for w in wins() if touches(w[3], p[0])), None)
+            if not top: return 'no window over the pane'
+            who = 'Backplane' if top[1] == client.pid else 'KiCad' if top[1] == kpid else 'another app'
+            if top[1] != kpid: return f"{who}'s window {top[0]} {top[3]} is in front over the pane {p[0]}"
+            if max(abs(a - b) for a, b in zip(top[3], p[0])) > 2: return f"KiCad's window {top[3]} is not at the pane {p[0]}"
+            return None
+        def front():
+            """Judged three times over 0.6 s after the step has settled (an order that holds for one look only is the bug)."""
+            wait_for(lambda: front_once() is None, 3, 0.1)
+            bad = []
+            for _ in range(3):
+                b = front_once()
+                if b: bad.append(b)
+                time.sleep(0.3)
+            return bad
+        def click_rect(i):
+            r = rects().get(i); b = ours()
+            if r: click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2)
+            return bool(r)
+        def rects_now():
+            """The controls of the client's last drawn frame only (rects() keeps every id ever drawn: a control that is gone stays there)."""
+            for l in reversed(client_log().splitlines()):
+                if 'GPUI_METRIC ' in l and '"rects"' in l:
+                    try: return {e['id']: e for e in json.loads(l.split('GPUI_METRIC ', 1)[1]).get('rects', []) or [] if isinstance(e, dict) and 'id' in e}
+                    except Exception: pass
+            return {}
+        def is_folded(): return 'ui:Unfold sidebar' in rects_now()
+        def fold(want):
+            """The sidebar folded or open, by its own control and judged by what is drawn (a narrow window starts with it folded: run
+            44006494316 pressed Cmd+B blind there and opened it, so its "folded" rows were the open ones and the other way round)."""
+            if is_folded() == want: return True
+            click_rect('ui:Fold sidebar' if want else 'ui:Unfold sidebar'); time.sleep(2.0)
+            return is_folded() == want
+        def pane_to(target):
+            """The pane to `target` pt wide by the window's width (None: the widest window the display gives); the width reached."""
+            if target is None:
+                b = ours(); win_size(client.pid, min(WIDEST, SCREEN_W - b[0]), b[3]); time.sleep(2.5); ours()
+                return last_push()[0][2] if last_push() else None
+            slope, prev = 1.0, None
+            for _ in range(8):
+                p = last_push(); b = ours()
+                if not p or abs(p[0][2] - target) <= 3: break
+                if prev and b[2] != prev[0] and p[0][2] != prev[1]: slope = max(0.2, min(2.0, (p[0][2] - prev[1]) / (b[2] - prev[0])))
+                prev = (b[2], p[0][2])
+                win_size(client.pid, max(500, min(WIDEST, SCREEN_W - b[0], round(b[2] + (target - p[0][2]) / slope))), b[3]); time.sleep(2.0); ours()
+            time.sleep(1.0)
+            return last_push()[0][2] if last_push() else None
+        def tab_now(): return 'SCH' if '"to":"SCH"' in ([l for l in client_log().splitlines() if '"kicad_tab"' in l] or [''])[-1] else 'PCB'
+        def to_tab(t):
+            click_rect(f'kicad-tab:{t}'); time.sleep(1.5)
+        STEPS = {}
+        def after_edit():
+            if not click_rect('ui:View'): return 'no View control'
+            wait_for(lambda: rects().get('ui:Edit') and not kicad_frame(), 10, 0.25); time.sleep(0.5)
+            click_rect('ui:Edit'); wait_for(kicad_frame, 20, 0.25)
+        def after_chrome():
+            b = ours(); click(b[0] + b[2] / 2, b[1] + 14); time.sleep(0.7)   # Backplane's title bar: its window comes to the front
+            p = last_push()[0]; click(p[0] + p[2] / 2, p[1] + p[3] / 2); time.sleep(0.3)  # and back into the editor
+        def after_tab(tab):
+            other = 'SCH' if tab == 'PCB' else 'PCB'
+            to_tab(other); to_tab(tab)
+        def after_press():
+            # the gate's blank pane: a press on our window that draws nothing of ours (its title bar, while Backplane already has the
+            # keyboard) brings it in front of the frame; nothing is clicked after it: the client must put the frame back by itself
+            b = ours(); click(b[0] + b[2] / 2, b[1] + 14); time.sleep(0.9); click(b[0] + b[2] / 2 + 6, b[1] + 14); time.sleep(0.5)
+        if os.environ.get('ZTRACE') and DRIVER == 'vnc': helper(f'trace {client.pid} {kpid} {os.path.join(OUT, "ztrace.txt")} 5400')
+        elif os.environ.get('ZTRACE'):
+            # the runner has no gate helper: the same 60 Hz trace from here (ms, then the normal windows front to back down to the later
+            # of ours and KiCad's: number:a|b|o:bounds, a = the client, b = KiCad, o = anyone else), a line on each change
+            import threading
+            def ztrace():
+                t0, last = time.time(), None
+                with open(os.path.join(OUT, 'ztrace.txt'), 'w') as f:
+                    while client.poll() is None:
+                        row, seen = [], set()
+                        for w in wins():
+                            tag = 'a' if w[1] == client.pid else 'b' if w[1] == kpid else 'o'
+                            row.append(f'{w[0]}:{tag}:{",".join(map(str, w[3]))}'); seen.add(tag)
+                            if {'a', 'b'} <= seen: break
+                        line = ' '.join(row)
+                        if line != last: f.write(f'{round((time.time() - t0) * 1000)} {line}\n'); f.flush(); last = line
+                        time.sleep(1 / 60)
+            threading.Thread(target=ztrace, daemon=True).start()
+        n_log = lambda what: client_log().count(what)
+        JUDGED = set()
+        for fold_on in (False, True):
+            for target in (611, 967, None):
+                if not fold(fold_on): print(f'INFO front: the sidebar could not be {"folded" if fold_on else "opened"} by its control before {target or "widest"} (drawn: {"folded" if is_folded() else "open"}): not judged', flush=True); continue
+                got = pane_to(target)
+                # the window's width can fold or open the sidebar by itself: a row is only ever named by what is drawn
+                if is_folded() != fold_on: print(f'INFO front: at {target or "widest"} the sidebar does not stay {"folded" if fold_on else "open"} on this display: not judged', flush=True); continue
+                JUDGED.add(fold_on)
+                name = f'{"folded" if fold_on else "open"}-{target or "widest"}'
+                if target and (not got or abs(got - target) > 6):
+                    print(f'INFO front {name}: the display gives a {got} pt pane with the sidebar {"folded" if fold_on else "open"}, not {target}: judged at {got}', flush=True)
+                for tab in ('PCB', 'SCH'):
+                    to_tab(tab); wait_for(kicad_frame, 30, 0.5); time.sleep(2)
+                    for step, act in (('edit', after_edit), ('chrome', after_chrome), ('press', after_press), ('tab', lambda: after_tab(tab))):
+                        good, why = 0, []
+                        for i in range(REPS):
+                            skip = act()
+                            if skip: why.append(skip); break
+                            bad = front()
+                            if bad: why.append(f'{i + 1}: {bad[-1]}')
+                            # another app's window over the pane: this run's windows are no longer the front ones; it stops here (no
+                            # picture: the screen now shows windows that are not the run's)
+                            if any('another app' in b for b in bad):
+                                check(False, f'front: {tab}, sidebar {"folded" if fold_on else "open"}, pane {got} pt, after {step}, try {i + 1}: {bad[-1]}')
+                                raise SystemExit(f'STOPPED front: another app\'s window is over the pane; nothing more is clicked or typed')
+                            else: good += 1
+                        RES[f'front_{name}_{tab}_{step}'] = {'pane': got, 'good': good, 'of': REPS, 'why': why[:3]}
+                        check(good == REPS, f'front: {tab}, sidebar {"folded" if fold_on else "open"}, pane {got} pt, after {step}: KiCad\'s frame is the front-most window over the pane {good} of {REPS}{" (" + "; ".join(why[:3]) + ")" if why else ""}')
+        check(JUDGED == {False, True}, f'front: judged with the sidebar open and folded (drawn states judged: {sorted("folded" if j else "open" for j in JUDGED)})')
+        # what the client did about it (its own log): the orders it had to repeat, and whether the pane ever said the editor is behind
+        RES['front_client'] = {'orders': n_log('"kicad_mac_order"'), 'verified': n_log('"kicad_mac_order_verified"'), 'said_behind': n_log('"kicad_mac_buried"')}
+        print(f'INFO front: the client re-ordered {RES["front_client"]["orders"]} times, proved {RES["front_client"]["verified"]}, said "behind" {RES["front_client"]["said_behind"]} times', flush=True)
+        check(RES['front_client']['said_behind'] == 0, 'front: the pane never had to say the editor is behind Backplane\'s window')
         raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=libs: the libraries row L1-L7 on this runtime and this Mac (L8 is mac/libtables_l8.py) ----
     if os.environ.get('MAC_MODE') == 'libs':
