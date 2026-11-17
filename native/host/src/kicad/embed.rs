@@ -263,15 +263,79 @@ pub fn local_switch(s: &Session, local_map: bool, plain: bool) -> bool {
         && s.frames.iter().any(|f| f.kind == s.active && f.xid > 0 && (f.realized || f.shown))
 }
 
-/// KiCad 10's local history (`<project>/.history`, a git repository of autosave snapshots) has a snapshot newer than the project's
-/// saved board and schematics: KiCad offers it back ("Recover Unsaved Changes") when it opens the project again.
+/// KiCad 10's local history (`<project>/.history`, a git repository of snapshots) holds changes that are not in the saved files, which
+/// KiCad offers back ("Recover Unsaved Changes") when it opens the project again. Read from the snapshot itself (`history_unsaved`): a
+/// board or schematic in it that differs from the file on disk and was snapshot after that file was written. KiCad snapshots every save
+/// too, so a snapshot newer than the files is not enough (after the hub saved an agent's change the pane said a copy of unsaved changes
+/// was kept). A history it cannot read (packed, another layout) falls back to that: a snapshot newer than the saved files.
 pub fn history_newer(dir: &Path) -> bool {
+    if let Some(unsaved) = history_unsaved(dir) { return unsaved }
     let mtime = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
     let head = dir.join(".history").join(".git");
     let snap = ["refs/heads/master", "refs/heads/main", "logs/HEAD"].iter().filter_map(|r| mtime(&head.join(r))).max();
     let saved = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|x| x == "kicad_pcb" || x == "kicad_sch")).filter_map(|p| mtime(&p)).max();
     matches!((snap, saved), (Some(s), Some(f)) if s > f)
+}
+/// The local history's latest snapshot against the files: Some(true) when a board or schematic in it differs from its file and was taken
+/// at or after that file was written (or the file is gone); Some(false) when every one matches or the file is newer; None when the
+/// snapshot cannot be read (no history, packed objects): the caller judges by times.
+pub fn history_unsaved(dir: &Path) -> Option<bool> {
+    let git = dir.join(".history").join(".git");
+    let head = std::fs::read_to_string(git.join("HEAD")).ok()?;
+    let head = head.trim();
+    let sha = match head.strip_prefix("ref: ") {
+        Some(r) => std::fs::read_to_string(git.join(r)).ok().map(|s| s.trim().to_string())
+            .or_else(|| std::fs::read_to_string(git.join("packed-refs")).ok()?.lines().find(|l| l.ends_with(&format!(" {r}"))).map(|l| l[..40.min(l.len())].to_string()))?,
+        None => head.to_string(),
+    };
+    let (kind, commit) = git_object(&git, &sha)?;
+    if kind != "commit" { return None }
+    let text = String::from_utf8_lossy(&commit);
+    let tree = text.lines().find_map(|l| l.strip_prefix("tree "))?.trim().to_string();
+    let when: u64 = text.lines().find_map(|l| l.strip_prefix("committer ")).and_then(|l| l.rsplitn(3, ' ').nth(1)).and_then(|s| s.parse().ok())?;
+    let mut files = vec![];
+    git_tree_files(&git, &tree, "", &mut files, 0)?;
+    let mut any = false;
+    for (path, blob) in files.iter().filter(|(p, _)| p.ends_with(".kicad_pcb") || p.ends_with(".kicad_sch")) {
+        any = true;
+        let f = dir.join(path);
+        let Ok(disk) = std::fs::read(&f) else { return Some(true) };
+        let (_, snap) = git_object(&git, blob)?;
+        let written = std::fs::metadata(&f).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
+        if snap != disk && when >= written { return Some(true) }
+    }
+    if any { Some(false) } else { None }
+}
+/// A loose object of a git repository (`objects/xx/yyyy`, zlib): its type and body. None for a packed one.
+fn git_object(git: &Path, sha: &str) -> Option<(String, Vec<u8>)> {
+    use std::io::Read;
+    if sha.len() < 40 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) { return None }
+    let raw = std::fs::read(git.join("objects").join(&sha[..2]).join(&sha[2..40])).ok()?;
+    let mut out = vec![];
+    flate2::read::ZlibDecoder::new(&raw[..]).read_to_end(&mut out).ok()?;
+    let nul = out.iter().position(|&b| b == 0)?;
+    let kind = String::from_utf8_lossy(&out[..nul]).split(' ').next().unwrap_or("").to_string();
+    Some((kind, out[nul + 1..].to_vec()))
+}
+/// A tree's files, recursively: (path, blob sha).
+fn git_tree_files(git: &Path, sha: &str, prefix: &str, out: &mut Vec<(String, String)>, depth: u32) -> Option<()> {
+    if depth > 8 { return Some(()) }
+    let (kind, body) = git_object(git, sha)?;
+    if kind != "tree" { return None }
+    let mut i = 0;
+    while i < body.len() {
+        let sp = i + body[i..].iter().position(|&b| b == b' ')?;
+        let nul = sp + body[sp..].iter().position(|&b| b == 0)?;
+        if nul + 21 > body.len() { return None }
+        let mode = String::from_utf8_lossy(&body[i..sp]).to_string();
+        let name = String::from_utf8_lossy(&body[sp + 1..nul]).to_string();
+        let id: String = body[nul + 1..nul + 21].iter().map(|b| format!("{b:02x}")).collect();
+        let path = if prefix.is_empty() { name } else { format!("{prefix}/{name}") };
+        if mode == "40000" { git_tree_files(git, &id, &path, out, depth + 1)?; } else { out.push((path, id)); }
+        i = nul + 21;
+    }
+    Some(())
 }
 /// The state of a session whose KiCad died after it was ready (a crash, a kill): the pane offers to open the editor again.
 pub const CLOSED: &str = "closed_unexpectedly";
@@ -3593,6 +3657,34 @@ mod tests {
         assert!(history_newer(&d), "a snapshot after the save");
         std::thread::sleep(std::time::Duration::from_millis(20)); std::fs::write(d.join("a.kicad_pcb"), "y").unwrap();
         assert!(!history_newer(&d), "saved after the snapshot");
+    }
+    /// KiCad's real local history (a git repository): what the pane says follows the snapshot's content, not its time. Made with git.
+    #[test] fn a_local_history_snapshot_counts_as_kept_only_when_it_holds_what_the_files_do_not() {
+        if std::process::Command::new("git").arg("--version").output().is_err() { eprintln!("no git: skipped"); return }
+        let d = crate::plat::tmp::dir("hist-content"); let h = d.join(".history"); std::fs::create_dir_all(&h).unwrap();
+        let git = |args: &[&str], at: u64| { let o = std::process::Command::new("git").current_dir(&h).args(["-c", "user.name=k", "-c", "user.email=k@k", "-c", "init.defaultBranch=master"]).args(args)
+            .env("GIT_COMMITTER_DATE", format!("@{at} +0000")).env("GIT_AUTHOR_DATE", format!("@{at} +0000")).output().unwrap(); assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr)); };
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        let snap = |text: &str, at: u64, msg: &str| { std::fs::write(h.join("a.kicad_pcb"), text).unwrap(); git(&["add", "-A"], at); git(&["commit", "-qm", msg], at); };
+        git(&["init", "-q"], now);
+        std::fs::write(d.join("a.kicad_pcb"), "(kicad_pcb saved)").unwrap();
+        // KiCad's snapshot of a save (the hub saved an agent's change): newer than the file, the same content: nothing unsaved
+        snap("(kicad_pcb saved)", now + 5, "PCB Save");
+        assert_eq!(history_unsaved(&d), Some(false)); assert!(!history_newer(&d), "a save's own snapshot is not a kept copy");
+        // an autosave of the person's unsaved edit: different and newer: kept, KiCad offers it back
+        snap("(kicad_pcb edited)", now + 10, "Autosave");
+        assert_eq!(history_unsaved(&d), Some(true)); assert!(history_newer(&d), "the person's edit is kept: never 'were not kept'");
+        // the file written after that snapshot (saved later): nothing to offer back
+        std::fs::write(d.join("a.kicad_pcb"), "(kicad_pcb later)").unwrap();
+        let later = std::fs::File::options().write(true).open(d.join("a.kicad_pcb")).unwrap();
+        later.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(now + 20)).unwrap();
+        assert_eq!(history_unsaved(&d), Some(false));
+        // a sub-folder's sheet in the snapshot, its file gone: kept
+        std::fs::create_dir_all(h.join("sub")).unwrap(); std::fs::write(h.join("sub/b.kicad_sch"), "(kicad_sch)").unwrap(); git(&["add", "-A"], now + 30); git(&["commit", "-qm", "Autosave"], now + 30);
+        assert_eq!(history_unsaved(&d), Some(true));
+        // unreadable (no objects): judged by times, as before
+        let e = crate::plat::tmp::dir("hist-unread"); std::fs::create_dir_all(e.join(".history/.git")).unwrap(); std::fs::write(e.join(".history/.git/HEAD"), "ref: refs/heads/master\n").unwrap();
+        assert_eq!(history_unsaved(&e), None);
     }
     #[test] fn a_macos_stall_is_kicads_recover_question_when_there_is_something_to_recover() {
         // nothing kept: the stall is a system prompt that names Backplane (the Documents prompt)
