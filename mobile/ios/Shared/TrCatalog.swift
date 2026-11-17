@@ -2697,6 +2697,8 @@ gpui.the.right.spelling	The right spelling	正しい綴り	La ortografía correc
 gpui.star.on.github	Star on GitHub	GitHubでスターを付ける	Dar estrella en GitHub
 gpui.star.dont.ask	Don't ask again	今後表示しない	No preguntar de nuevo
 gpui.star.why	Stars help other hardware designers find Backplane, and tell us what to keep building.	スターは、ほかのハードウェア設計者がBackplaneを見つける助けになり、私たちが何を作り続けるべきかを知る手がかりにもなります。	Las estrellas ayudan a otros diseñadores de hardware a encontrar Backplane y nos indican qué seguir construyendo.
+gpui.projects.unpushed	{n, plural, one {# commit not pushed to {upstream}} other {# commits not pushed to {upstream}}}	{upstream} にプッシュしていないコミット: {n} 件	{n, plural, one {# commit sin enviar a {upstream}} other {# commits sin enviar a {upstream}}}
+gpui.projects.push	Push	プッシュ	Enviar
 gpui.e.files.max.mb	Largest attachment (MB)	添付の上限（MB）	Adjunto más grande (MB)
 gpui.e.files.max.note	A file sent with a message, or shown from this hub, may be up to {mb} MB. Files stream from disk, so a large one costs disk space, not memory.	メッセージで送るファイルやこのハブから表示するファイルは{mb} MBまでです。ファイルはディスクから順に読むので、大きなファイルはメモリではなくディスク容量を使います。	Un archivo enviado con un mensaje, o mostrado desde este hub, puede pesar hasta {mb} MB. Los archivos se transmiten desde disco, así que uno grande consume espacio en disco, no memoria.
 gpui.e.dev.replay	Replay first run	初回起動をやり直す	Repetir primer inicio
@@ -2989,6 +2991,10 @@ gpui.e.freecad.ask.note	Downloads the latest FreeCAD (about 800 MB, 3 GB unpacke
 gpui.e.freecad.offer	FreeCAD's own release for this computer. Agents make mechanical parts with it.	このコンピュータ用のFreeCAD公式リリースです。エージェントはこれで機構部品を作ります。	La versión propia de FreeCAD para este ordenador. Los agentes crean piezas mecánicas con él.
 gpui.e.picker.clone.hint	Clones the repository and adds it as a project	リポジトリをクローンしてプロジェクトとして追加します	Clona el repositorio y lo añade como proyecto
 gpui.e.picker.clone.typed	Clone {origin}	{origin}をクローン	Clonar {origin}
+settings.git.page	Projects and git	プロジェクトと git	Proyectos y git
+settings.git.autopush	Push commits to the remote automatically	コミットを自動でリモートにプッシュ	Enviar los commits al remoto automáticamente
+settings.git.autopush.note	Backplane commits design files locally at each turn's end. On: it also pushes them to the branch's remote. Off: a project's page shows the commits not pushed, with Push.	Backplane は各ターンの終わりに設計ファイルをローカルにコミットします。オン: ブランチのリモートにもプッシュします。オフ: プロジェクトのページにプッシュしていないコミットと「プッシュ」ボタンを表示します。	Backplane hace commit de los archivos de diseño en local al final de cada turno. Activado: también los envía al remoto de la rama. Desactivado: la página del proyecto muestra los commits sin enviar, con Enviar.
+settings.git.notice	Backplane no longer pushes automatically. Turn it on in Settings if you want it.	Backplane は自動でプッシュしなくなりました。必要なら設定でオンにしてください。	Backplane ya no envía automáticamente. Actívalo en Ajustes si lo quieres.
 gpui.f.group.install	Install	インストール	Instalar
 gpui.f.group.agents	Agents	エージェント	Agentes
 gpui.f.group.cad	CAD tools	CADツール	Herramientas CAD
@@ -5723,6 +5729,9 @@ gpui.f2.uber.p.cherry	Cherry	チェリー	Cereza
 
     /// gpui.combo.resets = resets {when}
     static func gpui_combo_resets(when: String) -> String { f("gpui.combo.resets", ["when": when]) }
+
+    /// gpui.projects.unpushed = {n, plural, one {# commit not pushed to {upstream}} other {# commits not pushed to {upstream}}}
+    static func gpui_projects_unpushed(n: Int, upstream: String) -> String { f("gpui.projects.unpushed", ["n": String(n), "upstream": upstream]) }
 
     /// gpui.e.files.max.note = A file sent with a message, or shown from this hub, may be up to {mb} MB. Files stream from disk, so a large one costs disk space, not memory.
     static func gpui_e_files_max_note(mb: String) -> String { f("gpui.e.files.max.note", ["mb": mb]) }

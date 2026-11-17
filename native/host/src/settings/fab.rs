@@ -255,8 +255,11 @@ pub async fn opts(hub: &Arc<Hub>, thread: &str) -> Opts {
 pub async fn look_project(hub: &Arc<Hub>, project: &str) -> Value {
     let root = { let m = hub.model().await; m.projects.get(project).filter(|p| !p.removed).map(|p| std::path::PathBuf::from(&p.root)) };
     let home = hub.cfg.home.clone();
-    let mut c = tokio::task::spawn_blocking(move || look_in(&home, root.as_deref(), "", false, "", &[])).await.unwrap_or_else(|_| card("", "", &[], 0, &Value::Null, false, &[], "", ""));
+    let r2 = root.clone();
+    let mut c = tokio::task::spawn_blocking(move || look_in(&home, r2.as_deref(), "", false, "", &[])).await.unwrap_or_else(|_| card("", "", &[], 0, &Value::Null, false, &[], "", ""));
     c["project"] = json!(project);
+    // commits the remote lacks, with the page's Push (#1171: the hub pushes on its own only when `git.auto_push` is on)
+    if let Some(r) = root.as_deref().and_then(|r| r.to_str()) { if let Some((n, up)) = crate::files::kicad::canonical::unpushed(r).await { if n > 0 { c["unpushed"] = json!({"count": n, "upstream": up}); } } }
     // Buy it on the project's page: what the header of the thread it buys from offers (present/ready.rs `page_button`), from that thread's own card
     let src = crate::statehost::policies().and_then(|q| q.with_state(|st| crate::present::ready::page_source(st, project))).flatten();
     if let Some(th) = src {

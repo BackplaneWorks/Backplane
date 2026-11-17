@@ -28,7 +28,7 @@ impl RpcHandler for SettingSet {
             // a write to either fallback setting closes the open settings proposals in the same batch (Proposal.invalidate)
             if let Some(a) = &self.agents { let open: Vec<String> = a.world().await.asks.iter().filter(|(_, k)| k.tool == super::proposal::TOOL).map(|(i, _)| i.clone()).collect(); let extra = super::proposal::invalidate(&batch.clone(), &open, at); batch.extend(extra); batch = super::proposal::with_pending(a, batch, at).await; }
             match hub.commit_many(&batch).await {
-                Ok(_) => vec![json!({"t":"reply","id":id,"ok":true})],
+                Ok(_) => { if key == super::autopush::KEY { super::autopush::changed(hub).await } vec![json!({"t":"reply","id":id,"ok":true})] }
                 Err(e) => vec![json!({"t":"reply","id":id,"ok":false,"error":format!("{e:#}")})],
             }
         })

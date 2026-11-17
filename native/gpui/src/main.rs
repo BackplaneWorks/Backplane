@@ -171,6 +171,8 @@ impl Backplane {
             Event::Hello=>{self.streamer_hello(cx);let was=std::mem::replace(&mut self.had_hello,true);self.term_rejoin();if was{self.kicad_rejoin(cx);}self.screens.unsent.live=true;self.send_unsent();},
             Event::Star(v)=>self.star_offer(&v,cx),
             Event::TmNotice(v)=>self.tm_notice(&v,cx),
+            Event::GpNotice(v)=>self.gp_notice(&v,cx),
+            Event::Rpc("project-push",ok,why)=>{ if !ok { self.error=why; } let pid=self.screens.projects.home.pid.clone(); if !pid.is_empty() { screens::projects::ask_home(self,&pid); } cx.notify(); },
             Event::Rpc("mgmt",ok,why)=>{self.screens.mgmt.error=if ok{String::new()}else{why};cx.notify();},
             Event::Rpc(tag,ok,why)=>if tag=="term"{if !ok{self.error=format!("Terminal: {why}");}}else if tag=="google"{screens::google::done(self,ok,&why)}else if tag.starts_with("acct"){screens::accounts::done(self,tag,ok,&why,cx)}else if tag=="fileopen" {if !ok {self.error=why;}} else if tag=="plan" {screens::mgmt_plan::answered(self,ok,&why,cx)} else if tag.starts_with("files") {screens::filesui::rpc_done(self,tag,ok,&why,cx)} else {screens::settings::rpc_done(self,tag,ok,&why,cx)},
             Event::PlotTooBig(n)=>self.screens.plot.too_big(n),
