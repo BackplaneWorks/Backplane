@@ -27,6 +27,9 @@ pub enum Verdict {
     Unknown,
     /// held by a KiCad this hub started (its pid)
     Ours(u32),
+    /// held by a KiCad an earlier run of a Backplane hub started, whose hub is gone (`--parent-pid` names a process no longer there): left
+    /// running when Backplane was killed (lane K's clean-box R3)
+    Orphan(u32),
     /// held by another process here (its pid when known), or written on another computer
     Foreign { pid: Option<u32>, user: String, host: String, what: String },
 }
@@ -54,6 +57,17 @@ pub fn parent_pid_arg(cmdline: &str) -> Option<u32> {
     None
 }
 
+/// A foreign holder that is a Backplane KiCad (embedded, or a headless api-server) whose hub (`--parent-pid`) is gone: an orphan.
+pub fn orphaned(v: Verdict, alive: impl Fn(u32) -> bool) -> Verdict {
+    if let Verdict::Foreign { pid: Some(p), .. } = &v {
+        let cmd = cmdline_of(*p);
+        if let Some(parent) = parent_pid_arg(&cmd) {
+            if (cmd.contains("--embedded") || cmd.contains("api-server")) && !alive(parent) { return Verdict::Orphan(*p) }
+        }
+    }
+    v
+}
+
 /// What holds it, in words: "KiCad (pid 123)", "kicad-cli (pid 9)", "" unknown.
 fn program_of(cmdline: &str) -> String {
     let first = cmdline.split('\0').next().unwrap_or("");
@@ -75,7 +89,7 @@ pub fn inspect(doc: &str) -> Option<Seen> {
 }
 
 /// A process's command line, its arguments split by NUL (Linux /proc; Windows Win32_Process.CommandLine; elsewhere `ps`, split at spaces).
-fn cmdline_of(pid: u32) -> String {
+pub fn cmdline_of(pid: u32) -> String {
     if let Ok(b) = std::fs::read(format!("/proc/{pid}/cmdline")) { return String::from_utf8_lossy(&b).to_string() }
     #[cfg(windows)]
     {

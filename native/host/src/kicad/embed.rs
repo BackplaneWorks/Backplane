@@ -2510,7 +2510,8 @@ fn launch_docs(files: &Files, active: &str) -> Vec<String> {
 pub fn lock_verdict(doc: &str) -> super::locks::Verdict {
     let (user, host) = super::locks::me();
     let v = super::locks::classify(super::locks::inspect(doc).as_ref(), std::process::id(), &user, &host);
-    own_pid_verdict(v, |p| live_pids().lock().unwrap_or_else(|e| e.into_inner()).contains(&p))
+    let v = own_pid_verdict(v, |p| live_pids().lock().unwrap_or_else(|e| e.into_inner()).contains(&p));
+    super::locks::orphaned(v, crate::plat::proc::alive)
 }
 /// A foreign verdict whose holder is one of this hub's own processes (`own`) is this hub's.
 pub fn own_pid_verdict(v: super::locks::Verdict, own: impl Fn(u32) -> bool) -> super::locks::Verdict {
@@ -2529,6 +2530,25 @@ async fn lock_gate(me: &mpsc::UnboundedSender<Msg>, pro: &str, gen: u64, doc: &s
     let unreadable = |v: &super::locks::Verdict| matches!(v, super::locks::Verdict::Foreign { pid: Some(_), what, .. } if what.is_empty());
     let t = std::time::Instant::now();
     while unreadable(&v) && t.elapsed() < Duration::from_secs(5) { tokio::time::sleep(Duration::from_millis(250)).await; v = lock_verdict(doc); }
+    // a KiCad an earlier Backplane started, left running when that Backplane was killed (its hub gone): closed, then the lock is free.
+    // TERM only, and KILL never before KiCad's autosave debounce has passed (ORPHAN_TERM_WAIT): its own recovery snapshot of the person's
+    // unsaved edits stands, and KiCad offers it back when it opens the files; an agent's change was saved by the hub when it landed
+    // (f6c2eac8e), and bp.13 (3a19ebb5bb) arms the autosave for API commits too. The pane says the editor was reopened and why.
+    if let super::locks::Verdict::Orphan(pid) = v {
+        eprintln!("kicad embed: {pro}: {doc} is held by a KiCad an earlier Backplane started (pid {pid}, its hub gone): closing it {when}");
+        if !crate::plat::proc::kill_group(pid, crate::plat::proc::TERM) { let _ = crate::plat::proc::kill(pid, crate::plat::proc::TERM); }
+        let t = std::time::Instant::now();
+        while crate::plat::proc::alive(pid) && t.elapsed() < ORPHAN_TERM_WAIT { tokio::time::sleep(Duration::from_millis(100)).await; }
+        let killed = crate::plat::proc::alive(pid);
+        if killed { if !crate::plat::proc::kill_group(pid, crate::plat::proc::KILL) { let _ = crate::plat::proc::kill(pid, crate::plat::proc::KILL); } tokio::time::sleep(Duration::from_millis(300)).await; }
+        eprintln!("kicad embed: {pro}: the earlier Backplane's KiCad (pid {pid}) {} after {} ms", if killed { "did not close and was killed" } else { "closed" }, t.elapsed().as_millis());
+        let dir = Path::new(doc).parent().map(Path::to_path_buf).unwrap_or_default();
+        let recovery = std::fs::read_dir(&dir).into_iter().flatten().flatten().any(|e| e.file_name().to_string_lossy().starts_with("_autosave-"));
+        let _ = me.send(Msg::Notice { pro: pro.into(), gen, notice: json!({"kind": "orphan_closed", "frame": "", "error": false,
+            "title": "The editor was reopened: the KiCad left running by Backplane's last session was closed",
+            "detail": if recovery { "KiCad will offer to recover the unsaved changes it kept" } else { "" }}) });
+        v = lock_verdict(doc);
+    }
     match v {
         super::locks::Verdict::Stale => { super::locks::clear_stale(doc, &format!("{when}: nobody holds it, its KiCad ended")); true }
         super::locks::Verdict::Ours(pid) => { eprintln!("kicad embed: {pro}: {doc} is still held by this hub's KiCad (pid {pid}) {when}, after {} s", OWN_LOCK_WAIT.as_secs()); true }
@@ -2557,6 +2577,9 @@ async fn lock_gate(me: &mpsc::UnboundedSender<Msg>, pro: &str, gen: u64, doc: &s
         _ => true,
     }
 }
+/// How long an earlier Backplane's KiCad has to close on TERM before it is killed: past KiCad's autosave debounce (5 s), so its snapshot
+/// of the last edit is on disk.
+const ORPHAN_TERM_WAIT: Duration = Duration::from_secs(if cfg!(test) { 1 } else { 15 });
 /// How long a launch waits for a lock still held by a KiCad of this hub's (stopped for a restart, an update; a headless one retired).
 const OWN_LOCK_WAIT: Duration = Duration::from_secs(if cfg!(test) { 1 } else { 15 });
 
@@ -3373,6 +3396,9 @@ mod tests {
         assert_eq!(own_pid_verdict(foreign(6163), |p| p == 6163), Verdict::Ours(6163), "being stopped: still ours");
         assert!(matches!(own_pid_verdict(foreign(77), |p| p == 6163), Verdict::Foreign { .. }), "another process: asked");
         assert_eq!(own_pid_verdict(Verdict::Stale, |_| true), Verdict::Stale);
+        // a Backplane KiCad whose hub is gone (Backplane killed, started again): an orphan, closed rather than asked about
+        let me = std::process::id();
+        assert_eq!(super::super::locks::orphaned(foreign(me), |_| false), foreign(me), "not a Backplane KiCad: stays foreign");
         live_pids().lock().unwrap().insert(424242);
         assert!(live_pids().lock().unwrap().contains(&424242), "a spawned KiCad is in live_pids until reaped");
         live_pids().lock().unwrap().remove(&424242);
