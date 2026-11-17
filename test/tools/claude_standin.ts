@@ -705,7 +705,9 @@ async function run(c: Cmd, firstOne: boolean) {
     return;
   }
   // mcpcalls (a buy thread's agent): Backplane's notes about the quote get an agent's short answer, not an echo the screenshots would show
-  const reply = mode === "mcpcalls" ? "The quote is on the Order card: Buy now there when you are ready." : c.text.includes("two") ? "TWO" : c.text.includes("one") ? "ONE" : `REPLY ${c.text.slice(0, 40)}`;
+  // "echo:<text>:echo" answers <text> as it is ("\\n" a line break): a reply with Markdown of the test's choosing (test/e2e/android/copyable.mjs)
+  const echo = /echo:([\s\S]*?):echo/.exec(c.text)?.[1]?.replace(/\\n/g, "\n");
+  const reply = echo !== undefined ? echo : mode === "mcpcalls" ? "The quote is on the Order card: Buy now there when you are ready." : c.text.includes("two") ? "TWO" : c.text.includes("one") ? "ONE" : `REPLY ${c.text.slice(0, 40)}`;
   say(reply);
   result(reply);
   lc(c.uuid, "completed");
