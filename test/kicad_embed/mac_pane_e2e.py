@@ -903,11 +903,19 @@ try:
                 print(f'INFO undo_markers {E}: checks {"run through the hub (RunChecks)" if ran_direct else "KiCad\'s own after each edit (RunChecks refused through the hub: " + str(rc)[:100] + ")"}', flush=True)
                 row(E, 'undo_markers', 'works' if not bad else ('nothing' if all(b.endswith('no edit') for b in bad) else 'wrong'), ('; '.join(bad) or f'every real item back at each undo ({sum(c0.values())}: {c0}), no dialog'))
                 if E == 'pcb':  # select_markers_agent_check (fork e7f1bdb7a3, Carbon's crash): Cmd+A with the check's markers in it, an agent's
-                    # check frees them, the pointer moves over the canvas: KiCad keeps running and the non-marker items stay selected
+                    # check frees them, the pointer moves over the canvas: KiCad keeps running, and the selection is the same minus the markers
                     C = 'kiapi.common.commands.'
+                    def selection():
+                        d = ask('kicad_ipc', {'path': f, 'type': C + 'GetOpenDocuments', 'message': {'type': 'DOCTYPE_PCB'}}); doc = ((d.get('message') or {}).get('documents') or [None])[0]
+                        it = ((ask('kicad_ipc', {'path': f, 'type': C + 'GetSelection', 'message': {'header': {'document': doc}}}).get('message') or {}).get('items') or [])
+                        mk = [i for i in it if 'Marker' in str(i.get('@type', ''))]
+                        return len(it) - len(mk), len(mk)
                     n0 = seq(); ask('kicad_ipc', {'path': f, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': 'FK_PCB'}}); checks_idle(n0, 30)
-                    byk, okr, _ = agent_items(E, f); nm = sum(v for k, v in byk.items() if 'Marker' in k)
+                    gm = ask('kicad_ipc', {'path': f, 'type': 'kiapi.backplane.embed.GetMarkers', 'message': {'kind': 'FK_PCB'}})
+                    gmm = gm.get('message') or {}
+                    nm = max([len(v) for v in gmm.values() if isinstance(v, list)] + [0])
                     kpid0 = kpid; canvas(); key(K_A, CMD); time.sleep(0.8)
+                    real0, mk0 = selection()
                     n1 = seq(); ask('kicad_ipc', {'path': f, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': 'FK_PCB'}}); cd = checks_idle(n1, 30)
                     p = last_push()
                     for fx, fy in ((0.3, 0.3), (0.5, 0.5), (0.7, 0.6), (0.4, 0.7), (0.6, 0.4)):
@@ -915,14 +923,13 @@ try:
                     time.sleep(1.5)
                     alive = bool(kicad_frame()) and any(OUT in l and str(kpid0) in l.split()[0:1] for l in subprocess.run(['ps', '-axo', 'pid=,command='], capture_output=True, text=True).stdout.splitlines())
                     stall = open(os.path.join(OUT, 'kicad-embed-trace.log'), errors='replace').read().count('STALL') if os.path.isfile(os.path.join(OUT, 'kicad-embed-trace.log')) else 0
-                    d = ask('kicad_ipc', {'path': f, 'type': C + 'GetOpenDocuments', 'message': {'type': 'DOCTYPE_PCB'}}); doc = ((d.get('message') or {}).get('documents') or [None])[0]
-                    gs = ask('kicad_ipc', {'path': f, 'type': C + 'GetSelection', 'message': {'header': {'document': doc}}})
-                    sel_items = (gs.get('message') or {}).get('items') or []
-                    real_sel = [i for i in sel_items if 'Marker' not in str(i.get('@type', ''))]
-                    ok = alive and not stall and len(real_sel) > 1
-                    v = 'works' if ok else ('wrong' if alive else 'wrong (KiCad gone)')
-                    if nm == 0 and ok: v = 'nothing (not judged: no markers to select)'
-                    row(E, 'select_markers_agent_check', v, f'{nm} markers on the board before Cmd+A{" (none: the case not fully set up)" if nm == 0 else ""}; agent check {"done" if cd else "no ET_CHECKS_DONE"}; KiCad {"running" if alive else "GONE"}; STALL lines {stall}; selection after: {len(real_sel)} non-marker items of {len(sel_items)}')
+                    real1, mk1 = selection() if alive else (0, 0)
+                    detail = (f'GetMarkers: {nm} markers ({str(gmm)[:80]}); after Cmd+A the selection held {real0} items and {mk0} markers; agent check '
+                              f'{"done" if cd else "no ET_CHECKS_DONE"}; KiCad {"running" if alive else "GONE"}; STALL lines {stall}; after: {real1} items and {mk1} markers')
+                    if not alive or stall: v = 'wrong'
+                    elif not (nm or mk0): v = 'nothing (not judged: no markers on the board or in the selection)'
+                    else: v = 'works' if real1 == real0 and real0 > 1 and mk1 == 0 else 'wrong'
+                    row(E, 'select_markers_agent_check', v, detail)
                     key(K_ESC); time.sleep(0.6)
                 if not undo_ok:
                     print(f'INFO {E}: undo is nothing, so the rows after it run on what is left (no restore): judge them with that in mind', flush=True)
