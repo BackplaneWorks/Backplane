@@ -259,6 +259,9 @@ pub fn problem_line(p: &Value) -> String {
         return format!("the model named for {part} is not in its library{}: name one the file has (import lists them), or give another file", after(msg, "model").map(|m| format!(" ({m})")).unwrap_or_default()) }
     if is(&["pin"]) || says(&["pin count", "number of pins", "too few nodes", "incorrect number of nodes", "wrong number of"]) {
         return format!("pins of {part} do not match its model's nodes: give the map with model (pins: {{pin: node}})") }
+    if is(&["bad_param"]) { return format!("a value or parameter of {part} does not parse{}: set it with model (params), or correct the part's value", if short.is_empty() { String::new() } else { format!(" ({short})") }) }
+    if is(&["no_ground"]) || says(&["no ground", "no node 0"]) { return "the circuit has no ground (node 0): put a GND power symbol on the return net".into() }
+    if is(&["measure"]) { return format!("a measure gave no value{}", if short.is_empty() { String::new() } else { format!(": {short}") }) }
     if is(&["missing_model", "no_model", "model"]) || says(&["no model", "has no simulation model", "missing model"]) {
         return format!("missing model for {part}: assign one (model) or exclude it (exclude)") }
     if is(&["float"]) || says(&["floating", "no dc path to ground", "no dc path", "has no dc value"]) {
@@ -269,7 +272,7 @@ pub fn problem_line(p: &Value) -> String {
         return format!("singular matrix{}: a loop of sources or inductors, or a node with no DC path. Add a small series resistance or a path to ground there", if n.is_empty() { String::new() } else { format!(" at {n}") }) }
     if is(&["convergence", "converge", "timestep"]) || says(&["no convergence", "timestep too small", "time step too small", "iteration limit", "failed to converge", "gmin stepping failed", "source stepping failed"]) {
         let t = ["time =", "time=", " t =", " t="].iter().find_map(|k| after(msg, k)).filter(|t| t.chars().next().is_some_and(|c| c.is_ascii_digit())).map(|t| format!(" at t={}", t.trim_end_matches(['.', ':'])));
-        let n = if node.is_empty() { after(msg, "trouble with node").or(after(msg, "trouble with")).map(String::from).unwrap_or_default() } else { node.to_string() };
+        let n = if node.is_empty() { after(msg, "trouble with node").or(after(msg, "trouble with")).map(|n| n.trim_matches(['"', '\'']).to_string()).unwrap_or_default() } else { node.to_string() };
         let op = low.contains("gmin stepping") || low.contains("source stepping") || low.contains("operating point") || kind.ends_with("_op");
         return format!("no convergence{}{}: {}", t.unwrap_or_default(), if n.is_empty() { String::new() } else { format!(" (near {n})") },
             if op { "the DC operating point was not found. Set starting voltages (directives: .nodeset or .ic), or ramp the supplies in a .tran with uic" } else { "shorten the maximum time step (the third value of .tran), give edges a rise time, or add directives: .options method=gear reltol=1e-3" }) }
@@ -397,6 +400,8 @@ mod tests {
         assert_eq!(l(json!({"kind": "SPK_MODEL_NOT_IN_LIBRARY", "reference": "Q2", "message": "model BC847 not found in library"})), "the model named for Q2 is not in its library (BC847): name one the file has (import lists them), or give another file");
         assert_eq!(l(json!({"kind": "SPK_PIN_COUNT_MISMATCH", "reference": "U2"})), "pins of U2 do not match its model's nodes: give the map with model (pins: {pin: node})");
         assert!(l(json!({"message": "Warning: singular matrix:  check node out"})).starts_with("singular matrix at out: a loop of sources or inductors"));
+        assert_eq!((l(json!({"kind": "PK_NO_GROUND"})), l(json!({"kind": "ME_BAD_PARAMS", "reference": "R4", "message": "cannot read 'abc'"})), l(json!({"kind": "PK_MEASURE_FAILED", "message": "tr: out of interval"}))),
+            ("the circuit has no ground (node 0): put a GND power symbol on the return net".into(), "a value or parameter of R4 does not parse (cannot read 'abc'): set it with model (params), or correct the part's value".into(), "a measure gave no value: tr: out of interval".to_string()));
         assert_eq!(l(json!({"kind": "SPK_NETLIST", "reference": "V1", "message": "unknown parameter (foo)"})), "netlist error at V1: unknown parameter (foo)");
         assert_eq!((l(json!({"kind": "SPK_TIMEOUT"})).contains("did not finish"), l(json!({"kind": "SPK_SOMETHING_NEW", "reference": "R1"})), l(json!({"reference": "R9", "message": "odd thing"})), l(json!({}))), (true, "spk something new at R1".into(), "R9: odd thing".into(), "simulation problem".into()));
         for v in [json!({"kind": "SPK_NO_CONVERGENCE", "message": "x\ny\nz ".repeat(200)}), json!({"message": "a ".repeat(900)})] { let s = l(v); assert!(!s.contains('\n') && s.len() < 400, "{s}") }
