@@ -2503,30 +2503,62 @@ fn launch_docs(files: &Files, active: &str) -> Vec<String> {
     v.retain(|d| !d.is_empty()); v
 }
 
-/// Before KiCad opens `doc`: its lock read (locks.rs). Stale: removed and logged. Ours: one of this hub's KiCads (the headless one being
-/// retired: waited on a little). Foreign: the person is asked in the pane; true to go on (nothing held, or Open anyway: the lock is
-/// removed), false for Cancel.
-async fn lock_gate(me: &mpsc::UnboundedSender<Msg>, pro: &str, gen: u64, doc: &str, when: &str) -> bool {
+/// The lock of `doc` as this hub sees it: KiCad's lock read (locks.rs), and a holder this hub started that has not gone yet (live_pids:
+/// a pid stays there until its process is reaped, while it is being stopped or restarted too) is this hub's own, whatever its command
+/// line reads (lane K's update gate, Nov 16: the bp.12.4 KiCad being stopped for the update, its command line no longer readable, was
+/// taken for another's and the person was asked; the lead's rule: a KiCad the hub started is its own until it is gone).
+pub fn lock_verdict(doc: &str) -> super::locks::Verdict {
     let (user, host) = super::locks::me();
-    let hub = std::process::id();
-    let mut v = super::locks::classify(super::locks::inspect(doc).as_ref(), hub, &user, &host);
-    // one of ours: the headless KiCad just retired lets go as it exits (up to 5 s)
-    for _ in 0..20 { if !matches!(v, super::locks::Verdict::Ours(_)) { break } tokio::time::sleep(Duration::from_millis(250)).await; v = super::locks::classify(super::locks::inspect(doc).as_ref(), hub, &user, &host); }
+    let v = super::locks::classify(super::locks::inspect(doc).as_ref(), std::process::id(), &user, &host);
+    own_pid_verdict(v, |p| live_pids().lock().unwrap_or_else(|e| e.into_inner()).contains(&p))
+}
+/// A foreign verdict whose holder is one of this hub's own processes (`own`) is this hub's.
+pub fn own_pid_verdict(v: super::locks::Verdict, own: impl Fn(u32) -> bool) -> super::locks::Verdict {
+    match v { super::locks::Verdict::Foreign { pid: Some(p), .. } if own(p) => super::locks::Verdict::Ours(p), v => v }
+}
+
+/// Before KiCad opens `doc`: its lock read (lock_verdict). Stale: removed and logged. Ours: one of this hub's KiCads (being stopped, or
+/// the headless one retired): waited for until it lets go (up to OWN_LOCK_WAIT), never asked about. Foreign: the person is asked in the
+/// pane; true to go on (nothing held, Open anyway: the lock removed, or the other KiCad let go meanwhile), false for Cancel.
+async fn lock_gate(me: &mpsc::UnboundedSender<Msg>, pro: &str, gen: u64, doc: &str, when: &str) -> bool {
+    let mut v = lock_verdict(doc);
+    let t = std::time::Instant::now();
+    while matches!(v, super::locks::Verdict::Ours(_)) && t.elapsed() < OWN_LOCK_WAIT { tokio::time::sleep(Duration::from_millis(250)).await; v = lock_verdict(doc); }
+    // a holder whose command line cannot be read (a process exiting, or one starting through a launcher) is looked at again before
+    // anyone is asked (lane M, Mac mini: the pane asked for 180 s about a process gone a moment later)
+    let unreadable = |v: &super::locks::Verdict| matches!(v, super::locks::Verdict::Foreign { pid: Some(_), what, .. } if what.is_empty());
+    let t = std::time::Instant::now();
+    while unreadable(&v) && t.elapsed() < Duration::from_secs(5) { tokio::time::sleep(Duration::from_millis(250)).await; v = lock_verdict(doc); }
     match v {
         super::locks::Verdict::Stale => { super::locks::clear_stale(doc, &format!("{when}: nobody holds it, its KiCad ended")); true }
-        super::locks::Verdict::Ours(pid) => { eprintln!("kicad embed: {pro}: {doc} is still held by this hub's KiCad (pid {pid}) {when}"); true }
+        super::locks::Verdict::Ours(pid) => { eprintln!("kicad embed: {pro}: {doc} is still held by this hub's KiCad (pid {pid}) {when}, after {} s", OWN_LOCK_WAIT.as_secs()); true }
         super::locks::Verdict::Foreign { .. } => {
             let holder = super::locks::holder_words(&v);
             let file = Path::new(doc).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
             let (tx, rx) = oneshot::channel();
             if me.send(Msg::LockAsk { pro: pro.into(), gen, ask: json!({"file": file, "path": doc, "holder": holder}), answer: tx }).is_err() { return false }
-            let open = rx.await.unwrap_or(false);
-            if open { super::locks::override_lock(doc, &holder); } else { eprintln!("kicad embed: {pro}: the person chose Cancel over {holder}'s lock on {file}"); }
+            // while the person has not answered, the lock is read again each second: the other KiCad letting go ends the question by itself
+            let mut rx = rx; let mut freed = false;
+            let open = loop {
+                tokio::select! {
+                    r = &mut rx => break r.unwrap_or(false),
+                    _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                        if !freed && !matches!(lock_verdict(doc), super::locks::Verdict::Foreign { .. }) {
+                            freed = true; eprintln!("kicad embed: {pro}: {holder} let go of {file}: the question ends by itself");
+                            let _ = me.send(Msg::LockAnswer { pro: pro.into(), open: true });
+                        }
+                    }
+                }
+            };
+            if freed { if matches!(lock_verdict(doc), super::locks::Verdict::Stale) { super::locks::clear_stale(doc, "its holder let go while the person was asked"); } }
+            else if open { super::locks::override_lock(doc, &holder); } else { eprintln!("kicad embed: {pro}: the person chose Cancel over {holder}'s lock on {file}"); }
             open
         }
         _ => true,
     }
 }
+/// How long a launch waits for a lock still held by a KiCad of this hub's (stopped for a restart, an update; a headless one retired).
+const OWN_LOCK_WAIT: Duration = Duration::from_secs(if cfg!(test) { 1 } else { 15 });
 
 fn sweep_crashed_locks(root: &str, pro: &str) {
     let mut dirs = vec![];
@@ -3333,6 +3365,17 @@ mod tests {
         s = s.ready("/s", "", 1); put_route(&s, &tx); assert!(!gui_starting(pro), "ready: requests go to it");
         s.closing = true; put_route(&s, &tx); assert!(gui_starting(pro), "closing, still alive: its locks are not released yet");
         let stopped = s.stopped("closed"); put_route(&stopped, &tx); assert!(!gui_starting(pro), "gone");
+    }
+    // lane K's update gate: the hub's own KiCad being stopped holds the lock with a command line that no longer reads: its own, never asked
+    #[test] fn a_lock_held_by_a_kicad_this_hub_started_is_its_own_until_that_process_is_gone() {
+        use super::super::locks::Verdict;
+        let foreign = |pid| Verdict::Foreign { pid: Some(pid), user: "person".into(), host: "box".into(), what: String::new() };
+        assert_eq!(own_pid_verdict(foreign(6163), |p| p == 6163), Verdict::Ours(6163), "being stopped: still ours");
+        assert!(matches!(own_pid_verdict(foreign(77), |p| p == 6163), Verdict::Foreign { .. }), "another process: asked");
+        assert_eq!(own_pid_verdict(Verdict::Stale, |_| true), Verdict::Stale);
+        live_pids().lock().unwrap().insert(424242);
+        assert!(live_pids().lock().unwrap().contains(&424242), "a spawned KiCad is in live_pids until reaped");
+        live_pids().lock().unwrap().remove(&424242);
     }
     #[test] fn gerbview_and_the_editors_kicad_asks_for() {
         use super::*;

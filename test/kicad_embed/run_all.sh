@@ -58,6 +58,8 @@ SUITES=(
   "embed_client_exit_e2e.sh:client-kill:CX_EXIT=kill"
   "embed_client_exit_e2e.sh:client-detach:CX_EXIT=detach"
   "embed_client_exit_e2e.sh:client-close-pending:CX_AT=pending"
+  # the editor back within 30 s, no KiCad dialog, one KiCad: warm + Edit together, KiCad killed, the hub's own restart, Backplane killed (fork)
+  "embed_restart_gate_e2e.sh:restart-gate"
   # a click on one of KiCad's DRC markers keeps the editor where it is; Escape shuts a side panel before the viewer (fork; skips without Hubble_DK)
   "embed_marker_click_e2e.sh:marker-click"
   "embed_thread_e2e.sh:thread"
