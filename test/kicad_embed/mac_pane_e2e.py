@@ -97,7 +97,7 @@ else:
         return [(int(w['number']), int(w['pid']), w['owner'], tuple(round(v) for v in w['bounds'])) for w in helper('windows') or [] if w['layer'] == 0]
 
     # macOS virtual key codes the checks use, to the keysym names the relay types (Screen Sharing: Super is Command)
-    KEYNAME = {0: 'a', 40: 'k', 53: 'escape', 11: 'b', 38: 'j', 8: 'c', 48: 'tab', 51: 'backspace', 3: 'f', 43: ',', 13: 'w', 36: 'return', 117: 'delete'}
+    KEYNAME = {1: 's', 0: 'a', 40: 'k', 53: 'escape', 11: 'b', 38: 'j', 8: 'c', 48: 'tab', 51: 'backspace', 3: 'f', 43: ',', 13: 'w', 36: 'return', 117: 'delete'}
 
     def key(code, flags=0):
         mods = [m for m, bit in (('ctrl', CTRL), ('alt', ALT), ('shift', SHIFT), ('cmd', CMD)) if flags & bit]
@@ -622,8 +622,21 @@ try:
             key(K_Z, CMD); time.sleep(1.2)  # undo: the next case starts from the same board
             return ok
         trace = lambda: open(os.path.join(OUT, 'kicad-embed-trace.log'), errors='replace').read().count('Backspace handed to wx') if os.path.isfile(os.path.join(OUT, 'kicad-embed-trace.log')) else 0
+        # the menu chords (Edit > Undo, Redo, File > Save are menu key equivalents too, like Delete's ⌫): judged by KiCad's own events / the file
         board_click(0.1, 0.9)
-        check(deleted(lambda: (key(K_A, CMD), time.sleep(0.6), key(K_DEL)), 'pcb-all'), 'bs 1: Cmd+A then ⌫ deletes the selection in the embedded board editor')
+        e0 = edits(); key(K_A, CMD); time.sleep(0.6); key(K_DEL); d_ok = bool(wait_for(lambda: edits() > e0, 3))
+        check(d_ok, 'bs 1: Cmd+A then ⌫ deletes the selection in the embedded board editor')
+        e1 = edits(); key(K_Z, CMD)
+        check(bool(wait_for(lambda: edits() > e1, 3)), 'keys: Cmd+Z undoes in the embedded board editor (an edit event follows)')
+        e2 = edits(); key(K_Z, CMD | SHIFT)
+        check(bool(wait_for(lambda: edits() > e2, 3)), 'keys: Cmd+Shift+Z redoes in the embedded board editor')
+        key(K_Z, CMD); time.sleep(1.5)
+        pcbf = os.path.join(OUT, 'proj', 'ecc83-pp.kicad_pcb'); m0 = os.path.getmtime(pcbf)
+        board_click(0.1, 0.9); key(K_A, CMD); time.sleep(0.4); key(K_FDEL); time.sleep(1.0); key(16 if False else 1, CMD)  # Cmd+S (keycode 1 = s)
+        saved = wait_for(lambda: os.path.getmtime(pcbf) > m0, 6)
+        check(bool(saved), 'keys: Cmd+S saves the board in the embedded editor (the file on disk changes)')
+        if saved:  # the board back as it was: git, then KiCad reverts to it (File > Revert is not needed: undo then save)
+            key(K_Z, CMD); time.sleep(1.0); key(1, CMD); time.sleep(2)
         key(K_ESC); time.sleep(0.5); board_click(0.5, 0.5); key(K_ESC); time.sleep(0.6)
         check(deleted(lambda: key(K_DEL), 'pcb-hover'), 'bs 2: ⌫ with nothing selected deletes the item under the pointer')
         board_click(0.1, 0.9)
