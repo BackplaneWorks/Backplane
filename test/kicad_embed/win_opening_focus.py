@@ -1629,8 +1629,8 @@ def run(h):
             print("INFO BOM edit's format line: " + (m.group(0) if m else "none (the files were current)"), flush=True)
             h.check("savegate: the board is untouched by the BOM edit", sha(pcb) == h1, {"before": h1, "after": sha(pcb)})
             return h.finish()
-        if only == "plan":
-            os.environ.update(PLAN_ENV)  # the stand-in's MCP answers whole in standin.log, as on Linux
+        if only in ("plan", "libs", "keys", "survive", "lock4", "fresh_during", "nogpu", "checks"):
+            os.environ.update(PLAN_ENV)  # the stand-in runs mcpcall turns only with these (its MCP answers whole in standin.log), as on Linux
         h.start_hub(embed_mode="fork")
         cp = h.start_client([
             {"select": 0}, {"wait": 2800}, {"click": "rail:Board"},
@@ -2313,7 +2313,12 @@ def run(h):
                 fr = [w for w in E.list_child_windows(top) if w["visible"] and ("PCB Editor" if kind == "PCB" else "Schematic Editor") in (w["title"] or "")]
                 if fr:
                     f_ = max(fr, key=lambda w: w["w"] * w["h"])
-                    E.screen_click(f_["root_x"] + f_["w"] // 2 + 40, f_["root_y"] + f_["h"] // 2 + 40); time.sleep(1.5)
+                    gls_ = [w for w in E.list_child_windows(f_["hwnd"]) if w["visible"] and w["class"] == "wxGLCanvas"] or [f_]
+                    g_ = max(gls_, key=lambda w: w["w"] * w["h"])
+                    r_ = E.W.RECT(); E.u32.GetWindowRect(top, E.ctypes.byref(r_))
+                    x_, y_ = g_["root_x"] + g_["w"] // 2 + 30, g_["root_y"] + g_["h"] // 2 + 30
+                    if r_.left < x_ < r_.right and r_.top < y_ < r_.bottom:
+                        E.screen_click(x_, y_); time.sleep(1.5)
                 c1 = count(main_k, doc)
                 row(kind, "Ctrl+V", "works" if c1 == (c0 or 0) + 1 else ("does nothing" if c1 == c0 else "wrong"), {"before": c0, "after_paste": c1})
                 E.key_tap("Escape"); time.sleep(0.5)
