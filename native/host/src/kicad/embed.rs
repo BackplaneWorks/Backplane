@@ -934,7 +934,22 @@ pub async fn gui_call(route: &GuiRoute, ty: &str, msg: Value) -> Value { gui_cal
 /// The same, as `client` (an agent's actor, `agent:<thread>`): the fork's co-editing attributes, groups and undoes its changes by it.
 /// The hub's commands that never change KiCad's selection: they do not make a later selection the hub's.
 const NEVER_SELECTS: &[&str] = &["SetAgentActivity", "SetHostMarkers", "RunChecks", "HideFrame", "AttachToParent", "Shutdown", "SaveDocument", "SetVisibleLayers", "SetActiveLayer"];
-pub async fn gui_call_as(route: &GuiRoute, ty: &str, msg: Value, client: &str) -> Value {
+pub async fn gui_call_as(route: &GuiRoute, ty: &str, msg: Value, client: &str) -> Value { gui_call_in(route, ty, msg, client, None).await }
+/// How long a read waits on KiCad's task gate (a check or a refill running: bp.13 answers only re-entrant-safe reads meanwhile, AS_BUSY
+/// "a task is running: <what> (token <t>, ...)" for the rest, GetPlan with its derived data among them) before it is answered in words.
+pub const READ_TASK_WAIT: Duration = Duration::from_secs(30);
+/// gui_call_as for a request that waits out KiCad's task (GetTaskStatus with its token) for at most `max`, then is sent again: an agent's
+/// read, the plan tools', the Plan panel's. A task gate's refusal is no failure of the request (nothing was done); past `max` it is
+/// answered with what KiCad is busy with and to ask again (`busy_words`), its status still AS_BUSY.
+pub async fn gui_call_patient(route: &GuiRoute, ty: &str, msg: Value, client: &str, max: Duration) -> Value {
+    let o = gui_call_in(route, ty, msg, client, Some(max)).await;
+    match task_refusal(&o) { Some((what, _)) => json!({"ok": false, "status": "AS_BUSY", "error": busy_words(&what, max), "task": what}), None => o }
+}
+/// What an agent is told when KiCad's task outlasts its wait.
+pub fn busy_words(what: &str, waited: Duration) -> String {
+    format!("KiCad is busy with {what} and answers only some reads until it ends; it was still running after {} s. Nothing was done: ask again in a moment.", waited.as_secs())
+}
+async fn gui_call_in(route: &GuiRoute, ty: &str, msg: Value, client: &str, patient: Option<Duration>) -> Value {
     // every request but the checks' own is counted, so an in-editor check never starts while another client waits (kicad/checkrun.rs)
     // a named client's (an agent, the person's edit from a panel or a phone) also holds checks a moment after it ends; the hub's own
     // unnamed reads (the live BOM's poll, every second) only while in flight
@@ -945,6 +960,7 @@ pub async fn gui_call_as(route: &GuiRoute, ty: &str, msg: Value, client: &str) -
     let named = !client.is_empty();
     let _use = (client != CHECKS_CLIENT).then(|| { let mut m = gui_use().lock().unwrap(); let e = m.entry(route.sock.clone()).or_default(); e.0 += 1; if named { e.1 = crate::hub::now_ms() } Use(route.sock.clone(), named) });
     if TASK_GATED.iter().any(|g| ty.rsplit('.').next() == Some(*g)) && has_task_gate(&route.sock) { return raw_gated(&route.tx, &route.sock, &route.desc, ty, msg, 30000, client, None).await }
+    if let Some(max) = patient { return raw_gated_for(&route.tx, &route.sock, &route.desc, ty, msg, 30000, client, None, true, max, false).await }
     let (t, r) = oneshot::channel();
     if route.tx.send(Msg::Raw { sock: route.sock.clone(), desc: route.desc.clone(), ty: ty.into(), msg, timeout: 30000, client: client.into(), reply: t }).is_err() {
         return json!({"ok":false,"error":"no reply","why":"no reply","fallback":true})
@@ -2251,17 +2267,22 @@ pub const SUPERSEDED: &str = "superseded by a newer show";
 /// short wait), up to 10 minutes, the session saying meanwhile what it waits on (`task_wait`); `seq`: a show's number, given up for a newer.
 async fn raw_gated(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, ty: &str, msg: Value, timeout: u64, client: &str, seq: Option<u64>) -> Value {
     let gated = TASK_GATED.iter().any(|g| ty.rsplit('.').next() == Some(*g)) && has_task_gate(sock);
+    raw_gated_for(me, sock, desc, ty, msg, timeout, client, seq, gated, Duration::from_secs(600), true).await
+}
+/// raw_gated for any request (`gated`), waiting at most `max` for KiCad's task; `say`: the session says what it waits on (the hub's own
+/// drive of the frames; an agent's or the Plan panel's read waits without it). Past `max` the task gate's refusal is the answer.
+async fn raw_gated_for(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, ty: &str, msg: Value, timeout: u64, client: &str, seq: Option<u64>, gated: bool, max: Duration, say: bool) -> Value {
     let t0 = std::time::Instant::now();
     let mut waited = false;
     loop {
         let o = raw_once(me, sock, desc, ty, msg.clone(), timeout, client).await;
         let refusal = if gated { task_refusal(&o) } else { None };
-        let Some((what, token)) = refusal.filter(|_| t0.elapsed() < Duration::from_secs(600)) else {
-            if waited { let _ = me.send(Msg::TaskWait { sock: sock.into(), what: String::new() }); eprintln!("kicad embed: {ty} sent after KiCad's task, {} ms", t0.elapsed().as_millis()); }
+        let Some((what, token)) = refusal.filter(|_| t0.elapsed() < max) else {
+            if waited { if say { let _ = me.send(Msg::TaskWait { sock: sock.into(), what: String::new() }); } eprintln!("kicad embed: {ty} sent after KiCad's task, {} ms", t0.elapsed().as_millis()); }
             return o
         };
         if !waited { eprintln!("kicad embed: {ty} waits on KiCad's task: {what}"); waited = true; }
-        let _ = me.send(Msg::TaskWait { sock: sock.into(), what: what.clone() });
+        if say { let _ = me.send(Msg::TaskWait { sock: sock.into(), what: what.clone() }); }
         // a show's caller is answered now (the switch follows when the task ends): its client sees the wait instead of a held request
         if let Some(n) = seq { if let Some(r) = early_replies().lock().unwrap().remove(&(sock.to_string(), n)) { let _ = r.send(Ok(json!({"waiting": true, "task_wait": what}))); } }
         let mut unknown_once = false;
@@ -2272,7 +2293,7 @@ async fn raw_gated(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, ty: 
             // a refused request (the token gone: "unknown task token", AS_BAD_REQUEST) is an ended task too
             let st = raw_once(me, sock, desc, "kiapi.common.tasks.GetTaskStatus", json!({"token": {"value": token}}), 3000, "").await;
             match task_state(&st) { TaskState::Running => {}, TaskState::Unknown if !unknown_once => unknown_once = true, _ => break }
-            if t0.elapsed() > Duration::from_secs(600) { break }
+            if t0.elapsed() > max { break }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
@@ -3595,10 +3616,43 @@ mod tests {
         let o = gui_call(&route, "kiapi.backplane.embed.ShowFrame", json!({"kind": "FK_PCB_EDITOR"})).await;
         assert_eq!(o["ok"], true, "{o}");
         assert_eq!(*seen.lock().unwrap(), ["ShowFrame", "GetTaskStatus", "GetTaskStatus", "GetTaskStatus", "ShowFrame"], "polled while running, sent once it ended");
-        // a request outside the gated set is answered as it is (its caller decides)
+        // a request outside the gated set is answered as it is by gui_call (its caller decides)
         let (mut route2, mut rx2) = stand_in_route("/p/gate2.kicad_pro"); route2.sock = "/stand-in-gate2".into();
         tokio::spawn(async move { while let Some((_, _, reply)) = rx2.recv().await { let _ = reply.send(json!({"ok": false, "status": "AS_BUSY", "error": "a task is running: DRC (token t, for 1 s)"})); } });
         assert_eq!(gui_call(&route2, "kiapi.board.commands.GetItems", json!({})).await["status"], "AS_BUSY");
+        // ... and by gui_call_patient, past its wait, in words: what KiCad is busy with, nothing done, ask again (lane K: plan_get during DRC)
+        let t0 = std::time::Instant::now();
+        let o = gui_call_patient(&route2, "kiapi.backplane.plan.GetPlan", json!({}), "", Duration::from_millis(700)).await;
+        assert!(t0.elapsed() >= Duration::from_millis(700), "it waited");
+        assert_eq!((o["ok"].clone(), o["status"].clone(), o["task"].clone()), (json!(false), json!("AS_BUSY"), json!("DRC")), "{o}");
+        let e = o["error"].as_str().unwrap();
+        assert!(e.contains("KiCad is busy with DRC") && e.contains("Nothing was done") && e.contains("ask again") && !e.contains("token"), "{e}");
+    }
+    /// An agent's read (plan_get's GetPlan with derived data) refused AS_BUSY by KiCad's task gate during a 0.5 s DRC: the hub asks the
+    /// task's status until it ends and reads again; the agent gets the plan, never the refusal (lane K's clean-box run on bp.13).
+    #[tokio::test] async fn a_read_refused_for_a_task_is_read_again_when_it_ends() {
+        let (mut route, mut rx) = stand_in_route("/p/gateread.kicad_pro"); route.sock = "/stand-in-gate-read".into();
+        let seen = Arc::new(Mutex::new(Vec::<String>::new())); let s2 = seen.clone();
+        tokio::spawn(async move {
+            let (mut reads, mut polls) = (0, 0);
+            while let Some((ty, msg, reply)) = rx.recv().await {
+                s2.lock().unwrap().push(ty.rsplit('.').next().unwrap_or("").to_string());
+                let o = if ty.ends_with("GetPlan") { reads += 1; if reads == 1 { json!({"ok": false, "status": "AS_BUSY", "error": "a task is running: DRC (token tk5, for 0.1 s); kiapi.backplane.plan.GetPlan waits until it completes (GetTaskStatus with the token); only reads are answered meanwhile"}) } else { json!({"ok": true, "message": {"json": "{\"revision\":4}"}}) } }
+                    else if ty.ends_with("GetTaskStatus") { assert_eq!(msg["token"]["value"], "tk5"); polls += 1; json!({"ok": true, "message": {"state": if polls < 2 { "TS_RUNNING" } else { "TS_COMPLETED" }}}) }
+                    else { json!({"ok": true, "message": {}}) };
+                let _ = reply.send(o);
+            }
+        });
+        let o = gui_call_patient(&route, "kiapi.backplane.plan.GetPlan", json!({"derived": true}), "agent:t1", READ_TASK_WAIT).await;
+        assert_eq!(o["ok"], true, "{o}");
+        assert_eq!(o["message"]["json"], "{\"revision\":4}");
+        assert_eq!(*seen.lock().unwrap(), ["GetPlan", "GetTaskStatus", "GetTaskStatus", "GetPlan"], "polled while running, read again once it ended");
+        // a refusal that is not the task gate's (a dialog open) is the answer at once
+        let (mut route3, mut rx3) = stand_in_route("/p/gateread3.kicad_pro"); route3.sock = "/stand-in-gate-read3".into();
+        tokio::spawn(async move { while let Some((_, _, reply)) = rx3.recv().await { let _ = reply.send(json!({"ok": false, "status": "AS_BUSY", "error": "the dialog 'Board Setup' is open"})); } });
+        let t0 = std::time::Instant::now();
+        let o = gui_call_patient(&route3, "kiapi.backplane.plan.GetPlan", json!({}), "", READ_TASK_WAIT).await;
+        assert!(t0.elapsed() < Duration::from_secs(2) && o["error"] == "the dialog 'Board Setup' is open", "{o}");
     }
     /// A show waiting on the task gives way to a newer one: only the latest editor is sent when the task ends.
     #[tokio::test] async fn a_waiting_show_gives_way_to_a_newer_one() {

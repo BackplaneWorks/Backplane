@@ -434,6 +434,8 @@ pub fn pro_of(path: &str) -> String {
     String::new()
 }
 /// A listed KiCad read (`Get*`, `Ping`): the commands a copy may run and a writer lock never gates.
+/// The requests that wait out KiCad's task gate in the open editor rather than fail: reads, and the routing plan's commands.
+pub fn patient_of(type_: &str) -> bool { is_read(type_) || (type_.starts_with("kiapi.backplane.plan.") && !type_.ends_with(".ApprovePlan")) }
 pub fn is_read(type_: &str) -> bool {
     let name = type_.rsplit('.').next().unwrap_or(type_);
     name.starts_with("Get") || name == "Ping"
@@ -559,7 +561,10 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
             match save_gate(&gui, &msg, path, saves_board).await { Err(skip) => return Ok(skip), Ok(u) => upgrade = u }
         }
         let msg_doc = json!({"document": msg["document"].clone()});
-        let o = super::embed::gui_call_as(&gui, ty, msg, &actor).await;
+        // KiCad's task gate (a check or a refill running) refuses all but re-entrant-safe reads: a read, and the plan tools' requests
+        // (plan_get's GetPlan with derived data, plan_verify, plan_route; the Plan panel's reads), wait for the task and go again; a refusal
+        // did nothing, so going again is safe. Past READ_TASK_WAIT the agent is told in words what KiCad is busy with and to ask again.
+        let o = if patient_of(ty) { super::embed::gui_call_patient(&gui, ty, msg, &actor, super::embed::READ_TASK_WAIT).await } else { super::embed::gui_call_as(&gui, ty, msg, &actor).await };
         if let Some(note) = held { log_fallback(hub, thread, &note).await; }
         if commits && o["ok"].as_bool().unwrap_or(false) { super::embed::unsaved_update(&pro, |u| u.agent_committed()); }
         // the hub's own record of an agent's change not on disk (KiCad does not mark a document modified for it)
@@ -731,6 +736,11 @@ mod tests {
     }
     use super::*;
     /// bp.4's kicad-cli --version prints `10.99.0`: its manifest says what it is, so Settings > CAD shows ok and 10.99.0-bp.4, not stock
+    #[test] fn reads_and_the_plans_commands_wait_out_kicads_task() {
+        assert!(patient_of("kiapi.backplane.plan.GetPlan") && patient_of("kiapi.backplane.plan.VerifyPlan") && patient_of("kiapi.backplane.plan.RoutePlan"));
+        assert!(patient_of("kiapi.board.commands.GetItems") && patient_of("kiapi.common.commands.Ping"));
+        assert!(!patient_of("kiapi.common.commands.CreateItems") && !patient_of("kiapi.backplane.plan.ApprovePlan"));
+    }
     #[test] fn cad_status_trusts_a_backplane_manifest() {
         let s = |a: &str, b: &str| (a.to_string(), b.to_string());
         let bp4 = Env { cli: "/k/bin/kicad-cli".into(), version: "10.99.0-bp.4".into(), status: "ok".into(), api: 2, ..Default::default() };

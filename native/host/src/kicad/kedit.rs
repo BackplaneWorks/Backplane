@@ -43,12 +43,20 @@ pub trait Call: Sync {
 /// BUSY_WAIT, so a check that happens to run does not fail a whole edit. Any other refusal (an open dialog, which the answer names) is the answer.
 pub const BUSY_STEP: std::time::Duration = std::time::Duration::from_millis(250);
 pub const BUSY_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
-pub fn task_busy(e: &str) -> bool { e.contains("AS_BUSY") && e.contains("a task is running") }
+pub fn task_busy(e: &str) -> bool { e.contains("AS_BUSY") && (e.contains("a task is running") || e.contains("KiCad is busy with ")) }
+/// The task a task-gate refusal names ("... a task is running: DRC of video (token 7, for 1 s) ..." -> "DRC of video"); words it otherwise.
+pub fn busy_task(e: &str) -> &str {
+    if let Some(r) = e.split("KiCad is busy with ").nth(1) { return r.split(" and answers").next().unwrap_or(r).trim() } // the hub's own words (embed::busy_words)
+    e.split("a task is running: ").nth(1).map(|r| r.split(" (token ").next().unwrap_or(r).split(';').next().unwrap_or(r).trim()).filter(|s| !s.is_empty()).unwrap_or("a task") }
 struct Patient<'a> { c: &'a dyn Call, step: std::time::Duration, wait: std::time::Duration }
 impl Call for Patient<'_> {
     fn call<'b>(&'b self, ty: &'b str, msg: Value) -> Fut<'b> { Box::pin(async move {
         let until = std::time::Instant::now() + self.wait;
-        loop { match self.c.call(ty, msg.clone()).await { Err(e) if task_busy(&e) && std::time::Instant::now() < until => tokio::time::sleep(self.step).await, r => return r } }
+        loop { match self.c.call(ty, msg.clone()).await {
+            Err(e) if task_busy(&e) && std::time::Instant::now() < until => tokio::time::sleep(self.step).await,
+            // past the wait: what KiCad is busy with, in words, and to ask again (never KiCad's token and gate text)
+            Err(e) if task_busy(&e) => return Err(super::embed::busy_words(busy_task(&e), self.wait)),
+            r => return r } }
     }) }
     fn sheet_texts(&self) -> Option<Vec<String>> { self.c.sheet_texts() }
     fn check<'a>(&'a self) -> Fut<'a> { self.c.check() }
@@ -1171,6 +1179,9 @@ mod tests {
         assert_eq!(names(&f), ["GetOpenDocuments", "OpenDocument", "GetItems", "BeginCommit", "UpdateItems", "UpdateItems", "UpdateItems", "EndCommit", "SaveDocument"]);
         // an open dialog's refusal names the dialog and is the answer at once; a refused command (the plan's approval, in the gate above this) is too
         assert!(task_busy("KiCad answered AS_BUSY: a task is running: DRC") && !task_busy("KiCad answered AS_BUSY: the dialog \"Zone Properties\" is open"));
+        assert_eq!(busy_task("KiCad answered AS_BUSY: a task is running: DRC of video (token 7, for 1 s); x waits"), "DRC of video");
+        let w = crate::files::kicad::embed::busy_words("DRC", std::time::Duration::from_secs(30));
+        assert!(task_busy(&format!("KiCad answered AS_BUSY: {w}")) && busy_task(&format!("KiCad answered AS_BUSY: {w}")) == "DRC");
         // nothing here closes a document, shows a frame or selects: only these commands ever leave an edit
         let f = fake(None); go(&f, json!({"ops": [{"find": "zone"}, {"set": {"kind": "zone", "net": "+1V8"}, "name": "Z"}, {"delete": {"kind": "track", "net": "GND"}}, {"netclass": {"name": "N", "clearance": 0.2}}, {"refill": true}]})).unwrap();
         const SENT: &[&str] = &["GetOpenDocuments", "OpenDocument", "GetItems", "BeginCommit", "UpdateItems", "DeleteItems", "EndCommit", "SetNetClasses", "GetNetClasses", "GetNetClassAssignments", "RefillZones", "SaveDocument"];
