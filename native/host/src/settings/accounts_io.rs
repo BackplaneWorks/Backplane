@@ -18,6 +18,9 @@ pub const STARTING: &str = "A turn is starting on this account. Try again in a m
 pub const TURN_RUNNING: &str = "A turn is running on this account. Try again when it ends.";
 /// The whole of a one-shot CLI call (`Accounts::cli`): its output and its exit.
 const CLI_LIMIT: Duration = Duration::from_secs(12);
+/// A Codex sign-in's store is looked at this often for the login Codex saved (#1162), and the login is taken once it has been there [`SAVED_GRACE`].
+const SAVED_POLL: Duration = Duration::from_secs(1);
+const SAVED_GRACE: Duration = Duration::from_secs(3);
 const FAILURES: &[(&str, &str)] = &[
     ("code_rejected", "Claude did not accept that authentication code. It may be incomplete, expired, already used, or from an earlier sign-in. Choose Connect / Login and copy the new code from that sign-in page."),
     ("network", "Claude could not reach its sign-in service. Check the connection and try Connect / Login again."),
@@ -288,6 +291,20 @@ fn saved_kind(p: &Value) -> Profile {
         identity: json!({"email":label(p["email"].as_str().unwrap_or("")),"plan":label(p["plan"].as_str().unwrap_or("")),"auth":"oauth_token"}), ..Profile::default() }
 }
 
+/// #1162: a Codex sign-in that finished while the hub never took it (the hub stopped, or it missed the end) left the login in the attempt's store and the
+/// profile on none. On open such a profile takes that store (the newest, if several); the check after a restart then verifies it like any saved login.
+fn stranded_store(root: &Path, p: &Profile) -> Option<String> {
+    if p.provider != "codex" || !p.store.is_empty() || p.kind == SYNC { return None }
+    let base = root.join(&p.id);
+    if std::fs::symlink_metadata(&base).map_or(true, |m| !m.is_dir() || m.file_type().is_symlink()) { return None }
+    std::fs::read_dir(&base).ok()?.flatten().filter_map(|e| {
+        let name = e.file_name().to_str().filter(|n| valid_id(n))?.to_string();
+        if !e.file_type().ok()?.is_dir() { return None }
+        let auth = std::fs::symlink_metadata(e.path().join("auth.json")).ok().filter(|m| m.is_file())?;
+        Some((auth.modified().ok()?, name))
+    }).max().map(|(_, n)| n)
+}
+
 // ---- child processes ----
 
 /// Codex's app-server over JSON lines on stdio: requests with ids, notifications to a channel. Closed after its timeout.
@@ -375,6 +392,7 @@ impl Accounts {
                     }
                 }
             }
+            for p in inner.profiles.iter_mut() { if let Some(s) = stranded_store(&root, p) { p.store = s } }
         }
         // the usage read with the login's own token, on a real hub only (a test's, a stand-in's and a copy's read the CLI)
         // (BACKPLANE_USAGE_READ=1: a rig with stand-in agents reads the logins copied into its temp home for real; a copy never does)
@@ -1010,10 +1028,16 @@ impl Accounts {
             let Ok((login_id, url, code)) = started else { rpc.close().await; return self.cancel(&aid, "failed", "") };
             if self.current(&aid).is_none() { rpc.close().await; return }
             self.set_waiting(&aid, url, code);
+            // #1162: the sign-in can finish (Codex saved the login in this attempt's store, and `account/read` names it) with no `account/login/completed`
+            // reaching here; the attempt then waited for good. The saved login ends the wait too, once Codex had time to say so itself: `finish` verifies
+            // it in a fresh app-server, as for a completion, so a file that is not a working login fails there.
+            let saved = self.directory(&cand).ok().map(|d| d.join("auth.json"));
+            let mut tick = tokio::time::interval(SAVED_POLL); let mut saved_since: Option<tokio::time::Instant> = None;
             let outcome = loop {
                 tokio::select! {
-                    n = rpc.notes.recv() => match n { Some(m) if m["method"] == "account/login/completed" && m["params"]["loginId"] == login_id => break Some(m["params"]["success"] == true), Some(_) => {}, None => break Some(false) },
+                    n = rpc.notes.recv() => match n { Some(m) if m["method"] == "account/login/completed" && (m["params"]["loginId"] == login_id || m["params"]["loginId"].is_null()) => break Some(m["params"]["success"] == true), Some(_) => {}, None => break Some(false) },
                     c = cmds.recv() => match c { Some(Cmd::Cancel) | None => { let _ = rpc.request("account/login/cancel", json!({"loginId":login_id}), 5).await; rpc.close().await; return }, Some(Cmd::Respond(_)) => {} },
+                    _ = tick.tick() => if saved.as_ref().map_or(false, |f| f.is_file()) { if saved_since.get_or_insert_with(tokio::time::Instant::now).elapsed() >= SAVED_GRACE { break Some(true) } },
                     _ = tokio::time::sleep_until(deadline) => break None,
                 }
             };
@@ -2021,6 +2045,40 @@ for l in sys.stdin:
         let plan = a.launch_plan(&id, "2", "codex").await.unwrap(); assert!(plan.env.iter().any(|(k, _)| k == "CODEX_HOME")); assert!(plan.args.iter().any(|x| x.contains("cli_auth_credentials_store")));
         let s = a.request(&json!({"op":"disconnect","profile":id})).await; assert_eq!((prof(&s, &id)["state"].clone(), prof(&s, &id)["epoch"].clone()), (json!("disconnected"), json!(3)));
         assert_eq!(a.request(&json!({"op":"bogus","profile":id})).await["error"], GENERIC);
+        let _ = std::fs::remove_dir_all(&h);
+    }
+    /// #1162 (Codex CLI 0.169.0): the device-code sign-in finished and Codex saved the login in the attempt's store (`account/read` named it), but no
+    /// `account/login/completed` reached the hub; the account stayed "Signing in" with its store empty. The saved login ends the sign-in.
+    #[tokio::test(flavor = "multi_thread")] async fn a_codex_sign_in_that_saves_its_login_without_saying_so_still_connects() {
+        let (h, sd) = dirs("cx-quiet"); let a = mgr(&h, &sd);
+        let quiet = CODEX.replace("            send({\"method\": \"account/login/completed\", \"params\": {\"loginId\": \"L1\", \"success\": True}})\n", "");
+        assert_ne!(quiet, CODEX); std::fs::write(sd.join("codex"), quiet).unwrap();
+        let id = add(&a, "codex", "Team").await;
+        assert_eq!(a.request(&json!({"op":"login","profile":id,"mode":"device"})).await["error"], "");
+        let s = until(&a, |s| s["attempts"][0]["state"] == "waiting").await; let aid = s["attempts"][0]["id"].as_str().unwrap().to_string();
+        let end = std::time::Instant::now() + Duration::from_secs(60);
+        let s = loop { let s = a.snapshot(); if s["attempts"][0]["state"] != "waiting" || std::time::Instant::now() >= end { break s } tokio::time::sleep(Duration::from_millis(50)).await };
+        assert_eq!(s["attempts"][0]["state"], "done", "the saved login ends the sign-in: {s}");
+        let p = prof(&s, &id); assert_eq!((p["state"].clone(), p["identity"]["email"].clone()), (json!("connected"), json!("c@example.com")), "{p}");
+        assert_eq!(a.profile(&id).unwrap().store, aid, "the profile runs on the attempt's store");
+        let _ = std::fs::remove_dir_all(&h);
+    }
+    /// #1162: an attempt whose login was saved but never taken (the hub stopped while it waited) is recovered when the hub starts again: the profile takes
+    /// that store and the check after the restart connects it, with no new sign-in. A profile that has a store keeps it.
+    #[tokio::test(flavor = "multi_thread")] async fn a_stranded_codex_login_is_taken_up_after_a_restart() {
+        let (h, sd) = dirs("cx-strand"); let a = mgr(&h, &sd); let id = add(&a, "codex", "Team").await;
+        let root = h.join("providers/accounts-v1"); let (old, newer) = (new_id(), new_id());
+        for (st, email) in [(&old, "old@example.com"), (&newer, "c@example.com")] { let d = root.join(&id).join(st); std::fs::create_dir_all(&d).unwrap(); std::fs::write(d.join("auth.json"), json!({"email":email}).to_string()).unwrap(); std::thread::sleep(Duration::from_millis(20)); }
+        std::fs::create_dir_all(root.join(&id).join(new_id())).unwrap(); // an attempt that saved nothing
+        drop(a);
+        let b = mgr(&h, &sd); assert_eq!(b.profile(&id).unwrap().store, newer, "the newest saved login");
+        let s = b.request(&json!({"op":"list"})).await; let p = prof(&s, &id);
+        assert_eq!((p["state"].clone(), p["identity"]["email"].clone()), (json!("connected"), json!("c@example.com")), "{p}");
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(root.join("profiles.json")).unwrap()).unwrap();
+        assert_eq!(saved["profiles"].as_array().unwrap().iter().find(|x| x["id"] == id.as_str()).unwrap()["store"], json!(newer), "kept in the registry");
+        let c = mgr(&h, &sd);
+        let claude = add(&c, "claude", "Work").await; let d = root.join(&claude).join(new_id()); std::fs::create_dir_all(&d).unwrap(); std::fs::write(d.join("auth.json"), "{}").unwrap();
+        assert_eq!(mgr(&h, &sd).profile(&claude).unwrap().store, "", "only a Codex login is taken up this way");
         let _ = std::fs::remove_dir_all(&h);
     }
     /// #1108: a CLI that answered and closed its output but never exits (or whose exit the hub misses) held `cli`, and so the account's job, for ever.

@@ -2087,7 +2087,7 @@ gpui.acct.check.sign.in	Check sign-in	サインインを確認
 gpui.acct.sign.in.again	Sign in again	もう一度サインイン
 gpui.acct.confirm.delete	Confirm delete	削除を確定
 gpui.acct.keep	Keep	残す
-gpui.acct.each.account.is.a.separate	Each account is a separate Claude subscription sign-in kept on this machine. A thread uses the account picked beside its model; when one runs out of allowance the thread carries on with the next account that has some left.	アカウントはそれぞれ、このマシンに保存されたClaudeのサブスクリプションへのサインインです。スレッドはモデルの横で選んだアカウントを使い、利用枠がなくなると、枠の残っている次のアカウントで続けます。
+gpui.acct.each.account.is.a.separate	Each account is a separate Claude or Codex subscription sign-in kept on this machine. A thread uses the account picked beside its model; when one runs out of allowance the thread carries on with the next account that has some left.	アカウントはそれぞれ、このマシンに保存されたClaudeまたはCodexのサブスクリプションへのサインインです。スレッドはモデルの横で選んだアカウントを使い、利用枠がなくなると、枠の残っている次のアカウントで続けます。
 gpui.acct.the.claude.cli.s.own	The Claude CLI's own sign-in on this machine, as before.	このマシンにあるClaude CLI自身のサインイン（従来どおり）。
 gpui.acct.used.for.new.threads	Used for new threads	新しいスレッドで使用中
 gpui.acct.available	Available	利用可能
@@ -2438,6 +2438,7 @@ gpui.c.kicad.cancel	Cancel	キャンセル
 gpui.c.kicad.open.the.app.instead	Open the KiCad app instead	代わりに KiCad アプリで開く
 gpui.c.kicad.mac.full.screen	KiCad cannot be shown here while Backplane is full screen on macOS. Pop it out into a window of its own, or leave full screen.	macOS で Backplane が全画面のあいだ、KiCad はここに表示できません。別ウインドウにポップアウトするか、全画面を終了してください。
 gpui.c.kicad.mac.prompt	macOS is asking for permission for Backplane: answer the prompt to let KiCad start.	macOS が Backplane へのアクセス許可を求めています。表示されている確認に答えると KiCad が起動します。
+gpui.c.kicad.mac.buried	macOS keeps KiCad's editor behind Backplane's window here. Pop it out into a window of its own.	この位置では macOS が KiCad のエディタを Backplane のウィンドウの後ろに置いたままにしています。エディタを別ウィンドウに切り離してください。
 gpui.c.kicad.recover.prompt	KiCad is asking: Recover Unsaved Changes. Restore brings back the changes KiCad kept from the session that ended; Discard opens the files as they were last saved. Its question may be beside Backplane's window.	KiCad からの確認: 未保存の変更の復元 (Recover Unsaved Changes)。Restore で前回のセッションで KiCad が保持していた変更を戻し、Discard で最後に保存したファイルを開きます。確認は Backplane のウィンドウの横に表示されることがあります。
 gpui.c.kicad.stock.tip	This is stock KiCad: it can open in windows of its own, and agents cannot edit in it. Backplane KiCad opens in here.	これは標準の KiCad です。独自のウィンドウで開くことがあり、エージェントは編集できません。Backplane KiCad はこの中で開きます。
 gpui.c.kicad.kicad.is.not.responding	KiCad is not responding.	KiCad が応答していません。
