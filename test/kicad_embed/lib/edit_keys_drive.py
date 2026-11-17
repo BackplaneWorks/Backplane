@@ -289,6 +289,88 @@ def actor_after(docfile, n0):
     row("per_actor_undo", v, why)
 
 
+REAL = {"pcb": {"footprint": 1, "shape": 3, "text": 7, "track": 11, "via": 12, "arc": 13, "zone": 16},
+        "sch": {"junction": 19, "no_connect": 20, "line": 23, "text": 27, "label": 30, "global_label": 31, "hier_label": 32, "symbol": 35}}
+MARKER = {"pcb": 14, "sch": 18}
+
+
+def count(kot):
+    r = subprocess.run([sys.executable, IPC, "items-count", SOCK, editor, str(kot)], capture_output=True, text=True)
+    try:
+        return json.loads(r.stdout.strip().splitlines()[-1])["count"]
+    except (ValueError, IndexError, KeyError):
+        return -1
+
+
+def real_items():
+    return {k: count(v) for k, v in REAL[editor].items()}
+
+
+def run_check():
+    """A check in KiCad (RunChecks: DRC or ERC) and its end (ET_CHECKS_DONE): its markers are on the canvas after."""
+    n = seq()
+    subprocess.run([sys.executable, IPC, "run-checks", SOCK, editor], capture_output=True, text=True)
+    return checks_idle(n, 60)
+
+
+def agent_read(docfile):
+    """An agent's read through the hub's kicad_ipc (GetItems), as the stand-in agent makes it: (ok, what it answered)."""
+    log = os.path.join(OUT, "standin.log")
+    before = sum(1 for l in open(log, errors="replace") if l.startswith("MCPCALL")) if os.path.exists(log) else 0
+    kot = "KOT_PCB_FOOTPRINT" if editor == "pcb" else "KOT_SCH_SYMBOL"
+    call = {"name": "kicad_ipc", "arguments": {"path": docfile, "type": "kiapi.common.commands.GetItems", "message": {"header": {"document": "$doc"}, "types": [kot]}}}
+    steps = json.dumps([{"method": "turn.start", "params": {"thread": "t1", "text": "mcpcall:" + json.dumps(call), "msg": f"mku{time.time_ns()}"}}])
+    subprocess.run([os.environ.get("BUN", "bun"), os.environ["HUB_RPC_MJS"], os.environ["HPORT"], os.path.join(OUT, "home", "token"), steps], capture_output=True, text=True)
+    end = time.time() + 60
+    while time.time() < end:
+        lines = [l for l in open(log, errors="replace") if l.startswith("MCPCALL")] if os.path.exists(log) else []
+        if len(lines) > before:
+            last = lines[-1]
+            return ('"isError":true' not in last.replace(" ", "") and "AS_BUSY" not in last), last[:160].strip()
+        time.sleep(0.25)
+    return False, "no answer in 60 s"
+
+
+def undo_markers(docfile):
+    """The undo-markers case (fork d2ce4ba5c6): select all with the check's markers in it, Delete, undo, redo, undo, a check run and an
+    agent read between each step: every real item back at each undo, deleted at the redo, and no dialog of KiCad's at any point."""
+    wins0 = {w["xid"] for w in windows_of_kicad()}
+    c0 = real_items(); notes, bad = [], []
+    def between(tag):
+        ran = run_check(); ok, said = agent_read(docfile)
+        notes.append(f"{tag}: check {'done' if ran else 'no ET_CHECKS_DONE'}, {count(MARKER[editor])} markers, agent read {'ok' if ok else 'FAILED: ' + said}")
+        if not ok:
+            bad.append(f"the agent's read after {tag} failed")
+    def step(tag, keys, want_back):
+        focus() if tag == "delete" else None
+        n = seq(); x(*keys); ed = wait_edits(n)
+        if ed:
+            checks_idle(n, 15)
+        now = real_items()
+        if want_back and now != c0:
+            bad.append(f"after {tag} not every real item is back: {now} (was {c0})")
+        if not want_back and sum(max(v, 0) for v in now.values()) >= sum(max(v, 0) for v in c0.values()):
+            bad.append(f"after {tag} items remain: {now} (was {c0})")
+        notes.append(f"{tag}: edits {sums(ed)}, real items {sum(v for v in now.values() if v > 0)}")
+        if not ed:
+            bad.append(f"{tag}: no edit")
+    between("start")
+    focus(); select_all()
+    k = selection_count(); m = count(MARKER[editor])
+    notes.append(f"select all: {k} selected, {m} markers on the {editor}")
+    step("delete", ("key", "Delete"), False); between("delete")
+    step("undo", ("chord", "ctrl", "z"), True); between("undo")
+    step("redo", ("chord", "ctrl", "y"), False); between("redo")
+    step("undo again", ("chord", "ctrl", "z"), True); between("undo again")
+    dialogs = [w.get("title") or "?" for w in windows_of_kicad() if w["xid"] not in wins0]
+    if dialogs:
+        bad.append(f"KiCad showed {dialogs}")
+    for nline in notes:
+        print(f"INFO undo_markers {editor}: {nline}", flush=True)
+    v = "works" if not bad else ("nothing" if all(b.endswith("no edit") for b in bad) else "wrong")
+    row("undo_markers", v, ("; ".join(bad) or f"every real item back at each undo ({sum(x for x in c0.values() if x > 0)}), no dialog") + f"; markers {m}, selected {k}")
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1]
     if not frame():
@@ -298,5 +380,7 @@ if __name__ == "__main__":
         table(sys.argv[6])
     elif cmd == "actor-before":
         actor_before()
+    elif cmd == "undo-markers":
+        undo_markers(sys.argv[6])
     elif cmd == "actor-after":
         actor_after(sys.argv[6], int(sys.argv[7]))

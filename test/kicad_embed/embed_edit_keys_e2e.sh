@@ -1,7 +1,7 @@
 #!/bin/bash
 # The edit-keys table (lib/edit_keys_table.json, one definition with lane M's macOS and Carbon's Windows tables) for Linux embedded:
 # real X key events (XTest) with the keyboard in the embedded PCB canvas, then the schematic canvas: Ctrl+A, Ctrl+F, Ctrl+C/Ctrl+V,
-# Ctrl+X/Ctrl+V, Delete, Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z, BackSpace, Ctrl+S, and per-actor undo (the person's Ctrl+Z after an agent's commit
+# Ctrl+X/Ctrl+V, Delete, Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z, BackSpace, Ctrl+S, per-actor undo, and undo with the checks' markers selected (the person's Ctrl+Z after an agent's commit
 # through the hub's kicad_ipc takes back the person's edit, never the agent's). Judged from KiCad's own edit events, its selection, its
 # windows and the files on disk (lib/edit_keys_drive.py), never pixels. Every row gates. Copies only (seed_project.py), fork mode.
 set -euo pipefail
@@ -55,6 +55,7 @@ ROWS="$OUT/rows.txt"; : >"$ROWS"
 run_kd() { python3 "$KD" "$@" 2>&1 | tee -a "$ROWS"; }
 
 # the PCB editor
+export HPORT HUB_RPC_MJS BUN="$(command -v bun)"
 run_kd table pcb "$OUT" "$SOCK" "$KPID" "$PCB"; shot pcb_table
 # per-actor undo: the person deletes everything, an agent commits a track through the hub (save: false), the person presses Ctrl+Z
 S=$(run_kd actor-before pcb "$OUT" "$SOCK" "$KPID" | sed -n 's/^SEQ //p' | tail -1)
@@ -67,6 +68,8 @@ ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.common.commands.EndCommit\",\
 echo "INFO the agent's commit through the hub: id ${CID:-none}"
 sleep 1
 run_kd actor-after pcb "$OUT" "$SOCK" "$KPID" "$PCB" "${S:-0}"; shot pcb_actor
+# the undo-markers case (d2ce4ba5c6): select all with the check's markers, Delete, undo, redo, undo; a check and an agent read between
+run_kd undo-markers pcb "$OUT" "$SOCK" "$KPID" "$PCB"; shot pcb_undo_markers
 
 # the schematic editor (its tab in the pane)
 AT=$(ctl_at kicad-tab:SCH)
@@ -75,6 +78,7 @@ if [ -n "$AT" ]; then
   for _ in $(seq 240); do python3 "$DRIVER_PY" list-windows --match "schematic editor" 2>/dev/null | python3 -c 'import json,sys; sys.exit(0 if any(w.get("shown") and w["w"]>300 for w in json.load(sys.stdin)) else 1)' && break; sleep 0.25; done
   sleep 6
   run_kd table sch "$OUT" "$SOCK" "$KPID" "$SCH"; shot sch_table
+  run_kd undo-markers sch "$OUT" "$SOCK" "$KPID" "$SCH"; shot sch_undo_markers
 else
   echo "ROW sch all nothing the pane's Schematic tab (kicad-tab:SCH) was not found" | tee -a "$ROWS"
 fi
@@ -96,7 +100,7 @@ for i in ids:
 PY
 while read -r _ ed id verdict evidence; do
   check "edit keys: $ed $id works" "$([ "$verdict" = works ] && echo 1 || echo 0)" "$verdict: $evidence"
-  case "$verdict:$id" in nothing:undo|nothing:redo*|nothing:copy_paste|nothing:cut*|nothing:delete|nothing:backspace|nothing:save|nothing:all|wrong:*)
+  case "$verdict:$id" in nothing:undo_markers|nothing:undo|nothing:redo*|nothing:copy_paste|nothing:cut*|nothing:delete|nothing:backspace|nothing:save|nothing:all|wrong:*)
     echo "ALERT $ed $id $verdict (to the lead and the integrator): $evidence";; esac
 done < <(grep '^ROW ' "$ROWS")
 kill "$CP" 2>/dev/null || true; wait "$CP" 2>/dev/null || true
