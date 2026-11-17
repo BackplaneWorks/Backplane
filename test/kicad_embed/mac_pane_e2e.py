@@ -816,6 +816,7 @@ try:
                 if c or d: return 'wrong', f'created {c}, deleted {d}'
                 return 'nothing', 'no edit event'
             def table(E, f):
+                other_text = open(f, errors='replace').read()  # KiCad's own s-expression, as another KiCad's Cmd+C puts on the pasteboard
                 canvas(); canvas()
                 n, t = press(K_A, CMD); wait_for(lambda: since(n, 'ET_SELECTION_CHANGED'), W); time.sleep(0.4)
                 sel = [e.get('selection') or {} for e in since(n, 'ET_SELECTION_CHANGED')]
@@ -890,6 +891,12 @@ try:
                 key(K_ESC); time.sleep(0.4)
                 p = last_push(); relay(op='move', x=p[0][0] + p[0][2] * 0.5, y=p[0][1] + p[0][3] * 0.5); time.sleep(0.4)
                 n, t = press(K_V, CMD); time.sleep(1.0); board_click(0.5, 0.5); v = judge_cd(n, 'c', True); row(E, 'copy_paste', *v, t); settle(n)
+                if v[0] == 'works' and undo_ok: m = seq(); key(K_Z, CMD); wait_ed(m, 'd'); settle(m)
+                # paste from another KiCad: its clipboard text (the editor's s-expression) on the macOS pasteboard, Cmd+V and a click here
+                canvas(); subprocess.run(['pbcopy'], input=other_text.encode())
+                p = last_push(); relay(op='move', x=p[0][0] + p[0][2] * 0.5, y=p[0][1] + p[0][3] * 0.5); time.sleep(0.4)
+                n, t = press(K_V, CMD); time.sleep(1.0); board_click(0.5, 0.5); v = judge_cd(n, 'c', True)
+                row(E, 'paste_from_other', *v, t); settle(n); key(K_ESC); time.sleep(0.4)
                 if v[0] == 'works' and undo_ok: m = seq(); key(K_Z, CMD); wait_ed(m, 'd'); settle(m)
                 canvas(); key(K_A, CMD); time.sleep(0.5)
                 n, t = press(K_X, CMD); v = judge_cd(n, 'd', True); row(E, 'cut', *v, t); settle(n)
