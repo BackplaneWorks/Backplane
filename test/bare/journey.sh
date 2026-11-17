@@ -230,7 +230,7 @@ for _ in $(seq 120); do pos first-use >/dev/null && break; sleep 0.5; done
 pos first-use >/dev/null && { tm first-window "$(now)"; ok "the first window asks for the data folder"; } || { bad "no first window in 60 s: $(tail -5 "$HH/win.log" | tr '\n' ' ')"; shot 00-nothing; exit 1; }
 shot 00-first; click_id first-use
 for _ in $(seq 240); do hub_up && break; sleep 0.5; done
-hub_up && { tm hub-up "$(now)"; ok "Use this folder started the hub (port $(hub_port))"; [ -n "${UPDATE_FROM:-}" ] && { sleep 10; kcheck; }; } || { bad "no hub in 120 s"; tail -20 "$HUBH/hub.log" 2>/dev/null; exit 1; }
+hub_up && { tm hub-up "$(now)"; ok "Use this folder started the hub (port $(hub_port))"; if [ -n "${UPDATE_FROM:-}" ]; then sleep 10; kcheck; fi; true; } || { bad "no hub in 120 s"; tail -20 "$HUBH/hub.log" 2>/dev/null; exit 1; }
 sleep 4; shot 01-welcome
 
 # --- 3. setup: Welcome -> Agents -> Design tools (KiCad installs by itself there) ---
