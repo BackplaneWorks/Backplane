@@ -921,7 +921,7 @@ try:
                     real_sel = [i for i in sel_items if 'Marker' not in str(i.get('@type', ''))]
                     ok = alive and not stall and len(real_sel) > 1
                     v = 'works' if ok else ('wrong' if alive else 'wrong (KiCad gone)')
-                    if nm == 0 and ok: v = 'works'
+                    if nm == 0 and ok: v = 'nothing (not judged: no markers to select)'
                     row(E, 'select_markers_agent_check', v, f'{nm} markers on the board before Cmd+A{" (none: the case not fully set up)" if nm == 0 else ""}; agent check {"done" if cd else "no ET_CHECKS_DONE"}; KiCad {"running" if alive else "GONE"}; STALL lines {stall}; selection after: {len(real_sel)} non-marker items of {len(sel_items)}')
                     key(K_ESC); time.sleep(0.6)
                 if not undo_ok:
