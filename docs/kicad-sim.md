@@ -19,9 +19,56 @@ The hub:
 5. answers `{results: [one per op], saved, left}`. `left` is what still would not simulate after a model or an
    exclusion changed.
 
-A run waits inside its op: `RunSimulation` answers `SIM_RUNNING` for a run that takes longer than five seconds and the
-hub collects it with `GetSimulationResult`, up to the op's `timeout` (seconds, 120 by default), then stops it.
-`RunSimulation` counts as a read (`ipc::is_read`): it takes no document lock and changes nothing.
+A run waits inside its op: `RunSimulation` answers `SIM_RUNNING` for a run that takes longer than a second and the
+hub collects it with `GetSimulationResult`, a second at a time, up to the op's `timeout` (seconds, 120 by default,
+3600 at most). `RunSimulation` and `StopSimulation` are a class of their own (`ipc::is_sim`), not reads:
+
+| Where | What a simulation command does there |
+|---|---|
+| The document lock (`design.rs` `kicad_gate`) | Takes none: a run changes no document, whoever holds the schematic. |
+| A review turn (`snapguard::review_allows`) | Allowed, like a check. |
+| The person paused the agent in KiCad | `RunSimulation` waits for Resume, like a write (it may show in their Simulator); `StopSimulation` does not wait. |
+| A hub on a copied log | Refused, like any command that is not a listed read. |
+| KiCad busy with a task | Not asked again by the hub's read path; `ksim` waits it out itself. |
+| `StopSimulation` | Only for a run the same thread started (the hub keeps each run's thread by project and run id); the person stops any run in KiCad. |
+
+`GetSimulationResult` and the other `Get*` simulation commands are reads.
+
+### Long runs
+
+- **What a long run holds.** Its own project's KiCad, and nothing else of the hub: each poll is one short request, so
+  other projects' calls go on, and the same project's other calls wait a second at most behind a poll.
+- **The time limit always ends it.** KiCad stops the run itself at `timeout` and answers `SIM_TIMEOUT`. If it has not
+  15 s later the hub sends `StopSimulation`, and 45 s later the op fails saying how long the run was in and how far.
+  A poll that gets no answer is not waited for longer than 35 s. The failure says `stopped after 300 s at 42% of the
+  run` and what to do: a longer `timeout`, or a shorter run.
+- **An interrupted turn stops its run.** When the agent hangs up on a `kicad_sim` call (its turn was interrupted),
+  the hub drops the call (`mcp.rs`), and a run that is out is stopped with `StopSimulation` (`ksim::Running`).
+  `sim_e2e.py stop` checks it with the stand-in agent: the next turn's run is not refused as busy.
+- **The server pool** (`docs/kicad-ipc.md`): two headless KiCads, three from 32 GB of memory, four from 64 GB. A
+  server at work is never the one stopped to make room, so a long run is not lost to another project; with every
+  server at work a further project waits for room, up to 120 s.
+
+### Memory
+
+A run is bounded in what the hub reads, not in what ngspice computes.
+
+| Bound | Value | What it does |
+|---|---|---|
+| Points read of each vector | 200,000 (`max_points`: up to 2,000,000) | KiCad thins the rest (every Nth point). The answer's `thinned` says how many of how many were read; summaries and measures are of those, so a peak between them is missed. |
+| Vectors read | the op's `signals` and what its measures name | Nothing else is sent to the hub. |
+| A transient's currents and powers | not saved unless a signal or measure reads one (`I(...)`, `P(...)`, a `#branch`) | `options: {save_all_currents: true}` keeps them. |
+| `tstart` on a `.tran` run | `{run: ".tran 1u 10m", tstart: "8m"}` | ngspice stores nothing before it: the way to measure the end of a long run. |
+| A `.tran` line that says 20 million points or more ((stop - start) / maximum step) | refused before ngspice | Not checked with `.options interp`, which keeps the print step's points. |
+
+Measured (`sim_e2e.py big`, a debug hub): a transient of 2,000,000 points with two signals, thinned to 200,000,
+moves the hub's memory peak by 136 MB; the test's bound is 150 MB. The hub holds a reply's vectors once (the reply is
+handed on, not copied). Memory scales with the points read: `max_points: 2000000` is ten times that.
+
+Not bounded by the hub: KiCad's own memory for a run that is not windowed (ngspice keeps every computed point of
+every saved vector until the run ends; the 6.7 GB of 17 Nov was a 1.9-million-point run with `.save all` on a
+vendor model). `tstart`, the currents default and the 20-million refusal reduce it; a hard limit needs KiCad to stop
+a run at a point count.
 
 ## Ops
 
@@ -39,7 +86,7 @@ name (`onoise_spectrum`); a root sheet's net works with or without its `/`. `V(a
 | `{source: {type, pos, neg?, value?, params?, ac?, current?, ref?, at?, bom?}}` | A `Simulation_SPICE` source symbol between two nets (`neg` is GND unless given), with its model. Types: dc, sin, pulse, pwl, exp, am, sffm, trnoise, trrandom. Out of the BOM and off the board unless `bom: true`. |
 | `{probe: signals}`, `{probe: {pin: "R1.2", name}}` | Signals join the saved analysis' traces and this call's runs. A pin gets a net label first, so an unnamed net has a name to read. |
 | `{analysis: ".ac dec 20 1 1meg", signals?, tab?}`, `{analysis: true}` | Saves the analysis with the design: what the person's Simulator tab opens with. `true` reads what is saved. |
-| `{run: ".tran 1u 10m" \| true, set?, signals?, measures?, waves?, directives?, options?, retry?, netlist?, log?, timeout?, show?}` | Runs an analysis (`true`: the saved one, with its saved traces). Answers the operating-point values, the measures and one line per signal. |
+| `{run: ".tran 1u 10m" \| true, set?, signals?, measures?, waves?, directives?, options?, tstart?, max_points?, retry?, netlist?, log?, timeout?, show?}` | Runs an analysis (`true`: the saved one, with its saved traces). Answers the operating-point values, the measures and one line per signal. |
 | `{loopgain: "U1.2", run?, set?, directives?, waves?}` | A feedback loop's gain, cut at a pin in the netlist only (below). |
 | `{sweep: "R1" \| "V1.dc" \| {param}, values \| from, to, steps?, log? \| series, run, measures, set?}` | One run per value; the measures as one table `{columns, rows}`. |
 | `{tune: "R1", measure, target, from, to, series?, tol?, max_runs?, run, set?, write?}` | The value that brings a measure to its target. |
@@ -65,11 +112,26 @@ Simulator tab (`show: false` leaves it); the runs of a sweep or a tune never are
 `directives` are netlist lines for the run (`.options`, `.ic`, `.nodeset`, `.include`, `.model`, `.param`); `options`
 are KiCad's netlist options (`{save_all_currents: false}` for a vendor model whose internals have no branch currents).
 
-A transient that does not converge is run again, each step adding to the last (`ksim::RETRY`): gear integration; gear
-with `reltol=0.01`; those with looser `abstol`/`vntol` and a maximum step no longer than the print step. The first
-that converges is the answer, with `needed` saying what it took, so the next run can carry it as a directive; when
-none does, the failure's last line is `tried without success: ...`. `retry: false` leaves it at one run. The log's
-`retries` lists the steps.
+A transient that does not converge is run again (`ksim::RETRY`), each attempt on its own, the cheap ones first:
+
+1. gear integration (`.options method=gear`);
+2. looser tolerances with the default integration (`.options itl4=500 gmin=1e-9 abstol=1e-8 vntol=1e-5 rshunt=1e9
+   reltol=3e-3`): what a vendor's switching-regulator model converged with;
+3. gear with the looser tolerances (`reltol=0.01`);
+4. the second again with a maximum step no longer than the print step, last because it makes the run longer.
+
+The first that converges is the answer, with `needed` saying what it took, so the next run can carry it as a
+directive. Rules:
+
+- An attempt that converged is never run again, however long it took.
+- An attempt that took 20 s or more before it failed is the last: the answer says `no further attempt: that one took
+  97 s, and each of the 4 left would take as long`.
+- An attempt the run's own directives already are (they set every option of it) is skipped.
+- A sweep's and a tune's later runs start with what their first run needed.
+- When none converges the failure's last line is `tried without success:` with each attempt, how it ended and how
+  long it took (`gear integration: no convergence at t=1.5e-05 (near /sw) after 0.044 s`).
+
+`retry: false` leaves it at one run. The log's `retries` lists the attempts.
 
 ### Loop gain
 
@@ -198,6 +260,11 @@ bun test/kipc_bench/hub.mjs <backplane-hub> <runtime with sim-run> <port> WORK &
 python3 test/kipc_bench/sim_e2e.py run WORK      # then: touch WORK/stop
 ```
 
+`cargo test kicad::ipc`: three projects and room for two against a stand-in transport (a server with a run out is
+never stopped to make room; a project is not started again beside its last process).
+
 It generates five small schematics (an RC with a connector, a test point and an op-amp without a model; a divider; a
 series RLC; two capacitors in series; a two-pole loop of two controlled sources), drives every op through the MCP tool as a stand-in agent's turn and checks the
-numbers against closed form, the saved files, and the log's lines.
+numbers against closed form, the saved files, and the log's lines. Two more tasks are about load: `big` (two million
+points: the answer, the `thinned` line, the hub's memory peak, `tstart`) and the crowd `slow`, `busya`, `busyb`
+(three projects at once: a 40 s transient ends with its numbers while the other two are answered without a failure).

@@ -71,7 +71,7 @@ pub fn review_next(prev: bool, text: &str) -> bool { sn::is_review(text) || (pre
 /// What a review turn may still send to KiCad: reads, opening a document, the view (layers, selection), checks and exports.
 pub fn review_allows(ty: &str) -> bool {
     let n = ty.rsplit('.').next().unwrap_or(ty);
-    crate::files::kicad::ipc::is_read(ty) || matches!(n, "OpenDocument" | "SetActiveLayer" | "SetVisibleLayers" | "HitTest" | "RunChecks" | "RunDrc" | "RunErc") || n.contains("Selection") || n.starts_with("Export") || n.starts_with("Plot")
+    crate::files::kicad::ipc::is_read(ty) || crate::files::kicad::ipc::is_sim(ty) || matches!(n, "OpenDocument" | "SetActiveLayer" | "SetVisibleLayers" | "HitTest" | "RunChecks" | "RunDrc" | "RunErc") || n.contains("Selection") || n.starts_with("Export") || n.starts_with("Plot")
 }
 /// `/restore` or `/restore <turn>` from the person: Some(turn, 0 for the last one).
 pub fn restore_command(text: &str) -> Option<u64> {

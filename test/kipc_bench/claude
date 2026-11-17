@@ -33,7 +33,18 @@ if text.startswith("HOLD ") or text.startswith("ORACLE "):
         while not os.path.exists(arg + ".stop"): time.sleep(0.2)
         done("held")
     else:
-        r = subprocess.run([sys.executable, arg, url, os.getcwd()], capture_output=True, text=True)
+        # (as a real CLI does: an interrupt on stdin, or stdin closed, ends the tool call under way, here the script and with it its
+        # connection to the hub; the script also dies with this process)
+        def with_parent():
+            import ctypes, signal; ctypes.CDLL("libc.so.6").prctl(1, signal.SIGKILL)
+        import threading
+        pr = subprocess.Popen([sys.executable, arg, url, os.getcwd()], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, preexec_fn=with_parent if sys.platform == "linux" else None)
+        def watch():
+            for line in sys.stdin:
+                if "interrupt" in line: break
+            pr.kill()
+        threading.Thread(target=watch, daemon=True).start()
+        so = pr.communicate()[0]; r = type("R", (), {"stdout": so, "stderr": "", "returncode": pr.returncode})
         open(os.path.join(out, name + ".oracle.log"), "w").write(r.stdout + r.stderr)
         done("oracle exit %d" % r.returncode)
     sys.exit(0)

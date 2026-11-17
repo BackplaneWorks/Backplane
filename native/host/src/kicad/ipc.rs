@@ -440,9 +440,14 @@ pub fn pro_of(path: &str) -> String {
 pub fn patient_of(type_: &str) -> bool { is_read(type_) || (type_.starts_with("kiapi.backplane.plan.") && !type_.ends_with(".ApprovePlan")) }
 pub fn is_read(type_: &str) -> bool {
     let name = type_.rsplit('.').next().unwrap_or(type_);
-    // (a simulation run reads the open schematic and changes nothing: kicad/ksim.rs)
-    name.starts_with("Get") || name == "Ping" || name == "RunSimulation" || name == "StopSimulation"
+    name.starts_with("Get") || name == "Ping"
 }
+/// A simulation's own commands (kicad/ksim.rs): starting a run and stopping one. A class of their own, not reads: a run changes no
+/// document, so it takes no document lock and needs no snapshot (agents/design.rs `kicad_gate`, snapguard), but it does occupy the
+/// project's simulator and may show in the person's, so everywhere else it is treated as a command: refused on a copied hub, held while
+/// the person has paused the agent (a stop is not), not asked again by itself while KiCad is busy (ksim waits that out itself).
+/// Collecting a run (GetSimulationResult) and the simulation's other Get* commands are reads.
+pub fn is_sim(type_: &str) -> bool { matches!(type_.rsplit('.').next().unwrap_or(type_), "RunSimulation" | "StopSimulation") }
 /// KIpc.err: KiCad's own error, with its status.
 fn err_of(o: &Value) -> String {
     let (st, e) = (o["status"].as_str().unwrap_or(""), o["error"].as_str().unwrap_or(""));
@@ -562,7 +567,8 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
                 let _ = super::embed::gui_call_as(&gui, "kiapi.backplane.coedit.SetAgentActivity", super::coedit::activity(th, &task, "working"), &actor).await;
             }
             // the person paused this agent in KiCad: its writes wait for "Resume" (reads go on)
-            if !is_read(ty) { held = super::coedit::wait_resumed(th).await; }
+            // (a simulation run waits like a write: it would show in the paused person's Simulator; stopping one never waits)
+            if !is_read(ty) && short != "StopSimulation" { held = super::coedit::wait_resumed(th).await; }
         }
         let saves_board = short == "SaveDocument" && board_save(&msg, path);
         // never a save of a document KiCad says is unmodified: it would write only KiCad's own rewrite (its format, its load changes)
@@ -590,9 +596,10 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
                 "dialogs":st["dialogs"].clone(),"dialogs_reported":st["dialogs_reported"].clone(),"notices":st["notices"].clone()}))
         }
         if !ok { return Err(if short == "SaveDocument" { super::savegate::explain_save_error(&err_of(&o), super::savegate::saves_design(&msg_doc, path)) } else { err_of(&o) }) }
-        let mut out = json!({"type":o["type"].as_str().unwrap_or(""),"message":o["message"].clone()});
+        let wrote_nothing = short == "SaveDocument" && super::savegate::wrote_nothing(&o);
+        let mut o = o; let mut out = json!({"type":o["type"].as_str().unwrap_or(""),"message":o["message"].take()}); // (taken, not copied: a simulation's vectors)
         // an agent's save of a board KiCad changed on load (its 3D model migration): said, so the agent reports it rather than owns it
-        if short == "SaveDocument" && super::savegate::wrote_nothing(&o) { out["not_saved"] = json!(super::savegate::NOTHING_CHANGED); }
+        if wrote_nothing { out["not_saved"] = json!(super::savegate::NOTHING_CHANGED); }
         else if let Some(u) = upgrade { out["format_upgrade"] = json!(u); }
         if saves_board {
             if let Some((fp, zones)) = super::coedit::load_migration(&gui).await { out["kicad_load_changes"] = json!(format!("{}. They were saved with yours: tell the person, they are not your changes.", super::coedit::load_migration_words(fp, zones))); }
@@ -619,7 +626,7 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
     if o["fallback"].as_bool().unwrap_or(false) { log_fallback(hub, thread, o["why"].as_str().unwrap_or("")).await; return Err(o["error"].as_str().unwrap_or("").into()) }
     if status { return Ok(json!({"server":ks::note(&lines),"servers":lines,"argv":argv,"version":env.version,"capabilities":o["message"].clone(),"detail":if ok { String::new() } else { err_of(&o) }})) }
     if !ok { return Err(err_of(&o)) }
-    let mut out = json!({"type":o["type"].as_str().unwrap_or(""),"message":o["message"].clone()});
+    let mut o = o; let mut out = json!({"type":o["type"].as_str().unwrap_or(""),"message":o["message"].take()}); // (taken, not copied: a simulation's vectors)
     // a KiCad Open in KiCad started detached has this project open: it has no API server, so it does not show the agent's change, and
     // its next save would replace it. Said to the agent here and to the person in the thread (no silent overwrite trap)
     let short = ty.rsplit('.').next().unwrap_or(ty);
@@ -896,6 +903,10 @@ mod tests {
         assert_eq!(lines.lock().unwrap().clone(), format!("{project}|ready|"));
         for _ in 0..40 { tokio::time::sleep(Duration::from_millis(100)).await; if lines.lock().unwrap().contains("|stopped|") { break } }
         assert_eq!(lines.lock().unwrap().clone(), format!("{project}|stopped|"));
+    }
+    #[test] fn a_simulation_run_is_a_class_of_its_own() {
+        for t in ["kiapi.backplane.sim.RunSimulation", "kiapi.backplane.sim.StopSimulation"] { assert!(is_sim(t) && !is_read(t) && !patient_of(t) && copy_ipc_refused(true, t).is_some(), "{t}") }
+        for t in ["kiapi.backplane.sim.GetSimulationResult", "kiapi.backplane.sim.GetSimulationModels"] { assert!(is_read(t) && !is_sim(t), "{t}") }
     }
     #[test] fn a_copy_runs_only_the_listed_kicad_reads() {
         for t in ["kiapi.board.commands.GetItems", "kiapi.common.commands.Ping", "kiapi.backplane.GetCapabilities"] { assert_eq!(copy_ipc_refused(true, t), None, "{t}") }
