@@ -839,17 +839,18 @@ try:
                 n, t = press(K_Z, CMD); v = judge_cd(n, 'c', True); row(E, 'undo', *v, t); undo_ok = v[0] == 'works'
                 n, t = press(K_Y, CMD); v = judge_cd(n, 'd', True); row(E, 'redo', *v, t); settle(n)
                 if v[0] == 'works': m = seq(); key(K_Z, CMD); wait_ed(m, 'c')
-                n, t = press(K_Z, CMD | SHIFT); v = judge_cd(n, 'd', True); row(E, 'redo_shift_z', *v, t); settle(n)
-                m = seq(); key(K_Z, CMD); wait_ed(m, 'c'); settle(m)  # undone again, and the checks after it done
                 n, t = press(K_Z, CMD | SHIFT); v = judge_cd(n, 'd', True)
-                row(E, 'extra_redo_after_checks', v[0] if v[0] != 'works' else 'works', v[1] + ' (Cmd+Shift+Z after ET_CHECKS_DONE; "nothing" here with redo_shift_z working = the check emptied the redo list)', t)
+                row(E, 'extra_redo_at_once', v[0], v[1] + ' (Cmd+Shift+Z at once after the undo, before KiCad\'s check)', t); settle(n)
+                m = seq(); key(K_Z, CMD); wait_ed(m, 'c'); settle(m)  # undone again, and the check after it done: as a person who pauses
+                n, t = press(K_Z, CMD | SHIFT); v = judge_cd(n, 'd', True)
+                row(E, 'redo_shift_z', v[0], v[1] + ' (after ET_CHECKS_DONE; "nothing" here with extra_redo_at_once working = the check emptied the redo list)', t)
                 settle(n)
                 if v[0] == 'works': m = seq(); key(K_Z, CMD); wait_ed(m, 'c'); settle(m)
                 # undo and redo every time: 10 of 10 each (the earlier 6-of-7 failures must not recur)
                 canvas(); key(K_A, CMD); time.sleep(0.5); m = seq(); key(K_FDEL); wait_ed(m, 'd'); settle(m)
                 nu = nr = 0
-                for _ in range(10):  # redo at once after each undo (not after the check: see redo_shift_z)
-                    m = seq(); key(K_Z, CMD); c, d = wait_ed(m, 'c'); nu += bool(c and not d)
+                for _ in range(10):  # each redo after the undo's check, as redo_shift_z
+                    m = seq(); key(K_Z, CMD); c, d = wait_ed(m, 'c'); nu += bool(c and not d); settle(m)
                     m = seq(); key(K_Z, CMD | SHIFT); c, d = wait_ed(m, 'd'); nr += bool(d and not c); settle(m)
                 m = seq(); key(K_Z, CMD); wait_ed(m, 'c'); settle(m)
                 row(E, 'undo_10', 'works' if nu == 10 else ('nothing' if nu == 0 else 'wrong'), f'Cmd+Z undid {nu} of 10')
