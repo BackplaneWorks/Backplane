@@ -438,6 +438,12 @@ pub fn page_title(data: &Value, page: Option<&str>) -> Option<String> { page.and
 /// Whether an action sent to the hub goes somewhere (a bot's chat, a room, a link, a thread): the project's page on show gives way to it.
 /// The page is this window's own; the hub's selection may not move at all (the uberbot's chat was already selected under the page), so
 /// a click on the uberbot after a project page left the page up.
+/// The thread a New thread made (its id from the hub's reply), as the window opens it: its row's id when the lists hold it, else, for a thread of
+/// this hub, the id itself (a project lists only its pins and one other thread, so a new one beside a running one is not listed); a thread on a
+/// linked machine (`link~id`) only once it is listed, when that machine has sent it.
+pub fn open_made(id: &str, listed: &[String]) -> Option<String> {
+    listed.iter().find(|t| t.rsplit_once('|').map_or(t.as_str(), |(_, x)| x) == id).cloned().or_else(|| (!id.is_empty() && !id.contains('~')).then(|| id.to_string()))
+}
 pub fn leaves_page(action: &str) -> bool { matches!(action, "bot" | "room" | "link-open" | "link-file" | "select") }
 /// A viewer page asked for (the rail, its key) while a project's page is on show: the viewer is that project's, never the thread's that was open before the
 /// page. The thread to show it on (the project's top one, the page staying) and the kind; None when the thread selected is already one of the project's,
@@ -553,7 +559,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
     let mut bar = div().flex().flex_wrap().items_center().gap_2().pt_3().pb_1();
     { let pid2 = pid.to_string();
       /* i18n-ok: ctl labels and ui: ids are what drivers press */ ctl.push(CtlEntry { id: "page-new-thread".into(), label: "New thread".into(), ctl: Ctl::Node("new-thread".into(), pid.to_string()) });
-      bar = bar.child(action_button(cx, light, "page-new-thread", "plus", crate::i18n::trs("New thread"), true)
+      bar = bar.child(crate::ui::with_rect(action_button(cx, light, "page-new-thread", "plus", crate::i18n::trs("New thread"), true), || "page-new-thread".to_string())
         .on_click(cx.listener(move |this, _, _, cx| { this.arm_new(); let _ = this.tx.try_send(Command::Action("new-thread".into(), pid2.clone())); cx.notify(); }))); }
     { let r = root.clone();
       bar = bar.child(action_button(cx, light, "page-open-folder", "folder-open", crate::i18n::trs("Open folder"), false).on_click(cx.listener(move |this, _, _, _| this.file_open(&r, false)))); }
@@ -699,6 +705,15 @@ mod tests {
         for a in ["bot", "room", "link-open", "link-file", "select"] { assert!(super::leaves_page(a), "{a}"); }
         for a in ["flag", "new-thread", "proj-find-q", ""] { assert!(!super::leaves_page(a), "{a}"); }
     }
+    #[test] fn a_new_thread_opens_by_its_id_even_when_the_sidebar_does_not_list_it() {
+        let listed = vec!["http://h|t1".to_string(), "http://h|L~t9".to_string()];
+        assert_eq!(super::open_made("t1", &listed).as_deref(), Some("http://h|t1"), "listed: its row");
+        assert_eq!(super::open_made("t2", &listed).as_deref(), Some("t2"), "not listed (a running thread holds the project's one row): opened by its id");
+        assert_eq!(super::open_made("L~t9", &listed).as_deref(), Some("http://h|L~t9"));
+        assert_eq!(super::open_made("L~t8", &listed), None, "a linked machine's thread waits until that machine has sent it");
+        assert_eq!(super::open_made("", &listed), None);
+    }
+
     use super::*; use core::prelude::v1::test;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
     #[test] fn the_hubs_folder_picker_parses_and_closes_on_escape() {

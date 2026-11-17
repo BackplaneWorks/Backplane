@@ -281,6 +281,40 @@ if want('F14'):
     shown = differs(px('f14-open'), px('f14-typed'))
     log('F14-terminal', ok and shown, 'the floating terminal (Ctrl+J): a command typed with the keyboard ran in a real shell (the marker file exists=%s) and the panel redrew=%s (f14-typed.png)' % (ok, shown))
     chord('ctrl j')
+# ---- NEWT a new thread opens ready to type: the sidebar's + beside the project, then the project page's New thread. Each must make a thread, show it
+# (the client's `shown` metric names it, the project page gives way) and leave the composer focused: text typed at once, with no click, is posted to it
+if want('NEWT'):
+    def shown():
+        s = [m for m in metrics() if m.get('event') == 'shown']; return s[-1] if s else {}
+    def made_since(n0): return [e['id'] for e in events()[n0:] if e['$'] == 'ThreadCreated']
+    # a project with more threads than its rows in the window, as the person's has: the hub sends each project a share of 48 rows, the threads
+    # placed by a drag first, so 50 dragged threads fill the share and the new idle thread is not in the window's lists (the bug: the window waited
+    # for it there and stayed where it was)
+    def rpc(steps): return subprocess.run(['bun', os.path.join(REPO, 'test/cef/hub_rpc.mjs'), str(PORT), P('home/token'), json.dumps(steps)], capture_output=True, text=True, timeout=120).stdout
+    n_many = len(events()); rpc([{'m': 'thread.create', 'p': {'project': 'p1', 'title': 'Placed %d' % k}} for k in range(50)]); until(lambda: len(made_since(n_many)) >= 50, 30)
+    many = made_since(n_many); print('    reorder', len(rpc([{'m': 'thread.reorder', 'p': {'section': 'active', 'thread': t, 'ids': many}} for t in many]).splitlines()), flush=True)
+    running = len(many) >= 50 and until(lambda: sum(1 for e in events() if e['$'] == 'ThreadOrdered') >= 50, 10)
+    print('    %d threads placed by a drag=%s' % (len(many), running), flush=True)
+    def new_path(name, press):
+        sel(1); n0 = len(events())
+        try: pressed = press()
+        except Exception as e: pressed = False; print('    press failed', e, flush=True)
+        until(lambda: made_since(n0), 15); tid = (made_since(n0) or [''])[0]
+        opened = until(lambda: bool(tid) and shown().get('thread') == tid and not shown().get('page'), 10); pause(0.8); shot('newt-%s' % name)
+        word = 'zqshort typed at once %s' % name; xin('type', word); xin('key', 'Return')
+        posted = until(lambda: any(e['$'] == 'MessagePosted' and e.get('thread') == tid and word in e.get('text', '') for e in events()), 20)
+        log('NEWT-%s' % name, running and pressed and bool(tid) and opened and posted, '50 placed threads fill the project rows=%s, pressed=%s, ThreadCreated %r, the window showed it (shown=%s), the words typed with no click were posted to it=%s (newt-%s.png)' % (running, pressed, tid, shown(), posted, name))
+    new_path('sidebar', lambda: click_ctl('ui:New thread'))
+    def page_press():
+        click_ctl('project:p1'); until(lambda: 'page-new-thread' in ctrls(), 10); pause(0.8); return click_ctl('page-new-thread')
+    new_path('page', page_press)
+    # from an uberbot's chat (the live log: two +'s pressed there made threads the window never opened)
+    subprocess.run(['bun', os.path.join(REPO, 'test/cef/hub_rpc.mjs'), str(PORT), P('home/token'), json.dumps([{'m': 'bots.create', 'p': {'name': 'Bub', 'uber': True}}])], capture_output=True, text=True, timeout=30)
+    until(lambda: any(k.startswith('bot:') for k in ctrls()), 15)
+    def bot_press():
+        click_ctl(next((k for k in ctrls() if k.startswith('bot:')), '')); pause(1.5); return click_ctl('ui:New thread')
+    new_path('bot', bot_press)
+
 if want('F21'):
     sel(1); shot('f21-up'); hub.terminate(); hub.wait(); pause(6); shot('f21-down')
     hub = spawn([HUB, '--home', P('home'), '--port', str(PORT), '--host', '127.0.0.1', '--no-tailscale', '--foreground'], 'hub.log', cwd=P('proj'))

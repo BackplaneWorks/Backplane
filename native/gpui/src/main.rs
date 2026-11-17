@@ -299,8 +299,10 @@ impl Backplane {
     /// A thread (or a project with its first thread) is being made on the person's say: the first new thread row to appear is opened.
     pub fn arm_new(&mut self){self.arm_new=Some((Instant::now(),self.thread_ids().into_iter().collect()));}
     fn adopt_new(&mut self,cx:&mut Context<Self>){
-        // the thread the hub said it made (its id from the reply): opened as soon as the window's lists hold it, whatever else is new
-        if let Some((id,_))=self.screens.projects.made.clone() { if let Some(q)=self.thread_ids().into_iter().find(|t|t.rsplit_once('|').map_or(t.as_str(),|(_,x)|x)==id) { self.screens.projects.made=None;self.arm_new=None;self.note.clear();self.select_id(q,cx);self.want_focus=true;return } }
+        // A thread of this hub opens at once by that id: the sidebar lists a project's pins and one other thread (the one that runs, if any), so a new
+        // idle thread beside a running one is never in the lists and waiting for it there left the window where it was. One on a linked machine waits
+        // until that machine has sent it.
+        if let Some((id,_))=self.screens.projects.made.clone() { if let Some(q)=screens::projects::open_made(&id,&self.thread_ids()) { self.screens.projects.made=None;self.arm_new=None;self.note.clear();self.select_id(q,cx);self.want_focus=true;return } }
         let Some((at,known))=self.arm_new.as_ref() else {return};
         // (a thread made on a linked machine shows once that machine has pushed it: a few seconds, more while it sets up a worktree)
         if at.elapsed()>Duration::from_secs(30){self.arm_new=None;return;}
