@@ -116,13 +116,12 @@ mod slash_tests {
 mod native_tests {
     use super::native;
     #[test] fn folders_without_sh_answer_as_the_scripts_do() {
-        let base = std::env::temp_dir().join(format!("bp-fsn-{}", std::process::id())); let _ = std::fs::remove_dir_all(&base); std::fs::create_dir_all(base.join("b")).unwrap(); std::fs::create_dir_all(base.join("a")).unwrap(); std::fs::write(base.join("f"), "x").unwrap();
+        let tmp = crate::plat::tmp::dir("fsn"); let base = tmp.to_path_buf(); std::fs::create_dir_all(base.join("b")).unwrap(); std::fs::create_dir_all(base.join("a")).unwrap(); std::fs::write(base.join("f"), "x").unwrap();
         let home = base.to_string_lossy().into_owned();
         assert_eq!(native::path("", &home).unwrap(), base); assert_eq!(native::path("~", &home).unwrap(), base); assert_eq!(native::path("~/a", &home).unwrap(), base.join("a")); assert_eq!(native::path("a", &home).unwrap(), base.join("a"));
         assert_eq!(native::path("C:\\x", &home).unwrap(), std::path::PathBuf::from("C:\\x")); assert!(native::path("C:x", &home).unwrap_err().starts_with("invalid drive path"));
         let l = native::list("", &home); assert_eq!(l["entries"], serde_json::json!(["a", "b"]), "{l}");
         assert!(native::resolve("f", &home).unwrap_err().starts_with("not a folder")); assert!(native::resolve("nope", &home).unwrap_err().starts_with("no such folder"));
         let m = native::make("new/proj", &home).unwrap(); assert!(m.ends_with("new/proj") && !m.contains('\\'), "{m}"); assert!(native::make("new/proj", &home).unwrap_err().starts_with("already exists"));
-        let _ = std::fs::remove_dir_all(&base);
     }
 }
