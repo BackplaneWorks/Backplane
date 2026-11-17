@@ -95,10 +95,12 @@ pub fn wait_exec(pid: u32, exited: impl FnMut() -> bool, limit: Duration) -> Lau
 pub fn wait_exec_of(prog: &str, pid: u32, mut exited: impl FnMut() -> bool, limit: Duration) -> Launch {
     let t = Instant::now();
     let me: String = prog.rsplit('/').next().unwrap_or(&prog).chars().take(15).collect(); // the kernel's comm: 15 bytes
+    // A forked child wears the forking thread's comm until its exec sets the new one (the exe link changes a moment earlier, so it cannot tell).
+    let ours = std::fs::read_to_string("/proc/thread-self/comm").map(|c| c.trim().to_string()).unwrap_or_default();
     loop {
         if exited() { return Launch::Failed }
         match std::fs::read_to_string(format!("/proc/{pid}/comm")) {
-            Ok(c) if c.trim() != me && !c.trim().is_empty() => return Launch::Started,
+            Ok(c) if c.trim() != me && !c.trim().is_empty() && c.trim() != ours => return Launch::Started,
             Err(_) => if exited() { return Launch::Failed },
             _ => {}
         }
