@@ -30,9 +30,10 @@ time.sleep(3600)
 PY
 HOLDER=$!; track_pid "$HOLDER"
 for _ in $(seq 50); do [ -s "$OUT/holder.pid" ] && break; sleep 0.1; done
-holders() { lslocks -n -o PID,PATH 2>/dev/null | awk -v p="$LCK" '$2 == p {print $1}' | sort -u | tr '\n' ' '; }
+holders() { lslocks -n -u -o PID,PATH 2>/dev/null | awk -v p="$(readlink -f "$LCK")" '$2 == p {print $1}' | sort -u | tr '\n' ' '; }
 echo "INFO the other KiCad (stand-in pid $HOLDER) holds $LCK: $(holders)"
 start_xvfb_and_wm; start_hub
+HUB_PID=${OWN_GROUPS[${#OWN_GROUPS[@]}-1]}
 echo '[{"select":0},{"wait":2200},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},{"wait":110000},{"mark":"done"}]' >"$OUT/script.json"
 HOME="$OUT/fh" BACKPLANE_GPUI_RECTS=1 BACKPLANE_KICAD_DEBUG=1 BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 150 >"$OUT/client.log" 2>&1 &
 CP=$!; track_pid "$CP"
@@ -51,7 +52,7 @@ PY
 }
 wait_rect() { for _ in $(seq $(( $2 * 4 ))); do [ -n "$(rect "$1")" ] && return 0; sleep 0.25; done; return 1; }
 press() { local at; at=$(rect "$1"); [ -n "$at" ] || return 1; read -r X Y <<<"$at"; python3 "$XINPUT_PY" click "$X" "$Y"; }
-kicads() { pgrep -u "$(id -u)" -f "--embedded.*--parent-pid" 2>/dev/null | wc -l; }
+kicads() { { pgrep -u "$(id -u)" -f -- "--embedded.*--parent-pid $HUB_PID([[:space:]]|$)" || true; } | wc -l; }
 dlg() { xwininfo -root -tree 2>/dev/null | grep -c '"File Open Warning"' || true; }
 # L1
 ASKED=0; wait_rect kicad:lock-open 60 && wait_rect kicad:lock-cancel 5 && ASKED=1
@@ -68,9 +69,9 @@ press kicad:lock-open || true
 PAINTED=0
 for _ in $(seq 240); do grep -q 'kicad embed: start +[0-9]*ms ready' "$OUT/hub.log" 2>/dev/null && { PAINTED=1; break; }; sleep 0.5; done
 sleep 3
-OURS=$(pgrep -u "$(id -u)" -f "--embedded.*--parent-pid" -n 2>/dev/null || true)
+OURS=$(pgrep -n -u "$(id -u)" -f -- "--embedded.*--parent-pid $HUB_PID([[:space:]]|$)" 2>/dev/null || true)
 NOW=$(holders)
-check "L3 Try again asks again; Open anyway opens the editor, no File Open Warning, our KiCad holds the project's lock" "$([ $ASKED2 = 1 ] && [ $PAINTED = 1 ] && [ "$(dlg)" = 0 ] && echo " $NOW " | grep -q " $OURS " && echo 1 || echo 0)" "asked again $ASKED2, ready $PAINTED, dialogs $(dlg), lock held by $NOW (our KiCad $OURS); hub: $(grep -o 'kicad locks: the person chose Open anyway.*' "$OUT/hub.log" | head -1 | cut -c1-200)"
+check "L3 Try again asks again; Open anyway opens the editor, no File Open Warning, our KiCad holds the project's lock" "$([ $ASKED2 = 1 ] && [ $PAINTED = 1 ] && [ -n "$OURS" ] && [ "$(dlg)" = 0 ] && echo " $NOW " | grep -q " $OURS " && echo 1 || echo 0)" "asked again $ASKED2, ready $PAINTED, dialogs $(dlg), lock held by $NOW (our KiCad $OURS); hub: $(grep -o 'kicad locks: the person chose Open anyway.*' "$OUT/hub.log" | head -1 | cut -c1-200)"
 kill "$CP" 2>/dev/null || true
 # L4: a stale lock (the stand-in killed, its lock file left) on a second project's open: cleared, logged, never asked
 kill "$HOLDER" 2>/dev/null || true
