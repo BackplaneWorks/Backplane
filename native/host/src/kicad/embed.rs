@@ -1811,6 +1811,25 @@ impl Actor {
     }
 
     fn restart(&mut self, client: u64, pro: String, env: Env, reply: oneshot::Sender<Result<Value, String>>) {
+        // The KiCad running now goes before the next starts (the update's reopen on a new runtime, a lost window's restart): started at
+        // once, the next met the old one's lock on the project and waited on a question nobody answered (clean-box bp.13 update run). As the
+        // start retry does: the session is held "starting" under a new generation (an attach joins its waiters, the old one's exit is not
+        // taken for it), the old KiCad is asked to close, killed if it stays, and the next starts only once it is gone (Msg::RetryNow).
+        if let Some(old) = self.sessions.get(&pro).map(|s| s.pid).filter(|p| *p > 0 && crate::plat::proc::group_alive(*p)) {
+            self.next_gen += 1;
+            let g = self.next_gen;
+            let Some(s) = self.sessions.get_mut(&pro) else { return };
+            s.closing = true; s.gen = g; s.pid = 0; s.state = "starting".into(); s.reason = "restarting".into();
+            let (root, snap) = (s.root.clone(), s.clone());
+            self.publish(&snap, None);
+            self.attach_waiters.entry(pro.clone()).or_default().push((client, reply));
+            let (me, pro_c) = (self.me.clone(), pro.clone());
+            tokio::spawn(async move {
+                let waited = gone_before_retry(old, &root, &pro_c, RETRY_TERM_WAIT, RETRY_KILL_WAIT).await;
+                let _ = me.send(Msg::RetryNow { pro: pro_c, gen: g, client, env, waited });
+            });
+            return;
+        }
         let prev = self.sessions.get(&pro).cloned();
         if let Some(mut s) = prev.clone() {
             s.closing = true;
@@ -1871,7 +1890,15 @@ impl Actor {
             Msg::RetryNow { pro, gen, client, env, waited } => {
                 // the session was left (stopped or retired) while the first KiCad went: nothing to start
                 if !self.sessions.get(&pro).is_some_and(|s| s.gen == gen && s.state == "starting") { return }
-                eprintln!("kicad embed: {pro}: the first start's KiCad {waited}; starting the second");
+                // a KiCad that outlived even its kill: no second one beside it; the pane says why and offers to try again (never a silent pane)
+                if waited.starts_with("was still there") {
+                    let why = format!("the KiCad before it would not close ({waited})");
+                    eprintln!("kicad embed: {pro}: {why}; not starting another");
+                    if let Some(s) = self.sessions.get_mut(&pro) { *s = s.clone().failed(&why); let snap = s.clone(); self.publish(&snap, None); }
+                    self.finish_attach_waiters(&pro, Err(why));
+                    return;
+                }
+                eprintln!("kicad embed: {pro}: the KiCad before {waited}; starting the next");
                 let (tx, _rx) = oneshot::channel();
                 self.restart(client, pro, env, tx);
             }
@@ -3565,6 +3592,45 @@ mod tests {
         assert!(rep[0].to_string().contains("did not open its IPC socket"), "then failed, with the reason: {rep:?}");
         let info: Value = serde_json::from_str(hub.info_now()[&info_key(&pcb.to_string_lossy().replace(".kicad_pcb", ".kicad_pro"))].as_str().unwrap_or("{}")).unwrap_or_default();
         assert!(info.is_null() || info["state"] == json!("failed"), "{info}");
+    }
+
+    /// A restart (the update's reopen on a new runtime) starts the next KiCad only once the running one is gone: the stand-in ignores the
+    /// ask to close (so it is killed) and notes an overlap when the one before it is still there as it starts.
+    #[cfg(unix)]
+    #[tokio::test] async fn a_restart_starts_the_next_kicad_only_once_the_running_one_is_gone() {
+        use crate::plat::fs::PermissionsExt;
+        let base = crate::plat::tmp::short_dir("ke-rs");
+        let (home_dir, proj_dir, bin_dir) = (base.join("home"), base.join("proj"), base.join("bin"));
+        for d in [&home_dir, &proj_dir, &bin_dir] { std::fs::create_dir_all(d).unwrap(); }
+        let pcb = proj_dir.join("re.kicad_pcb");
+        std::fs::write(proj_dir.join("re.kicad_pro"), "{}").unwrap(); std::fs::write(&pcb, "(kicad_pcb)").unwrap();
+        let cfg = crate::hub::Cfg { home: home_dir.clone(), version: "0.14.0".into(), commit: "test".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
+        ipc::start(&hub); start(&hub);
+        let _ = hub.commit(&json!({"$":"ProjectCreated","id":"p1","title":"re","root":proj_dir.to_string_lossy(),"at":1})).await;
+        let (cli, gui, starts, pidf) = (bin_dir.join("kicad-cli"), bin_dir.join("kicad"), base.join("starts"), base.join("pid"));
+        std::fs::write(&cli, "#!/bin/sh\nif [ \"$2\" = \"--describe\" ]; then echo '{\"version\":\"10.99.0-bp.8\",\"capabilities\":[\"api-server\"]}'; exit 0; fi\necho 10.99.0\n").unwrap();
+        std::fs::write(&gui, format!("#!/bin/sh\ntrap '' TERM\np=$(cat '{pf}' 2>/dev/null)\nif [ -n \"$p\" ] && kill -0 \"$p\" 2>/dev/null; then echo overlap >> '{st}'; fi\necho $$ > '{pf}'\necho x >> '{st}'\nwhile :; do sleep 0.2; done\n", pf = pidf.display(), st = starts.display())).unwrap();
+        for f in [&cli, &gui] { std::fs::set_permissions(f, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+        let _ = hub.commit(&json!({"$":"SettingSet","key":"kicad.path","value":cli.to_string_lossy(),"at":2})).await;
+        let p = json!({"project": pcb.to_string_lossy(), "container": 9001, "toplevel": 8001, "display": ":99", "frame": "PCB"});
+        // the first KiCad starting (it waits for its window), then a restart while it runs
+        let (h1, p1) = (hub.clone(), p.clone());
+        let first = tokio::spawn(async move { let (mut c, _) = h1.connect(true); h1.request(&mut c, &json!({"id": 1, "m": "editor.kicad.attach", "p": p1})).await });
+        for _ in 0..50 { if std::fs::read_to_string(&starts).unwrap_or_default().lines().count() >= 1 { break } tokio::time::sleep(Duration::from_millis(100)).await; }
+        let old: u32 = std::fs::read_to_string(&pidf).unwrap_or_default().trim().parse().unwrap_or(0);
+        assert!(old > 0, "the first KiCad started");
+        let t0 = std::time::Instant::now();
+        let (h2, p2) = (hub.clone(), p.clone());
+        let again = tokio::spawn(async move { let (mut c, _) = h2.connect(true); h2.request(&mut c, &json!({"id": 2, "m": "editor.kicad.restart", "p": p2})).await });
+        for _ in 0..100 { if std::fs::read_to_string(&starts).unwrap_or_default().lines().filter(|l| *l == "x").count() >= 2 { break } tokio::time::sleep(Duration::from_millis(100)).await; }
+        let log = std::fs::read_to_string(&starts).unwrap_or_default();
+        assert!(log.lines().filter(|l| *l == "x").count() >= 2, "the restart started the next KiCad: {log}");
+        assert!(!log.contains("overlap"), "the next KiCad started while the one before was still there: {log}");
+        assert!(t0.elapsed() >= RETRY_TERM_WAIT, "the restart waited for the old KiCad (it ignored the ask to close): {:?}", t0.elapsed());
+        assert!(!crate::plat::proc::alive(old), "the old KiCad is gone");
+        first.abort(); again.abort();
+        if let Ok(p) = std::fs::read_to_string(&pidf) { if let Ok(p) = p.trim().parse::<u32>() { crate::plat::proc::kill_group(p, crate::plat::proc::KILL); } }
     }
 
     #[test] fn a_shown_project_is_kept_warm_within_the_cap_memory_and_locks() {
