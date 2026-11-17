@@ -1,10 +1,13 @@
 // A benchmark hub (docs/kicad-ipc-bench.md): bun hub.mjs HUB_BIN RUNTIME PORT WORK  -> starts it and prints {pid,port,home,run}; it stays up
-// until WORK/stop exists. Temp home, temp HOME/XDG for KiCad, the wrapper `claude` as the only agent, KiStack the hub's own pinned copy (KIPC_BENCH_KISTACK: another).
-import {mkdirSync,mkdtempSync,writeFileSync,chmodSync,copyFileSync,existsSync,rmSync} from 'node:fs';
+// until WORK/stop exists. A new home at each start (the last one kept as WORK/home.N), temp HOME/XDG for KiCad, the wrapper `claude` as the only agent, KiStack the hub's own pinned copy (KIPC_BENCH_KISTACK: another).
+import {mkdirSync,mkdtempSync,writeFileSync,chmodSync,copyFileSync,existsSync,rmSync,renameSync} from 'node:fs';
 import {startHub,stopHub,sleep} from '../perf/lib.mjs';
 const [bin,rt,port,work]=process.argv.slice(2);const KS=process.env.KIPC_BENCH_KISTACK,CL=process.env.KIPC_BENCH_CLAUDE,LG=process.env.KIPC_BENCH_LOGIN,MD=process.env.KIPC_BENCH_MODEL,EF=process.env.KIPC_BENCH_EFFORT,UH=process.env.HOME,DIS=process.env.KIPC_BENCH_DISALLOW??'',PR=process.env.KIPC_BENCH_PROMPT??'',NM=process.env.KIPC_BENCH_NOMCP??'';const GC=process.env.KIPC_BENCH_GROK_CLEAN??'';const here=import.meta.dir;
 for(const d of ['bin','out','runs','user/.config/kicad','user/.cache','user/.local/share','user/.local/state'])mkdirSync(`${work}/${d}`,{recursive:true});
 rmSync(`${work}/stop`,{force:true});
+// A fresh home at every start: on an old one the hub takes up the turns its last life left running, and such a turn writes over its run's
+// transcript in WORK/out and works beside the new runs. The old home is kept beside it (its event and simulation logs are a dead run's record).
+if(existsSync(`${work}/home`)){let n=1;while(existsSync(`${work}/home.${n}`))n++;renameSync(`${work}/home`,`${work}/home.${n}`)}
 const run=mkdtempSync('/tmp/kb-');
 copyFileSync(`${here}/claude`,`${work}/bin/claude`);chmodSync(`${work}/bin/claude`,0o755);
 for(const n of['codex','muse']){writeFileSync(`${work}/bin/${n}`,'#!/bin/sh\nexit 1\n');chmodSync(`${work}/bin/${n}`,0o755)}
