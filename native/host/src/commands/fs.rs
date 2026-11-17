@@ -41,19 +41,63 @@ fn private(path: &str, v: Value) -> Value {
     if v.get("error").is_none() && !empty { return v }
     match crate::plat::privacy_block(v["dir"].as_str().unwrap_or(path)) { Some(w) => error(&w), None => v }
 }
-pub async fn list(path: &str) -> Value { private(path, listed(&sh_ro(&list_sh(), path).await)) }
+pub async fn list(path: &str) -> Value { if no_sh() { return native::list(path, &crate::plat::dirs::home_or_empty()) } private(path, listed(&sh_ro(&list_sh(), path).await)) }
 /// FsJob.made: a new folder, then its listing.
-pub async fn mkdir(path: &str) -> Value { let r = sh(&mkdir_sh(), path).await; if r.code == 0 { list(lines(&r.out).last().map(String::as_str).unwrap_or("")).await } else { error(&r.out) } }
+pub async fn mkdir(path: &str) -> Value { if no_sh() { return match make(path).await { Ok(d) => list(&d).await, Err(e) => e } } let r = sh(&mkdir_sh(), path).await; if r.code == 0 { list(lines(&r.out).last().map(String::as_str).unwrap_or("")).await } else { error(&r.out) } }
 pub async fn find() -> Value {
     let r = sh_ro(&find_sh(), "").await; let mut ls = lines(&r.out);
     if ls.is_empty() { json!({"found": []}) } else { let h = ls.remove(0); json!({"home": h, "found": ls}) }
 }
 /// The folder a project would have: the resolved path or `{error}`.
-pub async fn resolve(path: &str) -> Result<String, Value> { let r = sh_ro(&resolve_sh(), path).await; if r.code == 0 { Ok(lines(&r.out).last().cloned().unwrap_or_default()) } else { Err(private(path, error(&r.out))) } }
+pub async fn resolve(path: &str) -> Result<String, Value> { if no_sh() { return native::resolve(path, &crate::plat::dirs::home_or_empty()).map_err(|e| error(&e)) } let r = sh_ro(&resolve_sh(), path).await; if r.code == 0 { Ok(lines(&r.out).last().cloned().unwrap_or_default()) } else { Err(private(path, error(&r.out))) } }
 /// FsJob.create's folder half for project.new: make it, then answer its path.
-pub async fn make(path: &str) -> Result<String, Value> { let r = sh(&mkdir_sh(), path).await; if r.code == 0 { Ok(lines(&r.out).last().cloned().unwrap_or_default()) } else { Err(private(path, error(&r.out))) } }
+pub async fn make(path: &str) -> Result<String, Value> {
+    if no_sh() { if crate::copy::on() { return Err(error("a hub on a copy makes no folders")) } return native::make(path, &crate::plat::dirs::home_or_empty()).map_err(|e| error(&e)) }
+    let r = sh(&mkdir_sh(), path).await; if r.code == 0 { Ok(lines(&r.out).last().cloned().unwrap_or_default()) } else { Err(private(path, error(&r.out))) } }
 /// FsJob.register: a resolved path must be a folder.
 pub fn is_dir(path: &str) -> bool { std::fs::metadata(path).map_or(false, |m| m.is_dir()) }
+
+/// Windows before Git for Windows is installed (#1163): no `sh` runs the scripts above, so the picker and project.add/new do the same in
+/// Rust (setup's Design tools step, or a thread's Install Git ask, installs it). Answers and errors are the scripts' own: `C:/x/y` as
+/// cygpath -am writes it, "no such folder: ...". `fs.find` finds nothing then.
+fn no_sh() -> bool { cfg!(windows) && crate::plat::hub::program(std::ffi::OsStr::new("sh")) == "sh.exe" }
+mod native {
+    use serde_json::{json, Value};
+    use std::path::{Path, PathBuf};
+    /// FP.Folder.path.sh: "" and ~ are home, ~/x and relative paths are under home; a drive with no slash after it is refused.
+    pub fn path(p: &str, home: &str) -> Result<PathBuf, String> {
+        let b = p.as_bytes();
+        if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && !(b.len() >= 3 && (b[2] == b'\\' || b[2] == b'/')) { return Err(format!("invalid drive path: {p} (use an absolute folder)")) }
+        let rooted = b.len() >= 3 && b[1] == b':' || p.starts_with('/') || p.starts_with('\\');
+        Ok(match p {
+            "" | "~" => PathBuf::from(home),
+            _ if p.starts_with("~/") || p.starts_with("~\\") => Path::new(home).join(&p[2..]),
+            _ if rooted => PathBuf::from(p),
+            _ => Path::new(home).join(p),
+        })
+    }
+    fn shown(d: &Path) -> String { d.to_string_lossy().replace('\\', "/") }
+    pub fn resolve(p: &str, home: &str) -> Result<String, String> {
+        let d = path(p, home)?; let s = shown(&d);
+        if !d.exists() { return Err(format!("no such folder: {s}")) }
+        if !d.is_dir() { return Err(format!("not a folder: {s}")) }
+        std::fs::read_dir(&d).map_err(|_| format!("cannot open: {s}"))?;
+        crate::plat::fs::canonicalize(&d).map(|c| shown(&c)).map_err(|_| format!("cannot open: {s}"))
+    }
+    pub fn make(p: &str, home: &str) -> Result<String, String> {
+        let d = path(p, home)?;
+        if d.exists() || d.symlink_metadata().is_ok() { return Err(format!("already exists: {}", shown(&d))) }
+        std::fs::create_dir_all(&d).map_err(|e| format!("cannot make {}: {e}", shown(&d)))?;
+        resolve(&shown(&d), home)
+    }
+    /// FsJob.listed: `{dir, entries}` (sub-folders by name, byte order, at most 5000) or `{error}`.
+    pub fn list(p: &str, home: &str) -> Value {
+        let d = match resolve(p, home) { Ok(d) => d, Err(e) => return json!({"error": e}) };
+        let mut v: Vec<String> = std::fs::read_dir(&d).map(|r| r.flatten().filter(|e| e.file_type().map_or(false, |t| t.is_dir())).map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+        v.sort(); v.truncate(5000);
+        json!({"dir": d, "entries": v})
+    }
+}
 
 #[cfg(test)]
 mod slash_tests {
@@ -65,5 +109,20 @@ mod slash_tests {
         assert_eq!(slashed("C:/already/fine"), "C:/already/fine");
         assert_eq!(slashed("/home/h/a\\b"), "/home/h/a\\b", "a POSIX name with a backslash is left alone");
         assert_eq!(slashed("~/x"), "~/x"); assert_eq!(slashed(""), "");
+    }
+}
+
+#[cfg(test)]
+mod native_tests {
+    use super::native;
+    #[test] fn folders_without_sh_answer_as_the_scripts_do() {
+        let base = std::env::temp_dir().join(format!("bp-fsn-{}", std::process::id())); let _ = std::fs::remove_dir_all(&base); std::fs::create_dir_all(base.join("b")).unwrap(); std::fs::create_dir_all(base.join("a")).unwrap(); std::fs::write(base.join("f"), "x").unwrap();
+        let home = base.to_string_lossy().into_owned();
+        assert_eq!(native::path("", &home).unwrap(), base); assert_eq!(native::path("~", &home).unwrap(), base); assert_eq!(native::path("~/a", &home).unwrap(), base.join("a")); assert_eq!(native::path("a", &home).unwrap(), base.join("a"));
+        assert_eq!(native::path("C:\\x", &home).unwrap(), std::path::PathBuf::from("C:\\x")); assert!(native::path("C:x", &home).unwrap_err().starts_with("invalid drive path"));
+        let l = native::list("", &home); assert_eq!(l["entries"], serde_json::json!(["a", "b"]), "{l}");
+        assert!(native::resolve("f", &home).unwrap_err().starts_with("not a folder")); assert!(native::resolve("nope", &home).unwrap_err().starts_with("no such folder"));
+        let m = native::make("new/proj", &home).unwrap(); assert!(m.ends_with("new/proj") && !m.contains('\\'), "{m}"); assert!(native::make("new/proj", &home).unwrap_err().starts_with("already exists"));
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
