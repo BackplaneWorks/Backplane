@@ -118,8 +118,15 @@ runtime and candidates ahead of it; adding unrelated PATH entries after it does 
 The bp.4 runtime advertises both fix capabilities: partial footprint updates and symbol creation from a library ID
 are accepted. Symbol libraries load on demand; agents need no blanket library preload on this runtime.
 
-The installer checks the pinned asset against both the release SHA256SUMS and the SHA-256 compiled into the hub
-(`install.rs`, `Package.sha256`).
+The managed install takes the pin for the hub's own platform (`native/host/src/kicad/install.rs`: `LINUX`, `WINDOWS`, `MAC`, one line
+each) and checks the downloaded asset against both the release's SHA256SUMS and the SHA-256 compiled into the hub (`Package.sha256`). A pin is bumped with
+`scripts/kicad-pin.py <tag>`: it downloads each platform's asset, requires its sha256 to equal the release's SHA256SUMS line (the
+tarball's own line, never GitHub's artifact digest) and its manifest to say that platform and version (Windows and macOS also
+`global-tables-seeded` and a `backplaneLibrary` pin; macOS its `minOs`), then writes version, release, asset and digest into the
+three lines (`--check` verifies without writing; `--platforms` limits it). A pin prepared ahead of its release carries a
+`PIN-ME-...` digest, which the catalog test and the installer's own check refuse, so it cannot land unfilled.
+`BACKPLANE_KICAD_FEED` (an http(s) folder, a rig's or gate's environment) makes the installer download the asset and SHA256SUMS from
+there instead of the release, so a staged runtime installs through the same driver before its tag (`kicad-pin.py --feed` reads it too).
 
 KiCad can buffer its ready line until exit when stdout is a pipe. The hub discovers a fresh socket in the
 project's private socket directory, including KiCad's `api-<pid>.sock` fallback, and the hub then requires Ping
