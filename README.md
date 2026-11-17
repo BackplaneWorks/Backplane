@@ -1,5 +1,6 @@
 <p align="left">
   <a href="README.jp.md"><img src="docs/media/readme/language-ja.svg" alt="日本語" width="92" height="28"></a>
+  <a href="README.es.md"><img src="docs/media/readme/language-es.svg" alt="Español" width="92" height="28"></a>
 </p>
 
 <p align="center">

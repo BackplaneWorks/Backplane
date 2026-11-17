@@ -176,13 +176,14 @@ impl Draft {
 /// The panel's note in the language in force. The note is kept in English (the harness reads it); a reason it carries (`{why}`, `{e}`: a capture's or the
 /// hub's words) is translated too, a saved file's path is not.
 pub fn note_text(note: &str) -> String {
-    use crate::i18n::{catalog, is_ja, trs, Arg};
-    if !is_ja() { return note.to_string() }
+    use crate::i18n::{active_lang, catalog, trs, Arg, Lang};
+    let lang = active_lang();
+    if lang == Lang::En { return note.to_string() }
     let c = catalog();
     match c.find_pref(note, "gpui.imp.") {
         Some((k, caps)) => {
             let args: Vec<(&str, Arg)> = caps.iter().map(|(n, v)| (n.as_str(), match v { Arg::Str(s) if n != "path" => Arg::Str(trs(s)), o => o.clone() })).collect();
-            c.message(&k, true, &args).unwrap_or_else(|| note.to_string())
+            c.message_in(&k, lang, &args).unwrap_or_else(|| note.to_string())
         }
         None => trs(note),
     }

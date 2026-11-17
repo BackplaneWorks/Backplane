@@ -4,8 +4,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
-/** The app's language and its messages (i18n/en.msg, i18n/ja.msg through Msg.kt, scripts/i18n-android.py).
- *  `lang` is "en" or "ja": the device's choice (AppSettings.lang: auto, en, ja) with auto following the system's language.
+/** The app's language and its messages (i18n/en.msg, i18n/ja.msg, i18n/es.msg through Msg.kt, scripts/i18n-android.py).
+ *  `lang` is "en", "ja" or "es": the device's choice (AppSettings.lang: auto, en, ja, es) with auto following the system's language.
  *  It is Compose state, so a screen that read a message redraws when it changes. Rendered messages are cached per language. */
 object Tr {
     /** The system's language, read at start and on each configuration change (MainActivity). */
@@ -13,7 +13,12 @@ object Tr {
     /** A JVM test sets this to skip AppSettings. */
     internal var fixed: String? = null
     val lang: String get() = fixed ?: resolve(AppSettings.lang, system)
-    fun resolve(choice: String, systemLanguage: String) = when (choice) { "ja" -> "ja"; "en" -> "en"; else -> if (systemLanguage == "ja") "ja" else "en" }
+    fun resolve(choice: String, systemLanguage: String) = when (choice) {
+        "ja" -> "ja"
+        "es" -> "es"
+        "en" -> "en"
+        else -> when (systemLanguage) { "ja" -> "ja"; "es" -> "es"; else -> "en" }
+    }
 
     private val lock = Any()
     private var cacheLang = ""
@@ -49,9 +54,13 @@ object Tr {
     private val index: Map<String, Int> by lazy { Msg.keys.withIndex().associate { it.value to it.index } }
     private val exact: Map<String, Int> by lazy { HashMap<String, Int>().also { m -> Msg.exactText.forEachIndexed { n, t -> m[t] = Msg.exactKey[n] } } }
     private val upperExact: Map<String, Int> by lazy { HashMap<String, Int>().also { m -> Msg.exactText.forEachIndexed { n, t -> m.putIfAbsent(t.uppercase(), Msg.exactKey[n]) } } }
-    private val parsedEn = HashMap<Int, List<Node>>(); private val parsedJa = HashMap<Int, List<Node>>()
+    private val parsedEn = HashMap<Int, List<Node>>(); private val parsedJa = HashMap<Int, List<Node>>(); private val parsedEs = HashMap<Int, List<Node>>()
     private fun nodes(l: String, i: Int): List<Node> = synchronized(parsedEn) {
-        if (l == "ja") parsedJa.getOrPut(i) { Icu.parse(Msg.ja[i]) } else parsedEn.getOrPut(i) { Icu.parse(Msg.en[i]) }
+        when (l) {
+            "ja" -> parsedJa.getOrPut(i) { Icu.parse(Msg.ja[i]) }
+            "es" -> parsedEs.getOrPut(i) { Icu.parse(Msg.es[i]) }
+            else -> parsedEn.getOrPut(i) { Icu.parse(Msg.en[i]) }
+        }
     }
     private val variants: List<Icu.Variant> by lazy { Msg.templates.flatMap { i -> Icu.variants(i, Icu.parse(Msg.en[i])) }.sortedByDescending { it.letters } }
 

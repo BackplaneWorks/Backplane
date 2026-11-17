@@ -1213,11 +1213,12 @@ struct DataToolRow: View {
 private let dClock: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
 private let dDayEn: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "EEE d MMM HH:mm"; return f }()
 private let dDayJa: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "ja_JP"); f.dateFormat = "M月d日(EEE) HH:mm"; return f }()
+private let dDayEs: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "es_ES"); f.dateFormat = "EEE d MMM HH:mm"; return f }()
 /// A message's time: the clock today, the day too on another (in the app's language).
 func dStamp(_ ms: Int) -> String {
     guard ms > 0 else { return "" }
     let d = Date(timeIntervalSince1970: Double(ms) / 1000)
-    return (Calendar.current.isDateInToday(d) ? dClock : Tr.lang == "ja" ? dDayJa : dDayEn).string(from: d)
+    return (Calendar.current.isDateInToday(d) ? dClock : Tr.lang == "ja" ? dDayJa : Tr.lang == "es" ? dDayEs : dDayEn).string(from: d)
 }
 
 struct DataEntryRow: View {

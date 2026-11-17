@@ -146,19 +146,21 @@ KOTLIN_HARD = {"as", "break", "class", "continue", "do", "else", "false", "for",
 
 
 def build():
-    en, ja = load(ROOT / "i18n/en.msg"), load(ROOT / "i18n/ja.msg")
+    en, ja, es = load(ROOT / "i18n/en.msg"), load(ROOT / "i18n/ja.msg"), load(ROOT / "i18n/es.msg")
     bad = [f"missing ja: {k}" for k in en if k not in ja] + [f"extra ja: {k}" for k in ja if k not in en]
+    bad += [f"missing es: {k}" for k in en if k not in es] + [f"extra es: {k}" for k in es if k not in en]
     keys = list(en)
-    parsed_en, parsed_ja, kinds = {}, {}, {}
+    parsed_en, kinds = {}, {}
     for k in keys:
         try:
             parsed_en[k] = parse(en[k][0]); a = args(parsed_en[k], {})
-            if k in ja:
-                parsed_ja[k] = parse(ja[k][0]); b = args(parsed_ja[k], {})
-                if set(a) != set(b): bad.append(f"args differ: {k}: {sorted(a)} vs {sorted(b)}")
-                for name, kind in b.items():
-                    if kind and a.get(name) and a[name] != kind: bad.append(f"{k}: {name} is a number in one language and a select in the other")
-                    elif kind and not a.get(name): a[name] = kind
+            for lang, cat in (("ja", ja), ("es", es)):
+                if k in cat:
+                    b = args(parse(cat[k][0]), {})
+                    if set(a) != set(b): bad.append(f"args differ ({lang}): {k}: {sorted(a)} vs {sorted(b)}")
+                    for name, kind in b.items():
+                        if kind and a.get(name) and a[name] != kind: bad.append(f"{k}: {name} is a number in one language and a select in the other")
+                        elif kind and not a.get(name): a[name] = kind
             kinds[k] = a
         except Bad as e:
             bad.append(f"{k}: {e}")
@@ -200,6 +202,7 @@ def build():
     table("keys", keys)
     table("en", [en[k][0] for k in keys])
     table("ja", [ja[k][0] for k in keys])
+    table("es", [es[k][0] for k in keys])
     table("exactText", [t for t, _ in exact])
     o.append("  internal val exactKey: IntArray by lazy { intArrayOf(" + ", ".join(str(idx[k]) for _, k in exact) + ") }")
     o.append("  internal val templates: IntArray by lazy { intArrayOf(" + ", ".join(str(idx[k]) for k in tmpl) + ") }")

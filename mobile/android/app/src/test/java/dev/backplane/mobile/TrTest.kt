@@ -67,11 +67,12 @@ class TrTest {
     @Test fun languagePolicy() {
         assertEquals("ja", Tr.resolve("auto", "ja")); assertEquals("en", Tr.resolve("auto", "fr")); assertEquals("en", Tr.resolve("auto", "en"))
         assertEquals("ja", Tr.resolve("ja", "en")); assertEquals("en", Tr.resolve("en", "ja"))
+        assertEquals("es", Tr.resolve("auto", "es")); assertEquals("es", Tr.resolve("es", "ja")); assertEquals("en", Tr.resolve("en", "es"))
     }
 
     @Test fun everyMessageParsesAndTemplatesReadBack() {
         Tr.fixed = "ja"
-        for (i in Msg.keys.indices) { Icu.parse(Msg.en[i]); Icu.parse(Msg.ja[i]) }
+        for (i in Msg.keys.indices) { Icu.parse(Msg.en[i]); Icu.parse(Msg.ja[i]); Icu.parse(Msg.es[i]) }
         // every template variant matches the English it renders, back to the same Japanese
         var n = 0
         for (i in Msg.templates) for (v in Icu.variants(i, Icu.parse(Msg.en[i])).take(1)) {
@@ -90,9 +91,9 @@ class TrTest {
             val k = l.substringBefore(" = "); val v = l.substringAfter(" = ")
             k to Regex("""\\(.)""").replace(v) { m -> when (m.groupValues[1]) { "s" -> " "; "n" -> "\n"; else -> m.groupValues[1] } }
         }
-        val en = load("en.msg"); val ja = load("ja.msg")
+        val en = load("en.msg"); val ja = load("ja.msg"); val es = load("es.msg")
         assertEquals("keys (run python3 scripts/i18n-android.py)", en.keys.toList(), Msg.keys.toList())
-        Msg.keys.forEachIndexed { i, k -> assertEquals(k, en[k], Msg.en[i]); assertEquals(k, ja[k], Msg.ja[i]) }
+        Msg.keys.forEachIndexed { i, k -> assertEquals(k, en[k], Msg.en[i]); assertEquals(k, ja[k], Msg.ja[i]); assertEquals(k, es[k], Msg.es[i]) }
     }
 
     /** What the app's pure parts say in English (shared oracles keep them English) reads in Japanese on screen through Tr.t. */

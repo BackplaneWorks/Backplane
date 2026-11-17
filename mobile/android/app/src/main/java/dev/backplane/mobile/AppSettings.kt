@@ -15,7 +15,7 @@ object AppSettings {
     // "system", "light" or "dark"
     var appearance by mutableStateOf("system")
         private set
-    // "auto" (the system's language), "en" or "ja": Tr.lang resolves it
+    // "auto" (the system's language), "en", "ja" or "es": Tr.lang resolves it
     var lang by mutableStateOf("auto")
         private set
     // "projects" or "active"; empty until the hub's choice was carried over

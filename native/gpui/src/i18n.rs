@@ -1,5 +1,5 @@
-//! The client's language: the catalogs `i18n/en.msg` (English, the source and the key list) and `i18n/ja.msg`, read once from the copies
-//! compiled in, and a device-local choice (Automatic, English, 日本語; Automatic follows the system language).
+//! The client's language: the catalogs `i18n/en.msg` (English, the source and the key list), `i18n/ja.msg` and `i18n/es.msg`, read once from
+//! the copies compiled in, and a device-local choice (Automatic, English, 日本語, Español; Automatic follows the system language).
 //!
 //! Three ways in, all pure and cached:
 //!   * `t(key)` / `tf(key, args)`: a message by its key, in the language in force (English when the catalog has no entry).
@@ -12,9 +12,13 @@ use std::{borrow::Cow, collections::HashMap, sync::{atomic::{AtomicU8, Ordering}
 
 pub const EN_MSG: &str = include_str!("../../../i18n/en.msg");
 pub const JA_MSG: &str = include_str!("../../../i18n/ja.msg");
+pub const ES_MSG: &str = include_str!("../../../i18n/es.msg");
 
 /// The choices, as kept in the local settings file and shown in Settings: (value, catalog key of its label).
-pub const CHOICES: [(&str, &str); 3] = [("auto", "settings.lang.auto"), ("en", "settings.lang.en"), ("ja", "settings.lang.ja")];
+pub const CHOICES: [(&str, &str); 4] = [("auto", "settings.lang.auto"), ("en", "settings.lang.en"), ("ja", "settings.lang.ja"), ("es", "settings.lang.es")];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lang { En, Ja, Es }
 
 // ---- the message grammar -----------------------------------------------------------------------------------------------------------------
 #[derive(Clone, Debug, PartialEq)]
@@ -155,7 +159,7 @@ fn number_prefix(text: &str) -> impl Iterator<Item = (u64, &str)> {
 /// Keys the reverse lookup never offers: their English is a frame with a free slot that would swallow other sentences.
 const NO_REVERSE: &[&str] = &["proj.addcand", "native.hub.connection", "native.task.parameter", "secret.asks", "voice.model.ready", "android.quiet.range"];
 pub struct Catalog {
-    en: HashMap<String, Vec<Node>>, ja: HashMap<String, Vec<Node>>,
+    en: HashMap<String, Vec<Node>>, ja: HashMap<String, Vec<Node>>, es: HashMap<String, Vec<Node>>,
     /// English text of a message with no argument → its key.
     exact: HashMap<String, String>,
     /// Messages with arguments, the longest fixed text first (the most specific wins): key and the fixed text's length.
@@ -168,9 +172,11 @@ fn fixed_len(nodes: &[Node]) -> usize { nodes.iter().map(|n| match n { Node::Tex
 fn plain(nodes: &[Node]) -> Option<String> { let mut s = String::new(); for n in nodes { match n { Node::Text(t) => s.push_str(t), _ => return None } } Some(s) }
 
 impl Catalog {
-    pub fn from(en: &str, ja: &str) -> Catalog {
+    pub fn from(en: &str, ja: &str) -> Catalog { Self::from_all(en, ja, "") }
+    pub fn from_all(en: &str, ja: &str, es: &str) -> Catalog {
         let en: HashMap<String, Vec<Node>> = entries(en).into_iter().map(|(k, v)| (k, parse(&v))).collect();
         let ja: HashMap<String, Vec<Node>> = entries(ja).into_iter().map(|(k, v)| (k, parse(&v))).collect();
+        let es: HashMap<String, Vec<Node>> = entries(es).into_iter().map(|(k, v)| (k, parse(&v))).collect();
         let mut exact: HashMap<String, String> = HashMap::new(); let mut templates = Vec::new();
         let mut keys: Vec<&String> = en.keys().collect(); keys.sort();
         for k in keys {
@@ -183,12 +189,22 @@ impl Catalog {
             }
         }
         templates.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-        Catalog { en, ja, exact, templates }
+        Catalog { en, ja, es, exact, templates }
     }
     pub fn keys(&self) -> Vec<&String> { let mut k: Vec<&String> = self.en.keys().collect(); k.sort(); k }
-    pub fn has(&self, key: &str, lang_ja: bool) -> bool { if lang_ja { self.ja.contains_key(key) } else { self.en.contains_key(key) } }
+    pub fn has(&self, key: &str, lang_ja: bool) -> bool { self.has_lang(key, if lang_ja { Lang::Ja } else { Lang::En }) }
+    pub fn has_lang(&self, key: &str, lang: Lang) -> bool {
+        match lang { Lang::Ja => self.ja.contains_key(key), Lang::Es => self.es.contains_key(key), Lang::En => self.en.contains_key(key) }
+    }
     pub fn message(&self, key: &str, ja: bool, args: &[(&str, Arg)]) -> Option<String> {
-        let nodes = if ja { self.ja.get(key).or_else(|| self.en.get(key))? } else { self.en.get(key)? };
+        self.message_in(key, if ja { Lang::Ja } else { Lang::En }, args)
+    }
+    pub fn message_in(&self, key: &str, lang: Lang, args: &[(&str, Arg)]) -> Option<String> {
+        let nodes = match lang {
+            Lang::Ja => self.ja.get(key).or_else(|| self.en.get(key))?,
+            Lang::Es => self.es.get(key).or_else(|| self.en.get(key))?,
+            Lang::En => self.en.get(key)?,
+        };
         let mut s = String::new(); render(nodes, args, None, &mut s); Some(s)
     }
     /// The key of the message that says exactly this in English, with the arguments it captured.
@@ -211,28 +227,30 @@ impl Catalog {
     }
     /// `tr` for a screen that means the messages under `prefix` (`history.`, `gpui.imp.`).
     pub fn trp(text: &str, prefix: &str) -> String {
-        if !is_ja() { return text.to_string() }
+        let lang = active_lang();
+        if lang == Lang::En { return text.to_string() }
         let c = catalog();
-        match c.find_pref(text, prefix) { Some((k, caps)) => { let args: Vec<(&str, Arg)> = caps.iter().map(|(n, v)| (n.as_str(), v.clone())).collect(); c.message(&k, true, &args).unwrap_or_else(|| text.to_string()) } None => trs(text) }
+        match c.find_pref(text, prefix) { Some((k, caps)) => { let args: Vec<(&str, Arg)> = caps.iter().map(|(n, v)| (n.as_str(), v.clone())).collect(); c.message_in(&k, lang, &args).unwrap_or_else(|| text.to_string()) } None => trs(text) }
     }
-    pub fn japanese(&self, text: &str) -> Option<String> {
+    pub fn japanese(&self, text: &str) -> Option<String> { self.translate_to(text, Lang::Ja) }
+    pub fn translate_to(&self, text: &str, lang: Lang) -> Option<String> {
         let (k, caps) = self.find(text)?;
         let args: Vec<(&str, Arg)> = caps.iter().map(|(n, v)| (n.as_str(), v.clone())).collect();
-        self.message(&k, true, &args)
+        self.message_in(&k, lang, &args)
     }
 }
-pub fn catalog() -> &'static Catalog { static C: OnceLock<Catalog> = OnceLock::new(); C.get_or_init(|| Catalog::from(EN_MSG, JA_MSG)) }
+pub fn catalog() -> &'static Catalog { static C: OnceLock<Catalog> = OnceLock::new(); C.get_or_init(|| Catalog::from_all(EN_MSG, JA_MSG, ES_MSG)) }
 
 // ---- the language in force ----------------------------------------------------------------------------------------------------------------
-const AUTO: u8 = 0; const EN: u8 = 1; const JA: u8 = 2;
+const AUTO: u8 = 0; const EN: u8 = 1; const JA: u8 = 2; const ES: u8 = 3;
 /// A test reads English unless it says otherwise (`with_lang`), whatever language the machine it runs on speaks.
 static CHOICE: AtomicU8 = AtomicU8::new(if cfg!(test) { EN } else { AUTO });
 #[cfg(test)]
 thread_local! { static ONLY_HERE: std::cell::Cell<Option<u8>> = const { std::cell::Cell::new(None) }; }
-/// Run `f` with this thread's language "en" or "ja" (other test threads keep theirs).
+/// Run `f` with this thread's language "en", "ja" or "es" (other test threads keep theirs).
 #[cfg(test)]
 pub fn with_lang<R>(lang: &str, f: impl FnOnce() -> R) -> R {
-    let prev = ONLY_HERE.with(|c| c.replace(Some(if lang == "ja" { JA } else { EN })));
+    let prev = ONLY_HERE.with(|c| c.replace(Some(match lang { "ja" => JA, "es" => ES, _ => EN })));
     if let Ok(mut c) = cache().lock() { c.clear(); }
     let r = f();
     ONLY_HERE.with(|c| c.set(prev)); if let Ok(mut c) = cache().lock() { c.clear(); }
@@ -244,17 +262,24 @@ fn current() -> u8 {
 }
 fn cache() -> &'static Mutex<HashMap<String, String>> { static C: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new(); C.get_or_init(Default::default) }
 
-/// The device's choice: "auto", "en" or "ja" (anything else is "auto"). Clears what was translated.
-pub fn set_choice(v: &str) { CHOICE.store(match v { "en" => EN, "ja" => JA, _ => AUTO }, Ordering::Relaxed); if let Ok(mut c) = cache().lock() { c.clear(); } }
-pub fn choice() -> &'static str { match current() { EN => "en", JA => "ja", _ => "auto" } }
-/// Whether the interface is in Japanese now: the choice, and for Automatic the system's language.
-pub fn is_ja() -> bool { match current() { JA => true, EN => false, _ => system_is_ja() } }
-pub fn tag() -> &'static str { if is_ja() { "ja" } else { "en" } }
+/// The device's choice: "auto", "en", "ja" or "es" (anything else is "auto"). Clears what was translated.
+pub fn set_choice(v: &str) { CHOICE.store(match v { "en" => EN, "ja" => JA, "es" => ES, _ => AUTO }, Ordering::Relaxed); if let Ok(mut c) = cache().lock() { c.clear(); } }
+pub fn choice() -> &'static str { match current() { EN => "en", JA => "ja", ES => "es", _ => "auto" } }
+/// The language currently in force: the choice, and for Automatic the system's language.
+pub fn active_lang() -> Lang { match current() { JA => Lang::Ja, ES => Lang::Es, EN => Lang::En, _ => system_lang() } }
+/// Whether the interface is in Japanese now.
+pub fn is_ja() -> bool { active_lang() == Lang::Ja }
+pub fn tag() -> &'static str { match active_lang() { Lang::Ja => "ja", Lang::Es => "es", Lang::En => "en" } }
 
-/// Whether the system's language is Japanese. The environment first (LC_ALL, LC_MESSAGES, LANGUAGE, LANG: Linux and a terminal start), else the
+/// Whether the system's language is Japanese or Spanish. The environment first (LC_ALL, LC_MESSAGES, LANGUAGE, LANG: Linux and a terminal start), else the
 /// platform's own setting: macOS's AppleLanguages (an app started from the Dock has no LANG), Windows' user locale name.
-pub fn system_is_ja() -> bool { static S: OnceLock<bool> = OnceLock::new(); *S.get_or_init(|| language_is_ja(&system_language())) }
+pub fn system_lang() -> Lang {
+    static S: OnceLock<Lang> = OnceLock::new();
+    *S.get_or_init(|| { let s = system_language(); if language_is_ja(&s) { Lang::Ja } else if language_is_es(&s) { Lang::Es } else { Lang::En } })
+}
+pub fn system_is_ja() -> bool { system_lang() == Lang::Ja }
 pub fn language_is_ja(tag: &str) -> bool { let t = tag.trim().to_ascii_lowercase(); t == "ja" || t.starts_with("ja_") || t.starts_with("ja-") || t.starts_with("ja.") || t.starts_with("ja@") }
+pub fn language_is_es(tag: &str) -> bool { let t = tag.trim().to_ascii_lowercase(); t == "es" || t.starts_with("es_") || t.starts_with("es-") || t.starts_with("es.") || t.starts_with("es@") }
 fn system_language() -> String {
     for k in ["LC_ALL", "LC_MESSAGES", "LANGUAGE", "LANG"] {
         if let Some(v) = std::env::var_os(k).map(|v| v.to_string_lossy().to_string()).filter(|v| !v.is_empty() && v != "C" && v != "POSIX") {
@@ -281,11 +306,11 @@ fn platform_language() -> String { String::new() }
 
 /// A message by its key in the language in force; the key itself when the catalog has none (a test refuses that).
 pub fn t(key: &str) -> String { tf(key, &[]) }
-pub fn tf(key: &str, args: &[(&str, Arg)]) -> String { catalog().message(key, is_ja(), args).unwrap_or_else(|| key.to_string()) }
+pub fn tf(key: &str, args: &[(&str, Arg)]) -> String { catalog().message_in(key, active_lang(), args).unwrap_or_else(|| key.to_string()) }
 
 /// English text, drawn in the language in force. Unknown text comes back unchanged.
 pub fn tr(text: &str) -> Cow<'_, str> {
-    if text.is_empty() || !is_ja() { return Cow::Borrowed(text) }
+    if text.is_empty() || active_lang() == Lang::En { return Cow::Borrowed(text) }
     if let Some(hit) = cache().lock().ok().and_then(|c| c.get(text).cloned()) { return if hit.is_empty() { Cow::Borrowed(text) } else { Cow::Owned(hit) } }
     let out = translate(text);
     if out.is_none() { miss(text); }
@@ -307,18 +332,19 @@ fn miss(text: &str) {
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) { let _ = writeln!(f, "{}", text.replace('\n', "\\n")); }
 }
 fn translate(text: &str) -> Option<String> {
+    let lang = active_lang();
     let c = catalog();
-    if let Some(s) = c.japanese(text) { return Some(s) }
+    if let Some(s) = c.translate_to(text, lang) { return Some(s) }
     // a trailing ellipsis, colon or period the catalog's message may not carry, and the label of a count
     let t = text.trim_end_matches(['…', ':', '.', '。']);
-    if t.len() != text.len() && !t.is_empty() { if let Some(s) = c.japanese(t) { return Some(format!("{s}{}", &text[t.len()..])) } }
+    if t.len() != text.len() && !t.is_empty() { if let Some(s) = c.translate_to(t, lang) { return Some(format!("{s}{}", &text[t.len()..])) } }
     None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn cat() -> Catalog { Catalog::from(EN_MSG, JA_MSG) }
+    fn cat() -> Catalog { Catalog::from_all(EN_MSG, JA_MSG, ES_MSG) }
     #[test] fn a_message_with_plural_select_and_number_renders_in_both_languages() {
         let c = Catalog::from("a.n = {n, plural, =0 {None} one {# thread} other {# threads}}\na.who = {who, select, you {You} agent {Agent} other {Someone}}\na.big = {n, number} more\na.q = don''t '{x}' \\sgo\\n", "a.n = {n}件\na.who = {who, select, you {自分} other {不明}}\na.big = さらに{n, number}件\na.q = 行く");
         let m = |k: &str, ja: bool, a: &[(&str, Arg)]| c.message(k, ja, a).unwrap();
@@ -347,18 +373,22 @@ mod tests {
         assert_eq!(c.japanese("New thread").as_deref(), Some("新しいスレッド")); assert!(c.japanese("Delete my plan?").unwrap().contains("my plan"));
         assert_eq!(c.japanese("2 threads").as_deref(), Some("スレッド2件"));
     }
-    /// The release check: every English message has a Japanese one with the same arguments, and no Japanese message is left over.
-    #[test] fn every_key_has_a_japanese_entry_and_the_same_arguments() {
-        let (en, ja) = (entries(EN_MSG), entries(JA_MSG));
-        let jam: HashMap<&String, &String> = ja.iter().map(|(k, v)| (k, v)).collect(); let enm: HashMap<&String, &String> = en.iter().map(|(k, v)| (k, v)).collect();
+    /// The release check: every English message has a Japanese and Spanish one with the same arguments, and no translation is left over.
+    #[test] fn every_key_has_a_japanese_and_spanish_entry_and_the_same_arguments() {
+        let en = entries(EN_MSG);
+        let enm: HashMap<&String, &String> = en.iter().map(|(k, v)| (k, v)).collect();
         let mut bad = Vec::new();
-        for (k, v) in &en {
-            match jam.get(k) {
-                None => bad.push(format!("{k}: no Japanese")),
-                Some(j) => { let (a, b) = (names(&parse(v)), names(&parse(j))); if a != b { bad.push(format!("{k}: arguments {a:?} in English, {b:?} in Japanese")); } }
+        for (lang, src) in [("Japanese", JA_MSG), ("Spanish", ES_MSG)] {
+            let cat = entries(src);
+            let cm: HashMap<&String, &String> = cat.iter().map(|(k, v)| (k, v)).collect();
+            for (k, v) in &en {
+                match cm.get(k) {
+                    None => bad.push(format!("{k}: no {lang}")),
+                    Some(t) => { let (a, b) = (names(&parse(v)), names(&parse(t))); if a != b { bad.push(format!("{k}: arguments {a:?} in English, {b:?} in {lang}")); } }
+                }
             }
+            for (k, _) in &cat { if !enm.contains_key(k) { bad.push(format!("{k}: {lang} without English")); } }
         }
-        for (k, _) in &ja { if !enm.contains_key(k) { bad.push(format!("{k}: Japanese without English")); } }
         assert!(bad.is_empty(), "{}", bad.join("\n"));
     }
     fn names(nodes: &[Node]) -> std::collections::BTreeSet<String> {
@@ -369,11 +399,13 @@ mod tests {
     #[test] fn the_language_in_force_decides_what_tr_returns() {
         assert_eq!(tr("Theme"), "Theme", "English is untouched");
         with_lang("ja", || { assert_eq!(tr("Theme"), "テーマ"); assert_eq!(trs("Open"), "開く"); assert_eq!(tr("a title nobody catalogued"), "a title nobody catalogued"); assert_eq!(tf("gpui.keys.fixed", &[("key", "Esc".into())]), "Esc。固定です。"); assert_eq!(tr("264 px."), "264 pxです。"); });
+        with_lang("es", || { assert_eq!(tr("Theme"), "Tema"); assert_eq!(trs("Open"), "Abrir"); assert_eq!(tr("1 thread"), "1 hilo"); assert_eq!(tr("12 threads"), "12 hilos"); });
         assert_eq!(tf("gpui.keys.fixed", &[("key", "Esc".into())]), "Esc. Fixed.");
         with_lang("en", || assert_eq!(tr("Theme"), "Theme"));
     }
     #[test] fn the_system_language_is_read_from_a_locale_tag() {
         for t in ["ja", "ja_JP.UTF-8", "ja-JP", "JA_jp", "ja@x"] { assert!(language_is_ja(t), "{t}"); }
-        for t in ["en_US.UTF-8", "jam", "", "C", "de_DE", "zh_CN"] { assert!(!language_is_ja(t), "{t}"); }
+        for t in ["es", "es_ES.UTF-8", "es-MX", "ES_419", "es@x"] { assert!(language_is_es(t), "{t}"); }
+        for t in ["en_US.UTF-8", "jam", "", "C", "de_DE", "zh_CN"] { assert!(!language_is_ja(t) && !language_is_es(t), "{t}"); }
     }
 }

@@ -109,7 +109,9 @@ pub fn api_keys(path: &str, names: &[String]) -> String {
 }
 
 /// Prompt.lang
-pub fn lang_line(setting: &str) -> &'static str { match setting { "ja" => T::PROMPT_LANG_K[0], "en" => T::PROMPT_LANG_K[1], _ => "" } }
+pub fn lang_line(setting: &str) -> &'static str { match setting { "ja" => T::PROMPT_LANG_K[0], "en" => T::PROMPT_LANG_K[1], "es" => PROMPT_LANG_ES, _ => "" } }
+/// Prompt.lang for Spanish (prompt_text.rs is generated and has ja and en only).
+const PROMPT_LANG_ES: &str = "Reply in Spanish (español) unless the person writes in another language or asks otherwise. Keep code, commands, paths and identifiers as they are.";
 
 /// The backplane_skills block: one line per bundled skill, its SKILL.md named, so any provider can read it.
 pub fn bundled_skills(ss: &[(String, String, String)]) -> String {
@@ -180,7 +182,7 @@ pub(crate) mod tests {
         assert!(!build(&gold_env()).contains("<backplane_skills>"));
         assert!(order_project(true).contains("`sendcutsend` block") && !order_project(false).contains("sendcutsend"), "the review knows SendCutSend's check");
     }
-    #[test] fn language_and_buy_blocks_are_added_after() { let mut e = gold_env(); e.lang = "en".into(); e.buy = true; let s = build(&e); assert!(s.ends_with("Keep code, commands, paths and identifiers as they are.")); assert!(s.contains("<backplane_buy>")); }
+    #[test] fn language_and_buy_blocks_are_added_after() { let mut e = gold_env(); e.lang = "en".into(); e.buy = true; let s = build(&e); assert!(s.ends_with("Keep code, commands, paths and identifiers as they are.")); assert!(s.contains("<backplane_buy>")); e.lang = "es".into(); assert!(build(&e).contains("Reply in Spanish")); e.lang = "fr".into(); assert!(!build(&e).contains("Reply in")); }
     /// e2e n1110: Buy it started a thread that exported Gerbers, guessed at a manifest and gave up ("I don't know the format it expects"): its prompt was the
     /// block's opening line only. The whole block is there: the gate, the questions, the export layout, the quote and the closing rules.
     #[test] fn a_buy_thread_gets_every_step_of_its_instructions() {
