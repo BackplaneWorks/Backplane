@@ -116,6 +116,14 @@ Upstream main (`origin/main`) is the one main. Local `main` only ever follows it
 Every failure prints `land: FAILED: <why>` and exits non-zero; nothing is half-landed: either origin has the commits and local main follows, or nothing moved.
 The main hook (`scripts/main.hook`, the reference-transaction hook) refuses any move of local `main` to a commit that is not on `origin/main`, so a hand merge into main fails at once. `scripts/main-build.sh` builds only `origin/main` (it fetches every minute), so nothing unpushed reaches the app.
 
+`scripts/check-author.sh` accepts i2cjak's `build@amemb.com` and `231940135+i2cjak@users.noreply.github.com`, and jlcjak's `206324213+jlcjak@users.noreply.github.com` and `kpatsatzakis1@gmail.com`, as author and committer. GitHub's `noreply@github.com` is accepted only as committer. Other addresses are refused; accepted identities and existing history are preserved. The installer keeps this checker beside the hooks in the common git directory, so every worktree uses the installed rule even while its checkout is stale. Local main and origin/main ref updates check only new commits absent from the old ref; landing checks `origin/main..HEAD`.
+
+To update the hooks for an existing checkout and all its worktrees without changing its working files, run this from a worktree (fetching with the old hook is safe; it checks local main):
+
+```sh
+bash -c 'set -euo pipefail; . scripts/lib-bptmp.sh; d=$(mktemp -d "$BP_TMP/hooks.XXXXXX"); trap '\''rm -rf "$d"'\'' EXIT; git fetch origin main; git archive origin/main scripts | tar -x -C "$d"; sh "$d/scripts/install-hooks.sh"'
+```
+
 ## GitHub accounts
 
 gh may be logged in to several accounts per host (`gh auth login` more than once). Backplane runs every gh call (listing merged pull requests, `gh pr create`) as the repository's account, and never switches gh's active account.

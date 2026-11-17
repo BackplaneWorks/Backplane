@@ -81,7 +81,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Every commit is authored and committed by build@amemb.com
+      - name: Author and hook regression tests
+        run: bash test/land/check_author_test.sh
+      - name: Every commit has an approved author and committer
         env:
           BEFORE: ${{ github.event.before }}
           BASE: ${{ github.event.pull_request.base.sha }}

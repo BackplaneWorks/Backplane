@@ -1,6 +1,5 @@
 #!/bin/sh
 # pre-commit hook, installed by scripts/install-hooks.sh into <common .git>/hooks/, which serves every worktree.
 # Refuses a commit whose author or committer scripts/check-author.sh does not allow (git var shows what this commit would use, env and config included).
-root=$(git worktree list --porcelain 2>/dev/null | awk 'NR==1{print substr($0,10)}')
-chk=$root/scripts/check-author.sh; [ -x "$chk" ] || chk=$(git rev-parse --show-toplevel)/scripts/check-author.sh
+chk=$(git rev-parse --git-common-dir)/hooks/check-author.sh
 exec "$chk" --ident
