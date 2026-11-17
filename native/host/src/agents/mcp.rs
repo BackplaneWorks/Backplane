@@ -240,6 +240,8 @@ impl Mcp {
             n if ag.tool_sets().iter().any(|s| s.owns(n)) => {
                 // a board or schematic written directly holds its document's lock, as a KiCad write does
                 let gate = if n == "files_write" { match ag.files_doc(thread, sv(&a, "path")).await { Some(doc) => ag.doc_gate(thread, &doc).await.err(), None => None } } else { None };
+                // #1163: a write of the project's files is snapshotted first (the turn's first), and refused for a design file in a review (snapguard.rs)
+                let gate = match gate { Some(g) => Some(g), None if matches!(n, "files_write" | "files_mkdir" | "files_rename" | "files_delete") => ag.files_write_guard(thread, &[sv(&a, "path"), sv(&a, "to")]).await.err(), None => None };
                 match gate { Some(why) => fail(&why), None => { let s = ag.tool_sets().into_iter().find(|s| s.owns(n)).unwrap(); s.call(thread, n, &a).await } }
             }
             _ => fail("unknown tool"),

@@ -64,6 +64,8 @@ impl Agents {
     pub async fn kicad_call(self: &Arc<Self>, thread: &str, path: &str, ty: &str, msg: Value) -> Result<Value, String> {
         use crate::files::kicad::ipc;
         if let Some(why) = ipc::approval_refused(ty, &msg) { return Err(why) }
+        // #1163, before the gate and any save: a review refuses writes, the turn's first write is snapshotted, a mass deletion waits for the person (snapguard.rs)
+        self.mass_guard(thread, &kc::doc_of(&kc::route(path)), ty, &msg).await?;
         let routed = self.kicad_gate_take(thread, path, ty).await?;
         let v = ipc::kicad_ipc_in(&self.hub, Some(thread), &routed, ty, msg).await?;
         // a saved document is committed straight to main
@@ -273,6 +275,7 @@ impl Agents {
     /// A turn ended: its design work is committed to main, then its documents are let go.
     pub async fn design_turn_end(self: &Arc<Self>, th: &str) {
         if crate::copy::on() { return }
+        self.turn_guard_end(th).await; // #1163: a mass loss or a review's change offers to restore to before the turn (snapguard.rs)
         self.design_record(th, "turn").await;
         self.doc_locks_free(th).await;
         // the open co-editing editors stop showing this agent at work (docs/kicad-coedit.md)

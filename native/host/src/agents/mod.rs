@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod account_tools; pub mod halt; pub mod halt_view; pub mod kicadsel; pub mod mcp_stdio; pub mod bundled; pub mod kistack; pub mod mailroom; pub mod recall; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod iconpick; pub mod groupname; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
+pub mod account_tools; pub mod halt; pub mod halt_view; pub mod kicadsel; pub mod mcp_stdio; pub mod bundled; pub mod kistack; pub mod mailroom; pub mod recall; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod iconpick; pub mod groupname; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod snapguard; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
 #[cfg(test)] mod tests;
 #[cfg(test)] mod laws;
 
@@ -84,7 +84,8 @@ pub fn handle() -> Option<Arc<Agents>> { HANDLE.get().cloned() }
 
 pub struct Agents { pub hist_ends: StdMutex<HashMap<String, Arc<HistEnds>>>, pub guards: locks::Guards, stopped: std::sync::atomic::AtomicBool, carry_gone: std::sync::atomic::AtomicBool, carrying: std::sync::atomic::AtomicUsize, pub copy_point: StdMutex<(Vec<(String, String, bool)>, Vec<String>)>, pub works: StdMutex<HashMap<String, work::Ctl>>, pub work_lock: tokio::sync::Mutex<()>, pub tool_sets: StdMutex<Vec<Arc<dyn mcp::ToolSet>>>, pub stopped_by: StdMutex<HashMap<String, String>>, pub hub: Arc<Hub>, pub cli: Cli, pub host: host::HostInfo, world: Mutex<World>, actors: StdMutex<HashMap<String, mpsc::Sender<Cmd>>>, pub stats: Stats, n: AtomicU64,
     pub driver_asks: StdMutex<HashMap<String, String>>, pub mcp: std::sync::OnceLock<Arc<mcp::Mcp>>, gens: StdMutex<HashMap<String, String>>, pub parked: StdMutex<HashMap<String, mcp::Parked>>, pub order_asks: StdMutex<HashMap<String, crate::settings::order::Asked>>, pub mailroom: std::sync::OnceLock<Arc<dyn mailroom::Mailroom>>, /** the memory tree (bots/recall): a thread with infinite context starts each turn fresh with its view */ pub recall: std::sync::OnceLock<Arc<dyn recall::Recall>>, /** the account manager (set by the accounts mod): a thread bound to a named account is launched through it */ pub accounts: std::sync::OnceLock<Arc<crate::settings::accounts_io::Accounts>>, cut: StdMutex<Vec<String>>, /** the selected KiCad's env for the turn being started (kicadsel.rs), set with its prompt */ pub kicad_env: StdMutex<Vec<(String, String)>>,
-    /** locks.rs: background lock ticks done; with lock_tick_manual set (tests that drive locks_tick themselves) the timer loop only counts */ pub lock_ticks: AtomicU64, pub lock_tick_manual: std::sync::atomic::AtomicBool }
+    /** locks.rs: background lock ticks done; with lock_tick_manual set (tests that drive locks_tick themselves) the timer loop only counts */ pub lock_ticks: AtomicU64, pub lock_tick_manual: std::sync::atomic::AtomicBool,
+    /** snapguard.rs: each running turn's snapshot, review mode and deletion counts */ pub turn_guards: StdMutex<HashMap<String, snapguard::TurnGuard>> }
 
 pub fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
 pub fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0) }
@@ -109,7 +110,7 @@ impl Agents {
     pub async fn start_host(hub: Arc<Hub>, cli: Cli, host: host::HostInfo) -> Result<Arc<Agents>> {
         let no_dir = cli.dir().is_none();
         let ag = Arc::new(Agents { lock_ticks: AtomicU64::new(0), lock_tick_manual: Default::default(), kicad_env: Default::default(), hist_ends: Default::default(), guards: Default::default(), stopped: Default::default(), carry_gone: Default::default(), carrying: Default::default(), hub: hub.clone(), cli, host, world: Mutex::new(crate::ckpt::take("agents", &hub.store, || World::load(&hub.store)).unwrap_or_default()), actors: StdMutex::new(HashMap::new()), stats: Stats::default(), n: AtomicU64::new(0),
-            mailroom: Default::default(), recall: Default::default(), accounts: std::sync::OnceLock::new(), cut: StdMutex::new(vec![]), driver_asks: StdMutex::new(HashMap::new()), order_asks: StdMutex::new(HashMap::new()), stopped_by: StdMutex::new(HashMap::new()), tool_sets: StdMutex::new(vec![]), works: StdMutex::new(HashMap::new()), copy_point: StdMutex::new((vec![], vec![])), work_lock: tokio::sync::Mutex::new(()), mcp: std::sync::OnceLock::new(), gens: StdMutex::new(HashMap::new()), parked: StdMutex::new(HashMap::new()) });
+            mailroom: Default::default(), recall: Default::default(), accounts: std::sync::OnceLock::new(), cut: StdMutex::new(vec![]), driver_asks: StdMutex::new(HashMap::new()), order_asks: StdMutex::new(HashMap::new()), stopped_by: StdMutex::new(HashMap::new()), tool_sets: StdMutex::new(vec![]), works: StdMutex::new(HashMap::new()), copy_point: StdMutex::new((vec![], vec![])), work_lock: tokio::sync::Mutex::new(()), mcp: std::sync::OnceLock::new(), gens: StdMutex::new(HashMap::new()), parked: StdMutex::new(HashMap::new()), turn_guards: StdMutex::new(HashMap::new()) });
         ag.world.lock().await.home = hub.cfg.home.to_string_lossy().into_owned();
         // reap BEFORE the owner mark is set: marked children of this process (another test's, in a shared test binary) must not be taken for a dead hub's
         if no_dir && !crate::copy::on() { tokio::task::spawn_blocking(|| { let _ = proc::search_dirs(); }); } // the login shell's PATH is read now, off the workers, not inside the person's first send
@@ -506,6 +507,8 @@ impl Agents {
                     let msg = p.get("msg").and_then(Value::as_str).filter(|m| !m.is_empty()).map(str::to_string).unwrap_or_else(|| hub_id("m", now_s(), self.seq()));
                     let retry = p.get("retry").and_then(Value::as_bool).unwrap_or(false);
                     let attached: Vec<Value> = p.get("attachments").filter(|a| a.as_array().map_or(false, |x| !x.is_empty())).map(|a| vec![json!({"$":"MessageAttached","thread":th,"msg":msg,"attachments":a,"at":now_s()})]).unwrap_or_default();
+                    // `/restore [turn]` from the person: the hub puts the project back to before that turn itself, no agent turn (snapguard.rs)
+                    if who.client > 0 && !retry { if let Some(n) = snapguard::restore_command(text) { return self.restore_command(th, n).await } }
                     if who.client > 0 && !retry && !text.trim().is_empty() {
                         // the star nudge counts this prompt in the same commit; the offer (the fifth) goes to this connection after it
                         let (mut extra, offer) = crate::statehost::policies().map(|p| p.star_prompt(&msg, now_s())).unwrap_or((vec![], None));
@@ -754,6 +757,7 @@ impl Actor {
         self.recent.push_back(msg.clone()); if self.recent.len() > RECENT { self.recent.pop_front(); }
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed);
         self.jobs_start(&cwd, &msg); if !self.settle_ends().await { return Ok(()) } // a Stop while it waited for the checkpoint: no agent is started, the Stop ends the turn
+        self.ag.turn_guard_start(&th, &cwd, Some(&text)).await; // #1163: the hub's snapshot (and the review mode) before the agent gets anything (snapguard.rs)
         // the person's message starts the turn: the <terminals> note follows it (and the chat's unpinned terminals stop)
         let rv_block = { let w = self.ag.world().await; let ops: Vec<_> = w.reviews.get(&th).map(|v| v.iter().filter_map(|(k, sm, at)| crate::files::kicad::review::of(crate::files::kicad::review::TONE, k, sm, *at)).collect()).unwrap_or_default(); crate::files::kicad::review::prompt(&crate::files::kicad::review::fold(&ops)) }; // Review.agent: the open comments follow every message
         let text_ref = { let w = self.ag.world().await; let mut model_lines: Vec<String> = refs.iter().map(|r| r.line()).collect(); if role == "user" && origin.is_none() { model_lines.extend(refs::machine_lines(&crate::session::composer::mention::machines(), &text)) } format!("{text}{}", refs::block(&w, &th, &text, &model_lines)) }; // Refs.agent: the text, then what it references (@ > % # words, then the `&model` lines, one block)
@@ -800,6 +804,7 @@ impl Actor {
         let text = if handed.is_empty() { text } else { format!("{handed}\n\n{text}") };
         self.commit(ev).await;
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, ""); if !self.settle_ends().await { return Ok(()) }
+        self.ag.turn_guard_start(&th, &cwd, Some(&text)).await;
         if self.codex { self.codex_run(&t, &cwd, &text).await } else { let msg = hub_id("q", now, self.ag.seq()); self.claude_send(&t, &cwd, &msg, &text, &text, now).await }
         Ok(())
     }
@@ -929,6 +934,7 @@ impl Actor {
         self.cx = cx; self.cwd = cwd.clone(); self.codex = t.provider != "claude"; self.prov = t.provider.clone(); self.model = t.model.clone();
         let mut ev = codex::ride_done(&th, &v, "with a new turn", now); ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
         self.commit(ev).await; self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, &codex::ride_last(&v)); if !self.settle_ends().await { return Ok(()) }
+        self.ag.turn_guard_start(&th, &cwd, None).await;
         let input = codex::ride_input(&v);
         if self.codex { self.codex_run(&t, &cwd, &input).await } else { let msg = hub_id("w", now, self.ag.seq()); self.claude_send(&t, &cwd, &msg, &input, &input, now).await }
         Ok(())
@@ -943,6 +949,7 @@ impl Actor {
         let now = now_s(); let mut ev = codex::ride_done(&th, &ride, "with a new turn", now);
         ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
         self.commit(ev).await; self.cwd = cwd.clone(); self.jobs_start(&cwd, &codex::ride_last(&ride)); if !self.settle_ends().await { return }
+        self.ag.turn_guard_start(&th, &cwd, None).await;
         self.codex_run(&t, &cwd, &codex::ride_input(&ride)).await;
     }
 
@@ -999,7 +1006,7 @@ impl Actor {
         if crate::copy::turn_gated(self.pressed) { return } // Copy.turns: nothing but a person's turn writes to an agent on a copy
         let th = self.th.clone(); let (cwd, msg, text, mut agent_text) = (cwd.to_string(), msg.to_string(), text.to_string(), agent_text.to_string());
         // the thread's MCP servers are part of the key: a list changed in Settings > MCP (or by an agent) starts Claude again at its next turn, on the same session
-        let key = format!("{}|mcp:{}", rules::agent_key(&t.model, &t.runtime, &t.interaction, self.cx.think), crate::mcpx::svc::fingerprint(&th, "claude").await);
+        let key = format!("{}|mcp:{}{}", rules::agent_key(&t.model, &t.runtime, &t.interaction, self.cx.think), crate::mcpx::svc::fingerprint(&th, "claude").await, if self.ag.in_review(&th).await { "|review" } else { "" }); // a review runs with deny rules for design files (snapguard.rs): a change of mode starts Claude again
         // a live process with a command still open (a turn in flight) is never replaced for a changed model/mode key: the message goes on its input (the CLI queues it) and the new key applies from the next process
         // infinite context (agents/recall.rs): a new turn (no command open: a message into a running turn goes on its input) starts a fresh session with the view
         let fresh = !self.person && !self.cmds.open("") && self.ag.recall_on(&th);
@@ -1189,7 +1196,8 @@ impl Actor {
         let (effort, think) = { let w = self.ag.world().await; (w.setting(&format!("effort.{th}")).to_string(), self.cx.think) };
         let url = self.ag.mcp.get().map(|m| m.url(&th, &gen)).unwrap_or_default();
         let mcp = crate::mcpx::svc::launch(&th, "claude", &url).await;
-        let mut args = rules::claude_args(&rules::ArgsIn { model: &t.model, session: &session, runtime: &t.runtime, interaction: &t.interaction, prompt: &prompt, dirs: &dirs, effort: &effort, think, plugins: &plugins, mcp_url: &url, mcp_json: &mcp.claude, disallowed: &mcp.disallowed });
+        let mut disallowed = mcp.disallowed.clone(); if self.ag.in_review(&th).await { disallowed.extend(snapguard::CLAUDE_DENY.iter().map(|x| x.to_string())) } // a review's design files are read-only to Claude's own tools too
+        let mut args = rules::claude_args(&rules::ArgsIn { model: &t.model, session: &session, runtime: &t.runtime, interaction: &t.interaction, prompt: &prompt, dirs: &dirs, effort: &effort, think, plugins: &plugins, mcp_url: &url, mcp_json: &mcp.claude, disallowed: &disallowed });
         let mut keep = vec![]; // Windows: the files Claude reads at its start, removed when it ends
         if cfg!(windows) {
             let name: String = th.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();

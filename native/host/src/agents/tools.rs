@@ -201,6 +201,7 @@ impl Agents {
             return Ok(())
         }
         let (now, th) = (now_s(), a.thread.clone());
+        if a.tool == super::snapguard::RESTORE_TOOL { return self.restore_answer(ask, &th, answer).await } // #1163: restore to before a turn, or keep it
         if a.tool == crate::mcpx::tools::TOOL { return crate::mcpx::tools::answer(self, ask, &th, &a.options, answer).await } // Settings > MCP: an agent's server change, confirmed or not
         if a.tool == crate::settings::proposal::TOOL { return { let open: Vec<String> = self.world().await.asks.iter().filter(|(_, k)| k.tool == crate::settings::proposal::TOOL).map(|(i, _)| i.clone()).collect(); crate::settings::proposal::answer_ask(self, ask, &th, &a.options, answer, now, &open).await } } // settings lane: Settings.answer
         if a.tool == crate::settings::order::PICK_TOOL { // the list of what would be ordered: a tap flips an item and the card is drawn again; anything else answers it
