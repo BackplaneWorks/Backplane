@@ -20,12 +20,12 @@ fn key_ok(k: &str) -> bool { !k.is_empty() && k.len() <= 256 && k.bytes().all(|b
 /// A thread's own terminal on a linked machine: its key is the thread's id there (`<link>~<id>`); the shell runs in that thread's folder over there.
 fn far_key(k: &str) -> bool { crate::net::far::is(k) && !k.contains(':') }
 /// Requests about such a terminal that wait on the other machine (a phone's socket runs them off its loop; the rest answer from what the socket already holds).
-pub fn far_wait(m: &str, p: &Value) -> bool { matches!(m, "term.new" | "term.write" | "term.resize") && (far_key(s(p, "key")) || far_key(s(p, "thread"))) }
+pub fn far_wait(m: &str, p: &Value) -> bool { matches!(m, "term.new" | "term.write" | "term.resize") && (far_key(s(p, "key")) || far_key(s(p, "thread")) || far_key(s(p, "chat"))) }
 /// What a phone is told when it opens or watches a far terminal: nothing yet. The owner's screen arrives as pushes (net/rpc.rs pull loop) and the first one resets it.
 fn far_open(key: &str, p: &Value) -> Value { let (c, r) = (size(p, "cols", 80), size(p, "rows", 24)); json!({"key":key,"g":0,"o":0,"state":"running","cols":c,"rows":r,"title":"shell","running":true,"reset":[c, r],"b":""}) }
 /// The requests of a far terminal that go to the owner: `term.open`, `term.input` (bytes as numbers) and `term.resize` of its viewer methods (net/farview.rs).
 pub async fn far_call(hub: &Arc<Hub>, client: u64, m: &str, p: &Value) -> Result<Value, Value> {
-    let key = if far_key(s(p, "key")) { s(p, "key") } else { s(p, "thread") };
+    let key = if far_key(s(p, "key")) { s(p, "key") } else if far_key(s(p, "chat")) { s(p, "chat") } else { s(p, "thread") };
     let (q, method) = match m {
         "term.new" => (json!({"thread":key,"cols":size(p, "cols", 80),"rows":size(p, "rows", 24)}), "term.open"),
         "term.resize" => (json!({"thread":key,"cols":size(p, "cols", 80),"rows":size(p, "rows", 24)}), "term.resize"),
@@ -47,6 +47,15 @@ async fn in_project(hub: &Hub, project: &str, t: &Value) -> bool {
     let k = s(t, "key");
     if let Some(r) = k.strip_prefix("s:") { return r.split(':').next() == Some(project) }
     let th = term::thread_of(k); hub.model().await.threads.get(th).map_or(false, |x| x.project == project)
+}
+
+/// A chat a phone may open the shell of (`term.new {chat}`): a live thread here (a project's, a bot's chat, the uberbot's), or `room:<id>` of a
+/// room here. The room is read before the model (one lock at a time, as term::cwd does).
+async fn chat_known(hub: &Arc<Hub>, chat: &str) -> bool {
+    if let Some(room) = chat.strip_prefix("room:") {
+        return match crate::bots::api::of(hub) { Some(b) => !room.is_empty() && b.world().await.room(room).is_some(), None => false }
+    }
+    hub.model().await.threads.get(chat).map_or(false, |t| !t.deleted)
 }
 
 /// The requests; None: not one of these. `watch` is the socket's set of watched keys.
@@ -99,6 +108,13 @@ pub async fn call(hub: &Arc<Hub>, client: u64, watch: &mut HashSet<String>, m: &
             t.resize(key, size(p, "cols", 80), size(p, "rows", 24)).await; Ok(json!({}))
         }
         "term.stop" => { if !t.known(key).await { return Some(Err(err("no such terminal"))) } t.kill(key).await; Ok(json!({})) }
+        // a chat's own shell (feature termChat): the one the desktop's term.open shows for that chat, under the chat's key
+        "term.new" if p.get("chat").is_some() => {
+            let chat = s(p, "chat");
+            if !key_ok(chat) || !chat_known(hub, chat).await { return Some(Err(err("unknown chat"))) }
+            t.open_shell(chat, size(p, "cols", 80), size(p, "rows", 24)).await;
+            Ok(t.stream_read(chat, 0, None).await.unwrap_or_else(|| json!({"key":chat})))
+        }
         "term.new" => {
             let (project, thread) = (s(p, "project"), s(p, "thread"));
             let (pk, cwd) = if !thread.is_empty() {

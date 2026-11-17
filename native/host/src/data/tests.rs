@@ -61,10 +61,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -756,4 +756,18 @@ fn a_reply_reaches_a_phone_as_its_body_and_reply_to() {
     // a reply with no image has no list
     let plain = en["result"]["entries"].as_array().unwrap().iter().find(|x| x["kind"] == "assistant" && x["id"] != "r1").cloned();
     if let Some(x) = plain { assert!(x.get("images").is_none(), "{x}") }
+}
+/// Copyable (md/copy.rs): a phone draws its own Markdown, so a reply and a notice carry what of them is to copy as `copy: [{text, cmd}]`, and nothing
+/// when there is none (the JSON stays as it was).
+#[test]
+fn a_reply_and_a_notice_carry_their_code_to_copy() {
+    let row = |role: &str, text: &str| crate::model::Row { seq: 1, ord: 1, id: "a-1".into(), thread: "t1".into(), src: String::new(), kind: "msg", role: role.into(), akind: String::new(), text: text.into(), at: 1 };
+    let e = row_entry_hid(&row("assistant", "Run `sudo apt-get install -y x`:\n```bash\nmake\nmake install\n```\nthen see `foo()`."), false, &HashSet::new()).unwrap();
+    assert_eq!(e["copy"], json!([{"text":"sudo apt-get install -y x","cmd":true},{"text":"make\nmake install","cmd":true}]));
+    assert!(row_entry_hid(&row("assistant", "no code"), false, &HashSet::new()).unwrap().get("copy").is_none());
+    assert!(row_entry_hid(&row("user", "`git status`"), false, &HashSet::new()).unwrap().get("copy").is_none(), "the person's own words get none");
+    let n = act_entry("t1", "x1", "warn", "error", "the build failed: run `scripts/land.sh --dry` in `native/host`", 1).unwrap();
+    assert_eq!(n["kind"], "note"); assert_eq!(n["copy"], json!([{"text":"scripts/land.sh --dry","cmd":true},{"text":"native/host","cmd":false}]));
+    assert!(act_entry("t1", "x2", "warn", "error", "plain words", 1).unwrap().get("copy").is_none());
+    assert!(super::FEATURES.contains(&"copy") && super::FEATURES.contains(&"termChat"));
 }

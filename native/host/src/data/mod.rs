@@ -20,7 +20,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -246,7 +246,7 @@ fn row_entry_hid(r: &crate::model::Row, bot: bool, backend: &HashSet<String>) ->
         if kind == "user" { if let Some((to, quote, body)) = crate::bots::reply::of(&r.text) {
             en["text"] = json!(shown_text(&body)); en["replyTo"] = json!({"id": to, "quote": quote.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("")}); } }
         if crate::present::thread::hidden(bot, &r.id, &r.role, &r.text) || (bot && backend.contains(&r.id)) { en["agentOnly"] = json!(true) }
-        if kind == "assistant" { with_images(&mut en, &r.text) }
+        if kind == "assistant" { with_images(&mut en, &r.text); with_copy(&mut en) }
         return Some(en);
     }
     act_entry(&r.thread, &r.id, &r.role, &r.akind, &r.text, at)
@@ -266,8 +266,13 @@ fn act_entry(thread: &str, id: &str, role: &str, akind: &str, text: &str, at: u6
         r if r == crate::term::emb::TONE && akind == crate::term::emb::KIND => term::entry(thread, id, text, at),
         "step" if pt::step_base(&e) => return None,
         "step" => json!({"id":id,"kind":"step","text":text,"label":pt::step_row(&e),"at":at}),
-        _ => { let a = pt::plain_act(&e); json!({"id":id,"kind":"note","text":a["text"],"label":a["label"],"tone":a["tone"],"at":at}) }
+        _ => { let a = pt::plain_act(&e); let mut n = json!({"id":id,"kind":"note","text":a["text"],"label":a["label"],"tone":a["tone"],"at":at}); if a.get("copy").is_some() { n["copy"] = a["copy"].clone() } n }
     })
+}
+/// What of a message there is to copy (feature `copy`, md/copy.rs `spans`): `copy: [{text, cmd}]`, each fenced block and each inline code span with a
+/// kind, in order; left out when there is none. A phone that draws the Markdown itself gives a span a copy button when its text is listed.
+pub(crate) fn with_copy(en: &mut Value) {
+    let c = crate::md::copy::spans(en["text"].as_str().unwrap_or("")); if !c.is_empty() { en["copy"] = json!(c) }
 }
 /// The paths of attached images are told to the agent in the message's text (`[attachment: <path>]` lines, the ones agents/inputs.rs reads as image
 /// blocks; messages from before said `[Attached image: <path>]`, which the agent got as words only); the phone shows the pictures instead.
@@ -600,7 +605,7 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
                 };
                 if crate::present::thread::hidden(bot, id, role, s(&e, "text")) || backend { en["agentOnly"] = json!(true) }
                 if let Some(a) = e.get("attachments") { en["attachments"] = a.clone() }
-                if kind == "assistant" { with_images(&mut en, s(&e, "text")) }
+                if kind == "assistant" { with_images(&mut en, s(&e, "text")); with_copy(&mut en) }
                 if kind == "user" { if let Some(x) = recalled(id) { if let Some(c) = x.get("clientId") { en["clientId"] = c.clone() } } }
                 let replaced = if kind == "assistant" { subs.live.get_mut(&th).and_then(|l| l.finished()) } else { None };
                 if let Some(n) = replaced { en["replaces"] = json!(Streams::id(&th, n)) }

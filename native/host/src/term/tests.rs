@@ -371,3 +371,24 @@ fn take_frames(rx: &Tap, key: &str, g: &mut u64, held: &mut u64, acc: &mut Vec<u
     assert_eq!(t.cwd("bot-chat-with-no-project").await, crate::plat::dirs::home_or_empty());
     assert_eq!(t.cwd("t1").await, work.to_string_lossy());
 }
+
+/// Feature termChat: a phone opens a chat's own shell (`term.new {chat}`), the one the desktop's term.open shows, under the chat's key: it starts it,
+/// or only resizes the one that runs. An unknown chat or room is refused, never a stray shell.
+#[cfg(unix)]
+#[tokio::test] async fn a_phone_opens_the_chats_own_shell_by_its_key() {
+    let (hub, _home, _work) = hub_in("chat").await;
+    let mut watch = std::collections::HashSet::new();
+    let call = |m: &'static str, p: Value| { let hub = hub.clone(); async move { let mut w = std::collections::HashSet::new(); crate::data::term::call(&hub, 0, &mut w, m, &p).await.unwrap() } };
+    let r = call("term.new", json!({"chat":"t1","cols":90,"rows":20})).await.unwrap();
+    assert_eq!(r["key"], "t1", "{r}");
+    let t = get(&hub).unwrap(); assert_eq!(t.shell_count().await, 1);
+    let r = call("term.new", json!({"chat":"t1","cols":100,"rows":30})).await.unwrap();
+    assert_eq!(r["key"], "t1"); assert_eq!(t.shell_count().await, 1, "a second open is the same shell");
+    // the phone then writes and watches that key, as the desktop does
+    assert!(crate::data::term::call(&hub, 0, &mut watch, "term.watch", &json!({"key":"t1"})).await.unwrap().is_ok());
+    assert!(call("term.write", json!({"key":"t1","text":"true\n"})).await.is_ok());
+    for bad in ["nope", "room:nope", "room:", "", "a b"] {
+        assert_eq!(call("term.new", json!({"chat":bad})).await, Err(json!("unknown chat")), "{bad}");
+    }
+    assert_eq!(t.shell_count().await, 1, "nothing was started for them");
+}

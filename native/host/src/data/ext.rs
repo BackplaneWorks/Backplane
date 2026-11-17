@@ -348,7 +348,8 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
             rpc(hub, c, "bots.room_delete", json!({"room":room})).await.map(|_| json!({})) }
         // a bots' exchange (`ephemeral`) is never in bots.list; opened by a link it reads like any room, and `keep` says the page offers Keep this room (`room.keep`)
         "room.posts" => match crate::bots::api::room_posts(hub, s(p, "room"), limit_of(p, 40, 200)).await {
-            Some(x) => { let (eph, closed) = crate::bots::api::room_life(hub, s(p, "room")).await.unwrap_or_default(); Ok(json!({"posts":x,"ephemeral":eph,"closed":closed,"keep":eph && !s(p, "room").contains('~')})) }
+            Some(mut x) => { for q in x.iter_mut() { let c = crate::md::copy::spans(q["text"].as_str().unwrap_or("")); if !c.is_empty() { q["copy"] = json!(c) } }
+                let (eph, closed) = crate::bots::api::room_life(hub, s(p, "room")).await.unwrap_or_default(); Ok(json!({"posts":x,"ephemeral":eph,"closed":closed,"keep":eph && !s(p, "room").contains('~')})) }
             None => Err(err("unknown room")) },
         "room.keep" => rpc(hub, c, "bots.room_keep", json!({"room":s(p, "room")})).await.map(|_| json!({})),
         "room.post" => {
