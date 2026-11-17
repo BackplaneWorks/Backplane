@@ -2,5 +2,3 @@
 # Left out for now (2026-11-17, lane F sub-lane flaky6-a): each fails the gate under machine load and passes alone; each comes back out of this list with its fix.
 #   triage: its checks read state once after a fixed 300 ms settle() (3 failed in one land run)
 bots::tests::triage::
-#   pi's launcher scripts are exec'd moments after they are written (likely "Text file busy" while another test thread forks)
-agents::proc::tests::a_launcher_that_needs_node_answers_with_the_agents_path
