@@ -115,7 +115,10 @@ fn kills_by_name(line: &str) -> bool {
     let link = d.join("janitor"); std::os::unix::fs::symlink(&script, &link).unwrap();
     let o = Command::new(&link).current_dir(&d).env_remove("GC_REPO").env("BP_TMP", &bt).env("GC_TMP_BASES", &bt).env("GC_LOCK", d.join("lock")).env("SCCACHE_DIR", &scc).env("GC_PAUSE", d.join("no-pause")).env("GC_CTIME", "0").output().unwrap();
     let (lo, le) = (String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
-    assert!(o.status.success() && lo.contains("would have freed") && !le.contains("No such file") && !le.contains("not a git repository"), "it runs through the guard's link:\n{lo}\n{le}");
+    // a checkout git cannot read (the gate's copy of a worktree on a Boat box: its .git names a path only this machine has) has no repository for the link to find: git's own
+    // "not a git repository" there is the copy's, not the link's
+    let has_git = Command::new("git").arg("-C").arg(root()).args(["rev-parse", "--git-dir"]).output().map_or(false, |o| o.status.success());
+    assert!(o.status.success() && lo.contains("would have freed") && !le.contains("No such file") && (!has_git || !le.contains("not a git repository")), "it runs through the guard's link:\n{lo}\n{le}");
     assert!(dry2.contains("worktree") && dry2.contains("/landed"), "a run does not make a worktree look used (git status writes no index):\n{dry2}");
     assert!(dry.contains("would have freed") && wt("landed").exists() && bt.join("aot-build").exists(), "a dry run changes nothing:\n{dry}");
     // paused (a release night): the /tmp and bp-tmp sweeps stop, and say why
