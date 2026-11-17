@@ -98,6 +98,17 @@ $path = @("$Root\cargo\bin", "$tools\bin", $nodeDir, "$sz\Files\7-Zip", 'C:\Prog
 ) | Set-Content -Encoding ascii "$runner\.env"
 
 # NETWORK SERVICE writes everything under $Root, nothing else
+# ... and may make symbolic links (setup-bun links bunx.exe to bun.exe; without the right its two tries fail and npm installs bun): the one user right
+$inf = "$dl\symlink.inf"; $db = "$dl\symlink.sdb"
+secedit /export /cfg $inf /areas USER_RIGHTS | Out-Null
+$line = (Get-Content $inf | Where-Object { $_ -like 'SeCreateSymbolicLinkPrivilege*' })
+if (-not $line -or $line -notmatch 'S-1-5-20') {
+  $cur = if ($line) { ($line -split '=', 2)[1].Trim() + ',' } else { '' }
+  @('[Unicode]', 'Unicode=yes', '[Version]', 'signature="$CHICAGO$"', 'Revision=1', '[Privilege Rights]', "SeCreateSymbolicLinkPrivilege = $cur*S-1-5-20") | Set-Content -Encoding Unicode $inf
+  secedit /configure /db $db /cfg $inf /areas USER_RIGHTS | Out-Null
+  if ($LASTEXITCODE) { throw "secedit: $LASTEXITCODE" }
+}
+Remove-Item -Force -ErrorAction SilentlyContinue $inf, $db
 icacls $Root /grant '*S-1-5-20:(OI)(CI)M' /T /Q | Out-Null
 
 if ($TokenFile) {
