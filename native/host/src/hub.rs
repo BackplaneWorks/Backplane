@@ -734,6 +734,19 @@ mod tests {
         let cleared = frame(&mut o).await; assert_eq!(cleared, json!({"t":"notify.clear","thread":"t1","key":"ask-t1"}), "the answered need's notification goes");
     }
 
+    // Alerts: a secret an agent asks for is a desktop notification on the desk used last, closed when the request ends (the secret is set or dismissed)
+    #[tokio::test] async fn a_secret_request_is_a_desktop_notification_until_it_is_set() {
+        let h = start_hub("secretdesk", Arc::new(Canned { reply: json!({}) })).await;
+        let desks = crate::settings::alerts::start(&h);
+        let mut o = h.attach(3); desks.say(3, "t1", true, now_ms() / 1000);
+        async fn frame(o: &mut Outbox) -> Value { loop { match tokio::time::timeout(std::time::Duration::from_secs(5), o.recv()).await { Ok(Some(Out::Value(v))) if v["t"].as_str().map_or(false, |t| t.starts_with("notify")) => return v, Ok(Some(_)) => continue, _ => return Value::Null } } }
+        h.commit(&json!({"$":"SettingSet","key":"secret.ask.gh","value":crate::settings::secret::ask_body("push the branch", "t1", "t1", 1),"at":1})).await.unwrap();
+        let shown = frame(&mut o).await; assert_eq!((shown["t"].as_str(), shown["key"].as_str(), shown["thread"].as_str(), shown["kind"].as_str()), (Some("notify"), Some("secret-gh"), Some("t1"), Some("ask")), "even on the thread it shows: {shown}");
+        assert!(shown["body"].as_str().unwrap().contains("the secret gh: push the branch"), "{shown}");
+        h.commit(&json!({"$":"SettingSet","key":"secret.ask.gh","value":"","at":2})).await.unwrap();
+        assert_eq!(frame(&mut o).await, json!({"t":"notify.clear","thread":"t1","key":"secret-gh"}));
+    }
+
     // Hub::set_info: stored for joiners, pushed to every client, empty removes, bounded
     #[tokio::test] async fn set_info_is_stored_pushed_removed_and_bounded() {
         let h = start_hub("setinfo", Arc::new(Canned { reply: json!({}) })).await;

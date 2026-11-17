@@ -29,12 +29,25 @@ fn blank() -> Thread {
 }
 
 /// Plane.rank: how much a state waits on the person (0: not at all)
-fn rank(s: &str) -> u8 { match s { "approval" => 8, "question" => 7, "failed" => 6, "stalled" => 5, _ => 0 } }
+fn rank(s: &str) -> u8 { match s { "approval" => 8, "question" | "secret" => 7, "failed" => 6, "stalled" => 5, _ => 0 } }
 /// Plane.sec: the section a state goes to: 0 need, 1 run, 2 the rest
 fn sec(s: &str) -> u8 { if rank(s) > 0 { 0 } else if s == "working" || s == "waiting" { 1 } else { 2 } }
 
-struct Ctx<'a> { st: &'a State, ix: HashMap<String, u8>, asks: HashMap<&'a str, HashSet<&'a str>>, blank: Thread }
+struct Ctx<'a> { st: &'a State, ix: HashMap<String, u8>, asks: HashMap<&'a str, HashSet<&'a str>>, secrets: HashMap<String, Vec<(String, String)>>, blank: Thread }
+/// Plane.secrets: the secrets agents asked for (`secret.ask.<name>` = {purpose, thread}) by the thread waiting on them, names sorted
+fn secrets(st: &State) -> HashMap<String, Vec<(String, String)>> {
+    let mut m: HashMap<String, Vec<(String, String)>> = HashMap::new();
+    for (name, purpose, th) in crate::present::thread::secret_asks(st) { if !th.is_empty() { m.entry(th).or_default().push((name, purpose)) } }
+    for v in m.values_mut() { v.sort() }
+    m
+}
 impl<'a> Ctx<'a> {
+    /// Plane.secret.sub: what a thread waiting on secrets says it waits for, "" when it waits on none
+    fn secret(&self, id: &str) -> String {
+        let Some(v) = self.secrets.get(id) else { return String::new() };
+        let one = |(n, p): &(String, String)| { let p: String = p.lines().next().unwrap_or("").trim().chars().take(120).collect(); if p.is_empty() { format!("`{n}`") } else { format!("`{n}` ({p})") } };
+        format!("waiting on the person for the secret{} {}: secret_request is answered when they enter it", if v.len() > 1 { "s" } else { "" }, v.iter().map(one).collect::<Vec<_>>().join(", "))
+    }
     fn thread(&self, id: &str) -> &Thread { self.st.threads.get(id).unwrap_or(&self.blank) }
     fn asked(&self, id: &str, kind: &str) -> bool { self.asks.get(id).map_or(false, |k| k.contains(kind)) }
     fn signal(&self, id: &str) -> u8 { self.ix.get(id).copied().unwrap_or(0) }
@@ -73,6 +86,8 @@ impl<'a> Ctx<'a> {
     /// Plane.signal.current: "stalled", what blocks it (a child's state when only a child does), else `free`
     fn current(&self, id: &str) -> String {
         if signal::stalled(self.st, id) { return "stalled".into() }
+        // a secret it asked for waits on the person, whatever its turn does (an approval or question of its own says more)
+        if self.secrets.contains_key(id) && self.own_phase(id).is_empty() { return "secret".into() }
         let (n, t) = (self.signal(id), self.thread(id));
         if !signal::blocked(n) { return self.free(n, t) }
         let own = self.own(id); if !own.is_empty() { return own.into() }
@@ -102,12 +117,15 @@ impl<'a> Ctx<'a> {
         let part = |head: &str, xs: &[String]| if xs.is_empty() { String::new() } else { format!(" · {head}: {}", xs.join("; ")) };
         format!("{sub} · agent: {}{}{}", self.thread(th).turn.word(), part("work", &work), part("wake on", &wakes))
     }
-    fn row(&self, kind: &'static str, id: &str, th: &str, title: &str, sub: &str, state: String) -> Row { Row { kind, id: id.into(), title: title.into(), sub: self.observed(&self.note(th, sub), th), state, at: self.thread(th).activity } }
+    fn row(&self, kind: &'static str, id: &str, th: &str, title: &str, sub: &str, state: String) -> Row {
+        let sec = self.secret(th); let sub = if sec.is_empty() { self.note(th, sub) } else if sub.is_empty() { sec } else { format!("{sec} · {sub}") };
+        Row { kind, id: id.into(), title: title.into(), sub: self.observed(&sub, th), state, at: self.thread(th).activity }
+    }
     /// Mood.moving, Mood.note over Mood.bot: what a bot at work is doing, "" for one at rest. World.talked is keyed by a post's `from`, the bot's name, and talked_at asks by id,
     /// so cat never reads "talking" from it; this keeps that.
     fn mood(&self, th: &str) -> &'static str {
         let t = self.thread(th);
-        if t.pending > 0 || self.asked(th, "approval") || self.asked(th, "input") || self.asked(th, "plan") || self.asked(th, "browser") { return "needs you" }
+        if t.pending > 0 || self.asked(th, "approval") || self.asked(th, "input") || self.asked(th, "plan") || self.asked(th, "browser") || self.secrets.contains_key(th) { return "needs you" }
         if t.turn == Turn::Failed { return "" }
         let starting = self.st.queue.get(th).map_or(false, |q| q.iter().any(|(m, _)| !m.starts_with("handoff:"))) && t.worktree_mode && t.worktree.is_empty();
         let out = !self.rows("bg", th).is_empty() || !self.rows("watch", th).is_empty() || !set(self.st, &format!("order.wait.{th}")).is_empty();
@@ -176,7 +194,7 @@ fn deploy(c: &Ctx) -> Vec<Row> {
 pub fn read(st: &State, w: &World, rooms: &[RoomNews], now: u64, idle: bool) -> String {
     let mut asks: HashMap<&str, HashSet<&str>> = HashMap::new();
     for (th, kind, open) in w.asks.values() { if *open { asks.entry(th.as_str()).or_default().insert(kind.as_str()); } }
-    let c = Ctx { st, ix: signal::index(st), asks, blank: blank() };
+    let c = Ctx { st, ix: signal::index(st), asks, secrets: secrets(st), blank: blank() };
     // Plane.of.f: the live threads of every project, then the bots' own threads that wait on the person or run
     let bot_thread = |p: &str| st.bot_threads_has(p);
     let hidden: HashSet<&str> = st.tasks.values().filter(|t| !bot_thread(&t.0) && st.threads.contains_key(t.1.as_str()) && parent(st, &t.1).is_some()).map(|t| t.1.as_str()).collect();

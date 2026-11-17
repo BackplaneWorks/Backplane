@@ -108,6 +108,32 @@ pub fn signin_order(w: &World, key: &str, rec: &Value, at: u64) -> Option<Value>
     let mut e = src.order(&format!("signin-{provider}-{at}"), "needs_you", &w.triage_thread(), "", rec["text"].as_str().unwrap_or("Sign-in expired: tap to sign in again"), at);
     e["link"] = json!(rec["link"].as_str().unwrap_or("")); Some(e)
 }
+/// A secret an agent asked for (`secret.ask.<name>` = {purpose, thread}, settings/secret.rs `tool_request`): an alert in the uberbot's name to the asking thread, whose
+/// composer shows the masked box (a tap opens it there), and one reminder an hour later while it is still unanswered. Emptied (the secret is set, or dismissed), both
+/// leave every phone. Seeing the thread is not answering it: like an approval, it stays until it is dealt with. Nov 17: a thread waited on `tailscale-winbuild` for hours
+/// and the person heard nothing until they asked.
+pub const SECRET: &str = "secret.ask.";
+pub const SECRET_AGAIN_S: u64 = 3600;
+pub fn secret_id(name: &str) -> String { format!("secret-{name}-") }
+pub fn secret_item(id: &str) -> bool { id.starts_with("secret-") }
+/// What the alert says: the secret, what for, and the thread that waits on it.
+pub fn secret_say(name: &str, purpose: &str, title: &str, again: bool) -> String {
+    let who = if title.is_empty() { "A thread".to_string() } else { title.to_string() };
+    let what = purpose.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let lead = if again { "Still waiting: " } else { "" };
+    if what.is_empty() { format!("{lead}{who} needs the secret {name}. Tap to enter it.") } else { format!("{lead}{who} needs the secret {name}: {what}. Tap to enter it.") }
+}
+/// The order a secret request makes (`None` when there is no uberbot: the thread's desk alert and its own box still show it).
+pub fn secret_order(w: &World, name: &str, thread: &str, text: &str, at: u64) -> Option<Value> {
+    let src = Source::notify(w, &w.uber_bot())?;
+    Some(src.order(&format!("{}{at}", secret_id(name)), "needs_you", thread, "", text, at))
+}
+/// What the uberbot's conversation shows of it: the ask, and a link to the thread's masked box.
+pub fn secret_tell(name: &str, purpose: &str, title: &str, thread: &str) -> String {
+    let what = purpose.trim(); let who = if title.is_empty() { thread } else { title };
+    format!("**Needs you:** [{who}](backplane://thread/{thread}) is waiting for the secret `{name}`{}. Open it and enter the secret in the masked box there; it is never shown in chat.",
+        if what.is_empty() { String::new() } else { format!(" ({what})") })
+}
 /// Whether needs_you or done text was already said (a reminder or digest repeats by design).
 pub fn repeat(reason: &str, told: &[crate::bots::ledger::Told], now: u64, text: &str) -> bool {
     matches!(reason, "needs_you" | "done") && !crate::bots::ledger::check(told, now, "", text, REPEAT_DAYS).is_empty()
@@ -215,7 +241,8 @@ impl Book {
     }
     pub fn trim(&mut self, now: u64) { self.open.retain(|i| i.at + KEEP_S > now); let n = self.open.len(); if n > OPEN_MAX { self.open.drain(..n - OPEN_MAX); } }
     /// The badge: every open ask, and every item not about one.
-    pub fn badge(&self, asks: u64) -> u64 { asks + self.open.iter().chain(&self.held).filter(|i| i.ask.is_empty()).count() as u64 }
+    /// A secret's reminder waiting for its hour is not counted: the alert it repeats is.
+    pub fn badge(&self, asks: u64) -> u64 { asks + self.open.iter().filter(|i| i.ask.is_empty()).chain(self.held.iter().filter(|i| i.ask.is_empty() && !i.id.ends_with("-again"))).count() as u64 }
 }
 /// What one push says. Several items collapse into one, whose link is their thread when they share one, else the uberbot's.
 #[derive(Clone, Debug, PartialEq)]
@@ -236,7 +263,7 @@ pub fn hears(d: &Device, through: bool) -> bool { d.kind == "alert" && d.platfor
 pub enum Sent { Ok, Dead, Later(String) }
 pub trait Carrier: Send + Sync { fn send(self: Arc<Self>, hub: Arc<Hub>, d: Device, frame: apns::Frame) -> futures_util::future::BoxFuture<'static, Sent>; }
 
-enum Msg { Devices, Order(Value), Asked(String), Spoke(String), Seen(String), Clear, Prefs, SignIn(String, String) }
+enum Msg { Devices, Order(Value), Asked(String), Spoke(String), Seen(String), Clear, Prefs, SignIn(String, String), Secret(String, String) }
 pub struct Push { tx: mpsc::UnboundedSender<Msg> }
 impl Push {
     /// `push.seen`: a device opened the thread.
@@ -256,6 +283,7 @@ impl crate::api::Observer for Watch {
             // the person saw the import's summary: its notice leaves the book (it has no thread to be seen in)
             Some("SettingSet") if e["key"].as_str() == Some(crate::import014::ACK) => tx.send(Msg::Seen(String::new())),
             Some("SettingSet") if e["key"].as_str().map_or(false, |k| k.starts_with(SIGNIN)) => tx.send(Msg::SignIn(e["key"].as_str().unwrap_or("").into(), e["value"].as_str().unwrap_or("").into())),
+            Some("SettingSet") if e["key"].as_str().map_or(false, |k| k.starts_with(SECRET)) => tx.send(Msg::Secret(e["key"].as_str().unwrap_or("").trim_start_matches(SECRET).into(), e["value"].as_str().unwrap_or("").into())),
             _ => Ok(()),
         }; }
     }
@@ -313,8 +341,10 @@ impl Worker {
             Msg::Order(e) => self.order(e).await,
             Msg::Asked(id) => self.deal(move |i| !id.is_empty() && i.ask == id).await,
             // an approval stays until it is answered: looking at it is not dealing with it
-            Msg::Spoke(t) | Msg::Seen(t) => self.deal(move |i| i.thread == t && i.ask.is_empty()).await,
-            Msg::Clear => self.deal(|i| i.ask.is_empty()).await,
+            // and so does a secret request: it leaves when the secret is set or dismissed (`Msg::Secret`)
+            Msg::Spoke(t) | Msg::Seen(t) => self.deal(move |i| i.thread == t && i.ask.is_empty() && !secret_item(&i.id)).await,
+            Msg::Clear => self.deal(|i| i.ask.is_empty() && !secret_item(&i.id)).await,
+            Msg::Secret(name, v) => self.secret(&name, &v).await,
             // the record of an expired sign-in: the alert, once; its clearing (the account is back) takes it off every phone
             Msg::SignIn(key, v) => {
                 let provider = key.strip_prefix(SIGNIN).unwrap_or("").to_string();
@@ -325,6 +355,26 @@ impl Worker {
             }
             Msg::Prefs => { let now = now_s(); let (q, _) = self.quiet(now).await; for i in &mut self.book.held { i.due = q.unwrap_or(now).max(now); } self.save().await }
         }
+    }
+    /// A secret request: its alert, its line in the uberbot's conversation and its one reminder, once a request (asking again while it waits adds nothing); its end clears them.
+    async fn secret(&mut self, name: &str, v: &str) {
+        let pre = secret_id(name);
+        if v.is_empty() { return self.deal(move |i| i.id.starts_with(&pre)).await }
+        if self.book.open.iter().chain(&self.book.held).any(|i| i.id.starts_with(&pre)) { return }
+        let b: Value = serde_json::from_str(v).unwrap_or(Value::Null);
+        let (thread, purpose) = (b["thread"].as_str().unwrap_or("").to_string(), b["purpose"].as_str().unwrap_or("").to_string());
+        let at = b["at"].as_u64().filter(|a| *a > 0).unwrap_or_else(now_s);
+        let title = { let m = self.hub.model.lock().await; m.threads.get(&thread).map(|t| t.title.clone()).unwrap_or_default() };
+        let (e, home) = { let w = self.bots.world().await; (secret_order(&w, name, &thread, &secret_say(name, &purpose, &title, false), at), w.triage_thread()) };
+        let Some(e) = e else { eprintln!("push: an agent asked for the secret {name} and there is no uberbot to alert the phones"); return };
+        // the uberbot's conversation: the ask in its own words, linking to the masked box (a `tell:` line, as notify_person writes from a private turn)
+        if !home.is_empty() && home != thread {
+            let _ = self.hub.commit(&json!({"$":"MessagePosted","thread":home,"msg":format!("tell:{pre}{at}"),"role":"assistant","text":secret_tell(name, &purpose, &title, &thread),"at":at})).await;
+        }
+        // the reminder waits in the book: it survives a restart, and the request's end takes it out with the alert
+        self.book.held.push(Item { id: format!("{pre}{at}-again"), reason: "needs_you".into(), thread: thread.clone(), text: plain(&secret_say(name, &purpose, &title, true), 500), at, due: at + SECRET_AGAIN_S, ..Default::default() });
+        self.save().await;
+        let _ = self.hub.commit(&e).await;
     }
     /// The quiet window's end, if in one, and whether a needs_you passes it.
     async fn quiet(&self, now: u64) -> (Option<u64>, bool) {
@@ -348,7 +398,19 @@ impl Worker {
             None => self.deliver(vec![item]).await,
         }
     }
-    async fn flush(&mut self) { let d = self.book.due(now_s()); if d.is_empty() { self.save().await } else { self.deliver(d).await } }
+    async fn flush(&mut self) {
+        let now = now_s();
+        let mut d = self.book.due(now);
+        // a reminder due in quiet hours waits for their end, as any order does (`route`)
+        if d.iter().any(|i| i.id.ends_with("-again")) {
+            if let (Some(q), false) = self.quiet(now).await { let (wait, go): (Vec<Item>, Vec<Item>) = d.into_iter().partition(|i| i.id.ends_with("-again")); d = go; self.book.held.extend(wait.into_iter().map(|i| Item { due: q, ..i })); }
+        }
+        if d.is_empty() { return self.save().await }
+        // a secret's reminder takes the place of the alert it repeats (one on the phone, one in the badge)
+        let first: Vec<String> = d.iter().filter_map(|i| i.id.strip_suffix("-again").map(str::to_string)).collect();
+        if !first.is_empty() { self.deal(move |i| first.contains(&i.id)).await }
+        self.deliver(d).await
+    }
     async fn deliver(&mut self, mut items: Vec<Item>) {
         let now = now_s();
         let (devices, home) = { let w = self.bots.world().await; (w.devices.values().cloned().collect::<Vec<_>>(), w.triage_thread()) };

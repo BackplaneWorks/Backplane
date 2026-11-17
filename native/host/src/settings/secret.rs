@@ -118,7 +118,7 @@ pub async fn tool_request(hub: &Arc<Hub>, thread: &str, a: &Value) -> (bool, Val
     if vault::names().contains(&nm) { return (true, handle(&nm, true)) }
     let at = now_ms() / 1000;
     let _ = hub.commit(&json!({"$":"SettingSet","key":ask_key(&nm),"value":ask_body(sv(a, "purpose"), thread, thread, at),"at":at})).await;
-    (true, json!({"secret":nm,"set":false,"requested":true,"note":"The person sees a masked box for it in this chat. End your turn; a message tells you when it is set."}))
+    (true, json!({"secret":nm,"set":false,"requested":true,"note":"The person is alerted on their phone and desktop and sees a masked box for it in this chat. End your turn; a message tells you when it is set."}))
 }
 
 /// secret_run {command, env?, files?, cwd?, timeout?}: `{code, timedOut, stdout, stderr}` or `{error}`, masked. Refused on a copy.
