@@ -38,6 +38,14 @@ say = lambda o: (print(json.dumps(o)), sys.stdout.flush())
 say({'type': 'system', 'subtype': 'init', 'session_id': 'bare-standin'})
 n = [0]
 def tool(name, args):
+    # KiCad busy with a task (a DRC the Checks panel started): wait and ask again, as an agent does (the answer names GetTaskStatus)
+    import time
+    for _ in range(40):
+        r = tool_once(name, args)
+        if not (r.get('error') and 'AS_BUSY' in json.dumps(r.get('body'))): return r
+        time.sleep(1.5)
+    return r
+def tool_once(name, args):
     n[0] += 1
     r = urllib.request.Request(url, json.dumps({'jsonrpc': '2.0', 'id': n[0], 'method': 'tools/call', 'params': {'name': name, 'arguments': args}}).encode(),
                                {'content-type': 'application/json', 'accept': 'application/json'})
