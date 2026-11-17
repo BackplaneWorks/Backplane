@@ -74,7 +74,7 @@ while :; do
   else say "PR #$num is open for $br"; fi
   # its state: GitHub works out mergeability a moment after a push, and its head must be the sha that was gated
   st=; for _ in $(seq 60); do
-    st=$(ghi pr view "$num" -R "$repo" --json state,mergeStateStatus,reviewDecision,headRefOid,mergeable -q '[.state,.mergeStateStatus,(.reviewDecision // "NONE"),.headRefOid,.mergeable] | join(" ")' 2>/dev/null) || st=
+    st=$(ghi pr view "$num" -R "$repo" --json state,mergeStateStatus,reviewDecision,headRefOid,mergeable -q '[.state,.mergeStateStatus,(if (.reviewDecision // "") == "" then "NONE" else .reviewDecision end),.headRefOid,.mergeable] | join(" ")' 2>/dev/null) || st=
     set -- $st; pstate=${1:-}; merge_st=${2:-}; review=${3:-}; head=${4:-}; mergeable=${5:-}
     [ "$pstate" = MERGED ] && break
     [ -n "$pstate" ] && [ "$head" = "$sha" ] && [ "$mergeable" != UNKNOWN ] && [ "$merge_st" != UNKNOWN ] && break
@@ -91,7 +91,8 @@ while :; do
     CLEAN|UNSTABLE|HAS_HOOKS) ;;
     *) # BLOCKED, DRAFT: what blocks it is said, and a lane stops here instead of retrying
       case "$review" in
-        REVIEW_REQUIRED|NONE|"") say "PR #$num open, gate green on $(git rev-parse --short "$sha"), waiting for an approving review"; exit 3;;
+        REVIEW_REQUIRED) say "PR #$num open, gate green on $(git rev-parse --short "$sha"), waiting for an approving review"; exit 3;;
+        NONE) say "PR #$num open, gate green on $(git rev-parse --short "$sha"), blocked by a rule with no review asked for ($merge_st): not merged (gh pr view $num names nothing more; see the ruleset)"; exit 3;;
         CHANGES_REQUESTED) say "PR #$num open, gate green on $(git rev-parse --short "$sha"), changes requested by a reviewer (answer them, push, then land again)"; exit 3;;
         *) say "PR #$num open, gate green on $(git rev-parse --short "$sha"), blocked ($merge_st, review $review): a required check or another rule has not passed"; exit 3;;
       esac;;
