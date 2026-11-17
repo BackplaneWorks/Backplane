@@ -504,11 +504,12 @@ try:
         doc = ((docs.get('message') or {}).get('documents') or [None])[0]
         h = {'document': doc}
         s0 = snaps()
-        b = ask('kicad_ipc', {'path': pcb, 'type': C + 'BeginCommit', 'message': {'header': h}})
+        b = ask('kicad_ipc', {'path': pcb, 'type': C + 'BeginCommit', 'save': False, 'message': {'header': h}})
         tid = (b.get('message') or {}).get('id')
-        ask('kicad_ipc', {'path': pcb, 'type': C + 'CreateItems', 'message': {'header': h, 'items': [{'@type': 'type.googleapis.com/kiapi.board.types.Track', 'id': {'value': str(__import__('uuid').uuid4())},
+        ask('kicad_ipc', {'path': pcb, 'type': C + 'CreateItems', 'save': False, 'message': {'header': h, 'items': [{'@type': 'type.googleapis.com/kiapi.board.types.Track', 'id': {'value': str(__import__('uuid').uuid4())},
             'start': {'x_nm': 120000000, 'y_nm': 100000000}, 'end': {'x_nm': 140000000, 'y_nm': 100000000}, 'width': {'value_nm': 300000}, 'layer': 'BL_F_Cu'}]}})
-        e = ask('kicad_ipc', {'path': pcb, 'type': C + 'EndCommit', 'message': {'header': h, 'id': tid, 'action': 'CMA_COMMIT', 'message': 'agent add track'}})
+        # save: false (lane J's 5c3cddabc saves an agent's landed change by default): the change stays unsaved, as the recovery needs
+        e = ask('kicad_ipc', {'path': pcb, 'type': C + 'EndCommit', 'save': False, 'message': {'header': h, 'id': tid, 'action': 'CMA_COMMIT', 'message': 'agent add track'}})
         RES['autosave_commit'] = {'doc': bool(doc), 'tid': bool(tid), 'end': str(e)[:160]}
         got = wait_for(lambda: snaps() > s0, 3 + 12, 0.5)
         check(bool(got), f'autosave: a .history snapshot within the debounce after the agent\'s commit ({s0} -> {snaps()}; {RES["autosave_commit"]})')
