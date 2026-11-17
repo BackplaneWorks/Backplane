@@ -24,6 +24,8 @@ fixtures. Only with the person's go (AGENTS.md).
   runtime's `libngspice` (the runtime ships no `ngspice` program).
 - `checks.py`: the pass check: the answer's `RESULT` line within tolerance, and the saved schematic still the board's
   and now simulating (see its head).
+- `osim.py`, `oracles/<task>.py`: each task done by hand over raw `kicad_ipc` (no model), on a runtime with the
+  simulation commands; `bench.py e2e` runs them through the hub when one is up and holds them to the check.
 - `bench.py`: `ref`, `e2e`, `run`, `table`.
 
 ## A run

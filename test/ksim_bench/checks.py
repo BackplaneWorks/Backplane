@@ -5,7 +5,8 @@ Two halves, both needed:
                BOM/board flags and its connections; what was added is out of the BOM and off the board; KiCad's own SPICE netlist of it has
                no part without a model, leaves out the parts that do not simulate, names the model the task asks for on the right pins, has a
                source, and loads (and, for a linear circuit, finds its operating point) in ngspice; a tuned value is written in the schematic
-A task whose model cannot be had without a sign-in passes the other way round: no number, the reason said, and no model put in its place.
+A task whose model cannot be had (a sign-in, or no model at all) passes the other way round: no number, the reason said, and no model put in
+its place.
 Written before any run."""
 import json, os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); sys.path.insert(0, HERE + "/tools"); sys.path.insert(0, os.path.join(HERE, "..", "kipc_bench"))
@@ -103,7 +104,8 @@ def check(task, d, fixtures, cli, text):
     c = task["check"]; fx = f"{fixtures}/{task['fixture']}"
     if c.get("blocked"):
         got = result(text) or {}; bad = [f"{k}: a number was reported ({got[k]:g}) though the part's model was not to be had" for k in c["answer"] if k in got]
-        if not re.search(r"log[ -]?in|sign[ -]?in|sign[ -]?up|account|regist|licen[cs]e|credential|password", text or "", re.I): bad.append("the answer does not say that the model needs a sign-in")
+        if not re.search(r"log[ -]?in|sign[ -]?in|sign[ -]?up|account|regist|licen[cs]e|credential|password|could ?n[o']t|cannot|can't|unable|not available|encrypted|no (\w+ )?(spice |simulation )?model", text or "", re.I):
+            bad.append("the answer does not say that the model could not be had")
         return bad + design(c, d, fx, cli)
     return answer(c["answer"], text) + design(c, d, fx, cli)
 
