@@ -30,7 +30,7 @@ impl Cli {
         if cli.is_empty() || cli.contains('/') { return Err(format!("not an agent: {cli}")) }
         match &self.dir {
             Some(d) => {
-                let p = d.join(cli);
+                let p = find_in(&[d.clone()], cli, cfg!(windows)).unwrap_or_else(|| d.join(cli)); // Windows: `<cli>.exe` or `<cli>.cmd` as well
                 let (cd, cp) = (crate::plat::fs::canonicalize(d).map_err(|_| format!("{} has no runnable {cli}", d.display()))?, crate::plat::fs::canonicalize(&p).map_err(|_| format!("{} has no runnable {cli}", d.display()))?);
                 let exec = std::fs::metadata(&cp).map(|m| { use crate::plat::fs::PermissionsExt; m.is_file() && m.permissions().mode() & 0o111 != 0 }).unwrap_or(false);
                 if exec && cp.starts_with(&cd) { Ok(cp) } else { Err(format!("{} has no runnable {cli}", d.display())) }
@@ -466,6 +466,12 @@ mod tests {
         std::fs::write(d.join("grok"), "x").unwrap(); assert!(a.resolve("grok").is_err()); // not executable
         let outside = dir("res-out"); script(&outside, "muse", "exit 0"); crate::plat::fs::symlink(outside.join("muse"), d.join("muse")).unwrap();
         assert!(a.resolve("muse").is_err()); // a link out of the folder is refused
+    }
+    /// Windows: a stand-in folder with `claude.exe` (or `claude.cmd`) alone runs it, as a real install would be found.
+    #[cfg(windows)]
+    #[test] fn a_standin_exe_alone_is_runnable_on_windows() {
+        let d = dir("res-exe"); std::fs::write(d.join("claude.exe"), "MZ").unwrap(); std::fs::write(d.join("codex.cmd"), "@echo off").unwrap(); let a = Cli::standin(&d);
+        assert!(a.resolve("claude").unwrap().ends_with("claude.exe")); assert!(a.resolve("codex").unwrap().ends_with("codex.cmd")); assert!(a.resolve("grok").is_err());
     }
     fn mk(d: &Path) -> PathBuf { std::fs::create_dir_all(d).unwrap(); d.to_path_buf() }
     fn none(_: &str) -> Option<std::ffi::OsString> { None }
