@@ -14,7 +14,7 @@ python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 PROJ="$OUT/proj"
 # the board in place of the fixture (its files only: no backups, outputs or lock files)
 ( cd "$PROJ" && git rm -q -r --cached . >/dev/null && find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} + )
-rsync -a --exclude '*backups*' --exclude 'build' --exclude 'mfg' --exclude 'docs' --exclude '~*.lck' --exclude '.git' "$CHECKS_BOARD"/ "$PROJ"/
+python3 "$KEMBED_LIB/project_copy.py" "$CHECKS_BOARD" "$PROJ" --skip '*backups*' --skip build --skip mfg --skip docs
 PRO=$(ls "$PROJ"/*.kicad_pro | head -1)
 echo "{\"project\": \"$(basename "$PRO")\"}" >"$PROJ/.backplane.json"
 ( cd "$PROJ" && git add -A >/dev/null && git commit -qm board >/dev/null )

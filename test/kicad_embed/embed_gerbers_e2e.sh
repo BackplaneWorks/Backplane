@@ -23,7 +23,7 @@ python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 PROJ="$OUT/proj"
 if [ -n "${GERBERS_BOARD:-}" ]; then
   ( cd "$PROJ" && git rm -q -r --cached . >/dev/null && find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} + )
-  rsync -a --exclude '*backups*' --exclude '~*.lck' --exclude '.git' "$GERBERS_BOARD"/ "$PROJ"/
+  python3 "$KEMBED_LIB/project_copy.py" "$GERBERS_BOARD" "$PROJ" --skip '*backups*'
   echo "{\"project\": \"$(basename "$(ls "$PROJ"/*.kicad_pro | head -1)")\"}" >"$PROJ/.backplane.json"
 else
   [ -x "$KICAD_CLI" ] || { echo "FAIL embed_gerbers_e2e: no kicad-cli to export the fixture's Gerbers (KICAD_CLI=${KICAD_CLI:-unset})"; exit 1; }

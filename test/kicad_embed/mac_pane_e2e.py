@@ -290,7 +290,8 @@ if os.environ.get('MAC_MODE') == 'narrow':
 DOCS_DIR = os.path.expanduser('~/Documents/bp-gate-docs-test')
 if os.path.isdir(DOCS_DIR): shutil.rmtree(DOCS_DIR)  # left by a run that died
 if os.environ.get('MAC_MODE') == 'docs':
-    shutil.copytree(os.path.join(OUT, 'proj'), os.path.join(DOCS_DIR, 'proj'), symlinks=True)
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lib')); from project_copy import copy_project
+    copy_project(os.path.join(OUT, 'proj'), os.path.join(DOCS_DIR, 'proj'), symlinks=True)
     ev = os.path.join(OUT, 'home', 'events.jsonl')
     open(ev, 'w').write(open(ev).read().replace(os.path.join(OUT, 'proj'), os.path.join(DOCS_DIR, 'proj')))
     # a fresh copy of the test hub at a path of its own: macOS asks this binary anew, nothing of the person's is reset

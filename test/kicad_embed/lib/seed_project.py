@@ -137,7 +137,9 @@ def main() -> None:
     src = os.environ.get("KEMBED_PROJ_SRC", "")
     if src:
         shutil.rmtree(proj)
-        shutil.copytree(src, proj, ignore=shutil.ignore_patterns(".git", ".backplane", "mfg", "*.lck", "*-backups"))
+        # without KiCad's scratch (an autosave beside the board stops KiCad on a recover question): project_copy's one list
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); from project_copy import copy_project
+        copy_project(src, proj, extra=("mfg",))
 
     # Initialize bare origin.git + proj git repo on main so canonical.rs design_root works as in production
     subprocess.run(["git", "init", "--bare", "-b", "main", origin], check=True, stdout=subprocess.DEVNULL)
