@@ -3,17 +3,153 @@
   "setup": "Each row starts from the full board (or sheet): what a row deletes is undone with Ctrl+Z / Cmd+Z only after the undo rows have passed; when undo is nothing the rows that need it are judged on a fresh copy or ordered to need no undo (say which).",
   "wait_s": 4,
   "rows": [
-    {"id": "select_all", "keys": {"linux": "Ctrl+A", "windows": "Ctrl+A", "macos": "Cmd+A"}, "works": "an ET_SELECTION_CHANGED whose selection is more than one item", "gating": true},
-    {"id": "delete", "keys": {"linux": "Delete", "windows": "Delete", "macos": "fn+Delete (forward delete)"}, "after": "select_all", "works": "an edit with deleted > 0 and created = 0", "gating": true},
-    {"id": "backspace", "keys": {"linux": "BackSpace", "windows": "Backspace", "macos": "Delete (⌫)"}, "after": "select_all", "works": "an edit with deleted > 0 and created = 0", "gating": true},
-    {"id": "undo", "keys": {"linux": "Ctrl+Z", "windows": "Ctrl+Z", "macos": "Cmd+Z"}, "after": "the person's own delete of everything", "works": "an edit with created > 0 (the deleted items back)", "wrong": "an edit with deleted > 0", "gating": true},
-    {"id": "redo", "keys": {"linux": "Ctrl+Y", "windows": "Ctrl+Y", "macos": "Cmd+Y (where KiCad binds it)"}, "after": "undo", "works": "an edit with deleted > 0 (the delete again)", "wrong": "an edit with created > 0", "gating": true},
-    {"id": "redo_shift_z", "keys": {"linux": "Ctrl+Shift+Z", "windows": "Ctrl+Shift+Z", "macos": "Cmd+Shift+Z"}, "after": "undo", "works": "an edit with deleted > 0 (the delete again)", "wrong": "an edit with created > 0", "gating": true},
-    {"id": "copy_paste", "keys": {"linux": "Ctrl+C, Escape, Ctrl+V, a click on the canvas", "windows": "Ctrl+C, Escape, Ctrl+V, a click", "macos": "Cmd+C, Escape, Cmd+V, a click"}, "after": "select_all", "works": "an edit with created > 0 after the click (KiCad places a paste where the pointer is)", "gating": true},
-    {"id": "cut", "keys": {"linux": "Ctrl+X", "windows": "Ctrl+X", "macos": "Cmd+X"}, "after": "select_all", "works": "an edit with deleted > 0", "gating": true},
-    {"id": "cut_paste", "keys": {"linux": "Ctrl+V, a click", "windows": "Ctrl+V, a click", "macos": "Cmd+V, a click"}, "after": "cut", "works": "an edit with created > 0 (what was cut comes back)", "gating": true},
-    {"id": "save", "keys": {"linux": "Ctrl+S", "windows": "Ctrl+S", "macos": "Cmd+S"}, "after": "an unsaved edit of the person's", "works": "the document's file on disk changes (mtime and content)", "gating": true},
-    {"id": "find", "keys": {"linux": "Ctrl+F", "windows": "Ctrl+F", "macos": "Cmd+F"}, "works": "KiCad's Find dialog is shown (a new window of KiCad's titled Find); Escape closes it", "gating": true},
-    {"id": "per_actor_undo", "keys": {"linux": "Ctrl+Z", "windows": "Ctrl+Z", "macos": "Cmd+Z"}, "editor": "pcb", "after": "the person deletes everything, then an agent commits a track through the hub's kicad_ipc (save: false)", "works": "an edit with created > 0 and deleted = 0 (the person's delete undone), and after Ctrl+S the file has the agent's track", "wrong": "the agent's track deleted (an edit with deleted > 0, or the saved file without it)", "gating": true}
-  ]
+    {
+      "id": "select_all",
+      "keys": {
+        "linux": "Ctrl+A",
+        "windows": "Ctrl+A",
+        "macos": "Cmd+A"
+      },
+      "works": "KiCad's selection holds more than one item: GetSelection's count (Linux), or from ET_SELECTION_CHANGED its references plus nets (the schematic's references count symbols only)",
+      "gating": true
+    },
+    {
+      "id": "delete",
+      "keys": {
+        "linux": "Delete",
+        "windows": "Delete",
+        "macos": "fn+Delete (forward delete)"
+      },
+      "after": "select_all",
+      "works": "an edit with deleted > 0 and created = 0",
+      "gating": true
+    },
+    {
+      "id": "backspace",
+      "keys": {
+        "linux": "BackSpace",
+        "windows": "Backspace",
+        "macos": "Delete (⌫)"
+      },
+      "after": "select_all",
+      "works": "an edit with deleted > 0 and created = 0",
+      "gating": true
+    },
+    {
+      "id": "undo",
+      "keys": {
+        "linux": "Ctrl+Z",
+        "windows": "Ctrl+Z",
+        "macos": "Cmd+Z"
+      },
+      "after": "the person's own delete of everything",
+      "works": "an edit with created > 0 (the deleted items back)",
+      "wrong": "an edit with deleted > 0",
+      "gating": true
+    },
+    {
+      "id": "redo",
+      "keys": {
+        "linux": "Ctrl+Y",
+        "windows": "Ctrl+Y",
+        "macos": "Cmd+Y (where KiCad binds it)"
+      },
+      "after": "undo",
+      "works": "an edit with deleted > 0 (the delete again)",
+      "wrong": "an edit with created > 0",
+      "gating": true
+    },
+    {
+      "id": "redo_shift_z",
+      "keys": {
+        "linux": "Ctrl+Shift+Z",
+        "windows": "Ctrl+Shift+Z",
+        "macos": "Cmd+Shift+Z"
+      },
+      "after": "undo",
+      "works": "an edit with deleted > 0 (the delete again)",
+      "wrong": "an edit with created > 0",
+      "gating": true
+    },
+    {
+      "id": "copy_paste",
+      "keys": {
+        "linux": "Ctrl+C, Escape, Ctrl+V, a click on the canvas",
+        "windows": "Ctrl+C, Escape, Ctrl+V, a click",
+        "macos": "Cmd+C, Escape, Cmd+V, a click"
+      },
+      "after": "select_all",
+      "works": "an edit with created > 0 after the click (KiCad places a paste where the pointer is)",
+      "gating": true
+    },
+    {
+      "id": "cut",
+      "keys": {
+        "linux": "Ctrl+X",
+        "windows": "Ctrl+X",
+        "macos": "Cmd+X"
+      },
+      "after": "select_all",
+      "works": "an edit with deleted > 0",
+      "gating": true
+    },
+    {
+      "id": "cut_paste",
+      "keys": {
+        "linux": "Ctrl+V, a click",
+        "windows": "Ctrl+V, a click",
+        "macos": "Cmd+V, a click"
+      },
+      "after": "cut",
+      "works": "an edit with created > 0 (what was cut comes back)",
+      "gating": true
+    },
+    {
+      "id": "save",
+      "keys": {
+        "linux": "Ctrl+S",
+        "windows": "Ctrl+S",
+        "macos": "Cmd+S"
+      },
+      "after": "an unsaved edit of the person's",
+      "works": "the document's file on disk changes (mtime and content)",
+      "gating": true
+    },
+    {
+      "id": "find",
+      "keys": {
+        "linux": "Ctrl+F",
+        "windows": "Ctrl+F",
+        "macos": "Cmd+F"
+      },
+      "works": "KiCad's Find dialog is shown (a new window of KiCad's titled Find); Escape closes it",
+      "gating": true
+    },
+    {
+      "id": "per_actor_undo",
+      "keys": {
+        "linux": "Ctrl+Z",
+        "windows": "Ctrl+Z",
+        "macos": "Cmd+Z"
+      },
+      "editor": "pcb",
+      "after": "the person deletes everything, then an agent commits a track through the hub's kicad_ipc (save: false)",
+      "works": "an edit with created > 0 and deleted = 0 (the person's delete undone), and after Ctrl+S / Cmd+S the saved .kicad_pcb holds the agent's track: both \"(start 120 100)\" and \"(end 140 100)\"",
+      "wrong": "the agent's track deleted (an edit with deleted > 0, or the saved file without it)",
+      "gating": true
+    }
+  ],
+  "extra_rows": {
+    "about": "not gating; each says what dialog or edit followed and whether KiCad's frame survived (lane M's macOS ids; other platforms may add them)",
+    "ids": [
+      "extra_print",
+      "extra_preferences",
+      "extra_open",
+      "extra_search_panel",
+      "extra_zoom_in",
+      "extra_zoom_out",
+      "extra_close_window",
+      "extra_quit"
+    ]
+  }
 }
