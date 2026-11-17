@@ -172,6 +172,32 @@ impl Drop for ProbeHome { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&
 pub fn kicad_probe<S: AsRef<OsStr>>(cli: S) -> (std::process::Command, ProbeHome) {
     let h = ProbeHome::new(); let mut c = std_cmd(Kind::Local, cli); c.env("KICAD_CONFIG_HOME", h.path()); (c, h)
 }
+/// How long a KiCad probe may run. A `--version` takes a few seconds; on macOS (#1160) some never exit: KiCad's start-up runs Python to
+/// find its interpreter (PYTHON_MANAGER::FindPythonInterpreter → wxExecute) and misses that child's exit, so the probe waits forever,
+/// ignoring SIGTERM, and they piled up under the hub (42 in two hours). Past this it is killed (SIGKILL) and reaped.
+#[allow(dead_code)] // bp-plot includes this file
+pub const PROBE_LIMIT: std::time::Duration = std::time::Duration::from_secs(20);
+/// Run a probe `c` (stdin and stderr on /dev/null, stdout captured) for at most `limit`: its output when it exited in time; None when it
+/// could not start or ran over (then it is killed and reaped, and the hub's log says so). Its stdout is read on a thread of its own, so a
+/// grandchild still holding the pipe after the kill never holds the caller.
+#[allow(dead_code)] // bp-plot includes this file
+pub fn probe_output(mut c: std::process::Command, limit: std::time::Duration) -> Option<std::process::Output> {
+    use std::io::Read;
+    let mut child = c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn().ok()?;
+    let mut out = child.stdout.take()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || { let mut b = vec![]; let _ = out.read_to_end(&mut b); let _ = tx.send(b); });
+    let end = std::time::Instant::now() + limit;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => { let stdout = rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap_or_default(); return Some(std::process::Output { status, stdout, stderr: vec![] }) }
+            Ok(None) if std::time::Instant::now() < end => std::thread::sleep(std::time::Duration::from_millis(25)),
+            _ => { let pid = child.id(); let _ = child.kill(); let _ = child.wait();
+                eprintln!("kicad: a probe ({:?} {:?}, pid {pid}) ran over {} s and was killed", c.get_program(), c.get_args().collect::<Vec<_>>(), limit.as_secs());
+                return None }
+        }
+    }
+}
 /// `kicad_probe` as a tokio command.
 #[allow(dead_code)] // bp-plot includes this file
 pub fn kicad_probe_tokio<S: AsRef<OsStr>>(cli: S) -> (tokio::process::Command, ProbeHome) {
