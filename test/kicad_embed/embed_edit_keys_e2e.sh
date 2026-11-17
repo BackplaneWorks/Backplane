@@ -111,7 +111,7 @@ ids = [r["id"] for r in json.load(open(sys.argv[2]))["rows"]]
 print(f'{"row":<16}{"PCB":<9}{"schematic":<9}')
 for i in ids:
     pv = rows.get(("pcb", i), rows.get(("pcb", "all"), ("not run", "")))[0]
-    sv = "n/a" if i == "per_actor_undo" else rows.get(("sch", i), rows.get(("sch", "all"), ("not run", "")))[0]
+    sv = "n/a" if i in ("per_actor_undo", "props_typing") else rows.get(("sch", i), rows.get(("sch", "all"), ("not run", "")))[0]
     print(f"{i:<16}{pv:<9}{sv:<9}")
 PY
 while read -r _ ed id verdict evidence; do
