@@ -657,6 +657,29 @@ try:
                     if not try_undo(tag + ', again'):
                         key(1, CMD); time.sleep(2); try_undo(tag + ', after Cmd+S')
             raise SystemExit(0)
+        if os.environ.get('BS_PROBE') == 'route':  # 3 and 4 judged without pixels where it can be: tracks counted from KiCad's edit events
+            def pt(fx, fy):
+                p = last_push(); return p[0][0] + p[0][2] * fx, p[0][1] + p[0][3] * fy
+            def route(y, back):
+                key(K_ESC); time.sleep(0.3); key(K_ESC); time.sleep(0.3); key(K_X); time.sleep(0.8)
+                n = seq()
+                for fx, fy in ((0.22, y), (0.32, y), (0.32, y + 0.06)):
+                    click(*pt(fx, fy)); time.sleep(0.6)
+                if back: key(K_DEL); time.sleep(0.8)
+                x, yy = pt(0.42, y + 0.06); relay(op='move', x=x, y=yy); time.sleep(0.5)
+                click(x, yy); click(x, yy); time.sleep(1.5)  # a double click finishes the route
+                created = sum(c for c, d in edits_since(n)); key(K_ESC); time.sleep(0.3); key(K_ESC); time.sleep(0.6)
+                return created
+            board_click(0.1, 0.9)
+            a = route(0.58, False); b = route(0.70, True)
+            print(f'INFO bs 3: a route of three clicks made {a} track items; the same with ⌫ after the third click made {b}', flush=True)
+            check(a > 0 and 0 < b < a, 'bs 3: ⌫ while routing takes back the last segment (fewer tracks committed)')
+            # 4: Find's field: a, b, c as key presses, then ⌫; the field's text in a picture of Backplane's window only
+            board_click(0.1, 0.9); key(K_F, CMD); time.sleep(1.5)
+            for k in (0, 11, 8): key(k); time.sleep(0.15)
+            shot('bs-text-before'); key(K_DEL); time.sleep(0.6); shot('bs-text-field'); key(K_ESC); time.sleep(1.0)
+            print('INFO bs 4: Find\'s field in bs-text-before.png ("abc") and bs-text-field.png ("ab")', flush=True)
+            raise SystemExit(1 if FAILS else 0)
         if os.environ.get('BS_PROBE') == 'order':  # the ⌫ cases ordered so none needs Cmd+Z to restore the board (undo is lost on macOS)
             K_DEL_ = K_DEL
             # 3: ⌫ while routing takes back the last segment: judged in cropped pictures of KiCad's own frame
