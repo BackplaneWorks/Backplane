@@ -244,6 +244,10 @@ impl RunFile {
     pub fn path(&self) -> &Path { &self.0 }
 }
 impl Drop for RunFile { fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); } }
+/// Where the hub keeps its agents' run files (`RunFile`), under its home.
+pub fn run_dir(home: &Path) -> PathBuf { home.join("secrets").join("run") }
+/// At the hub's start: the run files a hub that was killed (no waiter ran) left behind, removed; how many. Their processes were ended with it.
+pub fn clear_run_files(home: &Path) -> usize { std::fs::read_dir(run_dir(home)).map(|rd| rd.flatten().filter(|e| e.path().is_file() && std::fs::remove_file(e.path()).is_ok()).count()).unwrap_or(0) }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Exit { pub code: Option<i32>, pub signal: Option<i32>, pub stderr: String }
@@ -662,6 +666,9 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "{\"k\":1}");
         #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600); assert_eq!(std::fs::metadata(d.join("secrets/run")).unwrap().permissions().mode() & 0o777, 0o700); }
         drop(r); assert!(!f.exists());
+        // a hub killed with its agent leaves its file: the next hub's start removes it
+        let left = RunFile::private(&run_dir(&d), "t-2.mcp.json", "{}").unwrap(); let lf = left.path().to_path_buf(); std::mem::forget(left);
+        assert!(lf.exists()); assert_eq!(clear_run_files(&d), 1); assert!(!lf.exists()); assert_eq!(clear_run_files(&d.join("none")), 0);
     }
     /// Every provider's command line on Windows rules, its CLI installed through npm: what runs is the CLI's own program (or node with its script),
     /// never cmd.exe or sh; and Claude's, Grok's, Muse's, OpenCode's, Pi's and Oh My Pi's carry through any launcher (a person's own .cmd). Codex's
