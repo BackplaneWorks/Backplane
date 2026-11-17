@@ -383,9 +383,24 @@ def test_duty_paid_parcels_carry_the_couriers_fee():
     # the stand-in board costs 2 + 20*15/1000*5 = 3.50; its duty-paid shipping 20.00
     assert us["lines"][2]["amount"] == round(3.50 * 0.35 + 4.44, 2), us["lines"]
     assert "courier's fee" in us["lines"][2]["detail"]
-    assert gr["lines"][2]["amount"] == round((3.50 + 20) * 0.24 + duties.EUR_LINE + 8.88, 2), gr["lines"]
+    # EU: the per-line duty and the per-parcel handling fee, and VAT on goods, freight and both
+    duty = duties.EUR_LINE + duties.EU_HANDLING
+    assert gr["lines"][2]["amount"] == round(duty + (3.50 + 20 + duty) * 0.24 + 8.88, 2), gr["lines"]
     # no sales tax outside the US
     assert [ln["label"] for ln in gr["lines"]] == ["Manufacturing", "Shipping", "Duties & taxes"] and gr["sales_tax"] is None
+
+
+def test_the_packs_courier_fee_replaces_the_countrys(monkeypatch):
+    """A pack that knows the courier it picked gives that courier's duty fee (US DHL 7.52, not UPS's 4.44)."""
+    from fabsrv import vendor_api
+    files = {"main/gerbers.zip": board_zip()}
+    with client() as c:
+        v = vendor_api.pack()
+        plain = v.shipping
+        monkeypatch.setattr(v, "shipping", lambda country, parcels: {**plain(country, parcels), "duty_fee": 7.52, "parcels": 1})
+        us = quote_of(c, manifest(files), files)["quote"]
+    from fabsrv import duties
+    assert us["lines"][2]["amount"] == round(duties.estimate("US", 3.50, 20.0, 1, True) + 7.52, 2), us["lines"]
 
 
 class _Pinned:

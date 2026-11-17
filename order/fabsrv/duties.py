@@ -6,12 +6,14 @@ whatever is due on delivery and the quote says so instead.
 
 US: a flat 35% of the goods on circuit boards and assemblies (the fab's duty-paid
 rate since March 2026; tariffs on China change often, check it monthly).
-EU: VAT on goods and freight, plus the EUR 3 per-line duty in force from 1 July
-2026 (until July 2028). UK, Norway, Switzerland, Australia, Canada, ...: VAT/GST.
+EU: the EUR 3 per-line duty in force from 1 July 2026 (until July 2028), the EUR 2
+customs handling fee per parcel from 1 November 2026, and VAT on all of it: goods,
+freight, duty and handling fee (the fab's checkout to Greece, 2026-11-17). UK, Norway, Switzerland, Australia, Canada, ...: VAT/GST.
 
 A duty-paid parcel also carries the courier's duty and tax disbursement fee (it pays
-the duties for us and bills them on): USD 4.44 a parcel to the US and EUR 7.40 to
-Greece on the fab's checkouts (2026-11), in the Duties & taxes line.
+the duties for us and bills them on), in the Duties & taxes line. It depends on the
+courier (US: UPS 4.44, DHL 7.52, FedEx 17.74), so the fab pack gives it with the
+shipping it picked; disbursement() is the fallback.
 
 US sales tax is a line of its own: the fab charges it on every US order, duty paid or
 not, on the goods and the shipping (not the duties), at the ship-to's state and local
@@ -24,9 +26,11 @@ EU_VAT = {"AT": 20, "BE": 21, "BG": 20, "HR": 25, "CY": 19, "CZ": 21, "DK": 25, 
 VAT = {"GB": 20, "NO": 25, "CH": 8.1, "AU": 10, "NZ": 15, "CA": 13, "JP": 10, "KR": 10, "SG": 9, "IL": 18,
        "TR": 20, "IS": 24, "IN": 28, "MX": 16, "TW": 5, "HK": 0, "AE": 5, "ZA": 15, "BR": 60}
 US_RATE = 35
-EUR_LINE = 3.0 * 1.08
-# the fixed, conservative EUR rate for fees billed in euros (ECB was about 1.16 in 2026-11)
+# the fixed, conservative EUR rate for fees billed in euros (ECB was about 1.16 in
+# 2026-11; the fab converted at 1.113)
 EUR_FEES = 1.20
+EUR_LINE = round(3.0 * EUR_FEES, 2)
+EU_HANDLING = round(2.0 * EUR_FEES, 2)
 # the courier's disbursement fee per duty-paid parcel, in USD: seen on the fab's
 # checkouts to the US (2026-11-08, two orders) and Greece (EUR 7.40, 2026-11-02);
 # elsewhere the EU figure, which is the higher
@@ -74,14 +78,15 @@ def name(country):
     return NAMES.get(country, country)
 
 
-def estimate(country, goods, freight, lines, ddp):
+def estimate(country, goods, freight, lines, ddp, parcels=1):
     """What goes in the quote for duties and taxes (0 when the courier collects them instead)."""
     if not ddp:
         return 0.0
     if country == "US":
         return round(goods * US_RATE / 100, 2)
     if country in EU_VAT:
-        return round((goods + freight) * EU_VAT[country] / 100 + EUR_LINE * max(1, lines), 2)
+        duty = EUR_LINE * max(1, lines) + EU_HANDLING * max(1, parcels)
+        return round(duty + (goods + freight + duty) * EU_VAT[country] / 100, 2)
     if country in VAT:
         return round((goods + freight) * VAT[country] / 100, 2)
     return 0.0
@@ -94,7 +99,7 @@ def note(country, ddp):
     if country == "US":
         return f"US import duty ({US_RATE}% of the goods){fee}, paid in advance"
     if country in EU_VAT:
-        return f"{EU_VAT[country]:g}% VAT and EU import duty{fee}, paid in advance"
+        return f"{EU_VAT[country]:g}% VAT, EU import duty and handling fee{fee}, paid in advance"
     if country in VAT:
         return f"{VAT[country]:g}% VAT/GST{fee}, paid in advance"
     return "Duties and taxes, if any, are collected on delivery"

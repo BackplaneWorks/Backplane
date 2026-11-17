@@ -68,7 +68,7 @@ def cancelled():
 
 # The order terms a buyer agrees to on Stripe's checkout (a required box links
 # here). Changing them changes what every later buyer agrees to: bump the date.
-TERMS_DATE = "November 17, 2026"
+TERMS_DATE = "November 17, 2026"  # bump on every change
 
 
 def terms_items():
@@ -80,14 +80,18 @@ def terms_items():
                        "The manufacturer makes them from your files and ships them straight to you. "
                        "Ownership passes from the manufacturer to you."),
         ("Price", "The price at checkout is the full price: manufacturing, our fee, shipping, and any import duties and "
-                  "taxes shown. It is final."),
+                  "taxes shown."),
+        ("Price changes", "Your parts are made by a third-party manufacturer, which reviews every order after it is "
+                          "placed. If its price for your order comes out higher than quoted, we will tell you within 2 "
+                          "business days of your payment and ask for the difference. You can pay it, or cancel the "
+                          "order for a full refund."),
         ("Your design", "You are responsible for your design and files. Parts are made exactly as submitted. We don't check "
                         "that your design works, is safe, or suits your use. You keep all rights to your design; you let us "
                         "and the manufacturer use your files only to make and ship this order."),
         ("Lawful use", "You confirm the parts are legal to make, export, import and use, and that you, the recipient and the "
                        "destination are not subject to US or UN sanctions. We don't ship to sanctioned countries or regions."),
         ("Custom-made", "Every order is made to your specification, so it can't be cancelled or returned once it has been "
-                        "placed with the manufacturer. Where the law allows, this also excludes any right to withdraw from "
+                        "placed with the manufacturer, except as in Price changes. Where the law allows, this also excludes any right to withdraw from "
                         "the purchase."),
         ("Defects", "If what arrives doesn't match your files because of a manufacturing fault, tell us within 30 days of "
                     "delivery, with photos. We will have it remade or refund that part of the order. This is your only "

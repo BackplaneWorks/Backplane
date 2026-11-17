@@ -20,9 +20,12 @@ from . import catalog, config, duties, sourcing, vendor_api
 DENSITY = {"aluminum": 2.7, "stainless": 7.95, "steel": 7.85, "brass": 8.5, "copper": 8.96, "titanium": 4.43,
            "abs": 1.05, "asa": 1.07, "pla": 1.24, "tpu": 1.2, "pa12": 1.01, "pa11": 1.03, "pc": 1.2, "peek": 1.3,
            "pom": 1.41, "pmma": 1.18, "nylon": 1.14, "polycarbonate": 1.2, "fr4": 1.85, "resin": 1.15, "metal": 7.95}
-BOARD_DENSITY = 1.85
-# a board's own, where it isn't FR-4's (polyimide, aluminium and copper cores, PTFE)
-BOARD_DENSITIES = {"flex": 1.42, "aluminum": 2.7, "copper_core": 8.9, "ptfe": 2.2}
+# the fab's own weight for a rigid board, which its shipping is charged on: 2.075 g/cm3
+# of board (pcbWeight on its calculator, 2026-11-17, FR-4 and aluminium alike); 1.85
+# left 500 and 1000 board orders a shipping step under the fab's
+BOARD_DENSITY = 2.075
+# a board's own, where it isn't FR-4's (polyimide, copper cores, PTFE)
+BOARD_DENSITIES = {"flex": 1.42, "copper_core": 8.9, "ptfe": 2.2}
 
 
 
@@ -235,8 +238,10 @@ def price(manifest, measured, install=""):
         problems.append(ship["problem"])
     ddp = bool(ship.get("ddp"))
     # duties, and the courier's fee for paying them on each duty-paid parcel
-    tax = (duties.estimate(country, goods, ship.get("price", 0.0), len(parts_out), ddp)
-           + duties.disbursement(country, ship.get("parcels", 1) if parcels else 0, ddp))
+    # (the fab pack gives the courier's fee with the method it picked; else by country)
+    n_parcels = ship.get("parcels", 1) if parcels else 0
+    fees = ship["duty_fee"] if ddp and "duty_fee" in ship else duties.disbursement(country, n_parcels, ddp)
+    tax = duties.estimate(country, goods, ship.get("price", 0.0), len(parts_out), ddp, max(1, n_parcels)) + fees
     # US sales tax, on the goods and the shipping, at the state's rate (a high one without a state)
     region = manifest.get("ship_region") or ""
     stax = duties.sales_tax(country, region, goods, ship.get("price", 0.0)) if parts_out else None
@@ -297,5 +302,6 @@ def markdown(q):
         out += ["", "**Pilot:** ordering through Backplane is still being tested. Buy now opens a test checkout and your card "
                     "will not be charged. To get the parts made now, order them from any fabricator with the files exported to `mfg/`."]
         return "\n".join(out)
-    out += ["", f"Valid for {config.QUOTE_DAYS} days. The quoted price is the price you pay."]
+    out += ["", f"Valid for {config.QUOTE_DAYS} days. Made by a third-party manufacturer: if its review raises the price, "
+                "you're asked within 2 business days and can pay the difference or cancel for a full refund."]
     return "\n".join(out)

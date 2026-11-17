@@ -17,9 +17,10 @@ from . import config, store
 
 API = "https://api.stripe.com/v1"
 
-TERMS_AGREE = ("I agree to the [Backplane order terms]({url}): parts are made to my files, the price shown is final, "
-               "and an order can't be cancelled or returned once it's placed.")
-TERMS = "Parts are made to your files and ship straight from the manufacturer. The price shown is the price you pay."
+TERMS_AGREE = ("I agree to the [Backplane order terms]({url}): parts are made to my files by a third-party manufacturer; "
+               "if its price comes out higher, I'm asked within 2 business days and can pay the difference or cancel "
+               "for a full refund; otherwise an order can't be cancelled or returned once it's placed.")
+TERMS = "Parts are made to your files by a third-party manufacturer and ship straight to you."
 
 
 class Unavailable(Exception):
