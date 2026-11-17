@@ -25,10 +25,10 @@ pub const OPS: &[(&str, bool, &str, &str)] = &[
     ("models", false, "{models: true | \"all\" | refs}", "what would not simulate and why, with a model found on this machine for each where there is one; \"all\" or references list every part's model"),
     ("model", true, "{model: refs, device, type?, params?} | {model: refs, lib, name?, pins?} | {model: refs, raw: {primitive, model, library?}} | {model: refs, clear: true}",
         "assign a model as KiCad's dialog would: a built-in device with its parameters, a library file's .subckt or .model with a pin map {pin number: node} (by name when the names match, else by order, answered), or raw SPICE"),
-    ("exclude", true, "{exclude: refs | group | {ref|lib|value: pattern}}", "exclude from simulation: references, a group (connectors, mounting_holes, test_points, fiducials, mechanical, jumpers) or a pattern"),
+    ("exclude", true, "{exclude: refs | group | {ref|lib|value: pattern}}", "exclude from simulation: references, a group (connectors, mounting_holes, test_points, fiducials, mechanical, jumpers), \"no_model\" (every part of those groups that has no model), or a pattern; answers the parts it took"),
     ("include", true, "{include: refs | ...}", "the reverse of exclude"),
     ("import", true, "{import: {file | text, url, licence?, as?}, to?: refs, name?, pins?}", "keep a fetched model file in the project's sim/models/ with its source URL and licence line, answer its .subckt/.model names and nodes, and assign it to `to`"),
-    ("source", true, "{source: {type: dc|sin|pulse|pwl|exp|am|sffm, current?, ref?, pos, neg?, value?, params?, ac?, at?}}", "add a source symbol (Simulation_SPICE) between two nets; neg defaults to GND"),
+    ("source", true, "{source: {type: dc|sin|pulse|pwl|exp|am|sffm, current?, ref?, pos, neg?, value?, params?, ac?, at?, bom?}}", "add a source symbol (Simulation_SPICE) between two nets, out of the BOM and off the board (bom: true keeps it in); neg defaults to GND"),
     ("probe", true, "{probe: signals | {pin: \"R1.2\", name}}", "name what to read: signals join the saved analysis' traces and this call's runs; a pin gets a net label first"),
     ("analysis", true, "{analysis: \".ac dec 20 1 1meg\", signals?, tab?} | {analysis: true}", "save the analysis with the design (what the person's Simulator opens with); true reads what is saved"),
     ("run", false, "{run: \".tran 1u 10m\" | true, set?: {R1: \"2k\", \"V1.dc\": 3.3}, signals?, measures?, waves?, directives?, netlist?, log?, timeout?, show?}",
@@ -50,7 +50,9 @@ pub fn measure_names() -> String { kw::MEASURES.iter().map(|m| m.0).collect::<Ve
 /// What the driver needs of the machine: the project's folder (model files, `sim/models/`), the folders of the libraries that ship
 /// models (each with what the lookup calls it), the time, and the simulation log to read for `stats`.
 #[derive(Clone, Debug, Default)]
-pub struct Ctx { pub project_dir: PathBuf, pub libs: Vec<(PathBuf, &'static str)>, pub now: u64, pub log: Option<PathBuf> }
+pub struct Ctx { pub project_dir: PathBuf, pub libs: Vec<(PathBuf, &'static str)>, pub now: u64, pub log: Option<PathBuf>,
+    /// The person's KiCad has the project: a `run` is shown in its Simulator unless the op says `show: false` (a sweep's and a tune's runs never are).
+    pub gui: bool }
 
 const BUSY: &str = "a simulation of this project is running (the person's, or another agent's): this one was not started. Ask again when it ends";
 /// How long one request waits for a run before asking again (the API serves one request at a time), and what a run gets when none is given.
@@ -252,7 +254,7 @@ impl Sim<'_> {
     /// The references an exclude or include names: references (with `*`), a group's parts, or the parts a pattern matches.
     async fn pick(&self, target: &Value) -> Result<Vec<String>, String> {
         let words = refs_of(target);
-        if !target.is_object() && !words.is_empty() && words.iter().all(|w| !w.contains(['*', '?']) && !kp::GROUPS.iter().any(|g| g.0 == w)) { return Ok(words) }
+        if !target.is_object() && !words.is_empty() && words.iter().all(|w| !w.contains(['*', '?']) && w != "no_model" && !kp::GROUPS.iter().any(|g| g.0 == w)) { return Ok(words) }
         let all = self.models(&[], false).await?; let rows: Vec<&Value> = all["models"].as_array().into_iter().flatten().collect();
         let mut out: Vec<String> = vec![];
         fn add(out: &mut Vec<String>, r: &str) { if !out.iter().any(|x| x == r) { out.push(r.to_string()) } }
@@ -261,7 +263,8 @@ impl Sim<'_> {
             for m in &rows { if sel.iter().all(|(k, want)| { let got = s(m, match k.as_str() { "ref" => "reference", "lib" => "lib_id", _ => "value" }); refs_of(want).iter().any(|w| kedit::glob(w, got)) }) { add(&mut out, s(m, "reference")) } }
         } else if words.is_empty() { return Err(format!("name references, a group ({}) or a pattern {{ref|lib|value}}", kp::GROUPS.iter().map(|g| g.0).collect::<Vec<_>>().join(", "))) }
         for w in &words {
-            if kp::GROUPS.iter().any(|g| g.0 == w) { for m in &rows { if kp::in_group(w, s(m, "reference"), s(m, "lib_id")) == Some(true) { add(&mut out, s(m, "reference")) } } }
+            if w == "no_model" { for m in &rows { if s(m, "error_kind") == "ME_NO_MODEL" && kp::NOT_ELECTRICAL.iter().any(|g| kp::in_group(g, s(m, "reference"), s(m, "lib_id")) == Some(true)) { add(&mut out, s(m, "reference")) } } }
+            else if kp::GROUPS.iter().any(|g| g.0 == w) { for m in &rows { if kp::in_group(w, s(m, "reference"), s(m, "lib_id")) == Some(true) { add(&mut out, s(m, "reference")) } } }
             else { let n = out.len(); for m in &rows { if kedit::glob(w, s(m, "reference")) { add(&mut out, s(m, "reference")) } } if out.len() == n && !w.contains(['*', '?']) { return Err(format!("no part {w} in this schematic")) } }
         }
         Ok(out)
@@ -311,7 +314,7 @@ impl Sim<'_> {
     async fn exec(&mut self, command: &str, directives: &Value, overrides: Vec<Value>, signals: &[String], raw: &[String], op: &Value) -> Result<Value, String> {
         let timeout = op["timeout"].as_f64().map_or(TIMEOUT_MS, |t| (t * 1000.0) as u64).clamp(1000, 3_600_000);
         let msg = json!({"document": self.doc, "command": command, "directives": directives.as_array().cloned().unwrap_or_default(), "overrides": overrides, "signals": signals, "measures": raw,
-            "include_netlist": op["netlist"] == true, "show": op["show"] == true, "timeout_ms": timeout, "wait_ms": WAIT_MS, "max_points": op["max_points"].as_u64().unwrap_or(0)});
+            "include_netlist": op["netlist"] == true, "show": verb(op) == "run" && op["show"].as_bool().unwrap_or(self.ctx.gui), "timeout_ms": timeout, "wait_ms": WAIT_MS, "max_points": op["max_points"].as_u64().unwrap_or(0)});
         let started = std::time::Instant::now();
         let mut r = match self.call("RunSimulation", msg).await { Err(e) if e.contains("AS_BUSY") => return Err(BUSY.into()), r => r? };
         while s(&r, "status") == "SIM_RUNNING" {
@@ -404,6 +407,8 @@ impl Sim<'_> {
                 if let Some(x) = v.get("ac").filter(|x| !x.is_null()) { params.insert("ac".into(), x.clone()); }
                 let at = if v["at"].is_array() { v["at"].clone() } else { json!([38.1, 50.8]) };
                 let e = self.edit(json!([{"add": [{"symbol": {"lib": format!("Simulation_SPICE:{letter}{ty}"), "ref": reference, "at": at, "pins": {"1": pos, "2": neg}}}]}]), &format!("kicad_sim: source {reference}")).await?;
+                // a source is for the simulation only: out of the BOM and off the board, unless asked otherwise
+                if v["bom"] != true { self.edit(json!([{"set": reference, "raw": {"attributes": {"exclude_from_bill_of_materials": true, "exclude_from_board": true}}}]), &format!("kicad_sim: source {reference} is not a part")).await?; }
                 let mut out = json!({"ref": reference, "pos": pos, "neg": neg});
                 if let Some(to) = e["results"][0]["moved"].as_array().or(e["results"][0]["created"][0]["at"].as_array()) { out["at"] = json!(to) }
                 if !params.is_empty() || ty != "DC" {
@@ -442,6 +447,8 @@ impl Sim<'_> {
                 let r = self.call("SetSimulationSetup", msg).await?; let tab = r["tab"].as_u64().unwrap_or(0) as usize;
                 Ok(json!({"analysis": {"tab": tab, "command": s(&r["setup"]["tabs"][tab], "command"), "signals": r["setup"]["tabs"][tab]["signals"], "changed": r["changed"] == true}})) }
             "run" => { let mut asked = refs_of(&op["signals"]); for p in &self.probes { if !asked.iter().any(|x| key(x) == key(p)) { asked.push(p.clone()) } }
+                // the saved analysis is read with its saved traces, when the call names none
+                if asked.is_empty() && matches!(op["run"], Value::Bool(true)) { if let Ok(su) = self.call("GetSimulationSetup", json!({"document": self.doc})).await { asked = refs_of(&su["setup"]["tabs"][0]["signals"]) } }
                 let (command, overrides, meas, signals, raw) = self.plan(op, &op["run"], &asked)?;
                 let r = self.exec(&command, &op["directives"], overrides, &signals, &raw, op).await?;
                 let mut out = json!({"analysis": s(&r, "analysis")});
@@ -589,7 +596,7 @@ mod tests {
     /// A stand-in KiCad with the fork's simulation commands (api/proto/backplane/sim.proto) over a small circuit it solves in closed
     /// form: V1 into R1 (10k) to OUT, C1 (10n) from OUT to ground, a divider R2/R3 from VCC, and U1 (an op-amp) with no model. Values
     /// come from the schematic's parts or a run's overrides, so sweeps and tunes move the answers as the real circuit would.
-    struct Fake { log: Mutex<Vec<(String, Value)>>, caps: Vec<String>, parts: Mutex<std::collections::HashMap<String, Value>>, setup: Mutex<Vec<Value>>, mode: &'static str, polls: Mutex<u32>, save: Value }
+    struct Fake { made: Mutex<Vec<Value>>, log: Mutex<Vec<(String, Value)>>, caps: Vec<String>, parts: Mutex<std::collections::HashMap<String, Value>>, setup: Mutex<Vec<Value>>, mode: &'static str, polls: Mutex<u32>, save: Value }
     fn part(reference: &str, value: &str, lib: &str, device: &str) -> Value {
         json!({"reference": reference, "value": value, "lib_id": lib, "source": if device.is_empty() { "MS_NONE" } else { "MS_INFERRED" }, "device": device,
             "pins": [{"pin_number": "1", "pin_name": if reference == "U1" { "IN+" } else { "~" }, "model_node": if device.is_empty() { "" } else { "+" }}, {"pin_number": "2", "pin_name": if reference == "U1" { "IN-" } else { "~" }, "model_node": if device.is_empty() { "" } else { "-" }}],
@@ -598,7 +605,7 @@ mod tests {
     fn fake() -> Fake {
         let parts = [part("R1", "10k", "Device:R", "R"), part("C1", "10n", "Device:C", "C"), part("R2", "10k", "Device:R", "R"), part("R3", "10k", "Device:R", "R"), part("V1", "1", "Simulation_SPICE:VDC", "V"),
             part("U1", "LM358", "Amplifier_Operational:LM358", ""), part("J1", "Conn_01x02", "Connector_Generic:Conn_01x02", ""), part("TP1", "TestPoint", "Connector:TestPoint", ""), part("H1", "MountingHole", "Mechanical:MountingHole", "")];
-        Fake { log: Mutex::new(vec![]), caps: vec![CAP.into()], parts: Mutex::new(parts.into_iter().map(|p| (s(&p, "reference").to_string(), p)).collect()), setup: Mutex::new(vec![]), mode: "", polls: Mutex::new(0), save: json!({}) }
+        Fake { made: Mutex::new(vec![]), log: Mutex::new(vec![]), caps: vec![CAP.into()], parts: Mutex::new(parts.into_iter().map(|p| (s(&p, "reference").to_string(), p)).collect()), setup: Mutex::new(vec![]), mode: "", polls: Mutex::new(0), save: json!({}) }
     }
     impl Fake {
         fn value(&self, r: &str, overrides: &Value) -> f64 {
@@ -664,17 +671,18 @@ mod tests {
                 "SaveDocument" => self.save.clone(),
                 // what a nested kicad_edit needs of a schematic: its sheets, its items, KiCad's own placement of a library symbol
                 "GetSchematicHierarchy" => json!({"top_level_sheets": [{"path": {"path": [{"value": "root"}], "path_human_readable": "/"}}]}),
-                "GetItems" => if msg["types"][0] == "KOT_SCH_SYMBOL" { json!({"items": [
+                "GetItems" => if msg["types"][0] == "KOT_SCH_SYMBOL" { let mut items = json!([
                     {"id": {"value": "s-r1"}, "path": {"path": [{"value": "root"}], "path_human_readable": "/"}, "position": {"x_nm": "100000000", "y_nm": "100000000"}, "reference_field": {"text": {"text": "R1"}}, "value_field": {"text": {"text": "10k"}}, "unit": {"unit": 1}, "transform": {"orientation": "SSO_0"},
                         "definition": {"items": [{"item": {"@type": "type.googleapis.com/kiapi.schematic.types.SchematicPin", "number": "1", "name": "~", "position": {"y_nm": "-3810000"}, "orientation": "SPO_DOWN"}, "unit": {"unit": 1}}, {"item": {"@type": "type.googleapis.com/kiapi.schematic.types.SchematicPin", "number": "2", "name": "~", "position": {"y_nm": "3810000"}, "orientation": "SPO_UP"}, "unit": {"unit": 1}}]}},
                     {"id": {"value": "s-u1"}, "path": {"path": [{"value": "root"}], "path_human_readable": "/"}, "position": {"x_nm": "120000000", "y_nm": "100000000"}, "reference_field": {"text": {"text": "U1"}}, "value_field": {"text": {"text": "LM358"}}, "unit": {"unit": 1},
-                        "user_fields": [{"name": "MPN", "text": {"text": "LM358DR"}}, {"name": "Manufacturer", "text": {"text": "Texas Instruments"}}]}]}) } else { json!({"items": []}) },
+                        "user_fields": [{"name": "MPN", "text": {"text": "LM358DR"}}, {"name": "Manufacturer", "text": {"text": "Texas Instruments"}}]}]); items.as_array_mut().unwrap().extend(self.made.lock().unwrap().clone()); json!({"items": items}) } else { json!({"items": []}) },
                 "BeginCommit" => json!({"id": {"value": "commit-1"}}),
                 "PlaceSymbolFromLibrary" => { let pin = |n: &str, y: i64, o: &str| json!({"item": {"@type": "type.googleapis.com/kiapi.schematic.types.SchematicPin", "number": n, "name": if n == "1" { "+" } else { "-" }, "position": {"y_nm": (y * 1000000).to_string()}, "orientation": o}, "unit": {"unit": 1}});
                     json!({"item": {"id": {"value": "probe"}, "path": {}, "position": msg["position"], "transform": {"orientation": msg["orientation"]}, "unit": {"unit": 1}, "definition": {"id": msg["lib_id"], "items": [pin("1", -5, "SPO_DOWN"), pin("2", 5, "SPO_UP")]},
                         "reference_field": {"visible": true, "text": {"position": {"x_nm": "5"}, "text": msg["reference"]}}, "value_field": {"visible": true, "text": {"position": {"x_nm": "6"}, "text": "1"}}, "@type": "type.googleapis.com/kiapi.schematic.types.SchematicSymbolInstance"}}) }
                 "CreateItems" => { for i in msg["items"].as_array().unwrap() { if i["@type"].as_str().is_some_and(|t| t.ends_with("SchematicSymbolInstance")) { let r = i["reference_field"]["text"]["text"].as_str().unwrap_or("");
-                        if !r.starts_with('#') { self.parts.lock().unwrap().insert(r.to_string(), part(r, "1", "Simulation_SPICE:VDC", "V")); } } }
+                        if !r.starts_with('#') { let mut it = i.clone(); it["id"] = json!({"value": format!("made-{r}")}); it["path"] = json!({"path": [{"value": "root"}], "path_human_readable": "/"}); self.made.lock().unwrap().push(it);
+                            self.parts.lock().unwrap().insert(r.to_string(), part(r, "1", "Simulation_SPICE:VDC", "V")); } } }
                     json!({"created_items": msg["items"].as_array().unwrap().iter().enumerate().map(|(n, i)| { let mut it = i.clone(); it["id"] = json!({"value": format!("new-{n}")}); json!({"status": {"code": "ISC_OK"}, "item": it}) }).collect::<Vec<_>>()}) }
                 "UpdateItems" => { for i in msg["items"].as_array().unwrap() { if i["id"]["value"] == "s-r1" { self.parts.lock().unwrap().get_mut("R1").unwrap()["value"] = i["value_field"]["text"]["text"].clone() } }
                     json!({"updated_items": msg["items"].as_array().unwrap().iter().map(|i| json!({"status": {"code": "ISC_OK"}, "item": i})).collect::<Vec<_>>()}) }
@@ -685,7 +693,7 @@ mod tests {
     }
     fn tmp(tag: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("ksim-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
     fn go_in(f: &Fake, dir: &Path, ops: Value) -> (Result<Value, String>, Vec<Value>) {
-        let ctx = Ctx { project_dir: dir.to_path_buf(), libs: vec![], now: 1_800_000_000, log: None };
+        let ctx = Ctx { project_dir: dir.to_path_buf(), libs: vec![], now: 1_800_000_000, log: None, gui: false };
         tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap().block_on(run(f, "/p/t.kicad_sch", &json!({"ops": ops}), &ctx))
     }
     fn go(f: &Fake, ops: Value) -> Value { go_in(f, Path::new("/nonexistent-ksim"), ops).0.unwrap_or_else(|e| panic!("{e}")) }
@@ -765,6 +773,8 @@ mod tests {
         let f = fake(); let out = go(&f, json!([{"exclude": {"ref": "J*"}}, {"exclude": "TP*"}, {"include": "TP1"}, {"exclude": {"lib": "Mechanical:*"}}]));
         assert_eq!((out["results"][0].clone(), out["results"][1].clone(), out["results"][2].clone(), out["results"][3].clone()), (json!({"excluded": ["J1"]}), json!({"excluded": ["TP1"]}), json!({"included": ["TP1"]}), json!({"excluded": ["H1"]})));
         assert_eq!(out["left"], json!(["missing model for TP1: assign one (model) or exclude it (exclude)", "missing model for U1: assign one (model) or exclude it (exclude)"]));
+        // every part of the board's-sake groups that has no model, in one op: never the op-amp
+        assert_eq!(go(&fake(), json!([{"exclude": "no_model"}]))["results"][0], json!({"excluded": ["H1", "J1", "TP1"]}));
         assert_eq!(go(&fake(), json!([{"exclude": "fiducials"}]))["results"][0], json!({"excluded": [], "note": "no part matches"}));
         let e = go_in(&fake(), Path::new("/x"), json!([{"exclude": "connectors"}, {"exclude": "Q7"}])).0.unwrap_err(); assert!(e.contains("op 2 (exclude):") && e.contains("no symbol Q7") && e.ends_with("Already done and saved: exclude."), "{e}");
         assert!(go_in(&fake(), Path::new("/x"), json!([{"model": "U1"}])).0.unwrap_err().contains("a model is one of: device"));
@@ -854,6 +864,8 @@ mod tests {
         let placed = sent(&f, "PlaceSymbolFromLibrary"); assert_eq!((placed[0]["lib_id"].clone(), placed.iter().any(|p| p["lib_id"]["entry_name"] == "IPULSE")), (json!({"library_nickname": "Simulation_SPICE", "entry_name": "VSIN"}), true));
         let a = sent(&f, "AssignSimulationModel"); assert_eq!((a.len(), a[1]["builtin"].clone()), (3, json!({"device": "V", "type": "DC", "params": [{"name": "dc", "value": "5"}]})));
         assert_eq!(out["saved"], json!("/p/t.kicad_sch"));
+        let up = sent(&f, "UpdateItems"); assert_eq!((up.len(), up[0]["items"][0]["attributes"]["exclude_from_bill_of_materials"].clone(), up[0]["items"][0]["attributes"]["exclude_from_board"].clone()), (3, json!(true), json!(true)));
+        let f = fake(); go(&f, json!([{"source": {"pos": "VCC", "value": 5, "bom": true}}])); assert!(sent(&f, "UpdateItems").is_empty());
         assert!(go_in(&fake(), Path::new("/x"), json!([{"source": {"type": "square", "pos": "IN"}}])).0.unwrap_err().contains("no source type `square`") && go_in(&fake(), Path::new("/x"), json!([{"source": {}}])).0.unwrap_err().contains("source.pos"));
     }
     #[test] fn a_sweep_is_one_table() {
