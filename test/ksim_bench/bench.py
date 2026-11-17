@@ -21,16 +21,21 @@ TASKS = kb.TASKS; env = kb.env; med = kb.med
 CUT = re.compile(r"usage limit|rate limit|limit reached|hit your limit|out of (extra )?usage|credit balance|overloaded|API Error|quota|529|\b429\b", re.I)
 
 def answer_of(log):
-    """the agent's final message (the CLI's `result` line), whether the CLI called the turn an error, and how many shell commands ran ngspice"""
-    text, err, sims = "", False, 0
+    """the agent's final message (the CLI's `result` line), whether the CLI called the turn an error, how many shell commands ran ngspice, and how
+    many calls went to the web"""
+    text, err, sims, web = "", False, 0, 0
     for l in open(log):
         try: _, j = l.split("\t", 1); j = json.loads(j)
         except ValueError: continue
         if j.get("type") == "assistant":
             for b in j["message"].get("content", []):
-                if b.get("type") == "tool_use" and b.get("name") == "Bash" and re.search(r"ngspice|ngSpice", json.dumps(b.get("input", {}))): sims += 1
+                if b.get("type") != "tool_use": continue
+                n = b.get("name", ""); arg = json.dumps(b.get("input", {}))
+                if n == "Bash" and re.search(r"ngspice|ngSpice", arg): sims += 1
+                # a web fetch: the CLI's own fetch and search, the hub's browser going to a page, or a shell command that asks a web server
+                if n in ("WebFetch", "WebSearch") or re.search(r"preview_(open|navigate)$", n) or (n == "Bash" and re.search(r"\b(curl|wget)\b|urllib|requests\.get|https?://", arg)): web += 1
         if j.get("type") == "result": text = j.get("result") or ""; err = bool(j.get("is_error"))
-    return text, err, sims
+    return text, err, sims, web
 def simlog(work, thread, t0, t1):
     """what the hub's simulation log says about one run (<home>/logs/sim.jsonl, one line per simulation action; absent before kicad_sim exists):
     how many simulations ran, ngspice's run time and how many models were looked up"""
@@ -52,16 +57,25 @@ def one(work, variant, task, n):
     r = kb.turn(work, d, task["prompt"])
     o = {"variant": variant, "task": task["id"], "run": n, "state": r.get("state"), "wall_s": round(time.time() - t0, 1), "at": int(t0)}
     text, err = "", False
-    if os.path.exists(log): o.update(kb.usage(log)); text, err, o["shell_sims"] = answer_of(log)
+    if os.path.exists(log): o.update(kb.usage(log)); text, err, o["shell_sims"], o["web"] = answer_of(log)
     o.update(simlog(work, r.get("thread"), t0, time.time())); o["sims_seen"] = o.get("sims", o.get("shell_sims", 0) + sum(v for k, v in o.get("tools", {}).items() if "RunSimulation" in k or "kicad_sim" in k))
     # a run the account's limit or the API cut short is not a failure of the variant: it is marked and left out of the table (and said there)
     o["cut"] = "context" not in o and o["state"] != "timeout" or err or (o["state"] != "completed" and bool(CUT.search(text))) or bool(CUT.search(text[-400:]) and not checks.result(text))
     try: df = checks.check(task, d, env(work)["fixtures"], env(work)["cli"], text)
     except Exception as e: df = [f"check failed to run: {e!r}"[:200]]
-    o["pass"] = not df and o["state"] == "completed" and not o["cut"]; o["diff"] = df[:8]; o["answer"] = (checks.result(text) or {}) if text else None
+    o["pass"] = not df and o["state"] == "completed" and not o["cut"]; o["diff"] = df[:8]; o["why"] = why(o, df, text); o["answer"] = (checks.result(text) or {}) if text else None
     open(work + "/results.jsonl", "a").write(json.dumps(o) + "\n")
     print(f"{name}: {'CUT' if o['cut'] else 'PASS' if o['pass'] else 'FAIL'} ctx={o.get('context')} out={o.get('output')} calls={o.get('calls')} sims={o['sims_seen']} wall={o['wall_s']}s ${o.get('cost', 0):.2f} {o['diff'][:2] if df else ''}", flush=True)
     return o
+def why(o, df, text):
+    """a failed run in a few words: the turn cap, stopped early (no RESULT line), a wrong number, the schematic check, or both of the last two"""
+    if o["pass"]: return ""
+    if o["cut"]: return "cut short"
+    if o["state"] == "timeout": return "turn cap"
+    if o["state"] != "completed": return "turn " + str(o["state"])
+    if checks.result(text) is None: return "stopped early (no RESULT line)"
+    num = [x for x in df if re.match(r"[a-z0-9_]+: (-?[\d.]|no number|a number)", x)]; sch = [x for x in df if x not in num]
+    return " + ".join(([f"wrong number ({'; '.join(num)[:90]})"] if num else []) + ([f"schematic check ({'; '.join(sch)[:120]})"] if sch else []))
 def text_of(ans, scale=1.0): return "RESULT " + " ".join(f"{k}={v[0] * scale:.6g}" for k, v in ans.items())
 def main():
     cmd, work = sys.argv[1], sys.argv[2]; a = sys.argv[3:]
@@ -108,18 +122,20 @@ def main():
         with concurrent.futures.ThreadPoolExecutor(par) as ex: list(ex.map(lambda j: one(work, variant, j[0], j[1]), jobs))
     elif cmd == "table":
         rs = [json.loads(l) for l in open(work + "/results.jsonl")]; vs = a or sorted({r["variant"] for r in rs}, key=lambda v: min(r["at"] for r in rs if r["variant"] == v))
-        cols = ("context", "output", "calls", "wall_s", "cost", "sims_seen", "ngspice_s", "lookups")
-        print("| task | variant | pass | context tok | output tok | tool calls | wall s | cost $ | simulations | ngspice s | model lookups |\n|---|---|---|---|---|---|---|---|---|---|---|")
+        cols = ("context", "output", "calls", "wall_s", "cost", "sims_seen", "web", "ngspice_s", "lookups")
+        print("| task | variant | pass | context tok | output tok | tool calls | wall s | cost $ | simulations | web fetches | ngspice s | model lookups |\n|---|---|---|---|---|---|---|---|---|---|---|---|")
         tot = {v: [0] * (len(cols) + 2) for v in vs}; cut = {v: 0 for v in vs}
         for t in TASKS:
             for v in vs:
                 allx = [r for r in rs if r["variant"] == v and r["task"] == t["id"]]; x = [r for r in allx if not r.get("cut") and "context" in r]; cut[v] += len(allx) - len(x)
                 if not x: continue
                 row = [med([r.get(c) or 0 for r in x]) for c in cols]
-                print(f"| {t['id']} | {v} | {sum(r['pass'] for r in x)}/{len(x)} | {row[0]:,.0f} | {row[1]:,.0f} | {row[2]:.0f} | {row[3]:.0f} | {row[4]:.2f} | {row[5]:.0f} | {row[6]:.1f} | {row[7]:.0f} |")
+                print(f"| {t['id']} | {v} | {sum(r['pass'] for r in x)}/{len(x)} | {row[0]:,.0f} | {row[1]:,.0f} | {row[2]:.0f} | {row[3]:.0f} | {row[4]:.2f} | {row[5]:.0f} | {row[6]:.0f} | {row[7]:.1f} | {row[8]:.0f} |")
                 for i, c in enumerate(row): tot[v][i] += c
                 tot[v][-2] += sum(r["pass"] for r in x); tot[v][-1] += len(x)
-        for v in vs: c = tot[v]; print(f"| **all (sum of medians)** | {v} | {c[-2]}/{c[-1]} | {c[0]:,.0f} | {c[1]:,.0f} | {c[2]:.0f} | {c[3]:.0f} | {c[4]:.2f} | {c[5]:.0f} | {c[6]:.1f} | {c[7]:.0f} |")
+        for v in vs: c = tot[v]; print(f"| **all (sum of medians)** | {v} | {c[-2]}/{c[-1]} | {c[0]:,.0f} | {c[1]:,.0f} | {c[2]:.0f} | {c[3]:.0f} | {c[4]:.2f} | {c[5]:.0f} | {c[6]:.0f} | {c[7]:.1f} | {c[8]:.0f} |")
+        for r in rs:
+            if r["variant"] in vs and not r["pass"]: print(f"\n- {r['variant']} {r['task']} {r['run']}: {r.get('why') or 'failed'}")
         for v in vs:
             if cut[v]: print(f"\n{v}: {cut[v]} run(s) cut short (the account's limit, an API error or no result line) are left out.")
     sys.exit(1 if bad else 0)

@@ -131,7 +131,7 @@ What it took, which the baseline agent meets too:
 ## What is measured
 
 As the IPC benchmark: context tokens (input, cache writes and cache reads over the turn's requests), output tokens,
-tool calls, wall seconds, the CLI's cost, pass. And per run the simulations, ngspice's seconds and the model lookups,
+tool calls, wall seconds, the CLI's cost, pass. And per run the web fetches (the CLI's fetch and search, the hub's browser, a shell command that asks a web server), the simulations, ngspice's seconds and the model lookups,
 from the hub's `<home>/logs/sim.jsonl` once the hub writes it; until then `simulations` counts the `RunSimulation`
 calls and the shell commands that ran ngspice. A run cut short by the account's limit or an API error is marked,
 left out of the table and counted under it.
