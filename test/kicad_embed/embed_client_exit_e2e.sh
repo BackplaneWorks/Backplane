@@ -10,7 +10,8 @@
 #   CX_EXIT=viewer    the viewer closed (its X: the pane goes), then the window closed
 #   CX_AT=pcb | sch | switch (just after the Schematic tab press, a warm switch in flight) | pending (just after the first, cold one)
 # CX_RUNS (10) runs on one hub and one KiCad (re-adopted by each new window); pending: a new hub each run (a cold schematic each time).
-# The unsaved edit: an agent's track (CreateItems, not saved) in that KiCad: the same KiCad alive is the edit kept (bp.13 sets no
+# The unsaved edit: an agent's track (CreateItems with save: false: the hub saves an agent's change when it lands since f6c2eac8e, and
+# a KiCad with nothing unsaved is closed by the hub 15 s after the last window goes, by design) in that KiCad: the same KiCad alive is the edit kept (bp.13 sets no
 # modified flag for an API commit: said, not judged).
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -61,9 +62,9 @@ for i in $(seq "$N"); do
   if [ "$EDITED" = 0 ]; then # the unsaved edit: an agent's track, not saved
     TRACK="{\"@type\":\"type.googleapis.com/kiapi.board.types.Track\",\"start\":{\"x_nm\":\"60000000\",\"y_nm\":\"60000000\"},\"end\":{\"x_nm\":\"70000000\",\"y_nm\":\"60000000\"},\"width\":{\"value_nm\":\"300000\"},\"layer\":\"BL_F_Cu\"}"
     DOC="{\"type\":\"DOCTYPE_PCB\",\"board_filename\":\"$(basename "$PCB")\"}"
-    ask "mcpcall:{\"name\":\"kicad_ipc\",\"arguments\":{\"path\":\"$PCB\",\"type\":\"kiapi.common.commands.CreateItems\",\"message\":{\"header\":{\"document\":$DOC},\"items\":[$TRACK]}}}" 1
+    ask "mcpcall:{\"name\":\"kicad_ipc\",\"arguments\":{\"path\":\"$PCB\",\"save\":false,\"type\":\"kiapi.common.commands.CreateItems\",\"message\":{\"header\":{\"document\":$DOC},\"items\":[$TRACK]}}}" 1
     LOCK=$(grep "^MCPCALL kicad_ipc" "$OUT/standin.log" | tail -1 | grep -o 'lock_acquire kicad-[A-Za-z0-9_-]*' | head -1 | cut -d' ' -f2)
-    [ -n "$LOCK" ] && ask "mcpseq:[{\"name\":\"lock_acquire\",\"arguments\":{\"name\":\"$LOCK\"}},{\"name\":\"kicad_ipc\",\"arguments\":{\"path\":\"$PCB\",\"type\":\"kiapi.common.commands.CreateItems\",\"message\":{\"header\":{\"document\":$DOC},\"items\":[$TRACK]}}}]" 2
+    [ -n "$LOCK" ] && ask "mcpseq:[{\"name\":\"lock_acquire\",\"arguments\":{\"name\":\"$LOCK\"}},{\"name\":\"kicad_ipc\",\"arguments\":{\"path\":\"$PCB\",\"save\":false,\"type\":\"kiapi.common.commands.CreateItems\",\"message\":{\"header\":{\"document\":$DOC},\"items\":[$TRACK]}}}]" 2
     EDITED=1; echo "INFO the unsaved edit: $(grep '^MCPCALL kicad_ipc' "$OUT/standin.log" | tail -1 | cut -c1-140)"
   fi
   wait_for_log "$OUT/c$i.log" '"name":"go","event":"mark"' 300
