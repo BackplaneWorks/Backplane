@@ -69,6 +69,10 @@ SUITES=(
   "embed_edit_early_e2e.sh:edit-early"
   # a start that misses its window is retried once by the hub; twice, the pane offers Try again (fork only)
   "embed_start_retry_e2e.sh:start-retry"
+  # the edit keys in the embedded PCB and schematic canvas, real X key events (lib/edit_keys_table.json, one definition with macOS and
+  # Windows): undo, redo, cut/copy/paste, Delete, BackSpace, select all, save, find, and per-actor undo; judged from KiCad's edit events
+  # and the files; every row gates (fork only)
+  "embed_edit_keys_e2e.sh:edit-keys"
 )
 
 FAILED=0
