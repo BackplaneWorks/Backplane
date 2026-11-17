@@ -247,6 +247,14 @@ pub fn mac_refusal(macos: bool, mode: &str, desc: &str) -> Option<String> {
     if mode == "fork" && !desc.is_empty() && proto::load(desc).has_own("kiapi.backplane.embed.SetHostGeometry") { return None }
     Some(if mode == "fork" { "this Backplane KiCad cannot be shown in the pane on macOS: Update KiCad in Settings, CAD (it needs embed-macos)" } else { "only Backplane KiCad can be shown in the pane on macOS" }.into())
 }
+/// `mac_refusal`'s words when this hub's pin would cure it: the update row above the pane offers it (info kicad.update), so the pane
+/// points there, not to Settings. `to`: the pin's version when it can be shown in the pane on macOS.
+pub fn mac_refusal_with(why: String, to: Option<&str>) -> String {
+    match to {
+        Some(v) => format!("This KiCad cannot be shown in the pane on macOS. Backplane KiCad {v} can: Update, above the pane, installs it and opens it here."),
+        None => why,
+    }
+}
 
 /// Whether a show of the session's `active` frame is the client's own map (bp.9+ local map, the frame realized), with nothing else asked
 /// (`plain`: no document, item or remount).
@@ -1570,7 +1578,8 @@ impl Actor {
         // fails at once, so the pane offers the KiCad app as it did before (native_child_mac.rs)
         // (not in the hub's tests: their stand-in runtimes exercise the attach logic every platform shares; mac_refusal has its own test)
         if let Some(why) = mac_refusal(cfg!(target_os = "macos") && !cfg!(test), mode, &desc) {
-            sess.state = "failed".into(); sess.reason = why;
+            let to = super::install::package().filter(|p| super::install::pane_can_show("macos", p.version) && (mode != "fork" || super::install::older(&env.version, p))).map(|p| p.version);
+            sess.state = "failed".into(); sess.reason = mac_refusal_with(why, to);
             let out = sess.info_json();
             self.sessions.insert(pro.clone(), sess.clone());
             self.publish_and_reply(&sess, Some(client), reply, Ok(out));
@@ -3201,6 +3210,14 @@ pub fn stand_in_route(pro: &str) -> (GuiRoute, mpsc::UnboundedReceiver<(String, 
 
 #[cfg(test)]
 mod tests {
+    #[test] fn the_macos_refusal_names_the_update_when_the_pin_cures_it() {
+        let why = mac_refusal(true, "fork", "").unwrap();
+        assert!(why.contains("Settings"), "no cure: as before");
+        let w = mac_refusal_with(why.clone(), Some("10.99.0-bp.13"));
+        assert!(w.contains("10.99.0-bp.13") && w.contains("Update, above the pane") && !w.contains("Settings"), "{w}");
+        assert_eq!(mac_refusal_with(why.clone(), None), why);
+    }
+
     /// A stand-in kicad-cli that, like KiCad, writes its settings: to $KICAD_CONFIG_HOME when set, else to `person` (the person's
     /// kicad_common.json); it logs the folder it was given and answers --version and api-server --describe.
     #[cfg(unix)] fn writing_cli(dir: &std::path::Path, person: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {

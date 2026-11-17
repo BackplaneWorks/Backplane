@@ -320,6 +320,7 @@ pub async fn publish_cad(hub: &Arc<Hub>) {
     // the update a person is offered where they work (the pane's strip at Edit, as well as Settings): this hub's package over an older
     // Backplane runtime, with what it brings and its size; "" when there is none (install.rs `update_offer`)
     let update = super::install::update_offer(super::install::package(), &status, &version, &env.caps).map_or(String::new(), |v| v.to_string());
+    eprintln!("kicad: runtime {} {} at {}; update offer: {}", status, if version.is_empty() { "-" } else { &version }, if env.cli.is_empty() { "-" } else { &env.cli }, if update.is_empty() { "none" } else { &update });
     for (k, v) in [("kicad.cli", env.cli.as_str()), ("kicad.version", version.as_str()), ("kicad.status", status.as_str()), ("kicad.source", source), ("kicad.caps", caps.as_str()), ("kicad.library", library.as_str()), ("kicad.update", update.as_str()), ("freecad", fc.as_str())] { hub.set_info(k, v).await; }
     // the libraries the selected runtime registers by default reach the person's existing tables (libtables.rs); a copy of the log changes nothing
     if !env.root.is_empty() && !crate::copy::on() {
