@@ -11,14 +11,15 @@ use std::{path::{Path, PathBuf}, process::Stdio, sync::{atomic::{AtomicBool, Ord
 
 #[derive(Debug, PartialEq)]
 pub struct Package { pub platform: &'static str, pub version: &'static str, pub release: &'static str, pub asset: &'static str, pub sha256: &'static str, pub format: &'static str, pub cli: &'static str, pub size: u64 }
-/// Linux: bp.12.4 (bp.12.1's DRC zone guard, `drc-zone-guard`; bp.12.2's plan view keys, `plan-keys`; opening a board changes nothing in it
-/// and an unchanged file saves nothing, `no-load-migration`, bp.12.3; an open Symbol Editor no longer refuses other documents' saves,
-/// bp.12.4, no capability). Windows: bp.10 until its fixes ship. Apple Silicon: bp.12.5, the bp.12.4 code with the macOS build, its
-/// launchers (bin/kicad, bin/pcbnew, bin/eeschema) and manifest minOs 15.0 (`os_floor`); bp.13 brings KiCad in the pane there. Each pin is
-/// its one line; the tests read them.
-pub const LINUX: Package = Package { platform: "linux-x86_64", version: "10.99.0-bp.12.4", release: "backplane-kicad-v10.99.0-bp.12.4", asset: "backplane-kicad-linux-x86_64-10.99.0-bp.12.4.tar.gz", sha256: "a94104cd524558d92a1df8016ece4a2c5b2cc436a6c14bb5bc71d72e048ee2dc", format: "tar.gz", cli: "bin/kicad-cli", size: 1019304818 };
-pub const MAC: Package = Package { platform: "darwin-arm64", version: "10.99.0-bp.12.5", release: "backplane-kicad-v10.99.0-bp.12.5", asset: "backplane-kicad-darwin-arm64-10.99.0-bp.12.5.tar.gz", sha256: "4229b3cdd8dd81a84fcc66669979903bdab7ed489865664b5874e8c8a2330538", format: "tar.gz", cli: "bin/kicad-cli", size: 433770440 };
-pub const WINDOWS: Package = Package { platform: "windows-x86_64", version: "10.99.0-bp.10", release: "backplane-kicad-v10.99.0-bp.10", asset: "backplane-kicad-windows-x86_64-10.99.0-bp.10.zip", sha256: "68b3796f1de3a8c0a39dd20ca96a43f3354de47facbe5de45d0bd4668c32599c", format: "zip", cli: "bin/kicad-cli.exe", size: 124816974 };
+/// bp.13.1 on every platform (bp.13 with its three known issues fixed; fork 0f96e1162f), bringing bp.13's: KiCad's standard symbol, footprint and template libraries and the Backplane library in every runtime
+/// (Windows and macOS for the first time), KiCad seeding a missing global table itself (`global-tables-seeded`) and defaulting
+/// ${BACKPLANE_KICAD_LIBRARY} to the runtime's own copy, the library pinned in the manifest (`backplaneLibrary`); before it, Linux had
+/// bp.12.4, Windows bp.10 and Apple Silicon bp.12.5 (manifest minOs 15.0, `os_floor`). Each pin is its one line; the tests read them.
+/// `scripts/kicad-pin.py <tag>` downloads the three assets, checks each against the release's SHA256SUMS and its manifest, and writes
+/// the digests here (until then the digests are placeholders that the catalog test and the script's own check refuse).
+pub const LINUX: Package = Package { platform: "linux-x86_64", version: "10.99.0-bp.13.1", release: "backplane-kicad-v10.99.0-bp.13.1", asset: "backplane-kicad-linux-x86_64-10.99.0-bp.13.1.tar.gz", sha256: "7c5b4c0bdfecd8d2546afc5d74e4f8e49fcc2f01c73fe36c7137071123995617", format: "tar.gz", cli: "bin/kicad-cli", size: 1022764572 };
+pub const MAC: Package = Package { platform: "darwin-arm64", version: "10.99.0-bp.13.1", release: "backplane-kicad-v10.99.0-bp.13.1", asset: "backplane-kicad-darwin-arm64-10.99.0-bp.13.1.tar.gz", sha256: "c0aaaacee01645ba7c3d7ff48fdf9508fe522cec876336d20752f86cdb1d9945", format: "tar.gz", cli: "bin/kicad-cli", size: 1113357824 };
+pub const WINDOWS: Package = Package { platform: "windows-x86_64", version: "10.99.0-bp.13.1", release: "backplane-kicad-v10.99.0-bp.13.1", asset: "backplane-kicad-windows-x86_64-10.99.0-bp.13.1.zip", sha256: "0ef5a7062ff30ae711d69a4f7f7ca3dd398b79a9bf51ed4a7f3824395a136901", format: "zip", cli: "bin/kicad-cli.exe", size: 864871011 };
 /// A package's download in words: "about 1.1 GB", "about 980 MB"; "about 1 GB" while its size is not known (a placeholder pin).
 pub fn size_words(p: &Package) -> String {
     let mb = p.size >> 20;
@@ -816,6 +817,12 @@ mod tests {
         for v in ["10.99.0-bp.10", "10.99.0-bp.11", "10.99.0-bp.12"] { assert_eq!(decide(Some(&hot), "ok", v, ""), Action::Offer, "{v}"); assert_eq!(refusal("/k/bin/kicad-cli", "ok", v, true, false, Some(&hot)), None, "{v}"); }
         for v in ["10.99.0-bp.12.1", "10.99.0-bp.13"] { assert_eq!(decide(Some(&hot), "ok", v, ""), Action::Nothing, "{v}"); }
         assert_eq!(decide(Some(&WINDOWS), "ok", WINDOWS.version, ""), Action::Nothing);
+        // bp.13: each platform's runtime before it is offered the update, and the reason says what bp.13 brings
+        for (p, was) in [(&LINUX, "10.99.0-bp.12.4"), (&WINDOWS, "10.99.0-bp.10"), (&MAC, "10.99.0-bp.12.5")] {
+            assert_eq!(decide(Some(p), "ok", was, ""), Action::Offer, "{} {was}", p.platform);
+            let o = update_offer(Some(p), "ok", was, &["embed".to_string(), "drc-zone-guard".to_string()]).expect("offered");
+            assert!(o["reason"].as_str().unwrap().contains("narrow pane"), "{} {o}", p.platform);
+        }
         assert_eq!(refusal("/k/bin/kicad-cli", "ok", "10.99.0-bp.4", true, false, Some(&LINUX)), None);
     }
 
