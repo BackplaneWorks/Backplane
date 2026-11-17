@@ -7,7 +7,33 @@ use crate::files::kicad::ipc::Env;
 use std::path::{Path, PathBuf};
 
 /// The programs given a shim when the selected install has them beside its `kicad-cli`.
-pub const PROGRAMS: &[&str] = &["kicad-cli", "pcbnew", "eeschema", "kicad"];
+pub const PROGRAMS: &[&str] = &["kicad-cli"];
+/// KiCad's GUI programs: each gets a shim that refuses (an agent must never put a KiCad window on the person's desktop: a second,
+/// non-embedded KiCad showed its first-run "KiCad Setup" wizard over Backplane on bp-win, Nov 17). Ahead of any KiCad on the agent's PATH.
+pub const GUI_PROGRAMS: &[&str] = &["kicad", "pcbnew", "eeschema", "gerbview", "pl_editor", "bitmap2component", "pcb_calculator"];
+/// What a GUI shim says, and its exit code (1).
+pub const GUI_REFUSAL: &str = "Backplane: agents do not open KiCad windows. Show a design with viewer_show, edit it with kicad_edit or kicad_ipc (the KiCad inside Backplane), or use kicad-cli.";
+/// The file a refusing shim appends its caller to (parent pid, image, command line); the hub moves it into its log (drain_refusals).
+pub const REFUSALS: &str = "refused.log";
+/// A GUI program's shim: its caller written to `log`, the one line, exit 1, nothing started.
+pub fn gui_shim_text(program: &str, log: &Path) -> String {
+    let l = log.to_string_lossy();
+    if cfg!(windows) {
+        format!("@echo off\r\nrem Backplane: {program} is not for agents\r\npowershell -NoProfile -NonInteractive -Command \"$s=Get-CimInstance Win32_Process -Filter ('ProcessId='+$PID); $c=Get-CimInstance Win32_Process -Filter ('ProcessId='+$s.ParentProcessId); $p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$c.ParentProcessId); Add-Content -LiteralPath '{l}' -Value ('caller '+$p.ProcessId+' '+$p.Name+': '+$p.CommandLine+' :: {program} '+$c.CommandLine)\" >nul 2>&1\r\necho {GUI_REFUSAL} 1>&2\r\nexit /b 1\r\n")
+    } else {
+        let l = l.replace('\'', "'\\''");
+        format!("#!/bin/sh\n# Backplane: {program} is not for agents\n{{ printf 'caller %s: ' \"$PPID\"; tr '\\0' ' ' < /proc/$PPID/cmdline 2>/dev/null || ps -o command= -p $PPID 2>/dev/null; printf ' :: {program} %s\\n' \"$*\"; }} >> '{l}' 2>/dev/null\necho \"{GUI_REFUSAL}\" >&2\nexit 1\n")
+    }
+}
+/// The refusals the shims in `dir` wrote since the last look, each a line in the hub's log (then the file is emptied).
+pub fn drain_refusals(dir: &Path) -> Vec<String> {
+    let f = dir.join(REFUSALS);
+    let Ok(t) = std::fs::read_to_string(&f) else { return vec![] };
+    let _ = std::fs::remove_file(&f);
+    let v: Vec<String> = t.lines().filter(|l| !l.trim().is_empty()).map(|l| l.chars().take(600).collect()).collect();
+    for l in &v { eprintln!("agents: a KiCad GUI shim refused to open a KiCad window: {l}"); }
+    v
+}
 /// The agent's environment key that names the shims' folder; `proc::spawn_with` puts it first on PATH (and leaves the key itself out).
 pub const SHIMS_KEY: &str = "BACKPLANE_KICAD_SHIMS";
 
@@ -54,11 +80,11 @@ pub fn write_shims(dir: &Path, cli: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let bin = cli.parent().unwrap_or(Path::new(""));
     let ext = cli.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
-    for p in PROGRAMS {
-        let target = if *p == "kicad-cli" { cli.to_path_buf() } else { bin.join(format!("{p}{ext}")) };
+    let _ = (bin, &ext);
+    let wants = PROGRAMS.iter().map(|p| (*p, Some(cli.to_path_buf()))).chain(GUI_PROGRAMS.iter().map(|p| (*p, None)));
+    for (p, target) in wants {
         let at = dir.join(shim_name(p));
-        if !target.is_file() { let _ = std::fs::remove_file(&at); continue }
-        let text = shim_text(&target);
+        let text = match &target { Some(t) if !t.is_file() => { let _ = std::fs::remove_file(&at); continue } Some(t) => shim_text(t), None => gui_shim_text(p, &dir.join(REFUSALS)) };
         if std::fs::read_to_string(&at).map_or(false, |t| t == text) { continue }
         let tmp = dir.join(format!(".{}.{}", shim_name(p), std::process::id()));
         std::fs::write(&tmp, &text)?;
@@ -74,8 +100,9 @@ pub fn shims_dir(home: &Path) -> PathBuf { home.join("shims") }
 /// A turn's KiCad from the hub's selected runtime `env`: the prompt's facts and, when a KiCad is there, the shims written and the env to run with.
 /// A shim that cannot be written leaves the env with BACKPLANE_KICAD_CLI only (the prompt still names the full path).
 pub fn select(env: &Env, shims: &Path, version_of: impl FnOnce(&str) -> Option<String>) -> Selected {
+    drain_refusals(shims);
     let kicad = kicad_of(env, version_of);
-    if env.cli.is_empty() { let _ = PROGRAMS.iter().try_for_each(|p| std::fs::remove_file(shims.join(shim_name(p))).or_else(|_| Ok::<_, ()>(()))); return Selected { kicad, env: vec![] } }
+    if env.cli.is_empty() { let _ = PROGRAMS.iter().chain(GUI_PROGRAMS).try_for_each(|p| std::fs::remove_file(shims.join(shim_name(p))).or_else(|_| Ok::<_, ()>(()))); return Selected { kicad, env: vec![] } }
     let mut e = vec![("BACKPLANE_KICAD_CLI".to_string(), env.cli.clone())];
     match write_shims(shims, Path::new(&env.cli)) { Ok(()) => e.push((SHIMS_KEY.into(), shims.to_string_lossy().into_owned())), Err(x) => eprintln!("agents: the KiCad shims in {} could not be written: {x}", shims.display()) }
     Selected { kicad, env: e }
@@ -125,7 +152,8 @@ mod tests {
         let words = super::super::prompt::kicad(&s.kicad, true);
         assert!(words.contains(&format!("`{}`", want.display())) && words.contains("Backplane KiCad 10.99.0-bp.9") && !words.contains(".backplane-bend") && !words.contains("10.99.0-bp.4") && !words.contains("10.0.7"), "{words}");
         assert!(words.contains("BACKPLANE_KICAD_CLI") && words.contains("`kicad-cli` on your PATH"), "{words}");
-        assert!(shims.join("pcbnew").is_file() && !shims.join("eeschema").exists(), "a shim for each program the install has");
+        assert!(shims.join("kicad-cli").is_file(), "kicad-cli's shim runs the selected install");
+        assert!(GUI_PROGRAMS.iter().all(|p| std::fs::read_to_string(shims.join(p)).is_ok_and(|t| t.contains("not for agents"))), "every GUI program's shim refuses");
 
         // the agent's own process: its environment names bp.9, and plain `kicad-cli` runs it
         let script = "echo \"cli=$BACKPLANE_KICAD_CLI\"; echo \"shims=${BACKPLANE_KICAD_SHIMS-unset}\"; kicad-cli --version";
@@ -155,6 +183,32 @@ mod tests {
         let j = job_env(&e, Some("/usr/bin:/bin".into()));
         assert_eq!(j, vec![("BACKPLANE_KICAD_CLI".to_string(), "/k/bin/kicad-cli".into()), ("PATH".to_string(), "/h/shims:/usr/bin:/bin".into())]);
         assert!(job_env(&[], Some("/usr/bin".into())).is_empty(), "no KiCad selected: the job's PATH is left alone");
+    }
+    /// Every GUI program's shim refuses with the one line and exit 1, on every platform: an agent never opens a KiCad window
+    #[cfg(unix)]
+    #[test] fn every_kicad_gui_shim_refuses_and_starts_nothing() {
+        let d = crate::plat::tmp::dir("gui-shims"); let bin = d.join("bin"); std::fs::create_dir_all(&bin).unwrap();
+        let cli = bin.join("kicad-cli"); std::fs::write(&cli, "#!/bin/sh\necho cli\n").unwrap();
+        { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+        // a real GUI program beside it, which must never run
+        let marker = d.join("ran"); let gui = bin.join("pcbnew"); std::fs::write(&gui, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+        { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&gui, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+        let shims = d.join("shims"); write_shims(&shims, &cli).unwrap();
+        for p in GUI_PROGRAMS {
+            let o = crate::proc::std_cmd(crate::proc::Kind::Local, shims.join(p)).arg("/x/a.kicad_pro").output().unwrap();
+            assert_eq!(o.status.code(), Some(1), "{p} refuses");
+            assert!(String::from_utf8_lossy(&o.stderr).contains("agents do not open KiCad windows"), "{p}: {:?}", o.stderr);
+        }
+        assert!(!marker.exists(), "no GUI program ran");
+        let named = drain_refusals(&shims);
+        assert_eq!(named.len(), GUI_PROGRAMS.len(), "each refusal names its caller: {named:?}");
+        assert!(named.iter().all(|l| l.starts_with("caller ") && l.contains("/x/a.kicad_pro")), "{named:?}");
+        assert!(drain_refusals(&shims).is_empty(), "moved into the hub's log once");
+        let o = crate::proc::std_cmd(crate::proc::Kind::Local, shims.join("kicad-cli")).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "cli", "kicad-cli stays");
+    }
+    #[test] fn a_gui_shim_names_the_tools_to_use_instead() {
+        for p in GUI_PROGRAMS { let t = gui_shim_text(p, Path::new("/h/shims/refused.log")); assert!(t.contains("viewer_show") && t.contains("kicad_edit") && t.contains("kicad_ipc"), "{p}"); assert!(t.contains("exit")); }
     }
     #[test] fn a_shim_quotes_its_path() { if cfg!(unix) { assert_eq!(shim_text(Path::new("/a b/it's/kicad-cli")).lines().last().unwrap(), r#"exec '/a b/it'\''s/kicad-cli' "$@""#) } }
 }
