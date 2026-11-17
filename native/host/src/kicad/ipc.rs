@@ -440,7 +440,8 @@ pub fn pro_of(path: &str) -> String {
 pub fn patient_of(type_: &str) -> bool { is_read(type_) || (type_.starts_with("kiapi.backplane.plan.") && !type_.ends_with(".ApprovePlan")) }
 pub fn is_read(type_: &str) -> bool {
     let name = type_.rsplit('.').next().unwrap_or(type_);
-    name.starts_with("Get") || name == "Ping"
+    // (a simulation run reads the open schematic and changes nothing: kicad/ksim.rs)
+    name.starts_with("Get") || name == "Ping" || name == "RunSimulation" || name == "StopSimulation"
 }
 /// KIpc.err: KiCad's own error, with its status.
 fn err_of(o: &Value) -> String {
