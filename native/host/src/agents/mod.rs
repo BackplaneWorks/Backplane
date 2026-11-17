@@ -1189,11 +1189,16 @@ impl Actor {
         let url = self.ag.mcp.get().map(|m| m.url(&th, &gen)).unwrap_or_default();
         let mcp = crate::mcpx::svc::launch(&th, "claude", &url).await;
         let mut args = rules::claude_args(&rules::ArgsIn { model: &t.model, session: &session, runtime: &t.runtime, interaction: &t.interaction, prompt: &prompt, dirs: &dirs, effort: &effort, think, plugins: &plugins, mcp_url: &url, mcp_json: &mcp.claude, disallowed: &mcp.disallowed });
-        #[cfg(windows)] { let name: String = th.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect(); rules::prompt_to_file(&mut args, &self.ag.host.home.join("prompts").join(format!("{name}.md"))).map_err(|e| e.to_string())?; }
+        let mut keep = vec![]; // Windows: the files Claude reads at its start, removed when it ends
+        if cfg!(windows) {
+            let name: String = th.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
+            rules::prompt_to_file(&mut args, &self.ag.host.home.join("prompts").join(format!("{name}.md"))).map_err(|e| e.to_string())?;
+            keep.extend(rules::mcp_to_file(&mut args, &self.ag.host.home.join("secrets").join("run"), &format!("{name}-{gen}.mcp.json")).map_err(|e| format!("could not write the MCP config for Claude: {e}"))?);
+        }
         if !acct_args.is_empty() { acct_args.extend(args); args = acct_args }
         if self.person { args.extend(person::CLAUDE_STRICT.iter().map(|x| x.to_string())) } // only this hub's MCP config; the person's user-level hooks, MCP servers and rules do not load
         self.ag.set_gen(&th, &gen);
-        let p = if self.person { proc::spawn_person(&self.person_child()?, &prog, &args, std::path::Path::new(cwd), &[]) } else { proc::spawn(&prog, &args, std::path::Path::new(cwd), self.ag.cli.dir(), &[acct_env.clone(), self.ag.kicad_env.lock().unwrap().clone()].concat()) }.map_err(|e| e.to_string())?;
+        let p = if self.person { proc::spawn_person_holding(&self.person_child()?, &prog, &args, std::path::Path::new(cwd), &[], keep) } else { proc::spawn_holding(&prog, &args, std::path::Path::new(cwd), self.ag.cli.dir(), &[acct_env.clone(), self.ag.kicad_env.lock().unwrap().clone()].concat(), keep) }.map_err(|e| e.to_string())?;
         self.ag.memory_watch(&th, p.pid);
         self.cmds = cmds::Cmds::new(); self.wait.clear(); self.resumed = if self.person { String::new() } else { session.clone() }; self.spawn_n += 1;
         self.ag.stats.procs_spawned.fetch_add(1, Relaxed);
