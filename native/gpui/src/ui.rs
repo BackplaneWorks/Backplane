@@ -734,8 +734,21 @@ impl Render for Backplane {
         let keycap = move |k: &str, lit: bool| (keycaps && !k.is_empty()).then(|| crate::screens::hints::cap(light, &k.to_uppercase(), lit).absolute().top(px(3.)).right(px(3.)));
         crate::screens::viewer::follow(&self.tx, thread);
         let active_kind = if thread["diff"].is_object() { String::new() } else { crate::screens::viewer::active_kind(&thread["viewer"], self.screens.rail_pending.as_deref()) };
-        /* i18n-ok: ctl labels and ids; drawn through trs and keys::tip */ for (l, i) in [("Terminal", "terminal"), ("Commands", "search"), ("", ""), ("Board", "circuit-board"), ("Schematic", "cpu"), ("3D", "box"), ("Gerbers", "file-stack"), ("Split", "layout-panel-left"), ("Mech", "layers"), ("", ""), ("Files", "folder"), ("Diff", "diff"), ("Review", "circle-check"), ("Browser", "globe")].iter() {
+        // the rail's Simulation entry (the hub's word, in a window that can hold KiCad), lit while the pane is on KiCad's Simulator: the page under it is then not
+        let sim_rail = crate::viewers::kicad_pane::rail_simulation(&thread["viewer"], crate::viewers::kicad_pane::local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), thread)).is_some();
+        let sim_on = sim_rail && !thread["diff"].is_object() && self.simulation_on(cx) && self.kicad_for(thread, cx).is_some();
+        let active_kind = if sim_on { String::new() } else { active_kind };
+        /* i18n-ok: ctl labels and ids; drawn through trs and keys::tip */ for (l, i) in [("Terminal", "terminal"), ("Commands", "search"), ("", ""), ("Board", "circuit-board"), ("Schematic", "cpu"), ("3D", "box"), ("Simulation", "gauge"), ("Gerbers", "file-stack"), ("Split", "layout-panel-left"), ("Mech", "layers"), ("", ""), ("Files", "folder"), ("Diff", "diff"), ("Review", "circle-check"), ("Browser", "globe")].iter() {
             if l.is_empty() { rail.push(div().h(px(12.)).into_any_element()); continue; }
+            // Simulation (KiCad's Simulator in the pane): only where the hub says its KiCad has it for this project (viewer.simFrame)
+            /* i18n-ok: compared */ if *l == "Simulation" {
+                if sim_rail {
+                    ctl.push(CtlEntry { id: "rail:Simulation".into(), label: l.to_string(), ctl: Ctl::KicadAct("simulation".into()) });
+                    rail.push(with_rect(div().id("rail-Simulation"), || "rail:Simulation".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.open_simulation(cx))).tooltip(crate::keys::tip(l, "", light))
+                        .relative().flex().flex_col().items_center().h(crate::scale::tpx(48.)).justify_center().gap_1().text_size(rail_label()).when(sim_on, |d| d.bg(c("raise")).border_l_2().border_color(c("accent"))).text_color(c(if sim_on { "text" } else { "dim" })).hover(|s| s.bg(c("raise")).text_color(c("text"))).child(ic(light, i, 18., if sim_on { "accent" } else { "dim" })).child(trs(l)).into_any_element());
+                }
+                continue;
+            }
             // the viewer's kinds are the hub's view-kind values; Diff is its own action
             /* i18n-ok: compared */ let act: Option<(&'static str, &'static str)> = match *l { "Board" => Some(("view-kind", "board")), "Schematic" => Some(("view-kind", "schematic")), "3D" => Some(("view-kind", "3d")), "Gerbers" => Some(("view-kind", "gerbers")), "Split" => Some(("view-kind", "split")), "Mech" => Some(("view-kind", "mech")), "Files" => Some(("view-kind", "files")), "Review" => Some(("view-kind", "review")), "Browser" => Some(("view-kind", "browser")), "Diff" => Some(("diff", "")), _ => None };
             match act {

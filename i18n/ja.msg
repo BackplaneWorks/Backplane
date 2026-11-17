@@ -4571,3 +4571,4 @@ gpui.f2.uber.p.lilac = ライラック
 gpui.f2.uber.p.rose = ローズ
 gpui.f2.uber.p.mint = ミント
 gpui.f2.uber.p.cherry = チェリー
+gpui.simulation = シミュレーション

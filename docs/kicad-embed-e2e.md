@@ -111,6 +111,7 @@ test/kicad_embed/
   embed_editors_e2e.sh                         # Suite 2 (15 checks): Schematic, Symbol, PCB + copper zones, Footprint, DRC, 3D orbit, Plot + Gerber/Drill/STEP
   embed_agent_resilience_e2e.sh                # Suite 3 (9 checks in stock|fork; 8 in spike): live agent IPC + GAL diff + Ctrl+Z, SIGSTOP grab_escape, close(ask), GPUI SIGKILL save-set hot-swap, KiCad SIGKILL + restart + close
   embed_xprobe_e2e.sh                           # Suite 4 (6 checks on bp.8, 7 on bp.9): chat link -> KiCad selection (GetSelection) + zoom, editor.kicad.select, KiCad selection -> viewer (bp.9), chat link -> viewer zoom
+  embed_sim_e2e.sh                              # KiCad's Simulator as the Simulation tab (bp.13.2 sim-frame; skips itself without it): rail entry, child of the pane at its rectangle, keys and Ctrl+K, Schematic and back with the same window, Ctrl+W to View and open again; SIM_OLD=1: an older runtime (bp.12.1) has no entry, no tab
   run_all.sh                                   # sequential RAM-light runner (strictly one KiCad process at a time)
 ```
 

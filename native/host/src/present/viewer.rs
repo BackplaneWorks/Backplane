@@ -622,6 +622,17 @@ pub fn files_action(st: &State, hub: &str, session: &Value, action: &str, value:
 /// `thread.viewer`: the idle template with the page the thread's viewer has open. None for a page not ported.
 pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Value> {
     let sel = s(session, "sel");
+    // the rail's Simulation entry (desktop: KiCad's Simulator in the pane), whatever page is on show: the frame it opens, where this
+    // hub's KiCad embeds it and the thread's project has a schematic (kicad/embed.rs rail_simulation); absent otherwise, and for
+    // another machine's thread (nothing to embed here)
+    let mut v = viewer_page(st, template, session)?;
+    if !sel.is_empty() && !sel.contains('~') {
+        if let Some(f) = crate::files::kicad::embed::rail_simulation(&root_of(st, sel)) { if let Some(o) = v.as_object_mut() { o.insert("simFrame".into(), json!(f)); } }
+    }
+    Some(v)
+}
+fn viewer_page(st: &State, template: &Value, session: &Value) -> Option<Value> {
+    let sel = s(session, "sel");
     let kind = s(&session["drafts"], &format!("@view:{sel}"));
     // a panel the helper opened (Diff, Files, Mech, Review: view.kind/view.path in the info, panel on) is the helper's page, not an idle viewer
     let info = &session["info"];

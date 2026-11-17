@@ -200,7 +200,7 @@ impl Session {
     }
     /// What is not on disk: what KiCad says is modified, and what the hub knows an agent changed and nobody has saved since.
     pub fn unsaved_docs(&self) -> Vec<String> {
-        let mut v: Vec<String> = self.frames.iter().filter(|f| f.modified).map(|f| if !f.doc.is_empty() { f.doc.clone() } else { f.title.clone() }).collect();
+        let mut v: Vec<String> = self.frames.iter().filter(|f| f.modified).map(unsaved_name).collect();
         for d in agent_unsaved(&self.pro) { let name = Path::new(&d).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(d); if !v.iter().any(|x| x.ends_with(&name)) { v.push(name) } }
         v
     }
@@ -232,7 +232,7 @@ impl Session {
             "task_wait": self.task_wait,
             "start_phase": self.start_phase, "start_at": self.start_at, "lock_ask": self.lock_ask,
             // what the embedded editor can do beyond the basics (embed-gerbview, embed-editor-requested, ...): the client gates on these
-            "embed_caps": self.caps.iter().filter(|c| c.starts_with("embed-") || c.starts_with("prewarm-")).collect::<Vec<_>>(),
+            "embed_caps": self.caps.iter().filter(|c| c.starts_with("embed-") || c.starts_with("prewarm-") || *c == SIM_FRAME).collect::<Vec<_>>(),
             // bp.9: the client may map and unmap a frame KiCad has shown once (its tab switches need no round trip)
             // not on macOS: KiCad's frames are its own windows there, shown and hidden through the hub (native_child_mac.rs)
             "local_map": !cfg!(target_os = "macos") && self.mode == "fork" && !self.desc.is_empty() && proto::load(&self.desc).has_field("kiapi.backplane.embed.ShowFrame", "prewarm"),
@@ -391,6 +391,8 @@ pub fn canon_frame(raw: &str) -> &'static str {
         "FOOTPRINT_EDITOR" | "FK_FOOTPRINT_EDITOR" | "FP" => "FOOTPRINT_EDITOR",
         // bp.13: GerbView runs in KiCad's process and embeds like the editors
         "GERBVIEW" | "FK_GERBVIEW" => "GERBVIEW",
+        // bp.13.2: KiCad's Simulator (capability sim-frame), a frame like the editors with no document of its own
+        "SIMULATOR" | "FK_SIMULATOR" | "SIMULATION" | "SIM" => "SIMULATOR",
         _ => "OTHER",
     }
 }
@@ -407,6 +409,50 @@ pub fn default_frame_for_path(path: &str, requested: &str) -> &'static str {
 /// it is paid only when the person asks for 3D.
 pub fn prewarm_kinds(active: &str, have: &[String]) -> Vec<&'static str> {
     ["SCH", "PCB"].into_iter().filter(|k| *k != canon_frame(active) && !have.iter().any(|h| h == k)).collect()
+}
+
+/// The runtime capability of the embedded Simulator frame (bp.13.2), in the headless manifest and the editor's GetCapabilities alike.
+pub const SIM_FRAME: &str = "sim-frame";
+/// The editor a rail item opens in the pane's KiCad, or None when this runtime (its capabilities) has none for it: Board, Schematic
+/// and 3D always; Simulation only where KiCad embeds its Simulator (`sim-frame`), so an older runtime has no entry and no error.
+pub fn rail_frame(item: &str, caps: &[String]) -> Option<&'static str> {
+    match item.trim().to_ascii_lowercase().as_str() {
+        "board" => Some("PCB"),
+        "schematic" => Some("SCH"),
+        "3d" => Some("PCB_3D"),
+        "simulation" => caps.iter().any(|c| c == SIM_FRAME).then_some("SIMULATOR"),
+        _ => None,
+    }
+}
+/// Why `kind` cannot be shown by a session with these capabilities, or None: the Simulator needs `sim-frame`.
+pub fn frame_refused(kind: &str, caps: &[String]) -> Option<&'static str> {
+    (canon_frame(kind) == "SIMULATOR" && !caps.iter().any(|c| c == SIM_FRAME)).then_some("this KiCad has no simulation; needs Backplane KiCad bp.13.2")
+}
+/// What an unsaved frame is called in the close question: its document, else its title; the Simulator has no document (its `modified`
+/// is its workbook's), so it is named when KiCad gave no title.
+pub fn unsaved_name(f: &Frame) -> String {
+    if !f.doc.is_empty() { f.doc.clone() } else if !f.title.trim().is_empty() { f.title.clone() } else if f.kind == "SIMULATOR" { "Simulation workbook".into() } else { f.title.clone() }
+}
+/// The selected runtime's capabilities as last read (each attach, warm and restart reads its manifest): what the presenter gates the
+/// rail's Simulation entry on. True when they changed (the views are drawn again).
+pub fn note_runtime(env: &Env) -> bool {
+    let mut c = runtime_caps_cell().lock().unwrap();
+    if *c == env.caps { return false }
+    *c = env.caps.clone(); true
+}
+fn runtime_caps_cell() -> &'static std::sync::Mutex<Vec<String>> { static C: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> = std::sync::OnceLock::new(); C.get_or_init(Default::default) }
+/// The rail's Simulation entry for a project folder: the frame it opens ("SIMULATOR"), when the runtime embeds the Simulator and the
+/// project has a schematic; None otherwise (no entry).
+pub fn rail_simulation(root: &str) -> Option<&'static str> {
+    let frame = rail_frame("simulation", &runtime_caps_cell().lock().unwrap())?;
+    // (asked at every picture: the folder is read at most every 5 s)
+    static SEEN: std::sync::OnceLock<std::sync::Mutex<HashMap<String, (std::time::Instant, bool)>>> = std::sync::OnceLock::new();
+    let mut seen = SEEN.get_or_init(Default::default).lock().unwrap();
+    let has = match seen.get(root) {
+        Some((at, has)) if at.elapsed() < Duration::from_secs(5) => *has,
+        _ => { let has = resolve_project(root, "").is_ok_and(|r| !r.files.sch.is_empty() && Path::new(&r.files.sch).is_file()); seen.insert(root.to_string(), (std::time::Instant::now(), has)); has }
+    };
+    has.then_some(frame)
 }
 
 /// The embedded editor's capabilities from its GetCapabilities answer: the names it says, and for a build that says only its commands
@@ -467,6 +513,7 @@ pub fn fk_of(kind: &str) -> &'static str {
         "FOOTPRINT_EDITOR" => "FK_FOOTPRINT_EDITOR",
         "PCB_3D" => "FK_PCB_3D",
         "GERBVIEW" => "FK_GERBVIEW",
+        "SIMULATOR" => "FK_SIMULATOR",
         _ => "FK_OTHER",
     }
 }
@@ -481,6 +528,7 @@ pub fn kind_of_fk_val(v: &Value) -> &'static str {
         4 => "FOOTPRINT_EDITOR",
         5 => "PCB_3D",
         7 => "GERBVIEW",
+        8 => "SIMULATOR",
         _ => "OTHER",
     }
 }
@@ -1737,6 +1785,7 @@ impl Actor {
         let Some(s) = self.sessions.get_mut(&pro) else {
             let _ = reply.send(Err("no embedded KiCad session for this project; attach first".into())); return;
         };
+        if let Some(why) = frame_refused(&frame, &s.caps) { let _ = reply.send(Err(why.into())); return; }
         if s.state == "starting" {
             s.active = canon_frame(&frame).into();
             s.touched_at = ipc::now_s();
@@ -1872,7 +1921,7 @@ impl Actor {
                         let gf = raw_on(&me, &s.sock, &s.desc, "kiapi.backplane.embed.GetFrames", json!({}), 5000).await;
                         if gf["ok"].as_bool().unwrap_or(false) {
                             let (_, _, frames) = parse_get_frames(&gf["message"]);
-                            unsaved = frames.iter().filter(|f| f.modified).map(|f| if !f.doc.is_empty() { f.doc.clone() } else { f.title.clone() }).collect();
+                            unsaved = frames.iter().filter(|f| f.modified).map(unsaved_name).collect();
                         }
                     }
                     let _ = reply.send(Ok(json!({"closed":false,"error":err,"unsaved":unsaved})));
@@ -3366,6 +3415,7 @@ impl RpcHandler for EmbedRpc {
                     let display = p["display"].as_str().unwrap_or("").to_string();
                     let wait = p["wait"].as_bool().unwrap_or(true);
                     let env = ipc::runtime(hub).await;
+                    if note_runtime(&env) { hub.bump_views(); }
                     actor_tx.send(Msg::Attach {
                         client, pro: resolved.pro, root: resolved.root, files: resolved.files,
                         frame: resolved.frame, container, toplevel, display, wait, env, reply: tx,
@@ -3381,12 +3431,15 @@ impl RpcHandler for EmbedRpc {
                     })
                 }
                 "editor.kicad.warm" => {
+                    // (asked for every shown thread of a project here, warm or not: the runtime's capabilities are known from then,
+                    // and the rail has its Simulation entry before KiCad is started)
+                    let env = ipc::runtime(hub).await;
+                    if note_runtime(&env) { hub.bump_views(); }
                     // BACKPLANE_KICAD_WARM=0: never (the perf e2e measures a true cold Edit with it)
                     if std::env::var("BACKPLANE_KICAD_WARM").is_ok_and(|v| v == "0") { return ok_reply(id, json!({"warm": false, "why": "off"})) }
                     let hardware = super::canonical::hardware(&resolved.root);
                     let locked = project_locked(&resolved.files);
                     let display = p["display"].as_str().unwrap_or("").to_string();
-                    let env = ipc::runtime(hub).await;
                     actor_tx.send(Msg::Warm {
                         client, pro: resolved.pro, root: resolved.root, files: resolved.files, frame: resolved.frame, display, hardware, locked, env, reply: tx,
                     })
@@ -3642,6 +3695,43 @@ mod tests {
         assert_eq!(asking.ping_result(false).ping_result(false).ping_result(false).state, "ready", "a dialog open: missed pings are not a hang");
     }
 
+    #[test] fn the_rails_simulation_entry_needs_sim_frame() {
+        let (old, new): (Vec<String>, Vec<String>) = (vec!["api-server".into(), "embed".into()], vec!["api-server".into(), "sim-run".into(), "sim-frame".into()]);
+        assert_eq!(rail_frame("board", &old), Some("PCB")); assert_eq!(rail_frame("schematic", &old), Some("SCH")); assert_eq!(rail_frame("3d", &old), Some("PCB_3D"));
+        assert_eq!(rail_frame("simulation", &old), None, "bp.13.1 and older: no entry");
+        assert_eq!(rail_frame("simulation", &new), Some("SIMULATOR")); assert_eq!(rail_frame("Simulation", &new), Some("SIMULATOR"));
+        assert_eq!(rail_frame("simulation", &["sim-run".to_string()]), None, "the headless commands alone embed nothing");
+        assert_eq!(rail_frame("mech", &new), None);
+        // a show of it on a session without the capability is refused in words, and never reaches KiCad
+        assert!(frame_refused("SIMULATOR", &old).is_some_and(|w| w.contains("bp.13.2"))); assert_eq!(frame_refused("FK_SIMULATOR", &new), None); assert_eq!(frame_refused("SCH", &old), None);
+        // the session says it to the client beside its embed-* capabilities
+        let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0); s.caps = new.clone();
+        assert_eq!(s.info_json()["embed_caps"], json!(["sim-frame"]));
+        // the selected runtime's capabilities, as the presenter reads them: a change is said once
+        let env = |caps: &[String]| Env { cli: "/k/bin/kicad-cli".into(), caps: caps.to_vec(), ..Default::default() };
+        note_runtime(&env(&old)); assert!(!note_runtime(&env(&old))); assert_eq!(rail_simulation("/nowhere/at/all"), None);
+        assert!(note_runtime(&env(&new))); assert!(!note_runtime(&env(&new)));
+        let t = crate::plat::tmp::dir("rail-sim"); let d = t.to_string_lossy().to_string();
+        std::fs::write(t.join("a.kicad_pro"), "{}").unwrap(); std::fs::write(t.join("a.kicad_pcb"), "(kicad_pcb)").unwrap();
+        assert_eq!(rail_simulation(&d), None, "a project with no schematic has nothing to simulate");
+        let t2 = crate::plat::tmp::dir("rail-sim-sch"); let d2 = t2.to_string_lossy().to_string();
+        std::fs::write(t2.join("a.kicad_pro"), "{}").unwrap(); std::fs::write(t2.join("a.kicad_sch"), "(kicad_sch)").unwrap();
+        assert_eq!(rail_simulation(&d2), Some("SIMULATOR"));
+        assert!(note_runtime(&env(&old))); assert_eq!(rail_simulation(&d2), None, "an older runtime selected: the entry goes");
+    }
+    #[test] fn an_agents_show_of_the_simulator_does_not_move_the_pane() {
+        // RunSimulation{show} on a hidden Simulator posts ET_SHOW_REQUESTED with the API client that caused it: not followed (the pane
+        // stays on what the person is looking at); the frame is in GetFrames, so the strip lists its tab
+        assert_eq!(show_not_followed(true, "agent:t1", false, true, false), Some("an API client's"));
+        assert_eq!(show_not_followed(true, "hub:sim", false, true, false), Some("an API client's"));
+        // the person's own (Inspect > Simulator in the schematic editor: no actor) is followed
+        assert_eq!(show_not_followed(true, "", false, true, false), None);
+        // its unsaved workbook in the close question: the frame has no document
+        let f = |title: &str| Frame { kind: "SIMULATOR".into(), doc: String::new(), title: title.into(), modified: true, shown: true, realized: true, xid: 9, min_w: 0, min_h: 0 };
+        assert_eq!(unsaved_name(&f("*rc — Simulator")), "*rc — Simulator"); assert_eq!(unsaved_name(&f("")), "Simulation workbook");
+        let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "SCH", 1, 0); s.frames.push(f(""));
+        assert_eq!(s.unsaved_docs(), ["Simulation workbook"]);
+    }
     #[test] fn pure_frame_and_mode_rules() {
         assert_eq!(canon_frame(""), "PCB");
         assert_eq!(canon_frame("0"), "PCB");
@@ -3662,6 +3752,11 @@ mod tests {
         assert_eq!(fk_of("PCB_3D"), "FK_PCB_3D");
         assert_eq!(kind_of_fk_val(&json!("FK_FOOTPRINT_EDITOR")), "FOOTPRINT_EDITOR");
         assert_eq!(kind_of_fk_val(&json!(5)), "PCB_3D");
+        // bp.13.2: the Simulator, never pre-warmed
+        assert_eq!(canon_frame("fk_simulator"), "SIMULATOR"); assert_eq!(fk_of("SIMULATOR"), "FK_SIMULATOR");
+        assert_eq!(kind_of_fk_val(&json!(8)), "SIMULATOR"); assert_eq!(kind_of_fk_val(&json!("FK_SIMULATOR")), "SIMULATOR");
+        assert_eq!(prewarm_kinds("SIMULATOR", &[]), ["SCH", "PCB"]); assert!(!prewarm_kinds("PCB", &[]).contains(&"SIMULATOR"));
+        assert_eq!(stock_action_for("SIMULATOR"), None);
         assert_eq!(close_mode_of("ask"), "CM_FAIL_IF_MODIFIED");
         assert_eq!(close_mode_of("save"), "CM_SAVE");
         assert_eq!(close_mode_of("discard"), "CM_DISCARD");
