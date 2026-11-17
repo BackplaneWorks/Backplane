@@ -1113,8 +1113,10 @@ try:
                 wait_for(lambda: (k := kicad_frame()) and k, 60, 0.5); time.sleep(5)
             for target in (611, 480, 1000):
                 mark(f'{tab} set_pane {target}'); got = set_pane(target); mark(f'{tab} measure {target} (pane {got})'); m = frame_canvas(f'{tab}-{target}'); RES[f'narrow_{tab}_{target}'] = {'pane': got, **(m or {})}
-                check(bool(m) and not m['whole_frame'] and m['share'] >= 0.6 and got and abs(got - target) <= 6,
-                      f'narrow: {tab} in a {target} px pane ({got}): the canvas has at least 60 % of it ({m})')
+                # 1000: on a 1920 pt display the widest pane beside Backplane's chrome is about 967 (the sidebar folded): that is the row there
+                widest = target >= 1000 and got and got >= 950
+                check(bool(m) and not m['whole_frame'] and m['share'] >= 0.6 and got and (abs(got - target) <= 6 or widest),
+                      f'narrow: {tab} in a {target} px pane ({got}{", the widest this display allows" if widest and abs(got - target) > 6 else ""}): the canvas has at least 60 % of it ({m})')
             # Full size: the pane takes the room, and the panels come back
             r = rects().get('kicad:full'); b = next((w for w in wins() if w[0] == cw[0]), cw)[3]
             if r: click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2)
