@@ -948,8 +948,14 @@ try:
                         canvas_ev = [e.get('type') for e in evs() if int(e.get('seq', 0)) > n0 and e.get('type') in ('ET_DOCUMENT_EDITED', 'ET_SELECTION_CHANGED')]
                         key(K_ESC); time.sleep(0.6)
                         return (got == 'abcd' and not canvas_ev and bool(cd)), f'{where}: the field holds {got!r} after "ab", a check ({"done" if cd else "no ET_CHECKS_DONE"}; RunChecks {"ok" if "message" in rc else str(rc)[:60]}), "cd"; canvas events {canvas_ev}'
-                    r = across(lambda: key(5, CMD), 'the Search panel (Cmd+G)') or across(lambda: key(K_F, CMD), 'the Find dialog (Cmd+F)')
-                    row(E, 'type_across_check', ('works' if r[0] else 'wrong') if r else 'nothing', r[1] if r else 'no text field took "ab" (Search panel and Find dialog)')
+                    # the Find dialog's field (Cmd+F): not the Search panel by Cmd+G, which is also Group in the PCB editor (fork embed: Cmd+G,
+                    # then typing, hung KiCad on the base build), so no typed key can reach the canvas if a field did not open
+                    fd0 = seq(); r = None
+                    def open_find(): key(K_F, CMD)
+                    canvas(); open_find(); opened = wait_for(lambda: since(fd0, 'ET_DIALOG_OPENED'), W); key(K_ESC); time.sleep(0.8)
+                    if opened: r = across(open_find, 'the Find dialog (Cmd+F)')
+                    row(E, 'type_across_check', ('works' if r[0] else 'wrong') if r else 'nothing',
+                        r[1] if r else ('Find opened but its field did not take "ab" (not judged as KiCad: a harness path)' if opened else 'Find did not open'))
                 canvas(); n, t = press(K_F, CMD); wait_for(lambda: since(n, 'ET_DIALOG_OPENED'), W)
                 dl = [e.get('detail') for e in since(n, 'ET_DIALOG_OPENED')]
                 row(E, 'find', 'works' if 'Find' in dl else ('wrong' if dl else 'nothing'), f'dialogs {dl}', t); key(K_ESC); time.sleep(1.0)
