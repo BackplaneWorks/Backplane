@@ -530,8 +530,14 @@ try:
         oa = wait_for(lambda: rects().get('kicad:open-again'), 20, 0.5); shot('autosave-1-closed')
         if oa:
             b2 = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b2[0] + oa['x'] + oa['w'] / 2, b2[1] + 28 + oa['y'] + oa['h'] / 2)
-        rec = wait_for(lambda: 'Recover Unsaved Changes' in hub_log(), 90, 0.5); time.sleep(2); shot('autosave-2-recovery')
-        named = 'Recover Unsaved Changes' in client_log()
+        # macOS: KiCad's recovery question is a native alert before its API is up (no dialog event): a window of KiCad's own on screen
+        # while it is not ready, or (where the fork reports it) the dialog event
+        def alert():
+            ks = [w for w in wins() if 'kicad' in w[2].lower() and w[1] not in (client.pid, hub.pid) and w[3][2] < 600 and w[3][3] < 600]
+            return ks or ('Recover Unsaved Changes' in hub_log())
+        rec = wait_for(alert, 90, 0.5); time.sleep(2); shot('autosave-2-recovery')
+        named = 'kicad-recover-prompt' in client_log() or 'kicad-recover-prompt' in hub_log() or 'Recover Unsaved Changes' in client_log()
+        RES['autosave_alert'] = str(rec)[:160]
         check(bool(oa) and bool(rec), f'autosave: KiCad killed, Open the editor again: KiCad offers Recover Unsaved Changes (open-again {bool(oa)})')
         check(named, 'autosave: the pane names it ("KiCad is asking: Recover Unsaved Changes")')
         raise SystemExit(1 if FAILS else 0)
