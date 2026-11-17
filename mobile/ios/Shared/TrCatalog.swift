@@ -2165,6 +2165,8 @@ gpui.acct.anthropic.api.key.is.set	ANTHROPIC_API_KEY is set: Claude Code uses th
 gpui.acct.the.cli.is.signed.in	The CLI is signed in but did not give an email	CLIはサインインしていますがメールアドレスを返しませんでした	La CLI inició sesión pero no dio un correo
 gpui.bots.name.rule	A bot's name is 1 to 24 letters, digits, - or _, with no spaces.	ボットの名前は、英字・数字・「-」・「_」で1〜24文字です（スペースは使えません）。	El nombre de un bot tiene de 1 a 24 letras, dígitos, - o _, sin espacios.
 gpui.acct.open.the.link.and.sign	Open the link and sign in. Setup carries on by itself when you're done.	リンクを開いてサインインしてください。終わるとセットアップは自動で続きます。	Abre el enlace e inicia sesión. La configuración continúa sola cuando termines.
+bots.delete.removes	This removes {name}'s threads, its routines and its home folder.	{name}のスレッド、ルーティン、ホームフォルダを削除します。	Esto elimina los hilos de {name}, sus rutinas y su carpeta personal.
+bots.settings.head	Bots	ボット	Bots
 gpui.send.the.message	Send the message	メッセージを送信	Enviar el mensaje
 gpui.new.line.in.the.message	New line in the message	メッセージ内で改行	Nueva línea en el mensaje
 gpui.send.also	Send (also)	送信（別のキー）	Enviar (también)
@@ -5310,6 +5312,9 @@ gpui.f2.uber.p.cherry	Cherry	チェリー	Cereza
 
     /// gpui.acct.sync.days = {n, plural, one {# day left} other {# days left}}
     static func gpui_acct_sync_days(n: Int) -> String { f("gpui.acct.sync.days", ["n": String(n)]) }
+
+    /// bots.delete.removes = This removes {name}'s threads, its routines and its home folder.
+    static func bots_delete_removes(name: String) -> String { f("bots.delete.removes", ["name": name]) }
 
     /// gpui.b.replying.to = ↩ Replying to: {line}
     static func gpui_b_replying_to(line: String) -> String { f("gpui.b.replying.to", ["line": line]) }

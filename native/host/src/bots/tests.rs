@@ -128,12 +128,49 @@ async fn bot(hub: &Arc<Hub>, name: &str) -> String {
     assert_eq!(rpc(&hub, "bots.edit", json!({"bot":"nope"})).await["error"], "no such bot");
     let th = log(&hub).iter().find(|e| e["$"] == "ThreadCreated").unwrap()["id"].as_str().unwrap().to_string();
     // the bot's page offers Delete bot (the clients' button), naming the bot
-    assert_eq!(crate::bots::bot_page_from(&hub, &b, "settings", 1000, 0).await.unwrap()["delete"], json!({"label":"Delete bot","action":"bot-delete","value":b}));
+    assert_eq!(crate::bots::bot_page_from(&hub, &b, "settings", 1000, 0).await.unwrap()["delete"], json!({"label":"Delete bot","action":"bot-delete","value":b,"ask":crate::bots::api::delete_ask("bo")}));
     assert_eq!(rpc(&hub, "bots.delete", json!({"bot":b})).await["ok"], true);
     assert_eq!(*rec.stopped.lock().unwrap(), vec![th]);
     assert_eq!(rpc(&hub, "bots.delete", json!({"bot":b})).await["error"], "no such bot");
     assert_eq!(rec.stopped.lock().unwrap().len(), 1, "a refused delete stops nothing");
     assert_eq!(rpc(&hub, "bots.create", json!({"name":"bo"})).await["ok"], true, "a deleted bot's name is free again");
+}
+
+#[tokio::test] async fn delete_bot_removes_its_threads_routines_and_home_folder_and_refuses_the_uberbot() {
+    // what the confirm says (api::delete_ask) is what goes: the bot's threads (its chat, its mail runs), its routines, its home folder; nothing else
+    let (hub, bots, rec) = start("delall", "").await;
+    crate::commands::start(hub.clone()); // `thread.delete`, as the running hub has it
+    let (b, other, u) = (bot(&hub, "bo").await, bot(&hub, "keep").await, bot(&hub, "uu").await);
+    let w = bots.world().await; let (chat, kept) = (w.bot(&b).unwrap().thread.clone(), w.bot(&other).unwrap().thread.clone()); drop(w);
+    hub.commit_many(&[json!({"$":"ThreadCreated","id":"trun","project":"","title":"run","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}),
+        json!({"$":"RunSet","thread":"trun","bot":b,"conv":"c1","mail":"m1","at":2})]).await.unwrap();
+    for (who, r) in [(&b, "r1"), (&b, "r2"), (&other, "r3")] { assert_eq!(rpc(&hub, "bots.routine", json!({"bot":who,"routine":r,"name":r,"schedule":"daily 09:30","prompt":"p"})).await["ok"], true); }
+    let root = super::relocate::root(&hub.cfg.home); let home = root.join(&b);
+    std::fs::create_dir_all(home.join("tasks")).unwrap(); std::fs::write(home.join("tasks/a.md"), "x").unwrap(); std::fs::create_dir_all(root.join(&other)).unwrap();
+    // the confirm names the bot and says exactly that, on its page and on its bots.list row
+    let ask = json!({"title":"Delete bo?","body":"This removes bo's threads, its routines and its home folder.","yes":"Delete bot"});
+    assert_eq!(crate::bots::bot_page_from(&hub, &b, "settings", 1000, 0).await.unwrap()["delete"]["ask"], ask);
+    hub.commit(&json!({"$":"SettingSet","key":"uber.bot","value":u,"at":3})).await.unwrap();
+    let rows = crate::bots::api::directory(&hub).await;
+    let row = |id: &str| rows["bots"].as_array().unwrap().iter().find(|r| r["id"] == id).unwrap().clone();
+    assert_eq!(row(&b)["ask"], ask); assert!(row(&u)["delete"] == false && row(&u)["ask"].is_null(), "the uberbot offers no Delete bot");
+    assert!(crate::bots::bot_page_from(&hub, &u, "settings", 1000, 0).await.unwrap()["delete"].is_null());
+    // the uberbot is refused by the hub itself, whatever a client sends
+    let n = log(&hub).len();
+    assert_eq!(rpc(&hub, "bots.delete", json!({"bot":u})).await["error"], "the uberbot cannot be deleted");
+    assert_eq!(log(&hub).len(), n, "a refused delete logs nothing"); assert!(bots.world().await.live(&u));
+    assert_eq!(rpc(&hub, "bots.delete", json!({"bot":b})).await["ok"], true);
+    let l = log(&hub);
+    let gone: std::collections::BTreeSet<String> = l.iter().filter(|e| e["$"] == "ThreadDeleted").map(|e| e["id"].as_str().unwrap().to_string()).collect();
+    assert_eq!(gone, [chat.clone(), "trun".to_string()].into_iter().collect(), "its chat and its mail run's thread, no other thread");
+    let rdel: Vec<&str> = l.iter().filter(|e| e["$"] == "RoutineDeleted").map(|e| e["id"].as_str().unwrap()).collect();
+    assert_eq!(rdel, ["r1", "r2"], "its routines, not another bot's");
+    let w = bots.world().await;
+    assert!(!w.live(&b) && w.live(&other) && w.routines["r3"].deleted == false && w.routines.values().filter(|r| r.bot == b).all(|r| r.deleted));
+    drop(w);
+    assert!(!home.exists(), "its home folder is removed"); assert!(root.join(&other).is_dir(), "another bot's folder stays");
+    assert!(!gone.contains(&kept));
+    let stopped = rec.stopped.lock().unwrap().clone(); assert!(stopped.contains(&chat) && stopped.contains(&"trun".to_string()), "{stopped:?}");
 }
 
 #[tokio::test] async fn bots_say_once() {

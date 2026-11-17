@@ -1806,6 +1806,8 @@ gpui.acct.anthropic.api.key.is.set = ANTHROPIC_API_KEY está configurada: Claude
 gpui.acct.the.cli.is.signed.in = La CLI inició sesión pero no dio un correo
 gpui.bots.name.rule = El nombre de un bot tiene de 1 a 24 letras, dígitos, - o _, sin espacios.
 gpui.acct.open.the.link.and.sign = Abre el enlace e inicia sesión. La configuración continúa sola cuando termines.
+bots.delete.removes = Esto elimina los hilos de {name}, sus rutinas y su carpeta personal.
+bots.settings.head = Bots
 
 # ---- gpui-b: keys, ui, files, history ----
 gpui.send.the.message = Enviar el mensaje

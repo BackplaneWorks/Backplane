@@ -438,12 +438,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                 items(DataClient.rooms, key = { "r:${it.id}" }) { r -> SidebarRow("#", r.name, onMachine(Msg.android_kind_room, r.mark), onLong = if (r.delete) ({ roomDelete = r }) else null) { openRoom(r) } } }
         }
         // Delete bot (a long press on a bot the hub offers it for): asked first, then `bot.delete`
-        botDelete?.let { b ->
-            val del = rememberCoroutineScope()
-            AlertDialog(onDismissRequest = { botDelete = null }, title = { Text(Msg.native_bot_delete_ask(b.name)) },
-                confirmButton = { TextButton({ botDelete = null; del.launch { runCatching { DataClient.botDelete(b.id) } } }, Modifier.testTag("bot.delete.yes")) { Text(Msg.bots_delete, color = dcs.error) } },
-                dismissButton = { TextButton({ botDelete = null }) { Text(Msg.common_cancel) } })
-        }
+        botDelete?.let { b -> BotDeleteDialog(b) { botDelete = null } }
         // Delete room (a long press on a room the hub offers it for): asked first, then `room.delete`
         roomDelete?.let { r ->
             val del = rememberCoroutineScope()
@@ -887,6 +882,34 @@ private fun AskCard(tid: String, e: DEntry) {
 private fun botCat(b: DataClient.Bot): (@Composable () -> Unit)? =
     if (!DataClient.has("cats")) null else ({ BotCat(b.look, b.color, if (b.uber) 56.dp else 28.dp) })
 
+/** Delete bot's confirm (a long press on a bot row, or Settings' Bots): the hub's words (`ask`: the bot by name, what goes with it), then `bot.delete`. */
+@Composable
+internal fun BotDeleteDialog(b: DataClient.Bot, done: () -> Unit) {
+    val del = rememberCoroutineScope()
+    AlertDialog(onDismissRequest = done, title = { Text(b.ask.title.ifEmpty { "" }.let { if (it.isEmpty()) Msg.native_bot_delete_ask(b.name) else Tr.t(it) }) },
+        text = if (b.ask.body.isEmpty()) null else ({ Text(Tr.t(b.ask.body), Modifier.testTag("bot.delete.body")) }),
+        confirmButton = { TextButton({ done(); del.launch { runCatching { DataClient.botDelete(b.id) } } }, Modifier.testTag("bot.delete.yes")) { Text(if (b.ask.yes.isEmpty()) Msg.bots_delete else Tr.t(b.ask.yes), color = dcs.error) } },
+        dismissButton = { TextButton(done) { Text(Msg.common_cancel) } })
+}
+
+/** Settings' Bots: this hub's bots the hub offers Delete bot for (`bots.list` rows with `delete`; never the uberbot), each with Delete bot. */
+@Composable
+private fun BotsSettings() {
+    LaunchedEffect(Unit) { runCatching { DataClient.loadBots() } }
+    val bots = DataClient.bots.filter { it.delete }
+    if (bots.isEmpty()) return
+    var ask by remember { mutableStateOf<DataClient.Bot?>(null) }
+    DMono(Msg.bots_settings_head.uppercase(), dfaint)
+    bots.forEach { b ->
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(b.name, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            DBtn(Msg.bots_delete, false, modifier = Modifier.testTag("settings.bot.delete.${b.id}"), danger = true) { ask = b }
+        }
+    }
+    ask?.let { b -> BotDeleteDialog(b) { ask = null } }
+    DLine()
+}
+
 // ---- settings, folders, new thread
 @Composable
 private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Unit, mcp: () -> Unit, improve: () -> Unit) {
@@ -914,6 +937,7 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
             }
             // the uberbot's name and cat (feature cats), beside the agents' settings
             if (DataClient.has("cats")) UberSettings()
+            BotsSettings()
             // the agents' accounts, and the MCP servers every agent gets (feature mcpsettings)
             if (DataClient.has("accounts") || DataMcp.available) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (DataClient.has("accounts")) DBtn(Msg.android_accounts, false, modifier = Modifier.testTag("settings.accounts"), onClick = accounts)

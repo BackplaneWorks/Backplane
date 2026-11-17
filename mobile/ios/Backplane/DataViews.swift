@@ -227,10 +227,7 @@ struct DataThreadsView: View {
             Button(Tr.t("Delete room"), role: .destructive) { if let r = roomDelete { Task { await client.roomDelete(r.id) } } }
             Button(Tr.t("Cancel"), role: .cancel) {}
         }
-        .confirmationDialog(Tr.native_bot_delete_ask(name: botDelete?.name ?? ""), isPresented: Binding(get: { botDelete != nil }, set: { if !$0 { botDelete = nil } }), titleVisibility: .visible) {
-            Button(Tr.t("Delete bot"), role: .destructive) { if let b = botDelete { Task { await client.botDelete(b.id) } } }
-            Button(Tr.t("Cancel"), role: .cancel) {}
-        }
+        .botDeleteDialog(client: client, bot: $botDelete)
         .confirmationDialog(Tr.sidebar_sections_remove_ask(project: projectMenu?.title ?? ""), isPresented: Binding(get: { projectMenu != nil }, set: { if !$0 { projectMenu = nil } }), titleVisibility: .visible) {
             Button(Tr.t("Remove project"), role: .destructive) { if let p = projectMenu { Task { await client.projectAct(p.id, "remove") } } }
             Button(Tr.t("Keep it"), role: .cancel) {}

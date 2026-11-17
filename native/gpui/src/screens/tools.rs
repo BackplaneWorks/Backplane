@@ -47,8 +47,8 @@ pub fn context_items(thread: &Value) -> Vec<super::ctxmenu::Item> {
     let mut v = Vec::new();
     for m in menu(thread) {
         // a dangerous item (Delete) asks in the menu itself: the first click arms it, the second does it
-        if m.options.is_empty() { v.push(super::ctxmenu::Item { label: m.label, action: m.action, value: m.value, confirm: m.danger }); }
-        else { for (l, val) in m.options { v.push(super::ctxmenu::Item { label: format!("{} {}", m.label, l.to_lowercase()), action: m.action.clone(), value: val, confirm: false }); } }
+        if m.options.is_empty() { v.push(super::ctxmenu::Item { label: m.label, action: m.action, value: m.value, confirm: m.danger, note: String::new() }); }
+        else { for (l, val) in m.options { v.push(super::ctxmenu::Item { label: format!("{} {}", m.label, l.to_lowercase()), action: m.action.clone(), value: val, confirm: false, note: String::new() }); } }
     }
     v
 }

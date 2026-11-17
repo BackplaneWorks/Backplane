@@ -1829,6 +1829,8 @@ gpui.acct.anthropic.api.key.is.set = ANTHROPIC_API_KEYが設定されていま�
 gpui.acct.the.cli.is.signed.in = CLIはサインインしていますがメールアドレスを返しませんでした
 gpui.bots.name.rule = ボットの名前は、英字・数字・「-」・「_」で1〜24文字です（スペースは使えません）。
 gpui.acct.open.the.link.and.sign = リンクを開いてサインインしてください。終わるとセットアップは自動で続きます。
+bots.delete.removes = {name}のスレッド、ルーティン、ホームフォルダを削除します。
+bots.settings.head = ボット
 
 # ---- gpui-b: keys, ui, files, history ----
 gpui.send.the.message = メッセージを送信

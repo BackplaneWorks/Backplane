@@ -100,6 +100,13 @@ pub fn mem_key(k: &str) -> String { k.trim().chars().map(|c| if c.is_ascii_alpha
 /// Hop.max: a bot's message goes out one hop past the turn that sent it, never past 6
 pub const HOP_MAX: u64 = 6;
 /// Hop.live: a message at this hop is heard by bots (a held one, past the bound, is kept in its room for the person)
+/// The threads a bot owns, which go with it: its chat and the threads of its mail runs (deduplicated, in that order)
+pub fn owned_threads(w: &World, bot: &str) -> Vec<String> {
+    let mut v: Vec<String> = w.bot(bot).map(|b| b.thread.clone()).into_iter().collect();
+    let mut runs: Vec<&String> = w.mail.runs.values().filter(|r| r.bot == bot).map(|r| &r.thread).collect(); runs.sort();
+    for t in runs { if !v.contains(t) { v.push(t.clone()) } }
+    v.retain(|t| !t.is_empty()); v
+}
 pub fn hop_live(h: u64) -> bool { h <= HOP_MAX }
 /// Bots.space.msg: a space's button or field, heard as a person's message
 pub fn space_msg(action: &str, value: &str) -> String { format!("[space] {action}{}", if value.is_empty() { String::new() } else { format!(": {value}") }) }
@@ -266,13 +273,29 @@ impl Bots {
         self.commit_reply(id, w.also(now, evs)).await
     }
 
+    /// Delete bot: what its confirm says (`api::delete_ask`) and no more: the bot, its threads (its chat and its mail runs, each deleted as
+    /// the sidebar's Delete does: `thread.delete`), its routines and its home folder (`<bots root>/<bot>`). The uberbot is refused.
     async fn delete(&self, id: &Value, p: &Value) -> Vec<Value> {
         let bot = gs(p, "bot"); let w = self.world().await;
         if !w.live(bot) { return vec![err(id, "no such bot")] }
-        let thread = w.bot(bot).map(|b| b.thread.clone()).unwrap_or_default();
-        let r = self.commit_reply(id, vec![json!({"$":"BotDeleted","id":bot,"at":now_s()})]).await;
+        if w.uber_is(bot) { return vec![err(id, "the uberbot cannot be deleted")] }
+        let threads = owned_threads(&w, bot);
+        let now = now_s();
+        let mut evs = vec![json!({"$":"BotDeleted","id":bot,"at":now})];
+        let mut rs: Vec<&String> = w.routines.values().filter(|r| r.bot == bot && !r.deleted).map(|r| &r.id).collect(); rs.sort();
+        evs.extend(rs.into_iter().map(|r| json!({"$":"RoutineDeleted","id":r,"at":now})));
+        let r = self.commit_reply(id, evs).await;
         drop(w);
-        if r[0]["ok"] == true { self.inbox.stop(&thread).await } // B.AgentStop only after the commit; BotFx gone (the browser page) is the term lane's: PARITY
+        if r[0]["ok"] != true { return r }
+        // B.AgentStop only after the commit; BotFx gone (the browser page) is the term lane's: PARITY
+        for th in &threads { self.inbox.stop(th).await }
+        if let Some(h) = self.hub.rpc_for("thread.delete") {
+            for th in &threads { let _ = h.call(&self.hub, &Caller { gen: "bots".into(), client: 0 }, &json!(0), "thread.delete", &json!({"thread": th})).await; }
+        }
+        if safe_id(bot) {
+            let dir = super::relocate::root(&self.hub.cfg.home).join(bot);
+            let _ = tokio::task::spawn_blocking(move || if dir.is_dir() { if let Err(e) = std::fs::remove_dir_all(&dir) { eprintln!("bots: delete: {}: {e}", dir.display()) } }).await;
+        }
         r
     }
 

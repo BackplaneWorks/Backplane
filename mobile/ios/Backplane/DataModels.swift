@@ -256,6 +256,18 @@ struct DError: Error, LocalizedError {
 }
 
 // MARK: data/1 additions (hello.features: actions, search, models, mentions, bots, notify; native/host/src/data/ext.rs)
+/// `bots.list` row's `ask`: Delete bot's confirm (bots/api.rs `delete_ask`), shown as it is, translated.
+struct DBotAsk: Codable, Equatable {
+    var title: String = ""; var body: String = ""; var yes: String = ""
+    enum CodingKeys: String, CodingKey { case title, body, yes }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); title = c.str(.title); body = c.str(.body); yes = c.str(.yes) }
+    /// The confirm for `bot`: the hub's words, or (an older hub) its name alone and the plain Delete bot.
+    static func of(_ bot: DBot) -> (title: String, body: String, yes: String) {
+        let a = bot.ask
+        return (a.map { $0.title.isEmpty ? nil : Tr.t($0.title) }.flatMap { $0 } ?? Tr.native_bot_delete_ask(name: bot.name),
+                a.map { $0.body.isEmpty ? "" : Tr.t($0.body) } ?? "", a.map { $0.yes.isEmpty ? nil : Tr.t($0.yes) }.flatMap { $0 } ?? Tr.t("Delete bot"))
+    }
+}
 struct DBot: Codable, Equatable, Identifiable {
     var id: String; var name: String; var thread: String; var uber: Bool
     var mark: DMark?     // a bot of a linked machine: where it is; nil for this hub's own
@@ -263,8 +275,9 @@ struct DBot: Codable, Equatable, Identifiable {
     var delete: Bool = false // the hub offers Delete bot for it (a bot of this hub that is not the uberbot)
     var look: Int = 0     // its cat (feature cats): the look, 0..72
     var color: String = "" // and its fur, "#rrggbb" or "" for the coat's own
-    enum CodingKeys: String, CodingKey { case id, name, thread, uber, mark, note, delete, look, color }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); id = c.str(.id); name = c.str(.name); thread = c.str(.thread); uber = c.bool(.uber); mark = try? c.decode(DMark.self, forKey: .mark); note = c.str(.note); delete = c.bool(.delete); look = c.int(.look); color = c.str(.color) }
+    var ask: DBotAsk? // Delete bot's confirm as the hub words it (the bot by name, what goes with it); nil from an older hub
+    enum CodingKeys: String, CodingKey { case id, name, thread, uber, mark, note, delete, look, color, ask }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); id = c.str(.id); name = c.str(.name); thread = c.str(.thread); uber = c.bool(.uber); mark = try? c.decode(DMark.self, forKey: .mark); note = c.str(.note); delete = c.bool(.delete); look = c.int(.look); color = c.str(.color); ask = try? c.decode(DBotAsk.self, forKey: .ask) }
     /// The open chat `open` after a home move: the same bot's thread on its new home (`<link>~<id>` there, or the plain id back here); nil when it did not move.
     /// `known`: the bot that chat was last seen to be (a move lists it gone for a moment between the old home letting go and the new one showing it).
     static func followed(_ open: String, _ known: DBot?, _ now: [DBot]) -> String? {

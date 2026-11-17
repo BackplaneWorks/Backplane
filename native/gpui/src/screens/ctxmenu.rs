@@ -7,7 +7,7 @@ use gpui::{prelude::*, *};
 use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Item { pub label: String, pub action: String, pub value: String, pub confirm: bool }
+pub struct Item { pub label: String, pub action: String, pub value: String, pub confirm: bool, /** what an armed item says it does, the hub's words (a bot's Delete bot: what goes with it); "" for none */ pub note: String }
 #[derive(Clone, Debug)]
 pub struct Menu { pub at: Point<Pixels>, pub items: Vec<Item>, /// the item whose confirming click is awaited
     pub armed: Option<usize>, /// the probe ids of its entries are `<probe>:<label>` ("ctx" unless the opener names its own, e.g. "run-on")
@@ -35,7 +35,7 @@ pub const LOCAL_KICAD_EMBED: &str = "local:kicad-embed";
 pub const LOCAL_SUB: &str = "local:sub";
 fn s(v: &Value, k: &str) -> String { v[k].as_str().unwrap_or("").to_string() }
 fn raw(id: &str) -> &str { id.rsplit('|').next().unwrap_or(id) }
-fn item(label: &str, action: &str, value: &str, confirm: bool) -> Item { Item { label: label.into(), action: action.into(), value: value.into(), confirm } }
+fn item(label: &str, action: &str, value: &str, confirm: bool) -> Item { Item { label: label.into(), action: action.into(), value: value.into(), confirm, note: String::new() } }
 
 /// The menu of a link in a message: a file opens, shows in its folder, or has its path copied; a web address opens or is copied; any other link is copied.
 pub fn link_items(href: &str, file: bool) -> Vec<Item> {
@@ -144,7 +144,7 @@ pub fn section_items(menu: &Value) -> Vec<Item> {
             return item(&label, LOCAL_SUB, &Value::Array(sub).to_string(), false)
         }
         if id == "open" { return item(&label, LOCAL_FILE_OPEN, &value, false) }
-        item(&label, &action, &value, i["confirm"] == true)
+        Item { note: s(i, "note"), ..item(&label, &action, &value, i["confirm"] == true) }
     }
     menu.as_array().into_iter().flatten().map(one).filter(|i| !i.label.is_empty() && (!i.action.is_empty())).collect()
 }
@@ -268,6 +268,7 @@ pub fn armed_label(it: &Item) -> String {
 
 /// `armed_label` as drawn: the catalog's words for it, the item's own label translated inside.
 pub fn shown_armed_label(it: &Item) -> String {
+    if !it.note.is_empty() { return format!("{} {}", crate::i18n::trs(&it.note), crate::i18n::trs("Click again to delete")) }
     match it.action.as_str() { "row-delete" | "proj-remove" => crate::i18n::trs(&armed_label(it)), _ => crate::i18n::tf("gpui.ctx.click.again.to", &[("what", crate::i18n::trs(&it.label).to_lowercase().into())]) }
 }
 
@@ -388,7 +389,7 @@ mod tests {
     }
     #[test] fn an_armed_item_reads_in_the_language_in_force() {
         let t = j(r#"{"id":"h|t7"}"#); let items = thread_items(&t, "p1");
-        let del = items.iter().find(|i| i.action == "row-delete").unwrap(); let arch = Item { confirm: true, label: "Archive".into(), action: "row-archive".into(), value: "h|t7".into() };
+        let del = items.iter().find(|i| i.action == "row-delete").unwrap(); let arch = Item { confirm: true, label: "Archive".into(), action: "row-archive".into(), value: "h|t7".into(), note: String::new() };
         assert_eq!((shown_armed_label(del), shown_armed_label(&arch)), ("Click again to delete".to_string(), "Click again to archive".to_string()));
         crate::i18n::with_lang("ja", || {
             assert_eq!(shown_armed_label(del), crate::i18n::catalog().japanese("Click again to delete").unwrap());

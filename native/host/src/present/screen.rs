@@ -81,7 +81,7 @@ fn bot_rows(st: &State, hub: &str, now: u64, uber: &str, mark: &Value) -> Vec<Va
             else if now>t.map_or(0,|t|t.activity).saturating_add(900) { ("sleep","asleep") }else{("idle","ready")};
         json!({"id":format!("{hub}|{id}"),"name":name,"title":name,"act":if b.thread.is_empty(){"remote"}else{"bot"},
             "look":b.look,"color":b.color,"mood":mood,"note":note,"uber":!uber.is_empty()&&**id==uber,"sel":false,"remote":false,"peer":"","cat":format!("{}:{mood}",b.look),"key":id,"link":"",
-            "nav":if b.thread.is_empty(){format!("@remote:{id}")}else{format!("{hub}|{}",b.thread)},"mark":mark,"menu":bot_menu(id,!far && **id!=uber)})
+            "nav":if b.thread.is_empty(){format!("@remote:{id}")}else{format!("{hub}|{}",b.thread)},"mark":mark,"menu":bot_menu(id,&b.name,!far && **id!=uber)})
     }).collect()
 }
 /// The sidebar's rooms (permanent ones only: a bots' exchange, `RoomNav.ephemeral`, is never listed): this hub's, then each shown linked machine's (with its `mark`); a room kept on both machines (a room shared across them) is listed once, as this hub's.
@@ -99,10 +99,10 @@ fn room_rows(st: &State, hub: &str, mark: &Value, here: &dyn Fn(&str)->bool) -> 
     }).collect()
 }
 /// A bot row's right-click menu (the clients draw it as it is): Delete bot for this machine's bots but the uberbot (`side-bot-delete`, asked
-/// twice), none otherwise. The hub has no bot rename (a bot's name is its address in rooms and mentions).
-fn bot_menu(id: &str, mine: bool) -> Value {
+/// twice; `note`: what goes with it, the confirm's words, bots/api.rs `delete_ask`), none otherwise. The hub has no bot rename (a bot's name is its address in rooms and mentions).
+fn bot_menu(id: &str, name: &str, mine: bool) -> Value {
     if !mine { return json!([]) }
-    json!([{"id":"delete","label":"Delete bot","action":"side-bot-delete","value":id,"confirm":true}])
+    json!([{"id":"delete","label":"Delete bot","action":"side-bot-delete","value":id,"confirm":true,"note":crate::bots::api::delete_ask(name)["body"]}])
 }
 /// A room row's right-click menu: this machine's rooms can be renamed and deleted (`room-rename`, `room-delete`, asked twice); a linked machine's room is that machine's.
 fn room_menu(id: &str, mine: bool) -> Value {
@@ -1275,6 +1275,7 @@ mod state_tests {
                   json!({"$":"RoomSet","id":"r1","name":"Bring-up","members":"b1","at":3})] { event(&mut st,e); }
         let v=recent(&st,&params()).unwrap(); let s=&v["shown"];
         assert_eq!(s["bots"][0]["menu"][0]["action"],"side-bot-delete"); assert_eq!(s["bots"][0]["menu"][0]["confirm"],true);
+        assert_eq!(s["bots"][0]["menu"][0]["note"],"This removes Scout's threads, its routines and its home folder.","its armed item says what goes with it");
         let acts: Vec<&str>=s["rooms"][0]["menu"].as_array().unwrap().iter().map(|i|i["action"].as_str().unwrap()).collect(); assert_eq!(acts,["room-rename","room-delete"]);
         let act=|a: &str,val: &str,target: Value| { let mut p=params(); p["action"]=json!(a); p["value"]=json!(val);
             if target["kind"]=="bot" { p["botPage"]=json!({"kind":"bot","id":"b1","name":"Scout","tab":"chat","tabs":[],"subtabs":[],"chat":"t1"}); }

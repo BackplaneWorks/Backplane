@@ -67,7 +67,7 @@ pub async fn page_from(hub: &Arc<Hub>, bot: &str, tab: &str, now: u64, from: usi
     let chat = if uber { w.ub_chat() } else { me.thread.clone() };
     let mut v = json!({"kind":"bot","id":bot,"name":me.name,"title":me.name,"look":me.look,"color":me.color,"auto":me.auto,"tab":on,"navTab":parent,"tabs":tabs_json(tabs),"subtabs":tabs_json(nav_sections(uber, parent)),"edit":true,"uber":uber,"chat":chat});
     // Delete bot: any bot of this hub but the uberbot (it is taken back first); the clients ask before they send it
-    if !uber { v["delete"] = json!({"label":"Delete bot","action":"bot-delete","value":bot}); }
+    if !uber { v["delete"] = json!({"label":"Delete bot","action":"bot-delete","value":bot,"ask":delete_ask(&me.name)}); }
     // Settings: its name and cat, the control setup's Your uberbot draws (present/onboard_uber.rs), its presses `bot-cat` (present/screen.rs)
     if on == "settings" { v["catpick"] = crate::present::onboard_uber::cat_row(&format!("bcn.{bot}"), &format!("bcc.{bot}"), &me.name, "", (!me.auto).then_some(me.look), &me.color, "bot-cat", Some("Save name"), ""); }
     if tab_of_world(&w, bot, on, now, from, &mut v) {
@@ -161,6 +161,10 @@ async fn far_uber(hub: &Arc<Hub>) -> String {
     uber_shown("", &far)
 }
 
+/// Delete bot's confirm, the same on every client (each shows it as it is, translated): the bot by name and exactly what `bots.delete`
+/// removes with it (rpc.rs `delete`: its threads, its routines, its home folder)
+pub fn delete_ask(name: &str) -> Value { json!({"title":format!("Delete {name}?"),"body":format!("This removes {name}'s threads, its routines and its home folder."),"yes":"Delete bot"}) }
+
 /// The phone data API (data/1 `bots.list`): this machine's live bots and rooms. A bot's conversation is its own thread (open it like any thread).
 pub async fn directory(hub: &Arc<Hub>) -> serde_json::Value {
     let (mut bots, mut rooms, mut here_rooms, mut uber) = (vec![], vec![], std::collections::HashSet::new(), String::new());
@@ -175,9 +179,10 @@ pub async fn directory(hub: &Arc<Hub>) -> serde_json::Value {
 /// A linked machine's rooms as listed here: a room shared across machines is kept on each under the same id, and this machine's copy is the one listed
 pub fn far_rooms(rows: Vec<Value>, here: &std::collections::HashSet<String>) -> Vec<Value> { rows.into_iter().filter(|r| !here.contains(&crate::net::far::local(r["id"].as_str().unwrap_or("")))).collect() }
 /// A bots world's live bots and rooms (oldest first) as `bots.list` rows; `uber` is the bot shown as the uberbot, `mark` the machine's marker (null for this one);
-/// `delete` says the row offers Delete bot (`bot.delete`): this machine's bots but the uberbot; on a room, Delete room (`room.delete`): this machine's rooms
+/// `delete` says the row offers Delete bot (`bot.delete`): this machine's bots but the uberbot, `ask` its confirm (`delete_ask`); on a room, Delete room (`room.delete`): this machine's rooms
 pub fn rows_of(w: &super::world::World, uber: &str, mark: &Value) -> (Vec<Value>, Vec<Value>) {
     let mut bots: Vec<_> = w.bots.values().filter(|x| !x.deleted).map(|x| (x.created, x.id.clone(), json!({"id":x.id,"name":x.name,"thread":x.thread,"look":x.look,"color":x.color,"uber":!uber.is_empty() && x.id == uber,"mark":mark,"delete":mark.is_null() && x.id != uber}))).collect();
+    for b in bots.iter_mut().filter(|b| b.2["delete"] == true) { let n = b.2["name"].as_str().unwrap_or("").to_string(); b.2["ask"] = delete_ask(&n); }
     bots.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
     let mut rooms: Vec<_> = w.rooms.values().filter(|x| x.listed() && !x.swarm() && !crate::net::far::local(&x.id).starts_with("dm:")).map(|x| (x.created, x.id.clone(), json!({"id":x.id,"name":x.name,"members":x.members,"mark":mark,"delete":mark.is_null()}))).collect();
     rooms.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));

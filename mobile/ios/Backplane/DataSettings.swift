@@ -32,7 +32,7 @@ struct DataSettingsView: View {
         if client.has("accounts") { top.append(DSettingsGroup(id: "settings.accounts", icon: "person.2", title: Tr.t("Accounts & Usage"), page: DPage(name: "accounts"))) }
         top.append(DSettingsGroup(id: "settings.hubs", icon: "server.rack", title: Tr.t("Hubs"), page: DPage(name: DSettingsPage.hubs.rawValue)))
         var work: [DSettingsGroup] = []
-        if client.has("mcpsettings") || client.has("voice") || client.has("cats") { work.append(DSettingsGroup(id: "settings.agents", icon: "cpu", title: Tr.t("Agents"), page: DPage(name: DSettingsPage.agents.rawValue))) }
+        if client.has("mcpsettings") || client.has("voice") || client.has("cats") || client.bots.contains(where: { $0.delete }) { work.append(DSettingsGroup(id: "settings.agents", icon: "cpu", title: Tr.t("Agents"), page: DPage(name: DSettingsPage.agents.rawValue))) }
         if client.has("machines") || client.has("devices") { work.append(DSettingsGroup(id: "settings.machines", icon: "desktopcomputer", title: Tr.t("Machines & devices"), page: DPage(name: DSettingsPage.machines.rawValue))) }
         let phone = [DSettingsGroup(id: "settings.notifications", icon: "bell", title: Tr.t("Notifications"), page: DPage(name: DSettingsPage.notifications.rawValue)),
                      DSettingsGroup(id: "settings.appearance", icon: "textformat", title: Tr.t("Appearance"), page: DPage(name: DSettingsPage.appearance.rawValue))]
@@ -56,6 +56,7 @@ struct DataSettingsView: View {
         if client.has("notifysettings") { all.append(e(Tr.t("Notifications"), notify)) }
         if client.has("ring") { all.append(e(Tr.t("Ring"), notify)) }
         if client.has("cats") { all += [e(Tr.t("Your uberbot"), agents), e(Tr.t("Name"), agents), e(Tr.t("Colour"), agents), e(Tr.t("Cat"), agents)] }
+        if client.bots.contains(where: { $0.delete }) { all += [e(Tr.k("bots.settings.head"), agents), e(Tr.t("Delete bot"), agents)] }
         if client.has("mcpsettings") { all.append(e(Tr.t("MCP servers"), agents)) }
         if client.has("voice") { all.append(e(Tr.t("Voice"), agents)) }
         if client.has("machines") { all.append(e(Tr.t("Machines"), machines)) }
@@ -137,6 +138,42 @@ struct DataSettingsView: View {
     }
 }
 
+/// Settings, Agents: Bots. This hub's bots the hub offers Delete bot for (`bots.list` rows with `delete`; never the uberbot), each with Delete bot,
+/// asked first with the hub's words (`ask`: the bot by name, what goes with it).
+struct DataBotsSection: View {
+    @Bindable var client: DataClient
+    @State private var ask: DBot?
+    var body: some View {
+        let bots = client.bots.filter { $0.delete }
+        VStack(alignment: .leading, spacing: 10) {
+            if !bots.isEmpty {
+                DHeading(text: Tr.k("bots.settings.head"))
+                ForEach(bots) { b in
+                    HStack(spacing: 8) {
+                        Text(b.name).dmono(13).lineLimit(1)
+                        Spacer()
+                        Button(Tr.t("Delete bot"), role: .destructive) { ask = b }.buttonStyle(DButton()).accessibilityIdentifier("settings.bot.delete.\(b.id)")
+                    }
+                }
+                DLine()
+            }
+        }
+        .task(id: client.conn) { if client.conn == .online { await client.loadBots() } }
+        .botDeleteDialog(client: client, bot: $ask)
+    }
+}
+
+extension View {
+    /// Delete bot's confirm (a long press on a bot row, or Settings' Bots): the hub's words, then `bot.delete`.
+    func botDeleteDialog(client: DataClient, bot: Binding<DBot?>) -> some View {
+        let a = bot.wrappedValue.map(DBotAsk.of)
+        return confirmationDialog(a?.title ?? "", isPresented: Binding(get: { bot.wrappedValue != nil }, set: { if !$0 { bot.wrappedValue = nil } }), titleVisibility: .visible) {
+            Button(a?.yes ?? Tr.t("Delete bot"), role: .destructive) { if let b = bot.wrappedValue { Task { await client.botDelete(b.id) } } }
+            Button(Tr.t("Cancel"), role: .cancel) {}
+        } message: { if let body = a?.body, !body.isEmpty { Text(body) } }
+    }
+}
+
 /// A page under Settings: the same sections as before, grouped.
 struct DataSettingsPageView: View {
     @Bindable var client: DataClient
@@ -169,6 +206,7 @@ struct DataSettingsPageView: View {
                 case .hubs: hubs
                 case .agents:
                     if client.has("cats") { DataUberSection(client: client); if client.has("mcpsettings") || client.has("voice") { DLine() } }
+                    DataBotsSection(client: client)
                     if client.has("mcpsettings") { NavigationLink(value: DPage(name: "mcp")) { Text(Tr.t("MCP servers")) }.buttonStyle(DButton()).accessibilityIdentifier("settings.mcp") }
                     if client.has("voice") { if client.has("mcpsettings") { DLine() }; DataVoiceSection(client: client) }
                 case .machines:

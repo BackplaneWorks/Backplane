@@ -349,33 +349,51 @@ fn settings_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<Stri
         .child(row(&trs("Created"), string(bot, "created")))
         .children(delete_button(cx, light, bot)).into_any_element()
 }
-/// The bot whose Delete bot was clicked once (the second click deletes it), and when.
-static BOT_DEL: std::sync::Mutex<Option<(String, std::time::Instant)>> = std::sync::Mutex::new(None);
-/// How long Delete bot's confirming click stays asked for.
-const DELETE_ARMED: std::time::Duration = std::time::Duration::from_secs(6);
-/// What a click on Delete bot does: the first arms it for this bot, the second (in time, on the same bot) deletes. (armed after the click, delete now)
-pub fn delete_press(armed: Option<&(String, std::time::Instant)>, bot: &str, now: std::time::Instant) -> (Option<(String, std::time::Instant)>, bool) {
-    match armed { Some((b, at)) if b == bot && now.duration_since(*at) <= DELETE_ARMED => (None, true), _ => (Some((bot.to_string(), now)), false) }
-}
-/// Delete bot at the foot of Settings, when the hub offers it (`delete`: a bot of this hub that is not the uberbot). It asks first: the
-/// button says "Click again to delete" until the second click, as a menu's Delete does.
-fn delete_button(cx: &mut Context<Backplane>, light: bool, bot: &Value) -> Option<AnyElement> {
-    let c = |n: &str| theme::color(light, n);
+/// The bot whose Delete bot was clicked: its confirm is open (Delete bot or Cancel) until one is pressed or another bot's page arms its own.
+static BOT_DEL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// Delete bot's confirm, as the hub words it (`delete.ask`: the bot by name and what goes with it; bots/api.rs `delete_ask`) and what its yes sends.
+#[derive(Debug, PartialEq)]
+pub struct DeleteAsk { pub label: String, pub title: String, pub body: String, pub yes: String, pub action: String, pub value: String }
+/// The hub's Delete bot (`delete`: a bot of this hub that is not the uberbot), None when it offers none. An older hub sends no `ask`: its title
+/// names the bot and the body stays empty (that hub removes only the bot).
+pub fn delete_ask(bot: &Value) -> Option<DeleteAsk> {
     let d = &bot["delete"]; let (action, value) = (string(d, "action"), string(d, "value"));
     if action.is_empty() || value.is_empty() { return None }
-    let armed = BOT_DEL.lock().map_or(false, |g| g.as_ref().map_or(false, |(b, at)| *b == value && at.elapsed() <= DELETE_ARMED));
-    let label = if armed { trs("Click again to delete") } else { trs(&string(d, "label")) };
-    Some(div().pt_3().mt_2().border_t_1().border_color(c("line")).flex()
-        /* i18n-ok: a ctl id */ .child(crate::ui::with_rect(div().id("bot-delete"), || "ui:Delete bot".to_string()).px_2().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer().border_1().border_color(c("bad"))
-            .when(armed, |x| x.bg(c("bad")).text_color(c("on-accent"))).when(!armed, |x| x.bg(c("raise")).text_color(c("bad")).hover(|s| s.bg(c("panel"))))
-            .child(label)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                let go = BOT_DEL.lock().map_or(false, |mut g| { let (next, go) = delete_press(g.as_ref(), &value, std::time::Instant::now()); *g = next; go });
-                if go { let _ = this.tx.try_send(act(&action, &value)); }
-                // the asking lapses by itself: drawn again then, so the button says "Delete bot" again and not a stale "Click again to delete" that a late click only re-arms
-                else { cx.spawn(async move |this, cx| { cx.background_executor().timer(DELETE_ARMED + std::time::Duration::from_millis(100)).await; let _ = this.update(cx, |_, cx| cx.notify()); }).detach(); }
-                cx.notify();
-            }))).into_any_element())
+    let label = string(d, "label"); let a = &d["ask"];
+    let title = Some(string(a, "title")).filter(|t| !t.is_empty()).unwrap_or_else(|| crate::i18n::tf("native.bot.delete.ask", &[("name", string(bot, "name").into())]));
+    let yes = Some(string(a, "yes")).filter(|t| !t.is_empty()).unwrap_or_else(|| label.clone());
+    Some(DeleteAsk { label, title, body: string(a, "body"), yes, action, value })
+}
+/// A press on Delete bot's controls: "open" arms this bot's confirm, "yes" deletes (only while it is armed for this bot), "no" shuts it.
+/// (armed after, delete now)
+pub fn delete_press(armed: Option<&str>, bot: &str, what: &str) -> (Option<String>, bool) {
+    match what { "open" => (Some(bot.to_string()), false), "yes" if armed == Some(bot) => (None, true), "yes" => (armed.map(str::to_string), false), _ => (None, false) }
+}
+/// Delete bot at the foot of Settings, when the hub offers it. It asks first: the hub's confirm (the bot by name, what goes with it), Delete bot or Cancel.
+fn delete_button(cx: &mut Context<Backplane>, light: bool, bot: &Value) -> Option<AnyElement> {
+    let c = |n: &str| theme::color(light, n);
+    let ask = delete_ask(bot)?;
+    let armed = BOT_DEL.lock().map_or(false, |g| g.as_deref() == Some(ask.value.as_str()));
+    fn press(what: &'static str, value: String, action: String) -> impl Fn(&mut Backplane, &ClickEvent, &mut Window, &mut Context<Backplane>) + 'static {
+        move |this, _, _, cx| {
+            let go = BOT_DEL.lock().map_or(false, |mut g| { let (next, go) = delete_press(g.as_deref(), &value, what); *g = next; go });
+            if go { let _ = this.tx.try_send(act(&action, &value)); }
+            cx.notify();
+        }
+    }
+    let btn = |id: &'static str, probe: &'static str, label: String, bad: bool| crate::ui::with_rect(div().id(id), move || probe.to_string()).px_2().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer().border_1()
+        .when(bad, |x| x.border_color(c("bad")).bg(c("bad")).text_color(c("on-accent"))).when(!bad, |x| x.border_color(c("line")).bg(c("raise")).text_color(c("text")).hover(|s| s.bg(c("panel")))).child(label);
+    let foot = div().pt_3().mt_2().border_t_1().border_color(c("line")).flex().flex_col().gap_2();
+    if !armed {
+        /* i18n-ok: a ctl id */ let open = crate::ui::with_rect(div().id("bot-delete"), || "ui:Delete bot".to_string()).px_2().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer().border_1().border_color(c("bad"))
+            .bg(c("raise")).text_color(c("bad")).hover(|s| s.bg(c("panel"))).child(trs(&ask.label)).on_click(cx.listener(press("open", ask.value.clone(), ask.action.clone())));
+        return Some(foot.child(div().flex().child(open)).into_any_element())
+    }
+    Some(foot.child(div().font_weight(FontWeight::BOLD).child(trs(&ask.title)))
+        .children((!ask.body.is_empty()).then(|| div().text_color(c("dim")).child(trs(&ask.body))))
+        /* i18n-ok: ctl ids */ .child(div().flex().gap_2().child(btn("bot-delete-yes", "ui:Delete bot yes", trs(&ask.yes), true).on_click(cx.listener(press("yes", ask.value.clone(), ask.action.clone()))))
+            /* i18n-ok: a ctl id */ .child(btn("bot-delete-no", "ui:Delete bot cancel", crate::i18n::t("common.cancel"), false).on_click(cx.listener(press("no", ask.value.clone(), ask.action.clone())))))
+        .into_any_element())
 }
 /// Settings' infinite context (the hub's bots/recall): the switch, and how far the memory tree is written.
 fn recall_row(cx: &mut Context<Backplane>, light: bool, r: &Value) -> AnyElement {
@@ -609,12 +627,18 @@ mod tests {
         assert_eq!(o, vec![("n".to_string(), "Name".to_string()), ("q".to_string(), "Q".to_string())]);
         let f = form_fields(&j(r#"{"bot":{"kind":"bot","space":{"blocks":[{"type":"input","label":"Name","action":"n"}]}}}"#)); assert_eq!((f[0].name.as_str(), f[0].vault), ("sp.n", true));
     }
-    #[test] fn delete_bot_asks_first_and_the_second_click_in_time_on_the_same_bot_deletes() {
-        let t0 = std::time::Instant::now();
-        let (armed, go) = delete_press(None, "b1", t0); assert!(!go && armed.as_ref().unwrap().0 == "b1", "the first click only arms");
-        assert!(delete_press(armed.as_ref(), "b1", t0 + std::time::Duration::from_secs(2)).1, "the second deletes");
-        let (again, go) = delete_press(armed.as_ref(), "b2", t0); assert!(!go && again.unwrap().0 == "b2", "another bot's page arms its own");
-        assert!(!delete_press(armed.as_ref(), "b1", t0 + DELETE_ARMED + std::time::Duration::from_secs(1)).1, "a late click asks again");
+    #[test] fn delete_bot_asks_first_with_the_hubs_words_and_only_yes_on_the_same_bot_deletes() {
+        let page = j(r#"{"kind":"bot","id":"b1","name":"Bub","delete":{"label":"Delete bot","action":"bot-delete","value":"b1","ask":{"title":"Delete Bub?","body":"This removes Bub's threads, its routines and its home folder.","yes":"Delete bot"}}}"#);
+        let a = delete_ask(&page).unwrap();
+        assert_eq!((a.title.as_str(), a.body.as_str(), a.yes.as_str(), a.action.as_str(), a.value.as_str()), ("Delete Bub?", "This removes Bub's threads, its routines and its home folder.", "Delete bot", "bot-delete", "b1"), "the confirm is the hub's, as it is");
+        assert!(delete_ask(&j(r#"{"kind":"bot","id":"u","name":"Uber"}"#)).is_none(), "no delete offered (the uberbot): no button");
+        let old = delete_ask(&j(r#"{"kind":"bot","id":"b1","name":"Bub","delete":{"label":"Delete bot","action":"bot-delete","value":"b1"}}"#)).unwrap();
+        assert!(old.body.is_empty() && old.title.contains("Bub"), "an older hub: the bot by name, no claim of what goes");
+        let (armed, go) = delete_press(None, "b1", "open"); assert!(!go && armed.as_deref() == Some("b1"), "Delete bot only opens the confirm");
+        assert_eq!(delete_press(armed.as_deref(), "b1", "yes"), (None, true), "yes deletes");
+        assert_eq!(delete_press(armed.as_deref(), "b1", "no"), (None, false), "cancel shuts it");
+        assert_eq!(delete_press(armed.as_deref(), "b2", "yes"), (Some("b1".into()), false), "yes for another bot than the armed one deletes nothing");
+        assert_eq!(delete_press(None, "b1", "yes"), (None, false), "nothing armed: nothing deleted");
     }
     #[test] fn presses_are_the_phones_actions() {
         for (c, a, v) in [(tab_cmd("memory"), "bot-tab", "memory"), (pick_cmd("b1"), "room-pick", "b1"), (forget_cmd("k"), "mem-forget", "k"), (routine_toggle("r"), "routine-toggle", "r"), (hook_revoke("h"), "hook-revoke", "h"), (close_bot_form(""), "form-close", "@bnew"), (close_room_form(""), "form-close", "@rnew"), (provider_cmd("claude"), "bfield", "provider\u{1f}claude")] {

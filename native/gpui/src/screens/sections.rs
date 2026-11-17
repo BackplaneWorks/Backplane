@@ -42,7 +42,7 @@ fn head(cx: &mut Context<Backplane>, light: bool, s: &Value, ctl: &mut Vec<CtlEn
     if s["rename"] == true && !gid.is_empty() {
         /* i18n-ok: a ctl label */ ctl.push(CtlEntry { id: format!("group-rename:{gid}"), label: "Rename group".into(), ctl: Ctl::Node("group-rename-start".into(), gid.clone()) });
         d = d.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
-            /* i18n-ok: menu labels, drawn through trs */ let items = vec![crate::screens::ctxmenu::Item { label: "Rename group".into(), action: "group-rename-start".into(), value: gid.clone(), confirm: false }];
+            /* i18n-ok: menu labels, drawn through trs */ let items = vec![crate::screens::ctxmenu::Item { label: "Rename group".into(), action: "group-rename-start".into(), value: gid.clone(), confirm: false, note: String::new() }];
             this.ctx_open(e.position, items, cx);
         }));
     }
@@ -87,10 +87,10 @@ fn project(this: &Backplane, cx: &mut Context<Backplane>, light: bool, p: &Value
             // the hub's menu (Pin, New swarm, Rename, Badge, Open folder, Move to group ›, Make quiet, Remove project); an older hub sends none
             let hub_menu = crate::screens::ctxmenu::section_items(&menu);
             if !hub_menu.is_empty() { this.ctx_open(e.position, hub_menu, cx); return }
-            /* i18n-ok: menu labels, drawn through trs */ let mut items = vec![crate::screens::ctxmenu::Item { label: if pinned { "Unpin project".into() } else { "Pin project".into() }, action: "project-pin".into(), value: key3.clone(), confirm: false },
-                /* i18n-ok: a menu label, drawn through trs */ crate::screens::ctxmenu::Item { label: "New swarm".into(), action: "swarm-new".into(), value: pid3.clone(), confirm: false }];
+            /* i18n-ok: menu labels, drawn through trs */ let mut items = vec![crate::screens::ctxmenu::Item { label: if pinned { "Unpin project".into() } else { "Pin project".into() }, action: "project-pin".into(), value: key3.clone(), confirm: false, note: String::new() },
+                /* i18n-ok: a menu label, drawn through trs */ crate::screens::ctxmenu::Item { label: "New swarm".into(), action: "swarm-new".into(), value: pid3.clone(), confirm: false, note: String::new() }];
             for g in groups.as_array().into_iter().flatten() {
-                items.push(crate::screens::ctxmenu::Item { label: tf("gpui.sections.move.to", &[("group", string(g, "label").into())]), action: "group-move".into(), value: format!("{}\u{1f}{}", key3, string(g, "value")), confirm: false });
+                items.push(crate::screens::ctxmenu::Item { label: tf("gpui.sections.move.to", &[("group", string(g, "label").into())]), action: "group-move".into(), value: format!("{}\u{1f}{}", key3, string(g, "value")), confirm: false, note: String::new() });
             }
             this.ctx_open(e.position, items, cx);
         }))
