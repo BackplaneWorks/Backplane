@@ -934,22 +934,26 @@ try:
                         print(f'INFO ROW {E} {name}: Escape {"closes it" if closed else "does NOT close it"}', flush=True)
                         if not closed: key(K_ESC); time.sleep(1.0)
                     if not alive: print(f'INFO {E}: KiCad frame gone after {name}; the table stops here', flush=True); return False
-                if E == 'sch':  # last: Cmd+W (KiCad's Close: the pane goes back to View, Edit brings a fresh frame), then Cmd+Q (nothing or the save gate)
+                if True:  # last, in both editors: Cmd+W (KiCad's Close: the pane goes back to View, Edit brings a fresh frame); Cmd+Q (schematic only)
+                    canvas(); m0 = seq(); key(1, CMD); wait_for(lambda: since(m0, 'ET_MODIFIED_CHANGED') or True, 3); time.sleep(1.0)  # saved first: no save prompt
                     canvas(); n, t = press(13, CMD)
-                    gone = wait_for(lambda: not kicad_frame(), 10); offered = wait_for(lambda: rects().get('ui:Edit'), 10)
+                    gone = wait_for(lambda: since(n, 'ET_FRAME_CLOSED') or not kicad_frame(), 10); offered = wait_for(lambda: rects().get('ui:Edit'), 10)
+                    print(f'INFO ROW {E} extra_close_window: ET_FRAME_CLOSED {"seen" if since(n, "ET_FRAME_CLOSED") else "not seen"}', flush=True)
                     back = None
                     if offered:
                         r = rects().get('ui:Edit'); b = next((w for w in wins() if w[0] == cw[0]), cw)[3]
                         click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2); back = wait_for(kicad_frame, 60, 0.5)
                     dl = [e.get('detail') for e in since(n, 'ET_DIALOG_OPENED')]
                     row(E, 'extra_close_window', 'works' if gone and offered and back else 'wrong', f'frame gone {bool(gone)}; the pane offers Edit {bool(offered)}; Edit brings it back {bool(back)}; dialogs {dl}', t)
-                    if back:
+                    if back and E == 'sch':
                         time.sleep(4); board_click(0.1, 0.9); kp = {w[1] for w in wins() if 'kicad' in w[2].lower()}
                         n, t = press(12, CMD); time.sleep(3)
                         dl = [e.get('detail') for e in since(n, 'ET_DIALOG_OPENED')]; alive = bool(kicad_frame())
                         v = 'nothing (KiCad stays)' if alive and not dl else (f'the save gate ({dl})' if alive else 'KiCad QUIT')
                         row(E, 'extra_quit', v, f'frame there {alive}; dialogs {dl}', t)
                         if dl: key(K_ESC); time.sleep(1.0)
+                    if back and E == 'pcb': time.sleep(4); canvas()
+                    if not back: return False
                 return True
             # ⌫ while routing, inside the board: pictures of KiCad's frame only, right before and after ⌫
             def kshot(tag):
