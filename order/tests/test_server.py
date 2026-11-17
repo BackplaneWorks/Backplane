@@ -311,6 +311,18 @@ def test_ship_to_must_be_a_country():
     assert package.check_manifest(m)["ship_to"] == "GR"
 
 
+def test_sanctioned_destinations_are_refused():
+    sent = {"main/gerbers.zip": b"x"}
+    for code, name in (("CU", "Cuba"), ("IR", "Iran"), ("KP", "North Korea"), ("SY", "Syria"), ("RU", "Russia"), ("BY", "Belarus")):
+        m = manifest(sent)
+        m["ship_to"] = code
+        try:
+            package.check_manifest(m)
+            raise AssertionError(f"an order to {code} was accepted")
+        except package.Bad as e:
+            assert name in str(e) and "sanctions" in str(e), str(e)
+
+
 # ---------------------------------------------------------------- taxes and fees the fab charges on top
 
 def test_us_sales_tax_follows_the_state():
@@ -331,7 +343,7 @@ def test_us_sales_tax_follows_the_state():
     assert "Ships to the United States (Georgia)" in ga["markdown"]
     # Oregon has none; without a state, a high rate, and the quote says so
     assert tax["OR"]["amount"] == 0 and "Oregon has no sales tax" in tax["OR"]["detail"]
-    assert none["sales_tax"]["rate"] == 10.25 and none["region"] == "" and "without the state" in tax[None]["detail"]
+    assert none["sales_tax"]["rate"] == 10.25 and none["region"] == "" and "doesn't say which state" in tax[None]["detail"]
     assert any("doesn't say which US state" in w for w in none["warnings"]), none["warnings"]
     assert none["total"] > ga["total"] > orgn["total"]
     for q in quotes.values():

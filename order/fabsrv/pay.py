@@ -17,9 +17,7 @@ from . import config, store
 
 API = "https://api.stripe.com/v1"
 
-TERMS = ("Prices are estimates from current manufacturing rates and are not guaranteed. If the real cost is higher, "
-         "we'll ask before charging more, and if you'd rather not pay it you get a full refund. If it's lower, we refund "
-         "the difference.")
+TERMS = "Parts are made to your files and ship straight from the manufacturer. The price shown is the price you pay."
 
 
 class Unavailable(Exception):

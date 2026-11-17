@@ -128,8 +128,7 @@ def sales_tax(country, region, goods, freight):
 
 def sales_tax_note(t):
     if not t["known"]:
-        return (f"Estimated at {t['rate']:g}% without the state it ships to; "
-                "any difference is refunded or asked for")
+        return f"At {t['rate']:g}%, since the quote doesn't say which state it ships to"
     if not t["rate"]:
         return f"{STATES[t['region']]} has no sales tax"
     return f"{STATES[t['region']]}, {t['rate']:g}% average state and local rate, on the goods and shipping"

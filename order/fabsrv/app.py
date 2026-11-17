@@ -212,6 +212,8 @@ async def quote_buy(qid: str, request: Request, t: str = ""):
         return HTMLResponse(pages.done(o["status"]))
     if config.PAUSED:
         return HTMLResponse(pages.paused())
+    if row["country"] in package.NO_SHIP:
+        return HTMLResponse(pages.error("Not payable", "Backplane can't take orders shipping there."), status_code=409)
     if q["status"] != "ready":
         return HTMLResponse(pages.error("Not payable", "This quote can no longer be paid. Ask for a new one in Backplane."), status_code=409)
     if q["quote"].get("problems"):

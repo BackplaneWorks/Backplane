@@ -26,6 +26,10 @@ KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK
 MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH
 SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI
 VN VU WF WS YE YT ZA ZM ZW""".split())
+# Countries under comprehensive US sanctions, and Russia and Belarus (US export
+# controls on electronics): a US company may not sell or arrange orders there,
+# even when the fab ships. Occupied regions of Ukraine have no code of their own.
+NO_SHIP = {"CU": "Cuba", "IR": "Iran", "KP": "North Korea", "SY": "Syria", "RU": "Russia", "BY": "Belarus"}
 REGIONS = {"EU": "the European Union", "EZ": "the eurozone", "UN": "the United Nations", "UK": "the United Kingdom (its code is GB)"}
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$")
 PATH_PART = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._+()-]{0,127}$")
@@ -75,6 +79,8 @@ def check_manifest(m):
         what = REGIONS.get(country)
         raise Bad(f"ship_to {country} is {what}, not a country: ask which country it ships to" if what
                   else f"ship_to {country} is not a country's ISO code: ask which country it ships to")
+    if country in NO_SHIP:
+        raise Bad(f"Backplane can't take orders shipping to {NO_SHIP[country]}: US sanctions and export rules don't allow it")
     # the US state it ships to (its sales tax); optional, and only read for the US
     region = m.get("ship_region") or ""
     if country != "US":
