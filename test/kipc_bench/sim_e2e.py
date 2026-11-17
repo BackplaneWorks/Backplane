@@ -46,7 +46,11 @@ DIV = [("V1", "dc 5 ac 1", ["in", "GND"], None, None), ("R1", "10k", ["in", "out
 # series L1 1m, R1 50, then C1 100n to ground: V(c) is a second-order low-pass (z = 0.25), V(a)-V(c) across R1 a band-pass (Q = 2)
 RLC = [("L1", "1m", ["in", "a"], None, None), ("R1", "50", ["a", "c"], None, None), ("C1", "100n", ["c", "GND"], None, None)]
 FAIL = [("V1", "dc 1", ["in", "GND"], None, None), ("C1", "1u", ["in", "mid"], None, None), ("C2", "1u", ["mid", "GND"], None, None)]
-FIXTURES = {"rc": RC, "div": DIV, "rlc": RLC, "fail": FAIL}
+# a loop: E1 = 100 (V(ref) - V(fb)) -> R1 1k, C1 100n -> a unity buffer E2 -> R2 1k, C2 10n -> fb; V1 on ref has an AC value of its own
+E = lambda gain: {"Sim.Device": "SPICE", "Sim.Params": 'type=\\"E\\" model=\\"%s\\"' % gain}
+LOOP = [("V1", "dc 0 ac 1", ["ref", "GND"], None, None), ("E1", "100", ["e1", "GND", "ref", "fb"], None, E(100)), ("R1", "1k", ["e1", "o1"], None, None), ("C1", "100n", ["o1", "GND"], None, None),
+        ("E2", "1", ["o2", "GND", "o1", "GND"], None, E(1)), ("R2", "1k", ["o2", "fb"], None, None), ("C2", "10n", ["fb", "GND"], None, None)]
+FIXTURES = {"rc": RC, "div": DIV, "rlc": RLC, "fail": FAIL, "loop": LOOP}
 LM358 = "* a stand-in follower for the e2e: out follows inp\n.subckt LM358 INP OUT GND\nRin INP GND 1G\nE1 OUT GND INP GND 1\n.ends\n"
 
 def val(text):
@@ -107,6 +111,8 @@ def task_rc(t):
     parts = {p["ref"]: p for p in r["results"][1]["models"]["parts"]}
     t.ok("include, models all, exclude by pattern, model clear and by library with a pin map", r["results"][0] == {"included": ["TP1"]} and "why" in parts["TP1"] and parts["R1"].get("device", "").startswith("R") and parts["J1"].get("excluded") and r["results"][2] == {"excluded": ["TP1"]} and r["results"][4]["model"][0].get("pins") == "1=INP 2=OUT 3=GND" and r.get("left") == [], r)
     r = t.sim([{"probe": {"pin": "U1.2", "name": "BUFO"}}, {"run": ".op"}]); t.ok("probe: a pin's net labelled and read", "V(BUFO)" in r["results"][0]["probe"]["signals"] and '(label "BUFO"' in open(t.sch).read(), r["results"][0])
+    r = t.sim([{"import": {"text": ".subckt REG VIN GND PH\nI1 VIN GND 1Adc\nD1 GND PH MBR340\n.ends\n", "url": "https://vendor.example/reg.lib", "as": "reg.lib"}}]); w = r["results"][0]["import"].get("warnings", [])
+    t.ok("import: PSpice's ampere unit and an undefined model are warned of", len(w) == 2 and "atto" in w[0] and "mbr340" in w[1], w)
     e = t.err([{"import": {"text": "<html><body>Sign in to download</body></html>", "url": "https://vendor.example/login"}, "to": "U1"}]); t.ok("import: a login page is refused in words that say to ask the person", "stop and ask the person" in e, e)
     r = t.sim([{"stats": True}]); st = r["results"][0]["stats"]; t.ok("stats: the log's totals", st["actions"] >= 20 and st["ops"]["run"]["count"] >= 4 and st["ops"]["sweep"]["runs"] >= 5 and st["models_from"].get("vendor", 0) >= 1, st)
 
@@ -148,7 +154,24 @@ def task_fail(t):
     r = t.sim([{"run": ".op", "log": True}]); t.ok("the console when asked", isinstance(r["results"][0]["run"].get("log"), str) and len(r["results"][0]["run"]["log"]) > 20, r["results"][0]["run"].get("log", "")[:80])
     e = t.err([{"run": ".plot v(mid)"}]); t.ok("what is not an analysis is said before KiCad is asked", "is not an analysis" in e, e)
     e = t.err([{"model": "R99", "device": "R"}]); t.ok("an unknown part", "R99" in e, e)
-TASKS = {"rc": task_rc, "div": task_div, "rlc": task_rlc, "fail": task_fail}
+def task_loop(t):
+    p1, p2 = 1 / (2 * math.pi * 1e3 * 100e-9), 1 / (2 * math.pi * 1e3 * 10e-9); mag = lambda f: 100 / math.sqrt((1 + (f / p1) ** 2) * (1 + (f / p2) ** 2))
+    lo, hi = p1, 1e7
+    for _ in range(200): mid = math.sqrt(lo * hi); lo, hi = (mid, hi) if mag(mid) > 1 else (lo, mid)
+    fc = math.sqrt(lo * hi); pm = 180 - math.degrees(math.atan(fc / p1)) - math.degrees(math.atan(fc / p2))
+    # at the amplifier's input (nothing flows into it), and at its output (everything does): the same loop, the circuit's own AC source taken out
+    for at in ("E1.4", "R1.1"):
+        r = t.sim([{"loopgain": at}]); l = r["results"][0]["loopgain"]
+        t.near(f"loop gain cut at {at}: crossover", l["crossover"], fc, rel=0.01); t.near(f"loop gain cut at {at}: phase margin", l["phase_margin"], pm, rel=0.01); t.near(f"loop gain cut at {at}: DC loop gain, dB", l["dc_gain_db"], 40, rel=0.002)
+        t.ok(f"loop gain cut at {at}: two poles have no gain margin, three runs, nothing saved, no curve", str(l["gain_margin"]).startswith("none:") and l["runs"] == 3 and "curve" not in l and "saved" not in r, l)
+    r = t.sim([{"loopgain": "E1.4", "set": {"C2": "100n"}, "waves": 16, "run": ".ac dec 100 1 10meg"}]); l = r["results"][0]["loopgain"]
+    t.near("loop gain with C2 = 100n for these runs: both poles at one frequency", l["phase_margin"], 180 - 2 * math.degrees(math.atan(math.sqrt(99))), rel=0.02)
+    t.ok("loop gain: the curve when asked", len(l["curve"]["f"]) <= 16 and abs(l["curve"]["db"][0] - 40) < 0.1, l.get("curve"))
+    t.ok("the schematic is untouched", "Vlg" not in open(t.sch).read() and '"Value" "10n"' in open(t.sch).read(), "")
+    e = t.err([{"loopgain": "E9.1"}]); t.ok("a cut at a part that is not there", "E9" in e, e)
+    r = t.sim([{"run": ".ac dec 20 1 1meg", "options": {"save_all_currents": False}, "directives": [".options reltol=0.002"], "measures": {"cl": "dc_gain V(fb)", "bw": "corner V(fb)"}}]); ms = r["results"][0]["run"]["measures"]
+    t.near("closed loop with netlist options and directives: gain 100/101, dB", ms["cl"], 20 * math.log10(100 / 101), tol=0.01)
+TASKS = {"rc": task_rc, "div": task_div, "rlc": task_rlc, "fail": task_fail, "loop": task_loop}
 
 def run(work, only):
     fix = f"{work}/simfix"; shutil.rmtree(fix, ignore_errors=True); bad = 0

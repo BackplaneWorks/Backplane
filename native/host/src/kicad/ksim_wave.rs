@@ -255,6 +255,31 @@ pub fn measure(name: &str, p: &Value, sig: &Sig) -> Result<Value, String> {
     }
 }
 
+/// A loop's gain from a break in it, by Tian's method (M. Tian et al., "Striving for small-signal stability", 2001): the loop is cut
+/// at a node into x and y, a voltage source Vi (+ at x, - at y) and a current source Ii (from ground into x) stand in the cut, and the
+/// circuit is run twice: once with Vi = 1, Ii = 0, once with Vi = 0, Ii = 1. `v1`, `i1` are V(x) and the current through Vi (from x
+/// to y inside it, as ngspice's `vi#branch`) in the first run, `v2`, `i2` in the second. The DC operating point is the unbroken
+/// loop's (both sources are 0 V and 0 A at DC), voltage and current injection are combined, so the result holds at any impedance
+/// level and whichever side of the cut drives. Positive for negative feedback: its phase starts near 0 and falls.
+pub fn tian(v1: &Sig, i1: &Sig, v2: &Sig, i2: &Sig) -> Result<Sig, String> {
+    let n = v1.len(); if n == 0 || [i1.len(), v2.len(), i2.len()].iter().any(|l| *l != n) { return Err("the two injection runs differ in length".into()) }
+    let c = |s: &Sig, k: usize| (s.y[k], s.im.as_ref().map_or(0.0, |m| m[k]));
+    let mul = |a: (f64, f64), b: (f64, f64)| (a.0 * b.0 - a.1 * b.1, a.0 * b.1 + a.1 * b.0);
+    let inv = |a: (f64, f64)| { let d = a.0 * a.0 + a.1 * a.1; (a.0 / d, -a.1 / d) };
+    let (mut re, mut im) = (Vec::with_capacity(n), Vec::with_capacity(n));
+    for k in 0..n {
+        let (a, b, p, q) = (c(v1, k), c(i1, k), c(v2, k), c(i2, k));
+        let (x, y) = (mul(b, p), mul(a, q)); let d = (2.0 * (x.0 - y.0) + a.0 + q.0, 2.0 * (x.1 - y.1) + a.1 + q.1);
+        let e = inv(d); let t = inv((1.0 - e.0, -e.1)); re.push(-t.0); im.push(-t.1);
+    }
+    Ok(Sig { x: v1.x.clone(), y: re, im: Some(im), log: true })
+}
+/// `a - b`, point by point (a run's response without what the circuit's own AC sources put there).
+pub fn minus(a: &Sig, b: &Sig) -> Sig {
+    let im = match (&a.im, &b.im) { (None, None) => None, _ => Some((0..a.len()).map(|k| a.im.as_ref().map_or(0.0, |m| m[k]) - b.im.as_ref().map_or(0.0, |m| *m.get(k).unwrap_or(&0.0))).collect()) };
+    Sig { x: a.x.clone(), y: (0..a.len()).map(|k| a.y[k] - b.y.get(k).copied().unwrap_or(0.0)).collect(), im, log: a.log }
+}
+
 // ---- compaction ------------------------------------------------------------------------------------------------------------
 
 /// At most `n` sample indices that keep the shape: the first and the last, and the lowest and highest of every series in each of the
@@ -442,6 +467,25 @@ mod tests {
         // a loop that never reaches unity says which way it missed
         assert!(measure("phase_margin", &json!({}), &tf(logs(1.0, 1e3, 20), |w| div((1e6, 0.0), (1.0, w / p3)))).unwrap_err().contains("sweep to a higher frequency"));
         assert!(measure("unity_gain_freq", &json!({}), &tf(logs(1.0, 1e3, 20), |w| div((0.5, 0.0), (1.0, w / p3)))).unwrap_err().contains("below unity everywhere"));
+    }
+
+    #[test] fn a_loop_gain_from_two_injections() {
+        // an amplifier -A(s) of v(x) behind Zo, into Zi at x: T = A Zi / (Zi + Zo), whatever the impedances, and with the cut turned round
+        let (k, p) = (8.0, 2.0 * PI * 1e3); let a = |w: f64| { let q = (1.0, w / p); div((k, 0.0), mul(q, mul(q, q))) };
+        let add = |a: (f64, f64), b: (f64, f64)| (a.0 + b.0, a.1 + b.1);
+        for (zi, zo, c) in [(1e3, 1e3, 0.0), (1e6, 10.0, 1e-9), (10.0, 1e5, 1e-6)] {
+            let f = logs(1.0, 1e6, 20); let zi_of = |w: f64| div((zi, 0.0), (1.0, w * zi * c)); // Zi with a capacitor across it
+            // run 1 (Vi = 1): vx = 1 / (1 + A + Zo/Zi), i = -vx/Zi; run 2 (Ii = 1): vx = 1 / (1/Zi + (1 + A)/Zo), i = 1 - vx/Zi
+            let v1 = tf(f.clone(), |w| div((1.0, 0.0), add(add((1.0, 0.0), a(w)), div((zo, 0.0), zi_of(w))))); let i1 = tf(f.clone(), |w| { let v = div((1.0, 0.0), add(add((1.0, 0.0), a(w)), div((zo, 0.0), zi_of(w)))); let i = div(v, zi_of(w)); (-i.0, -i.1) });
+            let v2 = tf(f.clone(), |w| div((1.0, 0.0), add(div((1.0, 0.0), zi_of(w)), div(add((1.0, 0.0), a(w)), (zo, 0.0))))); let i2 = tf(f.clone(), |w| { let v = div((1.0, 0.0), add(div((1.0, 0.0), zi_of(w)), div(add((1.0, 0.0), a(w)), (zo, 0.0)))); let i = div(v, zi_of(w)); (1.0 - i.0, -i.1) });
+            let t = tian(&v1, &i1, &v2, &i2).unwrap(); let want = tf(f.clone(), |w| mul(a(w), div(zi_of(w), add(zi_of(w), (zo, 0.0)))));
+            for n in 0..f.len() { assert!((t.y[n] - want.y[n]).abs() + (t.im.as_ref().unwrap()[n] - want.im.as_ref().unwrap()[n]).abs() < 1e-9 * (1.0 + want.y[n].abs()), "zi {zi} zo {zo} at {}", f[n]) }
+            if c == 0.0 && zi == zo { close!(m("gain_margin", json!({}), &t), 20.0 * (8.0f64 / (k / 2.0)).log10(), 5e-3); close!(m("dc_gain", json!({}), &t), 20.0 * (k / 2.0f64).log10(), 1e-4) }
+        }
+        // what the circuit's own AC sources add to both runs is taken out with a third, un-injected run
+        let (a, b) = (Sig::ac(vec![1.0, 10.0], vec![3.0, 4.0], vec![1.0, 1.0]), Sig::ac(vec![1.0, 10.0], vec![1.0, 1.0], vec![0.5, 2.0])); let d = minus(&a, &b);
+        assert_eq!((d.y, d.im), (vec![2.0, 3.0], Some(vec![0.5, -1.0])));
+        assert!(tian(&a, &b, &a, &Sig::default()).is_err());
     }
 
     // ---- ripple, periodic signals, noise --------------------------------------------------------------------------------------
