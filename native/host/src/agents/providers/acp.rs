@@ -310,7 +310,7 @@ mod e2e {
     }
     fn core(ev: &[Value]) -> Vec<Value> {
         let policy = ["liveness.", "autosettle.", "alert.", "told.", "summary.at.", "star.nudge", "machine.id", "accounts.", "allowance.", "tz."];
-        ev.iter().filter(|e| { let key = e["key"].as_str().unwrap_or(""); !policy.iter().any(|p| key.starts_with(p)) && (e.to_string().contains(TH) || key.starts_with("stopped.") || key.starts_with("failed.")) }).cloned().collect()
+        ev.iter().filter(|e| { let key = e["key"].as_str().unwrap_or(""); !policy.iter().any(|p| key.starts_with(p)) && !crate::agents::snapguard::is_guard_event(e) && (e.to_string().contains(TH) || key.starts_with("stopped.") || key.starts_with("failed.")) }).cloned().collect()
     }
     /// The stand-in's lines, as make_acp_fixtures.py's norm_in: the folder, the MCP address and the runtime prompt replaced; a pid in a session id.
     fn norm_in(l: &str) -> String {

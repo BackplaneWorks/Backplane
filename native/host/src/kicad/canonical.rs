@@ -215,6 +215,7 @@ pub async fn commit_design(root: &str, msg: &str, skip: &[String]) -> Result<Rec
     let r = git::run_ro(root, &["rev-parse", "--show-toplevel"]).await;
     if r.code != 0 { return Err("the project is not in a git repository".into()) }
     let top = r.out.trim().to_string();
+    let _l = crate::files::snapshot::repo_lock(&top).await; // one hub git write at a time on a repository: the turn snapshots (#1163) use the same index
     let r = git::run_ro(&top, &["symbolic-ref", "--short", "-q", "HEAD"]).await;
     if r.code != 0 || r.out.trim().is_empty() { return Err("the main checkout is not on a branch".into()) }
     let branch = r.out.trim().to_string();

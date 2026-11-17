@@ -756,8 +756,9 @@ impl Actor {
         if let Some(ph) = first_title { let (ag, th2) = (self.ag.clone(), th.clone()); tokio::spawn(async move { if let Err(e) = ag.retitle(&th2, Some(&ph), false).await { eprintln!("titles: {th2}: kept the first line: {e}") } }); }
         self.recent.push_back(msg.clone()); if self.recent.len() > RECENT { self.recent.pop_front(); }
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed);
+        // #1163: the folder is a repository and snapshotted before the turn's own captures and before the agent gets anything (snapguard.rs)
+        if let Err(why) = self.ag.turn_guard_start(&th, &cwd, Some(&text)).await { self.fail(why, "git", &hub_id("git", now_s(), self.ag.seq())).await; return Ok(()) } // #1163: the hub's snapshot (and the review mode) before the agent gets anything (snapguard.rs)
         self.jobs_start(&cwd, &msg); if !self.settle_ends().await { return Ok(()) } // a Stop while it waited for the checkpoint: no agent is started, the Stop ends the turn
-        self.ag.turn_guard_start(&th, &cwd, Some(&text)).await; // #1163: the hub's snapshot (and the review mode) before the agent gets anything (snapguard.rs)
         // the person's message starts the turn: the <terminals> note follows it (and the chat's unpinned terminals stop)
         let rv_block = { let w = self.ag.world().await; let ops: Vec<_> = w.reviews.get(&th).map(|v| v.iter().filter_map(|(k, sm, at)| crate::files::kicad::review::of(crate::files::kicad::review::TONE, k, sm, *at)).collect()).unwrap_or_default(); crate::files::kicad::review::prompt(&crate::files::kicad::review::fold(&ops)) }; // Review.agent: the open comments follow every message
         let text_ref = { let w = self.ag.world().await; let mut model_lines: Vec<String> = refs.iter().map(|r| r.line()).collect(); if role == "user" && origin.is_none() { model_lines.extend(refs::machine_lines(&crate::session::composer::mention::machines(), &text)) } format!("{text}{}", refs::block(&w, &th, &text, &model_lines)) }; // Refs.agent: the text, then what it references (@ > % # words, then the `&model` lines, one block)
@@ -803,8 +804,9 @@ impl Actor {
         let handed = if taken { String::new() } else { self.handed(&mut ev, now).await }; // what was queued is `text` when it is all taken; otherwise the hand-overs go with this turn and the rest stays
         let text = if handed.is_empty() { text } else { format!("{handed}\n\n{text}") };
         self.commit(ev).await;
-        self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, ""); if !self.settle_ends().await { return Ok(()) }
-        self.ag.turn_guard_start(&th, &cwd, Some(&text)).await;
+        self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); // #1163: the folder is a repository and snapshotted before the turn's own captures and before the agent gets anything (snapguard.rs)
+        if let Err(why) = self.ag.turn_guard_start(&th, &cwd, Some(&text)).await { self.fail(why, "git", &hub_id("git", now_s(), self.ag.seq())).await; return Ok(()) }
+        self.jobs_start(&cwd, ""); if !self.settle_ends().await { return Ok(()) }
         if self.codex { self.codex_run(&t, &cwd, &text).await } else { let msg = hub_id("q", now, self.ag.seq()); self.claude_send(&t, &cwd, &msg, &text, &text, now).await }
         Ok(())
     }
@@ -933,8 +935,9 @@ impl Actor {
         // Ride.start: an idle thread starts a turn with the waiting rides
         self.cx = cx; self.cwd = cwd.clone(); self.codex = t.provider != "claude"; self.prov = t.provider.clone(); self.model = t.model.clone();
         let mut ev = codex::ride_done(&th, &v, "with a new turn", now); ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
-        self.commit(ev).await; self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, &codex::ride_last(&v)); if !self.settle_ends().await { return Ok(()) }
-        self.ag.turn_guard_start(&th, &cwd, None).await;
+        self.commit(ev).await; self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); // #1163: the folder is a repository and snapshotted before the turn's own captures and before the agent gets anything (snapguard.rs)
+        if let Err(why) = self.ag.turn_guard_start(&th, &cwd, None).await { self.fail(why, "git", &hub_id("git", now_s(), self.ag.seq())).await; return Ok(()) }
+        self.jobs_start(&cwd, &codex::ride_last(&v)); if !self.settle_ends().await { return Ok(()) }
         let input = codex::ride_input(&v);
         if self.codex { self.codex_run(&t, &cwd, &input).await } else { let msg = hub_id("w", now, self.ag.seq()); self.claude_send(&t, &cwd, &msg, &input, &input, now).await }
         Ok(())
@@ -948,8 +951,9 @@ impl Actor {
         let Some(t) = t else { return }; if ride.is_empty() || t.archived || t.deleted || providers::driver(&t.provider).is_none() { return }
         let now = now_s(); let mut ev = codex::ride_done(&th, &ride, "with a new turn", now);
         ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
-        self.commit(ev).await; self.cwd = cwd.clone(); self.jobs_start(&cwd, &codex::ride_last(&ride)); if !self.settle_ends().await { return }
-        self.ag.turn_guard_start(&th, &cwd, None).await;
+        self.commit(ev).await; self.cwd = cwd.clone(); // #1163: the folder is a repository and snapshotted before the turn's own captures and before the agent gets anything (snapguard.rs)
+        if let Err(why) = self.ag.turn_guard_start(&th, &cwd, None).await { self.fail(why, "git", &hub_id("git", now_s(), self.ag.seq())).await; return }
+        self.jobs_start(&cwd, &codex::ride_last(&ride)); if !self.settle_ends().await { return }
         self.codex_run(&t, &cwd, &codex::ride_input(&ride)).await;
     }
 
@@ -1044,7 +1048,9 @@ impl Actor {
     fn jobs_start(&mut self, cwd: &str, entry: &str) { self.hist(HistJob::Start(cwd.to_string(), entry.to_string())) }
     /// A tool call ended (Steps.claude): a step after it. A turn ended (Ended.out): a step and a checkpoint.
     fn jobs_step(&mut self, entry: &str) { let cwd = self.cwd.clone(); self.hist(HistJob::Step(cwd, entry.to_string())) }
-    fn jobs_end(&mut self) { let cwd = self.cwd.clone(); self.hist(HistJob::End(cwd)); let (ag, th) = (self.ag.clone(), self.th.clone()); tokio::spawn(async move { ag.design_turn_end(&th).await }); }
+    fn jobs_end(&mut self) { let cwd = self.cwd.clone(); self.hist(HistJob::End(cwd)); let (ag, th) = (self.ag.clone(), self.th.clone());
+        let guard = ag.turn_guards.lock().unwrap().remove(&th); // this turn's (#1163), taken now: the next turn's may be in place before the task below runs
+        tokio::spawn(async move { if let Some(g) = guard { ag.turn_guard_end_with(&th, g).await } ag.design_turn_end(&th).await }); }
     /// A thread's design-history captures run one after another, in the order they were asked for: two captures overlapping on one thread's index could see each other's
     /// changes (a step logged against the wrong entry, or an index lock clash), and a turn's end capture must not be overtaken by the next turn's start.
     /// Bounded: a burst of tool-end steps past HIST_STEPS_MAX waiting is dropped (counted), starts and ends always fit. The worker ends after HIST_IDLE with nothing to do

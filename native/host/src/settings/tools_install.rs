@@ -33,10 +33,23 @@ pub struct WinInstaller { pub name: &'static str, pub version: &'static str, pub
 /// %LOCALAPPDATA%\Programs (`install_dir`, given to it with `/D=`) (0.16.0 release check on Windows Server 2022: 133 s, 519 MB).
 /// One line per pin; the tests check it.
 pub const FREECAD_WIN: WinInstaller = WinInstaller { name: "FreeCAD", version: "1.1.4", asset: "FreeCAD_1.1.4-Windows-x86_64-py311-installer.exe", url: "https://github.com/FreeCAD/FreeCAD/releases/download/1.1.4/FreeCAD_1.1.4-Windows-x86_64-py311-installer.exe", sha256: "845f7101d33faf257a82a0cadc5f4f3804441f46ee493eb32b92fcf9c7147a24", size: 519314976, args: &["/S", "/CurrentUser"] };
+/// Git for Windows' installer (its 64-bit release on GitHub; `git-for-windows/git` v2.56.1.windows.1, the digest GitHub publishes for the
+/// asset): Inno Setup, run silently for this user only (`/CURRENTUSER`: no administrator rights) into %LOCALAPPDATA%\Programs\Git
+/// (`install_dir`). For a Windows with no winget, as FreeCAD's. One line per pin; the tests check it.
+pub const GIT_WIN: WinInstaller = WinInstaller { name: "Git", version: "2.56.1", asset: "Git-2.56.1-64-bit.exe", url: "https://github.com/git-for-windows/git/releases/download/v2.56.1.windows.1/Git-2.56.1-64-bit.exe", sha256: "c330c72e10b408cc39994bfefdb63542b0d93d21699325c3e0bd874af8a5a559", size: 66870448, args: &["/VERYSILENT", "/NORESTART", "/NOCANCEL", "/SP-", "/SUPPRESSMSGBOXES", "/CURRENTUSER"] };
+/// Inno Setup (Git for Windows) rather than NSIS (FreeCAD): its switches, folder and registration differ.
+fn inno(p: &WinInstaller) -> bool { p.name == "Git" }
 /// A pin's fields agree with each other: a version of digits and dots, the asset FreeCAD names for that version, its release's address, a
 /// lowercase sha256, a size, and silent per-user switches.
 pub fn check_pin(p: &WinInstaller) -> Result<(), String> {
     if p.version.is_empty() || !p.version.chars().all(|c| c.is_ascii_digit() || c == '.') { return Err("Invalid installer version".into()) }
+    if inno(p) {
+        if p.asset != format!("Git-{}-64-bit.exe", p.version) { return Err("Invalid installer name".into()) }
+        if p.url != format!("https://github.com/git-for-windows/git/releases/download/v{}.windows.1/{}", p.version, p.asset) { return Err("Invalid installer address".into()) }
+        if p.sha256.len() != 64 || !p.sha256.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)) { return Err("Invalid pinned digest".into()) }
+        if p.size == 0 || !p.args.contains(&"/VERYSILENT") || !p.args.contains(&"/CURRENTUSER") { return Err("Invalid installer pin".into()) }
+        return Ok(())
+    }
     if !p.asset.starts_with(&format!("{}_{}-Windows-x86_64-", p.name, p.version)) || !p.asset.ends_with("-installer.exe") || p.asset.contains(['/', '\\']) { return Err("Invalid installer name".into()) }
     if p.url != format!("https://github.com/FreeCAD/FreeCAD/releases/download/{}/{}", p.version, p.asset) { return Err("Invalid installer address".into()) }
     if p.sha256.len() != 64 || !p.sha256.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)) { return Err("Invalid pinned digest".into()) }
@@ -56,13 +69,33 @@ pub fn verify(file: &Path, p: &WinInstaller) -> Result<(), String> {
 /// Where the installer puts FreeCAD: `<LOCALAPPDATA>\Programs\FreeCAD <major.minor>` (its own per-user default), said to it with `/D=` so the
 /// folder is the one this hub's environment names, and where the hub then finds `bin\freecadcmd.exe`.
 pub fn install_dir(local_app_data: &Path, p: &WinInstaller) -> PathBuf {
+    if inno(p) { return local_app_data.join("Programs").join("Git") } // Git for Windows' own per-user default
     let mm: Vec<&str> = p.version.split('.').take(2).collect();
     local_app_data.join("Programs").join(format!("{} {}", p.name, mm.join(".")))
 }
 /// The installer's command line after the program: its switches, then NSIS's `/D=<folder>`, which must come last and unquoted (spaces and all).
-pub fn installer_line(p: &WinInstaller, dest: &Path) -> String { format!("{} /D={}", p.args.join(" "), dest.display()) }
+pub fn installer_line(p: &WinInstaller, dest: &Path) -> String { if inno(p) { format!("{} /DIR=\"{}\"", p.args.join(" "), dest.display()) } else { format!("{} /D={}", p.args.join(" "), dest.display()) } }
 /// The key FreeCAD's installer registers itself under (`Software\Microsoft\Windows\CurrentVersion\Uninstall\FreeCAD114` for 1.1.4).
-pub fn uninstall_key(p: &WinInstaller) -> String { format!("{}{}", p.name, p.version.replace('.', "")) }
+pub fn uninstall_key(p: &WinInstaller) -> String { if inno(p) { "Git_is1".into() } else { format!("{}{}", p.name, p.version.replace('.', "")) } }
+/// The program a pinned install leaves in its folder, which the hub then uses: FreeCAD's console program, Git's git.exe.
+pub fn placed(p: &WinInstaller, dir: &Path) -> PathBuf { if inno(p) { dir.join("cmd").join("git.exe") } else { dir.join("bin").join("freecadcmd.exe") } }
+/// After an install, or a hub started before one: Git for Windows' `cmd` folder put on this hub's PATH when no git is on it, so the hub and
+/// the agents it starts find git without a restart (winget's and the installer's own PATH change reaches only new logins). Answers the folder.
+pub fn git_pick_up() -> Option<PathBuf> {
+    if !cfg!(windows) { return None }
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    if std::env::split_paths(&path).any(|d| d.join("git.exe").is_file()) { return None }
+    let dir = git_dirs(|k| std::env::var_os(k)).into_iter().find(|d| d.join("git.exe").is_file())?;
+    let mut ps = vec![dir.clone()]; ps.extend(std::env::split_paths(&path));
+    if let Ok(j) = std::env::join_paths(ps) { std::env::set_var("PATH", j) }
+    Some(dir)
+}
+/// Where Git for Windows' `cmd` folder is when it is installed: for all users, then for this one.
+pub fn git_dirs(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = ["ProgramW6432", "ProgramFiles"].iter().filter_map(|k| var(k)).map(|r| PathBuf::from(r).join("Git").join("cmd")).collect();
+    if let Some(l) = var("LOCALAPPDATA") { v.push(PathBuf::from(l).join("Programs").join("Git").join("cmd")) }
+    v.dedup(); v
+}
 /// The folder an uninstaller registration names (`reg query ... /v UninstallString`'s answer: `"C:\...\FreeCAD 1.1\Uninstall-FreeCAD.exe"`).
 pub fn registered_dir(reg_out: &str) -> Option<PathBuf> {
     let l = reg_out.lines().find(|l| l.trim_start().starts_with("UninstallString"))?;
@@ -82,6 +115,7 @@ async fn registered(p: &WinInstaller) -> Option<PathBuf> {
 /// An installer's failure in the person's words. FreeCAD's quits silently (NSIS exit 2) when FreeCAD is running or this version is installed already.
 pub fn installer_failed(p: &WinInstaller, code: Option<i32>) -> String {
     match code {
+        Some(c) if inno(p) => format!("The {} installer stopped (exit {c}); close any Git Bash window, then Try again", p.name),
         Some(2) => format!("The {} installer stopped: close {} if it is open (agents' mechanical work uses it too), or remove an earlier {} {} in Windows' Installed apps, then Try again", p.name, p.name, p.name, p.version),
         Some(c) => format!("The {} installer stopped (exit {c})", p.name),
         None => format!("The {} installer was stopped", p.name),
@@ -241,7 +275,12 @@ pub fn plan(tool: &str, os: &str, arch: &str, winget: bool, node: bool) -> Optio
         "tailscale" => match os { "windows" if winget => Some(Plan::Winget("Tailscale.Tailscale")), "windows" => Some(Plan::Link("https://tailscale.com/download/windows")), "darwin" => Some(Plan::Link("https://tailscale.com/download/mac")), _ => Some(Plan::Link("https://tailscale.com/download/linux")) },
         // Git for Windows: the hub's shell commands and (until the fetch in Rust reaches Windows) KiCad's download run in its sh
         "git" if os == "windows" && winget => Some(Plan::Winget("Git.Git")),
+        "git" if os == "windows" && arch == "x64" => Some(Plan::Direct(&GIT_WIN)),
         "git" if os == "windows" => Some(Plan::Link("https://git-scm.com/download/win")),
+        // macOS: Homebrew's git where Homebrew is, else Apple's Command Line Tools (its own window asks and installs; Check again after)
+        "git" if os == "darwin" => Some(Plan::Sh(GIT_MAC_SH, vec![])),
+        // Linux: the distribution's package, through pkexec (the desktop's own password prompt) where there is one; else the step's command to copy
+        "git" if os == "linux" => Some(Plan::Sh(GIT_LINUX_SH, vec![])),
         // Linux and macOS: FreeCAD's own release into the hub's folder (`start` adds that folder); Windows: winget, else the same release's
         // installer, pinned, downloaded and run by the hub (x64 only: FreeCAD publishes no other Windows build)
         "freecad" => match (os, freecad_sys(os, arch)) {
@@ -264,6 +303,15 @@ pub fn plan(tool: &str, os: &str, arch: &str, winget: bool, node: bool) -> Optio
         _ => None,
     }
 }
+
+/// macOS: `brew install git` with Homebrew, else Apple's Command Line Tools (`xcode-select --install` opens Apple's own installer window).
+pub const GIT_MAC_SH: &str = "set -e; for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do if [ -x \"$b\" ]; then exec \"$b\" install git; fi; done; xcode-select --install 2>&1 || true; echo 'The Apple installer window is open: finish it there, then press Check again.'";
+/// Linux: the distribution's git through pkexec (a desktop password prompt) when there is one and a desktop to ask on; otherwise it stops
+/// with the command to run in a terminal.
+pub const GIT_LINUX_SH: &str = "for m in apt-get dnf pacman zypper apk; do command -v $m >/dev/null 2>&1 && break; m=; done
+case $m in apt-get) a='apt-get install -y git';; dnf) a='dnf install -y git';; pacman) a='pacman -S --noconfirm git';; zypper) a='zypper --non-interactive install git';; apk) a='apk add git';; *) echo 'No package manager found: install git with the software tool of your system'; exit 1;; esac
+if command -v pkexec >/dev/null 2>&1 && [ -n \"$DISPLAY$WAYLAND_DISPLAY\" ]; then exec pkexec $a; fi
+echo \"Run in a terminal: sudo $a\"; exit 1";
 
 /// Each tool's install: state, note and the share downloaded (0 to 1, a download with a known size only).
 static STATE: Mutex<BTreeMap<String, (String, String, Option<f64>)>> = Mutex::new(BTreeMap::new());
@@ -384,13 +432,13 @@ async fn direct(hub: &Arc<Hub>, tool: &str, p: &'static WinInstaller, dir: &Path
     let lad = std::env::var_os("LOCALAPPDATA").filter(|d| !d.is_empty()).ok_or("LOCALAPPDATA is not set")?;
     let dest = install_dir(Path::new(&lad), p);
     // this version installed for this user already (the installer then quits at once, silently): that one is used
-    if let Some(dir) = registered(p).await.filter(|d| d.join("bin").join("freecadcmd.exe").is_file()) {
-        let cmd = dir.join("bin").join("freecadcmd.exe").to_string_lossy().into_owned();
-        let d = hub.cfg.home.join("freecad"); let _ = std::fs::create_dir_all(&d); let _ = std::fs::write(d.join("command"), &cmd);
+    if let Some(dir) = registered(p).await.filter(|d| placed(p, d).is_file()) {
+        let cmd = placed(p, &dir).to_string_lossy().into_owned();
+        if inno(p) { git_pick_up(); } else { let d = hub.cfg.home.join("freecad"); let _ = std::fs::create_dir_all(&d); let _ = std::fs::write(d.join("command"), &cmd); }
         say(hub, tool, "running", &format!("{} {} is installed for this user already, in {}", p.name, p.version, dir.display())).await;
         return Ok(())
     }
-    say(hub, tool, "running", &format!("Installing {} {} for this Windows user. This takes about two minutes", p.name, p.version)).await;
+    say(hub, tool, "running", &format!("Installing {} {} for this Windows user. This takes {}", p.name, p.version, if inno(p) { "about a minute" } else { "about two minutes" })).await;
     let out = std::fs::OpenOptions::new().append(true).create(true).open(log).map_err(|e| e.to_string())?;
     let err = out.try_clone().map_err(|e| e.to_string())?;
     let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, &file);
@@ -405,11 +453,11 @@ async fn direct(hub: &Arc<Hub>, tool: &str, p: &'static WinInstaller, dir: &Path
         Err(_) => return Err(format!("The {} installer did not finish in 30 minutes", p.name)),
     };
     if !status.success() { return Err(installer_failed(p, status.code())) }
-    // the console program it placed; the hub uses it from now on
-    let cmd = dest.join("bin").join("freecadcmd.exe");
+    // the program it placed; the hub uses it from now on
+    let cmd = placed(p, &dest);
     if !cmd.is_file() { return Err(format!("The {} installer finished, but {} is not there", p.name, cmd.display())) }
     let cmd = cmd.to_string_lossy().into_owned();
-    let d = hub.cfg.home.join("freecad"); let _ = std::fs::create_dir_all(&d); let _ = std::fs::write(d.join("command"), &cmd);
+    if inno(p) { git_pick_up(); } else { let d = hub.cfg.home.join("freecad"); let _ = std::fs::create_dir_all(&d); let _ = std::fs::write(d.join("command"), &cmd); }
     let _ = std::fs::remove_file(&file);
     say(hub, tool, "running", &format!("Installed in {}", dest.display())).await;
     Ok(())
@@ -546,6 +594,26 @@ mod tests {
         let o = std::process::Command::new("sh").arg("-c").arg(VENDOR_SH).arg("sh").arg(CLAUDE_SH).env("PATH", format!("{}:/usr/bin:/bin", bin.display())).output().unwrap();
         assert!(!o.status.success() && String::from_utf8_lossy(&o.stderr).contains("Could not download https://claude.ai/install.sh"));
         let _ = std::fs::remove_dir_all(&r);
+    }
+    /// Git: winget, else Git for Windows' pinned installer (per user, Inno's own switches and folder); macOS and Linux their own scripts.
+    #[test] fn git_installs_on_every_system_and_windows_needs_no_winget() {
+        assert_eq!(plan("git", "windows", "x64", true, false), Some(Plan::Winget("Git.Git")));
+        let Some(Plan::Direct(p)) = plan("git", "windows", "x64", false, false) else { panic!("no winget: the pinned installer") }; assert_eq!(p, &GIT_WIN);
+        check_pin(&GIT_WIN).unwrap();
+        let d = install_dir(Path::new("C:\\Users\\A B\\AppData\\Local"), &GIT_WIN); assert!(d.ends_with("Programs/Git") || d.to_string_lossy().ends_with("Programs\\Git"), "{}", d.display());
+        assert!(installer_line(&GIT_WIN, &d).starts_with("/VERYSILENT /NORESTART /NOCANCEL /SP- /SUPPRESSMSGBOXES /CURRENTUSER /DIR=\""));
+        assert_eq!(uninstall_key(&GIT_WIN), "Git_is1"); assert!(placed(&GIT_WIN, Path::new("G")).ends_with("cmd/git.exe") || placed(&GIT_WIN, Path::new("G")).to_string_lossy().ends_with("cmd\\git.exe"));
+        assert_eq!(plan("git", "darwin", "arm64", false, false), Some(Plan::Sh(GIT_MAC_SH, vec![]))); assert_eq!(plan("git", "linux", "x64", false, false), Some(Plan::Sh(GIT_LINUX_SH, vec![])));
+        let v = |k: &str| match k { "ProgramFiles" => Some("C:\\PF".into()), "LOCALAPPDATA" => Some("C:\\L".into()), _ => None };
+        assert_eq!(git_dirs(v).len(), 2);
+        // the Linux script with no desktop: the command to run, never a hang on a password prompt
+        #[cfg(unix)] {
+            // only a stand-in apt-get on its PATH (no pkexec: nothing may ask for a password on this machine)
+            let d = crate::plat::tmp::dir("git-linux-sh"); std::fs::write(d.join("apt-get"), "#!/bin/sh\nexit 0\n").unwrap(); std::fs::set_permissions(d.join("apt-get"), std::fs::Permissions::from_mode(0o755)).unwrap();
+            let sh = ["/bin/sh", "/usr/bin/sh"].into_iter().find(|p| Path::new(p).exists()).unwrap();
+            let o = std::process::Command::new(sh).arg("-c").arg(GIT_LINUX_SH).env_clear().env("PATH", d.as_os_str()).output().unwrap();
+            let out = String::from_utf8_lossy(&o.stdout); assert!(!o.status.success() && out.trim() == "Run in a terminal: sudo apt-get install -y git", "{out}{}", String::from_utf8_lossy(&o.stderr));
+        }
     }
     /// winget first where it answers; without it the pinned installer, never only a page (the 0.16.0 blocker on Windows Server 2022).
     #[test] fn windows_freecad_is_winget_when_present_and_the_pinned_installer_when_not() {

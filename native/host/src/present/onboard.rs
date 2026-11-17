@@ -468,7 +468,9 @@ fn tools_with(f: &Facts, st: &State, session: &Value, pkg: Option<&crate::files:
     if !kd && f.checked && (!kicad_installing(f.info) || draft(session, "@ob.kicadlocate") == "1") { rows.push(locate(st, session, "obkicad", "Locate KiCad", "kicad-cli", "kicad.path", "ob-kicad")); }
     rows.push(fc);
     if !fd && f.checked { rows.push(locate(st, session, "obfreecad", "Locate FreeCAD", "freecadcmd", "freecad.path", "ob-freecad")); }
-    Step { id: "tools", group: "", title: "Design tools".into(), body, rows, choices: vec![], panel: String::new(), done: kd && fd, task: true, accept: false }
+    let (g, gd) = git_tool_row(f);
+    rows.push(g);
+    Step { id: "tools", group: "", title: "Design tools".into(), body, rows, choices: vec![], panel: String::new(), done: kd && fd && gd, task: true, accept: false }
 }
 
 /// What the uberbot is, in one line: said where it is first named (setup's step 4, Settings › Machines).
@@ -499,16 +501,31 @@ fn phone_rows(session: &Value) -> Vec<Value> {
     else { vec![row("Pair a phone", "Optional. Get the app, then show the code here and scan it. The phone opens your uberbot.", [vec![btn("Show the code", "device-invite", "", false)], apps()].concat())] }
 }
 
-/// Git missing (the checks say so): one line on what it costs and the one command that fixes it. Nothing is installed by itself.
-fn git_row(f: &Facts) -> Option<Value> {
-    if !f.checked || f.checks["git"] != false { return None }
+/// What Git is for, said where it is missing.
+pub const GIT_WHY: &str = "Backplane keeps every project in git and snapshots it before each agent turn, so any change an agent makes can be undone. Without git, agents do not start in a project.";
+/// The Design tools step's Git row: its version, or Install (winget or Git for Windows' own installer on Windows, Homebrew or Apple's
+/// Command Line Tools on macOS, the distribution's package on Linux) with the command to copy beside it. Done when a git new enough runs.
+fn git_tool_row(f: &Facts) -> (Value, bool) {
+    if !f.checked { return (row("Git", looking(f), vec![]), false) }
+    let v = s(&f.checks, "gitVersion");
+    if f.checks["git"] == true { return (row("Git", &if v.is_empty() { "Installed.".to_string() } else { format!("Git {v}.") }, vec![]), true) }
+    let (note, mut b, _) = install_btns(f, "git", "https://git-scm.com/downloads");
     let fix = s(&f.checks, "gitFix"); let fix = if fix.is_empty() { git_fix(&f.os, |_| false) } else { fix.to_string() };
-    Some(warn(row("Git", &format!("Git is not installed, so a project's threads get no worktree of their own and its design files are not committed (no history to go back to). To add it: {fix}"), vec![copy(&fix)])))
+    if f.os != "windows" { b.push(copy(&fix)) }
+    let what = if f.checks["gitOld"] == true { format!("Git {v} is too old: Backplane needs {}.{} or newer. {GIT_WHY}", crate::settings::onboard::GIT_MIN.0, crate::settings::onboard::GIT_MIN.1) } else { format!("Not installed. {GIT_WHY}") };
+    let mut r = warn(row("Git", &if note.is_empty() { what } else { note }, b));
+    if f.installs["git"]["state"] == "running" { if let Some(p) = f.installs["git"]["progress"].as_f64() { r["progress"] = json!(p); } }
+    (r, false)
+}
+/// Git missing (the checks say so) on the First project step: the same row as Design tools'.
+fn git_row(f: &Facts) -> Option<Value> {
+    if !f.checked || f.checks["git"] == true || f.checks["git"].is_null() { return None }
+    Some(git_tool_row(f).0)
 }
 /// The one command that installs Git here, by system and the package manager it has (`has`: whether a program is on this computer).
 pub fn git_fix(os: &str, has: impl Fn(&str) -> bool) -> String {
     match os {
-        "macos" => "xcode-select --install".into(),
+        "macos" | "darwin" => if has("brew") { "brew install git".into() } else { "xcode-select --install".into() },
         "windows" => if has("winget") { "winget install --id Git.Git -e".into() } else { "the installer from https://git-scm.com/download/win".into() },
         _ => [("apt-get", "sudo apt install git"), ("dnf", "sudo dnf install git"), ("pacman", "sudo pacman -S git"), ("zypper", "sudo zypper install git"), ("apk", "sudo apk add git")]
             .iter().find(|(p, _)| has(p)).map_or("your system's package manager (the package is git)".into(), |(_, c)| c.to_string()),
@@ -831,17 +848,26 @@ mod tests {
         assert!(act(&s0, "h", &sess(json!({})), &i, &desk(), "/h", "ob-connect", "grok").is_none());
         let n = act(&s0, "h", &sess(json!({"@ob.step": "agents", "@ob.panel": "claude"})), &i, &desk(), "/h", "ob-next", "").unwrap(); assert_eq!(n.patch["drafts"]["@ob.panel"], "");
     }
-    /// Git missing: one line on the First project step with what it costs and the one command (copied by its button); nothing when Git is there
-    /// or not checked yet.
-    #[test] fn a_missing_git_is_said_once_with_its_cost_and_the_command() {
+    /// Git missing: a row on Design tools (and First project) with what it costs, an Install button and the command to copy; nothing on First
+    /// project when Git is there or not checked yet; too old says the minimum.
+    #[test] fn a_missing_git_is_said_with_its_cost_an_install_button_and_the_command() {
         assert_eq!(git_fix("linux", |p| p == "apt-get"), "sudo apt install git"); assert_eq!(git_fix("linux", |p| p == "dnf"), "sudo dnf install git");
-        assert_eq!(git_fix("macos", |_| false), "xcode-select --install"); assert_eq!(git_fix("windows", |p| p == "winget"), "winget install --id Git.Git -e");
+        assert_eq!(git_fix("darwin", |_| false), "xcode-select --install"); assert_eq!(git_fix("darwin", |p| p == "brew"), "brew install git"); assert_eq!(git_fix("windows", |p| p == "winget"), "winget install --id Git.Git -e");
         assert!(git_fix("linux", |_| false).contains("package is git"));
         let rows = |git: Value| { let mut ch = blank(); ch["git"] = git; ch["gitFix"] = json!("sudo apt install git"); let s0 = cst(ch, &[]); let i = info("linux"); project(&Facts::of(&s0, &i), &sess(json!({})), "/h").rows };
         let r = rows(json!(false)); let g = r.iter().find(|x| x["label"] == "Git").expect("a Git row");
-        let n = g["note"].as_str().unwrap(); assert!(n.contains("no worktree") && n.contains("not committed") && n.ends_with("To add it: sudo apt install git"), "{n}");
-        assert_eq!(g["buttons"][0]["value"], "sudo apt install git");
+        let n = g["note"].as_str().unwrap(); assert!(n.starts_with("Not installed.") && n.contains("can be undone") && n.contains("agents do not start"), "{n}");
+        assert_eq!(g["buttons"][0]["label"], "Install"); assert_eq!(g["buttons"][0]["value"], "git"); assert_eq!(g["buttons"][1]["value"], "sudo apt install git");
         assert!(!rows(json!(true)).iter().any(|x| x["label"] == "Git") && !rows(Value::Null).iter().any(|x| x["label"] == "Git"));
+        // Design tools: found says the version and counts as done; too old says what is needed
+        let i = info("linux");
+        let mut c = blank(); c["git"] = json!(true); c["gitVersion"] = json!("2.43.0");
+        assert_eq!(row_of(&at(&cst(c.clone(), &[]), "tools", &i, &desk()), "Git")["note"], "Git 2.43.0.");
+        c["git"] = json!(false); c["gitOld"] = json!(true); c["gitVersion"] = json!("2.20.1");
+        assert!(row_of(&at(&cst(c, &[]), "tools", &i, &desk()), "Git")["note"].as_str().unwrap().starts_with("Git 2.20.1 is too old: Backplane needs 2.31 or newer."));
+        // Windows: an Install button with winget and without it (Git for Windows' pinned installer), no command line to copy
+        for wg in [true, false] { let mut c = blank(); c["git"] = json!(false); c["winget"] = json!(wg); let mut i = info("windows"); i["arch"] = json!("x64");
+            let b = &row_of(&at(&cst(c, &[]), "tools", &i, &desk()), "Git")["buttons"]; assert_eq!(b.as_array().unwrap().len(), 1, "{b}"); assert_eq!(b[0]["label"], "Install"); }
     }
     /// The update row says the installed version (no path) and what the new pin adds over it, from the installed runtime's capabilities.
     #[test] fn the_update_row_says_what_this_step_brings() {
@@ -927,6 +953,8 @@ mod tests {
         let mut c = blank(); c["kicad"] = json!({"path": "/usr/bin/kicad-cli", "version": "10.0.7", "runs": true});
         let p = at(&cst(c.clone(), &[]), "tools", &i, &desk()); assert_eq!(p["state"], "todo"); assert!(p["rows"].to_string().contains("Locate FreeCAD")); assert!(!p["rows"].to_string().contains("Locate KiCad"));
         c["freecad"] = json!({"path": "/x/freecadcmd", "version": "1.0.2", "runs": true});
+        assert_eq!(at(&cst(c.clone(), &[]), "tools", &i, &desk())["state"], "todo", "git not found yet");
+        c["git"] = json!(true);
         let p = at(&cst(c, &[]), "tools", &i, &desk()); assert_eq!(p["state"], "done"); assert_eq!(p["next"], "Next"); assert!(row_of(&p, "FreeCAD")["note"].as_str().unwrap().contains("1.0.2"));
         let mut b = blank(); b["freecad"] = json!({"path": "/x/freecadcmd", "runs": false, "why": "exit code 1"});
         let f = row_of(&at(&cst(b, &[]), "tools", &i, &desk()), "FreeCAD"); assert!(f["note"].as_str().unwrap().contains("exit code 1")); assert_eq!(f["tone"], "warn");

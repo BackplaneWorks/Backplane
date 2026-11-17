@@ -79,7 +79,7 @@ fn core(ev: &[Value], th: &str) -> Vec<Value> {
         let s = e.to_string();
         let key = e["key"].as_str().unwrap_or("");
         let policy = ["liveness.", "autosettle.", "alert.", "told.", "summary.at.", "star.nudge", "turn.live."].iter().any(|p| key.starts_with(p));
-        !policy && (s.contains(th) || key.starts_with("stopped.") || key.starts_with("failed.") || key == "tok.epoch" || key == "tok.recount")
+        !policy && !super::snapguard::is_guard_event(e) && (s.contains(th) || key.starts_with("stopped.") || key.starts_with("failed.") || key == "tok.epoch" || key == "tok.recount")
     }).cloned().collect()
 }
 fn lines_of(s: &str) -> Vec<Value> { s.lines().filter_map(|l| serde_json::from_str(l).ok()).collect() }
@@ -713,12 +713,14 @@ fn norm_steps(s: &str, roots: &[&str]) -> String {
     let ev = until(&hub, from, 30, |ev| ev.iter().filter(|e| turn_is(e, "completed")).count() == 2 && ev.iter().filter(|e| e["tone"] == "step").count() == 2).await; tokio::time::sleep(Duration::from_millis(800)).await;
     let ev = { let e2 = log_from(&hub, from).await; if e2.len() > ev.len() { e2 } else { ev } };
     let js_root = "/home/h/Documents/i2cjak/bp-agents-scratch/modes/work-steps/fixroot"; let me = work.to_string_lossy().to_string();
-    let f = |v: &[Value], r: &str| core(v, T1).iter().map(|e| norm_digits(&norm_steps(&norm(e), &[r]))).collect::<Vec<_>>();
+    // which git dir holds the steps is compared above; here the JS hub's (history.git, as it had no #1163) and ours are the same "<gitdir>"
+    let f = |v: &[Value], r: &str| core(v, T1).iter().map(|e| norm_digits(&norm_steps(&norm(e), &[r]).replace("<root>/.backplane/history.git", "<gitdir>").replace("<root>/.git", "<gitdir>"))).collect::<Vec<_>>();
     // the step Acts carry the commit, the previous commit, the git dir and top, and the files changed
     let steps: Vec<Value> = ev.iter().filter(|e| e["tone"] == "step").cloned().collect(); assert_eq!(steps.len(), 2, "{steps:?}");
     let rec = |i: usize| -> Value { let sm = steps[i]["summary"].as_str().unwrap_or(""); serde_json::from_str(sm).unwrap_or_else(|e| panic!("step {i}: the capture did not record a JSON step ({e}); its summary was: {sm:?}")) };
     assert_eq!(rec(0)["w"], "start"); assert_eq!(rec(0)["f"], json!(["A\tb.kicad_pcb"])); assert_eq!(rec(0)["p"], ""); assert_eq!(rec(1)["p"], rec(0)["c"]); assert_eq!(rec(1)["f"], json!(["M\tb.kicad_pcb"]));
-    assert_eq!(rec(0)["g"], format!("{me}/.backplane/history.git")); assert_eq!(rec(0)["t"], me);
+    // the folder was in no repository: the turn made it one first (#1163, snapguard.rs), so the steps are its .git's, not .backplane/history.git
+    assert_eq!(rec(0)["g"], format!("{me}/.git")); assert_eq!(rec(0)["t"], me);
     let (g, w) = (f(&ev, &me), f(&lines_of(include_str!("../../../../test/agents/fixtures/js-steps.jsonl")), js_root));
     // the Acts land when the background capture ends, so their place among the turn's events varies: compare the rest in order, and the Acts as a set
     let (gs, ws): (Vec<_>, Vec<_>) = (g.iter().filter(|x| !x.contains("\"tone\":\"step\"")).collect::<Vec<_>>(), w.iter().filter(|x| !x.contains("\"tone\":\"step\"")).collect::<Vec<_>>());

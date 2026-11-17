@@ -19,6 +19,20 @@ use std::sync::Arc;
 pub const RESTORE_TOOL: &str = "snapshot_restore";
 pub const RESTORE_YES: &str = "Restore to before this turn";
 pub const RESTORE_NO: &str = "Keep this turn's changes";
+/// The ask a thread shows when git is missing, and what the turn says.
+pub const GIT_TOOL: &str = "git_install";
+pub const GIT_YES: &str = "Install Git";
+pub const GIT_MISSING: &str = "Not started: git is not installed on this computer. Backplane snapshots the project with git before an agent may change it, so agents do not start without it. Press Install Git, then send your message again.";
+/// The hub's own lines and settings (snapshots, review mode, restore asks), which the JS hub never wrote: left out of its parity tests.
+pub fn is_guard_event(e: &Value) -> bool {
+    (e["$"] == "ActivityLogged" && e["kind"] == "git" && e["act"].as_str().is_some_and(|a| a.starts_with("sg")))
+        || (e["$"] == "SettingSet" && e["key"].as_str().is_some_and(|k| k.starts_with("review.ro.") || k.starts_with("restore.ask.")))
+}
+/// Whether git runs here (Windows: one installed since this hub started is put on its PATH first).
+pub async fn git_runs() -> bool {
+    crate::settings::tools_install::git_pick_up();
+    crate::files::git::proc_ro("git", &["--version"], "/", &[]).await.code == 0
+}
 /// The ask a mass deletion waits on.
 pub const MASS_TOOL: &str = "mass_delete";
 /// What a review turn's Claude is told it may not use (deny rules apply in every permission mode).
@@ -67,7 +81,12 @@ impl Agents {
 
     /// Before a turn's input reaches the agent: the folder made a repository if it is in none, the review mode decided from the request
     /// (`text`, None to keep the last one), and the work tree snapshotted. Never fails the turn: what could not be done is said.
-    pub async fn turn_guard_start(self: &Arc<Self>, th: &str, cwd: &str, text: Option<&str>) { self.guard_begin(th, cwd, text, true).await }
+    /// Err: git is not on this computer, so the turn does not start (nothing could be snapshotted); the thread has an Install Git ask.
+    pub async fn turn_guard_start(self: &Arc<Self>, th: &str, cwd: &str, text: Option<&str>) -> Result<(), String> {
+        if crate::copy::on() || cwd.is_empty() { return Ok(()) }
+        if !git_runs().await { self.git_missing(th).await; return Err(GIT_MISSING.into()) }
+        self.guard_begin(th, cwd, text, true).await; Ok(())
+    }
     /// `turn_guard_start`; `new_turn` false for a guard taken late, at a write of a turn that has none (an earlier turn's restore ask stays open).
     async fn guard_begin(self: &Arc<Self>, th: &str, cwd: &str, text: Option<&str>, new_turn: bool) {
         if crate::copy::on() || cwd.is_empty() { return }
@@ -77,6 +96,7 @@ impl Agents {
         if review && !prev { self.guard_say(th, "info", "This request is a review: the design files are read-only for it (Backplane refuses writes to them). Ask for a change in a message and that turn may edit.".into()).await }
         if new_turn { self.close_restore_asks(th).await }
         let root = kc::design_root(cwd);
+        if !std::path::Path::new(&root).is_dir() { self.turn_guards.lock().unwrap().insert(th.to_string(), TurnGuard { review, ..Default::default() }); return } // no folder: nothing to snapshot (the turn says why it cannot run there)
         let uh = std::path::PathBuf::from(&self.host.user_home);
         let made = sn::ensure_repo(&root, Some(&uh)).await;
         match &made { Ok(e) => { let l = e.line(); if !l.is_empty() { self.guard_say(th, if e.not_made.is_empty() { "info" } else { "warn" }, l).await } } Err(e) => self.guard_say(th, "warn", format!("Not made a git repository: {e}")).await }
@@ -108,6 +128,7 @@ impl Agents {
                 if let Err(e) = r { self.guard_say(th, "warn", format!("No snapshot before this turn's first edit: {e}")).await }
             }
             // no snapshot of this turn yet (a turn that started before this hub did): take it now
+            _ if !git_runs().await => { self.git_missing(th).await; return Err(GIT_MISSING.into()) }
             _ => { let cwd = self.world().await.cwd(th); let review = self.in_review(th).await; self.guard_begin(th, &cwd, None, false).await; if let Some(x) = self.turn_guards.lock().unwrap().get_mut(th) { x.review = review } }
         }
         if let Some(x) = self.turn_guards.lock().unwrap().get_mut(th) { x.wrote = true }
@@ -172,6 +193,10 @@ impl Agents {
     /// made opens an ask to restore to before the turn. The guard is cleared.
     pub async fn turn_guard_end(self: &Arc<Self>, th: &str) {
         let Some(g) = self.turn_guards.lock().unwrap().remove(th) else { return };
+        self.turn_guard_end_with(th, g).await
+    }
+    /// `turn_guard_end` for a guard already taken out.
+    pub async fn turn_guard_end_with(self: &Arc<Self>, th: &str, g: TurnGuard) {
         if crate::copy::on() || g.top.is_empty() { return }
         let lines = design_losses(&g.top, &g.reference).await;
         let changed = if g.review { review_changes(&g.top, &g.reference).await } else { vec![] };
@@ -185,6 +210,24 @@ impl Agents {
         self.commit_events(vec![
             json!({"$":"SettingSet","key":format!("restore.ask.{id}"),"value":format!("{}\n{}", g.top, g.turn),"at":now}),
             json!({"$":"AskOpened","id":id,"thread":th,"kind":"input","tool":RESTORE_TOOL,"detail":detail,"options":format!("{RESTORE_YES}\n{RESTORE_NO}"),"at":now}), pend]).await;
+    }
+    /// Git is missing: an Install Git ask in the thread (once while it is open).
+    async fn git_missing(&self, th: &str) {
+        if self.world().await.asks.values().any(|a| a.thread == th && a.tool == GIT_TOOL) { return }
+        let now = now_s(); let id = hub_id("q", now, self.seq_n());
+        let pend = self.pending_ev(th, 1, "", now).await;
+        self.commit_events(vec![json!({"$":"AskOpened","id":id,"thread":th,"kind":"input","tool":GIT_TOOL,"detail":format!("{GIT_MISSING} {}", crate::present::onboard::GIT_WHY),"options":format!("{GIT_YES}\nNot now"),"at":now}), pend]).await;
+    }
+    /// The person answered the Install Git ask.
+    pub async fn git_answer(self: &Arc<Self>, ask: &str, th: &str, answer: &str) -> Result<(), String> {
+        let now = now_s(); let pend = self.pending_ev(th, 0, ask, now).await;
+        self.commit_events(vec![json!({"$":"AskClosed","id":ask,"answer":answer,"at":now}), pend]).await;
+        if answer != GIT_YES { return Ok(()) }
+        match crate::settings::onboard::install_tool(&self.hub, "git").await {
+            Ok(_) => self.guard_say(th, "info", "Installing Git. Setup's Design tools step shows how it goes; send your message again once it is done.".into()).await,
+            Err(e) => self.guard_say(th, "error", format!("Git did not start installing: {e}. Install it from https://git-scm.com/downloads, then send your message again.")).await,
+        }
+        Ok(())
     }
     /// A new turn starts: an earlier turn's restore ask that is still open closes as kept (its snapshot stays; `/restore <turn>` still works).
     async fn close_restore_asks(&self, th: &str) {

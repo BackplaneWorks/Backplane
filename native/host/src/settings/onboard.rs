@@ -114,6 +114,15 @@ fn accounts(info: &Value) -> Value {
 /// The name of the account the Agents step's Connect makes: the person is never asked for one there (Settings › Accounts adds more).
 pub const DEFAULT: &str = "Default";
 
+/// The oldest git Backplane's snapshots work with (`rev-parse --path-format=absolute`, 2.31).
+pub const GIT_MIN: (u32, u32) = (2, 31);
+/// `git version 2.43.0` (`.windows.1` and the like after it) -> "2.43.0".
+pub fn git_version(out: &str) -> String { out.split_whitespace().nth(2).map(|v| v.split(".windows").next().unwrap_or(v).to_string()).unwrap_or_default() }
+pub fn git_new_enough(v: &str) -> bool { let mut n = v.split('.').map(|x| x.parse::<u32>().unwrap_or(0)); (n.next().unwrap_or(0), n.next().unwrap_or(0)) >= GIT_MIN }
+
+/// The Install press for `tool` from elsewhere than setup (a thread's "Install Git" when a project has no git: agents/snapguard.rs).
+pub async fn install_tool(hub: &Arc<Hub>, tool: &str) -> Result<String, String> { OnboardRpc::check(hub, &json!({})).await; OnboardRpc::install(hub, tool).await }
+
 pub struct OnboardRpc;
 impl OnboardRpc {
     async fn check(hub: &Arc<Hub>, p: &Value) {
@@ -122,11 +131,13 @@ impl OnboardRpc {
         let cli = crate::agents::proc::Cli::from_env();
         let (typed_k, typed_f) = (g("kicad"), g("freecad"));
         let (a, k, f) = tokio::join!(agents(&cli), kicad(hub, &typed_k), freecad(hub, &typed_f));
-        let (winget, node, git) = Self::have(&hub.cfg.os).await;
+        let (winget, node, git_v) = Self::have(&hub.cfg.os).await;
+        let git_old = !git_v.is_empty() && !git_new_enough(&git_v);
+        let git = !git_v.is_empty() && !git_old;
         let devices = crate::net::start::routes().map_or(0, |r| r.reg.list()["devices"].as_array().map_or(0, |d| d.iter().filter(|x| x["revoked"] != true && x["revoked"] != "true").count()));
         let exe = std::env::current_exe().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
         let on_path = on_path(crate::present::onboard::platform(&hub.cfg.os).launcher).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
-        let checks = json!({"exe": exe, "onPath": on_path, "agents": a, "accounts": accounts(&info), "kicad": k, "freecad": f, "devices": devices, "tailscale": info["tailscale"], "winget": winget, "node": node, "git": git,
+        let checks = json!({"exe": exe, "onPath": on_path, "agents": a, "accounts": accounts(&info), "kicad": k, "freecad": f, "devices": devices, "tailscale": info["tailscale"], "winget": winget, "node": node, "git": git, "gitVersion": git_v, "gitOld": git_old,
             "gitFix": if git { String::new() } else { crate::present::onboard::git_fix(&hub.cfg.os, |p| p == "winget" && winget || std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).any(|d| d.join(p).is_file())) }});
         // a path typed here goes where FreeCAD is looked for, then Settings, CAD reads the same machine
         if checks["freecad"]["runs"] == true && !g("freecad").is_empty() { let d = hub.cfg.home.join("freecad"); let _ = std::fs::create_dir_all(&d); let _ = std::fs::write(d.join("command"), g("freecad")); }
@@ -138,10 +149,11 @@ impl OnboardRpc {
         if hub.setting("onboard.checks").await.as_deref() != Some(text.as_str()) { let _ = hub.commit(&json!({"$":"SettingSet","key":"onboard.checks","value":text,"at":now_ms() / 1000})).await; }
     }
     /// Whether winget (Windows only), Node and git answer: Windows' buttons, the Codex fallback and the Git for Windows row read them.
-    async fn have(os: &str) -> (bool, bool, bool) {
+    async fn have(os: &str) -> (bool, bool, String) {
+        super::tools_install::git_pick_up(); // a Git installed since this hub started (Windows: its PATH change reaches only new logins)
         let w = async { os == "windows" && run(Kind::Local, Path::new("winget"), &["--version"], TIMEOUT).await.map_or(false, |r| r.0 == 0) };
         let n = async { run(Kind::Local, Path::new("node"), &["--version"], TIMEOUT).await.map_or(false, |r| r.0 == 0) };
-        let g = async { run(Kind::Local, Path::new("git"), &["--version"], TIMEOUT).await.map_or(false, |r| r.0 == 0) };
+        let g = async { run(Kind::Local, Path::new("git"), &["--version"], TIMEOUT).await.filter(|r| r.0 == 0).map_or(String::new(), |r| git_version(&r.1)) };
         tokio::join!(w, n, g)
     }
     /// `onboard.install {tool}`: the press on a tool's Install button.
@@ -236,6 +248,10 @@ impl RpcHandler for OnboardRpc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn gits_version_and_the_minimum() {
+        assert_eq!(git_version("git version 2.43.0\n"), "2.43.0"); assert_eq!(git_version("git version 2.56.1.windows.1"), "2.56.1"); assert_eq!(git_version("git version 2.39.5 (Apple Git-154)"), "2.39.5");
+        assert!(git_new_enough("2.43.0") && git_new_enough("3.0") && !git_new_enough("2.30.9") && !git_new_enough(""));
+    }
     #[test] fn versions_are_read_from_each_programs_first_line() {
         assert_eq!(version_of("10.0.7\n"), "10.0.7");
         assert_eq!(version_of("2.1.268 (Claude Code)\n"), "2.1.268");
