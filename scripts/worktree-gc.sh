@@ -12,7 +12,7 @@
 # made during the walk (lane B's bp-kembed run folder, a land's janitor-test repo, test runs' bpt dirs) were taken as "idle 24 h" mid-run.)
 # A pause file (GC_PAUSE, default ~/.cache/bp-janitor.pause; its text says why) stops the /tmp and bp-tmp sweeps; worktrees, target/ dirs and sccache go on. Every run appends
 # what it freed to the log main-build.sh gives it ($GPUI_DEV_DIR/janitor.log, ~/.backplane-gpui-dev/janitor.log), which any lane can read.
-# A .bp-keep file at the top of a bp-tmp entry or a worktree keeps it whole, idle or not: what release gates come back to between runs (forkgate/, pp-tests/: Nov 16, a cleanup took a gate's checkout mid-run).
+# A .bp-keep file (untracked: .gitignore has it) at the top of a bp-tmp entry or a worktree keeps it whole, idle or not: what release gates come back to between runs (forkgate/, pp-tests/: Nov 16, a cleanup took a gate's checkout mid-run).
 # Nothing is touched that a process has as its cwd, executable, open file, TMPDIR or CARGO_TARGET_DIR (Nov 11: 157 GB of bp-tmp and 137 GB of lanes' targets filled the disk).
 # Never touches the main checkout, a locked worktree, a worktree with unlanded commits or edits (only its target/), a file not this user's, or across a mount.
 # Dry run unless --apply. Every run prints what it frees (or would) and a total; --quiet prints the total only. One run at a time (a second one leaves at once).
@@ -42,8 +42,11 @@ HELD=$(mktemp); ENVS=$(mktemp); trap 'rm -f "$HELD" "$ENVS"' EXIT
 for e in /proc/[0-9]*/environ; do tr '\0' '\n' < "$e" 2>/dev/null | grep -aE '^(TMPDIR|CARGO_TARGET_DIR)='; done 2>/dev/null | sort -u > "$ENVS"
 { find /proc/[0-9]*/cwd /proc/[0-9]*/exe -maxdepth 0 -printf '%l\n'; find /proc/[0-9]*/fd -mindepth 1 -maxdepth 1 -printf '%l\n'; sed 's/^[A-Z_]*=//' "$ENVS"; } 2>/dev/null \
   | sed 's/ (deleted)$//' | grep '^/' | sort -u > "$HELD"
+# kept DIR: a .bp-keep someone put there, never one git tracks in that checkout (Nov 16: the repo carried an empty .bp-keep at its root since Oct 21, so every
+# worktree and every copy of the tree looked kept and the janitor freed nothing while the disk filled to 99%)
+kept() { [ -e "$1/.bp-keep" ] || return 1; ! git -C "$1" ls-files --error-unmatch -- .bp-keep > /dev/null 2>&1; }
 # live PATH MINUTES: it can go now: no .bp-keep, nothing in it (itself included) written or made in the last MINUTES, no process holding it at this moment (a fresh look, not $HELD)
-live() { local q=$1; [ -e "$q/.bp-keep" ] && return 1
+live() { local q=$1; kept "$q" && return 1
   [ -n "$(find "$q" -xdev $(since "$2") -print -quit 2>/dev/null)" ] && return 1
   find /proc/[0-9]*/cwd /proc/[0-9]*/exe -maxdepth 0 -printf '%l\n' 2>/dev/null | sed 's/ (deleted)$//' | awk -v q="$q" 'BEGIN{p = q "/"} $0 == q || index($0, p) == 1 {f = 1; exit} END{exit !f}' && return 1
   find /proc/[0-9]*/fd -mindepth 1 -maxdepth 1 -printf '%l\n' 2>/dev/null | sed 's/ (deleted)$//' | awk -v q="$q" 'BEGIN{p = q "/"} $0 == q || index($0, p) == 1 {f = 1; exit} END{exit !f}' && return 1
@@ -63,7 +66,7 @@ git -C "$REPO" worktree list --porcelain | awk '/^worktree /{w=substr($0,10); b=
 while IFS=$'\t' read -r w ref locked; do
   case "$w" in */.backplane/worktrees/*) ;; *) continue;; esac
   [ -d "$w" ] || continue; held "$w" && continue   # a running thread, build or shell works in it
-  [ -e "$w/.bp-keep" ] && continue                  # kept on purpose (a gate's checkout), target/ dirs too
+  kept "$w" && continue                  # kept on purpose (a gate's checkout), target/ dirs too
   b=${ref#refs/heads/}; lnd=0; [ -n "$ref" ] && landed "$b" && lnd=1
   clean=0; [ -z "$(git --no-optional-locks -C "$w" status --porcelain 2>/dev/null)" ] && clean=1   # never the index refresh: it would make the worktree look used
   if [ "$lnd" = 1 ] && [ "$clean" = 1 ] && [ "$locked" = 0 ] && ! recent "$w" "$MMIN" && ! recent "$(git -C "$w" rev-parse --absolute-git-dir 2>/dev/null || echo "$w")" "$MMIN"; then
@@ -94,7 +97,7 @@ if [ "$TMP_ON" = 1 ] && [ -d "$BP_TMP" ]; then
     case "$n" in sccache|claude) continue;; esac
     [ "$e" -ef "$LOCK" ] && continue
     [ -O "$e" ] || continue; [ -n "${busy_t[$n]:-}" ] && continue; [ -n "${fresh_t[$n]:-}" ] && continue
-    [ -e "$e/.bp-keep" ] && continue   # kept on purpose (a gate's scripts, venv, fixtures)
+    kept "$e" && continue   # kept on purpose (a gate's scripts, venv, fixtures)
     live "$e" $((TMPH * 60)) || continue   # made, written or opened since the lists above were read
     note tmp "$e" "idle ${TMPH} h"; N_TMP=$((N_TMP + 1)); wipe "$e"
   done
@@ -114,7 +117,7 @@ for base in ${GC_TMP_BASES:-/tmp $BP_TMP}; do [ "$TMP_ON" = 1 ] && [ -d "$base" 
       bp-chrome-*) continue;;
       *) [[ $b =~ $re ]] && [ ! -e "/proc/${BASH_REMATCH[1]}" ] || continue;;
     esac
-    [ -n "${act[$b]:-}" ] && continue; held "$d" && continue; [ -e "$d/.bp-keep" ] && continue; live "$d" "$TMIN" || continue
+    [ -n "${act[$b]:-}" ] && continue; held "$d" && continue; kept "$d" && continue; live "$d" "$TMIN" || continue
     note tmp "$d" "test leftover, owner gone"; N_TMP=$((N_TMP + 1)); wipe "$d"
   done
 done
