@@ -253,6 +253,8 @@ pub fn open_page(this: &mut Backplane, cx: &mut Context<Backplane>) {
     list(this);
     super::google::open_page(this);
 }
+/// The add button names the provider its account is made for (`add_provider`, "" is Claude).
+pub fn add_word(provider: &str) -> &'static str { /* i18n-ok: drawn through tr */ if provider == "codex" { "Add Codex account" } else { "Add Claude account" } }
 fn add(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let Some(input) = this.screens.acct.label.clone() else { return };
     let label = input.read(cx).content.to_string();
@@ -424,7 +426,7 @@ pub const ADD_ROW_MIN: f32 = 380.0;
 pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32) -> Vec<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     let mut out: Vec<AnyElement> = vec![];
-    out.push(div().pb_3().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs("Each account is a separate Claude subscription sign-in kept on this machine. A thread uses the account picked beside its model; when one runs out of allowance the thread carries on with the next account that has some left.")).into_any_element());
+    out.push(div().pb_3().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs("Each account is a separate Claude or Codex subscription sign-in kept on this machine. A thread uses the account picked beside its model; when one runs out of allowance the thread carries on with the next account that has some left.")).into_any_element());
     if !st.notice.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(trs(&st.notice)).into_any_element()); }
     if !st.info.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(crate::scale::tpx(12.)).text_color(c("text")).child(st.info.clone()).into_any_element()); }
     // the hub's accounts by person (host settings/accounts_people.rs): one entry per email, each login of it with its bars; an older hub sends none and the cards below stand
@@ -443,7 +445,7 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32)
         let row = if avail < ADD_ROW_MIN { div().flex().flex_col().items_start().gap_2().mt_2().child(div().w_full().h(crate::scale::tpx(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone())) }
             else { div().flex().items_center().gap_2().mt_2().child(div().flex_1().min_w_0().h(crate::scale::tpx(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone())) };
         out.push(row
-            .child(button(cx, light, "acct-add".into(), &trs("Add Claude account"), true, false, |this, cx| add(this, cx)))
+            .child(button(cx, light, "acct-add".into(), &trs(add_word(&st.add_provider)), true, false, |this, cx| add(this, cx)))
             .child(button(cx, light, "acct-add-sync".into(), &trs("Add Claude (sync)"), false, false, |this, cx| add_sync(this, cx))).into_any_element());
     }
     out.extend(super::google::section(cx, light, &st.google));
@@ -639,6 +641,7 @@ mod tests {
     }
     #[test] fn a_card_says_who_signed_in_and_how_much_is_used() {
         let ps = profiles(&snap()); assert_eq!(identity(&ps[0]), "Claude · a@b.com · max"); assert_eq!(identity(&ps[1]), "Claude");
+        assert_eq!((add_word("codex"), add_word(""), add_word("claude")), ("Add Codex account", "Add Claude account", "Add Claude account"), "#1162: Add names the provider it makes an account for");
         assert_eq!(allowance(&ps[0]), "62% of 5-hour used"); assert_eq!(allowance(&ps[1]), "");
         assert!(is_default(&snap(), &ps[0]) && !is_default(&snap(), &ps[1]));
         assert!(returns_here("https://auth.openai.com/oauth/authorize?response_type=code&client_id=x&redirect_uri=http%3A%2F%2F127.0.0.1%3A1455%2Fauth%2Fcallback&scope=y"), "Codex comes back to this computer");
