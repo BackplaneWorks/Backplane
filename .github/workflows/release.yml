@@ -51,11 +51,13 @@ jobs:
     name: build ${{ matrix.target }}
     # a nightly may build on faster machines, named by repo variables (unset: GitHub's): NIGHTLY_LINUX_RUNNER (Boat CI: boat), NIGHTLY_MAC_RUNNER (the Mac mini's
     # self-hosted runner label), NIGHTLY_WIN_RUNNER; a RELEASE_* variable below, when set, comes first.
-    # RELEASE_MAC_RUNNER and RELEASE_WIN_RUNNER (repo variables, a self-hosted runner's label: the Mac mini's bp-mac, bp-win's bp-win-nightly) build darwin-arm64
-    # and windows-x64 there for any run while they are set, the tag's included: the secrets come with the job, so the hub gets its telemetry key there as on
-    # GitHub. Unset, GitHub's images as before. Linux and Android always build on GitHub's. Each runner refuses any job but release.yml's and nightly.yml's
-    # from main or a v* tag (scripts/runner-guard.sh, docs/release-runners.md); the variables are set only while a release uses them.
-    runs-on: ${{ (matrix.target == 'darwin-arm64' && vars.RELEASE_MAC_RUNNER) || (matrix.target == 'windows-x64' && vars.RELEASE_WIN_RUNNER) || (inputs.nightly && matrix.target == 'linux-x64' && vars.NIGHTLY_LINUX_RUNNER) || (inputs.nightly && matrix.target == 'darwin-arm64' && vars.NIGHTLY_MAC_RUNNER) || (inputs.nightly && matrix.target == 'windows-x64' && vars.NIGHTLY_WIN_RUNNER) || matrix.os }}
+    # RELEASE_LINUX_RUNNER, RELEASE_MAC_RUNNER and RELEASE_WIN_RUNNER (repo variables, a self-hosted runner's label: this desktop's bp-linux-release, an ubuntu:22.04
+    # container; the Mac mini's bp-mac; bp-winbuild's bp-winbuild-release) build linux-x64, darwin-arm64 and windows-x64 there while they are set, the tag's
+    # included: the secrets come with the job, so the hub gets its telemetry key there as on GitHub. Unset, GitHub's images as before. bp-winbuild takes no
+    # nightly (its guard refuses one; a nightly's windows-x64 skips RELEASE_WIN_RUNNER), and GitHub cannot start it: scripts/release-dispatch.sh starts it
+    # and holds winbuild-vm for the run. linux-arm64 and Android always build on GitHub's. Each runner refuses any job but release.yml's and nightly.yml's from
+    # main or a v* tag (scripts/runner-guard.sh, docs/release-runners.md); the variables are set only while a release uses them.
+    runs-on: ${{ (matrix.target == 'linux-x64' && vars.RELEASE_LINUX_RUNNER) || (matrix.target == 'darwin-arm64' && vars.RELEASE_MAC_RUNNER) || (matrix.target == 'windows-x64' && !inputs.nightly && vars.RELEASE_WIN_RUNNER) || (inputs.nightly && matrix.target == 'linux-x64' && vars.NIGHTLY_LINUX_RUNNER) || (inputs.nightly && matrix.target == 'darwin-arm64' && vars.NIGHTLY_MAC_RUNNER) || (inputs.nightly && matrix.target == 'windows-x64' && vars.NIGHTLY_WIN_RUNNER) || matrix.os }}
     defaults:
       run:
         shell: bash
@@ -65,7 +67,14 @@ jobs:
       # a self-hosted Windows runner (bp-win, nightlies) puts System32 ahead of Git's tools: Windows' find.exe and sort.exe answered for find and sort
       - if: runner.os == 'Windows' && runner.environment == 'self-hosted'
         run: echo 'C:\Program Files\Git\usr\bin' >> "$GITHUB_PATH"
+      # a self-hosted runner keeps its checkout and each crate's target/ between runs (warm, incremental where LTO allows): checkout's git clean -ffdx
+      # would delete target/, so it cleans everything else itself below. GitHub's runners clean as before.
       - uses: actions/checkout@v4
+        with:
+          clean: ${{ runner.environment == 'github-hosted' }}
+      - name: clean all but target/ (self-hosted)
+        if: runner.environment != 'github-hosted'
+        run: git clean -ffdx -e native/host/target -e native/gpui/target -e native/guard/target -e native/voice/target
       - uses: dtolnay/rust-toolchain@stable
       # mold comes from a GitHub download too: two tries, then the build links without it (RUSTFLAGS set: .cargo/config's mold flag is skipped)
       - id: mold1
@@ -83,7 +92,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libasound2-dev libwayland-dev libvulkan-dev
+      # GitHub's runners: the Actions cache. Self-hosted: target/ persists, and sccache (its cache in the runner's SCCACHE_DIR, set in its .env) compiles
+      # what a changed crate needs; gpui's fat-LTO link (codegen-units=1) is never cached and runs in full every time.
       - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
         with:
           workspaces: |
             native/host
@@ -92,6 +104,13 @@ jobs:
             native/voice
           shared-key: release-${{ matrix.target }}
           save-if: ${{ !startsWith(github.ref, 'refs/tags/') }}   # a tag reads main's and writes no copy of its own: 0.16.0's tag copies (1-1.5 GB a target) evicted main's (docs/release-retro-0.16.0.md)
+      - name: sccache (self-hosted)
+        if: runner.environment != 'github-hosted'
+        run: |
+          [ -n "$SCCACHE_DIR" ] || { echo "::error::this self-hosted runner has no SCCACHE_DIR in its .env"; exit 1; }
+          sccache --version && sccache --stop-server >/dev/null 2>&1 || true
+          sccache --start-server && sccache --zero-stats >/dev/null
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
       - name: stamp the version
         run: |
           # the first `version = ` line of each crate (python, not sed: macOS's sed has no `0,/re/`, and its builds kept the old version, so the guard's
@@ -140,6 +159,9 @@ jobs:
           (cd native/guard && cargo build --release) & g=$!   # the guard: it starts the hub, updates it and brings it back (docs/deploy.md)
           (cd native/voice && cargo build --release --bin backplane-voice) & v=$!   # dictation's helper: the hub runs it from beside itself (voice/session.rs)
           wait $a; ra=$?; wait $b; rb=$?; wait $g; rg=$?; wait $v; rv=$?; exit $((ra | rb | rg | rv))
+      - name: sccache stats (self-hosted)
+        if: always() && runner.environment != 'github-hosted'
+        run: sccache --show-stats
       - name: no test trust in a release
         run: |
           # feature e2e-trust (test/update's feed) trusts a key from the environment; its code carries this mark, so a release that has it is refused
@@ -545,7 +567,9 @@ jobs:
           - { target: darwin-arm64, os: macos-latest }
           - { target: windows-x64, os: windows-latest }
     name: smoke ${{ matrix.target }}
-    runs-on: ${{ (matrix.target == 'darwin-arm64' && vars.RELEASE_MAC_RUNNER) || (matrix.target == 'windows-x64' && vars.RELEASE_WIN_RUNNER) || matrix.os }}
+    # the smoke draws the client, so it runs only where a session is ours to use: RELEASE_MAC_SMOKE_RUNNER and RELEASE_WIN_SMOKE_RUNNER (bp-win's
+    # bp-win-nightly), never the build runners (bp-winbuild has no desktop; the Mac mini's screen is the person's). Unset, GitHub's images.
+    runs-on: ${{ (matrix.target == 'darwin-arm64' && vars.RELEASE_MAC_SMOKE_RUNNER) || (matrix.target == 'windows-x64' && vars.RELEASE_WIN_SMOKE_RUNNER) || matrix.os }}
     permissions:
       contents: read
       actions: read

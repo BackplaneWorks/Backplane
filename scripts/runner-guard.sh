@@ -8,9 +8,11 @@
 #   release.yml on main, by hand (a dry run)
 r=${GITHUB_WORKFLOW_REF:-}; e=${GITHUB_EVENT_NAME:-}; w=BackplaneWorks/Backplane/.github/workflows
 [ "${GITHUB_REPOSITORY:-}" = BackplaneWorks/Backplane ] || { echo "refused: repository ${GITHUB_REPOSITORY:-?}" >&2; exit 1; }
-ok=
+ok=; ro=
+# a runner-guard.release-only file beside this script takes no nightly (release.yml only), as on bp-winbuild (runner-guard.ps1)
+[ ! -e "$(dirname "$0")/runner-guard.release-only" ] || ro=1
 case "$r" in *[!A-Za-z0-9._/@-]*) ;;   # a ref with anything else in it (a space, a glob) is refused outright
-  "$w/nightly.yml@refs/heads/main") case "$e" in schedule|workflow_dispatch) ok=1;; esac;;
+  "$w/nightly.yml@refs/heads/main") [ -n "$ro" ] || case "$e" in schedule|workflow_dispatch) ok=1;; esac;;
   "$w/release.yml@refs/heads/main") [ "$e" = workflow_dispatch ] && ok=1;;
   "$w/release.yml@refs/tags/v"?*) [ "$e" = push ] && ok=1;;
 esac
