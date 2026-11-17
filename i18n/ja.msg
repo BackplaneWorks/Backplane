@@ -2106,6 +2106,7 @@ gpui.c.kicad.cancel = キャンセル
 gpui.c.kicad.open.the.app.instead = 代わりに KiCad アプリで開く
 gpui.c.kicad.mac.full.screen = macOS で Backplane が全画面のあいだ、KiCad はここに表示できません。別ウインドウにポップアウトするか、全画面を終了してください。
 gpui.c.kicad.mac.prompt = macOS が Backplane へのアクセス許可を求めています。表示されている確認に答えると KiCad が起動します。
+gpui.c.kicad.recover.prompt = KiCad からの確認: 未保存の変更の復元 (Recover Unsaved Changes)。Restore で前回のセッションで KiCad が保持していた変更を戻し、Discard で最後に保存したファイルを開きます。確認は Backplane のウィンドウの横に表示されることがあります。
 gpui.c.kicad.stock.tip = これは標準の KiCad です。独自のウィンドウで開くことがあり、エージェントは編集できません。Backplane KiCad はこの中で開きます。
 gpui.c.kicad.kicad.is.not.responding = KiCad が応答していません。
 gpui.c.kicad.kicad.was.closed = KiCad は閉じられました。

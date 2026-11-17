@@ -179,6 +179,9 @@ pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<Strin
         }
         // KiCad's check or refill holds the switch (task-gate-reads): said, so the pane does not look dead; the hub sends it when it ends
         // macOS: KiCad's start waits on a system prompt that names Backplane (the hub's mac_prompt_wait): said, so the person looks for it
+        // macOS: KiCad's own offer to recover unsaved work is a native alert before its API is up (no dialog event): the hub tells it from
+        // the permission prompt by what the project's folder holds (embed.rs mac_wait_reason); said as KiCad's question, with the answers
+        "starting" if info["reason"] == "kicad-recover-prompt" => Some(crate::i18n::t("gpui.c.kicad.recover.prompt")),
         "starting" if info["reason"] == "mac-permission-prompt" => Some(crate::i18n::trs("macOS is asking for permission for Backplane: answer the prompt to let KiCad start.")),
         _ if info["task_wait"].as_str().is_some_and(|w| !w.is_empty()) => Some(crate::i18n::tf("gpui.c.kicad.task.wait", &[("what", info["task_wait"].as_str().unwrap_or("").to_string().into())])),
         "starting" => Some(starting_words(info)),
@@ -1215,6 +1218,9 @@ mod tests {
         let i = |st: &str, reason: &str| json!({"state": st, "reason": reason, "mode": "fork", "frames": [], "dialogs": []});
         let say = super::waiting_on(&i("starting", "mac-permission-prompt"), false, false).unwrap();
         assert!(say.contains("macOS is asking for permission for Backplane"), "{say}");
+        // KiCad's recovery alert on macOS (no dialog event): KiCad's question with what Restore and Discard do, never the permission words
+        let rec = super::waiting_on(&i("starting", "kicad-recover-prompt"), false, false).unwrap();
+        assert!(rec.contains("KiCad is asking") && rec.contains("Recover Unsaved Changes") && rec.contains("Restore") && rec.contains("Discard") && !rec.contains("permission"), "{rec}");
         assert_eq!(super::waiting_on(&i("starting", ""), false, false).as_deref(), Some("Starting KiCad…"));
         // another live KiCad's lock: asked before KiCad opens the document, whatever the state, over the editor too
         let ask = super::waiting_on(&json!({"state": "starting", "lock_ask": {"file": "a.kicad_pro", "holder": "kicad (pid 55) of h at desktop"}}), false, false).unwrap();
