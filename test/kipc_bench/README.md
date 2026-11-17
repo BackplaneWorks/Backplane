@@ -33,6 +33,8 @@ runtime's own demo boards. Never on a person's project, and only with their go (
 - `tasks2.json`, `checks.py`, `kx.py`, `mkfix2.py CLI FIXTURES HUBBLE_DIR OUT`: the design tasks (a schematic group, routing, placement, a
   footprint exchange, a real 8-layer board), their rule checks (DRC and ERC with nothing new, the netlist, the spec) and their fixtures;
   `KIPC_BENCH_TASKS=.../tasks2.json` runs `bench.py run`, `e2e` and `table` on them (`e2e`: `edit_e2e.py`'s `DESIGN`, the fewest calls).
+- `routebench.py`: the routing benchmark, no model: the fork's `SketchRoute` against the hub's router on fixed boards (cases, both
+  arms, scoring by KiCad's DRC); `docs/kicad-route-bench.md` has the cases, the numbers and how to run it.
 - `bench.py`: `ref` (the references), `e2e` (each task as one `kicad_edit` call must equal the reference), `run`
   (real turns; a line per run in `WORK/results.jsonl`), `table`.
 
