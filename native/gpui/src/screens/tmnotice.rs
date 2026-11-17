@@ -41,7 +41,7 @@ pub fn gp_strip(cx: &mut Context<Backplane>, n: Option<&Notice>, light: bool) ->
     let c = |k: &str| theme::color(light, k);
     let btn = |id: &'static str, label: String, strong: bool| div().id(id).px_2().h(px(16.)).flex().items_center().cursor_pointer().text_size(crate::scale::tpx(11.)).font_weight(FontWeight::BOLD)
         .bg(if strong { c("accent") } else { c("raise") }).text_color(if strong { c("on-accent") } else { c("dim") }).child(crate::i18n::trs(&label));
-    let settings = if n.settings.is_empty() { "Settings".to_string() } else { n.settings.clone() };
+    /* i18n-ok: drawn through trs in btn */ let settings = if n.settings.is_empty() { "Settings".to_string() } else { n.settings.clone() };
     let row = div().flex().items_center().gap_1().flex_shrink_0()
         /* i18n-ok: drawn through trs in btn */ .child(btn("gp-settings", settings, true).on_click(cx.listener(|this, _, _, cx| this.gp_notice_act("settings", cx))))
         /* i18n-ok: drawn through trs in btn */ .child(btn("gp-close", "Close".into(), false).on_click(cx.listener(|this, _, _, cx| this.gp_notice_act("close", cx))));
