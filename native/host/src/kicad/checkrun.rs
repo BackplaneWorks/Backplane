@@ -554,6 +554,13 @@ async fn run_editor(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &str, canc
     // there held KiCad's task gate (lane D, batch 4: minutes of AS_BUSY). From batch 6 the parity loads the schematic hidden.
     if !embed::has_frame(pro, "SCH") && !(s == "drc" && super::edchecks::drc_without_sch(pro)) {
         eprintln!("checks: {s} with kicad-cli: KiCad has no schematic editor open"); return None }
+    // DRC's parity in KiCad would load the schematic, and bp.13 opens it over another live KiCad's lock without asking: kicad-cli then
+    // (it reads the saved files, takes no lock)
+    if s == "drc" && !embed::has_frame(pro, "SCH") && !f.sch.is_empty() {
+        if let v @ super::locks::Verdict::Foreign { .. } = embed::lock_verdict(&f.sch) {
+            eprintln!("checks: drc with kicad-cli: the schematic is held by {} (KiCad's parity would open it over that lock)", super::locks::holder_words(&v)); return None
+        }
+    }
     { let e = edits(pro); let rev = with(pro, |p| if s == "drc" { p.drc.sched.running_rev.clone() } else { p.erc.sched.running_rev.clone() }).unwrap_or_default();
       eprintln!("checks: {s} in KiCad starts (rev {rev}, edits seen: board {} schematic {})", e[0], e[1]); }
     let pro2 = pro.to_string(); let s2 = s.to_string();

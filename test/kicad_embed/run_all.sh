@@ -52,6 +52,8 @@ SUITES=(
   # another live KiCad holds the project's lock: the pane asks Open anyway / Cancel before KiCad opens it (no silent override, no hidden
   # File Open Warning); Cancel starts nothing; a stale lock is cleared and logged (fork)
   "embed_foreign_lock_e2e.sh:foreign-lock"
+  # DRC while another KiCad holds the schematic runs on kicad-cli (KiCad's parity would open it over that lock) (fork)
+  "embed_drc_held_e2e.sh:drc-held"
   # a container is never destroyed with KiCad's holder in it: the window closed, killed, a non-keep detach (the schematic shown), and the
   # window closed with a cold show pending: KiCad alive 20 s after (the same process), the next Edit adopts and paints it, 10 of 10 (fork)
   "embed_client_exit_e2e.sh:client-close"
