@@ -934,6 +934,22 @@ try:
                 m0, b0 = os.path.getmtime(f), open(f, 'rb').read()
                 n, t = press(K_S, CMD); saved = wait_for(lambda: os.path.getmtime(f) > m0, 6)
                 row(E, 'save', 'works' if saved and open(f, 'rb').read() != b0 else ('wrong' if saved else 'nothing'), 'the file changed' if saved else 'the file unchanged', t)
+                if E == 'pcb':  # typing in a text field across a check: the keys stay in the field, none go to the canvas
+                    def field_text():
+                        subprocess.run(['pbcopy'], input=b'lane-m-none'); key(K_A, CMD); time.sleep(0.3); key(8, CMD); time.sleep(0.5)
+                        return subprocess.run(['pbpaste'], capture_output=True).stdout.decode(errors='replace')
+                    def across(open_field, where):
+                        canvas(); open_field(); time.sleep(1.2)
+                        n0 = seq(); relay(op='text', text='ab'); time.sleep(0.5)
+                        if field_text() != 'ab': key(K_ESC); time.sleep(0.6); return None
+                        key(124); time.sleep(0.3)  # the caret to the end
+                        rc = ask('kicad_ipc', {'path': f, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': 'FK_PCB'}}); cd = checks_idle(seq() - 1, 30)
+                        relay(op='text', text='cd'); time.sleep(0.5); got = field_text()
+                        canvas_ev = [e.get('type') for e in evs() if int(e.get('seq', 0)) > n0 and e.get('type') in ('ET_DOCUMENT_EDITED', 'ET_SELECTION_CHANGED')]
+                        key(K_ESC); time.sleep(0.6)
+                        return (got == 'abcd' and not canvas_ev and bool(cd)), f'{where}: the field holds {got!r} after "ab", a check ({"done" if cd else "no ET_CHECKS_DONE"}; RunChecks {"ok" if "message" in rc else str(rc)[:60]}), "cd"; canvas events {canvas_ev}'
+                    r = across(lambda: key(5, CMD), 'the Search panel (Cmd+G)') or across(lambda: key(K_F, CMD), 'the Find dialog (Cmd+F)')
+                    row(E, 'type_across_check', ('works' if r[0] else 'wrong') if r else 'nothing', r[1] if r else 'no text field took "ab" (Search panel and Find dialog)')
                 canvas(); n, t = press(K_F, CMD); wait_for(lambda: since(n, 'ET_DIALOG_OPENED'), W)
                 dl = [e.get('detail') for e in since(n, 'ET_DIALOG_OPENED')]
                 row(E, 'find', 'works' if 'Find' in dl else ('wrong' if dl else 'nothing'), f'dialogs {dl}', t); key(K_ESC); time.sleep(1.0)
