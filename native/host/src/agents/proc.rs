@@ -442,7 +442,7 @@ mod tests {
     }
     #[test] fn the_usual_directories_are_merged_once_with_the_newest_node_first() {
         let h = dir("usual"); for v in ["v20.1.0", "v24.13.1", "v9.0.0"] { std::fs::create_dir_all(h.join(".nvm/versions/node").join(v).join("bin")).unwrap() } std::fs::create_dir_all(h.join(".local/bin")).unwrap();
-        let u = usual_dirs(&h); assert_eq!(u[0], h.join(".nvm/versions/node/v24.13.1/bin"), "{u:?}"); assert_eq!(u[1], h.join(".nvm/versions/node/v20.1.0/bin")); assert_eq!(u[2], h.join(".nvm/versions/node/v9.0.0/bin")); assert!(u.contains(&h.join(".local/bin")) && !u.contains(&h.join(".volta/bin")), "only those that exist");
+        let u = usual_dirs_for(&h, cfg!(windows), cfg!(target_os = "macos"), &none); /* not the machine's own NVM_DIR (a test box sets it) */ assert_eq!(u[0], h.join(".nvm/versions/node/v24.13.1/bin"), "{u:?}"); assert_eq!(u[1], h.join(".nvm/versions/node/v20.1.0/bin")); assert_eq!(u[2], h.join(".nvm/versions/node/v9.0.0/bin")); assert!(u.contains(&h.join(".local/bin")) && !u.contains(&h.join(".volta/bin")), "only those that exist");
         let m = merge_dirs(&[vec![PathBuf::from("/a"), PathBuf::from("/b")], vec![PathBuf::from("/b"), PathBuf::from("/c"), PathBuf::new()], vec![PathBuf::from("/a"), PathBuf::from("/d")]]); assert_eq!(m, vec![PathBuf::from("/a"), PathBuf::from("/b"), PathBuf::from("/c"), PathBuf::from("/d")]);
     }
     #[cfg(target_os = "linux")]
@@ -488,7 +488,7 @@ mod tests {
         script(&h.join(".pi/agent/bin"), "pi", "echo 1.4.0"); crate::plat::fs::symlink("../../.pi/agent/bin/pi", h.join(".local/bin/pi")).unwrap();
         assert_eq!(find_in(&u, "grok", false), Some(h.join(".grok/bin/grok"))); assert_eq!(find_in(&u, "opencode", false), Some(h.join(".opencode/bin/opencode"))); assert_eq!(find_in(&u, "omp", false), Some(h.join(".bun/bin/omp")));
         let pi = find_in(&u, "pi", false).unwrap(); assert!(pi == h.join(".local/bin/pi") || pi == h.join(".pi/agent/bin/pi"), "{pi:?}");
-        assert_eq!(find_in(&u, "codex", false), None);
+        let mine: Vec<PathBuf> = u.iter().filter(|d| d.starts_with(&*h)).cloned().collect(); assert_eq!(find_in(&mine, "codex", false), None, "(a machine with codex in /usr/local/bin has it there)");
         // a version manager's own variables move its folder
         let alt = dir("inst-alt"); mk(&alt.join("versions/node/v20.0.0/bin")); mk(&alt.join("pnpm"));
         let env = |k: &str| match k { "NVM_DIR" => Some(alt.as_os_str().to_owned()), "PNPM_HOME" => Some(alt.join("pnpm").into_os_string()), _ => None };
