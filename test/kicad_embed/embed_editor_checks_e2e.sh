@@ -37,7 +37,7 @@ python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 PROJ="$OUT/proj"
 if [ -n "${CHECKS_BOARD:-}" ]; then
   ( cd "$PROJ" && git rm -q -r --cached . >/dev/null && find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} + )
-  rsync -a --exclude '*backups*' --exclude '~*.lck' --exclude '.git' --exclude 'mfg' --exclude 'build' "$CHECKS_BOARD"/ "$PROJ"/
+  python3 "$KEMBED_LIB/project_copy.py" "$CHECKS_BOARD" "$PROJ" --skip '*backups*' --skip mfg --skip build
   echo "{\"project\": \"$(basename "$(ls "$PROJ"/*.kicad_pro | head -1)")\"}" >"$PROJ/.backplane.json"
   git -C "$PROJ" add -A >/dev/null 2>&1; git -C "$PROJ" commit -qm "the board" >/dev/null 2>&1 || true
 fi

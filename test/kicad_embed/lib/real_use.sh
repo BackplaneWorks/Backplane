@@ -31,13 +31,11 @@ plan_demo() {  # plan_demo RUNTIME_KICAD OUT.py: 0 when the runtime has a plan d
 
 # stage_board SRC DST: a slim read-only copy (rsync-like, python so nothing extra is needed)
 stage_board() {
-  python3 -I - "$1" "$2" <<'PY'
-import os, shutil, sys
-src, dst = sys.argv[1], sys.argv[2]
-skip_dirs = {".git", ".backplane", "mfg", "build", "backups", "docs", "scripts", "renders", "__pycache__"}
-skip = shutil.ignore_patterns(*skip_dirs, "*-backups", "*.lck", "~*", "*.zip", "*.pdf", "fp-info-cache")
-if os.path.exists(dst): shutil.rmtree(dst)
-shutil.copytree(src, dst, ignore=skip, symlinks=True)
+  python3 -I - "$1" "$2" "${KEMBED_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}" <<'PY'
+import os, sys
+src, dst, lib = sys.argv[1], sys.argv[2], sys.argv[3]
+sys.path.insert(0, lib); from project_copy import copy_project   # KiCad's scratch left out: project_copy's one list
+copy_project(src, dst, extra=("mfg", "build", "backups", "docs", "scripts", "renders", "__pycache__", "~*", "*.zip", "*.pdf"), symlinks=True, fresh=True)
 PY
 }
 

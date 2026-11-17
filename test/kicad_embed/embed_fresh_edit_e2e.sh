@@ -36,7 +36,7 @@ rm -rf "$OUT/fh/.config/kicad" "$OUT/fh/.local/share/kicad" "$OUT/fh/.cache/kica
 # FRESH_PROJECT=<a project folder>: that project instead of the fixture (the release check opened KiCad's pic_programmer demo)
 if [ -n "${FRESH_PROJECT:-}" ]; then
   ( cd "$OUT/proj" && git rm -q -r --cached . >/dev/null && find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} + )
-  rsync -a "$FRESH_PROJECT"/ "$OUT/proj"/
+  python3 "$KEMBED_LIB/project_copy.py" "$FRESH_PROJECT" "$OUT/proj"
   echo "{\"project\": \"$(basename "$(ls "$OUT/proj"/*.kicad_pro | head -1)")\"}" >"$OUT/proj/.backplane.json"
   git -C "$OUT/proj" add -A >/dev/null 2>&1; git -C "$OUT/proj" commit -qm "the project" >/dev/null 2>&1 || true
 fi
