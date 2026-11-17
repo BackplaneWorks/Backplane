@@ -22,7 +22,7 @@ $pins = @{
   sccache = @{ v = '0.19.0'; sha = '130e4f8eb672e76590e9993c2ab890c4763b88238577bb11d8062158c7698353' }
 }
 $tools = "$Root\tools"; $dl = "$Root\dl"; $runner = "$Root\runner"
-New-Item -ItemType Directory -Force $Root, $tools, $dl, "$tools\bin", "$Root\sccache", "$Root\_work" | Out-Null
+New-Item -ItemType Directory -Force $Root, $tools, $dl, "$tools\bin", "$Root\sccache", "$Root\_work", "$Root\home" | Out-Null
 
 function Get-Pinned([string]$url, [string]$sha, [string]$out) {
   if ((Test-Path $out) -and ((Get-FileHash -Algorithm SHA256 $out).Hash -ieq $sha)) { return $out }
@@ -87,6 +87,7 @@ $path = @("$Root\cargo\bin", "$tools\bin", $nodeDir, "$sz\Files\7-Zip", 'C:\Prog
   (Join-Path (Split-Path $py) 'Scripts'), 'C:\Windows\System32', 'C:\Windows', 'C:\Windows\System32\WindowsPowerShell\v1.0', 'C:\Program Files\PowerShell\7') -join ';'
 @(
   "PATH=$path",
+  "HOME=$Root\home",   # NETWORK SERVICE has none in Git's bash (~/.cache: the OpenCascade build, bun)
   "RUSTUP_HOME=$Root\rustup",
   "CARGO_HOME=$Root\cargo",
   "SCCACHE_DIR=$Root\sccache",
