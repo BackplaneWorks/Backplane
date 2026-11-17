@@ -644,7 +644,51 @@ try:
             if ok:  # undo once KiCad's checks are done: the next case starts from the same board
                 checks_idle(n); m = seq(); key(K_Z, CMD); wait_for(lambda: any(c for c, d in edits_since(m)), 4); checks_idle(m)
             return ok
-        trace = lambda: open(os.path.join(OUT, 'kicad-embed-trace.log'), errors='replace').read().count('Backspace handed to wx') if os.path.isfile(os.path.join(OUT, 'kicad-embed-trace.log')) else 0
+        if os.environ.get('BS_PROBE') == 'undo':  # which delete path leaves Cmd+Z working: fn+delete, ⌫, ⌫ then Cmd+S
+            def try_undo(tag):
+                m = seq(); key(K_Z, CMD); u = bool(wait_for(lambda: any(c for c, d in edits_since(m)), 4)); checks_idle(m, 8)
+                print(f'INFO probe {tag}: Cmd+Z {"undoes" if u else "does nothing"}', flush=True); return u
+            for tag, k in (('fn+delete', K_FDEL), ('⌫', K_DEL), ('fn+delete again', K_FDEL)):
+                key(K_ESC); time.sleep(0.3); board_click(0.1, 0.9); n = seq(); key(K_A, CMD); time.sleep(0.6); key(k)
+                d = bool(wait_for(lambda: any(d for c, d in edits_since(n)), 4)); checks_idle(n, 8)
+                print(f'INFO probe {tag}: delete {"lands" if d else "does nothing"}', flush=True)
+                if d and not try_undo(tag):
+                    board_click(0.1, 0.9); try_undo(tag + ', after a click')
+                    if not try_undo(tag + ', again'):
+                        key(1, CMD); time.sleep(2); try_undo(tag + ', after Cmd+S')
+            raise SystemExit(0)
+        if os.environ.get('BS_PROBE') == 'order':  # the ⌫ cases ordered so none needs Cmd+Z to restore the board (undo is lost on macOS)
+            K_DEL_ = K_DEL
+            # 3: ⌫ while routing takes back the last segment: judged in cropped pictures of KiCad's own frame
+            key(K_ESC); time.sleep(0.4); board_click(0.5, 0.5); key(K_ESC); time.sleep(0.4)
+            key(K_X); time.sleep(0.8); board_click(0.5, 0.35); board_click(0.65, 0.35); shot('bs-route-before'); key(K_DEL_); time.sleep(1.0); shot('bs-route-after')
+            key(K_ESC); time.sleep(0.4); key(K_ESC); time.sleep(0.6)
+            print('INFO bs 3: routing before/after ⌫ in bs-route-before.png and bs-route-after.png (judged by eye)', flush=True)
+            # 4: ⌫ in Find's field: "abc" then ⌫
+            board_click(0.1, 0.9); key(K_F, CMD); time.sleep(1.5)
+            relay(op='text', text='abc'); time.sleep(0.4); key(K_DEL_); time.sleep(0.6); shot('bs-text-field'); key(K_ESC); time.sleep(1.0)
+            print('INFO bs 4: Find\'s field after "abc" then ⌫ in bs-text-field.png (judged by eye: "ab")', flush=True)
+            # 2: the pointer on a point where a click selects exactly one footprint, the selection cleared, then ⌫
+            spot = None
+            for fx, fy in ((0.5, 0.5), (0.35, 0.5), (0.65, 0.5), (0.5, 0.35), (0.5, 0.65), (0.35, 0.35), (0.65, 0.65), (0.35, 0.65), (0.65, 0.35), (0.25, 0.5), (0.75, 0.5), (0.2, 0.3), (0.8, 0.7)):
+                key(K_ESC); time.sleep(0.4); board_click(fx, fy); time.sleep(0.4)
+                if len(sel_refs()) == 1: spot = (fx, fy, sel_refs()[0]); break
+            key(K_ESC); time.sleep(0.6)
+            if spot:
+                print(f'INFO bs 2: the pointer on {spot[2]} at ({spot[0]}, {spot[1]}) of the canvas, nothing selected', flush=True)
+                n = seq(); key(K_DEL_)
+                check(bool(wait_for(lambda: any(d for c, d in edits_since(n)), 4)), 'bs 2: ⌫ with nothing selected deletes the item under the pointer')
+            else:
+                check(False, 'bs 2: no point of the canvas selected exactly one footprint (the case could not be set up)')
+            # the schematic: Cmd+A then ⌫
+            r = rects().get('kicad-tab:SCH'); b = next((w for w in wins() if w[0] == cw[0]), cw)[3]
+            if r: click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2)
+            time.sleep(6); board_click(0.1, 0.9)
+            n = seq(); key(K_A, CMD); time.sleep(0.6); key(K_DEL_)
+            check(bool(wait_for(lambda: any(d for c, d in edits_since(n)), 4)), 'bs 1: Cmd+A then ⌫ deletes the selection in the embedded schematic editor')
+            print(f'INFO embed trace "Backspace handed to wx": {open(os.path.join(OUT, "kicad-embed-trace.log"), errors="replace").read().count("Backspace handed to wx")} times', flush=True)
+            raise SystemExit(1 if FAILS else 0)
+        trace = lambda:open(os.path.join(OUT, 'kicad-embed-trace.log'), errors='replace').read().count('Backspace handed to wx') if os.path.isfile(os.path.join(OUT, 'kicad-embed-trace.log')) else 0
         # the menu chords (Edit > Undo, Redo, File > Save are menu key equivalents too, like Delete's ⌫): judged by KiCad's own edit events
         # (created = undo of a delete, deleted = redo), never by modified-flag events, which trail the edit itself
         board_click(0.1, 0.9)
