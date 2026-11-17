@@ -153,6 +153,8 @@ pub async fn found_seen(hub: &Arc<Hub>, agents: &Option<Arc<Agents>>, snapshot: 
     let mut evs = changes(&get, snapshot, at);
     if let Some(e) = allowance(&get, snapshot, at, at) { evs.push(e) }
     if !evs.is_empty() { let _ = hub.commit_many(&evs).await; }
+    // a sign-in or sign-out: the CLI that did it is found again at once (one installed by hand since the last detection shows in the picker now)
+    if evs.iter().any(|e| e["key"] == "accounts.inventory") { super::models_probe::refresh_soon(hub); }
     let inventory = public(snapshot);
     // not broadcast: the live profiles go only to clients granted account access (the `accounts` request)
     // threads whose account changed under them

@@ -28,6 +28,7 @@ impl Agents {
         if !parent.is_empty() { let ok = caller.as_ref().map_or(false, |c| !c.archived && !c.deleted && c.project == proj); if !ok { return fail("A subthread needs its launcher in the same project (maximum depth 64). Use subthread false only for an explicitly requested top-level conversation.") } }
         if !parent.is_empty() && !self.world().await.tree_chain_ok(&parent) { return fail("A subthread needs its launcher in the same project (maximum depth 64). Use subthread false only for an explicitly requested top-level conversation.") } // ST.Tree.chain
         if prompt.trim().is_empty() { return fail("a prompt is needed") }
+        let default_prov = crate::settings::models::default_now(&default_prov, &self.world().await.setting("accounts.inventory").to_string());
         let default_prov = if default_prov.is_empty() { "claude".to_string() } else { default_prov };
         // an account names its provider: an account of another one than asked for is refused, and with none asked for it decides
         let asked = if s(a, "provider").is_empty() { if a.get("account").is_some() && !s(a, "account").eq_ignore_ascii_case("default") { String::new() } else { default_prov.clone() } } else { s(a, "provider").to_string() };

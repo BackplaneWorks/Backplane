@@ -229,7 +229,7 @@ async fn act_here(hub: &Arc<Hub>, prov: &str, action: &str, text: &str) -> Resul
             if terms()?.input(&key, k.1.as_bytes().to_vec()).await { Ok(()) } else { Err("that sign-in is not running".into()) }
         }
         "stop" => { terms()?.kill(&key).await; forget_checks(hub); Ok(()) }
-        "check" => { forget_checks(hub); Ok(()) }
+        "check" => { forget_checks(hub); super::models_probe::refresh_soon(hub); Ok(()) }
         "install" => {
             let checks: Value = hub.setting("onboard.checks").await.and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
             super::tools_install::start(hub, p.id, checks["winget"] == true, checks["node"] == true, |h| Box::pin(async move { forget_checks(&h) })).await.map(|_| ())

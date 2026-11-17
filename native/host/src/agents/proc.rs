@@ -58,6 +58,8 @@ pub fn find_in(dirs: &[PathBuf], cli: &str, windows: bool) -> Option<PathBuf> {
 }
 
 // ---- where the provider CLIs are: a hub started from a launcher or a service has a PATH without the login shell's additions (nvm, volta, ~/.local/bin...) ----
+/// Each agent's own installer folder under the home (Unix and Windows alike).
+pub const AGENT_DIRS: [&str; 8] = [".claude/local", ".local/bin", ".grok/bin", ".opencode/bin", ".pi/agent/bin", ".gemini/antigravity-cli/bin", ".omp/bin", ".muse/bin"];
 /// CliPath.merge: each directory once, the first of each, in order, none empty.
 pub fn merge_dirs(parts: &[Vec<PathBuf>]) -> Vec<PathBuf> { let mut out: Vec<PathBuf> = vec![]; for d in parts.iter().flatten() { if !d.as_os_str().is_empty() && !out.contains(d) { out.push(d.clone()) } } out }
 fn semver_key(s: &str) -> (u64, u64, u64) { let mut p = s.trim_start_matches('v').split('.').map(|x| x.parse::<u64>().unwrap_or(0)); (p.next().unwrap_or(0), p.next().unwrap_or(0), p.next().unwrap_or(0)) }
@@ -79,7 +81,7 @@ fn node_versions(root: &Path, tail: &str) -> Vec<PathBuf> {
 pub fn usual_dirs_for(home: &Path, windows: bool, mac: bool, env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Vec<PathBuf> {
     let h = |d: &str| home.join(d);
     let var = |k: &str| env(k).map(PathBuf::from);
-    let agents = [".claude/local", ".local/bin", ".grok/bin", ".opencode/bin", ".pi/agent/bin", ".gemini/antigravity-cli/bin", ".omp/bin", ".muse/bin"];
+    let agents = AGENT_DIRS;
     let mut v: Vec<PathBuf> = vec![];
     if windows {
         let appdata = var("APPDATA").unwrap_or_else(|| h("AppData/Roaming")); let local = var("LOCALAPPDATA").unwrap_or_else(|| h("AppData/Local"));
@@ -149,7 +151,9 @@ pub fn search_dirs() -> &'static [PathBuf] {
         let cur: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
         let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from).unwrap_or_default();
         // what setup installs itself comes last, and is listed whether or not it exists yet: the list is worked out once, before the first install
-        merge_dirs(&[cur, login_dirs(), usual_dirs(&home), vec![crate::settings::tools_install::tools_dir(), home.join(".local/bin")]])
+        // the same for each agent's own installer folder (grok's ~/.grok/bin...): one installed after the hub started is found without a restart
+        let later: Vec<PathBuf> = std::iter::once(crate::settings::tools_install::tools_dir()).chain(AGENT_DIRS.iter().map(|d| home.join(d))).collect();
+        merge_dirs(&[cur, login_dirs(), usual_dirs(&home), later])
     })
 }
 

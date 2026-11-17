@@ -71,12 +71,33 @@ impl Commands {
     }
 }
 
+impl Commands {
+    /// agents.fresh (the hub's own, after a detection): every thread that no agent has ever answered (no session), is not running and is on an agent not installed here
+    /// moves to the agent a new thread would get now (a machine with only Codex: onboarding's first thread was made on Claude before Codex was found).
+    /// A thread an agent has answered keeps its agent: its picker says the agent is missing and offers the others. (Not "no entries": a new thread's
+    /// first entry is the hub's own note on where it works.)
+    async fn fresh(&self, hub: &Arc<Hub>, who: &Caller, id: &Value) -> Value {
+        use crate::settings::models;
+        let info: Value = serde_json::from_str(&models::info()).unwrap_or(Value::Null);
+        let Some(have) = models::installed(&info) else { return json!({"t":"reply","id":id,"ok":true,"result":{"moved":0}}) };
+        let (moves, to): (Vec<String>, String) = { let mut f = self.fold.lock().await; let _ = f.sync(&hub.store);
+            let to = models::default_agent(f.setting("agent.provider"), &info, &models::connected(f.setting("accounts.inventory")));
+            (f.threads.iter().filter(|(k, t)| !t.archived && !t.deleted && t.session.is_empty() && t.turn != "running" && !have.contains(&t.provider.as_str()) && t.provider != to).map(|(k, _)| k.clone()).collect(), to) };
+        if !have.contains(&to.as_str()) { return json!({"t":"reply","id":id,"ok":true,"result":{"moved":0}}) }
+        let mut moved = 0;
+        for th in moves { if self.call(hub, who, id, "thread.provider", &json!({"thread": th, "provider": to})).await.into_iter().any(|r| r["ok"] == true) { moved += 1 } }
+        if moved > 0 { eprintln!("models: {moved} new thread(s) moved to {to}, the agent installed here"); }
+        json!({"t":"reply","id":id,"ok":true,"result":{"moved":moved,"to":to}})
+    }
+}
+
 impl RpcHandler for Commands {
     fn methods(&self) -> &'static [&'static str] { &["bots.give", "thread.pin", "thread.unpin", "thread.settle", "thread.unsettle", "thread.archive", "thread.unarchive", "thread.rename", "thread.delete", "thread.snooze",
         "thread.reorder", "thread.detach", "thread.reparent", "thread.create", "thread.modes", "thread.planonce", "thread.effort", "thread.provider", "accounts.select", "accounts.move_all", "accounts.choose", "fallback.switch", "thread.fork", "thread.back", "project.remove", "project.rename",
-        "project.reorder", "project.move", "project.add", "project.new", "project.create", "project.start", "project.home", "todos.edit", "queue.edit", "queue.remove", "queue.move", "queue.steer", "queue.resume", "order.buy", "fs.list", "fs.mkdir", "fs.find"] }
+        "project.reorder", "project.move", "project.add", "project.new", "project.create", "project.start", "project.home", "todos.edit", "queue.edit", "queue.remove", "queue.move", "queue.steer", "queue.resume", "order.buy", "fs.list", "fs.mkdir", "fs.find", "agents.fresh"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
+            if method == "agents.fresh" { if who.client != 0 { return vec![json!({"t":"reply","id":id,"ok":false,"error":"unknown method"})] } return vec![self.fresh(hub, who, id).await] }
             if method == "bots.give" { // made of the requests below, so it holds no lock of its own past reading the modes
                 let modes = { let mut f = self.fold.lock().await; let _ = f.sync(&hub.store); f.threads.get(p["thread"].as_str().unwrap_or("")).map_or_else(Default::default, |t| (t.runtime.clone(), t.interaction.clone())) };
                 return give::give(hub, who, id, p, modes).await
@@ -123,6 +144,7 @@ impl RpcHandler for Commands {
                 if let Err(why) = check_base(&root, base).await { return vec![json!({"t":"reply","id":id,"ok":false,"error":why})] }
             } }
             if let Err(e) = f.sync(&hub.store) { return vec![json!({"t":"reply","id":id,"ok":false,"error":format!("{e:#}")})] }
+            f.default_agent = crate::settings::models::live().then(|| crate::settings::models::default_now(f.setting("agent.provider"), f.setting("accounts.inventory")));
             f.alloc = Some(hub.alloc_n(4) as usize); // p<at>-<n>, t<at>-<n+1>, g<at>-<n+3>: a number no other request shares
             if let Some(root) = create_in {
                 let pl = plan::project_create(&f, now_s(), id, p, &root);

@@ -120,7 +120,7 @@ impl<'a> Facts<'a> {
             ("failed", _) => { let mut b = vec![btn("Try again", "ob-install", tool, true)]; b.extend(page(&p)); let mut r = row(&format!("{label} did not install"), &format!("{}.", s(st, "note").trim_end_matches('.')), b); r["tone"] = json!("warn"); vec![r] }
             (_, Some(Plan::Winget(_))) => vec![row(&format!("Install {label}"), "Installs with winget. Windows may ask for permission once.", vec![btn("Install", "ob-install", tool, true)])],
             (_, Some(Plan::Direct(p))) => vec![row(&format!("Install {label}"), &format!("Downloads {} {}'s Windows installer, checks it and installs it for this Windows user. No administrator password.", p.name, p.version), vec![btn("Install", "ob-install", tool, true)])],
-            (_, Some(Plan::Sh(..))) | (_, Some(Plan::Ps(_))) => vec![row(&format!("Install {label}"), &format!("Downloads and runs {}.", if tool == "codex" { "Codex's own release, checked against its published checksum" } else { "its vendor's own installer" }), vec![btn("Install", "ob-install", tool, true)])],
+            (_, Some(Plan::Sh(..))) | (_, Some(Plan::Ps(_))) | (_, Some(Plan::Run(..))) => vec![row(&format!("Install {label}"), &format!("Downloads and runs {}.", if tool == "codex" { "Codex's own release, checked against its published checksum" } else { "its vendor's own installer" }), vec![btn("Install", "ob-install", tool, true)])],
             (_, Some(Plan::Link(u))) => vec![row(&format!("Get {label}"), "Opens its download page.", vec![link("Download", u)])],
             (_, None) => vec![],
         }
@@ -293,7 +293,7 @@ fn install_btns(f: &Facts, tool: &str, guide: &str) -> (String, Vec<Value>, bool
     match (s(st, "state"), &p) {
         ("running", _) => (format!("Installing. {}", if s(st, "note").is_empty() { "Starting." } else { s(st, "note") }), vec![], false),
         ("failed", _) => { let mut b = vec![btn("Try again", "ob-install", tool, true)]; b.extend(page(&p)); (format!("It did not install: {}.", s(st, "note").trim_end_matches('.')), b, true) }
-        (_, Some(Plan::Winget(_))) | (_, Some(Plan::Sh(..))) | (_, Some(Plan::Ps(_))) | (_, Some(Plan::Direct(_))) => (String::new(), vec![btn("Install", "ob-install", tool, true)], false),
+        (_, Some(Plan::Winget(_))) | (_, Some(Plan::Sh(..))) | (_, Some(Plan::Ps(_))) | (_, Some(Plan::Direct(_))) | (_, Some(Plan::Run(..))) => (String::new(), vec![btn("Install", "ob-install", tool, true)], false),
         (_, Some(Plan::Link(u))) => (String::new(), vec![link("Download", u)], false),
         (_, None) => (String::new(), fallback(), false),
     }
@@ -309,7 +309,17 @@ fn agent_row(f: &Facts, a: &Agent) -> Value {
         return if bad { warn(r) } else { r }
     }
     let ver = s(c, "version");
-    let at = if ver.is_empty() { "Installed.".to_string() } else { format!("Version {ver}.") };
+    let sup = &c["support"]; // settings/agent_versions.rs: older than Backplane supports is an Update, never "not installed"
+    if sup["state"] == "old" {
+        let key = format!("update:{}", a.id); let st = &f.installs[key.as_str()];
+        let (note, b, bad) = match s(st, "state") {
+            "running" => (format!("Updating. {}", if s(st, "note").is_empty() { "Starting." } else { s(st, "note") }), vec![], false),
+            "failed" => (format!("The update did not finish: {}.", s(st, "note").trim_end_matches('.')), vec![btn("Try again", "ob-install", &key, true)], true),
+            _ => (format!("Version {}: update needed, Backplane needs {} or newer.", s(sup, "version"), s(sup, "min")), vec![btn("Update", "ob-install", &key, true)], true),
+        };
+        let r = row(a.name, &note, b); return if bad { warn(r) } else { r }
+    }
+    let at = if ver.is_empty() { "Installed.".to_string() } else if sup["state"] == "newer" { format!("Version {ver} (newer than tested {}).", s(sup, "tested")) } else { format!("Version {ver}.") };
     let names = f.accounts(a.id);
     match a.id {
         "claude" | "codex" if f.signed(a.id) => {
@@ -770,6 +780,14 @@ mod tests {
         let p = at(&s0, "welcome", &i, &desk()); assert!(actions(&p).contains(&"ob-import".to_string())); assert!(row_of(&p, "Backplane 0.14")["note"].as_str().unwrap().contains("/h/.backplane-bend"));
         let nl = page(&s0, &sess(json!({"@ob.step": "welcome"})), &info("linux"), &Client { phone: false, os: "linux".into(), launcher: false }, "/h");
         assert!(row_of(&nl, "Data folder")["buttons"].as_array().unwrap().is_empty(), "no launcher: no Choose another");
+    }
+    #[test] fn an_old_agent_is_update_needed_with_an_update_button_never_not_installed() {
+        let mut c = blank(); c["agents"]["codex"] = json!({"path": "/x/codex", "version": "0.100.0", "signed": "yes", "support": crate::settings::agent_versions::verdict("codex", "0.100.0")});
+        let p = at(&cst(c.clone(), &[]), "agents", &info("linux"), &desk());
+        let r = row_of(&p, "Codex"); assert_eq!(r["note"], "Version 0.100.0: update needed, Backplane needs 0.169.0 or newer."); assert_eq!(r["tone"], "warn");
+        assert_eq!((r["buttons"][0]["action"].as_str(), r["buttons"][0]["value"].as_str()), (Some("ob-install"), Some("update:codex")));
+        c["agents"]["codex"]["version"] = json!("0.200.0"); c["agents"]["codex"]["support"] = crate::settings::agent_versions::verdict("codex", "0.200.0");
+        assert_eq!(row_of(&at(&cst(c, &[]), "agents", &info("linux"), &desk()), "Codex")["note"], "Version 0.200.0 (newer than tested 0.169.0). Connected.");
     }
     #[test] fn agents_is_one_list_with_more_agents_folded() {
         let (s0, i) = (cst(blank(), &[]), info("linux"));

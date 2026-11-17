@@ -24,7 +24,7 @@ fn send(session: &Value, hub: &str, m: &str, p: Value, cmds: &mut Vec<Value>, ri
 pub fn act(st: &State, hub: &str, session: &Value, action: &str, value: &str) -> Option<Out> {
     let mut rid = session["rid"].as_u64().unwrap_or(1);
     let mut cmds = vec![];
-    let provider = { let p = st.settings.get("agent.provider").map(String::as_str).unwrap_or("claude"); if PROVIDERS.contains(&p) { p } else { "claude" } };
+    let provider = { let get = |k: &str| st.settings.get(k).map(String::as_str).unwrap_or(""); let p = crate::settings::models::default_now(get("agent.provider"), get("accounts.inventory")); if PROVIDERS.contains(&p.as_str()) { p } else { "claude".into() } };
     let patch = match action {
         "bot-new" => json!({"drafts": {"@bnew": "1", "@rnew": "", "@f.name": "", "@f.persona": "", "@f.berr": "", "@bnew.provider": provider}}),
         "room-new" => json!({"drafts": {"@rnew": "1", "@bnew": "", "@f.rname": "", "@rnew.members": ""}}),

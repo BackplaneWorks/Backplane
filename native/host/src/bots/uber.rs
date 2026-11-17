@@ -189,7 +189,7 @@ impl Bots {
         let (look, auto, color) = super::catrig::of_event(&json!({"name": name, "look": look, "auto": offer["auto"], "color": offer["color"]}));
         if !super::rpc::name_ok(&name) || w.named(&name).is_some() { return vec![err(id, &format!("this machine has a bot called {name} already; rename it first"))] }
         let (bot, th) = (self.hub_id("b", now), self.hub_id("t", now));
-        let (provider, model) = (w.setting("agent.provider", "claude"), w.setting("agent.model", ""));
+        let (provider, model) = (crate::settings::models::default_now(&w.setting("agent.provider", "claude"), ""), w.setting("agent.model", ""));
         let mut ev = vec![json!({"$":"ThreadCreated","id":th,"project":"","title":name,"env":"local","branch":"","worktree":"","provider":provider,"model":model,"at":now}),
             super::catrig::with(json!({"$":"BotSet","id":bot,"name":name,"thread":th,"look":look,"persona":"","at":now}), look, auto, &color),
             json!({"$":"UberSet","bot":bot,"uid":uid,"at":now}), json!({"$":"SettingSet","key":"uber.offer","value":"","at":now})];

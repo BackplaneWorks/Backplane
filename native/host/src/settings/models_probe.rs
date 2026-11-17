@@ -145,8 +145,10 @@ pub fn info_of(f: &Found) -> String {
     let (oc, oca) = match &f.opencode { Some((v, o)) => (opencode::models(o), opencode::about(v, o)), None => (vec![], opencode::about("", "")) };
     let (pi, pia) = match &f.pi { Some((v, rows)) => (rows.iter().map(|r| r.0.clone()).collect(), pi_about(v, rows)), None => (vec![], none("pi")) };
     let (om, oma) = match &f.omp { Some((v, xs)) => (xs.iter().map(|o| gs(o, "selector").to_string()).filter(|s| !s.is_empty()).collect(), omp_about(v, xs)), None => (vec![], none("omp")) };
-    json!({"claude": cl, "codex": cx, "grok": gk, "muse": ms, "antigravity": agy::info_models(&f.agy), "opencode": oc, "pi": pi, "omp": om, "agy": agy::info_json(&f.agy), "probed": true,
-        "about": {"claude": cla, "codex": cxa, "grok": gka, "muse": msa, "antigravity": agy::info_about(&f.agy), "opencode": oca, "pi": pia, "omp": oma}}).to_string()
+    let mut info = json!({"claude": cl, "codex": cx, "grok": gk, "muse": ms, "antigravity": agy::info_models(&f.agy), "opencode": oc, "pi": pi, "omp": om, "agy": agy::info_json(&f.agy), "probed": true,
+        "about": {"claude": cla, "codex": cxa, "grok": gka, "muse": msa, "antigravity": agy::info_about(&f.agy), "opencode": oca, "pi": pia, "omp": oma}});
+    super::agent_versions::mark(&mut info); // each found CLI's version against the supported ones
+    info.to_string()
 }
 
 /// The models cache's text (0.14's Cache.of: the list's JSON on the first line; the prompt's text after it, unused here) and back.
@@ -251,7 +253,27 @@ pub async fn refresh(hub: &Arc<Hub>) -> bool {
     let _ = std::fs::write(hub.cfg.home.join("models.cache.part"), cache_text(&info)).and_then(|_| std::fs::rename(hub.cfg.home.join("models.cache.part"), hub.cfg.home.join("models.cache")));
     hub.push_all(&json!({"t":"info","info":{"models":super::models::info(),"models.all":super::models::all()}}));
     hub.bump_views();
+    // a thread made before its agent was found (onboarding's first thread, on Claude, with only Codex installed) moves to one that is here
+    if let Some(h) = hub.rpc_for("agents.fresh") { let _ = h.call(hub, &crate::api::Caller { gen: String::new(), client: 0 }, &json!(0), "agents.fresh", &json!({})).await; }
     true
+}
+
+/// A detection now, off the caller's path: after an install, a setup check or a sign-in, so the picker agrees with Settings at once instead of at the next
+/// 15-minute round (0.16.0: Codex installed by setup showed "not installed" in the picker while Settings had it connected). Asks made while one runs
+/// are folded into one more run after it.
+pub fn refresh_soon(hub: &Arc<Hub>) {
+    use std::sync::atomic::{AtomicU8, Ordering::SeqCst};
+    static STATE: AtomicU8 = AtomicU8::new(0); // 0 idle, 1 running, 2 running and asked again
+    if !super::models::live() { return }
+    if STATE.fetch_update(SeqCst, SeqCst, |s| Some(if s == 0 { 1 } else { 2 })).unwrap_or(0) != 0 { return }
+    let hub = hub.clone();
+    tokio::spawn(async move {
+        loop {
+            let changed = refresh(&hub).await;
+            if changed { eprintln!("models: detected again (changed)"); }
+            if STATE.fetch_update(SeqCst, SeqCst, |s| Some(if s == 2 { 1 } else { 0 })).unwrap_or(0) != 2 { break }
+        }
+    });
 }
 
 /// At start: the list found last time at once, then a detection (after the window is up) and one every 15 minutes. A copy of a real log with no stand-ins probes nothing.

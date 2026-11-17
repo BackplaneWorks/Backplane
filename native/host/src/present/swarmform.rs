@@ -12,7 +12,10 @@ pub const MAX: usize = 8;
 fn s<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 fn draft<'a>(session: &'a Value, k: &str) -> &'a str { s(&session["drafts"], k) }
 fn known(p: &str) -> bool { super::keys::AGENTS.iter().any(|(a, _)| *a == p) }
-fn default_provider(st: &State) -> &str { let p = st.settings.get("agent.provider").map(String::as_str).unwrap_or("claude"); if known(p) { p } else { "claude" } }
+fn default_provider(st: &State) -> String {
+    let get = |k: &str| st.settings.get(k).map(String::as_str).unwrap_or("");
+    let p = crate::settings::models::default_now(get("agent.provider"), get("accounts.inventory")); if known(&p) { p } else { "claude".into() }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row { pub provider: String, pub model: String, pub role: String }

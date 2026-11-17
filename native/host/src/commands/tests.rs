@@ -439,6 +439,16 @@ impl crate::api::RpcHandler for Arc<Close> {
 #[test] fn a_writers_answer_becomes_a_clean_title() {
     for (a, b) in [("Title: Fix the board.", "Fix the board"), ("  # **Hello**  world  ", "Hello world"), ("'quoted'", "quoted"), ("one\ntwo", "one"), ("", ""), ("wait...", "wait..."), (&"x".repeat(70), &format!("{}...", "x".repeat(57)))] { assert_eq!(super::plan::title_clean(a), b, "{a:?}") }
 }
+/// A new thread names no agent: it gets the one the handler worked out from what is installed (settings/models.rs default_agent), not the bare setting.
+#[tokio::test] async fn a_new_thread_gets_the_installed_default_agent() {
+    let h = hub("dflt").await;
+    let mut f = super::fold::Fold::default(); f.sync(&h.store).unwrap();
+    let made = |f: &super::fold::Fold| super::plan(f, 0, &json!(7), "thread.create", &json!({"project":"p1"}), &super::Ctx::default()).unwrap().events.into_iter().find(|e| e["$"] == "ThreadCreated").unwrap();
+    assert_eq!(made(&f)["provider"], "claude", "nothing known: the setting's default");
+    f.default_agent = Some("codex".into()); assert_eq!(made(&f)["provider"], "codex", "only Codex installed");
+    let named = super::plan(&f, 0, &json!(7), "thread.create", &json!({"project":"p1","provider":"grok"}), &super::Ctx::default()).unwrap().events.into_iter().find(|e| e["$"] == "ThreadCreated").unwrap();
+    assert_eq!(named["provider"], "grok", "an agent asked for is kept");
+}
 /// The planners of the job reports (no client method reaches them: the jobs that report are not ported). Straight through the planner.
 async fn plan_of(h: &Arc<Hub>, method: &str, p: Value) -> Vec<Value> {
     let mut f = super::fold::Fold::default(); f.sync(&h.store).unwrap();

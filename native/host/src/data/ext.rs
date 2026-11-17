@@ -56,7 +56,7 @@ async fn picker(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     // a new thread: what the phone has chosen so far, else the hub's default agent, and approvals on (the phones' default)
     let setting = |k: &str| crate::statehost::policies().and_then(|x| x.with_state(|st| st.settings.get(k).cloned())).flatten().unwrap_or_default();
     let pick = |k: &str, dflt: String| if p.get(k).is_some() { s(p, k).to_string() } else if th.is_empty() { dflt } else { s(&now, k).to_string() };
-    let provider = pick("provider", { let d = setting("agent.provider"); if d.is_empty() { "claude".into() } else { d } });
+    let provider = pick("provider", { let d = crate::settings::models::default_now(&setting("agent.provider"), &setting("accounts.inventory")); if d.is_empty() { "claude".into() } else { d } });
     let model = pick("model", if p.get("provider").is_some() { String::new() } else { setting("agent.model") });
     // a thread's own account's catalog (the one the desktop's picker lists) over the hub's detected list
     let info: Value = serde_json::from_str(&crate::settings::models::info()).unwrap_or(Value::Null);

@@ -23,7 +23,9 @@ pub struct Fold {
     pub queues: HashMap<String, Vec<(String, String)>>, pub asks: BTreeMap<String, Ask>, pub forks: HashMap<String, String>,
     pub st: HashMap<String, String>, /// Switch.count: entries filed under each thread by that thread
     pub count: HashMap<String, usize>, /// the number the request's ids are built from (Hub::alloc_n), else the log length
-    #[serde(skip)] pub alloc: Option<usize>, /// the first messages of home threads ("home-<msg>"), so a retry knows whether the message arrived
+    #[serde(skip)] pub alloc: Option<usize>, /// the agent a new thread gets when its request names none (settings/models.rs `default_agent`, set by the handler from
+    /// what is installed here); None: the `agent.provider` setting as it is
+    #[serde(skip)] pub default_agent: Option<String>, /// the first messages of home threads ("home-<msg>"), so a retry knows whether the message arrived
     pub home_msgs: std::collections::HashSet<String>,
 }
 

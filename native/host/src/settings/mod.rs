@@ -39,6 +39,7 @@ pub mod onboard;
 pub mod tools_install;
 pub mod models;
 pub mod models_probe;
+pub mod agent_versions;
 pub mod privacy;
 pub mod proposal;
 pub mod secret;
