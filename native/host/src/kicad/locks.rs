@@ -3,7 +3,9 @@
 //!
 //! KiCad writes `~<file>.lck` beside the project, board and schematic it opens: JSON {"username","hostname","token"}, and holds a
 //! `flock` on it while it runs (since 9ededb57e9, in bp.12.4: a lock nobody holds is one it reclaims by itself). So a lock is:
-//!   - stale: nobody holds it (its KiCad died): the hub removes it and logs it;
+//!   - stale: written on this computer (its hostname is this host's) and nobody holds it (its KiCad died): the hub removes it and logs it.
+//!     A lock naming another computer, or none (unreadable, no hostname), is never removed: on a shared or synced folder another
+//!     computer's KiCad may hold it there, and no flock reaches across machines, so "not held" here proves nothing about it;
 //!   - ours: held by a KiCad this hub started (`--parent-pid <this hub>`): the GUI session we have, or our headless server (retired first);
 //!   - foreign: held by any other live process (the person's own KiCad, another Backplane's), or written by another computer (a shared
 //!     folder: its holder is not ours to see): the person is asked in the pane, Open anyway or Cancel, before KiCad opens the document.
@@ -37,13 +39,17 @@ pub enum Verdict {
 #[derive(Clone, Debug, Default)]
 pub struct Seen { pub user: String, pub host: String, pub held: Option<bool>, pub pid: Option<u32>, pub cmdline: String }
 
+/// Whether a lock is one the hub may remove: nobody holds it here (the same test KiCad makes) AND it names this computer. A lock naming
+/// another computer, or no computer at all (unreadable, an empty hostname), is not: its KiCad may run on another machine sharing the folder.
+pub fn stale_here(s: &Seen, me_host: &str) -> bool { s.held == Some(false) && !s.host.is_empty() && !me_host.is_empty() && s.host.eq_ignore_ascii_case(me_host) }
 /// What the lock of `doc` is, against this hub's pid and this computer's user and host.
 pub fn classify(seen: Option<&Seen>, hub_pid: u32, _me_user: &str, me_host: &str) -> Verdict {
     let Some(s) = seen else { return Verdict::Free };
     let other_host = !s.host.is_empty() && !me_host.is_empty() && !s.host.eq_ignore_ascii_case(me_host);
     match s.held {
-        // nobody holds it here; written by another computer it may still be open there (a shared folder: no flock across machines)
-        Some(false) if !other_host => Verdict::Stale,
+        // nobody holds it here, and it was written here: its KiCad ended. One naming another computer, or none, is foreign: it may still be
+        // open there (a shared folder: no flock across machines); the person is asked, never the file removed
+        Some(false) if stale_here(s, me_host) => Verdict::Stale,
         None if !other_host => Verdict::Unknown,
         Some(true) if s.pid.is_some() && parent_pid_arg(&s.cmdline) == Some(hub_pid) => Verdict::Ours(s.pid.unwrap_or(0)),
         _ => Verdict::Foreign { pid: s.pid, user: s.user.clone(), host: s.host.clone(), what: program_of(&s.cmdline) },
@@ -75,9 +81,16 @@ fn program_of(cmdline: &str) -> String {
 }
 
 /// Read the lock of `doc` on this computer: its owner (the JSON), whether a process holds its flock, and which (Linux: /proc/locks).
-pub fn inspect(doc: &str) -> Option<Seen> {
-    let path = lock_path(doc)?;
-    let text = std::fs::read_to_string(&path).ok()?;
+pub fn inspect(doc: &str) -> Option<Seen> { inspect_file(&lock_path(doc)?) }
+/// The same for a lock file by its own path.
+pub fn inspect_file(path: &Path) -> Option<Seen> {
+    let path = path.to_path_buf();
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        // An existing but unreadable lock is not an absent lock. Keep its owner unknown so the notice path asks instead of opening over it.
+        Err(_) => String::new(),
+    };
     let j: Value = serde_json::from_str(&text).unwrap_or(json!({}));
     let mut s = Seen { user: j["username"].as_str().unwrap_or("").into(), host: j["hostname"].as_str().unwrap_or("").into(), ..Default::default() };
     s.held = held(&path);
@@ -214,11 +227,15 @@ fn hostname() -> String {
     std::env::var("COMPUTERNAME").unwrap_or_default()
 }
 
-/// Remove a stale lock (nobody holds it), saying so in the hub log. Never one that is held.
+/// Remove a stale lock, saying so in the hub log: only one this computer wrote (its hostname is this host's) that nobody holds (`stale_here`).
+/// Never one that is held, one naming another computer, or one naming none.
 pub fn clear_stale(doc: &str, why: &str) -> bool { lock_path(doc).is_some_and(|p| clear_stale_file(&p, why)) }
-/// The same for a lock file by its own path (a sweep of a folder's `~*.lck`): only one this platform can see is not held.
+/// The same for a lock file by its own path (a sweep of a folder's `~*.lck`).
 pub fn clear_stale_file(p: &Path, why: &str) -> bool {
-    if held(p) != Some(false) { return false }
+    let me_host = me().1;
+    match inspect_file(p) { Some(s) if stale_here(&s, &me_host) => {} Some(s) => {
+        if s.held == Some(false) { eprintln!("kicad locks: left the lock {} ({why}): nobody holds it here, but it {}", p.display(), if s.host.is_empty() { "names no computer".to_string() } else { format!("was written on {}", s.host) }); }
+        return false } None => return false }
     let ok = std::fs::remove_file(&p).is_ok();
     if ok { eprintln!("kicad locks: removed the stale lock {} ({why})", p.display()); }
     ok
@@ -229,7 +246,9 @@ pub fn holder_words(v: &Verdict) -> String {
     match v {
         Verdict::Foreign { pid, user, host, what } => {
             let prog = if what.is_empty() { "another KiCad".to_string() } else { what.trim_end_matches(".real").to_string() };
-            let who = match (user.is_empty(), host.is_empty()) { (false, false) => format!(" of {user} at {host}"), (false, true) => format!(" of {user}"), _ => String::new() };
+            let who = match (user.is_empty(), host.is_empty()) { (false, false) => format!(" of {user} at {host}"), (false, true) => format!(" of {user}"), (true, false) => format!(" at {host}"),
+                // its lock file names no one (unreadable, or written without them): it may be another computer's
+                (true, true) if pid.is_none() => " (its lock file does not say whose or on which computer)".to_string(), _ => String::new() };
             match pid { Some(p) => format!("{prog} (pid {p}){who}"), None => format!("{prog}{who}") }
         }
         _ => String::new(),
@@ -247,6 +266,37 @@ pub fn override_lock(doc: &str, holder: &str) {
 
 #[cfg(test)]
 mod tests {
+    fn seen_at(host: &str, held: Option<bool>) -> Seen { Seen { user: "h".into(), host: host.into(), held, ..Default::default() } }
+    /// Only a lock this computer wrote and nobody holds is stale; another computer's, or one naming none, is foreign (asked, never removed).
+    #[test] fn a_lock_from_another_computer_or_none_is_never_stale() {
+        assert_eq!(classify(Some(&seen_at("desk", Some(false))), 1, "h", "desk"), Verdict::Stale);
+        assert_eq!(classify(Some(&seen_at("DESK", Some(false))), 1, "h", "desk"), Verdict::Stale, "KiCad's host name, case aside");
+        assert!(matches!(classify(Some(&seen_at("laptop", Some(false))), 1, "h", "desk"), Verdict::Foreign { .. }), "another computer's: it may hold it there");
+        assert!(matches!(classify(Some(&seen_at("", Some(false))), 1, "h", "desk"), Verdict::Foreign { .. }), "one naming no computer");
+        assert!(matches!(classify(Some(&seen_at("desk", Some(true))), 1, "h", "desk"), Verdict::Foreign { .. }), "held here");
+        assert!(!stale_here(&seen_at("desk", Some(false)), ""), "this host unknown: nothing is proven");
+        assert_eq!(holder_words(&classify(Some(&seen_at("", Some(false))), 1, "h", "desk")), "another KiCad of h");
+        let none = Seen { held: Some(false), ..Default::default() };
+        assert_eq!(holder_words(&classify(Some(&none), 1, "h", "desk")), "another KiCad (its lock file does not say whose or on which computer)");
+    }
+    /// The removal itself checks the same: another computer's lock file (nobody holds it here) and one naming no computer survive; this
+    /// computer's stale one is removed; a held one is untouched.
+    #[cfg(unix)]
+    #[test] fn only_this_computers_unheld_lock_is_removed() {
+        let d = crate::plat::tmp::dir("locks-host"); let me_host = me().1; assert!(!me_host.is_empty());
+        let mk = |name: &str, host: &str| { let p = d.path().join(name); std::fs::write(&p, json!({"hostname": host, "username": "h", "token": "t"}).to_string()).unwrap(); p };
+        let other = mk("~a.kicad_pro.lck", "some-other-computer"); let blank = mk("~b.kicad_pro.lck", ""); let mine = mk("~c.kicad_pro.lck", &me_host);
+        let junk = d.path().join("~d.kicad_pro.lck"); std::fs::write(&junk, "not json").unwrap();
+        let heldp = mk("~e.kicad_pro.lck", &me_host);
+        let f = std::fs::File::open(&heldp).unwrap(); use std::os::unix::io::AsRawFd; assert_eq!(unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }, 0);
+        // flock is per open file description: this process's own hold blocks a second open's try, as KiCad's does
+        assert!(!clear_stale_file(&other, "test") && other.exists(), "another computer's lock survives");
+        assert!(!clear_stale_file(&blank, "test") && blank.exists(), "a lock naming no computer survives");
+        assert!(!clear_stale_file(&junk, "test") && junk.exists(), "an unreadable lock survives");
+        assert!(!clear_stale_file(&heldp, "test") && heldp.exists(), "a held lock is untouched");
+        assert!(clear_stale_file(&mine, "test") && !mine.exists(), "this computer's stale lock is removed");
+        drop(f);
+    }
     use super::*;
     #[test] fn a_lock_is_stale_ours_or_foreign() {
         let seen = |held: Option<bool>, pid: Option<u32>, cmd: &str, host: &str| Seen { user: "h".into(), host: host.into(), held, pid, cmdline: cmd.into() };
@@ -297,6 +347,9 @@ mod tests {
         // another test forking a child meanwhile shares this open file description until the child's exec closes it (close-on-exec):
         // the flock is free once that brief window ends
         for _ in 0..40 { if held(&lck) == Some(false) { break } std::thread::sleep(std::time::Duration::from_millis(50)); }
-        assert!(clear_stale(&doc.to_string_lossy(), "test") && !lck.exists());
+        std::fs::write(&lck, r#"{"hostname":"some-other-computer","username":"h","token":"t"}"#).unwrap();
+        assert!(!clear_stale(&doc.to_string_lossy(), "test") && lck.exists(), "free, but written on another computer: left");
+        std::fs::write(&lck, json!({"hostname": me().1, "username": "h", "token": "t"}).to_string()).unwrap();
+        assert!(clear_stale(&doc.to_string_lossy(), "test") && !lck.exists(), "free and this computer's: removed");
     }
 }
