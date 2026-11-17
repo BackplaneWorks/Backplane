@@ -1250,6 +1250,17 @@ const MAC_PROMPT_BOUND: Duration = Duration::from_secs(600);
 pub fn mac_prompt_wait(macos: bool, not_ready_for: Option<Duration>, kicad_dialog_open: bool) -> bool {
     macos && !kicad_dialog_open && not_ready_for.is_some_and(|d| d >= MAC_PROMPT_AFTER)
 }
+/// macOS: KiCad's own offer to recover unsaved work ("KiCad found unsaved changes from your last session…", Restore / Discard) is a native
+/// alert shown before its API is up, so no dialog event reaches the hub and the stall looks like a system prompt. When the project's folder
+/// holds what KiCad offers back (its `_autosave-*` files, or a local-history snapshot newer than the saved files: `history_newer`), the
+/// stall is KiCad's question, said as such (MAC_RECOVER_REASON); the permission words only when there is nothing to recover.
+/// (The Mac mini gate, Nov 16: after a kill the pane said "macOS is asking for permission" over KiCad's recovery alert.)
+pub const MAC_RECOVER_REASON: &str = "kicad-recover-prompt";
+pub fn mac_wait_reason(project_dir: &Path) -> &'static str {
+    let kept = std::fs::read_dir(project_dir).into_iter().flatten().flatten()
+        .any(|e| e.file_name().to_str().is_some_and(|n| n.starts_with("_autosave-")));
+    if kept || history_newer(project_dir) { MAC_RECOVER_REASON } else { MAC_PROMPT_REASON }
+}
 pub fn mac_prompt_failure(bound: Duration) -> String {
     format!("KiCad waited {} min on a macOS permission prompt that was not answered (answer it, then Try again)", bound.as_secs() / 60)
 }
@@ -2749,12 +2760,14 @@ async fn spawn_gui_session(
                 deadline = tokio::time::Instant::now() + Duration::from_secs(30);
                 let _ = me.send(Msg::StartupReason { pro: pro.clone(), gen, reason: format!("waiting on dialog: {dlg}") });
             } else if mac_prompt_wait(cfg!(target_os = "macos"), not_ready_since.map(|t| t.elapsed()), false) {
+                let why = mac_wait_reason(Path::new(&pro).parent().unwrap_or(Path::new(".")));
                 if !prompted {
                     prompted = true;
                     deadline = tokio::time::Instant::now() + MAC_PROMPT_BOUND;
-                    eprintln!("kicad embed: {pro}: KiCad not ready for {} s with no dialog of its own: waiting on a macOS prompt", MAC_PROMPT_AFTER.as_secs());
+                    eprintln!("kicad embed: {pro}: KiCad not ready for {} s with no dialog of its own: waiting on {}", MAC_PROMPT_AFTER.as_secs(),
+                        if why == MAC_RECOVER_REASON { "KiCad's offer to recover unsaved changes (its alert comes before its API)" } else { "a macOS prompt" });
                 }
-                let _ = me.send(Msg::StartupReason { pro: pro.clone(), gen, reason: MAC_PROMPT_REASON.into() });
+                let _ = me.send(Msg::StartupReason { pro: pro.clone(), gen, reason: why.into() });
             } else {
                 let _ = me.send(Msg::StartupReason { pro: pro.clone(), gen, reason: String::new() });
             }
@@ -3467,6 +3480,23 @@ mod tests {
         assert!(history_newer(&d), "a snapshot after the save");
         std::thread::sleep(std::time::Duration::from_millis(20)); std::fs::write(d.join("a.kicad_pcb"), "y").unwrap();
         assert!(!history_newer(&d), "saved after the snapshot");
+    }
+    #[test] fn a_macos_stall_is_kicads_recover_question_when_there_is_something_to_recover() {
+        // nothing kept: the stall is a system prompt that names Backplane (the Documents prompt)
+        let d = crate::plat::tmp::dir("mac-wait-none"); std::fs::write(d.join("a.kicad_pcb"), "x").unwrap();
+        assert_eq!(mac_wait_reason(&d), MAC_PROMPT_REASON);
+        // KiCad's autosave beside the files: its alert offers it back before its API is up
+        let a = crate::plat::tmp::dir("mac-wait-autosave"); std::fs::write(a.join("a.kicad_pcb"), "x").unwrap();
+        std::fs::write(a.join("_autosave-a.kicad_pcb"), "y").unwrap();
+        assert_eq!(mac_wait_reason(&a), MAC_RECOVER_REASON);
+        // a local-history snapshot newer than the saved files (the gate's case: an agent's unsaved change, then KiCad killed)
+        let h = crate::plat::tmp::dir("mac-wait-history"); std::fs::write(h.join("a.kicad_pcb"), "x").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let r = h.join(".history/.git/refs/heads"); std::fs::create_dir_all(&r).unwrap(); std::fs::write(r.join("master"), "c399").unwrap();
+        assert_eq!(mac_wait_reason(&h), MAC_RECOVER_REASON);
+        // and once saved after the snapshot, nothing to recover again
+        std::thread::sleep(std::time::Duration::from_millis(20)); std::fs::write(h.join("a.kicad_pcb"), "z").unwrap();
+        assert_eq!(mac_wait_reason(&h), MAC_PROMPT_REASON);
     }
     #[test] fn kicad_that_lost_its_windows_is_started_again_only_when_it_says_so() {
         assert!(windows_lost(3, "x\nkicad embed: windows lost\n"));
