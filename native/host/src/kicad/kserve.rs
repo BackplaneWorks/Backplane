@@ -101,9 +101,12 @@ impl Srv {
 
 pub fn active(st: &str) -> bool { st == "starting" || st == "ready" } // KS.active
 pub fn count(xs: &[Srv]) -> usize { xs.iter().filter(|s| active(&s.state)).count() } // KS.count
-/// KS.evict: with two servers starting or ready and a third wanted: the project of the least recently used ready one ("" when none can be retired; a held one never is).
-pub fn evict(srvs: &[Srv]) -> String {
-    if count(srvs) < 2 { return String::new() }
+/// How many headless KiCads run at once, by the machine's memory: two under 32 GB, three from 32 GB, four from 64 GB (unknown: two).
+/// (A machine sold as 32 GB reads a little under it: the steps are at 30 and 60 GiB.)
+pub fn room(total_ram: Option<u64>) -> usize { match total_ram.unwrap_or(0) >> 30 { 0..=29 => 2, 30..=59 => 3, _ => 4 } }
+/// KS.evict: with `room` servers starting or ready and one more wanted: the project of the least recently used ready one ("" when none can be retired; a held one never is).
+pub fn evict(srvs: &[Srv], room: usize) -> String {
+    if count(srvs) < room { return String::new() }
     let mut best: Option<(&str, u64)> = None;
     for s in srvs { if s.state == "ready" && s.why != HELD && best.map_or(true, |(_, at)| s.last < at) { best = Some((&s.project, s.last)) } }
     best.map(|(p, _)| p.to_string()).unwrap_or_default()
@@ -111,10 +114,10 @@ pub fn evict(srvs: &[Srv]) -> String {
 /// KS.state.of: a project's state ("" when no record); the first record wins.
 pub fn state_of(xs: &[Srv], project: &str) -> String { xs.iter().find(|s| s.project == project).map(|s| s.state.clone()).unwrap_or_default() }
 /// KS.plan: "ready", "wait", "failed", "start", "evict:<project>" or "busy".
-pub fn plan(srvs: &[Srv], project: &str, caps: &[String]) -> String {
+pub fn plan(srvs: &[Srv], project: &str, caps: &[String], room: usize) -> String {
     match state_of(srvs, project).as_str() {
         "ready" => "ready".into(), "starting" => "wait".into(), "failed" => "failed".into(),
-        _ => if count(srvs) < 2 { "start".into() } else { let v = evict(srvs); if has(caps, "shutdown") && !v.is_empty() { format!("evict:{v}") } else { "busy".into() } },
+        _ => if count(srvs) < room { "start".into() } else { let v = evict(srvs, room); if has(caps, "shutdown") && !v.is_empty() { format!("evict:{v}") } else { "busy".into() } },
     }
 }
 
@@ -126,7 +129,7 @@ pub const REFUSED: [&str; 18] = ["GetSelection", "AddToSelection", "RemoveFromSe
     "HighlightNets", "RunAction", "RevertDocument", "OpenLibraryItem", "InteractiveMoveItems"];
 pub fn headless_refused(ty: &str) -> bool { REFUSED.contains(&last(ty, '.')) } // KS.headless_refused
 pub const REFUSAL: &str = "not available in headless KiCad: pass explicit item IDs (get them with GetItems)"; // KS.refusal
-pub const BUSY: &str = "IPC busy: 2 KiCad servers already run for other projects"; // KS.busy
+pub const BUSY: &str = "IPC busy: as many KiCad servers as this machine has room for already run for other projects"; // KS.busy
 pub const FP_REFUSAL: &str = "bp.3 would wipe this footprint's pads and 3D models: send the full FootprintInstance from GetItems with only the fields you change";
 pub const SYM_REFUSAL: &str = "bp.3 would make an empty symbol from a library id: call LoadAllLibraries, wait until GetLibraryStatuses shows the library loaded, then use PlaceSymbolFromLibrary";
 
@@ -256,11 +259,12 @@ mod tests {
     // KS.evict / KS.plan: kserve_evict_least_recent, kserve_no_evict_with_room, kserve_third_project_evicts, kserve_third_project_busy_without_shutdown, kserve_running_server_is_used
     #[test] fn kserve_room_for_two() {
         let two = [up("A", 5), up("B", 3)];
-        assert_eq!(evict(&two), "B"); assert_eq!(evict(&[up("A", 5)]), "");
-        assert_eq!(plan(&two, "C", &s(&["shutdown"])), "evict:B"); assert_eq!(plan(&two, "C", &[]), "busy"); assert_eq!(plan(&two, "A", &[]), "ready");
-        assert_eq!(plan(&[], "C", &[]), "start"); assert_eq!(count(&two), 2);
+        assert_eq!(evict(&two, 2), "B"); assert_eq!(evict(&[up("A", 5)], 2), ""); assert_eq!(evict(&two, 3), "");
+        assert_eq!((room(None), room(Some(16 << 30)), room(Some(31 << 30)), room(Some(59 << 30)), room(Some(62 << 30)), room(Some(512 << 30))), (2, 2, 3, 3, 4, 4)); assert_eq!(plan(&two, "C", &[], 3), "start");
+        assert_eq!(plan(&two, "C", &s(&["shutdown"]), 2), "evict:B"); assert_eq!(plan(&two, "C", &[], 2), "busy"); assert_eq!(plan(&two, "A", &[], 2), "ready");
+        assert_eq!(plan(&[], "C", &[], 2), "start"); assert_eq!(count(&two), 2);
         // a server holding unsaved changes is never the victim
-        let held = [up("A", 5), up("B", 3).hold()]; assert_eq!(evict(&held), "A"); assert_eq!(touched_releases(), "");
+        let held = [up("A", 5), up("B", 3).hold()]; assert_eq!(evict(&held, 2), "A"); assert_eq!(touched_releases(), "");
     }
     fn touched_releases() -> String { up("B", 3).hold().touch(9).why }
     // KS.headless_refused / KS.refused: kserve_refused_selection, _refused_view, _refused_run_action, _get_items_allowed, _eighteen_refused

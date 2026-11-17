@@ -60,10 +60,27 @@ enum Msg {
     Bad { project: String, why: String },
     Late { project: String, born: u64 },
     Go { project: String },
+    Tick,
+    Dump(String),
+    Trim,
+    Trimmed { project: String },
     Evicted { victim: String, project: String, ok: bool, why: String },
 }
 
-struct Wt { project: String, ty: String, msg: Value, env: Env, reply: oneshot::Sender<Value> }
+/// A server process's key ("<project>\t<number>") as its project and number.
+fn proc_of(key: &str) -> (String, u64) { match key.rsplit_once('\t') { Some((p, n)) => (p.to_string(), n.parse().unwrap_or(0)), None => (key.to_string(), 0) } }
+struct Wt { project: String, ty: String, msg: Value, env: Env, reply: oneshot::Sender<Value>, at: std::time::Instant }
+/// A server answering a request, or asked within these seconds (an agent between two commands of one edit or one simulation), is
+/// never the one stopped to make room: stopping it loses the request, the run and the open document.
+const IN_USE_S: u64 = if cfg!(test) { 1 } else { 15 };
+/// How long a request waits for room while both servers are at work, and the longest any request waits for its server at all.
+const ROOM_WAIT: Duration = Duration::from_secs(if cfg!(test) { 4 } else { 120 });
+const WAIT_MAX: Duration = Duration::from_secs(if cfg!(test) { 6 } else { 180 });
+/// The longest a request is waited for from outside the actor, whatever happened inside it (KiCad's own limit is 30 s a request).
+const ASK_MAX: Duration = Duration::from_secs(WAIT_MAX.as_secs() + 120);
+pub const ROOM_BUSY: &str = "IPC busy: every KiCad server this machine has room for is at work for another project; ask again when one ends";
+/// A server beyond the first two that nobody has asked for this long is shut down (the room past two is for work, not for keeping).
+const SPARE_IDLE_S: u64 = if cfg!(test) { 2 } else { 600 };
 /// What carries the actor's requests. It takes request objects and answers, through the actor's mailbox, with
 /// the objects it writes (`Msg::Line`): replies by id, and `{"event":"line"|"exit"}` for a server.
 trait Transport: Send { fn send(&mut self, fields: Value) -> bool; } // false: it is gone, and nothing will answer
@@ -75,6 +92,13 @@ struct Actor {
     me: mpsc::UnboundedSender<Msg>, home: String, rt: String, hub_pid: u32,
     helper: Option<Helper>, gen: u64, pend: HashMap<String, oneshot::Sender<Value>>, next: u64,
     srvs: Vec<Srv>, wait: Vec<Wt>, shown: String, env: Env, lines: Arc<std::sync::Mutex<String>>,
+    /// Requests out per project and the project of each (by id); the processes alive per project (each start has a number: an old
+    /// one's exit is not the new one's), the current one's number, and the projects whose start waits for an old process to be gone.
+    uses: HashMap<String, u32>, pend_of: HashMap<String, String>, procs: HashMap<String, Vec<u64>>, cur: HashMap<String, u64>, proc_n: u64, relaunch: Vec<String>, ticking: bool,
+    /// How many servers run at once (kserve::room, by the machine's memory), and whether the check that trims the ones beyond two is set.
+    room: usize, trimming: bool,
+    /// Servers asked to stop for another project and not answered yet: not asked a second time for a second waiter.
+    stopping: Vec<String>,
 }
 
 pub fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
@@ -87,24 +111,84 @@ impl Actor {
     fn later(&self, secs: f64, m: Msg) { let me = self.me.clone(); tokio::spawn(async move { tokio::time::sleep(Duration::from_secs_f64(secs)).await; let _ = me.send(m); }); }
 
     /// A request line registered for its reply (KServe.call). The helper is started on first use.
-    fn call(&mut self, mut fields: Value, reply: oneshot::Sender<Value>) {
+    fn call(&mut self, mut fields: Value, reply: oneshot::Sender<Value>) -> Option<String> {
         if self.helper.is_none() { self.start_helper() }
-        let Some(h) = &mut self.helper else { let _ = reply.send(failed("the KiCad IPC transport could not start")); return };
+        let Some(h) = &mut self.helper else { let _ = reply.send(failed("the KiCad IPC transport could not start")); return None };
         self.next += 1; let id = self.next.to_string();
         fields["id"] = json!(self.next);
-        if !h.link.send(fields) { let _ = reply.send(failed("the KiCad IPC helper exited")); return }
-        self.pend.insert(id, reply);
+        // (registered before it is sent: a transport may answer at once)
+        self.pend.insert(id.clone(), reply);
+        if !h.link.send(fields) { if let Some(r) = self.pend.remove(&id) { let _ = r.send(failed("the KiCad IPC helper exited")); } return None }
+        Some(id)
+    }
+    /// The servers as room is made among them: one that is answering a request, or was asked a moment ago, counts as held.
+    fn in_use(&self) -> Vec<Srv> {
+        let now = now_s();
+        self.srvs.iter().cloned().map(|s| if s.state == "ready" && (self.uses.get(&s.project).copied().unwrap_or(0) > 0 || now.saturating_sub(s.last) < IN_USE_S || self.stopping.contains(&s.project)) { s.hold() } else { s }).collect()
+    }
+    /// A project's server process is gone: every request out to it is answered with `why` now (no reply line will come for it),
+    /// and it counts as used by nobody.
+    fn gone(&mut self, project: &str, why: &str) {
+        let ids: Vec<String> = self.pend_of.iter().filter(|(_, p)| p.as_str() == project).map(|(id, _)| id.clone()).collect();
+        for id in ids { self.pend_of.remove(&id); if let Some(r) = self.pend.remove(&id) { let _ = r.send(json!({"ok": false, "error": why})); } }
+        self.uses.remove(project);
+    }
+    /// Servers beyond the first two that have been idle SPARE_IDLE_S are asked to stop (the least recently used first); checked once a minute while there are more than two.
+    fn trim(&mut self) {
+        self.trimming = false; let now = now_s();
+        while ks::count(&self.srvs) > 2 {
+            let Some(v) = self.in_use().into_iter().filter(|s| s.state == "ready" && s.why != ks::HELD && now.saturating_sub(s.last) >= SPARE_IDLE_S).min_by_key(|s| s.last) else { break };
+            // (held until it answers, so it is asked once; one that refuses, for unsaved changes, stays held and is kept, as when room is made)
+            let s = self.srv(&v.project).hold(); self.put(s);
+            let (sock, env, me, project) = (v.sock.clone(), self.env.clone(), self.me.clone(), v.project.clone());
+            tokio::spawn(async move {
+                let (t, r) = oneshot::channel(); let _ = me.send(Msg::Raw { sock, env, ty: "kiapi.backplane.Shutdown".into(), msg: json!({}), reply: t });
+                let o = r.await.unwrap_or_else(|_| failed("no reply"));
+                if o["ok"].as_bool().unwrap_or(false) { let _ = me.send(Msg::Trimmed { project }); }
+            });
+            break
+        }
+        self.spare();
+    }
+    fn spare(&mut self) { if ks::count(&self.srvs) > 2 && !self.trimming { self.trimming = true; self.later(if cfg!(test) { 1.0 } else { 60.0 }, Msg::Trim) } }
+    /// What the actor knows, in hub.log, when a request has waited past a limit: the servers, the requests out and the ones waiting.
+    fn dump(&self, why: &str) {
+        use std::io::Write; let now = now_s();
+        let srvs: Vec<String> = self.srvs.iter().map(|s| format!("{} {} sock={} asked {} s ago{} out={} procs={:?} cur={:?}", ks::name(&s.project), s.state, s.sock, now.saturating_sub(s.last), if s.why.is_empty() { String::new() } else { format!(" ({})", s.why) },
+            self.uses.get(&s.project).copied().unwrap_or(0), self.procs.get(&s.project).cloned().unwrap_or_default(), self.cur.get(&s.project))).collect();
+        let wait: Vec<String> = self.wait.iter().map(|w| format!("{} {} {} s", ks::name(&w.project), w.ty.rsplit('.').next().unwrap_or(""), w.at.elapsed().as_secs())).collect();
+        let out: Vec<String> = self.pend_of.iter().map(|(id, p)| format!("#{id} {}", ks::name(p))).collect();
+        let _ = writeln!(std::io::stderr(), "kicad ipc: {why}; servers: [{}]; waiting: [{}]; out: [{}] ({} replies awaited); to start after an exit: {:?}", srvs.join(" | "), wait.join(" | "), out.join(", "), self.pend.len(), self.relaunch);
+    }
+    /// (First come, first served: the list is in the order asked, and a tick asks again in that order.)
+    fn queue(&mut self, w: Wt) { self.wait.push(w); if !self.ticking { self.ticking = true; self.later(1.0, Msg::Tick) } }
+    /// Once a second while anything waits: a request waiting for room is planned again (a server may have fallen idle), and none waits
+    /// for ever: for room ROOM_WAIT, for its own server WAIT_MAX, whatever became of the events it was waiting on.
+    fn tick(&mut self) {
+        self.ticking = false;
+        for w in std::mem::take(&mut self.wait) {
+            let age = w.at.elapsed(); let starting = self.srv(&w.project).state == "starting";
+            if age > WAIT_MAX { self.dump(&format!("a {} for {} waited {} s for its server", w.ty.rsplit('.').next().unwrap_or(""), ks::name(&w.project), age.as_secs())); let _ = w.reply.send(failed(&ks::unavailable(&format!("the headless KiCad for {} did not come up in {} s", ks::name(&w.project), WAIT_MAX.as_secs()), &w.env.cli))); }
+            else if starting { self.wait.push(w) }
+            else if age > ROOM_WAIT && ks::plan(&self.in_use(), &w.project, &self.env.caps, self.room) == "busy" { let _ = w.reply.send(failed(&ks::unavailable(ROOM_BUSY, &w.env.cli))); }
+            else { self.ask(w) }
+        }
+        if !self.wait.is_empty() && !self.ticking { self.ticking = true; self.later(1.0, Msg::Tick) }
     }
     fn start_helper(&mut self) {
+        // (a new transport: what the old one was asked will never be answered by it, so it is answered here and nothing counts as in use)
+        for (_, r) in self.pend.drain() { let _ = r.send(failed("the KiCad IPC helper restarted before answering; request outcome unknown")); }
+        self.pend_of.clear(); self.uses.clear();
         self.gen += 1; let gen = self.gen;
         let me = self.me.clone();
         self.helper = Some(Helper { link: Box::new(kipc::Native::new("", Arc::new(move |o| { let _ = me.send(Msg::Line(gen, o)); }))), gen });
     }
-    fn sink(&mut self, fields: Value) { let (t, _r) = oneshot::channel(); self.call(fields, t) }
+    fn sink(&mut self, fields: Value) { let (t, _r) = oneshot::channel(); self.call(fields, t); }
 
     fn forward(&mut self, project: &str, env: &Env, ty: &str, msg: Value, reply: oneshot::Sender<Value>) { // KServe.forward
         let srv = self.srv(project).touch(now_s());
-        let f = self.call_fields(&srv.sock, env, ty, msg); self.put(srv); self.call(f, reply)
+        let f = self.call_fields(&srv.sock, env, ty, msg); self.put(srv);
+        if let Some(id) = self.call(f, reply) { self.pend_of.insert(id, project.to_string()); *self.uses.entry(project.to_string()).or_insert(0) += 1 }
     }
     fn call_fields(&self, sock: &str, env: &Env, ty: &str, msg: Value) -> Value { // KServe.call.fields
         json!({"sock":sock,"type":ty,"message":msg,"desc":ks::desc(&env.root, &env.caps),"lib":format!("{}/lib", env.root),"timeout":30000})
@@ -116,11 +200,20 @@ impl Actor {
     }
     fn launch(&mut self, project: &str) { // KServe.launch: helper present, then the server is started and gets 30 s to say it listens
         let now = now_s();
+        // its last process is still going (it was asked to stop and has not yet): a second one beside it would share its socket and its
+        // project's lock. This start waits for that exit, 30 s at most (Late)
+        let old = self.srv(project).sock; self.close(&old); // (and its connection and token are not the new server's)
+        if self.procs.get(project).is_some_and(|p| !p.is_empty()) {
+            if !self.relaunch.iter().any(|p| p == project) { self.relaunch.push(project.to_string()) }
+            let s = self.srv(project).starting(now); self.put(s); self.later(30.0, Msg::Late { project: project.into(), born: now }); self.emit(); return
+        }
+        self.relaunch.retain(|p| p != project);
+        self.proc_n += 1; let n = self.proc_n; self.procs.entry(project.to_string()).or_default().push(n); self.cur.insert(project.to_string(), n);
         let dir = ks::dir(&self.rt, &self.home, project);
         { use crate::plat::fs::DirBuilderExt; let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir); }
         let argv = ks::argv(&self.env.cli, project, &dir, self.hub_pid, &self.env.caps);
         let envv: Map<String, Value> = ["BACKPLANE_KICAD_LIBRARY", "KICAD_CONFIG_HOME"].iter().map(|k| (k.to_string(), json!(std::env::var(k).unwrap_or_default()))).collect();
-        self.sink(json!({"op":"spawn","key":project,"argv":argv,"memory":"1536M","env":envv}));
+        self.sink(json!({"op":"spawn","key":format!("{project}\t{n}"),"argv":argv,"memory":"1536M","env":envv}));
         let s = self.srv(project).starting(now); self.put(s);
         if self.helper.is_some() { self.later(30.0, Msg::Late { project: project.into(), born: now }) }
         self.emit();
@@ -128,23 +221,25 @@ impl Actor {
     fn close(&mut self, sock: &str) { if !sock.is_empty() { self.sink(json!({"op":"close","sock":sock})) } } // KServe.close
 
     fn ask(&mut self, w: Wt) {
-        let plan = ks::plan(&self.srvs, &w.project, &self.env.caps);
+        // room is made only among servers nobody is using; while both are at work the request waits for one to fall idle (tick)
+        let mut plan = ks::plan(&self.in_use(), &w.project, &self.env.caps, self.room);
+        if plan == "busy" && ks::plan(&self.srvs, &w.project, &self.env.caps, self.room) != "busy" { plan = "room".into() }
         match plan.as_str() {
             "ready" => self.forward(&w.project.clone(), &w.env.clone(), &w.ty.clone(), w.msg, w.reply),
-            "wait" => self.wait.insert(0, w),
+            "wait" | "room" => self.queue(w),
             "failed" => { let why = format!("the headless KiCad for {} stopped: {}", ks::name(&w.project), self.srv(&w.project).why); let _ = w.reply.send(failed(&ks::unavailable(&why, &w.env.cli))); }
             "busy" => { let _ = w.reply.send(failed(&ks::unavailable(ks::BUSY, &w.env.cli))); }
-            "start" => { let p = w.project.clone(); self.wait.insert(0, w); self.launch(&p) }
+            "start" => { let p = w.project.clone(); self.queue(w); self.launch(&p) }
             p => { // "evict:<victim>": the least recently used server is asked to stop (it does so itself); the new one starts when it has
                 let victim = p.trim_start_matches("evict:").to_string(); let project = w.project.clone();
                 self.evicting(&victim, &project);
-                let s = Srv::new(&project, now_s()); self.put(s); self.wait.insert(0, w); self.emit();
+                let s = Srv::new(&project, now_s()); self.put(s); self.queue(w); self.emit();
             }
         }
     }
     fn evicting(&mut self, victim: &str, project: &str) { // KServe.evicting: kiapi.backplane.Shutdown, never a signal
         let sock = self.srv(victim).sock; let env = self.env.clone(); let me = self.me.clone();
-        let (victim, project) = (victim.to_string(), project.to_string());
+        let (victim, project) = (victim.to_string(), project.to_string()); self.stopping.push(victim.clone());
         tokio::spawn(async move {
             let (t, r) = oneshot::channel(); let _ = me.send(Msg::Raw { sock, env, ty: "kiapi.backplane.Shutdown".into(), msg: json!({}), reply: t });
             let o = r.await.unwrap_or_else(|_| failed("no reply"));
@@ -176,14 +271,28 @@ impl Actor {
     fn line(&mut self, o: Value) { // what the transport said: a server's stdout line or exit, else a reply (by id)
         match o["event"].as_str() {
             Some("line") => {
-                let project = o["key"].as_str().unwrap_or("").to_string();
+                let (project, n) = proc_of(o["key"].as_str().unwrap_or(""));
+                if self.cur.get(&project) != Some(&n) { return } // a process this record is no longer about
                 if let Some(path) = ks::ready(o["text"].as_str().unwrap_or("")) {
                     let s = self.srv(&project);
                     if s.state == "starting" && s.sock.is_empty() { self.hand(project.clone(), self.env.clone(), path.clone()); let s = s.listening(&path); self.put(s) }
                 }
             }
-            Some("exit") => self.exited(o["key"].as_str().unwrap_or("").to_string(), o["code"].as_i64().unwrap_or(1) as i32, o["tail"].as_str().unwrap_or("").to_string()),
-            _ => { let id = match &o["id"] { Value::String(s) => s.clone(), v => v.to_string() }; if let Some(r) = self.pend.remove(&id) { let _ = r.send(o); } }
+            Some("exit") => {
+                let (project, n) = proc_of(o["key"].as_str().unwrap_or(""));
+                if let Some(p) = self.procs.get_mut(&project) { p.retain(|x| *x != n) }
+                // the current process's exit is the server's; an older one's (stopped to make room, started again since) only frees its place
+                let current = self.cur.get(&project) == Some(&n);
+                // (the current process's requests out get no reply line: answered here, and the project counts as unused at once)
+                if current { self.cur.remove(&project); self.gone(&project, &format!("the headless KiCad for {} exited before answering; request outcome unknown", ks::name(&project))) }
+                if self.relaunch.iter().any(|p| *p == project) && self.srv(&project).state == "starting" { // a start was waiting for this exit
+                    let sock = self.srv(&project).sock; self.close(&sock);
+                    if self.procs.get(&project).map_or(true, |p| p.is_empty()) { self.launch(&project) }
+                } else if current { self.exited(project, o["code"].as_i64().unwrap_or(1) as i32, o["tail"].as_str().unwrap_or("").to_string()) }
+            }
+            _ => { let id = match &o["id"] { Value::String(s) => s.clone(), v => v.to_string() };
+                if let Some(p) = self.pend_of.remove(&id) { if let Some(u) = self.uses.get_mut(&p) { *u = u.saturating_sub(1) } let s = self.srv(&p); if s.state == "ready" { self.put(s.touch(now_s())) } }
+                if let Some(r) = self.pend.remove(&id) { let _ = r.send(o); } }
         }
     }
     fn exited(&mut self, project: String, code: i32, tail: String) { // the server's process ended: the record says what that means
@@ -203,7 +312,7 @@ impl Actor {
         let sock = s.sock.clone(); self.put(s.up(&sock, &version, now_s()));
         let (mine, rest): (Vec<Wt>, Vec<Wt>) = std::mem::take(&mut self.wait).into_iter().partition(|w| w.project == project); self.wait = rest;
         for w in mine { self.forward(&w.project.clone(), &w.env.clone(), &w.ty.clone(), w.msg, w.reply) }
-        self.emit();
+        self.emit(); self.spare();
     }
     fn bad(&mut self, project: String, why: String) { // it failed the handshake or never listened
         if self.srv(&project).state != "starting" { return }
@@ -211,9 +320,10 @@ impl Actor {
         self.fail_project(&project, &format!("the headless KiCad for {} {why}", ks::name(&project))); self.emit();
     }
     fn evicted(&mut self, victim: String, project: String, ok: bool, why: String) {
+        self.stopping.retain(|p| *p != victim);
         if ok { let s = self.srv(&victim).set("stopped", ""); self.put(s); self.launch(&project); return }
         let s = self.srv(&victim).hold(); self.put(s); // Shutdown refused (unsaved changes): held, never forced; the next least recently used is asked
-        let other = ks::evict(&self.srvs);
+        let other = ks::evict(&self.in_use(), self.room);
         if other.is_empty() {
             let s = self.srv(&project).set("stopped", ""); self.put(s);
             self.fail_project(&project, &format!("{} ({} would not stop: {why})", ks::BUSY, ks::name(&victim))); self.emit();
@@ -244,8 +354,12 @@ impl Actor {
     }
     fn handle(&mut self, m: Msg) {
         match m {
-            Msg::Ask { project, env, ty, msg, reply } => { self.env = env.clone(); self.ask(Wt { project, ty, msg, env, reply }) }
-            Msg::Raw { sock, env, ty, msg, reply } => { let f = self.call_fields(&sock, &env, &ty, msg); self.call(f, reply) }
+            Msg::Ask { project, env, ty, msg, reply } => { self.env = env.clone(); self.ask(Wt { project, ty, msg, env, reply, at: std::time::Instant::now() }) }
+            Msg::Raw { sock, env, ty, msg, reply } => { let f = self.call_fields(&sock, &env, &ty, msg); self.call(f, reply); }
+            Msg::Tick => self.tick(),
+            Msg::Dump(why) => self.dump(&why),
+            Msg::Trim => self.trim(),
+            Msg::Trimmed { project } => { let s = self.srv(&project); if s.state == "ready" { self.put(s.set("stopped", "")); self.emit() } }
             Msg::Retire { project, reply } => self.retire(project, reply),
             Msg::Retired { project, ok, why, reply } => self.retired(project, ok, why, reply),
             Msg::Info(r) => { let _ = r.send(ks::lines(&self.srvs)); }
@@ -254,7 +368,9 @@ impl Actor {
             Msg::Line(gen, t) => if self.helper.as_ref().map(|h| h.gen) == Some(gen) { self.line(t) },
             Msg::Up { project, version } => self.up(project, version),
             Msg::Bad { project, why } => self.bad(project, why),
-            Msg::Late { project, born } => { let s = self.srv(&project); if s.state == "starting" && s.started == born && s.sock.is_empty() { self.bad(project, "did not say it was listening within 30 s".into()) } }
+            Msg::Late { project, born } => { let s = self.srv(&project); if s.state == "starting" && s.started == born && s.sock.is_empty() {
+                let waits = self.relaunch.iter().any(|p| *p == project); self.relaunch.retain(|p| *p != project);
+                self.bad(project, if waits { "could not start: its last process, asked to stop, had not exited after 30 s".into() } else { "did not say it was listening within 30 s".into() }) } }
             Msg::Go { project } => if self.srv(&project).state == "starting" { self.launch(&project) },
             Msg::Evicted { victim, project, ok, why } => self.evicted(victim, project, ok, why),
         }
@@ -270,7 +386,8 @@ pub fn start(hub: &Arc<Hub>) {
     let lines = Arc::new(std::sync::Mutex::new(String::new()));
     let home = hub.cfg.home.to_string_lossy().to_string();
     let mut a = Actor { me: tx.clone(), home, rt: std::env::var("XDG_RUNTIME_DIR").unwrap_or_default(), hub_pid: std::process::id(), helper: None, gen: 0, pend: HashMap::new(), next: 0,
-        srvs: vec![], wait: vec![], shown: String::new(), env: Env::default(), lines: lines.clone() };
+        srvs: vec![], wait: vec![], shown: String::new(), env: Env::default(), lines: lines.clone(),
+        uses: HashMap::new(), pend_of: HashMap::new(), procs: HashMap::new(), cur: HashMap::new(), proc_n: 0, relaunch: vec![], ticking: false, room: ks::room(crate::memscope::total_ram()), trimming: false, stopping: vec![] };
     tokio::spawn(async move { while let Some(m) = rx.recv().await { a.handle(m) } });
     if IPC.set(Ipc { tx, lines }).is_ok() { hub.register_rpc(Arc::new(IpcRpc)) }
     // Settings > CAD reads kicad.* and freecad from the hub's info: say what is found now, and again whenever the path field changes
@@ -408,7 +525,8 @@ pub fn read_runtime(cli: &Path) -> Env {
 async fn ask(i: &Ipc, project: &str, env: &Env, ty: &str, msg: Value) -> Value {
     let (t, r) = oneshot::channel();
     if i.tx.send(Msg::Ask { project: project.into(), env: env.clone(), ty: ty.into(), msg, reply: t }).is_err() { return failed("no reply") }
-    r.await.unwrap_or_else(|_| failed("no reply"))
+    // (bounded from outside too: whatever became of the request inside, its caller is answered)
+    match tokio::time::timeout(ASK_MAX, r).await { Ok(o) => o.unwrap_or_else(|_| failed("no reply")), Err(_) => { let _ = i.tx.send(Msg::Dump(format!("a {} for {} got no answer in {} s", ty.rsplit('.').next().unwrap_or(""), ks::name(project), ASK_MAX.as_secs()))); failed(&format!("KiCad did not answer in {} s", ASK_MAX.as_secs())) } }
 }
 async fn info_on(i: &Ipc) -> String { let (t, r) = oneshot::channel(); if i.tx.send(Msg::Info(t)).is_err() { return String::new() } r.await.unwrap_or_default() }
 async fn argv_on(i: &Ipc, project: &str, env: &Env) -> String { let (t, r) = oneshot::channel(); if i.tx.send(Msg::Argv { project: project.into(), env: env.clone(), reply: t }).is_err() { return String::new() } r.await.unwrap_or_default() }
@@ -830,7 +948,8 @@ mod tests {
             asked
         });
         let (tx, mut rx) = mpsc::unbounded_channel(); let lines = Arc::new(std::sync::Mutex::new(String::new()));
-        let mut a = Actor { me: tx.clone(), home: String::new(), rt, hub_pid: std::process::id(), helper: None, gen: 0, pend: HashMap::new(), next: 0, srvs: vec![], wait: vec![], shown: String::new(), env: Env::default(), lines: lines.clone() };
+        let mut a = Actor { me: tx.clone(), home: String::new(), rt, hub_pid: std::process::id(), helper: None, gen: 0, pend: HashMap::new(), next: 0, srvs: vec![], wait: vec![], shown: String::new(), env: Env::default(), lines: lines.clone(),
+        uses: HashMap::new(), pend_of: HashMap::new(), procs: HashMap::new(), cur: HashMap::new(), proc_n: 0, relaunch: vec![], ticking: false, room: 2, trimming: false, stopping: vec![] };
         tokio::spawn(async move { while let Some(m) = rx.recv().await { a.handle(m) } });
         let env = Env { cli, version: "10.99.0-bp.4".into(), ..Default::default() };
         let (t, r) = oneshot::channel();
@@ -842,6 +961,148 @@ mod tests {
         assert_eq!(lines.lock().unwrap().clone(), format!("{project}|ready|"));
         for _ in 0..40 { tokio::time::sleep(Duration::from_millis(100)).await; if lines.lock().unwrap().contains("|stopped|") { break } }
         assert_eq!(lines.lock().unwrap().clone(), format!("{project}|stopped|"));
+    }
+    /// A stand-in for the transport and the KiCads behind it: a spawn listens at once, Ping/GetVersion/Shutdown answer, RunSimulation
+    /// is kept unanswered until the test lets it go (a run in flight), and a server told to shut down exits at once or, lingering, when told.
+    #[derive(Default)] struct Crowd { socks: HashMap<String, String>, held: Vec<Value>, spawned: Vec<String>, shut: Vec<String>, linger: bool, lingering: Vec<String> }
+    struct CrowdLink { st: Arc<std::sync::Mutex<Crowd>>, me: mpsc::UnboundedSender<Msg>, gen: u64 }
+    impl Transport for CrowdLink {
+        fn send(&mut self, f: Value) -> bool {
+            let mut st = self.st.lock().unwrap(); let id = f["id"].clone(); let say = |o: Value| { let _ = self.me.send(Msg::Line(self.gen, o)); };
+            match f["op"].as_str() {
+                Some("spawn") => { let key = f["key"].as_str().unwrap().to_string(); let sock = format!("/s/{}", key.replace(['/', '\t'], "_")); st.socks.insert(sock.clone(), key.clone()); st.spawned.push(key.clone());
+                    say(json!({"id": id, "ok": true})); say(json!({"event": "line", "key": key, "text": format!("KiCad API server listening at ipc://{sock}")})) }
+                Some("close") => say(json!({"id": id, "ok": true})),
+                _ => { let (ty, sock) = (f["type"].as_str().unwrap_or("").rsplit('.').next().unwrap().to_string(), f["sock"].as_str().unwrap_or("").to_string());
+                    let Some(key) = st.socks.get(&sock).cloned() else { say(json!({"id": id, "ok": false, "error": "KiCad closed the connection before answering; request outcome unknown"})); return true };
+                    match ty.as_str() {
+                        "Held" => st.held.push(id),
+                        "Shutdown" => { st.shut.push(key.clone()); say(json!({"id": id, "ok": true, "message": {}}));
+                            if st.linger { st.lingering.push(key) } else { st.socks.remove(&sock); say(json!({"event": "exit", "key": key, "code": 0, "tail": ""})) } }
+                        _ => say(json!({"id": id, "ok": true, "type": ty, "message": {"version": {"full_version": "x-bp.4"}, "from": key}})),
+                    } }
+            }
+            true
+        }
+    }
+    fn crowd_actor(room: usize) -> (Actor, mpsc::UnboundedReceiver<Msg>, Arc<std::sync::Mutex<Crowd>>, Env) {
+        let (tx, rx) = mpsc::unbounded_channel(); let st = Arc::new(std::sync::Mutex::new(Crowd::default()));
+        let a = Actor { me: tx.clone(), home: String::new(), rt: crate::plat::tmp::dir("ipc-crowd").path().to_string_lossy().into_owned(), hub_pid: 1, helper: Some(Helper { link: Box::new(CrowdLink { st: st.clone(), me: tx.clone(), gen: 1 }), gen: 1 }), gen: 1, pend: HashMap::new(), next: 0,
+            srvs: vec![], wait: vec![], shown: String::new(), env: Env::default(), lines: Arc::new(std::sync::Mutex::new(String::new())),
+            uses: HashMap::new(), pend_of: HashMap::new(), procs: HashMap::new(), cur: HashMap::new(), proc_n: 0, relaunch: vec![], ticking: false, room, trimming: false, stopping: vec![] };
+        (a, rx, st, Env { cli: "/rt/bin/kicad-cli".into(), version: "10.99.0-bp.4".into(), caps: vec!["shutdown".into()], ..Default::default() })
+    }
+    fn crowd_of(room: usize) -> (mpsc::UnboundedSender<Msg>, Arc<std::sync::Mutex<Crowd>>, Env) {
+        let (mut a, mut rx, st, env) = crowd_actor(room); let tx = a.me.clone();
+        tokio::spawn(async move { while let Some(m) = rx.recv().await { a.handle(m) } });
+        (tx, st, env)
+    }
+    fn crowd() -> (mpsc::UnboundedSender<Msg>, Arc<std::sync::Mutex<Crowd>>, Env) { crowd_of(2) }
+    fn asks(tx: &mpsc::UnboundedSender<Msg>, env: &Env, project: &str, ty: &str) -> oneshot::Receiver<Value> {
+        let (t, r) = oneshot::channel(); tx.send(Msg::Ask { project: project.into(), env: env.clone(), ty: format!("kiapi.x.{ty}"), msg: json!({}), reply: t }).unwrap(); r
+    }
+    async fn within(secs: f64, r: oneshot::Receiver<Value>) -> Value { tokio::time::timeout(Duration::from_secs_f64(secs), r).await.expect("an answer in time").unwrap() }
+    async fn until(what: &str, f: impl Fn() -> bool) { for _ in 0..400 { if f() { return } tokio::time::sleep(Duration::from_millis(10)).await } panic!("{what}") }
+    /// Room for two servers and three projects: the one a run is in flight on is never the one stopped for the third (it lost the
+    /// run and its caller the answer: "KiCad closed the connection"); the third is served by stopping the idle one; with both at
+    /// work it waits for one to fall idle, and past the limit is told so instead of waiting for ever.
+    #[tokio::test] async fn a_server_at_work_is_never_stopped_to_make_room() {
+        let (tx, st, env) = crowd();
+        let run = asks(&tx, &env, "/p/a.kicad_pro", "Held");
+        until("the run is out", || st.lock().unwrap().held.len() == 1).await;
+        assert_eq!(within(2.0, asks(&tx, &env, "/p/b.kicad_pro", "GetVersion")).await["message"]["from"], json!("/p/b.kicad_pro\t2"));
+        // b falls idle; a's run is still out: c takes b's place, and a is never asked to stop
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        assert_eq!(within(3.0, asks(&tx, &env, "/p/c.kicad_pro", "GetVersion")).await["message"]["from"], json!("/p/c.kicad_pro\t3"));
+        assert_eq!(st.lock().unwrap().shut, vec!["/p/b.kicad_pro\t2".to_string()]);
+        // both at work (a's run, c just asked): b waits for c to fall idle, then is started again and answered
+        assert_eq!(within(5.0, asks(&tx, &env, "/p/b.kicad_pro", "GetVersion")).await["message"]["from"], json!("/p/b.kicad_pro\t4"));
+        assert_eq!(st.lock().unwrap().shut, vec!["/p/b.kicad_pro\t2".to_string(), "/p/c.kicad_pro\t3".to_string()]);
+        // a second run, on b: now neither falls idle, and c is told so once the limit has passed (never left waiting)
+        let run_b = asks(&tx, &env, "/p/b.kicad_pro", "Held");
+        until("b's run is out", || st.lock().unwrap().held.len() == 2).await;
+        let o = within(8.0, asks(&tx, &env, "/p/c.kicad_pro", "GetVersion")).await;
+        assert!(o["ok"] == false && o["error"].as_str().unwrap().contains(ROOM_BUSY), "{o}");
+        // the runs' own answers come when KiCad gives them: nothing dropped them
+        let held = st.lock().unwrap().held.clone();
+        for id in held { tx.send(Msg::Line(1, json!({"id": id, "ok": true, "message": {"status": "SIM_RUNNING"}}))).unwrap() }
+        assert_eq!(within(2.0, run).await["message"]["status"], json!("SIM_RUNNING")); assert_eq!(within(2.0, run_b).await["message"]["status"], json!("SIM_RUNNING"));
+        assert_eq!(st.lock().unwrap().spawned.len(), 4);
+    }
+    /// A server told to stop that has not exited yet: its project asked for again starts no second process beside it (two KiCads on one
+    /// socket and one project's lock; the old one's exit then took the new one for stopped). The start waits for the exit.
+    #[tokio::test] async fn a_project_is_not_started_again_beside_its_last_process() {
+        let (tx, st, env) = crowd(); st.lock().unwrap().linger = true;
+        for p in ["a", "b"] { assert_eq!(within(2.0, asks(&tx, &env, &format!("/p/{p}.kicad_pro"), "GetVersion")).await["ok"], json!(true)) }
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        assert_eq!(within(3.0, asks(&tx, &env, "/p/c.kicad_pro", "GetVersion")).await["ok"], json!(true)); // a (the least recently used) was told to stop, and lingers
+        assert_eq!(st.lock().unwrap().lingering, vec!["/p/a.kicad_pro\t1".to_string()]);
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        let again = asks(&tx, &env, "/p/a.kicad_pro", "GetVersion");
+        until("room is made for a", || st.lock().unwrap().shut.len() == 2).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(st.lock().unwrap().spawned.iter().filter(|k| k.starts_with("/p/a.")).count(), 1, "no second process while the first is alive");
+        // the old process's exit: only now the new one, and the request is its (never "the headless KiCad exited")
+        tx.send(Msg::Line(1, json!({"event": "exit", "key": "/p/a.kicad_pro\t1", "code": 0, "tail": ""}))).unwrap();
+        let o = within(3.0, again).await; assert_eq!(o["ok"], json!(true), "{o}");
+        assert!(o["message"]["from"].as_str().unwrap().starts_with("/p/a.kicad_pro\t") && o["message"]["from"] != json!("/p/a.kicad_pro\t1"), "{o}");
+    }
+    /// A server that dies with a request out: the request is answered at once with what happened, and the project does not count as
+    /// in use for ever after (it was never the one stopped again, so a third project got no server).
+    #[tokio::test] async fn a_server_that_dies_mid_request_is_not_in_use_for_ever() {
+        let (tx, st, env) = crowd();
+        let out = asks(&tx, &env, "/p/a.kicad_pro", "Held");
+        until("a's request is out", || st.lock().unwrap().held.len() == 1).await;
+        tx.send(Msg::Line(1, json!({"event": "exit", "key": "/p/a.kicad_pro\t1", "code": 137, "tail": "Killed"}))).unwrap();
+        let o = within(1.0, out).await; assert!(o["ok"] == false && o["error"].as_str().unwrap().contains("exited before answering"), "{o}");
+        // a starts again by itself (a crash is retried) and b is at work: c can only have a's place, a moment after a fell idle
+        until("a is started again", || st.lock().unwrap().spawned.len() == 2).await;
+        let _b = asks(&tx, &env, "/p/b.kicad_pro", "Held");
+        until("b's request is out", || st.lock().unwrap().held.len() == 2).await;
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        assert_eq!(within(2.5, asks(&tx, &env, "/p/c.kicad_pro", "GetVersion")).await["ok"], json!(true));
+        assert_eq!(st.lock().unwrap().shut, vec!["/p/a.kicad_pro\t2".to_string()]);
+    }
+    /// The transport restarted with a request out: its caller is answered (the old transport's reply would never be taken), and
+    /// nothing counts as in use because of it.
+    #[tokio::test] async fn a_transport_restarted_mid_request_leaves_nothing_in_use() {
+        let (mut a, mut rx, st, env) = crowd_actor(2);
+        let pump = |a: &mut Actor, rx: &mut mpsc::UnboundedReceiver<Msg>| while let Ok(m) = rx.try_recv() { a.handle(m) };
+        let ask = |a: &Actor, p: &str, ty: &str| { let (t, r) = oneshot::channel(); a.me.send(Msg::Ask { project: p.into(), env: env.clone(), ty: format!("kiapi.x.{ty}"), msg: json!({}), reply: t }).unwrap(); r };
+        let out = ask(&a, "/p/a.kicad_pro", "Held"); let mut b = ask(&a, "/p/b.kicad_pro", "GetVersion");
+        for _ in 0..50 { pump(&mut a, &mut rx); tokio::time::sleep(Duration::from_millis(10)).await }
+        assert_eq!((a.uses.get("/p/a.kicad_pro").copied(), b.try_recv().unwrap()["ok"].clone(), st.lock().unwrap().held.len()), (Some(1), json!(true), 1));
+        a.start_helper(); let gen = a.gen; a.helper = Some(Helper { link: Box::new(CrowdLink { st: st.clone(), me: a.me.clone(), gen }), gen });
+        let o = within(1.0, out).await; assert!(o["ok"] == false && o["error"].as_str().unwrap().contains("helper restarted"), "{o}");
+        assert!(a.uses.is_empty() && a.pend_of.is_empty() && a.pend.is_empty());
+        // the old transport's late reply is nobody's; a third project gets a place once the two are idle
+        a.handle(Msg::Line(1, json!({"id": 1, "ok": true, "message": {}})));
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        let mut c = ask(&a, "/p/c.kicad_pro", "GetVersion");
+        for _ in 0..100 { pump(&mut a, &mut rx); tokio::time::sleep(Duration::from_millis(10)).await }
+        assert_eq!(c.try_recv().unwrap()["ok"], json!(true)); assert_eq!(st.lock().unwrap().shut, vec!["/p/a.kicad_pro\t1".to_string()]);
+    }
+    /// Two projects wait for room: the one that asked first gets the first place, whatever the number of ticks between.
+    #[tokio::test] async fn those_waiting_for_room_are_served_in_the_order_they_asked() {
+        let (tx, st, env) = crowd();
+        let _a = asks(&tx, &env, "/p/a.kicad_pro", "Held"); let _b = asks(&tx, &env, "/p/b.kicad_pro", "Held");
+        until("both are at work", || st.lock().unwrap().held.len() == 2).await;
+        let c = asks(&tx, &env, "/p/c.kicad_pro", "GetVersion"); tokio::time::sleep(Duration::from_millis(50)).await; let mut d = asks(&tx, &env, "/p/d.kicad_pro", "GetVersion");
+        tokio::time::sleep(Duration::from_millis(400)).await; // (a tick passes with both waiting)
+        tokio::time::sleep(Duration::from_millis(700)).await; // (and another)
+        let first = st.lock().unwrap().held[0].clone(); tx.send(Msg::Line(1, json!({"id": first, "ok": true, "message": {}}))).unwrap(); // a's request ends: a falls idle a second later
+        assert_eq!(within(2.5, c).await["message"]["from"], json!("/p/c.kicad_pro\t3"));
+        assert!(d.try_recv().is_err(), "d asked after c and is still waiting"); assert!(!st.lock().unwrap().spawned.iter().any(|k| k.starts_with("/p/d.")));
+    }
+    /// A machine with room for three: the third project starts beside the two, nothing is stopped for it; the one beyond two that
+    /// stays idle is shut down, and the two stay.
+    #[tokio::test] async fn room_beyond_two_is_used_and_given_back_when_idle() {
+        let (tx, st, env) = crowd_of(3);
+        for p in ["a", "b", "c"] { assert_eq!(within(2.0, asks(&tx, &env, &format!("/p/{p}.kicad_pro"), "GetVersion")).await["ok"], json!(true)) }
+        assert!(st.lock().unwrap().shut.is_empty() && st.lock().unwrap().spawned.len() == 3);
+        until("the idle spare is shut down", || st.lock().unwrap().shut.len() == 1).await;
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        assert_eq!(st.lock().unwrap().shut, vec!["/p/a.kicad_pro\t1".to_string()], "the least recently used, and only it");
     }
     #[test] fn a_copy_runs_only_the_listed_kicad_reads() {
         for t in ["kiapi.board.commands.GetItems", "kiapi.common.commands.Ping", "kiapi.backplane.GetCapabilities"] { assert_eq!(copy_ipc_refused(true, t), None, "{t}") }
