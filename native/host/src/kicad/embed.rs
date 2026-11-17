@@ -3018,6 +3018,18 @@ async fn wait_frame_drawn(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &st
 /// KiCad's ET_NOTICE (29, `embed-notice`): a message box embedded KiCad did not show (it would have sat over a frame the host had not
 /// shown, holding up its start), sent here instead. Its detail is JSON {kind, title, detail, error}; kind "graphics" is a drawing fallback
 /// ("Could not use OpenGL, falling back to software rendering", a driver reset). `frame`: the kind of editor it concerns, "" for none.
+/// bp.13's ET_AGENT_NOTICE "lock_overridden": KiCad opened a file another process held, without asking (embedded, nobody could answer).
+/// The hub's lock check comes first (locks.rs), so this means one it did not see (a lock taken between the check and the open): said in
+/// the strip as KiCad's notice, never silently.
+pub fn lock_notice_of(ev: &Value) -> Option<Value> {
+    if !super::coedit::is_notice(ev) { return None }
+    let d: Value = serde_json::from_str(ev["detail"].as_str().unwrap_or("")).ok()?;
+    if d["kind"] != "lock_overridden" { return None }
+    let det: Value = match &d["details"] { Value::String(t) => serde_json::from_str(t).unwrap_or(Value::Null), v => v.clone() };
+    let msg = det["message"].as_str().unwrap_or("").trim().to_string();
+    Some(json!({"kind": "lock_overridden", "title": "KiCad opened this although another KiCad had it open; either may save over the other's changes", "detail": msg, "error": true, "frame": ""}))
+}
+
 pub fn notice_of(ev: &Value) -> Option<Value> {
     if !(ev["type"] == "ET_NOTICE" || ev["type"].as_i64() == Some(29)) { return None }
     let raw = ev["detail"].as_str().unwrap_or("");
@@ -3085,6 +3097,11 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                         super::xprobe::kicad_selected(&pro, ev); continue
                     }
                     if super::coedit::on_edited(&pro, ev) { continue }
+                    if let Some(n) = lock_notice_of(ev) {
+                        eprintln!("kicad embed: {pro}: KiCad opened a locked file anyway: {}", n["detail"].as_str().unwrap_or(""));
+                        if me.send(Msg::Notice { pro: pro.clone(), gen, notice: n }).is_err() { return }
+                        continue
+                    }
                     if super::coedit::on_notice(&pro, ev) { continue }
                     if super::reload::on_event(&pro, ev) { need_sync = true; continue }
                     if super::comment::on_event(&pro, ev) { continue }
@@ -3466,6 +3483,12 @@ mod tests {
         live_pids().lock().unwrap().insert(424242);
         assert!(live_pids().lock().unwrap().contains(&424242), "a spawned KiCad is in live_pids until reaped");
         live_pids().lock().unwrap().remove(&424242);
+    }
+    #[test] fn kicads_lock_override_is_said_in_the_strip() {
+        let ev = json!({"type": "ET_AGENT_NOTICE", "detail": json!({"kind": "lock_overridden", "actor": "", "doc": "", "details": {"message": "Project 'a.kicad_pro' is already open by 'h' at 'laptop'."}}).to_string()});
+        let n = lock_notice_of(&ev).unwrap();
+        assert!(n["title"].as_str().unwrap().contains("another KiCad had it open") && n["detail"].as_str().unwrap().contains("laptop") && n["error"] == true);
+        assert!(lock_notice_of(&json!({"type": "ET_AGENT_NOTICE", "detail": json!({"kind": "deferred"}).to_string()})).is_none());
     }
     #[test] fn gerbview_and_the_editors_kicad_asks_for() {
         use super::*;
