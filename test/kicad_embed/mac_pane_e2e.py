@@ -818,16 +818,22 @@ try:
                 many = any(len(x.get('references') or []) + len(x.get('nets') or []) > 1 or x.get('count', 0) > 1 for x in sel)
                 row(E, 'select_all', 'works' if many else ('wrong' if sel else 'nothing'), f'{len(sel)} selection events; last {str(sel[-1])[:90] if sel else "-"}', t)
                 n, t = press(K_FDEL); v = judge_cd(n, 'd', True); row(E, 'delete', *v, t); settle(n)
-                n, t = press(K_Z, CMD); v = judge_cd(n, 'c', True); row(E, 'undo', *v, t); settle(n); undo_ok = v[0] == 'works'
+                # redo at once after the undo's edit (before KiCad's in-editor check runs), and again after ET_CHECKS_DONE: on bp.13 the
+                # check after an undo empties the redo list (climb-j, Linux), so a missing menu key and an emptied list are told apart
+                n, t = press(K_Z, CMD); v = judge_cd(n, 'c', True); row(E, 'undo', *v, t); undo_ok = v[0] == 'works'
                 n, t = press(K_Y, CMD); v = judge_cd(n, 'd', True); row(E, 'redo', *v, t); settle(n)
-                if v[0] == 'works': m = seq(); key(K_Z, CMD); wait_ed(m, 'c'); settle(m)
+                if v[0] == 'works': m = seq(); key(K_Z, CMD); wait_ed(m, 'c')
                 n, t = press(K_Z, CMD | SHIFT); v = judge_cd(n, 'd', True); row(E, 'redo_shift_z', *v, t); settle(n)
+                m = seq(); key(K_Z, CMD); wait_ed(m, 'c'); settle(m)  # undone again, and the checks after it done
+                n, t = press(K_Z, CMD | SHIFT); v = judge_cd(n, 'd', True)
+                row(E, 'extra_redo_after_checks', v[0] if v[0] != 'works' else 'works', v[1] + ' (Cmd+Shift+Z after ET_CHECKS_DONE; "nothing" here with redo_shift_z working = the check emptied the redo list)', t)
+                settle(n)
                 if v[0] == 'works': m = seq(); key(K_Z, CMD); wait_ed(m, 'c'); settle(m)
                 # undo and redo every time: 10 of 10 each (the earlier 6-of-7 failures must not recur)
                 canvas(); key(K_A, CMD); time.sleep(0.5); m = seq(); key(K_FDEL); wait_ed(m, 'd'); settle(m)
                 nu = nr = 0
-                for _ in range(10):
-                    m = seq(); key(K_Z, CMD); c, d = wait_ed(m, 'c'); nu += bool(c and not d); settle(m)
+                for _ in range(10):  # redo at once after each undo (not after the check: see redo_shift_z)
+                    m = seq(); key(K_Z, CMD); c, d = wait_ed(m, 'c'); nu += bool(c and not d)
                     m = seq(); key(K_Z, CMD | SHIFT); c, d = wait_ed(m, 'd'); nr += bool(d and not c); settle(m)
                 m = seq(); key(K_Z, CMD); wait_ed(m, 'c'); settle(m)
                 row(E, 'undo_10', 'works' if nu == 10 else ('nothing' if nu == 0 else 'wrong'), f'Cmd+Z undid {nu} of 10')
