@@ -1770,6 +1770,10 @@ impl Actor {
                 let take = || early_replies().lock().unwrap().remove(&(snap.sock.clone(), seq));
                 // an editor whose document KiCad has not opened yet: its lock read first (locks.rs), another live KiCad's put to the person
                 if let Some(doc) = unopened_doc(&snap) {
+                    // the person is to be asked: the client's show is answered now (it waits on its reply, and its connection with it: held
+                    // for the answer, the client's heartbeat timed out and the pane was rebuilt under the question, P3); the switch follows the
+                    // answer through the frames' update
+                    if matches!(lock_verdict(&doc), super::locks::Verdict::Foreign { .. }) { if let Some(r) = take() { let _ = r.send(Ok(snap.info_json())); } }
                     if !lock_gate(&me, &snap.pro, snap.gen, &doc, "before KiCad opens it").await {
                         if let Some(r) = take() { let _ = r.send(Err(format!("Not opened: {} is open in another KiCad, and you chose Cancel", Path::new(&doc).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()))); }
                         return;
@@ -2471,6 +2475,19 @@ async fn show_fork_frame_n(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &s
     Err("ShowFrame did not succeed".into())
 }
 
+/// The editor `kind` of the session on `sock` would open a document another live KiCad holds (KiCad has no frame of that kind yet):
+/// why it is not shown, or None.
+fn held_elsewhere(sock: &str, kind: &str) -> Option<String> {
+    let ext = match kind { "PCB" | "PCB_3D" => "kicad_pcb", "SCH" => "kicad_sch", _ => return None };
+    let pro = routes().lock().unwrap().values().find(|r| r.sock == sock).map(|r| r.pro.clone())?;
+    if has_frame(&pro, if ext == "kicad_pcb" { "PCB" } else { "SCH" }) { return None }
+    let doc = Path::new(&pro).with_extension(ext);
+    if !doc.is_file() { return None }
+    let doc = doc.to_string_lossy().to_string();
+    matches!(lock_verdict(&doc), super::locks::Verdict::Foreign { .. })
+        .then(|| format!("{} is open in another KiCad: not shown until the person answers", Path::new(&doc).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()))
+}
+
 /// Show `kind` in fork mode and hide every other currently-shown frame via `HideFrame` so GTK3/wxMSW owns frame map state cleanly.
 async fn switch_fork_frame(
     me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, kind: &str, doc: &str, item: &str, remount: bool, focus: bool,
@@ -2481,6 +2498,10 @@ async fn switch_fork_frame_n(
     me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, kind: &str, doc: &str, item: &str, remount: bool, focus: bool, seq: Option<u64>,
 ) -> Result<Option<(u64, String, Vec<Frame>)>, String> {
     let target_kind = canon_frame(kind);
+    // every path that shows an editor KiCad has not opened yet (a show, a re-attach, a follow of KiCad's own request) stops here while
+    // another live KiCad holds that document: only the show's own lock_gate (the person's answer) lets KiCad open it (P3: a re-attach
+    // after the pane's tab press sent ShowFrame FK_SCH around the question, and bp.12.4 asked in its own box outside the pane)
+    if let Some(why) = held_elsewhere(sock, target_kind) { return Err(why) }
     if remount {
         let gf0 = raw_on(me, sock, desc, "kiapi.backplane.embed.GetFrames", json!({}), 5000).await;
         if gf0["ok"].as_bool().unwrap_or(false) {
@@ -3262,6 +3283,17 @@ impl RpcHandler for EmbedRpc {
                     if !kinds.is_empty() { eprintln!("kicad embed: {}: not pre-warming {kinds:?}: {free} MB free, under {floor} MB", resolved.pro); }
                     kinds.clear();
                 }
+                // a document another live KiCad holds is never pre-warmed (bp.13 would open it over that lock without asking): the person's own
+                // switch to it asks first (lock_gate); a stale lock is cleared
+                kinds.retain(|k| {
+                    let ext = match *k { "PCB" | "PCB_3D" => "kicad_pcb", "SCH" => "kicad_sch", _ => return true };
+                    let doc = Path::new(&resolved.pro).with_extension(ext).to_string_lossy().to_string();
+                    match lock_verdict(&doc) {
+                        v @ super::locks::Verdict::Foreign { .. } => { eprintln!("kicad embed: {}: not pre-warming {k}: {doc} is held by {}", resolved.pro, super::locks::holder_words(&v)); false }
+                        super::locks::Verdict::Stale => { super::locks::clear_stale(&doc, "before a pre-warm"); true }
+                        _ => true,
+                    }
+                });
                 // the reply says what is built ([] when nothing is): the client's F5 guard stands down at once instead of its 60 s cap
                 let building: Vec<&'static str> = kinds.clone();
                 let (me, gui2, pro) = (actor_tx.clone(), gui.clone(), resolved.pro.clone());

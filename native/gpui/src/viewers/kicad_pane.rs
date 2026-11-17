@@ -1063,7 +1063,9 @@ impl KicadPane {
         if let Some(p) = at {
             if over.iter().any(|o| *o != p) { over.retain(|o| *o != p); }
         }
-        let show = self.want();
+        // the pane asks about another KiCad's lock: no editor over the question (KiCad's frame, mapped in its container, covered the
+        // pane's own buttons: a click on Open anyway went to KiCad, P3)
+        let show = if lock_asked(&self.info) { None } else { self.want() };
         // (the pane's full-screen line comes and goes with our window's full screen: drawn again when it changes)
         #[cfg(target_os = "macos")]
         if self.mac_host(at, show) { cx.notify(); }
