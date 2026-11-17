@@ -104,7 +104,14 @@ else:
         relay(op='chord', combo='+'.join(mods + [KEYNAME[code]]))
 
     def click(x, y, button='left'): relay(op='click', x=x, y=y, button=1 if button == 'left' else 3)
-    def shot_to(path): relay(op='png', path=path)
+    def shot_to(path):
+        # only the test's own windows (Backplane's and KiCad's), never the screen: their union's bounds
+        ours = [w for w in wins() if w[1] == client.pid or 'kicad' in w[2].lower() and OUT in ' '.join(subprocess.run(['ps', '-o', 'command=', '-p', str(w[1])], capture_output=True, text=True).stdout.split()[:1] or [''])]
+        ours = ours or [w for w in wins() if w[1] == client.pid]
+        if not ours: return
+        x0 = min(w[3][0] for w in ours); y0 = min(w[3][1] for w in ours)
+        x1 = max(w[3][0] + w[3][2] for w in ours); y1 = max(w[3][1] + w[3][3] for w in ours)
+        relay(op='png', path=path, rect=[x0, y0, x1 - x0, y1 - y0])
 
     # windows by hand, as a person moves them (the title bar's empty part left of the title, the bottom-right corner, the green and red
     # buttons: 13 pt below the top, at 14, 36 and 58 pt from the left on macOS 26)
