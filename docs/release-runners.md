@@ -46,7 +46,7 @@ It refuses everything else: pull_request and pull_request_target (whatever their
 ## The machines
 
 **bp-win** (Azure VM, 4 vCPU, 16 GB). Runner `bp-win` (label `bp-win-nightly`) in `C:\actions-runner`, started at logon by the scheduled task
-`GitHubActionsRunner`. The VM is deallocated every day at 07:00 UTC; start it with `az vm start -g BP-WIN-RG -n bp-win` and give it a minute. Its Windows
+`GitHubActionsRunner`. The VM is deallocated every day at 12:00 UTC (07:00 Eastern, its DevTestLab auto-shutdown), and by its idle watchdog after 30 minutes with no ssh, RDP, session-agent job or runner job ([winbuild-vm.md](winbuild-vm.md)); start it with `az vm start -g BP-WIN-RG -n bp-win` and give it a minute. For a release window whose Windows jobs it takes, hold it: `scripts/winvm/winvm-hold.sh bp-win 6h`. Windows KiCad builds no longer run here: they run on bp-winbuild. Its Windows
 Update active hours are 05:00 to 23:00 UTC: outside them an update can restart it mid-build, as one nightly found. The job then fails, and its run is started
 again. It has no Chocolatey; the build takes CMake and Ninja from Visual Studio, and Git's `usr\bin` goes ahead of System32 (release.yml).
 
