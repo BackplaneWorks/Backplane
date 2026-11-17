@@ -5,7 +5,7 @@ This page comes from docs/release-retro-0.16.0.md. Times are relative to the pla
 ## T-48 h: decide the scope
 
 - [ ] **Write down the release bar once**: the platforms, the gate list below and the known-issue policy. Get the person's OK on it. Any change to the bar later goes in writing, with what it costs in time.
-- [ ] **The Backplane release doesn't wait for a new KiCad.** It ships on the KiCad pins already on main. A new KiCad (bp.N) ships on its own schedule, and its pin bump goes in a point release. *(pending: rule #1)*
+- [ ] **The Backplane release doesn't wait for a new KiCad.** It ships on the KiCad pins already on main. A new KiCad (bp.N) ships on its own schedule and reaches installs through `kicad-pins.yml` (one `gh workflow run` per platform, docs/kicad-pins.md), with no Backplane point release needed. Hubs from 0.16.1 on take it within 6 h. Bumping the compiled pins (`scripts/kicad-pin.py`) is an ordinary change, made whenever convenient.
 - [ ] **Credentials go in the vault now:** the Claude and OpenAI test tokens, plus anything else the gate rows need.
 - [ ] **Machines are ready:** ≥100 GB free on this desktop, ≥40 GB on the Mac mini, ≥30 GB on h@backplane and bp-win. Inotify `max_user_instances` is at least 1024 (put it in `sysctl.d`). Boat is signed in. bp-win's auto-shutdown is suspended for the release window. *(pending: #10)*
 
