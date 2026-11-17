@@ -103,7 +103,20 @@ else:
         mods = [m for m, bit in (('ctrl', CTRL), ('alt', ALT), ('shift', SHIFT), ('cmd', CMD)) if flags & bit]
         relay(op='chord', combo='+'.join(mods + [KEYNAME[code]]))
 
-    def click(x, y, button='left'): relay(op='click', x=x, y=y, button=1 if button == 'left' else 3)
+    # never a click on the person's windows: the front-most window at the point (any layer) must be this run's Backplane or KiCad,
+    # else the run stops (the Mac mini gate, Nov 16: a lost window lookup sent clicks to the person's Chrome and Music)
+    def _our_pids():
+        ps = subprocess.run(['ps', '-axo', 'pid=,command='], capture_output=True, text=True).stdout.splitlines()
+        return {client.pid} | {int(l.split()[0]) for l in ps if OUT in l and 'kicad' in l.lower()}
+    def _guard(x, y, what):
+        mine = _our_pids()
+        for w in helper('windows') or []:
+            bx, by, bw, bh = w['bounds']
+            if bx <= x < bx + bw and by <= y < by + bh and w.get('layer', 0) < 1000:
+                if int(w['pid']) in mine: return
+                raise SystemExit(f'REFUSED {what} at ({round(x)}, {round(y)}): the window there is {w.get("owner", "?")}\'s, not this run\'s')
+        raise SystemExit(f'REFUSED {what} at ({round(x)}, {round(y)}): no window of this run there')
+    def click(x, y, button='left'): _guard(x, y, 'a click'); relay(op='click', x=x, y=y, button=1 if button == 'left' else 3)
     def shot_to(path):
         # only the test's own windows (Backplane's and KiCad's), never the screen: their union's bounds
         ours = [w for w in wins() if w[1] == client.pid or 'kicad' in w[2].lower() and OUT in ' '.join(subprocess.run(['ps', '-o', 'command=', '-p', str(w[1])], capture_output=True, text=True).stdout.split()[:1] or [''])]
@@ -118,15 +131,16 @@ else:
     def _main(pid): return max((w for w in wins() if w[1] == pid), key=lambda w: w[3][2] * w[3][3], default=None)
 
     def win_move(pid, x, y):
-        b = _main(pid)[3]; relay(op='drag', x0=b[0] + 120, y0=b[1] + 12, x1=x + 120, y1=y + 12, seconds=0.8); time.sleep(0.5)
+        b = _main(pid)[3]; _guard(b[0] + 120, b[1] + 12, 'a drag'); relay(op='drag', x0=b[0] + 120, y0=b[1] + 12, x1=x + 120, y1=y + 12, seconds=0.8); time.sleep(0.5)
 
     def win_size(pid, w, h):
-        b = _main(pid)[3]; relay(op='drag', x0=b[0] + b[2] - 2, y0=b[1] + b[3] - 2, x1=b[0] + w - 2, y1=b[1] + h - 2, seconds=0.8); time.sleep(0.5)
+        b = _main(pid)[3]; _guard(b[0] + b[2] - 2, b[1] + b[3] - 2, 'a drag'); relay(op='drag', x0=b[0] + b[2] - 2, y0=b[1] + b[3] - 2, x1=b[0] + w - 2, y1=b[1] + h - 2, seconds=0.8); time.sleep(0.5)
 
     def win_full(pid, on):
         if on:
             # the window active first (its title bar): a click on an inactive window's green button only activates it
-            b = _main(pid)[3]; relay(op='click', x=b[0] + 120, y=b[1] + 12); time.sleep(0.6); relay(op='click', x=b[0] + 58, y=b[1] + 13)
+            b = _main(pid)[3]; _guard(b[0] + 120, b[1] + 12, 'a click'); relay(op='click', x=b[0] + 120, y=b[1] + 12); time.sleep(0.6)
+            _guard(b[0] + 58, b[1] + 13, 'a click'); relay(op='click', x=b[0] + 58, y=b[1] + 13)
         else:
             # as a person leaves full screen: the pointer at the screen's top shows the title bar, then its green button
             # (Ctrl+Cmd+F needs an Exit Full Screen menu item; the client has none)
@@ -139,7 +153,7 @@ else:
                 if wait_for(lambda: client_log().count('"kicad_mac_full_screen":false') > n0, 4): break
                 relay(op='chord', combo='escape'); time.sleep(0.8)  # whatever opened instead (a menu) goes
 
-    def win_close(pid, bounds): relay(op='click', x=bounds[0] + 14, y=bounds[1] + 13)
+    def win_close(pid, bounds): _guard(bounds[0] + 14, bounds[1] + 13, 'a click'); relay(op='click', x=bounds[0] + 14, y=bounds[1] + 13)
 
 
 CLIENT, HUB, ASSETS, RT, OUT = sys.argv[1:6]
