@@ -21,6 +21,8 @@ pub enum Plan {
     /// A pinned Windows installer the hub downloads itself (resumable, checked against its pin) and runs silently for this user: FreeCAD on a
     /// Windows with no winget (Windows Server, LTSC/IoT, a fresh install before App Installer updates).
     Direct(&'static WinInstaller),
+    /// A program run as it is, no shell: an agent CLI's own updater (`claude update`, `opencode upgrade`...).
+    Run(String, Vec<String>),
 }
 
 /// A Windows installer pinned by version, address, size and sha256, run with `args` (silent, this user only: no administrator rights).
@@ -284,14 +286,30 @@ pub fn command(p: &Plan) -> Option<(String, Vec<String>)> {
         Plan::Winget(id) => Some(("winget".into(), v(&["install", "--id", id, "-e", "--silent", "--accept-package-agreements", "--accept-source-agreements"]))),
         Plan::Sh(script, args) => { let mut a = v(&["-c", script, "sh"]); a.extend(args.iter().cloned()); Some(("sh".into(), a)) }
         Plan::Ps(c) => Some(("powershell".into(), v(&["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", c]))),
+        Plan::Run(prog, args) => Some((prog.clone(), args.clone())),
         Plan::Link(_) | Plan::Direct(_) => None,
     }
+}
+
+/// What an agent's Update button (`update:<agent>`) does: the CLI's own updater found where the hub finds the CLI (agent_versions.rs `TABLE`); Codex placed
+/// by setup's own install (in the tools folder, where `codex update` cannot replace it) gets that install again; a CLI with no updater, its page.
+/// None: the CLI is not found here.
+pub fn update_plan(id: &str, path: &Path, tools: &Path, os: &str, arch: &str, node: bool) -> Option<Plan> {
+    let s = super::agent_versions::of(id)?;
+    if id == "codex" && path.starts_with(tools) { return plan("codex", os, arch, false, node) }
+    if s.update.is_empty() { return Some(Plan::Link(s.page)) }
+    Some(Plan::Run(path.to_string_lossy().into_owned(), s.update.iter().map(|a| a.to_string()).collect()))
 }
 
 /// `onboard.install {tool}`: started, or refused with the reason. How it goes is the info key `onboard.installs`; `after` runs the checks again at the end.
 pub async fn start(hub: &Arc<Hub>, tool: &str, winget: bool, node: bool, after: impl FnOnce(Arc<Hub>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + 'static) -> Result<String, String> {
     if crate::copy::on() { return Err("a copy of the log installs nothing".into()) }
-    let Some(p) = plan(tool, &hub.cfg.os, &hub.cfg.arch, winget, node) else { return Err(format!("{tool} has no install button; follow its guide")) };
+    let p = match tool.strip_prefix("update:") {
+        Some(id) => { let path = crate::agents::proc::Cli::from_env().resolve(super::agent_versions::program(id)).map_err(|_| format!("{id} is not installed here"))?;
+            update_plan(id, &path, &tools_dir(), &hub.cfg.os, &hub.cfg.arch, node) }
+        None => plan(tool, &hub.cfg.os, &hub.cfg.arch, winget, node),
+    };
+    let Some(p) = p else { return Err(format!("{tool} has no install button; follow its guide")) };
     // FreeCAD's own release goes into the hub's folder, where the hub then finds it (freecad/command)
     let p = match p { Plan::Sh(s, mut a) if tool == "freecad" => { a.push(hub.cfg.home.join("freecad").to_string_lossy().into_owned()); Plan::Sh(s, a) } p => p };
     if STATE.lock().unwrap().get(tool).map_or(false, |(s, _, _)| s == "running") { return Err(format!("{tool} is being installed already")) }
@@ -299,7 +317,7 @@ pub async fn start(hub: &Arc<Hub>, tool: &str, winget: bool, node: bool, after: 
         let tool = tool.to_string(); let name = tool.clone();
         say(hub, &tool, "running", "Starting.").await;
         let h = hub.clone();
-        let log = hub.cfg.home.join("installs"); let _ = std::fs::create_dir_all(&log); let log = log.join(format!("{tool}.log"));
+        let log = hub.cfg.home.join("installs"); let _ = std::fs::create_dir_all(&log); let log = log.join(format!("{}.log", tool.replace(':', "-")));
         let dir = download_dir(cfg!(windows), std::env::var_os("LOCALAPPDATA").as_deref(), &hub.cfg.home);
         tokio::spawn(async move {
             match direct(&h, &tool, pin, &dir, &log).await { Ok(()) => say(&h, &tool, "done", "Installed.").await, Err(why) => say(&h, &tool, "failed", &why).await }
@@ -311,10 +329,11 @@ pub async fn start(hub: &Arc<Hub>, tool: &str, winget: bool, node: bool, after: 
     let tool = tool.to_string(); let name = tool.clone();
     say(hub, &tool, "running", "Starting.").await;
     let h = hub.clone();
-    let log = hub.cfg.home.join("installs"); let _ = std::fs::create_dir_all(&log); let log = log.join(format!("{tool}.log"));
+    let log = hub.cfg.home.join("installs"); let _ = std::fs::create_dir_all(&log); let log = log.join(format!("{}.log", tool.replace(':', "-")));
     tokio::spawn(async move {
         let r = run(&h, &tool, &prog, &args, &log).await;
         match r { Ok(()) => say(&h, &tool, "done", "Installed.").await, Err(why) => say(&h, &tool, "failed", &why).await }
+        super::models_probe::refresh_soon(&h); // the picker finds what was just installed (or updated) now, not at the next 15-minute round
         after(h).await;
     });
     Ok(format!("installing {name}"))
@@ -448,6 +467,18 @@ mod tests {
         }
         assert_eq!(plan("codex", "freebsd", "x64", false, false), Some(Plan::Link(CODEX_RELEASES)));
         assert!(matches!(plan("codex", "freebsd", "x64", false, true), Some(Plan::Sh(s, _)) if s.contains("npm install -g @openai/codex")), "npm only as a fallback, with Node already there");
+    }
+    #[test] fn each_agents_update_is_its_own_updater_and_codex_from_setup_is_installed_again() {
+        let (t, x) = (Path::new("/h/.local/share/backplane/tools/bin"), Path::new("/h/.local/bin"));
+        let run = |id: &str| update_plan(id, &x.join(id), t, "linux", "x64", false);
+        assert_eq!(run("claude"), Some(Plan::Run("/h/.local/bin/claude".into(), vec!["update".into()])));
+        assert_eq!(run("opencode"), Some(Plan::Run("/h/.local/bin/opencode".into(), vec!["upgrade".into()])));
+        assert_eq!(run("pi"), Some(Plan::Run("/h/.local/bin/pi".into(), vec!["update".into(), "--self".into()])));
+        assert_eq!(run("codex"), Some(Plan::Run("/h/.local/bin/codex".into(), vec!["update".into()])), "an npm or brew Codex updates itself");
+        assert!(matches!(update_plan("codex", &t.join("codex"), t, "linux", "x64", false), Some(Plan::Sh(s, _)) if s == CODEX_SH), "setup's Codex: its checked release again");
+        assert!(matches!(run("muse"), Some(Plan::Link(_))), "no updater: its page");
+        assert_eq!(command(&run("grok").unwrap()), Some(("/h/.local/bin/grok".into(), vec!["update".into()])));
+        assert_eq!(update_plan("nobody", x, t, "linux", "x64", false), None);
     }
     #[test] fn the_tools_folder_follows_the_system() {
         assert_eq!(tools_dir_in(true, Some("C:\\Users\\A B\\AppData\\Local"), None, "C:\\Users\\A B"), Path::new("C:\\Users\\A B\\AppData\\Local").join("Backplane").join("tools").join("bin"));

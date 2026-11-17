@@ -51,6 +51,8 @@ pub fn agent_why(rows: &[Section], provider: &str, agents: &Value) -> String {
     if !said.is_empty() { return said }
     rows.iter().find(|s| s.action == "provider").and_then(|s| s.choices.iter().find(|c| c.value == provider)).filter(|c| !c.ok).map(|c| c.note.clone()).unwrap_or_default()
 }
+/// What the cursor's agent needs when its CLI is older than Backplane supports ("update needed: v0.1, needs ≥ v0.2"), from the hub's agents.
+pub fn update_note(agents: &Value, provider: &str) -> Option<String> { agents[bare(provider)]["update"].as_str().filter(|n| !n.is_empty()).map(str::to_string) }
 pub fn agent_ok(rows: &[Section], provider: &str) -> bool {
     rows.iter().find(|s| s.action == "provider").and_then(|s| s.choices.iter().find(|c| c.value == provider)).map_or(true, |c| c.ok)
 }
@@ -330,7 +332,13 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool
     }
     /* i18n-ok: section titles, drawn through trs in head */ let effort_body = div().flex().flex_col().child(head(2, "Effort")).child(meter)
         .child(div().px_3().pt_2().pb_2().text_size(z(11.)).text_color(c("faint")).child(meter_note(&ss, &cur.provider, &own)));
-    /* i18n-ok: section titles, drawn through trs in head */ let model_col = div().flex_1().min_w_0().flex().flex_col().child(head(1, "Model")).children(search).child(div().relative().child(list).children(bar));
+    // an installed CLI older than Backplane supports: still offered, with what it needs and an Update button (the CLI's own updater, run by the hub)
+    let update = update_note(&thread["pickerAgents"], &provider).map(|note| { let p = bare(&provider).to_string();
+        div().mx_3().mb_1().px_2().py_1().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(z(11.))
+            .child(div().flex_1().min_w_0().text_color(c("faint")).child(crate::i18n::trs(&note)))
+            /* i18n-ok: drawn through trs */ .child(div().id("picker-update").flex_shrink_0().px_2().cursor_pointer().text_color(c("accent")).child(crate::i18n::trs("Update"))
+                .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(crate::hub::Command::Rpc("onboard.install".into(), super::settings::Secret(serde_json::json!({"tool": format!("update:{p}")})), "agent-update")); cx.notify(); }))) });
+    /* i18n-ok: section titles, drawn through trs in head */ let model_col = div().flex_1().min_w_0().flex().flex_col().child(head(1, "Model")).children(update).children(search).child(div().relative().child(list).children(bar));
     let body = match f.mode {
         Mode::Wide => div().flex().items_start().child(agents).child(model_col)
             .child(div().id("picker-effort").w(px(f.effort_w)).flex_shrink_0().h(px(agents_h)).overflow_y_scroll().border_l_1().border_color(c("line")).child(effort_body)),

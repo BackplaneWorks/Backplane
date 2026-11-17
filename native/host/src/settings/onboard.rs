@@ -94,7 +94,8 @@ async fn agents(cli: &crate::agents::proc::Cli) -> Value {
             "codex" => (run(Kind::Agent, p, &["login", "status"], TIMEOUT).await.map_or("unknown", |r| codex_signed(r.0, &r.1, &r.2)), String::new()),
             _ => ("unknown", String::new()),
         };
-        m.insert(a.id.into(), json!({"path": path, "version": version, "signed": signed, "who": who}));
+        let support = super::agent_versions::verdict(if a.id == "agy" { "antigravity" } else { a.id }, &version); // the same verdict the picker reads
+        m.insert(a.id.into(), json!({"path": path, "version": version, "signed": signed, "who": who, "support": support}));
     }
     Value::Object(m)
 }
@@ -130,6 +131,7 @@ impl OnboardRpc {
         // a path typed here goes where FreeCAD is looked for, then Settings, CAD reads the same machine
         if checks["freecad"]["runs"] == true && !g("freecad").is_empty() { let d = hub.cfg.home.join("freecad"); let _ = std::fs::create_dir_all(&d); let _ = std::fs::write(d.join("command"), g("freecad")); }
         crate::files::kicad::ipc::publish_cad(hub).await;
+        super::models_probe::refresh_soon(hub); // setup's check and the picker's agents are found the same way, at the same moment
         Self::auto_kicad(hub).await;
         // a setting, not info: its log line redraws every client, and the answer outlives a restart. Only a change is logged.
         let text = checks.to_string();

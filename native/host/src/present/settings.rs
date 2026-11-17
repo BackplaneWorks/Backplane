@@ -183,17 +183,36 @@ fn agents(st: &State, info: &Value) -> Vec<Value> {
     let prov = set(st, "agent.provider", "claude");
     let cli = models["about"][prov]["cli"].as_str().unwrap_or("");
     let model = set(st, "agent.model", "");
+    let updates = agent_updates(&models, info);
     let mut ids: Vec<&str> = vec![""];
     ids.extend(models[prov].as_array().into_iter().flatten().filter_map(Value::as_str).take(12));
     if !ids.contains(&model) { ids.push(model); }
     let label = models["about"][prov]["labels"][if model.is_empty() { "default" } else { model }].as_str().unwrap_or("");
     vec![
         row("Provider and model for new threads", "Each thread keeps its own; change it from the composer.", vec![]),
-        row("Provider", &if cli.is_empty() && prov != "claude" { format!("{prov} is not installed") } else { cli.to_string() }, chips(PROVIDERS, prov, "agent.provider")),
+        row("Provider", &if !super::keys::is_installed(&models, prov) { format!("{prov} is not installed") } else { cli.to_string() }, chips(PROVIDERS, prov, "agent.provider")),
         row("Model", &format!("{}: {}", if model.is_empty() { "default" } else { model }, label), chips(&ids, model, "agent.model")),
+    ].into_iter().chain(updates).chain([
         row("Bots: infinite context (beta)", "Each bot turn starts fresh with the whole conversation as a tree of summaries the bot can zoom into, written by a cheaper model in the background. A long history takes hours of model calls to summarize.", chips(&["on", "off"], onoff(set(st, "recall.bots", "off") == "on"), "recall.bots")),
         row("Show thinking", "Ask agents for their thinking and show it in the thread, folded (Claude, Codex and Pi; a Claude session restarts to take it)", chips(&["on", "off"], set(st, "agent.thinking", "off"), "agent.thinking")),
-    ]
+    ]).collect()
+}
+/// Settings > Agents: a row for each installed agent CLI older than Backplane supports (settings/agent_versions.rs), with its Update button (the CLI's own updater,
+/// run as setup's installs are: `onboard.install {tool: "update:<agent>"}`) and how the update goes.
+fn agent_updates(models: &Value, info: &Value) -> Vec<Value> {
+    let installs: Value = info["onboard.installs"].as_str().and_then(|t| serde_json::from_str(t).ok()).unwrap_or(Value::Null);
+    crate::settings::agent_versions::TABLE.iter().filter_map(|t| {
+        let sup = &models["about"][t.id]["support"];
+        let key = format!("update:{}", t.id); let run = &installs[key.as_str()]; let state = run["state"].as_str().unwrap_or("");
+        if sup["state"] != "old" && state != "done" && state != "running" { return None }
+        let label = format!("Update {}", t.title);
+        Some(match state {
+            "running" => row(&label, &format!("Updating. {}", run["note"].as_str().filter(|n| !n.is_empty()).unwrap_or("Starting.")), vec![]),
+            "failed" => { let mut r = row(&label, &format!("The update did not finish: {}.", run["note"].as_str().unwrap_or("").trim_end_matches('.')), vec![btn("Try again", "agent-update", t.id, true)]); r["tone"] = json!("warn"); r }
+            "done" if sup["state"] != "old" => row(&label, "Updated.", vec![]),
+            _ => { let mut r = row(&label, &format!("{} {} is installed; Backplane needs {} or newer.", t.title, sup["version"].as_str().unwrap_or(""), t.min), vec![btn("Update", "agent-update", t.id, true)]); r["tone"] = json!("warn"); r }
+        })
+    }).collect()
 }
 
 fn ordering(st: &State) -> Vec<Value> {
@@ -794,6 +813,7 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             patch
         }
         "dev-star" => { send(session, hub, "star.replay", json!({}), &mut cmds, &mut rid); json!({"open": {"settings": false}}) }
+        "agent-update" => { send(session, hub, "onboard.install", json!({"tool": format!("update:{value}")}), &mut cmds, &mut rid); json!({}) }
         "update-check" => { send(session, hub, "update.check", json!({}), &mut cmds, &mut rid); json!({}) }
         "update-now" => { send(session, hub, "update.now", json!({}), &mut cmds, &mut rid); json!({}) }
         "rule-add" | "board-add" => {

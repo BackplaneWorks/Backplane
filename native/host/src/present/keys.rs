@@ -274,13 +274,25 @@ pub fn model_efforts(models: Option<&Value>, provider: &str, model: &str) -> Vec
     let take: Vec<&'static str> = match known { Some(xs) => lv.iter().copied().filter(|l| xs.iter().any(|x| x == l)).collect(), None => lv.to_vec() };
     if take.is_empty() { vec![] } else { std::iter::once("").chain(take).collect() }
 }
-/// Whether an agent can be used here, and why not: its CLI found (Claude's aliases are built in), the reason it lists nothing.
+/// Whether `agent` can run here, by the models info: its CLI found by the last detection. Before the CLIs were asked (the built-in value, a test hub) nothing
+/// is known to be missing and Claude's built-in aliases count. The one answer the picker, `&` mentions, Settings and a new thread's agent all read.
+pub fn is_installed(models: &Value, agent: &str) -> bool {
+    let found = models["about"][agent]["cli"].as_str().map_or(false, |c| !c.is_empty());
+    found || (models["probed"] != true && agent == "claude")
+}
+/// Whether an agent can be used here, and why not: its CLI found by the last detection (`is_installed`, Claude included), the reason it lists nothing.
 pub fn agent_ok(models: Option<&Value>, provider: &str) -> (bool, String) {
     let Some(m) = models.filter(|m| m["probed"] == true) else { return (true, String::new()) }; // not asked yet (the built-in list): nothing is known to be missing
     let about = &m["about"][provider];
-    let cli = about["cli"].as_str().unwrap_or("");
-    if cli.is_empty() && provider != "claude" { return (false, if provider == "antigravity" { "not installed: install Google's Antigravity CLI (agy), or Settings > Agents installs it".into() } else { "not installed on this machine".into() }) }
+    if !is_installed(m, provider) { return (false, if provider == "antigravity" { "not installed: install Google's Antigravity CLI (agy), or Settings > Agents installs it".into() } else { "not installed on this machine".into() }) }
     (true, about["error"].as_str().unwrap_or("").to_string())
+}
+/// An installed agent's version note (settings/agent_versions.rs, carried in the models info as `about.<agent>.support`): ("update needed: v0.1, needs ≥ v0.2", true)
+/// for one older than Backplane supports, ("v3, newer than tested v2", false) for one newer than tested; None when it is a supported version or unknown.
+pub fn support_note(models: Option<&Value>, provider: &str) -> Option<(String, bool)> {
+    let s = &models?["about"][provider]["support"];
+    let note = s["note"].as_str().filter(|n| !n.is_empty())?.to_string();
+    match s["state"].as_str() { Some("old") => Some((note, true)), Some("newer") => Some((note, false)), _ => None }
 }
 /// The chip under the composer: "claude / opus / high", the effort left out for an agent whose model takes none (0.14's View.mp.text).
 pub fn chip(provider: &str, model: &str, effort: &str, efforts: bool) -> String {
@@ -294,7 +306,8 @@ pub fn picker_with(provider: &str, model: &str, effort: &str, reading: &str, mod
     let es = model_efforts(models, provider, model);
     let efforts: Vec<Value> = es.iter().map(|e| choice(effort_label(e), e, *e == effort || *e == format!("@{provider}"))).collect();
     let providers: Vec<Value> = AGENTS.iter().map(|(p, what)| { let v = format!("@{p}"); let (ok, why) = agent_ok(models, p);
-        json!({"label": p, "value": v, "on": v == effort || *p == provider, "note": if ok { *what } else if why.starts_with("not installed") { "not installed" } else { why.as_str() }, "ok": ok}) }).collect();
+        let note = if !ok { if why.starts_with("not installed") { "not installed".to_string() } else { why.clone() } } else { support_note(models, p).map_or_else(|| what.to_string(), |(n, old)| if old { n } else { format!("{what} · {n}") }) };
+        json!({"label": p, "value": v, "on": v == effort || *p == provider, "note": note, "ok": ok}) }).collect();
     let menu = match models { Some(ms) => model_choices(ms, provider, model), None => json!([{"label": "default", "value": "", "on": model.is_empty()}]) };
     json!({"label": label, "chip": chip(provider, model, effort, !es.is_empty()), "provider": provider, "models": menu, "efforts": efforts, "providers": providers})
 }
@@ -318,7 +331,8 @@ pub fn picker_agents(models: Option<&Value>) -> Value {
     Value::Object(AGENTS.iter().map(|(p, _)| {
         let k = picker_with(p, "", "", "", models);
         let (ok, why) = agent_ok(models, p);
-        (p.to_string(), json!({"models": if ok { k["models"].clone() } else { json!([]) }, "efforts": k["efforts"], "ok": ok, "why": why}))
+        let update = support_note(models, p).filter(|n| n.1).map_or(Value::Null, |n| json!(n.0)); // the picker's Update line: an old CLI, still offered
+        (p.to_string(), json!({"models": if ok { k["models"].clone() } else { json!([]) }, "efforts": k["efforts"], "ok": ok, "why": why, "update": update}))
     }).collect())
 }
 /// The picker as the helper recorded it (the test fixtures): the chip, the agent and each row's note, state and efforts are Backplane's own.

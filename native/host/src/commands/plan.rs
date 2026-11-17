@@ -284,7 +284,7 @@ fn create(f: &Fold, at: u64, id: &Value, p: &Value, new_root: Option<(&str, usiz
     let gs = |k: &str, d: &str| p.get(k).and_then(Value::as_str).unwrap_or(d).to_string();
     let env = gs("env", f.get("thread.env", "auto"));
     let title = gs("title", "New thread");
-    let provider = gs("provider", f.get("agent.provider", "claude"));
+    let provider = gs("provider", f.default_agent.as_deref().unwrap_or(f.get("agent.provider", "claude")));
     let model = gs("model", f.get("agent.model", ""));
     let mode = if scratch || env == "local" { "local" } else { "worktree" };
     let wt = if scratch { format!("{root}/{th}") } else { String::new() };
