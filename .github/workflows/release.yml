@@ -21,6 +21,10 @@ on:
       broken_run:
         description: "smoke: a dry run with a newer tag than this one whose hub dies at its start: rolled back from"
         default: ""
+      # TEST BRANCH ONLY (selfhosted-builds-test, never landed): the runner labels as inputs, since no RELEASE_* variable may be set during 0.16.1
+      linux_runner: { description: "test: linux-x64 build runner label", default: "" }
+      mac_runner: { description: "test: darwin-arm64 build runner label", default: "" }
+      win_runner: { description: "test: windows-x64 build runner label", default: "" }
       android_only:
         description: "only the Android app: the release-signed APK and AAB as the archive-android artifact, nothing else built"
         type: boolean
@@ -57,7 +61,7 @@ jobs:
     # nightly (its guard refuses one; a nightly's windows-x64 skips RELEASE_WIN_RUNNER), and GitHub cannot start it: scripts/release-dispatch.sh starts it
     # and holds winbuild-vm for the run. linux-arm64 and Android always build on GitHub's. Each runner refuses any job but release.yml's and nightly.yml's from
     # main or a v* tag (scripts/runner-guard.sh, docs/release-runners.md); the variables are set only while a release uses them.
-    runs-on: ${{ (matrix.target == 'linux-x64' && vars.RELEASE_LINUX_RUNNER) || (matrix.target == 'darwin-arm64' && vars.RELEASE_MAC_RUNNER) || (matrix.target == 'windows-x64' && !inputs.nightly && vars.RELEASE_WIN_RUNNER) || (inputs.nightly && matrix.target == 'linux-x64' && vars.NIGHTLY_LINUX_RUNNER) || (inputs.nightly && matrix.target == 'darwin-arm64' && vars.NIGHTLY_MAC_RUNNER) || (inputs.nightly && matrix.target == 'windows-x64' && vars.NIGHTLY_WIN_RUNNER) || matrix.os }}
+    runs-on: ${{ (matrix.target == 'linux-x64' && (inputs.linux_runner || vars.RELEASE_LINUX_RUNNER)) || (matrix.target == 'darwin-arm64' && (inputs.mac_runner || vars.RELEASE_MAC_RUNNER)) || (matrix.target == 'windows-x64' && !inputs.nightly && (inputs.win_runner || vars.RELEASE_WIN_RUNNER)) || (inputs.nightly && matrix.target == 'linux-x64' && vars.NIGHTLY_LINUX_RUNNER) || (inputs.nightly && matrix.target == 'darwin-arm64' && vars.NIGHTLY_MAC_RUNNER) || (inputs.nightly && matrix.target == 'windows-x64' && vars.NIGHTLY_WIN_RUNNER) || matrix.os }}
     defaults:
       run:
         shell: bash
