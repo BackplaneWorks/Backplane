@@ -517,11 +517,11 @@ pub fn install_row(session: &Value, info: &Value, pkg: Option<&crate::files::kic
             "running" => running_row(&format!("Updating to Backplane KiCad {}", p.version), &st, p.version, note),
             // what the update adds over this runtime, not a fixed sentence (bp.12.1 to bp.12.2 brings the plan view's keys, not the editor)
             _ if draft(session, "@kinstall") == "ask" => row("Update Backplane KiCad?", &format!("Downloads Backplane KiCad {} ({}) from {FROM} and puts it beside {}, which stays.{}", p.version, crate::files::kicad::install::size_words(p), i("kicad.version"),
-                crate::files::kicad::install::update_reason(&i("kicad.caps").split(',').filter(|c| !c.is_empty()).collect::<Vec<_>>()).map_or(String::new(), |w| format!(" {w}"))),
+                crate::files::kicad::install::update_reason(&i("kicad.caps").split(',').filter(|c| !c.is_empty()).collect::<Vec<_>>(), i("kicad.version")).map_or(String::new(), |w| format!(" {w}"))),
                 vec![btn("Update", "kicad-install", "", true), btn("Cancel", "kicad-install-cancel", "", false)]),
             "failed" => row("Update Backplane KiCad", &format!("{note}."), vec![btn("Try again", "kicad-install-ask", "", true)]),
             _ => { let have: Vec<&str> = i("kicad.caps").split(',').filter(|c| !c.is_empty()).collect();
-                let why = crate::files::kicad::install::update_reason(&have).map_or(String::new(), |w| format!(" {w}"));
+                let why = crate::files::kicad::install::update_reason(&have, i("kicad.version")).map_or(String::new(), |w| format!(" {w}"));
                 row("Update Backplane KiCad", &format!("Backplane KiCad {} is out; this computer has {}.{why}", p.version, i("kicad.version")), vec![btn("Update KiCad", "kicad-install-ask", "", true)]) }
         });
     }

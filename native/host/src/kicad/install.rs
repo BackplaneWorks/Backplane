@@ -553,14 +553,16 @@ pub fn decide(pkg: Option<&Package>, status: &str, version: &str, install_state:
 }
 /// Why the update is worth taking, in one sentence, from what the installed runtime lacks (`have`: its manifest's capabilities): the
 /// DRC zone guard first (a safety fix), then the editor inside Backplane. None when it lacks neither (a newer build with nothing named).
-pub fn update_reason(have: &[&str]) -> Option<String> {
-    update_reason_on(have, cfg!(target_os = "linux"), package().is_some_and(|p| super::kserve::bp_number(p.version) >= 13))
+/// `version`: the installed runtime's (its manifest's), for what no capability says: the editor inside Backplane came with bp.8.
+pub fn update_reason(have: &[&str], version: &str) -> Option<String> {
+    update_reason_on(have, version, cfg!(target_os = "linux"), package().is_some_and(|p| super::kserve::bp_number(p.version) >= 13))
 }
 /// `update_reason` for a hub on Linux or not: a Linux runtime has always carried KiCad's libraries and Backplane's (its launcher sets
 /// them up); a Windows or macOS one has them only with `global-tables-seeded` (bp.13), so an update to it brings them.
 /// `to13`: the update brings bp.13 or later (its libraries, the narrow-pane fit, the OpenGL fallback); before that pin they are not said.
-pub fn update_reason_on(have: &[&str], linux: bool, to13: bool) -> Option<String> {
-    let embed = have.iter().any(|c| *c == "embed" || *c == "embedded");
+pub fn update_reason_on(have: &[&str], version: &str, linux: bool, to13: bool) -> Option<String> {
+    // no runtime's manifest lists the embedding (bp.12.1's does not, and it embeds): from bp.8 on it is there, whatever the list says
+    let embed = have.iter().any(|c| *c == "embed" || *c == "embedded") || super::kserve::bp_number(version) >= 8;
     let mut adds: Vec<&str> = vec![];
     if !have.contains(&"drc-zone-guard") { adds.push("fixes a DRC fault that could miss a short inside a filled zone") }
     if !embed { adds.push("brings the KiCad editor inside Backplane's viewer") }
@@ -592,7 +594,7 @@ pub fn update_reason_on(have: &[&str], linux: bool, to13: bool) -> Option<String
 pub fn update_offer(p: Option<&Package>, status: &str, version: &str, caps: &[String]) -> Option<serde_json::Value> {
     let p = p.filter(|p| status == "ok" && older(version, p))?;
     let have: Vec<&str> = caps.iter().map(String::as_str).collect();
-    let reason = update_reason_on(&have, cfg!(target_os = "linux"), super::kserve::bp_number(p.version) >= 13).unwrap_or_default();
+    let reason = update_reason_on(&have, version, cfg!(target_os = "linux"), super::kserve::bp_number(p.version) >= 13).unwrap_or_default();
     Some(json!({"offer": true, "from": version, "to": p.version, "reason": reason, "mb": p.size >> 20, "size": size_words(p)}))
 }
 /// Why a request is refused, None when it may run. `found`: the KiCad `ipc::runtime` found ("" for none); `status` its status. Only a compatible
@@ -969,15 +971,18 @@ cp \"$f\" \"$out\"
              "It adds Backplane's whole library, fits the editor to a narrow pane, and no longer stops at an OpenGL notice on a computer without a GPU."),
             (&["embed", "coedit", "drc-zone-guard"][..], false, win),                                   // Windows bp.10
             (&["embedded", "drc-zone-guard", "routing-plan", "plan-keys", "no-load-migration"][..], false, win), // macOS bp.12.5
-        ] { assert_eq!(s(update_reason_on(have, linux, true)), want, "{have:?}"); }
+        ] { assert_eq!(s(update_reason_on(have, "", linux, true)), want, "{have:?}"); }
         // a runtime without the zone guard still hears the safety fix first
-        assert_eq!(s(update_reason_on(&["api-server"], true, true)), "It fixes a DRC fault that could miss a short inside a filled zone, adds Backplane's whole library, fits the editor to a narrow pane, and no longer stops at an OpenGL notice on a computer without a GPU.");
+        assert_eq!(s(update_reason_on(&["api-server"], "", true, true)), "It fixes a DRC fault that could miss a short inside a filled zone, adds Backplane's whole library, fits the editor to a narrow pane, and no longer stops at an OpenGL notice on a computer without a GPU.");
+        // bp.12.1 (its manifest names no embedding, and it embeds) is not told the update brings the editor inside Backplane
+        assert!(!s(update_reason_on(&["coedit", "drc-zone-guard", "routing-plan"], "10.99.0-bp.12.1", true, false)).contains("inside Backplane's viewer"));
+        assert!(s(update_reason_on(&["api-server"], "10.99.0-bp.4", true, false)).contains("inside Backplane's viewer"), "bp.4 does not embed");
         // a pin before bp.13 never says what bp.13 brings (bp.12.1 offered bp.12.4: the earlier reasons only)
-        assert_eq!(s(update_reason_on(&["embedded", "drc-zone-guard", "routing-plan"], true, false)), "It makes A, R and W in KiCad's routing plan view act on the plan, and stops KiCad rewriting files nobody changed or refusing saves while its Symbol Editor is open.");
+        assert_eq!(s(update_reason_on(&["embedded", "drc-zone-guard", "routing-plan"], "", true, false)), "It makes A, R and W in KiCad's routing plan view act on the plan, and stops KiCad rewriting files nobody changed or refusing saves while its Symbol Editor is open.");
         // bp.13 itself, on every platform: nothing to say; the reasons between earlier pins are kept for a runtime that has bp.13's tables
-        for linux in [true, false] { assert_eq!(update_reason_on(&["embedded", "drc-zone-guard", "routing-plan", "plan-keys", "no-load-migration", seeded], linux, true), None); }
-        assert_eq!(s(update_reason_on(&["embedded", "drc-zone-guard", "routing-plan", seeded], true, true)), "It makes A, R and W in KiCad's routing plan view act on the plan, and stops KiCad rewriting files nobody changed or refusing saves while its Symbol Editor is open.");
-        assert_eq!(s(update_reason(&["routing-plan"])).matches(". ").count(), 0, "one sentence");
+        for linux in [true, false] { assert_eq!(update_reason_on(&["embedded", "drc-zone-guard", "routing-plan", "plan-keys", "no-load-migration", seeded], "", linux, true), None); }
+        assert_eq!(s(update_reason_on(&["embedded", "drc-zone-guard", "routing-plan", seeded], "", true, true)), "It makes A, R and W in KiCad's routing plan view act on the plan, and stops KiCad rewriting files nobody changed or refusing saves while its Symbol Editor is open.");
+        assert_eq!(s(update_reason(&["routing-plan"], "")).matches(". ").count(), 0, "one sentence");
     }
     #[test] fn the_update_offer_names_from_to_why_and_size_only_over_an_older_backplane_runtime() {
         let p = Package { version: "10.99.0-bp.13", release: "backplane-kicad-v10.99.0-bp.13", size: 1_160_000_000, ..WINDOWS };
