@@ -6,6 +6,7 @@
 #   L2  Cancel: no KiCad starts; the pane offers Try again; the other KiCad's lock is untouched (still held by it)
 #   L3  Try again asks again; Open anyway: the editor paints, no File Open Warning, the project's lock is now held by our KiCad
 #   L4  a stale lock (its holder gone) is cleared without asking, and the hub log says so
+#   L5  asked, and the other KiCad closes before anyone answers: the question ends by itself, the editor comes
 # fork only; under i3 and mutter (KEMBED_WM).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -84,5 +85,28 @@ CP=$!; track_pid "$CP"
 wait_for_log "$OUT/client2.log" '"name":"ready","event":"mark"' 600 || true
 STALE=$(grep -c "kicad locks: removed the stale lock .*$(basename "$LCK")" "$OUT/hub.log" || true)
 check "L4 a stale lock is cleared without asking, and the hub log says so" "$([ "${STALE:-0}" -ge 1 ] && grep -q '"name":"ready","event":"mark"' "$OUT/client2.log" && [ "$(dlg)" = 0 ] && echo 1 || echo 0)" "logged $STALE, dialogs $(dlg)"
+kill "$CP" 2>/dev/null || true
+# L5: asked, then the other KiCad closes before anyone answers: the question ends by itself and the editor comes
+for p in $(holders); do kill -9 "$p" 2>/dev/null || true; done
+for _ in $(seq 40); do [ -z "$(holders | tr -d ' ')" ] && break; sleep 0.25; done; sleep 2
+python3 - "$LCK" "$(id -un)" "$HOST" "$OUT/holder5.pid" <<'PY' &
+import fcntl, json, os, sys, time
+lck, user, host, pidf = sys.argv[1:5]
+f = open(lck, "w"); json.dump({"hostname": host, "username": user, "token": "other5"}, f); f.flush()
+fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+open(pidf, "w").write(str(os.getpid()))
+time.sleep(3600)
+PY
+H5=$!; track_pid "$H5"
+for _ in $(seq 50); do [ -s "$OUT/holder5.pid" ] && break; sleep 0.1; done
+READY0=$(grep -c 'kicad embed: start +[0-9]*ms ready' "$OUT/hub.log" || true)
+echo '[{"select":0},{"wait":2200},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},{"wait":90000}]' >"$OUT/script3.json"
+HOME="$OUT/fh" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script3.json" --exit-after 120 >"$OUT/client3.log" 2>&1 &
+CP=$!; track_pid "$CP"
+ASK0=2; ASK5=0; for _ in $(seq 240); do [ "$(grep -c 'the person is asked' "$OUT/hub.log" || true)" -gt "$ASK0" ] && { ASK5=1; break; }; sleep 0.25; done; sleep 2
+kill "$H5" 2>/dev/null || true
+T5=$(date +%s%3N); R5=-1
+for _ in $(seq 120); do [ "$(grep -c 'kicad embed: start +[0-9]*ms ready' "$OUT/hub.log" || true)" -gt "$READY0" ] && { R5=$(( $(date +%s%3N) - T5 )); break; }; sleep 0.25; done
+check "L5 the other KiCad closes while the pane asks: the question ends by itself and the editor comes" "$([ $ASK5 = 1 ] && [ "$R5" -ge 0 ] && grep -q 'let go of .*the question ends by itself' "$OUT/hub.log" && echo 1 || echo 0)" "asked $ASK5, editor ready $R5 ms after the other closed"
 kill "$CP" 2>/dev/null || true
 finish_suite "embed_foreign_lock_e2e ($EMBED_MODE)"
