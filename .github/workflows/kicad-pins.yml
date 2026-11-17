@@ -4,7 +4,7 @@ name: kicad-pins
 # It reads the published kicad-pins.json (release `kicad-pins` of this repo) and verifies it with the release key in the tree, checks the new
 # runtime as scripts/kicad-pin.py does (its asset downloaded, its sha256 equal to the KiCad release's SHA256SUMS line, its manifest's platform
 # and version), writes the next document (sequence + 1, a fresh expiry), signs it with the release key (BACKPLANE_RELEASE_KEY, as release.yml
-# does), verifies the signature again and uploads it. Hubs take a pin only when it is newer than the one compiled in. Nothing is signed anywhere else.
+# does), verifies the signature again and uploads it. The signing job waits in the environment kicad-pins for a required reviewer's approval. Hubs take a pin only when it is newer than the one compiled in. Nothing is signed anywhere else.
 on:
   workflow_dispatch:
     inputs:
@@ -17,7 +17,7 @@ on:
         required: false
         default: ''
       min_hub:
-        description: The oldest Backplane hub that may take it (0.16.1 is the first that reads the feed)
+        description: The oldest Backplane hub that may take it (hubs before the first release after 0.16.1 do not read the feed at all)
         required: false
         default: '0.16.1'
       days:
@@ -30,9 +30,27 @@ concurrency:
 permissions:
   contents: read
 jobs:
-  sign:
+  # The environment kicad-pins holds the run for a required reviewer and allows deployments from main only. GitHub creates an environment named by
+  # a job if it does not exist, unprotected, so this job checks first that it exists with a reviewer and a main-only policy, and sign runs only after it.
+  protected:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - run: |
+          set -eu
+          e=$(gh api "repos/$GITHUB_REPOSITORY/environments/kicad-pins") || { echo "::error::no environment kicad-pins: nothing is signed"; exit 1; }
+          [ "$(printf '%s' "$e" | jq '[.protection_rules[] | select(.type == "required_reviewers") | .reviewers | length] | add // 0')" -gt 0 ] || { echo "::error::environment kicad-pins has no required reviewer"; exit 1; }
+          [ "$(printf '%s' "$e" | jq -r '.can_admins_bypass')" = false ] || { echo "::error::admins can bypass environment kicad-pins"; exit 1; }
+          [ "$(printf '%s' "$e" | jq -r '.deployment_branch_policy.custom_branch_policies')" = true ] || { echo "::error::environment kicad-pins is not limited to main"; exit 1; }
+          b=$(gh api "repos/$GITHUB_REPOSITORY/environments/kicad-pins/deployment-branch-policies" --jq '[.branch_policies[] | "\(.type):\(.name)"] | join(",")')
+          [ "$b" = "branch:main" ] || { echo "::error::environment kicad-pins deploys from $b, not only main"; exit 1; }
+  sign:
+    needs: protected
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: kicad-pins
     permissions:
       contents: write
     env:

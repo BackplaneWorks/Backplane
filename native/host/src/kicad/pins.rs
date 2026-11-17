@@ -406,4 +406,45 @@ mod tests {
         assert!(install::update_offer_os(Some(pin("darwin-arm64", &["global-tables-seeded"])), "stock", "10.0.8", &[], "macos").is_none());
         assert!(install::update_offer_os(Some(pin("darwin-arm64", &["embed-macos", "global-tables-seeded"])), "stock", "10.0.8", &[], "macos").is_some());
     }
+
+    /// min_hub and the expiry are required: a document or a pin without one is refused whole, never read as "any hub" or "never expires".
+    #[test] fn a_document_without_min_hub_or_an_expiry_is_refused() {
+        let mut e = entry("linux-x86_64", "10.99.0-bp.13"); e.as_object_mut().unwrap().remove("min_hub");
+        assert!(open(&seal(&body(4, 2_000_000_000, serde_json::json!({"linux-x86_64": e})), &pair(3), "k1"), &keys()).unwrap_err().contains("no min_hub"));
+        let mut e = entry("linux-x86_64", "10.99.0-bp.13"); e["min_hub"] = "".into();
+        assert!(open(&seal(&body(4, 2_000_000_000, serde_json::json!({"linux-x86_64": e})), &pair(3), "k1"), &keys()).is_err(), "an empty min_hub");
+        for no in [serde_json::json!(null), serde_json::json!(0), serde_json::json!("2000000000"), serde_json::json!(-1)] {
+            let mut b: Value = serde_json::from_slice(&body(4, 2_000_000_000, serde_json::json!({"linux-x86_64": entry("linux-x86_64", "10.99.0-bp.13")}))).unwrap();
+            if no.is_null() { b.as_object_mut().unwrap().remove("expires"); } else { b["expires"] = no.clone(); }
+            assert!(open(&seal(&serde_json::to_vec(&b).unwrap(), &pair(3), "k1"), &keys()).unwrap_err().contains("no expiry"), "expires {no}");
+        }
+    }
+    /// Domain separation, both ways, under one key: a signed release manifest is no pin document, and a signed pin document (its body, or the
+    /// envelope) is no release manifest to the updater (`update::run::find`, through `rel::verify` and `rel::parse`), whatever release carries it.
+    #[test] fn a_release_manifest_is_no_pin_document_and_a_pin_document_is_no_release_manifest() {
+        let kp = pair(3);
+        let manifest = br#"{"schema":1,"tag":"v0.16.2","version":"0.16.2","channel":"stable","commit":"c","assets":{"linux-x64":{"name":"backplane-v0.16.2-linux-x64-native.tar.gz","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size":9}}}"#;
+        assert!(rel::parse(manifest).is_ok(), "the manifest is a good one");
+        assert!(open(&seal(manifest, &kp, "k1"), &keys()).unwrap_err().contains("not a pin document"));
+        // the updater: a release v0.16.2 whose manifest.json is a pin document's signed body (or its whole envelope), signed with the trusted key
+        let pin_body = body(4, 2_000_000_000, serde_json::json!({"linux-x86_64": entry("linux-x86_64", "10.99.0-bp.13")}));
+        for (what, m) in [("the signed body", pin_body.clone()), ("the envelope", good(4))] {
+            let d = crate::plat::tmp::dir("pins-dom"); let sig = kp.sk.sign(&m, None);
+            let files: std::collections::HashMap<String, Vec<u8>> = [("manifest.json", m.clone()), ("manifest.json.sig", sig.as_ref().to_vec()), ("manifest.json.keyid", b"k1".to_vec())].into_iter().map(|(n, b)| (format!("mem://{n}"), b)).collect();
+            let get = |u: &str, out: &Path, _: u64| -> Result<(), String> { std::fs::write(out, files.get(u).ok_or("404")?).map_err(|e| e.to_string()) };
+            let listed = crate::update::run::listing(br#"[{"tag_name":"v0.16.2","prerelease":false,"draft":false,"assets":[{"name":"manifest.json","browser_download_url":"mem://manifest.json"},{"name":"manifest.json.sig","browser_download_url":"mem://manifest.json.sig"},{"name":"manifest.json.keyid","browser_download_url":"mem://manifest.json.keyid"}]}]"#).unwrap();
+            let r = crate::update::run::find(&crate::update::run::Ask { current: "0.16.0", channel: "nightly", target: "linux-x64", keys: &keys(), bad: &[] }, &listed, &d, &get);
+            assert!(r.as_ref().is_err_and(|e| e.contains("lists no assets") || e.contains("newer Backplane")), "{what}: {r:?}");
+        }
+    }
+    /// The release `kicad-pins` is no update to any channel: its tag is no updater's shape and it carries no signed manifest.
+    #[test] fn the_kicad_pins_release_is_never_an_update() {
+        let listed = crate::update::run::listing(br#"[{"tag_name":"kicad-pins","prerelease":true,"draft":false,"assets":[{"name":"kicad-pins.json","browser_download_url":"u"}]},
+                                                   {"tag_name":"v0.16.0","prerelease":false,"draft":false,"assets":[]}]"#).unwrap();
+        assert!(!rel::tag_ok("kicad-pins") && !listed[0].rel.signed);
+        let rels: Vec<rel::Rel> = listed.iter().map(|l| l.rel.clone()).collect();
+        for ch in ["stable", "beta", "nightly"] { assert!(!rel::wants(ch, &listed[0].rel), "{ch}"); assert_eq!(rel::offer("0.0.1", ch, &rels), None, "{ch}"); }
+        // even signed (if the three files were ever there) the tag alone keeps it out
+        assert!(!rel::wants("nightly", &rel::Rel { tag: "kicad-pins".into(), prerelease: true, draft: false, signed: true }));
+    }
 }

@@ -12,7 +12,7 @@ gh workflow run kicad-pins.yml -R BackplaneWorks/Backplane --ref main -f platfor
 
 `platform` is `linux-x86_64`, `darwin-arm64` or `windows-x86_64`. `min_hub` is the oldest Backplane that may take the pin. Raise it when the runtime needs something a hub only has from some version on. `days` (default 120) is how long the document stays valid.
 
-The workflow (`.github/workflows/kicad-pins.yml`) runs only from main. It:
+The workflow (`.github/workflows/kicad-pins.yml`) runs only from main. Its signing job runs in the GitHub environment `kicad-pins`, which waits for a required reviewer (i2cjak) to approve the run (Actions, the run, Review deployments), accepts deployments from main only, and does not let admins bypass it. A first job checks that the environment still exists with a reviewer and that main-only policy, and nothing is signed otherwise: GitHub would create a missing environment with no protection. After approval the workflow:
 
 1. downloads the published `kicad-pins.json` and verifies it with the release key in the tree;
 2. checks the runtime the way `scripts/kicad-pin.py` does. It downloads the asset and checks that its sha256 equals the release's `SHA256SUMS` line. It checks that the manifest names this platform and version, and that Windows and macOS have `global-tables-seeded` and a library pin, and the Mac its `minOs`. It records the manifest's capabilities and the Mac's `minOs`;
@@ -27,9 +27,9 @@ Per release, the KiCad lead:
 - before the document expires, runs it with `platform=none` to sign the same pins under a new sequence and expiry. The run summary shows the expiry date. A document that expires drops hubs back to their compiled pins. Nothing breaks, but nothing newer is offered;
 - bumps the compiled pins (`scripts/kicad-pin.py <tag>`) in a normal change, so a new install that is offline at first start still gets a recent runtime. This no longer blocks a Backplane release.
 
-## Rolling back
+## Revoking a bad pin (rolling back)
 
-Run the workflow again for the platform with the earlier version (a higher sequence that points at the old pin), or with an empty `version` to drop the platform, so hubs go back to their compiled pin:
+A bad pin is revoked with a higher sequence that points back. Run the workflow again for the platform with the earlier version (the next sequence, pointing at the old pin), or with an empty `version` to drop the platform, so hubs go back to their compiled pin:
 
 ```sh
 gh workflow run kicad-pins.yml -R BackplaneWorks/Backplane --ref main -f platform=linux-x86_64 -f version=10.99.0-bp.13   # back to bp.13
@@ -43,6 +43,7 @@ This stops the bad pin from being offered or installed. It does not uninstall a 
 `native/host/src/kicad/pins.rs` fetches `https://github.com/BackplaneWorks/Backplane/releases/download/kicad-pins/kicad-pins.json` at start, every 6 hours (15 minutes after a failed read), and when an editor attaches at Edit. It takes a pin only if all of these hold:
 
 - The envelope `{"schema":1,"keyid","sig","doc"}` verifies with `update::rel::verify`, the same code and the same key (`release.pub`, id `6c899f869be656d3`) that check a Backplane release's manifest. Only that key is trusted. A build with feature `e2e-trust` also trusts an E2E key, and only for pins below 0.1.0. release.yml refuses a binary built with that feature.
+- `min_hub` and `expires` are required: a pin without `min_hub`, or a document without an expiry, is refused whole.
 - The body has `"kind":"backplane-kicad-pins"`. A release manifest signed with the same key has no kind, and a pin document has no `assets`, so neither passes as the other.
 - The sequence is not below the last good document's. The same sequence is accepted only for the same document. The last good document is kept in `<home>/kicad-pins/pins.json` and verified again when it is read, so a replayed older document is also refused after a restart. An expired cached document still holds its sequence.
 - The document has not expired.
@@ -57,7 +58,7 @@ The update row's text goes by the pin's capabilities where the pin lists them. `
 
 ## Threat notes
 
-- **Who can publish.** Only someone who can run a workflow on main of BackplaneWorks/Backplane, and the workflow refuses any other ref. The key is the repo secret, used only on GitHub, and nothing is signed locally. The offline copy of the release key (`~/.backplane/keys/release-signing.key`) can also sign a document, as it can sign a release.
+- **Who can publish.** Only someone who can run a workflow on main of BackplaneWorks/Backplane, and only after a required reviewer approves the run in the environment `kicad-pins`. The workflow refuses any other ref. The reviewer is the account the person's machines and agents use (i2cjak), so an agent holding that account's token could approve a run it started: the approval stops a dispatch by a stray token or another collaborator, not the account itself. The key stays a repository secret (release.yml reads it there), so another workflow on main could still read it, as before. The key is the repo secret, used only on GitHub, and nothing is signed locally. The offline copy of the release key (`~/.backplane/keys/release-signing.key`) can also sign a document, as it can sign a release.
 - **A stolen or compromised GitHub account with write access** could run the workflow, but only with a version that has a published KiCad release whose asset matches its SHA256SUMS. It cannot point a hub at a file outside the Backplane_KiCad release. The same account could already publish a Backplane release, so the feed adds no new reach.
 - **Compromise of the Backplane_KiCad release** (a replaced asset and SHA256SUMS): the pin's sha256 is signed in the document, so a replaced asset fails its check, as it does with a compiled pin.
 - **A network attacker or a hostile mirror** cannot forge a document. A replayed older document is refused by sequence, and one older than the expiry by its expiry. Withholding the document (a freeze) only keeps the hub on its last good pin, or on the compiled one once that expires. The feed is a convenience: missing it costs only a newer offer.
