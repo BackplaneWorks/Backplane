@@ -2241,6 +2241,57 @@ def run(h):
             h.check("checks P5: Fix with agent sent the finding to the thread's agent", got5, {"id": erc_id, "fix_clicked": fixed})
             h.shot("p5_fix")
             return h.finish()
+        if only == "survive":
+            # the lead (Nov 16): the host's window going (quit, a client kill, View, closing the viewer), with the PCB shown, the schematic
+            # shown or during a tab switch: KiCad alive 20 s after, its unsaved edit still there, and re-attach paints
+            import subprocess as _sp
+            act, when = os.environ.get("BP_SURVIVE_ACTION", "quit"), os.environ.get("BP_SURVIVE_WHEN", "pcb")
+            top = int(rep.get("toplevel") or 0) or E.find_main_window(cp.pid)
+            pcb = checks_project(h)[:-len(".kicad_pro")] + ".kicad_pcb"
+            kpid = int(rep.get("pid") or 0) or next((p for n, p in kicad_procs() if n == "kicad.exe"), 0)
+            def tracks():
+                a = standin_ask(h, "kicad_edit", {"path": pcb, "ops": [{"find": {"kind": "track", "limit": 2000}}], "save": False}, f"sv-find-{time.time_ns()}")
+                m = re.search(r'"count"\s*:\s*(\d+)', a) or re.search(r'(\d+) (?:rows|tracks)', a)
+                return int(m.group(1)) if m else a.count('"kind":"track"') or None
+            t0n = tracks()
+            ed = standin_ask(h, "kicad_edit", {"path": pcb, "message": "survive: an unsaved edit", "save": False,
+                                               "ops": [{"add": [{"track": {"from": [100.0, 100.0], "to": [112.0, 100.0], "width": 0.25, "layer": "F.Cu"}}]}]}, "sv-add")
+            t1n = tracks()
+            h.check(f"survive {act}/{when}: an unsaved edit made in KiCad (a track added, not saved)", t1n is not None and t0n is not None and t1n == t0n + 1, {"before": t0n, "after": t1n, "answer": ed[-300:]})
+            if when == "sch":
+                h.click_control(top, "kicad-tab:SCH"); time.sleep(4.0)
+            elif when == "switch":
+                h.click_control(top, "kicad-tab:SCH"); time.sleep(0.15)
+            if act == "quit":
+                E.u32.PostMessageW(top, 0x0010, 0, 0)  # WM_CLOSE: the window's close, as a person's X
+            elif act == "kill":
+                _sp.run(["taskkill", "/F", "/PID", str(cp.pid)], capture_output=True)  # the client alone, never its tree
+            elif act == "view":
+                h.click_control(top, "ui:View")
+            elif act == "close":
+                h.click_control(top, "rail:Board")  # the active rail page pressed again closes the viewer
+            time.sleep(20.0)
+            alive = any(p == kpid for n, p in kicad_procs())
+            h.check(f"survive {act}/{when}: KiCad is alive 20 s after", alive, {"kicad_pid": kpid, "kicad_now": kicad_procs()})
+            # re-attach: the same client's Edit, or a new client when this one went
+            client_gone = act in ("quit", "kill")
+            if client_gone:
+                cp = h.start_client([{"select": 0}, {"wait": 2800}, {"click": "rail:Board"}, {"wait": 3000}, {"mark": "re_edit"}, {"click": "ui:Edit"}, {"wait": 60000}],
+                                    log_name="client2.log", hold=True, exit_after=240)
+                time.sleep(4.0)
+                top = E.find_main_window(cp.pid)
+                t0 = time.monotonic()
+            else:
+                if act == "close":
+                    h.click_control(top, "rail:Board"); time.sleep(2.5)
+                t0 = time.monotonic()
+                h.click_control(top, "ui:Edit")
+            ms_ = wait_painted(top, t0, 30.0)
+            h.check(f"survive {act}/{when}: re-attach paints the editor within 30 s", ms_ is not None and ms_ <= 30000, {"ms": ms_})
+            t2n = tracks()
+            h.check(f"survive {act}/{when}: the unsaved edit is still there (same KiCad, its track count kept)", alive and t2n == t1n, {"after_edit": t1n, "after_reattach": t2n,
+                    "same_kicad": any(p == kpid for n, p in kicad_procs())})
+            return h.finish()
         if only in ("lock1", "lock2"):
             top = int(rep.get("toplevel") or 0) or E.find_main_window(cp.pid)
             watch = BoxWatch().start()
