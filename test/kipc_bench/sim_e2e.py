@@ -171,25 +171,88 @@ def task_loop(t):
     e = t.err([{"loopgain": "E9.1"}]); t.ok("a cut at a part that is not there", "E9" in e, e)
     r = t.sim([{"run": ".ac dec 20 1 1meg", "options": {"save_all_currents": False}, "directives": [".options reltol=0.002"], "measures": {"cl": "dc_gain V(fb)", "bw": "corner V(fb)"}}]); ms = r["results"][0]["run"]["measures"]
     t.near("closed loop with netlist options and directives: gain 100/101, dB", ms["cl"], 20 * math.log10(100 / 101), tol=0.01)
-TASKS = {"rc": task_rc, "div": task_div, "rlc": task_rlc, "fail": task_fail, "loop": task_loop}
+# Three projects at once and room for two headless KiCads: one runs a long transient (tens of seconds of ngspice, few points kept),
+# the other two keep asking for operating points. The long run ends with its numbers and no call of the others fails: a server at
+# work is never stopped to make room, so one of the two is served beside the run and the other waits for room.
+SLOW_S = 40
+def task_slow(t):
+    t0 = time.time(); r = t.sim([{"run": f".tran 0.1 {SLOW_S} 0 1u", "directives": [".options interp"], "signals": ["out"], "measures": {"end": "final V(out)"}, "retry": False, "timeout": 300}]); run = r["results"][0]["run"]
+    t.ok("the long transient ends with its numbers while two other projects are served", "failed" not in run and abs(run["measures"]["end"] - 5) < 0.01, run)
+    t.ok("it was long enough to be in the others' way (10 s or more)", time.time() - t0 >= 10, round(time.time() - t0, 1))
+def task_busy(t):
+    t0 = time.time(); worst, n, bad = 0.0, 0, []
+    while time.time() - t0 < SLOW_S + 5:
+        c0 = time.time(); e = t.err([{"run": ".op", "signals": ["out"]}]); worst = max(worst, time.time() - c0); n += 1
+        if e or abs(t.last["results"][0]["run"]["values"]["V(/out)"] - 2.5) > 1e-6: bad.append(e or t.last)
+        time.sleep(0.5)
+    # (room for two: the third project's first call waits until one of the others has been idle a while, here until the long run ends)
+    t.ok(f"every one of {n} operating points beside the long run was answered", not bad and n >= 1, bad[:3])
+    t.ok("none waited past the long run and the room wait", worst < SLOW_S + 45, round(worst, 1)); print(f"note {n} calls, the longest {worst:.1f} s")
+# A transient of two million points: KiCad thins what the hub reads to 200,000 a vector, the answer says so, the number is still right,
+# and the hub's memory high-water mark moves by less than BIG_MB (docs/kicad-sim.md "Memory"); with tstart only the window is kept at all.
+BIG_MB = 150
+def hub_peak_mb(t):
+    pid = json.load(open(os.path.dirname(os.path.dirname(os.path.dirname(t.sch))) + "/hub.json"))["pid"]
+    return int(next(l for l in open(f"/proc/{pid}/status") if l.startswith("VmHWM")).split()[1]) / 1024
+def task_big(t):
+    t.sim([{"run": ".op"}]); before = hub_peak_mb(t)
+    r = t.sim([{"run": ".tran 1u 2 0 1u", "signals": ["out", "in"], "measures": {"end": "final V(out)", "top": "max V(out)"}, "timeout": 300}]); run = r["results"][0]["run"]; grew = hub_peak_mb(t) - before
+    t.ok("two million points: the answer has its numbers", "failed" not in run and abs(run["measures"]["end"] - 5) < 0.01 and run["points"] >= 2_000_000, {k: run.get(k) for k in ("failed", "problems", "measures", "points", "ms")})
+    t.ok("it says the vectors were thinned, and how", "of 2000" in run.get("thinned", "") and "tstart" in run.get("thinned", ""), run.get("thinned"))
+    t.ok(f"the hub's memory peak grew by less than {BIG_MB} MB", grew < BIG_MB, round(grew, 1)); print(f"note hub peak grew {grew:.1f} MB for 2,000,000 points thinned to 200,000")
+    r = t.sim([{"run": ".tran 1u 2 0 1u", "tstart": "1.99", "signals": ["out"], "measures": {"end": "final V(out)"}, "timeout": 300}]); run = r["results"][0]["run"]
+    t.ok("with tstart only the window is kept: 10,000 points, none thinned", "failed" not in run and 9_000 <= run["points"] <= 11_000 and "thinned" not in run and abs(run["measures"]["end"] - 5) < 0.01, {k: run.get(k) for k in ("failed", "problems", "points", "thinned")})
+    e = t.err([{"run": ".tran 1n 100 0 1n"}]); t.ok("a line that says a hundred billion points is refused before ngspice", "points or more" in e, e)
+# A turn interrupted while its run is out: the hub drops the call and stops the run in KiCad. The first turn starts a transient of
+# minutes; the runner interrupts it; a second turn in the same project finds the simulator free (a run still going would refuse it).
+def task_stop(t):
+    mark = os.path.dirname(t.sch) + "/first-turn"
+    if not os.path.exists(mark):
+        open(mark, "w").write("x"); t.sim([{"run": ".tran 0.1 400 0 1u", "directives": [".options interp"], "signals": ["out"], "retry": False, "timeout": 600}])
+        t.ok("the first turn was interrupted before its run ended", False, "the run of minutes came back"); return
+    t0 = time.time(); e = t.err([{"run": ".op", "signals": ["out"]}])
+    t.ok("after the interrupt the simulator is free: an operating point is answered at once", not e and abs(t.last["results"][0]["run"]["values"]["V(/out)"] - 5) < 1e-6 and time.time() - t0 < 10, e or t.last)
+SLOW = [("V1", "dc 5", ["in", "GND"], None, None), ("R1", "1k", ["in", "out"], None, None), ("C1", "1u", ["out", "GND"], None, None)]
+FIXTURES.update({"slow": SLOW, "busya": DIV, "busyb": DIV, "big": SLOW, "stop": SLOW})
+CROWD = ["slow", "busya", "busyb"]
+TASKS = {"rc": task_rc, "div": task_div, "rlc": task_rlc, "fail": task_fail, "loop": task_loop, "slow": task_slow, "busya": task_busy, "busyb": task_busy, "big": task_big, "stop": task_stop}
 
 def run(work, only):
     fix = f"{work}/simfix"; shutil.rmtree(fix, ignore_errors=True); bad = 0
     for name, parts in FIXTURES.items(): write_project(f"{fix}/{name}", name, parts)
     log = f"{json.load(open(work + '/hub.json'))['home']}/logs/sim.jsonl"
-    for name in only or list(TASKS):
+    # (the crowd's three turns run at once, the busy ones started a moment after the long one; everything else one after another)
+    names = only or [n for n in TASKS if n not in CROWD] + ["crowd"]; turns = {}
+    def start(name):
         d = f"{work}/runs/e2e-{name}"; shutil.rmtree(d, ignore_errors=True); shutil.copytree(f"{fix}/{name}", d)
+        return subprocess.Popen(["bun", HERE + "/turn.mjs", work, d, f"ORACLE {os.path.abspath(__file__)}"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env={**os.environ, "TURN_MS": "600000"})
+    for name in [x for n in names for x in (CROWD if n == "crowd" else [n])]:
         before = len(open(log).read().splitlines()) if os.path.exists(log) else 0
-        r = subprocess.run(["bun", HERE + "/turn.mjs", work, d, f"ORACLE {os.path.abspath(__file__)}"], capture_output=True, text=True, env={**os.environ, "TURN_MS": "600000"})
+        if name == "stop":  # the first turn is left running, interrupted after 10 s, and the second turn is the one judged
+            d = f"{work}/runs/e2e-stop"; shutil.rmtree(d, ignore_errors=True); shutil.copytree(f"{fix}/stop", d)
+            first = json.loads(subprocess.run(["bun", HERE + "/turn.mjs", work, d, f"ORACLE {os.path.abspath(__file__)}", "nowait"], capture_output=True, text=True).stdout.strip().splitlines()[-1])
+            time.sleep(10); cut = subprocess.run(["bun", HERE + "/interrupt.mjs", work, first["thread"]], capture_output=True, text=True).stdout.strip()
+            time.sleep(4); print(f"stop: the first turn after the interrupt: {cut}", flush=True)
+            if os.path.exists(f"{work}/out/e2e-stop.oracle.log"): os.remove(f"{work}/out/e2e-stop.oracle.log")
+            out0 = subprocess.run(["bun", HERE + "/turn.mjs", work, d, f"ORACLE {os.path.abspath(__file__)}"], capture_output=True, text=True, env={**os.environ, "TURN_MS": "600000"}).stdout
+        elif name in CROWD:
+            if not turns:
+                for c in CROWD: turns[c] = start(c); time.sleep(3)
+            out0 = turns[name].communicate()[0]
+        else: out0 = start(name).communicate()[0]
+        r = type("R", (), {"stdout": out0, "stderr": ""})
         out = open(f"{work}/out/e2e-{name}.oracle.log").read() if os.path.exists(f"{work}/out/e2e-{name}.oracle.log") else r.stdout + r.stderr
         fails = [l for l in out.splitlines() if l.startswith("FAIL")]; done = [l for l in out.splitlines() if l.startswith("done ")]
         lines = []
         for _ in range(60):  # the turn's own line follows its end by a moment (the hub waits for the provider's usage)
-            lines = [json.loads(l) for l in open(log).read().splitlines()[before:]] if os.path.exists(log) else []
+            lines = []
+            for l in (open(log).read().splitlines()[before:] if os.path.exists(log) else []):
+                try: lines.append(json.loads(l))
+                except ValueError: pass  # (a line another turn is writing right now)
             if any(l.get("kind") == "turn" for l in lines): break
             time.sleep(0.1)
         acts, turn = [l for l in lines if l.get("kind") != "turn"], [l for l in lines if l.get("kind") == "turn"]
-        logged = bool(acts) and all(k in acts[0] for k in ("at", "thread", "turn", "op", "hub_ms", "bytes")) and any("timings" in a and "ngspice_ms" in a for a in acts) and len(turn) == 1
+        logged = bool(acts) and all(k in acts[0] for k in ("at", "thread", "turn", "op", "hub_ms", "bytes")) and any("timings" in a and "ngspice_ms" in a for a in acts) and len(turn) == 1 or name in CROWD or name == "stop"  # (the crowd's lines interleave: not counted per task)
         ok = not fails and bool(done) and logged; bad += 0 if ok else 1
         print(f"{name}: {'PASS' if ok else 'FAIL'} {done[-1] if done else '(the task did not finish)'}; log: {len(acts)} actions, {sum(a.get('runs', 0) for a in acts)} runs, turn line {'yes' if turn else 'NO'}", flush=True)
         for l in fails: print("   ", l[:400], flush=True)

@@ -31,8 +31,8 @@ pub const OPS: &[(&str, bool, &str, &str)] = &[
     ("source", true, "{source: {type: dc|sin|pulse|pwl|exp|am|sffm, current?, ref?, pos, neg?, value?, params?, ac?, at?, bom?}}", "add a source symbol (Simulation_SPICE) between two nets, out of the BOM and off the board (bom: true keeps it in); neg defaults to GND"),
     ("probe", true, "{probe: signals | {pin: \"R1.2\", name}}", "name what to read: signals join the saved analysis' traces and this call's runs; a pin gets a net label first"),
     ("analysis", true, "{analysis: \".ac dec 20 1 1meg\", signals?, tab?} | {analysis: true}", "save the analysis with the design (what the person's Simulator opens with); true reads what is saved"),
-    ("run", false, "{run: \".tran 1u 10m\" | true, set?: {R1: \"2k\", \"V1.dc\": 3.3}, signals?, measures?, waves?, directives?, options?, retry?, netlist?, log?, timeout?, show?}",
-        "run an analysis (true: the saved one) and answer operating-point values, measures and a line per signal; `set` values are for this run only; `waves: true` (or a point count) adds each signal as a few points; `directives` are netlist lines for this run (.options, .ic, .include, .model), `options` KiCad's netlist options ({save_all_currents: false}); a transient that does not converge is tried again with gear, a looser reltol and a smaller step (`needed` says which; `retry: false` leaves it)"),
+    ("run", false, "{run: \".tran 1u 10m\" | true, set?: {R1: \"2k\", \"V1.dc\": 3.3}, signals?, measures?, waves?, directives?, options?, tstart?, max_points?, retry?, netlist?, log?, timeout?, show?}",
+        "run an analysis (true: the saved one) and answer operating-point values, measures and a line per signal; `set` values are for this run only; `waves: true` (or a point count) adds each signal as a few points; `directives` are netlist lines for this run (.options, .ic, .include, .model), `options` KiCad's netlist options ({save_all_currents: false}); a transient that does not converge is tried again with gear, looser tolerances, then a smaller step (`needed` says which; `retry: false` leaves it); a long transient: `tstart: \"8m\"` keeps only the data from then on (measure the end of a run this way), `timeout` is its limit in seconds (120; the run is stopped there and the answer says how far it was), 200000 points of each signal are read (`thinned` says so; `max_points` for more)"),
     ("loopgain", false, "{loopgain: \"U1.2\", run?: \".ac dec 50 1 100meg\", set?, directives?, waves?}", "a feedback loop's gain, broken at a pin (reference.pin number) in the netlist only: crossover frequency, phase margin, gain margin and DC loop gain (Tian's method: voltage and current injection combined, the operating point kept); `waves` adds the curve"),
     ("sweep", false, "{sweep: \"R1\" | \"V1.dc\" | {param: name}, values | from, to, steps?, log? | series, run, measures, set?}", "one run per value, the measures as a table; nothing is written"),
     ("tune", false, "{tune: \"R1\", measure, target, from, to, series?, tol?, max_runs?, run, set?, write?}", "the value that brings a measure to its target (a search over runs), from an E series when named; `write: true` puts it on the schematic"),
@@ -53,11 +53,27 @@ pub fn measure_names() -> String { kw::MEASURES.iter().map(|m| m.0).collect::<Ve
 #[derive(Clone, Debug, Default)]
 pub struct Ctx { pub project_dir: PathBuf, pub libs: Vec<(PathBuf, &'static str)>, pub now: u64, pub log: Option<PathBuf>,
     /// The person's KiCad has the project: a `run` is shown in its Simulator unless the op says `show: false` (a sweep's and a tune's runs never are).
-    pub gui: bool }
+    pub gui: bool,
+    /// Stops a run this call started and can no longer wait for (the turn was interrupted and the call dropped): StopSimulation's message.
+    pub stop: Option<Stop> }
+#[derive(Clone)] pub struct Stop(pub std::sync::Arc<dyn Fn(Value) + Send + Sync>);
+impl std::fmt::Debug for Stop { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str("Stop") } }
+/// A run that is out: dropped before its end (its call was), KiCad is told to stop it.
+struct Running { stop: Option<Stop>, msg: Option<Value> }
+impl Drop for Running { fn drop(&mut self) { if let (Some(f), Some(m)) = (&self.stop, self.msg.take()) { (f.0)(m) } } }
 
 const BUSY: &str = "a simulation of this project is running (the person's, or another agent's): this one was not started. Ask again when it ends";
 /// How long one request waits for a run before asking again (the API serves one request at a time), and what a run gets when none is given.
-const WAIT_MS: u64 = 5000;
+/// How long one request waits for a run (the project's other requests wait behind it on the same connection, so not long).
+const WAIT_MS: u64 = 1000;
+/// Points kept of each vector when the op names no `max_points` (KiCad thins the rest: every Nth point), and the most an op may ask for.
+/// The hub holds a reply's vectors once, 32 bytes a point: 200,000 points of a time axis and four signals are 32 MB.
+pub const POINTS: u64 = 200_000;
+pub const POINTS_MAX: u64 = 2_000_000;
+/// A transient whose own line says it computes more points than this is refused before ngspice: KiCad would hold them all.
+const TRAN_POINTS_MAX: f64 = 2e7;
+/// An attempt that took this long before it failed ends the retries: each further one would take as long.
+const SLOW_MS: f64 = 20_000.0;
 const TIMEOUT_MS: u64 = 120_000;
 const DIGITS: usize = 6;
 
@@ -197,11 +213,50 @@ pub fn problem_lines(resp: &Value) -> Vec<String> {
 /// A failed run's lines: its problems, and what was tried for it.
 fn failure_lines(resp: &Value) -> Vec<String> {
     let mut l = problem_lines(resp);
+    if matches!(s(resp, "status"), "SIM_TIMEOUT" | "SIM_ABORTED") {
+        let far = resp["progress"].as_f64().map(|p| format!(" at {}% of the run", (p * 100.0).round())).unwrap_or_default();
+        l.push(format!("stopped after {} s{far}: give it longer (timeout, in seconds, up to 3600), or make it shorter: start its data later (tstart), a longer maximum step", kw::round_sig(took_ms(resp) / 1000.0, 2)));
+    }
     if let Some(t) = resp["tried"].as_array().filter(|t| !t.is_empty()) { l.push(format!("tried without success: {}", t.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("; then "))) }
     l
 }
 /// What a transient that did not converge is tried again with, in order (label, the options line); the last also shortens the step.
-pub const RETRY: &[(&str, &str)] = &[("gear integration", ".options method=gear"), ("gear with reltol 0.01", ".options method=gear reltol=0.01"), ("gear, reltol 0.01, looser tolerances and a maximum step of the print step", ".options method=gear reltol=0.01 abstol=1e-9 vntol=1e-4")];
+pub const LOOSE: &str = "itl4=500 gmin=1e-9 abstol=1e-8 vntol=1e-5 rshunt=1e9";
+/// (label, the options line, whether the step is shortened too.) Each is tried on its own, the cheap ones first; the one with the
+/// shorter step, which makes the run longer, last. The second is what a vendor's switching-regulator model converged with.
+pub const RETRY: &[(&str, &str, bool)] = &[("gear integration", ".options method=gear", false),
+    ("looser tolerances", ".options itl4=500 gmin=1e-9 abstol=1e-8 vntol=1e-5 rshunt=1e9 reltol=3e-3", false),
+    ("gear integration with looser tolerances", ".options method=gear itl4=500 gmin=1e-9 abstol=1e-8 vntol=1e-5 rshunt=1e9 reltol=0.01", false),
+    ("looser tolerances and a maximum step of the print step", ".options itl4=500 gmin=1e-9 abstol=1e-8 vntol=1e-5 rshunt=1e9 reltol=3e-3", true)];
+/// Whether the run's own directives already set every option of this line (trying it again would be the same run).
+fn has_options(directives: &Value, options: &str) -> bool {
+    let have: Vec<String> = directives.as_array().into_iter().flatten().filter_map(Value::as_str).filter(|l| l.trim_start().to_ascii_lowercase().starts_with(".option")).flat_map(|l| l.split_whitespace().skip(1).map(|w| w.to_ascii_lowercase()).collect::<Vec<_>>()).collect();
+    options.split_whitespace().skip(1).all(|w| have.iter().any(|h| h == &w.to_ascii_lowercase()))
+}
+/// One attempt in words: what it was, how it ended and how long it took.
+fn attempt(label: &str, r: &Value) -> String {
+    let why = problem_lines(r).into_iter().next().map(|p| p.split(": ").next().unwrap_or("").to_string()).filter(|p| !p.is_empty()).unwrap_or_else(|| kp::status_words(s(r, "status")).to_string());
+    format!("{label}: {why} after {} s", kw::round_sig(took_ms(r) / 1000.0, 2))
+}
+fn took_ms(r: &Value) -> f64 { r["timings"]["total_ms"].as_f64().unwrap_or(0.0).max(r["hub_ms"].as_f64().unwrap_or(0.0)) }
+/// A `.tran` line that keeps only what comes after `tstart` (`.tran 1u 10m` with "8m" -> `.tran 1u 10m 8m`): ngspice stores no earlier point.
+pub fn tran_from(command: &str, tstart: &str) -> Result<String, String> {
+    let mut lines = command.lines(); let first = lines.next().unwrap_or(""); let w: Vec<&str> = first.split_whitespace().collect();
+    if w.len() < 3 || !w[0].eq_ignore_ascii_case(".tran") { return Err("tstart is for a transient: run: \".tran <step> <stop>\" with tstart the time its data starts".into()) }
+    let (t, stop) = (kp::parse_value(tstart).ok_or(format!("tstart `{tstart}` is not a time (\"8m\")"))?, kp::parse_value(w[2]).unwrap_or(f64::INFINITY));
+    if t < 0.0 || t >= stop { return Err(format!("tstart {tstart} is not inside the run (0 to {})", w[2])) }
+    let mut out: Vec<String> = w.iter().map(|x| x.to_string()).collect();
+    if w.len() > 3 && !w[3].eq_ignore_ascii_case("uic") { out[3] = tstart.to_string() } else { out.insert(3, tstart.to_string()) }
+    let mut out = out.join(" "); for l in lines { out.push('\n'); out.push_str(l) }
+    Ok(out)
+}
+/// The points a `.tran` line itself says it computes at least: (stop - start) / maximum step, when it gives one.
+fn tran_points(command: &str) -> Option<f64> {
+    let w: Vec<&str> = command.lines().next()?.split_whitespace().filter(|x| !x.eq_ignore_ascii_case("uic")).collect();
+    if w.len() < 5 || !w[0].eq_ignore_ascii_case(".tran") { return None }
+    let (stop, start, max) = (kp::parse_value(w[2])?, kp::parse_value(w[3])?, kp::parse_value(w[4])?);
+    (max > 0.0).then(|| (stop - start) / max)
+}
 /// A `.tran` line with its maximum step no longer than its print step (`.tran 1u 10m` -> `.tran 1u 10m 0 1u`); other lines as they are.
 pub fn smaller_step(command: &str) -> String {
     let mut lines = command.lines(); let first = lines.next().unwrap_or(""); let w: Vec<&str> = first.split_whitespace().collect();
@@ -238,6 +293,8 @@ struct Sim<'a> { c: &'a dyn Call, path: &'a str, ctx: &'a Ctx, doc: Value,
     probes: Vec<String>, log: Vec<Value>, runs: Vec<Value>, lookups: Vec<Value>,
     /// The pins the next runs take off their nets (a loop gain's cut), and what a run that did not converge was tried again with.
     breaks: Vec<Value>, retries: Vec<String>,
+    /// What this op's first run needed to converge (its place in RETRY): its later runs (a sweep's, a tune's) start with it.
+    rung: Option<usize>,
     /// The model files of the project and the libraries, read once a call.
     scanned: Option<Vec<(String, &'static str, Vec<kp::ModelDef>)>> }
 
@@ -253,12 +310,14 @@ impl Sim<'_> {
         Ok(r)
     }
     /// The model files on this machine: the project's own, then the libraries'.
-    fn scanned(&mut self) -> &Vec<(String, &'static str, Vec<kp::ModelDef>)> {
+    /// (Read off the runtime's threads: hundreds of files, megabytes each.)
+    async fn scanned(&mut self) -> &Vec<(String, &'static str, Vec<kp::ModelDef>)> {
         if self.scanned.is_none() {
-            let mut all = vec![];
-            for (p, defs) in kp::scan(&self.ctx.project_dir, 3) { all.push((p.strip_prefix(&self.ctx.project_dir).unwrap_or(&p).to_string_lossy().into_owned(), "project", defs)) }
-            for (dir, what) in &self.ctx.libs { for (p, defs) in kp::scan(dir, 2) { all.push((p.to_string_lossy().into_owned(), *what, defs)) } }
-            self.scanned = Some(all);
+            let (project, libs) = (self.ctx.project_dir.clone(), self.ctx.libs.clone());
+            self.scanned = Some(tokio::task::spawn_blocking(move || { let mut all = vec![];
+                for (p, defs) in kp::scan(&project, 3) { all.push((p.strip_prefix(&project).unwrap_or(&p).to_string_lossy().into_owned(), "project", defs)) }
+                for (dir, what) in &libs { for (p, defs) in kp::scan(dir, 2) { all.push((p.to_string_lossy().into_owned(), *what, defs)) } }
+                all }).await.unwrap_or_default());
         }
         self.scanned.as_ref().unwrap()
     }
@@ -332,40 +391,65 @@ impl Sim<'_> {
             out["check"] = json!("symbol pin N went to the model's node N: read the nodes' meaning in the model file's comments and give pins: {pin number: node} if the symbol's numbering differs") }
         Ok(out)
     }
-    /// One run to its end: RunSimulation, then GetSimulationResult while ngspice works. Ok is the response, whatever its status.
+    /// One run to its end, and a transient that did not converge tried again (RETRY). Ok is the response, whatever its status.
+    /// No attempt is repeated: one that converged is the answer however long it took; one that took long before it failed ends
+    /// the retries (each further one would take as long); a sweep's or a tune's later runs start with what the first needed.
     async fn exec(&mut self, command: &str, directives: &Value, overrides: Vec<Value>, signals: &[String], raw: &[String], op: &Value) -> Result<Value, String> {
+        let command = match op["tstart"].as_str().map(String::from).or(op["tstart"].as_f64().map(kp::plain)) { Some(t) => tran_from(command, &t)?, None => command.to_string() }; let command = command.as_str();
+        // (with `.options interp` ngspice keeps the print step's points, not the computed ones)
+        let interp = directives.as_array().into_iter().flatten().filter_map(Value::as_str).any(|l| l.to_ascii_lowercase().contains("interp"));
+        if let Some(n) = tran_points(command).filter(|n| *n > TRAN_POINTS_MAX && !interp) { return Err(format!("this transient computes {} points or more ((stop - start) / maximum step): KiCad would hold them all. Shorten the run, start its data later (tstart), or lengthen the maximum step", kw::round_sig(n, 2))) }
+        let with = |n: usize| { let (_, options, shorter) = RETRY[n]; let mut dir = directives.as_array().cloned().unwrap_or_default(); dir.push(json!(options)); (json!(dir), if shorter { smaller_step(command) } else { command.to_string() }) };
+        if let Some(n) = self.rung { let (dir, cmd) = with(n); return self.once(&cmd, &dir, overrides, signals, raw, op).await }
         let mut r = self.once(command, directives, overrides.clone(), signals, raw, op).await?;
-        // a transient that did not converge is tried again, each step adding to the last, and the answer says what it took
         if s(&r, "status") == "SIM_NO_CONVERGENCE" && command.trim_start().to_ascii_lowercase().starts_with(".tran") && op["retry"] != false {
-            let mut tried = vec![];
-            for (n, (label, options)) in RETRY.iter().enumerate() {
-                let mut dir = directives.as_array().cloned().unwrap_or_default(); dir.push(json!(options));
-                let cmd = if n == RETRY.len() - 1 { smaller_step(command) } else { command.to_string() };
-                tried.push(label.to_string()); self.retries.push(label.to_string());
-                let again = self.once(&cmd, &json!(dir), overrides.clone(), signals, raw, op).await?;
-                if s(&again, "status") == "SIM_OK" { r = again; r["needed"] = json!(format!("{label}: it did not converge without ({options}{})", if cmd != command { format!(", {cmd}") } else { String::new() })); break }
-                if n == RETRY.len() - 1 { r = again }
+            let mut tried = vec![attempt("as given", &r)];
+            for (n, (label, options, _)) in RETRY.iter().enumerate() {
+                if took_ms(&r) > SLOW_MS { tried.push(format!("no further attempt: that one took {} s, and each of the {} left would take as long. Start the data later (tstart) or shorten the run, give edges a rise time, or pass your own .options with retry: false", kw::round_sig(took_ms(&r) / 1000.0, 2), RETRY.len() - n)); break }
+                if has_options(directives, options) { continue }
+                let (dir, cmd) = with(n); self.retries.push(label.to_string());
+                r = self.once(&cmd, &dir, overrides.clone(), signals, raw, op).await?;
+                if s(&r, "status") == "SIM_OK" { self.rung = Some(n); r["needed"] = json!(format!("{label}: it did not converge without ({options}{})", if cmd != command { format!(", {cmd}") } else { String::new() })); break }
+                tried.push(attempt(label, &r));
+                if s(&r, "status") != "SIM_NO_CONVERGENCE" { break } // a time limit, a stop: not a matter of options
             }
             if s(&r, "status") != "SIM_OK" { r["tried"] = json!(tried) }
         }
         Ok(r)
     }
+    /// RunSimulation, then GetSimulationResult while ngspice works, a second at a time (nothing of the hub's waits with it but this
+    /// call). Past its time the run is stopped (KiCad stops it itself at `timeout`; 15 s later the hub asks; 45 s later it gives up
+    /// and says how far the run was). A call dropped while its run is out stops the run (Running).
     async fn once(&mut self, command: &str, directives: &Value, overrides: Vec<Value>, signals: &[String], raw: &[String], op: &Value) -> Result<Value, String> {
         let timeout = op["timeout"].as_f64().map_or(TIMEOUT_MS, |t| (t * 1000.0) as u64).clamp(1000, 3_600_000);
         let mut msg = json!({"document": self.doc, "command": command, "directives": directives.as_array().cloned().unwrap_or_default(), "overrides": overrides, "signals": signals, "measures": raw,
-            "include_netlist": op["netlist"] == true, "show": verb(op) == "run" && op["show"].as_bool().unwrap_or(self.ctx.gui), "timeout_ms": timeout, "wait_ms": WAIT_MS, "max_points": op["max_points"].as_u64().unwrap_or(0)});
-        if op["options"].is_object() { msg["options"] = op["options"].clone() }
+            "include_netlist": op["netlist"] == true, "show": verb(op) == "run" && op["show"].as_bool().unwrap_or(self.ctx.gui), "timeout_ms": timeout, "wait_ms": WAIT_MS, "max_points": op["max_points"].as_u64().unwrap_or(POINTS).clamp(2, POINTS_MAX)});
+        // a transient keeps every device's current and power at every point unless told not to: kept only when a current or a power is read
+        let reads_currents = signals.iter().chain(raw).any(|x| { let k = key(x); k.contains("i(") || k.contains("p(") || k.contains("#branch") || k.contains('@') });
+        let mut options = op["options"].as_object().cloned().unwrap_or_default();
+        if command.trim_start().to_ascii_lowercase().starts_with(".tran") && !reads_currents { for k in ["save_all_currents", "save_all_dissipations"] { options.entry(k).or_insert(json!(false)); } }
+        if !options.is_empty() { msg["options"] = Value::Object(options) }
         if !self.breaks.is_empty() { msg["breaks"] = json!(self.breaks); msg["show"] = json!(false) }
-        let started = std::time::Instant::now();
+        let started = std::time::Instant::now(); let ms = |t: std::time::Instant| t.elapsed().as_millis() as u64;
         let mut r = match self.call("RunSimulation", msg).await { Err(e) if e.contains("AS_BUSY") => return Err(BUSY.into()), r => r? };
+        let mut out = Running { stop: self.ctx.stop.clone(), msg: None }; let (mut progress, mut asked) = (0.0, false);
         while s(&r, "status") == "SIM_RUNNING" {
-            let id = r["run_id"].clone();
-            if started.elapsed().as_millis() as u64 > timeout + 15_000 { let _ = self.call("StopSimulation", json!({"document": self.doc, "run_id": id})).await; }
-            if started.elapsed().as_millis() as u64 > timeout + 30_000 { return Err("the run did not stop when asked: KiCad's simulator is still busy with it".into()) }
-            r = self.call("GetSimulationResult", json!({"document": self.doc, "run_id": id, "wait_ms": WAIT_MS})).await?;
+            let id = r["run_id"].clone(); if let Some(p) = r["progress"].as_f64().filter(|p| *p > 0.0) { progress = p }
+            let stop = json!({"document": self.doc, "run_id": id}); out.msg = Some(stop.clone());
+            let far = || if progress > 0.0 { format!(", {}% through", (progress * 100.0).round()) } else { String::new() };
+            if ms(started) > timeout + 45_000 { out.msg = None; return Err(format!("the run did not stop when asked ({} s{}): KiCad's simulator is still busy with it", ms(started) / 1000, far())) }
+            if ms(started) > timeout + 15_000 && !asked { asked = true; let _ = tokio::time::timeout(std::time::Duration::from_secs(20), self.call("StopSimulation", stop)).await; }
+            // (a request that gets no answer at all is not waited for past the run's own time: the next one asks again)
+            r = match tokio::time::timeout(std::time::Duration::from_secs(35), self.call("GetSimulationResult", json!({"document": self.doc, "run_id": id, "wait_ms": WAIT_MS}))).await {
+                Ok(Ok(r)) => r,
+                Ok(Err(e)) => { out.msg = None; return Err(format!("{e} (the run was {} s in{})", ms(started) / 1000, far())) }
+                Err(_) => json!({"status": "SIM_RUNNING", "run_id": id}),
+            };
         }
-        let t = &r["timings"];
-        self.runs.push(json!({"status": s(&r, "status"), "analysis": s(&r, "analysis"), "netlist_ms": t["netlist_ms"], "load_ms": t["load_ms"], "run_ms": t["run_ms"], "total_ms": t["total_ms"], "points": r["points"], "hub_ms": started.elapsed().as_millis() as u64}));
+        out.msg = None;
+        if matches!(s(&r, "status"), "SIM_TIMEOUT" | "SIM_ABORTED") && progress > 0.0 { r["progress"] = json!(progress) }
+        r["hub_ms"] = json!(ms(started)); let t = &r["timings"];
+        self.runs.push(json!({"status": s(&r, "status"), "analysis": s(&r, "analysis"), "netlist_ms": t["netlist_ms"], "load_ms": t["load_ms"], "run_ms": t["run_ms"], "total_ms": t["total_ms"], "points": r["points"], "hub_ms": ms(started)}));
         Ok(r)
     }
     /// The parts of a run every op shares: its command (`true`: the saved one), directives, fixed overrides, measures and the signals those read.
@@ -397,7 +481,7 @@ impl Sim<'_> {
                         if !mpn.is_empty() { row["mpn"] = json!(mpn); if !maker.is_empty() { row["maker"] = json!(maker) } }
                         let entry = s(m, "lib_id").rsplit(':').next().unwrap_or(""); let wanted = m["fields"].as_array().into_iter().flatten().find(|f| s(f, "name") == "Sim.Name").map(|f| s(f, "value")).unwrap_or("");
                         let names = [mpn.as_str(), s(m, "value"), entry, wanted];
-                        let found = kp::lookup(&names, self.scanned());
+                        let found = kp::lookup(&names, self.scanned().await);
                         self.lookups.push(json!({"ref": s(m, "reference"), "names": names.iter().filter(|n| !n.is_empty()).collect::<Vec<_>>(), "found": found.iter().map(|f| json!({"file": f.file, "name": f.def.name, "from": f.source})).collect::<Vec<_>>()}));
                         if found.is_empty() { vendor = true } else { row["found"] = json!(found.iter().map(kp::Found::row).collect::<Vec<_>>()) }
                     }
@@ -508,6 +592,10 @@ impl Sim<'_> {
                         Ok(_) => {} Err(e) => { lines.insert(a.clone(), json!(format!("failed: {e}"))); } } }
                     if !lines.is_empty() { out["signals"] = Value::Object(lines) } if !waves.is_empty() { out["waves"] = Value::Object(waves) }
                     if !meas.is_empty() { out["measures"] = measures_of(&r, &meas) }
+                    if let Some(v) = r["vectors"].as_array().into_iter().flatten().find(|v| v["length"].as_u64().unwrap_or(0) > v["real"].as_array().map_or(0, Vec::len) as u64 && v["real"].as_array().is_some_and(|a| !a.is_empty())) {
+                        let (have, of) = (v["real"].as_array().map_or(0, Vec::len), v["length"].as_u64().unwrap_or(0));
+                        out["thinned"] = json!(format!("{have} of {of} points were read (every {}th): summaries and measures are of those, and a peak between them is missed. Read fewer: start the data later (tstart) or shorten the run; or more: max_points, up to {POINTS_MAX}", (of as f64 / have as f64).round()));
+                    }
                     if asked.is_empty() && meas.is_empty() && vals.is_empty() { out["has"] = json!(names_of(&r)); out["note"] = json!("name signals or measures to read them") }
                     let warn = problem_lines(&r); if !warn.is_empty() { out["warnings"] = json!(warn.iter().take(5).collect::<Vec<_>>()) }
                 }
@@ -612,10 +700,10 @@ pub async fn run(c: &dyn Call, path: &str, a: &Value, ctx: &Ctx) -> (Result<Valu
     if !path.ends_with(".kicad_sch") { return (Err("path is the schematic (.kicad_sch) to simulate".into()), vec![]) }
     if !c.caps().iter().any(|x| x == CAP) { return (Err(no_sim("")), vec![]) }
     let doc = match open(c, path).await { Ok(d) => d, Err(e) => return (Err(e), vec![]) };
-    let mut sim = Sim { c, path, ctx, doc, wrote: false, saved: None, models_changed: false, probes: vec![], log: vec![], runs: vec![], lookups: vec![], breaks: vec![], retries: vec![], scanned: None };
+    let mut sim = Sim { c, path, ctx, doc, wrote: false, saved: None, models_changed: false, probes: vec![], log: vec![], runs: vec![], lookups: vec![], breaks: vec![], retries: vec![], rung: None, scanned: None };
     let (mut results, mut failure, mut skipped) = (vec![], None, 0);
     for (i, op) in ops.iter().enumerate() {
-        let started = std::time::Instant::now(); sim.runs.clear(); sim.lookups.clear(); sim.retries.clear();
+        let started = std::time::Instant::now(); sim.runs.clear(); sim.lookups.clear(); sim.retries.clear(); sim.rung = None;
         let r = sim.op(op).await;
         let sum = |k: &str| sim.runs.iter().filter_map(|x| x[k].as_f64()).sum::<f64>().round();
         let mut entry = json!({"op": verb(op), "ok": r.is_ok(), "hub_ms": started.elapsed().as_millis() as u64, "runs": sim.runs.len()});
@@ -746,8 +834,13 @@ mod tests {
                     "float" => json!({"status": "SIM_FLOATING_NODE", "analysis": "OP", "problems": [{"kind": "PK_FLOATING_NODE", "severity": "PS_ERROR", "node": "net-_c1-pad2_", "net": "Net-(C1-Pad2)", "message": "no DC path to ground"}, {"kind": "PK_MISSING_MODEL", "severity": "PS_ERROR", "reference": "U1", "message": "U1 has no model"}],
                         "log": "Circuit: t\nWarning: singular matrix:  check node net-_c1-pad2_\nrun simulation(s) aborted\n", "timings": {"netlist_ms": 1.0, "total_ms": 4.0}}),
                     "stiff" => self.simulate(&msg),
+                    "slowfail" => json!({"status": "SIM_NO_CONVERGENCE", "analysis": "TRAN", "log": "doAnalyses: TRAN:  Timestep too small; time = 8.86e-03, timestep = 1.25e-19: trouble with node \"/sw\"\n", "timings": {"run_ms": 97000.0, "total_ms": 97400.0}}),
+                    "limit" | "forever" => json!({"status": "SIM_RUNNING", "run_id": "7", "progress": 0.42}),
+                    "thin" => { let mut r = self.simulate(&msg); for v in r["vectors"].as_array_mut().unwrap() { v["length"] = json!(2_000_000) } r }
                     "noconv" => json!({"status": "SIM_NO_CONVERGENCE", "analysis": "TRAN", "log": "Circuit: t\ndoAnalyses: TRAN:  Timestep too small; time = 1.5e-05, timestep = 1.25e-19: trouble with node \"/sw\"\nrun simulation(s) aborted\n", "timings": {"run_ms": 40.0, "total_ms": 44.0}}),
                     _ => self.simulate(&msg) },
+                "GetSimulationResult" if self.mode == "limit" => json!({"status": "SIM_TIMEOUT", "analysis": "TRAN", "timings": {"total_ms": 300000.0}}),
+                "GetSimulationResult" if self.mode == "forever" => { tokio::time::sleep(std::time::Duration::from_millis(5)).await; json!({"status": "SIM_RUNNING", "run_id": "7", "progress": 0.42}) }
                 "GetSimulationResult" => { let mut p = self.polls.lock().unwrap(); *p += 1; if *p < 3 { json!({"status": "SIM_RUNNING", "run_id": "7"}) } else { self.simulate(&json!({"command": ".op"})) } }
                 "SaveDocument" => self.save.clone(),
                 // what a nested kicad_edit needs of a schematic: its sheets, its items, KiCad's own placement of a library symbol
@@ -779,7 +872,7 @@ mod tests {
         fn div(self, o: Cx) -> Cx { let d = o.0 * o.0 + o.1 * o.1; Cx((self.0 * o.0 + self.1 * o.1) / d, (self.1 * o.0 - self.0 * o.1) / d) } }
     fn tmp(tag: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("ksim-{tag}")) }
     fn go_in(f: &Fake, dir: &Path, ops: Value) -> (Result<Value, String>, Vec<Value>) {
-        let ctx = Ctx { project_dir: dir.to_path_buf(), libs: vec![], now: 1_800_000_000, log: None, gui: false };
+        let ctx = Ctx { project_dir: dir.to_path_buf(), libs: vec![], now: 1_800_000_000, log: None, gui: false, stop: None };
         tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap().block_on(run(f, "/p/t.kicad_sch", &json!({"ops": ops}), &ctx))
     }
     fn go(f: &Fake, ops: Value) -> Value { go_in(f, Path::new("/nonexistent-ksim"), ops).0.unwrap_or_else(|e| panic!("{e}")) }
@@ -909,7 +1002,7 @@ mod tests {
         assert!(near(&run["measures"]["fc"], FC, 2e-3) && run["measures"]["dc"].as_f64().unwrap().abs() < 1e-3 && near(&run["measures"]["g10k"], -10.0 * (1.0 + (1e4 / FC).powi(2)).log10(), 2e-3), "{run}");
         assert_eq!((run["analysis"].as_str(), run["points"].as_u64(), run["signals"]["V(out)"]["n"].as_u64(), run["signals"]["V(out)"]["first_db"].as_f64(), run["ms"].as_f64(), run.get("waves"), run.get("log"), run.get("netlist"), out.get("saved")), (Some("AC"), Some(141), Some(141), Some(-0.0), Some(11.0), None, None, None, None));
         assert!(out.to_string().len() < 500, "{} bytes", out.to_string().len());
-        let m = &sent(&f, "RunSimulation")[0]; assert_eq!((m["command"].as_str(), m["signals"].clone(), m["wait_ms"].as_u64(), m["timeout_ms"].as_u64(), m["measures"].clone()), (Some(".ac dec 20 1 10meg"), json!(["V(out)", "V(in)"]), Some(5000), Some(120_000), json!([])));
+        let m = &sent(&f, "RunSimulation")[0]; assert_eq!((m["command"].as_str(), m["signals"].clone(), m["wait_ms"].as_u64(), m["timeout_ms"].as_u64(), m["measures"].clone()), (Some(".ac dec 20 1 10meg"), json!(["V(out)", "V(in)"]), Some(1000), Some(120_000), json!([])));
         assert_eq!((log[0]["op"].as_str(), log[0]["analysis"].as_str(), log[0]["status"].as_str(), log[0]["runs"].as_u64(), log[0]["ngspice_ms"].as_f64(), log[0]["timings"]["netlist_ms"].as_f64(), log[0]["bytes"].as_u64() == Some(out["results"][0].to_string().len() as u64)), (Some("run"), Some("AC"), Some("SIM_OK"), Some(1), Some(8.0), Some(2.0), true));
         // waves when asked, as a few points; the netlist and the log when asked
         let out = go(&fake(), json!([{"run": ".tran 1u 1m", "signals": "V(out)", "waves": 20, "netlist": true, "log": true, "measures": {"tr": "rise_time V(out)", "ts": {"settling_time": "V(out)"}, "ng": "TRIG v(/out) VAL=0.1 RISE=1 TARG v(/out) VAL=0.9 RISE=1", "bad": "WHEN v(/out)=9 never"}}]));
@@ -1001,14 +1094,56 @@ mod tests {
     #[test] fn a_transient_that_does_not_converge_is_tried_again() {
         let mut f = fake(); f.mode = "stiff"; let (r, log) = go_in(&f, Path::new("/x"), json!([{"run": ".tran 1u 1m", "signals": "V(out)", "directives": [".include x.lib"], "options": {"save_all_currents": false}, "measures": {"fin": "final V(out)"}}]));
         let out = r.unwrap(); let run = &out["results"][0]["run"];
-        assert_eq!((run["needed"].as_str(), run.get("failed"), run["measures"]["fin"].as_f64().map(|v| v > 0.99)), (Some("gear with reltol 0.01: it did not converge without (.options method=gear reltol=0.01)"), None, Some(true)));
-        let sent = sent(&f, "RunSimulation"); assert_eq!((sent.len(), sent[0]["directives"].clone(), sent[2]["directives"].clone(), sent[0]["options"].clone()), (3, json!([".include x.lib"]), json!([".include x.lib", ".options method=gear reltol=0.01"]), json!({"save_all_currents": false})));
-        assert_eq!((log[0]["runs"].as_u64(), log[0]["retries"].clone(), log[0]["status"].as_str()), (Some(3), json!(["gear integration", "gear with reltol 0.01"]), Some("SIM_NO_CONVERGENCE")));
-        // nothing helps: the failure says what was tried; retry: false leaves it at one run; other analyses are not tried again
+        assert_eq!((run["needed"].as_str(), run.get("failed"), run["measures"]["fin"].as_f64().map(|v| v > 0.99)), (Some("gear integration with looser tolerances: it did not converge without (.options method=gear itl4=500 gmin=1e-9 abstol=1e-8 vntol=1e-5 rshunt=1e9 reltol=0.01)"), None, Some(true)));
+        let sent = sent(&f, "RunSimulation"); assert_eq!((sent.len(), sent[0]["directives"].clone(), sent[1]["directives"].clone(), sent[0]["options"].clone()), (4, json!([".include x.lib"]), json!([".include x.lib", ".options method=gear"]), json!({"save_all_currents": false, "save_all_dissipations": false})));
+        assert_eq!((log[0]["runs"].as_u64(), log[0]["retries"].clone(), log[0]["status"].as_str()), (Some(4), json!(["gear integration", "looser tolerances", "gear integration with looser tolerances"]), Some("SIM_NO_CONVERGENCE")));
+        // nothing helps: the failure says each attempt and how long it took; the last one alone shortens the step
         let mut f = fake(); f.mode = "noconv"; let out = go(&f, json!([{"run": ".tran 1u 1m"}])); let p = out["results"][0]["run"]["problems"].as_array().unwrap();
-        assert!(p.last().unwrap().as_str().unwrap().starts_with("tried without success: gear integration; then gear with reltol 0.01; then gear, reltol 0.01, looser tolerances") && self::sent(&f, "RunSimulation").len() == 4 && self::sent(&f, "RunSimulation")[3]["command"] == ".tran 1u 1m 0 1u", "{p:?}");
+        assert!(p.last().unwrap().as_str().unwrap().starts_with("tried without success: as given: no convergence at t=1.5e-05 (near /sw) after 0.044 s; then gear integration: no convergence at t=1.5e-05 (near /sw) after 0.044 s; then looser tolerances: ") && self::sent(&f, "RunSimulation").len() == 5 && self::sent(&f, "RunSimulation")[4]["command"] == ".tran 1u 1m 0 1u" && self::sent(&f, "RunSimulation")[3]["command"] == ".tran 1u 1m", "{p:?}");
+        // an attempt the run's own directives already are is not made again
+        let mut f = fake(); f.mode = "noconv"; go(&f, json!([{"run": ".tran 1u 1m", "directives": [".options METHOD=gear cshunt=1e-15"]}])); assert_eq!(self::sent(&f, "RunSimulation").len(), 4);
+        // a slow attempt (97 s before it failed) is the last: three more would be five minutes for the same end
+        let mut f = fake(); f.mode = "slowfail"; let out = go(&f, json!([{"run": ".tran 100n 10m"}])); let p = out["results"][0]["run"]["problems"].as_array().unwrap();
+        assert!(self::sent(&f, "RunSimulation").len() == 1 && p.last().unwrap().as_str().unwrap().starts_with("tried without success: as given: no convergence at t=8.86e-03 (near /sw) after 97 s; then no further attempt: that one took 97 s, and each of the 4 left would take as long. Start the data later (tstart)"), "{p:?}");
+        // a sweep's later runs start with what its first needed: 4 runs for the first value, one for each after
+        let mut f = fake(); f.mode = "stiff"; let out = go(&f, json!([{"sweep": "R1", "values": ["1k", "2k", "3k"], "run": ".tran 1u 1m", "measures": {"fin": "final V(out)"}}]));
+        assert!(self::sent(&f, "RunSimulation").len() == 6 && out["results"][0]["sweep"].to_string().contains("fin"), "{}", out["results"][0]);
         let mut f = fake(); f.mode = "noconv"; go(&f, json!([{"run": ".tran 1u 1m", "retry": false}, {"run": ".op"}])); assert_eq!(self::sent(&f, "RunSimulation").len(), 1);
         assert_eq!((smaller_step(".tran 1u 10m"), smaller_step(".tran 1u 10m 0 10u uic"), smaller_step(".tran 1u 10m 1m 0.1u"), smaller_step(".tran 1u 10m\nfft v(out)"), smaller_step(".op")), (".tran 1u 10m 0 1u".into(), ".tran 1u 10m 0 1u uic".into(), ".tran 1u 10m 1m 0.1u".into(), ".tran 1u 10m 0 1u\nfft v(out)".into(), ".op".into()));
+    }
+    /// What bounds a run's memory: the points read of each vector, a transient's currents and powers only when one is read, its data
+    /// from `tstart` on, and a line that says tens of millions of points refused before ngspice.
+    #[test] fn a_run_is_bounded_in_points() {
+        let f = fake(); go(&f, json!([{"run": ".tran 1u 1m", "signals": "V(out)"}, {"run": ".tran 1u 1m", "signals": ["V(out)", "I(R1)"], "max_points": 5000000}, {"run": ".tran 1u 1m", "options": {"save_all_currents": true}}, {"run": ".ac dec 20 1 1meg"}]));
+        let m = sent(&f, "RunSimulation");
+        assert_eq!((m[0]["max_points"].as_u64(), m[0]["options"].clone(), m[1]["max_points"].as_u64(), m[1].get("options"), m[2]["options"].clone(), m[3].get("options")),
+            (Some(POINTS), json!({"save_all_currents": false, "save_all_dissipations": false}), Some(POINTS_MAX), None, json!({"save_all_currents": true, "save_all_dissipations": false}), None));
+        let f = fake(); go(&f, json!([{"run": ".tran 1u 10m", "tstart": "8m"}, {"run": ".tran 1u 10m 0 100n uic", "tstart": 0.008}]));
+        assert_eq!((sent(&f, "RunSimulation")[0]["command"].as_str(), sent(&f, "RunSimulation")[1]["command"].as_str()), (Some(".tran 1u 10m 8m"), Some(".tran 1u 10m 0.008 100n uic")));
+        assert_eq!((tran_from(".tran 1u 10m uic\nfft v(out)", "8m").unwrap(), tran_from(".ac dec 10 1 1k", "8m").is_err(), tran_from(".tran 1u 10m", "10m").unwrap_err()), (".tran 1u 10m 8m uic\nfft v(out)".to_string(), true, "tstart 10m is not inside the run (0 to 10m)".to_string()));
+        let f = fake(); let e = go_in(&f, Path::new("/x"), json!([{"run": ".tran 1n 1 0 1n"}])).0.unwrap_err();
+        assert!(e.contains("computes 1000000000 points or more") && e.contains("tstart") && sent(&f, "RunSimulation").is_empty(), "{e}");
+        assert_eq!((tran_points(".tran 100n 5m 4.8m 20n uic").map(f64::round), tran_points(".tran 1u 1m")), (Some(10000.0), None));
+        // vectors KiCad thinned: said, with what was read and what there was
+        let mut f = fake(); f.mode = "thin"; let out = go(&f, json!([{"run": ".tran 1u 1m", "signals": "V(out)"}])); let t = out["results"][0]["run"]["thinned"].as_str().unwrap();
+        assert!(t.contains(" of 2000000 points were read (every ") && t.contains("tstart") && t.contains("max_points, up to 2000000"), "{t}");
+    }
+    /// A run past its time says how long it ran and how far it was; a call dropped while its run is out stops the run in KiCad.
+    #[test] fn a_run_out_of_time_says_how_far_it_was_and_a_dropped_call_stops_its_run() {
+        let mut f = fake(); f.mode = "limit"; let out = go(&f, json!([{"run": ".tran 1u 1m", "timeout": 300}])); let got = &out["results"][0]["run"];
+        assert_eq!((got["failed"].as_str(), got["problems"].as_array().unwrap().last().unwrap().as_str()), (Some("the run did not finish in its time"), Some("stopped after 300 s at 42% of the run: give it longer (timeout, in seconds, up to 3600), or make it shorter: start its data later (tstart), a longer maximum step")));
+        assert_eq!((sent(&f, "RunSimulation").len(), sent(&f, "RunSimulation")[0]["timeout_ms"].as_u64()), (1, Some(300_000)));
+        let mut f = fake(); f.mode = "forever"; let stopped = std::sync::Arc::new(Mutex::new(vec![])); let st = stopped.clone();
+        let ctx = Ctx { project_dir: PathBuf::from("/x"), libs: vec![], now: 0, log: None, gui: false, stop: Some(Stop(std::sync::Arc::new(move |m| st.lock().unwrap().push(m)))) };
+        let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+        let a = json!({"ops": [{"run": ".tran 1u 1m"}]});
+        assert!(rt.block_on(async { tokio::time::timeout(std::time::Duration::from_millis(100), run(&f, "/p/t.kicad_sch", &a, &ctx)).await }).is_err());
+        let told = stopped.lock().unwrap().clone();
+        assert_eq!((told.len(), told[0]["run_id"].clone(), sent(&f, "GetSimulationResult").len() > 3), (1, json!("7"), true));
+        // a run that ended leaves nothing to stop
+        let f = fake(); let stopped = std::sync::Arc::new(Mutex::new(vec![])); let st = stopped.clone();
+        let ctx = Ctx { project_dir: PathBuf::from("/x"), libs: vec![], now: 0, log: None, gui: false, stop: Some(Stop(std::sync::Arc::new(move |m: Value| st.lock().unwrap().push(m)))) };
+        rt.block_on(run(&f, "/p/t.kicad_sch", &json!({"ops": [{"run": ".op"}]}), &ctx)).0.unwrap(); assert!(stopped.lock().unwrap().is_empty());
     }
     #[test] fn failures_are_one_line_each_with_what_to_do() {
         let mut f = fake(); f.mode = "float"; let (r, log) = go_in(&f, Path::new("/x"), json!([{"exclude": "J1"}, {"run": ".op", "signals": ["mid"]}, {"run": ".ac dec 10 1 1k"}]));

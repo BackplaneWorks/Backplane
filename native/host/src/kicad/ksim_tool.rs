@@ -37,9 +37,9 @@ impl Agents {
                 if ty.ends_with(".OpenDocument") && super::embed::gui_route(&super::ipc::pro_of(self.path)).is_some() {
                     return Err(format!("{} is not open in the person's KiCad, which has this project: ask them to open it there (Backplane opens no window for an agent)", self.path))
                 }
-                let v = self.ag.kicad_call(self.thread, self.path, ty, msg).await?;
+                let mut v = self.ag.kicad_call(self.thread, self.path, ty, msg).await?;
                 if !v["person"].is_null() { *self.person.lock().unwrap() = v["person"].clone() }
-                let mut m = v["message"].clone();
+                let mut m = v["message"].take(); // (taken, never copied: a run's vectors are held once)
                 for k in ["not_saved", "format_upgrade", "kicad_load_changes", "detached_kicad"] { if v[k].is_string() { if !m.is_object() { m = json!({}) } m[k] = v[k].clone() } }
                 Ok(m)
             }) }
@@ -59,7 +59,10 @@ impl Agents {
         let libs: Vec<(std::path::PathBuf, &'static str)> = [("share/kicad/symbols", "kicad"), ("share/kicad/simulation", "kicad"), ("share/kicad/backplane-library", "library")].into_iter()
             .map(|(d, what)| (std::path::Path::new(&env.root).join(d), what)).filter(|(d, _)| d.is_dir()).collect();
         let log = ksim_log::file(&self.hub.cfg.home);
-        let ctx = ksim::Ctx { project_dir, libs, now: crate::agents::now_s(), log: Some(log.clone()), gui };
+        let ctx = ksim::Ctx { project_dir, libs, now: crate::agents::now_s(), log: Some(log.clone()), gui, stop: Some({
+            // a call dropped while its run is out (the turn was interrupted): the run is stopped, not left to ngspice
+            let (ag, th, p) = (self.clone(), thread.to_string(), path.to_string());
+            ksim::Stop(Arc::new(move |m: Value| { let (ag, th, p) = (ag.clone(), th.clone(), p.clone()); tokio::spawn(async move { let _ = ag.kicad_call(&th, &p, "kiapi.backplane.sim.StopSimulation", m).await; }); })) }) };
         let via = Via { ag: self, thread, path, person: std::sync::Mutex::new(Value::Null), caps };
         let (r, entries) = ksim::run(&via, path, a, &ctx).await;
         if ksim::writes(&a["ops"]) { super::coedit::agent_wrote(&pro) }

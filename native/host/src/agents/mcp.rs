@@ -259,7 +259,10 @@ impl Mcp {
             // main's canonical copy, one holder for writes (taken when free; the holder is named to any other); a saved document is committed straight to main (agents/design.rs)
             "kicad_ipc" => ag.tool_kicad_ipc(thread, &a).await,
             "kicad_edit" => ag.tool_kicad_edit(thread, &a).await,
-            "kicad_sim" => ag.tool_kicad_sim(thread, &a).await,
+            // (a simulation may run for minutes: when the agent hangs up, its turn interrupted, the call is dropped, and a run that is
+            // out is stopped in KiCad by the drop (ksim::Running) instead of running on to its limit with nobody to answer)
+            "kicad_sim" => { let run = ag.tool_kicad_sim(thread, &a); tokio::pin!(run); let mut probe = [0u8; 1];
+                loop { tokio::select! { r = &mut run => break r, r = sock.read(&mut probe) => if matches!(r, Ok(0) | Err(_)) { return None } } } }
             "kicad_bring_back" => ag.tool_bring_back(thread, &a).await,
             // the person's KiCad (and Backplane's viewers) select what the agent names (kicad/xprobe.rs), as a reference clicked in the chat does
             "kicad_select" => { let mut p = a.clone(); p["project"] = json!(crate::files::kicad::canonical::route(sv(&a, "path"))); match crate::files::kicad::xprobe::select(&ag.hub, &p).await { Ok(v) => (true, v), Err(e) => fail(&e) } }

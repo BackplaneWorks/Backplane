@@ -31,6 +31,8 @@ pub fn structural(ty: &str) -> bool {
     matches!(ty.rsplit('.').next().unwrap_or(ty), "ImportNetlist" | "UpdatePCBFromSchematic" | "UpdateSchematicFromPCB" | "Annotate" | "AnnotateSchematic" | "RevertDocument" | "CloseDocument" | "OpenDocument" | "ImportSpecctraSession")
 }
 
+/// The simulation runs agents started: "<project>|<run id>" -> the thread (kicad_call: StopSimulation is the starter's alone).
+fn sim_runs() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> { static M: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> = std::sync::OnceLock::new(); M.get_or_init(Default::default) }
 impl Agents {
     /// The thread works in the main checkout for design files.
     pub async fn on_main(&self, th: &str) -> bool { self.world().await.setting(&main_key(th)) == "on" }
@@ -51,7 +53,8 @@ impl Agents {
     /// nothing blocks. Answers the main checkout's path the request must use. Reads are free.
     pub async fn kicad_gate(&self, thread: &str, path: &str, ty: &str) -> Result<String, String> {
         let routed = kc::route(path);
-        if crate::copy::on() || crate::files::kicad::ipc::is_read(ty) { return Ok(routed) }
+        // (a simulation run changes no document: no lock, whoever holds the schematic's; what a kicad_sim call writes goes through its own commands)
+        if crate::copy::on() || crate::files::kicad::ipc::is_read(ty) || crate::files::kicad::ipc::is_sim(ty) { return Ok(routed) }
         let doc = kc::doc_of(&routed);
         if doc.is_empty() || kc::split_worktree(&doc).is_some() { return Ok(routed) } // none (the IPC check names that), or an explicit experiment copy
         // A co-editing KiCad has the document open: agents and the person edit it live, together (docs/kicad-coedit.md); only
@@ -80,7 +83,12 @@ impl Agents {
         // #1163, before the gate and any save: a review refuses writes, the turn's first write is snapshotted, a mass deletion waits for the person (snapguard.rs)
         self.mass_guard(thread, &kc::doc_of(&kc::route(path)), ty, &msg).await?;
         let routed = self.kicad_gate_take(thread, path, ty).await?;
+        // an agent stops only a run it started (the person stops any, in KiCad): the runs each thread started are kept by project and id
+        let short = ty.rsplit('.').next().unwrap_or(""); let run_key = |id: &Value| format!("{}|{}", ipc::pro_of(&routed), id.as_str().map(String::from).unwrap_or_else(|| id.to_string()));
+        if short == "StopSimulation" && sim_runs().lock().unwrap().get(&run_key(&msg["run_id"])).map(String::as_str) != Some(thread) {
+            return Err("StopSimulation stops a run this thread started (its run_id, from RunSimulation): this one is not this thread's. The person stops any run in KiCad's Simulator".into()) }
         let v = ipc::kicad_ipc_in(&self.hub, Some(thread), &routed, ty, msg).await?;
+        if short == "RunSimulation" && !v["message"]["run_id"].is_null() { let mut m = sim_runs().lock().unwrap(); if m.len() > 512 { m.clear() } m.insert(run_key(&v["message"]["run_id"]), thread.to_string()); }
         // a saved document is committed straight to main
         if ty.rsplit('.').next() == Some("SaveDocument") && v["not_saved"].is_null() { self.design_record_note(thread, "save", v["format_upgrade"].as_str().unwrap_or("")).await }
         Ok(v)
