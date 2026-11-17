@@ -52,7 +52,7 @@
       "keys": {
         "linux": "Ctrl+Y",
         "windows": "Ctrl+Y",
-        "macos": "Cmd+Y (where KiCad binds it)"
+        "macos": "Cmd+Shift+Z (stock KiCad's redo on macOS; Cmd+Y is not bound)"
       },
       "after": "undo",
       "works": "an edit with deleted > 0 (the delete again)",
@@ -70,8 +70,13 @@
       "after": "undo",
       "works": "an edit with deleted > 0 (the delete again)",
       "wrong": "an edit with created > 0",
-      "gating": true,
-      "when": "pressed after KiCad's check that follows the undo has reported (ET_CHECKS_DONE), as a person who pauses would; bp.13 3a19ebb5bb empties the redo list there (redo at once still works)"
+      "gating": {
+        "macos": true,
+        "linux": false,
+        "windows": false
+      },
+      "when": "pressed after KiCad's check that follows the undo has reported (ET_CHECKS_DONE), as a person who pauses would; bp.13 3a19ebb5bb empties the redo list there (redo at once still works)",
+      "linux_windows": "informational: record what the chord did, never gate. Stock KiCad binds redo to Ctrl+Y on Linux and Windows and to Cmd+Shift+Z on macOS only; in the PCB editor Ctrl+Shift+Z is Draw Filled Zones (end it with Escape). The lead, Nov 17: no new binding."
     },
     {
       "id": "copy_paste",

@@ -368,6 +368,27 @@ Misses, ranked:
 Not measured (harness): ';' in the search box and the properties panel (the search box was not clicked into; the panel was looked for
 on the wrong side); the review-marker click.
 
+## Edit keys in the embedded editor (test/kicad_embed/embed_edit_keys_e2e.sh)
+
+One definition for Linux, macOS and Windows: `test/kicad_embed/lib/edit_keys_table.json` (row ids, keys per platform, what counts as
+works / nothing / wrong). Real OS key events with the keyboard in the embedded PCB, then schematic, canvas; judged from KiCad's own edit
+events (ET_DOCUMENT_EDITED created/deleted), its selection, windows and the files, never pixels. Each key waits until the check KiCad runs
+after the latest edit has reported. The keys, as stock KiCad binds them:
+
+| | Linux, Windows | macOS |
+|---|---|---|
+| Undo | Ctrl+Z | Cmd+Z |
+| Redo | Ctrl+Y | Cmd+Shift+Z |
+| Select all, copy, cut, paste | Ctrl+A, Ctrl+C, Ctrl+X, Ctrl+V | Cmd+A, Cmd+C, Cmd+X, Cmd+V |
+| Delete | Delete, BackSpace | fn+Delete, ⌫ |
+| Save, find | Ctrl+S, Ctrl+F | Cmd+S, Cmd+F |
+
+Ctrl+Shift+Z is not redo on Linux and Windows (in the PCB editor it is Draw Filled Zones): its row (`redo_shift_z`) is informational there
+(what the chord did is recorded, never a failure) and gating as redo on macOS only. No extra binding is added (the lead, Nov 17).
+Gating rows also include redo after the check, 10 cycles keys only, with and without the keyboard's trip to Backplane's chat
+(`redo_after_check`, `redo_after_backplane`: bp.13 and bp.13.1 7038d2231b lost undo and redo once a check ended, until a click; fixed in
+bp.13.1 e7f1bdb7a3), select all and copy on a fresh editor with no click, and typing in the Properties panel across a check.
+
 ## Undo/redo on bp.13 batch 5 (2026-11-13): what failed and why
 
 Collar, GPU display, batch 5 `332ac3bb99` (canvas-click focus). The undo journey first reported Ctrl+Y not redoing, then redoing one run

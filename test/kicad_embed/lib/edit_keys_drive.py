@@ -201,6 +201,20 @@ def redo_row(rid, chord):
     return v
 
 
+def shift_z_info():
+    """Ctrl+Shift+Z on Linux: informational, never gating (the lead, Nov 17). Stock KiCad's redo is Ctrl+Y on Linux and Windows and
+    Cmd+Shift+Z on macOS only; in the PCB editor Ctrl+Shift+Z is Draw Filled Zones. What the chord did is recorded (its edits, a tool
+    left running), then Escape twice ends any tool it started."""
+    before = {w["xid"] for w in windows_of_kicad()}
+    n = seq(); x("chord", "ctrl", "shift", "z"); ed = wait_edits(n)
+    new = [w.get("title") or "?" for w in windows_of_kicad() if w["xid"] not in before]
+    x("key", "Escape"); time.sleep(0.3); x("key", "Escape"); time.sleep(0.3)
+    if ed:
+        checks_idle(n, 15)
+    what = f"edits {ed}" + (f", new windows {new}" if new else "") + (" (the PCB editor's Draw Filled Zones, ended with Escape)" if editor == "pcb" and not ed else "")
+    row("redo_shift_z", "info", f"not redo on Linux (stock: Ctrl+Y; macOS: Cmd+Shift+Z): {what}")
+
+
 def restore():
     """Ctrl+Z once more to bring back what a row deleted (only used once undo has been judged works)."""
     n = seq(); x("chord", "ctrl", "z"); wait_edits(n); checks_idle(n, 8)
@@ -255,14 +269,14 @@ def table(docfile):
         if uv == "works":
             if redo_row("redo", ("ctrl", "y")) == "works":
                 restore()
-            if redo_row("redo_shift_z", ("ctrl", "shift", "z")) == "works":
-                restore()
+            shift_z_info()
         else:
             row("redo", "nothing", "not judged: undo did not work")
-            row("redo_shift_z", "nothing", "not judged: undo did not work")
+            shift_z_info()
     else:
-        for r in ("undo", "redo", "redo_shift_z"):
+        for r in ("undo", "redo"):
             row(r, "nothing", "not judged: Delete deleted nothing")
+        shift_z_info()
         uv = "nothing"
     # backspace: only on a full board (after a working undo, or when Delete did nothing and the board is whole)
     if uv == "works" or dv != "works":

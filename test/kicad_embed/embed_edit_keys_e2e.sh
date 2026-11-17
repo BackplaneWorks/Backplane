@@ -115,6 +115,7 @@ for i in ids:
     print(f"{i:<16}{pv:<9}{sv:<9}")
 PY
 while read -r _ ed id verdict evidence; do
+  [ "$verdict" = info ] && { echo "INFO edit keys: $ed $id (informational, never gating): $evidence"; continue; }
   check "edit keys: $ed $id works" "$([ "$verdict" = works ] && echo 1 || echo 0)" "$verdict: $evidence"
   case "$verdict:$id" in nothing:undo_markers|nothing:undo|nothing:redo_after_*|nothing:fresh_*|nothing:props_typing|nothing:redo*|nothing:copy_paste|nothing:cut*|nothing:delete|nothing:backspace|nothing:save|nothing:all|wrong:*)
     echo "ALERT $ed $id $verdict (to the lead and the integrator): $evidence";; esac
