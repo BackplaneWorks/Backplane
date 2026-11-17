@@ -78,7 +78,8 @@ fn kills_by_name(line: &str) -> bool {
     let d = tmp("jan"); let repo = d.join("repo"); let bt = d.join("bptmp"); let scc = d.join("scc");
     let git = |dir: &Path, a: &[&str]| { let o = Command::new("git").arg("-C").arg(dir).args(a).env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t").output().unwrap(); assert!(o.status.success(), "git {a:?}: {o:?}"); String::from_utf8_lossy(&o.stdout).trim().to_string() };
     fs::create_dir_all(&repo).unwrap(); git(&repo, &["init", "-q", "-b", "main"]); git(&repo, &["config", "core.hooksPath", "/dev/null"]);
-    fs::write(repo.join("a"), "a").unwrap(); fs::write(repo.join(".gitignore"), "target/\n").unwrap(); git(&repo, &["add", "a", ".gitignore"]); git(&repo, &["commit", "-qm", "a"]);
+    // a .bp-keep git tracks (the repo carried one at its root from Oct 21 to Nov 16) is in every checkout: it keeps nothing
+    fs::write(repo.join("a"), "a").unwrap(); fs::write(repo.join(".gitignore"), "target/\n").unwrap(); fs::write(repo.join(".bp-keep"), "").unwrap(); git(&repo, &["add", "a", ".gitignore", ".bp-keep"]); git(&repo, &["commit", "-qm", "a"]);
     let wt = |n: &str| repo.join(".backplane/worktrees").join(n);
     let add = |n: &str| { git(&repo, &["worktree", "add", "-q", "-b", n, wt(n).to_str().unwrap()]); };
     let commit = |n: &str| { fs::write(wt(n).join(n), n).unwrap(); git(&wt(n), &["add", n]); git(&wt(n), &["commit", "-qm", n]); };
@@ -91,7 +92,7 @@ fn kills_by_name(line: &str) -> bool {
     git(&repo, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
     commit("mine"); fs::write(wt("dirty").join("edit"), "x").unwrap();
     for n in ["landed", "fresh", "mine", "dirty", "busy", "recent", "kept"] { target(n) }
-    fs::write(wt("kept").join(".bp-keep"), "").unwrap();   // (untracked, so "kept" is not clean either: its target staying is what the marker does)
+    git(&wt("kept"), &["rm", "-q", "--cached", ".bp-keep"]); git(&wt("kept"), &["commit", "-qm", "untrack"]);   // its marker is one put there, not git's   // (untracked, so "kept" is not clean either: its target staying is what the marker does)
     // bp-tmp: an old scratch target, an old one a process has open, a fresh one, the sccache server's dir, an old file
     for (n, f) in [("aot-build", "big"), ("held", "log"), ("new", "x"), ("sccache", "s"), ("claude", "c"), ("forkgate", "venv")] { fs::create_dir_all(bt.join(n)).unwrap(); fs::write(bt.join(n).join(f), vec![0u8; 1 << 20]).unwrap(); }
     fs::write(bt.join("old.log"), "x").unwrap(); fs::write(bt.join("forkgate/.bp-keep"), "").unwrap();
