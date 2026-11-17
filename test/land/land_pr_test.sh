@@ -52,4 +52,9 @@ git -C "$LANE" rebase -q origin/main 2>/dev/null || { git -C "$LANE" fetch -q or
 land > "$T/o11b"; ! grep -q "older than origin/main's" "$T/o11b"; ok $? "a land.sh ahead of main's runs"
 # 12. nothing ever pushes to refs/heads/main itself
 ! grep -n 'push.*refs/heads/main\|push origin HEAD:main\|push.*HEAD:main' "$ROOT/scripts/land.sh" | grep -v '^[0-9]*:#'; ok $? "land.sh has no push to main"
+# 13. an edit of land.sh while a land runs (here from its gate) changes nothing in that run: it ends as it would have, not on a syntax error
+echo three > "$LANE/doc3"; g add -A; g commit -qm "docs: three"
+LAND_TEST="printf '\n( ((\n' >> $LANE/scripts/land.sh" land > "$T/o13"; rc=$?; g checkout -q scripts/land.sh
+[ $rc = 3 ] && ! grep -qi "syntax error" "$T/o13" && grep -q "waiting for an approving review\|blocked by a rule" "$T/o13"; ok $? "land.sh edited under a running land: the run is unchanged (rc $rc)"
+! ls "${TMPDIR:-/tmp}"/land-run.* >/dev/null 2>&1; ok $? "the private copy is removed"
 [ $fails = 0 ] && echo "land_pr_test: all passed" || { echo "land_pr_test: $fails failed"; exit 1; }
