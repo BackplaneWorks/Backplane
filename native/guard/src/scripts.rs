@@ -184,3 +184,18 @@ fn walk_rs(d: &Path, out: &mut Vec<PathBuf>) {
     }
     assert!(bad.is_empty(), "tests must use plat::tmp / crate::tmp drop guards and never write directly to /tmp:\n{}", bad.join("\n"));
 }
+
+/// #1165: a test script that makes Windows private by moving USERPROFILE/LOCALAPPDATA moves APPDATA too. The client keeps its settings
+/// (hubs.json) in %APPDATA%\backplane-gpui and the hub reads %APPDATA%\kicad, so a smoke that left it alone wrote into the real profile.
+#[test] fn a_script_private_on_windows_moves_appdata_with_localappdata() {
+    let mut files = vec![]; for d in ["scripts", "test", "deploy", "tools"] { walk(&root().join(d), &mut files); }
+    let mut bad = vec![];
+    for f in files.iter().filter(|f| f.extension().map_or(false, |e| e == "sh")) {
+        let Ok(t) = std::fs::read_to_string(f) else { continue };
+        for (i, l) in t.lines().enumerate() {
+            let c = code(l);
+            if c.contains("export") && c.contains("LOCALAPPDATA=") && !c.contains(" APPDATA=") { bad.push(format!("{}:{}", f.display(), i + 1)); }
+        }
+    }
+    assert!(bad.is_empty(), "these move LOCALAPPDATA but leave the real APPDATA: {bad:?}");
+}

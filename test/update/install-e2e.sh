@@ -20,7 +20,7 @@ export HOME=$T/userhome BACKPLANE_PREFIX=$T/prefix BACKPLANE_BIN=$T/bin BACKPLAN
 unset BACKPLANE_COPY BACKPLANE_NO_UPDATE BACKPLANE_BUILDS BACKPLANE_GUARD BACKPLANE_E2E_TRUST_KEY BACKPLANE_AGENT_OWNER BACKPLANE_FAULT BACKPLANE_SAFE
 mkdir -p "$HOME" "$T/agents" "$F" "$H"
 G=$BACKPLANE_PREFIX/backplane$X
-[ -z "$win" ] || export USERPROFILE="$(w "$HOME")" LOCALAPPDATA="$(w "$HOME")"
+[ -z "$win" ] || export USERPROFILE="$(w "$HOME")" LOCALAPPDATA="$(w "$HOME")" APPDATA="$(w "$HOME")"
 stop() { [ -x "$G" ] && "$G" hub stop --home "$(w "$H")" > /dev/null 2>&1; [ -n "${FPID:-}" ] && kill "$FPID" 2>/dev/null; }
 trap 'stop; [ -n "${UPD_KEEP:-}" ] || rm -rf "${T:?}"' EXIT
 ok() { PASS=$((PASS+1)); printf 'PASS %-9s %s\n' "$1" "$2"; }
