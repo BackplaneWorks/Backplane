@@ -21,6 +21,15 @@ on:
       kicad_run:
         description: "kicad-pane job: a Backplane_KiCad macOS CI run whose package (backplane-kicad-macos-native) has the macOS embedding"
         default: ""
+      mac_mode:
+        description: "kicad-pane job: mac_pane_e2e.py's MAC_MODE (empty: the default rows; bs, narrow, restart, lock, autosave, update, ...)"
+        default: ""
+      bs_probe:
+        description: "kicad-pane job with mac_mode bs: BS_PROBE (keys: the edit-keys table; route; order; undo)"
+        default: ""
+      update_from:
+        description: "kicad-pane job with mac_mode update: the Backplane KiCad release the home starts on (e.g. backplane-kicad-v10.99.0-bp.12.5); kicad_run's package is served from a local feed and pinned into this checkout's hub for the run only"
+        default: ""
       kicad_via:
         description: "kicad-runtime job: curl (fetch and check the tag's package by hand) or driver (Settings > CAD > Install: the hub's own install driver, which needs the hub's MAC pin on that tag)"
         default: "curl"
@@ -78,6 +87,26 @@ jobs:
           cd "$RUNNER_TEMP/k"; tar xzf backplane-kicad-darwin-arm64-*[0-9].tar.gz
           R=$(ls -d "$RUNNER_TEMP"/k/backplane-kicad-darwin-arm64-*/ | head -1); echo "RT=${R%/}" >> "$GITHUB_ENV"
           python3 -c "import json,sys;m=json.load(open(sys.argv[1]));print(m['version'],len(m['capabilities']),'capabilities')" "$R/manifest.json"; ls "$R/bin"
+      - name: the update row's start (update_from) and its feed (kicad_run's package), pinned into this run's hub only
+        if: inputs.mac_mode == 'update' && inputs.update_from != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu; mkdir -p "$RUNNER_TEMP/feed" "$RUNNER_TEMP/from"
+          A=$(cd "$RUNNER_TEMP/k" && ls backplane-kicad-darwin-arm64-*[0-9].tar.gz | head -1); cp "$RUNNER_TEMP/k/$A" "$RUNNER_TEMP/feed/"
+          (cd "$RUNNER_TEMP/feed" && shasum -a 256 "$A" > SHA256SUMS && cat SHA256SUMS)
+          SHA=$(cut -d' ' -f1 "$RUNNER_TEMP/feed/SHA256SUMS"); SIZE=$(stat -f %z "$RUNNER_TEMP/feed/$A"); VER=$(echo "$A" | sed -E 's/.*-(10\.99\.0-bp\.[0-9.]+)\.tar\.gz/\1/')
+          python3 - native/host/src/kicad/install.rs "$SHA" "$SIZE" "$VER" "$A" <<'PY'
+          import re, sys
+          p, sha, size, ver, asset = sys.argv[1:]; s = open(p).read()
+          line = f'pub const MAC: Package = Package {{ platform: "darwin-arm64", version: "{ver}", release: "backplane-kicad-v{ver}", asset: "{asset}", sha256: "{sha}", format: "tar.gz", cli: "bin/kicad-cli", size: {size} }};'
+          s2 = re.sub(r'^pub const MAC: Package = .*$', lambda m: line, s, count=1, flags=re.M); assert s2 != s; open(p, 'w').write(s2); print('this run pins', ver, sha[:12], size)
+          PY
+          gh release download ${{ inputs.update_from }} -R BackplaneWorks/Backplane_KiCad -p 'backplane-kicad-darwin-arm64-*.tar.gz' -D "$RUNNER_TEMP/from"
+          (cd "$RUNNER_TEMP/from" && tar xzf backplane-kicad-darwin-arm64-*.tar.gz)
+          F=$(ls -d "$RUNNER_TEMP"/from/backplane-kicad-darwin-arm64-*/ | head -1); echo "RT=${F%/}" >> "$GITHUB_ENV"
+          (cd "$RUNNER_TEMP/feed" && nohup python3 -m http.server 8123 --bind 127.0.0.1 > "$RUNNER_TEMP/feed.log" 2>&1 &)
+          echo "BACKPLANE_KICAD_FEED=http://127.0.0.1:8123" >> "$GITHUB_ENV"
       - name: build the hub and the client
         run: |
           export BACKPLANE_COMMIT=$(git rev-parse --short HEAD)
@@ -87,6 +116,9 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - name: KiCad in the pane
+        env:
+          MAC_MODE: ${{ inputs.mac_mode }}
+          BS_PROBE: ${{ inputs.bs_probe }}
         run: |
           set -o pipefail; mkdir -p out
           python -m pip install --quiet pyobjc-framework-Quartz pyobjc-framework-Cocoa
