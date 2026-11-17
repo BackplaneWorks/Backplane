@@ -506,9 +506,15 @@ try:
         check(bool(go) and bool(inst), f'update: Update installs bp.13 from the feed ({inst})')
         ro = wait_for(lambda: rects().get('kicad-update:reopen'), 30, 0.5)
         if ro: click(cwu[3][0] + ro['x'] + ro['w'] / 2, cwu[3][1] + 28 + ro['y'] + ro['h'] / 2)
-        f = wait_for(kicad_frame, 180, 0.5); shot('update-3-reopened')
-        p13 = [l for l in subprocess.run(['ps', '-axo', 'command='], capture_output=True, text=True).stdout.splitlines() if 'bp.13/' in l and OUT in l and 'kicad' in l.lower()]
-        check(bool(f) and bool(p13), f'update: the pane reopens on bp.13, KiCad over it ({"Reopen pressed" if ro else "no Reopen button"}; {len(p13)} bp.13 KiCad processes)')
+        def _frame_above_ours():  # as kicad_frame (defined after this block): a KiCad window directly above Backplane's
+            order = wins(); ours = next((i for i, w in enumerate(order) if cw and w[0] == cw[0]), None)
+            if ours is None: return None
+            k = [w for w in order[:ours] if w[1] not in (client.pid, hub.pid) and 'kicad' in w[2].lower()]
+            return k[0] if k and order.index(k[0]) == ours - 1 else None
+        nv = os.path.basename(os.path.dirname(os.path.dirname(inst))) if inst else '10.99.0-bp.13'
+        f = wait_for(_frame_above_ours, 180, 0.5); shot('update-3-reopened')
+        p13 = [l for l in subprocess.run(['ps', '-axo', 'command='], capture_output=True, text=True).stdout.splitlines() if f'{nv}/' in l and OUT in l and 'kicad' in l.lower()]
+        check(bool(f) and bool(p13), f'update: the pane reopens on {nv}, KiCad over it ({"Reopen pressed" if ro else "no Reopen button"}; {len(p13)} bp.13 KiCad processes)')
         raise SystemExit(1 if FAILS else 0)
     # ---- Edit: KiCad's frame over the pane, directly above our window ----
     def kicad_frame():
