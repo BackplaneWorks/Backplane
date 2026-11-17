@@ -109,6 +109,8 @@ else:
         ps = subprocess.run(['ps', '-axo', 'pid=,command='], capture_output=True, text=True).stdout.splitlines()
         return {client.pid} | {int(l.split()[0]) for l in ps if OUT in l and 'kicad' in l.lower()}
     def _guard(x, y, what):
+        # the client gone (its --exit-after, a crash): its window is gone too, and what is under the point now is the person's
+        if client.poll() is not None: raise SystemExit(f'REFUSED {what} at ({round(x)}, {round(y)}): the client has exited ({client.returncode})')
         mine = _our_pids()
         for w in helper('windows') or []:
             bx, by, bw, bh = w['bounds']
@@ -274,7 +276,7 @@ wait_for(lambda: subprocess.run(['curl', '-s', '-m1', '-o', '/dev/null', f'http:
 script = [{"select": 0}, {"wait": 2500}, {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit"}, {"wait": 900000}]
 json.dump(script, open(os.path.join(OUT, 'script.json'), 'w'))
 cenv = dict(os.environ, HOME=os.path.join(OUT, 'fh'), BACKPLANE_GPUI_ASSETS=ASSETS, BACKPLANE_GPUI_RECTS='1', BACKPLANE_KICAD_DEBUG='1')
-client = subprocess.Popen([CLIENT, '--url', f'http://127.0.0.1:{port}', '--token-file', os.path.join(OUT, 'home/token'), '--script', os.path.join(OUT, 'script.json'), '--exit-after', '900'],
+client = subprocess.Popen([CLIENT, '--url', f'http://127.0.0.1:{port}', '--token-file', os.path.join(OUT, 'home/token'), '--script', os.path.join(OUT, 'script.json'), '--exit-after', '5400' if os.environ.get('MAC_MODE') in ('bs', 'narrow', 'libs', 'front') else '900'],
                           env=cenv, stdout=open(os.path.join(OUT, 'client.log'), 'w'), stderr=subprocess.STDOUT); procs.append(client)
 
 
