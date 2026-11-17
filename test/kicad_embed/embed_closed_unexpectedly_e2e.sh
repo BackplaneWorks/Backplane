@@ -40,7 +40,7 @@ if [ "${CLOSED_EDIT:-agent}" = person ]; then
   python3 "$XINPUT_PY" click "$((FX + FW / 2))" "$((FY + FH / 2))"; sleep 0.6; python3 "$XINPUT_PY" key r; sleep 1; python3 "$XINPUT_PY" key Escape
   echo "INFO unsaved change: the person's own rotate (click at the canvas centre, R)"
 elif [ "${CLOSED_EDIT:-agent}" = raw ]; then
-  ADD=$(python3 "$IPC_PY" agent-add-track "$SOCK" 120.0 100.0 140.0 100.0 0.3 0 2>&1 | tail -1); echo "INFO unsaved change (straight to KiCad's socket, past the hub): $(echo "$ADD" | cut -c1-120)"
+  ADD=$(python3 "$IPC_PY" agent-add-track "$SOCK" 120.0 100.0 140.0 100.0 0.3 3 2>&1 | tail -1); echo "INFO unsaved change (straight to KiCad's socket, past the hub): $(echo "$ADD" | cut -c1-120)"
 else
   # an agent's commit through the hub's kicad_ipc tool, the person in Backplane's chrome (KiCad not the active window): agent saves by
   # default (the hub saves when it lands); agent_nosave passes save: false
