@@ -748,8 +748,8 @@ try:
                 row(E, 'find', 'works' if 'Find' in dl else ('wrong' if dl else 'nothing'), f'dialogs {dl}', t); key(K_ESC); time.sleep(1.0)
                 # the other menu chords: what they open or do (not gating; the trace says whether wx took them)
                 for name, code, fl, close in (('extra_print', 35, CMD, True), ('extra_preferences', 43, CMD, True), ('extra_open', 31, CMD, True),
-                                              ('extra_search_panel', 5, CMD, False), ('extra_zoom_in', 24, CMD, False), ('extra_zoom_out', 27, CMD, False),
-                                              ('extra_close_window', 13, CMD, False), ('extra_quit', 12, CMD, False)):
+                                              ('extra_search_panel', 5, CMD, False), ('extra_zoom_in', 24, CMD, False), ('extra_zoom_out', 27, CMD, False)) + (
+                                              (('extra_close_window', 13, CMD, False), ('extra_quit', 12, CMD, False)) if E == 'sch' else ()):
                     canvas(); n, t = press(code, fl); time.sleep(2.0)
                     dl = [e.get('detail') for e in since(n, 'ET_DIALOG_OPENED')]; c, d = ed(n)
                     other = sorted({e.get('type') for e in evs() if int(e.get('seq', 0)) > n} - {'ET_PROGRESS', 'ET_FRAME_DRAWN', 'ET_CHECKS_DONE', 'ET_FOCUS_IN', 'ET_FOCUS_OUT'})
@@ -787,7 +787,7 @@ try:
             if go:
                 r = rects().get('kicad-tab:SCH'); b = next((w for w in wins() if w[0] == cw[0]), cw)[3]
                 if r: click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2)
-                time.sleep(6); board_click(0.1, 0.9); table('sch', schf)
+                time.sleep(6); board_click(0.1, 0.9); table('sch', schf)  # Cmd+W and Cmd+Q last, in the schematic: they may end the editor
             RES['edit_keys'] = ROWS
             raise SystemExit(1 if FAILS else 0)
         if os.environ.get('BS_PROBE') == 'order':  # the ⌫ cases ordered so none needs Cmd+Z to restore the board (undo is lost on macOS)
