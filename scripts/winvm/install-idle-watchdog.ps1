@@ -5,8 +5,9 @@
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File install-idle-watchdog.ps1 -IdleMinutes 20
 #
-# bp-winbuild: -IdleMinutes 20.  bp-win: -IdleMinutes 30 -JobDir C:\bp\sess (its session agent's jobs).
-param([int]$IdleMinutes = 20, [string]$JobDir = '', [switch]$WhatIf)
+# bp-winbuild: -IdleMinutes 20.  bp-win (winvm-push.sh bp-win 30 ... as in docs/winbuild-vm.md): -IdleMinutes 30
+# -JobDir C:\bp\sess -RecentWriteDir C:\bp -ExtraBusyProcesses backplane-hub,backplane-gpui,backplane,kicad,...
+param([int]$IdleMinutes = 20, [string]$JobDir = '', [string]$ExtraBusyProcesses = '', [string]$RecentWriteDir = '', [switch]$WhatIf)
 $ErrorActionPreference = 'Stop'
 $dir = Join-Path $env:ProgramData 'bp-watchdog'
 New-Item -ItemType Directory -Force $dir | Out-Null
@@ -15,6 +16,9 @@ Copy-Item -Force (Join-Path $PSScriptRoot 'bp-idle-watchdog.ps1') $dir
 icacls $dir /inheritance:r /grant:r 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null
 $arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$dir\bp-idle-watchdog.ps1`" -IdleMinutes $IdleMinutes"
 if ($JobDir) { $arguments += " -JobDir `"$JobDir`"" }
+# Comma-separated names, e.g. 'backplane-hub,kicad,python'
+if ($ExtraBusyProcesses) { $arguments += " -ExtraBusyProcesses $ExtraBusyProcesses" }
+if ($RecentWriteDir) { $arguments += " -RecentWriteDir `"$RecentWriteDir`"" }
 if ($WhatIf) { $arguments += ' -WhatIf' }
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments
 $every = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1)

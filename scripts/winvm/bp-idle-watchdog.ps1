@@ -8,7 +8,9 @@
 # any VM it finds stopped.
 #
 # Busy means any of:
-#  - a process in -BusyProcesses (build tools; the GitHub runner's job worker) is running;
+#  - a process in -BusyProcesses (build tools; the GitHub runner's job worker; scp, sftp-server, robocopy) or
+#    -ExtraBusyProcesses (bp-win: Backplane, KiCad, python) is alive, in any session;
+#  - with -RecentWriteDir, a file or folder in that tree was written recently;
 #  - an ssh session is open (an established connection to port 22, a minute old or more);
 #  - an ssh login happened since (a lane's short polls: OpenSSH's event log);
 #  - an RDP session is active (an rdp-tcp# session; the auto-logon console session never counts);
@@ -19,7 +21,15 @@
 param(
     [int]$IdleMinutes = 20,
     [string[]]$BusyProcesses = @('cl', 'link', 'lib', 'ninja', 'cmake', 'ctest', 'vcpkg', 'msbuild',
-        'ccache', 'sccache', 'rc', 'mt', 'git', 'git-lfs', 'Runner.Worker'),
+        'ccache', 'sccache', 'rc', 'mt', 'git', 'git-lfs', 'Runner.Worker',
+        # a copy in progress
+        'scp', 'sftp-server', 'robocopy'),
+    # More process names that are busy while alive, in any session, the console's included (bp-win: the GUI
+    # tests' Backplane, KiCad and the python harness, which may wait on a window for minutes using no CPU)
+    [string[]]$ExtraBusyProcesses = @(),
+    # A folder (bp-win: C:\bp): recent file writes and folder changes both count, including overwrites.
+    [string]$RecentWriteDir = '',
+    [int]$RecentWriteMinutes = 30,
     # A session agent's job folder (bp-win: C:\bp\sess): a job waiting in in\ or running (out\<id>.ps1
     # with no out\<id>.done, written in the last 6 hours) is busy
     [string]$JobDir = '',
@@ -51,7 +61,9 @@ if (!$state -or $state.boot -ne $bootS) {
 
 $why = @()
 $procs = Get-Process -ErrorAction SilentlyContinue
-$names = $BusyProcesses | ForEach-Object { $_.ToLowerInvariant() }
+# powershell -File passes 'a,b,c' as one string: split it
+$names = (@($BusyProcesses) + @($ExtraBusyProcesses)) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } |
+    ForEach-Object { $_.ToLowerInvariant() }
 $busyProcs = $procs | Where-Object { $names -contains $_.ProcessName.ToLowerInvariant() } |
     Select-Object -ExpandProperty ProcessName -Unique
 if ($busyProcs) { $why += 'process ' + ($busyProcs -join ',') }
@@ -65,6 +77,32 @@ if ($ssh.Count) { $why += "ssh x$($ssh.Count)" }
 $rdp = @(qwinsta 2>$null | Select-String -Pattern '^\s*>?rdp-tcp#\d+\s+\S+\s+\d+\s+Active' )
 if ($rdp.Count) { $why += "rdp x$($rdp.Count)" }
 
+if ($RecentWriteDir) {
+    $cut = $now.AddMinutes(-$RecentWriteMinutes)
+    $recent = $null
+    try {
+        $pending = New-Object 'System.Collections.Generic.Stack[System.IO.DirectoryInfo]'
+        $pending.Push((New-Object IO.DirectoryInfo $RecentWriteDir))
+        while ($pending.Count -and !$recent) {
+            $folder = $pending.Pop()
+            if (!$folder.Exists) { throw "Missing activity folder $($folder.FullName)" }
+            if ($folder.LastWriteTime -gt $cut) { $recent = $folder.FullName; break }
+            $entries = $folder.EnumerateFileSystemInfos().GetEnumerator()
+            try {
+                while ($entries.MoveNext()) {
+                    $entry = $entries.Current
+                    if ($entry.LastWriteTime -gt $cut) { $recent = $entry.FullName; break }
+                    if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                        # Do not traverse junctions (cycles/outside the tree), or infer idle from an incomplete scan.
+                        $recent = "$($entry.FullName) (junction: counted busy)"; break
+                    }
+                    if ($entry -is [IO.DirectoryInfo]) { $pending.Push($entry) }
+                }
+            } finally { $entries.Dispose() }
+        }
+    } catch { $recent = "$RecentWriteDir (unreadable: counted busy)" }
+    if ($recent) { $why += "written $recent" }
+}
 if ($JobDir -and (Test-Path $JobDir)) {
     $waiting = @(Get-ChildItem (Join-Path $JobDir 'in') -Filter *.ps1 -ErrorAction SilentlyContinue)
     $running = @(Get-ChildItem (Join-Path $JobDir 'out') -Filter *.ps1 -ErrorAction SilentlyContinue | Where-Object {
@@ -72,14 +110,14 @@ if ($JobDir -and (Test-Path $JobDir)) {
     if ($waiting.Count + $running.Count) { $why += "session job x$($waiting.Count + $running.Count)" }
 }
 
-# A hold (winvm-hold.sh, e.g. a release window whose GitHub jobs bp-win's runner takes): busy until its
-# time, never more than 12 hours ahead
+# An unexpired hold always wins. Never delete the file here: another lane may be refreshing it.
+# winvm-hold.sh limits new holds to 12 hours; a malformed hold is treated as busy until repaired.
 $holdPath = Join-Path $dir 'hold-until.txt'
 if (Test-Path $holdPath) {
-    try { $until = [datetime](Get-Content $holdPath -Raw).Trim() } catch { $until = $null }
-    if ($until -and $until -gt $now -and $until -lt $now.AddHours(12)) { $why += "hold until $($until.ToString('o'))" }
-    elseif (!$until -or $until -le $now) { Remove-Item -Force $holdPath; Log 'hold expired' }
-    else { Log "hold $until is more than 12 h ahead: ignored" }
+    try {
+        $until = [datetime](Get-Content $holdPath -Raw).Trim()
+        if ($until -gt $now) { $why += "hold until $($until.ToString('o'))" }
+    } catch { $why += 'hold unreadable: counted busy' }
 }
 
 $busy = $why.Count -gt 0
