@@ -59,7 +59,7 @@ pub fn take(thread: &str) -> Option<(u64, String)> { marks().lock().unwrap().rem
 mod tests {
     use super::*;
     #[test] fn the_log_is_lines_and_sums() {
-        let d = std::env::temp_dir().join(format!("ksim-log-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); let p = file(&d);
+        let d = crate::plat::tmp::dir("ksim-log"); let p = file(&d);
         assert!(read(&p).is_empty() && p.ends_with("logs/sim.jsonl"));
         let entries = [json!({"op": "models", "ok": true, "hub_ms": 12, "runs": 0, "bytes": 400, "lookups": [{"ref": "U1", "found": [{"from": "project"}]}, {"ref": "U2", "found": []}]}),
             json!({"op": "run", "ok": true, "hub_ms": 40, "runs": 1, "analysis": "AC", "status": "SIM_OK", "ngspice_ms": 8.0, "bytes": 300, "timings": {"run_ms": 5.0}}),
@@ -74,6 +74,5 @@ mod tests {
         assert_eq!((summary(&all, "t2")["actions"].as_u64(), summary(&all, "t2")["turns"].as_array().map(|t| t.len()), summary(&all, "nobody")["actions"].as_u64()), (Some(2), Some(1), Some(0)));
         assert_eq!(turn_line(1, "t", 2, ""), json!({"at": 1, "thread": "t", "turn": 2, "kind": "turn", "tokens": null, "cost_nusd": null, "context": null}));
         mark("tx", 5, "a"); mark("tx", 6, "b"); assert_eq!((take("tx"), take("tx")), (Some((5, "a".to_string())), None));
-        let _ = std::fs::remove_dir_all(&d);
     }
 }

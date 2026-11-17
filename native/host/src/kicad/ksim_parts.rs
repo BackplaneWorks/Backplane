@@ -388,7 +388,7 @@ mod tests {
         assert_eq!(pins_by_name(&["OUT".into()], &[("1".into(), "OUT".into()), ("7".into(), "OUT".into())]), None, "two pins of the name do not settle it");
     }
     #[test] fn models_are_found_in_the_project_and_a_fetched_one_is_kept_with_its_source() {
-        let d = std::env::temp_dir().join(format!("ksim-parts-{}-{:?}", std::process::id(), std::thread::current().id())); let _ = std::fs::remove_dir_all(&d);
+        let d = crate::plat::tmp::dir("ksim-parts");
         std::fs::create_dir_all(d.join("models/ti")).unwrap(); std::fs::create_dir_all(d.join("firmware/lib")).unwrap(); std::fs::create_dir_all(d.join(".git")).unwrap();
         std::fs::write(d.join("opamps.lib"), LIB).unwrap(); std::fs::write(d.join("models/ti/tps.cir"), ".subckt TPS54331 VIN EN SS VSENSE COMP GND PH BOOT\n.ends\n").unwrap();
         std::fs::write(d.join("firmware/lib/x.lib"), ".model HIDDEN D\n").unwrap(); std::fs::write(d.join(".git/x.lib"), ".model GITTY D\n").unwrap(); std::fs::write(d.join("notes.txt"), ".model NOTE D\n").unwrap(); std::fs::write(d.join("page.lib"), "<html>login</html>").unwrap();
@@ -410,7 +410,6 @@ mod tests {
         assert!(store(&d, "a.lib", ".model X D\n", "", "", 1).unwrap_err().contains("where the model came from"));
         // the stored model is found by the next scan, as the project's
         assert!(scan(&d, 3).iter().any(|(p, _)| p.ends_with("sim/models/LM358.lib")));
-        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn groups_of_parts_that_do_not_simulate() {
         assert_eq!((in_group("connectors", "J3", "Connector_Generic:Conn_01x04"), in_group("connectors", "U1", "Connector:USB_C_Receptacle"), in_group("connectors", "R1", "Device:R"), in_group("connectors", "X1", "Device:Crystal")), (Some(true), Some(true), Some(false), Some(false)));

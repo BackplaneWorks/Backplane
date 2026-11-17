@@ -777,7 +777,7 @@ mod tests {
     fn num(re: f64, im: f64) -> Cx { Cx(re, im) }
     impl Cx { fn add(self, o: Cx) -> Cx { Cx(self.0 + o.0, self.1 + o.1) } fn sub(self, o: Cx) -> Cx { Cx(self.0 - o.0, self.1 - o.1) } fn mul(self, o: Cx) -> Cx { Cx(self.0 * o.0 - self.1 * o.1, self.0 * o.1 + self.1 * o.0) }
         fn div(self, o: Cx) -> Cx { let d = o.0 * o.0 + o.1 * o.1; Cx((self.0 * o.0 + self.1 * o.1) / d, (self.1 * o.0 - self.0 * o.1) / d) } }
-    fn tmp(tag: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("ksim-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
+    fn tmp(tag: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("ksim-{tag}")) }
     fn go_in(f: &Fake, dir: &Path, ops: Value) -> (Result<Value, String>, Vec<Value>) {
         let ctx = Ctx { project_dir: dir.to_path_buf(), libs: vec![], now: 1_800_000_000, log: None, gui: false };
         tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap().block_on(run(f, "/p/t.kicad_sch", &json!({"ops": ops}), &ctx))
@@ -846,7 +846,6 @@ mod tests {
         assert_eq!(rows.iter().find(|p| p["ref"] == "R1").unwrap(), &json!({"ref": "R1", "value": "10k", "device": "R"}));
         assert_eq!(go(&f, json!([{"models": ["C1"]}]))["results"][0]["models"]["parts"], json!([{"ref": "C1", "value": "10n", "device": "C"}]));
         assert_eq!(go_in(&f, &d, json!([{"models": "R99"}])).0.unwrap_err(), "op 1 (models): no part R99 in this schematic.");
-        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn excluding_groups_and_assigning_models_saves_and_says_what_is_left() {
         let f = fake(); let out = go(&f, json!([{"exclude": ["connectors", "test_points", "mounting_holes"]}, {"model": "U1", "device": "r", "params": {"r": "1Meg"}}]));
@@ -884,7 +883,6 @@ mod tests {
         assert!(go_in(&fake(), &d, json!([{"model": "U1", "lib": "sim/models/lm358.lib"}])).0.unwrap_err().contains("which model of sim/models/lm358.lib? name one: LM358, LM358_5"));
         assert!(go_in(&fake(), &d, json!([{"model": "U1", "lib": "sim/models/lm358.lib", "name": "TL072"}])).0.unwrap_err().contains("has no model `TL072`; it has LM358, LM358_5"));
         assert!(go_in(&fake(), &d, json!([{"model": "U1", "lib": "nope.lib"}])).0.unwrap_err().contains("cannot read the model file"));
-        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn a_fetched_model_is_kept_with_its_source_and_assigned() {
         let d = tmp("import"); let f = fake();
@@ -904,7 +902,6 @@ mod tests {
         for (text, want) in [("<html><body>Sign in to download</body></html>", "stop and ask the person"), ("$CDNENCSTART_ADV3 xx", "encrypted"), ("see datasheet", "no .subckt or .model")] {
             let e = go_in(&fake(), &d, json!([{"import": {"text": text, "url": "https://x"}, "to": "U1"}])).0.unwrap_err(); assert!(e.contains(want), "{e}") }
         assert!(go_in(&fake(), &d, json!([{"import": {"text": ".model X D\n"}}])).0.unwrap_err().contains("where the model came from") && go_in(&fake(), &d, json!([{"import": {"url": "https://x"}}])).0.unwrap_err().contains("`file` (a path) or `text`"));
-        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn a_run_answers_numbers_not_vectors() {
         let f = fake(); let (r, log) = go_in(&f, Path::new("/x"), json!([{"run": ".ac dec 20 1 10meg", "signals": ["V(out)"], "measures": {"fc": "corner V(out)", "dc": {"dc_gain": "V(out)/V(in)"}, "g10k": "gain_at V(out) x=10k"}}]));
