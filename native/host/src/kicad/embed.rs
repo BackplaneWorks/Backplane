@@ -279,6 +279,8 @@ pub fn start_error(tail: &str) -> Option<String> {
         .find(|l| { let s = l.to_ascii_lowercase(); ["error", "fatal", "failed", "cannot", "can't", "could not", "not found", "denied", "abort", "segmentation"].iter().any(|w| s.contains(w)) })
         .map(|l| l.chars().take(200).collect())
 }
+/// bp.13.1's exit when KiCad's windows went with their container: it saved its autosave and local history first, and says so.
+pub fn windows_lost(code: i32, tail: &str) -> bool { code == 3 && tail.contains("windows lost") }
 /// How a process ended, for the person: a signal by its name, else its exit code.
 pub fn exit_how(status: &std::process::ExitStatus) -> (i32, String) {
     #[cfg(unix)] { use std::os::unix::process::ExitStatusExt; if let Some(sig) = status.signal() {
@@ -2141,6 +2143,11 @@ impl Actor {
                 let was_starting = s.state == "starting";
                 let old = s.clone();
                 *s = s.clone().exited_how(code, &how, &tail);
+                // bp.13.1: KiCad whose windows were lost with their container saved its autosave and local history and exited with code 3
+                // ("kicad embed: windows lost"): started again on the project at once, with no window to hold it (the next Edit adopts it),
+                // so KiCad offers its Recover Unsaved Changes; the person is never left with a dead pane
+                let windows_lost = windows_lost(code, &tail) && s.state == CLOSED;
+                if windows_lost { s.container = 0; s.reason = "KiCad lost its window and is starting again to offer back the unsaved changes".into(); }
                 let snap = s.clone();
                 self.cleanup_session_sockets(&old);
                 if let Some(tx) = reply {
@@ -2151,6 +2158,11 @@ impl Actor {
                 if was_starting {
                     let why = if snap.reason.is_empty() { "KiCad exited before becoming ready".to_string() } else { snap.reason.clone() };
                     self.finish_attach_waiters(&pro, Err(why));
+                }
+                if windows_lost {
+                    eprintln!("kicad embed: {pro}: KiCad lost its windows (code 3): starting it again");
+                    let (me, hub) = (self.me.clone(), self.hub.clone());
+                    tokio::spawn(async move { let env = ipc::runtime(&hub).await; let (tx, _rx) = oneshot::channel(); let _ = me.send(Msg::Restart { client: 0, pro, env, reply: tx }); });
                 }
             }
             Msg::Tick => {
@@ -3434,6 +3446,11 @@ mod tests {
         assert!(history_newer(&d), "a snapshot after the save");
         std::thread::sleep(std::time::Duration::from_millis(20)); std::fs::write(d.join("a.kicad_pcb"), "y").unwrap();
         assert!(!history_newer(&d), "saved after the snapshot");
+    }
+    #[test] fn kicad_that_lost_its_windows_is_started_again_only_when_it_says_so() {
+        assert!(windows_lost(3, "x\nkicad embed: windows lost\n"));
+        assert!(!windows_lost(3, "some other exit 3"), "code 3 alone is not it");
+        assert!(!windows_lost(137, "kicad embed: windows lost"));
     }
     #[test] fn a_failed_start_is_said_by_an_error_line_never_by_start_up_noise() {
         let st = Session { state: "starting".into(), ..Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0) };
