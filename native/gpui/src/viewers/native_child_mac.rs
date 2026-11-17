@@ -123,6 +123,8 @@ pub fn container(parent: u64) -> Option<u64> { (parent != 0).then_some(parent) }
 pub fn container_for(parent: u64, _key: &str) -> Option<u64> { container(parent) }
 pub fn move_frames(_old: u64, _new: u64) {}
 pub fn destroy(_container: u64) {}
+/// macOS: KiCad's frames are its own windows (no parenting): nothing to move out (the integrator, Nov 16).
+pub fn release_holders(_container: Option<u64>) {}
 pub fn adopt(_pid: u32, _container: u64, _toplevel: u64) -> Vec<u64> { vec![] }
 pub fn dialogs(_pid: u32, _container: u64, _toplevel: u64) {}
 /// KiCad centres its dialogs on our window itself (MakeTransientFor); the hub's ET_DIALOG events are the dialog list, as on Windows.

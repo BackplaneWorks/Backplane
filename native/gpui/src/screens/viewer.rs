@@ -208,7 +208,7 @@ fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target
     }
     // a window that cannot hold it (the hub on another machine, another machine's thread): KiCad opens there, and the button says on whose screen
     if offer == KicadOffer::There { row = row.child(btn(cx, light, "kicad-open".into(), kicad_open_label(target.map(|t| t.addr.as_str()), thread["mark"]["name"].as_str()), false, kicad_open(viewer))); }
-    row.child(div().id("viewer-close").size(crate::scale::tpx(super::head::BTN_H)).flex().items_center().justify_center().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip(&trs("Close the viewer"), "", light))
+    row.child(crate::ui::with_rect(div().id("viewer-close"), || "ui:CloseViewer".to_string()).size(crate::scale::tpx(super::head::BTN_H)).flex().items_center().justify_center().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip(&trs("Close the viewer"), "", light))
         .child(crate::art::icon("x", 14., c("dim"))).on_click(cx.listener(|this, _, _, cx| { this.screens.rail_pending = Some(String::new()); this.screens.rail_at = Some(std::time::Instant::now()); let _ = this.tx.try_send(close()); cx.notify(); })))
         .into_any_element()
 }

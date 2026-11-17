@@ -1107,7 +1107,8 @@ impl KicadPane {
         if self.keys { nc::focus(self.toplevel); self.keys = false; }
         // kept, unmapped, with KiCad's frames in it (still attached in the hub): the next Edit of this project in this window maps it at once
         // (a fork that maps locally; the oldest kept beyond KEEP is let go as before)
-        if self.info["mode"] == "fork" && self.info["local_map"] == true && self.info["state"] == "ready" && self.toplevel == self.home {
+        // BACKPLANE_GPUI_KICAD_NO_KEEP=1 (e2e): the other way, the container destroyed (as for another window, or a start not ready)
+        if self.info["mode"] == "fork" && self.info["local_map"] == true && self.info["state"] == "ready" && self.toplevel == self.home && std::env::var_os("BACKPLANE_GPUI_KICAD_NO_KEEP").is_none() {
             let rect = self.placed.as_ref().and_then(|(at, _, _)| *at);
             for old in keep(Kept { toplevel: self.toplevel, project: self.project.clone(), container: c, ever_shown: self.ever_shown.clone(), rect }) {
                 self.rpc("editor.kicad.detach", json!({"project": old.project})); nc::destroy(old.container);
@@ -1145,6 +1146,10 @@ impl KicadPane {
     }
 }
 impl Drop for KicadPane { fn drop(&mut self) { self.detach(); } }
+
+/// At quit (the window's close, the app's quit): KiCad's holders out of every container of this window (nc::release_holders), before the
+/// process ends and the X server destroys its windows with them.
+pub fn release_all() { nc::release_holders(None); eprintln!("GPUI_LOG {}", json!({"kicad_release_at_quit": true})); }
 
 impl Render for KicadPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
