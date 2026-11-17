@@ -101,10 +101,13 @@ fn kills_by_name(line: &str) -> bool {
     let age = |p: &Path, when: &str| { let o = Command::new("find").arg(p).args(["-depth", "-exec", "touch", "-h", "-d", when, "{}", "+"]).output().unwrap(); assert!(o.status.success()); };
     age(&repo, "3 days ago"); age(&bt, "3 days ago"); for i in 0..6 { age(&scc.join(format!("o{i}")), &format!("{} days ago", 10 - i)); }
     age(&wt("recent").join("native/host/target"), "2 hours ago"); age(&bt.join("new"), "1 hour ago");
-    // the holders outlive every run (Nov 17: `sleep 120` ran out while a slow Boat box's runs took longer, and what they held went); killed however the test ends
-    struct Holder(std::process::Child); impl Drop for Holder { fn drop(&mut self) { let _ = self.0.kill(); let _ = self.0.wait(); } }
-    let shell = Holder(Command::new("sleep").arg("3600").current_dir(wt("busy")).spawn().unwrap());
-    let open = Holder(Command::new("sleep").arg("3600").stdin(fs::File::open(bt.join("held/log")).unwrap()).spawn().unwrap());
+    // The holders block on pipes kept open by the test, with no elapsed-time limit.
+    // sleep 120 expired in loaded runs (190–580 s), making "busy" and "held" look idle.
+    struct Holder(std::process::Child);
+    impl Drop for Holder { fn drop(&mut self) { let _ = self.0.kill(); let _ = self.0.wait(); } }
+    let holder = || { let mut c = Command::new("sh"); c.args(["-c", "read -r line"]).stdin(std::process::Stdio::piped()); c };
+    let shell = Holder(holder().current_dir(wt("busy")).spawn().unwrap());
+    let open = Holder(holder().stdout(fs::File::open(bt.join("held/log")).unwrap()).spawn().unwrap());
     let script = root().join("scripts/worktree-gc.sh"); fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).ok();
     let run_with = |apply: bool, extra: &[(&str, String)]| { let mut c = Command::new(&script); if apply { c.arg("--apply"); }
         // never the machine's own: its data drive, shared targets, home bp-tmp, or its free space deciding what goes (Nov 17: under 150 GB free the pressure rule fired here)
@@ -114,12 +117,17 @@ fn kills_by_name(line: &str) -> bool {
         assert!(o.status.success(), "{o:?}"); String::from_utf8_lossy(&o.stdout).to_string() };
     let run = |apply: bool| run_with(apply, &[("GC_PAUSE", d.join("no-pause").to_string_lossy().to_string())]);
     let dry = run(false); let dry2 = run(false);
-    // the guard runs it through a link ($DEV/janitor -> scripts/worktree-gc.sh): Nov 16 that failed ("lib-bptmp.sh: No such file", "not a git repository") when the disk was nearly full
-    let link = d.join("janitor"); std::os::unix::fs::symlink(&script, &link).unwrap();
-    // (GC_REPO: the test's repo; a Boat box's copy of the tree has no .git, so the clone beside the script cannot be found there: Nov 17, every Boat gate failed on it)
-    let o = Command::new(&link).current_dir(&d).env("GC_REPO", &repo).env("BP_DATA", d.join("data")).env("BP_TARGET", d.join("bptarget")).env("GC_LEGACY_TMP", "").env("GC_LOW_GB", "0").env("BP_TMP", &bt).env("GC_TMP_BASES", &bt).env("GC_LOCK", d.join("lock")).env("SCCACHE_DIR", &scc).env("GC_PAUSE", d.join("no-pause")).env("GC_CTIME", "0").output().unwrap();
+    // the guard runs it through a link ($DEV/janitor -> scripts/worktree-gc.sh): Nov 16 that failed ("lib-bptmp.sh: No such file", "not a git repository") when the disk was nearly full.
+    // The link names the script inside the test's own clone (the same file, beside its lib-bptmp.sh), so the clone it must find beside the resolved script is one this test
+    // made: a checkout of the tree that git cannot read (the land gate's copy on a Boat box has no .git) or one whose repository came and went mid-test (a probe of the tree
+    // after the run said "a repository" while the run had found none) decides nothing here.
+    let here = repo.join("scripts"); fs::create_dir_all(&here).unwrap();
+    for f in ["worktree-gc.sh", "lib-bptmp.sh"] { fs::copy(root().join("scripts").join(f), here.join(f)).unwrap(); fs::set_permissions(here.join(f), fs::Permissions::from_mode(0o755)).unwrap(); }
+    let link = d.join("janitor"); std::os::unix::fs::symlink(here.join("worktree-gc.sh"), &link).unwrap();
+    let o = Command::new(&link).current_dir(&d).env_remove("GC_REPO").env("BP_DATA", d.join("data")).env("BP_TARGET", d.join("bptarget")).env("GC_LEGACY_TMP", "").env("GC_LOW_GB", "0").env("GC_WORK_NOTES", d.join("work")).env("BP_TMP", &bt).env("GC_TMP_BASES", &bt).env("GC_LOCK", d.join("lock")).env("SCCACHE_DIR", &scc).env("GC_PAUSE", d.join("no-pause")).env("GC_CTIME", "0").output().unwrap();
     let (lo, le) = (String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
-    assert!(o.status.success() && lo.contains("would have freed") && !le.contains("No such file") && !le.contains("lib-bptmp"), "it runs through the guard's link:\n{lo}\n{le}");
+    assert!(o.status.success() && lo.contains("would have freed") && !le.contains("No such file") && !le.contains("not a git repository"), "it runs through the guard's link:\n{lo}\n{le}");
+    assert!(lo.contains("worktree") && lo.contains("/landed"), "through the link it finds the clone beside the script it resolves:\n{lo}");
     assert!(dry2.contains("worktree") && dry2.contains("/landed"), "a run does not make a worktree look used (git status writes no index):\n{dry2}");
     assert!(dry.contains("would have freed") && wt("landed").exists() && bt.join("aot-build").exists(), "a dry run changes nothing:\n{dry}");
     // paused (a release night): the /tmp and bp-tmp sweeps stop, and say why
