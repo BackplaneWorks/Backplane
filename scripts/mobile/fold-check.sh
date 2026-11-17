@@ -4,7 +4,7 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd); MAIN=${MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}; M=${M:-$MAIN/build/gpui/mac-ssh}; D=bp-fold-check
 $M hs-mac-mini "mkdir -p $D"
-RSYNC_RSH=$M rsync -a $ROOT/mobile/ios/Backplane/DataModels.swift $ROOT/mobile/ios/Backplane/DataFold.swift $ROOT/test/mobile/fold_labels.json hs-mac-mini:$D/
+RSYNC_RSH=$M rsync -a $ROOT/mobile/ios/Backplane/DataModels.swift $ROOT/mobile/ios/Backplane/Copyable.swift $ROOT/mobile/ios/Backplane/DataFold.swift $ROOT/test/mobile/fold_labels.json hs-mac-mini:$D/
 $M hs-mac-mini "cd $D && cat > main.swift" <<'SW'
 import Foundation
 struct Row: Decodable { var step: Bool?; var name: String; var text: String }
@@ -27,4 +27,4 @@ if case .fold(let f) = rows[0], f.live { print("an earlier run is not live"); ba
 if case .fold(let f) = rows[2], !f.live { print("the last run of a running turn is live"); bad += 1 }
 print("\(cases.count) labels, \(bad) wrong"); exit(bad == 0 ? 0 : 1)
 SW
-$M hs-mac-mini "cd $D && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swiftc -o fold DataModels.swift DataFold.swift main.swift 2>&1 | grep -v warning | head -20; ./fold"
+$M hs-mac-mini "cd $D && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swiftc -o fold DataModels.swift Copyable.swift DataFold.swift main.swift 2>&1 | grep -v warning | head -20; ./fold"

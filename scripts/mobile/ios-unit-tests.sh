@@ -21,16 +21,17 @@ run badge-symbols BadgeSymbolsTests.swift "$ROOT/native/host/src/present/badge.r
 run thread-find ThreadFindTests.swift "" ThreadFind.swift
 run voice-edit VoiceEditTests.swift "$ROOT/test/fixtures/voice-edits.json" VoiceEdit.swift
 run plot-parts PlotPartsTests.swift "" Plot.swift PlotParts.swift
-run wire-json WireJSONTests.swift "" WireJSON.swift DataModels.swift ThreadGroups.swift TermModels.swift Outbox.swift
+run wire-json WireJSONTests.swift "" WireJSON.swift DataModels.swift ThreadGroups.swift TermModels.swift Outbox.swift Copyable.swift
 run term-stream TermStreamTests.swift "" TermStream.swift
 run vt VtTests.swift "" Vt.swift
 run term-card TermCardTests.swift "" Vt.swift TermCard.swift
+run copyable CopyableTests.swift "" Copyable.swift TermPrefill.swift Vt.swift
 run migration MigrationTests.swift "" Migration.swift
 S=$ROOT/mobile/ios/Shared; run tr TrTests.swift "" Tr.swift TrCatalog.swift; S=$ROOT/mobile/ios/Backplane
 run viewer-backdrop ViewerBackdropTests.swift "" ViewerBackdrop.swift
 run browser-input BrowserInputTests.swift "$ROOT/test/mobile/browser_input_cases.json" BrowserInput.swift
 run google-loop GoogleLoopTests.swift "" GoogleLoopLogic.swift
-run swarm-model SwarmModelTests.swift "" SwarmModel.swift
+run swarm-model SwarmModelTests.swift "" SwarmModel.swift Copyable.swift
 run section-menu SectionMenuTests.swift "" SectionMenu.swift
 run mcp-page McpPageTests.swift "" McpPage.swift
 run cat-pick CatPickTests.swift "" CatPick.swift

@@ -852,8 +852,13 @@ struct DataThreadView: View {
         .task(id: "\(thread?.state ?? "")|\(client.conn == .online)") { if client.conn == .online, thread?.state != "working" { buy = await client.buyOf(id) } }
         .background(BackplaneDesign.background)
         .dataBar(thread?.title.isEmpty == false ? thread!.title : Tr.t("Thread"))
+        // Run in terminal in this chat (a project's thread, a bot's chat, the uberbot's): its own shell (term.new {chat})
+        .environment(\.runInTerminal, dRunIn(client, chat: ChatTerm.key(thread: id), title: thread?.title ?? ""))
         // Buy it when there is something to buy, the thread's menu, the viewers in the corner (the person's order, 11-04)
         .toolbar {
+            if client.has("termChat") {
+                ToolbarItem(placement: .topBarTrailing) { DChatTermButton(client: client, chat: ChatTerm.key(thread: id), title: thread?.title ?? "") }.dflat()
+            }
             if let b = buy {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { startBuy() } label: { Image(systemName: "cart").foregroundStyle(BackplaneDesign.accent) }.disabled(buying).accessibilityLabel(Tr.t(b.label)).accessibilityIdentifier("data.thread.buy")
@@ -1258,11 +1263,11 @@ struct DataEntryRow: View {
             }.padding(.vertical, 4).accessibilityIdentifier("data.entry.user")
         case "assistant":
             VStack(alignment: .leading, spacing: 4) {
-                DataMarkdown(text: entry.text, thread: thread, entry: entry.id, images: entry.live ? [] : entry.images)
+                DataMarkdown(text: entry.text, thread: thread, entry: entry.id, images: entry.live ? [] : entry.images, copy: Copyable.list(entry.copy, hubHasCopy: client.has("copy")))
                 // the pictures the reply names (the hub lists them as attachments); tap for the full size
                 ForEach(entry.attachments) { a in DataAttachmentImage(client: client, attachment: a) }
                 if !entry.live { Text(dStamp(entry.at)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
-            }.padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("data.entry.assistant")
+            }.padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).accessibilityElement(children: .contain).accessibilityIdentifier("data.entry.assistant")
         case "tool", "step":
             DataToolRow(entry: entry).accessibilityIdentifier("data.entry.tool")
         case "ask":
@@ -1277,6 +1282,8 @@ struct DataEntryRow: View {
                 DLinkText(text: Tr.t(entry.text), size: 12, thread: thread)
                 Spacer(minLength: 0)
             }.foregroundStyle(entry.tone == "error" ? BackplaneDesign.bad : BackplaneDesign.dim).padding(.vertical, 3)
+            // a notice's code (an error naming a command to run, a path): copy buttons, and Run in terminal for a command
+            DCopyPieces(pieces: Copyable.pieces(hub: Copyable.list(entry.copy, hubHasCopy: client.has("copy")), text: entry.text))
         }
     }
 }

@@ -170,6 +170,8 @@ ios.pair.code.connect	Connect with code	コードで接続	Conectar con código
 ios.history	Chats with no project	プロジェクトなしのチャット	Chats sin proyecto
 ios.copied	Copied	コピーしました	Copiado
 ios.copy.code	Copy code	コードをコピー	Copiar código
+ios.copy.run	Run in terminal	ターミナルで実行	Ejecutar en la terminal
+ios.term.fullscreen	The terminal is running a full-screen program: quit it, then try again.	ターミナルで全画面のプログラムが動いています。終了してからもう一度お試しください。	La terminal está ejecutando un programa a pantalla completa: ciérralo y vuelve a intentarlo.
 ios.delete.dots	Delete…	削除…	Eliminar…
 ios.devices	Devices	デバイス	Dispositivos
 ios.pad.hint.eraser	Drag over what to erase	消したいところをなぞる	Arrastra sobre lo que quieras borrar

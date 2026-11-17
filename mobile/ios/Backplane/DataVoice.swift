@@ -50,13 +50,15 @@ struct DVoiceRow: Identifiable {
     var fields: [DVoiceField] = []
     /// a code to scan (devices.page): one string of "0"/"1" a module row, and the line under it
     var qr: [String] = [], qrnote = ""
+    /// the note is a value (a path, an id, a link): what its copy button copies (the hub's `copy`)
+    var copy = ""
     /// the hub's `rows` array (voice.page, machines.page, devices.page)
     static func parse(_ v: Any?) -> [DVoiceRow] {
         (v as? [[String: Any]] ?? []).enumerated().map { i, r in
             DVoiceRow(id: i, label: r["label"] as? String ?? "", note: r["note"] as? String ?? "", tone: r["tone"] as? String ?? "",
                       buttons: (r["buttons"] as? [[String: Any]] ?? []).map { ($0["label"] as? String ?? "", $0["action"] as? String ?? "", $0["value"] as? String ?? "", $0["on"] as? Bool ?? false) },
                       fields: (r["fields"] as? [[String: Any]] ?? []).map(DVoiceField.init),
-                      qr: r["qr"] as? [String] ?? [], qrnote: r["qrnote"] as? String ?? "")
+                      qr: r["qr"] as? [String] ?? [], qrnote: r["qrnote"] as? String ?? "", copy: r["copy"] as? String ?? "")
         }
     }
 }
@@ -544,7 +546,9 @@ struct DPageRowView: View {
         let r = row
         VStack(alignment: .leading, spacing: 6) {
             Text(Tr.t(r.label)).dmono(13)
-            if !note.isEmpty { Text(Tr.t(note)).dmono(11).foregroundStyle(noteTone == "bad" ? BackplaneDesign.bad : noteTone == "warn" ? BackplaneDesign.warn : BackplaneDesign.dim).fixedSize(horizontal: false, vertical: true) }
+            // a note that is a value (the hub's `copy`): the value as it is, with its copy button; else the note in the reader's words
+            if !note.isEmpty, !r.copy.isEmpty, note == r.note { DCopyValue(shown: note, value: r.copy).accessibilityIdentifier(idPrefix + ".copy") }
+            else if !note.isEmpty { Text(Tr.t(note)).dmono(11).foregroundStyle(noteTone == "bad" ? BackplaneDesign.bad : noteTone == "warn" ? BackplaneDesign.warn : BackplaneDesign.dim).fixedSize(horizontal: false, vertical: true) }
             if let t = told { Text(t).dmono(11).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier(idPrefix + ".told") }
             if !r.qr.isEmpty { DQRCode(rows: r.qr).accessibilityIdentifier(idPrefix + ".qr") }
             if !r.qrnote.isEmpty { Text(Tr.t(r.qrnote)).dmono(12).foregroundStyle(BackplaneDesign.dim).textSelection(.enabled) }
@@ -559,7 +563,10 @@ struct DPageRowView: View {
             if !r.buttons.isEmpty {
                 FlowRow(spacing: 6) {
                     ForEach(Array(r.buttons.enumerated()), id: \.offset) { _, b in
+                        // a copy press (Copy link, Copy code, Copy beside a command): the copy button, its icon and its Copied check
+                        if DPageLocal.copied(b.action) { DCopyButton(text: b.value, label: Tr.t(b.label)).dbox().accessibilityIdentifier(idPrefix + ".page." + b.action) } else {
                         Button(Tr.t(b.label)) { press(b) }.buttonStyle(DButton(primary: b.on, compact: compact)).accessibilityAddTraits(b.on ? .isSelected : []).accessibilityIdentifier(idPrefix + ".page." + b.action)
+                        }
                     }
                 }
             }

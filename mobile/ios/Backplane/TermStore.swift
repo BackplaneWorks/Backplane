@@ -33,12 +33,49 @@ final class TermStore {
     @ObservationIgnored private var paused = false
     /// The terminal open full screen (the root screen presents it).
     var fullscreen: TermRoute?
+    /// Run in terminal: the command waiting to be typed into this shell once its prompt is up, and since when.
+    @ObservationIgnored private(set) var prefill: (key: String, cmd: String, at: Date)?
+    /// What Run in terminal could not do (a full-screen program has the terminal), shown on the terminal's bar until it closes.
+    var notice = ""
 
     func screen(_ key: String, cols: Int = 80, rows: Int = 24) -> TermScreen {
         if let s = screens[key] { return s }
         let s = TermScreen(key: key, cols: cols, rows: rows); screens[key] = s; return s
     }
-    func open(_ key: String, title: String) { fullscreen = TermRoute(key: key, title: title) }
+    func open(_ key: String, title: String) { notice = ""; fullscreen = TermRoute(key: key, title: title) }
+
+    // MARK: the chat's own shell (feature termChat)
+    /// The shell of a chat (ChatTerm.key: a thread, a bot's chat, the uberbot's, `room:<id>`), the one the desktop's panel shows: the hub starts it,
+    /// or only resizes it when it runs (`term.new {chat}`), and it opens full screen.
+    @discardableResult
+    func openChat(_ chat: String, title: String, cols: Int = 80, rows: Int = 24) async throws -> String {
+        guard let c = client else { throw DError(code: "OFFLINE", message: "Offline") }
+        let r: DTermRead = try await c.call("term.new", ["chat": chat, "cols": cols, "rows": rows])
+        let key = r.key.isEmpty ? chat : r.key
+        take(r, screen(key))
+        open(key, title: title)
+        return key
+    }
+    /// Run in terminal: the chat's shell opens with `cmd` typed at its prompt, not run (no Enter): bracketed paste when the shell asked for it,
+    /// else one line (TermPrefill). It waits for the prompt: every output looks again, and so do four looks `TermPrefill.wait` apart (no loop).
+    func runInTerminal(_ cmd: String, chat: String, title: String) async throws {
+        let cmd = Copyable.exact(cmd)
+        guard !cmd.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !chat.isEmpty else { return }
+        let key = try await openChat(chat, title: title)
+        prefill = (key, cmd, Date())
+        tryPrefill(key)
+        Task { [weak self] in
+            for _ in 0..<4 { try? await Task.sleep(nanoseconds: UInt64(TermPrefill.wait * 1_000_000_000)); guard let self, self.prefill?.key == key else { return }; self.tryPrefill(key) }
+        }
+    }
+    private func tryPrefill(_ key: String) {
+        guard let p = prefill, p.key == key, let s = screens[key] else { return }
+        switch TermPrefill.ready(s.vt, waited: Date().timeIntervalSince(p.at)) {
+        case nil: prefill = nil; notice = "The terminal is running a full-screen program: quit it, then try again."
+        case false?: break
+        case true?: prefill = nil; write(key, TermPrefill.bytes(p.cmd, vt: s.vt))
+        }
+    }
 
     // MARK: watching
     /// A view shows this terminal: stream it.
@@ -99,6 +136,7 @@ final class TermStore {
             snapshot(s, cols: c, rows: r, bytes: bytes, held: held)
         case .reread: reread(s)
         }
+        if prefill?.key == s.key { tryPrefill(s.key) }
     }
     /// A new screen of this size drawn by `bytes`; the scrollback stays when it is the same run.
     private func snapshot(_ s: TermScreen, cols: Int, rows: Int, bytes: [UInt8], held: TermHeld) {
@@ -117,6 +155,7 @@ final class TermStore {
     }
     /// The answer of `term.read`/`term.watch`/`term.new`: the bytes after `from`, or a snapshot. A push may have moved the screen on meanwhile; only what is new is taken.
     func take(_ r: DTermRead, _ s: TermScreen) {
+        defer { if prefill?.key == s.key { tryPrefill(s.key) } }
         s.set(missing: false); s.set(state: r.state); s.set(title: r.title)
         if let reset = r.reset, reset.count == 2 {
             if let h = s.held, h.g == r.g, h.o > r.o { return }
