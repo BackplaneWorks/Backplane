@@ -47,19 +47,36 @@ A stopped VM that is not *deallocated* still bills for compute, so every layer e
    SYSTEM, every minute; installed with `scripts/winvm/winvm-push.sh`). Busy: a build or job process (cl,
    link, ninja, cmake, vcpkg, ccache, git, the GitHub runner's `Runner.Worker`, ...), an ssh connection a minute
    old or more, an ssh login since (lanes' short polls, from OpenSSH's event log), an active RDP session (the
-   console session doesn't count), and on bp-win a session-agent job waiting or running (`C:\bp\sess`). After
+   console session doesn't count), and on bp-win also: a session-agent job waiting or running (`C:\bp\sess`); the GUI tests' processes alive in any
+   session, the console's included (backplane-hub, backplane-gpui, backplane, kicad, kicad-cli, pcbnew, eeschema, python,
+   pythonw: a harness waiting on a KiCad window with no CPU still counts); a copy (scp, sftp-server, robocopy); anything
+   written (including overwrites), created, renamed or deleted under `C:\bp` in the last 30 minutes; and a hold (`winvm-hold.sh`), which always wins. After
    20 idle minutes (bp-winbuild) or 30 (bp-win) it deallocates its own VM through Azure Resource Manager with the
    VM's system-assigned identity, whose only role is the custom **Backplane VM self-deallocate** (read and
    deallocate), scoped to that one VM. If Azure can't be reached it shuts Windows down, and layer 3 deallocates.
    Log: `C:\ProgramData\bp-watchdog\watchdog.log`; state each minute: `status.json`.
 2. **Azure auto-shutdown** (DevTestLab schedule, as bp-win has had): bp-winbuild daily at 05:00 Eastern;
-   bp-win daily at 12:00 UTC (unchanged). Azure's shutdown deallocates.
-3. **The desktop's watcher** (`scripts/winvm/winvm-watch.sh`, cron at :00 and :30, installed by
+   bp-win daily at 07:00 UTC (unchanged; its backstop). Azure's shutdown deallocates.
+3. **The desktop's watcher** (`scripts/winvm/winvm-watch.sh`, cron every 10 minutes, installed by
    `scripts/winvm/winvm-cron-install.sh` as `~/.local/bin/bp-winvm-watch.sh`; log `~/.cache/bp-winvm/watch.log`).
    A VM that is stopped but not deallocated is deallocated at once. A running VM whose locks have been free for 30
    minutes is deallocated: bp-winbuild's lock is `winbuild-vm`; bp-win's are `bp-win-ui` and `winbuild`, and its
    watchdog is asked first (through Azure Run Command, not ssh) whether it saw a session or job in those 30 minutes;
-   it is left running if so, but never past 3 hours with its locks free. A lock is held when its
+   it is left running if so, without a time cap on active work. A stale, unreadable or dry-run watchdog also leaves bp-win running; its 07:00 UTC shutdown remains the backstop. While `bp-win-ui` or `winbuild` is held, the watcher keeps bp-win's watchdog hold at least 60 minutes ahead
+   (Run Command; it never shortens a longer hold), since the VM can't see the desktop's locks. A lock is held when its
    `/tmp/bp-<name>.lock` has a flock (the hub's named locks and `scripts/bp-lock.sh` both take it).
 
 To keep a VM up for hand work, hold its lock (and stay connected); the watchdog still counts your session.
+
+Install bp-win's watchdog with all UI-test signals (add `-WhatIf` for a dry run):
+
+```sh
+scripts/winvm/winvm-push.sh bp-win 30 -JobDir 'C:\bp\sess' -RecentWriteDir 'C:\bp' -ExtraBusyProcesses 'backplane-hub,backplane-gpui,backplane,kicad,kicad-cli,pcbnew,eeschema,python,pythonw'
+```
+
+The regression checks are `bash test/winvm-watch.sh` (Azure and lock stand-ins) and, on Windows,
+`powershell -NoProfile -File test/winvm-watchdog.ps1 -Python C:\Python313\python.exe`.
+The Windows check uses isolated state and blocked shutdown calls. Process-name cases use synthetic
+zero-CPU console processes; the optional Python check launches a real sleeping harness and child,
+checks each PID independently, and stops only those captured PIDs. It also checks existing-file
+writes, directory changes, transfers, session jobs, holds, and idle negative controls.
