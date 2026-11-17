@@ -943,7 +943,7 @@ try:
                         n0 = seq(); relay(op='text', text='ab'); time.sleep(0.5)
                         if field_text() != 'ab': key(K_ESC); time.sleep(0.6); return None
                         key(124); time.sleep(0.3)  # the caret to the end
-                        rc = ask('kicad_ipc', {'path': f, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': 'FK_PCB'}}); cd = checks_idle(seq() - 1, 30)
+                        n1 = seq(); rc = ask('kicad_ipc', {'path': f, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': 'FK_PCB'}}); cd = checks_idle(n1, 30)
                         relay(op='text', text='cd'); time.sleep(0.5); got = field_text()
                         canvas_ev = [e.get('type') for e in evs() if int(e.get('seq', 0)) > n0 and e.get('type') in ('ET_DOCUMENT_EDITED', 'ET_SELECTION_CHANGED')]
                         key(K_ESC); time.sleep(0.6)
