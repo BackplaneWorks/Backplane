@@ -124,7 +124,12 @@ pub fn spawn(wrap: Option<Vec<String>>, ev: Evidence, mut make: impl FnMut(Optio
     give_up(said.lines().find(|l| crate::scopeprobe::scope_failure(l)).unwrap_or("systemd-run exited 1").trim());
     make(None).spawn()
 }
+/// Elsewhere (macOS and Windows: no systemd scopes, so no systemd-run to read) the stderr is handed back untouched. `init` turns scopes on
+/// only on Linux, so `spawn` returns before it reads any evidence there; even if it got here, nothing is read and nothing waits.
+#[cfg(not(target_os = "linux"))]
+fn take_back(e: tokio::process::ChildStderr) -> (Vec<u8>, Option<tokio::process::ChildStderr>) { (Vec::new(), Some(e)) }
 /// What an exited child wrote to its stderr pipe, and a pipe that gives the same bytes again to whoever reads it next.
+#[cfg(target_os = "linux")]
 fn take_back(e: tokio::process::ChildStderr) -> (Vec<u8>, Option<tokio::process::ChildStderr>) {
     use std::io::{Read, Write};
     let Ok(fd) = e.into_owned_fd() else { return (vec![], None) };
