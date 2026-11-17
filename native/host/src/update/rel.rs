@@ -124,6 +124,11 @@ pub fn ceiling_ok(keyid: &str, version: &str) -> Result<(), String> {
     if e2e_key().map_or(false, |(id, _)| id == keyid.trim()) && !Ver::parse(E2E_CEILING).newer(&Ver::parse(version)) { return Err(format!("a test-key release must be below {E2E_CEILING}")) }
     let _ = (keyid, version); Ok(())
 }
+/// Whether `keyid` is the E2E's test key (feature `e2e-trust`); always false in a default or release build.
+pub fn is_e2e_key(keyid: &str) -> bool {
+    #[cfg(feature = "e2e-trust")] if e2e_key().map_or(false, |(id, _)| id == keyid.trim()) { return true }
+    let _ = keyid; false
+}
 /// The one key a release is checked against. There is no other in a default or release build, and no way to add one at run time: a unit test passes its own keys to
 /// `verify`; only a hub built with feature `e2e-trust` adds the E2E's key.
 pub fn keys() -> Vec<(String, [u8; 32])> {

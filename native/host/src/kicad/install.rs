@@ -10,15 +10,19 @@ use serde_json::json;
 use std::{path::{Path, PathBuf}, process::Stdio, sync::{atomic::{AtomicBool, Ordering}, Arc}};
 
 #[derive(Debug, PartialEq)]
-pub struct Package { pub platform: &'static str, pub version: &'static str, pub release: &'static str, pub asset: &'static str, pub sha256: &'static str, pub format: &'static str, pub cli: &'static str, pub size: u64 }
+pub struct Package { pub platform: &'static str, pub version: &'static str, pub release: &'static str, pub asset: &'static str, pub sha256: &'static str, pub format: &'static str, pub cli: &'static str, pub size: u64,
+    /// The runtime's manifest capabilities, where the pin says them (a feed pin, `pins.rs`); empty for a compiled pin, whose gates go by its version.
+    pub caps: &'static [&'static str],
+    /// The oldest OS it starts on where the pin says it (a feed pin's `min_os`); empty: the platform's (`os_floor`).
+    pub min_os: &'static [u32] }
 /// Linux: bp.12.4 (bp.12.1's DRC zone guard, `drc-zone-guard`; bp.12.2's plan view keys, `plan-keys`; opening a board changes nothing in it
 /// and an unchanged file saves nothing, `no-load-migration`, bp.12.3; an open Symbol Editor no longer refuses other documents' saves,
 /// bp.12.4, no capability). Windows: bp.10 until its fixes ship. Apple Silicon: bp.12.5, the bp.12.4 code with the macOS build, its
 /// launchers (bin/kicad, bin/pcbnew, bin/eeschema) and manifest minOs 15.0 (`os_floor`); bp.13 brings KiCad in the pane there. Each pin is
-/// its one line; the tests read them.
-pub const LINUX: Package = Package { platform: "linux-x86_64", version: "10.99.0-bp.12.4", release: "backplane-kicad-v10.99.0-bp.12.4", asset: "backplane-kicad-linux-x86_64-10.99.0-bp.12.4.tar.gz", sha256: "a94104cd524558d92a1df8016ece4a2c5b2cc436a6c14bb5bc71d72e048ee2dc", format: "tar.gz", cli: "bin/kicad-cli", size: 1019304818 };
-pub const MAC: Package = Package { platform: "darwin-arm64", version: "10.99.0-bp.12.5", release: "backplane-kicad-v10.99.0-bp.12.5", asset: "backplane-kicad-darwin-arm64-10.99.0-bp.12.5.tar.gz", sha256: "4229b3cdd8dd81a84fcc66669979903bdab7ed489865664b5874e8c8a2330538", format: "tar.gz", cli: "bin/kicad-cli", size: 433770440 };
-pub const WINDOWS: Package = Package { platform: "windows-x86_64", version: "10.99.0-bp.10", release: "backplane-kicad-v10.99.0-bp.10", asset: "backplane-kicad-windows-x86_64-10.99.0-bp.10.zip", sha256: "68b3796f1de3a8c0a39dd20ca96a43f3354de47facbe5de45d0bd4668c32599c", format: "zip", cli: "bin/kicad-cli.exe", size: 124816974 };
+/// its one line; the tests read them. A newer pin published in the signed feed (`pins.rs`, docs/kicad-pins.md) replaces one at run time.
+pub const LINUX: Package = Package { platform: "linux-x86_64", version: "10.99.0-bp.12.4", release: "backplane-kicad-v10.99.0-bp.12.4", asset: "backplane-kicad-linux-x86_64-10.99.0-bp.12.4.tar.gz", sha256: "a94104cd524558d92a1df8016ece4a2c5b2cc436a6c14bb5bc71d72e048ee2dc", format: "tar.gz", cli: "bin/kicad-cli", size: 1019304818, caps: &[], min_os: &[] };
+pub const MAC: Package = Package { platform: "darwin-arm64", version: "10.99.0-bp.12.5", release: "backplane-kicad-v10.99.0-bp.12.5", asset: "backplane-kicad-darwin-arm64-10.99.0-bp.12.5.tar.gz", sha256: "4229b3cdd8dd81a84fcc66669979903bdab7ed489865664b5874e8c8a2330538", format: "tar.gz", cli: "bin/kicad-cli", size: 433770440, caps: &[], min_os: &[] };
+pub const WINDOWS: Package = Package { platform: "windows-x86_64", version: "10.99.0-bp.10", release: "backplane-kicad-v10.99.0-bp.10", asset: "backplane-kicad-windows-x86_64-10.99.0-bp.10.zip", sha256: "68b3796f1de3a8c0a39dd20ca96a43f3354de47facbe5de45d0bd4668c32599c", format: "zip", cli: "bin/kicad-cli.exe", size: 124816974, caps: &[], min_os: &[] };
 /// A package's download in words: "about 1.1 GB", "about 980 MB"; "about 1 GB" while its size is not known (a placeholder pin).
 pub fn size_words(p: &Package) -> String {
     let mb = p.size >> 20;
@@ -36,15 +40,20 @@ pub fn pick(os: &str, arch: &str) -> Option<&'static Package> {
 }
 /// This hub's package (the hub's own OS, never a connecting client's); None where none is published or this OS is older than the package's
 /// floor (`too_old`): a runtime that would not start is never installed.
-pub fn package() -> Option<&'static Package> { pick(std::env::consts::OS, std::env::consts::ARCH).filter(|p| too_old(p, &os_version()).is_none()) }
+/// The pin is the signed feed's when it has taken a newer one for this platform (`pins::taken`), else the compiled one.
+pub fn package() -> Option<&'static Package> { here().filter(|p| too_old(p, &os_version()).is_none()) }
+/// This hub's pin, whatever its OS version: the feed's newer one, else the compiled one.
+pub fn here() -> Option<&'static Package> { pick(std::env::consts::OS, std::env::consts::ARCH).map(|c| super::pins::taken(c).unwrap_or(c)) }
 /// The oldest OS version a package's programs start on, where it is above what Backplane itself runs on: the macOS runtime is built on
 /// macos-15 and its kicad and bundled dylibs say minos 15.0 (lane M, Nov 15; bp.6 was built the same way; bp.12.5's manifest says minOs 15.0), while the client runs on 12.
+/// A feed pin may raise it (`min_os`).
 pub fn os_floor(p: &Package) -> Option<(&'static str, &'static [u32])> {
-    match p.platform { "darwin-arm64" => Some(("macOS", &[15, 0])), _ => None }
+    match p.platform { "darwin-arm64" => Some(("macOS", if p.min_os.is_empty() { &[15, 0] } else { p.min_os })), _ => None }
 }
 /// Why `p` cannot run on an OS of version `have` ("15.1", "14.7.2"), None when it can or `have` is not known (never refused on a guess).
-pub fn too_old(p: &Package, have: &str) -> Option<String> {
-    let (name, floor) = os_floor(p)?;
+pub fn too_old(p: &Package, have: &str) -> Option<String> { let (name, floor) = os_floor(p)?; below(name, floor, have) }
+/// Why an OS called `name` of version `have` is under `floor`, None when it is not or `have` is not known.
+pub fn below(name: &str, floor: &[u32], have: &str) -> Option<String> {
     let v: Vec<u32> = have.trim().split('.').map(|x| x.parse().ok()).collect::<Option<_>>().filter(|v: &Vec<u32>| !v.is_empty())?;
     let n = floor.len().max(v.len()); let pad = |a: &[u32]| (0..n).map(|i| a.get(i).copied().unwrap_or(0)).collect::<Vec<_>>();
     let mut f = floor.to_vec(); while f.len() > 1 && f.last() == Some(&0) { f.pop(); } // 15.0 is said "15"
@@ -63,7 +72,7 @@ pub fn os_version() -> String {
 }
 /// What to say when this hub has no package: the OS floor it is under, or that none is published for it.
 pub fn none_here() -> String {
-    pick(std::env::consts::OS, std::env::consts::ARCH).and_then(|p| too_old(p, &os_version()))
+    here().and_then(|p| too_old(p, &os_version()))
         .unwrap_or_else(|| format!("No Backplane KiCad is published for this computer ({})", this_computer()))
 }
 /// Where installs go: the folder `ipc::runtime` searches newest first. Windows: %LOCALAPPDATA%\Backplane\kicad, because the hub's home is in the
@@ -214,12 +223,14 @@ pub fn get_args(g: &Getter, url: &str, to: &Path) -> Vec<String> {
     }
 }
 /// The package's fields as SCRIPT checks them (they come only from the catalog, but a pin is a one-line change and is checked here too).
-pub fn check_package(p: &Package) -> Result<(), String> {
-    if p.version.is_empty() || !p.version.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') { return Err("Invalid runtime version".into()) }
-    if p.release != format!("backplane-kicad-v{}", p.version) { return Err("Invalid runtime release".into()) }
-    if p.asset != format!("backplane-kicad-{}-{}.{}", p.platform, p.version, p.format) { return Err("Invalid runtime archive".into()) }
-    if p.sha256.len() != 64 || !p.sha256.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)) { return Err("Invalid pinned digest".into()) }
-    if !matches!((p.platform, p.format), ("linux-x86_64" | "darwin-arm64", "tar.gz") | ("windows-x86_64", "zip")) { return Err("No published Backplane KiCad package for this hub platform".into()) }
+/// A feed pin's fields are checked here before it is taken (`pins::parse`), the same check.
+pub fn check_package(p: &Package) -> Result<(), String> { check_fields(p.platform, p.version, p.release, p.asset, p.sha256, p.format) }
+pub fn check_fields(platform: &str, version: &str, release: &str, asset: &str, sha256: &str, format: &str) -> Result<(), String> {
+    if version.is_empty() || version.len() > 64 || !version.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') { return Err("Invalid runtime version".into()) }
+    if release != format!("backplane-kicad-v{version}") { return Err("Invalid runtime release".into()) }
+    if asset != format!("backplane-kicad-{platform}-{version}.{format}") { return Err("Invalid runtime archive".into()) }
+    if sha256.len() != 64 || !sha256.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)) { return Err("Invalid pinned digest".into()) }
+    if !matches!((platform, format), ("linux-x86_64" | "darwin-arm64", "tar.gz") | ("windows-x86_64", "zip")) { return Err("No published Backplane KiCad package for this hub platform".into()) }
     Ok(())
 }
 /// The digest SHA256SUMS lists for `asset` ("<hex>  <name>", the name maybe after `*` or `./`).
@@ -535,10 +546,12 @@ pub enum Action {
 }
 /// Whether the Backplane KiCad found (`version`, as `kicad.version` says it) is an older build of the same line than the package: one press
 /// updates it (the new one goes beside it, and `ipc::runtime` takes the newest). Stock and other lines are never "older".
-pub fn older(version: &str, p: &Package) -> bool {
+pub fn older(version: &str, p: &Package) -> bool { older_than(version, p.version) }
+/// `older` against a version: whether `version` is an older build of the same line than `pin`.
+pub fn older_than(version: &str, pin: &str) -> bool {
     // "-bp.12" and a hotfix's "-bp.12.1" (each dot part a number; a build suffix like "-851cbefda6" is not one, so not comparable)
     let bp = |v: &str| v.split_once("-bp.").and_then(|(base, n)| n.split('.').map(|x| x.parse::<u32>().ok()).collect::<Option<Vec<u32>>>().map(|n| (base.to_string(), n)));
-    matches!((bp(version), bp(p.version)), (Some((a, n)), Some((b, m))) if a == b && n < m)
+    matches!((bp(version), bp(pin)), (Some((a, n)), Some((b, m))) if a == b && n < m)
 }
 pub fn decide(pkg: Option<&Package>, status: &str, version: &str, install_state: &str) -> Action {
     if install_state == "running" { return Action::Wait }
@@ -555,8 +568,15 @@ pub fn decide(pkg: Option<&Package>, status: &str, version: &str, install_state:
 /// DRC zone guard first (a safety fix), then the editor inside Backplane. None when it lacks neither (a newer build with nothing named).
 /// `version`: the installed runtime's (its manifest's), for what no capability says: the editor inside Backplane came with bp.8.
 pub fn update_reason(have: &[&str], version: &str) -> Option<String> {
-    update_reason_os(have, version, this_os(), package().is_some_and(|p| super::kserve::bp_number(p.version) >= 13))
+    update_reason_os(have, version, this_os(), package().is_some_and(to13))
 }
+/// Whether a pin has `cap`: its own capabilities where it says them (a feed pin), else by its release (`since`, the bp. number that brought it):
+/// the compiled pins carry no list.
+pub fn pin_has(p: &Package, cap: &str, since: u64) -> bool { if p.caps.is_empty() { super::kserve::bp_number(p.version) >= since } else { p.caps.contains(&cap) } }
+/// Whether a pin brings what bp.13 did (the libraries everywhere, the narrow-pane fit, the OpenGL fallback): `global-tables-seeded`.
+pub fn to13(p: &Package) -> bool { pin_has(p, "global-tables-seeded", 13) }
+/// Whether a pin can be shown in the pane on `os` (`pane_can_show` for a runtime not installed yet): on macOS it needs `embed-macos`.
+pub fn pin_in_pane(os: &str, p: &Package) -> bool { if os == "macos" { pin_has(p, "embed-macos", 13) } else { pane_can_show(os, p.version) } }
 /// This hub's OS as the reasons name it.
 pub fn this_os() -> &'static str { if cfg!(target_os = "macos") { "macos" } else if cfg!(windows) { "windows" } else { "linux" } }
 /// Whether a Backplane runtime of `version` can be shown in the pane on `os`: macOS needs the fork's macOS embedding (bp.13,
@@ -617,10 +637,10 @@ pub fn update_offer(p: Option<&Package>, status: &str, version: &str, caps: &[St
 /// can: any refusal the pin would cure is offered as the update where the person works, never only a sentence in the pane.
 pub fn update_offer_os(p: Option<&Package>, status: &str, version: &str, caps: &[String], os: &str) -> Option<serde_json::Value> {
     let p = p?;
-    let over_stock = status == "stock" && !pane_takes_stock(os) && pane_can_show(os, p.version);
+    let over_stock = status == "stock" && !pane_takes_stock(os) && pin_in_pane(os, p);
     if !(over_stock || (status == "ok" && older(version, p))) { return None }
     let have: Vec<&str> = caps.iter().map(String::as_str).collect();
-    let to13 = super::kserve::bp_number(p.version) >= 13;
+    let to13 = to13(p);
     // over stock KiCad (which the pane cannot show here): the pane, with the libraries
     let reason = if over_stock { format!("It brings KiCad into Backplane's pane{}, with KiCad's standard libraries and Backplane's own.", if os == "macos" { " on the Mac" } else { "" }) }
                  else { update_reason_os(&have, version, os, to13).unwrap_or_default() };
@@ -836,7 +856,7 @@ mod tests {
         // a HEAD (-fsSIL) answers with the file's size; a serve/FAILAT file (<bytes>) stops a download there (a partial file and exit 18, as curl does)
         exe(&bin.join("curl"), &format!("#!/bin/sh\nhead=; case \"$*\" in *-fsSIL*) head=1;; esac\nwhile [ $# -gt 1 ]; do [ \"$1\" = -o ] && out=$2; shift; done\nf={}/$(basename \"$1\")\n[ -f \"$f\" ] || exit 22\nif [ -n \"$head\" ]; then echo 'HTTP/2 302'; echo 'content-length: 0'; echo; echo 'HTTP/2 200'; echo \"Content-Length: $(wc -c <\"$f\")\"; exit 0; fi\necho x >>\"$f.calls\"\nif [ -f {0}/FAILAT ] && [ \"$(basename \"$f\")\" != SHA256SUMS ]; then head -c \"$(cat {0}/FAILAT)\" \"$f\" >\"$out\"; exit 18; fi\ncp \"$f\" \"$out\"\n", serve.display()).replace("{0}", &serve.display().to_string()));
         let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
-        (Package { platform: plat, version: v, release: leak(format!("backplane-kicad-v{v}")), asset: leak(asset), sha256: leak(sum), format: "tar.gz", cli: "bin/kicad-cli", size: 0 }, bin)
+        (Package { platform: plat, version: v, release: leak(format!("backplane-kicad-v{v}")), asset: leak(asset), sha256: leak(sum), format: "tar.gz", cli: "bin/kicad-cli", size: 0, caps: &[], min_os: &[] }, bin)
     }
     #[cfg(unix)] fn script(bin: &Path, parent: &Path, p: &Package) -> (bool, String) {
         let o = std::process::Command::new("sh").arg("-c").arg(SCRIPT).arg("sh").args(args(parent, p)).env("PATH", format!("{}:/usr/bin:/bin", bin.display())).output().unwrap();
@@ -952,7 +972,7 @@ cp \"$f\" \"$out\"
         zip_of(&r.join("serve").join(&asset), &ents.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect::<Vec<_>>(), &[], false);
         let sum = sha256_file(&r.join("serve").join(&asset)).unwrap(); std::fs::write(r.join("serve/SHA256SUMS"), format!("{sum}  {asset}\n")).unwrap();
         let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
-        let p = Package { platform: "windows-x86_64", version: v, release: "backplane-kicad-v0.0.1-bp.1", asset: leak(asset), sha256: leak(sum), format: "zip", cli: "bin/kicad-cli.exe", size: 0 };
+        let p = Package { platform: "windows-x86_64", version: v, release: "backplane-kicad-v0.0.1-bp.1", asset: leak(asset), sha256: leak(sum), format: "zip", cli: "bin/kicad-cli.exe", size: 0, caps: &[], min_os: &[] };
         // no tar anywhere: the fetch is given only the stand-in curl's folder and a tar that fails if it is ever started
         let nt = r.join("notar"); std::fs::create_dir_all(&nt).unwrap(); exe(&nt.join("tar"), "#!/bin/sh\necho tar was started >&2; exit 9\n");
         let (got, steps) = fetch_run(&r, &p, &[bin.clone(), nt]);

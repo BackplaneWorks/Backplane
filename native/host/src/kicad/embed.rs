@@ -1673,7 +1673,7 @@ impl Actor {
         // fails at once, so the pane offers the KiCad app as it did before (native_child_mac.rs)
         // (not in the hub's tests: their stand-in runtimes exercise the attach logic every platform shares; mac_refusal has its own test)
         if let Some(why) = mac_refusal(cfg!(target_os = "macos") && !cfg!(test), mode, &desc) {
-            let to = super::install::package().filter(|p| super::install::pane_can_show("macos", p.version) && (mode != "fork" || super::install::older(&env.version, p))).map(|p| p.version);
+            let to = super::install::package().filter(|p| super::install::pin_in_pane("macos", p) && (mode != "fork" || super::install::older(&env.version, p))).map(|p| p.version);
             sess.state = "failed".into(); sess.reason = mac_refusal_with(why, to);
             let out = sess.info_json();
             self.sessions.insert(pro.clone(), sess.clone());
@@ -3272,6 +3272,8 @@ impl RpcHandler for EmbedRpc {
             if let Some(t) = p["theme"].as_str().filter(|t| matches!(*t, "light" | "dark")) { themes().lock().unwrap().insert(norm_pro_key(&resolved.pro), t.to_string()); }
             // the person's switch, Edit or pre-warm: an automatic check in KiCad starts after it, not in its middle (its task would refuse them)
             if matches!(method, "editor.kicad.show" | "editor.kicad.attach" | "editor.kicad.prewarm") { super::checkrun::person_touched(&resolved.pro); }
+            // the update row above the pane says what the pin offers: read the signed KiCad pins again first (at most every 15 minutes)
+            if method == "editor.kicad.attach" { super::pins::nudge(hub); }
             if method == "editor.kicad.prewarm" {
                 // the client, once the first editor is on show: the others opened hidden at the pane's size (KiCad paints a pre-warmed frame at
                 // the size given; at its 1280x800 default the first real show relaid the whole frame out)

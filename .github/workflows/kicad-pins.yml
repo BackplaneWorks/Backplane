@@ -1,0 +1,96 @@
+name: kicad-pins
+# Publish a Backplane KiCad pin without a Backplane release (docs/kicad-pins.md). Run by hand from main only:
+#   gh workflow run kicad-pins.yml -R BackplaneWorks/Backplane --ref main -f platform=linux-x86_64 -f version=10.99.0-bp.13 -f min_hub=0.16.1
+# It reads the published kicad-pins.json (release `kicad-pins` of this repo) and verifies it with the release key in the tree, checks the new
+# runtime as scripts/kicad-pin.py does (its asset downloaded, its sha256 equal to the KiCad release's SHA256SUMS line, its manifest's platform
+# and version), writes the next document (sequence + 1, a fresh expiry), signs it with the release key (BACKPLANE_RELEASE_KEY, as release.yml
+# does), verifies the signature again and uploads it. Hubs take a pin only when it is newer than the one compiled in. Nothing is signed anywhere else.
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: The platform to pin, or none to re-sign the current pins under a new expiry
+        type: choice
+        options: [linux-x86_64, darwin-arm64, windows-x86_64, none]
+      version:
+        description: The Backplane KiCad version (10.99.0-bp.13), from its release backplane-kicad-v<version>; empty drops the platform (the compiled pin is back)
+        required: false
+        default: ''
+      min_hub:
+        description: The oldest Backplane hub that may take it (0.16.1 is the first that reads the feed)
+        required: false
+        default: '0.16.1'
+      days:
+        description: Days until the document expires (hubs then fall back to their compiled pins)
+        required: false
+        default: '120'
+concurrency:
+  group: kicad-pins
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  sign:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PLATFORM: ${{ inputs.platform }}
+      VERSION: ${{ inputs.version }}
+      MIN_HUB: ${{ inputs.min_hub }}
+      DAYS: ${{ inputs.days }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: the published document
+        run: |
+          set -eu
+          mkdir -p w
+          if gh release view kicad-pins -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' 2>/dev/null | grep -qx kicad-pins.json; then
+            gh release download kicad-pins -R "$GITHUB_REPOSITORY" -p kicad-pins.json -D w/old
+            python3 -I scripts/kicad-pins.py open w/old/kicad-pins.json > w/current.json
+            echo "current: sequence $(jq .sequence w/current.json), pins: $(jq -c '.pins | map_values(.version)' w/current.json)"
+          else echo "nothing published yet: the first document"; fi
+      - name: the next document
+        run: |
+          set -eu
+          if [ -n "$VERSION" ] && ! printf '%s' "$VERSION" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+-bp\.[0-9]+(\.[0-9]+)?'; then echo "::error::bad version $VERSION"; exit 1; fi
+          cur=; [ ! -f w/current.json ] || cur="--current w/current.json"
+          if [ "$PLATFORM" = none ]; then
+            [ -n "$cur" ] || { echo "::error::nothing published to re-sign"; exit 1; }
+            python3 -I scripts/kicad-pins.py next $cur --platform none --min-hub "$MIN_HUB" --days "$DAYS" > w/body.json
+          elif [ -z "$VERSION" ]; then
+            python3 -I scripts/kicad-pins.py next $cur --platform "$PLATFORM" --drop --min-hub "$MIN_HUB" --days "$DAYS" > w/body.json
+          else
+            # the runtime itself: downloaded, its sha256 against the release's SHA256SUMS, its manifest's platform and version (and the Mac's minOs)
+            BP_TMP=$RUNNER_TEMP python3 -I scripts/kicad-pin.py "backplane-kicad-v$VERSION" --platforms "$PLATFORM" --dir "$RUNNER_TEMP/rt" --json w/pin.json
+            rm -rf "$RUNNER_TEMP/rt"
+            python3 -I scripts/kicad-pins.py next $cur --platform "$PLATFORM" --pin w/pin.json --min-hub "$MIN_HUB" --days "$DAYS" > w/body.json
+          fi
+          cat w/body.json
+      - name: sign
+        env:
+          KEY: ${{ secrets.BACKPLANE_RELEASE_KEY }}
+          KEY_ID: ${{ secrets.BACKPLANE_RELEASE_KEY_ID }}
+        run: |
+          set -eu
+          [ -n "$KEY" ] || { echo "::error::no BACKPLANE_RELEASE_KEY: nothing is published"; exit 1; }
+          # the key signing is the one hubs trust: its id is release.keyid, and its signature verifies under release.pub (below)
+          [ "$KEY_ID" = "$(tr -d '[:space:]' < native/host/src/update/release.keyid)" ] || { echo "::error::BACKPLANE_RELEASE_KEY_ID is not release.keyid"; exit 1; }
+          umask 077; printf '%s\n' "$KEY" > k.pem
+          openssl pkeyutl -sign -inkey k.pem -rawin -in w/body.json -out w/body.sig
+          rm -f k.pem
+          python3 -I scripts/kicad-pins.py seal w/body.json w/body.sig "$KEY_ID" > kicad-pins.json
+          python3 -I scripts/kicad-pins.py open kicad-pins.json > /dev/null
+          echo "signed sequence $(jq .sequence w/body.json)"
+      - name: publish
+        run: |
+          set -eu
+          # a prerelease, so it is never this repo's latest release; its tag is no updater's shape (rel.rs tag_ok), so no hub offers it as a build
+          gh release view kicad-pins -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+            gh release create kicad-pins -R "$GITHUB_REPOSITORY" --prerelease --target main --title "Backplane KiCad pins" \
+              --notes "The signed KiCad pin document hubs read (docs/kicad-pins.md). Published by the kicad-pins workflow; not a Backplane release."
+          gh release upload kicad-pins -R "$GITHUB_REPOSITORY" kicad-pins.json --clobber
+          echo "### kicad-pins sequence $(jq .sequence w/body.json), expires $(date -u -d @"$(jq .expires w/body.json)" +%Y-%m-%d)" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.pins | to_entries[] | "- \(.key): \(.value.version) (hub \(.value.min_hub)+)"' w/body.json >> "$GITHUB_STEP_SUMMARY"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pin a Backplane KiCad release in native/host/src/kicad/install.rs: download, verify, fill in.
 
-usage: scripts/kicad-pin.py <tag> [--platforms linux-x86_64,windows-x86_64,darwin-arm64] [--dir DIR] [--check] [--feed URL]
+usage: scripts/kicad-pin.py <tag> [--platforms linux-x86_64,windows-x86_64,darwin-arm64] [--dir DIR] [--check] [--feed URL] [--json FILE]
   <tag>  e.g. backplane-kicad-v10.99.0-bp.13 (the release in install.rs FROM)
 
 For each platform named (default: all three):
@@ -13,6 +13,8 @@ For each platform named (default: all three):
   - its install.rs line (LINUX, WINDOWS, MAC) gets that version, release, asset, digest and size (bytes: what the update offer says).
 --feed URL reads SHA256SUMS and the assets from a staged http(s) folder instead of the release (a build before its tag; the hub installs
 from the same folder with BACKPLANE_KICAD_FEED). --check verifies and prints without writing. Nothing is written unless every platform asked for passes.
+--json FILE writes the checked pins as JSON ({platform: {version, release, asset, sha256, size, caps, min_os}}) instead of install.rs: what
+.github/workflows/kicad-pins.yml signs into the KiCad pin feed (docs/kicad-pins.md).
 """
 import hashlib, json, os, re, subprocess, sys, tarfile, zipfile
 
@@ -84,7 +86,7 @@ def main():
     for line in open(os.path.join(d, "SHA256SUMS")):
         f = line.split()
         if len(f) == 2: sums[f[1].lstrip("*").removeprefix("./")] = f[0].lower()
-    pins = {}
+    pins = {}; feed = {}
     for p in plats:
         const, fmt = CONST[p]
         asset = f"backplane-kicad-{p}-{version}.{fmt}"
@@ -108,6 +110,11 @@ def main():
               f"{', minOs ' + m['minOs'] if m.get('minOs') else ''}{', library ' + str(lib.get('version')) + ' ' + str(lib.get('commit', ''))[:7] if lib else ''};"
               f" source {str(m.get('sourceCommit', ''))[:10]}")
         pins[const] = (p, asset, got, fmt, os.path.getsize(path))
+        feed[p] = {"version": version, "release": tag, "asset": asset, "sha256": got, "size": os.path.getsize(path), "caps": sorted(set(caps)), **({"min_os": m["minOs"]} if m.get("minOs") else {})}
+    if "--json" in args:
+        out = args[args.index("--json") + 1]
+        with open(out, "w") as f: json.dump(feed, f, indent=1, sort_keys=True)
+        print(f"wrote {', '.join(feed)} to {out}; install.rs not written"); return
     if check: print("checked; install.rs not written (--check)"); return
     s = open(INSTALL).read()
     for const, (p, asset, digest, fmt, size) in pins.items():
@@ -115,7 +122,7 @@ def main():
         if len(rx.findall(s)) != 1: die(f"install.rs: no single `pub const {const}` line")
         cli = "bin/kicad-cli.exe" if fmt == "zip" else "bin/kicad-cli"
         line = (f'pub const {const}: Package = Package {{ platform: "{p}", version: "{version}", release: "{tag}", asset: "{asset}", '
-                f'sha256: "{digest}", format: "{fmt}", cli: "{cli}", size: {size} }};')
+                f'sha256: "{digest}", format: "{fmt}", cli: "{cli}", size: {size}, caps: &[], min_os: &[] }};')
         s = rx.sub(lambda _: line, s)
     open(INSTALL, "w").write(s)
     left = re.findall(r'sha256: "PIN-ME[^"]*"', s)

@@ -51,6 +51,7 @@ pub mod coedit;
 pub mod histsteps;
 pub mod open;
 pub mod install;
+pub mod pins;
 pub mod mgmt;
 pub mod bompanel;
 pub mod bomedit;
@@ -65,6 +66,7 @@ use std::sync::Arc;
 pub fn start(hub: &Arc<Hub>) {
     let plots = watch::Plots::new(&hub.cfg.home);
     hub.register_rpc(Arc::new(watch::KicadRpc(plots)));
+    pins::start(hub);
     ipc::start(hub);
     embed::start(hub);
     xprobe::start(hub);

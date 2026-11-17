@@ -119,7 +119,8 @@ The bp.4 runtime advertises both fix capabilities: partial footprint updates and
 are accepted. Symbol libraries load on demand; agents need no blanket library preload on this runtime.
 
 The installer checks the pinned asset against both the release SHA256SUMS and the SHA-256 compiled into the hub
-(`install.rs`, `Package.sha256`).
+(`install.rs`, `Package.sha256`), or the one in the signed KiCad pin feed when the hub has taken a newer pin from it
+(`pins.rs`, docs/kicad-pins.md).
 
 KiCad can buffer its ready line until exit when stdout is a pipe. The hub discovers a fresh socket in the
 project's private socket directory, including KiCad's `api-<pid>.sock` fallback, and the hub then requires Ping
