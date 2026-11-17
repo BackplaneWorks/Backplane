@@ -1,0 +1,17 @@
+#!/bin/bash
+# A stand-in for gh in test/land/land_pr_test.sh: a PR is a file in $FAKE; its mergeability and review come from $FAKE/mergestate, $FAKE/review.
+# `pr merge` does what a GitHub rebase merge ends as: the PR head becomes main of the bare origin ($ORIGIN).
+case "$1 $2" in
+  "auth token") [ -z "${FAKE_NOLOGIN:-}" ] && echo fake-token || exit 1 ;;
+  "pr list") head=; while [ $# -gt 0 ]; do [ "$1" = --head ] && head=$2; shift; done; n=$(cat "$FAKE/pr.$head" 2>/dev/null) && [ ! -f "$FAKE/merged.$n" ] && echo "$n" ;;
+  "pr create") head=; while [ $# -gt 0 ]; do [ "$1" = --head ] && head=$2; shift; done; n=$(( $(cat "$FAKE/next" 2>/dev/null || echo 100) + 1 )); echo $n > "$FAKE/next"; echo $n > "$FAKE/pr.$head"; echo "$head" > "$FAKE/head.$n"; echo "https://github.com/x/y/pull/$n" ;;
+  "pr view") n=$3; head=$(cat "$FAKE/head.$n"); oid=$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$head"); st=OPEN; [ -f "$FAKE/merged.$n" ] && st=MERGED
+    case " $* " in *" .state "*) echo $st; exit 0;; esac
+    [ $st = MERGED ] && { echo "MERGED CLEAN APPROVED $oid MERGEABLE"; exit 0; }
+    echo "OPEN $(cat "$FAKE/mergestate" 2>/dev/null || echo BLOCKED) $(cat "$FAKE/review" 2>/dev/null || echo REVIEW_REQUIRED) $oid MERGEABLE" ;;
+  "pr merge") n=$3; head=$(cat "$FAKE/head.$n"); sha=; while [ $# -gt 0 ]; do [ "$1" = --match-head-commit ] && sha=$2; shift; done
+    [ "$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$head")" = "$sha" ] || { echo "head changed" >&2; exit 1; }
+    [ "$(cat "$FAKE/mergestate" 2>/dev/null)" = CLEAN ] || { echo "not mergeable" >&2; exit 1; }
+    git --git-dir="$ORIGIN" update-ref refs/heads/main "$sha" && touch "$FAKE/merged.$n" && echo "$n" >> "$FAKE/merges" ;;
+  *) echo "fake gh: unhandled: $*" >&2; exit 2 ;;
+esac
