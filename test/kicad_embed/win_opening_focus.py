@@ -2240,6 +2240,124 @@ def run(h):
             h.check("checks P5: Fix with agent sent the finding to the thread's agent", got5, {"id": erc_id, "fix_clicked": fixed})
             h.shot("p5_fix")
             return h.finish()
+        if only == "keys":
+            # the lead (Nov 16): the commands a person uses that KiCad wires through menu accelerators, pressed with the keys in the embedded
+            # PCB canvas, then the schematic canvas; each effect read through the API (counts, the file, the selection, the clipboard), never
+            # pixels: works / does nothing / wrong. Ctrl+W showed nothing on Windows (rpA-close).
+            import subprocess as _sp, ctypes as _C
+            top = int(rep.get("toplevel") or 0) or E.find_main_window(cp.pid)
+            pro = checks_project(h)
+            docs = {"PCB": pro[:-len(".kicad_pro")] + ".kicad_pcb", "SCH": pro[:-len(".kicad_pro")] + ".kicad_sch"}
+            kinds = {"PCB": ("footprint", "track"), "SCH": ("symbol", "wire")}
+            refs = {"PCB": "R1", "SCH": "R1"}
+            table = []
+            def count(kind_, doc):
+                a = standin_ask(h, "kicad_edit", {"path": doc, "ops": [{"find": {"kind": kind_, "limit": 5000}}], "save": False}, f"k-{kind_}-{time.time_ns()}")
+                p_ = plan_payload(a) if a else {}
+                rows = None
+                if isinstance(p_, dict):
+                    r0 = (p_.get("results") or [{}])[0] if isinstance(p_.get("results"), list) else {}
+                    rows = r0.get("count") if isinstance(r0, dict) and "count" in r0 else (len(r0.get("rows", [])) if isinstance(r0, dict) and "rows" in r0 else None)
+                return rows
+            def clip():
+                u32, k32 = _C.windll.user32, _C.windll.kernel32
+                u32.GetClipboardData.restype = _C.c_void_p; k32.GlobalLock.restype = _C.c_void_p
+                if not u32.OpenClipboard(0):
+                    return None
+                try:
+                    hd = u32.GetClipboardData(13)
+                    if not hd:
+                        return ""
+                    ptr = k32.GlobalLock(_C.c_void_p(hd))
+                    t = _C.wstring_at(ptr) if ptr else ""
+                    k32.GlobalUnlock(_C.c_void_p(hd))
+                    return t
+                finally:
+                    u32.CloseClipboard()
+            def keys_in(kind):
+                h.click_control(top, "kicad-tab:" + kind); time.sleep(4.0)
+            def select(kind):
+                h.hub_rpc([{"m": "editor.kicad.select", "p": {"project": pro, "references": [refs[kind]], "zoom": False}}]); time.sleep(1.5)
+                keys_in_tab = h.click_control(top, "kicad-tab:" + kind); time.sleep(1.0)
+            def row(kind, key, verdict, ev):
+                table.append({"editor": kind, "key": key, "result": verdict, **ev})
+                print("DIAG keys " + json.dumps(table[-1])[:600], flush=True)
+            for kind in ("PCB", "SCH"):
+                doc = docs[kind]; main_k, line_k = kinds[kind]
+                keys_in(kind)
+                # an edit of our own (through the API, not saved): the subject of Ctrl+S, Ctrl+Z and Ctrl+Y
+                op = {"track": {"from": [100.0, 100.0], "to": [112.0, 100.0], "width": 0.25, "layer": "F.Cu"}} if kind == "PCB" else {"wire": [[25.4, 25.4], [38.1, 25.4]]}
+                n0 = count(line_k, doc)
+                standin_ask(h, "kicad_edit", {"path": doc, "message": "keys: an edit", "save": False, "ops": [{"add": [op]}]}, f"k-add-{kind}")
+                n1 = count(line_k, doc)
+                keys_in(kind)
+                m0 = os.path.getmtime(doc)
+                E.key_chord("ctrl", "s"); time.sleep(3.0)
+                m1 = os.path.getmtime(doc)
+                row(kind, "Ctrl+S", "works" if m1 > m0 else "does nothing", {"mtime_changed": m1 > m0})
+                E.key_chord("ctrl", "z"); time.sleep(2.0)
+                n2 = count(line_k, doc)
+                row(kind, "Ctrl+Z", "works" if n2 == n0 and n1 == (n0 or 0) + 1 else ("does nothing" if n2 == n1 else "wrong"), {"before": n0, "after_edit": n1, "after_undo": n2})
+                keys_in(kind)
+                E.key_chord("ctrl", "y"); time.sleep(2.0)
+                n3 = count(line_k, doc)
+                row(kind, "Ctrl+Y", "works" if n3 == n1 else ("does nothing" if n3 == n2 else "wrong"), {"after_undo": n2, "after_redo": n3})
+                # clipboard: a selected part copied, pasted (placed with a click in the canvas), cut
+                select(kind)
+                c0 = count(main_k, doc)
+                E.key_chord("ctrl", "c"); time.sleep(1.5)
+                cb = clip() or ""
+                row(kind, "Ctrl+C", "works" if refs[kind] in cb or "(footprint" in cb or "(symbol" in cb else "does nothing", {"clipboard_chars": len(cb), "clip": cb[:80]})
+                E.key_chord("ctrl", "v"); time.sleep(1.5)
+                E.key_tap("Return"); time.sleep(0.8)
+                fr = [w for w in E.list_child_windows(top) if w["visible"] and ("PCB Editor" if kind == "PCB" else "Schematic Editor") in (w["title"] or "")]
+                if fr:
+                    f_ = max(fr, key=lambda w: w["w"] * w["h"])
+                    E.screen_click(f_["root_x"] + f_["w"] // 2 + 40, f_["root_y"] + f_["h"] // 2 + 40); time.sleep(1.5)
+                c1 = count(main_k, doc)
+                row(kind, "Ctrl+V", "works" if c1 == (c0 or 0) + 1 else ("does nothing" if c1 == c0 else "wrong"), {"before": c0, "after_paste": c1})
+                E.key_tap("Escape"); time.sleep(0.5)
+                select(kind)
+                E.key_chord("ctrl", "x"); time.sleep(1.5)
+                c2 = count(main_k, doc)
+                row(kind, "Ctrl+X", "works" if c2 == (c1 or 0) - 1 else ("does nothing" if c2 == c1 else "wrong"), {"before": c1, "after_cut": c2})
+                for key, name in (("Delete", "Delete"), ("Backspace", "Backspace")):
+                    select(kind)
+                    d0 = count(main_k, doc)
+                    E.key_tap(key if key != "Backspace" else "BackSpace"); time.sleep(1.5)
+                    d1 = count(main_k, doc)
+                    row(kind, name, "works" if d1 == (d0 or 0) - 1 else ("does nothing" if d1 == d0 else "wrong"), {"before": d0, "after": d1})
+                keys_in(kind)
+                E.key_chord("ctrl", "f"); time.sleep(2.0)
+                found = [w for w in kicad_toplevels() if w["visible"] and ("Find" in (w["title"] or ""))]
+                row(kind, "Ctrl+F", "works" if found else "does nothing", {"find": [w["title"] for w in found]})
+                if found:
+                    E.key_tap("Escape"); time.sleep(0.8)
+                keys_in(kind)
+                E.key_chord("ctrl", "a"); time.sleep(1.5)
+                sel = standin_ask(h, "kicad_ipc", {"path": doc, "type": "kiapi.common.commands.GetSelection", "message": {}}, f"k-sel-{kind}")
+                nsel = sel.count('"id"')
+                row(kind, "Ctrl+A", "works" if nsel > 3 else "does nothing", {"selection_ids": nsel})
+                E.key_tap("Escape"); time.sleep(0.5)
+            # Ctrl+W and Ctrl+Q last (they may close the editor or KiCad): the PCB editor
+            keys_in("PCB")
+            kp = [p for n, p in kicad_procs() if n == "kicad.exe"]
+            E.key_chord("ctrl", "w"); time.sleep(3.0)
+            closed = [l for l in log_lines(h, "client.log") if "kicad_frame_closed" in l]
+            row("PCB", "Ctrl+W", "works" if closed else "does nothing", {"frame_closed_logged": len(closed)})
+            if closed:
+                h.click_control(top, "ui:Edit"); wait_painted(top, time.monotonic(), 30.0)
+            keys_in("PCB")
+            E.key_chord("ctrl", "q"); time.sleep(4.0)
+            alive = [p for n, p in kicad_procs() if n == "kicad.exe"]
+            box = E.startup_box()
+            row("PCB", "Ctrl+Q", "works (KiCad kept, no quit past the save gate)" if alive and set(kp) & set(alive) else "wrong (KiCad quit)", {"kicad_before": kp, "kicad_after": alive, "box": box})
+            if box:
+                E.key_tap("Escape")
+            print("DIAG keys_table " + json.dumps(table), flush=True)
+            for r in table:
+                h.check(f"keys {r['editor']} {r['key']}: {r['result']}", r["result"].startswith("works"), r)
+            return h.finish()
         if only == "survive":
             # the lead (Nov 16): the host's window going (quit, a client kill, View, closing the viewer), with the PCB shown, the schematic
             # shown or during a tab switch: KiCad alive 20 s after, its unsaved edit still there, and re-attach paints
