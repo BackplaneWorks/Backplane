@@ -188,7 +188,9 @@ impl Mcp {
                 if cwd.is_empty() || !crate::files::kicad::project::altium_cached(&cwd) { tools.retain(|t| !sv(t, "name").starts_with("altium_")) }
                 // a thread of a project with a board or schematic has `kicad_edit` from its first request (Claude defers the other tools' definitions
                 // behind a tool search, a request of its own before the first edit)
-                if ag.has_design(thread).await { always_load(&mut tools, "kicad_edit") }
+                if ag.has_design(thread).await { always_load(&mut tools, "kicad_edit");
+                    // and `kicad_sim` (kicad/ksim.rs) where the KiCad runtime simulates
+                    if crate::files::kicad::ksim_tool::available(&ag).await { tools.push(crate::files::kicad::ksim_tool::def()) } }
                 Some(result(&id, json!({"tools":tools}))) }
             "tools/call" => self.call(&ag, thread, gen, &id, &p, sock).await,
             "ping" => Some(result(&id, json!({}))),
@@ -257,6 +259,7 @@ impl Mcp {
             // main's canonical copy, one holder for writes (taken when free; the holder is named to any other); a saved document is committed straight to main (agents/design.rs)
             "kicad_ipc" => ag.tool_kicad_ipc(thread, &a).await,
             "kicad_edit" => ag.tool_kicad_edit(thread, &a).await,
+            "kicad_sim" => ag.tool_kicad_sim(thread, &a).await,
             "kicad_bring_back" => ag.tool_bring_back(thread, &a).await,
             // the person's KiCad (and Backplane's viewers) select what the agent names (kicad/xprobe.rs), as a reference clicked in the chat does
             "kicad_select" => { let mut p = a.clone(); p["project"] = json!(crate::files::kicad::canonical::route(sv(&a, "path"))); match crate::files::kicad::xprobe::select(&ag.hub, &p).await { Ok(v) => (true, v), Err(e) => fail(&e) } }

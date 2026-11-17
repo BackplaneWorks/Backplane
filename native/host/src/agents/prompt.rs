@@ -164,6 +164,8 @@ pub fn build(e: &PromptEnv) -> String {
     if !e.pcb.is_empty() && !alt && crate::plan::plans(&e.kicad.status, &e.kicad.version, &crate::files::kicad::ipc::read_runtime(std::path::Path::new(&e.kicad.cli)).caps) { s += "\n\n"; s += &if e.routing_plan { crate::plan::guidance() } else { crate::plan::guidance_off().to_string() } }
     // RunAction's target editor (bp.13 batch 6, runaction-frame): what an agent's kicad_ipc may name, or where a shared action goes without it
     if e.kicad.status == "ok" && e.kicad_ipc && !alt { s += "\n\n"; s += crate::files::kicad::ipc::runaction_guidance(&crate::files::kicad::ipc::read_runtime(std::path::Path::new(&e.kicad.cli)).caps) }
+    // simulation, where the runtime has it (kicad/ksim.rs)
+    if e.kicad.status == "ok" && e.kicad_ipc && !e.sch.is_empty() && !alt && crate::files::kicad::ipc::read_runtime(std::path::Path::new(&e.kicad.cli)).caps.iter().any(|c| c == crate::files::kicad::ksim::CAP) { s += "\n\n"; s += T::PROMPT_SIM }
     if e.buy { s += "\n\n"; s += &T::ORDER_PROMPT_BUY.concat() } // every piece: the opening line alone ([0]) left a buy thread without its steps
     let l = lang_line(&e.lang); if l.is_empty() { s } else { s + "\n" + l }
 }

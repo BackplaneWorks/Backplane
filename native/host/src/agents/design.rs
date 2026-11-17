@@ -302,6 +302,7 @@ impl Agents {
     pub async fn design_turn_end(self: &Arc<Self>, th: &str) {
         if crate::copy::on() { return }
         self.turn_guard_end(th).await; // #1163: a mass loss or a review's change offers to restore to before the turn (snapguard.rs)
+        self.sim_turn_end(th).await; // (kicad/ksim_tool.rs: the turn's token cost beside its simulations)
         self.design_record(th, "turn").await;
         self.doc_locks_free(th).await;
         // the open co-editing editors stop showing this agent at work (docs/kicad-coedit.md)
