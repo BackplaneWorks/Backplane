@@ -555,14 +555,35 @@ pub fn decide(pkg: Option<&Package>, status: &str, version: &str, install_state:
 /// DRC zone guard first (a safety fix), then the editor inside Backplane. None when it lacks neither (a newer build with nothing named).
 /// `version`: the installed runtime's (its manifest's), for what no capability says: the editor inside Backplane came with bp.8.
 pub fn update_reason(have: &[&str], version: &str) -> Option<String> {
-    update_reason_on(have, version, cfg!(target_os = "linux"), package().is_some_and(|p| super::kserve::bp_number(p.version) >= 13))
+    update_reason_os(have, version, this_os(), package().is_some_and(|p| super::kserve::bp_number(p.version) >= 13))
 }
+/// This hub's OS as the reasons name it.
+pub fn this_os() -> &'static str { if cfg!(target_os = "macos") { "macos" } else if cfg!(windows) { "windows" } else { "linux" } }
+/// Whether a Backplane runtime of `version` can be shown in the pane on `os`: macOS needs the fork's macOS embedding (bp.13,
+/// embed-macos); elsewhere every fork from bp.8 can. Stock KiCad never can on macOS or Windows (`pane_takes_stock`).
+pub fn pane_can_show(os: &str, version: &str) -> bool {
+    let n = super::kserve::bp_number(version);
+    if os == "macos" { n >= 13 } else { n >= 8 }
+}
+pub fn pane_takes_stock(os: &str) -> bool { os == "linux" }
 /// `update_reason` for a hub on Linux or not: a Linux runtime has always carried KiCad's libraries and Backplane's (its launcher sets
 /// them up); a Windows or macOS one has them only with `global-tables-seeded` (bp.13), so an update to it brings them.
 /// `to13`: the update brings bp.13 or later (its libraries, the narrow-pane fit, the OpenGL fallback); before that pin they are not said.
 pub fn update_reason_on(have: &[&str], version: &str, linux: bool, to13: bool) -> Option<String> {
+    update_reason_os(have, version, if linux { "linux" } else { "windows" }, to13)
+}
+/// `update_reason_on` for `os` ("linux", "windows", "macos"): on macOS a runtime before bp.13 cannot be in the pane, and the update is what
+/// brings it there.
+pub fn update_reason_os(have: &[&str], version: &str, os: &str, to13: bool) -> Option<String> {
+    let linux = os == "linux";
+    // in the pane already: a capability that says so, or a version that has it (on macOS only the version counts: the embedding there is
+    // bp.13's, whatever an older runtime's list says)
+    let embed = pane_can_show(os, version) || (os != "macos" && have.iter().any(|c| *c == "embed" || *c == "embedded"));
+    // the Mac pane cannot show a runtime before bp.13 and the pin can: that is what the update brings (the lead's words)
+    if os == "macos" && to13 && !embed && !have.contains(&"global-tables-seeded") {
+        return Some("It brings KiCad into Backplane's pane on the Mac, with KiCad's standard libraries and Backplane's own.".into());
+    }
     // no runtime's manifest lists the embedding (bp.12.1's does not, and it embeds): from bp.8 on it is there, whatever the list says
-    let embed = have.iter().any(|c| *c == "embed" || *c == "embedded") || super::kserve::bp_number(version) >= 8;
     let mut adds: Vec<&str> = vec![];
     if !have.contains(&"drc-zone-guard") { adds.push("fixes a DRC fault that could miss a short inside a filled zone") }
     if !embed { adds.push("brings the KiCad editor inside Backplane's viewer") }
@@ -591,11 +612,20 @@ pub fn update_reason_on(have: &[&str], version: &str, linux: bool, to13: bool) -
 }
 /// Info `kicad.update`: `{offer, from, to, reason, mb}` when `p` would update the installed Backplane runtime (`status` ok, `version` an
 /// older build of the same line); None otherwise (stock KiCad, none found, the current one). `caps`: the installed runtime's.
-pub fn update_offer(p: Option<&Package>, status: &str, version: &str, caps: &[String]) -> Option<serde_json::Value> {
-    let p = p.filter(|p| status == "ok" && older(version, p))?;
+pub fn update_offer(p: Option<&Package>, status: &str, version: &str, caps: &[String]) -> Option<serde_json::Value> { update_offer_os(p, status, version, caps, this_os()) }
+/// `update_offer` on `os`: an older Backplane runtime, and also a stock KiCad where the pane cannot show stock (macOS, Windows) and the pin
+/// can: any refusal the pin would cure is offered as the update where the person works, never only a sentence in the pane.
+pub fn update_offer_os(p: Option<&Package>, status: &str, version: &str, caps: &[String], os: &str) -> Option<serde_json::Value> {
+    let p = p?;
+    let over_stock = status == "stock" && !pane_takes_stock(os) && pane_can_show(os, p.version);
+    if !(over_stock || (status == "ok" && older(version, p))) { return None }
     let have: Vec<&str> = caps.iter().map(String::as_str).collect();
-    let reason = update_reason_on(&have, version, cfg!(target_os = "linux"), super::kserve::bp_number(p.version) >= 13).unwrap_or_default();
-    Some(json!({"offer": true, "from": version, "to": p.version, "reason": reason, "mb": p.size >> 20, "size": size_words(p)}))
+    let to13 = super::kserve::bp_number(p.version) >= 13;
+    // over stock KiCad (which the pane cannot show here): the pane, with the libraries
+    let reason = if over_stock { format!("It brings KiCad into Backplane's pane{}, with KiCad's standard libraries and Backplane's own.", if os == "macos" { " on the Mac" } else { "" }) }
+                 else { update_reason_os(&have, version, os, to13).unwrap_or_default() };
+    let from = if over_stock { format!("stock KiCad {version}").trim().to_string() } else { version.to_string() };
+    Some(json!({"offer": true, "from": from, "to": p.version, "reason": reason, "mb": p.size >> 20, "size": size_words(p)}))
 }
 /// Why a request is refused, None when it may run. `found`: the KiCad `ipc::runtime` found ("" for none); `status` its status. Only a compatible
 /// Backplane KiCad refuses: a stock or old one is what the install replaces as the runtime the hub picks (the managed folder is searched first).
@@ -1000,6 +1030,34 @@ cp \"$f\" \"$out\"
         assert_eq!(base_url_from(&LINUX, Some("http://127.0.0.1:8123/bp13/")), "http://127.0.0.1:8123/bp13/");
         assert_eq!(base_url_from(&LINUX, Some("https://h/x")), "https://h/x/");
         for no in ["", "  ", "/tmp/x", "file:///tmp/x", "ftp://h/x"] { assert_eq!(base_url_from(&LINUX, Some(no)), base_url_from(&LINUX, None), "{no:?}"); }
+    }
+    /// Any refusal the pin would cure is offered where the person works: macOS before bp.13 cannot be in the pane, stock KiCad cannot on
+    /// macOS or Windows; each is offered the pin with what it brings.
+    #[test] fn a_kicad_the_pane_cannot_show_is_offered_the_pin_on_each_platform() {
+        let pin = |plat| Package { platform: plat, version: "10.99.0-bp.13", release: "backplane-kicad-v10.99.0-bp.13", size: 1_113_318_669, ..MAC };
+        let none: Vec<String> = vec![];
+        let reason = |o: &serde_json::Value| o["reason"].as_str().unwrap().to_string();
+        // macOS bp.12.5: into the pane on the Mac
+        let o = update_offer_os(Some(&pin("darwin-arm64")), "ok", "10.99.0-bp.12.5", &none, "macos").expect("bp.12.5 on the Mac");
+        assert_eq!(reason(&o), "It brings KiCad into Backplane's pane on the Mac, with KiCad's standard libraries and Backplane's own.");
+        assert_eq!((o["from"].as_str(), o["to"].as_str()), (Some("10.99.0-bp.12.5"), Some("10.99.0-bp.13")));
+        // stock KiCad on the Mac and on Windows: the pin installed beside it
+        for os in ["macos", "windows"] {
+            let o = update_offer_os(Some(&pin("x")), "stock", "10.0.8", &none, os).expect(os);
+            assert_eq!(o["from"], "stock KiCad 10.0.8", "{os}"); assert!(reason(&o).starts_with("It brings KiCad into Backplane's pane"), "{os}: {o}");
+        }
+        // stock on Linux is shown in the pane: nothing to offer over it
+        assert_eq!(update_offer_os(Some(&pin("linux-x86_64")), "stock", "10.0.8", &none, "linux"), None);
+        // Windows bp.10 (in the pane already): the libraries and the rest
+        let o = update_offer_os(Some(&pin("windows-x86_64")), "ok", "10.99.0-bp.10", &["embed".into(), "drc-zone-guard".into()], "windows").unwrap();
+        assert_eq!(reason(&o), "It adds KiCad's standard libraries and Backplane's own, fits the editor to a narrow pane, and no longer stops at an OpenGL notice on a computer without a GPU.");
+        // Linux bp.12.4
+        let o = update_offer_os(Some(&pin("linux-x86_64")), "ok", "10.99.0-bp.12.4", &["drc-zone-guard".into()], "linux").unwrap();
+        assert!(reason(&o).starts_with("It adds Backplane's whole library"), "{o}");
+        // a pin the Mac pane cannot show (before bp.13) is not offered over stock there
+        let old = Package { version: "10.99.0-bp.12.5", ..MAC };
+        assert_eq!(update_offer_os(Some(&old), "stock", "10.0.8", &none, "macos"), None);
+        assert!(pane_can_show("macos", "10.99.0-bp.13") && !pane_can_show("macos", "10.99.0-bp.12.5") && pane_can_show("windows", "10.99.0-bp.10"));
     }
     #[test] fn progress_is_said_in_megabytes_and_time_left() {
         let mb = 1u64 << 20;
