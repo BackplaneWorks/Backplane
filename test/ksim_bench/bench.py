@@ -20,6 +20,7 @@ import checks, refs
 TASKS = kb.TASKS; env = kb.env; med = kb.med
 CUT = re.compile(r"usage limit|rate limit|limit reached|hit your limit|out of (extra )?usage|credit balance|overloaded|API Error|quota|529|\b429\b", re.I)
 
+DEAD = []
 def answer_of(log):
     """the agent's final message (the CLI's `result` line), whether the CLI called the turn an error, how many shell commands ran ngspice, and how
     many calls went to the web"""
@@ -54,7 +55,10 @@ def simlog(work, thread, t0, t1):
 def one(work, variant, task, n):
     name = f"{variant}-{task['id']}-{n}"; d = kb.fresh(work, name, task["fixture"]); t0 = time.time(); log = f"{work}/out/{name}.jsonl"
     if os.path.exists(log): os.remove(log)
+    if DEAD: return None
     r = kb.turn(work, d, task["prompt"])
+    if r.get("state") == "driver-failed":  # the hub is gone (or the driver): not a run, and none of the rest would be one either
+        DEAD.append(name); print(f"{name}: NOT RUN, the turn could not be started: {str(r.get('err'))[-200:]}; the rest is left", flush=True); return None
     o = {"variant": variant, "task": task["id"], "run": n, "state": r.get("state"), "wall_s": round(time.time() - t0, 1), "at": int(t0)}
     text, err = "", False
     if os.path.exists(log): o.update(kb.usage(log)); text, err, o["shell_sims"], o["web"] = answer_of(log)
