@@ -21,7 +21,7 @@ the BOM and off the board, the circuit otherwise unchanged), and end with a line
 | `lc_corner` | `lcfilt`: a class-D output filter, 22 uH into 680 nF with a 15 ohm + 220 nF Zobel | -3 dB frequency and peaking with 8 ohm on the output | 51,793 Hz; 3.249 dB | 2 %; 0.15 dB |
 | `opamp_gain_pm` | `preamp`: a single-supply non-inverting stage (12k / 10k, 4.7 nF on the output), op-amp BP321 whose model is in the project's `models/`, not assigned | gain at 1 kHz and the loop's phase margin | 2.19995 V/V; 40.11 deg | 1 %; 3 deg |
 | `ldo_transient` | `ldo`: an adjustable regulator BP758 (model in `models/`), 5 V to 3.3 V, 10 uF out | a 10 mA to 200 mA load step in 1 us: the dip, the time to stay within 5 mV, and the loop's phase margin at 200 mA | 83.77 mV; 38.2 us; 32.55 deg | 5 %; 10 %; 3 deg |
-| `buck_ripple` | `buck`: a TPS54331 converter, 12 V to 3.3 V, 6.8 uH, 220 uF with 60 mohm (said in the prompt) | output ripple at 2 A with the manufacturer's model, which the agent is to get | 43.5 mV | 12 % |
+| `buck_ripple` | `buck`: a TPS54331 converter, 12 V to 3.3 V, 6.8 uH, 220 uF with 60 mohm (said in the prompt) | output ripple at 2 A with the manufacturer's model, which the agent is to get | 41 mV | 15 % |
 | `buck_blocked` | `buck_mp`: a converter around an MP1470 | the same question; the maker has no SPICE model of the part | the agent stops and asks | no number, no model put in its place |
 | `divider_tol` | `vsense`: 180k / 22k from a 24 V bus with 220k to 3.3 V, tolerances in each resistor's `Tolerance` field | the lowest and highest ADC voltage over the tolerances | 2.624514 V; 2.716016 V | 0.2 % |
 | `tune_corner` | `aafilter`: a two-stage RC low-pass whose second capacitor is a placeholder | the E24 value that puts the corner nearest 4 kHz, written into the schematic | 3.9 nF; 4,079.8 Hz | 1 %; 1.5 %; the schematic's value |
@@ -56,7 +56,11 @@ The two with no closed form are reference simulations, and their tolerance comes
   with Gear. The ringing's extremes are -76.1, +26.1, -9.95, +3.64, -1.35 mV about the new value, so a 5 mV band is
   left for good between the third and the fourth (a 10 mV band would sit on the third: 25.5 or 34.2 us by the step).
 - `buck_ripple`: 42.4 to 44.9 mV from a 20 ns to a 2 us step limit; 43.1 over 10 ms; 43.6 with another Schottky model
-  and 47.4 with ngspice's default diode. 12 % covers all of them and nothing that is not this circuit.
+  and 47.4 with ngspice's default diode. That is the peak-to-peak over the last millisecond, which holds a few mV of
+  the model's cycle-to-cycle wander in ngspice; one cycle's ripple is 38.3 to 38.9 mV in every run. Both answer the
+  prompt, so the reference is 41 mV with 15 % (34.9 to 47.2 mV): both readings pass, ngspice's default diode does not.
+  It was 43.5 mV with 12 % for the baseline and was recentred after it (2026-11-17); the baseline's three runs
+  (39.0, 39.8, 40.4 mV) pass under both, and the prompt is unchanged.
 
 The two op-amp and regulator models (`test/ksim_bench/models/BP321.lib`, `BP758.lib`) were written for the benchmark
 and say so; they are no manufacturer's part, so their numbers can be derived from first principles and nothing of a
@@ -187,6 +191,5 @@ What the runs did (tool calls over the three runs of a task):
 - `buck_blocked`: all three stopped and asked, after 25 to 34 calls spent finding out that the maker's only model is
   encrypted for its own simulator.
 
-One weakness of a reference showed: `buck_ripple`'s is the peak-to-peak over the last millisecond (43.5 mV), which
-holds a few mV of cycle-to-cycle wander of the model in ngspice; the three runs answered 39.0, 39.8 and 40.4 mV, the
-first of them the ripple of one cycle (38.3 to 38.9 mV in every run). All are inside the 12 %, the first by 0.7 mV.
+`buck_ripple`'s reference was recentred after these runs (see "References"): the three runs answered 39.0, 39.8 and
+40.4 mV, the first of them the ripple of one cycle, and pass under the old band and the new.
