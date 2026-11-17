@@ -5,7 +5,7 @@
 #       276b1dd1e); pressed: painted within 30 s, no File Open Warning, one KiCad, the dead KiCad's lock cleared and logged
 #   R1  the hub restarts its own KiCad (editor.kicad.restart, as an update does): never asked about its own lock, up within 30 s
 #   B1  Backplane killed (hub and window, kill -9) while the editor is up, then started again on the same home: Edit paints within 30 s,
-#       no File Open Warning, one KiCad on the project (the old one went with its parent, --parent-pid)
+#       no File Open Warning, nobody asked, one KiCad on the project (the KiCad the earlier hub left running is closed: its hub is gone)
 # fork only; under i3 and mutter (KEMBED_WM).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -13,7 +13,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 [ "$EMBED_MODE" = "fork" ] || { echo "embed_restart_gate_e2e: fork only"; exit 0; }
 [ "${1:-}" != "" ] && CLIENT_BIN=$1
 [ "${2:-}" != "" ] && HUB_BIN=$2
-discover_bins; discover_kicad; init_isolated_dirs
+discover_bins; [ -x "$REAL_HOME/.bun/bin/bun" ] && PATH="$REAL_HOME/.bun/bin:$PATH"; discover_kicad; init_isolated_dirs
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 PRO=$(find "$OUT/proj" -maxdepth 3 -name '*.kicad_pro' -not -path '*/.backplane/*' | sort | head -1)
 LCK="$(dirname "$PRO")/~$(basename "$PRO").lck"
@@ -74,13 +74,25 @@ for _ in $(seq $(( (LIMIT + 30) * 4 ))); do [ "$(grep -c 'kicad embed: start +[0
 sleep 3
 ASKS=$(( $(grep -c 'the person is asked' "$OUT/hub.log" || true) - ASKS0 ))
 check "R1 the hub restarts its own KiCad: never asked about its own lock, the new KiCad up within $LIMIT s, one KiCad" "$([ "$ASKS" = 0 ] && [ "$R1" -ge 0 ] && [ "$R1" -le $((LIMIT * 1000)) ] && [ "$(nkicads)" = 1 ] && echo 1 || echo 0)" "asked $ASKS times, up in $R1 ms, KiCads: $(kicads); $(grep -o 'is still held by this hub.s KiCad.*' "$OUT/hub.log" | tail -1 | cut -c1-120)"
-# B1: Backplane killed (its hub and its window), started again on the same home
+# B1: an agent's change first (a track, through kicad_ipc: the hub saves it when it lands), then Backplane killed (its hub and its window),
+# started again on the same home
+PCB=${PRO%.kicad_pro}.kicad_pcb
+ask() { local want=$2 before n; before=$(grep -c "^MCPCALL" "$OUT/standin.log" 2>/dev/null || true); before=${before:-0}
+  local text; text=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1")
+  hub_rpc "[{\"method\":\"turn.start\",\"params\":{\"thread\":\"t1\",\"text\":$text,\"msg\":\"mrg$(date +%s%N)\"}}]" >>"$OUT/rpc.log" 2>&1 || true
+  for _ in $(seq 360); do n=$(grep -c "^MCPCALL" "$OUT/standin.log" 2>/dev/null || true); [ "${n:-0}" -ge $((before + want)) ] && break; sleep 0.25; done; sleep 1; }
+TRACK="{\"@type\":\"type.googleapis.com/kiapi.board.types.Track\",\"start\":{\"x_nm\":\"61000000\",\"y_nm\":\"61000000\"},\"end\":{\"x_nm\":\"71000000\",\"y_nm\":\"61000000\"},\"width\":{\"value_nm\":\"300000\"},\"layer\":\"BL_F_Cu\"}"
+DOC="{\"type\":\"DOCTYPE_PCB\",\"board_filename\":\"$(basename "$PCB")\"}"
+ask "mcpcall:{\"name\":\"kicad_ipc\",\"arguments\":{\"path\":\"$PCB\",\"type\":\"kiapi.common.commands.CreateItems\",\"message\":{\"header\":{\"document\":$DOC},\"items\":[$TRACK]}}}" 1
+LOCKN=$(grep "^MCPCALL kicad_ipc" "$OUT/standin.log" | tail -1 | grep -o 'lock_acquire kicad-[A-Za-z0-9_-]*' | head -1 | cut -d' ' -f2 || true)
+[ -n "$LOCKN" ] && ask "mcpseq:[{\"name\":\"lock_acquire\",\"arguments\":{\"name\":\"$LOCKN\"}},{\"name\":\"kicad_ipc\",\"arguments\":{\"path\":\"$PCB\",\"type\":\"kiapi.common.commands.CreateItems\",\"message\":{\"header\":{\"document\":$DOC},\"items\":[$TRACK]}}}]" 2
+echo "INFO B1: the agent's track: $(grep '^MCPCALL kicad_ipc' "$OUT/standin.log" | tail -1 | cut -c1-160)"
 HUBPID=$(pgrep -u "$(id -u)" -f -- "backplane-hub.*--home $OUT/home" | tr '\n' ' ')
 kill -9 "$CP" $HUBPID 2>/dev/null || true
 for _ in $(seq 40); do [ -z "$(pgrep -u "$(id -u)" -f -- "backplane-hub.*--home $OUT/home")" ] && break; sleep 0.25; done
 echo "INFO B1: killed the window $CP and the hub $HUBPID; KiCad then: $(kicads)"
-for _ in $(seq 40); do [ "$(nkicads)" = 0 ] && break; sleep 0.25; done
-echo "INFO B1: KiCads 10 s after: $(kicads)"
+sleep 3
+echo "INFO B1: KiCads left running 3 s after: $(kicads) (the window's fix keeps KiCad alive: the next hub finds it)"
 mv "$OUT/hub.log" "$OUT/hub1.log"
 start_hub
 echo '[{"select":0},{"wait":2200},{"click":"rail:Board"},{"wait":2500},{"mark":"edit"},{"click":"ui:Edit"},{"kicad":{"wait_painted":120000,"kind":"PCB","tag":"ready"}},{"mark":"ready"},{"wait":5000}]' >"$OUT/s2.json"
@@ -88,6 +100,9 @@ client "$OUT/c2.log" "$OUT/s2.json"
 wait_for_log "$OUT/c2.log" '"name":"ready","event":"mark"' 900 || true
 sleep 3
 B1=$(ms "$OUT/c2.log" edit ready)
-check "B1 Backplane killed and started again: Edit paints within $LIMIT s, no File Open Warning, one KiCad" "$([ "$B1" -ge 0 ] && [ "$B1" -le $((LIMIT * 1000)) ] && [ "$(dlg)" = 0 ] && [ "$(nkicads)" = 1 ] && echo 1 || echo 0)" "$B1 ms, dialogs $(dlg), KiCads: $(kicads); $(grep -o 'kicad locks: .*' "$OUT/hub.log" | head -2 | tr '\n' '|' | cut -c1-200)"
+ASKB=$(grep -c 'the person is asked' "$OUT/hub.log" || true)
+INFILE=$(grep -c '(start 61 61)' "$PCB" || true)
+check "B1 the agent's change made before Backplane was killed is in the board file after the earlier KiCad was closed" "$([ "${INFILE:-0}" -ge 1 ] && echo 1 || echo 0)" "tracks at (61,61) in the file: $INFILE; $(grep -o "kicad embed: .*earlier Backplane's KiCad.*" "$OUT/hub.log" | tail -1 | cut -c1-140)"
+check "B1 Backplane killed and started again: Edit paints within $LIMIT s, no File Open Warning, nobody asked, one KiCad" "$([ "$B1" -ge 0 ] && [ "$B1" -le $((LIMIT * 1000)) ] && [ "$(dlg)" = 0 ] && [ "${ASKB:-0}" = 0 ] && [ "$(nkicads)" = 1 ] && echo 1 || echo 0)" "$B1 ms, dialogs $(dlg), KiCads: $(kicads); $(grep -o 'kicad locks: .*' "$OUT/hub.log" | head -2 | tr '\n' '|' | cut -c1-200)"
 kill "$CP" 2>/dev/null || true
 finish_suite "embed_restart_gate_e2e ($EMBED_MODE)"
