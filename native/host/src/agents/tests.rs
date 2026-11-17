@@ -276,11 +276,13 @@ fn renames(ev: &[Value]) -> Vec<String> { ev.iter().filter(|e| is(e, "ThreadRena
     let (hub, ag, _h, work) = start("gv", |w| base_log(w, 2, &format!("{}\n{}\n{}\n", json!({"$":"MessagePosted","thread":T1,"msg":"m1","role":"user","text":"Route the 3V3 rail","at":1700000010}),
         json!({"$":"ActivityLogged","thread":T1,"act":"a1","tone":"tool","kind":"Edit","summary":format!("{}/main.kicad_pcb", w.display()),"at":1700000011}), json!({"$":"MessagePosted","thread":T1,"msg":"m2","role":"assistant","text":"Routed it.","at":1700000012}))), |_| Cli::standin(&sd)).await;
     crate::commands::start(hub.clone());
-    rpc(&hub, "turn.start", json!({"thread":other,"text":"zqshort busy"})).await; until(&hub, 0, 30, |ev| ev.iter().any(|e| turn_is(e, "running") && e["thread"] == other)).await;
+    rpc(&hub, "turn.start", json!({"thread":other,"text":"zqshort busy"})).await; until(&hub, 0, 180, |ev| ev.iter().any(|e| turn_is(e, "running") && e["thread"] == other)).await;
     let from = len(&hub).await;
     let r = rpc(&hub, "bots.give", json!({"thread":T1,"text":"/give >fixture-1 check the DRC"})).await; assert_eq!(r["ok"], true, "{r}");
-    let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| is(e, "MessageFrom")) && ev.iter().any(|e| is(e, "ActivityLogged") && e["tone"] == "handoff") && ev.iter().any(|e| turn_is(e, "running") && e["thread"] == other)).await;
-    let msg = ev.iter().find(|e| is(e, "MessagePosted") && e["thread"] == other).expect("the handoff reaches the running thread as a message"); let t = msg["text"].as_str().unwrap();
+    // the busy turn's own answer may be posted in `other` after `from` too (under load it is late): the handoff is the message there that is not the agent's
+    let handoff = |e: &Value| is(e, "MessagePosted") && e["thread"] == other && e["role"] != "assistant";
+    let ev = until(&hub, from, 180, |ev| ev.iter().any(|e| is(e, "MessageFrom")) && ev.iter().any(|e| is(e, "ActivityLogged") && e["tone"] == "handoff") && ev.iter().any(|e| turn_is(e, "running") && e["thread"] == other) && ev.iter().any(handoff)).await;
+    let msg = ev.iter().find(|e| handoff(e)).expect("the handoff reaches the running thread as a message"); let t = msg["text"].as_str().unwrap();
     assert!(t.starts_with("[Backplane] The user hands you work from the thread \"Fixture 0\"") && t.contains("Summary: Routing the 3V3 rail; DRC is left to run.") && t.contains("The user's note with it: check the DRC") && t.contains("- board: main.kicad_pcb") && t.contains("- message m1 (user)"), "{t}");
     let from_ev = ev.iter().find(|e| is(e, "MessageFrom")).unwrap(); assert_eq!((from_ev["from"].as_str(), from_ev["kind"].as_str()), (Some(format!("thread:{T1}").as_str()), Some("thread")));
     assert!(!ev.iter().any(|e| is(e, "TurnQueued") && e["thread"] == other), "a handoff is a message, never held behind the turn: {ev:?}");

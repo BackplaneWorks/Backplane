@@ -6,5 +6,3 @@ bots::tests::triage::
 agents::proc::tests::a_launcher_that_needs_node_answers_with_the_agents_path
 #   asserts the replies came within 1 s of wall time while a turn waits for a checkpoint (1.02 s under load)
 agents::tests::checkpoint::a_turn_waiting_for_the_checkpoint_holds_back_nothing_else_and_starts_after_it
-#   under 64 hogs (4 to 6 of 20 runs): the handoff check misses the steered message
-agents::tests::a_give_into_a_running_thread_steers_it_with_a_summary_and_the_references
