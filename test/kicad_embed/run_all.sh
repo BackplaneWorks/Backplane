@@ -62,6 +62,8 @@ SUITES=(
   # a document another live KiCad holds is never opened over its lock after the editor's start: not pre-warmed, DRC on kicad-cli, the BOM
   # edit refused naming it; the person's switch to it asks (Open anyway / Cancel) with no editor over the question (fork)
   "embed_lock_preopen_e2e.sh:lock-preopen"
+  # Open in KiCad on Backplane's runtime on a fresh computer: KiCad's window, never its first-run wizard (fork)
+  "embed_open_app_e2e.sh:open-app"
   # a container is never destroyed with KiCad's holder in it: the window closed, killed, a non-keep detach (the schematic shown), and the
   # window closed with a cold show pending: KiCad alive 20 s after (the same process), the next Edit adopts and paints it, 10 of 10 (fork)
   "embed_client_exit_e2e.sh:client-close"
