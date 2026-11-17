@@ -143,6 +143,19 @@ impl Rig {
     assert!(!r.log().iter().any(|e| e["thread"] == T && ((e["$"] == "ActivityLogged" && e["tone"] == "error") || (e["$"] == "TurnChanged" && e["state"] == "failed"))), "no failure is shown");
     assert_eq!(r.provider(T).await, "claude"); assert_eq!(r.hub.setting(&fb::transient_key(T)).await.unwrap_or_default(), "", "the turn that came back starts the count again");
 }
+/// Many hubs in one process (the tests) share thread ids: a GOAWAY one hub's turn saw, before the line that ends it, is that hub's alone. Another hub's turn on the same
+/// thread id that ends well meanwhile does not take it, so the first turn still reconnects instead of failing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_dropped_connection_seen_by_one_hub_is_not_taken_by_another_on_the_same_thread_id() {
+    let (a, b) = (rig("seen-a", "claude").await, rig("seen-b", "claude").await);
+    for r in [&a, &b] { r.hub.commit(&json!({"$":"TurnChanged","thread":T,"state":"running","at":now()})).await.unwrap(); }
+    let goaway = json!({"type":"result","subtype":"error_during_execution","is_error":true,"result":"stream reading error: http2: server sent GOAWAY and closed the connection; LastStreamID=129, ErrCode=NO_ERROR, debug=\"server_shutting_down\"","session_id":"s"});
+    let end = json!({"type":"command_lifecycle","state":"completed","session_id":"s"});
+    let (mut sa, mut sb) = (None, None);
+    assert!(driver::on_line(&a.hub, None, T, &goaway, None, &mut sa).await.act.is_none(), "seen, not yet acted on");
+    driver::on_line(&b.hub, None, T, &end, Some("completed"), &mut sb).await; // the other hub's turn ends well
+    let v = driver::on_line(&a.hub, None, T, &end, Some("failed"), &mut sa).await;
+    assert!(matches!(v.act, Some(driver::Act::Retry { .. })), "the first hub's turn reconnects: {:?}", v.events);
+}
 /// The same when the process dies mid-stream with "connection reset by peer" on stderr and no result line.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_connection_reset_that_kills_the_process_reconnects_too() {
     let r = rig("reset", "claude").await;

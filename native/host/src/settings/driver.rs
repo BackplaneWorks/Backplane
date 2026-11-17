@@ -334,7 +334,7 @@ pub async fn on_line(hub: &Arc<Hub>, acc: Option<&Arc<crate::settings::accounts_
         let mut any = false; for k in [format!("account.failover.pending.{thread}"), format!("fallback.pending.{thread}")] { any |= !hub.setting(&k).await.unwrap_or_default().is_empty() } any });
     if end.is_some() && end != Some("failed") && !ran_out { // the turn went well or the person stopped it: what was remembered is over
         // `seen` too: a record written for a line of this same read is not committed yet, so the store does not show it, and left behind it would fail a later turn over
-        let had = seen.take().is_some(); let mut ev = vec![]; seen_transient(thread, None);
+        let had = seen.take().is_some(); let mut ev = vec![]; seen_transient(hub, thread, None);
         for k in [format!("account.failover.pending.{thread}"), format!("fallback.pending.{thread}")] { if had || !hub.setting(&k).await.unwrap_or_default().is_empty() { ev.push(set(&k, "", now_ms() / 1000)) } }
         // a turn that completed on its login is the proof the login is not out: its holds are over (they had outlived the limit by a day on Nov 7)
         if end == Some("completed") && !had { ev.extend(proven_events(hub, thread, &provider, &model).await) }
@@ -342,7 +342,7 @@ pub async fn on_line(hub: &Arc<Hub>, acc: Option<&Arc<crate::settings::accounts_
         return Verdict { events: ev, ..Default::default() };
     }
     if end.is_none() {
-        let Some(lim) = lim else { if let Some(why) = fb::transient(v) { seen_transient(thread, Some(why)); } return Verdict::default() };
+        let Some(lim) = lim else { if let Some(why) = fb::transient(v) { seen_transient(hub, thread, Some(why)); } return Verdict::default() };
         *seen = merged(Some(lim.clone()), seen.take());
         let w = world_of(hub, thread, provider, model).await;
         expire_login(acc, &w, &lim);
@@ -351,7 +351,7 @@ pub async fn on_line(hub: &Arc<Hub>, acc: Option<&Arc<crate::settings::accounts_
     let lim = merged(lim, seen.take());
     let w = world_of(hub, thread, provider, model).await;
     // a transient transport failure (no limit behind it): reconnect in the same session, with backoff
-    let earlier = seen_transient(thread, None); // taken whatever the end: a turn that went on well after it is over
+    let earlier = seen_transient(hub, thread, None); // taken whatever the end: a turn that went on well after it is over
     if lim.is_none() && end == Some("failed") { if let Some(why) = fb::transient(v).or(earlier) { let orig = original(hub, thread).await; return on_transient(&w, &why, &orig, jitter()) } }
     let Some(lim) = lim.or_else(|| pending_of(&w).filter(|p| due(p, w.now))) else { return Verdict::default() };
     expire_login(acc, &w, &lim);
@@ -392,9 +392,13 @@ pub fn on_transient(w: &World, why: &str, original: &str, jitter: f64) -> Verdic
         turn(th, "interrupted", at)];
     Verdict { events: ev, drop_turn_end: true, act: Some(Act::Retry { text: reconnect_text(original), delay_ms }) }
 }
-/// A transient failure seen on a line before the line that ends the turn (Claude Code's error result, then its lifecycle): by thread, taken when the turn ends.
+/// A transient failure seen on a line before the line that ends the turn (Claude Code's error result, then its lifecycle): by hub home and thread, taken when the turn ends.
+/// The home keeps hubs in one process apart (tests run many, on the same thread ids: one's well-ended turn took another's GOAWAY, which then read as a failure).
 static TRANSIENT_SEEN: std::sync::LazyLock<std::sync::Mutex<HashMap<String, String>>> = std::sync::LazyLock::new(Default::default);
-fn seen_transient(th: &str, why: Option<String>) -> Option<String> { let mut m = TRANSIENT_SEEN.lock().unwrap(); match why { Some(w) => { m.insert(th.into(), w.clone()); Some(w) } None => m.remove(th) } }
+fn seen_transient(hub: &Hub, th: &str, why: Option<String>) -> Option<String> {
+    let k = format!("{}\n{th}", hub.cfg.home.display()); let mut m = TRANSIENT_SEEN.lock().unwrap();
+    match why { Some(w) => { m.insert(k, w.clone()); Some(w) } None => m.remove(&k) }
+}
 fn jitter() -> f64 { (now_ms() % 1000) as f64 / 1000.0 }
 /// The events that end the limit holds on a thread's login (and model) after a turn completed on it (fallback.rs `proven`).
 async fn proven_events(hub: &Arc<Hub>, thread: &str, provider: &str, model: &str) -> Vec<Value> {
