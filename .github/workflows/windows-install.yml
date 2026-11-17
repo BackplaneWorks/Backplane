@@ -23,6 +23,7 @@ jobs:
         with:
           workspaces: native/host
           shared-key: windows-install
+          save-if: ${{ github.ref == 'refs/heads/main' }}   # only main writes (branches read main's): the repo's 10 GB cache was evicting the release's (docs/release-retro-0.16.0.md)
       - name: onboarding presenter tests
         working-directory: native/host
         shell: bash

@@ -58,6 +58,7 @@ jobs:
             native/host
             native/gpui
           shared-key: browser-e2e-${{ matrix.mode }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}   # only main writes (branches read main's): the repo's 10 GB cache was evicting the release's (docs/release-retro-0.16.0.md)
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: 1.4.4 }
       - uses: rui314/setup-mold@v1

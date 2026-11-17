@@ -81,6 +81,7 @@ jobs:
             native/host
             native/gpui
           shared-key: e2e-macos
+          save-if: ${{ github.ref == 'refs/heads/main' }}   # only main writes (branches read main's): the repo's 10 GB cache was evicting the release's (docs/release-retro-0.16.0.md)
       - name: the runtime, from the fork's macOS CI run
         env:
           GH_TOKEN: ${{ github.token }}
@@ -218,6 +219,7 @@ jobs:
             native/host
             native/gpui
           shared-key: e2e-macos
+          save-if: ${{ github.ref == 'refs/heads/main' }}   # only main writes (branches read main's): the repo's 10 GB cache was evicting the release's (docs/release-retro-0.16.0.md)
       - name: build the darwin-arm64 hub and client
         run: |
           export BACKPLANE_COMMIT=$(git rev-parse --short HEAD)
@@ -320,6 +322,7 @@ jobs:
         with:
           workspaces: native/gpui
           shared-key: e2e-macos-cef
+          save-if: ${{ github.ref == 'refs/heads/main' }}   # only main writes (branches read main's): the repo's 10 GB cache was evicting the release's (docs/release-retro-0.16.0.md)
       - name: build the client with cef, its framework and helper apps
         env:
           GH_TOKEN: ${{ github.token }}
@@ -359,6 +362,7 @@ jobs:
             native/host
             native/gpui
           shared-key: e2e-macos
+          save-if: ${{ github.ref == 'refs/heads/main' }}   # only main writes (branches read main's): the repo's 10 GB cache was evicting the release's (docs/release-retro-0.16.0.md)
       - name: build the hub and the client, take the browser helper from the archive
         env:
           GH_TOKEN: ${{ github.token }}
@@ -431,6 +435,7 @@ jobs:
             native/host
             native/gpui
           shared-key: e2e-macos
+          save-if: ${{ github.ref == 'refs/heads/main' }}   # only main writes (branches read main's): the repo's 10 GB cache was evicting the release's (docs/release-retro-0.16.0.md)
       - name: build the hub and the client from this checkout (no release archive to install)
         run: |
           export BACKPLANE_COMMIT=$(git rev-parse --short HEAD)
