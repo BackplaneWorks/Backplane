@@ -94,8 +94,9 @@ def main():
                 lim = tol if kind == "abs" else abs(ref) * tol; row = []
                 for name, src in (("derived", d), ("simulated", s)):
                     if k not in src: row.append(f"{name} -"); continue
-                    # the two derivations and tasks.json agree to a quarter of the pass tolerance (a hand estimate, marked by _note, is shown, not held)
-                    ok = abs(src[k] - ref) <= lim / 4 or (name == "derived" and "_note" in d); bad += not ok; row.append(f"{name} {src[k]:.6g}{'' if ok else ' MISMATCH'}")
+                    # the two derivations and tasks.json agree to a quarter of the pass tolerance, or the task's own share of it (buck_ripple's band is set
+                    # between two readings of the waveform); a hand estimate, marked by _note, is shown, not held
+                    ok = abs(src[k] - ref) <= lim * t["check"].get("validate", 0.25) or (name == "derived" and "_note" in d); bad += not ok; row.append(f"{name} {src[k]:.6g}{'' if ok else ' MISMATCH'}")
                 print(f"{t['id']:14} {k:14} reference {ref:<10g} +/- {lim:<8.3g} | " + " | ".join(row), flush=True)
     elif cmd == "e2e":
         hub = os.path.exists(work + "/hub.json")
