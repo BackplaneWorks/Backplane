@@ -33,6 +33,9 @@ on:
       update_from:
         description: "kicad-pane job with mac_mode update: the Backplane KiCad release the home starts on (e.g. backplane-kicad-v10.99.0-bp.12.5); kicad_run's package is served from a local feed and pinned into this checkout's hub for the run only"
         default: ""
+      update_feed:
+        description: "kicad-pane job with mac_mode update: local (kicad_run's package served from a local https feed and pinned into this run's hub) or release (the hub's own pin and its download from the published release: nothing injected)"
+        default: "local"
       kicad_via:
         description: "kicad-runtime job: curl (fetch and check the tag's package by hand) or driver (Settings > CAD > Install: the hub's own install driver, which needs the hub's MAC pin on that tag)"
         default: "curl"
@@ -92,7 +95,7 @@ jobs:
           R=$(ls -d "$RUNNER_TEMP"/k/backplane-kicad-darwin-arm64-*/ | head -1); echo "RT=${R%/}" >> "$GITHUB_ENV"
           python3 -c "import json,sys;m=json.load(open(sys.argv[1]));print(m['version'],len(m['capabilities']),'capabilities')" "$R/manifest.json"; ls "$R/bin"
       - name: the update row's start (update_from) and its feed (kicad_run's package), pinned into this run's hub only
-        if: inputs.mac_mode == 'update' && inputs.update_from != ''
+        if: inputs.mac_mode == 'update' && inputs.update_from != '' && inputs.update_feed != 'release'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -115,6 +118,15 @@ jobs:
           (cd "$RUNNER_TEMP/feed" && nohup python3 -c "import http.server,ssl; s=http.server.HTTPServer(('127.0.0.1',8443), http.server.SimpleHTTPRequestHandler); c=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); c.load_cert_chain('$RUNNER_TEMP/feed-cert.pem','$RUNNER_TEMP/feed-key.pem'); s.socket=c.wrap_socket(s.socket, server_side=True); s.serve_forever()" > "$RUNNER_TEMP/feed.log" 2>&1 &)
           sleep 2; CURL_CA_BUNDLE="$RUNNER_TEMP/feed-cert.pem" curl --proto =https -fsSI https://127.0.0.1:8443/SHA256SUMS | head -1
           echo "BACKPLANE_KICAD_FEED=https://127.0.0.1:8443" >> "$GITHUB_ENV"; echo "CURL_CA_BUNDLE=$RUNNER_TEMP/feed-cert.pem" >> "$GITHUB_ENV"
+      - name: the update row's start only (update_from), the hub's own pin and download (update_feed release)
+        if: inputs.mac_mode == 'update' && inputs.update_from != '' && inputs.update_feed == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu; mkdir -p "$RUNNER_TEMP/from"; grep -n '^pub const MAC' native/host/src/kicad/install.rs | cut -c1-220
+          gh release download ${{ inputs.update_from }} -R BackplaneWorks/Backplane_KiCad -p 'backplane-kicad-darwin-arm64-*[0-9].tar.gz' -D "$RUNNER_TEMP/from"
+          (cd "$RUNNER_TEMP/from" && tar xzf backplane-kicad-darwin-arm64-*[0-9].tar.gz)
+          F=$(ls -d "$RUNNER_TEMP"/from/backplane-kicad-darwin-arm64-*/ | head -1); echo "RT=${F%/}" >> "$GITHUB_ENV"
       - name: build the hub and the client
         run: |
           export BACKPLANE_COMMIT=$(git rev-parse --short HEAD)
