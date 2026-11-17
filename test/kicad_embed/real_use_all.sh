@@ -38,6 +38,7 @@ one() {
 }
 real_use_matrix one
 python3 -I "$HERE/lib/real_use_table.py" "$ROOT"; RC=$?
+[ "${REAL_USE_MISSING:-0}" = 1 ] && { echo "FAIL a runtime asked for by name does not exist (see FAIL runtime above)"; RC=1; }
 [ "$RUN_RC" = 0 ] || RC=1
 echo "artifacts: $ROOT"
 exit "$RC"

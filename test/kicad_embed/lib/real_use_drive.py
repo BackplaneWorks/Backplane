@@ -390,6 +390,9 @@ KICAD_RUN["asked_version"] = want_v
 if want_v and KICAD_RUN.get("api") and want_v not in KICAD_RUN["api"] and KICAD_RUN["api"] not in want_v:
     print(f"FAIL the KiCad running says version {KICAD_RUN['api']}, the runtime asked for is {want_v}", flush=True); RESULTS["kicad_mismatch"] = {"ms": None, "ok": 0}
 if asked and "kicad_mismatch" not in RESULTS: RESULTS["kicad_mismatch"] = {"ms": None, "ok": 1, "root": KICAD_RUN.get("proof", {}).get("root"), "how": KICAD_RUN.get("proof", {}).get("how")}
+# the evidence names the runtime exactly: the resolved root and its SOURCE_COMMIT (and the path asked for, a link or a base)
+RESULTS["kicad_runtime"] = {"ms": None, "asked": asked, "root": rt_dir or os.path.dirname(os.path.dirname(os.path.realpath(asked))) if asked else rt_dir,
+                            "source_commit": KICAD_RUN.get("source_commit"), "backplane_commit": KICAD_RUN.get("backplane_commit"), "version": KICAD_RUN.get("api")}
 print(f"INFO kicad {KICAD_RUN}", flush=True)
 # after Edit and the other editors' pre-warm, before any edit: is any document marked modified (a pre-warm that "repairs" a file)?
 if SOCK:
