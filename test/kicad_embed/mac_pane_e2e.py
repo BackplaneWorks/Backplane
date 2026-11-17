@@ -685,6 +685,111 @@ try:
             shot('bs-text-before'); key(K_DEL); time.sleep(0.6); shot('bs-text-field'); key(K_ESC); time.sleep(1.0)
             print('INFO bs 4: Find\'s field in bs-text-before.png ("abc") and bs-text-field.png ("ab")', flush=True)
             raise SystemExit(1 if FAILS else 0)
+        if os.environ.get('BS_PROBE') == 'keys':  # climb-j's edit-keys table (lib/edit_keys_table.json), same row ids, plus extra_* menu chords
+            KEYNAME.update({6: 'z', 7: 'x', 9: 'v', 16: 'y', 35: 'p', 31: 'o', 12: 'q', 5: 'g', 24: '=', 27: '-'})
+            K_Z, K_X, K_V, K_Y, K_S = 6, 7, 9, 16, 1
+            W = 4
+            sys.path.insert(0, os.path.join(REPO, 'test/kicad_embed/mac')); import hub_ws
+            token = open(os.path.join(OUT, 'home/token')).read().strip(); pcbf = os.path.join(OUT, 'proj', 'ecc83-pp.kicad_pcb'); schf = os.path.join(OUT, 'proj', 'ecc83-pp.kicad_sch')
+            tr = lambda: open(os.path.join(OUT, 'kicad-embed-trace.log'), errors='replace').read().splitlines() if os.path.isfile(os.path.join(OUT, 'kicad-embed-trace.log')) else []
+            def since(n, typ): return [e for e in evs() if int(e.get('seq', 0)) > n and e.get('type') == typ]
+            def press(code, flags=0):  # (seq before, trace lines before)
+                n, t = seq(), len(tr()); key(code, flags); return n, t
+            def ed(n): r = edits_since(n); return sum(c for c, d in r), sum(d for c, d in r)
+            def wait_ed(n, want):  # want: 'c' or 'd'
+                wait_for(lambda: (ed(n)[0] if want == 'c' else ed(n)[1]) > 0, W); time.sleep(0.4); return ed(n)
+            ROWS = []
+            def row(ed_, rid, verdict, detail, t0=None):
+                tl = [l.split('macos: ', 1)[-1] for l in tr()[t0:]] if t0 is not None else []
+                tl = [l for l in tl if 'handed to wx' in l][-2:]
+                ROWS.append((ed_, rid, verdict, detail)); line = f'ROW {ed_} {rid}: {verdict} ({detail}){"; trace: " + " | ".join(tl) if tl else ""}'
+                gating = not rid.startswith('extra_')
+                if gating: check(verdict == 'works', line)
+                else: print('INFO ' + line, flush=True)
+            def settle(n): checks_idle(n, 6); time.sleep(0.3)
+            def canvas(): key(K_ESC); time.sleep(0.3); board_click(0.1, 0.9); time.sleep(0.3)
+            def judge_cd(n, want, wrong):  # an edit of the wanted kind, or the opposite
+                c, d = wait_ed(n, want)
+                good = c if want == 'c' else d; bad = d if want == 'c' else c
+                if good and not (wrong and bad): return 'works', f'created {c}, deleted {d}'
+                if c or d: return 'wrong', f'created {c}, deleted {d}'
+                return 'nothing', 'no edit event'
+            def table(E, f):
+                canvas()
+                n, t = press(K_A, CMD); wait_for(lambda: since(n, 'ET_SELECTION_CHANGED'), W); time.sleep(0.4)
+                sel = [e.get('selection') or {} for e in since(n, 'ET_SELECTION_CHANGED')]
+                many = any(len(x.get('references') or []) + len(x.get('nets') or []) > 1 or x.get('count', 0) > 1 for x in sel)
+                row(E, 'select_all', 'works' if many else ('wrong' if sel else 'nothing'), f'{len(sel)} selection events; last {str(sel[-1])[:90] if sel else "-"}', t)
+                n, t = press(K_FDEL); v = judge_cd(n, 'd', True); row(E, 'delete', *v, t); settle(n)
+                n, t = press(K_Z, CMD); v = judge_cd(n, 'c', True); row(E, 'undo', *v, t); settle(n); undo_ok = v[0] == 'works'
+                n, t = press(K_Y, CMD); v = judge_cd(n, 'd', True); row(E, 'redo', *v, t); settle(n)
+                if v[0] == 'works': m = seq(); key(K_Z, CMD); wait_ed(m, 'c'); settle(m)
+                n, t = press(K_Z, CMD | SHIFT); v = judge_cd(n, 'd', True); row(E, 'redo_shift_z', *v, t); settle(n)
+                if v[0] == 'works': m = seq(); key(K_Z, CMD); wait_ed(m, 'c'); settle(m)
+                if not undo_ok:
+                    print(f'INFO {E}: undo is nothing, so the rows after it run on what is left (no restore): judge them with that in mind', flush=True)
+                canvas(); key(K_A, CMD); time.sleep(0.5)
+                n, t = press(K_DEL); v = judge_cd(n, 'd', True); row(E, 'backspace', *v, t); settle(n)
+                if v[0] == 'works' and undo_ok: m = seq(); key(K_Z, CMD); wait_ed(m, 'c'); settle(m)
+                canvas(); key(K_A, CMD); time.sleep(0.5); key(8, CMD); time.sleep(0.5); key(K_ESC); time.sleep(0.4)
+                p = last_push(); relay(op='move', x=p[0][0] + p[0][2] * 0.5, y=p[0][1] + p[0][3] * 0.5); time.sleep(0.4)
+                n, t = press(K_V, CMD); time.sleep(1.0); board_click(0.5, 0.5); v = judge_cd(n, 'c', True); row(E, 'copy_paste', *v, t); settle(n)
+                if v[0] == 'works' and undo_ok: m = seq(); key(K_Z, CMD); wait_ed(m, 'd'); settle(m)
+                canvas(); key(K_A, CMD); time.sleep(0.5)
+                n, t = press(K_X, CMD); v = judge_cd(n, 'd', True); row(E, 'cut', *v, t); settle(n)
+                p = last_push(); relay(op='move', x=p[0][0] + p[0][2] * 0.5, y=p[0][1] + p[0][3] * 0.5); time.sleep(0.4)
+                n, t = press(K_V, CMD); time.sleep(1.0); board_click(0.5, 0.5); v = judge_cd(n, 'c', True); row(E, 'cut_paste', *v, t); settle(n)
+                key(K_ESC); time.sleep(0.3)
+                m0, b0 = os.path.getmtime(f), open(f, 'rb').read()
+                n, t = press(K_S, CMD); saved = wait_for(lambda: os.path.getmtime(f) > m0, 6)
+                row(E, 'save', 'works' if saved and open(f, 'rb').read() != b0 else ('wrong' if saved else 'nothing'), 'the file changed' if saved else 'the file unchanged', t)
+                canvas(); n, t = press(K_F, CMD); wait_for(lambda: since(n, 'ET_DIALOG_OPENED'), W)
+                dl = [e.get('detail') for e in since(n, 'ET_DIALOG_OPENED')]
+                row(E, 'find', 'works' if 'Find' in dl else ('wrong' if dl else 'nothing'), f'dialogs {dl}', t); key(K_ESC); time.sleep(1.0)
+                # the other menu chords: what they open or do (not gating; the trace says whether wx took them)
+                for name, code, fl, close in (('extra_print', 35, CMD, True), ('extra_preferences', 43, CMD, True), ('extra_open', 31, CMD, True),
+                                              ('extra_search_panel', 5, CMD, False), ('extra_zoom_in', 24, CMD, False), ('extra_zoom_out', 27, CMD, False),
+                                              ('extra_close_window', 13, CMD, False), ('extra_quit', 12, CMD, False)):
+                    canvas(); n, t = press(code, fl); time.sleep(2.0)
+                    dl = [e.get('detail') for e in since(n, 'ET_DIALOG_OPENED')]; c, d = ed(n)
+                    other = sorted({e.get('type') for e in evs() if int(e.get('seq', 0)) > n} - {'ET_PROGRESS', 'ET_FRAME_DRAWN', 'ET_CHECKS_DONE', 'ET_FOCUS_IN', 'ET_FOCUS_OUT'})
+                    alive = bool(kicad_frame())
+                    row(E, name, 'opened ' + ', '.join(map(str, dl)) if dl else ('edit' if c or d else 'no dialog, no edit'), f'events {other}; KiCad frame {"there" if alive else "GONE"}', t)
+                    if dl and close: key(K_ESC); time.sleep(1.2)
+                    if not alive: print(f'INFO {E}: KiCad frame gone after {name}; the table stops here', flush=True); return False
+                return True
+            board_click(0.1, 0.9)
+            go = table('pcb', pcbf)
+            if go:  # per_actor_undo (PCB): the person deletes everything, an agent's track lands (save: false), the person's Cmd+Z
+                port_ = port
+                def mcalls(): return [l for l in open(os.path.join(OUT, 'standin.log'), errors='replace').read().splitlines() if l.startswith('MCPCALL')] if os.path.isfile(os.path.join(OUT, 'standin.log')) else []
+                def ask(name, args, wait=60):
+                    n0 = len(mcalls())
+                    hub_ws.send(port_, token, 'turn.start', {'thread': 't1', 'text': 'mcpcall:' + json.dumps({'name': name, 'arguments': args}), 'msg': f'as-{time.time_ns()}'})
+                    wait_for(lambda: len(mcalls()) > n0, wait, 0.3)
+                    l = mcalls()[-1] if len(mcalls()) > n0 else ''
+                    try: return json.loads(json.loads(l.split(' ', 2)[2])['result']['content'][0]['text'])
+                    except Exception: return {'raw': l[:300]}
+                canvas(); key(K_A, CMD); time.sleep(0.5); n = seq(); key(K_FDEL); wait_ed(n, 'd'); settle(n)
+                C = 'kiapi.common.commands.'
+                docs = ask('kicad_ipc', {'path': pcbf, 'type': C + 'GetOpenDocuments', 'message': {'type': 'DOCTYPE_PCB'}})
+                h = {'document': ((docs.get('message') or {}).get('documents') or [None])[0]}
+                b = ask('kicad_ipc', {'path': pcbf, 'type': C + 'BeginCommit', 'save': False, 'message': {'header': h}}); tid = (b.get('message') or {}).get('id')
+                ask('kicad_ipc', {'path': pcbf, 'type': C + 'CreateItems', 'save': False, 'message': {'header': h, 'items': [{'@type': 'type.googleapis.com/kiapi.board.types.Track', 'id': {'value': str(__import__('uuid').uuid4())},
+                    'start': {'x_nm': 120000000, 'y_nm': 100000000}, 'end': {'x_nm': 140000000, 'y_nm': 100000000}, 'width': {'value_nm': 300000}, 'layer': 'BL_F_Cu'}]}})
+                ask('kicad_ipc', {'path': pcbf, 'type': C + 'EndCommit', 'save': False, 'message': {'header': h, 'id': tid, 'action': 'CMA_COMMIT', 'message': 'agent add track'}})
+                time.sleep(1.5); canvas()
+                n, t = press(K_Z, CMD); c, d = wait_ed(n, 'c'); settle(n)
+                m0 = os.path.getmtime(pcbf); key(K_S, CMD); wait_for(lambda: os.path.getmtime(pcbf) > m0, 6)
+                txt = open(pcbf, errors='replace').read(); has = '(start 120 100)' in txt and '(end 140 100)' in txt
+                v = 'works' if c > 0 and d == 0 and has else ('wrong' if d > 0 or not has else 'nothing')
+                row('pcb', 'per_actor_undo', v, f'created {c}, deleted {d}; the saved file {"has" if has else "lacks"} the agent\'s track; agent commit {"ok" if tid else "no id"}', t)
+            if go:
+                r = rects().get('kicad-tab:SCH'); b = next((w for w in wins() if w[0] == cw[0]), cw)[3]
+                if r: click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2)
+                time.sleep(6); board_click(0.1, 0.9); table('sch', schf)
+            RES['edit_keys'] = ROWS
+            raise SystemExit(1 if FAILS else 0)
         if os.environ.get('BS_PROBE') == 'order':  # the ⌫ cases ordered so none needs Cmd+Z to restore the board (undo is lost on macOS)
             K_DEL_ = K_DEL
             # 3: ⌫ while routing takes back the last segment: judged in cropped pictures of KiCad's own frame
