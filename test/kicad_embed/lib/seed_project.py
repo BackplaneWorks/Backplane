@@ -245,7 +245,12 @@ def main() -> None:
     write(os.path.join(out_dir, "bin", "claude"), f'#!/bin/sh\nexec "{bun_sh}" "{standin_sh}" "$@"\n', executable=True)
     for blocked in ("codex", "grok", "muse", "opencode"):
         write(os.path.join(out_dir, "bin", blocked), "#!/bin/sh\nexit 1\n", executable=True)
-    if os.name == "nt":
+    if os.name == "nt" and os.environ.get("BP_STANDIN_EXE") and os.path.isfile(os.environ["BP_STANDIN_EXE"]):
+        # the stand-in compiled to an .exe (bun build --compile): an npm-style claude.cmd loses the hub's --mcp-config JSON on the way
+        # through cmd.exe (bp-win, Nov 17: the stand-in saw "--mcp-config" ""), so no MCP call of an agent's ever ran in these runs
+        os.remove(os.path.join(out_dir, "bin", "claude"))
+        shutil.copyfile(os.environ["BP_STANDIN_EXE"], os.path.join(out_dir, "bin", "claude.exe"))
+    elif os.name == "nt":
         write(os.path.join(out_dir, "bin", "claude.cmd"), f'@echo off\r\n"{bun}" "{standin}" %*\r\n')
         for blocked in ("codex", "grok", "muse", "opencode"):
             write(os.path.join(out_dir, "bin", f"{blocked}.cmd"), "@echo off\r\nexit /b 1\r\n")
