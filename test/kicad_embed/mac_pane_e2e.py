@@ -821,6 +821,22 @@ try:
                 if good and not (wrong and bad): return 'works', f'created {c}, deleted {d}'
                 if c or d: return 'wrong', f'created {c}, deleted {d}'
                 return 'nothing', 'no edit event'
+            def first_keys(E):
+                # the very first keys on a fresh frame, no click (Edit gives KiCad the keyboard): Cmd+A selects, Cmd+C puts the editor's
+                # text on the pasteboard, Cmd+V and a click paste every item (fork f71f546af8: a check no longer leaves the keys on a side panel)
+                subprocess.run(['pbcopy'], input=b'lane-m-before-copy')
+                n, t = press(K_A, CMD); wait_for(lambda: since(n, 'ET_SELECTION_CHANGED'), W); time.sleep(0.4)
+                sel = [e.get('selection') or {} for e in since(n, 'ET_SELECTION_CHANGED')]
+                k = max((len(x.get('references') or []) + len(x.get('nets') or []) for x in sel), default=0)
+                key(8, CMD); time.sleep(0.8); pb = subprocess.run(['pbpaste'], capture_output=True).stdout.decode(errors='replace')
+                kt = pb != 'lane-m-before-copy' and pb.lstrip().startswith('(')
+                key(K_ESC); time.sleep(0.4)
+                p = last_push(); relay(op='move', x=p[0][0] + p[0][2] * 0.5, y=p[0][1] + p[0][3] * 0.5); time.sleep(0.4)
+                m = seq(); key(K_V, CMD); time.sleep(1.0); board_click(0.5, 0.5); c, d = wait_ed(m, 'c'); settle(m); key(K_ESC); time.sleep(0.4)
+                ok = k > 1 and kt and c > 1
+                row(E, 'first_keys_no_click', 'works' if ok else ('nothing' if not (k or kt or c) else 'wrong'),
+                    f'Cmd+A selected {k} (refs+nets); the pasteboard after Cmd+C {"holds KiCad text (" + str(len(pb)) + " chars)" if kt else "has no KiCad text"}; Cmd+V and a click created {c}', t)
+                if c: m = seq(); key(K_Z, CMD); wait_ed(m, 'd'); settle(m)
             def table(E, f):
                 other_text = ''  # what KiCad's own Cmd+C puts on the pasteboard (copy_paste below records it): another KiCad's copy is the same text
                 canvas(); canvas()
@@ -886,6 +902,35 @@ try:
                 for nl in notes: print(f'INFO undo_markers {E}: {nl}', flush=True)
                 print(f'INFO undo_markers {E}: checks {"run through the hub (RunChecks)" if ran_direct else "KiCad\'s own after each edit (RunChecks refused through the hub: " + str(rc)[:100] + ")"}', flush=True)
                 row(E, 'undo_markers', 'works' if not bad else ('nothing' if all(b.endswith('no edit') for b in bad) else 'wrong'), ('; '.join(bad) or f'every real item back at each undo ({sum(c0.values())}: {c0}), no dialog'))
+                if E == 'pcb':  # select_markers_agent_check (fork e7f1bdb7a3, Carbon's crash): Cmd+A with the check's markers in it, an agent's
+                    # check frees them, the pointer moves over the canvas: KiCad keeps running, and the selection is the same minus the markers
+                    C = 'kiapi.common.commands.'
+                    def selection():
+                        d = ask('kicad_ipc', {'path': f, 'type': C + 'GetOpenDocuments', 'message': {'type': 'DOCTYPE_PCB'}}); doc = ((d.get('message') or {}).get('documents') or [None])[0]
+                        it = ((ask('kicad_ipc', {'path': f, 'type': C + 'GetSelection', 'message': {'header': {'document': doc}}}).get('message') or {}).get('items') or [])
+                        mk = [i for i in it if 'Marker' in str(i.get('@type', ''))]
+                        return len(it) - len(mk), len(mk)
+                    n0 = seq(); ask('kicad_ipc', {'path': f, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': 'FK_PCB'}}); checks_idle(n0, 30)
+                    gm = ask('kicad_ipc', {'path': f, 'type': 'kiapi.backplane.embed.GetMarkers', 'message': {'kind': 'FK_PCB'}})
+                    gmm = gm.get('message') or {}
+                    nm = max([len(v) for v in gmm.values() if isinstance(v, list)] + [0])
+                    kpid0 = kpid; canvas(); key(K_A, CMD); time.sleep(0.8)
+                    real0, mk0 = selection()
+                    n1 = seq(); ask('kicad_ipc', {'path': f, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': 'FK_PCB'}}); cd = checks_idle(n1, 30)
+                    p = last_push()
+                    for fx, fy in ((0.3, 0.3), (0.5, 0.5), (0.7, 0.6), (0.4, 0.7), (0.6, 0.4)):
+                        relay(op='move', x=p[0][0] + p[0][2] * fx, y=p[0][1] + p[0][3] * fy); time.sleep(0.4)
+                    time.sleep(1.5)
+                    alive = bool(kicad_frame()) and any(OUT in l and str(kpid0) in l.split()[0:1] for l in subprocess.run(['ps', '-axo', 'pid=,command='], capture_output=True, text=True).stdout.splitlines())
+                    stall = open(os.path.join(OUT, 'kicad-embed-trace.log'), errors='replace').read().count('STALL') if os.path.isfile(os.path.join(OUT, 'kicad-embed-trace.log')) else 0
+                    real1, mk1 = selection() if alive else (0, 0)
+                    detail = (f'GetMarkers: {nm} markers ({str(gmm)[:80]}); after Cmd+A the selection held {real0} items and {mk0} markers; agent check '
+                              f'{"done" if cd else "no ET_CHECKS_DONE"}; KiCad {"running" if alive else "GONE"}; STALL lines {stall}; after: {real1} items and {mk1} markers')
+                    if not alive or stall: v = 'wrong'
+                    elif not (nm or mk0): v = 'nothing (not judged: no markers on the board or in the selection)'
+                    else: v = 'works' if real1 == real0 and real0 > 1 and mk1 == 0 else 'wrong'
+                    row(E, 'select_markers_agent_check', v, detail)
+                    key(K_ESC); time.sleep(0.6)
                 if not undo_ok:
                     print(f'INFO {E}: undo is nothing, so the rows after it run on what is left (no restore): judge them with that in mind', flush=True)
                 canvas(); key(K_A, CMD); time.sleep(0.5)
@@ -918,6 +963,28 @@ try:
                 m0, b0 = os.path.getmtime(f), open(f, 'rb').read()
                 n, t = press(K_S, CMD); saved = wait_for(lambda: os.path.getmtime(f) > m0, 6)
                 row(E, 'save', 'works' if saved and open(f, 'rb').read() != b0 else ('wrong' if saved else 'nothing'), 'the file changed' if saved else 'the file unchanged', t)
+                if E == 'pcb':  # typing in a text field across a check: the keys stay in the field, none go to the canvas
+                    def field_text():
+                        subprocess.run(['pbcopy'], input=b'lane-m-none'); key(K_A, CMD); time.sleep(0.3); key(8, CMD); time.sleep(0.5)
+                        return subprocess.run(['pbpaste'], capture_output=True).stdout.decode(errors='replace')
+                    def across(open_field, where):
+                        canvas(); open_field(); time.sleep(1.2)
+                        n0 = seq(); key(0); time.sleep(0.12); key(11); time.sleep(0.5)  # a, b as key presses (the runner's unicode events did not reach wx)
+                        if field_text() != 'ab': key(K_ESC); time.sleep(0.6); return None
+                        key(124); time.sleep(0.3)  # the caret to the end
+                        n1 = seq(); rc = ask('kicad_ipc', {'path': f, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': 'FK_PCB'}}); cd = checks_idle(n1, 30)
+                        key(8); time.sleep(0.12); key(2); time.sleep(0.5); got = field_text()  # c, d
+                        canvas_ev = [e.get('type') for e in evs() if int(e.get('seq', 0)) > n0 and e.get('type') in ('ET_DOCUMENT_EDITED', 'ET_SELECTION_CHANGED')]
+                        key(K_ESC); time.sleep(0.6)
+                        return (got == 'abcd' and not canvas_ev and bool(cd)), f'{where}: the field holds {got!r} after "ab", a check ({"done" if cd else "no ET_CHECKS_DONE"}; RunChecks {"ok" if "message" in rc else str(rc)[:60]}), "cd"; canvas events {canvas_ev}'
+                    # the Find dialog's field (Cmd+F): not the Search panel by Cmd+G, which is also Group in the PCB editor (fork embed: Cmd+G,
+                    # then typing, hung KiCad on the base build), so no typed key can reach the canvas if a field did not open
+                    fd0 = seq(); r = None
+                    def open_find(): key(K_F, CMD)
+                    canvas(); open_find(); opened = wait_for(lambda: since(fd0, 'ET_DIALOG_OPENED'), W); key(K_ESC); time.sleep(0.8)
+                    if opened: r = across(open_find, 'the Find dialog (Cmd+F)')
+                    row(E, 'type_across_check', ('works' if r[0] else 'wrong') if r else 'nothing',
+                        r[1] if r else ('Find opened but its field did not take "ab" (not judged as KiCad: a harness path)' if opened else 'Find did not open'))
                 canvas(); n, t = press(K_F, CMD); wait_for(lambda: since(n, 'ET_DIALOG_OPENED'), W)
                 dl = [e.get('detail') for e in since(n, 'ET_DIALOG_OPENED')]
                 row(E, 'find', 'works' if 'Find' in dl else ('wrong' if dl else 'nothing'), f'dialogs {dl}', t); key(K_ESC); time.sleep(1.0)
@@ -966,6 +1033,7 @@ try:
             t0 = len(tr()); kshot('bs-route-before'); key(K_DEL); time.sleep(1.0); kshot('bs-route-after')
             print(f'INFO bs 3: ⌫ while routing, pictures bs-route-before.png / bs-route-after.png of KiCad\'s frame; trace {[l.split("macos: ",1)[-1] for l in tr()[t0:]]}', flush=True)
             key(K_ESC); time.sleep(0.4); key(K_ESC); time.sleep(0.6)
+            first_keys('pcb')
             board_click(0.1, 0.9)
             go = table('pcb', pcbf)
             if go:  # per_actor_undo (PCB): the person deletes everything, an agent's track lands (save: false), the person's Cmd+Z
@@ -986,7 +1054,7 @@ try:
             if go:
                 r = rects().get('kicad-tab:SCH'); b = next((w for w in wins() if w[0] == cw[0]), cw)[3]
                 if r: click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2)
-                time.sleep(6); board_click(0.1, 0.9); table('sch', schf)  # Cmd+W and Cmd+Q last, in the schematic: they may end the editor
+                time.sleep(6); first_keys('sch'); board_click(0.1, 0.9); table('sch', schf)  # Cmd+W and Cmd+Q last, in the schematic: they may end the editor
             RES['edit_keys'] = ROWS
             raise SystemExit(1 if FAILS else 0)
         if os.environ.get('BS_PROBE') == 'order':  # the ⌫ cases ordered so none needs Cmd+Z to restore the board (undo is lost on macOS)
