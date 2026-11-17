@@ -1,12 +1,14 @@
 # The linux-x64 release runner's image (docs/release-runners.md): ubuntu 22.04, so the archive keeps glibc 2.35 as on GitHub's ubuntu-22.04 image,
-# with the tools release.yml's build expects that image to have. The runner itself, rustup and every cache live in the volume at /home/runner
+# with the tools release.yml's build expects that image to have (wget for setup-mold; the libraries libcef.so links against, which GitHub's image has). The runner itself, rustup and every cache live in the volume at /home/runner
 # (scripts/ci-linux/entrypoint.sh installs what is missing there), so the image is the same on any machine and holds no credential.
 FROM ubuntu:22.04
 ARG UID=1000
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
       ca-certificates curl git git-lfs sudo python3 python3-venv build-essential pkg-config clang libclang-dev lld perl make file binutils \
-      xz-utils zstd unzip zip jq patchelf ninja-build libicu70 tzdata openssh-client rsync gnupg lsb-release \
+      xz-utils zstd unzip zip jq patchelf ninja-build libicu70 tzdata openssh-client rsync gnupg lsb-release wget \
+      libnss3 libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 libcups2 libdbus-1-3 libxdamage1 libxfixes3 libxcomposite1 libxrandr2 libxshmfence1 \
+      libpango-1.0-0 libcairo2 libgbm1 libdrm2 libgtk-3-0 libasound2 \
     && rm -rf /var/lib/apt/lists/*
 # pinned by sha256 (bump them together with scripts/ci-linux/README)
 RUN set -eu; cd /tmp; \
