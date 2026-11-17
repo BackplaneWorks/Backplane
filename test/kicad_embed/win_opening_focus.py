@@ -1912,7 +1912,7 @@ def run(h):
                 h.check("nogpu strict: no top-level KiCad window (no box) at any point", not nogpu_boxes, nogpu_boxes)
                 sock = (h.last_kicad_report("settled") or {}).get("sock") or ""
                 try:
-                    caps = h.ipc_cmd("caps", sock).get("capabilities") if sock else None
+                    caps = h.ipc_cmd("caps", sock, timeout=45.0).get("capabilities") if sock else None
                 except Exception as e:  # noqa: BLE001
                     caps = f"error: {e}"
                 h.check("nogpu strict: GetCapabilities has embed-notice", isinstance(caps, list) and "embed-notice" in caps, {"caps": caps if isinstance(caps, str) else sorted(c for c in (caps or []) if c.startswith("embed"))})
