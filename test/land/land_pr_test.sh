@@ -45,4 +45,11 @@ echo BLOCKED > "$FAKE/mergestate"; FAKE_NOLOGIN=1 land > "$T/o9"; rc=$?; [ $rc !
 echo NONE > "$FAKE/review"; land > "$T/o9b"; rc=$?; [ $rc = 3 ] && grep -q "blocked by a rule with no review asked for" "$T/o9b"; ok $? "blocked, no review decision: its own line, exit 3 (rc $rc)"
 # 10. the token is never printed
 ! grep -q fake-token "$T"/o[0-9]*; ok $? "the token is never printed"
+# 11. a stale copy of land.sh (main's has changed since this lane's) refuses to run; a copy ahead of main's (a change being landed) does not
+git -C "$M" pull -q origin main 2>/dev/null; echo "# newer" >> "$M/scripts/land.sh"; git -C "$M" commit -qam "land.sh: newer"; git -C "$M" push -q origin main
+before=$(wc -l < "$GATES"); land > "$T/o11"; rc=$?; [ $rc = 1 ] && grep -q "older than origin/main's" "$T/o11" && [ "$(wc -l < "$GATES")" = "$before" ]; ok $? "a stale land.sh refuses to run (rc $rc)"
+git -C "$LANE" rebase -q origin/main 2>/dev/null || { git -C "$LANE" fetch -q origin main; git -C "$LANE" rebase -q origin/main; }; echo "# ahead" >> "$LANE/scripts/land.sh"; g commit -qam "land.sh: ahead"
+land > "$T/o11b"; ! grep -q "older than origin/main's" "$T/o11b"; ok $? "a land.sh ahead of main's runs"
+# 12. nothing ever pushes to refs/heads/main itself
+! grep -n 'push.*refs/heads/main\|push origin HEAD:main\|push.*HEAD:main' "$ROOT/scripts/land.sh" | grep -v '^[0-9]*:#'; ok $? "land.sh has no push to main"
 [ $fails = 0 ] && echo "land_pr_test: all passed" || { echo "land_pr_test: $fails failed"; exit 1; }
