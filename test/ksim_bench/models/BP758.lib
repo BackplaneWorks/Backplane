@@ -1,0 +1,26 @@
+* BP758: 500 mA adjustable low-dropout regulator, SOT-23-5, 0.55 V reference. Behavioural macro-model: a
+* transconductance error amplifier with its compensation network driving the gate of a PMOS pass transistor;
+* enable threshold 0.9 V.
+* No current limit, no thermal shutdown, no noise.
+* Written for Backplane's simulation benchmark (test/ksim_bench). It is not a manufacturer's model of any part.
+*
+* Connections:  input
+*               |  ground
+*               |  |   enable
+*               |  |   |  feedback
+*               |  |   |  |  output
+*               |  |   |  |  |
+.subckt BP758   in gnd en fb out
+Bref ref gnd V = v(en,gnd) > 0.9 ? 0.55 : 0
+Gea g gnd ref fb 100u
+Ro in g 3meg
+Rz in gz 120k
+Cz gz g 20p
+Cg in g 2p
+Dlo gnd g BP758_CLAMP
+Dhi g in BP758_CLAMP
+M1 out g in in BP758_PASS W=1u L=1u
+Iq in gnd 50u
+.model BP758_PASS PMOS (LEVEL=1 VTO=-0.7 KP=1.6 LAMBDA=0.02)
+.model BP758_CLAMP D (IS=1e-14)
+.ends BP758

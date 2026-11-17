@@ -1,0 +1,28 @@
+* BP321: single-supply CMOS op-amp, SOT-23-5. Behavioural macro-model: 100 dB DC gain, 1 MHz gain-bandwidth,
+* a second pole at 3 MHz, 100 ohm open-loop output resistance, 8 nV/rtHz white input voltage noise at 27 C.
+* No output swing limit, no slew limit, no input bias current.
+* Written for Backplane's simulation benchmark (test/ksim_bench). It is not a manufacturer's model of any part.
+*
+* Connections:  non-inverting input
+*               |   inverting input
+*               |   |   positive supply
+*               |   |   |   negative supply
+*               |   |   |   |   output
+*               |   |   |   |   |
+.subckt BP321   inp inn vcc vee out
+Rnoise nz 0 3861.33
+Enoise inx inp nz 0 1
+Rm1 vcc mid 1meg noisy=0
+Rm2 mid vee 1meg noisy=0
+Rinp inx mid 1e12 noisy=0
+Rinn inn mid 1e12 noisy=0
+G1 0 n1 inx inn 1m
+R1 n1 0 100meg noisy=0
+C1 n1 0 159.155p
+E2 n2 0 n1 0 1
+R2 n2 n3 1k noisy=0
+C2 n3 0 53.0516p
+Eout n4 n5 n3 0 1
+Emid n5 0 mid 0 1
+Rout n4 out 100 noisy=0
+.ends BP321
