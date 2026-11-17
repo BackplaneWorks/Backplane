@@ -119,6 +119,7 @@ impl Agents {
         let home = hub.cfg.home.to_string_lossy().into_owned(); let h2 = home.clone();
         let left = tokio::task::spawn_blocking(move || proc::reap_orphans(&h2)).await.unwrap_or(0); proc::set_owner(&home);
         if left > 0 { eprintln!("agents: ended {left} process(es) a previous hub left behind") }
+        { let h3 = ag.host.home.clone(); let n = tokio::task::spawn_blocking(move || proc::clear_run_files(&h3)).await.unwrap_or(0); if n > 0 { eprintln!("agents: removed {n} run file(s) a previous hub left behind") } } // their processes are gone (above)
         let _ = tokio::task::spawn_blocking(crate::memscope::init).await; // agents and jobs in memory scopes of their own (memscope.rs), probed once
         { let cap = ag.world.lock().await.setting("memory.agent.max").to_string(); if !cap.is_empty() { crate::memscope::set_agent_cap(&cap); eprintln!("memscope: this hub's agents are capped at {cap} (Raise limit, memory.agent.max)") } }
         crate::startup::mark("agents: orphans reaped");
@@ -1193,7 +1194,7 @@ impl Actor {
         if cfg!(windows) {
             let name: String = th.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
             rules::prompt_to_file(&mut args, &self.ag.host.home.join("prompts").join(format!("{name}.md"))).map_err(|e| e.to_string())?;
-            keep.extend(rules::mcp_to_file(&mut args, &self.ag.host.home.join("secrets").join("run"), &format!("{name}-{gen}.mcp.json")).map_err(|e| format!("could not write the MCP config for Claude: {e}"))?);
+            keep.extend(rules::mcp_to_file(&mut args, &proc::run_dir(&self.ag.host.home), &format!("{name}-{gen}.mcp.json")).map_err(|e| format!("could not write the MCP config for Claude: {e}"))?);
         }
         if !acct_args.is_empty() { acct_args.extend(args); args = acct_args }
         if self.person { args.extend(person::CLAUDE_STRICT.iter().map(|x| x.to_string())) } // only this hub's MCP config; the person's user-level hooks, MCP servers and rules do not load
