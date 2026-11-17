@@ -837,7 +837,8 @@ try:
                 # redo at once after the undo's edit (before KiCad's in-editor check runs), and again after ET_CHECKS_DONE: on bp.13 the
                 # check after an undo empties the redo list (climb-j, Linux), so a missing menu key and an emptied list are told apart
                 n, t = press(K_Z, CMD); v = judge_cd(n, 'c', True); row(E, 'undo', *v, t); undo_ok = v[0] == 'works'
-                n, t = press(K_Y, CMD); v = judge_cd(n, 'd', True); row(E, 'redo', *v, t); settle(n)
+                # redo by Cmd+Y: the table's "where KiCad binds it"; KiCad on macOS binds redo to Cmd+Shift+Z only (redo_shift_z), so here n/a
+                n, t = press(K_Y, CMD); v = judge_cd(n, 'd', True); row(E, 'extra_redo_cmd_y', v[0] + (' (n/a on macOS: KiCad binds redo to Cmd+Shift+Z)' if v[0] == 'nothing' else ''), v[1], t); settle(n)
                 if v[0] == 'works': m = seq(); key(K_Z, CMD); wait_ed(m, 'c')
                 n, t = press(K_Z, CMD | SHIFT); v = judge_cd(n, 'd', True)
                 row(E, 'extra_redo_at_once', v[0], v[1] + ' (Cmd+Shift+Z at once after the undo, before KiCad\'s check)', t); settle(n)
