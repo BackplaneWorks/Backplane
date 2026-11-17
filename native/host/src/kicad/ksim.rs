@@ -31,15 +31,16 @@ pub const OPS: &[(&str, bool, &str, &str)] = &[
     ("source", true, "{source: {type: dc|sin|pulse|pwl|exp|am|sffm, current?, ref?, pos, neg?, value?, params?, ac?, at?, bom?}}", "add a source symbol (Simulation_SPICE) between two nets, out of the BOM and off the board (bom: true keeps it in); neg defaults to GND"),
     ("probe", true, "{probe: signals | {pin: \"R1.2\", name}}", "name what to read: signals join the saved analysis' traces and this call's runs; a pin gets a net label first"),
     ("analysis", true, "{analysis: \".ac dec 20 1 1meg\", signals?, tab?} | {analysis: true}", "save the analysis with the design (what the person's Simulator opens with); true reads what is saved"),
-    ("run", false, "{run: \".tran 1u 10m\" | true, set?: {R1: \"2k\", \"V1.dc\": 3.3}, signals?, measures?, waves?, directives?, netlist?, log?, timeout?, show?}",
-        "run an analysis (true: the saved one) and answer operating-point values, measures and a line per signal; `set` values are for this run only; `waves: true` (or a point count) adds each signal as a few points"),
+    ("run", false, "{run: \".tran 1u 10m\" | true, set?: {R1: \"2k\", \"V1.dc\": 3.3}, signals?, measures?, waves?, directives?, options?, retry?, netlist?, log?, timeout?, show?}",
+        "run an analysis (true: the saved one) and answer operating-point values, measures and a line per signal; `set` values are for this run only; `waves: true` (or a point count) adds each signal as a few points; `directives` are netlist lines for this run (.options, .ic, .include, .model), `options` KiCad's netlist options ({save_all_currents: false}); a transient that does not converge is tried again with gear, a looser reltol and a smaller step (`needed` says which; `retry: false` leaves it)"),
+    ("loopgain", false, "{loopgain: \"U1.2\", run?: \".ac dec 50 1 100meg\", set?, directives?, waves?}", "a feedback loop's gain, broken at a pin (reference.pin number) in the netlist only: crossover frequency, phase margin, gain margin and DC loop gain (Tian's method: voltage and current injection combined, the operating point kept); `waves` adds the curve"),
     ("sweep", false, "{sweep: \"R1\" | \"V1.dc\" | {param: name}, values | from, to, steps?, log? | series, run, measures, set?}", "one run per value, the measures as a table; nothing is written"),
     ("tune", false, "{tune: \"R1\", measure, target, from, to, series?, tol?, max_runs?, run, set?, write?}", "the value that brings a measure to its target (a search over runs), from an E series when named; `write: true` puts it on the schematic"),
     ("stats", false, "{stats: true | {thread?}}", "the simulation log's totals: actions, runs, ngspice time, failures, answer sizes and token cost per turn"),
 ];
-const OP_NAMES: &str = "models, model, exclude, include, import, source, probe, analysis, run, sweep, tune, stats";
+const OP_NAMES: &str = "models, model, exclude, include, import, source, probe, analysis, run, loopgain, sweep, tune, stats";
 /// The op's name: the key that says what it is. A tune and a sweep carry a `run` of their own, so they are looked for first.
-pub fn verb(op: &Value) -> &'static str { let Some(o) = op.as_object() else { return "" }; ["tune", "sweep"].into_iter().find(|v| o.contains_key(*v)).or_else(|| OPS.iter().find(|v| o.contains_key(v.0)).map(|v| v.0)).unwrap_or("") }
+pub fn verb(op: &Value) -> &'static str { let Some(o) = op.as_object() else { return "" }; ["tune", "sweep", "loopgain"].into_iter().find(|v| o.contains_key(*v)).or_else(|| OPS.iter().find(|v| o.contains_key(v.0)).map(|v| v.0)).unwrap_or("") }
 /// Whether the ops change the design (its schematic, its saved analysis, its model files): what takes the document's lock and waits for the person.
 pub fn writes(ops: &Value) -> bool {
     ops.as_array().into_iter().flatten().any(|o| match verb(o) { "tune" => o["write"] == true, "import" => !o["to"].is_null(), "analysis" => o["analysis"] != true, "probe" | "model" | "exclude" | "include" | "source" => true, _ => false })
@@ -193,6 +194,25 @@ pub fn problem_lines(resp: &Value) -> Vec<String> {
     if out.is_empty() && s(resp, "status") != "SIM_OK" { out.push(kp::status_words(s(resp, "status")).to_string()) }
     out.truncate(8); out
 }
+/// A failed run's lines: its problems, and what was tried for it.
+fn failure_lines(resp: &Value) -> Vec<String> {
+    let mut l = problem_lines(resp);
+    if let Some(t) = resp["tried"].as_array().filter(|t| !t.is_empty()) { l.push(format!("tried without success: {}", t.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("; then "))) }
+    l
+}
+/// What a transient that did not converge is tried again with, in order (label, the options line); the last also shortens the step.
+pub const RETRY: &[(&str, &str)] = &[("gear integration", ".options method=gear"), ("gear with reltol 0.01", ".options method=gear reltol=0.01"), ("gear, reltol 0.01, looser tolerances and a maximum step of the print step", ".options method=gear reltol=0.01 abstol=1e-9 vntol=1e-4")];
+/// A `.tran` line with its maximum step no longer than its print step (`.tran 1u 10m` -> `.tran 1u 10m 0 1u`); other lines as they are.
+pub fn smaller_step(command: &str) -> String {
+    let mut lines = command.lines(); let first = lines.next().unwrap_or(""); let w: Vec<&str> = first.split_whitespace().collect();
+    if w.len() < 3 { return command.to_string() }
+    let uic = w.iter().skip(3).any(|x| x.eq_ignore_ascii_case("uic")); let nums: Vec<&str> = w[3..].iter().filter(|x| !x.eq_ignore_ascii_case("uic")).copied().collect();
+    let (start, max) = (nums.first().copied().unwrap_or("0"), nums.get(1).copied());
+    let max = match (max.and_then(kp::parse_value), kp::parse_value(w[1])) { (Some(m), Some(t)) if m <= t => max.unwrap(), _ => w[1] };
+    let mut out = format!("{} {} {} {start} {max}{}", w[0], w[1], w[2], if uic { " uic" } else { "" });
+    for l in lines { out.push('\n'); out.push_str(l) }
+    out
+}
 /// An analysis line as ngspice takes it: its leading dot added, its first word one of ngspice's analyses.
 pub fn command_of(text: &str) -> Result<String, String> {
     let t = text.trim(); if t.is_empty() { return Err("an analysis is a line such as \".tran 1u 10m\", \".ac dec 20 1 1meg\", \".op\", \".dc V1 0 5 0.1\"".into()) }
@@ -216,6 +236,8 @@ struct Sim<'a> { c: &'a dyn Call, path: &'a str, ctx: &'a Ctx, doc: Value,
     wrote: bool, saved: Option<String>, models_changed: bool,
     /// Signals named by this call's probes (its runs read them too), each op's log entry, and what the current op ran and looked up.
     probes: Vec<String>, log: Vec<Value>, runs: Vec<Value>, lookups: Vec<Value>,
+    /// The pins the next runs take off their nets (a loop gain's cut), and what a run that did not converge was tried again with.
+    breaks: Vec<Value>, retries: Vec<String>,
     /// The model files of the project and the libraries, read once a call.
     scanned: Option<Vec<(String, &'static str, Vec<kp::ModelDef>)>> }
 
@@ -312,9 +334,28 @@ impl Sim<'_> {
     }
     /// One run to its end: RunSimulation, then GetSimulationResult while ngspice works. Ok is the response, whatever its status.
     async fn exec(&mut self, command: &str, directives: &Value, overrides: Vec<Value>, signals: &[String], raw: &[String], op: &Value) -> Result<Value, String> {
+        let mut r = self.once(command, directives, overrides.clone(), signals, raw, op).await?;
+        // a transient that did not converge is tried again, each step adding to the last, and the answer says what it took
+        if s(&r, "status") == "SIM_NO_CONVERGENCE" && command.trim_start().to_ascii_lowercase().starts_with(".tran") && op["retry"] != false {
+            let mut tried = vec![];
+            for (n, (label, options)) in RETRY.iter().enumerate() {
+                let mut dir = directives.as_array().cloned().unwrap_or_default(); dir.push(json!(options));
+                let cmd = if n == RETRY.len() - 1 { smaller_step(command) } else { command.to_string() };
+                tried.push(label.to_string()); self.retries.push(label.to_string());
+                let again = self.once(&cmd, &json!(dir), overrides.clone(), signals, raw, op).await?;
+                if s(&again, "status") == "SIM_OK" { r = again; r["needed"] = json!(format!("{label}: it did not converge without ({options}{})", if cmd != command { format!(", {cmd}") } else { String::new() })); break }
+                if n == RETRY.len() - 1 { r = again }
+            }
+            if s(&r, "status") != "SIM_OK" { r["tried"] = json!(tried) }
+        }
+        Ok(r)
+    }
+    async fn once(&mut self, command: &str, directives: &Value, overrides: Vec<Value>, signals: &[String], raw: &[String], op: &Value) -> Result<Value, String> {
         let timeout = op["timeout"].as_f64().map_or(TIMEOUT_MS, |t| (t * 1000.0) as u64).clamp(1000, 3_600_000);
-        let msg = json!({"document": self.doc, "command": command, "directives": directives.as_array().cloned().unwrap_or_default(), "overrides": overrides, "signals": signals, "measures": raw,
+        let mut msg = json!({"document": self.doc, "command": command, "directives": directives.as_array().cloned().unwrap_or_default(), "overrides": overrides, "signals": signals, "measures": raw,
             "include_netlist": op["netlist"] == true, "show": verb(op) == "run" && op["show"].as_bool().unwrap_or(self.ctx.gui), "timeout_ms": timeout, "wait_ms": WAIT_MS, "max_points": op["max_points"].as_u64().unwrap_or(0)});
+        if op["options"].is_object() { msg["options"] = op["options"].clone() }
+        if !self.breaks.is_empty() { msg["breaks"] = json!(self.breaks); msg["show"] = json!(false) }
         let started = std::time::Instant::now();
         let mut r = match self.call("RunSimulation", msg).await { Err(e) if e.contains("AS_BUSY") => return Err(BUSY.into()), r => r? };
         while s(&r, "status") == "SIM_RUNNING" {
@@ -338,7 +379,7 @@ impl Sim<'_> {
         Ok((command, overrides_of(&op["set"])?, meas, signals, raw))
     }
     /// A failed run in one line.
-    fn failed(resp: &Value) -> String { format!("{}: {}", kp::status_words(s(resp, "status")), problem_lines(resp).join("; ")) }
+    fn failed(resp: &Value) -> String { format!("{}: {}", kp::status_words(s(resp, "status")), failure_lines(resp).join("; ")) }
 
     async fn op(&mut self, op: &Value) -> Result<Value, String> {
         match verb(op) {
@@ -393,6 +434,7 @@ impl Sim<'_> {
                 self.scanned = None; self.lookups.push(json!({"stored": stored, "url": s(i, "url"), "from": "vendor"}));
                 let mut out = json!({"stored": stored, "source": format!("{stored}.source.json"), "models": defs.iter().take(12).map(kp::ModelDef::row).collect::<Vec<_>>()});
                 if defs.len() > 12 { out["more"] = json!(defs.len() - 12) }
+                let warn = kp::file_warnings(&text); if !warn.is_empty() { out["warnings"] = json!(warn) }
                 if s(i, "licence").is_empty() { out["licence"] = json!("none given: add the source's licence line to the note if it states one") }
                 let to = refs_of(&op["to"]);
                 if !to.is_empty() { let a = self.assign_library(&to, &stored, op["name"].as_str(), &op["pins"], &op["params"]).await?; for (k, v) in a.as_object().into_iter().flatten() { out[if k == "model" { "assigned" } else { k.as_str() }] = v.clone() } }
@@ -453,8 +495,9 @@ impl Sim<'_> {
                 let r = self.exec(&command, &op["directives"], overrides, &signals, &raw, op).await?;
                 let mut out = json!({"analysis": s(&r, "analysis")});
                 if command.is_empty() { out["command"] = json!(s(&r, "command")) }
-                if s(&r, "status") != "SIM_OK" { out["failed"] = json!(kp::status_words(s(&r, "status"))); out["problems"] = json!(problem_lines(&r)) }
+                if s(&r, "status") != "SIM_OK" { out["failed"] = json!(kp::status_words(s(&r, "status"))); out["problems"] = json!(failure_lines(&r)) }
                 else {
+                    if r["needed"].is_string() { out["needed"] = r["needed"].clone() }
                     out["points"] = r["points"].clone();
                     // single numbers (an operating point, .tf): the asked ones, else all (forty at most)
                     let vals: Vec<&Value> = r["values"].as_array().into_iter().flatten().filter(|v| asked.is_empty() || asked.iter().any(|a| same_signal(a, v))).collect();
@@ -473,6 +516,31 @@ impl Sim<'_> {
                 if op["netlist"] == true || (s(&r, "status") == "SIM_NETLIST_ERROR" && op["netlist"] != false && s(&r, "netlist").len() < 4000) { out["netlist"] = r["netlist"].clone() }
                 if op["log"] == true { out["log"] = r["log"].clone() }
                 Ok(json!({"run": out})) }
+            "loopgain" => { let at = op["loopgain"].as_str().or(op["loopgain"]["at"].as_str()).ok_or("loopgain names the pin where the loop is cut: \"U1.2\" (reference.pin number)")?;
+                let (reference, pin) = at.rsplit_once('.').ok_or(format!("`{at}`: the loop is cut at a pin, reference.pin number, e.g. \"U1.2\" (an op-amp's inverting input, a regulator's FB pin)"))?;
+                let command = match &op["run"] { Value::String(t) => command_of(t)?, _ => ".ac dec 50 1 100meg".to_string() };
+                if !command.to_ascii_lowercase().starts_with(".ac") { return Err("a loop gain is an .ac analysis: run: \".ac dec 50 1 100meg\"".into()) }
+                // a voltage source in the cut (+ at the pin) and a current source into the pin: 0 V and 0 A at DC, so the operating point is the closed loop's
+                let cut = |v: u8, i: u8| json!([{"reference": reference, "pin": pin, "insert": format!("Vlg_{{name}} {{pin}} {{net}} dc 0 ac {v}\nIlg_{{name}} 0 {{pin}} dc 0 ac {i}")}]);
+                let fixed = overrides_of(&op["set"])?;
+                let nl = self.call("GetSimulationNetlist", json!({"document": self.doc, "command": command, "overrides": fixed, "directives": op["directives"].as_array().cloned().unwrap_or_default(), "breaks": cut(0, 0)})).await?;
+                let b = &nl["broken"][0];
+                if s(b, "pin_node").is_empty() { let why: Vec<String> = nl["problems"].as_array().into_iter().flatten().map(kp::problem_line).collect(); return Err(if why.is_empty() { format!("{at} is not a pin of this schematic") } else { why.join("; ") }) }
+                let node = s(b, "pin_node").to_string(); let branch = format!("{}#branch", s(b, "insert").split_whitespace().next().unwrap_or("").to_ascii_lowercase());
+                let signals = [node.clone(), branch.clone()]; let mut got: Vec<(Sig, Sig)> = vec![]; let started = std::time::Instant::now();
+                // three runs: neither source (what the circuit's own AC sources put at the cut, taken out of the other two), the voltage, the current
+                for (v, i) in [(0, 0), (1, 0), (0, 1)] {
+                    self.breaks = cut(v, i).as_array().cloned().unwrap_or_default();
+                    let r = self.exec(&command, &op["directives"], fixed.clone(), &signals, &[], op).await; self.breaks.clear(); let r = r?;
+                    if s(&r, "status") != "SIM_OK" { return Err(Self::failed(&r)) }
+                    got.push((sig_of(&r, &node)?, sig_of(&r, &branch)?));
+                }
+                let t = kw::tian(&kw::minus(&got[1].0, &got[0].0), &kw::minus(&got[1].1, &got[0].1), &kw::minus(&got[2].0, &got[0].0), &kw::minus(&got[2].1, &got[0].1))?;
+                let m = |name: &str| match kw::measure(name, &json!({}), &t) { Ok(v) => round_all(&v), Err(e) => json!(format!("none: {e}")) };
+                let mut out = json!({"at": at, "crossover": m("unity_gain_freq"), "phase_margin": m("phase_margin"), "gain_margin": m("gain_margin"), "dc_gain_db": m("dc_gain"), "runs": 3, "ms": started.elapsed().as_millis() as u64});
+                if t.y.iter().zip(t.im.as_ref().unwrap()).any(|(a, b)| !a.is_finite() || !b.is_finite()) { out["note"] = json!("the loop gain is not a number at some frequencies: nothing flows through this pin, so no loop passes it; cut the loop at another pin") }
+                let n = match &op["waves"] { Value::Number(n) => n.as_u64().unwrap_or(40).clamp(4, 400) as usize, Value::Bool(true) => 40, _ => 0 }; if n > 0 { out["curve"] = kw::compact(&t, n, 4) }
+                Ok(json!({"loopgain": out})) }
             "sweep" => { let target = match &op["sweep"] { Value::String(t) => t.clone(), o if o["param"].is_string() => format!("param:{}", s(o, "param")), _ => return Err("sweep names what to step: \"R1\", \"V1.dc\" or {param: name}".into()) };
                 let values = kp::sweep_values(op)?; if values.len() > 200 { return Err(format!("{} steps: 200 at most in one sweep", values.len())) }
                 let (command, fixed, meas, signals, raw) = self.plan(op, &op["run"], &[])?;
@@ -544,16 +612,17 @@ pub async fn run(c: &dyn Call, path: &str, a: &Value, ctx: &Ctx) -> (Result<Valu
     if !path.ends_with(".kicad_sch") { return (Err("path is the schematic (.kicad_sch) to simulate".into()), vec![]) }
     if !c.caps().iter().any(|x| x == CAP) { return (Err(no_sim("")), vec![]) }
     let doc = match open(c, path).await { Ok(d) => d, Err(e) => return (Err(e), vec![]) };
-    let mut sim = Sim { c, path, ctx, doc, wrote: false, saved: None, models_changed: false, probes: vec![], log: vec![], runs: vec![], lookups: vec![], scanned: None };
+    let mut sim = Sim { c, path, ctx, doc, wrote: false, saved: None, models_changed: false, probes: vec![], log: vec![], runs: vec![], lookups: vec![], breaks: vec![], retries: vec![], scanned: None };
     let (mut results, mut failure, mut skipped) = (vec![], None, 0);
     for (i, op) in ops.iter().enumerate() {
-        let started = std::time::Instant::now(); sim.runs.clear(); sim.lookups.clear();
+        let started = std::time::Instant::now(); sim.runs.clear(); sim.lookups.clear(); sim.retries.clear();
         let r = sim.op(op).await;
         let sum = |k: &str| sim.runs.iter().filter_map(|x| x[k].as_f64()).sum::<f64>().round();
         let mut entry = json!({"op": verb(op), "ok": r.is_ok(), "hub_ms": started.elapsed().as_millis() as u64, "runs": sim.runs.len()});
         if !sim.runs.is_empty() { entry["analysis"] = sim.runs[0]["analysis"].clone(); entry["status"] = json!(sim.runs.iter().map(|x| s(x, "status")).find(|x| *x != "SIM_OK").unwrap_or("SIM_OK"));
             entry["timings"] = json!({"netlist_ms": sum("netlist_ms"), "load_ms": sum("load_ms"), "run_ms": sum("run_ms"), "total_ms": sum("total_ms")}); entry["ngspice_ms"] = json!(sum("load_ms") + sum("run_ms")); entry["points"] = sim.runs[0]["points"].clone() }
         if !sim.lookups.is_empty() { entry["lookups"] = json!(sim.lookups) }
+        if !sim.retries.is_empty() { entry["retries"] = json!(sim.retries) }
         match r {
             Ok(v) => { entry["bytes"] = json!(v.to_string().len());
                 let failed = v["run"]["failed"].is_string(); if failed { entry["problems"] = v["run"]["problems"].clone() }
@@ -660,11 +729,23 @@ mod tests {
                 "SetSimulationSetup" => { let mut tabs = self.setup.lock().unwrap(); let tab = json!({"analysis": "x", "command": msg["command"], "signals": msg["signals"], "options": msg["options"]});
                     let at = msg["tab"].as_u64().map(|n| n as usize).filter(|n| *n < tabs.len()); let n = match at { Some(n) => { tabs[n] = tab; n } None => { tabs.push(tab); tabs.len() - 1 } };
                     json!({"setup": {"tabs": tabs.clone()}, "tab": n, "changed": true}) }
+                "GetSimulationNetlist" => { let b = &msg["breaks"][0]; if s(b, "reference") != "U1" { json!({"netlist": "", "problems": [{"kind": "PK_NETLIST", "severity": "PS_ERROR", "message": format!("break: the schematic has no symbol {}", s(b, "reference"))}]}) }
+                    else { json!({"netlist": ".title t\n.end\n", "broken": [{"reference": "U1", "pin": s(b, "pin"), "net_node": "/fb", "pin_node": format!("brk_U1_{}", s(b, "pin")), "insert": s(b, "insert").replace("{name}", &format!("U1_{}", s(b, "pin")))}]}) } }
+                // a loop cut at U1's pin: an amplifier -A(s) of v(pin), A = 8 / (1 + s/p)^3 at 1 kHz, behind 1k into 1k; the circuit's own AC source adds the same to every run
+                "RunSimulation" if msg["breaks"].is_array() => { let ins = s(&msg["breaks"][0], "insert"); let ac: Vec<f64> = ins.lines().map(|l| l.rsplit(' ').next().unwrap().parse().unwrap()).collect();
+                    let f: Vec<f64> = (0..=300).map(|i| 10f64.powf(i as f64 / 50.0)).collect(); let (mut vr, mut vi, mut ir, mut ii) = (vec![], vec![], vec![], vec![]);
+                    for f in &f { let c = |re: f64, im: f64| num(re, im); let q = c(1.0, f / 1e3); let a = c(8.0, 0.0).div(q.mul(q).mul(q)); let one = c(1.0, 0.0);
+                        let v1 = one.div(one.add(a).add(one)); let i1 = c(0.0, 0.0).sub(v1.div(c(1e3, 0.0))); let v2 = one.div(c(1e-3, 0.0).add(one.add(a).div(c(1e3, 0.0)))); let i2 = one.sub(v2.div(c(1e3, 0.0)));
+                        let v = c(0.3, -0.1).add(v1.mul(c(ac[0], 0.0))).add(v2.mul(c(ac[1], 0.0))); let i = c(2e-4, 1e-4).add(i1.mul(c(ac[0], 0.0))).add(i2.mul(c(ac[1], 0.0)));
+                        vr.push(v.0); vi.push(v.1); ir.push(i.0); ii.push(i.1) }
+                    json!({"status": "SIM_OK", "analysis": "AC", "points": f.len(), "timings": {"run_ms": 2.0, "total_ms": 3.0}, "vectors": [{"name": "frequency", "kind": "VK_FREQUENCY", "real": f}, {"name": "brk_u1_2", "complex": true, "real": vr, "imag": vi}, {"name": "vlg_u1_2#branch", "complex": true, "real": ir, "imag": ii}]}) }
+                "RunSimulation" if self.mode == "stiff" && !msg["directives"].to_string().contains("reltol=0.01") => json!({"status": "SIM_NO_CONVERGENCE", "analysis": "TRAN", "log": "doAnalyses: TRAN:  Timestep too small; time = 2e-06, timestep = 1e-18\n", "timings": {"run_ms": 9.0, "total_ms": 10.0}}),
                 "RunSimulation" => match self.mode {
                     "busy" => return Err("KiCad answered AS_BUSY: a simulation is running".into()),
                     "slow" => json!({"status": "SIM_RUNNING", "run_id": "7", "progress": 0.1}),
                     "float" => json!({"status": "SIM_FLOATING_NODE", "analysis": "OP", "problems": [{"kind": "PK_FLOATING_NODE", "severity": "PS_ERROR", "node": "net-_c1-pad2_", "net": "Net-(C1-Pad2)", "message": "no DC path to ground"}, {"kind": "PK_MISSING_MODEL", "severity": "PS_ERROR", "reference": "U1", "message": "U1 has no model"}],
                         "log": "Circuit: t\nWarning: singular matrix:  check node net-_c1-pad2_\nrun simulation(s) aborted\n", "timings": {"netlist_ms": 1.0, "total_ms": 4.0}}),
+                    "stiff" => self.simulate(&msg),
                     "noconv" => json!({"status": "SIM_NO_CONVERGENCE", "analysis": "TRAN", "log": "Circuit: t\ndoAnalyses: TRAN:  Timestep too small; time = 1.5e-05, timestep = 1.25e-19: trouble with node \"/sw\"\nrun simulation(s) aborted\n", "timings": {"run_ms": 40.0, "total_ms": 44.0}}),
                     _ => self.simulate(&msg) },
                 "GetSimulationResult" => { let mut p = self.polls.lock().unwrap(); *p += 1; if *p < 3 { json!({"status": "SIM_RUNNING", "run_id": "7"}) } else { self.simulate(&json!({"command": ".op"})) } }
@@ -691,6 +772,11 @@ mod tests {
         }) }
         fn caps(&self) -> Vec<String> { self.caps.clone() }
     }
+    /// A complex number, for the stand-in's loop.
+    #[derive(Clone, Copy)] struct Cx(f64, f64);
+    fn num(re: f64, im: f64) -> Cx { Cx(re, im) }
+    impl Cx { fn add(self, o: Cx) -> Cx { Cx(self.0 + o.0, self.1 + o.1) } fn sub(self, o: Cx) -> Cx { Cx(self.0 - o.0, self.1 - o.1) } fn mul(self, o: Cx) -> Cx { Cx(self.0 * o.0 - self.1 * o.1, self.0 * o.1 + self.1 * o.0) }
+        fn div(self, o: Cx) -> Cx { let d = o.0 * o.0 + o.1 * o.1; Cx((self.0 * o.0 + self.1 * o.1) / d, (self.1 * o.0 - self.0 * o.1) / d) } }
     fn tmp(tag: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("ksim-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
     fn go_in(f: &Fake, dir: &Path, ops: Value) -> (Result<Value, String>, Vec<Value>) {
         let ctx = Ctx { project_dir: dir.to_path_buf(), libs: vec![], now: 1_800_000_000, log: None, gui: false };
@@ -903,6 +989,30 @@ mod tests {
         assert!(go_in(&fake(), Path::new("/x"), json!([{"tune": "V1.dc", "measure": "final V(mid)", "target": 1, "from": 1, "to": 2, "run": ".op", "write": true}])).0.unwrap_err().contains("is a parameter"));
         assert!(go_in(&fake(), Path::new("/x"), json!([{"tune": "R1", "target": 1, "from": 1, "to": 2, "run": ".op"}])).0.unwrap_err().contains("tune needs the measure"));
     }
+    #[test] fn a_loop_gain_is_read_at_a_cut_in_the_netlist() {
+        // T = 4 / (1 + s/p)^3 (the amplifier's 8 halved by 1k into 1k): the phase is -180 at p sqrt(3), where |T| = 1/2
+        let f = fake(); let (r, log) = go_in(&f, Path::new("/x"), json!([{"loopgain": "U1.2"}])); let out = r.unwrap(); let l = &out["results"][0]["loopgain"];
+        let wu = 1e3 * (4f64.powf(2.0 / 3.0) - 1.0).sqrt();
+        assert!(near(&l["crossover"], wu, 3e-3) && near(&l["phase_margin"], 180.0 - 3.0 * (wu / 1e3).atan().to_degrees(), 5e-3) && near(&l["gain_margin"], 20.0 * 2f64.log10(), 5e-3) && near(&l["dc_gain_db"], 20.0 * 4f64.log10(), 1e-3), "{l}");
+        assert_eq!((l["at"].as_str(), l["runs"].as_u64(), l.get("curve"), out.get("saved"), log[0]["runs"].as_u64()), (Some("U1.2"), Some(3), None, None, Some(3)));
+        let runs = sent(&f, "RunSimulation"); assert_eq!((runs.len(), runs[1]["breaks"][0]["insert"].as_str(), runs[2]["breaks"][0]["insert"].as_str(), runs[1]["signals"].clone(), runs[1]["show"].clone(), runs[1]["command"].as_str()),
+            (3, Some("Vlg_{name} {pin} {net} dc 0 ac 1\nIlg_{name} 0 {pin} dc 0 ac 0"), Some("Vlg_{name} {pin} {net} dc 0 ac 0\nIlg_{name} 0 {pin} dc 0 ac 1"), json!(["brk_U1_2", "vlg_u1_2#branch"]), json!(false), Some(".ac dec 50 1 100meg")));
+        let out = go(&fake(), json!([{"loopgain": "U1.2", "waves": 12, "run": "ac dec 20 1 1meg"}])); let c = &out["results"][0]["loopgain"]["curve"]; assert!(c["f"].as_array().unwrap().len() <= 12 && c["db"][0].as_f64().unwrap() > 12.0, "{c}");
+        assert!(go_in(&fake(), Path::new("/x"), json!([{"loopgain": "Q9.1"}])).0.unwrap_err().contains("the schematic has no symbol Q9") && go_in(&fake(), Path::new("/x"), json!([{"loopgain": "U1"}])).0.unwrap_err().contains("reference.pin number")
+            && go_in(&fake(), Path::new("/x"), json!([{"loopgain": "U1.2", "run": ".tran 1u 1m"}])).0.unwrap_err().contains("is an .ac analysis"));
+    }
+    #[test] fn a_transient_that_does_not_converge_is_tried_again() {
+        let mut f = fake(); f.mode = "stiff"; let (r, log) = go_in(&f, Path::new("/x"), json!([{"run": ".tran 1u 1m", "signals": "V(out)", "directives": [".include x.lib"], "options": {"save_all_currents": false}, "measures": {"fin": "final V(out)"}}]));
+        let out = r.unwrap(); let run = &out["results"][0]["run"];
+        assert_eq!((run["needed"].as_str(), run.get("failed"), run["measures"]["fin"].as_f64().map(|v| v > 0.99)), (Some("gear with reltol 0.01: it did not converge without (.options method=gear reltol=0.01)"), None, Some(true)));
+        let sent = sent(&f, "RunSimulation"); assert_eq!((sent.len(), sent[0]["directives"].clone(), sent[2]["directives"].clone(), sent[0]["options"].clone()), (3, json!([".include x.lib"]), json!([".include x.lib", ".options method=gear reltol=0.01"]), json!({"save_all_currents": false})));
+        assert_eq!((log[0]["runs"].as_u64(), log[0]["retries"].clone(), log[0]["status"].as_str()), (Some(3), json!(["gear integration", "gear with reltol 0.01"]), Some("SIM_NO_CONVERGENCE")));
+        // nothing helps: the failure says what was tried; retry: false leaves it at one run; other analyses are not tried again
+        let mut f = fake(); f.mode = "noconv"; let out = go(&f, json!([{"run": ".tran 1u 1m"}])); let p = out["results"][0]["run"]["problems"].as_array().unwrap();
+        assert!(p.last().unwrap().as_str().unwrap().starts_with("tried without success: gear integration; then gear with reltol 0.01; then gear, reltol 0.01, looser tolerances") && self::sent(&f, "RunSimulation").len() == 4 && self::sent(&f, "RunSimulation")[3]["command"] == ".tran 1u 1m 0 1u", "{p:?}");
+        let mut f = fake(); f.mode = "noconv"; go(&f, json!([{"run": ".tran 1u 1m", "retry": false}, {"run": ".op"}])); assert_eq!(self::sent(&f, "RunSimulation").len(), 1);
+        assert_eq!((smaller_step(".tran 1u 10m"), smaller_step(".tran 1u 10m 0 10u uic"), smaller_step(".tran 1u 10m 1m 0.1u"), smaller_step(".tran 1u 10m\nfft v(out)"), smaller_step(".op")), (".tran 1u 10m 0 1u".into(), ".tran 1u 10m 0 1u uic".into(), ".tran 1u 10m 1m 0.1u".into(), ".tran 1u 10m 0 1u\nfft v(out)".into(), ".op".into()));
+    }
     #[test] fn failures_are_one_line_each_with_what_to_do() {
         let mut f = fake(); f.mode = "float"; let (r, log) = go_in(&f, Path::new("/x"), json!([{"exclude": "J1"}, {"run": ".op", "signals": ["mid"]}, {"run": ".ac dec 10 1 1k"}]));
         let out = r.unwrap(); let run = &out["results"][1]["run"];
@@ -912,7 +1022,7 @@ mod tests {
         assert_eq!((log.len(), log[1]["status"].as_str(), log[1]["problems"].as_array().map(|p| p.len())), (2, Some("SIM_FLOATING_NODE"), Some(2)));
         let out = go(&f, json!([{"run": ".op", "log": true}])); assert!(out["results"][0]["run"]["log"].as_str().unwrap().contains("singular matrix"));
         // no problems from the fork: ngspice's own words are read
-        let mut f = fake(); f.mode = "noconv"; let out = go(&f, json!([{"run": ".tran 1u 1m"}]));
+        let mut f = fake(); f.mode = "noconv"; let out = go(&f, json!([{"run": ".tran 1u 1m", "retry": false}]));
         assert_eq!(out["results"][0]["run"]["problems"], json!(["no convergence at t=1.5e-05 (near /sw): shorten the maximum time step (the third value of .tran), give edges a rise time, or add directives: .options method=gear reltol=1e-3"]));
         // another run is in progress; a long run is collected when it ends
         let mut f = fake(); f.mode = "busy"; assert_eq!(go_in(&f, Path::new("/x"), json!([{"run": ".op"}])).0.unwrap_err(), format!("op 1 (run): {BUSY}."));

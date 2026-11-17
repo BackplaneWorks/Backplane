@@ -39,7 +39,8 @@ name (`onoise_spectrum`); a root sheet's net works with or without its `/`. `V(a
 | `{source: {type, pos, neg?, value?, params?, ac?, current?, ref?, at?, bom?}}` | A `Simulation_SPICE` source symbol between two nets (`neg` is GND unless given), with its model. Types: dc, sin, pulse, pwl, exp, am, sffm, trnoise, trrandom. Out of the BOM and off the board unless `bom: true`. |
 | `{probe: signals}`, `{probe: {pin: "R1.2", name}}` | Signals join the saved analysis' traces and this call's runs. A pin gets a net label first, so an unnamed net has a name to read. |
 | `{analysis: ".ac dec 20 1 1meg", signals?, tab?}`, `{analysis: true}` | Saves the analysis with the design: what the person's Simulator tab opens with. `true` reads what is saved. |
-| `{run: ".tran 1u 10m" \| true, set?, signals?, measures?, waves?, directives?, netlist?, log?, timeout?, show?}` | Runs an analysis (`true`: the saved one, with its saved traces). Answers the operating-point values, the measures and one line per signal. |
+| `{run: ".tran 1u 10m" \| true, set?, signals?, measures?, waves?, directives?, options?, retry?, netlist?, log?, timeout?, show?}` | Runs an analysis (`true`: the saved one, with its saved traces). Answers the operating-point values, the measures and one line per signal. |
+| `{loopgain: "U1.2", run?, set?, directives?, waves?}` | A feedback loop's gain, cut at a pin in the netlist only (below). |
 | `{sweep: "R1" \| "V1.dc" \| {param}, values \| from, to, steps?, log? \| series, run, measures, set?}` | One run per value; the measures as one table `{columns, rows}`. |
 | `{tune: "R1", measure, target, from, to, series?, tol?, max_runs?, run, set?, write?}` | The value that brings a measure to its target. |
 | `{stats: true \| {thread}}` | The log's totals (below). |
@@ -60,6 +61,26 @@ many points, `{x, y, of}` or `{f, db, deg, of}`: the first and last sample and t
 part of the axis (equal in log f for a frequency axis), so no peak is lost (`ksim_wave::pick`). `netlist: true` adds
 the netlist, `log: true` ngspice's console. With the person's KiCad holding the project a run is shown in its
 Simulator tab (`show: false` leaves it); the runs of a sweep or a tune never are.
+
+`directives` are netlist lines for the run (`.options`, `.ic`, `.nodeset`, `.include`, `.model`, `.param`); `options`
+are KiCad's netlist options (`{save_all_currents: false}` for a vendor model whose internals have no branch currents).
+
+A transient that does not converge is run again, each step adding to the last (`ksim::RETRY`): gear integration; gear
+with `reltol=0.01`; those with looser `abstol`/`vntol` and a maximum step no longer than the print step. The first
+that converges is the answer, with `needed` saying what it took, so the next run can carry it as a directive; when
+none does, the failure's last line is `tried without success: ...`. `retry: false` leaves it at one run. The log's
+`retries` lists the steps.
+
+### Loop gain
+
+`{loopgain: "U1.2"}` cuts the loop at a pin (an op-amp's inverting input, a regulator's FB pin) for its runs only: the
+fork's `breaks` takes the pin off its net in the netlist and the hub puts a voltage source in the cut and a current
+source into the pin, both zero at DC, so the operating point is the closed loop's and nothing is left in the
+schematic. Three `.ac` runs (neither source, the voltage, the current; the first is what the circuit's own AC sources
+put at the cut, taken out of the other two) give the loop gain by Tian's method (`ksim_wave::tian`: voltage and
+current injection combined, right at any impedance level and whichever side of the cut drives). The answer is
+`{at, crossover, phase_margin, gain_margin, dc_gain_db, runs}`; a margin that does not exist is `"none: why"`;
+`waves` adds the curve `{f, db, deg}`. `run` gives another sweep than `.ac dec 50 1 100meg`.
 
 ### Measures
 
@@ -114,6 +135,8 @@ from the fork's `problems`, else from ngspice's console, else the status in word
 | no convergence (operating point) | `no convergence: the DC operating point was not found. Set starting voltages (directives: .nodeset or .ic), or ramp the supplies in a .tran with uic` |
 | no ground | `the circuit has no ground (node 0): put a GND power symbol on the return net` |
 | not annotated | `annotate the schematic first: parts without a number in their reference do not simulate` |
+| undefined model | `the netlist refers to an undefined model or subcircuit mbr340: a model file names it without defining it. Add its definition (directives: .include of the maker's file that has it, or a .model line), or import that file` |
+| no code models | `ngspice's XSPICE code models are missing in this KiCad: parts that need them (digital, some vendor models) cannot be simulated here` |
 | no AC source | `the input source has no AC value (v1): give it one (set: {"V1.ac": 1} for this run, or model params ac=1)` |
 | another run | `a simulation of this project is running (the person's, or another agent's): this one was not started. Ask again when it ends` |
 
@@ -135,7 +158,8 @@ it is from):
 
 `import` writes the file as it came to `sim/models/<name>` and `<name>.source.json` beside it: `url`, `licence` (the
 source's licence line; "not stated by the source" when none was given), `fetched_at`, `sha256`, and the definitions.
-A web page saved in place of a model (a login or licence page), an encrypted model and a binary are refused in words
+The answer's `warnings` name what ngspice would misread in a file written for PSpice: a number with an ampere unit
+stuck to it (`1Adc` is read as 1 atto) and a device naming a `.model` the file does not define. A web page saved in place of a model (a login or licence page), an encrypted model and a binary are refused in words
 that say to ask the person.
 
 The rule, in the tool's description, the prompt and `models`' answer (`ksim::VENDOR_RULE`): find the maker's model by
@@ -155,6 +179,7 @@ One JSON line per op in `<home>/logs/sim.jsonl` (`ksim_log.rs`), and one per tur
 | `ngspice_ms` | `load_ms + run_ms`. |
 | `hub_ms` | The op's wall time in the hub. |
 | `problems` | A failed run's lines. |
+| `retries` | What a transient that did not converge was tried again with. |
 | `lookups` | `models`: per part the names tried and what was found (`from`: project, library, kicad; none found is `[]`). `import`: `{stored, url, from: "vendor"}`. |
 | `bytes` | The size of the op's answer as the agent got it. |
 | `kind: "turn"`, `tokens`, `cost_nusd`, `context` | The turn's line, written at its end: the turn's tokens (input, cached and output) and cost from the provider's usage, joined to its ops by `thread` and `turn`. Null when the provider reported none. |
@@ -173,6 +198,6 @@ bun test/kipc_bench/hub.mjs <backplane-hub> <runtime with sim-run> <port> WORK &
 python3 test/kipc_bench/sim_e2e.py run WORK      # then: touch WORK/stop
 ```
 
-It generates four small schematics (an RC with a connector, a test point and an op-amp without a model; a divider; a
-series RLC; two capacitors in series), drives every op through the MCP tool as a stand-in agent's turn and checks the
+It generates five small schematics (an RC with a connector, a test point and an op-amp without a model; a divider; a
+series RLC; two capacitors in series; a two-pole loop of two controlled sources), drives every op through the MCP tool as a stand-in agent's turn and checks the
 numbers against closed form, the saved files, and the log's lines.

@@ -154,6 +154,23 @@ pub fn models_in(text: &str) -> Vec<ModelDef> {
     }
     out
 }
+/// What ngspice would misread or miss in a model file written for PSpice: a number with an ampere or volt unit stuck to it (`1Adc` is
+/// read as 1 atto), and a device that names a `.model` the file does not define. Six lines at most, each with its line number.
+pub fn file_warnings(text: &str) -> Vec<String> {
+    let defined: Vec<String> = models_in(text).iter().filter(|d| !d.subckt).map(|d| d.name.to_ascii_lowercase()).collect();
+    let (mut out, mut missing): (Vec<String>, Vec<String>) = (vec![], vec![]);
+    for (n, l) in text.lines().enumerate() { let t = l.trim(); if t.is_empty() || t.starts_with('*') { continue }
+        for tok in t.split(|c: char| c.is_whitespace() || matches!(c, '=' | '(' | ')' | ',' | '{' | '}')) {
+            let digits = tok.bytes().take_while(|b| b.is_ascii_digit() || *b == b'.').count(); let unit = tok[digits..].to_ascii_lowercase();
+            if digits > 0 && tok.as_bytes()[0].is_ascii_digit() && matches!(unit.as_str(), "adc" | "aac" | "amp" | "amps" | "a") && out.len() < 4 { out.push(format!("line {}: `{tok}` is read by ngspice as {} atto (PSpice's ampere unit): write {}", n + 1, &tok[..digits], &tok[..digits])) }
+        }
+        let w: Vec<&str> = t.split_whitespace().collect(); let first = t.as_bytes()[0].to_ascii_lowercase();
+        let named = match first { b'd' if w.len() >= 4 => Some(w[3]), b'q' if w.len() >= 5 => Some(w[4]), b'm' if w.len() >= 6 => Some(w[5]), b'j' if w.len() >= 5 => Some(w[4]), _ => None };
+        if let Some(m) = named.map(|m| m.to_ascii_lowercase()).filter(|m| m.as_bytes()[0].is_ascii_alphabetic() && !m.contains('=') && !m.contains('{')) {
+            if !defined.contains(&m) && !missing.contains(&m) { missing.push(m.clone()); if missing.len() <= 3 { out.push(format!("line {}: {} names the model {m}, which this file does not define: add its .model (the maker's other file, or directives: .include / .model) or the run will fail", n + 1, w[0])) } } }
+    }
+    out
+}
 fn norm(s: &str) -> String { s.chars().filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_uppercase()).collect() }
 /// How well a model's name fits a part's name (its value, MPN or library entry): 2 the same, 1 one starts with the other (LM358DR and
 /// LM358; TL072 and TL072_TI) with four characters or more in common, 0 not.
@@ -257,6 +274,9 @@ pub fn problem_line(p: &Value) -> String {
     let short: String = msg.lines().next().unwrap_or("").chars().take(160).collect();
     if is(&["library_not_found", "lib_not_found", "no_library"]) || says(&["could not find library", "library file not found", "cannot open library", "no such file"]) {
         return format!("model library of {part} not found{}: give its path with model (lib), or import the vendor's file", if short.is_empty() { String::new() } else { format!(" ({short})") }) }
+    if r.is_empty() { if let Some(m) = ["unable to find definition of model", "could not find a valid modelname", "unknown subckt:", "unknown subckt"].iter().find_map(|k| after(msg, k)).filter(|_| !kind.contains("library")) {
+        return format!("the netlist refers to an undefined model or subcircuit {}: a model file names it without defining it. Add its definition (directives: .include of the maker's file that has it, or a .model line), or import that file", m.trim_matches(['"', '\''])) } }
+    if is(&["code_model"]) { return "ngspice's XSPICE code models are missing in this KiCad: parts that need them (digital, some vendor models) cannot be simulated here".into() }
     if is(&["model_not_in_library", "not_in_library", "model_not_found"]) || says(&["not found in library", "unknown subckt", "could not find a valid modelname", "unable to find definition of model", "unknown model"]) {
         return format!("the model named for {part} is not in its library{}: name one the file has (import lists them), or give another file", after(msg, "model").map(|m| format!(" ({m})")).unwrap_or_default()) }
     if is(&["pin"]) || says(&["pin count", "number of pins", "too few nodes", "incorrect number of nodes", "wrong number of"]) {
@@ -357,6 +377,9 @@ mod tests {
         assert_eq!(m.iter().map(|d| d.row()).collect::<Vec<_>>(), vec![json!({"name": "LM358", "subckt": ["1", "2", "3", "4", "5"]}), json!({"name": "DX", "model": "D"}), json!({"name": "TL072", "subckt": ["IN+", "IN-", "V+", "V-", "OUT"]}),
             json!({"name": "1N4148", "model": "D"}), json!({"name": "BC547B", "model": "NPN"}), json!({"name": "lookup", "model": "AKO:BC547B"})]);
         assert!(models_in("just a readme\nwith words").is_empty());
+        let w = file_warnings(".subckt TPS54331 VIN GND PH\nI1 VIN GND 1Adc\nD1 GND PH MBR340\nD2 GND PH DX\nQ1 a b c QN\n.model DX D\n.model QN NPN\nR1 a b 10k\nC1 a b 100n\n.ends\n");
+        assert_eq!(w.len(), 2, "{w:?}"); assert!(w[0].starts_with("line 2: `1Adc` is read by ngspice as 1 atto") && w[1].starts_with("line 3: D1 names the model mbr340, which this file does not define"), "{w:?}");
+        assert!(file_warnings(LIB).is_empty());
         assert!(unusable("<!DOCTYPE html><html><body>Please sign in</body></html>").unwrap().contains("web page") && unusable("* lib\n$CDNENCSTART_ADV3\nabcdef").unwrap().contains("encrypted") && unusable(&"PK\u{3}\u{4}\u{0}\u{1}\u{2}".repeat(10)).unwrap().contains("not text") && unusable(LIB).is_none());
         assert_eq!((name_fit("LM358", "LM358"), name_fit("lm358", "LM358DR"), name_fit("TL072_TI", "TL072"), name_fit("D", "D1"), name_fit("BC547B", "BC547C"), name_fit("1N4148", "1N4148W-7-F")), (2, 1, 1, 0, 0, 1));
         assert_eq!(pins_by_name(&["IN+".into(), "IN-".into(), "V+".into(), "V-".into(), "OUT".into()], &[("1".into(), "OUT".into()), ("2".into(), "IN-".into()), ("3".into(), "IN+".into()), ("4".into(), "V-".into()), ("8".into(), "V+".into())]),
@@ -408,6 +431,8 @@ mod tests {
             ("the circuit has no ground (node 0): put a GND power symbol on the return net".into(), "a value or parameter of R4 does not parse (cannot read 'abc'): set it with model (params), or correct the part's value".into(), "a measure gave no value: tr: out of interval".to_string()));
         assert_eq!(l(json!({"kind": "PK_NETLIST", "message": "The schematic is not fully annotated"})), "annotate the schematic first: parts without a number in their reference do not simulate");
         assert!(l(json!({"message": "Warning: Noise input source v1 has no AC value"})).starts_with("the input source has no AC value (v1): give it one"));
+        assert!(l(json!({"kind": "PK_MISSING_MODEL", "message": "Error: unable to find definition of model mbr340 - default assumed"})).starts_with("the netlist refers to an undefined model or subcircuit mbr340: a model file names it without defining it"));
+        assert!(l(json!({"kind": "PK_CODE_MODELS"})).contains("XSPICE code models are missing"));
         assert_eq!(l(json!({"kind": "SPK_NETLIST", "reference": "V1", "message": "unknown parameter (foo)"})), "netlist error at V1: unknown parameter (foo)");
         assert_eq!((l(json!({"kind": "SPK_TIMEOUT"})).contains("did not finish"), l(json!({"kind": "SPK_SOMETHING_NEW", "reference": "R1"})), l(json!({"reference": "R9", "message": "odd thing"})), l(json!({}))), (true, "spk something new at R1".into(), "R9: odd thing".into(), "simulation problem".into()));
         for v in [json!({"kind": "SPK_NO_CONVERGENCE", "message": "x\ny\nz ".repeat(200)}), json!({"message": "a ".repeat(900)})] { let s = l(v); assert!(!s.contains('\n') && s.len() < 400, "{s}") }
