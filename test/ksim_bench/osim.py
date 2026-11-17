@@ -16,13 +16,7 @@ class Sim(Doc):
         self.cwd = cwd; super().__init__(m, os.path.join(cwd, next(f for f in sorted(os.listdir(cwd)) if f.endswith(".kicad_sch")))); self.col = 0; self.pwr = 90
     def sim(self, name, msg=None): return self.ipc(SIM + name, {"document": self.doc, **(msg or {})})
     def exclude(self, refs_):
-        r = self.sim("AssignSimulationModel", {"references": refs_, "exclude_from_sim": True, "partial": True})
-        left = [x["reference"] for x in r.get("results", []) if x.get("error")]
-        if left:  # a symbol without pins (a mounting hole) is not a symbol to the simulation commands: its attribute is set as any other edit is
-            ups = []
-            for s in self.items("KOT_SCH_SYMBOL"):
-                if s["reference_field"]["text"]["text"] in left: s.pop("definition", None); s.setdefault("attributes", {})["exclude_from_simulation"] = True; ups.append(s)
-            self.begin(); u = self.update(ups); self.end("left out of simulation"); print("excluded by UpdateItems:", left, [x.get("status", {}).get("code") for x in u.get("updated_items", [])])
+        self.bad(self.sim("AssignSimulationModel", {"references": refs_, "exclude_from_sim": True}))  # a mounting hole too (a symbol without pins)
     def bad(self, r):
         e = [(x["reference"], x.get("error")) for x in r.get("results", []) if x.get("error")]
         if e: raise RuntimeError(f"AssignSimulationModel: {e}")
