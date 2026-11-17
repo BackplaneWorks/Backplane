@@ -822,7 +822,7 @@ try:
                 if c or d: return 'wrong', f'created {c}, deleted {d}'
                 return 'nothing', 'no edit event'
             def table(E, f):
-                other_text = open(f, errors='replace').read()  # KiCad's own s-expression, as another KiCad's Cmd+C puts on the pasteboard
+                other_text = ''  # what KiCad's own Cmd+C puts on the pasteboard (copy_paste below records it): another KiCad's copy is the same text
                 canvas(); canvas()
                 n, t = press(K_A, CMD); wait_for(lambda: since(n, 'ET_SELECTION_CHANGED'), W); time.sleep(0.4)
                 sel = [e.get('selection') or {} for e in since(n, 'ET_SELECTION_CHANGED')]
@@ -892,6 +892,7 @@ try:
                 canvas(); key(K_A, CMD); time.sleep(0.5)
                 subprocess.run(['pbcopy'], input=b'lane-m-before-copy'); key(8, CMD); time.sleep(0.8)
                 pb = subprocess.run(['pbpaste'], capture_output=True).stdout.decode(errors='replace')
+                other_text = pb if pb != 'lane-m-before-copy' else ''
                 pb_kicad = pb != 'lane-m-before-copy' and ('(footprint' in pb or '(symbol' in pb or '(kicad_' in pb or '(segment' in pb or 'lib_symbols' in pb)
                 print(f'INFO {E} copy: after Cmd+C the pasteboard {"holds KiCad text" if pb_kicad else ("is unchanged" if pb == "lane-m-before-copy" else "changed but not to KiCad text")} ({len(pb)} chars: {pb[:60]!r})', flush=True)
                 key(K_ESC); time.sleep(0.4)
@@ -899,11 +900,14 @@ try:
                 n, t = press(K_V, CMD); time.sleep(1.0); board_click(0.5, 0.5); v = judge_cd(n, 'c', True); row(E, 'copy_paste', *v, t); settle(n)
                 if v[0] == 'works' and undo_ok: m = seq(); key(K_Z, CMD); wait_ed(m, 'd'); settle(m)
                 # paste from another KiCad: its clipboard text (the editor's s-expression) on the macOS pasteboard, Cmd+V and a click here
-                canvas(); subprocess.run(['pbcopy'], input=other_text.encode())
+                if not other_text: row(E, 'paste_from_other', 'nothing', 'not judged: Cmd+C put no KiCad text on the pasteboard to paste from'); other_text = None
+                canvas()
+                if other_text: subprocess.run(['pbcopy'], input=b'lane-m-elsewhere'); time.sleep(0.3); subprocess.run(['pbcopy'], input=other_text.encode())
                 p = last_push(); relay(op='move', x=p[0][0] + p[0][2] * 0.5, y=p[0][1] + p[0][3] * 0.5); time.sleep(0.4)
-                n, t = press(K_V, CMD); time.sleep(1.0); board_click(0.5, 0.5); v = judge_cd(n, 'c', True)
-                row(E, 'paste_from_other', *v, t); settle(n); key(K_ESC); time.sleep(0.4)
-                if v[0] == 'works' and undo_ok: m = seq(); key(K_Z, CMD); wait_ed(m, 'd'); settle(m)
+                if other_text:
+                    n, t = press(K_V, CMD); time.sleep(1.0); board_click(0.5, 0.5); v = judge_cd(n, 'c', True)
+                    row(E, 'paste_from_other', *v, t); settle(n); key(K_ESC); time.sleep(0.4)
+                    if v[0] == 'works' and undo_ok: m = seq(); key(K_Z, CMD); wait_ed(m, 'd'); settle(m)
                 canvas(); key(K_A, CMD); time.sleep(0.5)
                 n, t = press(K_X, CMD); v = judge_cd(n, 'd', True); row(E, 'cut', *v, t); settle(n)
                 p = last_push(); relay(op='move', x=p[0][0] + p[0][2] * 0.5, y=p[0][1] + p[0][3] * 0.5); time.sleep(0.4)
