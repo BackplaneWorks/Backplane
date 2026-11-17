@@ -195,6 +195,8 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
     let term = term_bindings(&v, &k("term"));
     v.extend(term);
     v.extend(quit_bindings(mac()));
+    // last: a copy button's keys win over the window's Ctrl+C at the same depth, and nothing above is derived from them (pad_bindings, term_bindings)
+    v.extend(crate::screens::copyable::bindings());
     v
 }
 /// Cmd+Q quits the desktop client on a Mac (the hub runs on by itself). Bound after the pad's and the terminal's mutes, and left out of them,
@@ -644,6 +646,12 @@ mod tests {
         assert_eq!(d("ctrl-shift-h", &[]), "keys::PerfOverlay"); assert_eq!(hint(&Local::default(), "perf"), if mac() { "⌃⇧H" } else { "Ctrl+Shift+H" });
         assert!(MISSING.iter().all(|(k, why)| *k != "Ctrl+Shift+H" && !why.contains("Performance")), "no longer a key the client cannot do");
         let mut l = Local::default(); assert!(l.set("shortcut", "perf\u{1f}ctrl-alt-h")); assert_eq!(does(&l, "ctrl-alt-h", &[]), "keys::PerfOverlay"); assert_eq!(does(&l, "ctrl-shift-h", &[]), "");
+    }
+    #[test] fn a_copy_button_with_the_keyboard_copies_on_enter_and_its_copy_chord() {
+        let copy = if mac() { "cmd-c" } else { "ctrl-c" };
+        assert_eq!(d("enter", &["Copyable"]), "copyable::CopyIt"); assert_eq!(d(copy, &["Copyable"]), "copyable::CopyIt", "deeper than the window's copy");
+        assert_eq!(d("enter", &["CopyRun"]), "copyable::RunIt");
+        assert_eq!(d(copy, &[]), "backplane::CopySelection", "elsewhere the selection is copied as before"); assert_eq!(d("enter", &[]), "");
     }
     #[test] fn palette_and_dialog_scopes() {
         assert_eq!(d("escape", &["PickInput"]), "backplane::ClosePopup"); assert_eq!(d("escape", &["AskInput"]), "backplane::ClosePopup");

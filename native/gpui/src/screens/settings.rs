@@ -436,7 +436,11 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
         w.max(if has_field { field_w } else { slider_w }).max(if r.qr.is_empty() { 0. } else { qr_w(r.qr.len()) }) };
     left = if stack { left.w_full() } else { left.flex_none().w(px((avail - GAP - right_w).max(LABEL_MIN))) };
     if !r.label.is_empty() { left = left.child(div().text_size(crate::scale::tpx(13.)).child(trs(&r.label))); }
-    if !r.note.is_empty() { left = left.child(div().text_size(crate::scale::tpx(12.)).text_color(c(match r.tone.as_str() { "warn" => "warn", "bad" => "bad", _ => "dim" })).child(trs(&r.note))); }
+    if !r.note.is_empty() {
+        let note = div().text_size(crate::scale::tpx(12.)).text_color(c(match r.tone.as_str() { "warn" => "warn", "bad" => "bad", _ => "dim" })).child(trs(&r.note));
+        // a value to copy (the hub's `copy`: a path, an id, a link): its copy button shows while the pointer is on the row
+        left = match r.raw["copy"].as_str().filter(|v| !v.is_empty()) { Some(v) => left.child(super::copyable::value(light, format!("set-note-{i}"), note, v.to_string(), false, cx)), None => left.child(note) };
+    }
     // a download's share done (setup's and Settings' KiCad install): a thin bar under the words
     if let Some(p) = r.raw["progress"].as_f64() {
         let p = p.clamp(0., 1.) as f32;
@@ -477,6 +481,8 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
                 let d = if b.on { d.bg(c("accent")).text_color(c("on-accent")) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) };
                 // its rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only), named by what it does: `btn:<action>:<value>`
                 let d = if crate::art::rects_on() { let n = format!("btn:{}:{}", b.action, b.value); d.relative().child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&n, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { d };
+                // a copy press is the copy button (screens/copyable.rs): its check, its keyboard, the exact text
+                if b.action == "copy" { return super::copyable::chip(d, light, trs(&b.label), format!("set-copy-{i}-{j}"), b.value.clone(), cx).into_any_element() }
                 d.child(trs(&b.label)).on_click(cx.listener(move |this, _, _, cx| on_press(this, &b2, cx))).into_any_element()
             }).collect::<Vec<_>>()));
         }

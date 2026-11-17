@@ -513,9 +513,11 @@ fn talk_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, 
     let ps = posts(bot);
     let mut list = div().id("posts").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().gap_2().p_3();
     if ps.is_empty() { list = list.child(div().text_color(c("dim")).child(trs("No messages yet."))); }
-    for p in &ps {
+    for (i, p) in ps.iter().enumerate() {
         let who = if p.mine { trs("You") } else { p.from.clone() };
-        list = list.child(div().flex().flex_col().gap_1().child(div().flex().gap_2().child(div().font_weight(FontWeight::BOLD).child(who)).child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(p.ago.clone()))).child(div().child(p.text.clone())));
+        // the post's code (the hub's `copy`): copy buttons, and Run in terminal for a command
+        let copy = super::copyable::pieces(cx, light, &format!("talk-{i}"), &arr(bot, "posts").nth(i).map_or(Value::Null, |x| x["copy"].clone()));
+        list = list.child(div().flex().flex_col().gap_1().child(div().flex().gap_2().child(div().font_weight(FontWeight::BOLD).child(who)).child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(p.ago.clone()))).child(div().child(p.text.clone())).children(copy));
     }
     div().size_full().flex().flex_col().child(list)
         .child(div().flex().gap_2().items_end().p_3().border_t_1().border_color(c("line"))

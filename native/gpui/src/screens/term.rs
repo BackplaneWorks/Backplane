@@ -58,12 +58,37 @@ pub struct Term {
     pub focus_panel: bool,
     /// The card that has the keyboard this frame (worked out before the rows are drawn).
     pub card_focused: Option<String>,
+    /// Run in terminal: the command to type into this shell once it is ready (its prompt drawn), and when it was asked for.
+    pub prefill: Option<(String, String, std::time::Instant)>,
 }
 
-/// Which chat's shell the terminal shows: on a bot's page its chat thread (`bot.chat`), else the selected thread, without a `<hub>|` prefix.
+/// How long Run in terminal waits for a shell that never turns on bracketed paste (a plain `sh`) before it types the command anyway.
+pub const PREFILL_WAIT: std::time::Duration = std::time::Duration::from_millis(900);
+/// The bytes that type `cmd` at a shell's prompt without running it. A shell that takes bracketed paste (?2004: bash, zsh, fish) gets it as
+/// one paste, its lines kept and none run. Else it must be one line: a `\` line continuation is joined, and lines become `cmd1 && cmd2`.
+/// No Enter at the end either way: the person reads it and presses Enter.
+pub fn prefill_bytes(cmd: &str, vt: &Vt) -> Vec<u8> {
+    let cmd = cmd.trim_end_matches(['\n', '\r']);
+    if vt.bpaste() { return vt.paste(cmd) }
+    let joined = cmd.replace("\\\r\n", " ").replace("\\\n", " ");
+    let one = joined.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).collect::<Vec<_>>().join(" && ");
+    one.bytes().filter(|b| *b != 0x1b && *b != b'\r' && *b != b'\n').collect()
+}
+/// A shell is at its prompt: it turned on bracketed paste, or it printed something and PREFILL_WAIT has gone by. A full-screen program
+/// (an editor, `less`) is never typed into.
+pub fn prefill_ready(vt: &Vt, waited: std::time::Duration) -> Option<bool> {
+    if vt.alt() { return None }
+    let printed = vt.cursor().x > 0 || vt.cursor().y > 0 || vt.history() > 0;
+    Some(vt.bpaste() || (printed && waited >= PREFILL_WAIT) || waited >= PREFILL_WAIT * 4)
+}
+
+/// Which chat's shell the terminal shows: on a bot's page its chat thread (`bot.chat`), on a room's page the room's (`room:<id>`), else the selected
+/// thread, without a `<hub>|` prefix.
 pub fn term_key_of(data: &serde_json::Value, selected: &str) -> String {
     let bot = &data["bot"];
     if bot["kind"] == "bot" { if let Some(c) = bot["chat"].as_str().filter(|c| !c.is_empty()) { return crate::screens::attach::raw_id(c).to_string() } }
+    // a room has no thread: its own shell (the hub works it in the swarm's project folder, or home)
+    if bot["kind"] == "room" { if let Some(r) = bot["id"].as_str().filter(|r| !r.is_empty() && !r.contains('~')) { return format!("room:{r}") } }
     crate::screens::attach::raw_id(selected).to_string()
 }
 
@@ -158,7 +183,7 @@ pub fn shown_runs(runs: &[vt::VRun]) -> std::borrow::Cow<'_, [vt::VRun]> {
 impl Term {
     pub fn new(focus: FocusHandle) -> Term { Term { focus: Some(focus), ..Term::new_detached() } }
     pub fn new_detached() -> Term {
-        Term { open: false, key: String::new(), screens: HashMap::new(), focus: None, size: (100, 24), cell: (8., LINE_PX), grid: Rc::new(Cell::new(Bounds::default())), sel: None, dragging: false, scroll: 0, tick: 0, script: None, focus_card: None, card_focused: None, focus_panel: false }
+        Term { open: false, key: String::new(), screens: HashMap::new(), focus: None, size: (100, 24), cell: (8., LINE_PX), grid: Rc::new(Cell::new(Bounds::default())), sel: None, dragging: false, scroll: 0, tick: 0, script: None, focus_card: None, card_focused: None, focus_panel: false, prefill: None }
     }
     pub fn focused(&self, window: &Window) -> bool { self.focus.as_ref().is_some_and(|f| f.is_focused(window)) }
     pub fn take_keys(&self, window: &mut Window) { if let Some(f) = &self.focus { f.focus(window) } }
@@ -269,12 +294,44 @@ impl Backplane {
         let t = &self.screens.term; if let Some(what) = dismiss(t.open, t.focused(window)) { self.term_act(what, window, cx); }
     }
     /// A `term` frame from the hub.
+    /// Run in terminal (a command's button in the chat): the floating terminal of this chat opens (its project folder for a thread, the home
+    /// folder for a bot's chat: the hub's `term.open`) with the command typed at the prompt, not run; the keyboard is in it for Enter.
+    pub(crate) fn run_in_terminal(&mut self, cmd: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let cmd = crate::screens::copyable::exact(cmd);
+        if cmd.trim().is_empty() { return }
+        let key = self.term_chat();
+        if key.is_empty() { self.error = trs("Open a thread first: the terminal works in its folder."); cx.notify(); return }
+        if !(self.screens.term.open && self.screens.term.key == key) { self.term_show(window, cx); } else { self.screens.term.take_keys(window); }
+        if !self.screens.term.open { return }
+        self.screens.term.prefill = Some((key, cmd, std::time::Instant::now()));
+        self.term_prefill(cx);
+        // a shell with no bracketed paste says nothing more: look again once it had time to draw its prompt
+        cx.spawn(async move |this, cx| {
+            for _ in 0..4 { cx.background_executor().timer(PREFILL_WAIT).await; let _ = this.update(cx, |this, cx| this.term_prefill(cx)); }
+        }).detach();
+    }
+    /// Type the waiting command into its shell when the shell is ready (prefill_ready).
+    fn term_prefill(&mut self, cx: &mut Context<Self>) {
+        let Some((key, cmd, at)) = self.screens.term.prefill.clone() else { return };
+        let Some(vt) = self.screens.term.screens.get(&key).map(|s| &s.vt) else { return };
+        match prefill_ready(vt, at.elapsed()) {
+            None => { self.screens.term.prefill = None; self.error = trs("The terminal is running a full-screen program: quit it, then try again."); cx.notify(); }
+            Some(false) => {}
+            Some(true) => {
+                let bytes = prefill_bytes(&cmd, vt);
+                self.screens.term.prefill = None;
+                for chunk in bytes.chunks(MAX_INPUT) { self.term_rpc("term.input", json!({"thread": key, "b": chunk})); }
+                cx.notify();
+            }
+        }
+    }
     pub(crate) fn term_frame(&mut self, key: &str, pid: Option<i32>, bytes: &[u8], reset: Option<(usize, usize)>, state: Option<String>, cx: &mut Context<Self>) {
         let rows_before = self.screens.term.card(key).map(|c| card_window(c.vt, c.open).1);
         let (replies, off) = self.screens.term.frame(key, pid, bytes, reset, state.as_deref());
         // the panel puts a screen of another size back to its own, only while it shows it (a phone may hold it at another size meanwhile)
         if off && self.screens.term.open { let (c, r) = self.screens.term.size; self.screens.term.resize(c, r); self.term_rpc("term.resize", json!({"thread": key, "cols": c, "rows": r})); }
         self.term_send(replies);
+        if self.screens.term.prefill.as_ref().is_some_and(|p| p.0 == key) { self.term_prefill(cx); }
         if (key == self.screens.term.key && self.screens.term.open) || self.screens.term.has_card(key) {
             // a card that grew or shrank is measured again
             if rows_before.is_some() && rows_before != self.screens.term.card(key).map(|c| card_window(c.vt, c.open).1) { self.card_remeasure(key); }
@@ -595,11 +652,29 @@ mod tests {
         t.key = "t".into(); t.ensure("t"); t.resize(100, 30); assert_eq!((t.screens["x:t:1"].vt.cols(), t.screens["x:t:1"].vt.rows()), (60, 10), "the card is not the panel");
         assert_eq!(t.screens["t"].vt.cols(), 100);
     }
+    #[test] fn run_in_terminal_types_the_command_and_never_enter() {
+        let plain = Vt::new(80, 24);
+        assert_eq!(prefill_bytes("sudo apt-get install -y x\n", &plain), b"sudo apt-get install -y x".to_vec());
+        // a shell without bracketed paste: one line, so nothing runs before the person's Enter
+        assert_eq!(prefill_bytes("cd a \\\n  && make\n# done\nmake install", &plain), b"cd a    && make && make install".to_vec());
+        let mut b = Vt::new(80, 24); b.feed(b"\x1b[?2004h$ ");
+        let got = prefill_bytes("make\nmake install", &b);
+        assert_eq!(got, b"\x1b[200~make\rmake install\x1b[201~".to_vec());
+        assert!(!got.ends_with(b"\r"));
+    }
+    #[test] fn run_in_terminal_waits_for_the_prompt_and_not_into_a_full_screen_program() {
+        let mut v = Vt::new(80, 24);
+        assert_eq!(prefill_ready(&v, std::time::Duration::ZERO), Some(false));
+        v.feed(b"$ "); assert_eq!(prefill_ready(&v, std::time::Duration::ZERO), Some(false)); assert_eq!(prefill_ready(&v, PREFILL_WAIT), Some(true));
+        v.feed(b"\x1b[?2004h"); assert_eq!(prefill_ready(&v, std::time::Duration::ZERO), Some(true));
+        v.feed(b"\x1b[?1049h"); assert_eq!(prefill_ready(&v, PREFILL_WAIT), None);
+    }
     #[test] fn the_terminal_belongs_to_the_chat_on_screen() {
         let d = |v: &str| serde_json::from_str::<serde_json::Value>(v).unwrap();
         assert_eq!(term_key_of(&d("{}"), "h1|t1"), "t1");
         assert_eq!(term_key_of(&d(r#"{"bot":{"kind":"bot","id":"b1","chat":"tb"}}"#), "t1"), "tb");
         assert_eq!(term_key_of(&d(r#"{"bot":{"kind":"bot","id":"b1","chat":""}}"#), "t1"), "t1");
+        assert_eq!(term_key_of(&d(r#"{"bot":{"kind":"room","id":"r1"}}"#), "t1"), "room:r1");
     }
     #[test] fn a_selection_copies_its_text() {
         let mut vt = Vt::new(20, 3); vt.feed(b"one two\r\nthree   \r\nfour");

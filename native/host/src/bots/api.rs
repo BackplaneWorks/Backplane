@@ -188,6 +188,12 @@ pub fn rows_of(w: &super::world::World, uber: &str, mark: &Value) -> (Vec<Value>
     rooms.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
     (bots.into_iter().map(|x| x.2).collect(), rooms.into_iter().map(|x| x.2).collect())
 }
+/// A post as a room's page shows it, with its code to copy (md/copy.rs: `copy`, [{text, cmd}]) when it has any.
+fn post_json(p: &Value, from: &str, now: u64) -> Value {
+    let mut o = json!({"id":p["id"],"from":from,"text":p["text"],"ago":ago(now, p["at"].as_u64().unwrap_or(0)),"mine":from == "you"});
+    let c = crate::md::copy::spans(p["text"].as_str().unwrap_or("")); if !c.is_empty() { o["copy"] = json!(c) }
+    o
+}
 /// MBots.room.view for a room here (MBots.room.view.loc): `{kind:"room", id, name, title, members, posts:[{id, from, text, ago, mine}], ephemeral, closed, keep}`
 /// (`keep`: the page offers Keep this room, `bots.room_keep`), the newest 200 posts oldest first. None for an unknown room.
 pub async fn room_page(hub: &Arc<Hub>, room: &str, now: u64) -> Option<Value> {
@@ -196,13 +202,13 @@ pub async fn room_page(hub: &Arc<Hub>, room: &str, now: u64) -> Option<Value> {
         let mut head = None; on_far(hub, &crate::net::far::link(room), |mark, w| head = w.room(room).map(|r| (r.name.clone(), r.members.iter().map(|m| w.bot(m).map_or(m.clone(), |b| b.name.clone())).collect::<Vec<_>>(), mark.clone(), (r.ephemeral, r.closed))));
         let (name, members, mark, life) = head?;
         let posts: Vec<Value> = room_posts(hub, room, 200).await?.into_iter().map(|p| { let from = p["from"].as_str().unwrap_or("").to_string();
-            json!({"id":p["id"],"from":from,"text":p["text"],"ago":ago(now, p["at"].as_u64().unwrap_or(0)),"mine":from == "you"}) }).collect();
+            post_json(&p, &from, now) }).collect();
         return Some(json!({"kind":"room","id":room,"name":name,"title":name,"members":members.join(", "),"posts":posts,"mark":mark,"ephemeral":life.0,"closed":life.1,"keep":false}))
     }
     let b = of(hub)?;
     let (name, members, life, swarm) = { let w = b.world().await; let r = w.room(room).filter(|r| !r.deleted)?; (r.name.clone(), super::swarm::names(&w, r).into_iter().map(|x| x.1).collect::<Vec<_>>(), (r.ephemeral, r.closed), r.swarm()) };
     let posts: Vec<Value> = room_posts(hub, room, 200).await?.into_iter().map(|p| { let from = p["from"].as_str().unwrap_or("").to_string();
-        json!({"id":p["id"],"from":from,"text":p["text"],"ago":ago(now, p["at"].as_u64().unwrap_or(0)),"mine":from == "you"}) }).collect();
+        post_json(&p, &from, now) }).collect();
     // Life.keep: a bots' exchange opened by its id offers Keep (a linked machine's is kept there)
     let mut pg = json!({"kind":"room","id":room,"name":name,"title":name,"members":members.join(", "),"posts":posts,"ephemeral":life.0,"closed":life.1,"keep":life.0});
     // a swarm's room (docs/SWARM.md): its board as the swarm page draws it (members with live state and colour, posts with tags, claims) and the controls it offers

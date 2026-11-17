@@ -1,7 +1,7 @@
 //! Md.render's block layer: lines classified, then folded into paragraphs, lists, quotes, tables and code.
 use super::{el, inline::inline, Loc, Node};
 
-enum Line { Fence, Head(usize, String), Item(usize, String), Num(usize, String, String), Quote(String), Row(Vec<String>), Sep(String), Hr, Blank, Text(String) }
+enum Line { Fence(String), Head(usize, String), Item(usize, String), Num(usize, String, String), Quote(String), Row(Vec<String>), Sep(String), Hr, Blank, Text(String) }
 
 fn trim_start(s: &str) -> &str { s.trim_start_matches(|c: char| c == ' ' || ('\t'..='\r').contains(&c)) }
 fn trim(s: &str) -> &str { trim_start(s).trim_end_matches(|c: char| c == ' ' || ('\t'..='\r').contains(&c)) }
@@ -48,7 +48,7 @@ fn tree(its: &[It], i: &mut usize) -> Node {
 fn classify(l: &str) -> Line {
     let t = trim_start(l);
     let ind = indent(l);
-    if t.starts_with("```") { return Line::Fence }
+    if let Some(info) = t.strip_prefix("```") { return Line::Fence(info.split(|c: char| c.is_whitespace() || c == ',' || c == '{').next().unwrap_or("").to_string()) }
     let n = t.chars().take_while(|&c| c == '#').count();
     let r: String = t.chars().skip(n).collect();
     if n > 0 && n < 7 && r.starts_with(' ') { return Line::Head(n, trim_start(&r).to_string()) }
@@ -62,12 +62,14 @@ fn classify(l: &str) -> Line {
     if trim(t).is_empty() { Line::Blank } else { Line::Text(l.to_string()) }
 }
 
-enum Blk { None, Para(Vec<String>), Code(Vec<String>), Items(Vec<It>), Quote(Vec<String>), Table(Vec<(bool, Vec<String>)>) }
+enum Blk { None, Para(Vec<String>), Code(String, Vec<String>), Items(Vec<It>), Quote(Vec<String>), Table(Vec<(bool, Vec<String>)>) }
 
-fn codeblock(lc: Loc, ls: &[String]) -> Node {
+fn codeblock(lc: Loc, lang: &str, ls: &[String]) -> Node {
     let text = ls.join("\n");
+    // a command (copy.rs) says so: the clients draw Run in terminal beside its copy button
+    let pre = if super::copy::block_is_command(&text, lang) { vec![("copy", "cmd".to_string())] } else { vec![] };
     let copy = Node::El { tag: "button", attrs: vec![("class", "copy".into()), ("title", copy_word(lc).into()), ("data-value", text.clone())], kids: vec![Node::Txt(copy_word(lc).into())] };
-    Node::El { tag: "div", attrs: vec![("class", "codeblock".into())], kids: vec![copy, el("pre", vec![el("code", vec![Node::Txt(text)])])] }
+    Node::El { tag: "div", attrs: vec![("class", "codeblock".into())], kids: vec![copy, Node::El { tag: "pre", attrs: pre, kids: vec![el("code", vec![Node::Txt(text)])] }] }
 }
 fn copy_word(lc: Loc) -> &'static str { match lc { Loc::En => "Copy", Loc::Ja => "コピー" } }
 
@@ -75,7 +77,7 @@ fn close(lc: Loc, b: Blk, out: &mut Vec<Node>) {
     match b {
         Blk::None => {}
         Blk::Para(ls) => out.push(el("p", inline(&ls.join("\n")))),
-        Blk::Code(ls) => out.push(codeblock(lc, &ls)),
+        Blk::Code(lang, ls) => out.push(codeblock(lc, &lang, &ls)),
         Blk::Items(xs) => { let mut i = 0; while i < xs.len() { out.push(tree(&xs, &mut i)); } }
         Blk::Quote(ls) => out.push(el("blockquote", inline(&ls.join("\n")))),
         Blk::Table(rs) => out.push(el("table", rs.iter().map(|(head, cs)| el("tr", cs.iter().map(|c| el(if *head { "th" } else { "td" }, inline(c))).collect())).collect())),
@@ -90,9 +92,9 @@ pub fn render(lc: Loc, s: &str) -> Vec<Node> {
     for raw in s.split('\n') {
         let ln = classify(raw);
         b = match (b, ln) {
-            (Blk::Code(ls), Line::Fence) => { out.push(codeblock(lc, &ls)); Blk::None }
-            (Blk::Code(mut ls), _) => { ls.push(raw.to_string()); Blk::Code(ls) }
-            (b, Line::Fence) => { close(lc, b, &mut out); Blk::Code(vec![]) }
+            (Blk::Code(lang, ls), Line::Fence(_)) => { out.push(codeblock(lc, &lang, &ls)); Blk::None }
+            (Blk::Code(lang, mut ls), _) => { ls.push(raw.to_string()); Blk::Code(lang, ls) }
+            (b, Line::Fence(lang)) => { close(lc, b, &mut out); Blk::Code(lang, vec![]) }
             (b, Line::Head(n, t)) => { close(lc, b, &mut out); out.push(head(n, &t)); Blk::None }
             (Blk::Items(mut xs), Line::Item(ind, t)) => { xs.push(It { ind, num: None, text: t }); Blk::Items(xs) }
             (b, Line::Item(ind, t)) => { close(lc, b, &mut out); Blk::Items(vec![It { ind, num: None, text: t }]) }

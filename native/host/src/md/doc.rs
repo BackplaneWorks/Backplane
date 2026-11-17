@@ -93,6 +93,12 @@ impl<'a> Builder<'a> {
                 let mut s = String::new(); for k in &o.kids { plain(k, &mut s) }
                 let id = self.slug(&s); o.attrs.push(("id", id));
             }
+            // what a code span or block is to copy (copy.rs): every client draws its copy button, and Run in terminal on a command
+            "pre" | "code" if o.md => {
+                let mut s = String::new(); for k in &o.kids { plain(k, &mut s) }
+                let kind = if o.tag == "pre" { let lang = o.attrs.iter().find(|a| a.0 == "lang").map_or("", |a| a.1.as_str()); super::copy::block_is_command(s.trim_end_matches('\n'), lang).then_some("cmd") } else { super::copy::inline_kind(&s) };
+                if let Some(k) = kind { o.attrs.push(("copy", k.into())); }
+            }
             _ => {}
         }
         Some(Node::El { tag: o.tag, attrs: o.attrs, kids: o.kids })

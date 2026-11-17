@@ -88,11 +88,17 @@ fn state_frame(key: &str, sc: &Screen) -> Value { let mut f = frame(key, None, &
 impl Terms {
     fn send_to(&self, client: u64, f: Value) { if client == ALL { self.hub.push_all(&f) } else { self.hub.push(client, f); } }
 
-    /// Where a thread's shell works: its worktree, else its project's folder (Hub.cwd). A chat with no folder (a bot's, the uberbot's)
+    /// Where a thread's shell works: its worktree, else its project's folder (Hub.cwd). A chat with no folder (a bot's, the uberbot's, a room's)
     /// works in the person's home folder, not wherever the hub was started.
     pub async fn cwd(&self, thread: &str) -> String {
+        // a room's terminal (`room:<id>`, the client's key on a room's page): its swarm's project, read before the model (one lock at a time)
+        let room_project = match (thread.strip_prefix("room:"), crate::bots::api::of(&self.hub)) {
+            (Some(room), Some(b)) => b.world().await.room(room).map(|r| r.project.clone()).unwrap_or_default(),
+            _ => String::new(),
+        };
         let m = self.hub.model().await;
-        let dir = match m.threads.get(thread) { Some(t) if !t.worktree.is_empty() => t.worktree.clone(), Some(t) => m.projects.get(&t.project).map(|p| p.root.clone()).unwrap_or_default(), None => String::new() };
+        let project = |id: &str| m.projects.get(id).map(|p| p.root.clone()).unwrap_or_default();
+        let dir = match m.threads.get(thread) { Some(t) if !t.worktree.is_empty() => t.worktree.clone(), Some(t) => project(&t.project), None => project(&room_project) };
         if dir.is_empty() { crate::plat::dirs::home_or_empty() } else { dir }
     }
 

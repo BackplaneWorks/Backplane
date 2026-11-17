@@ -332,7 +332,9 @@ impl Backplane {
                 let tone = string(&e, "tone"); let whole = act_whole(&tone);
                 let line = if whole { crate::i18n::trs(&text) } else { let mut l = text.lines().next().unwrap_or("").to_string(); if text.trim_end().contains('\n') { l.push_str(" …"); } l };
                 let body = div().flex_1().min_w_0().when(!whole, |d| d.overflow_hidden().whitespace_nowrap().text_ellipsis()).when(tone.contains("error") && !tone.contains("restart"), |d| d.text_color(c("bad"))).child(line);
-                div().id(SharedString::from(format!("e-{id}"))).w_full().flex().gap_2().py_1().font(art::mono_font()).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(div().flex_shrink_0().text_color(c("faint")).child(crate::i18n::trs(&string(&e, "label")))).child(body).into_any_element()
+                let row = div().id(SharedString::from(format!("e-{id}"))).w_full().flex().gap_2().py_1().font(art::mono_font()).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(div().flex_shrink_0().text_color(c("faint")).child(crate::i18n::trs(&string(&e, "label")))).child(body);
+                // a notice's code (the hub's `copy`): each piece with its copy button, and Run in terminal for a command
+                match crate::screens::copyable::pieces(cx, light, &format!("act-{id}"), &e["copy"]) { Some(p) => div().w_full().flex().flex_col().child(row).child(p).into_any_element(), None => row.into_any_element() }
             }
             // a call whose summary is only its name (WebSearch, TaskUpdate...): its name alone, so an open fold shows as many rows as it counts
             _ if !string(&e, "label").is_empty() => div().id(SharedString::from(format!("e-{id}"))).flex().gap_2().py_1().font(art::mono_font()).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(string(&e, "label")).into_any_element(),
@@ -531,7 +533,7 @@ impl Backplane {
     pub(crate) fn viewer_part(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let light = self.light();
         crate::screens::xprobe::zoom_pending(self);
-        let reg = self.screens.reg.clone(); reg.borrow_mut().begin_outside();
+        let reg = self.screens.reg.clone(); reg.borrow_mut().begin_outside(); reg.borrow_mut().app = Some(cx.entity().downgrade());
         // the Backplane KiCad update at Edit: a row of its own above the pane (screens/kicad_update.rs), only while an editor is up
         let update = if self.screens.kicad.is_some() { crate::screens::kicad_update::view(self, cx) } else { None };
         let thread = &self.data["thread"];
@@ -548,7 +550,7 @@ impl Backplane {
         if crate::screens::subview::wanted(&self.screens.panels, &self.data["thread"]).is_some() { self.screens.parts.rows_ctl.clear(); return self.sub_page(cx) }
         let light = self.light();
         let c = |name: &str| theme::color(light, name);
-        self.screens.reg.borrow_mut().begin_rows(); self.screens.parts.rows_ctl.clear();
+        self.screens.reg.borrow_mut().begin_rows(); self.screens.reg.borrow_mut().app = Some(cx.entity().downgrade()); self.screens.parts.rows_ctl.clear();
         crate::screens::xprobe::want_names(self); self.screens.reg.borrow_mut().design = self.screens.xprobe.design.clone();
         let thread = &self.data["thread"];
         let has_thread = thread.is_object();

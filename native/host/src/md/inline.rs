@@ -34,7 +34,7 @@ fn text(acc: &[char], out: &mut Vec<Node>) {
 /// Md.code: inline code; a path in backticks is a file's link
 fn code(acc: &[char]) -> Node {
     let s = st(acc);
-    let c = el("code", vec![Node::Txt(s.clone())]);
+    let c = match super::copy::inline_kind(&s) { Some(k) => Node::El { tag: "code", attrs: vec![("copy", k.into())], kids: vec![Node::Txt(s.clone())] }, None => el("code", vec![Node::Txt(s.clone())]) };
     if links::is_path(&s) || links::is_design(&s) || links::file_url(&s) { file(&s, vec![c]) } else { c }
 }
 

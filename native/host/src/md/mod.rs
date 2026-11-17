@@ -6,6 +6,7 @@ pub mod links;
 pub mod refs;
 pub mod doc;
 pub mod issues;
+pub mod copy;
 mod html;
 mod inline;
 mod block;
@@ -46,7 +47,7 @@ fn node_json(n: &Node) -> Value {
 fn doc_attrs(tag: &str, attrs: &[(&'static str, String)], m: &mut Map<String, Value>) {
     for (k, v) in attrs {
         match *k {
-            "src" | "alt" | "width" | "height" | "align" | "id" | "checked" | "alert" | "lang" | "open" | "media" | "start" => { m.entry(k.to_string()).or_insert_with(|| json!(v)); }
+            "src" | "alt" | "width" | "height" | "align" | "id" | "checked" | "alert" | "lang" | "open" | "media" | "start" | "copy" => { m.entry(k.to_string()).or_insert_with(|| json!(v)); }
             "title" if tag == "img" => { m.insert("title".into(), json!(v)); }
             "file" => { m.insert("file".into(), json!(v == "1")); }
             _ => {}
@@ -76,7 +77,7 @@ mod tests {
         r##"[{"tag":"p","kids":[{"text":"a "},{"tag":"strong","kids":[{"text":"b"}]},{"text":" "},{"tag":"em","kids":[{"text":"c"}]},{"text":" "},{"tag":"code","kids":[{"text":"d"}]},{"text":" e * f "},{"text":"**g"}]}]"##,
         r##"[{"tag":"p","kids":[{"text":"x [lab] y "},{"tag":"a","kids":[{"text":"l"}],"href":"http://e.x/a","file":false},{"text":" "},{"tag":"strong","kids":[{"text":"b "},{"tag":"code","kids":[{"text":"c"}]},{"text":" d"}]},{"text":" "},{"tag":"em","kids":[{"text":"e "},{"tag":"code","kids":[{"text":"f"}]}]},{"text":" "},{"text":"`unclosed"}]}]"##,
         r##"[{"tag":"p","kids":[{"tag":"strong","kids":[{"text":"a*b"}]},{"text":" "},{"tag":"em","kids":[{"text":"x "}]},{"tag":"em","kids":[{"text":"y"}]},{"text":"* z* "},{"tag":"strong","kids":[{"text":"*w"}]},{"text":"* * lone"}]}]"##,
-        r##"[{"tag":"p","kids":[{"text":"path "},{"tag":"a","kids":[{"tag":"code","kids":[{"text":"src/a.rs"}]}],"href":"src/a.rs","file":true},{"text":" and [t1] *"}]}]"##,
+        r##"[{"tag":"p","kids":[{"text":"path "},{"tag":"a","kids":[{"tag":"code","kids":[{"text":"src/a.rs"}],"copy":"path"}],"href":"src/a.rs","file":true},{"text":" and [t1] *"}]}]"##,
         r##"[{"tag":"p","kids":[{"text":"a"},{"tag":"em","kids":[{"text":"\n"}]},{"text":"b "},{"tag":"strong","kids":[{"text":"c\n d"}]},{"text":" e"},{"tag":"code","kids":[{"text":"f\ng"}]}]}]"##,
         r##"[{"tag":"p","kids":[{"text":"tab\t"},{"tag":"em","kids":[{"text":"x"}]},{"text":"\t"},{"tag":"strong","kids":[{"text":"y"}]}]}]"##,
     ];

@@ -371,7 +371,10 @@ pub(crate) fn plain_act(e: &Ent) -> Value {
         return json!({"id": e.id, "kind": "handoff", "text": c["summary"], "title": c["title"], "from": c["from"], "note": c["note"], "refs": c["refs"]}) } }
     let text = if e.akind == "result" && e.text.trim().is_empty() { "The turn ended with an error; the agent gave no reason.".to_string() } else if e.text == e.akind { String::new() } else { e.text.clone() };
     let tone = if e.akind == "restart" { "info restart".to_string() } else { e.role.clone() };
-    json!({"id": e.id, "kind": "act", "tone": tone, "label": shown_name(&e.akind), "text": text})
+    let mut a = json!({"id": e.id, "kind": "act", "tone": tone, "label": shown_name(&e.akind), "text": text});
+    // a notice's code (an error naming a command to run, a path): the clients draw copy buttons for it (md/copy.rs)
+    let copy = crate::md::copy::spans(&text); if !copy.is_empty() { a["copy"] = json!(copy) }
+    a
 }
 
 /// Mob.act for a row in an open run: a design step shows as a step (its value opens it in the viewer), a tool call as an activity

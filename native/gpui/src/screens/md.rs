@@ -7,7 +7,15 @@ use std::ops::Range;
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct Style { pub bold: bool, pub italic: bool, pub code: bool, pub link: Option<Link>,
     /// a document's: struck through, a key (`<kbd>`), a small raised or lowered run (`<sup>`, `<sub>`: drawn dimmer, the line keeps one size)
-    pub strike: bool, pub kbd: bool, pub small: bool }
+    pub strike: bool, pub kbd: bool, pub small: bool,
+    /// a code span's copy button (the hub's `copy`, md/copy.rs): a command also gets Run in terminal
+    pub copy: Option<CopyAs> }
+/// What a code span is to copy, as the hub says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopyAs { Cmd, Path, Url, Hash, Id }
+impl CopyAs {
+    pub fn of(s: Option<&str>) -> Option<CopyAs> { Some(match s? { "cmd" => CopyAs::Cmd, "path" => CopyAs::Path, "url" => CopyAs::Url, "hash" => CopyAs::Hash, "id" => CopyAs::Id, _ => return None }) }
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct Link { pub href: String, /// a path on the hub's machine, not a web address
     pub file: bool }
@@ -20,8 +28,8 @@ pub enum Block {
     Heading(u8, Vec<Span>),
     List { ordered: bool, start: u64, items: Vec<Item> },
     Quote(Vec<Span>),
-    /// The code and its highlight tokens, computed once when the block is parsed.
-    Code(String, Vec<(Range<usize>, Tok)>),
+    /// The code and its highlight tokens, computed once when the block is parsed, and whether it is a shell command (Run in terminal).
+    Code(String, Vec<(Range<usize>, Tok)>, bool),
     Table { head: Vec<Vec<Span>>, rows: Vec<Vec<Vec<Span>>> },
     Rule,
     /// A document's (a README, a note): a paragraph or heading (level, 0 for a paragraph) with pictures among its text.
@@ -127,7 +135,7 @@ fn inline(node: &Value, style: &Style, out: &mut Vec<Span>, depth: usize) {
     match node["tag"].as_str().unwrap_or("") {
         "strong" | "b" => s.bold = true,
         "em" | "i" => s.italic = true,
-        "code" => s.code = true,
+        "code" => { s.code = true; if let Some(k) = CopyAs::of(node["copy"].as_str()) { s.copy = Some(k) } }
         "del" | "s" => s.strike = true,
         "kbd" => { s.kbd = true; s.code = true }
         "sup" | "sub" => s.small = true,
@@ -245,7 +253,7 @@ fn blocks_into(n: &Value, out: &mut Vec<Block>, depth: usize) {
                 (a, _) => out.push(Block::Callout(a, bs)),
             }
         }
-        "pre" => { let mut t = String::new(); text_of(n, &mut t, 0); let t = t.trim_end_matches('\n').to_string(); let tokens = if matches!(n["lang"].as_str(), Some("text" | "txt" | "plain" | "console" | "output")) { vec![(0..t.len(), Tok::Plain)] } else { highlight(&t) }; out.push(Block::Code(t, tokens)); }
+        "pre" => { let mut t = String::new(); text_of(n, &mut t, 0); let t = t.trim_end_matches('\n').to_string(); let tokens = if matches!(n["lang"].as_str(), Some("text" | "txt" | "plain" | "console" | "output")) { vec![(0..t.len(), Tok::Plain)] } else { highlight(&t) }; out.push(Block::Code(t, tokens, n["copy"] == "cmd")); }
         "hr" => out.push(Block::Rule),
         "table" => {
             let rows: Vec<Vec<Vec<Span>>> = kids(n).iter().map(|tr| kids(tr).iter().map(|c| spans(kids(c))).collect()).collect();
@@ -286,7 +294,7 @@ pub fn block_text(b: &Block) -> String {
             for b in &it.sub { for l in block_text(b).lines() { t.push_str("\n  "); t.push_str(l); } }
             t
         }).collect::<Vec<_>>().join("\n"),
-        Block::Code(t, _) => t.clone(),
+        Block::Code(t, _, _) => t.clone(),
         Block::Table { head, rows } => {
             let line = |r: &Vec<Vec<Span>>| r.iter().map(|c| plain(c)).collect::<Vec<_>>().join("\t");
             let mut lines: Vec<String> = Vec::new();
@@ -361,9 +369,16 @@ mod tests {
         let Block::List { ordered, start, items: inner } = &items[0].sub[0] else { panic!() }; assert!(*ordered); assert_eq!(*start, 2); assert_eq!(inner[0].sub.len(), 1);
         assert_eq!(block_text(&b[0]), "- a\n  2. b\n    - c\n- d");
     }
+    #[test] fn the_hubs_copy_kinds_reach_the_spans_and_blocks() {
+        let b = parse(&j(r#"[{"tag":"p","kids":[{"text":"run "},{"tag":"code","kids":[{"text":"git status"}],"copy":"cmd"},{"text":" or "},{"tag":"code","kids":[{"text":"foo()"}]}]},
+            {"tag":"div","kids":[{"tag":"button","kids":[{"text":"Copy"}]},{"tag":"pre","kids":[{"tag":"code","kids":[{"text":"make\n"}]}],"copy":"cmd"}]}]"#));
+        let Block::Para(s) = &b[0] else { panic!("{b:?}") };
+        assert_eq!(s.iter().map(|x| (x.text.as_str(), x.style.copy)).collect::<Vec<_>>(), [("run ", None), ("git status", Some(CopyAs::Cmd)), (" or ", None), ("foo()", None)]);
+        assert!(matches!(&b[1], Block::Code(t, _, true) if t == "make"));
+    }
     #[test] fn a_fenced_block_is_its_code_without_the_copy_button_text() {
         let b = parse(&j(r#"[{"tag":"div","kids":[{"tag":"button","kids":[{"text":"Copy"}]},{"tag":"pre","kids":[{"tag":"code","kids":[{"text":"fn main() {}\n"}]}]}]}]"#));
-        assert!(matches!(&b[..], [Block::Code(t, toks)] if t == "fn main() {}" && !toks.is_empty()));
+        assert!(matches!(&b[..], [Block::Code(t, toks, false)] if t == "fn main() {}" && !toks.is_empty()));
     }
     #[test] fn tables_have_a_head_only_when_th_cells_exist() {
         let t = |cell: &str| format!(r#"[{{"tag":"table","kids":[{{"tag":"tr","kids":[{{"tag":"{cell}","kids":[{{"text":"A"}}]}},{{"tag":"{cell}","kids":[{{"text":"B"}}]}}]}},{{"tag":"tr","kids":[{{"tag":"td","kids":[{{"text":"1"}}]}},{{"tag":"td","kids":[{{"text":"2"}}]}}]}}]}}]"#);

@@ -21,6 +21,8 @@ pub struct Registry {
     pub hover: String,
     /// The thread's design names: its parts, pins and nets in a message are links (screens/xprobe.rs).
     pub design: Rc<super::xprobe::Design>,
+    /// The window's app, for a command's Run in terminal (set each frame by the part that draws the rows).
+    pub app: Option<WeakEntity<Backplane>>,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct KPos { pub entry: String, pub idx: usize, pub off: usize }
@@ -30,7 +32,7 @@ pub type Reg = Rc<RefCell<Registry>>;
 pub const VIEWER_COPIES: usize = 1000;
 
 impl Default for Registry {
-    fn default() -> Self { Self { blocks: Vec::new(), dragging: false, entry: 0, entry_id: String::new(), idx: 0, keyed: None, sel: Selection::default(), copies: Vec::new(), copy_seen: 0, hover: String::new(), design: Default::default() } }
+    fn default() -> Self { Self { blocks: Vec::new(), dragging: false, entry: 0, entry_id: String::new(), idx: 0, keyed: None, sel: Selection::default(), copies: Vec::new(), copy_seen: 0, hover: String::new(), design: Default::default(), app: None } }
 }
 
 impl Registry {
@@ -129,7 +131,26 @@ impl Registry {
 pub enum Kind { Body, Quote, Code, Head }
 
 /// A block of text that paints its own selection and reports its layout to the registry.
-pub struct SelText { spans: Vec<Span>, kind: Kind, light: bool, reg: Reg, id: String, idx: usize, styled: Option<StyledText>, tokens: Vec<(Range<usize>, Tok)> }
+pub struct SelText { spans: Vec<Span>, kind: Kind, light: bool, reg: Reg, id: String, idx: usize, styled: Option<StyledText>, tokens: Vec<(Range<usize>, Tok)>,
+    /// The code spans with a copy button (md::CopyAs): where they are in the text, what they copy, and their buttons while shown.
+    chips: Vec<Chip> }
+struct Chip { range: Range<usize>, text: SharedString, cmd: bool, id: SharedString, el: Option<AnyElement>, hot: Vec<Bounds<Pixels>>, shown: bool }
+
+/// The room a code span's buttons take after its end (they show over what follows while the pointer is there): one icon, or two for a command.
+fn chip_room(cmd: bool) -> f32 { if cmd { 52. } else { 28. } }
+/// Where a span from `a` to `b` (the text positions of its ends, lines `lh` tall) is drawn, line by line, in text `left`..`right`, and the room
+/// after its end where its buttons go: the pointer anywhere over these keeps them shown.
+pub fn chip_hot(a: Point<Pixels>, b: Point<Pixels>, lh: Pixels, left: Pixels, right: Pixels, room: Pixels) -> Vec<Bounds<Pixels>> {
+    let mut out = Vec::new();
+    if a.y == b.y { out.push(Bounds::from_corners(a, point(b.x, b.y + lh))); }
+    else {
+        out.push(Bounds::from_corners(a, point(right, a.y + lh)));
+        if b.y > a.y + lh { out.push(Bounds::from_corners(point(left, a.y + lh), point(right, b.y))); }
+        out.push(Bounds::from_corners(point(left, b.y), point(b.x, b.y + lh)));
+    }
+    out.push(Bounds::from_corners(point(b.x, b.y - px(3.)), point(b.x + room, b.y + lh + px(3.))));
+    out
+}
 
 impl SelText {
     pub fn new(reg: &Reg, spans: Vec<Span>, kind: Kind, light: bool) -> Self {
@@ -140,7 +161,15 @@ impl SelText {
         let entry = r.entry; let (id, idx) = (r.entry_id.clone(), r.next_idx());
         r.blocks.push(Info { text: md::plain(&spans), entry, id: id.clone(), idx, links, layout: None });
         drop(r);
-        Self { spans, kind, light, reg: reg.clone(), id, idx, styled: None, tokens: Vec::new() }
+        let mut chips = Vec::new(); let mut at = 0usize;
+        for s in &spans {
+            if let Some(k) = s.style.copy.filter(|_| !s.text.trim().is_empty()) {
+                let cid = SharedString::from(format!("ic-{id}-{idx}-{at}"));
+                chips.push(Chip { range: at..at + s.text.len(), text: s.text.clone().into(), cmd: k == md::CopyAs::Cmd, id: cid, el: None, hot: vec![], shown: false });
+            }
+            at += s.text.len();
+        }
+        Self { spans, kind, light, reg: reg.clone(), id, idx, styled: None, tokens: Vec::new(), chips }
     }
     fn runs(&self, base: &TextStyle) -> Vec<TextRun> {
         let c = |n: &str| theme::color(self.light, n);
@@ -207,6 +236,26 @@ impl Element for SelText {
                 out.push((window.insert_hitbox(rect, HitboxBehavior::Normal), CursorStyle::PointingHand));
             }
         }
+        // a code span's copy button (and Run in terminal for a command), after its end, while the pointer is over it or a button has the keyboard
+        let mouse = window.mouse_position(); let app = self.reg.borrow().app.clone(); let light = self.light;
+        for ch in self.chips.iter_mut() {
+            let (Some(pa), Some(pb)) = (layout.position_for_index(ch.range.start), layout.position_for_index(ch.range.end)) else { ch.el = None; continue };
+            ch.hot = chip_hot(pa, pb, lh, bounds.left(), bounds.right(), px(chip_room(ch.cmd)));
+            let run_id = SharedString::from(format!("run:{}", ch.id));
+            ch.shown = ch.hot.iter().any(|h| h.contains(&mouse)) || super::copyable::focused(&ch.id, window) || super::copyable::focused(&run_id, window) || super::copyable::just_copied(&ch.id)
+                || crate::art::rects_on();   // check runs draw every button, so the window tests find them where the pointer has not been
+            if !ch.shown { ch.el = None; continue }
+            let c = |n: &str| theme::color(light, n);
+            let mut bar = div().flex().items_center().gap_px().bg(c("bg")).border_1().border_color(c("line")).shadow_sm();
+            if let (true, Some(app)) = (ch.cmd, app.clone()) { bar = bar.child(super::copyable::run_button(light, ch.id.clone(), ch.text.clone(), false, app, cx)); }
+            bar = bar.child(super::copyable::button(light, ch.id.clone(), ch.text.clone(), super::copyable::Opts { word: false, always: true }, cx));
+            let mut el = bar.into_any_element();
+            let size = el.layout_as_root(size(AvailableSpace::MinContent, AvailableSpace::MinContent), window, cx);
+            let vw = window.viewport_size().width;
+            let x = (pb.x + px(2.)).min(vw - size.width - px(4.)).max(px(0.));
+            el.prepaint_at(point(x, pb.y + (lh - size.height) / 2.), window, cx);
+            ch.el = Some(el);
+        }
         out
     }
     fn paint(&mut self, id: Option<&GlobalElementId>, inspector: Option<&InspectorElementId>, bounds: Bounds<Pixels>, rl: &mut (), pre: &mut Vec<(Hitbox, CursorStyle)>, window: &mut Window, cx: &mut App) {
@@ -230,6 +279,15 @@ impl Element for SelText {
         }
         styled.paint(id, inspector, bounds, rl, &mut (), window, cx);
         for (h, style) in pre.iter() { window.set_cursor_style(*style, h); }
+        for ch in self.chips.iter_mut() { if let Some(el) = ch.el.as_mut() { el.paint(window, cx); } }
+        // the pointer coming onto a code span or leaving it draws the frame again, which shows or hides its buttons
+        let hot: Vec<(Vec<Bounds<Pixels>>, bool)> = self.chips.iter().filter(|c| !c.hot.is_empty()).map(|c| (c.hot.clone(), c.shown)).collect();
+        if !hot.is_empty() && !crate::art::rects_on() {
+            window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, _| {
+                if phase != DispatchPhase::Bubble { return }
+                if hot.iter().any(|(h, shown)| h.iter().any(|b| b.contains(&e.position)) != *shown) { window.refresh(); }
+            });
+        }
         let mut r = self.reg.borrow_mut(); if let Some(o) = r.at(&self.id, self.idx) { r.blocks[o].layout = Some(layout); }
     }
 }
@@ -309,12 +367,14 @@ pub fn block_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, 
         Block::Quote(s) => div().border_l_2().border_color(c("line")).pl_3().child(text(reg, light, s.clone(), Kind::Quote)).into_any_element(),
         Block::Rule => div().h(px(1.)).w_full().bg(c("line")).my_1().into_any_element(),
         Block::List { .. } => list_el(cx, reg, light, b, key, 0, doc),
-        Block::Code(t, tokens) => {
-            let copy = t.clone();
+        Block::Code(t, tokens, cmd) => {
             let copy_ix = { let mut r = reg.borrow_mut(); let n = r.copy_seen; r.copy_seen += 1; n };
+            let id = SharedString::from(format!("code-{key}"));
+            let app = cx.entity().downgrade();
             div().w_full().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col()
-                .child(div().flex().justify_end().px_2().pt_1().child(div().id(SharedString::from(format!("copy-{key}"))).relative().px_2().text_size(crate::scale::tpx(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
-                    .child(crate::i18n::trs("Copy")).child(copy_probe(reg, copy_ix)).on_click(cx.listener(move |_, _, _, cx| { cx.write_to_clipboard(ClipboardItem::new_string(copy.clone())); }))))
+                .child(div().flex().justify_end().gap_1().px_2().pt_1()
+                    .when(*cmd, |d| d.child(super::copyable::run_button(light, id.clone(), t.clone(), true, app, cx)))
+                    .child(div().relative().child(super::copyable::button(light, id.clone(), t.clone(), super::copyable::Opts { word: true, always: true }, cx)).child(copy_probe(reg, copy_ix))))
                 .child(div().id(SharedString::from(format!("code-{key}"))).overflow_x_scroll().px_2().pb_2().text_size(crate::scale::tpx(12.)).whitespace_nowrap().child({ let mut s = SelText::new(reg, plain_spans(t), Kind::Code, light); s.tokens = tokens.clone(); s.into_any_element() }))
                 .into_any_element()
         }
