@@ -5,8 +5,13 @@
 #   - a landed branch's worktree that is not clean keeps its tree and loses its target/ dirs (idle --merged-minutes);
 #   - any other worktree's target/ dirs that nothing has written to for --hours (24) are deleted (a rebuild fills them again, mostly from sccache);
 #   - top-level entries of $BP_TMP (~/.cache/bp-tmp: lanes' scratch targets, temp homes, logs) that nothing has written to for --tmp-hours (24) are deleted;
-#   - test leftovers in /tmp and $BP_TMP (bp-<area>-<pid>-*, bpt-XXXXXX) whose owner is dead go after 30 minutes (--tmp-minutes);
+#   - test leftovers in /tmp and $BP_TMP (bp-<area>-<pid>-*, bpt-XXXXXX) whose owner is dead go after 24 h (--tmp-minutes, 1440);
 #   - the sccache cache is trimmed, oldest first, to its cap (--sccache-size, else SCCACHE_CACHE_SIZE, else 20G; K, M, G or T) when it has grown past it.
+# Every removal is checked again on the spot, just before it (live): a process holding it now (cwd, executable, open file, TMPDIR, CARGO_TARGET_DIR), anything in it written
+# or made within its idle time, or a .bp-keep marks it in use and it stays. (Nov 16: the held/fresh lists are read once, a walk takes up to minutes on a busy box, and folders
+# made during the walk (lane B's bp-kembed run folder, a land's janitor-test repo, test runs' bpt dirs) were taken as "idle 24 h" mid-run.)
+# A pause file (GC_PAUSE, default ~/.cache/bp-janitor.pause; its text says why) stops the /tmp and bp-tmp sweeps; worktrees, target/ dirs and sccache go on. Every run appends
+# what it freed to the log main-build.sh gives it ($GPUI_DEV_DIR/janitor.log, ~/.backplane-gpui-dev/janitor.log), which any lane can read.
 # A .bp-keep file at the top of a bp-tmp entry or a worktree keeps it whole, idle or not: what release gates come back to between runs (forkgate/, pp-tests/: Nov 16, a cleanup took a gate's checkout mid-run).
 # Nothing is touched that a process has as its cwd, executable, open file, TMPDIR or CARGO_TARGET_DIR (Nov 11: 157 GB of bp-tmp and 137 GB of lanes' targets filled the disk).
 # Never touches the main checkout, a locked worktree, a worktree with unlanded commits or edits (only its target/), a file not this user's, or across a mount.
@@ -14,7 +19,7 @@
 # Env for tests: GC_REPO (the clone), GC_UPSTREAM (default origin/main, else main), GC_TMP_BASES (default "/tmp $BP_TMP"), GC_LOCK, SCCACHE_DIR, GC_CTIME=0 (count only mtimes: a test cannot age a ctime).
 set -u; . "$(dirname "$0")/lib-bptmp.sh"
 renice -n 19 $$ > /dev/null 2>&1; ionice -c3 -p $$ > /dev/null 2>&1   # never in the way of a build or the hub
-APPLY=0; HOURS=24; TMPH=24; MMIN=60; TMIN=30; QUIET=0; SCC_SIZE=
+APPLY=0; HOURS=24; TMPH=24; MMIN=60; TMIN=1440; QUIET=0; SCC_SIZE=
 while [ $# -gt 0 ]; do case "$1" in
   --apply) APPLY=1;; --quiet) QUIET=1;; --hours) HOURS=$2; shift;; --days) HOURS=$(( $2 * 24 )); shift;; --tmp-hours) TMPH=$2; shift;;
   --merged-minutes) MMIN=$2; shift;; --tmp-minutes) TMIN=$2; shift;; --sccache-size) SCC_SIZE=$2; shift;;
@@ -37,6 +42,13 @@ HELD=$(mktemp); ENVS=$(mktemp); trap 'rm -f "$HELD" "$ENVS"' EXIT
 for e in /proc/[0-9]*/environ; do tr '\0' '\n' < "$e" 2>/dev/null | grep -aE '^(TMPDIR|CARGO_TARGET_DIR)='; done 2>/dev/null | sort -u > "$ENVS"
 { find /proc/[0-9]*/cwd /proc/[0-9]*/exe -maxdepth 0 -printf '%l\n'; find /proc/[0-9]*/fd -mindepth 1 -maxdepth 1 -printf '%l\n'; sed 's/^[A-Z_]*=//' "$ENVS"; } 2>/dev/null \
   | sed 's/ (deleted)$//' | grep '^/' | sort -u > "$HELD"
+# live PATH MINUTES: it can go now: no .bp-keep, nothing in it (itself included) written or made in the last MINUTES, no process holding it at this moment (a fresh look, not $HELD)
+live() { local q=$1; [ -e "$q/.bp-keep" ] && return 1
+  [ -n "$(find "$q" -xdev $(since "$2") -print -quit 2>/dev/null)" ] && return 1
+  find /proc/[0-9]*/cwd /proc/[0-9]*/exe -maxdepth 0 -printf '%l\n' 2>/dev/null | sed 's/ (deleted)$//' | awk -v q="$q" 'BEGIN{p = q "/"} $0 == q || index($0, p) == 1 {f = 1; exit} END{exit !f}' && return 1
+  find /proc/[0-9]*/fd -mindepth 1 -maxdepth 1 -printf '%l\n' 2>/dev/null | sed 's/ (deleted)$//' | awk -v q="$q" 'BEGIN{p = q "/"} $0 == q || index($0, p) == 1 {f = 1; exit} END{exit !f}' && return 1
+  grep -qsaE "^(TMPDIR|CARGO_TARGET_DIR)=$(printf '%s' "$q" | sed 's/[][\\.^$*+?(){}|]/\\&/g')(/|$)" <(for e in /proc/[0-9]*/environ; do tr '\0' '\n' < "$e"; done 2>/dev/null) && return 1
+  return 0; }
 held() { awk -v q="$1" 'BEGIN{p = q "/"} $0 == q || index($0, p) == 1 {f = 1; exit} END{exit !f}' "$HELD"; }
 # recent PATH MINUTES: something under it was written or made (ctime: a copy that kept old mtimes counts) in the last MINUTES; target/ dirs only count for themselves
 CT=1; [ "${GC_CTIME:-1}" = 0 ] && CT=0
@@ -55,19 +67,24 @@ while IFS=$'\t' read -r w ref locked; do
   b=${ref#refs/heads/}; lnd=0; [ -n "$ref" ] && landed "$b" && lnd=1
   clean=0; [ -z "$(git --no-optional-locks -C "$w" status --porcelain 2>/dev/null)" ] && clean=1   # never the index refresh: it would make the worktree look used
   if [ "$lnd" = 1 ] && [ "$clean" = 1 ] && [ "$locked" = 0 ] && ! recent "$w" "$MMIN" && ! recent "$(git -C "$w" rev-parse --absolute-git-dir 2>/dev/null || echo "$w")" "$MMIN"; then
+    live "$w" "$MMIN" || continue
     note worktree "$w" "$b landed in $UP, clean"; N_WT=$((N_WT + 1))
     [ "$APPLY" = 1 ] && git -C "$REPO" worktree remove --force "$w" 2>/dev/null && git -C "$REPO" branch -D "$b" > /dev/null 2>&1
     continue
   fi
   for t in $(targets "$w"); do
     if [ "$lnd" = 1 ]; then recent "$t" "$MMIN" all && continue; why="$b landed"; else recent "$t" $((HOURS * 60)) all && continue; why="idle ${HOURS} h"; fi
+    live "$t" "$([ "$lnd" = 1 ] && echo "$MMIN" || echo $((HOURS * 60)))" || continue
     note target "$t" "$why"; N_TG=$((N_TG + 1)); wipe "$t"
   done
 done < "$HELD.wt"
 rm -f "$HELD.wt"
 
+PAUSE=${GC_PAUSE:-${XDG_CACHE_HOME:-$HOME/.cache}/bp-janitor.pause}; TMP_ON=1
+if [ -e "$PAUSE" ]; then TMP_ON=0; say "janitor: /tmp and bp-tmp sweeps paused ($PAUSE: $(head -c 200 "$PAUSE" | tr '\n' ' '))"; fi
+[ -z "${GC_TEST_AFTER_SCAN:-}" ] || sh -c "$GC_TEST_AFTER_SCAN"   # tests: make what appears between the scans and the removals
 # $BP_TMP: whole top-level entries idle for --tmp-hours that nothing holds. Its sccache/ (the sccache server's TMPDIR) and claude/ (agents' CLAUDE_CODE_TMPDIR) stay.
-if [ -d "$BP_TMP" ]; then
+if [ "$TMP_ON" = 1 ] && [ -d "$BP_TMP" ]; then
   declare -A busy_t=() fresh_t=()
   while IFS= read -r l; do busy_t[$l]=1; done < <(grep -F "$BP_TMP/" "$HELD" | awk -v p="$BP_TMP/" 'index($0, p) == 1 {s = substr($0, length(p) + 1); sub(/\/.*/, "", s); print s}' | sort -u)
   # one walk lists the top-level names with anything written lately
@@ -78,6 +95,7 @@ if [ -d "$BP_TMP" ]; then
     [ "$e" -ef "$LOCK" ] && continue
     [ -O "$e" ] || continue; [ -n "${busy_t[$n]:-}" ] && continue; [ -n "${fresh_t[$n]:-}" ] && continue
     [ -e "$e/.bp-keep" ] && continue   # kept on purpose (a gate's scripts, venv, fixtures)
+    live "$e" $((TMPH * 60)) || continue   # made, written or opened since the lists above were read
     note tmp "$e" "idle ${TMPH} h"; N_TMP=$((N_TMP + 1)); wipe "$e"
   done
 fi
@@ -85,7 +103,7 @@ fi
 # Test leftovers (lanes' test runs) in /tmp and $BP_TMP, sooner than the rule above: only top-level entries of this kind, made by this user, never a symlink, never across
 # a mount, only when idle for --tmp-minutes and nothing uses them: bp-<area>-<pid>-<name> whose pid is dead (bp-chrome-<pid> is a real hub's, not a test's: left alone), and the
 # per-run bpt-XXXXXX dirs of scripts/lib-buildslot.sh (bpt_new) that no process has as its cwd or TMPDIR; a failed run's bpt dir (.bpt-failed) is evidence, bounded there.
-for base in ${GC_TMP_BASES:-/tmp $BP_TMP}; do [ -d "$base" ] || continue
+for base in ${GC_TMP_BASES:-/tmp $BP_TMP}; do [ "$TMP_ON" = 1 ] && [ -d "$base" ] || continue
   declare -A act=(); while IFS= read -r l; do act[$l]=1; done < <(find "$base" -xdev -mindepth 1 ! -path "$base/bp*" -prune -o -mmin -"$TMIN" -printf '%P\n' 2>/dev/null | awk -F/ '!s[$1]++ {print $1}')
   re='^bp-[a-z0-9_]+-([0-9]+)(-.*)?$'
   for d in "$base"/bp-*-[0-9]* "$base"/bpt-??????; do
@@ -96,7 +114,7 @@ for base in ${GC_TMP_BASES:-/tmp $BP_TMP}; do [ -d "$base" ] || continue
       bp-chrome-*) continue;;
       *) [[ $b =~ $re ]] && [ ! -e "/proc/${BASH_REMATCH[1]}" ] || continue;;
     esac
-    [ -n "${act[$b]:-}" ] && continue; held "$d" && continue; [ -e "$d/.bp-keep" ] && continue
+    [ -n "${act[$b]:-}" ] && continue; held "$d" && continue; [ -e "$d/.bp-keep" ] && continue; live "$d" "$TMIN" || continue
     note tmp "$d" "test leftover, owner gone"; N_TMP=$((N_TMP + 1)); wipe "$d"
   done
 done

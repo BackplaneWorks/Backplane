@@ -103,14 +103,23 @@ fn kills_by_name(line: &str) -> bool {
     let mut shell = Command::new("sleep").arg("120").current_dir(wt("busy")).spawn().unwrap();
     let mut open = Command::new("sleep").arg("120").stdin(fs::File::open(bt.join("held/log")).unwrap()).spawn().unwrap();
     let script = root().join("scripts/worktree-gc.sh"); fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).ok();
-    let run = |apply: bool| { let mut c = Command::new(&script); if apply { c.arg("--apply"); }
+    let run_with = |apply: bool, extra: &[(&str, String)]| { let mut c = Command::new(&script); if apply { c.arg("--apply"); }
+        for (k, v) in extra { c.env(k, v); }
         let o = c.args(["--sccache-size", "3M"]).current_dir(&d).env("GC_REPO", &repo).env("GC_UPSTREAM", "origin/main").env("BP_TMP", &bt).env("GC_TMP_BASES", &bt)
             .env("GC_LOCK", d.join("lock")).env("SCCACHE_DIR", &scc).env("GC_CTIME", "0").env_remove("TMPDIR").env_remove("CLAUDE_CODE_TMPDIR").output().unwrap();
         assert!(o.status.success(), "{o:?}"); String::from_utf8_lossy(&o.stdout).to_string() };
+    let run = |apply: bool| run_with(apply, &[("GC_PAUSE", d.join("no-pause").to_string_lossy().to_string())]);
     let dry = run(false); let dry2 = run(false);
     assert!(dry2.contains("worktree") && dry2.contains("/landed"), "a run does not make a worktree look used (git status writes no index):\n{dry2}");
     assert!(dry.contains("would have freed") && wt("landed").exists() && bt.join("aot-build").exists(), "a dry run changes nothing:\n{dry}");
-    let out = run(true);
+    // paused (a release night): the /tmp and bp-tmp sweeps stop, and say why
+    fs::write(d.join("pause"), "bp.13 and 0.16.0 release").unwrap();
+    let paused = run_with(true, &[("GC_PAUSE", d.join("pause").to_string_lossy().to_string())]);
+    assert!(paused.contains("sweeps paused") && paused.contains("0.16.0") && bt.join("aot-build").exists() && bt.join("old.log").exists(), "a pause file stops the tmp sweeps:\n{paused}");
+    // Nov 16: a run folder made while the janitor walked (after its held and fresh lists were read) was taken as "idle 24 h" mid-run; every removal is checked again on the spot
+    let late = bt.join("bp-kembed.late"); let late_s = late.to_string_lossy().to_string();
+    let out = run_with(true, &[("GC_PAUSE", d.join("no-pause").to_string_lossy().to_string()), ("GC_TEST_AFTER_SCAN", format!("mkdir -p '{late_s}' && echo log > '{late_s}/hub.log'"))]);
+    assert!(late.join("hub.log").exists(), "a folder made after the scans is not taken as idle:\n{out}");
     let _ = shell.kill(); let _ = open.kill(); let _ = shell.wait(); let _ = open.wait();
     let tg = |n: &str| wt(n).join("native/host/target").exists();
     assert!(!wt("landed").exists(), "a landed, clean, idle worktree is removed:\n{out}");
@@ -126,7 +135,7 @@ fn kills_by_name(line: &str) -> bool {
     assert!(bt.join("held/log").exists() && bt.join("new").exists() && bt.join("sccache").exists() && bt.join("claude").exists(), "held, fresh, sccache's and claude's stay:\n{out}");
     let left: Vec<String> = fs::read_dir(&scc).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
     assert!(left.len() <= 3 && left.iter().any(|n| n == "o5") && !left.iter().any(|n| n == "o0"), "sccache trimmed to its cap, oldest first: {left:?}\n{out}");
-    assert!(out.contains("janitor: freed") && out.contains("aot-build") && out.contains("landed"), "it says what it freed:\n{out}");
+    assert!(out.contains("janitor: freed") && out.contains("aot-build") && paused.contains("landed"), "it says what it freed (the landed worktree went in the paused run: a pause stops only the tmp sweeps):\n{paused}\n{out}");
     let _ = fs::remove_dir_all(&d);
 }
 
