@@ -137,6 +137,19 @@
       "works": "an edit with created > 0 and deleted = 0 (the person's delete undone), and after Ctrl+S / Cmd+S the saved .kicad_pcb holds the agent's track: both \"(start 120 100)\" and \"(end 140 100)\"",
       "wrong": "the agent's track deleted (an edit with deleted > 0, or the saved file without it)",
       "gating": true
+    },
+    {
+      "id": "undo_markers",
+      "keys": {
+        "linux": "Ctrl+A, Delete, Ctrl+Z, Ctrl+Y, Ctrl+Z",
+        "windows": "Ctrl+A, Delete, Ctrl+Z, Ctrl+Y, Ctrl+Z",
+        "macos": "Cmd+A, fn+Delete, Cmd+Z, Cmd+Y (or Cmd+Shift+Z), Cmd+Z"
+      },
+      "after": "a check run (DRC / ERC) so its markers are on the canvas and in select all",
+      "works": "with a check run and an agent's read through the hub (kicad_ipc GetItems) between each step: every real item back at each undo (GetItems counts per kind, markers aside, equal to the start), all deleted at the delete and the redo, every agent read answered, and no new KiCad window (dialog) at any point",
+      "wrong": "a real item missing after an undo, a dialog, or an agent read refused",
+      "gating": true,
+      "since": "fork d2ce4ba5c6 (the undo-markers fix)"
     }
   ],
   "extra_rows": {
