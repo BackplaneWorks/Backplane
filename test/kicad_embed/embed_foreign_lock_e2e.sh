@@ -109,4 +109,16 @@ T5=$(date +%s%3N); R5=-1
 for _ in $(seq 120); do [ "$(grep -c 'kicad embed: start +[0-9]*ms ready' "$OUT/hub.log" || true)" -gt "$READY0" ] && { R5=$(( $(date +%s%3N) - T5 )); break; }; sleep 0.25; done
 check "L5 the other KiCad closes while the pane asks: the question ends by itself and the editor comes" "$([ $ASK5 = 1 ] && [ "$R5" -ge 0 ] && grep -q 'let go of .*the question ends by itself' "$OUT/hub.log" && echo 1 || echo 0)" "asked $ASK5, editor ready $R5 ms after the other closed"
 kill "$CP" 2>/dev/null || true
+# L6: a lock another computer wrote (a shared or synced folder), held by nobody here (no flock across machines): never removed, the person asked
+for p in $(holders); do kill -9 "$p" 2>/dev/null || true; done
+for _ in $(seq 40); do [ -z "$(holders | tr -d ' ')" ] && break; sleep 0.25; done; sleep 2
+python3 -c 'import json,sys; json.dump({"hostname": "another-computer", "username": "colleague", "token": "far"}, open(sys.argv[1], "w"))' "$LCK"
+ASK0=$(grep -c 'the person is asked' "$OUT/hub.log" || true); RM0=$(grep -c "kicad locks: removed the stale lock .*$(basename "$LCK")" "$OUT/hub.log" || true)
+echo '[{"select":0},{"wait":2200},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},{"wait":30000}]' >"$OUT/script6.json"
+HOME="$OUT/fh" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script6.json" --exit-after 60 >"$OUT/client6.log" 2>&1 &
+CP=$!; track_pid "$CP"
+ASK6=0; for _ in $(seq 240); do [ "$(grep -c 'the person is asked' "$OUT/hub.log" || true)" -gt "$ASK0" ] && { ASK6=1; break; }; sleep 0.25; done; sleep 2
+RM6=$(( $(grep -c "kicad locks: removed the stale lock .*$(basename "$LCK")" "$OUT/hub.log" || true) - RM0 ))
+check "L6 another computer's lock nobody holds here is never removed: the person is asked who has it" "$([ $ASK6 = 1 ] && [ -e "$LCK" ] && [ "$RM6" = 0 ] && grep -q 'colleague at another-computer' "$OUT/hub.log" && echo 1 || echo 0)" "asked $ASK6, lock file still there $([ -e "$LCK" ] && echo yes || echo no), removed $RM6; hub: $(grep -o 'the person is asked.*' "$OUT/hub.log" | tail -1 | cut -c1-200)"
+kill "$CP" 2>/dev/null || true
 finish_suite "embed_foreign_lock_e2e ($EMBED_MODE)"

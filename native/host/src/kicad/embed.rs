@@ -2699,9 +2699,13 @@ fn sweep_crashed_locks(root: &str, pro: &str) {
         for ent in rd.flatten() {
             let name = ent.file_name();
             let s = name.to_string_lossy();
-            // only a lock nobody holds (a live KiCad's, the person's own, is never swept: locks.rs)
+            // only a stale lock, by the same verdict as before an editor opens: written on this computer and held by nobody (a live KiCad's,
+            // the person's own, or one another computer wrote on a shared folder is never swept: locks.rs)
             if s.starts_with('~') && s.ends_with(".lck") {
-                super::locks::clear_stale_file(&ent.path(), "a restart's sweep");
+                let (user, host) = super::locks::me();
+                if super::locks::classify(super::locks::inspect_file(&ent.path()).as_ref(), std::process::id(), &user, &host) == super::locks::Verdict::Stale {
+                    super::locks::clear_stale_file(&ent.path(), "a restart's sweep");
+                }
             }
         }
     }
@@ -3441,6 +3445,38 @@ pub fn stand_in_route(pro: &str) -> (GuiRoute, mpsc::UnboundedReceiver<(String, 
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test] fn a_restart_sweep_removes_only_this_hosts_unheld_locks() {
+        use std::os::unix::io::AsRawFd;
+        let root = crate::plat::tmp::dir("lock-sweep-host");
+        let docs = root.path().join("boards"); std::fs::create_dir(&docs).unwrap();
+        let host = super::super::locks::me().1;
+        let mut kept = vec![];
+        let mut removed = vec![];
+        let mut holds = vec![];
+        for dir in [root.path(), docs.as_path()] {
+            for (name, owner, survives) in [("far", "some-other-computer", true), ("unknown", "", true), ("stale", host.as_str(), false), ("held", host.as_str(), true)] {
+                let path = dir.join(format!("~{name}.kicad_pro.lck"));
+                std::fs::write(&path, serde_json::json!({"hostname": owner, "username": "h", "token": "test"}).to_string()).unwrap();
+                if name == "held" {
+                    let f = std::fs::File::open(&path).unwrap();
+                    assert_eq!(unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }, 0);
+                    holds.push(f);
+                }
+                if survives { kept.push(path); } else { removed.push(path); }
+            }
+            let malformed = dir.join("~malformed.kicad_pro.lck"); std::fs::write(&malformed, "not json").unwrap(); kept.push(malformed);
+            // read_to_string fails for a directory even when this test runs as root: exercise the unreadable-lock path.
+            let unreadable = dir.join("~unreadable.kicad_pro.lck"); std::fs::create_dir(&unreadable).unwrap();
+            let seen = super::super::locks::inspect_file(&unreadable).expect("unreadable is not absent");
+            assert!(matches!(super::super::locks::classify(Some(&seen), std::process::id(), "h", &host), super::super::locks::Verdict::Foreign { .. }));
+            kept.push(unreadable);
+        }
+        super::sweep_crashed_locks(&root.path().to_string_lossy(), &docs.join("board.kicad_pro").to_string_lossy());
+        for path in kept { assert!(path.exists(), "{} must survive the sweep", path.display()); }
+        for path in removed { assert!(!path.exists(), "{} is this host's stale lock", path.display()); }
+    }
+
     #[test] fn the_macos_refusal_names_the_update_when_the_pin_cures_it() {
         let why = mac_refusal(true, "fork", "").unwrap();
         assert!(why.contains("Settings"), "no cure: as before");
