@@ -159,8 +159,13 @@ internal fun PlainRow(r: JSONObject, tag: String, shown: (String, String) -> Str
     val label = r.optString("label"); val tone = r.optString("tone")
     Column(Modifier.fillMaxWidth().testTag("$tag.row.$label"), verticalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp)) {
         if (label.isNotEmpty() || !compact) Text(Tr.t(label), color = dcs.onSurface, fontFamily = BpMono, fontSize = if (compact) 12.5.sp else 13.sp)
-        if (r.optString("note").isNotEmpty()) Text(Tr.t(r.optString("note")), color = when (tone) { "bad" -> dcs.error; "warn" -> dwarn; else -> dcs.onSurfaceVariant }, fontFamily = BpMono, fontSize = 11.sp,
-            lineHeight = 15.sp, modifier = Modifier.testTag("$tag.note.$label"))
+        // a note that is a value (a path, an id, a link: the row's `copy`) has its copy button beside it
+        val noteCopy = r.optString("copy")
+        if (r.optString("note").isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(Tr.t(r.optString("note")), color = when (tone) { "bad" -> dcs.error; "warn" -> dwarn; else -> dcs.onSurfaceVariant }, fontFamily = BpMono, fontSize = 11.sp,
+                lineHeight = 15.sp, modifier = Modifier.weight(1f, fill = false).testTag("$tag.note.$label"))
+            if (noteCopy.isNotEmpty()) { Spacer(Modifier.width(4.dp)); CopyButton(noteCopy, tag = "$tag.copy.$label", size = 14) }
+        }
         // a code to scan (a pairing link's), as the hub drew it, and its line (the code, the address, until when)
         val qr = PageRow.qr(r)
         if (qr.isNotEmpty()) QrCode(qr, Modifier.fillMaxWidth().testTag("$tag.qr.$label"))
@@ -178,7 +183,9 @@ internal fun PlainRow(r: JSONObject, tag: String, shown: (String, String) -> Str
         val bs = r.optJSONArray("buttons").objs()
         if (bs.isNotEmpty()) FlowRow(Modifier.padding(top = if (compact) 4.dp else 0.dp), horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp), verticalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp)) {
             bs.forEachIndexed { i, b ->
-                if (compact) McpChip(Tr.t(b.optString("label")), b.optBoolean("on"), Modifier.testTag("$tag.btn.$label.$i")) { press(b) }
+                // a Copy press (Copy link, Copy code): the copy primitive, its check in place
+                if (b.optString("action") == "copy" || b.optString("action") == "copy-text") CopyChip(Tr.t(b.optString("label")), b.optString("value"), Modifier.testTag("$tag.btn.$label.$i"), compact)
+                else if (compact) McpChip(Tr.t(b.optString("label")), b.optBoolean("on"), Modifier.testTag("$tag.btn.$label.$i")) { press(b) }
                 else DBtn(Tr.t(b.optString("label")), b.optBoolean("on"), modifier = Modifier.testTag("$tag.btn.$label.$i")) { press(b) }
             }
         }

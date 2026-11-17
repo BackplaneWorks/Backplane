@@ -862,8 +862,8 @@ object DataClient {
         rooms = r.optJSONArray("rooms")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Room(it.optString("id"), it.optString("name"), it.optJSONObject("mark")?.optString("short") ?: "", it.optBoolean("delete")) } } ?: emptyList()
         if (uberAfterPair) bots.firstOrNull { it.uber && it.thread.isNotEmpty() }?.let { uberAfterPair = false; linkTarget = LinkTarget(LinkTarget.Kind.THREAD, it.thread) }
     }
-    data class Post(val from: String, val text: String, val at: Long)
-    suspend fun roomPosts(room: String): List<Post> = call("room.posts", JSONObject().put("room", room).put("limit", 60)).optJSONArray("posts")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Post(it.optString("from"), it.optString("text"), it.optLong("at")) } } ?: emptyList()
+    data class Post(val from: String, val text: String, val at: Long, val copy: List<CopyPiece>? = null)
+    suspend fun roomPosts(room: String): List<Post> = call("room.posts", JSONObject().put("room", room).put("limit", 60)).optJSONArray("posts")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Post(it.optString("from"), it.optString("text"), it.optLong("at"), parseCopy(it.optJSONArray("copy"))) } } ?: emptyList()
     suspend fun roomPost(room: String, text: String) { call("room.post", JSONObject().put("room", room).put("text", text).put("clientId", UUID.randomUUID().toString())) }
     /** Delete bot (`bot.delete`; the row asked first): the hub stops its chat, and the list is read again. */
     suspend fun botDelete(bot: String) { call("bot.delete", JSONObject().put("bot", bot)); loadBots() }
@@ -1052,6 +1052,7 @@ object DataClient {
     private fun cacheFile() = java.io.File(app.filesDir, "data-cache-v1.json")
     private fun J(o: DEntry) = JSONObject().put("id", o.id).put("kind", o.kind).put("text", o.text).put("at", o.at).apply {
         if (o.agentOnly) put("agentOnly", true)
+        o.copy?.let { put("copy", copyJson(it)) }
         o.handoff?.let { put("handoff", handoffJson(it)) }
         o.term?.let { t -> put("term", JSONObject().put("key", t.key).put("id", t.id).put("title", t.title).put("cols", t.cols).put("rows", t.rows).put("cmd", t.cmd)) }
         o.tool?.let { put("tool", JSONObject().put("name", it.name).put("summary", it.summary).put("state", it.state)) }

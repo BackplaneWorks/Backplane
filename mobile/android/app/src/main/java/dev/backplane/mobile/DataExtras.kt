@@ -299,15 +299,22 @@ fun SidebarRow(sigil: String, name: String, detail: String, onLong: (() -> Unit)
 
 @Composable
 fun RoomScreen(room: DataClient.Room, back: () -> Unit) {
+    // a room has a terminal of its own (`room:<id>`, in the home folder), for its Run in terminal too
+    val ct = rememberChatTerm(RunInTerminal.roomKey(room.id))
+    CompositionLocalProvider(LocalChatTerm provides ct) { RoomBody(room, back, ct) }
+}
+
+@Composable
+private fun RoomBody(room: DataClient.Room, back: () -> Unit, chatTerm: ChatTerm?) {
     val scope = rememberCoroutineScope()
     var posts by remember { mutableStateOf<List<DataClient.Post>>(emptyList()) }
     var draft by remember { mutableStateOf("") }
     suspend fun load() { posts = runCatching { DataClient.roomPosts(room.id) }.getOrDefault(posts) }
     LaunchedEffect(room.id) { while (true) { load(); kotlinx.coroutines.delay(2500) } }
     Column(Modifier.fillMaxSize()) {
-        DBar("#${room.name}", back)
+        DBar("#${room.name}", back) { ChatTermButton(chatTerm) }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("room.list"), contentPadding = PaddingValues(vertical = 8.dp)) {
-            items(posts.size) { i -> val p = posts[i]; Column(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) { DMono(p.from.ifEmpty { Msg.android_you }, dcs.primary, 11, bold = true); LinkText(p.text, "", color = dcs.onSurface, size = 13) } }
+            items(posts.size) { i -> val p = posts[i]; Column(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) { DMono(p.from.ifEmpty { Msg.android_you }, dcs.primary, 11, bold = true); LinkText(p.text, "", color = dcs.onSurface, size = 13); CopyPieces(CopyLookup.of(p.copy, DataClient.has("copy")).pieces(p.text), "room.copy.$i") } }
         }
         DLine()
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.Bottom) {

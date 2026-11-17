@@ -567,6 +567,13 @@ private fun StateStrip(t: DThread) {
 
 @Composable
 private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (String) -> Unit, settings: () -> Unit, back: () -> Unit) {
+    // the chat's own terminal (feature termChat): a project thread's in its folder, a bot's chat (the uberbot's too) in the home folder
+    val ct = rememberChatTerm(RunInTerminal.threadKey(id))
+    CompositionLocalProvider(LocalChatTerm provides ct) { ThreadBody(id, viewer, hub, go, settings, back, ct) }
+}
+
+@Composable
+private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (String) -> Unit, settings: () -> Unit, back: () -> Unit, chatTerm: ChatTerm?) {
     val scope = rememberCoroutineScope()
     DisposableEffect(id) { DataClient.openThread(id); onDispose { DataClient.closeThread(id) } }
     val thread = DataClient.threads.firstOrNull { it.id == id }
@@ -651,6 +658,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (S
     Column(Modifier.fillMaxSize()) {
         DBar(thread?.title ?: "", back) {
             // Buy it when there is something to buy; the thread's menu; the viewers in the corner (the person's order, 11-04)
+            ChatTermButton(chatTerm)
             buy?.let { b -> IconButton(onClick = startBuy, enabled = !buying, modifier = Modifier.testTag("thread.buy")) { Icon(Icons.Default.ShoppingCart, Tr.t(b.label), tint = dcs.primary) } }
             if (thread != null && DataClient.has("actions")) IconButton(onClick = { menu = true }, modifier = Modifier.testTag("thread.more")) { Icon(Icons.Default.MoreVert, Msg.native_thread_menu, tint = dcs.onSurfaceVariant) }
             if (thread != null && DataClient.has("viewers")) IconButton(onClick = viewer, modifier = Modifier.testTag("thread.viewer")) { Icon(Icons.Default.Dashboard, Msg.thread_viewer, tint = dcs.onSurfaceVariant) }
@@ -825,7 +833,7 @@ private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}) {
             }
         }
         "assistant" -> Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp)) {
-            MdText(e.text, thread = tid)
+            MdText(e.text, thread = tid, copy = CopyLookup.of(e.copy, DataClient.has("copy"), e.live))
             // the pictures the reply names (the hub lists them as attachments), tap for the full size
             e.attachments.forEach { Spacer(Modifier.height(6.dp)); PicById(it.id, 240, zoom = true) }
             if (!e.live) DMono(dStamp(e.at), dfaint, modifier = Modifier.padding(top = 4.dp))
@@ -837,7 +845,11 @@ private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}) {
         else -> Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp)) {
             val c = if (e.tone == "error") dcs.error else dcs.onSurfaceVariant
             if (e.label.isNotEmpty()) { Text(Tr.t(e.label), color = c, fontFamily = BpMono, fontSize = 12.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.width(8.dp)) }
-            LinkText(e.text, tid, color = c, size = 12)
+            Column(Modifier.weight(1f)) {
+                LinkText(e.text, tid, color = c, size = 12)
+                // a notice's code (an error naming a command to run, a path): its copy buttons
+                CopyPieces(CopyLookup.of(e.copy, DataClient.has("copy")).pieces(e.text), "note.copy.${e.id}")
+            }
         }
     }
 }
