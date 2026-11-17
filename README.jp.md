@@ -1,5 +1,6 @@
 <p align="right">
   <a href="README.md"><img src="docs/media/readme/language-en.svg" alt="English" width="92" height="28"></a>
+  <a href="README.es.md"><img src="docs/media/readme/language-es.svg" alt="Español" width="92" height="28"></a>
 </p>
 
 Backplaneは、エージェントによるハードウェア開発のためのオープンソースのワークスペースです。エージェントがKiCadとFreeCADのファイルを編集し、あなたは基板・回路図・3D・機械設計のビューアで作業を確認し、部品をクリックして話しかけられます。

@@ -186,7 +186,7 @@ struct DataSettingsPageView: View {
     }
     @ViewBuilder private var appearance: some View {
         DHeading(text: Tr.k("settings.lang"))
-        DChoices(options: [(label: Tr.k("settings.lang.auto"), value: "auto"), (label: Tr.k("settings.lang.en"), value: "en"), (label: Tr.k("settings.lang.ja"), value: "ja")], value: $settings.lang).accessibilityIdentifier("settings.lang")
+        DChoices(options: [(label: Tr.k("settings.lang.auto"), value: "auto"), (label: Tr.k("settings.lang.en"), value: "en"), (label: Tr.k("settings.lang.ja"), value: "ja"), (label: Tr.k("settings.lang.es"), value: "es")], value: $settings.lang).accessibilityIdentifier("settings.lang")
         Text(Tr.k("settings.lang.note")).dmono(11).foregroundStyle(BackplaneDesign.dim)
         DHeading(text: Tr.t("Appearance"))
         DChoices(options: [(label: Tr.t("system"), value: "system"), (label: Tr.t("light"), value: "light"), (label: Tr.t("dark"), value: "dark")], value: $settings.appearance)

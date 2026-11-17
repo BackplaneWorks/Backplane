@@ -21,7 +21,7 @@ pub const KEYS: [&str; 8] = ["enter", "ctrl-enter", "escape", "ctrl-b", "ctrl-k"
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Local {
-    /// The interface language: "auto" (the system's), "en" or "ja" (`i18n::CHOICES`).
+    /// The interface language: "auto" (the system's), "en", "ja" or "es" (`i18n::CHOICES`).
     pub lang: String,
     pub theme: String, pub viewer_bg: String, pub viewer_bg_rgb: u32, pub text_pct: u32, pub font: String, pub sidebar_px: u32, pub viewer_px: u32, pub sidebar_open: bool,
     pub notifications: bool, pub default_view: String, pub shortcuts: BTreeMap<String, String>,
@@ -133,7 +133,7 @@ mod tests {
     }
     #[test] fn the_language_is_a_choice_of_the_three_and_anything_else_is_automatic() {
         let mut l = Local::default(); assert_eq!(l.lang, "auto");
-        assert!(l.set("lang", "ja") && l.lang == "ja"); assert!(l.set("lang", "en") && l.lang == "en"); assert!(!l.set("lang", "fr") && l.lang == "en", "a language the client has not is refused");
+        assert!(l.set("lang", "ja") && l.lang == "ja"); assert!(l.set("lang", "es") && l.lang == "es"); assert!(l.set("lang", "en") && l.lang == "en"); assert!(!l.set("lang", "fr") && l.lang == "en", "a language the client has not is refused");
         let p = tmp("lang"); std::fs::write(&p, br#"{"lang":"klingon"}"#).unwrap(); assert_eq!(Local::read(&p).lang, "auto");
         std::fs::write(&p, br#"{"lang":"ja"}"#).unwrap(); assert_eq!(Local::read(&p).lang, "ja");
     }

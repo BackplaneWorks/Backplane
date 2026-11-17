@@ -82,10 +82,11 @@ internal fun dStatusWord(t: DThread) = when (t.status) { "" -> dStateWord(t.stat
 private val dClock = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
 private val dDay = java.text.SimpleDateFormat("EEE d MMM HH:mm", java.util.Locale.ENGLISH)
 private val dDayJa = java.text.SimpleDateFormat("M月d日(E) HH:mm", java.util.Locale.JAPANESE)
+private val dDayEs = java.text.SimpleDateFormat("EEE d MMM HH:mm", java.util.Locale("es", "ES"))
 /** A message's time: the clock today, the day too on another. */
 internal fun dStamp(ms: Long): String {
     if (ms <= 0) return ""
-    val d = java.util.Date(ms); return (if (android.text.format.DateUtils.isToday(ms)) dClock else if (Tr.lang == "ja") dDayJa else dDay).format(d)
+    val d = java.util.Date(ms); return (if (android.text.format.DateUtils.isToday(ms)) dClock else if (Tr.lang == "ja") dDayJa else if (Tr.lang == "es") dDayEs else dDay).format(d)
 }
 internal fun dAgo(ms: Long): String {
     val s = (System.currentTimeMillis() - ms) / 1000
@@ -956,7 +957,7 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
             DLine()
             DMono(Msg.settings_lang.uppercase(), dfaint)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("auto" to Msg.settings_lang_auto, "en" to Msg.settings_lang_en, "ja" to Msg.settings_lang_ja).forEach { (v, l) ->
+                listOf("auto" to Msg.settings_lang_auto, "en" to Msg.settings_lang_en, "ja" to Msg.settings_lang_ja, "es" to Msg.settings_lang_es).forEach { (v, l) ->
                     DBtn(l, AppSettings.lang == v, modifier = Modifier.testTag("settings.lang.$v")) { AppSettings.putLang(v); DataClient.channels() }
                 }
             }

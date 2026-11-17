@@ -7,26 +7,31 @@ import Observation
 //   Tr.t("Cancel")               English text to the language on show: an exact catalog message, or one that fits a templated message
 //                                ("3 files changed" fits `{n, plural, one {# file changed} other {# files changed}}`) rendered with what it captured.
 //                                Anything else (agent text, file names, what people wrote) comes back unchanged.
-// The language is Tr.lang ("en" or "ja"), set at the root from the app's setting. Reading it in a view's body (every Tr call does) is
+// The language is Tr.lang ("en", "ja" or "es"), set at the root from the app's setting. Reading it in a view's body (every Tr call does) is
 // what re-renders the view when it changes.
 enum Tr {
-    /// "en" or "ja": the language the app shows.
+    /// "en", "ja" or "es": the language the app shows.
     static var lang: String {
         get { TrLang.shared.tag }
         set { if newValue != TrLang.shared.tag { cache.clear(); TrLang.shared.tag = newValue } }
     }
 
-    /// The app's language from the setting: "auto" follows the system (its first preferred language starting with ja is Japanese).
+    /// The app's language from the setting: "auto" follows the system.
     static func resolve(_ setting: String, preferred: [String] = Locale.preferredLanguages) -> String {
-        switch setting {
-        case "en", "ja": setting
-        default: (preferred.first ?? "en").lowercased().hasPrefix("ja") ? "ja" : "en"
-        }
+        if ["en", "ja", "es"].contains(setting) { return setting }
+        let p = (preferred.first ?? "en").lowercased()
+        return p.hasPrefix("ja") ? "ja" : p.hasPrefix("es") ? "es" : "en"
     }
 
-    /// The locale for dates and numbers the app formats itself: Japanese, or the system's own when it is not Japanese.
+    /// The locale for dates and numbers the app formats itself.
     static var locale: Locale {
-        lang == "ja" ? Locale(identifier: "ja_JP") : Locale.current.language.languageCode?.identifier == "ja" ? Locale(identifier: "en_US") : Locale.current
+        switch lang {
+        case "ja": return Locale(identifier: "ja_JP")
+        case "es": return Locale(identifier: "es_ES")
+        default:
+            let code = Locale.current.language.languageCode?.identifier
+            return (code == "ja" || code == "es") ? Locale(identifier: "en_US") : Locale.current
+        }
     }
 
     /// "one" or "other", for the catalog's `{plural, select, one {…} other {…}}` beside a count.
@@ -35,13 +40,13 @@ enum Tr {
     /// A message without arguments; the key itself when the catalog has no such key.
     static func k(_ key: String) -> String {
         guard let e = table.byKey[key] else { return key }
-        return render(lang == "ja" ? e.ja : e.en, [:], lang)
+        return render(e.nodes(for: lang), [:], lang)
     }
 
     /// A message with arguments (numbers as their decimal text).
     static func f(_ key: String, _ args: [String: String]) -> String {
         guard let e = table.byKey[key] else { return key }
-        return render(lang == "ja" ? e.ja : e.en, args, lang)
+        return render(e.nodes(for: lang), args, lang)
     }
 
     /// English text in the language on show (see the top of this file).
@@ -82,8 +87,8 @@ enum Tr {
         if let (key, args, holes) = fitting(text), let e = table.byKey[key] {
             // a hole that is itself one of the catalog's plain messages (a state word, a reason) is put in the language too
             var a = args
-            for h in holes { if let v = a[h], let k = table.exact[v], let m = table.byKey[k] { a[h] = render(tag == "ja" ? m.ja : m.en, [:], tag) } }
-            return render(tag == "ja" ? e.ja : e.en, a, tag)
+            for h in holes { if let v = a[h], let k = table.exact[v], let m = table.byKey[k] { a[h] = render(m.nodes(for: tag), [:], tag) } }
+            return render(e.nodes(for: tag), a, tag)
         }
         guard text.contains(" · ") else { return nil }
         let pieces = text.components(separatedBy: " · ")
@@ -94,7 +99,10 @@ enum Tr {
 
     // MARK: the catalog
 
-    struct Entry { let en: [TrNode]; let ja: [TrNode] }
+    struct Entry {
+        let en: [TrNode]; let ja: [TrNode]; let es: [TrNode]
+        func nodes(for tag: String) -> [TrNode] { tag == "ja" ? ja : tag == "es" ? es : en }
+    }
     struct Template { let key: String; let parts: [TrPart]; let fixed: [String: String]; let anchor: String; let weight: Int }
     struct Table {
         var byKey: [String: Entry] = [:]
@@ -106,9 +114,9 @@ enum Tr {
         var t = Table()
         for line in catalog.split(separator: "\n", omittingEmptySubsequences: true) {
             let f = line.split(separator: "\t", omittingEmptySubsequences: false)
-            guard f.count == 3 else { continue }
-            let key = String(f[0]), en = TrParse.message(String(f[1])), ja = TrParse.message(String(f[2]))
-            t.byKey[key] = Entry(en: en, ja: ja)
+            guard f.count == 4 else { continue }
+            let key = String(f[0]), en = TrParse.message(String(f[1])), ja = TrParse.message(String(f[2])), es = TrParse.message(String(f[3]))
+            t.byKey[key] = Entry(en: en, ja: ja, es: es)
             if en.allSatisfy({ if case .lit = $0 { true } else { false } }) {
                 let s = en.map { if case .lit(let s) = $0 { s } else { "" } }.joined()
                 if t.exact[s] == nil { t.exact[s] = key }
@@ -162,7 +170,7 @@ enum Tr {
     }
 
     /// The plural category: English has one and other, Japanese only other.
-    static func category(_ n: Int, _ tag: String) -> String { tag == "en" && n == 1 ? "one" : "other" }
+    static func category(_ n: Int, _ tag: String) -> String { (tag == "en" || tag == "es") && n == 1 ? "one" : "other" }
 
     /// Grouped digits ("12,345") for a whole number; any other text as it is.
     static func number(_ v: String) -> String {

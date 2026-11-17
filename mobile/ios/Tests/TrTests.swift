@@ -30,13 +30,14 @@ check(Tr.resolve("auto", preferred: ["ja-JP", "en-US"]) == "ja", "auto, Japanese
 check(Tr.resolve("auto", preferred: ["en-US", "ja-JP"]) == "en", "auto, English first", "")
 check(Tr.resolve("auto", preferred: []) == "en", "auto, nothing", "")
 check(Tr.resolve("ja", preferred: ["en"]) == "ja" && Tr.resolve("en", preferred: ["ja"]) == "en", "chosen", "")
+check(Tr.resolve("auto", preferred: ["es-MX", "en-US"]) == "es" && Tr.resolve("es", preferred: ["ja"]) == "es" && Tr.resolve("en", preferred: ["es"]) == "en", "Spanish", "")
 
 // the real catalogs: every message renders whole in both languages
 var bad: [String] = []
 for (key, e) in Tr.table.byKey {
     var args: [String: String] = [:]
     for n in TrParse.variants(e.en, fixed: [:], hashArg: nil).flatMap(\.parts) { if case .cap(let a, _) = n { args[a] = "2" } }
-    for (tag, m) in [("en", e.en), ("ja", e.ja)] {
+    for (tag, m) in [("en", e.en), ("ja", e.ja), ("es", e.es)] {
         let out = Tr.render(m, args.merging(["plural": "other"]) { a, _ in a }, tag)
         if out.contains("{") && !out.contains("{}") && !key.hasPrefix("i18n.") { bad.append("\(tag) \(key): \(out)") }
     }

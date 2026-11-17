@@ -13,7 +13,7 @@ final class AppSettings {
 
     // "system", "light" or "dark"
     var appearance: String { didSet { d.set(appearance, forKey: "app.appearance") } }
-    // "auto" (the system's language), "en" or "ja": what the app shows (Tr.lang), changed at once
+    // "auto" (the system's language), "en", "ja" or "es": what the app shows (Tr.lang), changed at once
     var lang: String { didSet { d.set(lang, forKey: "app.lang"); Tr.lang = Tr.resolve(lang) } }
     // the 3D viewers' background, Mech and 3D board alike (docs/VIEWER-BACKGROUND.md): auto, light, dark or custom,
     // and the custom colour "#rrggbb"; this device only
@@ -40,7 +40,7 @@ final class AppSettings {
 
     private init() {
         let forced = d.string(forKey: "BackplaneLang")
-        langPreview = forced == "ja" || forced == "en"
+        langPreview = forced == "ja" || forced == "en" || forced == "es"
         lang = langPreview ? forced! : (d.string(forKey: "app.lang") ?? "auto")
         appearance = d.string(forKey: "app.appearance") ?? "system"
         let vb = d.string(forKey: "app.viewer_bg") ?? "auto"

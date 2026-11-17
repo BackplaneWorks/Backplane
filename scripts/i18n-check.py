@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Catalog gate: i18n/en.msg owns the keys; ja.msg must have every one, with the same argument names. Run from anywhere."""
+"""Catalog gate: i18n/en.msg owns the keys; ja.msg and es.msg must have every one, with the same argument names. Run from anywhere."""
 import re, sys, pathlib
 root = pathlib.Path(__file__).resolve().parent.parent / "i18n"
 def load(p):
@@ -35,8 +35,12 @@ def args(v):
             i = j
         i += 1
     return out
-en, ja = load(root / "en.msg"), load(root / "ja.msg")
-bad = [f"missing ja: {k}" for k in en if k not in ja] + [f"extra ja (no en): {k}" for k in ja if k not in en]
-bad += [f"args differ: {k}: {sorted(args(en[k]))} vs {sorted(args(ja[k]))}" for k in en if k in ja and args(en[k]) != args(ja[k])]
+en = load(root / "en.msg")
+bad = []
+for lang in ("ja", "es"):
+    cat = load(root / f"{lang}.msg")
+    bad += [f"missing {lang}: {k}" for k in en if k not in cat]
+    bad += [f"extra {lang} (no en): {k}" for k in cat if k not in en]
+    bad += [f"args differ ({lang}): {k}: {sorted(args(en[k]))} vs {sorted(args(cat[k]))}" for k in en if k in cat and args(en[k]) != args(cat[k])]
 if bad: print("\n".join(bad)); sys.exit(1)
-print(f"ok: {len(en)} keys, every one in ja")
+print(f"ok: {len(en)} keys, every one in ja and es")
