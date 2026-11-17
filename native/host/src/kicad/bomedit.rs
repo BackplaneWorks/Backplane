@@ -306,7 +306,18 @@ where F: Fn(&'static str, Value) -> Fut, Fut: std::future::Future<Output = Value
 pub async fn edit(hub: &Arc<Hub>, pro: &str, sch: &str, p: &Value) -> Result<Value, String> {
     if crate::copy::on() { return Err("a hub on a copied log (BACKPLANE_COPY=1) writes no design".into()) }
     let (field, refs, value) = check(p)?;
-    if let Some((gui, doc)) = gui_doc(pro).await? {
+    // the editor's KiCad has the project but not the schematic: it opens it out of sight, and the edit is made there (never a headless
+    // KiCad beside it: it would hold the schematic's lock, and the editor's KiCad would then open over it or ask outside the pane)
+    let mut found = gui_doc(pro).await?;
+    if found.is_none() {
+        if let Some(gui) = embed::gui_route(pro) {
+            embed::open_hidden(&gui, "SCH", sch).await?;
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            while found.is_none() && std::time::Instant::now() < until { tokio::time::sleep(std::time::Duration::from_millis(500)).await; found = gui_doc(pro).await?; }
+            if found.is_none() { return Err("the editor's KiCad did not open the schematic within 60 s: not changed".into()) }
+        }
+    }
+    if let Some((gui, doc)) = found {
         // as the person, never an agent's name (an actor of its own before bp.13, their own Ctrl+Z from it);
         // BACKPLANE_BOM_CLIENT=hub: the tests' run as the hub's own actor, to compare what KiCad's undo does with each
         let as_person = AS_PERSON && std::env::var("BACKPLANE_BOM_CLIENT").map_or(true, |v| v != "hub");

@@ -527,6 +527,11 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
         while super::embed::gui_starting(&pro) && super::embed::gui_route(&pro).is_none() && std::time::Instant::now() < until { tokio::time::sleep(Duration::from_millis(250)).await; }
         if super::embed::gui_route(&pro).is_none() && super::embed::gui_starting(&pro) { return Err(STARTING_IN_EDITOR.into()) }
     }
+    // a headless KiCad is never started beside the editor's KiCad for the same project (it would hold the project's and the document's locks:
+    // bp.13 opens over them, bp.12.4 asks outside the pane): the hub's own edits go through the editor's KiCad (embed::open_hidden)
+    if !gui_first && !pro.is_empty() && super::embed::gui_route(&pro).is_some() && !headless_active(&pro).await {
+        return Err(HEADLESS_BESIDE_EDITOR.into())
+    }
     if let Some(gui) = (gui_first && !pro.is_empty()).then(|| super::embed::gui_route(&pro)).flatten() {
         let plain = check_gui(ty, path, &pro, &msg, &gui.caps);
         if !plain.is_empty() { return Err(plain) }
@@ -626,6 +631,7 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
 
 /// How long a request waits for the editor's KiCad that is starting for its project, and what it is told after.
 const GUI_WAIT: Duration = Duration::from_secs(if cfg!(test) { 1 } else { 90 });
+pub const HEADLESS_BESIDE_EDITOR: &str = "the editor's KiCad has this project open: no second KiCad is started for it (it would hold the project's locks); the change goes through the editor's KiCad";
 pub const STARTING_IN_EDITOR: &str = "KiCad is starting in the editor for this project: retry in a moment (no second KiCad is started meanwhile: it would hold the project's lock)";
 /// Whether the project's headless KiCad is running (starting or ready).
 async fn headless_active(pro: &str) -> bool {
