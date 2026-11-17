@@ -8,7 +8,7 @@ pub const MACHINE: i32 = 75; pub const REFUSED: i32 = 78;
 const BALLAST: usize = 32 << 20;
 
 pub struct Opts { pub home: PathBuf, pub port: u16, pub host: String, pub builds: Option<PathBuf>, pub build: String, pub log: Option<PathBuf>, pub pidfile: Option<PathBuf>, pub mem: String, pub safe: bool, pub default_home: bool, pub hub_args: Vec<String> }
-struct Times { probe: u64, misses: u32, stable: u64, stall: u64, boot: u64, floor: u64 }
+struct Times { probe: u64, misses: u32, stable: u64, stall: u64, boot: u64, floor: u64, warn: u64 }
 fn env(n: &str, d: u64) -> u64 { std::env::var(n).ok().and_then(|v| v.parse().ok()).unwrap_or(d) }
 
 struct Guard { o: Opts, d: Dir, b: Option<Builds>, t: Tuning, tm: Times, build: String, mode: Mode, skip: Vec<String>, hist: Vec<Fail>, remote: Vec<u64>, why: String, hub_pid: u32, state: &'static str, stable: bool, last_req: Value, since: u64, probation: Option<String>, low: Vec<String>, space_at: Option<Instant>, swept: Vec<String>, sweep: Option<(Child, Instant)>, down: Vec<String>, down_before: Vec<String> }
@@ -81,9 +81,12 @@ impl Guard {
         let janitor = self.janitor();
         for (what, p) in [("home", self.o.home.clone()), ("temp", Self::temp_dir())] {
             let Some((free, total)) = sys::space(&p) else { continue };
-            let (title, room, did) = if what == "temp" { ("Temp folder nearly full", "Temp folder has room again", "agents' temporary files will fail to write; the next hub start gets a temp folder on the home's disk. Free it, or `backplane hub restart`") }
+            let (title, room, mut did) = if what == "temp" { ("Temp folder nearly full", "Temp folder has room again", "agents' temporary files will fail to write; the next hub start gets a temp folder on the home's disk. Free it, or `backplane hub restart`") }
                 else { ("Disk nearly full", "Disk has room again", "the hub keeps its log whole and refuses writes it cannot finish; free space on this disk") };
-            let low = plan::low_space(free, total, self.tm.floor);
+            let hard = plan::low_space(free, total, self.tm.floor);
+            // a dev machine (it has the janitor) hears about its home disk under the warning (75 GB), after the janitor has cleaned what it may
+            let low = hard || (what == "home" && janitor.is_some() && plan::warn_space(free, self.tm.warn));
+            if !hard { did = "lanes' build dirs, test runs and scratch are filling it; the janitor removed what it may (its log: ~/.backplane-gpui-dev/janitor.log). Free space before builds and the hub fail" }
             let told = self.low.iter().any(|x| x == what);
             // an alert this guard did not raise (an earlier run's) is looked up once, at its first look
             let open = told || (first && !low && self.d.open_alert(title));
@@ -448,7 +451,7 @@ pub fn run(o: Opts) -> i32 {
     if build.is_empty() { build = b.as_ref().map_or(String::new(), Builds::current); }
     let bad = b.as_ref().map_or(vec![], Builds::bad);
     let t = Tuning { tries: env("BACKPLANE_GUARD_TRIES", 3) as usize, window: env("BACKPLANE_GUARD_WINDOW", 600), pause: env("BACKPLANE_GUARD_PAUSE", 1), machine_pause: env("BACKPLANE_GUARD_MACHINE_PAUSE", 5), rescue_retry: env("BACKPLANE_GUARD_RESCUE_RETRY", 120) };
-    let tm = Times { probe: env("BACKPLANE_GUARD_PROBE", 5), misses: env("BACKPLANE_GUARD_MISSES", 6) as u32, stable: env("BACKPLANE_GUARD_STABLE", 60), stall: env("BACKPLANE_GUARD_STALL", 300), boot: env("BACKPLANE_GUARD_BOOT", 900), floor: env("BACKPLANE_GUARD_MIN_FREE", 1 << 30) };
+    let tm = Times { probe: env("BACKPLANE_GUARD_PROBE", 5), misses: env("BACKPLANE_GUARD_MISSES", 6) as u32, stable: env("BACKPLANE_GUARD_STABLE", 60), stall: env("BACKPLANE_GUARD_STALL", 300), boot: env("BACKPLANE_GUARD_BOOT", 900), floor: env("BACKPLANE_GUARD_MIN_FREE", 1 << 30), warn: env("BACKPLANE_DISK_WARN_GB", 75).saturating_mul(1_000_000_000) };
     let mode = if o.safe { Mode::Safe } else { Mode::Normal };
     let mut g = Guard { d, b, t, tm, build, mode, skip: vec![], hist: vec![], remote: vec![], why: String::new(), hub_pid: 0, state: "starting", stable: false, last_req: Value::Null, since: now(), probation: None, low: vec![], space_at: None, swept: vec![], sweep: None, down: vec![], down_before: vec![], o };
     // a build already marked bad is not started: the newest one that is not

@@ -97,6 +97,9 @@ pub fn identity_mismatch(expect: &serde_json::Value, said: &serde_json::Value) -
 /// A filesystem the hub writes to is nearly full: under `floor` (1 GiB), or under 5 % and under 10 GiB (a big disk with 90 GB left is not full). The temp folder counts as much as the home's disk: on a desktop where /tmp is a RAM
 /// tmpfs shared by every agent, it fills first, and every agent's writes then fail (ENOSPC, EDQUOT) as they would on a full disk.
 pub fn low_space(free: u64, total: u64, floor: u64) -> bool { free < floor || (free.saturating_mul(20) < total && free < 10 << 30) }
+/// A dev machine's home disk (one with the janitor: lanes' builds and test runs fill it by tens of GB an hour) is told about sooner: under `warn` (BACKPLANE_DISK_WARN_GB,
+/// 75 GB; 0: never), once the janitor has done what it may (Nov 17: the disk reached 98% with no alert, the person found it).
+pub fn warn_space(free: u64, warn: u64) -> bool { warn > 0 && free < warn }
 /// What the half-minute look at one filesystem does. Low space first gets the janitor (lanes' worktrees, build dirs, stale temp files; scripts/worktree-gc.sh), and
 /// the person is told only if it is still low once the janitor is done; room again clears what was told, also an alert a guard before this one left open.
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -234,6 +237,11 @@ mod tests {
         assert!(low_space(g / 2, 2000 * g, g), "under 1 GiB, whatever the size");
         assert!(low_space(g * 14 / 10, 30 * g, g), "a 30 GB tmpfs with 1.4 GB left: under 5 %");
         assert!(!low_space(10 * g, 30 * g, g)); assert!(!low_space(90 * g, 1800 * g, g), "90 GB free of 1.8 TB is under 5 % and not low");
+    }
+    #[test] fn a_dev_disk_under_its_warning_is_told() {
+        let g = 1_000_000_000u64;
+        assert!(warn_space(74 * g, 75 * g) && !warn_space(76 * g, 75 * g), "under 75 GB: told");
+        assert!(!warn_space(g, 0), "0: never");
     }
     #[test] fn low_space_gets_the_janitor_first_and_room_again_clears_the_alert() {
         use Space::*;

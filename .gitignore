@@ -8,9 +8,10 @@ node_modules/
 .env
 __pycache__/
 # Rust build output
-native/host/target/
-native/host/target-guard/
-native/gpui/target/
-native/voice/target/
+native/host/target
+native/host/target-guard
+native/gpui/target
+native/voice/target
+native/guard/target
 .lowmem/
 .bp-keep

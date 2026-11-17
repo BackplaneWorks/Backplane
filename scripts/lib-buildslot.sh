@@ -2,7 +2,7 @@
 # Shared by dev-build.sh and cargo-q: how many heavy cargo builds may run at once on this machine, a slot to hold while one runs, and the compiler cache.
 #   . scripts/lib-buildslot.sh; BQ_HELD=1 bq_run [on-wait-callback] COMMAND...   (inside COMMAND: bq_cc; J=$(bq_jobs))
 # Slots are flock files in $BUILD_LOCK_DIR (default ~/.cache/backplane-build.locks): a build holds slot.N while its command runs, the next waits for a free one.
-# Env: BUILD_SLOTS (fixed count), BUILD_LOCK_DIR, SCCACHE_DIR (default ~/.cache/sccache), SCCACHE_CACHE_SIZE (default 20G), NO_SCCACHE=1 (no compiler cache).
+# Env: BUILD_SLOTS (fixed count), BUILD_LOCK_DIR, SCCACHE_DIR (default $BP_DATA/sccache: /data/sccache with a data drive), SCCACHE_CACHE_SIZE (default 80G there, else 20G), NO_SCCACHE=1 (no compiler cache).
 . "$(dirname "${BASH_SOURCE[0]}")/lib-boat.sh"   # builds on a Boat sandbox when every slot is taken (BQ_OFFLOAD=1 asks for it; BP_NO_BOAT=1 never)
 bq_mem_gb() { awk '/^MemAvailable:/ {print int($2 / 1048576)}' /proc/meminfo 2>/dev/null || echo 16; }
 # slots: one per 10 cores and per 6 GB free, between 1 and 4 (this desktop, 32 cores and ~42 GB free: 3). The person's rule (Nov 11): this machine is used fully before a Boat.
@@ -33,7 +33,7 @@ bq_run() { local cb=$1 d=${BUILD_LOCK_DIR:-$HOME/.cache/backplane-build.locks} i
     if [ "$waited" = 0 ]; then waited=1; [ -n "$cb" ] && "$cb" "$n"; fi; tick=$((tick + 1)); sleep 1; done; }
 # sccache shares compiled dependencies between worktrees (a new lane no longer compiles tokio, naga, zbus... from cold); through sccache-tmp, so the shared server never lives in a test run's TMPDIR
 bq_cc() { [ -z "${NO_SCCACHE:-}" ] && [ -z "${RUSTC_WRAPPER:-}" ] && command -v sccache > /dev/null 2>&1 || return 0
-  export RUSTC_WRAPPER=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sccache-tmp SCCACHE_DIR=${SCCACHE_DIR:-$HOME/.cache/sccache} SCCACHE_CACHE_SIZE=${SCCACHE_CACHE_SIZE:-20G}; }
+  export RUSTC_WRAPPER=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sccache-tmp SCCACHE_DIR=${SCCACHE_DIR:-$BP_DATA/sccache} SCCACHE_CACHE_SIZE=${SCCACHE_CACHE_SIZE:-$([ "$BP_DATA" = "$HOME/.cache" ] && echo 20G || echo 80G)}; }
 
 # A private temp dir for a test run. The tests make dirs under std::env::temp_dir() (bp-<area>-<pid>-<name>) and never remove them; temp_dir() honours TMPDIR, so every run gets its own
 # TMPDIR and drops it when it ends. /tmp here is a RAM tmpfs with an inode quota, and leftovers once stopped every agent shell.

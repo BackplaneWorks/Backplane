@@ -101,24 +101,25 @@ fn kills_by_name(line: &str) -> bool {
     let age = |p: &Path, when: &str| { let o = Command::new("find").arg(p).args(["-depth", "-exec", "touch", "-h", "-d", when, "{}", "+"]).output().unwrap(); assert!(o.status.success()); };
     age(&repo, "3 days ago"); age(&bt, "3 days ago"); for i in 0..6 { age(&scc.join(format!("o{i}")), &format!("{} days ago", 10 - i)); }
     age(&wt("recent").join("native/host/target"), "2 hours ago"); age(&bt.join("new"), "1 hour ago");
-    let mut shell = Command::new("sleep").arg("120").current_dir(wt("busy")).spawn().unwrap();
-    let mut open = Command::new("sleep").arg("120").stdin(fs::File::open(bt.join("held/log")).unwrap()).spawn().unwrap();
+    // the holders outlive every run (Nov 17: `sleep 120` ran out while a slow Boat box's runs took longer, and what they held went); killed however the test ends
+    struct Holder(std::process::Child); impl Drop for Holder { fn drop(&mut self) { let _ = self.0.kill(); let _ = self.0.wait(); } }
+    let shell = Holder(Command::new("sleep").arg("3600").current_dir(wt("busy")).spawn().unwrap());
+    let open = Holder(Command::new("sleep").arg("3600").stdin(fs::File::open(bt.join("held/log")).unwrap()).spawn().unwrap());
     let script = root().join("scripts/worktree-gc.sh"); fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).ok();
     let run_with = |apply: bool, extra: &[(&str, String)]| { let mut c = Command::new(&script); if apply { c.arg("--apply"); }
-        for (k, v) in extra { c.env(k, v); }
+        // never the machine's own: its data drive, shared targets, home bp-tmp, or its free space deciding what goes (Nov 17: under 150 GB free the pressure rule fired here)
+        c.env("BP_DATA", d.join("data")).env("BP_TARGET", d.join("bptarget")).env("GC_LEGACY_TMP", "").env("GC_LOW_GB", "0");
         let o = c.args(["--sccache-size", "3M"]).current_dir(&d).env("GC_REPO", &repo).env("GC_UPSTREAM", "origin/main").env("BP_TMP", &bt).env("GC_TMP_BASES", &bt)
-            .env("GC_LOCK", d.join("lock")).env("SCCACHE_DIR", &scc).env("GC_CTIME", "0").env_remove("TMPDIR").env_remove("CLAUDE_CODE_TMPDIR").output().unwrap();
+            .env("GC_LOCK", d.join("lock")).env("SCCACHE_DIR", &scc).env("GC_CTIME", "0").env_remove("TMPDIR").env_remove("CLAUDE_CODE_TMPDIR").envs(extra.iter().map(|(k, v)| (*k, v.as_str()))).output().unwrap();
         assert!(o.status.success(), "{o:?}"); String::from_utf8_lossy(&o.stdout).to_string() };
     let run = |apply: bool| run_with(apply, &[("GC_PAUSE", d.join("no-pause").to_string_lossy().to_string())]);
     let dry = run(false); let dry2 = run(false);
     // the guard runs it through a link ($DEV/janitor -> scripts/worktree-gc.sh): Nov 16 that failed ("lib-bptmp.sh: No such file", "not a git repository") when the disk was nearly full
     let link = d.join("janitor"); std::os::unix::fs::symlink(&script, &link).unwrap();
-    let o = Command::new(&link).current_dir(&d).env_remove("GC_REPO").env("BP_TMP", &bt).env("GC_TMP_BASES", &bt).env("GC_LOCK", d.join("lock")).env("SCCACHE_DIR", &scc).env("GC_PAUSE", d.join("no-pause")).env("GC_CTIME", "0").output().unwrap();
+    // (GC_REPO: the test's repo; a Boat box's copy of the tree has no .git, so the clone beside the script cannot be found there: Nov 17, every Boat gate failed on it)
+    let o = Command::new(&link).current_dir(&d).env("GC_REPO", &repo).env("BP_DATA", d.join("data")).env("BP_TARGET", d.join("bptarget")).env("GC_LEGACY_TMP", "").env("GC_LOW_GB", "0").env("BP_TMP", &bt).env("GC_TMP_BASES", &bt).env("GC_LOCK", d.join("lock")).env("SCCACHE_DIR", &scc).env("GC_PAUSE", d.join("no-pause")).env("GC_CTIME", "0").output().unwrap();
     let (lo, le) = (String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
-    // a checkout git cannot read (the gate's copy of a worktree on a Boat box: its .git names a path only this machine has) has no repository for the link to find: git's own
-    // "not a git repository" there is the copy's, not the link's
-    let has_git = Command::new("git").arg("-C").arg(root()).args(["rev-parse", "--git-dir"]).output().map_or(false, |o| o.status.success());
-    assert!(o.status.success() && lo.contains("would have freed") && !le.contains("No such file") && (!has_git || !le.contains("not a git repository")), "it runs through the guard's link:\n{lo}\n{le}");
+    assert!(o.status.success() && lo.contains("would have freed") && !le.contains("No such file") && !le.contains("lib-bptmp"), "it runs through the guard's link:\n{lo}\n{le}");
     assert!(dry2.contains("worktree") && dry2.contains("/landed"), "a run does not make a worktree look used (git status writes no index):\n{dry2}");
     assert!(dry.contains("would have freed") && wt("landed").exists() && bt.join("aot-build").exists(), "a dry run changes nothing:\n{dry}");
     // paused (a release night): the /tmp and bp-tmp sweeps stop, and say why
@@ -129,7 +130,7 @@ fn kills_by_name(line: &str) -> bool {
     let late = bt.join("bp-kembed.late"); let late_s = late.to_string_lossy().to_string();
     let out = run_with(true, &[("GC_PAUSE", d.join("no-pause").to_string_lossy().to_string()), ("GC_TEST_AFTER_SCAN", format!("mkdir -p '{late_s}' && echo log > '{late_s}/hub.log'"))]);
     assert!(late.join("hub.log").exists(), "a folder made after the scans is not taken as idle:\n{out}");
-    let _ = shell.kill(); let _ = open.kill(); let _ = shell.wait(); let _ = open.wait();
+    drop(shell); drop(open);
     let tg = |n: &str| wt(n).join("native/host/target").exists();
     assert!(!wt("landed").exists(), "a landed, clean, idle worktree is removed:\n{out}");
     assert!(!git(&repo, &["branch", "--list", "landed"]).contains("landed"), "with its branch");
@@ -142,6 +143,13 @@ fn kills_by_name(line: &str) -> bool {
     assert!(bt.join("forkgate/venv").exists(), "a bp-tmp entry with .bp-keep stays, idle or not:\n{out}");
     assert!(!bt.join("aot-build").exists() && !bt.join("old.log").exists(), "idle bp-tmp entries go:\n{out}");
     assert!(bt.join("held/log").exists() && bt.join("new").exists() && bt.join("sccache").exists() && bt.join("claude").exists(), "held, fresh, sccache's and claude's stay:\n{out}");
+    // Nov 17 (bp-tmp at 160 GB, the disk at 98%): over its cap, the oldest unused entries go until it is under; under the free-space floor, every unused one may go, never a fresh one
+    let bt2 = d.join("bptmp2"); for (n, mb, when) in [("old1", 2usize, "5 days ago"), ("old2", 2, "3 days ago"), ("fresh", 1, "")] { fs::create_dir_all(bt2.join(n)).unwrap(); fs::write(bt2.join(n).join("f"), vec![0u8; mb << 20]).unwrap(); if !when.is_empty() { age(&bt2.join(n), when) } }
+    let p2 = |extra: &[(&str, &str)]| { let mut v: Vec<(&str, String)> = vec![("BP_TMP", bt2.to_string_lossy().to_string()), ("GC_TMP_BASES", bt2.to_string_lossy().to_string()), ("GC_PAUSE", d.join("pause").to_string_lossy().to_string()), ("GC_TMP_CAP", "4M".into())]; for (k, x) in extra { v.push((*k, x.to_string())) } run_with(true, &v) };
+    let capped = p2(&[]);
+    assert!(!bt2.join("old1").exists() && bt2.join("old2").exists() && bt2.join("fresh").exists() && capped.contains("over its cap"), "over the cap the oldest unused goes, and only until it is under (even paused):\n{capped}");
+    let low = p2(&[("GC_TMP_CAP", "1T"), ("GC_LOW_GB", "999999")]);
+    assert!(!bt2.join("old2").exists() && bt2.join("fresh").exists() && low.contains("nothing more it may remove"), "under the free-space floor the unused go, a fresh one stays, and it says so:\n{low}");
     let left: Vec<String> = fs::read_dir(&scc).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
     assert!(left.len() <= 3 && left.iter().any(|n| n == "o5") && !left.iter().any(|n| n == "o0"), "sccache trimmed to its cap, oldest first: {left:?}\n{out}");
     assert!(out.contains("janitor: freed") && out.contains("aot-build") && paused.contains("landed"), "it says what it freed (the landed worktree went in the paused run: a pause stops only the tmp sweeps):\n{paused}\n{out}");

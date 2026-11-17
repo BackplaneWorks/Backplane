@@ -6,6 +6,9 @@
 #   - any other worktree's target/ dirs that nothing has written to for --hours (24) are deleted (a rebuild fills them again, mostly from sccache);
 #   - top-level entries of $BP_TMP (~/.cache/bp-tmp: lanes' scratch targets, temp homes, logs) that nothing has written to for --tmp-hours (24) are deleted;
 #   - test leftovers in /tmp and $BP_TMP (bp-<area>-<pid>-*, bpt-XXXXXX) whose owner is dead go after 24 h (--tmp-minutes, 1440);
+#   - under pressure (Nov 17: bp-tmp reached 160 GB, the disk 98%): $BP_TMP is held under --tmp-cap (GC_TMP_CAP, 60G) and the shared cross-build targets $BP_TARGET under
+#     --target-cap (GC_TARGET_CAP, 40G), and while the disk has under --low-gb (GC_LOW_GB, 150) free the oldest unused entries of both go too, oldest last write first, until
+#     both hold; only entries idle --evict-minutes (120), held by nothing and not kept; the pause file does not stop this (it stops the routine sweeps);
 #   - the sccache cache is trimmed, oldest first, to its cap (--sccache-size, else SCCACHE_CACHE_SIZE, else 20G; K, M, G or T) when it has grown past it.
 # Every removal is checked again on the spot, just before it (live): a process holding it now (cwd, executable, open file, TMPDIR, CARGO_TARGET_DIR), anything in it written
 # or made within its idle time, or a .bp-keep marks it in use and it stays. (Nov 16: the held/fresh lists are read once, a walk takes up to minutes on a busy box, and folders
@@ -19,10 +22,15 @@
 # Env for tests: GC_REPO (the clone), GC_UPSTREAM (default origin/main, else main), GC_TMP_BASES (default "/tmp $BP_TMP"), GC_LOCK, SCCACHE_DIR, GC_CTIME=0 (count only mtimes: a test cannot age a ctime).
 set -u; HERE=$(cd "$(dirname "$(readlink -f "$0")")" && pwd); . "$HERE/lib-bptmp.sh"   # (the guard runs it through the link $DEV/janitor: beside the link is no lib-bptmp.sh and no clone)
 renice -n 19 $$ > /dev/null 2>&1; ionice -c3 -p $$ > /dev/null 2>&1   # never in the way of a build or the hub
-APPLY=0; HOURS=24; TMPH=24; MMIN=60; TMIN=1440; QUIET=0; SCC_SIZE=
+# caps: larger on a data drive (BP_DATA=/data, 2.2 TB: lib-bptmp.sh), as on a home disk before it
+dcap=60G; if [ "$BP_DATA" = "$HOME/.cache" ]; then tcap=40G; else tcap=300G; fi   # $BP_TMP is on the home disk either way (lib-bptmp.sh)
+APPLY=0; HOURS=24; TMPH=24; MMIN=60; TMIN=1440; QUIET=0; SCC_SIZE=; TMP_CAP=${GC_TMP_CAP:-$dcap}; TGT_CAP=${GC_TARGET_CAP:-$tcap}; LOW_GB=${GC_LOW_GB:-150}; EVMIN=120
+# the data drive's bp-tmp (Nov 17: the home bp-tmp's idle entries moved there, links left behind): its idle entries go by the same 24 h rule
+LEGACY_TMP=${GC_LEGACY_TMP-$BP_DATA/bp-tmp}; [ "$(readlink -f "$LEGACY_TMP" 2>/dev/null)" = "$(readlink -f "$BP_TMP")" ] && LEGACY_TMP=""
 while [ $# -gt 0 ]; do case "$1" in
   --apply) APPLY=1;; --quiet) QUIET=1;; --hours) HOURS=$2; shift;; --days) HOURS=$(( $2 * 24 )); shift;; --tmp-hours) TMPH=$2; shift;;
   --merged-minutes) MMIN=$2; shift;; --tmp-minutes) TMIN=$2; shift;; --sccache-size) SCC_SIZE=$2; shift;;
+  --tmp-cap) TMP_CAP=$2; shift;; --target-cap) TGT_CAP=$2; shift;; --low-gb) LOW_GB=$2; shift;; --evict-minutes) EVMIN=$2; shift;;
 esac; shift; done
 REPO=${GC_REPO:-$(git -C "$HERE" worktree list --porcelain | awk 'NR==1{print substr($0,10)}')}
 UP=${GC_UPSTREAM:-}; [ -n "$UP" ] || { git -C "$REPO" rev-parse -q --verify refs/remotes/origin/main > /dev/null && UP=origin/main || UP=${MAIN_BRANCH:-main}; }
@@ -50,7 +58,10 @@ live() { local q=$1; kept "$q" && return 1
   [ -n "$(find "$q" -xdev $(since "$2") -print -quit 2>/dev/null)" ] && return 1
   find /proc/[0-9]*/cwd /proc/[0-9]*/exe -maxdepth 0 -printf '%l\n' 2>/dev/null | sed 's/ (deleted)$//' | awk -v q="$q" 'BEGIN{p = q "/"} $0 == q || index($0, p) == 1 {f = 1; exit} END{exit !f}' && return 1
   find /proc/[0-9]*/fd -mindepth 1 -maxdepth 1 -printf '%l\n' 2>/dev/null | sed 's/ (deleted)$//' | awk -v q="$q" 'BEGIN{p = q "/"} $0 == q || index($0, p) == 1 {f = 1; exit} END{exit !f}' && return 1
-  grep -qsaE "^(TMPDIR|CARGO_TARGET_DIR)=$(printf '%s' "$q" | sed 's/[][\\.^$*+?(){}|]/\\&/g')(/|$)" <(for e in /proc/[0-9]*/environ; do tr '\0' '\n' < "$e"; done 2>/dev/null) && return 1
+  local qre; qre=$(printf '%s' "$q" | sed 's/[][\\.^$*+?(){}|]/\\&/g')
+  grep -qsaE "^(TMPDIR|CARGO_TARGET_DIR)=$qre(/|$)" <(for e in /proc/[0-9]*/environ; do tr '\0' '\n' < "$e"; done 2>/dev/null) && return 1
+  # a process naming it in its command line: an ssh master's ControlPath socket is no open file (Nov 17, bp-kembed-remote-*/cm of a running remote suite)
+  grep -qsaE "(^|[=:[:space:]])$qre(/|[[:space:]]|$)" <(for c in /proc/[0-9]*/cmdline; do tr '\0' '\n' < "$c"; done 2>/dev/null) && return 1
   return 0; }
 held() { awk -v q="$1" 'BEGIN{p = q "/"} $0 == q || index($0, p) == 1 {f = 1; exit} END{exit !f}' "$HELD"; }
 # recent PATH MINUTES: something under it was written or made (ctime: a copy that kept old mtimes counts) in the last MINUTES; target/ dirs only count for themselves
@@ -58,7 +69,9 @@ CT=1; [ "${GC_CTIME:-1}" = 0 ] && CT=0
 since() { if [ "$CT" = 1 ]; then echo "( -mmin -$1 -o -cmin -$1 )"; else echo "-mmin -$1"; fi; }
 recent() { local p=(); [ "${3:-}" = all ] || p=(-mindepth 1 -name target -prune -o); [ -n "$(find "$1" -xdev "${p[@]}" $(since "$2") -print -quit 2>/dev/null)" ]; }
 landed() { git -C "$REPO" merge-base --is-ancestor "refs/heads/$1" "$UP" 2>/dev/null && [ "$(git -C "$REPO" reflog show --format=%H "refs/heads/$1" -- 2>/dev/null | wc -l)" -gt 1 ]; }
-targets() { for t in "$1"/target "$1"/native/*/target; do [ -d "$t" ] && [ ! -L "$t" ] && echo "$t"; done; }
+# a worktree's target dirs: real ones, and the data drive's dirs its links point at (lib-bptmp.sh bp_target_link)
+targets() { local t r; for t in "$1"/target "$1"/native/*/target "$1"/native/*/target-guard; do
+  if [ -L "$t" ]; then r=$(readlink -f "$t"); case "$r" in "$BP_DATA"/target/*) [ -d "$r" ] && echo "$r";; esac; elif [ -d "$t" ]; then echo "$t"; fi; done; }
 
 # Worktrees: path, branch (empty when detached), locked
 git -C "$REPO" worktree list --porcelain | awk '/^worktree /{w=substr($0,10); b=""; l=0} /^branch /{b=substr($0,8)} /^locked/{l=1} /^$/{if (w!="") print w "\t" b "\t" l; w=""} END{if (w!="") print w "\t" b "\t" l}' \
@@ -79,21 +92,32 @@ while IFS=$'\t' read -r w ref locked; do
     if [ "$lnd" = 1 ]; then recent "$t" "$MMIN" all && continue; why="$b landed"; else recent "$t" $((HOURS * 60)) all && continue; why="idle ${HOURS} h"; fi
     live "$t" "$([ "$lnd" = 1 ] && echo "$MMIN" || echo $((HOURS * 60)))" || continue
     note target "$t" "$why"; N_TG=$((N_TG + 1)); wipe "$t"
+    case "$t" in "$BP_DATA"/target/*) [ "$APPLY" = 1 ] && mkdir -p "$t";; esac   # a link's dir comes back empty: cargo cannot build through a dangling link
   done
 done < "$HELD.wt"
 rm -f "$HELD.wt"
+
+# the data drive's worktree target dirs whose worktree is gone (removed with its link): idle --merged-minutes and held by nothing
+if [ -d "$BP_DATA/target" ]; then
+  declare -A linked=()
+  while IFS= read -r w; do for t in "$w"/target "$w"/native/*/target "$w"/native/*/target-guard; do [ -L "$t" ] || continue; r=$(readlink -f "$t"); r=${r#"$BP_DATA"/target/}; linked[${r%%/*}]=1; done
+  done < <(git -C "$REPO" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print substr($0,10)}')
+  for o in "$BP_DATA"/target/*; do [ -d "$o" ] && [ -O "$o" ] || continue; [ -n "${linked[${o##*/}]:-}" ] && continue
+    live "$o" "$MMIN" || continue; note target "$o" "its worktree is gone"; N_TG=$((N_TG + 1)); wipe "$o"; done
+fi
 
 PAUSE=${GC_PAUSE:-${XDG_CACHE_HOME:-$HOME/.cache}/bp-janitor.pause}; TMP_ON=1
 if [ -e "$PAUSE" ]; then TMP_ON=0; say "janitor: /tmp and bp-tmp sweeps paused ($PAUSE: $(head -c 200 "$PAUSE" | tr '\n' ' '))"; fi
 [ -z "${GC_TEST_AFTER_SCAN:-}" ] || sh -c "$GC_TEST_AFTER_SCAN"   # tests: make what appears between the scans and the removals
 # $BP_TMP: whole top-level entries idle for --tmp-hours that nothing holds. Its sccache/ (the sccache server's TMPDIR) and claude/ (agents' CLAUDE_CODE_TMPDIR) stay.
-if [ "$TMP_ON" = 1 ] && [ -d "$BP_TMP" ]; then
+for TB in "$BP_TMP" $LEGACY_TMP; do [ "$TMP_ON" = 1 ] && [ -d "$TB" ] || continue
   declare -A busy_t=() fresh_t=()
-  while IFS= read -r l; do busy_t[$l]=1; done < <(grep -F "$BP_TMP/" "$HELD" | awk -v p="$BP_TMP/" 'index($0, p) == 1 {s = substr($0, length(p) + 1); sub(/\/.*/, "", s); print s}' | sort -u)
+  while IFS= read -r l; do busy_t[$l]=1; done < <(grep -F "$TB/" "$HELD" | awk -v p="$TB/" 'index($0, p) == 1 {s = substr($0, length(p) + 1); sub(/\/.*/, "", s); print s}' | sort -u)
   # one walk lists the top-level names with anything written lately
-  while IFS= read -r l; do fresh_t[$l]=1; done < <(find "$BP_TMP" -xdev -mindepth 1 \( -path "$BP_TMP/sccache" -o -path "$BP_TMP/claude" \) -prune -o $(since $((TMPH * 60))) -printf '%P\n' 2>/dev/null | awk -F/ '!s[$1]++ {print $1}')
-  for e in "$BP_TMP"/* "$BP_TMP"/.[!.]*; do
-    [ -e "$e" ] || [ -L "$e" ] || continue; n=${e#"$BP_TMP"/}
+  while IFS= read -r l; do fresh_t[$l]=1; done < <(find "$TB" -xdev -mindepth 1 \( -path "$TB/sccache" -o -path "$TB/claude" \) -prune -o $(since $((TMPH * 60))) -printf '%P\n' 2>/dev/null | awk -F/ '!s[$1]++ {print $1}')
+  for e in "$TB"/* "$TB"/.[!.]*; do
+    [ -e "$e" ] || [ -L "$e" ] || continue; n=${e#"$TB"/}
+    [ -L "$e" ] && [ -e "$e" ] && continue   # a link to where an entry moved (the data drive): it goes when what it points at is gone
     case "$n" in sccache|claude) continue;; esac
     [ "$e" -ef "$LOCK" ] && continue
     [ -O "$e" ] || continue; [ -n "${busy_t[$n]:-}" ] && continue; [ -n "${fresh_t[$n]:-}" ] && continue
@@ -101,12 +125,12 @@ if [ "$TMP_ON" = 1 ] && [ -d "$BP_TMP" ]; then
     live "$e" $((TMPH * 60)) || continue   # made, written or opened since the lists above were read
     note tmp "$e" "idle ${TMPH} h"; N_TMP=$((N_TMP + 1)); wipe "$e"
   done
-fi
+done
 
 # Test leftovers (lanes' test runs) in /tmp and $BP_TMP, sooner than the rule above: only top-level entries of this kind, made by this user, never a symlink, never across
 # a mount, only when idle for --tmp-minutes and nothing uses them: bp-<area>-<pid>-<name> whose pid is dead (bp-chrome-<pid> is a real hub's, not a test's: left alone), and the
 # per-run bpt-XXXXXX dirs of scripts/lib-buildslot.sh (bpt_new) that no process has as its cwd or TMPDIR; a failed run's bpt dir (.bpt-failed) is evidence, bounded there.
-for base in ${GC_TMP_BASES:-/tmp $BP_TMP}; do [ "$TMP_ON" = 1 ] && [ -d "$base" ] || continue
+for base in ${GC_TMP_BASES:-/tmp $BP_TMP $LEGACY_TMP}; do [ "$TMP_ON" = 1 ] && [ -d "$base" ] || continue
   declare -A act=(); while IFS= read -r l; do act[$l]=1; done < <(find "$base" -xdev -mindepth 1 ! -path "$base/bp*" -prune -o -mmin -"$TMIN" -printf '%P\n' 2>/dev/null | awk -F/ '!s[$1]++ {print $1}')
   re='^bp-[a-z0-9_]+-([0-9]+)(-.*)?$'
   for d in "$base"/bp-*-[0-9]* "$base"/bpt-??????; do
@@ -121,6 +145,26 @@ for base in ${GC_TMP_BASES:-/tmp $BP_TMP}; do [ "$TMP_ON" = 1 ] && [ -d "$base" 
     note tmp "$d" "test leftover, owner gone"; N_TMP=$((N_TMP + 1)); wipe "$d"
   done
 done
+
+# Pressure: a size cap per base and a free-space floor for the disk, oldest unused entries first (see the top). Sizes: K, M, G or T.
+tokb() { printf '%s' "$1" | awk '{n = $0 + 0; u = toupper(substr($0, length($0)))} END{m = (u == "T") ? 1073741824 : (u == "G") ? 1048576 : (u == "M") ? 1024 : (u == "K") ? 1 : 1 / 1024; print int(n * m)}'; }
+availk() { df -Pk "$1" 2>/dev/null | awk 'NR == 2 {print $4}'; }
+EVK=0; lowk=$((LOW_GB * 1048576))
+evict() { local base=$1 capk=$2 have n t e k free why
+  [ -d "$base" ] || return 0; have=$(kb "$base"); have=${have:-0}
+  pressed() { free=$(( $(availk "$base") + EVK )); [ "$have" -gt "$capk" ] || [ "$free" -lt "$lowk" ]; }
+  pressed || return 0
+  # each top-level entry with the time of its newest write, oldest first (one walk)
+  while IFS=' ' read -r t n; do pressed || break
+    e=$base/$n; case "$n" in sccache|claude|"") continue;; esac
+    [ -e "$e" ] && [ -O "$e" ] && [ ! "$e" -ef "$LOCK" ] || continue
+    kept "$e" && continue; live "$e" "$EVMIN" || continue
+    if [ "$have" -gt "$capk" ]; then why="$base over its cap $(human "$capk")"; else why="disk under ${LOW_GB} GB free"; fi
+    k=$(kb "$e"); k=${k:-0}; note tmp "$e" "$why, oldest unused"; N_TMP=$((N_TMP + 1)); wipe "$e"; have=$((have - k)); EVK=$((EVK + k))
+  done < <(find "$base" -xdev -mindepth 1 -printf '%T@ %P\n' 2>/dev/null | awk '{split($2, a, "/"); n = a[1]; t = int($1); if (!(n in m) || t > m[n]) m[n] = t} END{for (n in m) print m[n], n}' | sort -n)
+}
+evict "$BP_TMP" "$(tokb "$TMP_CAP")"; evict "$BP_TARGET" "$(tokb "$TGT_CAP")"
+a=$(availk "${BP_TMP:-$HOME}"); [ -z "$a" ] || [ "$a" -ge "$lowk" ] || say "janitor: the disk has $(human "$a") free, under ${LOW_GB} GB, with nothing more it may remove"
 
 # sccache: its server evicts to the size it was started with; a server started with a bigger SCCACHE_CACHE_SIZE (or none) lets the cache pass the machine's cap
 SD=${SCCACHE_DIR:-$HOME/.cache/sccache}

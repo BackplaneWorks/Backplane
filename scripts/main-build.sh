@@ -6,15 +6,15 @@
 #   scripts/main-build.sh status     running or not, the tip it built last, the tip that failed
 # It builds in a checkout of its own (default <repo>/.backplane/worktrees/main-build, detached at the tip: a worktree of the one clone, like every lane), so no worker's untracked files or half edits are in a build, with one shared
 # target directory per crate (default ~/.cache/main-build). Always the newest tip, never a dropped build: a merge while a build runs lets it finish (and publish if it passed), then the newest tip is built. A tip that failed is not
-# tried again; the bar says why until a newer tip lands. It fetches origin every MAIN_FETCH s (default 60), so a push made elsewhere (jlcjak's) is built too. Env: MAIN_BRANCH (main), MAIN_REMOTE (origin), MAIN_WT, MAIN_TARGET, GPUI_DEV_DIR, MAIN_POLL (s, default 3), MAIN_MIN_FREE_GB (20), MAIN_JANITOR_EVERY (s, 3600), MAIN_JANITOR_FREE_GB (100), and dev-build.sh's.
+# tried again; the bar says why until a newer tip lands. It fetches origin every MAIN_FETCH s (default 60), so a push made elsewhere (jlcjak's) is built too. Env: MAIN_BRANCH (main), MAIN_REMOTE (origin), MAIN_WT, MAIN_TARGET, GPUI_DEV_DIR, MAIN_POLL (s, default 3), MAIN_MIN_FREE_GB (20), MAIN_JANITOR_EVERY (s, 3600), MAIN_JANITOR_FREE_GB (150), and dev-build.sh's.
 # The disk janitor (worktree-gc.sh --apply: landed worktrees, idle target dirs, stale bp-tmp entries, sccache over its cap) runs every MAIN_JANITOR_EVERY s, and every 5 minutes
-# while the disk has under MAIN_JANITOR_FREE_GB free, so it acts long before the guard's "Disk nearly full" (under 10 GB); what it frees goes to $DEV/janitor.log.
+# while the disk has under MAIN_JANITOR_FREE_GB (150 GB) free, so it acts long before the guard's "Disk nearly full" (under 75 GB on a machine with this janitor, BACKPLANE_DISK_WARN_GB); what it frees goes to $DEV/janitor.log.
 # $DEV/janitor points at it: the guard runs it too before it tells the person the disk is full.
 set -u
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_QUARANTINE_PATH
 if [ -n "${BACKPLANE_AGENT_OWNER:-}" ]; then exec env -u BACKPLANE_AGENT_OWNER "$0" "$@"; fi   # the hub reaps marked processes (see fresh-watch.sh)
 HERE=$(cd "$(dirname "$0")" && pwd); REPO=$(git -C "$HERE" worktree list --porcelain | awk 'NR==1{print substr($0,10)}')   # the main checkout: the refs are shared by every worktree
-BR=${MAIN_BRANCH:-main}; WT=${MAIN_WT:-$REPO/.backplane/worktrees/main-build}; TG=${MAIN_TARGET:-$HOME/.cache/main-build}
+BR=${MAIN_BRANCH:-main}; WT=${MAIN_WT:-$REPO/.backplane/worktrees/main-build}; DATA=${BP_DATA:-$([ -d /data ] && [ -w /data ] && echo /data || echo "$HOME/.cache")}; TG=${MAIN_TARGET:-$DATA/main-build}
 DEV=${GPUI_DEV_DIR:-$HOME/.backplane-gpui-dev}; POLL=${MAIN_POLL:-3}; ST=$DEV/BUILD; FREE=${MAIN_MIN_FREE_GB:-20}; PIDF=$DEV/.main-build.pid
 say() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*"; }
 status() { printf '{"phase":"%s","text":"%s","done":0,"total":0}\n' "$1" "$2" > "$ST.n" && mv -f "$ST.n" "$ST"; }
@@ -24,7 +24,7 @@ fetch() { now=$(date +%s); [ $((now - fetched)) -ge "$FETCH" ] || return 0; fetc
 built() { cat "$DEV/.main-built" 2>/dev/null; }
 running() { [ -f "$PIDF" ] && p=$(cat "$PIDF" 2>/dev/null) && [ -n "$p" ] && [ "$p" != $$ ] && kill -0 "$p" 2>/dev/null && tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q main-build; }
 mkdir -p "$DEV" "$TG"
-JAN_EVERY=${MAIN_JANITOR_EVERY:-3600}; JAN_FREE=${MAIN_JANITOR_FREE_GB:-100}; jan_at=0
+JAN_EVERY=${MAIN_JANITOR_EVERY:-3600}; JAN_FREE=${MAIN_JANITOR_FREE_GB:-150}; jan_at=0
 janitor() { local now a gap; now=$(date +%s); a=$(df -BG --output=avail "$TG" 2>/dev/null | tail -1 | tr -dc 0-9); gap=$JAN_EVERY; [ "${a:-0}" -lt "$JAN_FREE" ] && gap=300
   [ $((now - jan_at)) -ge "$gap" ] || return 0; jan_at=$now
   [ "$(stat -c %s "$DEV/janitor.log" 2>/dev/null || echo 0)" -gt $((8 << 20)) ] && mv -f "$DEV/janitor.log" "$DEV/janitor.log.1"

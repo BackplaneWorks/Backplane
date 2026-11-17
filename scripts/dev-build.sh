@@ -28,6 +28,7 @@ OFFLINE=--offline; [ -z "${BP_REMOTE_CORE:-}" ] || OFFLINE=   # (a Boat box has 
 PROFILE=${PROFILE:-fast}  # cargo profile: fast (no LTO, incremental; Cargo.toml) by default, PROFILE=release for the fat-LTO build
 GATE=0; CUT=1; for a in "$@"; do case "$a" in --gate) GATE=1;; --no-cut) CUT=0;; esac; done
 SECS=$DEV/.build-secs$([ "$GATE" = 1 ] && echo -gate)
+[ -n "${HOST_TARGET:-}" ] || { bp_target_link "$ROOT/native/host"; bp_target_link "$ROOT/native/host" target-guard; }; [ -n "${GPUI_TARGET:-}" ] || bp_target_link "$ROOT/native/gpui"; [ -n "${VOICE_TARGET:-}" ] || bp_target_link "$ROOT/native/voice"
 HT=${HOST_TARGET:-$ROOT/native/host/target}; GT=${GPUI_TARGET:-$ROOT/native/gpui/target}; VT=${VOICE_TARGET:-$ROOT/native/voice/target}; UT=${GUARD_TARGET:-$HT-guard}
 mkdir -p "$DEV"
 # what a build killed outright (SIGKILL: the OOM killer, a reaper; no trap runs) left in $DEV: stages (243 MB each), build-dir copies, logs and phase files untouched for 6 h.

@@ -28,7 +28,7 @@ if [ "${1:-}" = --xwin ]; then
   export PATH=$llvm:$bin:$PATH XWIN_ACCEPT_LICENSE=1 RC_x86_64_pc_windows_msvc=$llvm/llvm-rc
   unset CC_x86_64_pc_windows_gnu CXX_x86_64_pc_windows_gnu AR_x86_64_pc_windows_gnu
   # one folder per checkout: the programs carry no hash in their names, so a shared folder hands one worktree the .exe another built last
-  tgt=${CARGO_TARGET_DIR:-${BP_TMP:-$HOME/.cache/bp-tmp}/target-winmsvc-$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")}; export CARGO_TARGET_DIR=$tgt
+  tgt=${CARGO_TARGET_DIR:-${BP_TARGET:-$HOME/.cache/bp-target}/winmsvc-$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")}; export CARGO_TARGET_DIR=$tgt
   (cd "$HERE/native/host" && "$HERE/scripts/cargo-q" xwin build --offline --target x86_64-pc-windows-msvc --profile "$prof" --bin backplane-hub --bin bp-sh)
   (cd "$HERE/native/guard" && "$HERE/scripts/cargo-q" xwin build --offline --target x86_64-pc-windows-msvc --profile release)   # the guard has no fast profile
   # the client with the embedded Chromium (feature cef, as dev-build.sh and release.yml build it; GPUI_FEATURES= for none). The cef crate fetches CEF's
@@ -49,7 +49,7 @@ if [ "${1:-}" = --build ]; then
   rustup target list --installed | grep -qx x86_64-pc-windows-gnullvm || { echo "windows-check: rustup target add x86_64-pc-windows-gnullvm" >&2; exit 2; }
   out=${2:-$HERE/build/windows}; mkdir -p "$out"; T=x86_64_pc_windows_gnullvm
   export CC_$T=$tc/bin/x86_64-w64-mingw32-clang CXX_$T=$tc/bin/x86_64-w64-mingw32-clang++ AR_$T=$tc/bin/llvm-ar CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER=$tc/bin/x86_64-w64-mingw32-clang
-  tgt=${CARGO_TARGET_DIR:-${BP_TMP:-$HOME/.cache/bp-tmp}/target-wingnullvm}; export CARGO_TARGET_DIR=$tgt   # never under /tmp (cargo-q refuses it)
+  tgt=${CARGO_TARGET_DIR:-${BP_TARGET:-$HOME/.cache/bp-target}/x86_64-pc-windows-gnullvm}; export CARGO_TARGET_DIR=$tgt   # never under /tmp (cargo-q refuses it)
   (cd "$HERE/native/host" && "$HERE/scripts/cargo-q" build --offline --target x86_64-pc-windows-gnullvm --bin backplane-hub --bin bp-sh)
   (cd "$HERE/native/gpui" && "$HERE/scripts/cargo-q" build --offline --target x86_64-pc-windows-gnullvm)
   for f in backplane-hub.exe bp-sh.exe backplane-gpui.exe; do cp "$tgt/x86_64-pc-windows-gnullvm/debug/$f" "$out/"; done
