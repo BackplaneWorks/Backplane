@@ -2061,7 +2061,6 @@ def run(h):
             #   - the Linux suite's script waits for the editor and opens the panel itself; here the opening loop above did Edit and the
             #     panel is opened by a real click on mgmt:checks (the same control id), so "the panel opened" is a check of its own here.
             #   - shot names follow Linux (p1_panel ...); the X display's window list (xwininfo) is E.client_origin here.
-            import re
             top = E.find_main_window(cp.pid)
             sock = rep.get("sock") or first.get("sock") or ""
             pro = checks_project(h)
