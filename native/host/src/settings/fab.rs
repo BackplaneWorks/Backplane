@@ -423,7 +423,8 @@ mod tests {
     }
     static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
     #[test] fn only_https_or_loopback_order_servers_are_accepted() {
-        for ok in ["https://order.example.com", "https://order.example.com:8443/", "https://2.29.106.88", "http://127.0.0.1:8080", "http://localhost", "http://[::1]:9", "https://[2001:db8::1]"] { assert!(server_host(ok).is_some(), "{ok}"); assert_eq!(server_of(ok), ok.trim_end_matches('/')) }
+        // A generic IP fixture must differ from DEFAULT_SERVER: test hubs deliberately redirect the built-in server to loopback.
+        for ok in ["https://order.example.com", "https://order.example.com:8443/", "https://203.0.113.7", "http://127.0.0.1:8080", "http://localhost", "http://[::1]:9", "https://[2001:db8::1]"] { assert!(server_host(ok).is_some(), "{ok}"); assert_eq!(server_of(ok), ok.trim_end_matches('/')) }
         for bad in ["http://order.example.com", "http://10.0.0.5", "http://127.0.0.1.evil.com", "https://user@evil.com", "https://user:pw@evil.com", "http://127.0.0.1@evil.com", "ftp://x", "file:///etc/passwd", "garbage", "https://", "https://a b", "https://e.com/?x=1", "https://e.com#f", "https://e.com:80x", "https://evil.com\"x", "//evil.com"] { assert_eq!(server_of(bad), "", "{bad}"); assert!(server_host(bad).is_none(), "{bad}") }
     }
     #[test] fn curl_to_the_order_server_is_https_only_off_loopback() {
