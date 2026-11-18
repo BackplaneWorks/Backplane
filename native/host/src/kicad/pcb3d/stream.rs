@@ -21,10 +21,20 @@ pub struct Made {
     pub ms: (f64, f64),
 }
 
+/// A board file's model: a .kicad_pcb's (parse.rs), or an Altium .PcbDoc's (altium/board3d.rs, no KiCad needed; the part models it
+/// carries are written into `models`, by content).
+pub fn read_board(bytes: &[u8], models: &Path) -> Result<Board, String> {
+    if crate::files::altium::is_cfb(bytes) { crate::files::altium::board3d::board(bytes, models) } else { parse::board(bytes) }
+}
+/// Where the part models a board carries are written out (the models cache's `embedded`).
+fn models_dir() -> PathBuf { super::models::Cache::standard().embedded_dir() }
+
 /// The bare board straight from its file: parsed, every layer meshed, as the `solid` the clients draw.
-pub fn board_model(bytes: &[u8]) -> Result<Made, String> {
+pub fn board_model(bytes: &[u8]) -> Result<Made, String> { board_model_in(bytes, &models_dir()) }
+/// `board_model`, a board's own models written into `models`.
+pub fn board_model_in(bytes: &[u8], models: &Path) -> Result<Made, String> {
     let t = Instant::now();
-    let board = parse::board(bytes)?;
+    let board = read_board(bytes, models)?;
     let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
     let t = Instant::now();
     let layers = mesh::layers_within(&board, board_budget(&board));
@@ -43,16 +53,20 @@ pub fn board_budget(b: &Board) -> usize {
 /// `board_model`, kept by the file's content in `dir` across restarts, worktrees and saved versions: the solid and the seat are read back
 /// (Thunderscope: 1.7 s to mesh, a few ms to read 6 MB), the board parsed again (its parts are planned from it). A model read back has no
 /// `layers` (they make the board's own GLB, kept the first time: `want_layers` says one is needed and nothing is read back then).
-pub fn board_model_kept(bytes: &[u8], dir: &Path, want_layers: bool) -> Result<Made, String> {
-    let file = dir.join(format!("board-solid-v2-{}-{}-{:016x}-{}.bin", mesh::MOST_TRIS, mesh::MOST_TRIS_WITH_PARTS, super::super::plot::mesh_id(bytes), bytes.len()));
+pub fn board_model_kept(bytes: &[u8], dir: &Path, want_layers: bool) -> Result<Made, String> { board_model_kept_in(bytes, dir, want_layers, &models_dir()) }
+/// `board_model_kept`, a board's own models written into `models`.
+pub fn board_model_kept_in(bytes: &[u8], dir: &Path, want_layers: bool, models: &Path) -> Result<Made, String> {
+    // an Altium board's model is the Altium reader's: its version is in the name, so a reader that draws more makes it again
+    let reader = if crate::files::altium::is_cfb(bytes) { crate::files::altium::board3d::VERSION } else { "" };
+    let file = dir.join(format!("board-solid-v2-{reader}{}-{}-{:016x}-{}.bin", mesh::MOST_TRIS, mesh::MOST_TRIS_WITH_PARTS, super::super::plot::mesh_id(bytes), bytes.len()));
     if !want_layers {
         if let Some((so, seat)) = std::fs::read(&file).ok().and_then(|b| read_kept(&b)) {
             let t = Instant::now();
-            let board = parse::board(bytes)?;
+            let board = read_board(bytes, models)?;
             return Ok(Made { plot: solid::plot(Some(so)), board, seat, layers: vec![], ms: (t.elapsed().as_secs_f64() * 1000.0, 0.0) });
         }
     }
-    let made = board_model(bytes)?;
+    let made = board_model_in(bytes, models)?;
     if let Some(so) = &made.plot.solid {
         let _ = std::fs::create_dir_all(dir);
         let tmp = file.with_extension(format!("bin.{}.part", std::process::id()));
@@ -230,7 +244,7 @@ pub fn model_jobs(b: &Board, resolve: &dyn Fn(&str) -> Option<PathBuf>) -> Vec<(
 /// batch), so that its 3D view later finds them converted. Blocking; returns (models, converted now, ms).
 pub fn prewarm(bytes: &[u8], path: &str, kicad_cli: &str, tools: &[super::super::stepglb::Mesher], cache: &super::models::Cache) -> Result<(usize, usize, f64), String> {
     let t = Instant::now();
-    let b = parse::board(bytes)?;
+    let b = read_board(bytes, &cache.embedded_dir())?;
     let env = super::models::Env::system((!kicad_cli.is_empty()).then(|| Path::new(kicad_cli)));
     let dir = board_dir(path);
     let emb = super::models::embedded(bytes, &cache.embedded_dir());

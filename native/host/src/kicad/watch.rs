@@ -376,7 +376,7 @@ impl Plots {
     /// A project's board opened (any of its views) or changed: its part models converted in the background, once a revision, so its 3D
     /// view finds them ready. Not for a saved version, nor when kicad-cli makes the 3D models (`viewer.board3d`).
     fn prewarm(self: &Arc<Self>, hub: &Arc<Hub>, pcb: &str) {
-        if !pcb.ends_with(".kicad_pcb") || is_version(pcb) { return }
+        if !(pcb.ends_with(".kicad_pcb") || is_altium_board(pcb)) || is_version(pcb) { return }
         let rev = stamp(pcb).rev;
         if rev.is_empty() { return }
         { let mut st = self.st.lock().unwrap();
@@ -387,7 +387,7 @@ impl Plots {
           st.prewarmed.insert(pcb.to_string(), rev); }
         let (hub, pcb, home) = (hub.clone(), pcb.to_string(), self.home.clone());
         tokio::spawn(async move {
-            if !Self::board3d_native(&hub).await { return }
+            if !is_altium_board(&pcb) && !Self::board3d_native(&hub).await { return }
             let cli = super::ipc::runtime(&hub).await.cli;
             let _ = tokio::task::spawn_blocking(move || {
                 let bytes = std::fs::read(&pcb).unwrap_or_default();
@@ -466,14 +466,9 @@ impl Plots {
             let say = |text: &str| if solid3 { me.stage(&hub, &ky, text, t0.elapsed().as_millis() as u64, about) };
             if solid3 && me.readers.available_permits() == 0 { say("Waiting for another drawing to finish…") }
             let _slot = me.readers.acquire().await.ok();
-            // an Altium board's 3D: KiCad's importer makes a .kicad_pcb of it once (altium::kicad_board), drawn as any board
-            let file = if solid3 && is_altium_board(&file) && !is_version(&file) {
-                say("Converting the Altium board for 3D with KiCad's importer…");
-                let (cli, f) = (super::ipc::runtime(&hub).await.cli, file.clone());
-                match tokio::task::spawn_blocking(move || crate::files::altium::kicad_board(&cli, &f)).await { Ok(Ok(p)) => p, Ok(Err(e)) => { eprintln!("altium 3d: {e}"); file } Err(_) => file }
-            } else { file };
-            // Pv.read.at: a model whose GLB is known too big is refused at once, not behind another model's read
-            let native3d = solid3 && file.ends_with(".kicad_pcb") && !file.starts_with("diff\n") && Self::board3d_native(&hub).await;
+            // Pv.read.at: a model whose GLB is known too big is refused at once, not behind another model's read. An Altium board's 3D is
+            // always made here (altium/board3d.rs reads the .PcbDoc itself: no KiCad, no kicad-cli)
+            let native3d = solid3 && !file.starts_with("diff\n") && (is_altium_board(&file) || (file.ends_with(".kicad_pcb") && Self::board3d_native(&hub).await));
             let known = if solid3 && !native3d { solidread::known(kind, &file) } else { 0 };
             let _one = if solid3 && !native3d && solid::fits_for(known, solidread::is_step(&file)) {
                 let g = match me.solid.try_lock() { Ok(g) => g, Err(_) => { say("Waiting for another 3D model to finish…"); me.solid.lock().await } };

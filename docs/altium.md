@@ -26,8 +26,13 @@ Split and History views, cross-probing, the phones and comparisons need nothing 
 - `plotgen::of_bytes` sends an OLE file to these readers; the sheet tree, sheet boxes and reference lists read Altium sheets too.
   A sheet symbol may name its file without `.SchDoc`. A flat design's sheets (none placed by a sheet symbol) are reached
   from the top sheet, so the Sheets menu, the BOM and the names list see every sheet.
-- 3D: the board is converted once with KiCad's importer (`kicad-cli pcb import --format altium`, KiCad 10) into a
-  `.kicad_pcb` in the models cache (`altium::kicad_board`) and drawn by the native 3D path, embedded part models included.
+- 3D (`board3d.rs`, no KiCad): the .PcbDoc becomes the native 3D path's board model (`kicad/pcb3d`, which sends a compound file
+  here): the outline and cutouts, the stack's thickness, outer copper, pours, pads, vias, holes, mask openings and silk from the
+  2D reader's items and pad/via records. Parts are the components, placed as KiCad's importer places them; each body is a model:
+  an embedded STEP (`Models/N`, zlib) written once into the models cache by content and placed with its body's transform
+  (position, Z offset, X/Y/Z turns, projection side), an extruded body as a prism (a VRML file in the part's frame, one per
+  shape), a linked STEP by its name beside the board (a box and a note when it is not there). They mesh and stream as a KiCad
+  board's parts do.
 - BOM: Altium's parameters (`Manufacturer Part Number`, `Manufacturer`, `DNP`); a sheet placed by several sheet symbols
   counts once per placement, its parts named `$Component_$RoomName` (`IC1_CAN1`), as Altium names them on the board.
 
@@ -50,8 +55,9 @@ Altium still raises answered. Runs go in `%PUBLIC%\Backplane\altium\runs`.
 ## Testing
 
 - `cargo test altium` runs the unit tests (synthetic records only: the repo carries no Altium design files).
-- `BP_ALTIUM_CORPUS=<folder of real projects>` adds corpus tests (every sheet and board parses; BOM; with `BP_ALTIUM_OUT=<dir>`
-  they write debug SVGs). `BP_KICAD_CLI=<kicad-cli>` adds the 3D conversion test.
+- `BP_ALTIUM_CORPUS=<folder of real projects>` adds corpus tests (every sheet and board parses; BOM; 3D; with `BP_ALTIUM_OUT=<dir>`
+  they write debug SVGs). `BP_KICAD_CLI=<kicad-cli>` adds the 3D comparison with KiCad's importer (every embedded model the same
+  file in the same place); `BP_ALTIUM_3D_OUT=<dir>` draws both to PNGs (parts meshed with FreeCAD or `BACKPLANE_STEP2GLB`).
 - On Windows: `BP_ALTIUM_LIVE=1` runs `live_altium` against the running Altium (status, an error, a runaway loop, a
   compile error, Altium still answering); `BP_ALTIUM_SCRIPT=<file>` runs one script through the bridge and prints the result.
   The test binary must run in the desktop session (Altium's command forwarding does not cross into an ssh session).
@@ -61,4 +67,5 @@ Altium still raises answered. Runs go in `%PUBLIC%\Backplane\altium\runs`.
 
 - Altium's ERC/DRC in the Review tab, Gerber/BOM/PDF output through Output Jobs, Buy it for Altium boards.
 - Image contents on sheets (drawn as frames), more than six inner layers apart, rule-based mask/paste expansion.
+- 3D: cylinder and sphere bodies, the stack's own colours, a body's 3D colour on a STEP model.
 - Editing without Altium (writing .SchDoc/.PcbDoc directly).

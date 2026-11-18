@@ -19,8 +19,8 @@ use std::sync::Arc;
 
 pub struct Comp { pub refdes: String, pub footprint: String, pub x_mm: f32, pub y_mm: f32, pub rot: f32, pub bottom: bool, pub value: String }
 
-const NONE: u16 = 0xFFFF;
-const MULTI: u32 = 74;
+pub(super) const NONE: u16 = 0xFFFF;
+pub(super) const MULTI: u32 = 74;
 const KEEPOUT: u32 = 56;
 const V7_MECH: u32 = 0x0102_0000;
 
@@ -28,20 +28,20 @@ const V7_MECH: u32 = 0x0102_0000;
 const B_FAB: u32 = 0;
 const B_CRTYD: u32 = 1;
 const B_PASTE: u32 = 2;
-const B_SILK: u32 = 3;
-const B_MASK: u32 = 4;
-const B_CU: u32 = 5;
-const F_CU: u32 = 12;
-const PADS: u32 = 13;
-const F_MASK: u32 = 14;
+pub(super) const B_SILK: u32 = 3;
+pub(super) const B_MASK: u32 = 4;
+pub(super) const B_CU: u32 = 5;
+pub(super) const F_CU: u32 = 12;
+pub(super) const PADS: u32 = 13;
+pub(super) const F_MASK: u32 = 14;
 const F_PASTE: u32 = 15;
-const F_SILK: u32 = 16;
+pub(super) const F_SILK: u32 = 16;
 const F_CRTYD: u32 = 17;
 const F_FAB: u32 = 18;
 const DWGS: u32 = 19;
 const CMTS: u32 = 20;
 const MARGIN: u32 = 21;
-const EDGE: u32 = board::EDGE;
+pub(super) const EDGE: u32 = board::EDGE;
 const VIA: u32 = 23;
 const HOLE: u32 = 24;
 const KNAMES: [&str; 25] = ["B.Fab", "B.CrtYd", "B.Paste", "B.SilkS", "B.Mask", "B.Cu", "In6.Cu", "In5.Cu", "In4.Cu", "In3.Cu", "In2.Cu", "In1.Cu", "F.Cu", "*.Cu", "F.Mask", "F.Paste", "F.SilkS", "F.CrtYd", "F.Fab", "Dwgs.User", "Cmts.User", "Margin", "Edge.Cuts", "via", "hole"];
@@ -56,21 +56,21 @@ fn show(x: f64) -> String { let s = format!("{:.4}", x); s.trim_end_matches('0')
 
 /// The streams a board read needs, by storage name ("Tracks6" for "Tracks6/Data").
 pub struct Src(pub HashMap<String, Vec<u8>>);
-const STORES: [&str; 14] = ["Board6", "Nets6", "Components6", "Polygons6", "Tracks6", "Arcs6", "Vias6", "Pads6", "Fills6", "Texts6", "Regions6", "ShapeBasedRegions6", "WideStrings6", "ComponentBodies6"];
+const STORES: [&str; 15] = ["Rules6", "Board6", "Nets6", "Components6", "Polygons6", "Tracks6", "Arcs6", "Vias6", "Pads6", "Fills6", "Texts6", "Regions6", "ShapeBasedRegions6", "WideStrings6", "ComponentBodies6"];
 impl Src {
-    pub fn of(bytes: &[u8]) -> Option<Src> {
-        let mut d = Doc::open(bytes.to_vec())?;
+    pub fn of(bytes: &[u8]) -> Option<Src> { Src::of_doc(&mut Doc::open(bytes.to_vec())?) }
+    pub fn of_doc(d: &mut Doc) -> Option<Src> {
         let mut m = HashMap::new();
         for s in STORES { if let Some(b) = d.stream(&format!("{s}/Data")) { m.insert(s.to_string(), b); } }
         if !m.contains_key("Board6") { return None }
         Some(Src(m))
     }
-    fn get(&self, s: &str) -> &[u8] { self.0.get(s).map(|v| v.as_slice()).unwrap_or(&[]) }
-    fn text(&self, s: &str) -> Vec<Props> { pcb_text_records(self.get(s)) }
+    pub(super) fn get(&self, s: &str) -> &[u8] { self.0.get(s).map(|v| v.as_slice()).unwrap_or(&[]) }
+    pub(super) fn text(&self, s: &str) -> Vec<Props> { pcb_text_records(self.get(s)) }
 }
 
 /// A binary stream's records: (index, type, whole record bytes, its sub-records). Stops at the first record that does not fit.
-fn records(b: &[u8], ty: u8, nsub: usize) -> Vec<(usize, &[u8], Vec<&[u8]>)> {
+pub(super) fn records(b: &[u8], ty: u8, nsub: usize) -> Vec<(usize, &[u8], Vec<&[u8]>)> {
     let mut out = Vec::new();
     let mut i = 0;
     while i + 5 <= b.len() {
@@ -97,7 +97,7 @@ fn records(b: &[u8], ty: u8, nsub: usize) -> Vec<(usize, &[u8], Vec<&[u8]>)> {
 // Layers
 
 struct StackLayer { id: u32, name: String, next: u32, copthick: f64, dielheight: f64, mech_on: bool, mech_kind: String }
-struct Layers { stack: Vec<StackLayer>, paint: HashMap<u32, Option<u32>>, thick_um: u32, planes: Vec<u32> }
+pub(super) struct Layers { stack: Vec<StackLayer>, paint: HashMap<u32, Option<u32>>, pub thick_um: u32, planes: Vec<u32> }
 
 fn default_name(a: u32) -> String {
     match a {
@@ -183,7 +183,7 @@ impl Layers {
         Layers { stack, paint, thick_um: if thick_um > 0 { thick_um } else { 1600 }, planes }
     }
     /// An Altium layer's paint id; None: not drawn.
-    fn paint(&self, a: u32) -> Option<u32> {
+    pub(super) fn paint(&self, a: u32) -> Option<u32> {
         if let Some(p) = self.paint.get(&a) { return *p }
         Some(match a {
             1 => F_CU, 32 => B_CU, 2..=31 => F_CU - (a - 1).min(6), 39..=54 => F_CU - (a - 38).min(6),
@@ -193,6 +193,8 @@ impl Layers {
             _ => return None,
         })
     }
+    /// The outer copper's thickness, mm (the top layer's, else 1.4 mil)
+    pub fn copper_mm(&self) -> f64 { self.stack.iter().find(|l| l.id == 1).map_or(1.4, |l| l.copthick) * 0.0254 }
     fn name(&self, a: u32) -> String {
         self.stack.iter().find(|l| l.id == a).map(|l| l.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| default_name(a))
     }
@@ -292,7 +294,7 @@ fn kring(ps: &[(f64, f64)]) -> Vec<Pt> { ps.iter().map(|p| kp(p.0, p.1)).collect
 
 /// A frame: origin, rotation (degrees, counter-clockwise), in Altium millimetres
 #[derive(Clone, Copy)]
-struct Fr { x: f64, y: f64, c: f64, s: f64 }
+pub(super) struct Fr { x: f64, y: f64, c: f64, s: f64 }
 impl Fr {
     fn new(x: f64, y: f64, deg: f64) -> Fr { let a = deg.to_radians(); Fr { x, y, c: a.cos(), s: a.sin() } }
     fn at(&self, u: f64, v: f64) -> (f64, f64) { (self.x + u * self.c - v * self.s, self.y + u * self.s + v * self.c) }
@@ -300,7 +302,7 @@ impl Fr {
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum Shape { Round, Rect, Oct, RoundRect(f64) }
+pub(super) enum Shape { Round, Rect, Oct, RoundRect(f64) }
 /// A pad shape of size w×h about the frame's origin.
 fn pad_prim(fr: &Fr, w: f64, h: f64, shape: Shape) -> Prim {
     let (hw, hh) = (w / 2.0, h / 2.0);
@@ -328,9 +330,9 @@ fn shape_word(s: Shape, w: f64, h: f64) -> &'static str {
 // ---------------------------------------------------------------------------------------------------------------------
 // The board
 
-struct CompRec { refdes: String, footprint: String, value: String, x: f64, y: f64, rot: f64, bottom: bool, nameon: bool, commenton: bool, ctx: String }
+pub(super) struct CompRec { pub refdes: String, pub footprint: String, pub value: String, pub x: f64, pub y: f64, pub rot: f64, pub bottom: bool, pub nameon: bool, pub commenton: bool, pub ctx: String }
 
-struct Ctx<'a> { src: &'a Src, layers: Layers, nets: Vec<String>, comps: Vec<CompRec>, wide: HashMap<u32, String>, outline: Vec<(f64, f64)>, used: BTreeSet<u32>, poured: BTreeSet<u16> }
+pub(super) struct Ctx<'a> { src: &'a Src, pub layers: Layers, nets: Vec<String>, pub comps: Vec<CompRec>, wide: HashMap<u32, String>, outline: Vec<(f64, f64)>, used: BTreeSet<u32>, poured: BTreeSet<u16> }
 impl<'a> Ctx<'a> {
     fn new(src: &'a Src) -> Ctx<'a> {
         let board = src.text("Board6").into_iter().next().unwrap_or_default();
@@ -388,8 +390,8 @@ fn push(out: &mut Vec<Item>, key: String, sig: u32, layer: u32, prim: Prim, info
 fn sig(b: &[u8]) -> u32 { board::hash(b, board::FNV) }
 
 /// The common head of track, arc, fill, region, via and pad records: layer, flags, net, polygon, component.
-struct Head { layer: u8, _flags1: u8, flags2: u8, net: u16, polygon: u16, comp: u16 }
-fn head(r: &mut Bin) -> Head { Head { layer: r.u8(), _flags1: r.u8(), flags2: r.u8(), net: r.u16(), polygon: r.u16(), comp: r.u16() } }
+struct Head { layer: u8, flags1: u8, flags2: u8, net: u16, polygon: u16, comp: u16 }
+fn head(r: &mut Bin) -> Head { Head { layer: r.u8(), flags1: r.u8(), flags2: r.u8(), net: r.u16(), polygon: r.u16(), comp: r.u16() } }
 
 fn graphic_info(c: &Ctx, kind: &str, layer: u32, net: u16, comp: u16, width: f64) -> Info {
     let k = if is_cu(layer) && matches!(kind, "gr_line" | "gr_arc" | "gr_circle") { "track" } else { kind };
@@ -457,18 +459,26 @@ fn fills(c: &mut Ctx, out: &mut Vec<Item>) {
     }
 }
 
-fn vias(c: &mut Ctx, out: &mut Vec<Item>) {
-    let src = c.src;
-    for (i, rec, subs) in records(src.get("Vias6"), 3, 1) {
+/// A via record (Vias6): position, land and hole (mm, Altium's Y up), the copper layers it spans, its mask tenting.
+pub(super) struct ViaRec { pub i: usize, pub sig: u32, pub net: u16, pub x: f64, pub y: f64, pub d: f64, pub hole: f64, pub from: u8, pub to: u8, pub tent_top: bool, pub tent_bottom: bool }
+pub(super) fn via_recs(src: &Src) -> Vec<ViaRec> {
+    records(src.get("Vias6"), 3, 1).into_iter().map(|(i, rec, subs)| {
         let mut r = Bin::new(subs[0]);
         let h = head(&mut r);
         r.skip(4);
         let (x, y, d, hole) = (mm(r.i32()), mm(r.i32()), mm(r.i32()), mm(r.i32()));
+        let (from, to) = (r.u8(), r.u8());
+        ViaRec { i, sig: sig(rec), net: h.net, x, y, d, hole, from, to, tent_top: h.flags1 & 0x20 != 0, tent_bottom: h.flags1 & 0x40 != 0 }
+    }).collect()
+}
+
+fn vias(c: &mut Ctx, out: &mut Vec<Item>) {
+    for v in via_recs(c.src) {
+        let i = v.i;
         c.used.insert(MULTI);
-        let info: Info = Arc::from(format!("via{}{}{}", kv("net", c.net(h.net)), kv("size", &show(d)), kv("drill", &show(hole))));
-        let s = sig(rec);
-        push(out, format!("v/{i}"), s, VIA, Prim::Circ { c: kp(x, y), r: (d / 2.0) as f32, w: 0.0, fill: true }, &info);
-        if hole > 0.0 { push(out, format!("v/{i}/h"), s, HOLE, Prim::Circ { c: kp(x, y), r: (hole / 2.0) as f32, w: 0.0, fill: true }, &info) }
+        let info: Info = Arc::from(format!("via{}{}{}", kv("net", c.net(v.net)), kv("size", &show(v.d)), kv("drill", &show(v.hole))));
+        push(out, format!("v/{i}"), v.sig, VIA, Prim::Circ { c: kp(v.x, v.y), r: (v.d / 2.0) as f32, w: 0.0, fill: true }, &info);
+        if v.hole > 0.0 { push(out, format!("v/{i}/h"), v.sig, HOLE, Prim::Circ { c: kp(v.x, v.y), r: (v.hole / 2.0) as f32, w: 0.0, fill: true }, &info) }
     }
 }
 
@@ -476,8 +486,17 @@ fn shape_of(b: u8, alt: u8, radius: u8) -> Shape {
     match b { 2 => Shape::Rect, 3 => Shape::Oct, 1 if alt == 9 => Shape::RoundRect(radius as f64 / 200.0), 1 => Shape::Round, _ => Shape::Rect }
 }
 
-fn pads(c: &mut Ctx, out: &mut Vec<Item>) {
-    let src = c.src;
+/// A pad record (Pads6): its name, layer, net, part, position and turn, the copper's size and shape on top and bottom, its hole
+/// (round, square or a slot, offset from the pad's centre) and its mask and paste.
+pub(super) struct PadRec {
+    pub i: usize, pub sig: u32, pub name: String, pub layer: u32, pub net: u16, pub comp: u16, pub x: f64, pub y: f64, pub dir: f64,
+    pub top: (f64, f64), pub bot: (f64, f64), pub tshape: Shape, pub bshape: Shape, pub hole: f64, pub plated: bool,
+    pub hole_shape: u8, pub slot: f64, pub slot_rot: f64, pub off: (f64, f64),
+    /// the mask's expansion when set by hand (None: by the rules), and the paste's (0 when by rule), mm
+    pub mask_x: Option<f64>, pub paste_x: f64, pub tent_top: bool, pub tent_bottom: bool,
+}
+pub(super) fn pad_recs(src: &Src) -> Vec<PadRec> {
+    let mut out = vec![];
     for (i, rec, subs) in records(src.get("Pads6"), 2, 6) {
         let name = { let mut r = Bin::new(subs[0]); let n = r.u8() as usize; super::cp1252(r.bytes(n)) };
         let s5 = subs[4];
@@ -521,43 +540,55 @@ fn pads(c: &mut Ctx, out: &mut Vec<Item>) {
             alt = [alts[0], alts[31]];
             rad = [rads[0], rads[31]];
         }
-        let a = layer as u32;
-        let Some(l) = c.paint(a) else { continue };
-        let thru = hole > 0.0;
-        let (ts, bs) = (shape_of(tshape, alt[0], rad[0]), shape_of(bshape, alt[1], rad[1]));
-        let kind = if !thru { "smd" } else if plated { "thru_hole" } else { "np_thru_hole" };
-        let info: Info = Arc::from(format!("pad {name}{}{}{}{}", kv("net", c.net(net)), kv("type", kind), kv("shape", shape_word(ts, top.0, top.1)), c.ctx(comp)));
-        let s = sig(rec);
-        let k = format!("p/{i}");
-        // the copper about the hole, offset as the hole offset says
-        let sfr = Fr::new(x, y, dir);
-        let (ox, oy) = sfr.at(off.0, off.1);
-        let cfr = if thru { Fr::new(ox, oy, dir) } else { sfr };
-        let (size, shape, side) = if l == B_CU { (bot, bs, B_CU) } else { (top, ts, l) };
+        out.push(PadRec { i, sig: sig(rec), name, layer: layer as u32, net, comp, x, y, dir, top, bot, tshape: shape_of(tshape, alt[0], rad[0]), bshape: shape_of(bshape, alt[1], rad[1]),
+            hole, plated, hole_shape, slot, slot_rot, off, mask_x: (mask_mode == 2).then_some(mask_x), paste_x: if paste_mode == 2 { paste_x } else { 0.0 },
+            tent_top: flags1 & 0x20 != 0, tent_bottom: flags1 & 0x40 != 0 });
+    }
+    out
+}
+impl PadRec {
+    pub(super) fn thru(&self) -> bool { self.hole > 0.0 }
+    /// The frame the copper is drawn in: about the hole's offset for a through pad
+    pub(super) fn copper_frame(&self) -> Fr {
+        let sfr = Fr::new(self.x, self.y, self.dir);
+        if self.thru() { let (ox, oy) = sfr.at(self.off.0, self.off.1); Fr::new(ox, oy, self.dir) } else { sfr }
+    }
+    /// The copper on one side, grown by `grow` mm each way (mask and paste openings); None when it has no size
+    pub(super) fn copper(&self, bottom: bool, grow: f64) -> Option<Prim> {
+        let (sz, sh) = if bottom { (self.bot, self.bshape) } else { (self.top, self.tshape) };
+        let (w, h) = (sz.0 + 2.0 * grow, sz.1 + 2.0 * grow);
+        (w > 0.0 && h > 0.0).then(|| pad_prim(&self.copper_frame(), w, h, sh))
+    }
+    /// The hole: a round one, a square one or a slot
+    pub(super) fn hole_prim(&self) -> Prim {
+        let hfr = Fr::new(self.x, self.y, self.dir + if self.hole_shape == 2 { self.slot_rot } else { 0.0 });
+        match self.hole_shape {
+            2 if self.slot > self.hole => pad_prim(&hfr, self.slot, self.hole, Shape::Round),
+            1 => pad_prim(&hfr, self.hole, self.hole, Shape::Rect),
+            _ => Prim::Circ { c: kp(self.x, self.y), r: (self.hole / 2.0) as f32, w: 0.0, fill: true },
+        }
+    }
+}
+
+fn pads(c: &mut Ctx, out: &mut Vec<Item>) {
+    for p in pad_recs(c.src) {
+        let Some(l) = c.paint(p.layer) else { continue };
+        let thru = p.thru();
+        let kind = if !thru { "smd" } else if p.plated { "thru_hole" } else { "np_thru_hole" };
+        let info: Info = Arc::from(format!("pad {}{}{}{}{}", p.name, kv("net", c.net(p.net)), kv("type", kind), kv("shape", shape_word(p.tshape, p.top.0, p.top.1)), c.ctx(p.comp)));
+        let (s, k) = (p.sig, format!("p/{}", p.i));
+        let (side, bottom) = if l == B_CU { (B_CU, true) } else { (l, false) };
         // an unplated hole has no copper (KiCad's import gives it none)
-        if !thru || plated { push(out, k.clone(), s, side, pad_prim(&cfr, size.0, size.1, shape), &info) }
+        if !thru || p.plated { if let Some(prim) = p.copper(bottom, 0.0) { push(out, k.clone(), s, side, prim, &info) } }
         // mask and paste (hidden in a board view, shown by a Gerber comparison)
-        let mx = if mask_mode == 2 { mask_x } else { 0.0 };
-        let px = if paste_mode == 2 { paste_x } else { 0.0 };
-        let (tent_t, tent_b) = (flags1 & 0x20 != 0, flags1 & 0x40 != 0);
         let mut masks = vec![];
-        if (l == F_CU || l == PADS) && !tent_t { masks.push((F_MASK, top, ts, mx, "m")) }
-        if (l == B_CU || l == PADS) && !tent_b { masks.push((B_MASK, bot, bs, mx, "bm")) }
-        if !thru && l == F_CU { masks.push((F_PASTE, top, ts, px, "s")) }
-        if !thru && l == B_CU { masks.push((B_PASTE, bot, bs, px, "bs")) }
-        for (ml, sz, sh, e, tag) in masks {
-            let (w, h) = (sz.0 + 2.0 * e, sz.1 + 2.0 * e);
-            if w > 0.0 && h > 0.0 { push(out, format!("{k}/{tag}"), s, ml, pad_prim(&cfr, w, h, sh), &info) }
-        }
-        if thru {
-            let hfr = Fr::new(x, y, dir + if hole_shape == 2 { slot_rot } else { 0.0 });
-            let prim = match hole_shape {
-                2 if slot > hole => pad_prim(&hfr, slot, hole, Shape::Round),
-                1 => pad_prim(&hfr, hole, hole, Shape::Rect),
-                _ => Prim::Circ { c: kp(x, y), r: (hole / 2.0) as f32, w: 0.0, fill: true },
-            };
-            push(out, format!("{k}/h"), s, HOLE, prim, &info);
-        }
+        let mx = p.mask_x.unwrap_or(0.0);
+        if (l == F_CU || l == PADS) && !p.tent_top { masks.push((F_MASK, false, mx, "m")) }
+        if (l == B_CU || l == PADS) && !p.tent_bottom { masks.push((B_MASK, true, mx, "bm")) }
+        if !thru && l == F_CU { masks.push((F_PASTE, false, p.paste_x, "s")) }
+        if !thru && l == B_CU { masks.push((B_PASTE, true, p.paste_x, "bs")) }
+        for (ml, bot, e, tag) in masks { if let Some(prim) = p.copper(bot, e) { push(out, format!("{k}/{tag}"), s, ml, prim, &info) } }
+        if thru { push(out, format!("{k}/h"), s, HOLE, p.hole_prim(), &info) }
     }
 }
 
@@ -750,7 +781,7 @@ fn planes(c: &mut Ctx, out: &mut Vec<Item>) {
     }
 }
 
-fn build(src: &Src) -> (Vec<Item>, Ctx<'_>) {
+pub(super) fn build(src: &Src) -> (Vec<Item>, Ctx<'_>) {
     let mut c = Ctx::new(src);
     let mut out = Vec::new();
     type Step = fn(&mut Ctx, &mut Vec<Item>);
@@ -761,6 +792,26 @@ fn build(src: &Src) -> (Vec<Item>, Ctx<'_>) {
         #[cfg(test)] if std::env::var_os("BP_ALTIUM_TIME").is_some() { eprintln!("  {_name}: {} ms", _t.elapsed().as_millis()) }
     }
     (out, c)
+}
+
+/// Rules6: each rule is 2 bytes, then its properties (u32 length, `|KEY=VALUE|` text)
+pub(super) fn rules(src: &Src) -> Vec<Props> {
+    let (b, mut out, mut i) = (src.get("Rules6"), vec![], 0);
+    while i + 6 <= b.len() {
+        let n = (u32::from_le_bytes([b[i + 2], b[i + 3], b[i + 4], b[i + 5]]) & 0x00FF_FFFF) as usize;
+        i += 6;
+        if i + n > b.len() { break }
+        out.push(Props::parse(&b[i..i + n]));
+        i += n;
+    }
+    out
+}
+/// The board's solder mask expansion, mm: its enabled SolderMaskExpansion rule for All and All of the first priority (as KiCad's
+/// import takes it for the board's); 0 when it has none.
+pub(super) fn mask_rule(src: &Src) -> f64 {
+    let all = |p: &Props, k: &str| p.get(k).trim().eq_ignore_ascii_case("all");
+    rules(src).into_iter().filter(|p| p.get("RULEKIND").eq_ignore_ascii_case("SolderMaskExpansion") && (!p.has("ENABLED") || p.bool("ENABLED")) && all(p, "SCOPE1EXPRESSION") && all(p, "SCOPE2EXPRESSION"))
+        .min_by_key(|p| if p.has("PRIORITY") { p.int("PRIORITY") } else { 1 }).map_or(0.0, |p| milmm(p.num("EXPANSION")))
 }
 
 /// The whole board as items with KiCad layer ids; None if the bytes are not a readable PcbDoc.
