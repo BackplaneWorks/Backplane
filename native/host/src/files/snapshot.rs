@@ -8,6 +8,10 @@
 //!   and before the turn's first write. In a repository Backplane made it is a commit on the checked-out branch; in one the person had
 //!   already, it is a commit on a ref of its own (`refs/backplane/snapshots/<thread>/<n>`, parent HEAD), so the person's branch, index and
 //!   stash are never touched. Either way `snap_ref(thread, n)` names it, and nothing is stashed, reset or discarded.
+//! - `off_branch` (Settings > Projects and git > Keep Backplane's commits off my branch, `git.off_branch`, off by default: #1188): every
+//!   commit above goes on a ref of Backplane's own instead, even in a repository Backplane made (its first commit is `FIRST_REF`, the
+//!   branch left unborn), and the design commits of kicad/canonical.rs go on `design_ref(branch)` (`record_on_ref`). The person's branch,
+//!   index and work tree are never written; /restore, the snapshots and the KiCad history work the same.
 //! - `restore`: the work tree as a snapshot had it, made as a new snapshot after the current state is snapshotted first: nothing is lost
 //!   either way.
 //! - Review requests run read-only (`is_review`), and a mass deletion is counted (`count_items`, `mass_loss`).
@@ -25,6 +29,10 @@ pub const MAX_FILES: usize = 50_000;
 pub const AUTHOR: [(&str, &str); 4] = [("GIT_AUTHOR_NAME", "Backplane"), ("GIT_AUTHOR_EMAIL", "backplane@localhost"), ("GIT_COMMITTER_NAME", "Backplane"), ("GIT_COMMITTER_EMAIL", "backplane@localhost")];
 /// The first commit of a repository Backplane made.
 pub const FIRST: &str = "Backplane: snapshot of existing work before first use";
+/// Where a repository Backplane made keeps its first commit when the branch is the person's alone (`off_branch`).
+pub const FIRST_REF: &str = "refs/backplane/first";
+/// The ref the design commits of a branch go on when they are kept off it (`off_branch`): `refs/backplane/design/<branch>`.
+pub fn design_ref(branch: &str) -> String { format!("refs/backplane/design/{branch}") }
 /// The git config key that marks a repository Backplane made (its snapshots go on the branch).
 pub const OWNED_KEY: &str = "backplane.created";
 /// The .gitignore a repository Backplane makes starts with (appended to one the folder already has, once).
@@ -117,13 +125,13 @@ fn count_files(dir: &Path, cap: usize) -> usize {
 
 /// What `ensure_repo` did.
 #[derive(Debug, Default, Clone, PartialEq)]
-pub struct Ensured { pub top: String, pub made: bool, pub commit: String, pub skipped: Vec<String>, pub not_made: String }
+pub struct Ensured { pub top: String, pub made: bool, pub commit: String, pub skipped: Vec<String>, pub not_made: String, /** the first commit is on `FIRST_REF`, not the branch */ pub off_branch: bool }
 impl Ensured {
     /// The line the thread (or project) shows, "" when there is nothing to say.
     pub fn line(&self) -> String {
         if !self.not_made.is_empty() { return format!("Not made a git repository: {}. Backplane cannot snapshot this folder before agents change it.", self.not_made) }
         if !self.made { return String::new() }
-        format!("Made this folder a git repository and committed the work already in it as {} (\"{FIRST}\"), so every agent change can be undone.{}", self.commit, skipped_note(&self.skipped))
+        format!("Made this folder a git repository and committed the work already in it as {} (\"{FIRST}\"{}), so every agent change can be undone.{}", self.commit, if self.off_branch { format!(", on {FIRST_REF}; the branch is left to you") } else { String::new() }, skipped_note(&self.skipped))
     }
 }
 /// The note for files a snapshot left out.
@@ -135,8 +143,8 @@ pub fn skipped_note(skipped: &[String]) -> String {
 
 /// The folder `root` is a git repository afterwards, or says why not. A folder already inside a repository is left as it is (its
 /// uncommitted work is the next `snapshot`'s). One that is in none: `git init`, the default .gitignore, `/.backplane/` excluded, and a
-/// first commit of everything there (huge files left out, named).
-pub async fn ensure_repo(root: &str, user_home: Option<&Path>) -> Result<Ensured, String> {
+/// first commit of everything there (huge files left out, named): on the branch, or with `off_branch` on `FIRST_REF` (the branch unborn).
+pub async fn ensure_repo(root: &str, user_home: Option<&Path>, off_branch: bool) -> Result<Ensured, String> {
     if crate::copy::on() { return Err("a hub on a copy makes no repositories".into()) }
     if root.is_empty() || !Path::new(root).is_dir() { return Err(format!("{root} is not a folder")) }
     if let Some(top) = top_of(root).await { return Ok(Ensured { top, ..Default::default() }) }
@@ -157,8 +165,14 @@ pub async fn ensure_repo(root: &str, user_home: Option<&Path>) -> Result<Ensured
         std::fs::write(&gi, text).map_err(|e| format!("could not write .gitignore: {e}"))?;
     }
     let top = top_of(root).await.ok_or("git init made no repository")?;
+    if off_branch {
+        let (tree, big) = work_tree(&top, "first").await?;
+        let c = ok(g(&top, None, &["commit-tree", "--no-gpg-sign", "-m", FIRST, tree.as_str()]).await, "commit-tree")?;
+        ok(g(&top, None, &["update-ref", "--create-reflog", "-m", FIRST, FIRST_REF, c.as_str()]).await, "update-ref")?;
+        return Ok(Ensured { commit: short(&top, &c).await, top, made: true, skipped: big, not_made: String::new(), off_branch: true })
+    }
     let s = commit_all(&top, FIRST, true).await?;
-    Ok(Ensured { top, made: true, commit: s.0, skipped: s.1, not_made: String::new() })
+    Ok(Ensured { top, made: true, commit: s.0, skipped: s.1, not_made: String::new(), off_branch: false })
 }
 
 /// The work tree's files over `BIG` that are not ignored (repo-relative).
@@ -224,11 +238,12 @@ pub fn snap_msg(thread: &str, turn: u64, title: &str, when: &str) -> String {
 }
 
 /// The work tree of `top` as a snapshot of thread `thread`, named by `reference` (`snap_ref` for the one before a turn): committed when it
-/// differs from HEAD (on the branch in a repository Backplane made, else as its own commit whose parent is HEAD), HEAD itself when clean.
-pub async fn snapshot(top: &str, thread: &str, reference: &str, msg: &str) -> Result<Snap, String> {
+/// differs from HEAD (on the branch in a repository Backplane made, unless `off_branch`; else as its own commit whose parent is HEAD),
+/// HEAD itself when clean.
+pub async fn snapshot(top: &str, thread: &str, reference: &str, msg: &str, off_branch: bool) -> Result<Snap, String> {
     if crate::copy::on() { return Err("a hub on a copy takes no snapshots".into()) }
     let _l = repo_lock(top).await;
-    let mine = owned(top).await;
+    let mine = owned(top).await && !off_branch;
     let on_branch = mine && git::run_ro(top, &["symbolic-ref", "-q", "HEAD"]).await.code == 0;
     let (commit, made, skipped) = if on_branch {
         let before = git::run_ro(top, &["rev-parse", "-q", "--verify", "HEAD"]).await.out.trim().to_string();
@@ -265,10 +280,10 @@ pub struct Restored { pub to: String, pub saved: String, pub commit: String, pub
 /// then every file `to_ref` has is written and every file of that current snapshot that `to_ref` lacks is removed (ignored and huge files
 /// are in neither, so never touched), and the result is snapshotted again (`<ref>-restored`): on the branch in a repository Backplane made,
 /// else on that ref, the person's branch untouched. Nothing is lost either way: the state before the restore is a commit too.
-pub async fn restore(top: &str, thread: &str, to_ref: &str, what: &str) -> Result<Restored, String> {
+pub async fn restore(top: &str, thread: &str, to_ref: &str, what: &str, off_branch: bool) -> Result<Restored, String> {
     if crate::copy::on() { return Err("a hub on a copy restores nothing".into()) }
     let to = ok(git::run_ro(top, &["rev-parse", "--verify", &format!("{to_ref}^{{commit}}")]).await, "rev-parse")?;
-    let before = snapshot(top, thread, &format!("{to_ref}-before-restore"), &format!("Backplane: snapshot before restoring {what}")).await
+    let before = snapshot(top, thread, &format!("{to_ref}-before-restore"), &format!("Backplane: snapshot before restoring {what}"), off_branch).await
         .map_err(|e| format!("not restored: the current state could not be snapshotted first ({e})"))?;
     let removed = {
         let _l = repo_lock(top).await;
@@ -285,8 +300,48 @@ pub async fn restore(top: &str, thread: &str, to_ref: &str, what: &str) -> Resul
         for p in &gone { let mut d = Path::new(top).join(p); while d.pop() && d != Path::new(top) { if std::fs::remove_dir(&d).is_err() { break } } }
         gone.len()
     };
-    let after = snapshot(top, thread, &format!("{to_ref}-restored"), &format!("Backplane: restore {what}")).await?;
+    let after = snapshot(top, thread, &format!("{to_ref}-restored"), &format!("Backplane: restore {what}"), off_branch).await?;
     Ok(Restored { to: short(top, &to).await, saved: before.commit, commit: after.commit, removed })
+}
+
+/// git as the repository's own identity (`mine`), else as Backplane; the safe environment either way.
+async fn as_who(top: &str, mine: bool, args: &[&str]) -> Ran { if mine { git::run(top, args).await } else { g(top, None, args).await } }
+/// A design commit kept off the person's branch (`off_branch`, #1188): `files` (repo-relative) as the work tree has them, on top of the
+/// last such commit, as a commit on `reference` (`design_ref`); the branch, the real index and the work tree are not touched. The chain
+/// follows the branch: while HEAD is an ancestor of the ref's tip it grows on the tip; once the person commits (HEAD moves past it) the next
+/// one starts from HEAD with the old tip as its second parent, so nothing recorded becomes unreachable. `msg(base, changed)` writes the
+/// message once the change is known: `base` the commit it is measured from ("" for none), `changed` the files that differ from it.
+/// Ok(None): the files are as the base has them already. Ok(Some((commit, changed))): the short id and those files. With the identity
+/// the branch commits use (the repository's git config, as `commit_design` on the branch); as Backplane (`AUTHOR`) only on a machine
+/// where git has none, so the change is recorded all the same.
+pub async fn record_on_ref<F, Fut>(top: &str, reference: &str, files: &[String], msg: F) -> Result<Option<(String, Vec<String>)>, String>
+where F: FnOnce(String, Vec<String>) -> Fut, Fut: std::future::Future<Output = String> {
+    if crate::copy::on() { return Err("a hub on a copy records no commits".into()) }
+    let head = git::run_ro(top, &["rev-parse", "-q", "--verify", "HEAD^{commit}"]).await.out.trim().to_string();
+    let tip = git::run_ro(top, &["rev-parse", "-q", "--verify", &format!("{reference}^{{commit}}")]).await.out.trim().to_string();
+    let on_tip = !tip.is_empty() && (head.is_empty() || git::run_ro(top, &["merge-base", "--is-ancestor", &head, &tip]).await.code == 0);
+    let base = if on_tip { tip.clone() } else { head.clone() };
+    let gd = ok(git::run_ro(top, &["rev-parse", "--absolute-git-dir"]).await, "rev-parse")?;
+    let idx = format!("{gd}/backplane-design.index");
+    let _ = std::fs::remove_file(&idx);
+    let seeded = if base.is_empty() { g(top, Some(&idx), &["read-tree", "--empty"]).await } else { g(top, Some(&idx), &["read-tree", &base]).await };
+    let mut add = vec!["add", "-A", "--"]; add.extend(files.iter().map(String::as_str));
+    let added = if seeded.code == 0 { g(top, Some(&idx), &add).await } else { seeded };
+    let tree = if added.code == 0 { ok(g(top, Some(&idx), &["write-tree"]).await, "write-tree") } else { ok(added, "add") };
+    let _ = std::fs::remove_file(&idx);
+    let tree = tree?;
+    if !base.is_empty() && git::run_ro(top, &["rev-parse", &format!("{base}^{{tree}}")]).await.out.trim() == tree { return Ok(None) }
+    let d = if base.is_empty() { git::run_ro(top, &["ls-tree", "-r", "-z", "--name-only", &tree]).await } else { git::run_ro(top, &["diff-tree", "-r", "-z", "--name-only", &base, &tree]).await };
+    let changed: Vec<String> = d.out.split('\0').filter(|p| !p.is_empty()).map(str::to_string).collect();
+    let msg = msg(base.clone(), changed.clone()).await; let msg = msg.as_str();
+    let mut a = vec!["commit-tree", "--no-gpg-sign", "-m", msg, tree.as_str()];
+    if !base.is_empty() { a.extend(["-p", base.as_str()]) }
+    if !on_tip && !tip.is_empty() { a.extend(["-p", tip.as_str()]) }
+    let mine = git::run_ro(top, &["var", "GIT_COMMITTER_IDENT"]).await.code == 0 && git::run_ro(top, &["var", "GIT_AUTHOR_IDENT"]).await.code == 0;
+    let c = ok(as_who(top, mine, &a).await, "commit-tree")?;
+    let mut u = vec!["update-ref", "--create-reflog", "-m", msg.lines().next().unwrap_or(msg), reference, c.as_str()]; if !tip.is_empty() { u.push(tip.as_str()) }
+    ok(as_who(top, mine, &u).await, "update-ref")?;
+    Ok(Some((short(top, &c).await, changed)))
 }
 
 /// Whether a request only asks for a review, an assessment or a summary: such a turn runs with the design files read-only. A request
@@ -304,12 +359,22 @@ pub fn review_refusal(what: &str) -> String {
 
 /// Items of a KiCad board (footprints, tracks, vias, arcs, zones, drawings, text) or schematic (symbols, wires, labels, junctions, sheets,
 /// buses) at the top level of its text: what a mass deletion is measured in.
-pub fn count_items(text: &str, schematic: bool) -> usize {
-    const PCB: &[&str] = &["footprint", "segment", "via", "arc", "zone", "gr_line", "gr_arc", "gr_circle", "gr_rect", "gr_poly", "gr_curve", "gr_text", "gr_text_box", "dimension", "group", "image"];
-    const SCH: &[&str] = &["symbol", "wire", "bus", "junction", "label", "global_label", "hierarchical_label", "no_connect", "sheet", "text", "text_box", "bus_entry", "polyline", "rectangle", "circle", "arc", "image"];
-    let heads = if schematic { SCH } else { PCB };
-    let (mut depth, mut n, mut in_str, mut esc) = (0i32, 0usize, false, false);
-    let b = text.as_bytes(); let mut i = 0;
+pub fn count_items(text: &str, schematic: bool) -> usize { items(text, schematic).len() }
+/// A board's or schematic's top-level items (those `count_items` counts), each as (what it is, for people; its text; its own uuid, ""
+/// for none), in one pass over the text. Library symbols, pads inside a footprint, the header (version, layers, nets, setup) and anything
+/// inside a string are not items. The design commits' summary (kicad/canonical.rs `item_changes`) reads them too.
+pub fn items(text: &str, schematic: bool) -> Vec<(&'static str, &str, &str)> {
+    fn label(w: &str, schematic: bool) -> Option<&'static str> {
+        Some(if schematic { match w {
+            "symbol" => "symbol", "wire" => "wire", "bus" | "bus_entry" => "bus", "junction" => "junction", "label" | "global_label" | "hierarchical_label" => "label",
+            "no_connect" => "no-connect", "sheet" => "sheet", "text" | "text_box" => "text", "polyline" | "rectangle" | "circle" | "arc" => "drawing", "image" => "image", _ => return None } }
+        else { match w {
+            "footprint" => "footprint", "segment" | "arc" => "track", "via" => "via", "zone" => "zone", "gr_text" | "gr_text_box" => "text",
+            "gr_line" | "gr_arc" | "gr_circle" | "gr_rect" | "gr_poly" | "gr_curve" => "drawing", "dimension" => "dimension", "group" => "group", "image" => "image", _ => return None } })
+    }
+    let b = text.as_bytes(); let mut out = vec![];
+    let (mut depth, mut in_str, mut esc, mut i) = (0i32, false, false, 0usize);
+    let mut cur: Option<(&'static str, usize, &str)> = None; // (label, start, uuid)
     while i < b.len() {
         let c = b[i];
         if in_str { if esc { esc = false } else if c == b'\\' { esc = true } else if c == b'"' { in_str = false } i += 1; continue }
@@ -317,14 +382,19 @@ pub fn count_items(text: &str, schematic: bool) -> usize {
             b'"' => in_str = true,
             b'(' => {
                 depth += 1;
-                if depth == 2 { let rest = &text[i + 1..]; let w: &str = rest.split(|ch: char| ch.is_whitespace() || ch == '(' || ch == ')').next().unwrap_or(""); if heads.contains(&w) && !(schematic && w == "symbol" && rest.starts_with("symbol \"")) { n += 1 } }
+                if depth == 2 || depth == 3 {
+                    let rest = &text[i + 1..];
+                    let w = rest.split(|ch: char| ch.is_whitespace() || ch == '(' || ch == ')').next().unwrap_or("");
+                    if depth == 2 { cur = if schematic && w == "symbol" && rest.starts_with("symbol \"") { None } else { label(w, schematic).map(|l| (l, i, "")) } }
+                    else if w == "uuid" || w == "tstamp" { if let Some(x) = cur.as_mut() { if x.2.is_empty() { x.2 = rest[w.len()..].split(')').next().unwrap_or("").trim().trim_matches('"') } } }
+                }
             }
-            b')' => depth -= 1,
+            b')' => { if depth == 2 { if let Some((l, st, u)) = cur.take() { out.push((l, &text[st..=i], u)) } } depth -= 1 }
             _ => {}
         }
         i += 1;
     }
-    n
+    out
 }
 /// The smallest loss that counts as a mass deletion, whatever the share: a small board's few parts are not guarded by a ratio.
 pub const MASS_FLOOR: usize = 10;
@@ -363,14 +433,14 @@ mod tests {
         let d = crate::plat::tmp::dir("snap-init"); let root = d.to_string_lossy().into_owned();
         std::fs::write(d.join("b.kicad_pcb"), "(kicad_pcb)").unwrap(); std::fs::create_dir_all(d.join("b-backups")).unwrap(); std::fs::write(d.join("b-backups/b.zip"), "z").unwrap();
         std::fs::write(d.join("fp-info-cache"), "c").unwrap(); std::fs::write(d.join(".gitignore"), "secret.txt\n").unwrap(); std::fs::write(d.join("secret.txt"), "s").unwrap();
-        let e = ensure_repo(&root, None).await.unwrap();
+        let e = ensure_repo(&root, None, false).await.unwrap();
         assert!(e.made && !e.commit.is_empty(), "{e:?}");
         assert!(owned(&e.top).await);
         let files = files_of(&e.top, "HEAD").await.unwrap();
         assert_eq!(files.iter().cloned().collect::<Vec<_>>(), [".gitignore", "b.kicad_pcb"], "KiCad's scratch and the person's own ignores are left out");
         let gi = std::fs::read_to_string(d.join(".gitignore")).unwrap(); assert!(gi.starts_with("secret.txt\n") && gi.contains("*-backups/"), "appended, never rewritten: {gi}");
-        assert_eq!(ensure_repo(&root, None).await.unwrap().made, false, "once");
-        let s = snapshot(&e.top, "t1", &snap_ref("t1", 1), "x").await.unwrap();
+        assert_eq!(ensure_repo(&root, None, false).await.unwrap().made, false, "once");
+        let s = snapshot(&e.top, "t1", &snap_ref("t1", 1), "x", false).await.unwrap();
         assert!(!s.made, "nothing changed since the first commit: {s:?}");
         let st = git::run_ro(&e.top, &["status", "--porcelain"]).await.out; assert_eq!(st, "", "the repository Backplane made is clean");
     }
@@ -378,13 +448,13 @@ mod tests {
         let d = crate::plat::tmp::dir("snap-big"); let root = d.to_string_lossy().into_owned();
         std::fs::write(d.join("a.kicad_sch"), "(kicad_sch)").unwrap();
         let f = std::fs::File::create(d.join("scan.raw")).unwrap(); f.set_len(BIG + 1).unwrap(); // sparse: no disk used
-        let e = ensure_repo(&root, None).await.unwrap();
+        let e = ensure_repo(&root, None, false).await.unwrap();
         assert_eq!(e.skipped, ["scan.raw"]); assert!(e.line().contains("Left out, over 50 MB each: scan.raw."), "{}", e.line());
         assert!(!files_of(&e.top, "HEAD").await.unwrap().contains("scan.raw"));
         assert!(d.join("scan.raw").exists(), "left on disk");
         // a restore never removes a file no snapshot holds
         std::fs::write(d.join("a.kicad_sch"), "(kicad_sch changed)").unwrap();
-        restore(&e.top, "t1", "HEAD", "t1 test").await.unwrap();
+        restore(&e.top, "t1", "HEAD", "t1 test", false).await.unwrap();
         assert_eq!(std::fs::read_to_string(d.join("a.kicad_sch")).unwrap(), "(kicad_sch)"); assert!(d.join("scan.raw").exists());
     }
     /// BP_COUNT_BOARD=<a .kicad_pcb> cargo test count_items_cost -- --ignored --nocapture: what the first write of a turn spends counting a board.
@@ -393,6 +463,28 @@ mod tests {
         let t0 = std::time::Instant::now(); let text = std::fs::read_to_string(&p).unwrap(); let read = t0.elapsed();
         let t1 = std::time::Instant::now(); let n = count_items(&text, false); let count = t1.elapsed();
         println!("{p}: {} bytes, {n} items, read {read:?}, count {count:?}", text.len());
+    }
+    #[tokio::test] async fn keep_off_my_branch_leaves_a_repository_backplane_made_unborn_and_snapshots_and_restore_still_work() {
+        let d = crate::plat::tmp::dir("snap-offbranch"); let root = d.to_string_lossy().into_owned();
+        std::fs::write(d.join("b.kicad_pcb"), "(kicad_pcb)").unwrap();
+        let e = ensure_repo(&root, None, true).await.unwrap();
+        assert!(e.made && e.off_branch && e.line().contains("on refs/backplane/first; the branch is left to you"), "{e:?}");
+        assert_ne!(git::run_ro(&e.top, &["rev-parse", "-q", "--verify", "HEAD"]).await.code, 0, "no commit on the branch: it is the person's to start");
+        assert_eq!(files_of(&e.top, FIRST_REF).await.unwrap().into_iter().collect::<Vec<_>>(), [".gitignore", "b.kicad_pcb"], "the first state is recorded all the same");
+        std::fs::write(d.join("b.kicad_pcb"), "(kicad_pcb (footprint))").unwrap();
+        let s = snapshot(&e.top, "t1", &snap_ref("t1", 1), "x", true).await.unwrap();
+        assert!(s.made && !s.on_branch, "{s:?}"); assert!(s.line().contains("on its own ref; your branch is untouched"));
+        assert_ne!(git::run_ro(&e.top, &["rev-parse", "-q", "--verify", "HEAD"]).await.code, 0, "still nothing on the branch");
+        std::fs::write(d.join("b.kicad_pcb"), "(kicad_pcb gone)").unwrap();
+        let r = restore(&e.top, "t1", &snap_ref("t1", 1), "t1 test", true).await.unwrap();
+        assert_eq!(std::fs::read_to_string(d.join("b.kicad_pcb")).unwrap(), "(kicad_pcb (footprint))", "/restore works off the branch: {r:?}");
+        assert_ne!(git::run_ro(&e.top, &["rev-parse", "-q", "--verify", "HEAD"]).await.code, 0);
+        // by default (the option off) the same repository's snapshots are commits on its branch, as before
+        let d2 = crate::plat::tmp::dir("snap-onbranch"); std::fs::write(d2.join("b.kicad_pcb"), "(kicad_pcb)").unwrap();
+        let e2 = ensure_repo(&d2.to_string_lossy(), None, false).await.unwrap(); assert!(!e2.off_branch);
+        std::fs::write(d2.join("b.kicad_pcb"), "(kicad_pcb (footprint))").unwrap();
+        let s2 = snapshot(&e2.top, "t1", &snap_ref("t1", 1), "x", false).await.unwrap();
+        assert!(s2.on_branch && s2.made); assert_eq!(git::run_ro(&e2.top, &["rev-list", "--count", "HEAD"]).await.out.trim(), "2");
     }
     #[test] fn a_home_or_the_root_is_no_project() {
         let d = crate::plat::tmp::dir("snap-home");
@@ -403,7 +495,7 @@ mod tests {
         #[cfg(unix)] assert_eq!(not_a_project(Path::new("/usr"), None).as_deref(), Some("it is a system folder"));
     }
     #[test] fn the_lines_say_what_was_done() {
-        let e = Ensured { top: "/p".into(), made: true, commit: "abc1234".into(), skipped: vec!["video.mp4".into()], not_made: String::new() };
+        let e = Ensured { top: "/p".into(), made: true, commit: "abc1234".into(), skipped: vec!["video.mp4".into()], not_made: String::new(), off_branch: false };
         assert_eq!(e.line(), "Made this folder a git repository and committed the work already in it as abc1234 (\"Backplane: snapshot of existing work before first use\"), so every agent change can be undone. Left out, over 50 MB each: video.mp4.");
         assert_eq!(Ensured::default().line(), "");
         assert!(Ensured { not_made: "it is your home folder".into(), ..Default::default() }.line().starts_with("Not made a git repository: it is your home folder."));

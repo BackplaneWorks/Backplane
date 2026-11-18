@@ -2647,6 +2647,8 @@ settings.git.page = Projects and git
 settings.git.autopush = Push commits to the remote automatically
 settings.git.autopush.note = Backplane commits design files locally at each turn's end. On: it also pushes them to the branch's remote. Off: a project's page shows the commits not pushed, with Push.
 settings.git.notice = Backplane no longer pushes automatically. Turn it on in Settings if you want it.
+settings.git.offbranch = Keep Backplane's commits off my branch
+settings.git.offbranch.note = Off: at each turn's end and save, Backplane commits the design files an agent changed to your branch. On: it records the same changes on its own refs (refs/backplane/design/<branch>) and never commits to your branch or index, so your branch shows the design files as modified until you commit them yourself. /restore and the KiCad history work either way.
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = Install

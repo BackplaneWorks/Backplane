@@ -6,6 +6,7 @@
 //! line to an agent, and `secret::prompt()` / `keys::prompt(..)` in the prompt. See docs/HUB-API.md.
 pub mod accounts;
 pub mod autopush;
+pub mod offbranch;
 pub mod alerts;
 pub mod accounts_hub;
 pub mod binding;

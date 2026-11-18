@@ -2670,6 +2670,8 @@ settings.git.page = プロジェクトと git
 settings.git.autopush = コミットを自動でリモートにプッシュ
 settings.git.autopush.note = Backplane は各ターンの終わりに設計ファイルをローカルにコミットします。オン: ブランチのリモートにもプッシュします。オフ: プロジェクトのページにプッシュしていないコミットと「プッシュ」ボタンを表示します。
 settings.git.notice = Backplane は自動でプッシュしなくなりました。必要なら設定でオンにしてください。
+settings.git.offbranch = Backplane のコミットを自分のブランチに入れない
+settings.git.offbranch.note = オフ: 各ターンの終わりと保存のたびに、エージェントが変更した設計ファイルを Backplane があなたのブランチにコミットします。オン: 同じ変更を Backplane 自身の ref (refs/backplane/design/<branch>) に記録し、あなたのブランチやインデックスには一切コミットしません。そのため、自分でコミットするまで、ブランチでは設計ファイルが変更ありと表示されます。/restore と KiCad の履歴はどちらでも使えます。
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = インストール
