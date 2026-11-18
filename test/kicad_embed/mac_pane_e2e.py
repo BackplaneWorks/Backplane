@@ -916,6 +916,30 @@ try:
             print(f'INFO swap C{i + 1}: show seen {bool(seen)}, then closed; pushes {[(round((t - t0) * 1000), j["kicad_host_push"], j.get("visible")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; KiCad over the pane after 1.5 s {[w[3] for w in stale]}', flush=True)
             press_rect('rail:Board'); wait_for(kframe, 10, 0.1); time.sleep(0.8)
         check(c_wrong == 0, f'swap C: a hide right after a show is not undone ({c_wrong} of {c_reps} left KiCad over the pane)')
+        # (D) no answer at all (the lead's: an unanswered first push must expire and be sent again): KiCad stopped (SIGSTOP) for SWAP_STALL_S
+        # (default 10, past the client's 8 s), the viewer closed and the Board page pressed while it cannot answer, then KiCad resumed. With
+        # the keyboard left in Backplane (a click in its chrome after the press): the frame must end visible at the LAST rect, and KiCad must
+        # not take the keyboard by itself afterwards (no delayed focus steal from a retried raise)
+        stall = float(os.environ.get('SWAP_STALL_S', '10'))
+        wait_for(kframe, 10, 0.2); press_rect('ui:CloseViewer'); time.sleep(1.2)
+        kp = [int(l.split()[0]) for l in subprocess.run(['ps', '-axo', 'pid=,command='], capture_output=True, text=True).stdout.splitlines() if '--embedded' in l and OUT in l]
+        log0 = len(client_log().splitlines()); n0 = len(PUSHES)
+        for p_ in kp: os.kill(p_, 19)  # SIGSTOP
+        try:
+            t0 = time.time(); press_rect('rail:Board'); time.sleep(0.8)
+            cwa = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(cwa[0] + 150, cwa[1] + 28 + 250)
+            time.sleep(max(0.0, stall - (time.time() - t0)))
+        finally:
+            for p_ in kp: os.kill(p_, 18)  # SIGCONT
+        host_settled(15); time.sleep(3.0)
+        lines = client_log().splitlines()[log0:]
+        refused = [l for l in lines if 'kicad_host_refused' in l]; retried = [l for l in lines if '"retry":true' in l]
+        last = next((j['kicad_host_push'] for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None); lastvis = next((j.get('visible') for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None)
+        f = kframe(); okd = bool(lastvis) and bool(f and last) and all(abs(a - b) <= 2 for a, b in zip(f[3], last))
+        print(f'INFO swap D: KiCad stopped {stall:.0f} s across the return; pushes {[(round((t - t0) * 1000), j["kicad_host_push"], j.get("visible"), j.get("retry")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; refused {len(refused)}, retried {len(retried)}; frame {f and f[3]}; last {last}', flush=True)
+        check(okd, f'swap D: after KiCad could not answer for {stall:.0f} s, the frame ends visible at the LAST rect (frame {f and f[3]}, last {last})')
+        time.sleep(4.0)
+        check(not active(kpid), 'swap D: KiCad did not take the keyboard by itself after the recovery (no delayed focus steal)')
         raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=hide (#1198): Cmd+H with KiCad's canvas focused hides Backplane and KiCad's frame (a runtime with comment-key-63: the
     # host reserves Ctrl+H); unhidden, KiCad's frame is directly above Backplane's window again and a click gives KiCad the keyboard; Cmd+H
