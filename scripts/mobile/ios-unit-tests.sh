@@ -21,7 +21,7 @@ run badge-symbols BadgeSymbolsTests.swift "$ROOT/native/host/src/present/badge.r
 run thread-find ThreadFindTests.swift "" ThreadFind.swift
 run voice-edit VoiceEditTests.swift "$ROOT/test/fixtures/voice-edits.json" VoiceEdit.swift
 run plot-parts PlotPartsTests.swift "" Plot.swift PlotParts.swift
-run wire-json WireJSONTests.swift "" WireJSON.swift DataModels.swift ThreadGroups.swift TermModels.swift Outbox.swift Copyable.swift
+run wire-json WireJSONTests.swift "" WireJSON.swift DataModels.swift ThreadGroups.swift TermModels.swift Outbox.swift Copyable.swift ../Shared/Tr.swift ../Shared/TrCatalog.swift
 run term-stream TermStreamTests.swift "" TermStream.swift
 run vt VtTests.swift "" Vt.swift
 run term-card TermCardTests.swift "" Vt.swift TermCard.swift
