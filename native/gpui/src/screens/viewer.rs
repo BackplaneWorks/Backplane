@@ -673,6 +673,12 @@ fn pane_page(thread: &Value, local: bool) -> Option<(String, bool)> {
     if hub_open(thread) { return Some((open.to_string(), false)) }
     press.filter(|k| !k.is_empty()).map(|k| (k, true))
 }
+/// Whether page `open` draws the embedded editor when one is held for its design: Board, Schematic or 3D, no Gerber set (Backplane's own
+/// page, Edit on or not) and no Diff over it. `page` mounts the editor by it and ui.rs tells the pane by it whether the page holds it.
+pub fn editor_page(open: &str, viewer: &Value, diff_on: bool) -> bool { matches!(open, "board" | "schematic" | "3d") && viewer["gerbers"] != true && !diff_on }
+/// Whether the pane draws the embedded editor for `thread` this frame (its editor held: KicadPane::in_page): the page up, as `page` draws
+/// it (a rail press the hub has not answered yet included), and `editor_page` for it. False with the viewer shut (#1199).
+pub fn holds_editor(thread: &Value) -> bool { pane_page(thread).is_some_and(|(open, _)| editor_page(&open, &thread["viewer"], thread["diff"].is_object())) }
 /// The panel (None while nothing is open). 520 px wide, between the thread and the rail.
 pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>, editor: Option<&Entity<crate::viewers::kicad_pane::KicadPane>>, update: Option<AnyElement>) -> AnyElement {
     // KiCad itself in the pane (its Board, Schematic or 3D): its frames switch at once, and it stays until the hub moves the pane (kicad_pane.rs)
@@ -688,7 +694,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
     // or float in the top right corner of a page drawn to its edges (3D, Split, Browser)
     // the Gerbers page is the Board page drawing a Gerber set (viewer.gerbers): Backplane's own, never KiCad's, Edit on or not (lane K's
     // rerun 9: the rail lit Gerbers while the pane kept KiCad's PCB editor and never asked for the set's plot)
-    let editing = editor.is_some() && matches!(open, "board" | "schematic" | "3d") && viewer["gerbers"] != true && !diff_on;
+    let editing = editor.is_some() && editor_page(open, viewer, diff_on);
     let acts = |cx: &mut Context<Backplane>| pane_actions(cx, light, thread, target, diff_on, editing);
     let body: AnyElement = if editing {
         // the real KiCad, its rail page's editor over the pane (viewers/kicad_pane.rs); the pane's controls in its own row above it, never over KiCad's toolbar
@@ -898,6 +904,22 @@ pub fn follow(tx: &tokio::sync::mpsc::Sender<Command>, thread: &Value) {
 
 #[cfg(test)]
 mod tests {
+    /// #1199: whether the page holds the embedded editor, the one rule `page` mounts it by and the pane hides KiCad's frame by (macOS).
+    #[test] fn the_page_holds_the_editor_only_while_it_draws_it() {
+        use serde_json::json;
+        let t = |v: serde_json::Value| json!({"id": "t1", "viewer": v});
+        assert!(super::holds_editor(&t(json!({"open": "board"}))), "the Board page draws the editor");
+        assert!(super::holds_editor(&t(json!({"open": "schematic"}))) && super::holds_editor(&t(json!({"open": "3d"}))));
+        // KiCad's GerbView in the pane (Open in GerbView: the Board page, Edit on, the pane's override GERBVIEW) is still the Board page
+        assert!(super::holds_editor(&t(json!({"open": "board", "gerbers": false, "gerberFiles": ["a.gbr"]}))), "GerbView in the pane");
+        assert!(!super::holds_editor(&t(json!({"open": ""}))), "the viewer closed (X, the rail, a key, the hub): no editor");
+        assert!(!super::holds_editor(&json!({"id": "t1"})), "no viewer at all");
+        for k in ["files", "mech", "browser", "split", "review"] { assert!(!super::holds_editor(&t(json!({"open": k}))), "{k}: Backplane's own page"); }
+        assert!(!super::holds_editor(&t(json!({"open": "board", "gerbers": true}))), "the Gerbers page is Backplane's own");
+        assert!(!super::holds_editor(&json!({"id": "t1", "viewer": {"open": "board"}, "diff": {"files": []}})), "a Diff over the page");
+        // `page` mounts the editor by the same rule
+        assert!(super::editor_page("board", &json!({}), false) && !super::editor_page("board", &json!({}), true) && !super::editor_page("files", &json!({}), false));
+    }
     /// The pane's words in Japanese: whose machine KiCad opens on, a Split pane's toggle, a probed part on another sheet.
     #[test] fn the_panes_words_read_in_japanese() {
         crate::i18n::with_lang("ja", || {
