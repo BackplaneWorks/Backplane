@@ -643,8 +643,10 @@ impl TextInput {
     }
 }
 pub fn bind(cx: &mut App) { cx.bind_keys(bindings()); }
-pub fn bindings() -> Vec<KeyBinding> {
-    vec![
+pub fn bindings() -> Vec<KeyBinding> { bindings_for(crate::keys::mac()) }
+/// The pairing form's fields: off a Mac as before; on a Mac (#1172) Cmd+Left/Right go to the line's ends and Cmd+A/C/V/X edit, as its own fields.
+pub fn bindings_for(mac: bool) -> Vec<KeyBinding> {
+    let mut v = vec![
         KeyBinding::new("backspace", Backspace, Some("TextInput")),
         KeyBinding::new("delete", Delete, Some("TextInput")),
         KeyBinding::new("left", Left, Some("TextInput")),
@@ -657,7 +659,12 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("ctrl-x", Cut, Some("TextInput")),
         KeyBinding::new("home", Home, Some("TextInput")),
         KeyBinding::new("end", End, Some("TextInput")),
-    ]
+    ];
+    if mac {
+        v.extend([KeyBinding::new("cmd-left", Home, Some("TextInput")), KeyBinding::new("cmd-right", End, Some("TextInput")),
+            KeyBinding::new("cmd-a", SelectAll, Some("TextInput")), KeyBinding::new("cmd-v", Paste, Some("TextInput")), KeyBinding::new("cmd-c", Copy, Some("TextInput")), KeyBinding::new("cmd-x", Cut, Some("TextInput"))]);
+    }
+    v
 }
 
 #[cfg(test)]

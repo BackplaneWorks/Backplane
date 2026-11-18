@@ -138,6 +138,20 @@ impl Editor {
         let from = if word { self.word_start(self.head) } else { self.prev(self.head) };
         self.replace(from..self.head, "", if word { Kind::Other } else { Kind::Delete });
     }
+    /// Cmd+Backspace on a Mac: the selection, else back to the line's start (at its start, the newline before it, as a Mac's fields do).
+    pub fn backspace_line(&mut self) {
+        let sel = self.selection();
+        if !sel.is_empty() { return self.replace(sel, "", Kind::Other); }
+        let from = match self.line_start(self.head) { s if s == self.head => self.prev(self.head), s => s };
+        if from < self.head { self.replace(from..self.head, "", Kind::Other); }
+    }
+    /// Cmd+Delete on a Mac: the selection, else on to the line's end (at its end, the newline after it).
+    pub fn delete_line(&mut self) {
+        let sel = self.selection();
+        if !sel.is_empty() { return self.replace(sel, "", Kind::Other); }
+        let to = match self.line_end(self.head) { e if e == self.head => self.next(self.head), e => e };
+        if to > self.head { self.replace(self.head..to, "", Kind::Other); }
+    }
     pub fn delete(&mut self, word: bool) {
         let sel = self.selection();
         if !sel.is_empty() { return self.replace(sel, "", Kind::Other); }
@@ -162,6 +176,17 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // #1172: Cmd+Backspace / Cmd+Delete on a Mac: to the line's start or end; at it, the newline; a selection goes first
+    #[test] fn cmd_backspace_and_delete_go_to_the_line_ends() {
+        let mut e = Editor::new("one two\nthree four"); e.place(14, false); // after "three "
+        e.backspace_line(); assert_eq!(e.text(), "one two\nfour"); assert_eq!(e.head(), 8);
+        e.backspace_line(); assert_eq!(e.text(), "one twofour", "at the line's start: the newline");
+        e.place(3, false); e.delete_line(); assert_eq!(e.text(), "one");
+        e.delete_line(); assert_eq!(e.text(), "one", "at the text's end: nothing");
+        e.place(0, false); e.backspace_line(); assert_eq!(e.text(), "one", "at its start: nothing");
+        e.set_selection(1..2); e.backspace_line(); assert_eq!(e.text(), "oe", "a selection is what goes");
+        assert!(e.undo()); assert_eq!(e.text(), "one");
+    }
     fn typed(s: &str) -> Editor { let mut e = Editor::default(); for c in s.chars() { e.insert(&c.to_string()); } e }
     #[test] fn typing_is_one_undo_step_and_redo_restores() {
         let mut e = typed("hello world");

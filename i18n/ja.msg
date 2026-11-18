@@ -1984,6 +1984,12 @@ gpui.that.kicad.project.has.no = そのKiCadプロジェクトの隣にボード
 gpui.that.file.is.not.on = そのファイルはこのハブにありません。
 gpui.quit.backplane = Backplane を終了
 gpui.quit.backplane.on.a.mac = Backplane を終了（Mac）：ハブは動き続けます
+gpui.hide.backplane = Backplane を隠す
+gpui.hide.others = ほかを隠す
+gpui.show.all = すべてを表示
+gpui.close.window = ウインドウを閉じる
+gpui.close.the.window.on.a = ウインドウを閉じる（Mac）：ハブは動き続けます
+gpui.hide.backplane.on.a.mac = Backplane を隠す（Mac）：KiCad のエディタも一緒に隠れ、一緒に戻ります
 
 # ---- gpui-c: viewers, plots, terminal, drawing pad ----
 gpui.c.commit = コミット
