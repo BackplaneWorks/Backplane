@@ -3,7 +3,7 @@
 use std::ops::Range;
 
 use gpui::{
-    App, Application, Bounds, ClipboardItem, Context, CursorStyle, ElementId, ElementInputHandler,
+    App, Application, Bounds, ClipboardItem, ContentMask, Context, CursorStyle, ElementId, ElementInputHandler,
     Entity, EntityInputHandler, FocusHandle, Focusable, GlobalElementId, KeyBinding, Keystroke,
     LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
     ShapedLine, SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window, WindowBounds,
@@ -42,6 +42,8 @@ pub struct TextInput {
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
     is_selecting: bool,
+    /// How far the line is scrolled left so the caret stays in the box (a line longer than the box: a pasted link)
+    scroll_x: Pixels,
 }
 
 impl TextInput {
@@ -180,7 +182,7 @@ impl TextInput {
         if position.y > bounds.bottom() {
             return self.content.len();
         }
-        line.closest_index_for_x(position.x - bounds.left())
+        line.closest_index_for_x(position.x - bounds.left() + self.scroll_x)
     }
 
     fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
@@ -362,11 +364,11 @@ impl EntityInputHandler for TextInput {
         let range = self.range_from_utf16(&range_utf16);
         Some(Bounds::from_corners(
             point(
-                bounds.left() + last_layout.x_for_index(range.start),
+                bounds.left() + last_layout.x_for_index(range.start) - self.scroll_x,
                 bounds.top(),
             ),
             point(
-                bounds.left() + last_layout.x_for_index(range.end),
+                bounds.left() + last_layout.x_for_index(range.end) - self.scroll_x,
                 bounds.bottom(),
             ),
         ))
@@ -382,9 +384,20 @@ impl EntityInputHandler for TextInput {
         let last_layout = self.last_layout.as_ref()?;
 
         assert_eq!(last_layout.text, self.content);
-        let utf8_index = last_layout.index_for_x(point.x - line_point.x)?;
+        let utf8_index = last_layout.index_for_x(line_point.x + self.scroll_x)?;
         Some(self.offset_to_utf16(utf8_index))
     }
+}
+
+/// The line's scroll for a caret at `caret` (x in the line) in a box `width` wide, from the last one: none while the line fits; else just
+/// enough that the caret (2 px) is inside the box, never past the line's end.
+fn scrolled(was: Pixels, caret: Pixels, line: Pixels, width: Pixels) -> Pixels {
+    let room = width - px(2.);
+    if line <= room { return px(0.) }
+    let mut s = was;
+    if caret - s > room { s = caret - room }
+    if caret < s { s = caret }
+    s.min(line - room).max(px(0.))
 }
 
 struct TextElement {
@@ -393,6 +406,7 @@ struct TextElement {
 
 struct PrepaintState {
     line: Option<ShapedLine>,
+    scroll_x: Pixels,
     cursor: Option<PaintQuad>,
     selection: Option<PaintQuad>,
 }
@@ -440,6 +454,7 @@ impl Element for TextElement {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let input = self.input.read(cx);
+        let was_scrolled = input.scroll_x;
         let content = input.content.clone();
         let selected_range = input.selected_range.clone();
         let cursor = input.cursor_offset();
@@ -492,6 +507,9 @@ impl Element for TextElement {
             .text_system()
             .shape_line(display_text, font_size, &runs, None);
 
+        // a line longer than the box scrolls so the caret stays inside it (and is clipped at the box's edges in paint)
+        let scroll_x = scrolled(was_scrolled, line.x_for_index(cursor), line.width, bounds.size.width);
+        let bounds = Bounds::new(point(bounds.left() - scroll_x, bounds.top()), bounds.size);
         let cursor_pos = line.x_for_index(cursor);
         let (selection, cursor) = if selected_range.is_empty() {
             (
@@ -524,6 +542,7 @@ impl Element for TextElement {
         };
         PrepaintState {
             line: Some(line),
+            scroll_x,
             cursor,
             selection,
         }
@@ -545,22 +564,25 @@ impl Element for TextElement {
             ElementInputHandler::new(bounds, self.input.clone()),
             cx,
         );
-        if let Some(selection) = prepaint.selection.take() {
-            window.paint_quad(selection)
-        }
         let line = prepaint.line.take().unwrap();
-        line.paint(bounds.origin, window.line_height(), window, cx)
-            .unwrap();
-
-        if focus_handle.is_focused(window)
-            && let Some(cursor) = prepaint.cursor.take()
-        {
-            window.paint_quad(cursor);
-        }
+        let scroll_x = prepaint.scroll_x;
+        window.with_content_mask(Some(ContentMask { bounds }), |window| {
+            if let Some(selection) = prepaint.selection.take() {
+                window.paint_quad(selection)
+            }
+            line.paint(point(bounds.left() - scroll_x, bounds.top()), window.line_height(), window, cx)
+                .unwrap();
+            if focus_handle.is_focused(window)
+                && let Some(cursor) = prepaint.cursor.take()
+            {
+                window.paint_quad(cursor);
+            }
+        });
 
         self.input.update(cx, |input, _cx| {
             input.last_layout = Some(line);
             input.last_bounds = Some(bounds);
+            input.scroll_x = scroll_x;
         });
     }
 }
@@ -612,7 +634,7 @@ impl TextInput {
     pub fn new(cx: &mut Context<Self>) -> Self { Self {
         /* i18n-ok: the hint, drawn through trs where it is painted */ focus_handle: cx.focus_handle(), content: "".into(), placeholder: "Ask anything: @bot, >thread, %project, #room, $skill, /btw".into(),
         selected_range: 0..0, selection_reversed: false, marked_range: None,
-        last_layout: None, last_bounds: None, is_selecting: false,
+        last_layout: None, last_bounds: None, is_selecting: false, scroll_x: px(0.),
     }}
     /// What it says while empty.
     pub fn hint(mut self, text: SharedString) -> Self { self.placeholder = text; self }
@@ -636,4 +658,19 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("home", Home, Some("TextInput")),
         KeyBinding::new("end", End, Some("TextInput")),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn a_long_line_scrolls_to_keep_the_caret_in_the_box() {
+        let (w, line) = (px(100.), px(300.));
+        assert_eq!(scrolled(px(0.), px(50.), px(80.), w), px(0.), "a line that fits never scrolls");
+        assert_eq!(scrolled(px(40.), px(50.), px(80.), w), px(0.), "nor keeps an old scroll");
+        assert_eq!(scrolled(px(0.), px(300.), line, w), px(202.), "a caret at the end of a pasted link: the end shows");
+        assert_eq!(scrolled(px(202.), px(250.), line, w), px(202.), "moving left inside the box: no jump");
+        assert_eq!(scrolled(px(202.), px(10.), line, w), px(10.), "past the left edge: the caret is the box's first pixel");
+        assert_eq!(scrolled(px(500.), px(300.), line, w), px(202.), "never past the line's end");
+    }
 }
