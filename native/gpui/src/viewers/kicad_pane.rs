@@ -261,8 +261,43 @@ pub fn mac_shown(show: bool, host_visible: bool, hitbox: bool, in_page: bool, co
 /// owner to confirm). This send makes the last word KiCad gets the pane's rect and visibility now, until the fork applies the last
 /// SetHostGeometry it acknowledged. BACKPLANE_KICAD_MAC_SETTLE_MS: another wait, 0 none (mac_pane_e2e's swap check, which fails without it).
 pub const MAC_SETTLE_MS: u64 = 300;
-/// macOS: how long after KiCad refused a host push it is sent again (KicadPane::host_refused).
-pub const MAC_REFUSED_RETRY_MS: u64 = 250;
+/// macOS: the host pushes (`editor.kicad.host`) in flight and the latest wanted, shared by the window's panes and the app (a pane
+/// dropped at View still has its hide's answer to come). The hub answers one connection's requests in order, so the answer that leaves
+/// none in flight is the latest push's: an earlier push's answer decides nothing. The latest refused (KiCad busy: "SetHostGeometry: a
+/// task is running: DRC", e2e-macos 44274808579 return 3, the frame never shown; or an error) is sent again, as the latest push is then,
+/// after a wait that grows (HOST_RETRY_MS, to HOST_RETRY_CAP_MS) until KiCad takes it or a newer push replaces it: a newer hide is never
+/// undone by an older show sent again, and a stale timer finds nothing due.
+#[derive(Default, Debug)]
+pub struct HostSends { inflight: u32, last: Option<Value>, retry_at: Option<std::time::Instant>, refused: u32, sent_at: Option<std::time::Instant> }
+pub const HOST_RETRY_MS: u64 = 250;
+pub const HOST_RETRY_CAP_MS: u64 = 2000;
+/// An answer this long late is taken as lost (the hub reconnected, the reply dropped): the latest push is due again.
+pub const HOST_LOST_MS: u64 = 8000;
+impl HostSends {
+    /// A push sent now (its params, the project's): the latest wanted, any retry replaced by it.
+    pub fn sent(&mut self, params: Value, now: std::time::Instant) { self.inflight += 1; self.last = Some(params); self.retry_at = None; self.sent_at = Some(now); }
+    /// The hub's answer to a push: when the latest was refused, when to send it again.
+    pub fn reply(&mut self, ok: bool, now: std::time::Instant) -> Option<std::time::Instant> {
+        self.inflight = self.inflight.saturating_sub(1);
+        if self.inflight > 0 { return None }
+        if ok { self.refused = 0; self.retry_at = None; return None }
+        self.refused += 1;
+        let ms = (HOST_RETRY_MS << (self.refused - 1).min(4)).min(HOST_RETRY_CAP_MS);
+        let at = now + std::time::Duration::from_millis(ms); self.retry_at = Some(at); Some(at)
+    }
+    /// The push to send again now, if one is due (taken: the send that follows is a push of its own, `sent`).
+    pub fn due(&mut self, now: std::time::Instant) -> Option<Value> {
+        let lost = self.inflight > 0 && self.sent_at.is_some_and(|t| now.duration_since(t) >= std::time::Duration::from_millis(HOST_LOST_MS));
+        if lost { self.inflight = 0; self.retry_at = Some(now); }
+        match self.retry_at { Some(t) if t <= now && self.inflight == 0 => { self.retry_at = None; self.last.clone() } _ => None }
+    }
+    /// When the next look is wanted (a retry waiting, or an answer outstanding that may be lost).
+    pub fn next_look(&self) -> Option<std::time::Instant> {
+        self.retry_at.or_else(|| (self.inflight > 0).then(|| self.sent_at.map(|t| t + std::time::Duration::from_millis(HOST_LOST_MS))).flatten())
+    }
+    /// A new hub (reconnected): nothing of the old one's is in flight.
+    pub fn rejoined(&mut self) { self.inflight = 0; }
+}
 /// The settle wait in force (MAC_SETTLE_MS, or BACKPLANE_KICAD_MAC_SETTLE_MS; 0: never sent again).
 pub fn mac_settle_ms(env: Option<&str>) -> u64 { env.and_then(|v| v.trim().parse().ok()).unwrap_or(MAC_SETTLE_MS) }
 /// Whether something drawn after the pane's own content covers all of the pane (`over`: what was drawn over it, each clipped to
@@ -407,6 +442,8 @@ pub struct KicadPane {
     /// macOS: when the last push of a burst is sent again (`mac_watch`): a show and the rect corrected a frame later reached KiCad as
     /// two pushes, and its frame kept the first one's rect (e2e-macos 44255662838: 24 pt too tall over the strip, 13.6 s and on)
     mac_settle: Option<std::time::Instant>,
+    /// the window's host pushes, shared with the app (HostSends; Backplane::screens.host_sends)
+    pub host_sends: std::rc::Rc<std::cell::RefCell<HostSends>>,
     last_root: (i32, i32), placed: Option<(Option<nc::R>, Option<u64>, Vec<nc::R>)>,
     focus: FocusHandle, keys: bool, pub light: bool, _subs: Vec<Subscription>,
     /// the fork's holder already in our save-set; reserved chords pressed in KiCad, waiting to be pressed in gpui
@@ -540,7 +577,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, last_root: (i32::MIN, 0), placed: None,
+        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), last_root: (i32::MIN, 0), placed: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
@@ -1258,7 +1295,7 @@ impl KicadPane {
         if now.is_some() && now != self.host_sent {
             if let Some((x, y, w, h, v)) = now {
                 eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [x, y, w, h], "visible": v, "raise": false, "changed": true, "pane_px": at.map(|r| [r.x, r.y, r.w, r.h]), "frame": show, "in_page": self.in_page, "covered": self.mac_covered, "hitbox": hitbox, "dialog": dialog}));
-                self.rpc("editor.kicad.host", json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": v, "raise": false}));
+                self.host_rpc(json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": v, "raise": false}));
                 let ms = mac_settle_ms(std::env::var("BACKPLANE_KICAD_MAC_SETTLE_MS").ok().as_deref());
                 self.mac_settle = (ms > 0).then(|| std::time::Instant::now() + std::time::Duration::from_millis(ms));
                 // the page let the editor go (#1199): the keyboard back to Backplane's window if KiCad had it, as detach does (a8bbdc74e);
@@ -1274,9 +1311,8 @@ impl KicadPane {
         let said = self.mac_order(show, visible, "frame"); // i18n-ok: a log word
         redraw || said
     }
-    /// A host push KiCad refused (kicad_reply): the last push sent again MAC_REFUSED_RETRY_MS from now by the watch (mac_settle), whichever
-    /// push the refusal was for: what is sent is the pane's rect and visibility now.
-    pub fn host_refused(&mut self) { self.mac_settle = Some(std::time::Instant::now() + std::time::Duration::from_millis(MAC_REFUSED_RETRY_MS)); }
+    /// A host push (`editor.kicad.host`): counted in flight and kept as the latest wanted (HostSends), then sent.
+    fn host_rpc(&self, params: Value) { self.host_sends.borrow_mut().sent(params.clone(), std::time::Instant::now()); self.rpc("editor.kicad.host", params); }
     /// macOS: the watch looks every frame's time for the next while (something that can change the order just happened).
     #[cfg(target_os = "macos")]
     fn mac_heat(&mut self) { self.mac_hot = Some(std::time::Instant::now() + std::time::Duration::from_millis(1500)); }
@@ -1305,7 +1341,7 @@ impl KicadPane {
                 let kicad_active = nc::has_focus(0);
                 let also = sunk || raise_also_kicad(&std::env::var("BACKPLANE_KICAD_MAC_RAISE").unwrap_or_default(), kicad_active, n);
                 if let (true, Some((x, y, w, h, v))) = (also, self.host_sent) {
-                    self.rpc("editor.kicad.host", json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": v, "raise": true}));
+                    self.host_rpc(json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": v, "raise": true}));
                 }
                 let said = self.mac_buried && !was;
                 if n <= 8 || n % 30 == 0 || said {
@@ -1334,7 +1370,7 @@ impl KicadPane {
             self.mac_settle = None;
             if let Some((x, y, w, h, v)) = self.host_sent {
                 eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [x, y, w, h], "visible": v, "raise": false, "changed": false, "settle": true}));
-                self.rpc("editor.kicad.host", json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": v, "raise": false}));
+                self.host_rpc(json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": v, "raise": false}));
             }
         }
         let pressed = nc::mouse_down();
@@ -1360,7 +1396,7 @@ impl KicadPane {
     pub fn detach(&mut self) {
         // macOS: KiCad's frame leaves the screen with the pane (its windows are its own; nothing of ours to unmap)
         #[cfg(target_os = "macos")]
-        if let Some((x, y, w, h, true)) = self.host_sent.take() { self.rpc("editor.kicad.host", json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": false, "raise": false})); }
+        if let Some((x, y, w, h, true)) = self.host_sent.take() { self.host_rpc(json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": false, "raise": false})); }
         let Some(c) = self.container.take() else { return };
         nc::place(c, None, None, None, &mut self.last_root); nc::grab_escape(self.toplevel, false);
         // the keyboard back to Backplane's window on leaving the pane (View, another thread)
@@ -1503,6 +1539,44 @@ mod tests {
         assert!(covers_pane((800., 600.), &[(800., 600.)]), "a backdrop over the whole pane");
         assert!(!covers_pane((800., 600.), &[(200., 30.), (300., 600.)]), "a tooltip, a menu or a card over a part of it");
         assert!(!covers_pane((800., 600.), &[]) && !covers_pane((0., 0.), &[(0., 0.)]));
+    }
+    /// #1199: a host push KiCad refuses (a DRC running past 300 ms) is sent again, the latest one, until taken; a newer push (a hide)
+    /// replaces a waiting retry; an earlier push's answer decides nothing; an answer never coming is taken as lost.
+    #[test] fn a_refused_host_push_is_sent_again_until_taken_and_a_newer_one_wins() {
+        use super::{HostSends, HOST_RETRY_MS, HOST_RETRY_CAP_MS, HOST_LOST_MS};
+        use serde_json::json;
+        let ms = std::time::Duration::from_millis; let t0 = std::time::Instant::now();
+        let show = json!({"x": 430, "width": 496, "height": 500, "visible": true}); let hide = json!({"x": 430, "width": 496, "height": 500, "visible": false});
+        // a DRC well past 300 ms: refused, refused, refused, then taken; each retry the latest push, the wait growing to its cap
+        let mut s = HostSends::default();
+        s.sent(show.clone(), t0);
+        let at = s.reply(false, t0 + ms(10)).expect("refused: a retry"); assert_eq!(at, t0 + ms(10 + HOST_RETRY_MS));
+        assert_eq!(s.due(t0 + ms(100)), None, "not before its time");
+        let mut now = at; let mut waits = vec![];
+        for _ in 0..6 { assert_eq!(s.due(now), Some(show.clone()), "the latest push, again"); s.sent(show.clone(), now); let next = s.reply(false, now + ms(5)).unwrap(); waits.push((next - (now + ms(5))).as_millis() as u64); now = next; }
+        assert_eq!(waits, vec![2 * HOST_RETRY_MS, 4 * HOST_RETRY_MS, HOST_RETRY_CAP_MS, HOST_RETRY_CAP_MS, HOST_RETRY_CAP_MS, HOST_RETRY_CAP_MS], "bounded, never a tight loop");
+        assert_eq!(s.due(now), Some(show.clone())); s.sent(show.clone(), now); assert_eq!(s.reply(true, now + ms(5)), None, "taken: nothing more");
+        assert_eq!(s.due(now + ms(60_000)), None);
+        // a newer hide replaces a waiting retry of a show: the show is never sent again
+        let mut s = HostSends::default();
+        s.sent(show.clone(), t0); s.reply(false, t0).unwrap();
+        s.sent(hide.clone(), t0 + ms(50));
+        assert_eq!(s.due(t0 + ms(400)), None, "the hide in flight: no retry of the show");
+        assert_eq!(s.reply(true, t0 + ms(60)), None);
+        assert_eq!(s.due(t0 + ms(5_000)), None, "the hide taken: the closed viewer stays closed");
+        // the same with the hide refused too: what is sent again is the hide
+        let mut s = HostSends::default();
+        s.sent(show.clone(), t0); s.reply(false, t0).unwrap(); s.sent(hide.clone(), t0 + ms(50)); let at = s.reply(false, t0 + ms(60)).unwrap();
+        assert_eq!(s.due(at), Some(hide.clone()), "the latest wanted: the hide");
+        // two in flight: the earlier one's refusal decides nothing, the latest's answer does
+        let mut s = HostSends::default();
+        s.sent(show.clone(), t0); s.sent(hide.clone(), t0 + ms(5));
+        assert_eq!(s.reply(false, t0 + ms(10)), None, "an earlier push refused, the latest still to answer");
+        assert_eq!(s.reply(true, t0 + ms(20)), None); assert_eq!(s.due(t0 + ms(5_000)), None, "the latest taken");
+        // an answer that never comes (the hub reconnected): the latest push is due again once it is that late
+        let mut s = HostSends::default();
+        s.sent(show.clone(), t0); assert_eq!(s.next_look(), Some(t0 + ms(HOST_LOST_MS)));
+        assert_eq!(s.due(t0 + ms(HOST_LOST_MS - 1)), None); assert_eq!(s.due(t0 + ms(HOST_LOST_MS)), Some(show.clone()));
     }
     #[test] fn a_frame_left_behind_our_window_is_tried_again_then_said_with_pop_out() {
         use super::{raise_step, RaiseStep, RaiseState, KICAD_RAISE_BOUND, KICAD_RAISE_HELD};
@@ -1881,10 +1955,11 @@ impl crate::Backplane {
         if reply["ok"] != true {
             let why = crate::hub::rpc_error(&reply);
             // macOS: KiCad refused a host push (a task running: "SetHostGeometry: a task is running: DRC", e2e-macos 44274808579, the
-            // frame then never shown): the pane's last push is sent again in a moment, and again while it is refused
+            // frame then never shown): the latest push is sent again until KiCad takes it or a newer one replaces it (HostSends)
             if method == "editor.kicad.host" {
-                eprintln!("GPUI_LOG {}", json!({"kicad_host_refused": why}));
-                if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| p.host_refused()); }
+                let at = self.screens.host_sends.borrow_mut().reply(false, std::time::Instant::now());
+                eprintln!("GPUI_LOG {}", json!({"kicad_host_refused": why, "retry_ms": at.map(|t| t.saturating_duration_since(std::time::Instant::now()).as_millis() as u64)}));
+                if at.is_some() { self.host_retry_watch(cx); }
             }
             if method == "editor.kicad.attach" {
                 if let Some(p) = self.screens.kicad.clone() {
@@ -1893,7 +1968,7 @@ impl crate::Backplane {
             }
             return;
         }
-        if method == "editor.kicad.host" { eprintln!("GPUI_LOG {}", json!({"kicad_host_reply": reply["applied"], "why": reply["why"], "error": reply["error"]})); }
+        if method == "editor.kicad.host" { self.screens.host_sends.borrow_mut().reply(true, std::time::Instant::now()); eprintln!("GPUI_LOG {}", json!({"kicad_host_reply": reply["applied"], "why": reply["why"], "error": reply["error"]})); }
         if method == "editor.kicad.attach" && reply["state"].is_string() {
             let mut v = reply;
             if let Some(obj) = v.as_object_mut() { obj.remove("t"); obj.remove("id"); obj.remove("ok"); }
@@ -1934,7 +2009,7 @@ impl crate::Backplane {
     }
     pub(crate) fn kicad_rejoin(&mut self, cx: &mut Context<Self>) {
         // a new hub (a restart ends its KiCads): the shown project is asked warm again
-        WARM_LAST.lock().unwrap().clear(); self.kicad_warm();
+        WARM_LAST.lock().unwrap().clear(); self.kicad_warm(); self.screens.host_sends.borrow_mut().rejoined();
         if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| p.reattach()); }
     }
     /// Edit: the thread's design in the real KiCad, in the pane (the page stays on the rail's Board, Schematic or 3D).
@@ -2003,8 +2078,8 @@ impl crate::Backplane {
             // is asked for it again: never an Edit that does nothing
             if belongs_to(&pr.project, &pr.root, &pr.project_id, &key, &pid) { p.update(cx, |p, cx| if sim { p.open_simulation(cx) } else { p.edit_again(cx) }); return true }
         }
-        let (hub, infos, hub_open) = (self.tx.clone(), self.screens.kicad_infos.clone(), open_now.to_string());
-        let page = cx.new(move |cx| { let mut p = KicadPane::new(cx, project, root, pid, open, hub_open, hub); if let Some(v) = infos.values().find(|v| p.matches(v)).cloned() { p.info = v; } if sim { p.override_kind = Some(SIM.into()); } p });
+        let (hub, infos, hub_open, sends) = (self.tx.clone(), self.screens.kicad_infos.clone(), open_now.to_string(), self.screens.host_sends.clone());
+        let page = cx.new(move |cx| { let mut p = KicadPane::new(cx, project, root, pid, open, hub_open, hub); p.host_sends = sends; if let Some(v) = infos.values().find(|v| p.matches(v)).cloned() { p.info = v; } if sim { p.override_kind = Some(SIM.into()); } p });
         // the warm hand-over's end: the page drawn again without the viewer's picture under the pane
         cx.subscribe(&page, |_, _, _: &PaneShown, cx| cx.notify()).detach();
         // the editor's frame closed in KiCad (Ctrl+W, File > Close): back to View, Edit there again (a fresh frame on the next Edit)
@@ -2020,6 +2095,25 @@ impl crate::Backplane {
             else { this.screens.kicad.as_ref().map(|p| p.update(cx, |p, cx| { p.press.push(e.0.clone()); cx.notify(); })); }
         }).detach();
         self.screens.kicad = Some(page); cx.notify(); true
+    }
+    /// The latest host push sent again when it is due (HostSends: refused, or its answer lost), from a timer of the app's own, so a
+    /// pane dropped at View still has its hide sent again; one timer at a time, none while nothing waits.
+    pub(crate) fn host_retry_watch(&mut self, cx: &mut Context<Self>) {
+        if self.screens.host_retrying { return }
+        self.screens.host_retrying = true;
+        cx.spawn(async move |this, cx| loop {
+            let Some(at) = this.update(cx, |this, _| this.screens.host_sends.borrow().next_look()).ok().flatten() else { let _ = this.update(cx, |this, _| this.screens.host_retrying = false); break };
+            // at most HOST_RETRY_MS between looks: a refusal that comes while this waits on a late answer is sent again in time
+            cx.background_executor().timer(at.saturating_duration_since(std::time::Instant::now()).min(std::time::Duration::from_millis(HOST_RETRY_MS))).await;
+            let Ok(()) = this.update(cx, |this, _| {
+                let due = this.screens.host_sends.borrow_mut().due(std::time::Instant::now());
+                if let Some(params) = due {
+                    eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [params["x"], params["y"], params["width"], params["height"]], "visible": params["visible"], "raise": params["raise"], "retry": true}));
+                    this.screens.host_sends.borrow_mut().sent(params.clone(), std::time::Instant::now());
+                    let _ = this.tx.try_send(Command::Rpc("editor.kicad.host".into(), Secret(params), "kicad"));
+                }
+            }) else { break };
+        }).detach();
     }
     /// View: back to Backplane's own viewer (KiCad stays open in the hub, warm for the next Edit).
     pub(crate) fn kicad_view(&mut self, cx: &mut Context<Self>) { if let Some(p) = self.screens.kicad.take() { p.update(cx, |p, _| p.detach()); } cx.notify(); }
