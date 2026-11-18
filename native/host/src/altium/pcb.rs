@@ -56,7 +56,7 @@ fn show(x: f64) -> String { let s = format!("{:.4}", x); s.trim_end_matches('0')
 
 /// The streams a board read needs, by storage name ("Tracks6" for "Tracks6/Data").
 pub struct Src(pub HashMap<String, Vec<u8>>);
-const STORES: [&str; 14] = ["Board6", "Nets6", "Components6", "Polygons6", "Tracks6", "Arcs6", "Vias6", "Pads6", "Fills6", "Texts6", "Regions6", "ShapeBasedRegions6", "WideStrings6", "ComponentBodies6"];
+const STORES: [&str; 15] = ["Rules6", "Board6", "Nets6", "Components6", "Polygons6", "Tracks6", "Arcs6", "Vias6", "Pads6", "Fills6", "Texts6", "Regions6", "ShapeBasedRegions6", "WideStrings6", "ComponentBodies6"];
 impl Src {
     pub fn of(bytes: &[u8]) -> Option<Src> { Src::of_doc(&mut Doc::open(bytes.to_vec())?) }
     pub fn of_doc(d: &mut Doc) -> Option<Src> {
@@ -492,8 +492,8 @@ pub(super) struct PadRec {
     pub i: usize, pub sig: u32, pub name: String, pub layer: u32, pub net: u16, pub comp: u16, pub x: f64, pub y: f64, pub dir: f64,
     pub top: (f64, f64), pub bot: (f64, f64), pub tshape: Shape, pub bshape: Shape, pub hole: f64, pub plated: bool,
     pub hole_shape: u8, pub slot: f64, pub slot_rot: f64, pub off: (f64, f64),
-    /// mask and paste expansion when set by hand (0 when by rule), mm
-    pub mask_x: f64, pub paste_x: f64, pub tent_top: bool, pub tent_bottom: bool,
+    /// the mask's expansion when set by hand (None: by the rules), and the paste's (0 when by rule), mm
+    pub mask_x: Option<f64>, pub paste_x: f64, pub tent_top: bool, pub tent_bottom: bool,
 }
 pub(super) fn pad_recs(src: &Src) -> Vec<PadRec> {
     let mut out = vec![];
@@ -541,7 +541,7 @@ pub(super) fn pad_recs(src: &Src) -> Vec<PadRec> {
             rad = [rads[0], rads[31]];
         }
         out.push(PadRec { i, sig: sig(rec), name, layer: layer as u32, net, comp, x, y, dir, top, bot, tshape: shape_of(tshape, alt[0], rad[0]), bshape: shape_of(bshape, alt[1], rad[1]),
-            hole, plated, hole_shape, slot, slot_rot, off, mask_x: if mask_mode == 2 { mask_x } else { 0.0 }, paste_x: if paste_mode == 2 { paste_x } else { 0.0 },
+            hole, plated, hole_shape, slot, slot_rot, off, mask_x: (mask_mode == 2).then_some(mask_x), paste_x: if paste_mode == 2 { paste_x } else { 0.0 },
             tent_top: flags1 & 0x20 != 0, tent_bottom: flags1 & 0x40 != 0 });
     }
     out
@@ -582,8 +582,9 @@ fn pads(c: &mut Ctx, out: &mut Vec<Item>) {
         if !thru || p.plated { if let Some(prim) = p.copper(bottom, 0.0) { push(out, k.clone(), s, side, prim, &info) } }
         // mask and paste (hidden in a board view, shown by a Gerber comparison)
         let mut masks = vec![];
-        if (l == F_CU || l == PADS) && !p.tent_top { masks.push((F_MASK, false, p.mask_x, "m")) }
-        if (l == B_CU || l == PADS) && !p.tent_bottom { masks.push((B_MASK, true, p.mask_x, "bm")) }
+        let mx = p.mask_x.unwrap_or(0.0);
+        if (l == F_CU || l == PADS) && !p.tent_top { masks.push((F_MASK, false, mx, "m")) }
+        if (l == B_CU || l == PADS) && !p.tent_bottom { masks.push((B_MASK, true, mx, "bm")) }
         if !thru && l == F_CU { masks.push((F_PASTE, false, p.paste_x, "s")) }
         if !thru && l == B_CU { masks.push((B_PASTE, true, p.paste_x, "bs")) }
         for (ml, bot, e, tag) in masks { if let Some(prim) = p.copper(bot, e) { push(out, format!("{k}/{tag}"), s, ml, prim, &info) } }
@@ -791,6 +792,26 @@ pub(super) fn build(src: &Src) -> (Vec<Item>, Ctx<'_>) {
         #[cfg(test)] if std::env::var_os("BP_ALTIUM_TIME").is_some() { eprintln!("  {_name}: {} ms", _t.elapsed().as_millis()) }
     }
     (out, c)
+}
+
+/// Rules6: each rule is 2 bytes, then its properties (u32 length, `|KEY=VALUE|` text)
+pub(super) fn rules(src: &Src) -> Vec<Props> {
+    let (b, mut out, mut i) = (src.get("Rules6"), vec![], 0);
+    while i + 6 <= b.len() {
+        let n = (u32::from_le_bytes([b[i + 2], b[i + 3], b[i + 4], b[i + 5]]) & 0x00FF_FFFF) as usize;
+        i += 6;
+        if i + n > b.len() { break }
+        out.push(Props::parse(&b[i..i + n]));
+        i += n;
+    }
+    out
+}
+/// The board's solder mask expansion, mm: its enabled SolderMaskExpansion rule for All and All of the first priority (as KiCad's
+/// import takes it for the board's); 0 when it has none.
+pub(super) fn mask_rule(src: &Src) -> f64 {
+    let all = |p: &Props, k: &str| p.get(k).trim().eq_ignore_ascii_case("all");
+    rules(src).into_iter().filter(|p| p.get("RULEKIND").eq_ignore_ascii_case("SolderMaskExpansion") && (!p.has("ENABLED") || p.bool("ENABLED")) && all(p, "SCOPE1EXPRESSION") && all(p, "SCOPE2EXPRESSION"))
+        .min_by_key(|p| if p.has("PRIORITY") { p.int("PRIORITY") } else { 1 }).map_or(0.0, |p| milmm(p.num("EXPANSION")))
 }
 
 /// The whole board as items with KiCad layer ids; None if the bytes are not a readable PcbDoc.

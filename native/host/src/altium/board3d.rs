@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// This reader's version, in the names of the board models kept from it (stream.rs `board_model_kept`): raise it when it draws differently.
-pub const VERSION: &str = "alt1-";
+pub const VERSION: &str = "alt2-";
 
 /// The board model of a .PcbDoc's bytes; the models it carries are written into `models` (named by content: written once).
 pub fn board(bytes: &[u8], models: &Path) -> Result<Board, String> {
@@ -32,12 +32,13 @@ pub fn board(bytes: &[u8], models: &Path) -> Result<Board, String> {
     let src = Src::of_doc(&mut doc).ok_or("this file is not an Altium board (it has no Board6 record)")?;
     let (items, ctx) = pcb::build(&src);
     let thick = ctx.layers.thick_um as f64 / 1000.0;
-    let mut b = Board { stack: Stackup { thickness: thick, copper: ctx.layers.copper_mm(), ..Stackup::default() }, ..Board::default() };
+    let rule = pcb::mask_rule(&src);
+    let mut b = Board { stack: Stackup { thickness: thick, copper: ctx.layers.copper_mm(), mask_margin: rule, ..Stackup::default() }, ..Board::default() };
     for it in &items { item(&mut b, it) }
     let refdes = |c: u16| if c == pcb::NONE { String::new() } else { ctx.comps.get(c as usize).map(|k| k.refdes.clone()).unwrap_or_default() };
     // the copper stack's outer layers (the first and last of Board6's stack)
     let side_of = |a: u32| match ctx.layers.paint(a) { Some(pcb::F_CU) => (true, false), Some(pcb::B_CU) => (false, true), Some(pcb::PADS) => (true, true), _ => (false, false) };
-    for p in pcb::pad_recs(&src) { pad(&mut b, &p, side_of(p.layer), refdes(p.comp)) }
+    for p in pcb::pad_recs(&src) { pad(&mut b, &p, side_of(p.layer), refdes(p.comp), rule) }
     for v in pcb::via_recs(&src) {
         let c = P2::new(v.x, -v.y);
         let (top, bottom) = (side_of(v.from as u32).0, side_of(v.to as u32).1);
@@ -97,7 +98,8 @@ fn item(b: &mut Board, it: &Item) {
     }
 }
 
-fn pad(b: &mut Board, p: &pcb::PadRec, (top, bottom): (bool, bool), reference: String) {
+/// `rule`: the board's mask expansion, for a pad that does not set its own
+fn pad(b: &mut Board, p: &pcb::PadRec, (top, bottom): (bool, bool), reference: String, rule: f64) {
     let drill = p.thru().then(|| {
         let c = P2::new(p.x, -p.y);
         if p.hole_shape == 2 && p.slot > p.hole { Drill { c, w: p.slot, h: p.hole, rot: p.dir + p.slot_rot, plated: p.plated } } else { Drill { c, w: p.hole, h: p.hole, rot: 0.0, plated: p.plated } }
@@ -107,7 +109,7 @@ fn pad(b: &mut Board, p: &pcb::PadRec, (top, bottom): (bool, bool), reference: S
     let (t, bt) = (p.copper(false, 0.0).and_then(|x| shape(&x)), p.copper(true, 0.0).and_then(|x| shape(&x)));
     let mk = |s: Option<Shape>, top: bool, bottom: bool, drill: Option<Drill>| Pad {
         shapes: s.into_iter().collect(), layers: PadLayers { cu_top: top, cu_bottom: bottom, mask_top: top && !p.tent_top, mask_bottom: bottom && !p.tent_bottom },
-        drill, mask_margin: p.mask_x, reference: reference.clone() };
+        drill, mask_margin: p.mask_x.unwrap_or(rule), reference: reference.clone() };
     if !copper || (!top && !bottom) { if let Some(d) = drill { b.holes.push(d) } return }
     if top && bottom && t == bt { b.pads.push(mk(t, true, true, drill)); return }
     // a pad whose top and bottom differ: one a side, the hole with the first
@@ -159,10 +161,17 @@ pub(super) fn write_model(z: &[u8], name: &str, dir: &Path) -> Result<PathBuf, S
     let mut data = Vec::new();
     if std::io::Read::read_to_end(&mut flate2::read::ZlibDecoder::new(z), &mut data).is_err() { data = z.to_vec() }
     if !data.starts_with(b"ISO-10303-21") { return Err(format!("{name}: not a STEP model (only STEP models are drawn)")) }
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let tmp = dir.join(format!(".{}.{}.part", file.file_name().unwrap_or_default().to_string_lossy(), std::process::id()));
-    if let Err(e) = std::fs::write(&tmp, &data).and_then(|_| std::fs::rename(&tmp, &file)) { let _ = std::fs::remove_file(&tmp); return Err(e.to_string()) }
+    put(&file, &data).map_err(|e| e.to_string())?;
     Ok(file)
+}
+/// A file written whole or not at all: through a staged file of this writer's own (a prewarm and a 3D view may write one at once)
+fn put(file: &Path, data: &[u8]) -> std::io::Result<()> {
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    if let Some(d) = file.parent() { std::fs::create_dir_all(d)? }
+    let tmp = file.with_file_name(format!(".{}.{}-{}.part", file.file_name().unwrap_or_default().to_string_lossy(), std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    let r = std::fs::write(&tmp, data).and_then(|_| std::fs::rename(&tmp, file));
+    if r.is_err() { let _ = std::fs::remove_file(&tmp); }
+    r
 }
 
 fn mil(p: &Props, k: &str) -> f64 { super::parse_num(p.get(k)) * 0.0254 }
@@ -227,10 +236,7 @@ pub(super) fn prism(k: &CompRec, b: &Body, thick: f64, dir: &Path) -> Option<Pat
     let text = vrml_prism(&ring, z0, z1, b.p.int("BODYCOLOR3D") as u32)?;
     let file = dir.join(format!("altium-body-v1-{:016x}.wrl", crate::files::kicad::plot::mesh_id(text.as_bytes())));
     if file.is_file() { return Some(file) }
-    std::fs::create_dir_all(dir).ok()?;
-    let tmp = dir.join(format!(".{}.{}.part", file.file_name().unwrap_or_default().to_string_lossy(), std::process::id()));
-    if std::fs::write(&tmp, &text).and_then(|_| std::fs::rename(&tmp, &file)).is_err() { let _ = std::fs::remove_file(&tmp); return None }
-    Some(file)
+    put(&file, text.as_bytes()).ok().map(|_| file)
 }
 
 /// A closed prism over `ring` (mm, y up) from z0 to z1 as a VRML2 triangle set, faces outward, in Altium's colour (0x00BBGGRR).
@@ -353,6 +359,7 @@ mod tests {
         c.flush().unwrap();
         c.into_inner().into_inner()
     }
+    fn rule(t: &str) -> Vec<u8> { let mut v = vec![2u8, 0]; v.extend(text_rec(t)); v }
     const STEP: &[u8] = b"ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n";
     fn zlib(b: &[u8]) -> Vec<u8> { use std::io::Write; let mut e = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default()); e.write_all(b).unwrap(); e.finish().unwrap() }
 
@@ -366,6 +373,7 @@ mod tests {
         ].concat();
         let bytes = cfb(&[
             ("Board6/Data", text_rec(board6)),
+            ("Rules6/Data", [rule("|RULEKIND=SolderMaskExpansion|SCOPE1EXPRESSION=InNet('X')|SCOPE2EXPRESSION=All|PRIORITY=1|EXPANSION=9mil"), rule("|RULEKIND=SolderMaskExpansion|SCOPE1EXPRESSION=All|SCOPE2EXPRESSION=All|PRIORITY=2|EXPANSION=4mil")].concat()),
             ("Components6/Data", text_rec("|SOURCEDESIGNATOR=U1|PATTERN=SOIC8|X=500mil|Y=500mil|ROTATION=90|LAYER=BOTTOM")),
             ("Vias6/Data", via(100.0, 100.0, 24.0, 12.0)),
             ("ComponentBodies6/Data", bodies),
@@ -375,6 +383,7 @@ mod tests {
         let d = crate::plat::tmp::dir("alt-board");
         let b = board(&bytes, &d).expect("a board");
         assert!((b.stack.thickness - ((1.4 * 2.0 + 60.0) * 0.0254 + 0.02)).abs() < 1e-3, "{}", b.stack.thickness);
+        assert!((b.stack.mask_margin - 0.1016).abs() < 1e-9, "the board's mask rule: {}", b.stack.mask_margin);
         assert!(b.outline.len() == 1 && matches!(&b.outline[0], Shape::Poly { pts, .. } if pts.len() == 4), "{:?}", b.outline);
         assert_eq!(b.vias.len(), 1);
         let v = b.vias[0]; assert!((v.c.x - 2.54).abs() < 1e-6 && (v.c.y + 2.54).abs() < 1e-6 && (v.drill - 0.3048).abs() < 1e-6 && v.tented_top && !v.tented_bottom, "{v:?}");
