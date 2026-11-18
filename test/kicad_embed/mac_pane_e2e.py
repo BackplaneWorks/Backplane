@@ -827,7 +827,7 @@ try:
             burst = [(round((t - t0) * 1000), j['kicad_host_push'], j.get('visible'), j.get('settle')) for t, j in PUSHES if t >= t0]
             vis = [b for b in burst if b[2]]
             prov = len(vis) >= 2 and any(v[1] != vis[0][1] and v[0] - vis[0][0] <= 150 for v in vis[1:])
-            last = burst[-1][1] if burst else None; f = kframe()
+            last = burst[-1][1] if burst else (PUSHES[-1][1]['kicad_host_push'] if PUSHES else None); f = kframe()  # no push in the return: the last one before it
             ok = bool(f and last) and all(abs(a - b) <= 2 for a, b in zip(f[3], last))
             provoked += prov; wrong += (not ok)
             print(f'INFO swap {i + 1}: Full size toggled {toggled}; pushes {burst}; burst provoked {prov}; frame {f and f[3]}; last push {last}; {"at the last rect" if ok else "NOT at the last rect"}', flush=True)
