@@ -681,6 +681,42 @@ try:
                 if not k_now: click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); time.sleep(0.6); key(K_ESC); time.sleep(0.3)
                 check(active(kpid), f'leave: the keyboard is in KiCad ({"at once" if k_now else "after a click on the canvas"})')
         raise SystemExit(1 if FAILS else 0)
+    # ---- MAC_MODE=hide (#1198): Cmd+H with KiCad's canvas focused hides Backplane and KiCad's frame (a runtime with comment-key-63: the
+    # host reserves Ctrl+H); unhidden, KiCad's frame is directly above Backplane's window again and a click gives KiCad the keyboard; Cmd+H
+    # with Backplane focused does the same. A runtime without comment-key-63 keeps Cmd+H KiCad's own (high contrast): nothing hides ----
+    if os.environ.get('MAC_MODE') == 'hide':
+        caps = json.load(open(os.path.join(RT, 'manifest.json'))).get('capabilities') or []
+        reserved_h = 'comment-key-63' in caps
+        P = last_push()[0]
+        def kicad_over_pane():
+            out = []
+            for w in wins():
+                if w[1] != kpid: continue
+                x0, y0 = max(w[3][0], P[0]), max(w[3][1], P[1]); x1, y1 = min(w[3][0] + w[3][2], P[0] + P[2]), min(w[3][1] + w[3][3], P[1] + P[3])
+                if x1 > x0 and y1 > y0 and (x1 - x0) * (y1 - y0) > 0.3 * P[2] * P[3]: out.append(w)
+            return out
+        def ours_on_screen(): return any(w[0] == cw[0] for w in wins())
+        def unhide():
+            a = NSRunningApplication.runningApplicationWithProcessIdentifier_(client.pid); a.unhide(); time.sleep(0.4); a.activateWithOptions_(0)
+        def canvas_click(): click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); time.sleep(0.6); key(K_ESC); time.sleep(0.3)
+        for who in ('kicad', 'backplane'):
+            if who == 'kicad': canvas_click()
+            else:
+                cwa = next((w for w in wins() if w[0] == cw[0]), cw); click(cwa[3][0] + 200, cwa[3][1] + 28 + 300); time.sleep(1)
+            print(f'INFO hide: Cmd+H with {who} focused (KiCad active {active(kpid)}; the runtime reserves Ctrl+H: {reserved_h})', flush=True)
+            key(4, CMD)
+            hid = wait_for(lambda: not ours_on_screen() and not kicad_over_pane(), 5, 0.1)
+            if who == 'kicad' and not reserved_h:
+                check(not hid and ours_on_screen(), 'hide: a runtime without comment-key-63 keeps Cmd+H KiCad\'s own (nothing hides)')
+                continue
+            check(bool(hid), f'hide: Cmd+H with {who} focused hides Backplane and KiCad\'s frame (Backplane on screen {ours_on_screen()}; KiCad over the pane {len(kicad_over_pane())})')
+            unhide()
+            back = wait_for(kicad_frame, 10, 0.1); shot(f'hide-{who}-back')
+            check(bool(back), f'hide: unhidden, KiCad\'s frame is directly above Backplane\'s window over the pane ({who})')
+            if back:
+                P = last_push()[0]; canvas_click()
+                check(active(kpid), f'hide: after the unhide a click gives KiCad the keyboard ({who})')
+        raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=zoom: the zoom chords in the embedded board editor (fork embed's fix/mac-cmd-equals-zoom: plain Cmd+= zooms in), judged by
     # the board's size on screen (KiCad has no view readback): the extent of the board's coloured pixels (copper, silk; the grid, ratsnest and
     # text are grey) inside the canvas, where the canvas is where those pixels differ between two zoom levels (the panels' swatches do not).

@@ -25,7 +25,7 @@ on:
         description: "kicad-pane job: a published Backplane KiCad release (e.g. backplane-kicad-v10.99.0-bp.13.1) whose darwin-arm64 package it runs, instead of kicad_run's"
         default: ""
       mac_mode:
-        description: "kicad-pane job: mac_pane_e2e.py's MAC_MODE (empty: the default rows; bs, narrow, restart, lock, autosave, recover, zoom, leave, update, ...)"
+        description: "kicad-pane job: mac_pane_e2e.py's MAC_MODE (empty: the default rows; bs, narrow, restart, lock, autosave, recover, zoom, leave, hide, update, ...)"
         default: ""
       pane_env:
         description: "kicad-pane job: extra environment for the run, space separated NAME=value (e.g. FRONT_REPS=3; mac_mode front also writes the 60 Hz window-order trace into the artifact)"
