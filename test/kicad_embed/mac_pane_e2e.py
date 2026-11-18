@@ -864,6 +864,51 @@ try:
                 if not ok_back: print(f'INFO swap {i + 1}: Full size off pushed no narrower rect: the next return is judged on its own pushes only', flush=True); PUSHES.append((time.time(), {'kicad_host_push': None}))
         print(f'INFO swap: {provoked} of {reps} returns provoked a burst; {wrong} ended off the last pushed rect', flush=True)
         check(wrong == 0, f'swap: every return ends at the last rect the client pushed ({wrong} of {reps} did not; {provoked} bursts provoked)')
+        # (B) geometry while KiCad runs its checks (the lead's: return 3 was SetHostGeometry refused, "a task is running: DRC"): an agent's
+        # RunChecks started, and while it runs (it must run longer than 300 ms, said) the pane changes size (Full size) and, on alternate
+        # tries, the viewer closes and the Board page comes back; the frame must end visible at the client's LAST rect once the checks end
+        sys.path.insert(0, os.path.join(REPO, 'test/kicad_embed/mac')); import hub_ws
+        token = open(os.path.join(OUT, 'home/token')).read().strip(); pcbf = os.path.join(OUT, 'proj', 'ecc83-pp.kicad_pcb')
+        def mcalls(): return [l for l in open(os.path.join(OUT, 'standin.log'), errors='replace').read().splitlines() if l.startswith('MCPCALL')] if os.path.isfile(os.path.join(OUT, 'standin.log')) else []
+        def ask(name, args, wait=120):
+            n0 = len(mcalls())
+            hub_ws.send(port, token, 'turn.start', {'thread': 't1', 'text': 'mcpcall:' + json.dumps({'name': name, 'arguments': args}), 'msg': f'sw-{time.time_ns()}'})
+            wait_for(lambda: len(mcalls()) > n0, wait, 0.3)
+        b_reps = int(os.environ.get('SWAP_CHECK_REPS', '4')); b_wrong = b_during = 0
+        for i in range(b_reps):
+            wait_for(kframe, 10, 0.2); time.sleep(0.5)
+            log0 = len(client_log().splitlines()); n0 = len(PUSHES)
+            done = []
+            th = threading.Thread(target=lambda: (ask('kicad_ipc', {'path': pcbf, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': 'FK_PCB'}}), done.append(time.time())), daemon=True)
+            tc = time.time(); th.start(); time.sleep(0.25)
+            if i % 2 == 0: press_rect('kicad:full')
+            else: press_rect('ui:CloseViewer'); time.sleep(0.4); press_rect('rail:Board')
+            th.join(120); dur = (done[0] - tc) if done else None; time.sleep(1.5); wait_for(kframe, 5, 0.05); time.sleep(0.5)
+            busy = [l for l in client_log().splitlines()[log0:] if 'a task is running' in l]
+            during = bool(busy) or (dur is not None and dur > 0.3)
+            b_during += during
+            last = next((j['kicad_host_push'] for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None); lastvis = next((j.get('visible') for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None)
+            f = kframe(); ok = bool(lastvis) and bool(f and last) and all(abs(a - b) <= 2 for a, b in zip(f[3], last))
+            b_wrong += (not ok)
+            print(f'INFO swap B{i + 1}: {"Full size" if i % 2 == 0 else "close and reopen"} during RunChecks ({dur and round(dur * 1000)} ms; busy replies {len(busy)}); pushes {[(round((t - tc) * 1000), j["kicad_host_push"], j.get("visible")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; frame {f and f[3]}; last {last} visible {lastvis}; {"ok" if ok else "NOT at the last rect"}', flush=True)
+            if i % 2 == 0: press_rect('kicad:full'); time.sleep(1.5)
+        check(b_during > 0, f'swap B: the pane changed while KiCad ran its checks ({b_during} of {b_reps} tries ran longer than 300 ms or met a busy reply)')
+        check(b_wrong == 0, f'swap B: after geometry during the checks, the frame ends visible at the LAST rect ({b_wrong} of {b_reps} did not)')
+        # (C) a newer hide is not undone: the Board page, then the viewer closed again the moment the first visible:true push is seen; 1.5 s
+        # later no KiCad frame may cover the pane (a deferred show must not win over the later hide)
+        c_reps = int(os.environ.get('SWAP_HIDE_REPS', '4')); c_wrong = 0
+        def over_pane():
+            pp = (last_push() or [[0, 0, 0, 0]])[0]
+            return [w for w in wins() if w[1] == kpid and w[3][2] > 200 and w[3][3] > 200 and abs(w[3][0] - pp[0]) < 400]
+        for i in range(c_reps):
+            wait_for(kframe, 10, 0.2); press_rect('ui:CloseViewer'); time.sleep(1.2)
+            t0 = time.time(); n0 = len(PUSHES); press_rect('rail:Board')
+            seen = wait_for(lambda: any(j.get('visible') for _, j in PUSHES[n0:] if j.get('kicad_host_push')), 3, 0.005)
+            press_rect('ui:CloseViewer'); time.sleep(1.5)
+            stale = over_pane(); c_wrong += bool(stale)
+            print(f'INFO swap C{i + 1}: show seen {bool(seen)}, then closed; pushes {[(round((t - t0) * 1000), j["kicad_host_push"], j.get("visible")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; KiCad over the pane after 1.5 s {[w[3] for w in stale]}', flush=True)
+            press_rect('rail:Board'); wait_for(kframe, 10, 0.1); time.sleep(0.8)
+        check(c_wrong == 0, f'swap C: a hide right after a show is not undone ({c_wrong} of {c_reps} left KiCad over the pane)')
         raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=hide (#1198): Cmd+H with KiCad's canvas focused hides Backplane and KiCad's frame (a runtime with comment-key-63: the
     # host reserves Ctrl+H); unhidden, KiCad's frame is directly above Backplane's window again and a click gives KiCad the keyboard; Cmd+H
