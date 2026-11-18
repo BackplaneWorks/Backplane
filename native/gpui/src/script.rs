@@ -12,7 +12,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
+/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
 pub enum Ctl { /** the composer chip's account menu, and Settings' Accounts page */ AccountMenu, AccountsPage, /** the sidebar hub picker */ Hub(crate::screens::hubpick::Act), PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, Rail(String), PickFiles, /** the ▾ beside the thread's name: its menu */ ThreadMenu, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), /** a hub page of the Settings nav */ SettingsPage(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch, /** a bots-page press (screens::bots::press): its kind and value */ Bot(String, String), /** a chat terminal's card: focus, expand, pop, stop; its key */ Term(String, String), /** a subagent's own view (its key; "" goes back) */ Sub(String), /** a card's button that sends the hub an action (a halt card's Resume...): `Command::Action` */ Go(String, String), /** the viewer's Edit (true: the real KiCad in the pane) and View (false) */ KicadEdit(bool), /** the editor strip: a tab (its kind), full, popout, popin */ KicadAct(String), /** a management panel's press (screens/mgmt.rs `act`) */ Mgmt(String) }
@@ -48,6 +48,7 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let Some(r) = v["record"].as_str() { Some(Step::Record(if r == "start" { Some(v["name"].as_str().unwrap_or("rec").to_string()) } else { None })) }
         else if let (Some(id), Some(ms)) = (v["click"].as_str(), v["within"].as_u64()) { Some(Step::ClickWithin(id.into(), ms)) }
         else if let Some(id) = v["click"].as_str() { Some(Step::Click(id.into())) }
+        else if let Some(id) = v["press"].as_str() { Some(Step::Press(id.into())) }
         else if let Some(op) = v["imp"].as_str() { Some(Step::Imp(op.into())) }
         else if let Some(what) = v["read"].as_str() { Some(Step::Read(what.into())) }
         else if let Some(on) = v["layers"].as_bool() { Some(Step::Layers(on, v["max_h"].as_f64().map(|x| x as f32), v["scroll"].as_f64().unwrap_or(0.0) as f32)) }
@@ -390,6 +391,8 @@ impl Backplane {
                 let (text, supported) = match what.as_str() { "composer" => (self.input.read(cx).content.to_string(), true),
                     // the settings overlay's structure (labels, button actions, field names; never a field's value), to design its layout from the real payload
                     "settings" => (crate::screens::settings::structure(&self.data["settings"]), true),
+                    // the viewer pane as last drawn: "<page>[ pressed]|<loading line>|<the rail's lit kind>|<the window's error line>" (the tab-loading e2e)
+                    "pane" => (format!("{}|{}|{}", crate::screens::viewer::drawn(), crate::screens::viewer::active_kind(&self.data["thread"]["viewer"], self.screens.rail_pending.as_deref()), self.error.replace('|', "/")), true),
                     // the performance overlay's text; not supported while it is hidden
                     "perf" => crate::perf::lines().map_or((String::new(), false), |l| (l.join("\n"), true)),
                     // the open thread's conversation as the window holds it (its id, then one "role: text" line per entry), for e2e checks that a view
@@ -410,6 +413,12 @@ impl Backplane {
                 self.steps.push_front(Step::ClickWithin(id, ms.saturating_sub(250)));
                 self.steps.push_front(Step::Wait(250));
                 self.pump(cx);
+            }
+            Step::Press(id) => {
+                let found = self.all_controls().find(|c| c.id == id).cloned();
+                let action = found.map(|e| self.do_click(&e.ctl, cx));
+                self.m("press", json!({"id": id, "found": action.is_some(), "action": action}));
+                self.ui_epoch += 1; cx.notify(); self.pump(cx);
             }
             Step::Click(id) => {
                 let epoch = self.ui_epoch;

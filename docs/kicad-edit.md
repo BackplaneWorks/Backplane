@@ -120,6 +120,8 @@ to what an edit in twenty was:
 
 ## Ops
 
+Every answer, and every error after KiCad was reached, carries `served_by`: `headless` (kicad-cli api-server), `embedded` (the person's KiCad), `both` (the route changed between two requests), or null (refused before any request). A commit open in one KiCad is never continued in the other: the request is refused and the edit dropped.
+
 Parts are named by reference; lengths are millimetres, angles degrees, layers as KiCad shows them (`F.Cu`).
 
 | Op | What it does |
@@ -127,9 +129,9 @@ Parts are named by reference; lengths are millimetres, angles degrees, layers as
 | `{find: {kind, ...match}}` | The rows of a kind. Board: footprint, pad, track, arc, via, zone, text, shape, net. Schematic: symbol, wire, label, junction, no_connect, sheet. `fields: true` adds a part's fields, `raw: true` gives KiCad's own items, `limit` (200). |
 | `{move: refs, by: [dx, dy]}` | Also `to: [x, y]` and `rot`. |
 | `{set: refs, footprint: "Lib:Name"}` | A board: the footprint exchanged (above), answered with the pads' new places. A schematic: the symbols' Footprint. |
-| `{set: refs or {kind, ...match}, ...row keys}` | Change what the row shows: `value`, `fields: {MPN: ...}`, `at`, `rot`, a zone's `clearance`, `min_width`, `name`, `priority`, a track's `width`, `layer`, `net`. `raw: {...}` merges into KiCad's own item. |
-| `{add: [...], sheet?, fit?}` | `{track: {from, to, width, layer, net}}`, `{via: {at, size, drill, net, layers}}`, `{wire: [[x, y] or "REF.PIN", ...]}`, `{label: {text, at, type}}`, `{junction: [x, y]}`, `{no_connect: [x, y]}`, `{symbol: {lib, ref, value, at, rot, footprint, fields, pins}}`, or KiCad's own item with `@type`. A new symbol answers with its pins' places. |
-| `{delete: ids or {kind, ...match}}` | A selector must say more than a kind. |
+| `{set: refs or {kind, ...match}, ...row keys}` | Change what the row shows: `value`, `fields: {MPN: ...}`, `at`, `rot`, a zone's `clearance`, `min_width`, `name`, `priority`, a track's `width`, `layer`, `net`. `raw: {...}` merges into KiCad's own item; a symbol's `definition` is refused (its library symbol is not changed by an update: delete and add). |
+| `{add: [...], sheet?, fit?}` | `{track: {from, to, width, layer, net}}`, `{via: {at, size, drill, net, layers}}`, `{wire: [[x, y] or "REF.PIN", ...]}`, `{label: {text, at, type}}`, `{junction: [x, y]}`, `{no_connect: [x, y]}`, `{symbol: {lib, ref, value, at, rot, footprint, fields, pins}}`, or KiCad's own item with `@type` (a `SchematicSymbolInstance` naming only `definition.id` is placed from its library first, KiCad's definition kept whole, its own keys over it). A new symbol answers with its pins' places. A symbol KiCad gives with no pins and nothing drawn, fields only, is refused unless `allow_empty: true` (#1192: an HTTP library part whose source symbol had not loaded in the headless KiCad up to bp.13.2; place the source symbol itself with the part's fields instead). |
+| `{delete: ids or {kind, ...match}}` | A selector must say more than a kind. A selector first ends the call's open commit, so it finds what this call added. |
 | `{netclass: {name, clearance, track_width, diff_pair_width, diff_pair_gap, via_diameter, via_drill, patterns}}` | Added or changed (merged), the patterns assigned to it. |
 | `{rule: {name, condition, constraints: [{type, min, opt, max}], layer, severity}}` | Custom rules by name (`EditCustomRules`); `{rule: {remove: name}}`. |
 | `{refill: true}` | Refill every zone. |

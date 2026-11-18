@@ -270,6 +270,29 @@ pub fn sym_pins(raw: &Value) -> Vec<(String, String, (f64, f64), (f64, f64))> {
         let o = match p["orientation"].as_str().unwrap_or("") { "SPO_UP" => (0.0, 1.0), "SPO_DOWN" => (0.0, -1.0), "SPO_LEFT" => (1.0, 0.0), _ => (-1.0, 0.0) }; let (ox, oy) = turn(o.0, o.1);
         (p["number"].as_str().unwrap_or("").to_string(), p["name"].as_str().unwrap_or("").to_string(), (r3(px + x), r3(py + y)), (ox.round(), oy.round())) }).collect()
 }
+/// A symbol KiCad placed from its library with neither a pin nor anything drawn: its definition holds fields alone (or nothing). A power
+/// symbol (pins only), a logo or mechanical symbol (a body only), one that extends another (KiCad answers it flattened) and a unit of a
+/// multi-unit part all have one or the other. This is what KiCad's HTTP library gives in the headless KiCad up to bp.13.2 when the symbol
+/// its part names (symbolIdStr, `Device:R`) has not loaded (#1192). A placement answered with no definition at all is not judged (false).
+/// Items come wrapped ({item, unit, body_style}) as KiCad answers them; a bare item is read too.
+pub fn hollow(raw: &Value) -> bool {
+    let d = &raw["definition"]; if !d.is_object() { return false }
+    !d["items"].as_array().into_iter().flatten().any(|i| { let it = if i["item"].is_object() { &i["item"] } else { i }; it["@type"].as_str().is_some_and(|t| !t.ends_with(".SchematicField")) })
+}
+/// The names of the fields an empty template has (what KiCad did give).
+fn fields_named(t: &Value) -> String {
+    let d = &t["definition"]; let mut n: Vec<String> = d["items"].as_array().into_iter().flatten().filter_map(|i| { let it = if i["item"].is_object() { &i["item"] } else { i }; it["name"].as_str().map(str::to_string) }).collect();
+    for k in ["reference_field", "value_field", "footprint_field", "datasheet_field", "description_field"] { if let Some(x) = d[k]["name"].as_str() { if !n.iter().any(|y| y == x) { n.push(x.into()) } } }
+    if n.is_empty() { "none".into() } else { n.join(", ") }
+}
+/// What an agent is told of an empty template: which runtime made it, why, and what does work. Placing the source symbol again later in the
+/// same KiCad session does not mend it: the HTTP library keeps the part as it first made it.
+pub const HOLLOW: &str = "Nothing was placed from it. With an HTTP library this is the part's source symbol (its symbolIdStr, such as Device:R) not being loaded when the HTTP library first built this part, and that KiCad keeps the part so for the rest of its session, even once the source library has loaded. What works: place the source symbol itself (add {symbol: {lib: \"Device:R\", ref, at, value, footprint, fields}}) with the part's fields. A symbol that is fields alone on purpose is placed with allow_empty: true.";
+/// A raw SchematicSymbolInstance to add that names its library symbol (`definition.id`) and brings no body of its own: KiCad makes one from
+/// that id with the value and footprint alone, so it is placed from its library first, as a `symbol` entry is.
+fn raw_by_lib(it: &Value) -> bool {
+    it["@type"].as_str().is_some_and(|t| t.ends_with(".SchematicSymbolInstance")) && it["definition"]["id"]["entry_name"].is_string() && it["definition"]["items"].as_array().map_or(true, |a| a.is_empty())
+}
 /// Apply a row's keys to the raw item (`set`). Says whether a footprint's body (its `definition`) changed, so the update may leave it out.
 pub fn apply(kind: &str, raw: &mut Value, with: &Value) -> Result<bool, String> {
     let Some(o) = with.as_object() else { return Err("with is an object of row keys".into()) };
@@ -571,7 +594,9 @@ impl Run<'_> {
         let v = &it["symbol"]; let lib = v["lib"].as_str().unwrap_or(""); let (nick, entry) = lib.split_once(':').ok_or("symbol.lib is Library:Symbol")?;
         let mut msg = json!({"header": self.header(sheet), "lib_id": {"library_nickname": nick, "entry_name": entry}, "position": point(&v["at"], "at")?, "orientation": format!("SSO_{}", v["rot"].as_i64().unwrap_or(0)), "unit": {"unit": v["unit"].as_u64().unwrap_or(1)}});
         if let Some(r) = v["ref"].as_str() { msg["reference"] = json!(r) }
-        self.from_library(&format!("{S}PlaceSymbolFromLibrary"), msg).await.map_err(|e| format!("symbol {lib}: {e}"))
+        let t = self.from_library(&format!("{S}PlaceSymbolFromLibrary"), msg).await.map_err(|e| format!("symbol {lib}: {e}"))?;
+        if hollow(&t) && v["allow_empty"].as_bool() != Some(true) { return Err(format!("symbol {lib}: the template KiCad placed is empty: its definition has no pins and nothing drawn, only fields ({}). {HOLLOW}", fields_named(&t))) }
+        Ok(t)
     }
     /// A point given as a pin, "U7.3" (by number, or by the pin's name): where a wire joins that pin.
     async fn pin(&mut self, name: &str) -> Result<(String, String, (f64, f64), (f64, f64)), String> {
@@ -597,6 +622,21 @@ impl Run<'_> {
                 it["wire"] = json!(pts) }
             for k in ["label", "symbol"] { if let Some(n) = it[k]["at"].as_str().map(str::to_string) { let p = self.pin(&n).await?.2; it[k]["at"] = json!([p.0, p.1]) } }
             for k in ["junction", "no_connect"] { if let Some(n) = it[k].as_str().map(str::to_string) { let p = self.pin(&n).await?.2; it[k] = json!([p.0, p.1]) } }
+            if raw_by_lib(&it) {
+                // as a `symbol` entry: KiCad's own placement of it (its body, pins and the part's fields), the raw item's keys over that
+                let id = &it["definition"]["id"]; let at = [mm(&it["position"]["x_nm"]), mm(&it["position"]["y_nm"])];
+                let mut entry = json!({"symbol": {"lib": format!("{}:{}", id["library_nickname"].as_str().unwrap_or(""), id["entry_name"].as_str().unwrap_or("")), "at": at,
+                    "rot": sso(&it["transform"]["orientation"]), "unit": it["unit"]["unit"].as_u64().unwrap_or(1), "allow_empty": it["allow_empty"].as_bool().unwrap_or(false)}});
+                let rf = it["reference_field"]["text"]["text"].as_str().filter(|r| !r.is_empty()).map(str::to_string);
+                if let Some(r) = &rf { entry["symbol"]["ref"] = json!(r) }
+                let t = self.symbol_template(&entry, &sheet).await?;
+                if let Some(r) = rf { self.planned.insert(r, t.clone()); }
+                // KiCad's definition stays whole (its body, pins, the part's fields, what it extends): the raw item's {id} is what it was
+                // placed by, not a definition to send. KiCad's own id and sheet path of the dropped placement go; the instance keys asked for stay
+                let mut s = t; if let Some(o) = s.as_object_mut() { o.remove("id"); o.remove("path"); }
+                let mut over = it.clone(); if let Some(o) = over.as_object_mut() { o.remove("definition"); o.remove("allow_empty"); }
+                merge(&mut s, &over); out.push(s); continue
+            }
             if !it["symbol"].is_object() { out.push(it); continue }
             let t = self.symbol_template(&it, &sheet).await?;
             if let Some(r) = it["symbol"]["ref"].as_str() { self.planned.insert(r.to_string(), t.clone()); }
@@ -741,6 +781,10 @@ impl Run<'_> {
                 let mut with = op.as_object().map(|o| o.iter().filter(|(k, _)| if v == "move" { !matches!(k.as_str(), "move" | "by" | "to") } else { k.as_str() != "set" }).map(|(k, v)| (k.clone(), v.clone())).collect::<Map<_, _>>()).unwrap_or_default();
                 if v == "move" { if let Some(to) = op.get("to") { with.insert("at".into(), to.clone()); } if op.get("by").is_none() && with.is_empty() { return Err("move takes by: [dx, dy], to: [x, y] and/or rot".into()) } }
                 else if with.is_empty() { return Err("set takes the row keys to change (value, fields, at, rot, name, clearance, ...)".into()) }
+                // a symbol's update goes without its definition (slim): its library symbol is never changed by set, so a raw definition
+                // (a new library id) would be answered as updated and not be there (#1192)
+                if kind == "symbol" && with.get("raw").is_some_and(|r| !r["definition"].is_null()) {
+                    return Err("a symbol's library symbol (raw definition, its library id) is not changed by set: KiCad's update of a placed symbol keeps it. Delete the symbol and add the other one (add {symbol: {lib, ref, at}}), then join its pins again".into()) }
                 let mut ups = vec![];
                 let swap = if kind == "footprint" { with.remove("footprint") } else { None };
                 if let Some(lib) = &swap { let lib = lib.as_str().ok_or("footprint is Library:Footprint")?.to_string(); self.settle(i).await?; self.refill_all = true;
@@ -822,6 +866,8 @@ impl Run<'_> {
             "delete" => {
                 let t = &op["delete"];
                 let ids: Vec<(Value, Value)> = if t.is_object() { let sel = selector(t, self.board); if sel.as_object().is_some_and(|o| o.len() < 2) { return Err("delete needs more than a kind: say which (id, ref, net, near, ...)".into()) }
+                        // what this call added a moment ago is in the document only once its commit has ended (#1192: add then delete by ref)
+                        self.settle(i).await?;
                         self.pick(&sel).await?.into_iter().map(|(raw, sheet)| (raw["id"].clone(), sheet)).collect() }
                     else { let sheet = self.sheet(&op["sheet"]).await?; match t { Value::Array(a) => a.iter().map(|i| (json!({"value": i}), sheet.clone())).collect(), i => vec![(json!({"value": i}), sheet)] } };
                 if ids.is_empty() { return Err(format!("nothing matches {t}")) }
@@ -1020,10 +1066,13 @@ pub async fn run(c: &dyn Call, path: &str, a: &Value) -> Result<Value, String> {
                 let _ = r.end("CMA_DROP", "").await;
                 let ran: Vec<&str> = ops[..i].iter().map(verb).filter(|v| matches!(*v, "netclass" | "rule" | "refill" | "ipc")).collect();
                 let ran = if ran.is_empty() { String::new() } else { format!(" (already applied, not undone: {})", ran.join(", ")) };
-                // a find after a change ended that commit: what came before it stays, and is saved so the file and the document agree
-                if r.split > 0 && a["save"].as_bool().unwrap_or(true) {
-                    let _ = r.c.call(&format!("{C}SaveDocument"), json!({"document": r.doc})).await;
-                    return Err(format!("op {} ({}): {e}. The changes before op {}'s find were already committed and are saved; the later ones were dropped{ran}.", i + 1, verb(op), r.split));
+                // an op that needed the changes so far in the document (a find, a delete or set of what this call added, a symbol's placement)
+                // ended that commit: what came before it stays, and is saved so the file and the document agree
+                if r.split > 0 {
+                    let at = format!("op {} ({})", r.split, verb(&ops[r.split - 1]));
+                    if !a["save"].as_bool().unwrap_or(true) { return Err(format!("op {} ({}): {e}. The changes before {at} were already committed in KiCad (not saved: save is false); the rest were dropped{ran}.", i + 1, verb(op))) }
+                    let saved = match r.c.call(&format!("{C}SaveDocument"), json!({"document": r.doc})).await { Ok(s) if s["not_saved"].is_string() => format!("committed, and KiCad had nothing to save ({})", s["not_saved"].as_str().unwrap_or("")), Ok(_) => "committed and are saved".to_string(), Err(se) => format!("committed in KiCad but the save failed ({se}): they are not on disk") };
+                    return Err(format!("op {} ({}): {e}. The changes before {at} were already {saved}; {at}'s own and the later ones were dropped{ran}.", i + 1, verb(op)));
                 }
                 return Err(format!("op {} ({}): {e}. Nothing was saved; this call's item changes were dropped{ran}.", i + 1, verb(op)));
             }
@@ -1035,7 +1084,13 @@ pub async fn run(c: &dyn Call, path: &str, a: &Value) -> Result<Value, String> {
     if !r.refill.is_empty() { let zs = std::mem::take(&mut r.refill); r.c.call(&format!("{B}RefillZones"), json!({"board": r.doc, "zones": zs})).await?; }
     let mut out = json!({"results": results});
     if r.wrote && a["save"].as_bool().unwrap_or(true) {
-        let s = r.c.call(&format!("{C}SaveDocument"), json!({"document": r.doc})).await?;
+        // the edit is committed (and its zones refilled) before the save: a refused or failed save is said with it, never as the call's
+        // error, which reads as "nothing happened" and has the agent make every change a second time (#1169)
+        let s = match r.c.call(&format!("{C}SaveDocument"), json!({"document": r.doc})).await {
+            Ok(s) => s,
+            Err(e) => { out["saved"] = json!(false); out["not_saved"] = json!(format!("{e} The edit itself is made in the open editor: do not send this call again."));
+                return Ok(out) }
+        };
         // the save gate's word (nothing to write; only KiCad's own load change) is not a save; a save says what else it wrote
         if s["not_saved"].is_string() { out["saved"] = json!(false); out["not_saved"] = s["not_saved"].clone() } else { out["saved"] = json!(path) }
         for k in ["format_upgrade", "kicad_load_changes", "detached_kicad"] { if s[k].is_string() { out[k] = s[k].clone() } }
@@ -1150,7 +1205,9 @@ mod tests {
                 // KiCad's own placement of a library symbol: a two-pin part (pin 1 above, pin 2 below); the power library has GND only
                 "PlaceSymbolFromLibrary" => { if msg["lib_id"]["library_nickname"] == "power" && msg["lib_id"]["entry_name"] != "GND" { return Err("KiCad answered AS_BAD_REQUEST: symbol not found".into()) }
                     let pin = |n: &str, y: i64, o: &str| json!({"item": {"@type": "type.googleapis.com/kiapi.schematic.types.SchematicPin", "number": n, "name": if n == "1" { "A" } else { "K" }, "position": {"y_nm": (y * 1000000).to_string()}, "orientation": o}, "unit": {"unit": 1}});
-                    json!({"item": {"id": {"value": "probe"}, "path": {}, "position": msg["position"], "transform": {"orientation": msg["orientation"]}, "unit": {"unit": 1}, "definition": {"id": msg["lib_id"], "items": [pin("1", -4, "SPO_DOWN"), pin("2", 4, "SPO_UP")]},
+                    // the HTTP library's part whose source symbol did not load (#1192): fields alone
+                    let items = if msg["lib_id"]["library_nickname"] == "Hollow" { json!([{"item": {"@type": "type.googleapis.com/kiapi.schematic.types.SchematicField", "name": "MPN"}, "unit": {"unit": 0}}]) } else { json!([pin("1", -4, "SPO_DOWN"), pin("2", 4, "SPO_UP")]) };
+                    json!({"item": {"id": {"value": "probe"}, "path": {}, "position": msg["position"], "transform": {"orientation": msg["orientation"]}, "unit": {"unit": 1}, "definition": {"id": msg["lib_id"], "items": items},
                         "reference_field": {"visible": true, "text": {"position": {"x_nm": "5"}, "text": msg["reference"]}}, "value_field": {"visible": true, "text": {"position": {"x_nm": "6"}, "text": "R"}}, "@type": "type.googleapis.com/kiapi.schematic.types.SchematicSymbolInstance"}}) }
                 "DeleteItems" => json!({"deleted_items": msg["item_ids"].as_array().unwrap().iter().map(|i| json!({"id": i, "status": "IDS_OK"})).collect::<Vec<_>>()}),
                 _ => json!({}),
@@ -1239,6 +1296,15 @@ mod tests {
         assert!(go(&fake(None), json!({"ops": [{"paint": 1}]})).unwrap_err().starts_with("op 1: an op is one of") && go(&fake(None), json!({})).is_err());
         assert!(go(&fake(None), json!({"ops": [{"delete": {"kind": "track"}}]})).unwrap_err().contains("delete needs more than a kind"));
     }
+    /// #1169: a refused save after the commit is said with the results (saved: false and why), never as the call's error: the edit is
+    /// made, and an agent told "failed" sends it again (every track twice).
+    #[test] fn a_refused_save_is_not_the_calls_error() {
+        let f = fake(Some("SaveDocument"));
+        let o = go(&f, json!({"ops": [{"add": {"via": {"at": [1, 1], "size": 0.6, "drill": 0.3, "net": "GND"}}}]})).unwrap();
+        assert_eq!(o["saved"], json!(false));
+        assert!(o["not_saved"].as_str().unwrap().contains("do not send this call again"), "{o}");
+        assert!(o["results"].as_array().is_some_and(|r| !r.is_empty()), "{o}");
+    }
     #[test] fn zones_are_sent_without_fills_and_refilled_and_deletes_go_by_selector() {
         let f = fake(None);
         let out = go(&f, json!({"ops": [{"set": {"kind": "zone", "net": "+1V8"}, "clearance": 0.2, "name": "PWR_1V8"}, {"delete": {"kind": "track", "from": [146.2, 112.4]}}]})).unwrap();
@@ -1251,7 +1317,7 @@ mod tests {
         let f = fake(None);
         let out = go(&f, json!({"ops": [{"move": "R1", "by": [1, 0]}, {"find": {"kind": "footprint", "ref": "R1"}}, {"set": "R9", "value": "x"}]})).unwrap_err();
         assert_eq!(names(&f), ["GetOpenDocuments", "OpenDocument", "GetItems", "BeginCommit", "UpdateItems", "EndCommit", "GetItems", "SaveDocument"], "the find ended the commit and read the footprints again; the failed op had no commit to drop");
-        assert!(out.contains("op 3 (set)") && out.contains("before op 2's find were already committed and are saved"), "{out}");
+        assert!(out.contains("op 3 (set)") && out.contains("before op 2 (find) were already committed and are saved"), "{out}");
         // a symbol: KiCad places it from the library in a dropped commit, and the real one keeps that placement with the asked texts
         let t = json!({"id": {"value": "probe"}, "path": {}, "position": {"x_nm": "1", "y_nm": "2"}, "lib_id": {"library_nickname": "Device", "entry_name": "R"}, "definition": {"items": [1, 2, 3]},
             "reference_field": {"visible": true, "text": {"position": {"x_nm": "5"}, "text": "R"}}, "value_field": {"visible": true, "text": {"position": {"x_nm": "6"}, "text": "R"}}});
@@ -1264,6 +1330,73 @@ mod tests {
         assert_eq!(names(&f), ["GetOpenDocuments", "OpenDocument", "BeginCommit", "PlaceSymbolFromLibrary", "EndCommit", "GetSchematicHierarchy", "GetItems", "BeginCommit", "CreateItems", "EndCommit", "SaveDocument"], "placed by KiCad, then the sheet is read once (what the new part would lie over), then the one commit");
         let log = f.log.lock().unwrap(); assert_eq!((log[4].1["action"].clone(), log[9].1["action"].clone(), log[8].1["items"].as_array().unwrap().len()), (json!("CMA_DROP"), json!("CMA_COMMIT"), 2));
         assert_eq!((log[3].1["reference"].clone(), text2(&log[8].1["items"][0]["reference_field"]), log[8].1["items"][0].get("id")), (json!("R7"), "R7", None), "KiCad places it from the library in a commit that is dropped; the real one is that placement");
+    }
+    #[test] fn issue_1192_delete_after_add_set_of_a_library_and_a_raw_symbol_by_its_library() {
+        // add then delete by reference in one call: the add's commit ends first, so the delete reads the document with the new part in it
+        let f = fake(None); go_on(&f, "/p/b.kicad_sch", json!({"ops": [{"add": [{"symbol": {"lib": "Device:R", "ref": "R9", "at": [1, 2]}}]}, {"delete": {"kind": "symbol", "ref": "R1"}}]})).unwrap();
+        let n = names(&f); let create = n.iter().position(|x| x == "CreateItems").unwrap(); let del = n.iter().position(|x| x == "DeleteItems").unwrap();
+        let log = f.log.lock().unwrap();
+        let ended = (create..del).find(|&i| log[i].0 == "EndCommit" && log[i].1["action"] == "CMA_COMMIT"); let read = (create..del).find(|&i| log[i].0 == "GetItems");
+        assert!(ended.is_some() && read.is_some() && ended < read, "the add is committed before the delete's read: {n:?}");
+        assert_eq!(log[del].1["item_ids"], json!([{"value": "s1"}])); drop(log);
+        // a symbol's library is not changed by set: refused, nothing written (an update without its definition would keep the old one)
+        let f = fake(None); let e = go_on(&f, "/p/b.kicad_sch", json!({"ops": [{"set": ["R1"], "raw": {"definition": {"id": {"library_nickname": "My_Parts", "entry_name": "470R"}}}}]})).unwrap_err();
+        assert!(e.contains("not changed by set") && !names(&f).contains(&"UpdateItems".to_string()), "{e}");
+        // other raw keys of a symbol still go
+        let f = fake(None); go_on(&f, "/p/b.kicad_sch", json!({"ops": [{"set": ["R1"], "raw": {"locked": "LS_LOCKED"}}]})).unwrap(); assert!(names(&f).contains(&"UpdateItems".to_string()));
+        // a raw symbol that names its library symbol alone is placed from the library (body, pins, the part's fields), its own keys over that
+        let f = fake(None); let out = go_on(&f, "/p/b.kicad_sch", json!({"ops": [{"add": [{"@type": format!("{ST}SchematicSymbolInstance"), "definition": {"id": {"library_nickname": "My_Parts", "entry_name": "470R"}},
+            "position": {"x_nm": "10000000", "y_nm": "20000000"}, "reference_field": {"name": "Reference", "text": {"text": "R996"}}, "locked": "LS_LOCKED"}]}]})).unwrap();
+        let place = sent(&f, "PlaceSymbolFromLibrary"); assert_eq!((lib_id(&place["lib_id"]), place["reference"].clone(), place["position"].clone()), ("My_Parts:470R".to_string(), json!("R996"), to_xy(10.0, 20.0)));
+        let it = sent(&f, "CreateItems")["items"][0].clone();
+        assert_eq!((it["definition"]["items"].as_array().map(|a| a.len()), lib_id(&it["definition"]["id"]), text2(&it["reference_field"]), it["locked"].clone(), it.get("id")), (Some(2), "My_Parts:470R".to_string(), "R996", json!("LS_LOCKED"), None));
+        assert_eq!(out["results"][0]["created"][0]["pins"], json!({"1": [10.0, 16.0], "2": [10.0, 24.0]}), "it answers with its pins as a symbol entry does");
+        // an empty items list asked for is not KiCad's: the definition placed stays whole
+        let f = fake(None); go_on(&f, "/p/b.kicad_sch", json!({"ops": [{"add": [{"@type": format!("{ST}SchematicSymbolInstance"), "definition": {"id": {"library_nickname": "My_Parts", "entry_name": "470R"}, "items": []}, "position": {}, "unit": {"unit": 1}}]}]})).unwrap();
+        assert_eq!(sent(&f, "CreateItems")["items"][0]["definition"]["items"].as_array().map(|a| a.len()), Some(2));
+        // one that brings its own body goes as it is
+        let f = fake(None); go_on(&f, "/p/b.kicad_sch", json!({"ops": [{"add": [{"@type": format!("{ST}SchematicSymbolInstance"), "definition": {"id": {"library_nickname": "X", "entry_name": "Y"}, "items": [{"item": {}}]}, "position": {}}]}]})).unwrap();
+        assert!(!names(&f).contains(&"PlaceSymbolFromLibrary".to_string()));
+    }
+    #[test] fn an_empty_library_template_is_refused_and_real_symbols_are_not() {
+        let w = |t: &str| json!({"item": {"@type": format!("{ST}{t}")}, "unit": {"unit": 1}});
+        let d = |items: Value| json!({"definition": {"items": items}});
+        assert!(hollow(&d(json!([w("SchematicField"), w("SchematicField")]))), "fields alone");
+        assert!(hollow(&d(json!([]))) && hollow(&json!({"definition": {"id": {}}})), "nothing at all");
+        assert!(!hollow(&d(json!([w("SchematicPin")]))), "a power symbol: pins only");
+        assert!(!hollow(&d(json!([w("SchematicGraphicShape"), w("SchematicField")]))), "a logo or mechanical symbol: a body only");
+        assert!(!hollow(&d(json!([w("SchematicText")]))), "text drawn as its body");
+        // a multi-unit part: every unit's items are in the definition (unit 2 placed, unit 1's pins and the shared body there too)
+        assert!(!hollow(&d(json!([{"item": {"@type": format!("{ST}SchematicPin")}, "unit": {"unit": 1}}, {"item": {"@type": format!("{ST}SchematicGraphicShape")}, "unit": {"unit": 0}}]))));
+        // one that extends another comes flattened: the parent's items are its own
+        assert!(!hollow(&json!({"definition": {"id": {"entry_name": "AMS1117-3.3"}, "items": [w("SchematicPin"), w("SchematicPin"), w("SchematicPin"), w("SchematicGraphicShape")]}})));
+        // bare items are read as wrapped ones; an answer without a definition is not judged
+        assert!(hollow(&d(json!([{"@type": format!("{ST}SchematicField")}]))) && !hollow(&d(json!([{"@type": format!("{ST}SchematicPin")}]))) && !hollow(&json!({"position": {}})));
+        // kicad_edit refuses it before anything is created, and says what KiCad gave and what works
+        let f = fake(None); let e = go_on(&f, "/p/b.kicad_sch", json!({"ops": [{"add": [{"symbol": {"lib": "Hollow:470R", "ref": "R998", "at": [30, 250]}}]}]})).unwrap_err();
+        assert!(e.contains("Hollow:470R") && e.contains("template KiCad placed is empty") && e.contains("only fields (MPN)") && e.contains("source symbol itself") && e.contains("Nothing was saved"), "{e}");
+        assert!(!names(&f).contains(&"CreateItems".to_string()) && !names(&f).contains(&"SaveDocument".to_string()));
+        assert!(!e.contains("open the project"), "opening KiCad is no sure mend");
+        // the same by a raw symbol named by its library alone
+        let f = fake(None); let e = go_on(&f, "/p/b.kicad_sch", json!({"ops": [{"add": [{"@type": format!("{ST}SchematicSymbolInstance"), "definition": {"id": {"library_nickname": "Hollow", "entry_name": "470R"}}, "position": {}}]}]})).unwrap_err();
+        assert!(e.contains("is empty"), "{e}");
+        // a symbol that is fields alone on purpose goes with allow_empty
+        let f = fake(None); go_on(&f, "/p/b.kicad_sch", json!({"ops": [{"add": [{"symbol": {"lib": "Hollow:Note", "ref": "N1", "at": [1, 1], "allow_empty": true}}]}]})).unwrap();
+        assert!(names(&f).contains(&"CreateItems".to_string()));
+    }
+    #[test] fn a_later_failure_says_what_an_earlier_commit_already_saved() {
+        // add, then delete (it ends the add's commit), then an op that fails: the add is committed and saved, and the error says so
+        let f = fake(None); let e = go_on(&f, "/p/b.kicad_sch", json!({"ops": [{"add": [{"symbol": {"lib": "Device:R", "ref": "R9", "at": [1, 2]}}]}, {"delete": {"kind": "symbol", "ref": "R1"}}, {"set": ["Q99"], "value": "1k"}]})).unwrap_err();
+        assert!(e.starts_with("op 3 (set)") && e.contains("The changes before op 2 (delete) were already committed and are saved; op 2 (delete)'s own and the later ones were dropped"), "{e}");
+        assert!(!e.contains("Nothing was saved") && names(&f).contains(&"SaveDocument".to_string()));
+        // with save: false the commit stands in KiCad and the error does not call it saved
+        let f = fake(None); let e = go_on(&f, "/p/b.kicad_sch", json!({"save": false, "ops": [{"add": [{"symbol": {"lib": "Device:R", "ref": "R9", "at": [1, 2]}}]}, {"delete": {"kind": "symbol", "ref": "R1"}}, {"set": ["Q99"], "value": "1k"}]})).unwrap_err();
+        assert!(e.contains("committed in KiCad (not saved: save is false)") && !names(&f).contains(&"SaveDocument".to_string()), "{e}");
+        // a failing save is said as such
+        let f = fake(Some("SaveDocument")); let e = go_on(&f, "/p/b.kicad_sch", json!({"ops": [{"add": [{"symbol": {"lib": "Device:R", "ref": "R9", "at": [1, 2]}}]}, {"delete": {"kind": "symbol", "ref": "R1"}}, {"set": ["Q99"], "value": "1k"}]})).unwrap_err();
+        assert!(e.contains("the save failed") && e.contains("not on disk"), "{e}");
+        // nothing committed before the failure: nothing saved
+        let e = go_on(&fake(None), "/p/b.kicad_sch", json!({"ops": [{"set": ["Q99"], "value": "1k"}]})).unwrap_err(); assert!(e.contains("Nothing was saved"), "{e}");
     }
     #[test] fn a_symbols_pins_join_their_nets_and_a_wire_runs_between_pins() {
         // where the pins are: the library's place turned with the symbol (KiCad's angle, y down)

@@ -123,7 +123,12 @@ impl Agents {
     pub async fn local_projects(&self) -> Value {
         let here = self.hub.mirrors().here(); // (`key`: the project's one name across machines, present/merged.rs; thread_launch takes it)
         let w = self.world().await;
-        let mut v: Vec<_> = w.projects.iter().filter(|(_, p)| !p.1).map(|(id, p)| { let folder = w.roots.get(id).cloned().unwrap_or_default(); let origin = crate::mirror::origin_of_root(&folder); let key = crate::present::merged::key_of(&origin, w.st.get(&format!("project.link.{id}")).map(String::as_str).unwrap_or(""), "", &here, id); json!({"id":id,"name":p.0,"folder":folder,"origin":origin,"key":key}) }).collect();
+        // (the keys the sidebar and the registry rows give them: origin and folder in the repository, a machine's clones apart; a linked
+        // machine reads the folder back from the key, `Mirrors::set_origins_keyed`)
+        let keys = crate::statehost::policies().and_then(|p| p.with_state(|st| crate::present::merged::local_keys_here(st, &here))).unwrap_or_default();
+        let mut v: Vec<_> = w.projects.iter().filter(|(_, p)| !p.1).map(|(id, p)| { let folder = w.roots.get(id).cloned().unwrap_or_default(); let origin = crate::mirror::origin_of_root(&folder);
+            let key = keys.get(id).cloned().unwrap_or_else(|| crate::present::merged::key_of(&crate::present::merged::ident(&origin, &crate::mirror::repo_rel_of_root(&folder)), w.st.get(&format!("project.link.{id}")).map(String::as_str).unwrap_or(""), "", &here, id));
+            json!({"id":id,"name":p.0,"folder":folder,"origin":origin,"key":key}) }).collect();
         v.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
         Value::Array(v)
     }

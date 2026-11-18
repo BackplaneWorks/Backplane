@@ -321,6 +321,14 @@ fn swarms_of(p: &MergedProject, c: &Ctx) -> Vec<(Value, &'static str)> {
 }
 fn text_of<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 
+/// Whether the sidebar lists only the threads that need attention (Settings, Appearance, "Only threads that need attention": `sidebar.attention`,
+/// on unless the person turns it off; #1186). On: under each project its pins and the one thread that runs or wants a look (D11). Off: every
+/// thread of the project the person has not put away stays listed, as in 0.15, pins first, then the newest. Needs you is the same either way.
+pub fn attention_only(st: &State) -> bool { get(st, ATTENTION) != "off" }
+pub const ATTENTION: &str = "sidebar.attention";
+/// A thread the person put away (their Settle, or an archive): not listed under its project with every thread listed. One the clock settled is.
+fn put_away(f: &Th) -> bool { f.t.archived || f.t.src.and_then(|s| s.threads.get(&f.t.id)).map_or(false, |x| x.override_ == crate::state::Override::ForcedSettled) }
+
 /// One project row: the merged row (`merged::row_json`) with its counts and its visible threads (Needs you's are not repeated under it).
 fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, groups: &Groups) -> Value {
     let mut r = super::merged::row_json(p);
@@ -328,20 +336,29 @@ fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, gr
     let running = ths.iter().filter(|f| matches!(f.word, "running" | "monitoring" | "limit") || (f.word == "needs" && f.t.src.map_or(false, |s| s.threads.get(&f.t.id).map_or(false, |x| x.turn == Turn::Running)))).count();
     let needs = ths.iter().filter(|f| f.needs).count();
     let q = c.query;
-    // the thread on show is always listed under its project, settled or not: the person sees where they are (and where they left off)
-    let mut shown: Vec<&Th> = ths.iter().filter(|f| if q.is_empty() { !f.needs && ((f.show && !f.kid) || (!c.selected.is_empty() && f.t.id == c.selected)) } else { crate::sidebar::word_hit(&f.t.title, q) }).collect();
+    let every = !attention_only(st);
+    let on_show = |f: &Th| !c.selected.is_empty() && f.t.id == c.selected;
+    // the thread on show is always listed under its project, settled or not: the person sees where they are (and where they left off).
+    // Settings' "Only threads that need attention" off: every thread of it the person has not put away, its asks too (they are also in
+    // Needs you), as in 0.15; a delegated child or a swarm's member still hangs under its parent or its swarm
+    let mut shown: Vec<&Th> = if every && q.is_empty() { ths.iter().filter(|f| (!f.kid && !put_away(f)) || on_show(f)).collect() }
+        else { ths.iter().filter(|f| if q.is_empty() { !f.needs && ((f.show && !f.kid) || on_show(f)) } else { crate::sidebar::word_hit(&f.t.title, q) }).collect() };
     // a pinned thread is a fixed row of its project: first, where it was pinned, whatever runs or stops below it (and never cut by UNDER)
     if q.is_empty() { shown.sort_by_key(|f| pin_rank(f)); }
     // At most its two pins and one other: the thread that runs (the newest live one), else the one on show, else the newest stop that
     // still wants a look. Nothing folds: the rows under a project are few and fixed, so there is no chevron (the person, 2026-11-15: "the
     // max number of threads viewable under a project are 2 pinned plus one active ... it should not be collapsible anyway")
-    if q.is_empty() {
+    if q.is_empty() && !every {
         let mut other: Vec<&Th> = shown.iter().filter(|f| !f.t.pinned).copied().collect();
         other.sort_by_key(|f| (!crate::state::visible::live(f.word), f.t.id != c.selected, std::cmp::Reverse(f.t.activity)));
         let pins: Vec<&Th> = shown.iter().filter(|f| f.t.pinned).take(crate::commands::plan::PINS).copied().collect();
         shown = pins.into_iter().chain(other.into_iter().take(1)).collect();
     }
-    let rows: Vec<Value> = shown.iter().take(UNDER).map(|f| thread_row(c.hub, c.now, p, f)).collect();
+    // every thread: the pins, then the newest first (`ths`' order), at most PAGE (the rest are on its page), folded away by its chevron
+    // (`sidebar.fold.<key>`) unless the thread on show is one of them
+    let folded = every && q.is_empty() && folded_at(st, &p.key) > 0 && !shown.iter().any(|f| on_show(f));
+    let under = shown.len().min(if every { PAGE } else { UNDER });
+    let rows: Vec<Value> = if folded { vec![] } else { shown.iter().take(under).map(|f| thread_row(c.hub, c.now, p, f)).collect() };
     r["id"] = json!(qid(c.hub, &pid_of(p)));
     r["title"] = json!(p.name);
     r["pinned"] = json!(pinned_at(st, &p.key) > 0);
@@ -353,8 +370,10 @@ fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, gr
     r["running"] = json!(running + sw.iter().filter(|x| x.1 == "running").count());
     r["needsCount"] = json!(needs + sw.iter().filter(|x| x.1 != "running").count());
     let live: Vec<Value> = sw.into_iter().filter(|x| x.1 == "running").map(|x| x.0).collect();
-    // no fold (an older client draws a chevron only for a `fold` action with rows to hide: none)
-    r["fold"] = json!(""); r["folded"] = json!(false); r["under"] = json!(0);
+    // no fold while only what needs attention is listed (an older client draws a chevron only for a `fold` action with rows to hide: none);
+    // with every thread listed, a chevron folds them away (its counts stay, and its asks are in Needs you)
+    if every && q.is_empty() && under > 0 { r["fold"] = json!("project-fold"); r["folded"] = json!(folded); r["under"] = json!(under); }
+    else { r["fold"] = json!(""); r["folded"] = json!(false); r["under"] = json!(0); }
     r["swarms"] = json!(live);
     r["group"] = json!(gid);
     r["archived"] = json!(made_quiet(st, p)); r["quiet"] = json!(is_quiet(st, p, c.now));

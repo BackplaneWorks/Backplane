@@ -17,7 +17,7 @@ use std::sync::{Mutex, MutexGuard};
 /// seen counts...). A policy that starts reading another family adds its prefix here.
 const KEEP: &[&str] = &["settle.", "autosettle.", "launch.", "launched.", "thread.parent.", "bg.", "watch.", "order.wait.", "wake.", "wakes.", "lock.", "locks.",
     "secret.ask.", "liveness.", "star.nudge.", "restart.retry", "provider.resume.", "thread.config.hold.", "watchdog.", "alert.", "summary.", "notify.", "push.webhook", "told.", "project.dormant.",
-    "order.enabled", "order.estimates", "account.thread.", "allowance.", "sidebar.pin.", "sidebar.fold.", "sidebar.archived.", "sidebar.group.", "sidebar.hide.", "sidebar.looked.", "sidebar.cut.", "auth.wait.", "carry.wait.", "accounts.inventory", "fork.", "usage.", "effort.", "speed.", "buy."]; // fork.<id>: the source thread id, a thread screen's "back" button; the action dispatcher's facts (Fab.at / Fab.want, Accounts.named): tiny values, one account key per thread
+    "order.enabled", "order.estimates", "account.thread.", "allowance.", "sidebar.pin.", "sidebar.fold.", "sidebar.keys.moved.", "sidebar.archived.", "sidebar.group.", "sidebar.hide.", "sidebar.looked.", "sidebar.cut.", "auth.wait.", "carry.wait.", "accounts.inventory", "fork.", "usage.", "effort.", "speed.", "buy."]; // fork.<id>: the source thread id, a thread screen's "back" button; the action dispatcher's facts (Fab.at / Fab.want, Accounts.named): tiny values, one account key per thread
 // A thread screen must see its refusal gate's configuration even in the lean copy. Exact global keys keep their values;
 // per-thread keys keep only presence, never the possibly large body. stopped./failed. remain outside this allowlist.
 const GATE_EXACT: &[&str] = &["files.max.mb", "person.tz", "person.tz.device", "tz.machine", "think", "agent.thinking", "permissions.default"];
@@ -33,7 +33,7 @@ pub fn lean_keeps(k: &str) -> bool {
     // The GPUI recent root and existing sidebar read only bounded navigation settings.
     // a home move (net/homemove.rs): the uberbot's row says where it is going, and a moved chat is drawn from its new home
     if ["home.moving", "home.at"].contains(&k) { return true }
-    if ["ui.theme", "sidebar.view", "sidebar.groups", "mail.on", "uber.bot", "order.enabled", "order.estimates", "import.v014.ack"].contains(&k)
+    if ["ui.theme", "sidebar.view", "sidebar.groups", "sidebar.attention", "mail.on", "uber.bot", "order.enabled", "order.estimates", "import.v014.ack"].contains(&k)
         || ["thread.tree.", "project.icon.", "project.color.", "project.pick.", "project.link.", "buy.", "order.quote.", "order.pick.", "plan.once.", "mail.private.owner.", "account.thread."].iter().any(|p| k.starts_with(p)) { return true }
     // the Context panel's readings (present/tokstats.rs): one short string a thread, and the epoch that names the thread totals' key
     if ["tok.epoch", "tok.recount"].contains(&k) || ["turn.last.", "turn.speed.", "turn.models.", "turn.live.", "turn.tier."].iter().any(|p| k.starts_with(p)) || (k.starts_with("tok.") && [".t.", ".td.", ".tr.", ".bl."].iter().any(|p| k.starts_with(&format!("tok{p}")) || k.contains(p))) { return true }

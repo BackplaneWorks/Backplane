@@ -103,6 +103,22 @@ async fn thread_now(hub: &Arc<Hub>, id: &str) -> Result<Value, Value> {
     thread_json(hub, &g, id, &asks).ok_or_else(|| err("unknown thread"))
 }
 fn known_thread(m: &crate::model::Model, id: &str) -> bool { m.threads.get(id).map_or(false, |t| !t.deleted) }
+/// A thread's provider: this hub's from its model, a linked machine's from that machine's mirror ("" for one neither has).
+fn provider_now(hub: &Hub, m: &crate::model::Model, id: &str) -> String {
+    if let Some(t) = m.threads.get(id) { return t.provider.clone() }
+    if !machines::is_far(id) { return String::new() }
+    hub.mirrors().shown(|fars| machines::holder(fars, id).and_then(|(_, st)| st.threads.get(id)).map(|t| t.provider.clone())).unwrap_or_default()
+}
+/// `thread.pick`'s request for the desktop picker's choices: the method and params, the thread named as given (`<link>~<id>` kept, for the far router).
+fn pick_request(action: &str, th: &str, value: &str) -> (&'static str, Value) {
+    match action {
+        "effort" => ("thread.effort", json!({"thread":th,"effort":value})),
+        "speed" => ("thread.speed", json!({"thread":th,"speed":value})),
+        "provider" => ("thread.provider", json!({"thread":th,"provider":value})),
+        "runtime" => ("thread.modes", json!({"thread":th,"runtime":value})),
+        _ => ("thread.modes", json!({"thread":th,"model":value})),
+    }
+}
 /// A thread of this hub, or one of a linked machine this hub mirrors.
 fn known_any(hub: &Hub, m: &crate::model::Model, id: &str) -> bool { known_thread(m, id) || (machines::is_far(id) && hub.far().map_or(false, |f| f.has(id))) }
 
@@ -210,24 +226,22 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
             Ok(json!({"asks": asks.iter().filter(|a| th.is_empty() || a.2 == th).map(|a| json!({"name":a.0,"purpose":a.1,"thread":a.2})).collect::<Vec<_>>()})) }
         "models.list" => Ok(json!({"models": serde_json::from_str::<Value>(&crate::settings::models::all()).unwrap_or(json!({}))})),
         "thread.model" => {
-            let th = s(p, "thread"); if !known_thread(&*hub.model().await, th) { return Some(Err(err("unknown thread"))) }
+            // a linked machine's thread (`<link>~<id>`) too: the request keeps its id and `rpc` sends it there (net/far.rs METHODS)
+            let th = s(p, "thread"); if !known_any(hub, &*hub.model().await, th) { return Some(Err(err("unknown thread"))) }
             let mut q = json!({"thread":th,"provider":s(p, "provider"),"model":s(p, "model")});
             if !s(p, "effort").is_empty() { q["effort"] = p["effort"].clone() }
             if s(p, "provider").is_empty() { return Some(Err(err("provider"))) }
             // the same provider: only the model changes (thread.modes); another provider is a switch (thread.provider, a handoff between turns)
-            let same = hub.model().await.threads.get(th).map_or(false, |t| t.provider == s(p, "provider"));
+            let same = provider_now(hub, &*hub.model().await, th) == s(p, "provider");
             let r = if same { rpc(hub, c, "thread.modes", json!({"thread":th,"model":s(p, "model")})).await } else { rpc(hub, c, "thread.provider", q).await };
             match r { Ok(_) => thread_now(hub, th).await.map(|t| json!({"thread":t})), Err(e) => Err(e) }
         }
         "thread.picker" => picker(hub, p).await,
         "thread.pick" => {
-            let (th, value) = (s(p, "thread"), s(p, "value")); if !known_thread(&*hub.model().await, th) { return Some(Err(err("unknown thread"))) }
+            // this hub's thread or a linked machine's (its picks go there: `rpc`, net/far.rs METHODS; its account is chosen on its own machine, the router says so)
+            let (th, value) = (s(p, "thread"), s(p, "value")); if !known_any(hub, &*hub.model().await, th) { return Some(Err(err("unknown thread"))) }
             let r = match s(p, "action") {
-                "model" => rpc(hub, c, "thread.modes", json!({"thread":th,"model":value})).await,
-                "effort" => rpc(hub, c, "thread.effort", json!({"thread":th,"effort":value})).await,
-                "speed" => rpc(hub, c, "thread.speed", json!({"thread":th,"speed":value})).await,
-                "provider" => rpc(hub, c, "thread.provider", json!({"thread":th,"provider":value})).await,
-                "runtime" => rpc(hub, c, "thread.modes", json!({"thread":th,"runtime":value})).await,
+                a @ ("model" | "effort" | "speed" | "provider" | "runtime") => { let (m, q) = pick_request(a, th, value); rpc(hub, c, m, q).await }
                 // the account the thread runs on: the desktop's accounts.select, as the binding is now
                 "account" => {
                     let (profile, epoch) = value.split_once('\u{1f}').map_or((value, 0), |(a, b)| (a, b.parse::<u64>().unwrap_or(0)));
@@ -624,4 +638,19 @@ async fn review(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Resu
             }
         }
     }.await)
+}
+
+#[cfg(test)]
+mod pick_tests {
+    use super::*;
+    /// #1197: a phone's pick on a linked machine's thread is the desktop's request with the `<link>~<id>` id kept, which the far router takes; this hub's own as before.
+    #[test] fn a_phones_pick_names_a_linked_machines_thread_as_given() {
+        for (a, m, k) in [("model", "thread.modes", "model"), ("effort", "thread.effort", "effort"), ("speed", "thread.speed", "speed"), ("provider", "thread.provider", "provider"), ("runtime", "thread.modes", "runtime")] {
+            let (got, q) = pick_request(a, "lap~t9", "v");
+            assert_eq!((got, q["thread"].as_str(), q[k].as_str()), (m, Some("lap~t9"), Some("v")), "{a}");
+            assert!(crate::net::far::may(got)); assert_eq!(crate::net::far::params_link(&q), "lap");
+            let (_, q) = pick_request(a, "t9", "v"); assert_eq!((q["thread"].as_str(), crate::net::far::params_link(&q)), (Some("t9"), String::new()), "{a}");
+        }
+        assert!(!crate::net::far::may("accounts.select"), "a far thread's account is chosen on its own machine: the router refuses it");
+    }
 }

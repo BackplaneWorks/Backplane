@@ -118,8 +118,12 @@ Setup's sub-step shows each row as Signed in / Sign in there / Not on that machi
 
 ## 5. One project list
 
-- A project's key is its normalized origin (D5); with no origin, `<machine>/<project id>` (per machine). A hand link (Link with… on a project's
-  menu) sets `project.link.<id>` = the key of another, stored on both machines.
+- A project's key is its normalized origin (D5) and its folder inside the repository (`github.com/o/r` at the top, `github.com/o/r/boards/a`
+  for a board's folder; #1168: one repository holds several projects); with no origin, `<machine>/<project id>` (per machine). Copies on one
+  machine never merge: of two clones of one folder there, the older keeps the key, the other is `<machine>/<id>`. A hand link (Link with… on a
+  project's menu) sets `project.link.<id>` = the key of another, stored on both machines. A linked machine reads another's folder from the key
+  its machine_list sends (one of 0.16.0 sends the origin alone). What the person set under a 0.16.0 key (the origin alone: pins, groups, quiet
+  marks, folds) is carried to each project's key once (`present/merged.rs` `key_moves`, marked `sidebar.keys.moved.<key>`).
 - The sidebar (hub `present/screen.rs`, so GPUI and phones alike) shows **one row per key**: the name (this machine's name for it, else the
   most recently active machine's), machine chips (`desktop · boat-hub`, an away machine dimmed), and the threads of every machine under it,
   each with its quiet machine marker. A project on linked machines only (none here) is one row too, not "Backplane on framework".
@@ -147,7 +151,9 @@ Setup's sub-step shows each row as Signed in / Sign in there / Not on that machi
 
 - **D11 Thread visibility (T3 Code style):** a thread shows in the sidebar only while it is active: running (or monitoring work it owns),
   needs the person (an ask, approval or question), or stopped abnormally (failed, interrupted, cut by a restart or a limit). Finished, settled
-  and idle threads are hidden there and stay reachable from the project page and Ctrl+K. Pinned threads always show.
+  and idle threads are hidden there and stay reachable from the project page and Ctrl+K. Pinned threads always show. This is a setting,
+  on by default (Settings, Appearance, "Only threads that need attention", `sidebar.attention`; #1186): off, every thread of a project the
+  person has not settled or archived is listed under it, as in 0.15 (pins first, then the newest, at most 60, its row folds by its chevron).
   Another machine's thread follows the same rule with two limits (`present/sections.rs` `far_word`): what it last said is believed for
   ACTIVE only (an ask or a stop there quiet for longer leaves the sidebar and Needs you), and a machine that is away runs nothing the person
   can see (its running words do not count). Its row offers **Hide** (the desktop's menu, a long press on the phones): hidden on this machine
