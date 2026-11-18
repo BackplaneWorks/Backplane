@@ -658,6 +658,12 @@ impl Render for Backplane {
         let kscreen = self.screens.kicad_screen && kedit;
         let kfull = kscreen || (self.screens.kicad_full && viewer_open && self.screens.kicad.is_some() && matches!(thread["viewer"]["open"].as_str(), Some("board" | "schematic" | "3d")));
         crate::screens::viewer::KICAD_SCREEN.store(kscreen, std::sync::atomic::Ordering::Relaxed);
+        // whether the page holds the embedded editor this frame (popped out: its own window does), from this frame's state: macOS hides
+        // KiCad's frame by it when the pane is not drawn (#1199: the viewer closed, the PCB Editor stayed on screen)
+        if let Some(p) = self.screens.kicad.clone() {
+            let in_page = self.screens.kicad_window.is_some() || (self.kicad_for(thread, cx).is_some() && crate::screens::viewer::holds_editor(thread));
+            if p.read(cx).in_page != in_page { p.update(cx, |p, _| p.in_page = in_page); }
+        }
         let (side_shown, thread_least) = if kfull { (false, 0.) } else { (side_shown, thread_least) };
         crate::screens::viewer::KICAD_FULL.store(kfull, std::sync::atomic::Ordering::Relaxed); crate::screens::viewer::KICAD_POPPED.store(self.screens.kicad_window.is_some(), std::sync::atomic::Ordering::Relaxed);
         crate::screens::viewer::set_least(pane_least); crate::screens::viewer::set_share(share); self.screens.side_shown = side_shown;
