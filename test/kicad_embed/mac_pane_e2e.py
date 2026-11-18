@@ -841,6 +841,13 @@ try:
                         except Exception: pass
                 n = len(ls); time.sleep(0.005)
         threading.Thread(target=_tail, daemon=True).start()
+        def host_settled(t=8):  # every editor.kicad.host the client has sent is answered (their replies lagged past 1 s in 44274818743)
+            def pending():
+                ls = client_log().splitlines()
+                sent = {l.split('"id":', 1)[1].split(',', 1)[0] for l in ls if '"kicad_rpc_sent":"editor.kicad.host"' in l}
+                got = {l.split('"id":', 1)[1].split(',', 1)[0] for l in ls if '"kicad_rpc_reply":"editor.kicad.host"' in l}
+                return sent - got
+            return wait_for(lambda: not pending(), t, 0.05)
         reps = int(os.environ.get('SWAP_REPS', '10')); provoked = wrong = 0
         for i in range(reps):
             wait_for(kframe, 10, 0.2)
@@ -849,7 +856,7 @@ try:
             toggled = False
             if i % 2 == 1:  # every other return: Full size pressed the moment the first visible:true push is seen (a second rect at once)
                 if wait_for(lambda: any(t >= t0 and j.get('visible') for t, j in PUSHES), 2, 0.005): toggled = press_rect('kicad:full')
-            time.sleep(1.0); wait_for(kframe, 5, 0.05); time.sleep(1.0)  # 1 s after the return's last push, near enough: the pushes settle within it
+            time.sleep(1.0); wait_for(kframe, 5, 0.05); host_settled(); time.sleep(1.0)  # 1 s after the return's last push, near enough: the pushes settle within it
             burst = [(round((t - t0) * 1000), j['kicad_host_push'], j.get('visible'), j.get('settle')) for t, j in PUSHES if t >= t0 and j.get('kicad_host_push')]
             vis = [b for b in burst if b[2]]
             prov = len(vis) >= 2 and any(v[1] != vis[0][1] and v[0] - vis[0][0] <= 150 for v in vis[1:])
@@ -883,7 +890,7 @@ try:
             tc = time.time(); th.start(); time.sleep(0.25)
             if i % 2 == 0: press_rect('kicad:full')
             else: press_rect('ui:CloseViewer'); time.sleep(0.4); press_rect('rail:Board')
-            th.join(120); dur = (done[0] - tc) if done else None; time.sleep(1.5); wait_for(kframe, 5, 0.05); time.sleep(0.5)
+            th.join(120); dur = (done[0] - tc) if done else None; time.sleep(1.5); wait_for(kframe, 5, 0.05); host_settled(); time.sleep(0.5)
             busy = [l for l in client_log().splitlines()[log0:] if 'a task is running' in l]
             during = bool(busy) or (dur is not None and dur > 0.3)
             b_during += during
