@@ -275,6 +275,9 @@ pub const MAC_SETTLE_MS: u64 = 300;
 pub struct HostSends { inflight: u32, last: Option<Value>, retry_at: Option<std::time::Instant>, refused: u32, sent_at: Option<std::time::Instant>,
     /// the app's one watch (Backplane::host_retry_watch), woken by every push: it sleeps on this while nothing waits
     wake: Option<async_channel::Sender<()>> }
+/// macOS: whether a host push is due: the pane's rect and visibility now differ from the last pushed, or what was pushed may not have
+/// reached KiCad (`unsent`: the hub's connection was made again, kicad_rejoin), so the same rect is pushed again.
+pub fn host_push_due(now: Option<(i32, i32, i32, i32, bool)>, sent: Option<(i32, i32, i32, i32, bool)>, unsent: bool) -> bool { now.is_some() && (now != sent || unsent) }
 /// What the watch does next (`watch_step`): send this push again now, look again in a while, or sleep until a push wakes it.
 #[derive(Debug, PartialEq)]
 pub enum HostStep { Send(Value), Look(std::time::Duration), Idle }
@@ -321,7 +324,8 @@ impl HostSends {
     /// A new hub (reconnected): nothing of the old one's is in flight.
     /// A new hub (reconnected): nothing of the old one's is in flight, and nothing it refused is sent again (the reattach's own
     /// placement is the latest from here).
-    pub fn rejoined(&mut self) { self.inflight = 0; self.retry_at = None; self.refused = 0; self.last = None; self.sent_at = None; }
+    /// Answers the latest push it drops (kicad_rejoin sends a hide again when no pane will push).
+    pub fn rejoined(&mut self) -> Option<Value> { self.inflight = 0; self.retry_at = None; self.refused = 0; self.sent_at = None; self.last.take().map(|mut p| { p["raise"] = json!(false); p }) }
 }
 /// The settle wait in force (MAC_SETTLE_MS, or BACKPLANE_KICAD_MAC_SETTLE_MS; 0: never sent again).
 pub fn mac_settle_ms(env: Option<&str>) -> u64 { env.and_then(|v| v.trim().parse().ok()).unwrap_or(MAC_SETTLE_MS) }
@@ -469,6 +473,8 @@ pub struct KicadPane {
     mac_settle: Option<std::time::Instant>,
     /// the window's host pushes, shared with the app (HostSends; Backplane::screens.host_sends)
     pub host_sends: std::rc::Rc<std::cell::RefCell<HostSends>>,
+    /// macOS: what was last pushed may not have reached KiCad (the hub's connection made again): pushed again though unchanged
+    host_unsent: bool,
     last_root: (i32, i32), placed: Option<(Option<nc::R>, Option<u64>, Vec<nc::R>)>,
     focus: FocusHandle, keys: bool, pub light: bool, _subs: Vec<Subscription>,
     /// the fork's holder already in our save-set; reserved chords pressed in KiCad, waiting to be pressed in gpui
@@ -602,7 +608,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), last_root: (i32::MIN, 0), placed: None,
+        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
@@ -1317,7 +1323,8 @@ impl KicadPane {
         // the last rect, and the frame on show while the page holds the editor (mac_shown); an unseen window goes through host_visible
         let rect = at.and_then(|r| nc::screen_rect(self.toplevel, r)).or_else(|| self.host_sent.map(|(x, y, w, h, _)| (x, y, w, h)));
         let now = rect.map(|(x, y, w, h)| (x, y, w, h, visible));
-        if now.is_some() && now != self.host_sent {
+        if host_push_due(now, self.host_sent, self.host_unsent) {
+            self.host_unsent = false;
             if let Some((x, y, w, h, v)) = now {
                 eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [x, y, w, h], "visible": v, "raise": false, "changed": true, "pane_px": at.map(|r| [r.x, r.y, r.w, r.h]), "frame": show, "in_page": self.in_page, "covered": self.mac_covered, "hitbox": hitbox, "dialog": dialog}));
                 self.host_rpc(json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": v, "raise": false}));
@@ -1336,7 +1343,9 @@ impl KicadPane {
         let said = self.mac_order(show, visible, "frame"); // i18n-ok: a log word
         redraw || said
     }
-    /// A host push (`editor.kicad.host`): counted in flight and kept as the latest wanted (HostSends), then sent.
+    /// A host push (`editor.kicad.host`): counted in flight and kept as the latest wanted (HostSends), then sent. A push the client's
+    /// command queue refuses (try_send: full or closed) is still counted: it is never answered, and HOST_LOST_MS takes it as lost and
+    /// sends the latest again.
     fn host_rpc(&self, params: Value) { self.host_sends.borrow_mut().sent(params.clone(), std::time::Instant::now()); self.rpc("editor.kicad.host", params); }
     /// macOS: the watch looks every frame's time for the next while (something that can change the order just happened).
     #[cfg(target_os = "macos")]
@@ -1412,7 +1421,7 @@ impl KicadPane {
             let visible = mac_shown(show.is_some(), nc::host_visible(self.toplevel), self.at_px.is_some(), self.in_page, self.mac_covered, dialog, sent_visible);
             // our window hidden or back (minimised, another Space, Cmd+H) or the page letting the editor go, with no frame of ours drawn
             // (a hidden app draws none): pushed from here at the last rect, and drawn again for the next frame's own placement
-            if visible != sent_visible { self.mac_host(None, self.at_px.is_some(), show); cx.notify(); }
+            if visible != sent_visible || self.host_unsent { self.mac_host(None, self.at_px.is_some(), show); cx.notify(); }
             else if self.mac_order(show, visible, "watch") { cx.notify(); } // i18n-ok: a log word
         }
         33
@@ -1628,8 +1637,14 @@ mod tests {
         let HostStep::Send(again) = s.watch_step(at) else { panic!("due") }; assert_eq!(again["raise"], json!(false));
         s.reply(true, at + ms(5)); assert_eq!(s.watch_step(at + ms(6)), HostStep::Idle, "taken: asleep again");
         // a new hub: what the old one refused is not sent again
-        s.sent(show.clone(), at + ms(10)); s.reply(false, at + ms(20)).unwrap(); s.rejoined();
+        s.sent(show.clone(), at + ms(10)); s.reply(false, at + ms(20)).unwrap(); assert_eq!(s.rejoined().map(|p| p["visible"].clone()), Some(json!(true)));
         assert_eq!(s.watch_step(at + ms(10_000)), HostStep::Idle, "rejoined: nothing of the old hub's is due");
+        // the same KiCad after a reconnect, the pane's rect unchanged: pushed again (lane B), and not again once pushed
+        use super::host_push_due;
+        let r = Some((430, 153, 496, 500, true));
+        assert!(!host_push_due(r, r, false), "unchanged: nothing");
+        assert!(host_push_due(r, r, true), "unchanged, but the connection was made again: pushed");
+        assert!(host_push_due(Some((430, 153, 496, 524, true)), r, false) && !host_push_due(None, r, true), "a new rect; no rect at all");
     }
     #[test] fn a_frame_left_behind_our_window_is_tried_again_then_said_with_pop_out() {
         use super::{raise_step, RaiseStep, RaiseState, KICAD_RAISE_BOUND, KICAD_RAISE_HELD};
@@ -2062,8 +2077,16 @@ impl crate::Backplane {
     }
     pub(crate) fn kicad_rejoin(&mut self, cx: &mut Context<Self>) {
         // a new hub (a restart ends its KiCads): the shown project is asked warm again
-        WARM_LAST.lock().unwrap().clear(); self.kicad_warm(); self.screens.host_sends.borrow_mut().rejoined();
-        if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| p.reattach()); }
+        WARM_LAST.lock().unwrap().clear(); self.kicad_warm();
+        let dropped = self.screens.host_sends.borrow_mut().rejoined();
+        // the same hub and KiCad, connected again: a push lost with the connection is not resent by anything else (an unchanged rect
+        // pushes nothing, and set_info clears host_sent only for another KiCad): the pane pushes its state again, and with no pane a
+        // hide that was the latest wanted is sent again (a hide is never stale: a new KiCad starts with its frames hidden)
+        if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, cx| { p.host_unsent = true; p.reattach(); cx.notify(); }); }
+        else if let Some(hide) = dropped.filter(|d| d["visible"] == false) {
+            self.screens.host_sends.borrow_mut().sent(hide.clone(), std::time::Instant::now());
+            let _ = self.tx.try_send(Command::Rpc("editor.kicad.host".into(), Secret(hide), "kicad"));
+        }
     }
     /// Edit: the thread's design in the real KiCad, in the pane (the page stays on the rail's Board, Schematic or 3D).
     /// "Open in GerbView" on a Gerber set: the Board page with Edit on (the pane attaches where it is drawn), then the set in KiCad's
