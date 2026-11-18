@@ -387,6 +387,13 @@ mod tests {
         restore(&e.top, "t1", "HEAD", "t1 test").await.unwrap();
         assert_eq!(std::fs::read_to_string(d.join("a.kicad_sch")).unwrap(), "(kicad_sch)"); assert!(d.join("scan.raw").exists());
     }
+    /// BP_COUNT_BOARD=<a .kicad_pcb> cargo test count_items_cost -- --ignored --nocapture: what the first write of a turn spends counting a board.
+    #[test] #[ignore] fn count_items_cost() {
+        let Ok(p) = std::env::var("BP_COUNT_BOARD") else { return };
+        let t0 = std::time::Instant::now(); let text = std::fs::read_to_string(&p).unwrap(); let read = t0.elapsed();
+        let t1 = std::time::Instant::now(); let n = count_items(&text, false); let count = t1.elapsed();
+        println!("{p}: {} bytes, {n} items, read {read:?}, count {count:?}", text.len());
+    }
     #[test] fn a_home_or_the_root_is_no_project() {
         let d = crate::plat::tmp::dir("snap-home");
         assert_eq!(not_a_project(&d, Some(&d)).as_deref(), Some("it is your home folder"));

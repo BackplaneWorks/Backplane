@@ -763,7 +763,7 @@ impl Actor {
         self.recent.push_back(msg.clone()); if self.recent.len() > RECENT { self.recent.pop_front(); }
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed);
         // #1163: the folder is a repository and snapshotted before the turn's own captures and before the agent gets anything (snapguard.rs)
-        if let Err(why) = self.ag.turn_guard_start(&th, &cwd, Some(&text)).await { self.fail(why, "git", &hub_id("git", now_s(), self.ag.seq())).await; return Ok(()) } // #1163: the hub's snapshot (and the review mode) before the agent gets anything (snapguard.rs)
+        if let Err(why) = self.ag.turn_guard_start_by(&th, &cwd, Some(&text), self.pressed && origin.is_none()).await { self.fail(why, "git", &hub_id("git", now_s(), self.ag.seq())).await; return Ok(()) } // #1163: the hub's snapshot (and the review mode) before the agent gets anything (snapguard.rs)
         self.jobs_start(&cwd, &msg); if !self.settle_ends().await { return Ok(()) } // a Stop while it waited for the checkpoint: no agent is started, the Stop ends the turn
         // the person's message starts the turn: the <terminals> note follows it (and the chat's unpinned terminals stop)
         let rv_block = { let w = self.ag.world().await; let ops: Vec<_> = w.reviews.get(&th).map(|v| v.iter().filter_map(|(k, sm, at)| crate::files::kicad::review::of(crate::files::kicad::review::TONE, k, sm, *at)).collect()).unwrap_or_default(); crate::files::kicad::review::prompt(&crate::files::kicad::review::fold(&ops)) }; // Review.agent: the open comments follow every message

@@ -32,7 +32,9 @@ PY
 
 place_runtime() { # the staged build where the hub's installer puts a managed runtime; hard links, nothing copied twice
   mkdir -p "$OUT/home/kicad"
-  cp -al "$RT_SRC" "$OUT/home/kicad/$VER" 2>/dev/null || cp -a "$RT_SRC" "$OUT/home/kicad/$VER"
+  # a hard-link copy where it can be; else a whole copy (another filesystem: what cp -al left half-made goes first), made writable,
+  # since a published runtime is read-only and the hub writes beside its files
+  cp -al "$RT_SRC" "$OUT/home/kicad/$VER" 2>/dev/null || { chmod -R u+w "$OUT/home/kicad/$VER" 2>/dev/null; rm -rf "$OUT/home/kicad/$VER"; cp -a "$RT_SRC" "$OUT/home/kicad/$VER" && chmod -R u+w "$OUT/home/kicad/$VER"; }
   KICAD_BIN="$OUT/home/kicad/$VER/bin/kicad"; KICAD_CLI_MANAGED="$OUT/home/kicad/$VER/bin/kicad-cli"
   export KICAD_BIN
 }
