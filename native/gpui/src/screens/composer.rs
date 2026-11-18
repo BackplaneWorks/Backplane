@@ -481,7 +481,7 @@ mod tests {
                 ("cmd-left", "Home"), ("cmd-right", "End"), ("cmd-shift-left", "SelHome"), ("cmd-shift-right", "SelEnd"),
                 ("cmd-backspace", "LineBackspace"), ("cmd-delete", "LineDelete"),
                 ("cmd-up", "DocStart"), ("cmd-down", "DocEnd"), ("cmd-shift-up", "SelDocStart"), ("cmd-shift-down", "SelDocEnd"),
-                ("left", "Left"), ("shift-right", "SelRight"), ("home", "Home"), ("end", "End"), ("cmd-home", "DocStart"), ("cmd-a", "SelectAll"), ("cmd-z", "Undo")] {
+                ("left", "Left"), ("shift-right", "SelRight"), ("home", "Home"), ("end", "End")] { // (the secondary chords, Cmd+A, Cmd+Z, Cmd+Home, are the shared ones)
                 assert_eq!(edit_key(true, k, ctx), format!("composer::{a}"), "{ctx} {k}");
             }
         }
