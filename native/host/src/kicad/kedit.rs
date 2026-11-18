@@ -1084,7 +1084,13 @@ pub async fn run(c: &dyn Call, path: &str, a: &Value) -> Result<Value, String> {
     if !r.refill.is_empty() { let zs = std::mem::take(&mut r.refill); r.c.call(&format!("{B}RefillZones"), json!({"board": r.doc, "zones": zs})).await?; }
     let mut out = json!({"results": results});
     if r.wrote && a["save"].as_bool().unwrap_or(true) {
-        let s = r.c.call(&format!("{C}SaveDocument"), json!({"document": r.doc})).await?;
+        // the edit is committed (and its zones refilled) before the save: a refused or failed save is said with it, never as the call's
+        // error, which reads as "nothing happened" and has the agent make every change a second time (#1169)
+        let s = match r.c.call(&format!("{C}SaveDocument"), json!({"document": r.doc})).await {
+            Ok(s) => s,
+            Err(e) => { out["saved"] = json!(false); out["not_saved"] = json!(format!("{e} The edit itself is made in the open editor: do not send this call again."));
+                return Ok(out) }
+        };
         // the save gate's word (nothing to write; only KiCad's own load change) is not a save; a save says what else it wrote
         if s["not_saved"].is_string() { out["saved"] = json!(false); out["not_saved"] = s["not_saved"].clone() } else { out["saved"] = json!(path) }
         for k in ["format_upgrade", "kicad_load_changes", "detached_kicad"] { if s[k].is_string() { out[k] = s[k].clone() } }
@@ -1289,6 +1295,15 @@ mod tests {
         assert!(e.contains("op 2 (add): KiCad answered AS_BAD_REQUEST: no") && e.contains("already applied, not undone: netclass"), "{e}");
         assert!(go(&fake(None), json!({"ops": [{"paint": 1}]})).unwrap_err().starts_with("op 1: an op is one of") && go(&fake(None), json!({})).is_err());
         assert!(go(&fake(None), json!({"ops": [{"delete": {"kind": "track"}}]})).unwrap_err().contains("delete needs more than a kind"));
+    }
+    /// #1169: a refused save after the commit is said with the results (saved: false and why), never as the call's error: the edit is
+    /// made, and an agent told "failed" sends it again (every track twice).
+    #[test] fn a_refused_save_is_not_the_calls_error() {
+        let f = fake(Some("SaveDocument"));
+        let o = go(&f, json!({"ops": [{"add": {"via": {"at": [1, 1], "size": 0.6, "drill": 0.3, "net": "GND"}}}]})).unwrap();
+        assert_eq!(o["saved"], json!(false));
+        assert!(o["not_saved"].as_str().unwrap().contains("do not send this call again"), "{o}");
+        assert!(o["results"].as_array().is_some_and(|r| !r.is_empty()), "{o}");
     }
     #[test] fn zones_are_sent_without_fills_and_refilled_and_deletes_go_by_selector() {
         let f = fake(None);

@@ -549,7 +549,8 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
             let why = super::embed::unsaved_update(&pro, |u| u).refuse_save(Path::new(path).file_name().and_then(|f| f.to_str()).unwrap_or(path));
             if !why.is_empty() { return Err(why) }
         }
-        if short == "BeginCommit" { super::embed::unsaved_update(&pro, |u| u.agent_begins()); }
+        // (a co-editing KiCad says who made each change: there the person counts only by their own, ET_DOCUMENT_EDITED, #1169)
+        if short == "BeginCommit" && !coedit { let pending = !super::embed::agent_unsaved(&pro).is_empty(); super::embed::unsaved_update(&pro, |u| u.agent_begins(pending)); }
         let commits = short == "EndCommit" && msg_commits(&msg);
         let actor = if coedit { super::coedit::client_name(&super::coedit::Who::Agent(thread.unwrap_or(""))) } else { String::new() };
         let mut held = None;

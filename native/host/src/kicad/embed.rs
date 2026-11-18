@@ -943,22 +943,28 @@ pub fn gui_route(pro: &str) -> Option<GuiRoute> {
 
 // The person's unsaved edits (the person's rule, Nov 11): an agent's save never writes what the person has open and unsaved. Per project:
 // whether a document is modified (from each publish: GetFrames in fork mode, the client's titles in stock mode), whether the agent's own
-// commits changed it since the last save, and whether the person had the editor (the keyboard on a click, from the client) or had it
-// modified before the agent's commit began. All three clear when nothing is modified any more (a save, a revert).
+// commits changed it since the last save, and whether the person changed it. A co-editing runtime (`coedit`, bp.11+) says who made each
+// change (ET_DOCUMENT_EDITED's actor): there only the person's own change counts (#1169: a pan, a click, a selection or the keyboard
+// handed to KiCad changes nothing, and once counted it blocked every agent save). A runtime that says no actor (bp.10, stock) cannot
+// tell: there the person having had the editor (a press or the keyboard, from the client), or a change pending that no agent made when
+// an agent's commit begins, still counts. All three clear when nothing is modified any more (a save, a revert).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Unsaved { pub modified: bool, pub agent: bool, pub person: bool }
 impl Unsaved {
     /// What a publish says: nothing modified clears everything.
     pub fn seen(self, modified: bool) -> Self { if modified { Unsaved { modified, ..self } } else { Unsaved::default() } }
-    /// The person took the editor (a click gave KiCad the keyboard).
+    /// The person took the editor (a press or the keyboard handed to KiCad): counted only where KiCad says no actor (`touched_counts`).
     pub fn touched(self) -> Self { Unsaved { person: true, ..self } }
-    /// An agent's BeginCommit: edits already pending that are not the agent's are the person's.
-    pub fn agent_begins(self) -> Self { Unsaved { person: self.person || (self.modified && !self.agent), ..self } }
+    /// The person's own change, as a co-editing KiCad attributes it (ET_DOCUMENT_EDITED, actor "" or `person:`).
+    pub fn person_edited(self) -> Self { Unsaved { person: true, modified: true, ..self } }
+    /// An agent's BeginCommit on a runtime that says no actor: edits already pending that no agent made are the person's. `agents_pending`:
+    /// the hub's record has an agent's change not on disk in this project (`agent_unsaved`, any thread's): those are not the person's.
+    pub fn agent_begins(self, agents_pending: bool) -> Self { Unsaved { person: self.person || (self.modified && !self.agent && !agents_pending), ..self } }
     /// An agent's commit landed.
     pub fn agent_committed(self) -> Self { Unsaved { agent: true, modified: true, ..self } }
     /// Why an agent's save is refused ("" when it may save): the document is modified and the person may have edits in it.
     pub fn refuse_save(self, file: &str) -> String {
-        if self.modified && self.person { format!("You have unsaved edits in KiCad ({file}). The agent's save was refused so that it does not write them: save or revert your edits in KiCad first, then ask again.") } else { String::new() }
+        if self.modified && self.person { format!("Not saved: the person may have unsaved edits of their own in KiCad ({file}), and an agent's save would write them too. Your change is already made in the open editor: do not send it again (that would make it twice). It is written to the file when the person saves in KiCad (Ctrl+S); tell them so.") } else { String::new() }
     }
 }
 static UNSAVED: OnceLock<Mutex<HashMap<String, Unsaved>>> = OnceLock::new();
@@ -979,6 +985,16 @@ pub fn agent_unsaved(pro: &str) -> Vec<String> {
     let Some(v) = m.get_mut(&norm_pro_key(pro)) else { return vec![] };
     v.retain(|(d, at)| std::fs::metadata(d).and_then(|x| x.modified()).map_or(true, |w| w < *at));
     v.iter().map(|(d, _)| d.clone()).collect()
+}
+/// Whether the person having the editor counts as their edit (#1169): only where KiCad does not say who changed what (no `coedit`); a
+/// co-editing KiCad's ET_DOCUMENT_EDITED does (`is_persons_edit`). No editor route yet: counted, as before.
+pub fn touched_counts(pro: &str) -> bool { !gui_route(pro).is_some_and(|g| g.caps.iter().any(|c| c == "coedit")) }
+/// ET_DOCUMENT_EDITED made by the person (actor "" in KiCad, or Backplane's UI acting as them: `person:`), their undo and redo included;
+/// an agent's (`agent:`) or the hub's own (`hub:`) is not.
+pub fn is_persons_edit(ev: &Value) -> bool {
+    if !(ev["type"] == "ET_DOCUMENT_EDITED" || ev["type"].as_i64() == Some(20)) { return false }
+    let Ok(d) = serde_json::from_str::<Value>(ev["detail"].as_str().unwrap_or("")) else { return false };
+    let a = d["actor"].as_str().unwrap_or(""); a.is_empty() || a.starts_with("person:")
 }
 fn unsaved() -> &'static Mutex<HashMap<String, Unsaved>> { UNSAVED.get_or_init(Default::default) }
 /// The project's state, changed by `f`; answers the new state.
@@ -3203,6 +3219,7 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                         }
                         super::xprobe::kicad_selected(&pro, ev); continue
                     }
+                    if is_persons_edit(ev) { unsaved_update(&pro, |u| u.person_edited()); }
                     if super::coedit::on_edited(&pro, ev) { continue }
                     if let Some(n) = lock_notice_of(ev) {
                         eprintln!("kicad embed: {pro}: KiCad opened a locked file anyway: {}", n["detail"].as_str().unwrap_or(""));
@@ -3419,7 +3436,7 @@ impl RpcHandler for EmbedRpc {
                 let _ = actor_tx.send(Msg::ClientDialogs { pro: resolved.pro, open });
                 return ok_reply(id, json!({}))
             }
-            if method == "editor.kicad.touched" { unsaved_update(&resolved.pro, |u| u.touched()); super::checkrun::person_touched(&resolved.pro); super::coedit::person_input(&resolved.pro); return ok_reply(id, json!({})) }
+            if method == "editor.kicad.touched" { if touched_counts(&resolved.pro) { unsaved_update(&resolved.pro, |u| u.touched()); } super::checkrun::person_touched(&resolved.pro); super::coedit::person_input(&resolved.pro); return ok_reply(id, json!({})) }
             let (tx, rx) = oneshot::channel();
             let sent = match method {
                 "editor.kicad.attach" => {
@@ -4836,13 +4853,29 @@ mod unsaved_tests {
     #[test] fn an_agent_save_never_writes_the_persons_unsaved_edits() {
         let clean = Unsaved::default();
         // only the agent's commits: it may save
-        let a = clean.agent_begins().agent_committed(); assert_eq!(a.refuse_save("a.kicad_pcb"), "");
-        // the person clicked into KiCad and the board is modified: refused, whoever made the change
-        let p = a.touched(); assert!(p.refuse_save("a.kicad_pcb").starts_with("You have unsaved edits in KiCad (a.kicad_pcb)"));
+        let a = clean.agent_begins(false).agent_committed(); assert_eq!(a.refuse_save("a.kicad_pcb"), "");
+        // a runtime that says no actor: the person had the editor and the board is modified: refused, whoever made the change
+        let p = a.touched(); let why = p.refuse_save("a.kicad_pcb");
+        assert!(why.starts_with("Not saved: the person may have unsaved edits of their own in KiCad (a.kicad_pcb)"), "{why}");
+        // #1169: the words never send the agent to make the change a second time
+        assert!(why.contains("do not send it again") && !why.contains("ask again"), "{why}");
         // edits pending before the agent's first commit are the person's
-        let pending = clean.seen(true).agent_begins().agent_committed(); assert!(!pending.refuse_save("b").is_empty());
+        let pending = clean.seen(true).agent_begins(false).agent_committed(); assert!(!pending.refuse_save("b").is_empty());
+        // #1169: unless the hub's record says an agent made them (another thread's, a save: false left pending)
+        assert_eq!(clean.seen(true).agent_begins(true).agent_committed().refuse_save("b"), "");
         // a touch without changes refuses nothing; a save (nothing modified) clears it all
         assert_eq!(clean.touched().refuse_save("c"), ""); assert_eq!(p.seen(false), Unsaved::default());
+        // a co-editing KiCad's attributed edit of the person's counts on its own
+        assert!(!a.person_edited().refuse_save("d").is_empty() && clean.person_edited().modified);
+    }
+    /// #1169: on a co-editing KiCad only the person's own change counts, never an agent's or the hub's, and a pan (no event) nothing.
+    #[test] fn only_the_persons_attributed_edit_counts() {
+        use serde_json::json;
+        let ev = |actor: &str| json!({"type": "ET_DOCUMENT_EDITED", "detail": json!({"seq": 4, "doc": "pcb", "actor": actor, "description": "Rotate"}).to_string()});
+        assert!(super::is_persons_edit(&ev("")) && super::is_persons_edit(&ev("person:backplane-7")) && super::is_persons_edit(&json!({"type": 20, "detail": json!({"actor": "", "undo": true}).to_string()})));
+        assert!(!super::is_persons_edit(&ev("agent:t9")) && !super::is_persons_edit(&ev("hub:bom")) && !super::is_persons_edit(&json!({"type": "ET_SELECTION_CHANGED", "detail": "{}"})));
+        // no editor route: the old rule (counted)
+        assert!(super::touched_counts("/nowhere/x.kicad_pro"));
     }
 }
 
