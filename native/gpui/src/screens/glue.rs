@@ -252,10 +252,10 @@ impl Backplane {
     /// A picture was applied: the drafts, the asks' boxes and the settings fields follow what the hub just drew.
     pub(crate) fn picture_applied(&mut self, cx: &mut Context<Self>) {
         self.draft_from_hub(cx);
-        // the pressed rail kind gives way when the hub marks it (or after 2 s): a streamed picture arriving first does not flicker it back
+        // the pressed rail kind gives way when the hub marks it (or after PRESS_WAIT): a streamed picture arriving first does not flicker it back
         if let Some(p) = self.screens.rail_pending.clone() {
             let hub_on = super::viewer::active_kind(&self.data["thread"]["viewer"], None);
-            if hub_on == p || self.screens.rail_at.map_or(true, |t| t.elapsed() > std::time::Duration::from_secs(2)) { self.screens.rail_pending = None; self.screens.rail_at = None; }
+            if hub_on == p || self.screens.rail_at.map_or(true, |t| t.elapsed() > super::viewer::PRESS_WAIT) { self.screens.rail_pending = None; self.screens.rail_at = None; }
         }
         super::settings::sync(self, cx);
         super::onboard::sync(self, cx);
