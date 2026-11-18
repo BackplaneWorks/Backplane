@@ -1723,6 +1723,7 @@ impl Actor {
         let mode_s = mode.to_string();
         let root_s = root.clone();
         let caps = env.caps.clone();
+        let version = env.version.clone();
         let lock_docs = launch_docs(&files, &sess.active);
         tokio::spawn(async move {
             // Retire any headless kserve for this project before the GUI opens its files: it holds the project's lock while it runs (the
@@ -1745,6 +1746,8 @@ impl Actor {
                     return;
                 }
             }
+            // #1185: window geometry an older runtime's embedded KiCad saved into the person's settings, repaired while no KiCad runs
+            if mode_s == "fork" { let (v, h) = (version.clone(), home.clone()); let _ = tokio::task::spawn_blocking(move || super::geomguard::guard(&v, &h)).await; }
             spawn_gui_session(me, home, pro, root_s, gen, mode_s, argv_vec, sock_dir, req_sock, eff_display, desc, active, spawn_container, sweep_locks, caps).await;
         });
     }
