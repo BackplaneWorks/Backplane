@@ -95,13 +95,14 @@ class Project:
         r, e, s = self.call("kiapi.common.commands.GetItems", {"header": {"document": self.doc}, "types": ["KOT_PCB_TRACE"]})
         if e and ("not open" in e or "no handler" in e): self.doc = None  # a new server has no document open yet: the next read opens it
         return r, e, s
-    def work(self, seconds):
+    def work(self, seconds, heartbeat=False):
         """Requests back to back for `seconds`, in a thread: .errors and .n when joined."""
         self.errors, self.n, self.stop_at = [], 0, time.time() + seconds
         def loop():
             while time.time() < self.stop_at:
-                r, e, _ = self.read(); self.n += 1
+                r, e, _ = self.version() if heartbeat else self.read(); self.n += 1
                 if e: self.errors.append(e)
+                if heartbeat: time.sleep(0.2)
         self.thread = threading.Thread(target=loop); self.thread.start(); return self
     def end(self): self.stop_at = 0; self.thread.join()
     def release(self): open(self.hold + ".stop", "w").write("x")
@@ -179,21 +180,35 @@ def first_hub(work, hub_bin, rt, staged, port):
 def second_hub(work, hub_bin, rt, staged, port):
     gib = int(next(l for l in open("/proc/meminfo") if l.startswith("MemTotal")).split()[1]) >> 20
     if gib < 30: print(f"skip (f): this machine reads {gib} GiB, the pool has room for two"); return
-    h = Hub(work, hub_bin, rt, port, KNOBS)
+    h = Hub(work, hub_bin, rt, port, KNOBS); active = []
     try:
-        ps = [Project(h, staged, n) for n in ("qa", "qb", "qc")]; first = {}
+        ps = [Project(h, staged, n) for n in ("qa", "qb", "qc")]; first, starts = {}, {}
         for p in ps:
-            r, e, s = p.version(); time.sleep(1.2)
+            r, e, s = p.version(); starts[p.name] = round(s, 2)
             if e: first[p.name] = e
+            else: active.append(p.work(600, heartbeat=True))
+        # Cold starts can exceed SPARE_IDLE under load. Keep the earlier servers active until all three
+        # are ready, then stop together and establish the retirement order with warm requests.
         names = [n for _, n in h.servers()]
-        ok(f"(f) {gib} GiB: the third project has a server of its own beside the two", not first and names == ["qa", "qb", "qc"], {"errors": first, "servers": h.servers()})
+        for p in active: p.stop_at = 0
+        for p in active:
+            p.thread.join()
+            if p.errors: first[p.name] = p.errors
+        ok(f"(f) {gib} GiB: the third project has a server of its own beside the two", not first and names == ["qa", "qb", "qc"], {"errors": first, "servers": names, "cold_start_seconds": starts})
+        for p in ps:
+            r, e, s = p.version()
+            if e: raise RuntimeError(f"could not establish idle order for {p.name}: {e}")
+            time.sleep(1.2)
         deadline = time.time() + SPARE_IDLE + 75; left = h.servers()
         while time.time() < deadline and len(left) > 2: time.sleep(1); left = h.servers()
         ok(f"(f) idle {SPARE_IDLE} s, the one beyond two is retired: the least recently used", [n for _, n in left] == ["qb", "qc"], left)
         time.sleep(SPARE_IDLE + 5); ok("(f) the two stay", [n for _, n in h.servers()] == ["qb", "qc"], h.servers())
         r, e, s = ps[0].version(); ok("(f) and the retired project is served again when asked", not e and len(h.servers()) == 3, {"error": e, "servers": h.servers()})
         for p in ps: p.release()
-    finally: h.stop()
+    finally:
+        for p in active: p.stop_at = 0
+        for p in active: p.thread.join()
+        h.stop()
 
 if __name__ == "__main__":
     work, hub_bin, rt, board = [os.path.abspath(x) for x in sys.argv[1:5]]; port = int(sys.argv[5]) if len(sys.argv) > 5 else 3897
