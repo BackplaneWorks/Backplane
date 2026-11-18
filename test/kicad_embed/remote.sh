@@ -139,10 +139,26 @@ for a in "${ENVARGS[@]}"; do
 done
 
 # ---- 3. the tree and the build, by the same script as every remote build
+if [ -n "${KEMBED_PINNED:-}" ]; then
+  # KEMBED_PINNED=<dir>: binaries built elsewhere (a Boat job's pinned/ with its pinned-sha256.txt beside it): the tree is synced, nothing is
+  # compiled here, and the copies are checked against those digests on the remote before the run
+  [ -x "$KEMBED_PINNED/backplane-hub" ] && [ -x "$KEMBED_PINNED/backplane-gpui" ] && [ -f "$KEMBED_PINNED/../pinned-sha256.txt" ] || die "KEMBED_PINNED needs backplane-hub, backplane-gpui and ../pinned-sha256.txt" 64
+  say "syncing the worktree to $HOST, no build: pinned binaries from $KEMBED_PINNED"
+  ( cd "$REPO" && "$REPO/scripts/bp-build.sh" "$LANE" true ) >&2 || die "remote sync failed" 70
+  rssh "mkdir -p '$TREE/.target/host/fast' '$TREE/.target/gpui/fast'" || die "remote mkdir failed" 70
+  rsync -a -e "ssh ${SSH_OPTS[*]}" "$KEMBED_PINNED/backplane-hub" "$HOST:$TREE/.target/host/fast/" >&2 || die "pinned hub copy failed" 70
+  rsync -a --exclude backplane-hub -e "ssh ${SSH_OPTS[*]}" "$KEMBED_PINNED/" "$HOST:$TREE/.target/gpui/fast/" >&2 || die "pinned client copy failed" 70
+  ( cd "$KEMBED_PINNED" && sha256sum -c --quiet ../pinned-sha256.txt ) >&2 || die "the pinned binaries here do not match their digests" 70
+  want="$(sha256sum "$KEMBED_PINNED/backplane-hub" | cut -c1-64) $(sha256sum "$KEMBED_PINNED/backplane-gpui" | cut -c1-64)"
+  got=$(rssh "cd '$TREE/.target' && sha256sum host/fast/backplane-hub gpui/fast/backplane-gpui | cut -c1-64 | tr '\n' ' '")
+  [ "${got% }" = "$want" ] || die "the pinned binaries on $HOST do not match their digests ($got vs $want)" 70
+  say "pinned binaries in place and checked ($(sha256sum "$KEMBED_PINNED/backplane-hub" | cut -c1-12) hub)"
+else
 say "syncing the worktree and building the hub and client on $HOST (scripts/bp-build.sh $LANE)"
 BUILD='cd native/host && CARGO_TARGET_DIR=$CARGO_TARGET_DIR/host cargo build --profile fast --bin backplane-hub && cd ../gpui && CARGO_TARGET_DIR=$CARGO_TARGET_DIR/gpui cargo build --profile fast'
 ( cd "$REPO" && "$REPO/scripts/bp-build.sh" "$LANE" "$BUILD" ) >&2 || die "remote build failed" 70
 say "built in $(( $(date +%s) - T0 )) s since the lock"
+fi
 
 # ---- 4. run (the remote runner is in the tree we just synced)
 mkdir -p "$BP_TMP/bp-kembed-remote-out"; OUTLOCAL=$BP_TMP/bp-kembed-remote-out/$RID

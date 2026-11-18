@@ -645,6 +645,8 @@ impl Served {
     pub fn word(&self) -> Option<&'static str> {
         let first = *self.sent.first()?; Some(if self.sent.iter().all(|s| *s == first) { first } else { "both" })
     }
+    /// The KiCad this call's last request went to (EMBEDDED or HEADLESS), None before any: where its next one goes too (#1224).
+    pub fn last(&self) -> Option<&'static str> { self.sent.last().copied() }
 }
 tokio::task_local! { pub static SERVED: std::cell::RefCell<Served>; }
 pub const EMBEDDED: &str = "embedded";

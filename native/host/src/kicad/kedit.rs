@@ -38,6 +38,8 @@ pub trait Call: Sync {
     fn nets<'a>(&'a self) -> Fut<'a> { Box::pin(async { Ok(Value::Null) }) }
     /// KiCad's own check of the saved document (kicad-cli's DRC report of a board, ERC of a schematic, as JSON); Null: none to be had.
     fn check<'a>(&'a self) -> Fut<'a> { Box::pin(async { Ok(Value::Null) }) }
+    /// The KiCad this edit's requests were actually dispatched to so far (`ipc::EMBEDDED` or `ipc::HEADLESS`; None: not known).
+    fn served(&self) -> Option<&'static str> { None }
 }
 /// KiCad's task gate (a check or refill is running: AS_BUSY "a task is running: ...") is waited out, asked again every BUSY_STEP for at most
 /// BUSY_WAIT, so a check that happens to run does not fail a whole edit. Any other refusal (an open dialog, which the answer names) is the answer.
@@ -62,6 +64,7 @@ impl Call for Patient<'_> {
     fn check<'a>(&'a self) -> Fut<'a> { self.c.check() }
     fn nets<'a>(&'a self) -> Fut<'a> { self.c.nets() }
     fn caps(&self) -> Vec<String> { self.c.caps() }
+    fn served(&self) -> Option<&'static str> { self.c.served() }
 }
 /// A route's net name against a board net: as written, or a root-sheet net without its sheet's "/" ("N1" for "/N1", the name the
 /// person and the schematic's label give it).
@@ -350,6 +353,8 @@ pub fn merge(into: &mut Value, from: &Value) {
         _ => *into = from.clone(),
     }
 }
+/// Whether KiCad fills this zone: a copper pour or a teardrop (never a rule area, a keepout, nor a graphical zone).
+fn fillable(z: &Value) -> bool { matches!(z["type"].as_str().unwrap_or(""), "ZT_COPPER" | "ZT_TEARDROP") }
 /// The item an update sends: zones without their fills (KiCad refills), a footprint or symbol without its body unless that changed.
 fn slim(kind: &str, mut raw: Value, body: bool) -> Value {
     if let Some(o) = raw.as_object_mut() {
@@ -562,6 +567,18 @@ impl Run<'_> {
         }
         self.cache.insert(kind.into(), out.clone());
         Ok(out)
+    }
+    /// Every zone refilled (#1224). In the embedded editor KiCad fills `RefillZones` with no zones after the request ends (CallAfter
+    /// zoneFillAll, bp.13.1 api_handler_pcb.cpp), outside the request's actor: the fill came back as the person's "Fill Zone(s)" edit, and it
+    /// could land after the save that followed. Named, the same handler fills them within the request, as this agent, before its answer and
+    /// so before the save. Only copper pours and teardrops are named (KiCad refuses a rule area by id); none: nothing to fill, nothing sent.
+    /// Never the empty list there. A headless KiCad fills the empty list within the request (no frame: FillAllZones at once): left as it was.
+    async fn refill_every_zone(&mut self) -> Result<(), String> {
+        if self.c.served() != Some(super::ipc::EMBEDDED) { return self.c.call(&format!("{B}RefillZones"), json!({"board": self.doc, "zones": []})).await.map(|_| ()) }
+        self.cache.remove("zone");
+        let ids: Vec<Value> = self.items("zone").await?.iter().map(|(z, _)| z).filter(|z| fillable(z)).map(|z| json!({"value": z["id"]["value"].clone()})).collect();
+        if ids.is_empty() { return Ok(()) }
+        self.c.call(&format!("{B}RefillZones"), json!({"board": self.doc, "zones": ids})).await.map(|_| ())
     }
     /// The raw items a selector picks, each with its sheet.
     async fn pick(&mut self, sel: &Value) -> Result<Vec<(Value, Value)>, String> {
@@ -1080,7 +1097,7 @@ pub async fn run(c: &dyn Call, path: &str, a: &Value) -> Result<Value, String> {
     }
     let message = r.message.clone();
     r.end("CMA_COMMIT", &message).await?;
-    if r.refill_all { r.refill.clear(); r.c.call(&format!("{B}RefillZones"), json!({"board": r.doc, "zones": []})).await?; }
+    if r.refill_all { r.refill.clear(); r.refill_every_zone().await?; }
     if !r.refill.is_empty() { let zs = std::mem::take(&mut r.refill); r.c.call(&format!("{B}RefillZones"), json!({"board": r.doc, "zones": zs})).await?; }
     let mut out = json!({"results": results});
     if r.wrote && a["save"].as_bool().unwrap_or(true) {
@@ -1181,7 +1198,7 @@ mod tests {
     }
 
     /// A stand-in KiCad: a board with two footprints, a track and a zone; it records every command.
-    struct Fake { log: Mutex<Vec<(String, Value)>>, open: Mutex<bool>, fail: Option<&'static str>, busy: Mutex<u32>, save: Value, texts: Option<Vec<String>>, caps: Vec<String> }
+    struct Fake { log: Mutex<Vec<(String, Value)>>, open: Mutex<bool>, fail: Option<&'static str>, busy: Mutex<u32>, save: Value, texts: Option<Vec<String>>, caps: Vec<String>, served: Option<&'static str>, zones: Option<Value> }
     impl Call for Fake {
         fn call<'a>(&'a self, ty: &'a str, msg: Value) -> Fut<'a> { Box::pin(async move {
             self.log.lock().unwrap().push((ty.rsplit('.').next().unwrap_or("").to_string(), msg.clone()));
@@ -1195,7 +1212,7 @@ mod tests {
                     "KOT_PCB_FOOTPRINT" => json!({"items": [fp("R1", "10k", 1000000, 2000000), fp("R2", "10k", 3000000, 2000000), fp("C1", "1u", 5000000, 5000000)]}),
                     "KOT_PCB_TRACE" => json!({"items": [{"id": {"value": "t1"}, "start": {"x_nm": "146200000", "y_nm": "112400000"}, "end": {"x_nm": "153800000", "y_nm": "112400000"}, "width": {"value_nm": "200000"}, "layer": "BL_F_Cu", "net": {"name": "GND"}}]}),
                     "KOT_SCH_SYMBOL" => json!({"items": [{"id": {"value": "s1"}, "path": {"path": [{"value": "root"}, {"value": "sub"}], "path_human_readable": "/sub/"}, "position": {}, "reference_field": {"text": {"text": "R1"}}, "value_field": {"text": {"text": "10K"}}}]}),
-                    "KOT_PCB_ZONE" => json!({"items": [{"id": {"value": "z1"}, "copper_settings": {"net": {"name": "+1V8"}}, "filled_polygons": [1, 2]}]}),
+                    "KOT_PCB_ZONE" => self.zones.clone().unwrap_or_else(|| json!({"items": [{"id": {"value": "z1"}, "copper_settings": {"net": {"name": "+1V8"}}, "filled_polygons": [1, 2]}]})),
                     _ => json!({"items": []}),
                 },
                 "BeginCommit" => json!({"id": {"value": "commit-1"}}),
@@ -1215,8 +1232,9 @@ mod tests {
         }) }
         fn sheet_texts(&self) -> Option<Vec<String>> { self.texts.clone() }
         fn caps(&self) -> Vec<String> { self.caps.clone() }
+        fn served(&self) -> Option<&'static str> { self.served }
     }
-    fn fake(fail: Option<&'static str>) -> Fake { Fake { log: Mutex::new(vec![]), open: Mutex::new(false), fail, busy: Mutex::new(0), save: json!({}), texts: None, caps: vec![] } }
+    fn fake(fail: Option<&'static str>) -> Fake { Fake { log: Mutex::new(vec![]), open: Mutex::new(false), fail, busy: Mutex::new(0), save: json!({}), texts: None, caps: vec![], served: None, zones: None } }
     fn names(f: &Fake) -> Vec<String> { f.log.lock().unwrap().iter().map(|(t, _)| t.clone()).collect() }
     fn sent(f: &Fake, ty: &str) -> Value { f.log.lock().unwrap().iter().find(|(t, _)| t == ty).map(|(_, m)| m.clone()).unwrap_or(Value::Null) }
     fn go(f: &Fake, a: Value) -> Result<Value, String> { go_on(f, "/p/b.kicad_pcb", a) }
@@ -1274,6 +1292,7 @@ mod tests {
             {"updated": [{"ref": "C1", "value": "2u2", "at": [5.0, 5.0], "rot": 90.0, "layer": "B.Cu"}]}, {"created": [{"id": "new-0"}]}], "saved": "/p/b.kicad_pcb"}), "a change answers with what the items are now");
         // the document is opened once, the footprints are read once before the commit starts, and one commit holds every change
         assert_eq!(names(&f), ["GetOpenDocuments", "OpenDocument", "GetItems", "BeginCommit", "UpdateItems", "GetItems", "UpdateItems", "CreateItems", "EndCommit", "RefillZones", "SaveDocument"], "a new track stands in a pour: every zone is refilled before the save");
+        assert_eq!(sent(&f, "RefillZones")["zones"], json!([]), "headless: the empty list, filled within the request (no frame)");
         let up = sent(&f, "UpdateItems");
         assert_eq!((up["items"][0]["position"].clone(), up["items"][1]["position"]["y_nm"].clone(), up["items"][0].get("definition"), up["header"]["document"]["board_filename"].clone()), (json!({"x_nm": "1000000", "y_nm": "3000000"}), json!("3000000"), None, json!("b.kicad_pcb")));
         assert_eq!(sent(&f, "EndCommit"), json!({"header": {"document": {"type": "DOCTYPE_PCB", "board_filename": "b.kicad_pcb", "project": {"name": "b", "path": "/p"}}}, "id": {"value": "commit-1"}, "action": "CMA_COMMIT", "message": "tidy"}));
@@ -1298,6 +1317,32 @@ mod tests {
     }
     /// #1169: a refused save after the commit is said with the results (saved: false and why), never as the call's error: the edit is
     /// made, and an agent told "failed" sends it again (every track twice).
+    /// #1224: rule areas and graphical zones are not named for a fill (KiCad refuses a rule area by id); pours and teardrops are.
+    #[test] fn only_fillable_zones_are_named() {
+        assert!(fillable(&json!({"type": "ZT_COPPER"})) && fillable(&json!({"type": "ZT_TEARDROP"})));
+        assert!(!fillable(&json!({"type": "ZT_RULE_AREA"})) && !fillable(&json!({"type": "ZT_GRAPHICAL"})) && !fillable(&json!({})));
+    }
+    /// #1224: in the embedded editor a refill of every zone names the board's copper zones (filled within the request, as the agent,
+    /// before the save), never the empty list (filled after the request, as nobody: the person's "Fill Zone(s)"); with no copper zone
+    /// (none, or keepouts only) nothing is sent, and the save still goes.
+    #[test] fn an_embedded_refill_names_the_copper_zones_and_skips_none() {
+        let track = json!({"ops": [{"add": {"track": {"from": [1, 2], "to": [3, 2], "width": 0.2, "layer": "F.Cu", "net": "GND"}}}]});
+        let tail = |f: &Fake| { let n = names(f); n[n.iter().rposition(|x| x == "EndCommit").unwrap()..].to_vec() };
+        let mut f = fake(None); f.served = Some(crate::files::kicad::ipc::EMBEDDED);
+        f.zones = Some(json!({"items": [{"id": {"value": "z1"}, "type": "ZT_COPPER"}, {"id": {"value": "k1"}, "type": "ZT_RULE_AREA"}, {"id": {"value": "t1"}, "type": "ZT_TEARDROP"}]}));
+        assert_eq!(go(&f, track.clone()).unwrap()["saved"], "/p/b.kicad_pcb");
+        assert_eq!(tail(&f), ["EndCommit", "GetItems", "RefillZones", "SaveDocument"]);
+        let refills: Vec<Value> = f.log.lock().unwrap().iter().filter(|(t, _)| t == "RefillZones").map(|(_, m)| m["zones"].clone()).collect();
+        assert_eq!(refills, vec![json!([{"value": "z1"}, {"value": "t1"}])], "copper and teardrop by id, the keepout left out, once");
+        for zones in [json!({"items": []}), json!({"items": [{"id": {"value": "k1"}, "type": "ZT_RULE_AREA"}]})] {
+            let mut f = fake(None); f.served = Some(crate::files::kicad::ipc::EMBEDDED); f.zones = Some(zones.clone());
+            assert_eq!(go(&f, track.clone()).unwrap()["saved"], "/p/b.kicad_pcb", "{zones}");
+            assert_eq!(tail(&f), ["EndCommit", "GetItems", "SaveDocument"], "no copper zone: no refill ({zones})");
+        }
+        // KiCad refuses the named fill: the call says so (never the empty list instead)
+        let mut f = fake(Some("RefillZones")); f.served = Some(crate::files::kicad::ipc::EMBEDDED); f.zones = Some(json!({"items": [{"id": {"value": "z1"}, "type": "ZT_COPPER"}]}));
+        assert!(go(&f, track).is_err()); assert_eq!(tail(&f), ["EndCommit", "GetItems", "RefillZones"], "refused: no save after it, no second fill"); assert!(f.log.lock().unwrap().iter().filter(|(t, _)| t == "RefillZones").all(|(_, m)| m["zones"] != json!([])));
+    }
     #[test] fn a_refused_save_is_not_the_calls_error() {
         let f = fake(Some("SaveDocument"));
         let o = go(&f, json!({"ops": [{"add": {"via": {"at": [1, 1], "size": 0.6, "drill": 0.3, "net": "GND"}}}]})).unwrap();
