@@ -338,6 +338,21 @@ mod tests {
         let z = tmp("zip"); std::fs::write(format!("{z}/s.kicad_sch"), "(s)").unwrap(); std::fs::create_dir_all(format!("{z}/.backplane/history.git")).unwrap();
         let s4 = step_capture(&z, "th", &reg).await; assert!(s4.contains(".backplane/history.git") && std::fs::read_dir(format!("{z}/.backplane")).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().contains("untrusted")), "{s4:?}");
     }
+    /// A step holds Altium's documents too, but not Altium's own History/ backups; a KiCad file in a folder named History is still the project's.
+    #[tokio::test] async fn steps_take_altium_files_but_not_altiums_history() {
+        let d = tmp("stepalt"); let home = tmp("stepalthome"); let reg = format!("{home}/history.trusted");
+        g(&d, &["init", "-q"]).await;
+        for (f, b) in [("hw/Board.PcbDoc", "b"), ("hw/Top.SchDoc", "s"), ("hw/Thing.PrjPcb", "p"), ("hw/History/Top~1.SchDoc", "old"), ("History/x.kicad_sch", "(kicad_sch)")] {
+            let p = format!("{d}/{f}"); std::fs::create_dir_all(Path::new(&p).parent().unwrap()).unwrap(); std::fs::write(&p, b).unwrap();
+        }
+        let s = step_capture(&d, "th", &reg).await; let l: Vec<&str> = s.split('\n').collect(); assert_eq!(l[0].len(), 40, "{s:?}");
+        let gd = l[2]; let has = |f: &str| { let (gd, c) = (gd.to_string(), l[0].to_string()); let f = f.to_string(); async move { show(&gd, &format!("{c}:{f}")).await.is_some() } };
+        for f in ["hw/Board.PcbDoc", "hw/Top.SchDoc", "hw/Thing.PrjPcb", "History/x.kicad_sch"] { assert!(has(f).await, "{f} in the step") }
+        assert!(!has("hw/History/Top~1.SchDoc").await, "Altium's backup is not");
+        // a KiCad-only folder still steps as before (no Altium pattern makes git refuse)
+        let k = tmp("stepkicad"); g(&k, &["init", "-q"]).await; std::fs::write(format!("{k}/b.kicad_pcb"), "(kicad_pcb)").unwrap();
+        assert_eq!(step_capture(&k, "th", &reg).await.split('\n').next().unwrap().len(), 40);
+    }
     #[tokio::test] async fn a_registered_history_stays_when_its_device_number_changes() {
         let f = tmp("remount"); let home = tmp("remounthome"); let reg = format!("{home}/history.trusted");
         std::fs::write(format!("{f}/s.kicad_sch"), "(kicad_sch)").unwrap();

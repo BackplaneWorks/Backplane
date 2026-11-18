@@ -236,13 +236,14 @@ pub fn workers(jobs: usize) -> usize {
     (cores / 4).clamp(1, 8).min(jobs.max(1))
 }
 
-/// The native mesher's worker count: clamp(cores / 2, 2, 8), at most `jobs`. One backplane-step2glb is one thread and 50 to 500 MB (a
+/// The native mesher's worker count: clamp(cores / 2, 2, 4), at most `jobs`. One backplane-step2glb is one thread and 50 to 500 MB (a
 /// 7 MB STEP 225 MB, an 18 MB one 513 MB), much lighter than a FreeCAD, so it gets half the cores: on a 6-core machine `workers` gave
-/// one, and one 25 s model held back the other 79 of a board (MOP_Layout in a Windows VM: 74 s to the last part).
+/// one, and one 25 s model held back the other 79 of a board (MOP_Layout in a Windows VM: 74 s to the last part). At most 4, as
+/// `workers` gave a big machine: four 500 MB models at once is the most a first open may take (a busy machine is killed for memory).
 pub fn native_workers(jobs: usize) -> usize {
     #[cfg(test)] { let n = TEST_WORKERS.load(Ordering::Relaxed); if n > 0 { return n.min(jobs.max(1)) } }
     let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
-    (cores / 2).clamp(2, 8).min(jobs.max(1))
+    (cores / 2).clamp(2, 4).min(jobs.max(1))
 }
 /// The order `k` workers take `jobs` in: smallest file first, so the many small models come at once; with two workers or more the
 /// biggest first of all, so it runs beside them from the start instead of ending the batch alone.

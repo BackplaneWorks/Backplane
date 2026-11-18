@@ -10,6 +10,8 @@ fn copy(p: &str) -> bool { let parts: Vec<&str> = p.split('/').collect(); parts[
 fn pcb(p: &str) -> bool { p.ends_with(".kicad_pcb") || alt(p, ".pcbdoc") }
 /// an Altium file by its extension (any case)
 fn alt(p: &str, ext: &str) -> bool { p.to_ascii_lowercase().ends_with(ext) }
+/// Altium's own copies (its History/ backups, its __Previews/ and other __ folders): never a board of the project's. A KiCad file there still counts.
+fn altium_backup(p: &str) -> bool { p.split('/').rev().skip(1).any(|d| d.eq_ignore_ascii_case("history") || d.starts_with("__")) }
 fn dir(p: &str) -> &str { p.rsplit_once('/').map_or("", |x| x.0) }
 /// an Altium board is its project's when a .PrjPcb is in its folder
 fn owned(all: &[String], p: &str) -> bool { if alt(p, ".pcbdoc") { all.iter().any(|q| alt(q, ".prjpcb") && dir(q) == dir(p)) } else { all.contains(&pro(p)) } }
@@ -40,8 +42,8 @@ pub fn find(root: &Path) -> Vec<String> {
             let Ok(ft) = e.file_type() else { continue };
             let p = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
             if ft.is_dir() { // a symlink to a folder is not -type d: find lists nothing for it
-                if depth < 5 && !name.starts_with('.') && name != "node_modules" && p != "extra" && p != "mfg" && name != "History" && !name.starts_with("__") { walk(&e.path(), &p, depth + 1, out) }
-            } else if (name.ends_with(".kicad_pcb") || name.ends_with(".kicad_pro") || alt(&name, ".pcbdoc") || alt(&name, ".prjpcb")) && !name.starts_with("_autosave-") && !name.contains("backup") { out.push(p) }
+                if depth < 5 && !name.starts_with('.') && name != "node_modules" && p != "extra" && p != "mfg" { walk(&e.path(), &p, depth + 1, out) }
+            } else if (name.ends_with(".kicad_pcb") || name.ends_with(".kicad_pro") || (alt(&name, ".pcbdoc") || alt(&name, ".prjpcb")) && !altium_backup(&p)) && !name.starts_with("_autosave-") && !name.contains("backup") { out.push(p) }
         }
     }
     let mut v = vec![]; walk(root, "", 1, &mut v); v.sort(); v.truncate(2000); v

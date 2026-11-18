@@ -94,7 +94,7 @@ pub fn is_design(rel: &str) -> bool {
 }
 const DESIGN_EXT: &[&str] = &[".kicad_pcb", ".kicad_sch", ".kicad_pro", ".kicad_prl", ".kicad_sym", ".kicad_mod", ".kicad_dru", ".kicad_wks", ".step", ".stp", ".wrl", ".fcstd",
     ".prjpcb", ".pcbdoc", ".schdoc", ".schlib", ".pcblib", ".intlib", ".outjob", ".prjpcbstructure"]; // Altium's project, documents and libraries
-fn is_scratch(low: &str) -> bool { low.starts_with("history/") || low.contains("/history/") && (low.ends_with(".zip") || low.contains(".schdoc") || low.contains(".pcbdoc")) || low.contains("__previews/") || low.ends_with(".schdocpreview") || low.ends_with(".pcbdocpreview") || low.contains("-backups/") || low.ends_with(".lck") || low.ends_with("fp-info-cache") || low.contains("_autosave-") || low.contains("/.backplane/") || low.starts_with(".backplane/") }
+fn is_scratch(low: &str) -> bool { (low.starts_with("history/") || low.contains("/history/")) && (low.ends_with(".zip") || low.contains(".schdoc") || low.contains(".pcbdoc") || low.contains(".prjpcb")) || low.contains("__previews/") || low.ends_with(".schdocpreview") || low.ends_with(".pcbdocpreview") || low.contains("-backups/") || low.ends_with(".lck") || low.ends_with("fp-info-cache") || low.contains("_autosave-") || low.contains("/.backplane/") || low.starts_with(".backplane/") }
 /// The documents one writer at a time holds: boards and schematics.
 pub fn is_document(p: &str) -> bool { p.ends_with(".kicad_pcb") || p.ends_with(".kicad_sch") || { let l = p.to_ascii_lowercase(); l.ends_with(".pcbdoc") || l.ends_with(".schdoc") } }
 

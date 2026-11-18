@@ -163,6 +163,9 @@ impl Mcp {
         match sv(&o, "method") {
             "initialize" => { let pv = if sv(&p, "protocolVersion").is_empty() { "2025-06-18" } else { sv(&p, "protocolVersion") }; Some(result(&id, json!({"protocolVersion":pv,"capabilities":{"tools":{}},"serverInfo":{"name":"backplane","version":ag.hub.cfg.version}}))) }
             "tools/list" => { let mut tools = self.tools.clone(); tools.extend(crate::settings::order::listed(&ag, thread).await); for s in ag.tool_sets() { tools.extend(s.list(thread)) }
+                // Altium's tools only for a thread of an Altium project: a KiCad project's agents never see them
+                let cwd = ag.world().await.cwd(thread);
+                if cwd.is_empty() || !crate::files::kicad::project::altium_cached(&cwd) { tools.retain(|t| !sv(t, "name").starts_with("altium_")) }
                 // a thread of a project with a board or schematic has `kicad_edit` from its first request (Claude defers the other tools' definitions
                 // behind a tool search, a request of its own before the first edit)
                 if ag.has_design(thread).await { always_load(&mut tools, "kicad_edit") }

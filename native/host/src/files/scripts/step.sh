@@ -50,7 +50,9 @@ for x in "$spec" "$aspec1" "$aspec2" "$aspec3"; do
 done
 [ -n "$specs" ] || exit 0
 [ -n "$shadow" ] || git ls-files -z -- $specs | GIT_INDEX_FILE=$idx xargs -0 git add -f -- >/dev/null
-GIT_INDEX_FILE=$idx git add -A -- $specs ':(exclude)*_autosave-*' ':(exclude)*-backups/*' ':(exclude)History/*' ':(exclude)*/History/*' >/dev/null
+# Altium's own backups (History/) are left out; a KiCad file in a folder of that name is still the project's
+hx=":(exclude,icase)History/*.schdoc :(exclude,icase)*/History/*.schdoc :(exclude,icase)History/*.pcbdoc :(exclude,icase)*/History/*.pcbdoc :(exclude,icase)History/*.prjpcb :(exclude,icase)*/History/*.prjpcb"
+GIT_INDEX_FILE=$idx git add -A -- $specs ':(exclude)*_autosave-*' ':(exclude)*-backups/*' $hx >/dev/null
 tree=$(GIT_INDEX_FILE=$idx git write-tree) || exit 0
 prev=$(git rev-parse -q --verify "$ref")
 if [ -n "$prev" ]; then
