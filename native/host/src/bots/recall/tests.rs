@@ -115,13 +115,16 @@ impl Rig {
     assert!(r.kept().await.written() == 0);
     // a compactor that never answers the last task: that node is asked TRIES times, then its source cut is its line
     let r = rig("drop", 2, StandIn { drop_last: true, ..Default::default() }).await;
+    // one call at a time: with two in flight (recall.jobs' default), which nodes share a call, and so which one is each call's dropped last task, depends on whether
+    // a call has let its nodes go when the round picks the next batch; under load (1,0) went unanswered three times alone and was cut, and the root's line was cut from that
+    r.hub.commit_many(&[json!({"$":"SettingSet","key":"recall.jobs","value":"1","at":1700000000})]).await.unwrap();
     r.add(2, 4).await; // 4 messages, leaf 3 long: one call has leaf 3 and nothing else ready
     r.build().await;
     let kept = r.kept().await; let leaves = r.rc.leaves(TH).await; let reader = Reader::new(&r.hub.store, &kept, &leaves);
     // each call's last task goes unanswered: leaf 3 and (1,0) are written in later calls, (1,1) and the root, alone in theirs, end cut
     assert!(reader.line((0, 3)).unwrap().starts_with("S0/3: you: long3"), "{:?}", reader.line((0, 3)));
     let cut = reader.line((1, 1)).unwrap(); assert!(cut.starts_with("2+1|user: message 2 about item-2 3+1|S0/3") && cut.len() <= NODE, "{cut}");
-    assert!(reader.line((2, 0)).unwrap().starts_with("0+2|S1/0"));
+    assert!(reader.line((2, 0)).unwrap().starts_with("0+2|S1/0"), "{:?}", reader.line((2, 0)));
 }
 
 #[tokio::test(flavor = "multi_thread")] async fn the_view_stays_under_128_kb_and_keeps_the_newest_messages_whole() {
