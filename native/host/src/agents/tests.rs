@@ -486,7 +486,8 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     assert_eq!(rpc_mcp(&ag, T1, "", "nope", json!({})).await, (202, Value::Null)); // unknown methods and notifications: no reply
     assert_eq!(rpc_mcp(&ag, T1, "", "notifications/initialized", json!({})).await.0, 202);
     let (_, l) = rpc_mcp(&ag, T1, "", "tools/list", json!({})).await; let all: Value = serde_json::from_str(mcp::TOOLS_JSON).unwrap();
-    let want: Vec<&Value> = all["result"]["tools"].as_array().unwrap().iter().filter(|t| mcp::IMPLEMENTED.contains(&t["name"].as_str().unwrap())).collect();
+    // (this thread's project is no Altium one: Altium's tools are not listed for it)
+    let want: Vec<&Value> = all["result"]["tools"].as_array().unwrap().iter().filter(|t| mcp::IMPLEMENTED.contains(&t["name"].as_str().unwrap()) && !t["name"].as_str().unwrap().starts_with("altium_")).collect();
     let listed: Vec<&Value> = l["result"]["tools"].as_array().unwrap().iter().collect();
     assert_eq!(listed.iter().copied().filter(|t| mcp::IMPLEMENTED.contains(&t["name"].as_str().unwrap())).collect::<Vec<_>>(), want, "the definitions are the JS hub's");
     for n in ["wake_on", "wake_list", "wake_cancel"] { let d = listed.iter().find(|t| t["name"] == n).unwrap_or_else(|| panic!("{n} is listed")); assert_eq!(*d, all["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == n).unwrap(), "{n}: the JS hub's definition") } // tool sets add to the list
@@ -524,6 +525,27 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     let (_, r) = rpc_mcp(&ag, T1, "g1", "tools/call", json!({"name":"thread_list","arguments":{}})).await; assert_eq!(r["result"]["isError"], false);
     let (_, r) = rpc_mcp(&ag, T1, "g1", "tools/call", json!({"name":"thread_send","arguments":{"threadId":"t1700001001-1","text":"x"}})).await;
     assert_eq!(r["result"]["isError"], true); assert!(tool_text(&r)["error"].as_str().unwrap().starts_with("stale process")); assert_eq!(len(&hub).await, n);
+}
+/// altium_write (altium/write): Altium files made in the thread's project folder through the MCP tool, read back in its result;
+/// a path out of the project is refused and nothing is written.
+#[tokio::test(flavor = "multi_thread")] async fn altium_write_makes_files_in_the_project() {
+    let sd = dir("aw-bin"); perf_standin(&sd, 1);
+    let (_hub, ag, _h, _w) = start("aw", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await;
+    // an Altium project's thread lists Altium's tools (a KiCad project's does not: the_mcp_server_answers_as_the_js_hub_does)
+    let cwd = ag.world().await.cwd(T1); std::fs::write(format!("{cwd}/x.PrjPcb"), "[Design]\r\n").unwrap();
+    let (_, l) = rpc_mcp(&ag, T1, "", "tools/list", json!({})).await;
+    let names: Vec<&str> = l["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str()).collect();
+    for n in ["altium_status", "altium_script", "altium_write"] { assert!(names.contains(&n), "{n} listed for an Altium project: {names:?}") }
+    let call = |a: Value| { let ag = ag.clone(); async move { let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"altium_write","arguments":a})).await; (r["result"]["isError"] == false, tool_text(&r)) } };
+    let (ok, r) = call(json!({"pcblib": {"path": "lib/T.PcbLib", "footprints": [{"package": "chip", "size": "0402", "kind": "capacitor"}]},
+        "schlib": {"path": "lib/T.SchLib", "symbols": [{"name": "C", "template": "capacitor", "footprint": "CAPC1005X35N"}]}})).await;
+    assert!(ok, "{r}");
+    assert_eq!(r["pcblib"]["footprints"][0]["name"], "CAPC1005X35N");
+    assert_eq!(r["schlib"]["symbols"][0]["footprints"], json!(["CAPC1005X35N"]));
+    let lib = std::path::PathBuf::from(r["schlib"]["path"].as_str().unwrap());
+    assert!(lib.is_file(), "{}", lib.display());
+    let (ok, r) = call(json!({"schlib": {"path": "../escape.SchLib", "symbols": []}})).await;
+    assert!(!ok && r["error"].as_str().unwrap().contains("outside"), "{r}");
 }
 #[tokio::test(flavor = "multi_thread")] async fn thread_tools_read_send_wait_update_and_interrupt() {
     let sd = dir("m4-bin"); perf_standin(&sd, 1);

@@ -7,13 +7,20 @@ pub const MOST: usize = 24;
 fn copies(d: &str) -> bool { super::project::copies(&d.to_lowercase()) }
 /// Boards.copy: the path is inside a folder of copies (its file name is not a folder)
 fn copy(p: &str) -> bool { let parts: Vec<&str> = p.split('/').collect(); parts[..parts.len() - 1].iter().any(|d| copies(d)) }
-fn pcb(p: &str) -> bool { p.ends_with(".kicad_pcb") }
+fn pcb(p: &str) -> bool { p.ends_with(".kicad_pcb") || alt(p, ".pcbdoc") }
+/// an Altium file by its extension (any case)
+fn alt(p: &str, ext: &str) -> bool { p.to_ascii_lowercase().ends_with(ext) }
+/// Altium's own copies (its History/ backups, its __Previews/ and other __ folders): never a board of the project's. A KiCad file there still counts.
+fn altium_backup(p: &str) -> bool { p.split('/').rev().skip(1).any(|d| d.eq_ignore_ascii_case("history") || d.starts_with("__")) }
+fn dir(p: &str) -> &str { p.rsplit_once('/').map_or("", |x| x.0) }
+/// an Altium board is its project's when a .PrjPcb is in its folder
+fn owned(all: &[String], p: &str) -> bool { if alt(p, ".pcbdoc") { all.iter().any(|q| alt(q, ".prjpcb") && dir(q) == dir(p)) } else { all.contains(&pro(p)) } }
 /// Boards.pro: the project file a board would have beside it
 fn pro(p: &str) -> String { format!("{}.kicad_pro", &p[..p.len() - 10.min(p.len())]) }
 
 /// Boards.real: a KiCad project's own boards (a project file beside them), outside folders of copies. Only these count as something to order: a repository holding
 /// board files as test fixtures is no KiCad project, and offering it Buy it is what the person asked to be rid of (the picker below still shows them).
-pub fn own(all: &[String]) -> Vec<String> { all.iter().filter(|p| pcb(p) && !copy(p) && all.contains(&pro(p))).cloned().collect() }
+pub fn own(all: &[String]) -> Vec<String> { all.iter().filter(|p| pcb(p) && !copy(p) && owned(all, p)).cloned().collect() }
 
 /// Boards.pick: all = the hub's list (boards and project files, from the folder); bd = the default board.
 pub fn pick(all: &[String], bd: &str) -> Vec<String> {
@@ -36,7 +43,7 @@ pub fn find(root: &Path) -> Vec<String> {
             let p = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
             if ft.is_dir() { // a symlink to a folder is not -type d: find lists nothing for it
                 if depth < 5 && !name.starts_with('.') && name != "node_modules" && p != "extra" && p != "mfg" { walk(&e.path(), &p, depth + 1, out) }
-            } else if (name.ends_with(".kicad_pcb") || name.ends_with(".kicad_pro")) && !name.starts_with("_autosave-") && !name.contains("backup") { out.push(p) }
+            } else if (name.ends_with(".kicad_pcb") || name.ends_with(".kicad_pro") || (alt(&name, ".pcbdoc") || alt(&name, ".prjpcb")) && !altium_backup(&p)) && !name.starts_with("_autosave-") && !name.contains("backup") { out.push(p) }
         }
     }
     let mut v = vec![]; walk(root, "", 1, &mut v); v.sort(); v.truncate(2000); v
@@ -53,6 +60,8 @@ mod tests {
         assert_eq!(pick(&s(&["stray.kicad_pcb", "build/q.kicad_pcb"]), ""), s(&["stray.kicad_pcb"])); // none a project's own: every board outside copies
         assert_eq!(pick(&s(&["build/q.kicad_pcb", "old/z.kicad_pcb"]), ""), s(&["build/q.kicad_pcb", "old/z.kicad_pcb"])); // only copies: all of them
         assert_eq!(own(&all), s(&["a/x.kicad_pcb", "b/y.kicad_pcb"])); assert!(own(&s(&["test/files/fixtures/a.kicad_pcb"])).is_empty(), "a fixture is no project");
+        let alts = s(&["hw/Board.PcbDoc", "hw/Thing.PrjPcb", "loose/Other.PcbDoc"]);
+        assert_eq!(own(&alts), s(&["hw/Board.PcbDoc"])); assert_eq!(pick(&alts, ""), s(&["hw/Board.PcbDoc"]));
         assert_eq!(pick(&[], ""), Vec::<String>::new()); assert_eq!(pick(&[], "d.kicad_pcb"), s(&["d.kicad_pcb"]));
         let many: Vec<String> = (0..40).flat_map(|i| [format!("p{i:02}/b.kicad_pcb"), format!("p{i:02}/b.kicad_pro")]).collect(); assert_eq!(pick(&many, "").len(), MOST);
         assert!(copy("Archive_2/x.kicad_pcb") && copy("a/my-backups/x.kicad_pcb") && !copy("old.kicad_pcb") && !copy("a/exporter/x") == false);

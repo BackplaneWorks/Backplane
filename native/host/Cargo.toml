@@ -33,11 +33,13 @@ rayon = "1"
 i_triangle = "0.51"
 ruzstd = { version = "0.8", default-features = false, features = ["std"] }
 pulldown-cmark = { version = "0.13.6", default-features = false }
+cfb = "0.16" # Altium documents are OLE compound files (MIT)
+uuid = "1" # a compound file storage's CLSID, kept when an Altium library is rewritten (already in the tree through cfb)
 zip = { version = "2.6.1", default-features = false, features = ["deflate-flate2", "flate2"] } # Windows' KiCad zip, unpacked in-process (flate2: its pure-Rust miniz backend)
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] } # the zip's inflate: miniz_oxide, no C
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Credentials", "Win32_Security_Cryptography", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_SystemInformation", "Win32_System_Pipes", "Win32_System_Threading", "Win32_System_Time", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock", "Win32_System_RestartManager", "Win32_System_Registry"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Credentials", "Win32_Security_Cryptography", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_SystemInformation", "Win32_System_Pipes", "Win32_System_Threading", "Win32_System_Time", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock", "Win32_System_RestartManager", "Win32_System_Registry", "Win32_System_Diagnostics_ToolHelp", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 opt-level = 3

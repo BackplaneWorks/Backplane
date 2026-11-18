@@ -45,6 +45,13 @@ struct DInfo: Decodable { var info: String
 
 /// One sheet of the schematic on show: its depth in the hierarchy, whether it has none of its own, its name and its file.
 struct DSheet: Identifiable, Equatable { var depth: Int; var leaf: Bool; var name: String; var file: String; var id: String { file + "|" + name }
+    /// The sheets above row `i` (its parent's name, theirs...), outermost first, without the top sheet: "Power / Regulators" (the desktop's sheets.rs `path`).
+    static func path(_ sheets: [DSheet], _ i: Int) -> String {
+        guard sheets.indices.contains(i) else { return "" }
+        var d = sheets[i].depth; var up: [String] = []
+        for s in sheets[..<i].reversed() where s.depth < d { d = s.depth; if d == 0 { break }; up.append(s.name) }
+        return up.reversed().joined(separator: " / ")
+    }
     /// The rows of a `sheets` message: `depth TAB leaf TAB name TAB file` a line (the desktop's plot.rs `sheet_rows`).
     static func rows(_ text: String) -> [DSheet] { text.split(separator: "\n").compactMap { l in let f = l.split(separator: "\t", omittingEmptySubsequences: false).map(String.init); return f.count < 4 ? nil : DSheet(depth: Int(f[0]) ?? 0, leaf: f[1] == "1", name: f[2], file: f[3]) } }
 }
@@ -117,8 +124,8 @@ struct DataViewerView: View {
         self.client = client; self.thread = thread; self.openFile = openFile; self.line = line
         // a linked file opens where it belongs: a board or schematic in its tab, a model in Mech, anything else previewed in Files
         let e = ext(openFile)
-        _tab = State(initialValue: openFile.isEmpty ? "Files" : e == "kicad_pcb" ? "Board" : e == "kicad_sch" ? "Schematic" : ["step", "stp", "glb"].contains(e) ? "Mech" : "Files")
-        _target = State(initialValue: e == "kicad_pcb" ? ("Board", openFile) : e == "kicad_sch" ? ("Schematic", openFile) : ["step", "stp", "glb"].contains(e) ? ("Mech", openFile) : nil)
+        _tab = State(initialValue: openFile.isEmpty ? "Files" : e == "kicad_pcb" || e == "pcbdoc" ? "Board" : e == "kicad_sch" || e == "schdoc" ? "Schematic" : ["step", "stp", "glb"].contains(e) ? "Mech" : "Files")
+        _target = State(initialValue: e == "kicad_pcb" || e == "pcbdoc" ? ("Board", openFile) : e == "kicad_sch" || e == "schdoc" ? ("Schematic", openFile) : ["step", "stp", "glb"].contains(e) ? ("Mech", openFile) : nil)
     }
     var body: some View {
         VStack(spacing: 0) {
@@ -153,7 +160,7 @@ struct DataViewerView: View {
                 case "Diff": DataDiffTab(client: client, thread: thread)
                 case "Review": DataReviewTab(client: client, thread: thread)
                 case "Mech": DataMechTab(client: client, thread: thread, open: target?.tab == "Mech" ? target!.path : nil)
-                case "Files": DataFilesTab(client: client, thread: thread, start: ext(openFile) == "kicad_pcb" || ext(openFile) == "kicad_sch" ? "" : openFile, line: line) { target = $0; tab = $0.tab }
+                case "Files": DataFilesTab(client: client, thread: thread, start: ["kicad_pcb", "kicad_sch", "pcbdoc", "schdoc"].contains(ext(openFile)) ? "" : openFile, line: line) { target = $0; tab = $0.tab }
                 default: DataBrowserTab(client: client, thread: thread)
                 }
             }
@@ -178,7 +185,7 @@ struct DataViewerView: View {
             } else {
                 let cur = target?.tab == "Schematic" ? target!.path : (sheetPick.isEmpty ? (files?.board(boardPick)?.sch ?? "") : sheetPick)
                 let onFile = (client.sheets.first { $0.file == cur } ?? client.sheets.first)?.file ?? ""
-                DataPickerList(title: Tr.t("Sheets"), search: client.sheets.count > 10, rows: client.sheets.map { DataPickerRow(id: $0.file, name: $0.name, sub: ($0.file as NSString).lastPathComponent, on: $0.file == onFile, depth: $0.depth) }) { v in sheetPick = v == client.sheets.first?.file ? "" : v; target = nil; choosing = nil }
+                DataPickerList(title: Tr.t("Sheets"), search: client.sheets.count > 10, rows: client.sheets.enumerated().map { i, s in DataPickerRow(id: s.file, name: s.name, sub: (s.file as NSString).lastPathComponent, on: s.file == onFile, depth: s.depth, path: DSheet.path(client.sheets, i)) }) { v in sheetPick = v == client.sheets.first?.file ? "" : v; target = nil; choosing = nil }
             }
         }
     }
@@ -202,8 +209,10 @@ struct DataPickerHead: View {
         DLine()
     }
 }
-struct DataPickerRow: Identifiable { let id: String; let name: String; let sub: String; let on: Bool; let depth: Int }
+/// `path`: a sheet's parent path ("Power / Regulators"), shown in place of `sub` while a search lists the rows flat.
+struct DataPickerRow: Identifiable { let id: String; let name: String; let sub: String; let on: Bool; let depth: Int; var path: String = "" }
 /// A picker's list in a sheet from the bottom: its title and Done, a search field when there are many, the rows (two lines each, indented by depth, the one on show ticked).
+/// A search keeps the rows whose name or second line has every word, flat (no indent), a sheet under its parent path.
 struct DataPickerList: View {
     let title: String; let search: Bool; let rows: [DataPickerRow]; let pick: (String) -> Void
     @State private var q = ""
@@ -216,16 +225,18 @@ struct DataPickerList: View {
             DLine()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(rows.filter { q.trimmingCharacters(in: .whitespaces).isEmpty || $0.name.localizedCaseInsensitiveContains(q.trimmingCharacters(in: .whitespaces)) || $0.sub.localizedCaseInsensitiveContains(q.trimmingCharacters(in: .whitespaces)) }) { r in
+                    let words = q.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+                    ForEach(rows.filter { r in words.allSatisfy { r.name.localizedCaseInsensitiveContains($0) || r.sub.localizedCaseInsensitiveContains($0) } }) { r in
+                        let sub = !words.isEmpty && !r.path.isEmpty ? r.path : r.sub
                         Button { pick(r.id) } label: {
                             HStack(alignment: .center, spacing: 8) {
                                 Text(r.on ? "✓" : "").dmono(13).foregroundStyle(BackplaneDesign.accent).frame(width: 18)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(r.name).dmono(13, bold: r.on).foregroundStyle(r.on ? BackplaneDesign.accent : BackplaneDesign.text).lineLimit(3).multilineTextAlignment(.leading)
-                                    if !r.sub.isEmpty { Text(r.sub).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(2).multilineTextAlignment(.leading) }
+                                    if !sub.isEmpty { Text(sub).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(2).multilineTextAlignment(.leading) }
                                 }
                                 Spacer(minLength: 0)
-                            }.padding(.leading, CGFloat(14 + 14 * min(r.depth, 6))).padding(.trailing, 14).padding(.vertical, 6).frame(minHeight: 48).contentShape(Rectangle())
+                            }.padding(.leading, CGFloat(14 + 14 * (words.isEmpty ? min(r.depth, 6) : 0))).padding(.trailing, 14).padding(.vertical, 6).frame(minHeight: 48).contentShape(Rectangle())
                         }.buttonStyle(.plain).background(r.on ? BackplaneDesign.panel : Color.clear).accessibilityIdentifier("data.pick." + r.id)
                     }
                 }
@@ -498,8 +509,8 @@ struct DataFilesTab: View {
                         Button {
                             if e.dir { dir = full } else {
                                 switch ext(e.name) {
-                                case "kicad_pcb": open(("Board", full))
-                                case "kicad_sch": open(("Schematic", full))
+                                case "kicad_pcb", "pcbdoc": open(("Board", full))
+                                case "kicad_sch", "schdoc": open(("Schematic", full))
                                 case "step", "stp", "glb": open(("Mech", full))
                                 default: preview = full
                                 }

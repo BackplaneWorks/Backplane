@@ -252,7 +252,18 @@ pub fn empty(path: &str) -> Read {
     if std::fs::metadata(path).is_ok() { Read::Half } else { Read::Fail(format!("@bp.file-missing:{}", path.rsplit('/').next().unwrap_or(path))) }
 }
 /// a file's bytes as its plot; `fixed` (a version in a commit): what does not parse is unread rather than half written
-pub fn of_bytes(kind: u32, b: &[u8], fixed: bool) -> Read {
+pub fn of_bytes(kind: u32, b: &[u8], fixed: bool) -> Read { of_bytes_at(kind, b, fixed, "") }
+/// of_bytes for the file at `path` ("" unknown): an Altium sheet's special strings get its project's parameters and its name
+pub fn of_bytes_at(kind: u32, b: &[u8], fixed: bool, path: &str) -> Read {
+    // an Altium document (an OLE compound file): its own reader, the same items (altium/)
+    if crate::files::altium::is_cfb(b) {
+        use crate::files::altium::{pcb, sch};
+        let its = if kind == 0 { pcb::items(b) } else if path.is_empty() { sch::items(b) } else { sch::items_in(b, sch::Ctx::of_path(path)) };
+        let Some(its) = its else { return if fixed { Read::Fail(UNREAD.into()) } else { Read::Half } };
+        let (mut p, t) = items_plot(its, kind);
+        p.thick = if kind == 0 { pcb::thickness_um(b) } else { 0 };
+        return Read::Plot(Box::new(p), t)
+    }
     let Some(fs) = sexpr::forms(b) else { return if fixed { Read::Fail(UNREAD.into()) } else { Read::Half } };
     let (mut p, t) = if kind == 0 { board_plot(&fs) } else { items_plot(sch_items(&fs), kind) };
     p.thick = if kind == 0 { thick(b) } else { 0 };

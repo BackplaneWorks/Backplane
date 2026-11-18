@@ -53,7 +53,7 @@ pub fn show_refusal(kind: &str, path: &str, roots: &[String]) -> Option<String> 
         "mech" => Some(format!("Mech shows STEP, STP and GLB files, not {path}")),
         "board" | "pcb" | "schematic" | "sch" | "3d" | "split" | "browser" | "files" | "review" | "gerbers" => None,
         "" if is_model(path) => (!there()).then(|| format!("no such file: {path}")),
-        "" if l.ends_with(".kicad_pcb") || l.ends_with(".kicad_sch") => None,
+        "" if l.ends_with(".kicad_pcb") || l.ends_with(".kicad_sch") || l.ends_with(".pcbdoc") || l.ends_with(".schdoc") => None,
         "" => Some(format!("the viewer has no page for {path}: give a kind (board, schematic, 3d, mech, files) or a .kicad_pcb, .kicad_sch, .step or .glb")),
         k => Some(format!("unknown viewer kind {k:?} (board, schematic, 3d, mech, split, files, review)")),
     }
@@ -122,7 +122,7 @@ pub struct ViewOut {
 /// across closing the viewer (0.14 kept the board picked, Bd.id): "" for the project's own. A path that leaves the folder is no choice.
 fn chosen_board(d: &Value, sel: &str) -> String {
     let b = s(d, &format!("@view.board:{sel}"));
-    if b.is_empty() || b.contains("..") || b.starts_with('/') || !b.ends_with(".kicad_pcb") { String::new() } else { b.to_string() }
+    if b.is_empty() || b.contains("..") || b.starts_with('/') || !(b.ends_with(".kicad_pcb") || b.to_ascii_lowercase().ends_with(".pcbdoc")) { String::new() } else { b.to_string() }
 }
 /// The file a page of `kind` shows for the board `rel` (its schematic beside it on the Schematic page); "" for none.
 fn board_file(kind: &str, root: &str, rel: &str) -> String {
@@ -374,7 +374,7 @@ pub fn sheet_action(st: &State, hub: &str, session: &Value, file: &str) -> Optio
     let kind = s(d, &format!("@view:{sel}"));
     if !simple(st, session, sel) || !matches!(kind, "schematic" | "split") { return None }
     let root = root_of(st, sel);
-    if !file.is_empty() && !(file.starts_with(&format!("{root}/")) && file.ends_with(".kicad_sch") && !file.contains("..")) { return None }
+    if !file.is_empty() && !(file.starts_with(&format!("{root}/")) && (file.ends_with(".kicad_sch") || file.to_ascii_lowercase().ends_with(".schdoc")) && !file.contains("..")) { return None }
     let board = if kind == "split" { board_file("split", &root, &chosen_board(d, sel)) } else { String::new() };
     let want = if kind == "split" { format!("split|{root}|{board}|{file}") } else { format!("1|{root}|{file}") };
     let mut rid = session["rid"].as_u64().unwrap_or(0); let mut before = vec![]; let mut drafts = serde_json::Map::new();
@@ -626,6 +626,10 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
     // hub's KiCad embeds it and the thread's project has a schematic (kicad/embed.rs rail_simulation); absent otherwise, and for
     // another machine's thread (nothing to embed here)
     let mut v = viewer_page(st, template, session)?;
+    // an Altium project: its files open in Altium, not in KiCad (the bar's button says so; kicad/open.rs opens it)
+    if !sel.is_empty() && !sel.contains('~') && crate::files::kicad::project::altium_cached(&crate::files::kicad::canonical::design_root(&root_of(st, sel))) {
+        if let Some(o) = v.as_object_mut() { o.insert("cad".into(), json!("altium")); }
+    }
     if !sel.is_empty() && !sel.contains('~') {
         if let Some(f) = crate::files::kicad::embed::rail_simulation(&root_of(st, sel)) { if let Some(o) = v.as_object_mut() { o.insert("simFrame".into(), json!(f)); } }
     }
@@ -923,6 +927,10 @@ mod tests {
         assert_eq!(viewer_json(&st, &template, &s1).unwrap()["panes"][0]["key"], json!(format!("1|{root}|{sub}")));
         let o = sheet_action(&st, "h", &s1, "").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
         assert_eq!(viewer_json(&st, &template, &s1).unwrap()["panes"][0]["key"], json!(format!("1|{root}|")), "back to the root sheet");
+        let alt = format!("{root}/Power.SchDoc"); // an Altium sheet is a sheet too
+        let o = sheet_action(&st, "h", &s1, &alt).unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        assert_eq!(viewer_json(&st, &template, &s1).unwrap()["panes"][0]["key"], json!(format!("1|{root}|{alt}")));
+        assert!(sheet_action(&st, "h", &s1, &format!("{root}/notes.txt")).is_none());
         let _ = std::fs::remove_dir_all(&d);
     }
     fn sess(th: &str, drafts: Value) -> Value { json!({"sel": th, "rid": 1, "drafts": drafts, "open": {}, "adding": false, "panel": false, "info": {}}) }

@@ -31,7 +31,7 @@ pub fn design_file(p: &str) -> bool {
     let name = p.rsplit('/').next().unwrap_or(p); let l = name.to_ascii_lowercase();
     let Some((stem, e)) = l.rsplit_once('.') else { return false };
     let inner = e.strip_prefix('g').map_or(false, |n| !n.is_empty() && n.len() <= 2 && n.bytes().all(|b| b.is_ascii_digit()));
-    !stem.is_empty() && (inner || matches!(e, "kicad_pcb" | "kicad_sch" | "kicad_pro" | "step" | "stp" | "glb" | "gbr" | "gbrjob" | "gtl" | "gbl" | "gts" | "gbs" | "gto" | "gbo" | "gtp" | "gbp" | "gko" | "gm1" | "gml" | "drl" | "xln"))
+    !stem.is_empty() && (inner || matches!(e, "kicad_pcb" | "kicad_sch" | "kicad_pro" | "pcbdoc" | "schdoc" | "prjpcb" | "step" | "stp" | "glb" | "gbr" | "gbrjob" | "gtl" | "gbl" | "gts" | "gbs" | "gto" | "gbo" | "gtp" | "gbp" | "gko" | "gm1" | "gml" | "drl" | "xln"))
 }
 /// A file KiCad edits (a board, a schematic, a KiCad project): its link offers Open in KiCad (embedded).
 pub fn kicad_file(p: &str) -> bool { let l = p.split(['#', '?']).next().unwrap_or(p).to_ascii_lowercase(); let l = l.trim_end_matches(|c: char| c.is_ascii_digit() || c == ':'); [".kicad_pcb", ".kicad_sch", ".kicad_pro"].iter().any(|x| l.ends_with(x)) }
@@ -72,7 +72,7 @@ mod tests {
     }
     #[test] fn a_file_address_is_a_file_and_design_files_are_known_by_name() {
         assert_eq!(route("file:///w/a.kicad_pcb", false), Route::File("file:///w/a.kicad_pcb".into()));
-        for n in ["main.kicad_sch", "b/a.KICAD_PCB", "x.kicad_pro", "case.step", "m.glb", "a-F_Cu.gbr", "a.g2", "a.drl"] { assert!(design_file(n), "{n}"); }
+        for n in ["main.kicad_sch", "b/a.KICAD_PCB", "x.kicad_pro", "Top.SchDoc", "hw/Board.PcbDoc", "x.PrjPcb", "case.step", "m.glb", "a-F_Cu.gbr", "a.g2", "a.drl"] { assert!(design_file(n), "{n}"); }
         for n in ["x.rs", ".kicad_pcb", "notes.md", "g", "a.g123"] { assert!(!design_file(n), "{n}"); }
         assert!(kicad_file("a/b.kicad_sch:12") && kicad_file("file:///w/x.kicad_pro") && !kicad_file("a.step"));
     }

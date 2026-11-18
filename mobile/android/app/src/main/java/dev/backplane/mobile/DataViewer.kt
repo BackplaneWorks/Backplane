@@ -65,8 +65,8 @@ private data class Target(val tab: String, val path: String)
 fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> Unit) {
     // a linked file opens where it belongs: a board or schematic in its tab, a model in Mech, anything else previewed in Files
     val fx = ext(file)
-    var tab by remember { mutableStateOf(when { file.isEmpty() -> "Files"; fx == "kicad_pcb" -> "Board"; fx == "kicad_sch" -> "Schematic"; fx in setOf("step", "stp", "glb") -> "Mech"; else -> "Files" }) }
-    var target by remember { mutableStateOf<Target?>(when { fx == "kicad_pcb" -> Target("Board", file); fx == "kicad_sch" -> Target("Schematic", file); fx in setOf("step", "stp", "glb") -> Target("Mech", file); else -> null }) }
+    var tab by remember { mutableStateOf(when { file.isEmpty() -> "Files"; fx == "kicad_pcb" || fx == "pcbdoc" -> "Board"; fx == "kicad_sch" || fx == "schdoc" -> "Schematic"; fx in setOf("step", "stp", "glb") -> "Mech"; else -> "Files" }) }
+    var target by remember { mutableStateOf<Target?>(when { fx == "kicad_pcb" || fx == "pcbdoc" -> Target("Board", file); fx == "kicad_sch" || fx == "schdoc" -> Target("Schematic", file); fx in setOf("step", "stp", "glb") -> Target("Mech", file); else -> null }) }
     var files by remember { mutableStateOf<DataClient.ProjectFiles?>(null) }
     val online = DataClient.conn == DataClient.Conn.ONLINE
     LaunchedEffect(thread.id, online) {
@@ -107,7 +107,7 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
                 "Diff" -> DiffTab(thread)
                 "Review" -> ReviewTab(thread)
                 "Mech" -> MechTab(thread, target?.path?.takeIf { target?.tab == "Mech" })
-                "Files" -> FilesTab(thread, if (fx == "kicad_pcb" || fx == "kicad_sch") "" else file, line) { t -> target = t; tab = t.tab }
+                "Files" -> FilesTab(thread, if (fx == "kicad_pcb" || fx == "kicad_sch" || fx == "pcbdoc" || fx == "schdoc") "" else file, line) { t -> target = t; tab = t.tab }
                 else -> BrowserTab(thread)
             }
         }
@@ -132,17 +132,29 @@ private fun BoardPicker(boards: List<DataClient.BoardRow>, on: DataClient.BoardR
     }
 }
 
-/** The schematic's sheet on show (the hub's `sheets`, top first); a press opens the hierarchy in a sheet, each indented by its depth. */
+/** The schematic's sheet on show (the hub's `sheets`, top first); a press opens the hierarchy in a sheet, each indented by its depth.
+ *  A search (more than 10 sheets, as the desktop's) keeps the sheets whose name has every word, flat, each under its parent path. */
 @Composable
 private fun SheetPicker(sheets: List<DataClient.Sheet>, path: String, pick: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     val on = sheets.firstOrNull { it.file == path } ?: sheets.first()
     PickerHead(Msg.android_viewer_sheet, on.name, Msg.android_viewer_sheets_n(sheets.size), "viewer.sheets") { open = true }
     if (open) PickerSheet(Msg.android_viewer_sheets, close = { open = false }, search = sheets.size > 10) { q ->
-        sheets.filter { q.isBlank() || it.name.contains(q.trim(), ignoreCase = true) }.forEach { sh ->
-            PickerRow(sh.name, sh.file.substringAfterLast('/'), sh.file == on.file, if (q.isBlank()) sh.depth else 0, "viewer.sheet.${sh.file.substringAfterLast('/')}") { open = false; pick(sh.file) }
+        val words = q.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        sheets.forEachIndexed { i, sh ->
+            if (words.any { !sh.name.contains(it, ignoreCase = true) }) return@forEachIndexed
+            val up = if (words.isEmpty()) "" else sheetPath(sheets, i)
+            PickerRow(sh.name, up.ifEmpty { sh.file.substringAfterLast('/') }, sh.file == on.file, if (words.isEmpty()) sh.depth else 0, "viewer.sheet.${sh.file.substringAfterLast('/')}") { open = false; pick(sh.file) }
         }
     }
+}
+
+/** The sheets above row [i] (its parent's name, theirs...), outermost first, without the top sheet: "Power / Regulators" (the desktop's sheets.rs `path`). */
+internal fun sheetPath(sheets: List<DataClient.Sheet>, i: Int): String {
+    var d = sheets.getOrNull(i)?.depth ?: return ""
+    val up = mutableListOf<String>()
+    for (j in i - 1 downTo 0) { val s = sheets[j]; if (s.depth < d) { d = s.depth; if (d == 0) break; up.add(s.name) } }
+    return up.reversed().joinToString(" / ")
 }
 
 /** The bar a picker shows on the page: what it is, the choice whole, a line under it, and Change. */
@@ -403,7 +415,7 @@ private fun FilesTab(thread: DThread, start: String, startLine: Int, open: (Targ
                     val full = if (dir.isEmpty()) e.name else "$dir/${e.name}"
                     Column(Modifier.fillMaxWidth().clickable {
                         if (e.dir) dir = full else when (val x = ext(e.name)) {
-                            "kicad_pcb" -> open(Target("Board", full)); "kicad_sch" -> open(Target("Schematic", full))
+                            "kicad_pcb", "pcbdoc" -> open(Target("Board", full)); "kicad_sch", "schdoc" -> open(Target("Schematic", full))
                             "step", "stp", "glb" -> open(Target("Mech", full))
                             else -> preview = full
                         }

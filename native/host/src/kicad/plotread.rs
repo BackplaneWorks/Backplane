@@ -109,7 +109,8 @@ pub fn read(kind: u32, path: &str) -> Read {
     let fixed = kind_of(path) != 0;
     let b = version(path);
     if b.is_empty() { return if fixed { Read::Fail(plotgen::UNREAD.into()) } else { plotgen::empty(path) } }
-    plotgen::of_bytes(kind, &b, fixed)
+    // an Altium sheet's special strings resolve against its project and name (a version's: the live file's)
+    plotgen::of_bytes_at(kind, &b, fixed, &family(path))
 }
 
 // A schematic's sheets: core/hier
@@ -119,13 +120,31 @@ fn dir(p: &str) -> &str { p.rfind('/').map(|i| &p[..=i]).unwrap_or("") }
 fn resolve(parent: &str, f: &str) -> String { if crate::plat::fs::is_abs(f) { f.to_string() } else { format!("{}{f}", dir(parent)) } }
 fn sheet_forms<'b>(fs: &'b Option<Vec<&'b [u8]>>) -> impl Iterator<Item = &'b [u8]> + 'b { fs.iter().flatten().copied().filter(|f| head(f) == b"sheet") }
 pub fn kids(file: &str, b: &[u8]) -> Kids {
+    if crate::files::altium::is_cfb(b) {
+        // an Altium sheet: its sheet symbols name child .SchDoc files beside it
+        let mut sheets: Vec<(String, String)> = crate::files::altium::sch::sheets(b).into_iter().map(|(n, f)| (n, crate::files::altium::sheet_file(&resolve(file, &f.replace('\\', "/"))))).collect();
+        // the project's top sheet also leads to its other top-level sheets (a flat design's sheets: no sheet symbol places them)
+        if kind_of(file) == 0 {
+            if let Some(prj) = crate::files::altium::prj::find_for(file) {
+                let rs = crate::files::altium::prj::roots(&prj);
+                if rs.first().map_or(false, |r| r.eq_ignore_ascii_case(file)) {
+                    for r in &rs[1..] { sheets.push((r.rsplit(['/', '\\']).next().unwrap_or(r).trim_end_matches(".SchDoc").trim_end_matches(".schdoc").to_string(), r.clone())) }
+                }
+            }
+        }
+        return Kids { file: file.to_string(), sheets }
+    }
     let fs = forms(b);
     let sheets = sheet_forms(&fs).map(|f| { let x = parse(f); (sheet_prop(&x, "Sheetname", "Sheet name").to_string(), resolve(file, sheet_prop(&x, "Sheetfile", "Sheet file"))) }).collect();
     Kids { file: file.to_string(), sheets }
 }
 fn boxes_line(key: &str, b: &[u8]) -> String {
-    let fs = forms(b);
     let mut v = vec![key.to_string()];
+    if crate::files::altium::is_cfb(b) {
+        for (x0, y0, x1, y1) in crate::files::altium::sch::sheet_boxes(b) { v.push(format!("{} {} {} {}", fl::show(x0), fl::show(y0), fl::show(x1), fl::show(y1))) }
+        return v.join("\t")
+    }
+    let fs = forms(b);
     for f in sheet_forms(&fs) {
         let x = parse(f);
         let (a, s) = (x.get("at"), x.get("size"));
@@ -169,7 +188,11 @@ fn refs(b: &[u8]) -> Vec<String> {
     }
     out
 }
-fn refs_line(key: &str, b: &[u8]) -> String { let mut v = vec![key.to_string()]; v.extend(refs(b)); v.join("\t") }
+fn refs_line(key: &str, b: &[u8]) -> String {
+    let mut v = vec![key.to_string()];
+    if crate::files::altium::is_cfb(b) { v.extend(crate::files::altium::sch::parts(b).into_iter().map(|p| p.refdes).filter(|r| !r.contains('?') && r.bytes().any(|d| d.is_ascii_digit()))) } else { v.extend(refs(b)) }
+    v.join("\t")
+}
 fn trim_end(s: &str) -> &str { s.trim_end_matches([' ', '\t', '\n', '\u{b}', '\u{c}', '\r']) }
 
 #[derive(Debug, PartialEq)]

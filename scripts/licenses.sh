@@ -43,6 +43,7 @@ put fonts "$root/assets/fonts/jetbrains-mono/OFL.txt" "$root/assets/fonts/SPLEEN
 put fonts/noto-sans-cjk-jp "$root/assets/fonts/noto-sans-cjk-jp/OFL.txt" "$root/assets/fonts/noto-sans-cjk-jp/SOURCE.txt"   # compiled into the Linux client only; shipped everywhere, it is small
 put icons "$src/icons/lucide-LICENSE"; cp "$root/assets/providers/NOTICE.md" "$L/icons/simple-icons.md"
 put gpui "$root/native/gpui/vendor/gpui/LICENSE-APACHE" "$root/native/gpui/vendor/gpui/PATCH.md"
+put altiumsharp "$src/altiumsharp/LICENSE" "$src/altiumsharp/NOTICE.md"   # ported into the hub's Altium writer (altium/write/pcblib.rs)
 
 if [ "${LICENSES_NO_RUST:-}" = 1 ]; then echo "licenses: no Rust notices (LICENSES_NO_RUST=1)" >&2
 else put rust "$rust/hub.txt" "$rust/client.txt" "$rust/guard.txt" "$rust/voice.txt"; fi

@@ -19,6 +19,8 @@ pub mod threadpath;
 pub mod webimg;
 #[path = "../kicad/mod.rs"]
 pub mod kicad;
+#[path = "../altium/mod.rs"]
+pub mod altium;
 
 use crate::{api::{Caller, Fut, HttpHandler, HttpReply, RpcHandler}, auth::Req, hub::Hub};
 use serde_json::{json, Value};

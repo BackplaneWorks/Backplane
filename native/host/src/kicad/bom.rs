@@ -82,7 +82,47 @@ fn sym(sheet: &str, project: &str, x: &Sx) -> Vec<Part> {
 fn is_sym(b: &[u8]) -> bool { b.len() >= 8 && &b[..7] == b"(symbol" && matches!(b[7], b' ' | b'\n' | b'\t' | b'\r') }
 /// Bom.sheet: every part of one sheet file, unsorted; project "" takes all instances
 fn sheet(project: &str, sh: &Sheet) -> Vec<Part> {
+    if crate::files::altium::is_cfb(&sh.text) { return altium_sheet(sh) }
     forms(&sh.text).map(|fs| fs.into_iter().filter(|f| is_sym(f)).flat_map(|f| sym(&sh.path, project, &parse(f))).collect()).unwrap_or_default()
+}
+/// An Altium design's parts, sheets from the root (`shs[0]`): a sheet placed by several sheet symbols (a multi-channel design) is
+/// counted once per placement, its parts named as Altium names them on the board by default ($Component_$RoomName: `IC1_CAN1`).
+fn altium_parts(shs: &[Sheet]) -> Vec<Part> {
+    use std::collections::HashMap;
+    let kids: HashMap<&str, Vec<(String, String)>> = shs.iter().map(|s| (s.path.as_str(), super::plotread::kids(&s.path, &s.text).sheets)).collect();
+    // each sheet's placements: the suffixes its parts get ("" for the root and for a sheet placed once along a single path)
+    let mut inst: HashMap<String, Vec<String>> = HashMap::new();
+    let Some(root) = shs.first() else { return vec![] };
+    let mut todo = vec![(root.path.clone(), String::new(), 0)];
+    while let Some((p, suffix, depth)) = todo.pop() {
+        inst.entry(p.clone()).or_default().push(suffix.clone());
+        if depth > 16 { continue }
+        let ks = kids.get(p.as_str()).cloned().unwrap_or_default();
+        for (name, f) in &ks {
+            let many = ks.iter().filter(|(_, g)| g == f).count() > 1 || !suffix.is_empty();
+            todo.push((f.clone(), if many { format!("{suffix}_{name}") } else { String::new() }, depth + 1));
+        }
+    }
+    let mut out = vec![];
+    for sh in shs {
+        let ps = altium_sheet(sh);
+        let sfx = inst.get(&sh.path).cloned().unwrap_or_else(|| vec![String::new()]);
+        let mut seen = std::collections::HashSet::new();
+        for s in sfx { if !seen.insert(s.clone()) { continue } for p in &ps { let mut q = p.clone(); q.reference = format!("{}{s}", p.reference); out.push(q) } }
+    }
+    out
+}
+/// An Altium sheet's parts (altium::sch::parts): MPN and maker from Altium's usual parameter names; a part whose designator is unset
+/// ("R?") or a graphic with none is left out, as KiCad leaves out its power symbols.
+fn altium_sheet(sh: &Sheet) -> Vec<Part> {
+    const MPN: [&str; 6] = ["Manufacturer Part Number", "Manufacturer Part Number 1", "MPN", "Part Number", "Mfr Part Number", "PartNumber"];
+    const MFR: [&str; 5] = ["Manufacturer", "Manufacturer 1", "Manufacturer Name", "MFR", "Mfr"];
+    let get = |fs: &[(String, String)], ks: &[&str]| ks.iter().find_map(|k| fs.iter().find(|(n, v)| n.eq_ignore_ascii_case(k) && !v.trim().is_empty() && !v.starts_with('=')).map(|(_, v)| v.trim().to_string())).unwrap_or_default();
+    crate::files::altium::sch::parts(&sh.text).into_iter().filter(|p| !p.refdes.is_empty() && !p.refdes.ends_with('?')).map(|p| {
+        let dnp = p.fields.iter().any(|(n, v)| (n.eq_ignore_ascii_case("DNP") || n.eq_ignore_ascii_case("Not Fitted")) && matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "yes" | "true" | "dnp"));
+        Part { reference: p.refdes.clone(), value: p.value.clone(), footprint: p.footprint.clone(), mpn: get(&p.fields, &MPN), mfr: get(&p.fields, &MFR),
+            fields: p.fields.iter().map(|(k, v)| Fld { k: k.clone(), v: v.clone() }).collect(), dnp, inbom: true, lib: p.lib_ref.clone(), sheet: sh.path.clone(), unit: 0 }
+    }).collect()
 }
 /// Where each placed symbol is, by reference: its KIID and the instance's sheet path (KIIDs, "/<root>/<sheet>"), for findings that
 /// name a symbol (a missing MPN) to be shown on it. The instances of `project` when a symbol has any, else all; the first place of a
@@ -106,6 +146,7 @@ pub fn places(project: &str, shs: &[Sheet]) -> std::collections::HashMap<String,
 }
 /// Bom.parts: natural order, a multi-unit part once, parts KiCad leaves out of the BOM dropped; a reference two symbols share stays twice
 pub fn parts(project: &str, shs: &[Sheet]) -> Vec<Part> {
+    if shs.first().map_or(false, |s| crate::files::altium::is_cfb(&s.text)) { return fold(sorted(&altium_parts(shs))) }
     let ps: Vec<Part> = shs.iter().flat_map(|s| sheet(project, s)).filter(|p| p.inbom).collect();
     fold(sorted(&ps))
 }

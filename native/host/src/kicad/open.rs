@@ -101,6 +101,19 @@ pub fn shown(key: &str) -> Result<(&'static str, String), String> {
     let pick_kind = match kind { "1" if has(&f.sch) => Some(("eeschema", f.sch.clone())), "0" | "2" if has(&f.pcb) => Some(("pcbnew", f.pcb.clone())), _ => None };
     pick_kind.or_else(|| pick(&f)).ok_or_else(|| format!("The viewer's folder has no KiCad project: {root}"))
 }
+/// The Altium file to open for a viewer key (or, with none, the thread's root): the Altium document it names, else for an Altium
+/// project its page's board or top sheet, else the project itself. None: not Altium.
+pub fn altium_target(key: &str, root: &str) -> Option<String> {
+    let mut it = key.splitn(3, '|');
+    let (kind, kroot, file) = (it.next().unwrap_or(""), it.next().unwrap_or(""), it.next().unwrap_or(""));
+    if crate::files::altium::is_altium(file) && Path::new(file).is_file() { return Some(file.to_string()) }
+    let root = if kroot.is_empty() { root } else { kroot };
+    if root.is_empty() || !file.is_empty() { return None }
+    let f = project::read(&super::canonical::design_root(root));
+    if !project::is_altium(&f) { return None }
+    let has = |p: &str| !p.is_empty() && Path::new(p).is_file();
+    Some(match kind { "1" if has(&f.sch) => f.sch, "0" | "2" if has(&f.pcb) => f.pcb, _ => f.pro })
+}
 const NOTHING: &str = "Nothing KiCad is on show in this thread's viewer: show a board or schematic first, then Open in KiCad opens it";
 /// `kicad.open {thread, key}`: exactly what the thread's viewer shows (`key`, the client's viewer key; with none, its last
 /// `viewer.state` report), else the thread's design; the runtime, the launch, and its line in the thread.
@@ -113,6 +126,14 @@ pub async fn open(hub: &Arc<Hub>, thread: &str, key: &str) -> Result<String, Str
     { let (v, h) = (rt.version.clone(), hub.cfg.home.clone()); let _ = tokio::task::spawn_blocking(move || super::geomguard::guard(&v, &h)).await; }
     let key = if key.is_empty() { super::watch::viewer_state(thread).1["key"].as_str().unwrap_or("").to_string() } else { key.to_string() };
     let root = crate::files::root_of(hub, thread).await.map(|r| r.to_string_lossy().to_string()).unwrap_or_default();
+    // an Altium project: what is on show (a .PcbDoc or .SchDoc, else the project) opens in the person's Altium
+    if let Some(file) = altium_target(&key, &root) {
+        let r = crate::files::altium::live::open_file(&file);
+        let now = crate::agents::now_ms();
+        let (tone, summary) = match &r { Ok(_) => ("info", format!("Opened {} in Altium", file.rsplit(['/', '\\']).next().unwrap_or(&file))), Err(why) => ("warn", format!("Open in Altium: {why}")) };
+        let _ = hub.commit(&json!({"$":"ActivityLogged","thread":thread,"act":format!("kicad-open:{now}"),"tone":tone,"kind":"kicad","summary":summary,"at":now})).await;
+        return r
+    }
     let r = tokio::task::spawn_blocking(move || {
         if !key.is_empty() { return shown(&key).and_then(|(tool, file)| run(&cli, tool, &file)) }
         // no viewer report: the thread's own design, if it has one

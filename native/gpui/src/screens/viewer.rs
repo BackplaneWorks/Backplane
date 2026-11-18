@@ -3,7 +3,7 @@
 //! the hub's rows; every press is the view action the row names. The board, schematic and 3D pages draw plot chunks
 //! (screens::plot, next). Pure parsing below, tested; the element code only lays the rows out.
 use super::{md, timeline::{self, Reg}};
-use crate::{hub::Command, i18n::{tf, trs}, string, theme, Backplane};
+use crate::{hub::Command, i18n::{t, tf, trs}, string, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
 
@@ -79,6 +79,8 @@ pub fn kicad_offer(design: bool, gerbers: bool, diff_on: bool, editing: bool, ho
     if !design || gerbers { return KicadOffer::None }
     match holds { true if !diff_on => KicadOffer::Pane, false if !editing => KicadOffer::There, _ => KicadOffer::None }
 }
+/// The thread's project is an Altium one (the hub's `cad`): Open in Altium, no KiCad pane.
+pub fn is_altium(viewer: &Value) -> bool { viewer["cad"] == "altium" }
 pub fn has_design(viewer: &Value) -> bool { tabs(viewer).iter().any(|t| matches!(t.value.as_str(), "board" | "schematic")) }
 
 fn arr<'a>(v: &'a Value, k: &str) -> impl Iterator<Item = &'a Value> { v[k].as_array().into_iter().flatten() }
@@ -116,7 +118,7 @@ pub fn shown(kind: &str, path: &str) -> Option<(String, Option<String>)> {
     let l = path.to_ascii_lowercase();
     let model = [".step", ".stp", ".glb"].iter().any(|e| l.ends_with(e));
     let k = match kind { "board" | "pcb" => "board", "schematic" | "sch" => "schematic", "3d" if model => "mech", "3d" => "3d", "mech" | "split" | "browser" | "files" | "review" => kind,
-        "" if l.ends_with(".kicad_pcb") => "board", "" if l.ends_with(".kicad_sch") => "schematic", "" if model => "mech", _ => return None };
+        "" if l.ends_with(".kicad_pcb") || l.ends_with(".pcbdoc") => "board", "" if l.ends_with(".kicad_sch") || l.ends_with(".schdoc") => "schematic", "" if model => "mech", _ => return None };
     Some((k.to_string(), (k == "mech" && model).then(|| path.to_string())))
 }
 
@@ -205,6 +207,13 @@ fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target
     // button beside it (the editor's own window is its Pop out). The control keeps its id (ui:Edit), which the drivers press.
     // a Gerber set is no board to edit: no Open in KiCad (the embedded GerbView comes with bp.13)
     let gerbers = viewer["gerbers"] == true;
+    // an Altium project (the hub says `cad`): its design opens in Altium on the hub's machine, never in a KiCad pane
+    if is_altium(viewer) {
+        if has_design(viewer) && !gerbers && !diff_on {
+            row = row.child(div().id("altium-open").child(btn(cx, light, "altium-open".into(), t("gpui.c.altium.open"), false, kicad_open(viewer))).tooltip(crate::keys::tip(&t("gpui.c.altium.open.tip"), "", light)));
+        }
+        return row.child(close_button(cx, light)).into_any_element()
+    }
     let offer = kicad_offer(has_design(viewer), gerbers, diff_on, editing, crate::viewers::kicad_pane::local(target.map(|t| t.addr.as_str()), thread));
     if offer == KicadOffer::Pane {
         let c2 = c(if editing { "accent" } else { "line" });
@@ -216,9 +225,13 @@ fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target
     }
     // a window that cannot hold it (the hub on another machine, another machine's thread): KiCad opens there, and the button says on whose screen
     if offer == KicadOffer::There { row = row.child(btn(cx, light, "kicad-open".into(), kicad_open_label(target.map(|t| t.addr.as_str()), thread["mark"]["name"].as_str()), false, kicad_open(viewer))); }
-    row.child(crate::ui::with_rect(div().id("viewer-close"), || "ui:CloseViewer".to_string()).size(crate::scale::tpx(super::head::BTN_H)).flex().items_center().justify_center().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip(&trs("Close the viewer"), "", light))
-        .child(crate::art::icon("x", 14., c("dim"))).on_click(cx.listener(|this, _, _, cx| { this.screens.rail_pending = Some(String::new()); this.screens.rail_at = Some(std::time::Instant::now()); let _ = this.tx.try_send(close()); cx.notify(); })))
-        .into_any_element()
+    row.child(close_button(cx, light)).into_any_element()
+}
+/// The viewer's Close (×)
+fn close_button(cx: &mut Context<Backplane>, light: bool) -> impl IntoElement {
+    let c = |n: &str| theme::color(light, n);
+    crate::ui::with_rect(div().id("viewer-close"), || "ui:CloseViewer".to_string()).size(crate::scale::tpx(super::head::BTN_H)).flex().items_center().justify_center().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip(&trs("Close the viewer"), "", light))
+        .child(crate::art::icon("x", 14., c("dim"))).on_click(cx.listener(|this, _, _, cx| { this.screens.rail_pending = Some(String::new()); this.screens.rail_at = Some(std::time::Instant::now()); let _ = this.tx.try_send(close()); cx.notify(); }))
 }
 /// The 3D page's corner: the Boards menu (a project with several boards) before the pane's own controls.
 fn with_boards(cx: &mut Context<Backplane>, light: bool, viewer: &Value, pv: &super::plotview::PlotView, actions: AnyElement) -> AnyElement {
@@ -332,28 +345,23 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     let mut tools: Vec<AnyElement> = Vec::new();
     let note = string(viewer, "note");
     let note = (!note.is_empty()).then(|| div().px_3().py_1().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs(&note)));
-    let mut sheets_list = None;
     // Layers: the menu lists the layers this plot has; the hub's masks decide what the canvas draws
     let mut present = std::collections::BTreeMap::new();
     for ch in &frame.chunks { present.entry(ch.layer).or_insert(ch.color); }
     let strip = crate::viewers::layers::strip(viewer, &present);
     pv.present = strip.present;
-    // Sheets: a schematic of several sheets lists them as a tree (indented by depth); a press shows that sheet, the root first
+    // Sheets: a schematic of several sheets opens a menu of them under the button (screens::sheets: the tree indented by depth, a search
+    // field for a long list); a press shows that sheet, the root first
     if sheets.len() > 1 && open == "schematic" && layers {
-        let on_key = frame.key.clone();
-        let head = tall(div().id("sheets-btn").px_2().text_size(crate::scale::tpx(12.)).cursor_pointer()).border_1().border_color(c("line")).bg(c("raise")).child(tf("gpui.c.sheets.count", &[("n", sheets.len().into())]))
-            .on_click(cx.listener(|this, _, _, cx| { let pv = this.screens.pv(0); pv.sheets_open = !pv.sheets_open; cx.notify(); }));
-        tools.push(head.into_any_element());
+        let here = super::sheets::current(sheets, &frame.key);
+        let head = tall(div().id("sheets-btn").px_2().text_size(crate::scale::tpx(12.)).cursor_pointer()).border_1().border_color(c(if pv.sheets_open { "accent" } else { "line" })).bg(c("raise")).child(tf("gpui.c.sheets.count", &[("n", sheets.len().into())]))
+            .on_click(cx.listener(|this, _, window, cx| super::sheets::toggle(this, 0, window, cx)));
+        let mut wrap = div().relative().flex_shrink_0().child(head);
         if pv.sheets_open {
-            let mut list = div().id("sheets-list").flex().flex_col().px_3().pb_1().text_size(crate::scale::tpx(12.));
-            for (i, sh) in sheets.iter().enumerate() {
-                let file = if i == 0 { String::new() } else { sh.file.clone() };
-                let here = on_key.ends_with(&sh.file) && i != 0 || (i == 0 && on_key.ends_with('|'));
-                list = list.child(div().id(SharedString::from(format!("sheet-{i}"))).pl(px(8. * sh.depth as f32)).py_px().cursor_pointer().text_color(if here { c("accent") } else { c("text") }).hover(|s| s.bg(c("raise"))).child(sh.name.clone())
-                    .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-sheet".into(), file.clone())); this.screens.pv(0).sheets_open = false; cx.notify(); })));
-            }
-            sheets_list = Some(list);
+            let menu = super::sheets::menu(cx, light, 0, sheets, &mut pv.sheets, here);
+            wrap = wrap.child(div().absolute().left_0().top(crate::scale::tpx(super::head::BTN_H)).child(deferred(anchored().snap_to_window_with_margin(px(8.)).child(menu)).with_priority(3)));
         }
+        tools.push(wrap.into_any_element());
     }
     if layers {
         let fit = tall(div().id(SharedString::from(format!("plot-fit-{slot}"))).px_2().text_size(crate::scale::tpx(12.))).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).hover(|s| s.bg(c("panel"))).child(trs("Fit"))
@@ -389,7 +397,7 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
         None if !tools.is_empty() => col = col.child(div().flex().items_center().gap_2().px_3().py_1().children(tools)),
         None => {}
     }
-    col = col.children(note).children(sheets_list);
+    col = col.children(note);
     let mut area = div().relative().flex().flex_col().flex_1().min_h_0().child(super::plotview::canvas_el(cx, slot, pv.focus.clone(), light, frame, view, crate::viewers::layers::masks(viewer)));
     if layers { if let Some(p) = crate::viewers::layers::panel_el(cx, light, &strip, pv.layers_open, pv.layers_cap.unwrap_or(0.), &pv.layers_scroll) { area = area.child(p); } }
     // the card of the piece last tapped (Insp.card): what it is, then key = value rows; a tap on nothing, or Close, puts it away
@@ -509,27 +517,20 @@ fn split_head(cx: &mut Context<Backplane>, light: bool, pane: &'static str, name
         .child(div().id(SharedString::from(format!("split-hide-{pane}"))).p(px(3.)).cursor_pointer().hover(|s| s.bg(c("raise"))).tooltip(crate::keys::tip(&tf("gpui.c.split.hide", &[("name", trs(name).into())]), "", light))
             .child(crate::art::icon("x", 13., c("dim"))).on_click(cx.listener(move |this, _, _, cx| split_set(this, |p| p.hide = split_flip(&p.hide, pane), true, cx))))
 }
-/// The schematic pane's Sheets menu: the sheet on show, and the design's sheets (indented by depth) under it while open; a press shows that sheet in the pane.
-fn split_sheets(cx: &mut Context<Backplane>, light: bool, sheets: &[super::plot::Sheet], key: &str, open: bool) -> Option<AnyElement> {
+/// The schematic pane's Sheets menu: the sheet on show, and the design's sheets under it while open (screens::sheets); a press shows that sheet in the pane.
+fn split_sheets(cx: &mut Context<Backplane>, light: bool, sheets: &[super::plot::Sheet], key: &str, pv: &mut super::plotview::PlotView) -> Option<AnyElement> {
     if sheets.len() < 2 { return None }
     let c = |n: &str| theme::color(light, n);
-    let here = |i: usize, sh: &super::plot::Sheet| if i == 0 { key.ends_with('|') || !sheets.iter().skip(1).any(|x| key.ends_with(&x.file)) } else { key.ends_with(&sh.file) };
-    let cur = sheets.iter().enumerate().find(|(i, sh)| here(*i, sh)).map(|(i, sh)| if i == 0 { trs("Top sheet") } else { sh.name.clone() }).unwrap_or_else(|| trs("Top sheet"));
+    let open = pv.sheets_open;
+    let here = super::sheets::current(sheets, key);
+    let cur = if here == 0 { trs("Top sheet") } else { sheets[here].name.clone() };
     let btn = div().id("split-sheets").flex().items_center().gap_1().px_1().text_size(crate::scale::tpx(11.)).cursor_pointer().border_1().border_color(c(if open { "accent" } else { "line" })).hover(|s| s.bg(c("raise")))
         .child(div().max_w(px(220.)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(cur)).child(crate::art::icon("chevron-down", 11., c("dim")))
-        .on_click(cx.listener(|this, _, _, cx| { let pv = this.screens.pv(1); if !pv.sheets_open && super::popover::just_shut("split-sheets") { return } pv.sheets_open = !pv.sheets_open; cx.notify(); }));
+        .on_click(cx.listener(|this, _, window, cx| super::sheets::toggle(this, 1, window, cx)));
     let mut wrap = div().relative().child(btn);
     if open {
-        let mut list = div().id("split-sheets-list").mt(px(2.)).min_w(px(220.)).max_h(px(420.)).overflow_y_scroll().flex().flex_col().p_1().text_size(crate::scale::tpx(12.)).bg(c("panel")).border_1().border_color(c("line")).shadow_lg().occlude()
-            .on_mouse_down_out(cx.listener(|this, _, _, cx| { this.screens.pv(1).sheets_open = false; super::popover::shut("split-sheets"); cx.notify(); }));
-        for (i, sh) in sheets.iter().enumerate() {
-            let file = if i == 0 { String::new() } else { sh.file.clone() };
-            let on = here(i, sh);
-            list = list.child(div().id(SharedString::from(format!("split-sheet-{i}"))).pl(px(6. + 10. * sh.depth as f32)).pr_2().py(px(3.)).cursor_pointer().text_color(c(if on { "accent" } else { "text" })).hover(|s| s.bg(c("raise")))
-                .child(if i == 0 { trs("Top sheet") } else { sh.name.clone() })
-                .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-sheet".into(), file.clone())); this.screens.pv(1).sheets_open = false; cx.notify(); })));
-        }
-        wrap = wrap.child(div().absolute().left_0().top(crate::scale::tpx(20.)).child(deferred(anchored().snap_to_window_with_margin(px(8.)).child(list)).with_priority(3)));
+        let menu = super::sheets::menu(cx, light, 1, sheets, &mut pv.sheets, here);
+        wrap = wrap.child(div().absolute().left_0().top(crate::scale::tpx(20.)).child(deferred(anchored().snap_to_window_with_margin(px(8.)).child(menu)).with_priority(3)));
     }
     Some(wrap.into_any_element())
 }
@@ -593,7 +594,7 @@ fn split_page(cx: &mut Context<Backplane>, light: bool, viewer: &Value, plot: &s
     let [sch_pv, brd_pv] = pvs;
     let pane = |head: Div, body: AnyElement| div().flex().flex_col().min_w_0().min_h_0().child(head).child(div().relative().flex_1().min_h_0().min_w_0().child(body));
     // the schematic pane's sheets (0.14's combo-sheets): the sheet on show in its head, the hierarchy in a menu under it
-    let sheets_el = split_sheets(cx, light, &plot.sheets, &string(panes[0], "key"), sch_pv.sheets_open);
+    let sheets_el = split_sheets(cx, light, &plot.sheets, &string(panes[0], "key"), sch_pv);
     let sch = s_on.then(|| { /* i18n-ok: split_head draws the name through trs */ let h = split_head(cx, light, "sch", "Schematic", sheets_el); let b = plot_pane(cx, light, 1, "schematic", panes[0], plot.frame_for(&string(panes[0], "key")), sch_pv, false, &plot.sheets, &plot.sheet_refs, None); pane(h, b) });
     let brd = b_on.then(|| { /* i18n-ok: split_head draws the name through trs */ let h = split_head(cx, light, "pcb", "Board", None); let b = plot_pane(cx, light, 2, "board", panes[1], plot.frame_for(&string(panes[1], "key")), brd_pv, false, &[], &[], None); pane(h, b) });
     let d3 = t_on.then(|| {

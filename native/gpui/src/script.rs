@@ -365,7 +365,7 @@ impl Backplane {
                 self.ui_epoch += 1; self.begin("hist".into(), Goal::Frame, cx); cx.notify(); }
             Step::HistMode(m) => { crate::screens::histbar::mode(self, m); self.ui_epoch += 1; self.begin("histmode".into(), Goal::Frame, cx); cx.notify(); }
             Step::HistPlay => { crate::screens::histbar::play(self, cx); self.ui_epoch += 1; self.begin("histplay".into(), Goal::Frame, cx); cx.notify(); }
-            Step::Sheets(on) => { self.screens.plotview.sheets_open = on; self.ui_epoch += 1; self.begin("sheets".into(), Goal::Frame, cx); cx.notify(); }
+            Step::Sheets(on) => { crate::screens::sheets::set_open(self, 0, on, None, cx); self.ui_epoch += 1; self.begin("sheets".into(), Goal::Frame, cx); cx.notify(); }
             Step::Tap(fx, fy, slot) => { // a tap at (fx, fy) as fractions of canvas `slot` (0 the Board/Schematic page, 1 a Split's schematic, 2 its board): inspect what lies there
                 let (view, bounds) = { let pv = self.screens.pv(slot); (pv.view, pv.bounds) };
                 let panes = self.data["thread"]["viewer"]["panes"].as_array().cloned().unwrap_or_default();
