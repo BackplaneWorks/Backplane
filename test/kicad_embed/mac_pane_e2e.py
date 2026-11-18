@@ -783,6 +783,7 @@ try:
         typed('keep'); key(K_RET, SHIFT); typed('ab cd')
         check(composer_text() == 'keep\nab cd', f'textkeys: typed two lines ({composer_text()!r})')
         steps = [('Option+Left, X: before the word', lambda: (key(K_LEFT, ALT), typed('X')), 'keep\nab Xcd'),
+                 ('Cmd+Left alone: the text as it was', lambda: key(K_LEFT, CMD), 'keep\nab Xcd'),
                  ('Cmd+Left, Y: the line\'s start', lambda: (key(K_LEFT, CMD), typed('Y')), 'keep\nYab Xcd'),
                  ('Cmd+Right, Option+Backspace: a word back from the line\'s end', lambda: (key(K_RIGHT, CMD), key(K_DEL, ALT)), 'keep\nYab '),
                  ('Option+Shift+Left, Z: the word selected and typed over', lambda: (key(K_LEFT, ALT | SHIFT), typed('Z')), 'keep\nZ'),
@@ -792,14 +793,14 @@ try:
                  ('Option+Right after Cmd+Up: by word, not to the line\'s end', lambda: (key(K_UP, CMD), key(K_RIGHT, ALT), typed('!')), 'Skeep!\nQ'),
                  ('Cmd+Down, Cmd+Backspace: back to the line\'s start', lambda: (key(K_DOWN, CMD), key(K_DEL, CMD)), 'Skeep!\n'),
                  ('a backtick is typed, no terminal', lambda: key(K_GRAVE), 'Skeep!\n`')]
-        for what, do, want in steps:
-            do(); time.sleep(0.3); got = composer_text()
+        for n, (what, do, want) in enumerate(steps):
+            do(); time.sleep(0.3); shot(f'textkeys-{n:02d}'); where(what); got = composer_text()
             check(got == want, f'textkeys: {what} ({got!r}, want {want!r})')
         key(K_A, CMD); key(K_DEL); time.sleep(0.3)
         # after an unhide the runner's activation from this script may not make Backplane the active app (macOS 14+): each case starts with a click in it
         for who, focus in (('the message box', lambda: box()), ('the terminal', lambda: (box(), key(K_J, CMD), time.sleep(1.2))),
                            ('a viewer (the Files page)', lambda: (box(), key(K_J, CMD), time.sleep(0.6), press_rect('rail:Files'), time.sleep(1.0)))):
-            focus(); where(who); key(K_H, CMD)
+            focus(); where(who); shot(f'textkeys-hide-{who.split()[1]}'); key(K_H, CMD)
             hid = wait_for(lambda: not ours_on_screen(), 5, 0.1)
             check(bool(hid), f'textkeys: Cmd+H with {who} focused hides Backplane\'s window')
             unhide(); back = wait_for(ours_on_screen, 10, 0.1)
