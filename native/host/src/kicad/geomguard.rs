@@ -1,6 +1,8 @@
 //! #1185: a narrow repair of window geometry an embedded Backplane KiCad saved into the person's own KiCad settings
 //! (`<config>/kicad/10.99/pcbnew.json` and the other embedded editors'): side panels of 1.2e9 px and a 2e9 x 32245 px window at
-//! x = -1.1e9 on Windows, the park position (-30000, -30000) on Linux. The person's standalone KiCad then opens broken.
+//! x = -1.1e9 on Windows (bp-win's own rc.7 embed runs wrote the same: panels of ±1.5e9 px, the design-blocks panel 32765 px tall, a
+//! display of 4294967295, Windows' minimized place -32000), the park position (-30000, -30000) on Linux. The person's standalone KiCad
+//! then opens broken.
 //!
 //! The fork stops writing them (JSON_SETTINGS::SetKeepWindowGeometry, bp after 13.2); this undoes what an older runtime already wrote,
 //! before an embedded KiCad starts and before Open in KiCad. Hub probes never write the person's settings (a63f0eff0), so this is held
@@ -11,7 +13,8 @@
 //!
 //! What the person sees afterwards in stock KiCad: the window opens at KiCad's default size and place where its position or size was
 //! dropped; a side panel whose width was dropped opens at its default width; an AUI layout keeps every pane, with only a dock or
-//! floating size that was out of range back at its default. Panels shown or hidden, the grid, zoom, recent files are unchanged.
+//! floating size that was out of range back at its default; a library chooser or the design-blocks panel whose size was dropped opens at
+//! its default; a window whose display was dropped opens on the first. Panels shown or hidden, grid, zoom, recent files are unchanged.
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 
@@ -68,6 +71,9 @@ fn repair_perspective(s: &str) -> Option<(String, Vec<String>)> {
 /// A wx 3.2 perspective pane's pixel items (`state` is a bit field, `prop` a weight, `dir`/`layer`/`row`/`pos` counts: never touched).
 const PERSPECTIVE_SIZES: [&str; 10] = ["bestw", "besth", "minw", "minh", "maxw", "maxh", "floatx", "floaty", "floatw", "floath"];
 
+/// A library chooser's (`*_chooser`) pixel members.
+const CHOOSER_SIZES: [&str; 6] = ["width", "height", "sash_h", "sash_v", "sash_pos_h", "sash_pos_v"];
+
 fn aui_size_key(k: &str) -> bool { ["_width", "_height", "_size", "_pos"].iter().any(|s| k.ends_with(s)) }
 
 /// Remove the out-of-range geometry in one settings document; returns what was removed ("window.pos_x", "aui.right_panel_width").
@@ -78,6 +84,8 @@ pub fn repair_doc(doc: &mut Value) -> Vec<String> {
         if o.contains_key("size_x") && o.contains_key("size_y") {
             for k in ["pos_x", "pos_y"] { if o.get(k).is_some_and(big) { o.remove(k); gone.push(at(k)) } }
             for k in ["size_x", "size_y"] { if o.get(k).is_some_and(big) { o.remove(k); gone.push(at(k)) } }
+            // a frame that is a child window has no display: wxNOT_FOUND saved as 4294967295 (no machine has 64 monitors)
+            if o.get("display").and_then(Value::as_u64).is_some_and(|d| d >= 64) { o.remove("display"); gone.push(at("display")) }
             if let Some(st) = o.get_mut("aui_state") { repair_aui_state(st, &at("aui_state"), gone) }
             if let Some((fixed, what)) = o.get("perspective").and_then(Value::as_str).and_then(repair_perspective) {
                 o.insert("perspective".into(), Value::String(fixed));
@@ -92,6 +100,12 @@ pub fn repair_doc(doc: &mut Value) -> Vec<String> {
     }
     let Some(top) = doc.as_object_mut() else { return gone };
     windows(top, "", &mut gone);
+    // the library choosers' sizes (design_block_chooser is also the design-blocks panel docked in the frame: 32765 px tall on bp-win)
+    for (name, c) in top.iter_mut().filter(|(k, _)| k.ends_with("_chooser")) {
+        let Some(c) = c.as_object_mut() else { continue };
+        let bad: Vec<String> = c.iter().filter(|(k, v)| CHOOSER_SIZES.contains(&k.as_str()) && big(v)).map(|(k, _)| k.clone()).collect();
+        for k in bad { c.remove(&k); gone.push(format!("{name}.{k}")) }
+    }
     if let Some(aui) = top.get_mut("aui").and_then(Value::as_object_mut) {
         let bad: Vec<String> = aui.iter().filter(|(k, v)| aui_size_key(k) && any_big(v)).map(|(k, _)| k.clone()).collect();
         for k in bad { aui.remove(&k); gone.push(format!("aui.{k}")) }
@@ -184,6 +198,12 @@ mod tests {
     /// #1185's eeschema.json likewise.
     const WINDOWS_EESCHEMA: &str = include_str!("geomguard_fixtures/windows-eeschema.json");
 
+    /// bp-win's own embed runs of rc.7 (2026-11-17, C:\bp\runs\b14b-rc7-libs and -keys): real files an embedded KiCad wrote on Windows.
+    const BPWIN_PCBNEW: &str = include_str!("geomguard_fixtures/bpwin-rc7-pcbnew.json");
+    const BPWIN_EESCHEMA: &str = include_str!("geomguard_fixtures/bpwin-rc7-eeschema.json");
+    /// The same machine's other run: the frame saved at Windows' minimized-window place (-32000, -32000).
+    const BPWIN_MINIMIZED: &str = include_str!("geomguard_fixtures/bpwin-rc7-minimized-pcbnew.json");
+
     fn doc(t: &str) -> Value { serde_json::from_str(t).unwrap() }
 
     #[test]
@@ -203,6 +223,46 @@ mod tests {
         let mut e = doc(WINDOWS_EESCHEMA);
         let gone = repair_doc(&mut e);
         assert_eq!(gone, ["window.pos_x", "aui.hierarchy_panel_docked_width", "aui.properties_panel_width"], "{gone:?}");
+    }
+
+    /// Every number in `d` that looks like a pixel geometry value out of range (what is left after a repair must have none).
+    fn absurd(d: &Value, path: &str, out: &mut Vec<String>) {
+        match d {
+            Value::Object(o) => for (k, v) in o {
+                if k == "embed" || k == "proportion" || k == "state" || k == "index" || k == "version" { continue }
+                absurd(v, &format!("{path}.{k}"), out)
+            },
+            Value::Array(a) => for (i, v) in a.iter().enumerate() { absurd(v, &format!("{path}[{i}]"), out) },
+            v if big(v) => out.push(path.to_string()),
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn real_windows_damage_from_bp_win_is_repaired_exactly() {
+        for (name, text, must) in [
+            ("pcbnew", BPWIN_PCBNEW, &["window.pos_x", "window.size_x", "window.display", "design_block_chooser.height", "aui.design_blocks_panel_docked_width", "aui.properties_panel_width",
+                                        "aui.right_panel_width", "aui.search_panel_height", "aui.search_panel_width"][..]),
+            ("eeschema", BPWIN_EESCHEMA, &["window.pos_x", "window.display", "design_block_chooser.height", "aui.design_blocks_panel_docked_width", "aui.properties_panel_width",
+                                            "aui.remote_symbol_panel_docked_width", "aui.search_panel_height", "aui.search_panel_width"][..]),
+            ("minimized", BPWIN_MINIMIZED, &["window.pos_x", "window.pos_y", "window.display"][..]),
+        ] {
+            let before = doc(text);
+            let mut d = before.clone();
+            let gone = repair_doc(&mut d);
+            for m in must { assert!(gone.iter().any(|g| g == m), "{name}: {m} not dropped: {gone:?}"); }
+            let mut left = vec![]; absurd(&d, "", &mut left);
+            assert!(left.is_empty(), "{name}: still out of range: {left:?}");
+            // nothing but the dropped entries changed
+            let mut want = before.clone();
+            for g in &gone {
+                let (parent, key) = g.rsplit_once('.').unwrap();
+                let mut o = &mut want;
+                for k in parent.split('.') { o = &mut o[k]; }
+                o.as_object_mut().unwrap().remove(key);
+            }
+            assert_eq!(d, want, "{name}: only {gone:?} changed");
+        }
     }
 
     #[test]

@@ -1,0 +1,1176 @@
+{
+  "DRC": {
+    "crossprobe": true,
+    "report_all_track_errors": false,
+    "scroll_on_crossprobe": true
+  },
+  "appearance": {
+    "color_theme": "_builtin_default",
+    "custom_toolbars": false
+  },
+  "aui": {
+    "appearance_expand_layer_display": false,
+    "appearance_expand_net_display": false,
+    "appearance_panel_tab": 0,
+    "design_blocks_panel_docked_width": 1479847556,
+    "design_blocks_panel_float_height": -1,
+    "design_blocks_panel_float_width": -1,
+    "design_blocks_show": false,
+    "net_inspector_width": -1,
+    "properties_panel_width": 1479847556,
+    "properties_splitter_proportion": 0.5,
+    "right_panel_width": 1479847556,
+    "search_panel_dock_direction": 3,
+    "search_panel_height": 32185,
+    "search_panel_width": 1479847556,
+    "show_git_commit_pane": false,
+    "show_layer_manager": false,
+    "show_net_inspector": false,
+    "show_properties": false,
+    "show_search": false
+  },
+  "color_picker": {
+    "default_tab": 0
+  },
+  "cross_probing": {
+    "auto_highlight": true,
+    "center_on_items": true,
+    "flash_selection": false,
+    "on_selection": true,
+    "zoom_to_fit": true
+  },
+  "design_block_chooser": {
+    "height": 32765,
+    "keep_annotations": false,
+    "lib_tree": {
+      "column_widths": {
+        "Description": 600,
+        "Item": 225
+      },
+      "columns": [
+        "Item",
+        "Description"
+      ],
+      "open_libs": []
+    },
+    "place_as_group": true,
+    "place_as_sheet": false,
+    "repeated_placement": false,
+    "sash_pos_h": 385,
+    "sash_pos_v": 431,
+    "sort_mode": 0,
+    "width": 0
+  },
+  "diff_phase_skew": {
+    "negative_color": "rgb(255, 0, 0)",
+    "positive_color": "rgb(0, 0, 255)",
+    "unknown_color": "rgb(128, 128, 128)",
+    "use_log_scale": false,
+    "zero_color": "rgb(255, 255, 255)"
+  },
+  "editing": {
+    "allow_free_pads": false,
+    "arc_draw_mode": 0,
+    "arc_edit_mode": 0,
+    "area_anchor_point_selection": false,
+    "auto_constraints": true,
+    "auto_fill_zones": false,
+    "ctrl_click_highlight": false,
+    "esc_clears_net_highlight": true,
+    "flip_left_right": false,
+    "magnetic_all_layers": false,
+    "magnetic_graphics": true,
+    "magnetic_pads": 1,
+    "magnetic_tracks": 1,
+    "pcb_angle_snap_mode": 0,
+    "polar_coords": false,
+    "rotation_angle": 900,
+    "show_courtyard_collisions": true,
+    "snap_alignment_distribution": false,
+    "snap_construction_extensions": true,
+    "snap_object_geometry": true,
+    "snap_tangent_normal": false,
+    "track_drag_action": 1
+  },
+  "export_d356": {
+    "doNotExportUnconnectedPads": false
+  },
+  "field_editor": {
+    "field_widths": {},
+    "sash_pos": 400,
+    "selection_mode": 0,
+    "sidebar_collapsed": false,
+    "variant_sash_pos": 500
+  },
+  "find_replace": {
+    "find_history": [],
+    "find_string": "",
+    "match_case": false,
+    "match_mode": 0,
+    "replace_history": [],
+    "replace_string": "",
+    "search_and_replace": false
+  },
+  "footprint_chooser": {
+    "filter_on_pin_count": false,
+    "height": 595,
+    "sash_h": 385,
+    "sash_v": 403,
+    "sort_mode": 0,
+    "use_fp_filters": false,
+    "width": 770
+  },
+  "footprint_viewer": {
+    "aui_state": null,
+    "autozoom": true,
+    "cursor": {
+      "always_show_cursor": true,
+      "cross_hair_mode": 0
+    },
+    "display": 0,
+    "fp_list_width": 300,
+    "grid": {
+      "axes_enabled": false,
+      "fast_grid_1": 15,
+      "fast_grid_2": 16,
+      "last_size": 15,
+      "line_width": 1.0,
+      "min_spacing": 10.0,
+      "override_connected": false,
+      "override_connected_idx": 16,
+      "override_graphics": false,
+      "override_graphics_idx": 15,
+      "override_text": false,
+      "override_text_idx": 18,
+      "override_vias": false,
+      "override_vias_idx": 18,
+      "override_wires": false,
+      "override_wires_idx": 19,
+      "overrides_enabled": true,
+      "show": true,
+      "show_major": true,
+      "sizes": [
+        {
+          "name": "",
+          "x": "1000 mil",
+          "y": "1000 mil"
+        },
+        {
+          "name": "",
+          "x": "500 mil",
+          "y": "500 mil"
+        },
+        {
+          "name": "",
+          "x": "250 mil",
+          "y": "250 mil"
+        },
+        {
+          "name": "",
+          "x": "200 mil",
+          "y": "200 mil"
+        },
+        {
+          "name": "",
+          "x": "100 mil",
+          "y": "100 mil"
+        },
+        {
+          "name": "",
+          "x": "50 mil",
+          "y": "50 mil"
+        },
+        {
+          "name": "",
+          "x": "25 mil",
+          "y": "25 mil"
+        },
+        {
+          "name": "",
+          "x": "20 mil",
+          "y": "20 mil"
+        },
+        {
+          "name": "",
+          "x": "10 mil",
+          "y": "10 mil"
+        },
+        {
+          "name": "",
+          "x": "5 mil",
+          "y": "5 mil"
+        },
+        {
+          "name": "",
+          "x": "2 mil",
+          "y": "2 mil"
+        },
+        {
+          "name": "",
+          "x": "1 mil",
+          "y": "1 mil"
+        },
+        {
+          "name": "",
+          "x": "5.0 mm",
+          "y": "5.0 mm"
+        },
+        {
+          "name": "",
+          "x": "2.5 mm",
+          "y": "2.5 mm"
+        },
+        {
+          "name": "",
+          "x": "1.0 mm",
+          "y": "1.0 mm"
+        },
+        {
+          "name": "",
+          "x": "0.5 mm",
+          "y": "0.5 mm"
+        },
+        {
+          "name": "",
+          "x": "0.25 mm",
+          "y": "0.25 mm"
+        },
+        {
+          "name": "",
+          "x": "0.2 mm",
+          "y": "0.2 mm"
+        },
+        {
+          "name": "",
+          "x": "0.1 mm",
+          "y": "0.1 mm"
+        },
+        {
+          "name": "",
+          "x": "0.05 mm",
+          "y": "0.05 mm"
+        },
+        {
+          "name": "",
+          "x": "0.025 mm",
+          "y": "0.025 mm"
+        },
+        {
+          "name": "",
+          "x": "0.01 mm",
+          "y": "0.01 mm"
+        }
+      ],
+      "snap": 0,
+      "style": 0,
+      "user_grid_x": "",
+      "user_grid_y": ""
+    },
+    "lib_list_width": 200,
+    "maximized": false,
+    "mru_path": "",
+    "perspective": "",
+    "pos_x": 0,
+    "pos_y": 0,
+    "size_x": 0,
+    "size_y": 0,
+    "zoom": 1.0,
+    "zoom_factors": [
+      0.13,
+      0.22,
+      0.35,
+      0.6,
+      1.0,
+      1.5,
+      2.2,
+      3.5,
+      5.0,
+      8.0,
+      13.0,
+      20.0,
+      35.0,
+      50.0,
+      80.0,
+      130.0,
+      220.0,
+      300.0
+    ]
+  },
+  "footprint_wizard": {
+    "aui_state": null,
+    "cursor": {
+      "always_show_cursor": true,
+      "cross_hair_mode": 0
+    },
+    "display": 0,
+    "grid": {
+      "axes_enabled": false,
+      "fast_grid_1": 15,
+      "fast_grid_2": 16,
+      "last_size": 15,
+      "line_width": 1.0,
+      "min_spacing": 10.0,
+      "override_connected": false,
+      "override_connected_idx": 16,
+      "override_graphics": false,
+      "override_graphics_idx": 15,
+      "override_text": false,
+      "override_text_idx": 18,
+      "override_vias": false,
+      "override_vias_idx": 18,
+      "override_wires": false,
+      "override_wires_idx": 19,
+      "overrides_enabled": true,
+      "show": true,
+      "show_major": true,
+      "sizes": [
+        {
+          "name": "",
+          "x": "1000 mil",
+          "y": "1000 mil"
+        },
+        {
+          "name": "",
+          "x": "500 mil",
+          "y": "500 mil"
+        },
+        {
+          "name": "",
+          "x": "250 mil",
+          "y": "250 mil"
+        },
+        {
+          "name": "",
+          "x": "200 mil",
+          "y": "200 mil"
+        },
+        {
+          "name": "",
+          "x": "100 mil",
+          "y": "100 mil"
+        },
+        {
+          "name": "",
+          "x": "50 mil",
+          "y": "50 mil"
+        },
+        {
+          "name": "",
+          "x": "25 mil",
+          "y": "25 mil"
+        },
+        {
+          "name": "",
+          "x": "20 mil",
+          "y": "20 mil"
+        },
+        {
+          "name": "",
+          "x": "10 mil",
+          "y": "10 mil"
+        },
+        {
+          "name": "",
+          "x": "5 mil",
+          "y": "5 mil"
+        },
+        {
+          "name": "",
+          "x": "2 mil",
+          "y": "2 mil"
+        },
+        {
+          "name": "",
+          "x": "1 mil",
+          "y": "1 mil"
+        },
+        {
+          "name": "",
+          "x": "5.0 mm",
+          "y": "5.0 mm"
+        },
+        {
+          "name": "",
+          "x": "2.5 mm",
+          "y": "2.5 mm"
+        },
+        {
+          "name": "",
+          "x": "1.0 mm",
+          "y": "1.0 mm"
+        },
+        {
+          "name": "",
+          "x": "0.5 mm",
+          "y": "0.5 mm"
+        },
+        {
+          "name": "",
+          "x": "0.25 mm",
+          "y": "0.25 mm"
+        },
+        {
+          "name": "",
+          "x": "0.2 mm",
+          "y": "0.2 mm"
+        },
+        {
+          "name": "",
+          "x": "0.1 mm",
+          "y": "0.1 mm"
+        },
+        {
+          "name": "",
+          "x": "0.05 mm",
+          "y": "0.05 mm"
+        },
+        {
+          "name": "",
+          "x": "0.025 mm",
+          "y": "0.025 mm"
+        },
+        {
+          "name": "",
+          "x": "0.01 mm",
+          "y": "0.01 mm"
+        }
+      ],
+      "snap": 0,
+      "style": 0,
+      "user_grid_x": "",
+      "user_grid_y": ""
+    },
+    "maximized": false,
+    "mru_path": "",
+    "perspective": "",
+    "pos_x": 0,
+    "pos_y": 0,
+    "size_x": 0,
+    "size_y": 0,
+    "zoom_factors": [
+      0.13,
+      0.22,
+      0.35,
+      0.6,
+      1.0,
+      1.5,
+      2.2,
+      3.5,
+      5.0,
+      8.0,
+      13.0,
+      20.0,
+      35.0,
+      50.0,
+      80.0,
+      130.0,
+      220.0,
+      300.0
+    ]
+  },
+  "graphics": {
+    "highlight_factor": 0.5,
+    "select_factor": 0.75
+  },
+  "import": {
+    "keep_kicad_layer_names": false
+  },
+  "lib_tree": {
+    "column_widths": {
+      "Description": 600,
+      "Item": 300
+    },
+    "columns": [
+      "Item",
+      "Description"
+    ],
+    "open_libs": []
+  },
+  "meta": {
+    "version": 5
+  },
+  "pcb_display": {
+    "force_show_fields_when_fp_selected": true,
+    "graphic_items_fill": true,
+    "graphics_fill": true,
+    "live_3d_refresh": false,
+    "max_links_shown": 3,
+    "net_names_mode": 3,
+    "origin_invert_x_axis": false,
+    "origin_invert_y_axis": false,
+    "origin_mode": 0,
+    "pad_clearance": true,
+    "pad_fill": true,
+    "pad_numbers": true,
+    "pad_use_via_color_for_normal_th_padstacks": false,
+    "ratsnest_curved": false,
+    "ratsnest_footprint": true,
+    "ratsnest_global": true,
+    "ratsnest_thickness": 0.5,
+    "show_constraints": false,
+    "show_page_borders": true,
+    "text_fill": true,
+    "track_clearance_mode": 2,
+    "track_fill": true,
+    "via_fill": true
+  },
+  "pcb_editing": {
+    "match_properties": [
+      "common/Bold",
+      "common/Font",
+      "common/Italic",
+      "common/Layer",
+      "common/Line Width",
+      "common/Soldermask",
+      "common/Soldermask Margin Override",
+      "common/Text Height",
+      "common/Text Thickness",
+      "common/Text Width",
+      "shape/Fill",
+      "shape/Line Style",
+      "table/Border Style",
+      "via/Diameter",
+      "via/Hole",
+      "zone/Fill Mode"
+    ]
+  },
+  "plugins": {
+    "actions": []
+  },
+  "printing": {
+    "as_item_checkboxes": false,
+    "background": false,
+    "color_theme": "",
+    "drill_marks": 1,
+    "edge_cuts_on_all_pages": true,
+    "layers": [],
+    "mirror": false,
+    "monochrome": true,
+    "pagination": 1,
+    "scale": 1.0,
+    "title_block": false,
+    "use_theme": false
+  },
+  "search_pane": {
+    "search_hidden_fields": true,
+    "search_metadata": false,
+    "selection_zoom": 1
+  },
+  "system": {
+    "file_history": [
+      "C:/bp/runs/b14b-rc7-libs/proj/ecc83-pp.kicad_pcb"
+    ],
+    "first_run_shown": false,
+    "last_footprint3d_dir": "",
+    "last_footprint_lib_dir": "",
+    "last_imperial_units": 5,
+    "last_metric_units": 1,
+    "max_undo_items": 0,
+    "show_import_issues": true,
+    "units": 1
+  },
+  "tools": {
+    "pns": {
+      "auto_posture": true,
+      "can_violate_drc": false,
+      "corner_mode": 0,
+      "diff_pair_width_to_miter_ratio": 3.0,
+      "effort": 1,
+      "fix_all_segments": true,
+      "follow_mouse": true,
+      "free_angle_mode": false,
+      "jump_over_obstacles": false,
+      "keep_diff_pair_coupling_when_dragging": true,
+      "meta": {
+        "version": 0
+      },
+      "mode": 2,
+      "optimize_dragged_track": false,
+      "remove_loops": true,
+      "restrict_angles": false,
+      "shove_iteration_limit": 250,
+      "shove_time_limit": 1000,
+      "shove_vias": true,
+      "smart_pads": true,
+      "smooth_dragged_segments": true,
+      "snap_to_pads": false,
+      "snap_to_tracks": false,
+      "spread_tracks_distance": 0,
+      "start_diagonal": false,
+      "suggest_finish": false,
+      "via_force_prop_iteration_limit": 40,
+      "walkaround_hug_length_threshold": 1.5,
+      "walkaround_iteration_limit": 40
+    }
+  },
+  "window": {
+    "aui_state": {
+      "format": "kicad.wxaui",
+      "panes": [
+        {
+          "dock": {
+            "direction": 1,
+            "layer": 6,
+            "position": 0,
+            "proportion": 0,
+            "row": 0,
+            "size": 0
+          },
+          "meta": {
+            "center": false,
+            "class_name": "wxAuiToolBar",
+            "index": 0,
+            "notebook": false,
+            "toolbar": true,
+            "window_name": "control"
+          },
+          "name": "TopMainToolbar"
+        },
+        {
+          "dock": {
+            "direction": 1,
+            "layer": 5,
+            "position": 0,
+            "proportion": 0,
+            "row": 0,
+            "size": 0
+          },
+          "meta": {
+            "center": false,
+            "class_name": "wxAuiToolBar",
+            "index": 1,
+            "notebook": false,
+            "toolbar": true,
+            "window_name": "control"
+          },
+          "name": "TopAuxToolbar"
+        },
+        {
+          "dock": {
+            "direction": 3,
+            "layer": 6,
+            "position": 0,
+            "proportion": 0,
+            "row": 0,
+            "size": 0
+          },
+          "meta": {
+            "center": false,
+            "class_name": "wxPanel",
+            "index": 2,
+            "notebook": false,
+            "toolbar": false,
+            "window_name": "panel"
+          },
+          "name": "MsgPanel"
+        },
+        {
+          "dock": {
+            "direction": 4,
+            "layer": 3,
+            "position": 0,
+            "proportion": 0,
+            "row": 0,
+            "size": 0
+          },
+          "meta": {
+            "center": false,
+            "class_name": "wxAuiToolBar",
+            "index": 3,
+            "notebook": false,
+            "toolbar": true,
+            "window_name": "control"
+          },
+          "name": "LeftToolbar"
+        },
+        {
+          "dock": {
+            "direction": 2,
+            "layer": 3,
+            "position": 0,
+            "proportion": 0,
+            "row": 0,
+            "size": 0
+          },
+          "meta": {
+            "center": false,
+            "class_name": "wxAuiToolBar",
+            "index": 4,
+            "notebook": false,
+            "toolbar": true,
+            "window_name": "control"
+          },
+          "name": "RightToolbar"
+        },
+        {
+          "dock": {
+            "direction": 2,
+            "layer": 4,
+            "position": 0,
+            "proportion": 0,
+            "row": 0,
+            "size": 220
+          },
+          "floating": {
+            "rect": {
+              "position": {
+                "x": -1,
+                "y": -1
+              },
+              "size": {
+                "height": 480,
+                "width": 220
+              }
+            }
+          },
+          "hidden": true,
+          "meta": {
+            "caption": "Appearance",
+            "center": false,
+            "class_name": "wxPanel",
+            "index": 5,
+            "notebook": false,
+            "toolbar": false
+          },
+          "name": "LayersManager"
+        },
+        {
+          "dock": {
+            "direction": 2,
+            "layer": 4,
+            "position": 1,
+            "proportion": 0,
+            "row": 0,
+            "size": 220
+          },
+          "floating": {
+            "rect": {
+              "position": {
+                "x": -1,
+                "y": -1
+              },
+              "size": {
+                "height": 115,
+                "width": 190
+              }
+            }
+          },
+          "hidden": true,
+          "meta": {
+            "caption": "Selection Filter",
+            "center": false,
+            "class_name": "wxPanel",
+            "index": 6,
+            "notebook": false,
+            "toolbar": false
+          },
+          "name": "SelectionFilter"
+        },
+        {
+          "dock": {
+            "direction": 2,
+            "layer": 5,
+            "position": 0,
+            "proportion": 0,
+            "row": 0,
+            "size": 300
+          },
+          "floating": {
+            "rect": {
+              "position": {
+                "x": 50,
+                "y": 200
+              },
+              "size": {
+                "height": 600,
+                "width": 800
+              }
+            }
+          },
+          "hidden": true,
+          "meta": {
+            "caption": "Design Blocks",
+            "center": false,
+            "class_name": "wxPanel",
+            "index": 7,
+            "notebook": false,
+            "toolbar": false,
+            "window_name": "Design Blocks"
+          },
+          "name": "DesignBlocks"
+        },
+        {
+          "dock": {
+            "direction": 2,
+            "layer": 4,
+            "position": 3,
+            "proportion": 0,
+            "row": 0,
+            "size": 320
+          },
+          "hidden": true,
+          "meta": {
+            "caption": "Agents",
+            "center": false,
+            "class_name": "wxPanel",
+            "index": 8,
+            "notebook": false,
+            "toolbar": false,
+            "window_name": "panel"
+          },
+          "name": "AgentsPanel"
+        },
+        {
+          "dock": {
+            "direction": 4,
+            "layer": 5,
+            "position": 0,
+            "proportion": 0,
+            "row": 0,
+            "size": 300
+          },
+          "floating": {
+            "rect": {
+              "position": {
+                "x": -1,
+                "y": -1
+              },
+              "size": {
+                "height": 200,
+                "width": 300
+              }
+            }
+          },
+          "hidden": true,
+          "meta": {
+            "caption": "Properties",
+            "center": false,
+            "class_name": "wxPanel",
+            "index": 9,
+            "notebook": false,
+            "toolbar": false,
+            "window_name": "panel"
+          },
+          "name": "PropertiesManager"
+        },
+        {
+          "dock": {
+            "direction": 5,
+            "layer": 0,
+            "position": 0,
+            "proportion": 0,
+            "row": 0,
+            "size": 387
+          },
+          "meta": {
+            "center": true,
+            "class_name": "wxWindow",
+            "index": 10,
+            "notebook": false,
+            "toolbar": false,
+            "window_name": "panel"
+          },
+          "name": "DrawFrame"
+        },
+        {
+          "dock": {
+            "direction": 3,
+            "layer": 0,
+            "position": 0,
+            "proportion": 0,
+            "row": 0,
+            "size": 200
+          },
+          "floating": {
+            "rect": {
+              "position": {
+                "x": -1,
+                "y": -1
+              },
+              "size": {
+                "height": 200,
+                "width": 300
+              }
+            }
+          },
+          "hidden": true,
+          "meta": {
+            "caption": "Net Inspector",
+            "center": false,
+            "class_name": "wxPanel",
+            "index": 11,
+            "notebook": false,
+            "toolbar": false
+          },
+          "name": "NetInspector"
+        },
+        {
+          "dock": {
+            "direction": 3,
+            "layer": 0,
+            "position": 0,
+            "proportion": 0,
+            "row": 0,
+            "size": 100
+          },
+          "floating": {
+            "rect": {
+              "position": {
+                "x": -1,
+                "y": -1
+              },
+              "size": {
+                "height": 200,
+                "width": 480
+              }
+            }
+          },
+          "hidden": true,
+          "meta": {
+            "caption": "Search",
+            "center": false,
+            "class_name": "wxPanel",
+            "index": 12,
+            "notebook": false,
+            "toolbar": false
+          },
+          "name": "Search"
+        },
+        {
+          "dock": {
+            "direction": 3,
+            "layer": 1,
+            "position": 0,
+            "proportion": 0,
+            "row": 0,
+            "size": 200
+          },
+          "floating": {
+            "rect": {
+              "position": {
+                "x": -1,
+                "y": -1
+              },
+              "size": {
+                "height": 240,
+                "width": 600
+              }
+            }
+          },
+          "hidden": true,
+          "meta": {
+            "caption": "Geometric Constraints",
+            "center": false,
+            "class_name": "wxPanel",
+            "index": 13,
+            "notebook": false,
+            "toolbar": false
+          },
+          "name": "Constraints"
+        },
+        {
+          "dock": {
+            "direction": 2,
+            "layer": 5,
+            "position": 0,
+            "proportion": 0,
+            "row": 0,
+            "size": 300
+          },
+          "floating": {
+            "rect": {
+              "position": {
+                "x": -1,
+                "y": -1
+              },
+              "size": {
+                "height": 400,
+                "width": 300
+              }
+            }
+          },
+          "hidden": true,
+          "meta": {
+            "caption": "Version Control",
+            "center": false,
+            "class_name": "wxPanel",
+            "index": 14,
+            "notebook": false,
+            "toolbar": false
+          },
+          "name": "GitCommitPane"
+        }
+      ],
+      "version": 1
+    },
+    "cursor": {
+      "always_show_cursor": true,
+      "cross_hair_mode": 0
+    },
+    "display": 4294967295,
+    "grid": {
+      "axes_enabled": false,
+      "fast_grid_1": 15,
+      "fast_grid_2": 16,
+      "last_size": 15,
+      "line_width": 1.0,
+      "min_spacing": 10.0,
+      "override_connected": false,
+      "override_connected_idx": 16,
+      "override_graphics": false,
+      "override_graphics_idx": 15,
+      "override_text": false,
+      "override_text_idx": 18,
+      "override_vias": false,
+      "override_vias_idx": 18,
+      "override_wires": false,
+      "override_wires_idx": 19,
+      "overrides_enabled": true,
+      "show": true,
+      "show_major": true,
+      "sizes": [
+        {
+          "name": "",
+          "x": "1000 mil",
+          "y": "1000 mil"
+        },
+        {
+          "name": "",
+          "x": "500 mil",
+          "y": "500 mil"
+        },
+        {
+          "name": "",
+          "x": "250 mil",
+          "y": "250 mil"
+        },
+        {
+          "name": "",
+          "x": "200 mil",
+          "y": "200 mil"
+        },
+        {
+          "name": "",
+          "x": "100 mil",
+          "y": "100 mil"
+        },
+        {
+          "name": "",
+          "x": "50 mil",
+          "y": "50 mil"
+        },
+        {
+          "name": "",
+          "x": "25 mil",
+          "y": "25 mil"
+        },
+        {
+          "name": "",
+          "x": "20 mil",
+          "y": "20 mil"
+        },
+        {
+          "name": "",
+          "x": "10 mil",
+          "y": "10 mil"
+        },
+        {
+          "name": "",
+          "x": "5 mil",
+          "y": "5 mil"
+        },
+        {
+          "name": "",
+          "x": "2 mil",
+          "y": "2 mil"
+        },
+        {
+          "name": "",
+          "x": "1 mil",
+          "y": "1 mil"
+        },
+        {
+          "name": "",
+          "x": "5.0 mm",
+          "y": "5.0 mm"
+        },
+        {
+          "name": "",
+          "x": "2.5 mm",
+          "y": "2.5 mm"
+        },
+        {
+          "name": "",
+          "x": "1.0 mm",
+          "y": "1.0 mm"
+        },
+        {
+          "name": "",
+          "x": "0.5 mm",
+          "y": "0.5 mm"
+        },
+        {
+          "name": "",
+          "x": "0.25 mm",
+          "y": "0.25 mm"
+        },
+        {
+          "name": "",
+          "x": "0.2 mm",
+          "y": "0.2 mm"
+        },
+        {
+          "name": "",
+          "x": "0.1 mm",
+          "y": "0.1 mm"
+        },
+        {
+          "name": "",
+          "x": "0.05 mm",
+          "y": "0.05 mm"
+        },
+        {
+          "name": "",
+          "x": "0.025 mm",
+          "y": "0.025 mm"
+        },
+        {
+          "name": "",
+          "x": "0.01 mm",
+          "y": "0.01 mm"
+        }
+      ],
+      "snap": 0,
+      "style": 0,
+      "user_grid_x": "",
+      "user_grid_y": ""
+    },
+    "maximized": false,
+    "mru_path": "",
+    "perspective": "",
+    "pos_x": 701182016,
+    "pos_y": 580,
+    "size_x": -94598016,
+    "size_y": 468,
+    "zoom_factors": [
+      0.13,
+      0.22,
+      0.35,
+      0.6,
+      1.0,
+      1.5,
+      2.2,
+      3.5,
+      5.0,
+      8.0,
+      13.0,
+      20.0,
+      35.0,
+      50.0,
+      80.0,
+      130.0,
+      220.0,
+      300.0
+    ]
+  }
+}
