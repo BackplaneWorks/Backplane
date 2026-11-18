@@ -55,6 +55,8 @@ fn val(p: &Props, k: &str) -> f32 { p.int(k) as f32 + p.int(&format!("{k}_FRAC")
 /// Altium's text as KiCad's markup: braces kept literal, and a character followed by a backslash drawn under a bar
 /// ("R\E\S\E\T\" is RESET with a bar over it).
 fn markup(s: &str) -> String {
+    // "~1" is a line break and "~2" a "|" (the record's separator), as text frames and labels store them; a tab is spaces
+    let s = s.replace("~1", "\n").replace("~2", "|").replace('\t', "    ");
     let cs: Vec<char> = s.chars().collect();
     let mut out = String::with_capacity(s.len() + 8);
     let (mut i, mut run) = (0, String::new());
@@ -166,6 +168,17 @@ impl Sheet {
 }
 fn sheet_of(rs: &[Props]) -> Sheet { rs.iter().find(|r| rec(r) == 31).map(Sheet::of).unwrap_or_else(|| Sheet::of(&Props::default())) }
 
+/// A record's key: its UNIQUEID, else its kind and place ("a/r29@410,250"), which an insertion elsewhere leaves alone.
+fn key_of(r: &Props) -> String {
+    let u = r.get("UNIQUEID");
+    if !u.is_empty() { return format!("a/{u}") }
+    let (x, y) = if r.has("LOCATION.X") || r.has("LOCATION.Y") { ("LOCATION.X", "LOCATION.Y") } else { ("X1", "Y1") };
+    format!("a/r{}@{},{}", rec(r), val(r, x), val(r, y))
+}
+
+/// The key of a record of the `Additional` stream ("a/x/<unique id>")
+fn more_key(r: &Props) -> String { format!("a/x{}", &key_of(r)[1..]) }
+
 // Records' relations ------------------------------------------------------------------------------------------------------
 
 struct Doc2<'a> {
@@ -179,10 +192,9 @@ struct Doc2<'a> {
 impl<'a> Doc2<'a> {
     fn new(rs: &'a [Props]) -> Doc2<'a> {
         let mut seen = HashSet::new();
-        let keys = rs.iter().enumerate().map(|(i, r)| {
-            let u = r.get("UNIQUEID");
-            let k = if u.is_empty() { format!("a/{i}") } else { format!("a/{u}") };
-            if seen.insert(k.clone()) { k } else { format!("a/{i}") }
+        let keys = rs.iter().map(|r| {
+            let k = key_of(r);
+            if seen.insert(k.clone()) { k } else { let mut n = 2; while !seen.insert(format!("{k}#{n}")) { n += 1 } format!("{k}#{n}") }
         }).collect();
         let mut kids: HashMap<i64, Vec<usize>> = HashMap::new();
         for (i, r) in rs.iter().enumerate() { let o = owner(r); if o >= 0 && (o as usize) < rs.len() { kids.entry(o).or_default().push(i) } }
@@ -208,7 +220,7 @@ impl<'a> Doc2<'a> {
             None => s.to_string(),
         };
         if v.starts_with('=') && v != s { return self.resolve(&v, own) }
-        if v == "*" { String::new() } else { v.replace("~1", "\n") }
+        if v == "*" { String::new() } else { v }
     }
     /// Whether a component's child is drawn: its part is the component's current one and its display mode the component's.
     fn shown_in(&self, comp: &Props, r: &Props) -> bool {
@@ -362,7 +374,7 @@ fn connect(d: &Doc2, more: &[Props]) -> HashMap<String, (String, String)> {
             _ => {}
         }
     }
-    for (i, r) in more.iter().enumerate() { if rec(r) == 218 { c.wire(&format!("a/x{i}"), &sh.pts(r)) } }
+    for r in more { if rec(r) == 218 { c.wire(&more_key(r), &sh.pts(r)) } }
     c.solve()
 }
 fn net_kv(nets: &HashMap<String, (String, String)>, id: &str) -> String {
@@ -495,15 +507,17 @@ fn component(o: &mut Out, cx: &Cx, i: usize) {
     let csig = sig_of(c);
     let info: Info = Arc::from(format!("symbol{}{}{}{}{}", kv("ref", &rf), kv("value", &d.value(i)), kv("lib", c.get("LIBREFERENCE")), kv("footprint", &d.footprint(i)),
         kv("description", &c.get("COMPONENTDESCRIPTION").replace(';', ","))));
-    for &k in d.kids(i) {
+    for (n, &k) in d.kids(i).iter().enumerate() {
         let r = &d.rs[k];
         let sig = sig_of(r) ^ csig;
+        let u = r.get("UNIQUEID");
+        let gk = if u.is_empty() { format!("{ck}/g{n}") } else { format!("{ck}/g/{u}") };
         match rec(r) {
             2 => if d.shown_in(c, r) { pin(o, cx, r, ck, &rf, sig) },
             4..=14 => if d.shown_in(c, r) {
                 let s = if rec(r) == 4 && !r.bool("ISHIDDEN") { d.resolve(r.get("TEXT"), i as i64) } else { String::new() };
                 let f = d.sh.font(r.int("FONTID"));
-                graphic(o, &d.sh, r, &format!("{ck}/g{k}"), sig, 0, &info, Some((s.as_str(), &f)))
+                graphic(o, &d.sh, r, &gk, sig, 0, &info, Some((s.as_str(), &f)))
             },
             34 | 41 => {
                 if r.bool("ISHIDDEN") || !r.has("LOCATION.X") && !r.has("LOCATION.Y") { continue }
@@ -830,8 +844,8 @@ fn draw(rs: &Recs) -> Vec<Item> {
 fn additional(o: &mut Out, d: &Doc2, more: &[Props]) {
     let sh = &d.sh;
     let mut box_of: Option<(Pt, f32, f32, i64)> = None;
-    for (i, r) in more.iter().enumerate() {
-        let key = format!("a/x{i}");
+    for r in more {
+        let key = more_key(r);
         let sig = sig_of(r);
         match rec(r) {
             215 => {
@@ -962,7 +976,7 @@ mod tests {
         assert!(!its.iter().any(|i| i.key.contains("#2")), "a hidden parameter is not drawn");
         assert!(its.iter().any(|i| i.key.starts_with("a/RRRRRRRR/f/Value/")), "the comment is the value");
         assert!(its.iter().any(|i| i.key.starts_with("a/RRRRRRRR/f/Reference/") && i.layer == FIELD));
-        let body = its.iter().filter(|i| i.key.starts_with("a/RRRRRRRR/g4")).map(|i| i.layer).collect::<Vec<_>>();
+        let body = its.iter().filter(|i| i.key.starts_with("a/RRRRRRRR/g2")).map(|i| i.layer).collect::<Vec<_>>();
         assert_eq!(body, [BODY_FILL, BODY]);
         let ps = parts(&sample());
         assert_eq!(ps.len(), 1);
@@ -981,7 +995,9 @@ mod tests {
         assert!(info("a/RRRRRRRR/pin/1").contains("net=SDA"));
         assert!(info("a/LLLLLLLL/0").starts_with("label;text=SDA;net=SDA"));
         assert_ne!(g("a/WWWWWWW2"), g("a/WWWWWWW1"));
-        assert!(info("a/RRRRRRRR/g4").starts_with("symbol;ref=R1A;value=10k;lib=Res;footprint=R0603"), "{}", info("a/RRRRRRRR/g4"));
+        assert!(info("a/RRRRRRRR/g2").starts_with("symbol;ref=R1A;value=10k;lib=Res;footprint=R0603"), "{}", info("a/RRRRRRRR/g2"));
+        // a record with no unique id is keyed by its kind and place
+        assert!(its.iter().any(|i| i.key == "a/r29@50,480" && i.layer == JUNCTION));
         assert_eq!(nets(&sample()), ["GND", "SDA"]);
     }
     #[test] fn sheet_symbols() {
@@ -1010,6 +1026,7 @@ mod tests {
         assert_eq!(markup("\\C\\S\\ #"), "~{CS} #");
         assert_eq!(markup("A{1}"), "A{brl}1{brr}");
         assert_eq!(markup("EN"), "EN");
+        assert_eq!(markup("A~2B~1C\tD"), "A|B\nC    D");
         assert_eq!(placed(0, 0), (false, 0, 2));
         assert_eq!(placed(1, 8), (true, 2, 0));
         assert_eq!(placed(2, 0), (false, 2, 0)); // a half turn reads the right way up, anchored on the other side
@@ -1027,7 +1044,7 @@ mod tests {
         }
         walk(&root, &mut files);
         files.sort();
-        let (mut n, mut total) = (0, 0);
+        let (mut n, mut total, mut wired, mut all_wires) = (0, 0, 0, 0);
         for f in &files {
             let b = std::fs::read(f).unwrap();
             let t = std::time::Instant::now();
@@ -1036,12 +1053,18 @@ mod tests {
             assert!(its.len() > 10, "{} gave {} items", f.display(), its.len());
             let _ = (sheets(&b), parts(&b), nets(&b));
             n += 1; total += its.len();
+            // connectivity: wires whose group holds a pin
+            let g = |i: &Item| i.info.split(';').find_map(|f| f.strip_prefix("g=")).map(String::from);
+            let pin_groups: HashSet<String> = its.iter().filter(|i| i.info.starts_with("pin ")).filter_map(g).collect();
+            let wires: Vec<&Item> = its.iter().filter(|i| i.info.starts_with("wire")).collect();
+            wired += wires.iter().filter(|w| g(w).map(|x| pin_groups.contains(&x)).unwrap_or(false)).count();
+            all_wires += wires.len();
             if let Some(o) = &out {
                 let name = f.strip_prefix(&root).unwrap().to_string_lossy().replace(['/', ' '], "_");
                 crate::files::altium::debug_svg(&its, 1, &format!("{o}/{name}.svg"));
                 println!("SCH {name} items={} ms={ms}", its.len());
             }
         }
-        println!("SCH corpus: {n} sheets, {total} items");
+        println!("SCH corpus: {n} sheets, {total} items, {wired} of {all_wires} wires reach a pin");
     }
 }
