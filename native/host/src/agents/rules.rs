@@ -76,7 +76,9 @@ pub fn mcp_to_file(args: &mut [String], dir: &std::path::Path, name: &str) -> st
 pub fn json_to_file(args: &mut [String], flag: &str, dir: &std::path::Path, name: &str) -> std::io::Result<Option<super::proc::RunFile>> {
     let Some(i) = args.iter().position(|a| a == flag) else { return Ok(None) };
     if i + 1 >= args.len() || !args[i + 1].trim_start().starts_with('{') { return Ok(None) }
-    let f = super::proc::RunFile::private(dir, name, &args[i + 1])?;
+    // absolute: the process starts in the project's folder, not the hub's
+    let dir = std::path::absolute(dir)?;
+    let f = super::proc::RunFile::private(&dir, name, &args[i + 1])?;
     args[i + 1] = f.path().to_string_lossy().into_owned();
     Ok(Some(f))
 }
@@ -202,6 +204,18 @@ pub fn rules_agent(block: &str, text: &str) -> String { if block.is_empty() { te
 
 #[cfg(test)]
 mod tests {
+    #[test] fn claudes_mcp_key_is_in_a_private_file_not_argv() {
+        let canary = "CANARY0123456789abcdef"; let url = format!("http://127.0.0.1:9/mcp/t1.2?k={canary}");
+        let mut a = claude_args(&ArgsIn { model: "", session: "", runtime: "auto", interaction: "default", prompt: "P", dirs: &[], effort: "", think: false, plugins: &[], mcp_url: &url, mcp_json: "", disallowed: &[], speed: "" });
+        assert!(a.iter().any(|x| x.contains(canary)), "inline before it is moved");
+        let d = std::env::temp_dir().join(format!("bp-f009-{}", std::process::id()));
+        let f = mcp_to_file(&mut a, &d, "t1-2.mcp.json").unwrap().expect("moved");
+        assert!(!a.iter().any(|x| x.contains(canary)), "{a:?}");
+        let i = a.iter().position(|x| x == "--mcp-config").unwrap(); assert_eq!(a[i + 1], f.path().to_string_lossy());
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(f.path()).unwrap()).unwrap(); assert_eq!(v["mcpServers"]["backplane"]["url"], url.as_str());
+        #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; assert_eq!(std::fs::metadata(f.path()).unwrap().permissions().mode() & 0o777, 0o600); assert_eq!(std::fs::metadata(&d).unwrap().permissions().mode() & 0o777, 0o700); }
+        let p = f.path().to_path_buf(); drop(f); assert!(!p.exists(), "removed when the process ends"); let _ = std::fs::remove_dir_all(&d);
+    }
     #[test] fn a_refresh_lock_failure_is_called_a_stale_sign_in_lock_once() { // #1109
         use super::*;
         for m in ["Failed to refresh OAuth token: another Claude Code process is refreshing it", "OAuth access token could not be refreshed: another Claude Code process is holding the refresh lock"] {

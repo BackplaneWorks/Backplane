@@ -19,7 +19,7 @@ log(ev='start', argv=args)
 if '--input-format' not in args:  # a one-shot text job (a title, a summary)
     print('ok'); sys.exit(0)
 url = ''
-try: url = json.loads(arg('--mcp-config'))['mcpServers']['backplane']['url']
+try: url = json.loads((lambda v: v if v.lstrip().startswith('{') else open(v).read())(arg('--mcp-config')))['mcpServers']['backplane']['url']
 except Exception: pass
 sid = arg('--resume') or 'fake-%d' % os.getpid()
 n = 0

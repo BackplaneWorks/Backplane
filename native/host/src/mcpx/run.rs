@@ -35,7 +35,7 @@ pub fn refuse(line: &Value, off: &[String]) -> Option<Value> {
 fn key(id: &Value) -> String { id.to_string() }
 
 pub fn main(args: &[String]) -> i32 {
-    let url = std::env::var("BACKPLANE_MCP_URL").unwrap_or_default();
+    let url = std::env::var("BACKPLANE_MCP_URL").or_else(|_| std::env::var(super::gen::CODEX_URL_VAR)).unwrap_or_default();
     let id = args.first().cloned().unwrap_or_default();
     let spec = match ask(&url, "backplane/mcp_spec", json!({"id": id})) { Ok(s) => s, Err(e) => { eprintln!("backplane --mcp-run {id}: {e}"); return 2 } };
     let s = |k: &str| spec[k].as_str().unwrap_or("").to_string();
@@ -43,7 +43,7 @@ pub fn main(args: &[String]) -> i32 {
     let mut c = crate::proc::std_cmd(crate::proc::Kind::Shell, s("command"));
     c.args(spec["args"].as_array().into_iter().flatten().filter_map(Value::as_str));
     for kv in spec["env"].as_array().into_iter().flatten() { if let (Some(k), Some(v)) = (kv[0].as_str(), kv[1].as_str()) { c.env(k, v); } }
-    c.env_remove("BACKPLANE_MCP_URL");
+    c.env_remove("BACKPLANE_MCP_URL"); c.env_remove(super::gen::CODEX_URL_VAR);
     let cwd = s("cwd"); if !cwd.is_empty() { c.current_dir(&cwd); }
     c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
     let mut child = match c.spawn() { Ok(ch) => ch, Err(e) => {

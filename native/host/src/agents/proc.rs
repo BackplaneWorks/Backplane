@@ -248,6 +248,8 @@ impl RunFile {
     pub fn path(&self) -> &Path { &self.0 }
 }
 impl Drop for RunFile { fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); } }
+/// A name part no other run file of this hub has: two processes of one thread and generation (a restart over a process still ending) never share, or delete, a file.
+pub fn unique() -> String { static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); format!("{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) }
 /// Where the hub keeps its agents' run files (`RunFile`), under its home.
 pub fn run_dir(home: &Path) -> PathBuf { home.join("secrets").join("run") }
 /// At the hub's start: the run files a hub that was killed (no waiter ran) left behind, removed; how many. Their processes were ended with it.

@@ -1219,11 +1219,13 @@ impl Actor {
         let mcp = crate::mcpx::svc::launch(&th, "claude", &url).await;
         let mut disallowed = mcp.disallowed.clone(); if self.ag.in_review(&th).await { disallowed.extend(snapguard::CLAUDE_DENY.iter().map(|x| x.to_string())) } // a review's design files are read-only to Claude's own tools too
         let mut args = rules::claude_args(&rules::ArgsIn { model: &t.model, session: &session, runtime: &t.runtime, interaction: &t.interaction, prompt: &prompt, dirs: &dirs, effort: &effort, think, plugins: &plugins, mcp_url: &url, mcp_json: &mcp.claude, disallowed: &disallowed, speed });
-        let mut keep = vec![]; // Windows: the files Claude reads at its start, removed when it ends
+        let mut keep = vec![]; // the files Claude reads at its start, removed when it ends
+        // the MCP config holds the thread's key: on every platform it goes in a private file, never on the command line (`/proc/<pid>/cmdline` is world-readable on Linux, F-009)
+        { let name: String = th.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
+          keep.extend(rules::mcp_to_file(&mut args, &proc::run_dir(&self.ag.host.home), &format!("{name}-{gen}-{}.mcp.json", proc::unique())).map_err(|e| format!("could not write the MCP config for Claude: {e}"))?); }
         if cfg!(windows) {
             let name: String = th.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
             rules::prompt_to_file(&mut args, &self.ag.host.home.join("prompts").join(format!("{name}.md"))).map_err(|e| e.to_string())?;
-            keep.extend(rules::mcp_to_file(&mut args, &proc::run_dir(&self.ag.host.home), &format!("{name}-{gen}.mcp.json")).map_err(|e| format!("could not write the MCP config for Claude: {e}"))?);
             keep.extend(rules::json_to_file(&mut args, "--settings", &proc::run_dir(&self.ag.host.home), &format!("{name}-{gen}.settings.json")).map_err(|e| format!("could not write the settings for Claude: {e}"))?);
         }
         if !acct_args.is_empty() { acct_args.extend(args); args = acct_args }

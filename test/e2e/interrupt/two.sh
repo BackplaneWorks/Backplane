@@ -31,7 +31,7 @@ up|hubs)
   for d in $(ls /tmp/.X11-unix/ 2>/dev/null); do [ "$d" = X$DN ] && { echo "display :$DN in use"; exit 2; }; done
   rm -rf $R; mkdir -p $R/homeA $R/homeB $R/projA $R/projB $R/bin $R/fhA/.cache $R/fhB/.cache $R/fhC/.cache $R/shots
   for p in projA projB; do (cd $R/$p && git init -q -b main && echo hi > README.md && git add -A && git -c user.email=r@x -c user.name=rig commit -qm init); done
-  printf '#!/bin/sh\npython3 -I -c %s "$@" >> %s 2>/dev/null\nexec %s %s "$@"\n' "'import json,sys;a=sys.argv[1:];print(json.loads(a[a.index(\"--mcp-config\")+1])[\"mcpServers\"][\"backplane\"][\"url\"])'" "$R/mcp.urls" $BUN $SRC/test/tools/claude_standin.ts > $R/bin/claude; chmod +x $R/bin/claude
+  printf '#!/bin/sh\npython3 -I -c %s "$@" >> %s 2>/dev/null\nexec %s %s "$@"\n' "'import json,sys;a=sys.argv[1:];print(json.loads((lambda v:v if v.lstrip().startswith(\"{\") else open(v).read())(a[a.index(\"--mcp-config\")+1]))[\"mcpServers\"][\"backplane\"][\"url\"])'" "$R/mcp.urls" $BUN $SRC/test/tools/claude_standin.ts > $R/bin/claude; chmod +x $R/bin/claude
   for n in codex grok muse; do printf '#!/bin/sh\nexit 1\n' > $R/bin/$n; chmod +x $R/bin/$n; done
   seed; hub A; hub B; relay A on; relay B on; sleep 5
   for p in $PA $PB; do curl -s -m3 -o /dev/null -w "hello $p %{http_code}\n" http://127.0.0.1:$p/hello; done
