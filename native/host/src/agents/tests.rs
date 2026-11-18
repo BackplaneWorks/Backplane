@@ -503,6 +503,21 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     let other = path_of(&m.url("t1700001001-1", "")); assert_eq!(post(m.port, &other.replace("t1700001001-1", T1), body).await.0, 401); // another thread's key
     assert_eq!(post(m.port, &path_of(&m.url(T1, "")), "{not json").await.1, json!({"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"parse error"}}).to_string());
 }
+#[tokio::test(flavor = "multi_thread")] async fn the_mcp_key_may_ride_as_a_bearer_token_of_its_own_thread_only() {
+    let sd = dir("m3-bin"); perf_standin(&sd, 1);
+    let (_hub, ag, _h, _w) = start("m3", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let m = ag.mcp.get().unwrap(); let body = r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#;
+    let post_auth = |path: String, auth: String| async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut s = tokio::net::TcpStream::connect(("127.0.0.1", m.port)).await.unwrap();
+        s.write_all(format!("POST {path} HTTP/1.1\r\nHost: x\r\nAuthorization: {auth}\r\nContent-Length: {}\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+        let mut out = String::new(); s.read_to_string(&mut out).await.unwrap(); out.split(' ').nth(1).unwrap_or("0").parse::<u16>().unwrap_or(0) };
+    let key = m.key(T1, ""); let bare = path_of(&m.bare_url(T1, ""));
+    assert!(!m.bare_url(T1, "").contains(&key) && m.url(T1, "").contains(&key));
+    assert_eq!(post_auth(bare.clone(), format!("Bearer {key}")).await, 200);
+    assert_eq!(post_auth(bare.clone(), format!("Bearer {}", "0".repeat(64))).await, 401);
+    assert_eq!(post_auth(bare.replace(T1, "t1700001001-1"), format!("Bearer {key}")).await, 401, "another thread's path with this thread's key");
+    let g = m.key(T1, "7"); assert_ne!(g, key); assert_eq!(post_auth(path_of(&m.bare_url(T1, "")), format!("Bearer {g}")).await, 401, "another generation's key");
+}
 #[tokio::test(flavor = "multi_thread")] async fn a_stale_process_may_read_but_not_change() {
     let sd = dir("m3-bin"); perf_standin(&sd, 1);
     let (hub, ag, _h, _w) = start("m3", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await; ag.set_gen(T1, "g2"); let n = len(&hub).await;
@@ -640,9 +655,11 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
         if x.contains("/mcp/") { let (a, b) = x.split_once("/mcp/").unwrap(); let _ = a; format!("mcp:{}", b.split('?').next().unwrap().split('.').next().unwrap()) } else { x } }).collect::<Vec<_>>();
     // arguments, prompt and the MCP config (its port, generation and key differ by run)
     let (g, w) = (norm(&got), norm(&want));
-    for (i, (a, b)) in g.iter().zip(w.iter()).enumerate() { if a.starts_with('{') && a.contains("mcpServers") { assert!(a.contains("\"pcbparts\":{\"type\":\"http\",\"url\":\"https://pcbparts.dev/mcp\"}") && b.contains("pcbparts")); continue }
+    // the MCP config is a private file under the hub's home (its key is on no command line, F-009): the argument is its path, not the JSON
+    for (i, (a, b)) in g.iter().zip(w.iter()).enumerate() { if a.ends_with(".mcp.json") && !a.starts_with('{') { assert!(b.starts_with("mcp:") && std::path::Path::new(a).is_absolute() && !a.contains("k="), "{a}"); continue }
+        if a.starts_with('{') && a.contains("mcpServers") { assert!(a.contains("\"pcbparts\":{\"type\":\"http\",\"url\":\"https://pcbparts.dev/mcp\"}") && b.contains("pcbparts")); continue }
         assert_eq!(a, b, "argument {i}") }
-    assert!(got.last().unwrap().starts_with("{\"mcpServers\":{\"backplane\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:")); ag.shutdown();
+    assert!(got.last().unwrap().ends_with(".mcp.json") && got.iter().all(|a| !a.contains("?k=") && !a.contains("mcpServers")), "no key and no config in argv: {got:?}"); ag.shutdown();
 }
 
 // ---- replays of recorded stand-in output: the command ledger, background work, subagents, todos ----

@@ -52,6 +52,8 @@ fn toml_arr(xs: &[String]) -> String { format!("[{}]", xs.iter().map(|x| toml_st
 fn toml_tbl(kv: &[(String, String)]) -> String { format!("{{{}}}", kv.iter().map(|(k, v)| format!("{}={}", toml_str(k), toml_str(v))).collect::<Vec<_>>().join(",")) }
 /// The env variable a Codex process carries a server's secret header in. "TOKEN" in it keeps it out of the commands Codex runs (its shell
 /// environment policy's default excludes).
+/// The name Codex's process carries the thread's url in ("TOKEN": kept out of the commands Codex runs); the wrapper reads it (mcpx/run.rs).
+pub const CODEX_URL_VAR: &str = "BACKPLANE_MCP_URL_TOKEN";
 pub fn codex_var(id: &str, i: usize) -> String { format!("BACKPLANE_MCP_{}_{i}_TOKEN", id.to_ascii_uppercase().replace('-', "_")) }
 /// Codex's `-c` overrides for the list (Backplane's own and pcbparts are set by codex.rs), and the env the Codex process needs for secret headers.
 /// A secret the vault does not hold is left out (the server then answers 401, which its card shows).
@@ -70,7 +72,11 @@ pub fn codex(servers: &[&Server], c: &Ctx, vault: Vault) -> (Vec<String>, Vec<(S
             if !s.disabled_tools.is_empty() { set(format!("{p}.disabled_tools"), toml_arr(&s.disabled_tools)) }
         } else {
             let (cmd, args, e) = wrapper(s, c);
-            set(format!("{p}.command"), toml_str(&cmd)); set(format!("{p}.args"), toml_arr(&args)); set(format!("{p}.env"), toml_tbl(&e));
+            set(format!("{p}.command"), toml_str(&cmd)); set(format!("{p}.args"), toml_arr(&args));
+            // the wrapper's env holds the thread's key (its url): forwarded from Codex's own env by name, never written into the command line (F-009)
+            let (own, secret): (Vec<_>, Vec<_>) = e.into_iter().partition(|(k, _)| k != "BACKPLANE_MCP_URL");
+            if !own.is_empty() { set(format!("{p}.env"), toml_tbl(&own)) }
+            if let Some((_, u)) = secret.into_iter().next() { set(format!("{p}.env_vars"), toml_arr(&[CODEX_URL_VAR.to_string()])); if !env.iter().any(|(k, _)| k == CODEX_URL_VAR) { env.push((CODEX_URL_VAR.to_string(), u)) } }
         }
         set(format!("{p}.startup_timeout_sec"), "60".into());
     }
@@ -127,9 +133,10 @@ mod tests {
         let kv: Vec<&String> = args.iter().skip(1).step_by(2).collect();
         assert!(args.iter().step_by(2).all(|x| x == "-c"));
         assert_eq!(kv, [
-            "mcp_servers.fetch.command=\"/opt/bp/backplane-hub\"", "mcp_servers.fetch.args=[\"--mcp-run\",\"fetch\"]", "mcp_servers.fetch.env={\"BACKPLANE_MCP_URL\"=\"http://127.0.0.1:9/mcp/t.1?k=K\"}", "mcp_servers.fetch.startup_timeout_sec=60",
+            "mcp_servers.fetch.command=\"/opt/bp/backplane-hub\"", "mcp_servers.fetch.args=[\"--mcp-run\",\"fetch\"]", "mcp_servers.fetch.env_vars=[\"BACKPLANE_MCP_URL_TOKEN\"]", "mcp_servers.fetch.startup_timeout_sec=60",
             "mcp_servers.gh.url=\"https://api.githubcopilot.com/mcp/\"", "mcp_servers.gh.http_headers={\"X-Mode\"=\"ro\"}", "mcp_servers.gh.env_http_headers={\"Authorization\"=\"BACKPLANE_MCP_GH_0_TOKEN\"}", "mcp_servers.gh.disabled_tools=[\"delete_repo\"]", "mcp_servers.gh.startup_timeout_sec=60"]);
-        assert_eq!(env, vec![("BACKPLANE_MCP_GH_0_TOKEN".to_string(), "Bearer ghp_SECRET".to_string())]);
+        assert_eq!(env, vec![("BACKPLANE_MCP_URL_TOKEN".to_string(), "http://127.0.0.1:9/mcp/t.1?k=K".to_string()), ("BACKPLANE_MCP_GH_0_TOKEN".to_string(), "Bearer ghp_SECRET".to_string())]);
+        assert!(!args.iter().any(|x| x.contains("k=K")), "the thread's key is in no argument (F-009): {args:?}");
         assert!(!args.join(" ").contains("ghp_SECRET"));
         for a in kv { let (_, v) = a.split_once('=').unwrap(); crate::mcpx::toml::parse(&format!("x = {v}\n")).unwrap_or_else(|e| panic!("{v}: {e}")); }
         let (_, env) = codex(&[&rem()], &c(), &|_| None); assert!(env.is_empty(), "a secret the vault lacks is left out");

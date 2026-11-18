@@ -8,7 +8,7 @@ use std::{path::Path, time::{Duration, Instant}};
 const AGENT: &str = r#"#!/bin/sh
 url=""
 while [ $# -gt 0 ]; do
-  if [ "$1" = --mcp-config ]; then url=$(printf %s "$2" | sed -E 's/.*"backplane":\{"type":"http","url":"([^"]*)".*/\1/'); fi
+  if [ "$1" = --mcp-config ]; then cfg="$2"; [ -f "$cfg" ] && cfg=$(cat "$cfg"); url=$(printf %s "$cfg" | sed -E 's/.*"backplane":\{"type":"http","url":"([^"]*)".*/\1/'); fi
   shift
 done
 sid="fake-$$"; n=0
