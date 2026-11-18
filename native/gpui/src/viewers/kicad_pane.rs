@@ -246,9 +246,15 @@ pub fn raise_step(above: bool, on_screen: bool, st: &mut RaiseState, buried: &mu
 /// while KiCad has the keyboard draws such frames, d563d8a5ab) keeps a frame on show while the page still holds the editor (`in_page`) or
 /// KiCad has a dialog open (hiding its frame would strand the modal); the page no longer holding it (the viewer closed by X, rail, key
 /// or the hub; another thread; Files, Mech, Browser, Gerbers; a Diff over it) hides it (#1199). Shown again only once the hitbox is
-/// drawn: there is a rect to show it at.
-pub fn mac_shown(show: bool, host_visible: bool, hitbox: bool, in_page: bool, dialog: bool, was_visible: bool) -> bool {
-    show && host_visible && (hitbox || (was_visible && (in_page || dialog)))
+/// drawn: there is a rect to show it at. `covered`: a screen of Backplane's drawn over the whole pane (Settings, the palette, the
+/// lightbox, Improvements: `covers_pane`): macOS cannot cut holes in KiCad's frame, which would stay above it, so it is hidden too.
+pub fn mac_shown(show: bool, host_visible: bool, hitbox: bool, in_page: bool, covered: bool, dialog: bool, was_visible: bool) -> bool {
+    show && host_visible && (!covered || (dialog && was_visible)) && (hitbox || (was_visible && (in_page || dialog)))
+}
+/// Whether something drawn after the pane's own content covers all of the pane (`over`: what was drawn over it, each clipped to
+/// the pane, as Window::hitbox_drawn_after gives it): a full-window screen (its backdrop), not a menu, a tooltip or a card.
+pub fn covers_pane(pane: (f32, f32), over: &[(f32, f32)]) -> bool {
+    pane.0 > 0. && pane.1 > 0. && over.iter().any(|o| o.0 >= pane.0 - 1. && o.1 >= pane.1 - 1.)
 }
 
 pub fn order_plan(stack: &[Who]) -> OrderPlan {
@@ -380,7 +386,11 @@ pub struct KicadPane {
     /// when the hub was last told the person is working in KiCad's canvas
     busy_sent: Option<std::time::Instant>,
     container: Option<u64>, toplevel: u64, attached: bool, pub info: Value, frames: Vec<nc::Frame>,
-    marker: Arc<Mutex<Option<HitboxId>>>, last_root: (i32, i32), placed: Option<(Option<nc::R>, Option<u64>, Vec<nc::R>)>,
+    marker: Arc<Mutex<Option<HitboxId>>>,
+    /// macOS: a hitbox drawn after all the pane's own content (its last child), and whether what was drawn after it covered all of
+    /// the pane in the last frame (`covers_pane`: Settings or another full-window screen over the page)
+    end_marker: Arc<Mutex<Option<HitboxId>>>, mac_covered: bool,
+    last_root: (i32, i32), placed: Option<(Option<nc::R>, Option<u64>, Vec<nc::R>)>,
     focus: FocusHandle, keys: bool, pub light: bool, _subs: Vec<Subscription>,
     /// the fork's holder already in our save-set; reserved chords pressed in KiCad, waiting to be pressed in gpui
     kept: u64, pub press: Vec<String>,
@@ -513,7 +523,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
+        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, last_root: (i32::MIN, 0), placed: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
@@ -1126,7 +1136,11 @@ impl KicadPane {
         let show = if lock_asked(&self.info) { None } else { self.want() };
         // (the pane's full-screen line comes and goes with our window's full screen: drawn again when it changes)
         #[cfg(target_os = "macos")]
-        if self.mac_host(at, at.is_some(), show) { cx.notify(); }
+        {
+            let px = |b: &Bounds<Pixels>| (f32::from(b.size.width), f32::from(b.size.height));
+            self.mac_covered = self.end_marker.lock().unwrap().and_then(|id| window.hitbox_drawn_after(id)).is_some_and(|(e, o)| covers_pane(px(&e), &o.iter().map(px).collect::<Vec<_>>()));
+            if self.mac_host(at, at.is_some(), show) { cx.notify(); }
+        }
         // bp.9 local map: the frames shown once are the client's to map and unmap, the switch with no round trip (KiCad follows the map state)
         let local = self.info["mode"] == "fork" && self.info["local_map"] == true;
         let managed: Option<Vec<u64>> = if local { None } else { (self.info["mode"] == "fork").then(|| {
@@ -1219,18 +1233,18 @@ impl KicadPane {
         if redraw { self.mac_full = full; eprintln!("GPUI_LOG {}", json!({"kicad_mac_full_screen": full})); }
         let was = self.host_sent.is_some_and(|s| s.4);
         let dialog = self.seen_info()["dialogs"].as_array().is_some_and(|d| !d.is_empty());
-        let visible = mac_shown(show.is_some(), nc::host_visible(self.toplevel), hitbox, self.in_page, dialog, was);
+        let visible = mac_shown(show.is_some(), nc::host_visible(self.toplevel), hitbox, self.in_page, self.mac_covered, dialog, was);
         // a frame in which the pane's hitbox was not found (our window inactive while KiCad has the keyboard draws such frames) keeps
         // the last rect, and the frame on show while the page holds the editor (mac_shown); an unseen window goes through host_visible
         let rect = at.and_then(|r| nc::screen_rect(self.toplevel, r)).or_else(|| self.host_sent.map(|(x, y, w, h, _)| (x, y, w, h)));
         let now = rect.map(|(x, y, w, h)| (x, y, w, h, visible));
         if now.is_some() && now != self.host_sent {
             if let Some((x, y, w, h, v)) = now {
-                eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [x, y, w, h], "visible": v, "raise": false, "changed": true, "pane_px": at.map(|r| [r.x, r.y, r.w, r.h]), "frame": show, "in_page": self.in_page, "hitbox": hitbox, "dialog": dialog}));
+                eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [x, y, w, h], "visible": v, "raise": false, "changed": true, "pane_px": at.map(|r| [r.x, r.y, r.w, r.h]), "frame": show, "in_page": self.in_page, "covered": self.mac_covered, "hitbox": hitbox, "dialog": dialog}));
                 self.rpc("editor.kicad.host", json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": v, "raise": false}));
                 // the page let the editor go (#1199): the keyboard back to Backplane's window if KiCad had it, as detach does (a8bbdc74e);
                 // the frame stays parked in KiCad, shown again at the next frame that draws the pane, and the keys go to it on a click
-                if was && !v && !self.in_page && (self.keys || nc::has_focus(0)) {
+                if was && !v && (!self.in_page || self.mac_covered) && (self.keys || nc::has_focus(0)) {
                     nc::focus(self.toplevel); self.keys = false; self.want_keys = false; nc::grab_escape(self.toplevel, false);
                 }
             }
@@ -1303,7 +1317,7 @@ impl KicadPane {
         if let (Some(_), Some((.., sent_visible))) = (self.container, self.host_sent) {
             let show = if lock_asked(&self.info) { None } else { self.want() };
             let dialog = self.seen_info()["dialogs"].as_array().is_some_and(|d| !d.is_empty());
-            let visible = mac_shown(show.is_some(), nc::host_visible(self.toplevel), self.at_px.is_some(), self.in_page, dialog, sent_visible);
+            let visible = mac_shown(show.is_some(), nc::host_visible(self.toplevel), self.at_px.is_some(), self.in_page, self.mac_covered, dialog, sent_visible);
             // our window hidden or back (minimised, another Space, Cmd+H) or the page letting the editor go, with no frame of ours drawn
             // (a hidden app draws none): pushed from here at the last rect, and drawn again for the next frame's own placement
             if visible != sent_visible { self.mac_host(None, self.at_px.is_some(), show); cx.notify(); }
@@ -1427,6 +1441,9 @@ impl Render for KicadPane {
                 .when(app, |d| d.child(crate::ui::with_rect(div().id("kicad-app"), || "kicad:app".to_string()).px_3().py_1().rounded_md().cursor_pointer()
                     .bg(c("raise")).hover(|x| x.bg(c("line"))).text_color(c("text")).child(crate::i18n::trs("Open the KiCad app instead"))
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(PaneKey("kicad-app".into()))))))))
+            // macOS: the last of the pane's own hitboxes; what is drawn after it over all of the pane is a screen over the page (covers_pane).
+            // Not on Linux and Windows: a hitbox the pane's size after the marker would be cut out of KiCad's frame there (holes)
+            .when(cfg!(target_os = "macos"), |d| { let end = self.end_marker.clone(); d.child(canvas(move |b, window, _| { *end.lock().unwrap() = Some(window.insert_hitbox(b, HitboxBehavior::Normal).id); }, |_, _, _, _| {}).absolute().inset_0()) })
     }
 }
 
@@ -1437,15 +1454,23 @@ mod tests {
     /// KiCad has a dialog open; it comes back only once the pane is drawn again.
     #[test] fn macos_hides_kicads_frame_when_the_page_lets_the_editor_go() {
         use super::mac_shown;
-        // (show, host_visible, hitbox, in_page, dialog, was_visible)
-        assert!(mac_shown(true, true, true, true, false, false), "the pane drawn: on show");
-        assert!(!mac_shown(true, true, false, false, false, true), "the viewer closed: the pane not drawn, the page without it: hidden");
-        assert!(mac_shown(true, true, false, true, false, true), "a frame with no hitbox, the page still holding the editor: kept on show");
-        assert!(mac_shown(true, true, false, false, true, true), "a KiCad dialog open: its frame kept, never a stranded modal");
-        assert!(!mac_shown(true, true, false, true, false, false), "hidden, the page back but no hitbox yet: shown only once it is drawn");
-        assert!(mac_shown(true, true, true, true, false, false), "the page back and drawn: on show again");
-        assert!(!mac_shown(true, false, true, true, false, true), "our window unseen (minimised, Cmd+H): hidden");
-        assert!(!mac_shown(false, true, true, true, false, true), "no editor wanted: hidden");
+        // (show, host_visible, hitbox, in_page, covered, dialog, was_visible)
+        assert!(mac_shown(true, true, true, true, false, false, false), "the pane drawn: on show");
+        assert!(!mac_shown(true, true, false, false, false, false, true), "the viewer closed: the pane not drawn, the page without it: hidden");
+        assert!(mac_shown(true, true, false, true, false, false, true), "a frame with no hitbox, the page still holding the editor: kept on show");
+        assert!(mac_shown(true, true, false, false, false, true, true), "a KiCad dialog open: its frame kept, never a stranded modal");
+        assert!(!mac_shown(true, true, false, true, false, false, false), "hidden, the page back but no hitbox yet: shown only once it is drawn");
+        assert!(mac_shown(true, true, true, true, false, false, false), "the page back and drawn: on show again");
+        assert!(!mac_shown(true, false, true, true, false, false, true), "our window unseen (minimised, Cmd+H): hidden");
+        assert!(!mac_shown(false, true, true, true, false, false, true), "no editor wanted: hidden");
+        // Settings (or another full-window screen) over the page: the pane drawn under it, but KiCad's frame would be above it
+        assert!(!mac_shown(true, true, true, true, true, false, true), "Settings over the page: hidden");
+        assert!(mac_shown(true, true, true, true, true, true, true), "Settings over a KiCad dialog: the dialog kept");
+        assert!(mac_shown(true, true, true, true, false, false, false), "Settings closed: on show again");
+        use super::covers_pane;
+        assert!(covers_pane((800., 600.), &[(800., 600.)]), "a backdrop over the whole pane");
+        assert!(!covers_pane((800., 600.), &[(200., 30.), (300., 600.)]), "a tooltip, a menu or a card over a part of it");
+        assert!(!covers_pane((800., 600.), &[]) && !covers_pane((0., 0.), &[(0., 0.)]));
     }
     #[test] fn a_frame_left_behind_our_window_is_tried_again_then_said_with_pop_out() {
         use super::{raise_step, RaiseStep, RaiseState, KICAD_RAISE_BOUND, KICAD_RAISE_HELD};
