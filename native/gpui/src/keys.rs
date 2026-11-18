@@ -212,11 +212,10 @@ pub fn window_bindings(mac: bool) -> Vec<KeyBinding> {
 /// `window_bindings`. Installed at launch and again when the language changes; nothing elsewhere.
 pub fn install_menus(cx: &mut App) {
     if !mac() { return }
-    let t = |s: &str| tr(s).into_owned();
     cx.set_menus(vec![
-        Menu { name: "Backplane".into(), items: vec![MenuItem::action(t("Hide Backplane"), HideApp), MenuItem::action(t("Hide Others"), HideOthers), MenuItem::action(t("Show All"), ShowAll),
-            MenuItem::separator(), MenuItem::action(t("Quit Backplane"), Quit)] },
-        Menu { name: t("Window").into(), items: vec![MenuItem::action(t("Close Window"), CloseWindow)] },
+        Menu { name: "Backplane".into(), items: vec![MenuItem::action(tr("Hide Backplane").into_owned(), HideApp), MenuItem::action(tr("Hide Others").into_owned(), HideOthers), MenuItem::action(tr("Show All").into_owned(), ShowAll),
+            MenuItem::separator(), MenuItem::action(tr("Quit Backplane").into_owned(), Quit)] },
+        Menu { name: tr("Window").into_owned().into(), items: vec![MenuItem::action(tr("Close Window").into_owned(), CloseWindow)] },
     ]);
 }
 /// The floating terminal's own keys, and every other shortcut muted in it: Ctrl+C, Ctrl+K, Esc, a backtick and the rest are the shell's.
