@@ -164,6 +164,13 @@ pub fn repair_when(dir: &Path, backups: &Path, may_write: impl FnOnce() -> bool)
     said
 }
 
+/// Every process's program name (crate::plat::proc::PROCESS_LIST through the process gate), or None when they cannot be listed.
+fn process_names() -> Option<Vec<String>> {
+    let (prog, args) = crate::plat::proc::PROCESS_LIST;
+    let out = crate::proc::std_cmd(crate::proc::Kind::Local, prog).args(args).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().ok()?;
+    out.status.success().then(|| crate::plat::proc::image_names(&String::from_utf8_lossy(&out.stdout)))
+}
+
 /// Whether any KiCad program runs, of any user (None when the processes cannot be listed: then nothing is repaired either).
 fn kicad_running(names: &[String]) -> bool { names.iter().any(|n| KICAD_PROGRAMS.contains(&n.as_str())) }
 
@@ -179,7 +186,7 @@ pub fn guard(version: &str, hub_home: &Path) {
     let Some(dir) = super::libtables::config_root().and_then(|root| dir_for(version, &root)) else { return };
     let Some(ver) = dir.file_name().map(|v| v.to_string_lossy().to_string()) else { return };
     // the process list is read only when a file needs a repair (an embed start pays nothing otherwise)
-    let idle = || match crate::plat::proc::image_names() {
+    let idle = || match process_names() {
         Some(names) if !kicad_running(&names) => true,
         Some(_) => { eprintln!("kicad: window geometry (#1185): {} needs a repair; left for the next start, a KiCad is running", dir.display()); false }
         None => false,
@@ -340,6 +347,8 @@ mod tests {
         assert!(kicad_running(&n(&["kicad-cli"])), "our headless KiCad saves its settings when it stops, too");
         assert!(kicad_running(&n(&["pcbnew"])));
         assert!(!kicad_running(&n(&["bash", "backplane-hub", "kicad-helper"])));
+        #[cfg(unix)] assert_eq!(crate::plat::proc::image_names("  1 x\n/usr/bin/KiCad.real\nbash\n"), ["1 x", "kicad.real", "bash"]);
+        assert!(process_names().is_some_and(|n| !n.is_empty()), "this machine's processes can be listed");
     }
 
     #[test]
