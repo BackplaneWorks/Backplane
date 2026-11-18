@@ -208,7 +208,7 @@ mod tests {
         let canary = "CANARY0123456789abcdef"; let url = format!("http://127.0.0.1:9/mcp/t1.2?k={canary}");
         let mut a = claude_args(&ArgsIn { model: "", session: "", runtime: "auto", interaction: "default", prompt: "P", dirs: &[], effort: "", think: false, plugins: &[], mcp_url: &url, mcp_json: "", disallowed: &[], speed: "" });
         assert!(a.iter().any(|x| x.contains(canary)), "inline before it is moved");
-        let d = std::env::temp_dir().join(format!("bp-f009-{}", std::process::id()));
+        let g = crate::plat::tmp::dir("f009"); let d = g.join("mcp"); // a fresh subfolder: mcp_to_file makes it 0700 itself
         let f = mcp_to_file(&mut a, &d, "t1-2.mcp.json").unwrap().expect("moved");
         assert!(!a.iter().any(|x| x.contains(canary)), "{a:?}");
         let i = a.iter().position(|x| x == "--mcp-config").unwrap(); assert_eq!(a[i + 1], f.path().to_string_lossy());
