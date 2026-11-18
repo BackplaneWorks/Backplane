@@ -158,12 +158,18 @@ impl Backplane {
     /// A picture was applied. `prev` is the thread that was on screen: this picture of the same thread is laid over the rows it held, so what was
     /// read of its history stays, and the list keeps the reader where they are (or at the end, if that is where they are).
     pub(crate) fn timeline_picture(&mut self, mut prev: Value, window: &Value) {
+        const ECHO: &str = "local-echo-"; const ECHO_FOR: std::time::Duration = std::time::Duration::from_secs(20);
         let id = crate::string(&self.data["thread"], "id"); let raw = attach::raw_id(&id).to_string();
         if raw.is_empty() { self.timeline.reset(0); return; }
         let older = history::next_older("", window["older"].as_str().unwrap_or(""), window["hasMore"] == true, 0, &self.screens.pages_read);
         let fresh = match self.data["thread"]["entries"].take() { Value::Array(a) => a, _ => vec![] };
         let prev_id = crate::string(&prev, "id");
         let held = if attach::raw_id(&prev_id) == raw && prev["loading"] != true { match prev["entries"].take() { Value::Array(a) => a, _ => vec![] } } else { vec![] };
+        // the window's own echo of a message just sent: kept at the end until a picture has the hub's row for it (a picture made before
+        // the hub took the message, by the draft's last change or a turn's progress, would take it away again for a second or two)
+        let echoes: Vec<Value> = held.iter().filter(|r| r["id"].as_str().map_or(false, |id| id.starts_with(ECHO) && self.screens.born.get(id).map_or(false, |t| t.elapsed() < ECHO_FOR))).cloned().collect();
+        let held_ids: std::collections::HashSet<String> = held.iter().filter_map(|r| r["id"].as_str().map(str::to_string)).collect();
+        let fresh = keep_echoes(fresh, &echoes, &held_ids);
         let at = history::merge_point(&held, &fresh);
         let (rows, top) = match at {
             Some(i) if !held.is_empty() => {
@@ -374,5 +380,37 @@ mod splice_tests {
         assert_eq!(l.logical_scroll_top().item_ix, l.item_count(), "at the end it follows");
         l.scroll_to(ListOffset { item_ix: 3, offset_in_item: px(7.) }); splice_keeping(&l, 0..0, 2);
         assert_eq!(l.logical_scroll_top().item_ix, 5);
+    }
+}
+
+/// A picture's rows with the window's echoes of messages just sent put back at the end, each until the hub's own row for it is there: a user row
+/// the window did not hold before (the hub took the message; its text may differ: attachments, a command's own words). One new user row answers
+/// one echo, oldest first; the others stay in the order they were sent.
+pub(crate) fn keep_echoes(mut fresh: Vec<Value>, echoes: &[Value], held_ids: &std::collections::HashSet<String>) -> Vec<Value> {
+    if echoes.is_empty() { return fresh }
+    let new_users = fresh.iter().filter(|r| r["kind"] == "user" && r["id"].as_str().map_or(false, |id| !held_ids.contains(id))).count();
+    fresh.extend(echoes.iter().skip(new_users).cloned());
+    fresh
+}
+
+#[cfg(test)]
+mod echo_tests {
+    use super::keep_echoes;
+    use serde_json::{json, Value};
+    fn ids(rows: &[Value]) -> Vec<&str> { rows.iter().map(|r| r["id"].as_str().unwrap()).collect() }
+    #[test]
+    fn a_sent_message_stays_drawn_until_the_hubs_row_for_it_comes() {
+        let held_ids = ["a", "b", "local-echo-1"].iter().map(|s| s.to_string()).collect();
+        let echo = json!({"id":"local-echo-1","kind":"user","text":"hi"});
+        let old = vec![json!({"id":"a","kind":"user","text":"hi"}), json!({"id":"b","kind":"assistant","text":"x"})];
+        // a picture made before the hub took it (the same rows, or a reply's progress): the echo stays, even with an older "hi" above
+        assert_eq!(ids(&keep_echoes(old.clone(), &[echo.clone()], &held_ids)), ["a", "b", "local-echo-1"]);
+        // the hub's row came: the echo goes
+        let mut took = old.clone(); took.push(json!({"id":"c","kind":"user","text":"hi"}));
+        assert_eq!(ids(&keep_echoes(took, &[echo.clone()], &held_ids)), ["a", "b", "c"]);
+        // two sent, one taken: the second stays
+        let e2 = json!({"id":"local-echo-2","kind":"user","text":"more"});
+        let mut one = old; one.push(json!({"id":"c","kind":"user","text":"hi"}));
+        assert_eq!(ids(&keep_echoes(one, &[echo, e2], &held_ids)), ["a", "b", "c", "local-echo-2"]);
     }
 }
