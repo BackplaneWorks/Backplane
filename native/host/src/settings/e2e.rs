@@ -215,8 +215,11 @@ async fn a_thread_bound_to_a_named_account_runs_under_that_profiles_own_folder_a
     // a profile whose sign-in moved on is never silently swapped for the default: with no other login it is not swapped at all
     let s = mgr.request(&json!({"op":"disconnect","profile":id})).await; assert_ne!(s["error"], "", "an account a running thread uses cannot be signed out under it");
     assert_eq!(s["profiles"][0]["state"], "connected");
-    ag.stop(T1).await.unwrap(); tokio::time::sleep(Duration::from_millis(300)).await;
-    let s = mgr.request(&json!({"op":"disconnect","profile":id})).await; assert_eq!(s["error"], "", "{s}");
+    // once the thread is stopped the sign-out is taken: waited for on that, never a wall time (a gate run under load, Nov 18, was refused with CHECKING 300 ms after the stop:
+    // the account's own background check, which a sign-out never cuts short, was still running)
+    ag.stop(T1).await.unwrap();
+    let s = async { for _ in 0..1200 { let s = mgr.request(&json!({"op":"disconnect","profile":id})).await; if s["error"] == "" { return s } tokio::time::sleep(Duration::from_millis(50)).await }
+        panic!("the sign-out of a stopped thread's account was refused for 60 s: {}", mgr.snapshot()) }.await;
     // with no other account and the CLI's own login not signed in there is no route: it waits and tries again by itself (agents `account_retry`) and ends with the reason,
     // or, as the account's change reaches the watch first, is stopped with what to do (accounts_hub `retired`)
     let out = turn(T1).await; assert!(out.contains("Reconnect and select this account") && out.contains("Trying again in"), "no route to any login: {out}");
