@@ -3,7 +3,7 @@
 //! the hub's rows; every press is the view action the row names. The board, schematic and 3D pages draw plot chunks
 //! (screens::plot, next). Pure parsing below, tested; the element code only lays the rows out.
 use super::{md, timeline::{self, Reg}};
-use crate::{hub::Command, i18n::{tf, trs}, string, theme, Backplane};
+use crate::{hub::Command, i18n::{t, tf, trs}, string, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
 
@@ -71,6 +71,8 @@ pub fn kicad_offer(design: bool, gerbers: bool, diff_on: bool, editing: bool, ho
     if !design || gerbers { return KicadOffer::None }
     match holds { true if !diff_on => KicadOffer::Pane, false if !editing => KicadOffer::There, _ => KicadOffer::None }
 }
+/// The thread's project is an Altium one (the hub's `cad`): Open in Altium, no KiCad pane.
+pub fn is_altium(viewer: &Value) -> bool { viewer["cad"] == "altium" }
 pub fn has_design(viewer: &Value) -> bool { tabs(viewer).iter().any(|t| matches!(t.value.as_str(), "board" | "schematic")) }
 
 fn arr<'a>(v: &'a Value, k: &str) -> impl Iterator<Item = &'a Value> { v[k].as_array().into_iter().flatten() }
@@ -197,6 +199,13 @@ fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target
     // button beside it (the editor's own window is its Pop out). The control keeps its id (ui:Edit), which the drivers press.
     // a Gerber set is no board to edit: no Open in KiCad (the embedded GerbView comes with bp.13)
     let gerbers = viewer["gerbers"] == true;
+    // an Altium project (the hub says `cad`): its design opens in Altium on the hub's machine, never in a KiCad pane
+    if is_altium(viewer) {
+        if has_design(viewer) && !gerbers && !diff_on {
+            row = row.child(div().id("altium-open").child(btn(cx, light, "altium-open".into(), t("gpui.c.altium.open"), false, kicad_open(viewer))).tooltip(crate::keys::tip(&t("gpui.c.altium.open.tip"), "", light)));
+        }
+        return row.child(close_button(cx, light)).into_any_element()
+    }
     let offer = kicad_offer(has_design(viewer), gerbers, diff_on, editing, crate::viewers::kicad_pane::local(target.map(|t| t.addr.as_str()), thread));
     if offer == KicadOffer::Pane {
         let c2 = c(if editing { "accent" } else { "line" });
@@ -208,9 +217,13 @@ fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target
     }
     // a window that cannot hold it (the hub on another machine, another machine's thread): KiCad opens there, and the button says on whose screen
     if offer == KicadOffer::There { row = row.child(btn(cx, light, "kicad-open".into(), kicad_open_label(target.map(|t| t.addr.as_str()), thread["mark"]["name"].as_str()), false, kicad_open(viewer))); }
-    row.child(crate::ui::with_rect(div().id("viewer-close"), || "ui:CloseViewer".to_string()).size(crate::scale::tpx(super::head::BTN_H)).flex().items_center().justify_center().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip(&trs("Close the viewer"), "", light))
-        .child(crate::art::icon("x", 14., c("dim"))).on_click(cx.listener(|this, _, _, cx| { this.screens.rail_pending = Some(String::new()); this.screens.rail_at = Some(std::time::Instant::now()); let _ = this.tx.try_send(close()); cx.notify(); })))
-        .into_any_element()
+    row.child(close_button(cx, light)).into_any_element()
+}
+/// The viewer's Close (×)
+fn close_button(cx: &mut Context<Backplane>, light: bool) -> impl IntoElement {
+    let c = |n: &str| theme::color(light, n);
+    crate::ui::with_rect(div().id("viewer-close"), || "ui:CloseViewer".to_string()).size(crate::scale::tpx(super::head::BTN_H)).flex().items_center().justify_center().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip(&trs("Close the viewer"), "", light))
+        .child(crate::art::icon("x", 14., c("dim"))).on_click(cx.listener(|this, _, _, cx| { this.screens.rail_pending = Some(String::new()); this.screens.rail_at = Some(std::time::Instant::now()); let _ = this.tx.try_send(close()); cx.notify(); }))
 }
 /// The 3D page's corner: the Boards menu (a project with several boards) before the pane's own controls.
 fn with_boards(cx: &mut Context<Backplane>, light: bool, viewer: &Value, pv: &super::plotview::PlotView, actions: AnyElement) -> AnyElement {

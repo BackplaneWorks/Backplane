@@ -279,6 +279,11 @@ pub async fn run(script: &str, timeout: u32) -> Result<Ran, String> {
 }
 pub const NOT_HERE: &str = "Altium Designer runs on Windows: this hub is not on Windows, so it cannot reach Altium. The viewers still draw the project's .SchDoc and .PcbDoc files.";
 
+/// Altium.open: a document or project opened in the person's Altium (the running one takes it; else Altium starts with it).
+pub fn open_file(path: &str) -> Result<String, String> {
+    #[cfg(windows)] { win::open_file(path) }
+    #[cfg(not(windows))] { let _ = path; Err(NOT_HERE.into()) }
+}
 /// Altium.status: whether Altium runs, where, and its open projects and documents (a run of a canned script).
 pub const STATUS_SCRIPT: &str = r#"var
     WS : IWorkspace;
@@ -423,6 +428,19 @@ mod win {
         ran.output = std::fs::read_to_string(&out).unwrap_or_default().trim_end().to_string();
         ran.secs = started.elapsed().as_secs_f32();
         Ok(ran)
+    }
+    /// X2.EXE: the running one's, else the newest in Program Files/Altium/AD*
+    fn exe() -> Option<String> {
+        if let Some((_, p)) = altium().filter(|(_, p)| !p.is_empty()) { return Some(p) }
+        let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".into());
+        let mut v: Vec<std::path::PathBuf> = std::fs::read_dir(std::path::Path::new(&pf).join("Altium")).ok()?.flatten().map(|e| e.path().join("X2.EXE")).filter(|p| p.is_file()).collect();
+        v.sort(); v.pop().map(|p| p.to_string_lossy().into_owned())
+    }
+    pub fn open_file(path: &str) -> Result<String, String> {
+        let Some(x2) = exe() else { return Err("Altium Designer is not installed on this machine".into()) };
+        let file = path.replace('/', "\\");
+        crate::proc::std_cmd(crate::proc::Kind::Local, &x2).arg(&file).spawn().map_err(|e| format!("cannot start Altium: {e}"))?;
+        Ok(format!("altium {file}"))
     }
     fn rand_u16() -> u16 { (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0) >> 8) as u16 }
 }

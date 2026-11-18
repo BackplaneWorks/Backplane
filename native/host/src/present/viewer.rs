@@ -626,6 +626,10 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
     // hub's KiCad embeds it and the thread's project has a schematic (kicad/embed.rs rail_simulation); absent otherwise, and for
     // another machine's thread (nothing to embed here)
     let mut v = viewer_page(st, template, session)?;
+    // an Altium project: its files open in Altium, not in KiCad (the bar's button says so; kicad/open.rs opens it)
+    if !sel.is_empty() && !sel.contains('~') && crate::files::kicad::project::altium_cached(&crate::files::kicad::canonical::design_root(&root_of(st, sel))) {
+        if let Some(o) = v.as_object_mut() { o.insert("cad".into(), json!("altium")); }
+    }
     if !sel.is_empty() && !sel.contains('~') {
         if let Some(f) = crate::files::kicad::embed::rail_simulation(&root_of(st, sel)) { if let Some(o) = v.as_object_mut() { o.insert("simFrame".into(), json!(f)); } }
     }

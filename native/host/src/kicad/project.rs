@@ -73,6 +73,13 @@ fn altium(root: &str, pro: &str, pcb: &str, sch: &str) -> Files {
 }
 /// Files.is_altium: the project is an Altium one (its files are read by altium/, edited through Altium)
 pub fn is_altium(f: &Files) -> bool { f.pro.to_lowercase().ends_with(".prjpcb") }
+static ALT: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, bool)>>> = std::sync::OnceLock::new();
+/// is_altium of a folder's project, kept 10 s (the viewer's state asks on every refresh)
+pub fn altium_cached(root: &str) -> bool {
+    let m = ALT.get_or_init(Default::default);
+    if let Some((at, v)) = m.lock().unwrap().get(root) { if at.elapsed() < std::time::Duration::from_secs(10) { return *v } }
+    let v = !root.is_empty() && is_altium(&read(root)); m.lock().unwrap().insert(root.to_string(), (std::time::Instant::now(), v)); v
+}
 
 pub fn read(root: &str) -> Files {
     let cfg: serde_json::Value = std::fs::read_to_string(format!("{root}/.backplane.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(serde_json::Value::Null);
