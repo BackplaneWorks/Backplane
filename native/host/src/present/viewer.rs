@@ -374,7 +374,7 @@ pub fn sheet_action(st: &State, hub: &str, session: &Value, file: &str) -> Optio
     let kind = s(d, &format!("@view:{sel}"));
     if !simple(st, session, sel) || !matches!(kind, "schematic" | "split") { return None }
     let root = root_of(st, sel);
-    if !file.is_empty() && !(file.starts_with(&format!("{root}/")) && file.ends_with(".kicad_sch") && !file.contains("..")) { return None }
+    if !file.is_empty() && !(file.starts_with(&format!("{root}/")) && (file.ends_with(".kicad_sch") || file.to_ascii_lowercase().ends_with(".schdoc")) && !file.contains("..")) { return None }
     let board = if kind == "split" { board_file("split", &root, &chosen_board(d, sel)) } else { String::new() };
     let want = if kind == "split" { format!("split|{root}|{board}|{file}") } else { format!("1|{root}|{file}") };
     let mut rid = session["rid"].as_u64().unwrap_or(0); let mut before = vec![]; let mut drafts = serde_json::Map::new();
@@ -927,6 +927,10 @@ mod tests {
         assert_eq!(viewer_json(&st, &template, &s1).unwrap()["panes"][0]["key"], json!(format!("1|{root}|{sub}")));
         let o = sheet_action(&st, "h", &s1, "").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
         assert_eq!(viewer_json(&st, &template, &s1).unwrap()["panes"][0]["key"], json!(format!("1|{root}|")), "back to the root sheet");
+        let alt = format!("{root}/Power.SchDoc"); // an Altium sheet is a sheet too
+        let o = sheet_action(&st, "h", &s1, &alt).unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        assert_eq!(viewer_json(&st, &template, &s1).unwrap()["panes"][0]["key"], json!(format!("1|{root}|{alt}")));
+        assert!(sheet_action(&st, "h", &s1, &format!("{root}/notes.txt")).is_none());
         let _ = std::fs::remove_dir_all(&d);
     }
     fn sess(th: &str, drafts: Value) -> Value { json!({"sel": th, "rid": 1, "drafts": drafts, "open": {}, "adding": false, "panel": false, "info": {}}) }
