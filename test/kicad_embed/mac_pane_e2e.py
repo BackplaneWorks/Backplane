@@ -646,6 +646,32 @@ try:
                 check(False, f'recover: the alert window of the new KiCad is on screen (alert {bool(al)}, pane {bool(P)})')
             shot('recover-1-alert')
         raise SystemExit(1 if FAILS else 0)
+    # ---- MAC_MODE=leave (#1199): the pane leaving the page takes KiCad's frame off screen, and coming back brings it: the viewer's
+    # Close, then the Board page again; the Files page, then the Board page again. Judged from the window list: no window of the
+    # embedded KiCad over the pane's rect while the page does not hold the editor ----
+    if os.environ.get('MAC_MODE') == 'leave':
+        P = last_push()[0]
+        def press_rect(i):
+            r = rects().get(i)
+            if not r: return False
+            b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2); return True
+        def kicad_over_pane():  # KiCad's windows on screen that cover most of the pane's old rect (its frame; not a tooltip)
+            out = []
+            for w in wins():
+                if w[1] != kpid: continue
+                x0, y0 = max(w[3][0], P[0]), max(w[3][1], P[1]); x1, y1 = min(w[3][0] + w[3][2], P[0] + P[2]), min(w[3][1] + w[3][3], P[1] + P[3])
+                if x1 > x0 and y1 > y0 and (x1 - x0) * (y1 - y0) > 0.3 * P[2] * P[3]: out.append(w)
+            return out
+        for leave_id, label in (('ui:CloseViewer', 'closing the viewer'), ('rail:Files', 'the Files page')):
+            pressed_ = press_rect(leave_id); time.sleep(0.5)
+            gone = wait_for(lambda: not kicad_over_pane(), 8, 0.3); shot('leave-' + leave_id.split(':')[1])
+            check(pressed_ and bool(gone), f'leave: {label} takes KiCad\'s frame off screen (pressed {pressed_}; KiCad windows over the pane {[w[3] for w in kicad_over_pane()]})')
+            back_ = press_rect('rail:Board'); time.sleep(0.5)
+            if back_ and not wait_for(lambda: rects().get('ui:View') or kicad_frame(), 10, 0.3) and rects().get('ui:Edit'): press_rect('ui:Edit')
+            f2 = wait_for(kicad_frame, 30, 0.5); shot('leave-back-' + leave_id.split(':')[1])
+            check(bool(f2), f'leave: the Board page after {label} brings KiCad\'s frame back over the pane (pressed {back_})')
+            if f2: P = last_push()[0]
+        raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=zoom: the zoom chords in the embedded board editor (fork embed's fix/mac-cmd-equals-zoom: plain Cmd+= zooms in), judged by
     # the board's size on screen (KiCad has no view readback): the extent of the board's coloured pixels (copper, silk; the grid, ratsnest and
     # text are grey) inside the canvas, where the canvas is where those pixels differ between two zoom levels (the panels' swatches do not).
