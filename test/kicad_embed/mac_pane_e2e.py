@@ -737,6 +737,10 @@ try:
         print(f'INFO leave: the sidebar shows {rows}; home {home_thread}, other {other_thread}', flush=True)
         if home_thread: press_rect(home_thread); time.sleep(1.0)
         wait_for(at_pane, 10, 0.2); P = last_push()[0]
+        def jump(title, timed=False):  # the command bar (Cmd+K): a thread by its title, Return; the sidebar may not list a new worktree thread
+            cwa = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(cwa[0] + 150, cwa[1] + 28 + 250); time.sleep(0.5)
+            key(K_K, CMD); time.sleep(0.8); relay(op='text', text=title); time.sleep(1.0)
+            t = time.time(); key(36); return (True, t) if timed else True
         def back_from_settings():
             press_rect('ui:Settings') or key(K_ESC); time.sleep(1.2)
             if rects_now().get('ui:Settings') is None: key(K_ESC); time.sleep(0.8)
@@ -749,7 +753,7 @@ try:
         ways = [
             ('a', 'the viewer\'s Close', lambda: press_rect('ui:CloseViewer'), lambda: press_rect('rail:Board')),
             ('b', 'the rail closing the lit page', lambda: press_rect('rail:Board'), lambda: press_rect('rail:Board')),
-            ('c', 'another thread', lambda: other_thread and press_rect(other_thread), lambda: home_thread and press_rect(home_thread)),
+            ('c', 'another thread', lambda: other_thread and press_rect(other_thread) or jump('Other thread'), lambda: (home_thread and press_rect(home_thread)) or jump('Embedded KiCad E2E', timed=True)),
             ('d', 'the Files page', lambda: press_rect('rail:Files'), lambda: press_rect('rail:Board')),
             ('e', 'a Diff over the page', lambda: press_rect('rail:Diff'), lambda: press_rect('rail:Board')),
             # opening Settings shuts the viewer by design (host settings.rs, 0.14's Settings.viewer.shut): back is Settings closed, then the
