@@ -915,7 +915,13 @@ try:
             wait_for(kframe, 10, 0.2); press_rect('ui:CloseViewer'); time.sleep(1.2)
             t0 = time.time(); n0 = len(PUSHES); press_rect('rail:Board')
             seen = wait_for(lambda: any(j.get('visible') for _, j in PUSHES[n0:] if j.get('kicad_host_push')), 3, 0.005)
-            press_rect('ui:CloseViewer'); time.sleep(1.5)
+            n1 = len(PUSHES); tp = time.time(); closed = press_rect('ui:CloseViewer')
+            # judged 1.5 s after the client's hide push (its press can be taken late while the page is still appearing), not after the press
+            hid = wait_for(lambda: any(j.get('kicad_host_push') and not j.get('visible') for _, j in PUSHES[n1:]), 6, 0.02)
+            if not hid:
+                print(f'INFO swap C{i + 1}: the close was not taken (pressed {closed}; no visible:false push in 6 s): not judged', flush=True)
+                press_rect('rail:Board'); wait_for(kframe, 10, 0.1); time.sleep(0.8); continue
+            time.sleep(1.5)
             stale = over_pane(); c_wrong += bool(stale)
             print(f'INFO swap C{i + 1}: show seen {bool(seen)}, then closed; pushes {[(round((t - t0) * 1000), j["kicad_host_push"], j.get("visible")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; KiCad over the pane after 1.5 s {[w[3] for w in stale]}', flush=True)
             press_rect('rail:Board'); wait_for(kframe, 10, 0.1); time.sleep(0.8)
