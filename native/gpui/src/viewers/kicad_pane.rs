@@ -252,14 +252,14 @@ pub fn mac_shown(show: bool, host_visible: bool, hitbox: bool, in_page: bool, co
     show && host_visible && (!covered || (dialog && was_visible)) && (hitbox || (was_visible && (in_page || dialog)))
 }
 /// macOS: how long after the last push of a burst it is sent once more (`mac_watch`, KicadPane::mac_settle). Why: with bp.13.1 KiCad's
-/// frame can end off the last rect pushed, or not on show, after a show: e2e-macos 44255662838 pushed 496x524 visible then 496x500 and
-/// the frame stayed 496x524; 44274808579 (this send off) had a single visible:true push that never showed, and a 879-wide rect 340 ms
-/// after a 496 one that was not applied. The client sends its pushes in order on one socket (hub.rs `session`) and the hub sends each
-/// SetHostGeometry only after KiCad acknowledged the one before (wire/mod.rs `socket_inner`, embed.rs, kipc.rs); that is the order of
-/// KiCad's acknowledgements, not of its applying them: SetHostGeometry goes on KiCad's events socket and is acknowledged before its
-/// deferred, coalesced apply, while ShowFrame and HideFrame go on the main one (the integrator's reading of the fork, for embed.mm's
-/// owner to confirm). This send makes the last word KiCad gets the pane's rect and visibility now, until the fork applies the last
-/// SetHostGeometry it acknowledged. BACKPLANE_KICAD_MAC_SETTLE_MS: another wait, 0 none (mac_pane_e2e's swap check, which fails without it).
+/// frame ended off the last rect pushed (e2e-macos 44255662838: 496x524 visible, then 496x500, the frame kept 496x524) or never shown
+/// (44274808579 return 3, this send off). The hub sends each SetHostGeometry on KiCad's main API socket, one at a time, after KiCad
+/// answered the one before; there KiCad applies it before it answers (fork embed, bp.13.2 349339a52d: only the events socket defers
+/// and coalesces, and the hub never uses it). What did not apply was refused: AS_BUSY, "a task is running: DRC" (return 3), which the
+/// client did not log or send again before HostSends; 44255662838's 500 was most likely the same, unlogged then. HostSends now sends a
+/// refused push again until taken, and the fork's next batch lets SetHostGeometry through the task gate; this send stays until a run of
+/// that fork and this client shows it is not needed (the KiCad lead). Repeating an applied state is harmless (fork embed: SetHostRect
+/// re-places the frames where they are). BACKPLANE_KICAD_MAC_SETTLE_MS: another wait, 0 none (mac_pane_e2e's swap check runs with it off).
 pub const MAC_SETTLE_MS: u64 = 300;
 /// macOS: the host pushes (`editor.kicad.host`) in flight and the latest wanted, shared by the window's panes and the app (a pane
 /// dropped at View still has its hide's answer to come). The hub answers one connection's requests in order, so the answer that leaves
