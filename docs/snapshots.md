@@ -58,6 +58,13 @@ In review mode:
   counts back (a reroute nets out), and a commit dropped with `CMA_DROP` gives its deletions back. Past a fifth of the document's items,
   and at least 10, the call waits for the person's approval (an approval ask). The agent cannot answer it, and a decline refuses the
   call.
+  - In a turn the person did not start (a bot's, a delegated subthread's, a wake, a queued or relayed message), nobody can answer, so
+    the call is refused at once and no ask is opened.
+  - In the person's own turn it waits at most 5 minutes (`MASS_WAIT`); then the ask closes and the call is refused.
+  - While it waits, no KiCad request is sent and this call takes no document lock. A lock the turn's earlier writes took stays held
+    until the turn ends, as always.
+  - The denominator is the saved file's item count at the turn's first write (Hubble_DK, 2.5 MB: about 4 ms). The person's unsaved
+    edits can shift it a little, but only the turn's own IPC deletions are ever counted as the agent's.
 - At the turn's end, `turn_guard_end` compares every board and schematic in the snapshot with the disk (`count_items`: footprints,
   tracks, vias, zones, drawings; placed symbols, wires, labels...). A loss past the same line, or a document deleted, opens the restore
   ask, whatever tool did it.

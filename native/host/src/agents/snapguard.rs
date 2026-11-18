@@ -50,7 +50,12 @@ pub struct TurnGuard {
     pub review: bool, pub wrote: bool,
     /// per document: (items when first touched, net items deleted, deleted since the open BeginCommit), and whether the person said yes
     pub docs: HashMap<String, (usize, i64, i64)>, pub confirmed: Vec<String>,
+    /// the turn was started by the person's own message (they are there to answer a mass-deletion ask)
+    pub person: bool,
 }
+/// How long a mass deletion waits for the person's answer before it is refused. While it waits no KiCad request is sent (the guard runs
+/// before the document's gate and the call); a document lock this turn already took stays held, as it does for the rest of the turn.
+pub const MASS_WAIT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// Whether the next turn is a review: a request for one starts it, and it lasts through the follow-ups until a message asks for a change.
 pub fn review_next(prev: bool, text: &str) -> bool { sn::is_review(text) || (prev && !asks_change(text)) }
@@ -82,11 +87,17 @@ impl Agents {
     /// Before a turn's input reaches the agent: the folder made a repository if it is in none, the review mode decided from the request
     /// (`text`, None to keep the last one), and the work tree snapshotted. Never fails the turn: what could not be done is said.
     /// Err: git is not on this computer, so the turn does not start (nothing could be snapshotted); the thread has an Install Git ask.
-    pub async fn turn_guard_start(self: &Arc<Self>, th: &str, cwd: &str, text: Option<&str>) -> Result<(), String> {
+    pub async fn turn_guard_start(self: &Arc<Self>, th: &str, cwd: &str, text: Option<&str>) -> Result<(), String> { self.turn_guard_start_by(th, cwd, text, false).await }
+    /// `turn_guard_start`; `person`: the person's own message started this turn (they can answer a mass-deletion ask).
+    pub async fn turn_guard_start_by(self: &Arc<Self>, th: &str, cwd: &str, text: Option<&str>, person: bool) -> Result<(), String> {
         if crate::copy::on() || cwd.is_empty() { return Ok(()) }
+        // a bot's own thread works in its own folder (bots/rpc.rs makes it a repository), not a project: never blocked for git, never snapshotted
+        if self.world().await.bot_of.contains_key(th) { return Ok(()) }
         if !git_runs().await { self.git_missing(th).await; return Err(GIT_MISSING.into()) }
         self.close_git_asks(th).await; // installed meanwhile (setup, or this ask's own press): the ask is done
-        self.guard_begin(th, cwd, text, true).await; Ok(())
+        self.guard_begin(th, cwd, text, true).await;
+        if let Some(g) = self.turn_guards.lock().unwrap().get_mut(th) { g.person = person }
+        Ok(())
     }
     /// `turn_guard_start`; `new_turn` false for a guard taken late, at a write of a turn that has none (an earlier turn's restore ask stays open).
     async fn guard_begin(self: &Arc<Self>, th: &str, cwd: &str, text: Option<&str>, new_turn: bool) {
@@ -161,10 +172,13 @@ impl Agents {
         };
         if del > 0 && !confirmed {
             if let Some(line) = sn::mass_loss(doc.rsplit('/').next().unwrap_or(doc), before, (before as i64 - net).max(0) as usize) {
+                // nobody to answer (a bot's turn, a delegated subthread, a wake, a queued or relayed message): refused at once, never waited on
+                let person = self.turn_guard(th).is_some_and(|g| g.person) && { let w = self.world().await; !w.bot_of.contains_key(th) && !w.parents.contains_key(th) };
+                if !person { return Err(format!("Refused: {line}. A deletion this large needs the person's yes, and the person did not start this turn, so nobody is there to give it. Nothing was deleted. Tell the person what you want to remove and why; they can ask for it in a message of their own.")) }
                 match self.ask_person(th, MASS_TOOL, &format!("The agent wants to delete a large part of the design in one turn: {line}. A snapshot from before this turn is kept either way. Allow it?")).await {
                     Ok(true) => { if let Some(g) = self.turn_guards.lock().unwrap().get_mut(th) { g.confirmed.push(doc.to_string()) } }
                     Ok(false) => return Err(format!("Refused: {line}. The person declined this mass deletion; nothing was deleted. Say what you meant to change instead.")),
-                    Err(e) => return Err(format!("Refused: {line}, and the person could not be asked ({e}). Nothing was deleted.")),
+                    Err(e) => return Err(format!("Refused: {line}, and the person did not answer ({e}). Nothing was deleted.")),
                 }
             }
         }
@@ -187,7 +201,17 @@ impl Agents {
         self.parked.lock().unwrap().insert(id.clone(), super::mcp::Parked { thread: th.into(), tool: tool.into(), input: Value::Null, id: Value::Null, tx });
         let pend = self.pending_ev(th, 1, "", now).await;
         self.commit_events(vec![json!({"$":"AskOpened","id":id,"thread":th,"kind":"approval","tool":tool,"detail":detail,"options":"","at":now}), pend]).await;
-        match rx.await { Ok(a) => Ok(a == "accept" || a == "session"), Err(_) => Err("the question was closed before the person answered".into()) }
+        match tokio::time::timeout(MASS_WAIT, rx).await {
+            Ok(Ok(a)) => Ok(a == "accept" || a == "session"),
+            Ok(Err(_)) => Err("the question was closed before the person answered".into()),
+            // nobody answered in time: the ask closes and the call is refused
+            Err(_) => {
+                self.parked.lock().unwrap().remove(&id);
+                let now = now_s(); let pend = self.pending_ev(th, 0, &id, now).await;
+                self.commit_events(vec![json!({"$":"AskClosed","id":id,"answer":"no answer","at":now}), pend]).await;
+                Err(format!("no answer within {} minutes", MASS_WAIT.as_secs() / 60))
+            }
+        }
     }
 
     /// A turn ended: its design files are compared with its snapshot. A mass loss, a board or schematic gone, or any design change a review

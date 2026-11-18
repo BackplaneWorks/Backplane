@@ -141,6 +141,13 @@ async fn turn(hub: &Arc<Hub>, text: &str) -> Vec<Value> {
     ag.mass_guard(T1, &b, &format!("{c}EndCommit"), &json!({"action":"CMA_DROP"})).await.unwrap();
     ag.mass_guard(T1, &b, &format!("{c}DeleteItems"), &ids(9)).await.unwrap();         // 9 of 50: under the floor and a fifth
     ag.mass_guard(T1, &b, &format!("{c}CreateItems"), &json!({"items":[1, 2, 3]})).await.unwrap(); // a reroute adds back
+    // a turn the person did not start (this guard was taken late, at the write): nobody can say yes, so it is refused at once, never waited on
+    let from = len(&hub).await;
+    let why = ag.mass_guard(T1, &b, "kiapi.common.commands.DeleteItems", &json!({"item_ids": (0..10).collect::<Vec<_>>()})).await.unwrap_err();
+    assert!(why.contains("the person did not start this turn") && why.contains("Nothing was deleted"), "{why}");
+    assert!(!log_from(&hub, from).await.iter().any(|e| is(e, "AskOpened")), "no ask nobody can answer");
+    // the person's own turn: they are asked
+    ag.turn_guards.lock().unwrap().get_mut(T1).unwrap().person = true;
     let from = len(&hub).await;
     let (ag2, b2) = (ag.clone(), b.clone());
     let call = tokio::spawn(async move { ag2.mass_guard(T1, &b2, "kiapi.common.commands.DeleteItems", &json!({"item_ids": (0..10).collect::<Vec<_>>()})).await });
