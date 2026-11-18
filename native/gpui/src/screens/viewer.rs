@@ -677,18 +677,22 @@ fn pane_page(thread: &Value, local: bool) -> Option<(String, bool)> {
 pub fn editor_page(open: &str, viewer: &Value, diff_on: bool) -> bool { matches!(open, "board" | "schematic" | "3d") && viewer["gerbers"] != true && !diff_on }
 /// Whether the pane draws the embedded editor for `thread` this frame (its editor held: KicadPane::in_page): the page up, as `page` draws
 /// it (a rail press the hub has not answered yet included), and `editor_page` for it. False with the viewer shut (#1199).
-pub fn holds_editor(thread: &Value) -> bool { pane_page(thread).is_some_and(|(open, _)| editor_page(&open, &thread["viewer"], thread["diff"].is_object())) }
+pub fn holds_editor(thread: &Value) -> bool { pane_page(thread, editor_local(thread)).is_some_and(|(open, _)| editor_page(&open, &thread["viewer"], thread["diff"].is_object())) }
+/// With an editor held: whether KiCad itself is the hub's page now (its Board, Schematic or 3D), whose frames switch at once (`page`'s
+/// `local`, `pane_page`): the one rule `page` and `holds_editor` read.
+fn editor_local(thread: &Value) -> bool { thread["diff"].is_null() && matches!(thread["viewer"]["open"].as_str(), Some("board" | "schematic" | "3d")) && thread["viewer"]["gerbers"] != true }
 /// The design page a rail press asked for that the editor's page follows (Board, Schematic, 3D), until the hub's picture answers it. Read
 /// against the hub's own page: read against the page drawn (the press's own kind while the hub has not answered), `pressed` took the
 /// press as answered at its first frame, and the next frame had the viewer shut again until the hub's picture came (#1199: on macOS
 /// KiCad's frame shown, hidden 24 ms later and shown again; e2e-macos 44266050557).
 pub fn editor_press(viewer: &Value) -> Option<String> {
-    pressed(viewer["open"].as_str().unwrap_or("")).filter(|k| matches!(k.as_str(), "board" | "schematic" | "3d")) // i18n-ok: rail page kinds
+    // against the hub's rail kind, as pane_page reads it (the Gerbers page is the Board page drawing a set: a Board press from it is not answered)
+    pressed(&active_kind(viewer, None)).filter(|k| matches!(k.as_str(), "board" | "schematic" | "3d")) // i18n-ok: rail page kinds
 }
 /// The panel (None while nothing is open). 520 px wide, between the thread and the rail.
 pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>, editor: Option<&Entity<crate::viewers::kicad_pane::KicadPane>>, update: Option<AnyElement>) -> AnyElement {
     // KiCad itself in the pane (its Board, Schematic or 3D): its frames switch at once, and it stays until the hub moves the pane (kicad_pane.rs)
-    let local = editor.is_some() && thread["diff"].is_null() && matches!(thread["viewer"]["open"].as_str(), Some("board" | "schematic" | "3d")) && thread["viewer"]["gerbers"] != true;
+    let local = editor.is_some() && editor_local(thread);
     let Some((open, early)) = pane_page(thread, local) else { DRAWN.with(|d| *d.borrow_mut() = Default::default()); return Empty.into_any_element() };
     /* i18n-ok: an e2e script's read, never drawn */ DRAWN.with(|d| *d.borrow_mut() = (format!("{open}{}", if early { " pressed" } else { "" }), String::new()));
     let open = open.as_str();
@@ -922,6 +926,14 @@ mod tests {
         assert!(!super::holds_editor(&json!({"id": "t1"})), "no viewer at all");
         for k in ["files", "mech", "browser", "split", "review"] { assert!(!super::holds_editor(&t(json!({"open": k}))), "{k}: Backplane's own page"); }
         assert!(!super::holds_editor(&t(json!({"open": "board", "gerbers": true}))), "the Gerbers page is Backplane's own");
+        // a Board press from the Gerbers page: the Board page (the editor's) until the hub shows it; not answered by the Gerbers page's own "board"
+        let gerbers = t(json!({"open": "board", "gerbers": true}));
+        let _ = super::rail_command(&gerbers["viewer"], false, None, "board");
+        assert_eq!(super::editor_press(&gerbers["viewer"]).as_deref(), Some("board"), "the press waits for the hub");
+        // meanwhile page() draws the board loading over the Gerbers picture (editor_page: gerbers), not the editor: so does holds_editor
+        assert!(!super::holds_editor(&gerbers), "not yet the editor's page");
+        assert!(super::holds_editor(&t(json!({"open": "board"}))), "the hub shows the Board page: the editor's");
+        super::forget_press();
         assert!(!super::holds_editor(&json!({"id": "t1", "viewer": {"open": "board"}, "diff": {"files": []}})), "a Diff over the page");
         // a press on Board with the viewer shut: the page holds the editor from the press, every frame until the hub answers, though the
         // editor's page reads the press each frame (it took the press as answered at its first frame, and the next had the viewer shut)
