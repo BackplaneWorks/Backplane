@@ -767,6 +767,64 @@ try:
         for l in client_log().splitlines():
             if '"kicad_host_push"' in l and '"covered":true' in l.replace(' ', ''): print('INFO leave: a push said covered: ' + l.split('GPUI_LOG ', 1)[-1][:200], flush=True); break
         raise SystemExit(1 if FAILS else 0)
+    # ---- MAC_MODE=swap (#1199's find): KiCad's show path places a shown frame from the show call's rect after replying, over a later
+    # SetHostGeometry (e2e-macos 44255662838: pushes 500 false, 524 true, 500 true; the frame stayed at 524). Close the viewer, the Board page
+    # again, SWAP_REPS times: each return's burst (visible:true at one rect, then another within 150 ms: the bottom strip a frame late) is
+    # recorded, and 1 s later the frame must be at the last rect the client pushed (2 pt). Run with BACKPLANE_KICAD_MAC_SETTLE_MS=0 (pane_env)
+    # to see KiCad's own order (fails on bp.13.1 when a burst is provoked), and with the default settle send to see the workaround ----
+    if os.environ.get('MAC_MODE') == 'swap':
+        print(f'INFO swap: BACKPLANE_KICAD_MAC_SETTLE_MS={os.environ.get("BACKPLANE_KICAD_MAC_SETTLE_MS", "(default)")}', flush=True)
+        def rects_now():
+            last = None
+            for l in client_log().splitlines():
+                if 'GPUI_METRIC ' in l and '"rects"' in l: last = l
+            r = {}
+            try:
+                for e in json.loads(last.split('GPUI_METRIC ', 1)[1]).get('rects', []) or []:
+                    if isinstance(e, dict) and 'id' in e: r[e['id']] = e
+            except Exception: pass
+            k = backing_scale()
+            return {i: dict(e, x=e['x'] / k, y=e['y'] / k, w=e['w'] / k, h=e['h'] / k) for i, e in r.items()} if k != 1 else r
+        def press_rect(i):
+            r = rects_now().get(i)
+            if not r: return False
+            b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2); return True
+        def kframe():
+            return next((w for w in wins() if w[1] == kpid and w[3][2] > 200 and w[3][3] > 200), None)
+        import threading
+        PUSHES = []
+        def _tail():
+            n = 0
+            while True:
+                try: ls = open(CLIENT_LOG[0], errors='replace').read().splitlines()
+                except OSError: ls = []
+                now = time.time()
+                for l in ls[n:]:
+                    if '"kicad_host_push"' in l:
+                        try: PUSHES.append((now, json.loads(l.split('GPUI_LOG ', 1)[1])))
+                        except Exception: pass
+                n = len(ls); time.sleep(0.005)
+        threading.Thread(target=_tail, daemon=True).start()
+        reps = int(os.environ.get('SWAP_REPS', '10')); provoked = wrong = 0
+        for i in range(reps):
+            wait_for(kframe, 10, 0.2)
+            press_rect('ui:CloseViewer'); time.sleep(1.2)
+            t0 = time.time(); press_rect('rail:Board')
+            toggled = False
+            if i % 2 == 1:  # every other return: Full size pressed the moment the first visible:true push is seen (a second rect at once)
+                if wait_for(lambda: any(t >= t0 and j.get('visible') for t, j in PUSHES), 2, 0.005): toggled = press_rect('kicad:full')
+            time.sleep(1.0); wait_for(kframe, 5, 0.05); time.sleep(1.0)  # 1 s after the return's last push, near enough: the pushes settle within it
+            burst = [(round((t - t0) * 1000), j['kicad_host_push'], j.get('visible'), j.get('settle')) for t, j in PUSHES if t >= t0]
+            vis = [b for b in burst if b[2]]
+            prov = len(vis) >= 2 and any(v[1] != vis[0][1] and v[0] - vis[0][0] <= 150 for v in vis[1:])
+            last = burst[-1][1] if burst else None; f = kframe()
+            ok = bool(f and last) and all(abs(a - b) <= 2 for a, b in zip(f[3], last))
+            provoked += prov; wrong += (not ok)
+            print(f'INFO swap {i + 1}: Full size toggled {toggled}; pushes {burst}; burst provoked {prov}; frame {f and f[3]}; last push {last}; {"at the last rect" if ok else "NOT at the last rect"}', flush=True)
+            if toggled: press_rect('kicad:full'); time.sleep(1.5)  # back to the normal size for the next return
+        print(f'INFO swap: {provoked} of {reps} returns provoked a burst; {wrong} ended off the last pushed rect', flush=True)
+        check(wrong == 0, f'swap: every return ends at the last rect the client pushed ({wrong} of {reps} did not; {provoked} bursts provoked)')
+        raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=hide (#1198): Cmd+H with KiCad's canvas focused hides Backplane and KiCad's frame (a runtime with comment-key-63: the
     # host reserves Ctrl+H); unhidden, KiCad's frame is directly above Backplane's window again and a click gives KiCad the keyboard; Cmd+H
     # with Backplane focused does the same. A runtime without comment-key-63 keeps Cmd+H KiCad's own (high contrast): nothing hides ----
