@@ -743,8 +743,9 @@ try:
             time.sleep(0.8); relay(op='text', text=title); time.sleep(1.2)
             t = time.time(); key(36); return (True, t) if timed else True
         def back_from_settings():
-            press_rect('ui:Settings') or key(K_ESC); time.sleep(1.2)
-            if rects_now().get('ui:Settings') is None: key(K_ESC); time.sleep(0.8)
+            # Settings is a sheet over the window: Escape closes it (the gear behind it is not pressable; e2e-macos 44296739808 left it open);
+            # a second Escape is harmless (the viewer is already shut by Settings)
+            key(K_ESC); time.sleep(1.0); key(K_ESC); time.sleep(0.8)
             t = time.time(); return press_rect('rail:Board'), t
         def open_keysheet():
             cwa = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(cwa[0] + 150, cwa[1] + 28 + 250); time.sleep(0.6)
@@ -914,7 +915,13 @@ try:
             wait_for(kframe, 10, 0.2); press_rect('ui:CloseViewer'); time.sleep(1.2)
             t0 = time.time(); n0 = len(PUSHES); press_rect('rail:Board')
             seen = wait_for(lambda: any(j.get('visible') for _, j in PUSHES[n0:] if j.get('kicad_host_push')), 3, 0.005)
-            press_rect('ui:CloseViewer'); time.sleep(1.5)
+            n1 = len(PUSHES); tp = time.time(); closed = press_rect('ui:CloseViewer')
+            # judged 1.5 s after the client's hide push (its press can be taken late while the page is still appearing), not after the press
+            hid = wait_for(lambda: any(j.get('kicad_host_push') and not j.get('visible') for _, j in PUSHES[n1:]), 6, 0.02)
+            if not hid:
+                print(f'INFO swap C{i + 1}: the close was not taken (pressed {closed}; no visible:false push in 6 s): not judged', flush=True)
+                press_rect('rail:Board'); wait_for(kframe, 10, 0.1); time.sleep(0.8); continue
+            time.sleep(1.5)
             stale = over_pane(); c_wrong += bool(stale)
             print(f'INFO swap C{i + 1}: show seen {bool(seen)}, then closed; pushes {[(round((t - t0) * 1000), j["kicad_host_push"], j.get("visible")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; KiCad over the pane after 1.5 s {[w[3] for w in stale]}', flush=True)
             press_rect('rail:Board'); wait_for(kframe, 10, 0.1); time.sleep(0.8)
@@ -927,13 +934,13 @@ try:
         wait_for(kframe, 10, 0.2); press_rect('ui:CloseViewer'); time.sleep(1.2)
         kp = [int(l.split()[0]) for l in subprocess.run(['ps', '-axo', 'pid=,command='], capture_output=True, text=True).stdout.splitlines() if '--embedded' in l and OUT in l]
         log0 = len(client_log().splitlines()); n0 = len(PUSHES)
-        for p_ in kp: os.kill(p_, 19)  # SIGSTOP
+        for p_ in kp: os.kill(p_, __import__('signal').SIGSTOP)  # by name: 19 is SIGCONT on macOS (17 is SIGSTOP)
         try:
             t0 = time.time(); press_rect('rail:Board'); time.sleep(0.8)
             cwa = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(cwa[0] + 150, cwa[1] + 28 + 250)
             time.sleep(max(0.0, stall - (time.time() - t0)))
         finally:
-            for p_ in kp: os.kill(p_, 18)  # SIGCONT
+            for p_ in kp: os.kill(p_, __import__('signal').SIGCONT)
         host_settled(15); time.sleep(3.0)
         lines = client_log().splitlines()[log0:]
         refused = [l for l in lines if 'kicad_host_refused' in l]; retried = [l for l in lines if '"retry":true' in l]
@@ -951,15 +958,23 @@ try:
         th = threading.Thread(target=lambda: ask('kicad_ipc', {'path': pcbf, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': 'FK_PCB'}}), daemon=True)
         te = time.time(); th.start(); time.sleep(0.25); press_rect('kicad:full')
         refused_e = wait_for(lambda: any('kicad_host_refused' in l for l in client_log().splitlines()[log0:]), 5, 0.05)
-        os.kill(hub.pid, 19)  # SIGSTOP: the client hears nothing past its 35 s heartbeat
+        os.kill(hub.pid, __import__('signal').SIGSTOP)  # the client hears nothing past its 35 s heartbeat
         try: time.sleep(float(os.environ.get('SWAP_HUB_STOP_S', '45')))
-        finally: os.kill(hub.pid, 18)
-        rejoined = wait_for(lambda: sum('"Hello"' in l or 'disconnect' in l for l in client_log().splitlines()[log0:]) >= 1, 30, 0.2)
+        finally: os.kill(hub.pid, __import__('signal').SIGCONT)
+        # the reconnect: a second "status":"Connected" (the client logs one per connection) after the stop
+        rejoined = wait_for(lambda: any('"status":"Connected"' in l or '"status":"Reconnecting' in l for l in client_log().splitlines()[log0:]), 30, 0.2)
         th.join(60); host_settled(20); time.sleep(2.0)
+        # the hub's picture after the reconnect: on 0692805792 it said viewer_open "" (the viewer shut across the reconnect: e2e-macos
+        # 44299261909); said here for main and branch alike, then the Board page pressed and the frame judged from that press
+        pics = [l for l in client_log().splitlines()[log0:] if '"kicad_pic"' in l]
+        shut = bool(pics) and '"viewer_open":""' in pics[-1]
+        print(f'INFO swap E: after the reconnect the hub says viewer_open {"\"\" (shut)" if shut else "board"}', flush=True)
+        if shut:
+            n2 = len(PUSHES); press_rect('rail:Board'); wait_for(kframe, 10, 0.05); host_settled(10); time.sleep(1.5)
         lines = client_log().splitlines()[log0:]
         last = next((j['kicad_host_push'] for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None); lastvis = next((j.get('visible') for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None)
         f = kframe(); oke = bool(lastvis) and bool(f and last) and all(abs(a - b) <= 2 for a, b in zip(f[3], last))
-        print(f'INFO swap E: refusal waiting before the stop {bool(refused_e)}; reconnect seen {bool(rejoined)} ({[l.split("GPUI_LOG ", 1)[-1][:90] for l in lines if "disconnect" in l][:2]}); pushes {[(round((t - te) * 1000), j["kicad_host_push"], j.get("visible"), j.get("retry")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; frame {f and f[3]}; last {last}', flush=True)
+        print(f'INFO swap E: refusal waiting before the stop {bool(refused_e)}; reconnect seen {bool(rejoined)} ({[l.split("GPUI_LOG ", 1)[-1][:90] for l in lines if '"status"' in l][:3]}); pushes {[(round((t - te) * 1000), j["kicad_host_push"], j.get("visible"), j.get("retry")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; frame {f and f[3]}; last {last}', flush=True)
         check(bool(rejoined), 'swap E: the client dropped and re-made its hub connection')
         check(oke, f'swap E: after a reconnect with a refusal waiting, the frame ends visible at the LAST rect (frame {f and f[3]}, last {last}; refusal before {bool(refused_e)})')
         press_rect('kicad:full'); time.sleep(1.0)
