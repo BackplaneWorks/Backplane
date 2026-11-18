@@ -803,7 +803,9 @@ try:
     # SetHostGeometry (e2e-macos 44255662838: pushes 500 false, 524 true, 500 true; the frame stayed at 524). Close the viewer, the Board page
     # again, SWAP_REPS times: each return's burst (visible:true at one rect, then another within 150 ms: the bottom strip a frame late) is
     # recorded, and 1 s later the frame must be at the last rect the client pushed (2 pt). Run with BACKPLANE_KICAD_MAC_SETTLE_MS=0 (pane_env)
-    # to see KiCad's own order (fails on bp.13.1 when a burst is provoked), and with the default settle send to see the workaround ----
+    # to see KiCad's own order (fails on bp.13.1: e2e-macos 44274808579, a lone show left no frame, a later Full size rect was dropped), and
+    # with the default settle send to see the workaround. Kept as the regression for a fork fix: settle off must pass once KiCad applies
+    # its show and geometry in order ----
     if os.environ.get('MAC_MODE') == 'swap':
         print(f'INFO swap: BACKPLANE_KICAD_MAC_SETTLE_MS={os.environ.get("BACKPLANE_KICAD_MAC_SETTLE_MS", "(default)")}', flush=True)
         def rects_now():
@@ -846,14 +848,18 @@ try:
             if i % 2 == 1:  # every other return: Full size pressed the moment the first visible:true push is seen (a second rect at once)
                 if wait_for(lambda: any(t >= t0 and j.get('visible') for t, j in PUSHES), 2, 0.005): toggled = press_rect('kicad:full')
             time.sleep(1.0); wait_for(kframe, 5, 0.05); time.sleep(1.0)  # 1 s after the return's last push, near enough: the pushes settle within it
-            burst = [(round((t - t0) * 1000), j['kicad_host_push'], j.get('visible'), j.get('settle')) for t, j in PUSHES if t >= t0]
+            burst = [(round((t - t0) * 1000), j['kicad_host_push'], j.get('visible'), j.get('settle')) for t, j in PUSHES if t >= t0 and j.get('kicad_host_push')]
             vis = [b for b in burst if b[2]]
             prov = len(vis) >= 2 and any(v[1] != vis[0][1] and v[0] - vis[0][0] <= 150 for v in vis[1:])
             last = burst[-1][1] if burst else (PUSHES[-1][1]['kicad_host_push'] if PUSHES else None); f = kframe()  # no push in the return: the last one before it
+            if last is None and not burst: print(f'INFO swap {i + 1}: no push to judge against (excluded)', flush=True); continue
             ok = bool(f and last) and all(abs(a - b) <= 2 for a, b in zip(f[3], last))
             provoked += prov; wrong += (not ok)
             print(f'INFO swap {i + 1}: Full size toggled {toggled}; pushes {burst}; burst provoked {prov}; frame {f and f[3]}; last push {last}; {"at the last rect" if ok else "NOT at the last rect"}', flush=True)
-            if toggled: press_rect('kicad:full'); time.sleep(1.5)  # back to the normal size for the next return
+            if toggled:  # back to the normal size for the next return, confirmed by a push at the narrower width (else the next return is not judged)
+                n0 = len(PUSHES); press_rect('kicad:full')
+                ok_back = wait_for(lambda: any(j['kicad_host_push'][2] < 800 for _, j in PUSHES[n0:]), 3, 0.05); time.sleep(1.0)
+                if not ok_back: print(f'INFO swap {i + 1}: Full size off pushed no narrower rect: the next return is judged on its own pushes only', flush=True); PUSHES.append((time.time(), {'kicad_host_push': None}))
         print(f'INFO swap: {provoked} of {reps} returns provoked a burst; {wrong} ended off the last pushed rect', flush=True)
         check(wrong == 0, f'swap: every return ends at the last rect the client pushed ({wrong} of {reps} did not; {provoked} bursts provoked)')
         raise SystemExit(1 if FAILS else 0)
