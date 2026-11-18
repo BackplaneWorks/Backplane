@@ -487,9 +487,12 @@ try:
         if c: press(c)
         time.sleep(2.5); rt = wait_for(lambda: rect_since('kicad:retry', mark), 10, 0.5); shot('lock-2-cancelled')
         # the click is handled (the macOS end-marker hitbox over the pane's controls does not block it): the prompt goes, and the answer is sent
-        hub_mark = len(hub_log().splitlines()) if False else 0
-        said = [l for l in client_log().splitlines()[mark:] if 'editor.kicad.lock' in l and 'cancel' in l] or [l for l in hub_log().splitlines() if 'editor.kicad.lock' in l and 'cancel' in l]
-        gone_prompt = not rect_since('kicad:lock-cancel', len(client_log().splitlines()) - 40) and not rect_since('kicad:lock-open', len(client_log().splitlines()) - 40)
+        # the client logs the RPC (kicad_rpc_sent editor.kicad.lock), the hub the answer ("the person chose Cancel"); the prompt's buttons are
+        # not in the client's latest frame
+        sent = [l for l in client_log().splitlines()[mark:] if '"kicad_rpc_sent":"editor.kicad.lock"' in l]
+        said = [l for l in hub_log().splitlines() if 'the person chose Cancel' in l] if sent else []
+        last = next((l for l in reversed(client_log().splitlines()) if 'GPUI_METRIC ' in l and '"rects"' in l), '')
+        gone_prompt = '"kicad:lock-cancel"' not in last and '"kicad:lock-open"' not in last
         check(bool(c) and bool(said) and gone_prompt, f'lock L2a: the Cancel click is handled: the prompt goes ({gone_prompt}), editor.kicad.lock answer cancel sent ({(said or [""])[0].strip()[:160]!r})')
         check(not kicads() and bool(rt) and str(holder.pid) in holders(), f'lock L2: Cancel: no KiCad starts, Try again offered, the other KiCad still holds its lock ({holders()})')
         mark = len(client_log().splitlines())
