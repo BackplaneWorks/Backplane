@@ -1326,7 +1326,7 @@ impl KicadPane {
         if host_push_due(now, self.host_sent, self.host_unsent) {
             self.host_unsent = false;
             if let Some((x, y, w, h, v)) = now {
-                eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [x, y, w, h], "visible": v, "raise": false, "changed": true, "pane_px": at.map(|r| [r.x, r.y, r.w, r.h]), "frame": show, "in_page": self.in_page, "covered": self.mac_covered, "hitbox": hitbox, "dialog": dialog}));
+                eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [x, y, w, h], "visible": v, "raise": false, "changed": true, "pane_px": at.map(|r| [r.x, r.y, r.w, r.h]), "frame": show, "in_page": self.in_page, "covered": self.mac_covered, "hitbox": hitbox, "dialog": dialog, "at_ms": crate::screens::kcomment::epoch_ms() as u64}));
                 self.host_rpc(json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": v, "raise": false}));
                 let ms = mac_settle_ms(std::env::var("BACKPLANE_KICAD_MAC_SETTLE_MS").ok().as_deref());
                 self.mac_settle = (ms > 0).then(|| std::time::Instant::now() + std::time::Duration::from_millis(ms));
@@ -1403,7 +1403,7 @@ impl KicadPane {
         if self.mac_settle.is_some_and(|t| t <= std::time::Instant::now()) {
             self.mac_settle = None;
             if let Some((x, y, w, h, v)) = self.host_sent {
-                eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [x, y, w, h], "visible": v, "raise": false, "changed": false, "settle": true}));
+                eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [x, y, w, h], "visible": v, "raise": false, "changed": false, "settle": true, "at_ms": crate::screens::kcomment::epoch_ms() as u64}));
                 self.host_rpc(json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": v, "raise": false}));
             }
         }
@@ -2026,7 +2026,7 @@ impl crate::Backplane {
             // frame then never shown): the latest push is sent again until KiCad takes it or a newer one replaces it (HostSends)
             if method == "editor.kicad.host" {
                 let at = self.screens.host_sends.borrow_mut().reply(false, std::time::Instant::now());
-                eprintln!("GPUI_LOG {}", json!({"kicad_host_refused": why, "retry_ms": at.map(|t| t.saturating_duration_since(std::time::Instant::now()).as_millis() as u64)}));
+                eprintln!("GPUI_LOG {}", json!({"kicad_host_refused": why, "id": reply["id"], "retry_ms": at.map(|t| t.saturating_duration_since(std::time::Instant::now()).as_millis() as u64), "at_ms": crate::screens::kcomment::epoch_ms() as u64}));
                 self.host_retry_watch(cx);
             }
             if method == "editor.kicad.attach" {
@@ -2036,7 +2036,7 @@ impl crate::Backplane {
             }
             return;
         }
-        if method == "editor.kicad.host" { self.screens.host_sends.borrow_mut().reply(true, std::time::Instant::now()); eprintln!("GPUI_LOG {}", json!({"kicad_host_reply": reply["applied"], "why": reply["why"], "error": reply["error"]})); }
+        if method == "editor.kicad.host" { self.screens.host_sends.borrow_mut().reply(true, std::time::Instant::now()); eprintln!("GPUI_LOG {}", json!({"kicad_host_reply": reply["applied"], "why": reply["why"], "error": reply["error"], "id": reply["id"], "at_ms": crate::screens::kcomment::epoch_ms() as u64})); }
         if method == "editor.kicad.attach" && reply["state"].is_string() {
             let mut v = reply;
             if let Some(obj) = v.as_object_mut() { obj.remove("t"); obj.remove("id"); obj.remove("ok"); }
@@ -2183,7 +2183,7 @@ impl crate::Backplane {
             let Ok(step) = this.update(cx, |this, _| this.screens.host_sends.borrow_mut().watch_step(std::time::Instant::now())) else { break };
             match step {
                 HostStep::Send(params) => {
-                    eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [params["x"], params["y"], params["width"], params["height"]], "visible": params["visible"], "raise": params["raise"], "retry": true}));
+                    eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [params["x"], params["y"], params["width"], params["height"]], "visible": params["visible"], "raise": params["raise"], "retry": true, "at_ms": crate::screens::kcomment::epoch_ms() as u64}));
                     let Ok(()) = this.update(cx, |this, _| { let _ = this.tx.try_send(Command::Rpc("editor.kicad.host".into(), Secret(params), "kicad")); }) else { break };
                 }
                 HostStep::Look(d) => cx.background_executor().timer(d).await,
