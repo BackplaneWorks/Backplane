@@ -190,7 +190,8 @@ impl Backplane {
             Event::Older(cursor,page)=>self.older_landed(cursor,page,cx),
             Event::Error(e)=>{self.error=e;self.screens.unsent.lost();},
             Event::Unpaired=>screens::pair::revoked(self,cx),
-            Event::Refused(e)=>{self.error=e;},
+            // a refused view leaves no page to wait for: the pressed tab gives way at once, and the window says why
+            Event::Refused(e)=>{self.error=e;screens::viewer::forget_press();self.screens.rail_pending=None;self.screens.rail_at=None;},
             Event::Note(n)=>{self.note=n;},
             // the hub moved the composer on: a command left it, or the conversation's draft came back after an intent was saved. Another thread's is kept for when it opens
             Event::Compose(th,text)=>{if th==self.selected {self.input.update(cx,|input,cx|input.set(text.clone(),cx));}if text.is_empty(){self.drafts.remove(&th);}else{self.drafts.insert(th.clone(),text.clone());}self.screens.drafts.set(&th,&text);},
