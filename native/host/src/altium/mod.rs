@@ -9,6 +9,7 @@
 //!
 //! Format references: KiCad's import notes (https://dev-docs.kicad.org/en/import-formats/altium) and python-altium's
 //! format.md (https://github.com/vadmium/python-altium/blob/master/format.md).
+pub mod live;
 pub mod prj;
 pub mod sch;
 pub mod pcb;

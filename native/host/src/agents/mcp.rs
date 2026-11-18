@@ -227,6 +227,14 @@ impl Mcp {
             "kicad_bring_back" => ag.tool_bring_back(thread, &a).await,
             // the person's KiCad (and Backplane's viewers) select what the agent names (kicad/xprobe.rs), as a reference clicked in the chat does
             "kicad_select" => { let mut p = a.clone(); p["project"] = json!(crate::files::kicad::canonical::route(sv(&a, "path"))); match crate::files::kicad::xprobe::select(&ag.hub, &p).await { Ok(v) => (true, v), Err(e) => fail(&e) } }
+            // the person's running Altium Designer (Windows): a DelphiScript run in it (altium/live.rs)
+            "altium_status" => match crate::files::altium::live::run(crate::files::altium::live::STATUS_SCRIPT, 30).await {
+                Ok(r) if r.ok => (true, json!({"running": true, "status": r.output})),
+                Ok(r) => (false, r.json()),
+                Err(e) => fail(&e) },
+            "altium_script" => {
+                let t = a.get("timeout").and_then(Value::as_u64).unwrap_or(60).clamp(5, 600) as u32;
+                match crate::files::altium::live::run(sv(&a, "script"), t).await { Ok(r) => (r.ok, r.json()), Err(e) => fail(&e) } }
             "kicad_ipc_status" => match crate::files::kicad::ipc::kicad_ipc_status_in(&ag.hub, Some(thread), &crate::files::kicad::canonical::route(sv(&a, "path"))).await { Ok(v) => (true, v), Err(e) => fail(&e) },
             "kicad_export10" => crate::files::export10::mcp(&ag.hub, &crate::files::kicad::canonical::route(sv(&a, "path")), a.get("force").and_then(Value::as_bool).unwrap_or(false)).await,
             "settings_inspect" => crate::settings::proposal::tool_inspect(&ag.hub, &ag.host.models).await,
