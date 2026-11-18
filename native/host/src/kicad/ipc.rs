@@ -114,6 +114,8 @@ struct Actor {
     pool: Pool, trimming: bool,
     /// Servers asked to stop for another project and not answered yet: not asked a second time for a second waiter.
     stopping: Vec<String>,
+    /// Requests the transport failed for a project since its server last answered one (said in hub.log when the process's exit is seen).
+    lost: HashMap<String, u32>,
 }
 
 pub fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
@@ -143,10 +145,11 @@ impl Actor {
     }
     /// A project's server process is gone: every request out to it is answered with `why` now (no reply line will come for it),
     /// and it counts as used by nobody.
-    fn gone(&mut self, project: &str, why: &str) {
+    fn gone(&mut self, project: &str, why: &str) -> usize {
         let ids: Vec<String> = self.pend_of.iter().filter(|(_, p)| p.as_str() == project).map(|(id, _)| id.clone()).collect();
+        let n = ids.len();
         for id in ids { self.pend_of.remove(&id); if let Some(r) = self.pend.remove(&id) { let _ = r.send(json!({"ok": false, "error": why})); } }
-        self.uses.remove(project);
+        self.uses.remove(project); n
     }
     /// Servers beyond the first two that have been idle SPARE_IDLE_S are asked to stop (the least recently used first); checked once a minute while there are more than two.
     fn trim(&mut self) {
@@ -302,7 +305,11 @@ impl Actor {
                 // the current process's exit is the server's; an older one's (stopped to make room, started again since) only frees its place
                 let current = self.cur.get(&project) == Some(&n);
                 // (the current process's requests out get no reply line: answered here, and the project counts as unused at once)
-                if current { self.cur.remove(&project); self.gone(&project, &format!("the headless KiCad for {} exited before answering; request outcome unknown", ks::name(&project))) }
+                if current { self.cur.remove(&project); let out = self.gone(&project, &format!("the headless KiCad for {} exited before answering; request outcome unknown", ks::name(&project)));
+                    // the record of it in hub.log: what was out when the process went (answered here), and what the transport had already
+                    // failed since the server last answered (requests out when its connection dropped, or sent in the moment after)
+                    let (failed, code) = (self.lost.remove(&project).unwrap_or(0), o["code"].as_i64().unwrap_or(1));
+                    if out + failed as usize > 0 || code != 0 { use std::io::Write; let _ = writeln!(std::io::stderr(), "kicad ipc: {project} process {n} exited (code {code}) with {out} out, answered here, and {failed} failed by the transport since its last answer; in use by nobody now"); } }
                 if self.relaunch.iter().any(|p| *p == project) && self.srv(&project).state == "starting" { // a start was waiting for this exit
                     let sock = self.srv(&project).sock; self.close(&sock);
                     if self.procs.get(&project).map_or(true, |p| p.is_empty()) { self.launch(&project) }
@@ -313,7 +320,8 @@ impl Actor {
                 } else if current { self.exited(project, o["code"].as_i64().unwrap_or(1) as i32, o["tail"].as_str().unwrap_or("").to_string()) }
             }
             _ => { let id = match &o["id"] { Value::String(s) => s.clone(), v => v.to_string() };
-                if let Some(p) = self.pend_of.remove(&id) { if let Some(u) = self.uses.get_mut(&p) { *u = u.saturating_sub(1) } let s = self.srv(&p); if s.state == "ready" { self.put(s.touch(now_s())) } }
+                if let Some(p) = self.pend_of.remove(&id) { if let Some(u) = self.uses.get_mut(&p) { *u = u.saturating_sub(1) }
+                    if o["ok"] == true { self.lost.remove(&p); } else { *self.lost.entry(p.clone()).or_insert(0) += 1 } let s = self.srv(&p); if s.state == "ready" { self.put(s.touch(now_s())) } }
                 if let Some(r) = self.pend.remove(&id) { let _ = r.send(o); } }
         }
     }
@@ -409,7 +417,7 @@ pub fn start(hub: &Arc<Hub>) {
     let home = hub.cfg.home.to_string_lossy().to_string();
     let mut a = Actor { me: tx.clone(), home, rt: std::env::var("XDG_RUNTIME_DIR").unwrap_or_default(), hub_pid: std::process::id(), helper: None, gen: 0, pend: HashMap::new(), next: 0,
         srvs: vec![], wait: vec![], shown: String::new(), env: Env::default(), lines: lines.clone(),
-        uses: HashMap::new(), pend_of: HashMap::new(), procs: HashMap::new(), cur: HashMap::new(), proc_n: 0, relaunch: vec![], ticking: false, pool: pool_of(crate::memscope::total_ram(), &std::env::var("BACKPLANE_KICAD_POOL_TEST").unwrap_or_default()), trimming: false, stopping: vec![] };
+        uses: HashMap::new(), pend_of: HashMap::new(), procs: HashMap::new(), cur: HashMap::new(), proc_n: 0, relaunch: vec![], ticking: false, pool: pool_of(crate::memscope::total_ram(), &std::env::var("BACKPLANE_KICAD_POOL_TEST").unwrap_or_default()), trimming: false, stopping: vec![], lost: HashMap::new() };
     tokio::spawn(async move { while let Some(m) = rx.recv().await { a.handle(m) } });
     if IPC.set(Ipc { tx, lines }).is_ok() { hub.register_rpc(Arc::new(IpcRpc)) }
     // Settings > CAD reads kicad.* and freecad from the hub's info: say what is found now, and again whenever the path field changes
@@ -971,7 +979,7 @@ mod tests {
         });
         let (tx, mut rx) = mpsc::unbounded_channel(); let lines = Arc::new(std::sync::Mutex::new(String::new()));
         let mut a = Actor { me: tx.clone(), home: String::new(), rt, hub_pid: std::process::id(), helper: None, gen: 0, pend: HashMap::new(), next: 0, srvs: vec![], wait: vec![], shown: String::new(), env: Env::default(), lines: lines.clone(),
-        uses: HashMap::new(), pend_of: HashMap::new(), procs: HashMap::new(), cur: HashMap::new(), proc_n: 0, relaunch: vec![], ticking: false, pool: pool_of(None, ""), trimming: false, stopping: vec![] };
+        uses: HashMap::new(), pend_of: HashMap::new(), procs: HashMap::new(), cur: HashMap::new(), proc_n: 0, relaunch: vec![], ticking: false, pool: pool_of(None, ""), trimming: false, stopping: vec![], lost: HashMap::new() };
         tokio::spawn(async move { while let Some(m) = rx.recv().await { a.handle(m) } });
         let env = Env { cli, version: "10.99.0-bp.4".into(), ..Default::default() };
         let (t, r) = oneshot::channel();
@@ -1011,7 +1019,7 @@ mod tests {
         let (tx, rx) = mpsc::unbounded_channel(); let st = Arc::new(std::sync::Mutex::new(Crowd::default()));
         let a = Actor { me: tx.clone(), home: String::new(), rt: crate::plat::tmp::dir("ipc-crowd").path().to_string_lossy().into_owned(), hub_pid: 1, helper: Some(Helper { link: Box::new(CrowdLink { st: st.clone(), me: tx.clone(), gen: 1 }), gen: 1 }), gen: 1, pend: HashMap::new(), next: 0,
             srvs: vec![], wait: vec![], shown: String::new(), env: Env::default(), lines: Arc::new(std::sync::Mutex::new(String::new())),
-            uses: HashMap::new(), pend_of: HashMap::new(), procs: HashMap::new(), cur: HashMap::new(), proc_n: 0, relaunch: vec![], ticking: false, pool: Pool { room, ..pool_of(None, "") }, trimming: false, stopping: vec![] };
+            uses: HashMap::new(), pend_of: HashMap::new(), procs: HashMap::new(), cur: HashMap::new(), proc_n: 0, relaunch: vec![], ticking: false, pool: Pool { room, ..pool_of(None, "") }, trimming: false, stopping: vec![], lost: HashMap::new() };
         (a, rx, st, Env { cli: "/rt/bin/kicad-cli".into(), version: "10.99.0-bp.4".into(), caps: vec!["shutdown".into()], ..Default::default() })
     }
     fn crowd_of(room: usize) -> (mpsc::UnboundedSender<Msg>, Arc<std::sync::Mutex<Crowd>>, Env) {

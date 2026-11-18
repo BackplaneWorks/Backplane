@@ -8,7 +8,7 @@ board's tracks): a headless KiCad has no request that runs for minutes, each is 
 The hub's test knob BACKPLANE_KICAD_POOL_TEST sets the pool's room and its times, so a run takes minutes: room=2 for the first hub
 (whatever the machine's memory), the machine's own room for the second.
 Processes are found as the hub's own children by their project path, and the only one ever killed is one captured that way."""
-import glob, json, os, shutil, signal, subprocess, sys, threading, time
+import glob, json, os, re, shutil, signal, subprocess, sys, threading, time
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 from mcp import Mcp
 IN_USE, ROOM_WAIT, SPARE_IDLE = 5, 20, 15
@@ -95,6 +95,9 @@ class Project:
         r, e, s = self.call("kiapi.common.commands.GetItems", {"header": {"document": self.doc}, "types": ["KOT_PCB_TRACE"]})
         if e and ("not open" in e or "no handler" in e): self.doc = None  # a new server has no document open yet: the next read opens it
         return r, e, s
+    def big(self):
+        """A large read: every kind of item on the board at once."""
+        return self.call("kiapi.common.commands.GetItems", {"header": {"document": self.doc}, "types": ["KOT_PCB_FOOTPRINT", "KOT_PCB_PAD", "KOT_PCB_SHAPE", "KOT_PCB_TEXT", "KOT_PCB_TRACE", "KOT_PCB_VIA", "KOT_PCB_ARC", "KOT_PCB_ZONE"]})
     def work(self, seconds, heartbeat=False):
         """Requests back to back for `seconds`, in a thread: .errors and .n when joined."""
         self.errors, self.n, self.stop_at = [], 0, time.time() + seconds
@@ -141,12 +144,16 @@ def first_hub(work, hub_bin, rt, staged, port):
         r, e, s = b.read(); mine = h.servers("pb")
         ok("(c) before: one process for the project", len(mine) == 1 and not e, [mine, e])
         pid = mine[0][0]; before = h.socket_of(pid)
-        burst = [later(b.read) for _ in range(60)]; time.sleep(0.05); os.kill(pid, signal.SIGKILL)   # the pid captured above, a child of this test's hub
+        # the server is frozen first (SIGSTOP), so the five large reads sent next are certainly out and unanswered when it is killed
+        os.kill(pid, signal.SIGSTOP); burst = [later(b.big) for _ in range(5)]; time.sleep(1.5)
+        ok("(c) five requests are out to the frozen server, none answered", not any("r" in x for x in burst), [x.get("r") for x in burst])
+        os.kill(pid, signal.SIGKILL)   # the pid captured above, a child of this test's hub
         answers = [got(x, 60) for x in burst]; errs = [e for _, e, _ in answers if e]
         kinds = sorted({e[:110] for e in errs}); lost = [e for e in errs if "exited before answering" in e or "closed the connection" in e]
-        # (those out at the kill say the server exited or closed the connection; those sent in the second before the hub's restart of it
-        # say what they met: no server yet, or a new one with no document open)
-        ok("(c) the requests out when it was killed are answered with a plain error, at once", lost and not any("panicked" in e or "did not answer in" in e for e in errs) and max(s for _, _, s in answers) < 10, {"kinds of error": kinds, "errors": len(errs), "answered": len(answers), "slowest": round(max(s for _, _, s in answers), 1)})
+        ok("(c) each is answered with a plain error, at once: the server exited, or closed the connection", len(errs) == 5 and len(lost) == 5 and not any("panicked" in e or "did not answer in" in e for e in errs) and max(s for _, _, s in answers) < 10, {"kinds of error": kinds, "errors": len(errs), "slowest": round(max(s for _, _, s in answers), 1)})
+        time.sleep(1); rec = [l for l in open(h.work + "/hub.log", errors="replace").read().splitlines() if "kicad ipc: " + b.dir + "/" in l and " exited (code " in l]
+        m = re.search(r"with (\d+) out, answered here, and (\d+) failed by the transport", rec[-1]) if rec else None
+        ok("(c) the hub's own record of that exit: the five were out, each answered by the actor or failed by the transport, and the project is in use by nobody", bool(m) and int(m.group(1)) + int(m.group(2)) == 5 and "in use by nobody now" in rec[-1], rec[-1:])
         # (a killed server is started again by the hub, as after any crash; it is idle, so with pa at work pd can have its place)
         b.doc = None; a.work(40); time.sleep(IN_USE + 3); r, e, s = d.version()
         ok("(c) the killed project counts as used by nobody: a further project gets a server", not e and s < 20, {"error": e, "after": round(s, 1), "servers": h.servers()})
