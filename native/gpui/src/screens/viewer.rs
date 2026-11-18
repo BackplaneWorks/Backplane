@@ -690,6 +690,13 @@ pub fn editor_page(open: &str, viewer: &Value, diff_on: bool) -> bool { matches!
 /// Whether the pane draws the embedded editor for `thread` this frame (its editor held: KicadPane::in_page): the page up, as `page` draws
 /// it (a rail press the hub has not answered yet included), and `editor_page` for it. False with the viewer shut (#1199).
 pub fn holds_editor(thread: &Value) -> bool { pane_page(thread).is_some_and(|(open, _)| editor_page(&open, &thread["viewer"], thread["diff"].is_object())) }
+/// The design page a rail press asked for that the editor's page follows (Board, Schematic, 3D), until the hub's picture answers it. Read
+/// against the hub's own page: read against the page drawn (the press's own kind while the hub has not answered), `pressed` took the
+/// press as answered at its first frame, and the next frame had the viewer shut again until the hub's picture came (#1199: on macOS
+/// KiCad's frame shown, hidden 24 ms later and shown again; e2e-macos 44266050557).
+pub fn editor_press(viewer: &Value) -> Option<String> {
+    pressed(viewer["open"].as_str().unwrap_or("")).filter(|k| matches!(k.as_str(), "board" | "schematic" | "3d")) // i18n-ok: rail page kinds
+}
 /// The panel (None while nothing is open). 520 px wide, between the thread and the rail.
 pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>, editor: Option<&Entity<crate::viewers::kicad_pane::KicadPane>>, update: Option<AnyElement>) -> AnyElement {
     // KiCad itself in the pane (its Board, Schematic or 3D): its frames switch at once, and it stays until the hub moves the pane (kicad_pane.rs)
@@ -709,7 +716,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
     let acts = |cx: &mut Context<Backplane>| pane_actions(cx, light, thread, target, diff_on, editing);
     let body: AnyElement = if editing {
         // the real KiCad, its rail page's editor over the pane (viewers/kicad_pane.rs); the pane's controls in its own row above it, never over KiCad's toolbar
-        let pressed_open = pressed(open).filter(|k| matches!(k.as_str(), "board" | "schematic" | "3d")); // i18n-ok: rail page kinds
+        let pressed_open = editor_press(viewer);
         let e = editor.unwrap().clone();
         if e.read(cx).needs_sync_open(open, pressed_open.as_deref()) {
             let ho = open.to_string();
@@ -928,6 +935,14 @@ mod tests {
         for k in ["files", "mech", "browser", "split", "review"] { assert!(!super::holds_editor(&t(json!({"open": k}))), "{k}: Backplane's own page"); }
         assert!(!super::holds_editor(&t(json!({"open": "board", "gerbers": true}))), "the Gerbers page is Backplane's own");
         assert!(!super::holds_editor(&json!({"id": "t1", "viewer": {"open": "board"}, "diff": {"files": []}})), "a Diff over the page");
+        // a press on Board with the viewer shut: the page holds the editor from the press, every frame until the hub answers, though the
+        // editor's page reads the press each frame (it took the press as answered at its first frame, and the next had the viewer shut)
+        let shut = t(json!({"open": ""}));
+        let _ = super::rail_command(&shut["viewer"], false, None, "board");
+        for _ in 0..3 { assert!(super::holds_editor(&shut), "the press holds the page"); assert_eq!(super::editor_press(&shut["viewer"]).as_deref(), Some("board")); }
+        // the hub's picture shows the Board page: the press is answered
+        assert_eq!(super::editor_press(&json!({"open": "board"})), None);
+        assert!(!super::holds_editor(&shut), "answered, the shut picture is the viewer shut");
         // `page` mounts the editor by the same rule
         assert!(super::editor_page("board", &json!({}), false) && !super::editor_page("board", &json!({}), true) && !super::editor_page("files", &json!({}), false));
     }
