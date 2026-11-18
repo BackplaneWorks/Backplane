@@ -38,10 +38,10 @@ elif cmd == 'type':
     for ch in a[0]:
         name = NAMES.get(ch, ch); key(name, shift=ch.isupper() or ch in ':_@&>%$#~^')
 elif cmd == 'key': key(a[0])
-elif cmd == 'drag':  # drag X1 Y1 X2 Y2: press, move in steps (a drag starts past a few pixels), release
-    x1, y1, x2, y2 = map(float, a[:4]); move(x1, y1); xt.XTestFakeButtonEvent(d, 1, 1, 0); x11.XSync(d, 0); time.sleep(0.1)
+elif cmd == 'drag':  # drag X1 Y1 X2 Y2 [BUTTON]: press, move in steps (a drag starts past a few pixels), release; BUTTON 2 is a middle-drag (KiCad's pan)
+    x1, y1, x2, y2 = map(float, a[:4]); b = int(a[4]) if len(a) > 4 else 1; move(x1, y1); xt.XTestFakeButtonEvent(d, b, 1, 0); x11.XSync(d, 0); time.sleep(0.1)
     for i in range(1, 13): move(x1 + (x2 - x1) * i / 12, y1 + (y2 - y1) * i / 12); time.sleep(0.03)
-    time.sleep(0.15); xt.XTestFakeButtonEvent(d, 1, 0, 0); x11.XSync(d, 0); time.sleep(0.1)
+    time.sleep(0.15); xt.XTestFakeButtonEvent(d, b, 0, 0); x11.XSync(d, 0); time.sleep(0.1)
 elif cmd == 'chord': chord(a)
 elif cmd == 'focus':
     W = ctypes.c_ulong; x11.XDefaultRootWindow.restype = W; x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
