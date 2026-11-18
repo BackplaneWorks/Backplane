@@ -146,7 +146,7 @@ pub fn unified_of(st: &State,far: &[(String,&State)],origin: &dyn Fn(&str)->Stri
 /// The join over this hub's mirrors and the registry: what the sidebar and data/1 draw from.
 pub fn join_full(st: &State,far: &[(String,&State)],m: &crate::mirror::Mirrors) -> super::merged::Join {
     let reg=crate::net::registry::cached(); let here=m.here();
-    let mut list=super::merged::merged_projects(st,far,&|n|m.mark(n)["away"]==true,&|id|m.origin(id),&here,&reg);
+    let mut list=super::merged::merged_projects_in(st,far,&|n|m.mark(n)["away"]==true,&|id|m.origin(id),&|id|m.rel(id),&here,&reg,&|r|crate::mirror::origin_of_root(r),&|r|crate::mirror::repo_rel_of_root(r));
     for p in list.iter_mut() { crate::mirror::live_chips(m,&mut p.machines) } // (a linked machine whose history has not come yet is on, not off)
     let mut j=super::merged::join_of(&list,&far.iter().map(|(n,_)|n.clone()).collect::<Vec<_>>());
     // a project every machine of which is off: a row of its own, drawn from the registry (`@off:<key>`)
@@ -284,7 +284,10 @@ pub fn merged_here<'a>(st: &'a State,far: &[(String,&'a State)],un: &Unified) ->
 pub fn merged_with<'a>(st: &'a State,far: &[(String,&'a State)],un: &Unified,m: Option<&crate::mirror::Mirrors>,reg: &[super::merged::RegProject]) -> Vec<super::merged::MergedProject<'a>> {
     let origin=|id: &str| FAR_ORIGINS.with(|o|o.borrow().get(id).cloned()).filter(|o|!o.is_empty())
         .or_else(||un.far.get(id).and_then(|l|st.projects.get(l)).map(|p|crate::mirror::origin_of_root(&p.root))).unwrap_or_default();
-    let mut list=super::merged::merged_projects(st,far,&|n|un.mark(n)["away"]==json!(true),&origin,un.here,reg);
+    // (a copy's folder in its repository: as its machine said, else that of the copy here it joins)
+    let rel=|id: &str| m.map(|m|m.rel(id)).filter(|r|!r.is_empty())
+        .or_else(||un.far.get(id).and_then(|l|st.projects.get(l)).map(|p|crate::mirror::repo_rel_of_root(&p.root))).unwrap_or_default();
+    let mut list=super::merged::merged_projects_in(st,far,&|n|un.mark(n)["away"]==json!(true),&origin,&rel,un.here,reg,&|r|crate::mirror::origin_of_root(r),&|r|crate::mirror::repo_rel_of_root(r));
     if let Some(m)=m { for p in list.iter_mut() { crate::mirror::live_chips(m,&mut p.machines) } }
     list
 }

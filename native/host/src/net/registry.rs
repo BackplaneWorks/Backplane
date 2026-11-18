@@ -34,13 +34,15 @@ pub fn status(st: &State, id: &str) -> &'static str {
 }
 
 /// This machine's rows: `{machine, seen, projects:[{key,name,origin,id,folder}], threads:[{key,id,title,status,activity,pinned}]}`. Pure.
-pub fn rows_of(st: &State, machine: &str, now: u64, origin: &dyn Fn(&str) -> String) -> Value {
+/// `origin` and `rel` read a project's root: its origin, its folder in the repository (the key is `present::merged::local_keys`').
+pub fn rows_of(st: &State, machine: &str, now: u64, origin: &dyn Fn(&str) -> String, rel: &dyn Fn(&str) -> String) -> Value {
     let mut projects = vec![]; let mut keys: HashMap<&str, String> = HashMap::new();
+    let all = crate::present::merged::local_keys(st, machine, origin, rel);
     let mut ps: Vec<_> = st.projects.iter().filter(|(id, p)| !p.removed && id.as_str() != crate::sidebar::SCRATCH).collect();
     ps.sort_by(|a, b| a.0.cmp(b.0));
     for (id, p) in ps {
         let o = origin(&p.root);
-        let key = crate::present::merged::key_of(&o, st.settings.get(&format!("project.link.{id}")).map(String::as_str).unwrap_or(""), "", machine, id);
+        let key = all[id.as_str()].clone();
         projects.push(json!({"key":key,"name":p.title,"origin":o,"id":id,"folder":p.root}));
         keys.insert(id.as_str(), key);
     }
@@ -162,7 +164,7 @@ fn sent(dest: &str, digest: &str, now: u64) { last().lock().unwrap().insert(dest
 pub async fn tick(hub: &Arc<Hub>, machine: &str) {
     if machine.is_empty() { return }
     let now = crate::hub::now_ms() / 1000;
-    let Some(rows) = crate::statehost::policies().and_then(|p| p.with_state(|st| rows_of(st, machine, now, &|r| crate::mirror::origin_of_root(r)))) else { return };
+    let Some(rows) = crate::statehost::policies().and_then(|p| p.with_state(|st| rows_of(st, machine, now, &|r| crate::mirror::origin_of_root(r), &|r| crate::mirror::repo_rel_of_root(r)))) else { return };
     let digest = { let mut r = rows.clone(); r["seen"] = json!(0); r.to_string() };
     let home = home_link(hub).await;
     let base = match &home {
@@ -270,7 +272,7 @@ mod tests {
             json!({"$":"ThreadCreated","id":"t1","project":"p1","title":"one","at":5}), json!({"$":"ThreadCreated","id":"t2","project":"p1","title":"two","at":9}),
             json!({"$":"TurnChanged","thread":"t2","state":"running","at":10}), json!({"$":"AskOpened","id":"a1","thread":"t1","at":11})]);
         let origin = |r: &str| if r == "/a/bp" { "github.com/o/bp".to_string() } else { String::new() };
-        let r = rows_of(&a, "desktop", 100, &origin);
+        let r = rows_of(&a, "desktop", 100, &origin, &|_| String::new());
         assert_eq!(r["projects"].as_array().unwrap().iter().map(|p| p["key"].as_str().unwrap()).collect::<Vec<_>>(), ["github.com/o/bp", "desktop/p2"]);
         assert_eq!(r["threads"].as_array().unwrap().iter().map(|t| (t["id"].as_str().unwrap(), t["status"].as_str().unwrap())).collect::<Vec<_>>(), [("t1", "needs"), ("t2", "running")], "what needs the person first");
         let b = json!({"machine":"framework","seen":90,"projects":[{"key":"github.com/o/bp","name":"bp","origin":"github.com/o/bp","id":"p7","folder":"/f/bp"}],"threads":[{"key":"github.com/o/bp","id":"t7","title":"seven","status":"idle","activity":50,"pinned":true}]});
