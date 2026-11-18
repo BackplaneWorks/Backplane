@@ -138,19 +138,30 @@ pub fn design_words(main: &str, code: Option<(&str, &str)>, locks: &[(String, St
         None => format!("These live once, in the project's main checkout `{main}`: never edit a worktree copy of them; code stays in your worktree.{one}"),
     }
 }
+/// An Altium Designer project (its .PrjPcb is the project's file): Altium's words replace KiCad's editing and runtime blocks.
+pub fn is_altium(pro: &str) -> bool { pro.to_ascii_lowercase().ends_with(".prjpcb") }
+/// Prompt.altium: how an agent works on an Altium project (altium/live.rs; the bundled `altium` skill holds the verified recipes)
+pub fn altium(windows: bool) -> String {
+    let reach = if windows { "Edit it through the person's running Altium Designer with the backplane tools altium_status (what Altium has open; call it first) and altium_script (a DelphiScript run inside Altium: Emit(S) prints a line; errors come back as results). Before scripting, read the bundled `altium` skill's SKILL.md completely: its recipes are tested against Altium and show how to open a project and documents by path, read and edit schematics and boards, run ERC and DRC, and save." }
+        else { "Altium Designer runs on Windows and this hub is not on Windows, so altium_script cannot reach it here: read the design (the viewers, the files), and tell the person when a change needs Altium on a Windows machine." };
+    format!("<backplane_altium>This is an Altium Designer project: its .PrjPcb lists the schematic sheets (.SchDoc) and the board (.PcbDoc); libraries are .SchLib/.PcbLib/.IntLib. These are binary files: never write them directly, with scripts of your own or with any other tool, and never ask the person to close Altium. {reach} Address every document by its full path (never the focused document: the person may be working in another), wrap edits in PreProcess/PostProcess so the person can undo them in Altium, and save each document you change (Backplane's Board and Schematic viewers draw the saved files, and Backplane commits them to main at each turn's end): then show it with viewer_show. Keep each script small: inspect, change, verify by reading back. KiCad tools (kicad_edit, kicad_ipc, kicad-cli, KiStack's skills) do not apply to this project.</backplane_altium>")
+}
 /// Hub.prompt.base then Prompt.lang.add
 pub fn build(e: &PromptEnv) -> String {
     let orch = orchestration(e.may_delegate, &e.models);
-    let orch = match &e.kistack { Some(k) if !k.skills.is_empty() => orch, _ => orch.replace(" (KiStack's KiCad skills and the person's)", " (the person's)") }; // KiStack is claimed only when the agent has it
-    let mut s = [config_prompt(&e.fc, &e.render), kicad(&e.kicad, e.kicad_ipc), project_locked(&e.root, &e.pro, &e.pcb, &e.sch, &e.all, &e.design), orch, background().to_string(), order_project(e.orders_on)].join("\n\n");
-    if let Some(k) = e.kistack.as_ref().filter(|k| !k.skills.is_empty()) { s += "\n\n"; s += &kistack_skills(k) }
+    let alt = is_altium(&e.pro);
+    let orch = match &e.kistack { Some(k) if !k.skills.is_empty() && !alt => orch, _ => orch.replace(" (KiStack's KiCad skills and the person's)", " (the person's)") }; // KiStack is claimed only when the agent has it
+    let base = if alt { config_prompt(&e.fc, &e.render).replace(T::PROMPT_BOARD[0], "") } else { config_prompt(&e.fc, &e.render) };
+    let cad = if alt { altium(cfg!(windows)) } else { kicad(&e.kicad, e.kicad_ipc) };
+    let mut s = [base, cad, project_locked(&e.root, &e.pro, &e.pcb, &e.sch, &e.all, &e.design), orch, background().to_string(), order_project(e.orders_on)].join("\n\n");
+    if let Some(k) = e.kistack.as_ref().filter(|k| !k.skills.is_empty() && !alt) { s += "\n\n"; s += &kistack_skills(k) }
     if !e.skills.is_empty() { s += "\n\n"; s += &bundled_skills(&e.skills) }
     if !e.keys.is_empty() { s += "\n\n"; s += &e.keys }
     if !e.machines.is_empty() { s += "\n\n"; s += &e.machines }
     // a board on Backplane KiCad: plan before copper when the person turned it on, else route as asked (plan/mod.rs)
-    if !e.pcb.is_empty() && crate::plan::plans(&e.kicad.status, &e.kicad.version, &crate::files::kicad::ipc::read_runtime(std::path::Path::new(&e.kicad.cli)).caps) { s += "\n\n"; s += &if e.routing_plan { crate::plan::guidance() } else { crate::plan::guidance_off().to_string() } }
+    if !e.pcb.is_empty() && !alt && crate::plan::plans(&e.kicad.status, &e.kicad.version, &crate::files::kicad::ipc::read_runtime(std::path::Path::new(&e.kicad.cli)).caps) { s += "\n\n"; s += &if e.routing_plan { crate::plan::guidance() } else { crate::plan::guidance_off().to_string() } }
     // RunAction's target editor (bp.13 batch 6, runaction-frame): what an agent's kicad_ipc may name, or where a shared action goes without it
-    if e.kicad.status == "ok" && e.kicad_ipc { s += "\n\n"; s += crate::files::kicad::ipc::runaction_guidance(&crate::files::kicad::ipc::read_runtime(std::path::Path::new(&e.kicad.cli)).caps) }
+    if e.kicad.status == "ok" && e.kicad_ipc && !alt { s += "\n\n"; s += crate::files::kicad::ipc::runaction_guidance(&crate::files::kicad::ipc::read_runtime(std::path::Path::new(&e.kicad.cli)).caps) }
     if e.buy { s += "\n\n"; s += &T::ORDER_PROMPT_BUY.concat() } // every piece: the opening line alone ([0]) left a buy thread without its steps
     let l = lang_line(&e.lang); if l.is_empty() { s } else { s + "\n" + l }
 }
@@ -158,6 +169,14 @@ pub fn build(e: &PromptEnv) -> String {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[test] fn an_altium_project_gets_altiums_words_not_kicads() {
+        let mut e = PromptEnv::default(); e.root = "/p".into(); e.pro = "/p/Board.PrjPcb".into(); e.pcb = "/p/Board.PcbDoc".into(); e.sch = "/p/Top.SchDoc".into();
+        let s = build(&e);
+        assert!(s.contains("<backplane_altium>") && !s.contains("<backplane_kicad_board_editing>") && !s.contains("<kicad_runtime>"), "{s}");
+        e.pro = "/p/b.kicad_pro".into(); let k = build(&e);
+        assert!(!k.contains("<backplane_altium>") && k.contains("<backplane_kicad_board_editing>"));
+        assert!(altium(true).contains("altium_script") && altium(false).contains("not on Windows"));
+    }
     const GOLD: &str = include_str!("../../../../test/agents/fixtures/argv-default.json");
     pub fn gold() -> (String, serde_json::Value) { let a: Vec<String> = serde_json::from_str(GOLD).unwrap(); let i = a.iter().position(|x| x == "--append-system-prompt").unwrap(); (a[i + 1].clone(), serde_json::json!(a)) }
     pub fn gold_env() -> PromptEnv {

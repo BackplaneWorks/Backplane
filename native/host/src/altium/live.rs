@@ -475,6 +475,15 @@ mod tests {
             assert!(again.ok && again.output == "still answering");
         });
     }
+    /// A script file through the bridge (BP_ALTIUM_SCRIPT=<file>, Windows, desktop session): prints the result as JSON. A dev aid.
+    #[test] fn live_script_file() {
+        let Ok(f) = std::env::var("BP_ALTIUM_SCRIPT") else { return };
+        let t: u32 = std::env::var("BP_ALTIUM_TIMEOUT").ok().and_then(|v| v.parse().ok()).unwrap_or(60);
+        let src = std::fs::read_to_string(&f).expect("script");
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let r = rt.block_on(run(&src, t));
+        println!("BP-RESULT {}", match r { Ok(r) => r.json().to_string(), Err(e) => json!({"error": e}).to_string() });
+    }
     #[test] fn template_has_parts_and_paths() {
         let b = build("var X : Integer;\nX := 2;\nwhile X > 0 do X := X - 1;\nEmit('done');", r"C:\r\a.out", r"C:\r\a.done", 20);
         assert!(b.contains("X : Integer;") && b.contains("while (X > 0) and BpTick(3) do") && b.contains("BpOutPath := 'C:\\r\\a.out';") && b.contains("/ 86400"));
