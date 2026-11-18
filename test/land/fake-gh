@@ -2,6 +2,7 @@
 # A stand-in for gh in test/land/land_pr_test.sh: a PR is a file in $FAKE; its mergeability and review come from $FAKE/mergestate, $FAKE/review.
 # `pr merge` does what a GitHub rebase merge ends as: the PR head becomes main of the bare origin ($ORIGIN).
 case "$1 $2" in
+  "api user") echo "${FAKE_LOGIN:-i2cjak}" ;;
   "auth token") [ -z "${FAKE_NOLOGIN:-}" ] && echo fake-token || exit 1 ;;
   "pr list") head=; while [ $# -gt 0 ]; do [ "$1" = --head ] && head=$2; shift; done; n=$(cat "$FAKE/pr.$head" 2>/dev/null) && [ ! -f "$FAKE/merged.$n" ] && echo "$n" ;;
   "pr create") head=; while [ $# -gt 0 ]; do [ "$1" = --head ] && head=$2; shift; done; n=$(( $(cat "$FAKE/next" 2>/dev/null || echo 100) + 1 )); echo $n > "$FAKE/next"; echo $n > "$FAKE/pr.$head"; echo "$head" > "$FAKE/head.$n"; echo "https://github.com/x/y/pull/$n" ;;

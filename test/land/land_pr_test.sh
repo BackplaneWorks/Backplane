@@ -57,4 +57,10 @@ echo three > "$LANE/doc3"; g add -A; g commit -qm "docs: three"
 LAND_TEST="printf '\n( ((\n' >> $LANE/scripts/land.sh" land > "$T/o13"; rc=$?; g checkout -q scripts/land.sh
 [ $rc = 3 ] && ! grep -qi "syntax error" "$T/o13" && grep -q "waiting for an approving review\|blocked by a rule" "$T/o13"; ok $? "land.sh edited under a running land: the run is unchanged (rc $rc)"
 ! ls "${TMPDIR:-/tmp}"/land-run.* >/dev/null 2>&1; ok $? "the private copy is removed"
+# 14. a token that is not i2cjak's on GitHub: no pull request is opened or merged
+echo four > "$LANE/doc4"; g add -A; g commit -qm "docs: four"
+echo CLEAN > "$FAKE/mergestate"; echo APPROVED > "$FAKE/review"; nm=$(wc -l < "$FAKE/merges"); FAKE_LOGIN=hlord2000 land > "$T/o14"; rc=$?; [ $rc != 0 ] && grep -q "not i2cjak" "$T/o14" && [ "$(wc -l < "$FAKE/merges")" = "$nm" ]; ok $? "a token that is another account's is refused before a PR (rc $rc)"
+# 15. a lane commit not made as i2cjak <build@amemb.com> is refused, with the fix
+echo five > "$LANE/doc5"; g add -A; GIT_AUTHOR_EMAIL=x@y.org g commit -qm "docs: five"
+land > "$T/o15"; rc=$?; [ $rc != 0 ] && grep -q "not made as i2cjak <build@amemb.com>" "$T/o15" && grep -q "reset-author" "$T/o15"; ok $? "a commit by another identity is refused, with the fix (rc $rc)"
 [ $fails = 0 ] && echo "land_pr_test: all passed" || { echo "land_pr_test: $fails failed"; exit 1; }

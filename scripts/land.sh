@@ -52,7 +52,12 @@ tries=${LAND_TRIES:-3}; n=0; poll=${LAND_POLL_S:-2}
 gh_prog=${LAND_GH:-gh}
 repo=${LAND_REPO:-$(git remote get-url origin | sed -E 's#^.*github\.com[:/]([^/]+/[^/]+)$#\1#; s#\.git$##')}
 # gh as i2cjak, whatever account is active here (never switch it): the token is read into the environment of each gh call only
-ghi() { GH_TOKEN=$("$gh_prog" auth token --user i2cjak 2>/dev/null) || GH_TOKEN=; [ -n "$GH_TOKEN" ] || die "no gh login for i2cjak (gh auth login as i2cjak; the active account is not used)"; export GH_TOKEN; "$gh_prog" "$@"; }
+ghi() { GH_TOKEN=$("$gh_prog" auth token --user i2cjak 2>/dev/null) || GH_TOKEN=; [ -n "$GH_TOKEN" ] || die "no gh login for i2cjak (gh auth login as i2cjak; the active account is not used)"; export GH_TOKEN
+  # a write (a pull request opened or merged) only as i2cjak: ask GitHub whose token this is, in this very environment, before it runs
+  case "$1 $2" in "pr create"|"pr merge"|"pr close"|"pr comment"|"pr edit")
+    who=$("$gh_prog" api user --jq .login 2>/dev/null) || who=
+    [ "$who" = i2cjak ] || die "refusing 'gh $1 $2': the token it would use is ${who:-unknown} on GitHub, not i2cjak (gh auth token --user i2cjak must be i2cjak's; never gh auth switch or login)";; esac
+  "$gh_prog" "$@"; }
 "$gh_prog" auth token --user i2cjak >/dev/null 2>&1 || die "no gh login for i2cjak (gh auth login as i2cjak; the active account is not used)"
 pr_number() { ghi pr list -R "$repo" --head "$br" --state open --json number -q '.[0].number' 2>/dev/null || true; }
 # A stale copy of this script (a worktree made before main's land.sh changed) must not run: an older land.sh pushed straight to main. Refused when
@@ -70,6 +75,11 @@ while :; do
   if ! git rebase -q origin/main; then git rebase --abort 2>/dev/null || true; die "git rebase origin/main conflicts; resolve it by hand (git rebase origin/main), then land again"; fi
   [ -n "$(git rev-list -1 origin/main..HEAD)" ] || { say "nothing to land: $br is already on origin/main"; break; }
   "$here/check-author.sh" origin/main..HEAD || die "a commit has the wrong author or committer (see above)"
+  # the lane's own commits are always i2cjak <build@amemb.com>, author and committer (check-author.sh also lets the other contributor's through; a land does not)
+  odd=$(git log --format='%h %an <%ae> / %cn <%ce>' origin/main..HEAD | grep -v -x '[0-9a-f]* i2cjak <build@amemb.com> / i2cjak <build@amemb.com>' || true)
+  [ -z "$odd" ] || die "commits not made as i2cjak <build@amemb.com>:
+$odd
+fix: git config user.name i2cjak && git config user.email build@amemb.com (this repo's config), then re-author them: git rebase --exec 'git commit --amend --no-edit --reset-author' origin/main"
   free_check
   tree=$(git rev-parse 'HEAD^{tree}')
   if [ "$(cat "$mark" 2>/dev/null)" = "$tree" ]; then say "tests already passed on this tree ($(printf %s "$tree" | cut -c1-10))"
