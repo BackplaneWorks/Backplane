@@ -10,7 +10,9 @@ use std::{collections::HashMap, sync::{Arc, OnceLock, RwLock}};
 pub type Names = Arc<dyn Fn() -> Vec<(String, String)> + Send + Sync>;
 
 #[derive(Default)]
-pub struct Mirrors { st: RwLock<HashMap<String, State>>, names: OnceLock<Names>, origins: RwLock<HashMap<String, String>>, away: RwLock<std::collections::HashSet<String>>, here: RwLock<String>,
+pub struct Mirrors { st: RwLock<HashMap<String, State>>, names: OnceLock<Names>, origins: RwLock<HashMap<String, String>>,
+    /// a mirrored project's folder inside its repository (`repo_rel_of_root` on its machine, read from the key it sends), by `<link>~<id>`
+    rels: RwLock<HashMap<String, String>>, away: RwLock<std::collections::HashSet<String>>, here: RwLock<String>,
     /// the links that said their projects' origins (an origin of one of theirs is known, "" when it has none); `asked` wakes the watch for a new one
     known: RwLock<std::collections::HashSet<String>>, asked: tokio::sync::Notify,
     /// moves when what the merged rows are made of moves (an origin learned, a machine away or back): `publish` redraws the clients then
@@ -85,20 +87,34 @@ pub fn origin_in_config(text: &str) -> String {
 }
 /// The git config that holds a folder's remotes: the nearest `.git` above it (a worktree's or submodule's `.git` file leads to its
 /// git dir, whose `commondir` leads to the shared one).
-fn config_of(root: &std::path::Path) -> Option<std::path::PathBuf> {
+fn config_of(root: &std::path::Path) -> Option<std::path::PathBuf> { repo_of(root).map(|x| x.1) }
+/// The folder holding that nearest `.git` (the repository's, or the worktree's, top) and its config.
+fn repo_of(root: &std::path::Path) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
     let mut d = Some(root);
     while let Some(dir) = d {
         let g = dir.join(".git");
-        if g.is_dir() { return Some(g.join("config")) }
+        if g.is_dir() { return Some((dir.to_path_buf(), g.join("config"))) }
         if g.is_file() {
             let t = std::fs::read_to_string(&g).ok()?; let gd = t.trim().strip_prefix("gitdir:")?.trim();
             let gd = if std::path::Path::new(gd).is_absolute() { std::path::PathBuf::from(gd) } else { dir.join(gd) };
             let common = std::fs::read_to_string(gd.join("commondir")).ok().map(|c| { let c = c.trim(); if std::path::Path::new(c).is_absolute() { std::path::PathBuf::from(c) } else { gd.join(c) } }).unwrap_or(gd);
-            return Some(common.join("config"))
+            return Some((dir.to_path_buf(), common.join("config")))
         }
         d = dir.parent();
     }
     None
+}
+/// A project folder's place inside its git checkout, `/`-separated ("" at the top, or outside any checkout): `boards/a` for
+/// `<repo>/boards/a`. With the origin it names the same project on every machine (present/merged.rs `key_of`), kept for a minute.
+pub fn repo_rel_of_root(root: &str) -> String {
+    static CACHE: OnceLock<RwLock<HashMap<String, (std::time::Instant, String)>>> = OnceLock::new();
+    if root.is_empty() { return String::new() }
+    let c = CACHE.get_or_init(Default::default);
+    if let Some((at, r)) = c.read().unwrap().get(root) { if at.elapsed() < std::time::Duration::from_secs(60) { return r.clone() } }
+    let p = std::path::Path::new(root);
+    let r = repo_of(p).and_then(|(top, _)| p.strip_prefix(&top).ok().map(|rel| rel.components().filter_map(|c| match c { std::path::Component::Normal(n) => Some(n.to_string_lossy().to_string()), _ => None }).collect::<Vec<_>>().join("/"))).unwrap_or_default();
+    c.write().unwrap().insert(root.to_string(), (std::time::Instant::now(), r.clone()));
+    r
 }
 /// A project folder's normalized origin ("" for none), read from its git config (no process), kept for a minute.
 pub fn origin_of_root(root: &str) -> String {
@@ -121,14 +137,23 @@ pub fn unify(local: &[(String, String)], far: &[(String, String)]) -> HashMap<St
 
 impl Mirrors {
     /// The origins a linked machine says its projects have (machine_list's `origin`), by the mirror's id `<link>~<id>`; replaces that link's.
-    pub fn set_origins(&self, link: &str, projects: &[(String, String)]) {
-        let mut g = self.origins.write().unwrap();
+    pub fn set_origins(&self, link: &str, projects: &[(String, String)]) { self.set_origins_keyed(link, &projects.iter().map(|(i, o)| (i.clone(), o.clone(), String::new())).collect::<Vec<_>>()) }
+    /// `set_origins` with the key each project has on its machine (`present::merged::key_of`): an origin key names the project's folder inside
+    /// its repository after the origin (`github.com/o/r/boards/a`), which is kept as its `rel`. A machine of 0.16.0 or older sends the origin alone.
+    pub fn set_origins_keyed(&self, link: &str, projects: &[(String, String, String)]) {
         let pre = format!("{link}~");
+        let moved = { let mut r = self.rels.write().unwrap();
+          let mine = |r: &HashMap<String, String>| { let mut v: Vec<(String, String)> = r.iter().filter(|(k, _)| k.starts_with(&pre)).map(|(k, v)| (k.clone(), v.clone())).collect(); v.sort(); v };
+          let was = mine(&r); r.retain(|k, _| !k.starts_with(&pre));
+          for (id, o, key) in projects { let rel = crate::present::merged::rel_in_key(o, key); if !rel.is_empty() { r.insert(format!("{pre}{id}"), rel); } }
+          was != mine(&r) };
+        let projects: Vec<(String, String)> = projects.iter().map(|(i, o, _)| (i.clone(), o.clone())).collect();
+        let mut g = self.origins.write().unwrap();
         let before: Vec<(String, String)> = { let mut v: Vec<_> = g.iter().filter(|(k, _)| k.starts_with(&pre)).map(|(k, v)| (k.clone(), v.clone())).collect(); v.sort(); v };
         g.retain(|k, _| !k.starts_with(&pre));
         for (id, o) in projects { if !o.is_empty() { g.insert(format!("{pre}{id}"), o.clone()); } }
         let after: Vec<(String, String)> = { let mut v: Vec<_> = g.iter().filter(|(k, _)| k.starts_with(&pre)).map(|(k, v)| (k.clone(), v.clone())).collect(); v.sort(); v };
-        if self.known.write().unwrap().insert(link.to_string()) || before != after { self.bump() }
+        if self.known.write().unwrap().insert(link.to_string()) || before != after || moved { self.bump() }
     }
     /// A mirrored project's origin: "" when its machine said it has none, `UNKNOWN` ("?") while that machine has not said yet (asked at once:
     /// `present::merged` never keys such a project by machine/id, which would show one repository twice; it takes the registry's key or waits).
@@ -139,6 +164,8 @@ impl Mirrors {
         self.asked.notify_one();
         UNKNOWN.to_string()
     }
+    /// A mirrored project's folder inside its repository ("" at its top, or not said: a machine of 0.16.0 or older).
+    pub fn rel(&self, far_id: &str) -> String { self.rels.read().unwrap().get(far_id).cloned().unwrap_or_default() }
     /// Whether a linked machine answered when last asked (the origin watch asks each one every minute).
     pub fn set_away(&self, link: &str, away: bool) { let mut g = self.away.write().unwrap(); let was = g.contains(link); if away { g.insert(link.to_string()); } else { g.remove(link); } if was != away { eprintln!("machines: {link} {}", if away { "is away" } else { "answers" }); drop(g); self.bump() } }
     pub fn bump(&self) { self.gen.fetch_add(1, std::sync::atomic::Ordering::Relaxed); }
@@ -199,8 +226,7 @@ pub async fn ask_origins(hub: &crate::hub::Hub, link: &str) {
         Ok(_) => hub.mirrors().set_away(link, false),
     }
     if let Ok((true, b)) = r {
-        let ps: Vec<(String, String)> = b["projects"].as_array().into_iter().flatten().map(|p| (p["id"].as_str().unwrap_or("").to_string(), p["origin"].as_str().unwrap_or("").to_string())).filter(|(i, _)| !i.is_empty()).collect();
-        hub.mirrors().set_origins(link, &ps);
+        hub.mirrors().set_origins_keyed(link, &keyed_rows(&b["projects"]));
     }
 }
 /// The shown links whose origins are not known yet (a link just made), and not away: what a list about to be drawn asks for first.
@@ -219,9 +245,14 @@ pub fn live_chips(m: &Mirrors, chips: &mut [Value]) {
 }
 /// A machine's origins as its own registry rows say them (`registry.put` from it: the path that works when this hub cannot call it).
 impl Mirrors { pub fn origins_from_rows(&self, link: &str, rows: &Value) {
-    let ps: Vec<(String, String)> = rows["projects"].as_array().into_iter().flatten().map(|p| (p["id"].as_str().unwrap_or("").to_string(), p["origin"].as_str().unwrap_or("").to_string())).filter(|(i, _)| !i.is_empty()).collect();
-    if !ps.is_empty() { self.set_origins(link, &ps) }
+    let ps = keyed_rows(&rows["projects"]);
+    if !ps.is_empty() { self.set_origins_keyed(link, &ps) }
 } }
+/// `[{id, origin, key}]` (machine_list's projects, a registry row's) as `(id, origin, key)`.
+fn keyed_rows(ps: &Value) -> Vec<(String, String, String)> {
+    let f = |p: &Value, k: &str| p[k].as_str().unwrap_or("").to_string();
+    ps.as_array().into_iter().flatten().map(|p| (f(p, "id"), f(p, "origin"), f(p, "key"))).filter(|(i, _, _)| !i.is_empty()).collect()
+}
 
 /// Ask each linked machine for its projects' origins (machine_list) now and every minute, so the sidebar can show a repository
 /// that is on both machines as one project, and sync this hub's rows with the registry on the home. Display only: nothing here is a decision.
@@ -268,6 +299,9 @@ mod origin_tests {
         std::fs::write(wt.join(".git"), format!("gitdir: {}\n", main.join(".git/worktrees/w").display())).unwrap();
         for r in [main.clone(), wt.clone(), wt.join("sub")] { assert_eq!(origin_of_root(&r.to_string_lossy()), "github.com/BackplaneWorks/Backplane", "{r:?}"); }
         assert_eq!(origin_of_root(&d.to_string_lossy()), ""); assert_eq!(origin_of_root(""), "");
+        // a project's folder inside its checkout (#1168): "" at the top and a worktree's top, the path below it otherwise
+        std::fs::create_dir_all(main.join("boards/a")).unwrap();
+        for (r, want) in [(main.clone(), ""), (main.join("boards/a"), "boards/a"), (wt.clone(), ""), (wt.join("sub"), "sub"), (d.to_path_buf(), "")] { assert_eq!(repo_rel_of_root(&r.to_string_lossy()), want, "{r:?}"); }
     }
     #[test] fn projects_of_one_repository_are_one_and_others_stay_apart() {
         let s = |v: &[(&str, &str)]| v.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect::<Vec<_>>();
@@ -275,6 +309,10 @@ mod origin_tests {
         assert_eq!(u.len(), 2); assert_eq!(u["L~a"], "p1"); assert_eq!(u["M~d"], "p4");
         let m = Mirrors::default(); m.set_origins("L", &s(&[("a", "github.com/o/r"), ("b", "")])); assert_eq!((m.origin("L~a").as_str(), m.origin("L~b").as_str()), ("github.com/o/r", ""));
         m.set_origins("L", &s(&[("c", "x/y")])); assert_eq!((m.origin("L~a").as_str(), m.origin("L~c").as_str()), ("", "x/y"));
+        // a machine of 0.16.1 says each project's key: its folder in the repository is read from it
+        m.set_origins_keyed("L", &[("a".into(), "github.com/o/r".into(), "github.com/o/r/boards/a".into()), ("b".into(), "github.com/o/r".into(), "github.com/o/r".into()), ("c".into(), "".into(), "laptop/c".into())]);
+        assert_eq!((m.rel("L~a").as_str(), m.rel("L~b").as_str(), m.rel("L~c").as_str(), m.origin("L~a").as_str()), ("boards/a", "", "", "github.com/o/r"));
+        m.set_origins("L", &s(&[("a", "github.com/o/r")])); assert_eq!(m.rel("L~a"), "", "a 0.16.0 answer says no folder");
         m.set_names(Arc::new(|| vec![("L".to_string(), "framework-1".to_string())]));
         assert_eq!(m.mark("framework-1"), serde_json::json!({"name":"framework-1","short":"framework-1","away":false,"label":"on framework-1","runs":"runs on framework-1"}));
         m.set_away("L", true); assert_eq!(m.mark("framework-1")["away"], true); m.set_away("L", false); assert_eq!(m.mark("framework-1")["away"], false);

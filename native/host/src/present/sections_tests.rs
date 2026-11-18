@@ -488,3 +488,50 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
     assert_eq!(titles_of(&row(&s, "t2")["threads"]), ["T t2"]);
     assert_eq!(titles_of(&row(&s, "t1")["threads"]), ["T t1"]);
 }
+
+// ---- #1186: "Only threads that need attention" (on by default) or every thread --------------------------------------------------
+/// On (unset, a new install's and an existing one's alike): under the project its pin and the one thread that runs; the ask is in Needs you.
+/// Off: every thread the person has not settled or archived is listed under it, the ask too, pins first, then the newest; one the clock
+/// settled stays; the row folds by its chevron, unless the thread on show is under it.
+#[test] fn the_thread_list_shows_what_needs_attention_by_default_and_every_thread_when_that_is_off() {
+    let settle = |id: &str, manual: bool, at: u64| json!({"$":"ThreadSettled","id":id,"manual":manual,"at":at});
+    let evs = vec![tc("t2", "p1", NOW - 85), tc("t3", "p1", NOW - 80), tc("t4", "p1", NOW - 75), tc("t5", "p1", NOW - 70), tc("t6", "p1", NOW - 65), tc("t7", "p1", NOW - 60), tc("t8", "p1", NOW - 55),
+        turn("t2", "completed", NOW - 50), turn("t3", "running", NOW - 45), turn("t4", "completed", NOW - 44), settle("t4", false, NOW - 43),
+        turn("t5", "completed", NOW - 42), settle("t5", true, NOW - 41), json!({"$":"ThreadArchived","id":"t6","archived":true,"at":NOW-40}),
+        ask("q7", "t7", "question"), turn("t8", "completed", NOW - 38), json!({"$":"ThreadPinned","id":"t8","pinned":true,"at":NOW-37})];
+    let open = HashSet::new();
+    let view = |s: &State, sel: &'static str| { let rows = merged_projects(s, &[], &|_| false, &|_| String::new(), "desk", &[]); let c = Ctx { selected: sel, ..ctx(&open) }; build(s, &rows, &Value::Null, &c) };
+    let s = one(&evs);
+    assert!(attention_only(&s), "on unless the person turns it off");
+    let v = view(&s, ""); let p = &sec(&v, "active")["rows"][0];
+    assert_eq!(titles_of(&p["threads"]), ["T t8", "T t3"], "the pin and the running one");
+    assert_eq!(titles_of(&sec(&v, "needs")["rows"]), ["T t7"]);
+    assert_eq!(p["fold"], "", "no chevron");
+    let mut off = evs.clone(); off.push(set(ATTENTION, "off", NOW - 1));
+    let s = one(&off);
+    assert!(!attention_only(&s));
+    let v = view(&s, ""); let p = &sec(&v, "active")["rows"][0];
+    let t = titles_of(&p["threads"]);
+    assert_eq!(t[0], "T t8", "the pin first");
+    let mut rest = t[1..].to_vec(); rest.sort();
+    assert_eq!(rest, ["T t1", "T t2", "T t3", "T t4", "T t7"], "every thread but the settled-by-hand t5 and the archived t6; t4, settled by the clock, stays: {t:?}");
+    let acts: Vec<u64> = p["threads"].as_array().unwrap()[1..].iter().map(|r| r["activity"].as_u64().unwrap()).collect();
+    assert!(acts.windows(2).all(|w| w[0] >= w[1]), "newest first: {acts:?}");
+    assert_eq!(titles_of(&sec(&v, "needs")["rows"]), ["T t7"], "Needs you is the same");
+    assert_eq!((p["fold"].as_str(), p["folded"].as_bool(), p["under"].as_u64()), (Some("project-fold"), Some(false), Some(6)));
+    // the chevron folds them (the hub's project-fold), and the thread on show opens the row again
+    let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]); let key = rows[0].key.clone();
+    let a = act(&s, &rows, "project-fold", &key, &json!({}), NOW).unwrap();
+    let mut folded = off.clone(); for (k, v) in &a.sets { folded.push(set(k, v, NOW)); }
+    let s = one(&folded);
+    let p = sec(&view(&s, ""), "active")["rows"][0].clone();
+    assert_eq!((p["folded"].as_bool(), p["threads"].as_array().unwrap().len()), (Some(true), 0));
+    assert_eq!(sec(&view(&s, "t2"), "active")["rows"][0]["threads"].as_array().unwrap().len(), 6, "the open thread's project is never folded away");
+    // the search lists what matches either way
+    let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]); let c = Ctx { query: "t5", ..ctx(&open) };
+    assert_eq!(titles_of(&sec(&build(&s, &rows, &Value::Null, &c), "active")["rows"][0]["threads"]), ["T t5"]);
+    // the Settings row, under Appearance
+    let r = crate::present::settings::view(&s, &json!({"drafts":{"@settings.page":"appearance"}}), &json!({}));
+    let row = r["rows"].as_array().unwrap().iter().find(|r| r["label"] == "Only threads that need attention").expect("the row").clone();
+    assert_eq!(row["buttons"].as_array().unwrap().iter().map(|b| (b["value"].as_str().unwrap(), b["on"].as_bool().unwrap())).collect::<Vec<_>>(), [("sidebar.attention=on", false), ("sidebar.attention=off", true)]);
+}

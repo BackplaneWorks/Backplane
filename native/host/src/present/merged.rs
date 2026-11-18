@@ -1,6 +1,10 @@
 //! One project list over machines (docs/ALWAYS-ON.md section 5): every project of this hub, of each linked machine's mirror and of the
 //! registry (machines that are off) folded into one row per key. The key is the project's normalized git origin (`mirror::normalize_origin`,
-//! D5); a project with no origin is `<machine>/<id>`, unless a hand link (`project.link.<id>` = another project's key) joins it to another.
+//! D5) and its folder inside the repository (`github.com/o/r` at the top, `github.com/o/r/boards/a` for a board's folder: one repository holds
+//! several projects, #1168); a project with no origin is `<machine>/<id>`, unless a hand link (`project.link.<id>` = another project's key)
+//! joins it to another. Copies on one machine never merge by origin: of two clones of one folder there, the older keeps the key and the
+//! other is `<machine>/<id>`. So the same folder of a repository on two machines is one row, and different folders, or one machine's clones,
+//! are not.
 //! Pure: the sidebar sections (present/sections.rs), data/1 `projects.list` and the composer's machine picker all read this and decide nothing
 //! of their own about which projects are one.
 use crate::mirror::{mark_of, short_name};
@@ -21,8 +25,10 @@ pub struct RegThread { pub machine: String, pub id: String, pub title: String, p
 /// One row of the merged list.
 #[derive(Debug)]
 pub struct MergedProject<'a> {
-    /// the normalized origin, or `<machine>/<id>`, or the key a hand link names
+    /// the normalized origin and folder, or `<machine>/<id>`, or the key a hand link names
     pub key: String,
+    /// the key 0.16.0 gave it (the origin alone): its pins, groups and quiet marks kept under that are carried to `key` (`key_moves`)
+    pub was: String,
     /// this machine's name for it, else the most recently active machine's
     pub name: String,
     pub origin: String,
@@ -72,19 +78,77 @@ fn chip(machine: &str, here_name: &str, state: &str) -> Value {
     m
 }
 
-/// A project's key: its origin; else a hand link's key; else `<machine>/<id>` (`machine` "" is this one, named `here`).
+/// A project's key: its origin; else a hand link's key; else `<machine>/<id>` (`machine` "" is this one, named `here`). `origin` is the
+/// project's (`ident`: the origin and its folder in the repository).
 pub fn key_of(origin: &str, link: &str, machine: &str, here: &str, id: &str) -> String {
     if !origin.is_empty() { return origin.to_string() }
     if !link.is_empty() { return link.to_string() }
     let local = id.rsplit('~').next().unwrap_or(id);
     format!("{}/{local}", short_name(if machine.is_empty() { if here.is_empty() { "here" } else { here } } else { machine }))
 }
+/// What names a project across machines: its repository's origin and its folder in it (`rel`, `/`-separated, "" at the top), "" for no origin.
+pub fn ident(origin: &str, rel: &str) -> String {
+    let rel = rel.trim_matches('/');
+    if origin.is_empty() { String::new() } else if rel.is_empty() { origin.to_string() } else { format!("{origin}/{rel}") }
+}
+/// The folder a key names inside its repository (`ident` read back): `boards/a` of `github.com/o/r/boards/a` with origin `github.com/o/r`.
+pub fn rel_in_key(origin: &str, key: &str) -> String {
+    if origin.is_empty() { return String::new() }
+    key.strip_prefix(origin).and_then(|r| r.strip_prefix('/')).unwrap_or("").to_string()
+}
+/// One machine's keys for its projects (`(id, created, origin, rel, link)`): `key_of` over `ident`, except that a key an older project of the
+/// machine has already taken (two clones of one folder) is that copy's `<machine>/<id>` (or its hand link): one machine's copies never merge.
+pub fn keys_of(ps: &[(String, u64, String, String, String)], machine: &str, here: &str) -> HashMap<String, String> {
+    let mut v: Vec<&(String, u64, String, String, String)> = ps.iter().collect();
+    v.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
+    let mut taken = std::collections::HashSet::new(); let mut out = HashMap::new();
+    for (id, _, o, rel, link) in v {
+        let mut k = key_of(&ident(o, rel), link, machine, here, id);
+        if taken.contains(&k) { k = key_of("", link, machine, here, id); if taken.contains(&k) { k = key_of("", "", machine, here, id); } }
+        taken.insert(k.clone()); out.insert(id.clone(), k);
+    }
+    out
+}
+/// This machine's keys (`keys_of` over its projects, `origin` and `rel` read from each folder): what the sidebar, the registry rows and
+/// machine_list all say, so every machine computes the same key for a copy.
+pub fn local_keys(st: &State, here: &str, origin: &dyn Fn(&str) -> String, rel: &dyn Fn(&str) -> String) -> HashMap<String, String> {
+    let ps: Vec<(String, u64, String, String, String)> = st.projects.iter().filter(|(id, p)| !p.removed && id.as_str() != crate::sidebar::SCRATCH)
+        .map(|(id, p)| (id.clone(), p.created, origin(&p.root), rel(&p.root), st.settings.get(&format!("project.link.{id}")).cloned().unwrap_or_default())).collect();
+    keys_of(&ps, "", here)
+}
+/// `local_keys` read from the folders on disk.
+pub fn local_keys_here(st: &State, here: &str) -> HashMap<String, String> { local_keys(st, here, &|r| crate::mirror::origin_of_root(r), &|r| crate::mirror::repo_rel_of_root(r)) }
+
+/// The per-project settings of the sidebar kept by key (pinned, moved to a group, made quiet, folded).
+pub const KEYED: [&str; 4] = ["sidebar.pin.", "sidebar.group.of.", "sidebar.archived.", "sidebar.fold."];
+/// The settings that carry what the person set on a project under its 0.16.0 key (`was`, the origin alone, which every project of one
+/// repository shared) to its key now, once per key (`sidebar.keys.moved.<key>`): every project of the repository keeps the pin, group and
+/// quiet mark its shared row had. Nothing is copied over what is already set under the new key, and nothing is removed. Pure.
+pub fn key_moves(st: &State, rows: &[MergedProject]) -> Vec<(String, String)> {
+    let get = |k: &str| st.settings.get(k).map(String::as_str).unwrap_or("");
+    let mut out = vec![];
+    for p in rows {
+        if p.was.is_empty() || p.was == p.key { continue }
+        let mark = format!("sidebar.keys.moved.{}", p.key);
+        if !get(&mark).is_empty() { continue }
+        for pre in KEYED { let (old, new) = (format!("{pre}{}", p.was), format!("{pre}{}", p.key)); if !get(&old).is_empty() && get(&new).is_empty() { out.push((new, get(&old).to_string())) } }
+        out.push((mark, p.was.clone()));
+    }
+    out
+}
 
 /// The merged list. `st` is this hub's state, `far` the shown linked machines' mirrors `(machine, state)`, `away(machine)` whether a linked machine
 /// did not answer, `origin(far id)` a mirrored project's origin (`Mirrors::origin`), `here` this machine's name, `reg` the registry's projects (a
 /// machine in it that is neither here nor in `far` is off). Sorted by last activity, newest first.
 pub fn merged_projects<'a>(st: &'a State, far: &[(String, &'a State)], away: &dyn Fn(&str) -> bool, origin: &dyn Fn(&str) -> String, here: &str, reg: &[RegProject]) -> Vec<MergedProject<'a>> {
-    struct Copy<'a> { machine: String, id: String, st: Option<&'a State>, name: String, folder: String, origin: String, activity: u64 }
+    merged_projects_in(st, far, away, origin, &|_| String::new(), here, reg, &|r| crate::mirror::origin_of_root(r), &|r| crate::mirror::repo_rel_of_root(r))
+}
+/// `merged_projects` with `rel(far id)`, a mirrored project's folder in its repository (`Mirrors::rel`), and this machine's folders read by
+/// `local_origin` and `local_rel` (a project's root -> its origin, its folder in the repository).
+#[allow(clippy::too_many_arguments)]
+pub fn merged_projects_in<'a>(st: &'a State, far: &[(String, &'a State)], away: &dyn Fn(&str) -> bool, origin: &dyn Fn(&str) -> String, rel: &dyn Fn(&str) -> String, here: &str, reg: &[RegProject],
+    local_origin: &dyn Fn(&str) -> String, local_rel: &dyn Fn(&str) -> String) -> Vec<MergedProject<'a>> {
+    struct Copy<'a> { machine: String, id: String, st: Option<&'a State>, name: String, folder: String, origin: String, activity: u64, was: String }
     let mut by: Vec<(String, Vec<Copy<'a>>)> = vec![];
     let mut slot: HashMap<String, usize> = HashMap::new();
     let mut put = |key: String, c: Copy<'a>| { let i = *slot.entry(key.clone()).or_insert_with(|| { by.push((key, vec![])); by.len() - 1 }); by[i].1.push(c) };
@@ -93,14 +157,18 @@ pub fn merged_projects<'a>(st: &'a State, far: &[(String, &'a State)], away: &dy
     // this machine's, oldest first (so of two local projects of one repository the older names the row)
     let mut lp: Vec<_> = st.projects.iter().filter(|(id, p)| !p.removed && id.as_str() != crate::sidebar::SCRATCH).collect();
     lp.sort_by(|a, b| a.1.created.cmp(&b.1.created).then(a.0.cmp(b.0)));
+    let keys = local_keys(st, here, local_origin, local_rel);
     for (id, p) in lp {
-        let o = crate::mirror::origin_of_root(&p.root);
-        put(key_of(&o, set(st, format!("project.link.{id}")), "", here, id), Copy { machine: String::new(), id: id.clone(), st: Some(st), name: p.title.clone(), folder: p.root.clone(), origin: o, activity: live_act(st, id, p.created) });
+        let o = local_origin(&p.root);
+        let was = key_of(&o, set(st, format!("project.link.{id}")), "", here, id);
+        put(keys[id].clone(), Copy { machine: String::new(), id: id.clone(), st: Some(st), name: p.title.clone(), folder: p.root.clone(), origin: o, activity: live_act(st, id, p.created), was });
     }
     let live_names: Vec<&str> = far.iter().map(|(n, _)| n.as_str()).collect();
     for (m, f) in far {
         let mut fp: Vec<_> = f.projects.iter().filter(|(id, p)| !p.removed && !id.ends_with(&format!("~{}", crate::sidebar::SCRATCH)) && id.as_str() != crate::sidebar::SCRATCH).collect();
         fp.sort_by(|a, b| a.1.created.cmp(&b.1.created).then(a.0.cmp(b.0)));
+        // (one machine's copies never merge with each other: `keys_of`'s rule, applied to the keys as this hub learns them)
+        let mut taken = std::collections::HashSet::new();
         for (id, p) in fp {
             let local = id.rsplit('~').next().unwrap_or(id);
             let mut o = origin(id);
@@ -115,8 +183,12 @@ pub fn merged_projects<'a>(st: &'a State, far: &[(String, &'a State)], away: &dy
                     None => continue,
                 }
             }
-            let key = key.unwrap_or_else(|| key_of(&o, set(f, format!("project.link.{local}")), m, here, id));
-            put(key, Copy { machine: m.clone(), id: id.clone(), st: Some(*f), name: p.title.clone(), folder: p.root.clone(), origin: o, activity: live_act(f, id, p.created) });
+            let link = set(f, format!("project.link.{local}"));
+            let was = key_of(&o, link, m, here, id);
+            let mut key = key.unwrap_or_else(|| key_of(&ident(&o, &rel(id)), link, m, here, id));
+            if taken.contains(&key) { key = key_of("", link, m, here, id); if taken.contains(&key) { key = key_of("", "", m, here, id); } }
+            taken.insert(key.clone());
+            put(key, Copy { machine: m.clone(), id: id.clone(), st: Some(*f), name: p.title.clone(), folder: p.root.clone(), origin: o, activity: live_act(f, id, p.created), was });
         }
     }
     // the registry: only machines that are neither this one nor live (theirs come from their mirrors)
@@ -125,7 +197,7 @@ pub fn merged_projects<'a>(st: &'a State, far: &[(String, &'a State)], away: &dy
         for c in &r.machines {
             if c.machine == here || live_names.contains(&c.machine.as_str()) { continue }
             let act = r.threads.iter().filter(|t| t.machine == c.machine).map(|t| t.activity).max().unwrap_or(c.seen);
-            put(r.key.clone(), Copy { machine: c.machine.clone(), id: c.id.clone(), st: None, name: r.name.clone(), folder: c.folder.clone(), origin: r.origin.clone(), activity: act });
+            put(r.key.clone(), Copy { machine: c.machine.clone(), id: c.id.clone(), st: None, name: r.name.clone(), folder: c.folder.clone(), origin: r.origin.clone(), activity: act, was: if r.origin.is_empty() { r.key.clone() } else { r.origin.clone() } });
             reg_threads.entry(r.key.clone()).or_default().extend(r.threads.iter().filter(|t| t.machine == c.machine));
         }
     }
@@ -159,7 +231,9 @@ pub fn merged_projects<'a>(st: &'a State, far: &[(String, &'a State)], away: &dy
         threads.sort_by(|a, b| b.activity.cmp(&a.activity).then(a.id.cmp(&b.id)));
         let last_activity = cs.iter().map(|c| c.activity).max().unwrap_or(0);
         let here_id = cs.iter().find(|c| c.machine.is_empty()).map(|c| c.id.clone());
-        MergedProject { key, name, origin, folder, here: here_id, ids: cs.iter().map(|c| (c.machine.clone(), c.id.clone())).collect(), machines, threads, last_activity, icon, color, css, settings_of }
+        // the 0.16.0 key of the copy the settings are read from
+        let was = settings_of.as_ref().and_then(|(_, id)| cs.iter().find(|c| &c.id == id)).map(|c| c.was.clone()).unwrap_or_default();
+        MergedProject { key, was, name, origin, folder, here: here_id, ids: cs.iter().map(|c| (c.machine.clone(), c.id.clone())).collect(), machines, threads, last_activity, icon, color, css, settings_of }
     }).collect();
     out.sort_by(|a, b| b.last_activity.cmp(&a.last_activity).then(a.key.cmp(&b.key)));
     out
@@ -170,7 +244,7 @@ pub fn merged_projects<'a>(st: &'a State, far: &[(String, &'a State)], away: &dy
 pub fn merged_of<R>(st: &State, m: &crate::mirror::Mirrors, f: impl FnOnce(Vec<MergedProject>) -> R) -> R {
     let reg = crate::net::registry::cached();
     let here = m.here();
-    m.shown(|far| { let mut list = merged_projects(st, far, &|n| m.mark(n)["away"] == true, &|id| m.origin(id), &here, &reg); for p in list.iter_mut() { crate::mirror::live_chips(m, &mut p.machines) } f(list) })
+    m.shown(|far| { let mut list = merged_projects_in(st, far, &|n| m.mark(n)["away"] == true, &|id| m.origin(id), &|id| m.rel(id), &here, &reg, &|r| crate::mirror::origin_of_root(r), &|r| crate::mirror::repo_rel_of_root(r)); for p in list.iter_mut() { crate::mirror::live_chips(m, &mut p.machines) } f(list) })
 }
 
 /// The sidebar's join (present/screen.rs, data/1): which project id draws each merged row (its owner: this machine's copy, else the copy of the
@@ -273,5 +347,63 @@ mod tests {
         assert_eq!(v2[0].threads.iter().map(|t| (t.id.as_str(), t.archived)).collect::<Vec<_>>(), [("L~t9", false), ("L~t8", false)], "an archive is a settle now: the thread is listed");
         assert_eq!(row_json(&v2[0])["threadCount"], 2);
         assert_eq!(row_json(&v[0])["machines"][1]["state"], "on");
+    }
+
+    /// #1168: one repository with three projects (its top and two boards' folders) on one machine is three rows; the same folder on another
+    /// machine joins its row, a folder only there is its own; two clones of one folder on one machine stay apart (the older keeps the key).
+    #[test] fn projects_in_folders_of_one_repository_are_rows_of_their_own_and_merge_only_with_the_same_folder_elsewhere() {
+        let here = st(&[pc("p1", "repo", "/r", 1), pc("p2", "Board A", "/r/boards/a", 2), pc("p3", "Board B", "/r/boards/b", 3), pc("p4", "repo clone", "/r2", 4),
+            tc("t1", "p1", 40), tc("t2", "p2", 10), tc("t3", "p3", 20), tc("t4", "p4", 5)]);
+        let lo = |r: &str| if r.starts_with("/r") { "example.org/acme/repo".to_string() } else { String::new() };
+        let lr = |r: &str| r.strip_prefix("/r2").or_else(|| r.strip_prefix("/r")).unwrap_or("").trim_start_matches('/').to_string();
+        let v = merged_projects_in(&here, &[], &|_| false, &|_| String::new(), &|_| String::new(), "desk", &[], &lo, &lr);
+        let mut keys: Vec<(&str, &str)> = v.iter().map(|p| (p.name.as_str(), p.key.as_str())).collect(); keys.sort();
+        assert_eq!(keys, [("Board A", "example.org/acme/repo/boards/a"), ("Board B", "example.org/acme/repo/boards/b"), ("repo", "example.org/acme/repo"), ("repo clone", "desk/p4")]);
+        for p in &v { assert_eq!(p.threads.len(), 1, "each its own threads: {}", p.name); assert_eq!(p.was, "example.org/acme/repo", "the 0.16.0 key: {}", p.name); }
+        assert_eq!(local_keys(&here, "desk", &lo, &lr)["p2"], "example.org/acme/repo/boards/a", "what machine_list and the registry rows say");
+        // the laptop has the repository too: its top and Board A join those rows, its board C is a row of its own; its second clone of boards/a stays apart
+        let lap = st(&[pc("L~q1", "repo", "/home/x/repo", 1), pc("L~q2", "A", "/home/x/repo/boards/a", 2), pc("L~q3", "C", "/home/x/repo/boards/c", 3), pc("L~q4", "A again", "/home/x/other/boards/a", 4),
+            tc("L~u2", "L~q2", 50)]);
+        let far = vec![("laptop".to_string(), &lap)];
+        let fo = |_: &str| "example.org/acme/repo".to_string();
+        let fr = |id: &str| match id { "L~q2" | "L~q4" => "boards/a".to_string(), "L~q3" => "boards/c".to_string(), _ => String::new() };
+        let v = merged_projects_in(&here, &far, &|_| false, &fo, &fr, "desk", &[], &lo, &lr);
+        let row = |k: &str| v.iter().find(|p| p.key == k).unwrap_or_else(|| panic!("{k}: {v:?}"));
+        assert_eq!(row("example.org/acme/repo").ids, [("".to_string(), "p1".to_string()), ("laptop".to_string(), "L~q1".to_string())]);
+        let a = row("example.org/acme/repo/boards/a");
+        assert_eq!(a.ids, [("".to_string(), "p2".to_string()), ("laptop".to_string(), "L~q2".to_string())]);
+        assert_eq!((a.name.as_str(), a.threads.len()), ("Board A", 2), "this machine names it; both machines' threads");
+        assert_eq!(row("example.org/acme/repo/boards/c").ids, [("laptop".to_string(), "L~q3".to_string())]);
+        assert_eq!(row("laptop/q4").ids, [("laptop".to_string(), "L~q4".to_string())], "one machine's clones never merge");
+        assert_eq!(v.len(), 6);
+        // a laptop of 0.16.0 says no folder: its copies key by the origin alone, so only its top's merge as before
+        let v = merged_projects_in(&here, &far, &|_| false, &fo, &|_| String::new(), "desk", &[], &lo, &lr);
+        assert!(v.iter().any(|p| p.key == "example.org/acme/repo" && p.ids.len() == 2));
+        assert_eq!(ident("o/r", ""), "o/r"); assert_eq!(ident("o/r", "/b/a/"), "o/r/b/a"); assert_eq!(ident("", "b"), "");
+        assert_eq!(rel_in_key("o/r", "o/r/b/a"), "b/a"); assert_eq!(rel_in_key("o/r", "o/r"), ""); assert_eq!(rel_in_key("o/r", "o/rx/b"), ""); assert_eq!(rel_in_key("", "desk/p1"), "");
+    }
+    /// The pins, groups, quiet marks and folds kept under the 0.16.0 key (the origin, which the repository's projects shared) are carried to each
+    /// project's key now, once (`sidebar.keys.moved.<key>`), never over one set since; the repository's top keeps its key and needs nothing.
+    #[test] fn what_was_set_under_the_shared_key_is_carried_to_each_projects_key_once() {
+        let o = "example.org/acme/repo";
+        let mut evs = vec![pc("p1", "repo", "/r", 1), pc("p2", "Board A", "/r/boards/a", 2), pc("p3", "Board B", "/r/boards/b", 3)];
+        for (k, v) in [("sidebar.pin.", "77"), ("sidebar.group.of.", "custom:acme"), ("sidebar.archived.", "66"), ("sidebar.fold.", "55")] { evs.push(json!({"$":"SettingSet","key":format!("{k}{o}"),"value":v,"at":5})); }
+        evs.push(json!({"$":"SettingSet","key":format!("sidebar.group.of.{o}/boards/b"),"value":"custom:mine","at":6}));
+        let mut s = st(&evs);
+        let lo = |r: &str| if r.starts_with("/r") { o.to_string() } else { String::new() };
+        let lr = |r: &str| r.strip_prefix("/r").unwrap_or("").trim_start_matches('/').to_string();
+        let moves = |s: &State| { let v = merged_projects_in(s, &[], &|_| false, &|_| String::new(), &|_| String::new(), "desk", &[], &lo, &lr); let mut m = key_moves(s, &v); m.sort(); m };
+        let m = moves(&s);
+        let a = format!("{o}/boards/a"); let b = format!("{o}/boards/b");
+        let want: Vec<(String, String)> = { let mut w = vec![
+            (format!("sidebar.pin.{a}"), "77".to_string()), (format!("sidebar.group.of.{a}"), "custom:acme".into()), (format!("sidebar.archived.{a}"), "66".into()), (format!("sidebar.fold.{a}"), "55".into()), (format!("sidebar.keys.moved.{a}"), o.into()),
+            (format!("sidebar.pin.{b}"), "77".into()), (format!("sidebar.archived.{b}"), "66".into()), (format!("sidebar.fold.{b}"), "55".into()), (format!("sidebar.keys.moved.{b}"), o.into())]; w.sort(); w };
+        assert_eq!(m, want, "Board B keeps the group set on it since");
+        for (k, v) in &m { s.apply(&json!({"$":"SettingSet","key":k,"value":v,"at":9})); }
+        assert!(moves(&s).is_empty(), "once");
+        // the person unpins Board A afterwards: the old pin (the repository's top's own now) is not carried again
+        s.apply(&json!({"$":"SettingSet","key":format!("sidebar.pin.{a}"),"value":"","at":10}));
+        assert!(moves(&s).is_empty());
+        assert_eq!(s.settings.get(&format!("sidebar.pin.{o}")).map(String::as_str), Some("77"), "nothing is removed: the top keeps its pin");
     }
 }

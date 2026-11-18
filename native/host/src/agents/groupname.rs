@@ -35,6 +35,21 @@ pub fn start(ag: &Arc<Agents>, hub: &Arc<Hub>, before_recover: u64) {
     // before this start's recovery, so a turn the restart into this build cut shows (strictly older stops count as seen).
     { let h = hub.clone(); tokio::spawn(async move { if h.setting("sidebar.looked.since").await.unwrap_or_default().is_empty() {
         let _ = h.commit_many(&[json!({"$":"SettingSet","key":"sidebar.looked.since","value":before_recover.to_string(),"at":super::now_s()})]).await; } }); }
+    // the sidebar's keys of 0.16.1 (#1168, present/merged.rs `key_moves`): what the person set on a project under its 0.16.0 key is carried to
+    // its key now, soon after the start and each minute after (a linked machine's copy is keyed once its machine says its folder)
+    { let h = Arc::downgrade(hub); tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        loop {
+            let Some(hub) = h.upgrade() else { return };
+            let sets = crate::statehost::policies().and_then(|pol| pol.with_state(|st| crate::present::merged::merged_of(st, hub.mirrors(), |rows| crate::present::merged::key_moves(st, &rows)))).unwrap_or_default();
+            if !sets.is_empty() {
+                let at = super::now_s();
+                eprintln!("sidebar: {} project setting(s) carried to the 0.16.1 keys", sets.len());
+                let _ = hub.commit_many(&sets.into_iter().map(|(k, v)| json!({"$":"SettingSet","key":k,"value":v,"at":at})).collect::<Vec<_>>()).await;
+            }
+            drop(hub); tokio::time::sleep(ROUND).await;
+        }
+    }); }
     if crate::guard::safe() || crate::copy::on() { return }
     let me = Arc::downgrade(ag);
     tokio::spawn(async move {
