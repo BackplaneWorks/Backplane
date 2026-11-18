@@ -170,6 +170,7 @@ pub fn focus(w: u64) {
     if !ours && pid > 0 { KICAD_PID.store(pid, std::sync::atomic::Ordering::Relaxed); }
     eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_focus": {"window": w, "owner": pid, "ours": ours, "kicad_active_before": app_active(KICAD_PID.load(std::sync::atomic::Ordering::Relaxed))}}));
     if !ours && pid <= 0 { return } // a KiCad frame whose KiCad is not known yet: nothing to activate
+    if ours { cancel_yield(); } // the keyboard back to Backplane: a hand-in still waiting to fall back is void
     unsafe {
         if ours {
             send_activate_self(app());
@@ -197,9 +198,17 @@ pub fn hand_back(w: u64) { focus(w) }
 /// Consent for KiCad to activate itself (macOS 14+), without activating it: the hub's ShowFrame{focus} then has KiCad take the keyboard
 /// onto its canvas (TakeFocusForClick). Activating KiCad from here first put wx's focus on a toolbar field, and ShowFrame{focus} leaves a
 /// focus already inside the frame where it is: the canvas never had the keys (client runs 9, 10).
+/// The hand-in a yield_to's fallback belongs to (#1199). Each yield_to takes the next one, so a newer yield voids an older one's
+/// fallback; the keyboard taken back by Backplane (`focus` of one of our windows) and KiCad's frame leaving the screen (`cancel_yield`)
+/// void a pending one. Without it the fallback, 400 ms on, activated a KiCad whose frame had just been hidden: e2e-macos 44314267887
+/// leave (a), a canvas click, the viewer's Close 290 ms later, then kicad_mac_yield_fallback active_after:true and Backplane not active.
+static YIELD_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// KiCad's frame left the screen (the pane's hide): a hand-in waiting to fall back is void.
+pub fn cancel_yield() { YIELD_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst); }
 pub fn yield_to(w: u64) {
     let pid = match owner(w) { 0 => KICAD_PID.load(std::sync::atomic::Ordering::Relaxed), p => p };
     if pid <= 0 || pid == own_pid() { return }
+    let mine = YIELD_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     unsafe {
         let other = running_app(pid); if other.is_null() { return }
         let a = app();
@@ -214,6 +223,11 @@ pub fn yield_to(w: u64) {
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(400));
         if app_active(pid) { return }
+        // Backplane took the keyboard back, the frame left the screen, or a newer hand-in came: the person's choice stands
+        if !crate::viewers::kicad_pane::yield_current(mine, YIELD_GEN.load(std::sync::atomic::Ordering::SeqCst)) {
+            eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_yield_fallback": {"to": pid, "skipped": "the hand-in was voided (Backplane took the keyboard, the frame left, or a newer hand-in)"}}));
+            return
+        }
         unsafe {
             let other = running_app(pid); if other.is_null() { return }
             let f: unsafe extern "C" fn(*mut c_void, *mut c_void, usize) -> bool = std::mem::transmute(objc_msgSend as *const ());
