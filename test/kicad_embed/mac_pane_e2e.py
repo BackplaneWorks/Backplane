@@ -799,8 +799,10 @@ try:
         for l in client_log().splitlines():
             if '"kicad_host_push"' in l and '"covered":true' in l.replace(' ', ''): print('INFO leave: a push said covered: ' + l.split('GPUI_LOG ', 1)[-1][:200], flush=True); break
         raise SystemExit(1 if FAILS else 0)
-    # ---- MAC_MODE=swap (#1199's find): KiCad's show path places a shown frame from the show call's rect after replying, over a later
-    # SetHostGeometry (e2e-macos 44255662838: pushes 500 false, 524 true, 500 true; the frame stayed at 524). Close the viewer, the Board page
+    # ---- MAC_MODE=swap (#1199): KiCad's frame can end off the client's last pushed rect, or not show (e2e-macos 44255662838: pushes 500
+    # false, 524 true, 500 true, the frame stayed at 524; 44274808579 returns 3 and 4). The mechanism is not settled: SetHostGeometry goes on
+    # KiCad's events socket and is acknowledged before its deferred apply, ShowFrame/HideFrame on the main socket, so one connection's
+    # reply order does not fix the order KiCad applies them in (the integrator's review; embed.mm's owner confirms or refutes). Close the viewer, the Board page
     # again, SWAP_REPS times: each return's burst (visible:true at one rect, then another within 150 ms: the bottom strip a frame late) is
     # recorded, and 1 s later the frame must be at the last rect the client pushed (2 pt). Run with BACKPLANE_KICAD_MAC_SETTLE_MS=0 (pane_env)
     # to see KiCad's own order (fails on bp.13.1: e2e-macos 44274808579, a lone show left no frame, a later Full size rect was dropped), and
