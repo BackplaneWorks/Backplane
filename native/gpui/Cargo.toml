@@ -87,3 +87,7 @@ strip = "none"
 debug = "line-tables-only"
 [profile.dev.package."*"]
 debug = false
+
+[build-dependencies]
+# the Windows icon resource (build.rs)
+embed-resource = "3.0"
