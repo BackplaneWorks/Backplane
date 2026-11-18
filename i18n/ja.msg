@@ -4585,3 +4585,4 @@ gpui.f2.uber.p.rose = ローズ
 gpui.f2.uber.p.mint = ミント
 gpui.f2.uber.p.cherry = チェリー
 gpui.simulation = シミュレーション
+gpui.c.sheets.find = シートを探す

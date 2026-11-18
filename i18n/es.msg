@@ -4560,3 +4560,4 @@ gpui.f2.uber.p.rose = Rosa
 gpui.f2.uber.p.mint = Menta
 gpui.f2.uber.p.cherry = Cereza
 gpui.simulation = Simulación
+gpui.c.sheets.find = Buscar una hoja

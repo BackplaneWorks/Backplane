@@ -27,6 +27,8 @@ pub struct PlotView {
     /// Where the left button went down (a click is a press and release within 4 px); the piece last tapped (drawn lit) and the card the hub's info made of it.
     /// The Sheets menu is open (a schematic with more than one sheet).
     pub sheets_open: bool,
+    /// Its search, highlighted row and scroll (screens::sheets).
+    pub sheets: super::sheets::SheetsUi,
     /// Compare / History: the menu is open (1 compare, 2 history); the comparison on show (screens::histbar).
     pub menu: u8, pub compare: Option<super::histbar::Cmp>, pub hist: super::histbar::Hist,
     /// Pieces a cross-probe lights (chunk index, piece info index), and the canvas's focus for the keys.

@@ -4562,3 +4562,4 @@ gpui.f2.uber.p.rose = Rose
 gpui.f2.uber.p.mint = Mint
 gpui.f2.uber.p.cherry = Cherry
 gpui.simulation = Simulation
+gpui.c.sheets.find = Find a sheet

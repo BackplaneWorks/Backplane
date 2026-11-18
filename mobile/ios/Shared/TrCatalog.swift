@@ -2330,6 +2330,8 @@ gpui.c.bring.into.view	Bring it into view	表示位置へ移動	Traer a la vista
 gpui.c.browser.needs.hub	The browser page needs a connected hub.	ブラウザーページにはハブへの接続が必要です。	La página del navegador necesita un hub conectado.
 gpui.c.piece	piece	部品	pieza
 gpui.c.kicad.open.on	Open in KiCad on {machine}	{machine}のKiCadで開く	Abrir en KiCad en {machine}
+gpui.c.altium.open	Open in Altium	Altium で開く	Abrir en Altium
+gpui.c.altium.open.tip	Open this design in Altium Designer	このデザインを Altium Designer で開く	Abrir este diseño en Altium Designer
 gpui.c.sheets.count	Sheets ({n})	シート（{n}）	Hojas ({n})
 gpui.c.probe.on.top	{ref} is on the top sheet	{ref}は最上位シートにあります	{ref} está en la hoja superior
 gpui.c.probe.on.sheet	{ref} is on the sheet {sheet}	{ref}はシート{sheet}にあります	{ref} está en la hoja {sheet}
@@ -4431,6 +4433,7 @@ gpui.f2.uber.p.rose	Rose	ローズ	Rosa
 gpui.f2.uber.p.mint	Mint	ミント	Menta
 gpui.f2.uber.p.cherry	Cherry	チェリー	Cereza
 gpui.simulation	Simulation	シミュレーション	Simulación
+gpui.c.sheets.find	Find a sheet	シートを探す	Buscar una hoja
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
