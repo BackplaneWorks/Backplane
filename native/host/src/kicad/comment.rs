@@ -37,7 +37,12 @@ pub fn reserved(semicolon_is_kicads: bool, caps: &[String]) -> Vec<&'static str>
     if caps.iter().any(|c| c == "embed-raw-ctrl") {
         for c in v.iter_mut() { *c = match *c { "Ctrl+Tab" => "RawCtrl+Tab", "Ctrl+Shift+Tab" => "RawCtrl+Shift+Tab", "Ctrl+`" => "RawCtrl+`", other => other }; }
     }
+    let mac = caps.iter().any(|c| c == "embed-raw-ctrl");
     if semicolon_is_kicads && !caps.iter().any(|c| c == "comment-key-63" || c == "comment-key-handoff") { v.push(";") }
+    // macOS: Cmd+H (wx's Ctrl+H) hides Backplane with KiCad's frame from the editor too (#1198; else AppKit hid KiCad alone). Index 10,
+    // so only where ';' does not take it (every runtime with comment-key-63, bp.13.1 on): the client reads index 10 as Cmd+H on a Mac
+    // (native_child.rs `reserved_chord_index`). Cmd+W and Cmd+Q stay KiCad's in the editor (Cmd+W closes its frame back to View).
+    else if mac { v.push("Ctrl+H") }
     v
 }
 
@@ -194,8 +199,14 @@ mod tests {
     #[test] fn on_macos_the_tab_and_hand_back_chords_are_the_physical_ctrl_key_at_the_same_indices() {
         let mac = reserved(false, &["embed-raw-ctrl".to_string()]);
         assert_eq!(&mac[..6], ["Ctrl+K", "Ctrl+J", "RawCtrl+Tab", "RawCtrl+Shift+Tab", "RawCtrl+`", "Ctrl+;"]);
-        assert_eq!(mac.len(), RESERVED.len());
+        assert_eq!(mac.len(), RESERVED.len() + 1, "and Cmd+H after them (#1198)");
         assert_eq!(reserved(false, &[]), RESERVED.to_vec(), "no embed-raw-ctrl (every runtime off macOS): unchanged");
+        // #1198: Cmd+H at index 10 on a Mac, never where ';' takes 10, never off a Mac
+        assert_eq!(mac[10], "Ctrl+H");
+        assert_eq!(reserved(true, &["embed-raw-ctrl".into(), "comment-key-63".into()])[10], "Ctrl+H");
+        assert_eq!(reserved(true, &["embed-raw-ctrl".into()])[10], ";", "an old Mac runtime keeps ';' at 10 and gets no Cmd+H");
+        assert_eq!(reserved(true, &["embed-raw-ctrl".into()]).len(), 11);
+        assert!(!reserved(true, &["comment-key-63".into()]).contains(&"Ctrl+H"), "off a Mac Ctrl+H stays KiCad's");
     }
     #[test] fn a_comment_event_is_published_with_its_note_names_and_copied_image() {
         let ev = json!({"seq": "4", "type": "ET_COMMENT", "detail": "move this", "frame": {"kind": "FK_PCB"},

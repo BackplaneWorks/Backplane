@@ -13,7 +13,7 @@ use gpui::{
 use std::ops::Range;
 use std::path::PathBuf;
 
-actions!(composer, [Backspace, Delete, WordBackspace, WordDelete, Left, Right, WordLeft, WordRight, SelLeft, SelRight, SelWordLeft, SelWordRight,
+actions!(composer, [Backspace, Delete, WordBackspace, WordDelete, LineBackspace, LineDelete, Left, Right, WordLeft, WordRight, SelLeft, SelRight, SelWordLeft, SelWordRight,
     Up, Down, SelUp, SelDown, Home, End, DocStart, DocEnd, SelHome, SelEnd, SelDocStart, SelDocEnd, SelectAll, Copy, Cut, Paste, Undo, Redo, Newline, CharPalette, Go, GoBack, Tab]);
 
 pub const MAX_LINES: f32 = 12.0;
@@ -137,6 +137,8 @@ impl Composer {
     fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.delete(false)); }
     fn word_backspace(&mut self, _: &WordBackspace, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.backspace(true)); }
     fn word_delete(&mut self, _: &WordDelete, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.delete(true)); }
+    fn line_backspace(&mut self, _: &LineBackspace, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.backspace_line()); }
+    fn line_delete(&mut self, _: &LineDelete, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.delete_line()); }
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.left(false, false)); }
     fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.right(false, false)); }
     fn word_left(&mut self, _: &WordLeft, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.left(false, true)); }
@@ -390,7 +392,7 @@ impl gpui::Element for Element_ {
 impl Render for Composer {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         gpui::div().flex().key_context(self.ctx).track_focus(&self.focus).cursor(CursorStyle::IBeam).w_full()
-            .on_action(cx.listener(Self::backspace)).on_action(cx.listener(Self::delete)).on_action(cx.listener(Self::word_backspace)).on_action(cx.listener(Self::word_delete))
+            .on_action(cx.listener(Self::backspace)).on_action(cx.listener(Self::delete)).on_action(cx.listener(Self::word_backspace)).on_action(cx.listener(Self::word_delete)).on_action(cx.listener(Self::line_backspace)).on_action(cx.listener(Self::line_delete))
             .on_action(cx.listener(Self::left)).on_action(cx.listener(Self::right)).on_action(cx.listener(Self::word_left)).on_action(cx.listener(Self::word_right))
             .on_action(cx.listener(Self::sel_left)).on_action(cx.listener(Self::sel_right)).on_action(cx.listener(Self::sel_word_left)).on_action(cx.listener(Self::sel_word_right))
             .on_action(cx.listener(Self::tab)).on_action(cx.listener(Self::up)).on_action(cx.listener(Self::down)).on_action(cx.listener(Self::sel_up)).on_action(cx.listener(Self::sel_down))
@@ -409,17 +411,18 @@ impl Render for Composer {
 impl Focusable for Composer { fn focus_handle(&self, _: &App) -> FocusHandle { self.focus.clone() } }
 
 pub fn bind(cx: &mut App) { cx.bind_keys(bindings()); }
-pub fn bindings() -> Vec<KeyBinding> {
+pub fn bindings() -> Vec<KeyBinding> { bindings_for(crate::keys::mac()) }
+/// The text fields' editing keys. Off a Mac, Ctrl moves and deletes by word and Home/End go to the line's ends (Ctrl+Home/End the text's).
+/// On a Mac as its own text fields do (#1172): Option by word, Cmd to the line's start or end (Left/Right, Backspace/Delete) and to the
+/// text's (Up/Down), Shift selecting with each; Home/End and Cmd+Home/End as off a Mac.
+pub fn bindings_for(mac: bool) -> Vec<KeyBinding> {
     let mut v: Vec<KeyBinding> = Vec::new();
     /* i18n-ok: key contexts */ for ctx in ["Composer", "AskInput", "ImpInput", "PickInput", "FindInput", "PadLength"] {
     let c = Some(ctx);
     v.extend([
         KeyBinding::new("backspace", Backspace, c), KeyBinding::new("delete", Delete, c),
-        KeyBinding::new("secondary-backspace", WordBackspace, c), KeyBinding::new("secondary-delete", WordDelete, c),
         KeyBinding::new("left", Left, c), KeyBinding::new("right", Right, c),
-        KeyBinding::new("secondary-left", WordLeft, c), KeyBinding::new("secondary-right", WordRight, c),
         KeyBinding::new("shift-left", SelLeft, c), KeyBinding::new("shift-right", SelRight, c),
-        KeyBinding::new("secondary-shift-left", SelWordLeft, c), KeyBinding::new("secondary-shift-right", SelWordRight, c),
         KeyBinding::new("tab", Tab, c), KeyBinding::new("up", Up, c), KeyBinding::new("down", Down, c), KeyBinding::new("shift-up", SelUp, c), KeyBinding::new("shift-down", SelDown, c),
         KeyBinding::new("home", Home, c), KeyBinding::new("end", End, c), KeyBinding::new("shift-home", SelHome, c), KeyBinding::new("shift-end", SelEnd, c),
         KeyBinding::new("secondary-home", DocStart, c), KeyBinding::new("secondary-end", DocEnd, c),
@@ -428,6 +431,20 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("secondary-z", Undo, c), KeyBinding::new("secondary-shift-z", Redo, c), KeyBinding::new("secondary-y", Redo, c),
         KeyBinding::new("shift-enter", Newline, c),
     ]);
+    if mac {
+        v.extend([
+            KeyBinding::new("alt-left", WordLeft, c), KeyBinding::new("alt-right", WordRight, c), KeyBinding::new("alt-shift-left", SelWordLeft, c), KeyBinding::new("alt-shift-right", SelWordRight, c),
+            KeyBinding::new("alt-backspace", WordBackspace, c), KeyBinding::new("alt-delete", WordDelete, c),
+            KeyBinding::new("cmd-left", Home, c), KeyBinding::new("cmd-right", End, c), KeyBinding::new("cmd-shift-left", SelHome, c), KeyBinding::new("cmd-shift-right", SelEnd, c),
+            KeyBinding::new("cmd-backspace", LineBackspace, c), KeyBinding::new("cmd-delete", LineDelete, c),
+            KeyBinding::new("cmd-up", DocStart, c), KeyBinding::new("cmd-down", DocEnd, c), KeyBinding::new("cmd-shift-up", SelDocStart, c), KeyBinding::new("cmd-shift-down", SelDocEnd, c),
+        ]);
+    } else {
+        v.extend([
+            KeyBinding::new("ctrl-left", WordLeft, c), KeyBinding::new("ctrl-right", WordRight, c), KeyBinding::new("ctrl-shift-left", SelWordLeft, c), KeyBinding::new("ctrl-shift-right", SelWordRight, c),
+            KeyBinding::new("ctrl-backspace", WordBackspace, c), KeyBinding::new("ctrl-delete", WordDelete, c),
+        ]);
+    }
     }
     v.extend([KeyBinding::new("enter", Go, Some("AskInput")), KeyBinding::new("enter", Go, Some("PickInput")), KeyBinding::new("enter", Go, Some("PadLength")),
         // the find bar: Enter the next match, Shift+Enter the previous (bound after the editing keys, so it is not a new line there)
@@ -450,6 +467,39 @@ fn view_scroll(scroll: Pixels, caret_y: Option<Pixels>, lh: Pixels, view: Pixels
 mod tests {
     use super::*;
     use core::prelude::v1::test;
+    /// The editing action `key` does in the message box with these bindings, "" for none.
+    fn edit_key(mac: bool, key: &str, ctx: &str) -> String {
+        let map = gpui::Keymap::new(bindings_for(mac));
+        let stack = [gpui::KeyContext::parse("Backplane").unwrap(), gpui::KeyContext::parse(ctx).unwrap()];
+        map.bindings_for_input(&[gpui::Keystroke::parse(key).unwrap()], &stack).0.first().map(|b| b.action().name().to_string()).unwrap_or_default()
+    }
+    // #1172: a Mac's text keys: Option by word, Cmd to the line's (Left/Right, Backspace/Delete) and the text's (Up/Down) ends; Shift selects
+    #[test] fn on_a_mac_option_moves_by_word_and_cmd_to_the_line_and_text_ends() {
+        for ctx in ["Composer", "AskInput", "ImpInput", "PickInput", "FindInput", "PadLength"] {
+            for (k, a) in [("alt-left", "WordLeft"), ("alt-right", "WordRight"), ("alt-shift-left", "SelWordLeft"), ("alt-shift-right", "SelWordRight"),
+                ("alt-backspace", "WordBackspace"), ("alt-delete", "WordDelete"),
+                ("cmd-left", "Home"), ("cmd-right", "End"), ("cmd-shift-left", "SelHome"), ("cmd-shift-right", "SelEnd"),
+                ("cmd-backspace", "LineBackspace"), ("cmd-delete", "LineDelete"),
+                ("cmd-up", "DocStart"), ("cmd-down", "DocEnd"), ("cmd-shift-up", "SelDocStart"), ("cmd-shift-down", "SelDocEnd"),
+                ("left", "Left"), ("shift-right", "SelRight"), ("home", "Home"), ("end", "End"), ("cmd-home", "DocStart"), ("cmd-a", "SelectAll"), ("cmd-z", "Undo")] {
+                assert_eq!(edit_key(true, k, ctx), format!("composer::{a}"), "{ctx} {k}");
+            }
+        }
+    }
+    #[test] fn off_a_mac_the_text_keys_are_unchanged() {
+        for (k, a) in [("ctrl-left", "WordLeft"), ("ctrl-right", "WordRight"), ("ctrl-shift-left", "SelWordLeft"), ("ctrl-shift-right", "SelWordRight"),
+            ("ctrl-backspace", "WordBackspace"), ("ctrl-delete", "WordDelete"), ("home", "Home"), ("end", "End"), ("shift-home", "SelHome"),
+            ("ctrl-home", "DocStart"), ("ctrl-shift-end", "SelDocEnd"), ("up", "Up"), ("ctrl-a", "SelectAll"), ("ctrl-y", "Redo")] {
+            assert_eq!(edit_key(false, k, "Composer"), format!("composer::{a}"), "{k}");
+        }
+        for k in ["alt-left", "alt-right", "alt-backspace", "ctrl-up", "ctrl-down", "super-left", "super-backspace"] { assert_eq!(edit_key(false, k, "Composer"), "", "{k} unbound off a Mac, as before"); }
+    }
+    #[test] fn the_pairing_fields_get_the_macs_line_and_clipboard_keys() {
+        let k = |mac: bool, key: &str| { let map = gpui::Keymap::new(crate::input::bindings_for(mac));
+            map.bindings_for_input(&[gpui::Keystroke::parse(key).unwrap()], &[gpui::KeyContext::parse("TextInput").unwrap()]).0.first().map(|b| b.action().name().to_string()).unwrap_or_default() };
+        for (key, a) in [("cmd-left", "Home"), ("cmd-right", "End"), ("cmd-v", "Paste"), ("cmd-c", "Copy"), ("cmd-x", "Cut"), ("cmd-a", "SelectAll"), ("ctrl-v", "Paste")] { assert_eq!(k(true, key), format!("text_input::{a}"), "{key}"); }
+        assert_eq!(k(false, "cmd-left"), ""); assert_eq!(k(false, "ctrl-v"), "text_input::Paste");
+    }
     #[test] fn the_mask_keeps_every_byte_offset_and_newline() {
         let s = "key-é日\nline2";
         let m = mask(s);

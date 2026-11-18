@@ -85,6 +85,8 @@ pub fn reserved_chord_index(idx: usize) -> Option<&'static str> {
         7 => Some("alt-shift-c"), // i18n-ok: gpui keystroke
         8 => Some("alt-shift-l"), // i18n-ok: gpui keystroke
         9 => Some("alt-shift-f"), // i18n-ok: gpui keystroke
+        // macOS: Cmd+H (#1198), at 10 only where ';' is index 63 (host kicad/comment.rs `reserved`); mac_chord makes it cmd-h
+        10 if cfg!(target_os = "macos") => Some("ctrl-h"), // i18n-ok: gpui keystroke
         10 => Some(";"), // i18n-ok: gpui keystroke (bp.13: KiCad's own comment key, host kicad/comment.rs `reserved`)
         63 => Some(";"), // i18n-ok: gpui keystroke (KiCad's comment key handed over, bp.13 batch 5 "comment-key-63": a fixed index no reserved chord takes)
         _ => None,
@@ -2092,7 +2094,7 @@ mod tests {
         assert_eq!(chord(0xffbe, 4), None, "F1: not a reserved key");
         assert_eq!(reserved_chord_index(0), Some("ctrl-k"));
         assert_eq!(reserved_chord_index(3), Some("ctrl-shift-tab"));
-        assert_eq!(reserved_chord_index(4), Some("ctrl-`")); assert_eq!(reserved_chord_index(5), Some("ctrl-;")); assert_eq!(reserved_chord_index(6), Some("alt-shift-b")); assert_eq!(reserved_chord_index(63), Some(";")); assert_eq!(reserved_chord_index(9), Some("alt-shift-f")); assert_eq!(reserved_chord_index(10), Some(";")); assert_eq!(chord(0x3b, 0).as_deref(), Some(";")); assert_eq!(chord(0x3b, 4).as_deref(), Some("ctrl-;"));
+        assert_eq!(reserved_chord_index(4), Some("ctrl-`")); assert_eq!(reserved_chord_index(5), Some("ctrl-;")); assert_eq!(reserved_chord_index(6), Some("alt-shift-b")); assert_eq!(reserved_chord_index(63), Some(";")); assert_eq!(reserved_chord_index(9), Some("alt-shift-f")); assert_eq!(reserved_chord_index(10), Some(if cfg!(target_os = "macos") { "ctrl-h" } else { ";" }), "#1198: Cmd+H on a Mac"); assert_eq!(chord(0x3b, 0).as_deref(), Some(";")); assert_eq!(chord(0x3b, 4).as_deref(), Some("ctrl-;"));
         assert_eq!(reserved_chord_index(11), None);
         assert_eq!(chord(0x42, 8 | 1).as_deref(), Some("alt-shift-b"), "X11: Shift+B is keysym B");
     }
