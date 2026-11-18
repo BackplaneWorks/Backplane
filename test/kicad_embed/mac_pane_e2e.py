@@ -737,13 +737,27 @@ try:
         print(f'INFO leave: the sidebar shows {rows}; home {home_thread}, other {other_thread}', flush=True)
         if home_thread: press_rect(home_thread); time.sleep(1.0)
         wait_for(at_pane, 10, 0.2); P = last_push()[0]
+        def back_from_settings():
+            press_rect('ui:Settings') or key(K_ESC); time.sleep(1.2)
+            if rects_now().get('ui:Settings') is None: key(K_ESC); time.sleep(0.8)
+            t = time.time(); return press_rect('rail:Board'), t
+        def open_keysheet():
+            cwa = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(cwa[0] + 150, cwa[1] + 28 + 250); time.sleep(0.6)
+            PUSH_MARK[0] = len(client_log().splitlines())
+            key(122); return True  # F1
+        PUSH_MARK = [0]
         ways = [
             ('a', 'the viewer\'s Close', lambda: press_rect('ui:CloseViewer'), lambda: press_rect('rail:Board')),
             ('b', 'the rail closing the lit page', lambda: press_rect('rail:Board'), lambda: press_rect('rail:Board')),
             ('c', 'another thread', lambda: other_thread and press_rect(other_thread), lambda: home_thread and press_rect(home_thread)),
             ('d', 'the Files page', lambda: press_rect('rail:Files'), lambda: press_rect('rail:Board')),
             ('e', 'a Diff over the page', lambda: press_rect('rail:Diff'), lambda: press_rect('rail:Board')),
-            ('f', 'Settings over the page', lambda: press_rect('ui:Settings'), lambda: press_rect('ui:Settings') or (key(K_ESC), True)[1]),
+            # opening Settings shuts the viewer by design (host settings.rs, 0.14's Settings.viewer.shut): back is Settings closed, then the
+            # Board page, the return timed from that press
+            ('f', 'Settings over the page', lambda: press_rect('ui:Settings'), back_from_settings),
+            # the keyboard sheet over the page with the viewer open (#1199's covered path): Backplane takes the keyboard (a click in its
+            # chrome), F1; back is Escape (keysheet_close before escape_rest), the viewer still open
+            ('g', 'the keyboard sheet over the page', open_keysheet, lambda: (key(K_ESC), True)[1]),
         ]
         for tag, label, leave_, back_ in ways:
             if not at_pane():
@@ -756,7 +770,11 @@ try:
             check(bool(pressed_) and bool(gone), f'leave {tag}: {label} takes KiCad\'s frame off screen within 1 s (pressed {pressed_}; KiCad had the keyboard {k_before}; KiCad windows over the pane {[w[3] for w in kicad_over_pane()]})')
             check(bp_active, f'leave {tag}: Backplane is the active app with the keyboard after {label}')
             time.sleep(1.0)
+            if tag == 'g':
+                cov = [l for l in client_log().splitlines()[PUSH_MARK[0]:] if '"kicad_host_push"' in l and '"covered":true' in l]
+                check(bool(cov), f'leave g: a kicad_host_push said covered:true under the sheet ({(cov or [""])[0].split("GPUI_LOG ", 1)[-1][:160]!r})')
             tb = time.time(); b_ = back_()
+            if isinstance(b_, tuple): b_, tb = b_
             f2 = wait_for(at_pane, 3, 0.02); dt = time.time() - tb
             timeline(f'{tag} back', tb, time.time() if f2 else None)
             if not f2 and rects_now().get('ui:Edit'):
