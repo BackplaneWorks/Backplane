@@ -227,7 +227,7 @@ if os.environ.get('MAC_MODE') != 'libs':
     with open(os.path.join(OUT, 'bin/claude'), 'w') as f:
         f.write('#!/bin/sh\nexec /usr/bin/python3 ' + os.path.join(REPO, 'test/kicad_embed/mac/standin_agent.py') + ' "$@"\n')
     os.chmod(os.path.join(OUT, 'bin/claude'), 0o755)
-if os.environ.get('MAC_MODE') == 'autosave':
+if os.environ.get('MAC_MODE') in ('autosave', 'recover'):
     for v in ('10.99',):
         kc = os.path.join(OUT, 'fh/Library/Preferences/kicad', v, 'kicad_common.json')
         j = json.load(open(kc)) if os.path.isfile(kc) else {}
@@ -551,7 +551,11 @@ try:
     matches('at first show')
     # ---- MAC_MODE=autosave: with the keyboard in Backplane (KiCad not the active app), an agent commits a change over the API; a .history
     # snapshot appears within the debounce (3 s here); KiCad killed; Open the editor again: KiCad offers the recovery, and the pane names it ----
-    if os.environ.get('MAC_MODE') == 'autosave':
+    # ---- MAC_MODE=recover: the same, then fork embed's fix/mac-recovery-alert: KiCad's native recovery alert (an NSAlert before its API
+    # answers) is reported to the hub (ET_DIALOG_OPENED from the new KiCad), in front of Backplane's window and centred on the pane. The client
+    # window is first made smaller at the screen's left, so an alert centred on the screen (AppKit's own place) is not on the pane's centre ----
+    if os.environ.get('MAC_MODE') in ('autosave', 'recover'):
+        REC = os.environ.get('MAC_MODE') == 'recover'
         sys.path.insert(0, os.path.join(REPO, 'test/kicad_embed/mac')); import hub_ws
         token = open(os.path.join(OUT, 'home/token')).read().strip(); pcb = os.path.join(OUT, 'proj', 'ecc83-pp.kicad_pcb')
         def mcalls(): return [l for l in open(os.path.join(OUT, 'standin.log'), errors='replace').read().splitlines() if l.startswith('MCPCALL')] if os.path.isfile(os.path.join(OUT, 'standin.log')) else []
@@ -586,6 +590,17 @@ try:
         kk = []
         for l in subprocess.run(['ps', '-axo', 'pid=,command='], capture_output=True, text=True).stdout.splitlines():
             if '--parent-pid' in l and '--embedded' in l and OUT in l: kk.append(int(l.split()[0]))
+        if REC:
+            win_size(client.pid, 640, 560); time.sleep(2.5); cw = next((w for w in wins() if w[0] == cw[0]), cw)
+        def embed_events():
+            out = []
+            for ln in hub_log().splitlines():
+                i = ln.find('kicad embed event: ')
+                if i < 0: continue
+                try: out.append(json.loads(ln[i + 19:]))
+                except ValueError: pass
+            return out
+        ev0 = len(embed_events())
         for p in kk:
             try: os.kill(p, 9)
             except OSError: pass
@@ -602,6 +617,92 @@ try:
         RES['autosave_alert'] = str(rec)[:160]
         check(bool(oa) and bool(rec), f'autosave: KiCad killed, Open the editor again: KiCad offers Recover Unsaved Changes (open-again {bool(oa)})')
         check(named, 'autosave: the pane names it ("KiCad is asking: Recover Unsaved Changes")')
+        if REC:
+            def new_kicads():
+                return [int(l.split()[0]) for l in subprocess.run(['ps', '-axo', 'pid=,command='], capture_output=True, text=True).stdout.splitlines()
+                        if '--parent-pid' in l and '--embedded' in l and OUT in l and int(l.split()[0]) not in kk]
+            def the_alert():  # (index front to back, bounds) of the new KiCad's small window: the alert; any window level
+                ws = helper('windows') or []; nk = set(new_kicads())
+                for i, w in enumerate(ws):
+                    b = w['bounds']
+                    if w['pid'] in nk and 150 < b[2] < 700 and 80 < b[3] < 520: return i, b, ws
+                return None
+            al = wait_for(the_alert, 60, 0.5)
+            dlg = wait_for(lambda: [e for e in embed_events()[ev0:] if e.get('type') == 'ET_DIALOG_OPENED'], 30, 0.5)
+            RES['recover_alert'] = {'alert': al and al[1], 'dialog_events': [e.get('detail') for e in dlg or []]}
+            check(bool(dlg), f'recover: the recovery alert is reported to the hub (ET_DIALOG_OPENED from the new KiCad: {[e.get("detail") for e in dlg or []]})')
+            pp = last_push(); P = pp[0] if pp else None
+            if al and P:
+                i, b, ws = al
+                ci = next((j for j, w in enumerate(ws) if w['number'] == cw[0]), None)
+                check(ci is not None and i < ci, f'recover: the alert is in front of Backplane\'s window (alert {i}, Backplane {ci}, front to back)')
+                acx, acy = b[0] + b[2] / 2, b[1] + b[3] / 2; pcx = P[0] + P[2] / 2
+                disp = Quartz.CGDisplayBounds(Quartz.CGMainDisplayID()) if DRIVER == 'quartz' else None
+                scx = disp.origin.x + disp.size.width / 2 if disp else None
+                print(f'INFO recover: alert {b}, centre ({acx:.0f}, {acy:.0f}); pane {P}, centre x {pcx:.0f}; screen centre x {scx}', flush=True)
+                if scx is not None and abs(pcx - scx) < 80: print('INFO recover: the pane\'s centre is near the screen\'s: the centring check cannot tell them apart here', flush=True)
+                check(abs(acx - pcx) <= 40 and P[1] <= acy <= P[1] + P[3], f'recover: the alert is centred on the pane (|dx| {abs(acx - pcx):.0f} pt, centre y {acy:.0f} in the pane\'s {P[1]:.0f}..{P[1] + P[3]:.0f})')
+            else:
+                check(False, f'recover: the alert window of the new KiCad is on screen (alert {bool(al)}, pane {bool(P)})')
+            shot('recover-1-alert')
+        raise SystemExit(1 if FAILS else 0)
+    # ---- MAC_MODE=zoom: the zoom chords in the embedded board editor (fork embed's fix/mac-cmd-equals-zoom: plain Cmd+= zooms in), judged by
+    # the board's size on screen (KiCad has no view readback): the extent of the board's coloured pixels (copper, silk; the grid, ratsnest and
+    # text are grey) inside the canvas, where the canvas is where those pixels differ between two zoom levels (the panels' swatches do not).
+    # From a fit: Cmd+- twice (smaller each time), plain Cmd+= (larger: the row under test), Cmd+Shift+= (larger: KiCad's own Ctrl++,
+    # the control), Cmd+- (smaller), Cmd+0 (back to the fit). The pointer stays on the board's centre, KiCad's zoom anchor ----
+    if os.environ.get('MAC_MODE') == 'zoom':
+        if DRIVER != 'quartz': raise SystemExit('MAC_MODE=zoom reads pixels: the e2e-macos runner only')
+        def grab(r):
+            img = Quartz.CGWindowListCreateImage(Quartz.CGRectMake(*r), Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID, Quartz.kCGWindowImageNominalResolution)
+            w, h, bpr = Quartz.CGImageGetWidth(img), Quartz.CGImageGetHeight(img), Quartz.CGImageGetBytesPerRow(img)
+            d = bytes(Quartz.CGDataProviderCopyData(Quartz.CGImageGetDataProvider(img)))
+            sx, sy = w / r[2], h / r[3]; m = set()
+            for y in range(0, int(r[3]), 2):
+                row = int(y * sy) * bpr
+                for x in range(0, int(r[2]), 2):
+                    o = row + int(x * sx) * 4; px = d[o:o + 3]
+                    if max(px) - min(px) > 70 and max(px) > 90: m.add((x, y))
+            return m
+        def extent(m, R=None):
+            q = [p for p in m if not R or (R[0] <= p[0] <= R[2] and R[1] <= p[1] <= R[3])]
+            if len(q) < 20: return None
+            xs = sorted(p[0] for p in q); ys = sorted(p[1] for p in q); n = len(q)
+            # the 2nd and 98th percentiles, so a stray pixel does not make the size
+            return (xs[n // 50], ys[n // 50], xs[-1 - n // 50], ys[-1 - n // 50])
+        P = last_push()[0]; pane = (P[0], P[1], P[2], P[3])
+        def to_canvas(): key(K_ESC); time.sleep(0.3); click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); time.sleep(0.4); key(K_ESC); time.sleep(0.3)
+        tr_path = os.path.join(OUT, 'kicad-embed-trace.log')
+        def trace_from(n): return [l.split('macos: ', 1)[-1].strip() for l in open(tr_path, errors='replace').read().splitlines()[n:] if 'macos: ' in l] if os.path.isfile(tr_path) else []
+        def tr_n(): return len(open(tr_path, errors='replace').read().splitlines()) if os.path.isfile(tr_path) else 0
+        def chord(code, fl, tag):
+            n = tr_n(); key(code, fl); time.sleep(1.8); m = grab(pane); relay(op='png', rect=list(pane), path=os.path.join(OUT, f'zoom-{tag}.png'))
+            return m, trace_from(n)
+        to_canvas(); key(115); time.sleep(2.0)  # Home: KiCad's Zoom to Fit
+        m0 = grab(pane); relay(op='png', rect=list(pane), path=os.path.join(OUT, 'zoom-0-fit.png'))
+        e0 = extent(m0)
+        if e0: relay(op='move', x=P[0] + (e0[0] + e0[2]) / 2, y=P[1] + (e0[1] + e0[3]) / 2); time.sleep(0.4)
+        m1, t1 = chord(27, CMD, '1-out'); m2, t2 = chord(27, CMD, '2-out')
+        R = extent(m0 ^ m2); print(f'INFO zoom: canvas content box {R} (pane {P})', flush=True)
+        if R:
+            c2 = extent(m2, R)
+            if c2: relay(op='move', x=P[0] + (c2[0] + c2[2]) / 2, y=P[1] + (c2[1] + c2[3]) / 2); time.sleep(0.4)
+        m3, t3 = chord(24, CMD, '3-cmd-equals'); m4, t4 = chord(24, CMD | SHIFT, '4-cmd-shift-equals')
+        m5, t5 = chord(27, CMD, '5-out'); m6, t6 = chord(29, CMD, '6-cmd-0')
+        def size(m):
+            e = extent(m, R) if R else None
+            return ((e[2] - e[0]) + (e[3] - e[1])) / 2 if e else 0.0
+        s = [size(m) for m in (m0, m1, m2, m3, m4, m5, m6)]
+        RES['zoom_sizes'] = s; print(f'INFO zoom: board size (pt) fit {s[0]:.0f}, Cmd+- {s[1]:.0f}, Cmd+- {s[2]:.0f}, Cmd+= {s[3]:.0f}, Cmd+Shift+= {s[4]:.0f}, Cmd+- {s[5]:.0f}, Cmd+0 {s[6]:.0f}', flush=True)
+        for tag, t in (('Cmd+-', t1), ('Cmd+=', t3), ('Cmd+Shift+=', t4), ('Cmd+0', t6)): print(f'INFO zoom: trace after {tag}: {t}', flush=True)
+        ok_m = bool(R) and s[0] > 40
+        check(ok_m, f'zoom: the board is measurable in the canvas (fit {s[0]:.0f} pt)')
+        if ok_m:
+            check(s[1] < s[0] * 0.9 and s[2] < s[1] * 0.9, f'zoom: Cmd+- zooms out ({s[0]:.0f} -> {s[1]:.0f} -> {s[2]:.0f})')
+            check(s[3] > s[2] * 1.12, f'zoom: plain Cmd+= zooms in ({s[2]:.0f} -> {s[3]:.0f})')
+            check(s[4] > s[3] * 1.12, f'zoom: Cmd+Shift+= (KiCad\'s Ctrl++) zooms in ({s[3]:.0f} -> {s[4]:.0f})')
+            check(s[5] < s[4] * 0.9, f'zoom: Cmd+- zooms out again ({s[4]:.0f} -> {s[5]:.0f})')
+            check(abs(s[6] - s[0]) <= s[0] * 0.08, f'zoom: Cmd+0 zooms to fit ({s[5]:.0f} -> {s[6]:.0f}, the fit {s[0]:.0f})')
         raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=first: a fresh home's first Edit puts KiCad over the pane within 30 s (the checks above), and stops ----
     if os.environ.get('MAC_MODE') == 'first':
