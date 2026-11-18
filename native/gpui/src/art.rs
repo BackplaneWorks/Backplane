@@ -46,16 +46,16 @@ pub(crate) fn parse_d(d: &str) -> Vec<Seg> {
     out
 }
 
-/// A provider's vendor mark as path segments in its 24x24 viewBox (assets/providers/<provider>.svg), None for a provider without one.
+/// A provider's mark as path segments in its 24x24 viewBox (assets/providers/<provider>.svg, sources in its NOTICE.md), None for a provider without one.
 pub fn mark_path(provider: &str) -> Option<&'static [Seg]> {
-    static CLAUDE: std::sync::OnceLock<Vec<Seg>> = std::sync::OnceLock::new();
-    static OPENCODE: std::sync::OnceLock<Vec<Seg>> = std::sync::OnceLock::new();
-    let (cell, svg): (&'static std::sync::OnceLock<Vec<Seg>>, &'static str) = match provider {
-        "claude" => (&CLAUDE, include_str!("../../../assets/providers/claude.svg")),
-        "opencode" => (&OPENCODE, include_str!("../../../assets/providers/opencode.svg")),
-        _ => return None,
-    };
-    Some(cell.get_or_init(|| parse_d(attr(svg, "<path", "d").unwrap_or(""))).as_slice())
+    macro_rules! marks { ($($name:literal),*) => {{
+        static CELLS: [std::sync::OnceLock<Vec<Seg>>; marks!(@n $($name),*)] = [const { std::sync::OnceLock::new() }; marks!(@n $($name),*)];
+        let svgs = [$(include_str!(concat!("../../../assets/providers/", $name, ".svg"))),*];
+        let names = [$($name),*];
+        let i = names.iter().position(|n| *n == provider)?;
+        Some(CELLS[i].get_or_init(|| parse_d(attr(svgs[i], "<path", "d").unwrap_or(""))).as_slice())
+    }}; (@n $($name:literal),*) => { [$($name),*].len() } }
+    marks!("claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp")
 }
 /// The mark drawn plain in `color` in a `size` px box (one paint, no repaint loop).
 pub fn mark(segs: &'static [Seg], size: f32, color: u32) -> impl IntoElement {
