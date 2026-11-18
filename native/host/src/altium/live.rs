@@ -77,8 +77,8 @@ pub fn split(src: &str) -> Parts {
             }
             let en = toks.get(j).map(|x| x.1).unwrap_or(src.len());
             let sec = src[st..en].trim();
-            // the template's globals are already in a var section: a var section's own keyword is dropped, const/type keep theirs
-            if is_w(t, "var") { decls.push_str(sec[3..].trim()); } else { decls.push_str(sec); }
+            // every section keeps its keyword (the template's own var section comes first; Delphi takes several sections in any order)
+            decls.push_str(sec);
             decls.push('\n');
             k = j; continue
         }
@@ -168,6 +168,13 @@ pub fn track_undo(src: &str) -> String {
 
 fn pas_str(s: &str) -> String { format!("'{}'", s.replace('\'', "''")) }
 
+/// Error.where: an error naming a line of the run file ("at Line:54, Char:19") gets that line quoted, so the agent sees which of its
+/// own statements it was (the run file wraps the script, so its line numbers are not the script's).
+pub fn locate(err: &str, run_file: &str) -> String {
+    let Some(i) = err.find("Line:") else { return err.to_string() };
+    let n: usize = err[i + 5..].chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap_or(0);
+    match run_file.lines().nth(n.wrapping_sub(1)) { Some(l) if n > 0 && !l.trim().is_empty() => format!("{err}\n(that line of the script: `{}`)", l.trim()), _ => err.to_string() }
+}
 /// Template.of: the whole run file for `src`, writing its lines to `out` and, when it has ended, `done`; loops end after `guard_s` seconds.
 pub fn build(src: &str, out: &str, done: &str, guard_s: u32) -> String {
     // guards first, on the whole script, so a guard names the script's own line
@@ -313,10 +320,24 @@ mod win {
     use windows_sys::Win32::Foundation::{CloseHandle, HWND, LPARAM, WPARAM};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
     use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumChildWindows, EnumWindows, GetClassNameW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, PostMessageW, WM_CLOSE, WM_COMMAND};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumChildWindows, EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, PostMessageW, SendMessageW, SetForegroundWindow, WM_CLOSE, WM_COMMAND};
 
     fn wide(v: &[u16]) -> String { String::from_utf16_lossy(&v[..v.iter().position(|&c| c == 0).unwrap_or(v.len())]) }
 
+    /// Every running X2.EXE's pid (Altium itself, and the short-lived second instance a command line starts, whose own boxes
+    /// ("another instance is busy") block it until answered)
+    fn x2_pids() -> Vec<u32> {
+        let mut v = vec![];
+        unsafe {
+            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if snap.is_null() || snap as isize == -1 { return v }
+            let mut e: PROCESSENTRY32W = std::mem::zeroed();
+            e.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+            if Process32FirstW(snap, &mut e) != 0 { loop { if wide(&e.szExeFile).eq_ignore_ascii_case("X2.EXE") { v.push(e.th32ProcessID) } if Process32NextW(snap, &mut e) == 0 { break } } }
+            CloseHandle(snap);
+        }
+        v
+    }
     /// The running X2.EXE's pid and full path (the first found)
     pub fn altium() -> Option<(u32, String)> {
         unsafe {
@@ -342,40 +363,73 @@ mod win {
         }
     }
 
-    struct Dlg { hwnd: HWND, class: String, text: String }
+    struct Dlg { hwnd: HWND, class: String, text: String, buttons: Vec<(HWND, String)> }
     unsafe extern "system" fn child_text(h: HWND, l: LPARAM) -> BOOL {
         let acc = &mut *(l as *mut Vec<String>);
         let mut b = [0u16; 1024]; let n = GetWindowTextW(h, b.as_mut_ptr(), b.len() as i32);
         if n > 0 { acc.push(String::from_utf16_lossy(&b[..n as usize])) }
         1
     }
+    unsafe extern "system" fn child_button(h: HWND, l: LPARAM) -> BOOL {
+        let acc = &mut *(l as *mut Vec<(HWND, String)>);
+        let mut c = [0u16; 128]; let n = GetClassNameW(h, c.as_mut_ptr(), c.len() as i32);
+        let class = String::from_utf16_lossy(&c[..n.max(0) as usize]);
+        if class == "Button" || class == "TButton" || class.contains("Btn") {
+            let mut b = [0u16; 128]; let tn = GetWindowTextW(h, b.as_mut_ptr(), b.len() as i32);
+            acc.push((h, String::from_utf16_lossy(&b[..tn.max(0) as usize]).replace('&', "")));
+        }
+        1
+    }
     unsafe extern "system" fn top(h: HWND, l: LPARAM) -> BOOL {
-        let (pid, acc) = &mut *(l as *mut (u32, Vec<Dlg>));
+        let (pids, acc) = &mut *(l as *mut (Vec<u32>, Vec<Dlg>));
         let mut p = 0u32; GetWindowThreadProcessId(h, &mut p);
-        if p != *pid || IsWindowVisible(h) == 0 { return 1 }
+        if !pids.contains(&p) || IsWindowVisible(h) == 0 { return 1 }
         let mut c = [0u16; 256]; let n = GetClassNameW(h, c.as_mut_ptr(), c.len() as i32);
         let class = String::from_utf16_lossy(&c[..n.max(0) as usize]);
         if !matches!(class.as_str(), "#32770" | "TMessageForm") { return 1 }
         let mut t = [0u16; 512]; let tn = GetWindowTextW(h, t.as_mut_ptr(), t.len() as i32);
         let mut parts = vec![String::from_utf16_lossy(&t[..tn.max(0) as usize])];
         EnumChildWindows(h, Some(child_text), &mut parts as *mut Vec<String> as LPARAM);
-        acc.push(Dlg { hwnd: h, class, text: parts.into_iter().filter(|s| !s.trim().is_empty()).collect::<Vec<_>>().join(" | ") });
+        let mut buttons: Vec<(HWND, String)> = vec![];
+        EnumChildWindows(h, Some(child_button), &mut buttons as *mut Vec<(HWND, String)> as LPARAM);
+        acc.push(Dlg { hwnd: h, class, text: parts.into_iter().filter(|s| !s.trim().is_empty()).collect::<Vec<_>>().join(" | "), buttons });
         1
     }
     /// Altium's visible dialog boxes (message boxes and its own message forms)
     fn dialogs(pid: u32) -> Vec<Dlg> {
-        let mut st: (u32, Vec<Dlg>) = (pid, vec![]);
-        unsafe { EnumWindows(Some(top), &mut st as *mut (u32, Vec<Dlg>) as LPARAM); }
+        let mut pids = x2_pids(); if !pids.contains(&pid) { pids.push(pid) }
+        let mut st: (Vec<u32>, Vec<Dlg>) = (pids, vec![]);
+        unsafe { EnumWindows(Some(top), &mut st as *mut (Vec<u32>, Vec<Dlg>) as LPARAM); }
         st.1
     }
-    /// A box a failed script raised: answered Cancel (it stops the script), a message form closed.
+    /// A box a failed script raised, answered: its Cancel (stops the script), else No, else OK. A Windows box takes IDCANCEL; Altium's
+    /// own message forms take a click on the button (BM_CLICK) or, for its drawn buttons, Enter sent to the button; WM_CLOSE last.
     fn answer(d: &Dlg) {
         unsafe {
-            if d.class == "#32770" { PostMessageW(d.hwnd, WM_COMMAND, 2 as WPARAM, 0); } // IDCANCEL
-            else { PostMessageW(d.hwnd, WM_CLOSE, 0, 0); }
+            if d.class == "#32770" { PostMessageW(d.hwnd, WM_COMMAND, 2 as WPARAM, 0); return } // IDCANCEL
+            let pick = ["Cancel", "No", "OK", "Ok", "Close"].iter().find_map(|w| d.buttons.iter().find(|(_, t)| t.eq_ignore_ascii_case(w))).or(d.buttons.first());
+            match pick {
+                Some((b, _)) => {
+                    SendMessageW(*b, 0x00F5, 0, 0); // BM_CLICK
+                    std::thread::sleep(std::time::Duration::from_millis(150));
+                    if IsWindowVisible(d.hwnd) != 0 { PostMessageW(*b, 0x0100, 0x0D, 0); PostMessageW(*b, 0x0101, 0x0D, 0); } // Enter down/up
+                }
+                None => { PostMessageW(d.hwnd, WM_CLOSE, 0, 0); }
+            }
         }
     }
 
+    /// The window that was in front before a run, in front again (unless it was Altium's own, or the person has moved on to another).
+    fn give_back(pid: u32, front: isize) {
+        if front == 0 { return }
+        unsafe {
+            let (mut fp, mut np) = (0u32, 0u32);
+            GetWindowThreadProcessId(front as HWND, &mut fp);
+            let now = GetForegroundWindow();
+            GetWindowThreadProcessId(now, &mut np);
+            if fp != pid && np == pid { SetForegroundWindow(front as HWND); }
+        }
+    }
     /// Runs.dir: %PUBLIC%\Backplane\altium\runs (no spaces in a person's name: Altium's command-line parameters are not quoted)
     fn dir() -> std::path::PathBuf {
         let base = std::env::var_os("PUBLIC").map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from(r"C:\Users\Public"));
@@ -397,6 +451,8 @@ mod win {
         let guard = timeout.saturating_sub(3).max(2);
         std::fs::write(&pas, super::build(script, &out.to_string_lossy(), &done.to_string_lossy(), guard)).map_err(|e| e.to_string())?;
         let before: Vec<isize> = dialogs(pid).iter().map(|x| x.hwnd as isize).collect();
+        // the window in front before the run: Altium comes forward when a script starts; the person's window is given back after
+        let front = unsafe { GetForegroundWindow() } as isize;
         let started = Instant::now();
         let arg = format!("-RScriptingSystem:RunScriptFile(FileName={}|ProcName=Run)", pas.to_string_lossy());
         crate::proc::tokio_cmd(crate::proc::Kind::Local, &exe).arg(arg).spawn().map_err(|e| format!("cannot start {exe}: {e}"))?;
@@ -418,15 +474,27 @@ mod win {
                 ran.dialogs.push(x.text.clone()); answer(&x); stopped = true;
             }
             if stopped {
-                // a compile error or an error outside try: the box is answered, the debugger stopped; the run is over
-                let _ = crate::proc::tokio_cmd(crate::proc::Kind::Local, &exe).arg("-REditScript:Stop").spawn();
-                tokio::time::sleep(Duration::from_millis(400)).await;
-                if !done.exists() { ran.ok = false; ran.error = format!("Altium stopped the script: {}", ran.dialogs.join(" / ")); break }
+                // a compile error or an error outside try: "Continue execution?" is answered, then Altium may raise an Error box after it;
+                // every new box is answered until none has come for a second, then its debugger is stopped (that raises a box of its own
+                // while a run is still paused: answered too)
+                settle(pid, &before, &mut ran).await;
+                if !done.exists() {
+                    let _ = crate::proc::tokio_cmd(crate::proc::Kind::Local, &exe).arg("-REditScript:Stop").spawn();
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    settle(pid, &before, &mut ran).await;
+                }
+                if !done.exists() {
+                    ran.ok = false;
+                    let e = format!("Altium stopped the script: {}", ran.dialogs.iter().filter(|d| !d.is_empty()).cloned().collect::<Vec<_>>().join(" / "));
+                    ran.error = super::locate(&e, &std::fs::read_to_string(&pas).unwrap_or_default());
+                    break
+                }
             }
             if Instant::now() > end { ran.ok = false; ran.error = format!("no answer from Altium in {timeout} s (it may be busy, showing a dialog of its own, or still running the script)"); break }
         }
         ran.output = std::fs::read_to_string(&out).unwrap_or_default().trim_end().to_string();
         ran.secs = started.elapsed().as_secs_f32();
+        give_back(pid, front);
         Ok(ran)
     }
     /// X2.EXE: the running one's, else the newest in Program Files/Altium/AD*
@@ -442,6 +510,18 @@ mod win {
         crate::proc::std_cmd(crate::proc::Kind::Local, &x2).arg(&file).spawn().map_err(|e| format!("cannot start Altium: {e}"))?;
         Ok(format!("altium {file}"))
     }
+    /// Answer every box Altium raises (not one it had before the run) until none has come for a second (at most 6 s)
+    async fn settle(pid: u32, before: &[isize], ran: &mut Ran) {
+        let (t0, mut quiet) = (Instant::now(), Instant::now());
+        while quiet.elapsed() < Duration::from_millis(1000) && t0.elapsed() < Duration::from_secs(6) {
+            tokio::time::sleep(Duration::from_millis(120)).await;
+            for x in dialogs(pid) {
+                if before.contains(&(x.hwnd as isize)) { continue }
+                if !ran.dialogs.contains(&x.text) { ran.dialogs.push(x.text.clone()) }
+                answer(&x); quiet = Instant::now();
+            }
+        }
+    }
     fn rand_u16() -> u16 { (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0) >> 8) as u16 }
 }
 
@@ -451,7 +531,7 @@ mod tests {
     #[test] fn splits_var_routines_and_body() {
         let s = "var\n  Board : IPCB_Board;\n  I, N : Integer;\nconst K = 3;\nfunction Twice(X : Integer) : Integer;\nvar Y : Integer;\nbegin\n  Y := X * 2;\n  if Y > 0 then begin Result := Y; end else Result := 0;\nend;\nprocedure Hi;\nbegin\n  try Emit('a;b end'); except end;\nend;\nBoard := PCBServer.GetCurrentPCBBoard;\nEmit(IntToStr(Twice(K)));\n";
         let p = split(s);
-        assert_eq!(p.decls, "Board : IPCB_Board;\n  I, N : Integer;\nconst K = 3;");
+        assert_eq!(p.decls, "var\n  Board : IPCB_Board;\n  I, N : Integer;\nconst K = 3;");
         assert!(p.routines.starts_with("function Twice") && p.routines.contains("procedure Hi;") && p.routines.trim_end().ends_with("end;"), "{}", p.routines);
         assert_eq!(p.body, "Board := PCBServer.GetCurrentPCBBoard;\nEmit(IntToStr(Twice(K)));");
     }
@@ -502,9 +582,15 @@ mod tests {
         let r = rt.block_on(run(&src, t));
         println!("BP-RESULT {}", match r { Ok(r) => r.json().to_string(), Err(e) => json!({"error": e}).to_string() });
     }
+    #[test] fn errors_quote_their_line() {
+        let f = "a\nb\n    Emit('x';\nd";
+        assert_eq!(locate(") expected at Line:3, Char:19.", f), ") expected at Line:3, Char:19.\n(that line of the script: `Emit('x';`)");
+        assert_eq!(locate("no line here", f), "no line here");
+        assert_eq!(locate("at Line:99", f), "at Line:99");
+    }
     #[test] fn template_has_parts_and_paths() {
         let b = build("var X : Integer;\nX := 2;\nwhile X > 0 do X := X - 1;\nEmit('done');", r"C:\r\a.out", r"C:\r\a.done", 20);
-        assert!(b.contains("X : Integer;") && b.contains("while (X > 0) and BpTick(3) do") && b.contains("BpOutPath := 'C:\\r\\a.out';") && b.contains("/ 86400"));
+        assert!(b.contains("var X : Integer;") && build("const K = 2;\nvar Y : Integer;\nY := K;", "o", "d", 5).contains("const K = 2;\n    var Y : Integer;") && b.contains("while (X > 0) and BpTick(3) do") && b.contains("BpOutPath := 'C:\\r\\a.out';") && b.contains("/ 86400"));
         assert!(build("Emit('it''s');", "o", "d", 5).contains("Emit('it''s');"));
     }
 }
