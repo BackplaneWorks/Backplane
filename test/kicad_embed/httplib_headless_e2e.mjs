@@ -6,9 +6,9 @@
 // headless KiCad serves every call) and the answers are checked:
 //   whole     the HTTP part placed by kicad_edit add has its pins in `created`, and its raw definition has pins and graphics
 //   control   Device:R placed the same way has them (the runtime and the hub are fine without the HTTP library)
-//   served    the answer says the headless KiCad served it
-//   relib     set raw definition.id answers with the new lib, and a find straight after shows it
-//   rawadd    a raw SchematicSymbolInstance add with only definition.id has the part's other fields (MPN)
+//   served    the answer says the headless KiCad served it (served_by), on a refusal too
+//   relib     set raw definition.id is refused (a placed symbol's library symbol is not changed by set), not answered as done
+//   rawadd    a raw SchematicSymbolInstance add with only definition.id has the part's other fields (MPN); without the fork fix it is refused as empty
 //   adddel    add then delete by ref in one call deletes it
 // With --expect-hollow (a runtime without the fork fix) `whole` must fail and the hub must say so (flag `hollow`), the rest as above.
 // HOME and XDG_* are temp. Only processes this script started are stopped (the hub by its PID, the stub by its PID).
@@ -77,15 +77,15 @@ const res=k=>r[k]?.body?.results??[];const raw=k=>res(k)[1]?.rows?.[0];
 const items=d=>(d?.definition?.items??[]).map(i=>(i.item?.['@type']??i['@type']??'').split('.').pop());
 const whole=x=>items(x).includes('SchematicPin')&&items(x).some(t=>/Graphic|Shape/.test(t));
 check('control: Device:R comes whole',!r.control.error&&whole(raw('control'))&&!!res('control')[0]?.created?.[0]?.pins,r.control);
-const served=JSON.stringify(r.whole.body).match(/"served_by":"([a-z]+)"/)?.[1];
-check('served: the answer says the headless KiCad served it',served==='headless',r.whole.body?.served_by??r.whole.body);
+check('served: the answer says the headless KiCad served it',r.whole.body?.served_by==='headless'&&r.control.body?.served_by==='headless',[r.whole.body?.served_by,r.control.body?.served_by]);
 if(expectHollow){
- const flagged=r.whole.error?/no pins|hollow/.test(JSON.stringify(r.whole.body)):JSON.stringify(res('whole')[0]).includes('hollow');
- check('whole (without the fork fix): the hollow symbol is flagged or refused',flagged&&!whole(raw('whole')),r.whole);
+ check('whole (without the fork fix): the empty template is refused, nothing placed',r.whole.error&&/template KiCad placed is empty/.test(r.whole.body?.error)&&/source symbol itself/.test(r.whole.body?.error),r.whole);
 }else check('whole: the HTTP part comes with its pins and graphics',!r.whole.error&&whole(raw('whole'))&&!!res('whole')[0]?.created?.[0]?.pins,r.whole);
 console.log(`info again: the HTTP part placed after Device:R comes ${whole(raw('again'))?'whole':'hollow'}`);
-const rl=res('relib');check('relib: find straight after the set shows the new lib',!r.relib.error&&rl[1]?.rows?.[0]?.lib===P,r.relib);
-const ra=res('rawadd')[1]?.rows?.[0];check('rawadd: a raw add by definition.id carries the part\'s fields',!r.rawadd.error&&JSON.stringify(ra??{}).includes('RC1206FR-07470RL'),r.rawadd);
+check('relib: set raw definition is refused, not answered as done',r.relib.error&&/not changed by set/.test(r.relib.body?.error),r.relib);
+const ra=res('rawadd')[1]?.rows?.[0];
+if(expectHollow)check('rawadd (without the fork fix): refused as empty',r.rawadd.error&&/is empty/.test(r.rawadd.body?.error),r.rawadd);
+else check('rawadd: a raw add by definition.id carries the part\'s fields',!r.rawadd.error&&JSON.stringify(ra??{}).includes('RC1206FR-07470RL'),r.rawadd);
 check('adddel: add then delete by ref in one call',!r.adddel.error&&res('adddel')[1]?.deleted===1,r.adddel);
 const left=(r.after.body?.results?.[0]?.rows??[]).map(x=>x.ref);check('after: R995 is gone',!left.includes('R995'),left);
 }finally{await stopHub(h);try{process.kill(stub.pid)}catch{}rmSync(run,{recursive:true,force:true})}
