@@ -722,18 +722,28 @@ try:
             print(f'INFO leave baseline: View then Edit on a warm pane, the frame front-most at the pane in {(ts - tb) * 1000:.0f} ms (Edit pressed {pe}; seen {bool(fb)})', flush=True)
             timeline('baseline View->Edit', tb, ts if fb else None)
             if fb: P = last_push()[0]
-        # (c) needs the sidebar: unfolded first (the pane narrows; P follows), a second thread made, then back to the first one
-        if not rects_now().get('ui:New thread'): press_rect('ui:Fold sidebar'); time.sleep(1.5)
-        home_thread = next(iter(sorted(k for k in rects_now() if k.startswith('thread:'))), None)
-        print(f'INFO leave: the sidebar shows {sorted(k for k in rects_now() if k.startswith("thread:"))}; New thread {bool(rects_now().get("ui:New thread"))}', flush=True)
+        # (c) another thread: a second thread of the project made through the hub, the sidebar unfolded so both rows are drawn (the pane
+        # narrows; P follows); (c) presses the other thread's row and comes back on the first one's
+        sys.path.insert(0, os.path.join(REPO, 'test/kicad_embed/mac')); import hub_ws
+        hub_ws.send(port, open(os.path.join(OUT, 'home/token')).read().strip(), 'thread.create', {'project': 'p1', 'title': 'Other thread'}, wait=1.0)
+        time.sleep(2.0)
+        if not any(k.startswith('thread:') for k in rects_now()):
+            folds = [k for k in rects_now() if 'sidebar' in k.lower() or 'fold' in k.lower()]
+            print(f'INFO leave: sidebar controls {folds}', flush=True)
+            press_rect('ui:Fold sidebar') or (folds and press_rect(folds[0])); time.sleep(1.5)
+        rows = sorted(k for k in rects_now() if k.startswith('thread:'))
+        home_thread = 'thread:t1' if 'thread:t1' in rows else (rows[0] if rows else None)
+        other_thread = next((k for k in rows if k != home_thread), None)
+        print(f'INFO leave: the sidebar shows {rows}; home {home_thread}, other {other_thread}', flush=True)
+        if home_thread: press_rect(home_thread); time.sleep(1.0)
         wait_for(at_pane, 10, 0.2); P = last_push()[0]
         ways = [
             ('a', 'the viewer\'s Close', lambda: press_rect('ui:CloseViewer'), lambda: press_rect('rail:Board')),
             ('b', 'the rail closing the lit page', lambda: press_rect('rail:Board'), lambda: press_rect('rail:Board')),
-            ('c', 'another thread', lambda: press_rect('ui:New thread'), lambda: home_thread and press_rect(home_thread)),
+            ('c', 'another thread', lambda: other_thread and press_rect(other_thread), lambda: home_thread and press_rect(home_thread)),
             ('d', 'the Files page', lambda: press_rect('rail:Files'), lambda: press_rect('rail:Board')),
             ('e', 'a Diff over the page', lambda: press_rect('rail:Diff'), lambda: press_rect('rail:Board')),
-            ('f', 'Settings over the page', lambda: press_rect('ui:Settings'), lambda: (key(K_ESC), True)[1]),
+            ('f', 'Settings over the page', lambda: press_rect('ui:Settings'), lambda: press_rect('ui:Settings') or (key(K_ESC), True)[1]),
         ]
         for tag, label, leave_, back_ in ways:
             if not at_pane():
