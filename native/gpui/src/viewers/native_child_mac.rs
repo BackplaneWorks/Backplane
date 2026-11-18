@@ -226,12 +226,13 @@ pub fn yield_to(w: u64) {
     // focus() of our window and the pane's hide move the generation on, so no hand-back can come between the check and the activation.
     extern "C" fn fallback(ctx: *mut c_void) {
         let (pid, mine) = *unsafe { Box::from_raw(ctx as *mut (i64, u64)) };
-        if app_active(pid) { return }
-        // Backplane took the keyboard back, the frame left the screen, or a newer hand-in came: the person's choice stands
+        // Backplane took the keyboard back, the frame left the screen, or a newer hand-in came: the person's choice stands (checked first,
+        // so every stale fallback is logged, KiCad active or not)
         if !crate::viewers::kicad_pane::yield_current(mine, YIELD_GEN.load(std::sync::atomic::Ordering::SeqCst)) {
-            eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_yield_fallback": {"to": pid, "gen": mine, "skipped": "the hand-in was voided (Backplane took the keyboard, the frame left, or a newer hand-in)"}}));
+            eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_yield_fallback": {"to": pid, "gen": mine, "skipped": "the hand-in was voided (Backplane took the keyboard, the frame left, or a newer hand-in)", "kicad_active": app_active(pid)}}));
             return
         }
+        if app_active(pid) { return } // KiCad took the hand-in itself: nothing to do
         unsafe {
             let other = running_app(pid); if other.is_null() { return }
             let f: unsafe extern "C" fn(*mut c_void, *mut c_void, usize) -> bool = std::mem::transmute(objc_msgSend as *const ());
