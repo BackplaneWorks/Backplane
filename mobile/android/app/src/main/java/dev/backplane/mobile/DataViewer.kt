@@ -65,8 +65,8 @@ private data class Target(val tab: String, val path: String)
 fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> Unit) {
     // a linked file opens where it belongs: a board or schematic in its tab, a model in Mech, anything else previewed in Files
     val fx = ext(file)
-    var tab by remember { mutableStateOf(when { file.isEmpty() -> "Files"; fx == "kicad_pcb" -> "Board"; fx == "kicad_sch" -> "Schematic"; fx in setOf("step", "stp", "glb") -> "Mech"; else -> "Files" }) }
-    var target by remember { mutableStateOf<Target?>(when { fx == "kicad_pcb" -> Target("Board", file); fx == "kicad_sch" -> Target("Schematic", file); fx in setOf("step", "stp", "glb") -> Target("Mech", file); else -> null }) }
+    var tab by remember { mutableStateOf(when { file.isEmpty() -> "Files"; fx == "kicad_pcb" || fx == "pcbdoc" -> "Board"; fx == "kicad_sch" || fx == "schdoc" -> "Schematic"; fx in setOf("step", "stp", "glb") -> "Mech"; else -> "Files" }) }
+    var target by remember { mutableStateOf<Target?>(when { fx == "kicad_pcb" || fx == "pcbdoc" -> Target("Board", file); fx == "kicad_sch" || fx == "schdoc" -> Target("Schematic", file); fx in setOf("step", "stp", "glb") -> Target("Mech", file); else -> null }) }
     var files by remember { mutableStateOf<DataClient.ProjectFiles?>(null) }
     val online = DataClient.conn == DataClient.Conn.ONLINE
     LaunchedEffect(thread.id, online) {
@@ -107,7 +107,7 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
                 "Diff" -> DiffTab(thread)
                 "Review" -> ReviewTab(thread)
                 "Mech" -> MechTab(thread, target?.path?.takeIf { target?.tab == "Mech" })
-                "Files" -> FilesTab(thread, if (fx == "kicad_pcb" || fx == "kicad_sch") "" else file, line) { t -> target = t; tab = t.tab }
+                "Files" -> FilesTab(thread, if (fx == "kicad_pcb" || fx == "kicad_sch" || fx == "pcbdoc" || fx == "schdoc") "" else file, line) { t -> target = t; tab = t.tab }
                 else -> BrowserTab(thread)
             }
         }
@@ -403,7 +403,7 @@ private fun FilesTab(thread: DThread, start: String, startLine: Int, open: (Targ
                     val full = if (dir.isEmpty()) e.name else "$dir/${e.name}"
                     Column(Modifier.fillMaxWidth().clickable {
                         if (e.dir) dir = full else when (val x = ext(e.name)) {
-                            "kicad_pcb" -> open(Target("Board", full)); "kicad_sch" -> open(Target("Schematic", full))
+                            "kicad_pcb", "pcbdoc" -> open(Target("Board", full)); "kicad_sch", "schdoc" -> open(Target("Schematic", full))
                             "step", "stp", "glb" -> open(Target("Mech", full))
                             else -> preview = full
                         }

@@ -117,8 +117,8 @@ struct DataViewerView: View {
         self.client = client; self.thread = thread; self.openFile = openFile; self.line = line
         // a linked file opens where it belongs: a board or schematic in its tab, a model in Mech, anything else previewed in Files
         let e = ext(openFile)
-        _tab = State(initialValue: openFile.isEmpty ? "Files" : e == "kicad_pcb" ? "Board" : e == "kicad_sch" ? "Schematic" : ["step", "stp", "glb"].contains(e) ? "Mech" : "Files")
-        _target = State(initialValue: e == "kicad_pcb" ? ("Board", openFile) : e == "kicad_sch" ? ("Schematic", openFile) : ["step", "stp", "glb"].contains(e) ? ("Mech", openFile) : nil)
+        _tab = State(initialValue: openFile.isEmpty ? "Files" : e == "kicad_pcb" || e == "pcbdoc" ? "Board" : e == "kicad_sch" || e == "schdoc" ? "Schematic" : ["step", "stp", "glb"].contains(e) ? "Mech" : "Files")
+        _target = State(initialValue: e == "kicad_pcb" || e == "pcbdoc" ? ("Board", openFile) : e == "kicad_sch" || e == "schdoc" ? ("Schematic", openFile) : ["step", "stp", "glb"].contains(e) ? ("Mech", openFile) : nil)
     }
     var body: some View {
         VStack(spacing: 0) {
@@ -153,7 +153,7 @@ struct DataViewerView: View {
                 case "Diff": DataDiffTab(client: client, thread: thread)
                 case "Review": DataReviewTab(client: client, thread: thread)
                 case "Mech": DataMechTab(client: client, thread: thread, open: target?.tab == "Mech" ? target!.path : nil)
-                case "Files": DataFilesTab(client: client, thread: thread, start: ext(openFile) == "kicad_pcb" || ext(openFile) == "kicad_sch" ? "" : openFile, line: line) { target = $0; tab = $0.tab }
+                case "Files": DataFilesTab(client: client, thread: thread, start: ["kicad_pcb", "kicad_sch", "pcbdoc", "schdoc"].contains(ext(openFile)) ? "" : openFile, line: line) { target = $0; tab = $0.tab }
                 default: DataBrowserTab(client: client, thread: thread)
                 }
             }
@@ -498,8 +498,8 @@ struct DataFilesTab: View {
                         Button {
                             if e.dir { dir = full } else {
                                 switch ext(e.name) {
-                                case "kicad_pcb": open(("Board", full))
-                                case "kicad_sch": open(("Schematic", full))
+                                case "kicad_pcb", "pcbdoc": open(("Board", full))
+                                case "kicad_sch", "schdoc": open(("Schematic", full))
                                 case "step", "stp", "glb": open(("Mech", full))
                                 default: preview = full
                                 }
