@@ -754,6 +754,58 @@ try:
                 P = last_push()[0]; canvas_click()
                 check(active(kpid), f'hide: after the unhide a click gives KiCad the keyboard ({who})')
         raise SystemExit(1 if FAILS else 0)
+    # ---- MAC_MODE=textkeys (#1172, #1198): Backplane's own keys on a Mac, with the editor open over the pane. In the message box: Option+Left/Right
+    # by word, Cmd+Left/Right to the line's start/end, Cmd+Up/Down to the text's, Shift selecting, Option+Backspace a word, Cmd+Backspace to the
+    # line's start; a backtick is typed (it no longer shows the terminal from a text field). The text is read back by Cmd+A, Cmd+C (pbpaste).
+    # Cmd+H with the message box, the terminal (Cmd+J) and a viewer (the Files page) focused hides Backplane's window; unhidden, it is back.
+    # Last, Cmd+W with the terminal focused closes the window by the red button's path (the client's "close" metric, exit 0); the hub stays up ----
+    if os.environ.get('MAC_MODE') == 'textkeys':
+        K_LEFT, K_RIGHT, K_DOWN, K_UP, K_RET, K_GRAVE, K_H, K_W = 123, 124, 125, 126, 36, 50, 4, 13
+        def press_rect(i):
+            r = rects().get(i)
+            if not r: return False
+            b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2); time.sleep(0.6); return True
+        def composer_text():
+            subprocess.run(['pbcopy'], input=b'<nothing copied>'); key(K_A, CMD); time.sleep(0.15); key(8, CMD); time.sleep(0.3)
+            t = subprocess.run(['pbpaste'], capture_output=True).stdout.decode('utf8', 'replace'); key(K_RIGHT); time.sleep(0.15); return t
+        def typed(t): relay(op='text', text=t); time.sleep(0.2)
+        def ours_on_screen(): return any(w[0] == cw[0] for w in wins())
+        def unhide():
+            a = NSRunningApplication.runningApplicationWithProcessIdentifier_(client.pid); a.unhide(); time.sleep(0.4); a.activateWithOptions_(0)
+        def hub_up(): return subprocess.run(['curl', '-s', '-m2', '-o', '/dev/null', f'http://127.0.0.1:{port}/hello']).returncode == 0
+        check(press_rect('composer'), 'textkeys: the message box is on screen (its rect)'); key(K_A, CMD); key(K_DEL)
+        typed('keep'); key(K_RET, SHIFT); typed('ab cd')
+        check(composer_text() == 'keep\nab cd', f'textkeys: typed two lines ({composer_text()!r})')
+        steps = [('Option+Left, X: before the word', lambda: (key(K_LEFT, ALT), typed('X')), 'keep\nab Xcd'),
+                 ('Cmd+Left, Y: the line\'s start', lambda: (key(K_LEFT, CMD), typed('Y')), 'keep\nYab Xcd'),
+                 ('Cmd+Right, Option+Backspace: a word back from the line\'s end', lambda: (key(K_RIGHT, CMD), key(K_DEL, ALT)), 'keep\nYab '),
+                 ('Option+Shift+Left, Z: the word selected and typed over', lambda: (key(K_LEFT, ALT | SHIFT), typed('Z')), 'keep\nZ'),
+                 ('Cmd+Up, S: the text\'s start', lambda: (key(K_UP, CMD), typed('S')), 'Skeep\nZ'),
+                 ('Cmd+Down, E: the text\'s end', lambda: (key(K_DOWN, CMD), typed('E')), 'Skeep\nZE'),
+                 ('Cmd+Shift+Left, Q: the line selected back to its start', lambda: (key(K_LEFT, CMD | SHIFT), typed('Q')), 'Skeep\nQ'),
+                 ('Option+Right after Cmd+Up: by word, not to the line\'s end', lambda: (key(K_UP, CMD), key(K_RIGHT, ALT), typed('!')), 'Skeep!\nQ'),
+                 ('Cmd+Down, Cmd+Backspace: back to the line\'s start', lambda: (key(K_DOWN, CMD), key(K_DEL, CMD)), 'Skeep!\n'),
+                 ('a backtick is typed, no terminal', lambda: key(K_GRAVE), 'Skeep!\n`')]
+        for what, do, want in steps:
+            do(); time.sleep(0.3); got = composer_text()
+            check(got == want, f'textkeys: {what} ({got!r}, want {want!r})')
+        key(K_A, CMD); key(K_DEL); time.sleep(0.3)
+        for who, focus in (('the message box', lambda: press_rect('composer')), ('the terminal', lambda: (press_rect('composer'), key(K_J, CMD), time.sleep(1.2))),
+                           ('a viewer (the Files page)', lambda: (key(K_J, CMD), time.sleep(0.6), press_rect('rail:Files'), time.sleep(1.0)))):
+            focus(); key(K_H, CMD)
+            hid = wait_for(lambda: not ours_on_screen(), 5, 0.1)
+            check(bool(hid), f'textkeys: Cmd+H with {who} focused hides Backplane\'s window')
+            unhide(); back = wait_for(ours_on_screen, 10, 0.1)
+            check(bool(back), f'textkeys: unhidden, Backplane\'s window is back ({who})'); time.sleep(0.8)
+        press_rect('rail:Board'); time.sleep(1.5)
+        press_rect('composer'); key(K_J, CMD); time.sleep(1.2)
+        check(hub_up(), 'textkeys: the hub answers before Cmd+W')
+        key(K_W, CMD)
+        ended = wait_for(lambda: client.poll() is not None, 10, 0.1)
+        check(bool(ended) and client.returncode == 0, f'textkeys: Cmd+W with the terminal focused ends the client, exit 0 ({client.poll()})')
+        check('"event":"close"' in client_log(), 'textkeys: by the window\'s close path (its "close" metric in the log)')
+        check(hub_up(), 'textkeys: the hub stays up after Cmd+W')
+        raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=zoom: the zoom chords in the embedded board editor (fork embed's fix/mac-cmd-equals-zoom: plain Cmd+= zooms in), judged by
     # the board's size on screen (KiCad has no view readback): the extent of the board's coloured pixels (copper, silk; the grid, ratsnest and
     # text are grey) inside the canvas, where the canvas is where those pixels differ between two zoom levels (the panels' swatches do not).
