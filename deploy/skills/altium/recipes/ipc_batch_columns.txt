@@ -1,0 +1,163 @@
+# IPC Compliant Footprints Batch generator (pcblib_ipc_batch.pas): the CSV each package type takes, from Altium's templates
+# (<ProgramData>\Altium\Altium Designer {...}\Extensions\IPC Footprint Generator\Templates\*.xls, their Data sheet).
+# A CSV is: line 1 = the package line below as is; line 2 = its column names; then one line per footprint. Dimensions in mm,
+# min and max from the datasheet. No commas inside a field (a comma splits it). Leave optional columns empty.
+# Worked example (SOIC, TI D package, 8 pins), tested:
+#   SOIC127P600X175-8N,SOIC-8 (TI D) IPC nominal,5.8,6.2,0.31,0.51,0.4,1.27,3.8,4.0,4.8,5.0,1.35,1.75,0.1,0.25,,,8,1.27,,,,,,,,,N,,,,,,,,,,,,,,,,,,
+# SOIC columns: H lead span (tip to tip), B lead width, L lead length, E body width, D body length, A height, A1 standoff, A2 body
+# height, c lead thickness, PinCount (with absent pins), Pitch, AbsentPins/PinOrder (lists, need quotes: avoid), D2/E2 thermal pad
+# (blank = none), DensityLevel L/N/M (least/nominal/most copper), JT/JH/JS fillet minimums; the footprint columns after
+# DrawingNote (Z C G X Y pad geometry, A B assembly, V1 V2 courtyard, R1 R2 silk) override the computed values (leave blank).
+# Other packages use the same letters for the same things (JEDEC drawing letters); blank FootprintName = IPC-7351 name.
+
+[BGA (Ball Grid Array)]
+BGA,Package Specifications
+FootprintName,FootprintDescription,Dmin,Dmax,D1ave,Emin,Emax,E1ave,A1min,A1max,A2min,A2max,Amin,Amax,Bnom,PitchD,PitchE,GridType,MatrixType,Rows,Columns,Nmax,PinCount,DepopulateBalls,RepopulateBalls,DensityLevel,DrawingNote,X,C1,C2,A,B,V1,V2,R1,R2
+
+[BQFP (Bumpered Quad Flat Pack)]
+BQFP,Package Specifications
+FootprintName,FootprintDescription,Dmin,Dmax,D1min,D1max,Bmin,Bmax,Lmin,Lmax,Pitch,Amax,A1min,PinCount,Pin1,JTmin,JHmin,JSmin,DensityLevel,DrawingNote,Z,G,X,Y,C,A,B,V1,V2,R1,R2,PadTrimming
+
+[CAN (Thru-hole Metal Can)]
+CAN,Package Specifications
+FootprintName,FootprintDescription,PinCount,Dmin,Dmax,D1min,D1max,Alpha,Beta,Pitch,Bmin,Bmax,Cmin,Cmax,Jmin,Jmax,Kmin,Kmax,Lmin,Lmax,Amax,A1max,PinOrder,AbsentPins,DrawingNote,DrillSize,X,D,J,K,C,V1,V2,MaxHeight,StandoffHeight
+
+[CAN-FM (Thru-hole Flange Mount CAN)]
+CAN-FM,Package Specifications
+FootprintName,FootprintDescription,Dmin,Dmax,Emin,Emax,Rmin,Rmax,R3min,R3max,Pmin,Pmax,Qmin,Qmax,Bmax,Lmin,Lmax,Amax,A1max,D1min,D1max,PinCount,PinOrder,AbsentPins,Pitch,Smin,Smax,Cmin,Cmax,Alpha,DrawingNote,DrillSize,DrillSizeP,X,Q,P,P1,R,R3,S,C,A,B,R1,R2,V1,V2,MaxHeight,StandoffHeight
+
+[CAPAE (Electrolytic Aluminum Capacitor)]
+CAPAE,Package Specifications
+FootprintName,FootprintDescription,Lmin,Lmax,Wmin,Wmax,Tmin,Tmax,Amin,Amax,L1min,L1max,Twmin,Twmax,Dmin,Dmax,DensityLevel,JTmin,JHmin,JSmin,DrawingNote,Z,G,X,Y,C,A,B,R1,R2,V1,V2
+
+[CFP (Dual Flat Pack)]
+CFP,Package Specifications
+FootprintName,FootprintDescription,Dmin,Dmax,E1min,E1max,Bmin,Bmax,Dfmin,Dfmax,Lmin,Lmax,L3min,L3max,A2min,A2max,A1min,A1max,Amin,Amax,cmin,cmax,PinCount,Pitch,AbsentPins,D2min,D2max,E2min,E2max,DensityLevel,JHmin,JSmin,JTmin,DrawingNote,Z,G,X,Y,C,A,B,V1,V2,R1,R2,PadTrimming
+
+[CQFP (Ceramic Quad Flat Pack)]
+CQFP,Package Specifications
+FootprintName,FootprintDescription,D1min,D1max,Pitch,Amin,Amax,A1min,A1max,A2min,A2max,Dmin,Dmax,Lmin,Lmax,Bmin,Bmax,cmin,cmax,PinCount,Pin1,D2min,D2max,E2min,E2max,DensityLevel,JTmin,JHmin,JSmin,DrawingNote,Z,G,X,Y,C,E2t,D2t,A,B,V1,V2,R1,R2,PadTrimming
+
+[Chip Array (Chip Array)]
+Chip Array,Package Specifications
+FootprintName,FootprintDescription,Dmin,Dmax,Emin,Emax,Bmin,Bmax,B1min,B1max,Lmin,Lmax,Amin,Amax,PinCount,Pitch,PackageType,DensityLevel,JTmin,JHmin,JSmin,DrawingNote,Z,C,G,X,Y,X1,A,B,V1,V2,R1,R2
+
+[Chip Components]
+Chip2PinSM,Package Specifications
+FootprintName,FootprintDescription,Lmin,Lmax,Wmin,Wmax,Tmin,Tmax,Amin,Amax,PackageType,PolarityPin,DensityLevel,JTmin,JHmin,JSmin,DrawingNote,Z,G,X,Y,C,A,B,R1,R2,V1,V2
+
+[DFN (Dual Flat No-Lead)]
+DFN,Package Specifications
+FootprintName,FootprintDescription,Dmin,Dmax,Emin,Emax,b1min,b1max,L1min,L1max,b2min,b2max,L2min,L2max,Amax,Amin,A1max,A1min,PinCount,e1,e2,e,Periphery,DensityLevel,DrawingNote,A,B,C,C1,C2,R1,R2,V1,V2,X1,Y1,X2,Y2
+
+[DIP (Thru-hole Dual-In-Line)]
+DIP,Package Specifications
+FootprintName,FootprintDescription,Dmin,Dmax,Emin,Emax,Bmin,Bmax,Pitch,RowSpacing,PinCount,AbsentPins,B1min,B1max,B2min,B2max,cmin,cmax,Lmin,Lmax,L1min,L1max,smin,smax,s1min,s1max,D1min,D1max,E1min,E1max,Amin,Amax,A1min,A1max,A2min,A2max,A3min,A3max,DrawingNote,DrillSize,X,Y,C,A,B,V1,V2,R1,R2
+
+[DPAK (Transistor outline)]
+DPAK,Package Specifications
+FootprintName,FootprintDescription,Hmin,Hmax,Bmin,Bmax,Dmin,Dmax,Emin,Emax,Lmin,Lmax,B2min,B2max,L2min,L2max,L3min,L3max,L4min,L4max,Amin,Amax,A1min,A1max,cmin,cmax,c2min,c2max,PinCount,TabNumber,TrimmedPins,Pitch,DensityLevel,JTmin,JH1min,JH2min,JS1min,JS2min,DrawingNote,Z,G,X1,Y1,X2,Y2,C,A,B,V1,V2,R1,R2
+
+[FM (Flange Mount)]
+FM,Package Specifications
+FootprintName,FootprintDescription,PinCount,Pitch,Pitch1,Emin,Emax,Dmin,Dmax,D1min,D1max,L1min,L1max,L2min,L2max,Pmin,Pmax,Qmin,Qmax,Bmin,Bmax,B1min,B1max,B2min,B2max,Hmin,Hmax,H1min,H1max,H2min,H2max,H3min,H3max,H4min,H4max,Nmin,Nmax,N2min,N2max,N4min,N4max,Y2min,Y2max,Y4min,Y4max,Omin,Omax,O1min,O1max,O2min,O2max,cmin,cmax,Q1min,Q1max,Q2min,Q2max,AbsentPins,DrawingNote,DrillSize,X,Y,C,C1,C2,H1,B2,L2,P,Q,DrillSizeP,StandoffHeight,MaxHeight,A,B,R1,R2,V1,V2
+
+[LCC (Leadless Chip Carrier)]
+LCC,Package Specifications
+FootprintName,FootprintDescription,Emin,Emax,Dmin,Dmax,Bmin,Bmax,Lmin,Lmax,L1min,L1max,A2min,A2max,Amin,Amax,PinCountE,PinCountD,Pitch,Pin1,D2min,D2max,E2min,E2max,DensityLevel,JHmin,JTmin,JSmin,DrawingNote,ZE,ZD,GE,GD,X,Y,CE,CD,E2t,D2t,A,B,V1,V2,R1,R2
+
+[LGA (Land Grid Array)]
+LGA,Package Specifications
+FootprintName,FootprintDescription,Dmin,Dmax,D1ave,Emin,Emax,E1ave,A1min,A1max,A2min,A2max,Amin,Amax,LeadShape,Bnom,PitchD,PitchE,GridType,MatrixType,Rows,Columns,Nmax,PinCount,DepopulateBalls,RepopulateBalls,Periphery,DrawingNote,X,C1,C2,A,B,V1,V2,R1,R2
+
+[MELF]
+MELF,Package Specifications
+FootprintName,FootprintDescription,PackageType,Lmin,Lmax,Tmin,Tmax,Wmin,Wmax,Cathode,DensityLevel,JT min,JH min,JS min,DrawingNote,Z,G,X,Y,C,A,B,R1,R2,V1,V2
+
+[Molded Components (Capacitor Inductor Diode)]
+Molded,Package Specifications
+FootprintName,FootprintDescription,PackageType,Lmin,Lmax,L1min,L1max,Tmin,Tmax,TWmin,TWmax,Wmin,Wmax,Amin,Amax,A1min,A1max,cmin,cmax,PolarityPin,DensityLevel,JT min,JH min,JS min,DrawingNote,Z,G,X,Y,C,A,B,R1,R2,V1,V2
+
+[PCY (Thru-hole Plastic Cylinder Flat Index)]
+PCY,Package Specifications
+FootprintName,FootprintDescription,PinCount,Dmin,Dmax,Smin,Smax,Emin,Emax,Amax,Pitch,Bmin,Bmax,cmin,cmax,rmin,rmax,Lmin,Lmax,L2min,L2max,jmin,jmax,PinOrder,AbsentPins,DrawingNote,DrillSize,X,Y,D,E,r,V1,V2,MaxHeight,StandoffHeight
+
+[PLCC (Leaded Chip Carrier)]
+PLCC,Package Specifications
+FootprintName,FootprintDescription,Amin,Amax,A1min,A1max,Bmin,Bmax,Dmin,Dmax,D1min,D1max,D2min,D2max,Emin,Emax,E1min,E1max,E2min,E2max,Pitch,Lmin,Lmax,PinCountD,PinCountE,Pin1,DensityLevel,JTmin,JHmin,JSmin,DrawingNote,ZE,ZD,GE,GD,X,Y,CE,CD,A,B,V1,V2,R1,R2
+
+[PQFN (Quad Flat No-Lead Pullback)]
+PQFN,Package Specifications
+FootprintName,FootprintDescription,Dmin,Dmax,Emin,Emax,Bmin,Bmax,Lmin,Lmax,Amin,Amax,A1min,A1max,L1min,L1max,PinCountD,PinCountE,PitchD,PitchE,Pin1,D2min,D2max,E2min,E2max,DensityLevel,Periphery,DrawingNote,ZE,ZD,GE,GD,X,Y,CE,CD,E2t,D2t,L2,B2,B3,B4,B5,G3,G4,G5,G6,A,B,V1,V2,R1,R2
+
+[PQFP (Plastic Quad Flat Pack)]
+QFP,Package Specifications
+FootprintName,FootprintDescription,Dmin,Dmax,Emin,Emax,D1min,D1max,E1min,E1max,D2min,D2max,E2min,E2max,Bmin,Bmax,Lmin,Lmax,Pitch,Amin,Amax,A1min,A1max,A2min,A2max,cmin,cmax,PinCountD,PinCountE,Pin1,DensityLevel,JTmin,JHmin,JSmin,DrawingNote,ZE,ZD,GE,GD,X,Y,CE,CD,E2t,D2t,A,B,V1,V2,R1,R2,PadTrimming
+
+[PSON (Small Outline No-lead Pullback)]
+PSON,Package Specifications
+FootprintName,FootprintDescription,Dmin,Dmax,Emin,Emax,D2min,D2max,E2min,E2max,Bmin,Bmax,Lmin,Lmax,L1min,L1max,Amin,Amax,A1min,A1max,PinCount,Pitch,AbsentPins,PinOrder,DensityLevel,Periphery,DrawingNote,Z,C,G,X,Y,E2t,D2t,A,B,V1,V2,R1,R2,ViaCountE,ViaCountD,ViaPitchE,ViaPitchD,XY_Solder,X2Y2_Solder,XY_Paste,X2Y2_Paste,X_Paste,Y_Paste,X2_Paste,Y2_Paste,FillCountE,FillCountD,Fill_Gap
+
+[Precision Wire Wound_Inductor]
+PrecisionWireWound,Package Specifications
+FootprintName,FootprintDescription,Lmin,Lmax,TWmin,TWmax,Tmin,Tmax,Wmin,Wmax,Amin,Amax,PolarityPin,DensityLevel,JHmin,JTmin,JSmin,DrawingNote,Z,G,X,Y,C,A,B,R1,R2,V1,V2
+
+[QFN (Quad Flat No-Leads)]
+QFN,Package Specifications
+FootprintName,FootprintDescription,Dmin,Dmax,Emin,Emax,Bmin,Bmax,Lmin,Lmax,Amin,Amax,A1min,A1max,cmin,cmax,PinCountD,PinCountE,PitchD,PitchE,Pin1,D2min,D2max,E2min,E2max,DensityLevel,JTmin,JHmin,JSmin,DrawingNote,ZE,ZD,GE,GD,X,Y,CE,CD,E2t,D2t,L2,B2,B3,B4,B5,G3,G4,G5,G6,A,B,V1,V2,R1,R2
+
+[QFN-2Rows (Quad Flat No-leads, 2 Rows, Square)]
+QFN-2ROW,Package Specifications
+FootprintName,FootprintDescription,Dmin,Dmax,RowSpacing,D2min,D2max,Bmin,Bmax,cmin,cmax,Lmin,Lmax,Amin,Amax,A1min,A1max,PinCount,PinCountDout,PinCountEout,PinCountDin,PinCountEin,Pitch,DensityLevel,JTmin,JHmin,JSmin,DrawingNote,Z,G1,G2,C1,C2,X,Y1,Y2,D2t,A,B,R1,R2,V1,V2
+
+[SIP (Single Inline Package)]
+SIP,Package Specifications
+FootprintName,FootprintDescription,PinCount,Pitch,Pitch1,Emin,Emax,Dmin,Dmax,L1min,L1max,Pmin,Pmax,Qmin,Qmax,Amin,Amax,Bmin,Bmax,cmin,cmax,B1min,B1max,Hmin,Hmax,H2min,H2max,Nmin,Nmax,Omin,Omax,AbsentPins,DrawingNote,DrillSize,X,Y,C,P,Q,StandoffHeight,MaxHeight,A,B,R1,R2,V1,V2
+
+[SODFL (Small Outline Diode Flat-Lead)]
+SODFL,Package Specifications
+FootprintName,FootprintDescription,Dmin,Dmax,Emin,Emax,E1min,E1max,Bmin,Bmax,Lmin,Lmax,Amin,Amax,DensityLevel,JTmin,JHmin,JSmin,DrawingNote,Z,C,G,X,Y,A,B,V1,V2,R1,R2
+
+[SOF (Small Outline Flat Leads)]
+SOF,Package Specifications
+FootprintName,FootprintDescription,Dmin,Dmax,Emin,Emax,E1min,E1max,Bmin,Bmax,B1min,B1max,cmin,cmax,L1min,L1max,LPmin,LPmax,A1min,Amin,Amax,PinCount,Pitch,PinOrder,AbsentPins,DensityLevel,JTmin,JHmin,JSmin,DrawingNote,Z,C,G,X,Y,X1,A,B,V1,V2,R1,R2
+
+[SOIC (Small Outline Integrated Package)]
+SOIC,Package Specifications
+FootprintName,FootprintDescription,Hmin,Hmax,Bmin,Bmax,Lmin,Lmax,Emin,Emax,Dmin,Dmax,Amin,Amax,A1min,A1max,A2min,A2max,PinCount,Pitch,AbsentPins,PinOrder,cmin,cmax,D2min,D2max,E2min,E2max,DensityLevel,JTmin,JHmin,JSmin,DrawingNote,Z,C,G,X,Y,E2t,D2t,A,B,R1,R2,V1,V2,PadTrimming
+
+[SOJ (Small outline Package) - J Leads]
+SOJ,Package Specifications
+FootprintName,FootprintDescription,Emin,Emax,Bmin,Bmax,Lmin,Lmax,E1min,E1max,Dmin,Dmax,E2min,E2max,Amin,Amax,A1min,A1max,A2min,A2max,cmin,cmax,PinCount,AbsentPins,Pitch,DensityLevel,JTmin,JHmin,JSmin,DrawingNote,Z,C,G,X,Y,A,B,R1,R2,V1,V2
+
+[SON (Small Outline No-Lead)]
+SON,Package Specifications
+FootprintName,FootprintDescription,Dmin,Dmax,Emin,Emax,D2min,D2max,E2min,E2max,Bmin,Bmax,cmin,cmax,Lmin,Lmax,Amin,Amax,A1min,A1max,PinCount,Pitch,AbsentPins,PinOrder,DensityLevel,JTmin,JHmin,JSmin,DrawingNote,Z,C,G,X,Y,E2t,D2t,A,B,V1,V2,R1,R2,ViaCountE,ViaCountD,ViaPitchE,ViaPitchD,XY_Solder,X2Y2_Solder,XY_Paste,X2Y2_Paste,X_Paste,Y_Paste,X2_Paste,Y2_Paste,FillCountE,FillCountD,Fill_Gap
+
+[SOP (Small outline Package) - Gullwing Leads]
+SOP,Package Specifications
+FootprintName,FootprintDescription,Hmin,Hmax,Bmin,Bmax,Lmin,Lmax,Emin,Emax,Dmin,Dmax,Amin,Amax,A1min,A1max,A2min,A2max,PinCount,Pitch,AbsentPins,PinOrder,cmin,cmax,D2min,D2max,E2min,E2max,DensityLevel,JTmin,JHmin,JSmin,DrawingNote,Z,C,G,X,Y,E2t,D2t,A,B,R1,R2,V1,V2,PadTrimming
+
+[SOT143_343 (Small Outline Transistor)]
+SOT143_343,Package Specifications
+FootprintName,FootprintDescription,PackageType,Emin,Emax,Bmin,Bmax,Lmin,Lmax,E1min,E1max,Dmin,Dmax,B2min,B2max,Amin,Amax,A1min,A1max,A2min,A2max,cmin,cmax,PinOrder,Pitch,Pitch1,PitchOffset,LargePinLocation,DensityLevel,JTmin,JHmin,JS1min,JS2min,DrawingNote,Z,G,X,Y,X2,C,A,B,V1,V2,R1,R2,PadTrimming
+
+[SOT223 (Small Outline Transistor)]
+SOT223,Package Specifications
+FootprintName,FootprintDescription,Emin,Emax,Bmin,Bmax,Lmin,Lmax,E1min,E1max,Dmin,Dmax,B2min,B2max,Amin,Amax,A1min,A1max,A2min,A2max,cmin,cmax,PinCount,PinOrder,Pitch,Pitch1,DensityLevel,JTmin,JHmin,JSmin,JS2min,DrawingNote,Z,G,X,Y,X2,C,A,B,V1,V2,R1,R2,PadTrimming
+
+[SOT23 (Small Outline Transistor)]
+SOT23,Package Specifications
+FootprintName,FootprintDescription,Emin,Emax,Bmin,Bmax,Lmin,Lmax,E1min,E1max,Dmin,Dmax,Amin,Amax,A1min,A1max,A2min,A2max,cmin,cmax,PinCount,PinOrder,Pitch,Pitch1,DensityLevel,JTmin,JHmin,JSmin,DrawingNote,Z,G,X,Y,C,A,B,V1,V2,R1,R2,PadTrimming
+
+[SOT89 (Small Outline Transistor)]
+SOT89,Package Specifications
+FootprintName,FootprintDescription,Hmin,Hmax,H1min,H1max,Lmin,Lmax,Bmin,Bmax,B1min,B1max,cmin,cmax,Dmin,Dmax,D1min,D1max,Emin,Emax,Amin,Amax,PinCount,Pitch,PinOrder,DensityLevel,JTmin,JHmin,JS1min,JS2min,JS3min,DrawingNote,Z,Z2,X1,Y1,X2,Y2,X3,Y3,Alpha,BO,A,B,V1,V2,R1,R2
+
+[SOTFL (Small Outline Transistor Flat-Lead)]
+SOTFL,Package Specifications
+FootprintName,FootprintDescription,Dmin,Dmax,Emin,Emax,E1min,E1max,Bmin,Bmax,B1min,B1max,cmin,cmax,L1min,L1max,LPmin,LPmax,Amin,Amax,PinCount,Pitch,PinOrder,AbsentPins,DensityLevel,JTmin,JHmin,JSmin,DrawingNote,Z,C,G,X,Y,X1,A,B,V1,V2,R1,R2
+
+[ZIP (Zig-zag Inline Package)]
+ZIP,Package Specifications
+FootprintName,FootprintDescription,PinCount,Pitch,Pitch1,Emin,Emax,Dmin,Dmax,L1min,L1max,Bmin,Bmax,B1min,B1max,cmin,cmax,Hmin,Hmax,RowSpacing,Amin,Amax,H2min,H2max,H3min,H3max,H4min,H4max,Nmin,Nmax,N2min,N2max,N4min,N4max,Y2min,Y2max,Y4min,Y4max,Smin,Smax,S1min,S1max,AbsentPins,DrawingNote,DrillSize,X,Y,C,C1,C2,StandoffHeight,MaxHeight,A,B,R1,R2,V1,V2

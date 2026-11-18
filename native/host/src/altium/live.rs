@@ -175,6 +175,8 @@ pub fn locate(err: &str, run_file: &str) -> String {
     let n: usize = err[i + 5..].chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap_or(0);
     match run_file.lines().nth(n.wrapping_sub(1)) { Some(l) if n > 0 && !l.trim().is_empty() => format!("{err}\n(that line of the script: `{}`)", l.trim()), _ => err.to_string() }
 }
+/// Expect.file: where a run's BpExpect lines go (beside its output: `x.out` -> `x.exp`)
+pub fn expect_path(out: &str) -> String { format!("{}.exp", out.strip_suffix(".out").unwrap_or(out)) }
 /// Template.of: the whole run file for `src`, writing its lines to `out` and, when it has ended, `done`; loops end after `guard_s` seconds.
 pub fn build(src: &str, out: &str, done: &str, guard_s: u32) -> String {
     // guards first, on the whole script, so a guard names the script's own line
@@ -183,7 +185,8 @@ pub fn build(src: &str, out: &str, done: &str, guard_s: u32) -> String {
     format!(r#"// Backplane run (altium/live.rs): the agent's script wrapped; Emit(S) writes a line of output.
 var
     BpLines : TStringList;
-    BpOutPath, BpDonePath : String;
+    BpOutPath, BpDonePath, BpExpPath : String;
+    BpExps : TStringList;
     BpUntil : Double;
     BpTripped : Boolean;
     BpSchDocs : TList;
@@ -204,6 +207,14 @@ begin
         Emit('BP-LOOP-GUARD: the loop at line ' + IntToStr(Line) + ' still ran after {guard_s} s; every loop was cut short from here on');
     end;
     Result := not BpTripped;
+end;
+
+// a window the script will open and how the hub is to work it, in a file of its own (the hub reads it only while a new window
+// is up, so it never holds the output file Emit rewrites)
+procedure BpExpect(Title, Steps : String);
+begin
+    BpExps.Add('BP-EXPECT ' + Title + ' => ' + Steps);
+    BpExps.SaveToFile(BpExpPath);
 end;
 
 procedure BpSchPre(Doc : IDispatch; Param : String);
@@ -243,6 +254,8 @@ var
 begin
     BpOutPath := {outp};
     BpDonePath := {donep};
+    BpExpPath := {expp};
+    BpExps := TStringList.Create;
     BpLines := TStringList.Create;
     BpSchDocs := TList.Create;
     BpPcbOpen := False;
@@ -266,18 +279,89 @@ begin
         Done.Free;
         BpLines.Free;
         BpSchDocs.Free;
+        BpExps.Free;
     end;
 end;
-"#, decls = indent(&p.decls), routines = fix(&p.routines), body = indent(&fix(&p.body)), outp = pas_str(out), donep = pas_str(done))
+"#, decls = indent(&p.decls), routines = fix(&p.routines), body = indent(&fix(&p.body)), outp = pas_str(out), donep = pas_str(done), expp = pas_str(&expect_path(out)))
 }
 fn indent(s: &str) -> String { s.lines().map(|l| format!("    {l}")).collect::<Vec<_>>().join("\n") }
 
+/// One thing to do in a window a script expects (`BpExpect`).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Step {
+    /// click the button with this caption (`&` and a trailing `...` ignored, any case), waiting up to 30 s for it to be there and enabled
+    Click(String),
+    /// wait this many seconds
+    Wait(f32),
+    /// set the text of the window's n-th (from 1) edit box
+    Text(usize, String),
+    /// from here on, act in the window whose title has this in it (waiting up to 30 s for it to open)
+    Window(String),
+    /// wait until the window acted in has closed (at most this many seconds)
+    Gone(f32),
+}
+/// A window the script said it will open and how to work it, instead of the hub cancelling it as an unexpected box.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Expect { pub title: String, pub steps: Vec<Step> }
+
+/// Expect.steps: `click Validate Changes; wait 2; text 1 = C:\x.csv; window Open; gone 60` (steps between `;`; a value cannot hold one).
+pub fn parse_steps(s: &str) -> Result<Vec<Step>, String> {
+    let mut v = vec![];
+    for part in s.split(';').map(str::trim).filter(|p| !p.is_empty()) {
+        let (verb, rest) = part.split_once(char::is_whitespace).map(|(a, b)| (a, b.trim())).unwrap_or((part, ""));
+        let secs = |r: &str| r.parse::<f32>().ok().filter(|x| x.is_finite() && *x >= 0.0).ok_or_else(|| format!("`{part}`: seconds expected"));
+        v.push(match verb.to_ascii_lowercase().as_str() {
+            "click" if !rest.is_empty() => Step::Click(rest.to_string()),
+            "wait" => Step::Wait(secs(rest)?.min(600.0)),
+            "gone" => Step::Gone(secs(rest)?.min(3600.0)),
+            "window" if !rest.is_empty() => Step::Window(rest.to_string()),
+            "text" => {
+                let (n, val) = rest.split_once('=').ok_or_else(|| format!("`{part}`: text N = value"))?;
+                let n: usize = n.trim().parse().ok().filter(|n| *n > 0).ok_or_else(|| format!("`{part}`: the edit box's number (from 1) expected"))?;
+                Step::Text(n, val.trim().to_string())
+            }
+            _ => return Err(format!("`{part}`: steps are click <caption>, wait <s>, text <n> = <value>, window <title>, gone <s>")),
+        });
+    }
+    Ok(v)
+}
+/// The `BP-EXPECT <title> => <steps>` lines a script's BpExpect wrote, in order; a line that does not parse is an Err naming it.
+pub fn expectations(out: &str) -> Vec<Result<Expect, String>> {
+    out.lines().filter_map(|l| l.strip_prefix("BP-EXPECT ")).map(|l| {
+        let (t, s) = l.split_once("=>").ok_or_else(|| format!("BpExpect `{l}`: no steps"))?;
+        let title = t.trim().to_string();
+        if title.is_empty() { return Err(format!("BpExpect `{l}`: no window title")) }
+        Ok(Expect { title, steps: parse_steps(s)? })
+    }).collect()
+}
+/// A window title the script named: part of the window's title, any case.
+pub fn title_matches(want: &str, title: &str) -> bool { !want.is_empty() && title.to_lowercase().contains(&want.to_lowercase()) }
+/// A button caption the script named: the same words, `&` accelerators, a trailing `...` and case aside; a trailing `*` matches
+/// the caption's start (`Generate all footprints in*`, whose caption ends in a path).
+pub fn caption_matches(want: &str, caption: &str) -> bool {
+    let n = |s: &str| s.replace('&', "").trim().trim_end_matches("...").trim_end_matches('…').trim().to_lowercase();
+    match want.trim().strip_suffix('*') {
+        Some(p) => !p.trim().is_empty() && n(caption).starts_with(&n(p)),
+        None => !want.trim().is_empty() && n(want) == n(caption),
+    }
+}
+
+/// Box.is: a window of Altium's the hub answers when it comes up unasked: Windows' message boxes, Delphi's message forms, and
+/// an owned WPF window (its extensions' boxes, ActiveRoute's "Information" one: no controls to read, closed as Alt+F4 would)
+pub fn is_box(class: &str, owned: bool) -> bool { matches!(class, "#32770" | "TMessageForm") || owned && class.starts_with("HwndWrapper[") }
+
 /// What a run came to.
 #[derive(Debug, Default)]
-pub struct Ran { pub ok: bool, pub output: String, pub error: String, pub dialogs: Vec<String>, pub secs: f32 }
+pub struct Ran { pub ok: bool, pub output: String, pub error: String, pub dialogs: Vec<String>, pub driven: Vec<String>, pub secs: f32 }
 impl Ran {
-    pub fn json(&self) -> Value { json!({"ok": self.ok, "output": self.output, "error": self.error, "dialogs": self.dialogs, "seconds": (self.secs * 10.0).round() / 10.0}) }
+    pub fn json(&self) -> Value {
+        let mut v = json!({"ok": self.ok, "output": self.output, "error": self.error, "dialogs": self.dialogs, "seconds": (self.secs * 10.0).round() / 10.0});
+        if !self.driven.is_empty() { v["driven"] = json!(self.driven) }
+        v
+    }
 }
+/// The output the agent sees: the BpExpect lines are the hub's, reported as `driven`.
+pub fn shown_output(out: &str) -> String { out.lines().filter(|l| !l.starts_with("BP-EXPECT ")).collect::<Vec<_>>().join("\n").trim_end().to_string() }
 
 /// Altium.run: run `script` in the running Altium and wait up to `timeout` seconds. Err: Altium could not be asked at all.
 pub async fn run(script: &str, timeout: u32) -> Result<Ran, String> {
@@ -395,7 +479,8 @@ mod win {
     use windows_sys::Win32::Foundation::{CloseHandle, HWND, LPARAM, WPARAM};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
     use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumChildWindows, EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, PostMessageW, SendMessageW, SetForegroundWindow, WM_CLOSE, WM_COMMAND};
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumChildWindows, EnumWindows, GetClassNameW, GetClientRect, GetForegroundWindow, GetWindow, GetWindowLongW, GetWindowTextW, GetWindowThreadProcessId, IsWindow, IsWindowVisible, PostMessageW, SendMessageTimeoutW, SendMessageW, SetForegroundWindow, GWL_STYLE, GW_OWNER, SMTO_ABORTIFHUNG, WM_CLOSE, WM_COMMAND, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_SETTEXT, WS_DISABLED};
 
     fn wide(v: &[u16]) -> String { String::from_utf16_lossy(&v[..v.iter().position(|&c| c == 0).unwrap_or(v.len())]) }
 
@@ -461,7 +546,7 @@ mod win {
         if !pids.contains(&p) || IsWindowVisible(h) == 0 { return 1 }
         let mut c = [0u16; 256]; let n = GetClassNameW(h, c.as_mut_ptr(), c.len() as i32);
         let class = String::from_utf16_lossy(&c[..n.max(0) as usize]);
-        if !matches!(class.as_str(), "#32770" | "TMessageForm") { return 1 }
+        if !super::is_box(&class, !GetWindow(h, GW_OWNER).is_null()) { return 1 }
         let mut t = [0u16; 512]; let tn = GetWindowTextW(h, t.as_mut_ptr(), t.len() as i32);
         let mut parts = vec![String::from_utf16_lossy(&t[..tn.max(0) as usize])];
         EnumChildWindows(h, Some(child_text), &mut parts as *mut Vec<String> as LPARAM);
@@ -469,6 +554,87 @@ mod win {
         EnumChildWindows(h, Some(child_button), &mut buttons as *mut Vec<(HWND, String)> as LPARAM);
         acc.push(Dlg { hwnd: h, class, text: parts.into_iter().filter(|s| !s.trim().is_empty()).collect::<Vec<_>>().join(" | "), buttons });
         1
+    }
+    unsafe extern "system" fn top_any(h: HWND, l: LPARAM) -> BOOL {
+        let (pids, acc) = &mut *(l as *mut (Vec<u32>, Vec<(isize, String)>));
+        let mut p = 0u32; GetWindowThreadProcessId(h, &mut p);
+        if !pids.contains(&p) || IsWindowVisible(h) == 0 { return 1 }
+        let mut t = [0u16; 512]; let tn = GetWindowTextW(h, t.as_mut_ptr(), t.len() as i32);
+        acc.push((h as isize, String::from_utf16_lossy(&t[..tn.max(0) as usize])));
+        1
+    }
+    /// Every visible top-level window of Altium's processes, with its title
+    fn windows(pid: u32) -> Vec<(isize, String)> {
+        let mut pids = x2_pids(); if !pids.contains(&pid) { pids.push(pid) }
+        let mut st: (Vec<u32>, Vec<(isize, String)>) = (pids, vec![]);
+        unsafe { EnumWindows(Some(top_any), &mut st as *mut (Vec<u32>, Vec<(isize, String)>) as LPARAM); }
+        st.1
+    }
+    unsafe extern "system" fn child_any(h: HWND, l: LPARAM) -> BOOL {
+        let acc = &mut *(l as *mut Vec<(isize, String, String)>);
+        let mut c = [0u16; 128]; let n = GetClassNameW(h, c.as_mut_ptr(), c.len() as i32);
+        let mut b = [0u16; 512]; let tn = GetWindowTextW(h, b.as_mut_ptr(), b.len() as i32);
+        acc.push((h as isize, String::from_utf16_lossy(&c[..n.max(0) as usize]), String::from_utf16_lossy(&b[..tn.max(0) as usize])));
+        1
+    }
+    /// A window's controls, all levels down: (hwnd, class, text)
+    fn controls(w: isize) -> Vec<(isize, String, String)> {
+        let mut v: Vec<(isize, String, String)> = vec![];
+        unsafe { EnumChildWindows(w as HWND, Some(child_any), &mut v as *mut Vec<(isize, String, String)> as LPARAM); }
+        v
+    }
+    fn usable(h: isize) -> bool { unsafe { IsWindowVisible(h as HWND) != 0 && (GetWindowLongW(h as HWND, GWL_STYLE) as u32 & WS_DISABLED) == 0 } }
+    fn alive(h: isize) -> bool { unsafe { IsWindow(h as HWND) != 0 && IsWindowVisible(h as HWND) != 0 } }
+    /// A click on a control as the mouse makes it (posted, so a button that opens a box of its own does not hold the hub): Altium's
+    /// own buttons are drawn controls that take no BM_CLICK
+    fn click(h: isize) {
+        unsafe {
+            let mut r: RECT = std::mem::zeroed(); GetClientRect(h as HWND, &mut r);
+            let at = (((r.bottom / 2) as u32 & 0xffff) << 16 | ((r.right / 2) as u32 & 0xffff)) as LPARAM;
+            PostMessageW(h as HWND, WM_LBUTTONDOWN, 1, at);
+            PostMessageW(h as HWND, WM_LBUTTONUP, 0, at);
+        }
+    }
+    /// Drive.window: do an expected window's steps; a line per step done, Err (with what the window offers) at the first that cannot be done
+    fn drive(first: isize, e: &super::Expect, pid: u32, before: &[isize]) -> Result<Vec<String>, (Vec<String>, String)> {
+        use super::Step;
+        let mut w = first;
+        let mut log = vec![];
+        let until = |secs: f32, f: &mut dyn FnMut() -> bool| { let t = Instant::now(); while t.elapsed().as_secs_f32() < secs { if f() { return true } std::thread::sleep(Duration::from_millis(150)) } f() };
+        for st in &e.steps {
+            match st {
+                Step::Wait(s) => { std::thread::sleep(Duration::from_secs_f32(*s)); log.push(format!("waited {s} s")) }
+                Step::Click(c) => {
+                    let mut hit = None;
+                    if !until(30.0, &mut || { hit = controls(w).into_iter().find(|(h, _, t)| super::caption_matches(c, t) && usable(*h)).map(|x| x.0); hit.is_some() }) {
+                        let offers: Vec<String> = controls(w).into_iter().filter(|(h, _, t)| !t.trim().is_empty() && usable(*h)).map(|x| x.2).collect();
+                        return Err((log, format!("no enabled `{c}` in the window (it offers: {})", offers.join(", "))))
+                    }
+                    click(hit.unwrap()); std::thread::sleep(Duration::from_millis(300));
+                    log.push(format!("clicked {c}"));
+                }
+                Step::Text(n, val) => {
+                    let edits: Vec<isize> = controls(w).into_iter().filter(|(h, cl, _)| cl.to_ascii_lowercase().contains("edit") && usable(*h)).map(|x| x.0).collect();
+                    let Some(h) = edits.get(n - 1) else { return Err((log, format!("the window has {} edit boxes, not {n}", edits.len()))) };
+                    let mut wide: Vec<u16> = val.encode_utf16().collect(); wide.push(0);
+                    let mut res = 0usize;
+                    unsafe { SendMessageTimeoutW(*h as HWND, WM_SETTEXT, 0, wide.as_ptr() as LPARAM, SMTO_ABORTIFHUNG, 5000, &mut res); }
+                    log.push(format!("typed into box {n}"));
+                }
+                Step::Window(t) => {
+                    let mut hit = None;
+                    if !until(30.0, &mut || { hit = windows(pid).into_iter().find(|(h, ti)| !before.contains(h) && super::title_matches(t, ti)).map(|x| x.0); hit.is_some() }) {
+                        return Err((log, format!("no window `{t}` opened")))
+                    }
+                    w = hit.unwrap(); log.push(format!("in {t}"));
+                }
+                Step::Gone(s) => {
+                    if !until(*s, &mut || !alive(w)) { return Err((log, format!("the window was still open after {s} s"))) }
+                    log.push("closed".into());
+                }
+            }
+        }
+        Ok(log)
     }
     /// Altium's visible dialog boxes (message boxes and its own message forms)
     fn dialogs(pid: u32) -> Vec<Dlg> {
@@ -523,9 +689,13 @@ mod win {
         }
         let id = format!("bp{}{:04x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0), rand_u16());
         let (pas, out, done) = (d.join(format!("{id}.pas")), d.join(format!("{id}.out")), d.join(format!("{id}.done")));
+        let exp = std::path::PathBuf::from(super::expect_path(&out.to_string_lossy()));
         let guard = timeout.saturating_sub(3).max(2);
         std::fs::write(&pas, super::build(script, &out.to_string_lossy(), &done.to_string_lossy(), guard)).map_err(|e| e.to_string())?;
         let before: Vec<isize> = dialogs(pid).iter().map(|x| x.hwnd as isize).collect();
+        // every window Altium had before the run: an expected window is a new one
+        let before_all: Vec<isize> = windows(pid).iter().map(|x| x.0).collect();
+        let (mut announced, mut pending): (usize, Vec<super::Expect>) = (0, vec![]);
         // the window in front before the run: Altium comes forward when a script starts; the person's window is given back after
         let front = unsafe { GetForegroundWindow() } as isize;
         let started = Instant::now();
@@ -543,9 +713,35 @@ mod win {
                 if !ran.ok { ran.error = ls.collect::<Vec<_>>().join("\n").trim().to_string(); if ran.error.is_empty() { ran.error = "the script failed".into() } }
                 break
             }
+            // windows the script said it opens (BpExpect, written before the call that opens them): worked as it said, not cancelled
+            let open = windows(pid);
+            // read only while a new window is up: the script is then waiting on it, not writing the file
+            if open.iter().any(|(h, _)| !before_all.contains(h)) {
+                let ex = super::expectations(&std::fs::read_to_string(&exp).unwrap_or_default());
+                for e in ex.into_iter().skip(announced) { announced += 1; match e { Ok(e) => pending.push(e), Err(m) => ran.driven.push(m) } }
+            }
+            let hit = pending.iter().enumerate().find_map(|(i, e)| open.iter().find(|(h, t)| !before_all.contains(h) && super::title_matches(&e.title, t)).map(|(h, _)| (i, *h)));
+            if let Some((i, w)) = hit {
+                let e = pending.remove(i);
+                let (title, ba) = (e.title.clone(), before_all.clone());
+                let r = tokio::task::spawn_blocking(move || {
+                    let at_start: Vec<isize> = windows(pid).into_iter().map(|x| x.0).filter(|h| *h != w).collect();
+                    let r = drive(w, &e, pid, &ba);
+                    // steps that could not be done leave the window as the script found it: closed, as Cancel would, so Altium is not left
+                    // waiting on a modal window (the windows it opened from there too)
+                    if r.is_err() {
+                        for (h, _) in windows(pid).into_iter().filter(|(h, _)| !at_start.contains(h)) { unsafe { PostMessageW(h as HWND, WM_CLOSE, 0, 0); } }
+                        std::thread::sleep(Duration::from_millis(500));
+                    }
+                    r
+                }).await.unwrap_or_else(|x| Err((vec![], x.to_string())));
+                ran.driven.push(match r { Ok(l) => format!("{title}: {}", l.join(", ")), Err((l, m)) => format!("{title}: {}{m}; closed it", l.iter().map(|x| format!("{x}, ")).collect::<String>()) });
+                continue
+            }
             let mut stopped = false;
             for x in dialogs(pid) {
                 if before.contains(&(x.hwnd as isize)) { continue }
+                if pending.iter().any(|e| super::title_matches(&e.title, &x.text.split(" | ").next().unwrap_or(""))) { continue }
                 ran.dialogs.push(x.text.clone()); answer(&x); stopped = true;
             }
             if stopped {
@@ -567,7 +763,12 @@ mod win {
             }
             if Instant::now() > end { ran.ok = false; ran.error = format!("no answer from Altium in {timeout} s (it may be busy, showing a dialog of its own, or still running the script)"); break }
         }
-        ran.output = std::fs::read_to_string(&out).unwrap_or_default().trim_end().to_string();
+        let o = std::fs::read_to_string(&out).unwrap_or_default();
+        ran.output = super::shown_output(&o);
+        for e in super::expectations(&std::fs::read_to_string(&exp).unwrap_or_default()).into_iter().skip(announced) {
+            match e { Err(m) => ran.driven.push(m), Ok(e) => pending.push(e) }
+        }
+        for e in pending { ran.driven.push(format!("{}: did not open", e.title)) }
         ran.secs = started.elapsed().as_secs_f32();
         give_back(pid, front);
         Ok(ran)
@@ -682,6 +883,44 @@ mod tests {
         assert_eq!(locate(") expected at Line:3, Char:19.", f), ") expected at Line:3, Char:19.\n(that line of the script: `Emit('x';`)");
         assert_eq!(locate("no line here", f), "no line here");
         assert_eq!(locate("at Line:99", f), "at Line:99");
+    }
+    #[test] fn expected_windows_parse() {
+        assert_eq!(parse_steps("click Validate Changes; wait 2;click &Execute Changes ;; gone 30").unwrap(),
+            vec![Step::Click("Validate Changes".into()), Step::Wait(2.0), Step::Click("&Execute Changes".into()), Step::Gone(30.0)]);
+        assert_eq!(parse_steps("click Add Files; window Open; text 1 = C:\\bp\\a b.csv; click Open").unwrap(),
+            vec![Step::Click("Add Files".into()), Step::Window("Open".into()), Step::Text(1, "C:\\bp\\a b.csv".into()), Step::Click("Open".into())]);
+        assert!(parse_steps("press OK").unwrap_err().contains("click <caption>"));
+        assert!(parse_steps("wait soon").is_err() && parse_steps("text 0 = x").is_err() && parse_steps("text 1 x").is_err() && parse_steps("click").is_err());
+        assert_eq!(parse_steps("wait 99999").unwrap(), vec![Step::Wait(600.0)], "a wait is capped");
+        let out = "a line\nBP-EXPECT Engineering Change Order => click Validate Changes; click Execute Changes; click Close\nBP-EXPECT  => click x\nBP-EXPECT Situs => jump\nmore";
+        let e = expectations(out);
+        assert_eq!(e.len(), 3);
+        assert_eq!(e[0].as_ref().unwrap(), &Expect { title: "Engineering Change Order".into(), steps: vec![Step::Click("Validate Changes".into()), Step::Click("Execute Changes".into()), Step::Click("Close".into())] });
+        assert!(e[1].is_err() && e[2].is_err());
+        assert_eq!(shown_output(out), "a line\nmore");
+    }
+    #[test] fn boxes_include_owned_wpf_windows() {
+        assert!(is_box("#32770", false) && is_box("TMessageForm", true));
+        assert!(is_box("HwndWrapper[DefaultDomain;;baff34aa]", true), "ActiveRoute's Information box");
+        assert!(!is_box("HwndWrapper[DefaultDomain;;baff34aa]", false), "an unowned WPF window is a panel or the app");
+        assert!(!is_box("TDocumentForm", true) && !is_box("TApplication", false));
+    }
+    #[test] fn titles_and_captions_match_loosely() {
+        assert!(title_matches("engineering change order", "Engineering Change Order"));
+        assert!(title_matches("Situs Routing Strategies", "Situs Routing Strategies - board.PcbDoc"));
+        assert!(!title_matches("", "anything") && !title_matches("ECO", "Component Links"));
+        assert!(caption_matches("Execute Changes", "&Execute Changes") && caption_matches("Route All", "Route All...") && caption_matches("open", "&Open"));
+        assert!(!caption_matches("Execute", "Execute Changes") && !caption_matches(" ", ""));
+        assert!(caption_matches("Generate all footprints in*", r"Generate all footprints in C:\p\a.PcbLib") && !caption_matches("*", "x") && !caption_matches("Gen*", "Start"));
+    }
+    #[test] fn template_offers_expect() {
+        let b = build("BpExpect('Engineering Change Order', 'click Close');\nRunProcess('WorkspaceManager:Compare');", "o", "d", 5);
+        assert!(b.contains("procedure BpExpect(Title, Steps : String);") && b.contains("BpExps.Add('BP-EXPECT ' + Title + ' => ' + Steps);"));
+        assert!(build("Emit('x');", r"C:\r\a.out", "d", 5).contains(r"BpExpPath := 'C:\r\a.exp';"));
+        assert_eq!(expect_path(r"C:\r\bp1.out"), r"C:\r\bp1.exp");
+        let r = Ran { ok: true, driven: vec!["Engineering Change Order: clicked Close".into()], ..Default::default() };
+        assert_eq!(r.json()["driven"][0], "Engineering Change Order: clicked Close");
+        assert!(Ran::default().json().get("driven").is_none());
     }
     #[test] fn template_has_parts_and_paths() {
         let b = build("var X : Integer;\nX := 2;\nwhile X > 0 do X := X - 1;\nEmit('done');", r"C:\r\a.out", r"C:\r\a.done", 20);

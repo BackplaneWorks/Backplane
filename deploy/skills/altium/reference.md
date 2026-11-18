@@ -160,5 +160,85 @@ the focused document unless its parameters name one. The commands behind Altium'
 - `WorkspaceManager:Print` `Action=PublishToPDF|ObjectKind=OutputBatch|OutputMedium=PDF|DisableDialog=True`: raised an
   Error box and wrote nothing in testing. An OutJob with `OpenOutput<N>=1` would open the result in another program.
 - `WorkspaceManager:Compare` `ObjectKind=Project|Action=UpdateMe` (board in front; from a schematic
-  `Action=UpdateOther|Index=1`): the ECO, modal.
+  `Action=UpdateOther|Index=1`): the ECO, modal; `pcb_update_from_sch.pas` has the hub work its dialogs (below).
 - `PCB:DesignRuleCheck`: modal, see above.
+
+## Libraries
+
+```pascal
+// a new library (or any new document): no file until renamed and saved
+SD := Client.OpenNewDocument('SCHLIB', '', 'X.SchLib', False); SD.DoSafeChangeFileNameAndSave(Path, 'SCHLIB');  // 'PCBLIB' alike
+// it comes with an empty Component_1 / PCBComponent_1: remove it once yours is in
+// symbol
+Comp := SchServer.SchObjectFactory(eSchComponent, eCreate_Default);
+Comp.CurrentPartID := 1; Comp.DisplayMode := 0; Comp.PartCount := 1;   // PartCount reads 0 otherwise
+Comp.LibReference := 'NAME'; Comp.ComponentDescription := '...'; Comp.Designator.Text := 'U?'; Comp.Comment.Text := '...';
+Pin := SchServer.SchObjectFactory(ePin, eCreate_Default);   // Designator, Name, Electrical (eElectricInput/Output/IO/Passive/
+Pin.Location := Point(X, Y); Pin.Orientation := eRotate180;  //  Power/OpenCollector/OpenEmitter/HiZ), PinLength,
+Comp.AddSchObject(Pin);                                       //  OwnerPartId := Comp.CurrentPartID, OwnerPartDisplayMode
+Impl := Comp.AddSchImplementation; Impl.ModelName := 'FP'; Impl.ModelType := 'PCBLIB';
+Impl.AddDataFileLink('FP', 'Lib.PcbLib', 'PCBLIB'); Impl.IsCurrent := True;
+Lib.AddSchComponent(Comp); SchServer.RobotManager.SendMessage(nil, c_BroadCast, SCHM_PrimitiveRegistration, Comp.I_ObjectAddress);
+Lib.RemoveSchComponent(Old);
+// footprint
+FP := PCBServer.CreatePCBLibComp; FP.Name := 'FP'; FP.Height := ...; Lib.RegisterComponent(FP);
+FP.AddPCBObject(Pad); PCBServer.SendMessageToRobots(FP.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Pad.I_ObjectAddress);
+Lib.GetComponentByName('FP'); Lib.RemoveComponent(FP); Lib.CurrentComponent := FP;
+Body := PCBServer.PCBObjectFactory(eComponentBodyObject, ...); Body.SetOutlineContour(Contour);   // PCBServer.PCBContourFactory
+Body.Model := Body.ModelFactory_CreateExtruded(MinZ, MaxZ, Color);   // or ModelFactory_FromFilename(Step, False) + SetState_FromModel
+```
+
+- A pin's `Location` is its end on the body; the pin points away from the body by `Orientation` (0 right, 90 up, 180 left,
+  270 down) and its free end, `Location` plus `PinLength` that way, is the electrical one (checked: wires drawn to those
+  ends compile to the intended nets).
+- Footprint coordinates are the footprint's own (around 0,0). The footprint the library editor shows is moved to the
+  library's origin (`Lib.Board.XOrigin`, 50000 mil), and `FP.x/FP.y` say where it is: read primitives as `P.x - FP.x`,
+  and when copying a footprint's primitives onto a board start the component at `FP.x, FP.y` (`pcb_from_schematic.pas`).
+- `IntegratedLibraryManager`: `InstalledLibraryCount/Path(I)` (Components panel), `AvailableLibraryCount/Path(I)` (also
+  the focused project's libraries).
+- IPC footprints: `PCB:BatchPCBLibCreate` (IPC Compliant Footprints Batch generator, the PcbLib in front) takes a CSV per
+  package type (`recipes/ipc_batch_columns.txt`); the form closes itself when done. The one-at-a-time IPC wizard
+  (`PCB:PCBLibCreate`) is a many-page wizard: use the batch generator.
+
+## Schematic part ids
+
+`SchServer.LoadComponentFromLibrary` gives every placed copy the library symbol's `UniqueId`; parts sharing one compile
+as one. After placing, set a new one between `SCHM_BeginModify` and `SCHM_EndModify` (8 letters); a bare assignment is
+not kept. `Sch:ResetUniqueIds` also works but raises a box and needs the sheet saved and reopened.
+
+## Board shape and nets
+
+- Board shape: draw the outline as tracks on a mechanical layer, select only them, then
+  `PCB:PlaceBoardOutline` `MODE=BOARDOUTLINE_FROM_SEL_PRIMS` (no dialog). Setting `Board.BoardOutline` segments from a
+  script changes nothing.
+- A pad given a net by script needs `Net.AddPCBObject(Pad)` too, or it has no net after the board is saved and opened
+  again. New tracks and vias made with `.Net` set keep it.
+- Selection: `Obj.Selected := True` is Altium's selection for native commands (`Board.SelectecObjectCount` counts it);
+  `PCB:RunQuery` `Apply=True|Expr=...|Select=True|Mask=False|Zoom=False` selects by query. `PCB:DeSelect` `Scope=All`.
+
+## Routing and polygons
+
+- Situs is `PCB:Autoroute` with `Action=`: `Start` (whole board; opens "Situs Routing Strategies", click Route All),
+  `BetweenSelectedComponents`, `OnSelectedComponents` (no dialog, the selected components), `NetClass`/`ComponentClass`
+  (a chooser dialog), `Net`/`Connection`/`Component`/`Area` (interactive: they wait for a click). It runs to the end
+  before `RunProcess` returns. There is no net parameter: to route only some nets add a Routing Layers rule
+  (`PCBServer.PCBRuleFactory(eRule_RoutingLayers)`, `Scope1Expression := 'Not (InNet(''A'') or InNet(''B''))'`,
+  `RoutingLayers[L] := False` for every layer) - a new rule gets priority 1 - route, then remove it.
+- Unrouted connections are `eConnectionObject` objects (`Net`, `X1 Y1 X2 Y2`, `Layer1 Layer2`).
+- ActiveRoute (`ActiveRouteOptions:ActiveRouteCmd` `Action=SelectedPrims`, or AdvPcb's `PCB:AutorouteEx`) exports a
+  Specctra design, runs `ActiveRoute.exe` on `%TEMP%\AR_<project>_<board>\ActiveRoute.scmd` (written by its panel) and
+  imports the routes. Neither saw a script's selection; `PCB:AutorouteEx` wants the .scmd file the panel writes.
+- Polygon: `PCBObjectFactory(ePolyObject)`, `Layer`, `Net`, `PolyHatchStyle := ePolySolid`, `PourOver`, `RemoveDead`,
+  `PointCount := N` and `Segments[0..N] := Seg` (`Seg := TPolySegment; Seg.Kind := ePolySegmentLine; Seg.vx/vy`, the last
+  closing on the first), add it, then `Poly.Rebuild` pours it. Repour: `Rebuild` each polygon inside `PCBM_BeginModify`/
+  `EndModify`.
+
+## Processes with dialogs (BpExpect)
+
+- `WorkspaceManager:Compare` `ObjectKind=Project|Action=UpdateMe` (board in front): "Component Links" (only when parts
+  are not linked yet) and "Engineering Change Order" (Validate Changes, Execute Changes, Close).
+- `PCB:Autoroute` `Action=Start`: "Situs Routing Strategies" (Route All).
+- `PCB:BatchPCBLibCreate`: "IPC... Footprints Batch generator" (Add Files opens the Windows file box "Open": `text 1 =`
+  the path, `click Open`).
+- Altium's extensions show WPF windows (class `HwndWrapper[...]`, no child controls): the hub closes an unexpected one
+  (ActiveRoute's "Information") as Alt+F4 would.
