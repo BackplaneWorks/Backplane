@@ -765,6 +765,12 @@ try:
             r = rects().get(i)
             if not r: return False
             b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2); time.sleep(0.6); return True
+        def box():  # the message box: no rect of its own; it is the strip above Send (Send's row is under it, the box 60 pt high)
+            r = rects().get('send')
+            if not r: return False
+            b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + r['x'] - 120, b[1] + 28 + r['y'] - 38); time.sleep(0.6); return True
+        def where(what):
+            print(f'INFO textkeys {what}: Backplane active {active(client.pid)}, KiCad active {active(kpid)}, terminal opens so far {hub_log().count("term.open")}', flush=True)
         def composer_text():
             subprocess.run(['pbcopy'], input=b'<nothing copied>'); key(K_A, CMD); time.sleep(0.15); key(8, CMD); time.sleep(0.3)
             t = subprocess.run(['pbpaste'], capture_output=True).stdout.decode('utf8', 'replace'); key(K_RIGHT); time.sleep(0.15); return t
@@ -773,7 +779,7 @@ try:
         def unhide():
             a = NSRunningApplication.runningApplicationWithProcessIdentifier_(client.pid); a.unhide(); time.sleep(0.4); a.activateWithOptions_(0)
         def hub_up(): return subprocess.run(['curl', '-s', '-m2', '-o', '/dev/null', f'http://127.0.0.1:{port}/hello']).returncode == 0
-        check(press_rect('composer'), 'textkeys: the message box is on screen (its rect)'); key(K_A, CMD); key(K_DEL)
+        check(box(), 'textkeys: the message box is on screen (under Send\'s rect)'); where('the message box clicked'); key(K_A, CMD); key(K_DEL)
         typed('keep'); key(K_RET, SHIFT); typed('ab cd')
         check(composer_text() == 'keep\nab cd', f'textkeys: typed two lines ({composer_text()!r})')
         steps = [('Option+Left, X: before the word', lambda: (key(K_LEFT, ALT), typed('X')), 'keep\nab Xcd'),
@@ -790,15 +796,16 @@ try:
             do(); time.sleep(0.3); got = composer_text()
             check(got == want, f'textkeys: {what} ({got!r}, want {want!r})')
         key(K_A, CMD); key(K_DEL); time.sleep(0.3)
-        for who, focus in (('the message box', lambda: press_rect('composer')), ('the terminal', lambda: (press_rect('composer'), key(K_J, CMD), time.sleep(1.2))),
-                           ('a viewer (the Files page)', lambda: (key(K_J, CMD), time.sleep(0.6), press_rect('rail:Files'), time.sleep(1.0)))):
-            focus(); key(K_H, CMD)
+        # after an unhide the runner's activation from this script may not make Backplane the active app (macOS 14+): each case starts with a click in it
+        for who, focus in (('the message box', lambda: box()), ('the terminal', lambda: (box(), key(K_J, CMD), time.sleep(1.2))),
+                           ('a viewer (the Files page)', lambda: (box(), key(K_J, CMD), time.sleep(0.6), press_rect('rail:Files'), time.sleep(1.0)))):
+            focus(); where(who); key(K_H, CMD)
             hid = wait_for(lambda: not ours_on_screen(), 5, 0.1)
             check(bool(hid), f'textkeys: Cmd+H with {who} focused hides Backplane\'s window')
             unhide(); back = wait_for(ours_on_screen, 10, 0.1)
             check(bool(back), f'textkeys: unhidden, Backplane\'s window is back ({who})'); time.sleep(0.8)
         press_rect('rail:Board'); time.sleep(1.5)
-        press_rect('composer'); key(K_J, CMD); time.sleep(1.2)
+        box(); key(K_J, CMD); time.sleep(1.2); where('before Cmd+W')
         check(hub_up(), 'textkeys: the hub answers before Cmd+W')
         key(K_W, CMD)
         ended = wait_for(lambda: client.poll() is not None, 10, 0.1)
