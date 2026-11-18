@@ -14,10 +14,16 @@ export HUB_BIN=$TREE/.target/host/fast/backplane-hub CLIENT_BIN=$TREE/.target/gp
 echo "remote_run: $(hostname) glibc $(ldd --version | head -1 | awk '{print $NF}') cores $(nproc) load $(cut -d' ' -f1 /proc/loadavg)" >&2
 ARGS=()
 case "$(basename "$SUITE")" in run_all.sh) ARGS=("$RUN/out") ;; *) export OUT=$RUN/out ;; esac
+# a session bus of the run's own (dbus-run-session; it ends with the run): the login's user bus has no desktop portal here, and GTK's
+# portal activation on it waits D-Bus's 25 s timeout before KiCad's API socket opens (bench-artifacts/handoff-prewarm: hpt063646 against
+# hpt063830). The bus's identity is written from inside it, beside the suite's output.
+command -v dbus-run-session >/dev/null || { echo "remote_run: dbus-run-session is missing on $(hostname): no private session bus for the run" >&2; exit 70; }
+BUSPROBE='{ echo "inside: DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS"; echo "inside: bus id $(dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetId 2>&1 | sed -n "s/^ *string \"\(.*\)\"/\1/p")"; echo "inside: portal owner $(dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.NameHasOwner string:org.freedesktop.portal.Desktop 2>&1 | sed -n "s/^ *boolean //p")"; } > "$BP_KEMBED_BUS_OUT" 2>&1; exec "$@"'
+export BP_KEMBED_BUS_OUT=$RUN/out/remote-bus.txt
 PGID=
 stop_run() { [ -n "$PGID" ] && { kill -TERM -- "-$PGID" 2>/dev/null; sleep 3; kill -KILL -- "-$PGID" 2>/dev/null; }; }
 trap 'stop_run; exit 143' HUP TERM INT
-setsid env "$@" bash "$SUITE" "${ARGS[@]}" &
+setsid env "$@" dbus-run-session -- bash -c "$BUSPROBE" busprobe bash "$SUITE" "${ARGS[@]}" &
 PGID=$!
 wait "$PGID"; RC=$?
 # nothing may outlive the run: every process of it carries BP_KEMBED_RUN=<id> in its environment
