@@ -557,8 +557,9 @@ try:
     # ---- MAC_MODE=autosave: with the keyboard in Backplane (KiCad not the active app), an agent commits a change over the API; a .history
     # snapshot appears within the debounce (3 s here); KiCad killed; Open the editor again: KiCad offers the recovery, and the pane names it ----
     # ---- MAC_MODE=recover: the same, then fork embed's fix/mac-recovery-alert: KiCad's native recovery alert (an NSAlert before its API
-    # answers) is reported to the hub (ET_DIALOG_OPENED from the new KiCad), in front of Backplane's window and centred on the pane. The client
-    # window is first made smaller at the screen's left, so an alert centred on the screen (AppKit's own place) is not on the pane's centre ----
+    # answers) is reported to the hub (ET_DIALOG_OPENED from the new KiCad), in front of Backplane's window and centred on the pane. The pane
+    # sits right of the screen's centre (the client window at the left, 1000 pt wide: pane centre x ~680, the screen's 512), so an alert centred
+    # on the screen (AppKit's own place) is not on the pane's centre; the run says when it cannot tell them apart ----
     if os.environ.get('MAC_MODE') in ('autosave', 'recover'):
         REC = os.environ.get('MAC_MODE') == 'recover'
         sys.path.insert(0, os.path.join(REPO, 'test/kicad_embed/mac')); import hub_ws
@@ -595,8 +596,6 @@ try:
         kk = []
         for l in subprocess.run(['ps', '-axo', 'pid=,command='], capture_output=True, text=True).stdout.splitlines():
             if '--parent-pid' in l and '--embedded' in l and OUT in l: kk.append(int(l.split()[0]))
-        if REC:
-            win_size(client.pid, 640, 560); time.sleep(2.5); cw = next((w for w in wins() if w[0] == cw[0]), cw)
         def embed_events():
             out = []
             for ln in hub_log().splitlines():
@@ -615,7 +614,8 @@ try:
         # macOS: KiCad's recovery question is a native alert before its API is up (no dialog event): a window of KiCad's own on screen
         # while it is not ready, or (where the fork reports it) the dialog event
         def alert():
-            ks = [w for w in wins() if 'kicad' in w[2].lower() and w[1] not in (client.pid, hub.pid) and w[3][2] < 600 and w[3][3] < 600]
+            # any window level: AppKit's alert is not at the normal level (seen on e2e-macos 44247744393: the alert was on screen, this missed it)
+            ks = [w for w in (helper('windows') or []) if 'kicad' in w['owner'].lower() and w['pid'] not in (client.pid, hub.pid) and 150 < w['bounds'][2] < 700 and 80 < w['bounds'][3] < 520]
             return ks or ('Recover Unsaved Changes' in hub_log())
         rec = wait_for(alert, 90, 0.5); time.sleep(2); shot('autosave-2-recovery')
         named = 'kicad-recover-prompt' in client_log() or 'kicad-recover-prompt' in hub_log() or 'Recover Unsaved Changes' in client_log()
