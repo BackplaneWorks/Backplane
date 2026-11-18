@@ -743,8 +743,9 @@ try:
             time.sleep(0.8); relay(op='text', text=title); time.sleep(1.2)
             t = time.time(); key(36); return (True, t) if timed else True
         def back_from_settings():
-            press_rect('ui:Settings') or key(K_ESC); time.sleep(1.2)
-            if rects_now().get('ui:Settings') is None: key(K_ESC); time.sleep(0.8)
+            # Settings is a sheet over the window: Escape closes it (the gear behind it is not pressable; e2e-macos 44296739808 left it open);
+            # a second Escape is harmless (the viewer is already shut by Settings)
+            key(K_ESC); time.sleep(1.0); key(K_ESC); time.sleep(0.8)
             t = time.time(); return press_rect('rail:Board'), t
         def open_keysheet():
             cwa = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(cwa[0] + 150, cwa[1] + 28 + 250); time.sleep(0.6)
