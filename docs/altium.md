@@ -45,6 +45,18 @@ Altium's blocking "Continue execution?" box), `Emit(S)` lines written through to
 the run's deadline (a script cannot be stopped from outside), undo groups a failed script left open closed, and any box
 Altium still raises answered. Runs go in `%PUBLIC%\Backplane\altium\runs`.
 
+- Dialogs a script means to open: `BpExpect(Title, Steps)` before the call that opens one (the ECO's Engineering Change
+  Order, Situs's strategy dialog, the IPC footprint batch generator) tells the hub to work that window instead of
+  cancelling it: steps `click <caption>` (a trailing `*` matches the caption's start), `wait <s>`, `text <n> = <value>`
+  (the n-th edit box), `window <title>` (go on in another window it opened), `gone <s>`. The lines go to the run's own
+  `.exp` file, which the hub reads only while a new Altium window is up (the script is then waiting on it; reading the
+  output file while Emit rewrites it made Altium's save fail). The hub finds the new window whose title contains
+  `Title` and clicks as the mouse does (posted button-down/up: Altium's buttons are drawn controls). What it did comes
+  back as `driven`; a step it cannot do (no such enabled control within 30 s) closes the window and those it opened, as
+  Cancel would, and says what the window offered.
+- Boxes it answers unasked: Windows message boxes, Delphi message forms, and owned WPF windows (Altium's extensions,
+  e.g. ActiveRoute's "Information"), which have no controls to read and are closed as Alt+F4 would.
+
 - MCP tools: `altium_status` (Altium's build, open projects and documents, the focused one) and `altium_script`.
 - The agents of an Altium project get `<backplane_altium>` instead of KiCad's editing and runtime blocks
   (`agents/prompt.rs` `altium`), and the bundled `altium` skill (`deploy/skills/altium`): recipes tested against Altium.
@@ -66,6 +78,8 @@ Altium still raises answered. Runs go in `%PUBLIC%\Backplane\altium\runs`.
 ## Not yet
 
 - Altium's ERC/DRC in the Review tab, Gerber/BOM/PDF output through Output Jobs, Buy it for Altium boards.
+- ActiveRoute from a script (it sees only a selection made with the mouse); online parts (Manufacturer Part Search,
+  workspace components), which have no script surface.
 - Image contents on sheets (drawn as frames), more than six inner layers apart, rule-based mask/paste expansion.
 - 3D: cylinder and sphere bodies, the stack's own colours, a body's 3D colour on a STEP model.
 - Editing without Altium (writing .SchDoc/.PcbDoc directly).
