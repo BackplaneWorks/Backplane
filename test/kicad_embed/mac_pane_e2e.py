@@ -658,8 +658,19 @@ try:
     # within 250 ms of the press, and the keyboard is KiCad's (at once, or after a click on its canvas: said) ----
     if os.environ.get('MAC_MODE') == 'leave':
         P = last_push()[0]
+        def rects_now():  # the rects of the client's latest frame only (rects() keeps every id ever drawn: a stale one was pressed, e2e-macos 44250085437)
+            last = None
+            for l in client_log().splitlines():
+                if 'GPUI_METRIC ' in l and '"rects"' in l: last = l
+            r = {}
+            try:
+                for e in json.loads(last.split('GPUI_METRIC ', 1)[1]).get('rects', []) or []:
+                    if isinstance(e, dict) and 'id' in e: r[e['id']] = e
+            except Exception: pass
+            k = backing_scale()
+            return {i: dict(e, x=e['x'] / k, y=e['y'] / k, w=e['w'] / k, h=e['h'] / k) for i, e in r.items()} if k != 1 else r
         def press_rect(i):
-            r = rects().get(i)
+            r = rects_now().get(i)
             if not r: return False
             b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2); return True
         def press_prefix(pre, skip=()):
@@ -676,15 +687,17 @@ try:
             f = kicad_frame()
             return f if f and all(abs(a - b) <= 2 for a, b in zip(f[3], P)) else None
         def canvas_click(): click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); time.sleep(0.6); key(K_ESC); time.sleep(0.3)
-        first_thread = sorted(k for k in rects() if k.startswith('thread:'))
-        print(f'INFO leave: threads in the sidebar {first_thread}', flush=True)
-        home_thread = first_thread[0] if first_thread else None
+        # (c) needs the sidebar: unfolded first (the pane narrows; P follows), a second thread made, then back to the first one
+        if not rects_now().get('ui:New thread'): press_rect('ui:Fold sidebar'); time.sleep(1.5)
+        home_thread = next(iter(sorted(k for k in rects_now() if k.startswith('thread:'))), None)
+        print(f'INFO leave: the sidebar shows {sorted(k for k in rects_now() if k.startswith("thread:"))}; New thread {bool(rects_now().get("ui:New thread"))}', flush=True)
+        wait_for(at_pane, 10, 0.2); P = last_push()[0]
         ways = [
             ('a', 'the viewer\'s Close', lambda: press_rect('ui:CloseViewer'), lambda: press_rect('rail:Board')),
             ('b', 'the rail closing the lit page', lambda: press_rect('rail:Board'), lambda: press_rect('rail:Board')),
             ('c', 'another thread', lambda: press_rect('ui:New thread'), lambda: home_thread and press_rect(home_thread)),
             ('d', 'the Files page', lambda: press_rect('rail:Files'), lambda: press_rect('rail:Board')),
-            ('e', 'a Diff over the page', lambda: press_rect('rail:Diff'), lambda: press_rect('rail:Diff')),
+            ('e', 'a Diff over the page', lambda: press_rect('rail:Diff'), lambda: press_rect('rail:Board')),
             ('f', 'Settings over the page', lambda: press_rect('ui:Settings'), lambda: (key(K_ESC), True)[1]),
         ]
         for tag, label, leave_, back_ in ways:
@@ -700,7 +713,7 @@ try:
             time.sleep(1.0)
             tb = time.time(); b_ = back_()
             f2 = wait_for(at_pane, 3, 0.02); dt = time.time() - tb
-            if not f2 and rects().get('ui:Edit'):
+            if not f2 and rects_now().get('ui:Edit'):
                 print(f'INFO leave {tag}: the page came back on View: Edit pressed', flush=True)
                 tb = time.time(); press_rect('ui:Edit'); f2 = wait_for(at_pane, 30, 0.02); dt = time.time() - tb
             if not f2:  # where it ended up, for the record
