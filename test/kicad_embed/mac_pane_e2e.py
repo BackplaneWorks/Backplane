@@ -1233,7 +1233,9 @@ try:
                         key(124); time.sleep(0.3)  # the caret to the end
                         n1 = seq(); rc = ask('kicad_ipc', {'path': f, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': 'FK_PCB'}}); cd = checks_idle(n1, 30)
                         key(8); time.sleep(0.12); key(2); time.sleep(0.5); got = field_text()  # c, d
-                        canvas_ev = [e.get('type') for e in evs() if int(e.get('seq', 0)) > n0 and e.get('type') in ('ET_DOCUMENT_EDITED', 'ET_SELECTION_CHANGED')]
+                        # the board's canvas only: a schematic frame's empty selection change (its own checks freeing their markers, e2e-macos
+                        # 44251169563) is not a key that left the field
+                        canvas_ev = [e.get('type') for e in evs() if int(e.get('seq', 0)) > n0 and e.get('type') in ('ET_DOCUMENT_EDITED', 'ET_SELECTION_CHANGED') and (e.get('frame') or {}).get('kind') == 'FK_PCB']
                         key(K_ESC); time.sleep(0.6)
                         return (got == 'abcd' and not canvas_ev and bool(cd)), f'{where}: the field holds {got!r} after "ab", a check ({"done" if cd else "no ET_CHECKS_DONE"}; RunChecks {"ok" if "message" in rc else str(rc)[:60]}), "cd"; canvas events {canvas_ev}'
                     # the Find dialog's field (Cmd+F): not the Search panel by Cmd+G, which is also Group in the PCB editor (fork embed: Cmd+G,
