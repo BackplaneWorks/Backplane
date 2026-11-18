@@ -54,7 +54,12 @@ class Hub:
         return False
     def socket_of(self, pid):
         cmd = open(f"/proc/{pid}/cmdline").read().split("\0"); d = os.path.dirname(cmd[cmd.index("--socket") + 1])
-        return sorted((s, os.stat(s).st_ino) for s in glob.glob(d + "/*.sock"))
+        # The filesystem can reuse an unlinked socket's inode immediately. Include its creation/change stamp,
+        # as the production transport does, so replacement at the same path remains observable.
+        out = []
+        for s in glob.glob(d + "/*.sock"):
+            st = os.stat(s); out.append((s, st.st_dev, st.st_ino, st.st_ctime_ns))
+        return sorted(out)
 
 class Project:
     """One project and the held turn whose MCP url its requests go through."""
@@ -146,7 +151,7 @@ def first_hub(work, hub_bin, rt, staged, port):
         ok("(c) the killed project counts as used by nobody: a further project gets a server", not e and s < 20, {"error": e, "after": round(s, 1), "servers": h.servers()})
         a.end(); time.sleep(IN_USE + 1.5); r, e, s = b.read(); now = h.servers("pb")
         ok("(c) the next request to the killed project is answered by a fresh process", not e and len(now) == 1 and now[0][0] != pid, {"error": e, "was": pid, "now": now})
-        if len(now) == 1: after = h.socket_of(now[0][0]); ok("(c) on a fresh socket (and so a fresh token: the request above was accepted)", after and after != before, {"before": before, "after": after})
+        if len(now) == 1: after = h.socket_of(now[0][0]); ok("(c) on a replacement socket, with the request accepted by the new server", after and after != before, {"before": before, "after": after})
         # (e) a project asked for again while its last process is still exiting never has two processes
         seen, stop = {}, []
         def sample():
