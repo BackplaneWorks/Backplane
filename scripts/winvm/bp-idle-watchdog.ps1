@@ -93,8 +93,10 @@ if ($RecentWriteDir) {
                     $entry = $entries.Current
                     if ($entry.LastWriteTime -gt $cut) { $recent = $entry.FullName; break }
                     if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-                        # Do not traverse junctions (cycles/outside the tree), or infer idle from an incomplete scan.
-                        $recent = "$($entry.FullName) (junction: counted busy)"; break
+                        # A junction or symlink: its own write time was checked above; never walk into it (a cycle,
+                        # or a folder outside the tree). It is not activity by being there: one always is on bp-win
+                        # (C:\bp\kicad-b12), and counting it kept bp-win busy until its 07:00 UTC shutdown.
+                        continue
                     }
                     if ($entry -is [IO.DirectoryInfo]) { $pending.Push($entry) }
                 }

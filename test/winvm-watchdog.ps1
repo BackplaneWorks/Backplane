@@ -55,6 +55,23 @@ try {
     (Get-Item $file).LastWriteTime = $old
     (Get-Item $nested).LastWriteTime = Get-Date
     Check 'nested folder change' $true 'nested' @{ RecentWriteDir = $tree }
+    # A junction (bp-win has C:\bp\kicad-b12). Setting LastWriteTime on one follows it to its target, so the
+    # junction's own time can't be made old here: the target gets a file dated an hour ahead instead, and a
+    # 0-minute window makes everything already written idle; walking into the junction would find that file.
+    (Get-Item $nested).LastWriteTime = $old
+    $target = Join-Path $root 'junction-target'
+    New-Item -ItemType Directory $target -Force | Out-Null
+    $ahead = Join-Path $target 'ahead.txt'
+    Set-Content $ahead 'outside the tree'
+    (Get-Item $ahead).LastWriteTime = (Get-Date).AddHours(1)
+    $link = Join-Path $tree 'link'
+    cmd /c mklink /J $link $target | Out-Null
+    (Get-Item $tree).LastWriteTime = $old
+    Start-Sleep -Seconds 2
+    Check 'junction target is not walked' $false '' @{ RecentWriteDir = $tree; RecentWriteMinutes = 0 }
+    Check 'a new junction counts by its own write time' $true 'link' @{ RecentWriteDir = $tree }
+    cmd /c rmdir $link | Out-Null
+    (Get-Item $tree).LastWriteTime = $old
     Check 'unreadable activity tree is safe' $true 'unreadable' @{ RecentWriteDir = (Join-Path $root 'missing') }
     $jobs = Join-Path $root 'jobs'
     New-Item -ItemType Directory "$jobs\in", "$jobs\out" -Force | Out-Null
