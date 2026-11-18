@@ -646,40 +646,72 @@ try:
                 check(False, f'recover: the alert window of the new KiCad is on screen (alert {bool(al)}, pane {bool(P)})')
             shot('recover-1-alert')
         raise SystemExit(1 if FAILS else 0)
-    # ---- MAC_MODE=leave (#1199): the pane leaving the page takes KiCad's frame off screen, and coming back brings it: the viewer's
-    # Close, then the Board page again; the Files page, then the Board page again. Judged from the window list: no window of the
-    # embedded KiCad over the pane's rect while the page does not hold the editor ----
+    # ---- MAC_MODE=leave (#1199): every way the pane leaves the page takes KiCad's frame off screen, and coming back brings it: (a) the
+    # viewer's Close, (b) the rail closing the lit page, (c) another thread, (d) the Files page, (e) a Diff over the page, (f) Settings over
+    # the page. Each from KiCad holding the keyboard (a click on its canvas): within 1 s no window of the embedded KiCad covers the pane's
+    # rect (the window list) and Backplane is the active app; back, KiCad's frame is directly above Backplane's window at the pane's rect
+    # within 250 ms of the press, and the keyboard is KiCad's (at once, or after a click on its canvas: said) ----
     if os.environ.get('MAC_MODE') == 'leave':
         P = last_push()[0]
         def press_rect(i):
             r = rects().get(i)
             if not r: return False
             b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2); return True
-        def kicad_over_pane():  # KiCad's windows on screen that cover most of the pane's old rect (its frame; not a tooltip)
+        def press_prefix(pre, skip=()):
+            ids = sorted(k for k in rects() if k.startswith(pre) and k not in skip)
+            return press_rect(ids[0]) and ids[0] if ids else False
+        def kicad_over_pane():  # KiCad's windows on screen that cover most of the pane's rect (its frame; not a tooltip)
             out = []
             for w in wins():
                 if w[1] != kpid: continue
                 x0, y0 = max(w[3][0], P[0]), max(w[3][1], P[1]); x1, y1 = min(w[3][0] + w[3][2], P[0] + P[2]), min(w[3][1] + w[3][3], P[1] + P[3])
                 if x1 > x0 and y1 > y0 and (x1 - x0) * (y1 - y0) > 0.3 * P[2] * P[3]: out.append(w)
             return out
-        for leave_id, label in (('ui:CloseViewer', 'closing the viewer'), ('rail:Files', 'the Files page')):
-            pressed_ = press_rect(leave_id); time.sleep(0.5)
-            gone = wait_for(lambda: not kicad_over_pane(), 8, 0.3); shot('leave-' + leave_id.split(':')[1])
-            check(pressed_ and bool(gone), f'leave: {label} takes KiCad\'s frame off screen (pressed {pressed_}; KiCad windows over the pane {[w[3] for w in kicad_over_pane()]})')
-            tb = time.time(); back_ = press_rect('rail:Board')
-            f2 = wait_for(kicad_frame, 3, 0.02); dt = time.time() - tb
+        def at_pane():  # KiCad's frame directly above Backplane's window, at the pane's rect (2 pt)
+            f = kicad_frame()
+            return f if f and all(abs(a - b) <= 2 for a, b in zip(f[3], P)) else None
+        def canvas_click(): click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); time.sleep(0.6); key(K_ESC); time.sleep(0.3)
+        first_thread = sorted(k for k in rects() if k.startswith('thread:'))
+        print(f'INFO leave: threads in the sidebar {first_thread}', flush=True)
+        home_thread = first_thread[0] if first_thread else None
+        ways = [
+            ('a', 'the viewer\'s Close', lambda: press_rect('ui:CloseViewer'), lambda: press_rect('rail:Board')),
+            ('b', 'the rail closing the lit page', lambda: press_rect('rail:Board'), lambda: press_rect('rail:Board')),
+            ('c', 'another thread', lambda: press_rect('ui:New thread'), lambda: home_thread and press_rect(home_thread)),
+            ('d', 'the Files page', lambda: press_rect('rail:Files'), lambda: press_rect('rail:Board')),
+            ('e', 'a Diff over the page', lambda: press_rect('rail:Diff'), lambda: press_rect('rail:Diff')),
+            ('f', 'Settings over the page', lambda: press_rect('ui:Settings'), lambda: (key(K_ESC), True)[1]),
+        ]
+        for tag, label, leave_, back_ in ways:
+            if not at_pane():
+                f0 = wait_for(at_pane, 10, 0.1)
+                if not f0: check(False, f'leave {tag}: KiCad\'s frame over the pane before {label}'); continue
+            canvas_click(); k_before = active(kpid)
+            pressed_ = leave_(); t0 = time.time()
+            gone = wait_for(lambda: not kicad_over_pane(), 1.0, 0.05); dt_gone = time.time() - t0; shot(f'leave-{tag}')
+            bp_active = active(client.pid) and not active(kpid)
+            check(bool(pressed_) and bool(gone), f'leave {tag}: {label} takes KiCad\'s frame off screen within 1 s (pressed {pressed_}; KiCad had the keyboard {k_before}; KiCad windows over the pane {[w[3] for w in kicad_over_pane()]})')
+            check(bp_active, f'leave {tag}: Backplane is the active app with the keyboard after {label}')
+            time.sleep(1.0)
+            tb = time.time(); b_ = back_()
+            f2 = wait_for(at_pane, 3, 0.02); dt = time.time() - tb
             if not f2 and rects().get('ui:Edit'):
-                tb = time.time(); press_rect('ui:Edit'); f2 = wait_for(kicad_frame, 30, 0.02); dt = time.time() - tb
-            k_now = f2 and active(kpid)
-            shot('leave-back-' + leave_id.split(':')[1])
-            check(bool(f2), f'leave: the Board page after {label} brings KiCad\'s frame back over the pane (pressed {back_}; {dt * 1000:.0f} ms)')
-            # lane B's: back in under ~200 ms (from the press, the window list polled every 20 ms) and the keyboard in KiCad
-            print(f'INFO leave: after {label}, the frame back in {dt * 1000:.0f} ms; KiCad has the keyboard {bool(k_now)} before any click', flush=True)
+                print(f'INFO leave {tag}: the page came back on View: Edit pressed', flush=True)
+                tb = time.time(); press_rect('ui:Edit'); f2 = wait_for(at_pane, 30, 0.02); dt = time.time() - tb
+            if not f2:  # where it ended up, for the record
+                f2 = wait_for(at_pane, 10, 0.1); dt = time.time() - tb
+            k_now = bool(f2) and active(kpid); shot(f'leave-{tag}-back')
+            check(bool(f2), f'leave {tag}: back after {label}, KiCad\'s frame is front-most at the pane\'s rect (pressed {b_}; {dt * 1000:.0f} ms; frame {kicad_frame() and kicad_frame()[3]}, pane {last_push()[0]})')
+            print(f'INFO leave {tag}: back in {dt * 1000:.0f} ms; KiCad has the keyboard {k_now} before any click', flush=True)
             if f2:
-                check(dt <= 0.25, f'leave: the editor is back within ~200 ms of the press ({dt * 1000:.0f} ms)')
+                check(dt <= 0.25, f'leave {tag}: the editor is back within ~200 ms of the press ({dt * 1000:.0f} ms)')
                 P = last_push()[0]
-                if not k_now: click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); time.sleep(0.6); key(K_ESC); time.sleep(0.3)
-                check(active(kpid), f'leave: the keyboard is in KiCad ({"at once" if k_now else "after a click on the canvas"})')
+                if not k_now: canvas_click()
+                check(active(kpid), f'leave {tag}: the keyboard is in KiCad ({"at once" if k_now else "after a click on the canvas"})')
+            else:
+                P = last_push()[0]
+        for l in client_log().splitlines():
+            if '"kicad_host_push"' in l and '"covered":true' in l.replace(' ', ''): print('INFO leave: a push said covered: ' + l.split('GPUI_LOG ', 1)[-1][:200], flush=True); break
         raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=hide (#1198): Cmd+H with KiCad's canvas focused hides Backplane and KiCad's frame (a runtime with comment-key-63: the
     # host reserves Ctrl+H); unhidden, KiCad's frame is directly above Backplane's window again and a click gives KiCad the keyboard; Cmd+H
