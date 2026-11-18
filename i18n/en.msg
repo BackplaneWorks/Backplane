@@ -1961,6 +1961,12 @@ gpui.that.kicad.project.has.no = That KiCad project has no board or schematic be
 gpui.that.file.is.not.on = That file is not on this hub.
 gpui.quit.backplane = Quit Backplane
 gpui.quit.backplane.on.a.mac = Quit Backplane, on a Mac: the hub keeps running
+gpui.hide.backplane = Hide Backplane
+gpui.hide.others = Hide Others
+gpui.show.all = Show All
+gpui.close.window = Close Window
+gpui.close.the.window.on.a = Close the window, on a Mac: the hub keeps running
+gpui.hide.backplane.on.a.mac = Hide Backplane, on a Mac: KiCad's editor hides with it and comes back with it
 
 # ---- gpui-c: viewers, plots, terminal, drawing pad ----
 gpui.c.commit = Commit

@@ -11,7 +11,7 @@ actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThrea
     PickUp, PickDown, PickLeft, PickRight, PickTab, PickBackTab, PickEnter,
     Project1, Project2, Project3, Project4, Project5, Project6, Project7, Project8, Project9,
     Thread1, Thread2, Thread3, Thread4, Thread5, Thread6, Thread7, Thread8, Thread9,
-    RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal, ShowKeys, FoldProject, UnfoldProject, MgmtBom, MgmtChecks, MgmtLife, MgmtFab, CommentKicad, Quit]);
+    RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal, ShowKeys, FoldProject, UnfoldProject, MgmtBom, MgmtChecks, MgmtLife, MgmtFab, CommentKicad, Quit, CloseWindow, HideApp, HideOthers, ShowAll]);
 
 /// Where no text field, file list or viewer has the keyboard: a bare key may act.
 /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ pub const FREE: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
@@ -27,8 +27,9 @@ actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThrea
 /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ const NOT_MAC_COMPOSER: &str = "!Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput";
 /// Where Esc is the field's or the page's own: the viewer does not shut under it.
 /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ const ESC_OWNERS: [&str; 10] = ["TextInput", "PickInput", "FindInput", "AskInput", "ImpInput", "Terminal", "BrowserBar", "BrowserView", "CefBar", "CefPage"];
-/// Where a bare backtick shows the terminal: the message box, or nowhere that types (a shell, another field and a viewer keep their backticks).
-/* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ const TERM_BARE: &str = "Composer || (!TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage && !Terminal)";
+/// Where a bare backtick shows the terminal: nowhere that types. Every text field (the message box too, #1172: a backtick there is typed, for code),
+/// the shell and a viewer keep their backticks; Ctrl+J (Cmd+J on a Mac) shows the terminal from all of them.
+/* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ const TERM_BARE: &str = "!Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage && !Terminal";
 /// Where Ctrl+H is the viewer's: everywhere but the small fields, the terminal and web pages, whose own it stays (it deletes a character in many fields and in a shell, and opens a web page's history).
 /// The composer is included, as in the old client: the board beside it answers without a click on the canvas. With no plot on show the key goes on to the composer (`key_layers`).
 /// Ctrl+L to the message box: everywhere but the shell (its Ctrl+L clears the screen) and the Browser page (its address bar)
@@ -96,6 +97,8 @@ pub const TABLE: &[Entry] = &[
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("mgmt-fab", "Fab panel beside the design: open or close", "Viewer", "alt-shift-f", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("help", "Keyboard shortcuts: this list. ? outside a text box, F1 anywhere", "Window", "? or F1", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("quit", "Quit Backplane, on a Mac: the hub keeps running", "Window", "secondary-q", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("close-window", "Close the window, on a Mac: the hub keeps running", "Window", "secondary-w", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("hide", "Hide Backplane, on a Mac: KiCad's editor hides with it and comes back with it", "Window", "secondary-h", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("perf", "Performance overlay: the last few seconds of the window's work", "Window", "ctrl-shift-h", Rebind),
 ];
 /// Keys the old client had that this one cannot do yet (no equivalent): listed, not faked.
@@ -194,18 +197,27 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
     v.extend(pad_bindings(&v, &k("close")));
     let term = term_bindings(&v, &k("term"));
     v.extend(term);
-    v.extend(quit_bindings(mac()));
+    v.extend(window_bindings(mac()));
     // last: a copy button's keys win over the window's Ctrl+C at the same depth, and nothing above is derived from them (pad_bindings, term_bindings)
     v.extend(crate::screens::copyable::bindings());
     v
 }
-/// Cmd+Q quits the desktop client on a Mac (the hub runs on by itself). Bound after the pad's and the terminal's mutes, and left out of them,
-/// so it quits from every keyboard owner: the composer, a viewer, the shell, the drawing pad. Off a Mac, Ctrl+Q and Super+Q stay the fields' and the desktop's.
-pub fn quit_bindings(mac: bool) -> Vec<KeyBinding> { if mac { vec![KeyBinding::new("cmd-q", Quit, None)] } else { vec![] } }
-/// The macOS application menu: Backplane, with Quit Backplane (also Cmd+Q). Installed at launch and again when the language changes; nothing elsewhere.
+/// Cmd+Q quits the desktop client on a Mac (the hub runs on by itself), Cmd+W closes the window (the red button's path, `Backplane::close_window`)
+/// and Cmd+H hides Backplane (#1198). Bound after the pad's and the terminal's mutes, and left out of them, so they act from every keyboard
+/// owner: the composer, a viewer, the shell, the drawing pad. Off a Mac, Ctrl+Q/W/H and Super+Q/W/H stay the fields', the viewer's and the desktop's.
+pub fn window_bindings(mac: bool) -> Vec<KeyBinding> {
+    if mac { vec![KeyBinding::new("cmd-q", Quit, None), KeyBinding::new("cmd-w", CloseWindow, None), KeyBinding::new("cmd-h", HideApp, None), KeyBinding::new("alt-cmd-h", HideOthers, None)] } else { vec![] }
+}
+/// The macOS menus: Backplane (Hide Backplane, Hide Others, Show All, Quit Backplane) and Window (Close Window), each with its key from
+/// `window_bindings`. Installed at launch and again when the language changes; nothing elsewhere.
 pub fn install_menus(cx: &mut App) {
     if !mac() { return }
-    cx.set_menus(vec![Menu { name: "Backplane".into(), items: vec![MenuItem::action(tr("Quit Backplane").into_owned(), Quit)] }]);
+    let t = |s: &str| tr(s).into_owned();
+    cx.set_menus(vec![
+        Menu { name: "Backplane".into(), items: vec![MenuItem::action(t("Hide Backplane"), HideApp), MenuItem::action(t("Hide Others"), HideOthers), MenuItem::action(t("Show All"), ShowAll),
+            MenuItem::separator(), MenuItem::action(t("Quit Backplane"), Quit)] },
+        Menu { name: t("Window").into(), items: vec![MenuItem::action(t("Close Window"), CloseWindow)] },
+    ]);
 }
 /// The floating terminal's own keys, and every other shortcut muted in it: Ctrl+C, Ctrl+K, Esc, a backtick and the rest are the shell's.
 /// Its toggle and Shift+Esc stay (they are bound everywhere). Last, so the mutes win the tie with the bindings that have no context.
@@ -427,6 +439,7 @@ pub fn attach(el: Div, picker: bool, cx: &mut Context<Backplane>) -> Div {
     let el = on!(el, PickEnter, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.picker_enter(cx));
     let el = on!(el, PrevThread, |this: &mut Backplane, _, cx: &mut Context<Backplane>| { let n = neighbour(&this.data, &this.selected, false); this.key_go(n, cx) });
     let el = on!(el, NextThread, |this: &mut Backplane, _, cx: &mut Context<Backplane>| { let n = neighbour(&this.data, &this.selected, true); this.key_go(n, cx) });
+    let el = on!(el, CloseWindow, |this: &mut Backplane, _: &mut Window, _: &mut Context<Backplane>| this.close_window()); // Cmd+W (#1198): the red button's path
     let el = on!(el, AlwaysOn, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.voice_always_toggle(cx));
     let el = on!(el, UberChat, |this: &mut Backplane, _, cx: &mut Context<Backplane>| {
         let id = this.data["bots"].as_array().into_iter().flatten().find(|b| b["uber"].as_bool().unwrap_or(false)).map(|b| crate::string(b, "id"));
@@ -556,8 +569,9 @@ mod tests {
         assert_eq!(d("ctrl-j", &["DrawPad"]), "", "nothing behind the pad moves");
     }
     #[test] fn a_bare_backtick_shows_the_terminal_but_stays_typed_in_fields_and_the_shell() {
-        assert_eq!(d("`", &[]), "keys::ToggleTerminal"); assert_eq!(d("`", &["Composer"]), "keys::ToggleTerminal", "from the message box, as the old client");
-        for c in ["Terminal", "TextInput", "PickInput", "AskInput", "ImpInput", "Viewer", "BrowserBar", "FilesPage", "DrawPad"] { assert_eq!(d("`", &[c]), "", "{c} keeps its backtick"); }
+        assert_eq!(d("`", &[]), "keys::ToggleTerminal"); assert_eq!(d("`", &["Composer"]), "", "#1172: the message box types its backtick");
+        assert_eq!(d("ctrl-j", &["Composer"]), "keys::ToggleTerminal", "the terminal's chord still works from it");
+        for c in ["Composer", "Terminal", "TextInput", "PickInput", "AskInput", "ImpInput", "Viewer", "BrowserBar", "FilesPage", "DrawPad"] { assert_eq!(d("`", &[c]), "", "{c} keeps its backtick"); }
         assert_eq!(d("`", &["DrawPad", "PadLength"]), "");
     }
     #[test] fn shift_escape_leaves_the_terminal_and_plain_escape_is_the_shells() {
@@ -588,7 +602,7 @@ mod tests {
     }
     /// What `key` does on a Mac's keymap (this device's bindings, with the Mac's Cmd+Q added last when the tests run elsewhere, as `bindings` adds it there).
     fn on_mac(key: &str, ctx: &[&str]) -> String {
-        let mut all = bindings(&Local::default()); if !mac() { all.extend(quit_bindings(true)); }
+        let mut all = bindings(&Local::default()); if !mac() { all.extend(window_bindings(true)); }
         let map = Keymap::new(all);
         let stack: Vec<KeyContext> = ["Backplane"].iter().chain(ctx.iter()).map(|c| KeyContext::parse(c).unwrap()).collect();
         map.bindings_for_input(&[Keystroke::parse(key).unwrap()], &stack).0.first().map(|b| b.action().name().to_string()).unwrap_or_default()
@@ -600,8 +614,19 @@ mod tests {
         }
         assert_eq!(on_mac("cmd-n", &["DrawPad"]), "", "the pad's mute still holds the other shortcuts"); assert_eq!(on_mac("cmd-k", &["Terminal"]), "", "and the shell's");
     }
+    #[test] fn cmd_w_closes_and_cmd_h_hides_on_a_mac_from_every_keyboard_owner() {
+        for ctx in [&[][..], &["Composer"][..], &["TextInput"][..], &["AskInput"][..], &["FindInput"][..], &["Viewer"][..], &["Viewer Plot"][..], &["Viewer", "FilesPage"][..], &["Viewer", "BrowserBar"][..],
+            &["Viewer", "CefPage"][..], &["Terminal"][..], &["Viewer", "Terminal"][..], &["DrawPad"][..], &["DrawPad", "PadLength"][..], &["AccountMenu"][..], &["Picker", "Composer"][..]] {
+            assert_eq!(on_mac("cmd-w", ctx), "keys::CloseWindow", "{ctx:?}"); assert_eq!(on_mac("cmd-h", ctx), "keys::HideApp", "{ctx:?}"); assert_eq!(on_mac("alt-cmd-h", ctx), "keys::HideOthers", "{ctx:?}");
+        }
+        assert_eq!(on_mac("ctrl-h", &["Viewer"]), "keys::CycleLayers", "Ctrl+H stays the layers' on a Mac");
+        if !mac() { for ctx in [&[][..], &["Composer"][..], &["Viewer"][..], &["Terminal"][..]] { assert_eq!(d("ctrl-w", ctx), "", "{ctx:?}: Ctrl+W unbound off a Mac"); assert_eq!(d("super-h", ctx), ""); assert_eq!(d("super-w", ctx), ""); } }
+        for (id, key) in [("close-window", "secondary-w"), ("hide", "secondary-h")] { assert_eq!(find(id).map(|x| (x.key, x.kind)), Some((key, Fixed))); }
+        assert_eq!(hint(&Local::default(), "hide"), if mac() { "⌘H" } else { "Ctrl+H" });
+        for k in ["gpui.hide.backplane =", "gpui.hide.others =", "gpui.show.all =", "gpui.close.window =", "gpui.window ="] { assert_eq!(crate::i18n::JA_MSG.lines().filter(|l| l.starts_with(k)).count(), 1, "{k} in the catalog"); }
+    }
     #[test] fn quit_is_bound_only_on_a_mac_and_listed() {
-        assert!(quit_bindings(false).is_empty());
+        assert!(window_bindings(false).is_empty());
         if !mac() { for ctx in [&[][..], &["Composer"][..], &["Terminal"][..]] { assert_eq!(d("ctrl-q", ctx), "", "Ctrl+Q stays the field's and the shell's off a Mac"); assert_eq!(d("super-q", ctx), ""); } }
         assert_eq!(find("quit").map(|x| (x.key, x.kind)), Some(("secondary-q", Fixed)));
         assert_eq!(hint(&Local::default(), "quit"), if mac() { "⌘Q" } else { "Ctrl+Q" });
