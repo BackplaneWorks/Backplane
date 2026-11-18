@@ -940,6 +940,26 @@ try:
         check(okd, f'swap D: after KiCad could not answer for {stall:.0f} s, the frame ends visible at the LAST rect (frame {f and f[3]}, last {last})')
         time.sleep(4.0)
         check(not active(kpid), 'swap D: KiCad did not take the keyboard by itself after the recovery (no delayed focus steal)')
+        # (E) a reconnect while a refusal waits (#1199's rejoin): an agent's RunChecks running, Full size pressed (KiCad refuses the
+        # geometry while it checks), then the hub stopped past the client's 35 s heartbeat so the client drops and re-makes its connection
+        # to the same hub and KiCad; the frame must end visible at the LAST rect
+        wait_for(kframe, 10, 0.2); time.sleep(0.5)
+        log0 = len(client_log().splitlines()); n0 = len(PUSHES)
+        th = threading.Thread(target=lambda: ask('kicad_ipc', {'path': pcbf, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': 'FK_PCB'}}), daemon=True)
+        te = time.time(); th.start(); time.sleep(0.25); press_rect('kicad:full')
+        refused_e = wait_for(lambda: any('kicad_host_refused' in l for l in client_log().splitlines()[log0:]), 5, 0.05)
+        os.kill(hub.pid, 19)  # SIGSTOP: the client hears nothing past its 35 s heartbeat
+        try: time.sleep(float(os.environ.get('SWAP_HUB_STOP_S', '45')))
+        finally: os.kill(hub.pid, 18)
+        rejoined = wait_for(lambda: sum('"Hello"' in l or 'disconnect' in l for l in client_log().splitlines()[log0:]) >= 1, 30, 0.2)
+        th.join(60); host_settled(20); time.sleep(2.0)
+        lines = client_log().splitlines()[log0:]
+        last = next((j['kicad_host_push'] for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None); lastvis = next((j.get('visible') for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None)
+        f = kframe(); oke = bool(lastvis) and bool(f and last) and all(abs(a - b) <= 2 for a, b in zip(f[3], last))
+        print(f'INFO swap E: refusal waiting before the stop {bool(refused_e)}; reconnect seen {bool(rejoined)} ({[l.split("GPUI_LOG ", 1)[-1][:90] for l in lines if "disconnect" in l][:2]}); pushes {[(round((t - te) * 1000), j["kicad_host_push"], j.get("visible"), j.get("retry")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; frame {f and f[3]}; last {last}', flush=True)
+        check(bool(rejoined), 'swap E: the client dropped and re-made its hub connection')
+        check(oke, f'swap E: after a reconnect with a refusal waiting, the frame ends visible at the LAST rect (frame {f and f[3]}, last {last}; refusal before {bool(refused_e)})')
+        press_rect('kicad:full'); time.sleep(1.0)
         raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=hide (#1198): Cmd+H with KiCad's canvas focused hides Backplane and KiCad's frame (a runtime with comment-key-63: the
     # host reserves Ctrl+H); unhidden, KiCad's frame is directly above Backplane's window again and a click gives KiCad the keyboard; Cmd+H
