@@ -1437,6 +1437,8 @@ impl KicadPane {
     pub fn detach(&mut self) {
         // macOS: KiCad's frame leaves the screen with the pane (its windows are its own; nothing of ours to unmap)
         #[cfg(target_os = "macos")]
+        nc::cancel_yield(); // the editor leaves the pane: a hand-in still waiting to fall back is void (nc::yield_to)
+        #[cfg(target_os = "macos")]
         if let Some((x, y, w, h, true)) = self.host_sent.take() { self.host_rpc(json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": false, "raise": false})); }
         let Some(c) = self.container.take() else { return };
         nc::place(c, None, None, None, &mut self.last_root); nc::grab_escape(self.toplevel, false);
