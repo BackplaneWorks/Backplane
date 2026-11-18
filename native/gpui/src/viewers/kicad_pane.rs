@@ -251,8 +251,16 @@ pub fn raise_step(above: bool, on_screen: bool, st: &mut RaiseState, buried: &mu
 pub fn mac_shown(show: bool, host_visible: bool, hitbox: bool, in_page: bool, covered: bool, dialog: bool, was_visible: bool) -> bool {
     show && host_visible && (!covered || (dialog && was_visible)) && (hitbox || (was_visible && (in_page || dialog)))
 }
-/// macOS: how long after the last push of a burst it is sent once more (`mac_watch`, KicadPane::mac_settle).
+/// macOS: how long after the last push of a burst it is sent once more (`mac_watch`, KicadPane::mac_settle). Why: KiCad's show path
+/// (bp.13.1) places a frame shown by `SetHostGeometry {visible:true}` from that call's rect after it has answered it, over a later call's
+/// rect: e2e-macos 44255662838 pushed 496x524 visible then 496x500, and the frame stayed 496x524. Ours is in order: the client sends
+/// its commands on one socket in order (hub.rs `session`), the hub answers one connection's requests one at a time and each
+/// `editor.kicad.host` only after KiCad has answered its SetHostGeometry (wire/mod.rs `socket_inner`, embed.rs), and one worker per
+/// KiCad socket sends them in order (kipc.rs). So the swap is KiCad's, for the fork to fix (the integrator); this send keeps the last
+/// word ours meanwhile. BACKPLANE_KICAD_MAC_SETTLE_MS: another wait, 0 none (mac_pane_e2e's check that fails on KiCad's swap itself).
 pub const MAC_SETTLE_MS: u64 = 300;
+/// The settle wait in force (MAC_SETTLE_MS, or BACKPLANE_KICAD_MAC_SETTLE_MS; 0: never sent again).
+pub fn mac_settle_ms(env: Option<&str>) -> u64 { env.and_then(|v| v.trim().parse().ok()).unwrap_or(MAC_SETTLE_MS) }
 /// Whether something drawn after the pane's own content covers all of the pane (`over`: what was drawn over it, each clipped to
 /// the pane, as Window::hitbox_drawn_after gives it): a full-window screen (its backdrop), not a menu, a tooltip or a card.
 pub fn covers_pane(pane: (f32, f32), over: &[(f32, f32)]) -> bool {
@@ -1247,7 +1255,8 @@ impl KicadPane {
             if let Some((x, y, w, h, v)) = now {
                 eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [x, y, w, h], "visible": v, "raise": false, "changed": true, "pane_px": at.map(|r| [r.x, r.y, r.w, r.h]), "frame": show, "in_page": self.in_page, "covered": self.mac_covered, "hitbox": hitbox, "dialog": dialog}));
                 self.rpc("editor.kicad.host", json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": v, "raise": false}));
-                self.mac_settle = Some(std::time::Instant::now() + std::time::Duration::from_millis(MAC_SETTLE_MS));
+                let ms = mac_settle_ms(std::env::var("BACKPLANE_KICAD_MAC_SETTLE_MS").ok().as_deref());
+                self.mac_settle = (ms > 0).then(|| std::time::Instant::now() + std::time::Duration::from_millis(ms));
                 // the page let the editor go (#1199): the keyboard back to Backplane's window if KiCad had it, as detach does (a8bbdc74e);
                 // the frame stays parked in KiCad, shown again at the next frame that draws the pane, and the keys go to it on a click
                 if was && !v && (!self.in_page || self.mac_covered) && (self.keys || nc::has_focus(0)) {
@@ -1482,6 +1491,7 @@ mod tests {
         assert!(!mac_shown(true, true, true, true, true, false, true), "Settings over the page: hidden");
         assert!(mac_shown(true, true, true, true, true, true, true), "Settings over a KiCad dialog: the dialog kept");
         assert!(mac_shown(true, true, true, true, false, false, false), "Settings closed: on show again");
+        assert_eq!((super::mac_settle_ms(None), super::mac_settle_ms(Some("0")), super::mac_settle_ms(Some("x"))), (super::MAC_SETTLE_MS, 0, super::MAC_SETTLE_MS));
         use super::covers_pane;
         assert!(covers_pane((800., 600.), &[(800., 600.)]), "a backdrop over the whole pane");
         assert!(!covers_pane((800., 600.), &[(200., 30.), (300., 600.)]), "a tooltip, a menu or a card over a part of it");
