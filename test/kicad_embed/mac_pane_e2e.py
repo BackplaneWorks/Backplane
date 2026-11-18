@@ -200,6 +200,9 @@ else:
 CLIENT, HUB, ASSETS, RT, OUT = sys.argv[1:6]
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 FAILS, RES, procs = [], {}, []
+RT_MANIFEST = json.load(open(os.path.join(RT, 'manifest.json'))) if os.path.isfile(os.path.join(RT, 'manifest.json')) else {}
+RT_CAPS = set(RT_MANIFEST.get('capabilities') or [])
+print(f'INFO runtime: version={RT_MANIFEST.get("version")} sourceCommit={RT_MANIFEST.get("sourceCommit")} platform={RT_MANIFEST.get("platform")} caps={len(RT_CAPS)} host_order={"embed-host-order" in RT_CAPS} lazy_libs={"embed-lazy-libraries" in RT_CAPS} autopanels={"embed-autopanels" in RT_CAPS} gl_fallback={"embed-gl-fallback" in RT_CAPS} backplaneLibrary={RT_MANIFEST.get("backplaneLibrary")}', flush=True)
 
 
 def check(ok, what):
@@ -884,38 +887,77 @@ try:
         def ask(name, args, wait=120):
             n0 = len(mcalls())
             hub_ws.send(port, token, 'turn.start', {'thread': 't1', 'text': 'mcpcall:' + json.dumps({'name': name, 'arguments': args}), 'msg': f'sw-{time.time_ns()}'})
-            wait_for(lambda: len(mcalls()) > n0, wait, 0.3)
-        b_reps = int(os.environ.get('SWAP_CHECK_REPS', '4')); b_wrong = b_during = 0
-        for i in range(b_reps):
-            wait_for(kframe, 10, 0.2); time.sleep(0.5)
-            log0 = len(client_log().splitlines()); n0 = len(PUSHES)
-            done = []
-            th = threading.Thread(target=lambda: (ask('kicad_ipc', {'path': pcbf, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': 'FK_PCB'}}), done.append(time.time())), daemon=True)
-            tc = time.time(); th.start(); time.sleep(0.25)
-            if i % 2 == 0: press_rect('kicad:full')
-            else: press_rect('ui:CloseViewer'); time.sleep(0.4); press_rect('rail:Board')
-            th.join(120); dur = (done[0] - tc) if done else None; time.sleep(1.5); wait_for(kframe, 5, 0.05); host_settled(); time.sleep(0.5)
-            busy = [l for l in client_log().splitlines()[log0:] if 'a task is running' in l]
-            during = bool(busy) or (dur is not None and dur > 0.3)
-            b_during += during
-            last = next((j['kicad_host_push'] for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None); lastvis = next((j.get('visible') for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None)
-            f = kframe(); ok = bool(lastvis) and bool(f and last) and all(abs(a - b) <= 2 for a, b in zip(f[3], last))
-            b_wrong += (not ok)
-            print(f'INFO swap B{i + 1}: {"Full size" if i % 2 == 0 else "close and reopen"} during RunChecks ({dur and round(dur * 1000)} ms; busy replies {len(busy)}); pushes {[(round((t - tc) * 1000), j["kicad_host_push"], j.get("visible")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; frame {f and f[3]}; last {last} visible {lastvis}; {"ok" if ok else "NOT at the last rect"}', flush=True)
-            if i % 2 == 0: press_rect('kicad:full'); time.sleep(1.5)
-        check(b_during > 0, f'swap B: the pane changed while KiCad ran its checks ({b_during} of {b_reps} tries ran longer than 300 ms or met a busy reply)')
-        check(b_wrong == 0, f'swap B: after geometry during the checks, the frame ends visible at the LAST rect ({b_wrong} of {b_reps} did not)')
-        # (C) a newer hide is not undone: the Board page, then the viewer closed again the moment the first visible:true push is seen; 1.5 s
-        # later no KiCad frame may cover the pane (a deferred show must not win over the later hide)
-        c_reps = int(os.environ.get('SWAP_HIDE_REPS', '4')); c_wrong = 0
+            wait_for(lambda: len(mcalls()) > n0, wait, 0.02)
         def over_pane():
             pp = (last_push() or [[0, 0, 0, 0]])[0]
             return [w for w in wins() if w[1] == kpid and w[3][2] > 200 and w[3][3] > 200 and abs(w[3][0] - pp[0]) < 400]
+        b_reps = int(os.environ.get('SWAP_CHECK_REPS', '4')); b_wrong = b_during = b_native_rect = b_native_hide = b_busy_total = 0
+        for i in range(b_reps):
+            wait_for(kframe, 10, 0.2); time.sleep(0.5)
+            f0 = kframe(); b0 = f0[3] if f0 else None
+            log0 = len(client_log().splitlines()); n0 = len(PUSHES)
+            done = []
+            th = threading.Thread(target=lambda: (ask('kicad_ipc', {'path': pcbf, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': 'FK_PCB'}}), done.append(time.time())), daemon=True)
+            tc = time.time(); th.start(); time.sleep(0.15)
+            samples = []; native_rect_ms = native_hide_ms = native_show_ms = None
+            if i % 2 == 0:
+                press_rect('kicad:full')
+                prev_s = None
+                while not done and time.time() - tc < 60:
+                    ms = round((time.time() - tc) * 1000)
+                    kf = kframe(); cur = kf[3] if kf else None
+                    if cur != prev_s: samples.append((ms, cur)); prev_s = cur
+                    if cur and b0 and cur[2] > b0[2] + 100 and native_rect_ms is None: native_rect_ms = ms
+                    time.sleep(0.025)
+            else:
+                press_rect('ui:CloseViewer'); t_cl = time.time(); prev_v = None
+                while not done and time.time() - t_cl < 0.50:
+                    ms = round((time.time() - tc) * 1000)
+                    vis_now = bool(over_pane())
+                    if vis_now != prev_v: samples.append((ms, vis_now)); prev_v = vis_now
+                    if not vis_now and native_hide_ms is None:
+                        native_hide_ms = ms; break
+                    time.sleep(0.025)
+                press_rect('rail:Board')
+                while not done and time.time() - tc < 60:
+                    ms = round((time.time() - tc) * 1000)
+                    vis_now = bool(over_pane())
+                    if vis_now != prev_v: samples.append((ms, vis_now)); prev_v = vis_now
+                    if vis_now and native_hide_ms is not None and native_show_ms is None: native_show_ms = ms
+                    time.sleep(0.025)
+            th.join(120); dur = (done[0] - tc) if done else None; time.sleep(1.5); wait_for(kframe, 5, 0.05); host_settled(); time.sleep(0.5)
+            busy = [l for l in client_log().splitlines()[log0:] if 'a task is running' in l]
+            b_busy_total += len(busy)
+            dur_ms = round(dur * 1000) if dur is not None else None
+            during = bool(busy) or (dur is not None and dur > 0.3)
+            b_during += during
+            if i % 2 == 0 and native_rect_ms is not None and dur_ms is not None and native_rect_ms < dur_ms: b_native_rect += 1
+            if i % 2 == 1 and native_hide_ms is not None and dur_ms is not None and native_hide_ms < dur_ms: b_native_hide += 1
+            last = next((j['kicad_host_push'] for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None); lastvis = next((j.get('visible') for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None)
+            f = kframe(); ok = bool(lastvis) and bool(f and last) and all(abs(a - b) <= 2 for a, b in zip(f[3], last))
+            b_wrong += (not ok)
+            print(f'INFO swap B{i + 1}: {"Full size" if i % 2 == 0 else "close and reopen"} during RunChecks ({dur_ms} ms; busy replies {len(busy)}; native_rect_ms={native_rect_ms} native_hide_ms={native_hide_ms} native_show_ms={native_show_ms}; samples={samples[:8]}); pushes {[(round((t - tc) * 1000), j["kicad_host_push"], j.get("visible")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; frame {f and f[3]}; last {last} visible {lastvis}; {"ok" if ok else "NOT at the last rect"}', flush=True)
+            if i % 2 == 0: press_rect('kicad:full'); time.sleep(1.5)
+        check(b_during > 0, f'swap B: the pane changed while KiCad ran its checks ({b_during} of {b_reps} tries ran longer than 300 ms or met a busy reply)')
+        check(b_wrong == 0, f'swap B: after geometry during the checks, the frame ends visible at the LAST rect ({b_wrong} of {b_reps} did not)')
+        if 'embed-host-order' in RT_CAPS:
+            check(b_busy_total == 0, f'swap B: SetHostGeometry served during RunChecks with 0 busy refusals (busy={b_busy_total})')
+            check(b_native_rect > 0, f'swap B: native frame resized to Full size DURING RunChecks ({b_native_rect} of {(b_reps + 1) // 2} tries)')
+            check(b_native_hide > 0, f'swap B: native frame hid off the pane DURING RunChecks ({b_native_hide} of {b_reps // 2} tries)')
+        # (C) a newer hide is not undone: the Board page, then the viewer closed again the moment the first visible:true push is seen; 1.5 s
+        # later no KiCad frame may cover the pane (a deferred show must not win over the later hide)
+        c_reps = int(os.environ.get('SWAP_HIDE_REPS', '4')); c_wrong = 0
         for i in range(c_reps):
             wait_for(kframe, 10, 0.2); press_rect('ui:CloseViewer'); time.sleep(1.2)
             t0 = time.time(); n0 = len(PUSHES); press_rect('rail:Board')
             seen = wait_for(lambda: any(j.get('visible') for _, j in PUSHES[n0:] if j.get('kicad_host_push')), 3, 0.005)
-            press_rect('ui:CloseViewer'); time.sleep(1.5)
+            n1 = len(PUSHES); closed = press_rect('ui:CloseViewer')
+            # judged 1.5 s after the client's hide push (its press can be taken late while the page is still appearing), not after the press
+            hid = wait_for(lambda: any(j.get('kicad_host_push') and not j.get('visible') for _, j in PUSHES[n1:]), 6, 0.02)
+            if not hid:
+                print(f'INFO swap C{i + 1}: the close was not taken (pressed {closed}; no visible:false push in 6 s): not judged', flush=True)
+                press_rect('rail:Board'); wait_for(kframe, 10, 0.1); time.sleep(0.8); continue
+            time.sleep(1.5)
             stale = over_pane(); c_wrong += bool(stale)
             print(f'INFO swap C{i + 1}: show seen {bool(seen)}, then closed; pushes {[(round((t - t0) * 1000), j["kicad_host_push"], j.get("visible")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; KiCad over the pane after 1.5 s {[w[3] for w in stale]}', flush=True)
             press_rect('rail:Board'); wait_for(kframe, 10, 0.1); time.sleep(0.8)
@@ -958,6 +1000,14 @@ try:
         # the reconnect: a second "status":"Connected" (the client logs one per connection) after the stop
         rejoined = wait_for(lambda: any('"status":"Connected"' in l or '"status":"Reconnecting' in l for l in client_log().splitlines()[log0:]), 30, 0.2)
         th.join(60); host_settled(20); time.sleep(2.0)
+        # the hub's picture after the reconnect: on 0692805792 it said viewer_open "" (the viewer shut across the reconnect: e2e-macos
+        # 44299261909); said here for main and branch alike, then the Board page pressed and the frame judged from that press
+        pics = [l for l in client_log().splitlines()[log0:] if '"kicad_pic"' in l]
+        shut = bool(pics) and '"viewer_open":""' in pics[-1]
+        vo = '"" (shut)' if shut else 'board'
+        print(f'INFO swap E: after the reconnect the hub says viewer_open {vo}', flush=True)
+        if shut:
+            press_rect('rail:Board'); wait_for(kframe, 10, 0.05); host_settled(10); time.sleep(1.5)
         lines = client_log().splitlines()[log0:]
         last = next((j['kicad_host_push'] for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None); lastvis = next((j.get('visible') for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None)
         f = kframe(); oke = bool(lastvis) and bool(f and last) and all(abs(a - b) <= 2 for a, b in zip(f[3], last))
@@ -1848,12 +1898,14 @@ try:
             time.sleep(5)
             pp = last_push()
             if pp: click(pp[0][0] + pp[0][2] * 0.5, pp[0][1] + pp[0][3] * 0.6)
-            time.sleep(0.8); d0 = hub_log().count('ET_DIALOG_OPENED')
+            time.sleep(0.8); d0 = hub_log().count('ET_DIALOG_OPENED'); t_ch = time.time()
             key(key_name)
-            opened = wait_for(lambda: hub_log().count('ET_DIALOG_OPENED') > d0, 20, 0.5)
+            opened = wait_for(lambda: hub_log().count('ET_DIALOG_OPENED') > d0, 45, 0.5)
+            open_ms = round((time.time() - t_ch) * 1000) if opened else None
             time.sleep(10)  # the count in the title grows while the libraries load
             shot(f'L6-{name}')
             title = next((l for l in reversed(hub_log().splitlines()) if 'dialog opened' in l), '')
+            print(f'INFO L6-{name}: opened={bool(opened)} open_ms={open_ms} title={title[:160]}', flush=True)
             key(K_ESC); time.sleep(1.5)
             return bool(opened), title[:160]
         o_sym = chooser('kicad-tab:SCH', 0, 'symbols')
