@@ -32,7 +32,8 @@ Split and History views, cross-probing, the phones and comparisons need nothing 
   an embedded STEP (`Models/N`, zlib) written once into the models cache by content and placed with its body's transform
   (position, Z offset, X/Y/Z turns, projection side), an extruded body as a prism (a VRML file in the part's frame, one per
   shape), a linked STEP by its name beside the board (a box and a note when it is not there). They mesh and stream as a KiCad
-  board's parts do.
+  board's parts do. A board saved with no body on any part says so in the view (a body Altium holds only in the component's
+  group is not saved: see the skill's rule).
 - BOM: Altium's parameters (`Manufacturer Part Number`, `Manufacturer`, `DNP`); a sheet placed by several sheet symbols
   counts once per placement, its parts named `$Component_$RoomName` (`IC1_CAN1`), as Altium names them on the board.
 

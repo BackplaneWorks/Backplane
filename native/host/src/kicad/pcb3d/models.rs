@@ -4,9 +4,11 @@
 //! 2. `key`: sha256 of the file's bytes, memoized per (path, dev, ino, size, mtime), so a board opened again hashes nothing.
 //! 3. `Cache`: `<dir>/part-v3-<key>.glb` (mm, Z up, the converter's own format: freecad_gui.py's), put in place only by rename;
 //!    a failure is `part-v3-<key>.fail` holding the message and is retried after a day.
-//! 4. `convert`: a batch of (key, file) jobs. Hits are reported at once; the misses go to K = clamp(cores/4, 1, 8) workers and each
-//!    result is reported the moment it is done (completion order). FreeCAD workers are one process each converting many files
-//!    (files/scripts/freecad_batch.py); `Step2glb` runs one process per file on K threads; a `.wrl` is read natively (`wrl_to_glb`).
+//! 4. `convert`: a batch of (key, file) jobs. Hits are reported at once; the misses go to workers and each result is reported the
+//!    moment it is done (completion order). FreeCAD workers (clamp(cores/4, 1, 8)) are one process each converting many files
+//!    (files/scripts/freecad_batch.py); `Step2glb` runs one process per file on clamp(cores/2, 2, 8) threads (`native_workers`); a
+//!    `.wrl` is read natively (`wrl_to_glb`). Small files go first, so most parts come in the first seconds; with two workers or more
+//!    the biggest starts at once beside them (`queue`), so one slow model neither holds the rest back nor ends the batch late.
 //!    Blocking, but `stop` is polled (every ~25 ms) and the workers are killed when it is set. A tool that fails a job hands it to the
 //!    next tool of `tools`; only when all failed is the failure recorded and reported.
 use std::collections::{BTreeMap, HashMap};
@@ -234,6 +236,24 @@ pub fn workers(jobs: usize) -> usize {
     (cores / 4).clamp(1, 8).min(jobs.max(1))
 }
 
+/// The native mesher's worker count: clamp(cores / 2, 2, 8), at most `jobs`. One backplane-step2glb is one thread and 50 to 500 MB (a
+/// 7 MB STEP 225 MB, an 18 MB one 513 MB), much lighter than a FreeCAD, so it gets half the cores: on a 6-core machine `workers` gave
+/// one, and one 25 s model held back the other 79 of a board (MOP_Layout in a Windows VM: 74 s to the last part).
+pub fn native_workers(jobs: usize) -> usize {
+    #[cfg(test)] { let n = TEST_WORKERS.load(Ordering::Relaxed); if n > 0 { return n.min(jobs.max(1)) } }
+    let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
+    (cores / 2).clamp(2, 8).min(jobs.max(1))
+}
+/// The order `k` workers take `jobs` in: smallest file first, so the many small models come at once; with two workers or more the
+/// biggest first of all, so it runs beside them from the start instead of ending the batch alone.
+pub fn queue(mut jobs: Vec<Job>, k: usize) -> Vec<Job> {
+    let size = |p: &Path| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+    let mut sized: Vec<(u64, Job)> = jobs.drain(..).map(|j| (size(&j.1), j)).collect();
+    sized.sort_by_key(|(n, _)| *n);
+    if k >= 2 && sized.len() > 1 { let big = sized.pop().unwrap(); sized.insert(0, big) }
+    sized.into_iter().map(|(_, j)| j).collect()
+}
+
 /// Tests: a fixed worker count (a runner with 4 cores gets one worker, and a test of completion order needs two).
 #[cfg(test)] static TEST_WORKERS: AtomicUsize = AtomicUsize::new(0);
 type Job = (String, PathBuf);
@@ -245,7 +265,8 @@ pub fn convert<F: Fn(&str, Result<PathBuf, String>) + Send + Sync>(cache: &Cache
     convert_with(Opts::default(), cache, jobs, tools, stop, &on_ready)
 }
 
-/// How a conversion runs: `workers` FreeCAD processes at most (None: `workers()`), each `nice` lower. A prewarm is one process at 19.
+/// How a conversion runs: `workers` processes at most (None: `workers()` FreeCADs, `native_workers()` step2glbs), FreeCAD's each `nice`
+/// lower. A prewarm is one process, FreeCAD's at 19.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Opts { pub workers: Option<usize>, pub nice: i32 }
 impl Default for Opts { fn default() -> Self { Opts { workers: None, nice: 10 } } }
@@ -265,12 +286,12 @@ fn release(keys: &[String]) {
 /// The keys this call converts: let go as each is reported, and all of them when the call ends however it ends.
 struct Claim(Vec<String>);
 impl Drop for Claim { fn drop(&mut self) { release(&self.0) } }
-/// Whether `key` is still being converted by another caller (waits up to `ms` for it to finish).
-fn busy(key: &str, ms: u64) -> bool {
+/// Whether `key` is being converted by a caller now.
+fn is_busy(key: &str) -> bool { inflight().0.lock().unwrap_or_else(|e| e.into_inner()).contains(key) }
+/// Waits until a model being converted is let go, `ms` at most.
+fn changed(ms: u64) {
     let (m, cv) = inflight(); let s = m.lock().unwrap_or_else(|e| e.into_inner());
-    if !s.contains(key) { return false }
-    let (s, _) = cv.wait_timeout(s, Duration::from_millis(ms)).unwrap_or_else(|e| e.into_inner());
-    s.contains(key)
+    let _ = cv.wait_timeout(s, Duration::from_millis(ms));
 }
 
 /// `convert` with its options (`Opts`).
@@ -288,14 +309,20 @@ pub fn convert_with(opts: Opts, cache: &Cache, jobs: Vec<Job>, tools: &[Mesher],
     let _claim = Claim(mine.iter().map(|j| j.0.clone()).collect());
     let mine_ready = |k: &str, r: Result<PathBuf, String>| { release(&[k.to_string()]); on_ready(k, r) };
     std::thread::scope(|s| {
-        // another caller's models: each waited for, then taken from the cache; one it gave up (stopped) is converted here after all
+        // another caller's models (a prewarm's): each reported as it is done, in the order they are done (waiting for them in turn held
+        // every part behind the first, a 25 s one); one it gave up (it was stopped) is converted here at once
         s.spawn(|| {
-            let mut left = vec![];
-            for (k, p) in theirs {
-                while busy(&k, 100) { if stop.load(Ordering::Relaxed) { return } }
-                match cache.lookup(&k) { Some(r) => on_ready(&k, r), None => left.push((k, p)) }
+            let mut pending = theirs;
+            while !pending.is_empty() {
+                if stop.load(Ordering::Relaxed) { return }
+                let mut left = vec![];
+                pending.retain(|(k, p)| {
+                    if is_busy(k) { return true }
+                    match cache.lookup(k) { Some(r) => on_ready(k, r), None => left.push((k.clone(), p.clone())) }
+                    false
+                });
+                if !left.is_empty() { convert_with(opts, cache, left, tools, stop, on_ready) } else if !pending.is_empty() { changed(100) }
             }
-            if !left.is_empty() && !stop.load(Ordering::Relaxed) { convert_with(opts, cache, left, tools, stop, on_ready) }
         });
         run(opts, cache, mine, tools, stop, &mine_ready);
     });
@@ -305,7 +332,7 @@ pub fn convert_with(opts: Opts, cache: &Cache, jobs: Vec<Job>, tools: &[Mesher],
 fn run(opts: Opts, cache: &Cache, mut misses: Vec<Job>, tools: &[Mesher], stop: &AtomicBool, on_ready: &(dyn Fn(&str, Result<PathBuf, String>) + Sync)) {
     if misses.is_empty() || stop.load(Ordering::Relaxed) { return }
     let _ = std::fs::create_dir_all(&cache.dir);
-    misses.sort_by_key(|(_, p)| std::cmp::Reverse(std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)));
+    misses.sort_by_key(|(_, p)| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0));
     let (wrl, mut rest): (Vec<Job>, Vec<Job>) = misses.into_iter().partition(|(_, p)| is_wrl(p));
     std::thread::scope(|s| {
         s.spawn(move || for (k, p) in wrl {
@@ -329,7 +356,7 @@ fn run(opts: Opts, cache: &Cache, mut misses: Vec<Job>, tools: &[Mesher], stop: 
                     }
                     failed
                 }
-                Mesher::Step2glb(tool) => step2glb(cache, tool, std::mem::take(&mut rest), stop, on_ready),
+                Mesher::Step2glb(tool) => step2glb(cache, tool, opts.workers, std::mem::take(&mut rest), stop, on_ready),
             };
             tried = true;
             if let Some((_, m)) = failed.last() { last = m.clone() }
@@ -368,20 +395,40 @@ fn end(kids: &mut [std::process::Child], grace: Duration) {
     #[cfg(unix)] for c in kids.iter() { unsafe { libc::kill(-(c.id() as i32), 15); } }
 }
 
-fn step2glb(cache: &Cache, tool: &str, jobs: Vec<Job>, stop: &AtomicBool, on_ready: &(dyn Fn(&str, Result<PathBuf, String>) + Sync)) -> Failed {
-    let next = AtomicUsize::new(0); let failed = Mutex::new(vec![]);
+/// `workers`: Opts' (a prewarm's one), else `native_workers`.
+fn step2glb(cache: &Cache, tool: &str, workers: Option<usize>, jobs: Vec<Job>, stop: &AtomicBool, on_ready: &(dyn Fn(&str, Result<PathBuf, String>) + Sync)) -> Failed {
+    let k = workers.unwrap_or_else(|| native_workers(jobs.len())).clamp(1, jobs.len().max(1));
+    let jobs = queue(jobs, k);
+    let (next, failed, running) = (AtomicUsize::new(0), Mutex::new(vec![]), AtomicUsize::new(k));
     let jobs = &jobs;
-    std::thread::scope(|s| for _ in 0..workers(jobs.len()) {
-        s.spawn(|| loop {
-            let i = next.fetch_add(1, Ordering::Relaxed);
-            let Some((k, p)) = jobs.get(i) else { return };
-            if stop.load(Ordering::Relaxed) { return }
-            let tmp = cache.dir.join(format!(".{k}.{}.s2g.tmp", std::process::id()));
-            let r = stepglb::convert(&[Mesher::Step2glb(tool.into())], &p.to_string_lossy(), &tmp.to_string_lossy(), Some(stepglb::NORMAL), true);
-            let r = if r.code == 0 { cache.publish(k, &tmp) } else { Err(r.out.trim().to_string()) };
-            let _ = std::fs::remove_file(&tmp);
-            match r { Ok(g) => on_ready(k, Ok(g)), Err(e) => failed.lock().unwrap_or_else(|e| e.into_inner()).push(((k.clone(), p.clone()), e)) }
+    std::thread::scope(|s| {
+        // stopped (a prewarm, when its board's 3D view opens): the models not started yet are let go at once, not when the ones running
+        // end, so the view converts them now instead of waiting behind a slow one. Jobs are taken in order: from the swapped index on,
+        // none began, and no worker takes one after it.
+        s.spawn(|| while running.load(Ordering::Relaxed) > 0 {
+            if stop.load(Ordering::Relaxed) {
+                let i = next.swap(jobs.len(), Ordering::SeqCst);
+                if i < jobs.len() { release(&jobs[i..].iter().map(|j| j.0.clone()).collect::<Vec<_>>()) }
+                return
+            }
+            std::thread::sleep(POLL);
         });
+        for _ in 0..k {
+            s.spawn(|| {
+                struct Done<'a>(&'a AtomicUsize); // the watcher ends with the last worker, however it ends
+                impl Drop for Done<'_> { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::Relaxed); } }
+                let _done = Done(&running);
+                loop {
+                    let i = next.fetch_add(1, Ordering::SeqCst);
+                    let Some((k, p)) = jobs.get(i) else { break };
+                    let tmp = cache.dir.join(format!(".{k}.{}.s2g.tmp", std::process::id()));
+                    let r = stepglb::convert(&[Mesher::Step2glb(tool.into())], &p.to_string_lossy(), &tmp.to_string_lossy(), Some(stepglb::NORMAL), true);
+                    let r = if r.code == 0 { cache.publish(k, &tmp) } else { Err(r.out.trim().to_string()) };
+                    let _ = std::fs::remove_file(&tmp);
+                    match r { Ok(g) => on_ready(k, Ok(g)), Err(e) => failed.lock().unwrap_or_else(|e| e.into_inner()).push(((k.clone(), p.clone()), e)) }
+                }
+            });
+        }
     });
     failed.into_inner().unwrap_or_default()
 }
@@ -390,6 +437,8 @@ fn step2glb(cache: &Cache, tool: &str, jobs: Vec<Job>, stop: &AtomicBool, on_rea
 fn freecad(opts: Opts, cache: &Cache, gui: bool, program: &str, jobs: Vec<Job>, stop: &AtomicBool, on_ready: &(dyn Fn(&str, Result<PathBuf, String>) + Sync)) -> Failed {
     let Ok(stage) = stepglb::stage(&cache.dir.join("batch").to_string_lossy(), "b-") else { return jobs.into_iter().map(|j| (j, "cannot make a folder in the model cache".into())).collect() };
     let py = stage.join("batch.py"); let list = stage.join("jobs.txt");
+    let k = opts.workers.unwrap_or_else(|| workers(jobs.len()));
+    let jobs = queue(jobs, k);
     let outs: Vec<PathBuf> = jobs.iter().map(|(k, _)| stage.join(format!("{k}.glb"))).collect();
     let text: String = jobs.iter().zip(&outs).map(|((_, p), o)| format!("{}\t{}\n", p.display(), o.display())).collect();
     let mut failed: Failed = vec![];
@@ -798,6 +847,43 @@ mod tests {
         assert_eq!((*a.lock().unwrap(), *b.lock().unwrap()), (Some(true), Some(true)));
         assert_eq!(std::fs::read_to_string(d.join("runs")).unwrap().lines().count(), 1, "the second caller waited for the first");
         assert!(!inflight().0.lock().unwrap().contains("k1-once"), "its claim let go");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn small_files_go_first_and_the_biggest_starts_at_once_beside_them() {
+        let d = dir("queue");
+        let mk = |n: &str, len: usize| { let p = d.join(n); std::fs::write(&p, vec![b'x'; len]).unwrap(); (n.to_string(), p) };
+        let jobs = vec![mk("m", 50), mk("big", 900), mk("s", 10), mk("l", 300)];
+        let names = |v: Vec<Job>| v.into_iter().map(|j| j.0).collect::<Vec<_>>();
+        assert_eq!(names(queue(jobs.clone(), 1)), ["s", "m", "l", "big"], "one worker: the most parts soonest");
+        assert_eq!(names(queue(jobs, 3)), ["big", "s", "m", "l"], "more: the slow one runs beside the rest, not after them");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn a_stopped_prewarm_lets_the_view_convert_what_it_had_not_started() {
+        // a prewarm (one worker) is meshing a slow model with two quick ones queued behind it when the board's 3D view opens and stops it:
+        // the view converts the quick ones at once and takes the slow one from the prewarm when it is done, each converted once
+        let d = dir("giveway"); let c = Cache::new(d.join("parts"));
+        use crate::plat::fs::PermissionsExt;
+        let t = d.join("log"); std::fs::write(&t, format!("#!/bin/sh\nbasename \"$1\" >> {}\nms=$(cat \"$1\")\nsleep $(awk \"BEGIN{{print $ms/1000}}\")\nprintf glb > \"$2\"\n", crate::plat::fs::script_path(&d.join("runs")))).unwrap();
+        std::fs::set_permissions(&t, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let tools = [Mesher::Step2glb(t.to_string_lossy().into_owned())];
+        // the file says how long it takes (ms); the slow one is the smallest file, so the prewarm's one worker takes it first
+        let mk = |n: &str, body: &str| { let p = d.join(n); std::fs::write(&p, body).unwrap(); (format!("gw-{n}"), p) };
+        let jobs = vec![mk("slow", "900"), mk("q1", "0050"), mk("q2", "00050")];
+        let (stop, got) = (AtomicBool::new(false), Mutex::new(vec![]));
+        let t0 = Instant::now();
+        std::thread::scope(|s| {
+            s.spawn(|| convert_with(Opts::background(), &c, jobs.clone(), &tools, &stop, &|_, _| {}));
+            std::thread::sleep(Duration::from_millis(150));
+            s.spawn(|| convert(&c, jobs.clone(), &tools, &AtomicBool::new(false), |k, r| got.lock().unwrap().push((k.to_string(), r.is_ok(), t0.elapsed()))));
+            std::thread::sleep(Duration::from_millis(100));
+            stop.store(true, Ordering::Relaxed);
+        });
+        let got = got.into_inner().unwrap();
+        assert_eq!(got.len(), 3, "{got:?}"); assert!(got.iter().all(|g| g.1), "{got:?}");
+        assert_eq!(got[2].0, "gw-slow", "the quick ones first, in the order they were done: {got:?}");
+        assert!(got[1].2 < Duration::from_millis(750), "the quick ones did not wait for the slow one: {got:?}");
+        let mut runs: Vec<String> = std::fs::read_to_string(d.join("runs")).unwrap().lines().map(str::to_string).collect(); runs.sort();
+        assert_eq!(runs, ["q1", "q2", "slow"], "each converted once");
         let _ = std::fs::remove_dir_all(&d);
     }
     fn real_tools() -> Vec<Mesher> { stepglb::machine(Path::new(&std::env::var("HOME").unwrap())) }

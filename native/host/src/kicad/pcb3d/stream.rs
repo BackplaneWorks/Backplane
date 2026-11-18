@@ -241,8 +241,9 @@ pub fn model_jobs(b: &Board, resolve: &dyn Fn(&str) -> Option<PathBuf>) -> Vec<(
     out
 }
 /// A board's part models into the models cache, in the background (one FreeCAD at the lowest priority, its start-up paid once for the
-/// batch), so that its 3D view later finds them converted. Blocking; returns (models, converted now, ms).
-pub fn prewarm(bytes: &[u8], path: &str, kicad_cli: &str, tools: &[super::super::stepglb::Mesher], cache: &super::models::Cache) -> Result<(usize, usize, f64), String> {
+/// batch), so that its 3D view later finds them converted. Blocking; returns (models, converted now, ms). `stop`: the board's 3D view
+/// opened and converts them itself, with every worker (the models not started yet are let go at once).
+pub fn prewarm(bytes: &[u8], path: &str, kicad_cli: &str, tools: &[super::super::stepglb::Mesher], cache: &super::models::Cache, stop: &std::sync::atomic::AtomicBool) -> Result<(usize, usize, f64), String> {
     let t = Instant::now();
     let b = read_board(bytes, &cache.embedded_dir())?;
     let env = super::models::Env::system((!kicad_cli.is_empty()).then(|| Path::new(kicad_cli)));
@@ -250,7 +251,7 @@ pub fn prewarm(bytes: &[u8], path: &str, kicad_cli: &str, tools: &[super::super:
     let emb = super::models::embedded(bytes, &cache.embedded_dir());
     let jobs = model_jobs(&b, &|raw: &str| super::models::resolve_in(raw, &dir, &env, &emb));
     let (n, fresh) = (jobs.len(), jobs.iter().filter(|(k, _)| cache.lookup(k).is_none()).count());
-    if fresh > 0 { super::models::convert_with(super::models::Opts::background(), cache, jobs, tools, &std::sync::atomic::AtomicBool::new(false), &|_: &str, _| {}) }
+    if fresh > 0 { super::models::convert_with(super::models::Opts::background(), cache, jobs, tools, stop, &|_: &str, _| {}) }
     Ok((n, fresh, t.elapsed().as_secs_f64() * 1000.0))
 }
 
@@ -288,15 +289,23 @@ pub fn missing_note(p: &Plan) -> String {
     format!("{n} {} no 3D model on the hub's machine (KiCad's 3D library is not installed there, or the paths are wrong): {} shown as a box{first}", if n == 1 { "part has" } else { "parts have" }, if n == 1 { "it is" } else { "they are" })
 }
 
+/// The note for a board with parts and not one 3D model among them (`missing_note` otherwise): the view says why no part comes, rather
+/// than leaving the person waiting for them. An Altium board seen 2026-11-18 had 11 bodies in Altium that its save did not keep.
+pub fn note(b: &Board, p: &Plan) -> String {
+    let n = b.footprints.len();
+    if p.of == 0 && n > 0 { return if n == 1 { "The board's one part has no 3D model in the saved board file, so none is drawn".into() } else { format!("None of the board's {n} parts has a 3D model in the saved board file, so none is drawn") } }
+    missing_note(p)
+}
+
 /// The most triangles a model's parts may add (the phones refuse a model of over (64 << 20) / 84 triangles, board and parts together):
 /// past it a part is drawn as its box.
 pub const MOST_TRIS: u64 = (64 << 20) / 84 - 40_000;
 /// A part model this big is thinned (solid::thin) before it goes out.
 const THIN_OVER: usize = 8000;
 
-/// How long the parts took, from the stream's start (ms), and what came.
+/// How long the parts took, from the stream's start (ms), and what came. `most`: when nine parts in ten were placed.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Times { pub first: Option<f64>, pub all: f64, pub models: usize, pub boxes: usize, pub failed: usize }
+pub struct Times { pub first: Option<f64>, pub most: Option<f64>, pub all: f64, pub models: usize, pub boxes: usize, pub failed: usize }
 
 /// Every part of the plan to `emit`, in order: the frame that starts them, the boxes, then each model the moment it is converted
 /// (models::convert, cached by content). Blocks until all are out or `stop` is set. `board_tris`: what the board itself already uses.
@@ -305,7 +314,8 @@ pub struct Times { pub first: Option<f64>, pub all: f64, pub models: usize, pub 
 pub fn parts(key: &str, rev: &str, plan: &Plan, board_tris: u64, cache: &super::models::Cache, tools: &[super::super::stepglb::Mesher], stop: &std::sync::atomic::AtomicBool, emit: &(dyn Fn(Vec<u8>) + Sync), say: &(dyn Fn(String) + Sync)) -> Times {
     use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering::Relaxed};
     let t0 = Instant::now();
-    let (done, budget, first) = (AtomicU32::new(0), AtomicU64::new(MOST_TRIS.saturating_sub(board_tris)), std::sync::Mutex::new(None::<f64>));
+    let (done, budget, first, most) = (AtomicU32::new(0), AtomicU64::new(MOST_TRIS.saturating_sub(board_tris)), std::sync::Mutex::new(None::<f64>), std::sync::Mutex::new(None::<f64>));
+    let placed = |d: u32| { let ms = t0.elapsed().as_secs_f64() * 1000.0; first.lock().unwrap().get_or_insert(ms); if d as u64 * 10 >= plan.of as u64 * 9 { most.lock().unwrap().get_or_insert(ms); } };
     let (models, failed, boxed) = (AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(plan.boxes.len()));
     emit(super::super::plot::parts_frame(key, plan.of, rev));
     let (bn, bm) = box_model();
@@ -313,7 +323,7 @@ pub fn parts(key: &str, rev: &str, plan: &Plan, board_tris: u64, cache: &super::
         if at.is_empty() { return }
         let d = done.fetch_add(at.len() as u32, Relaxed) + at.len() as u32;
         emit(super::super::plot::part_frame(key, BOX_ID, bn, &bm, &at, &refs, d));
-        first.lock().unwrap().get_or_insert(t0.elapsed().as_secs_f64() * 1000.0);
+        placed(d);
     };
     boxes(plan.boxes.iter().map(|b| b.0.clone()).collect(), plan.boxes.iter().map(|b| b.1).collect());
     // each file's content key; a file that cannot be read is a box
@@ -325,6 +335,10 @@ pub fn parts(key: &str, rev: &str, plan: &Plan, board_tris: u64, cache: &super::
             Err(_) => { failed.fetch_add(1, Relaxed); boxed.fetch_add(u.at.len(), Relaxed); boxes(u.refs.clone(), u.boxes.iter().flatten().copied().collect()) }
         }
     }
+    // smallest file first, as the misses are converted (models::queue): the models already kept come in the same order as a first open's,
+    // so the room the parts share goes the same way every time (largest first boxed 604 of MOP_Layout's 681 parts on a first open and 129
+    // on the next; smallest first 9 to 34)
+    jobs.sort_by_key(|(_, p): &(String, PathBuf)| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0));
     let fall_back = |u: &Use| { boxed.fetch_add(u.at.len(), Relaxed); boxes(u.refs.clone(), u.boxes.iter().flatten().copied().collect()) };
     // the models not converted yet: they take seconds each, the rest milliseconds
     let fresh: std::collections::HashSet<String> = jobs.iter().filter(|j| cache.lookup(&j.0).is_none()).map(|j| j.0.clone()).collect();
@@ -363,11 +377,11 @@ pub fn parts(key: &str, rev: &str, plan: &Plan, board_tris: u64, cache: &super::
             let d = done.fetch_add(u.at.len() as u32, Relaxed) + u.at.len() as u32;
             emit(super::super::plot::part_frame(key, &id, n, &mesh, &u.at, &u.refs, d));
             models.fetch_add(1, Relaxed);
-            first.lock().unwrap().get_or_insert(t0.elapsed().as_secs_f64() * 1000.0);
+            placed(d);
         }
     });
-    let first = *first.lock().unwrap();
-    Times { first, all: t0.elapsed().as_secs_f64() * 1000.0, models: models.into_inner(), boxes: boxed.into_inner(), failed: failed.into_inner() }
+    let (first, most) = (*first.lock().unwrap(), *most.lock().unwrap());
+    Times { first, most, all: t0.elapsed().as_secs_f64() * 1000.0, models: models.into_inner(), boxes: boxed.into_inner(), failed: failed.into_inner() }
 }
 
 #[cfg(test)]
@@ -437,6 +451,15 @@ mod tests {
         let cache = super::super::models::Cache::new(cd.to_path_buf());
         parts("2|/r|", "", &p, 0, &cache, &[], &std::sync::atomic::AtomicBool::new(false), &|_f: Vec<u8>| {}, &|t: String| said.lock().unwrap().push(t));
         assert_eq!(said.into_inner().unwrap(), vec!["Placing parts: 1 of 1".to_string()], "a box is placed at once, nothing to convert");
+    }
+    #[test] fn a_board_whose_parts_have_no_model_says_so() {
+        let b = Board { footprints: vec![fp(1.0, 1.0, 0.0, Side::Top), fp(5.0, 1.0, 0.0, Side::Top)], ..Board::default() };
+        let p = plan(&b, (1.6, 0.0), &|_: &str| None);
+        assert_eq!(note(&b, &p), "None of the board's 2 parts has a 3D model in the saved board file, so none is drawn");
+        assert_eq!(note(&Board::default(), &plan(&Board::default(), (1.6, 0.0), &|_: &str| None)), "", "no parts: nothing to say");
+        let mut m = b.clone(); m.footprints[0].models = vec![mr("gone.step")];
+        let p = plan(&m, (1.6, 0.0), &|_: &str| None);
+        assert_eq!(note(&m, &p), missing_note(&p), "a part with a model not found: the missing note");
     }
     #[test] fn a_board_with_many_parts_leaves_them_room() {
         let mut b = Board::default();
@@ -515,8 +538,8 @@ mod tests {
                 let (frames, bytes_out) = (std::sync::atomic::AtomicUsize::new(0), std::sync::atomic::AtomicUsize::new(0));
                 let stop = std::sync::atomic::AtomicBool::new(false);
                 let t = parts("2|/r|", "rev", &plan, so.n as u64, cache, &tools, &stop, &|f: Vec<u8>| { frames.fetch_add(1, std::sync::atomic::Ordering::Relaxed); bytes_out.fetch_add(f.len(), std::sync::atomic::Ordering::Relaxed); }, &|_| {});
-                eprintln!("  parts {name}: first {} ms, all {:.0} ms; {} frames, {} KB; {} part frames, {} boxed, {} failed; to all parts from the start {:.0} ms",
-                    t.first.map_or("-".into(), |f| format!("{f:.0}")), t.all, frames.into_inner(), bytes_out.into_inner() >> 10, t.models, t.boxes, t.failed, first + tp.elapsed().as_secs_f64() * 1000.0);
+                eprintln!("  parts {name}: first {} ms, 90% {} ms, all {:.0} ms; {} frames, {} KB; {} part frames, {} boxed, {} failed; to all parts from the start {:.0} ms",
+                    t.first.map_or("-".into(), |f| format!("{f:.0}")), t.most.map_or("-".into(), |f| format!("{f:.0}")), t.all, frames.into_inner(), bytes_out.into_inner() >> 10, t.models, t.boxes, t.failed, first + tp.elapsed().as_secs_f64() * 1000.0);
             }
             if let Some(cli) = &cli {
                 let out = home.join("kicad.glb"); let _ = std::fs::create_dir_all(&home);

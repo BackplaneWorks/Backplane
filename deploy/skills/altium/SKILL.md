@@ -88,6 +88,12 @@ A new design, all by script (verified end to end): `new_documents` (sheet and bo
   `pcb_update_from_sch.pas` (the hub works the ECO's dialogs), or `pcb_from_schematic.pas` when the ECO cannot run;
   both save the board. If one fails, read the error, fix the script, and run it again. Do not hand the step to the
   person. If work was lost, redo it the same way.
+- **A 3D body on a placed board part is there only if the board counts it.** A body added with `C.AddPCBObject(Body)`
+  (even with `PCBM_BoardRegisteration` sent) sits in the component's group, but a board iterator over
+  `eComponentBodyObject` does not see it and the save leaves it out: 11 parts each showed a body through their group
+  iterators, the saved .PcbDoc had none, and Backplane's 3D view drew no parts. After adding bodies, save, then count
+  them with a board iterator (`B.BoardIterator_Create`, `eComponentBodyObject`, `AllLayers`); say the models are on the
+  board only when that count matches. Calling `B.AddPCBObject(Body)` as well is the likely fix (not yet verified).
 
 - **Altium's own dialogs: `BpExpect(Title, Steps)`.** A process that opens a modal window (the ECO, Situs's strategy
   dialog, the IPC batch generator) blocks the script until the window closes. Call `BpExpect` just before it and the hub

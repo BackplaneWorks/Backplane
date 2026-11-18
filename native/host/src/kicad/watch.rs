@@ -89,7 +89,8 @@ fn own_file(kind: u32, root: &str) -> String { let f = project::read(root); if k
 /// `took`: how long the last read of each 3D source's file took (ms), told as the estimate of the next one
 /// `mech_warming`: the projects whose Mech parts are being meshed ahead (warm_mech)
 /// `waiting`: the clients whose view shows "no board/schematic yet", `wait_busy` while their projects are being looked at
-struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, waiting: HashMap<u64, Wait>, wait_busy: bool, polling: bool, idle: Vec<String>, prewarmed: HashMap<String, String>, took: HashMap<String, u64>, mech_warming: std::collections::HashSet<String> }
+/// `warming`: each board's prewarm converting now, by its file: its stop, set when the board's 3D view starts its own parts (start_parts)
+struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, waiting: HashMap<u64, Wait>, wait_busy: bool, polling: bool, idle: Vec<String>, prewarmed: HashMap<String, String>, took: HashMap<String, u64>, mech_warming: std::collections::HashSet<String>, warming: HashMap<String, Arc<std::sync::atomic::AtomicBool>> }
 
 pub struct Plots { gen: std::sync::atomic::AtomicU64, st: Mutex<State>, bin: PathBuf, dir: PathBuf, home: PathBuf, readers: tokio::sync::Semaphore, solid: tokio::sync::Mutex<()> }
 
@@ -349,7 +350,10 @@ impl Plots {
           let Some(s) = st.srcs.get_mut(ky) else { return };
           if let Some(old) = s.stop.replace(stop.clone()) { old.store(true, std::sync::atomic::Ordering::Relaxed) }
           s.parts.clear();
-          for subs in st.subs.values_mut() { for sub in subs.iter_mut().filter(|s| s.key == ky) { sub.parts_at = 0 } } }
+          for subs in st.subs.values_mut() { for sub in subs.iter_mut().filter(|s| s.key == ky) { sub.parts_at = 0 } }
+          // the board's prewarm (one worker, the lowest priority) gives way: this stream converts its models with every worker, and the
+          // ones the prewarm is meshing now come from it when done
+          if let Some(w) = st.warming.get(file.rsplit(['\t', '\n']).next().unwrap_or(file)) { w.store(true, std::sync::atomic::Ordering::Relaxed) } }
         let (me, hub, ky, file, home) = (self.clone(), hub.clone(), ky.to_string(), file.to_string(), self.home.clone());
         let rt = tokio::runtime::Handle::current();
         tokio::task::spawn_blocking(move || {
@@ -370,7 +374,7 @@ impl Plots {
             // a box is either a model not found (unresolved: a variable or file missing) or one that failed to convert: said apart
             let un = &made.0.unresolved;
             let seen = if un.is_empty() { String::new() } else { format!("; not found: {}{}", un.iter().take(3).cloned().collect::<Vec<_>>().join(", "), if un.len() > 3 { format!(" and {} more", un.len() - 3) } else { String::new() }) };
-            eprintln!("pcb3d: {} parts: first {} ms, all {:.0} ms ({} part frames, {} instances boxed, {} models not found, {} models failed to convert{seen})", file, t.first.map_or("-".into(), |f| format!("{f:.0}")), t.all, t.models, t.boxes, un.len(), t.failed);
+            eprintln!("pcb3d: {} parts: first {} ms, 90% {} ms, all {:.0} ms ({} part frames, {} instances boxed, {} models not found, {} models failed to convert{seen})", file, t.first.map_or("-".into(), |f| format!("{f:.0}")), t.most.map_or("-".into(), |f| format!("{f:.0}")), t.all, t.models, t.boxes, un.len(), t.failed);
         });
     }
     /// A project's board opened (any of its views) or changed: its part models converted in the background, once a revision, so its 3D
@@ -379,26 +383,30 @@ impl Plots {
         if !(pcb.ends_with(".kicad_pcb") || is_altium_board(pcb)) || is_version(pcb) { return }
         let rev = stamp(pcb).rev;
         if rev.is_empty() { return }
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         { let mut st = self.st.lock().unwrap();
           if st.prewarmed.get(pcb) == Some(&rev) { return }
           // a 3D view of this board is open: its own stream converts the parts, with every worker (a prewarm's one would hold it back)
           if st.subs.values().flatten().any(|s| solid_kind(s.key.split('|').next().and_then(|k| k.parse().ok()).unwrap_or(0)) && st.srcs.get(&s.key).map_or(false, |x| x.file == pcb)) { return }
           if st.prewarmed.len() > 64 { st.prewarmed.clear() }
-          st.prewarmed.insert(pcb.to_string(), rev); }
-        let (hub, pcb, home) = (hub.clone(), pcb.to_string(), self.home.clone());
+          st.prewarmed.insert(pcb.to_string(), rev);
+          st.warming.insert(pcb.to_string(), stop.clone()); }
+        let (me, hub, pcb, home) = (self.clone(), hub.clone(), pcb.to_string(), self.home.clone());
         tokio::spawn(async move {
-            if !is_altium_board(&pcb) && !Self::board3d_native(&hub).await { return }
+            if !is_altium_board(&pcb) && !Self::board3d_native(&hub).await { me.st.lock().unwrap().warming.remove(&pcb); return }
             let cli = super::ipc::runtime(&hub).await.cli;
             let _ = tokio::task::spawn_blocking(move || {
                 let bytes = std::fs::read(&pcb).unwrap_or_default();
                 // the board's own model too, kept by content, so its first 3D view reads it back instead of meshing it (Thunderscope: 1.5 s)
                 let rev = stamp(&pcb).rev;
-                let _ = std::panic::catch_unwind(|| if let Ok(made) = pcb3d::stream::board_model_kept(&bytes, &std::path::Path::new(&stepglb::cache_dir()).join("boards"), !stepglb::have(&pcb3d::stream::glb_path(&pcb, &rev).to_string_lossy())) {
+                let stopped = || stop.load(std::sync::atomic::Ordering::Relaxed);
+                let _ = std::panic::catch_unwind(|| if stopped() {} else if let Ok(made) = pcb3d::stream::board_model_kept(&bytes, &std::path::Path::new(&stepglb::cache_dir()).join("boards"), !stepglb::have(&pcb3d::stream::glb_path(&pcb, &rev).to_string_lossy())) {
                     if !made.layers.is_empty() { let name = std::path::Path::new(&pcb).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(); pcb3d::stream::keep_glb(&made.layers, &name, &pcb, &rev) }
                 });
                 #[cfg(all(target_os = "linux", target_env = "gnu"))] unsafe { libc::malloc_trim(0); } // the meshing's memory goes back
-                let r = std::panic::catch_unwind(|| pcb3d::stream::prewarm(&bytes, &pcb, &cli, &stepglb::machine(&home), &pcb3d::models::Cache::standard()));
-                match r { Ok(Ok((n, fresh, ms))) if fresh > 0 => eprintln!("pcb3d: prewarm {pcb}: {fresh} of {n} part models converted in {ms:.0} ms"), Ok(Err(e)) => eprintln!("pcb3d: prewarm {pcb}: {e}"), _ => {} }
+                let r = std::panic::catch_unwind(|| pcb3d::stream::prewarm(&bytes, &pcb, &cli, &stepglb::machine(&home), &pcb3d::models::Cache::standard(), &stop));
+                { let mut st = me.st.lock().unwrap(); if st.warming.get(&pcb).map_or(false, |w| Arc::ptr_eq(w, &stop)) { st.warming.remove(&pcb); } }
+                match r { Ok(Ok((n, fresh, ms))) if fresh > 0 => eprintln!("pcb3d: prewarm {pcb}: {fresh} of {n} part models to convert, {ms:.0} ms{}", if stopped() { " (stopped: its 3D view converts them)" } else { "" }), Ok(Err(e)) => eprintln!("pcb3d: prewarm {pcb}: {e}"), _ => {} }
             }).await;
         });
     }
@@ -442,7 +450,7 @@ impl Plots {
                     let dir = pcb3d::stream::board_dir(&abs);
                     let emb = pcb3d::models::embedded(&bytes, &pcb3d::models::Cache::standard().embedded_dir()); // KiCad 9's models inside the board
                     let p = pcb3d::stream::plan(&made.board, made.seat, &|raw: &str| pcb3d::models::resolve_in(raw, &dir, &env, &emb));
-                    plotgen::write_infos(&infos.to_string_lossy(), &pcb3d::stream::missing_note(&p));
+                    plotgen::write_infos(&infos.to_string_lossy(), &pcb3d::stream::note(&made.board, &p));
                     Some(Arc::new((p, tris)))
                 };
                 if !is_version(&f) && !made.layers.is_empty() { // the GLB, kept by revision: one per board
