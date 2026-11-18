@@ -964,6 +964,13 @@ try:
         # the reconnect: a second "status":"Connected" (the client logs one per connection) after the stop
         rejoined = wait_for(lambda: any('"status":"Connected"' in l or '"status":"Reconnecting' in l for l in client_log().splitlines()[log0:]), 30, 0.2)
         th.join(60); host_settled(20); time.sleep(2.0)
+        # the hub's picture after the reconnect: on 0692805792 it said viewer_open "" (the viewer shut across the reconnect: e2e-macos
+        # 44299261909); said here for main and branch alike, then the Board page pressed and the frame judged from that press
+        pics = [l for l in client_log().splitlines()[log0:] if '"kicad_pic"' in l]
+        shut = bool(pics) and '"viewer_open":""' in pics[-1]
+        print(f'INFO swap E: after the reconnect the hub says viewer_open {"\"\" (shut)" if shut else "board"}', flush=True)
+        if shut:
+            n2 = len(PUSHES); press_rect('rail:Board'); wait_for(kframe, 10, 0.05); host_settled(10); time.sleep(1.5)
         lines = client_log().splitlines()[log0:]
         last = next((j['kicad_host_push'] for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None); lastvis = next((j.get('visible') for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None)
         f = kframe(); oke = bool(lastvis) and bool(f and last) and all(abs(a - b) <= 2 for a, b in zip(f[3], last))
