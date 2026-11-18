@@ -21,6 +21,8 @@ use super::{Frame, R};
 use std::ffi::{c_void, CStr};
 
 #[repr(C)] #[derive(Clone, Copy, Debug, Default)] struct Rect { x: f64, y: f64, w: f64, h: f64 }
+// libdispatch (libSystem): yield_to's fallback runs on the main queue, the UI thread, where focus() and the pane's hide run too (#1199)
+unsafe extern "C" { static _dispatch_main_q: u8; fn dispatch_time(when: u64, delta: i64) -> u64; fn dispatch_after_f(when: u64, queue: *const c_void, context: *mut c_void, work: extern "C" fn(*mut c_void)); }
 #[link(name = "objc")] unsafe extern "C" { fn sel_registerName(n: *const std::ffi::c_char) -> *mut c_void; fn objc_getClass(n: *const std::ffi::c_char) -> *mut c_void; fn objc_msgSend(); }
 fn sel(n: &CStr) -> *mut c_void { unsafe { sel_registerName(n.as_ptr()) } }
 fn class(n: &CStr) -> *mut c_void { unsafe { objc_getClass(n.as_ptr()) } }
@@ -216,16 +218,18 @@ pub fn yield_to(w: u64) {
         if responds(a, sel(c"respondsToSelector:"), sel(c"yieldActivationToApplication:")) { send_obj(a, c"yieldActivationToApplication:", other); }
         else { let f: unsafe extern "C" fn(*mut c_void, *mut c_void, usize) -> bool = std::mem::transmute(objc_msgSend as *const ()); f(other, sel(c"activateWithOptions:"), 0); }
     }
-    eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_yield": {"window": w, "to": pid}}));
+    eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_yield": {"window": w, "to": pid, "gen": mine}}));
     // KiCad activates itself on the focused show; when Backplane's own window became key again meanwhile (a palette closing), the consent
     // was gone and KiCad stayed in the background with Backplane holding the keys (client runs 16, 17). Then, 400 ms on, Backplane (still
     // the active app) activates KiCad itself: wx gives back the focus KiCad had, its canvas. NSRunningApplication is thread-safe.
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(400));
+    // On the main queue, not a thread of its own: the generation is read and KiCad activated in one step on the UI thread, where
+    // focus() of our window and the pane's hide move the generation on, so no hand-back can come between the check and the activation.
+    extern "C" fn fallback(ctx: *mut c_void) {
+        let (pid, mine) = *unsafe { Box::from_raw(ctx as *mut (i64, u64)) };
         if app_active(pid) { return }
         // Backplane took the keyboard back, the frame left the screen, or a newer hand-in came: the person's choice stands
         if !crate::viewers::kicad_pane::yield_current(mine, YIELD_GEN.load(std::sync::atomic::Ordering::SeqCst)) {
-            eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_yield_fallback": {"to": pid, "skipped": "the hand-in was voided (Backplane took the keyboard, the frame left, or a newer hand-in)"}}));
+            eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_yield_fallback": {"to": pid, "gen": mine, "skipped": "the hand-in was voided (Backplane took the keyboard, the frame left, or a newer hand-in)"}}));
             return
         }
         unsafe {
@@ -233,8 +237,10 @@ pub fn yield_to(w: u64) {
             let f: unsafe extern "C" fn(*mut c_void, *mut c_void, usize) -> bool = std::mem::transmute(objc_msgSend as *const ());
             f(other, sel(c"activateWithOptions:"), 0);
         }
-        eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_yield_fallback": {"to": pid, "active_after": app_active(pid)}}));
-    });
+        eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_yield_fallback": {"to": pid, "gen": mine, "active_after": app_active(pid)}}));
+    }
+    let ctx = Box::into_raw(Box::new((pid, mine))) as *mut c_void;
+    unsafe { dispatch_after_f(dispatch_time(0, 400_000_000), std::ptr::addr_of!(_dispatch_main_q) as *const c_void, ctx, fallback); }
 }
 pub fn activated_after_close(_main: u64, _popped: u64) -> bool { true }
 pub fn note_pane_keys(_kicad: bool) {}
