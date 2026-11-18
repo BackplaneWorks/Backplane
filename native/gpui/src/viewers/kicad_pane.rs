@@ -278,6 +278,10 @@ pub struct HostSends { inflight: u32, last: Option<Value>, retry_at: Option<std:
 /// macOS: whether a host push is due: the pane's rect and visibility now differ from the last pushed, or what was pushed may not have
 /// reached KiCad (`unsent`: the hub's connection was made again, kicad_rejoin), so the same rect is pushed again.
 pub fn host_push_due(now: Option<(i32, i32, i32, i32, bool)>, sent: Option<(i32, i32, i32, i32, bool)>, unsent: bool) -> bool { now.is_some() && (now != sent || unsent) }
+/// macOS: whether a yield_to's fallback (KiCad activated 400 ms after a hand-in that did not take) may still act: taken at generation
+/// `mine`, the generation now `now` (native_child_mac.rs YIELD_GEN: a newer hand-in, Backplane taking the keyboard back, or KiCad's
+/// frame leaving the screen each move it on, #1199).
+pub fn yield_current(mine: u64, now: u64) -> bool { mine == now }
 /// What the watch does next (`watch_step`): send this push again now, look again in a while, or sleep until a push wakes it.
 #[derive(Debug, PartialEq)]
 pub enum HostStep { Send(Value), Look(std::time::Duration), Idle }
@@ -1332,6 +1336,9 @@ impl KicadPane {
                 self.mac_settle = (ms > 0).then(|| std::time::Instant::now() + std::time::Duration::from_millis(ms));
                 // the page let the editor go (#1199): the keyboard back to Backplane's window if KiCad had it, as detach does (a8bbdc74e);
                 // the frame stays parked in KiCad, shown again at the next frame that draws the pane, and the keys go to it on a click
+                // and whatever hid it (the hub closing the viewer too), a hand-in still waiting to fall back is void: KiCad is never
+                // activated behind a frame that left the screen (nc::yield_to)
+                if was && !v { nc::cancel_yield(); }
                 if was && !v && (!self.in_page || self.mac_covered) && (self.keys || nc::has_focus(0)) {
                     nc::focus(self.toplevel); self.keys = false; self.want_keys = false; nc::grab_escape(self.toplevel, false);
                 }
@@ -1645,6 +1652,17 @@ mod tests {
         assert!(!host_push_due(r, r, false), "unchanged: nothing");
         assert!(host_push_due(r, r, true), "unchanged, but the connection was made again: pushed");
         assert!(host_push_due(Some((430, 153, 496, 524, true)), r, false) && !host_push_due(None, r, true), "a new rect; no rect at all");
+    }
+    /// #1199 (e2e-macos 44314267887 leave a): a hand-in's fallback acts only while nothing came after it.
+    #[test] fn a_hand_in_fallback_is_void_once_backplane_takes_the_keyboard_or_the_frame_leaves() {
+        use super::yield_current;
+        let mut g = 0u64; let mut next = || { g += 1; g };
+        let click = next(); // the canvas click: yield_to takes generation 1
+        assert!(yield_current(click, click), "nothing since: the fallback activates KiCad, as before");
+        let x = next(); // the viewer's Close: focus of our window (cancel_yield)
+        assert!(!yield_current(click, x), "Backplane took the keyboard: the fallback is skipped");
+        let hide = next(); assert!(!yield_current(click, hide), "the frame left the screen: skipped");
+        let again = next(); assert!(yield_current(again, again) && !yield_current(click, again), "a newer hand-in voids the older one only");
     }
     #[test] fn a_frame_left_behind_our_window_is_tried_again_then_said_with_pop_out() {
         use super::{raise_step, RaiseStep, RaiseState, KICAD_RAISE_BOUND, KICAD_RAISE_HELD};
