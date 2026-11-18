@@ -704,6 +704,8 @@ fn texts(c: &mut Ctx, out: &mut Vec<Item>) {
             }
             None => ((0.0, 0.0), 0, 2),
         };
+        // a frame's text wraps at its width, as Altium (and KiCad's text box) set it
+        let s = match t.frame { Some((w, _, m, _)) if w - 2.0 * m > 0.0 => strokefont::wrap(&s, size as f32, (w - 2.0 * m) as f32), _ => s };
         draw_text(out, &t, l, c.ctx_of(t.comp), &s, size, pen, at, hj, vj);
     }
 }
@@ -734,7 +736,7 @@ fn outline(c: &mut Ctx, out: &mut Vec<Item>) {
     if c.outline.len() < 3 { return }
     let mut ps = kring(&c.outline);
     ps.push(ps[0]);
-    let s = c.outline.len() as u32;
+    let s = c.outline.iter().fold(board::FNV, |h, p| board::hash(&[p.0.to_le_bytes(), p.1.to_le_bytes()].concat(), h));
     out.push(Item { key: "o".into(), sig: s, layer: EDGE, prim: Prim::Line { ps, w: 0.1 }, info: Arc::from("gr_poly;layer=Edge.Cuts") });
 }
 /// A plane is negative copper: a faint tint of the board in its colour (its splits and regions draw over it)
@@ -744,7 +746,7 @@ fn planes(c: &mut Ctx, out: &mut Vec<Item>) {
     for a in c.layers.planes.clone() {
         let Some(l) = c.layers.paint(a) else { continue };
         let (col, _) = crate::files::kicad::plotgen::look(0, l);
-        out.push(Item { key: format!("pl/{a}"), sig: a, layer: l, prim: board::tint_of(ps.clone(), col, 40), info: Arc::from(format!("zone{}", kv("layer", &c.layers.name(a)))) });
+        out.push(Item { key: format!("pl/{a}"), sig: a ^ c.outline.len() as u32, layer: l, prim: board::tint_of(ps.clone(), col, 40), info: Arc::from(format!("zone{}", kv("layer", &c.layers.name(a)))) });
     }
 }
 
