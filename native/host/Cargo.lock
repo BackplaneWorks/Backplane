@@ -83,6 +83,7 @@ dependencies = [
  "sha2",
  "tokio",
  "tokio-tungstenite",
+ "uuid",
  "windows-sys",
  "zip",
 ]
