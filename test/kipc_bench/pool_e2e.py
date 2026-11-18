@@ -149,8 +149,11 @@ def first_hub(work, hub_bin, rt, staged, port):
         ok("(c) five requests are out to the frozen server, none answered", not any("r" in x for x in burst), [x.get("r") for x in burst])
         os.kill(pid, signal.SIGKILL)   # the pid captured above, a child of this test's hub
         answers = [got(x, 60) for x in burst]; errs = [e for _, e, _ in answers if e]
-        kinds = sorted({e[:110] for e in errs}); lost = [e for e in errs if "exited before answering" in e or "closed the connection" in e]
-        ok("(c) each is answered with a plain error, at once: the server exited, or closed the connection", len(errs) == 5 and len(lost) == 5 and not any("panicked" in e or "did not answer in" in e for e in errs) and max(s for _, _, s in answers) < 10, {"kinds of error": kinds, "errors": len(errs), "slowest": round(max(s for _, _, s in answers), 1)})
+        kinds = sorted({e[:110] for e in errs}); lost = [e for e in errs if "exited before answering" in e or "closed the connection" in e or "Connection refused" in e]
+        # (which of the three a caller gets is a race between the transport and the process's exit: the one whose request was on the wire
+        # hears the connection closed, those queued behind it on the same socket are refused on the next dial, the rest are answered by
+        # the actor when it sees the exit)
+        ok("(c) each is answered with a plain error, at once: the server exited, closed the connection, or refuses one", len(errs) == 5 and len(lost) == 5 and any("exited before answering" in e or "closed the connection" in e for e in errs) and not any("panicked" in e or "did not answer in" in e for e in errs) and max(s for _, _, s in answers) < 10, {"kinds of error": kinds, "errors": len(errs), "slowest": round(max(s for _, _, s in answers), 1)})
         time.sleep(1); rec = [l for l in open(h.work + "/hub.log", errors="replace").read().splitlines() if "kicad ipc: " + b.dir + "/" in l and " exited (code " in l]
         m = re.search(r"with (\d+) out, answered here, and (\d+) failed by the transport", rec[-1]) if rec else None
         ok("(c) the hub's own record of that exit: the five were out, each answered by the actor or failed by the transport, and the project is in use by nobody", bool(m) and int(m.group(1)) + int(m.group(2)) == 5 and "in use by nobody now" in rec[-1], rec[-1:])
