@@ -267,15 +267,30 @@ pub const MAC_SETTLE_MS: u64 = 300;
 /// task is running: DRC", e2e-macos 44274808579 return 3, the frame never shown; or an error) is sent again, as the latest push is then,
 /// after a wait that grows (HOST_RETRY_MS, to HOST_RETRY_CAP_MS) until KiCad takes it or a newer push replaces it: a newer hide is never
 /// undone by an older show sent again, and a stale timer finds nothing due.
-#[derive(Default, Debug)]
-pub struct HostSends { inflight: u32, last: Option<Value>, retry_at: Option<std::time::Instant>, refused: u32, sent_at: Option<std::time::Instant> }
+/// Answers are told apart by order only: the client's rpc map forgets ids past 64 outstanding (hub.rs `rpcs`, `rpc_names`), and an
+/// answer it forgot never comes back here, so the count stays up until HOST_LOST_MS takes it as lost and the latest is sent again; an
+/// answer that comes after that (late, in order) counts down from 0 and decides as the latest's would: a refusal sends the latest again
+/// (harmless), a take ends a retry the latest's own answer then still decides.
+#[derive(Default)]
+pub struct HostSends { inflight: u32, last: Option<Value>, retry_at: Option<std::time::Instant>, refused: u32, sent_at: Option<std::time::Instant>,
+    /// the app's one watch (Backplane::host_retry_watch), woken by every push: it sleeps on this while nothing waits
+    wake: Option<async_channel::Sender<()>> }
+/// What the watch does next (`watch_step`): send this push again now, look again in a while, or sleep until a push wakes it.
+#[derive(Debug, PartialEq)]
+pub enum HostStep { Send(Value), Look(std::time::Duration), Idle }
 pub const HOST_RETRY_MS: u64 = 250;
 pub const HOST_RETRY_CAP_MS: u64 = 2000;
 /// An answer this long late is taken as lost (the hub reconnected, the reply dropped): the latest push is due again.
 pub const HOST_LOST_MS: u64 = 8000;
 impl HostSends {
     /// A push sent now (its params, the project's): the latest wanted, any retry replaced by it.
-    pub fn sent(&mut self, params: Value, now: std::time::Instant) { self.inflight += 1; self.last = Some(params); self.retry_at = None; self.sent_at = Some(now); }
+    pub fn sent(&mut self, params: Value, now: std::time::Instant) {
+        self.inflight += 1; self.last = Some(params); self.retry_at = None; self.sent_at = Some(now);
+        if let Some(w) = &self.wake { let _ = w.try_send(()); } // the watch wakes for every push, the first one included (lane B)
+    }
+    /// The watch's waker (set once, when the app starts its watch).
+    pub fn set_wake(&mut self, w: async_channel::Sender<()>) { self.wake = Some(w); }
+    pub fn has_wake(&self) -> bool { self.wake.is_some() }
     /// The hub's answer to a push: when the latest was refused, when to send it again.
     pub fn reply(&mut self, ok: bool, now: std::time::Instant) -> Option<std::time::Instant> {
         self.inflight = self.inflight.saturating_sub(1);
@@ -289,14 +304,24 @@ impl HostSends {
     pub fn due(&mut self, now: std::time::Instant) -> Option<Value> {
         let lost = self.inflight > 0 && self.sent_at.is_some_and(|t| now.duration_since(t) >= std::time::Duration::from_millis(HOST_LOST_MS));
         if lost { self.inflight = 0; self.retry_at = Some(now); }
-        match self.retry_at { Some(t) if t <= now && self.inflight == 0 => { self.retry_at = None; self.last.clone() } _ => None }
+        // never with raise: whether KiCad's frame is ordered in is mac_order's to decide fresh, so a retry answered after a long DRC
+        // cannot take the keyboard to KiCad by itself
+        match self.retry_at { Some(t) if t <= now && self.inflight == 0 => { self.retry_at = None; self.last.clone().map(|mut p| { p["raise"] = json!(false); p }) } _ => None }
+    }
+    /// The watch's next step at `now`: a push due again (sent: counted in flight), a look in a while (at most HOST_RETRY_MS: a refusal
+    /// that comes meanwhile is sent again in time), or nothing to wait for.
+    pub fn watch_step(&mut self, now: std::time::Instant) -> HostStep {
+        if let Some(p) = self.due(now) { self.sent(p.clone(), now); return HostStep::Send(p) }
+        match self.next_look() { Some(at) => HostStep::Look(at.saturating_duration_since(now).min(std::time::Duration::from_millis(HOST_RETRY_MS))), None => HostStep::Idle }
     }
     /// When the next look is wanted (a retry waiting, or an answer outstanding that may be lost).
     pub fn next_look(&self) -> Option<std::time::Instant> {
         self.retry_at.or_else(|| (self.inflight > 0).then(|| self.sent_at.map(|t| t + std::time::Duration::from_millis(HOST_LOST_MS))).flatten())
     }
     /// A new hub (reconnected): nothing of the old one's is in flight.
-    pub fn rejoined(&mut self) { self.inflight = 0; }
+    /// A new hub (reconnected): nothing of the old one's is in flight, and nothing it refused is sent again (the reattach's own
+    /// placement is the latest from here).
+    pub fn rejoined(&mut self) { self.inflight = 0; self.retry_at = None; self.refused = 0; self.last = None; self.sent_at = None; }
 }
 /// The settle wait in force (MAC_SETTLE_MS, or BACKPLANE_KICAD_MAC_SETTLE_MS; 0: never sent again).
 pub fn mac_settle_ms(env: Option<&str>) -> u64 { env.and_then(|v| v.trim().parse().ok()).unwrap_or(MAC_SETTLE_MS) }
@@ -1546,7 +1571,7 @@ mod tests {
         use super::{HostSends, HOST_RETRY_MS, HOST_RETRY_CAP_MS, HOST_LOST_MS};
         use serde_json::json;
         let ms = std::time::Duration::from_millis; let t0 = std::time::Instant::now();
-        let show = json!({"x": 430, "width": 496, "height": 500, "visible": true}); let hide = json!({"x": 430, "width": 496, "height": 500, "visible": false});
+        let show = json!({"x": 430, "width": 496, "height": 500, "visible": true, "raise": false}); let hide = json!({"x": 430, "width": 496, "height": 500, "visible": false, "raise": false});
         // a DRC well past 300 ms: refused, refused, refused, then taken; each retry the latest push, the wait growing to its cap
         let mut s = HostSends::default();
         s.sent(show.clone(), t0);
@@ -1577,6 +1602,34 @@ mod tests {
         let mut s = HostSends::default();
         s.sent(show.clone(), t0); assert_eq!(s.next_look(), Some(t0 + ms(HOST_LOST_MS)));
         assert_eq!(s.due(t0 + ms(HOST_LOST_MS - 1)), None); assert_eq!(s.due(t0 + ms(HOST_LOST_MS)), Some(show.clone()));
+    }
+    /// #1199 (lane B): the watch's own path, from the first push with no answer at all to the push sent again; every push wakes it;
+    /// a retry never raises; a new hub drops what the old one refused.
+    #[test] fn the_watch_sends_an_unanswered_first_push_again_without_a_raise() {
+        use super::{HostSends, HostStep, HOST_RETRY_MS, HOST_LOST_MS};
+        use serde_json::json;
+        let ms = std::time::Duration::from_millis; let t0 = std::time::Instant::now();
+        let mut s = HostSends::default();
+        let (tx, rx) = async_channel::bounded::<()>(1); s.set_wake(tx);
+        assert_eq!(s.watch_step(t0), HostStep::Idle, "nothing sent: asleep");
+        // the first push (a show with a raise), never answered (KiCad stopped)
+        let show = json!({"x": 430, "width": 496, "height": 500, "visible": true, "raise": true});
+        s.sent(show.clone(), t0);
+        assert!(rx.try_recv().is_ok(), "the first push wakes the watch");
+        assert_eq!(s.watch_step(t0 + ms(10)), HostStep::Look(ms(HOST_RETRY_MS)), "an answer outstanding: looked at again, bounded");
+        let mut now = t0 + ms(10); let mut looks = 0;
+        let sent = loop { match s.watch_step(now) { HostStep::Look(d) => { assert!(d <= ms(HOST_RETRY_MS) && d > ms(0)); now += d; looks += 1; } HostStep::Send(p) => break p, HostStep::Idle => panic!("asleep with an answer outstanding") } };
+        assert!(now >= t0 + ms(HOST_LOST_MS) && looks <= (HOST_LOST_MS / HOST_RETRY_MS) as usize + 1, "sent again once the answer is that late ({looks} looks)");
+        assert_eq!(sent["raise"], json!(false), "a retry never raises"); assert_eq!(sent["visible"], json!(true)); assert_eq!(sent["width"], json!(496));
+        assert!(rx.try_recv().is_ok(), "the retry is a push of its own");
+        // a refused retry: sent again, without a raise, until taken; then asleep
+        let at = s.reply(false, now + ms(5)).unwrap();
+        assert!(matches!(s.watch_step(now + ms(5)), HostStep::Look(_)));
+        let HostStep::Send(again) = s.watch_step(at) else { panic!("due") }; assert_eq!(again["raise"], json!(false));
+        s.reply(true, at + ms(5)); assert_eq!(s.watch_step(at + ms(6)), HostStep::Idle, "taken: asleep again");
+        // a new hub: what the old one refused is not sent again
+        s.sent(show.clone(), at + ms(10)); s.reply(false, at + ms(20)).unwrap(); s.rejoined();
+        assert_eq!(s.watch_step(at + ms(10_000)), HostStep::Idle, "rejoined: nothing of the old hub's is due");
     }
     #[test] fn a_frame_left_behind_our_window_is_tried_again_then_said_with_pop_out() {
         use super::{raise_step, RaiseStep, RaiseState, KICAD_RAISE_BOUND, KICAD_RAISE_HELD};
@@ -1959,7 +2012,7 @@ impl crate::Backplane {
             if method == "editor.kicad.host" {
                 let at = self.screens.host_sends.borrow_mut().reply(false, std::time::Instant::now());
                 eprintln!("GPUI_LOG {}", json!({"kicad_host_refused": why, "retry_ms": at.map(|t| t.saturating_duration_since(std::time::Instant::now()).as_millis() as u64)}));
-                if at.is_some() { self.host_retry_watch(cx); }
+                self.host_retry_watch(cx);
             }
             if method == "editor.kicad.attach" {
                 if let Some(p) = self.screens.kicad.clone() {
@@ -2079,6 +2132,7 @@ impl crate::Backplane {
             if belongs_to(&pr.project, &pr.root, &pr.project_id, &key, &pid) { p.update(cx, |p, cx| if sim { p.open_simulation(cx) } else { p.edit_again(cx) }); return true }
         }
         let (hub, infos, hub_open, sends) = (self.tx.clone(), self.screens.kicad_infos.clone(), open_now.to_string(), self.screens.host_sends.clone());
+        self.host_retry_watch(cx);
         let page = cx.new(move |cx| { let mut p = KicadPane::new(cx, project, root, pid, open, hub_open, hub); p.host_sends = sends; if let Some(v) = infos.values().find(|v| p.matches(v)).cloned() { p.info = v; } if sim { p.override_kind = Some(SIM.into()); } p });
         // the warm hand-over's end: the page drawn again without the viewer's picture under the pane
         cx.subscribe(&page, |_, _, _: &PaneShown, cx| cx.notify()).detach();
@@ -2099,20 +2153,20 @@ impl crate::Backplane {
     /// The latest host push sent again when it is due (HostSends: refused, or its answer lost), from a timer of the app's own, so a
     /// pane dropped at View still has its hide sent again; one timer at a time, none while nothing waits.
     pub(crate) fn host_retry_watch(&mut self, cx: &mut Context<Self>) {
-        if self.screens.host_retrying { return }
-        self.screens.host_retrying = true;
+        if self.screens.host_sends.borrow().has_wake() { return } // one watch for the window, for as long as it lives
+        let (tx, rx) = async_channel::bounded::<()>(1);
+        self.screens.host_sends.borrow_mut().set_wake(tx);
         cx.spawn(async move |this, cx| loop {
-            let Some(at) = this.update(cx, |this, _| this.screens.host_sends.borrow().next_look()).ok().flatten() else { let _ = this.update(cx, |this, _| this.screens.host_retrying = false); break };
-            // at most HOST_RETRY_MS between looks: a refusal that comes while this waits on a late answer is sent again in time
-            cx.background_executor().timer(at.saturating_duration_since(std::time::Instant::now()).min(std::time::Duration::from_millis(HOST_RETRY_MS))).await;
-            let Ok(()) = this.update(cx, |this, _| {
-                let due = this.screens.host_sends.borrow_mut().due(std::time::Instant::now());
-                if let Some(params) = due {
+            let Ok(step) = this.update(cx, |this, _| this.screens.host_sends.borrow_mut().watch_step(std::time::Instant::now())) else { break };
+            match step {
+                HostStep::Send(params) => {
                     eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [params["x"], params["y"], params["width"], params["height"]], "visible": params["visible"], "raise": params["raise"], "retry": true}));
-                    this.screens.host_sends.borrow_mut().sent(params.clone(), std::time::Instant::now());
-                    let _ = this.tx.try_send(Command::Rpc("editor.kicad.host".into(), Secret(params), "kicad"));
+                    let Ok(()) = this.update(cx, |this, _| { let _ = this.tx.try_send(Command::Rpc("editor.kicad.host".into(), Secret(params), "kicad")); }) else { break };
                 }
-            }) else { break };
+                HostStep::Look(d) => cx.background_executor().timer(d).await,
+                // nothing waits: asleep until the next push wakes it (no timer runs meanwhile)
+                HostStep::Idle => if rx.recv().await.is_err() { break },
+            }
         }).detach();
     }
     /// View: back to Backplane's own viewer (KiCad stays open in the hub, warm for the next Edit).
