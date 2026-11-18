@@ -81,6 +81,9 @@ impl Agents {
         self.commit_events(vec![json!({"$":"ActivityLogged","thread":th,"act":hub_id("sg", now, self.seq_n()),"tone":tone,"kind":"git","summary":summary,"at":now})]).await
     }
     pub fn turn_guard(&self, th: &str) -> Option<TurnGuard> { self.turn_guards.lock().unwrap().get(th).cloned() }
+    /// Settings > Projects and git > Keep Backplane's commits off my branch (settings/offbranch.rs, #1188): snapshots go on Backplane's refs
+    /// even in a repository it made.
+    async fn off_branch(&self) -> bool { crate::settings::offbranch::on(self.world().await.setting(crate::settings::offbranch::KEY)) }
     /// Whether this thread's turn is a review (read-only).
     pub async fn in_review(&self, th: &str) -> bool { self.turn_guard(th).map_or_else(|| false, |g| g.review) || self.world().await.setting(&review_key(th)) == "1" }
 
@@ -110,13 +113,14 @@ impl Agents {
         let root = kc::design_root(cwd);
         if !std::path::Path::new(&root).is_dir() { self.turn_guards.lock().unwrap().insert(th.to_string(), TurnGuard { review, ..Default::default() }); return } // no folder: nothing to snapshot (the turn says why it cannot run there)
         let uh = std::path::PathBuf::from(&self.host.user_home);
-        let made = sn::ensure_repo(&root, Some(&uh)).await;
+        let off = self.off_branch().await;
+        let made = sn::ensure_repo(&root, Some(&uh), off).await;
         match &made { Ok(e) => { let l = e.line(); if !l.is_empty() { self.guard_say(th, if e.not_made.is_empty() { "info" } else { "warn" }, l).await } } Err(e) => self.guard_say(th, "warn", format!("Not made a git repository: {e}")).await }
         let mut g = TurnGuard { review, ..Default::default() };
         if let Some(top) = sn::top_of(&root).await {
             let turn = sn::next_turn(&top, th).await;
             let title = self.thread_title(th).await;
-            match sn::snapshot(&top, th, &sn::snap_ref(th, turn), &sn::snap_msg(th, turn, &title, "")).await {
+            match sn::snapshot(&top, th, &sn::snap_ref(th, turn), &sn::snap_msg(th, turn, &title, ""), off).await {
                 Ok(s) => { if s.made || !s.skipped.is_empty() { self.guard_say(th, "info", s.line()).await } g.top = top; g.turn = turn; g.reference = s.reference; }
                 Err(e) => self.guard_say(th, "warn", format!("No snapshot before this turn: {e}")).await,
             }
@@ -136,7 +140,7 @@ impl Agents {
         match g {
             Some(g) if !g.top.is_empty() => {
                 let title = self.thread_title(th).await;
-                let r = sn::snapshot(&g.top, th, &format!("{}-edit", g.reference), &sn::snap_msg(th, g.turn, &title, "before its first edit")).await;
+                let r = sn::snapshot(&g.top, th, &format!("{}-edit", g.reference), &sn::snap_msg(th, g.turn, &title, "before its first edit"), self.off_branch().await).await;
                 if let Err(e) = r { self.guard_say(th, "warn", format!("No snapshot before this turn's first edit: {e}")).await }
             }
             // no snapshot of this turn yet (a turn that started before this hub did): take it now
@@ -284,7 +288,7 @@ impl Agents {
     }
     async fn restore_turn(self: &Arc<Self>, th: &str, top: &str, turn: u64) -> Result<sn::Restored, String> {
         if self.world().await.threads.get(th).is_some_and(|t| t.turn == "running") { let m = "Not restored: the thread's turn is still running. Stop it first, then restore.".to_string(); self.guard_say(th, "warn", m.clone()).await; return Err(m) }
-        let r = sn::restore(top, th, &sn::snap_ref(th, turn), &format!("{th} to before turn {turn}")).await;
+        let r = sn::restore(top, th, &sn::snap_ref(th, turn), &format!("{th} to before turn {turn}"), self.off_branch().await).await;
         match &r {
             Ok(x) => self.guard_say(th, "info", format!("Restored the project to before turn {turn} (snapshot {}) as {}. The state before the restore is kept as {}.{}", x.to, x.commit, x.saved, if x.removed > 0 { format!(" Removed {} file{} added since.", x.removed, if x.removed == 1 { "" } else { "s" }) } else { String::new() })).await,
             Err(e) => self.guard_say(th, "error", format!("Not restored: {e}")).await,

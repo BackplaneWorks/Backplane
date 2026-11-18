@@ -35,6 +35,8 @@ pub fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
 }
 /// Auth.mcp.key: the key a thread's URL carries.
 pub fn mcp_key(secret: &str, seg: &str) -> String { hex::encode(hmac_sha256(secret.as_bytes(), format!("mcp\n{seg}").as_bytes())) }
+/// The token of an `Authorization: Bearer <token>` header value.
+fn bearer_of(v: &str) -> Option<String> { let v = v.trim(); let (scheme, t) = v.split_once(' ')?; (scheme.eq_ignore_ascii_case("bearer") && !t.trim().is_empty()).then(|| t.trim().to_string()) }
 fn same(a: &str, b: &str) -> bool { a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0 }
 
 /// Mcp.result / Mcp.error / Mcp.content
@@ -122,17 +124,21 @@ impl Mcp {
         Ok(m)
     }
     pub fn seg(thread: &str, gen: &str) -> String { if gen.is_empty() { thread.to_string() } else { format!("{thread}.{gen}") } }
+    /// The thread's endpoint without its key, and the key (sent as `Authorization: Bearer`): what a command line may carry and what it may not (F-009).
+    pub fn bare_url(&self, thread: &str, gen: &str) -> String { format!("http://127.0.0.1:{}/mcp/{}", self.port, Mcp::seg(thread, gen)) }
+    pub fn key(&self, thread: &str, gen: &str) -> String { mcp_key(&self.secret, &Mcp::seg(thread, gen)) }
     /// Hub.mcp_url.g
     pub fn url(&self, thread: &str, gen: &str) -> String { let seg = Mcp::seg(thread, gen); format!("http://127.0.0.1:{}/mcp/{seg}?k={}", self.port, mcp_key(&self.secret, &seg)) }
 
     async fn conn(self: Arc<Self>, mut s: TcpStream) -> anyhow::Result<()> {
         let mut buf: Vec<u8> = Vec::new(); let mut tmp = [0u8; 8192];
-        let (head_len, method, target, clen) = loop {
+        let (head_len, method, target, clen, bearer) = loop {
             let n = tokio::time::timeout(Duration::from_secs(30), s.read(&mut tmp)).await??; if n == 0 { return Ok(()) } buf.extend_from_slice(&tmp[..n]);
             if buf.len() > 16384 && !buf.windows(4).any(|w| w == b"\r\n\r\n") { return Ok(()) }
             let mut hs = [httparse::EMPTY_HEADER; 32]; let mut r = httparse::Request::new(&mut hs);
             match r.parse(&buf) { Ok(httparse::Status::Complete(l)) => { let cl = r.headers.iter().find(|h| h.name.eq_ignore_ascii_case("content-length")).and_then(|h| std::str::from_utf8(h.value).ok()).and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or(0);
-                break (l, r.method.unwrap_or("").to_string(), r.path.unwrap_or("").to_string(), cl) } Ok(_) => continue, Err(_) => return Ok(()) }
+                let bearer = r.headers.iter().find(|h| h.name.eq_ignore_ascii_case("authorization")).and_then(|h| std::str::from_utf8(h.value).ok()).and_then(bearer_of).unwrap_or_default();
+                break (l, r.method.unwrap_or("").to_string(), r.path.unwrap_or("").to_string(), cl, bearer) } Ok(_) => continue, Err(_) => return Ok(()) }
         };
         let reply = |status: &str, body: &str| format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n{body}", body.len());
         if clen > MAX_BODY { s.write_all(reply("413 Payload Too Large", "").as_bytes()).await?; return Ok(()) }
@@ -140,7 +146,8 @@ impl Mcp {
         let body = String::from_utf8_lossy(&buf[head_len..head_len + clen]).into_owned();
         let (path, query) = target.split_once('?').unwrap_or((&target, ""));
         let seg = path.strip_prefix("/mcp/").unwrap_or("");
-        let k = query.split('&').find_map(|p| p.strip_prefix("k=")).unwrap_or("");
+        // the key rides in `Authorization: Bearer` (Codex: its argv never carries it, F-009) or, for a client that can only hold a URL, in `?k=`
+        let k = if bearer.is_empty() { query.split('&').find_map(|p| p.strip_prefix("k=")).unwrap_or("") } else { bearer.as_str() };
         if method != "POST" || seg.is_empty() || !same(k, &mcp_key(&self.secret, seg)) { s.write_all(reply("401 Unauthorized", "").as_bytes()).await?; return Ok(()) }
         let (thread, gen) = seg.split_once('.').map(|(a, b)| (a.to_string(), b.to_string())).unwrap_or((seg.to_string(), String::new()));
         let out = self.handle(&thread, &gen, &body, &mut s).await;
@@ -320,6 +327,7 @@ mod tests {
         assert_eq!(hex::encode(hmac_sha256(b"Jefe", b"what do ya want for nothing?")), "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
         assert_eq!(hex::encode(hmac_sha256(&[0xaa; 131], b"Test Using Larger Than Block-Size Key - Hash Key First")), "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54");
     }
+    #[test] fn a_bearer_header_carries_the_key() { assert_eq!(bearer_of("Bearer abc").as_deref(), Some("abc")); assert_eq!(bearer_of("bearer  abc ").as_deref(), Some("abc")); assert!(bearer_of("Basic abc").is_none() && bearer_of("Bearer").is_none() && bearer_of("Bearer ").is_none()); }
     #[test] fn the_url_key_belongs_to_one_thread_and_generation() { let a = mcp_key("s", "t1.g1"); assert_eq!(a.len(), 64); assert_ne!(a, mcp_key("s", "t1.g2")); assert_ne!(a, mcp_key("t", "t1.g1")); assert!(same(&a, &mcp_key("s", "t1.g1")) && !same(&a, &a[..63])); }
     #[test] fn verdicts_follow_the_answer() {
         let input = json!({"command":"rm x"});

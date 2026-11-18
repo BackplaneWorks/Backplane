@@ -107,10 +107,13 @@ fn threads(st: &State, session: &Value) -> Vec<Value> {
     v
 }
 
-/// Settings > Projects and git: whether the hub pushes the design commits it makes to the remote (settings/autopush.rs, #1171). Off unless turned on.
+/// Settings > Projects and git: whether the hub pushes the design commits it makes to the remote (settings/autopush.rs, #1171), and whether it
+/// makes them on the person's branch at all (settings/offbranch.rs, #1188). Both off unless turned on.
 fn git(st: &State) -> Vec<Value> {
     vec![row("Push commits to the remote automatically", "Backplane commits design files locally at each turn's end. On: it also pushes them to the branch's remote. Off: a project's page shows the commits not pushed, with Push.",
-        chips(&["on", "off"], onoff(crate::settings::autopush::on(set(st, crate::settings::autopush::KEY, ""))), crate::settings::autopush::KEY))]
+        chips(&["on", "off"], onoff(crate::settings::autopush::on(set(st, crate::settings::autopush::KEY, ""))), crate::settings::autopush::KEY)),
+        row("Keep Backplane's commits off my branch", "Off: at each turn's end and save, Backplane commits the design files an agent changed to your branch. On: it records the same changes on its own refs (refs/backplane/design/<branch>) and never commits to your branch or index, so your branch shows the design files as modified until you commit them yourself. /restore and the KiCad history work either way.",
+        chips(&["on", "off"], onoff(crate::settings::offbranch::on(set(st, crate::settings::offbranch::KEY, ""))), crate::settings::offbranch::KEY))]
 }
 
 /// The quiet window's two ends as `(from, to)`: the setting's own, else the default; None when quiet hours are off.
@@ -1005,10 +1008,10 @@ mod tests {
         assert_eq!(v["rows"][1]["buttons"][0]["action"], "settings-page"); assert_eq!(v["rows"][1]["buttons"][0]["value"], "threads");
     }
     #[test] fn projects_and_git_offers_auto_push_off_by_default() {
-        let lit = |s: &State| { let v = view(s, &json!({"open": {"settings": true}, "drafts": {"@settings.page": "git"}}), &json!({})); v["rows"][1]["buttons"].as_array().unwrap().iter().filter(|b| b["on"] == true).map(|b| b["value"].as_str().unwrap().to_string()).collect::<Vec<_>>() };
-        assert_eq!(lit(&st(&[])), ["git.auto_push=off"]);
-        assert_eq!(lit(&st(&[("git.auto_push", "on")])), ["git.auto_push=on"]);
-        assert_eq!(lit(&st(&[("git.auto_push", "off")])), ["git.auto_push=off"]);
+        let lit = |s: &State| { let v = view(s, &json!({"open": {"settings": true}, "drafts": {"@settings.page": "git"}}), &json!({})); v["rows"].as_array().unwrap().iter().flat_map(|r| r["buttons"].as_array().cloned().unwrap_or_default()).filter(|b| b["on"] == true).map(|b| b["value"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>() };
+        assert_eq!(lit(&st(&[])), ["git.auto_push=off", "git.off_branch=off"], "#1188: Backplane commits to the branch unless asked not to");
+        assert_eq!(lit(&st(&[("git.auto_push", "on")])), ["git.auto_push=on", "git.off_branch=off"]);
+        assert_eq!(lit(&st(&[("git.auto_push", "off"), ("git.off_branch", "on")])), ["git.auto_push=off", "git.off_branch=on"]);
     }
     #[test] fn about_says_what_this_windows_browser_tab_is() {
         let about = |client: Value| { let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {"@settings.page": "about"}}), &json!({"client": client})); labels(&v) };

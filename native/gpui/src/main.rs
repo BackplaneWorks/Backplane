@@ -50,6 +50,7 @@ pub struct Backplane { pub pair:Option<screens::pair::Ui>, pub paired:bool, /** 
     pub input:Entity<screens::composer::Composer>, data:Value, status:String, error:String, note:String,
     tx:tokio::sync::mpsc::Sender<Command>, selected:String,
     drafts:HashMap<String,String>, started:Instant, usable:bool,
+    /** a message sent and not yet answered by the hub: its thread and text (the box is emptied at the press; a refusal puts the text back) */ sent_wait:Option<(String,String)>,
     first_frame:bool, script_done:bool, pub timeline:ListState, pub cats:art::Cats, pub links_sent:bool, pub links_last:String, pub sidebar_open:bool, pub models_pending:bool, pub local:local::Local, pub project_page:Option<String>, pub arm_new:Option<(Instant,std::collections::HashSet<String>)>, pub echo_seq:u64, pub thread_cache:Vec<(String,Value)>, pub thread_source:&'static str, pub confirm:Option<(String,Instant)>, pub ack_pending:Option<(String,Instant)>, pub recording:Option<(String,Vec<f64>)>, pub ui_epoch:u64, pub controls:Vec<script::CtlEntry>, pub ctl_last:String, pub probes_last:String, pub last_layout:String, pub wake_at:Option<Instant>, pub reconnected:bool, pub had_hello:bool, pub click_info:Option<(String,String)>, pub timing:Option<hub::Timing>, pub applied_at:Option<Instant>, pub apply_ms:f64, pub render_us:u64, swatches:bool, gallery:bool, fonts:bool, theme_override:Option<bool>, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize, screens:screens::Screens,
 }
 fn pager_row(cx:&mut Context<Backplane>,id:String,pager:&Value,light:bool)->Option<AnyElement> {let c=|name:&str|theme::color(light,name);
@@ -107,7 +108,7 @@ impl Backplane {
         // (the renderer's destroy before the window went, every entity's drop). The hub runs on; it sees the socket close.
         {let weak=cx.entity().downgrade();window.on_window_should_close(cx,move|_,cx|{let t=Instant::now();let _=weak.update(cx,|this,_|this.before_exit());
             script::metric(started,"close",serde_json::json!({"put_away_ms":(t.elapsed().as_secs_f64()*1e6).round()/1e3}));std::process::exit(0)});}
-        Self{pair,paired,hubs:hubs::load(),hub_menu:false,has_hub,input,data:Value::Null,status:"Connecting…".into(),note:String::new(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:saved.clone(),started,usable:false,first_frame:false,script_done:false,timeline:ListState::new(0,ListAlignment::Bottom,px(screens::timeline::RUNWAY)),cats:art::Cats::new(),links_sent:false,links_last:String::new(),sidebar_open:local.sidebar_open,models_pending:false,local,project_page:None,arm_new:None,echo_seq:0,thread_cache:Vec::new(),thread_source:"hub",confirm:None,ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),probes_last:String::new(),last_layout:String::new(),wake_at:None,reconnected:false,had_hello:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total,screens:{let mut s=screens::Screens::new(cx,target,drafts_path,saved);s.elsewhere=elsewhere;s}}
+        Self{pair,paired,hubs:hubs::load(),hub_menu:false,has_hub,input,data:Value::Null,status:"Connecting…".into(),note:String::new(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:saved.clone(),sent_wait:None,started,usable:false,first_frame:false,script_done:false,timeline:ListState::new(0,ListAlignment::Bottom,px(screens::timeline::RUNWAY)),cats:art::Cats::new(),links_sent:false,links_last:String::new(),sidebar_open:local.sidebar_open,models_pending:false,local,project_page:None,arm_new:None,echo_seq:0,thread_cache:Vec::new(),thread_source:"hub",confirm:None,ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),probes_last:String::new(),last_layout:String::new(),wake_at:None,reconnected:false,had_hello:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total,screens:{let mut s=screens::Screens::new(cx,target,drafts_path,saved);s.elsewhere=elsewhere;s}}
     }
     /// What the window's close keeps before the process exits: the drafts written (bounded, normally a few ms) and a screen recording ended.
     /// (KiCad's holders first: out of every container before the process ends, kicad_pane::release_all)
@@ -186,12 +187,13 @@ impl Backplane {
             Event::Probe(slot,m) if slot>=3=>{ screens::plotview::frame_on(self,slot-3,&m); cx.notify(); }
             Event::Probe(slot,m)=>{ eprintln!("GPUI_LOG {}",serde_json::json!({"event":"probe_lit","slot":slot,"n":m.len()})); let pv=self.screens.pv(slot); if pv.lit.len()<20000 { pv.lit.extend(m); } cx.notify(); }
             Event::Status(s)=>{if s!=self.status {eprintln!("GPUI_LOG {}",serde_json::json!({"status":s})); /* always-on dictation: the hub says whether it is wanted here */ if s=="Connected" {let _=self.tx.try_send(Command::Rpc("bots.voice".into(),screens::settings::Secret(serde_json::json!({"op":"always"})),"voice"));}}self.status=s;if self.status=="Connected"{/* (every shown view says Connected: while setup is up its refusal stays until the person presses something there, or it would be gone before it was read) */ if hub::clears_on_connect(&self.error,self.data["tour"].is_object()){self.error.clear();}screens::hubbar::connected(&mut self.screens.hubbar);self.send_unsent();}},
+            Event::Accepted if self.sent_wait.take().is_some()=>{self.voice_sent(cx);self.timeline_to_end();},
             Event::Accepted=>{self.input.update(cx,|input,cx|input.set(String::new(),cx));let _=self.tx.try_send(Command::Draft(String::new())); /* a /give keeps its text in the hub until it took it: the box is empty now, so is that copy */ self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");self.voice_sent(cx);self.timeline_to_end();}, // (the file too: the box's own change comes after the map entry is gone, and would not clear it)
             Event::Older(cursor,page)=>self.older_landed(cursor,page,cx),
-            Event::Error(e)=>{self.error=e;self.screens.unsent.lost();},
+            Event::Error(e)=>{self.error=e;self.screens.unsent.lost();self.sent_back(cx);},
             Event::Unpaired=>screens::pair::revoked(self,cx),
             // a refused view leaves no page to wait for: the pressed tab gives way at once, and the window says why
-            Event::Refused(e)=>{self.error=e;screens::viewer::forget_press();self.screens.rail_pending=None;self.screens.rail_at=None;},
+            Event::Refused(e)=>{self.error=e;self.sent_back(cx);screens::viewer::forget_press();self.screens.rail_pending=None;self.screens.rail_at=None;},
             Event::Note(n)=>{self.note=n;},
             // the hub moved the composer on: a command left it, or the conversation's draft came back after an intent was saved. Another thread's is kept for when it opens
             Event::Compose(th,text)=>{if th==self.selected {self.input.update(cx,|input,cx|input.set(text.clone(),cx));}if text.is_empty(){self.drafts.remove(&th);}else{self.drafts.insert(th.clone(),text.clone());}self.screens.drafts.set(&th,&text);},
@@ -287,7 +289,11 @@ impl Backplane {
         }
         // a dictated draft (no picture, no command): it goes as a spoken message, the agent told so
         if !has_att&&!text.trim().is_empty()&&self.status=="Connected"&&!screens::sidebox::is_command(&self.data["thread"]["commands"],&text)&&self.voice_send_dictated(&text,cx) {self.input.update(cx,|i,cx|i.set(String::new(),cx));self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");let _=self.tx.try_send(Command::Draft(String::new()));cx.notify();return;}
-        if (!text.trim().is_empty()||has_att)&&self.status=="Connected" {self.voice_cut(true);if !text.trim().is_empty()&&!screens::sidebox::is_command(&self.data["thread"]["commands"],&text){self.echo_sent(&text);}let _=self.tx.try_send(Command::Send(text));self.error.clear();self.note.clear();}cx.notify();
+        if (!text.trim().is_empty()||has_att)&&self.status=="Connected" {self.voice_cut(true);let command=screens::sidebox::is_command(&self.data["thread"]["commands"],&text);if !text.trim().is_empty()&&!command{self.echo_sent(&text);}
+            // a message leaves the box at the press (the hub can take a while to answer, and a box still holding it was sent again); a command keeps the
+            // hub's own handling (it may leave text in the box). The hub's yes then leaves the box alone: the person may be typing the next one
+            if !command&&!text.trim().is_empty() {self.sent_wait=Some((self.selected.clone(),text.clone()));self.input.update(cx,|i,cx|i.set(String::new(),cx));self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");}
+            let _=self.tx.try_send(Command::Send(text));self.error.clear();self.note.clear();}cx.notify();
     }
     /// The message is drawn at the end of the open thread the moment it is sent; the hub's picture, which has the real entry, replaces it (history::merge
     /// keeps the rows up to the first one the hub also has, so an echo past it is dropped, not doubled).
@@ -295,6 +301,11 @@ impl Backplane {
     pub fn unsent_to_draft(&mut self,text:&str,cx:&mut Context<Self>){let d=self.input.read(cx).content.to_string();let merged=if d.trim().is_empty(){text.to_string()}else{format!("{d}\n\n{text}")};self.input.update(cx,|i,cx|i.set(merged.clone(),cx));self.screens.drafts.set(&self.selected,&merged);self.drafts.insert(self.selected.clone(),merged);self.want_focus=true;}
     /// The window's unsent messages go, one at a time, while it is connected (each answer sends the next).
     fn send_unsent(&mut self){if !self.screens.unsent.live{return;}if let Some(i)=self.screens.unsent.next(){if self.tx.try_send(hub::Command::Ask("turn.start".into(),screens::unsent::Unsent::request(&i),screens::unsent::TAG)).is_err(){self.screens.unsent.lost();}}}
+    /// A message the hub did not take (refused, or the connection dropped before its answer): its text goes back in the box when the box is still empty
+    /// and its thread is open, else into that thread's draft, so nothing typed is lost.
+    fn sent_back(&mut self,cx:&mut Context<Self>){let Some((th,text))=self.sent_wait.take() else {return};
+        if th==self.selected {if self.input.read(cx).content.trim().is_empty(){self.input.update(cx,|i,cx|i.set(text.clone(),cx));self.drafts.insert(th.clone(),text.clone());self.screens.drafts.set(&th,&text);}}
+        else if self.drafts.get(&th).map_or(true,|d|d.trim().is_empty()) {self.drafts.insert(th.clone(),text.clone());self.screens.drafts.set(&th,&text);}}
     fn echo_sent(&mut self,text:&str){
         if self.data["thread"]["id"].as_str().map_or(true,str::is_empty)||self.data["thread"]["loading"]==true{return;}
         let Some(rows)=self.data["thread"]["entries"].as_array_mut() else {return};

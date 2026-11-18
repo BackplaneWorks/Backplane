@@ -64,6 +64,12 @@ pub mod proc {
     pub fn exists(pid: u32) -> bool { pid > 0 && (unsafe { libc::kill(pid as i32, 0) } == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)) }
     /// The signal that ended a child, if one did.
     pub fn signal(s: &std::process::ExitStatus) -> Option<i32> { use std::os::unix::process::ExitStatusExt; s.signal() }
+    /// The program that lists every process of every user, and its arguments; `image_names` reads its output.
+    pub const PROCESS_LIST: (&str, &[&str]) = ("ps", &["-A", "-o", "comm="]);
+    /// Each process's program name from PROCESS_LIST's output (lower case, no folder).
+    pub fn image_names(out: &str) -> Vec<String> {
+        out.lines().map(|l| l.trim().rsplit('/').next().unwrap_or("").to_ascii_lowercase()).filter(|n| !n.is_empty()).collect()
+    }
 }
 
 /// The OS credential store Windows has; Unix has none here (its keyrings are reached through their own tools, settings/vault.rs).

@@ -122,6 +122,8 @@ pub async fn open(hub: &Arc<Hub>, thread: &str, key: &str) -> Result<String, Str
     let rt = super::ipc::runtime(hub).await; let cli = rt.cli.clone();
     // Backplane's own runtime: never its first-run wizard on a press of Open in KiCad (seed_first_run; a stock KiCad's is left as it is)
     if let Some(root) = super::libtables::config_root() { let v = rt.version.clone(); let _ = tokio::task::spawn_blocking(move || seed_first_run(&root, &v)).await; }
+    // #1185: the person's own KiCad opens without the window geometry an older runtime's embedded KiCad saved (while no KiCad runs)
+    { let (v, h) = (rt.version.clone(), hub.cfg.home.clone()); let _ = tokio::task::spawn_blocking(move || super::geomguard::guard(&v, &h)).await; }
     let key = if key.is_empty() { super::watch::viewer_state(thread).1["key"].as_str().unwrap_or("").to_string() } else { key.to_string() };
     let root = crate::files::root_of(hub, thread).await.map(|r| r.to_string_lossy().to_string()).unwrap_or_default();
     // an Altium project: what is on show (a .PcbDoc or .SchDoc, else the project) opens in the person's Altium

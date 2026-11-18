@@ -9,6 +9,12 @@ pub fn sandbox(runtime: &str) -> Vec<String> {
     match runtime { "full-access" | "" => vec!["--dangerously-bypass-approvals-and-sandbox".into()], "approval-required" => vec!["-s".into(), "read-only".into()], _ => vec!["-s".into(), "workspace-write".into()] }
 }
 pub struct ArgsIn<'a> { pub model: &'a str, pub session: &'a str, pub runtime: &'a str, pub effort: &'a str, pub think: bool, pub images: &'a [String], pub mcp_url: &'a str, pub pcbparts: &'a str, pub prompt: &'a str, pub text: &'a str, /** the list's servers (mcpx gen::codex) */ pub extra: &'a [String] }
+/// The env var the Codex process carries the thread's MCP key in.
+pub const BEARER_VAR: &str = "BACKPLANE_MCP_BEARER_TOKEN";
+/// `url?k=KEY` as (`url`, `KEY`); no key: (url, "").
+pub fn split_key(url: &str) -> (&str, &str) { match url.split_once("?k=") { Some((u, k)) => (u, k), None => (url, "") } }
+/// What Codex's env carries for the thread's MCP key (nothing when the url has none).
+pub fn bearer_env(url: &str) -> Vec<(String, String)> { let k = split_key(url).1; if k.is_empty() { vec![] } else { vec![(BEARER_VAR.to_string(), k.to_string())] } }
 /// Codex.args: head (fresh or resume), sandbox, model, effort, summaries, images, the MCP servers, the instructions, the text.
 pub fn args(a: &ArgsIn) -> Vec<String> {
     let mut v: Vec<String> = if a.session.is_empty() { vec!["exec".into(), "--json".into(), "--skip-git-repo-check".into()] } else { vec!["exec".into(), "resume".into(), a.session.into(), "--json".into(), "--skip-git-repo-check".into()] };
@@ -17,7 +23,9 @@ pub fn args(a: &ArgsIn) -> Vec<String> {
     if ["low", "medium", "high", "xhigh"].contains(&a.effort) { v.push("-c".into()); v.push(format!("model_reasoning_effort=\"{}\"", a.effort)) }
     if a.think { v.push("-c".into()); v.push("model_reasoning_summary=\"detailed\"".into()) }
     for i in a.images { v.push("--image".into()); v.push(i.clone()) }
-    v.push("-c".into()); v.push(format!("mcp_servers.backplane.url=\"{}\"", a.mcp_url));
+    // the key is not in argv (F-009): the bare endpoint here, the key in the env var Codex sends as `Authorization: Bearer` (`bearer_env`)
+    v.push("-c".into()); v.push(format!("mcp_servers.backplane.url=\"{}\"", split_key(a.mcp_url).0));
+    v.push("-c".into()); v.push(format!("mcp_servers.backplane.bearer_token_env_var=\"{BEARER_VAR}\""));
     if !a.pcbparts.is_empty() { v.push("-c".into()); v.push(format!("mcp_servers.pcbparts.url=\"{}\"", a.pcbparts)); }
     v.extend(a.extra.iter().cloned());
     v.push("-c".into()); v.push(format!("developer_instructions={}", Value::String(a.prompt.into())));
@@ -146,6 +154,13 @@ pub fn ride_last(v: &str) -> String { ride_read(v).last().map(|x| x.0.clone()).u
 mod tests {
     use super::*;
     fn ev(l: &str) -> Value { serde_json::from_str(l).unwrap() }
+    #[test] fn codex_argv_has_no_mcp_key_but_its_env_does() {
+        let canary = "CANARY0123456789abcdef"; let url = format!("http://127.0.0.1:9/mcp/t1.2?k={canary}");
+        let a = ArgsIn { model: "m", session: "", runtime: "auto", effort: "", think: false, images: &[], mcp_url: &url, pcbparts: "https://p", prompt: "P", text: "hi", extra: &[] };
+        let v = args(&a); assert!(!v.iter().any(|x| x.contains(canary) || x.contains("?k=")), "{v:?}");
+        assert!(v.contains(&"mcp_servers.backplane.url=\"http://127.0.0.1:9/mcp/t1.2\"".to_string()) && v.contains(&format!("mcp_servers.backplane.bearer_token_env_var=\"{BEARER_VAR}\"")));
+        assert_eq!(bearer_env(&url), vec![(BEARER_VAR.to_string(), canary.to_string())]); assert!(bearer_env("http://u").is_empty());
+    }
     #[test] fn args_fresh_and_resumed() {
         let a = ArgsIn { model: "m", session: "", runtime: "auto", effort: "high", think: true, images: &["/i.png".into()], mcp_url: "http://u", pcbparts: "https://p", prompt: "P\"q", text: "hi", extra: &[] };
         let v = args(&a); assert_eq!(&v[..3], ["exec", "--json", "--skip-git-repo-check"]); assert_eq!(v.last().unwrap(), "hi");

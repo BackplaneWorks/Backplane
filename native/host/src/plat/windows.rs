@@ -220,6 +220,13 @@ pub mod proc {
             Some((cpu, if io_ok { io.ReadTransferCount } else { 0 }, if io_ok { io.WriteTransferCount } else { 0 }, age))
         }
     }
+    /// The program that lists every process, and its arguments; `image_names` reads its output.
+    pub const PROCESS_LIST: (&str, &[&str]) = ("tasklist", &["/fo", "csv", "/nh"]);
+    /// Each process's image name from PROCESS_LIST's output (lower case, without ".exe").
+    pub fn image_names(out: &str) -> Vec<String> {
+        out.lines().filter_map(|l| l.trim_start_matches('"').split('"').next().map(|n| n.to_ascii_lowercase()))
+            .map(|n| n.strip_suffix(".exe").map(str::to_string).unwrap_or(n)).filter(|n| !n.is_empty()).collect()
+    }
     /// When a process started (100 ns since 1601): with the pid it names one process.
     pub fn start_time(pid: u32) -> Option<u64> {
         unsafe {

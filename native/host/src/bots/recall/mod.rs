@@ -258,6 +258,9 @@ impl Recall {
                     if set.len() >= jobs { break }
                     if self.hold.lock().unwrap().get(th).map_or(false, |(until, _)| *until > now_s()) { continue }
                     let Some(batch) = self.batch(th).await else { continue };
+                    // again: a call on this thread that failed while the batch was made (it awaits) has held the thread and let its nodes go, so the batch may be them, re-sent
+                    // straight after the outage, and its answer would clear the hold. A call sets the hold before it lets its nodes go, and nothing awaits from here to the spawn
+                    if self.hold.lock().unwrap().get(th).map_or(false, |(until, _)| *until > now_s()) { continue }
                     { let mut b = self.busy.lock().unwrap(); for (p, _) in &batch { b.insert((th.clone(), *p)); } }
                     let (me, th2) = (self.clone(), th.clone()); set.spawn(async move { me.write(&th2, batch).await }); more = true;
                 }

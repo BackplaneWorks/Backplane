@@ -152,7 +152,7 @@ impl RpcHandler for Commands {
                 if let Some((th, r, mode, src, op)) = pl.wt { let (pv, bd) = capture(&f, &th, &pl.events); worktree::spawn(hub.clone(), self.fold.clone(), th, r, mode, src, pv, bd, op) }
                 // #1163: every project is a git repository, its existing work committed before any agent can change it (files/snapshot.rs);
                 // in the background, so a big folder does not hold the reply (the first turn's guard makes sure of it too)
-                if method != "project.create" && !crate::copy::on() { let (root2, uh) = (root.clone(), crate::plat::dirs::home().map(std::path::PathBuf::from)); tokio::spawn(async move { if let Ok(e) = crate::files::snapshot::ensure_repo(&root2, uh.as_deref()).await { let l = e.line(); if !l.is_empty() { eprintln!("projects: {root2}: {l}") } } }); }
+                if method != "project.create" && !crate::copy::on() { let (root2, uh) = (root.clone(), crate::plat::dirs::home().map(std::path::PathBuf::from)); let off = crate::settings::offbranch::on(&hub.setting(crate::settings::offbranch::KEY).await.unwrap_or_default()); tokio::spawn(async move { if let Ok(e) = crate::files::snapshot::ensure_repo(&root2, uh.as_deref(), off).await { let l = e.line(); if !l.is_empty() { eprintln!("projects: {root2}: {l}") } } }); }
                 return vec![pl.reply];
             }
             let Some(mut pl) = plan(&f, now_s(), id, method, p, &cx) else { return vec![json!({"t":"reply","id":id,"ok":false,"error":"unknown method"})] };

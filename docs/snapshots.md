@@ -27,6 +27,7 @@ the work tree (tracked, untracked, not ignored, not huge) as a commit named `ref
 subject "Backplane: snapshot before <thread> turn <n>" (the thread's title in the body):
 
 - In a repository Backplane made, the commit is on the checked-out branch.
+- With Settings > Projects and git > Keep Backplane's commits off my branch on (`git.off_branch`, off by default; #1188, docs/git.md), it is on its ref there too, and such a repository's first commit is `refs/backplane/first`, its branch left unborn: no snapshot or restore then writes any branch.
 - In a repository the person already had, it is a commit of its own whose parent is HEAD. Their branch, index, staged changes and stash
   are untouched (the KiCad lead's condition: such repositories carry hooks, landing rules and other threads' half-done work).
 - When nothing changed, the ref names HEAD.

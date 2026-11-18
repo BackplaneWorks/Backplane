@@ -21,6 +21,9 @@ for s in 64 128 256 512; do
   rsvg-convert -w $s -h $s assets/icon/backplane.svg -o assets/icon/backplane-$s.png
   rsvg-convert -w $s -h $s assets/icon/backplane-desktop.svg -o assets/icon/backplane-desktop-$s.png
 done
+# Windows: the .exe's icon (resource 1, which the window, the taskbar and Explorer show; native/gpui/build.rs embeds it)
+for s in 16 20 24 32 40 48 64 128 256; do rsvg-convert -w $s -h $s assets/icon/backplane-desktop.svg -o "$tmp/ico-$s.png"; done
+magick "$tmp"/ico-16.png "$tmp"/ico-20.png "$tmp"/ico-24.png "$tmp"/ico-32.png "$tmp"/ico-40.png "$tmp"/ico-48.png "$tmp"/ico-64.png "$tmp"/ico-128.png "$tmp"/ico-256.png assets/icon/backplane.ico
 # the window's icon (_NET_WM_ICON): the mark's coverage at 64 px, one hex
 # digit a pixel, laid over the background by win.c
 rsvg-convert -w 64 -h 64 assets/icon/backplane.svg -b '#000000' -o "$tmp/w.png"
