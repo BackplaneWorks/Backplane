@@ -60,11 +60,16 @@ def strip(doc, gone):
         o.pop(last, None)
     return doc
 why = []
+log = open(f"{out}/hub.log", errors="ignore").read()
 for n, gone in (("pcbnew", ["window.pos_x", "window.size_x", "window.size_y", "aui.right_panel_width", "aui.properties_panel_width"]),
                 ("eeschema", ["window.pos_x", "window.pos_y"])):
-    dmg, now = L(f"{out}/{n}.damaged.json"), L(f"{out}/{n}.repaired.json")
-    if strip(dmg, gone) != now: why.append(f"{n}: not exactly the out-of-range entries removed")
+    # what the hub said it dropped, exactly
+    if f"{n}.json: dropped {', '.join(gone)} (backup" not in log: why.append(f"{n}: the hub log does not name exactly {gone}")
     if not os.path.exists(f"{bk}/{n}.json") or open(f"{bk}/{n}.json").read() != open(f"{out}/{n}.damaged.json").read(): why.append(f"{n}: no backup of the damaged file")
+# pcbnew.json is seeded in full and KiCad does not rewrite it while the board opens: the file itself, exactly the damage removed
+# (the seed has no eeschema.json: KiCad writes its own full one when it starts, so only the hub's word and the backup count there)
+if strip(L(f"{out}/pcbnew.damaged.json"), ["window.pos_x", "window.size_x", "window.size_y", "aui.right_panel_width", "aui.properties_panel_width"]) != L(f"{out}/pcbnew.repaired.json"):
+    why.append("pcbnew: the file is not exactly the damaged one less the out-of-range entries")
 print("1 ok" if not why else "0 " + "; ".join(why))
 PY
 )
@@ -76,7 +81,12 @@ read -r F FX FY FW FH <<<"$(pcb_frame)"
 [ -n "${F:-}" ] && python3 "$XINPUT_PY" click $((FX + FW / 2)) $((FY + FH - 120)); sleep 0.8
 python3 "$XINPUT_PY" chord ctrl w
 for _ in $(seq 40); do [ -z "$(pcb_frame)" ] && break; sleep 0.25; done; sleep 2
-cp "$D/pcbnew.json" "$OUT/pcbnew.after.json"
+# then the session ended as a person's ends (the client, then the hub, stopped): KiCad writes its settings files as it exits
+kill "$CP" 2>/dev/null || true; wait "$CP" 2>/dev/null || true
+HG=${OWN_GROUPS[${#OWN_GROUPS[@]}-1]}; kill -TERM -- "-$HG" 2>/dev/null || true
+for _ in $(seq 100); do kill -0 -- "-$HG" 2>/dev/null || break; sleep 0.2; done; sleep 1
+cp "$D/pcbnew.json" "$OUT/pcbnew.after.json"; cp "$D/eeschema.json" "$OUT/eeschema.after.json"
+echo "INFO after the session: pcbnew.json $(stat -c %y "$D/pcbnew.json"), eeschema.json $(stat -c %y "$D/eeschema.json")"
 G2=$(python3 - "$OUT" <<'PY'
 import json, sys
 out = sys.argv[1]
@@ -93,5 +103,4 @@ if [ "${GEOM_EXPECT_FORK_FIX:-0}" = 1 ]; then
 else
   echo "INFO G2 (runtime $VER, no fork fix expected): the embedded editor's close wrote: ${G2#* }"
 fi
-kill "$CP" 2>/dev/null || true; wait "$CP" 2>/dev/null || true
 finish_suite "embed_geometry_e2e ($EMBED_MODE, $VER)"
