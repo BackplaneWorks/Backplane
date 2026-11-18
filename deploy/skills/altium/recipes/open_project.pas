@@ -21,7 +21,7 @@ begin
     if (SD = nil) and OpenSheets and ((D.DM_DocumentKind = 'SCH') or (D.DM_DocumentKind = 'PCB')) then
         SD := Client.OpenDocument(D.DM_DocumentKind, D.DM_FullPath);
     if SD = nil then S := 'not loaded'
-    else if SD.Modified then S := 'loaded, MODIFIED (unsaved)'
+    else if SD.Modified <> False then S := 'loaded, MODIFIED (unsaved)'
     else S := 'loaded';
     Emit(D.DM_DocumentKind + ' | ' + D.DM_FullPath + ' | ' + S);
 end;

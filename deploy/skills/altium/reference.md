@@ -15,6 +15,8 @@ definitions follow the hub's helpers, the remaining statements run inside `try/e
 - A compile error shows Altium's "Continue execution?" box and then an Error box; the hub answers the first only, and a
   modal box left up makes every later run time out ("There is another instance ... busy"). Write scripts that compile.
 - A method call on `nil` fails at run time as "Undeclared identifier: <method>".
+- Test `IServerDocument.Modified` as `SD.Modified <> False`. `if SD.Modified then` (and `and`/`not` on it, or a Boolean
+  assigned from it) is false even when the document has unsaved edits, though `BoolToStr(SD.Modified, True)` says True.
 
 ## Documents and projects
 

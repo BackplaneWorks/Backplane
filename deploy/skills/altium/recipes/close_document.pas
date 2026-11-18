@@ -8,7 +8,7 @@ const
     Discard = False;   // True: drop unsaved edits; False: refuse to close a modified document
 SD := Client.GetDocumentByPath(DocPath);
 if SD = nil then begin Emit('not open: ' + DocPath); Exit; end;
-if SD.Modified and not Discard then begin Emit('modified, not closed (save it first, or set Discard): ' + DocPath); Exit; end;
+if (SD.Modified <> False) and not Discard then begin Emit('modified, not closed (save it first, or set Discard): ' + DocPath); Exit; end;
 SD.Modified := False;
 Client.CloseDocument(SD);
 if Client.GetDocumentByPath(DocPath) = nil then Emit('closed ' + DocPath) else Emit('still open ' + DocPath);
