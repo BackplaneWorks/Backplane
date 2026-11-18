@@ -33,8 +33,10 @@ every script addresses documents **by full path**, and never the focused/current
 3. Edit with the recipe for it: copy the file, change only its `const` block (placeholder paths, designators,
    coordinates), send it as `script`. Keep each script to one change: a short script fails clearly.
 4. Verify by re-reading (the list recipes), not by trusting the edit's own message.
-5. Save the edited documents with `save_document.pas`: Backplane's viewers read the files, so an unsaved edit is
-   invisible there. Saving is the person's call when they are working in the same document; say what is unsaved.
+5. **Save each document right after a change that matters** (the ECO, placement, the outline, routing, a new part),
+   before any other step: `SD.DoFileSave('')`, or `save_document.pas`. Until then the change lives only in Altium's
+   memory, and a box Altium raises or a document that closes loses it (this happened: an ECO's parts were lost when the
+   board was brought to the front unsaved). Backplane's viewers also read only the saved files.
 6. Close only what you opened (`close_document.pas`), never the person's documents.
 
 A new design, all by script (verified end to end): `new_documents` (sheet and board) -> `pcblib_footprint` /
@@ -79,6 +81,11 @@ A new design, all by script (verified end to end): `new_documents` (sheet and bo
 
 ## Rules that bite (all hit while verifying; details in reference.md)
 
+- **Never ask the person to run Update PCB (Design > Update PCB Document) or any other step a recipe does.** Run
+  `pcb_update_from_sch.pas` (the hub works the ECO's dialogs), or `pcb_from_schematic.pas` when the ECO cannot run;
+  both save the board. If one fails, read the error, fix the script, and run it again. Do not hand the step to the
+  person. If work was lost, redo it the same way.
+
 - **Altium's own dialogs: `BpExpect(Title, Steps)`.** A process that opens a modal window (the ECO, Situs's strategy
   dialog, the IPC batch generator) blocks the script until the window closes. Call `BpExpect` just before it and the hub
   works the window: `click <caption>` (trailing `*` = caption starts with), `wait <s>`, `text <n> = <value>` (n-th edit
@@ -115,6 +122,8 @@ A new design, all by script (verified end to end): `new_documents` (sheet and bo
 
 ## What needs the person
 
+Only what no script can reach (below). Everything else, Update PCB included, is yours to do by script.
+
 - **Online parts.** Manufacturer Part Search and workspace (Altium 365) components live in web panels with no script
   surface: a script cannot search them or place from them. Do it yourself where you can (find the part and its datasheet
   on the web; make the symbol with `schlib_symbol.pas` and the footprint with `pcblib_ipc_batch.pas` or
@@ -126,14 +135,17 @@ A new design, all by script (verified end to end): `new_documents` (sheet and bo
   gives "select some objects first", and its WPF box stops the run until the hub closes it). Use `pcb_autoroute.pas`
   (Situs) for nets and connections.
 - **Altium's batch DRC.** `PCB:DesignRuleCheck` opens the modal Design Rule Checker. Use `pcb_drc.pas`; when the full
-  rule set matters (un-routed nets, silk, mask...), ask the person to run Tools > Design Rule Check, then read the
-  markers with `pcb_violations.pas`.
+  rule set matters (un-routed nets, silk, mask...), say that Tools > Design Rule Check covers the rest and read its
+  markers with `pcb_violations.pas` if the person runs it; do not stop the work for it.
 - **PDF output.** The OutJob PDF container (`WorkspaceManager:Print`, `Action=PublishToPDF|ObjectKind=OutputBatch|
   DisableDialog=True`) raised an Error box and wrote no PDF in testing; Gerber/drill/ODB through `outjob_run.pas` work.
 
 ## How results look
 
 A result has `ok`, `output` (your `Emit` lines), `error`, `dialogs` and, after `BpExpect`, `driven`. `ok: false` with an `error` is an exception in
-your script (the lines emitted before it are kept). Anything in `dialogs` is a box Altium raised and the hub closed:
-look at the screen state with `altium_status` and do not retry blindly. Loops stop at the deadline
+your script (the lines emitted before it are kept). Anything in `dialogs` is a box Altium raised and the hub answered,
+as `<title | text | buttons> => pressed <button>` (Altium's own boxes often show only their title: their message text
+cannot be read). The hub never presses a button that throws work away (No on a save prompt, Don't Save, Discard,
+Reload). On a box that asks about saving it presses Cancel, or else Yes to save. When a box stopped the run, first check that every
+document you were editing is still open and save it; if one closed, redo its change by script. Do not retry blindly. Loops stop at the deadline
 (`BP-LOOP-GUARD` in the output): narrow the work instead of raising the timeout.

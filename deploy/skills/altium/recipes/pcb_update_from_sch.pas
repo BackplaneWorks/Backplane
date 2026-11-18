@@ -50,4 +50,5 @@ AddStringParameter('ObjectKind', 'Project');
 AddStringParameter('Action', 'UpdateMe');
 RunProcess('WorkspaceManager:Compare');
 C1 := Count(eComponentObject); N1 := Count(eNetObject);
-Emit('components ' + IntToStr(C0) + ' -> ' + IntToStr(C1) + ', nets ' + IntToStr(N0) + ' -> ' + IntToStr(N1) + '; modified=' + BoolToStr(SD.Modified, True));
+// save at once: until it is saved, the ECO's parts exist only in Altium's memory, and a box or a closed document loses them
+Emit('components ' + IntToStr(C0) + ' -> ' + IntToStr(C1) + ', nets ' + IntToStr(N0) + ' -> ' + IntToStr(N1) + '; saved ' + BoolToStr(SD.DoFileSave(''), True) + ', modified=' + BoolToStr(SD.Modified, True));

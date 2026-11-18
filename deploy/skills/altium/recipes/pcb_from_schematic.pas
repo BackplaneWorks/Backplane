@@ -168,3 +168,5 @@ for J := 0 to Flat.DM_NetCount - 1 do SetPadNets(Flat.DM_Nets(J));
 PCBServer.PostProcess;
 Board.GraphicallyInvalidate;
 Emit('components placed ' + IntToStr(Placed) + ', already on the board ' + IntToStr(Kept) + ', skipped ' + IntToStr(Skipped) + '; pads given nets ' + IntToStr(Padded));
+// save at once: unsaved parts live only in Altium's memory
+Emit('saved ' + BoolToStr(SD.DoFileSave(''), True));

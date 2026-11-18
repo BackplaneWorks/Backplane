@@ -350,6 +350,26 @@ pub fn caption_matches(want: &str, caption: &str) -> bool {
 /// an owned WPF window (its extensions' boxes, ActiveRoute's "Information" one: no controls to read, closed as Alt+F4 would)
 pub fn is_box(class: &str, owned: bool) -> bool { matches!(class, "#32770" | "TMessageForm") || owned && class.starts_with("HwndWrapper[") }
 
+/// What a run the hub had to stop says after the boxes: a document the script was editing may have closed with it.
+pub const STOPPED: &str = "The script did not finish: before anything else, check with a short script that every document you were editing is still open (Client.GetDocumentByPath) and save it (save_document.pas). If one is gone, redo its change yourself by script (pcb_update_from_sch.pas for the ECO); do not ask the person to redo it.";
+/// Box.answer: the button the hub presses on a box Altium raised unasked (index into `buttons`, captions as read; None:
+/// close the window, as Alt+F4). Work is never thrown away. A button that discards (Don't Save, Save None, Discard,
+/// Reload, Revert) is never pressed. On a box that asks about saving or losing changes, the hub presses Cancel, or
+/// else the answer that keeps the document as it is in Altium: No to discard, reload or revert, Yes to save. Otherwise
+/// it presses Cancel (which stops a failed script), No, OK or Close.
+/// Altium's own message forms draw their text as a label that cannot be read, so `text` is often only the title.
+pub fn pick_answer(text: &str, buttons: &[String]) -> Option<usize> {
+    let n = |s: &str| s.replace('&', "").trim().to_lowercase();
+    let t = text.to_lowercase();
+    let throws = |c: &str| ["don't save", "dont save", "do not save", "save none", "discard", "reload", "revert", "close without saving"].iter().any(|w| c.contains(w));
+    let find = |w: &str| buttons.iter().position(|b| n(b) == w);
+    let has = |ws: &[&str]| ws.iter().any(|w| t.contains(w));
+    let order: &[&str] = if has(&["discard", "lose", "lost", "reload", "revert", "overwrite", "without saving"]) { &["cancel", "no"] }
+        else if has(&["save", "modified", "unsaved", "changes"]) { &["cancel", "yes", "save"] }
+        else { &["cancel", "no", "ok", "close"] };
+    order.iter().find_map(|w| find(w)).or_else(|| buttons.iter().position(|b| !throws(&n(b)) && !matches!(n(b).as_str(), "yes" | "no")))
+}
+
 /// What a run came to.
 #[derive(Debug, Default)]
 pub struct Ran { pub ok: bool, pub output: String, pub error: String, pub dialogs: Vec<String>, pub driven: Vec<String>, pub secs: f32 }
@@ -643,19 +663,22 @@ mod win {
         unsafe { EnumWindows(Some(top), &mut st as *mut (Vec<u32>, Vec<Dlg>) as LPARAM); }
         st.1
     }
-    /// A box a failed script raised, answered: its Cancel (stops the script), else No, else OK. A Windows box takes IDCANCEL; Altium's
-    /// own message forms take a click on the button (BM_CLICK) or, for its drawn buttons, Enter sent to the button; WM_CLOSE last.
-    fn answer(d: &Dlg) {
+    /// A box Altium raised unasked, answered as `pick_answer` says (never a button that throws work away), and what was done, for
+    /// the result's `dialogs`. A Windows box with no readable button takes IDCANCEL; Altium's own message forms take a click on
+    /// the button (BM_CLICK) or, for its drawn buttons, Enter sent to the button; WM_CLOSE when there is no button to press.
+    fn answer(d: &Dlg) -> String {
+        let caps: Vec<String> = d.buttons.iter().map(|(_, t)| t.clone()).collect();
         unsafe {
-            if d.class == "#32770" { PostMessageW(d.hwnd, WM_COMMAND, 2 as WPARAM, 0); return } // IDCANCEL
-            let pick = ["Cancel", "No", "OK", "Ok", "Close"].iter().find_map(|w| d.buttons.iter().find(|(_, t)| t.eq_ignore_ascii_case(w))).or(d.buttons.first());
-            match pick {
-                Some((b, _)) => {
-                    SendMessageW(*b, 0x00F5, 0, 0); // BM_CLICK
+            match super::pick_answer(&d.text, &caps) {
+                Some(i) => {
+                    let b = d.buttons[i].0;
+                    SendMessageW(b, 0x00F5, 0, 0); // BM_CLICK
                     std::thread::sleep(std::time::Duration::from_millis(150));
-                    if IsWindowVisible(d.hwnd) != 0 { PostMessageW(*b, 0x0100, 0x0D, 0); PostMessageW(*b, 0x0101, 0x0D, 0); } // Enter down/up
+                    if IsWindowVisible(d.hwnd) != 0 { PostMessageW(b, 0x0100, 0x0D, 0); PostMessageW(b, 0x0101, 0x0D, 0); } // Enter down/up
+                    format!("pressed {}", caps[i])
                 }
-                None => { PostMessageW(d.hwnd, WM_CLOSE, 0, 0); }
+                None if d.class == "#32770" && caps.is_empty() => { PostMessageW(d.hwnd, WM_COMMAND, 2 as WPARAM, 0); "cancelled".into() } // IDCANCEL
+                None => { PostMessageW(d.hwnd, WM_CLOSE, 0, 0); "closed it".into() }
             }
         }
     }
@@ -742,7 +765,7 @@ mod win {
             for x in dialogs(pid) {
                 if before.contains(&(x.hwnd as isize)) { continue }
                 if pending.iter().any(|e| super::title_matches(&e.title, &x.text.split(" | ").next().unwrap_or(""))) { continue }
-                ran.dialogs.push(x.text.clone()); answer(&x); stopped = true;
+                let did = answer(&x); ran.dialogs.push(format!("{} => {did}", x.text)); stopped = true;
             }
             if stopped {
                 // a compile error or an error outside try: "Continue execution?" is answered, then Altium may raise an Error box after it;
@@ -756,7 +779,7 @@ mod win {
                 }
                 if !done.exists() {
                     ran.ok = false;
-                    let e = format!("Altium stopped the script: {}", ran.dialogs.iter().filter(|d| !d.is_empty()).cloned().collect::<Vec<_>>().join(" / "));
+                    let e = format!("Altium stopped the script: {}. {}", ran.dialogs.iter().filter(|d| !d.is_empty()).cloned().collect::<Vec<_>>().join(" / "), super::STOPPED);
                     ran.error = super::locate(&e, &std::fs::read_to_string(&pas).unwrap_or_default());
                     break
                 }
@@ -793,8 +816,9 @@ mod win {
             tokio::time::sleep(Duration::from_millis(120)).await;
             for x in dialogs(pid) {
                 if before.contains(&(x.hwnd as isize)) { continue }
-                if !ran.dialogs.contains(&x.text) { ran.dialogs.push(x.text.clone()) }
-                answer(&x); quiet = Instant::now();
+                let line = format!("{} => {}", x.text, answer(&x));
+                if !ran.dialogs.contains(&line) { ran.dialogs.push(line) }
+                quiet = Instant::now();
             }
         }
     }
@@ -904,6 +928,19 @@ mod tests {
         assert!(is_box("HwndWrapper[DefaultDomain;;baff34aa]", true), "ActiveRoute's Information box");
         assert!(!is_box("HwndWrapper[DefaultDomain;;baff34aa]", false), "an unowned WPF window is a panel or the app");
         assert!(!is_box("TDocumentForm", true) && !is_box("TApplication", false));
+    }
+    #[test] fn boxes_are_answered_without_throwing_work_away() {
+        let b = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let at = |t: &str, v: &[&str]| pick_answer(t, &b(v)).map(|i| v[i].to_string());
+        assert_eq!(at("Information", &["OK"]).as_deref(), Some("OK"), "the esp_carrier box: its only button");
+        assert_eq!(at("Confirm | Save changes to esp_carrier.PcbDoc?", &["&Yes", "&No", "Cancel"]).as_deref(), Some("Cancel"));
+        assert_eq!(at("Save changes to esp_carrier.PcbDoc?", &["Yes", "No"]).as_deref(), Some("Yes"), "no Cancel: save, never No");
+        assert_eq!(at("The document has been modified outside. Reload?", &["Yes", "No"]).as_deref(), Some("No"), "reload would drop the edits");
+        assert_eq!(at("Discard your changes?", &["Yes", "No"]).as_deref(), Some("No"));
+        assert_eq!(at("Confirm Save for 1 document", &["Save All", "Save None"]).as_deref(), Some("Save All"), "never Save None");
+        assert_eq!(at("Unsaved", &["Don't Save"]), None, "a discard button alone: closed, not pressed");
+        assert_eq!(at("Error | Continue execution?", &["Yes", "No", "Cancel"]).as_deref(), Some("Cancel"), "a failed script is still stopped");
+        assert_eq!(at("Information", &[]), None);
     }
     #[test] fn titles_and_captions_match_loosely() {
         assert!(title_matches("engineering change order", "Engineering Change Order"));

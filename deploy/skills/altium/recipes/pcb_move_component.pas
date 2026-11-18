@@ -35,4 +35,6 @@ PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_EndModify,
 PCBServer.PostProcess;
 Board.GraphicallyInvalidate;
 Emit(Designator + ' now ' + FormatFloat('0.###', CoordToMMs(Comp.x - Board.XOrigin)) + ',' + FormatFloat('0.###', CoordToMMs(Comp.y - Board.YOrigin))
-    + ' mm rot ' + FormatFloat('0.#', Comp.Rotation) + '; modified=' + BoolToStr(SD.Modified, True));
+    + ' mm rot ' + FormatFloat('0.#', Comp.Rotation));
+// save at once (placing many parts: save once after the last move, in the same script)
+Emit('saved ' + BoolToStr(SD.DoFileSave(''), True));

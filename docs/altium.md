@@ -90,10 +90,20 @@ Altium still raises answered. Runs go in `%PUBLIC%\Backplane\altium\runs`.
   Cancel would, and says what the window offered.
 - Boxes it answers unasked: Windows message boxes, Delphi message forms, and owned WPF windows (Altium's extensions,
   e.g. ActiveRoute's "Information"), which have no controls to read and are closed as Alt+F4 would.
+  Which button (`pick_answer`): never one that throws work away (Don't Save, Save None, Discard, Reload, Revert); on
+  a box about saving or losing changes, Cancel, else the answer that keeps the document (Yes to save, No to discard or
+  reload); otherwise Cancel, No, OK, Close. `dialogs` says what was pressed (`<box> => pressed <button>`). Altium's own
+  message forms draw their text as a label that cannot be read, so often only the title is known. A run the hub had to
+  stop tells the agent to check and save the documents it was editing before anything else. Seen 2026-11-18: a one-button
+  "Information" box came up while a placement script brought an unsaved board (fresh ECO parts) to the front. The hub
+  pressed OK and stopped the script, and the board had closed with its unsaved parts. Hence the rule in the skill and
+  the recipes: save right after the ECO and after placement.
 
 - MCP tools: `altium_status` (Altium's build, open projects and documents, the focused one) and `altium_script`.
 - The agents of an Altium project get `<backplane_altium>` instead of KiCad's editing and runtime blocks
-  (`agents/prompt.rs` `altium`), and the bundled `altium` skill (`deploy/skills/altium`): recipes tested against Altium.
+  (`agents/prompt.rs` `altium`), the bundled `altium` skill (`deploy/skills/altium`): recipes tested against Altium, and
+  KiStack's skills with a note that they are written for KiCad and are to be adapted at the agent's discretion (the
+  KiCad-only tools kicad_edit, kicad_ipc and kicad-cli stay out).
 - The viewer bar offers Open in Altium (the hub marks the viewer `cad: altium`; `kicad/open.rs` opens what is on show in
   the running Altium, else starts the newest installed one with it).
 - Off Windows the tools say Altium runs on Windows; the viewers still draw the files.
