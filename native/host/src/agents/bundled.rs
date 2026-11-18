@@ -17,6 +17,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("skills/sendcutsend/examples/bracket.py", include_str!("../../../../deploy/skills/sendcutsend/examples/bracket.py")),
     ("skills/altium/SKILL.md", include_str!("../../../../deploy/skills/altium/SKILL.md")),
     ("skills/altium/reference.md", include_str!("../../../../deploy/skills/altium/reference.md")),
+    ("skills/altium/write.md", include_str!("../../../../deploy/skills/altium/write.md")),
     ("skills/altium/recipes/close_document.pas", include_str!("../../../../deploy/skills/altium/recipes/close_document.pas")),
     ("skills/altium/recipes/open_project.pas", include_str!("../../../../deploy/skills/altium/recipes/open_project.pas")),
     ("skills/altium/recipes/outjob_run.pas", include_str!("../../../../deploy/skills/altium/recipes/outjob_run.pas")),

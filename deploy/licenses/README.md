@@ -8,6 +8,7 @@ notices for everything else in this archive, one folder per component.
 | Folder | What | Where it is in the archive | Licence |
 |---|---|---|---|
 | `rust/` | The Rust crates compiled into each program: `hub.txt` (backplane-hub, bp-sh), `client.txt` (backplane-gpui), `guard.txt` (backplane), `voice.txt` (backplane-voice). Made at release time by cargo-about for this platform | the programs | MIT, Apache-2.0, BSD and others, each text in full |
+| `altiumsharp/` | AltiumSharp's pad record template and footprint record layouts, ported into the hub's Altium writer (`NOTICE.md`) | backplane-hub | Apache-2.0 |
 | `gpui/` | gpui 0.2.2 by Zed Industries, vendored with the changes in `PATCH.md` | backplane-gpui | Apache-2.0 |
 | `bun/` | The Bun runtime, with JavaScriptCore/WebKit and tinycc, in the program built with `bun build --compile` | backplane-browser | MIT; LGPL-2 and LGPL-2.1 (see `NOTICE.md`) |
 | `playwright-core/` | Playwright's core library, bundled into the Browser tab's helper | backplane-browser | Apache-2.0 |

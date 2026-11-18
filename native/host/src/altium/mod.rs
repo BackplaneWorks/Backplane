@@ -14,6 +14,7 @@ pub mod prj;
 pub mod sch;
 pub mod pcb;
 pub mod board3d;
+pub mod write;
 
 use std::collections::HashMap;
 use std::io::{Cursor, Read};

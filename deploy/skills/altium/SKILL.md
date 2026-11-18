@@ -1,7 +1,21 @@
 ---
 name: altium
-description: Inspect and edit Altium Designer projects (.PrjPcb, .SchDoc, .PcbDoc, .SchLib, .OutJob) live in the person's running Altium through the altium_status and altium_script tools - list components, nets and ERC messages, change parameters, place wires, labels, power ports and parts, move board components, add tracks and vias, check design rules, diff schematic against board, run OutJob outputs (Gerber, drill, ODB). Use whenever a task touches an Altium design on Windows; verified recipes are in recipes/.
+description: Make Altium Designer footprints (.PcbLib), symbols (.SchLib) and schematic sheets (.SchDoc) directly with the altium_write tool (no Altium needed, any platform), and inspect and edit Altium projects (.PrjPcb, .SchDoc, .PcbDoc, .SchLib, .OutJob) live in the person's running Altium through the altium_status and altium_script tools - list components, nets and ERC messages, change parameters, place wires, labels, power ports and parts, move board components, add tracks and vias, check design rules, diff schematic against board, run OutJob outputs (Gerber, drill, ODB). Use whenever a task touches an Altium design on Windows; verified recipes are in recipes/.
 ---
+
+# Altium Designer
+
+## Writing files directly: altium_write (any platform, no Altium)
+
+New footprints, new symbols, new sheets, and parts, wires, net labels and power ports added to a sheet: use
+`altium_write`. It takes one JSON spec, writes Altium's own binary files, reads them back, and reports what they hold.
+Read `write.md` before the first call: it has the spec, the package table and the rules. Prefer it to scripting for
+these jobs: it needs no Altium, a spec cannot leave a dialog up, and every part is checked when it is read back.
+
+Typical flow for a new part: footprint from the datasheet's package drawing (`pcblib`, a `package` or `custom` pads),
+symbol with pins by side (`schlib`, `footprint` naming it), then place and `connect` it on a sheet (`schdoc`), and add the
+files to the project (`project`), all in one call. On Windows with Altium running, compile with
+`recipes/project_netlist.pas` afterwards to see Altium's own nets and ERC.
 
 # Altium Designer, live
 

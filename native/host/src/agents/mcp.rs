@@ -21,7 +21,7 @@ pub trait ToolSet: Send + Sync {
     fn call<'a>(&'a self, thread: &'a str, name: &'a str, a: &'a Value) -> crate::api::Fut<'a, (bool, Value)>;
 }
 pub const TOOLS_JSON: &str = include_str!("../../../../test/agents/fixtures/mcp-tools.json");
-pub const IMPLEMENTED: &[&str] = &["orchestrator_capabilities", "review_comment", "review_comments", "work_run", "work_watch", "work_list", "work_cancel", "work_unwatch", "lock_acquire", "lock_release", "lock_cancel", "lock_list", "account_list", "thread_launch", "machine_list", "delegate_task", "task_status", "task_cancel", "thread_list", "thread_read", "thread_send", "thread_update", "thread_wait", "thread_interrupt", "thread_settle", "viewer_show", "permission_prompt", "kicad_ipc", "kicad_edit", "kicad_ipc_status", "kicad_select", "kicad_bring_back", "altium_status", "altium_script", "terminal_open", "terminal_read", "terminal_send", "terminal_close", "preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status", "secret_request", "secret_list", "secret_run", "settings_inspect", "settings_propose"];
+pub const IMPLEMENTED: &[&str] = &["orchestrator_capabilities", "review_comment", "review_comments", "work_run", "work_watch", "work_list", "work_cancel", "work_unwatch", "lock_acquire", "lock_release", "lock_cancel", "lock_list", "account_list", "thread_launch", "machine_list", "delegate_task", "task_status", "task_cancel", "thread_list", "thread_read", "thread_send", "thread_update", "thread_wait", "thread_interrupt", "thread_settle", "viewer_show", "permission_prompt", "kicad_ipc", "kicad_edit", "kicad_ipc_status", "kicad_select", "kicad_bring_back", "altium_status", "altium_script", "altium_write", "terminal_open", "terminal_read", "terminal_send", "terminal_close", "preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status", "secret_request", "secret_list", "secret_run", "settings_inspect", "settings_propose"];
 const MAX_BODY: usize = 4 << 20;
 const MAX_CONNS: usize = 256;
 const MAX_PARKED_PER_THREAD: usize = 16;
@@ -235,6 +235,38 @@ impl Mcp {
             "altium_script" => {
                 let t = a.get("timeout").and_then(Value::as_u64).unwrap_or(60).clamp(5, 600) as u32;
                 match crate::files::altium::live::run(sv(&a, "script"), t).await { Ok(r) => (r.ok, r.json()), Err(e) => fail(&e) } }
+            // Altium files written directly, no Altium needed (altium/write): the thread's project folder (main's copy for design
+            // files), a sheet's lock as a direct write takes it, the turn's snapshot first
+            "altium_write" => {
+                let Some(root) = crate::files::root_of(&ag.hub, thread).await else { return Some(result(id, shaped(false, &json!({"error":"this thread has no project folder"})))) };
+                let root = root.to_string_lossy().into_owned();
+                let targets = crate::files::altium::write::spec::targets(&a);
+                let base = crate::files::kicad::canonical::direct(&root, targets.first().map(|s| s.as_str()).unwrap_or("x.SchDoc")).0;
+                let mut gate = None;
+                for t in &targets {
+                    if let Some(doc) = ag.files_doc(thread, t).await { if let Err(why) = ag.doc_gate(thread, &doc).await { gate = Some(why); break } }
+                }
+                if gate.is_none() { let ts: Vec<&str> = targets.iter().map(|s| s.as_str()).collect(); gate = ag.files_write_guard(thread, &ts).await.err(); }
+                match gate {
+                    Some(why) => fail(&why),
+                    None => {
+                        // a document the person's Altium has open: refused with unsaved edits, else closed now and reopened after
+                        let paths = crate::files::altium::write::spec::target_paths(&a, std::path::Path::new(&base));
+                        match crate::files::altium::live::before_write(&paths).await {
+                            Err(why) => fail(&why),
+                            Ok(open) => {
+                                let spec = a.clone();
+                                let ran = tokio::task::spawn_blocking(move || crate::files::altium::write::spec::run(&spec, std::path::Path::new(&base))).await;
+                                match ran {
+                                    Ok(Ok((v, _written))) => { let added = crate::files::altium::write::spec::project_added(&v); (true, crate::files::altium::live::after_write(v, &open, &added).await) }
+                                    Ok(Err(e)) => { let _ = crate::files::altium::live::after_write(json!({}), &open, &[]).await; fail(&e) }
+                                    Err(e) => { let _ = crate::files::altium::live::after_write(json!({}), &open, &[]).await; fail(&e.to_string()) }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             "kicad_ipc_status" => match crate::files::kicad::ipc::kicad_ipc_status_in(&ag.hub, Some(thread), &crate::files::kicad::canonical::route(sv(&a, "path"))).await { Ok(v) => (true, v), Err(e) => fail(&e) },
             "kicad_export10" => crate::files::export10::mcp(&ag.hub, &crate::files::kicad::canonical::route(sv(&a, "path")), a.get("force").and_then(Value::as_bool).unwrap_or(false)).await,
             "settings_inspect" => crate::settings::proposal::tool_inspect(&ag.hub, &ag.host.models).await,
