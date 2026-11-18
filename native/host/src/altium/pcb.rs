@@ -392,7 +392,7 @@ struct Head { layer: u8, _flags1: u8, flags2: u8, net: u16, polygon: u16, comp: 
 fn head(r: &mut Bin) -> Head { Head { layer: r.u8(), _flags1: r.u8(), flags2: r.u8(), net: r.u16(), polygon: r.u16(), comp: r.u16() } }
 
 fn graphic_info(c: &Ctx, kind: &str, layer: u32, net: u16, comp: u16, width: f64) -> Info {
-    let k = if is_cu(layer) && kind != "gr_poly" { "track" } else { kind };
+    let k = if is_cu(layer) && matches!(kind, "gr_line" | "gr_arc" | "gr_circle") { "track" } else { kind };
     let w = if width > 0.0 { kv("width", &show(width)) } else { String::new() };
     Arc::from(format!("{k}{}{}{w}{}", kv("net", c.net(net)), kv("layer", kname(layer)), c.ctx(comp)))
 }
@@ -410,7 +410,7 @@ fn tracks(c: &mut Ctx, out: &mut Vec<Item>) {
         if c.poured.contains(&h.polygon) { continue }
         let keepout = h.flags2 == 2 || a == KEEPOUT;
         let Some(l) = c.paint(a).map(|l| if keepout { MARGIN } else { l }) else { continue };
-        let info = graphic_info(c, if keepout { "keepout" } else { "gr_line" }, l, h.net, h.comp, w);
+        let info = graphic_info(c, if keepout { "keepout" } else if h.polygon < NONE - 1 { "zone" } else { "gr_line" }, l, h.net, h.comp, w);
         push(out, format!("t/{i}"), sig(rec), l, Prim::Seg { a: kp(x1, y1), b: kp(x2, y2), w: w as f32 }, &info);
     }
 }
@@ -431,7 +431,7 @@ fn arcs(c: &mut Ctx, out: &mut Vec<Item>) {
         let keepout = h.flags2 == 2 || a == KEEPOUT;
         let Some(l) = c.paint(a).map(|l| if keepout { MARGIN } else { l }) else { continue };
         let full = (ea - sa).abs() >= 359.999 || (sa == 0.0 && ea == 360.0);
-        let info = graphic_info(c, if keepout { "keepout" } else if full { "gr_circle" } else { "gr_arc" }, l, h.net, h.comp, w);
+        let info = graphic_info(c, if keepout { "keepout" } else if h.polygon < NONE - 1 { "zone" } else if full { "gr_circle" } else { "gr_arc" }, l, h.net, h.comp, w);
         let prim = if full { Prim::Circ { c: kp(cx, cy), r: rad as f32, w: w as f32, fill: false } } else { Prim::Line { ps: kring(&arc_pts(cx, cy, rad, sa, sweep_of(sa, ea))), w: w as f32 } };
         push(out, format!("a/{i}"), sig(rec), l, prim, &info);
     }
@@ -813,6 +813,14 @@ mod tests {
             eprintln!("  layers {:?}", ls);
             assert!(its.len() > 50 && !cs.is_empty(), "{name}");
             assert!(its.iter().any(|i| i.layer == EDGE), "an outline");
+            // beside KiCad's own import of the same board (BP_ALTIUM_KICAD_REF/<name>.kicad_pcb), through the hub's KiCad reader
+            if let Some(k) = std::env::var_os("BP_ALTIUM_KICAD_REF").map(|d| std::path::PathBuf::from(d).join(format!("{name}.kicad_pcb"))).and_then(|p| std::fs::read(p).ok()) {
+                let fs = crate::files::kicad::sexpr::forms(&k).unwrap_or_default();
+                let kits = crate::files::kicad::plotgen::board_items(&fs);
+                let count = |its: &[Item], l: u32| its.iter().filter(|i| i.layer == l).count();
+                let row: Vec<String> = [F_CU, B_CU, PADS, VIA, HOLE, F_SILK, B_SILK, EDGE].iter().map(|l| format!("{} {}/{}", kname(*l), count(&its, *l), count(&kits, *l))).collect();
+                eprintln!("  ours/kicad: {}", row.join(", "));
+            }
             if let Some(o) = &outdir {
                 let _ = std::fs::create_dir_all(o);
                 let f: Vec<Item> = its.iter().filter(|i| matches!(i.layer, F_CU | PADS | VIA | HOLE | F_SILK | EDGE)).cloned().collect();
