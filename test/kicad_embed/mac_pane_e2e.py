@@ -687,6 +687,38 @@ try:
             f = kicad_frame()
             return f if f and all(abs(a - b) <= 2 for a, b in zip(f[3], P)) else None
         def canvas_click(): click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); time.sleep(0.6); key(K_ESC); time.sleep(0.3)
+        # where a return's time goes: the client's pushes, stamped as they reach its log (a reader every 5 ms: the client writes them
+        # unbuffered), the hub's SetHostGeometry requests (their own ms stamps), and the window list's first sight of the frame
+        import threading
+        PUSHES = []
+        def _tail():
+            n = 0
+            while True:
+                try: ls = open(CLIENT_LOG[0], errors='replace').read().splitlines()
+                except OSError: ls = []
+                now = time.time()
+                for l in ls[n:]:
+                    if '"kicad_host_push"' in l:
+                        try: PUSHES.append((now, json.loads(l.split('GPUI_LOG ', 1)[1])))
+                        except Exception: pass
+                n = len(ls); time.sleep(0.005)
+        threading.Thread(target=_tail, daemon=True).start()
+        def hub_geoms(): return [int(m) / 1000 for m in __import__('re').findall(r'SetHostGeometry[^\n]*\(at (\d+)\)', hub_log())]
+        def timeline(tag, t_click, t_seen):
+            pv = next((t for t, j in PUSHES if t >= t_click and j.get('visible')), None)
+            pj = next((j for t, j in PUSHES if t >= t_click and j.get('visible')), {})
+            hg = next((t for t in hub_geoms() if t >= t_click - 0.01), None)
+            ms = lambda t: f'{(t - t_click) * 1000:.0f} ms' if t else 'none'
+            print(f'INFO timeline {tag}: click 0; first push visible:true {ms(pv)} (in_page {pj.get("in_page")}, covered {pj.get("covered")}, hitbox {pj.get("hitbox")}); '
+                  f'hub SetHostGeometry {ms(hg)}; frame seen above our window {ms(t_seen)}', flush=True)
+        # the baseline: View then Edit on the warm pane (the return path main already has), click to the frame front-most at the pane
+        wait_for(at_pane, 10, 0.2); P = last_push()[0]
+        if press_rect('ui:View'):
+            wait_for(lambda: not kicad_over_pane(), 5, 0.05); time.sleep(1.5)
+            tb = time.time(); pe = press_rect('ui:Edit'); fb = wait_for(at_pane, 30, 0.02); ts = time.time()
+            print(f'INFO leave baseline: View then Edit on a warm pane, the frame front-most at the pane in {(ts - tb) * 1000:.0f} ms (Edit pressed {pe}; seen {bool(fb)})', flush=True)
+            timeline('baseline View->Edit', tb, ts if fb else None)
+            if fb: P = last_push()[0]
         # (c) needs the sidebar: unfolded first (the pane narrows; P follows), a second thread made, then back to the first one
         if not rects_now().get('ui:New thread'): press_rect('ui:Fold sidebar'); time.sleep(1.5)
         home_thread = next(iter(sorted(k for k in rects_now() if k.startswith('thread:'))), None)
@@ -713,6 +745,7 @@ try:
             time.sleep(1.0)
             tb = time.time(); b_ = back_()
             f2 = wait_for(at_pane, 3, 0.02); dt = time.time() - tb
+            timeline(f'{tag} back', tb, time.time() if f2 else None)
             if not f2 and rects_now().get('ui:Edit'):
                 print(f'INFO leave {tag}: the page came back on View: Edit pressed', flush=True)
                 tb = time.time(); press_rect('ui:Edit'); f2 = wait_for(at_pane, 30, 0.02); dt = time.time() - tb
