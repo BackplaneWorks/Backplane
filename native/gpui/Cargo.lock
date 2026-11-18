@@ -528,6 +528,7 @@ dependencies = [
  "blade-macros",
  "bytemuck",
  "cef",
+ "embed-resource",
  "env_logger",
  "futures-util",
  "gpui",

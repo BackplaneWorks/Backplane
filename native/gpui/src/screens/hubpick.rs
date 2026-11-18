@@ -20,7 +20,7 @@ fn restart(this: &mut Backplane, cx: &mut Context<Backplane>) {
 }
 pub fn act(this: &mut Backplane, a: Act, cx: &mut Context<Backplane>) {
     match a {
-        Act::Menu => { this.hub_menu = !this.hub_menu; cx.notify(); }
+        Act::Menu => { this.hub_menu = !this.hub_menu; this.screens.offers.forget_arm = None; cx.notify(); }
         Act::Add => crate::screens::pair::add(this, cx),
         Act::Use(k) => {
             this.hub_menu = false;
@@ -54,6 +54,8 @@ pub struct Offers {
     pub done: Vec<String>,
     /// the home hub's key while the connection failed over to it
     pub on_home: Option<String>,
+    /// the picker's Forget pressed once on this hub: a second press forgets it
+    pub forget_arm: Option<String>,
 }
 /// The device token this client holds for the hub in use: a paired hub's credential; None on this computer's own hub (its home token: the client takes a link).
 fn token_in_use(this: &Backplane) -> Option<String> {
@@ -184,10 +186,28 @@ pub fn picker(this: &Backplane, cx: &mut Context<Backplane>, light: bool, ctl: &
             .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().when(away.is_some(), |d| d.text_color(c("accent"))).child(crate::i18n::trs(&cur))).child(crate::art::icon(if this.hub_menu { "chevron-down" } else { "chevron-right" }, 14., c("dim")))
             .on_click(cx.listener(|this, _, _, cx| act(this, Act::Menu, cx))));
     if this.hub_menu {
-        for e in es.iter().skip(1) {
-            ctl.push(CtlEntry { id: format!("hub:use:{}", e.key), label: e.label.clone(), ctl: Ctl::Hub(Act::Use(e.key.clone())) });
-            let k = e.key.clone();
-            col = col.child(div().id(SharedString::from(format!("hub-use-{}", e.key))).px_3().py_1().cursor_pointer().text_size(crate::scale::tpx(12.)).hover(|s| s.bg(c("panel"))).child(crate::i18n::trs(&e.label)).on_click(cx.listener(move |this, _, _, cx| act(this, Act::Use(k.clone()), cx))));
+        // every hub but the one shown above to switch to, and a Forget on each paired one (the one in use too): pressed once it asks
+        // ("Forget it"), again it forgets (Settings → Hubs has the same, but a device's person looks here first)
+        let armed = this.screens.offers.forget_arm.clone();
+        for e in es.iter() {
+            if e.in_use && !e.can_forget { continue }
+            let mut row = div().id(SharedString::from(format!("hub-row-{}", e.key))).flex().items_center().gap_2().px_3().py_1().text_size(crate::scale::tpx(12.));
+            let name = div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(crate::i18n::trs(&e.label));
+            if e.in_use {
+                /* i18n-ok: drawn through trs */ row = row.child(name.text_color(c("dim"))).child(div().text_color(c("faint")).child(crate::i18n::trs("In use")));
+            } else {
+                ctl.push(CtlEntry { id: format!("hub:use:{}", e.key), label: e.label.clone(), ctl: Ctl::Hub(Act::Use(e.key.clone())) });
+                let k = e.key.clone();
+                row = row.child(name.id(SharedString::from(format!("hub-use-{}", e.key))).cursor_pointer().hover(|s| s.text_color(c("accent"))).on_click(cx.listener(move |this, _, _, cx| act(this, Act::Use(k.clone()), cx))));
+            }
+            if e.can_forget {
+                let ask = armed.as_deref() == Some(e.key.as_str());
+                let k = e.key.clone();
+                /* i18n-ok: drawn through trs */ let label = if ask { "Forget it" } else { "Forget" };
+                row = row.child(div().id(SharedString::from(format!("hub-forget-{}", e.key))).flex_shrink_0().cursor_pointer().text_color(c(if ask { "accent" } else { "faint" })).hover(|s| s.text_color(c("accent"))).child(crate::i18n::trs(label))
+                    .on_click(cx.listener(move |this, _, _, cx| { if this.screens.offers.forget_arm.as_deref() == Some(k.as_str()) { this.screens.offers.forget_arm = None; this.hub_menu = false; act(this, Act::Forget(k.clone()), cx) } else { this.screens.offers.forget_arm = Some(k.clone()); cx.notify() } })));
+            }
+            col = col.child(row);
         }
         /* i18n-ok: ctl labels are what drivers press */ ctl.push(CtlEntry { id: "hub:add".into(), label: "Add a hub".into(), ctl: Ctl::Hub(Act::Add) });
         col = col.child(div().id("hub-add").px_3().py_1().cursor_pointer().text_size(crate::scale::tpx(12.)).text_color(c("dim")).hover(|s| s.bg(c("panel"))).child(crate::i18n::trs("Add a hub")).on_click(cx.listener(|this, _, _, cx| act(this, Act::Add, cx))));

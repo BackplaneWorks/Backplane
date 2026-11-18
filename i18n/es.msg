@@ -2649,6 +2649,8 @@ settings.git.page = Proyectos y git
 settings.git.autopush = Enviar los commits al remoto automáticamente
 settings.git.autopush.note = Backplane hace commit de los archivos de diseño en local al final de cada turno. Activado: también los envía al remoto de la rama. Desactivado: la página del proyecto muestra los commits sin enviar, con Enviar.
 settings.git.notice = Backplane ya no envía automáticamente. Actívalo en Ajustes si lo quieres.
+settings.git.offbranch = No hacer commits de Backplane en mi rama
+settings.git.offbranch.note = Desactivado: al final de cada turno y en cada guardado, Backplane hace commit en tu rama de los archivos de diseño que cambió un agente. Activado: registra los mismos cambios en sus propias refs (refs/backplane/design/<branch>) y nunca hace commit en tu rama ni en tu índice, así que tu rama muestra los archivos de diseño como modificados hasta que hagas commit tú. /restore y el historial de KiCad funcionan igual.
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = Instalar

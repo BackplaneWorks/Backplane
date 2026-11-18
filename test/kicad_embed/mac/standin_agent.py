@@ -31,7 +31,7 @@ def mcp_url():
     if '--mcp-config' not in a:
         return ''
     try:
-        return json.loads(a[a.index('--mcp-config') + 1])['mcpServers']['backplane']['url']
+        return json.loads((lambda v: v if v.lstrip().startswith('{') else open(v).read())(a[a.index('--mcp-config') + 1]))['mcpServers']['backplane']['url']
     except Exception:
         return ''
 

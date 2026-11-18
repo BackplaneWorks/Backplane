@@ -1,0 +1,798 @@
+{
+  "DRC": {
+    "crossprobe": true,
+    "report_all_track_errors": false,
+    "scroll_on_crossprobe": true
+  },
+  "appearance": {
+    "color_theme": "_builtin_default",
+    "custom_toolbars": false
+  },
+  "aui": {
+    "appearance_expand_layer_display": true,
+    "appearance_expand_net_display": false,
+    "appearance_panel_tab": 0,
+    "design_blocks_panel_docked_width": 990,
+    "design_blocks_panel_float_height": -1,
+    "design_blocks_panel_float_width": -1,
+    "design_blocks_show": false,
+    "net_inspector_width": -1,
+    "properties_panel_width": 1239146100,
+    "properties_splitter_proportion": 0.5,
+    "right_panel_width": 1239146100,
+    "search_panel_dock_direction": 3,
+    "search_panel_height": 110,
+    "search_panel_width": 284,
+    "show_git_commit_pane": false,
+    "show_layer_manager": true,
+    "show_net_inspector": false,
+    "show_properties": false,
+    "show_search": false
+  },
+  "color_picker": {
+    "default_tab": 0
+  },
+  "cross_probing": {
+    "auto_highlight": true,
+    "center_on_items": true,
+    "flash_selection": false,
+    "on_selection": true,
+    "zoom_to_fit": true
+  },
+  "design_block_chooser": {
+    "height": 765,
+    "keep_annotations": false,
+    "lib_tree": {
+      "column_widths": {},
+      "columns": [
+        "Item",
+        "Description"
+      ],
+      "open_libs": []
+    },
+    "place_as_group": true,
+    "place_as_sheet": false,
+    "repeated_placement": false,
+    "sash_pos_h": 495,
+    "sash_pos_v": 518,
+    "sort_mode": 0,
+    "width": 990
+  },
+  "diff_phase_skew": {
+    "negative_color": "rgb(255, 0, 0)",
+    "positive_color": "rgb(0, 0, 255)",
+    "unknown_color": "rgb(128, 128, 128)",
+    "use_log_scale": false,
+    "zero_color": "rgb(255, 255, 255)"
+  },
+  "editing": {
+    "allow_free_pads": false,
+    "arc_draw_mode": 0,
+    "arc_edit_mode": 0,
+    "area_anchor_point_selection": false,
+    "auto_constraints": true,
+    "auto_fill_zones": false,
+    "ctrl_click_highlight": false,
+    "esc_clears_net_highlight": true,
+    "flip_left_right": false,
+    "magnetic_all_layers": false,
+    "magnetic_graphics": true,
+    "magnetic_pads": 1,
+    "magnetic_tracks": 1,
+    "pcb_angle_snap_mode": 0,
+    "polar_coords": false,
+    "rotation_angle": 900,
+    "show_courtyard_collisions": true,
+    "snap_alignment_distribution": false,
+    "snap_construction_extensions": true,
+    "snap_object_geometry": true,
+    "snap_tangent_normal": false,
+    "track_drag_action": 1
+  },
+  "export_d356": {
+    "doNotExportUnconnectedPads": false
+  },
+  "field_editor": {
+    "field_widths": {},
+    "sash_pos": 400,
+    "selection_mode": 0,
+    "sidebar_collapsed": false,
+    "variant_sash_pos": 500
+  },
+  "find_replace": {
+    "find_history": [],
+    "find_string": "",
+    "match_case": false,
+    "match_mode": 0,
+    "replace_history": [],
+    "replace_string": "",
+    "search_and_replace": false
+  },
+  "footprint_chooser": {
+    "filter_on_pin_count": false,
+    "height": 765,
+    "sash_h": 495,
+    "sash_v": 363,
+    "sort_mode": 0,
+    "use_fp_filters": false,
+    "width": 990
+  },
+  "footprint_viewer": {
+    "aui_state": null,
+    "autozoom": true,
+    "cursor": {
+      "always_show_cursor": false,
+      "cross_hair_mode": 0
+    },
+    "display": 0,
+    "fp_list_width": 300,
+    "grid": {
+      "axes_enabled": false,
+      "fast_grid_1": 15,
+      "fast_grid_2": 16,
+      "last_size": 15,
+      "line_width": 1.0,
+      "min_spacing": 10.0,
+      "override_connected": false,
+      "override_connected_idx": 16,
+      "override_graphics": false,
+      "override_graphics_idx": 15,
+      "override_text": false,
+      "override_text_idx": 18,
+      "override_vias": false,
+      "override_vias_idx": 18,
+      "override_wires": false,
+      "override_wires_idx": 19,
+      "overrides_enabled": true,
+      "show": true,
+      "show_major": true,
+      "sizes": [
+        {
+          "name": "",
+          "x": "1000 mil",
+          "y": "1000 mil"
+        },
+        {
+          "name": "",
+          "x": "500 mil",
+          "y": "500 mil"
+        },
+        {
+          "name": "",
+          "x": "250 mil",
+          "y": "250 mil"
+        },
+        {
+          "name": "",
+          "x": "200 mil",
+          "y": "200 mil"
+        },
+        {
+          "name": "",
+          "x": "100 mil",
+          "y": "100 mil"
+        },
+        {
+          "name": "",
+          "x": "50 mil",
+          "y": "50 mil"
+        },
+        {
+          "name": "",
+          "x": "25 mil",
+          "y": "25 mil"
+        },
+        {
+          "name": "",
+          "x": "20 mil",
+          "y": "20 mil"
+        },
+        {
+          "name": "",
+          "x": "10 mil",
+          "y": "10 mil"
+        },
+        {
+          "name": "",
+          "x": "5 mil",
+          "y": "5 mil"
+        },
+        {
+          "name": "",
+          "x": "2 mil",
+          "y": "2 mil"
+        },
+        {
+          "name": "",
+          "x": "1 mil",
+          "y": "1 mil"
+        },
+        {
+          "name": "",
+          "x": "5.0 mm",
+          "y": "5.0 mm"
+        },
+        {
+          "name": "",
+          "x": "2.5 mm",
+          "y": "2.5 mm"
+        },
+        {
+          "name": "",
+          "x": "1.0 mm",
+          "y": "1.0 mm"
+        },
+        {
+          "name": "",
+          "x": "0.5 mm",
+          "y": "0.5 mm"
+        },
+        {
+          "name": "",
+          "x": "0.25 mm",
+          "y": "0.25 mm"
+        },
+        {
+          "name": "",
+          "x": "0.2 mm",
+          "y": "0.2 mm"
+        },
+        {
+          "name": "",
+          "x": "0.1 mm",
+          "y": "0.1 mm"
+        },
+        {
+          "name": "",
+          "x": "0.05 mm",
+          "y": "0.05 mm"
+        },
+        {
+          "name": "",
+          "x": "0.025 mm",
+          "y": "0.025 mm"
+        },
+        {
+          "name": "",
+          "x": "0.01 mm",
+          "y": "0.01 mm"
+        }
+      ],
+      "snap": 0,
+      "style": 0,
+      "user_grid_x": "",
+      "user_grid_y": ""
+    },
+    "lib_list_width": 200,
+    "maximized": false,
+    "mru_path": "/home/person/board",
+    "perspective": "layout2|",
+    "pos_x": 3345,
+    "pos_y": 1780,
+    "size_x": 990,
+    "size_y": 765,
+    "zoom": 1.0,
+    "zoom_factors": [
+      0.13,
+      0.22,
+      0.35,
+      0.6,
+      1.0,
+      1.5,
+      2.2,
+      3.5,
+      5.0,
+      8.0,
+      13.0,
+      20.0,
+      35.0,
+      50.0,
+      80.0,
+      130.0,
+      220.0,
+      300.0
+    ]
+  },
+  "footprint_wizard": {
+    "aui_state": null,
+    "cursor": {
+      "always_show_cursor": true,
+      "cross_hair_mode": 0
+    },
+    "display": 0,
+    "grid": {
+      "axes_enabled": false,
+      "fast_grid_1": 15,
+      "fast_grid_2": 16,
+      "last_size": 15,
+      "line_width": 1.0,
+      "min_spacing": 10.0,
+      "override_connected": false,
+      "override_connected_idx": 16,
+      "override_graphics": false,
+      "override_graphics_idx": 15,
+      "override_text": false,
+      "override_text_idx": 18,
+      "override_vias": false,
+      "override_vias_idx": 18,
+      "override_wires": false,
+      "override_wires_idx": 19,
+      "overrides_enabled": true,
+      "show": true,
+      "show_major": true,
+      "sizes": [
+        {
+          "name": "",
+          "x": "1000 mil",
+          "y": "1000 mil"
+        },
+        {
+          "name": "",
+          "x": "500 mil",
+          "y": "500 mil"
+        },
+        {
+          "name": "",
+          "x": "250 mil",
+          "y": "250 mil"
+        },
+        {
+          "name": "",
+          "x": "200 mil",
+          "y": "200 mil"
+        },
+        {
+          "name": "",
+          "x": "100 mil",
+          "y": "100 mil"
+        },
+        {
+          "name": "",
+          "x": "50 mil",
+          "y": "50 mil"
+        },
+        {
+          "name": "",
+          "x": "25 mil",
+          "y": "25 mil"
+        },
+        {
+          "name": "",
+          "x": "20 mil",
+          "y": "20 mil"
+        },
+        {
+          "name": "",
+          "x": "10 mil",
+          "y": "10 mil"
+        },
+        {
+          "name": "",
+          "x": "5 mil",
+          "y": "5 mil"
+        },
+        {
+          "name": "",
+          "x": "2 mil",
+          "y": "2 mil"
+        },
+        {
+          "name": "",
+          "x": "1 mil",
+          "y": "1 mil"
+        },
+        {
+          "name": "",
+          "x": "5.0 mm",
+          "y": "5.0 mm"
+        },
+        {
+          "name": "",
+          "x": "2.5 mm",
+          "y": "2.5 mm"
+        },
+        {
+          "name": "",
+          "x": "1.0 mm",
+          "y": "1.0 mm"
+        },
+        {
+          "name": "",
+          "x": "0.5 mm",
+          "y": "0.5 mm"
+        },
+        {
+          "name": "",
+          "x": "0.25 mm",
+          "y": "0.25 mm"
+        },
+        {
+          "name": "",
+          "x": "0.2 mm",
+          "y": "0.2 mm"
+        },
+        {
+          "name": "",
+          "x": "0.1 mm",
+          "y": "0.1 mm"
+        },
+        {
+          "name": "",
+          "x": "0.05 mm",
+          "y": "0.05 mm"
+        },
+        {
+          "name": "",
+          "x": "0.025 mm",
+          "y": "0.025 mm"
+        },
+        {
+          "name": "",
+          "x": "0.01 mm",
+          "y": "0.01 mm"
+        }
+      ],
+      "snap": 0,
+      "style": 0,
+      "user_grid_x": "",
+      "user_grid_y": ""
+    },
+    "maximized": false,
+    "mru_path": "",
+    "perspective": "",
+    "pos_x": 0,
+    "pos_y": 0,
+    "size_x": 0,
+    "size_y": 0,
+    "zoom_factors": [
+      0.13,
+      0.22,
+      0.35,
+      0.6,
+      1.0,
+      1.5,
+      2.2,
+      3.5,
+      5.0,
+      8.0,
+      13.0,
+      20.0,
+      35.0,
+      50.0,
+      80.0,
+      130.0,
+      220.0,
+      300.0
+    ]
+  },
+  "graphics": {
+    "highlight_factor": 0.5,
+    "select_factor": 0.75
+  },
+  "import": {
+    "keep_kicad_layer_names": false
+  },
+  "lib_tree": {
+    "column_widths": {
+      "Description": 600,
+      "Item": 444
+    },
+    "columns": [
+      "Item",
+      "Description"
+    ],
+    "open_libs": []
+  },
+  "meta": {
+    "version": 5
+  },
+  "pcb_display": {
+    "force_show_fields_when_fp_selected": true,
+    "graphic_items_fill": true,
+    "graphics_fill": true,
+    "live_3d_refresh": false,
+    "max_links_shown": 3,
+    "net_names_mode": 3,
+    "origin_invert_x_axis": false,
+    "origin_invert_y_axis": false,
+    "origin_mode": 0,
+    "pad_clearance": true,
+    "pad_fill": true,
+    "pad_numbers": true,
+    "pad_use_via_color_for_normal_th_padstacks": false,
+    "ratsnest_curved": false,
+    "ratsnest_footprint": true,
+    "ratsnest_global": true,
+    "ratsnest_thickness": 0.5,
+    "show_constraints": false,
+    "show_page_borders": true,
+    "text_fill": true,
+    "track_clearance_mode": 2,
+    "track_fill": true,
+    "via_fill": true
+  },
+  "pcb_editing": {
+    "match_properties": [
+      "common/Bold",
+      "common/Font",
+      "common/Italic",
+      "common/Layer",
+      "common/Line Width",
+      "common/Soldermask",
+      "common/Soldermask Margin Override",
+      "common/Text Height",
+      "common/Text Thickness",
+      "common/Text Width",
+      "shape/Fill",
+      "shape/Line Style",
+      "table/Border Style",
+      "via/Diameter",
+      "via/Hole",
+      "zone/Fill Mode"
+    ]
+  },
+  "plugins": {
+    "actions": []
+  },
+  "printing": {
+    "as_item_checkboxes": false,
+    "background": false,
+    "color_theme": "",
+    "drill_marks": 1,
+    "edge_cuts_on_all_pages": true,
+    "layers": [],
+    "mirror": false,
+    "monochrome": true,
+    "pagination": 1,
+    "scale": 1.0,
+    "title_block": false,
+    "use_theme": false
+  },
+  "search_pane": {
+    "search_hidden_fields": true,
+    "search_metadata": false,
+    "selection_zoom": 1
+  },
+  "system": {
+    "file_history": [
+      "/home/person/board",
+      "/home/person/board",
+      "/home/person/board",
+      "/home/person/board",
+      "/home/person/board",
+      "/home/person/board",
+      "/home/person/board",
+      "/home/person/board",
+      "/home/person/board"
+    ],
+    "first_run_shown": false,
+    "last_footprint3d_dir": "/home/person/board",
+    "last_footprint_lib_dir": "/home/person/board",
+    "last_imperial_units": 5,
+    "last_metric_units": 1,
+    "max_undo_items": 0,
+    "show_import_issues": true,
+    "units": 1
+  },
+  "tools": {
+    "pns": {
+      "auto_posture": true,
+      "can_violate_drc": false,
+      "corner_mode": 0,
+      "diff_pair_width_to_miter_ratio": 3.0,
+      "effort": 1,
+      "fix_all_segments": true,
+      "follow_mouse": true,
+      "free_angle_mode": false,
+      "jump_over_obstacles": false,
+      "keep_diff_pair_coupling_when_dragging": true,
+      "meta": {
+        "version": 0
+      },
+      "mode": 2,
+      "optimize_dragged_track": false,
+      "remove_loops": true,
+      "restrict_angles": false,
+      "shove_iteration_limit": 250,
+      "shove_time_limit": 1000,
+      "shove_vias": true,
+      "smart_pads": true,
+      "smooth_dragged_segments": true,
+      "snap_to_pads": true,
+      "snap_to_tracks": true,
+      "start_diagonal": false,
+      "suggest_finish": false,
+      "via_force_prop_iteration_limit": 40,
+      "walkaround_hug_length_threshold": 1.5,
+      "walkaround_iteration_limit": 40
+    }
+  },
+  "window": {
+    "aui_state": {
+      "format": "kicad.wxaui",
+      "panes": [
+        {
+          "dock": {
+            "direction": 2,
+            "layer": 0,
+            "position": 0,
+            "proportion": 100000,
+            "row": 0,
+            "size": 1239146100
+          },
+          "name": "LayersManager"
+        }
+      ],
+      "version": 1
+    },
+    "cursor": {
+      "always_show_cursor": true,
+      "cross_hair_mode": 1
+    },
+    "display": 2,
+    "grid": {
+      "axes_enabled": false,
+      "fast_grid_1": 15,
+      "fast_grid_2": 16,
+      "last_size": 21,
+      "line_width": 1.0,
+      "min_spacing": 10.0,
+      "override_connected": false,
+      "override_connected_idx": 16,
+      "override_graphics": false,
+      "override_graphics_idx": 15,
+      "override_text": false,
+      "override_text_idx": 18,
+      "override_vias": false,
+      "override_vias_idx": 18,
+      "override_wires": false,
+      "override_wires_idx": 19,
+      "overrides_enabled": true,
+      "show": true,
+      "show_major": true,
+      "sizes": [
+        {
+          "name": "",
+          "x": "1000 mil",
+          "y": "1000 mil"
+        },
+        {
+          "name": "",
+          "x": "500 mil",
+          "y": "500 mil"
+        },
+        {
+          "name": "",
+          "x": "250 mil",
+          "y": "250 mil"
+        },
+        {
+          "name": "",
+          "x": "200 mil",
+          "y": "200 mil"
+        },
+        {
+          "name": "",
+          "x": "100 mil",
+          "y": "100 mil"
+        },
+        {
+          "name": "",
+          "x": "50 mil",
+          "y": "50 mil"
+        },
+        {
+          "name": "",
+          "x": "25 mil",
+          "y": "25 mil"
+        },
+        {
+          "name": "",
+          "x": "20 mil",
+          "y": "20 mil"
+        },
+        {
+          "name": "",
+          "x": "10 mil",
+          "y": "10 mil"
+        },
+        {
+          "name": "",
+          "x": "5 mil",
+          "y": "5 mil"
+        },
+        {
+          "name": "",
+          "x": "2 mil",
+          "y": "2 mil"
+        },
+        {
+          "name": "",
+          "x": "1 mil",
+          "y": "1 mil"
+        },
+        {
+          "name": "",
+          "x": "5.0 mm",
+          "y": "5.0 mm"
+        },
+        {
+          "name": "",
+          "x": "2.5 mm",
+          "y": "2.5 mm"
+        },
+        {
+          "name": "",
+          "x": "1.0 mm",
+          "y": "1.0 mm"
+        },
+        {
+          "name": "",
+          "x": "0.5 mm",
+          "y": "0.5 mm"
+        },
+        {
+          "name": "",
+          "x": "0.25 mm",
+          "y": "0.25 mm"
+        },
+        {
+          "name": "",
+          "x": "0.2 mm",
+          "y": "0.2 mm"
+        },
+        {
+          "name": "",
+          "x": "0.1 mm",
+          "y": "0.1 mm"
+        },
+        {
+          "name": "",
+          "x": "0.05 mm",
+          "y": "0.05 mm"
+        },
+        {
+          "name": "",
+          "x": "0.025 mm",
+          "y": "0.025 mm"
+        },
+        {
+          "name": "",
+          "x": "0.01 mm",
+          "y": "0.01 mm"
+        }
+      ],
+      "snap": 0,
+      "style": 0,
+      "user_grid_x": "",
+      "user_grid_y": ""
+    },
+    "maximized": false,
+    "mru_path": "",
+    "perspective": "layout2|name=TopMainToolbar;caption=;state=139568;dir=1;layer=6;row=0;pos=0;prop=100000;bestw=1216;besth=38;minw=-1;minh=-1;maxw=-1;maxh=-1;floatx=-1;floaty=-1;floatw=-1;floath=-1|name=TopAuxToolbar;caption=;state=139568;dir=1;layer=5;row=0;pos=0;prop=100000;bestw=1762;besth=38;minw=-1;minh=-1;maxw=-1;maxh=-1;floatx=-1;floaty=-1;floatw=-1;floath=-1|name=MsgPanel;caption=;state=131388;dir=3;layer=6;row=0;pos=0;prop=100000;bestw=400;besth=38;minw=-1;minh=-1;maxw=-1;maxh=-1;floatx=-1;floaty=-1;floatw=-1;floath=-1|name=LeftToolbar;caption=;state=139532;dir=4;layer=3;row=0;pos=0;prop=100000;bestw=34;besth=654;minw=-1;minh=-1;maxw=-1;maxh=-1;floatx=-1;floaty=-1;floatw=-1;floath=-1|name=RightToolbar;caption=;state=139532;dir=2;layer=3;row=0;pos=0;prop=100000;bestw=34;besth=883;minw=-1;minh=-1;maxw=-1;maxh=-1;floatx=-1;floaty=-1;floatw=-1;floath=-1|name=LayersManager;caption=Appearance;state=1468;dir=2;layer=4;row=0;pos=0;prop=100000;bestw=220;besth=-1;minw=200;minh=60;maxw=-1;maxh=-1;floatx=-1;floaty=-1;floatw=220;floath=480|name=SelectionFilter;caption=Selection Filter;state=1468;dir=2;layer=4;row=0;pos=1;prop=0;bestw=274;besth=-1;minw=274;minh=171;maxw=-1;maxh=-1;floatx=-1;floaty=-1;floatw=274;floath=171|name=DesignBlocks;caption=Design Blocks;state=2099086;dir=2;layer=5;row=0;pos=0;prop=100000;bestw=300;besth=200;minw=240;minh=60;maxw=-1;maxh=-1;floatx=50;floaty=200;floatw=800;floath=600|name=AgentsPanel;caption=Agents;state=2098622;dir=2;layer=4;row=0;pos=3;prop=100000;bestw=320;besth=260;minw=260;minh=120;maxw=-1;maxh=-1;floatx=-1;floaty=-1;floatw=-1;floath=-1|name=PropertiesManager;caption=Properties;state=2098620;dir=4;layer=5;row=0;pos=0;prop=100000;bestw=300;besth=200;minw=240;minh=60;maxw=-1;maxh=-1;floatx=-1;floaty=-1;floatw=300;floath=200|name=DrawFrame;caption=;state=956;dir=5;layer=0;row=0;pos=0;prop=100000;bestw=400;besth=188;minw=-1;minh=-1;maxw=-1;maxh=-1;floatx=-1;floaty=-1;floatw=-1;floath=-1|name=NetInspector;caption=Net Inspector;state=2098622;dir=3;layer=0;row=0;pos=0;prop=100000;bestw=300;besth=200;minw=240;minh=60;maxw=-1;maxh=-1;floatx=-1;floaty=-1;floatw=300;floath=200|name=Search;caption=Search;state=2098622;dir=3;layer=0;row=0;pos=0;prop=100000;bestw=180;besth=100;minw=180;minh=60;maxw=-1;maxh=-1;floatx=-1;floaty=-1;floatw=480;floath=200|name=Constraints;caption=Geometric Constraints;state=2098622;dir=3;layer=1;row=0;pos=0;prop=100000;bestw=600;besth=200;minw=360;minh=120;maxw=-1;maxh=-1;floatx=-1;floaty=-1;floatw=600;floath=240|name=GitCommitPane;caption=Version Control;state=2098622;dir=2;layer=5;row=0;pos=0;prop=100000;bestw=319;besth=300;minw=319;minh=143;maxw=-1;maxh=-1;floatx=-1;floaty=-1;floatw=300;floath=400|dock_size(1,6,0)=38|dock_size(1,5,0)=38|dock_size(3,6,0)=38|dock_size(4,3,0)=34|dock_size(2,3,0)=34|dock_size(2,4,0)=274|dock_size(4,5,0)=300|dock_size(5,0,0)=376|",
+    "pos_x": -1137246128,
+    "pos_y": 10,
+    "size_x": 2071176320,
+    "size_y": 32245,
+    "zoom_factors": [
+      0.13,
+      0.22,
+      0.35,
+      0.6,
+      1.0,
+      1.5,
+      2.2,
+      3.5,
+      5.0,
+      8.0,
+      13.0,
+      20.0,
+      35.0,
+      50.0,
+      80.0,
+      130.0,
+      220.0,
+      300.0
+    ]
+  }
+}

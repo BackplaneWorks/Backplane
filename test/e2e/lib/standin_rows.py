@@ -16,7 +16,7 @@ def L(s):
 a = sys.argv[1:]
 url = ""
 if "--mcp-config" in a:
-    try: url = json.loads(a[a.index("--mcp-config") + 1])["mcpServers"]["backplane"]["url"]
+    try: url = json.loads((lambda v: v if v.lstrip().startswith("{") else open(v).read())(a[a.index("--mcp-config") + 1]))["mcpServers"]["backplane"]["url"]
     except Exception: pass
 L("START %d args=%s" % (os.getpid(), json.dumps(a)[:600]))
 def mcp(method, params):

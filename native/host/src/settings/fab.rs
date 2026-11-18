@@ -282,9 +282,13 @@ pub fn look_in(home: &Path, cwd: Option<&Path>, thread: &str, est_on: bool, serv
     let intent = std::fs::read_to_string(cwd.join(".backplane/intent.md")).unwrap_or_default();
     let files: Vec<(String, String)> = find_fab(cwd).into_iter().map(|p| { let t = std::fs::read_to_string(cwd.join(&p)).unwrap_or_default(); (p, t) }).collect();
     let ps = parts_in(&files, Some(cwd));
-    let all = kicad::boards::find(cwd);
-    let kf = kicad::project::read(&cwd.to_string_lossy());
-    let prefix = format!("{}/", cwd.to_string_lossy());
+    // the boards are read where `boards.list` reads them (files/misc.rs): a hardware project's main checkout, never the thread's code worktree,
+    // which holds none. Both answers set the same `fab.boards` info, so a card read in the worktree emptied the viewer's Boards menu each time
+    // the thread moved (a turn's end asks the card again), and the picker was gone until the viewer was opened again (it asks `boards.list`)
+    let droot = kicad::canonical::design_root(&cwd.to_string_lossy());
+    let all = kicad::boards::find(Path::new(&droot));
+    let kf = kicad::project::read(&droot);
+    let prefix = format!("{droot}/");
     let bd = kf.pcb.strip_prefix(&prefix).map(str::to_string).unwrap_or_default();
     let boards = kicad::boards::pick(&all, &bd);
     let order = order_status(&home.join("orders"), buy);
@@ -420,6 +424,15 @@ mod tests {
         assert_eq!(c["board_files"], json!(["test/files/fixtures/a.kicad_pcb"]), "the viewer's picker still offers it");
         put(work.join("boards/b/b.kicad_pcb"), "(kicad_pcb)"); put(work.join("boards/b/b.kicad_pro"), "{}");
         assert_eq!(look_in(&home, Some(&work), "t1", false, "http://127.0.0.1:9", &[])["boards"], json!(1), "a KiCad project's own board does count");
+    }
+    #[test] fn a_worktree_threads_card_lists_the_boards_of_the_main_checkout() {
+        // the card and `boards.list` set the same Boards menu: read in the code worktree (no boards there) the card hid the picker
+        let (home, main) = (tmp("wthome"), tmp("wtmain"));
+        for b in ["a/a", "b/b"] { put(main.join(format!("{b}.kicad_pcb")), "(kicad_pcb)"); put(main.join(format!("{b}.kicad_pro")), "{}"); }
+        let work = main.join(".backplane/worktrees/t1"); std::fs::create_dir_all(&work).unwrap();
+        let c = look_in(&home, Some(&work), "t1", false, "http://127.0.0.1:9", &[]);
+        assert_eq!(c["board_files"], json!(["a/a.kicad_pcb", "b/b.kicad_pcb"]), "the worktree's card offers the main checkout's boards");
+        assert_eq!(c["board_files"], look_in(&home, Some(&main), "t1", false, "http://127.0.0.1:9", &[])["board_files"]);
     }
     static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
     #[test] fn only_https_or_loopback_order_servers_are_accepted() {

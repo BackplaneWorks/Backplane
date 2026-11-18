@@ -227,7 +227,7 @@ if os.environ.get('MAC_MODE') != 'libs':
     with open(os.path.join(OUT, 'bin/claude'), 'w') as f:
         f.write('#!/bin/sh\nexec /usr/bin/python3 ' + os.path.join(REPO, 'test/kicad_embed/mac/standin_agent.py') + ' "$@"\n')
     os.chmod(os.path.join(OUT, 'bin/claude'), 0o755)
-if os.environ.get('MAC_MODE') == 'autosave':
+if os.environ.get('MAC_MODE') in ('autosave', 'recover'):
     for v in ('10.99',):
         kc = os.path.join(OUT, 'fh/Library/Preferences/kicad', v, 'kicad_common.json')
         j = json.load(open(kc)) if os.path.isfile(kc) else {}
@@ -486,6 +486,14 @@ try:
         mark = len(client_log().splitlines())
         if c: press(c)
         time.sleep(2.5); rt = wait_for(lambda: rect_since('kicad:retry', mark), 10, 0.5); shot('lock-2-cancelled')
+        # the click is handled (the macOS end-marker hitbox over the pane's controls does not block it): the prompt goes, and the answer is sent
+        # the client logs the RPC (kicad_rpc_sent editor.kicad.lock), the hub the answer ("the person chose Cancel"); the prompt's buttons are
+        # not in the client's latest frame
+        sent = [l for l in client_log().splitlines()[mark:] if '"kicad_rpc_sent":"editor.kicad.lock"' in l]
+        said = [l for l in hub_log().splitlines() if 'the person chose Cancel' in l] if sent else []
+        last = next((l for l in reversed(client_log().splitlines()) if 'GPUI_METRIC ' in l and '"rects"' in l), '')
+        gone_prompt = '"kicad:lock-cancel"' not in last and '"kicad:lock-open"' not in last
+        check(bool(c) and bool(said) and gone_prompt, f'lock L2a: the Cancel click is handled: the prompt goes ({gone_prompt}), editor.kicad.lock answer cancel sent ({(said or [""])[0].strip()[:160]!r})')
         check(not kicads() and bool(rt) and str(holder.pid) in holders(), f'lock L2: Cancel: no KiCad starts, Try again offered, the other KiCad still holds its lock ({holders()})')
         mark = len(client_log().splitlines())
         if rt: press(rt)
@@ -551,7 +559,12 @@ try:
     matches('at first show')
     # ---- MAC_MODE=autosave: with the keyboard in Backplane (KiCad not the active app), an agent commits a change over the API; a .history
     # snapshot appears within the debounce (3 s here); KiCad killed; Open the editor again: KiCad offers the recovery, and the pane names it ----
-    if os.environ.get('MAC_MODE') == 'autosave':
+    # ---- MAC_MODE=recover: the same, then fork embed's fix/mac-recovery-alert: KiCad's native recovery alert (an NSAlert before its API
+    # answers) is reported to the hub (ET_DIALOG_OPENED from the new KiCad), in front of Backplane's window and centred on the pane. The pane
+    # sits right of the screen's centre (the client window at the left, 1000 pt wide: pane centre x ~680, the screen's 512), so an alert centred
+    # on the screen (AppKit's own place) is not on the pane's centre; the run says when it cannot tell them apart ----
+    if os.environ.get('MAC_MODE') in ('autosave', 'recover'):
+        REC = os.environ.get('MAC_MODE') == 'recover'
         sys.path.insert(0, os.path.join(REPO, 'test/kicad_embed/mac')); import hub_ws
         token = open(os.path.join(OUT, 'home/token')).read().strip(); pcb = os.path.join(OUT, 'proj', 'ecc83-pp.kicad_pcb')
         def mcalls(): return [l for l in open(os.path.join(OUT, 'standin.log'), errors='replace').read().splitlines() if l.startswith('MCPCALL')] if os.path.isfile(os.path.join(OUT, 'standin.log')) else []
@@ -586,6 +599,15 @@ try:
         kk = []
         for l in subprocess.run(['ps', '-axo', 'pid=,command='], capture_output=True, text=True).stdout.splitlines():
             if '--parent-pid' in l and '--embedded' in l and OUT in l: kk.append(int(l.split()[0]))
+        def embed_events():
+            out = []
+            for ln in hub_log().splitlines():
+                i = ln.find('kicad embed event: ')
+                if i < 0: continue
+                try: out.append(json.loads(ln[i + 19:]))
+                except ValueError: pass
+            return out
+        ev0 = len(embed_events())
         for p in kk:
             try: os.kill(p, 9)
             except OSError: pass
@@ -595,13 +617,448 @@ try:
         # macOS: KiCad's recovery question is a native alert before its API is up (no dialog event): a window of KiCad's own on screen
         # while it is not ready, or (where the fork reports it) the dialog event
         def alert():
-            ks = [w for w in wins() if 'kicad' in w[2].lower() and w[1] not in (client.pid, hub.pid) and w[3][2] < 600 and w[3][3] < 600]
+            # any window level: AppKit's alert is not at the normal level (seen on e2e-macos 44247744393: the alert was on screen, this missed it)
+            ks = [w for w in (helper('windows') or []) if 'kicad' in w['owner'].lower() and w['pid'] not in (client.pid, hub.pid) and 150 < w['bounds'][2] < 700 and 80 < w['bounds'][3] < 520]
             return ks or ('Recover Unsaved Changes' in hub_log())
         rec = wait_for(alert, 90, 0.5); time.sleep(2); shot('autosave-2-recovery')
         named = 'kicad-recover-prompt' in client_log() or 'kicad-recover-prompt' in hub_log() or 'Recover Unsaved Changes' in client_log()
         RES['autosave_alert'] = str(rec)[:160]
         check(bool(oa) and bool(rec), f'autosave: KiCad killed, Open the editor again: KiCad offers Recover Unsaved Changes (open-again {bool(oa)})')
         check(named, 'autosave: the pane names it ("KiCad is asking: Recover Unsaved Changes")')
+        if REC:
+            def new_kicads():
+                return [int(l.split()[0]) for l in subprocess.run(['ps', '-axo', 'pid=,command='], capture_output=True, text=True).stdout.splitlines()
+                        if '--parent-pid' in l and '--embedded' in l and OUT in l and int(l.split()[0]) not in kk]
+            def the_alert():  # (index front to back, bounds) of the new KiCad's small window: the alert; any window level
+                ws = helper('windows') or []; nk = set(new_kicads())
+                for i, w in enumerate(ws):
+                    b = w['bounds']
+                    if w['pid'] in nk and 150 < b[2] < 700 and 80 < b[3] < 520: return i, b, ws
+                return None
+            al = wait_for(the_alert, 60, 0.5)
+            dlg = wait_for(lambda: [e for e in embed_events()[ev0:] if e.get('type') == 'ET_DIALOG_OPENED'], 30, 0.5)
+            RES['recover_alert'] = {'alert': al and al[1], 'dialog_events': [e.get('detail') for e in dlg or []]}
+            check(bool(dlg), f'recover: the recovery alert is reported to the hub (ET_DIALOG_OPENED from the new KiCad: {[e.get("detail") for e in dlg or []]})')
+            pp = last_push(); P = pp[0] if pp else None
+            if al and P:
+                i, b, ws = al
+                ci = next((j for j, w in enumerate(ws) if w['number'] == cw[0]), None)
+                check(ci is not None and i < ci, f'recover: the alert is in front of Backplane\'s window (alert {i}, Backplane {ci}, front to back)')
+                acx, acy = b[0] + b[2] / 2, b[1] + b[3] / 2; pcx = P[0] + P[2] / 2
+                disp = Quartz.CGDisplayBounds(Quartz.CGMainDisplayID()) if DRIVER == 'quartz' else None
+                scx = disp.origin.x + disp.size.width / 2 if disp else None
+                print(f'INFO recover: alert {b}, centre ({acx:.0f}, {acy:.0f}); pane {P}, centre x {pcx:.0f}; screen centre x {scx}', flush=True)
+                if scx is not None and abs(pcx - scx) < 80: print('INFO recover: the pane\'s centre is near the screen\'s: the centring check cannot tell them apart here', flush=True)
+                check(abs(acx - pcx) <= 40 and P[1] <= acy <= P[1] + P[3], f'recover: the alert is centred on the pane (|dx| {abs(acx - pcx):.0f} pt, centre y {acy:.0f} in the pane\'s {P[1]:.0f}..{P[1] + P[3]:.0f})')
+            else:
+                check(False, f'recover: the alert window of the new KiCad is on screen (alert {bool(al)}, pane {bool(P)})')
+            shot('recover-1-alert')
+        raise SystemExit(1 if FAILS else 0)
+    # ---- MAC_MODE=leave (#1199): every way the pane leaves the page takes KiCad's frame off screen, and coming back brings it: (a) the
+    # viewer's Close, (b) the rail closing the lit page, (c) another thread, (d) the Files page, (e) a Diff over the page, (f) Settings over
+    # the page. Each from KiCad holding the keyboard (a click on its canvas): within 1 s no window of the embedded KiCad covers the pane's
+    # rect (the window list) and Backplane is the active app; back, KiCad's frame is directly above Backplane's window at the pane's rect
+    # within 250 ms of the press, and the keyboard is KiCad's (at once, or after a click on its canvas: said) ----
+    if os.environ.get('MAC_MODE') == 'leave':
+        P = last_push()[0]
+        def rects_now():  # the rects of the client's latest frame only (rects() keeps every id ever drawn: a stale one was pressed, e2e-macos 44250085437)
+            last = None
+            for l in client_log().splitlines():
+                if 'GPUI_METRIC ' in l and '"rects"' in l: last = l
+            r = {}
+            try:
+                for e in json.loads(last.split('GPUI_METRIC ', 1)[1]).get('rects', []) or []:
+                    if isinstance(e, dict) and 'id' in e: r[e['id']] = e
+            except Exception: pass
+            k = backing_scale()
+            return {i: dict(e, x=e['x'] / k, y=e['y'] / k, w=e['w'] / k, h=e['h'] / k) for i, e in r.items()} if k != 1 else r
+        def press_rect(i):
+            r = rects_now().get(i)
+            if not r: return False
+            b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2); return True
+        def press_prefix(pre, skip=()):
+            ids = sorted(k for k in rects() if k.startswith(pre) and k not in skip)
+            return press_rect(ids[0]) and ids[0] if ids else False
+        def kicad_over_pane():  # KiCad's windows on screen that cover most of the pane's rect (its frame; not a tooltip)
+            out = []
+            for w in wins():
+                if w[1] != kpid: continue
+                x0, y0 = max(w[3][0], P[0]), max(w[3][1], P[1]); x1, y1 = min(w[3][0] + w[3][2], P[0] + P[2]), min(w[3][1] + w[3][3], P[1] + P[3])
+                if x1 > x0 and y1 > y0 and (x1 - x0) * (y1 - y0) > 0.3 * P[2] * P[3]: out.append(w)
+            return out
+        def at_pane():  # KiCad's frame directly above Backplane's window, at the pane's rect (2 pt)
+            f = kicad_frame()
+            return f if f and all(abs(a - b) <= 2 for a, b in zip(f[3], P)) else None
+        def canvas_click(): click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); time.sleep(0.6); key(K_ESC); time.sleep(0.3)
+        # where a return's time goes: the client's pushes, stamped as they reach its log (a reader every 5 ms: the client writes them
+        # unbuffered), the hub's SetHostGeometry requests (their own ms stamps), and the window list's first sight of the frame
+        import threading
+        PUSHES = []
+        def _tail():
+            n = 0
+            while True:
+                try: ls = open(CLIENT_LOG[0], errors='replace').read().splitlines()
+                except OSError: ls = []
+                now = time.time()
+                for l in ls[n:]:
+                    if '"kicad_host_push"' in l:
+                        try: PUSHES.append((now, json.loads(l.split('GPUI_LOG ', 1)[1])))
+                        except Exception: pass
+                n = len(ls); time.sleep(0.005)
+        threading.Thread(target=_tail, daemon=True).start()
+        def hub_geoms(): return [int(m) / 1000 for m in __import__('re').findall(r'SetHostGeometry[^\n]*\(at (\d+)\)', hub_log())]
+        def timeline(tag, t_click, t_seen):
+            pv = next((t for t, j in PUSHES if t >= t_click and j.get('visible')), None)
+            pj = next((j for t, j in PUSHES if t >= t_click and j.get('visible')), {})
+            hg = next((t for t in hub_geoms() if t >= t_click - 0.01), None)
+            ms = lambda t: f'{(t - t_click) * 1000:.0f} ms' if t else 'none'
+            print(f'INFO timeline {tag}: click 0; first push visible:true {ms(pv)} (in_page {pj.get("in_page")}, covered {pj.get("covered")}, hitbox {pj.get("hitbox")}); '
+                  f'hub SetHostGeometry {ms(hg)}; frame seen above our window {ms(t_seen)}', flush=True)
+        # the baseline: View then Edit on the warm pane (the return path main already has), click to the frame front-most at the pane
+        wait_for(at_pane, 10, 0.2); P = last_push()[0]
+        if press_rect('ui:View'):
+            wait_for(lambda: not kicad_over_pane(), 5, 0.05); time.sleep(1.5)
+            tb = time.time(); pe = press_rect('ui:Edit'); fb = wait_for(at_pane, 30, 0.02); ts = time.time()
+            print(f'INFO leave baseline: View then Edit on a warm pane, the frame front-most at the pane in {(ts - tb) * 1000:.0f} ms (Edit pressed {pe}; seen {bool(fb)})', flush=True)
+            timeline('baseline View->Edit', tb, ts if fb else None)
+            if fb: P = last_push()[0]
+        # (c) another thread: a second thread of the project made through the hub, the sidebar unfolded so both rows are drawn (the pane
+        # narrows; P follows); (c) presses the other thread's row and comes back on the first one's
+        sys.path.insert(0, os.path.join(REPO, 'test/kicad_embed/mac')); import hub_ws
+        hub_ws.send(port, open(os.path.join(OUT, 'home/token')).read().strip(), 'thread.create', {'project': 'p1', 'title': 'Other thread'}, wait=1.0)
+        time.sleep(2.0)
+        if not any(k.startswith('thread:') for k in rects_now()):
+            folds = [k for k in rects_now() if 'sidebar' in k.lower() or 'fold' in k.lower()]
+            print(f'INFO leave: sidebar controls {folds}', flush=True)
+            press_rect('ui:Fold sidebar') or (folds and press_rect(folds[0])); time.sleep(1.5)
+        rows = sorted(k for k in rects_now() if k.startswith('thread:'))
+        home_thread = 'thread:t1' if 'thread:t1' in rows else (rows[0] if rows else None)
+        other_thread = next((k for k in rows if k != home_thread), None)
+        print(f'INFO leave: the sidebar shows {rows}; home {home_thread}, other {other_thread}', flush=True)
+        if home_thread: press_rect(home_thread); time.sleep(1.0)
+        wait_for(at_pane, 10, 0.2); P = last_push()[0]
+        def jump(title, timed=False):  # the command bar (Cmd+K): a thread by its title, Return; the sidebar may not list a new worktree thread
+            cwa = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(cwa[0] + 150, cwa[1] + 28 + 250); time.sleep(0.5)
+            if not press_rect('ui:Jump or run a command'): key(K_K, CMD)
+            time.sleep(0.8); relay(op='text', text=title); time.sleep(1.2)
+            t = time.time(); key(36); return (True, t) if timed else True
+        def back_from_settings():
+            # Settings is a sheet over the window: Escape closes it (the gear behind it is not pressable; e2e-macos 44296739808 left it open);
+            # a second Escape is harmless (the viewer is already shut by Settings)
+            key(K_ESC); time.sleep(1.0); key(K_ESC); time.sleep(0.8)
+            t = time.time(); return press_rect('rail:Board'), t
+        def open_keysheet():
+            cwa = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(cwa[0] + 150, cwa[1] + 28 + 250); time.sleep(0.6)
+            PUSH_MARK[0] = len(client_log().splitlines())
+            key(122); return True  # F1
+        PUSH_MARK = [0]
+        ways = [
+            ('a', 'the viewer\'s Close', lambda: press_rect('ui:CloseViewer'), lambda: press_rect('rail:Board')),
+            ('b', 'the rail closing the lit page', lambda: press_rect('rail:Board'), lambda: press_rect('rail:Board')),
+            # the sidebar lists the selected thread (the other one's row went once it was left: e2e-macos 44288284194), so both ways go through
+            # the command bar's "Jump or run a command" with the thread's title
+            ('c', 'another thread', lambda: jump('Other thread'), lambda: jump('Embedded KiCad E2E', timed=True)),
+            ('d', 'the Files page', lambda: press_rect('rail:Files'), lambda: press_rect('rail:Board')),
+            ('e', 'a Diff over the page', lambda: press_rect('rail:Diff'), lambda: press_rect('rail:Board')),
+            # opening Settings shuts the viewer by design (host settings.rs, 0.14's Settings.viewer.shut): back is Settings closed, then the
+            # Board page, the return timed from that press
+            ('f', 'Settings over the page', lambda: press_rect('ui:Settings'), back_from_settings),
+            # the keyboard sheet over the page with the viewer open (#1199's covered path): Backplane takes the keyboard (a click in its
+            # chrome), F1; back is Escape (keysheet_close before escape_rest), the viewer still open
+            ('g', 'the keyboard sheet over the page', open_keysheet, lambda: (key(K_ESC), True)[1]),
+        ]
+        for tag, label, leave_, back_ in ways:
+            if not at_pane():
+                f0 = wait_for(at_pane, 10, 0.1)
+                if not f0: check(False, f'leave {tag}: KiCad\'s frame over the pane before {label}'); continue
+            canvas_click(); k_before = active(kpid)
+            pressed_ = leave_(); t0 = time.time()
+            gone = wait_for(lambda: not kicad_over_pane(), 1.0, 0.05); dt_gone = time.time() - t0; shot(f'leave-{tag}')
+            bp_active = active(client.pid) and not active(kpid)
+            check(bool(pressed_) and bool(gone), f'leave {tag}: {label} takes KiCad\'s frame off screen within 1 s (pressed {pressed_}; KiCad had the keyboard {k_before}; KiCad windows over the pane {[w[3] for w in kicad_over_pane()]})')
+            check(bp_active, f'leave {tag}: Backplane is the active app with the keyboard after {label}')
+            time.sleep(1.0)
+            if tag == 'g':
+                cov = [l for l in client_log().splitlines()[PUSH_MARK[0]:] if '"kicad_host_push"' in l and '"covered":true' in l]
+                check(bool(cov), f'leave g: a kicad_host_push said covered:true under the sheet ({(cov or [""])[0].split("GPUI_LOG ", 1)[-1][:160]!r})')
+            tb = time.time(); b_ = back_()
+            if isinstance(b_, tuple): b_, tb = b_
+            f2 = wait_for(at_pane, 3, 0.02); dt = time.time() - tb
+            timeline(f'{tag} back', tb, time.time() if f2 else None)
+            if not f2 and rects_now().get('ui:Edit'):
+                print(f'INFO leave {tag}: the page came back on View: Edit pressed', flush=True)
+                tb = time.time(); press_rect('ui:Edit'); f2 = wait_for(at_pane, 30, 0.02); dt = time.time() - tb
+            if not f2:  # where it ended up, for the record
+                f2 = wait_for(at_pane, 10, 0.1); dt = time.time() - tb
+            k_now = bool(f2) and active(kpid); shot(f'leave-{tag}-back')
+            check(bool(f2), f'leave {tag}: back after {label}, KiCad\'s frame is front-most at the pane\'s rect (pressed {b_}; {dt * 1000:.0f} ms; frame {kicad_frame() and kicad_frame()[3]}, pane {last_push()[0]})')
+            print(f'INFO leave {tag}: back in {dt * 1000:.0f} ms; KiCad has the keyboard {k_now} before any click', flush=True)
+            if f2:
+                check(dt <= 0.25, f'leave {tag}: the editor is back within ~200 ms of the press ({dt * 1000:.0f} ms)')
+                P = last_push()[0]
+                if not k_now: canvas_click()
+                check(active(kpid), f'leave {tag}: the keyboard is in KiCad ({"at once" if k_now else "after a click on the canvas"})')
+            else:
+                P = last_push()[0]
+        for l in client_log().splitlines():
+            if '"kicad_host_push"' in l and '"covered":true' in l.replace(' ', ''): print('INFO leave: a push said covered: ' + l.split('GPUI_LOG ', 1)[-1][:200], flush=True); break
+        raise SystemExit(1 if FAILS else 0)
+    # ---- MAC_MODE=swap (#1199): KiCad's frame can end off the client's last pushed rect, or not show (e2e-macos 44255662838: pushes 500
+    # false, 524 true, 500 true, the frame stayed at 524; 44274808579 returns 3 and 4). The mechanism is not settled: SetHostGeometry goes on
+    # KiCad's events socket and is acknowledged before its deferred apply, ShowFrame/HideFrame on the main socket, so one connection's
+    # reply order does not fix the order KiCad applies them in (the integrator's review; embed.mm's owner confirms or refutes). Close the viewer, the Board page
+    # again, SWAP_REPS times: each return's burst (visible:true at one rect, then another within 150 ms: the bottom strip a frame late) is
+    # recorded, and 1 s later the frame must be at the last rect the client pushed (2 pt). Run with BACKPLANE_KICAD_MAC_SETTLE_MS=0 (pane_env)
+    # to see KiCad's own order (fails on bp.13.1: e2e-macos 44274808579, a lone show left no frame, a later Full size rect was dropped), and
+    # with the default settle send to see the workaround. Kept as the regression for a fork fix: settle off must pass once KiCad applies
+    # its show and geometry in order ----
+    if os.environ.get('MAC_MODE') == 'swap':
+        print(f'INFO swap: BACKPLANE_KICAD_MAC_SETTLE_MS={os.environ.get("BACKPLANE_KICAD_MAC_SETTLE_MS", "(default)")}', flush=True)
+        def rects_now():
+            last = None
+            for l in client_log().splitlines():
+                if 'GPUI_METRIC ' in l and '"rects"' in l: last = l
+            r = {}
+            try:
+                for e in json.loads(last.split('GPUI_METRIC ', 1)[1]).get('rects', []) or []:
+                    if isinstance(e, dict) and 'id' in e: r[e['id']] = e
+            except Exception: pass
+            k = backing_scale()
+            return {i: dict(e, x=e['x'] / k, y=e['y'] / k, w=e['w'] / k, h=e['h'] / k) for i, e in r.items()} if k != 1 else r
+        def press_rect(i):
+            r = rects_now().get(i)
+            if not r: return False
+            b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2); return True
+        def kframe():
+            return next((w for w in wins() if w[1] == kpid and w[3][2] > 200 and w[3][3] > 200), None)
+        import threading
+        PUSHES = []
+        def _tail():
+            n = 0
+            while True:
+                try: ls = open(CLIENT_LOG[0], errors='replace').read().splitlines()
+                except OSError: ls = []
+                now = time.time()
+                for l in ls[n:]:
+                    if '"kicad_host_push"' in l:
+                        try: PUSHES.append((now, json.loads(l.split('GPUI_LOG ', 1)[1])))
+                        except Exception: pass
+                n = len(ls); time.sleep(0.005)
+        threading.Thread(target=_tail, daemon=True).start()
+        def host_settled(t=8):  # every editor.kicad.host the client has sent is answered (their replies lagged past 1 s in 44274818743)
+            def pending():
+                ls = client_log().splitlines()
+                sent = {l.split('"id":', 1)[1].split(',', 1)[0] for l in ls if '"kicad_rpc_sent":"editor.kicad.host"' in l}
+                got = {l.split('"id":', 1)[1].split(',', 1)[0] for l in ls if '"kicad_rpc_reply":"editor.kicad.host"' in l}
+                return sent - got
+            return wait_for(lambda: not pending(), t, 0.05)
+        reps = int(os.environ.get('SWAP_REPS', '10')); provoked = wrong = 0
+        for i in range(reps):
+            wait_for(kframe, 10, 0.2)
+            press_rect('ui:CloseViewer'); time.sleep(1.2)
+            t0 = time.time(); press_rect('rail:Board')
+            toggled = False
+            if i % 2 == 1:  # every other return: Full size pressed the moment the first visible:true push is seen (a second rect at once)
+                if wait_for(lambda: any(t >= t0 and j.get('visible') for t, j in PUSHES), 2, 0.005): toggled = press_rect('kicad:full')
+            time.sleep(1.0); wait_for(kframe, 5, 0.05); host_settled(); time.sleep(1.0)  # 1 s after the return's last push, near enough: the pushes settle within it
+            burst = [(round((t - t0) * 1000), j['kicad_host_push'], j.get('visible'), j.get('settle')) for t, j in PUSHES if t >= t0 and j.get('kicad_host_push')]
+            vis = [b for b in burst if b[2]]
+            prov = len(vis) >= 2 and any(v[1] != vis[0][1] and v[0] - vis[0][0] <= 150 for v in vis[1:])
+            last = burst[-1][1] if burst else (PUSHES[-1][1]['kicad_host_push'] if PUSHES else None); f = kframe()  # no push in the return: the last one before it
+            if last is None and not burst: print(f'INFO swap {i + 1}: no push to judge against (excluded)', flush=True); continue
+            ok = bool(f and last) and all(abs(a - b) <= 2 for a, b in zip(f[3], last))
+            provoked += prov; wrong += (not ok)
+            print(f'INFO swap {i + 1}: Full size toggled {toggled}; pushes {burst}; burst provoked {prov}; frame {f and f[3]}; last push {last}; {"at the last rect" if ok else "NOT at the last rect"}', flush=True)
+            if toggled:  # back to the normal size for the next return, confirmed by a push at the narrower width (else the next return is not judged)
+                n0 = len(PUSHES); press_rect('kicad:full')
+                ok_back = wait_for(lambda: any(j['kicad_host_push'][2] < 800 for _, j in PUSHES[n0:]), 3, 0.05); time.sleep(1.0)
+                if not ok_back: print(f'INFO swap {i + 1}: Full size off pushed no narrower rect: the next return is judged on its own pushes only', flush=True); PUSHES.append((time.time(), {'kicad_host_push': None}))
+        print(f'INFO swap: {provoked} of {reps} returns provoked a burst; {wrong} ended off the last pushed rect', flush=True)
+        check(wrong == 0, f'swap: every return ends at the last rect the client pushed ({wrong} of {reps} did not; {provoked} bursts provoked)')
+        # (B) geometry while KiCad runs its checks (the lead's: return 3 was SetHostGeometry refused, "a task is running: DRC"): an agent's
+        # RunChecks started, and while it runs (it must run longer than 300 ms, said) the pane changes size (Full size) and, on alternate
+        # tries, the viewer closes and the Board page comes back; the frame must end visible at the client's LAST rect once the checks end
+        sys.path.insert(0, os.path.join(REPO, 'test/kicad_embed/mac')); import hub_ws
+        token = open(os.path.join(OUT, 'home/token')).read().strip(); pcbf = os.path.join(OUT, 'proj', 'ecc83-pp.kicad_pcb')
+        def mcalls(): return [l for l in open(os.path.join(OUT, 'standin.log'), errors='replace').read().splitlines() if l.startswith('MCPCALL')] if os.path.isfile(os.path.join(OUT, 'standin.log')) else []
+        def ask(name, args, wait=120):
+            n0 = len(mcalls())
+            hub_ws.send(port, token, 'turn.start', {'thread': 't1', 'text': 'mcpcall:' + json.dumps({'name': name, 'arguments': args}), 'msg': f'sw-{time.time_ns()}'})
+            wait_for(lambda: len(mcalls()) > n0, wait, 0.3)
+        b_reps = int(os.environ.get('SWAP_CHECK_REPS', '4')); b_wrong = b_during = 0
+        for i in range(b_reps):
+            wait_for(kframe, 10, 0.2); time.sleep(0.5)
+            log0 = len(client_log().splitlines()); n0 = len(PUSHES)
+            done = []
+            th = threading.Thread(target=lambda: (ask('kicad_ipc', {'path': pcbf, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': 'FK_PCB'}}), done.append(time.time())), daemon=True)
+            tc = time.time(); th.start(); time.sleep(0.25)
+            if i % 2 == 0: press_rect('kicad:full')
+            else: press_rect('ui:CloseViewer'); time.sleep(0.4); press_rect('rail:Board')
+            th.join(120); dur = (done[0] - tc) if done else None; time.sleep(1.5); wait_for(kframe, 5, 0.05); host_settled(); time.sleep(0.5)
+            busy = [l for l in client_log().splitlines()[log0:] if 'a task is running' in l]
+            during = bool(busy) or (dur is not None and dur > 0.3)
+            b_during += during
+            last = next((j['kicad_host_push'] for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None); lastvis = next((j.get('visible') for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None)
+            f = kframe(); ok = bool(lastvis) and bool(f and last) and all(abs(a - b) <= 2 for a, b in zip(f[3], last))
+            b_wrong += (not ok)
+            print(f'INFO swap B{i + 1}: {"Full size" if i % 2 == 0 else "close and reopen"} during RunChecks ({dur and round(dur * 1000)} ms; busy replies {len(busy)}); pushes {[(round((t - tc) * 1000), j["kicad_host_push"], j.get("visible")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; frame {f and f[3]}; last {last} visible {lastvis}; {"ok" if ok else "NOT at the last rect"}', flush=True)
+            if i % 2 == 0: press_rect('kicad:full'); time.sleep(1.5)
+        check(b_during > 0, f'swap B: the pane changed while KiCad ran its checks ({b_during} of {b_reps} tries ran longer than 300 ms or met a busy reply)')
+        check(b_wrong == 0, f'swap B: after geometry during the checks, the frame ends visible at the LAST rect ({b_wrong} of {b_reps} did not)')
+        # (C) a newer hide is not undone: the Board page, then the viewer closed again the moment the first visible:true push is seen; 1.5 s
+        # later no KiCad frame may cover the pane (a deferred show must not win over the later hide)
+        c_reps = int(os.environ.get('SWAP_HIDE_REPS', '4')); c_wrong = 0
+        def over_pane():
+            pp = (last_push() or [[0, 0, 0, 0]])[0]
+            return [w for w in wins() if w[1] == kpid and w[3][2] > 200 and w[3][3] > 200 and abs(w[3][0] - pp[0]) < 400]
+        for i in range(c_reps):
+            wait_for(kframe, 10, 0.2); press_rect('ui:CloseViewer'); time.sleep(1.2)
+            t0 = time.time(); n0 = len(PUSHES); press_rect('rail:Board')
+            seen = wait_for(lambda: any(j.get('visible') for _, j in PUSHES[n0:] if j.get('kicad_host_push')), 3, 0.005)
+            press_rect('ui:CloseViewer'); time.sleep(1.5)
+            stale = over_pane(); c_wrong += bool(stale)
+            print(f'INFO swap C{i + 1}: show seen {bool(seen)}, then closed; pushes {[(round((t - t0) * 1000), j["kicad_host_push"], j.get("visible")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; KiCad over the pane after 1.5 s {[w[3] for w in stale]}', flush=True)
+            press_rect('rail:Board'); wait_for(kframe, 10, 0.1); time.sleep(0.8)
+        check(c_wrong == 0, f'swap C: a hide right after a show is not undone ({c_wrong} of {c_reps} left KiCad over the pane)')
+        # (D) no answer at all (the lead's: an unanswered first push must expire and be sent again): KiCad stopped (SIGSTOP) for SWAP_STALL_S
+        # (default 10, past the client's 8 s), the viewer closed and the Board page pressed while it cannot answer, then KiCad resumed. With
+        # the keyboard left in Backplane (a click in its chrome after the press): the frame must end visible at the LAST rect, and KiCad must
+        # not take the keyboard by itself afterwards (no delayed focus steal from a retried raise)
+        stall = float(os.environ.get('SWAP_STALL_S', '10'))
+        wait_for(kframe, 10, 0.2); press_rect('ui:CloseViewer'); time.sleep(1.2)
+        kp = [int(l.split()[0]) for l in subprocess.run(['ps', '-axo', 'pid=,command='], capture_output=True, text=True).stdout.splitlines() if '--embedded' in l and OUT in l]
+        log0 = len(client_log().splitlines()); n0 = len(PUSHES)
+        for p_ in kp: os.kill(p_, __import__('signal').SIGSTOP)  # by name: 19 is SIGCONT on macOS (17 is SIGSTOP)
+        try:
+            t0 = time.time(); press_rect('rail:Board'); time.sleep(0.8)
+            cwa = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(cwa[0] + 150, cwa[1] + 28 + 250)
+            time.sleep(max(0.0, stall - (time.time() - t0)))
+        finally:
+            for p_ in kp: os.kill(p_, __import__('signal').SIGCONT)
+        host_settled(15); time.sleep(3.0)
+        lines = client_log().splitlines()[log0:]
+        refused = [l for l in lines if 'kicad_host_refused' in l]; retried = [l for l in lines if '"retry":true' in l]
+        last = next((j['kicad_host_push'] for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None); lastvis = next((j.get('visible') for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None)
+        f = kframe(); okd = bool(lastvis) and bool(f and last) and all(abs(a - b) <= 2 for a, b in zip(f[3], last))
+        print(f'INFO swap D: KiCad stopped {stall:.0f} s across the return; pushes {[(round((t - t0) * 1000), j["kicad_host_push"], j.get("visible"), j.get("retry")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; refused {len(refused)}, retried {len(retried)}; frame {f and f[3]}; last {last}', flush=True)
+        check(okd, f'swap D: after KiCad could not answer for {stall:.0f} s, the frame ends visible at the LAST rect (frame {f and f[3]}, last {last})')
+        time.sleep(4.0)
+        check(not active(kpid), 'swap D: KiCad did not take the keyboard by itself after the recovery (no delayed focus steal)')
+        # (E) a reconnect while a refusal waits (#1199's rejoin): an agent's RunChecks running, Full size pressed (KiCad refuses the
+        # geometry while it checks), then the hub stopped past the client's 35 s heartbeat so the client drops and re-makes its connection
+        # to the same hub and KiCad; the frame must end visible at the LAST rect
+        wait_for(kframe, 10, 0.2); time.sleep(0.5)
+        log0 = len(client_log().splitlines()); n0 = len(PUSHES)
+        th = threading.Thread(target=lambda: ask('kicad_ipc', {'path': pcbf, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': 'FK_PCB'}}), daemon=True)
+        te = time.time(); th.start(); time.sleep(0.25); press_rect('kicad:full')
+        refused_e = wait_for(lambda: any('kicad_host_refused' in l for l in client_log().splitlines()[log0:]), 5, 0.05)
+        os.kill(hub.pid, __import__('signal').SIGSTOP)  # the client hears nothing past its 35 s heartbeat
+        try: time.sleep(float(os.environ.get('SWAP_HUB_STOP_S', '45')))
+        finally: os.kill(hub.pid, __import__('signal').SIGCONT)
+        # the reconnect: a second "status":"Connected" (the client logs one per connection) after the stop
+        rejoined = wait_for(lambda: any('"status":"Connected"' in l or '"status":"Reconnecting' in l for l in client_log().splitlines()[log0:]), 30, 0.2)
+        th.join(60); host_settled(20); time.sleep(2.0)
+        lines = client_log().splitlines()[log0:]
+        last = next((j['kicad_host_push'] for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None); lastvis = next((j.get('visible') for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None)
+        f = kframe(); oke = bool(lastvis) and bool(f and last) and all(abs(a - b) <= 2 for a, b in zip(f[3], last))
+        print(f'INFO swap E: refusal waiting before the stop {bool(refused_e)}; reconnect seen {bool(rejoined)} ({[l.split("GPUI_LOG ", 1)[-1][:90] for l in lines if '"status"' in l][:3]}); pushes {[(round((t - te) * 1000), j["kicad_host_push"], j.get("visible"), j.get("retry")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; frame {f and f[3]}; last {last}', flush=True)
+        check(bool(rejoined), 'swap E: the client dropped and re-made its hub connection')
+        check(oke, f'swap E: after a reconnect with a refusal waiting, the frame ends visible at the LAST rect (frame {f and f[3]}, last {last}; refusal before {bool(refused_e)})')
+        press_rect('kicad:full'); time.sleep(1.0)
+        raise SystemExit(1 if FAILS else 0)
+    # ---- MAC_MODE=hide (#1198): Cmd+H with KiCad's canvas focused hides Backplane and KiCad's frame (a runtime with comment-key-63: the
+    # host reserves Ctrl+H); unhidden, KiCad's frame is directly above Backplane's window again and a click gives KiCad the keyboard; Cmd+H
+    # with Backplane focused does the same. A runtime without comment-key-63 keeps Cmd+H KiCad's own (high contrast): nothing hides ----
+    if os.environ.get('MAC_MODE') == 'hide':
+        caps = json.load(open(os.path.join(RT, 'manifest.json'))).get('capabilities') or []
+        reserved_h = 'comment-key-63' in caps
+        P = last_push()[0]
+        def kicad_over_pane():
+            out = []
+            for w in wins():
+                if w[1] != kpid: continue
+                x0, y0 = max(w[3][0], P[0]), max(w[3][1], P[1]); x1, y1 = min(w[3][0] + w[3][2], P[0] + P[2]), min(w[3][1] + w[3][3], P[1] + P[3])
+                if x1 > x0 and y1 > y0 and (x1 - x0) * (y1 - y0) > 0.3 * P[2] * P[3]: out.append(w)
+            return out
+        def ours_on_screen(): return any(w[0] == cw[0] for w in wins())
+        def unhide():
+            a = NSRunningApplication.runningApplicationWithProcessIdentifier_(client.pid); a.unhide(); time.sleep(0.4); a.activateWithOptions_(0)
+        def canvas_click(): click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); time.sleep(0.6); key(K_ESC); time.sleep(0.3)
+        for who in ('kicad', 'backplane'):
+            if who == 'kicad': canvas_click()
+            else:
+                cwa = next((w for w in wins() if w[0] == cw[0]), cw); click(cwa[3][0] + 200, cwa[3][1] + 28 + 300); time.sleep(1)
+            print(f'INFO hide: Cmd+H with {who} focused (KiCad active {active(kpid)}; the runtime reserves Ctrl+H: {reserved_h})', flush=True)
+            key(4, CMD)
+            hid = wait_for(lambda: not ours_on_screen() and not kicad_over_pane(), 5, 0.1)
+            if who == 'kicad' and not reserved_h:
+                check(not hid and ours_on_screen(), 'hide: a runtime without comment-key-63 keeps Cmd+H KiCad\'s own (nothing hides)')
+                continue
+            check(bool(hid), f'hide: Cmd+H with {who} focused hides Backplane and KiCad\'s frame (Backplane on screen {ours_on_screen()}; KiCad over the pane {len(kicad_over_pane())})')
+            unhide()
+            back = wait_for(kicad_frame, 10, 0.1); shot(f'hide-{who}-back')
+            check(bool(back), f'hide: unhidden, KiCad\'s frame is directly above Backplane\'s window over the pane ({who})')
+            if back:
+                P = last_push()[0]; canvas_click()
+                check(active(kpid), f'hide: after the unhide a click gives KiCad the keyboard ({who})')
+        raise SystemExit(1 if FAILS else 0)
+    # ---- MAC_MODE=zoom: the zoom chords in the embedded board editor (fork embed's fix/mac-cmd-equals-zoom: plain Cmd+= zooms in), judged by
+    # the board's size on screen (KiCad has no view readback): the extent of the board's coloured pixels (copper, silk; the grid, ratsnest and
+    # text are grey) inside the canvas, where the canvas is where those pixels differ between two zoom levels (the panels' swatches do not).
+    # From a fit: Cmd+- twice (smaller each time), plain Cmd+= (larger: the row under test), Cmd+Shift+= (larger: KiCad's own Ctrl++,
+    # the control), Cmd+- (smaller), Cmd+0 (back to the fit). The pointer stays on the board's centre, KiCad's zoom anchor ----
+    if os.environ.get('MAC_MODE') == 'zoom':
+        if DRIVER != 'quartz': raise SystemExit('MAC_MODE=zoom reads pixels: the e2e-macos runner only')
+        def grab(r):
+            img = Quartz.CGWindowListCreateImage(Quartz.CGRectMake(*r), Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID, Quartz.kCGWindowImageNominalResolution)
+            w, h, bpr = Quartz.CGImageGetWidth(img), Quartz.CGImageGetHeight(img), Quartz.CGImageGetBytesPerRow(img)
+            d = bytes(Quartz.CGDataProviderCopyData(Quartz.CGImageGetDataProvider(img)))
+            sx, sy = w / r[2], h / r[3]; m = set()
+            for y in range(0, int(r[3]), 2):
+                row = int(y * sy) * bpr
+                for x in range(0, int(r[2]), 2):
+                    o = row + int(x * sx) * 4; px = d[o:o + 3]
+                    if max(px) - min(px) > 70 and max(px) > 90: m.add((x, y))
+            return m
+        def extent(m, R=None):
+            q = [p for p in m if not R or (R[0] <= p[0] <= R[2] and R[1] <= p[1] <= R[3])]
+            if len(q) < 20: return None
+            xs = sorted(p[0] for p in q); ys = sorted(p[1] for p in q); n = len(q)
+            # the 2nd and 98th percentiles, so a stray pixel does not make the size
+            return (xs[n // 50], ys[n // 50], xs[-1 - n // 50], ys[-1 - n // 50])
+        P = last_push()[0]; pane = (P[0], P[1], P[2], P[3])
+        def to_canvas(): key(K_ESC); time.sleep(0.3); click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); time.sleep(0.4); key(K_ESC); time.sleep(0.3)
+        tr_path = os.path.join(OUT, 'kicad-embed-trace.log')
+        def trace_from(n): return [l.split('macos: ', 1)[-1].strip() for l in open(tr_path, errors='replace').read().splitlines()[n:] if 'macos: ' in l] if os.path.isfile(tr_path) else []
+        def tr_n(): return len(open(tr_path, errors='replace').read().splitlines()) if os.path.isfile(tr_path) else 0
+        def chord(code, fl, tag):
+            n = tr_n(); key(code, fl); time.sleep(1.8); m = grab(pane); relay(op='png', rect=list(pane), path=os.path.join(OUT, f'zoom-{tag}.png'))
+            return m, trace_from(n)
+        to_canvas(); key(115); time.sleep(2.0)  # Home: KiCad's Zoom to Fit
+        m0 = grab(pane); relay(op='png', rect=list(pane), path=os.path.join(OUT, 'zoom-0-fit.png'))
+        e0 = extent(m0)
+        if e0: relay(op='move', x=P[0] + (e0[0] + e0[2]) / 2, y=P[1] + (e0[1] + e0[3]) / 2); time.sleep(0.4)
+        m1, t1 = chord(27, CMD, '1-out'); m2, t2 = chord(27, CMD, '2-out')
+        R = extent(m0 ^ m2); print(f'INFO zoom: canvas content box {R} (pane {P})', flush=True)
+        if R:
+            c2 = extent(m2, R)
+            if c2: relay(op='move', x=P[0] + (c2[0] + c2[2]) / 2, y=P[1] + (c2[1] + c2[3]) / 2); time.sleep(0.4)
+        m3, t3 = chord(24, CMD, '3-cmd-equals'); m4, t4 = chord(24, CMD | SHIFT, '4-cmd-shift-equals')
+        m5, t5 = chord(27, CMD, '5-out'); m6, t6 = chord(29, CMD, '6-cmd-0')
+        def size(m):
+            e = extent(m, R) if R else None
+            return ((e[2] - e[0]) + (e[3] - e[1])) / 2 if e else 0.0
+        s = [size(m) for m in (m0, m1, m2, m3, m4, m5, m6)]
+        RES['zoom_sizes'] = s; print(f'INFO zoom: board size (pt) fit {s[0]:.0f}, Cmd+- {s[1]:.0f}, Cmd+- {s[2]:.0f}, Cmd+= {s[3]:.0f}, Cmd+Shift+= {s[4]:.0f}, Cmd+- {s[5]:.0f}, Cmd+0 {s[6]:.0f}', flush=True)
+        for tag, t in (('Cmd+-', t1), ('Cmd+=', t3), ('Cmd+Shift+=', t4), ('Cmd+0', t6)): print(f'INFO zoom: trace after {tag}: {t}', flush=True)
+        ok_m = bool(R) and s[0] > 40
+        check(ok_m, f'zoom: the board is measurable in the canvas (fit {s[0]:.0f} pt)')
+        if ok_m:
+            check(s[1] < s[0] * 0.9 and s[2] < s[1] * 0.9, f'zoom: Cmd+- zooms out ({s[0]:.0f} -> {s[1]:.0f} -> {s[2]:.0f})')
+            check(s[3] > s[2] * 1.12, f'zoom: plain Cmd+= zooms in ({s[2]:.0f} -> {s[3]:.0f})')
+            check(s[4] > s[3] * 1.12, f'zoom: Cmd+Shift+= (KiCad\'s Ctrl++) zooms in ({s[3]:.0f} -> {s[4]:.0f})')
+            check(s[5] < s[4] * 0.9, f'zoom: Cmd+- zooms out again ({s[4]:.0f} -> {s[5]:.0f})')
+            check(abs(s[6] - s[0]) <= s[0] * 0.08, f'zoom: Cmd+0 zooms to fit ({s[5]:.0f} -> {s[6]:.0f}, the fit {s[0]:.0f})')
         raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=first: a fresh home's first Edit puts KiCad over the pane within 30 s (the checks above), and stops ----
     if os.environ.get('MAC_MODE') == 'first':
@@ -975,7 +1432,9 @@ try:
                         key(124); time.sleep(0.3)  # the caret to the end
                         n1 = seq(); rc = ask('kicad_ipc', {'path': f, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': 'FK_PCB'}}); cd = checks_idle(n1, 30)
                         key(8); time.sleep(0.12); key(2); time.sleep(0.5); got = field_text()  # c, d
-                        canvas_ev = [e.get('type') for e in evs() if int(e.get('seq', 0)) > n0 and e.get('type') in ('ET_DOCUMENT_EDITED', 'ET_SELECTION_CHANGED')]
+                        # the board's canvas only: a schematic frame's empty selection change (its own checks freeing their markers, e2e-macos
+                        # 44251169563) is not a key that left the field
+                        canvas_ev = [e.get('type') for e in evs() if int(e.get('seq', 0)) > n0 and e.get('type') in ('ET_DOCUMENT_EDITED', 'ET_SELECTION_CHANGED') and (e.get('frame') or {}).get('kind') == 'FK_PCB']
                         key(K_ESC); time.sleep(0.6)
                         return (got == 'abcd' and not canvas_ev and bool(cd)), f'{where}: the field holds {got!r} after "ab", a check ({"done" if cd else "no ET_CHECKS_DONE"}; RunChecks {"ok" if "message" in rc else str(rc)[:60]}), "cd"; canvas events {canvas_ev}'
                     # the Find dialog's field (Cmd+F): not the Search panel by Cmd+G, which is also Group in the PCB editor (fork embed: Cmd+G,

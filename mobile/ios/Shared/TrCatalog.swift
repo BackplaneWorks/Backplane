@@ -2324,6 +2324,7 @@ gpui.c.commit	Commit	コミット	Commit
 gpui.c.diff.cut	… the rest of the diff is not shown	… 差分の残りは表示されていません	… el resto del diff no se muestra
 gpui.c.loading.board	Loading the board…	基板を読み込み中…	Cargando la placa…
 gpui.c.loading.schematic	Loading the schematic…	回路図を読み込み中…	Cargando el esquemático…
+gpui.c.loading.gerbers	Loading the Gerbers…	ガーバーを読み込み中…	Cargando los Gerber…
 gpui.c.opening	Opening…	開いています…	Abriendo…
 gpui.c.open.it	Open it	開く	Abrirlo
 gpui.c.bring.into.view	Bring it into view	表示位置へ移動	Traer a la vista
@@ -3001,6 +3002,8 @@ settings.git.page	Projects and git	プロジェクトと git	Proyectos y git
 settings.git.autopush	Push commits to the remote automatically	コミットを自動でリモートにプッシュ	Enviar los commits al remoto automáticamente
 settings.git.autopush.note	Backplane commits design files locally at each turn's end. On: it also pushes them to the branch's remote. Off: a project's page shows the commits not pushed, with Push.	Backplane は各ターンの終わりに設計ファイルをローカルにコミットします。オン: ブランチのリモートにもプッシュします。オフ: プロジェクトのページにプッシュしていないコミットと「プッシュ」ボタンを表示します。	Backplane hace commit de los archivos de diseño en local al final de cada turno. Activado: también los envía al remoto de la rama. Desactivado: la página del proyecto muestra los commits sin enviar, con Enviar.
 settings.git.notice	Backplane no longer pushes automatically. Turn it on in Settings if you want it.	Backplane は自動でプッシュしなくなりました。必要なら設定でオンにしてください。	Backplane ya no envía automáticamente. Actívalo en Ajustes si lo quieres.
+settings.git.offbranch	Keep Backplane's commits off my branch	Backplane のコミットを自分のブランチに入れない	No hacer commits de Backplane en mi rama
+settings.git.offbranch.note	Off: at each turn's end and save, Backplane commits the design files an agent changed to your branch. On: it records the same changes on its own refs (refs/backplane/design/<branch>) and never commits to your branch or index, so your branch shows the design files as modified until you commit them yourself. /restore and the KiCad history work either way.	オフ: 各ターンの終わりと保存のたびに、エージェントが変更した設計ファイルを Backplane があなたのブランチにコミットします。オン: 同じ変更を Backplane 自身の ref (refs/backplane/design/<branch>) に記録し、あなたのブランチやインデックスには一切コミットしません。そのため、自分でコミットするまで、ブランチでは設計ファイルが変更ありと表示されます。/restore と KiCad の履歴はどちらでも使えます。	Desactivado: al final de cada turno y en cada guardado, Backplane hace commit en tu rama de los archivos de diseño que cambió un agente. Activado: registra los mismos cambios en sus propias refs (refs/backplane/design/<branch>) y nunca hace commit en tu rama ni en tu índice, así que tu rama muestra los archivos de diseño como modificados hasta que hagas commit tú. /restore y el historial de KiCad funcionan igual.
 gpui.f.group.install	Install	インストール	Instalar
 gpui.f.group.agents	Agents	エージェント	Agentes
 gpui.f.group.cad	CAD tools	CADツール	Herramientas CAD
