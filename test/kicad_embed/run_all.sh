@@ -28,6 +28,8 @@ SUITES=(
   "embed_ux_e2e.sh:ux-broken-toplevel:KEMBED_PROJ_SRC=$REPO_ROOT/test/files/fixtures/broken-toplevel"
   "embed_mgmt_e2e.sh:mgmt"
   "embed_fab_e2e.sh:fab"
+  # #1169: looking around (pan, zoom, a click, a selection) is not the person's edit; a real edit still is. Fork mode only.
+  "embed_unsaved_person_e2e.sh:unsaved-person"
   # the person's edits in KiCad's plan view (bp.13+; skips itself on runtimes without them, and outside fork mode)
   "embed_plan_person_e2e.sh:plan-person"
   # an agent routes in plan view; the Plan panel rows there (bp.13 batch 11 plan-view-api; skips itself without it)
