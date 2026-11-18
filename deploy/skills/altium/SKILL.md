@@ -19,6 +19,9 @@ files to the project (`project`), all in one call. On Windows with Altium runnin
 
 # Altium Designer, live
 
+If Altium is not running, `altium_status` and `altium_script` start the newest installed Altium and wait until it is up (about a
+minute); the result says so. Then open the project by path (`recipes/open_project.pas`). Never ask the person to open it.
+
 `altium_script` runs a DelphiScript inside the person's running Altium (Windows only). Altium has their real work open:
 every script addresses documents **by full path**, and never the focused/current document.
 

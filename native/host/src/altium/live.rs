@@ -335,6 +335,8 @@ pub fn expectations(out: &str) -> Vec<Result<Expect, String>> {
     }).collect()
 }
 /// A window title the script named: part of the window's title, any case.
+/// Altium's main window, once it is up ("Home Page - Altium Designer (26.11.1)"), not its splash or a dialog
+pub fn is_main_window(title: &str) -> bool { title.contains("Altium Designer") && !title.to_lowercase().contains("splash") }
 pub fn title_matches(want: &str, title: &str) -> bool { !want.is_empty() && title.to_lowercase().contains(&want.to_lowercase()) }
 /// A button caption the script named: the same words, `&` accelerators, a trailing `...` and case aside; a trailing `*` matches
 /// the caption's start (`Generate all footprints in*`, whose caption ends in a path).
@@ -700,8 +702,23 @@ mod win {
         base.join("Backplane").join("altium").join("runs")
     }
 
+    /// Altium not running: the newest installed one is started (on the person's desktop: the hub runs there) and waited for until its main
+    /// window is up and it has had a moment to load its servers (a cold start takes about a minute), so no one has to open it by hand.
+    async fn start_altium() -> Result<(u32, String), String> {
+        let Some(x2) = exe() else { return Err("Altium Designer is not installed on this machine.".into()) };
+        crate::proc::std_cmd(crate::proc::Kind::Local, &x2).spawn().map_err(|e| format!("cannot start Altium: {e}"))?;
+        let t0 = Instant::now();
+        loop {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            if let Some((pid, exe)) = altium() {
+                if windows(pid).iter().any(|(_, t)| super::is_main_window(t)) { tokio::time::sleep(Duration::from_secs(10)).await; return Ok((pid, exe)) }
+            }
+            if t0.elapsed() > Duration::from_secs(300) { return Err("Altium Designer was started but its window did not come up within 5 minutes. Check it with altium_status in a minute.".into()) }
+        }
+    }
+
     pub async fn run(script: &str, timeout: u32) -> Result<Ran, String> {
-        let Some((pid, exe)) = altium() else { return Err("Altium Designer is not running. Open it (and the project) first, then ask again.".into()) };
+        let (started_it, (pid, exe)) = match altium() { Some(a) => (false, a), None => (true, start_altium().await?) };
         if exe.is_empty() { return Err("Altium Designer is running but its program path cannot be read.".into()) }
         let d = dir();
         std::fs::create_dir_all(&d).map_err(|e| format!("cannot make {}: {e}", d.display()))?;
@@ -794,6 +811,7 @@ mod win {
         for e in pending { ran.driven.push(format!("{}: did not open", e.title)) }
         ran.secs = started.elapsed().as_secs_f32();
         give_back(pid, front);
+        if started_it { ran.output = format!("(Altium Designer was not running: Backplane started it; open the project's documents by path before editing.)\n{}", ran.output) }
         Ok(ran)
     }
     /// X2.EXE: the running one's, else the newest in Program Files/Altium/AD*
@@ -941,6 +959,10 @@ mod tests {
         assert_eq!(at("Unsaved", &["Don't Save"]), None, "a discard button alone: closed, not pressed");
         assert_eq!(at("Error | Continue execution?", &["Yes", "No", "Cancel"]).as_deref(), Some("Cancel"), "a failed script is still stopped");
         assert_eq!(at("Information", &[]), None);
+    }
+    #[test] fn altiums_main_window_is_known_by_its_title() {
+        assert!(is_main_window("Home Page - Altium Designer (26.11.1)") && is_main_window("board.PcbDoc - demo.PrjPcb - Altium Designer (26.11.1)"));
+        assert!(!is_main_window("Information") && !is_main_window("") && !is_main_window("Altium Designer splash"));
     }
     #[test] fn titles_and_captions_match_loosely() {
         assert!(title_matches("engineering change order", "Engineering Change Order"));

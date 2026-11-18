@@ -77,7 +77,7 @@ Altium has no out-of-process API. `altium/live.rs` runs a DelphiScript inside th
 wrapped: its `var` block global, its routines after the helpers, its statements in try/except (an error is a result, not
 Altium's blocking "Continue execution?" box), `Emit(S)` lines written through to disk, every `while`/`repeat` loop cut at
 the run's deadline (a script cannot be stopped from outside), undo groups a failed script left open closed, and any box
-Altium still raises answered. Runs go in `%PUBLIC%\Backplane\altium\runs`.
+Altium still raises answered. Runs go in `%PUBLIC%\Backplane\altium\runs`. With no Altium running, a run starts the newest installed one first and waits for its main window.
 
 - Dialogs a script means to open: `BpExpect(Title, Steps)` before the call that opens one (the ECO's Engineering Change
   Order, Situs's strategy dialog, the IPC footprint batch generator) tells the hub to work that window instead of
