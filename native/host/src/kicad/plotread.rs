@@ -109,7 +109,8 @@ pub fn read(kind: u32, path: &str) -> Read {
     let fixed = kind_of(path) != 0;
     let b = version(path);
     if b.is_empty() { return if fixed { Read::Fail(plotgen::UNREAD.into()) } else { plotgen::empty(path) } }
-    plotgen::of_bytes(kind, &b, fixed)
+    // an Altium sheet's special strings resolve against its project and name (a version's: the live file's)
+    plotgen::of_bytes_at(kind, &b, fixed, &family(path))
 }
 
 // A schematic's sheets: core/hier
