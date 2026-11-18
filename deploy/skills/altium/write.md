@@ -122,7 +122,9 @@ The operations run in this order:
    `power`: [{`net`, `at`, `style`, `rotation`}], `junctions`: [[x, y]], `no_erc`: [[x, y]].
    - `style` is one of: `bar`, `arrow`, `circle`, `wave`, `ground`, `signal_ground`, `earth`.
    - A port without `style`: ground for GND nets, else bar.
-5. `connect`: [{`pin` "U1.3" or "U1.VIN", `net`, `power`, `stub`}]. This is the easy way to wire a sheet.
+5. `connect`: [{`pin` "U1.3" or "U1.VIN", `net`, `power`, `stub`}]. The quick way to wire a pin, but a sheet wired only
+   with it is a sheet of labels: draw `wires` between pins that sit near each other, give supply nets `power` (a `bar`, or
+   `true`) so they show as power ports, and keep labels for long or cross-sheet runs (KiStack's `kicad-schematic`).
    - It draws a short wire out from the pin's end (100 mil, longer for a long label), then a net label at its end, or a
      power port when `power` is a style or `true`.
    - Nets with GND in the name get a ground port unless `"power": false`.

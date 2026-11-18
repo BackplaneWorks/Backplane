@@ -5,12 +5,35 @@ description: Make and edit Altium Designer designs. Without Altium (any platform
 
 # Altium Designer
 
+## Read KiStack's skill for the job first
+
+This skill covers only how to reach Altium (its files, its scripting, the tools below). How to design well is in KiStack's
+KiCad skills, which every Backplane agent has: before the work, read the one that covers it completely (as a skill:
+`kistack:<name>`; the `<kistack_skills>` block in your instructions gives their folder).
+
+| Work | KiStack skill |
+|---|---|
+| a schematic sheet: placing, wiring, power and ground, labels, readability | `kicad-schematic` |
+| a symbol | `kicad-symbol` |
+| a footprint | `kicad-footprint` |
+| board placement and routing | `layout-placement`, `kicad-layout`, `kicad-pcb` |
+| BOM, outputs, Gerbers, panels, renders | `kicad-bom`, `kicad-export`, `kicad-gerbers`, `kicad-panelize`, `pcb-product-render` |
+
+They are written for KiCad: keep their design rules and conventions (signal left to right, power symbols up and ground symbols
+down rather than net labels for supplies, real wires between nearby pins and labels only for long or cross-sheet runs, standard
+symbol shapes, spacing, reference designators, checks) and do the steps with Altium's means here instead of KiCad's tools
+(kicad-cli, kicad_edit and kicad_ipc do not apply). Where a KiCad-only step has no Altium equivalent, skip it and say so.
+When the sheet or board is drawn, look at it (`viewer_show` it, or read it back) and fix what KiStack's checks would flag.
+
 ## Writing files directly: altium_write (any platform, no Altium)
 
 New footprints, new symbols, new sheets, and parts, wires, net labels and power ports added to a sheet: use
 `altium_write`. It takes one JSON spec, writes Altium's own binary files, reads them back, and reports what they hold.
-Read `write.md` before the first call: it has the spec, the package table and the rules. Prefer it to scripting for
-these jobs: it needs no Altium, a spec cannot leave a dialog up, and every part is checked when it is read back.
+Read `write.md` before the first call: it has the spec, the package table and the rules. It needs no Altium, a spec cannot
+leave a dialog up, and every part is checked when it is read back; but it is plain: `connect` puts a stub and a net label on a pin,
+so for a sheet that reads well draw wires between nearby pins and use power ports for supplies and ground (`wires`,
+`power` in the spec, or `connect` with `power`), as KiStack's `kicad-schematic` asks. A real Altium library part, where one is installed, beats a
+template symbol.
 
 Typical flow for a new part: footprint from the datasheet's package drawing (`pcblib`, a `package` or `custom` pads),
 symbol with pins by side (`schlib`, `footprint` naming it), then place and `connect` it on a sheet (`schdoc`), and add the
