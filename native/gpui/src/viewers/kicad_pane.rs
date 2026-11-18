@@ -251,13 +251,15 @@ pub fn raise_step(above: bool, on_screen: bool, st: &mut RaiseState, buried: &mu
 pub fn mac_shown(show: bool, host_visible: bool, hitbox: bool, in_page: bool, covered: bool, dialog: bool, was_visible: bool) -> bool {
     show && host_visible && (!covered || (dialog && was_visible)) && (hitbox || (was_visible && (in_page || dialog)))
 }
-/// macOS: how long after the last push of a burst it is sent once more (`mac_watch`, KicadPane::mac_settle). Why: KiCad's show path
-/// (bp.13.1) places a frame shown by `SetHostGeometry {visible:true}` from that call's rect after it has answered it, over a later call's
-/// rect: e2e-macos 44255662838 pushed 496x524 visible then 496x500, and the frame stayed 496x524. Ours is in order: the client sends
-/// its commands on one socket in order (hub.rs `session`), the hub answers one connection's requests one at a time and each
-/// `editor.kicad.host` only after KiCad has answered its SetHostGeometry (wire/mod.rs `socket_inner`, embed.rs), and one worker per
-/// KiCad socket sends them in order (kipc.rs). So the swap is KiCad's, for the fork to fix (the integrator); this send keeps the last
-/// word ours meanwhile. BACKPLANE_KICAD_MAC_SETTLE_MS: another wait, 0 none (mac_pane_e2e's check that fails on KiCad's swap itself).
+/// macOS: how long after the last push of a burst it is sent once more (`mac_watch`, KicadPane::mac_settle). Why: with bp.13.1 KiCad's
+/// frame can end off the last rect pushed, or not on show, after a show: e2e-macos 44255662838 pushed 496x524 visible then 496x500 and
+/// the frame stayed 496x524; 44274808579 (this send off) had a single visible:true push that never showed, and a 879-wide rect 340 ms
+/// after a 496 one that was not applied. The client sends its pushes in order on one socket (hub.rs `session`) and the hub sends each
+/// SetHostGeometry only after KiCad acknowledged the one before (wire/mod.rs `socket_inner`, embed.rs, kipc.rs); that is the order of
+/// KiCad's acknowledgements, not of its applying them: SetHostGeometry goes on KiCad's events socket and is acknowledged before its
+/// deferred, coalesced apply, while ShowFrame and HideFrame go on the main one (the integrator's reading of the fork, for embed.mm's
+/// owner to confirm). This send makes the last word KiCad gets the pane's rect and visibility now, until the fork applies the last
+/// SetHostGeometry it acknowledged. BACKPLANE_KICAD_MAC_SETTLE_MS: another wait, 0 none (mac_pane_e2e's swap check, which fails without it).
 pub const MAC_SETTLE_MS: u64 = 300;
 /// The settle wait in force (MAC_SETTLE_MS, or BACKPLANE_KICAD_MAC_SETTLE_MS; 0: never sent again).
 pub fn mac_settle_ms(env: Option<&str>) -> u64 { env.and_then(|v| v.trim().parse().ok()).unwrap_or(MAC_SETTLE_MS) }
