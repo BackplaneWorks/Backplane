@@ -15,6 +15,31 @@ pub fn documents(text: &str) -> Vec<String> {
     }
     out
 }
+/// The project file (.PrjPcb) in a sheet's folder that lists that sheet, if any.
+pub fn find_for(sheet: &str) -> Option<String> {
+    let p = std::path::Path::new(sheet);
+    let (dir, name) = (p.parent()?, p.file_name()?.to_string_lossy().to_lowercase());
+    let mut ps: Vec<_> = std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).filter(|q| q.extension().map_or(false, |x| x.eq_ignore_ascii_case("prjpcb"))).collect();
+    ps.sort();
+    ps.into_iter().find(|q| std::fs::read(q).map(|b| of_kind(&String::from_utf8_lossy(&b), super::Kind::Schematic).iter().any(|d| d.rsplit('/').next().unwrap_or(d).to_lowercase() == name)).unwrap_or(false))
+        .map(|q| q.to_string_lossy().into_owned())
+}
+static ROOTS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, Vec<String>)>>> = std::sync::OnceLock::new();
+/// The project's sheets no other sheet of it places (its top-level sheets: the top of a hierarchy, and every sheet of a flat design), in
+/// the project's order, as paths in the project's folder. Kept 10 s (the sheet tree and the BOM ask while they walk).
+pub fn roots(prj: &str) -> Vec<String> {
+    let m = ROOTS.get_or_init(Default::default);
+    if let Some((at, v)) = m.lock().unwrap().get(prj) { if at.elapsed() < std::time::Duration::from_secs(10) { return v.clone() } }
+    let text = std::fs::read(prj).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+    let dir = prj.rfind(['/', '\\']).map(|i| &prj[..i]).unwrap_or("");
+    let sep = if prj.contains('/') { "/" } else { "\\" };
+    let sheets: Vec<String> = of_kind(&text, super::Kind::Schematic).into_iter().map(|d| if dir.is_empty() { d } else { format!("{dir}{sep}{}", if sep == "/" { d } else { d.replace('/', "\\") }) }).collect();
+    let base = |s: &str| { let l = s.rsplit(['/', '\\']).next().unwrap_or(s).to_lowercase(); if l.ends_with(".schdoc") { l } else { format!("{l}.schdoc") } };
+    let placed: std::collections::HashSet<String> = sheets.iter().flat_map(|f| std::fs::read(f).map(|b| super::sch::sheets(&b)).unwrap_or_default()).map(|(_, f)| base(&f)).collect();
+    let v: Vec<String> = sheets.into_iter().filter(|s| !placed.contains(&base(s))).collect();
+    m.lock().unwrap().insert(prj.to_string(), (std::time::Instant::now(), v.clone()));
+    v
+}
 /// The documents of one kind (by extension, any case).
 pub fn of_kind(text: &str, k: super::Kind) -> Vec<String> { documents(text).into_iter().filter(|d| super::kind(d) == Some(k)).collect() }
 

@@ -59,15 +59,16 @@ pub fn altium_found(root: &Path) -> Vec<String> {
 }
 /// Files.altium: an Altium project's board (its first .PcbDoc) and top sheet (the .SchDoc no other sheet of it places)
 fn altium(root: &str, pro: &str, pcb: &str, sch: &str) -> Files {
-    use crate::files::altium::{prj, sch as asch, Kind};
+    use crate::files::altium::{prj, Kind};
     let text = std::fs::read(abs(root, pro)).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
     let d = dir_of(pro);
     let pcb = if pcb.is_empty() { prj::of_kind(&text, Kind::Board).first().map(|f| in_dir(d, f)).unwrap_or_default() } else { pcb.to_string() };
     let sch = if !sch.is_empty() { sch.to_string() } else {
-        let sheets: Vec<String> = prj::of_kind(&text, Kind::Schematic).into_iter().map(|f| in_dir(d, &f)).collect();
-        let lower = |s: &str| s.rsplit('/').next().unwrap_or(s).to_lowercase();
-        let placed: Vec<String> = sheets.iter().flat_map(|f| std::fs::read(abs(root, f)).map(|b| asch::sheets(&b)).unwrap_or_default()).map(|(_, f)| lower(&f.replace('\\', "/"))).collect();
-        sheets.iter().find(|f| !placed.contains(&lower(f))).or(sheets.first()).cloned().unwrap_or_default()
+        // the first of its top-level sheets (no other sheet places it), else its first sheet
+        let full = abs(root, pro);
+        let rs = prj::roots(&full);
+        let first = rs.first().map(|r| r[full.len() - last_of(pro).len()..].replace('\\', "/")).map(|f| in_dir(d, &f));
+        first.or_else(|| prj::of_kind(&text, Kind::Schematic).first().map(|f| in_dir(d, f))).unwrap_or_default()
     };
     Files { pro: abs(root, pro), pcb: abs(root, &pcb), sch: abs(root, &sch), all: vec![] }
 }

@@ -121,7 +121,16 @@ fn sheet_forms<'b>(fs: &'b Option<Vec<&'b [u8]>>) -> impl Iterator<Item = &'b [u
 pub fn kids(file: &str, b: &[u8]) -> Kids {
     if crate::files::altium::is_cfb(b) {
         // an Altium sheet: its sheet symbols name child .SchDoc files beside it
-        let sheets = crate::files::altium::sch::sheets(b).into_iter().map(|(n, f)| (n, resolve(file, &f.replace('\\', "/")))).collect();
+        let mut sheets: Vec<(String, String)> = crate::files::altium::sch::sheets(b).into_iter().map(|(n, f)| (n, crate::files::altium::sheet_file(&resolve(file, &f.replace('\\', "/"))))).collect();
+        // the project's top sheet also leads to its other top-level sheets (a flat design's sheets: no sheet symbol places them)
+        if kind_of(file) == 0 {
+            if let Some(prj) = crate::files::altium::prj::find_for(file) {
+                let rs = crate::files::altium::prj::roots(&prj);
+                if rs.first().map_or(false, |r| r.eq_ignore_ascii_case(file)) {
+                    for r in &rs[1..] { sheets.push((r.rsplit(['/', '\\']).next().unwrap_or(r).trim_end_matches(".SchDoc").trim_end_matches(".schdoc").to_string(), r.clone())) }
+                }
+            }
+        }
         return Kids { file: file.to_string(), sheets }
     }
     let fs = forms(b);

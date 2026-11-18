@@ -46,6 +46,18 @@ pub fn kicad_board_in(cli: &str, pcbdoc: &str, dir: &std::path::Path) -> Result<
     Ok(out.to_string_lossy().into_owned())
 }
 
+/// A sheet symbol's file as it is on disk: Altium writes the name with or without `.SchDoc`, in any case, relative to the parent.
+/// `path` is the joined path; the existing file it means, else `path` as given.
+pub fn sheet_file(path: &str) -> String {
+    let p = std::path::Path::new(path);
+    if p.is_file() { return path.to_string() }
+    let (Some(dir), Some(name)) = (p.parent(), p.file_name().map(|n| n.to_string_lossy().to_lowercase())) else { return path.to_string() };
+    let want = [name.clone(), format!("{name}.schdoc")];
+    std::fs::read_dir(dir).ok().and_then(|rd| rd.flatten().find(|e| want.contains(&e.file_name().to_string_lossy().to_lowercase())))
+        .map(|e| { let n = e.file_name().to_string_lossy().into_owned(); let sep = if path.contains('/') { '/' } else { '\\' }; format!("{}{sep}{n}", path[..path.len() - p.file_name().map_or(0, |x| x.len())].trim_end_matches(['/', '\\'])) })
+        .unwrap_or_else(|| path.to_string())
+}
+
 /// The first eight bytes of every compound file.
 pub const MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 pub fn is_cfb(b: &[u8]) -> bool { b.len() >= 8 && b[..8] == MAGIC }
@@ -271,6 +283,19 @@ mod tests {
         let plan = crate::files::kicad::pcb3d::stream::plan(&made.board, made.seat, &|raw: &str| crate::files::kicad::pcb3d::models::resolve_in(raw, &dir, &env, &emb));
         println!("ALT3D import+mesh {:?} (cached {:?}), triangles {}, embedded models {}, plan: {}", t.elapsed(), cached, made.plot.solid.as_ref().map_or(0, |s| s.n), emb.len(), crate::files::kicad::pcb3d::stream::missing_note(&plan));
         assert!(made.plot.solid.as_ref().map_or(0, |s| s.n) > 1000);
+    }
+    /// The BOM panel's path on a corpus project: its top sheet found from the .PrjPcb, every sheet followed, parts grouped into lines.
+    #[test] fn corpus_bom() {
+        let Some(c) = corpus() else { return };
+        for (dir, n) in [("canbus transceiver board", 5), ("MOP_Revised", 100)] {
+            let d = c.join(dir); if !d.is_dir() { continue }
+            let f = crate::files::kicad::project::read(&d.to_string_lossy());
+            let shs = crate::files::kicad::bompanel::read_sheets(&f.sch);
+            let ps = crate::files::kicad::bom::parts("p", &shs);
+            let ls = crate::files::kicad::bom::group(&ps);
+            println!("BOM {dir}: top {} sheets {} parts {} lines {} with mpn {}", f.sch.rsplit('/').next().unwrap_or(""), shs.len(), ps.len(), ls.len(), ls.iter().filter(|l| !l.mpn.is_empty()).count());
+            assert!(ps.len() >= n, "{dir}: {} parts", ps.len());
+        }
     }
     #[test] fn kinds() {
         assert_eq!(kind("x/Top.SchDoc"), Some(Kind::Schematic));
