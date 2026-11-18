@@ -32,7 +32,7 @@ This page comes from docs/release-retro-0.16.0.md. Times are relative to the pla
 ## Candidates
 
 - **Batch fixes. One candidate per build cycle.** A fix found while a candidate builds goes in the next batch. Only a ship-blocker starts a new cycle early.
-- **Push the next candidate onto the same branch** (for example `fix/bp13.1-final2`), not a new `final3`. A new branch builds cold, at about 90 min on macOS and Linux against 10–25 warm.
+- **Push the next candidate onto the same branch** (for example `fix/bp13.1-final2`) to keep the cycle easy to follow. Since bp.13.2, new candidate branches can also restore the fork's compiler caches from main; wait for the previous candidate's promote before dispatching the next one. See [the measured cold/warm results](kicad-ci-cache-measurements.md).
 - **Never cancel a build that's within 30 min of finishing.** Let it finish and use it to prove whatever it can.
 - **Superseded runs are cancelled only by the fork integrator, by hand, with the guard.** Run `scripts/kicad-candidate-guard.py --new <branch>` (a dry run) when you dispatch the candidate, check what it says, then add `--apply`. It cancels only runs of an older SHA on a candidate branch (`^fix/bp\d+(\.\d+)*-final\d*$`) that are more than 30 min from their workflow's median finish. It never touches release/**, tags, runs of the new SHA, or a run named with `--keep <run id>`. Post its one-line message with the candidate's message.
 - When a candidate changes, the release owner sends one message to every lane that has the SHA, the run ids and what changed. Nobody else cancels runs.
@@ -40,7 +40,7 @@ This page comes from docs/release-retro-0.16.0.md. Times are relative to the pla
 
 ## T: tag and publish
 
-- [ ] **KiCad (bp.N) only: the last candidate's cache promote has finished before the tag is pushed.** Tag and release/** runs can restore only the cache on the fork's `main`, which the "Backplane KiCad cache promote" workflow fills from each candidate run. If the tag goes out before that promote finishes, the release build runs cold. *(pending: fork cache change after bp.13.1)*
+- [ ] **KiCad (bp.N) only: the last candidate's cache promote has finished before the tag is pushed.** Tag and release/** runs restore the cache on the fork's `main`, which the "Backplane KiCad cache promote" workflow fills from successful eligible candidate and release-line runs. Confirm each platform's promote succeeded and its cache entry exists. Windows compiler caching remains opt-in through `BACKPLANE_WIN_CCACHE`; with it unset, Windows does not produce a compiler-cache artifact.
 - [ ] Main is frozen. The release owner's tag script tags the branch head.
 - [ ] Self-hosted runners only if they're proven green on a nightly for this commit. Otherwise delete `RELEASE_*_RUNNER` before tagging (docs/release-runners.md).
 - [ ] Watch the tag run. Publish fills the draft. Check the 14 assets and the signed `manifest.json`.
@@ -58,6 +58,6 @@ This page comes from docs/release-retro-0.16.0.md. Times are relative to the pla
 | Build | Cold | Warm |
 |---|---|---|
 | Backplane tag run | 58 min (darwin 53, linux-x64 46: cache misses) | est. ~30 min |
-| KiCad Windows | 2 h 06 min – 2 h 47 min (no compiler cache) | not available yet *(pending: #2)* |
+| KiCad Windows | 2 h 06 min – 2 h 47 min (no compiler cache) | bp.13.2 measurement: 26.0 min with ccache enabled; [details](kicad-ci-cache-measurements.md) |
 | KiCad macOS | 76–104 min | 8–20 min |
 | KiCad Linux | 83–131 min | 23–29 min |
