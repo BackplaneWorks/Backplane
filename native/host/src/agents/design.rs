@@ -171,6 +171,7 @@ impl Agents {
                 Ok(m)
             }) }
             fn caps(&self) -> Vec<String> { self.caps.clone() }
+            fn served(&self) -> Option<&'static str> { crate::files::kicad::ipc::SERVED.try_with(|s| s.borrow().last()).ok().flatten() }
             fn sheet_texts(&self) -> Option<Vec<String>> {
                 if !self.path.ends_with(".kicad_sch") { return None }
                 fn walk(d: &std::path::Path, depth: u32, out: &mut Vec<String>) {
