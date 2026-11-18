@@ -251,6 +251,8 @@ pub fn raise_step(above: bool, on_screen: bool, st: &mut RaiseState, buried: &mu
 pub fn mac_shown(show: bool, host_visible: bool, hitbox: bool, in_page: bool, covered: bool, dialog: bool, was_visible: bool) -> bool {
     show && host_visible && (!covered || (dialog && was_visible)) && (hitbox || (was_visible && (in_page || dialog)))
 }
+/// macOS: how long after the last push of a burst it is sent once more (`mac_watch`, KicadPane::mac_settle).
+pub const MAC_SETTLE_MS: u64 = 300;
 /// Whether something drawn after the pane's own content covers all of the pane (`over`: what was drawn over it, each clipped to
 /// the pane, as Window::hitbox_drawn_after gives it): a full-window screen (its backdrop), not a menu, a tooltip or a card.
 pub fn covers_pane(pane: (f32, f32), over: &[(f32, f32)]) -> bool {
@@ -390,6 +392,9 @@ pub struct KicadPane {
     /// macOS: a hitbox drawn after all the pane's own content (its last child), and whether what was drawn after it covered all of
     /// the pane in the last frame (`covers_pane`: Settings or another full-window screen over the page)
     end_marker: Arc<Mutex<Option<HitboxId>>>, mac_covered: bool,
+    /// macOS: when the last push of a burst is sent again (`mac_watch`): a show and the rect corrected a frame later reached KiCad as
+    /// two pushes, and its frame kept the first one's rect (e2e-macos 44255662838: 24 pt too tall over the strip, 13.6 s and on)
+    mac_settle: Option<std::time::Instant>,
     last_root: (i32, i32), placed: Option<(Option<nc::R>, Option<u64>, Vec<nc::R>)>,
     focus: FocusHandle, keys: bool, pub light: bool, _subs: Vec<Subscription>,
     /// the fork's holder already in our save-set; reserved chords pressed in KiCad, waiting to be pressed in gpui
@@ -523,7 +528,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, last_root: (i32::MIN, 0), placed: None,
+        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, last_root: (i32::MIN, 0), placed: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
@@ -1242,6 +1247,7 @@ impl KicadPane {
             if let Some((x, y, w, h, v)) = now {
                 eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [x, y, w, h], "visible": v, "raise": false, "changed": true, "pane_px": at.map(|r| [r.x, r.y, r.w, r.h]), "frame": show, "in_page": self.in_page, "covered": self.mac_covered, "hitbox": hitbox, "dialog": dialog}));
                 self.rpc("editor.kicad.host", json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": v, "raise": false}));
+                self.mac_settle = Some(std::time::Instant::now() + std::time::Duration::from_millis(MAC_SETTLE_MS));
                 // the page let the editor go (#1199): the keyboard back to Backplane's window if KiCad had it, as detach does (a8bbdc74e);
                 // the frame stays parked in KiCad, shown again at the next frame that draws the pane, and the keys go to it on a click
                 if was && !v && (!self.in_page || self.mac_covered) && (self.keys || nc::has_focus(0)) {
@@ -1306,6 +1312,15 @@ impl KicadPane {
         if std::env::var("BACKPLANE_KICAD_MAC_WATCH").is_ok_and(|v| v == "off") { return 1000 }
         // a press brings our window in front of the frame, and one on the title bar or an edge draws no frame of ours (the gate's blank
         // pane: a press on the resize corner of a window that could not grow): the button going down is seen here within a frame's time
+        // the last push of a burst, once more when the burst is over: whatever order the pushes reached KiCad in, the last it applies is
+        // the pane's rect and visibility now (mac_settle)
+        if self.mac_settle.is_some_and(|t| t <= std::time::Instant::now()) {
+            self.mac_settle = None;
+            if let Some((x, y, w, h, v)) = self.host_sent {
+                eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [x, y, w, h], "visible": v, "raise": false, "changed": false, "settle": true}));
+                self.rpc("editor.kicad.host", json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": v, "raise": false}));
+            }
+        }
         let pressed = nc::mouse_down();
         if pressed != self.mac_pressed { self.mac_pressed = pressed; self.mac_heat(); }
         let hot = self.mac_hot.is_some_and(|t| t > std::time::Instant::now());
