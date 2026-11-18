@@ -666,11 +666,20 @@ try:
             pressed_ = press_rect(leave_id); time.sleep(0.5)
             gone = wait_for(lambda: not kicad_over_pane(), 8, 0.3); shot('leave-' + leave_id.split(':')[1])
             check(pressed_ and bool(gone), f'leave: {label} takes KiCad\'s frame off screen (pressed {pressed_}; KiCad windows over the pane {[w[3] for w in kicad_over_pane()]})')
-            back_ = press_rect('rail:Board'); time.sleep(0.5)
-            if back_ and not wait_for(lambda: rects().get('ui:View') or kicad_frame(), 10, 0.3) and rects().get('ui:Edit'): press_rect('ui:Edit')
-            f2 = wait_for(kicad_frame, 30, 0.5); shot('leave-back-' + leave_id.split(':')[1])
-            check(bool(f2), f'leave: the Board page after {label} brings KiCad\'s frame back over the pane (pressed {back_})')
-            if f2: P = last_push()[0]
+            tb = time.time(); back_ = press_rect('rail:Board')
+            f2 = wait_for(kicad_frame, 3, 0.02); dt = time.time() - tb
+            if not f2 and rects().get('ui:Edit'):
+                tb = time.time(); press_rect('ui:Edit'); f2 = wait_for(kicad_frame, 30, 0.02); dt = time.time() - tb
+            k_now = f2 and active(kpid)
+            shot('leave-back-' + leave_id.split(':')[1])
+            check(bool(f2), f'leave: the Board page after {label} brings KiCad\'s frame back over the pane (pressed {back_}; {dt * 1000:.0f} ms)')
+            # lane B's: back in under ~200 ms (from the press, the window list polled every 20 ms) and the keyboard in KiCad
+            print(f'INFO leave: after {label}, the frame back in {dt * 1000:.0f} ms; KiCad has the keyboard {bool(k_now)} before any click', flush=True)
+            if f2:
+                check(dt <= 0.25, f'leave: the editor is back within ~200 ms of the press ({dt * 1000:.0f} ms)')
+                P = last_push()[0]
+                if not k_now: click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); time.sleep(0.6); key(K_ESC); time.sleep(0.3)
+                check(active(kpid), f'leave: the keyboard is in KiCad ({"at once" if k_now else "after a click on the canvas"})')
         raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=zoom: the zoom chords in the embedded board editor (fork embed's fix/mac-cmd-equals-zoom: plain Cmd+= zooms in), judged by
     # the board's size on screen (KiCad has no view readback): the extent of the board's coloured pixels (copper, silk; the grid, ratsnest and
