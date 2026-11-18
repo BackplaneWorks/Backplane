@@ -4428,6 +4428,7 @@ gpui.f2.uber.p.lilac	Lilac	ライラック	Lila
 gpui.f2.uber.p.rose	Rose	ローズ	Rosa
 gpui.f2.uber.p.mint	Mint	ミント	Menta
 gpui.f2.uber.p.cherry	Cherry	チェリー	Cereza
+gpui.simulation	Simulation	シミュレーション	Simulación
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
