@@ -15,6 +15,27 @@ pub const FILES: &[(&str, &str)] = &[
     ("skills/sendcutsend/scripts/scs_step.py", include_str!("../../../../deploy/skills/sendcutsend/scripts/scs_step.py")),
     ("skills/sendcutsend/scripts/scs_sheet.py", include_str!("../../../../deploy/skills/sendcutsend/scripts/scs_sheet.py")),
     ("skills/sendcutsend/examples/bracket.py", include_str!("../../../../deploy/skills/sendcutsend/examples/bracket.py")),
+    ("skills/altium/SKILL.md", include_str!("../../../../deploy/skills/altium/SKILL.md")),
+    ("skills/altium/reference.md", include_str!("../../../../deploy/skills/altium/reference.md")),
+    ("skills/altium/recipes/close_document.pas", include_str!("../../../../deploy/skills/altium/recipes/close_document.pas")),
+    ("skills/altium/recipes/open_project.pas", include_str!("../../../../deploy/skills/altium/recipes/open_project.pas")),
+    ("skills/altium/recipes/outjob_run.pas", include_str!("../../../../deploy/skills/altium/recipes/outjob_run.pas")),
+    ("skills/altium/recipes/pcb_add_track_via.pas", include_str!("../../../../deploy/skills/altium/recipes/pcb_add_track_via.pas")),
+    ("skills/altium/recipes/pcb_delete.pas", include_str!("../../../../deploy/skills/altium/recipes/pcb_delete.pas")),
+    ("skills/altium/recipes/pcb_drc.pas", include_str!("../../../../deploy/skills/altium/recipes/pcb_drc.pas")),
+    ("skills/altium/recipes/pcb_list.pas", include_str!("../../../../deploy/skills/altium/recipes/pcb_list.pas")),
+    ("skills/altium/recipes/pcb_list_area.pas", include_str!("../../../../deploy/skills/altium/recipes/pcb_list_area.pas")),
+    ("skills/altium/recipes/pcb_move_component.pas", include_str!("../../../../deploy/skills/altium/recipes/pcb_move_component.pas")),
+    ("skills/altium/recipes/pcb_violations.pas", include_str!("../../../../deploy/skills/altium/recipes/pcb_violations.pas")),
+    ("skills/altium/recipes/project_netlist.pas", include_str!("../../../../deploy/skills/altium/recipes/project_netlist.pas")),
+    ("skills/altium/recipes/save_document.pas", include_str!("../../../../deploy/skills/altium/recipes/save_document.pas")),
+    ("skills/altium/recipes/sch_delete.pas", include_str!("../../../../deploy/skills/altium/recipes/sch_delete.pas")),
+    ("skills/altium/recipes/sch_edit_component.pas", include_str!("../../../../deploy/skills/altium/recipes/sch_edit_component.pas")),
+    ("skills/altium/recipes/sch_list_components.pas", include_str!("../../../../deploy/skills/altium/recipes/sch_list_components.pas")),
+    ("skills/altium/recipes/sch_list_objects.pas", include_str!("../../../../deploy/skills/altium/recipes/sch_list_objects.pas")),
+    ("skills/altium/recipes/sch_pcb_diff.pas", include_str!("../../../../deploy/skills/altium/recipes/sch_pcb_diff.pas")),
+    ("skills/altium/recipes/sch_place_part.pas", include_str!("../../../../deploy/skills/altium/recipes/sch_place_part.pas")),
+    ("skills/altium/recipes/sch_place_wire_label_power.pas", include_str!("../../../../deploy/skills/altium/recipes/sch_place_wire_label_power.pas")),
 ];
 
 pub fn dir(home: &Path) -> PathBuf { home.join("bundled") }
@@ -72,11 +93,12 @@ mod tests {
         let md = std::fs::read_to_string(d.join("skills/sendcutsend/SKILL.md")).unwrap();
         assert!(md.starts_with("---\nname: sendcutsend\n"));
         assert!(d.join("skills/sendcutsend/scripts/scs.py").is_file() && d.join("skills/sendcutsend/scripts/scs_step.py").is_file());
+        assert!(std::fs::read_to_string(d.join("skills/altium/SKILL.md")).unwrap().starts_with("---\nname: altium\n") && d.join("skills/altium/recipes/pcb_drc.pas").is_file());
         assert!(!stale.exists() && !h.join("bundled/skills/gone").exists(), "a skill an older build shipped is removed");
         let t0 = std::fs::metadata(d.join("skills/sendcutsend/SKILL.md")).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20)); install(&h).unwrap();
         assert_eq!(std::fs::metadata(d.join("skills/sendcutsend/SKILL.md")).unwrap().modified().unwrap(), t0, "an unchanged file is not rewritten");
-        let l = list(&d); assert_eq!(l.len(), 1); assert_eq!(l[0].0, "sendcutsend"); assert!(l[0].1.contains("SendCutSend")); assert!(l[0].2.replace('\\', "/").ends_with("bundled/skills/sendcutsend/SKILL.md"));
+        let l = list(&d); assert_eq!(l.len(), 2); assert_eq!(l[0].0, "sendcutsend"); assert_eq!(l[1].0, "altium"); assert!(l[1].1.contains("Altium")); assert!(l[0].1.contains("SendCutSend")); assert!(l[0].2.replace('\\', "/").ends_with("bundled/skills/sendcutsend/SKILL.md"));
         let _ = std::fs::remove_dir_all(&h);
     }
 
