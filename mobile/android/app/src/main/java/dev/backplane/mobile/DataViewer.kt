@@ -132,17 +132,29 @@ private fun BoardPicker(boards: List<DataClient.BoardRow>, on: DataClient.BoardR
     }
 }
 
-/** The schematic's sheet on show (the hub's `sheets`, top first); a press opens the hierarchy in a sheet, each indented by its depth. */
+/** The schematic's sheet on show (the hub's `sheets`, top first); a press opens the hierarchy in a sheet, each indented by its depth.
+ *  A search (more than 10 sheets, as the desktop's) keeps the sheets whose name has every word, flat, each under its parent path. */
 @Composable
 private fun SheetPicker(sheets: List<DataClient.Sheet>, path: String, pick: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     val on = sheets.firstOrNull { it.file == path } ?: sheets.first()
     PickerHead(Msg.android_viewer_sheet, on.name, Msg.android_viewer_sheets_n(sheets.size), "viewer.sheets") { open = true }
     if (open) PickerSheet(Msg.android_viewer_sheets, close = { open = false }, search = sheets.size > 10) { q ->
-        sheets.filter { q.isBlank() || it.name.contains(q.trim(), ignoreCase = true) }.forEach { sh ->
-            PickerRow(sh.name, sh.file.substringAfterLast('/'), sh.file == on.file, if (q.isBlank()) sh.depth else 0, "viewer.sheet.${sh.file.substringAfterLast('/')}") { open = false; pick(sh.file) }
+        val words = q.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        sheets.forEachIndexed { i, sh ->
+            if (words.any { !sh.name.contains(it, ignoreCase = true) }) return@forEachIndexed
+            val up = if (words.isEmpty()) "" else sheetPath(sheets, i)
+            PickerRow(sh.name, up.ifEmpty { sh.file.substringAfterLast('/') }, sh.file == on.file, if (words.isEmpty()) sh.depth else 0, "viewer.sheet.${sh.file.substringAfterLast('/')}") { open = false; pick(sh.file) }
         }
     }
+}
+
+/** The sheets above row [i] (its parent's name, theirs...), outermost first, without the top sheet: "Power / Regulators" (the desktop's sheets.rs `path`). */
+internal fun sheetPath(sheets: List<DataClient.Sheet>, i: Int): String {
+    var d = sheets.getOrNull(i)?.depth ?: return ""
+    val up = mutableListOf<String>()
+    for (j in i - 1 downTo 0) { val s = sheets[j]; if (s.depth < d) { d = s.depth; if (d == 0) break; up.add(s.name) } }
+    return up.reversed().joinToString(" / ")
 }
 
 /** The bar a picker shows on the page: what it is, the choice whole, a line under it, and Change. */
