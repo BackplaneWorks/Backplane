@@ -108,7 +108,7 @@ pub fn shown(kind: &str, path: &str) -> Option<(String, Option<String>)> {
     let l = path.to_ascii_lowercase();
     let model = [".step", ".stp", ".glb"].iter().any(|e| l.ends_with(e));
     let k = match kind { "board" | "pcb" => "board", "schematic" | "sch" => "schematic", "3d" if model => "mech", "3d" => "3d", "mech" | "split" | "browser" | "files" | "review" => kind,
-        "" if l.ends_with(".kicad_pcb") => "board", "" if l.ends_with(".kicad_sch") => "schematic", "" if model => "mech", _ => return None };
+        "" if l.ends_with(".kicad_pcb") || l.ends_with(".pcbdoc") => "board", "" if l.ends_with(".kicad_sch") || l.ends_with(".schdoc") => "schematic", "" if model => "mech", _ => return None };
     Some((k.to_string(), (k == "mech" && model).then(|| path.to_string())))
 }
 

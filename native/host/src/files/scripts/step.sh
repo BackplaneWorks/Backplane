@@ -11,7 +11,7 @@ if top=$(git rev-parse --show-toplevel) && [ -n "$top" ]; then
 else
   top=$(pwd); gd=$top/.backplane/history.git; pd=$gd; shadow=1
   [ "$top" = / ] || [ "$top" = "$HOME" ] && exit 0
-  [ -d "$gd" ] || [ -L "$gd" ] || [ -n "$(find . -maxdepth 4 \( -name '*.kicad_pcb' -o -name '*.kicad_sch' -o -name '*.kicad_pro' \) -print | head -n 1)" ] || exit 0
+  [ -d "$gd" ] || [ -L "$gd" ] || [ -n "$(find . -maxdepth 4 \( -name '*.kicad_pcb' -o -name '*.kicad_sch' -o -name '*.kicad_pro' -o -iname '*.pcbdoc' -o -iname '*.schdoc' -o -iname '*.prjpcb' \) -print | head -n 1)" ] || exit 0
   if [ -e "$gd" ] || [ -L "$gd" ]; then
     # trusted: the registry names this folder with its inode (the device number before the colon is not compared: it changes when the disk is mounted again)
     if ! { [ -n "$reg" ] && [ ! -L "$gd" ] && [ -d "$gd" ] && i=$(ino "$gd") && awk -v i="${i#*:}" -v g="$gd" '{ k = $1; sub(/^[^:]*:/, "", k) } k == i && substr($0, length($1) + 2) == g { f = 1 } END { exit !f }' "$reg"; }; then
@@ -28,7 +28,9 @@ fi
 bp_safe
 ref=refs/backplane/checkpoints/$name/steps
 spec='*.kicad_[ps][cr][boh]'
-[ -n "$shadow" ] || git rev-parse -q --verify "$ref" >/dev/null || [ -n "$(git ls-files -- "$spec" | head -n 1)" ] || [ -n "$(find . -maxdepth 4 \( -name '*.kicad_pcb' -o -name '*.kicad_sch' -o -name '*.kicad_pro' \) -not -path './.backplane/*' -print | head -n 1)" ] || exit 0
+# Altium's boards, sheets and projects (any case; History/ is Altium's own backups)
+aspec1=':(icase)*.pcbdoc' aspec2=':(icase)*.schdoc' aspec3=':(icase)*.prjpcb'
+[ -n "$shadow" ] || git rev-parse -q --verify "$ref" >/dev/null || [ -n "$(git ls-files -- "$spec" "$aspec1" "$aspec2" "$aspec3" | head -n 1)" ] || [ -n "$(find . -maxdepth 4 \( -name '*.kicad_pcb' -o -name '*.kicad_sch' -o -name '*.kicad_pro' -o -iname '*.pcbdoc' -o -iname '*.schdoc' -o -iname '*.prjpcb' \) -not -path './.backplane/*' -print | head -n 1)" ] || exit 0
 idx=$pd/backplane-$name.steps.index
 lock=$pd/backplane-$name.steps.lock
 n=0
@@ -40,8 +42,15 @@ done
 echo $$ > "$lock/pid"
 trap '[ "$(cat "$lock/pid")" = $$ ] && rm -rf "$lock"' EXIT
 rm -f "$idx.lock"
-[ -n "$shadow" ] || git ls-files -z -- "$spec" | GIT_INDEX_FILE=$idx xargs -0 git add -f -- >/dev/null
-GIT_INDEX_FILE=$idx git add -A -- "$spec" ':(exclude)*_autosave-*' ':(exclude)*-backups/*' >/dev/null
+# only the patterns that match a file here or in the index: git add refuses a pathspec that matches nothing (an Altium-only
+# folder has no KiCad file, a KiCad one no Altium file); globbing off so the shell leaves the patterns to git
+set -f; specs=
+for x in "$spec" "$aspec1" "$aspec2" "$aspec3"; do
+  [ -n "$(git ls-files -- "$x" | head -n 1)" ] || [ -n "$(git ls-files -o --exclude-standard -- "$x" | head -n 1)" ] && specs="$specs $x"
+done
+[ -n "$specs" ] || exit 0
+[ -n "$shadow" ] || git ls-files -z -- $specs | GIT_INDEX_FILE=$idx xargs -0 git add -f -- >/dev/null
+GIT_INDEX_FILE=$idx git add -A -- $specs ':(exclude)*_autosave-*' ':(exclude)*-backups/*' ':(exclude)History/*' ':(exclude)*/History/*' >/dev/null
 tree=$(GIT_INDEX_FILE=$idx git write-tree) || exit 0
 prev=$(git rev-parse -q --verify "$ref")
 if [ -n "$prev" ]; then

@@ -92,16 +92,17 @@ pub fn is_design(rel: &str) -> bool {
         || name.ends_with(".fab.json") || name.ends_with(".backplane.json") && name != ".backplane.json"
         || dirs.iter().any(|d| *d == "mech" || *d == "mfg" || d.ends_with(".pretty") || d.ends_with(".3dshapes"))
 }
-const DESIGN_EXT: &[&str] = &[".kicad_pcb", ".kicad_sch", ".kicad_pro", ".kicad_prl", ".kicad_sym", ".kicad_mod", ".kicad_dru", ".kicad_wks", ".step", ".stp", ".wrl", ".fcstd"];
-fn is_scratch(low: &str) -> bool { low.contains("-backups/") || low.ends_with(".lck") || low.ends_with("fp-info-cache") || low.contains("_autosave-") || low.contains("/.backplane/") || low.starts_with(".backplane/") }
+const DESIGN_EXT: &[&str] = &[".kicad_pcb", ".kicad_sch", ".kicad_pro", ".kicad_prl", ".kicad_sym", ".kicad_mod", ".kicad_dru", ".kicad_wks", ".step", ".stp", ".wrl", ".fcstd",
+    ".prjpcb", ".pcbdoc", ".schdoc", ".schlib", ".pcblib", ".intlib", ".outjob", ".prjpcbstructure"]; // Altium's project, documents and libraries
+fn is_scratch(low: &str) -> bool { low.starts_with("history/") || low.contains("/history/") && (low.ends_with(".zip") || low.contains(".schdoc") || low.contains(".pcbdoc")) || low.contains("__previews/") || low.ends_with(".schdocpreview") || low.ends_with(".pcbdocpreview") || low.contains("-backups/") || low.ends_with(".lck") || low.ends_with("fp-info-cache") || low.contains("_autosave-") || low.contains("/.backplane/") || low.starts_with(".backplane/") }
 /// The documents one writer at a time holds: boards and schematics.
-pub fn is_document(p: &str) -> bool { p.ends_with(".kicad_pcb") || p.ends_with(".kicad_sch") }
+pub fn is_document(p: &str) -> bool { p.ends_with(".kicad_pcb") || p.ends_with(".kicad_sch") || { let l = p.to_ascii_lowercase(); l.ends_with(".pcbdoc") || l.ends_with(".schdoc") } }
 
 /// Hardware: a project with KiCad files (a `.kicad_pro` up to four folders down, or a board or
 /// schematic in its root). Such a project's threads work in the main checkout.
 pub fn hardware(root: &str) -> bool {
-    !project::found(std::path::Path::new(root)).is_empty()
-        || std::fs::read_dir(root).map(|d| d.flatten().any(|e| { let n = e.file_name().to_string_lossy().into_owned(); n.ends_with(".kicad_pcb") || n.ends_with(".kicad_sch") })).unwrap_or(false)
+    !project::found(std::path::Path::new(root)).is_empty() || !project::altium_found(std::path::Path::new(root)).is_empty()
+        || std::fs::read_dir(root).map(|d| d.flatten().any(|e| { let n = e.file_name().to_string_lossy().into_owned(); n.ends_with(".kicad_pcb") || n.ends_with(".kicad_sch") || is_document(&n) })).unwrap_or(false)
 }
 static HW: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, bool)>>> = std::sync::OnceLock::new();
 /// `hardware`, remembered for ten seconds (the viewer asks on every page it builds).
@@ -137,6 +138,8 @@ pub fn doc_lock(doc: &str) -> String {
     let doc = &same_file(doc);
     let file = doc.rsplit('/').next().unwrap_or("board");
     let (stem, kind) = file.rsplit_once('.').map_or((file, "doc"), |(s, x)| (s, x.strip_prefix("kicad_").unwrap_or(x)));
+    // an Altium board or sheet takes the same lock names as KiCad's (one writer per document either way)
+    let kind = match kind.to_ascii_lowercase().as_str() { "pcbdoc" => "pcb", "schdoc" => "sch", _ => kind };
     let stem: String = stem.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' }).take(40).collect();
     format!("kicad-{stem}-{kind}-{}", &kserve::digest(doc)[..8]).chars().take(64).collect()
 }
@@ -330,6 +333,12 @@ pub fn bring_back(main: &str, wt: &str, thread: &str, stamp: &str) -> Result<(St
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn altium_files_are_design_documents() {
+        for f in ["hw/Board.PcbDoc", "Top.SchDoc", "x.PrjPcb", "lib/parts.SchLib", "lib/parts.PcbLib", "out.OutJob"] { assert!(is_design(f), "{f}") }
+        for f in ["History/Board.PcbDoc.zip", "hw/History/Top~1.SchDoc", "__Previews/Top.SchDocPreview"] { assert!(!is_design(f), "{f}") }
+        assert!(is_document("/p/Board.PcbDoc") && is_document("/p/Top.SCHDOC") && !is_document("/p/x.PrjPcb"));
+        assert!(is_doc_lock(&doc_lock("/p/Board.PcbDoc")) && is_doc_lock(&doc_lock("/p/Top.SchDoc")));
+    }
     #[test] fn a_new_board_family_counts_once_a_rename_or_baseline_counts_nothing() {
         let f = |n: &str, b: bool, now: bool| (n.to_string(), b, now);
         assert_eq!(new_board_families(&[f("boards/a/a", false, true)], true), 1, "a .kicad_pro/.kicad_pcb pair is one family");

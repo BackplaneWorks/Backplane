@@ -65,6 +65,8 @@ pub fn stage_text(kind: u32, file: &str, native: bool, cached: bool, tools: &[st
     let _ = kind; format!("Exporting the board's 3D model with KiCad (kicad-cli)…")
 }
 pub fn key(kind: u32, root: &str, path: &str) -> String { format!("{kind}|{root}|{path}") }
+/// An Altium board file (.PcbDoc, any case): read by altium/pcb.rs
+pub fn is_altium_board(p: &str) -> bool { p.to_ascii_lowercase().ends_with(".pcbdoc") }
 pub fn kind_of(name: &str) -> Option<u32> { Some(match name { "board" => 0, "schematic" => 1, "3d" => 2, "3d-bare" => 3, "3d-full" => 4, _ => return None }) }
 /// FNV-1a of a key (Key.hash), the info file's name.
 pub fn fnv(s: &str) -> u32 { s.chars().fold(2166136261u32, |h, c| (h ^ c as u32).wrapping_mul(16777619)) }
@@ -150,7 +152,8 @@ impl Plots {
         self.st.lock().unwrap().waiting.remove(&client);
         let f = project::read(root);
         let picked = !board.is_empty();
-        let own_sch = if picked { board.strip_suffix(".kicad_pcb").map(|b| format!("{b}.kicad_sch")).filter(|p| std::path::Path::new(p).is_file()).unwrap_or_default() } else { f.sch.clone() };
+        let own_sch = if picked && is_altium_board(board) { if board == f.pcb { f.sch.clone() } else { String::new() } } // an Altium board's sheets are its project's
+            else if picked { board.strip_suffix(".kicad_pcb").map(|b| format!("{b}.kicad_sch")).filter(|p| std::path::Path::new(p).is_file()).unwrap_or_default() } else { f.sch.clone() };
         let sch = if path.is_empty() { own_sch.clone() } else { path.to_string() };
         let pcb = if picked { board.to_string() } else { f.pcb.clone() };
         let (sch_at, pcb_at) = if picked { (if path.is_empty() { own_sch.as_str() } else { path }, board) } else { (path, "") };
@@ -697,7 +700,7 @@ impl RpcHandler for KicadRpc {
                     // kept: "<key>\t<id>" (an older phone sends the id alone)
                     let k = s("kept");
                     // (a board picked in the Boards menu must be a file of this folder)
-                    let board = s("board"); if !board.is_empty() && !(board.ends_with(".kicad_pcb") && !board.contains("..") && board.starts_with(&format!("{root}/"))) { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that board is not in this project"})] }
+                    let board = s("board"); if !board.is_empty() && !((board.ends_with(".kicad_pcb") || is_altium_board(&board)) && !board.contains("..") && board.starts_with(&format!("{root}/"))) { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that board is not in this project"})] }
                     if p.get("fresh").and_then(Value::as_bool) == Some(true) { self.0.forget(who.client) }
                     let keys = if kind == "split" { self.0.watch_split(hub, who.client, &root, &path, &s("tree"), &board) }
                     else { self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree"), kept_of(&k)) };

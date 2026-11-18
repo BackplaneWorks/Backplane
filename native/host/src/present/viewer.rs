@@ -53,7 +53,7 @@ pub fn show_refusal(kind: &str, path: &str, roots: &[String]) -> Option<String> 
         "mech" => Some(format!("Mech shows STEP, STP and GLB files, not {path}")),
         "board" | "pcb" | "schematic" | "sch" | "3d" | "split" | "browser" | "files" | "review" | "gerbers" => None,
         "" if is_model(path) => (!there()).then(|| format!("no such file: {path}")),
-        "" if l.ends_with(".kicad_pcb") || l.ends_with(".kicad_sch") => None,
+        "" if l.ends_with(".kicad_pcb") || l.ends_with(".kicad_sch") || l.ends_with(".pcbdoc") || l.ends_with(".schdoc") => None,
         "" => Some(format!("the viewer has no page for {path}: give a kind (board, schematic, 3d, mech, files) or a .kicad_pcb, .kicad_sch, .step or .glb")),
         k => Some(format!("unknown viewer kind {k:?} (board, schematic, 3d, mech, split, files, review)")),
     }
@@ -122,7 +122,7 @@ pub struct ViewOut {
 /// across closing the viewer (0.14 kept the board picked, Bd.id): "" for the project's own. A path that leaves the folder is no choice.
 fn chosen_board(d: &Value, sel: &str) -> String {
     let b = s(d, &format!("@view.board:{sel}"));
-    if b.is_empty() || b.contains("..") || b.starts_with('/') || !b.ends_with(".kicad_pcb") { String::new() } else { b.to_string() }
+    if b.is_empty() || b.contains("..") || b.starts_with('/') || !(b.ends_with(".kicad_pcb") || b.to_ascii_lowercase().ends_with(".pcbdoc")) { String::new() } else { b.to_string() }
 }
 /// The file a page of `kind` shows for the board `rel` (its schematic beside it on the Schematic page); "" for none.
 fn board_file(kind: &str, root: &str, rel: &str) -> String {

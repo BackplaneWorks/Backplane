@@ -119,13 +119,22 @@ fn dir(p: &str) -> &str { p.rfind('/').map(|i| &p[..=i]).unwrap_or("") }
 fn resolve(parent: &str, f: &str) -> String { if crate::plat::fs::is_abs(f) { f.to_string() } else { format!("{}{f}", dir(parent)) } }
 fn sheet_forms<'b>(fs: &'b Option<Vec<&'b [u8]>>) -> impl Iterator<Item = &'b [u8]> + 'b { fs.iter().flatten().copied().filter(|f| head(f) == b"sheet") }
 pub fn kids(file: &str, b: &[u8]) -> Kids {
+    if crate::files::altium::is_cfb(b) {
+        // an Altium sheet: its sheet symbols name child .SchDoc files beside it
+        let sheets = crate::files::altium::sch::sheets(b).into_iter().map(|(n, f)| (n, resolve(file, &f.replace('\\', "/")))).collect();
+        return Kids { file: file.to_string(), sheets }
+    }
     let fs = forms(b);
     let sheets = sheet_forms(&fs).map(|f| { let x = parse(f); (sheet_prop(&x, "Sheetname", "Sheet name").to_string(), resolve(file, sheet_prop(&x, "Sheetfile", "Sheet file"))) }).collect();
     Kids { file: file.to_string(), sheets }
 }
 fn boxes_line(key: &str, b: &[u8]) -> String {
-    let fs = forms(b);
     let mut v = vec![key.to_string()];
+    if crate::files::altium::is_cfb(b) {
+        for (x0, y0, x1, y1) in crate::files::altium::sch::sheet_boxes(b) { v.push(format!("{} {} {} {}", fl::show(x0), fl::show(y0), fl::show(x1), fl::show(y1))) }
+        return v.join("\t")
+    }
+    let fs = forms(b);
     for f in sheet_forms(&fs) {
         let x = parse(f);
         let (a, s) = (x.get("at"), x.get("size"));
@@ -169,7 +178,11 @@ fn refs(b: &[u8]) -> Vec<String> {
     }
     out
 }
-fn refs_line(key: &str, b: &[u8]) -> String { let mut v = vec![key.to_string()]; v.extend(refs(b)); v.join("\t") }
+fn refs_line(key: &str, b: &[u8]) -> String {
+    let mut v = vec![key.to_string()];
+    if crate::files::altium::is_cfb(b) { v.extend(crate::files::altium::sch::parts(b).into_iter().map(|p| p.refdes).filter(|r| !r.contains('?') && r.bytes().any(|d| d.is_ascii_digit()))) } else { v.extend(refs(b)) }
+    v.join("\t")
+}
 fn trim_end(s: &str) -> &str { s.trim_end_matches([' ', '\t', '\n', '\u{b}', '\u{c}', '\r']) }
 
 #[derive(Debug, PartialEq)]

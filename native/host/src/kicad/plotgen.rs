@@ -253,6 +253,15 @@ pub fn empty(path: &str) -> Read {
 }
 /// a file's bytes as its plot; `fixed` (a version in a commit): what does not parse is unread rather than half written
 pub fn of_bytes(kind: u32, b: &[u8], fixed: bool) -> Read {
+    // an Altium document (an OLE compound file): its own reader, the same items (altium/)
+    if crate::files::altium::is_cfb(b) {
+        use crate::files::altium::{pcb, sch};
+        let its = if kind == 0 { pcb::items(b) } else { sch::items(b) };
+        let Some(its) = its else { return if fixed { Read::Fail(UNREAD.into()) } else { Read::Half } };
+        let (mut p, t) = items_plot(its, kind);
+        p.thick = if kind == 0 { pcb::thickness_um(b) } else { 0 };
+        return Read::Plot(Box::new(p), t)
+    }
     let Some(fs) = sexpr::forms(b) else { return if fixed { Read::Fail(UNREAD.into()) } else { Read::Half } };
     let (mut p, t) = if kind == 0 { board_plot(&fs) } else { items_plot(sch_items(&fs), kind) };
     p.thick = if kind == 0 { thick(b) } else { 0 };
