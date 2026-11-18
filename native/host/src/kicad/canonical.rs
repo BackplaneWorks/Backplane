@@ -184,7 +184,7 @@ async fn dirty_design(top: &str) -> Result<Vec<String>, String> {
 }
 /// What a commit to main did: the commit (short) and its files, and whether it was pushed.
 #[derive(Debug, Default, Clone, PartialEq)]
-pub struct Recorded { pub commit: String, pub files: Vec<String>, pub pushed: String, pub new_boards: u64 }
+pub struct Recorded { pub commit: String, pub files: Vec<String>, pub pushed: String, pub new_boards: u64, /** the ref it went on, "" for the branch (`off_branch`) */ pub reference: String }
 /// The board families (`<dir>/<name>` of a `.kicad_pro`/`.kicad_pcb`) among changed files, each with whether the last commit had any file of
 /// it and whether any is on disk now.
 pub type Family = (String, bool, bool);
@@ -195,6 +195,115 @@ pub fn new_board_families(fams: &[Family], had_head: bool) -> u64 {
     let added = fams.iter().filter(|(_, before, now)| !before && *now).count() as u64;
     let removed = fams.iter().filter(|(_, before, now)| *before && !now).count() as u64;
     added.saturating_sub(removed)
+}
+/// A design commit's words about its change: a one-line subject and a line per file for the body.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct Described { pub subject: String, pub detail: Vec<String> }
+/// A design commit's message: the subject, the per-file detail when the subject could not hold it all, then `body` (the thread it came
+/// from, with its trailers).
+pub fn full_message(d: &Described, body: &str) -> String {
+    let mut m = d.subject.clone();
+    if !d.detail.is_empty() && d.subject != format!("design: {}", d.detail.join("; ")) { m.push_str("\n\n"); m.push_str(&d.detail.iter().map(|l| format!("- {l}")).collect::<Vec<_>>().join("\n")) }
+    let body = body.trim(); if !body.is_empty() { m.push_str("\n\n"); m.push_str(body) }
+    m
+}
+/// What changed between two versions of a board or schematic, in words: "12 tracks added, 1 footprint changed, 2 vias removed". Items
+/// (files/snapshot.rs `items`, the scanner #1163's `count_items` counts with) are matched by their own uuid, so a moved track or footprint
+/// is "changed", not one removed and one added; items with none match by their text. "" when no item differs (a setting, the title block,
+/// the file's format). Each version is scanned once.
+pub fn item_changes(old: &str, new: &str, schematic: bool) -> String {
+    use std::collections::{BTreeMap, HashMap};
+    let (a, b) = (crate::files::snapshot::items(old, schematic), crate::files::snapshot::items(new, schematic));
+    let mut n: BTreeMap<&str, [usize; 3]> = BTreeMap::new(); // label -> added, changed, removed
+    let by_id = |v: &[(&'static str, &str, &str)]| -> HashMap<String, (&'static str, String)> { v.iter().filter(|x| !x.2.is_empty()).map(|x| (x.2.to_string(), (x.0, x.1.to_string()))).collect() };
+    let (ia, ib) = (by_id(&a), by_id(&b));
+    for (id, (l, t)) in &ib { match ia.get(id) { None => n.entry(l).or_default()[0] += 1, Some((_, t0)) if t0 != t => n.entry(l).or_default()[1] += 1, _ => {} } }
+    for (id, (l, _)) in &ia { if !ib.contains_key(id) { n.entry(l).or_default()[2] += 1 } }
+    let mut bag: HashMap<(&str, &str), i64> = HashMap::new();
+    for x in a.iter().filter(|x| x.2.is_empty()) { *bag.entry((x.0, x.1)).or_default() -= 1 }
+    for x in b.iter().filter(|x| x.2.is_empty()) { *bag.entry((x.0, x.1)).or_default() += 1 }
+    for ((l, _), d) in bag { if d > 0 { n.entry(l).or_default()[0] += d as usize } else if d < 0 { n.entry(l).or_default()[2] += (-d) as usize } }
+    let plural = |l: &str, k: usize| if k == 1 { l.to_string() } else if l.ends_with('s') { format!("{l}es") } else { format!("{l}s") };
+    let order = ["footprint", "symbol", "track", "wire", "via", "zone", "label", "junction", "no-connect", "bus", "sheet", "text", "drawing", "dimension", "group", "image"];
+    let mut words = vec![];
+    for (i, verb) in ["added", "changed", "removed"].iter().enumerate() {
+        let mut parts: Vec<(usize, String)> = n.iter().filter(|(_, c)| c[i] > 0).map(|(l, c)| (order.iter().position(|o| o == l).unwrap_or(99), format!("{} {}", c[i], plural(l, c[i])))).collect();
+        parts.sort();
+        if !parts.is_empty() { words.push(format!("{} {verb}", parts.into_iter().map(|p| p.1).collect::<Vec<_>>().join(", "))) }
+    }
+    words.join(", ")
+}
+/// A design commit's subject is one line of at most this many characters; the detail goes in the body.
+pub const SUBJECT_MAX: usize = 72;
+/// The most board and schematic text (both versions of every one, together) the item summary reads; past it, file names only.
+pub const SUMMARY_MAX_BYTES: u64 = 64 << 20;
+/// The longest the item summary may take; past it the commit goes ahead with file names only.
+pub const SUMMARY_MAX_MS: u64 = 1500;
+/// The subject and detail from each file's (rank, path, line), most telling first (0: a document's items, 1: a document named only,
+/// 2: any other file): every line when they fit `SUBJECT_MAX`, else the first and a count, else as many names as fit and a count.
+fn compose(mut parts: Vec<(u8, String, String)>) -> Described {
+    parts.sort_by_key(|p| p.0);
+    let detail: Vec<String> = parts.iter().map(|p| p.2.clone()).collect();
+    let fits = |s: &str| s.chars().count() <= SUBJECT_MAX;
+    let more = |k: usize| if k == 0 { String::new() } else { format!(" and {k} more file{}", if k == 1 { "" } else { "s" }) };
+    let all = format!("design: {}", detail.join("; "));
+    let subject = if detail.is_empty() { "design: files updated".to_string() }
+        else if fits(&all) { all }
+        else if fits(&format!("design: {};{}", detail[0], more(detail.len() - 1))) { format!("design: {};{}", detail[0], more(detail.len() - 1)) }
+        else {
+            let mut s = String::from("design: "); let mut k = 0;
+            for (i, (_, path, _)) in parts.iter().enumerate() {
+                let n = path.rsplit('/').next().unwrap_or(path);
+                let next = format!("{s}{}{n}", if i == 0 { "" } else { ", " });
+                if i > 0 && !fits(&format!("{next}{}", more(parts.len() - i - 1))) { break }
+                s = next; k = i + 1;
+            }
+            let s = format!("{s}{}", more(parts.len() - k));
+            if fits(&s) { s } else { s.chars().take(SUBJECT_MAX - 1).collect::<String>() + "…" }
+        };
+    Described { subject, detail }
+}
+/// A design commit's words: what changed in each file since `base` ("" for none: every file is new). A board or schematic says its
+/// items ("main.kicad_pcb: 12 tracks added, 1 footprint changed"); any other file whether it was added, changed or removed. Bounded: past
+/// `SUMMARY_MAX_BYTES` of board and schematic text, past `SUMMARY_MAX_MS`, or on any error, the documents too are named only ("changed"),
+/// so the summary never fails or holds up the commit. Never the thread's title: that is the body's.
+pub async fn describe(top: &str, base: &str, files: &[String]) -> Described {
+    use crate::files::git;
+    let doc = |f: &str| f.ends_with(".kicad_pcb") || f.ends_with(".kicad_sch");
+    let gd = if base.is_empty() { String::new() } else { git::run_ro(top, &["rev-parse", "--absolute-git-dir"]).await.out.trim().to_string() };
+    let mut plain: Vec<(u8, String, String)> = vec![]; // (rank, name, line)
+    let mut read: Vec<(String, bool, bool)> = vec![]; // documents to summarize: (path, schematic, in base)
+    let mut bytes = 0u64;
+    for f in files {
+        let name = f.rsplit('/').next().unwrap_or(f).to_string();
+        let now_len = std::fs::metadata(std::path::Path::new(top).join(f)).ok().filter(|m| m.is_file()).map(|m| m.len());
+        let in_base = !base.is_empty() && git::run_ro(top, &["cat-file", "-e", &format!("{base}:{f}")]).await.code == 0;
+        let w = match (in_base, now_len) { (false, None) => continue, (false, Some(_)) => "added", (true, None) => "removed", (true, Some(_)) => "changed" };
+        plain.push((if doc(f) { 1 } else { 2 }, f.clone(), format!("{name} {w}")));
+        if let (true, Some(n)) = (doc(f), now_len) {
+            let old = if in_base { git::run_ro(top, &["cat-file", "-s", &format!("{base}:{f}")]).await.out.trim().parse::<u64>().unwrap_or(u64::MAX) } else { 0 };
+            bytes = bytes.saturating_add(old).saturating_add(n);
+            read.push((f.clone(), f.ends_with(".kicad_sch"), in_base));
+        }
+    }
+    if read.is_empty() || bytes > SUMMARY_MAX_BYTES { return compose(plain) }
+    let mut texts = vec![];
+    for (f, sch, in_base) in read {
+        let Ok(now) = std::fs::read(std::path::Path::new(top).join(&f)) else { return compose(plain) };
+        let was = if in_base { match git::show(&gd, &format!("{base}:{f}")).await { Some(x) => Some(x), None => return compose(plain) } } else { None };
+        let name = f.rsplit('/').next().unwrap_or(&f).to_string(); texts.push((f, name, sch, was, now));
+    }
+    // each version scanned once, off the async threads, within the time bound; late or failed: names only, and the commit goes ahead
+    let work = tokio::task::spawn_blocking(move || texts.into_iter().map(|(path, name, sch, was, now)| {
+        let now = String::from_utf8_lossy(&now);
+        let (rank, line) = match was {
+            None => { let k = crate::files::snapshot::items(&now, sch).len(); (0, format!("{name} added ({k} item{})", if k == 1 { "" } else { "s" })) }
+            Some(o) => { let w = item_changes(&String::from_utf8_lossy(&o), &now, sch); if w.is_empty() { (1, format!("{name} edited")) } else { (0, format!("{name}: {w}")) } }
+        };
+        (path, rank, line)
+    }).collect::<Vec<_>>());
+    let Ok(Ok(said)) = tokio::time::timeout(std::time::Duration::from_millis(SUMMARY_MAX_MS), work).await else { return compose(plain) };
+    compose(plain.into_iter().map(|(k, n, l)| match said.iter().find(|(sn, _, _)| *sn == n) { Some((_, r, sl)) => (*r, n, sl.clone()), None => (k, n, l) }).collect())
 }
 /// Why git refused the design commit, for the thread's line. A machine where git was never told a name and email (many
 /// people who draw boards have never used git) gets the one thing to do first, since the line is cut at the pane's width;
@@ -208,8 +317,11 @@ pub fn commit_refused(out: &str) -> String {
 /// and the branch has an upstream, push it. `skip`: documents another thread
 /// holds the lock of (their files stay for that thread's own commit). Only the main checkout
 /// (never a worktree), only on a branch, only design files: nothing else staged there is swept in.
+/// The subject says what changed (`describe`: "design: main.kicad_pcb: 12 tracks added, 1 footprint changed"); `body` follows it (the
+/// thread that made the change). `off_branch` (`git.off_branch`, off by default: settings/offbranch.rs, #1188): the same commit goes on
+/// `refs/backplane/design/<branch>` instead (files/snapshot.rs `record_on_ref`), the branch, index and work tree untouched, and is never pushed.
 /// Err: what stopped it. Ok with no commit: nothing to record.
-pub async fn commit_design(root: &str, msg: &str, skip: &[String], push: bool) -> Result<Recorded, String> {
+pub async fn commit_design(root: &str, body: &str, skip: &[String], push: bool, off_branch: bool) -> Result<Recorded, String> {
     use crate::files::git;
     if crate::copy::on() { return Err("a hub on a copy records no commits".into()) }
     if split_worktree(root).is_some() { return Err("that folder is a worktree, not the main checkout".into()) }
@@ -218,8 +330,9 @@ pub async fn commit_design(root: &str, msg: &str, skip: &[String], push: bool) -
     let top = r.out.trim().to_string();
     let _l = crate::files::snapshot::repo_lock(&top).await; // one hub git write at a time on a repository: the turn snapshots (#1163) use the same index
     let r = git::run_ro(&top, &["symbolic-ref", "--short", "-q", "HEAD"]).await;
-    if r.code != 0 || r.out.trim().is_empty() { return Err("the main checkout is not on a branch".into()) }
-    let branch = r.out.trim().to_string();
+    // a detached HEAD: never committed onto (as before); kept off the branch, the change is recorded on refs/backplane/design/detached
+    if (r.code != 0 || r.out.trim().is_empty()) && !off_branch { return Err("the main checkout is not on a branch".into()) }
+    let branch = if r.code != 0 || r.out.trim().is_empty() { "detached".to_string() } else { r.out.trim().to_string() };
     // git names the checkout with its symlinks resolved (`--show-toplevel`): the held documents are compared as files, not spellings
     let skip: Vec<String> = skip.iter().map(|d| same_file(d)).collect();
     let skipped = |p: &str| { let abs = same_file(&format!("{top}/{p}")); skip.iter().any(|d| abs == *d || abs.starts_with(&format!("{d}.")) ) };
@@ -235,6 +348,16 @@ pub async fn commit_design(root: &str, msg: &str, skip: &[String], push: bool) -
         fams.push((st, before, now));
     }
     let new_boards = new_board_families(&fams, had_head);
+    if off_branch {
+        let reference = crate::files::snapshot::design_ref(&branch);
+        let (t2, b2) = (top.clone(), body.to_string());
+        let rec = crate::files::snapshot::record_on_ref(&top, &reference, &files, |base, changed| async move { full_message(&describe(&t2, &base, &changed).await, &b2) }).await?;
+        let Some((commit, changed)) = rec else { return Ok(Recorded::default()) };
+        return Ok(Recorded { commit, files: changed, pushed: String::new(), new_boards, reference })
+    }
+    let base = if had_head { "HEAD".to_string() } else { String::new() };
+    let msg = full_message(&describe(&top, &base, &files).await, body);
+    let msg = msg.as_str();
     let mut add = vec!["add", "-A", "--"]; add.extend(files.iter().map(String::as_str));
     let r = git::run(&top, &add).await;
     if r.code != 0 { return Err(format!("git add: {}", r.out.trim())) }
@@ -243,7 +366,7 @@ pub async fn commit_design(root: &str, msg: &str, skip: &[String], push: bool) -
     if r.code != 0 { return Err(commit_refused(&r.out)) }
     let commit = git::run_ro(&top, &["rev-parse", "--short", "HEAD"]).await.out.trim().to_string();
     let pushed = if push { push_upstream(&top, &branch).await } else { String::new() };
-    Ok(Recorded { commit, files, pushed, new_boards })
+    Ok(Recorded { commit, files, pushed, new_boards, reference: String::new() })
 }
 /// The upstream (`origin/main`) of `branch` in the checkout at `top`, "" for none.
 async fn upstream(top: &str, branch: &str) -> String {
@@ -461,10 +584,10 @@ mod tests {
         std::fs::write(format!("{wt}/firmware/src/main.c"), "int main(){return 1;}").unwrap();
         // a stray code edit in the main checkout is never swept into the design commit
         std::fs::write(format!("{main}/firmware/CMakeLists.txt"), "project(fw2)").unwrap();
-        let r = commit_design(&main, "design: test (t1)", &[], true).await.unwrap();
+        let r = commit_design(&main, "Recorded by Backplane at the end of an agent's turn, thread t1: test", &[], true, false).await.unwrap();
         assert_eq!(r.files, vec!["boards/main/main.kicad_pcb", "boards/main/main.kicad_pcb.backplane.json", "mech/case.step"]);
         assert_eq!(r.pushed, "", "no upstream: nothing pushed");
-        assert_eq!(git(&main, &["show", "--name-only", "--format=%s", "HEAD"]), "design: test (t1)\n\nboards/main/main.kicad_pcb\nboards/main/main.kicad_pcb.backplane.json\nmech/case.step");
+        assert_eq!(git(&main, &["show", "--name-only", "--format=%s", "HEAD"]), "design: main.kicad_pcb edited; and 2 more files\n\nboards/main/main.kicad_pcb\nboards/main/main.kicad_pcb.backplane.json\nmech/case.step");
         assert_eq!(git(&main, &["status", "--porcelain"]), "M firmware/CMakeLists.txt");
         // the code lands the normal way: a commit on the thread's branch carries no board
         git(&wt, &["commit", "-qam", "fw"]);
@@ -474,7 +597,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(format!("{main}/boards/main/main.kicad_pcb")).unwrap(), "(pcb v2)", "the merge kept main's board");
         assert_eq!(std::fs::read_to_string(format!("{main}/firmware/src/main.c")).unwrap(), "int main(){return 1;}");
         // nothing more to record
-        assert_eq!(commit_design(&main, "x", &[], true).await.unwrap(), Recorded::default());
+        assert_eq!(commit_design(&main, "x", &[], true, false).await.unwrap(), Recorded::default());
         // a design path the thread names from its worktree is main's
         assert_eq!(route(&format!("{wt}/boards/main/main.kicad_pcb")), format!("{main}/boards/main/main.kicad_pcb"));
         assert_eq!(design_root(&wt), main);
@@ -501,7 +624,7 @@ mod tests {
         std::fs::write(format!("{main}/boards/main/main.kicad_pcb"), "(pcb other thread)").unwrap();
         std::fs::write(format!("{main}/boards/main/main.kicad_sch"), "(sch mine)").unwrap();
         // the holder named the board through the link; git names the checkout by its real folder
-        let rec = commit_design(&main, "design: mine", &[format!("{}/boards/main/main.kicad_pcb", link.display())], false).await.unwrap();
+        let rec = commit_design(&main, "", &[format!("{}/boards/main/main.kicad_pcb", link.display())], false, false).await.unwrap();
         assert_eq!(rec.files, vec!["boards/main/main.kicad_sch"], "the held board is not swept into another thread's commit");
         let _ = std::fs::remove_file(&link);
     }
@@ -513,10 +636,10 @@ mod tests {
         git(&main, &["remote", "add", "origin", bare.to_str().unwrap()]); git(&main, &["push", "-q", "-u", "origin", "main"]);
         std::fs::write(format!("{main}/boards/main/main.kicad_pcb"), "(pcb other thread)").unwrap();
         std::fs::write(format!("{main}/boards/main/main.kicad_sch"), "(sch mine)").unwrap();
-        let rec = commit_design(&main, "design: mine (t2)", &[format!("{main}/boards/main/main.kicad_pcb")], true).await.unwrap();
+        let rec = commit_design(&main, "thread t2", &[format!("{main}/boards/main/main.kicad_pcb")], true, false).await.unwrap();
         assert_eq!(rec.files, vec!["boards/main/main.kicad_sch"]);
         assert_eq!(rec.pushed, "origin/main");
-        assert_eq!(git(bare.to_str().unwrap(), &["log", "-1", "--format=%s", "main"]), "design: mine (t2)");
+        assert_eq!(git(bare.to_str().unwrap(), &["log", "-1", "--format=%s", "main"]), "design: main.kicad_sch edited");
         assert_eq!(git(&main, &["status", "--porcelain"]), "M boards/main/main.kicad_pcb", "the held board waits for its writer");
     }
 
@@ -528,19 +651,144 @@ mod tests {
         let before = git(bare.to_str().unwrap(), &["rev-parse", "main"]);
         assert_eq!(unpushed(&main).await, Some((0, "origin/main".into())));
         std::fs::write(format!("{main}/boards/main/main.kicad_pcb"), "(pcb local)").unwrap();
-        let rec = commit_design(&main, "design: local (t3)", &[], false).await.unwrap();
+        let rec = commit_design(&main, "thread t3", &[], false, false).await.unwrap();
         assert!(!rec.commit.is_empty() && rec.pushed.is_empty(), "committed, not pushed: {rec:?}");
-        assert_eq!(git(&main, &["log", "-1", "--format=%s"]), "design: local (t3)", "auto-commit is unchanged");
+        assert_eq!(git(&main, &["log", "-1", "--format=%s%n%b"]).trim(), "design: main.kicad_pcb edited\nthread t3", "auto-commit is unchanged");
         assert_eq!(git(bare.to_str().unwrap(), &["rev-parse", "main"]), before, "the remote did not move");
         assert_eq!(unpushed(&main).await, Some((1, "origin/main".into())), "the project page says 1 commit not pushed");
         // the page's Push: one deliberate click
         let (top, branch) = main_branch(&main).await.unwrap();
         assert_eq!(push_upstream(&top, &branch).await, "origin/main");
-        assert_eq!(git(bare.to_str().unwrap(), &["log", "-1", "--format=%s", "main"]), "design: local (t3)");
+        assert_eq!(git(bare.to_str().unwrap(), &["log", "-1", "--format=%s", "main"]), "design: main.kicad_pcb edited");
         assert_eq!(unpushed(&main).await, Some((0, "origin/main".into())));
         // no upstream: nothing to count or push
         git(&main, &["branch", "-q", "--unset-upstream"]);
         assert_eq!(unpushed(&main).await, None); assert_eq!(push_upstream(&top, &branch).await, "");
+    }
+
+    #[test] fn a_design_commit_subject_says_which_items_changed() {
+        let old = "(kicad_pcb (version 1) (net 0 \"\")\n (footprint \"R\" (at 1 2) (uuid \"f1\") (pad \"1\" smd rect (uuid \"p1\")))\n (footprint \"C\" (at 5 5) (uuid \"f2\"))\n (segment (start 0 0) (end 1 1) (uuid \"s1\"))\n (via (at 1 1) (uuid \"v1\"))\n)";
+        let new = "(kicad_pcb (version 1) (net 0 \"\")\n (footprint \"R\" (at 3 4) (uuid \"f1\") (pad \"1\" smd rect (uuid \"p1\")))\n (footprint \"C\" (at 5 5) (uuid \"f2\"))\n (segment (start 0 0) (end 1 1) (uuid \"s1\"))\n (segment (start 1 1) (end 2 2) (uuid \"s2\"))\n (segment (start 2 2) (end 3 3) (uuid \"s3\"))\n)";
+        assert_eq!(item_changes(old, new, false), "2 tracks added, 1 footprint changed, 1 via removed", "a moved footprint is its uuid's change, not a removal and an addition");
+        assert_eq!(item_changes(old, old, false), "");
+        let sch0 = "(kicad_sch (lib_symbols (symbol \"Device:R\"))\n (wire (pts (xy 0 0) (xy 1 0)))\n)";
+        let sch1 = "(kicad_sch (lib_symbols (symbol \"Device:R\") (symbol \"Device:C\"))\n (symbol (lib_id \"Device:C\") (uuid \"c1\"))\n (wire (pts (xy 0 0) (xy 1 0)))\n (wire (pts (xy 1 0) (xy 2 0)))\n (no_connect (at 2 0))\n)";
+        assert_eq!(item_changes(sch0, sch1, true), "1 symbol, 1 wire, 1 no-connect added", "a library symbol is not a placed one; items without a uuid match by text");
+        let d = |s: &str, l: &[&str]| Described { subject: s.into(), detail: l.iter().map(|x| x.to_string()).collect() };
+        assert_eq!(full_message(&d("design: a added", &["a added"]), ""), "design: a added", "the subject holds it all: no detail repeated");
+        assert_eq!(full_message(&d("design: a added; and 1 more file", &["a added", "b changed"]), "by t1\n"), "design: a added; and 1 more file\n\n- a added\n- b changed\n\nby t1");
+    }
+    #[test] fn a_subject_is_one_line_of_72_characters_and_the_rest_goes_in_the_body() {
+        let p = |r: u8, f: &str, l: &str| (r, f.to_string(), l.to_string());
+        let one = compose(vec![p(2, "mech/case.step", "case.step changed"), p(0, "b/main.kicad_pcb", "main.kicad_pcb: 12 tracks added, 1 footprint changed")]);
+        assert_eq!(one.subject, "design: main.kicad_pcb, case.step", "both lines (79) and the first with a count (77) are over 72: the names");
+        assert_eq!(one.detail, ["main.kicad_pcb: 12 tracks added, 1 footprint changed", "case.step changed"]);
+        let two = compose(vec![p(0, "b/main.kicad_pcb", "main.kicad_pcb: 2 tracks added"), p(2, "mech/case.step", "case.step changed")]);
+        assert_eq!(two.subject, "design: main.kicad_pcb: 2 tracks added; case.step changed");
+        let long = compose(vec![p(0, "b/main.kicad_pcb", "main.kicad_pcb: 120 tracks added, 14 footprints changed, 3 vias removed, 2 zones changed"), p(0, "b/main.kicad_sch", "main.kicad_sch: 4 symbols added"), p(2, "mech/case.step", "case.step changed")]);
+        assert_eq!(long.subject, "design: main.kicad_pcb, main.kicad_sch, case.step");
+        assert_eq!(long.detail.len(), 3, "every file's words are in the body");
+        let many: Vec<_> = (0..20).map(|i| p(2, &format!("mech/part{i:02}.step"), &format!("part{i:02}.step added"))).collect();
+        let m = compose(many);
+        assert!(m.subject.chars().count() <= SUBJECT_MAX && m.subject.ends_with("more files") && !m.subject.contains('\n'), "{}", m.subject);
+        assert_eq!(compose(vec![]).subject, "design: files updated");
+    }
+
+    #[tokio::test] async fn by_default_a_turn_commits_on_the_branch_with_a_subject_that_says_what_changed() {
+        let (_r, main) = mixed("bydefault");
+        let head = git(&main, &["rev-parse", "HEAD"]);
+        std::fs::write(format!("{main}/boards/main/main.kicad_pcb"), "(kicad_pcb\n (footprint \"R\" (uuid \"f1\"))\n (segment (uuid \"s1\"))\n (segment (uuid \"s2\"))\n)").unwrap();
+        std::fs::write(format!("{main}/mech/case.step"), "ISO-10303").unwrap();
+        let rec = commit_design(&main, "Recorded by Backplane at the end of an agent's turn, thread t9: Can you test the USB footprint", &[], false, false).await.unwrap();
+        assert_eq!(rec.reference, "", "on the branch, as before #1188");
+        assert_eq!(git(&main, &["rev-parse", "HEAD^"]), head, "one commit on the branch");
+        assert_eq!(git(&main, &["log", "-1", "--format=%s"]), "design: main.kicad_pcb: 1 footprint, 2 tracks added; case.step added");
+        assert_eq!(git(&main, &["log", "-1", "--format=%b"]), "Recorded by Backplane at the end of an agent's turn, thread t9: Can you test the USB footprint", "the thread's first words are the body, never the subject");
+        assert_eq!(git(&main, &["status", "--porcelain"]), "", "recorded: nothing left uncommitted");
+        assert!(git(&main, &["for-each-ref", "refs/backplane/design"]).is_empty(), "no ref of Backplane's own by default");
+    }
+
+    #[tokio::test] async fn keep_off_my_branch_records_every_change_on_backplanes_ref_and_never_touches_the_branch() {
+        let (_r, main) = mixed("offbranch");
+        let bare = crate::plat::tmp::uncreated("offbranch-remote");
+        git(&main, &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()]);
+        git(&main, &["remote", "add", "origin", bare.to_str().unwrap()]); git(&main, &["push", "-q", "-u", "origin", "main"]);
+        let (head, remote) = (git(&main, &["rev-parse", "HEAD"]), git(bare.to_str().unwrap(), &["rev-parse", "main"]));
+        std::fs::write(format!("{main}/firmware/CMakeLists.txt"), "project(fw3)").unwrap(); git(&main, &["add", "firmware/CMakeLists.txt"]); // the person's own staged change stays staged as it was
+        std::fs::write(format!("{main}/boards/main/main.kicad_pcb"), "(kicad_pcb\n (via (uuid \"v1\"))\n)").unwrap();
+        let index = git(&main, &["write-tree"]);
+        // auto-push on as well: Backplane's ref is never pushed, and the person's branch is not pushed for them
+        let rec = commit_design(&main, "thread t4", &[], true, true).await.unwrap();
+        assert_eq!(rec.reference, "refs/backplane/design/main"); assert_eq!(rec.files, vec!["boards/main/main.kicad_pcb"]); assert_eq!(rec.pushed, "");
+        assert_eq!(git(&main, &["rev-parse", "HEAD"]), head, "the branch did not move");
+        assert_eq!(git(&main, &["write-tree"]), index, "the index is the person's as it was");
+        assert_eq!(git(&main, &["status", "--porcelain"]), "M boards/main/main.kicad_pcb\nM  firmware/CMakeLists.txt", "the change stays in the work tree, uncommitted, for the person to commit");
+        assert_eq!(git(bare.to_str().unwrap(), &["rev-parse", "main"]), remote, "nothing pushed");
+        assert_eq!(git(&main, &["log", "-1", "--format=%s%n%b", "refs/backplane/design/main"]), "design: main.kicad_pcb: 1 via added\nthread t4");
+        assert_eq!(git(&main, &["show", "refs/backplane/design/main:boards/main/main.kicad_pcb"]), "(kicad_pcb\n (via (uuid \"v1\"))\n)", "the change is recorded");
+        assert_eq!(git(&main, &["rev-parse", "refs/backplane/design/main^"]), head, "on top of the branch");
+        // nothing new: nothing recorded
+        assert_eq!(commit_design(&main, "thread t4", &[], true, true).await.unwrap(), Recorded::default());
+        // the next turn's change grows the chain and names only what it changed
+        let tip = git(&main, &["rev-parse", "refs/backplane/design/main"]);
+        std::fs::write(format!("{main}/boards/main/main.kicad_sch"), "(kicad_sch\n (wire (pts))\n)").unwrap();
+        let rec = commit_design(&main, "thread t4", &[], false, true).await.unwrap();
+        assert_eq!(rec.files, vec!["boards/main/main.kicad_sch"]);
+        assert_eq!(git(&main, &["rev-parse", "refs/backplane/design/main^"]), tip);
+        assert_eq!(git(&main, &["log", "-1", "--format=%s", "refs/backplane/design/main"]), "design: main.kicad_sch: 1 wire added");
+        // the person commits when they choose; the next record starts from their commit and keeps the old chain as a second parent
+        git(&main, &["commit", "-qam", "my own words"]);
+        let (mine, tip) = (git(&main, &["rev-parse", "HEAD"]), git(&main, &["rev-parse", "refs/backplane/design/main"]));
+        std::fs::write(format!("{main}/mech/case.step"), "ISO-10303").unwrap();
+        commit_design(&main, "thread t4", &[], false, true).await.unwrap();
+        assert_eq!(git(&main, &["rev-list", "--parents", "-n1", "refs/backplane/design/main"]).split(' ').skip(1).collect::<Vec<_>>(), [mine.as_str(), tip.as_str()], "nothing recorded is unreachable");
+        assert_eq!(git(&main, &["log", "-1", "--format=%s", "refs/backplane/design/main"]), "design: case.step added", "measured from the person's commit");
+        assert_eq!(git(&main, &["rev-parse", "HEAD"]), mine);
+    }
+
+    #[tokio::test] async fn a_detached_head_is_never_committed_onto_and_kept_off_the_branch_is_recorded_on_its_own_ref() {
+        let (_r, main) = mixed("detached");
+        git(&main, &["checkout", "-q", "--detach"]); let head = git(&main, &["rev-parse", "HEAD"]);
+        std::fs::write(format!("{main}/boards/main/main.kicad_pcb"), "(kicad_pcb\n (via (uuid \"v1\"))\n)").unwrap();
+        assert_eq!(commit_design(&main, "", &[], false, false).await, Err("the main checkout is not on a branch".into()), "by default: as before");
+        let rec = commit_design(&main, "", &[], false, true).await.unwrap();
+        assert_eq!(rec.reference, "refs/backplane/design/detached"); assert_eq!(git(&main, &["rev-parse", "HEAD"]), head);
+        assert_eq!(git(&main, &["rev-parse", "refs/backplane/design/detached^"]), head);
+    }
+
+    #[tokio::test] async fn the_thread_is_a_trailer_and_the_commit_is_the_repositorys_own_identity_on_or_off_the_branch() {
+        let (_r, main) = mixed("trailer");
+        // whoever git says commits here (the repository's config, or the environment over it): the hub's own commits must be that identity
+        let who = |r: &str| git(&main, &["log", "-1", "--format=%an <%ae> / %cn <%ce>", r]);
+        let ident = |k: &str| { let o = std::process::Command::new("git").args(["var", k]).current_dir(&main).output().unwrap(); let l = String::from_utf8_lossy(&o.stdout).to_string(); l.rsplitn(3, ' ').nth(2).unwrap_or("").to_string() };
+        let want = format!("{} / {}", ident("GIT_AUTHOR_IDENT"), ident("GIT_COMMITTER_IDENT"));
+        assert!(!want.contains("backplane@localhost") && want.contains('@'), "{want}");
+        let body = crate::agents::design::design_body("t1794981671-222", "Can you test the USB footprint", "turn", "");
+        std::fs::write(format!("{main}/boards/main/main.kicad_pcb"), "(kicad_pcb (via (uuid \"v1\")))").unwrap();
+        commit_design(&main, &body, &[], false, false).await.unwrap();
+        let trailer = |r: &str| git(&main, &["log", "-1", "--format=%(trailers:key=Backplane-Thread,valueonly)", r]);
+        assert_eq!(trailer("HEAD"), "t1794981671-222", "machine-findable by a fixed key");
+        assert!(!git(&main, &["log", "-1", "--format=%s", "HEAD"]).contains("USB"), "the first message is not the subject");
+        assert_eq!(who("HEAD"), want, "on the branch: the repository's identity, as before");
+        std::fs::write(format!("{main}/boards/main/main.kicad_pcb"), "(kicad_pcb (via (uuid \"v1\")) (via (uuid \"v2\")))").unwrap();
+        commit_design(&main, &body, &[], false, true).await.unwrap();
+        assert_eq!(trailer("refs/backplane/design/main"), "t1794981671-222");
+        assert_eq!(who("refs/backplane/design/main"), want, "off the branch: the same identity (in the Backplane repository, i2cjak <build@amemb.com>), never Backplane's");
+    }
+
+    /// Hubble_DK's timing (#1188): BP_SUMMARY_BOARD=<a .kicad_pcb> cargo test --bin backplane-hub summary_time -- --ignored --nocapture
+    #[tokio::test] #[ignore] async fn summary_time_on_a_large_board() {
+        let src = std::env::var("BP_SUMMARY_BOARD").expect("BP_SUMMARY_BOARD");
+        let text = std::fs::read_to_string(&src).unwrap();
+        let r = tmp("summary-time"); let main = r.to_str().unwrap().to_string();
+        std::fs::write(r.join("b.kicad_pcb"), &text).unwrap();
+        git(&main, &["init", "-q", "-b", "main"]); git(&main, &["add", "-A"]); git(&main, &["commit", "-qm", "base"]);
+        // move every track's start a little: each is "changed" by its uuid
+        let moved = text.replace("(segment\n\t\t(start ", "(segment\n\t\t(start 1");
+        std::fs::write(r.join("b.kicad_pcb"), &moved).unwrap();
+        let t = std::time::Instant::now(); let d = describe(&main, "HEAD", &["b.kicad_pcb".to_string()]).await; let ms = t.elapsed().as_millis();
+        let t = std::time::Instant::now(); let n = crate::files::snapshot::count_items(&text, false); let scan = t.elapsed().as_millis();
+        println!("summary_time: {} bytes, {n} items; describe {ms} ms ({}); one scan {scan} ms", text.len(), d.subject);
     }
 
     #[tokio::test] async fn an_older_worktree_brings_its_board_back_with_a_backup() {
