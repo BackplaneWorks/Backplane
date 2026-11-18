@@ -181,16 +181,19 @@ impl Agents {
             if let Some(p) = crate::files::kicad::coedit::person_now(&crate::files::kicad::ipc::pro_of(path)) { return (false, json!({"error": kedit::person_first(&p), "person": p})) }
         }
         let via = Via { ag: self, thread, path, person: std::sync::Mutex::new(Value::Null), caps: crate::files::kicad::ipc::runtime(&self.hub).await.caps };
-        let r = kedit::run(&via, path, a).await;
+        // which KiCad served this call's requests, counted as they are sent (ipc::SERVED, this call's own)
+        use crate::files::kicad::ipc::{Served, SERVED};
+        let (r, served) = SERVED.scope(std::cell::RefCell::new(Served::default()), async { let r = kedit::run(&via, path, a).await; (r, SERVED.with(|s| s.borrow().word())) }).await;
         if kedit::writes(&a["ops"]) { crate::files::kicad::coedit::agent_wrote(&crate::files::kicad::ipc::pro_of(path)) }
+        let served = json!(served);
         match r {
-            Ok(mut v) => {
+            Ok(mut v) => { v["served_by"] = served;
                 let p = via.person.lock().unwrap().clone(); if !p.is_null() { v["person"] = p }
                 // a saved edit is shown: the person's viewer turns to the document, as `viewer_show` after the save would have it (show: false leaves it)
                 if v["saved"].as_str() == Some(path) && a["show"].as_bool().unwrap_or(true) { if self.viewer_show(thread, path, "", false).await.0 { v["shown"] = json!(true) } }
                 (true, v)
             }
-            Err(e) => fail(&e),
+            Err(e) => (false, json!({"error": e, "served_by": served})),
         }
     }
     /// Whether the thread's project has a board or schematic (its canonical design files).

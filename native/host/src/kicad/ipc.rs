@@ -539,6 +539,7 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
         if !super::known_root(hub, Path::new(&pro).parent().map(|p| p.to_str().unwrap_or("")).unwrap_or(""), "").await { return Err(format!("{path} is not in a project this hub knows")) }
         let setting = hub.setting("kicad.ipc").await.unwrap_or_else(|| "on".into());
         if setting == "off" { let why = "KiCad IPC is turned off in Settings"; log_fallback(hub, thread, why).await; return Err(ks::unavailable(why, &gui.cli)) }
+        if !status { dispatch(EMBEDDED, ty.rsplit('.').next().unwrap_or(ty))?; }
         // the person's unsaved edits are never written by an agent's save (SaveDocument, SaveDocumentAs); its commits are tracked for that.
         // A co-editing runtime (bp.11, `coedit`) is different: the agent edits the person's live document, its save includes both
         // sides' edits on purpose, and nobody is asked to save, revert, close KiCad or wait (docs/kicad-coedit.md).
@@ -576,8 +577,9 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
         if commits && o["ok"].as_bool().unwrap_or(false) { super::embed::unsaved_update(&pro, |u| u.agent_committed()); }
         // the hub's own record of an agent's change not on disk (KiCad does not mark a document modified for it)
         if o["ok"].as_bool().unwrap_or(false) && thread.is_some_and(|t| !t.is_empty()) && writes_items(short, &msg_doc, commits) { super::embed::agent_changed(&pro, &doc_file(path, &pro)) }
-        if o["fallback"].as_bool().unwrap_or(false) { log_fallback(hub, thread, o["why"].as_str().unwrap_or("")).await; return Err(o["error"].as_str().unwrap_or("").into()) }
         let ok = o["ok"].as_bool().unwrap_or(false);
+        if !ok && short == "BeginCommit" { unpin() }
+        if o["fallback"].as_bool().unwrap_or(false) { log_fallback(hub, thread, o["why"].as_str().unwrap_or("")).await; return Err(o["error"].as_str().unwrap_or("").into()) }
         let servers = format!("{pro}|ready|gui ({})", gui.mode);
         if status {
             // KiCad's open dialogs and its notices (embed-notice: "Could not use OpenGL, falling back to software rendering"): the agent says them
@@ -607,10 +609,12 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
     if !gate.is_empty() { log_fallback(hub, thread, &gate).await; return Err(ks::unavailable(&gate, &env.cli)) }
     let Some(i) = IPC.get() else { let why = "this Backplane has no KiCad IPC helper"; log_fallback(hub, thread, why).await; return Err(ks::unavailable(why, &env.cli)) };
     let msg_for_warning = msg.clone();
+    if !status { dispatch(HEADLESS, ty.rsplit('.').next().unwrap_or(ty))?; }
     let o = ask(i, &pro, &env, ty, msg).await;
     let lines = info_on(i).await; let argv = argv_on(i, &pro, &env).await;
-    if o["fallback"].as_bool().unwrap_or(false) { log_fallback(hub, thread, o["why"].as_str().unwrap_or("")).await; return Err(o["error"].as_str().unwrap_or("").into()) }
     let ok = o["ok"].as_bool().unwrap_or(false);
+    if !ok && ty.ends_with(".BeginCommit") { unpin() }
+    if o["fallback"].as_bool().unwrap_or(false) { log_fallback(hub, thread, o["why"].as_str().unwrap_or("")).await; return Err(o["error"].as_str().unwrap_or("").into()) }
     if status { return Ok(json!({"server":ks::note(&lines),"servers":lines,"argv":argv,"version":env.version,"capabilities":o["message"].clone(),"detail":if ok { String::new() } else { err_of(&o) }})) }
     if !ok { return Err(err_of(&o)) }
     let mut out = json!({"type":o["type"].as_str().unwrap_or(""),"message":o["message"].clone()});
@@ -629,6 +633,35 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
     }
     Ok(out)
 }
+
+/// Which KiCad one tool call's requests really went to (#1192): each request that was dispatched (sent to the editor's KiCad or to the
+/// headless one, whatever its answer) is recorded, a request refused before that is not. A commit begun on one of them is kept there: while
+/// it is open, a request that would now go to the other is refused, never continued on a KiCad that does not have the commit.
+#[derive(Default)]
+pub struct Served { pub sent: Vec<&'static str>, pinned: Option<&'static str> }
+impl Served {
+    /// "headless", "embedded", "both" (it changed between requests), or None when nothing was dispatched.
+    pub fn word(&self) -> Option<&'static str> {
+        let first = *self.sent.first()?; Some(if self.sent.iter().all(|s| *s == first) { first } else { "both" })
+    }
+}
+tokio::task_local! { pub static SERVED: std::cell::RefCell<Served>; }
+pub const EMBEDDED: &str = "embedded";
+pub const HEADLESS: &str = "headless";
+/// Before a request is sent to `route`: refused when this call's open commit is on the other KiCad; else recorded as sent there.
+fn dispatch(route: &'static str, short: &str) -> Result<(), String> {
+    SERVED.try_with(|s| { let mut s = s.borrow_mut();
+        if let Some(p) = s.pinned.filter(|p| *p != route) {
+            return Err(format!("this edit's commit is open in the {p} KiCad, and the project's requests now go to the {route} one (the person's KiCad {} the project meanwhile): {short} was not sent, so nothing of the edit lands on a KiCad that lacks the commit. Run the edit again.", if route == EMBEDDED { "opened" } else { "closed" }))
+        }
+        s.sent.push(route);
+        if short == "BeginCommit" { s.pinned = Some(route) } else if short == "EndCommit" { s.pinned = None }
+        Ok(())
+    }).unwrap_or(Ok(()))
+}
+
+/// A BeginCommit that KiCad refused opened no commit: nothing is kept on its KiCad.
+fn unpin() { let _ = SERVED.try_with(|s| s.borrow_mut().pinned = None); }
 
 /// How long a request waits for the editor's KiCad that is starting for its project, and what it is told after.
 const GUI_WAIT: Duration = Duration::from_secs(if cfg!(test) { 1 } else { 90 });
@@ -668,6 +701,23 @@ fn shown_version(manifest: &str, full: &str) -> String { if manifest.is_empty() 
 
 #[cfg(test)]
 mod tests {
+    #[test] fn served_by_counts_what_was_sent_and_a_commit_stays_on_its_kicad() {
+        use super::{dispatch, unpin, Served, SERVED, EMBEDDED, HEADLESS};
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let word = |f: &dyn Fn()| rt.block_on(SERVED.scope(std::cell::RefCell::new(Served::default()), async { f(); SERVED.with(|s| s.borrow().word()) }));
+        assert_eq!(word(&|| {}), None, "nothing sent: no KiCad served it");
+        assert_eq!(word(&|| { dispatch(HEADLESS, "GetItems").unwrap(); dispatch(HEADLESS, "CreateItems").unwrap(); }), Some("headless"));
+        assert_eq!(word(&|| { dispatch(EMBEDDED, "GetItems").unwrap(); }), Some("embedded"));
+        assert_eq!(word(&|| { dispatch(HEADLESS, "GetItems").unwrap(); dispatch(EMBEDDED, "GetItems").unwrap(); }), Some("both"), "the route changed between two reads");
+        // a commit begun headless is not continued in the editor's KiCad: refused before it is sent, and not counted as sent there
+        assert_eq!(word(&|| { dispatch(HEADLESS, "BeginCommit").unwrap(); let e = dispatch(EMBEDDED, "CreateItems").unwrap_err(); assert!(e.contains("commit is open in the headless KiCad") && e.contains("opened"), "{e}");
+            dispatch(HEADLESS, "EndCommit").unwrap(); dispatch(EMBEDDED, "GetItems").unwrap(); }), Some("both"), "once the commit has ended the next request goes where the project now is");
+        assert_eq!(word(&|| { dispatch(EMBEDDED, "BeginCommit").unwrap(); assert!(dispatch(HEADLESS, "SaveDocument").unwrap_err().contains("closed")); }), Some("embedded"));
+        // a refused BeginCommit opened nothing
+        assert_eq!(word(&|| { dispatch(HEADLESS, "BeginCommit").unwrap(); unpin(); dispatch(EMBEDDED, "GetItems").unwrap(); }), Some("both"));
+        // outside a kicad_edit (kicad_ipc, the hub's own calls) nothing is counted or refused
+        dispatch(HEADLESS, "BeginCommit").unwrap(); dispatch(EMBEDDED, "CreateItems").unwrap();
+    }
     /// A stand-in kicad-cli that, like KiCad, writes its settings: to $KICAD_CONFIG_HOME when set, else to `person` (the person's
     /// kicad_common.json); it logs the folder it was given and answers --version and api-server --describe.
     #[cfg(unix)] fn writing_cli(dir: &std::path::Path, person: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
