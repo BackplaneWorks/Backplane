@@ -1,5 +1,5 @@
 // What 'Update PCB' would change, read-only: compares the compiled schematic (components, footprints, pin nets)
-// with the board (components, patterns, pad nets) by designator. The update itself is Altium's ECO dialog (see SKILL.md).
+// with the board (components, patterns, pad nets) by designator. The update itself: pcb_update_from_sch.pas.
 var
     Prj : IProject;
     Flat : IDocument;
