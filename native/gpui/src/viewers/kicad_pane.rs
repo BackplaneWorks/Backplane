@@ -261,6 +261,8 @@ pub fn mac_shown(show: bool, host_visible: bool, hitbox: bool, in_page: bool, co
 /// owner to confirm). This send makes the last word KiCad gets the pane's rect and visibility now, until the fork applies the last
 /// SetHostGeometry it acknowledged. BACKPLANE_KICAD_MAC_SETTLE_MS: another wait, 0 none (mac_pane_e2e's swap check, which fails without it).
 pub const MAC_SETTLE_MS: u64 = 300;
+/// macOS: how long after KiCad refused a host push it is sent again (KicadPane::host_refused).
+pub const MAC_REFUSED_RETRY_MS: u64 = 250;
 /// The settle wait in force (MAC_SETTLE_MS, or BACKPLANE_KICAD_MAC_SETTLE_MS; 0: never sent again).
 pub fn mac_settle_ms(env: Option<&str>) -> u64 { env.and_then(|v| v.trim().parse().ok()).unwrap_or(MAC_SETTLE_MS) }
 /// Whether something drawn after the pane's own content covers all of the pane (`over`: what was drawn over it, each clipped to
@@ -1272,6 +1274,9 @@ impl KicadPane {
         let said = self.mac_order(show, visible, "frame"); // i18n-ok: a log word
         redraw || said
     }
+    /// A host push KiCad refused (kicad_reply): the last push sent again MAC_REFUSED_RETRY_MS from now by the watch (mac_settle), whichever
+    /// push the refusal was for: what is sent is the pane's rect and visibility now.
+    pub fn host_refused(&mut self) { self.mac_settle = Some(std::time::Instant::now() + std::time::Duration::from_millis(MAC_REFUSED_RETRY_MS)); }
     /// macOS: the watch looks every frame's time for the next while (something that can change the order just happened).
     #[cfg(target_os = "macos")]
     fn mac_heat(&mut self) { self.mac_hot = Some(std::time::Instant::now() + std::time::Duration::from_millis(1500)); }
@@ -1875,6 +1880,12 @@ impl crate::Backplane {
         }
         if reply["ok"] != true {
             let why = crate::hub::rpc_error(&reply);
+            // macOS: KiCad refused a host push (a task running: "SetHostGeometry: a task is running: DRC", e2e-macos 44274808579, the
+            // frame then never shown): the pane's last push is sent again in a moment, and again while it is refused
+            if method == "editor.kicad.host" {
+                eprintln!("GPUI_LOG {}", json!({"kicad_host_refused": why}));
+                if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| p.host_refused()); }
+            }
             if method == "editor.kicad.attach" {
                 if let Some(p) = self.screens.kicad.clone() {
                     p.update(cx, |p, cx| p.set_info(json!({"state": "failed", "reason": why}), cx));
