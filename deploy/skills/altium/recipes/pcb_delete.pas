@@ -9,7 +9,7 @@ var
 const
     // ---- edit: placeholders ----
     PcbPath = 'C:\Projects\Board\Board.PcbDoc';
-    Left = -15.5; Bottom = -22.5; Right = -14.5; Top = -21.5;   // the area, mm from the board origin
+    Left = -21; Bottom = -22.5; Right = -14.5; Top = -21.5;     // the area, mm from the board origin
     NetName = 'GND';                                          // only objects on this net ('' for any)
 function IsCurrent(Path : String) : Boolean;
 var B : IPCB_Board;
@@ -28,7 +28,7 @@ if not IsCurrent(PcbPath) then Client.ShowDocument(SD);
 if not IsCurrent(PcbPath) then begin Emit('could not make ' + PcbPath + ' the current board'); Exit; end;
 Doomed := TInterfaceList.Create;
 It := Board.SpatialIterator_Create;
-It.AddFilter_ObjectSet(MkSet(eViaObject));      // add eTrackObject, eArcObject, ... to delete those too
+It.AddFilter_ObjectSet(MkSet(eTrackObject, eViaObject));   // the kinds to delete: also eArcObject, ePadObject, eFillObject, eRegionObject, eComponentObject...
 It.AddFilter_LayerSet(AllLayers);
 It.AddFilter_Area(Board.XOrigin + MMsToCoord(Left), Board.YOrigin + MMsToCoord(Bottom), Board.XOrigin + MMsToCoord(Right), Board.YOrigin + MMsToCoord(Top));
 Obj := It.FirstPCBObject;

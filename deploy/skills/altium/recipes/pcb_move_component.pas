@@ -7,9 +7,9 @@ const
     // ---- edit: placeholders ----
     PcbPath = 'C:\Projects\Board\Board.PcbDoc';
     Designator = 'C1';
-    XMM = -10.7;       // new position, mm from the board origin
+    XMM = -11.7;       // new position, mm from the board origin
     YMM = -10.65;
-    RotDeg = 90;       // absolute rotation, degrees
+    RotDeg = 0;        // absolute rotation, degrees
 function IsCurrent(Path : String) : Boolean;
 var B : IPCB_Board;
 begin
