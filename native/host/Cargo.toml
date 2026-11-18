@@ -33,6 +33,7 @@ rayon = "1"
 i_triangle = "0.51"
 ruzstd = { version = "0.8", default-features = false, features = ["std"] }
 pulldown-cmark = { version = "0.13.6", default-features = false }
+cfb = "0.16" # Altium documents are OLE compound files (MIT)
 zip = { version = "2.6.1", default-features = false, features = ["deflate-flate2", "flate2"] } # Windows' KiCad zip, unpacked in-process (flate2: its pure-Rust miniz backend)
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] } # the zip's inflate: miniz_oxide, no C
 
