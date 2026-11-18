@@ -36,6 +36,40 @@ Split and History views, cross-probing, the phones and comparisons need nothing 
 - BOM: Altium's parameters (`Manufacturer Part Number`, `Manufacturer`, `DNP`); a sheet placed by several sheet symbols
   counts once per placement, its parts named `$Component_$RoomName` (`IC1_CAN1`), as Altium names them on the board.
 
+## Writing files (any platform, no Altium)
+
+`altium/write/` writes Altium's binary files itself, so agents make footprints, symbols and sheets with no Altium running
+(the MCP tool `altium_write`, one JSON spec; `deploy/skills/altium/write.md` is the agents' reference).
+
+- `mod.rs`: a compound file read into streams and written back (`cfb`, version 3: 512-byte sectors, as Altium writes);
+  `|KEY=VALUE|` records in Altium's spelling, coordinates in 10-mil units and `_Frac`, Windows-1252 with `%UTF8%` twins,
+  storage names cut to 31 characters with the full name in `SectionKeys`, unique ids from a seed.
+- `pcblib.rs`: footprints (pads with rounded-rectangle corners and slots, tracks, arcs, extruded 3D bodies) as binary
+  primitive records; the library's `Library/Data` (a master layer stack is required: without it Altium reports
+  "Catastrophic failure" loading the Library section), `ComponentParamsTOC`, `LayerKindMapping`, `PadViaLibrary`, the
+  model storages. A footprint of the same name is replaced; the others are kept byte for byte. `read` turns each
+  footprint's primitives into the board reader's streams, so the round trip is checked by the same code that draws boards.
+- `fp.rs`: footprints from package dimensions with IPC-7351B nominal lands (chip, gull-wing SOIC/SOP/TSSOP/MSOP/SOT-23,
+  QFN/DFN, pin headers, custom pads), silk clear of copper, assembly outline, courtyard and 3D body, IPC names.
+- `schlib.rs`: symbols (pins as Altium's binary pin records with `PinFrac` for fractions, graphics, parameters, the
+  footprint links 44/45/46/48) and the library header's symbol list; pins by side laid out in a box sized to their names.
+- `schdoc.rs`: a sheet made or edited: a library symbol placed with its records turned, mirrored and moved (a sheet stores
+  them placed; pins become text records), parts of a multi-part symbol under one designator, wires, net labels, power
+  ports, junctions, no-ERC marks, parameters, a pin hooked to a net (`connect`), parts and objects removed with owner
+  indices closed up.
+- `spec.rs`: the JSON spec (`pcblib`, `schlib`, `schdoc`, `project`), paths kept inside the project folder, the result
+  read back through `sch.rs` and the board reader.
+
+Altium's own behaviour with files changed under it (Altium 26.11): an open document with no unsaved edits was reloaded
+silently; one with unsaved edits raises a modal "has been modified ... Reload?" box; an open project ignores a changed
+.PrjPcb (and would overwrite it when saved); `IServerDocument.DoFileLoad` appends the file to the open document (every
+object twice). So the tool (`live::before_write`/`after_write`, Windows with Altium running) refuses a target open with
+unsaved edits, closes the other open targets before writing and reopens them after (the focused document last), and adds
+new documents to an open project through Altium (`DM_AddSourceDocument`).
+
+Formats and sources: Altium's own files; AltiumSharp (OriginalCircuit.Altium, Apache-2.0), whose writers the pad, track,
+arc and body records are ported from; KiCad's importer and python-altium's format notes as references.
+
 ## Editing (Windows, with Altium running)
 
 Altium has no out-of-process API. `altium/live.rs` runs a DelphiScript inside the person's running Altium
@@ -55,6 +89,9 @@ Altium still raises answered. Runs go in `%PUBLIC%\Backplane\altium\runs`.
 ## Testing
 
 - `cargo test altium` runs the unit tests (synthetic records only: the repo carries no Altium design files).
+- `BP_ALTIUM_WRITE_OUT=<dir> cargo test altium::write::spec::tests::demo_project` writes a demo project (every package,
+  template and sheet feature, with SVGs drawn by the viewers' readers) to open in Altium; `BP_ALTIUM_SPEC=<spec.json>`
+  with `BP_ALTIUM_WRITE_OUT` runs any spec there (`spec_file`).
 - `BP_ALTIUM_CORPUS=<folder of real projects>` adds corpus tests (every sheet and board parses; BOM; 3D; with `BP_ALTIUM_OUT=<dir>`
   they write debug SVGs). `BP_KICAD_CLI=<kicad-cli>` adds the 3D comparison with KiCad's importer (every embedded model the same
   file in the same place); `BP_ALTIUM_3D_OUT=<dir>` draws both to PNGs (parts meshed with FreeCAD or `BACKPLANE_STEP2GLB`).
@@ -68,4 +105,4 @@ Altium still raises answered. Runs go in `%PUBLIC%\Backplane\altium\runs`.
 - Altium's ERC/DRC in the Review tab, Gerber/BOM/PDF output through Output Jobs, Buy it for Altium boards.
 - Image contents on sheets (drawn as frames), more than six inner layers apart, rule-based mask/paste expansion.
 - 3D: cylinder and sphere bodies, the stack's own colours, a body's 3D colour on a STEP model.
-- Editing without Altium (writing .SchDoc/.PcbDoc directly).
+- Writing a .PcbDoc (boards are edited through Altium); footprint text and full pad stacks in written footprints.

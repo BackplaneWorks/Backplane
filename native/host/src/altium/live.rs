@@ -291,6 +291,81 @@ pub fn open_file(path: &str) -> Result<String, String> {
     #[cfg(windows)] { win::open_file(path) }
     #[cfg(not(windows))] { let _ = path; Err(NOT_HERE.into()) }
 }
+/// Before `altium_write` replaces files: what the running Altium has open of them. A document open with unsaved edits stops the
+/// write (Err names it: overwriting it raises Altium's modal "has been modified... Reload?" box, and the person's edits are theirs);
+/// the others open in Altium are closed (they hold nothing unsaved) and reopened by `after_write`. Off Windows, or with Altium
+/// not running, nothing is open.
+pub async fn before_write(paths: &[std::path::PathBuf]) -> Result<Open, String> {
+    #[cfg(windows)] {
+        let docs: Vec<String> = paths.iter().filter(|p| doc_kind(p).is_some()).map(|p| p.to_string_lossy().into_owned()).collect();
+        if win::altium().is_none() || docs.is_empty() { return Ok(Open::default()) }
+        let r = run(&close_script(&docs), 60).await?;
+        if !r.ok { return Err(format!("could not check what Altium has open: {} {}", r.error, r.output)) }
+        let open = Open::of(&r.output);
+        if !open.modified.is_empty() { return Err(format!("open in Altium with unsaved changes: {}. Save or close it there first (save_document.pas / close_document.pas, or ask the person); nothing was written.", open.modified.join(", "))) }
+        return Ok(open)
+    }
+    #[cfg(not(windows))] { let _ = paths; Ok(Open::default()) }
+}
+/// What `before_write` found and closed.
+#[derive(Debug, Default, PartialEq)]
+pub struct Open { pub focused: String, pub closed: Vec<String>, pub modified: Vec<String> }
+impl Open {
+    pub fn of(out: &str) -> Open {
+        let mut o = Open::default();
+        for l in out.lines() {
+            match l.split_once('|') { Some(("focused", p)) => o.focused = p.to_string(), Some(("closed", p)) => o.closed.push(p.to_string()), Some(("modified", p)) => o.modified.push(p.to_string()), _ => {} }
+        }
+        o
+    }
+}
+/// After `altium_write` wrote files: the documents `before_write` closed are opened again (and shown, the person's focused
+/// document last), and a project Altium has open gets the new documents added there too (it does not reload a changed
+/// .PrjPcb by itself, and saving the project there would drop them). Off Windows, or with Altium not running, the result
+/// goes back as it is.
+#[cfg_attr(not(windows), allow(unused_mut))]
+pub async fn after_write(mut v: Value, open: &Open, added: &[(String, Vec<String>)]) -> Value {
+    #[cfg(windows)] {
+        if win::altium().is_none() || (open.closed.is_empty() && added.is_empty()) { return v }
+        let mut notes = vec![];
+        if !open.closed.is_empty() {
+            match run(&reopen_script(&open.closed, &open.focused), 60).await {
+                Ok(r) => notes.extend(r.output.lines().map(|l| l.replace('|', ": ")).chain((!r.ok).then(|| format!("reopening failed: {}", r.error)))),
+                Err(e) => notes.push(format!("reopening failed: {e}")),
+            }
+        }
+        for (prj, docs) in added {
+            match run(&add_docs_script(prj, docs), 60).await {
+                Ok(r) => notes.extend(r.output.lines().map(|l| l.replace('|', ": ")).chain((!r.ok).then(|| format!("adding to the open project failed: {}", r.error)))),
+                Err(e) => notes.push(format!("adding to the open project failed: {e}")),
+            }
+        }
+        v["altium"] = json!(notes);
+    }
+    #[cfg(not(windows))] { let _ = (open, added); }
+    v
+}
+fn doc_kind(p: &std::path::Path) -> Option<&'static str> {
+    use crate::files::altium::{kind, Kind};
+    match kind(&p.to_string_lossy())? { Kind::Schematic => Some("SCH"), Kind::SchLib => Some("SCHLIB"), Kind::PcbLib => Some("PCBLIB"), Kind::Board => Some("PCB"), Kind::Project => None }
+}
+/// Reports the focused document and the given ones open with unsaved edits; when none has any, closes those open.
+pub fn close_script(docs: &[String]) -> String {
+    let calls = |f: &str| docs.iter().map(|d| format!("    {f}({});\n", pas_str(d))).collect::<String>();
+    format!("var\n    SD : IServerDocument;\n    Dirty : Boolean;\nprocedure BpCheck(P : String);\nbegin\n    SD := Client.GetDocumentByPath(P);\n    if SD = nil then Exit;\n    if SD.Modified <> False then begin Dirty := True; Emit('modified|' + P); end;\nend;\nprocedure BpClose(P : String);\nbegin\n    SD := Client.GetDocumentByPath(P);\n    if SD = nil then Exit;\n    Client.CloseDocument(SD);\n    Emit('closed|' + P);\nend;\nDirty := False;\nif GetWorkspace.DM_FocusedDocument <> nil then Emit('focused|' + GetWorkspace.DM_FocusedDocument.DM_FullPath);\n{}if not Dirty then\nbegin\n{}end;\n", calls("BpCheck"), calls("BpClose"))
+}
+/// Opens the closed documents again and shows them, then shows the document that was focused.
+pub fn reopen_script(docs: &[String], focused: &str) -> String {
+    let mut calls = String::new();
+    for d in docs { if let Some(k) = doc_kind(std::path::Path::new(d)) { calls.push_str(&format!("BpOpen({}, '{k}');\n", pas_str(d))) } }
+    format!("var\n    SD : IServerDocument;\nprocedure BpOpen(P : String; K : String);\nbegin\n    SD := Client.OpenDocument(K, P);\n    if SD = nil then begin Emit('could not reopen in Altium|' + P); Exit; end;\n    Client.ShowDocument(SD);\n    Emit('reopened in Altium|' + P);\nend;\n{calls}if {f} <> '' then\nbegin\n    SD := Client.GetDocumentByPath({f});\n    if SD <> nil then Client.ShowDocument(SD);\nend;\n", f = pas_str(focused))
+}
+/// Adds documents to a project Altium has open (nothing when it is not open).
+pub fn add_docs_script(prj: &str, docs: &[String]) -> String {
+    let calls: String = docs.iter().map(|d| format!("    BpAdd({});\n", pas_str(d))).collect();
+    format!("var\n    WS : IWorkspace;\n    Prj : IProject;\n    I : Integer;\nprocedure BpAdd(D : String);\nvar\n    J : Integer;\nbegin\n    for J := 0 to Prj.DM_LogicalDocumentCount - 1 do\n        if SameText(Prj.DM_LogicalDocuments(J).DM_FullPath, D) then Exit;\n    Prj.DM_AddSourceDocument(D);\n    Emit('added to the project open in Altium (unsaved there)|' + D);\nend;\nWS := GetWorkspace;\nPrj := nil;\nfor I := 0 to WS.DM_ProjectCount - 1 do\n    if SameText(WS.DM_Projects(I).DM_ProjectFullPath, {p}) then Prj := WS.DM_Projects(I);\nif Prj <> nil then\nbegin\n{calls}end;\n", p = pas_str(prj))
+}
+
 /// Altium.status: whether Altium runs, where, and its open projects and documents (a run of a canned script).
 pub const STATUS_SCRIPT: &str = r#"var
     WS : IWorkspace;
@@ -528,6 +603,26 @@ mod win {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// The write tool's scripts split as the bridge splits them (globals, routines, body); BP_ALTIUM_WRITE_SCRIPTS=<dir> writes them
+    /// there with paths from BP_ALTIUM_WRITE_DOCS (`;`-separated, the first the focused one) to try through the bridge.
+    #[test] fn write_scripts() {
+        let docs = vec![r"C:\p\A.SchDoc".to_string(), r"C:\p\it's.PcbLib".to_string()];
+        for sc in [close_script(&docs), reopen_script(&docs, r"C:\p\B.PcbDoc"), add_docs_script(r"C:\p\P.PrjPcb", &docs)] {
+            let p = split(&sc);
+            assert!(p.decls.starts_with("var") && p.routines.starts_with("procedure Bp") && !p.body.is_empty(), "{sc}");
+            assert!(sc.contains("'C:\\p\\it''s.PcbLib'"), "{sc}");
+        }
+        assert!(reopen_script(&docs, "").contains("'SCH'") && reopen_script(&docs, "").contains("'PCBLIB'"));
+        assert_eq!(Open::of("focused|C:\\x.PcbDoc\nmodified|C:\\a.SchDoc\nclosed|C:\\b.SchLib\nnoise"), Open { focused: "C:\\x.PcbDoc".into(), closed: vec!["C:\\b.SchLib".into()], modified: vec!["C:\\a.SchDoc".into()] });
+        if let (Some(dir), Ok(list)) = (std::env::var_os("BP_ALTIUM_WRITE_SCRIPTS"), std::env::var("BP_ALTIUM_WRITE_DOCS")) {
+            let d: Vec<String> = list.split(';').map(String::from).collect();
+            let dir = std::path::PathBuf::from(dir);
+            std::fs::write(dir.join("close.pas"), close_script(&d)).unwrap();
+            std::fs::write(dir.join("reopen.pas"), reopen_script(&d, &d[0])).unwrap();
+            let prj = d.iter().find(|x| x.to_lowercase().ends_with(".prjpcb")).cloned().unwrap_or_default();
+            std::fs::write(dir.join("add.pas"), add_docs_script(&prj, &d.iter().filter(|x| !x.to_lowercase().ends_with(".prjpcb")).cloned().collect::<Vec<_>>())).unwrap();
+        }
+    }
     #[test] fn splits_var_routines_and_body() {
         let s = "var\n  Board : IPCB_Board;\n  I, N : Integer;\nconst K = 3;\nfunction Twice(X : Integer) : Integer;\nvar Y : Integer;\nbegin\n  Y := X * 2;\n  if Y > 0 then begin Result := Y; end else Result := 0;\nend;\nprocedure Hi;\nbegin\n  try Emit('a;b end'); except end;\nend;\nBoard := PCBServer.GetCurrentPCBBoard;\nEmit(IntToStr(Twice(K)));\n";
         let p = split(s);
