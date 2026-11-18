@@ -53,6 +53,9 @@ impl<'a> B<'a> {
     }
 }
 
+/// The picker's four (model, effort, speed, provider) act on a thread the facts know, this machine's or, over that machine's mirror, a linked machine's.
+fn picks<F: Facts>(f: &F, sel: &str) -> bool { !sel.is_empty() && !sel.starts_with('@') && crate::session::select::Facts::thread_exists(f, sel) }
+
 pub fn act<F: Facts>(f: &F, hub: &str, session: &Value, sel: &str, action: &str, value: &str) -> Option<Out> {
     let mut b = B::new(hub, session);
     match action {
@@ -143,13 +146,14 @@ pub fn act<F: Facts>(f: &F, hub: &str, session: &Value, sel: &str, action: &str,
                 b.cmds.push(json!({"type": "focus", "id": "term"}));
             }
         }
-        // the picker under the composer: a model within the provider (Ui.model: thread.modes), a reasoning effort or, for a "@provider" chip, another agent (Ui.effort.set)
+        // the picker under the composer (any thread the facts know: a linked machine's `<link>~<id>` is kept, its hub's router sends it there, net/far.rs METHODS):
+        // a model within the provider (Ui.model: thread.modes), a reasoning effort or, for a "@provider" chip, another agent (Ui.effort.set)
         "model" => {
-            if sel.is_empty() || sel.contains('~') || sel.starts_with('@') || !crate::session::select::Facts::thread_exists(f, sel) { return None }
+            if !picks(f, sel) { return None }
             b.rpc("thread.modes", json!({"thread": sel, "model": value}));
         }
         "effort" => {
-            if sel.is_empty() || sel.contains('~') || sel.starts_with('@') || !crate::session::select::Facts::thread_exists(f, sel) { return None }
+            if !picks(f, sel) { return None }
             match value.strip_prefix('@') {
                 Some(provider) => b.rpc("thread.provider", json!({"thread": sel, "provider": provider})),
                 None => b.rpc("thread.effort", json!({"thread": sel, "effort": value})),
@@ -157,12 +161,12 @@ pub fn act<F: Facts>(f: &F, hub: &str, session: &Value, sel: &str, action: &str,
         }
         // the speed dial: Normal (""), Fast or UltraFast
         "speed" => {
-            if sel.is_empty() || sel.contains('~') || sel.starts_with('@') || !crate::session::select::Facts::thread_exists(f, sel) { return None }
+            if !picks(f, sel) { return None }
             b.rpc("thread.speed", json!({"thread": sel, "speed": value}));
         }
         // the desktop picker's cursor put on another agent (ModelPick.plan): one switch carrying `<provider>\u{1f}<model>`, then `\u{1f}<effort>` when the effort changed too; between turns the hub takes all of it or none
         "provider" => {
-            if sel.is_empty() || sel.contains('~') || sel.starts_with('@') || !crate::session::select::Facts::thread_exists(f, sel) { return None }
+            if !picks(f, sel) { return None }
             let mut p = value.split('\u{1f}');
             let provider = p.next().unwrap_or(""); if provider.is_empty() { return None }
             let mut q = json!({"thread": sel, "provider": provider, "model": p.next().unwrap_or("")});
@@ -321,6 +325,29 @@ mod tests {
         assert!(run("provider", "", sess()).is_none());
         let o = run("speed", "fast", sess()).unwrap(); assert!(text(&o, 0).contains("\"m\":\"thread.speed\"") && text(&o, 0).contains("\"speed\":\"fast\""));
         let o = run("effort", "", sess()).unwrap(); assert!(text(&o, 0).contains("\"effort\":\"\""), "auto is the empty effort");
+    }
+    /// A linked machine's thread (`<link>~<id>`, known to the facts over its mirror): the picker's four requests name it as it is, and the far router takes each
+    /// (allowed, its link read from `thread`, the id made that machine's own on the way); one the facts do not know, and a "@" page, still get nothing.
+    #[test] fn the_picker_acts_on_a_linked_machines_thread() {
+        const FAR: &str = "lap~t1700000002-3";
+        struct Far;
+        impl composer::Facts for Far { fn bot_thread(&self, _: &str) -> bool { false } fn account_params(&self, _: &str) -> bool { false } }
+        impl select::Facts for Far {
+            fn thread_exists(&self, id: &str) -> bool { id == FAR } fn turn_name(&self, _: &str) -> String { "idle".into() }
+            fn order_enabled(&self) -> bool { true } fn estimates_on(&self) -> bool { true }
+        }
+        impl Facts for Far { fn title_of(&self, _: &str) -> String { String::new() } fn root_of(&self, _: &str) -> String { String::new() } }
+        let s = json!({"sel": FAR, "rid": 5, "drafts": {}, "info": {}, "open": {}});
+        for (a, v, m) in [("model", "opus", "thread.modes"), ("effort", "high", "thread.effort"), ("effort", "@codex", "thread.provider"), ("speed", "fast", "thread.speed"), ("provider", "codex\u{1f}gpt-6", "thread.provider")] {
+            let o = act(&Far, "h", &s, FAR, a, v).unwrap_or_else(|| panic!("{a} {v}: refused"));
+            let req: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap();
+            assert_eq!((req["m"].as_str(), req["p"]["thread"].as_str()), (Some(m), Some(FAR)), "{a} {v}");
+            assert!(crate::net::far::may(m), "{m}: the far router takes it");
+            assert_eq!(crate::net::far::params_link(&req["p"]), "lap");
+            assert_eq!(crate::net::far::params_local(&req["p"], "lap")["thread"], json!("t1700000002-3"));
+        }
+        assert!(act(&Far, "h", &s, "other~t1", "model", "opus").is_none(), "a thread no mirror holds");
+        assert!(act(&Far, "h", &s, "@lap~x", "model", "opus").is_none());
     }
     #[test] fn find_open_modes() {
         let o = run("find-open", "search", sess()).unwrap();

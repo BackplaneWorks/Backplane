@@ -694,6 +694,13 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             crate::session::patch::merge(&mut session,&o.patch);
             cmds=o.before;
         },
+        // the composer's picker on a linked machine's thread: the shared dispatcher over that machine's mirror, which knows the thread; the request keeps
+        // the `<link>~<id>` id and this hub's router sends it there (net/far.rs METHODS). This machine's own threads were answered by the dispatch above.
+        "model" | "effort" | "speed" | "provider" if !std::ptr::eq(sel_st,st) => {
+            let mut a=p.clone(); a["session"]=session.clone();
+            let Some(out)=crate::session::dispatch::dispatch(&crate::session::dispatch::StateFacts(sel_st),&a) else { return refused("action.unported") };
+            session=out.session; cmds.extend(out.cmds);
+        },
         _ => return refused("action.unported"),
     } }
     // Dv.sync: an open Diff follows its thread
@@ -1160,6 +1167,34 @@ mod state_tests {
         // and the presenter runs it on a thread's view (view.open has no action): whatever it answers, its session has asked
         let mut p=params(); p["target"]=json!({"kind":"thread","id":"t1"}); p["window"]=json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderNext":"","hasMore":false,"remaining":0,"newer":0,"total":0});
         if let Some(v)=recent(&st,&p) { assert_eq!(looks(v["cmds"].as_array().unwrap()),1,"{}",v["cmds"]); } else { eprintln!("REFUSED (see the not ported line)"); }
+    }
+    /// #1197: the composer's picker on a linked machine's thread changes it there: model, effort, speed and agent each answer the view (never action.unported)
+    /// with one request naming the thread as `<link>~<id>`, which the far router takes; this machine's own thread still gets its own request.
+    #[test] fn the_model_picker_changes_a_linked_machines_thread() {
+        let mut st=State::new(); st.lean=true;
+        for e in [json!({"$":"ProjectCreated","id":"p1","title":"Here","root":"/h","at":1}),
+                  json!({"$":"ThreadCreated","id":"t1","project":"p1","title":"Mine","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2})] { event(&mut st,e); }
+        let mut f=State::new(); f.lean=true;
+        for e in [json!({"$":"ProjectCreated","id":"L~p9","title":"There","root":"/w","at":1}),
+                  json!({"$":"ThreadCreated","id":"L~t9","project":"L~p9","title":"Theirs","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":3})] { event(&mut f,e); }
+        let far=vec![("winbox".to_string(),&f)];
+        let sends=|v: &Value| v["cmds"].as_array().into_iter().flatten().filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).collect::<Vec<_>>();
+        let pick=|th: &str,a: &str,val: &str| { let mut q=params(); q["target"]=json!({"kind":"thread","id":th}); q["session"]["sel"]=json!(th);
+            q["window"]=json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderNext":"","hasMore":false,"remaining":0,"newer":0,"total":0});
+            q["page"]=json!({"thread":th,"rows":[]}); q["action"]=json!(a); q["value"]=json!(val); recent_far(&st,&far,&q) };
+        for (a,val,m) in [("model","opus","thread.modes"),("effort","high","thread.effort"),("effort","@codex","thread.provider"),("speed","fast","thread.speed"),("provider","codex\u{1f}gpt-6","thread.provider")] {
+            let v=pick("L~t9",a,val).unwrap_or_else(||panic!("{a} {val}: no answer"));
+            assert!(v.get("refused").is_none() && v["error"].is_null(),"{a} {val}: {v}");
+            let reqs: Vec<Value>=sends(&v).into_iter().filter(|r|r["m"]==m).collect();
+            assert_eq!(reqs.len(),1,"{a} {val}: {}",v["cmds"]);
+            assert_eq!(reqs[0]["p"]["thread"],"L~t9","the far id is kept");
+            assert!(crate::net::far::may(m) && crate::net::far::params_link(&reqs[0]["p"])=="L","{m}: the far router sends it to L");
+            // this machine's thread: its own request, as before
+            let v=pick("t1",a,val).unwrap_or_else(||panic!("local {a} {val}: no answer"));
+            let reqs: Vec<Value>=sends(&v).into_iter().filter(|r|r["m"]==m).collect();
+            assert_eq!((reqs.len(),reqs[0]["p"]["thread"].as_str()),(1,Some("t1")),"local {a} {val}: {}",v["cmds"]);
+            assert_eq!(crate::net::far::params_link(&reqs[0]["p"]),"");
+        }
     }
     #[test] fn recent_reads_the_existing_policy_copy_only_after_boot() {
         use crate::state::fam::policy::{Core,Policy};
