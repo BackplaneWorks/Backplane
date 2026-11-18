@@ -867,11 +867,14 @@ fn text_frame(o: &mut Out, cx: &Cx, r: &Props, key: &str, sig: u32) {
     let m = ((if r.has("TEXTMARGIN") || r.has("TEXTMARGIN_FRAC") { val(r, "TEXTMARGIN") } else { 5.0 }) * U).max(0.3);
     let shown = cx.d.mentions(&cx.d.resolve(r.get("TEXT"), -1));
     let s = &shown;
-    let s = if r.bool("WORDWRAP") { strokefont::wrap(&markup(&s), f.w(), (x1 - x0 - 2.0 * m).max(1.0)) } else { markup(&s) };
+    // the characters as wide as Altium's font draws them (the widest line's measure), so lines wrap where Altium's do
+    let (want, have) = (em_width(s, f.face) * f.face.em() * f.line(), strokefont::width(&markup(s), f.w()));
+    let cw = if want > 0.0 && have > 0.0 { f.w() * (want / have).clamp(0.7, 1.5) } else { f.w() };
+    let s = if r.bool("WORDWRAP") { strokefont::wrap(&markup(s), cw, (x1 - x0 - 2.0 * m).max(1.0)) } else { markup(s) };
     let (hj, x) = match r.int("ALIGNMENT") { 2 => (1, (x0 + x1) / 2.0), 3 => (2, x1 - m), _ => (0, x0 + m) };
     if s.trim().is_empty() { return }
     // already marked up: drawn as it is
-    let ps = strokefont::text_full(&s, x, y0 + m + 0.207 * f.line(), f.h, f.w(), f.pen(), 0.0, hj, 0, false, f.italic);
+    let ps = strokefont::text_full(&s, x, y0 + m + 0.207 * f.line(), f.h, cw, f.pen(), 0.0, hj, 0, false, f.italic);
     drawn(&shown, p(x, y0 + m), NOTE, &ps);
     o.put(ps, &format!("{key}/t"), sig, NOTE, &info);
 }
@@ -1349,7 +1352,7 @@ mod tests {
                 for (sub, t) in texts {
                     let kind = if sub.is_empty() { kind.clone() } else { format!("{kind}.{sub}") };
                     let own = if orc >= 0 { owner(x) } else { -1 };
-                    let v = if more { t.clone() } else { d.resolve(&t, own) };
+                    let v = if more { t.clone() } else if rc == 34 && orc == 1 { d.designator(owner(x) as usize) } else if rc == 28 || rc == 209 { d.mentions(&d.resolve(&t, -1)) } else { d.resolve(&t, own) };
                     let comp = if orc == 1 { Some(&r.main[owner(x) as usize]) } else { None };
                     let state = if t.trim().is_empty() { "empty" }
                         else if comp.map_or(false, |c| !d.shown_in(c, x)) && rc != 34 && rc != 41 { "other-part" }
@@ -1358,7 +1361,10 @@ mod tests {
                         else if rc == 2 && sub == "name" && x.int("PINCONGLOMERATE") & 8 == 0 { "name-off" }
                         else if rc == 2 && sub == "num" && x.int("PINCONGLOMERATE") & 16 == 0 { "num-off" }
                         else if shown.contains(v.as_str()) || shown.iter().any(|s| s.ends_with(&format!(": {v}"))) { "drawn" }
-                        else if t.starts_with('=') && v.is_empty() { "unresolved" }
+                        else if t.starts_with('=') && v == t { "unresolved" }
+                        else if t.eq_ignore_ascii_case("=CurrentTime") { "clock" }
+                        else if rc == 41 && (44..=48).contains(&orc) { "model-param" }
+                        else if rc == 43 && d.kids(i).iter().any(|&k| d.rs[k].get("NAME").eq_ignore_ascii_case("DifferentialPair")) { "diff-pair-mark" }
                         else if v.trim().is_empty() { "blank" }
                         else { "DROPPED" };
                     note(kind, state);
