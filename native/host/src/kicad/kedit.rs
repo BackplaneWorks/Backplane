@@ -1302,7 +1302,7 @@ mod tests {
         let f = fake(None);
         let out = go(&f, json!({"ops": [{"move": "R1", "by": [1, 0]}, {"find": {"kind": "footprint", "ref": "R1"}}, {"set": "R9", "value": "x"}]})).unwrap_err();
         assert_eq!(names(&f), ["GetOpenDocuments", "OpenDocument", "GetItems", "BeginCommit", "UpdateItems", "EndCommit", "GetItems", "SaveDocument"], "the find ended the commit and read the footprints again; the failed op had no commit to drop");
-        assert!(out.contains("op 3 (set)") && out.contains("before op 2's find were already committed and are saved"), "{out}");
+        assert!(out.contains("op 3 (set)") && out.contains("before op 2 (find) were already committed and are saved"), "{out}");
         // a symbol: KiCad places it from the library in a dropped commit, and the real one keeps that placement with the asked texts
         let t = json!({"id": {"value": "probe"}, "path": {}, "position": {"x_nm": "1", "y_nm": "2"}, "lib_id": {"library_nickname": "Device", "entry_name": "R"}, "definition": {"items": [1, 2, 3]},
             "reference_field": {"visible": true, "text": {"position": {"x_nm": "5"}, "text": "R"}}, "value_field": {"visible": true, "text": {"position": {"x_nm": "6"}, "text": "R"}}});
