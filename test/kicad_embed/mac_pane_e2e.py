@@ -1008,6 +1008,7 @@ try:
     # Cmd+H with the message box, the terminal (Cmd+J) and a viewer (the Files page) focused hides Backplane's window; unhidden, it is back.
     # Last, Cmd+W with the terminal focused closes the window by the red button's path (the client's "close" metric, exit 0); the hub stays up ----
     if os.environ.get('MAC_MODE') == 'textkeys':
+        if DRIVER != 'quartz': raise SystemExit('MAC_MODE=textkeys posts Quartz events and uses System Events: the e2e-macos runner only')
         K_LEFT, K_RIGHT, K_DOWN, K_UP, K_RET, K_GRAVE, K_H, K_W = 123, 124, 125, 126, 36, 50, 4, 13
         def press_rect(i):
             r = rects().get(i)
@@ -1022,10 +1023,22 @@ try:
         def composer_text():
             subprocess.run(['pbcopy'], input=b'<nothing copied>'); key(K_A, CMD); time.sleep(0.15); key(8, CMD); time.sleep(0.3)
             t = subprocess.run(['pbpaste'], capture_output=True).stdout.decode('utf8', 'replace'); key(K_RIGHT); time.sleep(0.15); return t
-        def typed(t): relay(op='text', text=t); time.sleep(0.2)
+        def typed(t):
+            # each character with no modifier flags of its own: right after a Cmd chord a posted character took Cmd from the session's
+            # state (run 44268640536: the Y after Cmd+Left arrived as Cmd+A, key code 0, and selected everything)
+            for ch in t:
+                for down in (True, False):
+                    e = Quartz.CGEventCreateKeyboardEvent(None, 0, down); Quartz.CGEventKeyboardSetUnicodeString(e, 1, ch); Quartz.CGEventSetFlags(e, 0)
+                    Quartz.CGEventPost(Quartz.kCGHIDEventTap, e); time.sleep(0.02)
+            time.sleep(0.2)
         def ours_on_screen(): return any(w[0] == cw[0] for w in wins())
         def unhide():
+            # unhidden, macOS had Finder in front and a click meant for us went to its window (run 44268640536): Backplane is made the
+            # front app by System Events (granted on the runner, as win_move uses it) and must be the active app before the next case
             a = NSRunningApplication.runningApplicationWithProcessIdentifier_(client.pid); a.unhide(); time.sleep(0.4); a.activateWithOptions_(0)
+            if not wait_for(lambda: active(client.pid), 2, 0.1):
+                osa(f'tell application "System Events" to set frontmost of (first process whose unix id is {client.pid}) to true')
+            check(bool(wait_for(lambda: active(client.pid), 5, 0.1)), 'textkeys: unhidden, Backplane is the active app again')
         def hub_up(): return subprocess.run(['curl', '-s', '-m2', '-o', '/dev/null', f'http://127.0.0.1:{port}/hello']).returncode == 0
         check(box(), 'textkeys: the message box is on screen (under Send\'s rect)'); where('the message box clicked'); key(K_A, CMD); key(K_DEL)
         typed('keep'); key(K_RET, SHIFT); typed('ab cd')
