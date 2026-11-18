@@ -17,6 +17,35 @@ pub mod pcb;
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
+/// A board's 3D: an Altium board converted by KiCad's own importer (`kicad-cli pcb import --format altium`, KiCad 10) into a
+/// .kicad_pcb kept in the models cache, keyed by the file's path, time and size, which the native 3D path then draws (KiCad's import
+/// carries the board's embedded STEP models along as embedded files). Ok: the converted board's path.
+pub fn kicad_board(cli: &str, pcbdoc: &str) -> Result<String, String> {
+    kicad_board_in(cli, pcbdoc, &std::path::Path::new(&crate::files::kicad::stepglb::cache_dir()).join("altium"))
+}
+/// kicad_board with the conversions kept in `dir`
+pub fn kicad_board_in(cli: &str, pcbdoc: &str, dir: &std::path::Path) -> Result<String, String> {
+    if cli.is_empty() { return Err("the 3D view of an Altium board needs KiCad 10 (its importer): install KiCad in Settings, CAD".into()) }
+    let md = std::fs::metadata(pcbdoc).map_err(|e| format!("{pcbdoc}: {e}"))?;
+    let t = md.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
+    let key = format!("{:08x}-{t}-{}", crate::files::kicad::board::hash(pcbdoc.as_bytes(), 2166136261), md.len());
+    let stem = std::path::Path::new(pcbdoc).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "board".into());
+    let out = dir.join(format!("{stem}-{key}.kicad_pcb"));
+    if out.is_file() { return Ok(out.to_string_lossy().into_owned()) }
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let part = dir.join(format!("{stem}-{key}.part.kicad_pcb"));
+    let o = crate::proc::std_cmd(crate::proc::Kind::Local, cli).args(["pcb", "import", "--format", "altium", "-o"]).arg(&part).arg(pcbdoc).output().map_err(|e| format!("could not run KiCad's importer: {e}"))?;
+    if !o.status.success() || !part.is_file() {
+        let _ = std::fs::remove_file(&part);
+        let why = String::from_utf8_lossy(&o.stderr).trim().lines().last().unwrap_or("").to_string();
+        return Err(format!("KiCad could not import this Altium board for 3D{}", if why.is_empty() { String::new() } else { format!(": {why}") }));
+    }
+    std::fs::rename(&part, &out).map_err(|e| e.to_string())?;
+    // earlier conversions of the same board: only the newest is kept
+    if let Ok(rd) = std::fs::read_dir(dir) { let pre = format!("{stem}-{:08x}-", crate::files::kicad::board::hash(pcbdoc.as_bytes(), 2166136261)); for e in rd.flatten() { let n = e.file_name().to_string_lossy().into_owned(); if n.starts_with(&pre) && e.path() != out { let _ = std::fs::remove_file(e.path()); } } }
+    Ok(out.to_string_lossy().into_owned())
+}
+
 /// The first eight bytes of every compound file.
 pub const MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 pub fn is_cfb(b: &[u8]) -> bool { b.len() >= 8 && b[..8] == MAGIC }
@@ -224,6 +253,24 @@ mod tests {
         let mut p = Vec::new();
         p.extend_from_slice(&7u32.to_le_bytes()); p.extend_from_slice(b"|NAME=A");
         assert_eq!(pcb_text_records(&p)[0].get("NAME"), "A");
+    }
+    /// A corpus board through KiCad's importer and the native 3D path (BP_ALTIUM_CORPUS and BP_KICAD_CLI): the board meshes and its parts resolve.
+    #[test] fn corpus_board_3d() {
+        let (Some(c), Ok(cli)) = (corpus(), std::env::var("BP_KICAD_CLI")) else { return };
+        let b = c.join("canbus transceiver board/transceivers_board.PcbDoc");
+        if !b.is_file() { return }
+        let t = std::time::Instant::now();
+        let tmp = crate::plat::tmp::dir("alt3d");
+        let k = kicad_board_in(&cli, &b.to_string_lossy(), &tmp.join("altium")).expect("import");
+        let again = std::time::Instant::now(); assert_eq!(kicad_board_in(&cli, &b.to_string_lossy(), &tmp.join("altium")).unwrap(), k); let cached = again.elapsed();
+        let bytes = std::fs::read(&k).unwrap();
+        let made = crate::files::kicad::pcb3d::stream::board_model_kept(&bytes, &tmp.join("boards"), true).expect("3d");
+        let emb = crate::files::kicad::pcb3d::models::embedded(&bytes, &tmp.join("emb"));
+        let env = crate::files::kicad::pcb3d::models::Env::system(Some(std::path::Path::new(&cli)));
+        let dir = crate::files::kicad::pcb3d::stream::board_dir(&k);
+        let plan = crate::files::kicad::pcb3d::stream::plan(&made.board, made.seat, &|raw: &str| crate::files::kicad::pcb3d::models::resolve_in(raw, &dir, &env, &emb));
+        println!("ALT3D import+mesh {:?} (cached {:?}), triangles {}, embedded models {}, plan: {}", t.elapsed(), cached, made.plot.solid.as_ref().map_or(0, |s| s.n), emb.len(), crate::files::kicad::pcb3d::stream::missing_note(&plan));
+        assert!(made.plot.solid.as_ref().map_or(0, |s| s.n) > 1000);
     }
     #[test] fn kinds() {
         assert_eq!(kind("x/Top.SchDoc"), Some(Kind::Schematic));

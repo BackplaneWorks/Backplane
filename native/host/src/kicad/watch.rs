@@ -466,6 +466,12 @@ impl Plots {
             let say = |text: &str| if solid3 { me.stage(&hub, &ky, text, t0.elapsed().as_millis() as u64, about) };
             if solid3 && me.readers.available_permits() == 0 { say("Waiting for another drawing to finish…") }
             let _slot = me.readers.acquire().await.ok();
+            // an Altium board's 3D: KiCad's importer makes a .kicad_pcb of it once (altium::kicad_board), drawn as any board
+            let file = if solid3 && is_altium_board(&file) && !is_version(&file) {
+                say("Converting the Altium board for 3D with KiCad's importer…");
+                let (cli, f) = (super::ipc::runtime(&hub).await.cli, file.clone());
+                match tokio::task::spawn_blocking(move || crate::files::altium::kicad_board(&cli, &f)).await { Ok(Ok(p)) => p, Ok(Err(e)) => { eprintln!("altium 3d: {e}"); file } Err(_) => file }
+            } else { file };
             // Pv.read.at: a model whose GLB is known too big is refused at once, not behind another model's read
             let native3d = solid3 && file.ends_with(".kicad_pcb") && !file.starts_with("diff\n") && Self::board3d_native(&hub).await;
             let known = if solid3 && !native3d { solidread::known(kind, &file) } else { 0 };
