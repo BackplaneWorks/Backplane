@@ -16,14 +16,25 @@ pub const GUI_REFUSAL: &str = "Backplane: agents do not open KiCad windows. Show
 /// The file a refusing shim appends its caller to (parent pid, image, command line); the hub moves it into its log (drain_refusals).
 pub const REFUSALS: &str = "refused.log";
 /// A GUI program's shim: its caller written to `log`, the one line, exit 1, nothing started.
-pub fn gui_shim_text(program: &str, log: &Path) -> String {
+pub fn gui_shim_text(program: &str, log: &Path) -> String { if cfg!(windows) { cmd_gui_text(program, log) } else { sh_gui_text(program, &log.to_string_lossy()) } }
+fn cmd_gui_text(program: &str, log: &Path) -> String {
     let l = log.to_string_lossy();
-    if cfg!(windows) {
-        format!("@echo off\r\nrem Backplane: {program} is not for agents\r\npowershell -NoProfile -NonInteractive -Command \"$s=Get-CimInstance Win32_Process -Filter ('ProcessId='+$PID); $c=Get-CimInstance Win32_Process -Filter ('ProcessId='+$s.ParentProcessId); $p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$c.ParentProcessId); Add-Content -LiteralPath '{l}' -Value ('caller '+$p.ProcessId+' '+$p.Name+': '+$p.CommandLine+' :: {program} '+$c.CommandLine)\" >nul 2>&1\r\necho {GUI_REFUSAL} 1>&2\r\nexit /b 1\r\n")
-    } else {
-        let l = l.replace('\'', "'\\''");
-        format!("#!/bin/sh\n# Backplane: {program} is not for agents\n{{ printf 'caller %s: ' \"$PPID\"; tr '\\0' ' ' < /proc/$PPID/cmdline 2>/dev/null || ps -o command= -p $PPID 2>/dev/null; printf ' :: {program} %s\\n' \"$*\"; }} >> '{l}' 2>/dev/null\necho \"{GUI_REFUSAL}\" >&2\nexit 1\n")
-    }
+    format!("@echo off\r\nrem Backplane: {program} is not for agents\r\npowershell -NoProfile -NonInteractive -Command \"$s=Get-CimInstance Win32_Process -Filter ('ProcessId='+$PID); $c=Get-CimInstance Win32_Process -Filter ('ProcessId='+$s.ParentProcessId); $p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$c.ParentProcessId); Add-Content -LiteralPath '{l}' -Value ('caller '+$p.ProcessId+' '+$p.Name+': '+$p.CommandLine+' :: {program} '+$c.CommandLine)\" >nul 2>&1\r\necho {GUI_REFUSAL} 1>&2\r\nexit /b 1\r\n")
+}
+/// The POSIX sh refusal (Linux, macOS, and Git Bash / MSYS2 / Cygwin on Windows, where `log` is in sh_path's form): LF line endings only.
+fn sh_gui_text(program: &str, log: &str) -> String {
+    format!("#!/bin/sh\n# Backplane: {program} is not for agents\n{{ printf 'caller %s: ' \"$PPID\"; tr '\\0' ' ' < /proc/$PPID/cmdline 2>/dev/null || ps -o command= -p $PPID 2>/dev/null; printf ' :: {program} %s\\n' \"$*\"; }} >> {} 2>/dev/null\necho \"{GUI_REFUSAL}\" >&2\nexit 1\n", sh_quote(log))
+}
+/// `s` as one sh word: single-quoted, each `'` written `'\''` (nothing else is special inside single quotes: spaces, `$`, backticks,
+/// non-ASCII, which is written as UTF-8).
+fn sh_quote(s: &str) -> String { format!("'{}'", s.replace('\'', "'\\''")) }
+/// A path as a POSIX sh on Windows takes it (#1167: Git Bash, MSYS2 and Cygwin, whose runtimes all accept a Win32 path in mixed form,
+/// `C:/Users/...`, where `/c/...` is MSYS's alone and Cygwin's is `/cygdrive/c/...`): `\\?\` dropped, `\\?\UNC\srv` and `\\srv` as `//srv`,
+/// backslashes as slashes. Elsewhere the path as it is.
+pub fn sh_path(p: &str, windows: bool) -> String {
+    if !windows { return p.to_string() }
+    let p = if let Some(r) = p.strip_prefix(r"\\?\UNC\") { format!(r"\\{r}") } else { p.strip_prefix(r"\\?\").unwrap_or(p).to_string() };
+    p.replace('\\', "/")
 }
 /// The refusals the shims in `dir` wrote since the last look, each a line in the hub's log (then the file is emptied).
 pub fn drain_refusals(dir: &Path) -> Vec<String> {
@@ -67,30 +78,56 @@ pub fn version_of(cli: &str) -> Option<String> {
 }
 
 /// One shim's text: exec the selected program with the agent's arguments.
-pub fn shim_text(target: &Path) -> String {
-    let t = target.to_string_lossy();
-    if cfg!(windows) { format!("@echo off\r\nrem Backplane: the KiCad this hub has selected (rewritten at each turn)\r\n\"{t}\" %*\r\n") }
-    else { format!("#!/bin/sh\n# Backplane: the KiCad this hub has selected (rewritten at each turn)\nexec '{}' \"$@\"\n", t.replace('\'', "'\\''")) }
+pub fn shim_text(target: &Path) -> String { if cfg!(windows) { cmd_exec_text(target) } else { sh_exec_text(&target.to_string_lossy()) } }
+fn cmd_exec_text(target: &Path) -> String { format!("@echo off\r\nrem Backplane: the KiCad this hub has selected (rewritten at each turn)\r\n\"{}\" %*\r\n", target.to_string_lossy()) }
+/// The POSIX sh exec shim: `exec`, so the program's exit code, stdin, stdout and stderr are the caller's; LF line endings only.
+fn sh_exec_text(target: &str) -> String { format!("#!/bin/sh\n# Backplane: the KiCad this hub has selected (rewritten at each turn)\nexec {} \"$@\"\n", sh_quote(target)) }
+/// The files of program `p`'s shim, (name, text): `target` None is a GUI program's refusal. On Windows a `.cmd` (what cmd and PowerShell
+/// run: an extensionless file matches no PATHEXT entry) and, beside it, an extensionless POSIX sh shim for Git Bash / MSYS2 (#1167).
+fn shim_files(p: &str, target: Option<&Path>, log: &Path, windows: bool) -> Vec<(String, String)> {
+    let sh = match target { Some(t) => sh_exec_text(&sh_path(&t.to_string_lossy(), windows)), None => sh_gui_text(p, &sh_path(&log.to_string_lossy(), windows)) };
+    if !windows { return vec![(p.to_string(), sh)] }
+    let cmd = match target { Some(t) => cmd_exec_text(t), None => cmd_gui_text(p, log) };
+    vec![(format!("{p}.cmd"), cmd), (p.to_string(), sh)]
 }
-fn shim_name(p: &str) -> String { if cfg!(windows) { format!("{p}.cmd") } else { p.to_string() } }
-
-/// Write `dir`'s shims for the selected `cli`: one per program in PROGRAMS that the install has beside it; a shim for a program it lacks is
-/// removed. Each is replaced whole (written aside, then renamed) and only when its text changes, so a turn running one never reads half of it.
-pub fn write_shims(dir: &Path, cli: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dir)?;
-    let bin = cli.parent().unwrap_or(Path::new(""));
-    let ext = cli.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
-    let _ = (bin, &ext);
-    let wants = PROGRAMS.iter().map(|p| (*p, Some(cli.to_path_buf()))).chain(GUI_PROGRAMS.iter().map(|p| (*p, None)));
-    for (p, target) in wants {
-        let at = dir.join(shim_name(p));
-        let text = match &target { Some(t) if !t.is_file() => { let _ = std::fs::remove_file(&at); continue } Some(t) => shim_text(t), None => gui_shim_text(p, &dir.join(REFUSALS)) };
-        if std::fs::read_to_string(&at).map_or(false, |t| t == text) { continue }
-        let tmp = dir.join(format!(".{}.{}", shim_name(p), std::process::id()));
-        std::fs::write(&tmp, &text)?;
-        #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?; }
-        std::fs::rename(&tmp, &at)?;
+/// A shim this hub wrote (now or in an earlier version): its second line is the `rem Backplane:` or `# Backplane:` mark.
+fn is_ours(f: &Path) -> bool {
+    use std::io::Read;
+    let mut b = [0u8; 256]; let n = std::fs::File::open(f).and_then(|mut h| h.read(&mut b)).unwrap_or(0);
+    String::from_utf8_lossy(&b[..n]).lines().nth(1).is_some_and(|l| l.starts_with("rem Backplane:") || l.starts_with("# Backplane:"))
+}
+/// Remove every shim of ours in `dir` (a program's name, or a file with our mark) that is not in `keep` (a program the install lost, one that left GUI_PROGRAMS, the sh shim of a
+/// `.cmd` that goes): `refused.log` and files being written (`.name.pid`) are left.
+fn sweep(dir: &Path, keep: &[String]) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let n = e.file_name().to_string_lossy().into_owned();
+        let known = PROGRAMS.iter().chain(GUI_PROGRAMS).any(|p| n == *p || n == format!("{p}.cmd"));
+        if n == REFUSALS || n.starts_with('.') || keep.contains(&n) || !e.path().is_file() || !(known || is_ours(&e.path())) { continue }
+        let _ = std::fs::remove_file(e.path());
     }
+}
+
+/// Write `dir`'s shims for the selected `cli`: one per program in PROGRAMS that the install has beside it, a refusal per GUI program, and
+/// any other shim of ours removed. Each is replaced whole (written aside, then renamed) and only when its text changes, so a turn running
+/// one never reads half of it.
+pub fn write_shims(dir: &Path, cli: &Path) -> std::io::Result<()> { write_shims_for(dir, cli, cfg!(windows)) }
+fn write_shims_for(dir: &Path, cli: &Path, windows: bool) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let wants = PROGRAMS.iter().map(|p| (*p, Some(cli.to_path_buf()))).chain(GUI_PROGRAMS.iter().map(|p| (*p, None)));
+    let mut keep = vec![];
+    for (p, target) in wants {
+        if target.as_ref().is_some_and(|t| !t.is_file()) { continue }
+        for (name, text) in shim_files(p, target.as_deref(), &dir.join(REFUSALS), windows) {
+            let at = dir.join(&name); keep.push(name.clone());
+            if std::fs::read_to_string(&at).map_or(false, |t| t == text) { continue }
+            let tmp = dir.join(format!(".{name}.{}", std::process::id()));
+            std::fs::write(&tmp, &text)?;
+            #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?; }
+            std::fs::rename(&tmp, &at)?;
+        }
+    }
+    sweep(dir, &keep);
     Ok(())
 }
 
@@ -102,7 +139,7 @@ pub fn shims_dir(home: &Path) -> PathBuf { home.join("shims") }
 pub fn select(env: &Env, shims: &Path, version_of: impl FnOnce(&str) -> Option<String>) -> Selected {
     drain_refusals(shims);
     let kicad = kicad_of(env, version_of);
-    if env.cli.is_empty() { let _ = PROGRAMS.iter().chain(GUI_PROGRAMS).try_for_each(|p| std::fs::remove_file(shims.join(shim_name(p))).or_else(|_| Ok::<_, ()>(()))); return Selected { kicad, env: vec![] } }
+    if env.cli.is_empty() { sweep(shims, &[]); return Selected { kicad, env: vec![] } }
     let mut e = vec![("BACKPLANE_KICAD_CLI".to_string(), env.cli.clone())];
     match write_shims(shims, Path::new(&env.cli)) { Ok(()) => e.push((SHIMS_KEY.into(), shims.to_string_lossy().into_owned())), Err(x) => eprintln!("agents: the KiCad shims in {} could not be written: {x}", shims.display()) }
     Selected { kicad, env: e }
@@ -209,6 +246,97 @@ mod tests {
     }
     #[test] fn a_gui_shim_names_the_tools_to_use_instead() {
         for p in GUI_PROGRAMS { let t = gui_shim_text(p, Path::new("/h/shims/refused.log")); assert!(t.contains("viewer_show") && t.contains("kicad_edit") && t.contains("kicad_ipc"), "{p}"); assert!(t.contains("exit")); }
+    }
+    // #1167: on Windows each `.cmd` gets an extensionless POSIX sh shim beside it for Git Bash / MSYS2. Its text is built the same on every
+    // platform (write_shims_for(.., windows: true)), so these run under Linux's /bin/sh; bp-win's live check runs them in Git Bash.
+    #[cfg(unix)]
+    fn exe(at: &Path, body: &str) { std::fs::write(at, body).unwrap(); use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(at, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+    #[cfg(unix)]
+    fn sh(shim: &Path, args: &[&str], stdin: &str) -> std::process::Output {
+        use std::io::Write;
+        let mut c = std::process::Command::new("/bin/sh").arg(shim).args(args).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
+        c.stdin.take().unwrap().write_all(stdin.as_bytes()).unwrap();
+        c.wait_with_output().unwrap()
+    }
+    #[test] fn a_windows_path_is_in_the_mixed_form_every_posix_sh_on_windows_takes() {
+        assert_eq!(sh_path(r"C:\Users\Jürgen O'Neil\AppData\Local\Backplane\kicad\10.99.0-bp.12\bin\kicad-cli.exe", true), "C:/Users/Jürgen O'Neil/AppData/Local/Backplane/kicad/10.99.0-bp.12/bin/kicad-cli.exe");
+        assert_eq!(sh_path(r"\\?\C:\k\bin\kicad-cli.exe", true), "C:/k/bin/kicad-cli.exe");
+        assert_eq!(sh_path(r"\\?\UNC\srv\share\bin\kicad-cli.exe", true), "//srv/share/bin/kicad-cli.exe");
+        assert_eq!(sh_path(r"\\srv\share\kicad-cli.exe", true), "//srv/share/kicad-cli.exe");
+        assert_eq!(sh_path(r"/a\b", false), r"/a\b", "elsewhere the path as it is");
+    }
+    #[test] fn on_windows_every_cmd_has_an_lf_only_sh_shim_beside_it() {
+        let d = tmp("win-files"); let bin = d.join("bin"); std::fs::create_dir_all(&bin).unwrap();
+        let cli = bin.join("kicad-cli.exe"); std::fs::write(&cli, "").unwrap();
+        let shims = d.join("shims"); write_shims_for(&shims, &cli, true).unwrap();
+        for p in PROGRAMS.iter().chain(GUI_PROGRAMS) {
+            let cmd = std::fs::read_to_string(shims.join(format!("{p}.cmd"))).unwrap(); let sh = std::fs::read_to_string(shims.join(p)).unwrap();
+            assert!(cmd.starts_with("@echo off\r\n") && cmd.ends_with("\r\n") && !cmd.replace("\r\n", "").contains('\n'), "{p}.cmd keeps CRLF");
+            assert!(sh.starts_with("#!/bin/sh\n") && !sh.contains('\r'), "{p}: LF only, a shebang Git Bash sees: {sh:?}");
+        }
+        assert_eq!(std::fs::read_to_string(shims.join("kicad-cli")).unwrap().lines().last().unwrap(), format!("exec '{}' \"$@\"", cli.display()));
+        assert!(GUI_PROGRAMS.iter().all(|p| std::fs::read_to_string(shims.join(p)).unwrap().contains("not for agents")), "every GUI sh shim refuses");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    /// (1) quoting: an apostrophe, a space, non-ASCII, `$` and a backtick in the runtime's path, run under /bin/sh against a stand-in exe;
+    /// (2) exec: argv with spaces and quotes arrives as given, stdin is piped through, stdout, stderr and a non-zero exit come back unchanged.
+    #[cfg(unix)]
+    #[test] fn the_sh_shim_runs_a_runtime_whose_path_has_quotes_spaces_and_non_ascii_and_passes_everything_through() {
+        let d = tmp("win-quote"); let bin = d.join("Jürgen O'Neil $HOME `id` ü/bin"); std::fs::create_dir_all(&bin).unwrap();
+        let cli = bin.join("kicad-cli.exe");
+        exe(&cli, "#!/bin/sh\nfor a; do printf '[%s]\\n' \"$a\"; done\nprintf 'in=%s\\n' \"$(cat)\"\necho oops >&2\nexit 7\n");
+        let shims = d.join("shims"); write_shims_for(&shims, &cli, true).unwrap();
+        let t = std::fs::read_to_string(shims.join("kicad-cli")).unwrap();
+        assert!(t.contains(r"'/") && t.contains(r"Jürgen O'\''Neil $HOME `id` ü/bin/kicad-cli.exe'"), "{t}");
+        let o = sh(&shims.join("kicad-cli"), &["pcb", "a b", r#"say "hi""#, "it's", "", "$x `y`"], "piped in");
+        assert_eq!(String::from_utf8_lossy(&o.stdout), "[pcb]\n[a b]\n[say \"hi\"]\n[it's]\n[]\n[$x `y`]\nin=piped in\n");
+        assert_eq!((o.status.code(), String::from_utf8_lossy(&o.stderr).as_ref()), (Some(7), "oops\n"), "exit code and stderr pass through");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    /// 6a9123e3d's refusal, kept by the sh shims: exit 1, the one line, nothing started, the caller in refused.log (whose path has a quote).
+    #[cfg(unix)]
+    #[test] fn a_windows_sh_gui_shim_refuses_like_its_cmd() {
+        let d = tmp("win-gui"); let bin = d.join("bin"); std::fs::create_dir_all(&bin).unwrap();
+        let cli = bin.join("kicad-cli.exe"); exe(&cli, "#!/bin/sh\n");
+        let marker = d.join("ran"); exe(&bin.join("pcbnew.exe"), &format!("#!/bin/sh\ntouch '{}'\n", marker.display()));
+        let shims = d.join("it's shims"); write_shims_for(&shims, &cli, true).unwrap();
+        for p in GUI_PROGRAMS {
+            let o = sh(&shims.join(p), &["/x/a b.kicad_pro"], "");
+            assert_eq!(o.status.code(), Some(1), "{p} refuses");
+            assert_eq!(String::from_utf8_lossy(&o.stderr).trim(), GUI_REFUSAL, "{p}");
+        }
+        assert!(!marker.exists(), "no GUI program ran");
+        let named = drain_refusals(&shims);
+        assert_eq!(named.len(), GUI_PROGRAMS.len(), "{named:?}"); assert!(named.iter().all(|l| l.starts_with("caller ") && l.contains("/x/a b.kicad_pro")), "{named:?}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    /// (3) stale shims: a runtime that moves rewrites both; one whose kicad-cli is gone, or a program that left GUI_PROGRAMS, loses its sh
+    /// shim with its .cmd; a hub from before #1167 (only .cmd files) gets its sh shims at the next turn; files not ours stay.
+    #[test] fn stale_sh_shims_go_with_their_cmd_and_a_hub_with_only_cmds_is_fine() {
+        let d = tmp("win-stale"); let shims = d.join("shims"); std::fs::create_dir_all(&shims).unwrap();
+        let (a, b) = (d.join("bp.11/bin"), d.join("bp.12/bin")); std::fs::create_dir_all(&a).unwrap(); std::fs::create_dir_all(&b).unwrap();
+        let (ca, cb) = (a.join("kicad-cli.exe"), b.join("kicad-cli.exe")); std::fs::write(&ca, "").unwrap(); std::fs::write(&cb, "").unwrap();
+        // before #1167: the four .cmd files of the issue, no sh shim; and a GUI program since dropped, with both its files
+        for p in ["kicad-cli", "kicad", "eeschema", "pcbnew"] { std::fs::write(shims.join(format!("{p}.cmd")), cmd_exec_text(&ca)).unwrap() }
+        std::fs::write(shims.join("oldtool.cmd"), cmd_gui_text("oldtool", &shims.join(REFUSALS))).unwrap();
+        std::fs::write(shims.join("oldtool"), sh_gui_text("oldtool", "/x/refused.log")).unwrap();
+        std::fs::write(shims.join("notes.txt"), "the person's\nfile\n").unwrap(); std::fs::write(shims.join(REFUSALS), "caller 1: x\n").unwrap();
+        write_shims_for(&shims, &ca, true).unwrap();
+        assert!(std::fs::read_to_string(shims.join("kicad-cli")).unwrap().contains("bp.11/bin/kicad-cli.exe"), "the missing sh shim is written");
+        assert!(std::fs::read_to_string(shims.join("pcbnew.cmd")).unwrap().contains("not for agents"), "an old GUI .cmd becomes the refusal");
+        assert!(!shims.join("oldtool.cmd").exists() && !shims.join("oldtool").exists(), "a program that left GUI_PROGRAMS loses both files");
+        assert!(shims.join("notes.txt").exists() && shims.join(REFUSALS).exists(), "files not ours stay");
+        write_shims_for(&shims, &cb, true).unwrap();
+        assert!(["kicad-cli", "kicad-cli.cmd"].iter().all(|n| std::fs::read_to_string(shims.join(n)).unwrap().contains("bp.12")), "the runtime moved: both follow");
+        std::fs::remove_file(&cb).unwrap(); write_shims_for(&shims, &cb, true).unwrap();
+        assert!(!shims.join("kicad-cli").exists() && !shims.join("kicad-cli.cmd").exists(), "kicad-cli gone: both shims go");
+        assert!(shims.join("kicad").exists() && shims.join("kicad.cmd").exists(), "the refusals stay");
+        std::fs::write(&cb, "").unwrap(); std::fs::remove_file(shims.join("kicad")).unwrap(); write_shims_for(&shims, &cb, true).unwrap();
+        assert!(shims.join("kicad").exists(), "a deleted sh shim comes back at the next turn");
+        assert!(select(&Env { status: "missing".into(), ..Default::default() }, &shims, |_| None).env.is_empty());
+        let left: Vec<_> = std::fs::read_dir(&shims).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(left, vec!["notes.txt".to_string()], "no KiCad: every shim of ours goes, sh and .cmd");
+        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn a_shim_quotes_its_path() { if cfg!(unix) { assert_eq!(shim_text(Path::new("/a b/it's/kicad-cli")).lines().last().unwrap(), r#"exec '/a b/it'\''s/kicad-cli' "$@""#) } }
 }
