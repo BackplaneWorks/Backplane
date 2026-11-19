@@ -125,7 +125,7 @@ impl<'a> Facts<'a> {
             ("failed", _) => { let mut b = vec![btn("Try again", "ob-install", tool, true)]; b.extend(page(&p)); let mut r = row(&format!("{label} did not install"), &format!("{}.", s(st, "note").trim_end_matches('.')), b); r["tone"] = json!("warn"); vec![r] }
             (_, Some(Plan::Winget(_))) => vec![row(&format!("Install {label}"), "Installs with winget. Windows may ask for permission once.", vec![btn("Install", "ob-install", tool, true)])],
             (_, Some(Plan::Direct(p))) => vec![row(&format!("Install {label}"), &format!("Downloads {} {}'s Windows installer, checks it and installs it for this Windows user. No administrator password.", p.name, p.version), vec![btn("Install", "ob-install", tool, true)])],
-            (_, Some(Plan::Sh(..))) | (_, Some(Plan::Ps(_))) | (_, Some(Plan::Run(..))) => vec![row(&format!("Install {label}"), &format!("Downloads and runs {}.", if tool == "codex" { "Codex's own release, checked against its published checksum" } else { "its vendor's own installer" }), vec![btn("Install", "ob-install", tool, true)])],
+            (_, Some(Plan::Sh(..))) | (_, Some(Plan::Ps(_))) | (_, Some(Plan::Run(..))) => vec![row(&format!("Install {label}"), &crate::settings::tools_install::install_notice(tool, &self.os), vec![btn("Install", "ob-install", tool, true)])],
             (_, Some(Plan::Link(u))) => vec![row(&format!("Get {label}"), "Opens its download page.", vec![link("Download", u)])],
             (_, None) => vec![],
         }
@@ -298,6 +298,8 @@ fn install_btns(f: &Facts, tool: &str, guide: &str) -> (String, Vec<Value>, bool
     match (s(st, "state"), &p) {
         ("running", _) => (format!("Installing. {}", if s(st, "note").is_empty() { "Starting." } else { s(st, "note") }), vec![], false),
         ("failed", _) => { let mut b = vec![btn("Try again", "ob-install", tool, true)]; b.extend(page(&p)); (format!("It did not install: {}.", s(st, "note").trim_end_matches('.')), b, true) }
+        // an agent's installer says plainly what the press downloads and runs (the vendor's own script, or a pinned release)
+        (_, Some(Plan::Sh(..))) | (_, Some(Plan::Ps(_))) if matches!(tool, "claude" | "grok" | "opencode" | "codex") => (format!("Not installed. {}", crate::settings::tools_install::install_notice(tool, &f.os)), vec![btn("Install", "ob-install", tool, true)], false),
         (_, Some(Plan::Winget(_))) | (_, Some(Plan::Sh(..))) | (_, Some(Plan::Ps(_))) | (_, Some(Plan::Direct(_))) | (_, Some(Plan::Run(..))) => (String::new(), vec![btn("Install", "ob-install", tool, true)], false),
         (_, Some(Plan::Link(u))) => (String::new(), vec![link("Download", u)], false),
         (_, None) => (String::new(), fallback(), false),
