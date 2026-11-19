@@ -982,7 +982,15 @@ try:
             return out
         def ours_on_screen(): return any(w[0] == cw[0] for w in wins())
         def unhide():
+            # as a person's Dock click or Cmd+Tab: Backplane is the active app before the next click. Unhidden and asked to activate from
+            # here, Backplane's activation landed after the canvas click and took the keyboard back from KiCad (e2e-macos 44475785205, the
+            # Backplane-focused case: the client's kicad_keys_flip saw KiCad active from the click, then neither app active). As textkeys:
+            # wait for it, System Events when the request from here is refused (macOS 14+)
             a = NSRunningApplication.runningApplicationWithProcessIdentifier_(client.pid); a.unhide(); time.sleep(0.4); a.activateWithOptions_(0)
+            if not wait_for(lambda: active(client.pid), 2, 0.1):
+                osa(f'tell application "System Events" to set frontmost of (first process whose unix id is {client.pid}) to true')
+            check(bool(wait_for(lambda: active(client.pid), 5, 0.1)), 'hide: unhidden, Backplane is the active app again')
+            time.sleep(0.5)  # the activation settled: no late activation of ours comes after the click
         def canvas_click(): click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); time.sleep(0.6); key(K_ESC); time.sleep(0.3)
         for who in ('kicad', 'backplane'):
             if who == 'kicad': canvas_click()
@@ -1000,7 +1008,9 @@ try:
             check(bool(back), f'hide: unhidden, KiCad\'s frame is directly above Backplane\'s window over the pane ({who})')
             if back:
                 P = last_push()[0]; canvas_click()
-                check(active(kpid), f'hide: after the unhide a click gives KiCad the keyboard ({who})')
+                got = active(kpid); time.sleep(1.0); kept = active(kpid)
+                print(f'INFO hide: after the click ({who}): KiCad active {got}, a second on {kept}; Backplane active {active(client.pid)}', flush=True)
+                check(got and kept, f'hide: after the unhide a click gives KiCad the keyboard, and it keeps it ({who})')
         raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=textkeys (#1172, #1198): Backplane's own keys on a Mac, with the editor open over the pane. In the message box: Option+Left/Right
     # by word, Cmd+Left/Right to the line's start/end, Cmd+Up/Down to the text's, Shift selecting, Option+Backspace a word, Cmd+Backspace to the
