@@ -26,19 +26,31 @@ fn top_of(window: &Window) -> Option<u64> {
 
 /// The editor tabs: (kind, label). Board, Schematic and 3D always; the symbol and footprint editors once KiCad has them (or the person asks).
 pub const TABS: &[(&str, &str)] = &[("PCB", "Board"), ("SCH", "Schematic"), ("PCB_3D", "3D"), ("SYMBOL_EDITOR", "Symbols"), ("FOOTPRINT_EDITOR", "Footprints"), ("GERBVIEW", "Gerbers"), ("SIMULATOR", "Simulation")]; // i18n-ok: wire kinds; labels go through trs
-/// The tab Ctrl+Tab (step 1) or Ctrl+Shift+Tab (step -1) goes to from `at`, round the tabs.
-pub fn next_tab(at: &str, step: i32) -> &'static str {
-    let i = TABS.iter().position(|(k, _)| *k == at).unwrap_or(0) as i32;
-    TABS[(i + step).rem_euclid(TABS.len() as i32) as usize].0
+/// The editor tab kinds shown on the pane's strip: Board, Schematic and 3D always;
+/// Symbols, Footprints, Gerbers and Simulation once KiCad has them (`have`) or while shown (`at`).
+pub fn strip_tabs(at: &str, have: &[String]) -> Vec<&'static str> {
+    TABS.iter().filter_map(|(kind, _)| {
+        let extra = matches!(*kind, "SYMBOL_EDITOR" | "FOOTPRINT_EDITOR" | "GERBVIEW" | "SIMULATOR"); // i18n-ok: wire frame kind enum names
+        (!extra || have.iter().any(|h| h == kind) || at == *kind).then_some(*kind)
+    }).collect()
+}
+/// The tab Ctrl+Tab (step 1) or Ctrl+Shift+Tab (step -1) goes to from `at`, round `shown`.
+pub fn next_tab(at: &str, step: i32, shown: &[&'static str]) -> &'static str {
+    if shown.is_empty() { return TABS[0].0 }
+    let i = shown.iter().position(|k| *k == at).unwrap_or(0) as i32;
+    shown[(i + step).rem_euclid(shown.len() as i32) as usize]
 }
 
-/// Ctrl+Tab's next tab where KiCad's Simulator is only gone to once KiCad has it (`have`: the kinds of its frames): it is opened from the
-/// rail, never by going round the tabs (a runtime without it would refuse; one with it would load the schematic for a key press).
-pub fn next_open_tab(at: &str, step: i32, have: &[String]) -> &'static str {
-    let mut to = next_tab(at, step);
-    while to == SIM && !have.iter().any(|h| h == SIM) { to = next_tab(to, step); }
+/// Ctrl+Tab's next tab round `shown` (the kinds on the strip), where KiCad's Simulator is only gone to once KiCad has it (`have`: the kinds of its frames):
+/// it is opened from the rail, never by going round the tabs (a runtime without it would refuse; one with it would load the schematic for a key press).
+pub fn next_open_tab(at: &str, step: i32, shown: &[&'static str], have: &[String]) -> &'static str {
+    let mut to = next_tab(at, step, shown);
+    let mut left = shown.len();
+    while to == SIM && !have.iter().any(|h| h == SIM) && left > 0 { to = next_tab(to, step, shown); left -= 1; }
     to
 }
+/// The wanted frame kind to publish on `PaneTab`: `Some(now)` only when the pane's wanted frame changed.
+pub fn tab_change<'a>(was: &str, now: &'a str) -> Option<&'a str> { (now != was).then_some(now) }
 /// KiCad's Simulator frame (bp.13.2, capability `sim-frame`): the rail's Simulation entry opens the pane on it.
 pub const SIM: &str = "SIMULATOR"; // i18n-ok: wire frame kind
 /// The frame the rail's Simulation entry opens, from the hub's viewer (`simFrame`: its KiCad embeds the Simulator and the project has a
@@ -592,6 +604,12 @@ pub fn after_close(closed: &str, page_kind: &str, info: &Value) -> Option<String
 /// The pane's warm hand-over ended (`handoff`): the page draws it alone, without the viewer's picture under it.
 pub struct PaneShown;
 impl EventEmitter<PaneShown> for KicadPane {}
+/// The pane's wanted editor frame changed (tab strip click, Ctrl+Tab, hub's active frame, rail, script).
+/// Published on change only from `note_tab` so the parent window repaints the right rail at once.
+/// Carries `wanted_kind()` (what the pane wants, which can be ahead of KiCad while `pending_show` is set);
+/// subscribers only repaint and must never call back into `show_kind`.
+pub struct PaneTab(pub String);
+impl EventEmitter<PaneTab> for KicadPane {}
 /// A runtime without `embed-frame-drawn` (bp.12.x): how long the viewer's picture stays under a warm KiCad's frame once it is mapped.
 /// Measured on the GPU display (RTX 5080, Collar main, bp.12.4, Nov 14): from the frame's first pixels to the pane settled took 52.6, 54.4
 /// and 58.7 ms (KiCad paints its toolbars, then the canvas; what it has not painted shows what is under it): 150 ms is about 2.5x the most.
@@ -699,7 +717,7 @@ impl KicadPane {
             _ => {}
         }
         self.info = info;
-        self.note_tab(&was_tab, &cause);
+        self.note_tab(&was_tab, &cause, cx);
         // the frame on show closed in KiCad: never a wait for it ("Starting KiCad…" for ever, lane M's Cmd+W)
         if let Some((k, next)) = closed {
             eprintln!("GPUI_LOG {}", json!({"kicad_frame_closed": k, "to": next}));
@@ -727,7 +745,7 @@ impl KicadPane {
     /// The rail moved to another page: show its editor (the hub opens it when KiCad has not yet).
     pub fn set_open(&mut self, open: &str, cx: &mut Context<Self>) { self.set_open_by(open, "rail page (set_open)", cx) } // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
     pub fn set_open_by(&mut self, open: &str, cause: &str, cx: &mut Context<Self>) {
-        let was_tab = self.tab(); self.set_open_inner(open, cx); self.note_tab(&was_tab, cause);
+        let was_tab = self.tab(); self.set_open_inner(open, cx); self.note_tab(&was_tab, cause, cx);
     }
     fn set_open_inner(&mut self, open: &str, cx: &mut Context<Self>) {
         if self.open == open && self.override_kind.is_none() { return }
@@ -750,9 +768,9 @@ impl KicadPane {
     fn attach_kind(&self) -> &'static str { if self.override_kind.as_deref() == Some(SIM) { SIM } else { frame_for(&self.open) } }
     /// The rail's Simulation: the pane on KiCad's Simulator (before the pane is attached: its first editor).
     pub fn open_simulation(&mut self, cx: &mut Context<Self>) {
-        if self.container.is_none() { self.override_kind = Some(SIM.into()); cx.notify(); return }
+        if self.container.is_none() { let was_tab = self.tab(); self.override_kind = Some(SIM.into()); self.note_tab(&was_tab, "rail Simulation", cx); cx.notify(); return } // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
         // (its attach is on its way with the page's editor: asked again, for the Simulator)
-        if !self.attached { self.override_kind = Some(SIM.into()); self.placed = None; self.reattach(); cx.notify(); return }
+        if !self.attached { let was_tab = self.tab(); self.override_kind = Some(SIM.into()); self.note_tab(&was_tab, "rail Simulation", cx); self.placed = None; self.reattach(); cx.notify(); return } // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
         if self.tab() == SIM && !missing_frame(&self.info, SIM) { return }
         if self.tab() == SIM { self.edit_again(cx); return }
         self.show_kind_by(SIM, "rail Simulation", cx); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
@@ -810,7 +828,7 @@ impl KicadPane {
     /// "Open in GerbView" entry point. Its tab then switches back to it like the editors'.
     pub fn open_gerbers(&mut self, files: &[String], cx: &mut Context<Self>) -> bool {
         if !self.attached || !self.can_gerbview() || files.is_empty() { return false }
-        let was_tab = self.tab(); self.override_kind = Some("GERBVIEW".into()); self.note_tab(&was_tab, "open_gerbers"); self.placed = None; self.pending_show = Some("GERBVIEW".into()); // i18n-ok: wire frame kind
+        let was_tab = self.tab(); self.override_kind = Some("GERBVIEW".into()); self.note_tab(&was_tab, "open_gerbers", cx); self.placed = None; self.pending_show = Some("GERBVIEW".into()); // i18n-ok: wire frame kind
         self.rpc("editor.kicad.show", json!({"project": self.project, "frame": "GERBVIEW", "document": files.join("\n")})); // i18n-ok: wire frame kind
         cx.notify(); true
     }
@@ -827,7 +845,7 @@ impl KicadPane {
     }
     pub fn show_kind(&mut self, kind: &str, cx: &mut Context<Self>) { self.show_kind_by(kind, "show_kind", cx) }
     pub fn show_kind_by(&mut self, kind: &str, cause: &str, cx: &mut Context<Self>) {
-        let was_tab = self.tab(); self.show_kind_inner(kind, cx); self.note_tab(&was_tab, cause);
+        let was_tab = self.tab(); self.show_kind_inner(kind, cx); self.note_tab(&was_tab, cause, cx);
     }
     fn show_kind_inner(&mut self, kind: &str, cx: &mut Context<Self>) {
         self.want_keys = true;
@@ -848,12 +866,13 @@ impl KicadPane {
             && pick_local(kind, &self.info, &self.frames, &self.ever_shown).is_some_and(|x| self.ever_shown.contains(&x))
     }
     pub fn tab(&self) -> String { self.wanted_kind().to_string() }
-    /// BACKPLANE_KICAD_DEBUG: one line the moment the pane's tab changes, with its cause (a click, a shortcut, the hub's active frame
-    /// that KiCad asked for, the rail, a script). A periodic state log cannot place a switch within the ~40 ms of a race: on Nov 13 it
-    /// took this line to see the hub following KiCad's show request 102 ms before a Ctrl+Y (fixed in 0decc2de6).
-    fn note_tab(&self, was: &str, cause: &str) {
-        let now = self.wanted_kind();
-        if now == was || std::env::var_os("BACKPLANE_KICAD_DEBUG").is_none() { return }
+    /// Publishes `PaneTab` on change only so the right rail lights the pane's wanted frame at once
+    /// (which can be ahead of KiCad while `pending_show` is set), and under `BACKPLANE_KICAD_DEBUG`
+    /// logs one line with its cause (click, shortcut, hub's active frame, rail, script).
+    fn note_tab(&self, was: &str, cause: &str, cx: &mut Context<Self>) {
+        let Some(now) = tab_change(was, self.wanted_kind()) else { return };
+        cx.emit(PaneTab(now.to_string()));
+        if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_none() { return }
         let epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64() * 1000.0).unwrap_or(0.0);
         eprintln!("GPUI_LOG {}", json!({"kicad_tab": {"epoch_ms": epoch, "from": was, "to": now, "cause": cause, "open": self.open, "override": self.override_kind, "hub_active": self.info["active"], "pending_show": self.pending_show}}));
     }
@@ -1031,7 +1050,7 @@ impl KicadPane {
                 }
             }
             self.frames = f; self.placed = None;
-            self.note_tab(&was_tab, "X frames changed (stock new editor / overridden editor closed)"); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
+            self.note_tab(&was_tab, "X frames changed (stock new editor / overridden editor closed)", cx); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
             cx.notify();
         }
         if let Some((Some(at), Some(show), _)) = &self.placed {
@@ -1155,8 +1174,14 @@ impl KicadPane {
                 // the shield did the hand-in itself and replays the press: the state only (no second focus call landing
                 // after the replayed press, which closed a right click's menu before it opened)
                 nc::Ev::ShieldClick => { if self.want().is_some() { self.grab_click(c, false); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } }
-                // Ctrl+Tab / Ctrl+Shift+Tab pressed in KiCad: the next editor tab, and KiCad keeps the keyboard
-                nc::Ev::Key(k) if k == "ctrl-tab" || k == "ctrl-shift-tab" => { let have: Vec<String> = self.info["frames"].as_array().into_iter().flatten().filter_map(|f| f["kind"].as_str().map(String::from)).collect(); let to = next_open_tab(self.wanted_kind(), if k == "ctrl-tab" { 1 } else { -1 }, &have); self.show_kind_by(to, &format!("host shortcut {k} (KiCad key hook)"), cx); } // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
+                // Ctrl+Tab / Ctrl+Shift+Tab pressed in KiCad: the next editor tab shown on the strip, and KiCad keeps the keyboard
+                nc::Ev::Key(k) if k == "ctrl-tab" || k == "ctrl-shift-tab" => {
+                    let have: Vec<String> = self.frames.iter().map(|f| f.kind.to_string())
+                        .chain(self.info["frames"].as_array().into_iter().flatten().filter_map(|f| f["kind"].as_str().map(String::from))).collect();
+                    let shown = strip_tabs(self.wanted_kind(), &have);
+                    let to = next_open_tab(self.wanted_kind(), if k == "ctrl-tab" { 1 } else { -1 }, &shown, &have);
+                    self.show_kind_by(to, &format!("host shortcut {k} (KiCad key hook)"), cx); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
+                }
                 nc::Ev::Key(k) => { eprintln!("GPUI_LOG {}", json!({"kicad_key": k, "at_ms": crate::screens::kcomment::epoch_ms() as u64})); self.refocus = None; nc::hand_back(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true);
                     // the comment chord (and bp.13's ';', KiCad's own comment key) opens the window now, from this event (no keystroke round trip through the next frame)
                     // the comment chord and the management panels' keys are acted on here, from the event: replayed as a keystroke after a
@@ -1910,15 +1935,41 @@ mod tests {
         assert!(super::asking(&[], false).is_none(), "no dialog");
     }
     #[test] fn ctrl_tab_goes_round_the_editor_tabs() {
-        assert_eq!(super::next_tab("PCB", 1), "SCH"); assert_eq!(super::next_tab("PCB", -1), "SIMULATOR"); assert_eq!(super::next_tab("FOOTPRINT_EDITOR", 1), "GERBVIEW"); assert_eq!(super::next_tab("GERBVIEW", 1), "SIMULATOR"); assert_eq!(super::next_tab("SIMULATOR", 1), "PCB");
-        // the Simulator is gone round to only once KiCad has it
-        assert_eq!(super::next_open_tab("PCB", -1, &[]), "GERBVIEW"); assert_eq!(super::next_open_tab("GERBVIEW", 1, &["PCB".into()]), "PCB");
-        assert_eq!(super::next_open_tab("GERBVIEW", 1, &["SIMULATOR".into()]), "SIMULATOR"); assert_eq!(super::next_open_tab("PCB", -1, &["SIMULATOR".into()]), "SIMULATOR");
+        let all: Vec<&'static str> = super::TABS.iter().map(|(k, _)| *k).collect();
+        assert_eq!(super::next_tab("PCB", 1, &all), "SCH"); assert_eq!(super::next_tab("PCB", -1, &all), "SIMULATOR"); assert_eq!(super::next_tab("FOOTPRINT_EDITOR", 1, &all), "GERBVIEW"); assert_eq!(super::next_tab("GERBVIEW", 1, &all), "SIMULATOR"); assert_eq!(super::next_tab("SIMULATOR", 1, &all), "PCB");
+        // with Symbols, Footprints, Gerbers and Simulation hidden, Ctrl+Tab cycles only what the strip shows
+        let base = super::strip_tabs("PCB", &["PCB".into(), "SCH".into()]);
+        assert_eq!(base, vec!["PCB", "SCH", "PCB_3D"]);
+        assert_eq!(super::next_tab("PCB", 1, &base), "SCH");
+        assert_eq!(super::next_tab("SCH", 1, &base), "PCB_3D");
+        assert_eq!(super::next_tab("PCB_3D", 1, &base), "PCB");
+        assert_eq!(super::next_tab("PCB", -1, &base), "PCB_3D");
+        assert_eq!(super::next_open_tab("PCB_3D", 1, &base, &["PCB".into()]), "PCB");
+        assert_eq!(super::next_open_tab("PCB", -1, &base, &["PCB".into()]), "PCB_3D");
+        // when Symbols is open (and Footprints still hidden), Symbols is in the cycle and Footprints is skipped
+        let with_sym = super::strip_tabs("PCB", &["PCB".into(), "SYMBOL_EDITOR".into()]);
+        assert_eq!(with_sym, vec!["PCB", "SCH", "PCB_3D", "SYMBOL_EDITOR"]);
+        assert_eq!(super::next_open_tab("PCB_3D", 1, &with_sym, &["PCB".into(), "SYMBOL_EDITOR".into()]), "SYMBOL_EDITOR");
+        assert_eq!(super::next_open_tab("SYMBOL_EDITOR", 1, &with_sym, &["PCB".into(), "SYMBOL_EDITOR".into()]), "PCB");
+        // the Simulator is gone round to only once KiCad has it, even if included in `shown`
+        assert_eq!(super::next_open_tab("PCB", -1, &all, &[]), "GERBVIEW"); assert_eq!(super::next_open_tab("GERBVIEW", 1, &all, &["PCB".into()]), "PCB");
+        assert_eq!(super::next_open_tab("GERBVIEW", 1, &all, &["SIMULATOR".into()]), "SIMULATOR"); assert_eq!(super::next_open_tab("PCB", -1, &all, &["SIMULATOR".into()]), "SIMULATOR");
+        let with_sim = super::strip_tabs("PCB", &["PCB".into(), "SIMULATOR".into()]);
+        assert_eq!(with_sim, vec!["PCB", "SCH", "PCB_3D", "SIMULATOR"]);
+        assert_eq!(super::next_open_tab("PCB_3D", 1, &with_sim, &["PCB".into(), "SIMULATOR".into()]), "SIMULATOR");
+        assert_eq!(super::next_open_tab("PCB_3D", 1, &with_sim, &["PCB".into()]), "PCB");
         // the rail's entry: the hub's word, in a window that can hold KiCad
         let v = serde_json::json!({"simFrame": "SIMULATOR"});
         assert_eq!(super::rail_simulation(&v, true).as_deref(), Some("SIMULATOR")); assert_eq!(super::rail_simulation(&v, false), None); assert_eq!(super::rail_simulation(&serde_json::json!({"open": "schematic"}), true), None);
         // closed in KiCad: back to View, whatever else is open
-        assert_eq!(super::after_close("SIMULATOR", "SCH", &serde_json::json!({"frames": [{"kind": "SCH"}]})), None); assert_eq!(super::after_close("GERBVIEW", "PCB", &serde_json::json!({"frames": [{"kind": "PCB"}]})).as_deref(), Some("PCB")); assert_eq!(super::next_tab("?", 1), "SCH");
+        assert_eq!(super::after_close("SIMULATOR", "SCH", &serde_json::json!({"frames": [{"kind": "SCH"}]})), None); assert_eq!(super::after_close("GERBVIEW", "PCB", &serde_json::json!({"frames": [{"kind": "PCB"}]})).as_deref(), Some("PCB")); assert_eq!(super::next_tab("?", 1, &base), "SCH");
+    }
+    #[test] fn tab_change_publishes_only_on_change_and_never_loops() {
+        assert_eq!(super::tab_change("PCB", "SCH"), Some("SCH"));
+        assert_eq!(super::tab_change("SCH", "SCH"), None, "unchanged wanted frame does not re-emit PaneTab");
+        // Lighting the rail from a published PaneTab does not mutate hub_open or trigger another sync_hub_open / show_kind.
+        let mut last_hub = "board".to_string();
+        assert_eq!(hub_open_step("board", &mut last_hub, "board", None), None);
     }
     #[test] fn rail_pages_name_editors() { assert_eq!(frame_for("board"), "PCB"); assert_eq!(frame_for("schematic"), "SCH"); assert_eq!(frame_for("3d"), "PCB_3D"); }
     #[test] fn the_project_comes_from_the_viewer_key() {
@@ -2186,8 +2237,6 @@ impl crate::Backplane {
         *EDIT_TAB.lock().unwrap() = Some(SIM.into());
         self.kicad_edit(cx);
     }
-    /// Whether the pane is on KiCad's Simulator (the rail lights Simulation, not the page under it).
-    pub(crate) fn simulation_on(&self, cx: &App) -> bool { self.screens.kicad.as_ref().is_some_and(|p| p.read(cx).tab() == SIM) }
     /// After a picture: an Edit pressed before the viewer had a file, acted on now that it has one (or dropped: another thread, 60 s).
     pub(crate) fn edit_pending_due(&mut self, cx: &mut Context<Self>) {
         let pending = EDIT_PENDING.lock().unwrap().clone();
@@ -2234,6 +2283,8 @@ impl crate::Backplane {
         let page = cx.new(move |cx| { let mut p = KicadPane::new(cx, project, root, pid, open, hub_open, hub); p.host_sends = sends; if let Some(v) = infos.values().find(|v| p.matches(v)).cloned() { p.info = v; } if sim { p.override_kind = Some(SIM.into()); } p });
         // the warm hand-over's end: the page drawn again without the viewer's picture under the pane
         cx.subscribe(&page, |_, _, _: &PaneShown, cx| cx.notify()).detach();
+        // the pane's wanted frame changed (strip click, Ctrl+Tab, KiCad's active frame): repaint the rail without calling back into show_kind
+        cx.subscribe(&page, |_, _, _: &PaneTab, cx| cx.notify()).detach();
         // the editor's frame closed in KiCad (Ctrl+W, File > Close): back to View, Edit there again (a fresh frame on the next Edit)
         cx.subscribe(&page, |this, _, _: &PaneFrameClosed, cx| this.kicad_view(cx)).detach();
         cx.subscribe(&page, |this, _, e: &PaneKey, cx| {
@@ -2293,9 +2344,9 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
     // Pop out was cut at the pane's edge
     let narrow = pane.read(cx).at_px.is_some_and(|b| f32::from(b.size.width) < 520.);
     let mut row = div().id("kicad-strip").flex().items_center().gap_1().px_2().h(crate::scale::tpx(30.)).flex_shrink_0().bg(c("panel")).border_b_1().border_color(c("rule"));
+    let shown = strip_tabs(&at, &have);
     for (kind, label) in TABS {
-        // the symbol and footprint editors: a tab once KiCad has them, or while shown
-        if matches!(*kind, "SYMBOL_EDITOR" | "FOOTPRINT_EDITOR" | "GERBVIEW" | "SIMULATOR") && !have.iter().any(|h| h == kind) && at != *kind { continue }
+        if !shown.contains(kind) { continue }
         let on = at == *kind; let k = kind.to_string(); let p = pane.clone();
         row = row.child(crate::ui::with_rect(div().id(SharedString::from(format!("kicad-tab-{kind}"))), { let k = kind.to_string(); move || format!("kicad-tab:{k}") }).when(narrow, |d| d.px_1()).when(!narrow, |d| d.px_2()).py(px(3.)).text_size(crate::scale::tpx(12.)).cursor_pointer()
             .text_color(c(if on { "text" } else { "dim" })).when(on, |d| d.border_b_2().border_color(c("accent"))).hover(|s| s.bg(c("raise")))

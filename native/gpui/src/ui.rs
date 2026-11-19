@@ -34,7 +34,25 @@ pub(crate) fn rail_enabled(viewer: &Value, id: &str) -> bool {
     viewer["rail"].as_array().is_none_or(|rows| rows.iter().any(|r| r["id"] == id && r["state"] != "disabled"))
 }
 
-fn viewer_row_on(row: &RailRow, pending: Option<&str>, active_kind: &str) -> bool {
+/// The rail entry lit for an embedded KiCad pane's wanted frame (`KicadPane::tab()`, which can be
+/// ahead of KiCad while `pending_show` is set). Symbols and Footprints light their owning design
+/// entry (Schematic and Board); Simulator lights Simulation. Pure mapping: never calls back into the pane.
+fn kicad_rail_id(frame: &str) -> Option<&'static str> {
+    match frame {
+        "PCB" | "FOOTPRINT_EDITOR" => Some("board"), // i18n-ok: wire frame kind enum names
+        "SCH" | "SYMBOL_EDITOR" => Some("schematic"), // i18n-ok: wire frame kind enum names
+        "PCB_3D" => Some("3d"), // i18n-ok: wire frame kind enum names
+        "GERBVIEW" => Some("gerbers"), // i18n-ok: wire frame kind enum names
+        "SIMULATOR" => Some("simulation"), // i18n-ok: wire frame kind enum names
+        _ => None,
+    }
+}
+
+/// Whether a viewer rail row is lit. When the embedded KiCad pane is on show (`kicad_on`, mapped
+/// from `KicadPane::tab()` / `wanted_kind()`), it leads immediately without waiting on a hub round
+/// trip; otherwise an optimistic rail press (`pending`) leads until the hub replies.
+fn viewer_row_on(row: &RailRow, kicad_on: Option<&str>, pending: Option<&str>, active_kind: &str) -> bool {
+    if let Some(id) = kicad_on { return id == row.id; }
     if let Some(pending) = pending { return pending == row.id; }
     if row.state.is_empty() { active_kind == row.id } else { row.state == "on" }
 }
@@ -803,9 +821,14 @@ impl Render for Backplane {
         let keycap = move |k: &str, lit: bool| (keycaps && !k.is_empty()).then(|| crate::screens::hints::cap(light, &k.to_uppercase(), lit).absolute().top(px(3.)).right(px(3.)));
         crate::screens::viewer::follow(&self.tx, thread);
         let active_kind = if thread["diff"].is_object() { "diff".to_owned() } else { crate::screens::viewer::active_kind(&thread["viewer"], self.screens.rail_pending.as_deref()) };
-        // the rail's Simulation entry (the hub's word, in a window that can hold KiCad), lit while the pane is on KiCad's Simulator: the page under it is then not
+        // the rail's Simulation entry (the hub's word, in a window that can hold KiCad)
         let sim_rail = crate::viewers::kicad_pane::rail_simulation(&thread["viewer"], crate::viewers::kicad_pane::local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), thread)).is_some();
-        let sim_on = sim_rail && !thread["diff"].is_object() && self.simulation_on(cx) && self.kicad_for(thread, cx).is_some();
+        // when the embedded KiCad pane is on show in this thread, light the rail from its wanted frame (`KicadPane::tab()`,
+        // which can be ahead of KiCad while `pending_show` is set); this generalizes Simulation and never calls back into `show_kind`
+        let kicad_on = (!thread["diff"].is_object() && crate::screens::viewer::holds_editor(thread))
+            .then(|| self.kicad_for(thread, cx).and_then(|p| kicad_rail_id(&p.read(cx).tab())))
+            .flatten()
+            .filter(|id| *id != "simulation" || sim_rail);
         let mut previous_group = None;
         for row in rail_rows(&thread["viewer"], sim_rail) {
             let block = match row.group { "layout" | "mech" => "design", group => group };
@@ -815,9 +838,7 @@ impl Render for Backplane {
             let disabled = row.state == "disabled";
             let active = !disabled && match id {
                 "terminal" => self.screens.term.open,
-                "simulation" if sim_on => true,
-                _ if sim_on => false,
-                _ => viewer_row_on(&row, self.screens.rail_pending.as_deref(), &active_kind),
+                _ => viewer_row_on(&row, kicad_on, self.screens.rail_pending.as_deref(), &active_kind),
             };
             let mut button = with_rect(div().id(SharedString::from(format!("rail-{}", row.label))), || format!("rail:{}", row.label))
                 .relative().flex().flex_col().items_center().h(crate::scale::tpx(48.)).justify_center().gap_1().text_size(rail_label())
@@ -1085,7 +1106,7 @@ pub fn page_doc_w(l: &ListState) -> f32 { (f32::from(l.viewport_bounds().size.wi
 
 #[cfg(test)]
 mod tests {
-    use super::{rail_rows, viewer_row_on, RailRow};
+    use super::{kicad_rail_id, rail_rows, viewer_row_on, RailRow};
     use serde_json::Value;
     #[test]
     fn rail_rows_follow_hub_order_content_and_empty_list() {
@@ -1104,10 +1125,40 @@ mod tests {
     fn pending_press_lights_the_target_until_the_hub_replies() {
         let files = RailRow { id: "files", state: "on", ..Default::default() };
         let board = RailRow { id: "board", state: "off", ..Default::default() };
-        assert!(viewer_row_on(&board, Some("board"), "files"));
-        assert!(!viewer_row_on(&files, Some("board"), "files"));
-        assert!(!viewer_row_on(&files, Some(""), "files"));
-        assert!(viewer_row_on(&files, None, "board"));
-        assert!(!viewer_row_on(&board, None, "board"));
+        assert!(viewer_row_on(&board, None, Some("board"), "files"));
+        assert!(!viewer_row_on(&files, None, Some("board"), "files"));
+        assert!(!viewer_row_on(&files, None, Some(""), "files"));
+        assert!(viewer_row_on(&files, None, None, "board"));
+        assert!(!viewer_row_on(&board, None, None, "board"));
+    }
+
+    #[test]
+    fn kicad_frame_maps_to_its_rail_entry_and_leads_without_round_trip() {
+        for (frame, rail) in [
+            ("PCB", Some("board")),
+            ("FOOTPRINT_EDITOR", Some("board")),
+            ("SCH", Some("schematic")),
+            ("SYMBOL_EDITOR", Some("schematic")),
+            ("PCB_3D", Some("3d")),
+            ("GERBVIEW", Some("gerbers")),
+            ("SIMULATOR", Some("simulation")),
+            ("UNKNOWN", None),
+        ] {
+            assert_eq!(kicad_rail_id(frame), rail, "{frame}");
+        }
+        let board = RailRow { id: "board", state: "on", ..Default::default() };
+        let sch = RailRow { id: "schematic", state: "off", ..Default::default() };
+        let sim = RailRow { id: "simulation", state: "off", ..Default::default() };
+        // Strip switched to Schematic (or Symbol Editor) while hub's page is still Board: Schematic lights, Board dims.
+        let lit = kicad_rail_id("SCH");
+        assert!(viewer_row_on(&sch, lit, None, "board"));
+        assert!(!viewer_row_on(&board, lit, None, "board"));
+        let sym = kicad_rail_id("SYMBOL_EDITOR");
+        assert!(viewer_row_on(&sch, sym, None, "board"));
+        assert!(!viewer_row_on(&board, sym, None, "board"));
+        // Footprint Editor lights Board; Simulator lights Simulation even while pending is Schematic.
+        assert!(viewer_row_on(&board, kicad_rail_id("FOOTPRINT_EDITOR"), None, "schematic"));
+        assert!(viewer_row_on(&sim, kicad_rail_id("SIMULATOR"), Some("schematic"), "schematic"));
+        assert!(!viewer_row_on(&sch, kicad_rail_id("SIMULATOR"), Some("schematic"), "schematic"));
     }
 }
