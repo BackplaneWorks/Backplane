@@ -594,9 +594,9 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     o.insert("readingSeen".into(), json!(newest_id.as_deref().unwrap_or("-")));
     // a sent message's references (@bot >thread %project #room &model) as cards the client draws under it
     let mut entries = entries;
-    // `#123` and `OWNER/REPO#123` in the messages' text link to GitHub's issues, in a project whose origin is on GitHub (md/issues.rs)
-    let repo = st.projects.get(&t.project).and_then(|p| md::issues::repo_of(&crate::mirror::origin_of_root(&p.root))).unwrap_or_default();
-    if !repo.is_empty() { for e in entries.iter_mut() { if let Some(Value::Array(b)) = e.get_mut("blocks") { md::issues::link_nodes(b, &repo) } } }
+    // `#123` and `OWNER/REPO#123` in the messages' text link to GitHub's issues, in the project's repository on GitHub, or the default one for a project with none and a bot's conversation (md/issues.rs)
+    let repo = if st.bot_threads_has(thread) { String::new() } else { st.projects.get(&t.project).and_then(|p| md::issues::repo_of(&crate::mirror::origin_of_root(&p.root))).unwrap_or_default() };
+    { for e in entries.iter_mut() { if let Some(Value::Array(b)) = e.get_mut("blocks") { md::issues::link_nodes(b, &repo) } } }
     // halt cards (agents/halt.rs): a turn ended out of memory or out of context, its row drawn as a card with its actions
     for e in entries.iter_mut() { if e["kind"] == "act" { let id = e["id"].as_str().unwrap_or("").to_string();
         if let Some(c) = st.settings.get(&crate::agents::halt::key(thread, &id)).and_then(|c| serde_json::from_str::<Value>(c).ok()) { *e = crate::agents::halt::entry(&id, e["text"].as_str().unwrap_or(""), &c) } } }
@@ -886,6 +886,38 @@ mod tests {
         assert_eq!(es[n - 2]["text"], "The **pour** goes");
         params["liveText"] = json!(""); let es = thread_object(&st, "h", th, &params, "").unwrap()["entries"].as_array().unwrap().clone();
         assert!(es.iter().all(|e| e["streaming"].is_null()), "no live text, no streaming row");
+    }
+    /// The picture of the fixture thread with its project's folder a git repository whose origin is `origin` ("" = no repository), and the reply
+    /// at row 1 saying `text`: the reply's blocks as the client gets them.
+    fn reply_blocks(origin: &str, text: &str, bot: bool) -> String {
+        let p = fixture(); let th = p["params"]["page"]["thread"].as_str().unwrap();
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0); // the origin of a folder is kept for a minute: each picture its own
+        let dir = std::env::temp_dir().join(format!("bp-issue-links-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)));
+        let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(dir.join(".git")).unwrap();
+        if !origin.is_empty() { std::fs::write(dir.join(".git/config"), format!("[remote \"origin\"]\n\turl = {origin}\n")).unwrap(); }
+        let mut st = State::new();
+        for l in std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).unwrap().lines() { st.apply_line(&l.replace("/tmp/soak2", dir.to_str().unwrap())); }
+        if bot { st.apply_line(&format!(r#"{{"$":"BotSet","id":"b1","thread":"{th}","name":"Bub","color":"","at":1}}"#)); assert!(st.bot_threads_has(th)); }
+        let mut params = p["params"].clone(); params["page"]["rows"][1][8] = json!(text);
+        let id = params["page"]["rows"][1][2].as_str().unwrap().to_string();
+        let o = thread_object(&st, "h", th, &params, "").expect("drawn");
+        let _ = std::fs::remove_dir_all(&dir);
+        o["entries"].as_array().unwrap().iter().find(|e| e["id"] == id.as_str()).map(|e| e["blocks"].to_string()).expect("the reply is a row")
+    }
+    #[test] fn an_assistant_reply_with_an_issue_number_links_it_in_the_picture_the_client_gets() {
+        // (the screen-audit binary compiles this file with an origin that is always "": there the default repository is all it can link to)
+        if crate::mirror::origin_of_root("/nonexistent-bp-probe").is_empty() && reply_blocks("git@github.com:acme/widget.git", "#7", false).contains("BackplaneWorks/Backplane/issues/7") { return }
+        let b = reply_blocks("https://github.com/BackplaneWorks/Backplane.git", "Fixed in #1229, see also other/thing#4.", false);
+        assert!(b.contains(r#""href":"https://github.com/BackplaneWorks/Backplane/issues/1229""#), "{b}");
+        assert!(b.contains(r#""href":"https://github.com/other/thing/issues/4""#), "{b}");
+        let b = reply_blocks("git@github.com:acme/widget.git", "see #7", false);
+        assert!(b.contains(r#""href":"https://github.com/acme/widget/issues/7""#), "{b}");
+    }
+    #[test] fn a_project_without_a_github_remote_and_a_bot_thread_link_to_the_default_repository() {
+        for (origin, bot) in [("", false), ("https://gitlab.com/a/b.git", false), ("https://github.com/acme/widget.git", true)] {
+            let b = reply_blocks(origin, "see #1229", bot);
+            assert!(b.contains(r#""href":"https://github.com/BackplaneWorks/Backplane/issues/1229""#), "{origin} {bot}: {b}");
+        }
     }
     #[test] fn civil_dates() { assert_eq!(civil(0), (1970, 1, 1)); assert_eq!(civil(19675), (2023, 11, 14)); assert_eq!(clock(1700002806, 0, &Rule::utc()), "Tue 14 Nov 23:00"); }
     #[test] fn labels_name_three_kinds_and_the_live_one_says_what_runs() {

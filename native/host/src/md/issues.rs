@@ -18,12 +18,48 @@ fn opens(prev: Option<char>) -> bool { prev.map_or(true, |c| !(c.is_alphanumeric
 /// What may follow its number: the end, a space or punctuation that is not part of a word.
 fn closes(next: Option<char>) -> bool { next.map_or(true, |c| !(c.is_alphanumeric() || c == '_')) }
 
-/// One piece of a text: plain, or a reference (its text, the repository, the number).
-#[derive(Debug, PartialEq)]
-pub enum Piece { Text(String), Issue(String, String, u64) }
+/// The repository a project with no GitHub remote (and a bot's conversation) links to.
+pub const DEFAULT_REPO: &str = "BackplaneWorks/Backplane";
 
-/// A text's references in `repo` (`#N`) and in any repository named (`OWNER/REPO#N`), the rest as text.
+/// One piece of a text: plain, an issue reference (its text, the repository, the number) or a commit (its text, the SHA).
+#[derive(Debug, PartialEq)]
+pub enum Piece { Text(String), Issue(String, String, u64), Commit(String) }
+
+/// A short commit SHA: 7 to 12 lower-case hex digits, at least two of them digits and one a letter (a plain number, a word such as
+/// `defaced` or `decade` is not one; `facade12` is, the one false link this allows).
+fn is_sha(w: &str) -> bool {
+    (7..=12).contains(&w.len()) && w.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+        && w.chars().filter(|c| c.is_ascii_digit()).count() >= 2 && w.chars().any(|c| c.is_ascii_lowercase())
+}
+
+/// A text's references in `repo` (`#N`) and in any repository named (`OWNER/REPO#N`), and its short commit SHAs, the rest as text.
 pub fn pieces(s: &str, repo: &str) -> Vec<Piece> {
+    let mut out = Vec::new();
+    for p in issue_pieces(s, repo) { match p { Piece::Text(t) => out.extend(commit_pieces(&t)), p => out.push(p) } }
+    out
+}
+/// A text's SHAs: a run of hex digits that no word, path, URL or number runs into on either side.
+fn commit_pieces(s: &str) -> Vec<Piece> {
+    let cs: Vec<char> = s.chars().collect();
+    let (mut out, mut from, mut i) = (Vec::new(), 0usize, 0usize);
+    while i < cs.len() {
+        if cs[i].is_ascii_hexdigit() && opens(if i == 0 { None } else { Some(cs[i - 1]) }) {
+            let mut j = i; while j < cs.len() && cs[j].is_ascii_alphanumeric() { j += 1 }
+            let w: String = cs[i..j].iter().collect();
+            // a sentence's full stop or a colon before a space may follow; any other path or URL character may not
+            let after = match cs.get(j) { Some('.' | ':') if cs.get(j + 1).map_or(true, |c| c.is_whitespace()) => None, c => c.copied() };
+            if is_sha(&w) && closes(after) && !matches!(after, Some('-' | '/' | '.' | ':' | '@' | '=' | '#' | '&')) {
+                if i > from { out.push(Piece::Text(cs[from..i].iter().collect())) }
+                out.push(Piece::Commit(w)); from = j; i = j; continue
+            }
+            i = j; continue
+        }
+        i += 1;
+    }
+    if from < cs.len() { out.push(Piece::Text(cs[from..].iter().collect())) }
+    out
+}
+fn issue_pieces(s: &str, repo: &str) -> Vec<Piece> {
     let cs: Vec<char> = s.chars().collect();
     let (mut out, mut from, mut i) = (Vec::new(), 0usize, 0usize);
     while i < cs.len() {
@@ -56,17 +92,21 @@ pub fn pieces(s: &str, repo: &str) -> Vec<Piece> {
 /// The link of a reference, and its hover title.
 pub fn url(repo: &str, n: u64) -> String { format!("https://github.com/{repo}/issues/{n}") }
 
-/// The references in rendered nodes (`nodes_json`'s JSON) as links, in place. `repo` is the project's `OWNER/REPO`; "" (a project with
-/// no GitHub remote) links nothing, `OWNER/REPO#N` included.
+/// The link of a commit.
+pub fn commit_url(repo: &str, sha: &str) -> String { format!("https://github.com/{repo}/commit/{sha}") }
+
+/// The references in rendered nodes (`nodes_json`'s JSON) as links, in place. `repo` is the project's `OWNER/REPO`; "" (a project with no
+/// GitHub remote, a bot's conversation) is `DEFAULT_REPO`.
 pub fn link_nodes(nodes: &mut Vec<Value>, repo: &str) {
-    if repo.is_empty() { return }
+    let repo = if repo.is_empty() { DEFAULT_REPO } else { repo };
     let mut out = Vec::with_capacity(nodes.len());
     for mut n in std::mem::take(nodes) {
         if let Some(t) = n.get("text").and_then(Value::as_str).filter(|_| n.get("tag").is_none()) {
-            if !t.contains('#') { out.push(n); continue }
+            if !t.contains('#') && !t.chars().any(|c| c.is_ascii_hexdigit()) { out.push(n); continue }
             for p in pieces(t, repo) {
                 out.push(match p {
                     Piece::Text(t) => json!({"text": t}),
+                    Piece::Commit(sha) => json!({"tag": "a", "kids": [{"text": sha.clone()}], "href": commit_url(repo, &sha), "file": false, "title": format!("{repo}@{sha}")}),
                     Piece::Issue(label, r, num) => json!({"tag": "a", "kids": [{"text": label}], "href": url(&r, num), "file": false, "title": format!("{r}#{num}")}),
                 });
             }
@@ -105,15 +145,29 @@ mod tests {
     #[test] fn rendered_nodes_link_their_text_but_not_code_or_links_and_nothing_without_a_repo() {
         let md = "fixes #12 and `#13`, [see #14](https://e.x) **bold #15**\n\n```\n#16\n```";
         let mut n = crate::md::nodes_json(&crate::md::render(md));
-        let before = n.clone();
-        link_nodes(&mut n, "");
-        assert_eq!(n, before, "no GitHub remote: nothing changes");
+        let mut d = n.clone();
+        link_nodes(&mut d, "");
+        assert_eq!(d, { let mut e = n.clone(); link_nodes(&mut e, DEFAULT_REPO); e }, "no GitHub remote: the default repository");
         link_nodes(&mut n, R);
         let s = serde_json::to_string(&n).unwrap();
         for k in [12, 15] { assert!(s.contains(&format!(r#""href":"https://github.com/{R}/issues/{k}""#)), "#{k} linked: {s}"); }
         assert!(s.contains(r#""title":"BackplaneWorks/Backplane#12""#), "{s}");
         for k in [13, 14, 16] { assert!(!s.contains(&format!("/issues/{k}")), "#{k} is code or a link's text: {s}"); }
         assert!(s.contains(r##"{"tag":"code","kids":[{"text":"#13"}]}"##), "{s}");
+    }
+    fn commits(s: &str) -> Vec<String> { pieces(s, R).into_iter().filter_map(|p| match p { Piece::Commit(c) => Some(c), _ => None }).collect() }
+    #[test] fn short_shas_link_and_words_numbers_paths_and_urls_do_not() {
+        assert_eq!(commits("landed 1b41a005a."), vec!["1b41a005a"]);
+        assert_eq!(commits("(350f18407), then 64846c0d4: ok"), vec!["350f18407", "64846c0d4"]);
+        assert_eq!(commits("fixes #12 in 1b41a00"), vec!["1b41a00"]);
+        for s in ["decade", "defaced1", "deadbeef", "1234567", "20261119", "1b41a00z", "x1b41a005a", "a/1b41a005a", "https://e.x/1b41a005a", "1b41a005a.rs", "1b41a005a-x", "file_1b41a005a", "1B41A005A", "1b41a005a1b41a005a", "1b41a0", "v0.16.2-1b41a005a", "1b41a005a/b", "a=1b41a005a"] {
+            assert!(commits(s).is_empty(), "{s}: {:?}", commits(s));
+        }
+        let mut n = crate::md::nodes_json(&crate::md::render("at 1b41a005a and `1b41a005a`\n\n```\n350f18407\n```"));
+        link_nodes(&mut n, R);
+        let j = serde_json::to_string(&n).unwrap();
+        assert!(j.contains(&format!(r#""href":"https://github.com/{R}/commit/1b41a005a""#)), "{j}");
+        assert_eq!(j.matches("/commit/").count(), 1, "code is never linked: {j}");
     }
     #[test] fn only_a_github_origin_names_a_repository() {
         assert_eq!(repo_of("github.com/BackplaneWorks/Backplane").as_deref(), Some(R));
