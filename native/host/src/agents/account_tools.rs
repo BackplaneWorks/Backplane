@@ -18,7 +18,7 @@ pub fn account_json(p: &Value, all: &[Value], get: &dyn Fn(&str) -> String, now:
     let held = fb::login_held(get, all, provider, id, epoch, model, now);
     let until = |i: &str, e: u64| if fb::hold_current(get, provider, i, e, model, now) { fb::hold_until(get, provider, i, e, model) } else { 0 };
     let held_until = std::iter::once((id.to_string(), epoch)).chain(fb::same_logins(all, provider, id, epoch)).map(|(i, e)| until(&i, e)).max().unwrap_or(0);
-    let windows: Vec<Value> = p["allowance"]["windows"].as_array().into_iter().flatten().map(|w| json!({"scope":w["scope"],"usedPercent":w["used_percent"],"resetsAt":w["resets_at"]})).collect();
+    let windows: Vec<Value> = p["allowance"]["windows"].as_array().into_iter().flatten().map(|w| json!({"scope":w["scope"],"label":w["label"],"usedPercent":w["used_percent"],"resetsAt":w["resets_at"]})).collect();
     json!({"id":id,"label":p["label"].as_str().unwrap_or(if id.is_empty() { "Default account" } else { "" }),"provider":provider,"email":p["identity"]["email"],"plan":p["identity"]["plan"],"state":p["state"],
         "remainingPercent":fb::usage_score(p, now, model).map(|x| x as f64 / 1000.0),"held":held,"heldUntil":if held { held_until } else { 0 },"windows":windows,
         "current":current == Some((id, epoch)),"default":default,"sameAsDefault":p["sameAsDefault"] == true})
@@ -115,6 +115,12 @@ impl Agents {
             let mut row = account_json(&own, &all, &get, now, &model, (prov == tprov).then_some(("", 0)).filter(|_| current.0.is_empty()), is_default(prov, "", 0));
             if who["state"] != "known" { row["whoUnknown"] = json!(who["reason"].as_str().unwrap_or(if who["state"] == "signed-out" { "the CLI is signed out" } else { "not checked yet" })) }
             out.push(row);
+        }
+        // the providers without accounts (Antigravity, Grok, Muse, Oh My Pi, Pi, OpenCode): their own login's reading, or that they report none, and what the hub saw (#1337)
+        let others = crate::settings::provider_usage::others_of(&self.hub, now).await;
+        for o in others.as_array().into_iter().flatten() {
+            let prov = o["provider"].as_str().unwrap_or(""); if !want.is_empty() && want != prov { continue }
+            out.push(crate::settings::provider_usage::account_row(o, if prov == tprov { &model } else { "" }, prov == tprov, now));
         }
         for p in all.iter() {
             let prov = p["provider"].as_str().unwrap_or(""); if !want.is_empty() && want != prov { continue }

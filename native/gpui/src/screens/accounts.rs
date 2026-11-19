@@ -481,7 +481,7 @@ fn person(cx: &mut Context<Backplane>, light: bool, st: &Accounts, e: &Value, i:
         let out = l["out"] == true;
         let (word, tok) = if out { (trs(&string(l, "hold")), "warn") } else { (trs(&string(l, "line")), bar_color(l["tone"].as_str().unwrap_or(""))) };
         let head = if narrow { div().flex().flex_col().items_start() } else { div().flex().items_center() }.gap_3()
-            .child(div().flex().items_center().gap_2().flex_1().min_w(px(140.)).child(super::picker::logo(if pv == "codex" { "codex" } else { "claude" }))
+            .child(div().flex().items_center().gap_2().flex_1().min_w(px(140.)).child(super::picker::logo(&pv))
                 .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(what.join(" · ")))
                 .when(l["default"] == true, |d| d.child(div().px_2().py(px(1.)).bg(c("raise")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("Used for new threads")))))
             .child(div().flex().items_center().gap_2().flex_shrink_0().child(div().size(px(8.)).bg(c(tok))).child(div().text_size(crate::scale::tpx(12.)).text_color(c(tok)).child(word)));
@@ -492,7 +492,8 @@ fn person(cx: &mut Context<Backplane>, light: bool, st: &Accounts, e: &Value, i:
         if !also.is_empty() { col = col.child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(format!("{} {}: {}", trs("Also added as"), also.join(", "), trs("the same account, counted once")))); }
         if let Some(p) = profiles(&st.snap).into_iter().find(|p| string(p, "id") == pid && !pid.is_empty()) {
             for el in controls(cx, light, st, &p, i * 10 + j, l["default"] == true) { col = col.child(el); }
-        } else if l["default"] != true && l["state"] == "connected" {
+        } else if kind == "cli" && l["default"] != true && l["state"] == "connected" {
+            // (a provider without accounts, `kind: provider`, has nothing to choose: its one login is what its threads run on)
             // the CLI's own login with no added account of it: only made the default here
             let prov = pv.clone();
             col = col.child(div().flex().child(button(cx, light, format!("acct-cli-default-{pv}"), &trs("Use for new threads"), false, false, move |this, _| {
@@ -515,7 +516,7 @@ pub fn usage_summary(light: bool, st: &Accounts) -> Vec<AnyElement> {
             let pv = string(l, "provider");
             let mut what = vec![trs(&string(l, "title"))]; if let Some(p) = l["plan"].as_str().filter(|p| !p.is_empty()) { what.push(p.to_string()) }
             let (word, tok) = if l["out"] == true { (trs(&string(l, "hold")), "warn") } else { (trs(&string(l, "line")), bar_color(l["tone"].as_str().unwrap_or(""))) };
-            card = card.child(div().flex().items_center().gap_2().child(super::picker::logo(if pv == "codex" { "codex" } else { "claude" }))
+            card = card.child(div().flex().items_center().gap_2().child(super::picker::logo(&pv))
                 .child(div().flex_1().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(what.join(" · ")))
                 .child(div().text_size(crate::scale::tpx(12.)).text_color(c(tok)).child(word)));
             for b in l["bars"].as_array().into_iter().flatten() { card = card.child(usage_bar(light, b)); }

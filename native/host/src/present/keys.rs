@@ -99,16 +99,23 @@ fn usage_tail(provider: &str, reading: &str) -> String {
     if used > 0 { if window == 0 { format!(" · ctx {}", tokens(used)) } else { format!(" · ctx {}% of {}", used * 100 / window, tokens(window)) } }
     else if provider == "claude" { String::new() } else { " · ctx n/a".into() }
 }
+/// A window that names the models it binds (`model`: one word, `models`: several, each matched inside the lower-cased model id `model`): whether `model` is one of them.
+/// None: the window names none (the provider's rules decide). Failover reads windows the same way (settings/fallback.rs `applies`).
+pub fn binds(w: &Value, model: &str) -> Option<bool> {
+    if let Some(ms) = w["models"].as_array().filter(|m| !m.is_empty()) { return Some(ms.iter().filter_map(Value::as_str).any(|m| !m.is_empty() && model.contains(&m.to_lowercase()))) }
+    w["model"].as_str().filter(|m| !m.is_empty()).map(|m| model.contains(m))
+}
 /// Allowance.chip, simplified: the least remaining percent across the provider's reported windows that apply to the model ("72% left"), or "" when no
 /// window has a current reading (the client says so, never a made-up percentage). A window whose reset has passed is not a current reading.
 /// `snapshot` is the thread's `allowance.<provider>` setting (permille used), or the bound profile's allowance (percent used) from `accounts.inventory`.
 pub fn allowance_text(snapshot: &Value, provider: &str, model: &str, now_s: u64) -> String {
-    if !matches!(provider, "claude" | "codex") || snapshot["provider"].as_str().is_some_and(|p| p != provider) { return String::new() }
+    if snapshot["provider"].as_str().is_some_and(|p| p != provider) { return String::new() }
     let m = model.to_lowercase();
     let mut left: Option<u64> = None; let mut shared = true;
     for w in snapshot["windows"].as_array().map(Vec::as_slice).unwrap_or_default() {
         let scope = w["scope"].as_str().unwrap_or("");
-        let applies = match w["model"].as_str().filter(|x| !x.is_empty()) { Some(x) => m.contains(x), None => provider == "codex" || scope == "shared" || scope == "five_hour" || scope == "seven_day" || (scope == "opus" && m.contains("opus")) || (scope == "sonnet" && m.contains("sonnet")) };
+        // a window naming its models binds those (a Claude model's weekly, an Antigravity family's); else every window of a provider but Claude, whose model windows are by scope
+        let applies = match binds(w, &m) { Some(b) => b, None => provider != "claude" || scope == "shared" || scope == "five_hour" || scope == "seven_day" || (scope == "opus" && m.contains("opus")) || (scope == "sonnet" && m.contains("sonnet")) };
         if !applies { continue }
         let used = w["used_permille"].as_f64().or_else(|| w["used_percent"].as_f64().map(|p| p * 10.0));
         let Some(used) = used.filter(|u| (0.0..=1000.0).contains(u)) else { return String::new() };
@@ -178,11 +185,11 @@ pub fn combo(snapshot: &Value, provider: &str, model: &str, effort: &str, speed:
     if accounts { full.push(account.0.to_string()); mid.push(account.0.to_string()); }
     if let Some(l) = left { full.push(format!("{l}% left")); mid.push(format!("{l}%")); short.push(format!("{l}%")); }
     let ml = model.to_lowercase();
-    let windows: Vec<Value> = if !accounts || snapshot["provider"].as_str().is_some_and(|p| p != provider) { vec![] } else { snapshot["windows"].as_array().into_iter().flatten().filter_map(|w| {
+    let windows: Vec<Value> = if snapshot["provider"].as_str().is_some_and(|p| p != provider) { vec![] } else { snapshot["windows"].as_array().into_iter().flatten().filter_map(|w| {
         let used = w["used_permille"].as_f64().map(|p| p / 10.0).or_else(|| w["used_percent"].as_f64()).filter(|u| (0.0..=100.0).contains(u))?;
         let scope = w["scope"].as_str().unwrap_or("");
         let label = w["label"].as_str().map(str::to_string).unwrap_or_else(|| match scope { "five_hour" => "5-hour".into(), "seven_day" | "shared" => "Weekly".into(), "seven_day_opus" | "opus" => "Opus weekly".into(), "seven_day_sonnet" | "sonnet" => "Sonnet weekly".into(), o => w["name"].as_str().unwrap_or(o).to_string() });
-        let applies = match w["model"].as_str().filter(|x| !x.is_empty()) { Some(x) => ml.contains(x), None => !matches!(scope, "opus" | "seven_day_opus") || ml.contains("opus") } && (!matches!(scope, "sonnet" | "seven_day_sonnet") || ml.contains("sonnet"));
+        let applies = match binds(w, &ml) { Some(b) => b, None => !matches!(scope, "opus" | "seven_day_opus") || ml.contains("opus") } && (!matches!(scope, "sonnet" | "seven_day_sonnet") || ml.contains("sonnet"));
         let reset = w["resets_at"].as_f64().map(|r| r as u64).filter(|r| *r > now_s);
         let l = ((100.0 - used).floor()).max(0.0) as u64;
         Some(json!({"label":label,"left":l,"tone":tone(Some(l)),"applies":applies,"resets_at":reset,"resets":reset.map(|r| super::thread::clock(r, now_s, zone)).unwrap_or_default()}))
@@ -190,7 +197,8 @@ pub fn combo(snapshot: &Value, provider: &str, model: &str, effort: &str, speed:
     let x = &snapshot["extra"];
     let extra = if x.is_object() { format!("Extra usage {}{}{}", x["used"].as_str().unwrap_or("$0"), x["limit"].as_str().map(|l| format!(" of {l}")).unwrap_or_default(),
         if x["enabled"] == true { String::new() } else { let r = x["reason"].as_str().unwrap_or("").replace('_', " "); if r.is_empty() { " · off".into() } else { format!(" · off ({r})") } }) } else { String::new() };
-    let note = if !accounts { String::new() } else if windows.is_empty() { snapshot["reason"].as_str().filter(|r| !r.is_empty()).unwrap_or("No limit reading yet.").to_string() } else { String::new() };
+    // a provider without accounts says why it has no windows when it knows ("usage not reported by Pi"), and nothing when it has no reading at all
+    let note = if !windows.is_empty() { String::new() } else if accounts { snapshot["reason"].as_str().filter(|r| !r.is_empty()).unwrap_or("No limit reading yet.").to_string() } else { snapshot["reason"].as_str().unwrap_or("").to_string() };
     let mut tip = vec![];
     if accounts { let who = if account.1.is_empty() { account.0.to_string() } else { account.1.to_string() }; tip.push(if account.2 { format!("{who} (saved account)") } else { format!("{who} (the CLI's own login)") }) }
     for w in &windows { tip.push(format!("{}  {}% left{}", w["label"].as_str().unwrap_or(""), w["left"], w["resets"].as_str().filter(|r| !r.is_empty()).map(|r| format!(" · resets {r}")).unwrap_or_default())) }
@@ -215,7 +223,8 @@ pub fn combo_of(st: &State, id: &str, now_s: u64) -> Value {
 pub fn account_sections(st: &State, id: &str, now_s: u64) -> Vec<Value> {
     let Some(t) = st.threads.get(id) else { return vec![] };
     let provider = t.provider.as_str();
-    if !matches!(provider, "claude" | "codex") { return vec![] }
+    // a provider without accounts (Antigravity, Grok...) has no account to pick: its own login's usage only (#1337)
+    if !matches!(provider, "claude" | "codex") { return usage_section(&combo_of(st, id, now_s)).into_iter().collect() }
     let get = |k: &str| st.settings.get(k).map(String::as_str).unwrap_or("");
     let bound = serde_json::from_str::<Value>(get(&format!("account.thread.{id}.{provider}"))).ok().and_then(|b| b["id"].as_str().map(str::to_string)).unwrap_or_default();
     let left = |a: &Value| allowance_text(a, provider, &t.model, now_s).split('%').next().and_then(|x| x.parse::<u64>().ok()).map(|l| format!(" · {l}% left")).unwrap_or_default();
@@ -227,13 +236,16 @@ pub fn account_sections(st: &State, id: &str, now_s: u64) -> Vec<Value> {
         choices.push(json!({"label":format!("{}{}", p["label"].as_str().unwrap_or(""), left(&profile_allowance(&p, provider))),"value":format!("{}\u{1f}{}", p["id"].as_str().unwrap_or(""), p["epoch"].as_u64().unwrap_or(0)),
             "on":p["id"].as_str() == Some(bound.as_str()),"ok":ok,"why":why}));
     }
-    let c = combo_of(st, id, now_s);
+    let mut out = vec![json!({"title":"Account","action":"account","choices":choices})];
+    out.extend(usage_section(&combo_of(st, id, now_s)));
+    out
+}
+/// The picker's Usage section of a combo: a row a window with its reset, then the extra usage and the note; None when there is nothing to read.
+fn usage_section(c: &Value) -> Option<Value> {
     let mut usage: Vec<Value> = c["windows"].as_array().into_iter().flatten().map(|w| json!({"label":format!("{}  {}% left", w["label"].as_str().unwrap_or(""), w["left"]),"value":"","on":false,"ok":false,
         "why":w["resets"].as_str().filter(|r| !r.is_empty()).map(|r| format!("resets {r}")).unwrap_or_default()})).collect();
     for k in ["extra", "note"] { if let Some(x) = c[k].as_str().filter(|x| !x.is_empty()) { usage.push(json!({"label":x,"value":"","on":false,"ok":false,"why":""})) } }
-    let mut out = vec![json!({"title":"Account","action":"account","choices":choices})];
-    if !usage.is_empty() { out.push(json!({"title":"Usage","action":"usage","choices":usage})) }
-    out
+    (!usage.is_empty()).then(|| json!({"title":"Usage","action":"usage","choices":usage}))
 }
 /// The models info as the thread's own account has it: a Claude or Codex thread bound to a saved account (else the provider's default account) lists that account's catalog
 /// (`accounts.inventory`, read again each hour), each row with the catalog's label and efforts, so a model the account has shows on the desktop and the phones alike even
@@ -492,7 +504,12 @@ mod tests {
         assert_eq!(allowance_text(&Value::Null, "claude", "", 100), "");
         assert_eq!(allowance_text(&json!({"windows":[{"scope":"shared","used_permille":null}]}), "claude", "", 100), "");
         assert_eq!(allowance_text(&json!({"windows":[{"scope":"shared","used_permille":100,"resets_at":50}]}), "claude", "", 100), "", "a passed reset is no current reading");
-        assert_eq!(allowance_text(&snap, "grok", "", 100), "");
+        assert_eq!(allowance_text(&snap, "grok", "", 100), "", "another provider's reading is not this one's");
+        // a provider without accounts reads its own (provider_usage.rs): Antigravity's windows bind their model family
+        let agy = json!({"provider":"antigravity","windows":[{"scope":"five_hour_gemini","models":["gemini"],"used_percent":10.0},{"scope":"five_hour_claude_gpt","models":["claude","gpt"],"used_percent":100.0,"resets_at":500}]});
+        assert_eq!(allowance_text(&agy, "antigravity", "gemini-4-neon", 100), "90% left · shared");
+        assert_eq!(allowance_text(&agy, "antigravity", "claude-opus-5-5-high", 100), "0% left · shared");
+        assert_eq!(allowance_text(&json!({"provider":"grok","windows":[{"scope":"seven_day","used_percent":19.0,"resets_at":500}]}), "grok", "grok-4.7", 100), "81% left · shared");
     }
     #[test] fn a_models_short_name_is_its_family_and_version() {
         for (id, want) in [("", "default"), ("claude-opus-5-5", "Opus 5.5"), ("opus", "Opus"), ("sonnet", "Sonnet"), ("claude-sonnet-4-5-20250929", "Sonnet 4.5"), ("claude-fable-5-1", "Fable 5.1"), ("opus[1m]", "Opus (1M)"), ("claude-fable-5-2[1m]", "Fable 5.2 (1M)"), ("gpt-5.1-codex", "gpt-5.1-codex"), ("claude-mystery-1", "claude-mystery-1")] {

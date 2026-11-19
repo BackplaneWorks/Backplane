@@ -262,6 +262,8 @@ impl RpcHandler for AccountsRpc {
                 snap["thread"] = json!({"id": th, "provider": provider, "binding": raw, "pinned": serde_json::from_str::<Value>(&chosen).map_or(false, |c| c["by"] == "person")});
             }
             snap["holds"] = holds(hub, &snap["profiles"], &model).await;
+            // the providers without accounts (Antigravity, Grok, Muse, Oh My Pi, Pi, OpenCode): their own usage reading, or what the hub saw of them (#1337)
+            snap["others"] = super::provider_usage::others_of(hub, now_ms() / 1000).await;
             // the accounts by person, with a bar a limit window: what Settings › Accounts draws (accounts_people.rs)
             snap["people"] = json!(super::accounts_people::people(&snap, &hub.setting("tz.machine").await.unwrap_or_default(), now_ms() / 1000));
             vec![json!({"t":"reply","id":id,"ok":snap["error"].as_str().unwrap_or("").is_empty(),"result":snap})]

@@ -83,7 +83,7 @@ pub fn people(snap: &Value, zone: &str, now: u64) -> Vec<Value> {
         let rank = |l: &Value| (if l["provider"] == "codex" { 1 } else { 0 }, match s(l, "kind") { "cli" => 0, "account" => 1, _ => 2 });
         logins.sort_by_key(|l| rank(l));
         json!({"key":key,"title":title,"logins":logins})
-    }).collect()
+    }).chain(super::provider_usage::people(&snap["others"], zone, now)).collect() // then each provider without accounts, with its own reading or what was seen (#1337)
 }
 
 #[cfg(test)]

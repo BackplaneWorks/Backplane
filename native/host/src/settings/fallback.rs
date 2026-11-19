@@ -241,11 +241,13 @@ pub fn same_model(a: &str, b: &str) -> bool {
     let bare = |s: &str| !s.contains('-') && !s.contains('[') && !s.is_empty();
     (bare(a) || bare(b)) && !model_family(a).is_empty() && model_family(a) == model_family(b)
 }
+/// A window naming the models it binds (present/keys.rs `binds`).
+pub use crate::present::keys::binds;
 /// Usage.applies: a model-specific window counts only for that model.
 fn applies(w: &Value, model: &str) -> bool {
     let scope = w["scope"].as_str().unwrap_or("");
-    // a model's own weekly limit (claude_usage.rs) binds that model only
-    if let Some(m) = w["model"].as_str().filter(|m| !m.is_empty()) { return model.to_lowercase().contains(m) }
+    // a model's own weekly limit (claude_usage.rs), or a model family's (Antigravity's Gemini and its Claude and GPT windows, provider_usage.rs), binds those models only
+    if let Some(b) = binds(w, &model.to_lowercase()) { return b }
     (!matches!(scope, "seven_day_opus" | "opus") || model.contains("opus")) && (!matches!(scope, "seven_day_sonnet" | "sonnet") || model.contains("sonnet"))
 }
 /// Usage.score: the remaining allowance in thousandths of a percent across the applicable live windows (the largest use counts); None when unknown.
