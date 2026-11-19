@@ -34,11 +34,25 @@ pub fn strip_tabs(at: &str, have: &[String]) -> Vec<&'static str> {
         (!extra || have.iter().any(|h| h == kind) || at == *kind).then_some(*kind)
     }).collect()
 }
-/// The tab Ctrl+Tab (step 1) or Ctrl+Shift+Tab (step -1) goes to from `at`, round `shown`.
+/// The tab Ctrl+Tab (`step > 0`) or Ctrl+Shift+Tab (`step < 0`) goes to from `at`, round `shown`.
+/// Boundaries: an empty `shown` falls back to `TABS[0]`; a single-tab `shown` stays on that tab;
+/// when `at` is not in `shown`, steps from `at`'s position in `TABS` to the nearest shown tab in
+/// `step`'s direction (or `shown[0]` / `shown.last()` if `at` is unknown).
 pub fn next_tab(at: &str, step: i32, shown: &[&'static str]) -> &'static str {
     if shown.is_empty() { return TABS[0].0 }
-    let i = shown.iter().position(|k| *k == at).unwrap_or(0) as i32;
-    shown[(i + step).rem_euclid(shown.len() as i32) as usize]
+    if shown.len() == 1 { return shown[0] }
+    if let Some(i) = shown.iter().position(|k| *k == at) {
+        return shown[(i as i32 + step).rem_euclid(shown.len() as i32) as usize];
+    }
+    if let Some(t_idx) = TABS.iter().position(|(k, _)| *k == at) {
+        let n = TABS.len() as i32;
+        let dir = if step >= 0 { 1 } else { -1 };
+        for d in 1..=TABS.len() as i32 {
+            let cand = TABS[(t_idx as i32 + dir * d).rem_euclid(n) as usize].0;
+            if shown.contains(&cand) { return cand; }
+        }
+    }
+    if step >= 0 { shown[0] } else { shown[shown.len() - 1] }
 }
 
 /// Ctrl+Tab's next tab round `shown` (the kinds on the strip), where KiCad's Simulator is only gone to once KiCad has it (`have`: the kinds of its frames):
@@ -717,12 +731,15 @@ impl KicadPane {
             _ => {}
         }
         self.info = info;
-        self.note_tab(&was_tab, &cause, cx);
         // the frame on show closed in KiCad: never a wait for it ("Starting KiCad…" for ever, lane M's Cmd+W)
         if let Some((k, next)) = closed {
             eprintln!("GPUI_LOG {}", json!({"kicad_frame_closed": k, "to": next}));
-            match next { Some(to) => { self.override_kind = None; self.show_kind_by(&to, "the frame shown closed in KiCad: the page's own editor", cx) } None => cx.emit(PaneFrameClosed(k)) } // i18n-ok: a debug log cause
+            match next {
+                Some(to) => { self.override_kind = None; self.show_kind_inner(&to, cx); cause = "the frame shown closed in KiCad: the page's own editor".into(); } // i18n-ok: a debug log cause
+                None => cx.emit(PaneFrameClosed(k)),
+            }
         }
+        self.note_tab(&was_tab, &cause, cx);
         cx.notify();
     }
     pub fn matches(&self, info: &Value) -> bool {
@@ -1174,7 +1191,8 @@ impl KicadPane {
                 // the shield did the hand-in itself and replays the press: the state only (no second focus call landing
                 // after the replayed press, which closed a right click's menu before it opened)
                 nc::Ev::ShieldClick => { if self.want().is_some() { self.grab_click(c, false); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } }
-                // Ctrl+Tab / Ctrl+Shift+Tab pressed in KiCad: the next editor tab shown on the strip, and KiCad keeps the keyboard
+                // Ctrl+Tab / Ctrl+Shift+Tab pressed in KiCad: cycle only the tabs shown on the strip, keeping KiCad's keyboard.
+                // `have` is the pane's own frames chained with the hub's (the same list `strip` uses), and feeds both `strip_tabs` and `next_open_tab`'s Simulator rule.
                 nc::Ev::Key(k) if k == "ctrl-tab" || k == "ctrl-shift-tab" => {
                     let have: Vec<String> = self.frames.iter().map(|f| f.kind.to_string())
                         .chain(self.info["frames"].as_array().into_iter().flatten().filter_map(|f| f["kind"].as_str().map(String::from))).collect();
@@ -1962,14 +1980,45 @@ mod tests {
         let v = serde_json::json!({"simFrame": "SIMULATOR"});
         assert_eq!(super::rail_simulation(&v, true).as_deref(), Some("SIMULATOR")); assert_eq!(super::rail_simulation(&v, false), None); assert_eq!(super::rail_simulation(&serde_json::json!({"open": "schematic"}), true), None);
         // closed in KiCad: back to View, whatever else is open
-        assert_eq!(super::after_close("SIMULATOR", "SCH", &serde_json::json!({"frames": [{"kind": "SCH"}]})), None); assert_eq!(super::after_close("GERBVIEW", "PCB", &serde_json::json!({"frames": [{"kind": "PCB"}]})).as_deref(), Some("PCB")); assert_eq!(super::next_tab("?", 1, &base), "SCH");
+        assert_eq!(super::after_close("SIMULATOR", "SCH", &serde_json::json!({"frames": [{"kind": "SCH"}]})), None); assert_eq!(super::after_close("GERBVIEW", "PCB", &serde_json::json!({"frames": [{"kind": "PCB"}]})).as_deref(), Some("PCB"));
+        // boundaries: empty shown, single tab, known-but-hidden `at`, and unknown `at`
+        assert_eq!(super::next_tab("PCB", 1, &[]), "PCB");
+        assert_eq!(super::next_tab("SCH", 1, &["SCH"]), "SCH");
+        assert_eq!(super::next_tab("SCH", -1, &["SCH"]), "SCH");
+        assert_eq!(super::next_tab("SYMBOL_EDITOR", 1, &base), "PCB", "hidden tab steps forward to next shown in TABS order");
+        assert_eq!(super::next_tab("SYMBOL_EDITOR", -1, &base), "PCB_3D", "hidden tab steps backward to previous shown in TABS order");
+        assert_eq!(super::next_tab("?", 1, &base), "PCB", "unknown tab forward lands on first shown");
+        assert_eq!(super::next_tab("?", -1, &base), "PCB_3D", "unknown tab backward lands on last shown");
     }
     #[test] fn tab_change_publishes_only_on_change_and_never_loops() {
         assert_eq!(super::tab_change("PCB", "SCH"), Some("SCH"));
         assert_eq!(super::tab_change("SCH", "SCH"), None, "unchanged wanted frame does not re-emit PaneTab");
-        // Lighting the rail from a published PaneTab does not mutate hub_open or trigger another sync_hub_open / show_kind.
+        // Real path: strip switches Board -> Schematic while hub's viewer.open stays "board".
+        // PaneTab("SCH") triggers a repaint; rail lights "schematic" with no pending press and no hub RPC;
+        // hub_open_step sees unchanged "board" and returns None (no set_open / second editor.kicad.show RPC).
+        let thread = json!({"viewer":{"open":"board","rail":[{"id":"board","state":"on"},{"id":"schematic","state":"off"}]}});
         let mut last_hub = "board".to_string();
-        assert_eq!(hub_open_step("board", &mut last_hub, "board", None), None);
+        assert_eq!(super::tab_change("PCB", "SCH"), Some("SCH"));
+        assert_eq!(crate::ui::rail_lit_id(&thread, true, Some("SCH"), None).as_deref(), Some("schematic"));
+        assert_eq!(hub_open_step("board", &mut last_hub, "board", None), None, "no second show RPC");
+        assert_eq!(super::tab_change("SCH", "SCH"), None, "no second PaneTab");
+    }
+    #[test] fn set_info_close_fallback_publishes_once_only_when_wanted_frame_changes() {
+        let i = |fs: &[&str]| json!({"pid": 7, "state": "ready", "frames": fs.iter().map(|k| json!({"kind": k})).collect::<Vec<_>>()});
+        // Symbols closes over Board -> close fallback resolves to PCB -> exactly one PaneTab("PCB").
+        let was = "SYMBOL_EDITOR";
+        let old = i(&["PCB", "SYMBOL_EDITOR"]);
+        let new = i(&["PCB"]);
+        let closed = super::closed_frame(&old, &new, was).map(|k| (k.clone(), super::after_close(&k, frame_for("board"), &new)));
+        assert_eq!(closed, Some(("SYMBOL_EDITOR".into(), Some("PCB".into()))));
+        let now = closed.as_ref().and_then(|(_, next)| next.as_deref()).unwrap_or(was);
+        assert_eq!(super::tab_change(was, now), Some("PCB"));
+        // A frame closes that was not the wanted one (SCH closes while PCB is wanted) -> no PaneTab.
+        let was_pcb = "PCB";
+        let old2 = i(&["PCB", "SCH"]);
+        let new2 = i(&["PCB"]);
+        assert_eq!(super::closed_frame(&old2, &new2, was_pcb), None);
+        assert_eq!(super::tab_change(was_pcb, was_pcb), None);
     }
     #[test] fn rail_pages_name_editors() { assert_eq!(frame_for("board"), "PCB"); assert_eq!(frame_for("schematic"), "SCH"); assert_eq!(frame_for("3d"), "PCB_3D"); }
     #[test] fn the_project_comes_from_the_viewer_key() {
