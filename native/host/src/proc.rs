@@ -130,6 +130,7 @@ fn dead(program: &str, why: &str) -> String { eprintln!("{why}"); format!("/none
 pub fn tokio_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> tokio::process::Command {
     let p = program.as_ref().to_string_lossy().into_owned();
     let mut c = match refusal(kind, &p) { None => { let (prog, pre) = crate::plat::hub::launch(program.as_ref()); let mut c = tokio::process::Command::new(prog); c.args(pre); c } Some(why) => tokio::process::Command::new(dead(&p, &why)) };
+    crate::plat::proc::default_signals_tokio(&mut c);
     // Windows: no console window for what the hub starts, whether or not the hub has a console to share (a guard's, a task's); own_group keeps it
     #[cfg(windows)] c.creation_flags(crate::plat::proc::NO_WINDOW);
     if scrubbed(kind) { for k in hub_only_present() { c.env_remove(k); } }
@@ -147,6 +148,7 @@ pub fn tokio_cmd_in<S: AsRef<OsStr>>(kind: Kind, program: S, wrap: Option<Vec<St
     // BACKPLANE_SYSTEMD_RUN: a stand-in (a test hub's; scopeprobe.rs reads the same)
     let sr = std::env::var("BACKPLANE_SYSTEMD_RUN").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| "systemd-run".into());
     let mut c = tokio::process::Command::new(sr); c.args(w).arg(prog).args(pre);
+    crate::plat::proc::default_signals_tokio(&mut c);
     if scrubbed(kind) { for k in hub_only_present() { c.env_remove(k); } }
     if let Some(d) = documents_for(kind) { c.env("KICAD_DOCUMENTS_HOME", d); }
     if let Some(d) = pycache_for(kind) { c.env("PYTHONPYCACHEPREFIX", d); }
@@ -209,6 +211,7 @@ pub fn kicad_probe_tokio<S: AsRef<OsStr>>(cli: S) -> (tokio::process::Command, P
 pub fn std_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> std::process::Command {
     let p = program.as_ref().to_string_lossy().into_owned();
     let mut c = match refusal(kind, &p) { None => { let (prog, pre) = crate::plat::hub::launch(program.as_ref()); let mut c = std::process::Command::new(prog); c.args(pre); c } Some(why) => std::process::Command::new(dead(&p, &why)) };
+    crate::plat::proc::default_signals(&mut c);
     #[cfg(windows)] { use std::os::windows::process::CommandExt; c.creation_flags(crate::plat::proc::NO_WINDOW); }
     if scrubbed(kind) { for k in hub_only_present() { c.env_remove(k); } }
     if let Some(d) = documents_for(kind) { c.env("KICAD_DOCUMENTS_HOME", d); }
@@ -348,6 +351,47 @@ mod tests {
         let o = std::process::Command::new(me).args(["proc::tests::copy_child_probe", "--exact", "--nocapture", "--test-threads=1"])
             .env("BACKPLANE_COPY", "1").env("BP_COPY_PROBE", "1").env_remove("BACKPLANE_AGENTS").output().unwrap();
         assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+    }
+
+    /// What a child reports about its signals: SIGCHLD/SIGPIPE/SIGXFSZ dispositions, whether its mask is empty, and whether its own fork+waitpid sees the exit.
+    #[cfg(unix)] #[test] fn sigchld_probe_inner() {
+        if std::env::var_os("BP_SIG_INNER").is_none() { return }
+        unsafe {
+            let disp = |sig: i32| { let mut o: libc::sigaction = std::mem::zeroed(); libc::sigaction(sig, std::ptr::null(), &mut o); if o.sa_sigaction == libc::SIG_IGN { "IGN" } else if o.sa_sigaction == libc::SIG_DFL { "DFL" } else { "HANDLER" } };
+            let mut m: libc::sigset_t = std::mem::zeroed(); libc::sigprocmask(libc::SIG_SETMASK, std::ptr::null(), &mut m);
+            let blocked = (1..32).filter(|s| libc::sigismember(&m, *s) == 1).count();
+            let pid = libc::fork(); if pid == 0 { libc::_exit(7) }
+            let mut st = 0; let r = libc::waitpid(pid, &mut st, 0);
+            let waited = r == pid && libc::WIFEXITED(st) && libc::WEXITSTATUS(st) == 7;
+            println!("BPSIG chld={} xfsz={} blocked={} waited={}", disp(libc::SIGCHLD), disp(libc::SIGXFSZ), blocked, waited);
+        }
+    }
+    /// The hub as it can be started (SIGCHLD, SIGPIPE, SIGXFSZ ignored; a signal blocked): the children it makes through the gate start with defaults.
+    #[cfg(unix)] #[test] fn sigchld_probe_outer() {
+        if std::env::var_os("BP_SIG_OUTER").is_none() { return }
+        unsafe {
+            for s in [libc::SIGCHLD, libc::SIGPIPE, libc::SIGXFSZ] { libc::signal(s, libc::SIG_IGN); }
+            let mut m: libc::sigset_t = std::mem::zeroed(); libc::sigemptyset(&mut m); libc::sigaddset(&mut m, libc::SIGUSR1); libc::pthread_sigmask(libc::SIG_BLOCK, &m, std::ptr::null_mut());
+        }
+        let me = std::env::current_exe().unwrap();
+        let args = ["proc::tests::sigchld_probe_inner", "--exact", "--nocapture", "--test-threads=1"];
+        let mut c = std_cmd(Kind::Local, &me); c.args(args).env("BP_SIG_INNER", "1").env_remove("BP_SIG_OUTER");
+        // SIGCHLD is ignored here, so wait() would fail with ECHILD (the hub's own symptom, #1108): read the pipe to its end instead
+        c.stdout(std::process::Stdio::piped()); let mut ch = c.spawn().unwrap(); let mut out = String::new(); std::io::Read::read_to_string(ch.stdout.as_mut().unwrap(), &mut out).unwrap(); println!("STD {out}");
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let _g = rt.enter(); unsafe { libc::signal(libc::SIGCHLD, libc::SIG_DFL); } // tokio's own reaping needs it; SIGCHLD itself is covered by the std child above
+         let mut t = tokio_cmd(Kind::Local, &me); t.args(args).env("BP_SIG_INNER", "1").env_remove("BP_SIG_OUTER");
+        let o = rt.block_on(async move { t.output().await }).unwrap(); println!("TOKIO {}", String::from_utf8_lossy(&o.stdout));
+    }
+    #[cfg(unix)] #[test] fn a_child_starts_with_default_signals_and_an_empty_mask_even_when_the_hub_ignores_sigchld() {
+        let mut c = std::process::Command::new(std::env::current_exe().unwrap());
+        c.args(["proc::tests::sigchld_probe_outer", "--exact", "--nocapture", "--test-threads=1"]).env("BP_SIG_OUTER", "1").env_remove("BACKPLANE_COPY");
+        let o = c.output().unwrap(); let out = String::from_utf8_lossy(&o.stdout).into_owned();
+        assert!(o.status.success(), "{out}{}", String::from_utf8_lossy(&o.stderr));
+        let want = "BPSIG chld=DFL xfsz=DFL blocked=0 waited=true";
+                assert!(out.contains(want), "std child (SIGCHLD ignored, so every ignored signal is reset): {out}");
+        // the tokio child runs with SIGCHLD at its default (tokio reaps by it), so only its mask and SIGCHLD are checked
+        assert!(out.matches("chld=DFL").count() == 2 && out.matches("blocked=0 waited=true").count() == 2, "std and tokio children: {out}");
     }
 
     /// The gate is the only way to make a process: no other non-test `Command::new` anywhere under src/ (src/bin has its own crates' helpers).

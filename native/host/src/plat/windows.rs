@@ -202,6 +202,9 @@ pub mod proc {
         unsafe { let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid); if h.is_null() { return std::io::Error::last_os_error().raw_os_error() == Some(5) } CloseHandle(h); false }
     }
     pub fn signal(_: &std::process::ExitStatus) -> Option<i32> { None }
+    /// No signal dispositions to inherit on Windows.
+    pub fn default_signals(_: &mut std::process::Command) {}
+    pub fn default_signals_tokio(_: &mut tokio::process::Command) {}
     /// What a process has used so far: CPU seconds (kernel and user), bytes read and written, and seconds since it started (a KiCad
     /// start's timing log: a start held by real-time scanning shows a long age with little CPU and reading).
     pub fn usage(pid: u32) -> Option<(f64, u64, u64, f64)> {
