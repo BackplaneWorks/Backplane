@@ -46,7 +46,10 @@ impl Budget {
     }
 }
 
+mod browser;
+
 struct Inner {
+    browser: browser::Requests,
     devices: Vec<Value>, invites: Vec<Value>, attempts: Budget, claims: Budget,
     clients: HashMap<u64, String>, retired: HashSet<u64>, swept: HashSet<String>,
 }
@@ -81,7 +84,7 @@ impl Registry {
     /// A registry that holds nothing and persists nothing: what the routes get when the real file cannot be read. The file is not touched.
     pub fn empty(home: &Path) -> Registry {
         let file = home.join("guard").join("devices-unreadable.json");
-        Registry { home: home.into(), root: String::new(), file, now: Box::new(|| 0), random: Box::new(urandom), inner: Mutex::new(Inner { devices: vec![], invites: vec![], attempts: Budget::default(), claims: Budget::default(), clients: HashMap::new(), retired: HashSet::new(), swept: HashSet::new() }) }
+        Registry { home: home.into(), root: String::new(), file, now: Box::new(|| 0), random: Box::new(urandom), inner: Mutex::new(Inner { browser: Default::default(), devices: vec![], invites: vec![], attempts: Budget::default(), claims: Budget::default(), clients: HashMap::new(), retired: HashSet::new(), swept: HashSet::new() }) }
     }
     pub fn with(home: &Path, root: &str, now: Box<dyn Fn() -> u64 + Send + Sync>, random: Box<dyn Fn(usize) -> Vec<u8> + Send + Sync>) -> Result<Registry, String> {
         let file = home.join("devices-v1.json");
@@ -96,7 +99,7 @@ impl Registry {
             use crate::plat::fs::PermissionsExt;
             std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).map_err(|_| "Cannot read or initialize device registry; existing pairings were preserved".to_string())?;
         }
-        Ok(Registry { home: home.into(), root: root.into(), file, now, random, inner: Mutex::new(Inner { devices, invites, attempts: Budget::default(), claims: Budget::default(), clients: HashMap::new(), retired: HashSet::new(), swept: HashSet::new() }) })
+        Ok(Registry { home: home.into(), root: root.into(), file, now, random, inner: Mutex::new(Inner { browser: Default::default(), devices, invites, attempts: Budget::default(), claims: Budget::default(), clients: HashMap::new(), retired: HashSet::new(), swept: HashSet::new() }) })
     }
     /// The 0.14 import: another home's paired devices (its devices-v1.json `devices`). Each live, valid one whose id and token hash are not here yet is
     /// added as it was, so a phone paired with 0.14 is let in by this hub without pairing again. Ok(how many were added).
@@ -104,7 +107,7 @@ impl Registry {
         let mut g = self.inner.lock().unwrap();
         let mut all = g.devices.clone(); let mut n = 0;
         for d in devices {
-            if !valid_device(d) || !live(d) || all.iter().any(|x| x["id"] == d["id"] || x["hash"] == d["hash"]) { continue }
+            if d["kind"] == "browser" || !valid_device(d) || !live(d) || all.iter().any(|x| x["id"] == d["id"] || x["hash"] == d["hash"]) { continue }
             all.push(d.clone()); n += 1;
         }
         if n == 0 { return Ok(0) }
@@ -149,7 +152,7 @@ impl Registry {
         if token.len() != 32 || !token.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) { return String::new() }
         let mut g = self.inner.lock().unwrap();
         let h = digest(token);
-        let Some(d) = g.devices.iter().find(|d| live(d) && same(d["hash"].as_str().unwrap_or(""), &h)).cloned() else { return String::new() };
+        let Some(d) = g.devices.iter().find(|d| d["kind"] != "browser" && live(d) && same(d["hash"].as_str().unwrap_or(""), &h)).cloned() else { return String::new() };
         let at = (self.now)();
         if at as f64 - d["lastSeen"].as_f64().unwrap_or(0.0) >= 60000.0 {
             let next = g.devices.iter().map(|x| if x["id"] == d["id"] { let mut y = x.clone(); y["lastSeen"] = json!(at); y } else { x.clone() }).collect();
