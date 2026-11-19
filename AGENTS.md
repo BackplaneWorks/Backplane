@@ -40,6 +40,18 @@ backplane-hub --home DIR --port N --no-tailscale --foreground   # run a hub (tem
 
 `dev-build.sh` honours `BUILD_ROOT` (the checkout to build), `PROFILE` (default `fast`), `HOST_TARGET`/`GPUI_TARGET`. Tests that need agents use stand-ins only.
 
+## Builds and gates: our machines first, GitHub Actions last
+
+Every build, test and gate runs on our own machines. GitHub Actions is the fallback only when none of them can do the job; say which job and why (today: linux-arm64 and Android release builds, and `publish`, which signs with repo secrets).
+
+- **This desktop**: every pre-merge gate. `scripts/land.sh` runs `scripts/dev-build.sh --gate --no-cut` before it pushes; build and test through `scripts/cargo-q`. A green land is the gate; a pull request's `ci.yml` run is not needed to merge.
+- **Boat sandboxes** (`bp-build-N`): `cargo-q` and `dev-build.sh` offload to them on their own when the local slots are full (`docs/BOAT-BUILD.md`). Never start one by hand for a build.
+- **h@backplane**: provisional builds and focused tests (`scripts/bp-build.sh LANE '<cmd>'`). Never a gating result.
+- **hs-mac-mini**: iOS and macOS builds and tests (`scripts/mac-build.sh`, `scripts/mac-hub-build.sh`), only under the `mac-heavy` lock.
+- **bp-winbuild** (Azure, 32 cores, $3.41/h): Windows builds (KiCad's runtime: `scripts/winbuild-kicad.sh`; it and `winbuild-up.sh` come with https://github.com/BackplaneWorks/Backplane/pull/1176) under the `winbuild-vm` lock. **bp-win** (Azure, 4 cores): Windows UI tests under `bp-win-ui`. Both are deallocated when idle: start with `az vm start -g BP-WIN-RG -n <vm>`, and `az vm deallocate -g BP-WIN-RG -n <vm>` when done (a stopped VM still bills). Quick Windows compile checks need no VM: `scripts/windows-check.sh`.
+- **Releases and nightlies**: release.yml's macOS, Windows and linux-x64 jobs run on our self-hosted runners (`bp-mac`, `bp-win-nightly` or `bp-winbuild-release`, `bp-linux-release`) while the `RELEASE_*_RUNNER` variables name them. GitHub cannot wake them, so run the release through `scripts/release-dispatch.sh` (`dispatch` or `watch RUN_ID`): it starts each machine under its lock and stops it after. A variable set while its runner is offline leaves the job queued for 24 h, so set the variables only for a release window (`docs/release-runners.md`).
+- Self-hosted runners never take pull requests. The repo is public, and each runner's guard (`scripts/runner-guard.sh`, `.ps1`) refuses every job except release.yml and nightly.yml from this repo. Pre-merge gates therefore stay as scripts you run here or over ssh, never `runs-on` a self-hosted label.
+
 ## Rules
 
 - Stand-in agents only in tests: set `BACKPLANE_AGENTS=<dir>` (the stand-ins go first on PATH; a missing CLI is blocked, never the real one). Real model turns only on temp homes, with the person's go.

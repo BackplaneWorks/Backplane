@@ -12,6 +12,8 @@ same hub that GitHub would build.
 | --- | --- | --- | --- |
 | `RELEASE_MAC_RUNNER` | build and smoke darwin-arm64 | `bp-mac` (the Mac mini, `~/bp-runner`) | macos-latest |
 | `RELEASE_WIN_RUNNER` | build and smoke windows-x64 | `bp-win-nightly` (bp-win, `C:\actions-runner`) | windows-latest |
+| | build windows-x64 (not a nightly) | `bp-winbuild-release` (bp-winbuild, 32 cores; `release-dispatch.sh` starts it under `winbuild-vm`) | windows-latest |
+| `RELEASE_LINUX_RUNNER` | build linux-x64 | `bp-linux-release` (an ubuntu:22.04 container, `scripts/ci-linux/up.sh`, on the Boat box named in `~/.config/bp-ci/linux-box`) | ubuntu-22.04 |
 
 A `RELEASE_*` variable applies to every run while it is set: tags, dry runs and nightlies. It comes ahead of the `NIGHTLY_*` ones (docs/nightly.md), which
 apply only to nightlies. linux-x64 (ubuntu-22.04, so the archive keeps glibc 2.35), linux-arm64 (ubuntu-22.04-arm; we have no ARM machine) and android
@@ -23,6 +25,13 @@ them once its jobs are done:
     gh variable delete RELEASE_MAC_RUNNER -R BackplaneWorks/Backplane; gh variable delete RELEASE_WIN_RUNNER -R BackplaneWorks/Backplane
 
 If a variable is set and its runner is offline, the job waits in the queue (up to 24 hours) and never falls back to GitHub. Start the machine and its runner first.
+
+Run a release through `scripts/release-dispatch.sh dispatch` (a dry run) or `watch RUN_ID` (a tag push): GitHub cannot start a deallocated VM or the
+mini's runner, and the script brings each named machine up under its lock and stops it after. Check first with
+`gh api repos/BackplaneWorks/Backplane/actions/runners`; on 2026-11-19 all four runners were offline, as they are between releases.
+
+Pre-merge gates never run on these runners (the guards below refuse pull requests). They run as scripts on our machines: `scripts/land.sh` on the
+desktop, `scripts/mac-build.sh` on the mini, `scripts/winbuild-kicad.sh` on bp-winbuild (AGENTS.md, "Builds and gates").
 
 ## Every self-hosted runner refuses all but the release and the nightly
 
