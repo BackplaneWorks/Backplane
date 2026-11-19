@@ -22,6 +22,7 @@ RT=$(dirname "$(dirname "$KICAD_BIN")")
 grep -q '"plan-view-api"' "$RT/manifest.json" 2>/dev/null || grep -qa "plan-view-api" "$RT/bin/kicad.real" 2>/dev/null \
   || { echo "SKIP embed_plan_route_live_e2e: this KiCad has no plan-view-api (bp.13 batch 11)"; exit 0; }
 init_isolated_dirs
+require_numpy
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 start_xvfb_and_wm
 export BP_STREAM_N=1 BP_STREAM_MS=10 BP_STANDIN_MCPCALL_MAX=200000

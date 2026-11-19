@@ -24,6 +24,7 @@ discover_bins
 [ -x "$REAL_HOME/.bun/bin/bun" ] && PATH="$REAL_HOME/.bun/bin:$PATH"
 discover_kicad
 init_isolated_dirs
+require_numpy
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 PROJ="$OUT/proj"
 ( cd "$PROJ" && git rm -q -r --cached . >/dev/null && find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} + )

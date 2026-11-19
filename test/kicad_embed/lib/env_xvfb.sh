@@ -314,7 +314,8 @@ start_hub() {
   if [ "$EMBED_MODE" = "stock" ] || [ "$EMBED_MODE" = "fork" ]; then
     mode_env="$EMBED_MODE"
   fi
-  own env \
+  # (a PYTHONPATH remote_run.sh added for the suites' own measures is not the hub's or KiCad's)
+  own env ${KEMBED_PYTHONPATH_ADDED:+-u PYTHONPATH} \
     HOME="$OUT/fh" \
     XDG_CONFIG_HOME="$OUT/fh/.config" \
     XDG_CACHE_HOME="$OUT/fh/.cache" \
@@ -340,6 +341,18 @@ start_hub() {
   echo "FAIL hub did not start on port $HPORT"
   tail -n 20 "$OUT/hub.log" || true
   return 1
+}
+
+# The suites that measure pictures (lib/canvas_box.py and their own numpy and Pillow code) call this first: an interpreter without them
+# fails the suite at once in one line, instead of each measure failing as if the layout were wrong (h@backplane, embed_narrow_pane: 3
+# failures a width on every branch, all `import numpy`). remote.sh's runs put ~/.cache/bp-kembed-remote/venv-numpy on PYTHONPATH there.
+require_numpy() {
+  local py err
+  py=$(command -v python3 || echo python3)
+  if ! err=$(python3 -c 'import numpy, PIL' 2>&1); then
+    echo "FAIL $py ($(python3 --version 2>&1)) cannot import numpy and PIL, which this suite's picture measures need: ${err##*$'\n'}. Install them for it, or put a venv's site-packages on PYTHONPATH${PYTHONPATH:+ (PYTHONPATH is $PYTHONPATH)}"
+    exit 1
+  fi
 }
 
 PASS_COUNT=0
