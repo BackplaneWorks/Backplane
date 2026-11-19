@@ -956,8 +956,8 @@ mod tests {
     fn reply_blocks(origin: &str, text: &str, bot: bool) -> String {
         let p = fixture(); let th = p["params"]["page"]["thread"].as_str().unwrap();
         static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0); // the origin of a folder is kept for a minute: each picture its own
-        let dir = std::env::temp_dir().join(format!("bp-issue-links-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)));
-        let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(dir.join(".git")).unwrap();
+        let dir = crate::plat::tmp::dir(&format!("issue-links-{}", N.fetch_add(1, std::sync::atomic::Ordering::SeqCst))); // (its drop guard removes it)
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
         if !origin.is_empty() { std::fs::write(dir.join(".git/config"), format!("[remote \"origin\"]\n\turl = {origin}\n")).unwrap(); }
         let mut st = State::new();
         for l in std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).unwrap().lines() { st.apply_line(&l.replace("/tmp/soak2", dir.to_str().unwrap())); }
@@ -965,7 +965,6 @@ mod tests {
         let mut params = p["params"].clone(); params["page"]["rows"][1][8] = json!(text);
         let id = params["page"]["rows"][1][2].as_str().unwrap().to_string();
         let o = thread_object(&st, "h", th, &params, "").expect("drawn");
-        let _ = std::fs::remove_dir_all(&dir);
         o["entries"].as_array().unwrap().iter().find(|e| e["id"] == id.as_str()).map(|e| e["blocks"].to_string()).expect("the reply is a row")
     }
     #[test] fn an_assistant_reply_with_an_issue_number_links_it_in_the_picture_the_client_gets() {
