@@ -1058,7 +1058,8 @@ mod state_tests {
     /// A KiCad file clicked in a message opens inside Backplane: the target moves to its project's thread with the Schematic tab on that file,
     /// and its watch is sent; in the thread on show it stays there; nothing goes to the system's app (`file.open`).
     #[test] fn a_kicad_file_link_opens_its_projects_thread_on_the_viewer_tab() {
-        let d=crate::plat::tmp::dir("filelink");
+        // the folder by its real path: the file a link names is opened by its real path (macOS: /private/var; Windows: RUNNER~1 is runneradmin)
+        let d=crate::plat::tmp::canonical("filelink"); use crate::plat::tmp::sl;
         std::fs::create_dir_all(d.join("amp/boards/main")).unwrap(); std::fs::create_dir_all(d.join("other")).unwrap();
         std::fs::write(d.join("amp/boards/main/main.kicad_sch"),"(kicad_sch)").unwrap(); std::fs::write(d.join("amp/boards/main/main.kicad_pcb"),"(kicad_pcb)").unwrap();
         let (amp,other)=(d.join("amp").to_string_lossy().to_string(),d.join("other").to_string_lossy().to_string());
@@ -1074,7 +1075,7 @@ mod state_tests {
         let v=click("to",&sch);
         assert_eq!(v["nextTarget"],json!({"kind":"thread","id":"ta"}),"{v}");
         let dr=&v["session"]["drafts"];
-        assert_eq!((dr["@view:ta"].as_str(),dr["@view.file:ta"].as_str()),(Some("schematic"),Some(format!("{amp}/boards/main/main.kicad_sch").as_str())));
+        assert_eq!((dr["@view:ta"].as_str(),dr["@view.file:ta"].as_str().map(sl)),(Some("schematic"),Some(sl(format!("{amp}/boards/main/main.kicad_sch")))));
         assert_eq!(v["session"]["open"]["project-closed:pa"],false,"its project unfolded");
         let w=sends(&v); assert!(w.iter().any(|c|c["m"]=="kicad.watch" && c["p"]["kind"]=="schematic"),"{w:?}"); assert!(!w.iter().any(|c|c["m"]=="file.open"),"never the system's app");
         // in the thread on show (a path from its folder): no move, the Board tab on the board
