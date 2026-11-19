@@ -17,6 +17,16 @@
 #[path = "../kicad/plot.rs"] mod plot;
 #[path = "../kicad/plotgen.rs"] mod plotgen;
 #[path = "../kicad/plotread.rs"] mod plotread;
+/// The Altium readers are the hub's (altium/): this helper reads KiCad files only, so an Altium file is "not one of ours" here
+mod altium_hook {
+    pub fn is_cfb(_: &[u8]) -> bool { false }
+    pub fn items(_: u32, _: &[u8], _: &str) -> Option<(Vec<super::board::Item>, u32)> { None }
+    pub fn sheets(_: &[u8]) -> Vec<(String, String)> { vec![] }
+    pub fn sheet_file(p: &str) -> String { p.to_string() }
+    pub fn roots_for(_: &str) -> Vec<String> { vec![] }
+    pub fn sheet_boxes(_: &[u8]) -> Vec<(f32, f32, f32, f32)> { vec![] }
+    pub fn refdes(_: &[u8]) -> Vec<String> { vec![] }
+}
 #[path = "../kicad/gerber/mod.rs"] mod gerber;
 #[path = "../kicad/glb.rs"] mod glb;
 #[path = "../kicad/mesh.rs"] mod mesh;

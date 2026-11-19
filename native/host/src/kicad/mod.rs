@@ -25,6 +25,21 @@ pub mod pcb3d;
 pub mod plot;
 pub mod plotgen;
 pub mod plotread;
+/// What the shared plot readers (plotgen, plotread; also built into bin/bp-plot, which has no altium/) ask of the Altium readers
+pub mod altium_hook {
+    use crate::files::altium::{pcb, prj, sch};
+    pub fn is_cfb(b: &[u8]) -> bool { crate::files::altium::is_cfb(b) }
+    /// a board (kind 0) or sheet's items and its board thickness (um; 0 for a sheet); `path` "" unknown
+    pub fn items(kind: u32, b: &[u8], path: &str) -> Option<(Vec<super::board::Item>, u32)> {
+        let its = if kind == 0 { pcb::items(b) } else if path.is_empty() { sch::items(b) } else { sch::items_in(b, sch::Ctx::of_path(path)) }?;
+        Some((its, if kind == 0 { pcb::thickness_um(b) } else { 0 }))
+    }
+    pub fn sheets(b: &[u8]) -> Vec<(String, String)> { sch::sheets(b) }
+    pub fn sheet_file(p: &str) -> String { crate::files::altium::sheet_file(p) }
+    pub fn roots_for(file: &str) -> Vec<String> { prj::find_for(file).map(|p| prj::roots(&p)).unwrap_or_default() }
+    pub fn sheet_boxes(b: &[u8]) -> Vec<(f32, f32, f32, f32)> { sch::sheet_boxes(b) }
+    pub fn refdes(b: &[u8]) -> Vec<String> { sch::parts(b).into_iter().map(|p| p.refdes).collect() }
+}
 pub mod png;
 pub mod render;
 pub mod schematic;
