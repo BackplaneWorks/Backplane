@@ -64,13 +64,39 @@ All in `native/host/src/kicad/`:
   else `<home>/run/kicad/<digest>`, one per project), `argv` (`--socket <dir>/api.sock`,
   `--parent-pid <hub>`, `--idle-exit 600` when the runtime has `idle-exit`), the ready line
   (`KiCad API server listening at <path>`), the `-bp.N` version check, `retry` (1, 5, 30 s within 300 s,
-  then give up), `plan` / eviction (two servers at most), `headless_refused` (selection, view state,
+  then give up), `room` (how many servers at once: two, three from 32 GB of memory, four from 64 GB),
+  `plan` / eviction, `headless_refused` (selection, view state,
   `RunAction`, ... answered by the hub at once) and `guard`.
 - `ipc.rs`: the actor. A request for a project waits while its server starts (spawn,
-  ready line within 30 s, `Ping`, `GetVersion`) and goes out when it is ready. A third project asks the
-  least recently used server to `kiapi.backplane.Shutdown` first (only when the runtime lists `shutdown`).
+  ready line within 30 s, `Ping`, `GetVersion`) and goes out when it is ready. With every place taken, one
+  more project asks the least recently used server to `kiapi.backplane.Shutdown` first (only when the
+  runtime lists `shutdown`). The pool's rules:
+  - **A server at work is never the one stopped.** One with a request out, or asked in the last 15 s (an
+    agent between two commands of one edit), is passed over: stopping it lost the request and the open
+    document ("KiCad closed the connection before answering"). With every server at work the request waits
+    for room, first come first served, and after 120 s is told `IPC busy: every KiCad server this machine
+    has room for is at work`.
+  - **One process a project.** Each start has a number (the spawn key is `<project>\t<n>`). A server told
+    to stop exits a moment later; the project is started again only after that exit (30 s at most, then
+    the start fails saying so), on a new connection with a new token. An old process's exit is never taken
+    for the new one's.
+  - **A process that exits** has its requests out answered at once (`the headless KiCad for <name> exited
+    before answering`, `Actor::gone`), and counts as used by nobody. The same when the transport restarts.
+  - **Room beyond two is given back.** A server beyond the first two that nobody has asked for ten minutes
+    is shut down (checked once a minute).
+  - **No request waits for ever.** For its server 180 s; from outside the actor 300 s whatever happened
+    inside (KiCad's own limit is 30 s a request, so this is reached only when a reply was lost). Either
+    writes the actor's state to `hub.log`: servers, requests out, requests waiting.
   The servers' state is the info key `kicad.ipc.servers` (`project|state|why`, one line each); Settings
   shows it under the KiCad IPC row, and a `failed` server is a notice with Retry (`kicad.retry`).
+  `test/kipc_bench/pool_e2e.py WORK HUB_BIN RUNTIME BOARD_DIR [PORT]` exercises these rules on a real
+  hub with held stand-in turns and headless KiCads, using staged copies of the board. Source
+  `scripts/lib-bptmp.sh` first and put `WORK` under `$BP_TMP`. It checks contention, the busy deadline,
+  crash recovery, requests during shutdown, one process per project, and idle retirement. Its
+  `BACKPLANE_KICAD_POOL_TEST` knob shortens the intervals and sets room for the contention cases;
+  production defaults are unchanged. The transport is in process, so killing a separate helper is
+  inapplicable; unit tests cover transport restart. Busy work uses back-to-back track reads, since
+  headless IPC requests are bounded to 30 seconds.
 - `kipc.rs` over `nng.rs` and `proto.rs`: the transport, in process. Pure-Rust nng and protobuf (the schema
   from the runtime's descriptor set; without one only `Ping` and `GetVersion` work). One task per socket
   owns its connection; a fresh socket in the project's private directory counts as readiness, including

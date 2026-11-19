@@ -2,16 +2,18 @@
 // until WORK/stop exists. A new home at each start (the last one kept as WORK/home.N), temp HOME/XDG for KiCad, the wrapper `claude` as the only agent, KiStack the hub's own pinned copy (KIPC_BENCH_KISTACK: another).
 import {mkdirSync,mkdtempSync,writeFileSync,chmodSync,copyFileSync,existsSync,rmSync,renameSync} from 'node:fs';
 import {startHub,stopHub,sleep} from '../perf/lib.mjs';
-const [bin,rt,port,work]=process.argv.slice(2);const KS=process.env.KIPC_BENCH_KISTACK,CL=process.env.KIPC_BENCH_CLAUDE,LG=process.env.KIPC_BENCH_LOGIN,MD=process.env.KIPC_BENCH_MODEL,EF=process.env.KIPC_BENCH_EFFORT,UH=process.env.HOME,DIS=process.env.KIPC_BENCH_DISALLOW??'',PR=process.env.KIPC_BENCH_PROMPT??'',NM=process.env.KIPC_BENCH_NOMCP??'';const GC=process.env.KIPC_BENCH_GROK_CLEAN??'';const here=import.meta.dir;
+const [bin,rt,port,work]=process.argv.slice(2);const KS=process.env.KIPC_BENCH_KISTACK,CL=process.env.KIPC_BENCH_CLAUDE,LG=process.env.KIPC_BENCH_LOGIN,MD=process.env.KIPC_BENCH_MODEL,EF=process.env.KIPC_BENCH_EFFORT,UH=process.env.HOME,DIS=process.env.KIPC_BENCH_DISALLOW??'',PR=process.env.KIPC_BENCH_PROMPT??'',NM=process.env.KIPC_BENCH_NOMCP??'';const GC=process.env.KIPC_BENCH_GROK_CLEAN??'';const HE=JSON.parse(process.env.KIPC_BENCH_HUB_ENV??'{}');const here=import.meta.dir;
 for(const d of ['bin','out','runs','user/.config/kicad','user/.cache','user/.local/share','user/.local/state'])mkdirSync(`${work}/${d}`,{recursive:true});
 rmSync(`${work}/stop`,{force:true});
 // A fresh home at every start: on an old one the hub takes up the turns its last life left running, and such a turn writes over its run's
 // transcript in WORK/out and works beside the new runs. The old home is kept beside it (its event and simulation logs are a dead run's record).
 if(existsSync(`${work}/home`)){let n=1;while(existsSync(`${work}/home.${n}`))n++;renameSync(`${work}/home`,`${work}/home.${n}`)}
-const run=mkdtempSync('/tmp/kb-');
+const run=mkdtempSync(`${process.env.TMPDIR??'/tmp'}/kb-`);
 copyFileSync(`${here}/claude`,`${work}/bin/claude`);chmodSync(`${work}/bin/claude`,0o755);
 for(const n of['codex','muse']){writeFileSync(`${work}/bin/${n}`,'#!/bin/sh\nexit 1\n');chmodSync(`${work}/bin/${n}`,0o755)}
-copyFileSync(`${here}/grok`,`${work}/bin/grok`);chmodSync(`${work}/bin/grok`,0o755); // the Grok cells: the real Grok CLI behind a wrapper, as claude's
+if(HE.KIPC_BENCH_STANDIN_ONLY)writeFileSync(`${work}/bin/grok`,'#!/bin/sh\nexit 1\n');
+else copyFileSync(`${here}/grok`,`${work}/bin/grok`); // the Grok cells: the real Grok CLI behind a wrapper, as claude's
+chmodSync(`${work}/bin/grok`,0o755);
 const u=`${work}/user`;
 const wrapper=`${work}/hub.sh`;writeFileSync(wrapper,`#!/bin/sh\nexport HOME='${u}' XDG_CONFIG_HOME='${u}/.config' XDG_CACHE_HOME='${u}/.cache' XDG_DATA_HOME='${u}/.local/share' XDG_STATE_HOME='${u}/.local/state' KICAD_CONFIG_HOME='${u}/.config/kicad' XDG_RUNTIME_DIR='${run}'\nexec '${bin}' "$@" >> '${work}/hub.log' 2>&1\n`);chmodSync(wrapper,0o755);
 for(const k of Object.keys(process.env))if(/^CLAUDE|^BACKPLANE_|^ANTHROPIC|^KIPC_BENCH/.test(k))delete process.env[k]; // this shell may be an agent's own
@@ -20,7 +22,7 @@ const h=await startHub({bin:wrapper,home:`${work}/home`,port:Number(port),standi
  
  extraEnv:{BACKPLANE_KICAD_CLI:`${rt}/bin/kicad-cli`,...(KS?{BACKPLANE_KISTACK:KS}:{}),KIPC_BENCH_OUT:`${work}/out`,
   KIPC_BENCH_CLAUDE:CL??`${UH}/.local/bin/claude`,KIPC_BENCH_GROK:process.env.KIPC_BENCH_GROK_BIN??`${UH}/.grok/bin/grok`,KIPC_BENCH_REALHOME:UH,KIPC_BENCH_GROK_CLEAN:GC,KIPC_BENCH_LOGIN:LG??`${UH}/.claude`,
-  KIPC_BENCH_MODEL:MD??'claude-fable-5-2',KIPC_BENCH_EFFORT:EF??'medium',KIPC_BENCH_DISALLOW:DIS,KIPC_BENCH_PROMPT:PR,KIPC_BENCH_NOMCP:NM}});
+  KIPC_BENCH_MODEL:MD??'claude-fable-5-2',KIPC_BENCH_EFFORT:EF??'medium',KIPC_BENCH_DISALLOW:DIS,KIPC_BENCH_PROMPT:PR,KIPC_BENCH_NOMCP:NM,...HE}});
 writeFileSync(`${work}/hub.json`,JSON.stringify({pid:h.pid,port:h.port,home:h.home,run,token:h.token}));
 console.log(JSON.stringify({pid:h.pid,port:h.port,home:h.home,run}));
 while(!existsSync(`${work}/stop`))await sleep(500);
