@@ -80,15 +80,43 @@ pub fn carry_braces_on(windows: bool, script: &str, args: &[&str]) -> (String, V
     (format!("{UNBRACE}{script}"), args.iter().map(|a| a.replace('%', "%0").replace('{', "%1").replace('}', "%2")).collect())
 }
 /// Git.run: a write, or unknown (refused on a copy); `run_ro` is the read.
-pub async fn run(cwd: &str, args: &[&str]) -> Ran { sh(&format!("{SAFE}bp_safe; exec git \"$@\""), args, cwd, &[]).await }
+pub async fn run(cwd: &str, args: &[&str]) -> Ran { git_safe(cwd, args, &[], true).await }
 /// Git.run for git that only reads (rev-parse, status, for-each-ref, cat-file, ls-files, a diff between two refs).
-pub async fn run_ro(cwd: &str, args: &[&str]) -> Ran { sh_ro(&format!("{SAFE}bp_safe; exec git \"$@\""), args, cwd, &[]).await }
+pub async fn run_ro(cwd: &str, args: &[&str]) -> Ran { git_safe(cwd, args, &[], false).await }
 /// Git.run.idx: git with a private index file
-pub async fn run_idx(cwd: &str, idx: &str, args: &[&str]) -> Ran {
-    // the index file is $0 (Git.run.idx): `-c script idx args..`
-    let (script, args) = carry_braces(&format!("{SAFE}bp_safe; GIT_INDEX_FILE=$0 exec git \"$@\""), args);
-    let mut a = vec!["-c", script.as_str(), idx]; a.extend(args.iter().map(String::as_str));
-    proc("sh", &a, cwd, &[]).await
+pub async fn run_idx(cwd: &str, idx: &str, args: &[&str]) -> Ran { git_safe(cwd, args, &[("GIT_INDEX_FILE", idx)], true).await }
+/// `run` with more environment (an author, a private index): a write.
+pub async fn run_env(cwd: &str, args: &[&str], env: &[(&str, &str)]) -> Ran { git_safe(cwd, args, env, true).await }
+
+/// `bp_safe` (scripts/safe.sh) in Rust: the repository's own filters (`filter.*.clean|smudge|process` set in its local or worktree config, an
+/// includeIf'd file there too) blanked for this one git, as GIT_CONFIG_KEY_n/VALUE_n after the hub's own (GIT_ENV), so no command of the
+/// repository's runs and what git stores or writes out is the files as they are. git is then started directly: through sh each call was
+/// bp-sh, sh, git config, awk and git (Windows: 6 to 10 s a turn's snapshot under load, Nov 19), now git config and git.
+pub async fn safe_env(cwd: &str) -> Vec<(String, String)> {
+    let r = proc_ro("git", &["config", "--show-scope", "--name-only", "--get-regexp", "^filter[.].*[.](clean|smudge|process)$"], cwd, &[]).await;
+    safe_env_of(if r.code == 0 { &r.out } else { "" })
+}
+/// `safe_env` from what `git config --show-scope --name-only --get-regexp` printed (`<scope>\t<key>` a line; anything else ignored, as
+/// safe.sh's awk does): the keys of the local and worktree scopes, each blanked, numbered after GIT_ENV's.
+pub fn safe_env_of(listing: &str) -> Vec<(String, String)> {
+    let base: usize = GIT_ENV.iter().find(|(k, _)| *k == "GIT_CONFIG_COUNT").and_then(|(_, v)| v.parse().ok()).unwrap_or(0);
+    let keys: Vec<&str> = listing.lines().filter_map(|l| { let (scope, key) = l.split_once('\t')?; matches!(scope, "local" | "worktree").then_some(key) }).collect();
+    let mut v: Vec<(String, String)> = vec![];
+    for (i, k) in keys.iter().enumerate() { v.push((format!("GIT_CONFIG_KEY_{}", base + i), k.to_string())); v.push((format!("GIT_CONFIG_VALUE_{}", base + i), String::new())); }
+    v.push(("GIT_CONFIG_COUNT".into(), (base + keys.len()).to_string()));
+    v
+}
+tokio::task_local! { static SAFE_HELD: (String, Vec<(String, String)>); }
+/// `f` with `cwd`'s safe environment read once for every git it runs in `cwd` (one snapshot, restore or first commit, under the repository's
+/// lock: Backplane changes no filter setting meanwhile), instead of a `git config` before each. Elsewhere each git reads it, as before.
+pub async fn with_safe<F: std::future::Future>(cwd: &str, f: F) -> F::Output { let e = safe_env(cwd).await; SAFE_HELD.scope((cwd.to_string(), e), f).await }
+/// git run directly in `cwd` with the safe environment (`safe_env`, or the one `with_safe` read for `cwd`) and `env`; `write` as `proc`
+/// (refused on a copy), else as `proc_ro`.
+async fn git_safe(cwd: &str, args: &[&str], env: &[(&str, &str)], write: bool) -> Ran {
+    let held = SAFE_HELD.try_with(|(c, e)| (c == cwd).then(|| e.clone())).ok().flatten();
+    let safe = match held { Some(e) => e, None => safe_env(cwd).await };
+    let mut e: Vec<(&str, &str)> = safe.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect(); e.extend_from_slice(env);
+    spawn("git", args, cwd, &e, false, write).await
 }
 /// Git.seq: a non-zero exit is "error: <output>", else the trimmed output (raw keeps it untouched, for diffs).
 fn seq(r: Ran, raw: bool) -> Result<String, String> { if r.code == 0 { Ok(if raw { r.out } else { r.out.trim().to_string() }) } else { Err(format!("error: {}", r.out.trim())) } }
@@ -292,6 +320,12 @@ mod tests {
         let t = tokio::time::timeout(std::time::Duration::from_millis(300), proc("sh", &["-c", script, &b, "2"], "/", &[])).await; assert!(t.is_err());
         let pid: i32 = std::fs::read_to_string(&b).unwrap().trim().parse().unwrap(); assert!(alive(pid), "a plain command must outlive its caller's timeout");
         assert!(gone_within(pid, 5000).await, "and end by itself");
+    }
+    #[test] fn the_safe_environment_blanks_only_the_repositorys_own_filters_after_the_hubs_settings() {
+        // what safe.sh's awk took: the local and worktree scopes' keys, from `<scope>\t<key>` lines; the global, system and command scopes stay
+        let l = "local\tfilter.lfs.clean\nglobal\tfilter.lfs.smudge\nworktree\tfilter.x.process\nsystem\tfilter.y.clean\nwarning: something\n";
+        assert_eq!(safe_env_of(l), [("GIT_CONFIG_KEY_5", "filter.lfs.clean"), ("GIT_CONFIG_VALUE_5", ""), ("GIT_CONFIG_KEY_6", "filter.x.process"), ("GIT_CONFIG_VALUE_6", ""), ("GIT_CONFIG_COUNT", "7")].map(|(k, v)| (k.to_string(), v.to_string())));
+        assert_eq!(safe_env_of(""), [("GIT_CONFIG_COUNT".to_string(), "5".to_string())], "none: the hub's five");
     }
     #[tokio::test] async fn checkpoints_diff_revert_and_status() {
         let d = tmp("cp"); g(&d, &["init", "-q"]).await; std::fs::write(format!("{d}/a.txt"), "one\n").unwrap(); g(&d, &["add", "."]).await; g(&d, &["commit", "-qm", "i"]).await;
