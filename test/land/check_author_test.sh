@@ -32,6 +32,7 @@ mk build@amemb.com unknown@invalid.example
 if ! chk "$good..HEAD" && ! GIT_COMMITTER_EMAIL=unknown@invalid.example chk --ident; then rc=0; else rc=1; fi
 ok "$rc" "range and --ident reject an unknown committer"
 if ! grep -q 'reset-author\|re-author' "$T/check-output"; then rc=0; else rc=1; fi; ok "$rc" "hint preserves accepted identities"
+if chk "$good..$good" && chk "$good" --not "$good"; then rc=0; else rc=1; fi; ok "$rc" "an empty range (no new commits) passes"
 if ! chk nonexistent-ref; then rc=0; else rc=1; fi; ok "$rc" "an invalid revision fails closed"
 git reset -q --hard "$good"
 # Install from a lane, while the main checkout's old checker rejects everything.
@@ -57,6 +58,9 @@ git remote add origin "$T/r"
 tip=$(git rev-parse HEAD)
 if printf 'refs/heads/lane %s refs/heads/lane %s\n' "$tip" "$old" | "$hooks/pre-push"; then rc=0; else rc=1; fi
 ok "$rc" "installed pre-push checks only commits absent from remotes"
+git tag -a -m tag vtest "$old"
+if printf 'refs/tags/vtest %s refs/tags/vtest %s\n' "$(git rev-parse vtest)" 0000000000000000000000000000000000000000 | "$hooks/pre-push"; then rc=0; else rc=1; fi
+ok "$rc" "installed pre-push accepts a new tag on a commit already on the remote"
 # Real ref transactions exercise new-not-old, followed by local main's fast-forward.
 if git update-ref refs/remotes/origin/main "$tip" "$old" && git -C "$T/r" merge -q --ff-only origin/main; then rc=0; else rc=1; fi
 ok "$rc" "origin/main and local main advance with accepted commits and a rejected old ancestor"

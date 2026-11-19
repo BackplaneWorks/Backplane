@@ -15,6 +15,7 @@ entries=$(log "$@") || exit $?
 bad=$(printf '%s\n' "$entries" | awk '
   function ok_author(e) { return e == "build@amemb.com" || e == "231940135+i2cjak@users.noreply.github.com" || e == "206324213+jlcjak@users.noreply.github.com" || e == "kpatsatzakis1@gmail.com" }
   function ok_committer(e) { return ok_author(e) || e == "noreply@github.com" }
+  NF == 0 { next }  # an empty range (a push of a tag on a commit already on the remote) is one empty line
   !ok_author($2) || !ok_committer($3) { print "  " $1 " author=" $2 " committer=" $3 }')
 [ -z "$bad" ] && exit 0
 echo "refused: unapproved author or committer address:" >&2
