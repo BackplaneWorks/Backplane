@@ -41,6 +41,7 @@ pub fn lean_keeps(k: &str) -> bool {
     if ["settle.idle.minutes", "settle.personal.minutes", "settle.done", "restart.continue", "thread.env", "agent.provider", "agent.model", "telemetry.share", "telemetry.usage.asked", "telemetry.asked", "telemetry.usage.generation", "telemetry.choice.revision", "telemetry.reset", "telemetry.notice", "onboard.usage", "update.channel", "text.provider", "text.model", "kicad.path", "freecad.path", "kicad.ipc", "viewer.board3d", "plan.routing", "fallback.chain", "fallback.on", "fallback.add.provider", "fallback.add.model", "recall.bots"].contains(&k) || ["push.webhook.", "notify.", "tz.rule."].iter().any(|p| k.starts_with(p)) { return true }
     // Settings, Voice (voice/page.rs, drawn by present/settings.rs from this copy): the engine, the model and the microphone, and the dictionary's
     // entries and learned fixes (a short line each, a removed one is gone, `blank_gone`). Without them every choice there looked unchosen (matrix S09).
+    if k.starts_with("mouse.") { return true }
     if ["voice.engine", "voice.model", "voice.device"].contains(&k) || k.starts_with("voice.e.") || k.starts_with("voice.l.") { return true }
     // Settings, Rules and task board: the person's standing rules and the task board's items (a few, each at most a few KB; a removed one is gone, `blank_gone`)
     if k.starts_with("rule.") || k.starts_with("board.") { return true }

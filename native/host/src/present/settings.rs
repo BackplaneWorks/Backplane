@@ -12,7 +12,7 @@ pub fn set_version(v: &str) { let _ = VERSION.set(v.to_string()); }
 pub fn version() -> &'static str { VERSION.get().map(String::as_str).unwrap_or("") }
 
 /// The ported pages in the order the desktop menu lists them (Settings.menu.pages): page id and title.
-pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("git", "Projects and git"), ("notifications", "Notifications"), ("agents", "Agents"), ("mcp", "MCP servers"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("machines", "Machines"), ("voice", "Voice"), ("ring", "Ring"), ("keys", "API keys"), ("timezone", "Time zone"), ("rules", "Rules and task board"), ("usage", "Usage"), ("setup", "Setup"), ("import", "Import from 0.14"), ("about", "About"), ("privacy", "Privacy"), ("developer", "Developer")];
+pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("git", "Projects and git"), ("notifications", "Notifications"), ("agents", "Agents"), ("mcp", "MCP servers"), ("writing", "Writing"), ("cad", "CAD"), ("mouse", "Mouse and trackpad"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("machines", "Machines"), ("voice", "Voice"), ("ring", "Ring"), ("keys", "API keys"), ("timezone", "Time zone"), ("rules", "Rules and task board"), ("usage", "Usage"), ("setup", "Setup"), ("import", "Import from 0.14"), ("about", "About"), ("privacy", "Privacy"), ("developer", "Developer")];
 
 pub struct Out { pub patch: Value, pub cmds: Vec<Value> }
 
@@ -517,6 +517,31 @@ fn privacy(st: &State, info: &Value) -> Vec<Value> {
         btn("Privacy", "open-url", "https://backplane.works/privacy", false), btn("Report an issue", "open-url", &bug_url(info), false)])]
 }
 
+/// Settings > Mouse and trackpad: the bindings of the built-in viewers (mouse.rs), a section for the flat views and one for the 3D views.
+/// Every button is the generic `setting key=value`, carrying the whole text its press makes.
+fn mouse(st: &State) -> Vec<Value> {
+    use crate::mouse::{self as m, Kind, Scheme};
+    let mut v = vec![row("Zoom direction", "Applies to the wheel and a trackpad's pinch in every viewer.", vec![btn("normal", "setting", &format!("{}=off", m::INVERT_KEY), !m::inverted(set(st, m::INVERT_KEY, ""))), btn("inverted", "setting", &format!("{}=on", m::INVERT_KEY), m::inverted(set(st, m::INVERT_KEY, "")))])];
+    for (kind, title) in [(Kind::Plot, "Board and schematic"), (Kind::Solid, "3D and STEP")] {
+        let text = set(st, kind.key(), "");
+        let s = Scheme::parse(kind, text);
+        let key = kind.key();
+        let custom = s.custom(kind);
+        v.push(row(title, if custom { "Changed from its preset. Each input does one thing: choosing an action for an input replaces what it did." } else { "A preset sets every input below. Each input does one thing: choosing an action for an input replaces what it did." },
+            vec![btn("KiCad", "setting", &format!("{key}=kicad"), !custom && s.base == m::Preset::Kicad), btn("Legacy", "setting", &format!("{key}=legacy"), !custom && s.base == m::Preset::Legacy)]));
+        for (input, cur, acts) in m::rows(kind, text) {
+            let label = match input { "left" => "Left drag", "middle" => "Middle drag", "right" => "Right drag", "shift-left" => "Shift + left drag", "ctrl-left" => "Ctrl + left drag", "alt-left" => "Alt + left drag", "wheel" => "Wheel", "shift-wheel" => "Shift + wheel", "ctrl-wheel" => "Ctrl + wheel", _ => "Alt + wheel" };
+            v.push(row(label, "", acts.iter().map(|(a, t)| btn(a.label(), "setting", &format!("{key}={t}"), *a == cur)).collect()));
+        }
+        let edit = |k: &str, val: &str| format!("{key}={}", Scheme::edited(kind, text, k, val));
+        v.push(row("Select", "A click, without moving, with no key held.", ["left", "middle", "right", "none"].iter().map(|b| btn(match *b { "left" => "left button", "middle" => "middle button", "right" => "right button", _ => "nothing" }, "setting", &edit("select", b), s.select.map_or("none", |x| match x { m::Button::Left => "left", m::Button::Middle => "middle", m::Button::Right => "right" }) == *b)).collect()));
+        v.push(row("Two-finger scroll", "A trackpad's two fingers. With Ctrl held it is the pinch, which zooms.", vec![btn("pans", "setting", &edit("scroll", "pan"), s.scroll_pans), btn("is the wheel", "setting", &edit("scroll", "wheel"), !s.scroll_pans)]));
+        v.push(row("Pinch", "A trackpad pinch.", vec![btn("zooms", "setting", &edit("pinch", "zoom"), s.pinch), btn("off", "setting", &edit("pinch", "off"), !s.pinch)]));
+        for a in s.unreachable(kind) { v.push(row(&format!("Nothing is set to {}", a.label()), "Choose an input for it above.", vec![])); }
+    }
+    v
+}
+
 /// Settings > Writing (TextGen): the small model that titles threads, names branches and writes commit messages: `text.provider` (claude, codex, grok or muse) and `text.model` ("" is the provider's light model).
 fn writing(st: &State, info: &Value) -> Vec<Value> {
     const TEXT: &[&str] = &["claude", "codex", "grok", "muse"];
@@ -769,7 +794,7 @@ fn mcp_patch(p: serde_json::Map<String, Value>) -> Value {
 
 /// One page's rows (without the way back).
 fn rows_of(st: &State, session: &Value, info: &Value, p: &str) -> Vec<Value> {
-    match p { "appearance" => appearance(st), "threads" => threads(st, session), "git" => git(st), "notifications" => notifications(st, session, info), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(st, session, info), "machines" => { let mut r = crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string());
+    match p { "appearance" => appearance(st), "threads" => threads(st, session), "git" => git(st), "notifications" => notifications(st, session, info), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "mouse" => mouse(st), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(st, session, info), "machines" => { let mut r = crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string());
             r.extend(crate::net::homemove::rows(!set(st, "uber.bot", "").is_empty(), set(st, "home.at", ""), info["home.move"].as_str().unwrap_or(""), &info["machines"]["linked"]));
             r.extend(crate::net::alwayson::rows::machines_rows(info, set(st, crate::net::alwayson::other::STAYS_ON, "") == "on"));
             r.extend(super::signin_there::open_rows(info)); r }, "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "ring" => ring(st, session, info), "usage" => usage(st), "developer" => developer(st), "mcp" => mcp(session, info), _ => vec![] }
@@ -1004,7 +1029,7 @@ mod tests {
 
     #[test] fn the_menu_lists_the_ported_pages_each_a_settings_page_button() {
         let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {}}), &json!({}));
-        assert_eq!(labels(&v), ["Appearance", "Threads", "Projects and git", "Notifications", "Agents", "MCP servers", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Machines", "Voice", "Ring", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "Import from 0.14", "About", "Privacy", "Developer"]);
+        assert_eq!(labels(&v), ["Appearance", "Threads", "Projects and git", "Notifications", "Agents", "MCP servers", "Writing", "CAD", "Mouse and trackpad", "Ordering", "Network and updates", "Devices", "Machines", "Voice", "Ring", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "Import from 0.14", "About", "Privacy", "Developer"]);
         assert_eq!(v["rows"][1]["buttons"][0]["action"], "settings-page"); assert_eq!(v["rows"][1]["buttons"][0]["value"], "threads");
     }
     #[test] fn projects_and_git_offers_auto_push_off_by_default() {
@@ -1144,6 +1169,24 @@ mod tests {
     }
     fn pg_rows(page: &str, kv: &[(&str, &str)], drafts: Value, info: Value) -> Vec<Value> {
         let v = view(&st(kv), &json!({"open": {"settings": true}, "drafts": {"@settings.page": page, "x": drafts}}), &info); v["rows"].as_array().unwrap().clone()
+    }
+    #[test] fn the_mouse_page_round_trips_through_the_setting_and_the_picture() {
+        // a press is the generic `setting key=value` carrying the whole text; the stored text comes back as the lit button and in the picture's `mouse`
+        let r = pg_rows("mouse", &[], json!({}), json!({}));
+        let b = r.iter().flat_map(|x| x["buttons"].as_array().cloned().unwrap_or_default()).find(|b| b["value"] == "mouse.2d=kicad;middle=zoom").expect("a button sets the middle drag to zoom");
+        assert_eq!(b["action"], "setting"); assert_eq!(b["on"], false);
+        let o = act("h", &json!({"rid": 5}), "setting", b["value"].as_str().unwrap()).unwrap();
+        assert_eq!(o.cmds[0]["text"], json!(r#"{"id":5,"m":"setting.set","p":{"key":"mouse.2d","value":"kicad;middle=zoom"}}"#));
+        let r = pg_rows("mouse", &[("mouse.2d", "kicad;middle=zoom")], json!({}), json!({}));
+        let lit: Vec<String> = r.iter().flat_map(|x| x["buttons"].as_array().cloned().unwrap_or_default()).filter(|b| b["on"] == true && b["value"].as_str().unwrap_or("").starts_with("mouse.2d=")).map(|b| b["label"].as_str().unwrap().to_string()).collect();
+        assert!(lit.contains(&"zoom".to_string()), "{lit:?}");
+        assert!(!r.iter().flat_map(|x| x["buttons"].as_array().cloned().unwrap_or_default()).any(|b| b["label"] == "KiCad" && b["value"] == "mouse.2d=kicad" && b["on"] == true), "a changed scheme lights no preset");
+        // Legacy is one press away, for either kind, and the preset buttons light for the stored preset
+        let r = pg_rows("mouse", &[("mouse.3d", "legacy")], json!({}), json!({}));
+        assert!(r.iter().flat_map(|x| x["buttons"].as_array().cloned().unwrap_or_default()).any(|b| b["value"] == "mouse.3d=legacy" && b["on"] == true));
+        // a scheme with nothing for zoom says so
+        let r = pg_rows("mouse", &[("mouse.2d", "kicad;wheel=none;pinch=off")], json!({}), json!({}));
+        assert!(r.iter().any(|x| x["label"] == "Nothing is set to zoom"));
     }
     #[test] fn writing_offers_its_providers_and_the_providers_models() {
         let info = json!({"models": r#"{"claude":["haiku","sonnet"],"codex":["gpt-6"]}"#});

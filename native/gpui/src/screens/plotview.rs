@@ -4,10 +4,11 @@
 use super::plot::{Chunk, Frame, View};
 use crate::{hub::Command, theme, Backplane};
 use gpui::{prelude::*, *};
+use crate::mouse::{Action, Scroll};
 
 #[derive(Default)]
 pub struct PlotView {
-    pub view: Option<View>, pub fitted: f32, pub key: String, pub drag: Option<(f32, f32)>,
+    pub view: Option<View>, pub fitted: f32, pub key: String, pub drag: Option<(f32, f32)>, /** what the drag now held does (the table's), and the button that holds it */ pub drag_act: Option<Action>, pub drag_btn: Option<MouseButton>,
     /// The canvas size the camera was fitted to, and whether the person has moved it since: an untouched camera is fitted again when the canvas turns out bigger or smaller than first assumed.
     pub fit_wh: (f32, f32), pub touched: bool,
     /// The canvas's last painted bounds (window pixels), for the pointer.
@@ -350,7 +351,7 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
     // the hub's masks decide which chunks are drawn, dimmed, and which one is painted last
     let order = crate::viewers::layers::plan(&chunks.iter().map(|c| c.layer).collect::<Vec<_>>(), &masks);
     let this = cx.entity();
-    let (key, off) = (frame.key.clone(), masks.off);
+    let (key, off) = (frame.key.clone(), masks.off); let (key2, key3) = (key.clone(), key.clone());
     // a probe: the rest dims towards the canvas's ground, and what it lights gets an edge in the text's colour (light on the dark ground, dark on the light)
     let (dim, edge): (Hsla, Hsla) = ({ let mut d = c("view"); d.a = PROBE_DIM; d.into() }, { let mut e = c("text"); e.a = 0.77; e.into() });
     let el = canvas(|b, _, _| b, move |_, b, window, cx| {
@@ -421,40 +422,77 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
             };
             if let Some(nv) = nv { pv.touched = true; pv.view = Some(nv); super::follow::person_input(this, slot); cx.notify(); }
         })))
-        .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, window, cx| { if let Some(f) = this.screens.pv(slot).focus.clone() { window.focus(&f); } let at = (f32::from(e.position.x), f32::from(e.position.y)); let pv = this.screens.pv(slot); pv.drag = Some(at); pv.down = Some(at); super::follow::person_input(this, slot); cx.notify(); }))
+        .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, window, cx| { plot_down(this, slot, e, window, cx) }))
+        .on_mouse_down(crate::mousecfg::BUTTONS[1], cx.listener(move |this, e: &MouseDownEvent, window, cx| { plot_down(this, slot, e, window, cx) }))
+        .on_mouse_down(crate::mousecfg::BUTTONS[2], cx.listener(move |this, e: &MouseDownEvent, window, cx| { plot_down(this, slot, e, window, cx) }))
         .on_mouse_move(cx.listener(move |this, e: &MouseMoveEvent, _, cx| {
             let pv = this.screens.pv(slot);
-            if let (Some((x, y)), Some(v), true) = (pv.drag, pv.view, e.dragging()) { let (nx, ny) = (f32::from(e.position.x), f32::from(e.position.y)); pv.touched = true; pv.view = Some(v.pan(nx - x, ny - y)); pv.drag = Some((nx, ny)); super::follow::person_input(this, slot); cx.notify(); }
+            if let (Some((x, y)), Some(v), Some(act), Some(b), true) = (pv.drag, pv.view, pv.drag_act, pv.bounds, e.dragging()) {
+                let (nx, ny) = (f32::from(e.position.x), f32::from(e.position.y));
+                let moved = match act {
+                    Action::Pan => { pv.view = Some(v.pan(nx - x, ny - y)); true }
+                    Action::Zoom => { pv.view = Some(v.zoom(crate::mousecfg::drag_zoom_factor(ny - y, crate::mousecfg::invert()), f32::from(px(x) - b.origin.x), f32::from(px(y) - b.origin.y), f32::from(b.size.width), f32::from(b.size.height), pv.fitted)); true }
+                    _ => false,
+                };
+                pv.drag = Some((nx, ny)); if moved { person_moved(this, slot); } cx.notify();
+            }
         }))
-        .on_mouse_up(MouseButton::Left, cx.listener(move |this, e: &MouseUpEvent, _, cx| {
-            // a press and release within 4 px is a tap: inspect what lies under it (View.pick: the finger's reach is 14 px)
-            let up = (f32::from(e.position.x), f32::from(e.position.y));
-            // a double-click fits the plot again
-            if e.click_count >= 2 { let pv = this.screens.pv(slot); pv.down = None; pv.drag = None; pv.view = None; cx.notify(); return }
-            let (tap, view, bounds) = { let pv = this.screens.pv(slot); pv.drag = None; (pv.down.take().filter(|d| (d.0 - up.0).abs() < 4. && (d.1 - up.1).abs() < 4.), pv.view, pv.bounds) };
-            if tap.is_some() { tap_at(this, slot, &key, off, up, view, bounds); }
-            cx.notify(); }))
-        .on_mouse_up_out(MouseButton::Left, cx.listener(move |this, _, _, cx| { this.screens.pv(slot).drag = None; cx.notify(); }))
+        .on_mouse_up(MouseButton::Left, cx.listener(move |this, e: &MouseUpEvent, _, cx| { plot_up(this, slot, &key, off, e, cx) }))
+        .on_mouse_up(crate::mousecfg::BUTTONS[1], cx.listener({ let key = key2; move |this, e: &MouseUpEvent, _, cx| { plot_up(this, slot, &key, off, e, cx) } }))
+        .on_mouse_up(crate::mousecfg::BUTTONS[2], cx.listener({ let key = key3; move |this, e: &MouseUpEvent, _, cx| { plot_up(this, slot, &key, off, e, cx) } }))
+        .on_mouse_up_out(MouseButton::Left, cx.listener(move |this, _, _, cx| { let pv = this.screens.pv(slot); pv.drag = None; pv.drag_act = None; cx.notify(); }))
+        .on_mouse_up_out(crate::mousecfg::BUTTONS[1], cx.listener(move |this, _, _, cx| { let pv = this.screens.pv(slot); pv.drag = None; pv.drag_act = None; cx.notify(); }))
+        .on_mouse_up_out(crate::mousecfg::BUTTONS[2], cx.listener(move |this, _, _, cx| { let pv = this.screens.pv(slot); pv.drag = None; pv.drag_act = None; cx.notify(); }))
         .on_scroll_wheel(cx.listener(move |this, e: &ScrollWheelEvent, _, cx| {
             let pv = this.screens.pv(slot);
             let (Some(v), Some(b)) = (pv.view, pv.bounds) else { return };
-            // wheelKind (src/web/): a touchpad's two-finger scroll (pixel deltas) moves the plot, a mouse wheel (lines) and a pinch (ctrl + wheel) zoom
-            let pad = matches!(e.delta, ScrollDelta::Pixels(_)) && !e.modifiers.control;
-            if pad { let d = e.delta.pixel_delta(px(16.)); pv.view = Some(v.pan(-f32::from(d.x), -f32::from(d.y))); super::follow::person_input(this, slot); cx.notify(); return }
-            let d = f32::from(e.delta.pixel_delta(px(16.)).y);
-            let factor = (1.0 + d * 0.0015).clamp(0.5, 2.0); pv.touched = true;
-            pv.view = Some(v.zoom(factor, f32::from(e.position.x - b.origin.x), f32::from(e.position.y - b.origin.y), f32::from(b.size.width), f32::from(b.size.height), pv.fitted));
-            super::follow::person_input(this, slot); cx.notify();
+            // what a wheel or two-finger scroll means is the table's (mouse.rs): a mouse's lines and a trackpad's pixels are told apart there
+            let (lines, x, y) = crate::mousecfg::delta(&e.delta);
+            match crate::mousecfg::plot().scroll(crate::mousecfg::mods(&e.modifiers), lines, x, y, crate::mousecfg::invert()) {
+                Scroll::Pan { dx, dy } => { pv.view = Some(v.pan(dx, dy)); person_moved(this, slot); cx.notify(); }
+                Scroll::Zoom { lines, y, .. } => {
+                    let d = if lines { y * 16. } else { y };
+                    let factor = (1.0 + d * 0.0015).clamp(0.5, 2.0);
+                    pv.view = Some(v.zoom(factor, f32::from(e.position.x - b.origin.x), f32::from(e.position.y - b.origin.y), f32::from(b.size.width), f32::from(b.size.height), pv.fitted));
+                    person_moved(this, slot); cx.notify();
+                }
+                Scroll::None => {}
+            }
         }))
         // a trackpad pinch: macOS sends it as a magnify gesture (gpui's PinchEvent), never as a wheel, so it zooms here at the pointer
         .on_pinch(cx.listener(move |this, e: &PinchEvent, _, cx| {
             let pv = this.screens.pv(slot);
             let (Some(v), Some(b)) = (pv.view, pv.bounds) else { return };
-            let factor = crate::viewers::solid::pinch_zoom(e.delta); if factor == 1.0 { return }
-            pv.touched = true;
+            let factor = crate::mousecfg::plot().pinch_factor(crate::viewers::solid::pinch_zoom(e.delta), crate::mousecfg::invert()); if factor == 1.0 { return }
             pv.view = Some(v.zoom(factor, f32::from(e.position.x - b.origin.x), f32::from(e.position.y - b.origin.y), f32::from(b.size.width), f32::from(b.size.height), pv.fitted));
-            super::follow::person_input(this, slot); cx.notify();
+            person_moved(this, slot); cx.notify();
         })).into_any_element()
+}
+
+/// The person moved or zoomed the view: the one place every plot input ends, so a camera that follows something lets go here (follow pauses).
+fn person_moved(app: &mut Backplane, slot: usize) { app.screens.pv(slot).touched = true; super::follow::person_input(app, slot); }
+
+/// A button went down on the plot: the table says whether it drags (and what the drag does) and whether a click of it selects.
+fn plot_down(this: &mut Backplane, slot: usize, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Backplane>) {
+    if let Some(f) = this.screens.pv(slot).focus.clone() { window.focus(&f); }
+    let Some(b) = crate::mousecfg::button(e.button) else { return };
+    let (scheme, m) = (crate::mousecfg::plot(), crate::mousecfg::mods(&e.modifiers));
+    let at = (f32::from(e.position.x), f32::from(e.position.y));
+    let pv = this.screens.pv(slot);
+    let act = scheme.drag(b, m);
+    pv.drag = Some(at); pv.drag_act = Some(act); pv.drag_btn = Some(e.button);
+    pv.down = scheme.selects(b, m).then_some(at);
+    super::follow::person_input(this, slot); cx.notify();
+}
+/// A button came up: a press and release within 4 px of a selecting button is a tap, a double-click of it fits the plot again.
+fn plot_up(this: &mut Backplane, slot: usize, key: &str, off: u32, e: &MouseUpEvent, cx: &mut Context<Backplane>) {
+    if this.screens.pv(slot).drag_btn != Some(e.button) { return }
+    let up = (f32::from(e.position.x), f32::from(e.position.y));
+    let selecting = crate::mousecfg::plot().selects(crate::mousecfg::button(e.button).unwrap_or(crate::mouse::Button::Left), crate::mouse::Mods::NONE);
+    if selecting && e.click_count >= 2 { let pv = this.screens.pv(slot); pv.down = None; pv.drag = None; pv.drag_act = None; pv.view = None; cx.notify(); return }
+    let (tap, view, bounds) = { let pv = this.screens.pv(slot); pv.drag = None; pv.drag_act = None; pv.drag_btn = None; (pv.down.take().filter(|d| (d.0 - up.0).abs() < 4. && (d.1 - up.1).abs() < 4.), pv.view, pv.bounds) };
+    if tap.is_some() { tap_at(this, slot, key, off, up, view, bounds); }
+    cx.notify();
 }
 
 /// Whether an untouched camera must be fitted again: the canvas is not the size it was fitted to (the first paint's size was a guess).
