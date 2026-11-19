@@ -2163,7 +2163,7 @@ impl mailroom::Mailroom for ChatRoom {
 #[tokio::test(flavor = "multi_thread")] async fn a_dictated_message_reaches_the_agent_marked_as_spoken_and_a_typed_one_does_not() {
     let sd = dir("vm-bin"); let log = sd.join("in.log");
     // the stand-in writes each line it is handed, as the agent got it
-    let body = STANDIN.replacen("\n", &format!("\nexport FAKE_PER=1 FAKE_CYCLE=1 FAKE_SECS=1 FAKE_LOG={}\n", log.display()), 1).replacen("    *'\"type\":\"user\"'*)\n", "    *'\"type\":\"user\"'*)\n      printf 'IN %s\\n' \"$line\" >> \"$FAKE_LOG\"\n", 1);
+    let body = STANDIN.replacen("\n", &format!("\nexport FAKE_PER=1 FAKE_CYCLE=1 FAKE_SECS=1 FAKE_LOG={}\n", log.display().to_string().replace('\\', "/")), 1) /* sh reads a "\\" as an escape: the path with "/" (Windows) */.replacen("    *'\"type\":\"user\"'*)\n", "    *'\"type\":\"user\"'*)\n      printf 'IN %s\\n' \"$line\" >> \"$FAKE_LOG\"\n", 1);
     script(&sd, "claude", &body);
     let (hub, ag, _h, _w) = start("vm", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await;
     let t0 = std::time::Instant::now();

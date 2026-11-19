@@ -1242,6 +1242,11 @@ def strip(m):
 
 
 def main(argv=None):
+    # the report has "≥", "×" and "°": on Windows a piped stdout is the locale's code page (cp1252), which cannot write them, and print crashed
+    for st in (sys.stdout, sys.stderr):
+        try:
+            if (st.encoding or "").lower().replace("-", "") != "utf8": st.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError): pass
     ap = argparse.ArgumentParser(prog="scs.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     f = sub.add_parser("fetch")

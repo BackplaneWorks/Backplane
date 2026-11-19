@@ -263,9 +263,10 @@ mod tests {
         assert!(USERCUSTOMIZE.contains("sys.pycache_prefix = _p") && USERCUSTOMIZE.contains("site.addsitedir"));
         // a real Python, isolated as FreeCAD starts its own (-I ignores PYTHON*), still takes the prefix through the user base: -E -s are
         // FreeCAD's flags but for the user site, which FreeCAD keeps on, so run with -E alone
-        if let Ok(o) = std::process::Command::new("python3").args(["-E", "-c", "import sys; print(sys.pycache_prefix)"]).env("PYTHONUSERBASE", &*d).env("PYTHONPYCACHEPREFIX", "/x/pyc").output() {
+        // (a Unix Python's layout, lib/python3.N: the hub sets the user base on macOS only; Windows' Python reads Python3NN\site-packages)
+        if cfg!(unix) { if let Ok(o) = std::process::Command::new("python3").args(["-E", "-c", "import sys; print(sys.pycache_prefix)"]).env("PYTHONUSERBASE", &*d).env("PYTHONPYCACHEPREFIX", "/x/pyc").output() {
             if o.status.success() { assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "/x/pyc", "{}", String::from_utf8_lossy(&o.stderr)); }
-        }
+        } }
         let _ = std::fs::remove_dir_all(&*d);
     }
 
