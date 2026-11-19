@@ -1,0 +1,236 @@
+{
+ "projects": [
+  {
+   "id": "p1",
+   "title": "feather",
+   "folder": "feather",
+   "threads": [
+    {
+     "id": "t1",
+     "title": "Move mounting hole H4"
+    },
+    {
+     "id": "t2",
+     "title": "Export the Gerbers"
+    }
+   ]
+  },
+  {
+   "id": "p2",
+   "title": "sensor-node",
+   "folder": "sensor-node",
+   "threads": [
+    {
+     "id": "t3",
+     "title": "Add the 3.3 V regulator sheet"
+    }
+   ]
+  }
+ ],
+ "chat": [
+  {
+   "say": "Move mounting hole H4",
+   "run": "edit:",
+   "reply": "Moved **H4** 2.54 mm to the right and saved the board.\n\nBackplane took a snapshot before this turn. If the move isn't what you wanted, restore it from the row above."
+  },
+  {
+   "say": "export the Gerbers",
+   "run": "",
+   "reply": "From the project folder:\n\n```sh\nkicad-cli pcb export gerbers -o mfg/ RoyalBlue54L-Feather.kicad_pcb\n```\n\nThen the drill files:\n\n```sh\nkicad-cli pcb export drill -o mfg/ RoyalBlue54L-Feather.kicad_pcb\n```"
+  },
+  {
+   "say": "3.3 V regulator sheet",
+   "run": {
+    "name": "altium_write",
+    "arguments": {
+     "pcblib": {
+      "path": "lib/Power.PcbLib",
+      "footprints": [
+       {
+        "package": "sot23",
+        "pins": 5
+       },
+       {
+        "package": "chip",
+        "size": "0603",
+        "kind": "capacitor"
+       },
+       {
+        "package": "header",
+        "rows": 1,
+        "pins": 2
+       }
+      ]
+     },
+     "schlib": {
+      "path": "lib/Power.SchLib",
+      "symbols": [
+       {
+        "name": "LDO_3V3",
+        "description": "500 mA LDO, 3.3 V",
+        "designator": "U?",
+        "footprint": "SOT95P280X145-5N",
+        "pins": [
+         {
+          "number": 1,
+          "name": "IN",
+          "side": "left",
+          "type": "power"
+         },
+         {
+          "number": 3,
+          "name": "EN",
+          "side": "left",
+          "type": "input"
+         },
+         {
+          "number": 5,
+          "name": "OUT",
+          "side": "right",
+          "type": "power"
+         },
+         {
+          "number": 4,
+          "name": "NC",
+          "side": "right"
+         },
+         {
+          "number": 2,
+          "name": "GND",
+          "side": "bottom",
+          "type": "power"
+         }
+        ]
+       },
+       {
+        "name": "C_1u",
+        "description": "1 uF, 10 V, X7R",
+        "designator": "C?",
+        "template": "capacitor"
+       },
+       {
+        "name": "CONN_2",
+        "description": "Battery connector",
+        "designator": "J?",
+        "pins": [
+         {
+          "number": 1,
+          "name": "VBAT",
+          "side": "right",
+          "type": "passive"
+         },
+         {
+          "number": 2,
+          "name": "GND",
+          "side": "right",
+          "type": "passive"
+         }
+        ]
+       }
+      ]
+     },
+     "schdoc": {
+      "path": "Power.SchDoc",
+      "size": "A4",
+      "place": [
+       {
+        "symbol": "CONN_2",
+        "library": "lib/Power.SchLib",
+        "designator": "J1",
+        "at": [
+         2500,
+         4500
+        ]
+       },
+       {
+        "symbol": "C_1u",
+        "library": "lib/Power.SchLib",
+        "designator": "C1",
+        "at": [
+         4200,
+         4300
+        ],
+        "rotation": 90
+       },
+       {
+        "symbol": "LDO_3V3",
+        "library": "lib/Power.SchLib",
+        "designator": "U1",
+        "at": [
+         5500,
+         4500
+        ]
+       },
+       {
+        "symbol": "C_1u",
+        "library": "lib/Power.SchLib",
+        "designator": "C2",
+        "at": [
+         7600,
+         4300
+        ],
+        "rotation": 90
+       }
+      ],
+      "connect": [
+       {
+        "pin": "J1.VBAT",
+        "net": "VBAT",
+        "power": "bar"
+       },
+       {
+        "pin": "J1.GND",
+        "net": "GND"
+       },
+       {
+        "pin": "C1.1",
+        "net": "VBAT",
+        "power": "bar"
+       },
+       {
+        "pin": "C1.2",
+        "net": "GND"
+       },
+       {
+        "pin": "U1.IN",
+        "net": "VBAT",
+        "power": "bar"
+       },
+       {
+        "pin": "U1.EN",
+        "net": "VBAT"
+       },
+       {
+        "pin": "U1.GND",
+        "net": "GND"
+       },
+       {
+        "pin": "U1.OUT",
+        "net": "3V3",
+        "power": "bar"
+       },
+       {
+        "pin": "U1.4",
+        "net": "NC"
+       },
+       {
+        "pin": "C2.1",
+        "net": "3V3",
+        "power": "bar"
+       },
+       {
+        "pin": "C2.2",
+        "net": "GND"
+       }
+      ]
+     },
+     "project": "SensorNode.PrjPcb"
+    }
+   },
+   "reply": "Added **Power.SchDoc** to the project: a 3.3 V LDO (U1) fed from the battery connector (J1), with 1 µF on its input and output (C1, C2).\n\nThe symbols and footprints are in `lib/Power.SchLib` and `lib/Power.PcbLib`. It's open on the Schematic tab.",
+   "locks": [
+    "kicad-Power-sch-HASH"
+   ]
+  }
+ ]
+}

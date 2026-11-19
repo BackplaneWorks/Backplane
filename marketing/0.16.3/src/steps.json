@@ -1,0 +1,8 @@
+[{"wait":7000},
+ {"action":["select","t3"]},{"wait":2500},{"type":"Add the 3.3 V regulator sheet: an LDO from the battery connector, 1 µF in and out."},{"send":true},{"wait":12000},
+ {"view":"schematic"},{"wait":8000},{"zoom":[50,0.44,0.43]},{"wait":4000},{"mark":"altium"},{"wait":1500},
+ {"action":["select","t2"]},{"wait":3000},{"type":"How do I export the Gerbers and drill files from a shell?"},{"send":true},{"wait":9000},{"mark":"copy"},{"wait":1500},
+ {"keys":"ctrl-j"},{"wait":3000},{"keys":"g i t space s t a t u s space - - s h o r t enter"},{"wait":1500},{"keys":"g i t space l o g space - - o n e l i n e space - 3 enter"},{"wait":2500},{"mark":"terminal"},{"wait":1500},{"keys":"ctrl-j"},{"wait":1500},
+ {"action":["select","t1"]},{"wait":3000},{"type":"Move mounting hole H4 2.54 mm to the right."},{"send":true},{"wait":14000},{"mark":"snapshot"},{"wait":1500},
+ {"type":"/restore"},{"send":true},{"wait":8000},{"mark":"restore"},{"wait":1500},
+ {"view":"board"},{"wait":9000},{"mark":"board"},{"wait":1500},{"click":"ui:Edit","within":8000},{"wait":45000},{"mark":"kicad"},{"wait":3000}]

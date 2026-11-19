@@ -1,0 +1,112 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Backplane 0.16.3</title>
+<!--
+  The X graphics for Backplane 0.16.3, after docs/STYLE_GUIDE.md. Pages: #1..#5 (1080 squares), #wide (1600x900), #banner (1500x500).
+  render.sh writes the PNGs. Every claim is from docs/releases/v0.16.3.md (the release's notes):
+    1  "On a Mac, KiCad opens in the pane, as it does on Linux and Windows" (Backplane KiCad bp.13.1)
+    2  "Altium projects are recognised (.PrjPcb). Their boards and schematics open in Backplane's viewers without Altium"
+    3  "Every project is a git repository, and Backplane takes a snapshot before each turn. You can restore a project to any of those snapshots"
+    4  "A copy button wherever text is meant to be copied ... Commands also get Run in terminal"
+    5  "Every chat has its own terminal ... Ctrl+J and the Terminal button open that chat's shell"
+  Every picture is the released 0.16.3 build (linux-x64) on a private headless display with demo projects and a stand-in agent
+  (capture.sh, demo.json, steps.json; crops in make_assets.sh). Nothing is drawn by hand; nothing is retouched.
+-->
+<link rel="stylesheet" href="brand-type.css">
+<style>
+:root { --bg:#0d0f12; --panel:#13161b; --raise:#1a1e25; --rule:#353c49; --line:#262b34; --text:#d9dde4; --dim:#8a93a3; --faint:#5c6473; --accent:#5fb3ff; }
+* { box-sizing:border-box; }
+html, body { margin:0; background:var(--bg); color:var(--text); font-family:var(--brand-type); font-weight:400; -webkit-font-smoothing:antialiased; }
+.page { display:none; position:relative; overflow:hidden; background:var(--bg); }
+.page.on { display:block; }
+.sq { width:1080px; height:1080px; padding:58px 64px 0; }
+.logo { display:flex; align-items:center; gap:14px; height:48px; }
+.logo img { width:46px; height:46px; }
+.logo b { font-size:30px; font-weight:700; }
+.logo .with { font-size:18px; color:var(--dim); margin-left:8px; }
+.logo .n { margin-left:auto; font-size:18px; color:var(--faint); }
+h1 { margin:30px 0 0; font-size:52px; line-height:1.14; font-weight:700; letter-spacing:-0.5px; }
+h1 em { font-style:normal; color:var(--accent); }
+.one { margin-top:14px; font-size:30px; color:var(--dim); }
+.one em { font-style:normal; color:var(--accent); }
+.tag { margin:34px 0 8px; font-size:17px; color:var(--dim); }
+.pic { display:block; width:100%; border:1px solid var(--accent); border-radius:6px; box-shadow:0 20px 60px rgba(0,0,0,.55); }
+.foot { position:absolute; left:64px; right:64px; bottom:26px; font-size:13px; line-height:1.45; color:var(--faint); }
+/* 1600x900: the headline on one line, the whole window under it */
+.wide { width:1600px; height:900px; padding:54px 64px 0; }
+.wide h1 { margin-top:24px; font-size:50px; white-space:nowrap; }
+.wide .tag { margin-top:22px; }
+.wide .foot { bottom:20px; }
+/* 1500x500 header: X covers the lower left with the profile picture and trims the top and bottom on some screens */
+.banner.on { display:flex; }
+.banner { width:1500px; height:500px; padding:0 64px; align-items:center; gap:40px; }
+.banner .txt { width:440px; flex:none; margin-top:-90px; }
+.banner h1 { font-size:44px; margin-top:26px; white-space:nowrap; }
+.banner .picw { width:892px; flex:none; margin-top:-30px; }
+.banner .foot { left:auto; right:64px; bottom:34px; text-align:right; width:892px; font-size:12px; }
+</style>
+
+<div class="page sq" id="p1">
+  <div class="logo"><img src="mark.svg"><b>Backplane</b><span class="with">works with KiCad</span><span class="n">1/5</span></div>
+  <h1>Backplane <em>0.16.3</em><br>KiCad in the pane, Mac too</h1>
+  <div class="tag">Backplane KiCad bp.13.1</div>
+  <img class="pic" src="img/kicad.png">
+  <div class="foot">Backplane 0.16.3 on Linux, a demo project (the RoyalBlue54L Feather, CERN-OHL-P). KiCad is a trademark of The Linux Foundation; Backplane is not affiliated with or endorsed by the KiCad project.</div>
+</div>
+
+<div class="page sq" id="p2">
+  <div class="logo"><img src="mark.svg"><b>Backplane</b><span class="n">2/5</span></div>
+  <h1>Now opens <em>Altium</em> projects</h1>
+  <div class="one">no Altium needed to <em>view</em></div>
+  <div class="tag">a .SchDoc in Backplane's viewer</div>
+  <img class="pic" src="img/altium.png">
+  <div class="foot">Backplane 0.16.3, a demo project: the sheet was written by Backplane's altium_write and is drawn by its own reader. Altium and Altium Designer are trademarks of Altium LLC; Backplane is not affiliated with or endorsed by Altium.</div>
+</div>
+
+<div class="page sq" id="p3">
+  <div class="logo"><img src="mark.svg"><b>Backplane</b><span class="n">3/5</span></div>
+  <h1>A <em>snapshot</em> before every turn</h1>
+  <div class="one">every project is a git repository</div>
+  <div class="tag">/restore</div>
+  <img class="pic" src="img/restore.png">
+  <div class="foot">Backplane 0.16.3, a demo project and a stand-in agent: a turn moves a part, /restore puts the project back.</div>
+</div>
+
+<div class="page sq" id="p4">
+  <div class="logo"><img src="mark.svg"><b>Backplane</b><span class="n">4/5</span></div>
+  <h1>Copy it, or <em>run it</em></h1>
+  <div class="one">a copy button wherever there's text</div>
+  <div class="tag">Run in terminal</div>
+  <img class="pic" src="img/copy.png">
+  <div class="foot">Backplane 0.16.3, a demo project and a stand-in agent. KiCad is a trademark of The Linux Foundation; Backplane is not affiliated with or endorsed by the KiCad project.</div>
+</div>
+
+<div class="page sq" id="p5">
+  <div class="logo"><img src="mark.svg"><b>Backplane</b><span class="n">5/5</span></div>
+  <h1>Every chat gets its own <em>terminal</em></h1>
+  <div class="tag">Ctrl+J</div>
+  <img class="pic" src="img/terminal.png">
+  <div class="foot">Backplane 0.16.3, a demo project: the chat's shell opens in its project folder.</div>
+</div>
+
+<div class="page wide" id="pwide">
+  <div class="logo"><img src="mark.svg"><b>Backplane</b><span class="with">works with KiCad</span></div>
+  <h1>Backplane <em>0.16.3</em>: KiCad in the pane, Mac too</h1>
+  <div class="tag">Backplane KiCad bp.13.1</div>
+  <img class="pic" src="img/kicad-wide.png">
+  <div class="foot">Backplane 0.16.3 on Linux, a demo project (the RoyalBlue54L Feather, CERN-OHL-P). KiCad is a trademark of The Linux Foundation; Backplane is not affiliated with or endorsed by the KiCad project.</div>
+</div>
+
+<div class="page banner" id="pbanner">
+  <div class="txt">
+    <div class="logo"><img src="mark.svg"><b>Backplane</b></div>
+    <h1>PCB design,<br><em>by agent</em></h1>
+  </div>
+  <div class="picw"><img class="pic" src="img/kicad-wide.png"></div>
+  <div class="foot">KiCad is a trademark of The Linux Foundation; Backplane is not affiliated with or endorsed by the KiCad project.</div>
+</div>
+
+<script>
+const page = (location.hash || "#1").slice(1);
+document.getElementById("p" + page).classList.add("on");
+</script>
