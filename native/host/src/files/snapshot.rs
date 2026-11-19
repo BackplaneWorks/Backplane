@@ -444,6 +444,25 @@ mod tests {
         assert!(!s.made, "nothing changed since the first commit: {s:?}");
         let st = git::run_ro(&e.top, &["status", "--porcelain"]).await.out; assert_eq!(st, "", "the repository Backplane made is clean");
     }
+    /// Windows: braces in an argument crossed Git's sh as nothing (`HEAD^{tree}` was `HEAD^tree`), so a snapshot taken at once after another made a second commit and a restore
+    /// said "Needed a single revision". The same revisions, spelt with braces, must name the same objects on every platform.
+    #[tokio::test] async fn revisions_spelt_with_braces_reach_git_whole_and_a_restore_works_end_to_end() {
+        let d = crate::plat::tmp::dir("snap-braces"); let root = d.to_string_lossy().into_owned();
+        std::fs::write(d.join("a.kicad_sch"), "(kicad_sch)").unwrap();
+        let e = ensure_repo(&root, None, false).await.unwrap();
+        let head = git::run_ro(&e.top, &["rev-parse", "-q", "--verify", "HEAD"]).await.out.trim().to_string();
+        let tree = git::run_ro(&e.top, &["show", "-s", "--format=%T", "HEAD"]).await.out.trim().to_string();
+        assert_eq!((head.len(), tree.len()), (40, 40), "{head} {tree}");
+        for (a, want) in [("HEAD^{tree}".to_string(), &tree), (format!("{head}^{{tree}}"), &tree), ("HEAD^{commit}".to_string(), &head), (format!("{head}^{{commit}}"), &head)] {
+            assert_eq!(git::run_ro(&e.top, &["rev-parse", "--verify", &a]).await.out.trim(), want.as_str(), "{a}");
+        }
+        let s = snapshot(&e.top, "t1", &snap_ref("t1", 1), "x", false).await.unwrap(); assert!(!s.made, "nothing changed since the first commit: {s:?}");
+        std::fs::write(d.join("a.kicad_sch"), "(kicad_sch changed)").unwrap();
+        let s2 = snapshot(&e.top, "t1", &snap_ref("t1", 2), "x", false).await.unwrap(); assert!(s2.made, "{s2:?}");
+        std::fs::write(d.join("a.kicad_sch"), "(kicad_sch ruined)").unwrap();
+        restore(&e.top, "t1", &snap_ref("t1", 2), "t1 test", false).await.unwrap();
+        assert_eq!(std::fs::read_to_string(d.join("a.kicad_sch")).unwrap(), "(kicad_sch changed)", "restored to the snapshot");
+    }
     #[tokio::test] async fn a_huge_file_is_left_out_and_named() {
         let d = crate::plat::tmp::dir("snap-big"); let root = d.to_string_lossy().into_owned();
         std::fs::write(d.join("a.kicad_sch"), "(kicad_sch)").unwrap();

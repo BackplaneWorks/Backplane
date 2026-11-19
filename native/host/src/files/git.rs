@@ -55,18 +55,29 @@ pub async fn read_within(limit: std::time::Duration, cmd: &str, args: &[&str], c
     match tokio::time::timeout(limit, read(cmd, args, cwd, env)).await { Ok(r) => r, Err(_) => Ran { code: 124, out: format!("{cmd} did not finish within {} s", limit.as_secs_f32()) } }
 }
 async fn sh(script: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran {
-    let mut a = vec!["-c", script, "sh"]; a.extend(args);
+    let (script, args) = carry_braces(script, args); let mut a = vec!["-c", script.as_str(), "sh"]; a.extend(args.iter().map(String::as_str));
     proc("sh", &a, cwd, env).await
 }
 /// A listed read through `sh -c script`.
 pub async fn sh_ro(script: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran {
-    let mut a = vec!["-c", script, "sh"]; a.extend(args);
+    let (script, args) = carry_braces(script, args); let mut a = vec!["-c", script.as_str(), "sh"]; a.extend(args.iter().map(String::as_str));
     proc_ro("sh", &a, cwd, env).await
 }
 /// `sh_ro`, killed (the `sh`, which execs or waits on its git) when the future waiting for it is dropped.
 pub async fn sh_read(script: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran {
-    let mut a = vec!["-c", script, "sh"]; a.extend(args);
+    let (script, args) = carry_braces(script, args); let mut a = vec!["-c", script.as_str(), "sh"]; a.extend(args.iter().map(String::as_str));
     read("sh", &a, cwd, env).await
+}
+/// Windows: Git's sh (Cygwin's runtime) expands braces in the arguments a Windows program gives it, quoted or not, so `HEAD^{tree}` reached git as
+/// `HEAD^tree` (measured on windows-latest, Nov 19): restore, the snapshot's "nothing changed" test, `@{upstream}` and every `^{commit}` check failed.
+/// So a `{` or `}` goes in an argument as a word without one, and the script puts them back before it uses `"$@"`. Nowhere else: one argument
+/// that holds neither is untouched, and off Windows nothing changes. The words: `%` is `%0`, `{` is `%1`, `}` is `%2`, every argument of the call (so the three are told apart).
+/// What a script starts with so its `"$@"` are the arguments as given (see [`carry_braces`]).
+const UNBRACE: &str = "bp_l='{'; bp_r='}'; bp_n=$#; while [ $bp_n -gt 0 ]; do bp_a=$1; shift; bp_a=${bp_a//%1/$bp_l}; bp_a=${bp_a//%2/$bp_r}; bp_a=${bp_a//%0/%}; set -- \"$@\" \"$bp_a\"; bp_n=$((bp_n - 1)); done; unset bp_l bp_r bp_n bp_a\n";
+pub fn carry_braces(script: &str, args: &[&str]) -> (String, Vec<String>) { carry_braces_on(cfg!(windows), script, args) }
+pub fn carry_braces_on(windows: bool, script: &str, args: &[&str]) -> (String, Vec<String>) {
+    if !windows || !args.iter().any(|a| a.contains(['{', '}'])) { return (script.to_string(), args.iter().map(|a| a.to_string()).collect()) }
+    (format!("{UNBRACE}{script}"), args.iter().map(|a| a.replace('%', "%0").replace('{', "%1").replace('}', "%2")).collect())
 }
 /// Git.run: a write, or unknown (refused on a copy); `run_ro` is the read.
 pub async fn run(cwd: &str, args: &[&str]) -> Ran { sh(&format!("{SAFE}bp_safe; exec git \"$@\""), args, cwd, &[]).await }
@@ -75,8 +86,8 @@ pub async fn run_ro(cwd: &str, args: &[&str]) -> Ran { sh_ro(&format!("{SAFE}bp_
 /// Git.run.idx: git with a private index file
 pub async fn run_idx(cwd: &str, idx: &str, args: &[&str]) -> Ran {
     // the index file is $0 (Git.run.idx): `-c script idx args..`
-    let script = format!("{SAFE}bp_safe; GIT_INDEX_FILE=$0 exec git \"$@\"");
-    let mut a = vec!["-c", script.as_str(), idx]; a.extend(args);
+    let (script, args) = carry_braces(&format!("{SAFE}bp_safe; GIT_INDEX_FILE=$0 exec git \"$@\""), args);
+    let mut a = vec!["-c", script.as_str(), idx]; a.extend(args.iter().map(String::as_str));
     proc("sh", &a, cwd, &[]).await
 }
 /// Git.seq: a non-zero exit is "error: <output>", else the trimmed output (raw keeps it untouched, for diffs).
@@ -241,6 +252,17 @@ pub fn exists(p: &str) -> bool { Path::new(p).exists() }
 
 #[cfg(test)]
 mod tests {
+    /// Windows hands Git's sh its arguments without braces (carry_braces); the script's prefix gives them back exactly, here run by this machine's sh.
+    #[tokio::test] async fn braces_cross_a_windows_sh_as_words_and_come_back_whole() {
+        let args = ["rev-parse", "--verify", "abc^{commit}", "@{upstream}", "a b", "", "x}{y", "plain", "100%BPLB%", "%1", "50%", "%%2"];
+        let (script, wire) = carry_braces_on(true, "printf '[%s]' \"$@\"", &args);
+        assert!(wire.iter().all(|a| !a.contains(['{', '}'])), "nothing with a brace goes over: {wire:?}");
+        let w: Vec<&str> = wire.iter().map(String::as_str).collect();
+        let r = proc_ro("bash", &[&["-c", script.as_str(), "sh"][..], &w[..]].concat(), ".", &[]).await;
+        assert_eq!(r.out, args.iter().map(|a| format!("[{a}]")).collect::<String>(), "{}", r.out);
+        let (same, wire) = carry_braces_on(false, "x", &args); assert_eq!((same.as_str(), wire.len()), ("x", args.len())); assert!(wire.iter().any(|a| a.contains('{')), "off Windows nothing changes");
+        let (same, _) = carry_braces_on(true, "x", &["no", "braces"]); assert_eq!(same, "x", "no brace, no prefix");
+    }
     use super::*;
     fn tmp(n: &str) -> crate::plat::tmp::TempStr { crate::plat::tmp::dir_str(&format!("git-{n}")) }
     async fn g(cwd: &str, a: &[&str]) -> Ran { proc("git", a, cwd, &[("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@t"), ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@t")]).await }
