@@ -652,7 +652,8 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     let t = st.threads.get(thread).ok_or("thread.missing")?;
     let mut o: serde_json::Map<String, Value> = serde_json::from_str(STATIC).map_err(|_|"thread.template")?;
     // the viewer panel the thread has open (Board, Schematic, 3D; other pages are not ported)
-    let viewer = super::viewer::viewer_json(st, &o["viewer"], &params["session"]).ok_or("viewer.page-not-ported")?;
+    let mut viewer = super::viewer::viewer_json(st, &o["viewer"], &params["session"]).ok_or("viewer.page-not-ported")?;
+    viewer["mode"] = super::viewer::surface(st, &viewer, params, thread);
     o.insert("viewer".into(), viewer);
     o.insert("diff".into(), crate::session::pages::diff_json(&params["session"], thread));
     o.insert("id".into(), json!(format!("{hub}|{thread}")));
@@ -762,7 +763,7 @@ mod tests {
     /// The recorded helper replies predate s04 (a reply inside a turn keeps its time for hover) and s03 (the running call marked): put those back as the helper drew them.
     fn as_helper(v: &Value) -> Value {
         let mut v = v.clone();
-        if let Some(viewer) = v.get_mut("viewer").and_then(Value::as_object_mut) { viewer.remove("rail"); viewer.remove("has"); }
+        if let Some(viewer) = v.get_mut("viewer").and_then(Value::as_object_mut) { assert_eq!(viewer.remove("mode").unwrap()["want"], "viewer"); viewer.remove("rail"); viewer.remove("has"); }
         let fix = |e: &mut Value| { if let Some(h) = e.as_object_mut().and_then(|o| o.remove("hover")) { e["stamp"] = h } if let Some(o) = e.as_object_mut() { o.remove("now"); } };
         match &mut v { Value::Array(a) => a.iter_mut().for_each(fix), Value::Object(o) => if let Some(Value::Array(a)) = o.get_mut("entries") { a.iter_mut().for_each(fix) }, _ => {} }
         v

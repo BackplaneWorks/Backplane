@@ -224,7 +224,7 @@ async fn clone_here(hub: &Arc<Hub>, origin: &str, path: &str) -> Result<Value, S
         }
         if !done { return Err(format!("could not clone {origin}: {why}")) }
     }
-    let mut c = crate::hub::Conn { sent: vec![], client: 0, gen: String::new(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
+    let mut c = crate::hub::Conn { local_view_socket: false, sent: vec![], client: 0, gen: String::new(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
     let r = hub.request_here(&mut c, &json!({"id":0,"m":"project.add","p":{"path":dir.to_string_lossy()}})).await.into_iter().find(|v| v["t"] == "reply").unwrap_or(Value::Null);
     if r["ok"] == true { Ok(json!({"path":dir.to_string_lossy()})) } else { Err(r["error"].as_str().unwrap_or("the project was not added").to_string()) }
 }

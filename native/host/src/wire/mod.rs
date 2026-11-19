@@ -194,13 +194,14 @@ pub fn live_notice_every(seen: &(String, usize), thread: &str, len: usize, since
 
 /// A view stream with no credential of its own (tests, no pairing registry installed). Fails closed once one is.
 pub async fn socket(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool) -> Result<()> {
-    socket_inner(hub, s, cbor_wanted, String::new()).await
+    socket_inner(hub, s, cbor_wanted, String::new(), false).await
 }
 /// `token` is the credential the /ws upgrade presented (`Auth::credential`).
-pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool, token: String) -> Result<()> {
+pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool, token: String, local_view_socket: bool) -> Result<()> {
     let mut cfg = WebSocketConfig::default(); cfg.max_message_size = Some(524288); cfg.max_frame_size = Some(524288);
     let (mut tx, mut rx) = tokio_tungstenite::accept_async_with_config(s, Some(cfg)).await?.split();
     let (mut conn, greeting) = hub.connect(cbor_wanted);
+    conn.local_view_socket = local_view_socket;
     let mut outbox = hub.attach(conn.client);
     struct Detach(Arc<Hub>, u64); impl Drop for Detach { fn drop(&mut self) { self.0.detach(self.1) } }
     let _detach = Detach(hub.clone(), conn.client);
@@ -350,7 +351,9 @@ pub async fn serve_with(hub: Arc<Hub>, s: TcpStream, trusted: bool) -> Result<()
             let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
             s.write_all(&response("400 Bad Request", "text/plain; charset=utf-8", "", b"this hub serves renderer mobile only")).await?; s.shutdown().await.ok(); return Ok(());
         }
-        return socket_inner(hub, s, req.param("enc") == "cbor", Auth::credential(&req)).await;
+        let local = crate::net::owner::trusted(req.peer.is_some_and(|p| p.ip().is_loopback()), &req.headers)
+            && ["origin", "forwarded", "x-forwarded-for", "x-forwarded-host"].iter().all(|h| req.header(h).is_empty());
+        return socket_inner(hub, s, req.param("enc") == "cbor", Auth::credential(&req), local).await;
     }
     let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
     http(&hub, s, req).await

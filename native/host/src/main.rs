@@ -258,7 +258,7 @@ mod tests {
     use super::*;
     // law hub_frames_cbor: for every text t, the hub's frame for it is one binary CBOR frame
     #[test] fn hub_frames_cbor() {
-        let (c, _) = (Conn { sent: vec![], client: 1, gen: "1".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 }, ());
+        let (c, _) = (Conn { local_view_socket: false, sent: vec![], client: 1, gen: "1".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 }, ());
         for t in ["", "x", "日本語🙂", "reply", "\u{0}\n\t", &"y".repeat(70000)] {
             let m = pack(&c, &json!({"t": t}));
             match m { Message::Binary(b) => assert_eq!(cbor::decode(&b).unwrap(), json!({"t": t})), other => panic!("not binary: {other:?}") }

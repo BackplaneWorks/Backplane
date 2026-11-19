@@ -84,7 +84,7 @@ pub static RAW_TIMES: AtomicU64 = AtomicU64::new(0);
 /// another hub's client. One hub runs in a real process; the tests run many at once, and each counting from 1 let one test's disconnect revoke another's
 /// account grant. Tests start above the numbers they attach by hand (`hub.attach(2)`).
 static NEXT_CLIENT: AtomicU64 = AtomicU64::new(if cfg!(test) { 1 << 20 } else { 1 });
-pub struct Conn { pub sent: Vec<(String, Value)>, pub client: u64, pub gen: String, pub view_id: String, pub target: Value, pub cbor: bool, pub lastrev: u64 }
+pub struct Conn { pub local_view_socket: bool, pub sent: Vec<(String, Value)>, pub client: u64, pub gen: String, pub view_id: String, pub target: Value, pub cbor: bool, pub lastrev: u64 }
 
 pub fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0) }
 /// (zone name, POSIX rule): TZ or /etc/timezone or /etc/localtime, the rule from the zone file's footer.
@@ -563,7 +563,7 @@ impl Hub {
     pub fn connect(&self, cbor: bool) -> (Conn, Value) {
         let gen = self.gen.fetch_add(1, Relaxed).to_string();
         let g = json!({"t":"view","version":1,"renderer":"mobile","generation":gen,"epoch":self.epoch,"limits":limits()});
-        (Conn { sent: vec![], client: NEXT_CLIENT.fetch_add(1, Relaxed), gen, view_id: String::new(), target: Value::Null, cbor, lastrev: 0 }, g)
+        (Conn { local_view_socket: false, sent: vec![], client: NEXT_CLIENT.fetch_add(1, Relaxed), gen, view_id: String::new(), target: Value::Null, cbor, lastrev: 0 }, g)
     }
 
     pub fn notice(&self, c: &Conn, rev: u64) -> Value {

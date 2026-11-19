@@ -677,6 +677,12 @@ fn cad_with(st: &State, session: &Value, info: &Value, pkg: Option<&crate::files
         row("Plan before routing", "On: before routing a board with 4 or more copper layers or more than 60 nets, the agent proposes a routing plan and routes only what you approve in the Plan panel beside the board. Off: agents route as you ask.", chips(&["on", "off"], onoff(crate::plan::is_on(set(st, crate::plan::SETTING, ""))), crate::plan::SETTING)),
         row("Board 3D", "How a board's 3D model is made: natively, the board at once and its parts as they convert, or by kicad-cli, all at the end.", chips(&["native", "kicad-cli"], set(st, "viewer.board3d", "native"), "viewer.board3d")),
     ]);
+    let key = super::design_mode::SETTING;
+    let preference = super::design_mode::Preference::read(set(st, key, "auto"));
+    let options = [("auto", "Auto"), ("viewer", "Always viewer"), ("kicad", "Always KiCad")];
+    v.push(row("Open designs in", "Takes effect when the embedded KiCad default is enabled for this platform.",
+        options.iter().map(|(value, label)| btn(label, "setting", &format!("{key}={value}"),
+            super::design_mode::Preference::read(value) == preference)).collect()));
     v
 }
 
@@ -1290,6 +1296,17 @@ mod tests {
         let o = act("h", &json!({"rid": 3, "drafts": {}}), "freecad-install", "").unwrap(); assert_eq!(o.patch["drafts"]["@finstall"], "ask"); assert!(o.cmds.is_empty());
         let o = act("h", &json!({"rid": 3, "drafts": {"@finstall": "ask"}}), "freecad-install", "").unwrap();
         assert!(o.cmds[0]["text"].as_str().unwrap().contains(r#""m":"onboard.install""#) && o.cmds[0]["text"].as_str().unwrap().contains(r#""tool":"freecad""#));
+    }
+    #[test]
+    fn design_mode_setting_selects_the_stored_choice() {
+        for (saved, choice) in [("", "auto"), ("viewer", "viewer"), ("kicad", "kicad")] {
+            let rows = cad_with(&st(&[(crate::present::design_mode::SETTING, saved)]), &json!({}), &Value::Null, None, None);
+            let row = rows.iter().find(|row| row["label"] == "Open designs in").unwrap();
+            let selected: Vec<_> = row["buttons"].as_array().unwrap().iter().filter(|b| b["on"] == true).collect();
+            assert_eq!(selected.len(), 1);
+            assert_eq!(selected[0]["action"], "setting");
+            assert_eq!(selected[0]["value"], format!("viewer.designMode={choice}"));
+        }
     }
     fn btns(r: &Value) -> Vec<(String, String)> { r["buttons"].as_array().unwrap().iter().map(|b| (b["label"].as_str().unwrap().to_string(), b["action"].as_str().unwrap().to_string())).collect() }
     #[test] fn install_kicad_shows_only_while_kicad_is_not_found() {

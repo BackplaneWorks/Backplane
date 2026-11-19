@@ -4531,6 +4531,10 @@ gpui.panestate.retrying	Trying again…	再試行中…	Reintentando…
 gpui.hub.view.notready	Not ready yet. Try again.	まだ準備ができていません。もう一度お試しください。	Aún no está listo. Inténtalo de nuevo.
 gpui.hub.view.staleconn	The connection to the hub went stale.	ハブへの接続が古くなりました。	La conexión con el hub caducó.
 gpui.hub.view.unavailable	That view isn't available here.	そのビューはここでは利用できません。	Esa vista no está disponible aquí.
+settings.designmode.label	Open designs in	設計を開く場所	Abrir los diseños en
+settings.designmode.viewer	Always viewer	常にビューアー	Siempre en el visor
+settings.designmode.kicad	Always KiCad	常に KiCad	Siempre en KiCad
+settings.designmode.note	Takes effect when the embedded KiCad default is enabled for this platform.	このプラットフォームで組み込みの KiCad が既定として有効になると適用されます。	Se aplicará cuando KiCad integrado se habilite por defecto en esta plataforma.
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}

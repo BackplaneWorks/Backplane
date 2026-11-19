@@ -346,7 +346,7 @@ pub async fn serve_with(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PRe
     // as a local client's request (Far.client), here and never onward: the reply frame is the answer
     let msg = if m == "turn.start" { p["msg"].as_str().unwrap_or("").to_string() } else { String::new() };
     if taken_before(&link, &msg) { return json_reply(&json!({"t":"reply","id":0,"ok":true})) }
-    let mut c = Conn { sent: vec![], client: hub.fresh_client(), gen: "far".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
+    let mut c = Conn { local_view_socket: false, sent: vec![], client: hub.fresh_client(), gen: "far".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
     let t0 = std::time::Instant::now();
     let out = hub.request_here(&mut c, &json!({"id": 0, "m": m, "p": p})).await;
     if t0.elapsed() > std::time::Duration::from_secs(3) { eprintln!("far: {m} from {link} took {} ms here", t0.elapsed().as_millis()); }

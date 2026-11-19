@@ -820,7 +820,7 @@ pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String,
                 let v = match wire::decode(&m) { None => continue, Some(Err(r)) => { tx.send(pack(&r, json_mode)).await?; continue } Some(Ok(v)) => v };
                 if waits_far(&v) {
                     let (hub, late, id, m, p) = (hub.clone(), late_tx.clone(), v["id"].clone(), v["m"].as_str().unwrap_or("").to_string(), v.get("p").cloned().unwrap_or(Value::Null));
-                    let mut c2 = Conn { sent: vec![], client: conn.client, gen: conn.gen.clone(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
+                    let mut c2 = Conn { local_view_socket: false, sent: vec![], client: conn.client, gen: conn.gen.clone(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
                     tokio::spawn(async move {
                         let res = match term::far_wait(&m, &p) { true => term::far_call(&hub, c2.client, &m, &p).await, false => call(&hub, &mut c2, &m, &p).await };
                         let _ = late.send(match res { Ok(r) => json!({"t":"reply","id":id,"ok":true,"result":r}), Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}) });

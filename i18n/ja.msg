@@ -4685,3 +4685,7 @@ gpui.panestate.retrying = 再試行中…
 gpui.hub.view.notready = まだ準備ができていません。もう一度お試しください。
 gpui.hub.view.staleconn = ハブへの接続が古くなりました。
 gpui.hub.view.unavailable = そのビューはここでは利用できません。
+settings.designmode.label = 設計を開く場所
+settings.designmode.viewer = 常にビューアー
+settings.designmode.kicad = 常に KiCad
+settings.designmode.note = このプラットフォームで組み込みの KiCad が既定として有効になると適用されます。

@@ -26,6 +26,7 @@ mod settings { pub mod order { pub use crate::order_view::*; } pub mod models { 
 #[path="../present/thread.rs"] mod thread;
 #[path="../present/window.rs"] mod window;
 #[path="../present/audit_files.rs"] mod files;
+#[path="../present/design_mode.rs"] mod design_mode;
 #[path="../present/rail.rs"] mod rail;
 #[path="../present/viewer.rs"] mod viewer;
 #[path="../present/panels.rs"] mod panels;
