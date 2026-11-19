@@ -32,7 +32,8 @@ pub fn pick(provider: &str, model: &str) -> (&'static str, String) {
 pub fn args(provider: &str, model: &str, system: &str) -> Vec<String> {
     let mut v: Vec<String> = vec![];
     if provider == "codex" {
-        v.extend(["exec", "--json", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "-c", "model_reasoning_effort=\"low\""].map(String::from));
+        // a bare `low`, not `"low"`: Codex reads a -c value that is no TOML as the string, and a `"` would not reach a Codex started through Git's sh on Windows (proc::carries)
+        v.extend(["exec", "--json", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "-c", "model_reasoning_effort=low"].map(String::from));
         if !model.is_empty() { v.push("-m".into()); v.push(model.into()) }
         v.push(system.into());
     } else {
@@ -219,9 +220,9 @@ impl Agents {
             }
         }
         for (prov, model, via, what) in tries {
-            match self.shot(prov, &model, TITLE_SYSTEM, &input, &via).await {
-                Some(a) => { let t = title_clean(&a); if !t.is_empty() { return Some(t) } eprintln!("titles: {thread}: {what} answered nothing usable") }
-                None => eprintln!("titles: {thread}: {what} ({prov} {model}) gave no title"),
+            match self.shot_r(prov, &model, TITLE_SYSTEM, &input, &via).await {
+                Ok(a) => { let t = title_clean(&a); if !t.is_empty() { return Some(t) } eprintln!("titles: {thread}: {what} answered nothing usable") }
+                Err(e) => eprintln!("titles: {thread}: {what} ({prov} {model}) gave no title: {e}"),
             }
         }
         // then Haiku on whichever Claude login can take it (the default login, else the named accounts: the failover's order), then Codex's light model
@@ -275,6 +276,13 @@ pub fn summarizer() -> Option<Arc<dyn Summarizer>> { super::handle().map(|a| a a
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn a_one_shots_command_line_reaches_an_agent_started_through_gits_sh() {
+        // Windows starts a `#!` program through Git's sh, which changes an argument holding a `"`; a Codex title asked with `-c model_reasoning_effort="low"`
+        // was refused there ("would not reach the agent intact") and the title fell to Claude. Checked on Windows rules on every system.
+        let d = crate::plat::tmp::dir("oneshot-sh"); let prog = d.join("agent"); std::fs::write(&prog, "#!/bin/sh\n").unwrap();
+        for p in ["claude", "codex"] { let a = args(p, "m", TITLE_SYSTEM); assert!(crate::agents::proc::plan(&prog, &a, true, &|| None).is_ok(), "{p}: {a:?}"); }
+        assert!(args("codex", "", "s").windows(2).any(|w| w == ["-c", "model_reasoning_effort=low"]), "Codex still asked for low effort");
+    }
     #[test] fn a_one_shot_tries_the_default_login_then_the_accounts_with_most_allowance_and_skips_one_found_out() {
         let now = 1_000_000u64;
         let prof = |id: &str, used: f64| json!({"id":id,"epoch":2,"provider":"claude","state":"connected","allowance":{"state":"ok","at":now - 10,"windows":[{"label":"Weekly","used_percent":used,"resets_at":now + 9999}]}});

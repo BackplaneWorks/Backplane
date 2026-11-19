@@ -269,10 +269,12 @@ mod tests {
     }
     #[test] fn a_whole_path_pasted_behind_the_fields_own_tilde_is_the_path_meant() {
         let home = d("pasted"); let h = home.to_str().unwrap();
+        // a path typed into the field is read with "/" on Windows (`norm`, #1230: "C:\\x" is "C:/x"), the form project.add shows a folder in; the home is not typed
+        let typed = norm(h, cfg!(windows));
         let f = folders(&open(&format!("~/{h}/alpha")), h, &[]);
-        assert_eq!(f["error"], ""); assert_eq!((f["items"][0]["action"].as_str(), f["items"][0]["value"].as_str().unwrap()), (Some("proj-add"), format!("{h}/alpha").as_str()), "\"~//abs/path\" is /abs/path");
+        assert_eq!(f["error"], ""); assert_eq!((f["items"][0]["action"].as_str(), f["items"][0]["value"].as_str().unwrap()), (Some("proj-add"), format!("{typed}/alpha").as_str()), "\"~//abs/path\" is /abs/path");
         let f = folders(&open("~/~/beta"), h, &[]); assert_eq!(f["items"][0]["value"], format!("{h}/beta"), "and a second ~/ is the home once");
-        let f = folders(&open(&format!("~/{h}/new-board")), h, &[]); assert_eq!((f["items"][0]["action"].as_str(), f["items"][0]["value"].as_str().unwrap()), (Some("proj-new"), format!("{h}/new-board").as_str()));
+        let f = folders(&open(&format!("~/{h}/new-board")), h, &[]); assert_eq!((f["items"][0]["action"].as_str(), f["items"][0]["value"].as_str().unwrap()), (Some("proj-new"), format!("{typed}/new-board").as_str()));
         assert_eq!(expand("~/x", "/h"), "/h/x"); assert_eq!(expand("~//x", "/h"), "/x"); assert_eq!(expand("~", "/h"), "/h");
     }
     #[test] fn a_folder_made_since_the_listing_is_seen_at_once_and_past_200_rows_are_counted() {
