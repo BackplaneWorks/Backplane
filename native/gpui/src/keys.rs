@@ -351,8 +351,10 @@ impl Backplane {
     }
     /// The command a rail press on viewer kind `v` sends (screens::viewer::rail_command), with the rail lit at once for what it asks: the kind, or none.
     pub(crate) fn rail_view(&mut self, v: &str, cx: &mut Context<Self>) -> Command {
-        let covered = self.data["thread"]["diff"].is_object() || self.screens.kicad.as_ref().is_some_and(|p| p.read(cx).has_override());
-        let cmd = crate::screens::viewer::rail_command(&self.data["thread"]["viewer"], covered, self.screens.rail_pending.as_deref(), v);
+        let local = crate::viewers::kicad_pane::local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), &self.data["thread"]);
+        let pane_frame = local.then(|| self.kicad_for(&self.data["thread"], cx).map(|p| p.read(cx).tab())).flatten();
+        let lit = crate::ui::rail_lit_id(&self.data["thread"], local, pane_frame.as_deref(), self.screens.rail_pending.as_deref());
+        let cmd = if lit.as_deref() == Some(v) && !v.is_empty() { crate::screens::viewer::rail_command(&self.data["thread"]["viewer"], false, Some(v), v) } else { crate::screens::viewer::rail_command(&self.data["thread"]["viewer"], true, self.screens.rail_pending.as_deref(), v) };
         let opens = matches!(&cmd, Command::Action(_, k) if !k.is_empty());
         if opens { if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, cx| p.set_open(v, cx)); } }
         self.screens.rail_pending = Some(if opens { v.to_string() } else { String::new() }); self.screens.rail_at = Some(std::time::Instant::now());
@@ -774,6 +776,17 @@ mod tests {
             assert_eq!(crate::ui::rail_enabled(&viewer, id), allowed);
         }
         assert!(crate::ui::rail_enabled(&serde_json::Value::Null, "board"));
+        // One selection behaviour: after a KiCad strip switch Board -> Schematic, pressing the lit Schematic
+        // entry shuts the viewer (`close()`), while pressing Board opens Board (`view_kind("board")`).
+        let thread = serde_json::json!({"viewer":{"open":"board","rail":[{"id":"board","state":"on"},{"id":"schematic","state":"off"}]}});
+        let lit = crate::ui::rail_lit_id(&thread, true, Some("SCH"), None);
+        assert_eq!(lit.as_deref(), Some("schematic"));
+        let close_cmd = if lit.as_deref() == Some("schematic") { crate::screens::viewer::rail_command(&thread["viewer"], false, Some("schematic"), "schematic") } else { crate::screens::viewer::rail_command(&thread["viewer"], true, None, "schematic") };
+        assert!(matches!(close_cmd, Command::Action(ref a, ref v) if a == "view" && v.is_empty()));
+        crate::screens::viewer::forget_press();
+        let open_board = if lit.as_deref() == Some("board") { crate::screens::viewer::rail_command(&thread["viewer"], false, Some("board"), "board") } else { crate::screens::viewer::rail_command(&thread["viewer"], true, None, "board") };
+        assert!(matches!(open_board, Command::Action(ref a, ref v) if a == "view" && v == "board"));
+        crate::screens::viewer::forget_press();
     }
     #[test] fn hints_follow_the_hubs_actions() {
         assert_eq!(id_for("diff", "", ""), "diff"); assert_eq!(id_for("interrupt", "", ""), "stop"); assert_eq!(id_for("new-thread", "p1", "p1"), "new"); assert_eq!(id_for("new-thread", "p2", "p1"), "");

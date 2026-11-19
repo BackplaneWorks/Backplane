@@ -81,13 +81,54 @@ fn kicad_rail_id(frame: &str) -> Option<&'static str> {
     }
 }
 
-/// Whether a viewer rail row is lit. When the embedded KiCad pane is on show (`kicad_on`, mapped
-/// from `KicadPane::tab()` / `wanted_kind()`), it leads immediately without waiting on a hub round
-/// trip; otherwise an optimistic rail press (`pending`) leads until the hub replies.
+/// The rail entry lit by the embedded KiCad pane's wanted frame (`KicadPane::tab()`, which can be
+/// ahead of KiCad while `pending_show` is set), or `None` when the pane does not govern the rail:
+/// requires a local thread whose viewer holds the editor (not covered by Diff), and that the mapped
+/// entry exists and is enabled in the drawn `rows` (e.g. GerbView with no Gerbers row does not
+/// suppress the hub's lit row and light nothing).
+fn kicad_lit_id(rows: &[RailRow], local: bool, holds_editor: bool, diff_on: bool, pane_frame: Option<&str>) -> Option<&'static str> {
+    if !local || !holds_editor || diff_on { return None; }
+    let id = kicad_rail_id(pane_frame?)?;
+    rows.iter().any(|r| r.id == id && r.state != "disabled").then_some(id)
+}
+
+/// Whether a viewer rail row is lit. An optimistic rail press (`pending`, including `""` when closing
+/// the viewer) leads while set; otherwise when the local embedded KiCad pane is on show (`kicad_on`,
+/// mapped from `KicadPane::tab()` / `wanted_kind()` to an enabled drawn row), its wanted frame leads
+/// without waiting on a hub round trip; otherwise the hub's `row.state` (or `active_kind` on older hubs) leads.
 fn viewer_row_on(row: &RailRow, kicad_on: Option<&str>, pending: Option<&str>, active_kind: &str) -> bool {
-    if let Some(id) = kicad_on { return id == row.id; }
     if let Some(pending) = pending { return pending == row.id; }
+    if let Some(id) = kicad_on { return id == row.id; }
     if row.state.is_empty() { active_kind == row.id } else { row.state == "on" }
+}
+
+/// Whether `BACKPLANE_GPUI_RECTS` is enabled for the process (checked once; off in normal use).
+fn rail_rects_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("BACKPLANE_GPUI_RECTS").is_some_and(|v| !v.is_empty() && v != "0"))
+}
+
+/// Snapshot of what the right rail draws (`lit`, `entries`, `disabled` using the `rail:<Label>`
+/// labels), returning `Some(snapshot)` on first paint and whenever it changes from `last`.
+fn rail_metric_change(last: &mut Option<Value>, lit: &[&str], entries: &[&str], disabled: &[&str]) -> Option<Value> {
+    let now = serde_json::json!({ "lit": lit, "entries": entries, "disabled": disabled });
+    if last.as_ref() == Some(&now) { return None; }
+    *last = Some(now.clone());
+    Some(now)
+}
+
+/// The viewer rail entry currently shown lit for `thread`, using the exact same priority order as
+/// `viewer_row_on` so pressing a lit entry (e.g. Schematic after a KiCad strip switch from Board)
+/// shuts the viewer consistently.
+pub(crate) fn rail_lit_id(thread: &Value, local: bool, pane_frame: Option<&str>, pending: Option<&str>) -> Option<String> {
+    let diff_on = thread["diff"].is_object();
+    let sim_rail = crate::viewers::kicad_pane::rail_simulation(&thread["viewer"], local).is_some();
+    let rows = rail_rows(&thread["viewer"], sim_rail);
+    let kicad_on = kicad_lit_id(&rows, local, crate::screens::viewer::holds_editor(thread), diff_on, pane_frame);
+    let active_kind = if diff_on { "diff".to_owned() } else { crate::screens::viewer::active_kind(&thread["viewer"], pending) };
+    rows.into_iter()
+        .find(|r| r.id != "terminal" && r.state != "disabled" && viewer_row_on(r, kicad_on, pending, &active_kind))
+        .map(|r| r.id.to_string())
 }
 
 fn pager_row(cx: &mut Context<Backplane>, id: String, pager: &Value, light: bool, ctl: &mut Vec<CtlEntry>) -> Option<AnyElement> {
@@ -861,20 +902,23 @@ impl Render for Backplane {
         // the rail's Simulation entry (the hub's word, in a window that can hold KiCad)
         let can_embed = crate::viewers::kicad_pane::local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), thread);
         let sim_rail = crate::viewers::kicad_pane::rail_simulation(&thread["viewer"], can_embed).is_some();
-        // when the embedded KiCad pane is on show in this thread, light the rail from its wanted frame (`KicadPane::tab()`,
-        // which can be ahead of KiCad while `pending_show` is set); this generalizes Simulation and never calls back into `show_kind`
-        let kicad_on = (!thread["diff"].is_object() && crate::screens::viewer::holds_editor(thread))
-            .then(|| self.kicad_for(thread, cx).and_then(|p| kicad_rail_id(&p.read(cx).tab())))
-            .flatten()
-            .filter(|id| *id != "simulation" || sim_rail);
+        let rows = rail_rows(&thread["viewer"], sim_rail);
+        // when the local embedded KiCad pane is on show in this thread, light the rail from its wanted frame (`KicadPane::tab()`,
+        // which can be ahead of KiCad while `pending_show` is set), provided the mapped entry exists and is enabled in `rows`
+        let pane_frame = can_embed.then(|| self.kicad_for(thread, cx).map(|p| p.read(cx).tab())).flatten();
+        let kicad_on = kicad_lit_id(&rows, can_embed, crate::screens::viewer::holds_editor(thread), thread["diff"].is_object(), pane_frame.as_deref());
         let mut previous_group = None;
         let mut page_top = px(0.);
         let mut selected_row = None;
         let collect_inv = crate::art::rects_on();
-        let mut inv_rows: Vec<RailInvRow> = Vec::new();
-        for row in rail_rows(&thread["viewer"], sim_rail) {
-            let rail = if row.group == "tools" { &mut rail_tools } else { &mut rail_pages };
-            if row.group != "tools" {
+        let (mut inv_page, mut inv_tool): (Vec<RailInvRow>, Vec<RailInvRow>) = (Vec::new(), Vec::new());
+        let emit_rail = rail_rects_on();
+        let (mut m_page_lit, mut m_page_entries, mut m_page_disabled): (Vec<&str>, Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut m_tool_lit, mut m_tool_entries, mut m_tool_disabled): (Vec<&str>, Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new(), Vec::new());
+        for row in rows {
+            let is_tool = row.group == "tools";
+            let rail = if is_tool { &mut rail_tools } else { &mut rail_pages };
+            if !is_tool {
                 if previous_group.is_some_and(|g| g != row.group) {
                     rail.push(div().h(px(12.)).flex_shrink_0().into_any_element());
                     page_top += px(12.);
@@ -887,9 +931,15 @@ impl Render for Backplane {
                 "terminal" => self.screens.term.open,
                 _ => viewer_row_on(&row, kicad_on, self.screens.rail_pending.as_deref(), &active_kind),
             };
-            if row.group != "tools" {
+            if !is_tool {
                 if active { selected_row = Some((row.id, page_top)); }
                 page_top += crate::scale::tpx(48.);
+            }
+            if emit_rail {
+                let (lit, entries, dis) = if is_tool { (&mut m_tool_lit, &mut m_tool_entries, &mut m_tool_disabled) } else { (&mut m_page_lit, &mut m_page_entries, &mut m_page_disabled) };
+                entries.push(row.label);
+                if disabled { dis.push(row.label); }
+                if active { lit.push(row.label); }
             }
             let icon_resolved = art::icon_name(row.icon);
             let mut button = with_rect(div().id(SharedString::from(format!("rail-{}", row.label))), || format!("rail:{}", row.label))
@@ -900,7 +950,7 @@ impl Render for Backplane {
             if disabled {
                 button = button.opacity(0.45).tooltip(crate::keys::tip(row.why, "", light));
                 if collect_inv {
-                    inv_rows.push(RailInvRow {
+                    (if is_tool { &mut inv_tool } else { &mut inv_page }).push(RailInvRow {
                         id: id.into(), label: trs(row.label), group: row.group.into(), state: "disabled".into(), disabled: true,
                         icon: row.icon.into(), icon_known: icon_resolved.is_some(),
                         tooltip_label: trs(row.why), tooltip_hint: String::new(),
@@ -913,7 +963,7 @@ impl Render for Backplane {
                 let cap_el = keycap(letter, active);
                 if collect_inv {
                     let cap_drawn = if cap_el.is_some() { letter.to_uppercase() } else { String::new() };
-                    inv_rows.push(RailInvRow {
+                    (if is_tool { &mut inv_tool } else { &mut inv_page }).push(RailInvRow {
                         id: id.into(), label: trs(row.label), group: row.group.into(), state: (if active { "on" } else { "off" }).into(), disabled: false,
                         icon: row.icon.into(), icon_known: icon_resolved.is_some(),
                         tooltip_label: trs(row.label), tooltip_hint: hint.clone(),
@@ -937,13 +987,22 @@ impl Render for Backplane {
             rail.push(button.into_any_element());
         }
         if collect_inv {
-            emit_rail_inventory_if_changed(self.started, &self.data, can_embed, &self.local, inv_rows);
+            inv_page.extend(inv_tool);
+            emit_rail_inventory_if_changed(self.started, &self.data, can_embed, &self.local, inv_page);
         }
         let selected = selected_row.map(|(id, _)| id);
         let reveal = if !kscreen && self.screens.rail_last_lit.as_deref() != selected {
             self.screens.rail_last_lit = selected.map(str::to_owned);
             selected_row.map(|(_, top)| top)
         } else { None };
+        if emit_rail {
+            m_page_lit.extend(m_tool_lit);
+            m_page_entries.extend(m_tool_entries);
+            m_page_disabled.extend(m_tool_disabled);
+            if let Some(snap) = rail_metric_change(&mut self.screens.rail_metric, &m_page_lit, &m_page_entries, &m_page_disabled) {
+                crate::script::metric(self.started, "rail", serde_json::json!({ "rail": snap }));
+            }
+        }
         // the open asks' buttons are controls too (the harness answers them by index: ask:<i>:<j>)
         for (i, a) in crate::screens::asks::parse(&thread["asks"]).into_iter().enumerate() {
             for (j, b) in a.buttons.iter().enumerate() { ctl.push(CtlEntry { id: format!("ask:{i}:{j}"), label: b.label.clone(), ctl: Ctl::Node("answer".into(), b.value.clone()) }); }
@@ -1239,18 +1298,18 @@ fn emit_rail_inventory_if_changed(started: std::time::Instant, data: &Value, can
 
 #[cfg(test)]
 mod tests {
-    use super::{kicad_rail_id, rail_inventory_json, rail_rows, viewer_row_on, RailInvRow, RailRow};
-    use serde_json::Value;
+    use super::{kicad_lit_id, kicad_rail_id, rail_inventory_json, rail_lit_id, rail_metric_change, rail_rows, viewer_row_on, RailInvRow, RailRow};
+    use serde_json::{json, Value};
     #[test]
     fn rail_rows_follow_hub_order_content_and_empty_list() {
-        let viewer = serde_json::json!({"rail":[
+        let viewer = json!({"rail":[
             {"id":"files","label":"Project files","icon":"folder","group":"work","state":"on","key":"f"},
             {"id":"board","label":"Board","icon":"cpu","group":"design","state":"disabled","key":"b","why":"No board"}]});
         let rows = rail_rows(&viewer, false);
         assert_eq!(rows.len(), 2);
         assert_eq!((rows[0].id, rows[0].label, rows[0].state), ("files", "Project files", "on"));
         assert_eq!((rows[1].icon, rows[1].group, rows[1].key, rows[1].state, rows[1].why), ("cpu", "design", "b", "disabled", "No board"));
-        assert!(rail_rows(&serde_json::json!({"rail":[]}), true).is_empty());
+        assert!(rail_rows(&json!({"rail":[]}), true).is_empty());
         assert_eq!(rail_rows(&Value::Null, false).last().unwrap().id, "commands");
     }
 
@@ -1298,18 +1357,73 @@ mod tests {
         }
         let board = RailRow { id: "board", state: "on", ..Default::default() };
         let sch = RailRow { id: "schematic", state: "off", ..Default::default() };
+        let files = RailRow { id: "files", state: "off", ..Default::default() };
+        let split = RailRow { id: "split", state: "off", ..Default::default() };
         let sim = RailRow { id: "simulation", state: "off", ..Default::default() };
-        // Strip switched to Schematic (or Symbol Editor) while hub's page is still Board: Schematic lights, Board dims.
+        // Strip switched to Schematic (or Symbol Editor) while hub's page is still Board (no pending press): Schematic lights, Board dims.
         let lit = kicad_rail_id("SCH");
         assert!(viewer_row_on(&sch, lit, None, "board"));
         assert!(!viewer_row_on(&board, lit, None, "board"));
         let sym = kicad_rail_id("SYMBOL_EDITOR");
         assert!(viewer_row_on(&sch, sym, None, "board"));
         assert!(!viewer_row_on(&board, sym, None, "board"));
-        // Footprint Editor lights Board; Simulator lights Simulation even while pending is Schematic.
+        // Footprint Editor lights Board; Simulator lights Simulation with no pending press.
         assert!(viewer_row_on(&board, kicad_rail_id("FOOTPRINT_EDITOR"), None, "schematic"));
-        assert!(viewer_row_on(&sim, kicad_rail_id("SIMULATOR"), Some("schematic"), "schematic"));
-        assert!(!viewer_row_on(&sch, kicad_rail_id("SIMULATOR"), Some("schematic"), "schematic"));
+        assert!(viewer_row_on(&sim, kicad_rail_id("SIMULATOR"), None, "schematic"));
+        assert!(!viewer_row_on(&sch, kicad_rail_id("SIMULATOR"), None, "schematic"));
+        // Pending rail press always leads over the embedded KiCad pane's wanted frame:
+        // 1) pressing Files or Split while pane is on Board/Schematic lights that target, never Board
+        assert!(viewer_row_on(&files, Some("board"), Some("files"), "board"));
+        assert!(!viewer_row_on(&board, Some("board"), Some("files"), "board"));
+        assert!(viewer_row_on(&split, Some("board"), Some("split"), "schematic"));
+        assert!(!viewer_row_on(&board, Some("board"), Some("split"), "schematic"));
+        // 2) pressing Schematic while pane is on Board lights Schematic and unlights Board
+        assert!(viewer_row_on(&sch, Some("board"), Some("schematic"), "board"));
+        assert!(!viewer_row_on(&board, Some("board"), Some("schematic"), "board"));
+        // 3) pressing the lit entry or X to close (pending = "") lights nothing
+        assert!(!viewer_row_on(&board, Some("board"), Some(""), "board"));
+        assert!(!viewer_row_on(&sch, Some("board"), Some(""), "board"));
+
+        // Gates on kicad_lit_id:
+        let no_gerbers = [
+            RailRow { id: "board", state: "on", ..Default::default() },
+            RailRow { id: "schematic", state: "disabled", ..Default::default() },
+        ];
+        // Linked thread (local = false) must never light the local pane's frame.
+        assert_eq!(kicad_lit_id(&no_gerbers, false, true, false, Some("PCB")), None);
+        // GerbView open with no Gerbers row in `rows` does not suppress the hub's lit row.
+        assert_eq!(kicad_lit_id(&no_gerbers, true, true, false, Some("GERBVIEW")), None);
+        // Disabled target row is not lit by the pane either.
+        assert_eq!(kicad_lit_id(&no_gerbers, true, true, false, Some("SCH")), None);
+        // Enabled target row on a local thread holding the editor is lit.
+        assert_eq!(kicad_lit_id(&no_gerbers, true, true, false, Some("PCB")), Some("board"));
+
+        // rail_lit_id end-to-end (used by both rail rendering and rail_press close check):
+        let thread = json!({"viewer":{"open":"board","rail":[
+            {"id":"board","state":"on"},{"id":"schematic","state":"off"},{"id":"files","state":"off"}]}});
+        // Local thread with pane on SCH lights "schematic"; linked thread keeps hub's "board".
+        assert_eq!(rail_lit_id(&thread, true, Some("SCH"), None).as_deref(), Some("schematic"));
+        assert_eq!(rail_lit_id(&thread, false, Some("SCH"), None).as_deref(), Some("board"));
+        // GerbView with no Gerbers row falls back to hub's "board" instead of lighting nothing.
+        assert_eq!(rail_lit_id(&thread, true, Some("GERBVIEW"), None).as_deref(), Some("board"));
+        // Pending press leads (leaving editor or closing).
+        assert_eq!(rail_lit_id(&thread, true, Some("PCB"), Some("files")).as_deref(), Some("files"));
+        assert_eq!(rail_lit_id(&thread, true, Some("PCB"), Some("")), None);
+        // Fallback for older hubs / linked threads without `viewer.rail`.
+        let legacy = json!({"viewer":{"open":"board"}});
+        assert_eq!(rail_lit_id(&legacy, false, Some("SCH"), None).as_deref(), Some("board"));
+        assert_eq!(rail_lit_id(&legacy, true, Some("SCH"), None).as_deref(), Some("schematic"));
+    }
+
+    #[test]
+    fn rail_metric_emits_on_first_paint_and_on_change_only() {
+        let mut last = None;
+        let first = rail_metric_change(&mut last, &["Board"], &["Board", "Schematic", "Split"], &["Split"]);
+        assert_eq!(first, Some(json!({"lit": ["Board"], "entries": ["Board", "Schematic", "Split"], "disabled": ["Split"]})));
+        assert_eq!(rail_metric_change(&mut last, &["Board"], &["Board", "Schematic", "Split"], &["Split"]), None, "unchanged frame emits nothing");
+        let switched = rail_metric_change(&mut last, &["Simulation"], &["Board", "Schematic", "Simulation", "Split"], &["Split"]);
+        assert_eq!(switched, Some(json!({"lit": ["Simulation"], "entries": ["Board", "Schematic", "Simulation", "Split"], "disabled": ["Split"]})));
+        assert_eq!(rail_metric_change(&mut last, &["Simulation"], &["Board", "Schematic", "Simulation", "Split"], &["Split"]), None);
     }
     #[test]
     fn rail_inventory_reports_drawn_icon_label_tooltip_keycap_and_palette() {
