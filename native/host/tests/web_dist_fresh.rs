@@ -14,15 +14,19 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn sha256_hex(path: &Path) -> String {
-    let bytes = fs::read(path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-    let digest = Sha256::digest(&bytes);
+fn sha256_bytes(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
     let mut out = String::with_capacity(64);
     for b in digest {
         use std::fmt::Write;
         let _ = write!(&mut out, "{b:02x}");
     }
     out
+}
+
+fn sha256_hex(path: &Path) -> String {
+    let bytes = fs::read(path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+    sha256_bytes(&bytes)
 }
 
 fn walk_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -71,6 +75,68 @@ fn web_dist_is_fresh_and_meets_csp_and_size_budget() {
             "web/dist is stale: {rel} changed since last build (run scripts/build-web.sh)"
         );
     }
+
+    // 1b. Shared CSS base tokens (first 90 lines of assets/web/style.css) must match.
+    let style_raw = fs::read_to_string(root.join("assets/web/style.css"))
+        .expect("missing assets/web/style.css");
+    let tokens_block: String = style_raw
+        .lines()
+        .take(90)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let want_tokens = manifest["styleTokensSha256"]
+        .as_str()
+        .expect("manifest.styleTokensSha256 must be a string");
+    assert_eq!(
+        sha256_bytes(tokens_block.as_bytes()),
+        want_tokens,
+        "web/dist is stale: assets/web/style.css base tokens changed (run scripts/build-web.sh)"
+    );
+
+    // 1c. Filtered i18n subset for keys used by web/src must match i18n/{en,es,ja}.msg.
+    let i18n_keys: Vec<&str> = manifest["i18nKeys"]
+        .as_array()
+        .expect("manifest.i18nKeys must be an array")
+        .iter()
+        .map(|v| v.as_str().expect("i18n key must be a string"))
+        .collect();
+    let mut catalogs = serde_json::Map::new();
+    for lang in ["en", "es", "ja"] {
+        let mut parsed = std::collections::HashMap::<String, String>::new();
+        if let Ok(raw) = fs::read_to_string(root.join(format!("i18n/{lang}.msg"))) {
+            for line in raw.lines() {
+                let t = line.trim();
+                if t.is_empty() || t.starts_with('#') {
+                    continue;
+                }
+                if let Some((k, v)) = t.split_once('=') {
+                    let k = k.trim();
+                    if !k.is_empty() {
+                        parsed.insert(k.to_string(), v.trim().to_string());
+                    }
+                }
+            }
+        }
+        let mut filtered = serde_json::Map::new();
+        for k in &i18n_keys {
+            if let Some(v) = parsed.get(*k) {
+                filtered.insert((*k).to_string(), Value::String(v.clone()));
+            }
+        }
+        catalogs.insert(lang.to_string(), Value::Object(filtered));
+    }
+    let i18n_source = format!(
+        "export const CATALOGS: Record<string, Record<string, string>> = {};\n",
+        serde_json::to_string(&Value::Object(catalogs)).unwrap()
+    );
+    let want_i18n = manifest["i18nSubsetSha256"]
+        .as_str()
+        .expect("manifest.i18nSubsetSha256 must be a string");
+    assert_eq!(
+        sha256_bytes(i18n_source.as_bytes()),
+        want_i18n,
+        "web/dist is stale: web i18n keys changed in i18n/*.msg (run scripts/build-web.sh)"
+    );
 
     // 2. Every file under web/src/** must be recorded in manifest.inputs.
     let mut src_files = Vec::new();

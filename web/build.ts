@@ -171,15 +171,14 @@ async function buildInto(outDir: string): Promise<void> {
   for (const f of [
     ...walkFiles(SRC_DIR),
     join(WEB_DIR, "build.ts"),
-    STYLE_SRC,
     join(ROOT, "assets/web/favicon.svg"),
     join(ROOT, "assets/web/favicon-light.svg"),
-    join(I18N_DIR, "en.msg"),
-    join(I18N_DIR, "es.msg"),
-    join(I18N_DIR, "ja.msg"),
   ]) {
     if (existsSync(f)) inputs[relative(ROOT, f).replace(/\\/g, "/")] = sha256(readFileSync(f));
   }
+  const styleTokensSha256 = sha256(extractBaseTokens(readFileSync(STYLE_SRC, "utf8")));
+  const i18nKeys = collectI18nKeys(tsFiles);
+  const i18nSubsetSha256 = sha256(i18nSource);
 
   const outputs: Record<string, { bytes: number; gzipBytes: number; sha256: string }> = {};
   let totalAssetGz = 0;
@@ -194,6 +193,9 @@ async function buildInto(outDir: string): Promise<void> {
   const manifest = {
     version: 1,
     totalAssetGzipBytes: totalAssetGz,
+    styleTokensSha256,
+    i18nKeys,
+    i18nSubsetSha256,
     inputs,
     outputs,
   };
