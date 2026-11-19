@@ -182,7 +182,8 @@ fn replay(fs: &[Value], draft: &str) -> String {
     assert_eq!(choose(&p, home, "local:parakeet-v2"), ("local", "parakeet-v2".to_string())); assert_eq!(choose(&p, home, "openai").0, "openai");
 }
 #[test] fn the_engine_a_setting_picks() { assert_eq!([engine_of("auto", true), engine_of("auto", false), engine_of("local", false), engine_of("cloud", true), engine_of("cloud", false)], ["local", "openai", "local", "openai", "openai"]); }
-#[tokio::test(flavor = "multi_thread")] async fn the_local_engine_keeps_one_recognizer_loaded_for_every_session_and_lets_it_go_with_the_cloud() {
+// the resident recognizer serves over a Unix socket, which Windows has none of (resident.rs `sock`): there each helper loads its own
+#[cfg(unix)] #[tokio::test(flavor = "multi_thread")] async fn the_local_engine_keeps_one_recognizer_loaded_for_every_session_and_lets_it_go_with_the_cloud() {
     let _g = ONE.lock().await; let mut r = rig("resident").await; let _ = std::fs::remove_file(r.bin.join("serve-stopped"));
     let res = resident::of(&r.home).unwrap();
     let up = |r: &Rig| r.hub.info_now()["voice.resident"].as_str().map_or(false, |s| s.contains("\"loaded\""));
