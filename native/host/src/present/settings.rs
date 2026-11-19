@@ -333,13 +333,22 @@ pub fn devices(st: &State, session: &Value, info: &Value) -> Vec<Value> {
         else { r.push(row("Pairing link", &format!("Expired at {until}. Each link works for ten minutes."), vec![btn("Add a device", "device-invite", "", false)])) }
     } else if let Some(e) = inv["error"].as_str() { r.push(row("Add a device", &format!("Could not make an invitation: {e}."), vec![btn("Try again", "device-invite", "", false)])) }
     else { r.push(row("Add a device", "Makes a link, a QR code and a short code for one new device. Each works once, for ten minutes.", vec![btn("Add a device", "device-invite", "", false)])) }
+    let enabled = set(st, "web.enabled", "") == "1";
+    r.push(row("Browser access", "Pair a browser over HTTPS using the dedicated Backplane tailnet name. A paired browser can use the terminal.",
+        vec![btn(if enabled { "Turn off" } else { "Turn on" }, "device-web-access", if enabled { "0" } else { "1" }, false)]));
+    if enabled {
+        for req in list["browserPending"].as_array().into_iter().flatten() {
+            r.push(row(s(req, "name"), &format!("Compare {} with the code in your browser.", s(req, "code")),
+                vec![btn("Approve", "device-web-approve", s(req, "id"), false), btn("Deny", "device-web-deny", s(req, "id"), false)]));
+        }
+    }
     let e = draft(session, "@lan.err");
     if !e.is_empty() { r.push(row_tone("Local network", e, "bad")) }
     // the paired devices (a revoked one is kept in the registry, and would only bury these)
     for d in list["devices"].as_array().into_iter().flatten() {
         let name = if s(d, "name").is_empty() { s(d, "id") } else { s(d, "name") };
         if d["revoked"].as_bool().unwrap_or(false) || s(d, "revoked") == "true" { continue }
-        r.push(row(name, "Paired", vec![btn("Revoke", "device-revoke", s(d, "id"), false)]));
+        r.push(row(name, if d["kind"] == "browser" { "Paired browser" } else { "Paired" }, vec![btn("Revoke", "device-revoke", s(d, "id"), false)]));
     }
     for x in list["lan"].as_array().into_iter().flatten() {
         let note = if x["listening"] == true { "The hub also answers here: plain HTTP on that network, not encrypted. Every device still has to pair." } else { "Kept, but this computer does not have this address now." };
@@ -867,6 +876,10 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
         "board-done" => { send(session, hub, "board.set", json!({"item": {"id": value, "status": "done"}}), &mut cmds, &mut rid); json!({}) }
         "board-drop" => { send(session, hub, "board.drop", json!({"id": value}), &mut cmds, &mut rid); json!({}) }
         // Devices: an invitation made here (the registry is the hub's own, the same one /auth/invitations uses), a device or a link revoked
+        "device-web-access" | "device-web-approve" | "device-web-deny" => {
+            send(session, hub, "devices.page.act", json!({"action":action,"value":value}), &mut cmds, &mut rid);
+            json!({})
+        }
         "device-invite" | "device-revoke" | "device-uninvite" | "device-addr" | "device-lan-on" | "device-lan-off" => return device_act(action, value).map(|patch| Out { patch, cmds }),
         "kicad-path" => {
             if !session["drafts"]["@f.kpath"].is_string() { return Some(Out { patch: json!({}), cmds }) }

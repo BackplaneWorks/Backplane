@@ -35,6 +35,7 @@ impl AuthRoutes {
     /// The registry's list with the local network addresses the person let the hub answer on (`lan`) and the main listener's host.
     pub fn devices(&self) -> Value {
         let mut j = self.reg.list();
+        j["browserPending"] = self.reg.browser_pending();
         if j.is_object() { j["lan"] = self.lan().map_or(json!([]), |l| l.list()); j["host"] = json!(self.host); }
         j
     }

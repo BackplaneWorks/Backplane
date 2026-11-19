@@ -29,10 +29,25 @@ pub fn page(session: &Value) -> Value {
     json!({"rows": rows, "state": state_of(session)})
 }
 
+async fn browser_action(hub: &Hub, action: &str, value: &str) -> Result<(), &'static str> {
+    let reg = super::start::registry(&hub.cfg.home).ok_or("registry unavailable")?;
+    if action == "device-web-access" {
+        if !matches!(value, "0" | "1") { return Err("invalid access setting") }
+        hub.commit(&json!({"$":"SettingSet","key":"web.enabled","value":value,"at":crate::hub::now_ms()/1000})).await.map_err(|_| "could not save browser access")?;
+        if value == "0" {
+            reg.browser_clear_pending();
+            hub.close_clients(&reg.browser_clients());
+        }
+    } else if hub.setting("web.enabled").await.as_deref() != Some("1") || !reg.browser_decide(value, action == "device-web-approve") {
+        return Err("browser request expired or already answered")
+    }
+    Ok(())
+}
+
 pub struct DevicesPage;
 impl RpcHandler for DevicesPage {
     fn methods(&self) -> &'static [&'static str] { &["devices.page", "devices.page.act"] }
-    fn call<'a>(&'a self, _hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
+    fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
             let mut session = session_of(&s("state"));
@@ -40,6 +55,13 @@ impl RpcHandler for DevicesPage {
                 let action = s("action");
                 if !action.starts_with("device-") { return vec![json!({"t":"reply","id":id,"ok":false,"error":"unknown action"})] }
                 let (a, v) = (action.clone(), s("value"));
+                if matches!(a.as_str(), "device-web-access" | "device-web-approve" | "device-web-deny") {
+                    let result = browser_action(hub, &a, &v).await;
+                    return vec![match result {
+                        Ok(()) => { let mut reply = page(&session); reply["t"] = json!("reply"); reply["id"] = id.clone(); reply["ok"] = json!(true); reply }
+                        Err(msg) => json!({"t":"reply","id":id,"ok":false,"error":msg})
+                    }]
+                }
                 // the registry and the listener are written to disk: off the async threads
                 let patch = tokio::task::spawn_blocking(move || crate::present::settings::device_act(&a, &v)).await.ok().flatten();
                 match patch { Some(patch) => crate::session::patch::merge(&mut session, &patch), None => return vec![json!({"t":"reply","id":id,"ok":false,"error":"unknown action"})] }
