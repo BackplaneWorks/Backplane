@@ -153,7 +153,7 @@ pub fn id_for(action: &str, value: &str, current: &str) -> &'static str {
     }
 }
 /// A rail view's bare key.
-pub fn rail_letter(kind: &str) -> &'static str { match kind { "board" => "b", "schematic" => "s", "3d" => "3", "split" => "v", "mech" => "m", "files" => "f", "diff" => "d", "review" => "r", "browser" => "w", _ => "" } }
+pub fn rail_letter(kind: &str) -> &'static str { match kind { "terminal" => "`", "board" => "b", "schematic" => "s", "3d" => "3", "split" => "v", "mech" => "m", "files" => "f", "diff" => "d", "review" => "r", "browser" => "w", _ => "" } }
 
 /// Every binding of the client: the editing keys, then these shortcuts with this device's choices.
 pub fn bindings(l: &Local) -> Vec<KeyBinding> {
