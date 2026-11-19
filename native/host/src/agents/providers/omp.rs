@@ -178,7 +178,7 @@ impl Driver for OmpDriver {
         let mut v = args(mode(&a.runtime), &dir(&a.home, &a.thread), &files, pi::model(&a.model), effort(&a.effort));
         v.extend(a.speed_args.iter().cloned()); v // the speed dial: `--service-tier priority|ultrafast` (agents/speed.rs)
     }
-    fn env(&self, a: &TurnIn) -> Vec<(String, String)> { vec![("BACKPLANE_OMP_MCP".into(), a.mcp_url.clone())] }
+    fn env(&self, a: &TurnIn) -> Vec<(String, String)> { vec![("BACKPLANE_OMP_MCP".into(), a.mcp_url.clone()), ("BACKPLANE_OMP_PCBPARTS".into(), a.pcbparts_url.clone())] }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {
         self.turn = pi::Turn { text: a.text.clone(), session: a.session.clone(), ask: pi::asks(&a.runtime) }; self.acp = Acp::default(); init()
     }
@@ -214,7 +214,9 @@ mod tests {
         let a = TurnIn { thread: "th".into(), home: dir_.to_string_lossy().into(), model: "openai/gpt".into(), session: "S9".into(), runtime: "approval-required".into(), text: "say this".into(), prompt: "P".into(), mcp_url: "http://mcp".into(), ..TurnIn::default() };
         let argv = d.argv(&a);
         assert!(argv.windows(2).any(|w| w == ["--model", "openai/gpt"]) && argv.windows(2).any(|w| w == ["--approval-mode", "always-ask"]), "model and runtime reach argv");
-        assert_eq!(d.env(&a), vec![("BACKPLANE_OMP_MCP".to_string(), "http://mcp".to_string())]);
+        assert_eq!(d.env(&a), vec![("BACKPLANE_OMP_MCP".to_string(), "http://mcp".to_string()), ("BACKPLANE_OMP_PCBPARTS".into(), String::new())]);
+        let on = TurnIn { pcbparts_url: "https://pcbparts.dev/mcp".into(), ..a.clone() }; assert_eq!(d.env(&on)[1], ("BACKPLANE_OMP_PCBPARTS".to_string(), "https://pcbparts.dev/mcp".to_string()), "the parts search, as Claude gets it");
+        assert!(EXT.contains("connect(pi, 'pcbparts', parts)"));
         d.start(&a);
         let r = d.on_line(&json!({"type":"response","id":"1","success":true,"data":{"sessionId":"S9","messageCount":4}}));
         assert_eq!(r.send, vec![r#"{"id":"2","type":"prompt","message":"say this"}"#], "the text reaches the prompt; the session is the one resumed");
@@ -247,7 +249,7 @@ mod tests {
         assert!(!v.iter().any(|x| x == "THE PROMPT")); // never in argv
         assert_eq!(std::fs::read_to_string(launch.join("system-prompt.txt")).unwrap(), "THE PROMPT"); assert_eq!(std::fs::read_to_string(launch.join("backplane.js")).unwrap(), EXT);
         { use crate::plat::fs::PermissionsExt; assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(launch.join("system-prompt.txt")).unwrap().permissions().mode() & 0o777, 0o600), 0o600); assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(&launch).unwrap().permissions().mode() & 0o777, 0o700), 0o700); }
-        assert_eq!(d.env(&a), vec![("BACKPLANE_OMP_MCP".to_string(), "http://m".to_string())]);
+        assert_eq!(d.env(&a), vec![("BACKPLANE_OMP_MCP".to_string(), "http://m".to_string()), ("BACKPLANE_OMP_PCBPARTS".into(), String::new())]);
         drop(d); assert!(!launch.exists());
         a.model = "openai/gpt".into(); a.effort = "turbo".into(); let d2 = OmpDriver::new(); let v2 = d2.argv(&a); assert_eq!(&v2[v2.len() - 2..], ["--model", "openai/gpt"]); drop(d2);
     }
@@ -316,6 +318,6 @@ mod tests {
         let r = feed(&mut d, &[r#"{"type":"response","id":"1","success":true,"data":{"sessionId":"new","messageCount":0}}"#]);
         assert_eq!(r[0].plain()[1], json!({"type":"notice","message":"Oh My Pi had no saved conversation for this thread, so this turn starts without the earlier context. This thread's history in Backplane is kept."}));
     }
-    // the file is generated from omp by test/agents/prov-pi/gen_ext.py; its bytes are pinned
-    #[test] fn the_extension_is_omp_byte_for_byte() { use sha2::{Digest, Sha256}; assert_eq!(hex::encode(Sha256::digest(EXT.as_bytes())), "a5ebd02e761b170ef6daca3d07c6bc168f978cf6062a9237740d79d723c3e442") }
+    // the file is generated from omp by test/agents/prov-pi/gen_ext.py (its source, the Bend hub, is gone: this file is the source now, with pcbparts added); its bytes are pinned
+    #[test] fn the_extension_is_omp_byte_for_byte() { use sha2::{Digest, Sha256}; assert_eq!(hex::encode(Sha256::digest(EXT.as_bytes())), "2cc26e2377ddd0c2f9aeb205dde788d0cdf7e1dc997a0fb21ff1c60563ab15dd") }
 }

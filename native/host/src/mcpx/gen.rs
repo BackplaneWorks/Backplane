@@ -90,10 +90,11 @@ pub fn codex_approve(ids: &[String], runtime: &str) -> Vec<String> {
     ids.iter().flat_map(|id| ["-c".to_string(), format!("mcp_servers.{id}.default_tools_approval_mode=\"approve\"")]).collect()
 }
 
-/// The ACP agents' `mcpServers` (session/new): Backplane's own, then the list; headers with their secrets put in (they go on the agent's stdin).
+/// The ACP agents' `mcpServers` (session/new): Backplane's own, pcbparts, then the list; headers with their secrets put in (they go on the agent's stdin).
 pub fn acp(servers: &[&Server], c: &Ctx, vault: Vault) -> Value {
     let nv = |kv: &[(String, String)]| Value::Array(kv.iter().map(|(k, v)| json!({"name":k,"value":v})).collect());
     let mut out = vec![json!({"type":"http","name":"backplane","url":c.url,"headers":[]})];
+    if c.pcbparts { out.push(json!({"type":"http","name":"pcbparts","url":PCBPARTS,"headers":[]})) }
     for s in servers {
         out.push(if s.remote() {
             let hs: Vec<(String, String)> = s.headers.iter().filter_map(|h| value(h, vault).map(|v| (h.k.clone(), v))).collect();
@@ -144,7 +145,10 @@ mod tests {
     }
     #[test] fn acp_gets_name_value_lists() {
         let (a, b) = (st(), rem()); let v = acp(&[&a, &b], &c(), &vault);
-        assert_eq!(v[0]["name"], "backplane"); assert_eq!(v[1], json!({"name":"fetch","command":"/opt/bp/backplane-hub","args":["--mcp-run","fetch"],"env":[{"name":"BACKPLANE_MCP_URL","value":"http://127.0.0.1:9/mcp/t.1?k=K"}]}));
+        assert_eq!(v[0]["name"], "backplane"); assert_eq!(v[1], json!({"type":"http","name":"pcbparts","url":PCBPARTS,"headers":[]}), "the built-in parts search, as Claude and Codex get it");
+        let v = Value::Array(v.as_array().unwrap().iter().filter(|s| s["name"] != "pcbparts").cloned().collect());
+        assert_eq!(acp(&[], &Ctx { pcbparts: false, ..c() }, &vault).as_array().unwrap().len(), 1, "turned off in Settings: Backplane's own only");
+        assert_eq!(v[1], json!({"name":"fetch","command":"/opt/bp/backplane-hub","args":["--mcp-run","fetch"],"env":[{"name":"BACKPLANE_MCP_URL","value":"http://127.0.0.1:9/mcp/t.1?k=K"}]}));
         assert_eq!(v[2]["headers"], json!([{"name":"X-Mode","value":"ro"},{"name":"Authorization","value":"Bearer ghp_SECRET"}])); assert_eq!(v[2]["type"], "http");
     }
     #[test] fn the_fingerprint_moves_with_the_list() {

@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 /// MspTurn: what a turn needs. `nonce` is the turn's gen: Muse refuses a command id it has seen, in any session.
 #[derive(Clone, Debug, Default)]
-pub struct MspTurn { pub cwd: String, pub mcp: String, pub prompt: String, pub text: String, pub session: String, pub mode: String, pub effort: String, pub nonce: String, pub model: String }
+pub struct MspTurn { pub cwd: String, pub mcp: String, /** the built-in parts search's URL; empty when it is off */ pub pcbparts: String, pub prompt: String, pub text: String, pub session: String, pub mode: String, pub effort: String, pub nonce: String, pub model: String }
 
 /// AcpOut: lines to write to Muse, shapes for the log, approval requests for the person (the raw request line each).
 #[derive(Debug, Default)]
@@ -37,11 +37,16 @@ pub fn uuid(nonce: &str, k: &str) -> String { let x = pad(&digits(nonce), 28); f
 pub fn init() -> String {
     rpc(1, "initialize", json!({"clientInfo":{"name":"backplane","title":"Backplane","version":"1"},"capabilities":{"requestedCapabilities":["sessionMcp"],"userInputDialogs":false}}))
 }
-fn config(url: &str) -> Value { json!({"mcpServers":{"backplane":{"transport":"streamableHttp","url":url,"mode":"optional"}}}) }
+/// The session's MCP servers: Backplane's own and, while it is on, the built-in parts search (pcbparts), as Claude and Codex get it.
+fn config(t: &MspTurn) -> Value {
+    let mut m = json!({"backplane":{"transport":"streamableHttp","url":t.mcp,"mode":"optional"}});
+    if !t.pcbparts.is_empty() { m["pcbparts"] = json!({"transport":"streamableHttp","url":t.pcbparts,"mode":"optional"}) }
+    json!({"mcpServers": m})
+}
 /// Msp.open: a new session or the thread's own.
 pub fn open(t: &MspTurn) -> String {
-    if t.session.is_empty() { rpc(2, "session/start", json!({"commandId":uuid(&t.nonce, "1"),"workspaceRoot":t.cwd,"approvalMode":t.mode,"config":config(&t.mcp)})) }
-    else { rpc(2, "session/resume", json!({"commandId":uuid(&t.nonce, "1"),"sessionId":t.session,"excludeItems":true,"config":config(&t.mcp)})) }
+    if t.session.is_empty() { rpc(2, "session/start", json!({"commandId":uuid(&t.nonce, "1"),"workspaceRoot":t.cwd,"approvalMode":t.mode,"config":config(t)})) }
+    else { rpc(2, "session/resume", json!({"commandId":uuid(&t.nonce, "1"),"sessionId":t.session,"excludeItems":true,"config":config(t)})) }
 }
 fn say_rpc(sid: &str, t: &MspTurn, text: &str) -> String {
     let mut p = json!({"commandId":uuid(&t.nonce, "3"),"sessionId":sid,"input":[{"type":"text","text":text}],"displayText":t.text});
@@ -181,7 +186,7 @@ pub fn mode(runtime: &str) -> &'static str { mode_k(match runtime { "approval-re
 mod tests {
     use super::*;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
-    fn turn(sid: &str) -> MspTurn { MspTurn { cwd: "/tmp/p".into(), mcp: "http://127.0.0.1:1/mcp/t?token=x".into(), prompt: "RULES".into(), text: "hello".into(), session: sid.into(), mode: "promptUnmatched".into(), effort: "".into(), nonce: "1791825557-42".into(), model: "".into() } }
+    fn turn(sid: &str) -> MspTurn { MspTurn { cwd: "/tmp/p".into(), mcp: "http://127.0.0.1:1/mcp/t?token=x".into(), pcbparts: "https://pcbparts.dev/mcp".into(), prompt: "RULES".into(), text: "hello".into(), session: sid.into(), mode: "promptUnmatched".into(), effort: "".into(), nonce: "1791825557-42".into(), model: "".into() } }
     fn turn_hi(sid: &str) -> MspTurn { MspTurn { mode: "allowAll".into(), effort: "high".into(), nonce: "1791825557-43".into(), ..turn(sid) } }
     fn m(l: &str) -> String { j(l)["method"].as_str().unwrap_or("").to_string() }
     fn p(l: &str) -> Value { j(l)["params"].clone() }
@@ -196,6 +201,8 @@ mod tests {
         assert_eq!(m(&o1.send[0]), "initialized"); assert_eq!(m(&o1.send[1]), "session/start");
         assert_eq!(p(&o1.send[1])["approvalMode"], "promptUnmatched");
         assert_eq!(p(&o1.send[1])["config"]["mcpServers"]["backplane"]["url"], "http://127.0.0.1:1/mcp/t?token=x");
+        assert_eq!(p(&o1.send[1])["config"]["mcpServers"]["pcbparts"], json!({"transport":"streamableHttp","url":"https://pcbparts.dev/mcp","mode":"optional"}), "the parts search, as Claude gets it");
+        let off = Msp::new().line(&MspTurn { pcbparts: String::new(), ..turn("") }, &j(INIT_OK)); assert!(p(&off.send[1])["config"]["mcpServers"].get("pcbparts").is_none(), "turned off in Settings");
         assert_eq!(p(&o1.send[1])["commandId"], "00000000-0000-7000-8017-918255574210");
         let ob = Msp::new().line(&turn("OLD"), &j(r#"{"id":1,"jsonrpc":"2.0","result":{}}"#)); assert_eq!(m(&ob.send[1]), "session/resume");
         let (_, ob2) = opened("OLD", &turn("OLD")); assert_eq!(m(&ob2.send[0]), "session/setApprovalMode"); assert_eq!(m(&ob2.send[1]), "turn/start");

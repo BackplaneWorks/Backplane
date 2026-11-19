@@ -65,7 +65,9 @@ So no secret is ever on a command line or in a file, and every provider gets the
 | Codex | `-c mcp_servers.<id>.url=…`, `http_headers`, `disabled_tools`, `startup_timeout_sec` | `env_http_headers`: an env variable of the Codex process named `BACKPLANE_MCP_<ID>_<n>_TOKEN`, which Codex's shell policy keeps out of the commands it runs |
 | Antigravity, Grok, OpenCode (ACP) | `mcpServers` in `session/new` / `load` / `resume` | `headers` on the agent's stdin |
 
-Muse, Pi, Oh My Pi and the agy CLI mode still get Backplane's own server only.
+Muse, Pi, Oh My Pi and the agy CLI mode still get Backplane's own server and none of the list.
+
+**The built-in parts search (pcbparts) reaches every provider** while it is on (`mcp.pcbparts`): Claude's `--mcp-config`, Codex's `-c mcp_servers.pcbparts.url`, the ACP agents' `mcpServers` (`gen::acp`), Muse's session `config` (`msp.rs`), Pi's and Oh My Pi's extensions (`BACKPLANE_PI_PCBPARTS`, `BACKPLANE_OMP_PCBPARTS`), and the agy CLI's `~/.gemini/config/mcp_config.json` (`"pcbparts": {"serverUrl": …}`, kept while it is on and taken out when it is turned off; a `pcbparts` of the person's own is left as it is). agy answers a call to a server it was never given with "tool X is not enabled for server pcbparts".
 
 **Changes apply from each thread's next turn, without a hub restart.** Codex and the ACP agents start a session per turn. A Claude process lives across turns, so the list's fingerprint is part of its agent key: when its servers change, it is started again at its next turn on the same session.
 

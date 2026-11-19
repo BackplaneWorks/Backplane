@@ -8,6 +8,9 @@
 //! The Backplane MCP server: agy reads MCP servers only from `~/.gemini/config/mcp_config.json` (no flag, no per-session file), and starts a stdio
 //! server with its own environment. So `prepare` keeps one entry there, `backplane`, a stdio command that runs this hub's `--mcp-stdio` bridge
 //! (agents/mcp_stdio.rs) on `BACKPLANE_MCP_URL`, the thread's endpoint for this process. Outside Backplane the variables are unset and it exits at once.
+//! The built-in parts search, `pcbparts`, is kept there too as agy's own remote entry (`serverUrl`, what `agy mcp add` writes) while it is on in
+//! Settings > MCP servers, and taken out again when it is turned off. agy says "tool X is not enabled for server pcbparts" for a server it was
+//! never given, so without it the prompt's jlc_search / jlc_stock_check could not be called.
 //!
 //! Approvals: headless agy cannot ask, it denies what its mode does not allow and names it in `denied_actions`. Backplane's modes map to agy's:
 //! supervised is agy's own review mode (with the person's allow rules in ~/.gemini/settings.json), accept edits `--mode accept-edits`, auto
@@ -20,6 +23,9 @@ pub const MCP_NAME: &str = "backplane";
 /// The stdio command agy starts for the `backplane` server: the hub's bridge when a Backplane turn started it, nothing otherwise.
 pub const MCP_SH: &str = "[ -n \"$BACKPLANE_MCP_URL\" ] && [ -x \"$BACKPLANE_HUB_EXE\" ] && exec \"$BACKPLANE_HUB_EXE\" --mcp-stdio; exit 0";
 pub fn mcp_entry() -> Value { json!({"command": "sh", "args": ["-c", MCP_SH]}) }
+pub const PCBPARTS_NAME: &str = "pcbparts";
+/// The `pcbparts` entry Backplane keeps: a remote server, in the form `agy mcp add pcbparts <url>` writes.
+pub fn pcbparts_entry() -> Value { json!({"serverUrl": crate::mcpx::gen::PCBPARTS}) }
 
 /// How agy is started: `sh -c RUN agy ARGS...` (the hub resolves `sh`; agy is the person's own binary, run as it is).
 pub const RUN: &str = "exec \"$0\" \"$@\"";
@@ -35,9 +41,10 @@ pub fn mcp_config(home: &Path) -> PathBuf { home.join(".gemini/config/mcp_config
 /// What `ensure_mcp` did: the entry was there, was written, or the file is not one Backplane can safely edit (said on the thread).
 #[derive(Debug, PartialEq)]
 pub enum Mcp { Had, Wrote, Skipped(String) }
-/// Keeps `backplane` in agy's mcp_config.json, leaving every other server and key as it is. A file that is not plain JSON (agy also takes
-/// comments and trailing commas) or a `backplane` server that is the person's own is left alone.
-pub fn ensure_mcp(path: &Path) -> Mcp {
+/// Keeps `backplane` in agy's mcp_config.json, and `pcbparts` while it is on (`pcbparts`), leaving every other server and key as it is. A file
+/// that is not plain JSON (agy also takes comments and trailing commas) or a `backplane` server that is the person's own is left alone; a
+/// `pcbparts` of the person's own is kept as it is, on or off.
+pub fn ensure_mcp(path: &Path, pcbparts: bool) -> Mcp {
     let mut o: Value = match std::fs::read_to_string(path) {
         Ok(t) if t.trim().is_empty() => json!({}),
         Ok(t) => match serde_json::from_str::<Value>(&t) { Ok(v) if v.is_object() => v, _ => return Mcp::Skipped(format!("{} is not plain JSON, so Backplane left it alone", path.display())) },
@@ -47,12 +54,16 @@ pub fn ensure_mcp(path: &Path) -> Mcp {
     if !o.get("mcpServers").map_or(true, Value::is_object) { return Mcp::Skipped(format!("{} has an mcpServers that is not an object", path.display())) }
     let servers = o.as_object_mut().unwrap().entry("mcpServers").or_insert_with(|| json!({}));
     let ours = mcp_entry();
+    let parts = servers.get(PCBPARTS_NAME).cloned();
+    let parts_ok = match &parts { None => !pcbparts, Some(v) => *v != pcbparts_entry() || pcbparts };
     match servers.get(MCP_NAME) {
-        Some(v) if *v == ours => return Mcp::Had,
-        Some(v) if !v.to_string().contains("BACKPLANE_MCP_URL") => return Mcp::Skipped(format!("{} already has a server named {MCP_NAME} of its own", path.display())),
+        Some(v) if *v == ours && parts_ok => return Mcp::Had,
+        Some(v) if *v != ours && !v.to_string().contains("BACKPLANE_MCP_URL") => return Mcp::Skipped(format!("{} already has a server named {MCP_NAME} of its own", path.display())),
         _ => {}
     }
-    servers.as_object_mut().unwrap().insert(MCP_NAME.into(), ours);
+    let m = servers.as_object_mut().unwrap();
+    m.insert(MCP_NAME.into(), ours);
+    match (&parts, pcbparts) { (None, true) => { m.insert(PCBPARTS_NAME.into(), pcbparts_entry()); } (Some(v), false) if *v == pcbparts_entry() => { m.remove(PCBPARTS_NAME); } _ => {} }
     let text = serde_json::to_string_pretty(&o).unwrap_or_default() + "\n";
     let dir = path.parent().unwrap_or(Path::new("."));
     let r = (|| -> std::io::Result<()> {
@@ -275,14 +286,32 @@ mod tests {
     }
     #[test] fn the_mcp_entry_is_kept_and_nothing_else_is_touched() {
         let d = super::super::muse::e2e::dir("agy-cli-mcp"); let p = mcp_config(&d);
-        assert_eq!(ensure_mcp(&p), Mcp::Wrote); let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap(); assert_eq!(v["mcpServers"]["backplane"], mcp_entry());
-        assert_eq!(ensure_mcp(&p), Mcp::Had);
+        assert_eq!(ensure_mcp(&p, false), Mcp::Wrote); let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap(); assert_eq!(v["mcpServers"]["backplane"], mcp_entry());
+        assert_eq!(ensure_mcp(&p, false), Mcp::Had); assert!(v["mcpServers"].get("pcbparts").is_none());
         std::fs::write(&p, r#"{"other":1,"mcpServers":{"aws":{"command":"uvx"},"backplane":{"command":"sh","args":["-c","old BACKPLANE_MCP_URL"]}}}"#).unwrap();
-        assert_eq!(ensure_mcp(&p), Mcp::Wrote); let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        assert_eq!(ensure_mcp(&p, false), Mcp::Wrote); let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
         assert_eq!(v["other"], 1); assert_eq!(v["mcpServers"]["aws"]["command"], "uvx"); assert_eq!(v["mcpServers"]["backplane"], mcp_entry());
         let keys: Vec<&String> = v["mcpServers"].as_object().unwrap().keys().collect(); assert_eq!(keys, ["aws", "backplane"], "the person's order is kept");
-        std::fs::write(&p, r#"{"mcpServers":{"backplane":{"url":"https://mine"}}}"#).unwrap(); assert!(matches!(ensure_mcp(&p), Mcp::Skipped(w) if w.contains("of its own")));
-        std::fs::write(&p, "{ // a comment\n}").unwrap(); assert!(matches!(ensure_mcp(&p), Mcp::Skipped(w) if w.contains("not plain JSON"))); assert_eq!(std::fs::read_to_string(&p).unwrap(), "{ // a comment\n}");
+        std::fs::write(&p, r#"{"mcpServers":{"backplane":{"url":"https://mine"}}}"#).unwrap(); assert!(matches!(ensure_mcp(&p, true), Mcp::Skipped(w) if w.contains("of its own")));
+        std::fs::write(&p, "{ // a comment\n}").unwrap(); assert!(matches!(ensure_mcp(&p, true), Mcp::Skipped(w) if w.contains("not plain JSON"))); assert_eq!(std::fs::read_to_string(&p).unwrap(), "{ // a comment\n}");
+    }
+    /// The bug: agy was given `backplane` only, so `call_mcp_tool pcbparts jlc_search` failed "tool jlc_search is not enabled for server pcbparts".
+    #[test] fn pcbparts_is_kept_while_it_is_on_and_taken_out_when_it_is_off() {
+        let d = super::super::muse::e2e::dir("agy-cli-pcbparts"); let p = mcp_config(&d);
+        let read = || -> Value { serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap() };
+        assert_eq!(ensure_mcp(&p, true), Mcp::Wrote); let v = read();
+        assert_eq!(v["mcpServers"]["backplane"], mcp_entry()); assert_eq!(v["mcpServers"]["pcbparts"], json!({"serverUrl": "https://pcbparts.dev/mcp"}));
+        assert_eq!(ensure_mcp(&p, true), Mcp::Had);
+        // a file from before (backplane only) gains it at the next turn
+        std::fs::write(&p, serde_json::to_string(&json!({"mcpServers": {"backplane": mcp_entry()}})).unwrap()).unwrap();
+        assert_eq!(ensure_mcp(&p, true), Mcp::Wrote); assert_eq!(read()["mcpServers"]["pcbparts"], pcbparts_entry());
+        // turned off in Settings: ours goes, backplane stays
+        assert_eq!(ensure_mcp(&p, false), Mcp::Wrote); let v = read(); assert!(v["mcpServers"].get("pcbparts").is_none()); assert_eq!(v["mcpServers"]["backplane"], mcp_entry());
+        assert_eq!(ensure_mcp(&p, false), Mcp::Had);
+        // the person's own pcbparts (agy mcp add writes "disabled": false) is theirs, on or off
+        let mine = json!({"disabled": false, "serverUrl": "https://pcbparts.dev/mcp"});
+        std::fs::write(&p, serde_json::to_string(&json!({"mcpServers": {"backplane": mcp_entry(), "pcbparts": mine}})).unwrap()).unwrap();
+        assert_eq!(ensure_mcp(&p, true), Mcp::Had); assert_eq!(ensure_mcp(&p, false), Mcp::Had); assert_eq!(read()["mcpServers"]["pcbparts"], mine);
         assert_eq!(std::fs::read_dir(p.parent().unwrap()).unwrap().count(), 1, "no temporary file is left");
     }
     #[test] fn the_mcp_command_does_nothing_outside_backplane() {

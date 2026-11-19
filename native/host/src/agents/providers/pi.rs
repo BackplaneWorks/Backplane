@@ -263,7 +263,7 @@ impl Driver for PiDriver {
         v.extend(kistack_arg(&a.home)); v
     }
     /// BACKPLANE_PI_MCP and BACKPLANE_PI_MODE: what Backplane's extension reads.
-    fn env(&self, a: &TurnIn) -> Vec<(String, String)> { vec![("BACKPLANE_PI_MCP".into(), a.mcp_url.clone()), ("BACKPLANE_PI_MODE".into(), mode(&a.runtime).into())] }
+    fn env(&self, a: &TurnIn) -> Vec<(String, String)> { vec![("BACKPLANE_PI_MCP".into(), a.mcp_url.clone()), ("BACKPLANE_PI_PCBPARTS".into(), a.pcbparts_url.clone()), ("BACKPLANE_PI_MODE".into(), mode(&a.runtime).into())] }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {
         self.turn = Turn { text: a.text.clone(), session: a.session.clone(), ask: asks(&a.runtime) }; self.acp = Acp::default(); vec![init()]
     }
@@ -306,7 +306,9 @@ mod tests {
         let a = TurnIn { thread: "th".into(), home: dir.to_string_lossy().into(), model: "openai/gpt".into(), session: "S9".into(), runtime: "approval-required".into(), text: "say this".into(), prompt: "P".into(), mcp_url: "http://mcp".into(), ..TurnIn::default() };
         let argv = d.argv(&a);
         assert!(argv.windows(2).any(|w| w == ["--model", "openai/gpt"]) && argv.windows(2).any(|w| w == ["--session-id", "S9"]), "model and session reach argv");
-        assert_eq!(d.env(&a), vec![("BACKPLANE_PI_MCP".to_string(), "http://mcp".to_string()), ("BACKPLANE_PI_MODE".into(), "ask".into())]);
+        assert_eq!(d.env(&a), vec![("BACKPLANE_PI_MCP".to_string(), "http://mcp".to_string()), ("BACKPLANE_PI_PCBPARTS".into(), String::new()), ("BACKPLANE_PI_MODE".into(), "ask".into())]);
+        let on = TurnIn { pcbparts_url: "https://pcbparts.dev/mcp".into(), ..a.clone() }; assert_eq!(d.env(&on)[1], ("BACKPLANE_PI_PCBPARTS".to_string(), "https://pcbparts.dev/mcp".to_string()), "the parts search, as Claude gets it");
+        assert!(EXT.contains("registerMcpServer('pcbparts'") && EXT.contains("mcp__pcbparts__"), "the extension adds pcbparts and lets its lookups through");
         d.start(&a);
         let r = d.on_line(&json!({"type":"response","id":"1","success":true,"data":{"sessionId":"S9","messageCount":4}}));
         assert_eq!(r.send, vec![r#"{"id":"2","type":"prompt","message":"say this"}"#], "the text reaches the prompt");
@@ -325,12 +327,12 @@ mod tests {
         let v = d.argv(&a);
         assert_eq!(v, vec!["--mode", "rpc", "--session-id", "bp-t1-9-0", "-e", &format!("{}/pi/backplane.js", a.home), "--append-system-prompt", "P", "--model", "anthropic/claude-x", "--thinking", "high"]);
         assert_eq!(std::fs::read_to_string(dir.join("pi/backplane.js")).unwrap(), EXT);
-        assert_eq!(d.env(&a), vec![("BACKPLANE_PI_MCP".to_string(), a.mcp_url.clone()), ("BACKPLANE_PI_MODE".into(), "ask".into())]);
+        assert_eq!(d.env(&a), vec![("BACKPLANE_PI_MCP".to_string(), a.mcp_url.clone()), ("BACKPLANE_PI_PCBPARTS".into(), a.pcbparts_url.clone()), ("BACKPLANE_PI_MODE".into(), "ask".into())]);
         a.model = "default".into(); a.effort = "".into(); a.session = "sess-1".into();
         assert_eq!(d.argv(&a)[3], "sess-1"); assert_eq!(d.argv(&a).len(), 8);
     }
-    // the file is generated from pi by test/agents/prov-pi/gen_ext.py; its bytes are pinned
-    #[test] fn the_extension_is_pi_byte_for_byte() { use sha2::{Digest, Sha256}; assert_eq!(hex::encode(Sha256::digest(EXT.as_bytes())), "97e272d8ae5d6a2bbb06895fa13c4b03053ef17772fe5d7bb813cc858fa6af5f") }
+    // the file is generated from pi by test/agents/prov-pi/gen_ext.py (its source, the Bend hub, is gone: this file is the source now, with pcbparts added); its bytes are pinned
+    #[test] fn the_extension_is_pi_byte_for_byte() { use sha2::{Digest, Sha256}; assert_eq!(hex::encode(Sha256::digest(EXT.as_bytes())), "83f96d0c0cb7d68d42bd9e0a8948ae5077b3554d62bcb8c53b6465bea0756c42") }
 
     #[test] fn a_turn_streams_a_reply_and_ends() {
         let mut d = PiDriver::new(); assert_eq!(d.start(&ti("full-access")), vec![r#"{"id":"1","type":"get_state"}"#]);

@@ -30,7 +30,7 @@ impl Driver for MuseDriver {
     fn argv(&self, a: &TurnIn) -> Vec<String> { args(&a.runtime, &a.model) }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {
         self.runtime = a.runtime.clone();
-        self.turn = msp::MspTurn { cwd: a.cwd.clone(), mcp: a.mcp_url.clone(), prompt: a.prompt.clone(), text: a.text.clone(), session: a.session.clone(), mode: msp::mode(&a.runtime).into(), effort: effort(&a.effort).into(), nonce: nonce(&a.gen), model: if a.model == "default" { String::new() } else { a.model.clone() } };
+        self.turn = msp::MspTurn { cwd: a.cwd.clone(), mcp: a.mcp_url.clone(), pcbparts: a.pcbparts_url.clone(), prompt: a.prompt.clone(), text: a.text.clone(), session: a.session.clone(), mode: msp::mode(&a.runtime).into(), effort: effort(&a.effort).into(), nonce: nonce(&a.gen), model: if a.model == "default" { String::new() } else { a.model.clone() } };
         self.st = msp::Msp::new();
         vec![msp::init()]
     }
