@@ -1,7 +1,7 @@
 //! backplane-hub: the Backplane hub for native clients (GPUI, SwiftUI, Compose).
 //! HTTP + authenticated WebSocket; renderer `mobile`; the picture comes from the presenter.
 mod agents; mod memscope; mod scopeprobe; mod api; mod fab; mod plan; mod review; mod google; mod import014; mod auth; mod bots; mod cbor; mod commands; mod data; mod copy; mod delta; mod files; mod guard; mod hub; mod md; mod mcpx; mod mirror; mod model; mod mouse; mod net; mod plat; #[cfg(test)] #[path = "plat/tests.rs"] mod plat_tests; mod present;
-mod presenter; mod proc; mod push; mod session; mod settings; mod shelf; mod sidebar; mod signal; mod stamp; mod state; #[path = "state/host.rs"] mod statehost; mod ckpt; mod ckptrun; #[cfg(test)] mod fold_inputs; /* the build scripts it runs are the Linux and macOS build machines' (dev-build.sh), not the Windows hub's */ #[cfg(all(test, unix))] mod oneshot_script_tests; mod startup; mod store; mod term; mod update; mod voice; mod wire; mod window;
+mod presenter; mod proc; mod push; mod session; mod settings; mod shelf; mod sidebar; mod signal; mod stamp; mod state; #[path = "state/host.rs"] mod statehost; mod ckpt; mod ckptrun; #[cfg(test)] mod fold_inputs; /* the build scripts it runs are the Linux and macOS build machines' (dev-build.sh), not the Windows hub's */ #[cfg(all(test, unix))] mod oneshot_script_tests; #[cfg(all(test, unix))] mod codex_apikey_tests; mod startup; mod store; mod term; mod update; mod voice; mod wire; mod window;
 
 #[cfg(test)] #[path = "../../winres.rs"] mod winres; #[cfg(test)] mod winres_tests;
 

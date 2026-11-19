@@ -396,11 +396,19 @@ pub fn spawn_person(person: &PersonChild, program: &Path, args: &[String], cwd: 
 /// `spawn_person`, holding `keep` until the process ends.
 pub fn spawn_person_holding(person: &PersonChild, program: &Path, args: &[String], cwd: &Path, env: &[(String, String)], keep: Vec<RunFile>) -> std::io::Result<Proc> { spawn_with(crate::proc::Kind::PersonTurn, Some(person), program, args, cwd, None, env, keep) }
 #[allow(clippy::too_many_arguments)]
+/// The variables that would make a Codex child bill a paid OpenAI API key instead of its ChatGPT sign-in: removed from every Codex the hub
+/// starts (a turn, a title, a swarm worker), whatever the hub inherited. Nothing for any other program. A test that means to run Codex on a
+/// key does it through scripts/codex-apikey.sh, which sets them itself and pins the cheapest model.
+pub fn no_api_key(program: &Path) -> &'static [&'static str] {
+    let stem = program.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
+    if stem == "codex" || stem.starts_with("codex-") { &["OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL", "OPENAI_ORG_ID", "OPENAI_ORGANIZATION", "OPENAI_PROJECT"] } else { &[] }
+}
 fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Path>, env: &[(String, String)], keep: Vec<RunFile>) -> std::io::Result<Proc> {
     let args: Vec<String> = args.iter().map(|a| crate::settings::mask::mask(a)).collect(); // settings lane: Spawn.agent masks every launch argument
     // Windows: an npm shim runs as what it starts, and nothing else goes through cmd.exe or sh with arguments they would change (`plan`)
     // a test's stand-in (a script in the stand-in folder `extra_path`, started through bp-sh) gets its arguments as given (`plan_for`)
     let standin = extra_path.is_some_and(|d| is_standin(program, d) && crate::plat::helper("bp-sh").is_some());
+    let api_vars = no_api_key(program); // by the CLI asked for, before an npm shim or bp-sh stands in for it
     let (program, pre) = plan_for(program, &args, cfg!(windows), &|| find_in(search_dirs(), "node", true), standin).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
     // its own memory scope (memscope.rs): a runaway it starts is killed alone, never the hub's scope with every agent in it
     // a launch that fails for its scope (an older systemd, no user manager) starts again unscoped (memscope::spawn), never failing the agent
@@ -420,6 +428,7 @@ fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &P
         None => { if let Some(o) = OWNER.get() { c.env("BACKPLANE_AGENT_OWNER", o).env("BACKPLANE_LOCK_HOME", o); } } // scripts/bp-lock.sh finds its hub by it (never BACKPLANE_HOME: proc::HUB_ONLY)
         Some(p) => { let (remove, set) = super::person::child_env(&p.home, &p.path, std::env::vars_os()); for k in remove { c.env_remove(k); } for (k, v) in set { c.env(k, v); } } // no BACKPLANE_* (so no owner mark either: PDEATHSIG ends it with the hub)
     }
+    for k in api_vars { c.env_remove(k); } // last: Codex runs on its ChatGPT sign-in, never on a paid API key, inherited or passed (Nov 19)
     // Linux: the kernel kills the agent when the hub dies (PDEATHSIG); Windows: its Job Object does. Elsewhere the `reaper` watcher does (the whole group, grandchildren included).
     crate::plat::proc::agent_group(&mut c);
     c };
@@ -458,6 +467,10 @@ pub fn alive(pid: u32) -> bool { crate::plat::proc::alive(pid) }
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_codex_child_never_gets_an_api_key_and_nothing_else_loses_one() {
+        for p in ["/usr/bin/codex", "/x/codex.cmd", "C:/npm/codex.exe", "/x/Codex", "/x/codex-aarch64-apple-darwin"] { assert!(no_api_key(Path::new(p)).contains(&"OPENAI_API_KEY") && no_api_key(Path::new(p)).contains(&"CODEX_API_KEY"), "{p}") }
+        for p in ["/usr/bin/claude", "/x/node", "/x/opencode", "/x/grok", "/x/codexy"] { assert!(no_api_key(Path::new(p)).is_empty(), "{p}") }
+    }
     /// Windows has no login shell's PATH to read: nothing is started for it (PowerShell was handed sh's -lc at every hub start).
     #[test] fn the_login_shell_is_asked_for_its_path_only_where_there_is_one() {
         assert!(probes_login_shell(false) && !probes_login_shell(true));
@@ -578,6 +591,15 @@ mod tests {
     }
     #[test] fn a_copy_of_a_log_without_standins_runs_nothing() { let a = Cli { dir: None, copy: true }; assert!(a.resolve("claude").unwrap_err().contains("refused")); }
 
+    #[tokio::test] async fn a_codex_the_hub_starts_has_no_api_key_even_one_passed_to_it() {
+        let d = dir("nokey"); let body = "echo \"key=${OPENAI_API_KEY:-none} cx=${CODEX_API_KEY:-none} other=${OTHER:-none}\"";
+        script(&d, "codex", body); script(&d, "claude", body);
+        let env = [("OPENAI_API_KEY".to_string(), "sk-x".to_string()), ("CODEX_API_KEY".to_string(), "sk-x".to_string()), ("OTHER".to_string(), "kept".to_string())];
+        let mut p = spawn(&d.join("codex"), &[], &d, None, &env).unwrap(); drop(p.input);
+        assert_eq!(p.lines.recv().await.unwrap(), "key=none cx=none other=kept", "a Codex child runs on its ChatGPT sign-in");
+        let mut p = spawn(&d.join("claude"), &[], &d, None, &env).unwrap(); drop(p.input);
+        assert_eq!(p.lines.recv().await.unwrap(), "key=sk-x cx=sk-x other=kept", "another program keeps what it is given");
+    }
     #[tokio::test] async fn lines_in_lines_out_and_the_exit_is_reaped() {
         let d = dir("io"); script(&d, "echoer", "while read l; do echo \"got:$l\"; done; exit 3");
         let mut p = spawn(&d.join("echoer"), &[], &d, None, &[]).unwrap();

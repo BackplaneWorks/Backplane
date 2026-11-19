@@ -26,8 +26,8 @@ if (process.env.CC_TOKEN_FILE) {
   chmodSync(join(BINS, 'claude'), 0o755);
 }
 if (process.env.OPENAI_KEY_FILE) {
-  mkdirSync(join(OUT, 'cx'), {recursive: true});
-  writeFileSync(join(BINS, 'codex'), `#!/bin/sh\nexport OPENAI_API_KEY="$(cat '${process.env.OPENAI_KEY_FILE}')"\nexport CODEX_API_KEY="$OPENAI_API_KEY"\nexport CODEX_HOME='${join(OUT, 'cx')}'\nexec '${real('codex')}' "$@"\n`);
+  // a paid API key: only through scripts/codex-apikey.sh, which pins the cheapest model and refuses any other (Nov 19: a run naming no model spent the key on gpt-6.2-sol)
+  writeFileSync(join(BINS, 'codex'), `#!/bin/sh\nexport CODEX_APIKEY_FILE='${process.env.OPENAI_KEY_FILE}'\nexport CODEX_APIKEY_HOME='${join(OUT, 'cx')}'\nexport CODEX_APIKEY_REAL='${real('codex')}'\nexport CODEX_APIKEY_TURNS=3\nexec '${join(import.meta.dir, '../../scripts/codex-apikey.sh')}' "$@"\n`);
   chmodSync(join(BINS, 'codex'), 0o755);
 }
 
