@@ -396,10 +396,14 @@ pub fn spawn_person(person: &PersonChild, program: &Path, args: &[String], cwd: 
 /// `spawn_person`, holding `keep` until the process ends.
 pub fn spawn_person_holding(person: &PersonChild, program: &Path, args: &[String], cwd: &Path, env: &[(String, String)], keep: Vec<RunFile>) -> std::io::Result<Proc> { spawn_with(crate::proc::Kind::PersonTurn, Some(person), program, args, cwd, None, env, keep) }
 #[allow(clippy::too_many_arguments)]
-/// The variables that would make a Codex child bill a paid OpenAI API key instead of its ChatGPT sign-in: removed from every Codex the hub
-/// starts (a turn, a title, a swarm worker), whatever the hub inherited. Nothing for any other program. A test that means to run Codex on a
-/// key does it through scripts/codex-apikey.sh, which sets them itself and pins the cheapest model.
-pub fn no_api_key(program: &Path) -> &'static [&'static str] {
+/// TEST HUBS ONLY: the OpenAI key variables a Codex child of a hub running stand-in agents (`BACKPLANE_AGENTS`, the stand-in folder) must not
+/// inherit from the shell that started the hub, so a lane's paid test key (the vault's `openai-test-api-key`) never reaches a Codex the hub
+/// starts by itself on whatever model Codex defaults to (Nov 19, #1321). A test that means to run Codex on a key does it through
+/// scripts/codex-apikey.sh, which sets them itself and pins the cheapest model. A person's or user's hub (no stand-in folder) changes nothing:
+/// their ChatGPT sign-in, `codex login --with-api-key`, an OPENAI_API_KEY in their environment and their own provider or base URL reach
+/// Codex as before (`a_users_openai_key_reaches_codex_in_a_normal_hub`). Variables the hub passes a child itself are never removed.
+pub fn no_api_key(program: &Path, test_hub: bool) -> &'static [&'static str] {
+    if !test_hub { return &[] }
     let stem = program.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
     if stem == "codex" || stem.starts_with("codex-") { &["OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL", "OPENAI_ORG_ID", "OPENAI_ORGANIZATION", "OPENAI_PROJECT"] } else { &[] }
 }
@@ -408,7 +412,7 @@ fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &P
     // Windows: an npm shim runs as what it starts, and nothing else goes through cmd.exe or sh with arguments they would change (`plan`)
     // a test's stand-in (a script in the stand-in folder `extra_path`, started through bp-sh) gets its arguments as given (`plan_for`)
     let standin = extra_path.is_some_and(|d| is_standin(program, d) && crate::plat::helper("bp-sh").is_some());
-    let api_vars = no_api_key(program); // by the CLI asked for, before an npm shim or bp-sh stands in for it
+    let api_vars = no_api_key(program, extra_path.is_some()); // by the CLI asked for, before an npm shim or bp-sh stands in for it; test hubs only
     let (program, pre) = plan_for(program, &args, cfg!(windows), &|| find_in(search_dirs(), "node", true), standin).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
     // its own memory scope (memscope.rs): a runaway it starts is killed alone, never the hub's scope with every agent in it
     // a launch that fails for its scope (an older systemd, no user manager) starts again unscoped (memscope::spawn), never failing the agent
@@ -422,13 +426,13 @@ fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &P
     if let (Some(v), Some((_, d))) = (path.as_mut(), env.iter().find(|(k, _)| k == super::kicadsel::SHIMS_KEY)) { v.insert(0, PathBuf::from(d)) }
     if let Some(j) = path.and_then(|v| std::env::join_paths(v).ok()) { c.env("PATH", j); }
     if person.is_none() { for k in crate::settings::accounts_io::STORE_ENV { c.env_remove(k); } } // the default login is ~/.claude, never a profile store the hub itself inherited; a named account puts its own back below
+    for k in api_vars { c.env_remove(k); } // a test hub's Codex inherits no OpenAI key from the lane's shell (#1321); what `env` passes below is kept
     for k in crate::settings::accounts_io::scrub_for(env) { c.env_remove(k); } // a named account's child inherits no provider credential (a sync account's token is its own, below)
     for (k, v) in env.iter().filter(|(k, _)| k != super::kicadsel::SHIMS_KEY) { c.env(k, v); }
     match person {
         None => { if let Some(o) = OWNER.get() { c.env("BACKPLANE_AGENT_OWNER", o).env("BACKPLANE_LOCK_HOME", o); } } // scripts/bp-lock.sh finds its hub by it (never BACKPLANE_HOME: proc::HUB_ONLY)
         Some(p) => { let (remove, set) = super::person::child_env(&p.home, &p.path, std::env::vars_os()); for k in remove { c.env_remove(k); } for (k, v) in set { c.env(k, v); } } // no BACKPLANE_* (so no owner mark either: PDEATHSIG ends it with the hub)
     }
-    for k in api_vars { c.env_remove(k); } // last: Codex runs on its ChatGPT sign-in, never on a paid API key, inherited or passed (Nov 19)
     // Linux: the kernel kills the agent when the hub dies (PDEATHSIG); Windows: its Job Object does. Elsewhere the `reaper` watcher does (the whole group, grandchildren included).
     crate::plat::proc::agent_group(&mut c);
     c };
@@ -467,9 +471,12 @@ pub fn alive(pid: u32) -> bool { crate::plat::proc::alive(pid) }
 
 #[cfg(test)]
 mod tests {
-    #[test] fn a_codex_child_never_gets_an_api_key_and_nothing_else_loses_one() {
-        for p in ["/usr/bin/codex", "/x/codex.cmd", "C:/npm/codex.exe", "/x/Codex", "/x/codex-aarch64-apple-darwin"] { assert!(no_api_key(Path::new(p)).contains(&"OPENAI_API_KEY") && no_api_key(Path::new(p)).contains(&"CODEX_API_KEY"), "{p}") }
-        for p in ["/usr/bin/claude", "/x/node", "/x/opencode", "/x/grok", "/x/codexy"] { assert!(no_api_key(Path::new(p)).is_empty(), "{p}") }
+    #[test] fn only_a_test_hubs_codex_loses_an_inherited_api_key() {
+        for p in ["/usr/bin/codex", "/x/codex.cmd", "C:/npm/codex.exe", "/x/Codex", "/x/codex-aarch64-apple-darwin"] {
+            assert!(no_api_key(Path::new(p), true).contains(&"OPENAI_API_KEY") && no_api_key(Path::new(p), true).contains(&"CODEX_API_KEY"), "{p}");
+            assert!(no_api_key(Path::new(p), false).is_empty(), "a user's hub keeps their key: {p}");
+        }
+        for p in ["/usr/bin/claude", "/x/node", "/x/opencode", "/x/grok", "/x/codexy"] { assert!(no_api_key(Path::new(p), true).is_empty(), "{p}") }
     }
     /// Windows has no login shell's PATH to read: nothing is started for it (PowerShell was handed sh's -lc at every hub start).
     #[test] fn the_login_shell_is_asked_for_its_path_only_where_there_is_one() {
@@ -591,14 +598,36 @@ mod tests {
     }
     #[test] fn a_copy_of_a_log_without_standins_runs_nothing() { let a = Cli { dir: None, copy: true }; assert!(a.resolve("claude").unwrap_err().contains("refused")); }
 
-    #[tokio::test] async fn a_codex_the_hub_starts_has_no_api_key_even_one_passed_to_it() {
-        let d = dir("nokey"); let body = "echo \"key=${OPENAI_API_KEY:-none} cx=${CODEX_API_KEY:-none} other=${OTHER:-none}\"";
-        script(&d, "codex", body); script(&d, "claude", body);
-        let env = [("OPENAI_API_KEY".to_string(), "sk-x".to_string()), ("CODEX_API_KEY".to_string(), "sk-x".to_string()), ("OTHER".to_string(), "kept".to_string())];
-        let mut p = spawn(&d.join("codex"), &[], &d, None, &env).unwrap(); drop(p.input);
-        assert_eq!(p.lines.recv().await.unwrap(), "key=none cx=none other=kept", "a Codex child runs on its ChatGPT sign-in");
-        let mut p = spawn(&d.join("claude"), &[], &d, None, &env).unwrap(); drop(p.input);
-        assert_eq!(p.lines.recv().await.unwrap(), "key=sk-x cx=sk-x other=kept", "another program keeps what it is given");
+    #[tokio::test] async fn what_the_hub_passes_a_codex_child_is_kept() {
+        let d = dir("passkey"); script(&d, "codex", "echo \"key=${OPENAI_API_KEY:-none} base=${OPENAI_BASE_URL:-none}\"");
+        let env = [("OPENAI_API_KEY".to_string(), "sk-x".to_string()), ("OPENAI_BASE_URL".to_string(), "https://proxy.example.invalid/v1".to_string())];
+        for standin in [None, Some(d.path())] {
+            let mut p = spawn(&d.join("codex"), &[], &d, standin, &env).unwrap(); drop(p.input);
+            assert_eq!(p.lines.recv().await.unwrap(), "key=sk-x base=https://proxy.example.invalid/v1", "passed by the hub: kept ({standin:?})");
+        }
+    }
+    /// The child half of the two tests below: a hub process with an OPENAI_API_KEY and a base URL in its own environment (a user's, or a
+    /// lane's shell) starts a Codex, as a person's hub (`BP_KEY_PROBE=user`, no stand-in folder) or a test hub (`test`, the stand-in folder).
+    #[tokio::test] async fn key_probe() {
+        let Ok(mode) = std::env::var("BP_KEY_PROBE") else { return };
+        let d = dir("keyprobe"); script(&d, "codex", "echo \"key=${OPENAI_API_KEY:-none} cx=${CODEX_API_KEY:-none} base=${OPENAI_BASE_URL:-none}\"");
+        let standin = if mode == "test" { Some(d.path()) } else { None };
+        let mut p = spawn(&d.join("codex"), &[], &d, standin, &[]).unwrap(); drop(p.input);
+        println!("KEYPROBE {}", p.lines.recv().await.unwrap());
+    }
+    fn key_probe_run(mode: &str) -> String {
+        let me = std::env::current_exe().unwrap();
+        let o = std::process::Command::new(me).args(["agents::proc::tests::key_probe", "--exact", "--nocapture", "--test-threads=1"]).env("BP_KEY_PROBE", mode)
+            .env("OPENAI_API_KEY", "sk-users-own").env("CODEX_API_KEY", "sk-users-own").env("OPENAI_BASE_URL", "https://my-azure.example.invalid/openai").env_remove("BACKPLANE_AGENTS").output().unwrap();
+        let out = String::from_utf8_lossy(&o.stdout).to_string();
+        assert!(o.status.success(), "{out}{}", String::from_utf8_lossy(&o.stderr));
+        out.lines().find_map(|l| l.split_once("KEYPROBE ").map(|(_, r)| r)).unwrap_or_else(|| panic!("the probe ran: {out}")).to_string()
+    }
+    #[test] fn a_users_openai_key_reaches_codex_in_a_normal_hub() {
+        assert_eq!(key_probe_run("user"), "key=sk-users-own cx=sk-users-own base=https://my-azure.example.invalid/openai", "a user's own key and base URL reach their Codex as before");
+    }
+    #[test] fn a_test_hubs_codex_does_not_inherit_the_lanes_key() {
+        assert_eq!(key_probe_run("test"), "key=none cx=none base=none", "a hub on stand-in agents: the shell's paid key stays out of Codex (#1321)");
     }
     #[tokio::test] async fn lines_in_lines_out_and_the_exit_is_reaped() {
         let d = dir("io"); script(&d, "echoer", "while read l; do echo \"got:$l\"; done; exit 3");
