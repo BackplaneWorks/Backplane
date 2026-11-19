@@ -493,8 +493,9 @@ struct Run<'a> { c: &'a dyn Call, doc: Value, board: bool, commit: Option<Value>
     /// The commit's name, the op (1-based) whose `find` ended a commit early, and each new symbol as KiCad itself places it (by its add entry's text).
     message: String, split: usize, templates: std::collections::HashMap<String, Value>,
     /// The new symbols of this call by reference (their templates: where their pins are), the parts it added or exchanged (the answer names
-    /// their nets), whether a library has answered (then "not found" is final), and how long a library's load is waited for between asks.
-    planned: std::collections::HashMap<String, Value>, added: Vec<String>, libs: bool, lib_step: std::time::Duration,
+    /// their nets), whether LoadAllLibraries was sent (once; headless it starts a load, the live editor refuses it), and how long apart a
+    /// library's status is asked while it loads.
+    planned: std::collections::HashMap<String, Value>, added: Vec<String>, lib_kicked: bool, lib_step: std::time::Duration,
     /// The highest #PWR number in use (new power symbols count on from it).
     pwr: Option<u64>,
     /// The nets and references this call worked on (the check's `new` is about these), and whether something it did has no such list.
@@ -508,6 +509,50 @@ struct Run<'a> { c: &'a dyn Call, doc: Value, board: bool, commit: Option<Value>
     /// Copper moved or was added (a route, a placement, a track): every zone is refilled before the save, so no pour is left over the new copper.
     refill_all: bool }
 /// Rows a change answers with: what the items are now, so nothing is read again to check it.
+/// What `from_library` does next after KiCad answered "not found": wait for the library, ask once more at once, or give up (its words, or
+/// empty for KiCad's own "not found").
+#[derive(Debug, PartialEq)] enum LibStep { Wait, Retry, Fail(String) }
+/// Polls of a library's status, each `lib_step` (500 ms) apart: at most 60 s in all; a library neither loaded nor loading, with no load of
+/// its kind in flight, is given up after 3 s (a cancelled, hidden or never-queued row); a KiCad without GetLibraryStatuses is asked 21 times
+/// (10.5 s), as before.
+const LIB_POLLS: u32 = 120;
+const LIB_IDLE: u32 = 6;
+const LIB_LEGACY: u32 = 21;
+/// One library's wait in one `from_library`: a second library in the same edit gets its own.
+#[derive(Default)] struct LibWait { polls: u32, idle: u32, loaded: bool }
+impl LibWait {
+    /// `seen`: this library's status and error (None: not in KiCad's tables) and whether any library of its kind is loading; None when
+    /// KiCad cannot say (GetLibraryStatuses unknown).
+    fn next(&mut self, nick: &str, seen: Option<(Option<(String, String)>, bool)>) -> LibStep {
+        self.polls += 1;
+        let Some((mine, loading)) = seen else { return if self.polls < LIB_LEGACY { LibStep::Wait } else { LibStep::Fail("the library did not load".into()) } };
+        let Some((status, error)) = mine else { return LibStep::Fail(format!("KiCad's library tables have no library `{nick}`")) };
+        let late = || LibStep::Fail(format!("the library `{nick}` did not finish loading within 60 s (it is {status})"));
+        match status.as_str() {
+            // loaded: asked once more (it may have loaded between the two questions), then KiCad's "not found" stands
+            "LLS_LOADED" => if std::mem::replace(&mut self.loaded, true) { LibStep::Fail(String::new()) } else { LibStep::Retry },
+            "LLS_ERROR" => LibStep::Fail(format!("the library `{nick}` failed to load{}", if error.is_empty() { String::new() } else { format!(": {error}") })),
+            "LLS_LOADING" => { self.idle = 0; if self.polls >= LIB_POLLS { late() } else { LibStep::Wait } }
+            // not reached yet (a library queued in a load in flight has no status of its own until a worker takes it: INVALID), or nothing will
+            _ => {
+                if loading { self.idle = 0 } else { self.idle += 1 }
+                if self.idle >= LIB_IDLE { LibStep::Fail(format!("the library `{nick}` is not loaded ({status}) and KiCad is loading no library")) }
+                else if self.polls >= LIB_POLLS { late() } else { LibStep::Wait }
+            }
+        }
+    }
+}
+/// From GetLibraryStatuses: `nick`'s status and error (the project's row over the global one) and whether any library is loading.
+fn lib_seen(r: &Value, nick: &str) -> (Option<(String, String)>, bool) {
+    const NAMES: [&str; 5] = ["LLS_UNKNOWN", "LLS_INVALID", "LLS_LOADING", "LLS_LOADED", "LLS_ERROR"];
+    let st = |e: &Value| -> String { match &e["status"] { Value::String(s) => s.clone(), Value::Number(n) => NAMES.get(n.as_u64().unwrap_or(0) as usize).unwrap_or(&NAMES[0]).to_string(), _ => NAMES[0].into() } };
+    let all: Vec<&Value> = r["libraries"].as_array().into_iter().flatten().collect();
+    let loading = all.iter().any(|e| st(e) == "LLS_LOADING");
+    let mine: Vec<&&Value> = all.iter().filter(|e| e["entry"]["nickname"] == nick).collect();
+    let pick = mine.iter().find(|e| e["entry"]["scope"] == "LTS_PROJECT").or(mine.first());
+    (pick.map(|e| (st(e), e["error_message"].as_str().unwrap_or("").to_string())), loading)
+}
+
 const SHOWN: usize = 24;
 /// The row kind of one of KiCad's own items, by its type.
 fn kind_of(raw: &Value) -> &'static str {
@@ -595,17 +640,27 @@ impl Run<'_> {
         self.c.call(&format!("{C}EndCommit"), json!({"header": self.header(&Value::Null), "id": id, "action": action, "message": message})).await.map(|_| ())
     }
     /// One thing placed by KiCad from its library in a commit that is dropped: the item as KiCad makes it (a symbol's reference and value where
-    /// the library has them, a footprint's pads where they land). Libraries load on demand: one not there yet is asked for and waited for (10 s).
+    /// the library has them, a footprint's pads where they land). KiCad answers "not found" both for an item its library lacks and for one
+    /// whose library has not loaded yet: the library's own status (GetLibraryStatuses) tells them apart, per library (LibWait). In the live
+    /// editor a full load another started (the person's Choose Symbol, Fix 1 of bp.13.2 b5) ends KiCad's on-demand loads of single libraries
+    /// until it reaches them (~13 s); LoadAllLibraries is refused there and only starts a load headless.
     async fn from_library(&mut self, ty: &str, msg: Value) -> Result<Value, String> {
-        for round in 0..22 {
+        let nick = msg["lib_id"]["library_nickname"].as_str().unwrap_or("").to_string();
+        let lt = if ty.ends_with("PlaceSymbolFromLibrary") { "LT_SYMBOL" } else { "LT_FOOTPRINT" };
+        let mut wait = LibWait::default();
+        loop {
             let id = self.c.call(&format!("{C}BeginCommit"), json!({"header": self.header(&Value::Null)})).await?["id"].clone();
             let made = self.c.call(ty, msg.clone()).await;
             self.c.call(&format!("{C}EndCommit"), json!({"header": self.header(&Value::Null), "id": id, "action": "CMA_DROP"})).await?;
-            match made { Ok(v) => { self.libs = true; return Ok(v["item"].clone()) }
-                Err(e) if e.contains("not found") && !self.libs && round < 21 => { if round == 0 { let _ = self.c.call(&format!("{C}LoadAllLibraries"), json!({})).await; } tokio::time::sleep(self.lib_step).await }
-                Err(e) => return Err(e) }
+            let e = match made { Ok(v) => return Ok(v["item"].clone()), Err(e) if e.contains("not found") => e, Err(e) => return Err(e) };
+            if !self.lib_kicked { self.lib_kicked = true; let _ = self.c.call(&format!("{C}LoadAllLibraries"), json!({})).await; }
+            let seen = self.c.call(&format!("{C}GetLibraryStatuses"), json!({"types": [lt], "scope": "LTS_BOTH"})).await.ok().map(|r| lib_seen(&r, &nick));
+            match wait.next(&nick, seen) {
+                LibStep::Wait => tokio::time::sleep(self.lib_step).await,
+                LibStep::Retry => {}
+                LibStep::Fail(why) => return Err(if why.is_empty() { e } else { format!("{e}; {why}") }),
+            }
         }
-        Err("the library did not load".into())
     }
     async fn symbol_template(&mut self, it: &Value, sheet: &Value) -> Result<Value, String> {
         let v = &it["symbol"]; let lib = v["lib"].as_str().unwrap_or(""); let (nick, entry) = lib.split_once(':').ok_or("symbol.lib is Library:Symbol")?;
@@ -1069,7 +1124,7 @@ pub async fn run(c: &dyn Call, path: &str, a: &Value) -> Result<Value, String> {
     if let Some((i, _)) = ops.iter().enumerate().find(|(_, o)| verb(o).is_empty()) { return Err(format!("op {}: an op is one of find, move, set, add, delete, route, place, netclass, rule, refill, ipc", i + 1)) }
     let patient = Patient { c, step: BUSY_STEP, wait: BUSY_WAIT }; let c: &dyn Call = &patient;
     let doc = Run::open(c, path).await?;
-    let mut r = Run { c, expect: vec![], deferred: 0, refill_all: false, planned: Default::default(), added: vec![], libs: false, pwr: None, touched: vec![], touch_all: false, vacated: vec![], field_fixes: c.caps().iter().any(|x| x == FIELD_FIXES), only: vec![], lib_step: std::time::Duration::from_millis(if cfg!(test) { 1 } else { 500 }), board: path.ends_with(".kicad_pcb"), doc, commit: None, sheets: None, refill: vec![], wrote: false, cache: Default::default(),
+    let mut r = Run { c, expect: vec![], deferred: 0, refill_all: false, planned: Default::default(), added: vec![], lib_kicked: false, pwr: None, touched: vec![], touch_all: false, vacated: vec![], field_fixes: c.caps().iter().any(|x| x == FIELD_FIXES), only: vec![], lib_step: std::time::Duration::from_millis(if cfg!(test) { 1 } else { 500 }), board: path.ends_with(".kicad_pcb"), doc, commit: None, sheets: None, refill: vec![], wrote: false, cache: Default::default(),
         message: a["message"].as_str().unwrap_or("kicad_edit").to_string(), split: 0, templates: Default::default() };
     // KiCad's own check before the edit, so the answer can say what the edit added to it (check: false leaves it out)
     let checking = writes(&a["ops"]) && a["save"].as_bool().unwrap_or(true) && a["check"].as_bool().unwrap_or(true);
