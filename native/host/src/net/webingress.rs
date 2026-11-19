@@ -139,7 +139,12 @@ async fn pair_response(hub: &crate::hub::Hub, req: &Req, login: &str) -> Vec<u8>
         "denied" | "expired" | "unknown_request" | "unverified_peer" => "401 Unauthorized",
         _ => "503 Service Unavailable",
     };
-    json_response(status, json!({"state":error}), "")
+    let headers = if req.route() == "/auth/web/poll" && matches!(error, "expired" | "denied" | "unknown_request") {
+        cookie_header("__Host-bp_web_pair", "", 0)
+    } else {
+        String::new()
+    };
+    json_response(status, json!({"state":error}), &headers)
 }
 
 /// Only the dedicated listener calls this, after authenticating its TLS proxy.
@@ -175,6 +180,11 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
         json_response("404 Not Found", json!({}), "")
     } else if !ingress.accepts(&req, upgrade) || login == "tagged-devices" {
         json_response("401 Unauthorized", json!({"state":"unauthorized"}), "")
+    } else if req.target.split_once('?').is_some_and(|(_, query)| query.split('&').any(|field| {
+        let key = field.split('=').next().unwrap_or("");
+        crate::files::fm::from_uri(key).eq_ignore_ascii_case("token")
+    })) {
+        json_response("400 Bad Request", json!({"state":"invalid_request"}), "")
     } else if upgrade && req.method == "GET" && req.target == "/ws?data=1&enc=json" {
         let registry = crate::net::start::registry(&hub.cfg.home);
         if let Some(device_id) = registry.and_then(|r| crate::auth::browser_device(&r, &req, &login)) {
@@ -252,6 +262,7 @@ fn static_asset(path: &str, paired: bool) -> Option<(&'static str, &'static [u8]
         "/" if paired => asset!("text/html; charset=utf-8", "index.html"),
         "/" => asset!("text/html; charset=utf-8", "pair.html"),
         "/assets/pair.js" => asset!("application/javascript", "assets/pair.js"),
+        "/assets/mesh-worker.js" if paired => asset!("application/javascript", "assets/mesh-worker.js"),
         "/assets/app.js" if paired => asset!("application/javascript", "assets/app.js"),
         "/assets/style.css" => asset!("text/css", "assets/style.css"),
         "/assets/favicon.svg" => asset!("image/svg+xml", "assets/favicon.svg"),
