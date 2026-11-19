@@ -43,8 +43,9 @@ export async function withTestTls(socketPath, run) {
   const { once } = await import('node:events');
   const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const key = privateKey.export({ type: 'pkcs8', format: 'pem' });
-  const certificate = execFileSync('openssl', [
-    'req', '-x509', '-new', '-key', '-', '-days', '1', '-subj', '/CN=backplane.example.test',
+  const certificate = execFileSync('sh', [
+    '-c', 'cat | openssl "$@"', 'openssl',
+    'req', '-x509', '-new', '-key', '/dev/stdin', '-days', '1', '-subj', '/CN=backplane.example.test',
     '-addext', 'subjectAltName=DNS:backplane.example.test',
   ], { input: key, stdio: ['pipe', 'pipe', 'ignore'] }).toString();
   const sockets = new Set();
