@@ -50,9 +50,9 @@ t=[w.get("title") or "" for w in json.load(sys.stdin) if w.get("shown") and w.ge
 print(",".join([k for k,s in (("PCB","PCB Editor"),("SCH","Schematic Editor")) if any(s in x for x in t)]) or "-")' 2>/dev/null || echo "?"; }
 # a click on a control the window drew: its rect from the latest `controls` or `rects` metric (the Follow toggle is only a rect)
 ctl() {
-  local xy; xy=$(python3 - "$OUT/client.log" "$DRIVER_PY" "$GPUI_XID" "$1" <<'PY'
+  local xy; xy=$(python3 - "$OUT/client.log" "$DRIVER_PY" "$GPUI_XID" "$1" "${3:-0}" <<'PY'
 import json, subprocess, sys
-log, drv, gx_s, cid = sys.argv[1:5]
+log, drv, gx_s, cid, dx = sys.argv[1:6]
 rect = None
 for line in open(log, encoding="utf-8", errors="replace"):
     if "GPUI_METRIC " not in line or cid not in line: continue
@@ -64,14 +64,16 @@ if not rect: sys.exit(0)
 gid = int(gx_s, 0); gx = gy = 0
 for w in json.loads(subprocess.check_output([sys.executable, drv, "list-windows"], text=True)):
     if w["xid_int"] == gid: gx, gy = w["root_x"], w["root_y"]; break
-print(int(gx + rect["x"] + rect["w"] / 2), int(gy + rect["y"] + rect["h"] / 2))
+print(int(gx + rect["x"] + rect["w"] / 2 + float(dx)), int(gy + rect["y"] + rect["h"] / 2))
 PY
 )
   [ -n "$xy" ] || { echo "DIAG ctl: '$1' not drawn"; return 1; }
   # shellcheck disable=SC2086
   python3 "$XINPUT_PY" click $xy; sleep "${2:-1.5}"
 }
-person_in_chat() { python3 "$XINPUT_PY" click 400 500; sleep 0.8; }
+# the person back in Backplane's composer (left of its Send button): never a fixed point of the thread, where a file link to the board
+# can come to sit as the agent's calls add rows (a click there opened the Board page)
+person_in_chat() { ctl send 0.8 -200 || { python3 "$XINPUT_PY" click 400 500; sleep 0.8; }; }
 
 cat >"$OUT/script.json" <<'JSON'
 [{"select":0},{"wait":2000},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},
