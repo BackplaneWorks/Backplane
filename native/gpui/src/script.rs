@@ -12,14 +12,14 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
+/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<path>"}: wait for the next painted frame, capture the X11 root window to <path> with ImageMagick `import`, then continue */ Shot(String), Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
 pub enum Ctl { /** the composer chip's account menu, and Settings' Accounts page */ AccountMenu, AccountsPage, /** the sidebar hub picker */ Hub(crate::screens::hubpick::Act), PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, Rail(String), PickFiles, /** the ▾ beside the thread's name: its menu */ ThreadMenu, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), /** a hub page of the Settings nav */ SettingsPage(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch, /** a bots-page press (screens::bots::press): its kind and value */ Bot(String, String), /** a chat terminal's card: focus, expand, pop, stop; its key */ Term(String, String), /** a subagent's own view (its key; "" goes back) */ Sub(String), /** a card's button that sends the hub an action (a halt card's Resume...): `Command::Action` */ Go(String, String), /** the viewer's Edit (true: the real KiCad in the pane) and View (false) */ KicadEdit(bool), /** the editor strip: a tab (its kind), full, popout, popin */ KicadAct(String), /** a management panel's press (screens/mgmt.rs `act`) */ Mgmt(String) }
 #[derive(Clone, Debug)]
 pub struct CtlEntry { pub id: String, pub label: String, pub ctl: Ctl }
 #[derive(Clone, Debug)]
-pub enum Goal { Frame, Changed(u64), Reconnected, Home, Thread(String), Popup, Typed(String), Sent(usize), Sleep }
+pub enum Goal { Frame, Changed(u64), Reconnected, Home, Thread(String), Popup, Typed(String), Sent(usize), Sleep, Shot(String) }
 pub struct Pending { pub label: String, pub started: Instant, pub goal: Goal, pub armed: bool, pub seq: u64 }
 
 /// Steps: {"select":N} {"home":N} {"popup":"/"} {"type":"text"} {"send":true} {"wait":ms}; e2e hooks: {"record":"start","name":"x"} {"record":"stop"}
@@ -53,6 +53,7 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let Some(what) = v["read"].as_str() { Some(Step::Read(what.into())) }
         else if let Some(on) = v["layers"].as_bool() { Some(Step::Layers(on, v["max_h"].as_f64().map(|x| x as f32), v["scroll"].as_f64().unwrap_or(0.0) as f32)) }
         else if let Some(name) = v["mark"].as_str() { Some(Step::Mark(name.into())) }
+        else if let Some(path) = v["shot"].as_str() { Some(Step::Shot(path.into())) }
         else if v["fit"].as_bool() == Some(true) { Some(Step::Fit) }
         else if let Some(what) = v["expect"].as_str() { Some(Step::Expect(what.into())) }
         else if v["cef"].is_object() { Some(Step::Cef(v["cef"].clone())) }
@@ -153,8 +154,33 @@ impl Backplane {
             Goal::Typed(text) => self.input.read(cx).content.as_ref() == text,
             Goal::Sent(before) => self.user_entries() > *before,
             Goal::Sleep => false,
+            Goal::Shot(_) => true,
         };
         if !done { return; }
+        if let Goal::Shot(path) = &p.goal {
+            let path = path.clone();
+            let (t0, seq) = (p.started, p.seq);
+            self.pending.as_mut().unwrap().armed = true;
+            window.on_next_frame(move |_, cx| {
+                let _ = this.update(cx, |_, cx| {
+                    cx.spawn(async move |this, cx| {
+                        let path_bg = path.clone();
+                        let res: Result<(), String> = cx.background_executor().spawn(async move {
+                            if let Some(par) = Path::new(&path_bg).parent().filter(|p| !p.as_os_str().is_empty()) {
+                                let _ = std::fs::create_dir_all(par);
+                            }
+                            let st = std::process::Command::new("import").args(["-window", "root", &path_bg]).status().map_err(|e| e.to_string())?;
+                            /* i18n-ok: scripted e2e screenshot metric, not drawn */ if st.success() { Ok(()) } else { Err(format!("import exited with {st}")) }
+                        }).await;
+                        let (ok, err) = match res { Ok(()) => (true, Value::Null), Err(e) => (false, json!(e)) };
+                        metric(started, "shot", json!({"path": path, "ok": ok, "error": err, "latency_ms": (t0.elapsed().as_secs_f64() * 1e6).round() / 1e3}));
+                        let _ = this.update(cx, |t, cx| { if t.pending.as_ref().map_or(false, |p| p.seq == seq) { t.pending = None; t.pump(cx); } });
+                    }).detach();
+                });
+            });
+            cx.notify();
+            return;
+        }
         let (label, t0, seq) = (p.label.clone(), p.started, p.seq);
         self.pending.as_mut().unwrap().armed = true;
         if let Some((id, action)) = self.click_info.take() { self.m("click", json!({"id": id, "changed": true, "action": action})); }
@@ -345,6 +371,7 @@ impl Backplane {
                 self.pump(cx);
             }
             Step::Mark(name) => { self.m("mark", json!({"name": name})); self.pump(cx); }
+            Step::Shot(path) => { self.begin(format!("shot:{path}"), Goal::Shot(path), cx); cx.notify(); }
             Step::Fit => { self.screens.plotview.view = None; self.ui_epoch += 1; self.begin("fit".into(), Goal::Frame, cx); cx.notify(); }
             Step::Expect(what) => { // a run that cannot measure what it claims stops itself: "canvas" needs a plot canvas with real height
                 let h = self.screens.plotview.bounds.map_or(0.0, |b| f32::from(b.size.height));
@@ -556,5 +583,14 @@ mod tests {
         let steps = load(&p);
         assert!(matches!(&steps[0], Step::ClickWithin(id, 8000) if id == "ui:Edit"), "{:?}", steps[0]);
         assert!(matches!(&steps[1], Step::Click(id) if id == "ui:Edit"), "{:?}", steps[1]);
+    }
+    #[test] fn shot_step_loads_path_in_order() {
+        let p = crate::tmp::file("script", "shot.json");
+        std::fs::write(&p, r#"[{"press":"rail:Board"},{"wait":300},{"shot":"out/board.png"}]"#).unwrap();
+        let steps = load(&p);
+        assert_eq!(steps.len(), 3);
+        assert!(matches!(&steps[0], Step::Press(id) if id == "rail:Board"), "{:?}", steps[0]);
+        assert!(matches!(&steps[1], Step::Wait(300)), "{:?}", steps[1]);
+        assert!(matches!(&steps[2], Step::Shot(path) if path == "out/board.png"), "{:?}", steps[2]);
     }
 }
