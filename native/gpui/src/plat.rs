@@ -103,11 +103,14 @@ mod win_acl {
     }
 }
 
-/// The user's own folder: $HOME (Windows: %USERPROFILE% when HOME is not set, as outside Git's shell).
+/// The user's own folder: $HOME (Windows: %USERPROFILE%, and HOME only when that is not set: a HOME there is another program's,
+/// Git's shell's or Cadence's `%APPDATA%\SPB_Data`, which made setup offer a data folder and a first project under SPB_Data).
 pub fn user_home() -> Option<std::path::PathBuf> {
-    let h = std::env::var_os("HOME").filter(|h| !h.is_empty());
-    #[cfg(windows)] let h = h.or_else(|| std::env::var_os("USERPROFILE").filter(|h| !h.is_empty()));
-    h.map(std::path::PathBuf::from)
+    let get = |k: &str| std::env::var_os(k).filter(|h| !h.is_empty());
+    pick_home(cfg!(windows), get("HOME"), get("USERPROFILE")).map(std::path::PathBuf::from)
+}
+fn pick_home(windows: bool, home: Option<std::ffi::OsString>, profile: Option<std::ffi::OsString>) -> Option<std::ffi::OsString> {
+    if windows { profile.or(home) } else { home }
 }
 /// Where this device's settings live: $XDG_CONFIG_HOME, else ~/.config (Windows: %APPDATA%).
 pub fn config_base() -> Option<std::path::PathBuf> {
@@ -181,4 +184,16 @@ pub fn adopt_app_bundle() {
     // <app>/Contents/MacOS/Backplane -> <app>
     if let Some(app) = std::path::Path::new(&p).ancestors().nth(3) { unsafe { std::env::set_var("BACKPLANE_APP", app) } }
     unsafe { std::env::remove_var("CFProcessPath") }
+}
+
+#[cfg(test)]
+mod home_tests {
+    /// Windows goes by the user's folder whatever HOME says (Cadence sets it to %APPDATA%\SPB_Data); elsewhere HOME is the home.
+    #[test] fn on_windows_the_users_folder_wins_over_another_programs_home() {
+        let s = |x: &str| Some(std::ffi::OsString::from(x));
+        assert_eq!(super::pick_home(true, s(r"C:\Users\ann\AppData\Roaming\SPB_Data"), s(r"C:\Users\ann")), s(r"C:\Users\ann"));
+        assert_eq!(super::pick_home(true, s(r"D:\home"), None), s(r"D:\home"), "HOME when Windows names no folder");
+        assert_eq!(super::pick_home(false, s("/home/ann"), s(r"C:\Users\ann")), s("/home/ann"));
+        assert_eq!(super::pick_home(false, None, s(r"C:\Users\ann")), None);
+    }
 }

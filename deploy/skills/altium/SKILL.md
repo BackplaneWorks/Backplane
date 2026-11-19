@@ -29,7 +29,9 @@ When the sheet or board is drawn, look at it (`viewer_show` it, or read it back)
 
 New footprints, new symbols, new sheets, and parts, wires, net labels and power ports added to a sheet: use
 `altium_write`. It takes one JSON spec, writes Altium's own binary files, reads them back, and reports what they hold.
-Read `write.md` before the first call: it has the spec, the package table and the rules. It needs no Altium, a spec cannot
+Read `write.md` before the first call: it has the spec, the package table and the rules. It says how to write a sheet, not how the sheet
+should look: read KiStack's `kicad-schematic` SKILL.md completely before the first sheet (`kicad-symbol` before a symbol,
+`kicad-footprint` before a footprint), and lay the spec out by it. It needs no Altium, a spec cannot
 leave a dialog up, and every part is checked when it is read back; but it is plain: `connect` puts a stub and a net label on a pin,
 so for a sheet that reads well draw wires between nearby pins and use power ports for supplies and ground (`wires`,
 `power` in the spec, or `connect` with `power`), as KiStack's `kicad-schematic` asks. A real Altium library part, where one is installed, beats a
