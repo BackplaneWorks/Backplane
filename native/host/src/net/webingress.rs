@@ -262,7 +262,6 @@ fn static_asset(path: &str, paired: bool) -> Option<(&'static str, &'static [u8]
         "/" if paired => asset!("text/html; charset=utf-8", "index.html"),
         "/" => asset!("text/html; charset=utf-8", "pair.html"),
         "/assets/pair.js" => asset!("application/javascript", "assets/pair.js"),
-        "/assets/mesh-worker.js" if paired => asset!("application/javascript", "assets/mesh-worker.js"),
         "/assets/app.js" if paired => asset!("application/javascript", "assets/app.js"),
         "/assets/style.css" => asset!("text/css", "assets/style.css"),
         "/assets/favicon.svg" => asset!("image/svg+xml", "assets/favicon.svg"),
