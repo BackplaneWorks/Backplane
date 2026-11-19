@@ -435,16 +435,22 @@ pub fn unsaved_name(f: &Frame) -> String {
 }
 /// The selected runtime's capabilities as last read (each attach, warm and restart reads its manifest): what the presenter gates the
 /// rail's Simulation entry on. True when they changed (the views are drawn again).
-pub fn note_runtime(env: &Env) -> bool {
-    let mut c = runtime_caps_cell().lock().unwrap();
+pub fn note_runtime(env: &Env) -> bool { note_runtime_in(runtime_caps_cell(), env) }
+/// `note_runtime` on `cell`: the process's one (`runtime_caps_cell`, a hub's) or a test's own. Tests share the process, and every one that
+/// attaches or warms an embedded KiCad notes its runtime in the process's cell, so a test of the rule keeps its own (Nov 19: the rail test
+/// read another test's note in the full suite).
+fn note_runtime_in(cell: &std::sync::Mutex<Vec<String>>, env: &Env) -> bool {
+    let mut c = cell.lock().unwrap();
     if *c == env.caps { return false }
     *c = env.caps.clone(); true
 }
 fn runtime_caps_cell() -> &'static std::sync::Mutex<Vec<String>> { static C: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> = std::sync::OnceLock::new(); C.get_or_init(Default::default) }
 /// The rail's Simulation entry for a project folder: the frame it opens ("SIMULATOR"), when the runtime embeds the Simulator and the
 /// project has a schematic; None otherwise (no entry).
-pub fn rail_simulation(root: &str) -> Option<&'static str> {
-    let frame = rail_frame("simulation", &runtime_caps_cell().lock().unwrap())?;
+pub fn rail_simulation(root: &str) -> Option<&'static str> { rail_simulation_in(runtime_caps_cell(), root) }
+/// `rail_simulation` with the runtime's capabilities in `cell` (see `note_runtime_in`).
+fn rail_simulation_in(cell: &std::sync::Mutex<Vec<String>>, root: &str) -> Option<&'static str> {
+    let frame = rail_frame("simulation", &cell.lock().unwrap().clone())?;
     // (asked at every picture: the folder is read at most every 5 s)
     static SEEN: std::sync::OnceLock<std::sync::Mutex<HashMap<String, (std::time::Instant, bool)>>> = std::sync::OnceLock::new();
     let mut seen = SEEN.get_or_init(Default::default).lock().unwrap();
@@ -3799,15 +3805,17 @@ mod tests {
         assert_eq!(s.info_json()["embed_caps"], json!(["sim-frame"]));
         // the selected runtime's capabilities, as the presenter reads them: a change is said once
         let env = |caps: &[String]| Env { cli: "/k/bin/kicad-cli".into(), caps: caps.to_vec(), ..Default::default() };
-        note_runtime(&env(&old)); assert!(!note_runtime(&env(&old))); assert_eq!(rail_simulation("/nowhere/at/all"), None);
-        assert!(note_runtime(&env(&new))); assert!(!note_runtime(&env(&new)));
+        // (on a cell of its own: every test that attaches or warms an embedded KiCad notes its runtime in the process's)
+        let cell = std::sync::Mutex::new(vec![]); let note = |e: &Env| note_runtime_in(&cell, e); let rail = |r: &str| rail_simulation_in(&cell, r);
+        note(&env(&old)); assert!(!note(&env(&old))); assert_eq!(rail("/nowhere/at/all"), None);
+        assert!(note(&env(&new))); assert!(!note(&env(&new)));
         let t = crate::plat::tmp::dir("rail-sim"); let d = t.to_string_lossy().to_string();
         std::fs::write(t.join("a.kicad_pro"), "{}").unwrap(); std::fs::write(t.join("a.kicad_pcb"), "(kicad_pcb)").unwrap();
-        assert_eq!(rail_simulation(&d), None, "a project with no schematic has nothing to simulate");
+        assert_eq!(rail(&d), None, "a project with no schematic has nothing to simulate");
         let t2 = crate::plat::tmp::dir("rail-sim-sch"); let d2 = t2.to_string_lossy().to_string();
         std::fs::write(t2.join("a.kicad_pro"), "{}").unwrap(); std::fs::write(t2.join("a.kicad_sch"), "(kicad_sch)").unwrap();
-        assert_eq!(rail_simulation(&d2), Some("SIMULATOR"));
-        assert!(note_runtime(&env(&old))); assert_eq!(rail_simulation(&d2), None, "an older runtime selected: the entry goes");
+        assert_eq!(rail(&d2), Some("SIMULATOR"));
+        assert!(note(&env(&old))); assert_eq!(rail(&d2), None, "an older runtime selected: the entry goes");
     }
     #[test] fn an_agents_show_of_the_simulator_does_not_move_the_pane() {
         // RunSimulation{show} on a hidden Simulator posts ET_SHOW_REQUESTED with the API client that caused it: not followed (the pane
