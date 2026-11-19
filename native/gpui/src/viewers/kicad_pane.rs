@@ -57,10 +57,6 @@ pub fn prewarm_builds_nothing(reply: &Value) -> bool {
     }
 }
 pub fn frame_for(open: &str) -> &'static str { match open { "schematic" => "SCH", "3d" => "PCB_3D", _ => "PCB" } } // i18n-ok: wire frame kind enum names
-/// The editor an attach names for the page it was pressed on (#1347): a design page its own (Board, Schematic, 3D); a page with no editor
-/// of its own (Files, Review, Mech, Browser, Split) none, and the hub opens a document the project has (the board, or the schematic of a
-/// project without one: #1334's attach_frame). The pane then follows the frame KiCad shows (set_info's `active`).
-pub fn page_frame(open: &str) -> Option<&'static str> { matches!(open, "board" | "schematic" | "3d").then(|| frame_for(open)) } // i18n-ok: rail page kinds
 /// Whether a re-show after a re-placement hands KiCad the keyboard, read when it is sent, never from what the pane believed earlier
 /// (the #1198 lane: KiCad's frame set changed ~4.5 s after Edit, the schematic pre-warmed, the pane re-placed and sent a focused show
 /// with the keys still noted KiCad's, ~20 ms before the person's click into Backplane, and KiCad took the keyboard back).
@@ -771,7 +767,7 @@ impl KicadPane {
     pub fn has_override(&self) -> bool { self.override_kind.is_some() }
     /// The editor an attach asks KiCad for: the rail page's, or the Simulator when the pane was opened on it (the rail's Simulation):
     /// KiCad then opens only that (and the schematic it needs, hidden), not the page's board first.
-    fn attach_kind(&self) -> Option<&'static str> { if self.override_kind.as_deref() == Some(SIM) { Some(SIM) } else { page_frame(&self.open) } }
+    fn attach_kind(&self) -> &'static str { if self.override_kind.as_deref() == Some(SIM) { SIM } else { frame_for(&self.open) } }
     /// The rail's Simulation: the pane on KiCad's Simulator (before the pane is attached: its first editor).
     pub fn open_simulation(&mut self, cx: &mut Context<Self>) {
         if self.container.is_none() { self.override_kind = Some(SIM.into()); cx.notify(); return }
@@ -916,12 +912,7 @@ impl KicadPane {
         if !self.dialogs_open.is_empty() && i["dialogs"].as_array().map_or(true, |d| d.is_empty()) { i["dialogs"] = json!(self.dialogs_open); }
         i
     }
-    /// The editor the pane wants on show: the one it switched to (override), else its page's own; a page with no editor of its own
-    /// (#1347: the attach named none) the one KiCad shows (the hub's `active`), the board only while that is not known
-    fn wanted_kind(&self) -> &str {
-        if let Some(k) = self.override_kind.as_deref() { return k }
-        match page_frame(&self.open) { Some(k) => k, None => self.info["active"].as_str().filter(|a| !a.is_empty()).unwrap_or("PCB") }
-    }
+    fn wanted_kind(&self) -> &str { self.override_kind.as_deref().unwrap_or_else(|| frame_for(&self.open)) }
     /// The person took the editor: the hub then refuses an agent's save while anything is unsaved (kicad/embed.rs `Unsaved`).
     fn touched(&self) { self.rpc("editor.kicad.touched", json!({"project": self.project})); }
     /// What a comment is made on: the project and the editor on show (PCB or SCH; the 3D view comments on its board), when one is.
@@ -1240,11 +1231,8 @@ impl KicadPane {
         }
         let display = std::env::var("DISPLAY").unwrap_or_default();
         let kind = self.attach_kind();
-        // no frame from a page with no editor of its own: the hub opens a document the project has, and the pane follows it (#1347)
-        self.pending_show = kind.map(str::to_string);
-        let mut params = json!({"project": self.project, "container": c, "toplevel": top, "display": display, "wait": false, "theme": if self.light { "light" } else { "dark" }});
-        if let Some(k) = kind { params["frame"] = json!(k); }
-        self.rpc("editor.kicad.attach", params);
+        self.pending_show = Some(kind.to_string());
+        self.rpc("editor.kicad.attach", json!({"project": self.project, "container": c, "toplevel": top, "display": display, "frame": kind, "wait": false, "theme": if self.light { "light" } else { "dark" }}));
         let weak = cx.entity().downgrade();
         window.on_frame_drawn(move |window, cx| weak.update(cx, |this, cx| this.after_frame(window, cx)).is_ok());
     }
@@ -1254,12 +1242,9 @@ impl KicadPane {
     pub fn reattach(&mut self) {
         let Some(c) = self.container else { return };
         let display = std::env::var("DISPLAY").unwrap_or_default();
-        // what the pane shows now (KiCad's frame it followed), else its page's own editor, else none (#1347: the hub's choice)
-        let kind = self.override_kind.clone().or_else(|| page_frame(&self.open).map(str::to_string));
-        self.pending_show = kind.clone();
-        let mut params = json!({"project": self.project, "container": c, "toplevel": self.toplevel, "display": display, "wait": false, "theme": if self.light { "light" } else { "dark" }});
-        if let Some(k) = kind { params["frame"] = json!(k); }
-        self.rpc("editor.kicad.attach", params);
+        let kind = self.wanted_kind().to_string();
+        self.pending_show = Some(kind.clone());
+        self.rpc("editor.kicad.attach", json!({"project": self.project, "container": c, "toplevel": self.toplevel, "display": display, "frame": kind, "wait": false, "theme": if self.light { "light" } else { "dark" }}));
     }
     /// After every frame: the container over the pane (the marker's bounds) with the wanted editor mapped, holes where gpui drew over it.
     fn after_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1972,12 +1957,6 @@ mod tests {
         assert!(!reshow_focus(false, false, true, true), "a press in Backplane under way: the keyboard stays where the press takes it");
         assert!(!reshow_focus(false, false, false, false), "Backplane has the keys now (the pane's note was stale): not taken back");
     }
-    #[test] fn an_attach_names_a_frame_only_from_a_page_with_an_editor_of_its_own() {
-        use super::page_frame;
-        // #1347: the design pages name theirs; every other page none, and the hub opens a document the project has
-        assert_eq!((page_frame("board"), page_frame("schematic"), page_frame("3d")), (Some("PCB"), Some("SCH"), Some("PCB_3D")));
-        for p in ["files", "review", "mech", "browser", "split", "diff", ""] { assert_eq!(page_frame(p), None, "{p}"); }
-    }
     #[test] fn rail_pages_name_editors() { assert_eq!(frame_for("board"), "PCB"); assert_eq!(frame_for("schematic"), "SCH"); assert_eq!(frame_for("3d"), "PCB_3D"); }
     #[test] fn the_project_comes_from_the_viewer_key() {
         assert_eq!(project_of("board|/p/proj|boards/a/a.kicad_pcb").as_deref(), Some("/p/proj/boards/a/a.kicad_pcb"));
@@ -2260,6 +2239,28 @@ impl crate::Backplane {
         }
     }
     pub(crate) fn kicad_edit(&mut self, cx: &mut Context<Self>) -> bool {
+        // #1347: KiCad opens over a design page only. From a page with no editor of its own (a context menu's, the boards menu's, a
+        // script's, a kept Edit), the design page whose document the project has first, as Simulation and GerbView do; neither: said
+        // where the person is (Files' status line) and no KiCad. The Simulator's own page is the Schematic its caller pressed.
+        let nav = if EDIT_TAB.lock().unwrap().as_deref() == Some(SIM) { None } else {
+            let v = &self.data["thread"]["viewer"];
+            let now = v["open"].as_str().unwrap_or("").to_string();
+            let page = crate::screens::viewer::pressed(&now).unwrap_or(now);
+            match crate::screens::viewer::edit_go(v, &page) {
+                crate::screens::viewer::EditGo::Here => None,
+                crate::screens::viewer::EditGo::To(to) => Some((page, to)),
+                crate::screens::viewer::EditGo::Nothing => {
+                    eprintln!("GPUI_LOG {}", json!({"kicad_edit": "refused", "page": page, "why": "no board or schematic"}));
+                    self.screens.files.status = crate::i18n::trs("That KiCad project has no board or schematic beside it.");
+                    cx.notify();
+                    return false
+                }
+            }
+        };
+        if let Some((from, to)) = &nav {
+            eprintln!("GPUI_LOG {}", json!({"kicad_edit": "to the design page", "from": from, "to": to}));
+            self.rail_press("view-kind", to, cx);
+        }
         let thread = &self.data["thread"];
         let viewer = &thread["viewer"];
         let key = crate::screens::viewer::shown_key(viewer);
@@ -2277,9 +2278,9 @@ impl crate::Backplane {
         // the rail's Simulation asked for this Edit: the pane opens on the Simulator
         let sim = EDIT_TAB.lock().unwrap().take().is_some_and(|k| k == SIM);
         let open_now = viewer["open"].as_str().unwrap_or("");
-        let open = crate::screens::viewer::pressed(open_now)
+        let open = nav.as_ref().map(|(_, to)| to.to_string()).or_else(|| crate::screens::viewer::pressed(open_now)
             .filter(|k| matches!(k.as_str(), "board" | "schematic" | "3d")) // i18n-ok: rail page kinds
-            .or_else(|| (!open_now.is_empty()).then(|| open_now.to_string()))
+            .or_else(|| (!open_now.is_empty()).then(|| open_now.to_string())))
             .unwrap_or_else(|| "board".to_string()); // i18n-ok: rail page kinds
         // never KiCad on a design page whose document the project does not have (#1347; the hub's `has`): KiCad would ask to create it
         if !sim && crate::screens::viewer::page_document(viewer, &open) == Some(false) {
