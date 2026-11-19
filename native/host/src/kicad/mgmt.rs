@@ -152,6 +152,33 @@ impl RpcHandler for MgmtRpc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn panel_doors_resolve_to_the_same_project_and_scope() {
+        use crate::present::viewer::{design_panels, has_management};
+        let d = crate::plat::tmp::canonical("mgmt-panel-scope");
+        let root = d.to_str().unwrap();
+        std::fs::write(d.join("alt.PrjPcb"), "").unwrap();
+        assert!(!has_management(root));
+        for name in ["a", "sub/b"] {
+            let pro = d.join(format!("{name}.kicad_pro"));
+            std::fs::create_dir_all(pro.parent().unwrap()).unwrap();
+            std::fs::write(&pro, "{}").unwrap();
+            let sch = pro.with_extension("kicad_sch");
+            std::fs::write(&sch, "(kicad_sch)").unwrap();
+            let panel = design_panels(sch.to_str().unwrap(), "");
+            assert_eq!(panel["bom"]["project"], pro.to_str().unwrap());
+            assert_eq!(panel["checks"]["refresh"], "kicad.checks.run");
+        }
+        assert!(has_management(root));
+        assert_eq!(design_panels(root, ""), design_panels(d.join("a.kicad_sch").to_str().unwrap(), ""));
+        let live = design_panels(root, "");
+        assert_eq!(live["bom"]["title"], "review.bom.working");
+        assert_eq!(live["bom"]["refresh"], "mgmt.refresh");
+        let cmp = design_panels(root, "git\t/repo\t123456789abc\t2\t/a\n/a");
+        assert_eq!(cmp["bom"]["versions"], json!(["12345678", ""]));
+        assert_eq!(cmp["bom"]["refresh"], "rv-run");
+        assert_eq!(cmp["checks"], live["checks"]);
+    }
     const K: &[&str] = &["bom", "checks", "life"];
     #[test] fn a_tab_opens_its_panel_and_a_second_press_shuts_it() {
         let s = apply(St::default(), &json!({"toggle": "bom"}), K); assert_eq!(s.open, "bom");

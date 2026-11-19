@@ -19,6 +19,8 @@ pub const WANT_TAG: u64 = 0x6368_6b34;
 
 #[derive(Default)]
 pub struct Ui {
+    stamp: String,
+    chips: BTreeMap<String, (String, &'static str)>,
     pub filter: Option<Entity<Composer>>,
     pub focus: Option<FocusHandle>,
     /// "" all, or "error" / "warning" / "excluded"
@@ -46,8 +48,12 @@ pub struct Ui {
 /// One line of the list: a group's heading, a finding, a group's "n more" / "Fewer", or a word (searching, nothing found...).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Item { Head(Value), Row(Value), More(Value, u64), Msg(&'static str) }
-thread_local! { static UI: RefCell<Ui> = RefCell::new(Ui::default()); }
-fn ui<R>(f: impl FnOnce(&mut Ui) -> R) -> R { UI.with(|u| f(&mut u.borrow_mut())) }
+#[derive(Clone, Default)]
+pub struct State(std::rc::Rc<RefCell<Ui>>);
+impl State {
+    fn with<R>(&self, f: impl FnOnce(&mut Ui) -> R) -> R { f(&mut self.0.borrow_mut()) }
+    pub fn reset(&self) { self.with(|u| { let chips = std::mem::take(&mut u.chips); *u = Ui { chips, ..Default::default() }; }) }
+}
 
 fn s<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 /// A rule's id as a heading: "courtyards_overlap" -> "Courtyards overlap".
@@ -96,7 +102,7 @@ pub fn by_source(d: &Value, src: &str) -> Value {
 }
 /// One item of the list, drawn (uniform_list asks only for the ones in view).
 fn item_el(app: &mut Backplane, i: usize, cx: &mut Context<Backplane>) -> AnyElement {
-    let (it, light, srcs, sel) = ui(|u| (u.items.get(i).cloned(), u.light, u.sources.clone(), u.sel.clone()));
+    let (it, light, srcs, sel) = app.screens.mgmt.checks.with(|u| (u.items.get(i).cloned(), u.light, u.sources.clone(), u.sel.clone()));
     let c = |n: &str| theme::color(light, n);
     let d = json!({"sources": srcs});
     let _ = app;
@@ -135,7 +141,7 @@ fn item_el(app: &mut Backplane, i: usize, cx: &mut Context<Backplane>) -> AnyEle
                     .absolute().right(px(6.)).top(px(3.)).px(px(5.)).border_1().border_color(c("line")).bg(c("raise")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).invisible().group_hover("checks-row", |x| x.visible()).when(on, |x| x.visible())
                     .hover(|x| x.text_color(c("text")).bg(c("bg"))).child(tf(if s(&f, "fix_kind") == "reexport" { "gpui.mgmt.checks.reexport" } else { "gpui.mgmt.checks.fix" }, &[]))
                     .on_click({ let id = id.clone(); cx.listener(move |this, _, _, cx| { cx.stop_propagation(); fix(this, &id, cx) }) }))
-                .on_click({ let id = id.clone(); cx.listener(move |this, _, window, cx| { if let Some(h) = ui(|u| u.focus.clone()) { window.focus(&h); } select(this, &id, cx) }) })
+                .on_click({ let id = id.clone(); cx.listener(move |this, _, window, cx| { if let Some(h) = this.screens.mgmt.checks.with(|u| u.focus.clone()) { window.focus(&h); } select(this, &id, cx) }) })
                 .into_any_element()
         }
     }
@@ -168,16 +174,16 @@ pub fn state_text(name: &str, c: &Value) -> (String, &'static str) {
 }
 
 fn project(app: &Backplane) -> String { app.screens.mgmt.project.clone() }
-fn filter_text(cx: &App) -> String { ui(|u| u.filter.clone()).map_or(String::new(), |f| f.read(cx).content.to_string()) }
+fn filter_text(app: &Backplane, cx: &App) -> String { app.screens.mgmt.checks.with(|u| u.filter.clone()).map_or(String::new(), |f| f.read(cx).content.to_string()) }
 fn log(ev: &str, v: Value) { let mut o = v; o["event"] = json!(ev); eprintln!("GPUI_LOG {o}"); }
 
 /// A row pressed (or reached with up/down): its items selected and zoomed in KiCad's right editor, lit in the viewers.
 pub fn select(app: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
-    ui(|u| u.sel = Some(id.to_string()));
+    app.screens.mgmt.checks.with(|u| u.sel = Some(id.to_string()));
     log("checks_select", json!({"id": id}));
     // a file's finding (Gerbers vs board): that comparison on its layer; a difference (a place) lit and zoomed on, the whole (a stale
     // export) as it is
-    let row = ui(|u| u.items.iter().find_map(|i| if let Item::Row(f) = i { (s(f, "id") == id).then(|| f.clone()) } else { None }));
+    let row = app.screens.mgmt.checks.with(|u| u.items.iter().find_map(|i| if let Item::Row(f) = i { (s(f, "id") == id).then(|| f.clone()) } else { None }));
     if let Some(f) = row.filter(|f| s(f, "doc") == "file") {
         let viewer = app.data["thread"]["viewer"].clone();
         if viewer["gerbersVsBoard"] != true { let _ = app.tx.try_send(Command::Action("view".into(), "gerbers\tboard".into())); }
@@ -211,8 +217,8 @@ pub fn controls(m: &super::mgmt::Mgmt) -> Vec<(String, String, String)> {
     if m.peek()["open"] != "checks" { return vec![] }
     let d = m.data("checks");
     let mut v: Vec<(String, String, String)> = vec![("mgmt:checks:run".into(), "Run".into(), "checks:run".into()), ("mgmt:checks:full".into(), "Run all checks".into(), "checks:full".into())]; // i18n-ok: harness ids and labels
-    let (more, open) = ui(|u| (u.more.clone(), u.open.clone()));
-    let found = ui(|u| u.found.clone()).map(|x| x.2);
+    let (more, open) = m.checks.with(|u| (u.more.clone(), u.open.clone()));
+    let found = m.checks.with(|u| u.found.clone()).map(|x| x.2);
     v.push(("mgmt:checks:scroll".into(), "Scroll".into(), "checks:scroll".into())); // i18n-ok: a harness id
     for k in ["", "drc", "erc"].into_iter().map(str::to_string).chain(d["order"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_string))) { v.push((format!("mgmt:checks:src:{k}"), source_label(&d, &k), format!("checks:src:{k}"))); }
     for g in d["groups"].as_array().into_iter().flatten() { let k = group_key(g); v.push((format!("mgmt:checks:more:{k}"), "More".into(), format!("checks:more:{k}"))); } // i18n-ok: harness ids
@@ -226,12 +232,12 @@ pub fn controls(m: &super::mgmt::Mgmt) -> Vec<(String, String, String)> {
 /// A press of one of `controls`.
 pub fn act(app: &mut Backplane, a: &str, cx: &mut Context<Backplane>) {
     if let Some(id) = a.strip_prefix("row:") { select(app, id, cx) } else if let Some(id) = a.strip_prefix("fix:") { fix(app, id, cx) }
-    else if let Some(k) = a.strip_prefix("src:") { ui(|u| u.src = k.to_string()); app.ui_epoch += 1; cx.notify() }
+    else if let Some(k) = a.strip_prefix("src:") { app.screens.mgmt.checks.with(|u| u.src = k.to_string()); app.ui_epoch += 1; cx.notify() }
     else if a == "run" { run(app, cx) } else if a == "full" { run_full(app, cx) }
     else if let Some(k) = a.strip_prefix("more:") { if let Some(g) = app.screens.mgmt.data("checks")["groups"].as_array().into_iter().flatten().find(|g| group_key(g) == k).cloned() { open_group(app, &g, cx) } }
     else if a == "scroll" {
         // a screen's worth down the list (the e2e's wheel: a synthetic wheel is not delivered to the window)
-        if let Some(h) = ui(|u| u.scroll.clone()) { let b = &h.0.borrow().base_handle; let o = b.offset(); b.set_offset(point(o.x, o.y - px(240.))); }
+        if let Some(h) = app.screens.mgmt.checks.with(|u| u.scroll.clone()) { let b = &h.0.borrow().base_handle; let o = b.offset(); b.set_offset(point(o.x, o.y - px(240.))); }
         app.ui_epoch += 1; cx.notify();
     }
 }
@@ -250,14 +256,14 @@ pub fn judged(d: &Value, src: &str) -> bool { d["sources"][src]["judged"] == tru
 fn ask_search(app: &mut Backplane, sev: &str, q: &str) {
     let key = (sev.to_string(), q.trim().to_string());
     let (sev_only, src) = key.0.split_once('|').map_or((key.0.clone(), String::new()), |(a, b)| (a.to_string(), b.to_string()));
-    if ui(|u| u.asked.as_ref() == Some(&key)) { return }
-    ui(|u| u.asked = Some(key.clone()));
+    if app.screens.mgmt.checks.with(|u| u.asked.as_ref() == Some(&key)) { return }
+    app.screens.mgmt.checks.with(|u| u.asked = Some(key.clone()));
     let _ = app.tx.try_send(Command::Ask("kicad.checks.list".into(), json!({"project": project(app), "severity": sev_only, "source": src, "q": key.1, "rows": true, "limit": 1000}), LIST_TAG));
 }
 fn open_group(app: &mut Backplane, g: &Value, cx: &mut Context<Backplane>) {
     let k = group_key(g);
-    let now_open = ui(|u| if u.open.remove(&k) { false } else { u.open.insert(k.clone()); true });
-    if now_open && !ui(|u| u.more.contains_key(&k)) {
+    let now_open = app.screens.mgmt.checks.with(|u| if u.open.remove(&k) { false } else { u.open.insert(k.clone()); true });
+    if now_open && !app.screens.mgmt.checks.with(|u| u.more.contains_key(&k)) {
         let sev = if g["excluded"] == true { "excluded" } else { "" };
         let _ = app.tx.try_send(Command::Ask("kicad.checks.list".into(), json!({"project": project(app), "source": s(g, "source"), "rule": s(g, "rule"), "severity": sev, "rows": true, "limit": 2000, "tag": k}), MORE_TAG));
     }
@@ -271,18 +277,18 @@ pub fn answered(app: &mut Backplane, id: u64, reply: &Value, cx: &mut Context<Ba
     if reply["ok"] == false { app.screens.mgmt.error = crate::hub::rpc_error(reply); cx.notify(); return true }
     let rows = r["findings"].as_array().cloned().unwrap_or_default();
     match id {
-        LIST_TAG => ui(|u| if let Some((a, b)) = u.asked.clone() { u.found = Some((a, b, rows)) }),
+        LIST_TAG => app.screens.mgmt.checks.with(|u| if let Some((a, b)) = u.asked.clone() { u.found = Some((a, b, rows)) }),
         // the wanted finding's group: opened (its rows fetched), so the row is there to select
         WANT_TAG => {
-            let want = ui(|u| u.want.as_ref().map(|w| w.0.clone())).unwrap_or_default();
+            let want = app.screens.mgmt.checks.with(|u| u.want.as_ref().map(|w| w.0.clone())).unwrap_or_default();
             if let Some(f) = rows.iter().find(|f| s(f, "id") == want) {
                 let g = json!({"source": s(f, "source"), "rule": s(f, "rule"), "excluded": s(f, "severity") == "excluded"});
-                if !ui(|u| u.open.contains(&group_key(&g))) { open_group(app, &g, cx) }
-            } else { ui(|u| u.want = None) } // gone (the checks ran again): nothing to show
+                if !app.screens.mgmt.checks.with(|u| u.open.contains(&group_key(&g))) { open_group(app, &g, cx) }
+            } else { app.screens.mgmt.checks.with(|u| u.want = None) } // gone (the checks ran again): nothing to show
         }
         MORE_TAG => {
             // the group these rows are: the rule and check of the first one (all of one group)
-            if let Some(f) = rows.first() { let k = format!("{}:{}:{}", s(f, "source"), s(f, "rule"), s(f, "severity") == "excluded"); ui(|u| { u.more.insert(k, rows.clone()); }); }
+            if let Some(f) = rows.first() { let k = format!("{}:{}:{}", s(f, "source"), s(f, "rule"), s(f, "severity") == "excluded"); app.screens.mgmt.checks.with(|u| { u.more.insert(k, rows.clone()); }); }
         }
         _ => {
             let text = s(r, "text").to_string();
@@ -297,32 +303,32 @@ pub fn answered(app: &mut Backplane, id: u64, reply: &Value, cx: &mut Context<Ba
 }
 
 /// A new result from the hub: what was fetched for it is old.
-fn sync(d: &Value) {
+fn sync(state: &State, d: &Value) {
     let stamp = format!("{}/{}", d["drc"]["at"], d["erc"]["at"]);
-    thread_local! { static SEEN: RefCell<String> = RefCell::new(String::new()); }
-    let changed = SEEN.with(|x| { let mut x = x.borrow_mut(); let c = *x != stamp; *x = stamp; c });
-    if changed { ui(|u| { u.more.clear(); u.found = None; u.asked = None; }) }
+    state.with(|u| {
+        if u.stamp != stamp { u.stamp = stamp; u.more.clear(); u.found = None; u.asked = None; }
+    });
 }
 
 pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backplane>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    if ui(|u| u.filter.is_none()) {
+    if app.screens.mgmt.checks.with(|u| u.filter.is_none()) {
         let f = cx.new(|cx| Composer::with_context(cx, "AskInput"));
         f.update(cx, |i, _| i.set_placeholder(&trs("Filter")));
         cx.observe(&f, |_, _, cx| cx.notify()).detach();
         let h = cx.focus_handle();
-        ui(|u| { u.filter = Some(f); u.focus = Some(h); });
+        app.screens.mgmt.checks.with(|u| { u.filter = Some(f); u.focus = Some(h); });
     }
     if d.is_null() { return div().p_3().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(tf("gpui.mgmt.checks.reading", &[])).into_any_element() }
-    sync(d);
-    let q = filter_text(cx);
-    let src_now = ui(|u| u.src.clone());
-    let sev = search_key(&ui(|u| u.sev.clone()), &src_now);
+    sync(&app.screens.mgmt.checks, d);
+    let q = filter_text(app, cx);
+    let src_now = app.screens.mgmt.checks.with(|u| u.src.clone());
+    let sev = search_key(&app.screens.mgmt.checks.with(|u| u.sev.clone()), &src_now);
     // a source alone keeps the groups (each rule a heading with its count, its first rows): only a severity or words ask the hub
-    let search = searching(&ui(|u| u.sev.clone()), &q);
+    let search = searching(&app.screens.mgmt.checks.with(|u| u.sev.clone()), &q);
     if search { ask_search(app, &sev, &q) }
-    let found = ui(|u| u.found.clone()).filter(|(a, b, _)| *a == sev && *b == q.trim()).map(|x| x.2);
-    let (more, open) = ui(|u| (u.more.clone(), u.open.clone()));
+    let found = app.screens.mgmt.checks.with(|u| u.found.clone()).filter(|(a, b, _)| *a == sev && *b == q.trim()).map(|x| x.2);
+    let (more, open) = app.screens.mgmt.checks.with(|u| (u.more.clone(), u.open.clone()));
 
     // the top row: each check's state, Run, the severity filter and the words
     let mut top = div().flex_shrink_0().min_h(crate::scale::tpx(super::head::ROW_H)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("rule")).text_size(crate::scale::tpx(11.));
@@ -330,16 +336,13 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
         let (t, col) = state_text(name, &d[k]);
         if !t.is_empty() { top = top.child(div().id(SharedString::from(format!("checks-state-{k}"))).flex_shrink_0().max_w(px(260.)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c(col)).child(t)); }
     }
-    let running = d["drc"]["state"] == "running" || d["erc"]["state"] == "running";
-    top = top.child(crate::ui::with_rect(div().id("checks-run"), || "mgmt:checks:run".into()).flex_shrink_0().px_2().border_1().border_color(c("line")).cursor_pointer().hover(|x| x.bg(c("panel")))
-        .text_color(c(if running { "faint" } else { "text" })).child(tf("gpui.mgmt.checks.run", &[])).on_click(cx.listener(|this, _, _, cx| run(this, cx))));
     let mut sevs = div().flex_shrink_0().flex().border_1().border_color(c("line"));
-    let sev_only = ui(|u| u.sev.clone());
+    let sev_only = app.screens.mgmt.checks.with(|u| u.sev.clone());
     for (k, label) in [("", "gpui.mgmt.checks.all"), ("error", "gpui.mgmt.checks.errors"), ("warning", "gpui.mgmt.checks.warnings"), ("excluded", "gpui.mgmt.checks.excluded")] {
         let on = sev_only == k;
         sevs = sevs.child(crate::ui::with_rect(div().id(SharedString::from(format!("checks-sev-{k}"))), move || format!("mgmt:checks:sev:{k}")).px(px(6.)).cursor_pointer()
             .when(on, |x| x.bg(c("raise")).text_color(c("text"))).when(!on, |x| x.text_color(c("dim")).hover(|x| x.bg(c("panel"))))
-            .child(tf(label, &[])).on_click(cx.listener(move |_, _, _, cx| { ui(|u| u.sev = k.to_string()); cx.notify(); })));
+            .child(tf(label, &[])).on_click(cx.listener(move |this, _, _, cx| { this.screens.mgmt.checks.with(|u| u.sev = k.to_string()); cx.notify(); })));
     }
     // the sources, when there are more than DRC and ERC: one list, narrowed to one of them by a press
     let order: Vec<String> = d["order"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_string)).collect();
@@ -352,34 +355,34 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
             row = row.child(crate::ui::with_rect(div().id(SharedString::from(format!("checks-src-{k}"))), { let k = k.clone(); move || format!("mgmt:checks:src:{k}") })
                 .px(px(6.)).border_1().border_color(c("line")).cursor_pointer().when(on, |x| x.bg(c("raise")).text_color(c("text"))).when(!on, |x| x.text_color(c(if stale { "faint" } else { "dim" })).hover(|x| x.bg(c("panel"))))
                 .child(if stale { format!("{label} · {}", tf("gpui.mgmt.checks.stale", &[])) } else { label }) // i18n-ok: a join
-                .on_click(cx.listener(move |_, _, _, cx| { ui(|u| u.src = kk.clone()); cx.notify(); })));
+                .on_click(cx.listener(move |this, _, _, cx| { this.screens.mgmt.checks.with(|u| u.src = kk.clone()); cx.notify(); })));
         }
         row
     });
-    top = top.child(sevs).child(div().flex_1().min_w(px(80.)).px_2().py(px(2.)).border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).children(ui(|u| u.filter.clone())));
+    top = top.child(sevs).child(div().flex_1().min_w(px(80.)).px_2().py(px(2.)).border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).children(app.screens.mgmt.checks.with(|u| u.filter.clone())));
 
     // the list: groups (a heading, its rows, "n more"), or the search's rows
     // the list: only the rows in view are built (a board's hundreds of findings scroll at the frame rate); every item is one row high
     let of_src = by_source(d, &src_now);
     let its = items(&of_src, if search { Some(found.as_deref().unwrap_or(&[])) } else { None }, search && found.is_none(), &more, &open);
     let n = its.len();
-    let scroll = ui(|u| u.scroll.get_or_insert_with(UniformListScrollHandle::new).clone());
+    let scroll = app.screens.mgmt.checks.with(|u| u.scroll.get_or_insert_with(UniformListScrollHandle::new).clone());
     // a finding named by a KiCad marker click: selected and scrolled to once its row is in the list; else its group is found and opened
-    ui(|u| u.flash = None);
-    if let Some((want, asked)) = ui(|u| u.want.clone()) {
+    app.screens.mgmt.checks.with(|u| u.flash = None);
+    if let Some((want, asked)) = app.screens.mgmt.checks.with(|u| u.want.clone()) {
         if let Some(ix) = its.iter().position(|i| matches!(i, Item::Row(f) if s(f, "id") == want)) {
-            ui(|u| { u.want = None; u.sel = Some(want.clone()); });
+            app.screens.mgmt.checks.with(|u| { u.want = None; u.sel = Some(want.clone()); });
             scroll.scroll_to_item(ix, ScrollStrategy::Center);
             log("checks_reveal", json!({"id": want}));
         } else if !asked {
-            ui(|u| u.want = Some((want.clone(), true)));
+            app.screens.mgmt.checks.with(|u| u.want = Some((want.clone(), true)));
             // a word typed in the filter could hide it too
-            if let Some(f) = ui(|u| u.filter.clone()) { f.update(cx, |i, cx| i.set(String::new(), cx)); }
+            if let Some(f) = app.screens.mgmt.checks.with(|u| u.filter.clone()) { f.update(cx, |i, cx| i.set(String::new(), cx)); }
             let src = want.split(':').next().unwrap_or("").to_string();
             let _ = app.tx.try_send(Command::Ask("kicad.checks.list".into(), json!({"project": project(app), "source": src, "rows": true, "limit": 2000}), WANT_TAG));
         }
     }
-    ui(|u| { u.items = its.clone(); u.light = light; u.sources = d["sources"].clone(); });
+    app.screens.mgmt.checks.with(|u| { u.items = its.clone(); u.light = light; u.sources = d["sources"].clone(); });
     let list = uniform_list("checks-rows", n, cx.processor(|this, range: std::ops::Range<usize>, _w, cx| range.map(|i| item_el(this, i, cx)).collect::<Vec<_>>()))
         .track_scroll(scroll.clone()).flex_1().min_h_0().text_size(crate::scale::tpx(12.));
     // what these results leave out, said plainly: the background runs skip the library checks, so the counts can differ from KiCad's own DRC
@@ -392,20 +395,20 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
 
     // up and down move through the rows, each one shown in KiCad as it is reached (and scrolled into view)
     let ids: Vec<String> = its.iter().filter_map(|i| if let Item::Row(f) = i { Some(s(f, "id").to_string()) } else { None }).collect();
-    let focus = ui(|u| u.focus.clone());
+    let focus = app.screens.mgmt.checks.with(|u| u.focus.clone());
     div().size_full().flex().flex_col().when_some(focus, |x, h| x.track_focus(&h).key_context("ChecksPanel"))
         .on_key_down(cx.listener(move |this, e: &KeyDownEvent, _, cx| {
             let by = match e.keystroke.key.as_str() { "down" => 1, "up" => -1, _ => return };
-            let Some(id) = step(&ids, ui(|u| u.sel.clone()).as_deref(), by) else { return };
+            let Some(id) = step(&ids, this.screens.mgmt.checks.with(|u| u.sel.clone()).as_deref(), by) else { return };
             cx.stop_propagation();
-            if let Some(ix) = ui(|u| u.items.iter().position(|i| matches!(i, Item::Row(f) if s(f, "id") == id))) { scroll.scroll_to_item(ix, ScrollStrategy::Center) }
+            if let Some(ix) = this.screens.mgmt.checks.with(|u| u.items.iter().position(|i| matches!(i, Item::Row(f) if s(f, "id") == id))) { scroll.scroll_to_item(ix, ScrollStrategy::Center) }
             select(this, &id, cx)
         }))
         .child(top).children(srcs).child(list).children(foot).into_any_element()
 }
 
 // The chip in the editor's row ("DRC 12 · ERC 3", coloured only when not clean): every project's, from `mgmt.checks.<digest>` as it arrives.
-thread_local! { static CHIPS: RefCell<std::collections::HashMap<String, (String, &'static str)>> = RefCell::new(Default::default()); }
+
 /// The chip's colour: errors red, warnings amber, a failed check red, else quiet.
 pub fn chip_tone(d: &Value) -> &'static str {
     let n = |k: &str, sev: &str| d[k]["counts"][sev].as_u64().unwrap_or(0);
@@ -414,13 +417,13 @@ pub fn chip_tone(d: &Value) -> &'static str {
 }
 /// A `mgmt.*` info arrived (main.rs): the chip of its project, when it is the Checks panel's.
 /// `open`: the Checks panel is open now (the state asked for or the hub's).
-pub fn seen(key: &str, text: &str, open: bool) {
+pub fn seen(state: &State, key: &str, text: &str, open: bool) {
     // a click on a review marker in KiCad (bp.13; lane J's review/markers.rs): that finding is the one to show
     if key.starts_with("review.clicked.") {
         let v: Value = serde_json::from_str(text).unwrap_or(Value::Null);
         if let Some(id) = v["id"].as_str().filter(|i| !i.is_empty()) {
             let fresh = v["at"].as_u64().is_some_and(|at| (super::kcomment::epoch_ms() as u64).abs_diff(at) < 10_000); // not one the hub kept from before
-            ui(|u| { clicked(u, id, s(&v, "title"), fresh, open, std::time::Instant::now()); });
+            state.with(|u| { clicked(u, id, s(&v, "title"), fresh, open, std::time::Instant::now()); });
         }
         return
     }
@@ -428,7 +431,7 @@ pub fn seen(key: &str, text: &str, open: bool) {
     let v: Value = serde_json::from_str(text).unwrap_or(Value::Null);
     let (pro, chip) = (s(&v, "project").to_string(), s(&v, "chip").to_string());
     if pro.is_empty() { return }
-    CHIPS.with(|m| { let mut m = m.borrow_mut(); if chip.is_empty() { m.remove(&pro); } else { m.insert(pro, (chip, chip_tone(&v))); } });
+    state.with(|u| { let m = &mut u.chips; if chip.is_empty() { m.remove(&pro); } else { m.insert(pro, (chip, chip_tone(&v))); } });
 }
 /// How long the chip says a clicked marker's finding.
 pub const FLASH: std::time::Duration = std::time::Duration::from_secs(4);
@@ -444,16 +447,16 @@ pub fn flash_in(u: &Ui, now: std::time::Instant) -> Option<(String, std::time::D
     let (t, at) = u.flash.as_ref()?; FLASH.checked_sub(now.duration_since(*at)).filter(|d| !d.is_zero()).map(|d| (t.clone(), d))
 }
 /// The chip's flash, and whether the repaint that ends it is still to be asked for (asked once).
-pub fn chip_flash() -> Option<(String, std::time::Duration, bool)> {
-    let f = ui(|u| { let f = flash_in(u, std::time::Instant::now())?; let ask = !u.flash_timer; u.flash_timer = true; Some((f.0, f.1, ask)) })?;
+pub fn chip_flash(state: &State) -> Option<(String, std::time::Duration, bool)> {
+    let f = state.with(|u| { let f = flash_in(u, std::time::Instant::now())?; let ask = !u.flash_timer; u.flash_timer = true; Some((f.0, f.1, ask)) })?;
     if f.2 { log("checks_chip_flash", json!({"title": f.0})); }
     Some(f)
 }
 
 /// The chip for a project (its .kicad_pro), once the hub has published its checks.
 /// `project`: the editor's (its .kicad_pro, board or schematic, or the project's folder).
-pub fn chip_for(project: &str) -> Option<(String, &'static str)> {
-    CHIPS.with(|m| { let m = m.borrow(); m.get(project).cloned().or_else(|| m.iter().find(|(k, _)| same_project(k, project)).map(|(_, v)| v.clone())) })
+pub fn chip_for(state: &State, project: &str) -> Option<(String, &'static str)> {
+    state.with(|u| { let m = &u.chips; m.get(project).cloned().or_else(|| m.iter().find(|(k, _)| same_project(k, project)).map(|(_, v)| v.clone())) })
 }
 /// Whether a path names the project of a .kicad_pro: the file itself, a file beside it with its name (board, schematic), or its folder.
 pub fn same_project(pro: &str, p: &str) -> bool {
@@ -506,14 +509,15 @@ mod tests {
         assert!(u.flash.is_none() && u.want.is_some(), "the hub's last click, replayed on connecting: remembered, not said");
     }
     #[test] fn the_chip() {
+        let state = State::default();
         let d = |de: u64, dw: u64, ee: u64, st: &str| json!({"project": "/p/a.kicad_pro", "chip": "DRC 1 · ERC 0", "drc": {"state": st, "counts": {"error": de, "warning": dw}}, "erc": {"state": "fresh", "counts": {"error": ee, "warning": 0}}});
         assert_eq!(chip_tone(&d(1, 0, 0, "fresh")), "bad"); assert_eq!(chip_tone(&d(0, 4, 0, "fresh")), "warn"); assert_eq!(chip_tone(&d(0, 0, 0, "fresh")), "faint");
         assert_eq!(chip_tone(&d(0, 0, 0, "failed")), "bad"); assert_eq!(chip_tone(&d(0, 0, 2, "fresh")), "bad");
-        seen("mgmt.checks.abc", &d(0, 2, 0, "fresh").to_string(), false);
-        assert_eq!(chip_for("/p/a.kicad_pro"), Some(("DRC 1 · ERC 0".to_string(), "warn")));
-        assert!(chip_for("/p/a.kicad_pcb").is_some() && chip_for("/p").is_some() && chip_for("/p/").is_some() && chip_for("/q/a.kicad_pcb").is_none());
+        seen(&state, "mgmt.checks.abc", &d(0, 2, 0, "fresh").to_string(), false);
+        assert_eq!(chip_for(&state, "/p/a.kicad_pro"), Some(("DRC 1 · ERC 0".to_string(), "warn")));
+        assert!(chip_for(&state, "/p/a.kicad_pcb").is_some() && chip_for(&state, "/p").is_some() && chip_for(&state, "/p/").is_some() && chip_for(&state, "/q/a.kicad_pcb").is_none());
         assert!(same_project("C:\\p\\a.kicad_pro", "C:/p/a.kicad_sch") && !same_project("/p/a.kicad_pro", "/p/ab.kicad_pcb"));
-        seen("mgmt.bom.abc", "{}", false); assert!(chip_for("/p/b.kicad_pro").is_none());
+        seen(&state, "mgmt.bom.abc", "{}", false); assert!(chip_for(&state, "/p/b.kicad_pro").is_none());
     }
     #[test] fn sources_by_name() {
         let d = json!({"sources": {"fab": {"label": "Fab rules", "judged": false}, "datasheet": {"label": "Datasheets", "judged": true}}});
@@ -545,11 +549,12 @@ mod tests {
         assert_eq!(kinds(&items(&json!({"groups": [], "drc": {"has_result": true}}), None, false, &more, &BTreeSet::new())), ["gpui.mgmt.checks.none"]);
     }
     #[test] fn a_marker_click_names_the_finding_to_show() {
-        ui(|u| { u.sev = "error".into(); u.src = "drc".into(); u.want = None; });
-        seen("review.clicked.abc", r#"{"id":"review:1f","at":5}"#, true);
-        assert_eq!(ui(|u| (u.want.clone(), u.sev.clone(), u.src.clone())), (Some(("review:1f".to_string(), false)), String::new(), String::new()), "the filters that could hide it are cleared");
-        seen("review.clicked.abc", r#"{"id":""}"#, true); assert!(ui(|u| u.want.is_some()), "an empty one changes nothing");
-        ui(|u| u.want = None);
+        let state = State::default();
+        state.with(|u| { u.sev = "error".into(); u.src = "drc".into(); u.want = None; });
+        seen(&state, "review.clicked.abc", r#"{"id":"review:1f","at":5}"#, true);
+        assert_eq!(state.with(|u| (u.want.clone(), u.sev.clone(), u.src.clone())), (Some(("review:1f".to_string(), false)), String::new(), String::new()), "the filters that could hide it are cleared");
+        seen(&state, "review.clicked.abc", r#"{"id":""}"#, true); assert!(state.with(|u| u.want.is_some()), "an empty one changes nothing");
+        state.with(|u| u.want = None);
     }
     #[test] fn up_and_down() {
         let ids: Vec<String> = ["a", "b", "c"].iter().map(|x| x.to_string()).collect();

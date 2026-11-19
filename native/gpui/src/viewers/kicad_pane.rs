@@ -2282,7 +2282,7 @@ impl crate::Backplane {
 
 /// The editor's own row: a tab per editor (one click; Ctrl+Tab and Ctrl+Shift+Tab go round them), Full size, and Pop out / Pop back in.
 /// `on` (the window it is drawn in): the main window's pane, or the editor's own window.
-pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPane>, popped: bool, full: bool, screen: bool,
+pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPane>, checks: &crate::screens::mgmt_checks::State, popped: bool, full: bool, screen: bool,
     act: impl Fn(&mut V, &str, &mut Window, &mut Context<V>) + Clone + 'static) -> AnyElement {
     let c = |n: &str| crate::theme::color(light, n);
     let at = pane.read(cx).tab();
@@ -2338,9 +2338,9 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
     }
     // the design's checks ("DRC 12 · ERC 3", coloured only when not clean): a press opens the Checks panel
     // a KiCad marker clicked with the Checks panel shut: the chip says that finding for a few seconds, and its press opens the panel on it
-    if let Some((text, tone)) = crate::screens::mgmt_checks::chip_for(&pane.read(cx).project) {
+    if let Some((text, tone)) = crate::screens::mgmt_checks::chip_for(checks, &pane.read(cx).project) {
         let a = act.clone();
-        let flash = crate::screens::mgmt_checks::chip_flash();
+        let flash = crate::screens::mgmt_checks::chip_flash(checks);
         let chip = match &flash {
             Some((t, ..)) => crate::screens::mgmt_checks::chip_el(if t.is_empty() { &text } else { t }, "accent", light).border_color(c("accent")).bg(c("raise"))
                 .max_w(px(260.)).overflow_hidden().whitespace_nowrap().text_ellipsis(),
@@ -2391,13 +2391,13 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
 }
 
 /// The editor in a window of its own (Pop out): the strip and the same pane (the same KiCad, nothing restarted). Closing it pops it back in.
-pub struct KicadWindow { pub pane: Entity<KicadPane>, pub app: WeakEntity<crate::Backplane>, pub light: bool }
+pub struct KicadWindow { checks: crate::screens::mgmt_checks::State, pub pane: Entity<KicadPane>, pub app: WeakEntity<crate::Backplane>, pub light: bool }
 impl Render for KicadWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // the pane's own idea of the theme (Backplane's render sets it; Backplane is never read from here, it may be the one updating)
         let light = self.pane.read(cx).light; self.light = light;
         let _ = window;
-        let strip = strip(cx, light, &self.pane, true, false, false, |this: &mut KicadWindow, a, window, cx| {
+        let strip = strip(cx, light, &self.pane, &self.checks, true, false, false, |this: &mut KicadWindow, a, window, cx| {
             if a == "popin" { if let Some(app) = this.app.upgrade() { app.update(cx, |app, cx| app.kicad_popin(cx)); } window.remove_window(); }
         });
         div().size_full().flex().flex_col().bg(crate::theme::color(light, "bg")).child(strip).child(div().flex_1().min_h_0().child(self.pane.clone()))
@@ -2410,13 +2410,14 @@ impl crate::Backplane {
         let Some(pane) = self.screens.kicad.clone() else { return };
         if self.screens.kicad_window.is_some() { return }
         let (app, light) = (cx.entity().downgrade(), self.light());
+        let checks = self.screens.mgmt.checks.clone();
         let title = std::path::Path::new(&pane.read(cx).project).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
         let opts = WindowOptions { window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(1400.), px(900.)), cx))),
             titlebar: Some(TitlebarOptions { title: Some(crate::streamer::shown(&format!("{title} — KiCad · Backplane")).into()), ..Default::default() }), ..Default::default() };
         match cx.open_window(opts, move |window, cx| {
             let app2 = app.clone();
             window.on_window_should_close(cx, move |window, cx| { let popped = top_of(window).unwrap_or(0); if let Some(a) = app2.upgrade() { a.update(cx, |a, cx| a.kicad_popin_closing(popped, cx)); } true });
-            cx.new(|_| KicadWindow { pane, app, light })
+            cx.new(|_| KicadWindow { pane, app, light, checks })
         }) {
             // the popped-out window is the person's now: the editor in it gets the keys as on Edit (the window itself is shown
             // active by open_window)

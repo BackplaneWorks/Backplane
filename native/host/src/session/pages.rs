@@ -199,11 +199,13 @@ fn page_title(page: &str) -> String {
 fn comparison<'a>(session: &'a Value, sel: &str) -> &'a str { draft(session, &format!("@rp.versions:{sel}")) }
 /// `ab`: for the BOM, the two versions it compares ("<old>\n<new>", a design-history comparison's sides; "" the BOM as it is)
 fn ask_page_ab(b: &mut B, sel: &str, page: &str, ab: &str) {
+    let release = page == "release";
+    let page = if release { "checks" } else { page };
     let m = match page { "bom" => "review.bom", "checks" => "review.checks", _ => return };
     b.patch_d.insert(format!("@rp.busy:{sel}"), json!(page));
     b.patch_i.insert(format!("rp.title:{sel}:{page}"), json!(page_title(page)));
     let (va, vb) = ab.split_once('\n').unwrap_or(("", ""));
-    let p = if page == "bom" { json!({"thread": sel, "a": va, "b": vb}) } else { json!({"thread": sel, "commit": "", "trigger": "manual"}) };
+    let p = if page == "bom" { json!({"thread": sel, "a": va, "b": vb}) } else { json!({"thread": sel, "commit": "", "trigger": if release { "release" } else { "manual" }}) };
     let id = b.rpc(m, p);
     b.patch_d.insert(format!("@rp.req:{id}"), json!(format!("{sel}:{page}")));
 }
@@ -214,7 +216,7 @@ fn open_review_ab(session: &Value, hub: &str, sel: &str, page: &str, ab: &str, m
     // the watch is stopped for the drawing's own root: kicad.watch names no root once the drawing is put away
     b.view(session, sel, "review", page);
     b.patch_d.insert(format!("@rp.versions:{sel}"), json!(ab));
-    if !managed || (page == "bom" && !ab.is_empty()) { ask_page_ab(&mut b, sel, page, ab); }
+    if page == "release" || !managed || (page == "bom" && !ab.is_empty()) { ask_page_ab(&mut b, sel, page, ab); }
     (b.patch(session), b.cmds)
 }
 /// The thread's viewer left for something else (a drawing, or closed): Diff and Review go
@@ -253,7 +255,7 @@ pub fn act_for(hub: &str, session: &Value, sel: &str, action: &str, value: &str,
             let page = if action == "rv-bom" || value.is_empty() { "bom" } else { value };
             if !matches!(page, "bom" | "checks" | "comments" | "release") { return None }
             // rv-bom "<old>\n<new>": the parts that changed between a comparison's two versions (0.14's compare bar BOM)
-            let ab = if action == "rv-bom" && value.contains('\n') { value } else if action == "rv-page" && kind_of(session, sel) == "review" { comparison(session, sel) } else { "" };
+            let ab = if action == "rv-bom" && value.contains('\n') { value } else { "" };
             let (p, cmds) = open_review_ab(session, hub, sel, page, ab, managed());
             return Some(Out { session_patch: p, cmds, look: true });
         }
@@ -404,22 +406,23 @@ fn tab(page: &str, cur: &str) -> Value {
 pub fn review_json(session: &Value, sel: &str) -> Value {
     if sel.is_empty() || info(session, &format!("view.kind:{sel}")) != "review" { return Value::Null }
     let page = match info(session, &format!("view.path:{sel}")) { "" => "bom", p => p };
-    let key = |k: &str| format!("{k}:{sel}:{page}");
+    let report_page = if page == "release" { "checks" } else { page };
+    let key = |k: &str| format!("{k}:{sel}:{report_page}");
     let (md_text, err) = (info(session, &key("rp.md")), info(session, &key("rp.err")));
-    let busy = draft(session, &format!("@rp.busy:{sel}")) == page;
-    let title = match page { "comments" => "Comments · 0 open".to_string(), "release" => String::new(), _ => info(session, &key("rp.title")).to_string() };
+    let busy = draft(session, &format!("@rp.busy:{sel}")) == report_page;
+    let title = match page { "comments" => "Comments · 0 open".to_string(), "release" => "Release".to_string(), _ => info(session, &key("rp.title")).to_string() };
     let note = if busy { "Reading the design…".to_string() } else if !err.is_empty() { err.to_string() } else if !md_text.is_empty() { String::new() } else { match page {
         "comments" => "No comments yet. Right-click a place on the board or schematic (long-press on a phone) to comment there.".into(),
         "release" => "Tag this design and make its fabrication outputs: Gerbers, drill, CPL, BOM, PDFs and STEP, in .backplane/releases.".into(),
         _ => "Nothing yet.".into() } };
     let blocks = if md_text.is_empty() { vec![] } else { md::nodes_json(&md::render(md_text)) };
-    let checks = if page == "checks" {
+    let checks = if report_page == "checks" {
         let tasks: Value = serde_json::from_str(info(session, &key("rp.tasks"))).unwrap_or(json!([]));
         let rows: Vec<Value> = tasks.as_array().into_iter().flatten().enumerate().map(|(i, t)| json!({"index": i, "text": s(t, "text"), "done": t["done"].as_bool().unwrap_or(false), "group": s(t, "group")})).collect();
         json!({"gate": info(session, &key("rp.gate")), "line": info(session, &key("rp.line")), "tasks": rows})
     } else { Value::Null };
     let tabs: Vec<Value> = ["bom", "checks", "comments", "release"].iter().map(|p| tab(p, page)).collect();
-    json!({"tabs": tabs, "title": title, "busy": busy, "note": note, "blocks": blocks, "checks": checks, "release": null})
+    json!({"tabs": tabs, "title": title, "busy": busy, "note": note, "blocks": blocks, "checks": checks, "release": if page == "release" { json!({"note":"Tag this design and make its fabrication outputs: Gerbers, drill, CPL, BOM, PDFs and STEP, in .backplane/releases.", "blocks": md::nodes_json(&md::render(info(session, &format!("rp.md:{sel}:release"))))}) } else { Value::Null }})
 }
 
 #[cfg(test)]
@@ -498,6 +501,21 @@ mod tests {
         patch::merge(&mut s1, &o.session_patch); assert!(!reverting(&s1, T));
         let o = act("h", &s1, T, "revert", "ask").unwrap(); patch::merge(&mut s1, &o.session_patch);
         let o = act("h", &s1, T, "revert-no", "").unwrap(); patch::merge(&mut s1, &o.session_patch); assert!(!reverting(&s1, T));
+    }
+    #[test] fn release_shows_its_gate_and_requests_release_trigger_checks() {
+        let mut session = sess();
+        let open = act_for("h", &session, T, "rv-page", "release", || true).unwrap();
+        let cmd: Value = serde_json::from_str(open.cmds[0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(cmd["p"]["trigger"], "release");
+        patch::merge(&mut session, &open.session_patch);
+        apply_reads(&M, "h", &mut session, &[json!({"method":"review.checks","ok":true,"id":5,"result":{"report":{
+            "page":"checks","thread":T,"gate":"Checklist: 1 unticked","tasks":[{"text":"ERC clean","done":false}],"md":"Project check output"
+        }}})]);
+        let r = review_json(&session, T);
+        assert_eq!(r["checks"]["gate"], "Checklist: 1 unticked");
+        assert_eq!(r["checks"]["tasks"][0]["text"], "ERC clean");
+        assert!(!r["blocks"].as_array().unwrap().is_empty());
+        assert!(r["release"]["note"].is_string());
     }
     #[test] fn changing_doors_does_not_run_a_second_working_copy_report() {
         for page in ["bom", "checks"] {

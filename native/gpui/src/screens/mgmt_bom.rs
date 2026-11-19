@@ -241,6 +241,9 @@ pub fn act(app: &mut Backplane, a: &str, cx: &mut Context<Backplane>) {
 }
 
 pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backplane>) -> AnyElement {
+    panel(app, d, app.screens.mgmt.peek()["side"] == "bottom", light, cx)
+}
+pub fn panel(app: &mut Backplane, d: &Value, bottom: bool, light: bool, cx: &mut Context<Backplane>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     if app.screens.mgmt.bom.filter.is_none() {
         let f = cx.new(|cx| Composer::with_context(cx, "AskInput"));
@@ -324,7 +327,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     if d["more"].as_u64().unwrap_or(0) > 0 { list = list.child(div().p_2().text_color(c("faint")).child(tf("gpui.mgmt.bom.more", &[("n", d["more"].as_u64().unwrap_or(0).into())]))); }
     let editor = sel.as_ref().and_then(|id| all.iter().find(|l| s(l, "id") == id.as_str())).map(|l| line_editor(app, l, light, cx));
     // docked at the bottom the panel is short and wide: the line's editor sits beside the list instead of under it
-    if app.screens.mgmt.peek()["side"] == "bottom" {
+    if bottom {
         let left = div().flex_1().min_w_0().h_full().flex().flex_col().child(head).child(list);
         return div().size_full().flex().flex_col().child(top).children(stock_note).child(div().flex_1().min_h_0().flex().flex_row().child(left)
             .children(editor.map(|e| div().id("bom-editor").w(px(380.)).flex_shrink_0().h_full().border_l_1().border_color(c("rule")).overflow_y_scroll().child(e)))).into_any_element()
