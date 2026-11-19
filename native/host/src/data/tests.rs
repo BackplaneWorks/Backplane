@@ -8,7 +8,7 @@ use tokio_tungstenite::connect_async;
 
 struct Fake(Arc<Hub>);
 impl RpcHandler for Fake {
-    fn methods(&self) -> &'static [&'static str] { &["project.add", "project.new", "thread.create", "thread.modes", "thread.effort", "thread.provider", "ask.answer", "turn.interrupt", "thread.pin", "thread.rename", "thread.detach", "setting.set"] }
+    fn methods(&self) -> &'static [&'static str] { &["project.add", "project.new", "thread.create", "thread.modes", "thread.effort", "thread.provider", "ask.answer", "turn.interrupt", "thread.pin", "thread.rename", "thread.detach", "setting.set", "thread.review"] }
     fn call<'a>(&'a self, h: &'a Arc<Hub>, _w: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let _ = &self.0; let at = now_ms() / 1000;
@@ -19,6 +19,7 @@ impl RpcHandler for Fake {
                 // /project's request: a folder named "full" holds something, any other is made with its first thread
                 "project.new" => if s(p, "path") == "full" { vec![json!({"t":"reply","id":id,"ok":false,"error":"/h/full is there and is not empty.","result":{"error":"/h/full is there and is not empty.","exists":"/h/full"}})] }
                     else { assert_eq!(p["empty"], true); vec![json!({"t":"reply","id":id,"ok":true,"thread":format!("made-{}", s(p, "text").len())})] },
+                "thread.review" => { h.commit(&json!({"$":"SettingSet","key":format!("review.ro.{}", s(p, "thread")),"value":if p["on"] == true { "1" } else { "0" },"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
                 "ask.answer" => { h.commit(&json!({"$":"AskClosed","id":s(p,"id"),"answer":s(p,"answer"),"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
                 "thread.modes" | "thread.effort" | "thread.provider" | "turn.interrupt" | "thread.pin" | "thread.rename" | "thread.detach" | "setting.set" => vec![json!({"t":"reply","id":id,"ok":true})],
                 _ => vec![json!({"t":"reply","id":id,"ok":false,"error":"no"})],
@@ -64,10 +65,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -427,6 +428,20 @@ impl crate::api::RpcHandler for PushState {
     assert!(q["text"].as_str().unwrap().contains("](http://127.0.0.1:3871/q/q_data?t=tok)"), "the phone gets the link it can open: {q}");
     let r = ask(&mut ws, 2, "thread.order", json!({"thread":"t1"})).await; assert_eq!(r["result"]["order"], Value::Null, "{r}");
     let r = ask(&mut ws, 3, "thread.order", json!({})).await; assert!(r["error"].is_string() || r["result"].is_null(), "a thread is needed: {r}");
+}
+/// #1305: a phone reads a thread's review bar and presses its button through `thread.review`, as the desktop's bar does.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_the_review_bar_reads_and_switches_review_mode() {
+    let (hub, port) = up_with("review", "{\"$\":\"SettingSet\",\"key\":\"review.ro.t1\",\"value\":\"1\",\"at\":1700000050}\n").await; let _ = &hub;
+    let mut ws = open(port, "&enc=json").await; let hello = next(&mut ws).await;
+    assert!(hello["features"].as_array().unwrap().iter().any(|x| x == "reviewmode"));
+    let r = ask(&mut ws, 1, "thread.review", json!({"thread":"t1"})).await;
+    assert_eq!((r["result"]["review"]["on"].as_bool(), r["result"]["review"]["button"].as_str(), r["result"]["review"]["value"].as_bool()), (Some(true), Some("Allow edits"), Some(false)), "{r}");
+    assert!(r["result"]["review"]["text"].as_str().unwrap().starts_with("Read-only: this request looked like a review"));
+    let r = ask(&mut ws, 2, "thread.review", json!({"thread":"t1","on":false})).await;
+    assert_eq!((r["result"]["review"]["on"].as_bool(), r["result"]["review"]["button"].as_str(), r["result"]["review"]["value"].as_bool()), (Some(false), Some("Read-only again"), Some(true)), "the press, then the bar as it is now: {r}");
+    let r = ask(&mut ws, 3, "thread.review", json!({"thread":"t1","on":true})).await; assert_eq!(r["result"]["review"]["button"], "Allow edits", "{r}");
+    let r = ask(&mut ws, 4, "thread.review", json!({"thread":"t2"})).await; assert_eq!(r["result"]["review"], Value::Null, "no review: no bar: {r}");
+    let r = ask(&mut ws, 5, "thread.review", json!({})).await; assert!(r["error"].is_string() || r["result"].is_null(), "a thread is needed: {r}");
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_the_hubs_note_to_the_agent_is_marked_agent_only_on_a_page_and_live() {
     let (hub, port) = up("agentonly").await;
