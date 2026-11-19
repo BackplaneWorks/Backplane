@@ -102,11 +102,16 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf, crate::plat::tmp:
     let log = std::fs::read_to_string(d.run_dir(thread, &run).join("log.jsonl")).unwrap(); assert!(log.contains("opened") && log.contains("\"end\":true"));
 }
 
+/// A folder opened to set its times: Windows opens a folder only with FILE_FLAG_BACKUP_SEMANTICS, and setting a time takes FILE_WRITE_ATTRIBUTES
+fn dir_handle(p: &std::path::Path) -> std::fs::File {
+    #[cfg(windows)] { use std::os::windows::fs::OpenOptionsExt; std::fs::OpenOptions::new().access_mode(0x0100).custom_flags(0x0200_0000).open(p).unwrap() }
+    #[cfg(not(windows))] { std::fs::File::open(p).unwrap() }
+}
 #[tokio::test] async fn runs_beyond_the_newest_twenty_are_pruned() {
     let dir = crate::plat::tmp::dir("prune");
     // the order is set, not left to the clock: each folder's modification time is an explicit second apart (r00 oldest), so a loaded machine cannot tie or reorder them
     let base = std::time::SystemTime::now() - Duration::from_secs(3600);
-    for i in 0..25 { let p = dir.join(format!("r{i:02}")); std::fs::create_dir_all(&p).unwrap(); std::fs::File::open(&p).unwrap().set_modified(base + Duration::from_secs(i)).unwrap() }
+    for i in 0..25 { let p = dir.join(format!("r{i:02}")); std::fs::create_dir_all(&p).unwrap(); dir_handle(&p).set_modified(base + Duration::from_secs(i)).unwrap() }
     prune(&dir, KEEP_RUNS); let mut left: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect(); left.sort();
     assert_eq!(left.len(), 20); assert_eq!(left[0], "r05"); assert_eq!(left[19], "r24");
 }

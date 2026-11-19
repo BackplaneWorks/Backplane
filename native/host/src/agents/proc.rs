@@ -465,7 +465,7 @@ mod tests {
     }
     #[test] fn the_usual_directories_are_merged_once_with_the_newest_node_first() {
         let h = dir("usual"); for v in ["v20.1.0", "v24.13.1", "v9.0.0"] { std::fs::create_dir_all(h.join(".nvm/versions/node").join(v).join("bin")).unwrap() } std::fs::create_dir_all(h.join(".local/bin")).unwrap();
-        let u = usual_dirs_for(&h, cfg!(windows), cfg!(target_os = "macos"), &none); /* not the machine's own NVM_DIR (a test box sets it) */ assert_eq!(u[0], h.join(".nvm/versions/node/v24.13.1/bin"), "{u:?}"); assert_eq!(u[1], h.join(".nvm/versions/node/v20.1.0/bin")); assert_eq!(u[2], h.join(".nvm/versions/node/v9.0.0/bin")); assert!(u.contains(&h.join(".local/bin")) && !u.contains(&h.join(".volta/bin")), "only those that exist");
+        let u = usual_dirs_for(&h, false, cfg!(target_os = "macos"), &none); /* not the machine's own NVM_DIR (a test box sets it); the Unix layout on every system (Windows has its own: nvm-windows, fnm's node-versions) */ assert_eq!(u[0], h.join(".nvm/versions/node/v24.13.1/bin"), "{u:?}"); assert_eq!(u[1], h.join(".nvm/versions/node/v20.1.0/bin")); assert_eq!(u[2], h.join(".nvm/versions/node/v9.0.0/bin")); assert!(u.contains(&h.join(".local/bin")) && !u.contains(&h.join(".volta/bin")), "only those that exist");
         let m = merge_dirs(&[vec![PathBuf::from("/a"), PathBuf::from("/b")], vec![PathBuf::from("/b"), PathBuf::from("/c"), PathBuf::new()], vec![PathBuf::from("/a"), PathBuf::from("/d")]]); assert_eq!(m, vec![PathBuf::from("/a"), PathBuf::from("/b"), PathBuf::from("/c"), PathBuf::from("/d")]);
     }
     #[cfg(target_os = "linux")]
@@ -750,13 +750,14 @@ mod tests {
         let Some(node) = find_in(search_dirs(), "node", true) else { eprintln!("no node: skipped"); return };
         let d = dir("npm-real"); let target = npm_install(&d, "claude"); std::fs::copy(&node, &target).unwrap();
         let home = d.join("home"); let mcp = crate::agents::rules::mcp_config("http://127.0.0.1:9/mcp/t?a=1&b=2");
-        let mut args: Vec<String> = vec!["-e".into(), "const a=process.argv.slice(1);const i=a.indexOf('--mcp-config');console.log(JSON.stringify({a,m:require('fs').readFileSync(a[i+1],'utf8')}))".into(), "--".into(), "--mcp-config".into(), mcp.clone(), "--add-dir".into(), "C:\\Program Files\\x\\".into(), "/k".into()];
+        // node's own `--` (the end of its options) is in process.argv on some versions and not on others (the runner's 24 leaves it out): not compared
+        let mut args: Vec<String> = vec!["-e".into(), "const a=process.argv.slice(1).filter(x=>x!=='--');const i=a.indexOf('--mcp-config');console.log(JSON.stringify({a,m:require('fs').readFileSync(a[i+1],'utf8')}))".into(), "--".into(), "--mcp-config".into(), mcp.clone(), "--add-dir".into(), "C:\\Program Files\\x\\".into(), "/k".into()];
         let f = crate::agents::rules::mcp_to_file(&mut args, &home.join("secrets/run"), "t.mcp.json").unwrap().unwrap(); let path = f.path().to_path_buf();
         for found in [d.join("claude"), d.join("claude.cmd")] {
             let mut p = spawn(&found, &args, &d, None, &[]).unwrap();
             let l = tokio::time::timeout(std::time::Duration::from_secs(30), p.lines.recv()).await.unwrap().unwrap();
             let v: serde_json::Value = serde_json::from_str(&l).unwrap_or_else(|_| panic!("{l}"));
-            assert_eq!(v["m"], mcp.as_str(), "{found:?}"); assert_eq!(v["a"], serde_json::json!(["--", "--mcp-config", path.to_string_lossy(), "--add-dir", "C:\\Program Files\\x\\", "/k"]), "{found:?}");
+            assert_eq!(v["m"], mcp.as_str(), "{found:?}"); assert_eq!(v["a"], serde_json::json!(["--mcp-config", path.to_string_lossy(), "--add-dir", "C:\\Program Files\\x\\", "/k"]), "{found:?}");
         }
         drop(f); assert!(!path.exists());
     }
