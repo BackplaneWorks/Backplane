@@ -12,7 +12,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 sid="fake-$$"; n=0
-tool() { r=$(curl -s -X POST -H 'content-type: application/json' --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$1\",\"arguments\":$2}}" "$url"); printf 'TOOL %s %s\n' "$1" "$r" >> @LOG@; }
+tool() { k=0; r=""; while [ -z "$r" ] && [ $k -lt 100 ]; do k=$((k + 1)); r=$(curl -s -X POST -H 'content-type: application/json' --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$1\",\"arguments\":$2}}" "$url"); [ -z "$r" ] && sleep 0.1; done; printf 'TOOL %s %s\n' "$1" "$r" >> @LOG@; } # an empty answer is a connection that did not come through: asked again (the hub's MCP endpoint under a loaded run), never taken as done
 say() { printf '{"type":"assistant","message":{"id":"m%s-%s","role":"assistant","content":[{"type":"text","text":"%s"}],"usage":{"input_tokens":1,"output_tokens":1}},"session_id":"%s"}\n' "$$" "$n" "$1" "$sid"; }
 while IFS= read -r line; do
   case "$line" in *'"type":"user"'*)
@@ -38,6 +38,8 @@ async fn wait_for(hub: &Arc<Hub>, what: &str, f: impl Fn(&[Value]) -> bool) {
     let timeline: Vec<String> = log(hub).iter().filter(|e| !matches!(e["$"].as_str(), Some("SettingSet" | "UsageSet" | "SessionSet"))).map(|e| format!("{} {} {} {}", e["$"].as_str().unwrap_or(""), e["thread"].as_str().or(e["id"].as_str()).unwrap_or(""), e["state"].as_str().or(e["role"].as_str()).unwrap_or(""), e["text"].as_str().unwrap_or("").chars().take(60).collect::<String>())).collect();
     panic!("{what} never came; the log in order:\n{}", timeline.join("\n"));
 }
+/// What the stand-in's `thread_launch` call answered (its `TOOL` line): the child exists only if the tool answered, so a test says what the tool said when no child came
+fn launch_answer(out: &Path) -> String { std::fs::read_to_string(out).unwrap_or_default().lines().find(|l| l.starts_with("TOOL thread_launch")).unwrap_or("no thread_launch call was logged").to_string() }
 fn said(l: &[Value], th: &str, text: &str) -> bool { l.iter().any(|e| e["$"] == "MessagePosted" && e["thread"] == th && e["role"] == "assistant" && e["text"] == text) }
 fn write_agent(d: &Path, out: &Path) { use crate::plat::fs::PermissionsExt; let p = d.join("claude"); std::fs::write(&p, AGENT.replace("@LOG@", &crate::plat::fs::script_path(out)).replace("@HOLD@", &crate::plat::fs::script_path(&out.with_file_name("hold"))).replace("@GATE@", &crate::plat::fs::script_path(&out.with_file_name("gate")))).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
 
@@ -103,6 +105,7 @@ fn write_agent(d: &Path, out: &Path) { use crate::plat::fs::PermissionsExt; let 
     assert_eq!(rpc(&hub, "bots.say", json!({"bot":ada,"text":"zqlaunch it","msg":"m1"})).await["ok"], true);
     // the bot's turn is over and its thread has settled (it idles) while the child works
     wait_for(&hub, "the bot's first turn", |l| said(l, &chat, "launched it") && l.iter().rev().find(|e| e["$"] == "TurnChanged" && e["thread"] == chat.as_str()).map_or(false, |e| e["state"] == "completed")).await;
+    assert!(launch_answer(&out).contains("\"isError\":false"), "the bot's thread_launch: {}", launch_answer(&out));
     hub.commit(&json!({"$":"ThreadSettled","id":chat,"manual":false,"at":now_s()})).await.unwrap();
     std::fs::write(out.with_file_name("gate"), "go").unwrap(); // only now may the child finish: the report always meets a settled thread, whatever the load
     wait_for(&hub, "the report in the bot's thread", |l| l.iter().any(|e| e["$"] == "MessagePosted" && e["thread"] == chat.as_str() && e["text"].as_str().map_or(false, |t| t.starts_with("[Backplane] Launched thread")))).await;
@@ -126,6 +129,8 @@ fn write_agent(d: &Path, out: &Path) { use crate::plat::fs::PermissionsExt; let 
     let chat = { let end = Instant::now() + Duration::from_secs(60); loop { if let Some(e) = log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == ada.as_str() && e["thread"].as_str().map_or(false, |t| !t.is_empty())) { break e["thread"].as_str().unwrap().to_string() } assert!(Instant::now() < end, "the bot's thread"); tokio::time::sleep(Duration::from_millis(50)).await } };
     assert_eq!(rpc(&hub, "bots.say", json!({"bot":ada,"text":"zqhold it","msg":"m1"})).await["ok"], true);
     // the bot's turn waits on its hold file; the child ends meanwhile and its report comes to the running turn
+    wait_for(&hub, "the bot's thread_launch call", |_| std::fs::read_to_string(&out).unwrap_or_default().contains("TOOL thread_launch")).await;
+    assert!(launch_answer(&out).contains("\"isError\":false"), "the bot's thread_launch: {}", launch_answer(&out));
     wait_for(&hub, "the report while the bot's turn runs", |l| l.iter().any(|e| e["$"] == "MessagePosted" && e["thread"] == chat.as_str() && e["text"].as_str().map_or(false, |t| t.starts_with("[Backplane] Launched thread")))).await;
     std::fs::write(out.with_file_name("hold"), "go").unwrap();
     wait_for(&hub, "the bot's turn on the report", |l| said(l, &chat, "heard the report")).await;
