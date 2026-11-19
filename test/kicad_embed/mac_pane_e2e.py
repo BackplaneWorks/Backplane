@@ -981,6 +981,13 @@ try:
     # host reserves Ctrl+H); unhidden, KiCad's frame is directly above Backplane's window again and a click gives KiCad the keyboard; Cmd+H
     # with Backplane focused does the same. A runtime without comment-key-63 keeps Cmd+H KiCad's own (high contrast): nothing hides ----
     if os.environ.get('MAC_MODE') == 'hide':
+        if DRIVER == 'vnc':
+            # the Mac mini gate (#1198): input goes through the relay as everywhere, but this row also unhides and activates Backplane and
+            # reads app and window state, which a process in the GUI session may do without a permission (the gate's venv has PyObjC);
+            # assigned as globals, so no other mode's use of the names in this function turns local
+            import importlib
+            globals()['Quartz'] = importlib.import_module('Quartz'); globals()['NSRunningApplication'] = importlib.import_module('AppKit').NSRunningApplication
+            KEYNAME[4] = 'h'
         caps = json.load(open(os.path.join(RT, 'manifest.json'))).get('capabilities') or []
         reserved_h = 'comment-key-63' in caps
         P = last_push()[0]
@@ -998,7 +1005,7 @@ try:
             # Backplane-focused case: the client's kicad_keys_flip saw KiCad active from the click, then neither app active). As textkeys:
             # wait for it, System Events when the request from here is refused (macOS 14+)
             a = NSRunningApplication.runningApplicationWithProcessIdentifier_(client.pid); a.unhide(); time.sleep(0.4); a.activateWithOptions_(0)
-            if not wait_for(lambda: active(client.pid), 2, 0.1):
+            if not wait_for(lambda: active(client.pid), 2, 0.1) and DRIVER == 'quartz':
                 osa(f'tell application "System Events" to set frontmost of (first process whose unix id is {client.pid}) to true')
             check(bool(wait_for(lambda: active(client.pid), 5, 0.1)), 'hide: unhidden, Backplane is the active app again')
             time.sleep(0.5)  # the activation settled: no late activation of ours comes after the click
