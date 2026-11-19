@@ -34,6 +34,8 @@ pub const QUIET_DEFAULT: &str = "22:00-07:00";
 /// The person's zone when the hub knows no other (the rule of America/New_York).
 pub const ZONE_DEFAULT: &str = "EST5EDT,M3.2.0,M11.1.0";
 pub const BURST_S: u64 = 120;
+/// Why the last alert to the registered phones reached none of them, in the person's words; empty once one gets through (Push.undelivered). notify_person reads it.
+pub const UNDELIVERED: &str = "push.undelivered";
 /// How far back a repeat is looked for, in days.
 pub const REPEAT_DAYS: u64 = 1;
 const KEEP_S: u64 = 7 * 86400;
@@ -431,10 +433,23 @@ impl Worker {
         let through = self.hub.setting(QUIET_URGENT).await.as_deref() == Some("on") && say.reason == "needs_you";
         let badge = self.book.badge(self.asks());
         let frame = apns::Frame::alert(&say, badge);
-        let sent = self.send(devices.iter().filter(|d| hears(d, through)), &frame).await;
-        let ev = json!({"$":"PushSent","key":say.key,"thread":say.thread,"ask":say.ask,"kind":say.reason,"title":say.title,"body":say.body,"badge":badge,"through":through,"sent":sent,"link":say.link,"at":now});
+        let hearing: Vec<&Device> = devices.iter().filter(|d| hears(d, through)).collect();
+        let (sent, why) = self.send(hearing.iter().copied(), &frame).await;
+        let ev = json!({"$":"PushSent","key":say.key,"thread":say.thread,"ask":say.ask,"kind":say.reason,"title":say.title,"body":say.body,"badge":badge,"through":through,"sent":sent,"why":if sent > 0 { "" } else { why.as_deref().unwrap_or("") },"link":say.link,"at":now});
         let _ = self.hub.commit(&ev).await;
+        if !hearing.is_empty() { self.undelivered(if sent > 0 { None } else { why }, &home, now).await }
         self.save().await;
+    }
+    /// Push.undelivered: phones are registered and an alert reached none of them (Nov 18: the wipe took the APNs key file, and for hours every push went to no phone while
+    /// the hub only said so in its log). The person hears it once a cause, in the uberbot's conversation, and notify_person stops answering "sent"; the first alert that gets through clears it.
+    async fn undelivered(&self, why: Option<String>, home: &str, now: u64) {
+        let prev = self.hub.setting(UNDELIVERED).await.unwrap_or_default();
+        let Some(why) = why else { if !prev.is_empty() { let _ = self.hub.commit(&json!({"$":"SettingSet","key":UNDELIVERED,"value":"","at":now})).await; } return };
+        let text = apns::explain(&self.hub, &why).await;
+        if text == prev { return }
+        let mut evs = vec![json!({"$":"SettingSet","key":UNDELIVERED,"value":text,"at":now})];
+        if !home.is_empty() { evs.push(json!({"$":"MessagePosted","thread":home,"msg":format!("tell:push-undelivered-{now}"),"role":"assistant","text":apns::undelivered_tell(&text),"at":now})) }
+        for e in evs { let _ = self.hub.commit(&e).await; }
     }
     async fn deal(&mut self, dealt: impl Fn(&Item) -> bool) {
         let (keys, changed) = self.book.deal(dealt);
@@ -445,19 +460,20 @@ impl Worker {
         let frame = apns::Frame::clear(&keys, badge);
         // recorded first: a socket (Android, the desktop) hears the clear no later than an iOS phone does
         let _ = self.hub.commit(&json!({"$":"PushCleared","keys":keys,"badge":badge,"at":now_s()})).await;
-        self.send(devices.iter().filter(|d| d.kind == "alert" && d.platform == "ios"), &frame).await;
+        let _ = self.send(devices.iter().filter(|d| d.kind == "alert" && d.platform == "ios"), &frame).await;
     }
     fn asks(&self) -> u64 { crate::data::open_ask_total(&self.hub) }
-    async fn send(&self, devices: impl Iterator<Item = &Device>, frame: &apns::Frame) -> u64 {
-        let mut n = 0;
+    /// How many phones it reached, and why the last one it did not reach was missed.
+    async fn send(&self, devices: impl Iterator<Item = &Device>, frame: &apns::Frame) -> (u64, Option<String>) {
+        let (mut n, mut miss) = (0, None);
         for d in devices {
             match self.carrier.clone().send(self.hub.clone(), d.clone(), frame.clone()).await {
                 Sent::Ok => n += 1,
                 Sent::Dead => { eprintln!("push: device {} retired: APNs refused its token for good", page::handle(&d.token)); let _ = self.hub.commit(&crate::net::devices::dropped(&json!({"token":d.token}), now_s())).await; }
-                Sent::Later(why) => eprintln!("push: not delivered: {why}"),
+                Sent::Later(why) => { eprintln!("push: not delivered: {why}"); miss = Some(why) }
             }
         }
-        n
+        (n, miss)
     }
     async fn save(&self) { if let Ok(v) = serde_json::to_string(&self.book) { let _ = self.hub.commit(&json!({"$":"SettingSet","key":BOOK,"value":v,"at":now_s()})).await; } }
 }
