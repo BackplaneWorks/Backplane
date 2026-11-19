@@ -122,14 +122,23 @@ pub fn design_root(root: &str) -> String {
 /// project folder linked elsewhere), or, for a file not there yet, its folder resolved and its name as given; else the path as given.
 /// Locks and "the same document" compare this, so two spellings of one board are never two documents.
 pub fn same_file(p: &str) -> String {
-    // Windows: canonicalize answers `\\?\` paths the hub's keys do not use; its paths are taken as given
-    if cfg!(windows) { return p.to_string() }
     let path = std::path::Path::new(p);
-    if let Ok(c) = path.canonicalize() { return c.to_string_lossy().into_owned() }
-    match (path.parent(), path.file_name()) {
-        (Some(d), Some(n)) if !d.as_os_str().is_empty() => d.canonicalize().map(|cd| cd.join(n).to_string_lossy().into_owned()).unwrap_or_else(|_| p.to_string()),
-        _ => p.to_string(),
-    }
+    let real = if let Ok(c) = path.canonicalize() { c.to_string_lossy().into_owned() } else {
+        match (path.parent(), path.file_name()) {
+            (Some(d), Some(n)) if !d.as_os_str().is_empty() => d.canonicalize().map(|cd| cd.join(n).to_string_lossy().into_owned()).unwrap_or_else(|_| p.to_string()),
+            _ => p.to_string(),
+        }
+    };
+    if cfg!(windows) { windows_key(&real) } else { real }
+}
+/// Windows: the spelling every comparison of one document shares. canonicalize answers `\\?\C:\...` (and `\\?\UNC\srv\...`) with the folders' real names, while a
+/// path as KiCad, a tool or the registry gave it has `\` or `/`, an 8.3 name, a drive letter in either case, and git's top-level has `/`: `C:/Users/me/p`.
+/// So the prefix goes, the separators are `/`, and the drive letter is upper case.
+pub fn windows_key(p: &str) -> String {
+    let p = if let Some(r) = p.strip_prefix(r"\\?\UNC\") { format!(r"\\{r}") } else { p.strip_prefix(r"\\?\").unwrap_or(p).to_string() };
+    let mut k = p.replace('\\', "/");
+    if k.as_bytes().get(1) == Some(&b':') { k[..1].make_ascii_uppercase() }
+    k
 }
 
 /// The named lock of one board or schematic: `kicad-<stem>-<pcb|sch>-<digest8>` (64 at most), of the file itself (`same_file`):
@@ -638,6 +647,12 @@ mod tests {
         let _ = std::fs::remove_file(&link);
     }
 
+    #[test] fn windows_spellings_of_one_document_are_one_key() {
+        assert_eq!(windows_key(r"\\?\c:\Users\me\p\b.kicad_pcb"), "C:/Users/me/p/b.kicad_pcb");
+        assert_eq!(windows_key("C:/Users/me/p/b.kicad_pcb"), windows_key(r"C:\Users\me\p/b.kicad_pcb"));
+        assert_eq!(windows_key(r"\\?\UNC\srv\share\b.kicad_pcb"), "//srv/share/b.kicad_pcb");
+        assert_eq!(windows_key("/home/me/b"), "/home/me/b");
+    }
     #[tokio::test] async fn a_document_another_thread_holds_is_left_for_it_and_main_pushes_to_its_upstream() {
         let (_r, main) = mixed("push");
         let bare = crate::plat::tmp::uncreated("push-remote");
