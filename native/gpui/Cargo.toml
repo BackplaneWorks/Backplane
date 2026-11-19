@@ -1,6 +1,6 @@
 [package]
 name = "backplane-gpui"
-version = "0.16.0"
+version = "0.16.3"
 edition = "2024"
 publish = false
 default-run = "backplane-gpui"

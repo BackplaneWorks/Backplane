@@ -1,6 +1,6 @@
 [package]
 name = "backplane-hub"
-version = "0.16.0"
+version = "0.16.3"
 edition = "2021"
 publish = false
 description = "Backplane hub in Rust. Native clients only (GPUI desktop, iOS, Android); renderer mobile; no helper process, no JS, no ."
