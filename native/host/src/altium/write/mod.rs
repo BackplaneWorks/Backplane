@@ -22,7 +22,7 @@ impl Tree {
     pub fn read(bytes: &[u8]) -> Result<Tree, String> {
         if !super::is_cfb(bytes) { return Err("not an Altium binary file (no OLE compound file header)".into()) }
         let mut cf = cfb::CompoundFile::open(Cursor::new(bytes.to_vec())).map_err(|e| format!("unreadable compound file: {e}"))?;
-        let entries: Vec<(String, bool, [u8; 16])> = cf.walk().map(|e| (e.path().to_string_lossy().trim_start_matches('/').to_string(), e.is_stream(), *e.clsid().as_bytes())).collect();
+        let entries: Vec<(String, bool, [u8; 16])> = cf.walk().map(|e| (entry_path(e.path()), e.is_stream(), *e.clsid().as_bytes())).collect();
         let mut t = Tree::default();
         for (p, stream, clsid) in entries {
             if stream {
@@ -213,6 +213,9 @@ impl Uids {
         format!("{{{:08X}-{:04X}-4{:03X}-{:04X}-{:012X}}}", h as u32, h2 as u16, (h2 >> 16) as u16 & 0xFFF, 0x8000 | (h3 as u16 & 0x3FFF), (h3 >> 16) & 0xFFFF_FFFF_FFFF)
     }
 }
+
+/// A compound-file entry's path as the tree keys it: `/`-separated, no leading slash. cfb builds it with `PathBuf`, so on Windows it is `\R1\Data`, which no stream is asked for by.
+pub(crate) fn entry_path(p: &std::path::Path) -> String { p.to_string_lossy().replace('\\', "/").trim_start_matches('/').to_string() }
 
 #[cfg(test)]
 mod tests {
