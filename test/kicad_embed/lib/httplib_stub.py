@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""A KiCad HTTP library server (REST API v1) with one category and one part whose symbol is Device:R, for issue #1192.
+"""A KiCad HTTP library server (REST API v1) with one category and two parts, for issue #1192: one whose symbol is Device:R and one
+whose symbol does not exist (Device:NoSuchSymbol).
 
   httplib_stub.py PORTFILE    listens on 127.0.0.1 at a free port, writes the port to PORTFILE, serves until killed;
                               each request's path is appended to PORTFILE.log
@@ -10,7 +11,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PART_NAME = "470R 1206 1% 250mW 200V"
 CATEGORIES = [{"id": "16", "name": "Resistors", "description": "Resistors"}]
-PARTS = [{"id": "1", "name": PART_NAME, "description": "470R thick film resistor"}]
+MISSING_NAME = "Missing symbol part"
+PARTS = [{"id": "1", "name": PART_NAME, "description": "470R thick film resistor"},
+         {"id": "2", "name": MISSING_NAME, "description": "a part whose symbol does not exist"}]
 PART = {
     "id": "1", "name": PART_NAME, "symbolIdStr": "Device:R",
     "exclude_from_bom": "False", "exclude_from_board": "False", "exclude_from_sim": "True",
@@ -25,6 +28,11 @@ PART = {
         "Manufacturer": {"value": "Example Resistors", "visible": "False"},
     },
 }
+MISSING = {
+    "id": "2", "name": MISSING_NAME, "symbolIdStr": "Device:NoSuchSymbol",
+    "exclude_from_bom": "False", "exclude_from_board": "False", "exclude_from_sim": "True",
+    "fields": {"value": {"value": "X"}, "reference": {"value": "U"}, "MPN": {"value": "NO-SUCH-1", "visible": "False"}},
+}
 
 
 class H(BaseHTTPRequestHandler):
@@ -38,6 +46,7 @@ class H(BaseHTTPRequestHandler):
         elif p == "/v1/categories.json": body = CATEGORIES
         elif p == "/v1/parts/category/16.json": body = PARTS
         elif p == "/v1/parts/1.json": body = PART
+        elif p == "/v1/parts/2.json": body = MISSING
         if body is None:
             self.send_response(404); self.end_headers(); return
         data = json.dumps(body).encode()

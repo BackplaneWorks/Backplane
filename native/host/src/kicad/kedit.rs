@@ -275,8 +275,9 @@ pub fn sym_pins(raw: &Value) -> Vec<(String, String, (f64, f64), (f64, f64))> {
 }
 /// A symbol KiCad placed from its library with neither a pin nor anything drawn: its definition holds fields alone (or nothing). A power
 /// symbol (pins only), a logo or mechanical symbol (a body only), one that extends another (KiCad answers it flattened) and a unit of a
-/// multi-unit part all have one or the other. This is what KiCad's HTTP library gives in the headless KiCad up to bp.13.2 when the symbol
-/// its part names (symbolIdStr, `Device:R`) has not loaded (#1192). A placement answered with no definition at all is not judged (false).
+/// multi-unit part all have one or the other. This is what KiCad's HTTP library gave in the headless KiCad before bp.13.2 when the symbol
+/// its part names (symbolIdStr, `Device:R`) had not loaded (#1192); from bp.13.2 it loads that library, and a part whose symbol cannot be had
+/// is KiCad's "not found" error. A placement answered with no definition at all is not judged (false).
 /// Items come wrapped ({item, unit, body_style}) as KiCad answers them; a bare item is read too.
 pub fn hollow(raw: &Value) -> bool {
     let d = &raw["definition"]; if !d.is_object() { return false }
@@ -288,9 +289,9 @@ fn fields_named(t: &Value) -> String {
     for k in ["reference_field", "value_field", "footprint_field", "datasheet_field", "description_field"] { if let Some(x) = d[k]["name"].as_str() { if !n.iter().any(|y| y == x) { n.push(x.into()) } } }
     if n.is_empty() { "none".into() } else { n.join(", ") }
 }
-/// What an agent is told of an empty template: which runtime made it, why, and what does work. Placing the source symbol again later in the
-/// same KiCad session does not mend it: the HTTP library keeps the part as it first made it.
-pub const HOLLOW: &str = "Nothing was placed from it. With an HTTP library this is the part's source symbol (its symbolIdStr, such as Device:R) not being loaded when the HTTP library first built this part, and that KiCad keeps the part so for the rest of its session, even once the source library has loaded. What works: place the source symbol itself (add {symbol: {lib: \"Device:R\", ref, at, value, footprint, fields}}) with the part's fields. A symbol that is fields alone on purpose is placed with allow_empty: true.";
+/// What an agent is told of an empty template: why, and what does work. Only a KiCad older than bp.13.2 (the pin from then on) gives one for an
+/// HTTP library part; that one keeps the part so for its session, so placing the source symbol first does not mend it.
+pub const HOLLOW: &str = "Nothing was placed from it. KiCad gives a symbol of fields alone when its library could not give the symbol's body: for an HTTP library part that is a KiCad older than Backplane KiCad 10.99.0-bp.13.2, which built the part before its source symbol (its symbolIdStr, such as Device:R) had loaded and keeps it so for the rest of its session; bp.13.2 and later place the part whole. What works on such a KiCad: place the source symbol itself (add {symbol: {lib: \"Device:R\", ref, at, value, footprint, fields}}) with the part's fields. A symbol that is fields alone on purpose is placed with allow_empty: true.";
 /// A raw SchematicSymbolInstance to add that names its library symbol (`definition.id`) and brings no body of its own: KiCad makes one from
 /// that id with the value and footprint alone, so it is placed from its library first, as a `symbol` entry is.
 fn raw_by_lib(it: &Value) -> bool {
