@@ -23,7 +23,8 @@ PROJ="$OUT/proj"; PRO="$PROJ/ecc83-pp.kicad_pro"
 # schematic only: the board and its companion go
 ( cd "$PROJ" && git rm -q -f ecc83-pp.kicad_pcb && { git rm -q -f ecc83-pp.kicad_pcb.backplane.json 2>/dev/null || true; } && git commit -qm "schematic only" )
 [ ! -e "$PROJ/ecc83-pp.kicad_pcb" ] && [ -f "$PROJ/ecc83-pp.kicad_sch" ] || { echo "FAIL the fixture is not schematic-only"; exit 1; }
-export BACKPLANE_KICAD_DEBUG=1
+# the warm-up's free-memory floor without its 4 GB headroom: KiCad's own estimate still applies (this box runs other lanes too)
+export BACKPLANE_KICAD_DEBUG=1 BACKPLANE_KICAD_WARM_HEADROOM_MB=0
 start_xvfb_and_wm; start_hub
 
 # the hub's websocket answers only once it is serving (~4 s after it listens): wait for an empty round trip first

@@ -2079,7 +2079,9 @@ impl Actor {
                 };
                 let (desc, _) = discover_desc(&self.hub.cfg.home, &env);
                 let quiet = !desc.is_empty() && proto::load(&desc).has_own("kiapi.backplane.embed.CancelProgress");
-                match warm_decision(&self.sessions, &pro, hardware, locked, free_mb(), quiet, WARM) {
+                // BACKPLANE_KICAD_WARM_HEADROOM_MB overrides the room kept beside KiCad's own estimate (tests on a shared, loaded box)
+                let cfg = match std::env::var("BACKPLANE_KICAD_WARM_HEADROOM_MB").ok().and_then(|v| v.parse::<u64>().ok()) { Some(h) => WarmCfg { headroom_mb: h, ..WARM }, None => WARM };
+                match warm_decision(&self.sessions, &pro, hardware, locked, free_mb(), quiet, cfg) {
                     Warm::Have => {
                         if let Some(s) = self.sessions.get_mut(&pro) { s.touched_at = ipc::now_s(); }
                         let _ = reply.send(Ok(json!({"warm": true, "started": false})));
