@@ -1025,6 +1025,20 @@ try:
             check(bool(wait_for(lambda: active(client.pid), 5, 0.1)), 'hide: unhidden, Backplane is the active app again')
             time.sleep(0.5)  # the activation settled: no late activation of ours comes after the click
         def canvas_click(): click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); time.sleep(0.6); key(K_ESC); time.sleep(0.3)
+        def canvas_takes_keys(what):
+            # one Cmd+A, no retry and no second click: KiCad's canvas selects everything and the hub hears ET_SELECTION_CHANGED
+            n0 = hub_log().count('ET_SELECTION_CHANGED'); key(K_A, CMD)
+            took = wait_for(lambda: hub_log().count('ET_SELECTION_CHANGED') > n0, 3, 0.1)
+            key(K_ESC); time.sleep(0.5)
+            check(bool(took), f'hide: {what}, KiCad\'s canvas takes keys with no second click (Cmd+A)')
+        # the first click into an inactive KiCad (#1198, fork fix/1198-key-on-activate): KiCad's activation lands after the click, and the
+        # frame's makeKeyWindow ran before it and was ignored (KiCad active with no key window, keys going nowhere until a second click).
+        # Backplane is made active first (a click in its message area), then one click on the canvas, then keys
+        cwa = next((w for w in wins() if w[0] == cw[0]), cw); click(cwa[3][0] + 200, cwa[3][1] + 28 + 300); time.sleep(1)
+        check(not active(kpid), f'hide: before the first click KiCad is not the active app (Backplane active {active(client.pid)})')
+        click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); time.sleep(0.6)
+        check(bool(wait_for(lambda: active(kpid), 2, 0.1)), 'hide: the first click into an inactive KiCad makes it the active app')
+        canvas_takes_keys('after the first click into an inactive KiCad')
         for who in ('kicad', 'backplane'):
             if who == 'kicad': canvas_click()
             else:
@@ -1055,6 +1069,7 @@ try:
                 got = active(kpid); time.sleep(1.0); kept = active(kpid)
                 print(f'INFO hide: after the click ({who}): KiCad active {got}, a second on {kept}; Backplane active {active(client.pid)}', flush=True)
                 check(got and kept, f'hide: after the unhide a click gives KiCad the keyboard, and it keeps it ({who})')
+                canvas_takes_keys(f'after the unhide and a click ({who})')
         raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=textkeys (#1172, #1198): Backplane's own keys on a Mac, with the editor open over the pane. In the message box: Option+Left/Right
     # by word, Cmd+Left/Right to the line's start/end, Cmd+Up/Down to the text's, Shift selecting, Option+Backspace a word, Cmd+Backspace to the
