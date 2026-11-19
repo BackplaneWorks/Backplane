@@ -21,6 +21,8 @@ while IFS= read -r line; do
     printf '{"type":"system","subtype":"init","session_id":"%s","cwd":"/tmp","tools":["Bash"],"model":"fake","permissionMode":"default"}\n' "$sid"
     case "$own" in
       *'<charter>'*) tool memory_save '{"key":"run-note","kind":"note","text":"the run saw the morning routine"}'; say "planned the day" ;;
+      *zqwait*) while [ ! -f "@HOLD@" ]; do sleep 0.05; done; say "answered the person" ;;
+      *'You were restarted'*) say "" ;;
       *zqhold*) tool thread_launch '{"project":"p1","prompt":"child work please"}'; while [ ! -f "@HOLD@" ]; do sleep 0.05; done; say "launched it" ;;
       *zqlaunch*) tool thread_launch '{"project":"p1","prompt":"child work please"}'; say "launched it" ;;
       *'Launched thread'*) say "heard the report" ;;
@@ -136,6 +138,48 @@ fn write_agent(d: &Path, out: &Path) { use crate::plat::fs::PermissionsExt; let 
     wait_for(&hub, "the bot's turn on the report", |l| said(l, &chat, "heard the report")).await;
     let agent = std::fs::read_to_string(&out).unwrap();
     assert!(agent.lines().any(|l| l.starts_with("TURN ") && l.contains("Launched thread") && l.contains("completed")), "the report is the bot's input: {agent}");
+    ag.shutdown();
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// #1246: the restart's wake waited for nobody. Thirty seconds after every start (a fresh install's first start too) it went into the uberbot's chat as a system
+/// message; when the person had just asked something, it steered their turn (a Codex turn starts again with only the wake's text) and told the agent the turn was
+/// private and to say nothing, so the person's question was never answered. The wake now waits for the turn in the chat to end, and only then has a turn of its own.
+#[tokio::test(flavor = "multi_thread")] async fn the_restart_wake_waits_for_the_persons_turn_in_the_uberbots_chat() {
+    let root = crate::plat::tmp::dir("uber-wake-idle");
+    let (home, bin) = (root.join("home"), root.join("bin")); std::fs::create_dir_all(&home).unwrap(); std::fs::create_dir_all(&bin).unwrap();
+    let out = root.join("agent.log"); write_agent(&bin, &out);
+    std::fs::write(home.join("events.jsonl"), "{\"$\":\"SettingSet\",\"key\":\"machine.id\",\"value\":\"m1\",\"at\":1}\n").unwrap();
+    let hub = Hub::start(Cfg { home, version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let ag = Agents::start_with(hub.clone(), Cli::standin(&bin)).await.unwrap();
+    let bots = crate::bots::start(hub.clone(), ag.clone()).await;
+    let r = rpc(&hub, "bots.create", json!({"name":"bub","uber":true})).await; let bub = r["bot"].as_str().unwrap_or_else(|| panic!("{r}")).to_string();
+    wait_for(&hub, "the promotion", |l| l.iter().any(|e| e["$"] == "UberSet") && l.iter().any(|e| e["$"] == "WorktreeSet")).await;
+    assert!(bots.uber_init(now_s()).await > 0, "the uberbot's first ops");
+    let chat = log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == bub.as_str()).unwrap()["thread"].as_str().unwrap().to_string();
+    let woke = |l: &[Value]| l.iter().any(|e| e["$"] == "MessagePosted" && e["thread"] == chat.as_str() && e["role"] == "system" && e["text"].as_str().map_or(false, |t| t.starts_with("You were restarted")));
+
+    // the person asks; their turn is still running when the wake comes
+    assert_eq!(rpc(&hub, "bots.say", json!({"bot":bub,"text":"zqwait how do I start?","msg":"m1"})).await["ok"], true);
+    wait_for(&hub, "the person's turn in the agent", |_| std::fs::read_to_string(&out).unwrap_or_default().contains("zqwait")).await;
+    let b2 = bots.clone(); let wake = tokio::spawn(async move { b2.wake_uber_within("update", Duration::from_secs(60), Duration::from_millis(100)).await });
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(!woke(&log(&hub)), "the wake did not go into the person's running turn");
+    assert!(!log(&hub).iter().any(|e| e["$"] == "ActivityLogged" && e["thread"] == chat.as_str() && e["kind"] == "steer"), "nothing steered the person's turn");
+    assert!(!wake.is_finished(), "the wake waits");
+
+    // the person's turn ends with its answer, and then the wake has its own turn
+    std::fs::write(out.with_file_name("hold"), "go").unwrap();
+    wait_for(&hub, "the answer to the person", |l| said(l, &chat, "answered the person")).await;
+    assert_eq!(tokio::time::timeout(Duration::from_secs(60), wake).await.expect("the wake goes once the chat is idle").unwrap(), Ok(true));
+    let l = log(&hub);
+    let at = |f: &dyn Fn(&Value) -> bool| l.iter().position(|e| f(e)).unwrap();
+    let answer = at(&|e| e["$"] == "MessagePosted" && e["thread"] == chat.as_str() && e["text"] == "answered the person");
+    let wake_msg = at(&|e| e["$"] == "MessagePosted" && e["thread"] == chat.as_str() && e["role"] == "system" && e["text"].as_str().map_or(false, |t| t.starts_with("You were restarted")));
+    assert!(answer < wake_msg, "the person was answered before the wake was posted");
+    let turns = std::fs::read_to_string(&out).unwrap();
+    let person_turn = turns.lines().find(|l| l.starts_with("TURN ") && l.contains("zqwait")).unwrap();
+    assert!(!person_turn.contains("You were restarted"), "the person's turn never carried the wake: {person_turn}");
     ag.shutdown();
     let _ = std::fs::remove_dir_all(&root);
 }

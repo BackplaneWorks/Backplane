@@ -17,6 +17,8 @@ pub trait Inbox: Send + Sync {
     fn approve<'a>(&'a self, _thread: &'a str, _tool: &'a str, _detail: &'a str) -> Fut<'a, Result<String, String>> { Box::pin(async { Err("nobody can answer here".to_string()) }) }
     /// the same message with M.System's role (a mailroom escalation into a bot's thread)
     fn deliver_system<'a>(&'a self, thread: &'a str, msg: &'a str, text: &'a str, origin: Option<(String, String, String)>) -> Fut<'a, Result<(), String>> { self.deliver(thread, msg, text, origin) }
+    /// a system message that starts a turn only on an idle thread: Ok(false), nothing posted, while one runs (the uberbot's restart wake)
+    fn deliver_system_idle<'a>(&'a self, thread: &'a str, msg: &'a str, text: &'a str) -> Fut<'a, Result<bool, String>> { Box::pin(async move { self.deliver_system(thread, msg, text, None).await.map(|_| true) }) }
     /// Wake.ride: a note on a thread's ride
     fn ride<'a>(&'a self, thread: &'a str, id: &'a str, text: &'a str) -> Fut<'a, Result<(), String>>;
     /// Ride.note alone: the note joins the ride (a running Claude turn hears it at once) and starts no turn
@@ -47,6 +49,7 @@ impl Inbox for Arc<Agents> {
         })
     }
     fn deliver_system<'a>(&'a self, thread: &'a str, msg: &'a str, text: &'a str, origin: Option<(String, String, String)>) -> Fut<'a, Result<(), String>> { Box::pin(async move { Agents::deliver_as(self, "system", thread, msg, text, origin, vec![]).await }) }
+    fn deliver_system_idle<'a>(&'a self, thread: &'a str, msg: &'a str, text: &'a str) -> Fut<'a, Result<bool, String>> { Box::pin(async move { Agents::deliver_system_when_idle(self, thread, msg, text).await }) }
     fn ride<'a>(&'a self, thread: &'a str, id: &'a str, text: &'a str) -> Fut<'a, Result<(), String>> { Box::pin(async move { Agents::wake_ride(self, thread, id, text).await }) }
     fn note<'a>(&'a self, thread: &'a str, id: &'a str, text: &'a str) -> Fut<'a, Result<(), String>> { Box::pin(async move { Agents::ride_note(self, thread, id, text).await }) }
     fn info<'a>(&'a self, thread: &'a str) -> Fut<'a, Option<super::swarm::ThreadInfo>> { Box::pin(async move {
