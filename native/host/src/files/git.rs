@@ -375,6 +375,19 @@ mod tests {
         let r = proc("sh", &["-c", INIT], &d, &env).await; assert_eq!(r.code, 0, "{}", r.out); assert!(is_repo(&d).await);
         let again = proc("sh", &["-c", INIT], &d, &env).await; assert_eq!(again.code, 1); assert!(again.out.contains("already a git repository"));
     }
+    /// A project opened through a symlink (macOS: every folder under /tmp and /var): the step and the refs name its top the way it was
+    /// opened, as the History compares "<top>/<file>" with the file on show; git alone would say the real path and the bar would be empty.
+    #[cfg(unix)] #[tokio::test] async fn a_step_names_the_top_as_the_project_was_opened_through_a_symlink() {
+        let real = tmp("step-real"); let home = tmp("step-linkhome"); let reg = format!("{home}/history.trusted");
+        let link = format!("{home}/link"); std::os::unix::fs::symlink(&real, &link).unwrap();
+        g(&real, &["init", "-q"]).await; std::fs::create_dir_all(format!("{real}/sub")).unwrap(); std::fs::write(format!("{real}/sub/b.kicad_pcb"), "(kicad_pcb)").unwrap();
+        for at in [link.clone(), format!("{link}/sub")] {
+            let s = step_capture(&at, &format!("th{}", at.len()), &reg).await; let l: Vec<&str> = s.split('\n').collect();
+            assert_eq!(l[0].len(), 40, "{s:?}"); assert_eq!(l[3], link, "the top as opened, from {at}"); assert!(std::path::Path::new(l[2]).join("HEAD").exists(), "{s:?}");
+            let r = refs(&at, "th").await; assert_eq!(r.lines().nth(1), Some(link.as_str()), "{r:?}");
+        }
+        let s = step_capture(&real, "th-real", &reg).await; assert_eq!(s.split('\n').nth(3), Some(real.as_str()), "the real path stays the real path");
+    }
     #[tokio::test] async fn steps_refs_and_show() {
         let d = tmp("step"); let home = tmp("stephome"); let reg = format!("{home}/history.trusted");
         g(&d, &["init", "-q"]).await;
