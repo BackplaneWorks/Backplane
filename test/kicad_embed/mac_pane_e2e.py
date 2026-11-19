@@ -1031,6 +1031,10 @@ try:
             took = wait_for(lambda: hub_log().count('ET_SELECTION_CHANGED') > n0, 3, 0.1)
             key(K_ESC); time.sleep(0.5)
             check(bool(took), f'hide: {what}, KiCad\'s canvas takes keys with no second click (Cmd+A)')
+        # after Edit, with no click: the focused show activated KiCad (TakeFocus, KiCad inactive) and its makeKeyWindow ran before the
+        # activation landed (#1198, fork fix/1198-key-on-activate). One Cmd+A must reach the canvas
+        check(bool(wait_for(lambda: active(kpid), 5, 0.1)), 'hide: after Edit, with no click, KiCad is the active app')
+        canvas_takes_keys('after Edit, with no click')
         # the first click into an inactive KiCad (#1198, fork fix/1198-key-on-activate): KiCad's activation lands after the click, and the
         # frame's makeKeyWindow ran before it and was ignored (KiCad active with no key window, keys going nowhere until a second click).
         # Backplane is made active first (a click in its message area), then one click on the canvas, then keys
