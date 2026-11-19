@@ -196,7 +196,7 @@ fn page_title(page: &str) -> String {
     match page { "bom" => "BOM · Working copy".into(), "checks" => "Checks · Working copy".into(), _ => String::new() }
 }
 /// Rp.ask: the page a review request asks for, marked by its id (`@rp.req:<id>`: a request that fails has no report to end the page's reading)
-fn ask_page(b: &mut B, sel: &str, page: &str) { ask_page_ab(b, sel, page, "") }
+fn comparison<'a>(session: &'a Value, sel: &str) -> &'a str { draft(session, &format!("@rp.versions:{sel}")) }
 /// `ab`: for the BOM, the two versions it compares ("<old>\n<new>", a design-history comparison's sides; "" the BOM as it is)
 fn ask_page_ab(b: &mut B, sel: &str, page: &str, ab: &str) {
     let m = match page { "bom" => "review.bom", "checks" => "review.checks", _ => return };
@@ -208,11 +208,13 @@ fn ask_page_ab(b: &mut B, sel: &str, page: &str, ab: &str) {
     b.patch_d.insert(format!("@rp.req:{id}"), json!(format!("{sel}:{page}")));
 }
 /// Rp.open: the Review tab on a page, and the page asked for
-pub fn open_review(session: &Value, hub: &str, sel: &str, page: &str) -> (Value, Vec<Value>) { open_review_ab(session, hub, sel, page, "") }
-pub fn open_review_ab(session: &Value, hub: &str, sel: &str, page: &str, ab: &str) -> (Value, Vec<Value>) {
+pub fn open_review(session: &Value, hub: &str, sel: &str, page: &str, managed: bool) -> (Value, Vec<Value>) { open_review_ab(session, hub, sel, page, "", managed) }
+fn open_review_ab(session: &Value, hub: &str, sel: &str, page: &str, ab: &str, managed: bool) -> (Value, Vec<Value>) {
     let mut b = B::new(hub, session);
     // the watch is stopped for the drawing's own root: kicad.watch names no root once the drawing is put away
-    b.view(session, sel, "review", page); ask_page_ab(&mut b, sel, page, ab);
+    b.view(session, sel, "review", page);
+    b.patch_d.insert(format!("@rp.versions:{sel}"), json!(ab));
+    if !managed || (page == "bom" && !ab.is_empty()) { ask_page_ab(&mut b, sel, page, ab); }
     (b.patch(session), b.cmds)
 }
 /// The thread's viewer left for something else (a drawing, or closed): Diff and Review go
@@ -239,7 +241,11 @@ pub fn diff_only(session: &Value) -> bool {
 }
 
 /// The actions this module owns: `rv-page`, `rv-run`, `rv-bom`, `rv-tick`, `revert`, `revert-no`
-pub fn act(hub: &str, session: &Value, sel: &str, action: &str, value: &str) -> Option<Out> {
+#[cfg(test)]
+fn act(hub: &str, session: &Value, sel: &str, action: &str, value: &str) -> Option<Out> {
+    act_for(hub, session, sel, action, value, || false)
+}
+pub fn act_for(hub: &str, session: &Value, sel: &str, action: &str, value: &str, managed: impl FnOnce() -> bool) -> Option<Out> {
     if sel.is_empty() || sel.contains('~') { return None }
     let mut b = B::new(hub, session);
     match action {
@@ -247,13 +253,13 @@ pub fn act(hub: &str, session: &Value, sel: &str, action: &str, value: &str) -> 
             let page = if action == "rv-bom" || value.is_empty() { "bom" } else { value };
             if !matches!(page, "bom" | "checks" | "comments" | "release") { return None }
             // rv-bom "<old>\n<new>": the parts that changed between a comparison's two versions (0.14's compare bar BOM)
-            let ab = if action == "rv-bom" && value.contains('\n') { value } else { "" };
-            let (p, cmds) = open_review_ab(session, hub, sel, page, ab);
+            let ab = if action == "rv-bom" && value.contains('\n') { value } else if action == "rv-page" && kind_of(session, sel) == "review" { comparison(session, sel) } else { "" };
+            let (p, cmds) = open_review_ab(session, hub, sel, page, ab, managed());
             return Some(Out { session_patch: p, cmds, look: true });
         }
         "rv-run" => {
             let page = if info(session, &format!("view.kind:{sel}")) == "review" { match info(session, &format!("view.path:{sel}")) { "" => "bom", p => p } } else { return None };
-            ask_page(&mut b, sel, page);
+            ask_page_ab(&mut b, sel, page, comparison(session, sel));
         }
         "rv-tick" => { b.rpc("review.tick", json!({"thread": sel, "index": value.parse::<u64>().unwrap_or(0)})); }
         // Ui.revert: "ask" arms it for the thread (the diff stays on show while the person decides), "confirm" sends it, a turn number is a revert already confirmed
@@ -493,11 +499,21 @@ mod tests {
         let o = act("h", &s1, T, "revert", "ask").unwrap(); patch::merge(&mut s1, &o.session_patch);
         let o = act("h", &s1, T, "revert-no", "").unwrap(); patch::merge(&mut s1, &o.session_patch); assert!(!reverting(&s1, T));
     }
+    #[test] fn changing_doors_does_not_run_a_second_working_copy_report() {
+        for page in ["bom", "checks"] {
+            let open = act_for("h", &sess(), T, "rv-page", page, || true).unwrap();
+            assert!(open.cmds.is_empty());
+            assert_eq!(open.session_patch["info"][format!("view.path:{T}")], page);
+        }
+    }
     #[test] fn a_comparisons_bom_asks_for_the_parts_between_its_two_versions() {
         let s1 = sess();
         let o = act("h", &s1, T, "rv-bom", "git\t/p/.git\tabc\t2\t/p/b.kicad_pcb\n/p/b.kicad_pcb").unwrap();
         let t = o.cmds[0]["text"].as_str().unwrap();
         assert!(t.contains("\"m\":\"review.bom\"") && t.contains("abc") && t.contains("\"b\":\"/p/b.kicad_pcb\""), "{t}");
+        let mut comparing = s1.clone(); patch::merge(&mut comparing, &o.session_patch);
+        let refresh = act("h", &comparing, T, "rv-run", "").unwrap();
+        assert!(refresh.cmds[0]["text"].as_str().unwrap().contains("abc"));
         let plain = act("h", &s1, T, "rv-bom", "").unwrap(); assert!(plain.cmds[0]["text"].as_str().unwrap().contains("\"a\":\"\""), "the BOM as it is");
     }
     #[test] fn the_review_tab_asks_for_the_bom_and_shows_the_report_when_it_comes() {
