@@ -31,7 +31,7 @@ pub const OPS: &[(&str, bool, &str, &str)] = &[
     ("source", true, "{source: {type: dc|sin|pulse|pwl|exp|am|sffm, current?, ref?, pos, neg?, value?, params?, ac?, at?, bom?}}", "add a source symbol (Simulation_SPICE) between two nets, out of the BOM and off the board (bom: true keeps it in); neg defaults to GND"),
     ("probe", true, "{probe: signals | {pin: \"R1.2\", name}}", "name what to read: signals join the saved analysis' traces and this call's runs; a pin gets a net label first"),
     ("analysis", true, "{analysis: \".ac dec 20 1 1meg\", signals?, tab?} | {analysis: true}", "save the analysis with the design (what the person's Simulator opens with); true reads what is saved"),
-    ("run", false, "{run: \".tran 1u 10m\" | true, set?: {R1: \"2k\", \"V1.dc\": 3.3}, signals?, measures?, waves?, directives?, options?, tstart?, max_points?, retry?, netlist?, log?, timeout?, show?}",
+    ("run", false, "{run: \".tran 1u 10m\" | true, set?: {R1: \"2k\", \"V1.dc\": 3.3}, signals?, measures?, waves?, directives?, options?, tstart?, max_points?, max_run_points?, retry?, netlist?, log?, timeout?, show?}",
         "run an analysis (true: the saved one) and answer operating-point values, measures and a line per signal; `set` values are for this run only; `waves: true` (or a point count) adds each signal as a few points; `directives` are netlist lines for this run (.options, .ic, .include, .model), `options` KiCad's netlist options ({save_all_currents: false}); a transient that does not converge is tried again with gear, looser tolerances, then a smaller step (`needed` says which; `retry: false` leaves it); a long transient: `tstart: \"8m\"` keeps only the data from then on (measure the end of a run this way), `timeout` is its limit in seconds (120; the run is stopped there and the answer says how far it was), 200000 points of each signal are read (`thinned` says so; `max_points` for more)"),
     ("loopgain", false, "{loopgain: \"U1.2\", run?: \".ac dec 50 1 100meg\", set?, directives?, waves?}", "a feedback loop's gain, broken at a pin (reference.pin number) in the netlist only: crossover frequency, phase margin, gain margin and DC loop gain (Tian's method: voltage and current injection combined, the operating point kept); `waves` adds the curve"),
     ("sweep", false, "{sweep: \"R1\" | \"V1.dc\" | {param: name}, values | from, to, steps?, log? | series, run, measures, set?}", "one run per value, the measures as a table; nothing is written"),
@@ -72,6 +72,9 @@ pub const POINTS: u64 = 200_000;
 pub const POINTS_MAX: u64 = 2_000_000;
 /// A transient whose own line says it computes more points than this is refused before ngspice: KiCad would hold them all.
 const TRAN_POINTS_MAX: f64 = 2e7;
+/// The most an op may give as `max_run_points` (KiCad stops a run at that many values: its points x the vectors ngspice saves, 8 bytes each;
+/// 5,000,000 when the op names none: KiCad's own default, capability sim-run-points-cap).
+pub const RUN_POINTS_MAX: u64 = 1_000_000_000;
 /// An attempt that took this long before it failed ends the retries: each further one would take as long.
 const SLOW_MS: f64 = 20_000.0;
 const TIMEOUT_MS: u64 = 120_000;
@@ -216,6 +219,9 @@ fn failure_lines(resp: &Value) -> Vec<String> {
     if matches!(s(resp, "status"), "SIM_TIMEOUT" | "SIM_ABORTED") {
         let far = resp["progress"].as_f64().map(|p| format!(" at {}% of the run", (p * 100.0).round())).unwrap_or_default();
         l.push(format!("stopped after {} s{far}: give it longer (timeout, in seconds, up to 3600), or make it shorter: start its data later (tstart), a longer maximum step", kw::round_sig(took_ms(resp) / 1000.0, 2)));
+    }
+    if s(resp, "status") == "SIM_POINT_LIMIT" {
+        l.push(format!("KiCad stops a run at max_run_points values (its points x the vectors ngspice saves, 8 bytes each in KiCad's memory; {} here): name only the signals you read (then only those are saved), start the data later (tstart), lengthen the maximum step, or give a larger max_run_points (up to {RUN_POINTS_MAX})", resp["max_run_points"].as_u64().unwrap_or(5_000_000)));
     }
     if let Some(t) = resp["tried"].as_array().filter(|t| !t.is_empty()) { l.push(format!("tried without success: {}", t.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("; then "))) }
     l
@@ -430,6 +436,7 @@ impl Sim<'_> {
         if command.trim_start().to_ascii_lowercase().starts_with(".tran") && !reads_currents { for k in ["save_all_currents", "save_all_dissipations"] { options.entry(k).or_insert(json!(false)); } }
         if !options.is_empty() { msg["options"] = Value::Object(options) }
         if !self.breaks.is_empty() { msg["breaks"] = json!(self.breaks); msg["show"] = json!(false) }
+        if let Some(n) = op["max_run_points"].as_u64() { msg["max_run_points"] = json!(n.clamp(1000, RUN_POINTS_MAX)) }
         let started = std::time::Instant::now(); let ms = |t: std::time::Instant| t.elapsed().as_millis() as u64;
         let mut r = match self.call("RunSimulation", msg).await { Err(e) if e.contains("AS_BUSY") => return Err(BUSY.into()), r => r? };
         let mut out = Running { stop: self.ctx.stop.clone(), msg: None }; let (mut progress, mut asked) = (0.0, false);
@@ -594,7 +601,9 @@ impl Sim<'_> {
                     if !meas.is_empty() { out["measures"] = measures_of(&r, &meas) }
                     if let Some(v) = r["vectors"].as_array().into_iter().flatten().find(|v| v["length"].as_u64().unwrap_or(0) > v["real"].as_array().map_or(0, Vec::len) as u64 && v["real"].as_array().is_some_and(|a| !a.is_empty())) {
                         let (have, of) = (v["real"].as_array().map_or(0, Vec::len), v["length"].as_u64().unwrap_or(0));
-                        out["thinned"] = json!(format!("{have} of {of} points were read (every {}th): summaries and measures are of those, and a peak between them is missed. Read fewer: start the data later (tstart) or shorten the run; or more: max_points, up to {POINTS_MAX}", (of as f64 / have as f64).round()));
+                        let how = if s(&r, "thinning") == "TH_MIN_MAX" { "of each stretch of the run the points where a signal read is lowest and highest: no peak or dip is lost, the points are not evenly spaced; summaries and measures are of those".to_string() }
+                            else { format!("every {}th: summaries and measures are of those, and a peak between them is missed", (of as f64 / have as f64).round()) };
+                        out["thinned"] = json!(format!("{have} of {of} points were read ({how}). Read fewer: start the data later (tstart) or shorten the run; or more: max_points, up to {POINTS_MAX}"));
                     }
                     if asked.is_empty() && meas.is_empty() && vals.is_empty() { out["has"] = json!(names_of(&r)); out["note"] = json!("name signals or measures to read them") }
                     let warn = problem_lines(&r); if !warn.is_empty() { out["warnings"] = json!(warn.iter().take(5).collect::<Vec<_>>()) }
@@ -836,6 +845,9 @@ mod tests {
                     "stiff" => self.simulate(&msg),
                     "slowfail" => json!({"status": "SIM_NO_CONVERGENCE", "analysis": "TRAN", "log": "doAnalyses: TRAN:  Timestep too small; time = 8.86e-03, timestep = 1.25e-19: trouble with node \"/sw\"\n", "timings": {"run_ms": 97000.0, "total_ms": 97400.0}}),
                     "limit" | "forever" => json!({"status": "SIM_RUNNING", "run_id": "7", "progress": 0.42}),
+                    "minmax" => { let mut r = self.simulate(&msg); for v in r["vectors"].as_array_mut().unwrap() { v["length"] = json!(2_000_000) } r["thinning"] = json!("TH_MIN_MAX"); r }
+                    "pointlimit" => json!({"status": "SIM_POINT_LIMIT", "analysis": "TRAN", "points": 1250000, "run_values": 5000000, "max_run_points": 5000000, "timings": {"total_ms": 1600.0},
+                        "problems": [{"kind": "PK_POINT_LIMIT", "severity": "PS_ERROR", "message": "the run was stopped at 1250000 points, time = 1.24999: ngspice had produced 5000000 values (points x saved vectors) and max_run_points is 5000000."}]}),
                     "thin" => { let mut r = self.simulate(&msg); for v in r["vectors"].as_array_mut().unwrap() { v["length"] = json!(2_000_000) } r }
                     "noconv" => json!({"status": "SIM_NO_CONVERGENCE", "analysis": "TRAN", "log": "Circuit: t\ndoAnalyses: TRAN:  Timestep too small; time = 1.5e-05, timestep = 1.25e-19: trouble with node \"/sw\"\nrun simulation(s) aborted\n", "timings": {"run_ms": 40.0, "total_ms": 44.0}}),
                     _ => self.simulate(&msg) },
@@ -1127,6 +1139,14 @@ mod tests {
         // vectors KiCad thinned: said, with what was read and what there was
         let mut f = fake(); f.mode = "thin"; let out = go(&f, json!([{"run": ".tran 1u 1m", "signals": "V(out)"}])); let t = out["results"][0]["run"]["thinned"].as_str().unwrap();
         assert!(t.contains(" of 2000000 points were read (every ") && t.contains("tstart") && t.contains("max_points, up to 2000000"), "{t}");
+        // bp.13.2 (sim-thin-minmax): the extremes are kept, and the answer says that instead of "every Nth"
+        let mut f = fake(); f.mode = "minmax"; let out = go(&f, json!([{"run": ".tran 1u 1m", "signals": "V(out)"}])); let t = out["results"][0]["run"]["thinned"].as_str().unwrap();
+        assert!(t.contains(" of 2000000 points were read (of each stretch") && t.contains("no peak or dip is lost") && !t.contains("every "), "{t}");
+        // bp.13.2 (sim-run-points-cap): the limit goes to KiCad only when the op names one; a run stopped at it is a failure that says what to do
+        let f = fake(); go(&f, json!([{"run": ".tran 1u 1m", "max_run_points": 40000000}, {"run": ".tran 1u 1m"}, {"run": ".tran 1u 1m", "max_run_points": 9000000000u64}]));
+        let m = sent(&f, "RunSimulation"); assert_eq!((m[0]["max_run_points"].as_u64(), m[1].get("max_run_points"), m[2]["max_run_points"].as_u64()), (Some(40_000_000), None, Some(RUN_POINTS_MAX)));
+        let mut f = fake(); f.mode = "pointlimit"; let out = go(&f, json!([{"run": ".tran 1u 2", "signals": "V(out)", "retry": false}])); let run = &out["results"][0]["run"]; let p = run["problems"].to_string();
+        assert!(run["failed"] == "the run reached its point limit" && run.get("signals").is_none() && p.contains("stopped at 1250000 points") && p.contains("max_run_points") && p.contains("tstart"), "{run}");
     }
     /// A run past its time says how long it ran and how far it was; a call dropped while its run is out stops the run in KiCad.
     #[test] fn a_run_out_of_time_says_how_far_it_was_and_a_dropped_call_stops_its_run() {

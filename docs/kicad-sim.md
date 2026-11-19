@@ -45,9 +45,10 @@ hub collects it with `GetSimulationResult`, a second at a time, up to the op's `
 - **An interrupted turn stops its run.** When the agent hangs up on a `kicad_sim` call (its turn was interrupted),
   the hub drops the call (`mcp.rs`), and a run that is out is stopped with `StopSimulation` (`ksim::Running`).
   `sim_e2e.py stop` checks it with the stand-in agent: the next turn's run is not refused as busy.
-- **The server pool** (`docs/kicad-ipc.md`): two headless KiCads, three from 32 GB of memory, four from 64 GB. A
-  server at work is never the one stopped to make room, so a long run is not lost to another project; with every
-  server at work a further project waits for room, up to 120 s.
+- **The server pool** (`docs/kicad-ipc.md`): two headless KiCads at once. Until the pool fix of
+  https://github.com/BackplaneWorks/Backplane/pull/1182 is on main, a third project that asks for a server can have
+  the one a long run is on stopped to make room: the run's call then fails with "KiCad closed the connection before
+  answering" and is run again by the agent. With it, a server at work is never the one stopped.
 
 ### Memory
 
@@ -55,7 +56,8 @@ A run is bounded in what the hub reads, not in what ngspice computes.
 
 | Bound | Value | What it does |
 |---|---|---|
-| Points read of each vector | 200,000 (`max_points`: up to 2,000,000) | KiCad thins the rest (every Nth point). The answer's `thinned` says how many of how many were read; summaries and measures are of those, so a peak between them is missed. |
+| Points read of each vector | 200,000 (`max_points`: up to 2,000,000) | KiCad thins the rest: of each stretch of the run it keeps the points where a signal read is lowest and highest (`sim-thin-minmax`), so no peak or dip is lost and the points are not evenly spaced. The answer's `thinned` says how many of how many were read and how; summaries and measures are of those. |
+| Values a run may produce in KiCad | 5,000,000 (`max_run_points`: up to 1,000,000,000) | Points times the vectors ngspice saves, 8 bytes each in KiCad (`sim-run-points-cap`). KiCad stops the run there: the op fails with "the run reached its point limit", how far it was and what to do, and no numbers. With `signals` named only those are saved, so the same run produces fewer values. Counted with `.options interp` too (the computed points). |
 | Vectors read | the op's `signals` and what its measures name | Nothing else is sent to the hub. |
 | A transient's currents and powers | not saved unless a signal or measure reads one (`I(...)`, `P(...)`, a `#branch`) | `options: {save_all_currents: true}` keeps them. |
 | `tstart` on a `.tran` run | `{run: ".tran 1u 10m", tstart: "8m"}` | ngspice stores nothing before it: the way to measure the end of a long run. |
@@ -67,8 +69,8 @@ handed on, not copied). Memory scales with the points read: `max_points: 2000000
 
 Not bounded by the hub: KiCad's own memory for a run that is not windowed (ngspice keeps every computed point of
 every saved vector until the run ends; the 6.7 GB of 17 Nov was a 1.9-million-point run with `.save all` on a
-vendor model). `tstart`, the currents default and the 20-million refusal reduce it; a hard limit needs KiCad to stop
-a run at a point count.
+vendor model). `tstart`, the currents default and the 20-million refusal reduce it, and from bp.13.2 KiCad stops a
+run at `max_run_points` values (the table above), which is the hard limit.
 
 ## Ops
 
@@ -86,7 +88,7 @@ name (`onoise_spectrum`); a root sheet's net works with or without its `/`. `V(a
 | `{source: {type, pos, neg?, value?, params?, ac?, current?, ref?, at?, bom?}}` | A `Simulation_SPICE` source symbol between two nets (`neg` is GND unless given), with its model. Types: dc, sin, pulse, pwl, exp, am, sffm, trnoise, trrandom. Out of the BOM and off the board unless `bom: true`. |
 | `{probe: signals}`, `{probe: {pin: "R1.2", name}}` | Signals join the saved analysis' traces and this call's runs. A pin gets a net label first, so an unnamed net has a name to read. |
 | `{analysis: ".ac dec 20 1 1meg", signals?, tab?}`, `{analysis: true}` | Saves the analysis with the design: what the person's Simulator tab opens with. `true` reads what is saved. |
-| `{run: ".tran 1u 10m" \| true, set?, signals?, measures?, waves?, directives?, options?, tstart?, max_points?, retry?, netlist?, log?, timeout?, show?}` | Runs an analysis (`true`: the saved one, with its saved traces). Answers the operating-point values, the measures and one line per signal. |
+| `{run: ".tran 1u 10m" \| true, set?, signals?, measures?, waves?, directives?, options?, tstart?, max_points?, max_run_points?, retry?, netlist?, log?, timeout?, show?}` | Runs an analysis (`true`: the saved one, with its saved traces). Answers the operating-point values, the measures and one line per signal. |
 | `{loopgain: "U1.2", run?, set?, directives?, waves?}` | A feedback loop's gain, cut at a pin in the netlist only (below). |
 | `{sweep: "R1" \| "V1.dc" \| {param}, values \| from, to, steps?, log? \| series, run, measures, set?}` | One run per value; the measures as one table `{columns, rows}`. |
 | `{tune: "R1", measure, target, from, to, series?, tol?, max_runs?, run, set?, write?}` | The value that brings a measure to its target. |
@@ -260,8 +262,7 @@ bun test/kipc_bench/hub.mjs <backplane-hub> <runtime with sim-run> <port> WORK &
 python3 test/kipc_bench/sim_e2e.py run WORK      # then: touch WORK/stop
 ```
 
-`cargo test kicad::ipc`: three projects and room for two against a stand-in transport (a server with a run out is
-never stopped to make room; a project is not started again beside its last process).
+The crowd tasks (below) are run by name, `sim_e2e.py run WORK crowd`: they pass only with the pool fix of #1182.
 
 It generates five small schematics (an RC with a connector, a test point and an op-amp without a model; a divider; a
 series RLC; two capacitors in series; a two-pole loop of two controlled sources), drives every op through the MCP tool as a stand-in agent's turn and checks the

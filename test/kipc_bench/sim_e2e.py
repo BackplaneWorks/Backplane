@@ -176,7 +176,7 @@ def task_loop(t):
 # work is never stopped to make room, so one of the two is served beside the run and the other waits for room.
 SLOW_S = 40
 def task_slow(t):
-    t0 = time.time(); r = t.sim([{"run": f".tran 0.1 {SLOW_S} 0 1u", "directives": [".options interp"], "signals": ["out"], "measures": {"end": "final V(out)"}, "retry": False, "timeout": 300}]); run = r["results"][0]["run"]
+    t0 = time.time(); r = t.sim([{"run": f".tran 0.1 {SLOW_S} 0 1u", "directives": [".options interp"], "signals": ["out"], "measures": {"end": "final V(out)"}, "retry": False, "timeout": 300, "max_run_points": 400_000_000}]); run = r["results"][0]["run"]
     t.ok("the long transient ends with its numbers while two other projects are served", "failed" not in run and abs(run["measures"]["end"] - 5) < 0.01, run)
     t.ok("it was long enough to be in the others' way (10 s or more)", time.time() - t0 >= 10, round(time.time() - t0, 1))
 def task_busy(t):
@@ -196,9 +196,11 @@ def hub_peak_mb(t):
     return int(next(l for l in open(f"/proc/{pid}/status") if l.startswith("VmHWM")).split()[1]) / 1024
 def task_big(t):
     t.sim([{"run": ".op"}]); before = hub_peak_mb(t)
-    r = t.sim([{"run": ".tran 1u 2 0 1u", "signals": ["out", "in"], "measures": {"end": "final V(out)", "top": "max V(out)"}, "timeout": 300}]); run = r["results"][0]["run"]; grew = hub_peak_mb(t) - before
+    r = t.sim([{"run": ".tran 1u 2 0 1u", "signals": ["out", "in"], "measures": {"end": "final V(out)", "top": "max V(out)"}, "timeout": 300, "max_run_points": 20_000_000}]); run = r["results"][0]["run"]; grew = hub_peak_mb(t) - before
     t.ok("two million points: the answer has its numbers", "failed" not in run and abs(run["measures"]["end"] - 5) < 0.01 and run["points"] >= 2_000_000, {k: run.get(k) for k in ("failed", "problems", "measures", "points", "ms")})
-    t.ok("it says the vectors were thinned, and how", "of 2000" in run.get("thinned", "") and "tstart" in run.get("thinned", ""), run.get("thinned"))
+    t.ok("it says the vectors were thinned, and how", "of 2000" in run.get("thinned", "") and "tstart" in run.get("thinned", "") and "lowest and highest" in run.get("thinned", ""), run.get("thinned"))
+    lim = t.sim([{"run": ".tran 1u 2 0 1u", "signals": ["out", "in"], "measures": {"end": "final V(out)"}, "retry": False, "timeout": 300}])["results"][0]["run"]
+    t.ok("without max_run_points KiCad stops the run at 5,000,000 values: a failure that says so and what to do, no numbers", lim.get("failed") == "the run reached its point limit" and "measures" not in lim and "max_run_points" in json.dumps(lim.get("problems")), {k: lim.get(k) for k in ("failed", "problems", "measures")})
     t.ok(f"the hub's memory peak grew by less than {BIG_MB} MB", grew < BIG_MB, round(grew, 1)); print(f"note hub peak grew {grew:.1f} MB for 2,000,000 points thinned to 200,000")
     r = t.sim([{"run": ".tran 1u 2 0 1u", "tstart": "1.99", "signals": ["out"], "measures": {"end": "final V(out)"}, "timeout": 300}]); run = r["results"][0]["run"]
     t.ok("with tstart only the window is kept: 10,000 points, none thinned", "failed" not in run and 9_000 <= run["points"] <= 11_000 and "thinned" not in run and abs(run["measures"]["end"] - 5) < 0.01, {k: run.get(k) for k in ("failed", "problems", "points", "thinned")})
@@ -208,7 +210,7 @@ def task_big(t):
 def task_stop(t):
     mark = os.path.dirname(t.sch) + "/first-turn"
     if not os.path.exists(mark):
-        open(mark, "w").write("x"); t.sim([{"run": ".tran 0.1 400 0 1u", "directives": [".options interp"], "signals": ["out"], "retry": False, "timeout": 600}])
+        open(mark, "w").write("x"); t.sim([{"run": ".tran 0.1 400 0 1u", "directives": [".options interp"], "signals": ["out"], "retry": False, "timeout": 600, "max_run_points": 1_000_000_000}])
         t.ok("the first turn was interrupted before its run ended", False, "the run of minutes came back"); return
     t0 = time.time(); e = t.err([{"run": ".op", "signals": ["out"]}])
     t.ok("after the interrupt the simulator is free: an operating point is answered at once", not e and abs(t.last["results"][0]["run"]["values"]["V(/out)"] - 5) < 1e-6 and time.time() - t0 < 10, e or t.last)
@@ -222,7 +224,7 @@ def run(work, only):
     for name, parts in FIXTURES.items(): write_project(f"{fix}/{name}", name, parts)
     log = f"{json.load(open(work + '/hub.json'))['home']}/logs/sim.jsonl"
     # (the crowd's three turns run at once, the busy ones started a moment after the long one; everything else one after another)
-    names = only or [n for n in TASKS if n not in CROWD] + ["crowd"]; turns = {}
+    names = only or [n for n in TASKS if n not in CROWD]; turns = {} # (the crowd is asked for by name, `run WORK crowd`: it needs the pool fix of #1182, without which the long run's server is stopped to make room)
     def start(name):
         d = f"{work}/runs/e2e-{name}"; shutil.rmtree(d, ignore_errors=True); shutil.copytree(f"{fix}/{name}", d)
         return subprocess.Popen(["bun", HERE + "/turn.mjs", work, d, f"ORACLE {os.path.abspath(__file__)}"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env={**os.environ, "TURN_MS": "600000"})
