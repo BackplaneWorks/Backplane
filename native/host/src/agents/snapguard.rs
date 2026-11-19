@@ -42,11 +42,8 @@ pub const CLAUDE_DENY: &[&str] = &["Edit(**/*.kicad_pcb)", "Edit(**/*.kicad_sch)
 /// The setting that says a thread's turns are reviews (read-only), "1" while they are.
 pub fn review_key(th: &str) -> String { format!("review.ro.{th}") }
 
-/// How long a turn waits for its pre-turn snapshot before the agent starts anyway (the hidden setting `snap.wait.ms` overrides it, for tests).
-pub const SNAP_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
-
-/// The longest a write through the hub waits for its turn's late snapshot.
-pub const PENDING_CAP: std::time::Duration = std::time::Duration::from_secs(300);
+/// A snapshot that takes longer than this says so in the thread (the agent waits for it: it must hold the state before the turn).
+pub const SNAP_SAY: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// One turn's guard state.
 #[derive(Debug, Default, Clone)]
@@ -58,9 +55,6 @@ pub struct TurnGuard {
     pub docs: HashMap<String, (usize, i64, i64)>, pub confirmed: Vec<String>,
     /// the turn was started by the person's own message (they are there to answer a mass-deletion ask)
     pub person: bool,
-    /// the turn's snapshot is still being taken after the agent started (`snap_wait`): true once it ended. A write through the hub waits for it,
-    /// so the snapshot never holds the agent's own edit.
-    pub pending: Option<tokio::sync::watch::Receiver<bool>>,
 }
 /// How long a mass deletion waits for the person's answer before it is refused. While it waits no KiCad request is sent (the guard runs
 /// before the document's gate and the call); a document lock this turn already took stays held, as it does for the rest of the turn.
@@ -121,30 +115,15 @@ impl Agents {
         if new_turn { self.close_restore_asks(th).await }
         let root = kc::design_root(cwd);
         if !std::path::Path::new(&root).is_dir() { self.turn_guards.lock().unwrap().insert(th.to_string(), TurnGuard { review, ..Default::default() }); return } // no folder: nothing to snapshot (the turn says why it cannot run there)
-        let g = TurnGuard { review, ..Default::default() };
-        // The snapshot of a big folder (a first commit of a folder in no repository, `git add -A` over a large tree, a slow disk, Windows process
-        // spawns) can take minutes (#1233, #1246): the agent waits for it only up to `snap_wait`; past that it starts, and the snapshot finishes in
-        // its own task, which then fills this turn's guard (a write before that takes its own snapshot, as for a turn that has none).
-        let wait = self.world().await.setting("snap.wait.ms").parse().map_or(SNAP_WAIT, std::time::Duration::from_millis);
-        let (me, th2, root2) = (self.clone(), th.to_string(), root.clone());
-        let mut task = tokio::spawn(async move { me.take_snapshot(&th2, &root2).await });
-        let mut g = g;
-        let g = match tokio::time::timeout(wait, &mut task).await {
-            Ok(r) => match r.ok().flatten() { Some((top, turn, reference)) => TurnGuard { top, turn, reference, ..g }, None => g },
-            Err(_) => {
-                self.guard_say(th, "info", format!("The snapshot of this project is taking more than {} s (a large folder). The agent starts now and the snapshot finishes meanwhile.", wait.as_secs_f32())).await;
-                let (me, th2) = (self.clone(), th.to_string());
-                let (tx, rx) = tokio::sync::watch::channel(false);
-                g.pending = Some(rx);
-                tokio::spawn(async move {
-                    if let Some((top, turn, reference)) = task.await.ok().flatten() {
-                        if let Some(g) = me.turn_guards.lock().unwrap().get_mut(&th2) { if g.top.is_empty() { g.top = top; g.turn = turn; g.reference = reference } }
-                    }
-                    let _ = tx.send(true);
-                });
-                g
-            }
-        };
+        let mut g = TurnGuard { review, ..Default::default() };
+        // The agent gets the turn only once the snapshot is taken: it must hold the state before the turn, whatever the agent's own tools write
+        // (#1233, #1246). The snapshot is incremental (files/snapshot.rs keeps its index between turns), so it is quick after the first; a slow one
+        // says so in the thread.
+        let (me, th2) = (self.clone(), th.to_string());
+        let say = tokio::spawn(async move { tokio::time::sleep(SNAP_SAY).await; me.guard_say(&th2, "info", "Taking a snapshot of the project before the agent starts (a large folder takes a while the first time)\u{2026}".into()).await });
+        let r = self.take_snapshot(th, &root).await;
+        say.abort();
+        if let Some((top, turn, reference)) = r { g = TurnGuard { top, turn, reference, ..g } }
         self.turn_guards.lock().unwrap().insert(th.to_string(), g);
     }
 
@@ -172,8 +151,6 @@ impl Agents {
         let rel = path.rsplit_once("/.backplane/worktrees/").map(|x| x.1.split_once('/').map_or("", |y| y.1).to_string()).unwrap_or_else(|| path.to_string());
         let design = kc::is_design(&rel) || kc::is_document(path) || path.ends_with(".kicad_pro");
         if design && self.in_review(th).await { return Err(sn::review_refusal(path.rsplit('/').next().unwrap_or(path))) }
-        // the turn's snapshot is still running (it outlasted `snap_wait`): the agent's edit waits for it, so the snapshot is of the state before the turn
-        if let Some(mut rx) = self.turn_guard(th).and_then(|g| g.pending) { let _ = tokio::time::timeout(PENDING_CAP, rx.wait_for(|d| *d)).await; }
         let g = self.turn_guard(th);
         if g.as_ref().is_some_and(|g| g.wrote) { return Ok(()) }
         match g {
