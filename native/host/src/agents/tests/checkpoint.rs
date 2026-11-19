@@ -100,7 +100,11 @@ async fn a_failed_start_after_the_wait_is_shown_as_a_failed_turn_with_its_reason
     let (hub, ag, _home, _work) = start("ckpt-fail", |w| base_log(w, 1, ""), |_| Cli::standin(&none)).await;
     let held = ag.ends_of(T1); held.n.fetch_add(1, Relaxed);
     let from = len(&hub).await;
-    let r = tokio::time::timeout(Duration::from_secs(5), rpc(&hub, "turn.start", json!({"thread":T1,"text":"please write nothing.txt"}))).await.expect("answered while it waits");
+    // the start takes the project's snapshot before anything (snapguard.rs, #1163), and the reply comes after it: a fresh folder's first one (made a repository)
+    // took 9 s on the Windows runner under load (Nov 19). Once it is taken, the start waits on the held checkpoint, and the caller must not wait with it
+    let h2 = hub.clone(); let call = tokio::spawn(async move { rpc(&h2, "turn.start", json!({"thread":T1,"text":"please write nothing.txt"})).await });
+    until(&hub, from, 60, |ev| ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "git" && e["summary"].as_str().map_or(false, |s| ["Snapshot before", "Nothing uncommitted before", "No snapshot before"].iter().any(|p| s.starts_with(p))))).await;
+    let r = tokio::time::timeout(Duration::from_secs(5), call).await.expect("answered while it waits").unwrap();
     assert_eq!(r["ok"], true);
     until(&hub, from, 10, |ev| ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "checkpoint")).await;
     assert!(!until(&hub, from, 1, |ev| ev.iter().any(|e| turn_is(e, "failed"))).await.iter().any(|e| turn_is(e, "failed")), "nothing fails while the start waits");

@@ -9,6 +9,12 @@ on:
       filter:
         description: nextest filter expression, e.g. test(/^agents::tests::lost::/)
         required: true
+      os:
+        description: the runner (windows-latest, macos-latest, ubuntu-latest)
+        default: windows-latest
+      capture:
+        description: "no: --no-capture (one test at a time, output as it comes); yes: in parallel as CI runs them"
+        default: "no"
 env:
   CARGO_INCREMENTAL: 0
   CARGO_TERM_COLOR: never
@@ -18,7 +24,7 @@ permissions:
   contents: read
 jobs:
   run:
-    runs-on: windows-latest
+    runs-on: ${{ inputs.os }}
     steps:
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
@@ -36,4 +42,4 @@ jobs:
           FILTER: ${{ inputs.filter }}
         run: |
           cargo build --locked --bins
-          cargo nextest run --locked --no-fail-fast --no-capture -E "$FILTER"
+          if [ "${{ inputs.capture }}" = yes ]; then cargo nextest run --locked --no-fail-fast --success-output final --failure-output final -E "$FILTER"; else cargo nextest run --locked --no-fail-fast --no-capture -E "$FILTER"; fi
