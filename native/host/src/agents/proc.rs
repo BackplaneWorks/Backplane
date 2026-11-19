@@ -224,11 +224,19 @@ pub fn carries(l: Launcher, args: &[String]) -> Result<(), String> {
 /// What runs for `program` and the arguments before the caller's, on Windows rules (`windows`): an npm shim is resolved ([`unshim`]); anything else
 /// that still goes through cmd.exe or sh must carry `args` ([`carries`]), else the start is refused with why, rather than an agent started without
 /// what it was given (its MCP servers, its instructions).
-pub fn plan(program: &Path, args: &[String], windows: bool, node: &dyn Fn() -> Option<PathBuf>) -> Result<(PathBuf, Vec<String>), String> {
+pub fn plan(program: &Path, args: &[String], windows: bool, node: &dyn Fn() -> Option<PathBuf>) -> Result<(PathBuf, Vec<String>), String> { plan_for(program, args, windows, node, false) }
+/// `plan`, for a test's stand-in when `standin`: a `#!/bin/sh` stand-in IS the agent (it execs no Windows program after sh), and bp-sh hands sh
+/// every argument by Cygwin's rules, so what `carries` guards against (MSYS re-quoting on the way to a native program) cannot happen to it.
+pub fn plan_for(program: &Path, args: &[String], windows: bool, node: &dyn Fn() -> Option<PathBuf>, standin: bool) -> Result<(PathBuf, Vec<String>), String> {
     if !windows { return Ok((program.to_path_buf(), vec![])) }
     if let Some(t) = unshim(program, node) { return Ok(t) }
-    if let Some(l) = launcher(program) { carries(l, args).map_err(|e| format!("{} is a {} launcher: {e}; install the agent's own program (an .exe) or through npm", program.display(), if l == Launcher::Sh { "sh" } else { "batch" }))? }
+    if let Some(l) = launcher(program) { if standin && l == Launcher::Sh { return Ok((program.to_path_buf(), vec![])) } carries(l, args).map_err(|e| format!("{} is a {} launcher: {e}; install the agent's own program (an .exe) or through npm", program.display(), if l == Launcher::Sh { "sh" } else { "batch" }))? }
     Ok((program.to_path_buf(), vec![]))
+}
+
+/// Whether `program` is a stand-in in the folder `dir` (both read through their real paths).
+fn is_standin(program: &Path, dir: &Path) -> bool {
+    match (crate::plat::fs::canonicalize(program), crate::plat::fs::canonicalize(dir)) { (Ok(p), Ok(d)) => p.starts_with(d), _ => false }
 }
 
 /// A file an agent reads when it starts, holding what must not be on its command line (Claude's MCP config on Windows: it can hold tokens).
@@ -391,7 +399,9 @@ pub fn spawn_person_holding(person: &PersonChild, program: &Path, args: &[String
 fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Path>, env: &[(String, String)], keep: Vec<RunFile>) -> std::io::Result<Proc> {
     let args: Vec<String> = args.iter().map(|a| crate::settings::mask::mask(a)).collect(); // settings lane: Spawn.agent masks every launch argument
     // Windows: an npm shim runs as what it starts, and nothing else goes through cmd.exe or sh with arguments they would change (`plan`)
-    let (program, pre) = plan(program, &args, cfg!(windows), &|| find_in(search_dirs(), "node", true)).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    // a test's stand-in (a script in the stand-in folder `extra_path`, started through bp-sh) gets its arguments as given (`plan_for`)
+    let standin = extra_path.is_some_and(|d| is_standin(program, d) && crate::plat::helper("bp-sh").is_some());
+    let (program, pre) = plan_for(program, &args, cfg!(windows), &|| find_in(search_dirs(), "node", true), standin).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
     // its own memory scope (memscope.rs): a runaway it starts is killed alone, never the hub's scope with every agent in it
     // a launch that fails for its scope (an older systemd, no user manager) starts again unscoped (memscope::spawn), never failing the agent
     let make = |wrap: Option<Vec<String>>| {
@@ -674,6 +684,10 @@ mod tests {
         let e = plan(&bat, &["a\nb".into()], true, &|| None).unwrap_err(); assert!(e.contains("mine.cmd is a batch launcher") && e.contains("argument 1"), "{e}");
         assert_eq!(plan(&bat, &["--mcp-config".into(), json.clone()], true, &|| None).unwrap(), (bat.clone(), vec![]));
         assert_eq!(plan(&bat, &["a\nb".into()], false, &|| None).unwrap(), (bat.clone(), vec![]), "elsewhere nothing changes");
+        // a stand-in that is a sh script is the agent itself: started through bp-sh it gets a `"` or a leading `/` as given; a real sh launcher is still refused
+        let sh = d.join("standin"); std::fs::write(&sh, "#!/bin/sh\n").unwrap(); let hard: Vec<String> = vec!["-c".into(), "k=\"v\"".into(), "/omp/s".into()];
+        assert!(plan(&sh, &hard, true, &|| None).is_err()); assert_eq!(plan_for(&sh, &hard, true, &|| None, true).unwrap(), (sh.clone(), vec![]));
+        assert!(is_standin(&sh, &d) && !is_standin(&sh, &d.join("nope")));
     }
     #[test] fn a_run_file_is_private_and_goes_with_its_process() {
         let d = dir("runfile"); let r = RunFile::private(&d.join("secrets/run"), "t-1.mcp.json", "{\"k\":1}").unwrap(); let f = r.path().to_path_buf();
