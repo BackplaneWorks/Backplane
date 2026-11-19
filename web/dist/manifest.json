@@ -1,6 +1,21 @@
 {
   "version": 1,
   "totalAssetGzipBytes": 20631,
+  "styleTokensSha256": "553065bb02cda4fc70b85df890e052e94f8601530d5a963c4243d5e324ccb229",
+  "i18nKeys": [
+    "common.cancel",
+    "common.delete",
+    "common.remove",
+    "common.save",
+    "gpui.b.in.reply.to",
+    "gpui.follow.paused",
+    "gpui.follow.wait",
+    "palette.diff",
+    "palette.newthread",
+    "settings.lang",
+    "thread.new"
+  ],
+  "i18nSubsetSha256": "e69bbc7048a2748ca4976418735f33f0b5464017424c7c0d8179709836868ba5",
   "inputs": {
     "web/src/app.ts": "aa193c56921035a01e59505b3d70332f2f03a46fb998381e97b1c757e7bde448",
     "web/src/chat.ts": "b56455b6f4e7f7fe7415878cf0ebd64cf2804c57c782aa53933cc0f061b9730f",
@@ -15,13 +30,9 @@
     "web/src/shell.css": "17d699de8a58a06742c4dd0fefea32627e2983e1d1beb587cb8638c12bcc952d",
     "web/src/sidebar.ts": "bf316bd6f86168e6503ea5af4a7982ed37ba4082b344700c8895d944d63a15a9",
     "web/src/ws.ts": "bff5636759f3871df89395c792d5c69aef90a5e1e9ecd8247ac522ebb40badc9",
-    "web/build.ts": "e11ddeff3855f4fe7f443f0eff262c47d92fae82ae77f00aaca75b8648ef909a",
-    "assets/web/style.css": "3feaacb24b25eed516bad973f5edcc5cf98bebfb20e8cdf95a133e3245ace975",
+    "web/build.ts": "654c53266b95a3d229df578fffbe01dbf51b66fb4445646d51cbbb65b02e21e2",
     "assets/web/favicon.svg": "5b0f22a3329f59809216aabe58d8dbbedbd46d29e4a2373a727529daa2441a2c",
-    "assets/web/favicon-light.svg": "9aa4fb973f8a719c602e351c84d3344bac377db049f59eaa52d617e84eada5b6",
-    "i18n/en.msg": "80dd25b8d4e6971e83236e3c33762a807dad2674efb60f2f58344b589f54af14",
-    "i18n/es.msg": "8ecb28804e25cdde5579a5382fa210c8faab6fdebcb58128229097977e23e550",
-    "i18n/ja.msg": "1d6b97fb2469e8c8e12f76ecbd05508c2f9847a822fc91b556ed499e9a07b4c6"
+    "assets/web/favicon-light.svg": "9aa4fb973f8a719c602e351c84d3344bac377db049f59eaa52d617e84eada5b6"
   },
   "outputs": {
     "assets/app.js": {
