@@ -11,6 +11,7 @@ pub mod thread;
 pub mod design_mode;
 pub mod layout;
 pub mod rail;
+pub mod identity_context;
 pub mod viewer;
 pub mod settings;
 pub mod onboard;
