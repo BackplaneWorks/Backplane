@@ -121,6 +121,9 @@ SS3=$(sel sch); L=$(hub_lines)
 A=$(edit_move U1 0.5); sleep 2.5
 check "P3 the agent's board edit landed" "$(landed "$A" && echo 1 || echo 0)" "$(echo "$A" | cut -c1-200)"
 check "P3 the hub decided Elsewhere and sent no SelectItems" "$(since "$L" | grep -q '^follow: Elsewhere t1' && ! since "$L" | grep -q '^follow: SelectItems' && echo 1 || echo 0)" "$(since "$L" | grep '^follow: ' | head -3 | cut -c1-300)"
+# the line under Follow agent says where the edit was (the client's drawn text, logged as it changes)
+for _ in $(seq 40); do LINE3=$(grep -o '"follow_line":"[^"]*","pane":"[^"]*"' "$OUT/client.log" | tail -1); echo "$LINE3" | grep -q '"pane":"elsewhere"' && break; sleep 0.25; done
+check "P3 the status line says the edit was on the board ($LINE3)" "$(echo "$LINE3" | grep -q '"follow_line":"Following: Board · edited U1","pane":"elsewhere"' && echo 1 || echo 0)"
 check "P3 the Schematic stays on show ($(shown_frame))" "$([ "$(shown_frame)" = SCH ] && echo 1 || echo 0)"
 check "P3 the Schematic's selection is unchanged (no cross-probe): $SS3 -> $(sel sch)" "$([ "$(sel sch)" = "$SS3" ] && echo 1 || echo 0)"
 shot p3_elsewhere
