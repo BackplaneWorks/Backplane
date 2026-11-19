@@ -117,6 +117,12 @@ function mountApp(): void {
   let olderCursor: string | null = null;
   let activeRailKind = "";
   let viewerController: ReturnType<ViewerMountFn> | null = null;
+  const threadCache = new Map<string, {
+    entries: EntryItem[];
+    olderCursor: string | null;
+    review: ReviewBar | null;
+    unanswered: UnansweredNotice | null;
+  }>();
 
   const sidebar = new SidebarView(sidebarEl, {
     onSelectThread: (id) => { void openThread(id); },
@@ -323,6 +329,20 @@ function mountApp(): void {
   }
 
   async function openThread(threadId: string): Promise<void> {
+    // Save current thread's held entries into in-memory cache before switching
+    if (selectedThreadId && selectedThreadId !== threadId) {
+      const held = chat.getEntries();
+      if (held.length > 0) {
+        const prev = threadCache.get(selectedThreadId);
+        threadCache.set(selectedThreadId, {
+          entries: held,
+          olderCursor,
+          review: prev?.review ?? null,
+          unanswered: prev?.unanswered ?? null,
+        });
+      }
+    }
+
     const gen = ++threadGen;
     const prevSub = threadSubId;
     threadSubId = null;
@@ -331,13 +351,21 @@ function mountApp(): void {
     }
 
     selectedThreadId = threadId;
-    olderCursor = null;
+    const cached = threadCache.get(threadId);
+    olderCursor = cached?.olderCursor ?? null;
     try { localStorage.setItem("bp.lastThread", threadId); } catch { /* ignore */ }
     sidebar.setSelected(threadId);
     sidebarEl.classList.remove("bp-sidebar-open");
     updateCrumb();
 
     const th = threads.find((x) => x.id === threadId) ?? null;
+    // Synchronously replace A's content: paint B's cached snapshot if held, else empty loading pane.
+    if (cached) {
+      chat.setThread(th, cached.entries, Boolean(cached.olderCursor), cached.review, cached.unanswered);
+    } else {
+      chat.setLoading(th);
+    }
+    // Target is unambiguous once A's content is gone; keep composer ready to type.
     composer.setState(true, th?.state === "working");
     rail.setItems([]);
 
@@ -348,7 +376,11 @@ function mountApp(): void {
     };
     try {
       res = await hub.rpc("thread.entries", { thread: threadId, limit: 40 });
-    } catch {
+    } catch (e) {
+      if (gen === threadGen) {
+        const msg = e instanceof Error && e.message ? e.message : "Could not load messages.";
+        chat.setError(th, msg, () => { void openThread(threadId); });
+      }
       return;
     }
     if (gen !== threadGen) return;
@@ -364,7 +396,10 @@ function mountApp(): void {
     }
     if (gen !== threadGen) return;
 
-    chat.setThread(th, res.entries ?? [], Boolean(olderCursor), review, res.unanswered ?? null);
+    const entries = res.entries ?? [];
+    const unanswered = res.unanswered ?? null;
+    threadCache.set(threadId, { entries, olderCursor, review, unanswered });
+    chat.setThread(th, entries, Boolean(olderCursor), review, unanswered);
 
     try {
       const sub = await hub.rpc<{ sub?: SubId }>("subscribe", { topic: "thread", thread: threadId });

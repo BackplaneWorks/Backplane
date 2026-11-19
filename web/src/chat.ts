@@ -90,6 +90,51 @@ export class ChatView {
     container.append(this.headEl, this.bannerEl, this.scrollEl);
   }
 
+  public setLoading(thread: ThreadItem | null): void {
+    this.thread = thread;
+    this.entries = [];
+    this.hasMore = false;
+    this.review = null;
+    this.unanswered = null;
+    this.btwNote = null;
+    this.liveNodes.clear();
+    this.renderHead();
+    this.renderBanners();
+    this.olderBtn.classList.add("bp-hidden");
+    const el = document.createElement("div");
+    el.className = "bp-empty-state";
+    el.textContent = "Loading messages…";
+    this.listEl.replaceChildren(el);
+  }
+
+  public setError(thread: ThreadItem | null, message: string, onRetry: () => void): void {
+    this.thread = thread;
+    this.entries = [];
+    this.hasMore = false;
+    this.review = null;
+    this.unanswered = null;
+    this.btwNote = null;
+    this.liveNodes.clear();
+    this.renderHead();
+    this.renderBanners();
+    this.olderBtn.classList.add("bp-hidden");
+    const box = document.createElement("div");
+    box.className = "bp-empty-state";
+    const msg = document.createElement("div");
+    msg.className = "bp-bad";
+    msg.textContent = message;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Retry";
+    btn.addEventListener("click", onRetry);
+    box.append(msg, btn);
+    this.listEl.replaceChildren(box);
+  }
+
+  public getEntries(): EntryItem[] {
+    return this.entries.slice();
+  }
+
   public setThread(
     thread: ThreadItem | null,
     entries: EntryItem[],
