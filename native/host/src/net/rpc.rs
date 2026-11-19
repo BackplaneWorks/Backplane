@@ -165,7 +165,10 @@ impl FarRouter for Router {
             let l = match self.plan(client, id, m, p) { Ok(l) => l, Err(e) => return e };
             // (Far.rpc.job): the request is out on a task of its own and the answer is pushed when it comes; this connection goes on meanwhile
             let (me, hub, id, m, p) = (self.parts(), hub.clone(), id.clone(), m.to_string(), p.clone());
-            tokio::spawn(async move { let frame = me.run(&hub, client, &id, &m, &p, &l).await; hub.far_replied(client, &frame); /* (a Diff's or a folder's answer is the view's read: its next request carries it) */ hub.push(client, frame); });
+            let watch = (m == "kicad.watch").then(|| crate::session::begin_watch(client)).flatten();
+            tokio::spawn(async move { let frame = me.run(&hub, client, &id, &m, &p, &l).await;
+                if frame["ok"] == true && crate::session::finish_watch(client, watch, &p) { hub.bump_views(); }
+                hub.far_replied(client, &frame); /* (a Diff's or a folder's answer is the view's read: its next request carries it) */ hub.push(client, frame); });
             vec![]
         })
     }

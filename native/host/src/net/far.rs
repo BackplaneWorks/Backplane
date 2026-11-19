@@ -58,7 +58,7 @@ pub const METHODS: &[&str] = &["turn.start", "turn.interrupt", "ask.answer", "qu
     "thread.create", "thread.fork", "thread.archive", "thread.unarchive", "thread.pin", "thread.unpin",
     "project.add", "project.new", "project.remove", "fs.list", "fs.mkdir", "fs.find", "thread.detach", "todos.edit", "kicad.open", "viewer.state", "boards.list",
     // the viewers of a thread whose project is there: its Diff and its Files (listing, and a file's bytes to show here)
-    "git.diff", "files.dir", "files.get",
+    "git.diff", "files.dir", "files.get", "viewer.documents",
     // its Diff's Commit, PR and Revert act on that machine's repository
     "git.act", "git.revert",
     // a person's post in a room there
