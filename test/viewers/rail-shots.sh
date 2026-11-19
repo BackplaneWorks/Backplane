@@ -234,6 +234,7 @@ DRL
 
   (
     cd "$dir"
+    printf '*.lck\n~*.lck\n' >.gitignore
     git init -q -b main
     git config user.name "Fixture"
     git config user.email "fixture@example.invalid"

@@ -50,10 +50,10 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000)
                     {"shot": "task4-gerbers-vs-board", "settle": "gerbers", "timeout_ms": settle_timeout_ms},
                 ])
             elif slug == "split":
-                # Task 5: tap a part on the board pane (slot 2) in Split and check cross-probe
+                # Task 5: tap known component R1 on the board pane (slot 2) in Split and check cross-probe
                 steps.extend([
                     {"mark": "press:task5-split-probe"},
-                    {"tap": [0.352, 0.857, 2]},
+                    {"tap": [0.325, 0.470, 2]},
                     {"wait": 600},
                     {"mark": "settled:task5-split-probe"},
                     {"shot": "task5-split-probe", "settle": "split", "timeout_ms": settle_timeout_ms},
@@ -69,12 +69,12 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000)
                 ])
 
     if kind == "full":
-        # Task 3: verify 1-press return to Schematic from every other page
+        # Task 3: verify 1-press return to Schematic from every other page (each starting page settled first)
         for src_slug, src_rail, src_settle in M.TASK3_SOURCES:
             steps.extend([
                 {"mark": f"task3-setup:{src_slug}"},
                 {"press": src_rail},
-                {"wait": 400},
+                {"wait_settled": src_settle, "tag": f"task3-start-{src_slug}", "timeout_ms": settle_timeout_ms},
                 {"mark": f"press:task3-from-{src_slug}"},
                 {"press": "rail:Schematic"},
                 {"mark": f"settled:task3-from-{src_slug}"},

@@ -12,15 +12,20 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<name>","settle":"<kind>"?,"timeout_ms":N?}: wait until settled (if requested) and painted, emit shot-ready, wait for <BACKPLANE_GPUI_SHOT_DIR>/<name>.done */ Shot { name: String, settle: Option<String>, timeout_ms: u64 }, Fit, Unsupported(String) }
+/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<name>","settle":"<kind>"?,"timeout_ms":N?}: wait until settled (if requested) and painted, emit shot-ready, wait for <BACKPLANE_GPUI_SHOT_DIR>/<name>.done */ Shot { name: String, settle: Option<String>, timeout_ms: u64 }, /** {"wait_settled":"<kind>","tag":"<tag>","timeout_ms":N?}: wait until the page settles and emit a `settled` metric with its viewer state */ WaitSettled { kind: String, tag: String, timeout_ms: u64 }, Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
 pub enum Ctl { /** the composer chip's account menu, and Settings' Accounts page */ AccountMenu, AccountsPage, /** the sidebar hub picker */ Hub(crate::screens::hubpick::Act), PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, Rail(String), PickFiles, /** the ▾ beside the thread's name: its menu */ ThreadMenu, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), /** a hub page of the Settings nav */ SettingsPage(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch, /** a bots-page press (screens::bots::press): its kind and value */ Bot(String, String), /** a chat terminal's card: focus, expand, pop, stop; its key */ Term(String, String), /** a subagent's own view (its key; "" goes back) */ Sub(String), /** a card's button that sends the hub an action (a halt card's Resume...): `Command::Action` */ Go(String, String), /** the viewer's Edit (true: the real KiCad in the pane) and View (false) */ KicadEdit(bool), /** the editor strip: a tab (its kind), full, popout, popin */ KicadAct(String), /** a management panel's press (screens/mgmt.rs `act`) */ Mgmt(String) }
 #[derive(Clone, Debug)]
 pub struct CtlEntry { pub id: String, pub label: String, pub ctl: Ctl }
 #[derive(Clone, Debug)]
-pub enum Goal { Frame, Changed(u64), Reconnected, Home, Thread(String), Popup, Typed(String), Sent(usize), Sleep, Shot { name: String, settle: Option<String>, dir: std::path::PathBuf, timeout_ms: u64, polling: bool } }
+pub enum Goal { Frame, Changed(u64), Reconnected, Home, Thread(String), Popup, Typed(String), Sent(usize), Sleep, Shot { name: String, settle: Option<String>, dir: std::path::PathBuf, timeout_ms: u64, polling: bool }, WaitSettled { kind: String, tag: String, timeout_ms: u64, polling: bool } }
 pub struct Pending { pub label: String, pub started: Instant, pub goal: Goal, pub armed: bool, pub seq: u64 }
+
+thread_local! {
+    /// SolidPage (key, painted) snapshot taken when a script press/click runs, so `viewer_settled` requires a newly painted frame for a new model.
+    static PRESS_SOLID: std::cell::RefCell<(String, u64)> = const { std::cell::RefCell::new((String::new(), 0)) };
+}
 
 /// Shot marker names must be lowercase ASCII slugs (`[a-z0-9-]+`) so they are safe filenames in `BACKPLANE_GPUI_SHOT_DIR`.
 pub fn valid_shot_name(name: &str) -> bool {
@@ -59,6 +64,7 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let Some(on) = v["layers"].as_bool() { Some(Step::Layers(on, v["max_h"].as_f64().map(|x| x as f32), v["scroll"].as_f64().unwrap_or(0.0) as f32)) }
         else if let Some(name) = v["mark"].as_str() { Some(Step::Mark(name.into())) }
         else if let Some(name) = v["shot"].as_str() { Some(Step::Shot { name: name.into(), settle: v["settle"].as_str().map(String::from), timeout_ms: v["timeout_ms"].as_u64().unwrap_or(15_000) }) }
+        else if let Some(kind) = v["wait_settled"].as_str() { Some(Step::WaitSettled { kind: kind.into(), tag: v["tag"].as_str().unwrap_or(kind).into(), timeout_ms: v["timeout_ms"].as_u64().unwrap_or(15_000) }) }
         else if v["fit"].as_bool() == Some(true) { Some(Step::Fit) }
         else if let Some(what) = v["expect"].as_str() { Some(Step::Expect(what.into())) }
         else if v["cef"].is_object() { Some(Step::Cef(v["cef"].clone())) }
@@ -159,9 +165,41 @@ impl Backplane {
             Goal::Typed(text) => self.input.read(cx).content.as_ref() == text,
             Goal::Sent(before) => self.user_entries() > *before,
             Goal::Sleep => false,
-            Goal::Shot { .. } => true,
+            Goal::Shot { .. } | Goal::WaitSettled { .. } => true,
         };
         if !done { return; }
+        if matches!(p.goal, Goal::WaitSettled { .. }) {
+            let (kind, tag, timeout_ms, polling, t0, seq) = match &p.goal {
+                Goal::WaitSettled { kind, tag, timeout_ms, polling } => (kind.clone(), tag.clone(), *timeout_ms, *polling, p.started, p.seq),
+                _ => unreachable!(),
+            };
+            let state = match self.viewer_settled(&kind, cx) {
+                Some(st) => st,
+                None if (t0.elapsed().as_millis() as u64) < timeout_ms => {
+                    if !polling {
+                        if let Some(Pending { goal: Goal::WaitSettled { polling, .. }, .. }) = &mut self.pending { *polling = true; }
+                        cx.spawn(async move |this, cx| {
+                            cx.background_executor().timer(Duration::from_millis(100)).await;
+                            let _ = this.update(cx, |t, cx| {
+                                if let Some(Pending { seq: s, goal: Goal::WaitSettled { polling, .. }, .. }) = &mut t.pending {
+                                    if *s == seq { *polling = false; cx.notify(); }
+                                }
+                            });
+                        }).detach();
+                    }
+                    return;
+                }
+                None => "timeout",
+            };
+            let vstate = self.viewer_state_json(cx);
+            self.pending.as_mut().unwrap().armed = true;
+            window.on_next_frame(move |_, cx| {
+                metric(started, "settled", json!({"tag": tag, "kind": kind, "state": state, "settled": state != "timeout", "viewer": vstate}));
+                let _ = this.update(cx, |t, cx| { if t.pending.as_ref().map_or(false, |p| p.seq == seq) { t.pending = None; t.pump(cx); } });
+            });
+            cx.notify();
+            return;
+        }
         if matches!(p.goal, Goal::Shot { .. }) {
             let (name, settle, dir, timeout_ms, polling, t0, seq) = match &p.goal {
                 Goal::Shot { name, settle, dir, timeout_ms, polling } => (name.clone(), settle.clone(), dir.clone(), *timeout_ms, *polling, p.started, p.seq),
@@ -422,6 +460,11 @@ impl Backplane {
                 self.begin_for(format!("shot:{name}"), Goal::Shot { name, settle, dir, timeout_ms, polling: false }, fail_s, cx);
                 cx.notify();
             }
+            Step::WaitSettled { kind, tag, timeout_ms } => {
+                let fail_s = (timeout_ms / 1000).max(5) + 15;
+                self.begin_for(format!("wait_settled:{tag}"), Goal::WaitSettled { kind, tag, timeout_ms, polling: false }, fail_s, cx);
+                cx.notify();
+            }
             Step::Fit => { self.screens.plotview.view = None; self.ui_epoch += 1; self.begin("fit".into(), Goal::Frame, cx); cx.notify(); }
             Step::Expect(what) => { // a run that cannot measure what it claims stops itself: "canvas" needs a plot canvas with real height
                 let h = self.screens.plotview.bounds.map_or(0.0, |b| f32::from(b.size.height));
@@ -492,6 +535,10 @@ impl Backplane {
                 self.pump(cx);
             }
             Step::Press(id) => {
+                if let Some(s) = &self.screens.solid {
+                    let sr = s.read(cx);
+                    PRESS_SOLID.with(|c| *c.borrow_mut() = (sr.key().to_string(), sr.stats.painted));
+                }
                 let found = self.find_script_control(&id);
                 let action = found.map(|e| self.do_click(&e.ctl, cx));
                 self.m("press", json!({"id": id, "found": action.is_some(), "action": action}));
@@ -635,12 +682,20 @@ impl Backplane {
         let diff_on = th["diff"].is_object();
         let open = v["open"].as_str().unwrap_or("");
         let active = if diff_on { "diff".to_string() } else { crate::screens::viewer::active_kind(v, None) };
+        let (press_key, press_painted) = PRESS_SOLID.with(|c| c.borrow().clone());
         let solid_state = |want_key: &str| -> Option<&'static str> {
             let Some(s) = &self.screens.solid else { return None };
             let sr = s.read(cx);
             if !want_key.is_empty() && sr.key() != want_key { return None; }
             if !sr.note.is_empty() { return Some("empty"); }
-            if sr.stage_text().is_empty() && sr.stats.painted > 0 { return Some("ready"); }
+            let painted_for_key = if !want_key.is_empty() && press_key != want_key {
+                sr.stats.painted > press_painted
+            } else {
+                sr.stats.painted > 0
+            };
+            if sr.stage_text().is_empty() && painted_for_key && sr.stats.last_size.0 > 0 && sr.stats.last_size.1 > 0 {
+                return Some("ready");
+            }
             None
         };
         let plot_state = |want_key: &str, frame: Option<&crate::screens::plot::Frame>| -> Option<&'static str> {
@@ -714,19 +769,26 @@ impl Backplane {
         let v = &th["viewer"];
         let d = &th["diff"];
         let rects = crate::art::ctl_rects();
-        let (solid_key, solid_shown, solid_note, solid_stage, solid_painted) = match &self.screens.solid {
-            Some(s) => { let sr = s.read(cx); (sr.key().to_string(), sr.shown_key().to_string(), sr.note.clone(), sr.stage_text(), sr.stats.painted) }
-            None => (String::new(), String::new(), String::new(), String::new(), 0),
+        let (_, press_painted) = PRESS_SOLID.with(|c| c.borrow().clone());
+        let (solid_key, solid_shown, solid_note, solid_stage, solid_painted, solid_last_w, solid_last_h) = match &self.screens.solid {
+            Some(s) => { let sr = s.read(cx); (sr.key().to_string(), sr.shown_key().to_string(), sr.note.clone(), sr.stage_text(), sr.stats.painted, sr.stats.last_size.0, sr.stats.last_size.1) }
+            None => (String::new(), String::new(), String::new(), String::new(), 0, 0, 0),
         };
         let (plot_key, plot_none) = match &self.screens.plot.frame {
             Some(f) => (f.key.clone(), f.none.clone()),
             None => (String::new(), String::new()),
         };
         let panes = v["panes"].as_array().map(|a| a.len()).unwrap_or(0);
+        let card_ref = |pv: &crate::screens::plotview::PlotView| -> String {
+            pv.card.as_ref().and_then(|c| c.rows.iter().find(|r| r.0 == "ref").map(|r| r.1.clone())).unwrap_or_default()
+        };
         let split_sch_picked = self.screens.split_pv[0].picked.is_some();
         let split_pcb_picked = self.screens.split_pv[1].picked.is_some();
         let split_sch_lit = !self.screens.split_pv[0].lit.is_empty();
         let split_pcb_lit = !self.screens.split_pv[1].lit.is_empty();
+        let split_sch_ref = card_ref(&self.screens.split_pv[0]);
+        let split_pcb_ref = card_ref(&self.screens.split_pv[1]);
+        let diff_file_names: Vec<String> = d["files"].as_array().into_iter().flatten().filter_map(|f| f["name"].as_str().map(String::from)).collect();
         json!({
             "open": v["open"].as_str().unwrap_or(""),
             "active_kind": if d.is_object() { "diff".to_string() } else { crate::screens::viewer::active_kind(v, self.screens.rail_pending.as_deref()) },
@@ -741,8 +803,12 @@ impl Backplane {
             "solid_note": solid_note,
             "solid_stage": solid_stage,
             "solid_painted": solid_painted,
+            "solid_painted_since_press": solid_painted.saturating_sub(press_painted),
+            "solid_last_w": solid_last_w,
+            "solid_last_h": solid_last_h,
             "diff_open": d.is_object(),
             "diff_files": d["files"].as_array().map_or(0, Vec::len),
+            "diff_file_names": diff_file_names,
             "diff_summary": d["summary"].as_str().unwrap_or(""),
             "follow_present": v["follow"].is_object(),
             "follow_on": v["follow"]["on"] == true,
@@ -753,6 +819,8 @@ impl Backplane {
             "split_picked_pcb": split_pcb_picked,
             "split_lit_sch": split_sch_lit,
             "split_lit_pcb": split_pcb_lit,
+            "split_sch_ref": split_sch_ref,
+            "split_pcb_ref": split_pcb_ref,
             "error": self.error,
         })
     }
@@ -795,5 +863,12 @@ mod tests {
         assert!(!valid_shot_name("Board"));
         assert!(!valid_shot_name("a/b"));
         assert!(!valid_shot_name("a_b"));
+    }
+    #[test] fn wait_settled_step_loads_kind_and_tag() {
+        let p = crate::tmp::file("script", "ws.json");
+        std::fs::write(&p, r#"[{"wait_settled":"board","tag":"task3-start-board","timeout_ms":9000}]"#).unwrap();
+        let steps = load(&p);
+        assert_eq!(steps.len(), 1);
+        assert!(matches!(&steps[0], Step::WaitSettled { kind, tag, timeout_ms: 9000 } if kind == "board" && tag == "task3-start-board"), "{:?}", steps[0]);
     }
 }
