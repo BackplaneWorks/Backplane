@@ -59,7 +59,10 @@ impl Agents {
         // digest) and starts no turn there either. Its chat auto-settles, so before Nov 11 every report to it was posted here as a bare system line the mailroom
         // never saw, and the person heard of no finished work.
         let uber_chat = match self.mailroom() { Some(m) => m.chat_is(thread).await, None => false };
-        if !uber_chat && matches!(origin.1.as_str(), "system" | "task" | "wake" | "launch") && self.world().await.threads.get(thread).map_or(false, |t| t.settled) {
+        // A bot's thread is the exception for a launched thread's report (#1239): a bot launches with no parent, so nothing holds its thread open while the child works; it
+        // settles when idle, and the report it waits for must still start its turn.
+        let bot_waits = origin.1 == "launch" && !uber_chat && match self.mailroom() { Some(m) => m.reach(thread, "").await == Some(true), None => false };
+        if !uber_chat && !bot_waits && matches!(origin.1.as_str(), "system" | "task" | "wake" | "launch") && self.world().await.threads.get(thread).map_or(false, |t| t.settled) {
             let mut ev = extra; ev.push(json!({"$":"MessagePosted","thread":thread,"msg":msg,"role":"system","text":text,"at":now_s()}));
             self.commit_events(ev).await; return Ok(())
         }

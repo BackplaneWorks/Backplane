@@ -21,6 +21,9 @@ while IFS= read -r line; do
     printf '{"type":"system","subtype":"init","session_id":"%s","cwd":"/tmp","tools":["Bash"],"model":"fake","permissionMode":"default"}\n' "$sid"
     case "$own" in
       *'<charter>'*) tool memory_save '{"key":"run-note","kind":"note","text":"the run saw the morning routine"}'; say "planned the day" ;;
+      *zqlaunch*) tool thread_launch '{"project":"p1","prompt":"child work please"}'; say "launched it" ;;
+      *'Launched thread'*) say "heard the report" ;;
+      *'child work please'*) sleep 2; say "child done" ;;
       *zqsave*) tool memory_save '{"key":"favourite-part","kind":"fact","text":"likes the 0603 footprint"}'; say "saved it" ;;
       *) say "hello" ;;
     esac
@@ -80,6 +83,29 @@ fn write_agent(d: &Path, out: &Path) { use crate::plat::fs::PermissionsExt; let 
     let agent = std::fs::read_to_string(&out).unwrap();
     assert!(agent.lines().any(|l| l.starts_with("TURN ") && l.contains("<charter>") && l.contains("plan the day")), "the brief carries the routine's prompt");
     assert_eq!(chat_lines(&hub), before, "nothing in the person's conversation");
+    ag.shutdown();
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// #1239: a thread a bot launched ends its turn: the report wakes the bot (a turn of its own, with the report as its input), as a person's launcher is woken
+#[tokio::test(flavor = "multi_thread")] async fn a_report_from_a_thread_a_bot_launched_wakes_the_bot_with_the_report_as_input() {
+    let root = crate::plat::tmp::dir("bot-launch-e2e");
+    let (home, bin, work) = (root.join("home"), root.join("bin"), root.join("work")); for d in [&home, &bin, &work] { std::fs::create_dir_all(d).unwrap(); }
+    let out = root.join("agent.log"); write_agent(&bin, &out);
+    std::fs::write(home.join("events.jsonl"), format!("{{\"$\":\"SettingSet\",\"key\":\"machine.id\",\"value\":\"m1\",\"at\":1}}\n{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"toy\",\"root\":{},\"at\":1}}\n", serde_json::to_string(&work.to_string_lossy()).unwrap())).unwrap();
+    let hub = Hub::start(Cfg { home, version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let ag = Agents::start_with(hub.clone(), Cli::standin(&bin)).await.unwrap();
+    let _bots = crate::bots::start(hub.clone(), ag.clone()).await;
+    let r = rpc(&hub, "bots.create", json!({"name":"ada"})).await; let ada = r["bot"].as_str().unwrap_or_else(|| panic!("{r}")).to_string();
+    let chat = { let end = Instant::now() + Duration::from_secs(10); loop { if let Some(e) = log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == ada.as_str() && e["thread"].as_str().map_or(false, |t| !t.is_empty())) { break e["thread"].as_str().unwrap().to_string() } assert!(Instant::now() < end, "the bot's thread"); tokio::time::sleep(Duration::from_millis(50)).await } };
+    assert_eq!(rpc(&hub, "bots.say", json!({"bot":ada,"text":"zqlaunch it","msg":"m1"})).await["ok"], true);
+    // the bot's turn is over and its thread has settled (it idles) while the child works
+    wait_for(&hub, "the bot's first turn", |l| said(l, &chat, "launched it") && l.iter().rev().find(|e| e["$"] == "TurnChanged" && e["thread"] == chat.as_str()).map_or(false, |e| e["state"] == "completed")).await;
+    hub.commit(&json!({"$":"ThreadSettled","id":chat,"manual":false,"at":now_s()})).await.unwrap();
+    wait_for(&hub, "the report in the bot's thread", |l| l.iter().any(|e| e["$"] == "MessagePosted" && e["thread"] == chat.as_str() && e["text"].as_str().map_or(false, |t| t.starts_with("[Backplane] Launched thread")))).await;
+    wait_for(&hub, "the bot's turn on the report", |l| said(l, &chat, "heard the report")).await;
+    let agent = std::fs::read_to_string(&out).unwrap();
+    assert!(agent.lines().any(|l| l.starts_with("TURN ") && l.contains("Launched thread") && l.contains("completed")), "the report is the bot's input: {agent}");
     ag.shutdown();
     let _ = std::fs::remove_dir_all(&root);
 }
