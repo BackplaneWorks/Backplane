@@ -13,6 +13,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 # gal2/gal3 ran client 46cd43ec0 with a 015eb3206 hub whose immediate in-KiCad check switched the pane to the board)
 [ -z "${CLIENT_BIN:-}" ] || [ -n "${HUB_BIN:-}" ] || { echo "FAIL real_use_journeys: CLIENT_BIN is pinned but HUB_BIN is not; pin both"; exit 2; }
 discover_bins; discover_kicad; init_isolated_dirs
+require_numpy
 bin_id() {  # path, sha256, mtime and the build folder's COMMIT file, when it has one
   local c; c=$(cat "$(dirname "$1")/COMMIT" 2>/dev/null | head -1 || true)
   echo "path=$1 sha256=$(sha256sum <"$1" | cut -c1-16) mtime=$(date -r "$1" +%FT%T) commit=${c:-unknown}"

@@ -33,6 +33,7 @@ discover_bins
 [ -x "$REAL_HOME/.bun/bin/bun" ] && PATH="$REAL_HOME/.bun/bin:$PATH"
 discover_kicad
 init_isolated_dirs
+require_numpy
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 PROJ="$OUT/proj"
 if [ -n "${CHECKS_BOARD:-}" ]; then

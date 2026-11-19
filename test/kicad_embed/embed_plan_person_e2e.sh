@@ -38,6 +38,7 @@ RT=$(dirname "$(dirname "$KICAD_BIN")")
 KEYS=0; { grep -q '"plan-keys"' "$RT/manifest.json" 2>/dev/null || grep -qa "embed-frame-drawn" "$RT/bin/kicad.real" 2>/dev/null; } && KEYS=1
 [ "$KEYS" = 1 ] || [ "${PLAN_PERSON_FORCE:-0}" = 1 ] || { echo "SKIP embed_plan_person_e2e: in this KiCad's plan view A, R, W are KiCad's own keys (plan-keys: bp.12.2, bp.13 batch 6); PLAN_PERSON_FORCE=1 PLAN_KEYS=0 checks the Plan panel's decisions there"; exit 0; }
 init_isolated_dirs
+require_numpy
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 # paint bounds (Nov 13, bp.13 batch 3, 16 cores busy): KiCad painted 0.07-0.08 s after Edit and the board was open, full size, 9.7-13.3 s
 # after the client started; the main-thread stall fixed in 82c67d16a made them 11 s and 88-133 s. So 5 s to paint and 45 s to be ready.

@@ -16,6 +16,7 @@ if [ -z "${NARROW_W:-}" ]; then rc=0; for w in ${NARROW_WIDTHS:-611 480 1000}; d
 [ "${1:-}" != "" ] && CLIENT_BIN=$1
 [ "${2:-}" != "" ] && HUB_BIN=$2
 discover_bins; discover_kicad; init_isolated_dirs
+require_numpy
 SW=$NARROW_W
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 # a fresh profile as a person's is: KiCad's own panel defaults (seed_project.py hides every side panel for the other suites, so their
