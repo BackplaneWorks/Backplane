@@ -319,7 +319,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
         let h = cx.focus_handle();
         app.screens.mgmt.checks.with(|u| { u.filter = Some(f); u.focus = Some(h); });
     }
-    if d.is_null() { return div().p_3().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(tf("gpui.mgmt.checks.reading", &[])).into_any_element() }
+    if d.is_null() { return super::mgmt::panel_state(app, "checks", light, tf("gpui.mgmt.checks.reading", &[]), true) }
     sync(&app.screens.mgmt.checks, d);
     let q = filter_text(app, cx);
     let src_now = app.screens.mgmt.checks.with(|u| u.src.clone());
@@ -393,6 +393,10 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
         .when(left_out, |x| x.child(crate::ui::with_rect(div().id("checks-full"), || "mgmt:checks:full".into()).flex_shrink_0().px_2().border_1().border_color(c("line")).text_color(c("dim")).cursor_pointer()
             .hover(|x| x.text_color(c("text")).bg(c("panel"))).child(tf("gpui.mgmt.checks.fullrun", &[])).on_click(cx.listener(|this, _, _, cx| run_full(this, cx))))));
 
+    let list = if let [Item::Msg(key)] = its.as_slice() {
+        let loading = search && found.is_none() || d["drc"]["state"] == "running" || d["erc"]["state"] == "running";
+        super::mgmt::panel_state(app, "checks", light, tf(key, &[]), loading)
+    } else { list.into_any_element() };
     // up and down move through the rows, each one shown in KiCad as it is reached (and scrolled into view)
     let ids: Vec<String> = its.iter().filter_map(|i| if let Item::Row(f) = i { Some(s(f, "id").to_string()) } else { None }).collect();
     let focus = app.screens.mgmt.checks.with(|u| u.focus.clone());
