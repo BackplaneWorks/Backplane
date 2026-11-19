@@ -4534,7 +4534,7 @@ gpui.hub.view.unavailable	That view isn't available here.	そのビューはこ�
 settings.designmode.label	Open designs in	設計を開く場所	Abrir los diseños en
 settings.designmode.viewer	Always viewer	常にビューアー	Siempre en el visor
 settings.designmode.kicad	Always KiCad	常に KiCad	Siempre en KiCad
-settings.designmode.note	Takes effect when the embedded KiCad default is enabled for this platform.	このプラットフォームで組み込みの KiCad が既定として有効になると適用されます。	Se aplicará cuando KiCad integrado se habilite por defecto en esta plataforma.
+settings.designmode.note	Auto opens KiCad by itself only where that is enabled for this platform.	自動を選ぶと、このプラットフォームで自動起動が有効な場合にだけ KiCad が開きます。	En modo automático, KiCad solo se abre por sí solo si esta plataforma lo permite.
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}

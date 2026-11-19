@@ -680,7 +680,7 @@ fn cad_with(st: &State, session: &Value, info: &Value, pkg: Option<&crate::files
     let key = super::design_mode::SETTING;
     let preference = super::design_mode::Preference::read(set(st, key, "auto"));
     let options = [("auto", "Auto"), ("viewer", "Always viewer"), ("kicad", "Always KiCad")];
-    v.push(row("Open designs in", "Takes effect when the embedded KiCad default is enabled for this platform.",
+    v.push(row("Open designs in", "Auto opens KiCad by itself only where that is enabled for this platform.",
         options.iter().map(|(value, label)| btn(label, "setting", &format!("{key}={value}"),
             super::design_mode::Preference::read(value) == preference)).collect()));
     v

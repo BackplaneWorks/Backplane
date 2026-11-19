@@ -4665,4 +4665,4 @@ gpui.hub.view.unavailable = That view isn't available here.
 settings.designmode.label = Open designs in
 settings.designmode.viewer = Always viewer
 settings.designmode.kicad = Always KiCad
-settings.designmode.note = Takes effect when the embedded KiCad default is enabled for this platform.
+settings.designmode.note = Auto opens KiCad by itself only where that is enabled for this platform.

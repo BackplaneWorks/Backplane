@@ -316,6 +316,25 @@ pub async fn wire(hub: Arc<Hub>, s: TcpStream, since: usize, origin_asked: Strin
     }
 }
 
+fn local_view_socket(loopback: bool, headers: &[(String, String)]) -> bool {
+    crate::net::owner::trusted(loopback, headers) && !headers.iter().any(|(name, _)| {
+        let name = name.to_ascii_lowercase();
+        name == "origin" || name == "forwarded" || name.starts_with("x-forwarded-")
+    })
+}
+
+#[cfg(test)]
+#[test]
+fn only_a_direct_local_view_socket_can_host_a_desktop_frame() {
+    let host = ("Host".to_owned(), "localhost".to_owned());
+    assert!(local_view_socket(true, std::slice::from_ref(&host)));
+    assert!(!local_view_socket(false, std::slice::from_ref(&host)));
+    assert!(!local_view_socket(true, &[("Host".into(), "remote.example".into())]));
+    for header in ["Origin", "Forwarded", "X-Forwarded-Port", "X-Forwarded-Host", "X-Forwarded-For", "Tailscale-User-Login"] {
+        assert!(!local_view_socket(true, &[host.clone(), (header.into(), "value".into())]));
+    }
+}
+
 /// A connection from a listener that has no opinion on its peer: untrusted.
 pub async fn serve(hub: Arc<Hub>, s: TcpStream) -> Result<()> { serve_with(hub, s, false).await }
 /// `trusted`: the listener decided this socket's peer is the owner's own device (the tailnet listener, after whois) or loopback
@@ -351,8 +370,7 @@ pub async fn serve_with(hub: Arc<Hub>, s: TcpStream, trusted: bool) -> Result<()
             let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
             s.write_all(&response("400 Bad Request", "text/plain; charset=utf-8", "", b"this hub serves renderer mobile only")).await?; s.shutdown().await.ok(); return Ok(());
         }
-        let local = crate::net::owner::trusted(req.peer.is_some_and(|p| p.ip().is_loopback()), &req.headers)
-            && ["origin", "forwarded", "x-forwarded-for", "x-forwarded-host"].iter().all(|h| req.header(h).is_empty());
+        let local = local_view_socket(req.peer.is_some_and(|p| p.ip().is_loopback()), &req.headers);
         return socket_inner(hub, s, req.param("enc") == "cbor", Auth::credential(&req), local).await;
     }
     let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;

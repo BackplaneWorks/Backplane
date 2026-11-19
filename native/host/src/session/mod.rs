@@ -50,7 +50,11 @@ fn target_valid(t: &Value) -> bool {
 
 /// The fields of the presenter's params only the hub makes: the thread's `window` and `page` (rows read from the index), `reads` and `local`. A client's own copy would
 /// be taken for the hub's (an unported native page for indexed rows), so every one is removed from the request's clone before the hub's go in.
-fn strip_hub_owned(params: &mut Value) { if let Some(o) = params.as_object_mut() { for k in ["window", "page", "reads", "local", "wants", "botPage", "roomPage", "subLog", "subView", "liveText", "incoming"] { o.remove(k); } } }
+fn design_desktop(local: bool, client: &Value, id: u64) -> Option<u64> {
+    (local && client["kind"] == "desktop").then_some(id)
+}
+
+fn strip_hub_owned(params: &mut Value) { if let Some(o) = params.as_object_mut() { for k in ["designDesktop", "window", "page", "reads", "local", "wants", "botPage", "roomPage", "subLog", "subView", "liveText", "incoming"] { o.remove(k); } } }
 
 /// PRESENTER_UNAVAILABLE is retryable on the wire: a target the Rust presenter has not ported (the helper is not running) or a helper that is restarting answers "not yet", never "no"
 /// (Hub::error has retryable:false for every code).
@@ -119,7 +123,7 @@ impl Hub {
         let mut params = p.clone();
         strip_hub_owned(&mut params);   // window, page, reads and local are the hub's: whatever the client sent is gone before the hub's own are put in
         if let Some(o) = params.as_object_mut() {
-            o.insert("designDesktop".into(), json!((c.local_view_socket && p["client"]["kind"] == "desktop").then_some(c.client)));
+            o.insert("designDesktop".into(), json!(design_desktop(c.local_view_socket, &p["client"], c.client)));
             // what the presenter needs of the hub: the view's id, the hub's signal revision (SignalRevision: the context's metadataRevision;
             // saved sidebar pages are kept only while it, the view and the choices stay the same: activity lines and assistant text do not move it), this run's key
             o.insert("revision".into(), json!(self.signal_seq())); o.insert("viewId".into(), json!(view_id)); o.insert("nativeKey".into(), json!(self.native_key)); o.insert("now".into(), json!(now_ms()));
@@ -365,7 +369,10 @@ mod read_tests {
         assert_eq!(event_type(""), None);
     }
     #[test] fn client_supplied_hub_fields_are_stripped() {
-        let mut p = json!({"target": {"kind": "thread", "id": "t1"}, "window": {"ids": ["x"]}, "page": {"rows": []}, "reads": [1], "local": {"a": "b"}, "wants": [2], "session": {}});
+        let mut p = json!({"target": {"kind": "thread", "id": "t1"}, "window": {"ids": ["x"]}, "page": {"rows": []}, "reads": [1], "local": {"a": "b"}, "wants": [2], "designDesktop": 3, "session": {}});
+        assert_eq!(design_desktop(true, &json!({"kind":"desktop"}), 2), Some(2));
+        assert_eq!(design_desktop(false, &json!({"kind":"desktop"}), 2), None);
+        assert_eq!(design_desktop(true, &json!({"kind":"mobile"}), 2), None);
         strip_hub_owned(&mut p);
         assert_eq!(p, json!({"target": {"kind": "thread", "id": "t1"}, "session": {}}));
     }

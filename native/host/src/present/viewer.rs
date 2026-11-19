@@ -794,6 +794,8 @@ pub fn surface(st: &State, viewer: &Value, params: &Value, thread: &str) -> Valu
     let linked = thread.contains('~');
     let document = if !matches!(page, "board" | "schematic") || viewer["gerbers"] == true || pages::diff_on(session, thread) {
         Document::OtherPage
+    } else if viewer["has"][page].as_bool().is_none() {
+        Document::Unknown
     } else {
         let selected = chosen_board(&session["drafts"], thread);
         let drafts = &session["drafts"];
@@ -810,6 +812,19 @@ pub fn surface(st: &State, viewer: &Value, params: &Value, thread: &str) -> Valu
         platform: Platform::host(), preference: Preference::read(st.settings.get(SETTING).map_or("", String::as_str)),
         visit: Visit::Normal, runtime: Runtime::UNKNOWN,
     }, AUTO_PLATFORMS)
+}
+
+#[cfg(test)]
+#[test]
+fn frame_switch_preserves_design_mode_and_unknown_documents_stay_distinct() {
+    let st = State::new();
+    for page in ["board", "schematic"] {
+        for (has, why) in [(json!({"board":true,"schematic":true}), "runtimeUnknown"), (Value::Null, "documentUnknown"),
+            (json!({"board":false,"schematic":false}), "missingDocument")] {
+            assert_eq!(surface(&st, &json!({"open":page,"has":has}), &json!({"designDesktop":2}), "thread"),
+                json!({"want":"viewer","why":why}));
+        }
+    }
 }
 
 pub(crate) fn has_management(root: &str) -> bool {
