@@ -53,7 +53,36 @@ PY
 )
 [ "$KP" -gt 0 ] && track_pid "$KP"
 
-# L1: the schematic editor, Choose Symbol (A on its canvas), a symbol picked out by its search, closed
+# Where KiCad's footprint load of Choose Symbol stands (its ET_PROGRESS in the hub's log, BACKPLANE_KICAD_DEBUG): `state` is none,
+# started (fraction -1 seen after the chooser opened) or done (that load's fraction 1); `gap` is hit when the edit's first
+# PlaceFootprintFromLibrary came after the load started and before it reached fraction 1, else missed (with the log lines)
+fp_load() { python3 - "$OUT/hub.log" "$1" <<'PY'
+import json, sys
+lines = open(sys.argv[1], errors="replace").read().splitlines(); mode = sys.argv[2]
+opened = next((i for i, l in enumerate(lines) if "ET_DIALOG_OPENED" in l and "Choose Symbol" in l), None)
+start = end = place = None; pid = None
+if opened is not None:
+    for i in range(opened, len(lines)):
+        l = lines[i]
+        if place is None and "request kiapi.board.commands.PlaceFootprintFromLibrary" in l: place = i
+        if not l.startswith("kicad embed event: "): continue
+        try: p = json.loads(l[len("kicad embed event: "):]).get("progress") or {}
+        except Exception: continue
+        if p.get("title") != "Loading Footprint Libraries": continue
+        if pid is None and p.get("fraction") == -1: pid, start = p.get("id"), i
+        elif pid is not None and p.get("id") == pid and end is None and (p.get("fraction") == 1 or p.get("done")): end = i
+if mode == "state": print("done" if end is not None else "started" if start is not None else "none")
+else: print("hit" if start is not None and place is not None and start < place and (end is None or place < end) else f"missed (load started at line {start}, reached 1 at {end}, first PlaceFootprintFromLibrary at {place})")
+PY
+}
+
+# L0: KiCad held to two CPUs (every thread of it, taskset -a): its footprint load takes long enough for the edit to land inside it
+# (on a 32-core desktop it finished while the chooser was still open: 0 status asks, nothing shown)
+PIN=$(taskset -a -p -c 0-1 "$KP" 2>&1 | tail -1 || true)
+check "L0 KiCad is held to CPUs 0-1" "$(taskset -c -p "$KP" 2>/dev/null | grep -qE 'list: (0-1|0,1)$' && echo 1 || echo 0)" "$PIN"
+
+# L1: the schematic editor, Choose Symbol (A on its canvas), a symbol picked out by its search; closed the moment the search's
+# selection has started the footprint load
 click_gpui_control "$OUT/client.log" "$GPUI_XID" "rail:Schematic"
 SCH_XID=$(wait_for_embedded_frame "$GPUI_XID" "$CONT_XID" "$KP" "Schematic Editor" 160)
 sleep 1
@@ -61,23 +90,26 @@ RPT_SCH=$(python3 "$DRIVER_PY" report "$GPUI_XID" "$CONT_XID" "$SCH_XID")
 read -r SX SY SW SH < <(python3 -c 'import json,sys; n=json.loads(sys.argv[1]).get("native",{}); print(n.get("root_x",800), n.get("root_y",200), n.get("w",600), n.get("h",600))' "$RPT_SCH")
 python3 "$XINPUT_PY" click $((SX + SW * 2 / 3)) $((SY + SH / 2)); sleep 0.5
 python3 "$XINPUT_PY" key a
-CHOOSER=$(wait_for_kicad_win "$KP" "Choose Symbol" 40 || true)
+CHOOSER=$(wait_for_kicad_win "$KP" "Choose Symbol" 120 || true)
 check "L1 Choose Symbol opened" "$([ -n "$CHOOSER" ] && echo 1 || echo 0)" "${CHOOSER:-no window}"
 sleep 1
 for k in n e 5 5 5 p; do python3 "$XINPUT_PY" key "$k"; sleep 0.12; done
-sleep 2.5   # the search's first match is selected: its footprint selector asks for the footprints, which starts the full load
-shot l1_chooser 2>/dev/null || true
-python3 "$XINPUT_PY" key Escape; sleep 0.3; python3 "$XINPUT_PY" key Escape; sleep 0.3
+for _ in $(seq 300); do [ "$(fp_load state)" != none ] && break; sleep 0.1; done
+LOAD=$(fp_load state)
+check "L1 the search's selection started KiCad's footprint load (fraction -1)" "$([ "$LOAD" != none ] && echo 1 || echo 0)" "load $LOAD"
+python3 "$XINPUT_PY" key Escape; sleep 0.2; python3 "$XINPUT_PY" key Escape
 
-# L2: at once, two exchanges in one call: a library early in the table, then one late in it
+# L2: at once (no settle), two exchanges in one call: a library early in the table, then one late in it
+AT_SEND=$(fp_load state)
 STATUSES_BEFORE=$(count "request kiapi.common.commands.GetLibraryStatuses" "$OUT/hub.log")
 T0=$(date +%s%N)
 E=$(ask kicad_edit "{\"path\":\"$PCB\",\"ops\":[{\"set\":\"C1\",\"footprint\":\"Capacitor_THT:C_Disc_D4.7mm_W2.5mm_P5.00mm\"},{\"set\":\"R3\",\"footprint\":\"Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal\"}]}")
 T1=$(date +%s%N)
 ASKED=$(( $(count "request kiapi.common.commands.GetLibraryStatuses" "$OUT/hub.log") - STATUSES_BEFORE ))
-echo "INFO kicad_edit after Choose Symbol ($(( (T1 - T0) / 1000000 )) ms): $(echo "$E" | cut -c1-400)"
-if [ "$ASKED" -gt 0 ]; then echo "INFO the edit waited for a library: $ASKED status asks (the gap was hit)"
-else echo "INFO no status asks: the full load had already reached Resistor_THT (the gap was not hit; this run shows nothing of the wait)"; fi
+GAP=$(fp_load gap)
+echo "INFO kicad_edit after Choose Symbol ($(( (T1 - T0) / 1000000 )) ms; the load was $AT_SEND when it was sent): $(echo "$E" | cut -c1-400)"
+check "L2 the edit landed inside the footprint load (the gap was hit: otherwise this run proves nothing)" "$([ "$GAP" = hit ] && echo 1 || echo 0)" "$GAP"
+check "L2 the edit waited for a library by its status (asks > 0: otherwise this run proves nothing)" "$([ "$ASKED" -gt 0 ] && echo 1 || echo 0)" "$ASKED status asks"
 check "L2 both footprints are exchanged and the board is saved" \
   "$([ "$(echo "$E" | grep -o '"swapped":1' | wc -l)" = 2 ] && echo "$E" | grep -q "\"saved\":\"$PCB\"" && echo 1 || echo 0)" "$(echo "$E" | cut -c1-300)"
 check "L2 and nothing said a library did not load or was not found" "$(echo "$E" | grep -qE 'not found|did not load' && echo 0 || echo 1)" "$(echo "$E" | grep -oE '[^"]*(not found|did not load)[^"]*' | head -1)"
