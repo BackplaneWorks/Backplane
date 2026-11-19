@@ -4,6 +4,8 @@
 #   S2  its frame is a child of the pane, at the pane's rectangle, painted; the strip lists its tab
 #   S3  a click gives it the keyboard; Backplane's own chord (Ctrl+K: the palette) still works from it, and the keys go back after
 #   S4  Schematic and back (the strip's tabs, then the rail): the same Simulator window each time, nothing rebuilt
+#   L1-L4  the rail entry drawn lit follows the frame on show (the client's own word, GPUI_METRIC "rail"): Simulation while the Simulator is
+#       shown, Schematic after the strip's Schematic tab, Simulation again by the rail, not Simulation once it is closed
 #   S5  Ctrl+W in the Simulator closes it: the pane is back on View (Edit offered); the rail's Simulation opens it again
 #   SIM_OLD=1: a runtime without sim-frame (SIM_OLD_KICAD, default the released bp.12.1): no Simulation on the rail, no tab in the strip,
 #   Ctrl+Tab never goes to it, the editors work as before
@@ -51,6 +53,20 @@ c = next((c for c in (last or []) if c.get("id") == sys.argv[2] and c.get("rect"
 print(f'{int(c["rect"]["x"] + c["rect"]["w"] / 2)} {int(c["rect"]["y"] + c["rect"]["h"] / 2)}' if c else "")
 PY
 }
+# the rail as the client drew it last (GPUI_METRIC event "rail", under BACKPLANE_GPUI_RECTS): "$1" = lit | entries | disabled, labels joined by "|";
+# "none" when the client has said nothing of its rail yet
+rail() { python3 -c 'import json, sys
+last = None
+for l in open(sys.argv[1], errors="ignore"):
+    if "GPUI_METRIC " in l and "\"event\":\"rail\"" in l:
+        try: last = json.loads(l.split("GPUI_METRIC ", 1)[1])["rail"]
+        except Exception: pass
+print("none" if last is None else "|".join(last.get(sys.argv[2], [])))' "$OUT/client.log" "$1"; }
+# 1 when, within 5 s, the entry $1 is lit and none of the others named is ("" for $1: only that the others are not lit)
+lit_is() { local l ok n; for _ in $(seq 20); do l=$(rail lit); ok=1; [ "$l" = none ] && ok=0
+    [ -z "$1" ] || case "|$l|" in *"|$1|"*) ;; *) ok=0 ;; esac
+    for n in "${@:2}"; do case "|$l|" in *"|$n|"*) ok=0 ;; esac; done
+    [ "$ok" = 1 ] && { echo 1; return; }; sleep 0.25; done; echo 0; }
 press() { local at; at=$(ctl_at "$1"); [ -n "$at" ] || return 1; python3 "$XINPUT_PY" click $at; }
 # KiCad's frames by its own word (GetFrames): "<window> <shown 0|1> <focused 0|1>" of FrameKind $1, "" when it has none
 frame() { python3 "$IPC_PY" frames "$SOCK" 2>/dev/null | python3 -c 'import json,sys
@@ -82,6 +98,7 @@ if [ "$OLD" = 1 ]; then
   check "O1 an older runtime: the schematic editor opens in the pane as before" "$(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); print(1 if r.get("state")=="ready" and r.get("in_gpui_tree") and r.get("want")=="SCH" else 0)' "$R")"
   check "O2 no Simulation on the rail" "$(grep -q '"id":"rail:Simulation"' "$OUT/client.log" && echo 0 || echo 1)"
   check "O3 no Simulation tab in the strip (the other tabs are there)" "$([ -z "$(ctl_at kicad-tab:SIMULATOR)" ] && [ -n "$(ctl_at kicad-tab:SCH)" ] && echo 1 || echo 0)" "SCH tab at $(ctl_at kicad-tab:SCH)"
+  check "O6 the rail as drawn never has Simulation (not an entry, not lit) and lights Schematic while the schematic editor shows" "$([ "$(grep -c '"event":"rail"' "$OUT/client.log")" -gt 0 ] && ! grep '"event":"rail"' "$OUT/client.log" | grep -q Simulation && [ "$(lit_is Schematic Board)" = 1 ] && echo 1 || echo 0)" "lit $(rail lit); entries $(rail entries)"
   # Ctrl+Tab round the tabs from KiCad: never the Simulator
   read -r F _ _ <<<"$(frame $FK_SCH)"; read -r GX GY GW GH _ <<<"$(geom "$F")"
   python3 "$XINPUT_PY" click $((GX + GW / 2)) $((GY + GH - 120)); sleep 0.8
@@ -89,6 +106,7 @@ if [ "$OLD" = 1 ]; then
   for _ in 1 2 3 4 5 6 7; do python3 "$XINPUT_PY" chord ctrl Tab; sleep 1.2; done
   TABS=$(tail -n +"$N" "$OUT/client.log" | grep -o '"kicad_tab":{[^}]*' | grep -o '"to":"[A-Z_0-9]*"' | tr '\n' ' ')
   check "O4 Ctrl+Tab goes round the editors and never to a Simulator this KiCad has not" "$([ -n "$TABS" ] && ! echo "$TABS" | grep -q SIMULATOR && echo 1 || echo 0)" "$TABS"
+  check "O7 after the rounds of Ctrl+Tab the drawn rail still never had Simulation" "$(grep '"event":"rail"' "$OUT/client.log" | grep -q Simulation && echo 0 || echo 1)" "lit $(rail lit)"
   check "O5 nothing was refused or failed" "$(grep -q 'no simulation\|"state":"failed"' "$OUT/client.log" "$OUT/hub.log" && echo 0 || echo 1)"
   shot old-runtime
   kill "$CP" 2>/dev/null || true; wait "$CP" 2>/dev/null || true
@@ -115,6 +133,7 @@ ok = r.get("in_gpui_tree") is True and f.get("kind")=="SIMULATOR" and f.get("sho
   and abs(c.get("x",-99)-p.get("x",0))<=2 and abs(c.get("y",-99)-p.get("y",0))<=2 and abs(f.get("w",-99)-p.get("w",0))<=2 and abs(f.get("h",-99)-p.get("h",0))<=2 \
   and p.get("w",0)>300 and f.get("painted",0)>=15
 print(1 if ok else 0)' "$R" "${SIMW:-0}")" "$(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); f=next((f for f in r.get("frames",[]) if f.get("xid")==r.get("shown")), {}); print("pane", r.get("pane"), "container", {k: (r.get("container") or {}).get(k) for k in ("x","y","w","h")}, "frame", {k: f.get(k) for k in ("kind","x","y","w","h","painted","shown")}, "in tree", r.get("in_gpui_tree"))' "$R")"
+check "L1 while the Simulator is shown the rail's Simulation entry is the lit one; Schematic and Board are not" "$(lit_is Simulation Schematic Board)" "lit $(rail lit); entries $(rail entries); disabled $(rail disabled)"
 check "S2 the strip lists the Simulation tab" "$([ -n "$(ctl_at kicad-tab:SIMULATOR)" ] && echo 1 || echo 0)"
 read -r GX GY GW GH _ <<<"$(geom "$SIMW")"
 # S3: a click in its console (low left: a click on the signal grid would change a trace), then Backplane's chord
@@ -131,6 +150,7 @@ check "S3 the Simulator is still there (the chord was Backplane's, not KiCad's)"
 T0=$(date +%s%N); press kicad-tab:SCH || true
 wait_frame $FK_SCH 1 120 && SCH_OK=1 || SCH_OK=0
 check "S4 the strip's Schematic tab shows the schematic editor; the Simulator is kept, hidden" "$([ "$SCH_OK" = 1 ] && [ "$(frame $FK_SIM | cut -d' ' -f1)" = "$SIMW" ] && echo 1 || echo 0)" "sch $(frame $FK_SCH) sim $(frame $FK_SIM)"
+check "L2 after the strip's Schematic tab the rail lights Schematic, not Simulation" "$(lit_is Schematic Simulation)" "lit $(rail lit)"
 sleep 2.5; shot sim-schematic
 T0=$(date +%s%N); press kicad-tab:SIMULATOR || true
 for _ in $(seq 80); do G=$(geom "$SIMW"); [ "$(echo "$G" | cut -d' ' -f5)" = 1 ] && break; sleep 0.05; done
@@ -143,6 +163,7 @@ check "S4 the rail's Schematic takes the pane to the schematic editor" "$([ "$(g
 sleep 2.5; press rail:Simulation || true
 for _ in $(seq 80); do G=$(geom "$SIMW"); [ "$(echo "$G" | cut -d' ' -f5)" = 1 ] && break; sleep 0.1; done
 check "S4 the rail's Simulation brings the same Simulator back" "$([ "$(frame $FK_SIM | cut -d' ' -f1)" = "$SIMW" ] && [ "$(echo "$G" | cut -d' ' -f5)" = 1 ] && echo 1 || echo 0)" "window $(frame $FK_SIM) was $SIMW; $G"
+check "L3 back on the Simulator by the rail: Simulation is lit again; Schematic and Board are not" "$(lit_is Simulation Schematic Board)" "lit $(rail lit)"
 check "S4 one KiCad through it all" "$(kill -0 "$KP" 2>/dev/null && [ "$(grep -c 'kicad embed: running ' "$OUT/hub.log")" = 1 ] && echo 1 || echo 0)"
 # S5: Ctrl+W
 sleep 1.5; read -r GX GY GW GH _ <<<"$(geom "$SIMW")"
@@ -152,6 +173,7 @@ python3 "$XINPUT_PY" chord ctrl w
 wait_frame $FK_SIM gone 60 && GONE=1 || GONE=0; sleep 2
 check "S5 Ctrl+W in the Simulator closes it (no prompt: nothing unsaved)" "$GONE" "frame $(frame $FK_SIM)"
 check "S5 the pane is back on View (Edit offered again)" "$(tail -n +"$N" "$OUT/client.log" | grep -q '"kicad_frame_closed":"SIMULATOR"' && [ -n "$(ctl_at ui:Edit)" ] && echo 1 || echo 0)" "$(tail -n +"$N" "$OUT/client.log" | grep -o '"kicad_frame_closed[^}]*' | head -1); Edit at $(ctl_at ui:Edit)"
+check "L4 with the Simulator closed its entry is no longer lit" "$(lit_is "" Simulation)" "lit $(rail lit)"
 shot sim-closed
 press rail:Simulation || true
 wait_frame $FK_SIM 1 160 && BACK=1 || BACK=0; sleep 2
