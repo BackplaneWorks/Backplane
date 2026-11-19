@@ -403,6 +403,30 @@ pub fn default_frame_for_path(path: &str, requested: &str) -> &'static str {
     if path.ends_with(".kicad_sch") { "SCH" } else { "PCB" }
 }
 
+/// The editor to open when the person did not ask for one (a warm-up, a restart with no session before it): `frame` when its document
+/// exists, else the project's other editor that has one; None when the project has neither a board nor a schematic. KiCad opening an
+/// editor on a missing document asks "PCB '…' does not exist. Do you wish to create it?" over the app (#1326: a schematic-only project's
+/// warm-up). The 3D viewer counts as the board's; the editors with no document of their own (symbol and footprint editors, GerbView,
+/// the Simulator) are as asked.
+pub fn frame_for_documents(frame: &str, has_pcb: bool, has_sch: bool) -> Option<&'static str> {
+    let f = canon_frame(frame);
+    let has = |k: &str| match k { "PCB" | "PCB_3D" => has_pcb, "SCH" => has_sch, _ => true };
+    if has(f) { return Some(f) }
+    ["PCB", "SCH"].into_iter().find(|k| has(k))
+}
+/// The editor an `editor.kicad.attach` opens: the frame it names, exactly (the pane always names one); a path that names a document
+/// (.kicad_pcb, .kicad_sch) its own; a frameless attach of a project (.kicad_pro, its folder: an agent's or the hub's own) the board,
+/// or the schematic of a project without one, never a missing document (#1326).
+pub fn attach_frame(raw_path: &str, requested: &str, has_pcb: bool, has_sch: bool) -> &'static str {
+    if !requested.trim().is_empty() || raw_path.ends_with(".kicad_pcb") || raw_path.ends_with(".kicad_sch") { return default_frame_for_path(raw_path, requested) }
+    frame_for_documents("PCB", has_pcb, has_sch).unwrap_or("PCB")
+}
+/// [`frame_for_documents`] for a project's files as they are on disk.
+pub fn frame_with_document(frame: &str, files: &Files) -> Option<&'static str> {
+    let on_disk = |f: &str| !f.is_empty() && Path::new(f).is_file();
+    frame_for_documents(frame, on_disk(&files.pcb), on_disk(&files.sch))
+}
+
 /// `kiapi.backplane.embed.FrameKind` enum name for a canonical frame string.
 /// The editors pre-warmed after the first one is shown: the board and the schematic, less the one shown and those KiCad has open. Never
 /// the 3D viewer: its first paint builds the board's models on KiCad's UI thread (~0.9 s on a small board), a hitch wherever it falls, so
@@ -1078,6 +1102,8 @@ pub async fn gui_call(route: &GuiRoute, ty: &str, msg: Value) -> Value { gui_cal
 /// has not opened: never a headless KiCad beside the editor's (it would hold the document's lock, and the editor's KiCad would open over
 /// it or ask outside the pane). `doc`'s lock is read first: another live KiCad's refuses (the hub's edit is not the person's to override).
 pub async fn open_hidden(gui: &GuiRoute, kind: &str, doc: &str) -> Result<(), String> {
+    // a document that is not there: KiCad would ask whether to create it, out of sight (#1326)
+    if !Path::new(doc).is_file() { return Err(format!("{doc} does not exist: KiCad was not asked to open it")) }
     if gui.mode != "fork" || gui.desc.is_empty() || !proto::load(&gui.desc).has_field("kiapi.backplane.embed.ShowFrame", "prewarm") {
         return Err("this KiCad cannot open the document out of sight (Backplane KiCad bp.12 or later does): open it in the editor, then try again".into())
     }
@@ -2024,10 +2050,12 @@ impl Actor {
             Some(s) => (s.root, s.active, s.container, s.toplevel, s.display),
             None => {
                 let root = Path::new(&pro).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-                (root, "PCB".into(), 0, 0, String::new())
+                (root, String::new(), 0, 0, String::new())
             }
         };
         let files = project::read(&root);
+        // no session before it: the board, or the schematic of a project without one (#1326), never a missing document
+        let frame = if frame.is_empty() { frame_with_document("PCB", &files).unwrap_or("PCB").to_string() } else { frame };
         self.attach(client, pro, root, files, frame, container, toplevel, display, true, env, reply);
     }
 
@@ -2048,9 +2076,19 @@ impl Actor {
             Msg::Detach { client, pro, keep, reply } => self.detach(client, pro, keep, reply),
             Msg::Warm { client, pro, root, files, frame, display, hardware, locked, env, reply } => {
                 self.note_user(client);
+                // a warm-up is never asked for a document: it starts KiCad on one that exists (a schematic-only project's schematic), and
+                // on none when the project has no board and no schematic (#1326)
+                let Some(frame) = frame_with_document(&frame, &files).map(str::to_string) else {
+                    let why = "the project has no board and no schematic to open";
+                    eprintln!("kicad embed: not warming {pro}: {why}");
+                    let _ = reply.send(Ok(json!({"warm": false, "why": why})));
+                    return
+                };
                 let (desc, _) = discover_desc(&self.hub.cfg.home, &env);
                 let quiet = !desc.is_empty() && proto::load(&desc).has_own("kiapi.backplane.embed.CancelProgress");
-                match warm_decision(&self.sessions, &pro, hardware, locked, free_mb(), quiet, WARM) {
+                // BACKPLANE_KICAD_WARM_HEADROOM_MB overrides the room kept beside KiCad's own estimate (tests on a shared, loaded box)
+                let cfg = match std::env::var("BACKPLANE_KICAD_WARM_HEADROOM_MB").ok().and_then(|v| v.parse::<u64>().ok()) { Some(h) => WarmCfg { headroom_mb: h, ..WARM }, None => WARM };
+                match warm_decision(&self.sessions, &pro, hardware, locked, free_mb(), quiet, cfg) {
                     Warm::Have => {
                         if let Some(s) = self.sessions.get_mut(&pro) { s.touched_at = ipc::now_s(); }
                         let _ = reply.send(Ok(json!({"warm": true, "started": false})));
@@ -3407,6 +3445,12 @@ impl RpcHandler for EmbedRpc {
                 kinds.retain(|k| {
                     let ext = match *k { "PCB" | "PCB_3D" => "kicad_pcb", "SCH" => "kicad_sch", _ => return true };
                     let doc = Path::new(&resolved.pro).with_extension(ext).to_string_lossy().to_string();
+                    // never a document the project does not have (#1326: the board of a schematic-only project; KiCad would ask to create it)
+                    let named = match *k { "SCH" => &resolved.files.sch, _ => &resolved.files.pcb };
+                    if !Path::new(&doc).is_file() && !(!named.is_empty() && Path::new(named).is_file()) {
+                        eprintln!("kicad embed: {}: not pre-warming {k}: the project has no {ext}", resolved.pro);
+                        return false
+                    }
                     match lock_verdict(&doc) {
                         v @ super::locks::Verdict::Foreign { .. } => { eprintln!("kicad embed: {}: not pre-warming {k}: {doc} is held by {}", resolved.pro, super::locks::holder_words(&v)); false }
                         super::locks::Verdict::Stale => { super::locks::clear_stale(&doc, "before a pre-warm"); true }
@@ -3480,9 +3524,12 @@ impl RpcHandler for EmbedRpc {
                     let wait = p["wait"].as_bool().unwrap_or(true);
                     let env = ipc::runtime(hub).await;
                     if note_runtime(&env) { hub.bump_views(); }
+                    // a frameless attach of a project: never its missing board (#1326); a named frame exactly as asked
+                    let on_disk = |f: &str| !f.is_empty() && Path::new(f).is_file();
+                    let frame = attach_frame(raw_project, req_frame, on_disk(&resolved.files.pcb), on_disk(&resolved.files.sch)).to_string();
                     actor_tx.send(Msg::Attach {
                         client, pro: resolved.pro, root: resolved.root, files: resolved.files,
-                        frame: resolved.frame, container, toplevel, display, wait, env, reply: tx,
+                        frame, container, toplevel, display, wait, env, reply: tx,
                     })
                 }
                 "editor.kicad.show" => {
@@ -3829,6 +3876,41 @@ mod tests {
         assert_eq!(unsaved_name(&f("*rc — Simulator")), "*rc — Simulator"); assert_eq!(unsaved_name(&f("")), "Simulation workbook");
         let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "SCH", 1, 0); s.frames.push(f(""));
         assert_eq!(s.unsaved_docs(), ["Simulation workbook"]);
+    }
+    #[test] fn a_frameless_attach_of_a_project_opens_only_a_document_it_has() {
+        // #1326 (c): an agent's or the hub's editor.kicad.attach with no frame, on a .kicad_pro or a project folder
+        for path in ["/p/a.kicad_pro", "/p"] {
+            assert_eq!(attach_frame(path, "", true, false), "PCB", "{path}: board only");
+            assert_eq!(attach_frame(path, "", false, true), "SCH", "{path}: schematic only");
+            assert_eq!(attach_frame(path, "", true, true), "PCB", "{path}: both, the board as before");
+            assert_eq!(attach_frame(path, "", false, false), "PCB", "{path}: neither, as before (nothing better to open)");
+        }
+        // a named frame is exactly as asked, documents or not (the pane always names one: Edit on the Board page stays the board)
+        assert_eq!(attach_frame("/p/a.kicad_pro", "PCB", false, true), "PCB");
+        assert_eq!(attach_frame("/p/a.kicad_pro", "board", false, true), "PCB");
+        assert_eq!(attach_frame("/p/a.kicad_pro", "SCH", true, false), "SCH");
+        // a path that names its document keeps it
+        assert_eq!(attach_frame("/p/a.kicad_pcb", "", false, true), "PCB");
+        assert_eq!(attach_frame("/p/a.kicad_sch", "", true, false), "SCH");
+    }
+    #[test] fn a_warm_up_opens_only_a_document_the_project_has() {
+        // #1326: a schematic-only project warmed on the board made KiCad ask "PCB '…' does not exist. Do you wish to create it?"
+        assert_eq!(frame_for_documents("PCB", true, false), Some("PCB"), "board only: the board");
+        assert_eq!(frame_for_documents("PCB", false, true), Some("SCH"), "schematic only: the schematic");
+        assert_eq!(frame_for_documents("PCB", true, true), Some("PCB"), "both: the board, as before");
+        assert_eq!(frame_for_documents("PCB", false, false), None, "neither: nothing opened");
+        assert_eq!(frame_for_documents("SCH", true, false), Some("PCB"), "a schematic asked for and none there: the board");
+        assert_eq!(frame_for_documents("SCH", true, true), Some("SCH"));
+        assert_eq!(frame_for_documents("PCB_3D", false, true), Some("SCH"), "the 3D viewer is the board's");
+        assert_eq!(frame_for_documents("FOOTPRINT_EDITOR", false, false), Some("FOOTPRINT_EDITOR"), "an editor with no document of its own: as asked");
+        // on disk: an empty or missing path is no document
+        let t = crate::plat::tmp::dir("warm-docs");
+        let sch = t.path().join("a.kicad_sch"); std::fs::write(&sch, "(kicad_sch)").unwrap();
+        let files = |pcb: &str, sch: &str| Files { pro: String::new(), pcb: pcb.into(), sch: sch.into(), all: vec![] };
+        let s = sch.to_string_lossy().to_string(); let missing = t.path().join("a.kicad_pcb").to_string_lossy().to_string();
+        assert_eq!(frame_with_document("PCB", &files(&missing, &s)), Some("SCH"), "a board named but not on disk");
+        assert_eq!(frame_with_document("PCB", &files("", &s)), Some("SCH"));
+        assert_eq!(frame_with_document("PCB", &files(&missing, "")), None);
     }
     #[test] fn pure_frame_and_mode_rules() {
         assert_eq!(canon_frame(""), "PCB");
