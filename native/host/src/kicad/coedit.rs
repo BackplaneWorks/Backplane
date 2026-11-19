@@ -59,6 +59,13 @@ pub fn person_selected(pro: &str, frame: &str, names: Value) {
     p.selection = if empty { None } else { Some((frame.to_string(), names, Instant::now())) };
 }
 
+/// When the person's own selection in `frame` ("pcb" / "sch") of this project's KiCad was made, while they still have one (the same rule
+/// as `person_selected`: a selection after a command of the hub's with no input since is not theirs). Follow agent never replaces it.
+pub fn person_selection_at(pro: &str, frame: &str) -> Option<Instant> {
+    let s = state().lock().unwrap();
+    s.person.get(pro)?.selection.as_ref().filter(|(f, _, _)| f == frame).map(|(_, _, t)| *t)
+}
+
 /// ET_DOCUMENT_EDITED (20): the person's own change (actor ""), kept for PERSON_RECENT. Returns whether `ev` was one.
 pub fn on_edited(pro: &str, ev: &Value) -> bool {
     if !(ev["type"] == "ET_DOCUMENT_EDITED" || ev["type"].as_i64() == Some(20)) { return false }

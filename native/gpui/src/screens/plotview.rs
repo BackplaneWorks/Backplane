@@ -666,8 +666,11 @@ pub fn report_state(app: &mut Backplane) {
     let v = app.data["thread"]["viewer"].clone();
     let card = [0usize, 1, 2].iter().find_map(|i| app.screens.pv(*i).card.clone());
     let lit: usize = (0..3).map(|i| app.screens.pv(i).lit.len()).sum();
-    let state = state_json(&v, card.as_ref(), lit);
-    let text = state.to_string();
+    let mut state = state_json(&v, card.as_ref(), lit);
+    // the embedded KiCad in this window's pane (Follow agent follows into it: host kicad/follow.rs); a window that cannot hold KiCad says false
+    state["kicad"] = serde_json::json!(app.screens.kicad_shown.0); state["kicadFrame"] = serde_json::json!(app.screens.kicad_shown.1);
+    // the thread too: the same page of another thread is news to the hub (whose page holds KiCad)
+    let text = format!("{}\t{state}", app.selected);
     if text == app.screens.last_state || app.selected.is_empty() { return }
     app.screens.last_state = text;
     let _ = app.tx.try_send(Command::Rpc("viewer.state".into(), crate::screens::settings::Secret(serde_json::json!({"thread": app.selected, "state": state})), "vstate"));

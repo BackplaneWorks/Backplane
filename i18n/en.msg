@@ -2980,6 +2980,7 @@ gpui.follow.near = near {ref}
 gpui.follow.wait = Following: waiting for the agent's next edit
 gpui.follow.paused = Following paused
 gpui.follow.resume = Resume
+gpui.follow.held = Following: {page} · waiting while you have something selected
 
 # ---- android: new entries go here ----
 android.mgmt.all = All

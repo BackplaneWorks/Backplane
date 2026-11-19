@@ -2981,6 +2981,7 @@ gpui.follow.near = cerca de {ref}
 gpui.follow.wait = Siguiendo: esperando la próxima edición del agente
 gpui.follow.paused = Seguimiento en pausa
 gpui.follow.resume = Reanudar
+gpui.follow.held = Siguiendo: {page} · en espera mientras tienes algo seleccionado
 # ---- android: new entries go here ----
 android.mgmt.all = Todo
 android.mgmt.judged = juzgado por agente

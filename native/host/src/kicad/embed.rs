@@ -1011,7 +1011,7 @@ pub struct GuiRoute {
     tx: mpsc::UnboundedSender<Msg>,
 }
 
-fn norm_pro_key(pro: &str) -> String {
+pub(crate) fn norm_pro_key(pro: &str) -> String {
     // one project however its path is spelled (a symlinked folder, macOS's /var for /private/var): the open KiCad's route, its unsaved
     // state and its frames are found from any spelling, so an agent's write never misses the open editor and goes around it
     let pro = &super::canonical::same_file(pro);
@@ -1133,6 +1133,10 @@ fn publish_live_sock(pro: &str, sock: &str) {
 fn open_frames() -> &'static Mutex<HashMap<String, Vec<String>>> { static F: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new(); F.get_or_init(Default::default) }
 /// Whether the project's open KiCad has a frame of `kind` open (shown or not): no round trip.
 pub fn has_frame(pro: &str, kind: &str) -> bool { open_frames().lock().unwrap().get(&norm_pro_key(pro)).is_some_and(|v| v.iter().any(|k| k == kind)) }
+/// Whether each project's ready KiCad is in a client's pane (attached to a container, not parked), kept at every publish (put_route).
+fn attached_panes() -> &'static Mutex<HashMap<String, bool>> { static P: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new(); P.get_or_init(Default::default) }
+/// Whether the project's KiCad is ready in a pane now (Follow agent: kicad/follow.rs): no round trip.
+pub fn pane_attached(pro: &str) -> bool { attached_panes().lock().unwrap().get(&norm_pro_key(pro)).copied().unwrap_or(false) }
 /// Projects whose GUI KiCad is starting or closing: the hub starts no headless KiCad for them meanwhile (it would take the project's lock
 /// first, and the GUI KiCad would ask "File Open Warning: already open" outside the pane: the release check's fresh-home stall, Nov 16).
 fn gui_holding() -> &'static Mutex<std::collections::HashSet<String>> { static H: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new(); H.get_or_init(Default::default) }
@@ -1144,6 +1148,7 @@ fn put_route(s: &Session, tx: &mpsc::UnboundedSender<Msg>) {
     session_notes().lock().unwrap().insert(norm_pro_key(&s.pro), json!({"dialogs": s.dialogs, "notices": s.notices,
         "dialogs_reported": !cfg!(windows) || s.caps.iter().any(|c| c == "embed-dialog-events")}));
     open_frames().lock().unwrap().insert(norm_pro_key(&s.pro), s.frames.iter().map(|f| f.kind.clone()).collect());
+    attached_panes().lock().unwrap().insert(norm_pro_key(&s.pro), s.state == "ready" && s.container != 0 && !s.parked);
     unsaved_update(&s.pro, |u| u.seen(s.frames.iter().any(|f| f.modified)));
     let k = norm_pro_key(&s.pro);
     let mut r = routes().lock().unwrap();
@@ -3605,7 +3610,7 @@ impl RpcHandler for EmbedRpc {
                 let _ = actor_tx.send(Msg::ClientDialogs { pro: resolved.pro, open });
                 return ok_reply(id, json!({}))
             }
-            if method == "editor.kicad.touched" { if touched_counts(&resolved.pro) { unsaved_update(&resolved.pro, |u| u.touched()); } super::checkrun::person_touched(&resolved.pro); super::coedit::person_input(&resolved.pro); return ok_reply(id, json!({})) }
+            if method == "editor.kicad.touched" { if touched_counts(&resolved.pro) { unsaved_update(&resolved.pro, |u| u.touched()); } super::checkrun::person_touched(&resolved.pro); super::coedit::person_input(&resolved.pro); super::follow::touched(&resolved.pro); return ok_reply(id, json!({})) }
             let (tx, rx) = oneshot::channel();
             let sent = match method {
                 "editor.kicad.attach" => {

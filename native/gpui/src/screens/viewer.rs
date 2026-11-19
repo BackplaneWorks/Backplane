@@ -242,8 +242,8 @@ fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target
         }
         return row.child(close_button(cx, light)).into_any_element()
     }
-    // Follow agent: the thread's setting (the hub's), on Backplane's own viewer only; an open KiCad in Edit mode is left alone
-    if viewer["follow"].is_object() && !editing && !diff_on && !gerbers {
+    // Follow agent: the thread's setting (the hub's), on Backplane's own viewer and over the embedded KiCad (host kicad/follow.rs `pane`)
+    if viewer["follow"].is_object() && !diff_on && !gerbers {
         let f = &viewer["follow"]; let on = f["on"] == true;
         let say = super::follow::line(f);
         let toggle = btn(cx, light, "follow-agent".into(), t("gpui.follow.button"), on, Command::Action("follow".into(), (if on { "off" } else { "on" }).into()));
