@@ -12,6 +12,12 @@ pub fn is_command(words: &Value, draft: &str) -> bool {
     words.as_array().into_iter().flatten().filter_map(|w| w["word"].as_str()).any(|w| lead.strip_prefix(w).map_or(false, |r| r.trim().is_empty() || r.starts_with([' ', '\n'])))
 }
 
+/// `/project <folder> …` (or `/new-project`): the draft makes a project whose first thread opens here once the hub has made it; the word alone opens Add project.
+pub fn makes_project(draft: &str) -> bool {
+    let lead = draft.trim();
+    ["/project", "/new-project"].iter().any(|w| lead.strip_prefix(w).map_or(false, |r| r.starts_with([' ', '\n', '\t']) && !r.trim().is_empty()))
+}
+
 /// What the Send button says: the hub's word for this draft (Ask, Give, Save, Steer), Send otherwise; Stop has no button of its own here.
 /* i18n-ok: the hub's word for the button, drawn by ui.rs */ pub fn send_label(thread: &Value) -> String { match string(thread, "send") { s if s.is_empty() || thread["sendAct"] != "send" => "Send".into(), s => s } }
 
@@ -66,6 +72,7 @@ mod tests {
     fn words() -> Value { json!([{"word":"/btw"},{"word":"/give"},{"word":"/secret"},{"word":"/intent"}]) }
     #[test] fn a_command_is_the_drafts_first_word() {
         for d in ["/btw why", "/btw", "  /give >x", "/secret\nname", "/intent  "] { assert!(is_command(&words(), d), "{d}"); }
+        for (d, made) in [("/project ~/x Build a sensor puck", true), ("/new-project puck", true), ("/project", false), ("/project   ", false), ("/projects x", false), ("say /project x", false)] { assert_eq!(makes_project(d), made, "{d}"); }
         for d in ["hi /btw", "/btwx", "/compact", ""] { assert!(!is_command(&words(), d), "{d}"); }
         assert!(!is_command(&Value::Null, "/btw why"), "an older hub lists none: nothing changes");
     }

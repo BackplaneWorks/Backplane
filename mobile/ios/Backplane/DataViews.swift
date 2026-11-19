@@ -236,6 +236,7 @@ struct DataThreadsView: View {
             ForEach(pickNew?.newOn ?? [], id: \.value) { n in Button(dAway(Tr.t(n.label), n.away)) { newThread = n.value; pickNew = nil }.accessibilityIdentifier("data.thread.new.on." + n.value) }
         }
         .sheet(isPresented: $addingProject) { DataNewProjectSheet(client: client) }
+        .onChange(of: client.openAddProject) { _, v in if v { client.openAddProject = false; addingProject = true } }
         .sheet(item: Binding(get: { newSwarm.map { Wrapped(id: $0) } }, set: { newSwarm = $0?.id })) { w in
             DataNewSwarmSheet(client: client, project: w.id) { path.append($0) }
         }
@@ -726,6 +727,8 @@ struct DataThreadView: View {
     @State private var notice = ""
     // the masked box: a name ("" for a new one) while open; the value stays in the box until Save
     @State private var box: String?
+    // /project's folder that holds something: Add existing adds it as it is
+    @State private var existing: String?
     @State private var renaming: DThread?
     @State private var deleting: DThread?
     @State private var modelSheet = false
@@ -965,6 +968,10 @@ struct DataThreadView: View {
             DLine()
             VStack(alignment: .leading, spacing: 8) {
                 if !notice.isEmpty { Text(Tr.t(notice)).dmono(12).foregroundStyle(BackplaneDesign.warn).accessibilityIdentifier("data.images.notice") }
+                if let dir = existing {
+                    Button(Tr.t("Add existing")) { Task { do { _ = try await client.addProject(path: dir); existing = nil; notice = ""; text = ""; client.setDraft(id, "") } catch { notice = (error as? DError)?.message ?? "That could not be done." } } }
+                        .buttonStyle(DButton()).accessibilityIdentifier("data.project.existing")
+                }
                 if !pending.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
@@ -1051,7 +1058,7 @@ struct DataThreadView: View {
     }
     // a command of the composer: the hub runs it; a refusal leaves the draft and says why
     private func run(_ t: String) {
-        notice = ""
+        notice = ""; existing = nil
         Task {
             do {
                 let r = try await client.runCommand(id, t.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -1059,6 +1066,10 @@ struct DataThreadView: View {
                 case "edit": text = r.text ?? ""; client.setDraft(id, text)
                 case "secret": box = r.name ?? ""; text = ""; client.setDraft(id, "")
                 case "intent": notice = "Intent saved"; text = ""; client.setDraft(id, "")
+                // /project: alone, the Add project sheet; made, its first thread opens; a folder that holds something, Add existing under the reason
+                case "project": text = ""; client.setDraft(id, ""); client.openAddProject = true
+                case "made": text = ""; client.setDraft(id, ""); notice = r.note ?? ""; if let th = r.thread, !th.isEmpty { client.pendingThread = th }
+                case "exists": notice = r.error ?? ""; existing = r.path
                 default: text = ""; client.setDraft(id, "")
                 }
             } catch { notice = (error as? DError)?.message ?? "That could not be done." }
