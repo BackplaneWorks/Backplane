@@ -105,6 +105,8 @@ pub fn act<F: Facts>(f: &F, hub: &str, session: &Value, sel: &str, action: &str,
             b.rpc("setting.set", json!({"key": format!("thread.tree.{id}"), "value": open}));
         }
         "interrupt" => { if sel.is_empty() { return None } b.rpc("turn.interrupt", json!({"thread": sel})) }
+        // #1304: the "hasn't answered" notice's Send again: the turn stops and the person's unanswered words start a new one (agents `thread.again`)
+        "again" => { if sel.is_empty() { return None } b.rpc("thread.again", json!({"thread": sel})) }
         "copy" => {}
         // Ui.toggle_panel: opened or shut by hand (the hub's own view leaves it alone now); shut forgets the Mech parts asked for
         "panel" => {

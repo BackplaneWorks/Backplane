@@ -51,6 +51,7 @@ pub fn lean_keeps(k: &str) -> bool {
     if k.starts_with("probe:") { return true }
     // a halt card's facts (agents/halt.rs), one per turn that ended out of memory or out of context: the thread view draws the card from it (a few KB at most)
     if k.starts_with("halt.") { return true }
+    if k.starts_with("unanswered.") { return true } // #1304: the thread view draws the "hasn't answered" notice from it (agents/unanswered.rs)
     // setup (present/onboard.rs): the step reached, the skipped and seen lists, done, and the last checks of this machine (a few KB, replaced each time)
     if k.starts_with("onboard.") || k == "freecad.path" { return true }
     k.starts_with("launch.input.") || k.starts_with("fallback.input.") || (!k.starts_with("ride.") && KEEP.iter().any(|p| k.starts_with(p)))
@@ -268,6 +269,7 @@ mod tests {
         assert!(lean_keeps("plan.routing"), "Settings › CAD draws the Plan before routing switch from it");
         assert!(lean_keeps("halt.t1.oom5-1"), "the thread view draws a halt card from it");
         assert!(lean_keeps("review.ro.t1"), "the thread view draws the review bar from it (#1305)");
+        assert!(lean_keeps("unanswered.t1"), "the thread view draws the hasn't-answered notice from it");
         for k in ["voice.engine", "voice.model", "voice.device", "voice.e.kicad", "voice.l.jason"] { assert!(lean_keeps(k), "{k}: Settings, Voice shows it"); }
         for k in ["tok.t.t1", "tok.1b.t.t1", "turn.last.t1", "turn.speed.t1", "turn.models.t1", "turn.live.t1", "tok.epoch", "tok.recount"] { assert!(lean_keeps(k), "{k}"); }
         for k in ["onboard.step", "onboard.skipped", "onboard.seen", "onboard.done", "onboard.checks", "onboard.usage", "freecad.path"] { assert!(lean_keeps(k), "{k}: setup reads it, and without it every press forgets the last"); }
