@@ -4284,6 +4284,7 @@ ios.image.denied = 写真へのアクセスがオフです。画像を保存す�
 ios.image.failed = 画像を保存できませんでした。
 ios.image.incoming = 画像の準備ができました。送るスレッドを開いてください。
 ios.image.loadfail = 画像を読み込めませんでした。
+ios.image.unavailable = 画像を表示できません
 native.permission.photos.add = スレッドで選んだ画像を写真ライブラリに保存します。
 ios.buy.ask = {project} の購入スレッドを開始しますか？
 ios.settings.accounts.usage = アカウントと使用量

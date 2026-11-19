@@ -4261,6 +4261,7 @@ ios.image.denied = Photos access is off: allow it in Settings to save pictures.
 ios.image.failed = Could not save the picture.
 ios.image.incoming = Picture ready: open a thread to send it.
 ios.image.loadfail = Could not load the picture.
+ios.image.unavailable = Image unavailable
 native.permission.photos.add = Backplane saves the pictures you choose in a thread to your photo library.
 ios.buy.ask = Start a buy thread for {project}?
 ios.settings.accounts.usage = Accounts & Usage
