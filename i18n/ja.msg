@@ -4688,4 +4688,4 @@ gpui.hub.view.unavailable = そのビューはここでは利用できません�
 settings.designmode.label = 設計を開く場所
 settings.designmode.viewer = 常にビューアー
 settings.designmode.kicad = 常に KiCad
-settings.designmode.note = このプラットフォームで組み込みの KiCad が既定として有効になると適用されます。
+settings.designmode.note = 自動を選ぶと、このプラットフォームで自動起動が有効な場合にだけ KiCad が開きます。

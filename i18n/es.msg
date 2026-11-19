@@ -4663,4 +4663,4 @@ gpui.hub.view.unavailable = Esa vista no está disponible aquí.
 settings.designmode.label = Abrir los diseños en
 settings.designmode.viewer = Siempre en el visor
 settings.designmode.kicad = Siempre en KiCad
-settings.designmode.note = Se aplicará cuando KiCad integrado se habilite por defecto en esta plataforma.
+settings.designmode.note = En modo automático, KiCad solo se abre por sí solo si esta plataforma lo permite.

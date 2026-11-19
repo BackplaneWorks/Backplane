@@ -24,7 +24,7 @@ impl Preference {
 }
 
 #[derive(Clone, Copy)]
-pub enum Document { Present, Missing, OtherPage }
+pub enum Document { Present, Missing, Unknown, OtherPage }
 #[derive(Clone, Copy)]
 pub enum Visit { Normal, OpenKicad, ShowViewer }
 #[derive(Clone, Copy)]
@@ -52,14 +52,18 @@ pub struct Input {
     pub platform: Platform, pub preference: Preference, pub visit: Visit, pub runtime: Runtime,
 }
 
+/// Board and Schematic share a surface policy. Moving between them switches frames in the same project.
+/// Focus and the cold-start dwell belong to the client. Automatic attach leaves keyboard focus alone.
+/// A generation identifies a runtime lifetime. Presenter updates, including a new generation, never retry a
+/// failed start. OpenKicad is a deliberate retry and overrides Always viewer for the current visit.
 pub fn design_mode(input: Input, rollout: &[Platform]) -> Value {
-    use {Document::*, Session::*, Visit::*};
+    use {Session::*, Visit::*};
     let viewer = |why| json!({"want":"viewer", "why":why});
     let r = input.runtime;
     if input.linked { return viewer("linkedThread") }
     let Some(client) = input.desktop else { return viewer("remoteClient") };
     if input.altium { return viewer("altium") }
-    match input.document { OtherPage => return viewer("page"), Missing => return viewer("missingDocument"), Present => {} }
+    match input.document { Document::OtherPage => return viewer("page"), Document::Missing => return viewer("missingDocument"), Document::Unknown => return viewer("documentUnknown"), Document::Present => {} }
     if matches!(input.visit, ShowViewer) { return viewer("thisVisit") }
     let deliberate = matches!(input.visit, OpenKicad);
     if input.preference == Preference::Viewer && !deliberate { return viewer("preference") }
@@ -67,7 +71,6 @@ pub fn design_mode(input: Input, rollout: &[Platform]) -> Value {
         Support::Unknown => return viewer("runtimeUnknown"), Support::Missing => return viewer("runtimeMissing"),
         Support::Unsupported => return viewer("unsupported"), Support::Supported => {}
     }
-    if r.holder.is_some_and(|holder| holder != client) { return viewer("anotherWindow") }
     match r.session {
         Unknown => return viewer("runtimeUnknown"),
         ClosedByPerson if !deliberate => return viewer("closedByPerson"),
@@ -83,6 +86,7 @@ pub fn design_mode(input: Input, rollout: &[Platform]) -> Value {
             WarmBlock::Memory if !requested => return viewer("memory"), _ => {}
         }
     }
+    if r.holder.is_some_and(|holder| holder != client) { return viewer("anotherWindow") }
     json!({"want":"kicad","why": if deliberate { "thisVisit" } else if requested { "preference" } else { "auto" }})
 }
 
@@ -126,6 +130,32 @@ mod tests {
             assert_eq!(mode(Input {runtime:live,..base}), k("auto"));
             assert_eq!(mode(Input {runtime:Runtime {holder:Some(8),..live},..base}), v("anotherWindow"));
             assert_eq!(mode(Input {runtime:Runtime {holder:Some(4),..live},..base}), k("auto"));
+        }
+        assert_eq!(mode(Input { platform: Platform::Windows, preference: Preference::Kicad, ..base }), k("preference"));
+        for (i, why) in [
+            (Input { desktop: None, ..base }, "remoteClient"), (Input { linked: true, ..base }, "linkedThread"),
+            (Input { altium: true, ..base }, "altium"), (Input { document: Document::OtherPage, ..base }, "page"),
+            (Input { document: Document::Missing, ..base }, "missingDocument"),
+            (Input { document: Document::Unknown, ..base }, "documentUnknown"),
+        ] {
+            for visit in [Visit::Normal, Visit::OpenKicad] {
+                assert_eq!(mode(Input { preference: Preference::Kicad, visit, ..i }), v(why));
+            }
+        }
+        for (session, holder) in [(Session::Cold,None), (Session::Live,None), (Session::Live,Some(4))] {
+            let i = Input { preference: Preference::Viewer, runtime: Runtime { session, holder, ..runtime }, ..base };
+            assert_eq!(mode(i), v("preference"));
+            assert_eq!(mode(Input { visit: Visit::OpenKicad, ..i }), k("thisVisit"));
+        }
+        let blocked = Runtime { holder: Some(8), warm_block: WarmBlock::Capacity, ..runtime };
+        for (session, why) in [(Session::Unknown,"runtimeUnknown"), (Session::Failed,"failed"),
+            (Session::IdleStopped,"idleStopped"), (Session::ClosedByPerson,"closedByPerson"), (Session::Cold,"capacity")] {
+            assert_eq!(mode(Input { runtime: Runtime { session, ..blocked }, ..base }), v(why));
+        }
+        for generation in [Some(1), Some(2)] {
+            let failed = Input { runtime: Runtime { session: Session::Failed, generation, ..runtime }, ..base };
+            assert_eq!(mode(failed), v("failed"));
+            assert_eq!(mode(Input { visit: Visit::OpenKicad, ..failed }), k("thisVisit"));
         }
         assert_eq!(design_mode(base,AUTO_PLATFORMS),v("rollout"));
     }
