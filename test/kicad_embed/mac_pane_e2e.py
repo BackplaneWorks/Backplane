@@ -964,6 +964,17 @@ try:
         print(f'INFO swap E: refusal waiting before the stop {bool(refused_e)}; reconnect seen {bool(rejoined)} ({[l.split("GPUI_LOG ", 1)[-1][:90] for l in lines if '"status"' in l][:3]}); pushes {[(round((t - te) * 1000), j["kicad_host_push"], j.get("visible"), j.get("retry")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; frame {f and f[3]}; last {last}', flush=True)
         check(bool(rejoined), 'swap E: the client dropped and re-made its hub connection')
         check(oke, f'swap E: after a reconnect with a refusal waiting, the frame ends visible at the LAST rect (frame {f and f[3]}, last {last}; refusal before {bool(refused_e)})')
+        # #1225 (PR #1261): the new connection's pictures keep the Board viewer open. Each picture the client takes logs the hub's
+        # thread.viewer.open (kicad_pane.rs kicad_warm, "kicad_pic"); from the reconnect on, every one must say board, the first included
+        # (before #1261 the fresh session's first picture said no viewer, which shut it)
+        ri = next((i for i, l in enumerate(lines) if '"status":"Connected"' in l), None)
+        pics = []
+        for l in (lines[ri + 1:] if ri is not None else []):
+            if '"kicad_pic"' in l:
+                try: pics.append(json.loads(l.split('GPUI_LOG ', 1)[1]).get('viewer_open'))
+                except Exception: pass
+        print(f'INFO swap E: after the reconnect the hub says viewer_open {pics[:6]}{" ..." if len(pics) > 6 else ""} ({len(pics)} pictures; last {pics[-1] if pics else None!r})', flush=True)
+        check(bool(pics) and all(v == 'board' for v in pics), f'swap E: after the reconnect every picture keeps the Board viewer open (#1225; {len(pics)} pictures, not board: {[v for v in pics if v != "board"][:3]})')
         press_rect('kicad:full'); time.sleep(1.0)
         raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=hide (#1198): Cmd+H with KiCad's canvas focused hides Backplane and KiCad's frame (a runtime with comment-key-63: the
