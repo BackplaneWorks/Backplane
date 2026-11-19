@@ -57,23 +57,6 @@ pub fn prewarm_builds_nothing(reply: &Value) -> bool {
     }
 }
 pub fn frame_for(open: &str) -> &'static str { match open { "schematic" => "SCH", "3d" => "PCB_3D", _ => "PCB" } } // i18n-ok: wire frame kind enum names
-/// Whether a re-show after a re-placement hands KiCad the keyboard, read when it is sent, never from what the pane believed earlier
-/// (the #1198 lane: KiCad's frame set changed ~4.5 s after Edit, the schematic pre-warmed, the pane re-placed and sent a focused show
-/// with the keys still noted KiCad's, ~20 ms before the person's click into Backplane, and KiCad took the keyboard back).
-/// `person_chose`: the person asked for this editor (Edit, its tab, the rail's page: want_keys), as before. Otherwise the frame set
-/// changed around it: the same frame placed again never; another frame KiCad put on show only while KiCad holds the keyboard now and no
-/// press in Backplane is under way. The tile contract's keys_wanted reads the same rule.
-pub fn reshow_focus(person_chose: bool, same_frame: bool, kicad_has_keys_now: bool, press_in_backplane: bool) -> bool {
-    if person_chose { return true }
-    !same_frame && kicad_has_keys_now && !press_in_backplane
-}
-/// A mouse press under way in Backplane's own window, now (macOS: any press; one into KiCad's frame makes KiCad active by itself).
-fn press_in_backplane(w: u64) -> bool {
-    #[cfg(target_os = "macos")]
-    { let _ = w; nc::mouse_down() }
-    #[cfg(not(target_os = "macos"))]
-    { nc::button_over(w) == Some(false) }
-}
 
 fn is_abs_path(s: &str) -> bool {
     s.starts_with('/') || s.starts_with('\\')
@@ -493,9 +476,6 @@ pub struct KicadPane {
     /// macOS: until when the watch looks every frame's time (a push, a re-order, an activation or a press of ours just happened), and
     /// what was last seen, to tell a change (our window key, the frame on show)
     mac_hot: Option<std::time::Instant>, mac_seen: (bool, Option<u64>), mac_pressed: bool, mac_looked: Option<std::time::Instant>,
-    /// The frame last placed on show, kept across a re-placement (`placed` is reset when KiCad's frame set changes): a re-placement of
-    /// the same frame is no new editor to hand the keyboard to (reshow_focus)
-    last_show: Option<u64>,
     /// the .kicad_pro the hub resolved this pane's project to (its attach reply), "" until then
     pub bound: String,
     pub project: String, pub root: String, pub project_id: String, pub open: String, last_hub_open: String, hub: tokio::sync::mpsc::Sender<Command>,
@@ -655,7 +635,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, last_show: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None,
+        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
@@ -685,7 +665,7 @@ impl KicadPane {
         }
         if info["pid"] != self.info["pid"] {
             let had_pid = !self.info["pid"].is_null();
-            self.poked = None; self.unmapped_since = None; self.kept = 0; self.placed = None; self.last_show = None; if had_pid || self.override_kind.as_deref() != Some(SIM) { self.override_kind = None; } cause = format!("hub info: KiCad pid {} -> {}", self.info["pid"], info["pid"]); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
+            self.poked = None; self.unmapped_since = None; self.kept = 0; self.placed = None; if had_pid || self.override_kind.as_deref() != Some(SIM) { self.override_kind = None; } cause = format!("hub info: KiCad pid {} -> {}", self.info["pid"], info["pid"]); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
             if had_pid { self.pending_show = None; }
         }
         if matches!(info["state"].as_str(), Some("failed" | "stopped")) { self.pending_show = None; }
@@ -1326,13 +1306,7 @@ impl KicadPane {
         // a KiCad dialog with the keyboard keeps it: the shown frame can change under an open dialog (a dialog of a dialog, Change
         // Footprints over Footprint Properties, re-placed the frame twice), and the hand-in took the keyboard from the dialog to the frame
         let kicad_dialog_has_keys = self.info["mode"] == "fork" && nc::focus_in_pid(self.info["pid"].as_u64().unwrap_or(0) as u32) && !nc::has_focus(c);
-        // read now, not from what the pane noted earlier: the person's choice, or KiCad still holding the keyboard with no press in Backplane
-        let same_frame = show.is_some() && show == self.last_show;
-        // (Windows: has_focus misses a frame's child holding the keys; the poll's own correction, keys_really_backplanes, as below)
-        let keys_now = nc::has_focus(c) || (cfg!(windows) && self.keys && !nc::keys_really_backplanes(c));
-        let hand_in = show.is_some_and(|w| reshow_focus(self.want_keys, same_frame, keys_now, press_in_backplane(w)));
-        if show.is_some() { self.last_show = show; }
-        if (self.keys || self.want_keys) && show != prev_show && !kicad_dialog_has_keys && hand_in {
+        if (self.keys || self.want_keys) && show != prev_show && !kicad_dialog_has_keys {
             if let Some(w) = show {
                 if self.want_keys && nc::button_over(w) == Some(false) { self.press_gave_keys = true; }
                 #[cfg(not(target_os = "macos"))]
@@ -1945,17 +1919,6 @@ mod tests {
         assert_eq!(super::rail_simulation(&v, true).as_deref(), Some("SIMULATOR")); assert_eq!(super::rail_simulation(&v, false), None); assert_eq!(super::rail_simulation(&serde_json::json!({"open": "schematic"}), true), None);
         // closed in KiCad: back to View, whatever else is open
         assert_eq!(super::after_close("SIMULATOR", "SCH", &serde_json::json!({"frames": [{"kind": "SCH"}]})), None); assert_eq!(super::after_close("GERBVIEW", "PCB", &serde_json::json!({"frames": [{"kind": "PCB"}]})).as_deref(), Some("PCB")); assert_eq!(super::next_tab("?", 1), "SCH");
-    }
-    #[test] fn a_reshow_after_the_frame_set_changes_hands_in_the_keyboard_only_when_read_so_at_send_time() {
-        use super::reshow_focus;
-        // the person chose the editor (Edit, its tab): handed in, as before
-        assert!(reshow_focus(true, false, false, true) && reshow_focus(true, true, true, false));
-        // #1198 lane: the frame set changed (a pre-warm), the same frame placed again: never, whoever holds the keys
-        assert!(!reshow_focus(false, true, true, false), "the same frame re-placed is no new editor");
-        // another frame KiCad put on show: only while KiCad holds the keyboard now and no press in Backplane is under way
-        assert!(reshow_focus(false, false, true, false), "KiCad has the keys and nobody pressed: unchanged");
-        assert!(!reshow_focus(false, false, true, true), "a press in Backplane under way: the keyboard stays where the press takes it");
-        assert!(!reshow_focus(false, false, false, false), "Backplane has the keys now (the pane's note was stale): not taken back");
     }
     #[test] fn rail_pages_name_editors() { assert_eq!(frame_for("board"), "PCB"); assert_eq!(frame_for("schematic"), "SCH"); assert_eq!(frame_for("3d"), "PCB_3D"); }
     #[test] fn the_project_comes_from_the_viewer_key() {
