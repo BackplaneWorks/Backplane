@@ -35,6 +35,7 @@ pub struct Mgmt {
     pub error: String,
     /// the open panel's width as last drawn (the BOM's columns fit it)
     pub panel_w: f32,
+    pub checks: super::mgmt_checks::State,
     pub bom: super::mgmt_bom::Ui,
     pub life: super::mgmt_life::Ui,
     /// a plan review link pressed (screens/linkroute.rs `Route::Plan`): its board (from the project folder), when, and whether that board was picked
@@ -58,6 +59,7 @@ pub fn shows(open: &str) -> bool { matches!(open, "board" | "schematic" | "3d" |
 pub fn project_for(thread: &Value) -> Option<String> {
     let v = &thread["viewer"];
     if thread["diff"].is_object() || !shows(v["open"].as_str().unwrap_or("")) || !super::viewer::has_design(v) { return None }
+    if let Some(pro) = v["designPanels"]["bom"]["project"].as_str() { return Some(pro.to_string()) }
     crate::viewers::kicad_pane::project_of(&super::viewer::shown_key(v)).filter(|p| !p.is_empty())
 }
 /// The state a press on a tab asks for: that panel, or none when it is the one open (the hub's mgmt::apply does the same).
@@ -108,7 +110,7 @@ impl Mgmt {
 fn want(app: &mut Backplane, project: &str) {
     if app.screens.mgmt.asked == project { return }
     app.screens.mgmt.asked = project.to_string();
-    if app.screens.mgmt.project != project { app.screens.mgmt.digest.clear(); }
+    if app.screens.mgmt.project != project { app.screens.mgmt.digest.clear(); app.screens.mgmt.bom = Default::default(); app.screens.mgmt.checks.reset(); app.screens.mgmt.error.clear(); }
     let _ = app.tx.try_send(Command::Ask("mgmt.watch".into(), json!({"project": project}), WATCH_TAG));
 }
 /// `mgmt.watch`'s answer: the project's digest (what its info keys end in).
@@ -187,18 +189,19 @@ pub fn review_panel(app: &mut Backplane, cx: &mut Context<Backplane>) -> Option<
     let scope = viewer["designPanels"].get(&id)?.clone();
     if !scope["versions"].is_array() { want(app, scope["project"].as_str()?) }
     app.screens.mgmt.panel_w = super::viewer::pane_width() as f32;
-    Some(shared_panel(app, &id, &scope, app.light(), cx))
+    Some(shared_panel(app, &id, &scope, false, app.light(), cx))
 }
 
-fn shared_panel(app: &mut Backplane, id: &str, scope: &Value, light: bool, cx: &mut Context<Backplane>) -> AnyElement {
+fn shared_panel(app: &mut Backplane, id: &str, scope: &Value, bottom: bool, light: bool, cx: &mut Context<Backplane>) -> AnyElement {
     use crate::i18n::tf;
     let working = tf("history.workingcopy", &[]);
     let historical = scope["versions"].is_array();
+    let key = scope["title"].as_str().unwrap_or("");
     let title = if historical {
         let label = |n: usize| scope["versions"][n].as_str().filter(|s| !s.is_empty()).unwrap_or(&working).to_owned();
-        tf("review.bom.change", &[("old", label(0).into()), ("new", label(1).into())])
-    } else if id == "bom" { tf("review.bom.working", &[]) }
-    else { tf("review.checks.of", &[("version", working.into())]) };
+        tf(key, &[("old", label(0).into()), ("new", label(1).into())])
+    } else if id == "bom" { tf(key, &[]) }
+    else { tf(key, &[("version", working.into())]) };
     let method = scope["refresh"].as_str().unwrap_or("").to_owned();
     let panel = id.to_owned();
     let refresh = div().id("design-panel-refresh").px_2().cursor_pointer().child(trs("Refresh"))
@@ -216,15 +219,15 @@ fn shared_panel(app: &mut Backplane, id: &str, scope: &Value, light: bool, cx: &
         let review = &app.data["thread"]["viewer"]["review"];
         let nodes = review["blocks"].as_array().map(Vec::as_slice).unwrap_or_default();
         let parsed = super::md::parse(nodes);
-        div().id("comparison-bom").flex_1().min_h_0().overflow_y_scroll()
+        div().id("comparison-bom").p_3().flex_1().min_h_0().overflow_y_scroll()
             .children(super::timeline::blocks(cx, &app.screens.reg, light, &parsed, "comparison-bom"))
-            .when(nodes.is_empty(), |d| d.child(trs(review["note"].as_str().unwrap_or("")))).into_any_element()
+            .when(nodes.is_empty() || review["busy"] == true, |d| d.child(div().text_color(theme::color(light, "dim")).child(trs(review["note"].as_str().unwrap_or(""))))).into_any_element()
     } else {
         let data = app.screens.mgmt.data(id);
         if id == "checks" { super::mgmt_checks::body(app, &data, light, cx) }
-        else { super::mgmt_bom::body(app, &data, light, cx) }
+        else { super::mgmt_bom::panel(app, &data, bottom, light, cx) }
     };
-    div().flex_1().min_h_0().flex().flex_col().overflow_hidden().child(head).child(body).into_any_element()
+    div().flex_1().min_h_0().flex().flex_col().overflow_hidden().child(head).when(!app.screens.mgmt.error.is_empty(), |d| d.child(div().text_color(theme::color(light, "bad")).child(app.screens.mgmt.error.clone()))).child(body).into_any_element()
 }
 
 struct EdgeDrag;
@@ -289,7 +292,7 @@ pub fn host(app: &mut Backplane, page: AnyElement, window: &mut Window, cx: &mut
     let size = fit(asked, avail);
     app.screens.mgmt.panel_w = if bottom { super::viewer::pane_width() as f32 } else { size };
     let scope = app.data["thread"]["viewer"]["designPanels"][&open].clone();
-    let body = if scope.is_object() { shared_panel(app, &open, &scope, light, cx) } else { match VIEWS.iter().find(|v| v.id == open) { Some(v) => (v.body)(app, &data, light, cx), None => div().into_any_element() } };
+    let body = if scope.is_object() { shared_panel(app, &open, &scope, bottom, light, cx) } else { match VIEWS.iter().find(|v| v.id == open) { Some(v) => (v.body)(app, &data, light, cx), None => div().into_any_element() } };
     let handle = div().id("mgmt-edge").flex_shrink_0().bg(c("rule")).hover(|s| s.bg(c("accent")))
         .map(|d| if bottom { d.h(px(1.)).w_full().cursor_row_resize() } else { d.w(px(1.)).h_full().cursor_col_resize() })
         .child(div().absolute().map(|d| if bottom { d.left_0().right_0().top(px(-2.)).h(px(HANDLE)) } else { d.top_0().bottom_0().left(px(-2.)).w(px(HANDLE)) }))

@@ -728,7 +728,7 @@ fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Val
     let title = string(review, "title");
     let page = arr(review, "tabs").find(|t| t["on"] == true).map(|t| string(t, "page")).unwrap_or_default();
     if !title.is_empty() { col = col.child(div().flex().items_center().gap_2().child(div().flex_1().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(15.)).child(trs(&title)))
-        .children(matches!(page.as_str(), "bom" | "checks").then(|| btn(cx, light, "rv-run".into(), trs("Refresh"), false, Command::Action("rv-run".into(), String::new()))))); }
+        .children(matches!(page.as_str(), "bom" | "checks" | "release").then(|| btn(cx, light, "rv-run".into(), trs("Refresh"), false, Command::Action("rv-run".into(), String::new()))))); }
     // the Checks page: why the gate fails, and the checklist's boxes (a press ticks one: rv-tick <index>)
     if review["checks"].is_object() {
         let line = string(&review["checks"], "line"); let gate = string(&review["checks"], "gate");
@@ -754,6 +754,11 @@ fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Val
     }
     if blocks.is_empty() { col = col.child(div().text_color(c("dim")).child(if review["busy"] == true { trs("Working…") } else { trs(&string(review, "note")) })); }
     else { let parsed = md::parse(&blocks); for el in timeline::blocks(cx, reg, light, &parsed, "review") { col = col.child(el); } }
+    if review["release"].is_object() {
+        col = col.child(div().text_color(c("dim")).child(trs(&string(&review["release"], "note"))));
+        let nodes = review["release"]["blocks"].as_array().map(Vec::as_slice).unwrap_or_default();
+        col = col.children(timeline::blocks(cx, reg, light, &md::parse(nodes), "release"));
+    }
     div().flex().flex_col().child(bar).child(col).into_any_element()
 }
 
@@ -793,7 +798,8 @@ pub fn editor_press(viewer: &Value) -> Option<String> {
     pressed(&active_kind(viewer, None)).filter(|k| matches!(k.as_str(), "board" | "schematic" | "3d")) // i18n-ok: rail page kinds
 }
 /// The panel (None while nothing is open). 520 px wide, between the thread and the rail.
-pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>, editor: Option<&Entity<crate::viewers::kicad_pane::KicadPane>>, update: Option<AnyElement>, review_panel: Option<AnyElement>) -> AnyElement {
+pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>, editor: Option<&Entity<crate::viewers::kicad_pane::KicadPane>>, update: Option<AnyElement>, review_panel: Option<AnyElement>, checks: &super::mgmt_checks::State) -> AnyElement {
+    let shared_scroll = review_panel.is_some();
     pv.loading.begin_frame(&string(thread, "id"));
     // KiCad itself in the pane (its Board, Schematic or 3D): its frames switch at once, and it stays until the hub moves the pane (kicad_pane.rs)
     let local = editor.is_some() && editor_local(thread);
@@ -822,7 +828,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         let a = acts(cx);
         let (popped, full) = (KICAD_POPPED.load(std::sync::atomic::Ordering::Relaxed), KICAD_FULL.load(std::sync::atomic::Ordering::Relaxed));
         let screen = KICAD_SCREEN.load(std::sync::atomic::Ordering::Relaxed);
-        let strip = crate::viewers::kicad_pane::strip(cx, light, &e, false, full, screen, |this: &mut Backplane, a, _, cx| this.kicad_strip_act(a, cx));
+        let strip = crate::viewers::kicad_pane::strip(cx, light, &e, checks, false, full, screen, |this: &mut Backplane, a, _, cx| this.kicad_strip_act(a, cx));
         let body = if popped {
             // the editor is in its own window: the pane says so and offers it back
             div().flex_1().min_h_0().flex().flex_col().items_center().justify_center().gap_2().text_color(theme::color(light, "faint")).child(trs("KiCad is open in its own window."))
@@ -888,7 +894,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
     if editing { pv.loading.clear(); } else { pv.loading.end_frame_and_arm(cx); }
     // Keep main's exact scroll parent for the embedded editor (`editing`) and scrollable pages (Review, Diff, Mech);
     // only 3D (when not editing) joins files/image/pdf/text in omitting overflow_y_scroll so 3D's size_full() does not collapse under mgmt::host.
-    if matches!(open, "files" | "image" | "pdf" | "text" | "3d") && !diff_on && !editing { div().id("viewer-body").size_full().child(body).into_any_element() } else { div().id("viewer-body").size_full().overflow_y_scroll().child(body).into_any_element() }
+    if (matches!(open, "files" | "image" | "pdf" | "text" | "3d") || (shared_scroll && open == "review")) && !diff_on && !editing { div().id("viewer-body").size_full().child(body).into_any_element() } else { div().id("viewer-body").size_full().overflow_y_scroll().child(body).into_any_element() }
 }
 /// The pane around the page on show: its width, the left edge's drag and border; `page` (the page itself, `page()`, drawn as a part of the
 /// window by ui.rs) fills the rest, so the pane's frame is known without building the page.

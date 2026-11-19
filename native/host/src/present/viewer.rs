@@ -794,11 +794,17 @@ pub(crate) fn has_management(root: &str) -> bool {
 
 /// Both doors name the same live management publication. A comparison's BOM is
 /// a read-only report whose two labels come from the versions sent to review.bom.
-fn design_panels(project: &str, versions: &str) -> Value {
-    let mut panels = json!({"bom":{"project":project,"refresh":"mgmt.refresh"}, "checks":{"project":project,"refresh":"kicad.checks.run"}});
+pub(crate) fn design_panels(project: &str, versions: &str) -> Value {
+    let Ok(project) = crate::files::kicad::embed::resolve_pro(project) else { return Value::Null };
+    panel_scope(&project, versions)
+}
+
+fn panel_scope(project: &str, versions: &str) -> Value {
+    let mut panels = json!({"bom":{"project":project,"title":"review.bom.working","refresh":"mgmt.refresh"}, "checks":{"project":project,"title":"review.checks.of","refresh":"kicad.checks.run"}});
     if let Some((old, new)) = versions.split_once('\n') {
         let revision = |source: &str| source.strip_prefix("git\t").and_then(|s| s.split('\t').nth(1))
             .map(|sha| sha.chars().take(8).collect::<String>()).unwrap_or_default();
+        panels["bom"]["title"] = json!("review.bom.change");
         panels["bom"]["refresh"] = json!("rv-run");
         panels["bom"]["versions"] = json!([revision(old), revision(new)]);
     }
