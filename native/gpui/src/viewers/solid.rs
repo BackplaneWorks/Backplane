@@ -471,9 +471,9 @@ pub fn to_image(bgra: Vec<u8>, w: usize, h: usize) -> Option<Arc<RenderImage>> {
 /// `Scene`: the model with the parts that have come (`mesh`), after one or more frames: `board` when the board itself is new (its
 /// pictures in flight are stale), `reset` when the parts started again, `groups` part frames held, `done` of `of` instances come.
 /// `Building`: a large model frame of this key is being decoded now.
-enum Msg { Mesh(SolidFrame), Building(String), Scene { key: String, mesh: Option<Arc<Layers>>, board: bool, reset: bool, groups: usize, done: u32, of: u32 }, Image { ticket: u64, key: String, image: Arc<RenderImage>, ms: f64, tris: usize, w: usize, h: usize, by: &'static str, draft: bool } }
-/// What to render: the source key, the model, the camera, the size, the samples a pixel a side, the ticket, whether it is a draft (the model is moving).
-type Job = (String, Arc<Layers>, Arc<Vec<f32>>, Camera, usize, usize, usize, u64, bool, raster::Backdrop);
+enum Msg { Mesh(SolidFrame), Building(String), Scene { key: String, mesh: Option<Arc<Layers>>, board: bool, reset: bool, groups: usize, done: u32, of: u32 }, Image { ticket: u64, key: String, view_rev: u64, image: Arc<RenderImage>, ms: f64, tris: usize, w: usize, h: usize, by: &'static str, draft: bool } }
+/// What to render: the source key, the model, the camera, the view revision, the size, the samples a pixel a side, the ticket, whether it is a draft (the model is moving).
+type Job = (String, Arc<Layers>, Arc<Vec<f32>>, Camera, u64, usize, usize, usize, u64, bool, raster::Backdrop);
 /// What the worker holds of the model on show: the board, the part frames come so far, the progress.
 #[derive(Default)] struct Scene { key: String, board: Option<Arc<Mesh>>, parts: Vec<Arc<Mesh>>, done: u32, of: u32 }
 impl Scene {
@@ -561,11 +561,11 @@ impl Worker {
                 let mesh = Layers::of(scene.board.clone(), scene.parts.clone()).map(Arc::new); // no copy: a new part is one more layer
                 if tx.send_blocking(Msg::Scene { key: scene.key.clone(), mesh, board, reset, groups: scene.parts.len(), done: scene.done, of: scene.of }).is_err() { return }
             }
-            if let Some((key, mesh, fades, cam, w, h, ss, my, draft, back)) = render {
+            if let Some((key, mesh, fades, cam, view_rev, w, h, ss, my, draft, back)) = render {
                 let t0 = std::time::Instant::now();
                 let g = g2.clone();
                 if let Some((px, by)) = drawer.draw(&mesh, &fades, &cam, w, h, ss, &back, &move || wanted(draft, my, g.load(Ordering::Relaxed))) {
-                    if let Some(image) = to_image(px, w, h) { if tx.send_blocking(Msg::Image { ticket: my, key, image, ms: t0.elapsed().as_secs_f64() * 1000.0, tris: mesh.tris(), w, h, by, draft }).is_err() { return } }
+                    if let Some(image) = to_image(px, w, h) { if tx.send_blocking(Msg::Image { ticket: my, key, view_rev, image, ms: t0.elapsed().as_secs_f64() * 1000.0, tris: mesh.tris(), w, h, by, draft }).is_err() { return } }
                 }
             }
         } }).ok();
@@ -573,10 +573,10 @@ impl Worker {
     }
     fn forget(&self) { let (m, cv) = &*self.slot; m.lock().unwrap().forget = true; cv.notify_one(); }
     fn submit_frame(&self, bytes: Vec<u8>) { let (m, cv) = &*self.slot; m.lock().unwrap().frames.push(bytes); cv.notify_one(); }
-    /// Ask for an image of `mesh` for source `key`, replacing any request not yet begun.
-    fn submit_render(&self, key: String, mesh: Arc<Layers>, fades: Arc<Vec<f32>>, cam: Camera, w: usize, h: usize, ss: usize, draft: bool, back: raster::Backdrop) -> u64 {
+    /// Ask for an image of `mesh` for source `key` at `view_rev`, replacing any request not yet begun.
+    fn submit_render(&self, key: String, mesh: Arc<Layers>, fades: Arc<Vec<f32>>, cam: Camera, view_rev: u64, w: usize, h: usize, ss: usize, draft: bool, back: raster::Backdrop) -> u64 {
         let ticket = self.ticket.fetch_add(1, Ordering::Relaxed) + 1;
-        let (m, cv) = &*self.slot; m.lock().unwrap().render = Some((key, mesh, fades, cam, w, h, ss, ticket, draft, back)); cv.notify_one(); ticket
+        let (m, cv) = &*self.slot; m.lock().unwrap().render = Some((key, mesh, fades, cam, view_rev, w, h, ss, ticket, draft, back)); cv.notify_one(); ticket
     }
 }
 impl Drop for Worker { fn drop(&mut self) { let (m, cv) = &*self.slot; m.lock().unwrap().shutdown = true; self.ticket.fetch_add(1, Ordering::Relaxed); cv.notify_one(); } }
@@ -626,24 +626,224 @@ pub fn retry_watch(key: &str) -> Option<serde_json::Value> {
     let (k, root, path) = (p.next()?, p.next()?, p.next()?);
     is_solid_key(key).then(|| serde_json::json!({"kind": if k == "2" { "3d" } else if k == "3" { "3d-bare" } else { "3d-full" }, "root": root, "path": path, "tree": ""}))
 }
+/// Target render pixel size `(w, h)` for a panel of logical size `(pw, ph)` at scale `sf`.
+/// Returns `None` when the panel has not been laid out yet (`pw <= 0.0 || ph <= 0.0`).
+pub fn target_px(pw: f32, ph: f32, sf: f32, draft: bool, draft_scale: f32) -> Option<(usize, usize)> {
+    if pw <= 0.0 || ph <= 0.0 { return None; }
+    let (mut w, mut h) = (((pw * sf) as usize).max(64), ((ph * sf) as usize).max(48));
+    if w * h > MAX_PIXELS { let k = (MAX_PIXELS as f32 / (w * h) as f32).sqrt(); w = (w as f32 * k) as usize; h = (h as f32 * k) as usize; }
+    let most = (DRAFT_PIXELS as f32 * draft_scale) as usize;
+    if draft && w * h > most { let k = (most as f32 / (w * h) as f32).sqrt(); w = ((w as f32 * k) as usize).max(32); h = ((h as f32 * k) as usize).max(24); }
+    Some((w, h))
+}
+/// A cached image kept alongside a `Kept` model, tagged with the exact size, view revision, backdrop and probe that produced it.
+struct KeptImage { image: Arc<RenderImage>, size: (usize, usize), view_rev: u64, back: raster::Backdrop, probe: String }
 /// The model the page showed before the one on show (one: up to 60 MB of a big board's triangles), with its camera: going back to it
 /// (3D after a Mech part, a thread back) shows it at once while the hub sends it again. `groups`: its part frames.
-/// `image`: its last picture, as CPU bytes (out of the atlas; painted again when it comes back, while a new one is drawn).
-struct Kept { key: String, mesh: Arc<Layers>, cam: Camera, touched: bool, fit_aspect: f32, parts: (u32, u32), groups: usize, image: Option<Arc<RenderImage>> }
+/// `image`: its last picture, as CPU bytes (out of the atlas; painted again only when size, view revision, backdrop and probe still match).
+struct Kept { key: String, mesh: Arc<Layers>, cam: Camera, view_rev: u64, touched: bool, fit_aspect: f32, parts: (u32, u32), groups: usize, image: Option<KeptImage> }
+struct SceneResult { clear_building_stage: bool, clear_stage: bool, clear_failed: bool, clear_note: bool, should_render: bool, notify: bool }
+/// Pure scene/camera/image/cache state machine for `SolidPage` (exercised directly by unit tests).
+struct SolidCore {
+    probe: String,
+    lit: Option<(Arc<Layers>, String, Option<Arc<Layers>>)>,
+    mesh: Option<Arc<Layers>>,
+    key: String,
+    cam: Option<Camera>,
+    touched: bool,
+    fit_aspect: f32,
+    fitted: ([f32; 3], f32),
+    refined: Vec<([f32; 3], f32)>,
+    view_rev: u64,
+    image: Option<Arc<RenderImage>>,
+    image_key: String,
+    image_size: (usize, usize),
+    image_view_rev: u64,
+    image_gen: u64,
+    retired: Vec<(Arc<RenderImage>, u64)>,
+    frames: u64,
+    born: Vec<std::time::Instant>,
+    parts: (u32, u32),
+    prev: Option<Kept>,
+    restored: Option<usize>,
+    back: raster::Backdrop,
+    asked: (usize, usize),
+    latest: u64,
+    on_screen: u64,
+    floor: u64,
+}
+impl SolidCore {
+    fn new() -> Self {
+        SolidCore {
+            probe: String::new(), lit: None, mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0,
+            fitted: ([0.0; 3], 0.0), refined: Vec::new(), view_rev: 0, image: None, image_key: String::new(),
+            image_size: (0, 0), image_view_rev: 0, image_gen: 0, retired: Vec::new(), frames: 0, born: Vec::new(),
+            parts: (0, 0), prev: None, restored: None, back: raster::Backdrop::DARK, asked: (0, 0), latest: 0, on_screen: 0, floor: 0,
+        }
+    }
+    /// Retire the current image and clear all image metadata so a new source never paints or caches the previous model's pixels.
+    fn clear_image(&mut self) {
+        if let Some(i) = self.image.take() { self.retired.push((i, self.frames)); }
+        self.image_key.clear();
+        self.image_size = (0, 0);
+        self.image_view_rev = 0;
+    }
+    /// Advance the view revision on a camera/backdrop/probe/mesh change without clearing the current image (keeps same-key moves flash-free).
+    fn bump_view(&mut self) { self.view_rev = self.view_rev.wrapping_add(1); }
+    fn drawn(&mut self) -> Option<Arc<Layers>> {
+        let mesh = self.mesh.clone()?;
+        if self.probe.is_empty() { self.lit = None; return Some(mesh) }
+        if !self.lit.as_ref().is_some_and(|l| Arc::ptr_eq(&l.0, &mesh) && l.1 == self.probe) { self.lit = Some((mesh.clone(), self.probe.clone(), lit_layers(&mesh, &self.probe).map(Arc::new))); }
+        Some(self.lit.as_ref().and_then(|l| l.2.clone()).unwrap_or(mesh))
+    }
+    /// The model on show becomes the one kept (Kept). Only caches `image` when it was rendered for `self.key` and the current `view_rev`.
+    fn keep_current(&mut self) {
+        if let (Some(mesh), Some(cam)) = (self.mesh.clone(), self.cam) {
+            let image = (image_matches_key(&self.key, &self.image_key, self.image.is_some()) && self.image_view_rev == self.view_rev)
+                .then(|| self.image.clone().map(|image| KeptImage { image, size: self.image_size, view_rev: self.image_view_rev, back: self.back, probe: self.probe.clone() }))
+                .flatten();
+            self.prev = Some(Kept { key: self.key.clone(), mesh, cam, view_rev: self.view_rev, touched: self.touched, fit_aspect: self.fit_aspect, parts: self.parts, groups: self.born.len(), image });
+        }
+    }
+    /// Save the outgoing source into `prev` and clear all active mesh/camera/image state so nothing of the old source can be rendered under the new key.
+    fn switch_source_reset(&mut self) {
+        self.keep_current();
+        self.clear_image();
+        self.mesh = None;
+        self.cam = None;
+        self.lit = None;
+        self.restored = None;
+        self.asked = (0, 0);
+        self.floor = self.latest + 1;
+        self.refined.clear();
+    }
+    fn apply_scene(&mut self, key: String, mesh: Option<Arc<Layers>>, board: bool, reset: bool, groups: usize, done: u32, of: u32, panel_wh: (f32, f32)) -> SceneResult {
+        if key != self.key { self.switch_source_reset(); }
+        // a model brought back stays until the hub's stream of it has caught up (no parts going and fading in again)
+        if key == self.key && let Some(g) = self.restored {
+            if groups < g && !(of > 0 && done >= of) && mesh.is_some() {
+                return SceneResult { clear_building_stage: true, clear_stage: false, clear_failed: false, clear_note: false, should_render: false, notify: false };
+            }
+            self.restored = None;
+            let shown = std::time::Instant::now() - std::time::Duration::from_secs(1);
+            self.born = vec![shown; groups];
+            self.parts = (done, of);
+            self.floor = self.latest + 1;
+            let should_render = if let Some(m) = mesh { self.mesh = Some(m); self.bump_view(); true } else { false };
+            return SceneResult { clear_building_stage: true, clear_stage: false, clear_failed: false, clear_note: false, should_render, notify: true };
+        }
+        let fresh = key != self.key || self.cam.is_none();
+        self.key = key;
+        if reset { self.born.clear(); }
+        let now = std::time::Instant::now();
+        self.born.truncate(groups);
+        while self.born.len() < groups { self.born.push(now); } // a part fades in from when it shows
+        self.parts = (done, of);
+        let Some(mesh) = mesh else {
+            return SceneResult { clear_building_stage: true, clear_stage: board, clear_failed: true, clear_note: false, should_render: false, notify: true };
+        };
+        if board || fresh { self.floor = self.latest + 1; } // pictures of the old board are stale; ones without the newest part are not
+        if fresh {
+            let (pw, ph) = panel_wh;
+            self.fit_aspect = pw / ph.max(1.0);
+            self.touched = false;
+            self.cam = Some(Camera::fit_to(mesh.center, mesh.radius, self.fit_aspect));
+            self.fitted = (mesh.center, mesh.radius);
+        }
+        // a model coming in parts with nothing under them (a STEP streaming) grows: the camera follows it until the person moves it
+        else if !self.touched && refit(self.fitted, (mesh.center, mesh.radius)) {
+            self.cam = Some(Camera::fit_to(mesh.center, mesh.radius, self.fit_aspect.max(0.05)));
+            self.fitted = (mesh.center, mesh.radius);
+        }
+        self.mesh = Some(mesh);
+        self.bump_view();
+        SceneResult { clear_building_stage: true, clear_stage: board, clear_failed: true, clear_note: true, should_render: true, notify: true }
+    }
+    fn apply_note(&mut self, key: String) {
+        if !note_keeps_model(&self.key, &key) {
+            // another source's model could not be made: the old source's model must not show under this key
+            self.keep_current();
+            self.restored = None;
+            self.mesh = None;
+            self.cam = None;
+            self.lit = None;
+            self.clear_image();
+            self.floor = self.latest + 1; // a render of the old model still in flight is stale
+            self.born.clear();
+            self.parts = (0, 0);
+        }
+        self.key = key;
+    }
+    fn apply_image(&mut self, ticket: u64, key: String, view_rev: u64, image: Arc<RenderImage>, w: usize, h: usize) -> bool {
+        if !shows_for_key(&self.key, &key, ticket, self.on_screen, self.floor) { return false; } // stale key or ticket: never paint another model's picture
+        self.on_screen = ticket;
+        self.image_key = key;
+        self.image_size = (w, h);
+        self.image_view_rev = view_rev;
+        self.image_gen = self.image_gen.wrapping_add(1);
+        if let Some(old) = self.image.replace(image) { self.retired.push((old, self.frames)); }
+        true
+    }
+    /// Restore `prev` when it matches `key`. Restores its cached pixels immediately only when viewport size, view revision, backdrop and probe still match.
+    fn restore_kept(&mut self, key: &str, panel_wh_sf: (f32, f32, f32), draft_scale: f32) -> bool {
+        if key.is_empty() || key == self.key || self.prev.as_ref().map_or(true, |p| p.key != key) { return false; }
+        let Some(k) = self.prev.take() else { return false; };
+        self.keep_current();
+        self.clear_image();
+        let want_px = target_px(panel_wh_sf.0, panel_wh_sf.1, panel_wh_sf.2, false, draft_scale);
+        if let Some(ki) = k.image
+            && ki.view_rev == k.view_rev
+            && want_px == Some(ki.size)
+            && ki.back == self.back
+            && ki.probe == self.probe
+        {
+            self.retired.retain(|(r, _)| !Arc::ptr_eq(r, &ki.image));
+            self.image = Some(ki.image);
+            self.image_key = k.key.clone();
+            self.image_size = ki.size;
+            self.image_view_rev = ki.view_rev;
+            self.image_gen = self.image_gen.wrapping_add(1);
+            self.on_screen = self.latest;
+        }
+        self.fitted = (k.mesh.center, k.mesh.radius);
+        self.key = k.key;
+        self.mesh = Some(k.mesh);
+        self.cam = Some(k.cam);
+        self.view_rev = k.view_rev;
+        self.lit = None;
+        self.touched = k.touched;
+        self.fit_aspect = k.fit_aspect;
+        self.parts = k.parts;
+        let shown = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        self.born = vec![shown; k.groups];
+        self.restored = Some(k.groups);
+        self.floor = self.latest + 1;
+        self.asked = (0, 0);
+        true
+    }
+    fn prepare_render(&mut self, panel_wh_sf: (f32, f32, f32), draft: bool, draft_scale: f32) -> Option<(String, Arc<Layers>, Camera, u64, usize, usize)> {
+        let (mesh, cam) = (self.drawn()?, self.cam?);
+        let (w, h) = target_px(panel_wh_sf.0, panel_wh_sf.1, panel_wh_sf.2, draft, draft_scale).unwrap_or((64, 48));
+        self.asked = (w, h);
+        Some((self.key.clone(), mesh, cam, self.view_rev, w, h))
+    }
+}
 pub struct SolidPage {
     /// the button now held down, whose release ends the drag (the table decides what it does)
     press_btn: Option<MouseButton>,
-    /** where the left button went down, until the pointer leaves it by 4 px (a click picks the part under it); the reference of the probed part (`set_probe`); the model with that part lit, for the model and reference it was made of (`drawn`) */ press: Option<Point<Pixels>>, probe: String, lit: Option<(Arc<Layers>, String, Option<Arc<Layers>>)>,
+    /** where the left button went down, until the pointer leaves it by 4 px (a click picks the part under it) */ press: Option<Point<Pixels>>,
     /** the page names the probed part beside its tools (a Split names it in its own bar: off there) */ pub names_probe: bool,
-    mesh: Option<Arc<Layers>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, /** what the camera was last fitted to (centre, radius) */ fitted: ([f32; 3], f32), /** the regions of this model asked to be refined (`settled`) */ refined: Vec<([f32; 3], f32)>, image: Option<Arc<RenderImage>>, /** the source key `image` was rendered for (must match `key` whenever `image` is Some) */ image_key: String, /** pictures off the screen and the window frame they left it in (`collect`) */ retired: Vec<(Arc<RenderImage>, u64)>, frames: u64, drag: Option<(Drag, Point<Pixels>)>,
-    /** when each part group showed (its fade runs from then), the parts' progress (done, of), whether the last picture asked for was mid-fade */
-    born: Vec<std::time::Instant>, parts: (u32, u32), fading: bool,
+    core: SolidCore,
+    drag: Option<(Drag, Point<Pixels>)>,
+    /** whether the last picture asked for was mid-fade */
+    fading: bool,
     /** the page's keys (0.14's: f/Home fit, 0-6 views, arrows turn, shift+arrows move, +/- zoom), taken when the model is pressed; the wheel's burst, to settle after it */ focus: FocusHandle, wheel: u64,
     /** what the hub said it is doing for a model (Stage), shown with its time running; whether a second's tick is running for it */ stage: Option<Stage>, ticking: bool,
     /** the share of DRAFT_PIXELS a picture in motion gets, from how long the last ones took (draft_scale) */ draft_scale: f32,
-    /** the model shown before (Kept); the part frames of a model brought back, until the hub's stream of it has as many */ prev: Option<Kept>, restored: Option<usize>,
-    /** the hub could not make this source's model (its Note): the page offers Retry when retryable */ failed: bool, retryable: Option<bool>, /** last Retry press time (1 s client cooldown) */ last_retry: Option<std::time::Instant>, /** the background the pictures are drawn on (`set_backdrop`) */ back: raster::Backdrop,
-    pub note: String, /** room (px) the page's floating tools leave free at its top right, for the viewer pane's controls */ pub reserve: f32, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */, asked: (usize, usize), /** the newest ticket asked for, the one on screen, the first of the model shown */ latest: u64, on_screen: u64, floor: u64, counted: u64, pub stats: Stats,
+    /** the hub could not make this source's model (its Note): the page offers Retry when retryable */ failed: bool, retryable: Option<bool>, /** last Retry press time (1 s client cooldown) */ last_retry: Option<std::time::Instant>,
+    pub note: String, /** room (px) the page's floating tools leave free at its top right, for the viewer pane's controls */ pub reserve: f32, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */,
+    /** incremented inside the GPUI paint phase only after the image element is actually painted with non-zero bounds */
+    painted: Arc<AtomicU64>, painted_gen: Arc<AtomicU64>, pub stats: Stats,
 }
 impl SolidPage {
     pub fn new(cx: &mut Context<Self>) -> Self {
@@ -653,20 +853,13 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { press_btn: None, press: None, probe: String::new(), lit: None, names_probe: true, mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, fitted: ([0.0; 3], 0.0), refined: Vec::new(), image: None, image_key: String::new(), retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, prev: None, restored: None, failed: false, retryable: None, last_retry: None, back: raster::Backdrop::DARK, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ reserve: 0.0, worker: Worker::spawn(tx),
-            size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), latest: 0, on_screen: 0, floor: 0, counted: 0, stats: Stats::default() }
+        SolidPage { press_btn: None, press: None, names_probe: true, core: SolidCore::new(), drag: None, fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, failed: false, retryable: None, last_retry: None, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ reserve: 0.0, worker: Worker::spawn(tx),
+            size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), painted: Arc::new(AtomicU64::new(0)), painted_gen: Arc::new(AtomicU64::new(0)), stats: Stats::default() }
     }
     /// The background to draw on (the setting resolved by the window): a change draws the picture again at once, the camera untouched.
-    pub fn set_backdrop(&mut self, back: raster::Backdrop) { if self.back != back { self.back = back; self.ask_render(false); } }
+    pub fn set_backdrop(&mut self, back: raster::Backdrop) { if self.core.back != back { self.core.back = back; self.core.bump_view(); self.ask_render(false); } }
     /// The part the hub's probe names ("" none): drawn lit on a board's model, the picture made again when it changes.
-    pub fn set_probe(&mut self, r: &str) { if self.probe != r { self.probe = r.to_string(); self.ask_render(false); } }
-    /// The model as it is drawn: the probed part lit (made once a model and reference), else the model itself.
-    fn drawn(&mut self) -> Option<Arc<Layers>> {
-        let mesh = self.mesh.clone()?;
-        if self.probe.is_empty() { self.lit = None; return Some(mesh) }
-        if !self.lit.as_ref().is_some_and(|l| Arc::ptr_eq(&l.0, &mesh) && l.1 == self.probe) { self.lit = Some((mesh.clone(), self.probe.clone(), lit_layers(&mesh, &self.probe).map(Arc::new))); }
-        Some(self.lit.as_ref().and_then(|l| l.2.clone()).unwrap_or(mesh))
-    }
+    pub fn set_probe(&mut self, r: &str) { if self.core.probe != r { self.core.probe = r.to_string(); self.core.bump_view(); self.ask_render(false); } }
     /// A click on a board's model (a press let go where it went down): the part under it is lit and told to the window (`SolidEvent::Pick`), which
     /// makes it the board's probe; the board itself or the background clears it. A model that names no parts (a STEP, a GLB) is not picked on.
     /// A button went down: the table says what its drag does and whether its click selects.
@@ -687,7 +880,7 @@ impl SolidPage {
         let click = self.press.take(); if self.drag.take().is_some() { self.settled(cx); cx.notify(); } if let Some(at) = click { self.click_at(at, cx); }
     }
     fn click_at(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
-        let (Some(model), Some(cam)) = (self.mesh.clone(), self.cam) else { return };
+        let (Some(model), Some(cam)) = (self.core.mesh.clone(), self.core.cam) else { return };
         if !has_refs(&model) { return }
         let [pw, ph, _, ox, oy] = *self.size.lock().unwrap();
         if pw <= 0.0 || ph <= 0.0 { return }
@@ -697,17 +890,14 @@ impl SolidPage {
         self.set_probe(&r); cx.emit(SolidEvent::Pick(r)); cx.notify();
     }
     /// The key of the model the page holds now (set when a decoded frame is applied, not when one is queued): "" before any.
-    pub fn key(&self) -> &str { &self.key }
+    pub fn key(&self) -> &str { &self.core.key }
     /// The source key the currently painted image was rendered for ("" when no image is held for the current model).
-    pub fn image_key(&self) -> &str { &self.image_key }
-    /// Retire the current image and clear `image_key` so a new source never paints the previous model's pixels.
-    fn clear_image(&mut self) {
-        if let Some(i) = self.image.take() { self.retired.push((i, self.frames)); }
-        self.image_key.clear();
-    }
+    pub fn image_key(&self) -> &str { &self.core.image_key }
+    /// Number of distinct rendered images that have actually been painted by GPUI with non-zero bounds.
+    pub fn painted_count(&self) -> u64 { self.painted.load(Ordering::Relaxed) }
     /// The source the page is showing: the one being made when the hub is making another than the model held (the page then shows its
     /// progress), else `key`. The viewer shows the page when this is the source it asks for.
-    pub fn shown_key(&self) -> &str { match &self.stage { Some(s) if s.key != self.key => &s.key, _ => &self.key } }
+    pub fn shown_key(&self) -> &str { match &self.stage { Some(s) if s.key != self.core.key => &s.key, _ => &self.core.key } }
     /// The stage line for the page, "" when nothing is being made.
     pub fn stage_text(&self) -> String { self.stage.as_ref().map_or(String::new(), |s| stage_line(&s.text, s.since.elapsed().as_secs(), s.about)) }
     fn set_stage(&mut self, st: Option<Stage>, cx: &mut Context<Self>) {
@@ -736,123 +926,79 @@ impl SolidPage {
     fn apply(&mut self, msg: Msg, cx: &mut Context<Self>) {
         match msg {
             Msg::Scene { key, mesh, board, reset, groups, done, of } => {
-                if key != self.key {
-                    self.keep_current();
-                    self.clear_image();
-                    self.restored = None;
-                    self.asked = (0, 0);
+                let [pw, ph, _, _, _] = *self.size.lock().unwrap();
+                let res = self.core.apply_scene(key, mesh, board, reset, groups, done, of, (pw, ph));
+                let mut stage_cleared = false;
+                if res.clear_building_stage && self.stage.as_ref().is_some_and(|s| s.key == self.core.key && (res.clear_stage || s.text == BUILDING)) {
+                    self.stage = None;
+                    stage_cleared = true;
                 }
-                // a model brought back stays until the hub's stream of it has caught up (no parts going and fading in again)
-                if key == self.key && let Some(g) = self.restored {
-                    if self.stage.as_ref().is_some_and(|s| s.key == self.key && s.text == BUILDING) { self.stage = None; cx.notify(); }
-                    if groups < g && !(of > 0 && done >= of) && mesh.is_some() { return }
-                    self.restored = None; let shown = std::time::Instant::now() - std::time::Duration::from_secs(1);
-                    self.born = vec![shown; groups]; self.parts = (done, of); self.floor = self.latest + 1;
-                    if let Some(m) = mesh { self.mesh = Some(m); self.ask_render(self.drag.is_some()); } cx.notify(); return
-                }
-                let fresh = key != self.key || self.cam.is_none();
-                if key != self.key { self.refined.clear(); }
-                self.key = key;
-                if reset { self.born.clear(); }
-                let now = std::time::Instant::now(); self.born.truncate(groups); while self.born.len() < groups { self.born.push(now); } // a part fades in from when it shows
-                self.parts = (done, of);
-                if self.stage.as_ref().is_some_and(|s| s.key == self.key && (board || s.text == BUILDING)) { self.stage = None; } // made, or decoded
-                self.failed = false; self.retryable = None;
-                let Some(mesh) = mesh else { cx.notify(); return };
-                if board || fresh { self.floor = self.latest + 1; } // pictures of the old board are stale; ones without the newest part are not
-                if fresh { let [pw, ph, _, _, _] = *self.size.lock().unwrap(); self.fit_aspect = pw / ph.max(1.0); self.touched = false; self.cam = Some(Camera::fit_to(mesh.center, mesh.radius, self.fit_aspect)); self.fitted = (mesh.center, mesh.radius); }
-                // a model coming in parts with nothing under them (a STEP streaming) grows: the camera follows it until the person moves it
-                else if !self.touched && refit(self.fitted, (mesh.center, mesh.radius)) { self.cam = Some(Camera::fit_to(mesh.center, mesh.radius, self.fit_aspect.max(0.05))); self.fitted = (mesh.center, mesh.radius); }
-                self.mesh = Some(mesh); self.note.clear(); self.ask_render(self.drag.is_some()); cx.notify();
+                if res.clear_failed { self.failed = false; self.retryable = None; }
+                if res.clear_note { self.note.clear(); }
+                if res.should_render { self.ask_render(self.drag.is_some()); }
+                if res.notify || stage_cleared { cx.notify(); }
             }
             Msg::Mesh(SolidFrame::Model(..) | SolidFrame::Parts(..) | SolidFrame::Part(..)) => {} // the worker makes these a Scene
             Msg::Mesh(SolidFrame::Note(key, why, retryable)) => { // why there is no model; the same source's previous model stays shown
-                if !note_keeps_model(&self.key, &key) {
-                    // another source's model could not be made: the old source's model must not show under this key
-                    self.keep_current(); self.restored = None;
-                    self.mesh = None; self.cam = None; if let Some(i) = self.image.take() { self.retired.push((i, self.frames)); }
-                    self.floor = self.latest + 1; // a render of the old model still in flight is stale
-                    self.born.clear(); self.parts = (0, 0);
-                }
+                self.core.apply_note(key);
                 self.stage = None;
                 self.failed = !why.is_empty() && !crate::screens::panestate::is_empty_none(&why);
                 self.retryable = retryable;
-                self.key = key; self.note = if self.mesh.is_some() { format!("{why}{PREVIOUS_SHOWN}") } else { why }; cx.notify();
+                self.note = if self.core.mesh.is_some() { format!("{why}{PREVIOUS_SHOWN}") } else { why }; cx.notify();
             }
             Msg::Mesh(SolidFrame::Bad(e)) => { self.failed = true; self.retryable = Some(true); self.note = e; self.set_stage(None, cx); }
             Msg::Mesh(SolidFrame::Stage(key, text, ms, about)) => {
-                if key == self.key && !text.is_empty() { self.failed = false; }
+                if key == self.core.key && !text.is_empty() { self.failed = false; }
                 if text.is_empty() && self.stage.as_ref().is_some_and(|s| s.key != key) { return } // another source's end: not this one's stage
                 let st = (!text.is_empty()).then(|| Stage { key, text, since: std::time::Instant::now().checked_sub(std::time::Duration::from_millis(ms)).unwrap_or_else(std::time::Instant::now), about, retrying: false });
                 if st.is_none() && self.stage.as_ref().is_some_and(|s| s.text == BUILDING) { return } // the model is still being decoded here
                 self.set_stage(st, cx);
             }
             Msg::Building(key) => self.set_stage(Some(Stage { key, text: BUILDING.into(), since: std::time::Instant::now(), about: 0, retrying: false }), cx),
-            Msg::Image { ticket, key, image, ms, tris, w, h, by, draft } => {
+            Msg::Image { ticket, key, view_rev, image, ms, tris, w, h, by, draft } => {
                 if draft { self.draft_scale = draft_scale(self.draft_scale, ms); }
-                if !shows_for_key(&self.key, &key, ticket, self.on_screen, self.floor) { return } // stale key or ticket: never paint another model's picture
-                self.on_screen = ticket;
-                self.image_key = key;
-                if let Some(old) = self.image.replace(image) { self.retired.push((old, self.frames)); }
-                self.stats = Stats { images: self.stats.images + 1, painted: self.stats.painted, last_ms: ms, last_tris: tris, last_size: (w, h), by }; cx.notify();
+                if !self.core.apply_image(ticket, key, view_rev, image, w, h) { return }
+                self.stats = Stats { images: self.stats.images + 1, painted: self.painted_count(), last_ms: ms, last_tris: tris, last_size: (w, h), by }; cx.notify();
                 // a fade is drawn picture after picture while it runs (no timer: the next is asked when this one is in), then once more at rest
-                if ticket == self.latest && self.drag.is_none() && self.fading { let still = self.fades().1; self.ask_render(still); }
+                if ticket == self.core.latest && self.drag.is_none() && self.fading { let still = self.fades().1; self.ask_render(still); }
             }
-        }
-    }
-    /// The model on show becomes the one kept (Kept). Only caches `image` when it was rendered for `self.key`.
-    fn keep_current(&mut self) {
-        if let (Some(mesh), Some(cam)) = (self.mesh.clone(), self.cam) {
-            let image = image_matches_key(&self.key, &self.image_key, self.image.is_some()).then(|| self.image.clone()).flatten();
-            self.prev = Some(Kept { key: self.key.clone(), mesh, cam, touched: self.touched, fit_aspect: self.fit_aspect, parts: self.parts, groups: self.born.len(), image });
         }
     }
     /// The viewer asks for `key`: when it is the model kept, it comes back at once, with its camera (the hub sends it again meanwhile).
     pub fn want(&mut self, key: &str, cx: &mut Context<Self>) {
-        if key.is_empty() || key == self.key || self.prev.as_ref().map_or(true, |p| p.key != key) { return }
-        let Some(k) = self.prev.take() else { return };
-        self.keep_current();
-        self.clear_image();
-        // its last picture at once (the same camera), a new one drawn behind it
-        if let Some(i) = k.image { self.retired.retain(|(r, _)| !Arc::ptr_eq(r, &i)); self.image = Some(i); self.image_key = k.key.clone(); self.on_screen = self.latest; }
-        self.fitted = (k.mesh.center, k.mesh.radius); self.key = k.key; self.mesh = Some(k.mesh); self.cam = Some(k.cam); self.touched = k.touched; self.fit_aspect = k.fit_aspect; self.parts = k.parts;
-        let shown = std::time::Instant::now() - std::time::Duration::from_secs(1); self.born = vec![shown; k.groups]; self.restored = Some(k.groups);
-        if self.stage.as_ref().is_some_and(|s| s.key == self.key) { self.stage = None; }
-        self.note.clear(); self.failed = false; self.floor = self.latest + 1; self.asked = (0, 0); self.ask_render(false); cx.notify();
-        eprintln!("GPUI_METRIC {{\"event\":\"solid_restored\",\"triangles\":{}}}", self.mesh.as_ref().map_or(0, |m| m.tris()));
+        let [pw, ph, sf, _, _] = *self.size.lock().unwrap();
+        if !self.core.restore_kept(key, (pw, ph, sf), self.draft_scale) { return }
+        if self.stage.as_ref().is_some_and(|s| s.key == self.core.key) { self.stage = None; }
+        self.note.clear(); self.failed = false; self.ask_render(false); cx.notify();
+        eprintln!("GPUI_METRIC {{\"event\":\"solid_restored\",\"triangles\":{}}}", self.core.mesh.as_ref().map_or(0, |m| m.tris()));
     }
     /// Each part group's fade now (index 0 the board), and whether any is still fading.
     fn fades(&self) -> (Vec<f32>, bool) {
-        let mut v = Vec::with_capacity(self.born.len() + 1); v.push(1.0); let mut any = false;
-        for b in &self.born { let f = fade_at(b.elapsed().as_secs_f32() * 1000.0); any |= f < 1.0; v.push(f); }
+        let mut v = Vec::with_capacity(self.core.born.len() + 1); v.push(1.0); let mut any = false;
+        for b in &self.core.born { let f = fade_at(b.elapsed().as_secs_f32() * 1000.0); any |= f < 1.0; v.push(f); }
         (v, any)
     }
     /// The parts' progress for the page ("" when none is awaited).
-    pub fn parts_progress(&self) -> String { progress(self.parts.0, self.parts.1) }
+    pub fn parts_progress(&self) -> String { progress(self.core.parts.0, self.core.parts.1) }
     /// Request an image at the panel's device-pixel size (half size for a draft), within MAX_PIXELS.
     fn ask_render(&mut self, draft: bool) {
         let (fades, fading) = self.fades(); self.fading = fading;
-        let (Some(mesh), Some(cam)) = (self.drawn(), self.cam) else { return };
         let [pw, ph, sf, _, _] = *self.size.lock().unwrap();
-        let (mut w, mut h) = (((pw * sf) as usize).max(64), ((ph * sf) as usize).max(48));
-        if w * h > MAX_PIXELS { let k = (MAX_PIXELS as f32 / (w * h) as f32).sqrt(); w = (w as f32 * k) as usize; h = (h as f32 * k) as usize; }
-        // a draft while moving: one sample a pixel, and half size only on a very large panel; the rest at rest: smooth outlines
-        let most = (DRAFT_PIXELS as f32 * self.draft_scale) as usize;
-        if draft && w * h > most { let k = (most as f32 / (w * h) as f32).sqrt(); w = ((w as f32 * k) as usize).max(32); h = ((h as f32 * k) as usize).max(24); }
-        self.asked = (w, h);
-        self.latest = self.worker.submit_render(self.key.clone(), mesh, Arc::new(fades), cam, w, h, samples(w, h, draft), draft, self.back);
+        let Some((key, mesh, cam, view_rev, w, h)) = self.core.prepare_render((pw, ph, sf), draft, self.draft_scale) else { return };
+        self.core.latest = self.worker.submit_render(key, mesh, Arc::new(fades), cam, view_rev, w, h, samples(w, h, draft), draft, self.core.back);
     }
     /// The toolbar's Fit (the first fitted view again, camera untouched) and its standard views.
     pub fn set_view(&mut self, name: &str) {
-        let Some(m) = self.mesh.clone() else { return };
-        let fitted = Camera::fit_to(m.center, m.radius, self.fit_aspect.max(0.05));
-        if name == "fit" { self.cam = Some(fitted); self.touched = false; self.fitted = (m.center, m.radius); }
-        else { self.cam = Some(fitted.named(name)); self.touched = true; }
+        let Some(m) = self.core.mesh.clone() else { return };
+        let fitted = Camera::fit_to(m.center, m.radius, self.core.fit_aspect.max(0.05));
+        if name == "fit" { self.core.cam = Some(fitted); self.core.touched = false; self.core.fitted = (m.center, m.radius); }
+        else { self.core.cam = Some(fitted.named(name)); self.core.touched = true; }
+        self.core.bump_view();
         self.ask_render(false);
     }
     /// A move of the camera by a key or the wheel: a draft now, the full picture once nothing has moved it for 150 ms.
     fn moved(&mut self, cx: &mut Context<Self>) {
-        self.touched = true; self.ask_render(true); self.wheel += 1; let n = self.wheel;
+        self.core.touched = true; self.core.bump_view(); self.ask_render(true); self.wheel += 1; let n = self.wheel;
         cx.spawn(async move |weak, cx| {
             cx.background_executor().timer(std::time::Duration::from_millis(150)).await;
             let _ = weak.update(cx, |this, cx| if this.wheel == n && this.drag.is_none() { this.settled(cx) });
@@ -862,11 +1008,11 @@ impl SolidPage {
     /// the finer model replaces this one when the hub has it, the camera where the person left it).
     fn settled(&mut self, cx: &mut Context<Self>) {
         self.ask_render(false);
-        let (Some(m), Some(c)) = (&self.mesh, self.cam) else { return };
-        if !refinable(&self.key) { return }
-        let Some(f) = refine_focus(&c, m.radius, self.fit_aspect.max(0.05)) else { return };
-        if self.refined.iter().any(|r| covers(*r, f)) { return }
-        self.refined.push(f); cx.emit(SolidEvent::Refine(self.key.clone(), f.0, f.1));
+        let (Some(m), Some(c)) = (&self.core.mesh, self.core.cam) else { return };
+        if !refinable(&self.core.key) { return }
+        let Some(f) = refine_focus(&c, m.radius, self.core.fit_aspect.max(0.05)) else { return };
+        if self.core.refined.iter().any(|r| covers(*r, f)) { return }
+        self.core.refined.push(f); cx.emit(SolidEvent::Refine(self.core.key.clone(), f.0, f.1));
     }
     /// The page's keys, as 0.14's 3D view had them; whether the key was one of them.
     fn on_key(&mut self, e: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
@@ -875,7 +1021,7 @@ impl SolidPage {
         let k = e.keystroke.key.as_str();
         let view = match k { "f" | "home" => Some("fit"), "0" => Some("iso"), "1" => Some("top"), "2" => Some("bottom"), "3" => Some("front"), "4" => Some("right"), "5" => Some("back"), "6" => Some("left"), _ => None };
         if let Some(v) = view { self.set_view(v); cx.notify(); return true }
-        let Some(c) = &mut self.cam else { return false };
+        let Some(c) = &mut self.core.cam else { return false };
         let h = self.size.lock().unwrap()[1];
         match k {
             "left" | "right" | "up" | "down" => {
@@ -892,7 +1038,7 @@ impl SolidPage {
     pub fn retry_sent(&mut self, cx: &mut Context<Self>) {
         let now = std::time::Instant::now();
         self.last_retry = Some(now);
-        /* i18n-ok: stage_line draws through trs */ self.set_stage(Some(Stage { key: self.key.clone(), text: "Trying again…".into(), since: now, about: 0, retrying: true }), cx);
+        /* i18n-ok: stage_line draws through trs */ self.set_stage(Some(Stage { key: self.core.key.clone(), text: "Trying again…".into(), since: now, about: 0, retrying: true }), cx);
     }
     /// Retry: routed through the window's presenter `"retry"` action (preserving Split and far `on`); disabled during the 1 s cooldown.
     fn retry_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -905,12 +1051,12 @@ impl SolidPage {
         base.text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).cursor_pointer().hover(|d| d.bg(rgba(0x2a3548ee)))
             .on_click(cx.listener(|this, _, _, cx| {
                 if !crate::screens::panestate::retry_ready(this.last_retry, std::time::Instant::now()) { return }
-                let k = this.key.clone(); cx.emit(SolidEvent::Retry(k));
+                let k = this.core.key.clone(); cx.emit(SolidEvent::Retry(k));
             }))
     }
     /// Snap view: the picture on screen as a PNG in `dir` (never over a file); the path, or why not.
     pub fn snap(&mut self, dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
-        /* i18n-ok: a reason inside the translated "Snap view failed" */ let img = self.image.clone().ok_or("no picture yet")?;
+        /* i18n-ok: a reason inside the translated "Snap view failed" */ let img = self.core.image.clone().ok_or("no picture yet")?;
         let (w, h) = { let s = img.size(0); (s.width.0 as u32, s.height.0 as u32) };
         /* i18n-ok: as above */ let mut px = img.as_bytes(0).ok_or("no picture yet")?.to_vec();
         for p in px.chunks_exact_mut(4) { p.swap(0, 2); } // the container holds BGRA
@@ -922,59 +1068,65 @@ impl SolidPage {
         Ok(path)
     }
     /// For the demo and tests: an orbit drag step as the mouse handler does it.
-    pub fn drag_by(&mut self, dx: f32, dy: f32) { if let Some(c) = &mut self.cam { c.orbit(dx, dy); } self.ask_render(true); }
+    pub fn drag_by(&mut self, dx: f32, dy: f32) { if let Some(c) = &mut self.core.cam { c.orbit(dx, dy); self.core.bump_view(); } self.ask_render(true); }
     /// For the demo: the button went up, the full picture is asked for.
     pub fn settle(&mut self) { self.ask_render(false); }
     /// Give the images back to the atlas (call before dropping the page, with the window).
-    pub fn release(&mut self, window: &mut Window) { self.image_key.clear(); for i in self.retired.drain(..).map(|r| r.0).chain(self.image.take()) { let _ = window.drop_image(i); } }
+    pub fn release(&mut self, window: &mut Window) { self.core.image_key.clear(); self.core.image_size = (0, 0); self.core.image_view_rev = 0; for i in self.core.retired.drain(..).map(|r| r.0).chain(self.core.image.take()) { let _ = window.drop_image(i); } }
     /// The pictures that are (or may still be) in the window's sprite atlas, on the GPU.
-    pub fn atlas_images(&self) -> usize { self.retired.len() + self.image.is_some() as usize }
+    pub fn atlas_images(&self) -> usize { self.core.retired.len() + self.core.image.is_some() as usize }
     /// The page is put away (the viewer closed, another page or thread shown): its pictures leave the atlas and its model the GPU; the model
     /// stays here, on the CPU, so showing the page again draws it again at once. The next paint asks for a new picture.
     pub fn put_away(&mut self) {
-        self.image_key.clear();
-        let Some(i) = self.image.take() else { return };
-        self.retired.push((i, self.frames)); self.asked = (0, 0); self.on_screen = self.latest; self.worker.forget();
+        self.core.image_key.clear(); self.core.image_size = (0, 0); self.core.image_view_rev = 0;
+        let Some(i) = self.core.image.take() else { return };
+        self.core.retired.push((i, self.core.frames)); self.core.asked = (0, 0); self.core.on_screen = self.core.latest; self.worker.forget();
     }
     /// Once a window frame (from the window's render, the page drawn or not): the pictures that left the screen two frames ago leave the
     /// atlas. Not sooner: the frame that last drew one may still be on the GPU (gpui waits for a frame only at the end of the next one's
     /// draw), and gpui destroys an image's texture at once when it is dropped, a texture the GPU would still be reading.
     pub fn collect(&mut self, window: &mut Window) {
-        self.frames += 1;
-        let before = self.retired.len();
-        let frames = self.frames;
-        self.retired.retain(|(i, at)| if gone_from_gpu(*at, frames) { let _ = window.drop_image(i.clone()); false } else { true });
-        if self.image.is_none() && self.retired.is_empty() && before > 0 { eprintln!("GPUI_METRIC {{\"event\":\"solid_put_away\",\"images_dropped\":{before},\"atlas_images\":{}}}", self.atlas_images()); }
+        self.core.frames += 1;
+        let before = self.core.retired.len();
+        let frames = self.core.frames;
+        self.core.retired.retain(|(i, at)| if gone_from_gpu(*at, frames) { let _ = window.drop_image(i.clone()); false } else { true });
+        if self.core.image.is_none() && self.core.retired.is_empty() && before > 0 { eprintln!("GPUI_METRIC {{\"event\":\"solid_put_away\",\"images_dropped\":{before},\"atlas_images\":{}}}", self.atlas_images()); }
     }
 }
 impl Render for SolidPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // images no longer shown leave the sprite atlas (gpui keeps a painted RenderImage there until it is dropped)
-        if self.stats.images != self.counted { self.counted = self.stats.images; self.stats.painted += 1; }
-        let size = self.size.clone();
-        let probe = canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
-            let new = [f32::from(b.size.width), f32::from(b.size.height), window.scale_factor(), f32::from(b.origin.x), f32::from(b.origin.y)];
-            let mut g = size.lock().unwrap();
-            if *g != new { *g = new; drop(g); window.refresh(); } // the panel changed size or scale: ask for the next frame once, which re-renders at the new size
-        }).absolute().top_0().left_0().size_full(); // (at the page's corner: with no place of its own it sat under the picture, and the pointer was measured from the page's bottom edge)
+        self.stats.painted = self.painted_count();
         // a panel whose size differs from the last request re-renders at the right size
         let [pw, ph, sf, _, _] = *self.size.lock().unwrap();
         // the model was fitted before the panel's size was known: an untouched camera is fitted again to the real shape
-        if let Some(m) = self.mesh.clone() { if pw > 0.0 && ph > 0.0 && !self.touched && aspect_changed(self.fit_aspect, pw / ph) { self.fit_aspect = pw / ph; self.cam = Some(Camera::fit_to(m.center, m.radius, self.fit_aspect)); self.fitted = (m.center, m.radius); self.ask_render(false); } }
-        if self.mesh.is_some() && pw > 0.0 { let want = (((pw * sf) as usize).max(64), ((ph * sf) as usize).max(48)); if self.drag.is_none() && want.0 * want.1 <= MAX_PIXELS && want != self.asked && self.asked.0 * 2 != want.0 { self.ask_render(false); } }
+        if let Some(m) = self.core.mesh.clone() { if pw > 0.0 && ph > 0.0 && !self.core.touched && aspect_changed(self.core.fit_aspect, pw / ph) { self.core.fit_aspect = pw / ph; self.core.cam = Some(Camera::fit_to(m.center, m.radius, self.core.fit_aspect)); self.core.fitted = (m.center, m.radius); self.core.bump_view(); self.ask_render(false); } }
+        if self.core.mesh.is_some() && pw > 0.0 { let want = (((pw * sf) as usize).max(64), ((ph * sf) as usize).max(48)); if self.drag.is_none() && want.0 * want.1 <= MAX_PIXELS && want != self.core.asked && self.core.asked.0 * 2 != want.0 { self.ask_render(false); } }
         // the model is here and its first picture is being drawn (a big board on a machine without a usable GPU: a second or two): said, not blank
-        let stage = { let t = self.stage_text(); if t.is_empty() && self.image.is_none() && self.mesh.is_some() { trs(DRAWING) } else { t } };
-        let making_other = self.stage.as_ref().is_some_and(|s| s.key != self.key);
-        let body = match &self.image {
-            _ if making_other || (self.image.is_none() && !stage.is_empty()) => div().id("solid-stage").size_full().child(crate::screens::panestate::view_on_backdrop(self.back, &crate::screens::panestate::PaneState::loading(stage.clone()), None)).into_any_element(),
+        let stage = { let t = self.stage_text(); if t.is_empty() && self.core.image.is_none() && self.core.mesh.is_some() { trs(DRAWING) } else { t } };
+        let making_other = self.stage.as_ref().is_some_and(|s| s.key != self.core.key);
+        let showing_image = !making_other && image_matches_key(&self.core.key, &self.core.image_key, self.core.image.is_some());
+        let paint_gen = showing_image.then_some(self.core.image_gen);
+        let size = self.size.clone();
+        let painted = self.painted.clone();
+        let painted_gen = self.painted_gen.clone();
+        let probe = canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
+            let new = [f32::from(b.size.width), f32::from(b.size.height), window.scale_factor(), f32::from(b.origin.x), f32::from(b.origin.y)];
+            if let Some(g) = paint_gen && new[0] > 0.0 && new[1] > 0.0 && painted_gen.swap(g, Ordering::Relaxed) != g {
+                painted.fetch_add(1, Ordering::Relaxed);
+            }
+            let mut g = size.lock().unwrap();
+            if *g != new { *g = new; drop(g); window.refresh(); } // the panel changed size or scale: ask for the next frame once, which re-renders at the new size
+        }).absolute().top_0().left_0().size_full(); // (at the page's corner: with no place of its own it sat under the picture, and the pointer was measured from the page's bottom edge)
+        let body = match &self.core.image {
+            _ if making_other || (self.core.image.is_none() && !stage.is_empty()) => div().id("solid-stage").size_full().child(crate::screens::panestate::view_on_backdrop(self.core.back, &crate::screens::panestate::PaneState::loading(stage.clone()), None)).into_any_element(),
             Some(i) => img(i.clone()).size_full().object_fit(ObjectFit::Fill).into_any_element(),
             None => {
-                let st = crate::screens::panestate::classify_solid_note(&self.note, self.failed && !self.key.is_empty(), self.retryable);
+                let st = crate::screens::panestate::classify_solid_note(&self.note, self.failed && !self.core.key.is_empty(), self.retryable);
                 let retry = st.retry.then(|| self.retry_button(cx).into_any_element());
-                crate::screens::panestate::view_on_backdrop(self.back, &st, retry)
+                crate::screens::panestate::view_on_backdrop(self.core.back, &st, retry)
             }
         };
-        let tools = (self.mesh.is_some() && !making_other).then(|| {
+        let tools = (self.core.mesh.is_some() && !making_other).then(|| {
             // the first row of buttons centred on the thread's header row (32 px, ui.rs `thread-head`), so their line is the pane's line
             let mut bar = div().absolute().top(px(TOOL_TOP)).left_2().right(px(8. + self.reserve)).flex().flex_wrap().gap_1();
             for (key, view) in [("viewer.fit", "fit"), ("viewer.c.view.iso", "iso"), ("viewer.c.view.top", "top"), ("viewer.c.view.bottom", "bottom"), ("viewer.c.view.front", "front"), ("viewer.c.view.right", "right"), ("viewer.c.view.back", "back"), ("viewer.c.view.left", "left"), ("viewer.c.view.snap", "snap")] {
@@ -990,10 +1142,10 @@ impl Render for SolidPage {
                     })));
             }
             // the probed part, when this model has it: its name in the colour it is lit in, and a press to put it away
-            if self.names_probe && self.lit.as_ref().is_some_and(|l| l.1 == self.probe && l.2.is_some()) {
+            if self.names_probe && self.core.lit.as_ref().is_some_and(|l| l.1 == self.core.probe && l.2.is_some()) {
                 bar = bar.child(div().id("solid-probe").pl_2().pr(px(2.)).h(crate::scale::tpx(TOOL_H)).flex().items_center().gap_1().text_size(crate::scale::tpx(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0xffe066))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(self.probe.clone())
+                    .child(self.core.probe.clone())
                     .child(div().id("solid-probe-clear").p(px(2.)).cursor_pointer().hover(|d| d.bg(rgba(0x2a3548ee))).child(crate::art::icon("x", 12., rgb(0x8a93a3)))
                         .on_click(cx.listener(|this, _, _, cx| { this.set_probe(""); cx.emit(SolidEvent::Pick(String::new())); cx.notify(); }))));
             }
@@ -1001,9 +1153,9 @@ impl Render for SolidPage {
         });
         div().id("solid-page").size_full().overflow_hidden().relative().track_focus(&self.focus).key_context("Viewer").child(body).child(probe).children(tools)
             .on_key_down(cx.listener(|this, e: &KeyDownEvent, _, cx| if this.on_key(e, cx) { cx.stop_propagation() }))
-            .when(self.image.is_some() && !making_other && !self.note.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().flex().items_center().gap_2().text_size(crate::scale::tpx(12.)).text_color(rgb(0x8a93a3)).child(note_words(&self.note))
-                .when(self.failed && self.retryable.unwrap_or_else(|| crate::screens::panestate::is_retryable_none(&self.note)) && !self.key.is_empty(), |d| d.child(self.retry_button(cx)))))
-            .when(self.image.is_some() && !making_other && (!stage.is_empty() || !self.parts_progress().is_empty()), |d| d.child(div().id("solid-parts").absolute().bottom_2().right_2().px_2().text_size(crate::scale::tpx(12.)).text_color(rgb(0x8a93a3)).child(if stage.is_empty() { trs(&self.parts_progress()) } else { stage.clone() })))
+            .when(self.core.image.is_some() && !making_other && !self.note.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().flex().items_center().gap_2().text_size(crate::scale::tpx(12.)).text_color(rgb(0x8a93a3)).child(note_words(&self.note))
+                .when(self.failed && self.retryable.unwrap_or_else(|| crate::screens::panestate::is_retryable_none(&self.note)) && !self.core.key.is_empty(), |d| d.child(self.retry_button(cx)))))
+            .when(self.core.image.is_some() && !making_other && (!stage.is_empty() || !self.parts_progress().is_empty()), |d| d.child(div().id("solid-parts").absolute().bottom_2().right_2().px_2().text_size(crate::scale::tpx(12.)).text_color(rgb(0x8a93a3)).child(if stage.is_empty() { trs(&self.parts_progress()) } else { stage.clone() })))
             .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, window, cx| this.mouse_down(e, window, cx)))
             .on_mouse_down(crate::mousecfg::BUTTONS[1], cx.listener(|this, e: &MouseDownEvent, window, cx| this.mouse_down(e, window, cx)))
             .on_mouse_down(crate::mousecfg::BUTTONS[2], cx.listener(|this, e: &MouseDownEvent, window, cx| this.mouse_down(e, window, cx)))
@@ -1014,7 +1166,7 @@ impl Render for SolidPage {
                 if e.pressed_button.is_none() { this.drag = None; this.ask_render(false); cx.notify(); return } // the button went up where we could not see it
                 let (dx, dy) = (f32::from(e.position.x - last.x), f32::from(e.position.y - last.y));
                 let h = this.size.lock().unwrap()[1];
-                this.touched = true; if let Some(c) = &mut this.cam { match kind { Drag::Orbit => c.orbit(dx, dy), Drag::Pan => c.pan(dx, dy, h), Drag::Roll => c.roll(dx), Drag::Zoom => c.zoom_by(crate::mousecfg::drag_zoom_factor(dy, crate::mousecfg::invert()), 0.0, 0.0, 1.0) } }
+                this.core.touched = true; if let Some(c) = &mut this.core.cam { match kind { Drag::Orbit => c.orbit(dx, dy), Drag::Pan => c.pan(dx, dy, h), Drag::Roll => c.roll(dx), Drag::Zoom => c.zoom_by(crate::mousecfg::drag_zoom_factor(dy, crate::mousecfg::invert()), 0.0, 0.0, 1.0) } this.core.bump_view(); }
                 this.drag = Some((kind, e.position)); this.ask_render(true); // a draft while dragging, the full image on release. No repaint here: the picture's arrival is what repaints
             }))
             .on_mouse_up(MouseButton::Left, cx.listener(|this, e: &MouseUpEvent, _, cx| this.mouse_up(e, cx)))
@@ -1032,10 +1184,10 @@ impl Render for SolidPage {
                         let k = if lines { wheel_zoom(Some(y), 0.0, ctrl) } else { wheel_zoom(None, y, ctrl) };
                         // the pointer in panel coordinates, -1..1 with y up
                         let (nx, ny) = if pw > 0.0 && ph > 0.0 { ((f32::from(e.position.x) - ox) / pw * 2.0 - 1.0, 1.0 - (f32::from(e.position.y) - oy) / ph * 2.0) } else { (0.0, 0.0) };
-                        this.touched = true;
-                        if let Some(c) = &mut this.cam { c.zoom_by(k, nx.clamp(-1.0, 1.0), ny.clamp(-1.0, 1.0), pw / ph.max(1.0)); }
+                        this.core.touched = true;
+                        if let Some(c) = &mut this.core.cam { c.zoom_by(k, nx.clamp(-1.0, 1.0), ny.clamp(-1.0, 1.0), pw / ph.max(1.0)); }
                     }
-                    crate::mouse::Scroll::Pan { dx, dy } => { this.touched = true; if let Some(c) = &mut this.cam { c.pan(dx, dy, ph); } }
+                    crate::mouse::Scroll::Pan { dx, dy } => { this.core.touched = true; if let Some(c) = &mut this.core.cam { c.pan(dx, dy, ph); } }
                     crate::mouse::Scroll::None => return,
                 }
                 cx.stop_propagation(); this.moved(cx); // drafts while the wheel turns, the full picture when it rests
@@ -1045,8 +1197,8 @@ impl Render for SolidPage {
                 let [pw, ph, _, ox, oy] = *this.size.lock().unwrap();
                 let (nx, ny) = if pw > 0.0 && ph > 0.0 { ((f32::from(e.position.x) - ox) / pw * 2.0 - 1.0, 1.0 - (f32::from(e.position.y) - oy) / ph * 2.0) } else { (0.0, 0.0) };
                 let f = crate::mousecfg::solid().pinch_factor(pinch_zoom(e.delta), crate::mousecfg::invert()); if f == 1.0 { return }
-                this.touched = true;
-                if let Some(c) = &mut this.cam { c.zoom_by(f, nx.clamp(-1.0, 1.0), ny.clamp(-1.0, 1.0), pw / ph.max(1.0)); }
+                this.core.touched = true;
+                if let Some(c) = &mut this.core.cam { c.zoom_by(f, nx.clamp(-1.0, 1.0), ny.clamp(-1.0, 1.0), pw / ph.max(1.0)); }
                 cx.stop_propagation(); this.moved(cx);
             }))
     }
@@ -1579,5 +1731,95 @@ mod tests {
         assert!(!super::image_matches_key(mech, "", true));
         assert!(!super::image_matches_key(mech, mech, false));
         assert!(super::image_matches_key(mech, mech, true));
+    }
+    fn dummy_layers() -> std::sync::Arc<super::Layers> {
+        std::sync::Arc::new(super::Layers::of(Some(std::sync::Arc::new(mesh())), vec![]).unwrap())
+    }
+    fn dummy_img(w: usize, h: usize) -> std::sync::Arc<gpui::RenderImage> {
+        super::to_image(vec![0x7fu8; w * h * 4], w, h).unwrap()
+    }
+    #[test] fn source_switch_to_meshless_parts_header_clears_old_mesh_and_never_submits_it() {
+        let board = "2|/proj|";
+        let mech = "2|/proj|/proj/mech/bracket.step";
+        let mut core = super::SolidCore::new();
+        // 1. Paint source A (board).
+        let res = core.apply_scene(board.into(), Some(dummy_layers()), true, true, 0, 0, 0, (600.0, 800.0));
+        assert!(res.should_render);
+        let (rk, _, _, rev, w, h) = core.prepare_render((600.0, 800.0, 1.0), false, 1.0).unwrap();
+        assert_eq!((rk.as_str(), w, h), (board, 600, 800));
+        core.latest = 1;
+        assert!(core.apply_image(1, board.into(), rev, dummy_img(w, h), w, h));
+        assert!(core.image.is_some() && core.image_key == board);
+        // 2. Switch to source B via a mesh-less Parts header before B's first Part arrives.
+        let res_b = core.apply_scene(mech.into(), None, false, true, 0, 0, 4, (600.0, 800.0));
+        assert!(!res_b.should_render);
+        assert_eq!(core.key, mech);
+        assert!(core.mesh.is_none(), "old mesh must be cleared on source switch");
+        assert!(core.cam.is_none(), "old camera must be cleared on source switch");
+        assert!(core.image.is_none() && core.image_key.is_empty(), "old image must be cleared");
+        // 3. Attempting to submit a render before B's first part arrives must produce nothing (never submit A under B).
+        assert!(core.prepare_render((600.0, 800.0, 1.0), false, 1.0).is_none());
+        // 4. Late image for A is rejected even with a fresh ticket.
+        assert!(!core.apply_image(2, board.into(), rev, dummy_img(w, h), w, h));
+        assert!(core.image.is_none());
+    }
+    #[test] fn kept_cache_restores_image_only_when_viewport_size_matches() {
+        let board = "2|/proj|";
+        let mech = "2|/proj|/proj/mech/bracket.step";
+        let mut core = super::SolidCore::new();
+        // Paint A in a Split-sized viewport (300x400).
+        core.apply_scene(board.into(), Some(dummy_layers()), true, true, 0, 0, 0, (300.0, 400.0));
+        let (_, _, _, rev_a, w, h) = core.prepare_render((300.0, 400.0, 1.0), false, 1.0).unwrap();
+        core.latest = 1;
+        assert!(core.apply_image(1, board.into(), rev_a, dummy_img(w, h), w, h));
+        // Switch to B (full-height 600x800): A is saved in prev with size (300, 400).
+        core.apply_scene(mech.into(), Some(dummy_layers()), true, true, 0, 0, 0, (600.0, 800.0));
+        // Restore A into a full-height 600x800 viewport: mesh + cam restore, but mismatched Split image must NOT restore.
+        assert!(core.restore_kept(board, (600.0, 800.0, 1.0), 1.0));
+        assert_eq!(core.key, board);
+        assert!(core.mesh.is_some() && core.cam.is_some());
+        assert!(core.image.is_none() && core.image_key.is_empty(), "mismatched viewport size must not restore stretched image");
+        // Now paint A at 600x800, switch to B, and return to A at the SAME 600x800 viewport: cached image restores at once.
+        let (_, _, _, rev_a2, w2, h2) = core.prepare_render((600.0, 800.0, 1.0), false, 1.0).unwrap();
+        core.latest = 2;
+        assert!(core.apply_image(2, board.into(), rev_a2, dummy_img(w2, h2), w2, h2));
+        core.apply_scene(mech.into(), Some(dummy_layers()), true, true, 0, 0, 0, (600.0, 800.0));
+        assert!(core.restore_kept(board, (600.0, 800.0, 1.0), 1.0));
+        assert!(core.image.is_some() && core.image_key == board && core.image_size == (600, 800));
+    }
+    #[test] fn orbit_keeps_image_on_same_key_but_cache_rejects_stale_camera_image() {
+        let board = "2|/proj|";
+        let mech = "2|/proj|/proj/mech/bracket.step";
+        let mut core = super::SolidCore::new();
+        // Paint A at 600x800.
+        core.apply_scene(board.into(), Some(dummy_layers()), true, true, 0, 0, 0, (600.0, 800.0));
+        let (_, _, cam_before, rev1, w, h) = core.prepare_render((600.0, 800.0, 1.0), false, 1.0).unwrap();
+        core.latest = 1;
+        assert!(core.apply_image(1, board.into(), rev1, dummy_img(w, h), w, h));
+        // Orbit on A: previous image stays on screen (no flash while replacement renders), view_rev advances.
+        if let Some(c) = &mut core.cam { c.orbit(24.0, 12.0); }
+        let cam_after = core.cam.unwrap();
+        assert_ne!(cam_before.eye(), cam_after.eye());
+        core.bump_view();
+        assert_ne!(core.view_rev, rev1);
+        assert!(core.image.is_some(), "same-key camera move must keep previous image to avoid flash");
+        // Leave to B before the new camera's render finishes, then return to A at the same size.
+        core.apply_scene(mech.into(), Some(dummy_layers()), true, true, 0, 0, 0, (600.0, 800.0));
+        assert!(core.restore_kept(board, (600.0, 800.0, 1.0), 1.0));
+        assert_eq!(core.cam.unwrap().eye(), cam_after.eye(), "orbited camera must be restored");
+        assert!(core.image.is_none() && core.image_key.is_empty(), "pre-orbit image must not be restored under the orbited camera");
+    }
+    #[test] fn note_for_different_source_clears_image_and_metadata() {
+        let board = "2|/proj|";
+        let mech = "2|/proj|/proj/mech/bracket.step";
+        let mut core = super::SolidCore::new();
+        core.apply_scene(board.into(), Some(dummy_layers()), true, true, 0, 0, 0, (600.0, 800.0));
+        let (_, _, _, rev, w, h) = core.prepare_render((600.0, 800.0, 1.0), false, 1.0).unwrap();
+        core.latest = 1;
+        assert!(core.apply_image(1, board.into(), rev, dummy_img(w, h), w, h));
+        core.apply_note(mech.into());
+        assert_eq!(core.key, mech);
+        assert!(core.mesh.is_none() && core.cam.is_none());
+        assert!(core.image.is_none() && core.image_key.is_empty() && core.image_size == (0, 0) && core.image_view_rev == 0);
     }
 }

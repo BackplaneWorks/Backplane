@@ -548,7 +548,7 @@ impl Backplane {
             Step::Press(id) => {
                 if let Some(s) = &self.screens.solid {
                     let sr = s.read(cx);
-                    PRESS_SOLID.with(|c| *c.borrow_mut() = (sr.key().to_string(), sr.stats.painted));
+                    PRESS_SOLID.with(|c| *c.borrow_mut() = (sr.key().to_string(), sr.painted_count()));
                 }
                 let found = self.find_script_control(&id);
                 let action = found.map(|e| self.do_click(&e.ctl, cx));
@@ -701,10 +701,11 @@ impl Backplane {
             if !want_key.is_empty() && sr.key() != want_key { return None; }
             if !sr.note.is_empty() { return Some("empty"); }
             if !want_key.is_empty() && sr.image_key() != want_key { return None; }
+            let painted_now = sr.painted_count();
             let painted_for_key = if !want_key.is_empty() && press_key != want_key {
-                sr.stats.painted > press_painted
+                painted_now > press_painted
             } else {
-                sr.stats.painted > 0
+                painted_now > 0
             };
             if sr.stage_text().is_empty() && painted_for_key && sr.stats.last_size.0 > 0 && sr.stats.last_size.1 > 0 {
                 return Some("ready");
@@ -784,7 +785,7 @@ impl Backplane {
         let rects = crate::art::ctl_rects();
         let (_, press_painted) = PRESS_SOLID.with(|c| c.borrow().clone());
         let (solid_key, solid_image_key, solid_shown, solid_note, solid_stage, solid_painted, solid_last_w, solid_last_h) = match &self.screens.solid {
-            Some(s) => { let sr = s.read(cx); (sr.key().to_string(), sr.image_key().to_string(), sr.shown_key().to_string(), sr.note.clone(), sr.stage_text(), sr.stats.painted, sr.stats.last_size.0, sr.stats.last_size.1) }
+            Some(s) => { let sr = s.read(cx); (sr.key().to_string(), sr.image_key().to_string(), sr.shown_key().to_string(), sr.note.clone(), sr.stage_text(), sr.painted_count(), sr.stats.last_size.0, sr.stats.last_size.1) }
             None => (String::new(), String::new(), String::new(), String::new(), String::new(), 0, 0, 0),
         };
         let (plot_key, plot_none) = match &self.screens.plot.frame {
