@@ -36,7 +36,7 @@ pub fn line(f: &Value) -> String {
     if f["paused"] == true { return t("gpui.follow.paused") }
     let focus = &f["focus"];
     if !focus.is_object() { return t("gpui.follow.wait") }
-    let page = trs(if focus["page"] == "schematic" { "Schematic" } else { "Board" });
+    let page = if focus["page"] == "schematic" { trs("Schematic") } else { trs("Board") };
     let refs: Vec<&str> = focus["refs"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
     if focus["kind"] == "route" {
         let near = refs.first().map(|r| format!(" {}", tf("gpui.follow.near", &[("ref", (*r).into())]))).unwrap_or_default();
