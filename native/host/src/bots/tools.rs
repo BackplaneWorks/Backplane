@@ -428,8 +428,10 @@ impl Bots {
         // bot speaks to the person from it: the text lands in its chat as a message of its own (`tell:`), shown like a reply
         let backend = { let m = self.hub.model().await; crate::present::thread::last_input_backend(&m.tail(&self.hub.store, th, 48)) };
         if backend { evs.push(json!({"$":"MessagePosted","thread":th,"msg":format!("tell:{}", self.hub_id("n", now)),"role":"assistant","text":text,"at":now})) }
-        let answer = if !on { "recorded; the person turned these alerts off" } else if source.is_some() { "sent to the person" } else { "shown on the person's desktop; only the uberbot reaches their phone" };
-        self.t_commit(w, now, evs).await.map_or_else(|e| fail(&e), |_| said(answer))
+        // Push.undelivered: the last alert reached no registered phone, so this one will not either: say so, never "sent"
+        let miss = if on && source.is_some() { self.hub.setting(crate::push::UNDELIVERED).await.unwrap_or_default() } else { String::new() };
+        let answer = if !on { "recorded; the person turned these alerts off".to_string() } else if !miss.is_empty() { format!("shown in your conversation, but NOT on the person's phone: alerts are not getting through ({miss}); do not say they were notified") } else if source.is_some() { "sent to the person".to_string() } else { "shown on the person's desktop; only the uberbot reaches their phone".to_string() };
+        self.t_commit(w, now, evs).await.map_or_else(|e| fail(&e), |_| said(&answer))
     }
 
     /// project_create (Hub.newproj): the person is asked first, unless they allowed it for this session; once they accept, the folder is made when missing and resolved, and

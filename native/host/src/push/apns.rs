@@ -154,3 +154,16 @@ pub async fn credentials(hub: &Arc<Hub>) -> Option<(String, String, String, &'st
     let env = env_path().and_then(|p| std::fs::read_to_string(&p).ok().map(|t| (t, p)));
     resolve(set, env.as_ref().map(|(t, p)| (t.as_str(), p.parent().unwrap_or(Path::new(".")))))
 }
+
+/// Push.undelivered.why: a send's failure as the person reads it, naming the key file when that is what is gone (never a key's contents).
+pub async fn explain(hub: &Arc<Hub>, why: &str) -> String {
+    if why != "APNs is not configured" { return format!("Apple refused or did not answer the alert ({why})") }
+    let key = hub.setting("push.apns.key").await.unwrap_or_default();
+    if !key.is_empty() && !Path::new(&key).is_file() { return format!("the APNs key file {key} is missing") }
+    "push is not set up on this hub (push.apns.key, push.apns.keyid and push.apns.team, or ~/.config/backplane/apns.env)".into()
+}
+/// The line the uberbot's conversation shows when phone alerts stop getting through.
+pub fn undelivered_tell(why: &str) -> String {
+    let fix = if why.starts_with("the APNs key file") { " Apple lets you download a key only once, so make a new APNs key at developer.apple.com (Certificates, IDs & Profiles, Keys), then ask me to point push.apns.key and push.apns.keyid at the new .p8. No restart needed." } else { "" };
+    format!("**Phone alerts aren't reaching your phone:** {why}. Replies still show here and in the app while it is open, but nothing pops up on the phone until this is fixed.{fix}")
+}

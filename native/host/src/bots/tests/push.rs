@@ -649,3 +649,32 @@ async fn a_run(s: &S, n: usize) -> (String, String) {
     let f = crate::settings::alerts::secret_frame("gh", "push", "t1", "Lane");
     assert_eq!((f["t"].as_str(), f["kind"].as_str(), f["key"].as_str(), f["thread"].as_str(), f["body"].as_str()), (Some("notify"), Some("ask"), Some("secret-gh"), Some("t1"), Some("Lane needs the secret gh: push. Enter it in the masked box there.")));
 }
+
+/// A carrier whose key is gone until `ok` is set (Nov 18: the wipe took the APNs key file and every push reached no phone).
+#[derive(Default)] struct Keyless { ok: std::sync::atomic::AtomicBool }
+impl Carrier for Keyless {
+    fn send(self: Arc<Self>, _hub: Arc<Hub>, _d: Device, _f: Frame) -> futures_util::future::BoxFuture<'static, Sent> {
+        let r = if self.ok.load(std::sync::atomic::Ordering::SeqCst) { Sent::Ok } else { Sent::Later("APNs is not configured".into()) }; Box::pin(async move { r })
+    }
+}
+#[tokio::test] async fn a_push_that_reaches_no_phone_is_told_once_and_notify_stops_saying_sent() {
+    let (hub, bots, _rec, _bub, chat) = uber("push-keyless").await;
+    set(&hub, push::QUIET, "off").await; set(&hub, push::BURST, "0").await; set(&hub, "push.apns.key", "/nonexistent/AuthKey_GONE.p8").await; device(&hub, "tok1").await;
+    let carrier = Arc::new(Keyless::default()); let p = push::start_with(&hub, bots.clone(), carrier.clone());
+    let tells = |hub: &Arc<Hub>| log(hub).into_iter().filter(|e| e["$"] == "MessagePosted" && e["thread"] == chat.as_str() && e["msg"].as_str().map_or(false, |m| m.starts_with("tell:push-undelivered"))).collect::<Vec<_>>();
+    let r = bots.tool_call_at(&chat, "notify_person", &json!({"reason":"needs_you","text":"first"}), now_s()).await; assert!(r.0, "{r:?}");
+    quiesce(&hub, &bots, &p, None).await;
+    let sent = log(&hub).into_iter().find(|e| e["$"] == "PushSent").expect("recorded"); assert_eq!((sent["sent"].as_u64(), sent["why"].as_str()), (Some(0), Some("APNs is not configured")));
+    assert_eq!(hub.setting(push::UNDELIVERED).await.as_deref(), Some("the APNs key file /nonexistent/AuthKey_GONE.p8 is missing"));
+    let t = tells(&hub); assert_eq!(t.len(), 1, "the person hears it in the chat: {t:?}"); assert!(t[0]["text"].as_str().unwrap().contains("developer.apple.com"), "{t:?}");
+    // the next notify knows: it does not claim the phone heard it, and the same cause is not told twice
+    hub.commit(&json!({"$":"MessagePosted","thread":chat,"msg":"p2","role":"user","text":"go 2","at":now_s() + 2})).await.unwrap();
+    let r = bots.tool_call_at(&chat, "notify_person", &json!({"reason":"needs_you","text":"second"}), now_s() + 3).await; assert!(r.0, "{r:?}");
+    assert!(r.1["note"].as_str().unwrap().contains("NOT on the person's phone"), "{r:?}");
+    quiesce(&hub, &bots, &p, None).await; assert_eq!(tells(&hub).len(), 1, "once a cause");
+    // a key back: the next alert gets through and clears it
+    carrier.ok.store(true, std::sync::atomic::Ordering::SeqCst);
+    hub.commit(&json!({"$":"MessagePosted","thread":chat,"msg":"p3","role":"user","text":"go 3","at":now_s() + 4})).await.unwrap();
+    let r = bots.tool_call_at(&chat, "notify_person", &json!({"reason":"needs_you","text":"third"}), now_s() + 5).await; assert!(r.0, "{r:?}");
+    quiesce(&hub, &bots, &p, None).await; assert_eq!(hub.setting(push::UNDELIVERED).await.unwrap_or_default(), "");
+}
