@@ -6,6 +6,7 @@
 pub(crate) mod ext;
 pub(crate) mod link;
 pub mod term;
+pub mod webpolicy;
 pub mod machines;
 /// What a phone hears of a push on its socket (ext.rs `notify_of`).
 pub fn ext_notify(e: &Value) -> Value { ext::notify_of(e) }
