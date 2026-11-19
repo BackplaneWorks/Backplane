@@ -246,19 +246,18 @@ pub fn open_page(this: &mut Backplane, cx: &mut Context<Backplane>) {
     if this.screens.acct.label.is_none() {
         let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
         input.update(cx, |i, _| i.set_placeholder(&trs("Account name (optional: its email once signed in)")));
-        cx.subscribe(&input, |this, _, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) { add(this, cx) }).detach();
+        cx.subscribe(&input, |this, _, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) { let p = if this.screens.acct.add_provider == "codex" { "codex" } else { "claude" }; add(this, cx, p) }).detach();
         this.screens.acct.label = Some(input);
     }
     this.screens.acct.armed.clear();
     list(this);
     super::google::open_page(this);
 }
-/// The add button names the provider its account is made for (`add_provider`, "" is Claude).
+/// One Add button per provider, each naming the account it makes (`add_provider`, set by onboarding, only picks which is primary and what Enter in the name box adds; "" is Claude).
 pub fn add_word(provider: &str) -> &'static str { /* i18n-ok: drawn through tr */ if provider == "codex" { "Add Codex account" } else { "Add Claude account" } }
-fn add(this: &mut Backplane, cx: &mut Context<Backplane>) {
+fn add(this: &mut Backplane, cx: &mut Context<Backplane>, provider: &'static str) {
     let Some(input) = this.screens.acct.label.clone() else { return };
     let label = input.read(cx).content.to_string();
-    let provider = if this.screens.acct.add_provider == "codex" { "codex" } else { "claude" };
     // no name given: the hub names it after its email once it is signed in
     ask(this, json!({"op": "add", "provider": provider, "label": label.trim(), "unnamed": label.trim().is_empty()}));
     input.update(cx, |i, cx| i.set(String::new(), cx));
@@ -445,7 +444,8 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32)
         let row = if avail < ADD_ROW_MIN { div().flex().flex_col().items_start().gap_2().mt_2().child(div().w_full().h(crate::scale::tpx(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone())) }
             else { div().flex().items_center().gap_2().mt_2().child(div().flex_1().min_w_0().h(crate::scale::tpx(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone())) };
         out.push(row
-            .child(button(cx, light, "acct-add".into(), &trs(add_word(&st.add_provider)), true, false, |this, cx| add(this, cx)))
+            .child(button(cx, light, "acct-add-claude".into(), &trs(add_word("claude")), st.add_provider != "codex", false, |this, cx| add(this, cx, "claude")))
+            .child(button(cx, light, "acct-add-codex".into(), &trs(add_word("codex")), st.add_provider == "codex", false, |this, cx| add(this, cx, "codex")))
             .child(button(cx, light, "acct-add-sync".into(), &trs("Add Claude (sync)"), false, false, |this, cx| add_sync(this, cx))).into_any_element());
     }
     out.extend(super::google::section(cx, light, &st.google));

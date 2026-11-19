@@ -205,6 +205,9 @@ impl Agents {
         // Settings > Writing: a provider or model the person chose is what names threads (the page says so); with neither set, Haiku as before
         let (tp, tm) = { let w = self.world().await; (w.setting("text.provider").to_string(), w.setting("text.model").to_string()) };
         if !tp.trim().is_empty() || !tm.trim().is_empty() { let (p, m) = pick(&tp, &tm); if p == "claude" || p == "codex" { tries.push((p, m, Launch::default(), "the Writing setting")) } }
+        // no Writing setting: a Codex thread is titled by Codex first (a Codex-only install has no Claude to try); Claude's attempts below stay as the fallback (#1162)
+        let thread_provider = { let w = self.world().await; w.threads.get(thread).map(|t| t.provider.clone()).unwrap_or_default() };
+        if tries.is_empty() && thread_provider == "codex" { tries.push(("codex", pick("codex", "").1, Launch::default(), "the thread's provider")) }
         let raw = self.hub.setting(&crate::settings::accounts::binding_key(thread, "claude")).await.unwrap_or_default();
         let b: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
         let id = b["id"].as_str().unwrap_or("").to_string();
