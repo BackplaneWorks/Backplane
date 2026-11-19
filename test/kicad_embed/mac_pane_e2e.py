@@ -686,6 +686,27 @@ try:
                 x0, y0 = max(w[3][0], P[0]), max(w[3][1], P[1]); x1, y1 = min(w[3][0] + w[3][2], P[0] + P[2]), min(w[3][1] + w[3][3], P[1] + P[3])
                 if x1 > x0 and y1 > y0 and (x1 - x0) * (y1 - y0) > 0.3 * P[2] * P[3]: out.append(w)
             return out
+        def sample_back(tag, t0, limit=10.0):
+            # a recorder beside the checks (they keep their own waits and budgets): from the press, every ~20 ms for `limit` s, each change of
+            # the embedded KiCad's windows on screen (any level) logged with its epoch ms (the hub's "(at ms)" and the client's at_ms clock),
+            # rect, level and order against Backplane's window; written as INFO sample lines when the next way starts (#1199's slow returns)
+            out = []
+            def run():
+                last = None
+                while time.time() - t0 < limit:
+                    ws = helper('windows') or []; ms = int(time.time() * 1000)
+                    ours = next((i for i, w in enumerate(ws) if w['number'] == cw[0]), None)
+                    ks = tuple((tuple(round(v) for v in w['bounds']), w['layer'], 'above' if ours is not None and i < ours else 'below')
+                               for i, w in enumerate(ws) if w['pid'] == kpid and w['bounds'][2] > 200 and w['bounds'][3] > 200)
+                    if ks != last: out.append((ms, ks)); last = ks
+                    time.sleep(0.02)
+                out.append((int(time.time() * 1000), 'end'))
+            th = threading.Thread(target=run, daemon=True); th.start()
+            def report():
+                th.join(limit + 2)
+                print(f'INFO sample {tag}: press at {int(t0 * 1000)} (epoch ms); pane {list(P)}; KiCad windows on screen, each change: ' +
+                      '; '.join(f'+{m - int(t0 * 1000)} ms {k}' for m, k in out), flush=True)
+            return report
         def at_pane():  # KiCad's frame directly above Backplane's window, at the pane's rect (2 pt)
             f = kicad_frame()
             return f if f and all(abs(a - b) <= 2 for a, b in zip(f[3], P)) else None
@@ -743,8 +764,9 @@ try:
             time.sleep(0.8); relay(op='text', text=title); time.sleep(1.2)
             t = time.time(); key(36); return (True, t) if timed else True
         def back_from_settings():
-            press_rect('ui:Settings') or key(K_ESC); time.sleep(1.2)
-            if rects_now().get('ui:Settings') is None: key(K_ESC); time.sleep(0.8)
+            # Settings is a sheet over the window: Escape closes it (the gear behind it is not pressable; e2e-macos 44296739808 left it open);
+            # a second Escape is harmless (the viewer is already shut by Settings)
+            key(K_ESC); time.sleep(1.0); key(K_ESC); time.sleep(0.8)
             t = time.time(); return press_rect('rail:Board'), t
         def open_keysheet():
             cwa = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(cwa[0] + 150, cwa[1] + 28 + 250); time.sleep(0.6)
@@ -766,6 +788,8 @@ try:
             # chrome), F1; back is Escape (keysheet_close before escape_rest), the viewer still open
             ('g', 'the keyboard sheet over the page', open_keysheet, lambda: (key(K_ESC), True)[1]),
         ]
+        import threading
+        REPORTS = []
         for tag, label, leave_, back_ in ways:
             if not at_pane():
                 f0 = wait_for(at_pane, 10, 0.1)
@@ -782,7 +806,8 @@ try:
                 check(bool(cov), f'leave g: a kicad_host_push said covered:true under the sheet ({(cov or [""])[0].split("GPUI_LOG ", 1)[-1][:160]!r})')
             tb = time.time(); b_ = back_()
             if isinstance(b_, tuple): b_, tb = b_
-            f2 = wait_for(at_pane, 3, 0.02); dt = time.time() - tb
+            rep = sample_back(tag, tb); f2 = wait_for(at_pane, 3, 0.02); dt = time.time() - tb
+            REPORTS.append(rep)
             timeline(f'{tag} back', tb, time.time() if f2 else None)
             if not f2 and rects_now().get('ui:Edit'):
                 print(f'INFO leave {tag}: the page came back on View: Edit pressed', flush=True)
@@ -799,6 +824,25 @@ try:
                 check(active(kpid), f'leave {tag}: the keyboard is in KiCad ({"at once" if k_now else "after a click on the canvas"})')
             else:
                 P = last_push()[0]
+        for rep in REPORTS: rep()
+        # (h) a canvas click, then the viewer's Close within the 400 ms yield fallback (#1199's delayed-yield race, 44314267887 (a)): KiCad's
+        # frame off screen, and Backplane stays the active app past the fallback's deadline (checked at +0.6 s and +1.5 s after the Close),
+        # KiCad not active; the client's kicad_mac_yield_fallback lines after the Close said
+        if wait_for(at_pane, 10, 0.1):
+            log0 = len(client_log().splitlines())
+            click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); tclick = time.time(); time.sleep(0.12)
+            closed = press_rect('ui:CloseViewer'); tclose = time.time()
+            gone = wait_for(lambda: not kicad_over_pane(), 1.0, 0.02)
+            samples = []
+            for at in (0.6, 1.0, 1.5):
+                time.sleep(max(0.0, tclose + at - time.time())); samples.append((at, active(client.pid), active(kpid)))
+            fb = [l.split('GPUI_LOG ', 1)[-1][:160] for l in client_log().splitlines()[log0:] if 'kicad_mac_yield_fallback' in l]
+            print(f'INFO leave h: click at {int(tclick * 1000)}, Close {int((tclose - tclick) * 1000)} ms after (pressed {closed}); (s after Close, Backplane active, KiCad active) {samples}; fallback lines {fb}', flush=True)
+            check(bool(closed) and bool(gone), 'leave h: a Close within 400 ms of a canvas click takes KiCad\'s frame off screen')
+            check(all(b and not k for _, b, k in samples), f'leave h: Backplane stays the active app past the yield fallback\'s deadline, KiCad not active ({samples})')
+            press_rect('rail:Board'); wait_for(at_pane, 10, 0.1)
+        else:
+            check(False, 'leave h: KiCad\'s frame over the pane before the quick Close')
         for l in client_log().splitlines():
             if '"kicad_host_push"' in l and '"covered":true' in l.replace(' ', ''): print('INFO leave: a push said covered: ' + l.split('GPUI_LOG ', 1)[-1][:200], flush=True); break
         raise SystemExit(1 if FAILS else 0)
@@ -914,7 +958,13 @@ try:
             wait_for(kframe, 10, 0.2); press_rect('ui:CloseViewer'); time.sleep(1.2)
             t0 = time.time(); n0 = len(PUSHES); press_rect('rail:Board')
             seen = wait_for(lambda: any(j.get('visible') for _, j in PUSHES[n0:] if j.get('kicad_host_push')), 3, 0.005)
-            press_rect('ui:CloseViewer'); time.sleep(1.5)
+            n1 = len(PUSHES); tp = time.time(); closed = press_rect('ui:CloseViewer')
+            # judged 1.5 s after the client's hide push (its press can be taken late while the page is still appearing), not after the press
+            hid = wait_for(lambda: any(j.get('kicad_host_push') and not j.get('visible') for _, j in PUSHES[n1:]), 6, 0.02)
+            if not hid:
+                print(f'INFO swap C{i + 1}: the close was not taken (pressed {closed}; no visible:false push in 6 s): not judged', flush=True)
+                press_rect('rail:Board'); wait_for(kframe, 10, 0.1); time.sleep(0.8); continue
+            time.sleep(1.5)
             stale = over_pane(); c_wrong += bool(stale)
             print(f'INFO swap C{i + 1}: show seen {bool(seen)}, then closed; pushes {[(round((t - t0) * 1000), j["kicad_host_push"], j.get("visible")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; KiCad over the pane after 1.5 s {[w[3] for w in stale]}', flush=True)
             press_rect('rail:Board'); wait_for(kframe, 10, 0.1); time.sleep(0.8)
@@ -927,13 +977,13 @@ try:
         wait_for(kframe, 10, 0.2); press_rect('ui:CloseViewer'); time.sleep(1.2)
         kp = [int(l.split()[0]) for l in subprocess.run(['ps', '-axo', 'pid=,command='], capture_output=True, text=True).stdout.splitlines() if '--embedded' in l and OUT in l]
         log0 = len(client_log().splitlines()); n0 = len(PUSHES)
-        for p_ in kp: os.kill(p_, 19)  # SIGSTOP
+        for p_ in kp: os.kill(p_, __import__('signal').SIGSTOP)  # by name: 19 is SIGCONT on macOS (17 is SIGSTOP)
         try:
             t0 = time.time(); press_rect('rail:Board'); time.sleep(0.8)
             cwa = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(cwa[0] + 150, cwa[1] + 28 + 250)
             time.sleep(max(0.0, stall - (time.time() - t0)))
         finally:
-            for p_ in kp: os.kill(p_, 18)  # SIGCONT
+            for p_ in kp: os.kill(p_, __import__('signal').SIGCONT)
         host_settled(15); time.sleep(3.0)
         lines = client_log().splitlines()[log0:]
         refused = [l for l in lines if 'kicad_host_refused' in l]; retried = [l for l in lines if '"retry":true' in l]
@@ -951,15 +1001,23 @@ try:
         th = threading.Thread(target=lambda: ask('kicad_ipc', {'path': pcbf, 'type': 'kiapi.backplane.embed.RunChecks', 'message': {'kind': 'FK_PCB'}}), daemon=True)
         te = time.time(); th.start(); time.sleep(0.25); press_rect('kicad:full')
         refused_e = wait_for(lambda: any('kicad_host_refused' in l for l in client_log().splitlines()[log0:]), 5, 0.05)
-        os.kill(hub.pid, 19)  # SIGSTOP: the client hears nothing past its 35 s heartbeat
+        os.kill(hub.pid, __import__('signal').SIGSTOP)  # the client hears nothing past its 35 s heartbeat
         try: time.sleep(float(os.environ.get('SWAP_HUB_STOP_S', '45')))
-        finally: os.kill(hub.pid, 18)
-        rejoined = wait_for(lambda: sum('"Hello"' in l or 'disconnect' in l for l in client_log().splitlines()[log0:]) >= 1, 30, 0.2)
+        finally: os.kill(hub.pid, __import__('signal').SIGCONT)
+        # the reconnect: a second "status":"Connected" (the client logs one per connection) after the stop
+        rejoined = wait_for(lambda: any('"status":"Connected"' in l or '"status":"Reconnecting' in l for l in client_log().splitlines()[log0:]), 30, 0.2)
         th.join(60); host_settled(20); time.sleep(2.0)
+        # the hub's picture after the reconnect: on 0692805792 it said viewer_open "" (the viewer shut across the reconnect: e2e-macos
+        # 44299261909); said here for main and branch alike, then the Board page pressed and the frame judged from that press
+        pics = [l for l in client_log().splitlines()[log0:] if '"kicad_pic"' in l]
+        shut = bool(pics) and '"viewer_open":""' in pics[-1]
+        print(f'INFO swap E: after the reconnect the hub says viewer_open {"\"\" (shut)" if shut else "board"}', flush=True)
+        if shut:
+            n2 = len(PUSHES); press_rect('rail:Board'); wait_for(kframe, 10, 0.05); host_settled(10); time.sleep(1.5)
         lines = client_log().splitlines()[log0:]
         last = next((j['kicad_host_push'] for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None); lastvis = next((j.get('visible') for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None)
         f = kframe(); oke = bool(lastvis) and bool(f and last) and all(abs(a - b) <= 2 for a, b in zip(f[3], last))
-        print(f'INFO swap E: refusal waiting before the stop {bool(refused_e)}; reconnect seen {bool(rejoined)} ({[l.split("GPUI_LOG ", 1)[-1][:90] for l in lines if "disconnect" in l][:2]}); pushes {[(round((t - te) * 1000), j["kicad_host_push"], j.get("visible"), j.get("retry")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; frame {f and f[3]}; last {last}', flush=True)
+        print(f'INFO swap E: refusal waiting before the stop {bool(refused_e)}; reconnect seen {bool(rejoined)} ({[l.split("GPUI_LOG ", 1)[-1][:90] for l in lines if '"status"' in l][:3]}); pushes {[(round((t - te) * 1000), j["kicad_host_push"], j.get("visible"), j.get("retry")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; frame {f and f[3]}; last {last}', flush=True)
         check(bool(rejoined), 'swap E: the client dropped and re-made its hub connection')
         check(oke, f'swap E: after a reconnect with a refusal waiting, the frame ends visible at the LAST rect (frame {f and f[3]}, last {last}; refusal before {bool(refused_e)})')
         press_rect('kicad:full'); time.sleep(1.0)
