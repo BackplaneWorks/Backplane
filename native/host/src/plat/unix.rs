@@ -43,6 +43,39 @@ pub mod errno {
 
 pub mod proc {
     pub use libc::{SIGHUP as HUP, SIGKILL as KILL, SIGTERM as TERM};
+    /// What a child starts with, whatever the hub has changed: every signal the hub ignores (SIGXFSZ, SIGPIPE, an inherited SIGCHLD or SIGHUP)
+    /// back at its default, and an empty mask. A SIG_IGN survives exec (a handler does not), and an ignored SIGCHLD makes the child's own children
+    /// auto-reap, so the child's wait() never sees them (KiCad's `which -a python3` under wxExecute, #1160; the hub's own missed exits, #1108).
+    /// Async-signal-safe (sigaction, sigprocmask only): it runs between fork and exec.
+    pub fn default_signals_now() {
+        unsafe {
+            let mut none: libc::sigset_t = std::mem::zeroed(); libc::sigemptyset(&mut none); libc::sigprocmask(libc::SIG_SETMASK, &none, std::ptr::null_mut());
+            for sig in 1..32 {
+                if sig == libc::SIGKILL || sig == libc::SIGSTOP { continue }
+                let mut old: libc::sigaction = std::mem::zeroed();
+                if libc::sigaction(sig, std::ptr::null(), &mut old) == 0 && old.sa_sigaction == libc::SIG_IGN {
+                    let mut dfl: libc::sigaction = std::mem::zeroed(); dfl.sa_sigaction = libc::SIG_DFL; libc::sigaction(sig, &dfl, std::ptr::null_mut());
+                }
+            }
+        }
+    }
+    /// Whether a child needs the reset: the hub ignores SIGCHLD (inherited, and it changes how the child's own wait() behaves), or this thread blocks a
+    /// signal. No other ignored signal counts: any
+    /// `pre_exec` makes std fork the whole hub (800 MB, many threads) for every child instead of posix_spawn, and a hub started under nohup or a
+    /// shell with SIGQUIT or SIGHUP ignored would pay that on every spawn (the full hub suite went from 71 s to over 200 s and timed out). std
+    /// resets SIGPIPE itself on both of its spawn paths; the others (nohup's SIGHUP, SIGXFSZ) stay as the launcher left them.
+    /// Also true when the spawning thread blocks a signal: std's posix_spawn path does not clear the mask (only its fork path does), so it would leak.
+    fn ignores_inheritable() -> bool {
+        unsafe {
+            let mut m: libc::sigset_t = std::mem::zeroed(); libc::pthread_sigmask(libc::SIG_BLOCK, std::ptr::null(), &mut m);
+            if (1..32).any(|s| libc::sigismember(&m, s) == 1) { return true }
+        }
+        unsafe { let mut old: libc::sigaction = std::mem::zeroed(); libc::sigaction(libc::SIGCHLD, std::ptr::null(), &mut old) == 0 && old.sa_sigaction == libc::SIG_IGN }
+    }
+    /// `default_signals_now` in the child of `c`, when the hub ignores SIGCHLD; the reset then covers every ignored signal. Registered first (proc.rs), so a caller's
+    /// own pre_exec (setsid, ...) runs after it.
+    pub fn default_signals(c: &mut std::process::Command) { use std::os::unix::process::CommandExt; if ignores_inheritable() { unsafe { c.pre_exec(|| { default_signals_now(); Ok(()) }); } } }
+    pub fn default_signals_tokio(c: &mut tokio::process::Command) { if ignores_inheritable() { unsafe { c.pre_exec(|| { default_signals_now(); Ok(()) }); } } }
     /// A child in its own session and process group (setsid), so the group can be signalled as one and a signal to ours does not reach it.
     pub fn own_group(c: &mut std::process::Command) { use std::os::unix::process::CommandExt; unsafe { c.pre_exec(|| { libc::setsid(); Ok(()) }); } }
     pub fn own_group_tokio(c: &mut tokio::process::Command) { unsafe { c.pre_exec(|| { libc::setsid(); Ok(()) }); } }
