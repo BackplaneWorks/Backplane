@@ -61,10 +61,14 @@ pub fn next_open_tab(at: &str, step: i32, shown: &[&'static str], have: &[String
     let mut to = next_tab(at, step, shown);
     let mut left = shown.len();
     while to == SIM && !have.iter().any(|h| h == SIM) && left > 0 { to = next_tab(to, step, shown); left -= 1; }
+    if to == SIM && !have.iter().any(|h| h == SIM) { return TABS[0].0 }
     to
 }
 /// The wanted frame kind to publish on `PaneTab`: `Some(now)` only when the pane's wanted frame changed.
 pub fn tab_change<'a>(was: &str, now: &'a str) -> Option<&'a str> { (now != was).then_some(now) }
+/// Reaction to `PaneTab`: repaint only (never call back into `show_kind` or send a hub RPC).
+/// Both `kicad_edit`'s subscription and the no-feedback unit test call this function.
+fn on_pane_tab(notify: impl FnOnce()) { notify(); }
 /// KiCad's Simulator frame (bp.13.2, capability `sim-frame`): the rail's Simulation entry opens the pane on it.
 pub const SIM: &str = "SIMULATOR"; // i18n-ok: wire frame kind
 /// The frame the rail's Simulation entry opens, from the hub's viewer (`simFrame`: its KiCad embeds the Simulator and the project has a
@@ -1976,6 +1980,7 @@ mod tests {
         assert_eq!(with_sim, vec!["PCB", "SCH", "PCB_3D", "SIMULATOR"]);
         assert_eq!(super::next_open_tab("PCB_3D", 1, &with_sim, &["PCB".into(), "SIMULATOR".into()]), "SIMULATOR");
         assert_eq!(super::next_open_tab("PCB_3D", 1, &with_sim, &["PCB".into()]), "PCB");
+        assert_eq!(super::next_open_tab("SIMULATOR", 1, &["SIMULATOR"], &[]), "PCB", "Simulator-only shown without Simulator in have never returns Simulator");
         // the rail's entry: the hub's word, in a window that can hold KiCad
         let v = serde_json::json!({"simFrame": "SIMULATOR"});
         assert_eq!(super::rail_simulation(&v, true).as_deref(), Some("SIMULATOR")); assert_eq!(super::rail_simulation(&v, false), None); assert_eq!(super::rail_simulation(&serde_json::json!({"open": "schematic"}), true), None);
@@ -1993,15 +1998,26 @@ mod tests {
     #[test] fn tab_change_publishes_only_on_change_and_never_loops() {
         assert_eq!(super::tab_change("PCB", "SCH"), Some("SCH"));
         assert_eq!(super::tab_change("SCH", "SCH"), None, "unchanged wanted frame does not re-emit PaneTab");
-        // Real path: strip switches Board -> Schematic while hub's viewer.open stays "board".
-        // PaneTab("SCH") triggers a repaint; rail lights "schematic" with no pending press and no hub RPC;
-        // hub_open_step sees unchanged "board" and returns None (no set_open / second editor.kicad.show RPC).
+        // Real subscriber body (`on_pane_tab`) + command channel: a strip switch Board -> Schematic sends one
+        // `editor.kicad.show`, emits `PaneTab("SCH")` which notifies the parent to repaint, lights "schematic" on
+        // the rail while the hub's page stays "board", and never triggers a second `editor.kicad.show` RPC.
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<super::Command>(8);
+        let _ = tx.try_send(super::Command::Rpc("editor.kicad.show".into(), super::Secret(json!({"project": "/p/a.kicad_pro", "frame": "SCH"})), "kicad"));
+        let emitted = super::tab_change("PCB", "SCH");
+        assert_eq!(emitted, Some("SCH"));
+        let mut notified = 0usize;
+        if emitted.is_some() { super::on_pane_tab(|| notified += 1); }
+        assert_eq!(notified, 1, "PaneTab subscriber notifies the parent once");
         let thread = json!({"viewer":{"open":"board","rail":[{"id":"board","state":"on"},{"id":"schematic","state":"off"}]}});
+        assert_eq!(crate::ui::rail_lit_id(&thread, true, emitted, None).as_deref(), Some("schematic"));
         let mut last_hub = "board".to_string();
-        assert_eq!(super::tab_change("PCB", "SCH"), Some("SCH"));
-        assert_eq!(crate::ui::rail_lit_id(&thread, true, Some("SCH"), None).as_deref(), Some("schematic"));
-        assert_eq!(hub_open_step("board", &mut last_hub, "board", None), None, "no second show RPC");
+        assert_eq!(hub_open_step("board", &mut last_hub, "board", None), None, "unchanged hub page does not re-sync");
         assert_eq!(super::tab_change("SCH", "SCH"), None, "no second PaneTab");
+        let mut show_rpcs = 0usize;
+        while let Ok(cmd) = rx.try_recv() {
+            if matches!(cmd, super::Command::Rpc(ref m, _, _) if m == "editor.kicad.show") { show_rpcs += 1; }
+        }
+        assert_eq!(show_rpcs, 1, "exactly one editor.kicad.show sent in total");
     }
     #[test] fn set_info_close_fallback_publishes_once_only_when_wanted_frame_changes() {
         let i = |fs: &[&str]| json!({"pid": 7, "state": "ready", "frames": fs.iter().map(|k| json!({"kind": k})).collect::<Vec<_>>()});
@@ -2360,7 +2376,7 @@ impl crate::Backplane {
         // the warm hand-over's end: the page drawn again without the viewer's picture under the pane
         cx.subscribe(&page, |_, _, _: &PaneShown, cx| cx.notify()).detach();
         // the pane's wanted frame changed (strip click, Ctrl+Tab, KiCad's active frame): repaint the rail without calling back into show_kind
-        cx.subscribe(&page, |_, _, _: &PaneTab, cx| cx.notify()).detach();
+        cx.subscribe(&page, |_, _, _: &PaneTab, cx| on_pane_tab(|| cx.notify())).detach();
         // the editor's frame closed in KiCad (Ctrl+W, File > Close): back to View, Edit there again (a fresh frame on the next Edit)
         cx.subscribe(&page, |this, _, _: &PaneFrameClosed, cx| this.kicad_view(cx)).detach();
         cx.subscribe(&page, |this, _, e: &PaneKey, cx| {
