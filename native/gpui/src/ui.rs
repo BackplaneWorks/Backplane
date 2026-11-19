@@ -799,6 +799,9 @@ impl Render for Backplane {
             let in_page = self.screens.kicad_window.is_some() || (self.kicad_for(thread, cx).is_some() && crate::screens::viewer::holds_editor(thread));
             if p.read(cx).in_page != in_page { p.update(cx, |p, _| p.in_page = in_page); }
         }
+        // Follow agent in KiCad: the hub learns whether this thread's page holds KiCad and which frame it shows (viewer.state, on change)
+        let kshown = match self.screens.kicad.clone() { Some(p) if p.read(cx).in_page => (true, p.read(cx).tab()), _ => (false, String::new()) };
+        if self.screens.kicad_shown != kshown { self.screens.kicad_shown = kshown; let me = cx.entity(); cx.defer(move |cx| me.update(cx, |this, _| crate::screens::plotview::report_state(this))); }
         let (side_shown, thread_least) = if kfull { (false, 0.) } else { (side_shown, thread_least) };
         crate::screens::viewer::KICAD_FULL.store(kfull, std::sync::atomic::Ordering::Relaxed); crate::screens::viewer::KICAD_POPPED.store(self.screens.kicad_window.is_some(), std::sync::atomic::Ordering::Relaxed);
         crate::screens::viewer::set_least(pane_least); crate::screens::viewer::set_share(share); self.screens.side_shown = side_shown;

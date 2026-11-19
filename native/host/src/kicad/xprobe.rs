@@ -294,7 +294,7 @@ async fn open_frames(route: &embed::GuiRoute) -> Vec<(String, bool)> {
 }
 
 /// Whether the GUI's runtime has bp.9's SelectItems.
-fn has_select_items(route: &embed::GuiRoute) -> bool {
+pub(crate) fn has_select_items(route: &embed::GuiRoute) -> bool {
     route.mode == "fork" && !route.desc.is_empty() && super::proto::load(&route.desc).has_own("kiapi.backplane.embed.SelectItems")
 }
 

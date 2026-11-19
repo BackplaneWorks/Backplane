@@ -3332,6 +3332,7 @@ gpui.follow.near	near {ref}	{ref} の近く	cerca de {ref}
 gpui.follow.wait	Following: waiting for the agent's next edit	追従中: エージェントの次の編集を待っています	Siguiendo: esperando la próxima edición del agente
 gpui.follow.paused	Following paused	追従を一時停止中	Seguimiento en pausa
 gpui.follow.resume	Resume	再開	Reanudar
+gpui.follow.held	Following: {page} · waiting while you have something selected	追従中: {page} · 選択中のものがあるため待機しています	Siguiendo: {page} · en espera mientras tienes algo seleccionado
 android.mgmt.all	All	すべて	Todo
 android.mgmt.judged	agent-judged	エージェント判定	juzgado por agente
 android.mgmt.fix	Fix with agent	エージェントで直す	Corregir con agente
@@ -6359,6 +6360,9 @@ review.empty.next	Add a schematic to see its parts here.	回路図を追加す�
 
     /// gpui.follow.near = near {ref}
     static func gpui_follow_near(ref: String) -> String { f("gpui.follow.near", ["ref": ref]) }
+
+    /// gpui.follow.held = Following: {page} · waiting while you have something selected
+    static func gpui_follow_held(page: String) -> String { f("gpui.follow.held", ["page": page]) }
 
     /// android.ago.m = {n}m
     static func android_ago_m(n: String) -> String { f("android.ago.m", ["n": n]) }

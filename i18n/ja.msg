@@ -3003,6 +3003,7 @@ gpui.follow.near = {ref} の近く
 gpui.follow.wait = 追従中: エージェントの次の編集を待っています
 gpui.follow.paused = 追従を一時停止中
 gpui.follow.resume = 再開
+gpui.follow.held = 追従中: {page} · 選択中のものがあるため待機しています
 
 # ---- android: new entries go here ----
 android.mgmt.all = すべて

@@ -217,7 +217,11 @@ impl Agents {
                     let cwd = self.world().await.cwd(thread);
                     let sch = tokio::task::spawn_blocking(move || crate::files::kicad::project::read(&kc::design_root(&cwd)).sch).await.unwrap_or_default();
                     crate::files::kicad::follow::record(thread, path, &sch, &v).is_some() };
-                if v["saved"].as_str() == Some(path) && (followed || a["show"].as_bool().unwrap_or(true)) { if self.viewer_show(thread, path, "", false).await.0 { v["shown"] = json!(true) } }
+                // the thread's page holds the embedded KiCad: the edit never switches the frame the person's KiCad shows (Follow on or off; an
+                // agent's own viewer_show still does); Follow brings KiCad's view to it in the frame on show (kicad/follow.rs `pane`)
+                let in_pane = v["saved"].as_str() == Some(path) && crate::files::kicad::follow::in_pane(thread, path);
+                if followed && in_pane { crate::files::kicad::follow::pane(&self.hub, thread, path).await; self.hub.bump_views(); }
+                if v["saved"].as_str() == Some(path) && !in_pane && (followed || a["show"].as_bool().unwrap_or(true)) { if self.viewer_show(thread, path, "", false).await.0 { v["shown"] = json!(true) } }
                 (true, v)
             }
             Err(e) => (false, json!({"error": e, "served_by": served})),

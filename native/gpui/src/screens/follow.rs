@@ -37,6 +37,8 @@ pub fn line(f: &Value) -> String {
     let focus = &f["focus"];
     if !focus.is_object() { return t("gpui.follow.wait") }
     let page = if focus["page"] == "schematic" { trs("Schematic") } else { trs("Board") };
+    // the embedded KiCad holds the edit while the person has something selected (the hub's `pane`: SelectItems would clear theirs)
+    if f["pane"] == "held" { return tf("gpui.follow.held", &[("page", page.into())]) }
     let refs: Vec<&str> = focus["refs"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
     if focus["kind"] == "route" {
         let near = refs.first().map(|r| format!(" {}", tf("gpui.follow.near", &[("ref", (*r).into())]))).unwrap_or_default();
@@ -126,6 +128,10 @@ mod tests {
         assert_eq!(line(&f), "Following: Board · routed +3V3 near U5");
         let s = json!({"on": true, "focus": {"page": "schematic", "kind": "edit", "refs": ["R1", "C2"]}});
         assert_eq!(line(&s), "Following: Schematic · edited R1, C2");
+        let held = json!({"on": true, "pane": "held", "focus": {"page": "board", "kind": "edit", "refs": ["U5"]}});
+        assert_eq!(line(&held), "Following: Board · waiting while you have something selected", "the embedded KiCad holds it for the person");
+        let elsewhere = json!({"on": true, "pane": "elsewhere", "focus": {"page": "board", "kind": "edit", "refs": ["U5"]}});
+        assert_eq!(line(&elsewhere), "Following: Board · edited U5", "an edit in the frame not on show: the line says where");
     }
     #[test] fn a_focus_is_taken_by_the_plot_of_its_page_and_sheet_only() {
         let focus = json!({"page": "schematic", "sheet": "/p/sub.kicad_sch", "box": [0.0, 0.0, 10.0, 10.0]});
