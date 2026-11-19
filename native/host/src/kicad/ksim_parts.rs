@@ -319,7 +319,7 @@ pub fn problems_of_log(log: &str) -> Vec<Value> {
 /// A failed run's status in words, when no problem says more.
 pub fn status_words(status: &str) -> &'static str {
     match status { "SIM_OK" | "" => "ok", "SIM_NETLIST_ERROR" => "the netlist has errors", "SIM_MODEL_ERROR" => "a model is missing or wrong", "SIM_NO_CONVERGENCE" => "no convergence", "SIM_FLOATING_NODE" => "a node floats",
-        "SIM_SINGULAR_MATRIX" => "singular matrix", "SIM_TIMEOUT" => "the run did not finish in its time", "SIM_ABORTED" => "the run was stopped", _ => "the simulation failed" }
+        "SIM_SINGULAR_MATRIX" => "singular matrix", "SIM_TIMEOUT" => "the run did not finish in its time", "SIM_ABORTED" => "the run was stopped", "SIM_POINT_LIMIT" => "the run reached its point limit", _ => "the simulation failed" }
 }
 
 #[cfg(test)]
