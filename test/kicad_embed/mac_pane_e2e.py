@@ -1033,8 +1033,26 @@ try:
             check(bool(took), f'hide: {what}, KiCad\'s canvas takes keys with no second click (Cmd+A)')
         # after Edit, with no click: the focused show activated KiCad (TakeFocus, KiCad inactive) and its makeKeyWindow ran before the
         # activation landed (#1198, fork fix/1198-key-on-activate). One Cmd+A must reach the canvas
-        check(bool(wait_for(lambda: active(kpid), 5, 0.1)), 'hide: after Edit, with no click, KiCad is the active app')
-        canvas_takes_keys('after Edit, with no click')
+        # HIDE_RACE=1 (#1347's client race): the keyboard in KiCad from Edit, then a click in Backplane the moment KiCad's background frame
+        # set changes (kicad_info frames 1 -> 2, the schematic's prewarm, ~4 s after Edit). The re-show that change brings used to hand the
+        # keyboard back to KiCad as the click gave it to Backplane. Instead of the after-Edit keys check, which moves the click off the moment
+        def kicad_frames():
+            for l in reversed(client_log().splitlines()):
+                if l.startswith('GPUI_LOG {"kicad_info"'):
+                    try: return int(json.loads(l.split('GPUI_LOG ', 1)[1]).get('frames') or 0)
+                    except ValueError: return 0
+            return 0
+        if os.environ.get('HIDE_RACE') == '1':
+            f0 = kicad_frames()
+            if f0 >= 2: print(f'INFO hide (race): KiCad\'s frame set had already changed ({f0} frames) before the run got here: not hit', flush=True)
+            else:
+                changed = wait_for(lambda: kicad_frames() >= 2, 20, 0.02)
+                cwa = next((w for w in wins() if w[0] == cw[0]), cw); click(cwa[3][0] + 200, cwa[3][1] + 28 + 300); time.sleep(1.5)
+                print(f'INFO hide (race): frames {f0} -> {kicad_frames()} (changed {bool(changed)}), Backplane clicked at once; KiCad active {active(kpid)}, Backplane active {active(client.pid)}', flush=True)
+                check(bool(changed) and not active(kpid), 'hide (race): a click in Backplane as KiCad\'s frame set changes keeps the keyboard in Backplane')
+        else:
+            check(bool(wait_for(lambda: active(kpid), 5, 0.1)), 'hide: after Edit, with no click, KiCad is the active app')
+            canvas_takes_keys('after Edit, with no click')
         # the first click into an inactive KiCad (#1198, fork fix/1198-key-on-activate): KiCad's activation lands after the click, and the
         # frame's makeKeyWindow ran before it and was ignored (KiCad active with no key window, keys going nowhere until a second click).
         # Backplane is made active first (a click in its message area), then one click on the canvas, then keys
