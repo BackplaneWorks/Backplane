@@ -149,7 +149,7 @@ static SEARCH: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
 pub fn search_dirs() -> &'static [PathBuf] {
     SEARCH.get_or_init(|| {
         let cur: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
-        let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from).unwrap_or_default();
+        let home = PathBuf::from(crate::plat::dirs::home_or_empty());
         // what setup installs itself comes last, and is listed whether or not it exists yet: the list is worked out once, before the first install
         // the same for each agent's own installer folder (grok's ~/.grok/bin...): one installed after the hub started is found without a restart
         let later: Vec<PathBuf> = std::iter::once(crate::settings::tools_install::tools_dir()).chain(AGENT_DIRS.iter().map(|d| home.join(d))).collect();

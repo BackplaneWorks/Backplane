@@ -24,11 +24,12 @@ pub fn join(os: Os, base: &str, parts: &[&str]) -> String {
     s
 }
 
-/// The person's home folder: HOME; on Windows, where HOME is usually unset (or a POSIX one from Git's shell), USERPROFILE, then HOMEDRIVE+HOMEPATH.
+/// The person's home folder: HOME; on Windows the user's own folder, USERPROFILE, then HOMEDRIVE+HOMEPATH, and HOME only when neither is set.
+/// Windows programs (Explorer, Claude Code, Altium, KiCad) go by USERPROFILE; a HOME there is some other program's: Git's shell leaves a POSIX
+/// one, and Cadence (OrCAD, Allegro) sets HOME to `%APPDATA%\SPB_Data` for the whole account, which put a new home under SPB_Data.
 pub fn home_in(os: Os, env: Env) -> Option<String> {
-    if let Some(h) = var(os, env, "HOME") { return Some(h) }
-    if os != Os::Windows { return None }
-    var(os, env, "USERPROFILE").or_else(|| Some(format!("{}{}", env("HOMEDRIVE")?, env("HOMEPATH")?)).filter(|h| win_abs(h)))
+    if os != Os::Windows { return var(os, env, "HOME") }
+    var(os, env, "USERPROFILE").or_else(|| Some(format!("{}{}", env("HOMEDRIVE")?, env("HOMEPATH")?)).filter(|h| win_abs(h))).or_else(|| var(os, env, "HOME"))
 }
 pub fn home() -> Option<String> { home_in(OS, &process_env) }
 /// `home`, or "" (a caller that joins it gets a relative path, never another folder's).
@@ -125,6 +126,13 @@ mod tests {
         assert_eq!(models_cache_in(Os::Windows, &e, r"C:\T"), r"C:/Users/ann/AppData/Local/Backplane/cache-diagnostic\backplane-bend\models");
         assert_eq!(kicad_config_roots_in(Os::Windows, &e), [r"D:\kicad cfg", r"C:\cfg\kicad", r"C:\R\kicad"]);
         assert_eq!(home_in(Os::Windows, &env(&[("HOMEDRIVE", "C:"), ("HOMEPATH", r"\Users\b")])).as_deref(), Some(r"C:\Users\b"));
+    }
+    #[test] fn on_windows_another_programs_home_never_moves_the_persons_folder() {
+        // Cadence sets HOME for the whole account; the user's folder is still USERPROFILE
+        let e = env(&[("HOME", r"C:\Users\ann\AppData\Roaming\SPB_Data"), ("USERPROFILE", r"C:\Users\ann"), ("APPDATA", r"C:\Users\ann\AppData\Roaming")]);
+        assert_eq!(home_in(Os::Windows, &e).as_deref(), Some(r"C:\Users\ann"));
+        assert_eq!(home_in(Os::Windows, &env(&[("HOME", r"D:\home\ann")])).as_deref(), Some(r"D:\home\ann"), "HOME when Windows names no folder");
+        assert_eq!(home_in(Os::Linux, &env(&[("HOME", "/home/ann"), ("USERPROFILE", r"C:\Users\ann")])).as_deref(), Some("/home/ann"));
     }
     #[test] fn linux_and_macos_keep_xdg_and_their_own_folders() {
         let e = env(&[("HOME", "/home/ann")]);

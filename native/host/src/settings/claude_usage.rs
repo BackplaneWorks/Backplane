@@ -30,7 +30,7 @@ pub fn read_login(dir: &Path) -> Option<Login> {
     Some(Login { token, expires_ms: o["expiresAt"].as_u64().or_else(|| o["expiresAt"].as_f64().map(|x| x as u64)).unwrap_or(0) })
 }
 /// Where the CLI's own login keeps its store: `$CLAUDE_CONFIG_DIR` is not inherited by the default login's children (accounts_io `STORE_ENV`), so `~/.claude`.
-pub fn default_dir() -> Option<PathBuf> { std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).filter(|h| !h.is_empty()).map(|h| PathBuf::from(h).join(".claude")) }
+pub fn default_dir() -> Option<PathBuf> { crate::plat::dirs::home().map(|h| PathBuf::from(h).join(".claude")) }
 
 /// The request: a token in, (HTTP status, body) out; Err only when no answer came (its words never hold the token).
 pub type Get = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = Result<(u16, Value), String>> + Send>> + Send + Sync>;
