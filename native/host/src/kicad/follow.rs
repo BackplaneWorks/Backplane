@@ -246,6 +246,36 @@ async fn attempt(key: &str) -> Step {
     step
 }
 
+/// An agent's explicit viewer_show of `target` ("PCB" / "SCH") while the window's pane shows `shown`: whether the pane is brought to it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Bring { No, Yes, Busy }
+/// Pure: nothing when it is already on show (or the page holds no KiCad); not while the person is in a modal or mid-operation in KiCad.
+pub fn bring(target: &str, shown: &str, modal: bool, tool_busy: bool) -> Bring {
+    if target.is_empty() || shown.is_empty() || target == shown { return Bring::No }
+    if modal || tool_busy { Bring::Busy } else { Bring::Yes }
+}
+/// An agent's explicit viewer_show of `path` (issue 1355): the frame the window holding the project's KiCad for `thread` is to show
+/// (its pane shows another: the person picked it on the strip), or why not now ("" and None: nothing to do).
+pub async fn bring_frame(thread: &str, path: &str) -> (Option<&'static str>, String) {
+    if !(path.ends_with(".kicad_pcb") || path.ends_with(".kicad_sch")) { return (None, String::new()) }
+    let Some(shown) = pane_frame(thread, path) else { return (None, String::new()) };
+    let target = frame_of(path);
+    let (mut modal, mut busy) = (false, false);
+    if target != shown {
+        if let Some(r) = super::embed::gui_route(&super::ipc::pro_of(path)) {
+            let o = super::embed::gui_call(&r, "kiapi.backplane.embed.GetFrames", json!({})).await;
+            modal = o["status"] == "AS_BUSY" || super::embed::session_state(&r.pro)["dialogs"].as_array().is_some_and(|d| !d.is_empty());
+            busy = o["message"]["frames"].as_array().into_iter().flatten().any(|f| f["tool_busy"].as_bool() == Some(true));
+        }
+    }
+    let name = |k: &str| if k == "SCH" { "Schematic" } else if k == "PCB" { "Board" } else { "another editor" };
+    match bring(target, &shown, modal, busy) {
+        Bring::Yes => (Some(target), String::new()),
+        Bring::Busy => (None, format!("KiCad is busy ({}): the pane stays on the {} the person has on show", if modal { "a dialog is open" } else { "a tool is mid-operation" }, name(&shown))),
+        Bring::No => (None, String::new()),
+    }
+}
+
 /// The person pressed or typed in the project's pane (editor.kicad.touched): a thread following it whose page holds KiCad pauses when
 /// KiCad says that was on its canvas since Follow last moved the view (as a hand on Backplane's viewer pauses it).
 pub fn touched(pro: &str) {
@@ -374,5 +404,15 @@ mod tests {
         drop_held(key, &new);
         assert!(worker_stops(key) && !panes().lock().unwrap()[key].worker, "nothing held: it stops and clears the flag, so the next edit spawns one");
         panes().lock().unwrap().remove(key);
+    }
+    #[test] fn an_explicit_show_brings_the_pane_to_its_frame_unless_it_is_on_show_or_kicad_is_busy() {
+        assert_eq!(bring("PCB", "SCH", false, false), Bring::Yes, "the person's strip tab: the agent's show brings the board");
+        assert_eq!(bring("SCH", "PCB", false, false), Bring::Yes);
+        assert_eq!(bring("PCB", "PCB", false, false), Bring::No, "already on show");
+        assert_eq!(bring("PCB", "", false, false), Bring::No, "the page holds no KiCad: the viewer's page push does it");
+        assert_eq!(bring("PCB", "SCH", true, false), Bring::Busy, "a modal: said, not done");
+        assert_eq!(bring("PCB", "SCH", false, true), Bring::Busy, "mid-drag: said, not done");
+        assert_eq!(bring("PCB", "PCB", true, true), Bring::No, "nothing to bring: nothing to refuse");
+        assert_eq!(bring("PCB", "PCB_3D", false, false), Bring::Yes, "3D on show: the board editor");
     }
 }

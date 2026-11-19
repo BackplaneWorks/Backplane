@@ -79,6 +79,16 @@ impl Backplane {
         if !(self.selected==thread||self.selected.ends_with(&format!("|{thread}"))||thread.is_empty()) {return}
         let _=self.tx.try_send(screens::viewer::view_kind(&match part {Some(p)=>format!("{k}\t{p}"),None=>k})); cx.notify();
     }
+    /// An agent's viewer_show named the KiCad frame the embedded pane is to show (the hub saw it show another: the person's strip tab;
+    /// issue 1355): the pane shows it as a tab press would (show_kind_by), so it publishes the change itself. Only the window whose page
+    /// holds the embedded KiCad for that thread.
+    pub(crate) fn kicad_bring(&mut self,thread:&str,frame:&str,cx:&mut Context<Self>){
+        if frame.is_empty()||!(self.selected==thread||self.selected.ends_with(&format!("|{thread}"))) {return}
+        let Some(p)=self.screens.kicad.clone() else {return};
+        if !p.read(cx).in_page||p.read(cx).tab()==frame {return}
+        eprintln!("GPUI_LOG {}",serde_json::json!({"kicad_bring":frame,"from":p.read(cx).tab()}));
+        let f=frame.to_string(); p.update(cx,|p,cx|p.show_kind_by(&f,"an agent's viewer_show (issue 1355)",cx)); cx.notify(); // i18n-ok: a debug log cause
+    }
     pub(crate) fn new(window:&mut Window,cx:&mut Context<Self>,config:hub::Config,started:Instant)->Self {
         let (swatches,gallery,fonts,theme)=(config.swatches,config.gallery,config.fonts,config.theme.clone());let steps:VecDeque<Step>=config.script.as_ref().map(|p|script::load(p)).unwrap_or_default();let script_total=steps.len();
         // a client that never gets projects says so (a hub with a canned presenter, a refused token ...) instead of leaving a script waiting silently
@@ -207,7 +217,7 @@ impl Backplane {
             Event::Sheets(rows,refs)=>{ self.screens.plot.sheets=screens::plot::sheet_rows(&rows); self.screens.plot.sheet_refs=screens::plot::sheet_refs(&refs); cx.notify(); }
             Event::BrowserDownload(owner,id,name,error)=>{if let Some((o,page))=&self.screens.browser {if *o==owner {let page=page.clone();page.update(cx,|p,cx|p.take_download(&id,&name,&error,cx));}}},
             Event::BrowserTabs(owner,text)=>{if let Some((o,page))=&self.screens.browser {if *o==owner {let page=page.clone();page.update(cx,|p,cx|p.set_tabs(&text,cx));}}},
-            Event::ViewShow(thread,kind,path)=>self.view_show(&thread,&kind,&path,cx),
+            Event::ViewShow(thread,kind,path,frame)=>{self.view_show(&thread,&kind,&path,cx);self.kicad_bring(&thread,&frame,cx);},
             Event::Pick(info)=>{ let slot=self.screens.pick_slot.unwrap_or(0); let card=screens::plot::card(&info); let pv=self.screens.pv(slot); if pv.picked.is_some() { pv.card=card.clone(); } if let Some(c)=card { screens::plotview::cross_probe(self,slot,&c); } screens::plotview::report_state(self); cx.notify(); }
             Event::Probe(slot,m) if slot>=3=>{ screens::plotview::frame_on(self,slot-3,&m); cx.notify(); }
             Event::Probe(slot,m)=>{ eprintln!("GPUI_LOG {}",serde_json::json!({"event":"probe_lit","slot":slot,"n":m.len()})); let pv=self.screens.pv(slot); if pv.lit.len()<20000 { pv.lit.extend(m); } cx.notify(); }
