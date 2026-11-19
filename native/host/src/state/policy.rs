@@ -44,6 +44,8 @@ pub fn lean_keeps(k: &str) -> bool {
     if ["voice.engine", "voice.model", "voice.device"].contains(&k) || k.starts_with("voice.e.") || k.starts_with("voice.l.") { return true }
     // Settings, Rules and task board: the person's standing rules and the task board's items (a few, each at most a few KB; a removed one is gone, `blank_gone`)
     if k.starts_with("rule.") || k.starts_with("board.") { return true }
+    // Settings, Projects and git (present/settings.rs `git`): git.auto_push and git.off_branch, one on/off value each; without them both chips always looked Off (#1232)
+    if k == "git.auto_push" || k == "git.off_branch" { return true }
     // the viewer's probe, one per board (present/viewer.rs `probe_action`: the tapped piece's info line, at most 2000 characters)
     if k.starts_with("probe:") { return true }
     // a halt card's facts (agents/halt.rs), one per turn that ended out of memory or out of context: the thread view draws the card from it (a few KB at most)
