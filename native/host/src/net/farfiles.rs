@@ -20,6 +20,7 @@ const KEEP: usize = 64;
 struct Seen { at: Instant, got: Option<Result<String, String>>, asking: bool }
 type Key = (String, String);
 static DIRS: LazyLock<Mutex<HashMap<Key, Seen>>> = LazyLock::new(Default::default);
+static DOCUMENTS: LazyLock<Mutex<HashMap<Key, Seen>>> = LazyLock::new(Default::default);
 static FILES: LazyLock<Mutex<HashMap<Key, Seen>>> = LazyLock::new(Default::default);
 static BOUND: OnceLock<(Weak<Hub>, Arc<super::farsync::FarSync>)> = OnceLock::new();
 
@@ -30,6 +31,12 @@ pub fn listing(thread: &str, dir: &str) -> Option<Result<String, String>> { seen
 /// This machine's copy of a file of a thread elsewhere (its absolute path here); None while it is on its way, Err when that machine refused.
 pub fn copy(thread: &str, rel: &str) -> Option<Result<String, String>> { seen(&FILES, thread, rel, "files.get", json!({"path": rel})) }
 
+/// Relative canonical paths and existence as determined by the thread's owning machine.
+pub fn documents(thread: &str) -> Option<Value> {
+    let reply = seen(&DOCUMENTS, thread, "", "viewer.documents", json!({}))?.ok()?;
+    serde_json::from_str(&reply).ok()
+}
+
 fn seen(map: &'static LazyLock<Mutex<HashMap<Key, Seen>>>, thread: &str, what: &str, m: &'static str, mut p: Value) -> Option<Result<String, String>> {
     let (link, local) = match thread.split_once('~') { Some((l, t)) if !l.is_empty() && !t.is_empty() => (l.to_string(), t.to_string()), _ => return Some(Err("not a thread of another machine".into())) };
     let key = (thread.to_string(), what.to_string());
@@ -37,7 +44,7 @@ fn seen(map: &'static LazyLock<Mutex<HashMap<Key, Seen>>>, thread: &str, what: &
     if g.len() >= KEEP && !g.contains_key(&key) { if let Some(old) = g.iter().filter(|(_, s)| !s.asking).min_by_key(|(_, s)| s.at).map(|(k, _)| k.clone()) { g.remove(&old); } }
     let e = g.entry(key.clone()).or_insert(Seen { at: Instant::now(), got: None, asking: false });
     // a file's copy is fetched once; a folder is asked again when what was drawn is older than FRESH
-    let stale = e.got.is_none() || (m == "files.dir" && e.at.elapsed() > FRESH);
+    let stale = e.got.is_none() || (m != "files.get" && e.at.elapsed() > FRESH);
     if stale && !e.asking {
         if let Some((hub, sync)) = BOUND.get().and_then(|(h, s)| h.upgrade().map(|h| (h, s.clone()))) {
             e.asking = true;
@@ -48,7 +55,13 @@ fn seen(map: &'static LazyLock<Mutex<HashMap<Key, Seen>>>, thread: &str, what: &
                 let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
                 let why = || v["error"].as_str().or_else(|| v["result"]["fmError"].as_str()).filter(|e| !e.is_empty()).map_or_else(|| "That machine did not answer.".to_string(), str::to_string);
                 let got = if code == 0 { Err("That machine is away.".to_string()) } else if code != 200 || v["ok"] != true { Err(why()) }
-                    else if m == "files.dir" { Ok(v["result"]["fmEntries"].as_str().unwrap_or("").to_string()) } else { keep_copy(&hub.cfg.home, &key.0, &key.1, &v["result"]) };
+                    else if m == "viewer.documents" { Ok(v["result"].to_string()) }
+                    else if m == "files.dir" {
+                        match v["result"]["fmEntries"].as_str() {
+                            Some(entries) if v["result"]["fmError"].as_str().unwrap_or("").is_empty() => Ok(entries.to_string()),
+                            _ => Err(why()),
+                        }
+                    } else { keep_copy(&hub.cfg.home, &key.0, &key.1, &v["result"]) };
                 let changed = { let mut g = map.lock().unwrap(); match g.get_mut(&key) { Some(e) => { let ch = e.got.as_ref() != Some(&got); e.got = Some(got); e.at = Instant::now(); e.asking = false; ch } None => false } };
                 if changed { hub.bump_views(); }
             });
@@ -72,13 +85,23 @@ fn keep_copy(home: &std::path::Path, thread: &str, rel: &str, r: &Value) -> Resu
 /// The owning side's file for another machine. Only another machine's /far/rpc reaches it (it names the thread by this hub's own id).
 struct Own;
 impl RpcHandler for Own {
-    fn methods(&self) -> &'static [&'static str] { &["files.get"] }
-    fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, _method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
+    fn methods(&self) -> &'static [&'static str] { &["files.get", "viewer.documents"] }
+    fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let fail = |e: &str| vec![json!({"t":"reply","id":id,"ok":false,"error":e})];
             let th = p["thread"].as_str().unwrap_or("");
             let root = { let m = hub.model().await; m.threads.get(th).filter(|t| !t.deleted).map(|t| if !t.worktree.is_empty() { t.worktree.clone() } else { m.projects.get(&t.project).map_or(String::new(), |x| x.root.clone()) }).unwrap_or_default() };
             if root.is_empty() { return fail("This thread has no project folder.") }
+            if method == "viewer.documents" {
+                let docs = tokio::task::spawn_blocking(move || {
+                    let root = crate::files::kicad::canonical::design_root(&root);
+                    crate::present::identity_context::local_documents(&root)
+                }).await;
+                return match docs {
+                    Ok(result) => vec![json!({"t":"reply","id":id,"ok":true,"result":result})],
+                    Err(_) => fail("Could not read project documents."),
+                }
+            }
             let root = std::path::PathBuf::from(root);
             use base64::Engine;
             let rel = p["path"].as_str().unwrap_or("").to_string();

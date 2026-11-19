@@ -31,6 +31,12 @@ mod settings { pub mod order { pub use crate::order_view::*; } pub mod models { 
 #[path="../present/viewer.rs"] mod viewer;
 #[path="../present/panels.rs"] mod panels;
 #[path="../present/ready.rs"] pub mod ready;
+mod identity_context {
+    use serde_json::Value;
+    pub fn facts(_: &crate::state::State, _: &Value, _: &str) -> Value { Value::Null }
+    pub fn browser(_: &Value, _: &str) -> (String, String) { Default::default() }
+    pub fn far_exists(_: &str, _: &str) -> Option<bool> { None }
+}
 mod present { pub use crate::ready; }
 // the issue links' repository (present/thread.rs): the audit reads no project's git config, so it links nothing
 mod mirror { pub fn origin_of_root(_: &str) -> String { String::new() } }
