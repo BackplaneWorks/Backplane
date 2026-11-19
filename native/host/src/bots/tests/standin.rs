@@ -21,6 +21,7 @@ while IFS= read -r line; do
     printf '{"type":"system","subtype":"init","session_id":"%s","cwd":"/tmp","tools":["Bash"],"model":"fake","permissionMode":"default"}\n' "$sid"
     case "$own" in
       *'<charter>'*) tool memory_save '{"key":"run-note","kind":"note","text":"the run saw the morning routine"}'; say "planned the day" ;;
+      *zqhold*) tool thread_launch '{"project":"p1","prompt":"child work please"}'; while [ ! -f "@HOLD@" ]; do sleep 0.05; done; say "launched it" ;;
       *zqlaunch*) tool thread_launch '{"project":"p1","prompt":"child work please"}'; say "launched it" ;;
       *'Launched thread'*) say "heard the report" ;;
       *'child work please'*) while [ ! -f "@GATE@" ]; do sleep 0.05; done; say "child done" ;;
@@ -34,10 +35,11 @@ done
 async fn wait_for(hub: &Arc<Hub>, what: &str, f: impl Fn(&[Value]) -> bool) {
     let end = Instant::now() + Duration::from_secs(120); // a bound for a starved full-suite run, never a pause: the loop leaves as soon as the event is there
     while Instant::now() < end { if f(&log(hub)) { return } tokio::time::sleep(Duration::from_millis(50)).await }
-    panic!("{what} never came; the log's kinds: {:?}", kinds(hub, 0));
+    let timeline: Vec<String> = log(hub).iter().filter(|e| !matches!(e["$"].as_str(), Some("SettingSet" | "UsageSet" | "SessionSet"))).map(|e| format!("{} {} {} {}", e["$"].as_str().unwrap_or(""), e["thread"].as_str().or(e["id"].as_str()).unwrap_or(""), e["state"].as_str().or(e["role"].as_str()).unwrap_or(""), e["text"].as_str().unwrap_or("").chars().take(60).collect::<String>())).collect();
+    panic!("{what} never came; the log in order:\n{}", timeline.join("\n"));
 }
 fn said(l: &[Value], th: &str, text: &str) -> bool { l.iter().any(|e| e["$"] == "MessagePosted" && e["thread"] == th && e["role"] == "assistant" && e["text"] == text) }
-fn write_agent(d: &Path, out: &Path) { use crate::plat::fs::PermissionsExt; let p = d.join("claude"); std::fs::write(&p, AGENT.replace("@LOG@", &crate::plat::fs::script_path(out)).replace("@GATE@", &crate::plat::fs::script_path(&out.with_file_name("gate")))).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+fn write_agent(d: &Path, out: &Path) { use crate::plat::fs::PermissionsExt; let p = d.join("claude"); std::fs::write(&p, AGENT.replace("@LOG@", &crate::plat::fs::script_path(out)).replace("@HOLD@", &crate::plat::fs::script_path(&out.with_file_name("hold"))).replace("@GATE@", &crate::plat::fs::script_path(&out.with_file_name("gate")))).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
 
 #[tokio::test(flavor = "multi_thread")] async fn the_uberbot_answers_remembers_and_wakes_for_a_routine_with_a_stand_in_agent() {
     std::env::set_var("TZ", "Etc/UTC");
@@ -104,6 +106,28 @@ fn write_agent(d: &Path, out: &Path) { use crate::plat::fs::PermissionsExt; let 
     hub.commit(&json!({"$":"ThreadSettled","id":chat,"manual":false,"at":now_s()})).await.unwrap();
     std::fs::write(out.with_file_name("gate"), "go").unwrap(); // only now may the child finish: the report always meets a settled thread, whatever the load
     wait_for(&hub, "the report in the bot's thread", |l| l.iter().any(|e| e["$"] == "MessagePosted" && e["thread"] == chat.as_str() && e["text"].as_str().map_or(false, |t| t.starts_with("[Backplane] Launched thread")))).await;
+    wait_for(&hub, "the bot's turn on the report", |l| said(l, &chat, "heard the report")).await;
+    let agent = std::fs::read_to_string(&out).unwrap();
+    assert!(agent.lines().any(|l| l.starts_with("TURN ") && l.contains("Launched thread") && l.contains("completed")), "the report is the bot's input: {agent}");
+    ag.shutdown();
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// #1239: the child finishes while the bot's own turn is still running (a loaded machine): the report still reaches the bot, as its next turn's input
+#[tokio::test(flavor = "multi_thread")] async fn a_report_that_comes_while_the_bot_turn_still_runs_reaches_the_bot() {
+    let root = crate::plat::tmp::dir("bot-launch-running");
+    let (home, bin, work) = (root.join("home"), root.join("bin"), root.join("work")); for d in [&home, &bin, &work] { std::fs::create_dir_all(d).unwrap(); }
+    let out = root.join("agent.log"); write_agent(&bin, &out); std::fs::write(out.with_file_name("gate"), "go").unwrap(); // the child finishes at once
+    std::fs::write(home.join("events.jsonl"), format!("{{\"$\":\"SettingSet\",\"key\":\"machine.id\",\"value\":\"m1\",\"at\":1}}\n{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"toy\",\"root\":{},\"at\":1}}\n", serde_json::to_string(&work.to_string_lossy()).unwrap())).unwrap();
+    let hub = Hub::start(Cfg { home, version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let ag = Agents::start_with(hub.clone(), Cli::standin(&bin)).await.unwrap();
+    let _bots = crate::bots::start(hub.clone(), ag.clone()).await;
+    let r = rpc(&hub, "bots.create", json!({"name":"ada"})).await; let ada = r["bot"].as_str().unwrap_or_else(|| panic!("{r}")).to_string();
+    let chat = { let end = Instant::now() + Duration::from_secs(60); loop { if let Some(e) = log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == ada.as_str() && e["thread"].as_str().map_or(false, |t| !t.is_empty())) { break e["thread"].as_str().unwrap().to_string() } assert!(Instant::now() < end, "the bot's thread"); tokio::time::sleep(Duration::from_millis(50)).await } };
+    assert_eq!(rpc(&hub, "bots.say", json!({"bot":ada,"text":"zqhold it","msg":"m1"})).await["ok"], true);
+    // the bot's turn waits on its hold file; the child ends meanwhile and its report comes to the running turn
+    wait_for(&hub, "the report while the bot's turn runs", |l| l.iter().any(|e| e["$"] == "MessagePosted" && e["thread"] == chat.as_str() && e["text"].as_str().map_or(false, |t| t.starts_with("[Backplane] Launched thread")))).await;
+    std::fs::write(out.with_file_name("hold"), "go").unwrap();
     wait_for(&hub, "the bot's turn on the report", |l| said(l, &chat, "heard the report")).await;
     let agent = std::fs::read_to_string(&out).unwrap();
     assert!(agent.lines().any(|l| l.starts_with("TURN ") && l.contains("Launched thread") && l.contains("completed")), "the report is the bot's input: {agent}");
