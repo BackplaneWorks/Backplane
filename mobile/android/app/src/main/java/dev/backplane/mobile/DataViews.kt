@@ -107,6 +107,7 @@ fun DataRoot() {
     LaunchedEffect(DataClient.openAccount) { DataClient.openAccount?.let { page = Page.Account(it, true); DataClient.openAccount = null } }
     LaunchedEffect(DataClient.openFromIntent) { DataClient.openFromIntent?.let { page = if (DataClient.openViewerTab != null) Page.Viewer(it) else Page.Thread(it); DataClient.openFromIntent = null } }
     // a link the hub resolved (DataLinks.kt): its screen
+    LaunchedEffect(DataClient.openAddProject) { if (DataClient.openAddProject) { DataClient.openAddProject = false; page = Page.Folders } }
     LaunchedEffect(DataClient.linkTarget) {
         val t = DataClient.linkTarget ?: return@LaunchedEffect
         DataClient.linkTarget = null
@@ -606,6 +607,8 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
     DisposableEffect(id) { DataVoice.open(id); onDispose { DataVoice.open("") } }
     // the masked box: a name ("" for a new one) while open; the value stays in this box until Save
     var box by remember(id) { mutableStateOf<String?>(null) }
+    // /project's folder that holds something: Add existing adds it as it is
+    var existing by remember(id) { mutableStateOf<String?>(null) }
     LaunchedEffect(id) { DataClient.refreshSecretAsks(id) }
     val word = DataClient.commandOf(draft)
     fun put(t: String) = DataClient.setField(id, TextFieldValue(t, TextRange(t.length)), typed = false)
@@ -690,6 +693,7 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
         if (box != null || asked != null) SecretBox(id, box ?: asked?.name ?: "", asked?.takeIf { box == null || it.name == box }, { box = null })
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (notice.isNotEmpty()) DMono(Tr.t(notice), dwarn, 12)
+            existing?.let { dir -> DBtn(Msg.android_hub_cmd_project_existing, false, true, Modifier.testTag("thread.project.existing")) { scope.launch { try { DataClient.addProject(dir); existing = null; notice = ""; put("") } catch (e: Exception) { notice = e.message ?: Msg.android_failed_generic } } } }
             thread?.mark?.let { m -> DMono(Tr.t(m.runs) + if (m.away) " · " + Msg.android_away else "", dfaint, 11, Modifier.testTag("thread.runs")) }
             DataClient.sendError[id]?.let { DMono(Tr.t(it), dcs.error, 12, Modifier.testTag("thread.refused")) }
             if (pending.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -717,7 +721,7 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
                 val blank = draft.isBlank() && pending.isEmpty()
                 if (running && blank) DBtn(Msg.composer_stop, false, modifier = Modifier.testTag("thread.stop"), danger = true) { DataClient.interrupt(id) }
                 else DBtn(word?.label?.let(Tr::t) ?: Msg.composer_send, true, !blank, Modifier.testTag("thread.send")) {
-                    notice = ""
+                    notice = ""; existing = null
                     // sent: the keyboard goes away, so the reply has the screen (a tap on the box brings it back)
                     // (focus first: the keyboard's word in progress is committed before the box empties, never after it)
                     if (word == null) { val text = draft; focus.clearFocus(); val spoken = if (dictate && pending.isEmpty()) DataVoice.dictated(id) else null; if (dictate) DataVoice.sent(id); DataClient.send(id, text, pending.toList(), voice = spoken); pending.clear(); stick = true }
@@ -728,6 +732,10 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
                             "edit" -> put(r.optString("text"))
                             "secret" -> { box = r.optString("name"); put("") }
                             "intent" -> { notice = Msg.intent_saved; put("") }
+                            // /project: alone, the Add project screen; made, its first thread opens; a folder that holds something, Add existing under the reason
+                            "project" -> { put(""); DataClient.openAddProject = true }
+                            "made" -> { put(""); notice = r.optString("note"); r.optString("thread").takeIf { it.isNotEmpty() }?.let { DataClient.linkTarget = LinkTarget(LinkTarget.Kind.THREAD, it) } }
+                            "exists" -> { notice = r.optString("error"); existing = r.optString("path") }
                             else -> put("")
                         }
                     } catch (e: Exception) { notice = e.message ?: Msg.android_failed_generic } } }

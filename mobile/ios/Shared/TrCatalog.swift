@@ -2321,6 +2321,12 @@ gpui.that.kicad.project.has.no	That KiCad project has no board or schematic besi
 gpui.that.file.is.not.on	That file is not on this hub.	そのファイルはこのハブにありません。	Ese archivo no está en este hub.
 gpui.quit.backplane	Quit Backplane	Backplane を終了	Salir de Backplane
 gpui.quit.backplane.on.a.mac	Quit Backplane, on a Mac: the hub keeps running	Backplane を終了（Mac）：ハブは動き続けます	Salir de Backplane, en Mac: el hub sigue ejecutándose
+gpui.hide.backplane	Hide Backplane	Backplane を隠す	Ocultar Backplane
+gpui.hide.others	Hide Others	ほかを隠す	Ocultar otros
+gpui.show.all	Show All	すべてを表示	Mostrar todo
+gpui.close.window	Close Window	ウインドウを閉じる	Cerrar ventana
+gpui.close.the.window.on.a	Close the window, on a Mac: the hub keeps running	ウインドウを閉じる（Mac）：ハブは動き続けます	Cerrar la ventana, en Mac: el hub sigue ejecutándose
+gpui.hide.backplane.on.a.mac	Hide Backplane, on a Mac: KiCad's editor hides with it and comes back with it	Backplane を隠す（Mac）：KiCad のエディタも一緒に隠れ、一緒に戻ります	Ocultar Backplane, en Mac: el editor de KiCad se oculta con él y vuelve con él
 gpui.c.commit	Commit	コミット	Commit
 gpui.c.diff.cut	… the rest of the diff is not shown	… 差分の残りは表示されていません	… el resto del diff no se muestra
 gpui.c.loading.board	Loading the board…	基板を読み込み中…	Cargando la placa…
@@ -3318,6 +3324,14 @@ gpui.f.tool.runs.nover	{name}  runs from {path}.	{name}が{path}で動作しま�
 gpui.f2.aon.boat.learn	Learn more about Boat	Boatについて詳しく	Más información sobre Boat
 gpui.f2.uberbot.what	Your uberbot is the assistant you talk to first. It answers you, starts and follows your threads and bots across projects and machines, and keeps your reminders and phone alerts going.	メインボットは最初に話しかけるアシスタントです。返事をし、プロジェクトやマシンをまたいでスレッドとボットを始めて見守り、リマインダーとスマホへの通知を動かし続けます。	Tu uberbot es el asistente con el que hablas primero. Te responde, inicia y sigue tus hilos y bots en todos tus proyectos y máquinas, y mantiene tus recordatorios y alertas del teléfono en marcha.
 gpui.acct.account.name.optional	Account name (optional: its email once signed in)	アカウントの名前（省略可：サインイン後はメールアドレス）	Nombre de la cuenta (opcional: su correo una vez iniciada la sesión)
+gpui.follow.button	Follow agent	エージェントを追う	Seguir al agente
+gpui.follow.button.tip	Keep the view on what the agent is editing	エージェントが編集している場所を表示し続ける	Mantener la vista en lo que el agente está editando
+gpui.follow.route	Following: {page} · routed {net}{near}	追従中: {page} · {net} を配線{near}	Siguiendo: {page} · enrutó {net}{near}
+gpui.follow.edit	Following: {page} · edited {what}	追従中: {page} · {what} を編集	Siguiendo: {page} · editó {what}
+gpui.follow.near	near {ref}	{ref} の近く	cerca de {ref}
+gpui.follow.wait	Following: waiting for the agent's next edit	追従中: エージェントの次の編集を待っています	Siguiendo: esperando la próxima edición del agente
+gpui.follow.paused	Following paused	追従を一時停止中	Seguimiento en pausa
+gpui.follow.resume	Resume	再開	Reanudar
 android.mgmt.all	All	すべて	Todo
 android.mgmt.judged	agent-judged	エージェント判定	juzgado por agente
 android.mgmt.fix	Fix with agent	エージェントで直す	Corregir con agente
@@ -4033,6 +4047,10 @@ android.hub.cmd.secret	Give an agent a key or token in a masked box, never in th
 android.hub.cmd.intent	Save this project's intent	このプロジェクトの意図を保存	Guardar la intención de este proyecto
 android.hub.cmd.settle.desc	Settle this thread and stop all of its work	このスレッドを完了し、すべての作業を停止します	Cerrar este hilo y detener todo su trabajo
 android.hub.cmd.btw.empty	Type your question after /btw.	/btwの後に質問を入力してください。	Escribe tu pregunta después de /btw.
+android.hub.cmd.project	Make a project: /project <name or path> [first message]; alone, Add project	プロジェクトを作成: /project <名前またはパス> [最初のメッセージ]。単独ではプロジェクトを追加	Crea un proyecto: /project <nombre o ruta> [primer mensaje]; solo, Añadir proyecto
+android.hub.cmd.newproject	Make a project: /new-project <name or path> [first message]	プロジェクトを作成: /new-project <名前またはパス> [最初のメッセージ]	Crea un proyecto: /new-project <nombre o ruta> [primer mensaje]
+android.hub.cmd.project.quote	The folder's closing quote is missing.	フォルダーの閉じ引用符がありません。	Falta la comilla de cierre de la carpeta.
+android.hub.cmd.project.existing	Add existing	既存を追加	Añadir existente
 android.hub.cmd.notcmd	not a command of the composer	コンポーザーのコマンドではありません	no es un comando del compositor
 android.hub.link.screen	That conversation has no screen on the phone.	その会話にはスマートフォン用の画面がありません。	Esa conversación no tiene pantalla en el teléfono.
 android.hub.link.conversation	That conversation is not on this hub.	その会話はこのハブにありません。	Esa conversación no está en este hub.
@@ -4444,6 +4462,49 @@ thread.restore.action	Restore to before this	この時点の前に戻す	Restaur
 thread.restore.ask	Restore the project to before this message?	このメッセージの前の状態にプロジェクトを戻しますか？	¿Restaurar el proyecto a como estaba antes de este mensaje?
 thread.restore.note	Restoring makes a new commit. The project as it is now is kept as a commit too.	戻すと新しいコミットが作られます。現在のプロジェクトもコミットとして残ります。	Restaurar crea un commit nuevo. El proyecto tal como está ahora también se guarda como commit.
 thread.restore.go	Restore	戻す	Restaurar
+mouse.mouseandtrackpad0	Mouse and trackpad	マウスとトラックパッド	Ratón y trackpad
+mouse.zoomdirection1	Zoom direction	ズームの向き	Dirección del zoom
+mouse.appliestothewheelandatrackpads2	Applies to the wheel and a trackpad's pinch in every viewer.	すべてのビューアで、ホイールとトラックパッドのピンチに適用されます。	Se aplica a la rueda y al pellizco del trackpad en todos los visores.
+mouse.normal3	normal	通常	normal
+mouse.inverted4	inverted	反転	invertida
+mouse.boardandschematic5	Board and schematic	基板と回路図	Placa y esquema
+mouse.k3dandstep6	3D and STEP	3DとSTEP	3D y STEP
+mouse.changedfromitspreseteachinputd7	Changed from its preset. Each input does one thing: choosing an action for an input replaces what it did.	プリセットから変更されています。各操作は1つの動作だけを持ちます。動作を選ぶと、それまでの動作が置き換わります。	Cambiado respecto al preajuste. Cada entrada hace una sola cosa: elegir una acción para una entrada sustituye la anterior.
+mouse.apresetsetseveryinputbeloweach8	A preset sets every input below. Each input does one thing: choosing an action for an input replaces what it did.	プリセットは下のすべての操作を設定します。各操作は1つの動作だけを持ちます。動作を選ぶと、それまでの動作が置き換わります。	Un preajuste fija todas las entradas de abajo. Cada entrada hace una sola cosa: elegir una acción para una entrada sustituye la anterior.
+mouse.legacy10	Legacy	従来	Anterior
+mouse.leftdrag11	Left drag	左ドラッグ	Arrastrar con el izquierdo
+mouse.middledrag12	Middle drag	中ボタンドラッグ	Arrastrar con el central
+mouse.rightdrag13	Right drag	右ドラッグ	Arrastrar con el derecho
+mouse.shiftleftdrag14	Shift + left drag	Shift + 左ドラッグ	Mayús + arrastrar con el izquierdo
+mouse.ctrlleftdrag15	Ctrl + left drag	Ctrl + 左ドラッグ	Ctrl + arrastrar con el izquierdo
+mouse.altleftdrag16	Alt + left drag	Alt + 左ドラッグ	Alt + arrastrar con el izquierdo
+mouse.wheel17	Wheel	ホイール	Rueda
+mouse.shiftwheel18	Shift + wheel	Shift + ホイール	Mayús + rueda
+mouse.ctrlwheel19	Ctrl + wheel	Ctrl + ホイール	Ctrl + rueda
+mouse.altwheel20	Alt + wheel	Alt + ホイール	Alt + rueda
+mouse.nothing21	nothing	何もしない	nada
+mouse.pan22	pan	パン	desplazar
+mouse.pansideways23	pan sideways	左右にパン	desplazar a los lados
+mouse.panupanddown24	pan up and down	上下にパン	desplazar arriba y abajo
+mouse.zoom25	zoom	ズーム	zoom
+mouse.rotate26	rotate	回転	girar
+mouse.roll27	roll	ロール	rodar
+mouse.select28	Select	選択	Seleccionar
+mouse.aclickwithoutmovingwithnokeyhe29	A click, without moving, with no key held.	キーを押さず、動かさずにクリックします。	Un clic, sin mover, sin tecla pulsada.
+mouse.leftbutton30	left button	左ボタン	botón izquierdo
+mouse.middlebutton31	middle button	中ボタン	botón central
+mouse.rightbutton32	right button	右ボタン	botón derecho
+mouse.twofingerscroll33	Two-finger scroll	2本指スクロール	Desplazamiento con dos dedos
+mouse.atrackpadstwofingerswithctrlhe34	A trackpad's two fingers. With Ctrl held it is the pinch, which zooms.	トラックパッドの2本指です。Ctrlを押すとピンチとなりズームします。	Dos dedos en el trackpad. Con Ctrl es el pellizco, que hace zoom.
+mouse.pans35	pans	パンする	desplaza
+mouse.isthewheel36	is the wheel	ホイールとして扱う	es la rueda
+mouse.pinch37	Pinch	ピンチ	Pellizco
+mouse.atrackpadpinch38	A trackpad pinch.	トラックパッドのピンチです。	Un pellizco en el trackpad.
+mouse.zooms39	zooms	ズームする	hace zoom
+mouse.chooseaninputforitabove41	Choose an input for it above.	上で操作を割り当ててください。	Elige arriba una entrada para ello.
+mouse.nothingissettopan42	Nothing is set to pan	パンに割り当てた操作がありません	Nada está asignado a desplazar
+mouse.nothingissettozoom43	Nothing is set to zoom	ズームに割り当てた操作がありません	Nada está asignado a zoom
+mouse.nothingissettorotate44	Nothing is set to rotate	回転に割り当てた操作がありません	Nada está asignado a girar
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -6257,6 +6318,15 @@ thread.restore.go	Restore	戻す	Restaurar
 
     /// gpui.f.tool.runs.nover = {name}  runs from {path}.
     static func gpui_f_tool_runs_nover(name: String, path: String) -> String { f("gpui.f.tool.runs.nover", ["name": name, "path": path]) }
+
+    /// gpui.follow.route = Following: {page} · routed {net}{near}
+    static func gpui_follow_route(page: String, net: String, near: String) -> String { f("gpui.follow.route", ["page": page, "net": net, "near": near]) }
+
+    /// gpui.follow.edit = Following: {page} · edited {what}
+    static func gpui_follow_edit(page: String, what: String) -> String { f("gpui.follow.edit", ["page": page, "what": what]) }
+
+    /// gpui.follow.near = near {ref}
+    static func gpui_follow_near(ref: String) -> String { f("gpui.follow.near", ["ref": ref]) }
 
     /// android.ago.m = {n}m
     static func android_ago_m(n: String) -> String { f("android.ago.m", ["n": n]) }

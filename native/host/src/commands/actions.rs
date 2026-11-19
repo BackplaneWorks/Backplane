@@ -183,6 +183,8 @@ pub fn act(req: &Req) -> Option<ActOut> {
         // Add project: the folder picker (present/picker.rs draws it from `@proj.open`, `@proj.text`). Typing and going into a folder set the text;
         // Add and Create send the request that makes the project (and its first thread, which the reply selects: Made.want).
         "picker-open" => { a.set("@proj.open", "1"); a.set("@proj.text", "~/"); a.set("@proj.err", ""); a.set("@proj.clone", ""); a.set("@menu", "") }
+        // /project on a folder that holds something (its reply's `exists`): the dialog opens on that folder, its Add row adding it as it is, the reason above it
+        "proj-exists" if !v.is_empty() => { a.set("@proj.open", "1"); a.set("@proj.text", v.trim_end_matches('/')); a.set("@proj.err", &crate::commands::fs::not_empty(v)); a.set("@proj.clone", ""); a.set("@menu", "") }
         "picker-type" => { a.set("@proj.text", v); a.set("@proj.err", "") }
         "proj-cd" => { let t = if v.ends_with('/') { v.to_string() } else { format!("{v}/") }; a.set("@proj.text", &t); a.set("@proj.err", "") }
         "proj-close" => { a.set("@proj.open", ""); a.set("@proj.text", ""); a.set("@proj.err", ""); a.set("@proj.clone", "") }
@@ -237,6 +239,8 @@ mod tests {
     #[test] fn the_folder_picker_actions_set_the_text_and_add_sends_the_request() {
         let sess = json!({"rid": 3, "drafts": {}, "info": {"local.machine": "m", "local.generation": "g"}});
         let run = |action: &str, value: &str, session: &Value| act(&Req { hub: "h", session, sel: "", action, value, title_of: &|_| String::new() }).unwrap();
+        let o = run("proj-exists", "/h/board", &sess); let d = &o.session_patch["drafts"];
+        assert_eq!((d["@proj.open"].as_str(), d["@proj.text"].as_str()), (Some("1"), Some("/h/board"))); assert!(d["@proj.err"].as_str().unwrap().contains("Add existing"));
         let o = run("picker-open", "", &sess); assert_eq!((o.session_patch["drafts"]["@proj.open"].as_str(), o.session_patch["drafts"]["@proj.text"].as_str()), (Some("1"), Some("~/")));
         assert_eq!(run("picker-type", "~/pro", &sess).session_patch["drafts"]["@proj.text"], "~/pro");
         assert_eq!(run("proj-cd", "/home/x/proj", &sess).session_patch["drafts"]["@proj.text"], "/home/x/proj/");

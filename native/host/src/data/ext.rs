@@ -591,6 +591,18 @@ async fn composer_run(hub: &Arc<Hub>, c: &mut Conn, p: &Value) -> Result<Value, 
         Some(Word::Settle) => rpc(hub, c, "thread.settle", json!({"thread":th})).await.map(|_| json!({"kind":"settle"})),
         Some(Word::Intent(b)) if b.is_empty() => { let card = crate::settings::fab::look(hub, th).await; Ok(json!({"kind":"edit","text":intent_edit(card["intent"].as_str().unwrap_or(""))})) }
         Some(Word::Intent(b)) => rpc(hub, c, "fab.intent", json!({"thread":th,"text":b})).await.map(|_| json!({"kind":"intent"})),
+        Some(Word::Project(rest)) => match crate::session::composer::project_args(&rest) {
+            Err(e) => Err(err(e)),
+            Ok(None) => Ok(json!({"kind":"project"})), // the app opens its Add project screen
+            // made as the desktop's /project makes it (`project.new`, `empty`, the first message); `made`: the thread to open. A folder that holds something:
+            // `exists` with the folder for an app that offers to add it as it is (`exists: true` in the request), else the refusal in words
+            Ok(Some((path, first))) => {
+                let r = hub.request_here(c, &json!({"id":0,"m":"project.new","p":{"path":path,"empty":true,"text":first}})).await.into_iter().find(|v| v["t"] == "reply").unwrap_or(Value::Null);
+                if r["ok"] == true { return Ok(json!({"kind":"made","thread":r["thread"],"note":r["note"].as_str().unwrap_or("")})) }
+                let why = r["error"].as_str().unwrap_or("The project could not be made.").to_string();
+                match r["result"]["exists"].as_str() { Some(d) if p["exists"] == true => Ok(json!({"kind":"exists","path":d,"error":why})), _ => Err(err(why)) }
+            }
+        },
     }
 }
 // ---- dictation: the hub's `bots.voice`, the same ops the desktop sends (voice/session.rs); its `{"t":"voice"}` frames reach this socket as they are ----

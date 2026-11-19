@@ -11,6 +11,8 @@ import UserNotifications
 final class DataClient {
     /// A thread a link in a message asked to open (backplane://thread/<id>); the root screen takes it.
     var pendingThread: String?
+    /// `/project` alone in a composer: the home screen opens its Add project sheet.
+    var openAddProject = false
     /// Just paired: once the hub's bots are in, its uberbot's chat opens (phones have no setup; docs/ALWAYS-ON.md, D9).
     private var uberAfterPair = false
     /// a tapped link the hub resolved (DataLinks.swift): the root screen opens it; a link that opens nothing leaves a short note
@@ -985,7 +987,7 @@ final class DataClient {
     }
 
     // MARK: the composer's own commands (feature commands): the hub runs them, the draft stays until it said yes
-    struct CommandResult: Decodable { let kind: String; var q: String?; var name: String?; var text: String? }
+    struct CommandResult: Decodable { let kind: String; var q: String?; var name: String?; var text: String?; var thread: String?; var path: String?; var error: String?; var note: String? }
     private struct SecretAsks: Decodable { let asks: [SecretAsk] }
     /// The command this draft is, by the hub's own rule (session/composer.rs command_is): the word alone, or followed by a space or a new line.
     func commandOf(_ draft: String) -> Word? {
@@ -998,7 +1000,8 @@ final class DataClient {
     }
     /// Runs it; throws the hub's plain words when it cannot. `kind` says what became of it.
     func runCommand(_ tid: String, _ text: String) async throws -> CommandResult {
-        let r: CommandResult = try await call("composer.run", ["thread": tid, "text": text])
+        // `exists`: this app offers Add existing on a folder /project found not empty (the answer's kind "exists")
+        let r: CommandResult = try await call("composer.run", ["thread": tid, "text": text, "exists": true])
         if r.kind == "btw" { btw[tid] = Btw(q: r.q ?? "", a: "Thinking…") }
         return r
     }

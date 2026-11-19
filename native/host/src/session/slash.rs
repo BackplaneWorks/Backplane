@@ -2,12 +2,14 @@
 //! the composer offers the commands whose name starts with it. Backplane's own come first (any provider), then Claude's (only in a Claude thread).
 
 /// `(name, about)`: the commands every thread has.
-pub const OWN: [(&str, &str); 5] = [
+pub const OWN: [(&str, &str); 7] = [
     ("/btw", "Ask a side question; the thread never sees it"),
     ("/give", "Hand this conversation to a >thread, %project or @bot"),
     ("/secret", "Give an agent a key or token in a masked box, never in the chat"),
     ("/settle", "Settle this thread and stop all of its work"),
     ("/intent", "Edit this project's intent (.backplane/intent.md)"),
+    ("/project", "Make a project: /project <name or path> [first message]; alone, Add project"),
+    ("/new-project", "Make a project: /new-project <name or path> [first message]"),
 ];
 /// The commands only a Claude thread has.
 pub const CLAUDE: [(&str, &str); 2] = [("/compact", "Summarize the conversation to free context"), ("/context", "Show what fills the context window")];
@@ -38,7 +40,8 @@ mod tests {
     #[test] fn slash_not_midline() { assert!(!typing("hi /gi")) }
     #[test] fn slash_typing_needs_slash() { assert!(!typing("give")) }
     #[test] fn slash_claude_prefix() { assert_eq!(names(&cmds(true, "c")), ["/compact", "/context"]) }
-    #[test] fn slash_others_own_only() { assert_eq!(names(&cmds(false, "")), ["/btw", "/give", "/secret", "/settle", "/intent"]) }
+    #[test] fn slash_others_own_only() { assert_eq!(names(&cmds(false, "")), ["/btw", "/give", "/secret", "/settle", "/intent", "/project", "/new-project"]) }
+    #[test] fn slash_project_and_its_alias() { assert_eq!(names(&cmds(true, "pro")), ["/project"]); assert_eq!(names(&cmds(false, "new")), ["/new-project"]) }
     #[test] fn slash_none_unknown() { assert!(cmds(true, "zz").is_empty()) }
     // Refs.last.go: a separator resets the word, so a trailing one leaves "", tabs and carriage returns count
     #[test] fn token_is_the_last_word() {

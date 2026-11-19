@@ -56,6 +56,18 @@ pub async fn make(path: &str) -> Result<String, Value> {
     let r = sh(&mkdir_sh(), path).await; if r.code == 0 { Ok(lines(&r.out).last().cloned().unwrap_or_default()) } else { Err(private(path, error(&r.out))) } }
 /// FsJob.register: a resolved path must be a folder.
 pub fn is_dir(path: &str) -> bool { std::fs::metadata(path).map_or(false, |m| m.is_dir()) }
+/// A folder with nothing in it (hidden files count): /project makes its project in one, never in one that holds something.
+pub fn is_empty(path: &str) -> bool { std::fs::read_dir(path).map_or(false, |mut r| r.next().is_none()) }
+/// /project's refusal of a folder that holds something: the folder, and what to do instead.
+pub fn not_empty(dir: &str) -> String { format!("{dir} is there and is not empty. Add it as it is (Add existing), or give /project a new name.") }
+/// A folder request's error in the person's words for /project: no permission said plainly, the script's own words otherwise.
+pub fn plain(e: &str) -> String {
+    let low = e.to_lowercase();
+    if low.contains("permission denied") || low.contains("access is denied") || low.contains("read-only file system") { return format!("No permission to make that folder there ({}).", e.trim()) }
+    if let Some(p) = e.trim().strip_prefix("cannot open: ") { return format!("No permission to open {p}.") }
+    if let Some(p) = e.trim().strip_prefix("already exists: ") { return format!("{p} is there and is not a folder.") }
+    e.trim().to_string()
+}
 
 /// Windows before Git for Windows is installed (#1163): no `sh` runs the scripts above, so the picker and project.add/new do the same in
 /// Rust (setup's Design tools step, or a thread's Install Git ask, installs it). Answers and errors are the scripts' own: `C:/x/y` as
@@ -96,6 +108,22 @@ mod native {
         let mut v: Vec<String> = std::fs::read_dir(&d).map(|r| r.flatten().filter(|e| e.file_type().map_or(false, |t| t.is_dir())).map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
         v.sort(); v.truncate(5000);
         json!({"dir": d, "entries": v})
+    }
+}
+
+#[cfg(test)]
+mod project_tests {
+    #[test] fn slash_project_folders_say_why_in_plain_words() {
+        let t = crate::plat::tmp::dir("fsp"); let d = t.to_string_lossy().into_owned();
+        assert!(super::is_empty(&d), "a new folder is empty");
+        std::fs::write(t.join(".x"), "").unwrap(); assert!(!super::is_empty(&d), "a hidden file counts");
+        assert!(super::not_empty(&d).contains("Add existing"));
+        assert!(super::plain("mkdir: cannot create directory '/root/x': Permission denied").starts_with("No permission"));
+        assert!(super::plain("cannot make C:/x: Access is denied. (os error 5)").starts_with("No permission"));
+        assert_eq!(super::plain("already exists: /h/f"), "/h/f is there and is not a folder.");
+        assert_eq!(super::plain("cannot open: /root"), "No permission to open /root.");
+        assert_eq!(super::plain("no such folder: /x"), "no such folder: /x");
+        let _ = std::fs::remove_dir_all(&t);
     }
 }
 

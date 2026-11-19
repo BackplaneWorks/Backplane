@@ -261,12 +261,13 @@ Driven in the GPUI window on a private Xvfb rig (`test/slash/rig.sh` with `drive
 
 | Item | 0.14 | Filter, keys, insert | Result | Shot |
 | --- | --- | --- | --- | --- |
-| `/` list | yes | prefix of the name; Down/Up move, Esc closes, Tab completes | seven rows (`/btw /give /secret /settle /intent`, Claude's `/compact /context`) | `a1` to `a4` |
+| `/` list | yes | prefix of the name; Down/Up move, Esc closes, Tab completes | nine rows (`/btw /give /secret /settle /intent /project /new-project`, Claude's `/compact /context`) | `a1` to `a4` |
 | `/btw` | yes | Tab completes, Enter asks | card answers, thread unchanged | `d2` |
 | `/give` | yes | Tab, then the `>` popup | `>busy-build` inserted, Enter hands over, "Given to" row | `b4`, `c1` |
 | `/secret` | yes | Tab, name, Enter | masked box; value typed as `*`; Enter or Save stores it; value in no file of the home | `e3`, `e4` |
 | `/intent` | yes (typed in full) | Tab (new in the popup) or full word, Enter | template in the composer, Save button, writes `.backplane/intent.md` | `f3`, `f4` |
 | `/settle` | new | typed in full, Enter | settles at once (fixed: Enter used to only complete the row) | `g6` |
+| `/project`, `/new-project` | new | Tab, a name or path, then any first message, Enter | `project.new` (`empty`): the folder is made under the home folder for a bare name (where Add project starts), as given for `~/x` or an absolute path; its first thread opens with the message. Alone: the Add project dialog, focused. A folder that holds something: the dialog opens on it (Add takes it as it is) | `scripts/desktop-slash-project.sh`: `01-autocomplete` to `05-invalid` |
 | `/compact`, `/context` | yes, Claude only | Tab, Enter | sent to Claude as a message | `g4` |
 | steer | yes | any send while a turn runs | button Steer, message posted at once, no queue | `g2` |
 | `@` bot | yes | slug match, Tab or Enter inserts `@ada ` | driven | `pop-hia*` |

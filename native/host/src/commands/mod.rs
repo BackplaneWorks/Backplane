@@ -125,7 +125,14 @@ impl RpcHandler for Commands {
                 "project.add" | "project.new" => {
                     // `orAdd` (setup's one field: "a folder that exists to add it, or a new path to make it"): a folder that is there is added as it is
                     let there = if method == "project.new" && p["orAdd"] == true { fs::resolve(&path).await.ok().filter(|d| fs::is_dir(d)) } else { None };
+                    // `empty` (the composer's /project): a folder that is there is used when it is empty; one that holds anything is refused, saying where (`exists`), so the client can offer to add it as it is
+                    let there = match there { None if method == "project.new" && p["empty"] == true => match fs::resolve(&path).await {
+                        Ok(d) if fs::is_dir(&d) && fs::is_empty(&d) => Some(d),
+                        Ok(d) if fs::is_dir(&d) => return answer(json!({"error": fs::not_empty(&d), "exists": d})),
+                        Err(e) if e["error"].as_str().map_or(false, |m| m.starts_with("cannot open")) => return answer(json!({"error": fs::plain(e["error"].as_str().unwrap_or(""))})),
+                        _ => None }, t => t };
                     let r = match there { Some(d) => Ok(d), None if method == "project.add" => fs::resolve(&path).await, None => fs::make(&path).await };
+                    let r = if p["empty"] == true { r.map_err(|e| json!({"error": fs::plain(e["error"].as_str().unwrap_or(""))})) } else { r };
                     match r { Ok(d) if fs::is_dir(&d) => Some(d), Ok(d) => return answer(json!({"error": crate::plat::privacy_block(&d).unwrap_or_else(|| format!("invalid project folder: {d}"))})), Err(e) => return answer(e) }
                 }
                 "project.create" => Some(path.clone()),
@@ -153,6 +160,14 @@ impl RpcHandler for Commands {
                 // #1163: every project is a git repository, its existing work committed before any agent can change it (files/snapshot.rs);
                 // in the background, so a big folder does not hold the reply (the first turn's guard makes sure of it too)
                 if method != "project.create" && !crate::copy::on() { let (root2, uh) = (root.clone(), crate::plat::dirs::home().map(std::path::PathBuf::from)); let off = crate::settings::offbranch::on(&hub.setting(crate::settings::offbranch::KEY).await.unwrap_or_default()); tokio::spawn(async move { if let Ok(e) = crate::files::snapshot::ensure_repo(&root2, uh.as_deref(), off).await { let l = e.line(); if !l.is_empty() { eprintln!("projects: {root2}: {l}") } } }); }
+                drop(f); // the first message goes to the agents module, which must not wait on this lock
+                // /project's first message: the new project's first thread starts with it, as a page's Send does (its failure is the reply's)
+                let first = p["text"].as_str().map(str::trim).unwrap_or("");
+                if method == "project.new" && !first.is_empty() && pl.reply["ok"] == true { if let Some(th) = pl.reply["thread"].as_str() {
+                    let msg = format!("np-{}", th.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect::<String>());
+                    let r = match hub.rpc_for("turn.start") { Some(h) => h.call(hub, who, &json!(0), "turn.start", &json!({"thread": th, "text": first, "msg": msg})).await.into_iter().next().unwrap_or(Value::Null), None => json!({"ok": false, "error": "no agent module is running"}) };
+                    if r["ok"] != true { let mut x = pl.reply.clone(); x["note"] = json!(format!("The project is made, but its first message did not go: {}", r["error"].as_str().unwrap_or("send it again"))); return vec![x] }
+                } }
                 return vec![pl.reply];
             }
             let Some(mut pl) = plan(&f, now_s(), id, method, p, &cx) else { return vec![json!({"t":"reply","id":id,"ok":false,"error":"unknown method"})] };

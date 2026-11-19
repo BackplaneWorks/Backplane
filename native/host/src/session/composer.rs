@@ -68,11 +68,12 @@ fn say(text: &str) -> ActOut { ActOut { session_patch: json!({}), cmds: vec![jso
 /// What the composer holds now: `keep` for the kept copy, `compose` for the box itself.
 fn compose(hub: &str, sel: &str, text: &str) -> Vec<Value> { vec![json!({"type": "keep", "thread": format!("{hub}|{sel}"), "text": text}), json!({"type": "compose", "thread": sel, "text": text})] }
 /// The composer's own commands, none of them ever a message: `(word, the Send button's label, what it does)`. The clients match a draft against these (`command_is`).
-pub const WORDS: [(&str, &str, &str); 5] = [("/btw", "Ask", super::slash::OWN[0].1), ("/give", "Give", super::slash::OWN[1].1), ("/secret", "Send", super::slash::OWN[2].1), ("/intent", "Save", "Save this project's intent"), ("/settle", "Settle", super::slash::OWN[3].1)];
+pub const WORDS: [(&str, &str, &str); 7] = [("/btw", "Ask", super::slash::OWN[0].1), ("/give", "Give", super::slash::OWN[1].1), ("/secret", "Send", super::slash::OWN[2].1), ("/intent", "Save", "Save this project's intent"), ("/settle", "Settle", super::slash::OWN[3].1),
+    ("/project", "Create", super::slash::OWN[5].1), ("/new-project", "Create", super::slash::OWN[6].1)];
 /// The same table as data, for the phones (`hello.commands`) and the desktop (`thread.commands`).
 pub fn words() -> Value { Value::Array(WORDS.iter().map(|(w, l, d)| json!({"word": w, "label": l, "desc": d})).collect()) }
 /// A draft read as one of the composer's commands, and what follows the word.
-#[derive(Debug, PartialEq)] pub enum Word { Btw(String), Give, Secret(String), Intent(String), Settle }
+#[derive(Debug, PartialEq)] pub enum Word { Btw(String), Give, Secret(String), Intent(String), Settle, Project(String) }
 pub fn word_of(draft: &str) -> Option<Word> {
     let rest = |w: &str| draft.trim().get(w.len()..).unwrap_or("").trim().to_string();
     // Sbox.is, Intent.is, Give.is, Btw.is, in the order Ui.send asks them
@@ -81,7 +82,37 @@ pub fn word_of(draft: &str) -> Option<Word> {
     if command_is(draft, "/give") { return Some(Word::Give) }
     if command_is(draft, "/btw") { return Some(Word::Btw(rest("/btw"))) }
     if command_is(draft, "/settle") { return Some(Word::Settle) }
+    for w in ["/project", "/new-project"] { if command_is(draft, w) { return Some(Word::Project(rest(w))) } }
     None
+}
+
+/// `/project <folder> [first message]`: what follows the word, as (the folder, the first message). The folder is the first word, or a "quoted"
+/// path with spaces in it; the rest is the new thread's first message. Ok(None): no folder given (the Add project dialog opens instead).
+/// The folder itself is taken as `project.new` takes it (commands/fs.rs): a bare name is under the home folder, where the Add project
+/// dialog starts (`picker-open`: "~/"), and `~/x` or an absolute path is used as given.
+pub fn project_args(rest: &str) -> Result<Option<(String, String)>, String> {
+    let rest = rest.trim();
+    if rest.is_empty() { return Ok(None) }
+    let (path, text) = if let Some(q) = rest.strip_prefix('"') {
+        match q.split_once('"') { Some((p, t)) => (p.to_string(), t.trim().to_string()), None => return Err("The folder's closing quote is missing.".into()) }
+    } else { match rest.split_once(char::is_whitespace) { Some((p, t)) => (p.to_string(), t.trim().to_string()), None => (rest.to_string(), String::new()) } };
+    project_folder_ok(&path)?;
+    Ok(Some((path, text)))
+}
+/// Np.name: a folder the command can make. Never a control character, a `.` or `..` part; a bare name (no folder before it) holds none of
+/// the characters a folder's name cannot have on some system (`< > : " | ? * \`) and is at most 255 bytes.
+pub fn project_folder_ok(path: &str) -> Result<(), String> {
+    let bad = |why: &str| Err(format!("{path:?} cannot be a project's folder: {why}."));
+    if path.is_empty() { return bad("no name") }
+    if path.chars().any(char::is_control) { return bad("it holds a control character") }
+    if path.split(['/', '\\']).any(|p| p == "..") { return bad("a path with .. in it") }
+    let bare = !path.contains('/') && !path.contains('\\') && !path.starts_with('~');
+    if bare {
+        if path == "." { return bad("a name, not .") }
+        if path.chars().any(|c| matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')) { return bad("a name has none of < > : \" | ? *") }
+        if path.len() > 255 { return bad("a name is at most 255 characters") }
+    }
+    Ok(())
 }
 /// Bound.refuse: a draft this view holds only bounded is never sent; `marker` starts with its size in bytes. A message's bound is 128 KB.
 fn bound_says(marker: &str) -> String {
@@ -123,6 +154,18 @@ fn run(cx: &SendCtx, session: &Value, sel: &str, w: Word) -> ActOut {
         // `/intent` alone has nothing to save, and saving nothing would empty the file: it opens the intent to edit
         Word::Intent(body) if body.is_empty() => intent_borrow(cx.hub, session, sel),
         Word::Intent(body) => ActOut { session_patch: json!({"rid": rid + 1}), cmds: vec![req("fab.intent", json!({"thread": sel, "text": body}))] },
+        Word::Project(rest) => match project_args(&rest) {
+            Err(e) => say(&e),
+            // `/project` alone: the Add project dialog, as its button opens it (commands/actions.rs `picker-open`); the client focuses its field
+            Ok(None) => { let mut drafts = Map::new(); drafts.insert(sel.to_string(), json!("")); for (k, v) in [("@proj.open", "1"), ("@proj.text", "~/"), ("@proj.err", ""), ("@proj.clone", ""), ("@menu", "")] { drafts.insert(k.into(), json!(v)); }
+                ActOut { session_patch: json!({"drafts": drafts}), cmds: compose(cx.hub, sel, "") } }
+            // made as the dialog's Create makes it (`project.new`), its first thread selected by the reply (Made.want); `empty`: an empty folder that is there is
+            // used, one with files in it refused (the client offers Add project on it); `text`: that thread's first message. The draft stays until the reply.
+            Ok(Some((path, text))) => {
+                let at = format!("{}|{}", s(&session["info"], "local.machine"), s(&session["info"], "local.generation"));
+                ActOut { session_patch: json!({"rid": rid + 1, "drafts": {"@want.new": rid.to_string(), "@want.new.at": at}}), cmds: vec![req("project.new", json!({"path": path, "empty": true, "text": text}))] }
+            }
+        },
     }
 }
 
@@ -205,7 +248,8 @@ pub fn fields(draft: &str, running: bool, attaching: bool, claude: bool, own_ski
     if !matches!(lang, "" | "en") { return None }
     // Follow.stop: Stop while a turn runs and nothing is typed or attached
     let stop = running && blank(draft) && !attaching;
-    let label = if stop { "Stop" } else if command_is(draft, "/btw") { "Ask" } else if command_is(draft, "/give") { "Give" } else if command_is(draft, "/intent") { "Save" } else if command_is(draft, "/settle") { "Settle" } else if running { "Steer" } else { "Send" };
+    // the command's own word (WORDS: Ask, Give, Save, Settle, Create...), the one the phones read from `hello.commands`
+    let label = if stop { "Stop" } else if let Some((_, l, _)) = WORDS.iter().find(|(w, ..)| command_is(draft, w)) { l } else if running { "Steer" } else { "Send" };
     let skills = if super::slash::typing(draft) { slash_rows(claude, draft) } else { own_skills.clone() };
     Some(json!({"draft": draft, "skills": skills, "send": label, "sendAct": if stop { "interrupt" } else { "send" }}))
 }
@@ -451,6 +495,29 @@ mod tests {
         assert_eq!(word_of("/settle"), Some(Word::Settle)); assert_eq!(word_of(" /settle \n"), Some(Word::Settle)); assert_eq!(word_of("/settled"), None);
         assert_eq!(word_of("/give >x note"), Some(Word::Give)); assert_eq!(word_of("/secret"), Some(Word::Secret("".into()))); assert_eq!(word_of("/secret github-token"), Some(Word::Secret("github-token".into())));
         assert_eq!(word_of("/intent\n# Goal\nlamp"), Some(Word::Intent("# Goal\nlamp".into()))); assert_eq!(word_of("/compact"), None); assert_eq!(word_of("hi /btw"), None); assert_eq!(word_of("/btwx"), None);
+    }
+    #[test] fn slash_project_reads_its_folder_and_first_message() {
+        assert_eq!(word_of("/project ~/x Build a sensor puck"), Some(Word::Project("~/x Build a sensor puck".into()))); assert_eq!(word_of("/new-project puck"), Some(Word::Project("puck".into())));
+        assert_eq!(word_of("/project"), Some(Word::Project("".into()))); assert_eq!(word_of("/projects"), None);
+        assert_eq!(project_args(""), Ok(None));
+        assert_eq!(project_args("~/x Build a sensor puck"), Ok(Some(("~/x".into(), "Build a sensor puck".into()))));
+        assert_eq!(project_args("puck"), Ok(Some(("puck".into(), "".into()))));
+        assert_eq!(project_args("/srv/boards/puck\nfirst line\nsecond"), Ok(Some(("/srv/boards/puck".into(), "first line\nsecond".into()))));
+        assert_eq!(project_args("\"~/My Boards/puck\" go"), Ok(Some(("~/My Boards/puck".into(), "go".into()))));
+        assert!(project_args("\"~/open").unwrap_err().contains("quote"));
+        for bad in ["..", ".", "a:b", "x?", "~/a/../b", "a*"] { assert!(project_args(bad).is_err(), "{bad}") }
+        assert!(project_args(&"n".repeat(256)).is_err()); assert!(project_args("C:\\work\\puck").is_ok(), "a Windows path keeps its colon");
+    }
+    #[test] fn slash_project_makes_the_project_or_opens_add_project() {
+        let o = send(&cx(), &with("/project ~/x Build a sensor puck")).unwrap();
+        let (m, p) = sent_method(&o).unwrap(); assert_eq!(m, "project.new"); assert_eq!(p, json!({"path": "~/x", "empty": true, "text": "Build a sensor puck"}));
+        assert_eq!(o.session_patch["drafts"]["@want.new"], "2", "the reply's thread is selected"); assert!(o.session_patch["drafts"].get(T).is_none(), "the draft stays until the hub says yes");
+        let o = send(&cx(), &with("/project")).unwrap(); let d = &o.session_patch["drafts"];
+        assert!(sent_method(&o).is_none()); assert_eq!((d["@proj.open"].as_str(), d["@proj.text"].as_str(), d[T].as_str()), (Some("1"), Some("~/"), Some("")), "the Add project dialog, as its button opens it");
+        let o = send(&cx(), &with("/new-project ..")).unwrap(); assert!(sent_method(&o).is_none()); assert!(says(&o).contains("cannot be a project's folder"), "{}", says(&o));
+        assert!(words().as_array().unwrap().iter().any(|w| w["word"] == "/project" && w["label"] == "Create"));
+        assert_eq!(fields("/project ~/x go", true, false, false, &json!([]), "")["send"], "Create", "the button says what Send does");
+        assert_eq!(slash_rows(false, "/pro")[0]["name"], "/project");
     }
     #[test] fn a_side_question_goes_to_the_hub_and_never_to_the_thread() {
         let o = send(&cx(), &with("/btw why")).unwrap();

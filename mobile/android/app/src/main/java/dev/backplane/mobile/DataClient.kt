@@ -706,7 +706,8 @@ object DataClient {
     }
     /** Runs it; throws the hub's plain words when it cannot. The answer's `kind` is what became of it. */
     suspend fun runCommand(tid: String, text: String): JSONObject {
-        val r = call("composer.run", JSONObject().put("thread", tid).put("text", text))
+        // `exists`: this app offers Add existing on a folder /project found not empty (the answer's kind "exists")
+        val r = call("composer.run", JSONObject().put("thread", tid).put("text", text).put("exists", true))
         if (r.optString("kind") == "btw") btw = btw + (tid to Btw(r.optString("q"), Msg.android_thinking))
         return r
     }
@@ -724,6 +725,8 @@ object DataClient {
     var openFromIntent by mutableStateOf<String?>(null)
     /** A tapped link the hub resolved (DataLinks.kt): the root screen opens it. A link that opens nothing leaves a short note; a project link scrolls the list to it. */
     var linkTarget by mutableStateOf<LinkTarget?>(null)
+    /** `/project` alone in a composer: DataRoot opens the Add project screen. */
+    var openAddProject by mutableStateOf(false)
     var linkNote by mutableStateOf("")
     var focusProject by mutableStateOf("")
     /** An account whose sign-in an alert's tap (or backplane://account/<id>) opens. */

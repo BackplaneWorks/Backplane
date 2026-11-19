@@ -184,7 +184,9 @@ fn folders_in(cache: &Shared, drafts: &Value, home: &str, roots: &[(&str, &str)]
         if let Some(id) = id { it["project"] = json!(id); }
         items.push(it);
     }
-    let error = if let Some(w) = blocked { w } else if Path::new(&dir).is_dir() { String::new() } else { format!("{} is not a folder", t(&dir)) };
+    // `@proj.err`: why the dialog was opened on this folder (/project found it not empty), until the field changes
+    let said = drafts["@proj.err"].as_str().unwrap_or("");
+    let error = if let Some(w) = blocked { w } else if !Path::new(&dir).is_dir() { format!("{} is not a folder", t(&dir)) } else { said.to_string() };
     let hint = if clone.is_empty() { "Path of a folder, e.g. ~/projects/board, or a Git repository's address to clone it".to_string() } else { format!("Where to clone {clone}") };
     // `more`: the folders that match past the rows sent (typing narrows them); `cut`: the folder holds more entries than are read, so there may be others
     json!({"text": text, "hint": hint, "error": error, "items": items, "more": more, "cut": cut})

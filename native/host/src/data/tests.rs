@@ -8,7 +8,7 @@ use tokio_tungstenite::connect_async;
 
 struct Fake(Arc<Hub>);
 impl RpcHandler for Fake {
-    fn methods(&self) -> &'static [&'static str] { &["project.add", "thread.create", "thread.modes", "thread.effort", "thread.provider", "ask.answer", "turn.interrupt", "thread.pin", "thread.rename", "thread.detach", "setting.set"] }
+    fn methods(&self) -> &'static [&'static str] { &["project.add", "project.new", "thread.create", "thread.modes", "thread.effort", "thread.provider", "ask.answer", "turn.interrupt", "thread.pin", "thread.rename", "thread.detach", "setting.set"] }
     fn call<'a>(&'a self, h: &'a Arc<Hub>, _w: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let _ = &self.0; let at = now_ms() / 1000;
@@ -16,6 +16,9 @@ impl RpcHandler for Fake {
             match m {
                 "project.add" => { let root = s(p, "path"); h.commit(&json!({"$":"ProjectCreated","id":format!("p{n}"),"title":root.rsplit('/').next().unwrap_or(""),"root":root,"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
                 "thread.create" => { let t = format!("t{n}"); h.commit(&json!({"$":"ThreadCreated","id":t,"project":s(p,"project"),"title":if s(p,"title").is_empty(){"New thread"}else{s(p,"title")},"env":if s(p,"env").is_empty(){"(setting)"}else{s(p,"env")},"branch":"","worktree":"","provider":"claude","model":"","at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true,"thread":t})] }
+                // /project's request: a folder named "full" holds something, any other is made with its first thread
+                "project.new" => if s(p, "path") == "full" { vec![json!({"t":"reply","id":id,"ok":false,"error":"/h/full is there and is not empty.","result":{"error":"/h/full is there and is not empty.","exists":"/h/full"}})] }
+                    else { assert_eq!(p["empty"], true); vec![json!({"t":"reply","id":id,"ok":true,"thread":format!("made-{}", s(p, "text").len())})] },
                 "ask.answer" => { h.commit(&json!({"$":"AskClosed","id":s(p,"id"),"answer":s(p,"answer"),"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
                 "thread.modes" | "thread.effort" | "thread.provider" | "turn.interrupt" | "thread.pin" | "thread.rename" | "thread.detach" | "setting.set" => vec![json!({"t":"reply","id":id,"ok":true})],
                 _ => vec![json!({"t":"reply","id":id,"ok":false,"error":"no"})],
@@ -246,6 +249,12 @@ impl crate::api::RpcHandler for PushState {
     assert_eq!(ask(&mut ws, 6, "composer.run", json!({"thread":"t1","text":"/btw why"})).await["result"], json!({"kind":"btw","q":"why"}));
     let a = loop { let v = next(&mut ws).await; if v["k"] == "btw" { break v } };
     assert_eq!((a["t"].as_str(), a["thread"].as_str(), a["q"].as_str()), (Some("d"), Some("t1"), Some("why"))); assert!(a["a"].as_str().unwrap().contains("Settings, Writing"), "no model here: it says where the model is chosen");
+    assert!(hello["commands"].as_array().unwrap().iter().any(|c| c["word"] == "/project"), "{hello}");
+    assert_eq!(ask(&mut ws, 7, "composer.run", json!({"thread":"t1","text":"/project"})).await["result"], json!({"kind":"project"}), "alone: the app's Add project");
+    assert_eq!(ask(&mut ws, 8, "composer.run", json!({"thread":"t1","text":"/project puck Build it"})).await["result"], json!({"kind":"made","thread":"made-8","note":""}));
+    assert_eq!(ask(&mut ws, 9, "composer.run", json!({"thread":"t1","text":"/new-project full","exists":true})).await["result"], json!({"kind":"exists","path":"/h/full","error":"/h/full is there and is not empty."}));
+    let r = ask(&mut ws, 10, "composer.run", json!({"thread":"t1","text":"/project full"})).await; assert_eq!((r["ok"].as_bool(), r["error"].as_str()), (Some(false), Some("/h/full is there and is not empty.")), "an app that offers no Add existing gets the words");
+    assert_eq!(ask(&mut ws, 11, "composer.run", json!({"thread":"t1","text":"/project a?b"})).await["ok"], false);
     assert_eq!(h.store.len(), n);
 }
 

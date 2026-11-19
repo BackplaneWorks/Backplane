@@ -299,6 +299,27 @@ fn tmp(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::named(&forma
     assert_eq!((e.len(), e[0]["$"].as_str()), (1, Some("ProjectCreated")), "{e:?}");
 }
 
+// /project (`project.new` with `empty`): a new folder is made, an empty one that is there is used, one that holds something is refused saying where;
+// `text` is the first thread's first message (no agent module here: the project stands, the reply says the message did not go)
+#[tokio::test] async fn slash_project_uses_an_empty_folder_and_refuses_a_full_one() {
+    let h = hub("pslash").await; let d = tmp("slash");
+    let (e, r) = ask(&h, "project.new", json!({"path": d.join("puck").to_str().unwrap(), "empty": true})).await; assert_eq!(r["ok"], true, "{r}"); assert!(d.join("puck").is_dir());
+    assert_eq!((e[0]["$"].as_str(), e[1]["$"].as_str()), (Some("ProjectCreated"), Some("ThreadCreated"))); assert!(r["thread"].is_string());
+    std::fs::create_dir_all(d.join("bare")).unwrap();
+    let (e, r) = ask(&h, "project.new", json!({"path": d.join("bare").to_str().unwrap(), "empty": true})).await; assert_eq!(r["ok"], true, "an empty folder is used: {r}"); assert_eq!(e[0]["$"], "ProjectCreated");
+    std::fs::create_dir_all(d.join("full")).unwrap(); std::fs::write(d.join("full/notes.txt"), "x").unwrap();
+    let (e, r) = ask(&h, "project.new", json!({"path": d.join("full").to_str().unwrap(), "empty": true})).await; assert!(e.is_empty()); assert_eq!(r["ok"], false);
+    assert!(r["error"].as_str().unwrap().contains("not empty"), "{r}"); assert!(r["result"]["exists"].as_str().unwrap().ends_with("/full"), "{r}");
+    std::fs::write(d.join("afile"), "x").unwrap();
+    let (_, r) = ask(&h, "project.new", json!({"path": d.join("afile").to_str().unwrap(), "empty": true})).await; assert_eq!(r["error"], format!("{} is there and is not a folder.", d.join("afile").display()), "{r}");
+    #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; let ro = d.join("ro"); std::fs::create_dir_all(&ro).unwrap(); std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::write(ro.join("probe"), "").is_err() { // not root
+            let (_, r) = ask(&h, "project.new", json!({"path": ro.join("x").to_str().unwrap(), "empty": true})).await; assert!(r["error"].as_str().unwrap().starts_with("No permission"), "{r}"); }
+        std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+    let (_, r) = ask(&h, "project.new", json!({"path": d.join("withmsg").to_str().unwrap(), "empty": true, "text": "Build a sensor puck"})).await; assert_eq!(r["ok"], true, "{r}");
+    assert!(r["note"].as_str().unwrap_or("").contains("first message did not go"), "no agents here: {r}");
+}
+
 fn git_repo(name: &str) -> crate::plat::tmp::TempDir {
     let d = tmp(name); let p = d.to_str().unwrap().to_string();
     let g = |a: &[&str]| assert!(std::process::Command::new("git").args(a).current_dir(&p).env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t").output().unwrap().status.success());

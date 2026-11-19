@@ -167,6 +167,10 @@ impl Backplane {
                 self.error.clear();
                 if id.contains('~') { self.note=crate::i18n::trs("Sent. The thread opens here as soon as that machine has it."); }
                 self.screens.projects.made=Some((id.to_string(),at)); self.adopt_new(cx); } cx.notify(); }
+            // /project: the hub made the project (its thread is opened as a New thread's is, `created` next); the command leaves the box. A folder that
+            // holds something: the Add project dialog opens on it, where Add takes it as it is
+            Event::Data(tag,v) if tag=="project-made" => { let now=self.input.read(cx).content.to_string(); if screens::sidebox::makes_project(&now) { self.input.update(cx,|i,cx|i.set(String::new(),cx)); self.drafts.remove(&self.selected); self.screens.drafts.set(&self.selected,""); let _=self.tx.try_send(Command::Draft(String::new())); } if let Some(n)=v.as_str().filter(|n|!n.is_empty()) { self.note=crate::i18n::trs(n); } cx.notify(); }
+            Event::Data(tag,v) if tag=="project-exists" => { self.arm_new=None; if let Some(d)=v.as_str() { let _=self.tx.try_send(Command::Action("proj-exists".into(),d.to_string())); } cx.notify(); }
             Event::Data(tag,v) if tag==streamer::TAG => self.streamer_ids(&v,cx),
             Event::Data(tag,v) if tag=="names" => { screens::xprobe::got_names(self,&v); cx.notify(); }
             Event::Data(tag,v) if tag=="xsel" => { screens::xprobe::got_select(self,&v); cx.notify(); }
@@ -194,15 +198,15 @@ impl Backplane {
             Event::Pick(info)=>{ let slot=self.screens.pick_slot.unwrap_or(0); let card=screens::plot::card(&info); let pv=self.screens.pv(slot); if pv.picked.is_some() { pv.card=card.clone(); } if let Some(c)=card { screens::plotview::cross_probe(self,slot,&c); } screens::plotview::report_state(self); cx.notify(); }
             Event::Probe(slot,m) if slot>=3=>{ screens::plotview::frame_on(self,slot-3,&m); cx.notify(); }
             Event::Probe(slot,m)=>{ eprintln!("GPUI_LOG {}",serde_json::json!({"event":"probe_lit","slot":slot,"n":m.len()})); let pv=self.screens.pv(slot); if pv.lit.len()<20000 { pv.lit.extend(m); } cx.notify(); }
-            Event::Status(s)=>{if s!=self.status {eprintln!("GPUI_LOG {}",serde_json::json!({"status":s})); /* always-on dictation: the hub says whether it is wanted here */ if s=="Connected" {let _=self.tx.try_send(Command::Rpc("bots.voice".into(),screens::settings::Secret(serde_json::json!({"op":"always"})),"voice"));}}self.status=s;if self.status=="Connected"{/* (every shown view says Connected: while setup is up its refusal stays until the person presses something there, or it would be gone before it was read) */ if hub::clears_on_connect(&self.error,self.data["tour"].is_object()){self.error.clear();}screens::hubbar::connected(&mut self.screens.hubbar);self.send_unsent();}},
+            Event::Status(s)=>{let back=s!=self.status;if s!=self.status {eprintln!("GPUI_LOG {}",serde_json::json!({"status":s})); /* always-on dictation: the hub says whether it is wanted here */ if s=="Connected" {let _=self.tx.try_send(Command::Rpc("bots.voice".into(),screens::settings::Secret(serde_json::json!({"op":"always"})),"voice"));}}self.status=s;if self.status=="Connected"{/* (every shown view says Connected: while setup is up its refusal stays until the person presses something there, or it would be gone before it was read) */ if hub::clears_on_connect(&self.error,self.data["tour"].is_object(),back){self.error.clear();}screens::hubbar::connected(&mut self.screens.hubbar);self.send_unsent();}},
             Event::Accepted if self.sent_wait.take().is_some()=>{self.voice_sent(cx);self.timeline_to_end();},
             Event::Accepted=>{self.input.update(cx,|input,cx|input.set(String::new(),cx));let _=self.tx.try_send(Command::Draft(String::new())); /* a /give keeps its text in the hub until it took it: the box is empty now, so is that copy */ self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");self.voice_sent(cx);self.timeline_to_end();}, // (the file too: the box's own change comes after the map entry is gone, and would not clear it)
             Event::Older(cursor,page)=>self.older_landed(cursor,page,cx),
             Event::Error(e)=>{self.error=e;self.screens.unsent.lost();self.sent_back(cx);},
             Event::Unpaired=>screens::pair::revoked(self,cx),
             // a refused view leaves no page to wait for: the pressed tab gives way at once, and the window says why
-            Event::Refused(e)=>{self.error=e;self.sent_back(cx);screens::viewer::forget_press();self.screens.rail_pending=None;self.screens.rail_at=None;},
-            Event::Note(n)=>{self.note=n;},
+            Event::Refused(e)=>{eprintln!("GPUI_LOG {}",serde_json::json!({"refused":e.chars().take(160).collect::<String>()}));self.error=e;self.sent_back(cx);screens::viewer::forget_press();self.screens.rail_pending=None;self.screens.rail_at=None;self.ui_epoch+=1;cx.notify();}, // drawn now: a composer command's refusal (/project, /btw) came with no picture to repaint it
+            Event::Note(n)=>{self.note=n;self.ui_epoch+=1;cx.notify();},
             // the hub moved the composer on: a command left it, or the conversation's draft came back after an intent was saved. Another thread's is kept for when it opens
             Event::Compose(th,text)=>{if th==self.selected {self.input.update(cx,|input,cx|input.set(text.clone(),cx));}if text.is_empty(){self.drafts.remove(&th);}else{self.drafts.insert(th.clone(),text.clone());}self.screens.drafts.set(&th,&text);},
         }
@@ -297,7 +301,7 @@ impl Backplane {
         }
         // a dictated draft (no picture, no command): it goes as a spoken message, the agent told so
         if !has_att&&!text.trim().is_empty()&&self.status=="Connected"&&!screens::sidebox::is_command(&self.data["thread"]["commands"],&text)&&self.voice_send_dictated(&text,cx) {self.input.update(cx,|i,cx|i.set(String::new(),cx));self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");let _=self.tx.try_send(Command::Draft(String::new()));cx.notify();return;}
-        if (!text.trim().is_empty()||has_att)&&self.status=="Connected" {self.voice_cut(true);let command=screens::sidebox::is_command(&self.data["thread"]["commands"],&text);if !text.trim().is_empty()&&!command{self.echo_sent(&text);}
+        if (!text.trim().is_empty()||has_att)&&self.status=="Connected" {self.voice_cut(true);let command=screens::sidebox::is_command(&self.data["thread"]["commands"],&text);if !text.trim().is_empty()&&!command{self.echo_sent(&text);} if command&&screens::sidebox::makes_project(&text) {self.arm_new();}
             // a message leaves the box at the press (the hub can take a while to answer, and a box still holding it was sent again); a command keeps the
             // hub's own handling (it may leave text in the box). The hub's yes then leaves the box alone: the person may be typing the next one
             if !command&&!text.trim().is_empty() {self.sent_wait=Some((self.selected.clone(),text.clone()));self.input.update(cx,|i,cx|i.set(String::new(),cx));self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");}
