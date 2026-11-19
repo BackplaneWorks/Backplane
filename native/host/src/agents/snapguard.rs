@@ -42,6 +42,9 @@ pub const CLAUDE_DENY: &[&str] = &["Edit(**/*.kicad_pcb)", "Edit(**/*.kicad_sch)
 /// The setting that says a thread's turns are reviews (read-only), "1" while they are.
 pub fn review_key(th: &str) -> String { format!("review.ro.{th}") }
 
+/// How long a turn waits for its pre-turn snapshot before the agent starts anyway (the hidden setting `snap.wait.ms` overrides it, for tests).
+pub const SNAP_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// One turn's guard state.
 #[derive(Debug, Default, Clone)]
 pub struct TurnGuard {
@@ -112,20 +115,43 @@ impl Agents {
         if new_turn { self.close_restore_asks(th).await }
         let root = kc::design_root(cwd);
         if !std::path::Path::new(&root).is_dir() { self.turn_guards.lock().unwrap().insert(th.to_string(), TurnGuard { review, ..Default::default() }); return } // no folder: nothing to snapshot (the turn says why it cannot run there)
+        let g = TurnGuard { review, ..Default::default() };
+        // The snapshot of a big folder (a first commit of a folder in no repository, `git add -A` over a large tree, a slow disk, Windows process
+        // spawns) can take minutes (#1233, #1246): the agent waits for it only up to `snap_wait`; past that it starts, and the snapshot finishes in
+        // its own task, which then fills this turn's guard (a write before that takes its own snapshot, as for a turn that has none).
+        let wait = self.world().await.setting("snap.wait.ms").parse().map_or(SNAP_WAIT, std::time::Duration::from_millis);
+        let (me, th2, root2) = (self.clone(), th.to_string(), root.clone());
+        let mut task = tokio::spawn(async move { me.take_snapshot(&th2, &root2).await });
+        let g = match tokio::time::timeout(wait, &mut task).await {
+            Ok(r) => match r.ok().flatten() { Some((top, turn, reference)) => TurnGuard { top, turn, reference, ..g }, None => g },
+            Err(_) => {
+                self.guard_say(th, "info", format!("The snapshot of this project is taking more than {} s (a large folder). The agent starts now and the snapshot finishes meanwhile.", wait.as_secs_f32())).await;
+                let (me, th2) = (self.clone(), th.to_string());
+                tokio::spawn(async move {
+                    if let Some((top, turn, reference)) = task.await.ok().flatten() {
+                        if let Some(g) = me.turn_guards.lock().unwrap().get_mut(&th2) { if g.top.is_empty() { g.top = top; g.turn = turn; g.reference = reference } }
+                    }
+                });
+                g
+            }
+        };
+        self.turn_guards.lock().unwrap().insert(th.to_string(), g);
+    }
+
+    /// The folder `root` made a repository if it is in none, and its work tree snapshotted for `th`'s next turn: (top, turn, reference), None when
+    /// there is no repository or no snapshot (said in the thread).
+    async fn take_snapshot(self: &Arc<Self>, th: &str, root: &str) -> Option<(String, u64, String)> {
         let uh = std::path::PathBuf::from(&self.host.user_home);
         let off = self.off_branch().await;
-        let made = sn::ensure_repo(&root, Some(&uh), off).await;
+        let made = sn::ensure_repo(root, Some(&uh), off).await;
         match &made { Ok(e) => { let l = e.line(); if !l.is_empty() { self.guard_say(th, if e.not_made.is_empty() { "info" } else { "warn" }, l).await } } Err(e) => self.guard_say(th, "warn", format!("Not made a git repository: {e}")).await }
-        let mut g = TurnGuard { review, ..Default::default() };
-        if let Some(top) = sn::top_of(&root).await {
-            let turn = sn::next_turn(&top, th).await;
-            let title = self.thread_title(th).await;
-            match sn::snapshot(&top, th, &sn::snap_ref(th, turn), &sn::snap_msg(th, turn, &title, ""), off).await {
-                Ok(s) => { if s.made || !s.skipped.is_empty() { self.guard_say(th, "info", s.line()).await } g.top = top; g.turn = turn; g.reference = s.reference; }
-                Err(e) => self.guard_say(th, "warn", format!("No snapshot before this turn: {e}")).await,
-            }
+        let top = sn::top_of(root).await?;
+        let turn = sn::next_turn(&top, th).await;
+        let title = self.thread_title(th).await;
+        match sn::snapshot(&top, th, &sn::snap_ref(th, turn), &sn::snap_msg(th, turn, &title, ""), off).await {
+            Ok(s) => { if s.made || !s.skipped.is_empty() { self.guard_say(th, "info", s.line()).await } Some((top, turn, s.reference)) }
+            Err(e) => { self.guard_say(th, "warn", format!("No snapshot before this turn: {e}")).await; None }
         }
-        self.turn_guards.lock().unwrap().insert(th.to_string(), g);
     }
 
     /// Before a write through the hub to `path` (absolute): a review refuses it when it is a design file; the turn's first write snapshots
