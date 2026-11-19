@@ -57,6 +57,7 @@ const ALLOWED: &[&str] = &[
     "viewer.info",
     "viewer.layers",
     "viewer.probe",
+    "viewer.rail",
     "viewer.refs",
     "viewer.watch",
 ];

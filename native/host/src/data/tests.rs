@@ -65,10 +65,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -794,4 +794,26 @@ fn a_reply_and_a_notice_carry_their_code_to_copy() {
     assert_eq!(n["kind"], "note"); assert_eq!(n["copy"], json!([{"text":"scripts/land.sh --dry","cmd":true},{"text":"native/host","cmd":false}]));
     assert!(act_entry("t1", "x2", "warn", "error", "plain words", 1).unwrap().get("copy").is_none());
     assert!(super::FEATURES.contains(&"copy") && super::FEATURES.contains(&"termChat"));
+}
+
+#[tokio::test]
+async fn viewer_rail_returns_hub_rail_for_local_and_far_threads() {
+    let (hub, port) = up("viewer-rail").await;
+    let mut ws = open(port, "&enc=json").await;
+    let hello = next(&mut ws).await;
+    assert!(hello["features"].as_array().unwrap().iter().any(|f| f == "rail"));
+
+    // Local thread: returns hub's ordered rail model with mode="viewer", active page lit, and no local-only simulation entry
+    let r = ask(&mut ws, 1, "viewer.rail", json!({"thread":"t1","page":"files"})).await;
+    assert_eq!(r["ok"], true);
+    assert_eq!(r["result"]["mode"], "viewer");
+    let items = r["result"]["rail"].as_array().unwrap();
+    assert!(items.iter().any(|x| x["id"] == "files" && x["state"] == "on"));
+    assert!(!items.iter().any(|x| x["id"] == "simulation"), "data/1 rail must not offer local-only simulation");
+    // diff=true lights the diff entry regardless of page
+    let rd = ask(&mut ws, 2, "viewer.rail", json!({"thread":"t1","page":"files","diff":true})).await;
+    assert_eq!(rd["ok"], true);
+    let ditems = rd["result"]["rail"].as_array().unwrap();
+    assert!(ditems.iter().any(|x| x["id"] == "diff" && x["state"] == "on"));
+    drop(hub);
 }

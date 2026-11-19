@@ -718,9 +718,9 @@ pub fn files_action(st: &State, hub: &str, session: &Value, action: &str, value:
 use super::rail;
 
 #[derive(Clone, Copy, Default)]
-struct RailSources { board: bool, schematic: bool, mech: bool, gerbers: bool, altium: bool }
+pub struct RailSources { pub board: bool, pub schematic: bool, pub mech: bool, pub gerbers: bool, pub altium: bool }
 
-fn rail_sources(root: &str) -> RailSources {
+pub fn rail_sources(root: &str) -> RailSources {
     use std::path::Path;
     if root.is_empty() { return RailSources::default(); }
     let files = crate::files::kicad::project::read(root);
