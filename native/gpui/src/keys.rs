@@ -345,6 +345,7 @@ impl Backplane {
     pub(crate) fn rail_press(&mut self, a: &str, v: &str, cx: &mut Context<Self>) {
         // a project's page on show: the viewer opens on that project (projects::page_view), not on the thread that was open before the page
         if a == "view-kind" { if let Some((t, k)) = crate::screens::projects::page_view(&self.data, self.project_page.as_deref(), &self.selected, v) { self.page_viewer(t, k, cx); return } }
+        if !crate::ui::rail_enabled(&self.data["thread"]["viewer"], if a == "view-kind" { v } else { a }) { return }
         let cmd = if a == "view-kind" { self.rail_view(v, cx) } else { Command::Action(a.into(), v.into()) };
         let _ = self.tx.try_send(cmd); cx.notify();
     }
@@ -761,6 +762,13 @@ mod tests {
         for ctx in [&[][..], &["Composer"][..], &["Terminal"][..], &["Viewer"][..]] { assert_eq!(d("super-`", ctx), "keys::ToggleTerminal", "{ctx:?}"); }
         assert_eq!(d("super-`", &["DrawPad"]), ""); assert_eq!(hint(&Local::default(), "term-super"), "Super+`");
         assert_eq!(rail_letter("diff"), "d", "Diff's bare key, as the rail's keycap and tooltip say");
+    }
+    #[test] fn rail_press_requires_an_enabled_or_open_entry() {
+        let viewer = serde_json::json!({"rail":[{"id":"board","state":"disabled"},{"id":"files","state":"off"},{"id":"diff","state":"on"}]});
+        for (id, allowed) in [("board", false), ("gerbers", false), ("files", true), ("diff", true)] {
+            assert_eq!(crate::ui::rail_enabled(&viewer, id), allowed);
+        }
+        assert!(crate::ui::rail_enabled(&serde_json::Value::Null, "board"));
     }
     #[test] fn hints_follow_the_hubs_actions() {
         assert_eq!(id_for("diff", "", ""), "diff"); assert_eq!(id_for("interrupt", "", ""), "stop"); assert_eq!(id_for("new-thread", "p1", "p1"), "new"); assert_eq!(id_for("new-thread", "p2", "p1"), "");
