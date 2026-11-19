@@ -13,9 +13,12 @@ pub mod dirs;
 /// start whatever program of that name PATH has first.
 pub fn helper(name: &str) -> Option<std::path::PathBuf> { helper_in(&std::env::current_exe().ok()?, name, std::env::consts::EXE_SUFFIX) }
 /// `helper` for the program `exe` and the system's program suffix (`.exe` on Windows).
+/// A test binary in Cargo's newer layout, `target/<profile>/build/<package>/<hash>/out/`, finds it in `target/<profile>` (the stable toolchain on
+/// the Windows runner moved test binaries there: bp-sh was not found, and every `sh` argument with a backslash or a quote changed on its way).
 pub fn helper_in(exe: &std::path::Path, name: &str, suffix: &str) -> Option<std::path::PathBuf> {
     let file = format!("{name}{suffix}"); let d = exe.parent()?;
-    std::iter::once(d.join(&file)).chain(d.parent().map(|u| u.join(&file))).find(|f| f.is_file())
+    let profile = (d.file_name()? == "out").then(|| d.ancestors().nth(3).filter(|b| b.file_name().is_some_and(|n| n == "build")).and_then(|b| b.parent())).flatten();
+    std::iter::once(d.join(&file)).chain(d.parent().map(|u| u.join(&file))).chain(profile.map(|p| p.join(&file))).find(|f| f.is_file())
 }
 /// A lookup kept once it finds something; a miss is looked for again next time, so a program installed after the hub started (Git for
 /// Windows from setup's button) is found without a restart. A `OnceLock` kept the miss for the hub's life: every `sh` failed after Git came.
@@ -93,6 +96,9 @@ pub fn privacy_words(dir: &str, home: &str) -> String {
         assert_eq!(super::helper_in(&hub, "bp-sh", ".exe"), Some(build.join("bp-sh.exe")));
         assert!(super::helper_in(&hub, "bp-sh", ".exe").unwrap().is_absolute());
         assert_eq!(super::helper_in(&deps.join("t.exe"), "bp-sh", ".exe"), Some(build.join("bp-sh.exe")), "a test binary in target/*/deps finds it one folder up");
+        let out = build.join("build").join("backplane-hub").join("0123abcd").join("out"); std::fs::create_dir_all(&out).unwrap();
+        assert_eq!(super::helper_in(&out.join("backplane_hub-0123abcd.exe"), "bp-sh", ".exe"), Some(build.join("bp-sh.exe")), "and one in Cargo's build/<package>/<hash>/out");
+        assert_eq!(super::helper_in(&build.join("x").join("y").join("z").join("out").join("t.exe"), "bp-sh", ".exe"), None, "only under a build folder");
         assert_eq!(super::helper_in(&hub, "bp-sh", ""), None, "the suffix is the system's: bp-sh is not bp-sh.exe");
         // after an update the hub runs from the new build's folder, and its helpers are that folder's
         let next = d.join("builds").join("v0.16.1"); std::fs::create_dir_all(&next).unwrap(); std::fs::write(next.join("bp-sh.exe"), "y").unwrap();
