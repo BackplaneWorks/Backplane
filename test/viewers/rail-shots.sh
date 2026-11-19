@@ -63,6 +63,15 @@ HUB_BIN=$(cd "$(dirname "${POS_ARGS[1]}")" && pwd)/$(basename "${POS_ARGS[1]}")
 ASSETS_DIR=$(cd "${POS_ARGS[2]}" && pwd)
 RAW_OUTDIR="${POS_ARGS[3]}"
 
+# Validate requested project kinds against the manifest BEFORE creating any directory or file.
+if [ -n "${RAIL_KINDS:-}" ]; then
+  read -r -a RAW_KINDS <<<"$RAIL_KINDS"
+  KINDS_TEXT=$(python3 "$SCRIPT_DIR/rail_shots_manifest.py" validate "${RAW_KINDS[@]}") || exit 2
+else
+  KINDS_TEXT=$(python3 "$SCRIPT_DIR/rail_shots_manifest.py") || exit 2
+fi
+mapfile -t KINDS <<<"$KINDS_TEXT"
+
 # Refuse a non-empty OUTDIR so stale captures can never contaminate a run.
 if [ -e "$RAW_OUTDIR" ] && [ -n "$(ls -A "$RAW_OUTDIR" 2>/dev/null)" ]; then
   echo "rail-shots: refusing non-empty OUTDIR: $RAW_OUTDIR (use a fresh directory)" >&2
@@ -427,12 +436,6 @@ with open(os.path.join(d, "README.md"), "a", encoding="utf-8") as f:
     f.write("\nChange made after thread creation for Diff check.\n")
 PY
 }
-
-if [ -n "${RAIL_KINDS:-}" ]; then
-  read -r -a KINDS <<<"$RAIL_KINDS"
-else
-  mapfile -t KINDS < <(python3 -c "import sys; sys.path.insert(0, '$SCRIPT_DIR'); import rail_shots_manifest as M; print('\n'.join(M.KINDS))")
-fi
 
 for kind in "${KINDS[@]}"; do
   echo "rail-shots: === kind=$kind ==="

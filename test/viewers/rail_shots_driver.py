@@ -122,17 +122,21 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
     return steps
 
 
-def detect_obstructions(disp: str) -> list[dict]:
+def detect_obstructions(disp: str) -> tuple[list[dict], bool, str | None]:
     """Inspect X11 top-level windows on `disp` for native dialogs/windows obstructing Backplane.
 
-    Children nested inside Backplane's own window (e.g. embedded KiCad or CEF) are ignored.
+    Returns (obstructions, inspect_ok, inspect_error). Fails closed (inspect_ok=False) if xwininfo
+    cannot inspect the X11 tree or a candidate window. Children nested inside Backplane's own
+    window (e.g. embedded KiCad or CEF) are ignored.
     """
     env = dict(os.environ, DISPLAY=disp)
     try:
         out = subprocess.check_output(["xwininfo", "-root", "-tree"], env=env, text=True, stderr=subprocess.DEVNULL, timeout=5)
-    except Exception:
-        return []
+    except Exception as e:
+        return [], False, f"xwininfo -root -tree failed: {e}"
     obstructions: list[dict] = []
+    inspect_ok = True
+    inspect_error: str | None = None
     # Match lines like:
     #   0x600003 "Warning": ("kicad" "Kicad")  610x120+415+390  +415+390
     #   0x400001 "Backplane": ()  1440x900+0+0  +0+0
@@ -164,12 +168,14 @@ def detect_obstructions(disp: str) -> list[dict]:
         # Ignore i3 WM frames
         if "i3" in low_cls:
             continue
-        # Confirm it is actually mapped (IsViewable)
+        # Confirm it is actually mapped (IsViewable); fail closed if inspection fails
         try:
             info = subprocess.check_output(["xwininfo", "-id", xid], env=env, text=True, stderr=subprocess.DEVNULL, timeout=2)
             if "Map State: IsViewable" not in info:
                 continue
-        except Exception:
+        except Exception as e:
+            inspect_ok = False
+            inspect_error = f"xwininfo -id {xid} failed: {e}"
             continue
         obstructions.append({
             "xid": xid,
@@ -180,18 +186,33 @@ def detect_obstructions(disp: str) -> list[dict]:
             "x": int(x_s),
             "y": int(y_s),
         })
-    return obstructions
+    return obstructions, inspect_ok, inspect_error
 
 
 def trigger_sim_run(disp: str, last_kicad: dict, kind_out: Path) -> None:
-    """Click inside the embedded Simulator frame and press `r` (Run/Stop Simulation)."""
+    """Click inside the embedded Simulator frame and press `r` (Run/Stop Simulation).
+
+    Records observer metadata explicitly: until KiCad IPC or the client exposes completed
+    simulation results (trace / operating-point values), `observer` is None and
+    `result_evidenced` is False.
+    """
     repo_root = Path(__file__).resolve().parents[2]
     xinput = repo_root / "test" / "cef" / "xinput.py"
     env = dict(os.environ, DISPLAY=disp)
     pane = last_kicad.get("pane") or last_kicad.get("container") or {}
     x = int(pane.get("x", 800)) + max(40, int(pane.get("w", 400)) // 5)
     y = int(pane.get("y", 100)) + max(40, int(pane.get("h", 400)) * 3 // 4)
-    rec: dict = {"action": "sim-run", "x": x, "y": y, "key": "r", "ok": False, "error": None}
+    rec: dict = {
+        "action": "sim-run",
+        "x": x,
+        "y": y,
+        "key": "r",
+        "ok": False,
+        "observer": None,
+        "result_evidenced": False,
+        "result_summary": "",
+        "error": None,
+    }
     try:
         if not xinput.exists():
             raise FileNotFoundError(str(xinput))
@@ -255,13 +276,15 @@ def watch_and_capture(disp: str, client_log: Path, shot_dir: Path, kind_out: Pat
                             err = "empty png"
                     except Exception as e:
                         err = str(e)
-                    obstructions = detect_obstructions(disp)
+                    obstructions, inspect_ok, inspect_error = detect_obstructions(disp)
                     rec = {
                         "name": name,
                         "path": str(out_png),
                         "ok": ok,
                         "bytes": out_png.stat().st_size if out_png.exists() else 0,
                         "error": err,
+                        "inspect_ok": inspect_ok,
+                        "inspect_error": inspect_error,
                         "obstructed": len(obstructions) > 0,
                         "obstructions": obstructions,
                         "state": ev.get("state", ""),
