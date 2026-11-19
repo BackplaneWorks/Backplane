@@ -12,7 +12,8 @@ while [ $# -gt 0 ]; do
   shift
 done
 sid="fake-$$"; n=0
-tool() { k=0; r=""; while [ -z "$r" ] && [ $k -lt 100 ]; do k=$((k + 1)); r=$(curl -s -X POST -H 'content-type: application/json' --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$1\",\"arguments\":$2}}" "$url"); [ -z "$r" ] && sleep 0.1; done; printf 'TOOL %s %s\n' "$1" "$r" >> @LOG@; } # an empty answer is a connection that did not come through: asked again (the hub's MCP endpoint under a loaded run), never taken as done
+# a tool call tries for up to a minute: under a full-suite run the hub took 11 s to start and ten seconds of tries ran out (the MCP endpoint answered nothing yet)
+tool() { k=0; r=""; while [ -z "$r" ] && [ $k -lt 600 ]; do k=$((k + 1)); r=$(curl -s -X POST -H 'content-type: application/json' --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$1\",\"arguments\":$2}}" "$url"); [ -z "$r" ] && sleep 0.1; done; printf 'TOOL %s %s\n' "$1" "$r" >> @LOG@; } # an empty answer is a connection that did not come through: asked again (the hub's MCP endpoint under a loaded run), never taken as done
 say() { printf '{"type":"assistant","message":{"id":"m%s-%s","role":"assistant","content":[{"type":"text","text":"%s"}],"usage":{"input_tokens":1,"output_tokens":1}},"session_id":"%s"}\n' "$$" "$n" "$1" "$sid"; }
 while IFS= read -r line; do
   case "$line" in *'"type":"user"'*)
