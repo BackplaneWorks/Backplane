@@ -151,6 +151,14 @@ export class ChatView {
     this.renderEntries(atBottom);
   }
 
+  public removeEntry(entryId: string): void {
+    const next = this.entries.filter((e) => e.id !== entryId);
+    if (next.length !== this.entries.length) {
+      this.entries = next;
+      this.renderEntries(false);
+    }
+  }
+
   public appendLiveText(entryId: string, append: string, at: number): void {
     const atBottom = this.isNearBottom();
     let entry = this.entries.find((e) => e.id === entryId);

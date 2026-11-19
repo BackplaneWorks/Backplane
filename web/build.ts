@@ -121,6 +121,22 @@ async function buildInto(outDir: string): Promise<void> {
     },
   };
 
+  const viewerPanePath = join(SRC_DIR, "viewers/viewer-pane.ts");
+  const viewerPlugin: Bun.BunPlugin = {
+    name: "backplane-viewer-pane",
+    setup(build) {
+      build.onResolve({ filter: /^virtual:viewer-pane$/ }, () =>
+        existsSync(viewerPanePath)
+          ? { path: viewerPanePath }
+          : { path: "virtual:viewer-pane", namespace: "bp-viewer-stub" },
+      );
+      build.onLoad({ filter: /.*/, namespace: "bp-viewer-stub" }, () => ({
+        contents: "export const mountViewerPane = null;\n",
+        loader: "ts",
+      }));
+    },
+  };
+
   const entrypoints = [join(SRC_DIR, "app.ts"), join(SRC_DIR, "pair.ts")];
   const workerEntry = join(SRC_DIR, "viewers/mesh-worker.ts");
   if (existsSync(workerEntry)) entrypoints.push(workerEntry);
@@ -134,7 +150,7 @@ async function buildInto(outDir: string): Promise<void> {
     sourcemap: "none",
     splitting: false,
     naming: "[name].[ext]",
-    plugins: [i18nPlugin],
+    plugins: [i18nPlugin, viewerPlugin],
   });
   if (!res.success) {
     for (const log of res.logs) console.error(log);
