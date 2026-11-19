@@ -624,6 +624,7 @@ mod tests {
         let (ok, out) = run(&no_curl(&r, &serve, false)); assert!(!ok && out.contains("curl or wget is needed to download Codex"), "{out}");
         let (ok, out) = run(&no_curl(&r, &serve, true)); assert!(ok, "{out}"); assert!(dest.join("codex").is_file());
         // the vendor wrapper (Claude, Grok, OpenCode) downloads its installer with wget too
+        std::fs::write(serve.join("latest"), "echo vendor script\n").unwrap();
         let o = std::process::Command::new("sh").arg("-c").arg(VENDOR_SH).arg("sh").arg("https://x/latest").env("PATH", no_curl(&r, &serve, true)).output().unwrap();
         let t = format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)); assert!(t.contains("Running the installer") && !t.contains("Could not download"), "{t}");
         let _ = std::fs::remove_dir_all(&r);
