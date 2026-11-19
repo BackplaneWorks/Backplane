@@ -288,6 +288,78 @@ mod tests {
         assert_eq!(first_of("", "/b", "BACKPLANE_NOPE_ENV", &[], vec![]), Some("/b".into()));
         assert_eq!(first_of("", "", "BACKPLANE_NOPE_ENV", &["no-such-program-here"], vec![]), None);
     }
+    /// A stand-in kicad-cli that, like KiCad, writes at every start: its settings (an atomic save: a `.kicad-save-<pid>-0` temp, then the
+    /// rename), its cache and its documents folder, each to its KICAD_*_HOME when set, else into `person` (the person's home); it logs
+    /// the folders it was given. With `hang`, it hangs mid-save as a stuck probe does (#1160): the temp written, SIGTERM ignored.
+    #[cfg(unix)] fn writing_kicad(dir: &Path, person: &Path, hang: bool) -> (PathBuf, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let (cli, log) = (dir.join("kicad-cli"), dir.join("given.log"));
+        let p = person.display();
+        std::fs::write(&cli, format!(r#"#!/bin/sh
+echo "$$ ${{KICAD_CONFIG_HOME:-}} ${{KICAD_CACHE_HOME:-}} ${{KICAD_DOCUMENTS_HOME:-}}" >> '{log}'
+C="${{KICAD_CONFIG_HOME:-{p}/.config/kicad}}/10.99"; mkdir -p "$C" "${{KICAD_CACHE_HOME:-{p}/.cache/kicad}}/10.99" "${{KICAD_DOCUMENTS_HOME:-{p}/.local/share/kicad}}/10.99"
+echo '{{"rewritten": true}}' > "$C/kicad_common.json.kicad-save-$$-0"
+{hang}
+mv "$C/kicad_common.json.kicad-save-$$-0" "$C/kicad_common.json"
+echo 10.99.0
+"#, log = log.display(), hang = if hang { "trap '' TERM; exec sleep 60" } else { "" })).unwrap();
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (cli, log)
+    }
+    /// Every file under `d` with its bytes (the person's home as a probe found it).
+    fn tree(d: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+        let mut v = vec![];
+        for e in std::fs::read_dir(d).into_iter().flatten().flatten() { let p = e.path(); if p.is_dir() { v.push((p.clone(), vec![])); v.extend(tree(&p)) } else { v.push((p.clone(), std::fs::read(&p).unwrap_or_default())) } }
+        v.sort(); v
+    }
+    #[cfg(unix)] fn person_home(t: &Path) -> PathBuf {
+        let h = t.join("person"); std::fs::create_dir_all(h.join(".config/kicad/10.99")).unwrap();
+        std::fs::write(h.join(".config/kicad/10.99/kicad_common.json"), "{\"mine\": 1}").unwrap(); h
+    }
+    /// #1204: Setup's and Settings' KiCad check (`kicad-cli --version`) leaves the person's KiCad folders exactly as they were: its
+    /// settings, cache and documents go to a throwaway folder of its own, gone once it has answered.
+    #[cfg(unix)] #[tokio::test] async fn the_kicad_check_leaves_the_persons_kicad_folders_untouched() {
+        let t = crate::plat::tmp::dir("onboard-kprobe");
+        let home = person_home(t.path()); let before = tree(&home);
+        let (cli, log) = writing_kicad(t.path(), &home, false);
+        let v = kicad_version(&cli, TIMEOUT).await;
+        assert_eq!((v["runs"].clone(), v["version"].clone()), (json!(true), json!("10.99.0")), "{v}");
+        assert_eq!(tree(&home), before, "the person's home is byte-identical, and nothing new in it");
+        let given = std::fs::read_to_string(&log).unwrap(); let f: Vec<&str> = given.split_whitespace().collect();
+        assert_eq!(f.len(), 4, "{given:?}");
+        let probe = PathBuf::from(f[1]); assert!(probe.to_string_lossy().contains("bp-kicad-probe-"), "{given:?}");
+        assert!(f[2].starts_with(f[1]) && f[3].starts_with(f[1]), "cache and documents in the probe's folder: {given:?}");
+        assert!(!probe.exists(), "the probe's folder is removed after: {}", probe.display());
+    }
+    /// A check that hangs mid-save (#1160 on macOS) is killed at its limit: the answer says so in bounded time, the process is gone, and
+    /// its half-saved settings (the `.kicad-save-<pid>-0` temp #1204 found in the person's 10.99) went with the throwaway folder.
+    #[cfg(unix)] #[tokio::test] async fn a_hung_kicad_check_is_killed_at_its_limit_and_leaves_nothing() {
+        let t = crate::plat::tmp::dir("onboard-kprobe-hang");
+        let home = person_home(t.path()); let before = tree(&home);
+        let (cli, log) = writing_kicad(t.path(), &home, true);
+        let start = std::time::Instant::now();
+        let v = kicad_version(&cli, Duration::from_secs(2)).await;
+        assert!(start.elapsed() < Duration::from_secs(8), "bounded: {:?}", start.elapsed());
+        assert_eq!((v["runs"].clone(), v["why"].clone()), (json!(false), json!("it did not start or did not answer")), "{v}");
+        let given = std::fs::read_to_string(&log).unwrap(); let f: Vec<&str> = given.split_whitespace().collect();
+        let pid = f[0];
+        // (reaped by the runtime: it has to run between the looks)
+        let mut gone = false;
+        for _ in 0..60 { if !std::process::Command::new("kill").args(["-0", pid]).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success()) { gone = true; break } tokio::time::sleep(Duration::from_millis(50)).await }
+        assert!(gone, "the hung probe (pid {pid}) is killed");
+        assert_eq!(tree(&home), before, "no half-saved settings in the person's home");
+        assert!(!Path::new(f[1]).exists(), "the probe's folder, with its temp, is removed");
+    }
+    /// The real thing (run by hand: BACKPLANE_TEST_KICAD_CLI=<a kicad-cli> cargo test -- --ignored the_real_kicad_check): the person's
+    /// KiCad settings folders (every place this system's KiCad reads them from) are as they were after the check.
+    #[tokio::test] #[ignore] async fn the_real_kicad_check_leaves_the_persons_settings_untouched() {
+        let Ok(cli) = std::env::var("BACKPLANE_TEST_KICAD_CLI") else { eprintln!("BACKPLANE_TEST_KICAD_CLI not set: nothing to check"); return };
+        let snap = || -> Vec<(PathBuf, Vec<u8>, Option<std::time::SystemTime>)> { crate::plat::dirs::kicad_config_roots().iter().flat_map(|r| tree(Path::new(r))).map(|(p, b)| { let m = std::fs::metadata(&p).and_then(|m| m.modified()).ok(); (p, b, m) }).collect() };
+        let before = snap();
+        let v = kicad_version(Path::new(&cli), TIMEOUT).await;
+        assert_eq!(v["runs"], json!(true), "{v}");
+        assert_eq!(snap(), before, "the person's KiCad settings: same files, bytes and times");
+    }
     #[test] fn only_connected_accounts_count() {
         let live = json!({"accounts.live": json!({"profiles":[{"provider":"claude","label":"Work","state":"connected"},{"provider":"claude","label":"Old","state":"disconnected"},{"provider":"codex","label":"Me","state":"connected"}]}).to_string()});
         assert_eq!(accounts(&live), json!({"claude":["Work"],"codex":["Me"]}));
