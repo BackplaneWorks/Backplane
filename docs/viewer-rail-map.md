@@ -34,3 +34,19 @@ On desktop GPUI, the right rail (`72 px` wide, `ui.rs`) is driven by the hub's `
 - **Management strip (`screens/mgmt.rs`):** Renders a `24 px` bottom strip (`BOM`, `Checks`, `Lifecycle`, `Plan`, `Fab`) on Board, Schematic, 3D, Gerbers, and Split — separate from Review's own tabs (`BOM`, `Checks`, `Comments`, `Release`).
 - **KiCad `.lck` lock files shown in the Files page:** On projects with a KiCad board or schematic, the **Files** page lists KiCad's temporary lock files (`~ecc83-pp.kicad_pcb.lck`, `~ecc83-pp.kicad_sch.lck`), whose contents can include the host's user name and hostname. The harness records what the app really shows rather than hiding them in fixtures; the Files page (or hub file listing) should filter KiCad lock files.
 - **Mobile parity gap:** iOS (`DataViewer.swift`) and Android (`DataViewer.kt`) hard-code `["Board", "Schematic", "3D", "Split", "Mech", "Files", "Diff", "Review", "Browser"]` (no `Gerbers`, no `Simulation`, not driven by a single hub rail list).
+
+## Harness Fixture Project Kinds (`test/viewers/rail-shots.sh`)
+
+| Kind | Files seeded in fixture repo | Expected enabled design rail entries | Expected dimmed (`disabled`) / hidden entries |
+|---|---|---|---|
+| `full` | `ecc83-pp.kicad_pcb`, `ecc83-pp.kicad_sch`, `ecc83-pp.kicad_prl`, `ecc83-pp.kicad_pro`, `mech/bracket.step`, `mfg/gerbers/*`, `README.md` | Board, Schematic, 3D, Gerbers, Split, Mech (+ Simulation in `--embed`) | None |
+| `board-only` | `ecc83-pp.kicad_pcb`, `ecc83-pp.kicad_prl`, `ecc83-pp.kicad_pro`, `README.md` (no `.kicad_sch`, no `mech/`, no `mfg/`) | Board, 3D | Dimmed: Schematic, Split, Mech; Hidden: Gerbers, Simulation |
+| `schematic-only` | `ecc83-pp.kicad_sch`, `ecc83-pp.kicad_pro`, `README.md` (no `.kicad_pcb`, no `mech/`, no `mfg/`) | Schematic | Dimmed: Board, 3D, Split, Mech; Hidden: Gerbers, Simulation |
+| `mech-only` | `mech/bracket.step`, `README.md` (no KiCad files, no `mfg/`) | Mech | Dimmed: Board, Schematic, 3D, Split; Hidden: Gerbers, Simulation |
+| `no-design` | `README.md` only | None (work tools only: Files, Diff, Review, Browser) | Dimmed: Board, Schematic, 3D, Split, Mech; Hidden: Gerbers, Simulation |
+
+## Privacy & `--share` Scope
+
+- Fixture repos run through an atomic mode-`0700` alias directory under `/var/tmp/bp-rail.XXXXXX` (pointing to `$BP_TMP`) so project paths carry no OS user name.
+- Any shot with a visible native dialog (`obstructed: true`) or user-identifying path in metadata is marked `"private": true` in `steps.json` and excluded from **every** derived image (`contact-<kind>.png`, `headers.png`, `rails.png`, and `--compare` pairs).
+- **Canvas limitation:** metadata scanning cannot see a path drawn inside an editor or simulator canvas (e.g., KiCad's SPICE console or status bar), so `--embed` shots of KiCad (`task8-edit`, `task7-sim`, `task7-sim-run`) are marked `"private": true` by default unless a path-free fixture is proven. `--share` refuses any run or comparison that contains a private shot or lacks complete schema-2 privacy metadata.

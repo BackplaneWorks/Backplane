@@ -150,12 +150,17 @@ def _sensitive_tokens() -> list[str]:
     return sorted(set(tokens))
 
 
-def shot_privacy_reasons(cap: dict, srec: dict) -> list[str]:
-    """Return reasons a shot must be marked private: true (native dialog or user-identifying path)."""
+EMBED_CANVAS_SHOTS = {"task8-edit", "task7-sim", "task7-sim-run"}
+
+
+def shot_privacy_reasons(cap: dict, srec: dict, shot_name: str = "", embed: bool = False) -> list[str]:
+    """Return reasons a shot must be marked private: true (native dialog, user path, or unscannable KiCad canvas)."""
     reasons: list[str] = []
     if cap.get("obstructed"):
         titles = [o.get("title") or "/".join(o.get("class") or []) for o in (cap.get("obstructions") or [])]
         reasons.append(f"native dialog/window visible ({', '.join(t for t in titles if t) or 'unknown'})")
+    if embed and shot_name in EMBED_CANVAS_SHOTS and os.environ.get("RAIL_EMBED_PATH_FREE") != "1":
+        reasons.append("embedded KiCad canvas may display filesystem paths (not scannable from metadata)")
     tokens = _sensitive_tokens()
     if tokens:
         blob = json.dumps({
@@ -200,14 +205,14 @@ def infer_rail_map(srec: dict) -> dict[str, dict]:
     return out
 
 
-def make_contact_sheet(kind_dir: Path, out_png: Path, private_shots: set[str]) -> tuple[bool, list[str]]:
+def make_contact_sheet(kind_dir: Path, out_png: Path, cleared_shots: set[str]) -> tuple[bool, list[str]]:
     excluded: list[str] = []
     ordered: list[Path] = []
     for s in M.contact_shots():
         p = kind_dir / f"{s}.png"
         if not p.exists():
             continue
-        if s in private_shots:
+        if s not in cleared_shots:
             excluded.append(s)
             continue
         ordered.append(p)
@@ -295,7 +300,8 @@ def body_diff_ratio(img_a: Path, lay_a: dict, img_b: Path, lay_b: dict) -> float
         return round(diff / len(sa), 4)
 
 
-def build_strips(outdir: Path, kinds: list[str], parsed: dict[str, dict]) -> None:
+def build_strips(outdir: Path, kinds: list[str], parsed: dict[str, dict], cleared_by_kind: dict[str, set[str]]) -> None:
+    """Build headers.png and rails.png strictly from the explicitly cleared (non-private) shot list."""
     font = load_font(12)
     small_font = load_font(10)
     header_rows: list[tuple[str, Image.Image | None, str]] = []
@@ -305,7 +311,10 @@ def build_strips(outdir: Path, kinds: list[str], parsed: dict[str, dict]) -> Non
     for kind in kinds:
         kind_dir = outdir / kind
         shots_meta = parsed.get(kind, {}).get("shots", {})
+        cleared = cleared_by_kind.get(kind, set())
         for slug, _, _, _ in M.PAGES:
+            if slug not in cleared:
+                continue
             img_path = kind_dir / f"{slug}.png"
             if not img_path.exists():
                 continue
@@ -318,7 +327,7 @@ def build_strips(outdir: Path, kinds: list[str], parsed: dict[str, dict]) -> Non
                 main = lay.get("main") or {"x": 240, "y": 36, "w": iw - 240 - 72, "h": ih - 36}
 
                 rc = crop_box(im, rail["x"], rail["y"], rail["w"], rail["h"])
-                short_kind = {"full": "full", "schematic-only": "sch-only", "mech-only": "mech-only", "no-design": "no-design"}.get(kind, kind)
+                short_kind = {"full": "full", "board-only": "brd-only", "schematic-only": "sch-only", "mech-only": "mech-only", "no-design": "no-design"}.get(kind, kind)
                 short_page = {"split-after-mech": "split2", "schematic": "schem"}.get(slug, slug)
                 rail_cols.append((f"{short_kind}\n{short_page}", rc))
 
@@ -404,15 +413,24 @@ def evaluate_scorecard(
         outcome: str,
         evidence: dict,
         note: str = "",
+        one_step_back: bool | str = "not_measured",
     ) -> dict:
+        within = len(used_presses) <= budget
+        parts = {
+            "found": bool(used_presses) if outcome not in ("unavailable", "harness_failed") else False,
+            "within_budget": within if outcome not in ("unavailable", "harness_failed") else False,
+            "result_evidenced": outcome == "passed",
+            "one_step_back": one_step_back,
+        }
         return {
             "task": tid,
             "name": name,
             "step_budget": budget,
             "presses_used": len(used_presses),
-            "within_budget": len(used_presses) <= budget,
+            "within_budget": within,
             "presses": used_presses,
             "outcome": outcome,
+            "parts": parts,
             "evidence": evidence,
             "note": note,
         }
@@ -527,6 +545,7 @@ def evaluate_scorecard(
     tasks.append(make_task(
         3, "Get back to the schematic from any page", 1, ["rail:Schematic"], o3,
         {"transitions": t3_results},
+        one_step_back=(o3 == "passed"),
     ))
 
     # Task 4: Compare Gerbers to the board side by side (budget 2)
@@ -638,8 +657,11 @@ def evaluate_scorecard(
             full_dir / "task7-sim-run.png",
             (shots.get("task7-sim-run") or {}).get("layout") or {},
         )
-        # On task7-sim-run, KiCad Simulator's own "New Simulation Tab" dialog is an expected response to Run.
+        # On task7-sim-run, KiCad Simulator's own "New Simulation Tab" dialog is NOT a harness failure,
+        # but it IS a task_failed because no analysis completed (0 points for opening a setup dialog).
+        setup_dialog_open = any(o.get("title") == "New Simulation Tab" for o in oblist7b)
         unexpected_obs7b = [o for o in oblist7b if o.get("title") != "New Simulation Tab"]
+        sim_result_evidenced = bool(sim_act.get("result_evidenced")) and not setup_dialog_open
         if not full_client_ok or not ok7a or not ok7b or obs7a or bool(unexpected_obs7b):
             o7 = "harness_failed"
         elif (
@@ -650,12 +672,20 @@ def evaluate_scorecard(
             and b7a["body_non_flat"]
             and b7b["body_non_flat"]
             and sim_act.get("ok") is True
+            and sim_result_evidenced
             and len(p7) <= 2
         ):
             o7 = "passed"
         else:
             o7 = "task_failed"
-        note7 = "" if o7 == "passed" else f"kicad_state={k7.get('state')} shown_kind={k7_shown.get('kind')} painted={k7_shown.get('painted')} sim_run_ok={sim_act.get('ok')} body_diff={sim_diff}"
+        if o7 == "passed":
+            note7 = ""
+        elif setup_dialog_open:
+            note7 = "pressing Run opened 'New Simulation Tab' setup dialog with no completed analysis or trace (fixture has no SPICE models; 0 points for opening a dialog)"
+        elif not sim_result_evidenced:
+            note7 = "no completed simulation analysis result (operating-point value or trace) evidenced"
+        else:
+            note7 = f"kicad_state={k7.get('state')} shown_kind={k7_shown.get('kind')} painted={k7_shown.get('painted')} sim_run_ok={sim_act.get('ok')} body_diff={sim_diff}"
         tasks.append(make_task(
             7, "Run a simulation of the schematic", 2, p7, o7,
             {
@@ -664,6 +694,8 @@ def evaluate_scorecard(
                 "shown_kind": k7_shown.get("kind"),
                 "shown_painted": k7_shown.get("painted"),
                 "sim_run_action": sim_act,
+                "setup_dialog_open": setup_dialog_open,
+                "sim_result_evidenced": sim_result_evidenced,
                 "body_open": b7a,
                 "body_after_run": b7b,
                 "body_diff_after_run": sim_diff,
@@ -734,6 +766,7 @@ def evaluate_scorecard(
                 "obstructions": oblist8a + oblist8b,
             },
             note=note8,
+            one_step_back=(k8_view.get("ok") is False and s8_view.get("state") == "ready" and len(p8_view) == 1),
         ))
     else:
         tasks.append(make_task(
@@ -793,6 +826,7 @@ def evaluate_scorecard(
     tasks.append(make_task(
         10, "Close the viewer and get the thread's full width back", 1, p10, o10,
         {"open": v10.get("open"), "active_kind": v10.get("active_kind"), "idle_main_w": idle_main.get("w"), "closed_main_w": closed_main.get("w"), "width_diff_px": round(width_diff, 2), "pane_w_closed_px": round(pane_w_closed, 2), "capture_ok": ok10, "obstructed": obs10, "obstructions": oblist10},
+        one_step_back=(o10 == "passed"),
     ))
 
     return tasks
@@ -812,9 +846,18 @@ def main() -> int:
     parsed: dict[str, dict] = {}
     captures_by_kind: dict[str, dict[str, dict]] = {}
     embed_actions_by_kind: dict[str, dict[str, dict]] = {}
+    cleared_by_kind: dict[str, set[str]] = {}
     kinds_out: dict[str, dict] = {}
     harness_errors: list[str] = []
     all_private: list[str] = []
+
+    runtime_info: dict = {"embed_mode": embed, "runtime_root": "", "capabilities": []}
+    rt_path = outdir / "runtime.json"
+    if rt_path.exists():
+        try:
+            runtime_info = json.loads(rt_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
 
     for kind in kinds:
         kdir = outdir / kind
@@ -837,20 +880,26 @@ def main() -> int:
         failed_caps: list[str] = []
         obstructions_found: dict[str, list[dict]] = {}
         private_shots: dict[str, list[str]] = {}
+        cleared_shots: set[str] = set()
         shots = p.get("shots", {})
         for sname in expected:
             rec = caps.get(sname)
             png = kdir / f"{sname}.png"
+            cap_ok = bool(rec and rec.get("ok") and png.exists() and png.stat().st_size > 0)
             if not rec or not png.exists() or png.stat().st_size == 0:
                 missing.append(sname)
             elif not rec.get("ok"):
                 failed_caps.append(sname)
             if rec and rec.get("obstructed"):
                 obstructions_found[sname] = rec.get("obstructions") or []
-            reasons = shot_privacy_reasons(rec or {}, shots.get(sname) or {})
+            reasons = shot_privacy_reasons(rec or {}, shots.get(sname) or {}, shot_name=sname, embed=(embed and kind == "full"))
             if reasons:
                 private_shots[sname] = reasons
                 all_private.append(f"{kind}/{sname}: {'; '.join(reasons)}")
+            elif cap_ok:
+                cleared_shots.add(sname)
+
+        cleared_by_kind[kind] = cleared_shots
 
         if missing:
             harness_errors.append(f"{kind}: missing captures: {', '.join(missing)}")
@@ -899,6 +948,8 @@ def main() -> int:
             bstats = pane_body_stats(kdir / f"{slug}.png", srec.get("layout") or {}) if slug != "idle" else None
             p_reasons = private_shots.get(slug, [])
             ep_reasons = private_shots.get(f"{slug}-300ms", []) if slug != "idle" else []
+            early_png = kdir / f"{slug}-300ms.png"
+            early_cap_ok = bool(ecap.get("ok") and early_png.exists() and early_png.stat().st_size > 0) if slug != "idle" else False
 
             pages_summary[slug] = {
                 "presses": [x["id"] for x in presses.get(f"press:{slug}", [])] if rail_id else [],
@@ -920,18 +971,17 @@ def main() -> int:
                 "diff_summary": v.get("diff_summary") if slug == "diff" else None,
                 "viewer": v,
                 "early_300ms_state": erec.get("state", "") if slug != "idle" else None,
+                "early_capture_ok": early_cap_ok if slug != "idle" else None,
                 "early_300ms_obstructed": bool(ecap.get("obstructed")) if slug != "idle" else None,
                 "early_300ms_private": len(ep_reasons) > 0 if slug != "idle" else False,
                 "shot": str(kdir / f"{slug}.png"),
-                "early_shot": str(kdir / f"{slug}-300ms.png") if slug != "idle" else None,
+                "early_shot": str(early_png) if slug != "idle" else None,
             }
 
             if slug == "diff":
                 lcks = [n for n in (v.get("diff_file_names") or []) if str(n).endswith(".lck")]
                 if lcks:
                     harness_errors.append(f"{kind}: diff leaked lock files: {', '.join(lcks)}")
-
-        _, excluded_contact = make_contact_sheet(kdir, outdir / f"contact-{kind}.png", set(private_shots.keys()))
 
         kinds_out[kind] = {
             "client_exit": client_exit,
@@ -941,12 +991,11 @@ def main() -> int:
             "failed_captures": failed_caps,
             "obstructions": obstructions_found,
             "private_shots": private_shots,
-            "excluded_from_contact": excluded_contact,
+            "cleared_shots": sorted(cleared_shots),
+            "excluded_from_contact": [s for s in M.contact_shots() if (kdir / f"{s}.png").exists() and s not in cleared_shots],
             "rail": rail_map,
             "pages": pages_summary,
         }
-
-    build_strips(outdir, kinds, parsed)
 
     full_client_ok = "full" in kinds_out and kinds_out["full"]["client_exit"] == 0 and not kinds_out["full"]["missing_shots"] and not kinds_out["full"]["failed_captures"]
     scorecard_tasks = evaluate_scorecard(
@@ -967,9 +1016,12 @@ def main() -> int:
         overall = "passed"
 
     summary = {
+        "evidence_schema": 2,
+        "privacy_checked": True,
         "overall_outcome": overall,
         "embed_mode": embed,
         "share_mode": share,
+        "runtime": runtime_info,
         "private_shot_count": len(all_private),
         "harness_errors": harness_errors,
         "kinds": kinds_out,
@@ -977,15 +1029,21 @@ def main() -> int:
     }
     (outdir / "steps.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
 
-    if harness_errors:
-        for e in harness_errors:
-            print(f"rail-shots: HARNESS FAILED: {e}", file=sys.stderr)
-        return 1
+    # Under --share, refuse BEFORE writing any derived images (contact sheets, headers.png, rails.png).
     if share and all_private:
         print(f"rail-shots: --share refused: {len(all_private)} private shot(s) detected:", file=sys.stderr)
         for item in all_private:
             print(f"  - {item}", file=sys.stderr)
         return 3
+
+    for kind in kinds:
+        make_contact_sheet(outdir / kind, outdir / f"contact-{kind}.png", cleared_by_kind[kind])
+    build_strips(outdir, kinds, parsed, cleared_by_kind)
+
+    if harness_errors:
+        for e in harness_errors:
+            print(f"rail-shots: HARNESS FAILED: {e}", file=sys.stderr)
+        return 1
     return 0
 
 

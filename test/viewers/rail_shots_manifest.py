@@ -2,7 +2,7 @@
 """Single shared manifest for rail-shots.sh, rail_shots_driver.py, and rail_shots_post.py."""
 from __future__ import annotations
 
-KINDS = ["full", "schematic-only", "mech-only", "no-design"]
+KINDS = ["full", "board-only", "schematic-only", "mech-only", "no-design"]
 
 # (slug, rail_control_id, settle_kind, expected_open)
 PAGES = [
@@ -35,6 +35,7 @@ TASK3_SOURCES = [
 
 HAS_RESOURCE = {
     "full": {"board", "schematic", "3d", "gerbers", "split", "mech", "split-after-mech", "files", "diff", "review", "browser"},
+    "board-only": {"board", "3d", "files", "diff", "review", "browser"},
     "schematic-only": {"schematic", "files", "diff", "review", "browser"},
     "mech-only": {"mech", "files", "diff", "review", "browser"},
     "no-design": {"files", "diff", "review", "browser"},

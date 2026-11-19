@@ -83,21 +83,9 @@ export REAL_HOME
 # shellcheck source=../e2e/lib/own-group.sh
 . "$REPO_ROOT/test/e2e/lib/own-group.sh"
 
-RUN=$(mktemp -d "$BP_TMP/bp-rail-shots.XXXXXX")
-mkdir -p "$RUN/bin" "$RUN/fakehome/.cache" "$RUN/fakehome/.config" "$RUN/fakehome/.local/share"
-mkdir -p -m 700 "$RUN/run" "$RUN/tmp"
-
-# Neutral path symlink under /var/tmp so fixture paths carry no OS user name.
-NEUTRAL_LINK=""
-NEUTRAL_RUN="$RUN"
-if [ -d /var/tmp ] && [ -w /var/tmp ]; then
-  NEUTRAL_LINK="/var/tmp/bp-rail-$$"
-  if ln -sfn "$RUN" "$NEUTRAL_LINK" 2>/dev/null; then
-    NEUTRAL_RUN="$NEUTRAL_LINK"
-  else
-    NEUTRAL_LINK=""
-  fi
-fi
+RUN=""
+NEUTRAL_DIR=""
+NEUTRAL_RUN=""
 
 stop_group() {
   local pg=$1
@@ -114,13 +102,51 @@ cleanup() {
   local rc=$?
   set +e
   own_stop || true
-  [ -n "$NEUTRAL_LINK" ] && rm -f "$NEUTRAL_LINK" 2>/dev/null || true
-  if [ "${RAIL_KEEP_RUN:-0}" != "1" ]; then
+  # Only remove the literal symlink `r` inside our own mktemp dir under /var/tmp/bp-rail.*
+  if [ -n "$NEUTRAL_DIR" ] && [ -d "$NEUTRAL_DIR" ] && [[ "$NEUTRAL_DIR" == /var/tmp/bp-rail.* ]]; then
+    [ -L "$NEUTRAL_DIR/r" ] && rm -f "$NEUTRAL_DIR/r" 2>/dev/null || true
+    rmdir "$NEUTRAL_DIR" 2>/dev/null || true
+  fi
+  if [ "${RAIL_KEEP_RUN:-0}" != "1" ] && [ -n "$RUN" ] && [ -d "$RUN" ] && [[ "$RUN" == "$BP_TMP/bp-rail-shots."* ]]; then
     rm -rf "$RUN" 2>/dev/null || true
   fi
   exit "$rc"
 }
+# Install cleanup trap BEFORE creating any temp directory or /var/tmp alias.
 trap cleanup EXIT INT TERM
+
+RUN=$(mktemp -d "$BP_TMP/bp-rail-shots.XXXXXX")
+mkdir -p "$RUN/bin" "$RUN/fakehome/.cache" "$RUN/fakehome/.config" "$RUN/fakehome/.local/share"
+mkdir -p -m 700 "$RUN/run" "$RUN/tmp"
+
+# Atomic mode-0700 neutral alias directory under /var/tmp so fixture paths carry no OS user name.
+NEUTRAL_RUN="$RUN"
+if [ -d /var/tmp ] && [ -w /var/tmp ]; then
+  if NEUTRAL_DIR=$(mktemp -d /var/tmp/bp-rail.XXXXXX 2>/dev/null); then
+    chmod 700 "$NEUTRAL_DIR"
+    if ln -s "$RUN" "$NEUTRAL_DIR/r" 2>/dev/null; then
+      NEUTRAL_RUN="$NEUTRAL_DIR/r"
+    else
+      rmdir "$NEUTRAL_DIR" 2>/dev/null || true
+      NEUTRAL_DIR=""
+    fi
+  else
+    NEUTRAL_DIR=""
+  fi
+fi
+
+# Helper: run a KiCad CLI probe with strictly isolated HOME/XDG and no DISPLAY.
+kicad_probe_env() {
+  env -u DISPLAY -u WAYLAND_DISPLAY \
+    HOME="$RUN/fakehome" \
+    XDG_CONFIG_HOME="$RUN/fakehome/.config" \
+    XDG_CACHE_HOME="$RUN/fakehome/.cache" \
+    XDG_DATA_HOME="$RUN/fakehome/.local/share" \
+    XDG_RUNTIME_DIR="$RUN/run" \
+    TMPDIR="$RUN/tmp" \
+    LC_ALL=C \
+    "$@"
+}
 
 # Locate bun for the stand-in agent wrapper
 BUN_BIN=$(command -v bun 2>/dev/null || true)
@@ -138,11 +164,12 @@ for agent in codex grok muse opencode pi omp antigravity; do
   chmod +x "$RUN/bin/$agent"
 done
 
-# Locate KiCad CLI for Gerber generation and hub plotting
+# Locate KiCad CLI for Gerber generation and hub plotting (prefer test builds, never ~/.backplane*)
 KICAD_CLI="${BACKPLANE_KICAD_CLI:-}"
 if [ -z "$KICAD_CLI" ] || [ ! -x "$KICAD_CLI" ]; then
+  KICAD_TEST_ROOT="${RAIL_KICAD_TEST_ROOT:-/data/kicad-test/builds}"
   for cand in \
-    "$REAL_HOME/.backplane-gpui-fresh/home/kicad"/10.99.0-bp.*/bin/kicad-cli \
+    $(ls -1dt "$KICAD_TEST_ROOT"/10.99.0-bp.*/bin/kicad-cli 2>/dev/null || true) \
     "$REAL_HOME/.local/bin/kicad-cli" \
     "$(command -v kicad-cli 2>/dev/null || true)"; do
     if [ -n "$cand" ] && [ -x "$cand" ]; then
@@ -152,39 +179,40 @@ if [ -z "$KICAD_CLI" ] || [ ! -x "$KICAD_CLI" ]; then
   done
 fi
 
-# When --embed is enabled, discover a Backplane fork KiCad runtime with sim-frame capability
-# (read-only discovery matching test/kicad_embed/embed_sim_e2e.sh; nothing under test/kicad_embed is modified).
+# When --embed is enabled, discover a Backplane fork KiCad runtime strictly under the test-build root
+# (/data/kicad-test/builds/*, matching docs/kicad-embed-e2e.md) — never the user's install or home.
 EMBED_KICAD_CLI=""
+RUNTIME_CAPS_JSON="$OUTDIR/runtime.json"
 if [ "$EMBED_MODE_FLAG" = "1" ]; then
+  KICAD_TEST_ROOT="${RAIL_KICAD_TEST_ROOT:-/data/kicad-test/builds}"
   is_fork_kicad() { [ -x "$1" ] && grep -qa 'kiapi.backplane.embed' "$(dirname "$1")/../share/backplane/api.desc" 2>/dev/null; }
-  has_sim_frame() { "$1" api-server --describe 2>/dev/null | python3 -c 'import json,sys; sys.exit(0 if "sim-frame" in json.load(sys.stdin).get("capabilities", []) else 1)' 2>/dev/null; }
+  has_sim_frame() { kicad_probe_env "$1" api-server --describe 2>/dev/null | python3 -c 'import json,sys; sys.exit(0 if "sim-frame" in json.load(sys.stdin).get("capabilities", []) else 1)' 2>/dev/null; }
   EMBED_KICAD_BIN=""
-  for cand in \
-    "${KICAD_BIN:-}" \
-    "${BACKPLANE_KICAD_BIN:-}" \
-    $(ls -1dt /data/kicad-test/builds/10.99.0-bp.*/bin/kicad 2>/dev/null || true) \
-    $(ls -1dt "$REAL_HOME"/.backplane*/home/kicad/10.99.0-bp.*/bin/kicad 2>/dev/null || true) \
-    $(ls -1dt "$REAL_HOME"/.local/share/backplane/kicad/10.99.0-bp.*/bin/kicad 2>/dev/null || true); do
-    [ -n "$cand" ] || continue
-    if is_fork_kicad "$cand" && [ -x "$(dirname "$cand")/kicad-cli" ] && has_sim_frame "$(dirname "$cand")/kicad-cli"; then
-      EMBED_KICAD_BIN="$cand"
-      EMBED_KICAD_CLI="$(dirname "$cand")/kicad-cli"
-      break
-    fi
-  done
+  if [ -d "$KICAD_TEST_ROOT" ]; then
+    for cand in $(ls -1dt "$KICAD_TEST_ROOT"/10.99.0-bp.*/bin/kicad 2>/dev/null || true); do
+      [ -n "$cand" ] || continue
+      if is_fork_kicad "$cand" && [ -x "$(dirname "$cand")/kicad-cli" ] && has_sim_frame "$(dirname "$cand")/kicad-cli"; then
+        EMBED_KICAD_BIN="$cand"
+        EMBED_KICAD_CLI="$(dirname "$cand")/kicad-cli"
+        break
+      fi
+    done
+  fi
   if [ -z "$EMBED_KICAD_BIN" ]; then
-    echo "rail-shots: --embed requires a Backplane fork KiCad runtime with sim-frame capability (bp.13.2+)" >&2
+    echo "rail-shots: --embed requires a Backplane fork KiCad test build with sim-frame under $KICAD_TEST_ROOT" >&2
     exit 2
   fi
   EMBED_RT=$(cd "$(dirname "$EMBED_KICAD_BIN")/.." && pwd)
+  EMBED_DESC=$(kicad_probe_env "$EMBED_KICAD_CLI" api-server --describe 2>/dev/null || printf '{}')
   if ! python3 -c 'import json,sys; sys.exit(0 if "sim-frame" in json.load(open(sys.argv[1])).get("capabilities", []) else 1)' "$EMBED_RT/manifest.json" 2>/dev/null; then
     mkdir -p "$RUN/rt"
     for e in "$EMBED_RT"/*; do
       [ "$(basename "$e")" = manifest.json ] || ln -sfn "$e" "$RUN/rt/$(basename "$e")"
     done
-    "$EMBED_KICAD_CLI" api-server --describe >"$RUN/rt/manifest.json"
+    printf '%s\n' "$EMBED_DESC" >"$RUN/rt/manifest.json"
     EMBED_KICAD_CLI="$NEUTRAL_RUN/rt/bin/kicad-cli"
   fi
+  printf '%s\n' "$EMBED_DESC" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps({"embed_mode": True, "runtime_root": sys.argv[1], "capabilities": sorted(d.get("capabilities", []))}, indent=2))' "$EMBED_RT" >"$RUNTIME_CAPS_JSON"
   echo "rail-shots: --embed runtime -> $EMBED_KICAD_CLI"
 
   # Seed isolated KiCad XDG configs so embedded KiCad skips first-run wizard and enables API server.
@@ -232,6 +260,8 @@ for ver in ("10.0", "10.99"):
     with open(os.path.join(cdir, "fp-lib-table"), "w", encoding="utf-8") as f: f.write(fp_text)
     with open(os.path.join(cdir, "design-block-lib-table"), "w", encoding="utf-8") as f: f.write("(design_block_lib_table\n  (version 7)\n)\n")
 PY
+else
+  printf '{"embed_mode": false, "runtime_root": "", "capabilities": []}\n' >"$RUNTIME_CAPS_JSON"
 fi
 
 # Locate Xvfb (prefer ~/.local/xvfb-root with LD_LIBRARY_PATH)
@@ -296,7 +326,6 @@ MESH_FIX="$REPO_ROOT/test/files/fixtures/mesh"
 
 seed_project() {
   local kind=$1 dir=$2
-  rm -rf "$dir"
   mkdir -p "$dir"
   printf '# %s fixture\n\nInitial text for rail-shots.\n' "$kind" >"$dir/README.md"
 
@@ -307,12 +336,8 @@ seed_project() {
       mkdir -p "$dir/mech" "$dir/mfg/gerbers"
       cp "$MESH_FIX/bracket.step" "$dir/mech/bracket.step"
       if [ -n "$KICAD_CLI" ] && [ -x "$KICAD_CLI" ]; then
-        env -u DISPLAY -u WAYLAND_DISPLAY \
-          HOME="$RUN/fakehome" XDG_CONFIG_HOME="$RUN/fakehome/.config" XDG_CACHE_HOME="$RUN/fakehome/.cache" TMPDIR="$RUN/tmp" \
-          "$KICAD_CLI" pcb export gerbers --layers "F.Cu,B.Cu,F.SilkS,F.Mask,B.Mask,Edge.Cuts" -o "$dir/mfg/gerbers/" "$dir/ecc83-pp.kicad_pcb" >/dev/null 2>&1 || true
-        env -u DISPLAY -u WAYLAND_DISPLAY \
-          HOME="$RUN/fakehome" XDG_CONFIG_HOME="$RUN/fakehome/.config" XDG_CACHE_HOME="$RUN/fakehome/.cache" TMPDIR="$RUN/tmp" \
-          "$KICAD_CLI" pcb export drill -o "$dir/mfg/gerbers/" "$dir/ecc83-pp.kicad_pcb" >/dev/null 2>&1 || true
+        kicad_probe_env "$KICAD_CLI" pcb export gerbers --layers "F.Cu,B.Cu,F.SilkS,F.Mask,B.Mask,Edge.Cuts" -o "$dir/mfg/gerbers/" "$dir/ecc83-pp.kicad_pcb" >/dev/null 2>&1 || true
+        kicad_probe_env "$KICAD_CLI" pcb export drill -o "$dir/mfg/gerbers/" "$dir/ecc83-pp.kicad_pcb" >/dev/null 2>&1 || true
       fi
       if [ -z "$(ls -A "$dir/mfg/gerbers" 2>/dev/null)" ]; then
         cat >"$dir/mfg/gerbers/ecc83-pp-F_Cu.gbr" <<'GBR'
@@ -347,6 +372,10 @@ X10.0Y10.0
 M30
 DRL
       fi
+      ;;
+    board-only)
+      cp "$PLOT_FIX/ecc83-pp.kicad_pcb" "$PLOT_FIX/ecc83-pp.kicad_prl" "$dir/"
+      printf '{}\n' >"$dir/ecc83-pp.kicad_pro"
       ;;
     schematic-only)
       cp "$PLOT_FIX/ecc83-pp.kicad_sch" "$dir/"
@@ -409,14 +438,14 @@ for kind in "${KINDS[@]}"; do
   echo "rail-shots: === kind=$kind ==="
   KIND_OUT="$OUTDIR/$kind"
   mkdir -p "$KIND_OUT"
+  # Create directories strictly inside our fresh $RUN under $BP_TMP; pass neutral alias paths to hub/client.
+  mkdir -p "$RUN/proj-$kind" "$RUN/home-$kind" "$RUN/shots-$kind"
   PROJ="$NEUTRAL_RUN/proj-$kind"
   HHOME="$NEUTRAL_RUN/home-$kind"
   SHOT_DIR="$RUN/shots-$kind"
   STOP_FLAG="$RUN/stop-$kind"
-  rm -rf "$HHOME" "$SHOT_DIR" "$STOP_FLAG"
-  mkdir -p "$HHOME" "$SHOT_DIR"
 
-  seed_project "$kind" "$PROJ"
+  seed_project "$kind" "$RUN/proj-$kind"
 
   USE_EMBED=0
   if [ "$EMBED_MODE_FLAG" = "1" ] && [ "$kind" = "full" ]; then
