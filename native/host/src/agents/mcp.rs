@@ -108,6 +108,19 @@ pub fn ans_line(kind: &str, tool: &str, q: &str, answer: &str) -> String {
     else { format!("{}: {tool} {}", match answer { "accept" => "Allowed", "session" => "Allowed for this session", _ => "Denied" }, q.chars().take(160).collect::<String>()) }
 }
 
+/// `BP_MCP_TRACE=<file>`: one line per step of each MCP connection (accepted, head, dispatch, answer, written, closed; an early EOF, a refusal) appended to the file (#1287). Off when unset.
+static TRACE: std::sync::OnceLock<Option<std::sync::Mutex<std::fs::File>>> = std::sync::OnceLock::new();
+static CID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+fn trace_file() -> Option<&'static std::sync::Mutex<std::fs::File>> { TRACE.get_or_init(|| std::env::var_os("BP_MCP_TRACE").and_then(|p| std::fs::OpenOptions::new().create(true).append(true).open(p).ok()).map(std::sync::Mutex::new)).as_ref() }
+/// Whether the trace is on: a line costly to build is built only then.
+fn tracing() -> bool { trace_file().is_some() }
+pub fn trace(port: u16, cid: u64, what: &str) {
+    if let Some(f) = trace_file() { use std::io::Write; let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0); let _ = writeln!(f.lock().unwrap(), "{ms} pid={} port={port} c{cid} {what}", std::process::id()); }
+}
+/// Every connection is taken (MAX_CONNS): the caller is told so (503 and a JSON-RPC error) instead of a connection closed with nothing said (#1287).
+async fn busy(mut s: TcpStream) { let b = error(&Value::Null, -32000, "the hub is busy: too many MCP calls at once; nothing was done, ask again").to_string();
+    let _ = tokio::time::timeout(Duration::from_secs(5), s.write_all(format!("HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: {}\r\nRetry-After: 1\r\nConnection: close\r\n\r\n{b}", b.len()).as_bytes())).await; let _ = s.shutdown().await;
+    let mut sink = [0u8; 4096]; let _ = tokio::time::timeout(Duration::from_secs(2), async { while matches!(s.read(&mut sink).await, Ok(n) if n > 0) {} }).await; } // the request read and dropped, so the close sends no reset over the answer
 pub struct Parked { pub thread: String, pub tool: String, pub input: Value, pub id: Value, pub tx: oneshot::Sender<String> }
 
 pub struct Mcp { pub port: u16, secret: String, ag: Weak<Agents>, tools: Vec<Value>, sem: Arc<Semaphore> }
@@ -120,7 +133,7 @@ impl Mcp {
         let tools: Vec<Value> = all["result"]["tools"].as_array().cloned().unwrap_or_default().into_iter().filter(|t| IMPLEMENTED.contains(&sv(t, "name"))).collect();
         let m = Arc::new(Mcp { port, secret: hex::encode(b), ag: Arc::downgrade(ag), tools, sem: Arc::new(Semaphore::new(MAX_CONNS)) });
         let mm = m.clone();
-        tokio::spawn(async move { loop { let Ok((s, _)) = l.accept().await else { continue }; let Ok(p) = mm.sem.clone().try_acquire_owned() else { continue }; let m2 = mm.clone(); tokio::spawn(async move { let _ = m2.conn(s).await; drop(p) }); } });
+        tokio::spawn(async move { loop { let (s, _) = match l.accept().await { Ok(x) => x, Err(e) => { trace(port, 0, &format!("accept error {e}")); continue } }; let cid = CID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1; trace(port, cid, &format!("accepted ({} free)", mm.sem.available_permits())); let Ok(p) = mm.sem.clone().try_acquire_owned() else { trace(port, cid, "busy: 503"); tokio::spawn(busy(s)); continue }; let m2 = mm.clone(); tokio::spawn(async move { let t0 = std::time::Instant::now(); let r = m2.conn(s, cid).await; trace(port, cid, &format!("closed after {}ms: {:?}", t0.elapsed().as_millis(), r.as_ref().err())); drop(p) }); } });
         Ok(m)
     }
     pub fn seg(thread: &str, gen: &str) -> String { if gen.is_empty() { thread.to_string() } else { format!("{thread}.{gen}") } }
@@ -130,28 +143,35 @@ impl Mcp {
     /// Hub.mcp_url.g
     pub fn url(&self, thread: &str, gen: &str) -> String { let seg = Mcp::seg(thread, gen); format!("http://127.0.0.1:{}/mcp/{seg}?k={}", self.port, mcp_key(&self.secret, &seg)) }
 
-    async fn conn(self: Arc<Self>, mut s: TcpStream) -> anyhow::Result<()> {
+    async fn conn(self: Arc<Self>, mut s: TcpStream, cid: u64) -> anyhow::Result<()> {
+        let port = self.port;
         let mut buf: Vec<u8> = Vec::new(); let mut tmp = [0u8; 8192];
         let (head_len, method, target, clen, bearer) = loop {
-            let n = tokio::time::timeout(Duration::from_secs(30), s.read(&mut tmp)).await??; if n == 0 { return Ok(()) } buf.extend_from_slice(&tmp[..n]);
+            let n = tokio::time::timeout(Duration::from_secs(30), s.read(&mut tmp)).await??; if n == 0 { trace(port, cid, &format!("EOF in head after {} bytes", buf.len())); return Ok(()) } buf.extend_from_slice(&tmp[..n]);
             if buf.len() > 16384 && !buf.windows(4).any(|w| w == b"\r\n\r\n") { return Ok(()) }
             let mut hs = [httparse::EMPTY_HEADER; 32]; let mut r = httparse::Request::new(&mut hs);
             match r.parse(&buf) { Ok(httparse::Status::Complete(l)) => { let cl = r.headers.iter().find(|h| h.name.eq_ignore_ascii_case("content-length")).and_then(|h| std::str::from_utf8(h.value).ok()).and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or(0);
                 let bearer = r.headers.iter().find(|h| h.name.eq_ignore_ascii_case("authorization")).and_then(|h| std::str::from_utf8(h.value).ok()).and_then(bearer_of).unwrap_or_default();
-                break (l, r.method.unwrap_or("").to_string(), r.path.unwrap_or("").to_string(), cl, bearer) } Ok(_) => continue, Err(_) => return Ok(()) }
+                break (l, r.method.unwrap_or("").to_string(), r.path.unwrap_or("").to_string(), cl, bearer) } Ok(_) => continue, Err(e) => { trace(port, cid, &format!("BAD HEAD {e}")); return Ok(()) } }
         };
         let reply = |status: &str, body: &str| format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n{body}", body.len());
-        if clen > MAX_BODY { s.write_all(reply("413 Payload Too Large", "").as_bytes()).await?; return Ok(()) }
-        while buf.len() < head_len + clen { let n = tokio::time::timeout(Duration::from_secs(30), s.read(&mut tmp)).await??; if n == 0 { return Ok(()) } buf.extend_from_slice(&tmp[..n]) }
+        trace(port, cid, &format!("head {method} {} clen={clen} got={}", target.split('?').next().unwrap_or(""), buf.len() - head_len));
+        if clen > MAX_BODY { trace(port, cid, &format!("413 clen={clen}")); s.write_all(reply("413 Payload Too Large", &error(&Value::Null, -32600, "the request is too large").to_string()).as_bytes()).await?; return Ok(()) }
+        while buf.len() < head_len + clen { let n = tokio::time::timeout(Duration::from_secs(30), s.read(&mut tmp)).await??; if n == 0 { trace(port, cid, &format!("EOF in body at {}/{clen}", buf.len() - head_len)); return Ok(()) } buf.extend_from_slice(&tmp[..n]) }
         let body = String::from_utf8_lossy(&buf[head_len..head_len + clen]).into_owned();
         let (path, query) = target.split_once('?').unwrap_or((&target, ""));
         let seg = path.strip_prefix("/mcp/").unwrap_or("");
         // the key rides in `Authorization: Bearer` (Codex: its argv never carries it, F-009) or, for a client that can only hold a URL, in `?k=`
         let k = if bearer.is_empty() { query.split('&').find_map(|p| p.strip_prefix("k=")).unwrap_or("") } else { bearer.as_str() };
-        if method != "POST" || seg.is_empty() || !same(k, &mcp_key(&self.secret, seg)) { s.write_all(reply("401 Unauthorized", "").as_bytes()).await?; return Ok(()) }
+        if method != "POST" || seg.is_empty() || !same(k, &mcp_key(&self.secret, seg)) { trace(port, cid, &format!("401 seg={seg} keylen={}", k.len())); s.write_all(reply("401 Unauthorized", &error(&Value::Null, -32001, "unauthorized: this MCP URL's key is not the thread's").to_string()).as_bytes()).await?; return Ok(()) }
         let (thread, gen) = seg.split_once('.').map(|(a, b)| (a.to_string(), b.to_string())).unwrap_or((seg.to_string(), String::new()));
+        if tracing() { let o: Value = serde_json::from_str(&body).unwrap_or(Value::Null); trace(port, cid, &format!("dispatch {seg} {} {}", sv(&o, "method"), o.pointer("/params/name").and_then(Value::as_str).unwrap_or(""))); }
+        let t0 = std::time::Instant::now();
         let out = self.handle(&thread, &gen, &body, &mut s).await;
-        match out { Some(v) => s.write_all(reply("200 OK", &v.to_string()).as_bytes()).await?, None => s.write_all(reply("202 Accepted", "").as_bytes()).await? }
+        let txt = match &out { Some(v) => reply("200 OK", &v.to_string()), None => reply("202 Accepted", "") };
+        if tracing() { trace(port, cid, &format!("answer after {}ms: {}", t0.elapsed().as_millis(), match &out { Some(v) => format!("200 {}b {}", v.to_string().len(), v.to_string().chars().take(160).collect::<String>()), None => "202 (none)".into() })); }
+        if let Err(e) = s.write_all(txt.as_bytes()).await { trace(port, cid, &format!("WRITE FAILED {e}")); return Err(e.into()) }
+        trace(port, cid, "written");
         s.shutdown().await.ok(); Ok(())
     }
 
@@ -159,7 +179,7 @@ impl Mcp {
     pub async fn handle(&self, thread: &str, gen: &str, body: &str, sock: &mut TcpStream) -> Option<Value> {
         let Ok(o) = serde_json::from_str::<Value>(body) else { return Some(error(&Value::Null, -32700, "parse error")) };
         let id = o.get("id").cloned().unwrap_or(Value::Null); let p = o.get("params").cloned().unwrap_or(Value::Null);
-        let ag = self.ag.upgrade()?;
+        let Some(ag) = self.ag.upgrade() else { return o.get("id").map(|_| error(&id, -32000, "the hub's agents are not running: nothing was done")) }; // a request is answered, never left empty
         match sv(&o, "method") {
             "initialize" => { let pv = if sv(&p, "protocolVersion").is_empty() { "2025-06-18" } else { sv(&p, "protocolVersion") }; Some(result(&id, json!({"protocolVersion":pv,"capabilities":{"tools":{}},"serverInfo":{"name":"backplane","version":ag.hub.cfg.version}}))) }
             "tools/list" => { let mut tools = self.tools.clone(); tools.extend(crate::settings::order::listed(&ag, thread).await); for s in ag.tool_sets() { tools.extend(s.list(thread)) }
@@ -183,7 +203,9 @@ impl Mcp {
                     _ => Err("unknown method".to_string()) };
                 Some(match r { Ok(v) => result(&id, v), Err(e) => error(&id, -32000, &e) })
             }
-            _ => None, // notifications and anything unknown: no reply (Mcp.method.pos)
+            // a notification (no id) gets no reply (202); a request for a method this server does not have gets JSON-RPC's error, never an empty answer (#1287)
+            m if m.starts_with("notifications/") || o.get("id").is_none() => None,
+            m => Some(error(&id, -32601, &format!("method not found: {m}"))),
         }
     }
 

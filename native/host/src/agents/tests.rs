@@ -483,7 +483,7 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     assert_eq!(rpc_mcp(&ag, T1, "", "initialize", json!({"protocolVersion":"2025-06-18"})).await, (200, js(MCP_INIT)));
     assert_eq!(rpc_mcp(&ag, T1, "", "ping", json!({})).await, (200, js(MCP_PING)));
     assert_eq!(rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"no_such_tool","arguments":{}})).await, (200, js(MCP_BADTOOL)));
-    assert_eq!(rpc_mcp(&ag, T1, "", "nope", json!({})).await, (202, Value::Null)); // unknown methods and notifications: no reply
+    assert_eq!(rpc_mcp(&ag, T1, "", "nope", json!({})).await, (200, json!({"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found: nope"}}))); // a request is always answered (#1287); a notification is not
     assert_eq!(rpc_mcp(&ag, T1, "", "notifications/initialized", json!({})).await.0, 202);
     let (_, l) = rpc_mcp(&ag, T1, "", "tools/list", json!({})).await; let all: Value = serde_json::from_str(mcp::TOOLS_JSON).unwrap();
     // (this thread's project is no Altium one: Altium's tools are not listed for it)
@@ -499,10 +499,23 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
 #[tokio::test(flavor = "multi_thread")] async fn the_mcp_server_refuses_what_has_no_key_and_what_is_not_a_post() {
     let sd = dir("m2-bin"); perf_standin(&sd, 1);
     let (_hub, ag, _h, _w) = start("m2", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let m = ag.mcp.get().unwrap(); let body = r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#;
-    assert_eq!(post(m.port, &format!("/mcp/{T1}"), body).await.0, 401);                       // no key
+    let (st, b) = post(m.port, &format!("/mcp/{T1}"), body).await; assert_eq!(st, 401); assert!(b.contains("\"error\"") && b.contains("unauthorized"), "a refusal says why: {b}"); // no key
     assert_eq!(post(m.port, &format!("/mcp/{T1}?k={}", "0".repeat(64)), body).await.0, 401);   // a wrong one
     let other = path_of(&m.url("t1700001001-1", "")); assert_eq!(post(m.port, &other.replace("t1700001001-1", T1), body).await.0, 401); // another thread's key
     assert_eq!(post(m.port, &path_of(&m.url(T1, "")), "{not json").await.1, json!({"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"parse error"}}).to_string());
+}
+/// #1287: with every connection taken, the next caller is told the hub is busy (503 and a JSON-RPC error), never a connection closed with nothing said
+#[tokio::test(flavor = "multi_thread")] async fn a_full_mcp_endpoint_says_it_is_busy() {
+    let sd = dir("m5-bin"); perf_standin(&sd, 1);
+    let (_hub, ag, _h, _w) = start("m5", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let m = ag.mcp.get().unwrap();
+    let mut held = vec![]; // connections that send nothing: each holds one of the endpoint's places while it waits for a request
+    for _ in 0..256 { held.push(tokio::net::TcpStream::connect(("127.0.0.1", m.port)).await.unwrap()) }
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let (st, b) = loop { let r = post(m.port, &path_of(&m.url(T1, "")), r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#).await; if r.0 == 503 || std::time::Instant::now() > end { break r } tokio::time::sleep(std::time::Duration::from_millis(20)).await };
+    assert_eq!(st, 503, "{b}"); assert!(b.contains("\"error\"") && b.contains("busy"), "the caller is told: {b}");
+    drop(held);
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop { let r = rpc_mcp(&ag, T1, "", "ping", json!({})).await; if r.0 == 200 { break } assert!(std::time::Instant::now() < end, "the places come back: {r:?}"); tokio::time::sleep(std::time::Duration::from_millis(20)).await }
 }
 #[tokio::test(flavor = "multi_thread")] async fn the_mcp_key_may_ride_as_a_bearer_token_of_its_own_thread_only() {
     let sd = dir("m3-bin"); perf_standin(&sd, 1);
