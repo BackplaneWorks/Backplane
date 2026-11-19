@@ -23,7 +23,7 @@ fn cmd_gui_text(program: &str, log: &Path) -> String {
 }
 /// The POSIX sh refusal (Linux, macOS, and Git Bash / MSYS2 / Cygwin on Windows, where `log` is in sh_path's form): LF line endings only.
 fn sh_gui_text(program: &str, log: &str) -> String {
-    format!("#!/bin/sh\n# Backplane: {program} is not for agents\n{{ printf 'caller %s: ' \"$PPID\"; tr '\\0' ' ' < /proc/$PPID/cmdline 2>/dev/null || ps -o command= -p $PPID 2>/dev/null; printf ' :: {program} %s\\n' \"$*\"; }} >> {} 2>/dev/null\necho \"{GUI_REFUSAL}\" >&2\nexit 1\n", sh_quote(log))
+    format!("#!/bin/sh\n# Backplane: {program} is not for agents\n{{ printf 'caller %s: ' \"$PPID\"; tr '\\0' ' ' < /proc/$PPID/cmdline 2>/dev/null || ps -o command= -p $PPID 2>/dev/null | tr '\\n' ' '; printf ' :: {program} %s\\n' \"$*\"; }} >> {} 2>/dev/null\necho \"{GUI_REFUSAL}\" >&2\nexit 1\n", sh_quote(log))
 }
 /// `s` as one sh word: single-quoted, each `'` written `'\''` (nothing else is special inside single quotes: spaces, `$`, backticks,
 /// non-ASCII, which is written as UTF-8).
