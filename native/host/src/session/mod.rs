@@ -19,7 +19,7 @@ pub mod thread_actions;
 pub mod pages;
 pub mod event_type;
 pub use event_type::event_type;
-pub use actor::{forget, is_job, record_answer, record_read, record_read_bound, record_reply, record_reply_bound, record_reply_bound_m, replied, replied_late, take_reads};
+pub use actor::{begin_watch, finish_watch, forget, is_job, record_answer, record_read, record_read_bound, record_reply, record_reply_bound, record_reply_bound_m, replied, replied_late, take_reads};
 /// Registers this lane's handlers: `thread.search` and `thread.find` (search.rs), what was said in every thread or in one, and starts their index (index.rs).
 pub fn start(hub: &Arc<Hub>) { index::start(&hub.store); hub.register_rpc(Arc::new(search::Search)); }
 

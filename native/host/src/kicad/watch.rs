@@ -760,8 +760,10 @@ impl RpcHandler for KicadRpc {
                     let board = s("board"); if !board.is_empty() && !((board.ends_with(".kicad_pcb") || is_altium_board(&board)) && !board.contains("..") && board.starts_with(&format!("{root}/"))) { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that board is not in this project"})] }
                     let force = p.get("force").and_then(Value::as_bool) == Some(true);
                     if p.get("fresh").and_then(Value::as_bool) == Some(true) { self.0.forget(who.client) }
+                    let ticket = crate::session::begin_watch(who.client);
                     let keys = if kind == "split" { self.0.watch_split(hub, who.client, &root, &path, &s("tree"), &board, force) }
                     else { self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree"), kept_of(&k), force) };
+                    if crate::session::finish_watch(who.client, ticket, p) { hub.bump_views(); }
                     vec![json!({"t":"reply","id":id,"ok":true,"result":{"keys":keys}})]
                 }
                 // the client zoomed in on a STEP: its solids there meshed finer, the model replaced when they are (Plots::refine)

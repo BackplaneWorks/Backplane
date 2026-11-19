@@ -655,6 +655,13 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     let mut viewer = super::viewer::viewer_json(st, &o["viewer"], &params["session"]).ok_or("viewer.page-not-ported")?;
     // Placeholder until embed::runtime_picture(root, board_file) is available.
     viewer["runtime"] = json!({"support":"unknown"});
+    if viewer["identity"]["page"] == "browser" {
+        let (title, url) = super::identity_context::browser(&params["hubInfo"], thread);
+        if !url.is_empty() {
+            viewer["identity"]["url"] = json!(url);
+            if !title.is_empty() { viewer["identity"]["title"] = json!(title); }
+        }
+    }
     viewer["mode"] = super::viewer::surface(st, &viewer, params, thread);
     o.insert("viewer".into(), viewer);
     o.insert("diff".into(), crate::session::pages::diff_json(&params["session"], thread));
