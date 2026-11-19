@@ -1,14 +1,15 @@
 #!/bin/sh
 # reference-transaction hook, installed by scripts/install-hooks.sh into <common .git>/hooks/, which serves every worktree.
 # When refs/heads/main or refs/remotes/origin/main moves, make sure the main builder is running: it builds the new tip (tests, hub, window) and publishes it for the app to relaunch on.
-# It blocks moves of the retired branches gpui and gpui-next ("use main"), new main commits with unapproved identities (scripts/check-author.sh),
+# It blocks moves of the retired branches gpui and gpui-next ("use main"), new main commits with unapproved identities that are not on origin/main (scripts/check-author.sh),
 # and a move of main to a commit that is not on origin/main: upstream main is the one main, local main only follows it (land with scripts/land.sh: fetch, rebase onto
 # origin/main, test, push, then main fast-forwards). Everything else exits 0.
 if [ "$1" = prepared ]; then
   z=0000000000000000000000000000000000000000; bad=; badmain=; ahead=
   chk=$(git rev-parse --git-common-dir)/hooks/check-author.sh
   while read -r old new ref; do
-    case "$ref" in refs/heads/main|refs/remotes/origin/main)
+    # origin/main is the remote's main: what a fetch brings is published history and is not checked (check-author.sh skips it for main too)
+    case "$ref" in refs/heads/main)
       if [ "$new" != "$z" ] && [ "$new" != "$old" ]; then
         if [ "$old" = "$z" ]; then "$chk" "$new" || badmain=1
         else "$chk" "$new" --not "$old" || badmain=1; fi

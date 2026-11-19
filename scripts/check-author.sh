@@ -8,6 +8,14 @@
 set -eu
 # usage: scripts/check-author.sh --ident   checks the commit about to be made (git var, so env and config count): the pre-commit hook
 [ $# -gt 0 ] || { echo "usage: check-author.sh <rev-list args> | --ident" >&2; exit 2; }
+# Commits already on the remote's main (refs/remotes/origin/main, or CHECK_AUTHOR_UPSTREAM; "none" for no exclusion) are never checked: they
+# are published history, whoever wrote them (the person's decision, Nov 19). Only new commits being made, landed or pushed are.
+up=${CHECK_AUTHOR_UPSTREAM:-refs/remotes/origin/main}
+if [ "$1" != --ident ] && [ "$up" != none ] && git rev-parse -q --verify "$up^{commit}" > /dev/null 2>&1; then
+  # each --not flips what follows: after an odd number of them (`$new --not $old`) a plain ref is already an exclusion
+  n=0; for a in "$@"; do [ "$a" = --not ] && n=$((n + 1)); done
+  if [ $((n % 2)) = 1 ]; then set -- "$@" "$up"; else set -- "$@" --not "$up"; fi
+fi
 log() { if [ "$1" = --ident ]; then
     a=$(git var GIT_AUTHOR_IDENT | sed -n 's/.*<\(.*\)>.*/\1/p'); c=$(git var GIT_COMMITTER_IDENT | sed -n 's/.*<\(.*\)>.*/\1/p'); echo "this-commit $a $c"
   else git log --format='%h %ae %ce' "$@"; fi; }
