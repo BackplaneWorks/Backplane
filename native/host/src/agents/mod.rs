@@ -65,6 +65,8 @@ pub enum Cmd {
     /// Steer.go: a running non-Claude turn stops and starts again with the text; Claude takes it in place.
     /// Wake.ride: add a message to the thread's ride (see `Agents::wake_ride`).
     WakeRide { id: String, text: String, start: bool, reply: oneshot::Sender<Result<(), String>> },
+    /// A system message that starts a turn of its own only on an idle thread (`Agents::deliver_system_when_idle`): Ok(false), nothing posted, while a turn runs.
+    SystemIdle { msg: String, text: String, reply: oneshot::Sender<Result<bool, String>> },
     Steer { text: String, reply: oneshot::Sender<Result<(), String>> },
     /// A Claude start that could not get an account goes again (`Actor::account_retry`): the message that started the turn (msg, text, what the agent gets).
     Retry { msg: String, text: String, agent_text: String },
@@ -248,6 +250,15 @@ impl Agents {
     }
     /// AgentStop: end the thread's agent process in ANY state (an idle Claude process too); no events. For hub-side callers (archive, delete, a provider switch); not a client method.
     pub async fn deliver_as(self: &Arc<Self>, role: &str, thread: &str, msg: &str, text: &str, origin: Option<(String, String, String)>, extra: Vec<Value>) -> Result<(), String> { self.deliver_k(false, role, thread, msg, text, origin, extra).await }
+    /// A system message for `thread` that must not cut into a turn: delivered (Ok(true)) only when the thread is idle, else Ok(false) and nothing is posted. The
+    /// uberbot's restart wake goes this way (#1246): steered into the person's own turn, its "this turn is private, say nothing" left their question unanswered.
+    pub async fn deliver_system_when_idle(self: &Arc<Self>, thread: &str, msg: &str, text: &str) -> Result<bool, String> {
+        if let Some(r) = crate::net::homemove::hold_delivery(&self.hub, thread, &json!({"thread":thread,"msg":msg,"text":text,"role":"system","person":false,"origin":Value::Null,"extra":[]})).await { return r.map(|_| true) }
+        self.healthy(thread).await;
+        let tx = self.actor(thread); let (reply, rx) = oneshot::channel();
+        tx.try_send(Cmd::SystemIdle { msg: msg.into(), text: text.into(), reply }).map_err(|_| "too many messages are waiting for this thread".to_string())?;
+        rx.await.unwrap_or_else(|_| Err("the thread's agent stopped".into()))
+    }
     /// A message a PERSON typed (the client's turn.start): the only delivery that may start or write to a real agent in side-by-side mode.
     pub async fn deliver_person(self: &Arc<Self>, thread: &str, msg: &str, text: &str, extra: Vec<Value>) -> Result<(), String> { self.deliver_k(true, "user", thread, msg, text, None, extra).await }
     /// Before a turn is handed to the thread's actor (a person's message, a launch, a routine, a bot's mail, a queued start): an idle thread bound to an account known to
@@ -689,6 +700,13 @@ impl Actor {
             Cmd::StartQueued { text, taken, reply } => { self.early = Some(reply); let r = self.start_queued(text, taken).await; if let Some(re) = self.early.take() { let _ = re.send(r); } }
             Cmd::WakeRide { id, text, start, reply } => { self.early = Some(reply); let r = self.wake_ride(id, text, start).await; if let Some(re) = self.early.take() { let _ = re.send(r); } }
             Cmd::Steer { text, reply } => { let r = self.steer(text).await; let _ = reply.send(r); }
+            Cmd::SystemIdle { msg, text, reply } => {
+                // decided here, in the thread's own order: a message the person sent just before is already its turn, and this waits
+                let running = self.cx.running || self.ag.world().await.running(&self.th);
+                if running { let _ = reply.send(Ok(false)); return }
+                let r = self.user(false, msg, text, "system".into(), None, vec![]).await; // no early answer: the waker is a task of its own
+                let _ = reply.send(r.map(|_| true));
+            }
             Cmd::Retry { msg, text, agent_text } => {
                 // only the start still waiting: its turn running with no process, and no newer message taken meanwhile (that one started its own)
                 let (t, cwd) = { let w = self.ag.world().await; (w.threads.get(&self.th).cloned(), w.cwd(&self.th)) };

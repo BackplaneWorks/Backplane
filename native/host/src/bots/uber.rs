@@ -109,6 +109,9 @@ impl World {
     }
 }
 
+/// How long the restart wake waits for the uberbot's chat to be idle, and how often it looks.
+const WAKE_IDLE_WAIT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+const WAKE_IDLE_POLL: std::time::Duration = std::time::Duration::from_secs(2);
 /// What the uberbot is told when the hub comes back. It is short: the bot reads the plane itself.
 pub fn restarted_text(why: &str) -> String {
     let why = why.trim(); let why = if why.is_empty() { String::new() } else { format!(" ({why})") };
@@ -126,15 +129,21 @@ impl Bots {
             let _ = b.wake_uber(&why).await;
         });
     }
-    /// The turn itself, when there is an uberbot and this machine holds its conversation.
-    pub async fn wake_uber(&self, why: &str) -> Result<bool, String> {
-        let now = now_s();
+    /// The turn itself, when there is an uberbot and this machine holds its conversation. It waits for a turn running in the uberbot's chat to end (#1246): sent
+    /// into it, the wake steered the person's own turn (a Codex turn starts again with only the wake's text) and told the agent to say nothing, so the person's
+    /// question went unanswered. Past WAKE_IDLE_WAIT of turns the wake is dropped: an uberbot busy that long is not idle after a restart, and the cut turns carry on by themselves.
+    pub async fn wake_uber(&self, why: &str) -> Result<bool, String> { self.wake_uber_within(why, WAKE_IDLE_WAIT, WAKE_IDLE_POLL).await }
+    pub(crate) async fn wake_uber_within(&self, why: &str, wait: std::time::Duration, poll: std::time::Duration) -> Result<bool, String> {
         // an uberbot that came with a 0.14 import in this start was not restarted: it would read 0.14's halted threads as its own, maybe while 0.14 still runs them
         if crate::import014::ran_this_start(&self.hub.cfg.home) { return Ok(false) }
-        let th = { let w = self.world().await; let bot = w.uber_bot(); if bot.is_empty() || !w.holder_me() { return Ok(false) } w.bot(&bot).map(|b| b.thread.clone()).unwrap_or_default() };
-        if th.is_empty() { return Ok(false) }
-        self.inbox.deliver_system(&th, &self.id("m", now), &restarted_text(why), None).await?;
-        Ok(true)
+        let end = std::time::Instant::now() + wait;
+        loop {
+            let th = { let w = self.world().await; let bot = w.uber_bot(); if bot.is_empty() || !w.holder_me() { return Ok(false) } w.bot(&bot).map(|b| b.thread.clone()).unwrap_or_default() };
+            if th.is_empty() { return Ok(false) }
+            if self.inbox.deliver_system_idle(&th, &self.id("m", now_s()), &restarted_text(why)).await? { return Ok(true) }
+            if std::time::Instant::now() >= end { eprintln!("bots: the uberbot's chat was busy for {wait:?} after the restart: its wake is dropped"); return Ok(false) }
+            tokio::time::sleep(poll).await;
+        }
     }
     /// the uberbot has no conversation thread (an imported history ends with a BotSet that has none, and the sidebar then takes it for a bot on another machine): give it one
     pub async fn uber_heal(&self, now: u64) -> bool {
