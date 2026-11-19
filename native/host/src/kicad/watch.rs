@@ -64,6 +64,12 @@ pub fn stage_text(kind: u32, file: &str, native: bool, cached: bool, tools: &[st
     if solidread::is_step(path) { return if tool.is_empty() { format!("Meshing {name}…") } else { format!("Meshing {name} with {tool}…") } }
     let _ = kind; format!("Exporting the board's 3D model with KiCad (kicad-cli)…")
 }
+/// Whether a failed plot/3D read (`none`) is retryable by the client (missing files, unsupported formats and permission errors are permanent).
+pub fn is_retryable_err(why: &str) -> bool {
+    if why.is_empty() || why.starts_with("@bp.file-missing:") { return false }
+    let low = why.to_ascii_lowercase();
+    !["too large", "not found", "no such file", "does not exist", "unsupported", "permission denied"].iter().any(|p| low.contains(p))
+}
 pub fn key(kind: u32, root: &str, path: &str) -> String { format!("{kind}|{root}|{path}") }
 /// An Altium board file (.PcbDoc, any case): read by altium/pcb.rs
 pub fn is_altium_board(p: &str) -> bool { p.to_ascii_lowercase().ends_with(".pcbdoc") }
@@ -106,7 +112,7 @@ impl Plots {
     /// other views are dropped; a new plot view starts from the chunks of the one it replaces (Sub.carry), a 3D view also
     /// watches the board's plot beside the model. `kept` names the model the client has cached: its key ("" for any of this view's) and id (0: none).
     /// Returns the keys of the plots this view shows, so a client can drop what arrives late for the view it left.
-    pub fn watch(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, kind: Option<u32>, root: &str, path: &str, tree: &str, kept: (&str, u64)) -> Vec<String> {
+    pub fn watch(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, kind: Option<u32>, root: &str, path: &str, tree: &str, kept: (&str, u64), force: bool) -> Vec<String> {
         let Some(kind) = kind else { self.stop(client); return vec![] };
         let board = |k: u32| if path.is_empty() { own_file(k, root) } else { path.to_string() };
         let file = board(kind);
@@ -115,8 +121,9 @@ impl Plots {
             { let mut st = self.st.lock().unwrap();
               st.waiting.insert(client, Wait { kind, root: root.to_string(), tree: tree.to_string() });
               if !st.polling { st.polling = true; let me = self.clone(); let hub = hub.clone(); tokio::spawn(async move { me.poll(hub).await }); } }
-            hub.push(client, json!({"t":"plot","key":key(kind, root, path),"none": if kind == 1 { "No schematic in this project yet" } else { "No board in this project yet" }}));
-            return vec![key(kind, root, path)]
+            let ky = key(kind, root, path);
+            hub.push(client, json!({"t":"plot","key":ky,"none": if kind == 1 { "No schematic in this project yet" } else { "No board in this project yet" },"retryable":false}));
+            return vec![ky]
         }
         self.st.lock().unwrap().waiting.remove(&client);
         let is_board = file.ends_with(".kicad_pcb"); // Pv.watch.go: only a board's model has a board beside it
@@ -127,17 +134,18 @@ impl Plots {
         let keys: Vec<String> = views.iter().map(|v| v.1.clone()).collect();
         let mut todo = vec![];
         { let mut st = self.st.lock().unwrap();
-          let carry = st.subs.get(&client).and_then(|v| v.iter().find(|s| s.key.starts_with("0|") || s.key.starts_with("1|"))).map(|s| (s.held.clone(), s.base.clone())).unwrap_or_default();
+          let carry = if force { Default::default() } else { st.subs.get(&client).and_then(|v| v.iter().find(|s| s.key.starts_with("0|") || s.key.starts_with("1|"))).map(|s| (s.held.clone(), s.base.clone())).unwrap_or_default() };
           // a model this client was already sent for the same source stays sent: a second watch of it (the Mech page's own beside the
-          // view's) does not send its frames again
-          let mut had: Vec<(String, Vec<u8>, usize)> = st.subs.remove(&client).unwrap_or_default().into_iter().filter(|s| !s.mesh.is_empty()).map(|s| (s.key, s.mesh, s.parts_at)).collect();
+          // view's) does not send its frames again; a forced watch (Retry) drops held state and re-reads even with an unchanged stamp
+          let mut had: Vec<(String, Vec<u8>, usize)> = if force { st.subs.remove(&client); vec![] } else { st.subs.remove(&client).unwrap_or_default().into_iter().filter(|s| !s.mesh.is_empty()).map(|s| (s.key, s.mesh, s.parts_at)).collect() };
           for (i, (k, ky, f)) in views.into_iter().enumerate() {
-              let carries = i == 0 && !solid_kind(k);
+              let carries = !force && i == 0 && !solid_kind(k);
               let (mesh, parts_at) = had.iter().position(|h| h.0 == ky).map(|i| { let h = had.swap_remove(i); (h.1, h.2) }).unwrap_or_default();
-              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: if carries { carry.0.clone() } else { vec![] }, mesh, fresh: true, base: if carries { carry.1.clone() } else { String::new() }, kept: if solid_kind(k) && (kept.0.is_empty() || kept.0 == ky) { kept.1 } else { 0 }, parts_at });
+              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: if carries { carry.0.clone() } else { vec![] }, mesh, fresh: true, base: if carries { carry.1.clone() } else { String::new() }, kept: if !force && solid_kind(k) && (kept.0.is_empty() || kept.0 == ky) { kept.1 } else { 0 }, parts_at });
               let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, file: f.clone(), ..Default::default() });
               s.file = f;
-              if !s.busy && !is_version(&s.file) && s.stamp.as_ref() != Some(&stamp(&s.file)) { s.plot = None } // Pv.fresh: a plot of an older file is not sent
+              if force { s.plot = None; s.stamp = None; }
+              else if !s.busy && !is_version(&s.file) && s.stamp.as_ref() != Some(&stamp(&s.file)) { s.plot = None } // Pv.fresh: a plot of an older file is not sent
               todo.push(ky);
           }
           self.gc(&mut st);
@@ -149,7 +157,7 @@ impl Plots {
     /// kicad.watch kind "split": the schematic (`path` is its sheet, "" the root), the board and the board's 3D model at once, each its own
     /// plot (full chunks, no carry: the panes are separate sources) and the 3D model's board plot shared with the board pane.
     /// `board` (absolute, "" the project's own): a board picked in the Boards menu: its file and the schematic beside it are the sources, keyed by their paths.
-    pub fn watch_split(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, root: &str, path: &str, tree: &str, board: &str) -> Vec<String> {
+    pub fn watch_split(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, root: &str, path: &str, tree: &str, board: &str, force: bool) -> Vec<String> {
         self.st.lock().unwrap().waiting.remove(&client);
         let f = project::read(root);
         let picked = !board.is_empty();
@@ -164,14 +172,18 @@ impl Plots {
         let keys: Vec<String> = views.iter().map(|v| v.1.clone()).collect();
         let mut todo = vec![];
         { let mut st = self.st.lock().unwrap();
-          // a pane whose source stays (another sheet in the schematic pane: the board and the 3D stay) keeps what this client holds of it: nothing is sent again
+          // a pane whose source stays (another sheet in the schematic pane: the board and the 3D stay) keeps what this client holds of it: nothing is sent again;
+          // a forced watch (Retry) re-reads every source of the Split page even when its subscription exists and its stamp is unchanged
           let mut old = st.subs.remove(&client).unwrap_or_default();
           for (k, ky, file) in views {
-              if let Some(i) = old.iter().position(|o| o.key == ky) { let o = old.swap_remove(i); st.subs.entry(client).or_default().push(o); continue }
+              if !force {
+                  if let Some(i) = old.iter().position(|o| o.key == ky) { let o = old.swap_remove(i); st.subs.entry(client).or_default().push(o); continue }
+              }
               st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0, parts_at: 0 });
               let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, file: file.clone(), ..Default::default() });
               s.file = file;
-              if !s.busy && !is_version(&s.file) && s.stamp.as_ref() != Some(&stamp(&s.file)) { s.plot = None }
+              if force { s.plot = None; s.stamp = None; }
+              else if !s.busy && !is_version(&s.file) && s.stamp.as_ref() != Some(&stamp(&s.file)) { s.plot = None }
               todo.push(ky);
           }
           self.gc(&mut st);
@@ -202,7 +214,7 @@ impl Plots {
             for (client, w) in found {
                 // still the view this client waits on (it may have opened another, or closed it, while the folders were read)
                 if me.st.lock().unwrap().waiting.get(&client) != Some(&w) { continue }
-                me.watch(&hub, client, Some(w.kind), &w.root, "", &w.tree, ("", 0));
+                me.watch(&hub, client, Some(w.kind), &w.root, "", &w.tree, ("", 0), false);
             }
         });
     }
@@ -508,8 +520,9 @@ impl Plots {
                 (None, 0 | 2) => {} // half written or read again: the next poll sees the file change
                 (None, _) => { // Pv.fail: every watcher told why, and holding nothing
                     let why: String = text.trim().chars().take(200).collect();
+                    let retryable = is_retryable_err(&why);
                     let mut st = me.st.lock().unwrap(); let mut gone = vec![];
-                    for (c, subs) in st.subs.iter_mut() { for s in subs.iter_mut().filter(|s| s.key == ky) { s.held.clear(); if !hub.push(*c, json!({"t":"plot","key":ky,"none":why})) { gone.push(*c) } } }
+                    for (c, subs) in st.subs.iter_mut() { for s in subs.iter_mut().filter(|s| s.key == ky) { s.held.clear(); if !hub.push(*c, json!({"t":"plot","key":ky,"none":why,"retryable":retryable})) { gone.push(*c) } } }
                     drop(st); for c in gone { me.stop(c) } }
             }
             if matches!(code, 0 | 2) && (ky.starts_with("2|") || ky.starts_with("3|")) { me.note(&hub, &ky, None) } // Pv.handle PGot
@@ -710,9 +723,10 @@ impl RpcHandler for KicadRpc {
                     let k = s("kept");
                     // (a board picked in the Boards menu must be a file of this folder)
                     let board = s("board"); if !board.is_empty() && !((board.ends_with(".kicad_pcb") || is_altium_board(&board)) && !board.contains("..") && board.starts_with(&format!("{root}/"))) { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that board is not in this project"})] }
+                    let force = p.get("force").and_then(Value::as_bool) == Some(true);
                     if p.get("fresh").and_then(Value::as_bool) == Some(true) { self.0.forget(who.client) }
-                    let keys = if kind == "split" { self.0.watch_split(hub, who.client, &root, &path, &s("tree"), &board) }
-                    else { self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree"), kept_of(&k)) };
+                    let keys = if kind == "split" { self.0.watch_split(hub, who.client, &root, &path, &s("tree"), &board, force) }
+                    else { self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree"), kept_of(&k), force) };
                     vec![json!({"t":"reply","id":id,"ok":true,"result":{"keys":keys}})]
                 }
                 // the client zoomed in on a STEP: its solids there meshed finer, the model replaced when they are (Plots::refine)
@@ -775,7 +789,7 @@ mod tests {
         let plots = Plots::new(&home);
         let root = proj.to_string_lossy().into_owned();
         let mut out = hub.attach(7);
-        let keys = plots.watch(&hub, 7, Some(1), &root, "", "", ("", 0));
+        let keys = plots.watch(&hub, 7, Some(1), &root, "", "", ("", 0), false);
         assert_eq!(keys, vec![key(1, &root, "")]);
         match out.try_recv() { Ok(Out::Value(v)) => assert_eq!(v["none"], "No schematic in this project yet"), _ => panic!("the empty view is told so") }
         assert_eq!(plots.st.lock().unwrap().waiting.get(&7), Some(&Wait { kind: 1, root: root.clone(), tree: String::new() }));
@@ -794,10 +808,58 @@ mod tests {
         assert!(plots.st.lock().unwrap().waiting.is_empty(), "the wait is over");
         // a view that is closed, or replaced by another, waits no more
         std::fs::remove_file(proj.join("boards/lamp/lamp.kicad_sch")).unwrap();
-        plots.watch(&hub, 7, Some(1), &root, "", "", ("", 0)); assert_eq!(plots.st.lock().unwrap().waiting.len(), 1);
+        plots.watch(&hub, 7, Some(1), &root, "", "", ("", 0), false); assert_eq!(plots.st.lock().unwrap().waiting.len(), 1);
         plots.stop(7); assert!(plots.st.lock().unwrap().waiting.is_empty());
-        plots.watch(&hub, 7, Some(0), &root, "", "", ("", 0)); assert_eq!(plots.st.lock().unwrap().waiting.get(&7).map(|w| w.kind), Some(0), "a board view waits for the board");
-        plots.watch(&hub, 7, None, "", "", "", ("", 0)); assert!(plots.st.lock().unwrap().waiting.is_empty());
+        plots.watch(&hub, 7, Some(0), &root, "", "", ("", 0), false); assert_eq!(plots.st.lock().unwrap().waiting.get(&7).map(|w| w.kind), Some(0), "a board view waits for the board");
+        plots.watch(&hub, 7, None, "", "", "", ("", 0), false); assert!(plots.st.lock().unwrap().waiting.is_empty());
+        let _ = std::fs::remove_dir_all(&home); let _ = std::fs::remove_dir_all(&proj);
+    }
+    #[tokio::test] async fn a_forced_split_watch_re_reads_a_failed_unchanged_source_and_keeps_siblings() {
+        use crate::{hub::{Cfg, Out}, presenter::Canned};
+        let (home, proj) = (crate::plat::tmp::dir("fsplit-home"), crate::plat::tmp::dir("fsplit-proj"));
+        let cfg = Cfg { home: home.to_path_buf(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let plots = Plots::new(&home);
+        let root = proj.to_string_lossy().into_owned();
+        let fx = concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/files/fixtures/plot/ecc83-pp.kicad_sch");
+        std::fs::write(proj.join("b.kicad_pro"), "{}").unwrap();
+        std::fs::copy(fx, proj.join("b.kicad_sch")).unwrap();
+        // Corrupt board file: 3D pane fails with a none frame; file stamp stays unchanged across Retry
+        std::fs::write(proj.join("b.kicad_pcb"), "not a valid kicad_pcb").unwrap();
+        let mut out = hub.attach(9);
+        let keys = plots.watch_split(&hub, 9, &root, "", "", "", false);
+        assert_eq!(keys.len(), 3, "split subscribes to schematic, board, and 3d");
+        let solid_key = key(2, &root, "");
+        let mut first_fail = false;
+        for _ in 0..80 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            while let Ok(o) = out.try_recv() {
+                if let Out::Value(v) = o {
+                    if v["key"] == solid_key && v.get("none").is_some() { first_fail = true; }
+                }
+            }
+            if first_fail { break }
+        }
+        assert!(first_fail, "initial Split watch produced a none frame for the failed 3D source");
+        // Drain any remaining frames from the first watch
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        while out.try_recv().is_ok() {}
+        // Non-forced watch with unchanged file does nothing; forced watch re-reads the failed unchanged source and keeps all 3 panes subscribed
+        plots.watch_split(&hub, 9, &root, "", "", "", true);
+        let mut second_fail = false;
+        for _ in 0..80 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            while let Ok(o) = out.try_recv() {
+                if let Out::Value(v) = o {
+                    if v["key"] == solid_key && v.get("none").is_some() { second_fail = true; }
+                }
+            }
+            if second_fail { break }
+        }
+        assert!(second_fail, "forced Split watch performed a second read of the unchanged failed source");
+        let sub_keys: Vec<String> = plots.st.lock().unwrap().subs.get(&9).map(|v| v.iter().map(|s| s.key.clone()).collect()).unwrap_or_default();
+        assert_eq!(sub_keys, keys, "all three Split panes remain subscribed after forced retry");
+        plots.stop(9);
         let _ = std::fs::remove_dir_all(&home); let _ = std::fs::remove_dir_all(&proj);
     }
     /// A STEP streaming its parts: each frame goes out as it is made; once its model is sent no frame of the stream follows it, and a

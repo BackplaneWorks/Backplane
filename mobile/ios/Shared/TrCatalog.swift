@@ -4517,6 +4517,20 @@ gpui.rail.no.board	No board in this project	このプロジェクトには基板
 gpui.rail.no.schematic	No schematic in this project	このプロジェクトには回路図がありません	Este proyecto no tiene esquema
 gpui.rail.split.needs.both	Split needs a board and a schematic	分割表示には基板と回路図が必要です	La vista dividida requiere una placa y un esquema
 gpui.rail.no.mech	No mechanical parts in this project	このプロジェクトには機械部品がありません	Este proyecto no tiene piezas mecánicas
+gpui.panestate.next.board	Ask an agent to lay one out.	エージェントに基板のレイアウトを依頼してください。	Pide a un agente que diseñe una placa.
+gpui.panestate.next.schematic	Ask an agent to draw one.	エージェントに回路図の作成を依頼してください。	Pide a un agente que dibuje uno.
+gpui.panestate.next.solid	Ask an agent to lay out a board.	エージェントに基板のレイアウトを依頼してください。	Pide a un agente que diseñe una placa.
+gpui.panestate.empty.gerbers	No Gerber files in this project yet	このプロジェクトにガーバーファイルはまだありません	Aún no hay archivos Gerber en este proyecto
+gpui.panestate.next.gerbers	Ask an agent to export fabrication files into mfg/.	エージェントに mfg/ への製造ファイル出力を依頼してください。	Pide a un agente que exporte archivos de fabricación en mfg/.
+gpui.panestate.gerbers.noboard	No board to compare these Gerbers against.	これらのガーバーと比較する基板がありません。	No hay placa con la que comparar estos Gerber.
+gpui.panestate.gerbers.noboard.next	Add a board to this project to compare them.	比較するには、このプロジェクトに基板を追加してください。	Añade una placa a este proyecto para compararlos.
+gpui.panestate.empty.mech	No mechanical parts in this project yet	このプロジェクトに機構パーツはまだありません	Aún no hay piezas mecánicas en este proyecto
+gpui.panestate.next.mech	Ask an agent to model one, or add a STEP file to mech/.	エージェントにモデル作成を依頼するか、mech/ に STEP ファイルを追加してください。	Pide a un agente que modele una, o añade un archivo STEP en mech/.
+gpui.panestate.loading.split	Loading the views…	ビューを読み込み中…	Cargando las vistas…
+gpui.panestate.retrying	Trying again…	再試行中…	Reintentando…
+gpui.hub.view.notready	Not ready yet. Try again.	まだ準備ができていません。もう一度お試しください。	Aún no está listo. Inténtalo de nuevo.
+gpui.hub.view.staleconn	The connection to the hub went stale.	ハブへの接続が古くなりました。	La conexión con el hub caducó.
+gpui.hub.view.unavailable	That view isn't available here.	そのビューはここでは利用できません。	Esa vista no está disponible aquí.
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}

@@ -107,6 +107,18 @@ fn watch(app: &mut Backplane, path: &str) {
     let Some((kind, _, root, _)) = open_file(app) else { return };
     let _ = app.tx.try_send(Command::Rpc("kicad.watch".into(), super::settings::Secret(json!({"kind": kind, "root": root, "path": path, "tree": ""})), "cmp"));
 }
+/// Forced watch payload for retrying a historical version or comparison currently owned by the history bar.
+pub fn retry_watch_payload(kind: &str, root: &str, cmp: &Cmp) -> serde_json::Value {
+    json!({"kind": kind, "root": root, "path": shown(cmp), "tree": "", "force": true})
+}
+/// When the open pane is showing a history version or comparison, re-send that revision-specific watch with `force: true`.
+/// Returns `None` when the pane is on a live source (caller should use the presenter's `"retry"` action).
+pub fn retry_watch(app: &mut Backplane) -> Option<bool> {
+    let (kind, key, root, _) = open_file(app)?;
+    let cmp = app.screens.plotview.compare.as_ref().filter(|c| c.base == key)?;
+    let p = retry_watch_payload(&kind, &root, cmp);
+    Some(app.tx.try_send(Command::Rpc("kicad.watch".into(), super::settings::Secret(p), "cmp")).is_ok())
+}
 /// Show the comparison (None: put it away and watch the file itself again).
 pub fn set(app: &mut Backplane, c: Option<Cmp>) {
     let Some((kind, _, _, own)) = open_file(app) else { return };
@@ -531,5 +543,13 @@ mod tests {
         let ja = crate::i18n::with_lang("ja", || menu_rows(Some(&h), Some(&r)));
         assert_eq!((ja[0].0.as_str(), ja[8].0.as_str(), ja[10].0.as_str()), ("変更10", "HEAD", "ターン3"));
         assert_eq!(ja[9].1, "このスレッドの開始前"); assert_eq!(ja[10].2, Pick::Commit("c3".into(), "Turn 3".into()));
+    }
+    #[test] fn retry_watch_payload_re_sends_revision_path_with_force() {
+        let ver = Cmp { base: "0|/p|".into(), old: "git\t/p/.git\tabc\t2\t/p/b.kicad_pcb".into(), new: "/p/b.kicad_pcb".into(), label: "HEAD".into(), to: "Live".into(), mode: 0, bits: 0 };
+        let p_ver = retry_watch_payload("board", "/p", &ver);
+        assert_eq!(p_ver, json!({"kind": "board", "root": "/p", "path": "git\t/p/.git\tabc\t2\t/p/b.kicad_pcb", "tree": "", "force": true}));
+        let diff = Cmp { mode: 1, bits: 8, ..ver };
+        let p_diff = retry_watch_payload("board", "/p", &diff);
+        assert_eq!(p_diff, json!({"kind": "board", "root": "/p", "path": "diff\ngit\t/p/.git\tabc\t2\t/p/b.kicad_pcb\n/p/b.kicad_pcb\n8", "tree": "", "force": true}));
     }
 }

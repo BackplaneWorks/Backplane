@@ -486,7 +486,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             // a thread of another machine is drawn from that machine's mirror (its project folder is a folder over there); the watch it asks for goes there too
             let vsel=text(&session,"sel").to_string();
             let vst: &State=far.iter().map(|(_,f)|*f).find(|f|vsel.contains('~') && f.threads.contains_key(vsel.as_str())).unwrap_or(st);
-            let Some(o)=super::viewer::view_action(vst,hub,&session,value) else { return refused("action.view-unported") };
+            let Some(o)=super::viewer::view_action_at(vst,hub,&session,value,p["now"].as_u64().unwrap_or(0)) else { return refused("action.view-unported") };
             crate::session::patch::merge(&mut session,&o.patch);
             cmds=[read_cmds.clone(),o.before].concat();
             crate::session::dispatch::fab_tail(&crate::session::dispatch::StateFacts(st),hub,&mut session,&mut cmds);
@@ -721,6 +721,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     // Composer fields are drawn from the same adopted draft that the action dispatcher patches.
     // a thread of a linked machine is drawn from that machine's display state (its page and window come from the mirror)
     let tst: &State=far.iter().map(|(_,f)|*f).find(|f|thread.contains('~') && f.threads.contains_key(thread)).unwrap_or(st);
+    if !thread.is_empty() { super::viewer::sync_gerbers(tst,hub,&mut session,&mut cmds); }
     if thread.contains('~') && std::ptr::eq(tst,st) { return refused("thread.far-unknown") }
     let shown_thread=if thread.is_empty() { Value::Null }else{
         if !p["window"].is_object() { return refused("window.missing") }
