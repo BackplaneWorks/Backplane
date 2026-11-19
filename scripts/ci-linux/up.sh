@@ -14,7 +14,7 @@ if [ ! -f "$ci/runner-home/actions-runner/.runner" ]; then
   umask 077; cat > "$ci/runner-home/.reg-token"; [ -s "$ci/runner-home/.reg-token" ] || { echo "empty token" >&2; exit 1; }
 fi
 docker rm -f bp-linux-release-runner >/dev/null 2>&1 || true
-docker run -d --name bp-linux-release-runner --restart unless-stopped --cpus "$(nproc)" \
+docker run -d --name bp-linux-release-runner --restart unless-stopped --cpus "$(docker info -f "{{.NCPU}}" 2>/dev/null || nproc)" \
   -e RUNNER_NAME="$name" -e RUNNER_LABEL="$label" -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE:-20G}" \
   -v "$ci/runner-home:/home/runner" -v "$ci/runner-guard.sh:/opt/bp/runner-guard.sh:ro" \
   bp-linux-release-runner >/dev/null
