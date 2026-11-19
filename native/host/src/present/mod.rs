@@ -8,6 +8,7 @@ pub mod panels;
 pub mod tokstats;
 pub mod picker;
 pub mod thread;
+pub mod rail;
 pub mod viewer;
 pub mod settings;
 pub mod onboard;
@@ -108,6 +109,49 @@ type _R = Result<()>;
 #[cfg(test)]
 mod tests {
     use super::*; use crate::presenter::Canned;
+    #[test]
+    fn viewer_rail_reflects_project_files_on_the_next_picture() {
+        let dir = crate::plat::tmp::dir("rail-project");
+        let mut st = crate::state::State::new();
+        st.apply_line(&json!({"$":"ProjectCreated","id":"p","title":"Board","root":dir.to_str().unwrap(),"at":1}).to_string());
+        st.apply_line(&json!({"$":"ThreadCreated","id":"t","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+        let idle = json!({"sel":"t","drafts":{},"panel":false,"info":{}});
+        let picture = |session: &Value| viewer::viewer_json(&st, &json!({}), session).unwrap();
+        let state = |v: &Value, id: &str| v["rail"].as_array().unwrap().iter().find(|r| r["id"] == id).map(|r| r["state"].as_str().unwrap().to_owned());
+        let check = |board, sch, mech| {
+            let v = picture(&idle);
+            for (id, enabled) in [("board", board), ("schematic", sch), ("3d", board), ("split", board && sch), ("mech", mech)] {
+                assert_eq!(state(&v, id).as_deref(), Some(if enabled { "off" } else { "disabled" }), "{id}");
+            }
+            assert_eq!(state(&v, "gerbers"), None);
+        };
+        check(false, false, false);
+        assert_eq!(state(&picture(&idle), "simulation"), None);
+        std::fs::create_dir(dir.join("mech")).unwrap();
+        std::fs::write(dir.join("mech/case.step"), "").unwrap();
+        check(false, false, true);
+        std::fs::remove_file(dir.join("mech/case.step")).unwrap();
+        std::fs::write(dir.join("unit.kicad_sch"), "").unwrap();
+        check(false, true, false);
+        std::fs::write(dir.join("unit.kicad_pcb"), "").unwrap();
+        check(true, true, false);
+        for page in ["diff", "review", "files", "browser"] {
+            let mut session = idle.clone();
+            if matches!(page, "diff" | "review") {
+                session["info"]["view.kind:t"] = json!(page);
+                session["panel"] = json!(true);
+            } else { session["drafts"]["@view:t"] = json!(page); }
+            assert_eq!(state(&picture(&session), page).as_deref(), Some("on"));
+        }
+        std::fs::write(dir.join("unit.PrjPcb"), "[Design]").unwrap();
+        std::fs::write(dir.join("unit.PcbDoc"), "").unwrap();
+        std::fs::write(dir.join("unit.SchDoc"), "").unwrap();
+        std::fs::write(dir.join(".backplane.json"), r#"{"project":"unit.PrjPcb","pcb":"unit.PcbDoc","schematic":"unit.SchDoc"}"#).unwrap();
+        let v = picture(&idle);
+        assert_eq!(v["cad"], "altium");
+        check(true, true, false);
+        assert_eq!(state(&v, "simulation"), None);
+    }
     struct Mine; impl Screen for Mine {
         fn name(&self) -> &'static str { "mine" }
         fn view(&self, p: &Value) -> Option<Value> { if p["target"]["kind"] == "thread" { Some(json!({"shown":{"by":"rust"}})) } else { None } }

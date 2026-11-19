@@ -4642,3 +4642,7 @@ gpui.review.allow.tip = Desactivar el modo revisión: el agente puede cambiar lo
 gpui.review.off = Cambios permitidos: desactivaste el modo revisión en este hilo.
 gpui.review.again = Volver a solo lectura
 gpui.review.again.tip = Volver a activar el modo revisión: los archivos de diseño vuelven a ser de solo lectura
+gpui.rail.no.board = Este proyecto no tiene placa
+gpui.rail.no.schematic = Este proyecto no tiene esquema
+gpui.rail.split.needs.both = La vista dividida requiere una placa y un esquema
+gpui.rail.no.mech = Este proyecto no tiene piezas mecánicas

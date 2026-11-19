@@ -84,10 +84,12 @@ pub fn items(data: &Value) -> Vec<Item> {
     if thread.is_object() {
         for t in thread["tools"].as_array().into_iter().flatten().chain(thread["menu"].as_array().into_iter().flatten()) {
             let (label, action, value) = (string(t, "label"), string(t, "action"), string(t, "value"));
+            if action == "view-kind" && !crate::ui::rail_enabled(&thread["viewer"], &value) { continue }
             if label.is_empty() || action.is_empty() || action == "delete" || t["options"].as_array().map_or(false, |o| !o.is_empty()) { continue }
             v.push(Item { label: trs(&label), place: String::new(), kind: "action", what: Do::Action(action, value), row: Value::Null });
         }
         /* i18n-ok: viewer kinds, drawn through trs in the label */ for (l, k) in [("Board", "board"), ("Schematic", "schematic"), ("3D", "3d"), ("Gerbers", "gerbers"), ("Split", "split"), ("Mech", "mech"), ("Files", "files"), ("Review", "review"), ("Browser", "browser")] {
+            if !crate::ui::rail_enabled(&thread["viewer"], k) { continue }
             v.push(Item { label: tf("gpui.palette.open", &[("kind", trs(l).into())]), place: trs("viewer"), kind: "action", what: Do::Action("view-kind".into(), k.into()), row: Value::Null });
         }
     }
@@ -232,6 +234,7 @@ impl Backplane {
             Do::Thread(id) => self.go("select", id, cx),
             // a message found: its thread at the message, marked, with the find bar holding the words for the next and previous ones there
             Do::Message(id, msg) => { let q = self.screens.palette.q.trim().to_string(); self.find_open_at(&id, &msg, &q, cx); }
+            Do::Action(a, v) if a == "view-kind" || a == "diff" => self.rail_press(&a, &v, cx),
             Do::Action(a, v) => {
                 if super::tools::makes_thread(&a) { self.arm_new(); }
                 // a project from the jump list: its page opens here too (the hub fills its lists)
@@ -290,6 +293,14 @@ mod tests {
     use core::prelude::v1::test;
     fn data() -> Value { json!({"thread": {"tools": [{"label": "Pin", "action": "pin"}, {"label": "Delete", "action": "delete"}], "menu": []},
         "projects": [{"id": "h|p1", "title": "Demo", "threads": [{"id": "h|t1", "title": "Board layout review"}, {"id": "h|t2", "title": "Power budget"}], "settled": [{"id": "h|t3", "title": "Old notes"}]}]}) }
+    #[test] fn viewer_commands_require_an_available_rail_entry() {
+        let mut d = data();
+        d["thread"]["viewer"]["rail"] = json!([{"id":"board","state":"disabled"},{"id":"files","state":"on"}]);
+        let offered: Vec<_> = items(&d).into_iter().filter_map(|item| match item.what {
+            Do::Action(a, k) if a == "view-kind" => Some(k), _ => None
+        }).collect();
+        assert_eq!(offered, ["files"]);
+    }
     #[test] fn a_prefix_beats_a_word_beats_letters_in_order() { assert_eq!((rank("Board layout", "boa"), rank("Board layout", "lay"), rank("Board layout", "blt"), rank("Board layout", "zz"), rank("x", "")), (3, 2, 1, 0, 1)); }
     #[test] fn a_thread_the_sidebar_does_not_hold_is_found_by_its_title_from_the_hub() {
         let res = json!({"hits": [], "titles": [{"thread": "t1", "title": "Board layout review", "project": "Demo"}, {"thread": "t9", "title": "Old board notes", "project": "Amp"}]});

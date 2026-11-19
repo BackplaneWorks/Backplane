@@ -623,29 +623,20 @@ pub fn files_action(st: &State, hub: &str, session: &Value, action: &str, value:
     Some(ViewOut { patch: json!({"rid": rid, "drafts": drafts}), before, boards_look: false })
 }
 
-#[path = "rail.rs"]
-pub mod rail;
+use super::rail;
 
 #[derive(Clone, Copy, Default)]
 struct RailSources { board: bool, schematic: bool, mech: bool, gerbers: bool, altium: bool }
 
 fn rail_sources(root: &str) -> RailSources {
-    use std::{collections::HashMap, path::Path, sync::{LazyLock, Mutex}, time::{Duration, Instant}};
+    use std::path::Path;
     if root.is_empty() { return RailSources::default(); }
-    // Viewer pictures also update while a turn streams. Share recent project scans across pictures.
-    static CACHE: LazyLock<Mutex<HashMap<String, (Instant, RailSources)>>> = LazyLock::new(Default::default);
-    let fresh = Duration::from_secs(5);
-    if let Some((_, sources)) = CACHE.lock().unwrap().get(root).filter(|(at, _)| at.elapsed() < fresh) { return *sources; }
     let files = crate::files::kicad::project::read(root);
-    let sources = RailSources {
+    RailSources {
         board: Path::new(&files.pcb).is_file(), schematic: Path::new(&files.sch).is_file(),
         mech: !mech_parts(root).is_empty(), gerbers: crate::files::kicad::gerber::default_set(Path::new(root)).is_some(),
         altium: crate::files::kicad::project::is_altium(&files),
-    };
-    let mut cache = CACHE.lock().unwrap();
-    cache.retain(|_, (at, _)| at.elapsed() < fresh);
-    cache.insert(root.to_owned(), (Instant::now(), sources));
-    sources
+    }
 }
 
 /// `thread.viewer`: the idle template with the page the thread's viewer has open. None for a page not ported.
@@ -669,7 +660,7 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         let model = rail::rail(rail::RailInput {
             board: sources.board, schematic: sources.schematic, mech: sources.mech || v["mech"]["parts"].as_array().is_some_and(|p| !p.is_empty()),
             gerbers: v["gerbers"] == true || v["hasGerbers"].as_bool().unwrap_or(sources.gerbers),
-            simulation: v["simFrame"].is_string(), altium: sources.altium, page, diff: pages::kind_of(session, sel) == "diff",
+            simulation: v["simFrame"].is_string(), altium: sources.altium, page, diff: pages::diff_on(session, sel),
         });
         v["rail"] = model;
     }
@@ -798,6 +789,7 @@ mod tests {
         let mut s2 = session.clone(); crate::session::patch::merge(&mut s2, &o.patch);
         let v = viewer_json(&st, &template, &s2).expect("and draws it");
         assert_eq!((v["open"].as_str(), v["key"].as_str()), (Some("board"), Some("0|/desk/board|")));
+        assert!(v.get("rail").is_none(), "linked project files are on the other machine");
         // this machine's own thread asks for no machine
         let (mine, th) = state(); let own = json!({"sel": th, "rid": 1, "drafts": {}, "open": {}, "adding": false, "panel": false, "info": {}});
         assert!(!view_action(&mine, "h", &own, "board").unwrap().before[0]["text"].as_str().unwrap().contains("\"on\""));
