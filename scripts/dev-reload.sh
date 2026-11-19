@@ -24,7 +24,7 @@ hub_up() { kill -0 "$(cat "$SW/hub.pid" 2>/dev/null)" 2>/dev/null; }
 turns() {
   local t r; t=$(cat "$SW/home/token" 2>/dev/null) || { echo '?'; return; }
   r=$(printf 'Authorization: Bearer %s\n' "$t" | curl -s -m3 -H @- "http://127.0.0.1:$PORT/dev/turns" 2>/dev/null) || { echo '?'; return; }
-  case "$r" in '{"running":'*'}') r=${r#*:}; echo "${r%\}}";; *) echo '?';; esac
+  r=$(printf '%s' "$r" | sed -n 's/.*"running":\([0-9][0-9]*\).*/\1/p'); echo "${r:-?}"
 }
 in_use() { cat "$SW/$1.bin" 2>/dev/null; }
 hub_same() { local b; b=$(in_use hub); [ -n "$b" ] && [ -f "$b" ] && cmp -s "$b" "$DEV/builds/$1/backplane-hub" && hub_up; }

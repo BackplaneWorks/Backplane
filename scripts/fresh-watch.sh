@@ -35,10 +35,10 @@ SHOWN=$DEV/.fresh-shown   # the build the app was last relaunched on (the hub ca
 shown() { cat "$SHOWN" 2>/dev/null || true; }
 running_dir() { local p; p=$(pid hub); alive "$p" && dirname "$(readlink "/proc/$p/exe" 2>/dev/null)" || true; }
 hello() { printf 'Authorization: Bearer %s\n' "$(cat "$H/token" 2>/dev/null)" | curl -sf -m3 -H @- "http://127.0.0.1:$PORT/hello" >/dev/null 2>&1; }
-# a number, or ? when the hub cannot say
+# a number, or ? when the hub cannot say. turns running|background: running turns block a relaunch; background work (a shell or subagent at rest) is only shown
 turns() {
   local r; r=$(printf 'Authorization: Bearer %s\n' "$(cat "$H/token" 2>/dev/null)" | curl -s -m3 -H @- "http://127.0.0.1:$PORT/dev/turns" 2>/dev/null) || { echo '?'; return; }
-  case "$r" in '{"running":'*'}') r=${r#*:}; echo "${r%\}}";; *) echo '?';; esac
+  r=$(printf '%s' "$r" | sed -n "s/.*\"${1:-running}\":\([0-9][0-9]*\).*/\1/p"); echo "${r:-?}"
 }
 go() {  # go BUILD_DIR WHAT(client|both): relaunch on that build
   local b=$1 p
@@ -63,9 +63,12 @@ while :; do
   if [ "$what" = both ] && alive "$(pid hub)"; then
     n=$(turns)
     if [ "$n" != 0 ]; then
-      [ "$waiting" = "$c:$n" ] || tell "Build $c is ready; waiting for $n running turn(s) to finish (Enter relaunches now)."
+      # one desktop notification per build; the window's bar follows the count silently
+      [ "$waiting" = "$c" ] || tell "Build $c is ready; waiting for $n running turn(s) to finish (Enter relaunches now)."
       hk=$(tr -d '"\\' < "$DEV/builds/$c/HAIKU" 2>/dev/null | paste -sd'|' | sed 's/|/ \/ /g')   # the build's haiku, on one line
-      waiting=$c:$n; status waiting "Build ${c##*-} ready: waiting for $n running turn(s) to end" ",\"action\":\"restart\",\"turns\":$n,\"haiku\":\"$hk\""
+      bg=$(turns background); case "$bg" in ''|0|'?') bg=;; *) bg=", $bg thread(s) on background work";; esac
+      tn=$n; [ "$tn" = '?' ] && tn=0
+      waiting=$c; status waiting "Build ${c##*-} ready: waiting for $n running turn(s) to end$bg" ",\"action\":\"restart\",\"turns\":$tn,\"haiku\":\"$hk\""
       if [ -e "$REQ" ]; then rm -f "$REQ"; say "relaunch asked for from the window"
       elif [ -t 0 ]; then read -r -t "$POLL" _ || continue
       else sleep "$POLL"; continue; fi
