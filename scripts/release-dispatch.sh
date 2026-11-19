@@ -13,10 +13,22 @@
 set -euo pipefail
 repo=BackplaneWorks/Backplane; here=$(cd "$(dirname "$0")" && pwd)
 mode=${1:?usage: release-dispatch.sh dispatch [--ref REF] [-f k=v ...] | watch RUN_ID}; shift
-var() { gh variable get "$1" -R "$repo" 2>/dev/null || true; }
+# gh 2.46 has no `gh variable get`: read the list once (a failure to read is fatal, never "unset": an empty answer started no machine on rc.2's first run)
+vars=$(gh variable list -R "$repo" --json name,value 2>&1) || { echo "release-dispatch: cannot read the repo variables: $vars" >&2; exit 1; }
+var() { printf '%s' "$vars" | python3 -c 'import json,sys; print(next((v["value"] for v in json.load(sys.stdin) if v["name"] == sys.argv[1]), ""), end="")' "$1"; }
 # the variables, or the same names in the environment (a branch's test run, where the workflow takes the labels as inputs)
 win=${RELEASE_WIN_RUNNER-$(var RELEASE_WIN_RUNNER)}; mac=${RELEASE_MAC_RUNNER-$(var RELEASE_MAC_RUNNER)}; lin=${RELEASE_LINUX_RUNNER-$(var RELEASE_LINUX_RUNNER)}
 box=$(cat "$HOME/.config/bp-ci/linux-box" 2>/dev/null || true)
+# a RELEASE_* value this script cannot start a machine for is an error, never a job left queued
+[ -z "$win" ] || [ "$win" = bp-winbuild-release ] || [ "$win" = bp-win-nightly ] || { echo "release-dispatch: RELEASE_WIN_RUNNER=$win is not a runner this script knows" >&2; exit 1; }
+[ -z "$mac" ] || [ "$mac" = bp-mac ] || { echo "release-dispatch: RELEASE_MAC_RUNNER=$mac is not a runner this script knows" >&2; exit 1; }
+[ -z "$lin" ] || [ "$lin" = bp-linux-release ] || { echo "release-dispatch: RELEASE_LINUX_RUNNER=$lin is not a runner this script knows" >&2; exit 1; }
+[ "$win" != bp-win-nightly ] || echo "release-dispatch: bp-win-nightly is started by hand (this script starts no bp-win); make sure it is up" >&2
+# the desktop's container is the linux runner when no Boat box is named: it must be running
+if [ "$lin" = bp-linux-release ] && [ -z "$box" ] && [ "$mode" != _resolve ]; then
+  [ -n "$(docker ps -q -f name=bp-linux-release-runner 2>/dev/null)" ] || { echo "release-dispatch: RELEASE_LINUX_RUNNER is set, but the bp-linux-release-runner container is not running here and no Boat box is named" >&2; exit 1; }
+fi
+[ "$mode" != _resolve ] || { echo "win=$win mac=$mac lin=$lin"; exit 0; }
 
 # the job "build <target>" of run $1: its status (queued, in_progress, completed) or "none"
 job_status() { gh run view "$1" -R "$repo" --json jobs -q ".jobs[] | select(.name == \"build $2\") | .status" 2>/dev/null | head -1 | grep . || echo none; }
