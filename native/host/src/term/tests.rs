@@ -121,7 +121,9 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
     let (ok, o) = tools::call(&hub, "t1", "terminal_read", &json!({"id":"nope"})).await.unwrap(); assert!(!ok && o == "There is no such terminal in this thread.");
     // close hangs it up: stopped
     let (ok, o) = tools::call(&hub, "t1", "terminal_close", &json!({"id":id})).await.unwrap(); assert!(ok && o["state"] == "stopped");
-    assert!(wait(10, || std::fs::read_to_string(home.join("terms").join(&*crate::plat::fs::file_name((&key).as_ref()))).map_or(false, |f| f.starts_with("60x10\t"))).await, "the last screen is written when the program exits");
+    // the screen is also saved every 2 s while it runs (term/mod.rs `save_dirty`, its live state: "done 0" here), so a file is there before the hang-up's:
+    // waited for is the one the end writes (Windows under load read the periodic one first, Nov 19)
+    assert!(wait(10, || std::fs::read_to_string(home.join("terms").join(&*crate::plat::fs::file_name((&key).as_ref()))).map_or(false, |f| f.starts_with("60x10\tstopped\n") || f.starts_with("60x10\texited"))).await, "the last screen is written when the program exits");
     let f = std::fs::read_to_string(home.join("terms").join(&*crate::plat::fs::file_name((&key).as_ref()))).unwrap(); assert!(f.starts_with("60x10\tstopped\n") || f.starts_with("60x10\texited"), "{}", f.lines().next().unwrap());
 }
 

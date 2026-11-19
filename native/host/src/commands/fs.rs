@@ -6,12 +6,15 @@ use serde_json::{json, Value};
 /// FP.Folder.path.sh: "" and ~ are home, ~/x and relative paths are under home.
 const PATH: &str = "d=\"$1\"; if command -v cygpath >/dev/null 2>&1; then case \"$d\" in /[a-zA-Z]:[\\\\/]*) d=\"${d#/}\";; esac; case \"$d\" in [a-zA-Z]:[\\\\/]*|\\\\\\\\*|//*) d=$(cygpath -au -- \"$d\") || { echo \"cannot resolve folder: $1\"; exit 2; };; [a-zA-Z]:*) echo \"invalid drive path: $d (use an absolute folder)\"; exit 2;; esac; fi; case \"$d\" in ''|'~') d=\"$HOME\";; '~/'*) d=\"$HOME/${d#??}\";; /*) ;; [a-zA-Z]:*) echo \"cannot resolve Windows folder: $d\"; exit 2;; *) d=\"$HOME/$d\";; esac; ";
 const NATIVE: &str = "if command -v cygpath >/dev/null 2>&1; then d=$(cygpath -am -- \"$d\") || { echo \"cannot resolve folder: $d\"; exit 2; }; fi; ";
-const DIR: &str = "[ -e \"$d\" ] || { echo \"no such folder: $d\"; exit 2; }; [ -d \"$d\" ] || { echo \"not a folder: $d\"; exit 2; }; [ -r \"$d\" ] && [ -x \"$d\" ] && d=$(cd -P -- \"$d\" && pwd -P) || { echo \"cannot open: $d\"; exit 2; }; ";
+/// `$n`: the folder as the person reads it, for a message (Windows: cygpath -am's `C:/x/y`, never Git's sh's `/tmp/...` or `/c/...`, which the
+/// answers already were and the errors were not, Nov 19: /project said "/tmp/.../afile is there and is not a folder."); elsewhere `$d`.
+const SHOWN: &str = "n=$d; if command -v cygpath >/dev/null 2>&1; then n=$(cygpath -am -- \"$d\" 2>/dev/null) || n=$d; fi; ";
+const DIR: &str = "[ -e \"$d\" ] || { echo \"no such folder: $n\"; exit 2; }; [ -d \"$d\" ] || { echo \"not a folder: $n\"; exit 2; }; [ -r \"$d\" ] && [ -x \"$d\" ] && d=$(cd -P -- \"$d\" && pwd -P) || { echo \"cannot open: $n\"; exit 2; }; ";
 const TMO: &str = "tmo() { t=$1; shift; if command -v timeout >/dev/null 2>&1; then timeout -k 1 \"$t\" \"$@\"; elif command -v gtimeout >/dev/null 2>&1; then gtimeout -k 1 \"$t\" \"$@\"; else \"$@\"; fi; }; ";
 
-fn list_sh() -> String { format!("exec 2>&1; set -e; {PATH}{DIR}{NATIVE}echo \"$d\"; find \"$d\" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sed 's|^.*/||' | LC_ALL=C sort | head -n 5000") }
-fn mkdir_sh() -> String { format!("exec 2>&1; set -e; {PATH}if [ -e \"$d\" ] || [ -L \"$d\" ]; then echo \"already exists: $d\"; exit 3; fi; mkdir -p -- \"$d\"; {DIR}{NATIVE}echo \"$d\"") }
-fn resolve_sh() -> String { format!("exec 2>&1; set -e; {PATH}{DIR}{NATIVE}echo \"$d\"") }
+fn list_sh() -> String { format!("exec 2>&1; set -e; {PATH}{SHOWN}{DIR}{NATIVE}echo \"$d\"; find \"$d\" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sed 's|^.*/||' | LC_ALL=C sort | head -n 5000") }
+fn mkdir_sh() -> String { format!("exec 2>&1; set -e; {PATH}{SHOWN}if [ -e \"$d\" ] || [ -L \"$d\" ]; then echo \"already exists: $n\"; exit 3; fi; mkdir -p -- \"$d\"; {DIR}{NATIVE}echo \"$d\"") }
+fn resolve_sh() -> String { format!("exec 2>&1; set -e; {PATH}{SHOWN}{DIR}{NATIVE}echo \"$d\"") }
 fn find_sh() -> String { format!("exec 2>/dev/null; {TMO}echo \"$HOME\"; tmo 5 find \"$HOME\" -xdev -mindepth 1 -maxdepth 5 \\( -type d \\( -name node_modules -o -path \"$HOME/Library\" -o \\( -name '.*' ! -name .backplane \\) \\) -prune \\) -o \\( -type d -name .backplane -print -prune \\) -o \\( -name .backplane.json -print \\) | sed 's|/[^/]*$||' | grep -vxF \"$HOME\" | LC_ALL=C sort -u | head -n 500; true") }
 
 /// A Windows drive or UNC path with its backslashes as slashes (`C:\x\y` -> `C:/x/y`, `\\srv\s` -> `//srv/s`); any other path as it is.
