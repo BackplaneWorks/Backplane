@@ -5,6 +5,45 @@ use crate::i18n::{tf, trs};
 use gpui::{prelude::*, *};
 use serde_json::Value;
 
+#[derive(Default)]
+struct RailRow<'a> {
+    id: &'a str, label: &'a str, icon: &'a str, group: &'a str, key: &'a str,
+    state: &'a str, why: &'a str,
+}
+
+fn rail_rows(viewer: &Value, simulation: bool) -> Vec<RailRow<'_>> {
+    if let Some(rows) = viewer["rail"].as_array() {
+        return rows.iter().map(|row| {
+            let field = |name: &str| row[name].as_str().unwrap_or("");
+            RailRow { id: field("id"), label: field("label"), icon: field("icon"), group: field("group"),
+                key: field("key"), state: field("state"), why: field("why") }
+        }).collect();
+    }
+    // Older hubs send choices and simFrame. Keep their existing rail and grouping.
+    [("terminal", "Terminal", "terminal", "tools"), ("commands", "Commands", "search", "tools"),
+     ("board", "Board", "circuit-board", "design"), ("schematic", "Schematic", "cpu", "design"),
+     ("3d", "3D", "box", "design"), ("simulation", "Simulation", "gauge", "design"),
+     ("gerbers", "Gerbers", "file-stack", "design"), ("split", "Split", "layout-panel-left", "design"),
+     ("mech", "Mech", "layers", "design"), ("files", "Files", "folder", "work"), ("diff", "Diff", "diff", "work"),
+     ("review", "Review", "circle-check", "work"), ("browser", "Browser", "globe", "work")]
+        .into_iter().filter(|(id, ..)| *id != "simulation" || simulation)
+        .map(|(id, label, icon, group)| RailRow { id, label, icon, group, key: crate::keys::rail_letter(id), ..Default::default() }).collect()
+}
+
+#[cfg(test)]
+#[core::prelude::v1::test]
+fn rail_rows_follow_hub_order_content_and_empty_list() {
+    let viewer = serde_json::json!({"rail":[
+        {"id":"files","label":"Project files","icon":"folder","group":"work","state":"on","key":"f"},
+        {"id":"board","label":"Board","icon":"cpu","group":"design","state":"disabled","key":"b","why":"No board"}]});
+    let rows = rail_rows(&viewer, false);
+    assert_eq!(rows.len(), 2);
+    assert_eq!((rows[0].id, rows[0].label, rows[0].state), ("files", "Project files", "on"));
+    assert_eq!((rows[1].icon, rows[1].group, rows[1].key, rows[1].state, rows[1].why), ("cpu", "design", "b", "disabled", "No board"));
+    assert!(rail_rows(&serde_json::json!({"rail":[]}), true).is_empty());
+    assert_eq!(rail_rows(&Value::Null, false)[0].id, "terminal");
+}
+
 fn pager_row(cx: &mut Context<Backplane>, id: String, pager: &Value, light: bool, ctl: &mut Vec<CtlEntry>) -> Option<AnyElement> {
     let c = |name: &str| theme::color(light, name);
     let mut row = div().flex().gap_2().px_3().py_1().text_size(crate::scale::tpx(11.));
@@ -772,32 +811,48 @@ impl Render for Backplane {
         // the rail's Simulation entry (the hub's word, in a window that can hold KiCad), lit while the pane is on KiCad's Simulator: the page under it is then not
         let sim_rail = crate::viewers::kicad_pane::rail_simulation(&thread["viewer"], crate::viewers::kicad_pane::local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), thread)).is_some();
         let sim_on = sim_rail && !thread["diff"].is_object() && self.simulation_on(cx) && self.kicad_for(thread, cx).is_some();
-        let active_kind = if sim_on { String::new() } else { active_kind };
-        /* i18n-ok: ctl labels and ids; drawn through trs and keys::tip */ for (l, i) in [("Terminal", "terminal"), ("Commands", "search"), ("", ""), ("Board", "circuit-board"), ("Schematic", "cpu"), ("3D", "box"), ("Simulation", "gauge"), ("Gerbers", "file-stack"), ("Split", "layout-panel-left"), ("Mech", "layers"), ("", ""), ("Files", "folder"), ("Diff", "diff"), ("Review", "circle-check"), ("Browser", "globe")].iter() {
-            if l.is_empty() { rail.push(div().h(px(12.)).into_any_element()); continue; }
-            // Simulation (KiCad's Simulator in the pane): only where the hub says its KiCad has it for this project (viewer.simFrame)
-            /* i18n-ok: compared */ if *l == "Simulation" {
-                if sim_rail {
-                    ctl.push(CtlEntry { id: "rail:Simulation".into(), label: l.to_string(), ctl: Ctl::KicadAct("simulation".into()) });
-                    rail.push(with_rect(div().id("rail-Simulation"), || "rail:Simulation".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.open_simulation(cx))).tooltip(crate::keys::tip(l, "", light))
-                        .relative().flex().flex_col().items_center().h(crate::scale::tpx(48.)).justify_center().gap_1().text_size(rail_label()).when(sim_on, |d| d.bg(c("raise")).border_l_2().border_color(c("accent"))).text_color(c(if sim_on { "text" } else { "dim" })).hover(|s| s.bg(c("raise")).text_color(c("text"))).child(ic(light, i, 18., if sim_on { "accent" } else { "dim" })).child(trs(l)).into_any_element());
-                }
-                continue;
+        let mut previous_group = None;
+        for row in rail_rows(&thread["viewer"], sim_rail) {
+            if previous_group.is_some_and(|group| group != row.group) { rail.push(div().h(px(12.)).into_any_element()); }
+            previous_group = Some(row.group);
+            let id = row.id;
+            let disabled = row.state == "disabled" || (id == "simulation" && !sim_rail);
+            let active = !disabled && match id {
+                "terminal" => self.screens.term.open,
+                "simulation" if sim_on => true,
+                _ if sim_on => false,
+                _ if !row.state.is_empty() => row.state == "on",
+                "diff" => thread["diff"].is_object(),
+                _ => active_kind == id,
+            };
+            let mut button = with_rect(div().id(SharedString::from(format!("rail-{}", row.label))), || format!("rail:{}", row.label))
+                .relative().flex().flex_col().items_center().h(crate::scale::tpx(48.)).justify_center().gap_1().text_size(rail_label())
+                .when(active, |d| d.bg(c("raise")).border_l_2().border_color(c("accent")))
+                .text_color(c(if active { "text" } else { "dim" }))
+                .child(ic(light, art::icon_name(row.icon).unwrap_or("folder"), 18., if active { "accent" } else { "dim" })).child(trs(row.label));
+            if disabled {
+                let why = if row.why.is_empty() { "Simulation needs a local editor" } else { row.why };
+                button = button.opacity(0.45).tooltip(crate::keys::tip(why, "", light));
+            } else {
+                let binding = match id { "diff" | "files" => id, "terminal" => "term", "commands" => "palette", _ => "" };
+                let chord = crate::keys::hint(&self.local, binding);
+                let letter = if id == "commands" { "" } else { row.key };
+                let hint = [letter.to_uppercase(), chord].into_iter().filter(|k| !k.is_empty()).collect::<Vec<_>>().join(&format!(" {} ", trs("or")));
+                button = button.cursor_pointer().hover(|s| s.bg(c("raise")).text_color(c("text")))
+                    .tooltip(crate::keys::tip(row.label, &hint, light)).children(keycap(letter, active));
+                let action = match id {
+                    "terminal" => Ctl::None, "commands" => Ctl::OpenPalette, "simulation" => Ctl::KicadAct("simulation".into()),
+                    "diff" => Ctl::Node("diff".into(), "".into()), _ => Ctl::Rail(id.into()),
+                };
+                ctl.push(CtlEntry { id: format!("rail:{}", row.label), label: row.label.into(), ctl: action });
+                let id = id.to_owned();
+                button = button.on_click(cx.listener(move |this, _, window, cx| match id.as_str() {
+                    "terminal" => this.term_toggle(window, cx), "commands" => this.palette_open(cx),
+                    "simulation" => this.open_simulation(cx), "diff" => this.rail_press("diff", "", cx),
+                    kind => this.rail_press("view-kind", kind, cx),
+                }));
             }
-            // the viewer's kinds are the hub's view-kind values; Diff is its own action
-            /* i18n-ok: compared */ let act: Option<(&'static str, &'static str)> = match *l { "Board" => Some(("view-kind", "board")), "Schematic" => Some(("view-kind", "schematic")), "3D" => Some(("view-kind", "3d")), "Gerbers" => Some(("view-kind", "gerbers")), "Split" => Some(("view-kind", "split")), "Mech" => Some(("view-kind", "mech")), "Files" => Some(("view-kind", "files")), "Review" => Some(("view-kind", "review")), "Browser" => Some(("view-kind", "browser")), "Diff" => Some(("diff", "")), _ => None };
-            match act {
-                Some((a, v)) => {
-                    let active = (a == "view-kind" && v == active_kind) || (a == "diff" && thread["diff"].is_object()); // (Diff is lit while it is on show, as the others are)
-                    ctl.push(CtlEntry { id: format!("rail:{l}"), label: l.to_string(), ctl: if a == "view-kind" { Ctl::Rail(v.into()) } else { Ctl::Node(a.into(), v.into()) } });
-                    rail.push(with_rect(div().id(SharedString::from(format!("rail-{l}"))), || format!("rail:{l}")).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| this.rail_press(a, v, cx))).tooltip({ let letter = crate::keys::rail_letter(if a == "diff" { "diff" } else { v }).to_uppercase(); let chord = match (a, v) { ("diff", _) => crate::keys::hint(&self.local, "diff"), (_, "files") => crate::keys::hint(&self.local, "files"), _ => String::new() }; let key = [letter, chord].into_iter().filter(|k| !k.is_empty()).collect::<Vec<_>>().join(&format!(" {} ", trs("or"))); crate::keys::tip(l, &key, light) })
-                        .relative().flex().flex_col().items_center().h(crate::scale::tpx(48.)).justify_center().gap_1().text_size(rail_label()).when(active, |d| d.bg(c("raise")).border_l_2().border_color(c("accent"))).text_color(c(if active { "text" } else { "dim" })).hover(|s| s.bg(c("raise")).text_color(c("text"))).child(ic(light, i, 18., if active { "accent" } else { "dim" })).child(trs(l))
-                        .children(keycap(crate::keys::rail_letter(if a == "diff" { "diff" } else { v }), active)).into_any_element());
-                }
-                None if *l == "Terminal" => { let on = self.screens.term.open; rail.push(with_rect(div().id("rail-Terminal").cursor_pointer().on_click(cx.listener(|this, _, window, cx| this.term_toggle(window, cx))).tooltip(crate::keys::tip("Terminal", &crate::keys::hint(&self.local, "term"), light)), || "rail:Terminal".to_string()).relative().flex().flex_col().items_center().h(crate::scale::tpx(48.)).justify_center().gap_1().text_size(rail_label()).when(on, |d| d.bg(c("raise")).border_l_2().border_color(c("accent"))).text_color(c(if on { "text" } else { "dim" })).hover(|s| s.bg(c("raise"))).child(ic(light, i, 18., if on { "accent" } else { "dim" })).child(trs(l)).children(keycap("`", on)).into_any_element()) }
-                None if *l == "Commands" => rail.push(with_rect(div().id("rail-Commands").cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.palette_open(cx))).tooltip(crate::keys::tip("Commands", &crate::keys::hint(&self.local, "palette"), light)), || "rail:Commands".to_string()).flex().flex_col().items_center().h(crate::scale::tpx(48.)).justify_center().gap_1().text_size(rail_label()).text_color(c("dim")).hover(|s| s.bg(c("raise"))).child(ic(light, i, 18., "dim")).child(trs(l)).into_any_element()),
-                None => rail.push(with_rect(div().opacity(0.45), || format!("rail:{l}")).flex().flex_col().items_center().h(crate::scale::tpx(48.)).justify_center().gap_1().text_size(rail_label()).text_color(c("dim")).child(ic(light, i, 18., "dim")).child(trs(l)).into_any_element()),
-            }
+            rail.push(button.into_any_element());
         }
         // the open asks' buttons are controls too (the harness answers them by index: ask:<i>:<j>)
         for (i, a) in crate::screens::asks::parse(&thread["asks"]).into_iter().enumerate() {
@@ -837,8 +892,6 @@ impl Render for Backplane {
         /* i18n-ok: registered controls the e2e drivers press */ for b in crate::screens::settings::parse(&self.data["settings"]).into_iter().flat_map(|r| r.buttons).filter(|b| b.action.starts_with("kicad-install")) { ctl.push(CtlEntry { id: format!("set:{}", b.action), label: b.label, ctl: Ctl::Node(b.action, b.value) }); }
         /* i18n-ok: registered controls the e2e drivers press */ if let Some(p) = self.data["projects"].as_array().and_then(|p| p.first()) { let id = string(p, "id"); let id = id.rsplit_once('|').map_or(id.as_str(), |(_, r)| r).to_string(); ctl.push(CtlEntry { id: "ui:New thread".into(), label: "New thread".into(), ctl: Ctl::Node("new-thread".into(), id) }); }
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "send".into(), label: "Send".into(), ctl: Ctl::Send });
-        /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "rail:Terminal".into(), label: "Terminal".into(), ctl: Ctl::None });
-        /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "rail:Commands".into(), label: "Commands".into(), ctl: Ctl::OpenPalette });
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Context".into(), label: "Context".into(), ctl: Ctl::ToggleContext });
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Jump or run a command".into(), label: "Jump or run a command".into(), ctl: Ctl::OpenPalette });
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Account".into(), label: "Account".into(), ctl: Ctl::AccountMenu });

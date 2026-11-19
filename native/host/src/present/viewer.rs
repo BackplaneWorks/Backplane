@@ -623,6 +623,31 @@ pub fn files_action(st: &State, hub: &str, session: &Value, action: &str, value:
     Some(ViewOut { patch: json!({"rid": rid, "drafts": drafts}), before, boards_look: false })
 }
 
+#[path = "rail.rs"]
+pub mod rail;
+
+#[derive(Clone, Copy, Default)]
+struct RailSources { board: bool, schematic: bool, mech: bool, gerbers: bool, altium: bool }
+
+fn rail_sources(root: &str) -> RailSources {
+    use std::{collections::HashMap, path::Path, sync::{LazyLock, Mutex}, time::{Duration, Instant}};
+    if root.is_empty() { return RailSources::default(); }
+    // Viewer pictures also update while a turn streams. Share recent project scans across pictures.
+    static CACHE: LazyLock<Mutex<HashMap<String, (Instant, RailSources)>>> = LazyLock::new(Default::default);
+    let fresh = Duration::from_secs(5);
+    if let Some((_, sources)) = CACHE.lock().unwrap().get(root).filter(|(at, _)| at.elapsed() < fresh) { return *sources; }
+    let files = crate::files::kicad::project::read(root);
+    let sources = RailSources {
+        board: Path::new(&files.pcb).is_file(), schematic: Path::new(&files.sch).is_file(),
+        mech: !mech_parts(root).is_empty(), gerbers: crate::files::kicad::gerber::default_set(Path::new(root)).is_some(),
+        altium: crate::files::kicad::project::is_altium(&files),
+    };
+    let mut cache = CACHE.lock().unwrap();
+    cache.retain(|_, (at, _)| at.elapsed() < fresh);
+    cache.insert(root.to_owned(), (Instant::now(), sources));
+    sources
+}
+
 /// `thread.viewer`: the idle template with the page the thread's viewer has open. None for a page not ported.
 pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Value> {
     let sel = s(session, "sel");
@@ -630,16 +655,23 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
     // hub's KiCad embeds it and the thread's project has a schematic (kicad/embed.rs rail_simulation); absent otherwise, and for
     // another machine's thread (nothing to embed here)
     let mut v = viewer_page(st, template, session)?;
-    // an Altium project: its files open in Altium, not in KiCad (the bar's button says so; kicad/open.rs opens it)
-    if !sel.is_empty() && !sel.contains('~') && crate::files::kicad::project::altium_cached(&crate::files::kicad::canonical::design_root(&root_of(st, sel))) {
-        if let Some(o) = v.as_object_mut() { o.insert("cad".into(), json!("altium")); }
-    }
     // Follow agent: the thread's setting and the last edit's focus (the phones read the same; kicad/follow.rs)
     if !sel.is_empty() && !sel.contains('~') && v["open"].as_str().is_some_and(|o| matches!(o, "board" | "schematic" | "split")) {
         if let Some(o) = v.as_object_mut() { o.insert("follow".into(), crate::files::kicad::follow::picture(sel)); }
     }
     if !sel.is_empty() && !sel.contains('~') {
-        if let Some(f) = crate::files::kicad::embed::rail_simulation(&root_of(st, sel)) { if let Some(o) = v.as_object_mut() { o.insert("simFrame".into(), json!(f)); } }
+        let root = root_of(st, sel);
+        let sources = rail_sources(&root);
+        if sources.altium { v["cad"] = json!("altium"); }
+        if let Some(f) = crate::files::kicad::embed::rail_simulation(&root) { if let Some(o) = v.as_object_mut() { o.insert("simFrame".into(), json!(f)); } }
+        let selected = v["choices"].as_array().and_then(|rows| rows.iter().find(|r| r["on"] == true)).and_then(|r| r["value"].as_str());
+        let page = selected.unwrap_or_else(|| s(&v, "open"));
+        let model = rail::rail(rail::RailInput {
+            board: sources.board, schematic: sources.schematic, mech: sources.mech || v["mech"]["parts"].as_array().is_some_and(|p| !p.is_empty()),
+            gerbers: v["gerbers"] == true || v["hasGerbers"].as_bool().unwrap_or(sources.gerbers),
+            simulation: v["simFrame"].is_string(), altium: sources.altium, page, diff: pages::kind_of(session, sel) == "diff",
+        });
+        v["rail"] = model;
     }
     Some(v)
 }
@@ -798,7 +830,7 @@ mod tests {
         assert!(viewer_json(&st, &template, &kind).is_none(), "a view.kind in the info alone is the helper's too");
         // Diff open on another thread leaves the session's panel on: this thread, with nothing of its own open, is still drawn (a new thread made from the + after Diff was refused)
         let mut other = idle.clone(); other["panel"] = json!(true); other["info"] = json!({"view.kind:t-other": "diff", "panel:t-other": "1"});
-        assert_eq!(viewer_json(&st, &template, &other), Some(template.clone()), "the panel left on by another thread: the idle viewer");
+        assert_eq!(viewer_json(&st, &template, &other), viewer_json(&st, &template, &idle), "the panel left on by another thread: the idle viewer");
         let mut board = other.clone(); board["drafts"] = json!({format!("@view:{th}"): "board", "@view.at": "0|/tmp/soak2|"});
         assert!(viewer_json(&st, &template, &board).is_some(), "and its own drawing is drawn");
     }
