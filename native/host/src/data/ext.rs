@@ -517,6 +517,7 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
                 use crate::present::rail::{rail, RailInput};
                 let (page, diff) = (s(p, "page"), p["diff"] == true);
                 let items = if machines::is_far(th) {
+                    machines::far_root(hub, th).ok_or_else(|| err("that thread has no folder"))?;
                     rail(RailInput { board: true, schematic: true, mech: true, gerbers: false, simulation: false, altium: false, page, diff })
                 } else {
                     let root = crate::files::kicad::canonical::design_root(&root_of(hub, th).await?);

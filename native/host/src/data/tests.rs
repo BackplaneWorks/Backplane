@@ -798,22 +798,65 @@ fn a_reply_and_a_notice_carry_their_code_to_copy() {
 
 #[tokio::test]
 async fn viewer_rail_returns_hub_rail_for_local_and_far_threads() {
+    use crate::present::rail::{rail, RailInput};
     let (hub, port) = up("viewer-rail").await;
+    // Set up a rootless local thread and a shown mirror (L) plus an unshown mirror (H).
+    hub.commit(&json!({"$":"ProjectCreated","id":"p_noroot","title":"empty","root":"","at":1700000040})).await.unwrap();
+    hub.commit(&json!({"$":"ThreadCreated","id":"t_noroot","project":"p_noroot","title":"Rootless","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000041})).await.unwrap();
+    hub.mirrors().set_names(Arc::new(|| vec![("L".to_string(), "desktop".to_string())]));
+    hub.mirrors().fold("L", &[
+        json!({"$":"ProjectCreated","id":"L~p1","title":"Board","root":"/far/board","at":1}),
+        json!({"$":"ThreadCreated","id":"L~t1","project":"L~p1","title":"far one","at":10}),
+        json!({"$":"ThreadCreated","id":"L~del","project":"L~p1","title":"far gone","at":11}),
+        json!({"$":"ThreadDeleted","id":"L~del","at":12}),
+        json!({"$":"ProjectCreated","id":"L~p2","title":"NoRoot","root":"","at":1}),
+        json!({"$":"ThreadCreated","id":"L~noroot","project":"L~p2","title":"far rootless","at":13}),
+    ]);
+    hub.mirrors().fold("H", &[
+        json!({"$":"ProjectCreated","id":"H~p1","title":"Hidden","root":"/hidden/board","at":1}),
+        json!({"$":"ThreadCreated","id":"H~t1","project":"H~p1","title":"hidden one","at":10}),
+    ]);
+
     let mut ws = open(port, "&enc=json").await;
     let hello = next(&mut ws).await;
     assert!(hello["features"].as_array().unwrap().iter().any(|f| f == "rail"));
 
-    // Local thread: returns hub's ordered rail model with mode="viewer", active page lit, and no local-only simulation entry
+    // Local thread: exact match against the shared rail builder for the thread's design root
+    let root = crate::files::kicad::canonical::design_root("/tmp/alpha");
+    let src = crate::present::viewer::rail_sources(&root);
     let r = ask(&mut ws, 1, "viewer.rail", json!({"thread":"t1","page":"files"})).await;
     assert_eq!(r["ok"], true);
     assert_eq!(r["result"]["mode"], "viewer");
-    let items = r["result"]["rail"].as_array().unwrap();
-    assert!(items.iter().any(|x| x["id"] == "files" && x["state"] == "on"));
-    assert!(!items.iter().any(|x| x["id"] == "simulation"), "data/1 rail must not offer local-only simulation");
+    let expected_local = serde_json::to_value(rail(RailInput {
+        board: src.board, schematic: src.schematic, mech: src.mech, gerbers: src.gerbers,
+        simulation: false, altium: src.altium, page: "files", diff: false,
+    })).unwrap();
+    assert_eq!(r["result"]["rail"], expected_local);
+    assert!(!r["result"]["rail"].as_array().unwrap().iter().any(|x| x["id"] == "simulation"));
+
     // diff=true lights the diff entry regardless of page
     let rd = ask(&mut ws, 2, "viewer.rail", json!({"thread":"t1","page":"files","diff":true})).await;
     assert_eq!(rd["ok"], true);
-    let ditems = rd["result"]["rail"].as_array().unwrap();
-    assert!(ditems.iter().any(|x| x["id"] == "diff" && x["state"] == "on"));
+    let expected_diff = serde_json::to_value(rail(RailInput {
+        board: src.board, schematic: src.schematic, mech: src.mech, gerbers: src.gerbers,
+        simulation: false, altium: src.altium, page: "files", diff: true,
+    })).unwrap();
+    assert_eq!(rd["result"]["rail"], expected_diff);
+
+    // Known linked thread on a shown mirror with a folder: exact match against optimistic far rail
+    let rf = ask(&mut ws, 3, "viewer.rail", json!({"thread":"L~t1","page":"board"})).await;
+    assert_eq!(rf["ok"], true);
+    assert_eq!(rf["result"]["mode"], "viewer");
+    let expected_far = serde_json::to_value(rail(RailInput {
+        board: true, schematic: true, mech: true, gerbers: false,
+        simulation: false, altium: false, page: "board", diff: false,
+    })).unwrap();
+    assert_eq!(rf["result"]["rail"], expected_far);
+
+    // Refused cases: unknown/deleted/unshown/rootless linked threads, unknown local, rootless local
+    for (i, th) in ["L~nope", "L~del", "L~noroot", "H~t1", "nope", "t_noroot"].iter().enumerate() {
+        let bad = ask(&mut ws, 10 + i as u64, "viewer.rail", json!({"thread":th,"page":"board"})).await;
+        assert_eq!(bad["ok"], false, "expected refusal for thread {th}, got {bad}");
+    }
     drop(hub);
 }
