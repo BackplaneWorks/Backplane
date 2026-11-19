@@ -439,7 +439,7 @@ impl Driver for AgyDriver {
     fn prepare(&mut self, a: &TurnIn) -> Result<(), String> {
         if !pinned(&a.home) { if let Some(p) = super::agy_cli::find() {
             let home = std::path::PathBuf::from(crate::plat::dirs::home_or_empty());
-            if let super::agy_cli::Mcp::Skipped(why) = super::agy_cli::ensure_mcp(&super::agy_cli::mcp_config(&home)) { self.cs.note = format!("Backplane's tools are not available to Antigravity this turn: {why}.") }
+            if let super::agy_cli::Mcp::Skipped(why) = super::agy_cli::ensure_mcp(&super::agy_cli::mcp_config(&home), !a.pcbparts_url.is_empty()) { self.cs.note = format!("Backplane's tools are not available to Antigravity this turn: {why}.") }
             self.bases = bases_from(&std::fs::read_to_string(bases_path(&a.home)).unwrap_or_default()); // the probe's folded list: model + effort -> agy's variant
             self.cli = Some(p); return Ok(())
         } }
