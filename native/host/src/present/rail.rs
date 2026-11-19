@@ -26,8 +26,8 @@ pub fn rail(input: RailInput<'_>) -> Value {
     add("board", "Board", "circuit-board", "design", "b", no_board);
     add("schematic", "Schematic", "cpu", "design", "s", (!input.schematic).then_some("No schematic in this project"));
     add("3d", "3D", "box", "design", "3", no_board);
-    if input.gerbers || page == "gerbers" { add("gerbers", "Gerbers", "file-stack", "design", "", None); }
-    if input.simulation && input.schematic && !input.altium { add("simulation", "Simulation", "gauge", "design", "", None); }
+    if input.gerbers || page == "gerbers" { add("gerbers", "Gerbers", "file-stack", "design", "g", None); }
+    if input.simulation && input.schematic && !input.altium { add("simulation", "Simulation", "gauge", "design", "i", None); }
     add("split", "Split", "layout-panel-left", "layout", "v", (!(input.board && input.schematic)).then_some("Split needs a board and a schematic"));
     add("mech", "Mech", "wrench", "layout", "m", (!input.mech).then_some("No mechanical parts in this project"));
     add("files", "Files", "folder", "work", "f", None);
@@ -60,6 +60,20 @@ mod tests {
                 }
             }
         }}}
+    }
+
+    #[test]
+    fn every_rail_action_has_a_label_for_its_tooltip_and_palette_an_icon_and_a_distinct_key() {
+        let rows = rail(RailInput { board: true, schematic: true, mech: true, gerbers: true, simulation: true, ..Default::default() });
+        let mut keys = std::collections::HashSet::new();
+        for row in rows.as_array().unwrap() {
+            for field in ["id", "label", "icon"] {
+                assert!(row[field].as_str().is_some_and(|s| !s.is_empty()), "{row} lacks {field}");
+            }
+            // Commands opens the palette with its configurable platform shortcut.
+            let key = if row["id"] == "commands" { "palette" } else { row["key"].as_str().unwrap() };
+            assert!(!key.is_empty() && keys.insert(key), "{row}");
+        }
     }
 
     #[test]

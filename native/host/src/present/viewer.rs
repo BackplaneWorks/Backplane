@@ -771,6 +771,10 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
             let versions = if v["open"] == "review" { s(&session["drafts"], &format!("@rp.versions:{sel}")) } else { "" };
             v["designPanels"] = design_panels(if picked.is_empty() { &root } else { &picked }, versions);
         }
+        if v["open"] == "review" && !sources.schematic && v["review"]["tabs"].as_array().is_some_and(|tabs| tabs.iter().any(|t| t["page"] == "bom" && t["on"] == true))
+            && s(&session["drafts"], &format!("@rp.versions:{sel}")).is_empty() {
+            v["review"]["empty"] = json!({"title":"Nothing to review yet", "next":"Add a schematic to see its parts here."});
+        }
         if sources.altium { v["cad"] = json!("altium"); }
         if let Some(f) = crate::files::kicad::embed::rail_simulation(&root) { if let Some(o) = v.as_object_mut() { o.insert("simFrame".into(), json!(f)); } }
         let selected = v["choices"].as_array().and_then(|rows| rows.iter().find(|r| r["on"] == true)).and_then(|r| r["value"].as_str());

@@ -878,7 +878,7 @@ impl Render for Backplane {
                 let letter = row.key;
                 let hint = rail_hint(&self.local, id, letter);
                 button = button.cursor_pointer().hover(|s| s.bg(c("raise")).text_color(c("text")))
-                    .tooltip(crate::keys::tip(row.label, &hint, light)).children(keycap(letter, active));
+                    .tooltip(crate::keys::tip(row.label, &hint, light)).children(keycap(if letter.is_empty() { &hint } else { letter }, active));
                 let action = match id {
                     "terminal" => Ctl::None, "commands" => Ctl::OpenPalette, "simulation" => Ctl::KicadAct("simulation".into()),
                     "diff" => Ctl::Node("diff".into(), "".into()), _ => Ctl::Rail(id.into()),
