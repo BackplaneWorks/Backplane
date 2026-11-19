@@ -227,6 +227,15 @@ Wide chip — {dir}/h.png;\n\nFolder: `{dir}`\n- i.png — the last\n- missing.p
         let t2 = format!("{dir}\n- a.png\n\nSome prose here.\nMore prose here.\nlater.png");
         assert_eq!(paths(&t2), [format!("{dir}/a.png")]);
     }
+    /// Captioned runs of absolute image paths (one per line under bold headings) are all found in order.
+    #[cfg(unix)] #[test] fn captioned_runs_of_paths_are_all_pictures() {
+        let d = "/home/user/proj/build/shots";
+        let names = ["before-project.png", "after-project.png", "after-project-boards.png", "before-picker.png", "after-picker.png"];
+        let want: Vec<String> = names.iter().map(|n| format!("{d}/{n}")).collect();
+        let text = format!("Both look right.\n\n**Project page, before and after:**\n{}\n{}\n{}\n\n**Model picker, before and after:**\n{}\n{}\n", want[0], want[1], want[2], want[3], want[4]);
+        assert_eq!(paths(&text), want);
+        for p in &want { assert!(message_allowed(&text, p), "{p}") }
+    }
     #[cfg(unix)] #[test] fn a_backslash_is_refused_on_unix() { assert!(!message_allowed("/a/b\\.png", "/a/b\\.png")) }
     /// Windows: an image an agent names as C:\\x\\y.png (the hub's own attachments are written so) is allowed, a climb under either separator is not.
     #[cfg(windows)] #[test] fn a_windows_path_is_allowed_and_a_climb_is_not() {

@@ -453,6 +453,7 @@ ios.image.denied	Photos access is off: allow it in Settings to save pictures.	�
 ios.image.failed	Could not save the picture.	画像を保存できませんでした。	No se pudo guardar la imagen.
 ios.image.incoming	Picture ready: open a thread to send it.	画像の準備ができました。送るスレッドを開いてください。	Imagen lista: abre un hilo para enviarla.
 ios.image.loadfail	Could not load the picture.	画像を読み込めませんでした。	No se pudo cargar la imagen.
+ios.image.unavailable	Image unavailable	画像を表示できません	Imagen no disponible
 native.permission.photos.add	Backplane saves the pictures you choose in a thread to your photo library.	スレッドで選んだ画像を写真ライブラリに保存します。	Backplane guarda en tu fototeca las imágenes que elijas en un hilo.
 ios.buy.ask	Start a buy thread for {project}?	{project} の購入スレッドを開始しますか？	¿Iniciar un hilo de compra para {project}?
 ios.settings.accounts.usage	Accounts & Usage	アカウントと使用量	Cuentas y uso

@@ -4261,6 +4261,7 @@ ios.image.denied = El acceso a Fotos está desactivado: permítelo en Ajustes pa
 ios.image.failed = No se pudo guardar la imagen.
 ios.image.incoming = Imagen lista: abre un hilo para enviarla.
 ios.image.loadfail = No se pudo cargar la imagen.
+ios.image.unavailable = Imagen no disponible
 native.permission.photos.add = Backplane guarda en tu fototeca las imágenes que elijas en un hilo.
 ios.buy.ask = ¿Iniciar un hilo de compra para {project}?
 ios.settings.accounts.usage = Cuentas y uso

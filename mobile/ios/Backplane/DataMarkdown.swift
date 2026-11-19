@@ -221,39 +221,43 @@ struct DataMarkdown: View {
     let text: String
     /// the thread the message is in: a file path in it is looked for in that thread's project
     var thread = ""
-    /// a reply's images (the hub's list, data/1 `images`) and its entry: each is drawn under the first block that names it, the rest at the end,
-    /// as the desktop draws them; a tap on its path opens it full size
+    /// a reply's images (the hub's list, data/1 `images`) and its entry: a line of pictures is drawn as them (one inline, several as a
+    /// carousel: ReplyImages), a picture named in a sentence under that block; a tap on one, or on its path, opens them all full screen
     var entry = ""
     var images: [String] = []
     /// what to copy, as the hub listed it (`copy: [{text, cmd}]`); nil: the same rules decide here (Copyable)
     var copy: [DCopyPiece]? = nil
-    @State private var full: DReplyPic?
+    @State private var viewer: DReplyOpen?
     var body: some View {
-        let blocks = dMdBlocks(text)
-        let pics = images.isEmpty ? nil : DMdPicPlan(blocks: blocks, entry: entry, paths: images)
+        let layout = dMdLayout(text, images: images)
+        let blocks = dMdBlocks(layout.text)
+        let (entry, all) = (entry, images)
+        let show: (String) -> Void = { viewer = DReplyOpen(entry: entry, all: all, start: ReplyImages.start($0, in: all)) }
+        let pics = images.isEmpty ? nil : DMdPicPlan(blocks: blocks, entry: entry, layout: layout, open: show)
         DMdBlocks(blocks: blocks, pics: pics, copy: copy)
             .environment(\.openURL, OpenURLAction { url in
-                if let p = dPathFrom(url), images.contains(p) { full = DReplyPic(entry: entry, path: p); return .handled }
+                if let p = dPathFrom(url), images.contains(p) { show(p); return .handled }
                 return dMdOpen(url, thread: thread)
             })
-            .fullScreenCover(item: $full) { DReplyFull(pic: $0) { full = nil } }
+            .fullScreenCover(item: $viewer) { DReplyViewer(open: $0) { viewer = nil } }
     }
 }
 
-struct DReplyPic: Identifiable, Hashable { let entry: String; let path: String; var id: String { entry + "\n" + path } }
-
-/// Which block each of a reply's images goes under: the first whose text names it (a path alone on a line, in a list, bold, in backticks,
-/// a Markdown image); an image no block names (a folder, then its files) goes at the end.
+/// Where a reply's pictures go (ReplyImages.layout): `slots` stand where their lines were; a `loose` picture (named inside a sentence, a
+/// quote or a table) goes under the first block that names it, the rest at the end. `open` shows them all, full screen, from the one tapped.
 struct DMdPicPlan {
     let entry: String
+    let slots: [[String]]
+    let open: (String) -> Void
     var at: [Int: [String]] = [:]
     var rest: [String] = []
-    init(blocks: [DMdBlock], entry: String, paths: [String]) {
-        self.entry = entry
-        for p in paths {
+    init(blocks: [DMdBlock], entry: String, layout: ReplyImages.Layout, open: @escaping (String) -> Void) {
+        self.entry = entry; self.slots = layout.slots; self.open = open
+        for p in layout.loose {
             if let i = blocks.firstIndex(where: { dMdNames($0, p) }) { at[i, default: []].append(p) } else { rest.append(p) }
         }
     }
+    func slot(_ paragraph: String) -> [String]? { ReplyImages.slot(paragraph, count: slots.count).map { slots[$0] } }
 }
 private func dMdNames(_ b: DMdBlock, _ path: String) -> Bool {
     switch b {
@@ -264,52 +268,12 @@ private func dMdNames(_ b: DMdBlock, _ path: String) -> Bool {
     default: return false
     }
 }
-
-/// One of a reply's images: read through the hub, drawn at most 360 high; tap for the full size, long press to save or share.
-struct DReplyImage: View {
-    let pic: DReplyPic
-    @State private var image: UIImage?
-    @State private var data: Data?
-    @State private var failed = false
-    @State private var full = false
-    var body: some View {
-        Group {
-            if let image {
-                Image(uiImage: image).resizable().scaledToFit().frame(maxWidth: min(image.size.width, 520), maxHeight: 360).dbox()
-                    .onTapGesture { full = true }.dImageMenu(image, data: data)
-            } else if !failed { Rectangle().fill(BackplaneDesign.panel).frame(height: 96) }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .task(id: pic) {
-            if let d = await DataClient.shared.replyImage(entry: pic.entry, path: pic.path), let u = UIImage(data: d) { data = d; image = u } else { failed = true }
-        }
-        .fullScreenCover(isPresented: $full) { if let image { DImageFull(image: image, data: data) { full = false } } }
-        .accessibilityIdentifier("md.reply.image")
-    }
-}
-
-/// A reply image's path tapped: the picture full size, read through the hub (Save to Photos, Share image), or a note when the hub has none.
-struct DReplyFull: View {
-    let pic: DReplyPic
-    let close: () -> Void
-    @State private var image: UIImage?
-    @State private var data: Data?
-    @State private var failed = false
-    var body: some View {
-        if let image { DImageFull(image: image, data: data, close: close) }
-        else {
-            ZStack {
-                Color.black.ignoresSafeArea()
-                if failed { Text(Tr.t("Could not load the picture.")).dmono(12).foregroundStyle(.white) } else { ProgressView().tint(.white) }
-            }
-            .overlay(alignment: .topTrailing) {
-                Button(action: close) { Image(systemName: "xmark.circle.fill").font(.title).foregroundStyle(.white) }.padding().accessibilityLabel(Tr.t("Close"))
-            }
-            .task(id: pic) {
-                if let d = await DataClient.shared.replyImage(entry: pic.entry, path: pic.path), let u = UIImage(data: d) { data = d; image = u } else { failed = true }
-            }
-        }
-    }
+private final class DMdLayouts { nonisolated(unsafe) static let cache = NSCache<NSString, Box<ReplyImages.Layout>>() }
+func dMdLayout(_ text: String, images: [String]) -> ReplyImages.Layout {
+    if images.isEmpty { return ReplyImages.Layout(text: text, slots: [], loose: []) }
+    let key = images.joined(separator: "\n") + "\u{0}" + text
+    if let c = DMdLayouts.cache.object(forKey: key as NSString) { return c.v }
+    let l = ReplyImages.layout(text, images: images); DMdLayouts.cache.setObject(Box(l), forKey: key as NSString); return l
 }
 
 /// What a tap on a link does (DataLinks.swift): web addresses, emails and phone numbers go to the system (Safari, Mail, Phone); a backplane:// link or a path is
@@ -334,10 +298,11 @@ private struct DMdBlocks: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { i, b in
-                block(b)
-                if let pics { ForEach(pics.at[i] ?? [], id: \.self) { DReplyImage(pic: DReplyPic(entry: pics.entry, path: $0)) } }
+                if let pics, case .p(let s) = b, let paths = pics.slot(s) { DReplySlot(entry: pics.entry, paths: paths, open: pics.open) }
+                else { block(b) }
+                if let pics, let loose = pics.at[i] { DReplySlot(entry: pics.entry, paths: loose, open: pics.open) }
             }
-            if let pics { ForEach(pics.rest, id: \.self) { DReplyImage(pic: DReplyPic(entry: pics.entry, path: $0)) } }
+            if let pics { DReplySlot(entry: pics.entry, paths: pics.rest, open: pics.open) }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
     @ViewBuilder private func block(_ b: DMdBlock) -> some View {
@@ -436,8 +401,16 @@ struct DMdPreview: View {
             for b in dMdBlocks(full) { if case .image(_, let u) = b { DMdPics.cache.setObject(img, forKey: u as NSString) } }
         }
     }
+    /// BACKPLANE_MDPREVIEW_PICS=<folder>: the reply's absolute image paths are its pictures, each read from that folder by its file name
+    /// (DReplyStore), one not there showing as unavailable
+    private var pics: [String] {
+        guard ProcessInfo.processInfo.environment["BACKPLANE_MDPREVIEW_PICS"] != nil else { return [] }
+        var out: [String] = []
+        for w in full.split(whereSeparator: { " \n\t`()*".contains($0) }).map(String.init) where w.hasPrefix("/") && [".png", ".jpg", ".jpeg"].contains(where: { w.lowercased().hasSuffix($0) }) && !out.contains(w) { out.append(w) }
+        return out
+    }
     var body: some View {
-        ScrollView { DataMarkdown(text: String(full.prefix(stream ? n : full.count))).padding(14) }
+        ScrollView { DataMarkdown(text: String(full.prefix(stream ? n : full.count)), entry: "preview", images: pics).padding(14) }
             .background(BackplaneDesign.view)
             .task { while stream, n < full.count { try? await Task.sleep(nanoseconds: 60_000_000); n += 7 } }
     }
