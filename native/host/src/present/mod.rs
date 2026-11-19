@@ -120,12 +120,18 @@ mod tests {
         let state = |v: &Value, id: &str| v["rail"].as_array().unwrap().iter().find(|r| r["id"] == id).map(|r| r["state"].as_str().unwrap().to_owned());
         let check = |board, sch, mech| {
             let v = picture(&idle);
+            assert_eq!(v["has"], json!({"board":board, "schematic":sch, "mech":mech, "gerbers":false}));
             for (id, enabled) in [("board", board), ("schematic", sch), ("3d", board), ("split", board && sch), ("mech", mech)] {
                 assert_eq!(state(&v, id).as_deref(), Some(if enabled { "off" } else { "disabled" }), "{id}");
             }
             assert_eq!(state(&v, "gerbers"), None);
         };
         check(false, false, false);
+        let mut session = idle.clone();
+        session["drafts"]["@view:t"] = json!("board");
+        let open = picture(&session);
+        assert_eq!(state(&open, "board").as_deref(), Some("on"));
+        assert_eq!(open["has"]["board"], false);
         assert_eq!(state(&picture(&idle), "simulation"), None);
         std::fs::create_dir(dir.join("mech")).unwrap();
         std::fs::write(dir.join("mech/case.step"), "").unwrap();

@@ -8,13 +8,13 @@ use gpui::{prelude::*, *};
 use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Do { Thread(String), /** a message found by what it says: its thread and the message */ Message(String, String), Action(String, String), Settings, Sidebar, Models, Prev, Next, Uber, Shortcuts, /** streamer mode on or off (streamer.rs) */ Streamer, Hub(String) }
+pub enum Do { Rail(String, String), Thread(String), /** a message found by what it says: its thread and the message */ Message(String, String), Action(String, String), Settings, Sidebar, Models, Prev, Next, Uber, Shortcuts, /** streamer mode on or off (streamer.rs) */ Streamer, Hub(String) }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item { pub label: String, pub place: String, pub kind: &'static str, pub what: Do, /** a thread's row (its status, state and want): its dot and what it wants */ pub row: Value }
 /// The key that does what an item does, as the person reads it ("" for none).
 pub fn shortcut(it: &Item, current: &str, l: &crate::local::Local) -> String {
     let id = match &it.what {
-        Do::Action(a, v) if a == "view-kind" && v != "files" => return crate::keys::rail_letter(v).to_uppercase(),
+        Do::Rail(id, key) => return crate::ui::rail_hint(l, id, key),
         Do::Action(a, v) => crate::keys::id_for(a, v, current),
         Do::Sidebar => "sidebar", Do::Models => "models", Do::Prev => "prev", Do::Next => "next", Do::Uber => "uber", _ => "",
     };
@@ -22,7 +22,7 @@ pub fn shortcut(it: &Item, current: &str, l: &crate::local::Local) -> String {
 }
 
 #[derive(Default)]
-pub struct Palette { pub focus: bool, pub open: bool, pub input: Option<Entity<Composer>>, pub q: String, pub ix: usize,
+pub struct Palette { can_embed: bool, pub focus: bool, pub open: bool, pub input: Option<Entity<Composer>>, pub q: String, pub ix: usize,
     /// "Search in thread": the thread (its raw id) the box searches, "" for the whole palette
     pub scope: String,
     /// Find across threads (Ctrl+Shift+F): the box lists only what was said, and the threads named by the words
@@ -78,20 +78,22 @@ pub fn rank(label: &str, q: &str) -> u8 {
 }
 
 /// Every thing the box can offer now (before the text filters it).
-pub fn items(data: &Value) -> Vec<Item> {
+fn items(data: &Value, can_embed: bool) -> Vec<Item> {
     let mut v: Vec<Item> = vec![];
     let thread = &data["thread"];
     if thread.is_object() {
         for t in thread["tools"].as_array().into_iter().flatten().chain(thread["menu"].as_array().into_iter().flatten()) {
             let (label, action, value) = (string(t, "label"), string(t, "action"), string(t, "value"));
-            if action == "view-kind" && !crate::ui::rail_enabled(&thread["viewer"], &value) { continue }
+            if matches!(action.as_str(), "view-kind" | "diff") { continue }
             if label.is_empty() || action.is_empty() || action == "delete" || t["options"].as_array().map_or(false, |o| !o.is_empty()) { continue }
             v.push(Item { label: trs(&label), place: String::new(), kind: "action", what: Do::Action(action, value), row: Value::Null });
         }
-        /* i18n-ok: viewer kinds, drawn through trs in the label */ for (l, k) in [("Board", "board"), ("Schematic", "schematic"), ("3D", "3d"), ("Gerbers", "gerbers"), ("Split", "split"), ("Mech", "mech"), ("Files", "files"), ("Review", "review"), ("Browser", "browser")] {
-            if !crate::ui::rail_enabled(&thread["viewer"], k) { continue }
-            v.push(Item { label: tf("gpui.palette.open", &[("kind", trs(l).into())]), place: trs("viewer"), kind: "action", what: Do::Action("view-kind".into(), k.into()), row: Value::Null });
-        }
+    }
+    let viewer = &thread["viewer"];
+    let simulation = crate::viewers::kicad_pane::rail_simulation(viewer, can_embed).is_some();
+    for row in crate::ui::rail_rows(viewer, simulation) {
+        if row.state == "disabled" { continue }
+        v.push(Item { label: trs(row.label), place: trs("viewer"), kind: "action", what: Do::Rail(row.id.into(), row.key.into()), row: Value::Null });
     }
     if thread.is_object() {
         v.push(Item { label: trs("Agent, model and effort"), place: String::new(), kind: "action", what: Do::Models, row: Value::Null });
@@ -164,7 +166,7 @@ pub fn listed(data: &Value, p: &Palette) -> Vec<Item> {
     // Find across threads: what was said, then the threads whose title has the words
     if p.find_all { let mut v = hits; if answered { v.extend(p.titles.iter().take(6).cloned()); } return v }
     // the sidebar's rows, then the hub's title hits for threads it does not hold (settled, older pages)
-    let mut all = items(data);
+    let mut all = items(data, p.can_embed);
     if answered { let held: std::collections::HashSet<Do> = all.iter().map(|it| it.what.clone()).collect(); all.extend(p.titles.iter().filter(|t| !held.contains(&t.what)).cloned()); }
     let mut v = found(all, &p.q, 10);
     let room = 14usize.saturating_sub(v.len());
@@ -195,6 +197,7 @@ impl Backplane {
         /* i18n-ok: placeholders drawn through trs by the input, and the text through trs */ if let Some(i) = self.screens.palette.input.clone() { i.update(cx, |i, _| i.set_placeholder("Type a word said in any thread")); }
     }
     pub(crate) fn palette_open(&mut self, cx: &mut Context<Self>) {
+        self.screens.palette.can_embed = crate::viewers::kicad_pane::local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), &self.data["thread"]);
         self.kicad_lend(cx);
         if self.screens.palette.input.is_none() {
             let input = cx.new(|cx| Composer::with_context(cx, "PickInput"));
@@ -234,7 +237,13 @@ impl Backplane {
             Do::Thread(id) => self.go("select", id, cx),
             // a message found: its thread at the message, marked, with the find bar holding the words for the next and previous ones there
             Do::Message(id, msg) => { let q = self.screens.palette.q.trim().to_string(); self.find_open_at(&id, &msg, &q, cx); }
-            Do::Action(a, v) if a == "view-kind" || a == "diff" => self.rail_press(&a, &v, cx),
+            Do::Rail(id, _) => match id.as_str() {
+                "terminal" => cx.defer(|cx| cx.dispatch_action(&crate::keys::ToggleTerminal)),
+                "commands" => self.palette_open(cx),
+                "simulation" => self.open_simulation(cx),
+                "diff" => self.rail_press("diff", "", cx),
+                kind => self.rail_press("view-kind", kind, cx),
+            },
             Do::Action(a, v) => {
                 if super::tools::makes_thread(&a) { self.arm_new(); }
                 // a project from the jump list: its page opens here too (the hub fills its lists)
@@ -296,10 +305,25 @@ mod tests {
     #[test] fn viewer_commands_require_an_available_rail_entry() {
         let mut d = data();
         d["thread"]["viewer"]["rail"] = json!([{"id":"board","state":"disabled"},{"id":"files","state":"on"}]);
-        let offered: Vec<_> = items(&d).into_iter().filter_map(|item| match item.what {
-            Do::Action(a, k) if a == "view-kind" => Some(k), _ => None
+        let offered: Vec<_> = items(&d, true).into_iter().filter_map(|item| match item.what {
+            Do::Rail(id, _) => Some(id), _ => None
         }).collect();
         assert_eq!(offered, ["files"]);
+    }
+    #[test] fn rail_commands_use_the_hubs_labels_and_the_same_hints_as_the_buttons() {
+        let local = crate::local::Local::default();
+        let d = json!({"thread":{"viewer":{"simFrame":"sim","rail":[
+            {"id":"simulation","label":"Simulation","key":"","state":"off"},
+            {"id":"files","label":"Project files","key":"f","state":"on"},
+            {"id":"terminal","label":"Terminal","key":"`","state":"off"},
+            {"id":"commands","label":"Commands","key":"","state":"off"}
+        ]}}});
+        let rows: Vec<_> = items(&d, true).into_iter().filter(|i| matches!(i.what, Do::Rail(..))).collect();
+        assert_eq!(rows.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Simulation", "Project files", "Terminal", "Commands"]);
+        for (item, (id, key)) in rows.iter().zip([("simulation", ""), ("files", "f"), ("terminal", "`"), ("commands", "")]) {
+            assert_eq!(shortcut(item, "", &local), crate::ui::rail_hint(&local, id, key));
+        }
+        assert!(!items(&d, false).iter().any(|i| i.label == "Simulation"));
     }
     #[test] fn a_prefix_beats_a_word_beats_letters_in_order() { assert_eq!((rank("Board layout", "boa"), rank("Board layout", "lay"), rank("Board layout", "blt"), rank("Board layout", "zz"), rank("x", "")), (3, 2, 1, 0, 1)); }
     #[test] fn a_thread_the_sidebar_does_not_hold_is_found_by_its_title_from_the_hub() {
@@ -320,16 +344,16 @@ mod tests {
         let p = Palette { q: "fore".into(), titles: title_items(&res, &|raw| format!("h|{raw}")), hits_q: "fore".into(), ..Default::default() };
         let l = listed(&d, &p); assert_eq!(l.iter().filter(|i| i.kind != "action").map(|i| (i.label.as_str(), i.kind)).collect::<Vec<_>>(), [("foreman", "bot")]);
         assert_eq!(l[0].what, Do::Thread("h|t7".into()));
-        let far = items(&d).into_iter().find(|i| i.label == "far cat").unwrap(); assert_eq!(far.what, Do::Action("bot".into(), "h|b2".into()));
+        let far = items(&d, true).into_iter().find(|i| i.label == "far cat").unwrap(); assert_eq!(far.what, Do::Action("bot".into(), "h|b2".into()));
     }
     #[test] fn an_old_scratch_chat_is_found_by_its_title() {
         let d = serde_json::json!({"conversationHistory": {"jump": [{"id": "h|s1", "title": "zebra scratch chat"}]}, "legacy": [{"id": "h|s2", "title": "live chat"}]});
-        let found: Vec<_> = items(&d).into_iter().filter(|i| i.kind == "thread").collect();
+        let found: Vec<_> = items(&d, true).into_iter().filter(|i| i.kind == "thread").collect();
         assert_eq!(found.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["zebra scratch chat", "live chat"]);
         assert_eq!(found[0].what, Do::Thread("h|s1".into())); assert_eq!(found[0].place, "Chats with no project");
     }
     #[test] fn threads_and_actions_are_found_by_what_is_typed_and_a_delete_is_never_offered() {
-        let all = items(&data());
+        let all = items(&data(), true);
         assert!(all.iter().any(|i| i.what == Do::Thread("h|t3".into())) && all.iter().any(|i| i.what == Do::Action("pin".into(), String::new())) && all.iter().any(|i| i.what == Do::Settings));
         assert!(!all.iter().any(|i| i.what == Do::Action("delete".into(), String::new())), "Delete asks first and is not a palette action");
         let r = found(all.clone(), "pow", 10); assert_eq!(r[0].label, "Power budget");
@@ -340,10 +364,10 @@ mod tests {
         let d = json!({"projects": [{"id": "h|p1", "title": "Amp", "threads": [{"id": "h|t1", "title": "Quiet one", "status": "inactive", "want": ""},
             {"id": "h|t2", "title": "Firmware pin map", "status": "failed", "want": "failed"}, {"id": "h|t3", "title": "Battery life", "status": "blocked", "want": "approval"},
             {"id": "h|t4", "title": "Grounding plan", "status": "blocked", "want": "question"}]}]});
-        let r = found(items(&d), "", 10);
+        let r = found(items(&d, true), "", 10);
         assert_eq!(r[..3].iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Battery life", "Grounding plan", "Firmware pin map"], "approval, question, failed (Urg.rank)");
         assert_eq!(r[0].row["want"], "approval");
-        assert_eq!(found(items(&d), "quiet", 10)[0].label, "Quiet one", "a typed query ranks as before");
+        assert_eq!(found(items(&d, true), "quiet", 10)[0].label, "Quiet one", "a typed query ranks as before");
     }
     #[test] fn what_was_said_is_listed_after_the_jumps_and_alone_in_a_threads_search() {
         let res = json!({"hits": [{"thread": "t2", "title": "Firmware pin map", "project": "Sensor", "msg": "m1", "role": "user", "text": "where does the pinecone go"}]});
@@ -358,8 +382,8 @@ mod tests {
     }
     #[test] fn the_list_is_bounded_and_each_thing_is_listed_once() {
         let mut d = data(); d["active"] = json!([{"id": "h|t1", "title": "Board layout review", "project": "Demo"}]);
-        let r = found(items(&d), "", 100); assert_eq!(r.iter().filter(|i| i.label == "Board layout review").count(), 1, "the same thread from two lists shows once");
-        assert!(found(items(&d), "", 3).len() == 3);
+        let r = found(items(&d, true), "", 100); assert_eq!(r.iter().filter(|i| i.label == "Board layout review").count(), 1, "the same thread from two lists shows once");
+        assert!(found(items(&d, true), "", 3).len() == 3);
     }
 }
 
