@@ -168,10 +168,11 @@ echo "Running the installer"
 bash "$t"
 "#;
 
-/// Codex's standalone binary: the digest GitHub lists for the release asset, the download from that tag, the check, then the move into `$1` (a folder
-/// the hub puts on its PATH). Arguments: folder, asset, name to give it, kind (tar.gz or raw). Nothing is placed unless the digest matches.
+/// Codex's standalone binary at a pinned release: the download from that tag, a check of its size and sha256 against the pin (`CODEX_TAG`,
+/// `codex_asset`), then the move into `$1` (a folder the hub puts on its PATH). Arguments: folder, asset, name to give it, kind (tar.gz or raw),
+/// tag, sha256, size. Nothing is placed unless both match.
 pub const CODEX_SH: &str = r#"set -eu
-dest=$1; asset=$2; name=$3; kind=$4
+dest=$1; asset=$2; name=$3; kind=$4; tag=$5; want=$6; size=$7
 fail() { echo "$*" >&2; exit 1; }
 command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || fail 'curl or wget is needed to download Codex, and neither was found'
 if command -v curl >/dev/null 2>&1; then get() { curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 30 --speed-limit 1024 --speed-time 30 -o "$1" "$2"; }
@@ -180,16 +181,13 @@ else get() { echo 'curl or wget is needed to download it, and neither was found'
 if command -v cygpath >/dev/null 2>&1; then dest=$(cygpath -u "$dest"); fi
 case "$asset" in codex-*) ;; *) fail 'Invalid Codex asset' ;; esac
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' 0
-echo "Looking up the latest Codex release"
-get "$tmp/rel.json" https://api.github.com/repos/openai/codex/releases/latest || fail 'Could not read the Codex release list'
-# the API answers on one line: one field per line, then read the tag and the digest that follows the asset's name
-tr ',{}' '\n\n\n' < "$tmp/rel.json" | tr -d ' \r' > "$tmp/fields"
-tag=$(sed -n 's/^"tag_name":"\([^"]*\)".*/\1/p' "$tmp/fields" | head -n 1)
-want=$(awk -v n="\"name\":\"$asset\"" '$0==n { f=1 } f && index($0, "\"digest\":\"sha256:") == 1 { sub(/^"digest":"sha256:/, ""); sub(/".*/, ""); print; exit }' "$tmp/fields")
-[ -n "$tag" ] && [ "${#want}" -eq 64 ] || fail "The Codex release lists no checksum for $asset"
+[ -n "$tag" ] && [ "${#want}" -eq 64 ] && [ -n "$size" ] || fail "No pinned checksum for $asset"
+case "$tag" in *[!A-Za-z0-9._-]*) fail 'Invalid Codex release' ;; esac
 echo "Downloading $asset"
 get "$tmp/pkg" "https://github.com/openai/codex/releases/download/$tag/$asset" || fail "Could not download $asset"
 echo 'Checking the checksum'
+len=$(wc -c < "$tmp/pkg" | tr -d ' ')
+[ "$len" = "$size" ] || fail 'Codex size mismatch'
 if command -v sha256sum >/dev/null 2>&1; then got=$(sha256sum "$tmp/pkg" | cut -d' ' -f1); else got=$(shasum -a 256 "$tmp/pkg" | cut -d' ' -f1); fi
 [ "$want" = "$got" ] || fail 'Codex checksum mismatch'
 mkdir -p "$dest" "$tmp/x"
@@ -262,16 +260,31 @@ pub fn freecad_sys(os: &str, arch: &str) -> Option<&'static str> {
     match (os, arch) { ("linux", "x64") => Some("Linux-x86_64"), ("linux", "arm64") => Some("Linux-aarch64"), ("darwin", "arm64") => Some("macOS-arm64"), ("darwin", "x64") => Some("macOS-x86_64"), _ => None }
 }
 
-/// Codex's release asset for a system: (asset, the name it is given, kind). Hub `os` and `arch` words (linux, darwin, windows; x64, arm64).
-pub fn codex_asset(os: &str, arch: &str) -> Option<(&'static str, &'static str, &'static str)> {
-    match (os, arch) {
-        ("linux", "x64") => Some(("codex-x86_64-unknown-linux-musl.tar.gz", "codex", "tar.gz")),
-        ("linux", "arm64") => Some(("codex-aarch64-unknown-linux-musl.tar.gz", "codex", "tar.gz")),
-        ("darwin", "arm64") => Some(("codex-aarch64-apple-darwin.tar.gz", "codex", "tar.gz")),
-        ("darwin", "x64") => Some(("codex-x86_64-apple-darwin.tar.gz", "codex", "tar.gz")),
-        ("windows", "x64") => Some(("codex-x86_64-pc-windows-msvc.exe", "codex.exe", "raw")),
-        ("windows", "arm64") => Some(("codex-aarch64-pc-windows-msvc.exe", "codex.exe", "raw")),
-        _ => None,
+/// The Codex release the installer is pinned to (github.com/openai/codex/releases/tag/rust-v0.170.0). Bump it with the table below: each
+/// asset's size and the sha256 GitHub lists for it (`gh api repos/openai/codex/releases/tags/<tag>`). The tests check the table's shape.
+pub const CODEX_TAG: &str = "rust-v0.170.0";
+/// A Codex release asset's pin: (asset, the name it is given, kind, sha256, size).
+pub type CodexPin = (&'static str, &'static str, &'static str, &'static str, u64);
+pub const CODEX_PINS: &[(&str, &str, CodexPin)] = &[
+    ("linux", "x64", ("codex-x86_64-unknown-linux-musl.tar.gz", "codex", "tar.gz", "d054916ccd28a53820376b8d2f7c875184ca8f40fcd44bbabeb8ee240ce247f5", 119025052)),
+    ("linux", "arm64", ("codex-aarch64-unknown-linux-musl.tar.gz", "codex", "tar.gz", "0da6b061f6b5223901a5a73e841bd1466596e2ef620d68823360febed2ff7ebc", 121314071)),
+    ("darwin", "arm64", ("codex-aarch64-apple-darwin.tar.gz", "codex", "tar.gz", "7c9f21d5cbae4860d14b379fdcf709ff399ce874fd714b58783e1b4199c2b9a9", 114545562)),
+    ("darwin", "x64", ("codex-x86_64-apple-darwin.tar.gz", "codex", "tar.gz", "c858bb0149b003a8cf8840a1143c4d953f18bea23ba6ea861d5fdf0b5e29a5a3", 124603199)),
+    ("windows", "x64", ("codex-x86_64-pc-windows-msvc.exe", "codex.exe", "raw", "8d06dc231dba649c7d48d3eecab239c452a1ac498c41dd6492a6f301b90a22ce", 385571120)),
+    ("windows", "arm64", ("codex-aarch64-pc-windows-msvc.exe", "codex.exe", "raw", "57e60c27714335aa05bfe64c65f11e874bf29633fe7515c1298faf9b5db1ac29", 326498096)),
+];
+/// Codex's pinned release asset for a system. Hub `os` and `arch` words (linux, darwin, windows; x64, arm64).
+pub fn codex_asset(os: &str, arch: &str) -> Option<CodexPin> { CODEX_PINS.iter().find(|(o, a, _)| *o == os && *a == arch).map(|(_, _, p)| *p) }
+/// What the Install button says before it runs: whether the install is checked against a pin, or runs the vendor's own script (named, with its address).
+pub fn install_notice(tool: &str, os: &str) -> String {
+    let script = match (tool, os) {
+        ("claude", "windows") => Some("https://claude.ai/install.ps1"), ("claude", _) => Some(CLAUDE_SH),
+        ("grok", "windows") => Some("https://x.ai/cli/install.ps1"), ("grok", _) => Some(GROK_SH),
+        ("opencode", _) => Some(OPENCODE_SH), _ => None };
+    match (tool, script) {
+        ("codex", _) => format!("Downloads Codex's release {CODEX_TAG} from GitHub and checks its size and sha256 against Backplane's pinned values before running anything."),
+        (_, Some(u)) => format!("Downloads and runs the vendor's own installer script from {u}. It is not checked against a pinned checksum: the vendor publishes none."),
+        _ => "Downloads and runs its vendor's own installer.".into(),
     }
 }
 
@@ -315,7 +328,7 @@ pub fn plan(tool: &str, os: &str, arch: &str, winget: bool, node: bool) -> Optio
         "grok" if os == "windows" => Some(Plan::Ps(GROK_PS)),
         "opencode" if unix => Some(Plan::Sh(VENDOR_SH, vec![OPENCODE_SH.into()])),
         "codex" => match codex_asset(os, arch) {
-            Some((asset, name, kind)) => Some(Plan::Sh(CODEX_SH, vec![tools_dir().to_string_lossy().into_owned(), asset.into(), name.into(), kind.into()])),
+            Some((asset, name, kind, sha, size)) => Some(Plan::Sh(CODEX_SH, vec![tools_dir().to_string_lossy().into_owned(), asset.into(), name.into(), kind.into(), CODEX_TAG.into(), sha.into(), size.to_string()])),
             // no standalone build for this system: npm only when Node is already there
             None if node => Some(Plan::Sh("exec npm install -g @openai/codex", vec![])),
             None => Some(Plan::Link(CODEX_RELEASES)),
@@ -537,6 +550,8 @@ mod tests {
         for (os, arch, asset) in [("linux", "x64", "codex-x86_64-unknown-linux-musl.tar.gz"), ("linux", "arm64", "codex-aarch64-unknown-linux-musl.tar.gz"), ("darwin", "arm64", "codex-aarch64-apple-darwin.tar.gz"), ("darwin", "x64", "codex-x86_64-apple-darwin.tar.gz"), ("windows", "x64", "codex-x86_64-pc-windows-msvc.exe"), ("windows", "arm64", "codex-aarch64-pc-windows-msvc.exe")] {
             let Some(Plan::Sh(script, a)) = plan("codex", os, arch, false, false) else { panic!("{os} {arch}") };
             assert_eq!(script, CODEX_SH); assert_eq!(a[1], asset); assert!(!script.contains("npm"), "no Node");
+            assert_eq!(a[4], CODEX_TAG); assert_eq!(a[5].len(), 64); assert!(a[5].chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)), "a pinned lowercase sha256"); assert!(a[6].parse::<u64>().unwrap() > 0, "a pinned size");
+            assert!(!script.contains("releases/latest"), "pinned, never the latest");
             assert_eq!(a[2], if os == "windows" { "codex.exe" } else { "codex" });
         }
         assert_eq!(plan("codex", "freebsd", "x64", false, false), Some(Plan::Link(CODEX_RELEASES)));
@@ -568,24 +583,27 @@ mod tests {
     #[cfg(unix)] fn exe(p: &Path, body: &str) { std::fs::write(p, body).unwrap(); std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap() }
     #[cfg(unix)] fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("tools-{n}")) }
     /// The real Codex script against a stand-in `curl` that serves a release listing in GitHub's layout and an archive.
-    #[cfg(unix)] fn codex_run(r: &Path, digest_ok: bool) -> (bool, String, PathBuf) {
+    #[cfg(unix)] fn codex_run(r: &Path, digest_ok: bool) -> (bool, String, PathBuf) { codex_run_with(r, digest_ok, 0) }
+    /// `size_delta`: how far the pinned size is from the real one.
+    #[cfg(unix)] fn codex_run_with(r: &Path, digest_ok: bool, size_delta: u64) -> (bool, String, PathBuf) {
         let asset = "codex-x86_64-unknown-linux-musl.tar.gz";
         let serve = r.join("serve"); std::fs::create_dir_all(serve.join("pkg")).unwrap();
         exe(&serve.join("pkg/codex-x86_64-unknown-linux-musl"), "#!/bin/sh\necho codex 9.9.9\n");
         assert!(std::process::Command::new("tar").arg("-czf").arg(serve.join(asset)).arg("-C").arg(serve.join("pkg")).arg("codex-x86_64-unknown-linux-musl").status().unwrap().success());
         let sum = String::from_utf8(std::process::Command::new("sha256sum").arg(serve.join(asset)).output().unwrap().stdout).unwrap().split(' ').next().unwrap().to_string();
-        let listed = if digest_ok { sum } else { "0".repeat(64) };
-        std::fs::write(serve.join("latest"), format!("{{\"tag_name\":\"rust-v9.9.9\",\"author\":{{\"login\":\"bot\"}},\"assets\":[{{\"name\":\"codex-other.tar.gz\",\"uploader\":{{\"login\":\"x\"}},\"size\":1,\"digest\":\"sha256:{}\"}},{{\"name\":\"{asset}\",\"uploader\":{{\"login\":\"x\"}},\"size\":2,\"digest\":\"sha256:{listed}\"}}]}}", "f".repeat(64))).unwrap();
+        let bad = "0".repeat(64); let size = std::fs::metadata(serve.join(asset)).unwrap().len();
+        // the pinned release's download address: the script asks for nothing else (no release listing is served)
+        std::fs::write(serve.join("sentinel"), "x").unwrap();
         let bin = r.join("bin"); std::fs::create_dir_all(&bin).unwrap();
         exe(&bin.join("curl"), &format!("#!/bin/sh\nwhile [ $# -gt 1 ]; do [ \"$1\" = -o ] && out=$2; shift; done\nf={}/$(basename \"$1\")\n[ -f \"$f\" ] || exit 22\ncp \"$f\" \"$out\"\n", serve.display()));
         let dest = r.join("my tools/bin");
-        let o = std::process::Command::new("sh").arg("-c").arg(CODEX_SH).arg("sh").arg(&dest).arg(asset).arg("codex").arg("tar.gz").env("PATH", format!("{}:/usr/bin:/bin", bin.display())).output().unwrap();
+        let o = std::process::Command::new("sh").arg("-c").arg(CODEX_SH).arg("sh").arg(&dest).arg(asset).arg("codex").arg("tar.gz").arg("rust-v9.9.9").arg(if digest_ok { &sum } else { &bad }).arg((size + size_delta).to_string()).env("PATH", format!("{}:/usr/bin:/bin", bin.display())).output().unwrap();
         (o.status.success(), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)), dest)
     }
     #[cfg(unix)] #[test] fn the_codex_script_places_a_binary_whose_digest_matches_and_runs() {
         let r = tmp("ok"); let (ok, out, dest) = codex_run(&r, true);
         assert!(ok, "{out}");
-        assert_eq!(out.lines().collect::<Vec<_>>(), ["Looking up the latest Codex release", "Downloading codex-x86_64-unknown-linux-musl.tar.gz", "Checking the checksum", &format!("Installed in {}/codex", dest.display())]);
+        assert_eq!(out.lines().collect::<Vec<_>>(), ["Downloading codex-x86_64-unknown-linux-musl.tar.gz", "Checking the checksum", &format!("Installed in {}/codex", dest.display())]);
         let v = std::process::Command::new(dest.join("codex")).arg("--version").output().unwrap(); assert_eq!(String::from_utf8_lossy(&v.stdout).trim(), "codex 9.9.9", "it runs");
         let _ = std::fs::remove_dir_all(&r);
     }
@@ -599,8 +617,10 @@ mod tests {
         b
     }
     #[cfg(unix)] #[test] fn with_no_curl_the_codex_script_downloads_with_wget_and_with_neither_says_so() {
-        let r = tmp("wget"); let _ = codex_run(&r, true); let serve = r.join("serve"); let dest = r.join("w/bin");
-        let run = |p: &Path| { let o = std::process::Command::new("sh").arg("-c").arg(CODEX_SH).arg("sh").arg(&dest).arg("codex-x86_64-unknown-linux-musl.tar.gz").arg("codex").arg("tar.gz").env("PATH", p).output().unwrap(); (o.status.success(), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))) };
+        let r = tmp("wget"); let _ = codex_run(&r, true); let serve = r.join("serve");
+        let sum = String::from_utf8(std::process::Command::new("sha256sum").arg(serve.join("codex-x86_64-unknown-linux-musl.tar.gz")).output().unwrap().stdout).unwrap().split(' ').next().unwrap().to_string();
+        let size = std::fs::metadata(serve.join("codex-x86_64-unknown-linux-musl.tar.gz")).unwrap().len(); let dest = r.join("w/bin");
+        let run = |p: &Path| { let o = std::process::Command::new("sh").arg("-c").arg(CODEX_SH).arg("sh").arg(&dest).arg("codex-x86_64-unknown-linux-musl.tar.gz").arg("codex").arg("tar.gz").arg("rust-v9.9.9").arg(&sum).arg(size.to_string()).env("PATH", p).output().unwrap(); (o.status.success(), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))) };
         let (ok, out) = run(&no_curl(&r, &serve, false)); assert!(!ok && out.contains("curl or wget is needed to download Codex"), "{out}");
         let (ok, out) = run(&no_curl(&r, &serve, true)); assert!(ok, "{out}"); assert!(dest.join("codex").is_file());
         // the vendor wrapper (Claude, Grok, OpenCode) downloads its installer with wget too
@@ -613,6 +633,26 @@ mod tests {
         assert!(!ok && out.trim_end().ends_with("Codex checksum mismatch"), "{out}");
         assert!(!dest.join("codex").exists(), "nothing placed");
         let _ = std::fs::remove_dir_all(&r);
+    }
+    #[cfg(unix)] #[test] fn the_codex_script_places_nothing_when_the_size_differs() {
+        let r = tmp("size"); let (ok, out, dest) = codex_run_with(&r, true, 1);
+        assert!(!ok && out.trim_end().ends_with("Codex size mismatch"), "{out}");
+        assert!(!dest.join("codex").exists(), "nothing placed");
+        let _ = std::fs::remove_dir_all(&r);
+    }
+    #[cfg(unix)] #[test] fn the_codex_script_refuses_a_missing_pin() {
+        let r = tmp("nopin"); let o = std::process::Command::new("sh").arg("-c").arg(CODEX_SH).arg("sh").arg(r.join("d")).arg("codex-x.tar.gz").arg("codex").arg("tar.gz").arg("rust-v1").arg("").arg("1").output().unwrap();
+        assert!(!o.status.success() && String::from_utf8_lossy(&o.stderr).contains("No pinned checksum"));
+        let _ = std::fs::remove_dir_all(&r);
+    }
+    #[test] fn the_codex_pins_are_whole_and_the_notice_names_the_vendor_script() {
+        assert_eq!(CODEX_PINS.len(), 6);
+        for (os, arch, (asset, name, kind, sha, size)) in CODEX_PINS { assert_eq!(codex_asset(os, arch).unwrap().0, *asset); assert!(asset.starts_with("codex-") && !asset.contains(['/', '\\'])); assert!(!name.is_empty() && (*kind == "tar.gz" || *kind == "raw")); assert!(sha.len() == 64 && sha.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)), "{asset}"); assert!(*size > 0); }
+        assert!(CODEX_TAG.starts_with("rust-v"));
+        let n = install_notice("claude", "linux"); assert!(n.contains("runs the vendor's own installer script from https://claude.ai/install.sh") && n.contains("not checked"), "{n}");
+        assert!(install_notice("claude", "windows").contains("https://claude.ai/install.ps1"));
+        assert!(install_notice("grok", "darwin").contains(GROK_SH) && install_notice("opencode", "linux").contains(OPENCODE_SH));
+        assert!(install_notice("codex", "linux").contains(CODEX_TAG) && install_notice("codex", "linux").contains("sha256"));
     }
     #[cfg(unix)] #[test] fn the_vendor_script_stops_when_the_download_fails() {
         let r = tmp("vendor"); let bin = r.join("bin"); std::fs::create_dir_all(&bin).unwrap();
