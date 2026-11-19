@@ -32,24 +32,58 @@ pub enum Support { Unknown, Missing, Unsupported, Supported }
 #[derive(Clone, Copy)]
 pub enum Session { Unknown, Cold, Starting, Live, Failed, IdleStopped, ClosedByPerson }
 #[derive(Clone, Copy)]
-pub enum WarmBlock { None, Memory, Capacity, ExternalLock }
+pub enum WarmBlock { Unknown, None, Memory, Capacity, ExternalLock }
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum StopReason { Unknown, Idle, Evicted, AppClosed, CloseAsked, AgentClosed, KicadQuit, Crashed, StartFailed }
 
 #[derive(Clone, Copy)]
-pub struct Runtime {
+pub enum Frame { Board, Schematic }
+
+#[derive(Clone, Copy, Default)]
+pub struct ClosedFrames { board: bool, schematic: bool }
+impl ClosedFrames {
+    fn contains(self, frame: Option<Frame>) -> bool {
+        match frame { Some(Frame::Board) => self.board, Some(Frame::Schematic) => self.schematic, None => false }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct Runtime<'a> {
     pub support: Support, pub session: Session, pub warm_block: WarmBlock,
-    // Identifies the lifetime of the reported session for the future attach reconciler.
-    pub generation: Option<u64>, pub holder: Option<u64>,
+    pub stop_reason: StopReason, pub stopped_at: Option<u64>, pub closed_frames: ClosedFrames,
+    pub warm_why: &'a str, pub warm_at: Option<u64>, pub generation: Option<u64>, pub holder: Option<u64>,
 }
-impl Runtime {
-    pub const UNKNOWN: Self = Self { support: Support::Unknown, session: Session::Unknown,
-        warm_block: WarmBlock::None, generation: None, holder: None };
+
+/// Decode the owner’s runtime picture. Diagnostics are carried verbatim and never decide mode.
+pub fn runtime_from_picture(p: &Value) -> Runtime<'_> {
+    let field = |name: &str| p[name].as_str().unwrap_or("");
+    let number = |name: &str| p[name].as_u64().or_else(|| field(name).parse().ok());
+    let mut closed_frames = ClosedFrames::default();
+    for frame in p["closedFrames"].as_array().into_iter().flatten() {
+        match frame.as_str() { Some("PCB") => closed_frames.board = true, Some("SCH") => closed_frames.schematic = true, _ => {} }
+    }
+    Runtime {
+        support: match field("support") { "supported" => Support::Supported, "missing" => Support::Missing,
+            "unsupported" => Support::Unsupported, _ => Support::Unknown },
+        session: match field("session") { "cold" => Session::Cold, "starting" => Session::Starting, "live" => Session::Live,
+            "failed" => Session::Failed, "idleStopped" => Session::IdleStopped, "closedByPerson" => Session::ClosedByPerson, _ => Session::Unknown },
+        stop_reason: match field("stopReason") { "idle" => StopReason::Idle, "evicted" => StopReason::Evicted,
+            "appClosed" => StopReason::AppClosed, "closeAsked" => StopReason::CloseAsked, "agentClosed" => StopReason::AgentClosed,
+            "kicadQuit" => StopReason::KicadQuit, "crashed" => StopReason::Crashed, "startFailed" => StopReason::StartFailed, _ => StopReason::Unknown },
+        warm_block: match field("warmBlock") { "none" => WarmBlock::None, "memory" => WarmBlock::Memory,
+            "capacity" => WarmBlock::Capacity, "externalLock" => WarmBlock::ExternalLock, _ => WarmBlock::Unknown },
+        closed_frames, stopped_at: number("stoppedAt"), generation: number("generation"), holder: number("holder"),
+        warm_why: field("warmWhy"), warm_at: number("warmAt"),
+    }
 }
 
 #[derive(Clone, Copy)]
-pub struct Input {
+pub struct Input<'a> {
     /// A local native desktop connection's hub-assigned ID. Others cannot host native frames.
     pub desktop: Option<u64>, pub linked: bool, pub altium: bool, pub document: Document,
-    pub platform: Platform, pub preference: Preference, pub visit: Visit, pub runtime: Runtime,
+    pub platform: Platform, pub preference: Preference, pub visit: Visit, pub runtime: Runtime<'a>,
+    pub frame: Option<Frame>, pub visit_started_after_stop: bool,
 }
 
 /// Board and Schematic share a surface policy. Moving between them switches frames in the same project.
@@ -71,7 +105,13 @@ pub fn design_mode(input: Input, rollout: &[Platform]) -> Value {
         Support::Unknown => return viewer("runtimeUnknown"), Support::Missing => return viewer("runtimeMissing"),
         Support::Unsupported => return viewer("unsupported"), Support::Supported => {}
     }
-    match r.session {
+    let session = match r.session {
+        Live if r.closed_frames.contains(input.frame) => ClosedByPerson,
+        IdleStopped if input.visit_started_after_stop => Cold,
+        IdleStopped | ClosedByPerson if matches!(r.stop_reason, StopReason::Evicted | StopReason::AgentClosed) => Cold,
+        other => other,
+    };
+    match session {
         Unknown => return viewer("runtimeUnknown"),
         ClosedByPerson if !deliberate => return viewer("closedByPerson"),
         IdleStopped if !deliberate => return viewer("idleStopped"),
@@ -80,8 +120,9 @@ pub fn design_mode(input: Input, rollout: &[Platform]) -> Value {
     }
     let requested = deliberate || input.preference == Preference::Kicad;
     if !requested && !rollout.contains(&input.platform) { return viewer("rollout") }
-    if !matches!(r.session, Live | Starting) {
+    if !matches!(session, Live | Starting) {
         match r.warm_block {
+            WarmBlock::Unknown => return viewer("runtimeUnknown"),
             WarmBlock::ExternalLock => return viewer("externalLock"), WarmBlock::Capacity => return viewer("capacity"),
             WarmBlock::Memory if !requested => return viewer("memory"), _ => {}
         }
@@ -94,11 +135,25 @@ pub fn design_mode(input: Input, rollout: &[Platform]) -> Value {
 mod tests {
     use super::*;
     #[test]
+    fn runtime_picture_decodes_wire_fields_and_unknown_values() {
+        let picture = json!({"support":"supported","session":"failed","stopReason":"startFailed","stoppedAt":13,
+            "closedFrames":["SCH","future"],"warmBlock":"externalLock","warmWhy":"memory","warmAt":"12","generation":2,"holder":"4"});
+        let r = runtime_from_picture(&picture);
+        assert!(matches!((r.support,r.session,r.warm_block),(Support::Supported,Session::Failed,WarmBlock::ExternalLock)));
+        assert_eq!(r.stop_reason, StopReason::StartFailed);
+        assert!(r.closed_frames.schematic && !r.closed_frames.board);
+        assert_eq!((r.stopped_at,r.warm_why,r.warm_at,r.generation,r.holder),(Some(13),"memory",Some(12),Some(2),Some(4)));
+        let future = json!({"support":"future","session":"future","warmBlock":"future","stopReason":"future","holder":[]});
+        let r = runtime_from_picture(&future);
+        assert!(matches!((r.support,r.session,r.warm_block,r.stop_reason),(Support::Unknown,Session::Unknown,WarmBlock::Unknown,StopReason::Unknown)));
+        assert_eq!((r.holder,r.generation),(None,None));
+    }
+    #[test]
     fn mode_truth_table() {
-        let runtime = Runtime { support: Support::Supported, session: Session::Cold, ..Runtime::UNKNOWN };
+        let runtime = Runtime { support: Support::Supported, session: Session::Cold, warm_block: WarmBlock::None, ..runtime_from_picture(&Value::Null) };
         let base = Input { desktop: Some(4), linked: false, altium: false, document: Document::Present,
-            platform: Platform::Linux, preference: Preference::Auto, visit: Visit::Normal, runtime };
-        let mode = |i| design_mode(i, &[Platform::Linux, Platform::Mac]);
+            platform: Platform::Linux, preference: Preference::Auto, visit: Visit::Normal, runtime, frame: Some(Frame::Board), visit_started_after_stop: false };
+        fn mode(i: Input<'_>) -> Value { design_mode(i, &[Platform::Linux, Platform::Mac]) }
         let v = |why| json!({"want":"viewer","why":why});
         let k = |why| json!({"want":"kicad","why":why});
         for (i, result) in [
@@ -109,7 +164,7 @@ mod tests {
             (Input { document:Document::OtherPage,..base }, v("page")),
             (Input { preference:Preference::Viewer,..base }, v("preference")),
             (Input { visit:Visit::ShowViewer,preference:Preference::Kicad,..base }, v("thisVisit")),
-            (Input { runtime:Runtime::UNKNOWN, preference:Preference::Kicad,..base }, v("runtimeUnknown")),
+            (Input { runtime:runtime_from_picture(&Value::Null), preference:Preference::Kicad,..base }, v("runtimeUnknown")),
         ] { assert_eq!(mode(i), result); }
         for (support, why) in [(Support::Missing,"runtimeMissing"),(Support::Unsupported,"unsupported")] {
             assert_eq!(mode(Input { runtime:Runtime { support,..runtime },..base }), v(why));
@@ -156,6 +211,20 @@ mod tests {
             let failed = Input { runtime: Runtime { session: Session::Failed, generation, ..runtime }, ..base };
             assert_eq!(mode(failed), v("failed"));
             assert_eq!(mode(Input { visit: Visit::OpenKicad, ..failed }), k("thisVisit"));
+        }
+        for (closed, board_closed) in [("PCB",true), ("SCH",false)] {
+            let picture = json!({"support":"supported","session":"live","closedFrames":[closed],"warmBlock":"none"});
+            for (frame, is_closed) in [(Frame::Board,board_closed), (Frame::Schematic,!board_closed)] {
+                let i = Input { runtime: runtime_from_picture(&picture), frame: Some(frame), ..base };
+                assert_eq!(mode(i), if is_closed { v("closedByPerson") } else { k("auto") });
+                assert_eq!(mode(Input { visit: Visit::OpenKicad, ..i }), k("thisVisit"));
+            }
+        }
+        for (why, same_visit) in [("idle",v("idleStopped")), ("agentClosed",k("auto")), ("evicted",k("auto"))] {
+            let picture = json!({"support":"supported","session":"idleStopped","stopReason":why,"warmBlock":"none"});
+            let i = Input { runtime: runtime_from_picture(&picture), ..base };
+            assert_eq!(mode(i), same_visit);
+            assert_eq!(mode(Input { visit_started_after_stop:true, ..i }), k("auto"));
         }
         assert_eq!(design_mode(base,AUTO_PLATFORMS),v("rollout"));
     }
