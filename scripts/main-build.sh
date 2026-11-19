@@ -24,8 +24,11 @@ fetch() { now=$(date +%s); [ $((now - fetched)) -ge "$FETCH" ] || return 0; fetc
 built() { cat "$DEV/.main-built" 2>/dev/null; }
 running() { [ -f "$PIDF" ] && p=$(cat "$PIDF" 2>/dev/null) && [ -n "$p" ] && [ "$p" != $$ ] && kill -0 "$p" 2>/dev/null && tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q main-build; }
 mkdir -p "$DEV" "$TG"
+# the target directory can vanish under a running loop (a wipe, a hand clean): make it again before each measure, so df never reads a missing path as "0 G free";
+# empty when it still cannot be measured, and the bar says so instead of a blank number
+free_gb() { mkdir -p "$TG" 2>/dev/null; df -BG --output=avail "$TG" 2>/dev/null | tail -1 | tr -dc 0-9; }
 JAN_EVERY=${MAIN_JANITOR_EVERY:-3600}; JAN_FREE=${MAIN_JANITOR_FREE_GB:-150}; jan_at=0
-janitor() { local now a gap; now=$(date +%s); a=$(df -BG --output=avail "$TG" 2>/dev/null | tail -1 | tr -dc 0-9); gap=$JAN_EVERY; [ "${a:-0}" -lt "$JAN_FREE" ] && gap=300
+janitor() { local now a gap; now=$(date +%s); a=$(free_gb); gap=$JAN_EVERY; [ -n "$a" ] && [ "$a" -lt "$JAN_FREE" ] && gap=300
   [ $((now - jan_at)) -ge "$gap" ] || return 0; jan_at=$now
   [ "$(stat -c %s "$DEV/janitor.log" 2>/dev/null || echo 0)" -gt $((8 << 20)) ] && mv -f "$DEV/janitor.log" "$DEV/janitor.log.1"
   ( setsid nice -n 19 ionice -c3 "$HERE/worktree-gc.sh" --apply >> "$DEV/janitor.log" 2>&1 < /dev/null & ); }
@@ -54,10 +57,13 @@ while :; do
     if [ "$t" = "$bad" ] && [ -f "$DEV/.last-failure" ]; then status failed "$BR $(printf %s "$t" | cut -c1-10) failed in $(cut -c1-120 "$DEV/.last-failure")"; fi
     [ "${1:-}" = --once ] && exit 0; sleep "$POLL"; continue
   fi
-  avail=$(df -BG --output=avail "$TG" | tail -1 | tr -dc 0-9)
-  if [ "${avail:-0}" -lt "$FREE" ]; then "$HERE/worktree-gc.sh" --apply >> "$DEV/janitor.log" 2>&1; avail=$(df -BG --output=avail "$TG" | tail -1 | tr -dc 0-9); fi   # lanes' merged worktrees and idle target dirs first
+  avail=$(free_gb)
+  if [ -z "$avail" ]; then status failed "Not building $BR $(printf %s "$t" | cut -c1-10): cannot measure free space at $TG"; [ "${1:-}" = --once ] && exit 1; sleep 30; continue; fi
+  if [ "$avail" -lt "$FREE" ]; then "$HERE/worktree-gc.sh" --apply >> "$DEV/janitor.log" 2>&1; avail=$(free_gb); fi   # lanes' merged worktrees and idle target dirs first
   if [ "${avail:-0}" -lt "$FREE" ]; then status failed "Not building $BR $(printf %s "$t" | cut -c1-10): ${avail}G free, need ${FREE}G"; [ "${1:-}" = --once ] && exit 1; sleep 30; continue; fi
   say "building $BR $(printf %s "$t" | cut -c1-10) (tests first)"
+  # (the checkout too can vanish under a running loop: make it again rather than fail every tip)
+  [ -e "$WT/.git" ] || { git -C "$REPO" worktree prune 2>/dev/null; git -C "$REPO" worktree add --detach "$WT" "$t" > /dev/null 2>&1; } || { say "cannot make the checkout $WT"; status failed "Not building $BR $(printf %s "$t" | cut -c1-10): cannot make the checkout $WT"; sleep 30; continue; }
   git -C "$WT" checkout -q --detach "$t" && git -C "$WT" clean -qfd -e Cargo.lock || { say "cannot check out $t"; sleep "$POLL"; continue; }
   # this loop runs the tip's own main-build.sh: one started from a checkout that is behind (the main checkout's working tree) re-runs itself from the tip it just
   # checked out, so an old copy never keeps building main (an old one published builds without the embedded browser, the guard, voice and the browser helper)
