@@ -516,7 +516,7 @@ mod tests {
         assert!(sent_method(&o).is_none()); assert_eq!((d["@proj.open"].as_str(), d["@proj.text"].as_str(), d[T].as_str()), (Some("1"), Some("~/"), Some("")), "the Add project dialog, as its button opens it");
         let o = send(&cx(), &with("/new-project ..")).unwrap(); assert!(sent_method(&o).is_none()); assert!(says(&o).contains("cannot be a project's folder"), "{}", says(&o));
         assert!(words().as_array().unwrap().iter().any(|w| w["word"] == "/project" && w["label"] == "Create"));
-        assert_eq!(fields("/project ~/x go", true, false, false, &json!([]), "")["send"], "Create", "the button says what Send does");
+        assert_eq!(fields("/project ~/x go", true, false, false, &json!([]), "").unwrap()["send"], "Create", "the button says what Send does");
         assert_eq!(slash_rows(false, "/pro")[0]["name"], "/project");
     }
     #[test] fn a_side_question_goes_to_the_hub_and_never_to_the_thread() {
