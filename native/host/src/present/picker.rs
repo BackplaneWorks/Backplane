@@ -11,6 +11,13 @@ fn expand(text: &str, home: &str) -> String {
     else if let Some(r) = text.strip_prefix("~/") { if r.starts_with('/') || r == "~" || r.starts_with("~/") || crate::plat::fs::is_abs(r) { expand(r, home) } else { format!("{}/{}", home.trim_end_matches('/'), r) } }
     else { text.to_string() }
 }
+/// What the field holds as the hub reads it. On Windows "\\" separates as "/" does ("D:\\x", "\\\\server\\share" read "D:/x", "//server/share"), and a bare drive "D:" is
+/// the drive's root. An empty field is the home folder, but stays empty: the field is the person's to clear (#1230: it was put back as "~/").
+fn norm(text: &str, win: bool) -> String {
+    let t = if win { text.replace('\\', "/") } else { text.to_string() };
+    let b = t.as_bytes();
+    if t.is_empty() { "~/".to_string() } else if win && b.len() == 2 && b[0].is_ascii_alphabetic() && b[1] == b':' { format!("{t}/") } else { t }
+}
 /// (the folder being typed in, the part of a name typed so far): "~/pro" is ("<home>/", "pro"); "~/proj/" is ("<home>/proj/", "").
 fn split(expanded: &str) -> (String, String) {
     if expanded.ends_with('/') { return (expanded.to_string(), String::new()) }
@@ -124,7 +131,7 @@ pub fn folders(drafts: &Value, home: &str, roots: &[(&str, &str)]) -> Value {
     folders_in(CACHE.get_or_init(Default::default), drafts, home, roots)
 }
 fn folders_in(cache: &Shared, drafts: &Value, home: &str, roots: &[(&str, &str)]) -> Value {
-    let text = drafts["@proj.text"].as_str().filter(|t| !t.is_empty()).unwrap_or("~/").to_string();
+    let text = drafts["@proj.text"].as_str().unwrap_or("").to_string();
     // a Git repository's address typed instead of a folder: one row, Clone, which then asks where (the same steps as Clone it here)
     if drafts["@proj.clone"].as_str().unwrap_or("").is_empty() {
         if let Some(origin) = repo_typed(&text) {
@@ -132,7 +139,7 @@ fn folders_in(cache: &Shared, drafts: &Value, home: &str, roots: &[(&str, &str)]
                 "items": [{"label": format!("Clone {origin}"), "action": "proj-clone", "value": origin, "kind": "add"}]});
         }
     }
-    let x = expand(&text, home);
+    let x = expand(&norm(&text, cfg!(windows)), home);
     let (dir, part) = split(&x);
     check(cache, &dir, &part);
     let (all, cut) = names(cache, &dir);
@@ -188,6 +195,15 @@ mod tests {
     use super::*;
     fn open(t: &str) -> Value { json!({"@proj.open": "1", "@proj.text": t}) }
     fn d(tag: &str) -> crate::plat::tmp::TempDir { let p = crate::plat::tmp::dir(&format!("picker-{tag}")); std::fs::create_dir_all(p.join("alpha/inner")).unwrap(); std::fs::create_dir_all(p.join("beta")).unwrap(); std::fs::create_dir_all(p.join(".hidden")).unwrap(); p }
+    #[test] fn the_field_can_be_emptied_and_takes_windows_paths() {
+        assert_eq!(norm("", false), "~/", "an empty field lists the home folder");
+        for (t, want) in [("D:\\", "D:/"), ("D:/", "D:/"), ("D:", "D:/"), ("D:\\work\\board", "D:/work/board"), ("\\\\srv\\share\\x", "//srv/share/x"), ("~\\a", "~/a")] { assert_eq!(norm(t, true), want, "{t}"); }
+        assert_eq!(norm("a\\b", false), "a\\b", "a backslash is a name's character off Windows");
+        assert_eq!(expand(&norm("D:\\x", true), "C:/Users/me"), "D:/x");
+        assert_eq!(expand(&norm("~\\a", true), "C:/Users/me"), "C:/Users/me/a");
+        let f = folders_in(&Shared::default(), &json!({"@proj.open": "1", "@proj.text": ""}), "/nonexistent-home", &[]);
+        assert_eq!(f["text"], "", "the hub does not put \"~/\" back in a field that was emptied");
+    }
     #[test] fn clone_it_here_confirms_the_folder_and_refuses_one_that_holds_something_else() {
         // a repository's address typed where the path goes: one Clone row, in every form people paste
         for (typed, origin) in [("https://github.com/o/Board.git", "github.com/o/Board"), ("git@github.com:o/Board.git", "github.com/o/Board"), ("github.com/o/Board", "github.com/o/Board"), ("~/https://github.com/o/Board.git", "github.com/o/Board"), ("/home/me/work/git@github.com:o/Board.git", "github.com/o/Board"), ("ssh://git@gitlab.example.com/team/sub/r", "gitlab.example.com/team/sub/r")] {
