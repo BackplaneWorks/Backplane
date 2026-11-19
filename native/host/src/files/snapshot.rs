@@ -66,11 +66,9 @@ pub async fn repo_lock(top: &str) -> tokio::sync::OwnedMutexGuard<()> {
 
 /// git with the safe environment, an optional private index, and Backplane as author and committer.
 async fn g(cwd: &str, idx: Option<&str>, args: &[&str]) -> Ran {
-    let script = format!("{}bp_safe; exec git \"$@\"", git::SAFE);
-    let mut a = vec!["-c", script.as_str(), "sh"]; a.extend(args);
     let mut env: Vec<(&str, &str)> = AUTHOR.to_vec();
     if let Some(i) = idx { env.push(("GIT_INDEX_FILE", i)) }
-    git::proc("sh", &a, cwd, &env).await
+    git::run_env(cwd, args, &env).await
 }
 fn ok(r: Ran, what: &str) -> Result<String, String> { if r.code == 0 { Ok(r.out.trim().to_string()) } else { Err(format!("git {what}: {}", r.out.trim())) } }
 
@@ -252,6 +250,10 @@ pub fn snap_msg(thread: &str, turn: u64, title: &str, when: &str) -> String {
 pub async fn snapshot(top: &str, thread: &str, reference: &str, msg: &str, off_branch: bool) -> Result<Snap, String> {
     if crate::copy::on() { return Err("a hub on a copy takes no snapshots".into()) }
     let _l = repo_lock(top).await;
+    git::with_safe(top, snapshot_held(top, thread, reference, msg, off_branch)).await
+}
+/// `snapshot`, its repository locked and its safe environment read once.
+async fn snapshot_held(top: &str, thread: &str, reference: &str, msg: &str, off_branch: bool) -> Result<Snap, String> {
     let mine = owned(top).await && !off_branch;
     let on_branch = mine && git::run_ro(top, &["symbolic-ref", "-q", "HEAD"]).await.code == 0;
     let (commit, made, skipped) = if on_branch {
