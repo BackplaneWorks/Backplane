@@ -262,17 +262,22 @@ impl Mcp {
                     None => {
                         // a document the person's Altium has open: refused with unsaved edits, else closed now and reopened after
                         let paths = crate::files::altium::write::spec::target_paths(&a, std::path::Path::new(&base));
-                        match crate::files::altium::live::before_write(&paths).await {
+                        // one Altium session from the check to the reopen: no script runs between the close and the write
+                        let live = crate::files::altium::live::session(120).await;
+                        match live {
                             Err(why) => fail(&why),
-                            Ok(open) => {
-                                let spec = a.clone();
-                                let ran = tokio::task::spawn_blocking(move || crate::files::altium::write::spec::run(&spec, std::path::Path::new(&base))).await;
-                                match ran {
-                                    Ok(Ok((v, _written))) => { let added = crate::files::altium::write::spec::project_added(&v); (true, crate::files::altium::live::after_write(v, &open, &added).await) }
-                                    Ok(Err(e)) => { let _ = crate::files::altium::live::after_write(json!({}), &open, &[]).await; fail(&e) }
-                                    Err(e) => { let _ = crate::files::altium::live::after_write(json!({}), &open, &[]).await; fail(&e.to_string()) }
+                            Ok(ss) => match crate::files::altium::live::before_write(&ss, &paths).await {
+                                Err(why) => fail(&why),
+                                Ok(open) => {
+                                    let spec = a.clone();
+                                    let ran = tokio::task::spawn_blocking(move || crate::files::altium::write::spec::run(&spec, std::path::Path::new(&base))).await;
+                                    match ran {
+                                        Ok(Ok((v, _written))) => { let added = crate::files::altium::write::spec::project_added(&v); (true, crate::files::altium::live::after_write(&ss, v, &open, &added).await) }
+                                        Ok(Err(e)) => { let _ = crate::files::altium::live::after_write(&ss, json!({}), &open, &[]).await; fail(&e) }
+                                        Err(e) => { let _ = crate::files::altium::live::after_write(&ss, json!({}), &open, &[]).await; fail(&e.to_string()) }
+                                    }
                                 }
-                            }
+                            },
                         }
                     }
                 }

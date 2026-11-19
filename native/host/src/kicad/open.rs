@@ -128,7 +128,7 @@ pub async fn open(hub: &Arc<Hub>, thread: &str, key: &str) -> Result<String, Str
     let root = crate::files::root_of(hub, thread).await.map(|r| r.to_string_lossy().to_string()).unwrap_or_default();
     // an Altium project: what is on show (a .PcbDoc or .SchDoc, else the project) opens in the person's Altium
     if let Some(file) = altium_target(&key, &root) {
-        let r = crate::files::altium::live::open_file(&file);
+        let r = crate::files::altium::live::open_file(&file).await;
         let now = crate::agents::now_ms();
         let (tone, summary) = match &r { Ok(_) => ("info", format!("Opened {} in Altium", file.rsplit(['/', '\\']).next().unwrap_or(&file))), Err(why) => ("warn", format!("Open in Altium: {why}")) };
         let _ = hub.commit(&json!({"$":"ActivityLogged","thread":thread,"act":format!("kicad-open:{now}"),"tone":tone,"kind":"kicad","summary":summary,"at":now})).await;
