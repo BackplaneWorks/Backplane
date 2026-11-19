@@ -32,6 +32,9 @@ SUITES=(
   "embed_unsaved_person_e2e.sh:unsaved-person"
   # #1224: the zone fill of an agent's own kicad_edit is the agent's; the person's own Fill is theirs. Fork mode, coedit runtimes.
   "embed_fill_actor_e2e.sh:fill-actor"
+  # an agent's footprint exchange while the person's Choose Symbol has KiCad's full footprint load running: kicad_edit waits for each
+  # library by its status (bp.13.2 b5/b6 Fix 1). Fork mode only.
+  "embed_lib_wait_e2e.sh:lib-wait"
   # the person's edits in KiCad's plan view (bp.13+; skips itself on runtimes without them, and outside fork mode)
   "embed_plan_person_e2e.sh:plan-person"
   # an agent routes in plan view; the Plan panel rows there (bp.13 batch 11 plan-view-api; skips itself without it)
