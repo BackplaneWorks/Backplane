@@ -1007,7 +1007,18 @@ try:
             back = wait_for(kicad_frame, 10, 0.1); shot(f'hide-{who}-back')
             check(bool(back), f'hide: unhidden, KiCad\'s frame is directly above Backplane\'s window over the pane ({who})')
             if back:
-                P = last_push()[0]; canvas_click()
+                P = last_push()[0]
+                # what is under the click, every layer (wins() keeps layer 0 only): e2e-macos 44540065022, the Backplane-focused case, a
+                # click there left Backplane active and never reached KiCad though KiCad's frame was directly above Backplane's window
+                cx, cy = P[0] + P[2] * 0.5, P[1] + P[3] * 0.5
+                under = [(int(w.get('kCGWindowNumber', 0)), int(w.get('kCGWindowOwnerPID', 0)), w.get('kCGWindowOwnerName', ''), int(w.get('kCGWindowLayer', 0)),
+                          round(float(w.get('kCGWindowAlpha', 1)), 2), w.get('kCGWindowName') or '', tuple(round(v) for v in (b['X'], b['Y'], b['Width'], b['Height'])))
+                         for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID) or []
+                         for b in [w.get('kCGWindowBounds') or {}] if b and b['X'] <= cx < b['X'] + b['Width'] and b['Y'] <= cy < b['Y'] + b['Height']]
+                ka = NSRunningApplication.runningApplicationWithProcessIdentifier_(kpid)
+                print(f'INFO hide: under the click at ({round(cx)}, {round(cy)}) front to back ({who}): {under[:6]}; KiCad hidden {bool(ka and ka.isHidden())}, '
+                      f'Backplane pid {client.pid}, KiCad pid {kpid}', flush=True)
+                canvas_click()
                 got = active(kpid); time.sleep(1.0); kept = active(kpid)
                 print(f'INFO hide: after the click ({who}): KiCad active {got}, a second on {kept}; Backplane active {active(client.pid)}', flush=True)
                 check(got and kept, f'hide: after the unhide a click gives KiCad the keyboard, and it keeps it ({who})')
