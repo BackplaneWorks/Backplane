@@ -94,7 +94,7 @@ begin
     Comp.MoveToXY(Board.XOrigin + MMsToCoord(X), Board.YOrigin + MMsToCoord(RowYmm));
     R := Comp.BoundingRectangle;
     X := X + CoordToMMs(R.Right - R.Left) + 2;
-    Emit('placed ' + C.DM_PhysicalDesignator + ' ' + C.DM_Footprint + ' at ' + FormatFloat('0.##', CoordToMMs(Comp.x - Board.XOrigin)) + ',' + FormatFloat('0.##', RowYmm) + ' mm');
+    Emit('placed ' + C.DM_PhysicalDesignator + ' ' + C.DM_Footprint + ' at ' + BpFmt('0.##', CoordToMMs(Comp.x - Board.XOrigin)) + ',' + BpFmt('0.##', RowYmm) + ' mm');
     Result := True;
 end;
 function FindPad(Comp : IPCB_Component; Name : String) : IPCB_Pad;

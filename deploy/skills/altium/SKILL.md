@@ -121,9 +121,17 @@ A new design, all by script (verified end to end): `new_documents` (sheet and bo
 - **Altium's own dialogs: `BpExpect(Title, Steps)`.** A process that opens a modal window (the ECO, Situs's strategy
   dialog, the IPC batch generator) blocks the script until the window closes. Call `BpExpect` just before it and the hub
   works the window: `click <caption>` (trailing `*` = caption starts with), `wait <s>`, `text <n> = <value>` (n-th edit
-  box), `window <title>` (go on in a window it opened, e.g. a file box), `gone <s>`. What it did comes back as `driven`;
-  a step it cannot do closes the window (as Cancel) and lists the buttons the window had. Without `BpExpect` the hub
-  only answers message boxes, and the run waits out its timeout.
+  box), `window <title>` (go on in a window it opened, e.g. a file box), `gone <s>`. `BpMayExpect` for a window that comes
+  only sometimes. Write titles and captions in English: the hub also matches Altium's own translations of them, and finds
+  Windows' file box (`window Open`, `click Open`/`Save`) in any language. What it did comes back as `driven`; a step it
+  cannot do closes that window (as Cancel), lists what the window offered, and makes the run not ok (so does an expected
+  window that never came). Without `BpExpect` the hub leaves the window for the person and the run waits out its timeout.
+- **Numbers: `BpNum(S)` and `BpFmt(Fmt, X)`, never `StrToFloat`/`FloatToStr`/`FormatFloat` on text.** On a machine whose
+  Windows uses a decimal comma (German, French, ...), `StrToFloat('1.5')` fails and `FloatToStr(1.5)` gives `1,5`. `BpNum`
+  reads a decimal point and `BpFmt` writes one, whatever the locale. Read and check every number before the first edit, so a
+  bad one stops the script with nothing changed.
+- **`BpFail(Msg)`** ends the run not ok with your message (the lines emitted are kept): use it for a partial result or a check
+  that failed, never `Emit` alone.
 - **`var` before `const`.** The hub turns your `var` section into globals; a `const` section placed before it makes the
   variables "typed constants" and the script does not compile. Every recipe has `var` first, then `const`.
 - **Never send a script that does not compile.** A compile error leaves Altium with an Error box the hub does not close,
@@ -175,9 +183,12 @@ Only what no script can reach (below). Everything else, Update PCB included, is 
 ## How results look
 
 A result has `ok`, `output` (your `Emit` lines), `error`, `dialogs` and, after `BpExpect`, `driven`. `ok: false` with an `error` is an exception in
-your script (the lines emitted before it are kept). Anything in `dialogs` is a box Altium raised and the hub answered,
-as `<title | text | buttons> => pressed <button>` (Altium's own boxes often show only their title: their message text
-cannot be read). The hub never presses a button that throws work away (No on a save prompt, Don't Save, Discard,
-Reload). On a box that asks about saving it presses Cancel, or else Yes to save. When a box stopped the run, first check that every
-document you were editing is still open and save it; if one closed, redo its change by script. Do not retry blindly. Loops stop at the deadline
+your script or a `BpFail` (the lines emitted before it are kept). `dialogs` says what the hub did with Altium's boxes. It
+answers only the script engine's own box (a compile or run error: Cancel, which stops the script; "did not compile" means
+nothing of it ran) and a box with a single button that came up while your script ran (`=> pressed OK`: it decided nothing).
+Every other box is the person's to answer and is named as `left for the person: "<title>" [buttons]`; the hub never presses
+a button that decides something and never closes a window it did not open. A run that times out after its script started
+blocks the next ones until it ends (the next call says what became of it): do not retry in a loop; look at what it was
+doing. When a box ended the run ("Altium ended the script"), first check that every document you were editing is still open
+and save it; if one closed, redo its change by script. Do not retry blindly. Loops stop at the deadline
 (`BP-LOOP-GUARD` in the output): narrow the work instead of raising the timeout.

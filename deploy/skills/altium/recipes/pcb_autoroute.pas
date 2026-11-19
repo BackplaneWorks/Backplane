@@ -102,7 +102,17 @@ begin
     Board.AddPCBObject(Rule);
     PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Rule.I_ObjectAddress);
     PCBServer.PostProcess;
-    Emit('only nets ' + Nets + ' (rule ' + Rule.Name + ', priority ' + IntToStr(Rule.Priority) + ')');
+    // it must outrank every other routing-layers rule, or the other nets still route
+    if Rule.Priority <> 1 then
+    begin
+        PCBServer.PreProcess;
+        Board.RemovePCBObject(Rule);
+        PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Rule.I_ObjectAddress);
+        PCBServer.PostProcess;
+        BpFail('the temporary rule got priority ' + IntToStr(Rule.Priority) + ', not 1: removed it, routed nothing');
+        Exit;
+    end;
+    Emit('only nets ' + Nets + ' (rule ' + Rule.Name + ', priority 1)');
 end;
 ResetParameters;
 if Mode = 'all' then
@@ -123,14 +133,19 @@ begin
     if Mode = 'between' then AddStringParameter('Action', 'BetweenSelectedComponents')
     else AddStringParameter('Action', 'OnSelectedComponents');
 end;
-RunProcess('PCB:Autoroute');
-if Mode <> 'all' then DeselectAll;
-if Rule <> nil then
-begin
-    PCBServer.PreProcess;
-    Board.RemovePCBObject(Rule);
-    PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Rule.I_ObjectAddress);
-    PCBServer.PostProcess;
+// the temporary rule goes whatever happens while routing
+try
+    RunProcess('PCB:Autoroute');
+finally
+    if Mode <> 'all' then DeselectAll;
+    if Rule <> nil then
+    begin
+        PCBServer.PreProcess;
+        Board.RemovePCBObject(Rule);
+        PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Rule.I_ObjectAddress);
+        PCBServer.PostProcess;
+        Emit('removed the temporary rule ' + Rule.Name);
+    end;
 end;
 C1 := Count(eConnectionObject); T1 := Count(eTrackObject); V1 := Count(eViaObject);
 Emit('after: unrouted connections ' + IntToStr(C1) + ', tracks ' + IntToStr(T1) + ' (+' + IntToStr(T1 - T0) + '), vias ' + IntToStr(V1) + ' (+' + IntToStr(V1 - V0) + ')');

@@ -13,7 +13,7 @@ const
     PcbPath = 'C:\Projects\Board\Board.PcbDoc';
 function MM(C : Integer) : String;
 begin
-    Result := FormatFloat('0.###', CoordToMMs(C));
+    Result := BpFmt('0.###', CoordToMMs(C));
 end;
 SD := Client.GetDocumentByPath(PcbPath);
 if SD = nil then SD := Client.OpenDocument('PCB', PcbPath);
@@ -28,7 +28,7 @@ Comp := It.FirstPCBObject;
 while Comp <> nil do
 begin
     Emit(Comp.Name.Text + ' | ' + Comp.Pattern + ' | ' + Comp.Comment.Text + ' | ' + MM(Comp.x - Board.XOrigin) + ',' + MM(Comp.y - Board.YOrigin) + ' mm | rot '
-        + FormatFloat('0.#', Comp.Rotation) + ' | ' + Layer2String(Comp.Layer));
+        + BpFmt('0.#', Comp.Rotation) + ' | ' + Layer2String(Comp.Layer));
     Comp := It.NextPCBObject;
 end;
 Board.BoardIterator_Destroy(It);

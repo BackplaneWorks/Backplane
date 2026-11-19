@@ -11,7 +11,7 @@ const
     Left = -22; Bottom = -24; Right = -13; Top = -20;   // the area, mm from the board origin
 function MM(C : Integer) : String;
 begin
-    Result := FormatFloat('0.###', CoordToMMs(C));
+    Result := BpFmt('0.###', CoordToMMs(C));
 end;
 SD := Client.GetDocumentByPath(PcbPath);
 if SD = nil then SD := Client.OpenDocument('PCB', PcbPath);

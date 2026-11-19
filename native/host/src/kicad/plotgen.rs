@@ -256,12 +256,10 @@ pub fn of_bytes(kind: u32, b: &[u8], fixed: bool) -> Read { of_bytes_at(kind, b,
 /// of_bytes for the file at `path` ("" unknown): an Altium sheet's special strings get its project's parameters and its name
 pub fn of_bytes_at(kind: u32, b: &[u8], fixed: bool, path: &str) -> Read {
     // an Altium document (an OLE compound file): its own reader, the same items (altium/)
-    if crate::files::altium::is_cfb(b) {
-        use crate::files::altium::{pcb, sch};
-        let its = if kind == 0 { pcb::items(b) } else if path.is_empty() { sch::items(b) } else { sch::items_in(b, sch::Ctx::of_path(path)) };
-        let Some(its) = its else { return if fixed { Read::Fail(UNREAD.into()) } else { Read::Half } };
+    if super::altium_hook::is_cfb(b) {
+        let Some((its, thick)) = super::altium_hook::items(kind, b, path) else { return if fixed { Read::Fail(UNREAD.into()) } else { Read::Half } };
         let (mut p, t) = items_plot(its, kind);
-        p.thick = if kind == 0 { pcb::thickness_um(b) } else { 0 };
+        p.thick = thick;
         return Read::Plot(Box::new(p), t)
     }
     let Some(fs) = sexpr::forms(b) else { return if fixed { Read::Fail(UNREAD.into()) } else { Read::Half } };

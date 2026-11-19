@@ -36,7 +36,7 @@ begin
 end;
 procedure Corner(X, Y : Double);
 begin
-    Xs.Add(FloatToStr(X)); Ys.Add(FloatToStr(Y));
+    Xs.Add(BpFmt('0.######', X)); Ys.Add(BpFmt('0.######', Y));
 end;
 SD := Client.GetDocumentByPath(PcbPath);
 if SD = nil then SD := Client.OpenDocument('PCB', PcbPath);
@@ -65,8 +65,8 @@ for I := 0 to N - 1 do
     begin
         K := (I + 1) mod N;
         Track := PCBServer.PCBObjectFactory(eTrackObject, eNoDimension, eCreate_Default);
-        Track.X1 := Board.XOrigin + MMsToCoord(StrToFloat(Xs[I])); Track.Y1 := Board.YOrigin + MMsToCoord(StrToFloat(Ys[I]));
-        Track.X2 := Board.XOrigin + MMsToCoord(StrToFloat(Xs[K])); Track.Y2 := Board.YOrigin + MMsToCoord(StrToFloat(Ys[K]));
+        Track.X1 := Board.XOrigin + MMsToCoord(BpNum(Xs[I])); Track.Y1 := Board.YOrigin + MMsToCoord(BpNum(Ys[I]));
+        Track.X2 := Board.XOrigin + MMsToCoord(BpNum(Xs[K])); Track.Y2 := Board.YOrigin + MMsToCoord(BpNum(Ys[K]));
         Track.Layer := Mech(MechLayer);
         Track.Width := MMsToCoord(LineMM);
         Board.AddPCBObject(Track);
@@ -82,7 +82,7 @@ AddStringParameter('Scope', 'All');
 RunProcess('PCB:DeSelect');
 Board.GraphicallyInvalidate;
 BO := Board.BoardOutline;
-Emit('board outline ' + IntToStr(N) + ' corners, ' + FloatToStr(WidthMM) + ' x ' + FloatToStr(HeightMM) + ' mm from the origin; box ' +
-    FormatFloat('0.##', CoordToMMs(BO.BoundingRectangle.Left - Board.XOrigin)) + ',' + FormatFloat('0.##', CoordToMMs(BO.BoundingRectangle.Bottom - Board.YOrigin)) + ' - ' +
-    FormatFloat('0.##', CoordToMMs(BO.BoundingRectangle.Right - Board.XOrigin)) + ',' + FormatFloat('0.##', CoordToMMs(BO.BoundingRectangle.Top - Board.YOrigin)) + '; modified=' + BoolToStr(SD.Modified, True));
+Emit('board outline ' + IntToStr(N) + ' corners, ' + BpFmt('0.###', WidthMM) + ' x ' + BpFmt('0.###', HeightMM) + ' mm from the origin; box ' +
+    BpFmt('0.##', CoordToMMs(BO.BoundingRectangle.Left - Board.XOrigin)) + ',' + BpFmt('0.##', CoordToMMs(BO.BoundingRectangle.Bottom - Board.YOrigin)) + ' - ' +
+    BpFmt('0.##', CoordToMMs(BO.BoundingRectangle.Right - Board.XOrigin)) + ',' + BpFmt('0.##', CoordToMMs(BO.BoundingRectangle.Top - Board.YOrigin)) + '; modified=' + BoolToStr(SD.Modified, True));
 Xs.Free; Ys.Free;
