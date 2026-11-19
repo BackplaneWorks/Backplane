@@ -20,6 +20,9 @@ use serde_json::{json, Value};
 use std::{collections::{HashMap, HashSet, VecDeque}, path::{Path, PathBuf}, process::Stdio, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex, OnceLock}, time::Duration};
 use tokio::{io::{AsyncBufReadExt, AsyncRead, BufReader}, sync::{mpsc, oneshot}};
 
+/// The most KiCads the hub keeps running at once, in all: those in panes, parked and warmed, the one being asked for included (not 3 besides
+/// it). A warm-up or an Edit that would start one more first closes the oldest clean one in no pane ([`evict_warm`]); a warm-up with none
+/// such is refused.
 pub const MAX_WARM: usize = 3;
 const EVENTS_LINE: &str = "KiCad embed events at ";
 
@@ -86,8 +89,11 @@ pub struct Session {
     /// macOS (`embed-reserved-key-event`): the reserved chords pressed in KiCad (ET_RESERVED_KEY), the last 8 as [seq, index in
     /// SetReservedKeys or 63 for the comment key]; elsewhere they reach the client's window directly (_BACKPLANE_KEY / WM_APP)
     pub keys: Vec<(u64, u64)>,
-    /// KiCad's resident memory, MB (Linux, sampled on the health tick; 0 unknown): the warm policy's measure of what a KiCad costs
+    /// KiCad's resident memory now, MB (sampled on the health tick, mem.rs `proc_mb`; 0 unknown)
     pub rss_mb: u64,
+    /// its peak so far, MB (Linux VmHWM, macOS lifetime maximum footprint, Windows peak working set; 0 unknown): the warm policy's measure
+    /// of what a KiCad costs
+    pub peak_mb: u64,
     /// a request of the hub's drive (a show, a pre-warm) waits on KiCad's check or refill task (task-gate-reads): its description, "" for none
     pub task_wait: String,
     /// a start's last step ("spawned", "socket", "answering", "first show") and when KiCad was started (epoch ms): a pane waiting on it
@@ -115,7 +121,7 @@ impl Session {
             container: 0, toplevel: 0, holder: 0, display: String::new(), start_phase: String::new(), start_at: 0, lock_ask: Value::Null,
             sock: String::new(), events_sock: String::new(), sock_dir: String::new(),
             argv: String::new(), cli: String::new(), version: String::new(), desc: String::new(),
-            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], keys: vec![], rss_mb: 0, task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None),
+            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], keys: vec![], rss_mb: 0, peak_mb: 0, task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None),
         }
     }
     pub fn spawned(mut self, pid: u32) -> Self { self.pid = pid; self }
@@ -228,7 +234,7 @@ impl Session {
             "notices": self.notices,
             "drawn": self.drawn,
             "keys": self.keys,
-            "rss_mb": self.rss_mb,
+            "rss_mb": self.rss_mb, "peak_mb": self.peak_mb,
             "task_wait": self.task_wait,
             "start_phase": self.start_phase, "start_at": self.start_at, "lock_ask": self.lock_ask,
             // what the embedded editor can do beyond the basics (embed-gerbview, embed-editor-requested, ...): the client gates on these
@@ -629,7 +635,8 @@ pub fn fork_argv(kicad_bin: &str, pro: &str, sock: &str, container: u64, topleve
     v
 }
 
-/// Least-recently-used detached clean session to evict before spawning a new one when live sessions >= `max_warm`.
+/// Least-recently-used detached clean session to evict before starting `keep_pro`'s KiCad when the others running are `max_warm` already
+/// (so that with it there are never more than `max_warm` in all).
 pub fn evict_warm(sessions: &HashMap<String, Session>, keep_pro: &str, max_warm: usize) -> Option<String> {
     let live = sessions.values().filter(|s| s.pro != keep_pro && s.is_live()).count();
     if live < max_warm { return None }
@@ -643,51 +650,118 @@ pub fn evict_warm(sessions: &HashMap<String, Session>, keep_pro: &str, max_warm:
 /// (`editor.kicad.warm`) when it shows a thread of a project on this machine; the hub decides here.
 #[derive(Clone, Copy, Debug)]
 pub struct WarmCfg {
+    /// KiCads running at once, in all ([`MAX_WARM`])
     pub max: usize, pub idle_s: u64,
-    /// what a KiCad is taken to cost before one has been measured (bp.12 measured on real boards: 4.5-5.1 GB at its peak, the global footprint
-    /// table parsed at start)
+    /// what a KiCad is taken to cost before one has been measured running (KICAD_MB_*)
     pub kicad_mb: u64,
-    /// memory left free for everything else once the new KiCad has started
+    /// memory left free for everything else once the new KiCad has started ([`warm_headroom_mb`])
     pub headroom_mb: u64,
+    /// memory pressure (Linux PSI `full avg10`, percent: every non-idle task waiting for memory) at or above which nothing is warmed
+    /// whatever is free: the machine is thrashing already, and a KiCad would push it further into swap
+    pub pressure_max: f64,
 }
+/// What a KiCad costs before one has been measured running on this machine: a medium board's, with the schematic the hub pre-warms by
+/// itself after the board shows (every warm KiCad gets there) and room for 3D. The peak of a KiCad running is what protects on a large
+/// board: it replaces this as soon as it is higher. bp.12 parsed the global footprint table at start and took 4.5-5.1 GB (the 5,200 MB
+/// this replaces). Measured on the published runtime bp.13.2 (edfc943200), Nov 19 2026, medians (Integrator: 3 runs on Linux; Lane M:
+/// 6 on macOS), demo boards A (kit-dev-coldfire-xilinx_5213, 160 footprints, 3 sheets) and B (stickhub, 94 footprints):
+/// Linux, h@backplane, VmRSS: A board 752 MB, + schematic 1043, + 3D 1705; B board ~700, + schematic ~1000.
+pub const KICAD_MB_LINUX: u64 = 2048;
+/// macOS, M4 16 GB, `ps` RSS: A board 596 MB, + schematic 719, + 3D 854; B 560 / 638. The hub reads the peak physical footprint, which
+/// reads higher than RSS: the Linux figure until the footprint has been measured there.
+pub const KICAD_MB_MACOS: u64 = 2048;
+/// Windows: not measured yet: the Linux figure.
+pub const KICAD_MB_WINDOWS: u64 = 2048;
+pub const KICAD_MB: u64 = if cfg!(target_os = "macos") { KICAD_MB_MACOS } else if cfg!(windows) { KICAD_MB_WINDOWS } else { KICAD_MB_LINUX };
 /// Free memory (MemAvailable) below which the other editors are not pre-warmed after the first is on show: a pre-warmed schematic took
-/// ~1.5 GB on Hubble_DK, and the headroom for everything else is kept as for a warm KiCad (WARM.headroom_mb).
+/// ~1.5 GB on Hubble_DK (bp.12), and the headroom for everything else is kept as the warm-up's was then (4 GB). Unchanged by the warm-up's
+/// rule (pinned in a test); read on Linux only, as before ([`prewarm_free_mb`]).
 pub const PREWARM_FREE_MB: u64 = 2048 + 4096;
-pub const WARM: WarmCfg = WarmCfg { max: MAX_WARM, idle_s: 5 * 60, kicad_mb: 5200, headroom_mb: 4096 };
-
-/// What the next KiCad will cost: the largest one measured running, else the configured guess.
-pub fn kicad_cost_mb(sessions: &HashMap<String, Session>, cfg: WarmCfg) -> u64 {
-    sessions.values().filter(|s| s.is_live()).map(|s| s.rss_mb).max().filter(|m| *m > 0).unwrap_or(cfg.kicad_mb)
+/// The warm-up's defaults; the headroom here is the most it is ([`warm_cfg`] sets this machine's).
+pub const WARM: WarmCfg = WarmCfg { max: MAX_WARM, idle_s: 5 * 60, kicad_mb: KICAD_MB, headroom_mb: WARM_HEADROOM_MAX_MB, pressure_max: 10.0 };
+pub const WARM_HEADROOM_MIN_MB: u64 = 2048;
+pub const WARM_HEADROOM_MAX_MB: u64 = 4096;
+/// The room kept for everything else: an eighth of the machine's memory, at least 2 GB and at most 4 GB (4 GB at 32 GB and above, 2 GB at
+/// 16 GB and below). Unknown total: the most.
+pub fn warm_headroom_mb(total_mb: Option<u64>) -> u64 {
+    total_mb.map_or(WARM_HEADROOM_MAX_MB, |t| (t / 8).clamp(WARM_HEADROOM_MIN_MB, WARM_HEADROOM_MAX_MB))
+}
+/// This machine's warm-up rule: [`WARM`] with the headroom for its memory. BACKPLANE_KICAD_WARM_HEADROOM_MB overrides the headroom and
+/// BACKPLANE_KICAD_WARM_PRESSURE_MAX the pressure limit (tests on a shared, loaded box; a forced refusal with a huge headroom).
+pub fn warm_cfg() -> WarmCfg {
+    let over = std::env::var("BACKPLANE_KICAD_WARM_HEADROOM_MB").ok().and_then(|v| v.parse::<u64>().ok());
+    let pressure = std::env::var("BACKPLANE_KICAD_WARM_PRESSURE_MAX").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(WARM.pressure_max);
+    WarmCfg { headroom_mb: over.unwrap_or_else(|| warm_headroom_mb(super::mem::total_mb())), pressure_max: pressure, ..WARM }
+}
+/// The machine's memory as the warm-up reads it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MemNow {
+    /// available (None: this platform cannot say: taken as enough)
+    pub free_mb: Option<u64>,
+    /// Linux PSI `full avg10` (None: unreadable, taken as no pressure)
+    pub pressure: Option<f64>,
+}
+impl MemNow {
+    pub fn read() -> MemNow { MemNow { free_mb: super::mem::free_mb(), pressure: super::mem::pressure_avg10() } }
+}
+/// The memory line the hub logs at start: what the warm-up will read on this machine (Lane M and Carbon read it on macOS and Windows,
+/// where no client asks for a warm-up yet).
+pub fn warm_memory_line() -> String {
+    let (free, total, cfg) = (super::mem::free_mb(), super::mem::total_mb(), warm_cfg());
+    let mb = |v: Option<u64>| v.map_or("unknown".to_string(), |m| format!("{m} MB"));
+    format!("kicad embed: memory: free {}, total {}, pressure {}; warm-up needs a KiCad's {} MB (before one is measured) + headroom {} MB",
+        mb(free), mb(total), super::mem::pressure_avg10().map_or("unknown".into(), |p| format!("{p:.2}")), cfg.kicad_mb, cfg.headroom_mb)
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// What the next KiCad will cost, and where the figure comes from: the largest peak of a KiCad running now, never below the default
+/// (a KiCad still loading, or a small project, must not make the next look cheap).
+pub fn kicad_cost_mb(sessions: &HashMap<String, Session>, cfg: WarmCfg) -> (u64, &'static str) {
+    let measured = sessions.values().filter(|s| s.is_live()).map(|s| s.peak_mb).max().unwrap_or(0);
+    if measured > cfg.kicad_mb { (measured, "measured") } else { (cfg.kicad_mb, "default") }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Warm {
     /// start KiCad detached (no pane yet), first closing `evict` (a clean, idle one) when the cap is reached
     Start { evict: Option<String> },
     /// it is up (or starting) already: only remembered as used now
     Have,
-    /// not now, and why (said in the reply; Edit still starts it)
-    No(&'static str),
+    /// not now, and why (said in the reply and the hub log; Edit still starts it, cold)
+    No(String),
 }
 
 /// Whether to warm `pro`. `hardware`: the project has KiCad files; `locked`: a KiCad lock file of the project's is there and no session of
 /// ours holds it (the person's own KiCad, or a crash's leftover: KiCad would ask about it in a dialog, which a pre-warm must never raise);
-/// `free_mb`: memory available (None: unknown, taken as enough); `quiet`: the runtime loads with no window of its own on screen (bp.12's
-/// ET_PROGRESS instead of KiCad's progress windows: an older one shows "Load PCB" over Backplane when a thread is merely shown).
-pub fn warm_decision(sessions: &HashMap<String, Session>, pro: &str, hardware: bool, locked: bool, free_mb: Option<u64>, quiet: bool, cfg: WarmCfg) -> Warm {
-    if !hardware { return Warm::No("not a KiCad project") }
-    if !quiet && !sessions.get(pro).is_some_and(Session::is_live) { return Warm::No("this KiCad shows its own windows while loading (needs Backplane KiCad bp.12)") }
+/// `mem`: the machine's memory now; `quiet`: the runtime loads with no window of its own on screen (bp.12's ET_PROGRESS instead of
+/// KiCad's progress windows: an older one shows "Load PCB" over Backplane when a thread is merely shown).
+pub fn warm_decision(sessions: &HashMap<String, Session>, pro: &str, hardware: bool, locked: bool, mem: MemNow, quiet: bool, cfg: WarmCfg) -> Warm {
+    let no = |w: &str| Warm::No(w.to_string());
+    if !hardware { return no("not a KiCad project") }
+    if !quiet && !sessions.get(pro).is_some_and(Session::is_live) { return no("this KiCad shows its own windows while loading (needs Backplane KiCad bp.12)") }
     if sessions.get(pro).is_some_and(Session::is_live) { return Warm::Have }
     // a session that failed or was closed by the person is not started again behind their back; Edit does that
-    if sessions.get(pro).is_some_and(|s| s.state == "failed" || s.state == CLOSED || s.reason == "KiCad was closed") { return Warm::No("KiCad stopped for this project; Edit starts it") }
-    if locked { return Warm::No("the project is open in another KiCad") }
-    // memory: the new KiCad's cost and the headroom must fit (builds and other programs take theirs first); room made by an eviction is
-    // not counted on: a refused warm costs only Edit's cold start
-    if free_mb.is_some_and(|m| m < kicad_cost_mb(sessions, cfg) + cfg.headroom_mb) { return Warm::No("too little free memory") }
+    if sessions.get(pro).is_some_and(|s| s.state == "failed" || s.state == CLOSED || s.reason == "KiCad was closed") { return no("KiCad stopped for this project; Edit starts it") }
+    if locked { return no("the project is open in another KiCad") }
+    // memory: the machine already waiting for memory (a build growing) refuses whatever the numbers; else the new KiCad's cost and the
+    // headroom must fit in what is available (builds and other programs take theirs first). Room made by an eviction is not counted on:
+    // a refused warm costs only Edit's cold start
+    if let Some(p) = mem.pressure.filter(|p| *p >= cfg.pressure_max) {
+        return Warm::No(format!("memory pressure (full avg10 {p:.2} >= {:.0})", cfg.pressure_max))
+    }
+    let (cost, src) = kicad_cost_mb(sessions, cfg);
+    if let Some(free) = mem.free_mb.filter(|m| *m < cost + cfg.headroom_mb) {
+        return Warm::No(format!("too little free memory (free {free} MB < KiCad {cost} MB ({src}) + headroom {} MB)", cfg.headroom_mb))
+    }
     let live = sessions.values().filter(|s| s.pro != pro && s.is_live()).count();
     if live < cfg.max { return Warm::Start { evict: None } }
-    match evict_warm(sessions, pro, cfg.max) { Some(v) => Warm::Start { evict: Some(v) }, None => Warm::No("as many KiCads as are kept warm are in use") }
+    match evict_warm(sessions, pro, cfg.max) { Some(v) => Warm::Start { evict: Some(v) }, None => no("as many KiCads as are kept warm are in use") }
 }
+
+/// The free memory the post-Edit pre-warm reads: Linux only, as before the warm-up's rule (elsewhere unknown, so never held back): a real
+/// reading on macOS (free + inactive + purgeable) would hold the pre-warm back on a 16 GB Mac, a change not made here.
+pub fn prewarm_free_mb() -> Option<u64> { if cfg!(target_os = "linux") { super::mem::free_mb() } else { None } }
+/// The pre-warm's memory gate: Some(free) when `free` is under `floor` (refused), None when allowed or unknown.
+pub fn prewarm_refused(free: Option<u64>, floor: u64) -> Option<u64> { free.filter(|f| *f < floor) }
 
 /// How long after the last desktop client that used KiCad went before its KiCads are closed: a reconnect (a new connection id) is not a close.
 pub const APP_GONE_S: u64 = 15;
@@ -736,16 +810,6 @@ pub fn stall_total_us(text: &str) -> Option<u64> {
     text.lines().find(|l| l.starts_with("some "))?.split_whitespace().find_map(|f| f.strip_prefix("total="))?.parse().ok()
 }
 
-/// A process's resident memory in MB (Linux; None elsewhere).
-fn rss_mb(pid: u32) -> Option<u64> {
-    let st = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
-    st.lines().find(|l| l.starts_with("VmRSS:"))?.split_whitespace().nth(1)?.parse::<u64>().ok().map(|kb| kb / 1024)
-}
-/// MemAvailable in MB (Linux; None elsewhere).
-fn free_mb() -> Option<u64> {
-    let m = std::fs::read_to_string("/proc/meminfo").ok()?;
-    m.lines().find(|l| l.starts_with("MemAvailable:"))?.split_whitespace().nth(1)?.parse::<u64>().ok().map(|kb| kb / 1024)
-}
 
 fn u64_of(v: &Value) -> u64 {
     v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok())).unwrap_or(0)
@@ -1511,6 +1575,8 @@ fn start_window(pro: &str) -> (u64, bool) {
 #[cfg(not(test))] fn test_window(_pro: &str) -> Option<u64> { None }
 
 impl Actor {
+    /// KiCads of the hub's running now (any state but stopped or failed).
+    fn live_count(&self) -> usize { self.sessions.values().filter(|s| s.is_live()).count() }
     fn ensure_helper(&mut self) {
         if self.helper.is_some() { return }
         self.hgen += 1; let g = self.hgen; let me = self.me.clone();
@@ -1715,7 +1781,10 @@ impl Actor {
         self.start_env.insert(pro.clone(), env.clone());
 
         // Warm-session cap: retire the oldest detached clean session before starting a 4th GUI KiCad.
-        if let Some(victim) = evict_warm(&self.sessions, &pro, MAX_WARM) { self.retire(&victim); }
+        if let Some(victim) = evict_warm(&self.sessions, &pro, MAX_WARM) {
+            eprintln!("kicad embed: evicting {victim}: {} KiCads running, the cap is {MAX_WARM} in all; room for {pro} (Edit)", self.live_count());
+            self.retire(&victim);
+        }
 
         let kicad_bin = match kicad_gui_bin(&env.cli) {
             // Backplane KiCad on a computer whose glibc is at least its own: started on the computer's loader and graphics driver
@@ -2086,16 +2155,17 @@ impl Actor {
                 };
                 let (desc, _) = discover_desc(&self.hub.cfg.home, &env);
                 let quiet = !desc.is_empty() && proto::load(&desc).has_own("kiapi.backplane.embed.CancelProgress");
-                // BACKPLANE_KICAD_WARM_HEADROOM_MB overrides the room kept beside KiCad's own estimate (tests on a shared, loaded box)
-                let cfg = match std::env::var("BACKPLANE_KICAD_WARM_HEADROOM_MB").ok().and_then(|v| v.parse::<u64>().ok()) { Some(h) => WarmCfg { headroom_mb: h, ..WARM }, None => WARM };
-                match warm_decision(&self.sessions, &pro, hardware, locked, free_mb(), quiet, cfg) {
+                match warm_decision(&self.sessions, &pro, hardware, locked, MemNow::read(), quiet, warm_cfg()) {
                     Warm::Have => {
                         if let Some(s) = self.sessions.get_mut(&pro) { s.touched_at = ipc::now_s(); }
                         let _ = reply.send(Ok(json!({"warm": true, "started": false})));
                     }
                     Warm::No(why) => { eprintln!("kicad embed: not warming {pro}: {why} (runtime {} {}, api.desc {desc})", env.root, env.version); let _ = reply.send(Ok(json!({"warm": false, "why": why}))); }
                     Warm::Start { evict } => {
-                        if let Some(v) = evict { self.retire(&v); }
+                        if let Some(v) = evict {
+                            eprintln!("kicad embed: evicting {v}: {} KiCads running, the cap is {} in all; room for {pro} (warm-up)", self.live_count(), WARM.max);
+                            self.retire(&v);
+                        }
                         eprintln!("kicad embed: warming {pro}");
                         let (tx, rx) = oneshot::channel();
                         // detached: no container yet (the fork parks its frames); Edit attaches it to the pane
@@ -2160,7 +2230,7 @@ impl Actor {
                 // then (what is loaded at open, and which request separates a 4.8 GB open from a 5.5 GB one)
                 if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() && !ty.ends_with("NextEvents") && !ty.ends_with("Ping") {
                     let pid = self.sessions.values().find(|s| s.sock == sock).map_or(0, |s| s.pid);
-                    eprintln!("kicad embed: request {ty} kind={} client={client} rss={}MB (at {})", msg["kind"].as_str().unwrap_or(""), rss_mb(pid).unwrap_or(0), ipc::now_ms());
+                    eprintln!("kicad embed: request {ty} kind={} client={client} rss={}MB (at {})", msg["kind"].as_str().unwrap_or(""), super::mem::proc_mb(pid).map_or(0, |m| m.0), ipc::now_ms());
                 }
                 self.raw_call(&sock, &desc, &ty, msg, timeout, &client, reply)
             }
@@ -2451,7 +2521,7 @@ impl Actor {
                     }
                 } else { self.users_gone = None; }
                 for v in idle_victims(&self.sessions, ipc::now_s(), WARM.idle_s) { eprintln!("kicad embed: idle, closing {v}"); self.retire(&v); }
-                for s in self.sessions.values_mut().filter(|s| s.is_live() && s.pid > 0) { if let Some(m) = rss_mb(s.pid) { s.rss_mb = m; } }
+                for s in self.sessions.values_mut().filter(|s| s.is_live() && s.pid > 0) { if let Some((now, peak)) = super::mem::proc_mb(s.pid) { s.rss_mb = now; s.peak_mb = peak; } }
                 let targets: Vec<Session> = self.sessions.values()
                     .filter(|s| matches!(s.state.as_str(), "ready" | "unresponsive") && !s.sock.is_empty())
                     .cloned().collect();
@@ -3340,6 +3410,7 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
 // Hub wiring & RPC handler --------------------------------------------------------------------------------------------------
 
 pub fn start(hub: &Arc<Hub>) {
+    eprintln!("{}", warm_memory_line());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let (info_tx, mut info_rx) = mpsc::unbounded_channel::<(String, String, Option<oneshot::Sender<()>>)>();
     let info_hub = hub.clone();
@@ -3436,7 +3507,7 @@ impl RpcHandler for EmbedRpc {
                 // memory: a pre-warmed editor costs its frame and its libraries (Hubble_DK's schematic: ~1.5 GB, 3.9 -> 5.4 GB), worth it only
                 // with room to spare; below that the first switch loads it (~1 s) instead. BACKPLANE_KICAD_PREWARM_FREE_MB overrides the floor
                 let floor = std::env::var("BACKPLANE_KICAD_PREWARM_FREE_MB").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(PREWARM_FREE_MB);
-                if let Some(free) = free_mb().filter(|f| *f < floor) {
+                if let Some(free) = prewarm_refused(prewarm_free_mb(), floor) {
                     if !kinds.is_empty() { eprintln!("kicad embed: {}: not pre-warming {kinds:?}: {free} MB free, under {floor} MB", resolved.pro); }
                     kinds.clear();
                 }
@@ -4186,37 +4257,92 @@ mod tests {
 
     #[test] fn a_shown_project_is_kept_warm_within_the_cap_memory_and_locks() {
         let ready = |p: &str, t: u64, cont: u64| { let mut s = Session::new(p, "/p", "fork", "PCB", 1, t).ready("/s", "", t); s.container = cont; (p.to_string(), s) };
-        let cfg = WarmCfg { max: 2, idle_s: 1800, kicad_mb: 2000, headroom_mb: 1000 };
+        let cfg = WarmCfg { max: 2, idle_s: 1800, kicad_mb: 2000, headroom_mb: 1000, pressure_max: 10.0 };
+        let free = |m: u64| MemNow { free_mb: Some(m), pressure: None };
         let empty = HashMap::new();
-        assert_eq!(warm_decision(&empty, "/p/a.kicad_pro", true, false, Some(8000), true, cfg), Warm::Start { evict: None });
-        assert_eq!(warm_decision(&empty, "/p/a.kicad_pro", true, false, None, true, cfg), Warm::Start { evict: None }, "memory unknown: enough");
-        assert!(matches!(warm_decision(&empty, "/p/a.kicad_pro", false, false, Some(8000), true, cfg), Warm::No(_)), "not hardware");
-        assert!(matches!(warm_decision(&empty, "/p/a.kicad_pro", true, true, Some(8000), true, cfg), Warm::No(_)), "locked by another KiCad: its dialog would come up");
-        assert!(matches!(warm_decision(&empty, "/p/a.kicad_pro", true, false, Some(2900), true, cfg), Warm::No(_)), "less than a KiCad and the headroom");
-        assert!(matches!(warm_decision(&empty, "/p/a.kicad_pro", true, false, Some(8000), false, cfg), Warm::No(_)), "a runtime that shows its load windows is never warmed");
-        // a KiCad measured running sets the cost of the next: 5 GB measured, 6 GB free is not enough for another
-        let mut big = Session::new("/p/b.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0); big.container = 3; big.rss_mb = 5000;
+        assert_eq!(warm_decision(&empty, "/p/a.kicad_pro", true, false, free(8000), true, cfg), Warm::Start { evict: None });
+        assert_eq!(warm_decision(&empty, "/p/a.kicad_pro", true, false, MemNow::default(), true, cfg), Warm::Start { evict: None }, "memory unknown: enough");
+        assert!(matches!(warm_decision(&empty, "/p/a.kicad_pro", false, false, free(8000), true, cfg), Warm::No(_)), "not hardware");
+        assert!(matches!(warm_decision(&empty, "/p/a.kicad_pro", true, true, free(8000), true, cfg), Warm::No(_)), "locked by another KiCad: its dialog would come up");
+        assert!(matches!(warm_decision(&empty, "/p/a.kicad_pro", true, false, free(2900), true, cfg), Warm::No(_)), "less than a KiCad and the headroom");
+        assert!(matches!(warm_decision(&empty, "/p/a.kicad_pro", true, false, free(8000), false, cfg), Warm::No(_)), "a runtime that shows its load windows is never warmed");
+        // a KiCad measured running sets the cost of the next (its peak): 5 GB measured, 6 GB free is not enough for another
+        let mut big = Session::new("/p/b.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0); big.container = 3; big.peak_mb = 5000; big.rss_mb = 900;
         let m: HashMap<String, Session> = [("/p/b.kicad_pro".to_string(), big)].into_iter().collect();
-        assert_eq!(kicad_cost_mb(&m, cfg), 5000);
-        assert!(matches!(warm_decision(&m, "/p/a.kicad_pro", true, false, Some(5500), true, cfg), Warm::No(_)));
-        assert_eq!(warm_decision(&m, "/p/a.kicad_pro", true, false, Some(6500), true, cfg), Warm::Start { evict: None });
+        assert_eq!(kicad_cost_mb(&m, cfg), (5000, "measured"));
+        assert!(matches!(warm_decision(&m, "/p/a.kicad_pro", true, false, free(5500), true, cfg), Warm::No(_)));
+        assert_eq!(warm_decision(&m, "/p/a.kicad_pro", true, false, free(6500), true, cfg), Warm::Start { evict: None });
         let m: HashMap<String, Session> = [ready("/p/a.kicad_pro", 10, 0)].into_iter().collect();
-        assert_eq!(warm_decision(&m, "/p/a.kicad_pro", true, true, Some(100), true, cfg), Warm::Have, "ours already: its own lock and memory do not count");
+        assert_eq!(warm_decision(&m, "/p/a.kicad_pro", true, true, free(100), true, cfg), Warm::Have, "ours already: its own lock and memory do not count");
         // at the cap: the oldest clean one in no pane makes room; none such: refused (never a 3rd)
         let m: HashMap<String, Session> = [ready("/p/a.kicad_pro", 10, 0), ready("/p/b.kicad_pro", 5, 0)].into_iter().collect();
-        assert_eq!(warm_decision(&m, "/p/c.kicad_pro", true, false, Some(8000), true, cfg), Warm::Start { evict: Some("/p/b.kicad_pro".into()) });
+        assert_eq!(warm_decision(&m, "/p/c.kicad_pro", true, false, free(8000), true, cfg), Warm::Start { evict: Some("/p/b.kicad_pro".into()) });
         let m: HashMap<String, Session> = [ready("/p/a.kicad_pro", 10, 7), ready("/p/b.kicad_pro", 5, 9)].into_iter().collect();
-        assert!(matches!(warm_decision(&m, "/p/c.kicad_pro", true, false, Some(8000), true, cfg), Warm::No(_)), "both in panes");
+        assert!(matches!(warm_decision(&m, "/p/c.kicad_pro", true, false, free(8000), true, cfg), Warm::No(_)), "both in panes");
         // the person closed KiCad, or it failed: Edit starts it, not a pre-warm
         let closed = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).exited(0, "");
         let failed = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).failed("x");
-        for s in [closed, failed] { let m: HashMap<String, Session> = [("/p/a.kicad_pro".to_string(), s)].into_iter().collect(); assert!(matches!(warm_decision(&m, "/p/a.kicad_pro", true, false, Some(8000), true, cfg), Warm::No(_))); }
+        for s in [closed, failed] { let m: HashMap<String, Session> = [("/p/a.kicad_pro".to_string(), s)].into_iter().collect(); assert!(matches!(warm_decision(&m, "/p/a.kicad_pro", true, false, free(8000), true, cfg), Warm::No(_))); }
         // evicted for room (closing): warm again later
         let mut ev = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0); ev.closing = true; let ev = ev.exited(0, "");
         let m: HashMap<String, Session> = [("/p/a.kicad_pro".to_string(), ev)].into_iter().collect();
-        assert_eq!(warm_decision(&m, "/p/a.kicad_pro", true, false, Some(8000), true, cfg), Warm::Start { evict: None });
+        assert_eq!(warm_decision(&m, "/p/a.kicad_pro", true, false, free(8000), true, cfg), Warm::Start { evict: None });
     }
 
+    #[test] fn the_warm_up_memory_rule_at_its_boundaries() {
+        let cfg = WarmCfg { headroom_mb: 2048, ..WARM };
+        let empty = HashMap::new();
+        let at = |free: Option<u64>, pressure: Option<f64>| warm_decision(&empty, "/p/a.kicad_pro", true, false, MemNow { free_mb: free, pressure }, true, cfg);
+        let need = KICAD_MB + 2048;
+        // nothing measured: the default cost plus the headroom, exactly
+        assert_eq!(kicad_cost_mb(&empty, cfg), (KICAD_MB, "default"));
+        assert_eq!(at(Some(need), None), Warm::Start { evict: None }, "exactly enough");
+        let Warm::No(why) = at(Some(need - 1), None) else { panic!("one MB short is refused") };
+        assert_eq!(why, format!("too little free memory (free {} MB < KiCad {KICAD_MB} MB (default) + headroom 2048 MB)", need - 1), "the refusal says its numbers");
+        assert_eq!(at(None, None), Warm::Start { evict: None }, "free unknown: enough");
+        // memory pressure refuses whatever is free; just under it, or unreadable, does not
+        let Warm::No(why) = at(Some(100_000), Some(10.0)) else { panic!("pressure at the limit refuses") };
+        assert!(why.starts_with("memory pressure (full avg10 10.00 >= 10)"), "{why}");
+        assert_eq!(at(Some(100_000), Some(9.99)), Warm::Start { evict: None });
+        assert_eq!(at(Some(100_000), None), Warm::Start { evict: None }, "PSI unreadable: no pressure");
+        // real PSI text: a build's capped slots (some high, full low) warm; a machine thrashing (full high) does not
+        let psi = |t: &str| super::super::mem::psi_full_avg10(t);
+        assert_eq!(at(Some(12_852), psi("some avg10=18.19 avg60=9.40 avg300=2.10 total=8732072\nfull avg10=0.31 avg60=0.20 avg300=0.46 total=8122749\n")), Warm::Start { evict: None });
+        assert!(matches!(at(Some(12_852), psi("some avg10=64.02 avg60=40.00 avg300=12.00 total=9\nfull avg10=37.50 avg60=20.00 avg300=6.00 total=8\n")), Warm::No(w) if w.contains("full avg10 37.50")));
+        // measured: a live KiCad's peak above the default is the cost; one below it (still loading, a small project) is not
+        let live = |peak: u64| { let mut s = Session::new("/p/b.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0); s.container = 3; s.peak_mb = peak;
+            [("/p/b.kicad_pro".to_string(), s)].into_iter().collect::<HashMap<String, Session>>() };
+        assert_eq!(kicad_cost_mb(&live(KICAD_MB + 1), cfg), (KICAD_MB + 1, "measured"));
+        assert_eq!(kicad_cost_mb(&live(400), cfg), (KICAD_MB, "default"));
+        assert_eq!(kicad_cost_mb(&live(0), cfg), (KICAD_MB, "default"), "not read yet");
+        let m = live(3000);
+        assert_eq!(warm_decision(&m, "/p/a.kicad_pro", true, false, MemNow { free_mb: Some(5048), pressure: None }, true, cfg), Warm::Start { evict: None });
+        assert!(matches!(warm_decision(&m, "/p/a.kicad_pro", true, false, MemNow { free_mb: Some(5047), pressure: None }, true, cfg), Warm::No(w) if w.contains("KiCad 3000 MB (measured)")));
+        // a closed KiCad's peak no longer counts
+        let mut gone = live(9000); gone.values_mut().for_each(|s| *s = s.clone().exited(0, ""));
+        assert_eq!(kicad_cost_mb(&gone, cfg), (KICAD_MB, "default"));
+    }
+    #[test] fn the_warm_up_headroom_follows_the_machine() {
+        assert_eq!(warm_headroom_mb(Some(8 * 1024)), 2048, "8 GB: the least");
+        assert_eq!(warm_headroom_mb(Some(16 * 1024)), 2048, "16 GB");
+        assert_eq!(warm_headroom_mb(Some(24 * 1024)), 3072, "24 GB: an eighth");
+        assert_eq!(warm_headroom_mb(Some(31_852)), 3981, "h@backplane's 31 GB");
+        assert_eq!(warm_headroom_mb(Some(32 * 1024)), 4096, "32 GB: the most");
+        assert_eq!(warm_headroom_mb(Some(64 * 1024)), 4096, "64 GB");
+        assert_eq!(warm_headroom_mb(None), 4096, "unknown: the most");
+        // the defaults: a bp.13.2 figure per OS, nothing like bp.12's 5.2 GB; the most headroom is today's 4 GB
+        assert!(KICAD_MB_LINUX >= 1705 && KICAD_MB_LINUX < 5200 && KICAD_MB_MACOS >= KICAD_MB_LINUX && KICAD_MB_WINDOWS >= KICAD_MB_LINUX, "a medium board with its schematic and 3D (bp.13.2), not bp.12's");
+        assert_eq!(WARM.headroom_mb, 4096);
+        assert_eq!(WARM.pressure_max, 10.0);
+    }
+    #[test] fn the_post_edit_prewarm_gate_is_unchanged() {
+        // editor.kicad.prewarm (the other editors opened hidden once the first is on show) keeps its own floor: 6 GB free, Linux's reading
+        assert_eq!(PREWARM_FREE_MB, 6144);
+        assert_eq!(prewarm_refused(Some(6143), PREWARM_FREE_MB), Some(6143));
+        assert_eq!(prewarm_refused(Some(6144), PREWARM_FREE_MB), None);
+        assert_eq!(prewarm_refused(None, PREWARM_FREE_MB), None, "unknown: pre-warmed");
+        if !cfg!(target_os = "linux") { assert_eq!(prewarm_free_mb(), None, "off Linux the pre-warm never read free memory, and still does not"); }
+    }
     #[test] fn idle_kicads_in_no_pane_close_after_the_idle_time() {
         let mk = |p: &str, t: u64, cont: u64, modified: bool| { let mut s = Session::new(p, "/p", "fork", "PCB", 1, t).ready("/s", "", t); s.container = cont;
             if modified { s.frames.push(Frame { kind: "PCB".into(), doc: p.into(), title: String::new(), modified: true, shown: true, realized: true, xid: 1, min_w: 0, min_h: 0 }); } (p.to_string(), s) };

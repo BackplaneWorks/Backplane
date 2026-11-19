@@ -19,6 +19,7 @@ pub mod kexport;
 pub mod kipc;
 pub mod kserve;
 pub mod locks;
+pub mod mem;
 pub mod nng;
 pub mod proto;
 pub mod boards;
