@@ -1,4 +1,6 @@
 mod app_menu;
+mod ime_keys;
+pub use ime_keys::is_windows_ime_vkey;
 mod keyboard;
 mod keystroke;
 

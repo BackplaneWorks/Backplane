@@ -101,6 +101,7 @@ impl WindowsWindowInner {
             WM_DEADCHAR => self.handle_dead_char_msg(wparam),
             WM_IME_STARTCOMPOSITION => self.handle_ime_position(handle),
             WM_IME_COMPOSITION => self.handle_ime_composition(handle, lparam),
+            WM_IME_REQUEST => self.handle_ime_request(wparam, lparam),
             WM_SETCURSOR => self.handle_set_cursor(handle, lparam),
             WM_SETTINGCHANGE => self.handle_system_settings_changed(handle, wparam, lparam),
             WM_INPUTLANGCHANGE => self.handle_input_language_changed(),
@@ -328,6 +329,11 @@ impl WindowsWindowInner {
     }
 
     fn handle_syskeydown_msg(&self, handle: HWND, wparam: WPARAM, lparam: LPARAM) -> Option<isize> {
+        if is_ime_key(handle, wparam) {
+            // Alt+Hankaku/Zenkaku and the like.
+            translate_message(handle, wparam, lparam);
+            return None;
+        }
         let mut lock = self.state.borrow_mut();
         let input = handle_key_event(handle, wparam, lparam, &mut lock, |keystroke| {
             PlatformInput::KeyDown(KeyDownEvent {
@@ -370,6 +376,12 @@ impl WindowsWindowInner {
     // It's a known bug that you can't trigger `ctrl-shift-0`. See:
     // https://superuser.com/questions/1455762/ctrl-shift-number-key-combination-has-stopped-working-for-a-few-numbers
     fn handle_keydown_msg(&self, handle: HWND, wparam: WPARAM, lparam: LPARAM) -> Option<isize> {
+        if is_ime_key(handle, wparam) {
+            // Hankaku/Zenkaku, Henkan, Muhenkan and the other IME keys map to no keystroke; the IME still has to see them
+            // (`TranslateMessage` hands a `VK_PROCESSKEY` to it), and `DefWindowProc` gets the message as in any Windows program.
+            translate_message(handle, wparam, lparam);
+            return None;
+        }
         let mut lock = self.state.borrow_mut();
         let Some(input) = handle_key_event(handle, wparam, lparam, &mut lock, |keystroke| {
             PlatformInput::KeyDown(KeyDownEvent {
@@ -407,6 +419,9 @@ impl WindowsWindowInner {
     }
 
     fn handle_keyup_msg(&self, handle: HWND, wparam: WPARAM, lparam: LPARAM) -> Option<isize> {
+        if is_ime_key(handle, wparam) {
+            return None;
+        }
         let mut lock = self.state.borrow_mut();
         let Some(input) = handle_key_event(handle, wparam, lparam, &mut lock, |keystroke| {
             PlatformInput::KeyUp(KeyUpEvent { keystroke })
@@ -652,6 +667,55 @@ impl WindowsWindowInner {
             ImmReleaseContext(handle, ctx).ok().log_err();
             Some(0)
         }
+    }
+
+    /// `IMR_RECONVERTSTRING`: the IME (Henkan on committed text) asks for the text to reconvert. It is the selection, or
+    /// the text just before the caret when nothing is selected.
+    fn handle_ime_request(&self, wparam: WPARAM, lparam: LPARAM) -> Option<isize> {
+        if wparam.0 as u32 != IMR_RECONVERTSTRING {
+            return None;
+        }
+        let (text, start_u16, end_u16) = self.with_input_handler(|h| {
+            let sel = h.selected_text_range(true)?;
+            let (from, to) = if sel.range.is_empty() {
+                // No selection: a window before the caret, and the text after it for context.
+                (sel.range.start.saturating_sub(256), sel.range.end + 256)
+            } else {
+                (sel.range.start, sel.range.end)
+            };
+            let mut adjusted = None;
+            let text = h.text_for_range(from..to, &mut adjusted)?;
+            let base = adjusted.map(|r| r.start).unwrap_or(from);
+            Some((text, sel.range.start.saturating_sub(base), sel.range.end.saturating_sub(base)))
+        })??;
+        let units: Vec<u16> = text.encode_utf16().collect();
+        let (start, end) = crate::platform::ime_keys::reconvert_span(&units, start_u16, end_u16);
+        if start >= end {
+            return Some(0);
+        }
+        let header = std::mem::size_of::<RECONVERTSTRING>();
+        let total = header + (units.len() + 1) * 2;
+        if lparam.0 == 0 {
+            return Some(total as isize);
+        }
+        unsafe {
+            let rs = lparam.0 as *mut RECONVERTSTRING;
+            if (*rs).dwSize < total as u32 {
+                return Some(0);
+            }
+            (*rs).dwSize = total as u32;
+            (*rs).dwVersion = 0;
+            (*rs).dwStrLen = units.len() as u32;
+            (*rs).dwStrOffset = header as u32;
+            (*rs).dwCompStrLen = (end - start) as u32;
+            (*rs).dwCompStrOffset = (start * 2) as u32;
+            (*rs).dwTargetStrLen = (end - start) as u32;
+            (*rs).dwTargetStrOffset = (start * 2) as u32;
+            let dst = (lparam.0 as *mut u8).add(header) as *mut u16;
+            std::ptr::copy_nonoverlapping(units.as_ptr(), dst, units.len());
+            *dst.add(units.len()) = 0;
+        }
+        Some(total as isize)
     }
 
     fn handle_ime_composition(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {
@@ -1279,6 +1343,16 @@ impl WindowsWindowInner {
         self.state.borrow_mut().input_handler = Some(input_handler);
         result
     }
+}
+
+/// Whether this key message is for the IME: an IME key itself, or a `VK_PROCESSKEY` whose real key is one.
+fn is_ime_key(handle: HWND, wparam: WPARAM) -> bool {
+    let vkey = wparam.loword();
+    if vkey == VK_PROCESSKEY.0 {
+        let real = unsafe { ImmGetVirtualKey(handle) } as u16;
+        return crate::is_windows_ime_vkey(real) && real != VK_PROCESSKEY.0;
+    }
+    crate::is_windows_ime_vkey(vkey)
 }
 
 #[inline]

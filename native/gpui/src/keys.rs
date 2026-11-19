@@ -767,3 +767,18 @@ mod tests {
         assert_eq!(hint(&Local::default(), "stop"), show("ctrl-.", mac())); assert_eq!(rail_letter("3d"), "3");
     }
 }
+
+#[cfg(test)]
+mod windows_ime_keys {
+    /// #1244: these keys must reach the IME (gpui's Windows window passes them to `TranslateMessage` and `DefWindowProc`
+    /// and never turns them into an app keystroke), whatever the host the test runs on.
+    #[test]
+    fn japanese_ime_keys_are_left_to_the_ime() {
+        for vk in [0x19u16, 0x1C, 0x1D, 0xE5, 0xF0, 0xF1, 0xF2, 0xF3, 0xF4] {
+            assert!(gpui::is_windows_ime_vkey(vk), "{vk:#x}");
+        }
+        for vk in [0x0Du16, 0x1B, 0x1B, 0x20, 0x41] {
+            assert!(!gpui::is_windows_ime_vkey(vk), "{vk:#x}");
+        }
+    }
+}
