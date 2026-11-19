@@ -8,6 +8,7 @@ pub mod panels;
 pub mod tokstats;
 pub mod picker;
 pub mod thread;
+pub mod design_mode;
 pub mod rail;
 pub mod viewer;
 pub mod settings;

@@ -4660,3 +4660,7 @@ gpui.panestate.retrying = Reintentando…
 gpui.hub.view.notready = Aún no está listo. Inténtalo de nuevo.
 gpui.hub.view.staleconn = La conexión con el hub caducó.
 gpui.hub.view.unavailable = Esa vista no está disponible aquí.
+settings.designmode.label = Abrir los diseños en
+settings.designmode.viewer = Siempre en el visor
+settings.designmode.kicad = Siempre en KiCad
+settings.designmode.note = Se aplicará cuando KiCad integrado se habilite por defecto en esta plataforma.

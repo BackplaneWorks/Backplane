@@ -40,7 +40,7 @@ async fn link(a: &Node, b: &Node, own: bool) -> String {
 /// A client of `b` asks; the reply is the frame returned or, for a request sent on, the one pushed to its connection.
 async fn ask(b: &Node, id: u64, m: &str, p: Value) -> Value {
     let client = b.hub.fresh_client(); let mut ob = b.hub.attach(client);
-    let mut c = Conn { sent: vec![], client, gen: "t".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
+    let mut c = Conn { local_view_socket: false, sent: vec![], client, gen: "t".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
     if let Some(v) = b.hub.request(&mut c, &json!({"id": id, "m": m, "p": p})).await.into_iter().find(|v| v["t"] == "reply") { return v }
     match tokio::time::timeout(std::time::Duration::from_secs(10), ob.recv()).await { Ok(Some(crate::hub::Out::Value(v))) => v, o => panic!("no reply (timeout or other frame): {}", o.is_ok()) }
 }
@@ -105,7 +105,7 @@ async fn signed(from: &Node, to: &Node, link: &str, body: Value) -> botnet::Resp
     let (a, _fa) = side("ra7", true, true).await; let (b, _fb) = side("rb7", false, false).await;
     let l = link(&a, &b, true).await;
     let client = b.hub.fresh_client(); let _ob = b.hub.attach(client);
-    let mut c = Conn { sent: vec![], client, gen: "t".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
+    let mut c = Conn { local_view_socket: false, sent: vec![], client, gen: "t".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
     let t = std::time::Instant::now();
     let out = b.hub.request(&mut c, &json!({"id": 1, "m": "thread.rename", "p": {"thread": format!("{l}~t"), "title": "x"}})).await;
     assert!(out.is_empty() && t.elapsed() < std::time::Duration::from_secs(2), "sent on, nothing to wait for: {out:?} {:?}", t.elapsed());
@@ -161,7 +161,7 @@ async fn signed(from: &Node, to: &Node, link: &str, body: Value) -> botnet::Resp
     // B is a copy: a request about a thing elsewhere is answered with an error here, at once, and nothing reaches A
     let t = std::time::Instant::now();
     let client = b.hub.fresh_client(); let _ob = b.hub.attach(client);
-    let mut c = Conn { sent: vec![], client, gen: "t".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
+    let mut c = Conn { local_view_socket: false, sent: vec![], client, gen: "t".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
     let out = b.hub.request(&mut c, &json!({"id": 4, "m": "thread.rename", "p": {"thread": format!("{l}~t"), "title": "x"}})).await;
     assert_eq!(out.len(), 1); assert_eq!(out[0]["ok"], false); assert_eq!(out[0]["id"], 4);
     assert_eq!(out[0]["error"], "a hub on a copied log does not reach other machines");
@@ -217,7 +217,7 @@ impl RpcHandler for Viewer {
     let v = Arc::new(Viewer(Default::default())); a.hub.register_rpc(v.clone());
     let l = link(&a, &b, true).await;
     let client = b.hub.fresh_client(); let mut ob = b.hub.attach(client);
-    let mut c = Conn { sent: vec![], client, gen: "t".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
+    let mut c = Conn { local_view_socket: false, sent: vec![], client, gen: "t".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
     // the watch names the machine; the reply is the owner's, and what the owner draws arrives as pushes to this window
     let sent = b.hub.request(&mut c, &json!({"id": 5, "m": "kicad.watch", "p": {"kind":"board","root":"/r","path":"","tree":"","on": l}})).await;
     assert!(sent.is_empty(), "the answer comes later: the connection never waits on another machine");

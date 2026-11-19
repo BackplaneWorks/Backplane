@@ -43,7 +43,7 @@ pub async fn call(hub: &Arc<Hub>, link: &str, p: &Value) -> Value {
         if !known { return json!({"t":"reply","ok":false,"error":"no such thread here"}) }
     }
     let Some((client, _)) = sub_of(hub, link, sub, true) else { return json!({"t":"reply","ok":false,"error":"too many windows of other machines are open here"}) };
-    let mut c = Conn { sent: vec![], client, gen: "far".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
+    let mut c = Conn { local_view_socket: false, sent: vec![], client, gen: "far".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
     let out = hub.request_here(&mut c, &json!({"id": 0, "m": m, "p": p.get("p").cloned().unwrap_or(Value::Null)})).await;
     out.into_iter().find(|v| v["t"] == "reply").unwrap_or_else(|| json!({"t":"reply","ok":false,"error":"no answer"}))
 }
@@ -67,7 +67,7 @@ pub async fn drop_sub(hub: &Arc<Hub>, link: &str, p: &Value) -> Value {
     let sub = p["sub"].as_u64().unwrap_or(0);
     let gone = subs().lock().unwrap().remove(&(link.to_string(), sub));
     if let Some(s) = gone {
-        let mut c = Conn { sent: vec![], client: s.client, gen: "far".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
+        let mut c = Conn { local_view_socket: false, sent: vec![], client: s.client, gen: "far".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
         let _ = hub.request_here(&mut c, &json!({"id": 0, "m": "kicad.watch", "p": {"kind": ""}})).await;
         hub.detach(s.client);
     }

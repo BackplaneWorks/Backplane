@@ -119,6 +119,7 @@ impl Hub {
         let mut params = p.clone();
         strip_hub_owned(&mut params);   // window, page, reads and local are the hub's: whatever the client sent is gone before the hub's own are put in
         if let Some(o) = params.as_object_mut() {
+            o.insert("designDesktop".into(), json!((c.local_view_socket && p["client"]["kind"] == "desktop").then_some(c.client)));
             // what the presenter needs of the hub: the view's id, the hub's signal revision (SignalRevision: the context's metadataRevision;
             // saved sidebar pages are kept only while it, the view and the choices stay the same: activity lines and assistant text do not move it), this run's key
             o.insert("revision".into(), json!(self.signal_seq())); o.insert("viewId".into(), json!(view_id)); o.insert("nativeKey".into(), json!(self.native_key)); o.insert("now".into(), json!(now_ms()));

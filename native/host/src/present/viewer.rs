@@ -786,6 +786,32 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
     }
     Some(v)
 }
+/// Choose the surface for this connection and the document the frame would open.
+pub fn surface(st: &State, viewer: &Value, params: &Value, thread: &str) -> Value {
+    use super::design_mode::*;
+    let session = &params["session"];
+    let page = s(viewer, "open");
+    let linked = thread.contains('~');
+    let document = if !matches!(page, "board" | "schematic") || viewer["gerbers"] == true || pages::diff_on(session, thread) {
+        Document::OtherPage
+    } else {
+        let selected = chosen_board(&session["drafts"], thread);
+        let drafts = &session["drafts"];
+        let sheet = s(drafts, &format!("@view.sheet:{thread}"));
+        let explicit = if page == "schematic" && !sheet.is_empty() { sheet } else { s(drafts, &format!("@view.file:{thread}")) };
+        let present = if linked { false }
+            else if !explicit.is_empty() { std::path::Path::new(explicit).is_file() }
+            else if selected.is_empty() { viewer["has"][page] == true }
+            else { std::path::Path::new(&board_file(page, &root_of(st, thread), &selected)).is_file() };
+        if present { Document::Present } else { Document::Missing }
+    };
+    design_mode(Input {
+        desktop: params["designDesktop"].as_u64(), linked, altium: viewer["cad"] == "altium", document,
+        platform: Platform::host(), preference: Preference::read(st.settings.get(SETTING).map_or("", String::as_str)),
+        visit: Visit::Normal, runtime: Runtime::UNKNOWN,
+    }, AUTO_PLATFORMS)
+}
+
 pub(crate) fn has_management(root: &str) -> bool {
     let files = crate::files::kicad::project::read(root);
     !root.is_empty() && !crate::files::kicad::project::is_altium(&files)
