@@ -46,7 +46,10 @@ note() { local k; k=$(kb "$2"); k=${k:-0}; FREED=$((FREED + k)); say "$(printf '
 wipe() { [ "$APPLY" = 1 ] || return 0; if [ -L "$1" ] || [ ! -d "$1" ]; then rm -f -- "$1"; else chmod -R u+rwX -- "$1" 2>/dev/null; rm -rf --one-file-system -- "$1"; fi; }
 
 # What processes hold: cwd, executable, open files (what lsof lists), and the dirs their TMPDIR / CARGO_TARGET_DIR name. Read once.
-HELD=$(mktemp); ENVS=$(mktemp); NOTED=$(mktemp); trap 'rm -f "$HELD" "$ENVS" "$NOTED"' EXIT
+# its own lists (what processes hold, their environments, the work notes: 2 MB on a busy desktop) are made outside every folder it measures: made in
+# $BP_TMP (lib-bptmp.sh sets TMPDIR there) they counted against that folder's cap and a run on a busy machine evicted one entry too many
+SCR=$(mktemp -d "${GC_SCRATCH:-${XDG_RUNTIME_DIR:-/tmp}}/bp-gc.XXXXXX"); HELD=$SCR/held; ENVS=$SCR/envs; NOTED=$SCR/noted; : > "$HELD"; : > "$ENVS"; : > "$NOTED"
+trap 'rm -f "$HELD" "$ENVS" "$NOTED" "$HELD.wt"; rmdir "$SCR" 2>/dev/null' EXIT
 # the hub's work notes (noted, below): GC_WORK_NOTES (dirs; tests), else the hub home its jobs are given, and every Backplane home of this user
 if [ -n "${GC_WORK_NOTES+x}" ]; then WN=$GC_WORK_NOTES; else WN="${BACKPLANE_LOCK_HOME:+$BACKPLANE_LOCK_HOME/work} ${BACKPLANE_HOME:+$BACKPLANE_HOME/work} $(ls -d "$HOME"/.backplane*/home/work "$HOME"/.backplane/work 2>/dev/null | tr '\n' ' ')"; fi
 for w in $WN; do [ -d "$w" ] && find "$w" -mindepth 2 -maxdepth 2 -name cmd -mmin -$(( ${GC_WORK_HOURS:-24} * 60 )) -exec cat {} + 2>/dev/null; done > "$NOTED"
