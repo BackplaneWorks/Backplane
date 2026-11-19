@@ -728,8 +728,14 @@ impl SolidCore {
             let shown = std::time::Instant::now() - std::time::Duration::from_secs(1);
             self.born = vec![shown; groups];
             self.parts = (done, of);
-            self.floor = self.latest + 1;
-            let should_render = if let Some(m) = mesh { self.mesh = Some(m); self.bump_view(); true } else { false };
+            let should_render = if let Some(m) = mesh {
+                self.floor = self.latest + 1;
+                self.mesh = Some(m);
+                self.bump_view();
+                true
+            } else {
+                false
+            };
             return SceneResult { clear_building_stage: true, clear_stage: false, clear_failed: false, clear_note: false, should_render, notify: true };
         }
         let fresh = key != self.key || self.cam.is_none();
@@ -842,7 +848,7 @@ pub struct SolidPage {
     /** the share of DRAFT_PIXELS a picture in motion gets, from how long the last ones took (draft_scale) */ draft_scale: f32,
     /** the hub could not make this source's model (its Note): the page offers Retry when retryable */ failed: bool, retryable: Option<bool>, /** last Retry press time (1 s client cooldown) */ last_retry: Option<std::time::Instant>,
     pub note: String, /** room (px) the page's floating tools leave free at its top right, for the viewer pane's controls */ pub reserve: f32, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */,
-    /** incremented inside the GPUI paint phase only after the image element is actually painted with non-zero bounds */
+    /** runs in normal clients too (one relaxed atomic per qualifying paint); measures the GPUI paint callback with non-zero bounds, not GPU presentation */
     painted: Arc<AtomicU64>, painted_gen: Arc<AtomicU64>, pub stats: Stats,
 }
 impl SolidPage {
@@ -893,7 +899,8 @@ impl SolidPage {
     pub fn key(&self) -> &str { &self.core.key }
     /// The source key the currently painted image was rendered for ("" when no image is held for the current model).
     pub fn image_key(&self) -> &str { &self.core.image_key }
-    /// Number of distinct rendered images that have actually been painted by GPUI with non-zero bounds.
+    /// Number of distinct rendered images that have reached the GPUI paint callback with non-zero bounds
+    /// (runs in normal clients too as one relaxed atomic per qualifying paint; measures the paint callback, not GPU presentation).
     pub fn painted_count(&self) -> u64 { self.painted.load(Ordering::Relaxed) }
     /// The source the page is showing: the one being made when the hub is making another than the model held (the page then shows its
     /// progress), else `key`. The viewer shows the page when this is the source it asks for.
@@ -1821,5 +1828,28 @@ mod tests {
         assert_eq!(core.key, mech);
         assert!(core.mesh.is_none() && core.cam.is_none());
         assert!(core.image.is_none() && core.image_key.is_empty() && core.image_size == (0, 0) && core.image_view_rev == 0);
+    }
+    #[test] fn restored_model_without_pixels_accepts_its_render_after_meshless_parts_header() {
+        let board = "2|/proj|";
+        let mech = "2|/proj|/proj/mech/bracket.step";
+        let mut core = super::SolidCore::new();
+        // Paint A at Split size (300x400), then switch to B so A is kept.
+        core.apply_scene(board.into(), Some(dummy_layers()), true, true, 0, 0, 0, (300.0, 400.0));
+        let (_, _, _, rev_a, w, h) = core.prepare_render((300.0, 400.0, 1.0), false, 1.0).unwrap();
+        core.latest = 1;
+        assert!(core.apply_image(1, board.into(), rev_a, dummy_img(w, h), w, h));
+        core.apply_scene(mech.into(), Some(dummy_layers()), true, true, 0, 0, 0, (600.0, 800.0));
+        // Restore A at full height (600x800): cached Split image is ineligible, mesh+cam are restored, ticket N=2 is queued.
+        assert!(core.restore_kept(board, (600.0, 800.0, 1.0), 1.0));
+        assert!(core.image.is_none());
+        let (_, _, _, rev_n, wn, hn) = core.prepare_render((600.0, 800.0, 1.0), false, 1.0).unwrap();
+        core.latest = 2;
+        // A's mesh-less Parts header arrives before image N=2 finishes: must NOT advance floor past N=2 when no replacement render is queued.
+        let hdr = core.apply_scene(board.into(), None, false, true, 0, 0, 4, (600.0, 800.0));
+        assert!(!hdr.should_render);
+        assert!(core.floor <= 2, "floor must not advance past in-flight ticket when mesh is None");
+        // Image N=2 arrives and is accepted and shown.
+        assert!(core.apply_image(2, board.into(), rev_n, dummy_img(wn, hn), wn, hn));
+        assert!(core.image.is_some() && core.image_key == board && core.image_size == (600, 800));
     }
 }
