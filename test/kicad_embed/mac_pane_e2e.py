@@ -310,6 +310,28 @@ env = dict(os.environ, HOME=os.path.join(OUT, 'fh'), TMPDIR=tmp, BACKPLANE_KICAD
 if os.environ.get('MAC_MODE') == 'update':
     env.pop('BACKPLANE_KICAD_CLI', None)
     if os.environ.get('BACKPLANE_KICAD_FEED'): env['BACKPLANE_KICAD_FEED'] = os.environ['BACKPLANE_KICAD_FEED']
+
+def covering_windows():
+    """System windows above the normal level that cover the screen (at least 1000x600 pt). The Dock's own full-screen window is always
+    there and takes no click (as in _guard); anything else, such as Notification Center holding a persistent alert (the Mac mini,
+    Nov 19: a KiCad build's "Quick Look Previewer Extensions Added"), stops every click the guard checks."""
+    if DRIVER == 'vnc':
+        ws = [(w.get('owner', '?'), int(w.get('layer', 0)), tuple(round(v) for v in w['bounds'])) for w in helper('windows') or []]
+    else:
+        ws = [(w.get('kCGWindowOwnerName', '?'), int(w.get('kCGWindowLayer', 0)), tuple(round(w['kCGWindowBounds'][k]) for k in ('X', 'Y', 'Width', 'Height')))
+              for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID) or [] if w.get('kCGWindowBounds')]
+    return [w for w in ws if 0 < w[1] < 1000 and w[0] != 'Dock' and w[2][2] >= 1000 and w[2][3] >= 600]
+
+
+# before anything starts: a covered screen fails now, with what covers it, not after a wait and a refused click
+_cover = covering_windows()
+if _cover:
+    os.makedirs(OUT, exist_ok=True)
+    if DRIVER == 'vnc':  # the gate's own display, the test machine's: its whole screen may be saved (never the runner's or a person's)
+        relay(op='png', path=os.path.join(OUT, 'covered-screen.png'), rect=[0, 0, max(w[2][2] for w in _cover), max(w[2][3] for w in _cover)])
+    print(f'FAIL the screen is covered before the run: {_cover}' + (f' (picture: {os.path.join(OUT, "covered-screen.png")})' if DRIVER == 'vnc' else ''), flush=True)
+    raise SystemExit(2)
+
 hub = subprocess.Popen([HUB, '--home', os.path.join(OUT, 'home'), '--port', str(port), '--host', '127.0.0.1', '--no-tailscale', '--foreground'],
                        env=env, stdout=open(os.path.join(OUT, 'hub.log'), 'w'), stderr=subprocess.STDOUT); procs.append(hub)
 wait_for(lambda: subprocess.run(['curl', '-s', '-m1', '-o', '/dev/null', f'http://127.0.0.1:{port}/hello']).returncode == 0, 30)
