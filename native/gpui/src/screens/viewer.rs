@@ -219,7 +219,7 @@ fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target
         let f = &viewer["follow"]; let on = f["on"] == true;
         let say = super::follow::line(f);
         let toggle = btn(cx, light, "follow-agent".into(), t("gpui.follow.button"), on, Command::Action("follow".into(), (if on { "off" } else { "on" }).into()));
-        row = row.child(div().id("follow-agent-wrap").child(toggle).tooltip(crate::keys::tip(&t("gpui.follow.button.tip"), "", light)));
+        row = row.child(crate::ui::with_rect(div().id("follow-agent-wrap").child(toggle), || "follow-agent".to_string()).tooltip(crate::keys::tip(&t("gpui.follow.button.tip"), "", light)));
         if !say.is_empty() {
             row = row.child(div().id("follow-line").min_w_0().max_w(px(260.)).overflow_hidden().text_ellipsis().whitespace_nowrap().text_size(crate::scale::tpx(11.)).text_color(c(if f["paused"] == true { "warn" } else { "dim" })).child(say));
             if f["paused"] == true { row = row.child(btn(cx, light, "follow-resume".into(), t("gpui.follow.resume"), false, Command::Action("follow".into(), "resume".into()))); }
