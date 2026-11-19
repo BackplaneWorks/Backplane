@@ -194,3 +194,27 @@ async fn turn(hub: &Arc<Hub>, text: &str) -> Vec<Value> {
     assert_eq!(sn::snaps(&top, T1).await.len(), 1, "the snapshot finished after the lock was free");
     ag.shutdown();
 }
+
+/// The snapshot that outlasts the wait is still a snapshot from before the turn: a write through the hub (what the agent's kicad_edit and files_*
+/// calls do) waits for it, so the agent's edit cannot be in it, and /restore brings back the state before the turn.
+#[tokio::test(flavor = "multi_thread")] async fn a_write_during_a_late_snapshot_waits_and_is_not_in_the_snapshot() {
+    let bin = dir("sg-late-bin"); script(&bin, "claude", DOER);
+    let (hub, ag, _home, work) = start("sg-late", |w| {
+        std::fs::write(w.join("a.txt"), "one\n").unwrap();
+        git_out(w, &["init", "-q", "-b", "main"]); git_out(w, &["add", "."]); git_out(w, &["commit", "-qm", "mine"]);
+        base_log(w, 1, "") }, |_| Cli::standin(&bin)).await;
+    hub.commit(&json!({"$":"SettingSet","key":"snap.wait.ms","value":"300","at":1700000050})).await.unwrap();
+    let top = sn::top_of(&work.to_string_lossy()).await.unwrap();
+    let lock = sn::repo_lock(&top).await;
+    turn(&hub, "hello").await; // the agent ran while the snapshot waited
+    let file = work.join("a.txt");
+    let (ag2, f2) = (ag.clone(), file.clone());
+    let write = tokio::spawn(async move { ag2.write_guard(T1, &f2.to_string_lossy()).await.unwrap(); std::fs::write(&f2, "agent\n").unwrap(); });
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    assert!(!write.is_finished(), "the write waits for the turn's snapshot");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "one\n");
+    drop(lock);
+    tokio::time::timeout(Duration::from_secs(20), write).await.expect("the write went ahead once the snapshot ended").unwrap();
+    assert_eq!(git_out(&work, &["show", &format!("{}:a.txt", sn::snap_ref(T1, 1))]), "one\n", "the snapshot is of the state before the agent's write");
+    ag.shutdown();
+}
