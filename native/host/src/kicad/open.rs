@@ -177,22 +177,22 @@ mod tests {
     fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("kopen-{n}")) }
     fn touch(p: PathBuf) { std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, "").unwrap() }
     #[test] fn the_project_first_then_the_board_then_the_schematic() {
-        let r = tmp("pick"); let root = r.to_str().unwrap();
+        let r = tmp("pick"); let root = r.to_str().unwrap(); use crate::plat::tmp::sl;
         assert_eq!(pick(&project::read(root)), None);
         touch(r.join("a.kicad_sch")); assert_eq!(pick(&project::read(root)).map(|x| x.0), Some("eeschema"));
         touch(r.join("a.kicad_pcb")); assert_eq!(pick(&project::read(root)).map(|x| x.0), Some("pcbnew"));
-        touch(r.join("a.kicad_pro")); assert_eq!(pick(&project::read(root)), Some(("kicad", format!("{root}/a.kicad_pro"))));
+        touch(r.join("a.kicad_pro")); assert_eq!(pick(&project::read(root)).map(|(e, f)| (e, sl(f))), Some(("kicad", sl(format!("{root}/a.kicad_pro")))));
     }
     #[test] fn it_opens_exactly_what_the_viewer_shows() {
         // a bot's thread showing another project's board (viewer_show): its own folder has no project
-        let r = tmp("shown"); let root = r.to_str().unwrap();
+        let r = tmp("shown"); let root = r.to_str().unwrap(); use crate::plat::tmp::sl; let shown = |s: &str| shown(s).map(|(e, f)| (e, sl(f)));
         for f in ["boards/usb/usb.kicad_pro", "boards/usb/usb.kicad_pcb", "boards/usb/usb.kicad_sch", "mech/case.step"] { touch(r.join(f)) }
-        assert_eq!(shown(&format!("0|{root}/boards/usb|{root}/boards/usb/usb.kicad_pcb")).unwrap(), ("pcbnew", format!("{root}/boards/usb/usb.kicad_pcb")));
+        assert_eq!(shown(&format!("0|{root}/boards/usb|{root}/boards/usb/usb.kicad_pcb")).unwrap(), ("pcbnew", sl(format!("{root}/boards/usb/usb.kicad_pcb"))));
         assert_eq!(shown(&format!("2|{root}|{root}/boards/usb/usb.kicad_pcb")).unwrap().0, "pcbnew", "the 3D view of a board opens that board");
-        assert_eq!(shown(&format!("1|{root}|{root}/boards/usb/usb.kicad_sch")).unwrap(), ("eeschema", format!("{root}/boards/usb/usb.kicad_sch")));
+        assert_eq!(shown(&format!("1|{root}|{root}/boards/usb/usb.kicad_sch")).unwrap(), ("eeschema", sl(format!("{root}/boards/usb/usb.kicad_sch"))));
         // the page with no file named: the root's project board, or schematic, as the viewer resolves it
-        assert_eq!(shown(&format!("0|{root}|")).unwrap(), ("pcbnew", format!("{root}/boards/usb/usb.kicad_pcb")));
-        assert_eq!(shown(&format!("1|{root}|")).unwrap(), ("eeschema", format!("{root}/boards/usb/usb.kicad_sch")));
+        assert_eq!(shown(&format!("0|{root}|")).unwrap(), ("pcbnew", sl(format!("{root}/boards/usb/usb.kicad_pcb"))));
+        assert_eq!(shown(&format!("1|{root}|")).unwrap(), ("eeschema", sl(format!("{root}/boards/usb/usb.kicad_sch"))));
         // nothing on show, a Mech part, a folder without a project: said plainly
         assert!(shown("").unwrap_err().contains("Nothing KiCad is on show"));
         assert!(shown(&format!("2|{root}|{root}/mech/case.step")).unwrap_err().contains("3D model (case.step)"));

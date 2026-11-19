@@ -486,7 +486,7 @@ async fn flip(s: &S, st: &mut crate::state::State, k: &str, v: &str) { press(s, 
     let none = || (String::new(), String::new(), String::new());
     assert_eq!(apns::resolve(none(), None), None, "nothing set, no file: off");
     let r = apns::resolve(none(), Some((env, &d))).unwrap(); assert_eq!((r.1.as_str(), r.2.as_str(), r.3), ("KID1", "TEAM1", "apns.env"), "empty settings: the env file, the key beside it named for the key id");
-    assert!(r.0.ends_with("apns/AuthKey_KID1.p8"));
+    assert!(crate::plat::tmp::sl(&r.0).ends_with("apns/AuthKey_KID1.p8"), "{}", r.0);
     let own = d.join("own.p8").to_string_lossy().into_owned();
     let r = apns::resolve((own.clone(), "K".into(), "T".into()), Some((env, &d))).unwrap(); assert_eq!((r.0, r.1, r.2, r.3), (own.clone(), "K".into(), "T".into(), "settings"), "settings win and the file is not used");
     let env2 = format!("{env}export BACKPLANE_APNS_PRIVATE_KEY_PATH={own}\n"); assert_eq!(apns::resolve(none(), Some((&env2, &d))).unwrap().0, own, "the file's own key path");

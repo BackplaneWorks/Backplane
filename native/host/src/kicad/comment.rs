@@ -259,8 +259,9 @@ mod tests {
         assert_eq!(text(&json!({"note": "  "})), "");
     }
     #[test] fn a_post_attaches_only_pictures_in_the_hubs_own_data() {
-        let home = std::path::Path::new("/h/home");
-        assert!(image_ok(home, "") && image_ok(home, "/h/home/kicad-comments/a-4.png"));
+        // an absolute path is one with a drive on Windows
+        let d = if cfg!(windows) { "C:" } else { "" }; let h = format!("{d}/h/home"); let home = std::path::Path::new(&h);
+        assert!(image_ok(home, "") && image_ok(home, &format!("{d}/h/home/kicad-comments/a-4.png")));
         assert!(!image_ok(home, "/etc/passwd") && !image_ok(home, "/h/home/../x.png") && !image_ok(home, "kicad-comments/a.png") && !image_ok(home, "/h/homeother/a.png"));
     }
 }

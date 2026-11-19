@@ -28,6 +28,12 @@ fn open(thread: &str, pid: &str, action: &'static str, value: &str) -> Plan { Pl
     assert_eq!(absolute("rel.kicad_pcb", "", ""), None, "relative with no folder");
     assert_eq!(absolute("https://a.b/c.kicad_pcb", "/w", ""), None, "a web address is no file");
 }
+#[cfg(windows)] #[test] fn a_windows_path_is_one_path_in_either_spelling() {
+    // file:///C:/... (what a browser or the OS writes), a pasted C:\... and a mixed one all name C:/w/amp/...; a project rooted at C:\w\amp owns them
+    for h in ["file:///C:/w/amp/a%20b.kicad_pcb", "C:\\w\\amp\\a b.kicad_pcb", "file://C:\\w\\amp/a b.kicad_pcb"] { assert_eq!(absolute(h, "", "").as_deref(), Some("C:/w/amp/a b.kicad_pcb"), "{h}"); }
+    assert_eq!(absolute("boards\\x.kicad_sch", "C:\\w\\amp", "").as_deref(), Some("C:/w/amp/boards/x.kicad_sch"));
+    assert!(under("C:/w/amp/a.kicad_pcb", "C:\\w\\amp") && under("C:\\w\\amp\\a.kicad_pcb", "C:/w/amp/") && !under("C:/w/ampx/a", "C:\\w\\amp"));
+}
 #[test] fn a_file_opens_in_its_projects_thread_on_the_tab_that_draws_it() {
     // the thread on show is the project's: it stays
     assert_eq!(plan_of("ta", "boards/main/main.kicad_pcb"), open("ta", "pa", "fm-open", "boards/main/main.kicad_pcb"));
@@ -76,7 +82,7 @@ fn open(thread: &str, pid: &str, action: &'static str, value: &str) -> Plan { Pl
     std::fs::create_dir_all(d.join("boards/main")).unwrap(); std::fs::create_dir_all(d.join(".backplane/worktrees/w/boards/main")).unwrap();
     std::fs::write(d.join("boards/main/main.kicad_sch"), "x").unwrap(); std::fs::write(d.join(".backplane/worktrees/w/boards/main/other.kicad_sch"), "x").unwrap();
     let root = d.to_string_lossy().to_string();
-    assert_eq!(find_named(&root, "main.kicad_sch"), Some(format!("{root}/boards/main/main.kicad_sch")));
+    use crate::plat::tmp::sl; assert_eq!(find_named(&root, "main.kicad_sch").map(sl), Some(sl(format!("{root}/boards/main/main.kicad_sch"))));
     assert_eq!(find_named(&root, "other.kicad_sch"), None, "a hidden folder (a worktree's copy) is not looked in");
     assert_eq!(find_named(&root, "x.rs"), None); assert_eq!(find_named(&root, "boards/main/main.kicad_sch"), None);
 }

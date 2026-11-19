@@ -359,3 +359,7 @@ mod tests {
         }
     }
 }
+
+/// A path as a test compares it: on Windows "\\" read as "/" (the hub joins paths with the system's separator, `Path::join`; a test's
+/// expectation is written with "/"), elsewhere unchanged.
+pub fn sl(p: impl AsRef<str>) -> String { if cfg!(windows) { p.as_ref().replace('\\', "/") } else { p.as_ref().to_string() } }
