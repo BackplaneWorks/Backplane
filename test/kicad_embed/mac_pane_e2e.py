@@ -1001,13 +1001,16 @@ try:
             return out
         def ours_on_screen(): return any(w[0] == cw[0] for w in wins())
         def unhide():
-            # as a person's Dock click or Cmd+Tab: Backplane is the active app before the next click. Unhidden and asked to activate from
-            # here, Backplane's activation landed after the canvas click and took the keyboard back from KiCad (e2e-macos 44475785205, the
-            # Backplane-focused case: the client's kicad_keys_flip saw KiCad active from the click, then neither app active). As textkeys:
-            # wait for it, System Events when the request from here is refused (macOS 14+)
+            # as a person's Dock click or Cmd+Tab: Backplane is the active app before the canvas click (the case that fails, e2e-macos
+            # 44540065022: Backplane active, a click on KiCad's frame does not make KiCad active). As textkeys: wait for it; when the request
+            # from here is refused (macOS 14+), System Events on the runner, a click on Backplane's title bar on the Mac mini (no
+            # Accessibility grant there; its empty part, left of the title, as win_move uses)
             a = NSRunningApplication.runningApplicationWithProcessIdentifier_(client.pid); a.unhide(); time.sleep(0.4); a.activateWithOptions_(0)
-            if not wait_for(lambda: active(client.pid), 2, 0.1) and DRIVER == 'quartz':
-                osa(f'tell application "System Events" to set frontmost of (first process whose unix id is {client.pid}) to true')
+            if not wait_for(lambda: active(client.pid), 2, 0.1):
+                if DRIVER == 'quartz':
+                    osa(f'tell application "System Events" to set frontmost of (first process whose unix id is {client.pid}) to true')
+                else:
+                    b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + 120, b[1] + 12)
             check(bool(wait_for(lambda: active(client.pid), 5, 0.1)), 'hide: unhidden, Backplane is the active app again')
             time.sleep(0.5)  # the activation settled: no late activation of ours comes after the click
         def canvas_click(): click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); time.sleep(0.6); key(K_ESC); time.sleep(0.3)
