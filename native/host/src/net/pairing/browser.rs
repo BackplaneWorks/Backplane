@@ -162,6 +162,31 @@ mod tests {
     use super::*;
     use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
 
+    #[tokio::test]
+    async fn pending_poll_is_exclusive_cancellable_and_woken_by_decision() {
+        let home = crate::plat::tmp::dir("browser-long-poll");
+        let r = Registry::open(&home, "test").unwrap();
+        let login = "person@example.com";
+        let (req, cookie) = r.browser_request(login, "Browser").unwrap();
+        let id = req["id"].as_str().unwrap();
+        let mut first = Box::pin(r.browser_wait(login, &cookie));
+        tokio::select! {
+            biased;
+            _ = &mut first => panic!("pending request returned"),
+            _ = std::future::ready(()) => {}
+        }
+        assert_eq!(r.browser_wait(login, &cookie).await, Err("rate_limited"));
+        drop(first);
+        let mut retry = Box::pin(r.browser_wait(login, &cookie));
+        tokio::select! {
+            biased;
+            _ = &mut retry => panic!("retry did not wait"),
+            _ = std::future::ready(()) => {}
+        }
+        assert!(r.browser_decide(id, false));
+        assert_eq!(tokio::time::timeout(std::time::Duration::from_secs(1), retry).await.unwrap(), Err("denied"));
+    }
+
     #[test]
     fn browser_pairing_lifecycle() {
         let home = crate::plat::tmp::dir("browser-pairing");
