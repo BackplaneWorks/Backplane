@@ -89,9 +89,23 @@ pub fn page_document(viewer: &Value, page: &str) -> Option<bool> {
     let has = viewer.get("has").filter(|h| h.is_object())?;
     match page { "board" | "3d" => Some(has["board"] == true), "schematic" => Some(has["schematic"] == true), _ => None } // i18n-ok: rail page kinds
 }
-/// Whether Open in KiCad is offered on `page`: never on a design page whose document the project does not have (KiCad would ask to create
-/// it over the app: #1326); elsewhere, as before, while the project has a board or a schematic.
-pub fn edit_design(viewer: &Value, page: &str) -> bool { page_document(viewer, page).unwrap_or_else(|| has_design(viewer)) }
+/// Whether Open in KiCad is offered on `page` (#1347): only on a page with an editor of its own (Board, Schematic, 3D), and there only
+/// while its document is in the project (KiCad would ask to create it over the app: #1326; `has` absent: as before, while the project has
+/// a board or a schematic). Never on Files, Review, Mech, Browser, Split: since KiCad was embedded (Nov 11) it opens only over a design
+/// page, and the control the tab bar's removal (25c7d352a) left on every page was a press that did nothing.
+pub fn edit_design(viewer: &Value, page: &str) -> bool {
+    matches!(page, "board" | "schematic" | "3d") && page_document(viewer, page).unwrap_or_else(|| has_design(viewer)) // i18n-ok: rail page kinds
+}
+/// Where an Edit asked for from `page` goes (#1347: a context menu's, the boards menu's, a script's, one kept until the viewer's
+/// picture): `Here` on a design page; from a page with no editor of its own, `To` the design page whose document the project has (the
+/// Board, or the Schematic of a project without one; `has` absent: the Board, as before), or `Nothing` when it has neither.
+#[derive(Debug, PartialEq)]
+pub enum EditGo { Here, To(&'static str), Nothing }
+pub fn edit_go(viewer: &Value, page: &str) -> EditGo {
+    if matches!(page, "board" | "schematic" | "3d") { return EditGo::Here } // i18n-ok: rail page kinds
+    let Some(has) = viewer.get("has").filter(|h| h.is_object()) else { return EditGo::To("board") }; // i18n-ok: rail page kind
+    if has["board"] == true { EditGo::To("board") } else if has["schematic"] == true { EditGo::To("schematic") } else { EditGo::Nothing } // i18n-ok: rail page kinds
+}
 
 fn arr<'a>(v: &'a Value, k: &str) -> impl Iterator<Item = &'a Value> { v[k].as_array().into_iter().flatten() }
 pub fn tabs(viewer: &Value) -> Vec<Tab> { arr(viewer, "choices").map(|c| Tab { label: string(c, "label"), value: string(c, "value"), on: c["on"].as_bool().unwrap_or(false) }).collect() }
@@ -1067,23 +1081,36 @@ pub fn follow(tx: &tokio::sync::mpsc::Sender<Command>, thread: &Value) {
 
 #[cfg(test)]
 mod tests {
-    /// #1347: Open in KiCad is never offered on a design page whose document the project does not have (the hub's `has`); `has` absent
-    /// (another machine's thread, an older hub) is unknown, and the offer is as it was (a board or a schematic among the pages).
-    #[test] fn edit_is_offered_only_where_the_pages_document_exists() {
+    /// #1347: Open in KiCad is offered only on Board, Schematic and 3D, and there only while the page's document is in the project (the
+    /// hub's `has`; absent: as before). Files, Review, Mech, Browser and Split never: the pane is not drawn there, and the press did nothing.
+    #[test] fn edit_is_offered_only_on_a_design_page_whose_document_exists() {
         use serde_json::json;
         let tabs = json!([{"value": "board"}, {"value": "schematic"}]);
         let v = |has: serde_json::Value| { let mut v = json!({"choices": tabs}); if !has.is_null() { v["has"] = has; } v };
         let pages = ["board", "3d", "schematic", "files", "review", "mech", "browser", "split"];
         let offer = |v: &serde_json::Value| pages.iter().map(|p| super::edit_design(v, p)).collect::<Vec<_>>();
         //                                                        board  3d     sch    files  review mech   browser split
-        assert_eq!(offer(&v(json!({"board": false, "schematic": true}))), [false, false, true, true, true, true, true, true], "schematic only");
-        assert_eq!(offer(&v(json!({"board": true, "schematic": false}))), [true, true, false, true, true, true, true, true], "board only");
-        assert_eq!(offer(&v(json!({"board": true, "schematic": true}))), [true; 8], "both");
-        assert_eq!(offer(&v(serde_json::Value::Null)), [true; 8], "has absent: as before, never read as missing");
+        assert_eq!(offer(&v(json!({"board": false, "schematic": true}))), [false, false, true, false, false, false, false, false], "schematic only");
+        assert_eq!(offer(&v(json!({"board": true, "schematic": false}))), [true, true, false, false, false, false, false, false], "board only");
+        assert_eq!(offer(&v(json!({"board": true, "schematic": true}))), [true, true, true, false, false, false, false, false], "both");
+        assert_eq!(offer(&v(serde_json::Value::Null)), [true, true, true, false, false, false, false, false], "has absent: the design pages as before");
         assert_eq!(super::page_document(&v(serde_json::Value::Null), "board"), None);
-        // and as before, no board or schematic among the pages: nothing to open, `has` or not
-        assert!(!super::edit_design(&json!({"choices": [{"value": "mech"}]}), "files"));
-        assert!(!super::edit_design(&json!({"choices": [], "has": {"board": false, "schematic": false}}), "board"));
+        assert!(!super::edit_design(&json!({"choices": [{"value": "mech"}]}), "board"), "no board or schematic among the pages: none, as before");
+    }
+    /// #1347: an Edit asked for from a page with no editor of its own (a context menu, the boards menu, a script, a kept Edit) goes to the
+    /// design page whose document the project has; neither: nothing (said, no KiCad); a design page: here.
+    #[test] fn an_edit_from_a_page_without_an_editor_goes_to_a_design_page_the_project_has() {
+        use serde_json::json;
+        use super::{edit_go, EditGo};
+        let v = |has: serde_json::Value| json!({"has": has});
+        for page in ["files", "review", "mech", "browser", "split", ""] {
+            assert_eq!(edit_go(&v(json!({"board": false, "schematic": true})), page), EditGo::To("schematic"), "{page}: schematic only");
+            assert_eq!(edit_go(&v(json!({"board": true, "schematic": false})), page), EditGo::To("board"), "{page}: board only");
+            assert_eq!(edit_go(&v(json!({"board": true, "schematic": true})), page), EditGo::To("board"), "{page}: both, the board");
+            assert_eq!(edit_go(&v(json!({"board": false, "schematic": false})), page), EditGo::Nothing, "{page}: neither");
+            assert_eq!(edit_go(&json!({}), page), EditGo::To("board"), "{page}: has absent, the board as before");
+        }
+        for page in ["board", "schematic", "3d"] { assert_eq!(edit_go(&v(json!({"board": false, "schematic": false})), page), EditGo::Here, "{page}"); }
     }
     /// #1199: whether the page holds the embedded editor, the one rule `page` mounts it by and the pane hides KiCad's frame by (macOS).
     #[test] fn the_page_holds_the_editor_only_while_it_draws_it() {
