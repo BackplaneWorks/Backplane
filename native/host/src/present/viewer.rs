@@ -788,8 +788,76 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         v["rail"] = rail::rail(input);
         v["has"] = has;
     }
+    if let identity @ Value::Object(_) = header_identity(st,session,&v) { v["identity"] = identity; }
     Some(v)
 }
+#[path="viewer_identity.rs"]
+mod viewer_identity;
+
+/// Gather source facts for the page, then format them without filesystem access.
+fn header_identity(st: &State, session: &Value, viewer: &Value) -> Value {
+    use std::path::Path;
+    use crate::files::kicad::gerber;
+    let sel = s(session,"sel");
+    let page = if pages::diff_on(session,sel) { "diff" } else if viewer["gerbers"] == true { "gerbers" } else { s(viewer,"open") };
+    if page.is_empty() { return Value::Null }
+    let root = root_of(st,sel);
+    let far = sel.contains('~');
+    let draft = |key: &str| s(&session["drafts"],&format!("{key}:{sel}"));
+    let file = draft("@view.file");
+    let sheet = draft("@view.sheet");
+    let selected = chosen_board(&session["drafts"],sel);
+    let context = super::identity_context::facts(st, session, sel);
+    let mut board = if selected.is_empty() { s(&context,"board").to_owned() } else { selected.clone() };
+    let mut schematic = if selected.is_empty() { s(&context,"sheet").to_owned() } else { board_file("schematic",&root,&selected) };
+    if !file.is_empty() {
+        match page { "board"|"3d"=>board=file.into(), "schematic"=>schematic=file.into(), _=>{} }
+    }
+    if !sheet.is_empty() { schematic=sheet.into(); }
+    let historical = s(&context,"historyRel");
+    if !historical.is_empty() {
+        match page { "board" | "3d" => board = historical.into(), "schematic" => schematic = historical.into(), _ => {} }
+    }
+    let mut set = String::new();
+    let mut made_at = None;
+    if page=="gerbers" {
+        set = gerber::set_of(file.strip_prefix("noboard\n").unwrap_or(file)).to_owned();
+        if set.is_empty() && !far && !root.is_empty() {
+            set = gerber::default_set(Path::new(&root)).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+        }
+        if !far {
+            if let Some(rel) = viewer_identity::relative(&root,&set) {
+                made_at = gerber::set_files(&Path::new(&root).join(rel)).iter()
+                    .filter_map(|p| p.metadata().ok()?.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs()).max();
+            }
+        }
+    }
+    let sources = viewer_identity::Sources { root:&root, board:&board, schematic:&schematic, file, sheet, directory:draft("@files.dir"), set:&set,made_at };
+    let mut id = viewer_identity::identity(page,viewer,&sources,&|rel| {
+        if !historical.is_empty() && historical == rel { return Some(true) }
+        if far {
+            if context["board"] == rel { context["hasBoard"].as_bool() }
+            else if context["sheet"] == rel { context["hasSheet"].as_bool() }
+            else { super::identity_context::far_exists(sel,rel) }
+        } else if page=="gerbers" { Some(made_at.is_some()) } else {
+            let p = Path::new(&root).join(rel);
+            Some(if page=="files" { p.is_dir() } else { p.is_file() })
+        }
+    });
+    if !s(&context,"version").is_empty() { id["version"] = context["version"].clone(); }
+    if context["comparison"].is_object() {
+        let pair = &context["comparison"];
+        id["scope"] = json!(format!("{} → {}",s(pair,"from"),s(pair,"to")));
+    }
+    if page == "browser" {
+        for (value,field) in [("browserTitle","title"),("browserUrl","url")] {
+            if !s(&context,value).is_empty() { id[field] = context[value].clone(); }
+        }
+    }
+    id
+}
+
 /// Choose the surface for this connection and the document the frame would open.
 pub fn surface(st: &State, viewer: &Value, params: &Value, thread: &str) -> Value {
     use super::design_mode::*;

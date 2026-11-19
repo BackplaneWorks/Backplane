@@ -27,7 +27,7 @@ fn render_scratch(key: &str) -> bool { key.starts_with("@more.") || key == "@pil
 const VIEW_INFO: [&str; 5] = ["view.design:", "view.kind:", "view.path:", "view.sheet:", "view.tree:"];
 
 #[derive(Default)]
-pub struct ViewActor { view: String, target: Option<Value>, sel: Option<String>, keys: BTreeSet<String>, away: BTreeMap<String, String>, page: Option<(String, Value, u64)>, local: Option<(String, Value, Value)>, held_drafts: Map<String, Value>, held_info: Map<String, Value>, rid: u64, panel: bool, hub_view: bool, reads: Vec<(Option<(String, Value)>, Value)>, bot: Option<(String, String)>,
+pub struct ViewActor { watch_order: u64, watched: Option<(String, Value, Value)>, view: String, target: Option<Value>, sel: Option<String>, keys: BTreeSet<String>, away: BTreeMap<String, String>, page: Option<(String, Value, u64)>, local: Option<(String, Value, Value)>, held_drafts: Map<String, Value>, held_info: Map<String, Value>, rid: u64, panel: bool, hub_view: bool, reads: Vec<(Option<(String, Value)>, Value)>, bot: Option<(String, String)>,
     /// ids of the requests this view's commands told the client to send (`cmds` of type send), and of those the hub has since answered
     sent: BTreeSet<u64>, replied: BTreeSet<u64>, late: BTreeSet<u64> }
 
@@ -138,6 +138,10 @@ impl ViewActor {
         }
         session.insert("drafts".into(), Value::Object(drafts));
         session.insert("info".into(), Value::Object(info));
+        session.remove("watchedHistory");
+        if let Some((v, t, facts)) = &self.watched {
+            if v == view && t == target { session.insert("watchedHistory".into(), facts.clone()); }
+        }
         session.insert("outbox".into(), json!({}));
         Value::Object(session)
     }
@@ -380,6 +384,26 @@ pub fn shown_thread(client: u64, target: &Value) -> String {
         _ => String::new(),
     }
 }
+/// Bind a watch to the requesting window before a peer can answer asynchronously.
+pub fn begin_watch(client: u64) -> Option<(u64, String, Value)> {
+    let mut actors = ACTORS.lock().unwrap();
+    let actor = actors.get_mut(&client)?;
+    let target = actor.target.clone()?;
+    actor.watch_order += 1;
+    Some((actor.watch_order, actor.view.clone(), target))
+}
+
+pub fn finish_watch(client: u64, ticket: Option<(u64, String, Value)>, params: &Value) -> bool {
+    let Some((order, view, target)) = ticket else { return false };
+    let mut actors = ACTORS.lock().unwrap();
+    let Some(actor) = actors.get_mut(&client) else { return false };
+    if actor.watch_order != order || actor.view != view || actor.target.as_ref() != Some(&target) { return false }
+    let next = crate::present::identity_context::watched(params).map(|facts| (view, target, facts));
+    if next == actor.watched { return false }
+    actor.watched = next;
+    true
+}
+
 /// A connection ended (`Hub::detach`, from the connection's drop guard).
 pub fn forget(client: u64) { ACTORS.lock().unwrap().remove(&client); }
 
