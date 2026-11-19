@@ -1134,9 +1134,43 @@ impl Render for Ghost { fn render(&mut self, _: &mut Window, _: &mut Context<Sel
 /// The width a project page's README is laid out to: the list's, in the page's 930 px column less its padding.
 pub fn page_doc_w(l: &ListState) -> f32 { (f32::from(l.viewport_bounds().size.width).min(930.) - 32.).max(300.) }
 
+/// Test-mode inventory of every drawn right-rail entry (icon, label, tooltip, keycap, palette command).
+pub(crate) fn rail_inventory_of(data: &Value, can_embed: bool, local: &crate::local::Local) -> Vec<Value> {
+    let viewer = &data["thread"]["viewer"];
+    let sim_rail = crate::viewers::kicad_pane::rail_simulation(viewer, can_embed).is_some();
+    rail_rows(viewer, sim_rail).into_iter().map(|row| {
+        let disabled = row.state == "disabled";
+        let hint = if disabled { String::new() } else { rail_hint(local, row.id, row.key) };
+        let tooltip = if disabled { trs(row.why) } else { trs(row.label) };
+        let keycap = if disabled { String::new() } else { row.key.to_uppercase() };
+        let pal = crate::screens::palette::rail_command_for(data, can_embed, row.id, local);
+        serde_json::json!({
+            "id": row.id,
+            "label": trs(row.label),
+            "group": row.group,
+            "state": row.state,
+            "disabled": disabled,
+            "icon": row.icon,
+            "icon_known": art::icon_name(row.icon).is_some(),
+            "tooltip": tooltip,
+            "tooltip_hint": hint,
+            "key": row.key,
+            "keycap": keycap,
+            "palette_label": pal.as_ref().map(|(l, _)| l.as_str()).unwrap_or(""),
+            "palette_shortcut": pal.as_ref().map(|(_, s)| s.as_str()).unwrap_or(""),
+        })
+    }).collect()
+}
+
+/// Test-mode wrapper called only from `script::drawn_marks` when `BACKPLANE_GPUI_RECTS` is enabled; inert in normal clients.
+pub(crate) fn rail_inventory(this: &Backplane) -> Vec<Value> {
+    let can_embed = crate::viewers::kicad_pane::local(this.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), &this.data["thread"]);
+    rail_inventory_of(&this.data, can_embed, &this.local)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{rail_rows, viewer_row_on, RailRow};
+    use super::{rail_inventory_of, rail_rows, viewer_row_on, RailRow};
     use serde_json::Value;
     #[test]
     fn rail_rows_follow_hub_order_content_and_empty_list() {
@@ -1177,5 +1211,32 @@ mod tests {
         assert!(!viewer_row_on(&files, Some(""), "files"));
         assert!(viewer_row_on(&files, None, "board"));
         assert!(!viewer_row_on(&board, None, "board"));
+    }
+    #[test]
+    fn rail_inventory_reports_drawn_icon_label_tooltip_keycap_and_palette() {
+        let local = crate::local::Local::default();
+        let data = serde_json::json!({"thread":{"viewer":{"rail":[
+            {"id":"board","label":"Board","icon":"circuit-board","group":"design","state":"off","key":"b"},
+            {"id":"gerbers","label":"Gerbers","icon":"layers","group":"design","state":"off","key":""},
+            {"id":"split","label":"Split","icon":"columns","group":"design","state":"disabled","key":"v","why":"No schematic"}
+        ]}}});
+        let inv = rail_inventory_of(&data, false, &local);
+        assert_eq!(inv.len(), 3);
+        assert_eq!(inv[0]["id"], "board");
+        assert_eq!(inv[0]["icon"], "circuit-board");
+        assert_eq!(inv[0]["icon_known"], crate::art::icon_name("circuit-board").is_some());
+        assert_eq!(inv[0]["label"], "Board");
+        assert_eq!(inv[0]["tooltip"], "Board");
+        assert_eq!(inv[0]["keycap"], "B");
+        assert_eq!(inv[0]["palette_label"], "Board");
+        // Gerbers without key has empty keycap & tooltip_hint, which B5 flags.
+        assert_eq!(inv[1]["id"], "gerbers");
+        assert_eq!(inv[1]["keycap"], "");
+        assert_eq!(inv[1]["tooltip_hint"], "");
+        // Disabled entry carries its why text as tooltip and has no palette command.
+        assert_eq!(inv[2]["id"], "split");
+        assert_eq!(inv[2]["disabled"], true);
+        assert_eq!(inv[2]["tooltip"], "No schematic");
+        assert_eq!(inv[2]["palette_label"], "");
     }
 }

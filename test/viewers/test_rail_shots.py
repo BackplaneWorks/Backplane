@@ -425,6 +425,154 @@ class RailShotsRegressionTests(unittest.TestCase):
             self.assertTrue(parsed["presses"]["press:task8-edit"][0]["found"])
             self.assertFalse(parsed["presses"]["press:missing"][0]["found"])
 
+    # --- rail-p item 1: one step back for tasks 1, 2, 5, 6, 9 ---
+    def test_one_step_back_awards_4_of_4_only_when_observed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            outdir = Path(td)
+            full_dir = outdir / "full"
+            write_non_flat_png(full_dir / "board.png", color_b=(90, 140, 200))
+            write_non_flat_png(full_dir / "3d.png", color_b=(120, 200, 90))
+            write_non_flat_png(full_dir / "mech.png", color_b=(200, 120, 90))
+            write_non_flat_png(full_dir / "task5-split-probe.png", color_b=(140, 140, 200))
+            for s in ("idle", "task1-back", "task2-back", "task5-back", "task6-back", "task9-follow-on", "task9-follow-off"):
+                write_non_flat_png(full_dir / f"{s}.png")
+            lay_idle = {
+                "topbar": {"x": 0, "y": 0, "w": 1440, "h": 36},
+                "main": {"x": 240, "y": 36, "w": 1128, "h": 864},
+                "rail": {"x": 1368, "y": 36, "w": 72, "h": 864},
+            }
+            lay_open = {
+                "topbar": {"x": 0, "y": 0, "w": 1440, "h": 36},
+                "main": {"x": 240, "y": 36, "w": 500, "h": 864},
+                "rail": {"x": 1368, "y": 36, "w": 72, "h": 864},
+            }
+            closed_v = {"open": "", "active_kind": "", "diff_open": False}
+            full_parsed = {
+                "shots": {
+                    "idle": {"state": "ready", "viewer": closed_v, "layout": lay_idle, "controls_ids": []},
+                    "board": {"state": "ready", "viewer": {"open": "board", "gerbers": False, "plot_key": "0|/p|", "plot_none": ""}, "layout": lay_open, "controls_ids": []},
+                    "task1-back": {"state": "ready", "viewer": closed_v, "layout": lay_idle, "controls_ids": []},
+                    "3d": {"state": "ready", "viewer": {"open": "3d", "key": "2|/p|", "solid_key": "2|/p|", "solid_painted_since_press": 1, "solid_last_w": 600, "solid_last_h": 800}, "layout": lay_open, "controls_ids": []},
+                    "task2-back": {"state": "ready", "viewer": closed_v, "layout": lay_idle, "controls_ids": []},
+                    "task5-split-probe": {"state": "ready", "viewer": {"open": "split", "panes_count": 2, "split_pcb_ref": "R1", "split_sch_ref": "R1", "split_lit_sch": True, "split_lit_pcb": True}, "layout": lay_open, "controls_ids": []},
+                    "task5-back": {"state": "ready", "viewer": closed_v, "layout": lay_idle, "controls_ids": []},
+                    "mech": {"state": "ready", "viewer": {"open": "mech", "key": "2|/p|/p/mech/bracket.step", "solid_key": "2|/p|/p/mech/bracket.step", "solid_painted_since_press": 1, "solid_last_w": 600, "solid_last_h": 800}, "layout": lay_open, "controls_ids": []},
+                    "task6-back": {"state": "ready", "viewer": closed_v, "layout": lay_idle, "controls_ids": []},
+                    "task9-follow-on": {"state": "ready", "viewer": {"open": "board", "follow_present": True, "follow_on": True, "follow_rect_visible": True}, "layout": lay_open, "controls_ids": []},
+                    "task9-follow-off": {"state": "ready", "viewer": {"open": "board", "follow_present": True, "follow_on": False, "follow_rect_visible": True}, "layout": lay_open, "controls_ids": []},
+                },
+                "settled_tags": {
+                    "task6-back-start": {"settled": True, "state": "ready", "viewer": {"open": "mech"}},
+                },
+                "kicad_tags": {},
+                "presses": {
+                    "press:board": [{"id": "rail:Board", "found": True}],
+                    "press:task1-back": [{"id": "rail:Board", "found": True}],
+                    "press:3d": [{"id": "rail:3D", "found": True}],
+                    "press:task2-back": [{"id": "rail:3D", "found": True}],
+                    "press:split": [{"id": "rail:Split", "found": True}],
+                    "press:task5-back": [{"id": "rail:Split", "found": True}],
+                    "press:mech": [{"id": "rail:Mech", "found": True}],
+                    "press:task6-back": [{"id": "rail:Mech", "found": True}],
+                    "press:task9-follow-on": [{"id": "follow-agent", "found": True}],
+                    "press:task9-follow-off": [{"id": "follow-agent", "found": True}],
+                },
+            }
+            caps = {
+                name: {"name": name, "ok": True, "bytes": 1234, "inspect_ok": True, "obstructed": False, "obstructions": []}
+                for name in full_parsed["shots"]
+            }
+            tasks = {t["task"]: t for t in P.evaluate_scorecard(outdir, full_parsed, caps, True)}
+            for tid in (1, 2, 5, 6, 9):
+                self.assertEqual(tasks[tid]["outcome"], "passed", f"task {tid}")
+                self.assertTrue(tasks[tid]["parts"]["one_step_back"], f"task {tid} one_step_back")
+                self.assertEqual(C.score_single_task(tasks[tid])["points"], 4, f"task {tid} should be 4/4")
+            self.assertEqual(tasks[5]["evidence"]["one_step_back"]["returned_to"], "closed")
+
+            # If Follow stays on after toggle, Task 9 loses its 4th point (3/4, not 4/4).
+            full_parsed["shots"]["task9-follow-off"]["viewer"]["follow_on"] = True
+            tasks2 = {t["task"]: t for t in P.evaluate_scorecard(outdir, full_parsed, caps, True)}
+            self.assertFalse(tasks2[9]["parts"]["one_step_back"])
+            self.assertEqual(C.score_single_task(tasks2[9])["points"], 3)
+
+    # --- rail-p item 2: Rule B1 unavailable without PR #1359 metric, scored 0-3 with it ---
+    def test_rule_b1_unavailable_without_rail_metric_and_scored_with_it(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            # Without GPUI_METRIC event=rail -> unavailable
+            log_no_rail = Path(td) / "no_rail.log"
+            log_no_rail.write_text('GPUI_METRIC {"event":"settled","tag":"b1-press-open-board","state":"ready","settled":true,"viewer":{"open":"board"}}\n', encoding="utf-8")
+            p_no = P.parse_client_log(log_no_rail)
+            self.assertFalse(p_no["rail_metric_seen"])
+            b1_no = P.evaluate_b1_kind("full", p_no, {"board": {"state": "enabled", "why": ""}})
+            self.assertEqual(b1_no["status"], "unavailable")
+            cons_no = C.score_consistency({"kinds": {"full": {"rail_metric_seen": False, "b1_checks": b1_no, "pages": {}}}})
+            self.assertEqual(cons_no["B1"]["status"], "unavailable")
+            self.assertIsNone(cons_no["B1"]["points"])
+
+            # With GPUI_METRIC event=rail -> scored 0-3 with failing entries listed
+            log_rail = Path(td) / "with_rail.log"
+            lines = [
+                # Board (enabled): all 5 pass
+                'GPUI_METRIC {"event":"rail","rail":{"lit":["Board"],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
+                'GPUI_METRIC {"event":"settled","tag":"b1-press-open-board","state":"ready","settled":true,"viewer":{"open":"board","diff_open":false}}',
+                'GPUI_METRIC {"event":"rail","rail":{"lit":[],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
+                'GPUI_METRIC {"event":"settled","tag":"b1-press-close-board","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
+                'GPUI_METRIC {"event":"rail","rail":{"lit":["Board"],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
+                'GPUI_METRIC {"event":"settled","tag":"b1-key-open-board","state":"ready","settled":true,"viewer":{"open":"board","diff_open":false}}',
+                'GPUI_METRIC {"event":"rail","rail":{"lit":[],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
+                'GPUI_METRIC {"event":"settled","tag":"b1-key-close-board","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
+                'GPUI_METRIC {"event":"rail","rail":{"lit":["Board"],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
+                'GPUI_METRIC {"event":"settled","tag":"b1-palette-open-board","state":"ready","settled":true,"viewer":{"open":"board","diff_open":false}}',
+                # Gerbers (enabled): press & palette pass, bare key fails to open
+                'GPUI_METRIC {"event":"rail","rail":{"lit":["Gerbers"],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
+                'GPUI_METRIC {"event":"settled","tag":"b1-press-open-gerbers","state":"ready","settled":true,"viewer":{"open":"board","gerbers":true,"diff_open":false}}',
+                'GPUI_METRIC {"event":"rail","rail":{"lit":[],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
+                'GPUI_METRIC {"event":"settled","tag":"b1-press-close-gerbers","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
+                'GPUI_METRIC {"event":"settled","tag":"b1-key-open-gerbers","state":"timeout","settled":false,"viewer":{"open":"","diff_open":false}}',
+                'GPUI_METRIC {"event":"settled","tag":"b1-key-close-gerbers","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
+                'GPUI_METRIC {"event":"rail","rail":{"lit":["Gerbers"],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
+                'GPUI_METRIC {"event":"settled","tag":"b1-palette-open-gerbers","state":"ready","settled":true,"viewer":{"open":"board","gerbers":true,"diff_open":false}}',
+                # Split (disabled): all 3 no-ops pass
+                'GPUI_METRIC {"event":"rail","rail":{"lit":[],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
+                'GPUI_METRIC {"event":"settled","tag":"b1-disabled-press-split","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
+                'GPUI_METRIC {"event":"settled","tag":"b1-disabled-key-split","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
+                'GPUI_METRIC {"event":"settled","tag":"b1-disabled-palette-split","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
+            ]
+            log_rail.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            p_yes = P.parse_client_log(log_rail)
+            self.assertTrue(p_yes["rail_metric_seen"])
+            rmap = {
+                "board": {"state": "enabled", "why": ""},
+                "gerbers": {"state": "enabled", "why": ""},
+                "split": {"state": "disabled", "why": "No schematic"},
+            }
+            b1_yes = P.evaluate_b1_kind("full", p_yes, rmap)
+            self.assertEqual(b1_yes["status"], "measured")
+            self.assertTrue(b1_yes["entries"]["board"]["passed"])
+            self.assertFalse(b1_yes["entries"]["gerbers"]["passed"])
+            self.assertIn("key_open", b1_yes["entries"]["gerbers"]["failed"])
+            self.assertTrue(b1_yes["entries"]["split"]["passed"])
+            cons_yes = C.score_consistency({"kinds": {"full": {"rail_metric_seen": True, "b1_checks": b1_yes, "pages": {}}}})
+            self.assertEqual(cons_yes["B1"]["status"], "measured")
+            self.assertEqual(cons_yes["B1"]["points"], 2.0)  # 2/3 * 3.0
+            self.assertEqual(cons_yes["B1"]["violations"], ["full/gerbers: key_open"])
+
+    # --- rail-p item 3: Rule B5 from client's own rail_inventory ---
+    def test_rule_b5_scores_client_rail_inventory_and_flags_missing_fields(self) -> None:
+        cons_unavail = C.score_consistency({"kinds": {"full": {"rail_inventory": None, "pages": {}}}})
+        self.assertEqual(cons_unavail["B5"]["status"], "unavailable")
+        self.assertIsNone(cons_unavail["B5"]["points"])
+
+        inv = [
+            {"id": "board", "label": "Board", "disabled": False, "icon": "circuit-board", "icon_known": True, "tooltip": "Board", "tooltip_hint": "B", "key": "b", "keycap": "B", "palette_label": "Board"},
+            {"id": "gerbers", "label": "Gerbers", "disabled": False, "icon": "layers", "icon_known": True, "tooltip": "Gerbers", "tooltip_hint": "", "key": "", "keycap": "", "palette_label": "Gerbers"},
+            {"id": "commands", "label": "Commands", "disabled": False, "icon": "search", "icon_known": True, "tooltip": "Commands", "tooltip_hint": "Ctrl+Shift+P", "key": "", "keycap": "", "palette_label": ""},
+        ]
+        cons = C.score_consistency({"kinds": {"full": {"rail_inventory": inv, "pages": {}}}})
+        self.assertEqual(cons["B5"]["status"], "measured")
+        self.assertEqual(cons["B5"]["points"], 2.0)  # 2/3 * 3.0 (gerbers missing key)
+        self.assertEqual(cons["B5"]["violations"], ["full/gerbers: missing key"])
+
 
 if __name__ == "__main__":
     unittest.main()

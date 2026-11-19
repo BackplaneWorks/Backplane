@@ -55,6 +55,21 @@ EMBED_SHOTS = [
     "task7-sim-run",
 ]
 
+# Viewer rail entries exercised for Rule B1 (press open/close, bare key open/close, palette open, disabled no-op).
+# (id, label, rail_control_id, settle_kind, bare_key, palette_query)
+B1_ENTRIES = [
+    ("board", "Board", "rail:Board", "board", "b", "Board"),
+    ("schematic", "Schematic", "rail:Schematic", "schematic", "s", "Schematic"),
+    ("3d", "3D", "rail:3D", "3d", "3", "3D"),
+    ("gerbers", "Gerbers", "rail:Gerbers", "gerbers", "g", "Gerbers"),
+    ("split", "Split", "rail:Split", "split", "v", "Split"),
+    ("mech", "Mech", "rail:Mech", "mech", "m", "Mech"),
+    ("files", "Files", "rail:Files", "files", "f", "Files"),
+    ("diff", "Diff", "rail:Diff", "diff", "d", "Diff"),
+    ("review", "Review", "rail:Review", "review", "r", "Review"),
+    ("browser", "Browser", "rail:Browser", "browser", "w", "Browser"),
+]
+
 
 def contact_shots() -> list[str]:
     """Ordered shot slugs shown in each kind's contact sheet."""
@@ -88,9 +103,14 @@ def expected_shots(kind: str, embed: bool = False) -> list[str]:
     shots = list(contact_shots())
     if kind == "full":
         shots.extend([
+            "task1-back",
+            "task2-back",
             "task4-gerbers-vs-board",
             "task5-split-probe",
+            "task5-back",
+            "task6-back",
             "task9-follow-on",
+            "task9-follow-off",
             "task10-closed",
         ])
         for src_slug, _, _ in TASK3_SOURCES:

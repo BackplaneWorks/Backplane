@@ -316,6 +316,16 @@ def score_consistency(steps: dict) -> dict:
     kinds = steps.get("kinds") or {}
     canvas_pages = {"board", "schematic", "3d", "gerbers", "split", "mech", "split-after-mech"}
 
+    b1_available = False
+    b1_checked = 0
+    b1_clean = 0
+    b1_violations: list[str] = []
+
+    b5_available = False
+    b5_checked = 0
+    b5_clean = 0
+    b5_violations: list[str] = []
+
     b3_checked = 0
     b3_clean = 0
     b3_unscored = 0
@@ -342,6 +352,47 @@ def score_consistency(steps: dict) -> dict:
     b6_unscored_private = 0
 
     for kind, kdata in kinds.items():
+        # B1: One selection behaviour for every rail entry (requires client-drawn rail metric from PR #1359)
+        b1_k = kdata.get("b1_checks") or {}
+        if isinstance(b1_k, dict) and b1_k.get("status") == "measured" and kdata.get("rail_metric_seen"):
+            b1_available = True
+            for eid, edata in (b1_k.get("entries") or {}).items():
+                if not isinstance(edata, dict):
+                    continue
+                b1_checked += 1
+                if edata.get("passed"):
+                    b1_clean += 1
+                else:
+                    failed = edata.get("failed") or ["failed"]
+                    b1_violations.append(f"{kind}/{eid}: {', '.join(str(f) for f in failed)}")
+
+        # B5: Client's own drawn rail inventory (icon, label, tooltip, key, palette command)
+        inv = kdata.get("rail_inventory")
+        if isinstance(inv, list) and inv:
+            b5_available = True
+            for entry in inv:
+                if not isinstance(entry, dict):
+                    continue
+                eid = str(entry.get("id") or entry.get("label") or "?")
+                b5_checked += 1
+                missing_fields: list[str] = []
+                if not (entry.get("icon_known") is True and str(entry.get("icon") or "").strip()):
+                    missing_fields.append("icon")
+                if not str(entry.get("label") or "").strip():
+                    missing_fields.append("label")
+                if not str(entry.get("tooltip") or "").strip():
+                    missing_fields.append("tooltip")
+                if not entry.get("disabled"):
+                    has_key = bool(str(entry.get("keycap") or "").strip()) or bool(str(entry.get("tooltip_hint") or "").strip())
+                    if not has_key:
+                        missing_fields.append("key")
+                    if eid != "commands" and not str(entry.get("palette_label") or "").strip():
+                        missing_fields.append("palette")
+                if missing_fields:
+                    b5_violations.append(f"{kind}/{eid}: missing {', '.join(missing_fields)}")
+                else:
+                    b5_clean += 1
+
         pages = kdata.get("pages") or {}
         for slug, pg in pages.items():
             if slug == "idle":
@@ -442,6 +493,8 @@ def score_consistency(steps: dict) -> dict:
             return None
         return round(max_pts * (clean / total), 2)
 
+    b1_pts = pts_of(b1_clean, b1_checked, 3.0) if b1_available else None
+    b5_pts = pts_of(b5_clean, b5_checked, 3.0) if b5_available else None
     b6_loading_pts = pts_of(b6_loading_clean, b6_loading_checked, 1.0)
     b6_empty_pts = pts_of(b6_empty_clean, b6_empty_checked, 1.0)
     b6_error_pts = pts_of(b6_error_clean, b6_error_checked, 1.0)
@@ -449,7 +502,27 @@ def score_consistency(steps: dict) -> dict:
     b6_total = round(sum(b6_parts), 2) if b6_parts else None
     b6_measured_max = float(len(b6_parts))
 
+    def rule_status(code: str) -> str:
+        if code == "B1":
+            return "measured" if b1_available else "unavailable"
+        if code == "B5":
+            return "measured" if b5_available else "unavailable"
+        if code in ("B3", "B4", "B6"):
+            return "measured_partial"
+        return "not measured by the harness"
+
     return {
+        "B1": {
+            "rule": RULE_BY_ID["B1"],
+            "scope": "One selection behaviour per rail entry (press, press again, key, palette, disabled no-op; client-drawn lit)",
+            "status": "measured" if b1_available else "unavailable",
+            "reason": "" if b1_available else "client did not emit GPUI_METRIC event=rail (requires PR #1359)",
+            "max_points": 3,
+            "checked": b1_checked,
+            "clean": b1_clean,
+            "points": b1_pts,
+            "violations": b1_violations,
+        },
         "B3": {
             "rule": RULE_BY_ID["B3"],
             "scope": "Known misplaced controls found (partial check; not a whole-rule score)",
@@ -471,6 +544,17 @@ def score_consistency(steps: dict) -> dict:
             "violations": b4_violations,
             "points": None,
         },
+        "B5": {
+            "rule": RULE_BY_ID["B5"],
+            "scope": "Client-drawn rail inventory (icon, label, tooltip, key, palette command)",
+            "status": "measured" if b5_available else "unavailable",
+            "reason": "" if b5_available else "client did not emit GPUI_METRIC event=rail_inventory",
+            "max_points": 3,
+            "checked": b5_checked,
+            "clean": b5_clean,
+            "points": b5_pts,
+            "violations": b5_violations,
+        },
         "B6": {
             "rule": RULE_BY_ID["B6"],
             "scope": "Empty / loading / error states (1 pt each; unobstructed opened pages only)",
@@ -483,7 +567,7 @@ def score_consistency(steps: dict) -> dict:
             "error": {"checked": b6_error_checked, "clean": b6_error_clean, "points": b6_error_pts, "max_points": 1, "violations": b6_error_violations},
         },
         "rules": [
-            {"rule": code, "text": text, "max_points": 3, "status": "measured_partial" if code in ("B3", "B4", "B6") else "not measured by the harness"}
+            {"rule": code, "text": text, "max_points": 3, "status": rule_status(code)}
             for code, text in SCORECARD_RULES
         ],
     }
@@ -722,7 +806,14 @@ def main(argv: list[str] | None = None) -> int:
         "|---|---|---|---|---|",
     ])
     for code, text in SCORECARD_RULES:
-        if code == "B3":
+        if code == "B1":
+            def fmt_b1(c: dict) -> str:
+                if c.get("status") != "measured":
+                    return "`unavailable`"
+                return f"{fmt_opt_pts(c['points'], 3)} ({c['clean']}/{c['checked']} clean)"
+            note = n_cons["B1"].get("reason") or f"{len(n_cons['B1']['violations'])} failing entries"
+            lines.append(f"| **B1** | {text} | {fmt_b1(b_cons['B1'])} | {fmt_b1(n_cons['B1'])} | {note} |")
+        elif code == "B3":
             lines.append(
                 f"| **B3** | {text} | {b_cons['B3']['misplaced_count']} misplaced ({b_cons['B3']['checked']} checked) | "
                 f"{n_cons['B3']['misplaced_count']} misplaced ({n_cons['B3']['checked']} checked, {n_cons['B3']['unscored_obstructed_or_unopened']} unscored) | partial check only |"
@@ -732,6 +823,13 @@ def main(argv: list[str] | None = None) -> int:
                 f"| **B4** | {text} | {len(b_cons['B4']['violations'])} violations ({b_cons['B4']['checked']} checked) | "
                 f"{len(n_cons['B4']['violations'])} violations ({n_cons['B4']['checked']} checked, {n_cons['B4']['unscored_private']} unscored) | partial check: desktop absent resources only |"
             )
+        elif code == "B5":
+            def fmt_b5(c: dict) -> str:
+                if c.get("status") != "measured":
+                    return "`unavailable`"
+                return f"{fmt_opt_pts(c['points'], 3)} ({c['clean']}/{c['checked']} clean)"
+            note = n_cons["B5"].get("reason") or f"{len(n_cons['B5']['violations'])} incomplete entries"
+            lines.append(f"| **B5** | {text} | {fmt_b5(b_cons['B5'])} | {fmt_b5(n_cons['B5'])} | {note} |")
         elif code == "B6":
             lines.append(
                 f"| **B6** | {text} | {fmt_opt_pts(b_cons['B6']['points'], b_cons['B6']['measured_max_points'] or 3)} | "
@@ -742,6 +840,17 @@ def main(argv: list[str] | None = None) -> int:
             lines.append(f"| **{code}** | {text} | not measured | not measured | not measured by the harness |")
 
     lines.extend(["", "## Consistency Findings (New)", ""])
+    if n_cons["B1"].get("status") != "measured":
+        lines.append(f"### B1: `unavailable` ({n_cons['B1'].get('reason', 'no client rail metric')})")
+    else:
+        lines.append(f"### B1: Failing rail selection entries ({len(n_cons['B1']['violations'])})")
+        if not n_cons["B1"]["violations"]:
+            lines.append("- None")
+        else:
+            for v in n_cons["B1"]["violations"]:
+                lines.append(f"- `{v}`")
+    lines.append("")
+
     lines.append(f"### B3: Known misplaced controls found ({n_cons['B3']['misplaced_count']})")
     if not n_cons["B3"]["misplaced"]:
         lines.append("- None")
@@ -756,6 +865,17 @@ def main(argv: list[str] | None = None) -> int:
     else:
         for v in n_cons["B4"]["violations"]:
             lines.append(f"- `{v}`")
+    lines.append("")
+
+    if n_cons["B5"].get("status") != "measured":
+        lines.append(f"### B5: `unavailable` ({n_cons['B5'].get('reason', 'no client rail_inventory metric')})")
+    else:
+        lines.append(f"### B5: Incomplete drawn rail entries ({len(n_cons['B5']['violations'])})")
+        if not n_cons["B5"]["violations"]:
+            lines.append("- None")
+        else:
+            for v in n_cons["B5"]["violations"]:
+                lines.append(f"- `{v}`")
     lines.append("")
 
     lines.append("### B6: Page state breakdown (unobstructed opened pages only)")

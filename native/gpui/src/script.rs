@@ -130,6 +130,12 @@ impl Backplane {
             let links: Vec<Value> = self.link_and_copy_rects().into_iter().filter(|(id, _, _)| id.starts_with("link:")).map(|(id, href, b)| json!({"id": id, "href": href, "rect": {"x": f32::from(b.origin.x), "y": f32::from(b.origin.y), "w": f32::from(b.size.width), "h": f32::from(b.size.height)}})).collect();
             let text = serde_json::to_string(&links).unwrap_or_default();
             if !self.links_sent || text != self.links_last { self.links_sent = true; self.links_last = text; metric(started, "links", json!({"links": links, "supported": true})); }
+            // B5: drawn right-rail inventory (icon, label, tooltip, keycap, palette command), on change; inert unless BACKPLANE_GPUI_RECTS is set
+            { static LAST_INV: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+              let inv = crate::ui::rail_inventory(self);
+              let text = serde_json::to_string(&inv).unwrap_or_default();
+              let mut g = LAST_INV.lock().unwrap();
+              if *g != text { *g = text; metric(started, "rail_inventory", json!({"entries": inv})); } }
         }
     }
 
