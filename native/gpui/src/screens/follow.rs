@@ -66,6 +66,9 @@ pub fn key_fits(key: &str, focus: &Value) -> bool {
 /// (`take` in plotview::ensure_view).
 pub fn tick(app: &mut Backplane) {
     let f = of(app);
+    // the line under the toggle, logged when it changes (what the e2e reads: embed_follow_pane_e2e)
+    { static SAID: Mutex<String> = Mutex::new(String::new()); let now = line(&f); let mut s = SAID.lock().unwrap();
+      if *s != now { eprintln!("GPUI_LOG {}", serde_json::json!({"follow_line": now, "pane": f["pane"]})); *s = now; } }
     let thread = app.selected.clone();
     let mut s = SEEN.lock().unwrap();
     if !f.is_object() { s.pending = None; return }

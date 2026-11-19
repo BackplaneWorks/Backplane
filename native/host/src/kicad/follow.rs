@@ -166,10 +166,13 @@ static HUB: Mutex<Option<Weak<crate::hub::Hub>>> = Mutex::new(None);
 const HOLD_FOR: Duration = Duration::from_secs(300);
 const HOLD_EVERY: Duration = Duration::from_millis(300);
 
-/// Whether `thread`'s page holds the project's embedded KiCad in this hub's window now.
-pub fn in_pane(thread: &str, path: &str) -> bool {
-    super::watch::pane_holds(thread) && super::embed::pane_attached(&super::ipc::pro_of(path))
+/// The frame shown by the pane that holds the project's embedded KiCad, when that window's page is `thread`'s: the window KiCad is
+/// attached to (embed), never another window's report (two windows on one hub, a phone on the same thread).
+pub fn pane_frame(thread: &str, path: &str) -> Option<String> {
+    super::embed::pane_client(&super::ipc::pro_of(path)).and_then(|c| super::watch::pane_frame_of(c, thread))
 }
+/// Whether `thread`'s page holds the project's embedded KiCad in this hub's window now.
+pub fn in_pane(thread: &str, path: &str) -> bool { pane_frame(thread, path).is_some() }
 fn set_pane(thread: &str, seq: u64, word: &'static str) -> bool {
     let mut m = map().lock().unwrap();
     match m.get_mut(thread) { Some(f) if f.seq == seq && f.pane != word => { f.pane = word; true } _ => false }
@@ -189,23 +192,33 @@ pub async fn pane(hub: &Arc<crate::hub::Hub>, thread: &str, path: &str) -> Step 
         if spawn { tokio::spawn(async move {
             loop {
                 tokio::time::sleep(HOLD_EVERY).await;
-                if attempt(&key).await != Step::Hold { break }
+                if attempt(&key).await == Step::Hold { continue }
+                if worker_stops(&key) { break }
             }
-            if let Some(p) = panes().lock().unwrap().get_mut(&key) { p.worker = false }
         }); }
     }
     step
 }
 
+/// Whether the project's hold worker stops now: only with nothing held, decided under the lock `pane` sets `held` and asks for a worker
+/// under, so an edit held between the worker's last attempt and here is looked at by this worker, never left for the next edit.
+fn worker_stops(key: &str) -> bool {
+    let mut p = panes().lock().unwrap();
+    match p.get_mut(key) { Some(e) if e.held.is_some() => false, Some(e) => { e.worker = false; true } None => true }
+}
+/// The held edit `h` is done with: cleared only if it is still the one held (a newer one held meanwhile, an await away, is the next attempt's).
+fn drop_held(key: &str, h: &Held) {
+    if let Some(p) = panes().lock().unwrap().get_mut(key) { if p.held.as_ref().is_some_and(|x| x.at == h.at && x.thread == h.thread) { p.held = None } }
+}
 /// One look at the project's held edit: what `decide` says, done.
 async fn attempt(key: &str) -> Step {
     let Some(h) = panes().lock().unwrap().get(key).and_then(|p| p.held.clone()) else { return Step::Not };
-    let drop_held = |key: &str| { if let Some(p) = panes().lock().unwrap().get_mut(key) { p.held = None } };
+
     let f = map().lock().unwrap().get(&h.thread).cloned().unwrap_or_default();
-    if h.at.elapsed() > HOLD_FOR || f.seq != h.seq { drop_held(key); if set_pane(&h.thread, h.seq, "") { bump() } return Step::Not }
+    if h.at.elapsed() > HOLD_FOR || f.seq != h.seq { drop_held(key, &h); if set_pane(&h.thread, h.seq, "") { bump() } return Step::Not }
     let edit = frame_of(&h.path);
     let route = super::embed::gui_route(&super::ipc::pro_of(&h.path));
-    let shown = if in_pane(&h.thread, &h.path) { super::watch::pane_frame(&h.thread) } else { String::new() };
+    let shown = pane_frame(&h.thread, &h.path).unwrap_or_default();
     let mut look = Look { follows: f.on && !f.paused, shown: &shown, edit, ..Default::default() };
     let since = [f.since, panes().lock().unwrap().get(key).and_then(|p| p.moved)].into_iter().flatten().max();
     let after = |t: Option<Instant>| t.is_some_and(|t| since.map_or(true, |s| t > s));
@@ -227,7 +240,7 @@ async fn attempt(key: &str) -> Step {
         else if o["status"] == "AS_BUSY" { step = Step::Hold } else { step = Step::Not }
     } else { eprintln!("follow: {step:?} {} {:?}", h.thread, look); }
     let word = match step { Step::Now => "here", Step::Hold => "held", Step::Elsewhere => "elsewhere", _ => "" };
-    if step != Step::Hold { drop_held(key) }
+    if step != Step::Hold { drop_held(key, &h) }
     if step == Step::Pause { act(&h.thread, "pause"); bump(); return step }
     if set_pane(&h.thread, h.seq, word) { bump() }
     step
@@ -238,7 +251,7 @@ async fn attempt(key: &str) -> Step {
 pub fn touched(pro: &str) {
     let key = super::embed::norm_pro_key(pro);
     let threads: Vec<(String, Option<Instant>)> = map().lock().unwrap().iter()
-        .filter(|(t, f)| f.on && !f.paused && !f.pro.is_empty() && super::embed::norm_pro_key(&f.pro) == key && super::watch::pane_holds(t))
+        .filter(|(t, f)| f.on && !f.paused && !f.pro.is_empty() && super::embed::norm_pro_key(&f.pro) == key && pane_frame(t, &f.pro).is_some())
         .map(|(t, f)| (t.clone(), f.since)).collect();
     if threads.is_empty() { return }
     let Some(route) = super::embed::gui_route(pro) else { return };
@@ -345,5 +358,21 @@ mod tests {
     }
     #[test] fn a_board_edit_is_the_board_editors_and_a_schematic_edit_the_schematics() {
         assert_eq!((frame_of("/p/b.kicad_pcb"), frame_of("/p/sub.kicad_sch")), ("PCB", "SCH"));
+    }
+    #[test] fn an_edit_held_while_the_worker_stops_is_still_looked_at() {
+        let key = "/p/race-test.kicad_pro";
+        let held = |thread: &str| Held { thread: thread.into(), path: "/p/race-test.kicad_pcb".into(), seq: 1, at: Instant::now() };
+        panes().lock().unwrap().insert(key.into(), Pane { worker: true, ..Default::default() });
+        // the worker's last attempt dropped its edit; before it stops, a new edit is held (pane() then finds `worker` still set and spawns none)
+        let old = held("t-race"); panes().lock().unwrap().get_mut(key).unwrap().held = Some(old.clone());
+        std::thread::sleep(Duration::from_millis(2));
+        let new = held("t-race"); panes().lock().unwrap().get_mut(key).unwrap().held = Some(new.clone());
+        drop_held(key, &old);
+        assert!(panes().lock().unwrap()[key].held.as_ref().is_some_and(|h| h.at == new.at), "the old attempt never drops the newer edit");
+        assert!(!worker_stops(key), "something is held: the worker goes on");
+        assert!(panes().lock().unwrap()[key].worker, "and keeps its flag, so pane() spawns no second one");
+        drop_held(key, &new);
+        assert!(worker_stops(key) && !panes().lock().unwrap()[key].worker, "nothing held: it stops and clears the flag, so the next edit spawns one");
+        panes().lock().unwrap().remove(key);
     }
 }

@@ -703,19 +703,26 @@ pub fn family(ky: &str) -> String {
 /// What each thread's viewer shows, as the client reports it (`viewer.state`): kind, source key, part, sheet, layer, selection; with a counter that moves at every report.
 static VIEWER_STATE: std::sync::OnceLock<Mutex<HashMap<String, (u64, Value)>>> = std::sync::OnceLock::new();
 fn vs() -> &'static Mutex<HashMap<String, (u64, Value)>> { VIEWER_STATE.get_or_init(Default::default) }
-pub fn viewer_report(thread: &str, state: Value) {
-    // the desktop client says whether its pane holds the embedded KiCad (`kicad`): the thread whose page holds it is the last that said so
+pub fn viewer_report(thread: &str, state: Value) { viewer_report_from(0, thread, state) }
+/// A client's viewer.state. A desktop client says whether its pane holds the embedded KiCad (`kicad`) and the frame it shows (`kicadFrame`):
+/// kept per client, so two windows on one hub (two projects' KiCads, two threads) each keep their own; a report with no `kicad` (a phone,
+/// the web, an older client) says nothing of any pane.
+pub fn viewer_report_from(client: u64, thread: &str, state: Value) {
     if let Some(k) = state.get("kicad").and_then(Value::as_bool) {
-        let mut p = PANE_THREAD.lock().unwrap();
-        if k { *p = thread.to_string() } else if *p == thread { p.clear() }
+        let mut p = panes().lock().unwrap();
+        if k { if p.len() > 64 && !p.contains_key(&client) { p.clear() } p.insert(client, (thread.to_string(), state["kicadFrame"].as_str().unwrap_or("").to_string())); } else { p.remove(&client); }
     }
     let mut m = vs().lock().unwrap(); if m.len() > 512 && !m.contains_key(thread) { m.clear(); } let n = m.get(thread).map_or(0, |x| x.0) + 1; m.insert(thread.to_string(), (n, state)); }
-static PANE_THREAD: Mutex<String> = Mutex::new(String::new());
-/// Whether `thread`'s page in this hub's desktop window holds the embedded KiCad now (its viewer.state's `kicad`; KiCad's session is the
-/// project's, shared by its threads, so only the client can say which thread's page holds it).
-pub fn pane_holds(thread: &str) -> bool { !thread.is_empty() && *PANE_THREAD.lock().unwrap() == thread }
-/// The KiCad frame that window's pane shows ("PCB", "SCH", ...: its viewer.state's `kicadFrame`), "" when none.
-pub fn pane_frame(thread: &str) -> String { if !pane_holds(thread) { return String::new() } viewer_state(thread).1["kicadFrame"].as_str().unwrap_or("").to_string() }
+/// Per client: the thread whose page holds that window's embedded KiCad, and the frame it shows.
+fn panes() -> &'static Mutex<HashMap<u64, (String, String)>> { static P: std::sync::OnceLock<Mutex<HashMap<u64, (String, String)>>> = std::sync::OnceLock::new(); P.get_or_init(Default::default) }
+/// A client went away (Hub::detach): its window's pane holds nothing now (a reconnect is a new client, which reports again).
+pub fn client_gone(client: u64) { panes().lock().unwrap().remove(&client); }
+/// The KiCad frame `client`'s pane shows when that window's page is `thread`'s and holds the embedded KiCad (its viewer.state's `kicad`
+/// and `kicadFrame`; KiCad's session is the project's, shared by its threads, so only the window can say which thread's page holds it).
+/// None otherwise: another thread's page, a page with no KiCad, or a window that never said (a phone, the web).
+pub fn pane_frame_of(client: u64, thread: &str) -> Option<String> {
+    panes().lock().unwrap().get(&client).filter(|(t, _)| !thread.is_empty() && t == thread).map(|(_, f)| f.clone())
+}
 /// (report counter, state) of a thread's viewer; (0, null) before any report.
 pub fn viewer_state(thread: &str) -> (u64, Value) { vs().lock().unwrap().get(thread).cloned().unwrap_or((0, Value::Null)) }
 
@@ -771,7 +778,7 @@ impl RpcHandler for KicadRpc {
                 },
                 "history.steps" => vec![json!({"t":"reply","id":id,"ok":true,"result": super::histsteps::steps(hub, &s("thread"), &s("kind"), &s("file")).await})],
                 "viewer.state" => { // the client says what its viewer shows (the thread is the raw id)
-                    viewer_report(&s("thread"), p.get("state").cloned().unwrap_or(Value::Null));
+                    viewer_report_from(who.client, &s("thread"), p.get("state").cloned().unwrap_or(Value::Null));
                     vec![json!({"t":"reply","id":id,"ok":true})]
                 }
                 "kicad.probe" => {
@@ -791,17 +798,22 @@ impl RpcHandler for KicadRpc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test] fn the_thread_whose_page_holds_kicad_is_the_last_desktop_report_that_says_so() {
-        viewer_report("t-pane-a", json!({"open": "board", "kicad": true, "kicadFrame": "SCH"}));
-        assert!(pane_holds("t-pane-a")); assert_eq!(pane_frame("t-pane-a"), "SCH");
-        viewer_report("t-pane-b", json!({"open": "board"}));
-        assert!(pane_holds("t-pane-a"), "a report with no `kicad` (a phone) says nothing of the pane");
-        viewer_report("t-pane-b", json!({"open": "board", "kicad": true, "kicadFrame": "PCB"}));
-        assert!(!pane_holds("t-pane-a") && pane_holds("t-pane-b"), "another thread's page took it");
-        viewer_report("t-pane-a", json!({"open": "board", "kicad": false}));
-        assert!(pane_holds("t-pane-b"), "a thread's own 'no' clears only itself");
-        viewer_report("t-pane-b", json!({"open": "files", "kicad": false}));
-        assert!(!pane_holds("t-pane-b") && pane_frame("t-pane-b").is_empty() && !pane_holds(""));
+    #[test] fn each_window_says_which_threads_page_holds_its_kicad() {
+        let at = |c: u64, t: &str| pane_frame_of(c, t);
+        viewer_report_from(901, "t-pane-a", json!({"open": "board", "kicad": true, "kicadFrame": "SCH"}));
+        assert_eq!(at(901, "t-pane-a").as_deref(), Some("SCH"));
+        viewer_report_from(902, "t-pane-a", json!({"open": "board"}));
+        assert_eq!(at(901, "t-pane-a").as_deref(), Some("SCH"), "a phone's report on the same thread (no `kicad`) says nothing of the pane");
+        viewer_report_from(903, "t-pane-b", json!({"open": "board", "kicad": true, "kicadFrame": "PCB"}));
+        assert!(at(901, "t-pane-a").is_some() && at(903, "t-pane-b").is_some(), "a second window with another project's KiCad: both keep theirs");
+        viewer_report_from(904, "t-pane-a", json!({"open": "files", "kicad": false}));
+        assert!(at(901, "t-pane-a").is_some(), "another window on the same thread's Files page clears only its own");
+        assert!(at(903, "t-pane-a").is_none(), "window 903's pane holds thread b's page, not a's");
+        viewer_report_from(901, "t-pane-c", json!({"open": "board", "kicad": true, "kicadFrame": "PCB"}));
+        assert!(at(901, "t-pane-a").is_none() && at(901, "t-pane-c").is_some(), "a window's page moved to another thread");
+        viewer_report_from(903, "t-pane-b", json!({"open": "files", "kicad": false}));
+        client_gone(901);
+        assert!(at(903, "t-pane-b").is_none() && at(901, "t-pane-c").is_none() && at(901, "").is_none());
     }
     /// A person opens the Schematic view of a new, empty project and an agent then makes the schematic: the view said "No schematic in
     /// this project yet" and stayed so until it was closed and opened again. The view now waits, and the drawing arrives by itself.

@@ -1135,8 +1135,14 @@ fn open_frames() -> &'static Mutex<HashMap<String, Vec<String>>> { static F: Onc
 pub fn has_frame(pro: &str, kind: &str) -> bool { open_frames().lock().unwrap().get(&norm_pro_key(pro)).is_some_and(|v| v.iter().any(|k| k == kind)) }
 /// Whether each project's ready KiCad is in a client's pane (attached to a container, not parked), kept at every publish (put_route).
 fn attached_panes() -> &'static Mutex<HashMap<String, bool>> { static P: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new(); P.get_or_init(Default::default) }
-/// Whether the project's KiCad is ready in a pane now (Follow agent: kicad/follow.rs): no round trip.
-pub fn pane_attached(pro: &str) -> bool { attached_panes().lock().unwrap().get(&norm_pro_key(pro)).copied().unwrap_or(false) }
+fn attach_clients() -> &'static Mutex<HashMap<String, u64>> { static C: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new(); C.get_or_init(Default::default) }
+/// The client whose pane the project's ready KiCad is in now (attached to its container, not parked), for Follow agent (kicad/follow.rs):
+/// None when it is in no pane. No round trip.
+pub fn pane_client(pro: &str) -> Option<u64> {
+    let k = norm_pro_key(pro);
+    if !attached_panes().lock().unwrap().get(&k).copied().unwrap_or(false) { return None }
+    attach_clients().lock().unwrap().get(&k).copied()
+}
 /// Projects whose GUI KiCad is starting or closing: the hub starts no headless KiCad for them meanwhile (it would take the project's lock
 /// first, and the GUI KiCad would ask "File Open Warning: already open" outside the pane: the release check's fresh-home stall, Nov 16).
 fn gui_holding() -> &'static Mutex<std::collections::HashSet<String>> { static H: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new(); H.get_or_init(Default::default) }
@@ -1706,6 +1712,8 @@ impl Actor {
 
     fn attach(&mut self, client: u64, pro: String, root: String, files: Files, frame: String, container: u64, toplevel: u64, display: String, wait: bool, env: Env, reply: oneshot::Sender<Result<Value, String>>) {
         let now = ipc::now_s();
+        // which client's pane holds this project's KiCad (Follow agent: kicad/follow.rs follows into that window's pane only)
+        if container > 0 { attach_clients().lock().unwrap().insert(norm_pro_key(&pro), client); }
         // the runtime selected now is another than the one this project's KiCad runs (Backplane KiCad installed or updated since it started,
         // the path set in Settings): Open in KiCad gets the selected one, not the stock KiCad left running from before the install. One
         // with unsaved work is kept as it is
