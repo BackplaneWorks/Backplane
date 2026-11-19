@@ -953,6 +953,10 @@ final class DataClient {
             }
         } catch { failure = error.localizedDescription }
     }
+    /// A user message's Restore to before this, confirmed: the hub restores the project and says so in the thread.
+    func restore(_ tid: String, _ r: DRestore) async {
+        do { _ = try await call("thread.restore", ["thread": tid, "turn": r.turn, "commit": r.commit], as: DEmpty.self) } catch { failure = error.localizedDescription }
+    }
     func interrupt(_ tid: String) async { _ = try? await call("turn.interrupt", ["thread": tid], as: DEmpty.self) }
     func addProject(path: String, title: String = "") async throws -> DProject {
         var p: [String: Any] = ["path": path]; if !title.isEmpty { p["title"] = title }

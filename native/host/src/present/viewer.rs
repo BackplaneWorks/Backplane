@@ -488,7 +488,11 @@ pub fn layer_reply(kind: &str, present: u32, off: u32, focus: &str, action: &str
 
 /// The versions a comparison may take, from `history.refs`' lines (kind, label, commit), as the desktop lists them.
 pub fn ref_rows(refs: &str) -> Vec<(String, String, String)> {
-    refs.lines().filter_map(|l| { let f: Vec<&str> = l.split('\t').collect(); if f.len() < 3 || f[2].is_empty() || !matches!(f[0], "head" | "base" | "branch" | "tag" | "commit") { return None } Some((f[0].to_string(), f[1].to_string(), f[2].to_string())) }).take(60).collect()
+    // a turn's snapshot (files/snapshot.rs, refs.sh `snap`): "Before turn N", the newest few first so they are not cut off
+    let snap = |l: &str| { let f: Vec<&str> = l.split('\t').collect(); (f.len() >= 3 && f[0] == "snap" && !f[2].is_empty()).then(|| ("snap".to_string(), format!("Before turn {}", f[1].rsplit('/').next().unwrap_or("")), f[2].to_string())) };
+    let snaps: Vec<_> = refs.lines().filter_map(snap).take(10).collect();
+    let rest = refs.lines().filter_map(|l| { let f: Vec<&str> = l.split('\t').collect(); if f.len() < 3 || f[2].is_empty() || !matches!(f[0], "head" | "base" | "branch" | "tag" | "commit") { return None } Some((f[0].to_string(), f[1].to_string(), f[2].to_string())) });
+    snaps.into_iter().chain(rest).take(60).collect()
 }
 /// core/hist's comparison of `file` with `commit`: "diff\n<the version>\n<the live file>", then `bits`, the layers its marks keep to (0 every layer). None for a file outside `top`.
 pub fn compare_path(git: &str, top: &str, commit: &str, file: &str, bits: u32) -> Option<String> {

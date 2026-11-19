@@ -664,6 +664,10 @@ object DataClient {
             entries = entries + (tid to (entries[tid] ?: emptyList()).map { if (it.ask?.id == ask) it.copy(ask = it.ask.copy(state = "answered", answered = option)) else it })
         } catch (e: Exception) { failure = e.message ?: "" }
     }
+    /** A user message's Restore to before this, confirmed: the hub restores the project and says so in the thread. */
+    fun restore(tid: String, r: DRestore) = scope.launch {
+        try { call("thread.restore", JSONObject().put("thread", tid).put("turn", r.turn).put("commit", r.commit)) } catch (e: Exception) { failure = e.message ?: "" }
+    }
     fun interrupt(tid: String) { scope.launch { runCatching { call("turn.interrupt", JSONObject().put("thread", tid)) } } }
     suspend fun addProject(path: String): DProject {
         val p = parseProject(call("project.add", JSONObject().put("path", path)).getJSONObject("project"))

@@ -4579,3 +4579,11 @@ gpui.f2.uber.p.mint = Menta
 gpui.f2.uber.p.cherry = Cereza
 gpui.simulation = Simulación
 gpui.c.sheets.find = Buscar una hoja
+
+# Restore to before this on the person's message; a turn's snapshot in Compare
+history.snap = Antes del turno {turn}
+history.ref.snap = instantánea de este hilo, antes del turno
+thread.restore.action = Restaurar a antes de esto
+thread.restore.ask = ¿Restaurar el proyecto a como estaba antes de este mensaje?
+thread.restore.note = Restaurar crea un commit nuevo. El proyecto tal como está ahora también se guarda como commit.
+thread.restore.go = Restaurar

@@ -127,6 +127,32 @@ async fn turn(hub: &Arc<Hub>, text: &str) -> Vec<Value> {
     ag.shutdown();
 }
 
+/// Restore to before this on the person's message: the turn's snapshot line is logged (quiet, for agents and the message's action), the
+/// message's row carries the turn and the short info, and `thread.restore` with them (or with only the commit, as a line from before the
+/// turn was named gives it) puts the files back.
+#[tokio::test(flavor = "multi_thread")] async fn the_persons_message_restores_to_before_its_turn() {
+    let bin = dir("sg6-bin"); script(&bin, "claude", DOER);
+    let (hub, ag, _home, work) = start("sg-restore-msg", |w| { std::fs::write(w.join("a.txt"), "one\n").unwrap(); base_log(w, 1, "") }, |_| Cli::standin(&bin)).await;
+    turn(&hub, "please edit the notes").await;
+    assert_eq!(std::fs::read_to_string(work.join("a.txt")).unwrap(), "agent\n");
+    let ev = log_from(&hub, 0).await;
+    let line = ev.iter().filter(|e| is(e, "ActivityLogged")).filter_map(|e| e["summary"].as_str()).find_map(crate::present::thread::snap_line).unwrap_or_else(|| panic!("no snapshot line: {ev:?}"));
+    assert_eq!(line.turn, 1);
+    let rows: Vec<(String, bool, String, String, String)> = ev.iter().filter_map(|e| match e["$"].as_str()? {
+        "MessagePosted" => Some((e["msg"].as_str()?.to_string(), true, e["role"].as_str()?.to_string(), String::new(), e["text"].as_str()?.to_string())),
+        "ActivityLogged" => Some((e["act"].as_str()?.to_string(), false, e["tone"].as_str()?.to_string(), e["kind"].as_str()?.to_string(), e["summary"].as_str()?.to_string())), _ => None }).collect();
+    let pts = crate::present::thread::restore_points(rows.iter().map(|r| (r.0.as_str(), r.1, r.2.as_str(), r.3.as_str(), r.4.as_str())));
+    let user = rows.iter().find(|r| r.1 && r.2 == "user").unwrap();
+    assert_eq!(pts[&user.0]["turn"], 1, "the message that started the turn: {pts:?}");
+    assert!(pts[&user.0]["info"].as_str().unwrap().contains(&line.commit));
+    // by the commit alone (a line from before it named its turn)
+    assert_eq!(rpc(&hub, "thread.restore", json!({"thread":T1,"turn":0,"commit":line.commit})).await["ok"], true);
+    assert_eq!(std::fs::read_to_string(work.join("a.txt")).unwrap(), "one\n", "back to before the turn");
+    assert!(log_from(&hub, 0).await.iter().any(|e| is(e, "ActivityLogged") && e["summary"].as_str().is_some_and(|s| s.starts_with("Restored the project to before turn 1"))));
+    assert_eq!(rpc(&hub, "thread.restore", json!({"thread":T1,"turn":0,"commit":"ffffff9"})).await["ok"], false, "no such snapshot");
+    ag.shutdown();
+}
+
 /// A mass deletion through KiCad's IPC waits for the person: deletions a dropped commit gave back do not count, a large net loss opens an
 /// approval, and a decline refuses the call.
 #[tokio::test(flavor = "multi_thread")] async fn a_mass_deletion_needs_the_persons_yes_and_a_dropped_commit_gives_its_deletions_back() {

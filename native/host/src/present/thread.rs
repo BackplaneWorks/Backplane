@@ -165,6 +165,66 @@ pub fn bot_private(id: &str, role: &str, text: &str) -> bool {
     if ["[Backplane]", "[mail ", "[mailroom "].iter().any(|h| text.starts_with(h)) { return true }
     !matches!(crate::state::fam::ext::classify_kind(crate::model::link_from(id), id, text), "person" | "peer" | "room")
 }
+/// The hub's routine bookkeeping in a thread, which every client leaves out of the timeline (the log keeps it; agents read it with thread_read):
+/// the snapshot before each turn (agents/snapguard.rs, files/snapshot.rs `Snap::line`; the user message's Restore to before this carries it
+/// instead), a folder made a git repository, and the design files committed or recorded at a turn's end (agents/design.rs). A warning or an
+/// error is never quiet, nor a commit line that says its push failed.
+pub fn quiet_act(role: &str, akind: &str, text: &str) -> bool {
+    if akind != "git" || role != "info" { return false }
+    if snap_line(text).is_some() || text.starts_with("Made this folder a git repository") || text.starts_with("The snapshot of this project is taking more than") { return true }
+    (text.starts_with("Committed ") || text.starts_with("Recorded ")) && text.contains(" design file") && !text.contains("not pushed")
+}
+/// What the timeline shows of the activities: quiet ones (`quiet_act`) left out, and a warning that says word for word what the last warning of its
+/// kind said, with nothing else of that kind between (a snapshot line aside), left out too (a commit that fails the same way every turn warns once).
+#[derive(Default)]
+pub struct Noise { last: HashMap<String, String> }
+impl Noise {
+    /// Whether this row shows (oldest first).
+    pub fn shown(&mut self, msg: bool, role: &str, akind: &str, text: &str) -> bool {
+        if msg { return true }
+        if role == "warn" || role == "error" {
+            let same = self.last.get(akind).is_some_and(|t| t == text);
+            self.last.insert(akind.to_string(), text.to_string());
+            return !same
+        }
+        // (a turn's snapshot comes between every two turns: it says nothing of the warning, so the warning stays said)
+        if snap_line(text).is_none() { self.last.remove(akind); }
+        !quiet_act(role, akind, text)
+    }
+}
+/// A snapshot line's short info: the turn (0 in a line from before it was said), the short commit, where it is.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SnapLine { pub turn: u64, pub commit: String, pub place: String }
+/// The snapshot a `Snap::line` names; None for any other text.
+pub fn snap_line(text: &str) -> Option<SnapLine> {
+    let turn_of = |r: &str| -> Option<(u64, String)> {
+        if let Some(r) = r.strip_prefix("this turn: ") { return Some((0, r.to_string())) }
+        let r = r.strip_prefix("turn ")?; let (n, r) = r.split_once(": ")?; Some((n.parse().ok()?, r.to_string()))
+    };
+    if let Some(r) = text.strip_prefix("Snapshot before ") {
+        let (turn, r) = turn_of(r)?; let (commit, r) = r.split_once(" (")?; let (place, _) = r.split_once(')')?;
+        return Some(SnapLine { turn, commit: commit.to_string(), place: place.to_string() })
+    }
+    let r = text.strip_prefix("Nothing uncommitted before ")?;
+    let (turn, r) = turn_of(r)?; let c = r.strip_prefix("it starts from ")?; let commit = c.split(['.', ' ']).next()?.to_string();
+    Some(SnapLine { turn, commit, place: "nothing uncommitted: the last commit".into() })
+}
+/// Restore to before this, on the person's messages: each snapshot line goes to the newest message of the person's since the snapshot before it
+/// (the message that started the turn; a follow-up queued during a turn starts the next). `rows` oldest first: (id, message, role, kind, text).
+/// Answers message id -> `{turn, commit, info}` (`turn` 0: a line from before it named its turn; `thread.restore` finds it by `commit`).
+pub fn restore_points<'a>(rows: impl IntoIterator<Item = (&'a str, bool, &'a str, &'a str, &'a str)>) -> HashMap<String, Value> {
+    let (mut out, mut open) = (HashMap::new(), None::<&str>);
+    for (id, msg, role, akind, text) in rows {
+        if msg { if role == "user" && !agent_only(role, text) && !text.starts_with(CARRY) { open = Some(id) } continue }
+        if akind != "git" { continue }
+        let Some(s) = snap_line(text) else { continue };
+        if let Some(m) = open.take() {
+            let info = format!("{}{} · {}", if s.turn > 0 { format!("Turn {} · ", s.turn) } else { String::new() }, s.commit, s.place);
+            out.insert(m.to_string(), json!({"turn": s.turn, "commit": s.commit, "info": info}));
+        }
+    }
+    out
+}
 /// Bot.backend: what starts a bot's turn that is not the person's (or a person's on a linked machine): the hub's notes, a restart's wake, a launched thread's
 /// report, another bot, a room, a routine, a webhook, mail. The replies of such a turn are backend: no row of the person's chat, no alert. The bot speaks to
 /// the person from it only through notify_person, whose text lands as a message of its own (id `tell:`).
@@ -209,9 +269,10 @@ fn hub_note(e: &Ent) -> bool { e.msg && e.role == "assistant" && e.id.starts_wit
 fn blank(e: &Ent) -> bool { e.msg && ((e.role == "assistant" && white(&e.text)) || agent_only(&e.role, &e.text)) }
 /// Fold.shown: blank messages left out, an error row an API error reply already says, and the restart row its continue message stands for
 fn fold_shown(es: &[Ent]) -> Vec<Ent> {
-    let (mut out, mut p) = (Vec::new(), String::new());
+    let (mut out, mut p, mut noise) = (Vec::new(), String::new(), Noise::default());
     for e in es {
         let b = blank(e);
+        if !noise.shown(e.msg, &e.role, &e.akind, &e.text) { continue } // routine bookkeeping, a repeated warning (`Noise`)
         let dup = !e.msg && ((e.akind == "restart" && e.text == "Continuing after the restart" && p.starts_with(CARRY))
             || (api_err(&p) && e.role == "error" && e.akind == "result" && (e.text.trim().is_empty() || e.text.trim() == p.trim())));
         if !(b || dup) { out.push(e.clone()) }
@@ -273,6 +334,7 @@ pub fn entries_w(es: &[Ent], running: bool, waiting: bool, unread: &str, open: &
     // Hist.seen: the design as it was before is no row
     let seen: Vec<Ent> = es.iter().filter(|e| !step_base(e)).cloned().collect();
     let es = seen.as_slice();
+    let restore = restore_points(es.iter().map(|e| (e.id.as_str(), e.msg, e.role.as_str(), e.akind.as_str(), e.text.as_str())));
     let vis: Vec<Ent> = fold_shown(es);
     let now = now_ms / 1000;
     // Stamp.ends over the page, oldest first in, walked newest first
@@ -310,6 +372,8 @@ pub fn entries_w(es: &[Ent], running: bool, waiting: bool, unread: &str, open: &
             let stamp = c.unwrap_or_default(); let stamp = if waits { if stamp.is_empty() { "not read yet".to_string() } else { format!("not read yet · {stamp}") } } else { stamp };
             let mut row = json!({"id": e.id, "kind": "user", "text": body, "attachments": paths.iter().map(|p| chip(p)).collect::<Vec<_>>(), "stamp": stamp});
             if waits { row["unread"] = json!(true) }
+            // Restore to before this: the snapshot taken before the turn this message started (`restore_points`)
+            if let Some(r) = restore.get(&e.id) { row["restore"] = r.clone() }
             // spoken (voice/mark.rs): the mic mark, with the engine and its confidence for the hover
             if let Some(v) = e.akind.strip_prefix("voice").and_then(|j| serde_json::from_str::<Value>(j).ok()) { row["voice"] = v }
             if let Some((rid, q)) = reply { row["replyTo"] = json!({"id": rid, "quote": q.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("")}); }
@@ -929,5 +993,38 @@ mod tests {
         // a parts search is not named for the supplier it asks
         assert_eq!(shown_name("mcp__pcbparts__acme_search"), "parts_search"); assert_eq!(shown_name("mcp__pcbparts__acme_get_part"), "parts_get_part"); assert_eq!(shown_name("mcp__pcbparts__search"), "parts_search");
         assert_eq!(shown_name("mcp__other__acme_search"), "acme_search", "only the parts server's tools");
+    }
+    /// The per-turn git rows go quiet; warnings stay, once; the person's message offers Restore to before this with the snapshot's short info.
+    #[test] fn bookkeeping_is_quiet_and_messages_carry_their_snapshot() {
+        let g = |id: &str, tone: &str, x: &str| Ent { id: id.into(), msg: false, role: tone.into(), akind: "git".into(), text: x.into(), at: 1 };
+        let snap_new = "Snapshot before turn 12: 0bac077 (on its own ref; your branch is untouched). Restore to before this turn at any time: /restore 12";
+        let snap_old = "Snapshot before this turn: 0bac077 (on its own ref; your branch is untouched). Restore to before this turn at any time: /restore";
+        let clean = "Nothing uncommitted before turn 3: it starts from 1234abc. /restore 3 brings this point back.";
+        assert_eq!(snap_line(snap_new), Some(SnapLine { turn: 12, commit: "0bac077".into(), place: "on its own ref; your branch is untouched".into() }));
+        assert_eq!(snap_line(snap_old).map(|s| (s.turn, s.commit)), Some((0, "0bac077".into())), "a line from before it named its turn");
+        assert_eq!(snap_line(clean).map(|s| (s.turn, s.commit)), Some((3, "1234abc".into())));
+        // (what Snap::line writes is what snap_line reads: files/snapshot.rs `snap_lines_read_back`)
+        for x in [snap_new, snap_old, clean, "Committed 2 design files to main as abc1234: boards/a/a.kicad_pcb, boards/a/a.kicad_sch", "Recorded 1 design file on refs/backplane/design as abc1234 (your branch is untouched; commit when you choose): a.kicad_pcb",
+            "Made this folder a git repository and committed the work already in it as abc1234 (\"Backplane: snapshot of existing work before first use\"), so every agent change can be undone."] { assert!(quiet_act("info", "git", x), "{x}") }
+        for (tone, x) in [("warn", "Design files not committed to main: the project is not in a git repository"), ("info", "Committed 1 design file to main as abc1234; not pushed: fatal: no remote"),
+            ("info", "This request is a review: the design files are read-only for it"), ("info", "Restored the project to before turn 3 (snapshot 1234abc) as 9999999."), ("warn", "No snapshot before this turn: disk full")] { assert!(!quiet_act(tone, "git", x), "{x}") }
+        assert!(!quiet_act("info", "tool", snap_new), "only the hub's git rows");
+        // a thread: two turns, the same warning each turn
+        let warn = "Design files not committed to main: the project is not in a git repository";
+        let es = vec![m("u1", "user", "route it", 1), g("s1", "info", snap_new), m("a1", "assistant", "done", 2), g("c1", "info", "Committed 1 design file to main as abc1234: a.kicad_pcb"), g("w1", "warn", warn),
+            m("u2", "user", "again", 3), g("s2", "info", clean), m("a2", "assistant", "done", 4), g("w2", "warn", warn), g("w3", "warn", "Design files not committed to main: disk full")];
+        let shown: Vec<String> = fold_shown(&es).into_iter().map(|e| e.id).collect();
+        assert_eq!(shown, ["u1", "a1", "w1", "u2", "a2", "w3"], "the snapshots and the commit go quiet; the warning shows once until it changes");
+        let pts = restore_points(es.iter().map(|e| (e.id.as_str(), e.msg, e.role.as_str(), e.akind.as_str(), e.text.as_str())));
+        assert_eq!(pts["u1"], json!({"turn": 12, "commit": "0bac077", "info": "Turn 12 · 0bac077 · on its own ref; your branch is untouched"}));
+        assert_eq!(pts["u2"]["turn"], 3);
+        // a follow-up queued while a turn runs is the one the next turn's snapshot belongs to; a turn no message of the person's started gives none
+        let es2 = vec![m("u1", "user", "a", 1), g("s1", "info", snap_new), m("u2", "user", "b", 2), m("a1", "assistant", "x", 3), g("s2", "info", clean), g("s3", "info", snap_old)];
+        let pts = restore_points(es2.iter().map(|e| (e.id.as_str(), e.msg, e.role.as_str(), e.akind.as_str(), e.text.as_str())));
+        assert_eq!((pts["u1"]["turn"].as_u64(), pts["u2"]["turn"].as_u64(), pts.len()), (Some(12), Some(3), 2));
+        // the desktop's rows: the user row carries `restore`, no snapshot row is drawn
+        let rows = entries(&es, false, &|_| false, 5000, Some(&Rule::utc()), &|_| 0, 0).unwrap();
+        assert!(rows.iter().all(|r| !r["text"].as_str().unwrap_or("").starts_with("Snapshot")), "{rows:?}");
+        assert_eq!(rows.iter().find(|r| r["id"] == "u1").unwrap()["restore"]["commit"], "0bac077");
     }
 }

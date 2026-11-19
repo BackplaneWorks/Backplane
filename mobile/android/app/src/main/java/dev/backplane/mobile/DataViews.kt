@@ -809,6 +809,7 @@ private fun SecretBox(tid: String, name0: String, asked: DataClient.SecretAsk?, 
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}) {
     when (e.kind) {
@@ -817,7 +818,19 @@ private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}) {
             e.replyTo?.let { r -> DMono(Msg.gpui_b_in_reply_to(r.quote), dfaint, modifier = Modifier.clickable { goTo(r.id) }.padding(bottom = 3.dp).testTag("thread.entry.replyto")) }
             e.localImages.forEach { Pic(it, 160); Spacer(Modifier.height(4.dp)) }
             e.attachments.filter { e.localImages.isEmpty() }.forEach { PicById(it.id, 160); Spacer(Modifier.height(4.dp)) }
-            if (e.text.isNotEmpty()) Box(Modifier.background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 8.dp)) { LinkText(e.text, tid, color = dcs.onSurface, size = 13, lineHeight = 19) }
+            // long-press: Restore to before this, when the hub has the snapshot before the turn this message started; asked first, with the snapshot's info
+            var menu by remember { mutableStateOf(false) }; var asking by remember { mutableStateOf(false) }
+            val press = if (e.restore != null) Modifier.combinedClickable(onClick = {}, onLongClick = { menu = true }) else Modifier
+            if (e.text.isNotEmpty()) Box(press.background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 8.dp)) {
+                LinkText(e.text, tid, color = dcs.onSurface, size = 13, lineHeight = 19)
+                DropdownMenu(menu, { menu = false }) { DropdownMenuItem({ Text(Msg.thread_restore_action, fontFamily = BpMono) }, { menu = false; asking = true }, Modifier.testTag("thread.entry.restore")) }
+            }
+            e.restore?.takeIf { asking }?.let { r ->
+                AlertDialog(onDismissRequest = { asking = false }, title = { Text(Msg.thread_restore_ask) },
+                    text = { Column { Text(r.info, fontFamily = BpMono, fontSize = 12.sp); Spacer(Modifier.height(6.dp)); Text(Msg.thread_restore_note, fontSize = 13.sp) } },
+                    confirmButton = { TextButton({ asking = false; DataClient.restore(tid, r) }, Modifier.testTag("thread.restore.yes")) { Text(Msg.thread_restore_go, color = dcs.error) } },
+                    dismissButton = { TextButton({ asking = false }) { Text(Msg.common_cancel) } })
+            }
             Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 // spoken: the mic, and how sure the engine was (edited when typed in); just sent by voice: Undo, for a moment
                 e.voice?.let { v ->

@@ -76,12 +76,13 @@ struct DEntry: Codable, Equatable, Identifiable {
     var images: [String] = []   // the images a reply names (feature replyImages): drawn where they are named, read with message.image
     var replyTo: DReplyTo?   // the person's reply to a message (data/1 `replyTo`): the chip over the bubble
     var voice: DVoiceMark?   // spoken (data/1 `voice`): the mic on the bubble, the engine and its confidence
+    var restore: DRestore?   // the person's message: the snapshot before the turn it started (data/1 `restore`): Restore to before this
     var copy: [DCopyPiece]?   // what to copy in it, as the hub lists it (`copy: [{text, cmd}]`, md/copy.rs); nil: the phone's own rules (Copyable)
     // phone-only, never on the wire: a message sent and not yet confirmed, or one the hub refused
     var sending = false
     var failed = false
     var localImages: [Data] = []   // the pictures of a message this phone is sending (JPEG), shown before the hub has them
-    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, images, replyTo, voice, copy }
+    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, images, replyTo, voice, copy, restore }
     init(id: String, kind: String, text: String, at: Int, clientId: String? = nil, live: Bool = false) {
         self.id = id; self.kind = kind; self.text = text; self.at = at; self.clientId = clientId; self.live = live
     }
@@ -101,6 +102,7 @@ struct DEntry: Codable, Equatable, Identifiable {
         replyTo = try? c.decode(DReplyTo.self, forKey: .replyTo)
         copy = try? c.decode([DCopyPiece].self, forKey: .copy)
         voice = try? c.decode(DVoiceMark.self, forKey: .voice)
+        restore = try? c.decode(DRestore.self, forKey: .restore)
     }
 }
 
@@ -114,6 +116,16 @@ struct DVoiceMark: Codable, Equatable {
 }
 
 /// What a reply answers (docs/PHONE-DATA.md, Entry): the message's id and its first line.
+/// Restore to before this (data/1 `restore` on a user entry): the turn (0 for a snapshot from before it was named), its short commit, and the short info
+/// its confirm shows. `thread.restore {thread, turn, commit}` does it.
+struct DRestore: Codable, Equatable, Identifiable {
+    var turn: Int; var commit: String; var info: String
+    var id: String { "\(turn):\(commit)" }
+    enum CodingKeys: String, CodingKey { case turn, commit, info }
+    init(turn: Int, commit: String, info: String) { self.turn = turn; self.commit = commit; self.info = info }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); turn = c.int(.turn); commit = c.str(.commit); info = c.str(.info) }
+}
+
 struct DReplyTo: Codable, Equatable {
     var id: String; var quote: String
     enum CodingKeys: String, CodingKey { case id, quote }

@@ -14,6 +14,7 @@ if top=$(git rev-parse --show-toplevel 2>/dev/null) && [ -n "$top" ]; then
   git for-each-ref --sort=-creatordate --count=40 --format='tag%09%(refname:short)%09%(if)%(*objectname)%(then)%(*objectname)%(else)%(objectname)%(end)' refs/tags
   git log -n 40 --format='commit%x09%h %s%x09%H' -- '*.kicad_[ps]c[bh]'
   git for-each-ref --sort=-committerdate --format='turn%09%(refname)%09%(objectname)' "refs/backplane/checkpoints/$name/turn/"
+  git for-each-ref --sort=-committerdate --count=40 --format='snap%09%(refname)%09%(objectname)' "refs/backplane/snapshots/$name/" | awk -F'\t' '$2 ~ /\/[0-9]+$/'
 else
   top=$(pwd)
   printf '%s\n%s\n' "$top/.backplane/history.git" "$top"
