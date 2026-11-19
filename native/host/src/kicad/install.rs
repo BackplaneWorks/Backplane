@@ -1034,15 +1034,15 @@ cp \"$f\" \"$out\"
         assert_eq!(s(update_reason_on(&["embedded", "drc-zone-guard", "routing-plan", seeded], "", true, true)), "It makes A, R and W in KiCad's routing plan view act on the plan, and stops KiCad rewriting files nobody changed or refusing saves while its Symbol Editor is open.");
         assert_eq!(s(update_reason(&["routing-plan"], "")).matches(". ").count(), 0, "one sentence");
     }
-    #[test] fn the_update_offer_names_from_to_why_and_size_only_over_an_older_backplane_runtime() {
+    #[test] fn the_update_offer_names_from_to_why_and_size_only_over_an_older_backplane_runtime() { // Linux's offer: macOS and Windows offer more (6d2dc4d1f), each tested below
         let p = Package { version: "10.99.0-bp.13", release: "backplane-kicad-v10.99.0-bp.13", size: 1_160_000_000, ..WINDOWS };
         let caps: Vec<String> = ["embed", "coedit", "drc-zone-guard", "no-load-migration"].iter().map(|c| c.to_string()).collect();
-        let o = update_offer(Some(&p), "ok", "10.99.0-bp.10", &caps).expect("bp.10 is offered bp.13");
+        let o = update_offer_os(Some(&p), "ok", "10.99.0-bp.10", &caps, "linux").expect("bp.10 is offered bp.13");
         assert_eq!((o["offer"].as_bool(), o["from"].as_str(), o["to"].as_str(), o["mb"].as_u64(), o["size"].as_str()), (Some(true), Some("10.99.0-bp.10"), Some(p.version), Some(1106), Some("about 1.1 GB")));
         assert!(o["reason"].as_str().unwrap().contains("narrow pane"), "{o}");
-        assert_eq!(update_offer(Some(&p), "ok", p.version, &caps), None, "the current one");
-        assert_eq!(update_offer(Some(&p), "stock", "10.0.7", &caps), None, "stock KiCad: Settings offers an install, not an update");
-        assert_eq!(update_offer(None, "ok", "10.99.0-bp.10", &caps), None, "no package for this computer");
+        assert_eq!(update_offer_os(Some(&p), "ok", p.version, &caps, "linux"), None, "the current one");
+        assert_eq!(update_offer_os(Some(&p), "stock", "10.0.7", &caps, "linux"), None, "stock KiCad on Linux: Settings offers an install, not an update (macOS and Windows: a_kicad_the_pane_cannot_show_is_offered_the_pin_on_each_platform)");
+        assert_eq!(update_offer_os(None, "ok", "10.99.0-bp.10", &caps, "linux"), None, "no package for this computer");
         assert_eq!(size_words(&Package { size: 0, ..LINUX }), "about 1 GB"); assert_eq!(size_words(&Package { size: 433_770_440, ..MAC }), "about 413 MB");
     }
     #[test] fn a_feed_replaces_the_release_folder_only_when_it_is_a_web_folder() {
