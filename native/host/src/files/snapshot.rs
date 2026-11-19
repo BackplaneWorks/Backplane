@@ -414,6 +414,7 @@ pub fn mass_loss(file: &str, before: usize, after: usize) -> Option<String> {
     (lost >= MASS_FLOOR && lost * 5 > before).then(|| format!("{file}: {lost} of its {before} items removed ({}%)", lost * 100 / before.max(1)))
 }
 
+#[cfg(test)] #[path = "snapshot_pin_tests.rs"] mod pin_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
