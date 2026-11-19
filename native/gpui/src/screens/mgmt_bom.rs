@@ -11,7 +11,7 @@ pub enum Col { #[default] Refs, Qty, Value, Footprint, Mpn, Stock, Price, Class 
 pub const COLS: &[(Col, &str, &str)] = &[(Col::Refs, "refs", "Refs"), (Col::Qty, "qty", "Qty"), (Col::Value, "value", "Value"), (Col::Footprint, "footprint", "Footprint"), (Col::Mpn, "mpn", "MPN"), (Col::Stock, "stock", "Stock"), (Col::Price, "price", "Price"), (Col::Class, "class", "Class")]; // i18n-ok: ids; labels go through trs
 
 #[derive(Default)]
-pub struct Ui { pub sort: Col, pub desc: bool, pub filter: Option<Entity<Composer>>, pub sel: Option<String>,
+pub struct Ui { pub scroll: ScrollHandle, pub sort: Col, pub desc: bool, pub filter: Option<Entity<Composer>>, pub sel: Option<String>,
     /// the selected line's fields (EDIT order), the line they hold, and what the last edit said (ok, words)
     pub fields: Vec<Entity<Composer>>, pub filled: String, pub filled_vals: Vec<String>,
     /// the alternatives asked for a line (its id, the hub's answer; Null while asked)
@@ -286,7 +286,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
         head = head.child(cell(wd, right(k)).id(SharedString::from(format!("bom-h-{id}"))).cursor_pointer().hover(|s| s.text_color(c("text"))).child(format!("{}{mark}", trs(label)))
             .on_click(cx.listener(move |this, _, _, cx| { let (a, b) = press((this.screens.mgmt.bom.sort, this.screens.mgmt.bom.desc), k); this.screens.mgmt.bom.sort = a; this.screens.mgmt.bom.desc = b; cx.notify(); })));
     }
-    let mut list = div().id("bom-rows").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().text_size(crate::scale::tpx(12.));
+    let mut list = div().id("bom-rows").track_scroll(&app.screens.mgmt.bom.scroll).flex_1().min_h_0().overflow_y_scroll().flex().flex_col().text_size(crate::scale::tpx(12.));
     if rows.is_empty() { list = list.child(div().p_3().text_color(c("faint")).child(if all.is_empty() { trs("No parts.") } else { trs("No line matches the filter.") })); }
     for l in rows {
         let id = s(&l, "id").to_string(); let dnp = l["dnp"] == true; let on = sel.as_deref() == Some(id.as_str());

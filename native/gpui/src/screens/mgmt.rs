@@ -178,6 +178,55 @@ pub fn act(app: &mut Backplane, a: &str, cx: &mut Context<Backplane>) {
     else if let Some(b) = a.strip_prefix("life:") { super::mgmt_life::act(app, b, cx) }
 }
 
+/// Review mounts the same element and borrows the same scroll and selection
+/// state as the dock. A comparison has its own read-only report.
+pub fn review_panel(app: &mut Backplane, cx: &mut Context<Backplane>) -> Option<AnyElement> {
+    let viewer = &app.data["thread"]["viewer"];
+    if viewer["open"] != "review" { return None }
+    let id = viewer["review"]["tabs"].as_array()?.iter().find(|tab| tab["on"] == true)?["page"].as_str()?.to_owned();
+    let scope = viewer["designPanels"].get(&id)?.clone();
+    if !scope["versions"].is_array() { want(app, scope["project"].as_str()?) }
+    app.screens.mgmt.panel_w = super::viewer::pane_width() as f32;
+    Some(shared_panel(app, &id, &scope, app.light(), cx))
+}
+
+fn shared_panel(app: &mut Backplane, id: &str, scope: &Value, light: bool, cx: &mut Context<Backplane>) -> AnyElement {
+    use crate::i18n::tf;
+    let working = tf("history.workingcopy", &[]);
+    let historical = scope["versions"].is_array();
+    let title = if historical {
+        let label = |n: usize| scope["versions"][n].as_str().filter(|s| !s.is_empty()).unwrap_or(&working).to_owned();
+        tf("review.bom.change", &[("old", label(0).into()), ("new", label(1).into())])
+    } else if id == "bom" { tf("review.bom.working", &[]) }
+    else { tf("review.checks.of", &[("version", working.into())]) };
+    let method = scope["refresh"].as_str().unwrap_or("").to_owned();
+    let panel = id.to_owned();
+    let refresh = div().id("design-panel-refresh").px_2().cursor_pointer().child(trs("Refresh"))
+        .on_click(cx.listener(move |app, _, _, _| {
+            if method == "rv-run" {
+                let _ = app.tx.try_send(Command::Action(method.clone(), String::new()));
+            } else if !app.screens.mgmt.digest.is_empty() {
+                let args = json!({"project":app.screens.mgmt.project, "panel":panel});
+                let _ = app.tx.try_send(Command::Rpc(method.clone(), Secret(args), "mgmt"));
+            }
+        }));
+    let head = div().flex_shrink_0().flex().items_center().px_2().py_1().text_size(crate::scale::tpx(12.))
+        .child(div().flex_1().font_weight(FontWeight::BOLD).child(title)).child(refresh);
+    let body = if historical {
+        let review = &app.data["thread"]["viewer"]["review"];
+        let nodes = review["blocks"].as_array().map(Vec::as_slice).unwrap_or_default();
+        let parsed = super::md::parse(nodes);
+        div().id("comparison-bom").flex_1().min_h_0().overflow_y_scroll()
+            .children(super::timeline::blocks(cx, &app.screens.reg, light, &parsed, "comparison-bom"))
+            .when(nodes.is_empty(), |d| d.child(trs(review["note"].as_str().unwrap_or("")))).into_any_element()
+    } else {
+        let data = app.screens.mgmt.data(id);
+        if id == "checks" { super::mgmt_checks::body(app, &data, light, cx) }
+        else { super::mgmt_bom::body(app, &data, light, cx) }
+    };
+    div().flex_1().min_h_0().flex().flex_col().overflow_hidden().child(head).child(body).into_any_element()
+}
+
 struct EdgeDrag;
 struct Ghost;
 impl Render for Ghost { fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement { div() } }
@@ -239,7 +288,8 @@ pub fn host(app: &mut Backplane, page: AnyElement, window: &mut Window, cx: &mut
     let avail = if bottom { f32::from(vp.height) * 0.8 } else { super::viewer::pane_px(app.data["thread"]["viewer"]["open"].as_str().unwrap_or(""), asked.max(MIN)) };
     let size = fit(asked, avail);
     app.screens.mgmt.panel_w = if bottom { super::viewer::pane_width() as f32 } else { size };
-    let body = match VIEWS.iter().find(|v| v.id == open) { Some(v) => (v.body)(app, &data, light, cx), None => div().into_any_element() };
+    let scope = app.data["thread"]["viewer"]["designPanels"][&open].clone();
+    let body = if scope.is_object() { shared_panel(app, &open, &scope, light, cx) } else { match VIEWS.iter().find(|v| v.id == open) { Some(v) => (v.body)(app, &data, light, cx), None => div().into_any_element() } };
     let handle = div().id("mgmt-edge").flex_shrink_0().bg(c("rule")).hover(|s| s.bg(c("accent")))
         .map(|d| if bottom { d.h(px(1.)).w_full().cursor_row_resize() } else { d.w(px(1.)).h_full().cursor_col_resize() })
         .child(div().absolute().map(|d| if bottom { d.left_0().right_0().top(px(-2.)).h(px(HANDLE)) } else { d.top_0().bottom_0().left(px(-2.)).w(px(HANDLE)) }))
