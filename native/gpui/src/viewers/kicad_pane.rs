@@ -278,6 +278,27 @@ pub struct HostSends { inflight: u32, last: Option<Value>, retry_at: Option<std:
 /// macOS: whether a host push is due: the pane's rect and visibility now differ from the last pushed, or what was pushed may not have
 /// reached KiCad (`unsent`: the hub's connection was made again, kicad_rejoin), so the same rect is pushed again.
 pub fn host_push_due(now: Option<(i32, i32, i32, i32, bool)>, sent: Option<(i32, i32, i32, i32, bool)>, unsent: bool) -> bool { now.is_some() && (now != sent || unsent) }
+/// macOS: the longest a show is held for the pane's layout to settle (`show_settled`).
+pub const MAC_SHOW_HOLD_MS: u64 = 100;
+/// macOS: whether a host push may go now. A show (the frame hidden or not yet sent, now visible) at a rect other than the last one sent
+/// waits until two frames in a row give the same rect, or MAC_SHOW_HOLD_MS: the page's first layout can be a transient one (e2e-macos
+/// 44465483071 leave (b): 496x524, then 496x500 a frame later), and each push is a hub round trip of about 500 ms one after another, so
+/// KiCad showed the frame at the transient rect and corrected it a push later: back in 1358 ms against 300. A show at the rect last
+/// sent (back from a covering sheet) and every push while shown go at once. `held`: the rect waiting and since when.
+/// `fresh`: the rect is this frame's layout (false: the watch's look between frames, which only lets a held show go at its time).
+pub fn show_settled(now: (i32, i32, i32, i32, bool), sent: Option<(i32, i32, i32, i32, bool)>, held: &mut Option<((i32, i32, i32, i32), std::time::Instant)>, fresh: bool, t: std::time::Instant) -> bool {
+    let r = (now.0, now.1, now.2, now.3);
+    let showing = now.4 && !sent.is_some_and(|s| s.4);
+    if !showing { *held = None; return true }
+    if !fresh && held.is_none() { return true }
+    if fresh && sent.is_some_and(|s| (s.0, s.1, s.2, s.3) == r) { *held = None; return true }
+    match *held {
+        Some((h, _)) if fresh && h == r => { *held = None; true }
+        Some((_, since)) if t.duration_since(since) >= std::time::Duration::from_millis(MAC_SHOW_HOLD_MS) => { *held = None; true }
+        Some((_, since)) => { *held = Some((r, since)); false }
+        None => { *held = Some((r, t)); false }
+    }
+}
 /// macOS: whether a yield_to's fallback (KiCad activated 400 ms after a hand-in that did not take) may still act: taken at generation
 /// `mine`, the generation now `now` (native_child_mac.rs YIELD_GEN: a newer hand-in, Backplane taking the keyboard back, or KiCad's
 /// frame leaving the screen each move it on, #1199).
@@ -479,6 +500,8 @@ pub struct KicadPane {
     pub host_sends: std::rc::Rc<std::cell::RefCell<HostSends>>,
     /// macOS: what was last pushed may not have reached KiCad (the hub's connection made again): pushed again though unchanged
     host_unsent: bool,
+    /// macOS: a show waiting for the pane's layout to settle: its rect and since when (show_settled).
+    mac_show_held: Option<((i32, i32, i32, i32), std::time::Instant)>,
     last_root: (i32, i32), placed: Option<(Option<nc::R>, Option<u64>, Vec<nc::R>)>,
     focus: FocusHandle, keys: bool, pub light: bool, _subs: Vec<Subscription>,
     /// the fork's holder already in our save-set; reserved chords pressed in KiCad, waiting to be pressed in gpui
@@ -612,7 +635,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None,
+        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
@@ -1325,9 +1348,17 @@ impl KicadPane {
         let visible = mac_shown(show.is_some(), nc::host_visible(self.toplevel), hitbox, self.in_page, self.mac_covered, dialog, was);
         // a frame in which the pane's hitbox was not found (our window inactive while KiCad has the keyboard draws such frames) keeps
         // the last rect, and the frame on show while the page holds the editor (mac_shown); an unseen window goes through host_visible
-        let rect = at.and_then(|r| nc::screen_rect(self.toplevel, r)).or_else(|| self.host_sent.map(|(x, y, w, h, _)| (x, y, w, h)));
+        // (a show held for the layout: its rect, not the last one sent)
+        let rect = at.and_then(|r| nc::screen_rect(self.toplevel, r)).or_else(|| self.mac_show_held.map(|(r, _)| r)).or_else(|| self.host_sent.map(|(x, y, w, h, _)| (x, y, w, h)));
         let now = rect.map(|(x, y, w, h)| (x, y, w, h, visible));
-        if host_push_due(now, self.host_sent, self.host_unsent) {
+        let due = host_push_due(now, self.host_sent, self.host_unsent);
+        let settled = due && now.is_some_and(|n| show_settled(n, self.host_sent, &mut self.mac_show_held, at.is_some(), std::time::Instant::now()));
+        if due && !settled {
+            // a show at a rect not yet seen twice: held for the next frame's layout (show_settled); drawn again so that frame comes
+            eprintln!("GPUI_LOG {}", json!({"kicad_host_push_held": now.map(|(x, y, w, h, _)| [x, y, w, h]), "at_ms": crate::screens::kcomment::epoch_ms() as u64}));
+            return true;
+        }
+        if due {
             self.host_unsent = false;
             if let Some((x, y, w, h, v)) = now {
                 eprintln!("GPUI_LOG {}", json!({"kicad_host_push": [x, y, w, h], "visible": v, "raise": false, "changed": true, "pane_px": at.map(|r| [r.x, r.y, r.w, r.h]), "frame": show, "in_page": self.in_page, "covered": self.mac_covered, "hitbox": hitbox, "dialog": dialog, "at_ms": crate::screens::kcomment::epoch_ms() as u64}));
@@ -1665,6 +1696,30 @@ mod tests {
         assert!(!yield_current(click, x), "Backplane took the keyboard: the fallback is skipped");
         let hide = next(); assert!(!yield_current(click, hide), "the frame left the screen: skipped");
         let again = next(); assert!(yield_current(again, again) && !yield_current(click, again), "a newer hand-in voids the older one only");
+    }
+    /// e2e-macos 44465483071 leave (b): the page's first layout 496x524, a frame later 496x500; one push, at 500 (#1199).
+    #[test] fn a_show_waits_for_its_layout_to_settle() {
+        use super::{show_settled, MAC_SHOW_HOLD_MS};
+        let t0 = std::time::Instant::now(); let ms = |n| t0 + std::time::Duration::from_millis(n);
+        let old = Some((430, 153, 496, 500, false));
+        let mut held = None;
+        assert!(!show_settled((430, 153, 496, 524, true), old, &mut held, true, ms(0)), "a show at a new rect waits a frame");
+        assert!(show_settled((430, 153, 496, 500, true), old, &mut held, true, ms(22)) && held.is_none(), "settled at the rect last sent: sent");
+        let mut held = None;
+        assert!(!show_settled((430, 153, 496, 524, true), None, &mut held, true, ms(0)));
+        assert!(!show_settled((430, 153, 496, 500, true), None, &mut held, true, ms(22)), "the layout changed: waits again");
+        assert!(!show_settled((430, 153, 496, 500, true), None, &mut held, false, ms(40)), "the watch's look is not a second layout");
+        assert!(show_settled((430, 153, 496, 500, true), None, &mut held, true, ms(44)) && held.is_none(), "the same rect twice: sent");
+        let mut held = None;
+        assert!(show_settled((430, 153, 496, 500, true), old, &mut held, true, ms(0)), "back at the rect last sent (a covering sheet closed): at once");
+        assert!(show_settled((1, 2, 3, 4, true), Some((430, 153, 496, 500, true)), &mut held, true, ms(0)), "while shown every rect goes at once");
+        assert!(show_settled((1, 2, 3, 4, false), old, &mut held, true, ms(0)), "a hide goes at once");
+        let mut held = None;
+        for (i, h) in [524, 510, 505, 502].iter().enumerate() { assert!(!show_settled((0, 0, 496, *h, true), None, &mut held, true, ms(i as u64 * 20))); }
+        assert!(show_settled((0, 0, 496, 501, true), None, &mut held, true, ms(MAC_SHOW_HOLD_MS)), "a layout that keeps moving goes at the hold's end");
+        let mut held = None;
+        assert!(!show_settled((0, 0, 496, 524, true), None, &mut held, true, ms(0)));
+        assert!(show_settled((0, 0, 496, 524, false), None, &mut held, true, ms(10)) && held.is_none(), "hidden again before it went: the held show is dropped");
     }
     #[test] fn a_frame_left_behind_our_window_is_tried_again_then_said_with_pop_out() {
         use super::{raise_step, RaiseStep, RaiseState, KICAD_RAISE_BOUND, KICAD_RAISE_HELD};
