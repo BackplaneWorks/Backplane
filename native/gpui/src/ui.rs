@@ -837,7 +837,7 @@ impl Render for Backplane {
         let mut rail_tools = Vec::new();
         // held Ctrl: each rail button's bare key in its corner (the old rail's keycaps), lit on the view on show
         let keycaps = self.screens.held == crate::keys::Held::Threads;
-        let keycap = move |k: &str, lit: bool| (keycaps && !k.is_empty()).then(|| crate::screens::hints::cap(light, &k.to_uppercase(), lit).absolute().top(px(3.)).right(px(3.)));
+        let keycap = move |k: &str, lit: bool| (keycaps && k.chars().count() == 1).then(|| crate::screens::hints::cap(light, &k.to_uppercase(), lit).absolute().top(px(3.)).right(px(3.)));
         crate::screens::viewer::follow(&self.tx, thread);
         let active_kind = if thread["diff"].is_object() { "diff".to_owned() } else { crate::screens::viewer::active_kind(&thread["viewer"], self.screens.rail_pending.as_deref()) };
         // the rail's Simulation entry (the hub's word, in a window that can hold KiCad), lit while the pane is on KiCad's Simulator: the page under it is then not
@@ -878,7 +878,7 @@ impl Render for Backplane {
                 let letter = row.key;
                 let hint = rail_hint(&self.local, id, letter);
                 button = button.cursor_pointer().hover(|s| s.bg(c("raise")).text_color(c("text")))
-                    .tooltip(crate::keys::tip(row.label, &hint, light)).children(keycap(if letter.is_empty() { &hint } else { letter }, active));
+                    .tooltip(crate::keys::tip(row.label, &hint, light)).children(keycap(letter, active));
                 let action = match id {
                     "terminal" => Ctl::None, "commands" => Ctl::OpenPalette, "simulation" => Ctl::KicadAct("simulation".into()),
                     "diff" => Ctl::Node("diff".into(), "".into()), _ => Ctl::Rail(id.into()),
