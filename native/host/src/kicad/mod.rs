@@ -64,6 +64,7 @@ pub mod edchecks;
 pub mod gerber;
 pub mod geomguard;
 pub mod coedit;
+pub mod follow;
 pub mod histsteps;
 pub mod open;
 pub mod install;

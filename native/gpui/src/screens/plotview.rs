@@ -44,6 +44,8 @@ pub struct PlotView {
     pub boards: crate::viewers::boards::BoardsUi,
     /// The hub's probe this canvas last lit, with the source it was lit on ("<key>\u{1}<info>"): another source or another probe lights it again.
     pub probe_at: String,
+    /// Follow agent: how many times a person's hand moved this canvas (screens::follow), and the focus the camera takes once its plot is drawn.
+    pub hands: u32, pub follow_to: Option<([f32; 4], serde_json::Value)>,
 }
 
 /// What a tessellated plot depends on: the frame's chunks (by identity), the order and fade they are drawn in, the zoom and the canvas's
@@ -417,12 +419,12 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
                 "escape" => { let all: &[usize] = if slot == 0 { &[0] } else { &[1, 2] }; for &i in all { let p = this.screens.pv(i); p.picked = None; p.card = None; p.lit.clear(); } keep_probe(this, None); cx.notify(); return }
                 _ => None,
             };
-            if let Some(nv) = nv { pv.touched = true; pv.view = Some(nv); cx.notify(); }
+            if let Some(nv) = nv { pv.touched = true; pv.view = Some(nv); super::follow::person_input(this, slot); cx.notify(); }
         })))
-        .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, window, cx| { if let Some(f) = this.screens.pv(slot).focus.clone() { window.focus(&f); } let at = (f32::from(e.position.x), f32::from(e.position.y)); let pv = this.screens.pv(slot); pv.drag = Some(at); pv.down = Some(at); cx.notify(); }))
+        .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, window, cx| { if let Some(f) = this.screens.pv(slot).focus.clone() { window.focus(&f); } let at = (f32::from(e.position.x), f32::from(e.position.y)); let pv = this.screens.pv(slot); pv.drag = Some(at); pv.down = Some(at); super::follow::person_input(this, slot); cx.notify(); }))
         .on_mouse_move(cx.listener(move |this, e: &MouseMoveEvent, _, cx| {
             let pv = this.screens.pv(slot);
-            if let (Some((x, y)), Some(v), true) = (pv.drag, pv.view, e.dragging()) { let (nx, ny) = (f32::from(e.position.x), f32::from(e.position.y)); pv.touched = true; pv.view = Some(v.pan(nx - x, ny - y)); pv.drag = Some((nx, ny)); cx.notify(); }
+            if let (Some((x, y)), Some(v), true) = (pv.drag, pv.view, e.dragging()) { let (nx, ny) = (f32::from(e.position.x), f32::from(e.position.y)); pv.touched = true; pv.view = Some(v.pan(nx - x, ny - y)); pv.drag = Some((nx, ny)); super::follow::person_input(this, slot); cx.notify(); }
         }))
         .on_mouse_up(MouseButton::Left, cx.listener(move |this, e: &MouseUpEvent, _, cx| {
             // a press and release within 4 px is a tap: inspect what lies under it (View.pick: the finger's reach is 14 px)
@@ -438,11 +440,11 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
             let (Some(v), Some(b)) = (pv.view, pv.bounds) else { return };
             // wheelKind (src/web/): a touchpad's two-finger scroll (pixel deltas) moves the plot, a mouse wheel (lines) and a pinch (ctrl + wheel) zoom
             let pad = matches!(e.delta, ScrollDelta::Pixels(_)) && !e.modifiers.control;
-            if pad { let d = e.delta.pixel_delta(px(16.)); pv.view = Some(v.pan(-f32::from(d.x), -f32::from(d.y))); cx.notify(); return }
+            if pad { let d = e.delta.pixel_delta(px(16.)); pv.view = Some(v.pan(-f32::from(d.x), -f32::from(d.y))); super::follow::person_input(this, slot); cx.notify(); return }
             let d = f32::from(e.delta.pixel_delta(px(16.)).y);
             let factor = (1.0 + d * 0.0015).clamp(0.5, 2.0); pv.touched = true;
             pv.view = Some(v.zoom(factor, f32::from(e.position.x - b.origin.x), f32::from(e.position.y - b.origin.y), f32::from(b.size.width), f32::from(b.size.height), pv.fitted));
-            cx.notify();
+            super::follow::person_input(this, slot); cx.notify();
         }))
         // a trackpad pinch: macOS sends it as a magnify gesture (gpui's PinchEvent), never as a wheel, so it zooms here at the pointer
         .on_pinch(cx.listener(move |this, e: &PinchEvent, _, cx| {
@@ -451,7 +453,7 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
             let factor = crate::viewers::solid::pinch_zoom(e.delta); if factor == 1.0 { return }
             pv.touched = true;
             pv.view = Some(v.zoom(factor, f32::from(e.position.x - b.origin.x), f32::from(e.position.y - b.origin.y), f32::from(b.size.width), f32::from(b.size.height), pv.fitted));
-            cx.notify();
+            super::follow::person_input(this, slot); cx.notify();
         })).into_any_element()
 }
 
@@ -469,6 +471,8 @@ pub fn ensure_view(pv: &mut PlotView, frame: &Frame, w: f32, h: f32) -> Option<V
     if frame.none.is_empty() && (pv.key != frame.fam || pv.view.is_none()) {
         pv.key = frame.fam.clone(); fit_now(pv, frame, w, h); pv.picked = None; pv.card = None; pv.lit.clear(); // another file: what was tapped in the last is not in this
     } else if frame.none.is_empty() && refit_needed(pv.touched, pv.fit_wh, w, h) { fit_now(pv, frame, w, h); }
+    // Follow agent: an edit's box, once the plot of its page and sheet is the one drawn
+    if frame.none.is_empty() && pv.follow_to.is_some() { super::follow::take(pv, &frame.key, w, h); }
     pv.view
 }
 

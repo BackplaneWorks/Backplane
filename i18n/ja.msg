@@ -2989,6 +2989,14 @@ gpui.f.tool.runs.nover = {name}が{path}で動作します。
 gpui.f2.aon.boat.learn = Boatについて詳しく
 gpui.f2.uberbot.what = メインボットは最初に話しかけるアシスタントです。返事をし、プロジェクトやマシンをまたいでスレッドとボットを始めて見守り、リマインダーとスマホへの通知を動かし続けます。
 gpui.acct.account.name.optional = アカウントの名前（省略可：サインイン後はメールアドレス）
+gpui.follow.button = エージェントを追う
+gpui.follow.button.tip = エージェントが編集している場所を表示し続ける
+gpui.follow.route = 追従中: {page} · {net} を配線{near}
+gpui.follow.edit = 追従中: {page} · {what} を編集
+gpui.follow.near = {ref} の近く
+gpui.follow.wait = 追従中: エージェントの次の編集を待っています
+gpui.follow.paused = 追従を一時停止中
+gpui.follow.resume = 再開
 
 # ---- android: new entries go here ----
 android.mgmt.all = すべて

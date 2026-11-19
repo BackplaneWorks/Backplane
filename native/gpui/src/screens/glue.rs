@@ -267,6 +267,7 @@ impl Backplane {
         super::onboard::sync(self, cx);
         super::projects::sync(self, cx);
         super::plotview::report_state(self);
+        super::follow::tick(self);
         super::histbar::follow_focus(self);
         super::filesui::sync(self, cx);
         self.browser_page(cx);

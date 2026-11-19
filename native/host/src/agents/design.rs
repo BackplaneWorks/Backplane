@@ -204,7 +204,12 @@ impl Agents {
             Ok(mut v) => { v["served_by"] = served;
                 let p = via.person.lock().unwrap().clone(); if !p.is_null() { v["person"] = p }
                 // a saved edit is shown: the person's viewer turns to the document, as `viewer_show` after the save would have it (show: false leaves it)
-                if v["saved"].as_str() == Some(path) && a["show"].as_bool().unwrap_or(true) { if self.viewer_show(thread, path, "", false).await.0 { v["shown"] = json!(true) } }
+                // (a thread whose person turned Follow agent on is brought to the edit's place even when `show` is false: kicad/follow.rs)
+                let followed = v["saved"].as_str() == Some(path) && crate::files::kicad::follow::following(thread) && {
+                    let cwd = self.world().await.cwd(thread);
+                    let sch = tokio::task::spawn_blocking(move || crate::files::kicad::project::read(&kc::design_root(&cwd)).sch).await.unwrap_or_default();
+                    crate::files::kicad::follow::record(thread, path, &sch, &v).is_some() };
+                if v["saved"].as_str() == Some(path) && (followed || a["show"].as_bool().unwrap_or(true)) { if self.viewer_show(thread, path, "", false).await.0 { v["shown"] = json!(true) } }
                 (true, v)
             }
             Err(e) => (false, json!({"error": e, "served_by": served})),
