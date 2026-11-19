@@ -133,7 +133,28 @@ pub enum Kind { Body, Quote, Code, Head }
 /// A block of text that paints its own selection and reports its layout to the registry.
 pub struct SelText { spans: Vec<Span>, kind: Kind, light: bool, reg: Reg, id: String, idx: usize, styled: Option<StyledText>, tokens: Vec<(Range<usize>, Tok)>,
     /// The code spans with a copy button (md::CopyAs): where they are in the text, what they copy, and their buttons while shown.
-    chips: Vec<Chip> }
+    chips: Vec<Chip>,
+    /// The text ranges drawn on a shade (a code span, a key, a Settings link's button): painted under the selection, which is under the glyphs.
+    shaded: Vec<Range<usize>> }
+/// The ranges of `spans` drawn on a shade (`code`, `kbd`, a link into Settings or a plan, drawn as a button).
+pub fn shaded(spans: &[Span]) -> Vec<Range<usize>> {
+    let mut out = Vec::new(); let mut at = 0usize;
+    for s in spans {
+        let button = s.style.link.as_ref().is_some_and(|l| l.href.starts_with("backplane://settings/") || l.href.starts_with("backplane://plan/"));
+        if !s.text.is_empty() && (s.style.code || s.style.kbd || button) { out.push(at..at + s.text.len()); }
+        at += s.text.len();
+    }
+    out
+}
+/// The rectangles a text range covers, line by line, from `a` (its start's position) to `b` (its end's), lines `lh` tall in text `left`..`right`.
+pub fn line_rects(a: Point<Pixels>, b: Point<Pixels>, lh: Pixels, left: Pixels, right: Pixels) -> Vec<Bounds<Pixels>> {
+    if a.y == b.y { return vec![Bounds::from_corners(a, point(b.x, b.y + lh))] }
+    let mut out = vec![Bounds::from_corners(a, point(right, a.y + lh))];
+    let mut y = a.y + lh;
+    while y < b.y { out.push(Bounds::from_corners(point(left, y), point(right, y + lh))); y += lh; }
+    out.push(Bounds::from_corners(point(left, b.y), point(b.x, b.y + lh)));
+    out
+}
 struct Chip { range: Range<usize>, text: SharedString, cmd: bool, id: SharedString, el: Option<AnyElement>, hot: Vec<Bounds<Pixels>>, shown: bool }
 
 /// The room a code span's buttons take after its end (they show over what follows while the pointer is there): one icon, or two for a command.
@@ -141,13 +162,7 @@ fn chip_room(cmd: bool) -> f32 { if cmd { 52. } else { 28. } }
 /// Where a span from `a` to `b` (the text positions of its ends, lines `lh` tall) is drawn, line by line, in text `left`..`right`, and the room
 /// after its end where its buttons go: the pointer anywhere over these keeps them shown.
 pub fn chip_hot(a: Point<Pixels>, b: Point<Pixels>, lh: Pixels, left: Pixels, right: Pixels, room: Pixels) -> Vec<Bounds<Pixels>> {
-    let mut out = Vec::new();
-    if a.y == b.y { out.push(Bounds::from_corners(a, point(b.x, b.y + lh))); }
-    else {
-        out.push(Bounds::from_corners(a, point(right, a.y + lh)));
-        if b.y > a.y + lh { out.push(Bounds::from_corners(point(left, a.y + lh), point(right, b.y))); }
-        out.push(Bounds::from_corners(point(left, b.y), point(b.x, b.y + lh)));
-    }
+    let mut out = line_rects(a, b, lh, left, right);
     out.push(Bounds::from_corners(point(b.x, b.y - px(3.)), point(b.x + room, b.y + lh + px(3.))));
     out
 }
@@ -163,13 +178,16 @@ impl SelText {
         drop(r);
         let mut chips = Vec::new(); let mut at = 0usize;
         for s in &spans {
-            if let Some(k) = s.style.copy.filter(|_| !s.text.trim().is_empty()) {
+            // every code span copies (the hub's `copy` says what it is; a command also gets Run in terminal), its button shown on hover
+            if (s.style.copy.is_some() || s.style.code) && !s.text.trim().is_empty() {
+                let k = s.style.copy;
                 let cid = SharedString::from(format!("ic-{id}-{idx}-{at}"));
-                chips.push(Chip { range: at..at + s.text.len(), text: s.text.clone().into(), cmd: k == md::CopyAs::Cmd, id: cid, el: None, hot: vec![], shown: false });
+                chips.push(Chip { range: at..at + s.text.len(), text: s.text.clone().into(), cmd: k == Some(md::CopyAs::Cmd), id: cid, el: None, hot: vec![], shown: false });
             }
             at += s.text.len();
         }
-        Self { spans, kind, light, reg: reg.clone(), id, idx, styled: None, tokens: Vec::new(), chips }
+        let shaded = if kind == Kind::Code { Vec::new() } else { shaded(&spans) };
+        Self { spans, kind, light, reg: reg.clone(), id, idx, styled: None, tokens: Vec::new(), chips, shaded }
     }
     fn runs(&self, base: &TextStyle) -> Vec<TextRun> {
         let c = |n: &str| theme::color(self.light, n);
@@ -196,7 +214,8 @@ impl SelText {
             let color = if s.style.link.is_some() { c("accent") } else if self.kind == Kind::Quote || s.style.small { c("dim") } else { c("text") };
             runs.push(TextRun {
                 len: s.text.len(), font, color: color.into(),
-                background_color: (s.style.code || s.style.kbd || button).then(|| c("raise").into()),
+                // a code span's shade is painted under the selection by `paint` (shaded), not by the text: a run's own background covered the highlight
+                background_color: None,
                 underline: (s.style.link.is_some() && !button).then(|| UnderlineStyle { color: Some(color.into()), thickness: px(1.), wavy: false }),
                 strikethrough: s.style.strike.then(|| StrikethroughStyle { color: Some(color.into()), thickness: px(1.) }),
             });
@@ -261,21 +280,16 @@ impl Element for SelText {
     fn paint(&mut self, id: Option<&GlobalElementId>, inspector: Option<&InspectorElementId>, bounds: Bounds<Pixels>, rl: &mut (), pre: &mut Vec<(Hitbox, CursorStyle)>, window: &mut Window, cx: &mut App) {
         let Some(styled) = self.styled.as_mut() else { return };
         let layout = styled.layout().clone();
-        // the selection first, under the glyphs
+        // in order: a code span's shade, the selection over it, then the glyphs (a run's own background would cover the selection)
+        let (lh, left, right) = (layout.line_height(), bounds.left(), bounds.right());
+        let shade = theme::color(self.light, "raise");
+        for r in &self.shaded {
+            if let (Some(pa), Some(pb)) = (layout.position_for_index(r.start), layout.position_for_index(r.end)) { for q in line_rects(pa, pb, lh, left, right) { window.paint_quad(fill(q, shade)); } }
+        }
         let range = { let r = self.reg.borrow(); r.at(&self.id, self.idx).and_then(|o| r.sel.within(o, r.blocks[o].text.len())) };
         if let Some(range) = range {
-            let lh = layout.line_height();
             let tint = select::highlight(self.light);
-            if let (Some(pa), Some(pb)) = (layout.position_for_index(range.start), layout.position_for_index(range.end)) {
-                let (left, right) = (bounds.left(), bounds.right());
-                if pa.y == pb.y { window.paint_quad(fill(Bounds::from_corners(pa, point(pb.x, pb.y + lh)), tint)); }
-                else {
-                    window.paint_quad(fill(Bounds::from_corners(pa, point(right, pa.y + lh)), tint));
-                    let mut y = pa.y + lh;
-                    while y < pb.y { window.paint_quad(fill(Bounds::from_corners(point(left, y), point(right, y + lh)), tint)); y += lh; }
-                    window.paint_quad(fill(Bounds::from_corners(point(left, pb.y), point(pb.x, pb.y + lh)), tint));
-                }
-            }
+            if let (Some(pa), Some(pb)) = (layout.position_for_index(range.start), layout.position_for_index(range.end)) { for q in line_rects(pa, pb, lh, left, right) { window.paint_quad(fill(q, tint)); } }
         }
         styled.paint(id, inspector, bounds, rl, &mut (), window, cx);
         for (h, style) in pre.iter() { window.set_cursor_style(*style, h); }
@@ -723,6 +737,21 @@ mod tests {
     }
     fn info(id: &str, idx: usize, text: &str) -> Info { Info { text: text.into(), entry: id[1..].parse().unwrap_or(0), id: id.into(), idx, links: vec![], layout: None } }
     fn frame(r: &mut Registry, blocks: &[(&str, usize, &str)]) { r.begin(); for (id, idx, t) in blocks { r.blocks.push(info(id, *idx, t)); } r.resolve(); }
+    #[test] fn a_code_span_is_shaded_by_paint_under_the_selection_not_by_its_run() {
+        // the person selected a list item over an inline command and saw no highlight on the command: its run's own background covered it
+        let sp = |t: &str, code: bool, bold: bool| Span { text: t.into(), style: md::Style { code, bold, ..Default::default() } };
+        let spans = vec![sp("Paste this in: ", false, false), sp("PROTON_LOG=1 %command%", true, false), sp(" and ", false, true), sp("x", true, false)];
+        assert_eq!(shaded(&spans), vec![15..37, 42..43]);
+        let reg: Reg = Default::default(); let st = SelText::new(&reg, spans, Kind::Body, false);
+        assert!(st.runs(&TextStyle::default()).iter().all(|r| r.background_color.is_none()), "no run paints a background over the selection");
+        assert_eq!(st.shaded, vec![15..37, 42..43]);
+    }
+    #[test] fn a_range_covers_its_lines() {
+        let (lh, l, r) = (px(10.), px(0.), px(100.));
+        assert_eq!(line_rects(point(px(5.), px(0.)), point(px(20.), px(0.)), lh, l, r), vec![Bounds::from_corners(point(px(5.), px(0.)), point(px(20.), px(10.)))]);
+        let m = line_rects(point(px(50.), px(0.)), point(px(20.), px(20.)), lh, l, r);
+        assert_eq!(m.len(), 3); assert_eq!(m[1], Bounds::from_corners(point(l, px(10.)), point(r, px(20.)))); assert_eq!(m[2].right(), px(20.));
+    }
     #[test] fn a_selection_follows_its_text_when_blocks_are_added_above() {
         let mut r = Registry::default();
         frame(&mut r, &[("e2", 0, "second"), ("e3", 0, "third message")]);

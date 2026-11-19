@@ -160,7 +160,13 @@ fn msg_tools(cx: &mut Context<Backplane>, light: bool, id: &str, text: &str) -> 
     let c = |n: &str| theme::color(light, n);
     let (copy, reply, rid) = (text.to_string(), format!("{id}\u{1f}{text}"), id.to_string());
     let btn = |tag: &str, label: &'static str| div().id(SharedString::from(format!("{tag}-{rid}"))).px_1().cursor_pointer().text_size(crate::scale::tpx(11.)).text_color(c("faint")).hover(|s| s.text_color(c("text"))).child(trs(label));
-    /* i18n-ok: drawn through trs in btn */ div().flex().gap_2().child(btn("copy", "Copy").on_click(cx.listener(move |_, _, _, cx| { cx.write_to_clipboard(ClipboardItem::new_string(copy.clone())); })))
+    // Copy message: the copyable primitive's copy (the exact text, its check and "Copied" for a moment)
+    let cid = SharedString::from(format!("msg-{rid}")); let done = crate::screens::copyable::just_copied(&cid);
+    let copy_btn = div().id(SharedString::from(format!("copy-{rid}"))).px_1().cursor_pointer().text_size(crate::scale::tpx(11.)).text_color(c(if done { "ok" } else { "faint" })).hover(|s| s.text_color(c("text")))
+        .flex().items_center().gap_1().child(crate::art::icon(if done { "check" } else { "copy" }, 11., c(if done { "ok" } else { "faint" })))
+        /* i18n-ok: drawn through trs */ .child(trs(if done { "Copied" } else { "Copy" }))
+        .on_click(move |_, window, cx| { cx.stop_propagation(); crate::screens::copyable::copy(&cid, &copy, window, cx) });
+    /* i18n-ok: drawn through trs in btn */ div().flex().gap_2().child(copy_btn)
         /* i18n-ok: drawn through trs in btn */ .child(btn("reply", "Reply").on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("reply".into(), reply.clone())); cx.notify(); })))
 }
 

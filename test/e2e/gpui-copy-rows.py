@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The copy button and Run in terminal, in the GPUI window (gpui-f-rows.py's harness: private Xvfb + i3, real X input, the real X clipboard).
-usage: gpui-copy-rows.py CLIENT_BIN HUB_BIN ASSETS_DIR OUT [PORT] [DISPLAY_N] [rows...]   rows: F23 (copy on each chat surface), F24 (Run in terminal)
+usage: gpui-copy-rows.py CLIENT_BIN HUB_BIN ASSETS_DIR OUT [PORT] [DISPLAY_N] [rows...]   rows: F23 (copy on each chat surface), F24 (Run in terminal), F25 (a selection shows over inline code)
 A project thread, the uberbot Bub's chat and a room each hold a reply with an inline command, a fenced command and a commit hash."""
 import os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
