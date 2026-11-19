@@ -100,6 +100,11 @@ impl ViewActor {
             let mut i = Map::new();
             for (k, v) in &ci { if pref(k) || *k == format!("panel:{th}") { i.insert(k.clone(), v.clone()); } }
             for (k, v) in seed_info(&ci) { i.insert(k, v); }
+            // the viewer the person had open (#1225): a new connection (a reconnect to the same hub) is a fresh actor, and without the record
+            // of what was on show its first picture says no viewer is open, which closes it. The page's own record is taken, bounded.
+            if thread_ok { for (k, n) in [(format!("@view:{th}"), 32), (format!("@view.file:{th}"), 4096), (format!("@files.dir:{th}"), 4096), (format!("@mech.part:{th}"), 4096), ("@view.at".to_string(), 4096)] {
+                if let Some(t) = cd.get(&k).and_then(|v| within(v, n)).filter(|t| !t.is_empty()) { d.insert(k, json!(t)); }
+            } }
             drafts = d; info = i;
         } else {
             let mut d = self.held_drafts.clone();
@@ -390,6 +395,15 @@ mod tests {
     fn req(kind: &str, id: &str) -> Value { json!({"target": {"kind": kind, "id": id}, "session": {"drafts": {}}}) }
     fn keys(v: &Value) -> Vec<String> { let mut k: Vec<String> = v["drafts"].as_object().unwrap().keys().cloned().collect(); k.sort(); k }
     fn has(v: &Value, k: &str) -> bool { keys(v).contains(&k.to_string()) }
+
+    /// #1225: a new connection to the same hub (a fresh actor) takes the viewer record the page sends, so its first picture keeps the viewer open.
+    #[test] fn a_reconnect_keeps_the_open_viewer_in_its_first_session() {
+        let r = json!({"target": {"kind": "thread", "id": "t1"}, "session": {"drafts": {"@view:t1": "board", "@view.at": "0|/p|", "@view.file:t1": "a.kicad_pcb", "@view:t2": "board"}}});
+        let s = ViewActor::default().input("v1", &r);
+        assert_eq!((s["drafts"]["@view:t1"].as_str(), s["drafts"]["@view.at"].as_str(), s["drafts"]["@view.file:t1"].as_str()), (Some("board"), Some("0|/p|"), Some("a.kicad_pcb")));
+        assert!(!has(&s, "@view:t2"), "another thread's record is not taken");
+        let none = ViewActor::default().input("v1", &req("thread", "t1")); assert!(!has(&none, "@view:t1"));
+    }
 
     /// law hist_picker_scope: Actor.scope.keep("@cmp.menu") == False (and the other scoped keys)
     // @rp.req:<id> and @telemetry.req:<id> (session parity, recA/session-mobile 30..): only for requests the view's own commands sent, only once answered
