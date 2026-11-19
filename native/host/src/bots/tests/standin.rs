@@ -6,14 +6,17 @@ use std::{path::Path, time::{Duration, Instant}};
 
 /// `@LOG@`: a file; each turn's input and each tool answer go there. A message with `zqsave` saves a memory, a run's brief (`<charter>`) saves another from the run's own thread.
 const AGENT: &str = r#"#!/bin/sh
-url=""
+cfg=""
 while [ $# -gt 0 ]; do
-  if [ "$1" = --mcp-config ]; then cfg="$2"; [ -f "$cfg" ] && cfg=$(cat "$cfg"); url=$(printf %s "$cfg" | sed -E 's/.*"backplane":\{"type":"http","url":"([^"]*)".*/\1/'); fi
+  if [ "$1" = --mcp-config ]; then cfg="$2"; fi
   shift
 done
-sid="fake-$$"; n=0
-# a tool call tries for up to a minute: under a full-suite run the hub took 11 s to start and ten seconds of tries ran out (the MCP endpoint answered nothing yet)
-tool() { k=0; r=""; while [ -z "$r" ] && [ $k -lt 600 ]; do k=$((k + 1)); r=$(curl -s -X POST -H 'content-type: application/json' --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$1\",\"arguments\":$2}}" "$url"); [ -z "$r" ] && sleep 0.1; done; printf 'TOOL %s %s\n' "$1" "$r" >> @LOG@; } # an empty answer is a connection that did not come through: asked again (the hub's MCP endpoint under a loaded run), never taken as done
+# the MCP URL, read from the config (a file the hub wrote, F-009) when a tool is first called, as late as a slow agent reads it: a file gone by then is a test failure, never a guess
+mcp_url() { c="$cfg"; [ -f "$c" ] && c=$(cat "$c"); printf %s "$c" | sed -nE 's/.*"backplane":\{"type":"http","url":"([^"]*)".*/\1/p'; }
+sid="fake-$$"; n=0; url=""
+# one call: the answer, or the reason there is none (curl's exit code and HTTP status) on its CURL line (#1287); an empty TOOL line is a failure, never taken as done
+tool() { [ -n "$url" ] || url=$(mcp_url); o=$(curl -sS -w '\n@@%{http_code}' -X POST -H 'content-type: application/json' --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$1\",\"arguments\":$2}}" "$url" 2>&1); rc=$?
+  r=""; [ $rc = 0 ] && r=$(printf %s "$o" | sed '$d'); printf 'CURL %s rc=%s cfg=%s out=%s\n' "$1" "$rc" "$([ -f "$cfg" ] && echo file || echo gone)" "$(printf %s "$o" | tr '\n' ' ' | cut -c1-300)" >> @LOG@; printf 'TOOL %s %s\n' "$1" "$r" >> @LOG@; }
 say() { printf '{"type":"assistant","message":{"id":"m%s-%s","role":"assistant","content":[{"type":"text","text":"%s"}],"usage":{"input_tokens":1,"output_tokens":1}},"session_id":"%s"}\n' "$$" "$n" "$1" "$sid"; }
 while IFS= read -r line; do
   case "$line" in *'"type":"user"'*)
@@ -24,6 +27,7 @@ while IFS= read -r line; do
       *'<charter>'*) tool memory_save '{"key":"run-note","kind":"note","text":"the run saw the morning routine"}'; say "planned the day" ;;
       *zqwait*) while [ ! -f "@HOLD@" ]; do sleep 0.05; done; say "answered the person" ;;
       *'You were restarted'*) say "" ;;
+      *zqlate*) while [ ! -f "@HOLD@" ]; do sleep 0.05; done; tool memory_save '{"key":"late","kind":"fact","text":"saved after another hub started"}'; say "saved late" ;;
       *zqhold*) tool thread_launch '{"project":"p1","prompt":"child work please"}'; while [ ! -f "@HOLD@" ]; do sleep 0.05; done; say "launched it" ;;
       *zqlaunch*) tool thread_launch '{"project":"p1","prompt":"child work please"}'; say "launched it" ;;
       *'Launched thread'*) say "heard the report" ;;
@@ -42,7 +46,9 @@ async fn wait_for(hub: &Arc<Hub>, what: &str, f: impl Fn(&[Value]) -> bool) {
     panic!("{what} never came; the log in order:\n{}", timeline.join("\n"));
 }
 /// What the stand-in's `thread_launch` call answered (its `TOOL` line): the child exists only if the tool answered, so a test says what the tool said when no child came
-fn launch_answer(out: &Path) -> String { std::fs::read_to_string(out).unwrap_or_default().lines().find(|l| l.starts_with("TOOL thread_launch")).unwrap_or("no thread_launch call was logged").to_string() }
+fn launch_answer(out: &Path) -> String { tool_answer(out, "thread_launch") }
+/// A tool's answer in the stand-in's log (its `TOOL` line), with what curl said (its `CURL` line: exit code, HTTP status, whether the MCP config file was still there) when it is no answer
+fn tool_answer(out: &Path, tool: &str) -> String { let s = std::fs::read_to_string(out).unwrap_or_default(); let t = s.lines().find(|l| l.starts_with(&format!("TOOL {tool} "))).unwrap_or("no call was logged").to_string(); if t.contains("\"isError\":false") { t } else { format!("{t}\n{}", s.lines().filter(|l| l.starts_with(&format!("CURL {tool} "))).collect::<Vec<_>>().join("\n")) } }
 fn said(l: &[Value], th: &str, text: &str) -> bool { l.iter().any(|e| e["$"] == "MessagePosted" && e["thread"] == th && e["role"] == "assistant" && e["text"] == text) }
 fn write_agent(d: &Path, out: &Path) { use crate::plat::fs::PermissionsExt; let p = d.join("claude"); std::fs::write(&p, AGENT.replace("@LOG@", &crate::plat::fs::script_path(out)).replace("@HOLD@", &crate::plat::fs::script_path(&out.with_file_name("hold"))).replace("@GATE@", &crate::plat::fs::script_path(&out.with_file_name("gate")))).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
 
@@ -182,5 +188,34 @@ fn write_agent(d: &Path, out: &Path) { use crate::plat::fs::PermissionsExt; let 
     let person_turn = turns.lines().find(|l| l.starts_with("TURN ") && l.contains("zqwait")).unwrap();
     assert!(!person_turn.contains("You were restarted"), "the person's turn never carried the wake: {person_turn}");
     ag.shutdown();
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// #1287: a hub that starts while another hub's agent is running (two hubs of one process: the test binary) leaves that agent's run files alone. The files are
+/// its `--mcp-config` (the MCP URL and key) and its `--settings`. Both hubs' agents had no home of their own (`start_with`), so both wrote to `./secrets/run`, and
+/// the second hub's start emptied it ("removed 1 run file(s) a previous hub left behind"): the running agent found no MCP config, and every tool call it made
+/// reached nothing (an empty answer the stand-in once took as done). The agent here reads its config only after the second hub has started.
+#[tokio::test(flavor = "multi_thread")] async fn a_hub_that_starts_leaves_another_hubs_running_agent_its_mcp_config() {
+    let root = crate::plat::tmp::dir("bot-runfile");
+    let (home, bin, work, home2) = (root.join("home"), root.join("bin"), root.join("work"), root.join("home2")); for d in [&home, &bin, &work, &home2] { std::fs::create_dir_all(d).unwrap(); }
+    let out = root.join("agent.log"); write_agent(&bin, &out);
+    std::fs::write(home.join("events.jsonl"), format!("{{\"$\":\"SettingSet\",\"key\":\"machine.id\",\"value\":\"m1\",\"at\":1}}\n{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"toy\",\"root\":{},\"at\":1}}\n", serde_json::to_string(&work.to_string_lossy()).unwrap())).unwrap();
+    let hub = Hub::start(Cfg { home, version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let ag = Agents::start_with(hub.clone(), Cli::standin(&bin)).await.unwrap();
+    let _bots = crate::bots::start(hub.clone(), ag.clone()).await;
+    let r = rpc(&hub, "bots.create", json!({"name":"ada"})).await; let ada = r["bot"].as_str().unwrap_or_else(|| panic!("{r}")).to_string();
+    let chat = { let end = Instant::now() + Duration::from_secs(60); loop { if let Some(e) = log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == ada.as_str() && e["thread"].as_str().map_or(false, |t| !t.is_empty())) { break e["thread"].as_str().unwrap().to_string() } assert!(Instant::now() < end, "the bot's thread"); tokio::time::sleep(Duration::from_millis(50)).await } };
+    assert_eq!(rpc(&hub, "bots.say", json!({"bot":ada,"text":"zqlate it","msg":"m1"})).await["ok"], true);
+    // the agent is running (its turn has come) and has not read its MCP config yet
+    wait_for(&hub, "the agent's turn", |_| std::fs::read_to_string(&out).unwrap_or_default().contains("TURN ")).await;
+    // another hub starts in this process, as another test's does
+    std::fs::write(home2.join("events.jsonl"), "{\"$\":\"SettingSet\",\"key\":\"machine.id\",\"value\":\"m2\",\"at\":1}\n").unwrap();
+    let hub2 = Hub::start(Cfg { home: home2, version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let ag2 = Agents::start_with(hub2.clone(), Cli::standin(&bin)).await.unwrap();
+    std::fs::write(out.with_file_name("hold"), "go").unwrap(); // only now does the agent read its config and call its tool
+    wait_for(&hub, "the agent's reply", |l| said(l, &chat, "saved late")).await;
+    assert!(tool_answer(&out, "memory_save").contains("\"isError\":false"), "the agent's tool call reached its hub: {}", tool_answer(&out, "memory_save"));
+    wait_for(&hub, "the memory", |l| l.iter().any(|e| e["$"] == "MemorySaved" && e["key"] == "late")).await;
+    ag2.shutdown(); ag.shutdown();
     let _ = std::fs::remove_dir_all(&root);
 }

@@ -107,6 +107,10 @@ impl Agents {
         let bub = w.setting("uber.bot"); if bub.is_empty() { return false }
         w.bots.get(bub).map_or(false, |b| !b.2 && b.1 == th) || th.starts_with(&format!("mailcoord-{bub}-")) || th.starts_with(&format!("run-{bub}-"))
     }
+    /// #1287: the home whose `secrets/run` holds this hub's agents' run files (their `--mcp-config` and `--settings`), and which `clear_run_files` empties at
+    /// the start: the host's home, or the hub's own when the host has none (`start_with`). Never a folder another hub shares: with an empty home every hub of a
+    /// process wrote into, and at its start emptied, `./secrets/run`, deleting a live agent's MCP config before it was read (its tool calls then reached nothing).
+    pub fn run_home(&self) -> std::path::PathBuf { if self.host.home.as_os_str().is_empty() { self.hub.cfg.home.clone() } else { self.host.home.clone() } }
     pub async fn start(hub: Arc<Hub>) -> Result<Arc<Agents>> { let h = host::HostInfo::probe(&hub.cfg.home); Agents::start_host(hub, Cli::from_env(), h).await }
     pub async fn start_with(hub: Arc<Hub>, cli: Cli) -> Result<Arc<Agents>> { Agents::start_host(hub, cli, host::HostInfo::default()).await }
     pub async fn start_host(hub: Arc<Hub>, cli: Cli, host: host::HostInfo) -> Result<Arc<Agents>> {
@@ -122,7 +126,7 @@ impl Agents {
         let home = hub.cfg.home.to_string_lossy().into_owned(); let h2 = home.clone();
         let left = tokio::task::spawn_blocking(move || proc::reap_orphans(&h2)).await.unwrap_or(0); proc::set_owner(&home);
         if left > 0 { eprintln!("agents: ended {left} process(es) a previous hub left behind") }
-        { let h3 = ag.host.home.clone(); let n = tokio::task::spawn_blocking(move || proc::clear_run_files(&h3)).await.unwrap_or(0); if n > 0 { eprintln!("agents: removed {n} run file(s) a previous hub left behind") } } // their processes are gone (above)
+        { let h3 = ag.run_home(); let n = tokio::task::spawn_blocking(move || proc::clear_run_files(&h3)).await.unwrap_or(0); if n > 0 { eprintln!("agents: removed {n} run file(s) a previous hub left behind") } } // their processes are gone (above)
         let _ = tokio::task::spawn_blocking(crate::memscope::init).await; // agents and jobs in memory scopes of their own (memscope.rs), probed once
         { let cap = ag.world.lock().await.setting("memory.agent.max").to_string(); if !cap.is_empty() { crate::memscope::set_agent_cap(&cap); eprintln!("memscope: this hub's agents are capped at {cap} (Raise limit, memory.agent.max)") } }
         crate::startup::mark("agents: orphans reaped");
@@ -1244,11 +1248,11 @@ impl Actor {
         let mut keep = vec![]; // the files Claude reads at its start, removed when it ends
         // the MCP config holds the thread's key: on every platform it goes in a private file, never on the command line (`/proc/<pid>/cmdline` is world-readable on Linux, F-009)
         { let name: String = th.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
-          keep.extend(rules::mcp_to_file(&mut args, &proc::run_dir(&self.ag.host.home), &format!("{name}-{gen}-{}.mcp.json", proc::unique())).map_err(|e| format!("could not write the MCP config for Claude: {e}"))?); }
+          keep.extend(rules::mcp_to_file(&mut args, &proc::run_dir(&self.ag.run_home()), &format!("{name}-{gen}-{}.mcp.json", proc::unique())).map_err(|e| format!("could not write the MCP config for Claude: {e}"))?); }
         if cfg!(windows) {
             let name: String = th.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
-            rules::prompt_to_file(&mut args, &self.ag.host.home.join("prompts").join(format!("{name}.md"))).map_err(|e| e.to_string())?;
-            keep.extend(rules::json_to_file(&mut args, "--settings", &proc::run_dir(&self.ag.host.home), &format!("{name}-{gen}.settings.json")).map_err(|e| format!("could not write the settings for Claude: {e}"))?);
+            rules::prompt_to_file(&mut args, &self.ag.run_home().join("prompts").join(format!("{name}.md"))).map_err(|e| e.to_string())?;
+            keep.extend(rules::json_to_file(&mut args, "--settings", &proc::run_dir(&self.ag.run_home()), &format!("{name}-{gen}.settings.json")).map_err(|e| format!("could not write the settings for Claude: {e}"))?);
         }
         if !acct_args.is_empty() { acct_args.extend(args); args = acct_args }
         if self.person { args.extend(person::CLAUDE_STRICT.iter().map(|x| x.to_string())) } // only this hub's MCP config; the person's user-level hooks, MCP servers and rules do not load
