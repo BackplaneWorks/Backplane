@@ -319,6 +319,9 @@ pub fn menu_rows(h: Option<&Steps>, r: Option<&super::plot::Refs>) -> Vec<(Strin
             let (label, shown, sub) = match kind.as_str() {
                 "turn" => { let n = name.rsplit('/').next().unwrap_or(name);
                     /* i18n-ok: the label the comparison keeps (drawn through trs) */ (format!("Turn {n}"), tf("history.turn", &[("turn", n.into())]), trs(if n == "0" { "this thread, before it began" } else { "this thread, at the end of a turn" })) }
+                // a turn's snapshot (the hub's refs.sh `snap`): the project as it was before that turn
+                "snap" => { let n = name.rsplit('/').next().unwrap_or(name);
+                    /* i18n-ok: the label the comparison keeps (drawn through trs) */ (format!("Before turn {n}"), tf("history.snap", &[("turn", n.into())]), trs("this thread's snapshot, before the turn")) }
                 "head" => (name.clone(), name.clone(), trs("the commit checked out")), "branch" => (name.clone(), name.clone(), trs("branch")), "tag" => (name.clone(), name.clone(), trs("tag")),
                 /* i18n-ok: the label the comparison keeps (drawn through trs) */ "base" => (format!("Branch point · {name}"), tf("history.branchpoint", &[("branch", name.into())]), trs("where this branch left it")), _ => (name.clone(), name.clone(), trs("commit")),
             };

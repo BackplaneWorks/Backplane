@@ -33,6 +33,9 @@ Entry   = {id, kind, text, at, clientId?, live?, agentOnly?, tool?, ask?, replyT
           live: true on the assistant entry still streaming (its text so far; later `k:"text"` pushes append to it)
           tool = {name, summary, state ∈ "running" | "done" | "failed"}
           ask  = {id, state ∈ "open" | "answered", question, options:[{id,label}], answered?:<option id or text>}
+          restore = {turn, commit, info} on a user entry: Restore to before this (the snapshot before the turn it started; docs/snapshots.md). A long-press offers
+                 it; the confirm shows `info`, and Restore sends `thread.restore {thread, turn, commit}` → `{}`. The hub's routine git rows (snapshots, design
+                 commits) are no entries at all; when a snapshot is logged, the user entry it belongs to is pushed again whole, with `restore`.
           copy = [{text, cmd}] on an assistant or note entry (feature `copy`; md/copy.rs `spans`, at most 16, absent when none): what of its text is to copy, in
                  order: each fenced block whole, each inline code span that is a command, path, url, hash or id. A phone drawing the Markdown itself gives
                  every fenced block a copy button and an inline code span one when its text is listed; `cmd` adds Run in terminal (`term.new {chat}`).

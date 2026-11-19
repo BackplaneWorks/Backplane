@@ -159,7 +159,8 @@ impl Agents {
         let turn = sn::next_turn(&top, th).await;
         let title = self.thread_title(th).await;
         match sn::snapshot(&top, th, &sn::snap_ref(th, turn), &sn::snap_msg(th, turn, &title, ""), off).await {
-            Ok(s) => { if s.made || !s.skipped.is_empty() { self.guard_say(th, "info", s.line()).await } Some((top, turn, s.reference)) }
+            // every turn's snapshot is logged, a quiet line (present::thread::quiet_act): the person's message offers Restore to before this from it
+            Ok(s) => { self.guard_say(th, "info", s.line()).await; Some((top, turn, s.reference)) }
             Err(e) => { self.guard_say(th, "warn", format!("No snapshot before this turn: {e}")).await; None }
         }
     }
@@ -323,6 +324,16 @@ impl Agents {
         let turn = if turn == 0 { sn::snaps(&top, th).await.last().map_or(0, |x| x.0) } else { turn };
         if turn == 0 { self.guard_say(th, "warn", "Nothing to restore: this thread has no snapshot yet.".into()).await; return Ok(()) }
         self.restore_turn(th, &top, turn).await.map(|_| ())
+    }
+    /// `thread.restore {thread, turn, commit}`: a user message's Restore to before this. `turn` 0 (a snapshot line from before it named its turn):
+    /// the thread's snapshot whose commit is `commit`.
+    pub async fn restore_pressed(self: &Arc<Self>, th: &str, turn: u64, commit: &str) -> Result<(), String> {
+        if turn > 0 { return self.restore_command(th, turn).await }
+        let cwd = self.world().await.cwd(th);
+        let top = sn::top_of(&kc::design_root(&cwd)).await.ok_or("this project is not a git repository")?;
+        let c = commit.trim();
+        let n = if c.len() >= 4 && c.chars().all(|x| x.is_ascii_hexdigit()) { sn::snaps(&top, th).await.into_iter().filter(|(_, full)| full.starts_with(c)).map(|x| x.0).last() } else { None };
+        match n { Some(n) => self.restore_command(th, n).await, None => Err(format!("no snapshot {c} of this thread")) }
     }
     async fn restore_turn(self: &Arc<Self>, th: &str, top: &str, turn: u64) -> Result<sn::Restored, String> {
         if self.world().await.threads.get(th).is_some_and(|t| t.turn == "running") { let m = "Not restored: the thread's turn is still running. Stop it first, then restore.".to_string(); self.guard_say(th, "warn", m.clone()).await; return Err(m) }

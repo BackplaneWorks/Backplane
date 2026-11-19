@@ -431,7 +431,7 @@ impl Agents {
 
 struct Rpc(Arc<Agents>);
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer", "thread.retitle", "thread.btw", "thread.halt", "lock.release", "lock.cancel", "work.cancel", "task.stop", "text.write", "thread.hand", "thread.deliver"] }
+    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer", "thread.retitle", "thread.btw", "thread.halt", "thread.restore", "lock.release", "lock.cancel", "work.cancel", "task.stop", "text.write", "thread.hand", "thread.deliver"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             // the hub's own requests (`/give`, from commands/give.rs): a connection (client 1 and up) could say anything there, so it is never heard
@@ -477,6 +477,10 @@ impl RpcHandler for Rpc {
             if method == "thread.halt" { // a halt card's action (halt.rs): resume, raise, compact, fresh
                 let g = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
                 return vec![match self.0.halt_act(th, &g("act"), &g("do")).await { Ok(()) => ok(id), Err(e) => err(id, &e) }]
+            }
+            if method == "thread.restore" { // a user message's Restore to before this (snapguard.rs): the person pressed it and confirmed
+                let turn = p.get("turn").and_then(Value::as_u64).unwrap_or(0);
+                return vec![match self.0.restore_pressed(th, turn, p.get("commit").and_then(Value::as_str).unwrap_or("")).await { Ok(()) => ok(id), Err(e) => err(id, &e) }]
             }
             if method == "task.stop" { // the thread's panel: Stop on one subagent or background shell
                 return vec![match self.0.stop_task(th, p.get("id").and_then(Value::as_str).unwrap_or("")).await { Ok(()) => json!({"t":"reply","id":id,"ok":true,"result":{}}), Err(e) => err(id, &e) }]

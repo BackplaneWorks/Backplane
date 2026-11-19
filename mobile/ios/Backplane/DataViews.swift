@@ -1230,6 +1230,7 @@ struct DataEntryRow: View {
     let thread: String
     let entry: DEntry
     var goTo: (String) -> Void = { _ in }   // a reply's chip: to the message it answers
+    @State private var restoring: DRestore?   // Restore to before this, pressed: its confirm is up
 
     var body: some View {
         switch entry.kind {
@@ -1245,6 +1246,12 @@ struct DataEntryRow: View {
                         if entry.localImages.isEmpty { ForEach(entry.attachments) { a in DataAttachmentImage(client: client, attachment: a) } }
                         if !entry.text.isEmpty { DLinkText(text: entry.text, thread: thread).foregroundStyle(BackplaneDesign.text).lineSpacing(3) }
                     }.padding(.horizontal, 10).padding(.vertical, 8).dbox(fill: BackplaneDesign.raised)
+                    // long-press: Restore to before this, when the hub has the snapshot before the turn this message started
+                    .contextMenu { if let r = entry.restore { Button(Tr.t("Restore to before this"), systemImage: "clock.arrow.circlepath") { restoring = r }.accessibilityIdentifier("data.entry.restore") } }
+                    .confirmationDialog(Tr.t("Restore the project to before this message?"), isPresented: Binding(get: { restoring != nil }, set: { if !$0 { restoring = nil } }), titleVisibility: .visible, presenting: restoring) { r in
+                        Button(Tr.t("Restore"), role: .destructive) { Task { await client.restore(thread, r) } }
+                        Button(Tr.t("Cancel"), role: .cancel) {}
+                    } message: { r in Text(r.info + "\n" + Tr.t("Restoring makes a new commit. The project as it is now is kept as a commit too.")) }
                     HStack(spacing: 6) {
                         // spoken: the mic, and how sure the engine was (edited when typed in); just sent by voice: Undo, for a moment
                         if let v = entry.voice {

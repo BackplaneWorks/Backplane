@@ -75,6 +75,20 @@ In review mode:
 - The restore ask (kind input, tool `snapshot_restore`): **Restore to before this turn** or **Keep this turn's changes**. It shows on
   every client, as asks do, and the next turn closes it as kept.
 - `/restore` (the thread's last turn) or `/restore <n>` sent as a message. The hub restores, no agent turn starts.
+- **Restore to before this** on the person's message (hover on the desktop, long-press on the phones). The hub puts `restore: {turn, commit, info}`
+  on the message that started the turn (`present::thread::restore_points`: each snapshot line goes to the newest message of the person's since
+  the snapshot before it). The confirm shows `info` (`Turn 12 · 0bac077 · on its own ref; your branch is untouched`), and Restore sends
+  `thread.restore {thread, turn, commit}`. `turn` 0 comes from a line logged before lines named their turn; the hub then finds the snapshot by `commit`.
+
+## Quiet bookkeeping (no timeline rows)
+
+Every turn's snapshot is logged as a `git` activity: `Snapshot before turn <n>: <commit> (<where>)...` or
+`Nothing uncommitted before turn <n>: ...`. These rows are quiet. So are "The snapshot of this project is taking more than N s" (a large folder), a folder made a repository and a turn end's `Committed/Recorded N design files`
+(`present::thread::quiet_act`). Quiet rows stay in the log, `thread_read` gives them to agents, and Compare in the design history lists the
+snapshots (`refs.sh` `snap`: "Before turn N"). The desktop and the phones draw no row for them (`present::thread::Noise`, the same rule in
+`fold_shown` and data/1's `thread.entries` and pushes). A warning or an error always shows (a commit line that says its push failed is not
+quiet). The one exception: a warning that repeats the last warning of its kind word for word, with nothing else of that kind between, shows
+once. A failing commit warns at the first turn, not at every turn.
 
 `snapshot::restore` first snapshots the current state (`<n>-before-restore`). It then writes every file of the snapshot, removes the
 files that were added since (ignored and huge files are in neither snapshot, so they are never touched), and snapshots the result

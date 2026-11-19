@@ -164,6 +164,22 @@ fn msg_tools(cx: &mut Context<Backplane>, light: bool, id: &str, text: &str) -> 
         /* i18n-ok: drawn through trs in btn */ .child(btn("reply", "Reply").on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("reply".into(), reply.clone())); cx.notify(); })))
 }
 
+/// The confirm of a message's Restore to before this, under its bubble: what it does, the snapshot's short info (the hub's `restore.info`), Restore and Cancel.
+/// Restore sends `thread.restore {thread, turn, commit}`; the hub says in the thread what it restored.
+fn restore_confirm(cx: &mut Context<Backplane>, light: bool, thread: &str, id: &str, r: &Value) -> Stateful<Div> {
+    let c = |n: &str| theme::color(light, n);
+    let p = serde_json::json!({"thread": thread, "turn": r["turn"].as_u64().unwrap_or(0), "commit": string(r, "commit")});
+    let btn = |tag: &str, label: &'static str, main: bool| div().id(SharedString::from(format!("{tag}-{id}"))).px_2().py(px(2.)).border_1().cursor_pointer().text_size(crate::scale::tpx(12.))
+        .border_color(c(if main { "accent" } else { "line" })).text_color(c(if main { "accent" } else { "dim" })).hover(|s| s.bg(c("raise"))).child(trs(label));
+    div().id(SharedString::from(format!("restore-ask-{id}"))).px_3().py_2().border_1().border_color(c("line")).flex().flex_col().gap_1().text_size(crate::scale::tpx(12.))
+        /* i18n-ok: drawn through trs */ .child(div().text_color(c("text")).child(trs("Restore the project to before this message?")))
+        .child(div().text_color(c("faint")).font(art::mono_font()).child(string(r, "info")))
+        /* i18n-ok: drawn through trs */ .child(div().text_color(c("dim")).child(trs("Restoring makes a new commit. The project as it is now is kept as a commit too.")))
+        .child(div().flex().justify_end().gap_2().mt_1()
+            /* i18n-ok: drawn through trs in btn */ .child(btn("restore-no", "Cancel", false).on_click(cx.listener(|this, _, _, cx| { this.screens.restore_ask.clear(); cx.notify(); })))
+            /* i18n-ok: drawn through trs in btn */ .child(btn("restore-go", "Restore", true).on_click(cx.listener(move |this, _, _, cx| { this.screens.restore_ask.clear(); let _ = this.tx.try_send(Command::Rpc("thread.restore".into(), crate::screens::settings::Secret(p.clone()), "restore")); cx.notify(); }))))
+}
+
 impl Backplane {
     /// One thread row of the sidebar (a project's, or the Active view's: `sub` names the project there, `faded` is a settled one).
     pub(crate) fn side_thread(&self, cx: &mut Context<Self>, light: bool, t: &Value, pid: &str, sub: &str, faded: bool, ctl: &mut Vec<CtlEntry>) -> AnyElement {
@@ -256,20 +272,27 @@ impl Backplane {
                 // r05: a follow-up the agent has not read yet: its text a step dimmer, its time ("not read yet · 06:13") in the queued colour
                 let unread = e["unread"] == true;
                 let spoken = crate::screens::voice::bubble_mark(cx, light, &self.screens.voice, &id, &e["voice"]);
-                let stamp_row = div().flex().justify_end().items_center().gap_3().text_size(crate::scale::tpx(11.)).text_color(c("faint")).children(spoken).child(tools).child(div().when(unread, |d| d.text_color(c("queued"))).child(crate::i18n::trs(&stamp)));
+                // Restore to before this (the hub's `restore`: the snapshot before the turn this message started): on hover; its confirm shows the snapshot
+                let group = SharedString::from(format!("um-{id}"));
+                let asking = e["restore"].is_object() && self.screens.restore_ask == id;
+                let restore = (e["restore"].is_object() && !asking).then(|| { let rid = id.clone();
+                    div().id(SharedString::from(format!("restore-{id}"))).px_1().cursor_pointer().invisible().group_hover(group.clone(), |s| s.visible()).hover(|s| s.text_color(c("text")))
+                        /* i18n-ok: drawn through trs */ .child(trs("Restore to before this")).on_click(cx.listener(move |this, _, _, cx| { this.screens.restore_ask = rid.clone(); cx.notify(); })) });
+                let confirm = asking.then(|| restore_confirm(cx, light, &self.selected, &id, &e["restore"]));
+                let stamp_row = div().flex().justify_end().items_center().gap_3().text_size(crate::scale::tpx(11.)).text_color(c("faint")).children(restore).children(spoken).child(tools).child(div().when(unread, |d| d.text_color(c("queued"))).child(crate::i18n::trs(&stamp)));
                 let body = div().when(unread, |d| d.opacity(0.7)).child(body);
                 let reply_to = e["replyTo"].is_object().then(|| {
                     let (target, quote) = (string(&e["replyTo"], "id"), string(&e["replyTo"], "quote"));
                     div().id(SharedString::from(format!("rt-{id}"))).mb_1().max_w_full().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(crate::scale::tpx(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
                         .child(tf("gpui.b.in.reply.to", &[("quote", quote.into())])).on_click(cx.listener(move |this, _, _, cx| { this.timeline_goto(&target); cx.notify(); }))
                 });
-                let row = div().id(SharedString::from(format!("e-{id}"))).w_full().py_2();
+                let row = div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().group(group);
                 // A text that may wrap sits in block layout like a reply's (a shrink-to-fit flex bubble measured it at one width and painted it at another);
                 // a message of short lines keeps the snug flex bubble.
                 if wide {
-                    row.child(div().w_full().max_w(px(640.)).ml_auto().px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).children(reply_to).child(body).children(cards.map(|k| k.mt_1())).children(atts.into_iter().map(|a| div().mt_1().child(a))).child(div().mt_1().child(stamp_row))).into_any_element()
+                    row.child(div().w_full().max_w(px(640.)).ml_auto().px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).children(reply_to).child(body).children(cards.map(|k| k.mt_1())).children(atts.into_iter().map(|a| div().mt_1().child(a))).child(div().mt_1().child(stamp_row))).children(confirm.map(|k| div().w_full().max_w(px(640.)).ml_auto().mt_1().child(k))).into_any_element()
                 } else {
-                    row.flex().justify_end().child(div().max_w(px(640.)).px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col().gap_1().children(reply_to).child(body).children(cards).children(atts).child(stamp_row)).into_any_element()
+                    row.flex().flex_col().items_end().child(div().max_w(px(640.)).px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col().gap_1().children(reply_to).child(body).children(cards).children(atts).child(stamp_row)).children(confirm.map(|k| div().max_w(px(640.)).mt_1().child(k))).into_any_element()
                 }
             }
             "fold" => {

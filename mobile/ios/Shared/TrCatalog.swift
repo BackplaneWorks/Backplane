@@ -4438,6 +4438,12 @@ gpui.f2.uber.p.mint	Mint	ミント	Menta
 gpui.f2.uber.p.cherry	Cherry	チェリー	Cereza
 gpui.simulation	Simulation	シミュレーション	Simulación
 gpui.c.sheets.find	Find a sheet	シートを探す	Buscar una hoja
+history.snap	Before turn {turn}	ターン{turn}の前	Antes del turno {turn}
+history.ref.snap	this thread's snapshot, before the turn	このスレッドのスナップショット（ターンの前）	instantánea de este hilo, antes del turno
+thread.restore.action	Restore to before this	この時点の前に戻す	Restaurar a antes de esto
+thread.restore.ask	Restore the project to before this message?	このメッセージの前の状態にプロジェクトを戻しますか？	¿Restaurar el proyecto a como estaba antes de este mensaje?
+thread.restore.note	Restoring makes a new commit. The project as it is now is kept as a commit too.	戻すと新しいコミットが作られます。現在のプロジェクトもコミットとして残ります。	Restaurar crea un commit nuevo. El proyecto tal como está ahora también se guarda como commit.
+thread.restore.go	Restore	戻す	Restaurar
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -7181,4 +7187,7 @@ gpui.c.sheets.find	Find a sheet	シートを探す	Buscar una hoja
 
     /// gpui.streamer.account = account {n}
     static func gpui_streamer_account(n: String) -> String { f("gpui.streamer.account", ["n": n]) }
+
+    /// history.snap = Before turn {turn}
+    static func history_snap(turn: String) -> String { f("history.snap", ["turn": turn]) }
 }

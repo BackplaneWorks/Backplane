@@ -4581,3 +4581,11 @@ gpui.f2.uber.p.mint = Mint
 gpui.f2.uber.p.cherry = Cherry
 gpui.simulation = Simulation
 gpui.c.sheets.find = Find a sheet
+
+# Restore to before this on the person's message; a turn's snapshot in Compare
+history.snap = Before turn {turn}
+history.ref.snap = this thread's snapshot, before the turn
+thread.restore.action = Restore to before this
+thread.restore.ask = Restore the project to before this message?
+thread.restore.note = Restoring makes a new commit. The project as it is now is kept as a commit too.
+thread.restore.go = Restore

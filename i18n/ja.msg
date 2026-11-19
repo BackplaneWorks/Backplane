@@ -4604,3 +4604,11 @@ gpui.f2.uber.p.mint = ミント
 gpui.f2.uber.p.cherry = チェリー
 gpui.simulation = シミュレーション
 gpui.c.sheets.find = シートを探す
+
+# Restore to before this on the person's message; a turn's snapshot in Compare
+history.snap = ターン{turn}の前
+history.ref.snap = このスレッドのスナップショット（ターンの前）
+thread.restore.action = この時点の前に戻す
+thread.restore.ask = このメッセージの前の状態にプロジェクトを戻しますか？
+thread.restore.note = 戻すと新しいコミットが作られます。現在のプロジェクトもコミットとして残ります。
+thread.restore.go = 戻す

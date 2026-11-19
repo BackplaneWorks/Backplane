@@ -227,8 +227,11 @@ pub struct Snap { pub top: String, pub turn: u64, pub commit: String, pub refere
 impl Snap {
     pub fn line(&self) -> String {
         let place = if self.on_branch { "on the branch" } else { "on its own ref; your branch is untouched" };
-        if self.made { format!("Snapshot before this turn: {} ({place}). Restore to before this turn at any time: /restore{}", self.commit, skipped_note(&self.skipped)) }
-        else { format!("Nothing uncommitted before this turn: it starts from {}. /restore brings this point back.{}", self.commit, skipped_note(&self.skipped)) }
+        // (present::thread::snap_line reads these back: the turn and the commit for Restore to before this on the person's message)
+        let n = if self.turn > 0 { format!("turn {}", self.turn) } else { "this turn".into() };
+        let cmd = if self.turn > 0 { format!("/restore {}", self.turn) } else { "/restore".into() };
+        if self.made { format!("Snapshot before {n}: {} ({place}). Restore to before this turn at any time: {cmd}{}", self.commit, skipped_note(&self.skipped)) }
+        else { format!("Nothing uncommitted before {n}: it starts from {}. {cmd} brings this point back.{}", self.commit, skipped_note(&self.skipped)) }
     }
 }
 /// The subject of a thread's snapshot commit.
@@ -501,5 +504,14 @@ mod tests {
         assert!(Ensured { not_made: "it is your home folder".into(), ..Default::default() }.line().starts_with("Not made a git repository: it is your home folder."));
         assert_eq!(snap_msg("t1", 3, "Review the board", ""), "Backplane: snapshot before t1 turn 3\n\nThread: Review the board");
         assert_eq!(snap_msg("t1", 3, "New thread", "before its first edit"), "Backplane: snapshot before t1 turn 3, before its first edit");
+    }
+    /// The thread's timeline reads a snapshot line back (present::thread::snap_line) for Restore to before this.
+    #[test] fn snap_lines_read_back() {
+        use crate::present::thread::snap_line;
+        for made in [true, false] {
+            let s = Snap { turn: 7, commit: "abc1234".into(), made, ..Default::default() };
+            assert_eq!(snap_line(&s.line()).map(|x| (x.turn, x.commit)), Some((7, "abc1234".into())), "{}", s.line());
+            assert!(s.line().contains("/restore 7"), "{}", s.line());
+        }
     }
 }

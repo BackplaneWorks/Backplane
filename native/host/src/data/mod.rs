@@ -209,7 +209,8 @@ fn far_entries(f: &Arc<dyn crate::api::FarView>, th: &str, p: &Value, bot: bool)
     let mut rows: Vec<&crate::model::Row> = page.rows.iter().filter(|r| ids.contains(&r.ord) && r.thread == th).collect();
     rows.sort_by_key(|r| r.ord);
     let backend = if bot { let o = oldest_ord(&page.rows); backend_of(&page.rows, if o > 1 { f.page(th, o, 32).map(|p| p.rows).unwrap_or_default() } else { vec![] }) } else { HashSet::new() };
-    let out: Vec<Value> = rows.iter().filter_map(|r| row_entry_hid(r, bot, &backend)).collect();
+    let mut noise = crate::present::thread::Noise::default();
+    let out: Vec<Value> = rows.iter().filter(|r| noise.shown(r.kind == "msg", &r.role, &r.akind, &r.text)).filter_map(|r| row_entry_hid(r, bot, &backend)).collect();
     let more = page.below > 0 || page.rows.iter().map(|r| r.ord).collect::<HashSet<_>>().len() > ids.len();
     let next = if more { rows.first().map(|r| json!(r.ord.to_string())).unwrap_or(Value::Null) } else { Value::Null };
     let title = rows.iter().find(|r| r.kind == "msg" && r.role == "user").map(|r| clip(&shown_text(&r.text), 60)).unwrap_or_default();
@@ -297,9 +298,14 @@ async fn entries(hub: &Hub, p: &Value) -> Result<Value, Value> {
     rows.sort_by_key(|r| r.ord);
     let bot = bot_chat(th);
     let backend = if bot { let o = oldest_ord(&page.rows); backend_of(&page.rows, if o > 1 { m.page(&hub.store, th, o, 32).map(|p| p.rows).unwrap_or_default() } else { vec![] }) } else { HashSet::new() };
-    let mut out: Vec<Value> = rows.iter().filter_map(|r| { let mut e = row_entry_hid(r, bot, &backend)?;
+    // routine bookkeeping and a warning said again are no entries; the person's message carries its turn's snapshot (`present::thread::Noise`, `restore_points`)
+    let mut all: Vec<&crate::model::Row> = page.rows.iter().filter(|r| r.thread == th).collect(); all.sort_by_key(|r| r.ord);
+    let mut noise = crate::present::thread::Noise::default();
+    let quiet: HashSet<&str> = all.iter().filter(|r| !noise.shown(r.kind == "msg", &r.role, &r.akind, &r.text)).map(|r| r.id.as_str()).collect();
+    let points = crate::present::thread::restore_points(all.iter().map(|r| (r.id.as_str(), r.kind == "msg", r.role.as_str(), r.akind.as_str(), r.text.as_str())));
+    let mut out: Vec<Value> = rows.iter().filter(|r| !quiet.contains(r.id.as_str())).filter_map(|r| { let mut e = row_entry_hid(r, bot, &backend)?;
         // a user message's images are on its log line
-        if r.kind == "msg" && r.role == "user" { if let Some(a) = attachments_of(hub, r.seq as usize - 1, &r.id) { e["attachments"] = a } }
+        if r.kind == "msg" && r.role == "user" { if let Some(a) = attachments_of(hub, r.seq as usize - 1, &r.id) { e["attachments"] = a } if let Some(p) = points.get(&r.id) { e["restore"] = p.clone() } }
         Some(e) }).collect();
     // older entries exist when the page read more ordinals than it returns (its lookahead) or has rows below it
     let more = page.below > 0 || page.rows.iter().map(|r| r.ord).collect::<HashSet<_>>().len() > ids.len();
@@ -312,6 +318,27 @@ async fn entries(hub: &Hub, p: &Value) -> Result<Value, Value> {
     Ok(json!({"thread":thread,"entries":out,"next":next}))
 }
 
+/// The newest rows of a thread, oldest first.
+async fn tail_of(hub: &Hub, th: &str) -> Vec<crate::model::Row> { let m = hub.model().await; let mut v = m.tail(&hub.store, th, 48); v.sort_by_key(|r| r.ord); v }
+fn noise_rows(rows: &[crate::model::Row]) -> impl Iterator<Item = (&str, bool, &str, &str, &str)> { rows.iter().map(|r| (r.id.as_str(), r.kind == "msg", r.role.as_str(), r.akind.as_str(), r.text.as_str())) }
+/// Whether activity `act`, among the thread's newest rows, shows (`present::thread::Noise`: a warning said again word for word does not).
+async fn noise_shows(hub: &Hub, th: &str, act: &str) -> bool {
+    let rows = tail_of(hub, th).await; let mut n = crate::present::thread::Noise::default();
+    for (id, msg, role, akind, text) in noise_rows(&rows) { let s = n.shown(msg, role, akind, text); if id == act { return s } }
+    true
+}
+/// A turn's snapshot line was logged: the person's message it belongs to again, whole, now with its `restore` (Restore to before this). None when
+/// it belongs to none (a turn no message of the person's started).
+async fn restore_push(hub: &Hub, th: &str, act: &str) -> Option<Value> {
+    let rows = tail_of(hub, th).await;
+    let upto = rows.iter().position(|r| r.id == act)?;
+    let points = crate::present::thread::restore_points(noise_rows(&rows[..=upto]));
+    let r = rows[..upto].iter().rev().find(|r| r.kind == "msg" && r.role == "user" && points.contains_key(&r.id))?;
+    let mut en = row_entry_hid(r, bot_chat(th), &HashSet::new())?;
+    if let Some(a) = attachments_of(hub, r.seq as usize - 1, &r.id) { en["attachments"] = a }
+    en["restore"] = points[&r.id].clone();
+    Some(en)
+}
 /// A user message's images: on its own line (the built-in turn.start) or on the MessageAttached line the agents' turn.start commits a few lines after it.
 fn attachments_of(hub: &Hub, line: usize, msg: &str) -> Option<Value> {
     let own = hub.store.get(line).ok()?;
@@ -612,7 +639,12 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
                 if replaced.is_some() || kind != "assistant" || !s(&e, "text").trim().is_empty() { entry = Some(en) }
             }
             "MessageAttached" => { let id = s(&e, "msg"); let mut en = json!({"id":id,"kind":"user","text":"","at":ms(e["at"].as_u64().unwrap_or(0)),"attachments":e["attachments"]}); if let Some(x) = recalled(id) { en["text"] = x["text"].clone(); if let Some(c) = x.get("clientId") { en["clientId"] = c.clone() } } entry = Some(en) }
-            "ActivityLogged" => entry = act_entry(&th, s(&e, "act"), s(&e, "tone"), s(&e, "kind"), s(&e, "summary"), ms(e["at"].as_u64().unwrap_or(0))),
+            "ActivityLogged" => entry = {
+                let (tone, kind, sum) = (s(&e, "tone"), s(&e, "kind"), s(&e, "summary"));
+                if crate::present::thread::snap_line(sum).is_some() { restore_push(hub, &th, s(&e, "act")).await } // the turn's snapshot: no row; its message gains Restore to before this
+                else if (tone == "warn" || tone == "error") && !noise_shows(hub, &th, s(&e, "act")).await { None } // the same warning again
+                else { act_entry(&th, s(&e, "act"), tone, kind, sum, ms(e["at"].as_u64().unwrap_or(0))) }
+            },
             "AskOpened" => entry = Some(ask_entry(&e, None)),
             // the only alert a phone hears on its socket: what the uberbot's gate let through (push), and its clear
             "PushSent" => { for sub in subs.lists() { out.push(d(sub, "notify", ext::notify_of(&e))) } }
@@ -685,7 +717,8 @@ async fn far_pushes(hub: &Hub, subs: &mut Subs) -> Vec<Value> {
         let targets = subs.threads(&th); let bot = far_bot(hub, &th);
         let known = subs.far_rows.entry(th.clone()).or_insert_with(|| (rows.iter().map(|r| r.id.clone()).collect(), turn.clone()));
         let backend = if bot { let o = oldest_ord(&page.rows); backend_of(&page.rows, if o > 1 { f.page(&th, o, 32).map(|p| p.rows).unwrap_or_default() } else { vec![] }) } else { HashSet::new() };
-        for r in rows { if known.0.insert(r.id.clone()) { if let Some(en) = row_entry_hid(r, bot, &backend) { for sub in &targets { out.push(d(*sub, "entry", json!({"thread":th,"entry":en}))) } } } }
+        let mut noise = crate::present::thread::Noise::default();
+        for r in rows { let shows = noise.shown(r.kind == "msg", &r.role, &r.akind, &r.text); if known.0.insert(r.id.clone()) && shows { if let Some(en) = row_entry_hid(r, bot, &backend) { for sub in &targets { out.push(d(*sub, "entry", json!({"thread":th,"entry":en}))) } } } }
         if known.1 != turn && !turn.is_empty() { known.1 = turn.clone(); for sub in &targets { out.push(d(*sub, "turn", json!({"thread":th,"state":turn}))) } }
     } }
     out

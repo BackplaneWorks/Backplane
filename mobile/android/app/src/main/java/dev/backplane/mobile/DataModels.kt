@@ -25,7 +25,10 @@ data class DEntry(
     val replyTo: DReplyTo? = null, // the person's reply to a message (data/1 `replyTo`): the chip over the bubble
     val voice: DVoiceMark? = null, // spoken (data/1 `voice`): the mic on the bubble, the engine and its confidence
     val copy: List<CopyPiece>? = null, // what of a reply or a notice is to copy (feature `copy`, data/1 `copy`); null: the hub said nothing
+    val restore: DRestore? = null, // the person's message: the snapshot before the turn it started (data/1 `restore`): Restore to before this
 )
+/** Restore to before this (data/1 `restore`): the turn (0: a snapshot from before it was named), its short commit, the short info its confirm shows. */
+data class DRestore(val turn: Long, val commit: String, val info: String)
 /** A spoken message's mark: the engine, its mean confidence (0..1, null unknown), the words it was unsure of, typed in after. */
 data class DVoiceMark(val stt: String, val conf: Double?, val doubt: List<String>, val edited: Boolean)
 fun parseVoiceMark(o: JSONObject) = DVoiceMark(o.str("stt"), if (o.has("conf") && !o.isNull("conf")) o.optDouble("conf") else null, o.optJSONArray("doubt")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList(), o.optBoolean("edited", false))
@@ -91,6 +94,7 @@ fun parseEntry(o: JSONObject) = DEntry(
     replyTo = o.optJSONObject("replyTo")?.takeIf { it.str("id").isNotEmpty() }?.let { DReplyTo(it.str("id"), it.str("quote")) },
     voice = o.optJSONObject("voice")?.let(::parseVoiceMark),
     copy = parseCopy(o.optJSONArray("copy")),
+    restore = o.optJSONObject("restore")?.let { DRestore(it.lng("turn"), it.str("commit"), it.str("info")) },
 )
 fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("root"), o.optInt("threadCount", 0), o.lng("updatedAt"), o.optInt("waiting", 0), o.optString("icon", "folder"), o.optString("css"), if (o.has("settledCount") && !o.isNull("settledCount")) o.optInt("settledCount") else null,
     parseMark(o.optJSONObject("mark")), o.str("also"), o.optJSONArray("newOn").list { DNewOn(it.str("value"), it.str("label"), it.optBoolean("away")) }, o.str("runsOn"), o.str("key"))
