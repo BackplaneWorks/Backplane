@@ -2013,6 +2013,17 @@ async fn tool_of(ag: &Arc<Agents>, name: &str) -> Arc<dyn mcp::ToolSet> { ag.too
     ag.shutdown();
 }
 
+#[tokio::test(flavor = "multi_thread")] async fn a_codex_thread_is_titled_by_codex_when_nothing_is_set_for_writing() { // #1162: background writing follows the thread's provider
+    let sd = dir("wr-cx-bin"); let log = sd.join("argv"); let logp = log.display().to_string().replace('\\', "/");
+    script(&sd, "claude", &format!("#!/bin/sh\ncat > /dev/null\necho \"claude $*\" >> {}\nprintf '{{\"type\":\"result\",\"is_error\":false,\"result\":\"Claude title\"}}\\n'\n", logp));
+    script(&sd, "codex", &format!("#!/bin/sh\ncat > /dev/null\necho \"codex $*\" >> {}\nprintf '{{\"type\":\"item.completed\",\"item\":{{\"type\":\"agent_message\",\"text\":\"Codex title\"}}}}\\n'\n", logp));
+    let (hub, ag, _h, _w) = start("wrcx", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await;
+    hub.commit(&json!({"$":"ThreadCreated","id":"tcx","project":"p1","title":"New thread","provider":"codex","model":"","at":1700000071})).await.unwrap(); tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(ag.write_title("tcx", "design a board").await.as_deref(), Some("Codex title"), "a Codex thread is titled by Codex");
+    let argv = std::fs::read_to_string(&log).unwrap_or_default(); assert!(!argv.contains("claude"), "Claude was never asked: {argv}");
+    ag.shutdown();
+}
+
 // ---- every message cuts into a running turn (no queue behind a turn, from anyone) ----
 /// A stand-in `claude` that says init and then only records what it is sent, one line each, so the turn stays running.
 const RECORDS: &str = "#!/bin/sh\nD=$(dirname \"$0\")\necho '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"rec-1\"}'\nwhile read l; do echo \"$l\" >> \"$D/in.log\"; done\n";
