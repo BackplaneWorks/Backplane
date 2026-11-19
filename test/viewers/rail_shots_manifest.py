@@ -40,6 +40,20 @@ HAS_RESOURCE = {
     "no-design": {"files", "diff", "review", "browser"},
 }
 
+# Pages where design-only controls (Open in KiCad, Edit) are expected to be absent.
+NON_DESIGN_PAGES = {"files", "diff", "review", "browser"}
+
+# Pages where Follow agent is allowed to appear.
+FOLLOW_PAGES = {"board", "schematic", "split", "split-after-mech"}
+
+# Extra shots captured on `full` when `--embed` is enabled (Tasks 7 and 8).
+EMBED_SHOTS = [
+    "task8-edit",
+    "task8-view",
+    "task7-sim",
+    "task7-sim-run",
+]
+
 
 def contact_shots() -> list[str]:
     """Ordered shot slugs shown in each kind's contact sheet."""
@@ -51,7 +65,7 @@ def contact_shots() -> list[str]:
     return out
 
 
-def expected_shots(kind: str) -> list[str]:
+def expected_shots(kind: str, embed: bool = False) -> list[str]:
     """Every shot slug that must be captured for `kind`."""
     shots = list(contact_shots())
     if kind == "full":
@@ -63,4 +77,6 @@ def expected_shots(kind: str) -> list[str]:
         ])
         for src_slug, _, _ in TASK3_SOURCES:
             shots.append(f"task3-from-{src_slug}")
+        if embed:
+            shots.extend(EMBED_SHOTS)
     return shots

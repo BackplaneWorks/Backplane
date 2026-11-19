@@ -16,7 +16,7 @@ import rail_shots_manifest as M  # noqa: E402
 SHOT_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 
 
-def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000) -> list[dict]:
+def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000, embed: bool = False) -> list[dict]:
     steps: list[dict] = [
         {"select": 0},
         {"shot": "idle", "settle": "", "timeout_ms": settle_timeout_ms},
@@ -87,12 +87,46 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000)
             {"mark": "settled:task10-closed"},
             {"shot": "task10-closed", "settle": "", "timeout_ms": settle_timeout_ms},
         ])
+        if embed:
+            # Task 8: move between Backplane's viewer and embedded KiCad editor (Board -> Edit -> View)
+            steps.extend([
+                {"mark": "task8-setup"},
+                {"press": "rail:Board"},
+                {"wait_settled": "board", "tag": "task8-start-board", "timeout_ms": settle_timeout_ms},
+                {"mark": "press:task8-edit"},
+                {"click": "ui:Edit", "within": 8000},
+                {"kicad": {"wait_painted": 60000, "kind": "PCB", "tag": "task8-edit"}},
+                {"wait": 500},
+                {"mark": "settled:task8-edit"},
+                {"shot": "task8-edit"},
+                {"mark": "press:task8-view"},
+                {"click": "ui:View", "within": 8000},
+                {"wait": 800},
+                {"kicad": {"report": True, "tag": "task8-view"}},
+                {"mark": "settled:task8-view"},
+                {"shot": "task8-view", "settle": "board", "timeout_ms": settle_timeout_ms},
+                # Task 7: run a simulation of the schematic (rail:Simulation -> Simulator -> Run)
+                {"mark": "press:task7-sim"},
+                {"click": "rail:Simulation", "within": 8000},
+                {"kicad": {"wait_painted": 60000, "kind": "SIMULATOR", "tag": "task7-sim"}},
+                {"wait": 800},
+                {"mark": "settled:task7-sim"},
+                {"shot": "task7-sim"},
+                {"mark": "embed:sim-run"},
+                {"wait": 3000},
+                {"kicad": {"report": True, "tag": "task7-sim-run"}},
+                {"mark": "settled:task7-sim-run"},
+                {"shot": "task7-sim-run"},
+            ])
 
     return steps
 
 
 def detect_obstructions(disp: str) -> list[dict]:
-    """Inspect X11 top-level windows on `disp` for native dialogs/windows obstructing Backplane."""
+    """Inspect X11 top-level windows on `disp` for native dialogs/windows obstructing Backplane.
+
+    Children nested inside Backplane's own window (e.g. embedded KiCad or CEF) are ignored.
+    """
     env = dict(os.environ, DISPLAY=disp)
     try:
         out = subprocess.check_output(["xwininfo", "-root", "-tree"], env=env, text=True, stderr=subprocess.DEVNULL, timeout=5)
@@ -101,21 +135,34 @@ def detect_obstructions(disp: str) -> list[dict]:
     obstructions: list[dict] = []
     # Match lines like:
     #   0x600003 "Warning": ("kicad" "Kicad")  610x120+415+390  +415+390
+    #   0x400001 "Backplane": ()  1440x900+0+0  +0+0
     #   0x600003 (has no name): ("kicad" "Kicad")  610x120+415+390  +415+390
-    win_re = re.compile(r'^\s*(0x[0-9a-f]+)\s+(?:"([^"]*)"|\(has no name\)):\s+\("([^"]*)"\s+"([^"]*)"\)\s+(\d+)x(\d+)\+(-?\d+)\+(-?\d+)')
+    win_re = re.compile(r'^(\s*)(0x[0-9a-f]+)\s+(?:"([^"]*)"|\(has no name\)):\s+(?:\("([^"]*)"\s+"([^"]*)"\)|\(\))\s+(\d+)x(\d+)\+(-?\d+)\+(-?\d+)')
+    bp_indent: int | None = None
     for line in out.splitlines():
         m = win_re.match(line)
         if not m:
             continue
-        xid, title, cls1, cls2, w_s, h_s, x_s, y_s = m.groups()
+        indent_s, xid, title, cls1, cls2, w_s, h_s, x_s, y_s = m.groups()
+        indent = len(indent_s)
         title = title or ""
+        cls1 = cls1 or ""
+        cls2 = cls2 or ""
         w, h = int(w_s), int(h_s)
-        if w < 60 or h < 40:
-            continue
         low_cls = f"{cls1} {cls2}".lower()
         low_title = title.lower()
-        # Ignore i3 WM frames and Backplane's own GPUI window
-        if "i3" in low_cls or "backplane" in low_cls or "backplane" in low_title:
+        if "backplane" in low_cls or "backplane" in low_title:
+            bp_indent = indent
+            continue
+        if bp_indent is not None:
+            if indent > bp_indent:
+                # Embedded child window inside Backplane (e.g. KiCad container/frame or CEF).
+                continue
+            bp_indent = None
+        if w < 60 or h < 40:
+            continue
+        # Ignore i3 WM frames
+        if "i3" in low_cls:
             continue
         # Confirm it is actually mapped (IsViewable)
         try:
@@ -136,10 +183,34 @@ def detect_obstructions(disp: str) -> list[dict]:
     return obstructions
 
 
+def trigger_sim_run(disp: str, last_kicad: dict, kind_out: Path) -> None:
+    """Click inside the embedded Simulator frame and press `r` (Run/Stop Simulation)."""
+    repo_root = Path(__file__).resolve().parents[2]
+    xinput = repo_root / "test" / "cef" / "xinput.py"
+    env = dict(os.environ, DISPLAY=disp)
+    pane = last_kicad.get("pane") or last_kicad.get("container") or {}
+    x = int(pane.get("x", 800)) + max(40, int(pane.get("w", 400)) // 5)
+    y = int(pane.get("y", 100)) + max(40, int(pane.get("h", 400)) * 3 // 4)
+    rec: dict = {"action": "sim-run", "x": x, "y": y, "key": "r", "ok": False, "error": None}
+    try:
+        if not xinput.exists():
+            raise FileNotFoundError(str(xinput))
+        subprocess.run([sys.executable, str(xinput), "click", str(x), str(y)], env=env, check=True, timeout=10)
+        time.sleep(0.35)
+        subprocess.run([sys.executable, str(xinput), "key", "r"], env=env, check=True, timeout=10)
+        rec["ok"] = True
+    except Exception as e:
+        rec["error"] = str(e)
+    with (kind_out / "embed_actions.jsonl").open("a", encoding="utf-8") as af:
+        af.write(json.dumps(rec, separators=(",", ":")) + "\n")
+
+
 def watch_and_capture(disp: str, client_log: Path, shot_dir: Path, kind_out: Path, stop_flag: Path) -> int:
     """Tail client_log for shot-ready markers, capture with `import -window root`, touch <name>.done."""
     captures_path = kind_out / "captures.jsonl"
     seen: set[str] = set()
+    seen_marks: set[str] = set()
+    last_kicad: dict = {}
     pos = 0
     buf = ""
     env = dict(os.environ, DISPLAY=disp)
@@ -154,13 +225,21 @@ def watch_and_capture(disp: str, client_log: Path, shot_dir: Path, kind_out: Pat
                 buf += chunk
                 while "\n" in buf:
                     line, buf = buf.split("\n", 1)
-                    if "GPUI_METRIC " not in line or '"shot-ready"' not in line:
+                    if "GPUI_METRIC " not in line:
                         continue
                     try:
                         ev = json.loads(line.split("GPUI_METRIC ", 1)[1])
                     except Exception:
                         continue
-                    if ev.get("event") != "shot-ready":
+                    etype = ev.get("event")
+                    if etype == "kicad":
+                        last_kicad = ev
+                        continue
+                    if etype == "mark" and ev.get("name") == "embed:sim-run" and "embed:sim-run" not in seen_marks:
+                        seen_marks.add("embed:sim-run")
+                        trigger_sim_run(disp, last_kicad, kind_out)
+                        continue
+                    if etype != "shot-ready":
                         continue
                     name = ev.get("name") or ""
                     if not SHOT_NAME_RE.match(name) or name in seen:
@@ -204,15 +283,17 @@ def watch_and_capture(disp: str, client_log: Path, shot_dir: Path, kind_out: Pat
 
 def main() -> int:
     if len(sys.argv) < 2:
-        print("usage: rail_shots_driver.py (gen-script KIND OUT_JSON [EARLY_MS] [TIMEOUT_MS] | watch DISP CLIENT_LOG SHOT_DIR KIND_OUT STOP_FLAG)", file=sys.stderr)
+        print("usage: rail_shots_driver.py (gen-script KIND OUT_JSON [EARLY_MS] [TIMEOUT_MS] [--embed] | watch DISP CLIENT_LOG SHOT_DIR KIND_OUT STOP_FLAG)", file=sys.stderr)
         return 2
     cmd = sys.argv[1]
     if cmd == "gen-script":
-        kind = sys.argv[2]
-        out_json = Path(sys.argv[3])
-        early_ms = int(sys.argv[4]) if len(sys.argv) > 4 else 300
-        timeout_ms = int(sys.argv[5]) if len(sys.argv) > 5 else 15000
-        steps = build_script(kind, early_ms=early_ms, settle_timeout_ms=timeout_ms)
+        args = [a for a in sys.argv[2:] if a != "--embed"]
+        embed = "--embed" in sys.argv[2:]
+        kind = args[0]
+        out_json = Path(args[1])
+        early_ms = int(args[2]) if len(args) > 2 else 300
+        timeout_ms = int(args[3]) if len(args) > 3 else 15000
+        steps = build_script(kind, early_ms=early_ms, settle_timeout_ms=timeout_ms, embed=embed)
         out_json.write_text(json.dumps(steps, indent=2) + "\n", encoding="utf-8")
         return 0
     if cmd == "watch":

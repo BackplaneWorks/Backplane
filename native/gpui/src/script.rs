@@ -86,6 +86,17 @@ pub fn load(path: &Path) -> VecDeque<Step> {
     }).collect()
 }
 
+/// If the hub's rail array marks `want` as disabled (dimmed) or omits it (hidden), return that settled state immediately.
+fn rail_row_state(viewer: &Value, want: &str) -> Option<&'static str> {
+    if want.is_empty() { return None; }
+    let rows = viewer["rail"].as_array()?;
+    match rows.iter().find(|r| r["id"].as_str() == Some(want)) {
+        Some(r) if r["state"].as_str() == Some("disabled") => Some("disabled"),
+        Some(_) => None,
+        None => Some("hidden"),
+    }
+}
+
 impl Backplane {
     pub fn m(&self, event: &str, fields: Value) { metric(self.started, event, fields); }
 
@@ -675,10 +686,11 @@ impl Backplane {
         }
         None
     }
-    /// Whether the requested viewer page has settled into one of `ready`, `empty`, `error`, or `refused`.
+    /// Whether the requested viewer page has settled into one of `ready`, `empty`, `error`, `refused`, `disabled`, or `hidden`.
     fn viewer_settled(&self, want: &str, cx: &Context<Self>) -> Option<&'static str> {
         let th = &self.data["thread"];
         let v = &th["viewer"];
+        if let Some(st) = rail_row_state(v, want) { return Some(st); }
         let diff_on = th["diff"].is_object();
         let open = v["open"].as_str().unwrap_or("");
         let active = if diff_on { "diff".to_string() } else { crate::screens::viewer::active_kind(v, None) };
@@ -789,12 +801,20 @@ impl Backplane {
         let split_sch_ref = card_ref(&self.screens.split_pv[0]);
         let split_pcb_ref = card_ref(&self.screens.split_pv[1]);
         let diff_file_names: Vec<String> = d["files"].as_array().into_iter().flatten().filter_map(|f| f["name"].as_str().map(String::from)).collect();
+        let rail: Vec<Value> = v["rail"].as_array().into_iter().flatten().map(|r| json!({
+            "id": r["id"].as_str().unwrap_or(""),
+            "label": r["label"].as_str().unwrap_or(""),
+            "state": r["state"].as_str().unwrap_or(""),
+            "why": r["why"].as_str().unwrap_or(""),
+        })).collect();
         json!({
             "open": v["open"].as_str().unwrap_or(""),
             "active_kind": if d.is_object() { "diff".to_string() } else { crate::screens::viewer::active_kind(v, self.screens.rail_pending.as_deref()) },
             "key": v["key"].as_str().unwrap_or(""),
             "gerbers": v["gerbers"] == true,
             "gerbers_vs_board": v["gerbersVsBoard"] == true,
+            "sim_frame": v["simFrame"] == true,
+            "rail": rail,
             "panes_count": panes,
             "plot_key": plot_key,
             "plot_none": plot_none,
@@ -870,5 +890,18 @@ mod tests {
         let steps = load(&p);
         assert_eq!(steps.len(), 1);
         assert!(matches!(&steps[0], Step::WaitSettled { kind, tag, timeout_ms: 9000 } if kind == "board" && tag == "task3-start-board"), "{:?}", steps[0]);
+    }
+    #[test] fn rail_row_state_detects_disabled_and_hidden_entries() {
+        let v = json!({
+            "rail": [
+                {"id": "board", "label": "Board", "state": "disabled", "why": "No board in this project"},
+                {"id": "schematic", "label": "Schematic", "state": "ready", "why": ""},
+            ]
+        });
+        assert_eq!(rail_row_state(&v, ""), None);
+        assert_eq!(rail_row_state(&v, "board"), Some("disabled"));
+        assert_eq!(rail_row_state(&v, "schematic"), None);
+        assert_eq!(rail_row_state(&v, "gerbers"), Some("hidden"));
+        assert_eq!(rail_row_state(&json!({}), "board"), None);
     }
 }

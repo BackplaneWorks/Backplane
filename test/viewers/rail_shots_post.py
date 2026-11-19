@@ -45,18 +45,39 @@ def parse_captures(kind_dir: Path) -> dict[str, dict]:
     return out
 
 
+def parse_embed_actions(kind_dir: Path) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    p = kind_dir / "embed_actions.jsonl"
+    if not p.exists():
+        return out
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        act = rec.get("action")
+        if act:
+            out[act] = rec
+    return out
+
+
 def parse_client_log(log_path: Path) -> dict:
-    """Parse GPUI_METRIC lines from client.log into per-shot state, settled tags, presses, and layout snapshots."""
+    """Parse GPUI_METRIC lines from client.log into per-shot state, settled tags, presses, probes, kicad reports, and layout snapshots."""
     layout: dict = {}
     controls: dict[str, dict] = {}
+    probes: set[str] = set()
     current_mark = ""
     presses_by_mark: dict[str, list[dict]] = {}
     shots: dict[str, dict] = {}
     settled_tags: dict[str, dict] = {}
+    kicad_tags: dict[str, dict] = {}
     refused_shots: list[dict] = []
 
     if not log_path.exists():
-        return {"shots": shots, "settled_tags": settled_tags, "presses": presses_by_mark, "refused_shots": refused_shots}
+        return {"shots": shots, "settled_tags": settled_tags, "kicad_tags": kicad_tags, "presses": presses_by_mark, "refused_shots": refused_shots}
 
     for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
         if "GPUI_METRIC " not in line:
@@ -70,14 +91,24 @@ def parse_client_log(log_path: Path) -> dict:
             layout = ev["rects"]
         elif kind == "controls" and isinstance(ev.get("controls"), list):
             controls = {c.get("id", ""): c for c in ev["controls"] if isinstance(c, dict)}
+        elif kind == "probes":
+            pr = ev.get("probes") or ev.get("rects") or []
+            if isinstance(pr, dict):
+                probes = set(pr.keys())
+            elif isinstance(pr, list):
+                probes = {x.get("id", "") for x in pr if isinstance(x, dict) and x.get("id")}
         elif kind == "mark":
             current_mark = ev.get("name") or ""
-        elif kind == "press":
+        elif kind in ("press", "click"):
             presses_by_mark.setdefault(current_mark, []).append({
                 "id": ev.get("id") or "",
                 "found": bool(ev.get("found")),
                 "action": ev.get("action"),
             })
+        elif kind == "kicad":
+            tag = ev.get("tag") or ""
+            if tag:
+                kicad_tags[tag] = ev
         elif kind == "shot":
             if not ev.get("ok"):
                 refused_shots.append(ev)
@@ -101,15 +132,87 @@ def parse_client_log(log_path: Path) -> dict:
                     "viewer": ev.get("viewer") or {},
                     "layout": dict(layout),
                     "controls_ids": sorted(controls.keys()),
+                    "probes_ids": sorted(probes),
                 }
 
-    return {"shots": shots, "settled_tags": settled_tags, "presses": presses_by_mark, "refused_shots": refused_shots}
+    return {"shots": shots, "settled_tags": settled_tags, "kicad_tags": kicad_tags, "presses": presses_by_mark, "refused_shots": refused_shots}
 
 
-def make_contact_sheet(kind_dir: Path, out_png: Path) -> bool:
-    ordered = [kind_dir / f"{s}.png" for s in M.contact_shots() if (kind_dir / f"{s}.png").exists()]
+def _sensitive_tokens() -> list[str]:
+    tokens: list[str] = []
+    for env_key in ("REAL_HOME", "HOME"):
+        val = os.environ.get(env_key, "").strip()
+        if val and val.startswith("/home/") and len(val) > len("/home/"):
+            tokens.append(val)
+    user = os.environ.get("USER", "").strip()
+    if user and user not in ("root", "user"):
+        tokens.append(f"/home/{user}")
+    return sorted(set(tokens))
+
+
+def shot_privacy_reasons(cap: dict, srec: dict) -> list[str]:
+    """Return reasons a shot must be marked private: true (native dialog or user-identifying path)."""
+    reasons: list[str] = []
+    if cap.get("obstructed"):
+        titles = [o.get("title") or "/".join(o.get("class") or []) for o in (cap.get("obstructions") or [])]
+        reasons.append(f"native dialog/window visible ({', '.join(t for t in titles if t) or 'unknown'})")
+    tokens = _sensitive_tokens()
+    if tokens:
+        blob = json.dumps({
+            "obstructions": cap.get("obstructions") or [],
+            "error": (srec.get("viewer") or {}).get("error", ""),
+            "diff_file_names": (srec.get("viewer") or {}).get("diff_file_names") or [],
+        })
+        for tok in tokens:
+            if tok in blob:
+                reasons.append(f"user home path visible in metadata ({tok})")
+                break
+    return reasons
+
+
+def infer_rail_map(srec: dict) -> dict[str, dict]:
+    """Build {rail_id_slug: {label, state, why}} from hub viewer.rail, falling back to probes vs controls."""
+    out: dict[str, dict] = {}
+    v = srec.get("viewer") or {}
+    rail_rows = v.get("rail")
+    if isinstance(rail_rows, list) and rail_rows:
+        for r in rail_rows:
+            rid = str(r.get("id") or "")
+            if not rid:
+                continue
+            st = str(r.get("state") or "")
+            out[rid] = {
+                "label": str(r.get("label") or rid),
+                "state": "disabled" if st == "disabled" else "enabled",
+                "why": str(r.get("why") or ""),
+            }
+        return out
+    ctls = set(srec.get("controls_ids") or [])
+    prbs = set(srec.get("probes_ids") or [])
+    for slug, rail_id, settle_kind, _ in M.PAGES:
+        if not rail_id or slug == "split-after-mech":
+            continue
+        rid = settle_kind
+        if rail_id in ctls:
+            out[rid] = {"label": rail_id.split(":", 1)[1], "state": "enabled", "why": ""}
+        elif rail_id in prbs:
+            out[rid] = {"label": rail_id.split(":", 1)[1], "state": "disabled", "why": ""}
+    return out
+
+
+def make_contact_sheet(kind_dir: Path, out_png: Path, private_shots: set[str]) -> tuple[bool, list[str]]:
+    excluded: list[str] = []
+    ordered: list[Path] = []
+    for s in M.contact_shots():
+        p = kind_dir / f"{s}.png"
+        if not p.exists():
+            continue
+        if s in private_shots:
+            excluded.append(s)
+            continue
+        ordered.append(p)
     if not ordered:
-        return False
+        return False, excluded
     cmd = [
         "montage",
         "-background", "#181a1f",
@@ -122,7 +225,7 @@ def make_contact_sheet(kind_dir: Path, out_png: Path) -> bool:
         str(out_png),
     ]
     subprocess.run(cmd, check=True)
-    return True
+    return True, excluded
 
 
 def crop_box(img: Image.Image, x: float, y: float, w: float, h: float) -> Image.Image:
@@ -273,11 +376,15 @@ def evaluate_scorecard(
     full_caps: dict[str, dict],
     full_client_ok: bool,
     mech_only_parsed: dict | None = None,
+    embed: bool = False,
+    embed_actions: dict[str, dict] | None = None,
 ) -> list[dict]:
     full_dir = outdir / "full"
     shots = full_parsed.get("shots", {})
     settled_tags = full_parsed.get("settled_tags", {})
+    kicad_tags = full_parsed.get("kicad_tags", {})
     presses = full_parsed.get("presses", {})
+    embed_actions = embed_actions or {}
 
     def shot_ok(name: str) -> tuple[bool, bool, list[dict]]:
         cap = full_caps.get(name)
@@ -513,19 +620,127 @@ def evaluate_scorecard(
         note=note6,
     ))
 
-    # Task 7: Run a simulation of the schematic (unavailable in this PR)
-    tasks.append(make_task(
-        7, "Run a simulation of the schematic", 2, [], "unavailable",
-        {"rail_simulation_present": "rail:Simulation" in (s1.get("controls_ids") or [])},
-        note="requires a KiCad runtime with sim-frame capability (as test/kicad_embed/embed_sim_e2e.sh uses)",
-    ))
+    # Task 7: Run a simulation of the schematic (budget 2: rail:Simulation -> Run)
+    if embed:
+        k7 = kicad_tags.get("task7-sim", {})
+        k7_frames = k7.get("frames") or []
+        k7_shown = next((f for f in k7_frames if f.get("xid") == k7.get("shown")), {})
+        ok7a, obs7a, oblist7a = shot_ok("task7-sim")
+        ok7b, obs7b, oblist7b = shot_ok("task7-sim-run")
+        b7a = body_check("task7-sim")
+        b7b = body_check("task7-sim-run")
+        sim_act = embed_actions.get("sim-run", {})
+        p7_raw = presses.get("press:task7-sim", [])
+        p7 = [p["id"] for p in p7_raw] + (["key:r(Run)"] if sim_act.get("ok") else [])
+        sim_diff = body_diff_ratio(
+            full_dir / "task7-sim.png",
+            (shots.get("task7-sim") or {}).get("layout") or {},
+            full_dir / "task7-sim-run.png",
+            (shots.get("task7-sim-run") or {}).get("layout") or {},
+        )
+        # On task7-sim-run, KiCad Simulator's own "New Simulation Tab" dialog is an expected response to Run.
+        unexpected_obs7b = [o for o in oblist7b if o.get("title") != "New Simulation Tab"]
+        if not full_client_ok or not ok7a or not ok7b or obs7a or bool(unexpected_obs7b):
+            o7 = "harness_failed"
+        elif (
+            k7.get("state") == "ready"
+            and k7.get("in_gpui_tree") is True
+            and k7_shown.get("kind") == "SIMULATOR"
+            and int(k7_shown.get("painted") or 0) >= 15
+            and b7a["body_non_flat"]
+            and b7b["body_non_flat"]
+            and sim_act.get("ok") is True
+            and len(p7) <= 2
+        ):
+            o7 = "passed"
+        else:
+            o7 = "task_failed"
+        note7 = "" if o7 == "passed" else f"kicad_state={k7.get('state')} shown_kind={k7_shown.get('kind')} painted={k7_shown.get('painted')} sim_run_ok={sim_act.get('ok')} body_diff={sim_diff}"
+        tasks.append(make_task(
+            7, "Run a simulation of the schematic", 2, p7, o7,
+            {
+                "kicad_state": k7.get("state"),
+                "in_gpui_tree": k7.get("in_gpui_tree"),
+                "shown_kind": k7_shown.get("kind"),
+                "shown_painted": k7_shown.get("painted"),
+                "sim_run_action": sim_act,
+                "body_open": b7a,
+                "body_after_run": b7b,
+                "body_diff_after_run": sim_diff,
+                "capture_ok": ok7a and ok7b,
+                "obstructed": obs7a or obs7b,
+                "obstructions": oblist7a + oblist7b,
+            },
+            note=note7,
+        ))
+    else:
+        tasks.append(make_task(
+            7, "Run a simulation of the schematic", 2, [], "unavailable",
+            {"rail_simulation_present": "rail:Simulation" in (s1.get("controls_ids") or [])},
+            note="run with --embed against a bp.13.2+ KiCad runtime with sim-frame capability",
+        ))
 
-    # Task 8: Move between Backplane's viewer and embedded KiCad editor (unavailable in this PR)
-    tasks.append(make_task(
-        8, "Move between Backplane's viewer and embedded KiCad editor", 1, [], "unavailable",
-        {"ui_edit_present": "ui:Edit" in (s1.get("controls_ids") or [])},
-        note="requires an embedded KiCad editor session (not launched in this viewer-rail harness)",
-    ))
+    # Task 8: Move between Backplane's viewer and embedded KiCad editor (budget 1 per direction)
+    if embed:
+        k8_edit = kicad_tags.get("task8-edit", {})
+        k8_view = kicad_tags.get("task8-view", {})
+        k8_frames = k8_edit.get("frames") or []
+        k8_shown = next((f for f in k8_frames if f.get("xid") == k8_edit.get("shown")), {})
+        s8_view = shots.get("task8-view", {})
+        v8_view = s8_view.get("viewer") or {}
+        ok8a, obs8a, oblist8a = shot_ok("task8-edit")
+        ok8b, obs8b, oblist8b = shot_ok("task8-view")
+        b8a = body_check("task8-edit")
+        b8b = body_check("task8-view")
+        p8_edit = [p["id"] for p in presses.get("press:task8-edit", [])]
+        p8_view = [p["id"] for p in presses.get("press:task8-view", [])]
+        if not full_client_ok or not ok8a or not ok8b or obs8a or obs8b:
+            o8 = "harness_failed"
+        elif (
+            k8_edit.get("state") == "ready"
+            and k8_edit.get("in_gpui_tree") is True
+            and k8_shown.get("kind") == "PCB"
+            and int(k8_shown.get("painted") or 0) >= 15
+            and b8a["body_non_flat"]
+            and k8_view.get("ok") is False
+            and s8_view.get("state") == "ready"
+            and v8_view.get("open") == "board"
+            and str(v8_view.get("plot_key", "")).startswith("0|")
+            and b8b["body_non_flat"]
+            and len(p8_edit) == 1
+            and len(p8_view) == 1
+        ):
+            o8 = "passed"
+        else:
+            o8 = "task_failed"
+        note8 = "" if o8 == "passed" else f"edit_state={k8_edit.get('state')} shown_kind={k8_shown.get('kind')} painted={k8_shown.get('painted')} view_kicad_ok={k8_view.get('ok')} view_state={s8_view.get('state')}"
+        tasks.append(make_task(
+            8, "Move between Backplane's viewer and embedded KiCad editor", 1, p8_edit, o8,
+            {
+                "edit_presses": p8_edit,
+                "view_presses": p8_view,
+                "edit_kicad_state": k8_edit.get("state"),
+                "edit_in_gpui_tree": k8_edit.get("in_gpui_tree"),
+                "edit_shown_kind": k8_shown.get("kind"),
+                "edit_shown_painted": k8_shown.get("painted"),
+                "view_kicad_detached": k8_view.get("ok") is False,
+                "view_state": s8_view.get("state"),
+                "view_open": v8_view.get("open"),
+                "view_plot_key": v8_view.get("plot_key"),
+                "body_edit": b8a,
+                "body_view": b8b,
+                "capture_ok": ok8a and ok8b,
+                "obstructed": obs8a or obs8b,
+                "obstructions": oblist8a + oblist8b,
+            },
+            note=note8,
+        ))
+    else:
+        tasks.append(make_task(
+            8, "Move between Backplane's viewer and embedded KiCad editor", 1, [], "unavailable",
+            {"ui_edit_present": "ui:Edit" in (s1.get("controls_ids") or [])},
+            note="run with --embed against an embedded KiCad runtime",
+        ))
 
     # Task 9: Turn Follow agent on and see that it is on (budget 1)
     s9 = shots.get("task9-follow-on", {})
@@ -584,23 +799,31 @@ def evaluate_scorecard(
 
 
 def main() -> int:
-    if len(sys.argv) < 3:
-        print("usage: rail_shots_post.py OUTDIR KIND [KIND ...]", file=sys.stderr)
+    raw_args = sys.argv[1:]
+    embed = "--embed" in raw_args
+    share = "--share" in raw_args
+    pos_args = [a for a in raw_args if a not in ("--embed", "--share")]
+    if len(pos_args) < 2:
+        print("usage: rail_shots_post.py [--embed] [--share] OUTDIR KIND [KIND ...]", file=sys.stderr)
         return 2
-    outdir = Path(sys.argv[1])
-    kinds = sys.argv[2:]
+    outdir = Path(pos_args[0])
+    kinds = pos_args[1:]
 
     parsed: dict[str, dict] = {}
     captures_by_kind: dict[str, dict[str, dict]] = {}
+    embed_actions_by_kind: dict[str, dict[str, dict]] = {}
     kinds_out: dict[str, dict] = {}
     harness_errors: list[str] = []
+    all_private: list[str] = []
 
     for kind in kinds:
         kdir = outdir / kind
         p = parse_client_log(kdir / "client.log")
         caps = parse_captures(kdir)
+        eacts = parse_embed_actions(kdir)
         parsed[kind] = p
         captures_by_kind[kind] = caps
+        embed_actions_by_kind[kind] = eacts
 
         exit_file = kdir / "client.exit"
         client_exit = int(exit_file.read_text().strip()) if exit_file.exists() else -1
@@ -609,10 +832,12 @@ def main() -> int:
         if p.get("refused_shots"):
             harness_errors.append(f"{kind}: client refused {len(p['refused_shots'])} shot step(s)")
 
-        expected = M.expected_shots(kind)
+        expected = M.expected_shots(kind, embed=(embed and kind == "full"))
         missing: list[str] = []
         failed_caps: list[str] = []
         obstructions_found: dict[str, list[dict]] = {}
+        private_shots: dict[str, list[str]] = {}
+        shots = p.get("shots", {})
         for sname in expected:
             rec = caps.get(sname)
             png = kdir / f"{sname}.png"
@@ -622,17 +847,24 @@ def main() -> int:
                 failed_caps.append(sname)
             if rec and rec.get("obstructed"):
                 obstructions_found[sname] = rec.get("obstructions") or []
+            reasons = shot_privacy_reasons(rec or {}, shots.get(sname) or {})
+            if reasons:
+                private_shots[sname] = reasons
+                all_private.append(f"{kind}/{sname}: {'; '.join(reasons)}")
 
         if missing:
             harness_errors.append(f"{kind}: missing captures: {', '.join(missing)}")
         if failed_caps:
             harness_errors.append(f"{kind}: failed captures: {', '.join(failed_caps)}")
 
+        # Derive rail map (enabled / disabled / hidden) from idle shot (or first available shot).
+        ref_shot = shots.get("idle") or (next(iter(shots.values())) if shots else {})
+        rail_map = infer_rail_map(ref_shot)
+
         pages_summary: dict[str, dict] = {}
-        shots = p.get("shots", {})
         presses = p.get("presses", {})
         avail = M.HAS_RESOURCE.get(kind, set())
-        for slug, rail_id, _, expected_open in M.PAGES:
+        for slug, rail_id, settle_kind, expected_open in M.PAGES:
             srec = shots.get(slug, {})
             erec = shots.get(f"{slug}-300ms", {}) if slug != "idle" else {}
             v = srec.get("viewer") or {}
@@ -652,21 +884,44 @@ def main() -> int:
                 actual_page = v.get("open", "")
                 matched = (v.get("open") == expected_open)
 
+            if slug == "idle":
+                r_state = "enabled"
+                r_why = ""
+            else:
+                rentry = rail_map.get(settle_kind)
+                if rentry is None:
+                    r_state = "hidden"
+                    r_why = ""
+                else:
+                    r_state = rentry["state"]
+                    r_why = rentry.get("why", "")
+
+            bstats = pane_body_stats(kdir / f"{slug}.png", srec.get("layout") or {}) if slug != "idle" else None
+            p_reasons = private_shots.get(slug, [])
+            ep_reasons = private_shots.get(f"{slug}-300ms", []) if slug != "idle" else []
+
             pages_summary[slug] = {
                 "presses": [x["id"] for x in presses.get(f"press:{slug}", [])] if rail_id else [],
                 "resource_present": (slug in avail) if slug != "idle" else True,
+                "rail_state": r_state,
+                "rail_why": r_why,
                 "expected_open": expected_open,
                 "actual_page": actual_page,
                 "settled_state": srec.get("state", ""),
                 "matched_expected": matched,
+                "body_non_flat": bstats["body_non_flat"] if bstats is not None else None,
+                "controls_ids": srec.get("controls_ids") or [],
                 "obstructed": bool(cap.get("obstructed")),
                 "obstructions": cap.get("obstructions") or [],
+                "private": len(p_reasons) > 0,
+                "private_reasons": p_reasons,
                 "diff_open": v.get("diff_open") if slug == "diff" else None,
                 "diff_files": v.get("diff_files") if slug == "diff" else None,
                 "diff_summary": v.get("diff_summary") if slug == "diff" else None,
                 "viewer": v,
                 "early_300ms_state": erec.get("state", "") if slug != "idle" else None,
                 "early_300ms_obstructed": bool(ecap.get("obstructed")) if slug != "idle" else None,
+                "early_300ms_private": len(ep_reasons) > 0 if slug != "idle" else False,
                 "shot": str(kdir / f"{slug}.png"),
                 "early_shot": str(kdir / f"{slug}-300ms.png") if slug != "idle" else None,
             }
@@ -676,6 +931,8 @@ def main() -> int:
                 if lcks:
                     harness_errors.append(f"{kind}: diff leaked lock files: {', '.join(lcks)}")
 
+        _, excluded_contact = make_contact_sheet(kdir, outdir / f"contact-{kind}.png", set(private_shots.keys()))
+
         kinds_out[kind] = {
             "client_exit": client_exit,
             "expected_shots": len(expected),
@@ -683,14 +940,24 @@ def main() -> int:
             "missing_shots": missing,
             "failed_captures": failed_caps,
             "obstructions": obstructions_found,
+            "private_shots": private_shots,
+            "excluded_from_contact": excluded_contact,
+            "rail": rail_map,
             "pages": pages_summary,
         }
-        make_contact_sheet(kdir, outdir / f"contact-{kind}.png")
 
     build_strips(outdir, kinds, parsed)
 
     full_client_ok = "full" in kinds_out and kinds_out["full"]["client_exit"] == 0 and not kinds_out["full"]["missing_shots"] and not kinds_out["full"]["failed_captures"]
-    scorecard_tasks = evaluate_scorecard(outdir, parsed.get("full", {}), captures_by_kind.get("full", {}), full_client_ok, parsed.get("mech-only")) if "full" in kinds else []
+    scorecard_tasks = evaluate_scorecard(
+        outdir,
+        parsed.get("full", {}),
+        captures_by_kind.get("full", {}),
+        full_client_ok,
+        parsed.get("mech-only"),
+        embed=embed,
+        embed_actions=embed_actions_by_kind.get("full"),
+    ) if "full" in kinds else []
 
     if harness_errors or any(t["outcome"] == "harness_failed" for t in scorecard_tasks):
         overall = "harness_failed"
@@ -701,6 +968,9 @@ def main() -> int:
 
     summary = {
         "overall_outcome": overall,
+        "embed_mode": embed,
+        "share_mode": share,
+        "private_shot_count": len(all_private),
         "harness_errors": harness_errors,
         "kinds": kinds_out,
         "scorecard_tasks": scorecard_tasks,
@@ -711,6 +981,11 @@ def main() -> int:
         for e in harness_errors:
             print(f"rail-shots: HARNESS FAILED: {e}", file=sys.stderr)
         return 1
+    if share and all_private:
+        print(f"rail-shots: --share refused: {len(all_private)} private shot(s) detected:", file=sys.stderr)
+        for item in all_private:
+            print(f"  - {item}", file=sys.stderr)
+        return 3
     return 0
 
 
