@@ -471,9 +471,9 @@ pub fn to_image(bgra: Vec<u8>, w: usize, h: usize) -> Option<Arc<RenderImage>> {
 /// `Scene`: the model with the parts that have come (`mesh`), after one or more frames: `board` when the board itself is new (its
 /// pictures in flight are stale), `reset` when the parts started again, `groups` part frames held, `done` of `of` instances come.
 /// `Building`: a large model frame of this key is being decoded now.
-enum Msg { Mesh(SolidFrame), Building(String), Scene { key: String, mesh: Option<Arc<Layers>>, board: bool, reset: bool, groups: usize, done: u32, of: u32 }, Image { ticket: u64, image: Arc<RenderImage>, ms: f64, tris: usize, w: usize, h: usize, by: &'static str, draft: bool } }
-/// What to render: the model, the camera, the size, the samples a pixel a side, the ticket, whether it is a draft (the model is moving).
-type Job = (Arc<Layers>, Arc<Vec<f32>>, Camera, usize, usize, usize, u64, bool, raster::Backdrop);
+enum Msg { Mesh(SolidFrame), Building(String), Scene { key: String, mesh: Option<Arc<Layers>>, board: bool, reset: bool, groups: usize, done: u32, of: u32 }, Image { ticket: u64, key: String, image: Arc<RenderImage>, ms: f64, tris: usize, w: usize, h: usize, by: &'static str, draft: bool } }
+/// What to render: the source key, the model, the camera, the size, the samples a pixel a side, the ticket, whether it is a draft (the model is moving).
+type Job = (String, Arc<Layers>, Arc<Vec<f32>>, Camera, usize, usize, usize, u64, bool, raster::Backdrop);
 /// What the worker holds of the model on show: the board, the part frames come so far, the progress.
 #[derive(Default)] struct Scene { key: String, board: Option<Arc<Mesh>>, parts: Vec<Arc<Mesh>>, done: u32, of: u32 }
 impl Scene {
@@ -493,8 +493,16 @@ impl Scene {
 }
 /// Whether a render in progress goes on: a draft does, or a drag would show nothing at all; a picture at rest gives way to anything newer.
 pub fn wanted(draft: bool, my: u64, newest: u64) -> bool { draft || my == newest }
-/// Whether a finished picture goes on the screen: it is of this model (`floor`) and newer than the one there. Pictures of a drag finish behind the pointer: that is no reason to drop them.
+/// Whether a finished picture goes on the screen: it is of this model (`floor` and matching source key) and newer than the one there. Pictures of a drag finish behind the pointer: that is no reason to drop them.
 pub fn shows(ticket: u64, shown: u64, floor: u64) -> bool { ticket >= floor && ticket > shown }
+/// Whether a finished picture for `image_key` may be painted on a page showing `page_key`.
+pub fn shows_for_key(page_key: &str, image_key: &str, ticket: u64, shown: u64, floor: u64) -> bool {
+    !page_key.is_empty() && page_key == image_key && shows(ticket, shown, floor)
+}
+/// Whether the cached image `image_key` belongs to `page_key` and may be kept/drawn under it.
+pub fn image_matches_key(page_key: &str, image_key: &str, has_image: bool) -> bool {
+    has_image && !page_key.is_empty() && page_key == image_key
+}
 /// What draws: the process's GPU (solid_gpu::shared), or the cores when there is none or it fails.
 /// `cpu`: the layers made one mesh for the CPU's drawing, and the layers it was made of (Weak: no later mesh can take their addresses).
 #[derive(Default)] struct Drawer { cpu: Option<(Vec<std::sync::Weak<Mesh>>, Arc<Mesh>)> }
@@ -553,11 +561,11 @@ impl Worker {
                 let mesh = Layers::of(scene.board.clone(), scene.parts.clone()).map(Arc::new); // no copy: a new part is one more layer
                 if tx.send_blocking(Msg::Scene { key: scene.key.clone(), mesh, board, reset, groups: scene.parts.len(), done: scene.done, of: scene.of }).is_err() { return }
             }
-            if let Some((mesh, fades, cam, w, h, ss, my, draft, back)) = render {
+            if let Some((key, mesh, fades, cam, w, h, ss, my, draft, back)) = render {
                 let t0 = std::time::Instant::now();
                 let g = g2.clone();
                 if let Some((px, by)) = drawer.draw(&mesh, &fades, &cam, w, h, ss, &back, &move || wanted(draft, my, g.load(Ordering::Relaxed))) {
-                    if let Some(image) = to_image(px, w, h) { if tx.send_blocking(Msg::Image { ticket: my, image, ms: t0.elapsed().as_secs_f64() * 1000.0, tris: mesh.tris(), w, h, by, draft }).is_err() { return } }
+                    if let Some(image) = to_image(px, w, h) { if tx.send_blocking(Msg::Image { ticket: my, key, image, ms: t0.elapsed().as_secs_f64() * 1000.0, tris: mesh.tris(), w, h, by, draft }).is_err() { return } }
                 }
             }
         } }).ok();
@@ -565,10 +573,10 @@ impl Worker {
     }
     fn forget(&self) { let (m, cv) = &*self.slot; m.lock().unwrap().forget = true; cv.notify_one(); }
     fn submit_frame(&self, bytes: Vec<u8>) { let (m, cv) = &*self.slot; m.lock().unwrap().frames.push(bytes); cv.notify_one(); }
-    /// Ask for an image of `mesh`, replacing any request not yet begun.
-    fn submit_render(&self, mesh: Arc<Layers>, fades: Arc<Vec<f32>>, cam: Camera, w: usize, h: usize, ss: usize, draft: bool, back: raster::Backdrop) -> u64 {
+    /// Ask for an image of `mesh` for source `key`, replacing any request not yet begun.
+    fn submit_render(&self, key: String, mesh: Arc<Layers>, fades: Arc<Vec<f32>>, cam: Camera, w: usize, h: usize, ss: usize, draft: bool, back: raster::Backdrop) -> u64 {
         let ticket = self.ticket.fetch_add(1, Ordering::Relaxed) + 1;
-        let (m, cv) = &*self.slot; m.lock().unwrap().render = Some((mesh, fades, cam, w, h, ss, ticket, draft, back)); cv.notify_one(); ticket
+        let (m, cv) = &*self.slot; m.lock().unwrap().render = Some((key, mesh, fades, cam, w, h, ss, ticket, draft, back)); cv.notify_one(); ticket
     }
 }
 impl Drop for Worker { fn drop(&mut self) { let (m, cv) = &*self.slot; m.lock().unwrap().shutdown = true; self.ticket.fetch_add(1, Ordering::Relaxed); cv.notify_one(); } }
@@ -627,7 +635,7 @@ pub struct SolidPage {
     press_btn: Option<MouseButton>,
     /** where the left button went down, until the pointer leaves it by 4 px (a click picks the part under it); the reference of the probed part (`set_probe`); the model with that part lit, for the model and reference it was made of (`drawn`) */ press: Option<Point<Pixels>>, probe: String, lit: Option<(Arc<Layers>, String, Option<Arc<Layers>>)>,
     /** the page names the probed part beside its tools (a Split names it in its own bar: off there) */ pub names_probe: bool,
-    mesh: Option<Arc<Layers>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, /** what the camera was last fitted to (centre, radius) */ fitted: ([f32; 3], f32), /** the regions of this model asked to be refined (`settled`) */ refined: Vec<([f32; 3], f32)>, image: Option<Arc<RenderImage>>, /** pictures off the screen and the window frame they left it in (`collect`) */ retired: Vec<(Arc<RenderImage>, u64)>, frames: u64, drag: Option<(Drag, Point<Pixels>)>,
+    mesh: Option<Arc<Layers>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, /** what the camera was last fitted to (centre, radius) */ fitted: ([f32; 3], f32), /** the regions of this model asked to be refined (`settled`) */ refined: Vec<([f32; 3], f32)>, image: Option<Arc<RenderImage>>, /** the source key `image` was rendered for (must match `key` whenever `image` is Some) */ image_key: String, /** pictures off the screen and the window frame they left it in (`collect`) */ retired: Vec<(Arc<RenderImage>, u64)>, frames: u64, drag: Option<(Drag, Point<Pixels>)>,
     /** when each part group showed (its fade runs from then), the parts' progress (done, of), whether the last picture asked for was mid-fade */
     born: Vec<std::time::Instant>, parts: (u32, u32), fading: bool,
     /** the page's keys (0.14's: f/Home fit, 0-6 views, arrows turn, shift+arrows move, +/- zoom), taken when the model is pressed; the wheel's burst, to settle after it */ focus: FocusHandle, wheel: u64,
@@ -645,7 +653,7 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { press_btn: None, press: None, probe: String::new(), lit: None, names_probe: true, mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, fitted: ([0.0; 3], 0.0), refined: Vec::new(), image: None, retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, prev: None, restored: None, failed: false, retryable: None, last_retry: None, back: raster::Backdrop::DARK, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ reserve: 0.0, worker: Worker::spawn(tx),
+        SolidPage { press_btn: None, press: None, probe: String::new(), lit: None, names_probe: true, mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, fitted: ([0.0; 3], 0.0), refined: Vec::new(), image: None, image_key: String::new(), retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, prev: None, restored: None, failed: false, retryable: None, last_retry: None, back: raster::Backdrop::DARK, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ reserve: 0.0, worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), latest: 0, on_screen: 0, floor: 0, counted: 0, stats: Stats::default() }
     }
     /// The background to draw on (the setting resolved by the window): a change draws the picture again at once, the camera untouched.
@@ -690,6 +698,13 @@ impl SolidPage {
     }
     /// The key of the model the page holds now (set when a decoded frame is applied, not when one is queued): "" before any.
     pub fn key(&self) -> &str { &self.key }
+    /// The source key the currently painted image was rendered for ("" when no image is held for the current model).
+    pub fn image_key(&self) -> &str { &self.image_key }
+    /// Retire the current image and clear `image_key` so a new source never paints the previous model's pixels.
+    fn clear_image(&mut self) {
+        if let Some(i) = self.image.take() { self.retired.push((i, self.frames)); }
+        self.image_key.clear();
+    }
     /// The source the page is showing: the one being made when the hub is making another than the model held (the page then shows its
     /// progress), else `key`. The viewer shows the page when this is the source it asks for.
     pub fn shown_key(&self) -> &str { match &self.stage { Some(s) if s.key != self.key => &s.key, _ => &self.key } }
@@ -721,7 +736,12 @@ impl SolidPage {
     fn apply(&mut self, msg: Msg, cx: &mut Context<Self>) {
         match msg {
             Msg::Scene { key, mesh, board, reset, groups, done, of } => {
-                if key != self.key { self.keep_current(); self.restored = None; }
+                if key != self.key {
+                    self.keep_current();
+                    self.clear_image();
+                    self.restored = None;
+                    self.asked = (0, 0);
+                }
                 // a model brought back stays until the hub's stream of it has caught up (no parts going and fading in again)
                 if key == self.key && let Some(g) = self.restored {
                     if self.stage.as_ref().is_some_and(|s| s.key == self.key && s.text == BUILDING) { self.stage = None; cx.notify(); }
@@ -768,10 +788,11 @@ impl SolidPage {
                 self.set_stage(st, cx);
             }
             Msg::Building(key) => self.set_stage(Some(Stage { key, text: BUILDING.into(), since: std::time::Instant::now(), about: 0, retrying: false }), cx),
-            Msg::Image { ticket, image, ms, tris, w, h, by, draft } => {
+            Msg::Image { ticket, key, image, ms, tris, w, h, by, draft } => {
                 if draft { self.draft_scale = draft_scale(self.draft_scale, ms); }
-                if !shows(ticket, self.on_screen, self.floor) { return } // never painted, so never in the atlas: nothing to give back
+                if !shows_for_key(&self.key, &key, ticket, self.on_screen, self.floor) { return } // stale key or ticket: never paint another model's picture
                 self.on_screen = ticket;
+                self.image_key = key;
                 if let Some(old) = self.image.replace(image) { self.retired.push((old, self.frames)); }
                 self.stats = Stats { images: self.stats.images + 1, painted: self.stats.painted, last_ms: ms, last_tris: tris, last_size: (w, h), by }; cx.notify();
                 // a fade is drawn picture after picture while it runs (no timer: the next is asked when this one is in), then once more at rest
@@ -779,18 +800,21 @@ impl SolidPage {
             }
         }
     }
-    /// The model on show becomes the one kept (Kept).
+    /// The model on show becomes the one kept (Kept). Only caches `image` when it was rendered for `self.key`.
     fn keep_current(&mut self) {
-        if let (Some(mesh), Some(cam)) = (self.mesh.clone(), self.cam) { self.prev = Some(Kept { key: self.key.clone(), mesh, cam, touched: self.touched, fit_aspect: self.fit_aspect, parts: self.parts, groups: self.born.len(), image: self.image.clone() }); }
+        if let (Some(mesh), Some(cam)) = (self.mesh.clone(), self.cam) {
+            let image = image_matches_key(&self.key, &self.image_key, self.image.is_some()).then(|| self.image.clone()).flatten();
+            self.prev = Some(Kept { key: self.key.clone(), mesh, cam, touched: self.touched, fit_aspect: self.fit_aspect, parts: self.parts, groups: self.born.len(), image });
+        }
     }
     /// The viewer asks for `key`: when it is the model kept, it comes back at once, with its camera (the hub sends it again meanwhile).
     pub fn want(&mut self, key: &str, cx: &mut Context<Self>) {
         if key.is_empty() || key == self.key || self.prev.as_ref().map_or(true, |p| p.key != key) { return }
         let Some(k) = self.prev.take() else { return };
         self.keep_current();
-        if let Some(i) = self.image.take() { self.retired.push((i, self.frames)); }
+        self.clear_image();
         // its last picture at once (the same camera), a new one drawn behind it
-        if let Some(i) = k.image { self.retired.retain(|(r, _)| !Arc::ptr_eq(r, &i)); self.image = Some(i); self.on_screen = self.latest; }
+        if let Some(i) = k.image { self.retired.retain(|(r, _)| !Arc::ptr_eq(r, &i)); self.image = Some(i); self.image_key = k.key.clone(); self.on_screen = self.latest; }
         self.fitted = (k.mesh.center, k.mesh.radius); self.key = k.key; self.mesh = Some(k.mesh); self.cam = Some(k.cam); self.touched = k.touched; self.fit_aspect = k.fit_aspect; self.parts = k.parts;
         let shown = std::time::Instant::now() - std::time::Duration::from_secs(1); self.born = vec![shown; k.groups]; self.restored = Some(k.groups);
         if self.stage.as_ref().is_some_and(|s| s.key == self.key) { self.stage = None; }
@@ -816,7 +840,7 @@ impl SolidPage {
         let most = (DRAFT_PIXELS as f32 * self.draft_scale) as usize;
         if draft && w * h > most { let k = (most as f32 / (w * h) as f32).sqrt(); w = ((w as f32 * k) as usize).max(32); h = ((h as f32 * k) as usize).max(24); }
         self.asked = (w, h);
-        self.latest = self.worker.submit_render(mesh, Arc::new(fades), cam, w, h, samples(w, h, draft), draft, self.back);
+        self.latest = self.worker.submit_render(self.key.clone(), mesh, Arc::new(fades), cam, w, h, samples(w, h, draft), draft, self.back);
     }
     /// The toolbar's Fit (the first fitted view again, camera untouched) and its standard views.
     pub fn set_view(&mut self, name: &str) {
@@ -902,12 +926,13 @@ impl SolidPage {
     /// For the demo: the button went up, the full picture is asked for.
     pub fn settle(&mut self) { self.ask_render(false); }
     /// Give the images back to the atlas (call before dropping the page, with the window).
-    pub fn release(&mut self, window: &mut Window) { for i in self.retired.drain(..).map(|r| r.0).chain(self.image.take()) { let _ = window.drop_image(i); } }
+    pub fn release(&mut self, window: &mut Window) { self.image_key.clear(); for i in self.retired.drain(..).map(|r| r.0).chain(self.image.take()) { let _ = window.drop_image(i); } }
     /// The pictures that are (or may still be) in the window's sprite atlas, on the GPU.
     pub fn atlas_images(&self) -> usize { self.retired.len() + self.image.is_some() as usize }
     /// The page is put away (the viewer closed, another page or thread shown): its pictures leave the atlas and its model the GPU; the model
     /// stays here, on the CPU, so showing the page again draws it again at once. The next paint asks for a new picture.
     pub fn put_away(&mut self) {
+        self.image_key.clear();
         let Some(i) = self.image.take() else { return };
         self.retired.push((i, self.frames)); self.asked = (0, 0); self.on_screen = self.latest; self.worker.forget();
     }
@@ -1539,5 +1564,20 @@ mod tests {
             let mut rgba = px.clone(); for p in rgba.chunks_exact_mut(4) { p.swap(0, 2); }
             image::RgbaImage::from_raw(w as u32, h as u32, rgba).unwrap().save(crate::tmp::base().join(format!("solid-{name}.png"))).unwrap();
         }
+    }
+    #[test] fn solid_image_is_accepted_and_kept_only_for_its_own_source_key() {
+        let board = "2|/proj|";
+        let mech = "2|/proj|/proj/mech/bracket.step";
+        // An image rendered for the board must never be accepted once the page switched to Mech, even with a fresh ticket.
+        assert!(!super::shows_for_key(mech, board, 10, 5, 6));
+        assert!(super::shows_for_key(mech, mech, 10, 5, 6));
+        // An older ticket for the same key is still rejected by floor/shown.
+        assert!(!super::shows_for_key(mech, mech, 5, 5, 6));
+        assert!(!super::shows_for_key("", "", 10, 0, 1));
+        // Cached image is kept/drawn only when image_key matches page_key and an image is present.
+        assert!(!super::image_matches_key(mech, board, true));
+        assert!(!super::image_matches_key(mech, "", true));
+        assert!(!super::image_matches_key(mech, mech, false));
+        assert!(super::image_matches_key(mech, mech, true));
     }
 }

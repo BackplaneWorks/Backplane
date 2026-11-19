@@ -700,6 +700,7 @@ impl Backplane {
             let sr = s.read(cx);
             if !want_key.is_empty() && sr.key() != want_key { return None; }
             if !sr.note.is_empty() { return Some("empty"); }
+            if !want_key.is_empty() && sr.image_key() != want_key { return None; }
             let painted_for_key = if !want_key.is_empty() && press_key != want_key {
                 sr.stats.painted > press_painted
             } else {
@@ -782,9 +783,9 @@ impl Backplane {
         let d = &th["diff"];
         let rects = crate::art::ctl_rects();
         let (_, press_painted) = PRESS_SOLID.with(|c| c.borrow().clone());
-        let (solid_key, solid_shown, solid_note, solid_stage, solid_painted, solid_last_w, solid_last_h) = match &self.screens.solid {
-            Some(s) => { let sr = s.read(cx); (sr.key().to_string(), sr.shown_key().to_string(), sr.note.clone(), sr.stage_text(), sr.stats.painted, sr.stats.last_size.0, sr.stats.last_size.1) }
-            None => (String::new(), String::new(), String::new(), String::new(), 0, 0, 0),
+        let (solid_key, solid_image_key, solid_shown, solid_note, solid_stage, solid_painted, solid_last_w, solid_last_h) = match &self.screens.solid {
+            Some(s) => { let sr = s.read(cx); (sr.key().to_string(), sr.image_key().to_string(), sr.shown_key().to_string(), sr.note.clone(), sr.stage_text(), sr.stats.painted, sr.stats.last_size.0, sr.stats.last_size.1) }
+            None => (String::new(), String::new(), String::new(), String::new(), String::new(), 0, 0, 0),
         };
         let (plot_key, plot_none) = match &self.screens.plot.frame {
             Some(f) => (f.key.clone(), f.none.clone()),
@@ -819,6 +820,7 @@ impl Backplane {
             "plot_key": plot_key,
             "plot_none": plot_none,
             "solid_key": solid_key,
+            "solid_image_key": solid_image_key,
             "solid_shown_key": solid_shown,
             "solid_note": solid_note,
             "solid_stage": solid_stage,
