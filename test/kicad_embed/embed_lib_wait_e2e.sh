@@ -5,11 +5,12 @@
 # its status (GetLibraryStatuses), each library on its own.
 #   L1  Choose Symbol opens in the embedded schematic editor; a symbol is picked out by its search (its footprint selector asks for the
 #       footprints: the full load starts), then closed
-#   L2  at once, one kicad_edit exchanges C1 for a footprint of Capacitor_THT (early in the stock table) and R3 for one of Resistor_THT
-#       (late in it): both are exchanged and the board is saved. Before the fix the second failed: once one footprint had come from a
+#   L0  KiCad is held to one CPU, so its footprint load lasts long enough for the edit to land inside it
+#   L2  at once, one kicad_edit exchanges C1 for a footprint of Capacitor_THT (11th of the stock table's 155) and U1 for the same valve
+#       footprint from Valve (154th, the end of the queue): both are exchanged and the board is saved. Before the fix the second failed: once one footprint had come from a
 #       library, a later "not found" was final (or a library's 10.5 s wait ran out). (The board's own footprints say `Footprints:`, a
 #       library no table has: not used here.)
-#   INFO whether the gap was hit: how often the edit asked KiCad for the library statuses (0: the load had already reached Resistor_THT)
+#   L2  fails unless the edit landed inside the footprint load and asked for the library statuses at least once (else it proves nothing)
 # Copies only (seed_project.py), fork mode.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -76,10 +77,11 @@ else: print("hit" if start is not None and place is not None and start < place a
 PY
 }
 
-# L0: KiCad held to two CPUs (every thread of it, taskset -a): its footprint load takes long enough for the edit to land inside it
-# (on a 32-core desktop it finished while the chooser was still open: 0 status asks, nothing shown)
-PIN=$(taskset -a -p -c 0-1 "$KP" 2>&1 | tail -1 || true)
-check "L0 KiCad is held to CPUs 0-1" "$(taskset -c -p "$KP" 2>/dev/null | grep -qE 'list: (0-1|0,1)$' && echo 1 || echo 0)" "$PIN"
+# L0: KiCad held to one CPU (every thread of it, taskset -a): its footprint load takes long enough for the edit, sent through the
+# stand-in agent (~5 s), to land inside it (a 32-core desktop finished it while the chooser was still open; on two CPUs it still
+# finished before main's edit arrived)
+PIN=$(taskset -a -p -c 0 "$KP" 2>&1 | tail -1 || true)
+check "L0 KiCad is held to CPU 0" "$(taskset -c -p "$KP" 2>/dev/null | grep -qE 'list: 0$' && echo 1 || echo 0)" "$PIN"
 
 # L1: the schematic editor, Choose Symbol (A on its canvas), a symbol picked out by its search; closed the moment the search's
 # selection has started the footprint load
@@ -99,11 +101,12 @@ LOAD=$(fp_load state)
 check "L1 the search's selection started KiCad's footprint load (fraction -1)" "$([ "$LOAD" != none ] && echo 1 || echo 0)" "load $LOAD"
 python3 "$XINPUT_PY" key Escape; sleep 0.2; python3 "$XINPUT_PY" key Escape
 
-# L2: at once (no settle), two exchanges in one call: a library early in the table, then one late in it
+# L2: at once (no settle), two exchanges in one call: a library early in the table, then the one at the end of its queue (Valve, 154th
+# of 155; Resistor_THT, 116th, was already in by the time the edit came: no "not found", nothing of the wait shown)
 AT_SEND=$(fp_load state)
 STATUSES_BEFORE=$(count "request kiapi.common.commands.GetLibraryStatuses" "$OUT/hub.log")
 T0=$(date +%s%N)
-E=$(ask kicad_edit "{\"path\":\"$PCB\",\"ops\":[{\"set\":\"C1\",\"footprint\":\"Capacitor_THT:C_Disc_D4.7mm_W2.5mm_P5.00mm\"},{\"set\":\"R3\",\"footprint\":\"Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal\"}]}")
+E=$(ask kicad_edit "{\"path\":\"$PCB\",\"ops\":[{\"set\":\"C1\",\"footprint\":\"Capacitor_THT:C_Disc_D4.7mm_W2.5mm_P5.00mm\"},{\"set\":\"U1\",\"footprint\":\"Valve:Valve_ECC-83-1\"}]}")
 T1=$(date +%s%N)
 ASKED=$(( $(count "request kiapi.common.commands.GetLibraryStatuses" "$OUT/hub.log") - STATUSES_BEFORE ))
 GAP=$(fp_load gap)
@@ -113,6 +116,6 @@ check "L2 the edit waited for a library by its status (asks > 0: otherwise this 
 check "L2 both footprints are exchanged and the board is saved" \
   "$([ "$(echo "$E" | grep -o '"swapped":1' | wc -l)" = 2 ] && echo "$E" | grep -q "\"saved\":\"$PCB\"" && echo 1 || echo 0)" "$(echo "$E" | cut -c1-300)"
 check "L2 and nothing said a library did not load or was not found" "$(echo "$E" | grep -qE 'not found|did not load' && echo 0 || echo 1)" "$(echo "$E" | grep -oE '[^"]*(not found|did not load)[^"]*' | head -1)"
-check "L2 the saved board has C1 on Capacitor_THT and R3 on Resistor_THT" "$(grep -q '(footprint "Capacitor_THT:C_Disc_D4.7mm_W2.5mm_P5.00mm"' "$PCB" && grep -q '(footprint "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"' "$PCB" && echo 1 || echo 0)"
+check "L2 the saved board has C1 on Capacitor_THT and U1 on Valve" "$(grep -q '(footprint "Capacitor_THT:C_Disc_D4.7mm_W2.5mm_P5.00mm"' "$PCB" && grep -q '(footprint "Valve:Valve_ECC-83-1"' "$PCB" && echo 1 || echo 0)"
 wait_for_log "$OUT/client.log" '"name":"done","event":"mark"' 5 || true
 finish_suite "embed_lib_wait_e2e ($EMBED_MODE)"
