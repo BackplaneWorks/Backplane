@@ -8,19 +8,39 @@ On desktop GPUI, the right rail (`72 px` wide, `ui.rs`) is driven by the hub's `
 
 | Entry | Icon | Shown on project kinds | Press behaviour | Header controls | Empty / loading / error state | Key / Palette |
 |---|---|---|---|---|---|---|
-| **Terminal** | `terminal` | All | Toggles floating terminal (`term_toggle`, `Ctl::None` in harness) | Floating overlay, not a viewer pane | Shell prompt | `` ` `` / `Ctrl+J` (`Cmd+J`), Palette |
-| **Commands** | `search` | All | Opens command palette (`palette_open`) | Modal overlay, not a viewer pane | Search prompt | `Ctrl+K` / `Ctrl+Shift+P` |
 | **Board** | `circuit-board` | All (desktop); hub `choices` always lists it | `view` `"board"` (or `""` to close if lit) | `bar_wrap`: `[Boards]` `Layers` `Fit` + right: `[From]` `Follow agent` `[Open in KiCad]` `×` | Early: ghost `Layers`/`Fit` bar + `"Loading the board…"` on `view` bg. Empty/missing: `status_row` with hub `frame.none` message. | `B` (in `RAIL`), Palette |
 | **Schematic** | `cpu` | All | `view` `"schematic"` (or `""` if lit) | `bar_wrap`: `[Boards]` `Layers` `Fit` `[Sheets (N)]` + right: `[From]` `Follow agent` `[Open in KiCad]` `×` | Early: ghost `Layers`/`Fit` bar + `"Loading the schematic…"`. Empty/missing: `status_row` with hub `frame.none` message. | `S` (in `RAIL`), Palette |
 | **3D** | `box` | All | `view` `"3d"` (or `""` if lit) | No bar row: floating top-left view buttons (`Fit`, `Iso`, `Top`, `Bottom`, `Front`, `Right`, `Back`, `Left`, `Snap`) + floating top-right `in_corner` (`[Boards]`, `[Open in KiCad]`, `×`) | Early: gradient backdrop (`model_loading`) + `"Loading…"` / `"Loading the model…"` / `"Drawing the view…"`. Error/empty: centred note + `Retry` button on failure. | `3` (in `RAIL`), Palette |
-| **Simulation** | `gauge` | Only when `viewer.simFrame` is set and local KiCad is supported | `open_simulation` (opens KiCad Simulator frame in embedded pane) | Embedded KiCad bar + strip (`kicad_pane::strip`) | Embedded KiCad startup / failed banner + `Try again` | None (no bare key) |
-| **Gerbers** | `file-stack` | All (desktop); phones' lists have no Gerbers | `view` `"gerbers"` (mapped to `"board"` with `gerbers: true`) | `bar_wrap`: `[Boards]` `Layers` `Fit` `vs board` `[Open in GerbView]` `[legend]` `[note]` + right: `[From]` `×` (no `Open in KiCad` or `Follow agent`) | Early: ghost bar + `"Loading the Gerbers…"`. Missing set: hub refuses (`PRESENTER_UNAVAILABLE`) -> red error line under thread; viewer stays on prior page or shut. | None (no bare key), Palette |
+| **Simulation** | `gauge` | Only when `viewer.simFrame` is set and local KiCad is supported | `open_simulation` (opens KiCad Simulator frame in embedded pane) | Embedded KiCad bar + strip (`kicad_pane::strip`) | Embedded KiCad startup / failed banner + `Try again` | I, Palette |
+| **Gerbers** | `file-stack` | All (desktop); phones' lists have no Gerbers | `view` `"gerbers"` (mapped to `"board"` with `gerbers: true`) | `bar_wrap`: `[Boards]` `Layers` `Fit` `vs board` `[Open in GerbView]` `[legend]` `[note]` + right: `[From]` `×` (no `Open in KiCad` or `Follow agent`) | Early: ghost bar + `"Loading the Gerbers…"`. Missing set: hub refuses (`PRESENTER_UNAVAILABLE`) -> red error line under thread; viewer stays on prior page or shut. | G, Palette |
 | **Split** | `layout-panel-left` | All | `view` `"split"` (or `""` if lit) | `split-bar` (`ROW_H`): `[Boards]` + spacer + pane toggles (`Schematic`, `Board`, `3D`) + `[probe chip]` + right: `[From]` `Follow agent` `[Open in KiCad]` `×`. Sub-panes each have a `26 px` `split_head` (`SCHEMATIC`, `BOARD`, `3D` + `×`). | Early: `in_corner` `"Loading…"` or `status_row` `"Opening…"` until 3 panes arrive; each sub-pane then shows its own plot/model loading or `none` state. | `V` (in `RAIL`), Palette |
-| **Mech** | `layers` | All | `view` `"mech"` (or `""` if lit) | `bar_wrap`: part chips (`mech-part-0`…) + `Refresh` + right: `[From]` `[Open in KiCad]` (when `has_design`) `×`. Floating 3D view buttons below bar when a model is loaded; note line below bar when `key` is empty. | Early: `in_corner` `"Loading…"`, then `mech_chrome` + `"Loading the model…"`. Empty: `mech_chrome` + dim `say`/`empty`/`note` line under bar + blank area below. | `M` (in `RAIL`), Palette |
+| **Mech** | `wrench` | All | `view` `"mech"` (or `""` if lit) | `bar_wrap`: part chips (`mech-part-0`…) + `Refresh` + right: `[From]` `[Open in KiCad]` (when `has_design`) `×`. Floating 3D view buttons below bar when a model is loaded; note line below bar when `key` is empty. | Early: `in_corner` `"Loading…"`, then `mech_chrome` + `"Loading the model…"`. Empty: `mech_chrome` + dim `say`/`empty`/`note` line under bar + blank area below. | `M` (in `RAIL`), Palette |
 | **Files** | `folder` | All | `view` `"files"` (hub toggles to `""` when already on Files/preview) | `bar_wrap`: `Up` + breadcrumbs + `New`, `Upload`, `Zip` + right: `[From]` `[Open in KiCad]` (when `has_design`) `×`. Filter row below bar. Preview sub-page replaces bar with `Files` back button + filename + `[PDF prev/next]`. | Early: `"Opening…"`, then `"Loading…"` if `files.ready == false`. Empty: `"Empty folder. Drop files here to upload."` or `"Nothing matches"`. Error: `files.error` text. | `F` (in `RAIL`) or `Ctrl+P` (`Cmd+P`), Palette |
 | **Diff** | `diff` | All | `diff` `""` (not `view-kind`; toggles `thread.diff` overlay over viewer) | `bar_wrap`: summary text + (when changed) `Commit & push`, `PR`, `Revert` + right: `[From]` `×` (no `Open in KiCad` or `Follow agent`) | Early: `"Opening…"`. Clean/no repo: summary line only, git buttons hidden. | `D` (in `RAIL`) or `Ctrl+D` (`Cmd+D`) |
 | **Review** | `circle-check` | All | `view` `"review"` (opens `pages::open_review` on `"bom"`) | `bar_wrap`: review tab chips (`BOM`, `Checks`, `Comments`, `Release`) + right: `[From]` `[Open in KiCad]` (when `has_design`) `×`. Sub-heading + `Refresh` below bar on BOM/Checks. | Early: `"Opening…"`, then `"Working…"` while `review.busy == true`. Empty: dim `review.note`. | `R` (in `RAIL`), Palette |
 | **Browser** | `globe` | All | `view` `"browser"` (or `""` if lit) | No bar row: browser's own tab bar + address/nav bar + floating top-right `in_corner` (`[From]`, `[Open in KiCad]` when `has_design`, `×`) | Early: `"Opening…"`, then browser page opening state. Disconnected hub: `status_row` `"The browser page needs a connected hub."` | `W` (in `RAIL`), Palette |
+| **Terminal** | `terminal` | All | Toggles floating terminal (`term_toggle`, `Ctl::None` in harness) | Floating overlay, not a viewer pane | Shell prompt | `` ` `` / `Ctrl+J` (`Cmd+J`), Palette |
+| **Commands** | `search` | All | Opens command palette (`palette_open`) | Modal overlay, not a viewer pane | Search prompt | `Ctrl+K` / `Ctrl+Shift+P` |
+
+## Page names across clients
+
+The desktop rail, tooltip and palette use the same hub label. The table records the corresponding phone and in-app help vocabulary. Resource names in empty states identify what to add or open.
+
+| Page | Phone or help catalog | Related words in headers and states |
+|---|---|---|
+| Board | `viewer.board` | Boards selects a document. |
+| Schematic | `viewer.schematic` | Sheets selects a sheet. |
+| 3D | `viewer.solid`, `gpui.f.key.threed`, `gpui.f.tour.threed` | Former help labels “3D model” and “3D view” now read “3D”. A model is the content. |
+| Gerbers | Desktop rail | Gerber files form the set. Fab also includes other manufacturing output. |
+| Simulation | Desktop rail | Simulator identifies the KiCad frame. |
+| Split | `android.viewer.split`, `gpui.f.key.side` | Former shortcut label “Schematic and board side by side” now reads “Split”. |
+| Mech | `viewer.mech`, `gpui.f.tour.mech` | Former tour heading “Mechanical parts” now reads “Mech”. Parts are the items in the picker. |
+| Files | `viewer.files` | The open file supplies the preview title. |
+| Diff | `viewer.diff`, `gpui.f.key.diff` | Former shortcut label “Diff of the thread’s changes” now reads “Diff”. |
+| Review | `viewer.review` | BOM and Checks identify tabs shared with the management strip. |
+| Browser | `bots.tab.browser` | The address bar identifies the site. |
+| Terminal | Desktop rail | The shell prompt identifies the session. |
+| Commands | `gpui.commands` | Opens the palette with its configured shortcut. |
 
 ## Pane States & Observed Inconsistencies
 

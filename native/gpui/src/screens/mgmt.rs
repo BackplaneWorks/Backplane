@@ -23,6 +23,10 @@ pub const MIN: f32 = 160.0;
 
 #[derive(Default)]
 pub struct Mgmt {
+    // The screenshot driver reads the state of the panel Review actually rendered,
+    // including filtered lists. A subsequent render of the dock has its own state.
+    pub review_snapshot: Option<(&'static str, String)>,
+    panel_placeholder: Option<(&'static str, String)>,
     /// every `mgmt.*` info the hub published, by key (JSON values)
     pub infos: HashMap<String, Value>,
     /// the project shown and its digest (from `mgmt.watch`'s answer); the project last asked about
@@ -183,17 +187,26 @@ pub fn act(app: &mut Backplane, a: &str, cx: &mut Context<Backplane>) {
 /// Review mounts the same element and borrows the same scroll and selection
 /// state as the dock. A comparison has its own read-only report.
 pub fn review_panel(app: &mut Backplane, cx: &mut Context<Backplane>) -> Option<AnyElement> {
+    app.screens.mgmt.review_snapshot = None;
     let viewer = &app.data["thread"]["viewer"];
-    if viewer["open"] != "review" { return None }
+    if viewer["open"] != "review" || viewer["review"]["empty"].is_object() { return None }
     let id = viewer["review"]["tabs"].as_array()?.iter().find(|tab| tab["on"] == true)?["page"].as_str()?.to_owned();
     let scope = viewer["designPanels"].get(&id)?.clone();
     if !scope["versions"].is_array() { want(app, scope["project"].as_str()?) }
     app.screens.mgmt.panel_w = super::viewer::pane_width() as f32;
-    Some(shared_panel(app, &id, &scope, false, app.light(), cx))
+    app.screens.mgmt.panel_placeholder = None;
+    let panel = shared_panel(app, &id, &scope, false, app.light(), cx);
+    if crate::art::rects_on() {
+        app.screens.mgmt.review_snapshot = Some(app.screens.mgmt.panel_placeholder.take().unwrap_or(("ready", String::new())));
+    }
+    Some(panel)
 }
 
 pub(super) fn panel_state(app: &mut Backplane, id: &str, light: bool, line: String, loading: bool) -> AnyElement {
     use super::panestate::{self, PaneState};
+    if crate::art::rects_on() {
+        app.screens.mgmt.panel_placeholder = Some((if loading { "loading" } else { "empty" }, line.clone()));
+    }
     let state = if loading {
         let secs = app.screens.plotview.loading.track_now(&format!("panel:{id}:{}", app.screens.mgmt.digest));
         PaneState::loading(panestate::loading_line(&line, secs, 0))

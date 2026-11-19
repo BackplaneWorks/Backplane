@@ -724,6 +724,12 @@ fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Val
     let pages = div().flex_1().min_w_0().flex().flex_wrap().gap_2().gap_y_1().children(arr(review, "tabs").enumerate().map(|(i, t)| btn(cx, light, format!("rv-{i}"), trs(&string(t, "label")), t["on"].as_bool().unwrap_or(false), Command::Action("rv-page".into(), string(t, "page")))).collect::<Vec<_>>());
     // the tabs are the page's bar (the pane's controls at the end of its first line); the page under it
     let bar = bar_wrap(light).flex_nowrap().items_start().child(pages).child(actions);
+    if let Some(title) = review["empty"]["title"].as_str() {
+        let title = trs(title);
+        DRAWN.with(|d| d.borrow_mut().1 = title.clone());
+        let state = super::panestate::PaneState::empty(title, trs(&string(&review["empty"], "next")));
+        return div().size_full().flex().flex_col().child(bar).child(super::panestate::view(light, &state, None)).into_any_element();
+    }
     if let Some(panel) = shared { return div().size_full().flex().flex_col().child(bar).child(panel).into_any_element() }
     let title = string(review, "title");
     let page = arr(review, "tabs").find(|t| t["on"] == true).map(|t| string(t, "page")).unwrap_or_default();

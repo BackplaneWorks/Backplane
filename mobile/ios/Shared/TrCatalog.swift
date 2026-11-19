@@ -3240,12 +3240,12 @@ gpui.f.go.project	Go to the project step	プロジェクトのステップへ	Ir
 gpui.f.n.so.far	{n, number} so far.	これまでに{n, number}件。	{n, number} hasta ahora.
 gpui.f.tour.viewers	Boards and schematics	基板と回路図	Placas y esquemáticos
 gpui.f.tour.viewers.body	The rail beside a thread opens its project in a viewer. Backplane draws boards and schematics itself, so they open without KiCad running, and the view updates when an agent changes a file. Press a letter while the keyboard is outside the message box. The history bar under a view steps through each saved version.	スレッドの横のレールで、そのプロジェクトをビューアで開きます。Backplaneは基板と回路図を自前で描画するのでKiCadを起動せずに開け、エージェントがファイルを変更すると表示も更新されます。キーボードがメッセージボックスの外にあるときに文字キーを押してください。ビューの下の履歴バーで保存された各バージョンをたどれます。	La barra junto a un hilo abre su proyecto en un visor. Backplane dibuja placas y esquemáticos por sí mismo, así que se abren sin KiCad ejecutándose y la vista se actualiza cuando un agente cambia un archivo. Pulsa una letra mientras el teclado esté fuera del cuadro de mensaje. La barra de historial bajo una vista recorre cada versión guardada.
-gpui.f.key.side	Schematic and board side by side	回路図と基板を並べて表示	Esquemático y placa lado a lado
-gpui.f.key.diff	Diff of the thread's changes	スレッドの変更の差分	Diff de los cambios del hilo
-gpui.f.tour.threed	3D view	3Dビュー	Vista 3D
+gpui.f.key.side	Split	分割	Dividir
+gpui.f.key.diff	Diff	差分	Diff
+gpui.f.tour.threed	3D	3D	3D
 gpui.f.tour.threed.body	Press 3 for the board in 3D, with its parts. Drag to turn it in any direction and use the wheel to zoom at the pointer. A right drag, a middle drag or Shift with a drag moves it. The view redraws only while you move it, so an open 3D view uses no processor time at rest.	3を押すと部品付きの基板を3Dで表示します。ドラッグで好きな方向に回転し、ホイールでポインタの位置にズームします。右ドラッグ、中ドラッグ、Shift+ドラッグで移動します。動かしている間だけ再描画するので、開いたままの3Dビューは静止中にプロセッサを使いません。	Pulsa 3 para ver la placa en 3D, con sus piezas. Arrastra para girarla en cualquier dirección y usa la rueda para hacer zoom en el puntero. Arrastrar con el botón derecho, el botón central o Shift la mueve. La vista solo se redibuja mientras la mueves, así que una vista 3D abierta no consume procesador en reposo.
-gpui.f.key.threed	3D model	3Dモデル	Modelo 3D
-gpui.f.tour.mech	Mechanical parts	機構部品	Piezas mecánicas
+gpui.f.key.threed	3D	3D	3D
+gpui.f.tour.mech	Mech	Mech	Mech
 gpui.f.tour.mech.body	Press M for the Mech view. It lists every STEP file in the project's mech folder, such as an enclosure, a bracket or the board in a fit check, and draws the one you pick in 3D with the same controls. Agents write each part as a FreeCAD script beside its STEP, so FreeCAD has to be installed for them to change one.	Mを押すと機構ビューを開きます。プロジェクトのmechフォルダにあるSTEPファイル（筐体、ブラケット、組み付け確認用の基板など）を一覧し、選んだものを同じ操作で3D表示します。エージェントは各部品をSTEPの横にFreeCADスクリプトとして書くので、部品を変更するにはFreeCADが必要です。	Pulsa M para la vista Mech. Lista cada archivo STEP en la carpeta mech del proyecto, como una carcasa, un soporte o la placa en una comprobación de encaje, y dibuja el que elijas en 3D con los mismos controles. Los agentes escriben cada pieza como un script de FreeCAD junto a su STEP, así que FreeCAD debe estar instalado para que puedan cambiar una.
 gpui.f.tour.browser.body	Agents have a web browser on the hub's machine for datasheets, part pages and web tools. Press W to watch it. A bot's browser is also its Browser tab. This build shows the page the agent has open, and you cannot click in it yet.	エージェントはハブのマシン上のWebブラウザで、データシートや部品ページ、Webツールを使います。Wを押すとその様子を見られます。ボットのブラウザはボットのブラウザタブでも見られます。このビルドではエージェントが開いているページを表示するだけで、まだクリックはできません。	Los agentes tienen un navegador web en la máquina del hub para hojas de datos, páginas de piezas y herramientas web. Pulsa W para verlo. El navegador de un bot es también su pestaña Navegador. Esta compilación muestra la página que el agente tiene abierta, y aún no puedes hacer clic en ella.
 gpui.f.tour.thread	Working in a thread	スレッドでの作業	Trabajar en un hilo
@@ -4535,6 +4535,8 @@ settings.designmode.label	Open designs in	設計を開く場所	Abrir los diseñ
 settings.designmode.viewer	Always viewer	常にビューアー	Siempre en el visor
 settings.designmode.kicad	Always KiCad	常に KiCad	Siempre en KiCad
 settings.designmode.note	Auto opens KiCad by itself only where that is enabled for this platform.	自動を選ぶと、このプラットフォームで自動起動が有効な場合にだけ KiCad が開きます。	En modo automático, KiCad solo se abre por sí solo si esta plataforma lo permite.
+review.empty.title	Nothing to review yet	レビューするものはまだありません	Aún no hay nada que revisar
+review.empty.next	Add a schematic to see its parts here.	回路図を追加すると、ここに部品が表示されます。	Añade un esquemático para ver sus componentes aquí.
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}

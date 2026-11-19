@@ -317,14 +317,14 @@ mod tests {
     #[test] fn rail_commands_use_the_hubs_labels_and_the_same_hints_as_the_buttons() {
         let local = crate::local::Local::default();
         let d = json!({"thread":{"viewer":{"simFrame":"sim","rail":[
-            {"id":"simulation","label":"Simulation","key":"","state":"off"},
+            {"id":"simulation","label":"Simulation","key":"i","state":"off"},
             {"id":"files","label":"Project files","key":"f","state":"on"},
             {"id":"terminal","label":"Terminal","key":"`","state":"off"},
             {"id":"commands","label":"Commands","key":"","state":"off"}
         ]}}});
         let rows: Vec<_> = items(&d, true).into_iter().filter(|i| matches!(i.what, Do::Rail(..))).collect();
         assert_eq!(rows.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Simulation", "Project files", "Terminal"]);
-        for (item, (id, key)) in rows.iter().zip([("simulation", ""), ("files", "f"), ("terminal", "`")]) {
+        for (item, (id, key)) in rows.iter().zip([("simulation", "i"), ("files", "f"), ("terminal", "`")]) {
             assert_eq!(shortcut(item, "", &local), crate::ui::rail_hint(&local, id, key));
         }
         assert!(!items(&d, false).iter().any(|i| i.label == "Simulation"));

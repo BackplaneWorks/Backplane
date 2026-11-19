@@ -766,6 +766,10 @@ impl Backplane {
             }
             "review" => {
                 if diff_on || open != "review" || !v["review"].is_object() { return None; }
+                if v["review"]["empty"].is_object() { return Some("empty"); }
+                if let Some((state, _)) = &self.screens.mgmt.review_snapshot {
+                    return (*state != "loading").then_some(*state);
+                }
                 let r = &v["review"];
                 if r["busy"] == true { return None; }
                 if r["blocks"].as_array().is_some_and(|b| !b.is_empty()) || r["checks"].is_object() { Some("ready") } else { Some("empty") }
@@ -820,6 +824,8 @@ impl Backplane {
             "panes_count": panes,
             "plot_key": plot_key,
             "plot_none": plot_none,
+            "empty_text": if v["open"] == "review" && v["review"]["empty"].is_object() { crate::screens::viewer::drawn().strip_prefix("review|").unwrap_or("").to_owned() }
+                else { self.screens.mgmt.review_snapshot.as_ref().filter(|(s, _)| *s == "empty").map(|(_, line)| line.clone()).unwrap_or_default() },
             "solid_key": solid_key,
             "solid_image_key": solid_image_key,
             "solid_shown_key": solid_shown,

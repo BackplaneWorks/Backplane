@@ -11,7 +11,7 @@ actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThrea
     PickUp, PickDown, PickLeft, PickRight, PickTab, PickBackTab, PickEnter,
     Project1, Project2, Project3, Project4, Project5, Project6, Project7, Project8, Project9,
     Thread1, Thread2, Thread3, Thread4, Thread5, Thread6, Thread7, Thread8, Thread9,
-    RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal, ShowKeys, FoldProject, UnfoldProject, MgmtBom, MgmtChecks, MgmtLife, MgmtFab, CommentKicad, Quit, CloseWindow, HideApp, HideOthers, ShowAll]);
+    RailBoard, RailSchematic, Rail3d, RailGerbers, RailSimulation, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal, ShowKeys, FoldProject, UnfoldProject, MgmtBom, MgmtChecks, MgmtLife, MgmtFab, CommentKicad, Quit, CloseWindow, HideApp, HideOthers, ShowAll]);
 
 /// Where no text field, file list or viewer has the keyboard: a bare key may act.
 /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ pub const FREE: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
@@ -153,7 +153,7 @@ pub fn id_for(action: &str, value: &str, current: &str) -> &'static str {
     }
 }
 /// A rail view's bare key.
-pub fn rail_letter(kind: &str) -> &'static str { match kind { "terminal" => "`", "board" => "b", "schematic" => "s", "3d" => "3", "split" => "v", "mech" => "m", "files" => "f", "diff" => "d", "review" => "r", "browser" => "w", _ => "" } }
+pub fn rail_letter(kind: &str) -> &'static str { match kind { "terminal" => "`", "board" => "b", "schematic" => "s", "3d" => "3", "gerbers" => "g", "simulation" => "i", "split" => "v", "mech" => "m", "files" => "f", "diff" => "d", "review" => "r", "browser" => "w", _ => "" } }
 
 /// Every binding of the client: the editing keys, then these shortcuts with this device's choices.
 pub fn bindings(l: &Local) -> Vec<KeyBinding> {
@@ -187,7 +187,7 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
     /* i18n-ok: key contexts */ v.extend([KeyBinding::new("left", FoldProject, Some(SIDE)), KeyBinding::new("right", UnfoldProject, Some(SIDE))]);
     v.extend([KeyBinding::new("b", RailBoard, Some(RAIL)), KeyBinding::new("s", RailSchematic, Some(RAIL)), KeyBinding::new("3", Rail3d, Some(RAIL)), KeyBinding::new("v", RailSplit, Some(RAIL)),
         KeyBinding::new("m", RailMech, Some(RAIL)), KeyBinding::new("f", RailFiles, Some(RAIL)), KeyBinding::new("d", RailDiff, Some(RAIL)), KeyBinding::new("r", RailReview, Some(RAIL)),
-        KeyBinding::new("w", RailBrowser, Some(RAIL))]);
+        KeyBinding::new("g", RailGerbers, Some(RAIL)), KeyBinding::new("i", RailSimulation, Some(RAIL)), KeyBinding::new("w", RailBrowser, Some(RAIL))]);
     v.extend([KeyBinding::new(&k("mgmt-bom"), MgmtBom, alt), KeyBinding::new(&k("mgmt-checks"), MgmtChecks, alt), KeyBinding::new(&k("mgmt-life"), MgmtLife, alt), KeyBinding::new(&k("mgmt-fab"), MgmtFab, alt)]);
     let key = |id: &str| find(id).map_or("", |x| x.key);
     for c in PICK_SCOPES.map(Some) {
@@ -463,7 +463,8 @@ pub fn attach(el: Div, picker: bool, cx: &mut Context<Backplane>) -> Div {
     let el = on!(el, MgmtLife, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::mgmt::toggle(this, "life", cx));
     let el = on!(el, MgmtFab, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::mgmt::toggle(this, "fab", cx));
     macro_rules! rail { ($el:expr, $($a:ty => ($k:literal, $v:literal)),*) => {{ let mut e = $el; $( e = on!(e, $a, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.key_rail($k, $v, cx)); )* e }} }
-    let el = rail!(el, RailBoard => ("view-kind", "board"), RailSchematic => ("view-kind", "schematic"), Rail3d => ("view-kind", "3d"), RailSplit => ("view-kind", "split"),
+    let el = on!(el, RailSimulation, |this: &mut Backplane, _, cx: &mut Context<Backplane>| { if !this.covered() && crate::ui::rail_enabled(&this.data["thread"]["viewer"], "simulation") { this.open_simulation(cx); } });
+    let el = rail!(el, RailGerbers => ("view-kind", "gerbers"), RailBoard => ("view-kind", "board"), RailSchematic => ("view-kind", "schematic"), Rail3d => ("view-kind", "3d"), RailSplit => ("view-kind", "split"),
         RailMech => ("view-kind", "mech"), RailFiles => ("view-kind", "files"), RailDiff => ("diff", ""), RailReview => ("view-kind", "review"), RailBrowser => ("view-kind", "browser"));
     macro_rules! digits { ($el:expr, $($n:literal $p:ty, $t:ty),*) => {{ let mut e = $el; $(
         e = on!(e, $p, |this: &mut Backplane, _, cx: &mut Context<Backplane>| if let Some(p) = nth_project(&this.data, $n) { this.open_project(p, cx) });
@@ -525,7 +526,11 @@ mod tests {
     }
     #[test] fn timeline_scope_bare_keys_act_only_outside_fields_and_viewers() {
         assert_eq!(d("/", &[]), "keys::FocusComposer"); assert_eq!(d("b", &[]), "keys::RailBoard"); assert_eq!(d("3", &[]), "keys::Rail3d"); assert_eq!(d("d", &[]), "keys::RailDiff");
-        for c in ["Composer", "TextInput", "PickInput", "AskInput", "ImpInput", "Viewer", "BrowserBar", "FilesPage"] { for k in ["/", "b", "s", "3", "v", "m", "f", "d", "r", "w"] { if k == "/" && c == "Viewer" { continue } assert_eq!(d(k, &[c]), "", "{k} in {c}"); } }
+        for (key, action) in [("g", "keys::RailGerbers"), ("i", "keys::RailSimulation")] {
+            assert_eq!(d(key, &[]), action);
+            assert_eq!(d(key, &["Viewer Plot"]), action);
+        }
+        for c in ["Composer", "TextInput", "PickInput", "AskInput", "ImpInput", "Viewer", "BrowserBar", "FilesPage"] { for k in ["/", "b", "s", "3", "g", "i", "v", "m", "f", "d", "r", "w"] { if k == "/" && c == "Viewer" { continue } assert_eq!(d(k, &[c]), "", "{k} in {c}"); } }
         assert_eq!(d("/", &["Viewer"]), "keys::FocusComposer", "a key back to the message box from the board, schematic or 3D");
         // from a board or schematic plot the rail's letters act (a click on the board is where the keyboard is while a person looks at it); the 3D view keeps F and its digits
         assert_eq!(d("s", &["Viewer Plot"]), "keys::RailSchematic"); assert_eq!(d("3", &["Viewer Plot"]), "keys::Rail3d"); assert_eq!(d("b", &["Viewer Plot"]), "keys::RailBoard"); assert_eq!(d("f", &["Viewer Plot"]), "keys::RailFiles");
