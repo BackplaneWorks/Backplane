@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod account_tools; pub mod halt; pub mod halt_view; pub mod kicadsel; pub mod mcp_stdio; pub mod bundled; pub mod kistack; pub mod speed; pub mod mailroom; pub mod recall; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod iconpick; pub mod groupname; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod snapguard; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
+pub mod account_tools; pub mod halt; pub mod halt_view; pub mod review_mode; pub mod kicadsel; pub mod mcp_stdio; pub mod bundled; pub mod kistack; pub mod speed; pub mod mailroom; pub mod recall; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod iconpick; pub mod groupname; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod snapguard; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
 #[cfg(test)] mod tests;
 #[cfg(test)] mod laws;
 
@@ -446,7 +446,7 @@ impl Agents {
 
 struct Rpc(Arc<Agents>);
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer", "thread.retitle", "thread.btw", "thread.halt", "thread.restore", "lock.release", "lock.cancel", "work.cancel", "task.stop", "text.write", "thread.hand", "thread.deliver"] }
+    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer", "thread.retitle", "thread.btw", "thread.halt", "thread.restore", "thread.review", "lock.release", "lock.cancel", "work.cancel", "task.stop", "text.write", "thread.hand", "thread.deliver"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             // the hub's own requests (`/give`, from commands/give.rs): a connection (client 1 and up) could say anything there, so it is never heard
@@ -496,6 +496,9 @@ impl RpcHandler for Rpc {
             if method == "thread.restore" { // a user message's Restore to before this (snapguard.rs): the person pressed it and confirmed
                 let turn = p.get("turn").and_then(Value::as_u64).unwrap_or(0);
                 return vec![match self.0.restore_pressed(th, turn, p.get("commit").and_then(Value::as_str).unwrap_or("")).await { Ok(()) => ok(id), Err(e) => err(id, &e) }]
+            }
+            if method == "thread.review" { // the review bar's Allow edits / Read-only again (snapguard.rs, #1305): the person's press, logged
+                return vec![match self.0.review_set(th, p.get("on").and_then(Value::as_bool).unwrap_or(false)).await { Ok(()) => ok(id), Err(e) => err(id, &e) }]
             }
             if method == "task.stop" { // the thread's panel: Stop on one subagent or background shell
                 return vec![match self.0.stop_task(th, p.get("id").and_then(Value::as_str).unwrap_or("")).await { Ok(()) => json!({"t":"reply","id":id,"ok":true,"result":{}}), Err(e) => err(id, &e) }]
@@ -795,6 +798,7 @@ impl Actor {
         let rv_block = { let w = self.ag.world().await; let ops: Vec<_> = w.reviews.get(&th).map(|v| v.iter().filter_map(|(k, sm, at)| crate::files::kicad::review::of(crate::files::kicad::review::TONE, k, sm, *at)).collect()).unwrap_or_default(); crate::files::kicad::review::prompt(&crate::files::kicad::review::fold(&ops)) }; // Review.agent: the open comments follow every message
         let text_ref = { let w = self.ag.world().await; let mut model_lines: Vec<String> = refs.iter().map(|r| r.line()).collect(); if role == "user" && origin.is_none() { model_lines.extend(refs::machine_lines(&crate::session::composer::mention::machines(), &text)) } format!("{text}{}", refs::block(&w, &th, &text, &model_lines)) }; // Refs.agent: the text, then what it references (@ > % # words, then the `&model` lines, one block)
         let text_rv = if rv_block.is_empty() { text_ref } else { format!("{text_ref}\n\n{rv_block}") };
+        let text_rv = if self.ag.in_review(&th).await { format!("{text_rv}\n\n{}", snapguard::REVIEW_NOTE) } else { text_rv }; // #1305: a review's agent is told it is read-only, and how the person lifts it
         let agent_text = if role == "user" && origin.is_none() { let n = crate::term::tools::on_person_message(&self.ag.hub, &th).await; if n.is_empty() { text_rv.clone() } else { format!("{text_rv}\n\n{n}") } } else { text_rv.clone() };
         let agent_text = if takes_ride && !codex { format!("{}\n\n{}", codex::ride_input(&ride), agent_text) } else { agent_text }; // what waited for the person goes with their next message
         let agent_text = match self.ag.mailroom() { Some(m) => { let b = m.turn_block(&th, &agent_text).await; if b.is_empty() { agent_text } else { format!("{b}\n\n{agent_text}") } } None => agent_text }; // Bots.turn: a bot's memory

@@ -34,7 +34,7 @@ pub fn lean_keeps(k: &str) -> bool {
     // a home move (net/homemove.rs): the uberbot's row says where it is going, and a moved chat is drawn from its new home
     if ["home.moving", "home.at"].contains(&k) { return true }
     if ["ui.theme", "sidebar.view", "sidebar.groups", "sidebar.attention", "mail.on", "uber.bot", "order.enabled", "order.estimates", "import.v014.ack"].contains(&k)
-        || ["thread.tree.", "project.icon.", "project.color.", "project.pick.", "project.link.", "buy.", "order.quote.", "order.pick.", "plan.once.", "mail.private.owner.", "account.thread."].iter().any(|p| k.starts_with(p)) { return true }
+        || ["thread.tree.", "project.icon.", "project.color.", "project.pick.", "project.link.", "buy.", "order.quote.", "order.pick.", "plan.once.", "review.ro.", "mail.private.owner.", "account.thread."].iter().any(|p| k.starts_with(p)) { return true }
     // the Context panel's readings (present/tokstats.rs): one short string a thread, and the epoch that names the thread totals' key
     if ["tok.epoch", "tok.recount"].contains(&k) || ["turn.last.", "turn.speed.", "turn.models.", "turn.live.", "turn.tier."].iter().any(|p| k.starts_with(p)) || (k.starts_with("tok.") && [".t.", ".td.", ".tr.", ".bl."].iter().any(|p| k.starts_with(&format!("tok{p}")) || k.contains(p))) { return true }
     // the Settings pages' values (present/settings.rs): short strings, one per control
@@ -267,6 +267,7 @@ mod tests {
         for k in ["rule.r1", "board.b1"] { assert!(lean_keeps(k), "{k}: Settings, Rules and task board lists it"); }
         assert!(lean_keeps("plan.routing"), "Settings › CAD draws the Plan before routing switch from it");
         assert!(lean_keeps("halt.t1.oom5-1"), "the thread view draws a halt card from it");
+        assert!(lean_keeps("review.ro.t1"), "the thread view draws the review bar from it (#1305)");
         for k in ["voice.engine", "voice.model", "voice.device", "voice.e.kicad", "voice.l.jason"] { assert!(lean_keeps(k), "{k}: Settings, Voice shows it"); }
         for k in ["tok.t.t1", "tok.1b.t.t1", "turn.last.t1", "turn.speed.t1", "turn.models.t1", "turn.live.t1", "tok.epoch", "tok.recount"] { assert!(lean_keeps(k), "{k}"); }
         for k in ["onboard.step", "onboard.skipped", "onboard.seen", "onboard.done", "onboard.checks", "onboard.usage", "freecad.path"] { assert!(lean_keeps(k), "{k}: setup reads it, and without it every press forgets the last"); }

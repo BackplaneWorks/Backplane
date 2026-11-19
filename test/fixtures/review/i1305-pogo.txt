@@ -1,0 +1,28 @@
+Design an original, compact, keyed pogo-pin programming connector system for SWD. It's an alternative to Tag-Connect, with its own design and name; don't copy Tag-Connect's geometry or branding.
+
+The person's requirements:
+- **Smaller board footprint** overall than Tag-Connect's TC2030/TC2050 (no-legs and legged). Compare the actual target-board area: pads plus holes plus keep-out.
+- **Exactly 5 signals:** VDD, GND, SWDIO, SWDCLK and RESET.
+- **D-sub-like layout:** two staggered rows, 3 pins on top and 2 on the bottom, with a trapezoid-ish keyed outline so it can't go on backwards. Keying must be physical (asymmetric holes, offset or outline), not just silkscreen.
+- **Self-retaining without big holes.** Only two through-holes on the target board. Retention comes from those two holes: for example sheet-metal spring latches or barbed or forked clips that snap through and hold, or press-fit pegs with spring fingers. Specify hole sizes and tolerances that a standard fab drills cheaply, and keep them small.
+- **Built only from off-the-shelf parts, sheet metal and PCBs:**
+  - stock pogo pins from the fab's stock or major distributors, in stock;
+  - PCBs as the structural layers (a pogo-holder sandwich of 2–3 stacked FR-4 boards with standoffs or spacers is fine);
+  - a sheet-metal latch or clip part;
+  - a cable or ribbon to a standard debug header.
+  No injection moulding and no machined custom parts if avoidable.
+- **Really easy assembly:** few parts and no special tools. Reflow or hand-solder the pogo pins, then slide or snap the latch on.
+
+**Deliverables, in this project laid out the Backplane way:**
+1. **Concept and drawings:** a short design note with pin pitch, row stagger, keying, retention mechanism, target footprint dimensions and an area comparison against TC2030-NL and TC2030 with legs. Have 2–3 retention concepts considered, pick one and give the reasons.
+2. **Target-side footprint:** a KiCad footprint and symbol to put on customer boards. Use the kicad-footprint and kicad-symbol skills, with courtyard and keep-out.
+3. **The plug:** KiCad boards for the pogo-holder PCB stack in boards/<name>/. One of them is the cable-side board with a standard 10-pin 1.27 mm Cortex debug header (or 2x5) so it plugs into a J-Link or ST-Link; you may use a pinout adaptor. Each needs a `.fab.json` with measured features.
+4. **The sheet-metal latch:** design it for SendCutSend with the sendcutsend skill: material, thickness, bends and a DFM check against their live specs. Include its fab.json. Use FreeCAD if it's installed. If it isn't, tell Bub and the person. Backplane installs it via Settings › CAD.
+5. **Mechanical check:** a STEP assembly of the plug on a 1.6 mm target board, with the pogo travel at mid-compression, latch engagement and the force budget (pogo spring force vs. latch hold).
+6. **BOM:** every part with its MPN, checked in stock with the pcbparts tools. Prefer the fab's basic and preferred parts.
+
+Read each relevant SKILL.md first: kicad-footprint, kicad-symbol, kicad-layout, layout-placement, kicad-bom, sendcutsend. Commit milestones to git.
+
+**Never** drive or capture the person's live display. Never order anything; the person orders through Backplane's Buy button. Never run `rm -rf` on a path built from a variable. Ask the person when a design choice has real trade-offs (for example latch style or pitch), with a recommendation.
+
+Report a summary with renders, the footprint area comparison, the BOM and what's ready to order.

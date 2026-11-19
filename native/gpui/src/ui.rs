@@ -806,6 +806,8 @@ impl Render for Backplane {
             // a "Backplane needs" card's typed box and its Continue (the harness clicks the box and types, as a person does)
             if a.needs && !a.pre.is_empty() { ctl.push(CtlEntry { id: format!("ask:{i}:box"), label: a.placeholder.clone(), ctl: Ctl::None }); ctl.push(CtlEntry { id: format!("ask:{i}:go"), label: a.go.clone(), ctl: Ctl::None }); }
         }
+        // the review bar's button (#1305): Allow edits, or Read-only again
+        ctl.extend(crate::screens::review::control(&thread["review"]));
         // the header's tools (Buy it is tool:fab-buy) and the Order card's Buy now are controls too
         for t in crate::screens::tools::tools(thread) { ctl.push(CtlEntry { id: format!("tool:{}", t.action), label: t.label.clone(), ctl: Ctl::Node(t.action.clone(), t.value.clone()) }); }
         /* i18n-ok: registered controls the e2e drivers press */ if let Some(o) = crate::screens::order::parse(&thread["order"]).filter(crate::screens::order::payable) { ctl.push(CtlEntry { id: "ui:Buy now".into(), label: if o.label.is_empty() { "Buy now".into() } else { o.label }, ctl: Ctl::None }); }
@@ -879,6 +881,9 @@ impl Render for Backplane {
                     // a buy thread's title is marked an Order with the cart, as 0.14's was (the hub sends its Order card only for a buy thread)
                     .when(head_thread && thread["order"].is_object(), |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("order-mark").flex().items_center().gap(px(3.)).text_size(crate::scale::tpx(11.)).text_color(c("accent"))
                         .tooltip(crate::keys::tip("This thread orders the project's parts", "", light)).child(ic(light, "shopping-cart", 12., "accent")).child(trs("Order"))))
+                    // a thread in review mode says so by its name too (#1305); the bar over the message box says why and switches it
+                    .when(head_thread && thread["review"]["on"] == true, |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("review-mark").flex().items_center().gap(px(3.)).text_size(crate::scale::tpx(11.)).text_color(c("warn"))
+                        .tooltip(crate::keys::tip("Review mode: the design files are read-only for this thread", "", light)).child(ic(light, "search", 12., "warn")).child(trs("Read-only"))))
                     .when(head_thread, |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("thread-title").relative().min_w_0().flex().font_weight(FontWeight::BOLD).child(crate::screens::head::measure(cx, self.screens.head.title.clone())).child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(string(thread, "title")))
                         // the name is not a button (Rename is in its menu): a right click on it, or the ▾ beside it, opens the thread's menu
                         .on_mouse_down(MouseButton::Right, cx.listener(|this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::title_items(&this.data); if !items.is_empty() { this.ctx_open(e.position, items, cx); } })))
@@ -921,6 +926,7 @@ impl Render for Backplane {
                     .when(!self.note.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("dim")).child(crate::i18n::trs(&self.note))))
                     .child(div().flex_shrink_0().relative().child(art::probe("composer")).children(crate::perf::mark("composer")).border_t_1().border_color(c("rule")).flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_3().flex().flex_col().gap_2()
                         .when(show_popup, |d| d.child(div().relative().border_1().border_color(c("line")).bg(c("panel")).child(popup).children(popup_bar)))
+                        .children(crate::screens::review::view(cx, light, &thread["review"]))
                         .children(crate::screens::order::view(cx, light, &thread["order"]))
                         .children(crate::screens::asks::view(cx, light, &self.screens.ask_inputs, &thread["asks"]))
                         .children(crate::screens::voice::pending_view(cx, light, &self.screens.voice, &self.selected.clone()))

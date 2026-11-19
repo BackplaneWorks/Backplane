@@ -42,8 +42,17 @@ Git missing: the turn does not start. It fails with what to do, and the thread g
 
 ## A review is read-only
 
-A request that only asks for a review, an assessment, a summary or a task list (`snapshot::is_review`) puts the thread in review
-mode (setting `review.ro.<thread>`). It lasts through follow-ups until a message asks for a change (fix, update, route, delete...).
+Only a plain review starts review mode (`files/reviewask.rs`, #1305): a SHORT request (one paragraph, at most 280 characters) that
+LEADS with a review ask ("review the board", "audit the schematic", "check over the layout", "what's left?", "summarize...") and asks
+for no change or new work (no fix, add, route, design, make, write, export, fab files...; "make a task list" or "write a summary" is
+the review's own answer). A design brief that also asks for "a summary with renders" or a stock check is work, and a status question
+is no review. The rule fails open: what it cannot place is not a review. The setting `review.ro.<thread>` holds it ("1"); it lasts
+through follow-ups until a message asks for a change (that list, or "go ahead", "keep going", "yes").
+The thread shows it: a bar over the message box ("Read-only: this request looked like a review...") and "Read-only" by the thread's
+name. The bar's Allow edits sends `thread.review {thread, on: false}`: review mode goes off at once, the running turn's guard too (its
+next write goes through), the hub logs it and tells the agent (a running Claude turn at once, through the ride). The setting is then "0"
+and the bar offers Read-only again (`on: true`) until the person's next message, which decides afresh. A review's message tells the
+agent it is read-only and how the person lifts it.
 In review mode:
 
 - The hub refuses writes to design files from `kicad_edit`, `kicad_ipc` (reads, `OpenDocument`, layers, selection, checks and exports

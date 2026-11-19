@@ -37,10 +37,11 @@ mod mirror { pub fn origin_of_root(_: &str) -> String { String::new() } }
 #[path="../agents/skills.rs"] pub mod skills_;
 #[path="../agents/lockrec.rs"] pub mod lockrec_;
 #[path="../agents/halt_view.rs"] pub mod halt_;
+#[path="../agents/review_mode.rs"] pub mod review_mode_;
 #[path="../agents/speed.rs"] pub mod speed_;
 // (the audit draws this machine's threads only: a project on another machine has no listing here)
 mod net { pub mod farfiles { pub fn listing(_: &str, _: &str) -> Option<Result<String, String>> { None } pub fn copy(_: &str, _: &str) -> Option<Result<String, String>> { None } } }
-mod agents { pub use crate::bg_ as bg; pub use crate::inputs_ as inputs; pub use crate::skills_ as skills; pub use crate::lockrec_ as lockrec; pub use crate::halt_ as halt; pub use crate::speed_ as speed; }
+mod agents { pub use crate::bg_ as bg; pub use crate::inputs_ as inputs; pub use crate::skills_ as skills; pub use crate::lockrec_ as lockrec; pub use crate::halt_ as halt; pub use crate::review_mode_ as review_mode; pub use crate::speed_ as speed; }
 use serde_json::json;
 use std::{collections::{BTreeMap,HashSet},path::Path};
 fn main() -> anyhow::Result<()> {

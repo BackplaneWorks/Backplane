@@ -395,6 +395,14 @@ pub fn act(params: &Value, facts: &dyn Facts) -> Option<ActOut> {
             let mut outbox = Map::new(); outbox.insert(rid.to_string(), json!(request));
             Some(ActOut { session_patch: json!({"rid": rid + 1, "outbox": outbox}), cmds: vec![json!({"type": "send", "hub": hub, "text": request}), json!({"type": "scroll"})] })
         }
+        // the review bar's button (#1305): review mode off ("false", Allow edits) or back on ("true"), as the hub's `thread.review`
+        "review-set" => {
+            let sel = s(session, "sel"); if !safe(sel) { return None }
+            let on = match s(params, "value") { "true" => true, "false" => false, _ => return None };
+            let rid = session["rid"].as_u64().unwrap_or(0);
+            let req = json!({"id": rid, "m": "thread.review", "p": {"thread": sel, "on": on}});
+            Some(ActOut { session_patch: json!({"rid": rid + 1}), cmds: vec![json!({"type": "send", "hub": hub, "text": req.to_string()})] })
+        }
         // a halt card's action (agents/halt.rs): `<act>|<do>` for the open thread, as the hub's `thread.halt`
         "halt" => {
             let sel = s(session, "sel"); if !safe(sel) { return None }
@@ -451,6 +459,13 @@ mod tests {
         let o = act(&p("oom5-1|resume"), &Plain).unwrap();
         assert_eq!(serde_json::from_str::<Value>(o.cmds[0]["text"].as_str().unwrap()).unwrap(), json!({"id": 3, "m": "thread.halt", "p": {"thread": "t1", "act": "oom5-1", "do": "resume"}}));
         assert_eq!(o.session_patch["rid"], 4); assert!(act(&p("nobar"), &Plain).is_none()); assert!(act(&p("|resume"), &Plain).is_none());
+    }
+    #[test] fn the_review_bars_button_asks_the_hub_to_switch_review_mode() {
+        struct Plain; impl Facts for Plain { fn bot_thread(&self, _: &str) -> bool { false } fn account_params(&self, _: &str) -> bool { false } }
+        let p = |v: &str| json!({"session": {"sel": "t1", "rid": 3, "drafts": {}, "info": {}}, "action": "review-set", "value": v, "hub": "h"});
+        let req = |v: &str| serde_json::from_str::<Value>(act(&p(v), &Plain).unwrap().cmds[0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(req("false"), json!({"id": 3, "m": "thread.review", "p": {"thread": "t1", "on": false}}));
+        assert_eq!(req("true")["p"]["on"], true); assert!(act(&p("maybe"), &Plain).is_none());
     }
     #[test] fn a_reply_is_a_counted_block_the_clients_take_apart() {
         let b = reply_block("m1", "line one\nline two");
