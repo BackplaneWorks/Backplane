@@ -525,6 +525,7 @@ impl X11WindowState {
             if let Some(titlebar) = params.titlebar
                 && let Some(title) = titlebar.title
             {
+                // WM_NAME is a STRING (Latin-1); a UTF-8 title there reads "Â·" for "·" (#1285). The UTF-8 title is _NET_WM_NAME's.
                 check_reply(
                     || "X11 ChangeProperty8 on window title failed.",
                     xcb.change_property8(
@@ -532,6 +533,16 @@ impl X11WindowState {
                         x_window,
                         xproto::AtomEnum::WM_NAME,
                         xproto::AtomEnum::STRING,
+                        &latin1(&title),
+                    ),
+                )?;
+                check_reply(
+                    || "X11 ChangeProperty8 on _NET_WM_NAME failed.",
+                    xcb.change_property8(
+                        xproto::PropMode::REPLACE,
+                        x_window,
+                        atoms._NET_WM_NAME,
+                        atoms.UTF8_STRING,
                         title.as_bytes(),
                     ),
                 )?;
@@ -1335,7 +1346,7 @@ impl PlatformWindow for X11Window {
                 self.0.x_window,
                 xproto::AtomEnum::WM_NAME,
                 xproto::AtomEnum::STRING,
-                title.as_bytes(),
+                &latin1(title),
             ),
         )
         .log_err();
@@ -1672,3 +1683,9 @@ impl PlatformWindow for X11Window {
         self.0.state.borrow().renderer.gpu_specs().into()
     }
 }
+
+/// A title as X11's STRING type holds it (ISO 8859-1): each character up to U+00FF as its one byte, any other as "?". The full UTF-8 title goes in _NET_WM_NAME.
+fn latin1(title: &str) -> Vec<u8> {
+    title.chars().map(|c| u8::try_from(u32::from(c)).unwrap_or(b'?')).collect()
+}
+
