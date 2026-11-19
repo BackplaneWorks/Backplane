@@ -87,6 +87,23 @@ pub fn guarded_install(me: &Path) -> Option<(PathBuf, PathBuf)> {
     /* i18n-ok: folder names */ (prefix.join("CURRENT").is_file() && guard.is_file()).then(|| (guard, prefix.to_path_buf()))
 }
 
+/// After an update the guard restarts the hub on the new build and moves `<prefix>/CURRENT` to it, but this window is still the old build's
+/// program: what an update changes in the app (and whatever the agent is told the app now does) shows only once the app starts again.
+/// The program of the build CURRENT names when this one is a guarded install's other build, else None (a build tree, the build that runs,
+/// a CURRENT naming no build with an app). Its folder is CURRENT's, so the program it starts answers None and never starts another.
+pub fn moved_build(me: &Path) -> Option<PathBuf> {
+    let (_, prefix) = guarded_install(me)?;
+    /* i18n-ok: a file name */ let cur = std::fs::read_to_string(prefix.join("CURRENT")).ok()?;
+    moved_to(me, &prefix, &cur, |p| p.is_file())
+}
+fn moved_to(me: &Path, prefix: &Path, current: &str, exists: impl Fn(&Path) -> bool) -> Option<PathBuf> {
+    let cur = current.lines().next().unwrap_or("").trim();
+    if cur.is_empty() || cur == "." || cur == ".." || cur.contains(['/', '\\']) { return None }
+    if me.parent()?.file_name()?.to_str()? == cur { return None }
+    let app = prefix.join("builds").join(cur).join(me.file_name()?);
+    exists(&app).then_some(app)
+}
+
 fn detached(cmd: &mut std::process::Command) {
     #[cfg(unix)] { use std::os::unix::process::CommandExt; cmd.process_group(0); }
     // a console of its own that is never shown (CREATE_NO_WINDOW), shared by what the hub starts (git, sh), in its own group (CREATE_NEW_PROCESS_GROUP):
@@ -200,6 +217,25 @@ mod tests {
         let g = d.join(if cfg!(windows) { "backplane.exe" } else { "backplane" }); std::fs::write(&g, b"x").unwrap();
         assert_eq!(guarded_install(&me), Some((g, d.to_path_buf())));
         assert_eq!(guarded_install(&d.join("target/release/backplane-gpui")), None, "a build tree");
+    }
+    /// An update moved CURRENT: the old build's window starts the new build's program; the new build's (and a build tree) starts nothing,
+    /// so a restart never loops; a CURRENT naming no app, a path, or nothing at all is left alone.
+    #[test] fn a_window_of_an_old_build_finds_the_build_the_update_moved_to() {
+        let pre = Path::new("/p"); let exe = if cfg!(windows) { "backplane-gpui.exe" } else { "backplane-gpui" };
+        let old = pre.join("builds/v0.16.1").join(exe); let new = pre.join("builds/v0.16.2").join(exe);
+        let has = |p: &Path| p == new.as_path() || p == old.as_path();
+        assert_eq!(moved_to(&old, pre, "v0.16.2\n", has), Some(new.clone()), "the update moved CURRENT");
+        assert_eq!(moved_to(&new, pre, "v0.16.2\n", has), None, "the new build's window stays");
+        assert_eq!(moved_to(&new, pre, "v0.16.1\n", has), Some(old.clone()), "a rollback moves the window back too");
+        assert_eq!(moved_to(&old, pre, "v0.16.3\n", has), None, "no app in the build CURRENT names");
+        for bad in ["", "\n", "..", "../x", "a\\b", "."] { assert_eq!(moved_to(&old, pre, bad, |_| true), None, "{bad:?}"); }
+        let d = crate::tmp::uncreated("launch-moved");
+        let tag = d.join("builds/v0.16.1"); std::fs::create_dir_all(&tag).unwrap(); std::fs::create_dir_all(d.join("builds/v0.16.2")).unwrap();
+        let me = tag.join(exe); std::fs::write(&me, b"x").unwrap(); std::fs::write(d.join(if cfg!(windows) { "backplane.exe" } else { "backplane" }), b"x").unwrap();
+        std::fs::write(d.join("CURRENT"), "v0.16.1\n").unwrap(); assert_eq!(moved_build(&me), None, "nothing moved");
+        std::fs::write(d.join("CURRENT"), "v0.16.2\n").unwrap(); assert_eq!(moved_build(&me), None, "the new build has no app yet");
+        std::fs::write(d.join("builds/v0.16.2").join(exe), b"x").unwrap(); assert_eq!(moved_build(&me), Some(d.join("builds/v0.16.2").join(exe)));
+        assert_eq!(moved_build(&d.join("target/release").join(exe)), None, "a build tree never moves");
     }
     #[test] fn each_system_has_its_own_default_home() {
         assert_eq!(default_home("linux", Path::new("/home/a")), Path::new("/home/a/.backplane/hub"));

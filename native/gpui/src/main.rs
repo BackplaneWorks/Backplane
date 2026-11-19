@@ -106,12 +106,24 @@ impl Backplane {
         // Closing the window ends the program at once (the window manager's close, Alt+F4): what must not be lost is put away first (the drafts
         // on disk, a screen recording stopped), then the process exits without gpui's teardown, which drew nothing and took a second or two
         // (the renderer's destroy before the window went, every entity's drop). The hub runs on; it sees the socket close.
+        // an installed release: the guard moves CURRENT once an update's hub has run cleanly for a while, after this window reconnected, so it is looked at every 20 s
+        if std::env::current_exe().ok().and_then(|me|launch::guarded_install(&me)).is_some(){cx.spawn(async move|this,cx|loop{cx.background_executor().timer(Duration::from_secs(20)).await;if this.update(cx,|this,_|this.to_moved_build()).is_err(){break}}).detach();}
         {let weak=cx.entity().downgrade();window.on_window_should_close(cx,move|_,cx|{let t=Instant::now();let _=weak.update(cx,|this,_|this.before_exit());
             script::metric(started,"close",serde_json::json!({"put_away_ms":(t.elapsed().as_secs_f64()*1e6).round()/1e3}));std::process::exit(0)});}
         Self{pair,paired,hubs:hubs::load(),hub_menu:false,has_hub,input,data:Value::Null,status:"Connecting…".into(),note:String::new(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:saved.clone(),sent_wait:None,started,usable:false,first_frame:false,script_done:false,timeline:ListState::new(0,ListAlignment::Bottom,px(screens::timeline::RUNWAY)),cats:art::Cats::new(),links_sent:false,links_last:String::new(),sidebar_open:local.sidebar_open,models_pending:false,local,project_page:None,arm_new:None,echo_seq:0,thread_cache:Vec::new(),thread_source:"hub",confirm:None,ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),probes_last:String::new(),last_layout:String::new(),wake_at:None,reconnected:false,had_hello:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total,screens:{let mut s=screens::Screens::new(cx,target,drafts_path,saved);s.elsewhere=elsewhere;s}}
     }
     /// What the window's close keeps before the process exits: the drafts written (bounded, normally a few ms) and a screen recording ended.
     /// (KiCad's holders first: out of every container before the process ends, kicad_pane::release_all)
+    /// The hub answered (at start, and after each restart): when an update moved the install to another build (launch::moved_build), this window is
+    /// the old build's program, so it puts its drafts away and starts the new one with the same arguments, as closing and opening it would.
+    fn to_moved_build(&mut self)->bool{
+        let Some(app)=std::env::current_exe().ok().and_then(|me|launch::moved_build(&me)) else {return false};
+        /* i18n-ok: a log line */ eprintln!("GPUI_LOG {}",serde_json::json!({"moved_build":app.display().to_string()}));
+        self.before_exit();
+        let args:Vec<String>=std::env::args().skip(1).collect();
+        /* i18n-ok: an env name */ let mut c=std::process::Command::new(&app);c.args(crate::hubs::relaunch_with(&args,&crate::hubs::load())).env_remove("BACKPLANE_GPUI_SCRIPT");
+        match c.spawn(){Ok(_)=>std::process::exit(0),Err(e)=>{self.status=crate::i18n::tf("gpui.could.not.restart",&[("why",e.to_string().into())]);false}}
+    }
     fn before_exit(&mut self) {crate::viewers::kicad_pane::release_all();self.screens.drafts.flush();drop(self.screens.imp.take_recording());}
     fn receive(&mut self,event:Event,cx:&mut Context<Self>) {
         let timed=perf::on().then(||(event.name(),Instant::now()));
@@ -169,7 +181,7 @@ impl Backplane {
             // the first message of a thread a page's Send made: refused, the text comes back (never merged) and the error shows; taken, it is done
             Event::Rpc("first-message",ok,why)=>{ let text=self.screens.projects.sending.take(); if !ok { self.screens.projects.refused=why; if let Some(t)=text { let now=self.input.read(cx).content.to_string(); if let Some(t)=screens::projects::give_back(t,&now,&mut self.screens.projects.restore) { self.input.update(cx,|i,cx|i.set(t,cx)); } } } cx.notify(); },
             Event::Term(key,pid,b,reset,state)=>self.term_frame(&key,pid,&b,reset,state,cx),
-            Event::Hello=>{self.streamer_hello(cx);let was=std::mem::replace(&mut self.had_hello,true);self.term_rejoin();if was{self.kicad_rejoin(cx);}self.screens.unsent.live=true;self.send_unsent();},
+            Event::Hello=>{if self.to_moved_build(){return}self.streamer_hello(cx);let was=std::mem::replace(&mut self.had_hello,true);self.term_rejoin();if was{self.kicad_rejoin(cx);}self.screens.unsent.live=true;self.send_unsent();},
             Event::Star(v)=>self.star_offer(&v,cx),
             Event::TmNotice(v)=>self.tm_notice(&v,cx),
             Event::GpNotice(v)=>self.gp_notice(&v,cx),
