@@ -3,6 +3,8 @@
 mod agents; mod memscope; mod scopeprobe; mod api; mod fab; mod plan; mod review; mod google; mod import014; mod auth; mod bots; mod cbor; mod commands; mod data; mod copy; mod delta; mod files; mod guard; mod hub; mod md; mod mcpx; mod mirror; mod model; mod mouse; mod net; mod plat; #[cfg(test)] #[path = "plat/tests.rs"] mod plat_tests; mod present;
 mod presenter; mod proc; mod push; mod session; mod settings; mod shelf; mod sidebar; mod signal; mod stamp; mod state; #[path = "state/host.rs"] mod statehost; mod ckpt; mod ckptrun; #[cfg(test)] mod fold_inputs; #[cfg(test)] mod oneshot_script_tests; mod startup; mod store; mod term; mod update; mod voice; mod wire; mod window;
 
+#[cfg(test)] #[path = "../../winres.rs"] mod winres; #[cfg(test)] mod winres_tests;
+
 use anyhow::{Context, Result};
 use auth::Req;
 use futures_util::{SinkExt, StreamExt};
