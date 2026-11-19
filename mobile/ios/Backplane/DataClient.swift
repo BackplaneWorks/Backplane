@@ -1045,6 +1045,11 @@ final class DataClient {
     func find(_ thread: String, _ q: String) async -> DFind? { try? await call("find", ["thread": thread, "q": q]) }
     func searchIn(_ thread: String, _ q: String) async -> [DHit] { (try? await call("search", ["q": q, "thread": thread, "limit": 60], as: DHits.self))?.messages ?? [] }
     func order(_ thread: String) async throws -> DOrder? { (try await call("thread.order", ["thread": thread]) as DOrderReply).order }
+    /// The review bar (feature reviewmode, #1305), nil while the thread is no review; with `on`, the person's press first (the hub's `thread.review`), then the bar as it is now.
+    func review(_ thread: String, on: Bool? = nil) async throws -> DReviewBar? {
+        var p: [String: Any] = ["thread": thread]; if let on { p["on"] = on }
+        return (try await call("thread.review", p) as DReviewReply).review.flatMap { $0.drawn ? $0 : nil }
+    }
     func picker(thread: String?, _ choice: DNewThreadChoice = DNewThreadChoice()) async throws -> DPicker {
         var p = choice.params; if let thread { p["thread"] = thread }
         return (try await call("thread.picker", p) as DPickerReply).picker

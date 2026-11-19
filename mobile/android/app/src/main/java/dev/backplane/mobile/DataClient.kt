@@ -824,6 +824,9 @@ object DataClient {
         val st = o.optJSONArray("steps")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { OrderStep(it.optString("label"), it.optString("mark")) } } ?: emptyList()
         return Order(o.optString("name"), st, o.optString("line"), o.optBoolean("waiting"), o.optString("total"), o.optString("customs"), o.optString("pay"), o.optString("label"))
     }
+    // the review bar (feature reviewmode, #1305): the hub's, drawn as it says; null while the thread is no review. The button is the same `thread.review` with `on`
+    suspend fun review(tid: String): DReviewBar? = DReviewBar.of(call("thread.review", JSONObject().put("thread", tid)).optJSONObject("review"))
+    suspend fun reviewSet(tid: String, on: Boolean): DReviewBar? = DReviewBar.of(call("thread.review", JSONObject().put("thread", tid).put("on", on)).optJSONObject("review"))
     suspend fun picker(thread: String?, choice: DNewThreadChoice = DNewThreadChoice()): DPicker {
         val p = choice.into(JSONObject()); if (thread != null) p.put("thread", thread)
         return parsePicker(call("thread.picker", p).getJSONObject("picker"))
@@ -1096,6 +1099,13 @@ object DataClient {
 
 /** The GitHub star suggestion while the hub says it is out and undecided (feature "star", native/host/src/state/star.rs): from star.offer at every
  *  (re)connect and from a `{"t":"star","offer"}` frame (null hides it). The hub decides when; the app shows exactly this. */
+/** The review bar over the message box (feature reviewmode, docs/PHONE-DATA.md): `on` the thread is read-only and `text` says why; the button sends `value`
+ *  (false: Allow edits, review mode off; true: Read-only again). The hub's words, drawn as they are. */
+data class DReviewBar(val on: Boolean, val text: String, val button: String, val tip: String, val value: Boolean) {
+    companion object {
+        fun of(o: JSONObject?): DReviewBar? = o?.let { if (it.optString("text").isEmpty() || it.optString("button").isEmpty()) null else DReviewBar(it.optBoolean("on"), it.optString("text"), it.optString("button"), it.optString("tip"), it.optBoolean("value")) }
+    }
+}
 data class DStarOffer(val token: String, val text: String, val url: String, val label: String, val repo: String = "", val why: String = "") {
     /** where the card says the repository is: the address without its scheme */
     val place get() = if (repo.isNotEmpty()) "github.com/$repo" else url.removePrefix("https://")

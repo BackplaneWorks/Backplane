@@ -20,7 +20,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -515,6 +515,12 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
         "thread.order" => { let th = s(p, "thread"); if th.is_empty() { return Err(err("thread")) }
             let o = crate::statehost::policies().and_then(|q| q.with_state(|st| crate::present::thread::order_json(st, th, st.threads.get(th).map_or(false, |t| t.turn == crate::state::Turn::Running)))).unwrap_or(Value::Null);
             Ok(json!({"order":o})) }
+        // #1305: the review bar (agents/review_mode.rs `bar`, what the desktop draws over the message box), null while the thread is no review; with `on`
+        // (true/false), the person's press first: the hub's own `thread.review {thread, on}` (logged, the running turn's guard switched, the agent told)
+        "thread.review" => { let th = s(p, "thread"); if th.is_empty() { return Err(err("thread")) }
+            if let Some(on) = p.get("on").and_then(Value::as_bool) { rpc(hub, c, "thread.review", json!({"thread":th,"on":on})).await?; }
+            let v = hub.setting(&crate::agents::review_mode::review_key(th)).await.unwrap_or_default();
+            Ok(json!({"review":crate::agents::review_mode::bar(&v)})) }
         "dirs.list" => dirs(p),
         "project.add" => {
             let path = s(p, "path"); if path.is_empty() { return Err(err("path")) }

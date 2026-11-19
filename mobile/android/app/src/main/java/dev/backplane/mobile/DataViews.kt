@@ -619,6 +619,9 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
     val rowsNow by rememberUpdatedState(rows); var found by remember(id) { mutableStateOf("") } // the row find or a search hit went to, marked
     var order by remember(id) { mutableStateOf<DataClient.Order?>(null) }
     LaunchedEffect(id, list.size, thread?.state, DataClient.conn) { if (DataClient.has("order")) runCatching { DataClient.order(id) }.onSuccess { order = it } }
+    // the review bar (#1305): asked again when the thread's entries or turn change (a review starts with a turn; a press anywhere logs a line)
+    var review by remember(id) { mutableStateOf<DReviewBar?>(null) }; var reviewing by remember(id) { mutableStateOf(false) }
+    LaunchedEffect(id, list.size, thread?.state, DataClient.conn) { if (DataClient.has("reviewmode")) runCatching { DataClient.review(id) }.onSuccess { review = it } }
     LaunchedEffect(id, all.size, thread?.state, DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE) runCatching { DataClient.loadQueue(id) } }
     // Buy it: the hub's button for this thread (a KiCad project or fab files ready to order), asked again when the turn ends
     var buy by remember(id) { mutableStateOf<DataClient.Buy?>(null) }; var buying by remember(id) { mutableStateOf(false) }
@@ -685,6 +688,7 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
             if (thread?.state == "working") item("working") { WorkingRow() }
         }
         DLine()
+        review?.let { r -> ReviewBar(r, !reviewing) { if (!reviewing) { reviewing = true; scope.launch { try { review = DataClient.reviewSet(id, r.value) } catch (e: Exception) { notice = e.message ?: "" } finally { reviewing = false } } } } }
         order?.let { OrderCard(it) }
         MentionPopup(draft) { put(it) }
         DataClient.btw[id]?.let { b -> BtwCard(b) { DataClient.closeBtw(id) } }
@@ -1207,6 +1211,16 @@ private fun ImproveScreen(back: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+/** The review bar (#1305): while the thread is read-only, why, and Allow edits; just after the person switched it off, Read-only again. The hub's words. */
+@Composable
+internal fun ReviewBar(r: DReviewBar, enabled: Boolean, press: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).border(BorderStroke(1.dp, if (r.on) dwarn else dcs.outlineVariant)).background(dcs.surfaceVariant).padding(horizontal = 10.dp, vertical = 6.dp).testTag("thread.review"),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        DMono(Tr.t(r.text), if (r.on) dcs.onSurface else dcs.onSurfaceVariant, 12, Modifier.weight(1f).testTag("thread.review.text"), lines = 3)
+        DBtn(Tr.t(r.button), false, enabled, Modifier.testTag("thread.review.button")) { press() }
     }
 }
 

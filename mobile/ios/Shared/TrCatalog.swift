@@ -4505,6 +4505,14 @@ mouse.chooseaninputforitabove41	Choose an input for it above.	上で操作を割
 mouse.nothingissettopan42	Nothing is set to pan	パンに割り当てた操作がありません	Nada está asignado a desplazar
 mouse.nothingissettozoom43	Nothing is set to zoom	ズームに割り当てた操作がありません	Nada está asignado a zoom
 mouse.nothingissettorotate44	Nothing is set to rotate	回転に割り当てた操作がありません	Nada está asignado a girar
+gpui.review.mark	Read-only	読み取り専用	Solo lectura
+gpui.review.mark.tip	Review mode: the design files are read-only for this thread	レビューモード：このスレッドでは設計ファイルは読み取り専用です	Modo revisión: los archivos de diseño son de solo lectura en este hilo
+gpui.review.why	Read-only: this request looked like a review, so Backplane refuses changes to the design files.	読み取り専用：この依頼はレビューと判断されたため、Backplaneは設計ファイルへの変更を拒否します。	Solo lectura: esta petición parecía una revisión, así que Backplane rechaza cambios en los archivos de diseño.
+gpui.review.allow	Allow edits	編集を許可	Permitir cambios
+gpui.review.allow.tip	Switch review mode off: the agent may change the design files	レビューモードをオフにする：エージェントが設計ファイルを変更できます	Desactivar el modo revisión: el agente puede cambiar los archivos de diseño
+gpui.review.off	Edits allowed: you switched review mode off for this thread.	編集可：このスレッドのレビューモードをオフにしました。	Cambios permitidos: desactivaste el modo revisión en este hilo.
+gpui.review.again	Read-only again	再び読み取り専用に	Volver a solo lectura
+gpui.review.again.tip	Switch review mode back on: the design files are read-only again	レビューモードをオンに戻す：設計ファイルは再び読み取り専用になります	Volver a activar el modo revisión: los archivos de diseño vuelven a ser de solo lectura
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}

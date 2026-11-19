@@ -45,5 +45,13 @@ for a in ["shown", "close", "off"] {
     check(p.count == 2 && p["token"] as? String == "t1" && p["action"] as? String == a, "telemetry act \(a)", p)
 }
 
+// the review bar (feature reviewmode, #1305): the hub's words and the value its button sends; nothing to draw is no bar
+let rb = try! JSONDecoder().decode(DReviewReply.self, from: Data(#"{"review":{"on":true,"text":"Read-only: this request looked like a review, so Backplane refuses changes to the design files.","button":"Allow edits","tip":"t","value":false}}"#.utf8)).review
+check(rb == DReviewBar(on: true, text: "Read-only: this request looked like a review, so Backplane refuses changes to the design files.", button: "Allow edits", tip: "t", value: false) && rb!.drawn, "review bar on", String(describing: rb))
+let ro = try! JSONDecoder().decode(DReviewReply.self, from: Data(#"{"review":{"on":false,"text":"Edits allowed","button":"Read-only again","value":true}}"#.utf8)).review
+check(ro?.value == true && ro?.on == false, "review bar off: pressed again, back on", String(describing: ro))
+check(try! JSONDecoder().decode(DReviewReply.self, from: Data(#"{"review":null}"#.utf8)).review == nil, "no review: no bar", "")
+check(try! JSONDecoder().decode(DReviewReply.self, from: Data(#"{"review":{"on":true}}"#.utf8)).review?.drawn == false, "nothing to draw", "")
+
 print("wire-json: \(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

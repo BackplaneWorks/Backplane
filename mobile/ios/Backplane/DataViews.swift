@@ -736,6 +736,8 @@ struct DataThreadView: View {
     @State private var openRuns: Set<String> = []
     @State private var atEnd = true
     @State private var order: DOrder?
+    @State private var review: DReviewBar?
+    @State private var reviewing = false
     @State private var buy: DBuy?          // Buy it, when the hub offers it for this thread
     @State private var buying = false
     @State private var finding = false     // Search in thread
@@ -754,6 +756,11 @@ struct DataThreadView: View {
     /// the find bar's current match: marked, and gone to
     private func findGoTo() { guard let i = findAt, let r = findRes, r.matches.indices.contains(i) else { return }; mark = r.matches[i].msg; findGo = r.matches[i].msg }
     private func findStep(_ by: Int) { findAt = ThreadFind.step(findAt, count: findRes?.matches.count ?? 0, by: by); findGoTo() }
+    /// the review bar's button: the hub's `thread.review {on}`, then the bar as it is after it
+    private func press(_ r: DReviewBar) {
+        guard !reviewing else { return }; reviewing = true
+        Task { do { review = try await client.review(id, on: r.value) } catch { notice = error.localizedDescription }; reviewing = false }
+    }
     private func findClose() { findOpen = false; findFocus = false; findQ = ""; findRes = nil; findAt = nil; mark = nil }
 
     private var thread: DThread? { client.threads.first { $0.id == id } }
@@ -827,6 +834,7 @@ struct DataThreadView: View {
                     findGo = nil
                 }
             }
+            if let review { DataReviewBar(bar: review, enabled: !reviewing) { press(review) } }
             if let order { DataOrderCard(order: order) }
             if let m = thread?.mark { Text(dAway(Tr.t(m.runs), m.away)).dmono(11).foregroundStyle(BackplaneDesign.faint).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.top, 4).accessibilityIdentifier("data.thread.runs") }
             DataMentionBar(client: client, text: text) { text = $0; client.setDraft(id, $0) }
@@ -852,6 +860,8 @@ struct DataThreadView: View {
             caret = (VoiceEdit.utf16(new, caret: c.at), rev)
         }
         .task(id: "\(list.count)|\(thread?.state ?? "")|\(client.conn == .online)") { if client.has("order"), let o = try? await client.order(id) { order = o } else if !client.has("order") { order = nil } }
+        // the review bar (#1305): asked again when the thread's entries or turn change (a review starts with a turn; a press anywhere logs a line)
+        .task(id: "r|\(list.count)|\(thread?.state ?? "")|\(client.conn == .online)") { if client.has("reviewmode") { if let r = try? await client.review(id) { review = r } } else { review = nil } }
         .task(id: "\(thread?.state ?? "")|\(client.conn == .online)") { if client.conn == .online, thread?.state != "working" { buy = await client.buyOf(id) } }
         .background(BackplaneDesign.background)
         .dataBar(thread?.title.isEmpty == false ? thread!.title : Tr.t("Thread"))
@@ -1510,6 +1520,21 @@ struct DataLocalImage: View {
                 .fullScreenCover(isPresented: $full) { DImageFull(image: u, data: data) { full = false } }
                 .accessibilityIdentifier("data.entry.image")
         }
+    }
+}
+
+/// The review bar (#1305): while the thread is read-only, why, and Allow edits; just after the person switched it off, Read-only again. As the Android app's ReviewBar.
+struct DataReviewBar: View {
+    let bar: DReviewBar
+    let enabled: Bool
+    let press: () -> Void
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(Tr.t(bar.text)).dmono(12).foregroundStyle(bar.on ? BackplaneDesign.text : BackplaneDesign.dim).frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("thread.review.text")
+            Button(Tr.t(bar.button)) { press() }.buttonStyle(DButton(compact: true)).disabled(!enabled).accessibilityIdentifier("thread.review.button")
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6).background(BackplaneDesign.panel).overlay(Rectangle().strokeBorder(bar.on ? BackplaneDesign.warn : BackplaneDesign.line, lineWidth: 1))
+        .padding(.horizontal, 12).padding(.vertical, 6).accessibilityElement(children: .contain).accessibilityIdentifier("thread.review")
     }
 }
 

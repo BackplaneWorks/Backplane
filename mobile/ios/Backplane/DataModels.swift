@@ -390,6 +390,19 @@ struct DOrder: Decodable, Equatable {
     var payURL: URL? { (pay.hasPrefix("https://") || pay.hasPrefix("http://")) ? URL(string: pay) : nil }
 }
 struct DOrderReply: Decodable { var order: DOrder? }
+/// The review bar over the message box (feature reviewmode, `thread.review`, #1305): `on` the thread is read-only and `text` says why; the button sends `value`
+/// (false: Allow edits, review mode off; true: Read-only again). The hub's words, drawn as they are; nothing to draw is no bar.
+struct DReviewBar: Decodable, Equatable {
+    var on = false, value = false; var text = "", button = "", tip = ""
+    init(on: Bool, text: String, button: String, tip: String, value: Bool) { self.on = on; self.text = text; self.button = button; self.tip = tip; self.value = value }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: K.self); func s(_ k: K) -> String { (try? c.decode(String.self, forKey: k)) ?? "" }; func b(_ k: K) -> Bool { (try? c.decode(Bool.self, forKey: k)) ?? false }
+        on = b(.on); value = b(.value); text = s(.text); button = s(.button); tip = s(.tip)
+    }
+    enum K: String, CodingKey { case on, text, button, tip, value }
+    var drawn: Bool { !text.isEmpty && !button.isEmpty }
+}
+struct DReviewReply: Decodable { var review: DReviewBar? }
 /// What a new thread will run with, chosen before it exists.
 struct DNewThreadChoice: Equatable {
     var provider: String?; var model: String?; var effort: String?; var runtime: String?; var speed: String?
