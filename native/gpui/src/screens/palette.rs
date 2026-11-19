@@ -92,8 +92,8 @@ fn items(data: &Value, can_embed: bool) -> Vec<Item> {
     let viewer = &thread["viewer"];
     let simulation = crate::viewers::kicad_pane::rail_simulation(viewer, can_embed).is_some();
     for row in crate::ui::rail_rows(viewer, simulation) {
-        if row.state == "disabled" { continue }
-        v.push(Item { label: trs(row.label), place: trs("viewer"), kind: "action", what: Do::Rail(row.id.into(), row.key.into()), row: Value::Null });
+        if row.state == "disabled" || row.id == "commands" || (!thread.is_object() && row.id != "terminal") { continue }
+        v.push(Item { label: trs(row.label), place: if row.id == "terminal" { String::new() } else { trs("viewer") }, kind: "action", what: Do::Rail(row.id.into(), row.key.into()), row: Value::Null });
     }
     if thread.is_object() {
         v.push(Item { label: trs("Agent, model and effort"), place: String::new(), kind: "action", what: Do::Models, row: Value::Null });
@@ -239,7 +239,6 @@ impl Backplane {
             Do::Message(id, msg) => { let q = self.screens.palette.q.trim().to_string(); self.find_open_at(&id, &msg, &q, cx); }
             Do::Rail(id, _) => match id.as_str() {
                 "terminal" => cx.defer(|cx| cx.dispatch_action(&crate::keys::ToggleTerminal)),
-                "commands" => self.palette_open(cx),
                 "simulation" => self.open_simulation(cx),
                 "diff" => self.rail_press("diff", "", cx),
                 kind => self.rail_press("view-kind", kind, cx),
@@ -302,6 +301,11 @@ mod tests {
     use core::prelude::v1::test;
     fn data() -> Value { json!({"thread": {"tools": [{"label": "Pin", "action": "pin"}, {"label": "Delete", "action": "delete"}], "menu": []},
         "projects": [{"id": "h|p1", "title": "Demo", "threads": [{"id": "h|t1", "title": "Board layout review"}, {"id": "h|t2", "title": "Power budget"}], "settled": [{"id": "h|t3", "title": "Old notes"}]}]}) }
+    #[test] fn no_thread_offers_only_terminal_from_the_rail() {
+        let rails: Vec<_> = items(&json!({}), true).into_iter().filter(|i| matches!(i.what, Do::Rail(..))).collect();
+        assert_eq!(rails.len(), 1);
+        assert_eq!((&*rails[0].label, &*rails[0].place), ("Terminal", ""));
+    }
     #[test] fn viewer_commands_require_an_available_rail_entry() {
         let mut d = data();
         d["thread"]["viewer"]["rail"] = json!([{"id":"board","state":"disabled"},{"id":"files","state":"on"}]);
@@ -319,8 +323,8 @@ mod tests {
             {"id":"commands","label":"Commands","key":"","state":"off"}
         ]}}});
         let rows: Vec<_> = items(&d, true).into_iter().filter(|i| matches!(i.what, Do::Rail(..))).collect();
-        assert_eq!(rows.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Simulation", "Project files", "Terminal", "Commands"]);
-        for (item, (id, key)) in rows.iter().zip([("simulation", ""), ("files", "f"), ("terminal", "`"), ("commands", "")]) {
+        assert_eq!(rows.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Simulation", "Project files", "Terminal"]);
+        for (item, (id, key)) in rows.iter().zip([("simulation", ""), ("files", "f"), ("terminal", "`")]) {
             assert_eq!(shortcut(item, "", &local), crate::ui::rail_hint(&local, id, key));
         }
         assert!(!items(&d, false).iter().any(|i| i.label == "Simulation"));

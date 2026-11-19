@@ -41,11 +41,21 @@ fn rail_layout(height: Pixels, row: Pixels, tools: usize) -> (Pixels, Pixels) {
     (height - footer, footer)
 }
 
-fn rail_sections(pages: Vec<AnyElement>, tools: Vec<AnyElement>, rule: Rgba) -> impl IntoElement {
+// Distances are measured down from the top of the scroll content, including group gaps.
+fn reveal_rail_row(offset: Pixels, top: Pixels, row: Pixels, viewport: Pixels) -> Pixels {
+    (top + row - viewport).max(offset).min(top).max(px(0.))
+}
+
+fn rail_sections(scroll: ScrollHandle, reveal: Option<Pixels>, pages: Vec<AnyElement>, tools: Vec<AnyElement>, rule: Rgba) -> impl IntoElement {
     canvas(move |bounds, window, cx| {
         let (page_h, footer_h) = rail_layout(bounds.size.height, crate::scale::tpx(48.), tools.len());
+        if let Some(top) = reveal {
+            let old = scroll.offset();
+            let y = reveal_rail_row(-old.y, top, crate::scale::tpx(48.), page_h);
+            scroll.set_offset(point(old.x, -y));
+        }
         let mut sections = div().w(bounds.size.width).h(bounds.size.height).flex().flex_col()
-            .child(div().id("rail-pages").h(page_h).overflow_y_scroll().flex().flex_col().children(pages))
+            .child(div().id("rail-pages").h(page_h).overflow_y_scroll().track_scroll(&scroll).flex().flex_col().children(pages))
             .when(!tools.is_empty(), |d| d.child(div().h(footer_h).flex_shrink_0().border_t_1().border_color(rule).flex().flex_col().children(tools)))
             .into_any_element();
         sections.prepaint_as_root(bounds.origin, bounds.size.map(AvailableSpace::Definite), window, cx);
@@ -831,12 +841,17 @@ impl Render for Backplane {
         let sim_rail = crate::viewers::kicad_pane::rail_simulation(&thread["viewer"], crate::viewers::kicad_pane::local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), thread)).is_some();
         let sim_on = sim_rail && !thread["diff"].is_object() && self.simulation_on(cx) && self.kicad_for(thread, cx).is_some();
         let mut previous_group = None;
+        let mut page_top = px(0.);
+        let mut selected_row = None;
         for row in rail_rows(&thread["viewer"], sim_rail) {
             let rail = if row.group == "tools" { &mut rail_tools } else { &mut rail_pages };
-            if row.group != "tools" && previous_group.is_some_and(|g| g != row.group) {
-                rail.push(div().h(px(12.)).flex_shrink_0().into_any_element());
+            if row.group != "tools" {
+                if previous_group.is_some_and(|g| g != row.group) {
+                    rail.push(div().h(px(12.)).flex_shrink_0().into_any_element());
+                    page_top += px(12.);
+                }
+                previous_group = Some(row.group);
             }
-            previous_group = Some(row.group);
             let id = row.id;
             let disabled = row.state == "disabled";
             let active = !disabled && match id {
@@ -845,25 +860,17 @@ impl Render for Backplane {
                 _ if sim_on => false,
                 _ => viewer_row_on(&row, self.screens.rail_pending.as_deref(), &active_kind),
             };
+            if row.group != "tools" {
+                if active { selected_row = Some((row.id, page_top)); }
+                page_top += crate::scale::tpx(48.);
+            }
             let mut button = with_rect(div().id(SharedString::from(format!("rail-{}", row.label))), || format!("rail:{}", row.label))
                 .relative().flex().flex_col().items_center().h(crate::scale::tpx(48.)).flex_shrink_0().justify_center().gap_1().text_size(rail_label())
                 .when(active, |d| d.bg(c("raise")).border_l_2().border_color(c("accent")))
                 .text_color(c(if active { "text" } else { "dim" }))
                 .child(ic(light, art::icon_name(row.icon).unwrap_or("folder"), 18., if active { "accent" } else { "dim" })).child(trs(row.label));
             if disabled {
-                let hovered = self.screens.rail_hover.as_deref() == Some(id);
-                let hover_id = id.to_owned();
-                button = button.opacity(0.45).on_hover(cx.listener(move |this, on: &bool, _, cx| {
-                    if *on { this.screens.rail_hover = Some(hover_id.clone()); }
-                    else if this.screens.rail_hover.as_deref() == Some(&hover_id) { this.screens.rail_hover = None; }
-                    cx.notify();
-                }));
-                if hovered {
-                    let height = crate::scale::tpx(26.);
-                    let tip = div().h(height).flex().items_center().px_2().whitespace_nowrap().bg(c("panel")).border_1().border_color(c("line")).text_color(c("text")).text_size(crate::scale::tpx(11.)).child(trs(row.why));
-                    button = button.child(div().absolute().left(px(-6.)).top((crate::scale::tpx(48.) - height) / 2.)
-                        .child(deferred(anchored().anchor(Corner::TopRight).child(tip)).with_priority(3)));
-                }
+                button = button.opacity(0.45).tooltip(crate::keys::tip(row.why, "", light));
             } else {
                 let letter = row.key;
                 let hint = rail_hint(&self.local, id, letter);
@@ -883,6 +890,11 @@ impl Render for Backplane {
             }
             rail.push(button.into_any_element());
         }
+        let selected = selected_row.map(|(id, _)| id);
+        let reveal = if !kscreen && self.screens.rail_last_lit.as_deref() != selected {
+            self.screens.rail_last_lit = selected.map(str::to_owned);
+            selected_row.map(|(_, top)| top)
+        } else { None };
         // the open asks' buttons are controls too (the harness answers them by index: ask:<i>:<j>)
         for (i, a) in crate::screens::asks::parse(&thread["asks"]).into_iter().enumerate() {
             for (j, b) in a.buttons.iter().enumerate() { ctl.push(CtlEntry { id: format!("ask:{i}:{j}"), label: b.label.clone(), ctl: Ctl::Node("answer".into(), b.value.clone()) }); }
@@ -1075,7 +1087,7 @@ impl Render for Backplane {
                 .children(crate::perf::mark("viewer"))
                 .children(crate::screens::viewer::is_open(thread).then(|| self.screens.parts.el(Backplane::viewer_part, StyleRefinement::default().flex_1().min_h_0(), cx)).and_then(|page| crate::screens::viewer::pane(cx, light, thread, page)))
                 // right rail
-                .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).children(crate::perf::mark("rail")).border_l_1().border_color(c("rule")).flex().flex_col().py_2().when(kscreen, |d| d.w(px(0.)).border_l_0().py_0().overflow_hidden()).when(!kscreen, |d| d.child(rail_sections(rail_pages, rail_tools, c("rule"))))))
+                .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).children(crate::perf::mark("rail")).border_l_1().border_color(c("rule")).flex().flex_col().py_2().when(kscreen, |d| d.w(px(0.)).border_l_0().py_0().overflow_hidden()).when(!kscreen, |d| d.child(rail_sections(self.screens.rail_scroll.clone(), reveal, rail_pages, rail_tools, c("rule"))))))
             // the one-time telemetry notice (screens/tmnotice.rs)
             .children({ let (n, shown) = (self.screens.tm_notice.clone(), self.screens.tm_shown.clone()); crate::screens::tmnotice::strip(cx, n.as_ref(), &shown, light) })
             // the one-time notice that the hub no longer pushes on its own (#1171)
@@ -1136,6 +1148,15 @@ mod tests {
         assert_eq!(rail_rows(&Value::Null, false).last().unwrap().id, "commands");
     }
 
+    #[test]
+    fn reveal_only_scrolls_as_far_as_the_selected_row_needs() {
+        use gpui::px;
+        let offset = |old, top, height| super::reveal_rail_row(px(old), px(top), px(48.), px(height));
+        assert_eq!(offset(0., 396., 300.), px(144.));
+        assert_eq!(offset(144., 180., 300.), px(144.));
+        assert_eq!(offset(144., 48., 300.), px(48.));
+        assert_eq!(offset(0., 396., 24.), px(396.));
+    }
     #[test]
     fn short_rail_reserves_the_tools_before_allocating_scroll_space() {
         use gpui::px;

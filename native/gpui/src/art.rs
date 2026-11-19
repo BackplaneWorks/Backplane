@@ -389,6 +389,8 @@ pub fn probes_frame_done() { let f = PROBE_FRAME.fetch_add(1, std::sync::atomic:
 /// An invisible overlay recording its parent control's rectangle (physical window px) under the control's id.
 pub fn probe_rect(id: String) -> AnyElement {
     canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
+        // A rail row outside the scrolling pages must never supply a click target over the pinned tools.
+        if id.starts_with("rail:") && b.intersect(&window.content_mask().bounds) != b { return; }
         let s = window.scale_factor();
         let mut g = CTL_RECTS.lock().unwrap();
         let m = g.get_or_insert_with(Default::default);
