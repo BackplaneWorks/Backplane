@@ -379,7 +379,10 @@ fn waiting(ev: &[Value]) -> Vec<String> { let mut m = std::collections::BTreeMap
 #[tokio::test(flavor = "multi_thread")] async fn a_restart_brings_back_every_cut_thread_oldest_first_and_a_few_at_a_time() {
     let sd = dir("ca-bin"); perf_standin(&sd, 1);
     let (hub, ag, _h, _w) = start("ca", |w| cut_log(w, 10), |_| Cli::standin(&sd)).await;
-    let ev = until(&hub, 0, 45, |ev| carried(ev).len() == 10 && ev.iter().filter(|e| turn_is(e, "completed")).count() == 10).await;
+    // each carried turn starts once its snapshot is taken (snapguard.rs, #1163): about 6 to 10 s a turn on the Windows runner under load (Nov 19), 10 of them in a
+    // row. Each next one is waited for on its own, so a line that stops still fails within a turn's wait, not after a deadline sized for all ten
+    for k in 1..=10 { let ev = until(&hub, 0, 40, |ev| carried(ev).len() >= k).await; assert!(carried(&ev).len() >= k, "the line stopped at {}: {:?}", k - 1, carried(&ev)); }
+    let ev = until(&hub, 0, 60, |ev| carried(ev).len() == 10 && ev.iter().filter(|e| turn_is(e, "completed")).count() == 10).await;
     let c = carried(&ev); let order: Vec<String> = c.iter().map(|x| x.0.clone()).collect();
     assert_eq!(order, (0..10).rev().map(tid).collect::<Vec<_>>(), "the longest running first, every one of them, once");
     for i in 0..10 { let th = tid(i);
@@ -406,7 +409,10 @@ fn waiting(ev: &[Value]) -> Vec<String> { let mut m = std::collections::BTreeMap
     let marked = |ev: &[Value]| ev.iter().filter(|e| is(e, "SettingSet") && e["key"].as_str().unwrap_or("").starts_with("carry.wait.") && e["value"] == "1").map(|e| e["key"].to_string()).collect::<std::collections::BTreeSet<_>>().len();
     assert_eq!(marked(&log_from(&hub, 0).await), 6, "all of them are written down");
     hub.commit(&json!({"$":"SettingSet","key":"restart.continue","value":"off","at":1700000200})).await.unwrap();
-    let ev = until(&hub, 0, 12, |ev| waiting(ev).is_empty()).await;
+    // the burst first, however long its starts take (each takes the turn's snapshot: about 2.5 s on the Windows runner, the burst 10 s, against 1 s on
+    // macOS; Nov 19), then the line: each in it is judged a CARRY_GAP_S after the one before, so it is empty within those gaps (and a start's worth more)
+    until(&hub, 0, 60, |ev| carried(ev).len() >= BURST).await;
+    let ev = until(&hub, 0, (6 - BURST as u64) * CARRY_GAP_S + 6, |ev| waiting(ev).is_empty()).await;
     assert_eq!(waiting(&ev), Vec::<String>::new()); assert_eq!(carried(&ev).len(), BURST); ag.shutdown();
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_second_restart_keeps_the_line_and_forgets_what_the_person_took_over() {
@@ -1568,8 +1574,12 @@ async fn lock_now(ag: &Arc<Agents>, name: &str) -> Value { ag.tool_lock_list().a
     assert!(ag.tool_work_cancel(T2, &json!({"id":bid})).await.0, "the running job");
     // the timed-out job keeps the lock: nothing after it starts until it really ends
     let (_, e) = ag.tool_work_run(T1, &json!({"command":format!("touch '{}'", mark("e").display()),"lock":"x","note":"after"})).await; assert!(e["state"].as_str().unwrap().starts_with("waiting"), "{e}");
-    let ev = until(&hub, from, 20, |ev| said(ev, T3, "timed out, still running, lock retained")).await; assert!(said(&ev, T2, "\"cancelled running\" ended: cancelled"), "{ev:?}");
+    // the timeout is judged by the job's row, which the hub sets the moment it fires: the "timed out" message reaches the thread when its actor is
+    // free, and T3's had just started a turn on the earlier report, waiting on that turn's snapshot (about 9 s on the Windows runner under load, Nov 19),
+    // by which time the 6 s job had finished
+    until(&hub, from, 20, |ev| ev.iter().any(|e| is(e, "WorkSet") && e["rows"].as_str().map_or(false, |r| r.contains(crate::agents::locks::TIMED_OUT) && r.contains("times out")))).await;
     assert!(lock_now(&ag, "x").await["holder"]["note"] == "times out" && !mark("e").exists() && !mark("d").exists(), "held past its timeout");
+    let ev = until(&hub, from, 60, |ev| said(ev, T3, "timed out, still running, lock retained")).await; assert!(said(&ev, T2, "\"cancelled running\" ended: cancelled"), "{ev:?}");
     let (_, l) = ag.tool_work_list(T3).await; assert_eq!(l["work"][0]["state"], "watching (timed out, still running)", "{l}");
     until(&hub, from, 20, |ev| said(ev, T1, "\"after\" ended: exit 0")).await;
     assert!(mark("d").exists() && mark("e").exists() && !mark("c").exists() && !mark("b").exists());
@@ -1806,7 +1816,9 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     let h2 = hub.clone(); let t = tokio::spawn(async move { rpc(&h2, "turn.start", json!({"thread":T1,"text":"zqshort hi"})).await });
     tokio::time::sleep(Duration::from_millis(600)).await; assert_eq!(ag.stats.procs_spawned.load(Relaxed), 0, "it waits for the job's answer");
     hub.commit(&json!({"$":"WorktreeSkipped","id":T1,"at":1700000200})).await.unwrap();
-    // well inside the 60 s the wait gives a worktree: the answer "no repository" ends it
+    // well inside the 60 s the wait gives a worktree: the answer "no repository" ends it. The agent starts once the turn's snapshot of the project is taken
+    // (snapguard.rs, #1163; a fresh folder made a repository first: 9 s on the Windows runner under load, Nov 19), then it runs its turn
+    until(&hub, from, 60, |ev| ev.iter().any(|e| is(e, "SessionSet") && e["id"] == T1)).await;
     let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await; assert!(ev.iter().any(|e| turn_is(e, "completed")), "{ev:?}"); let _ = t.await; ag.shutdown();
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_model_mention_is_logged_as_refs_and_told_to_the_agent_without_changing_the_thread() {

@@ -346,6 +346,10 @@ mod e2e {
             }
             until(&hub, from, 30, |ev| ended(ev) > i).await;
             tokio::time::sleep(Duration::from_millis(300)).await;
+            // and the turn's end captures (its checkpoint, a git commit) done: a next turn sent while one runs past 2 s says "Saving the last turn's
+            // checkpoint…", an event the JS hub's fixture has not (Windows under the full suite's load, Nov 19)
+            let ends = ag.ends_of(TH); let t = std::time::Instant::now();
+            while ends.n.load(std::sync::atomic::Ordering::Relaxed) > 0 && t.elapsed() < Duration::from_secs(60) { tokio::time::sleep(Duration::from_millis(20)).await }
         }
         let events = log_from(&hub, from).await; ag.shutdown();
         tokio::time::sleep(Duration::from_millis(300)).await;

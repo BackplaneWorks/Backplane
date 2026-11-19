@@ -869,7 +869,8 @@ mod tests {
         let tools = [Mesher::Step2glb(t.to_string_lossy().into_owned())];
         // the file says how long it takes (ms); the slow one is the smallest file, so the prewarm's one worker takes it first
         let mk = |n: &str, body: &str| { let p = d.join(n); std::fs::write(&p, body).unwrap(); (format!("gw-{n}"), p) };
-        let jobs = vec![mk("slow", "900"), mk("q1", "0050"), mk("q2", "00050")];
+        // the slow one takes far longer than a quick one's whole start (sh, basename, cat, awk, sleep: one alone took 0.46 s on the Windows runner and 0.56 s on macOS, Nov 19)
+        let jobs = vec![mk("slow", "2500"), mk("q1", "0050"), mk("q2", "00050")];
         let (stop, got) = (AtomicBool::new(false), Mutex::new(vec![]));
         let t0 = Instant::now();
         std::thread::scope(|s| {
@@ -882,7 +883,8 @@ mod tests {
         let got = got.into_inner().unwrap();
         assert_eq!(got.len(), 3, "{got:?}"); assert!(got.iter().all(|g| g.1), "{got:?}");
         assert_eq!(got[2].0, "gw-slow", "the quick ones first, in the order they were done: {got:?}");
-        assert!(got[1].2 < Duration::from_millis(750), "the quick ones did not wait for the slow one: {got:?}");
+        // waiting for the slow one would put them after it: done well before it is (it alone takes 2.5 s), however long a process takes to start here
+        assert!(got[1].2 + Duration::from_millis(1000) < got[2].2, "the quick ones did not wait for the slow one: {got:?}");
         let mut runs: Vec<String> = std::fs::read_to_string(d.join("runs")).unwrap().lines().map(str::to_string).collect(); runs.sort();
         assert_eq!(runs, ["q1", "q2", "slow"], "each converted once");
         let _ = std::fs::remove_dir_all(&d);

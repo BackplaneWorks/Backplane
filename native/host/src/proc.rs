@@ -35,9 +35,16 @@ pub fn refusal_with(on: bool, kind: Kind, program: &str, agents_dir: Option<&str
     let no = || Some(copy::refusal(base));
     match kind {
         Kind::Net | Kind::Terminal | Kind::Browser | Kind::Shell | Kind::PersonTurn => no(), // PersonTurn: refused here; the global `refusal` lets it through in side-by-side mode
-        Kind::Agent => match agents_dir { Some(d) if !d.is_empty() && program.starts_with(&format!("{}/", d.trim_end_matches('/'))) => None, _ => no() },
+        Kind::Agent => match agents_dir { Some(d) if !d.is_empty() && in_agents_dir(program, d) => None, _ => no() },
         Kind::Local => if copy::refused_with(true, program, &[]) { no() } else { None },
     }
+}
+/// Whether `program` lies inside the stand-in folder `dir`, both by their real paths where they exist: the agent is resolved to its real path
+/// (macOS's /var is /private/var; Windows' RUNNER~1 is runneradmin, and its separator is "\\"), and BACKPLANE_AGENTS is given as the caller wrote it.
+/// Compared as given, a copy refused its own stand-ins there, the person's turn too ("could not start claude: No such file or directory").
+fn in_agents_dir(program: &str, dir: &str) -> bool {
+    let real = |x: &str| crate::plat::fs::canonicalize(std::path::Path::new(x)).unwrap_or_else(|_| std::path::PathBuf::from(x));
+    let (p, d) = (real(program), real(dir)); p != d && p.starts_with(&d)
 }
 fn refusal(kind: Kind, program: &str) -> Option<String> {
     if let (Some(why), Kind::Agent | Kind::PersonTurn) = (PAUSED.get(), kind) { return Some(why.clone()) }
@@ -332,6 +339,12 @@ mod tests {
         }
         assert!(refusal_with(true, Kind::Agent, "/tmp/standins/claude", Some("/tmp/standins")).is_none(), "a stand-in agent runs");
         assert!(refusal_with(true, Kind::Agent, "/tmp/standins-evil/claude", Some("/tmp/standins")).is_some(), "a sibling folder is not the stand-in folder");
+        // the folder named by another path to it (macOS: /var is /private/var), the agent by its real path: still the stand-in folder; a link out of it is not
+        #[cfg(unix)] { let d = crate::plat::tmp::dir("standin-alias"); let real = d.join("real"); std::fs::create_dir_all(&real).unwrap(); std::fs::write(real.join("claude"), "").unwrap();
+            let alias = d.join("alias"); std::os::unix::fs::symlink(&real, &alias).unwrap(); let prog = crate::plat::fs::canonicalize(&real.join("claude")).unwrap();
+            assert!(refusal_with(true, Kind::Agent, &prog.to_string_lossy(), Some(&alias.to_string_lossy())).is_none(), "a stand-in by its real path, its folder by an alias");
+            std::os::unix::fs::symlink("/usr/bin/env", real.join("out")).unwrap();
+            assert!(refusal_with(true, Kind::Agent, &alias.join("out").to_string_lossy(), Some(&alias.to_string_lossy())).is_some(), "a link out of the folder is no stand-in"); }
         for (k, p) in [(Kind::Local, "git"), (Kind::Local, "/usr/bin/kicad-cli"), (Kind::Local, "sh"), (Kind::Local, "/x/backplane-window"), (Kind::Local, "nice")] { assert_eq!(refusal_with(true, k, p, None), None, "{k:?} {p}") }
     }
     #[test] fn a_hub_that_is_no_copy_refuses_nothing() {
