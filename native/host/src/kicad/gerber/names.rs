@@ -14,58 +14,117 @@ pub fn is_drill(name: &str) -> bool { let n = name.to_ascii_lowercase(); n.ends_
 pub fn is_job(name: &str) -> bool { name.to_ascii_lowercase().ends_with(".gbrjob") }
 pub fn is_fab_file(name: &str) -> bool { is_gerber(name) || is_drill(name) || is_job(name) }
 
+/// Canonicalise `p` only if it resolves inside `canon_root` (skips symlinks escaping the project root).
+pub(crate) fn canon_in(p: &Path, canon_root: &Path) -> Option<PathBuf> {
+    let c = std::fs::canonicalize(p).ok()?;
+    c.starts_with(canon_root).then_some(c)
+}
+
 /// The files of a set: a folder's fab files (and its subfolders', two deep: mfg/gerbers/), a job file's folder's, or the one file.
-pub fn set_files(path: &Path) -> Vec<PathBuf> {
-    if path.is_file() {
+/// Every directory and file read must canonicalise inside `root` (or inside the set's own canonical folder when `root` is `None`).
+pub fn set_files_in(path: &Path, root: Option<&Path>) -> Vec<PathBuf> {
+    let bound = match root {
+        Some(r) => match std::fs::canonicalize(r) { Ok(c) => c, Err(_) => return vec![] },
+        None => {
+            let base = if path.is_file() { path.parent().unwrap_or(path) } else { path };
+            match std::fs::canonicalize(base) { Ok(c) => c, Err(_) => return vec![] }
+        }
+    };
+    let Some(canon_path) = canon_in(path, &bound) else { return vec![] };
+    if canon_path.is_file() {
         let n = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        return if is_job(&n) { path.parent().map(set_files).unwrap_or_default() } else { vec![path.to_path_buf()] }
+        return if is_job(&n) { path.parent().map(|d| set_files_in(d, Some(&bound))).unwrap_or_default() } else { vec![path.to_path_buf()] }
     }
     let mut out = vec![];
-    fn walk(d: &Path, depth: u32, out: &mut Vec<PathBuf>) {
+    fn walk(d: &Path, depth: u32, bound: &Path, out: &mut Vec<PathBuf>) {
+        if canon_in(d, bound).is_none() { return }
         let Ok(rd) = std::fs::read_dir(d) else { return };
         let mut es: Vec<_> = rd.flatten().collect();
         es.sort_by_key(|e| e.file_name());
         for e in es {
             let p = e.path(); let n = e.file_name().to_string_lossy().into_owned();
-            if p.is_dir() { if depth > 0 && !n.starts_with('.') { walk(&p, depth - 1, out) } } else if is_fab_file(&n) { out.push(p) }
+            let Some(cp) = canon_in(&p, bound) else { continue };
+            if cp.is_dir() { if depth > 0 && !n.starts_with('.') { walk(&p, depth - 1, bound, out) } } else if is_fab_file(&n) { out.push(p) }
             if out.len() >= 200 { return }
         }
     }
-    walk(path, 2, &mut out);
+    walk(path, 2, &bound, &mut out);
     out
 }
+
+/// The files of a set (containment checked against the set's own canonical folder).
+pub fn set_files(path: &Path) -> Vec<PathBuf> { set_files_in(path, None) }
 
 /// Whether a path is a Gerber set this reader draws: a fab file, or a folder holding some (directly).
 pub fn is_set_path(p: &Path) -> bool {
     if p.is_dir() { return std::fs::read_dir(p).map_or(false, |rd| rd.flatten().any(|e| { let n = e.file_name().to_string_lossy().into_owned(); is_gerber(&n) || is_drill(&n) })) }
     p.file_name().map_or(false, |n| is_fab_file(&n.to_string_lossy()))
 }
-/// A project's Gerbers: the folder under `<root>/mfg` (three deep) or `<root>/gerbers` holding fab files, the one written last.
+/// Fast presence check: whether a project has at least one eligible Gerber set inside its canonical root (stops at the first match).
+pub fn has_gerbers(root: &Path) -> bool {
+    let Ok(canon_root) = std::fs::canonicalize(root) else { return false };
+    fn walk(d: &Path, depth: u32, canon_root: &Path) -> bool {
+        if canon_in(d, canon_root).is_none() { return false }
+        let Ok(rd) = std::fs::read_dir(d) else { return false };
+        for e in rd.flatten() {
+            let p = e.path(); let n = e.file_name().to_string_lossy().into_owned();
+            let Some(cp) = canon_in(&p, canon_root) else { continue };
+            if cp.is_dir() { if depth > 0 && !n.starts_with('.') && walk(&p, depth - 1, canon_root) { return true } }
+            else if is_gerber(&n) || is_drill(&n) { return true }
+        }
+        false
+    }
+    ["mfg", "gerbers", "gerber"].iter().any(|top| walk(&root.join(top), 3, &canon_root))
+}
+/// A project's Gerbers: the folder under `<root>/mfg` (three deep) or `<root>/gerbers` holding fab files inside the canonical root, the one written last.
 pub fn default_set(root: &Path) -> Option<PathBuf> {
+    let canon_root = std::fs::canonicalize(root).ok()?;
     let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
-    fn walk(d: &Path, depth: u32, best: &mut Option<(std::time::SystemTime, PathBuf)>) {
+    fn walk(d: &Path, depth: u32, canon_root: &Path, best: &mut Option<(std::time::SystemTime, PathBuf)>) {
+        if canon_in(d, canon_root).is_none() { return }
         let Ok(rd) = std::fs::read_dir(d) else { return };
         let mut newest: Option<std::time::SystemTime> = None;
         for e in rd.flatten() {
             let p = e.path(); let n = e.file_name().to_string_lossy().into_owned();
-            if p.is_dir() { if depth > 0 && !n.starts_with('.') { walk(&p, depth - 1, best) } }
-            else if is_gerber(&n) || is_drill(&n) { if let Ok(t) = e.metadata().and_then(|m| m.modified()) { newest = Some(newest.map_or(t, |x| x.max(t))) } }
+            let Some(cp) = canon_in(&p, canon_root) else { continue };
+            if cp.is_dir() { if depth > 0 && !n.starts_with('.') { walk(&p, depth - 1, canon_root, best) } }
+            else if is_gerber(&n) || is_drill(&n) { if let Ok(t) = std::fs::metadata(&cp).and_then(|m| m.modified()) { newest = Some(newest.map_or(t, |x| x.max(t))) } }
         }
         if let Some(t) = newest { if best.as_ref().map_or(true, |b| t > b.0) { *best = Some((t, d.to_path_buf())) } }
     }
-    for top in ["mfg", "gerbers", "gerber"] { walk(&root.join(top), 3, &mut best) }
+    for top in ["mfg", "gerbers", "gerber"] { walk(&root.join(top), 3, &canon_root, &mut best) }
     best.map(|b| b.1)
 }
 
 
-/// The board a set was made from: the .kicad_pcb beside the first .kicad_pro in the set's folder or the four above it.
-pub fn board_of(set: &Path) -> Option<std::path::PathBuf> {
-    for d in set.ancestors().take(5) {
+/// The board a set was made from: the .kicad_pcb beside the first .kicad_pro in the set's folder or up to four ancestors,
+/// never leaving `root` when provided.
+pub fn board_of_in(set: &Path, root: Option<&Path>) -> Option<std::path::PathBuf> {
+    let canon_root = match root {
+        Some(r) => Some(std::fs::canonicalize(r).ok()?),
+        None => None,
+    };
+    let start = match &canon_root {
+        Some(cr) => canon_in(set, cr)?,
+        None => set.to_path_buf(),
+    };
+    for d in start.ancestors().take(5) {
+        if let Some(cr) = &canon_root { if !d.starts_with(cr) { break } }
         let Ok(rd) = std::fs::read_dir(d) else { continue };
-        for e in rd.flatten() { let p = e.path(); if p.extension().map_or(false, |x| x == "kicad_pro") { let b = p.with_extension("kicad_pcb"); if b.is_file() { return Some(b) } } }
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.extension().map_or(false, |x| x == "kicad_pro") {
+                let b = p.with_extension("kicad_pcb");
+                let ok = match &canon_root { Some(cr) => canon_in(&b, cr).is_some(), None => b.is_file() };
+                if ok { return Some(b) }
+            }
+        }
     }
     None
 }
+
+/// The board a set was made from (unbounded ancestors; prefer `board_of_in` when the project root is known).
+pub fn board_of(set: &Path) -> Option<std::path::PathBuf> { board_of_in(set, None) }
 /// The path of a set compared with its board (kicad/plotread.rs reads it here): "gerbercmp\n<set>\n<board>".
 /// What "Open in GerbView" opens of a set (Backplane KiCad's in-process GerbView, `OpenGerbers`): its job file, which brings all its
 /// layers, else its Gerber and drill files.
@@ -94,5 +153,41 @@ mod tests {
         assert_eq!(v.iter().map(|f| f.rsplit(['/', '\\']).next().unwrap()).collect::<Vec<_>>(), ["b-B_Cu.gbr", "b-F_Cu.gbr", "b-PTH.drl"]);
         std::fs::write(d.join("b-job.gbrjob"), "{}").unwrap();
         assert_eq!(gerbview_files(d).iter().map(|f| f.rsplit(['/', '\\']).next().unwrap()).collect::<Vec<_>>(), ["b-job.gbrjob"]);
+    }
+
+    #[cfg(unix)]
+    #[test] fn gerber_discovery_members_and_companion_board_stay_inside_project_root() {
+        use std::os::unix::fs::symlink;
+        let base = crate::plat::tmp::dir("gerber-contain");
+        let outside = base.join("outside");
+        let proj = base.join("proj");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::write(outside.join("ext-F_Cu.gbr"), "G04 ext*\nM02*\n").unwrap();
+
+        // 1. Linked set directory pointing outside project root is skipped
+        symlink(&outside, proj.join("gerbers")).unwrap();
+        assert!(!has_gerbers(&proj), "linked outside set dir must not report has_gerbers");
+        assert!(default_set(&proj).is_none(), "linked outside set dir must be skipped by default_set");
+        assert!(set_files_in(&proj.join("gerbers"), Some(&proj)).is_empty());
+
+        // 2. Linked member file inside a valid in-root set is skipped while in-root members stay
+        let mfg = proj.join("mfg");
+        std::fs::create_dir_all(&mfg).unwrap();
+        std::fs::write(mfg.join("in-F_Cu.gbr"), "G04 in*\nM02*\n").unwrap();
+        symlink(outside.join("ext-F_Cu.gbr"), mfg.join("leak-B_Cu.gbr")).unwrap();
+        assert!(has_gerbers(&proj));
+        let set = default_set(&proj).expect("valid in-root mfg set");
+        let names: Vec<String> = set_files_in(&set, Some(&proj))
+            .iter().filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).collect();
+        assert_eq!(names, vec!["in-F_Cu.gbr"]);
+
+        // 3. Companion board in an ancestor outside project root is skipped; one inside root is found
+        std::fs::write(base.join("parent.kicad_pro"), "{}").unwrap();
+        std::fs::write(base.join("parent.kicad_pcb"), "(kicad_pcb)").unwrap();
+        assert!(board_of_in(&set, Some(&proj)).is_none(), "companion board outside root must be skipped");
+        std::fs::write(proj.join("local.kicad_pro"), "{}").unwrap();
+        std::fs::write(proj.join("local.kicad_pcb"), "(kicad_pcb)").unwrap();
+        assert_eq!(board_of_in(&set, Some(&proj)).unwrap().file_name().unwrap(), "local.kicad_pcb");
     }
 }

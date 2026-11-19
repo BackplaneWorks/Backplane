@@ -40,13 +40,16 @@ fn cmp_board_is(path: &str) -> bool { path.starts_with(CMP) }
 
 /// A set as a plot, as the board viewer draws one (kicad/plotread.rs `read` sends a Gerber path here), with its note: the set, its age
 /// against the board, what did not read; compared with the board (a CMP path), the differences marked and counted.
-pub fn plot(path: &str) -> super::plotgen::Read {
+pub fn plot(path: &str) -> super::plotgen::Read { plot_in(path, None) }
+
+/// The same, confined to canonical `root` when provided (skipping symlinked sets/members and companion boards outside `root`).
+pub fn plot_in(path: &str, root: Option<&Path>) -> super::plotgen::Read {
     let (set, cmp_board) = match path.strip_prefix(CMP) { Some(r) => { let (a, b) = r.split_once('\n').unwrap_or((r, "")); (a.to_string(), Some(b.to_string())) } None => (path.to_string(), None) };
     let sp = Path::new(&set);
-    let r = read_set(sp);
+    let r = read_set_in(sp, root);
     { let mut n = NOTES.lock().unwrap(); n.retain(|(p, _)| p != path); n.push((path.to_string(), r.notes.clone())); if n.len() > 32 { n.remove(0); } }
-    let board = board_of(sp);
-    let newest = set_files(sp).iter().map(|f| modified_ms(f)).max().unwrap_or(0);
+    let board = board_of_in(sp, root);
+    let newest = set_files_in(sp, root).iter().map(|f| modified_ms(f)).max().unwrap_or(0);
     let board_ms = board.as_deref().map(modified_ms).unwrap_or(0);
     let (mut note, mut warn) = set_line(&label_of(sp, board.as_deref()), r.layers.len(), newest, board_ms);
     let older = if newest > 0 && board_ms > newest + 60_000 { board_ms - newest } else { 0 };
@@ -179,8 +182,11 @@ pub fn drill_items(file: &str, d: &excellon::Drills, plated: bool, out: &mut Vec
 }
 
 /// A set (folder, job file, or one file) read: its items, each file's (name, layer, objects), and what did not read.
-pub fn read_set(path: &Path) -> Read {
-    let files = set_files(path);
+pub fn read_set(path: &Path) -> Read { read_set_in(path, None) }
+
+/// The same, confining every file read to canonical `root` when provided.
+pub fn read_set_in(path: &Path, root: Option<&Path>) -> Read {
+    let files = set_files_in(path, root);
     let mut r = Read::default();
     let jobs: Vec<(String, String)> = files.iter().filter(|f| is_job(&f.to_string_lossy())).filter_map(|f| std::fs::read_to_string(f).ok()).flat_map(|t| job_functions(&t)).collect();
     for f in files.iter().filter(|f| !is_job(&f.to_string_lossy())) {

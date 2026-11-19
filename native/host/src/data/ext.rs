@@ -491,27 +491,25 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
             "viewer.files" if machines::is_far(th) => { let (_, root) = machines::far_root(hub, th).ok_or_else(|| err("that thread has no folder"))?;
                 let r = result(rpc(hub, c, "boards.list", json!({"thread":th})).await?); let mut v = machines::board_files(&root, s(&r, "board_default"));
                 let list: Vec<String> = r["board_list"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
-                v["boards"] = machines::board_rows(&root, &list, s(&r, "board_default")); Ok(v) }
+                v["boards"] = machines::board_rows(&root, &list, s(&r, "board_default")); v["hasGerbers"] = json!(false); Ok(v) }
             "viewer.refs" | "viewer.compare" | "mech.list" if machines::is_far(th) => Err(err("That is shown on its own machine only for now.")),
             // `boards`: the project's boards for the viewer's picker (two or more; the desktop's Boards menu, `boards.list`), each with the files its pages watch
             // the design's folder: the main checkout for a hardware project's thread with a code worktree (which holds no board), as boards.list reads it
             "viewer.files" => { let root = crate::files::kicad::canonical::design_root(&root_of(hub, th).await?); let f = crate::files::kicad::project::read(&root);
                 let bd = f.pcb.strip_prefix(&format!("{root}/")).unwrap_or("").to_string();
                 let list = crate::files::kicad::boards::pick(&crate::files::kicad::boards::find(std::path::Path::new(&root)), &bd);
-                let has_gerbers = crate::files::kicad::gerber::default_set(std::path::Path::new(&root)).is_some();
+                let has_gerbers = crate::files::kicad::gerber::has_gerbers(std::path::Path::new(&root));
                 Ok(json!({"root":root,"pro":f.pro,"pcb":f.pcb,"sch":f.sch,"boards":machines::board_rows(&root, &list, &bd),"hasGerbers":has_gerbers})) }
             "viewer.watch" => {
                 // the design's folder, as viewer.files answers it: a hardware thread working in a code worktree has no board there
-                let root = crate::files::kicad::canonical::design_root(&root_of(hub, th).await?); let raw_kind = s(p, "kind"); let raw_path = s(p, "path");
+                let raw_kind = s(p, "kind"); let raw_path = s(p, "path");
+                if raw_kind == "gerbers" && machines::is_far(th) { return Err(err("Gerbers of a project on another machine are not shown yet")) }
+                let root = crate::files::kicad::canonical::design_root(&root_of(hub, th).await?);
                 if raw_path.split('/').any(|x| x == "..") || raw_path.contains('\0') { return Err(err("that path is not in this project")) }
                 let (kind, path) = if raw_kind == "gerbers" {
-                    let set = if raw_path.is_empty() {
-                        crate::files::kicad::gerber::default_set(std::path::Path::new(&root)).ok_or_else(|| err("no Gerbers in this project"))?.to_string_lossy().into_owned()
-                    } else {
-                        let full = if crate::plat::fs::is_abs(raw_path) { raw_path.to_string() } else { format!("{root}/{raw_path}") };
-                        if !full.starts_with(&format!("{root}/")) { return Err(err("that path is not in this project")) }
-                        full
-                    };
+                    if !raw_path.is_empty() { return Err(err("that path is not in this project")) }
+                    let set = crate::files::kicad::gerber::default_set(std::path::Path::new(&root))
+                        .ok_or_else(|| err("no Gerbers in this project"))?.to_string_lossy().into_owned();
                     ("board", set)
                 } else {
                     let path = if raw_path.is_empty() || crate::plat::fs::is_abs(raw_path) { raw_path.to_string() } else { format!("{root}/{raw_path}") };

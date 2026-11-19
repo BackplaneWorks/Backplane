@@ -865,15 +865,23 @@ async fn viewer_rail_returns_hub_rail_for_local_and_far_threads() {
 async fn viewer_gerbers_files_and_watch() {
     struct WatchSpy(Arc<Mutex<Vec<Value>>>);
     impl RpcHandler for WatchSpy {
-        fn methods(&self) -> &'static [&'static str] { &["kicad.watch"] }
-        fn call<'a>(&'a self, _h: &'a Arc<Hub>, _w: &'a Caller, id: &'a Value, _m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
+        fn methods(&self) -> &'static [&'static str] { &["kicad.watch", "boards.list"] }
+        fn call<'a>(&'a self, _h: &'a Arc<Hub>, _w: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
+            if m == "boards.list" {
+                return Box::pin(async move { vec![json!({"t":"reply","id":id,"ok":true,"result":{"board_default":"","board_list":[]}})] });
+            }
             self.0.lock().unwrap().push(p.clone());
             let key = format!("0|{}|{}", s(p, "root"), s(p, "path"));
             Box::pin(async move { vec![json!({"t":"reply","id":id,"ok":true,"result":{"keys":[key]}})] })
         }
     }
 
-    let proj = crate::plat::tmp::dir("viewer-gerbers");
+    let base = crate::plat::tmp::dir("viewer-gerbers");
+    let proj = base.join("proj");
+    let outside = base.join("outside");
+    std::fs::create_dir_all(&proj).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("ext-F_Cu.gbr"), "G04 ext*\nM02*\n").unwrap();
     let root = proj.to_string_lossy().into_owned();
     let more = format!(
         "{}\n{}\n",
@@ -881,6 +889,11 @@ async fn viewer_gerbers_files_and_watch() {
         json!({"$":"ThreadCreated","id":"tg","project":"pg","title":"Gerb","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000041}),
     );
     let (hub, port) = up_with("viewer-gerbers", &more).await;
+    hub.mirrors().set_names(Arc::new(|| vec![("L".to_string(), "desktop".to_string())]));
+    hub.mirrors().fold("L", &[
+        json!({"$":"ProjectCreated","id":"L~p1","title":"Far","root":root,"at":1}),
+        json!({"$":"ThreadCreated","id":"L~t1","project":"L~p1","title":"far one","at":10}),
+    ]);
     let seen = Arc::new(Mutex::new(Vec::new()));
     hub.register_rpc(Arc::new(WatchSpy(seen.clone())));
 
@@ -888,23 +901,39 @@ async fn viewer_gerbers_files_and_watch() {
     let hello = next(&mut ws).await;
     assert!(hello["features"].as_array().unwrap().iter().any(|f| f == "gerbers"));
 
-    // Without Gerbers: viewer.files reports hasGerbers=false, viewer.watch kind="gerbers" errors
+    // Without Gerbers: viewer.files reports hasGerbers=false, viewer.watch kind="gerbers" errors and enqueues no watch
     let f0 = ask(&mut ws, 1, "viewer.files", json!({"thread":"tg"})).await;
     assert_eq!(f0["ok"], true);
     assert_eq!(f0["result"]["hasGerbers"], false);
     let w0 = ask(&mut ws, 2, "viewer.watch", json!({"thread":"tg","kind":"gerbers"})).await;
     assert_eq!(w0["ok"], false);
     assert_eq!(w0["error"], "no Gerbers in this project");
+    assert!(seen.lock().unwrap().is_empty(), "rejected watch must enqueue nothing");
 
-    // With Gerbers under gerbers/: viewer.files reports hasGerbers=true, viewer.watch resolves kind="board" + default set
+    // Linked set directory outside root is ignored (hasGerbers=false, watch refused, no watch enqueued)
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&outside, proj.join("gerbers")).unwrap();
+        let fl = ask(&mut ws, 3, "viewer.files", json!({"thread":"tg"})).await;
+        assert_eq!(fl["result"]["hasGerbers"], false);
+        let wl = ask(&mut ws, 4, "viewer.watch", json!({"thread":"tg","kind":"gerbers"})).await;
+        assert_eq!(wl["ok"], false);
+        assert_eq!(wl["error"], "no Gerbers in this project");
+        assert!(seen.lock().unwrap().is_empty());
+        std::fs::remove_file(proj.join("gerbers")).unwrap();
+    }
+
+    // With in-root Gerbers under gerbers/ (and an outside-linked member skipped): hasGerbers=true, watch resolves default_set
     let gdir = proj.join("gerbers");
     std::fs::create_dir_all(&gdir).unwrap();
     std::fs::write(gdir.join("board-F_Cu.gbr"), "G04 test*\nM02*\n").unwrap();
-    let f1 = ask(&mut ws, 3, "viewer.files", json!({"thread":"tg"})).await;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(outside.join("ext-F_Cu.gbr"), gdir.join("leak-B_Cu.gbr")).unwrap();
+    let f1 = ask(&mut ws, 5, "viewer.files", json!({"thread":"tg"})).await;
     assert_eq!(f1["ok"], true);
     assert_eq!(f1["result"]["hasGerbers"], true);
 
-    let w1 = ask(&mut ws, 4, "viewer.watch", json!({"thread":"tg","kind":"gerbers"})).await;
+    let w1 = ask(&mut ws, 6, "viewer.watch", json!({"thread":"tg","kind":"gerbers"})).await;
     assert_eq!(w1["ok"], true, "{w1}");
     let expected_set = gdir.to_string_lossy().into_owned();
     let calls = seen.lock().unwrap().clone();
@@ -912,8 +941,19 @@ async fn viewer_gerbers_files_and_watch() {
     assert_eq!(calls[0]["kind"], "board");
     assert_eq!(calls[0]["path"], expected_set);
 
-    // Path outside project is refused
-    let w_bad = ask(&mut ws, 5, "viewer.watch", json!({"thread":"tg","kind":"gerbers","path":"/etc/passwd"})).await;
+    // Explicit path (even inside project or outside) is refused for kind="gerbers" and enqueues no watch
+    let w_exp = ask(&mut ws, 7, "viewer.watch", json!({"thread":"tg","kind":"gerbers","path":"board.kicad_pcb"})).await;
+    assert_eq!(w_exp["ok"], false);
+    let w_bad = ask(&mut ws, 8, "viewer.watch", json!({"thread":"tg","kind":"gerbers","path":"/etc/passwd"})).await;
     assert_eq!(w_bad["ok"], false);
+
+    // Far thread: viewer.files reports hasGerbers=false, viewer.watch refused before any local fs access
+    let ff = ask(&mut ws, 9, "viewer.files", json!({"thread":"L~t1"})).await;
+    assert_eq!(ff["ok"], true, "{ff}");
+    assert_eq!(ff["result"]["hasGerbers"], false);
+    let wf = ask(&mut ws, 10, "viewer.watch", json!({"thread":"L~t1","kind":"gerbers"})).await;
+    assert_eq!(wf["ok"], false);
+    assert_eq!(wf["error"], "Gerbers of a project on another machine are not shown yet");
+    assert_eq!(seen.lock().unwrap().len(), 1, "rejected requests must enqueue no extra kicad.watch");
     drop(hub);
 }

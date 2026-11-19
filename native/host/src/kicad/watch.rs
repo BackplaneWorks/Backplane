@@ -566,8 +566,9 @@ impl Plots {
                 o
             }).await.ok()
         }
+        let root = ky.split('|').nth(1).filter(|r| !r.is_empty()).map(std::path::PathBuf::from);
         tokio::task::spawn_blocking(move || {
-            let r = std::panic::catch_unwind(|| plotread::read(kind, &f));
+            let r = std::panic::catch_unwind(|| plotread::read_in(kind, &f, root.as_deref()));
             let o = match r {
                 Ok(plotgen::Read::Plot(p, t)) => { plotgen::write_infos(&infos.to_string_lossy(), &t); (0, String::new(), Some(*p)) }
                 Ok(plotgen::Read::Half) => (2, String::new(), None),
