@@ -126,7 +126,7 @@ pub fn kistack_skills(c: &crate::agents::kistack::Copy) -> String {
     let l = T::PROMPT_SKILL_LINE;
     let which = if c.pinned { format!("pinned with this Backplane (KiStack commit {})", &c.rev[..12.min(c.rev.len())]) } else { format!("from BACKPLANE_KISTACK (KiStack {})", if c.rev.is_empty() { "of no recorded commit" } else { &c.rev }) };
     let list = c.skills.iter().map(|(n, d, p)| format!("{}{n}{}{d}{}{p}{}", l[0], l[1], l[2], l[3])).collect::<Vec<_>>().join("\n");
-    format!("<kistack_skills>KiStack's KiCad skills, {which}, are in `{}`. Before KiCad work one of them covers (schematics, symbols, footprints, layout, BOM, exports, Gerbers, panels, renders), read its SKILL.md completely and follow it. Where your CLI lists them as skills of its own (Claude: `kistack:<name>`, e.g. `kistack:kicad-schematic`), they are these same files. Use only these copies: any other copy of these skills on this machine (in ~/.agents/skills, ~/.claude/skills, ~/.codex/skills, ~/.skills or a project folder) is older and not to be used.\n{list}</kistack_skills>", c.dir)
+    format!("<kistack_skills>KiStack's KiCad skills, {which}, are in `{}`. Before design work one of them covers (schematics, symbols, footprints, layout, BOM, exports, Gerbers, panels, renders), read its SKILL.md completely and follow it, in KiCad or in another CAD tool such as Altium. Where your CLI lists them as skills of its own (Claude: `kistack:<name>`, e.g. `kistack:kicad-schematic`), they are these same files. Use only these copies: any other copy of these skills on this machine (in ~/.agents/skills, ~/.claude/skills, ~/.codex/skills, ~/.skills or a project folder) is older and not to be used.\n{list}</kistack_skills>", c.dir)
 }
 /// Where a hardware thread's work goes. `code`: its code worktree and branch when it works in the
 /// main checkout ("" for a thread still in an older worktree); `locks`: (document, its lock).
@@ -141,11 +141,21 @@ pub fn design_words(main: &str, code: Option<(&str, &str)>, locks: &[(String, St
 /// An Altium Designer project (its .PrjPcb is the project's file): Altium's words replace KiCad's editing and runtime blocks.
 pub fn is_altium(pro: &str) -> bool { pro.to_ascii_lowercase().ends_with(".prjpcb") }
 /// Prompt.altium: how an agent works on an Altium project (altium/live.rs; the bundled `altium` skill holds the verified recipes)
-pub fn altium(windows: bool, kistack: bool) -> String {
+/// What an Altium thread reads before each kind of work: KiStack's skill for it, by its file (the skills are written for KiCad; their rules for how
+/// a sheet, a symbol, a footprint and a board should look are the same in Altium). Without them the agent drew with the tools alone: a sheet
+/// crammed into a corner with text over parts, a board with designators on top of each other.
+pub fn altium_kistack(skills: &[(String, String, String)]) -> String {
+    let path = |n: &str| skills.iter().find(|s| s.0 == n).map(|s| format!("`{}`", s.2));
+    let steps: Vec<String> = [("a schematic sheet (placing, wiring, power and ground, labels)", &["kicad-schematic"][..]), ("a symbol", &["kicad-symbol"][..]), ("a footprint", &["kicad-footprint"][..]), ("placing or routing the board", &["layout-placement", "kicad-layout"][..])]
+        .iter().filter_map(|(what, names)| { let ps: Vec<String> = names.iter().filter_map(|n| path(n)).collect(); (!ps.is_empty()).then(|| format!("before {what}, {}", ps.join(" and "))) }).collect();
+    if steps.is_empty() { return " KiStack's skills (below) are written for KiCad: their design rules apply here too; do their steps with Altium's means.".into() }
+    format!(" How the design should look is KiStack's (below), not this block's: these tools only reach Altium. Read KiStack's skill for each step completely before you do it, even though it is written for KiCad: {}. Keep its rules (signal left to right, power ports up and ground down instead of labels for supplies, wires between nearby pins, parts spread over the sheet with no text over another, designators readable on the board) and do its steps with altium_write and altium_script instead of KiCad's tools; skip a KiCad-only step and say so. Then show the result with viewer_show and fix what that skill's checks would flag.", steps.join("; "))
+}
+pub fn altium(windows: bool, kistack: &[(String, String, String)]) -> String {
     let write = "New footprints (.PcbLib), symbols (.SchLib) and schematic sheets, and parts, wires, labels and power ports added to a sheet, are written with the backplane tool altium_write: a JSON spec, no Altium needed, the result read back.";
     let reach = if windows { format!("{write} Everything else goes through the person's running Altium Designer with the backplane tools altium_status (what Altium has open; call it first) and altium_script (a DelphiScript run inside Altium: Emit(S) prints a line; errors come back as results). If Altium is not running, either tool starts it and waits for it (about a minute): never ask the person to open Altium. Altium's own dialogs that a recipe opens are worked by the hub (BpExpect); any other box is left for the person and named in the result's `dialogs`: say what it is, and ask the person only when your script cannot avoid it. Before either, read the bundled `altium` skill's SKILL.md completely: its recipes are tested against Altium and show how to open a project and documents by path, read and edit schematics and boards, run ERC and DRC, and save.") }
         else { format!("{write} Read the bundled `altium` skill's SKILL.md first. Altium Designer itself runs on Windows and this hub is not on Windows, so altium_script cannot reach it here: board edits, ERC and DRC need Altium on a Windows machine; say so when a change needs it.") };
-    format!("<backplane_altium>This is an Altium Designer project: its .PrjPcb lists the schematic sheets (.SchDoc) and the board (.PcbDoc); libraries are .SchLib/.PcbLib/.IntLib. These are binary files: never write them with scripts of your own or any other tool than altium_write, and never ask the person to close Altium. {reach} Address every document by its full path (never the focused document: the person may be working in another), wrap edits in PreProcess/PostProcess so the person can undo them in Altium, and save each document right after each change that matters (the ECO, placement, routing), before any other step: unsaved work is lost if a box or a closed document interrupts (Backplane's Board and Schematic viewers draw the saved files, and Backplane commits them to main at each turn's end); then show it with viewer_show. Update the board from the schematic yourself with the skill's pcb_update_from_sch.pas recipe: never ask the person to run Update PCB or redo any step a script can do; ask them only for what no script can reach, such as online part downloads. Keep each script small: inspect, change, verify by reading back. The KiCad tools (kicad_edit, kicad_ipc, kicad-cli) do not apply to this project.{ks}</backplane_altium>", ks = if kistack { " KiStack's skills (below) are written for KiCad: adapt them for Altium at your discretion." } else { "" })
+    format!("<backplane_altium>This is an Altium Designer project: its .PrjPcb lists the schematic sheets (.SchDoc) and the board (.PcbDoc); libraries are .SchLib/.PcbLib/.IntLib. These are binary files: never write them with scripts of your own or any other tool than altium_write, and never ask the person to close Altium. {reach} Address every document by its full path (never the focused document: the person may be working in another), wrap edits in PreProcess/PostProcess so the person can undo them in Altium, and save each document right after each change that matters (the ECO, placement, routing), before any other step: unsaved work is lost if a box or a closed document interrupts (Backplane's Board and Schematic viewers draw the saved files, and Backplane commits them to main at each turn's end); then show it with viewer_show. Update the board from the schematic yourself with the skill's pcb_update_from_sch.pas recipe: never ask the person to run Update PCB or redo any step a script can do; ask them only for what no script can reach, such as online part downloads. Keep each script small: inspect, change, verify by reading back. The KiCad tools (kicad_edit, kicad_ipc, kicad-cli) do not apply to this project.{ks}</backplane_altium>", ks = if kistack.is_empty() { String::new() } else { altium_kistack(kistack) })
 }
 /// Hub.prompt.base then Prompt.lang.add
 pub fn build(e: &PromptEnv) -> String {
@@ -154,7 +164,8 @@ pub fn build(e: &PromptEnv) -> String {
     let has_kistack = e.kistack.as_ref().is_some_and(|k| !k.skills.is_empty());
     let orch = match &e.kistack { Some(k) if !k.skills.is_empty() => orch, _ => orch.replace(" (KiStack's KiCad skills and the person's)", " (the person's)") }; // KiStack is claimed only when the agent has it
     let base = if alt { config_prompt(&e.fc, &e.render).replace(T::PROMPT_BOARD[0], "") } else { config_prompt(&e.fc, &e.render) };
-    let cad = if alt { altium(cfg!(windows), has_kistack) } else { kicad(&e.kicad, e.kicad_ipc) };
+    let ks: &[(String, String, String)] = match &e.kistack { Some(k) if has_kistack => &k.skills, _ => &[] };
+    let cad = if alt { altium(cfg!(windows), ks) } else { kicad(&e.kicad, e.kicad_ipc) };
     let mut s = [base, cad, project_locked(&e.root, &e.pro, &e.pcb, &e.sch, &e.all, &e.design), orch, background().to_string(), order_project(e.orders_on)].join("\n\n");
     if let Some(k) = e.kistack.as_ref().filter(|k| !k.skills.is_empty()) { s += "\n\n"; s += &kistack_skills(k) }
     if !e.skills.is_empty() { s += "\n\n"; s += &bundled_skills(&e.skills) }
@@ -177,13 +188,17 @@ pub(crate) mod tests {
         assert!(s.contains("<backplane_altium>") && !s.contains("<backplane_kicad_board_editing>") && !s.contains("<kicad_runtime>"), "{s}");
         e.pro = "/p/b.kicad_pro".into(); let k = build(&e);
         assert!(!k.contains("<backplane_altium>") && k.contains("<backplane_kicad_board_editing>"));
-        assert!(altium(true, false).contains("altium_script") && altium(false, false).contains("not on Windows") && altium(false, false).contains("altium_write"));
+        assert!(altium(true, &[]).contains("altium_script") && altium(false, &[]).contains("not on Windows") && altium(false, &[]).contains("altium_write"));
         assert!(s.contains("pcb_update_from_sch.pas") && s.contains("never ask the person to run Update PCB") && s.contains("right after each change"), "{s}");
-        assert!(s.contains("(kicad_edit, kicad_ipc, kicad-cli) do not apply") && !s.contains("<kistack_skills>") && !s.contains("KiStack's skills (below)"), "no copy, no claim");
+        assert!(s.contains("(kicad_edit, kicad_ipc, kicad-cli) do not apply") && !s.contains("<kistack_skills>") && !s.contains("KiStack"), "no copy, no claim");
         e.pro = "/p/Board.PrjPcb".into(); e.kistack = Some(crate::agents::kistack::Copy { dir: "/h/kistack".into(), rev: crate::agents::kistack::REV.into(), pinned: true,
             skills: vec![("kicad-schematic".into(), "Draw schematics.".into(), "/h/kistack/skills/schematic/SKILL.md".into())] });
         let a = build(&e);
-        assert!(a.contains("<kistack_skills>") && a.contains("KiStack's skills (below) are written for KiCad: adapt them for Altium at your discretion.") && a.contains("(KiStack's KiCad skills and the person's)"), "{a}");
+        assert!(a.contains("<kistack_skills>") && a.contains("(KiStack's KiCad skills and the person's)") && a.contains("in KiCad or in another CAD tool such as Altium"), "{a}");
+        // the Altium block names the schematic skill's file at the step it is for, and asks for it to be read first
+        let blk = &a[a.find("<backplane_altium>").unwrap()..a.find("</backplane_altium>").unwrap()];
+        assert!(blk.contains("before a schematic sheet (placing, wiring, power and ground, labels), `/h/kistack/skills/schematic/SKILL.md`") && blk.contains("Read KiStack's skill for each step completely before you do it"), "{blk}");
+        assert!(!blk.contains("before a footprint"), "a skill the copy lacks is not named");
         assert!(a.contains("<backplane_altium>") && !a.contains("<backplane_kicad_board_editing>") && !a.contains("<kicad_runtime>"), "KiCad's tool blocks stay out");
     }
     const GOLD: &str = include_str!("../../../../test/agents/fixtures/argv-default.json");

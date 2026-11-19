@@ -34,7 +34,7 @@ const CHUNK_MIN: usize = 100; const CHUNK_MAX: usize = 2000; const HOLD_MS: u64 
 /// The next chunk's size after one of `n` lines held for `ms`: halved when it took over 1.5 times the target, doubled when under half of it.
 pub fn next_chunk(n: usize, ms: u64) -> usize { if ms > HOLD_MS * 3 / 2 { (n / 2).max(CHUNK_MIN) } else if ms < HOLD_MS / 2 { (n * 2).min(CHUNK_MAX) } else { n } }
 
-fn user_folder() -> Option<PathBuf> { std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).filter(|v| !v.is_empty()).map(PathBuf::from) }
+fn user_folder() -> Option<PathBuf> { crate::plat::dirs::home().map(PathBuf::from) }
 fn same(a: &Path, b: &Path) -> bool { crate::plat::fs::canonicalize(a).unwrap_or_else(|_| a.into()) == crate::plat::fs::canonicalize(b).unwrap_or_else(|_| b.into()) }
 
 /// A folder that holds a 0.14 home and is not this home nor inside it (or it inside the old one).

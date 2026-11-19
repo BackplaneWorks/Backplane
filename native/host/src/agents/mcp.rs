@@ -20,6 +20,10 @@ pub trait ToolSet: Send + Sync {
     fn owns(&self, name: &str) -> bool;
     fn call<'a>(&'a self, thread: &'a str, name: &'a str, a: &'a Value) -> crate::api::Fut<'a, (bool, Value)>;
 }
+/// What an altium_write result asks next: a sheet written is looked at and checked against KiStack's schematic rules (the tool lays nothing out).
+pub fn altium_next(spec: &Value) -> Option<&'static str> {
+    spec.get("schdoc").filter(|v| v.is_object()).map(|_| "Look at the sheet now (viewer_show) and check it against KiStack's kicad-schematic rules: signal left to right, power ports up and ground down, wires between nearby pins, parts spread over the sheet, no text over a part or another text. Fix what fails before the next step.")
+}
 pub const TOOLS_JSON: &str = include_str!("../../../../test/agents/fixtures/mcp-tools.json");
 pub const IMPLEMENTED: &[&str] = &["orchestrator_capabilities", "review_comment", "review_comments", "work_run", "work_watch", "work_list", "work_cancel", "work_unwatch", "lock_acquire", "lock_release", "lock_cancel", "lock_list", "account_list", "thread_launch", "machine_list", "delegate_task", "task_status", "task_cancel", "thread_list", "thread_read", "thread_send", "thread_update", "thread_wait", "thread_interrupt", "thread_settle", "viewer_show", "permission_prompt", "kicad_ipc", "kicad_edit", "kicad_ipc_status", "kicad_select", "kicad_bring_back", "altium_status", "altium_script", "altium_write", "terminal_open", "terminal_read", "terminal_send", "terminal_close", "preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status", "secret_request", "secret_list", "secret_run", "settings_inspect", "settings_propose"];
 const MAX_BODY: usize = 4 << 20;
@@ -272,7 +276,7 @@ impl Mcp {
                                     let spec = a.clone();
                                     let ran = tokio::task::spawn_blocking(move || crate::files::altium::write::spec::run(&spec, std::path::Path::new(&base))).await;
                                     match ran {
-                                        Ok(Ok((v, _written))) => { let added = crate::files::altium::write::spec::project_added(&v); (true, crate::files::altium::live::after_write(&ss, v, &open, &added).await) }
+                                        Ok(Ok((v, _written))) => { let added = crate::files::altium::write::spec::project_added(&v); let mut out = crate::files::altium::live::after_write(&ss, v, &open, &added).await; if let (Some(n), Some(o)) = (altium_next(&a), out.as_object_mut()) { o.insert("next".into(), json!(n)); } (true, out) }
                                         Ok(Err(e)) => { let _ = crate::files::altium::live::after_write(&ss, json!({}), &open, &[]).await; fail(&e) }
                                         Err(e) => { let _ = crate::files::altium::live::after_write(&ss, json!({}), &open, &[]).await; fail(&e.to_string()) }
                                     }

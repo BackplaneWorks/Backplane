@@ -25,6 +25,11 @@ impl Client {
 
 /// The person's own folder on the hub's machine: where a first project goes.
 pub fn home_dir() -> String { crate::plat::dirs::home_or_empty() }
+/// The first project's suggested folder under the person's folder, in that folder's own separators (`C:\Users\ann\Backplane\first-board`).
+fn first_board(user_home: &str) -> String {
+    use crate::plat::dirs::{join, win_abs, Os};
+    join(if win_abs(user_home) { Os::Windows } else { Os::Linux }, user_home, &["Backplane", "first-board"])
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mark { Done, Skipped, Todo }
@@ -549,7 +554,7 @@ fn project(f: &Facts, session: &Value, user_home: &str) -> Step {
         r["fields"] = json!([{"name": "obfirst", "hint": "What should the agent do?", "secret": false, "value": draft(session, "@f.obfirst")}]);
         rows.push(r);
     } else {
-        let path = if session["drafts"]["@f.obproject"].is_string() { draft(session, "@f.obproject").to_string() } else { format!("{}/Backplane/first-board", user_home.trim_end_matches('/')) };
+        let path = if session["drafts"]["@f.obproject"].is_string() { draft(session, "@f.obproject").to_string() } else { first_board(user_home) };
         let e = draft(session, "@ob.project.err");
         let mut add = row("Folder", if e.is_empty() { "The full path of a folder on this computer." } else { e }, vec![btn("Create", "ob-project", "", true)]);
         add["fields"] = json!([{"name": "obproject", "hint": "Folder", "secret": false, "value": path}]);
@@ -738,7 +743,7 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
         "ob-freecad" => { let raw = draft(session, "@f.obfreecad").trim().to_string(); ask.put("freecad.path", &raw); ask.send("onboard.check", json!({"freecad": raw})); json!({}) }
         "ob-project" => {
             let raw = draft(session, "@f.obproject").trim().to_string();
-            let path = if raw.is_empty() { format!("{}/Backplane/first-board", user_home.trim_end_matches('/')) } else { raw };
+            let path = if raw.is_empty() { first_board(user_home) } else { raw };
             if !(path.starts_with('/') || path.starts_with('~') || path.chars().nth(1) == Some(':')) { return Some(Out { patch: json!({"drafts": {"@ob.project.err": "Give the full path, starting at the top of the disk."}}), cmds: ask.cmds }) }
             ask.send("project.new", json!({"path": path, "orAdd": true}));
             json!({"drafts": {"@ob.project.err": "", "@f.obproject": Value::Null}})
@@ -998,6 +1003,7 @@ mod tests {
     #[test] fn first_project_makes_the_folder_then_takes_the_first_message_and_offers_a_phone() {
         let (s0, i) = (cst(blank(), &[]), info("linux"));
         let p = at(&s0, "project", &i, &desk()); assert_eq!(row_of(&p, "Folder")["fields"][0]["value"], "/h/Backplane/first-board");
+        assert_eq!(first_board(r"C:\Users\ann"), r"C:\Users\ann\Backplane\first-board", "Windows separators throughout");
         assert_eq!(row_of(&p, "Pair a phone")["buttons"][0]["action"], "device-invite");
         let o = act(&s0, "h", &sess(json!({"@ob.step": "project"})), &i, &desk(), "/home/x", "ob-project", "").unwrap();
         assert_eq!(sent(&o, "project.new")[0]["path"], "/home/x/Backplane/first-board"); assert_eq!(sent(&o, "project.new")[0]["orAdd"], true);
