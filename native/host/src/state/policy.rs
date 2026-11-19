@@ -35,8 +35,8 @@ pub fn lean_keeps(k: &str) -> bool {
     if ["home.moving", "home.at"].contains(&k) { return true }
     if ["ui.theme", "sidebar.view", "sidebar.groups", "sidebar.attention", "mail.on", "uber.bot", "order.enabled", "order.estimates", "import.v014.ack"].contains(&k)
         || ["thread.tree.", "project.icon.", "project.color.", "project.pick.", "project.link.", "buy.", "order.quote.", "order.pick.", "plan.once.", "review.ro.", "mail.private.owner.", "account.thread."].iter().any(|p| k.starts_with(p)) { return true }
-    // the Context panel's readings (present/tokstats.rs): one short string a thread, and the epoch that names the thread totals' key
-    if ["tok.epoch", "tok.recount"].contains(&k) || ["turn.last.", "turn.speed.", "turn.models.", "turn.live.", "turn.tier."].iter().any(|p| k.starts_with(p)) || (k.starts_with("tok.") && [".t.", ".td.", ".tr.", ".bl."].iter().any(|p| k.starts_with(&format!("tok{p}")) || k.contains(p))) { return true }
+    // the Context panel's readings (present/tokstats.rs): one short string a thread, and the epoch that names the thread totals' key; a provider's day (`.dv.`, Settings › Accounts)
+    if ["tok.epoch", "tok.recount"].contains(&k) || ["turn.last.", "turn.speed.", "turn.models.", "turn.live.", "turn.tier."].iter().any(|p| k.starts_with(p)) || (k.starts_with("tok.") && [".t.", ".td.", ".tr.", ".bl.", ".dv."].iter().any(|p| k.starts_with(&format!("tok{p}")) || k.contains(p))) { return true }
     // the Settings pages' values (present/settings.rs): short strings, one per control
     if ["settle.idle.minutes", "settle.personal.minutes", "settle.done", "restart.continue", "thread.env", "agent.provider", "agent.model", "telemetry.share", "telemetry.usage.asked", "telemetry.asked", "telemetry.usage.generation", "telemetry.choice.revision", "telemetry.reset", "telemetry.notice", "onboard.usage", "update.channel", "text.provider", "text.model", "kicad.path", "freecad.path", "kicad.ipc", "viewer.board3d", "plan.routing", "fallback.chain", "fallback.on", "fallback.add.provider", "fallback.add.model", "recall.bots"].contains(&k) || ["push.webhook.", "notify.", "tz.rule."].iter().any(|p| k.starts_with(p)) { return true }
     // Settings, Voice (voice/page.rs, drawn by present/settings.rs from this copy): the engine, the model and the microphone, and the dictionary's
@@ -271,6 +271,7 @@ mod tests {
         assert!(lean_keeps("review.ro.t1"), "the thread view draws the review bar from it (#1305)");
         assert!(lean_keeps("unanswered.t1"), "the thread view draws the hasn't-answered notice from it");
         for k in ["voice.engine", "voice.model", "voice.device", "voice.e.kicad", "voice.l.jason"] { assert!(lean_keeps(k), "{k}: Settings, Voice shows it"); }
+        for k in ["tok.dv.2026-11-19|grok", "tok.1b.dv.2026-11-19|pi"] { assert!(lean_keeps(k), "{k}: Settings › Accounts says what a provider without a usage reading ran today (provider_usage.rs)"); }
         for k in ["tok.t.t1", "tok.1b.t.t1", "turn.last.t1", "turn.speed.t1", "turn.models.t1", "turn.live.t1", "tok.epoch", "tok.recount"] { assert!(lean_keeps(k), "{k}"); }
         for k in ["onboard.step", "onboard.skipped", "onboard.seen", "onboard.done", "onboard.checks", "onboard.usage", "freecad.path"] { assert!(lean_keeps(k), "{k}: setup reads it, and without it every press forgets the last"); }
         for k in ["ride.t1", "tok.basis.t1", "uber.op.u.m.1", "todos.base.t1", "session.t1.claude"] { assert!(!lean_keeps(k), "{k}"); }

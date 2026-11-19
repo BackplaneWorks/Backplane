@@ -34,6 +34,8 @@ mod e2e;
 #[cfg(test)]
 mod failover_e2e;
 #[cfg(test)]
+mod provider_usage_e2e;
+#[cfg(test)]
 mod restart_e2e;
 pub mod mask;
 pub mod misc;
@@ -43,6 +45,7 @@ pub mod models;
 pub mod models_probe;
 pub mod agent_versions;
 pub mod privacy;
+pub mod provider_usage;
 pub mod proposal;
 pub mod secret;
 pub mod set;

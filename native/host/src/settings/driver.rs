@@ -54,8 +54,15 @@ impl World {
     fn usable(&self, t: &fb::Target) -> Option<Option<(String, u64)>> {
         let get = |k: &str| self.get(k); let profiles = self.inventory();
         if !self.offered(t) || fb::target_held(&get, t, self.now) { return None }
-        if !profiles.iter().any(|p| p["provider"] == t.provider.as_str()) { return Some(None) }
+        if !profiles.iter().any(|p| p["provider"] == t.provider.as_str()) { return if self.reading_out(t).is_some() { None } else { Some(None) } }
         fb::pick_account(&profiles, &get, self.now, &t.provider, &t.model).map(|p| Some((p["id"].as_str().unwrap_or("").to_string(), p["epoch"].as_u64().unwrap_or(0))))
+    }
+    /// The model a target runs: its own, else the provider's first listed (the CLI's default: Antigravity's is Gemini).
+    fn model_of(&self, t: &fb::Target) -> String { if !t.model.is_empty() { return t.model.clone() } self.caps[&t.provider].as_array().and_then(|a| a.first()).and_then(Value::as_str).unwrap_or("").to_string() }
+    /// A provider's own login (no named accounts) whose reading (`allowance.<provider>`: Claude's or Codex's CLI login, Antigravity, Grok... provider_usage.rs) has a window
+    /// for the target's model that is full and resets later: (scope, reset). Its usage known, the order passes it over without spending a turn to find out.
+    fn reading_out(&self, t: &fb::Target) -> Option<(String, u64)> {
+        fb::exhausted(&fb::default_profile(&t.provider, &self.get(&format!("allowance.{}", t.provider))), self.now, &self.model_of(t))
     }
     /// The first target of the order, from its top, that can run now and is not where the thread is out (its own target, or its provider alone). `above`: only the targets ranked
     /// above the thread's provider (the way back up once one has reset).
@@ -93,7 +100,10 @@ fn pending_of(w: &World) -> Option<fb::Limit> {
 }
 
 /// A limit seen on a line. `terminal`: the turn failed on it. The events to write now and, for a terminal one in force, the restart to make.
-pub fn on_limit(w: &World, lim: &fb::Limit, terminal: bool, original: &str) -> Verdict {
+pub fn on_limit(w: &World, lim: &fb::Limit, terminal: bool, original: &str) -> Verdict { held_on(w, lim, terminal, original, true) }
+/// `on_limit`, and the holds that are not a provider's limit (a transport that did not come back, a CLI not installed): `limit` says whether a rate limit was met, which
+/// the Accounts page shows of a provider without accounts (`allowance.seen.<provider>`).
+fn held_on(w: &World, lim: &fb::Limit, terminal: bool, original: &str, limit: bool) -> Verdict {
     let (th, at) = (w.thread.as_str(), w.now);
     if lim.auth && !w.managed() { return Verdict::default() } // with no other account to go to, a failed sign-in stays the failed turn it is, and says why
     if !terminal {
@@ -104,6 +114,14 @@ pub fn on_limit(w: &World, lim: &fb::Limit, terminal: bool, original: &str) -> V
     }
     if !due(lim, at) { return Verdict::default() }
     let mut ev: Vec<Value> = vec![];
+    let mut lim = lim.clone();
+    if !w.managed() && lim.reset == 0 && !lim.auth {
+        // the limit's own words had no reset: the window of the provider's reading that filled has one (Antigravity's, Grok's... provider_usage.rs)
+        lim.reset = fb::window_reset(&fb::default_profile(&w.provider, &w.get(&format!("allowance.{}", w.provider))), &w.model, at);
+    }
+    // what the Accounts page says of a provider without accounts: the last rate limit it met, and when it ends (#1337)
+    if limit && !accounts::supported(&w.provider) && !lim.auth && !fb::missing_text(&lim.reason) { ev.push(set(&crate::settings::provider_usage::seen_key(&w.provider), &lim.json(at), at)) }
+    let lim = &lim;
     if w.managed() {
         // AccountFallback.limited: the hold on this login (or this model on it), then the same request again; the restart picks what is still eligible
         let (id, epoch) = w.binding();
@@ -222,7 +240,10 @@ fn missing_here(w: &World) -> bool {
 /// When the hold on a provider with no accounts (or on its model) ends: 0 unknown.
 fn provider_hold(w: &World, t: &fb::Target) -> u64 {
     let rec = |scope: &str| serde_json::from_str::<Value>(&w.get(&fb::Limit::key(scope))).unwrap_or(Value::Null);
-    [rec(&t.provider), rec(&t.key())].iter().filter(|o| fb::hold_active(o, w.now)).map(fb::hold_end).filter(|e| *e > 0).min().unwrap_or(0)
+    let held = [rec(&t.provider), rec(&t.key())].iter().filter(|o| fb::hold_active(o, w.now)).map(fb::hold_end).filter(|e| *e > 0).min().unwrap_or(0);
+    // a window its reading shows full ends then too: the later of the two is when it can run (#1337)
+    let full = if w.inventory().iter().any(|p| p["provider"] == t.provider.as_str()) { 0 } else { w.reading_out(t).map_or(0, |f| f.1) };
+    held.max(full)
 }
 /// Every target of the order is out too: one line with every provider's accounts and the earliest reset among all of them, and the thread goes on by itself then (`resume_on`
 /// takes the best that is free at that time, which may be a provider above this one). With no other provider in the order this is the provider's own wait (`wait_all`).
@@ -356,7 +377,7 @@ pub async fn on_line(hub: &Arc<Hub>, acc: Option<&Arc<crate::settings::accounts_
     let Some(lim) = lim.or_else(|| pending_of(&w).filter(|p| due(p, w.now))) else { return Verdict::default() };
     expire_login(acc, &w, &lim);
     let orig = original(hub, thread).await;
-    on_limit(&w, &lim, true, &orig)
+    held_on(&w, &lim, true, &orig, false)
 }
 /// A turn that could not start because its provider's CLI is not installed here (`could not start <cli>: <cli> is not installed ...`): held and moved on as a limit is.
 /// Default when it is not that, or the thread is not one this hub runs.
@@ -381,7 +402,7 @@ pub fn on_transient(w: &World, why: &str, original: &str, jitter: f64) -> Verdic
     let n = rec["tries"].as_u64().unwrap_or(0) + 1;
     if n > fb::TRANSIENT_TRIES {
         let lim = fb::Limit { scope: w.provider.clone(), reason: format!("{} (still failing after {} reconnects)", why.chars().take(300).collect::<String>(), fb::TRANSIENT_TRIES), reset: at + fb::TRANSIENT_HOLD_S, auth: false };
-        let mut v = on_limit(w, &lim, true, original);
+        let mut v = held_on(w, &lim, true, original, false);
         v.events.insert(0, set(&fb::transient_key(th), "", at));
         v.events.insert(1, act_row(th, "warn", "reconnect-failed", &format!("{} did not come back after {} reconnects: {}", fb::provider_name(&w.provider), fb::TRANSIENT_TRIES, why.chars().take(200).collect::<String>()), at));
         return v
@@ -700,6 +721,37 @@ mod tests {
         assert_eq!(keys(&v.events), ["fallback.outage.claude", "fallback.pending.t1", "TurnChanged"]); assert!(v.drop_turn_end);
         assert_eq!((v.events[2]["state"].clone(), v.events[2]["failover"].clone()), (json!("interrupted"), json!(true)), "its task and launcher are not told it ended");
         match v.act.unwrap() { Act::Restart { text } => assert!(text.starts_with("[Backplane] The account this turn ran on stopped") && text.ends_with("build the board")), a => panic!("{a:?}") }
+    }
+    /// #1337: with Antigravity's and Grok's usage known (provider_usage.rs), the order Claude, Codex, Antigravity, Grok passes over a provider whose window for
+    /// the model is full, waits for the earliest reset among all of them, and a limit with no reset of its own takes its window's.
+    #[test] fn the_order_reads_antigravity_and_grok_usage_before_it_moves_there() {
+        let agy = |gemini: f64, reset: u64| ("allowance.antigravity", json!({"provider":"antigravity","state":"ok","at":900,"windows":[
+            {"scope":"five_hour_gemini","models":["gemini"],"used_percent":gemini,"resets_at":reset},{"scope":"five_hour_claude_gpt","models":["claude","gpt"],"used_percent":0.0,"resets_at":reset}]}).to_string());
+        let grok = |used: f64, reset: u64| ("allowance.grok", json!({"provider":"grok","state":"ok","at":900,"windows":[{"scope":"seven_day","used_percent":used,"resets_at":reset}]}).to_string());
+        let out = |p: &str| (Box::leak(format!("fallback.outage.{p}").into_boxed_str()) as &str, json!({"scope":p,"reason":"r","reset":5000,"at":900}).to_string());
+        let mk = |extra: Vec<(&'static str, String)>| { let mut s = vec![("fallback.on", "on".to_string()), out("claude"), out("codex")]; s.extend(extra);
+            let mut w = ordered("claude", "opus", &s); w.caps = json!({"claude":["opus"],"codex":["gpt-6"],"antigravity":["gemini-4-neon","claude-opus-5-5-high"],"grok":["grok-4.7"]}); w };
+        // Antigravity's default model (its first, Gemini) has room: the order goes there, after Claude and Codex
+        match next(&mk(vec![agy(40.0, 4000), grok(10.0, 9000)])) { Next::Chain { to, .. } => assert_eq!(to.provider, "antigravity"), n => panic!("{n:?}") }
+        // its Gemini window is full: passed over without a turn spent on it; Grok is next
+        match next(&mk(vec![agy(100.0, 4000), grok(10.0, 9000)])) { Next::Chain { to, say, .. } => { assert_eq!(to.provider, "grok"); assert!(say.starts_with("Switched to Grok: Claude ran out"), "{say}") } n => panic!("{n:?}") }
+        // a target naming a model of the other family reads that family's window
+        let mut w = mk(vec![agy(100.0, 4000), grok(10.0, 9000)]); w.settings.insert("fallback.chain".into(), "claude,codex,antigravity/claude-opus-5-5-high,grok".into());
+        match next(&w) { Next::Chain { to, .. } => assert_eq!(to.key(), "antigravity/claude-opus-5-5-high"), n => panic!("{n:?}") }
+        // Grok's week is out too: everything waits, until the earliest reset of all, Antigravity's window (4000) before the others' holds (5000)
+        match next(&mk(vec![agy(100.0, 4000), grok(100.0, 9000)])) { Next::Wait { reset, events } => {
+            assert_eq!(reset, 4000, "{events:?}");
+            assert!(events.iter().any(|e| e["summary"].as_str().map_or(false, |s| s.starts_with("Every account is out (Claude; Codex; Antigravity; Grok)"))), "{events:?}") } n => panic!("{n:?}") }
+        // a stale reading of a window that has reset since holds nothing
+        match next(&mk(vec![agy(100.0, 950), grok(100.0, 9000)])) { Next::Chain { to, .. } => assert_eq!(to.provider, "antigravity"), n => panic!("{n:?}") }
+        // a turn on Antigravity that runs out with no reset in its words: the hold ends at its window's reset, and the Accounts page hears of it
+        let mut g = mk(vec![agy(100.0, 4000)]); g.provider = "antigravity".into(); g.model = "gemini-4-neon".into();
+        let v = on_limit(&g, &lim("antigravity", 0), true, "hi");
+        let hold = v.events.iter().find(|e| e["key"] == "fallback.outage.antigravity").expect("held");
+        assert_eq!(serde_json::from_str::<Value>(hold["value"].as_str().unwrap()).unwrap()["reset"], 4000);
+        let seen = v.events.iter().find(|e| e["key"] == "allowance.seen.antigravity").expect("seen");
+        assert_eq!(serde_json::from_str::<Value>(seen["value"].as_str().unwrap()).unwrap()["reset"], 4000);
+        assert!(!on_limit(&mk(vec![]), &lim("claude", 0), true, "hi").events.iter().any(|e| e["key"].as_str().map_or(false, |k| k.starts_with("allowance.seen."))), "Claude's limits are its accounts' holds");
     }
     #[test] fn the_restart_moves_to_the_next_chain_target_and_never_wraps() {
         let hold = ("fallback.outage.claude", json!({"scope":"claude","reason":"r","reset":0,"at":1}).to_string());

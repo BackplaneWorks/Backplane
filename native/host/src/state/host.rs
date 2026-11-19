@@ -168,6 +168,8 @@ fn policy_of(hub: &Hub) -> Option<Arc<Policy>> { FOLDS.lock().unwrap().iter().fi
 /// Lines the 0.14 import wrote, into the policies' state (the views read it), with nothing derived: `Policy::fold_quiet`.
 pub fn fold_quiet(hub: &Hub, first_seq: u64, events: Vec<serde_json::Value>) -> u64 { policy_of(hub).map_or(0, |p| p.fold_quiet(first_seq, events)) }
 /// Whether the policies' start fold is over (an import that begins by itself waits for it).
+/// Borrow this hub's lean fold (None before its policies started or during boot): what a hub-side reply reads of the state the views have, such as the day's token totals.
+pub fn with_state_of<R>(hub: &Hub, f: impl FnOnce(&crate::state::State) -> R) -> Option<R> { policy_of(hub)?.with_state(f) }
 pub fn booted(hub: &Hub) -> bool { policy_of(hub).map_or(true, |p| p.with_state(|_| ()).is_some()) }
 pub fn refold_begin(hub: &Hub) -> bool { policy_of(hub).map_or(false, |p| p.begin_refold()) }
 pub fn refold_end(hub: &Arc<Hub>, owned: bool) { if !owned { return } if let Some(p) = policy_of(hub) { tokio::spawn(boot_task(p, hub.clone(), crate::guard::Folding::begin())); } }
