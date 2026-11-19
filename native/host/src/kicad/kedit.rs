@@ -542,13 +542,16 @@ impl LibWait {
         }
     }
 }
-/// From GetLibraryStatuses: `nick`'s status and error (the project's row over the global one) and whether any library is loading.
-fn lib_seen(r: &Value, nick: &str) -> (Option<(String, String)>, bool) {
+/// From GetLibraryStatuses: the status and error of `nick` of kind `lt` (LT_FOOTPRINT, LT_SYMBOL: a symbol and a footprint library may
+/// share a nickname; the project's row over the global one) and whether any library of either kind is loading (one thread pool loads both).
+fn lib_seen(r: &Value, nick: &str, lt: &str) -> (Option<(String, String)>, bool) {
     const NAMES: [&str; 5] = ["LLS_UNKNOWN", "LLS_INVALID", "LLS_LOADING", "LLS_LOADED", "LLS_ERROR"];
     let st = |e: &Value| -> String { match &e["status"] { Value::String(s) => s.clone(), Value::Number(n) => NAMES.get(n.as_u64().unwrap_or(0) as usize).unwrap_or(&NAMES[0]).to_string(), _ => NAMES[0].into() } };
     let all: Vec<&Value> = r["libraries"].as_array().into_iter().flatten().collect();
     let loading = all.iter().any(|e| st(e) == "LLS_LOADING");
-    let mine: Vec<&&Value> = all.iter().filter(|e| e["entry"]["nickname"] == nick).collect();
+    const KINDS: [&str; 4] = ["LT_UNKNOWN", "LT_SYMBOL", "LT_FOOTPRINT", "LT_DESIGN_BLOCK"];
+    let kind = |e: &Value| -> String { match &e["entry"]["type"] { Value::String(s) => s.clone(), Value::Number(n) => KINDS.get(n.as_u64().unwrap_or(0) as usize).unwrap_or(&KINDS[0]).to_string(), _ => KINDS[0].into() } };
+    let mine: Vec<&&Value> = all.iter().filter(|e| e["entry"]["nickname"] == nick && kind(e) == lt).collect();
     let pick = mine.iter().find(|e| e["entry"]["scope"] == "LTS_PROJECT").or(mine.first());
     (pick.map(|e| (st(e), e["error_message"].as_str().unwrap_or("").to_string())), loading)
 }
@@ -654,7 +657,9 @@ impl Run<'_> {
             self.c.call(&format!("{C}EndCommit"), json!({"header": self.header(&Value::Null), "id": id, "action": "CMA_DROP"})).await?;
             let e = match made { Ok(v) => return Ok(v["item"].clone()), Err(e) if e.contains("not found") => e, Err(e) => return Err(e) };
             if !self.lib_kicked { self.lib_kicked = true; let _ = self.c.call(&format!("{C}LoadAllLibraries"), json!({})).await; }
-            let seen = self.c.call(&format!("{C}GetLibraryStatuses"), json!({"types": [lt], "scope": "LTS_BOTH"})).await.ok().map(|r| lib_seen(&r, &nick));
+            // both kinds: they load on one thread pool, and the symbol load (Choose Symbol's first) can hold every worker while the
+            // footprint rows wait their turn, INVALID with no footprint row LOADING
+            let seen = self.c.call(&format!("{C}GetLibraryStatuses"), json!({"types": ["LT_SYMBOL", "LT_FOOTPRINT"], "scope": "LTS_BOTH"})).await.ok().map(|r| lib_seen(&r, &nick, lt));
             match wait.next(&nick, seen) {
                 LibStep::Wait => tokio::time::sleep(self.lib_step).await,
                 LibStep::Retry => {}
@@ -1256,7 +1261,7 @@ mod tests {
     struct Fake { log: Mutex<Vec<(String, Value)>>, open: Mutex<bool>, fail: Option<&'static str>, busy: Mutex<u32>, save: Value, texts: Option<Vec<String>>, caps: Vec<String>, served: Option<&'static str>, zones: Option<Value>, libs: Option<Mutex<Libs>> }
     /// Footprint libraries loading as in the live editor (#1204's sibling, b5 Fix 1): each library's status before and from its poll `at`
     /// of GetLibraryStatuses, and the footprints it has; KiCad answers "not found" for a footprint until its library is LOADED.
-    struct LibRow { nick: &'static str, before: &'static str, after: &'static str, at: u32, has: &'static [&'static str] }
+    struct LibRow { kind: &'static str, nick: &'static str, before: &'static str, after: &'static str, at: u32, has: &'static [&'static str] }
     struct Libs { polls: u32, rows: Vec<LibRow> }
     impl LibRow { fn now(&self, polls: u32) -> &'static str { if polls >= self.at { self.after } else { self.before } } }
     impl Call for Fake {
@@ -1287,10 +1292,10 @@ mod tests {
                     json!({"item": {"id": {"value": "probe"}, "path": {}, "position": msg["position"], "transform": {"orientation": msg["orientation"]}, "unit": {"unit": 1}, "definition": {"id": msg["lib_id"], "items": items},
                         "reference_field": {"visible": true, "text": {"position": {"x_nm": "5"}, "text": msg["reference"]}}, "value_field": {"visible": true, "text": {"position": {"x_nm": "6"}, "text": "R"}}, "@type": "type.googleapis.com/kiapi.schematic.types.SchematicSymbolInstance"}}) }
                 "PlaceFootprintFromLibrary" if self.libs.is_some() => { let l = self.libs.as_ref().unwrap().lock().unwrap(); let (nick, entry) = (msg["lib_id"]["library_nickname"].as_str().unwrap_or(""), msg["lib_id"]["entry_name"].as_str().unwrap_or(""));
-                    if !l.rows.iter().any(|r| r.nick == nick && r.now(l.polls) == "LLS_LOADED" && r.has.contains(&entry)) { return Err(format!("KiCad answered AS_BAD_REQUEST: footprint '{nick}:{entry}' not found")) }
+                    if !l.rows.iter().any(|r| r.kind == "LT_FOOTPRINT" && r.nick == nick && r.now(l.polls) == "LLS_LOADED" && r.has.contains(&entry)) { return Err(format!("KiCad answered AS_BAD_REQUEST: footprint '{nick}:{entry}' not found")) }
                     json!({"item": {"position": msg["position"], "layer": msg["layer"], "definition": {"id": msg["lib_id"], "items": []}}}) }
                 "GetLibraryStatuses" if self.libs.is_some() => { let mut l = self.libs.as_ref().unwrap().lock().unwrap(); l.polls += 1; let p = l.polls;
-                    json!({"libraries": l.rows.iter().map(|r| { let st = r.now(p); let mut e = json!({"entry": {"nickname": r.nick, "type": "LT_FOOTPRINT", "scope": "LTS_GLOBAL"}, "status": st}); if st == "LLS_ERROR" { e["error_message"] = json!("cannot read /x/A.pretty") } e }).collect::<Vec<_>>()}) }
+                    json!({"libraries": l.rows.iter().map(|r| { let st = r.now(p); let mut e = json!({"entry": {"nickname": r.nick, "type": r.kind, "scope": "LTS_GLOBAL"}, "status": st}); if st == "LLS_ERROR" { e["error_message"] = json!("cannot read /x/A.pretty") } e }).collect::<Vec<_>>()}) }
                 "DeleteItems" => json!({"deleted_items": msg["item_ids"].as_array().unwrap().iter().map(|i| json!({"id": i, "status": "IDS_OK"})).collect::<Vec<_>>()}),
                 _ => json!({}),
             })
@@ -1355,7 +1360,7 @@ mod tests {
     /// A footprint exchanged while the live editor's full footprint load (the person's Choose Symbol) has not reached its library: KiCad says
     /// "not found" for it until then. The edit waits for that library by its status, past the old 10.5 s, and the exchange is made.
     #[test] fn a_footprint_waits_for_its_library_past_the_old_ten_seconds() {
-        let f = with_libs(vec![LibRow { nick: "A", before: "LLS_LOADING", after: "LLS_LOADED", at: 40, has: &["X"] }]);
+        let f = with_libs(vec![LibRow { kind: "LT_FOOTPRINT", nick: "A", before: "LLS_LOADING", after: "LLS_LOADED", at: 40, has: &["X"] }]);
         let out = go(&f, json!({"ops": [{"set": "R1", "footprint": "A:X"}]})).unwrap();
         assert_eq!((out["results"][0]["swapped"].clone(), out["saved"].clone()), (json!(1), json!("/p/b.kicad_pcb")), "{out}");
         assert_eq!(polls(&f), 40, "asked until it loaded");
@@ -1364,16 +1369,26 @@ mod tests {
     /// Two exchanges in one call: the first library is loaded, the second is still queued (INVALID until a worker reaches it, while another
     /// library loads). The second waits for its own library: an answer from the first never makes the second's "not found" final.
     #[test] fn a_second_footprint_from_a_later_library_waits_for_that_library() {
-        let f = with_libs(vec![LibRow { nick: "A", before: "LLS_LOADED", after: "LLS_LOADED", at: 0, has: &["X"] },
-            LibRow { nick: "B", before: "LLS_INVALID", after: "LLS_LOADED", at: 30, has: &["Y"] },
-            LibRow { nick: "Other", before: "LLS_LOADING", after: "LLS_LOADED", at: 30, has: &[] }]);
+        let f = with_libs(vec![LibRow { kind: "LT_FOOTPRINT", nick: "A", before: "LLS_LOADED", after: "LLS_LOADED", at: 0, has: &["X"] },
+            LibRow { kind: "LT_FOOTPRINT", nick: "B", before: "LLS_INVALID", after: "LLS_LOADED", at: 30, has: &["Y"] },
+            LibRow { kind: "LT_FOOTPRINT", nick: "Other", before: "LLS_LOADING", after: "LLS_LOADED", at: 30, has: &[] }]);
         let out = go(&f, json!({"ops": [{"set": "R1", "footprint": "A:X"}, {"set": "R2", "footprint": "B:Y"}]})).unwrap();
         assert_eq!((out["results"][0]["swapped"].clone(), out["results"][1]["swapped"].clone()), (json!(1), json!(1)), "{out}");
         assert_eq!(polls(&f), 30);
     }
+    /// Choose Symbol starts the symbol load first and it can hold every worker of the shared pool: the footprint library sits INVALID
+    /// with no footprint library LOADING, only symbol libraries. That is a load in flight: the edit keeps waiting, past LIB_IDLE asks.
+    #[test] fn a_footprint_library_waits_while_only_symbol_libraries_load() {
+        let f = with_libs(vec![LibRow { kind: "LT_FOOTPRINT", nick: "B", before: "LLS_INVALID", after: "LLS_LOADED", at: 25, has: &["Y"] },
+            LibRow { kind: "LT_SYMBOL", nick: "Device", before: "LLS_LOADING", after: "LLS_LOADED", at: 25, has: &[] }]);
+        let out = go(&f, json!({"ops": [{"set": "R2", "footprint": "B:Y"}]})).unwrap();
+        assert_eq!(out["results"][0]["swapped"], json!(1), "{out}");
+        assert_eq!(polls(&f), 25, "well past LIB_IDLE ({LIB_IDLE})");
+        assert_eq!(sent(&f, "GetLibraryStatuses")["types"], json!(["LT_SYMBOL", "LT_FOOTPRINT"]), "both kinds asked");
+    }
     /// The library is loaded and has no such footprint: "not found" after one more ask, at once (no waiting).
     #[test] fn a_footprint_missing_from_a_loaded_library_is_not_found_at_once() {
-        let f = with_libs(vec![LibRow { nick: "A", before: "LLS_LOADED", after: "LLS_LOADED", at: 0, has: &["X"] }]);
+        let f = with_libs(vec![LibRow { kind: "LT_FOOTPRINT", nick: "A", before: "LLS_LOADED", after: "LLS_LOADED", at: 0, has: &["X"] }]);
         let e = go(&f, json!({"ops": [{"set": "R1", "footprint": "A:Nope"}]})).unwrap_err();
         assert!(e.contains("footprint A:Nope") && e.contains("'A:Nope' not found"), "{e}");
         assert_eq!(polls(&f), 2, "one more ask after the first LOADED, then final");
@@ -1381,10 +1396,10 @@ mod tests {
     }
     /// A library that failed to load is said at once, with KiCad's reason; one KiCad has no row for is said at once too.
     #[test] fn a_library_that_failed_or_is_not_in_the_tables_is_said_at_once() {
-        let f = with_libs(vec![LibRow { nick: "A", before: "LLS_ERROR", after: "LLS_ERROR", at: 0, has: &["X"] }]);
+        let f = with_libs(vec![LibRow { kind: "LT_FOOTPRINT", nick: "A", before: "LLS_ERROR", after: "LLS_ERROR", at: 0, has: &["X"] }]);
         let e = go(&f, json!({"ops": [{"set": "R1", "footprint": "A:X"}]})).unwrap_err();
         assert!(e.contains("the library `A` failed to load: cannot read /x/A.pretty"), "{e}"); assert_eq!(polls(&f), 1);
-        let f = with_libs(vec![LibRow { nick: "A", before: "LLS_LOADED", after: "LLS_LOADED", at: 0, has: &["X"] }]);
+        let f = with_libs(vec![LibRow { kind: "LT_FOOTPRINT", nick: "A", before: "LLS_LOADED", after: "LLS_LOADED", at: 0, has: &["X"] }]);
         let e = go(&f, json!({"ops": [{"set": "R1", "footprint": "Zed:X"}]})).unwrap_err();
         assert!(e.contains("no library `Zed`") && e.contains("not found"), "{e}"); assert_eq!(polls(&f), 1);
     }
@@ -1397,9 +1412,13 @@ mod tests {
         let mut w = LibWait::default(); let mut last = LibStep::Wait; for _ in 0..LIB_POLLS { last = w.next("A", st("LLS_LOADING", true)) }
         assert_eq!(last, LibStep::Fail("the library `A` did not finish loading within 60 s (it is LLS_LOADING)".into()));
         let mut w = LibWait::default(); let mut n = 1; while w.next("A", None) == LibStep::Wait { n += 1 } assert_eq!(n, LIB_LEGACY);
-        assert_eq!(lib_seen(&json!({"libraries": [{"entry": {"nickname": "A", "scope": "LTS_GLOBAL"}, "status": 2}, {"entry": {"nickname": "A", "scope": "LTS_PROJECT"}, "status": "LLS_LOADED"}, {"entry": {"nickname": "B"}}]}), "A"),
-            (Some(("LLS_LOADED".into(), String::new())), true), "the project's row over the global one; a numeric status read too");
-        assert_eq!(lib_seen(&json!({"libraries": [{"entry": {"nickname": "B"}}]}), "B"), (Some(("LLS_UNKNOWN".into(), String::new())), false), "an omitted status is UNKNOWN");
+        assert_eq!(lib_seen(&json!({"libraries": [{"entry": {"nickname": "A", "type": "LT_FOOTPRINT", "scope": "LTS_GLOBAL"}, "status": 2}, {"entry": {"nickname": "A", "type": 2, "scope": "LTS_PROJECT"}, "status": "LLS_LOADED"}, {"entry": {"nickname": "B", "type": "LT_FOOTPRINT"}}]}), "A", "LT_FOOTPRINT"),
+            (Some(("LLS_LOADED".into(), String::new())), true), "the project's row over the global one; a numeric status and type read too");
+        assert_eq!(lib_seen(&json!({"libraries": [{"entry": {"nickname": "B", "type": "LT_FOOTPRINT"}}]}), "B", "LT_FOOTPRINT"), (Some(("LLS_UNKNOWN".into(), String::new())), false), "an omitted status is UNKNOWN");
+        // a symbol library of the same nickname is not the footprint library; its loading still counts as a load in flight
+        assert_eq!(lib_seen(&json!({"libraries": [{"entry": {"nickname": "A", "type": "LT_SYMBOL"}, "status": "LLS_LOADING"}, {"entry": {"nickname": "A", "type": "LT_FOOTPRINT"}, "status": "LLS_INVALID"}]}), "A", "LT_FOOTPRINT"),
+            (Some(("LLS_INVALID".into(), String::new())), true));
+        assert_eq!(lib_seen(&json!({"libraries": [{"entry": {"nickname": "Z", "type": "LT_SYMBOL"}, "status": "LLS_LOADED"}]}), "Z", "LT_FOOTPRINT").0, None, "only a symbol library Z: no footprint library Z");
     }
 
     #[test] fn one_call_opens_reads_commits_and_saves() {
