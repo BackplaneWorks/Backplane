@@ -1,16 +1,19 @@
 // Issue #1192: a symbol from a KiCad HTTP library placed through the headless KiCad (kicad-cli api-server), driven as an agent drives it.
 //   bun httplib_headless_e2e.mjs HUB RUNTIME PORT WORK [--expect-hollow]
 // The HTTP part is placed first, on a server that has loaded no library yet (as an agent's first call does).
-// A REST stub (lib/httplib_stub.py) serves one part whose symbolIdStr is Device:R; the global symbol table (a temp KICAD_CONFIG_HOME) holds
+// A REST stub (lib/httplib_stub.py) serves a part whose symbolIdStr is Device:R and one whose symbol does not exist; the global symbol table (a temp KICAD_CONFIG_HOME) holds
 // that HTTP library (My_Parts) and Device. A stand-in `claude` calls kicad_edit inside a turn on a temp hub (no editor open, so the
 // headless KiCad serves every call) and the answers are checked:
 //   whole     the HTTP part placed by kicad_edit add has its pins in `created`, and its raw definition has pins and graphics
+//   missing   a part whose symbol does not exist (symbolIdStr Device:NoSuchSymbol), placed next: an error naming it, nothing placed
 //   control   Device:R placed the same way has them (the runtime and the hub are fine without the HTTP library)
+//   again     the HTTP part placed once more in the same session is still whole
 //   served    the answer says the headless KiCad served it (served_by), on a refusal too
 //   relib     set raw definition.id is refused (a placed symbol's library symbol is not changed by set), not answered as done
 //   rawadd    a raw SchematicSymbolInstance add with only definition.id has the part's other fields (MPN); without the fork fix it is refused as empty
 //   adddel    add then delete by ref in one call deletes it
-// With --expect-hollow (a runtime without the fork fix) `whole` must fail and the hub must say so (flag `hollow`), the rest as above.
+// With --expect-hollow (a runtime without the fork fix, before bp.13.2) `whole` must fail and the hub must say so (flag `hollow`); `missing`
+// and `again` are not judged; the rest as above.
 // HOME and XDG_* are temp. Only processes this script started are stopped (the hub by its PID, the stub by its PID).
 import {spawn} from 'node:child_process';
 import {chmodSync,existsSync,mkdirSync,mkdtempSync,readFileSync,rmSync,writeFileSync,copyFileSync} from 'node:fs';
@@ -33,10 +36,11 @@ const sch=`${work}/proj/t.kicad_sch`;
 writeFileSync(sch,`(kicad_sch (version 20250114) (generator "eeschema") (generator_version "9.0") (uuid "6a3c0b1e-0000-4000-8000-000000001192") (paper "A4") (lib_symbols) (sheet_instances (path "/" (page "1"))))\n`);
 writeFileSync(`${work}/proj/t.kicad_pro`,JSON.stringify({meta:{filename:'t.kicad_pro',version:3}}));
 makeStandins(`${work}/bin`);
-const P='My_Parts:470R 1206 1% 250mW 200V';
+const P='My_Parts:470R 1206 1% 250mW 200V',M='My_Parts:Missing symbol part';
 writeFileSync(`${work}/bin/claude`,`#!/usr/bin/env python3
-import json,os,sys,urllib.request
-a=sys.argv;url=json.loads(a[a.index('--mcp-config')+1])['mcpServers']['backplane']['url'];out=os.environ['KH_OUT'];sch=os.environ['KH_SCH'];P=${JSON.stringify(P)}
+import json,os,sys,traceback,urllib.request
+sys.excepthook=lambda *e:open(os.environ['KH_OUT']+'.err','a').write(json.dumps(sys.argv)+'\\n'+''.join(traceback.format_exception(*e)))
+a=sys.argv;m=a[a.index('--mcp-config')+1];url=json.loads(m if m.lstrip().startswith('{') else open(m).read())['mcpServers']['backplane']['url'];out=os.environ['KH_OUT'];sch=os.environ['KH_SCH'];P=${JSON.stringify(P)};M=${JSON.stringify(M)}
 say=lambda o:(print(json.dumps(o)),sys.stdout.flush())
 say({'type':'system','subtype':'init','session_id':'kh-standin'})
 sys.stdin.readline()
@@ -51,6 +55,8 @@ def tool(name,args):
 ed=lambda ops:tool('kicad_edit',{'path':sch,'ops':ops})
 r={}
 r['whole']=ed([{'add':[{'symbol':{'lib':P,'ref':'R998','at':[30,100]}}]},{'find':{'kind':'symbol','ref':'R998','raw':True}}])
+r['missing']=ed([{'add':[{'symbol':{'lib':M,'ref':'U999','at':[200,100]}}]}])
+r['missing_find']=ed([{'find':{'kind':'symbol','ref':'U999'}}])
 r['control']=ed([{'add':[{'symbol':{'lib':'Device:R','ref':'R997','at':[60,100]}}]},{'find':{'kind':'symbol','ref':'R997','raw':True}}])
 r['again']=ed([{'add':[{'symbol':{'lib':P,'ref':'R994','at':[150,100]}}]},{'find':{'kind':'symbol','ref':'R994','raw':True}}])
 r['relib']=ed([{'set':['R997'],'raw':{'definition':{'id':{'library_nickname':'My_Parts','entry_name':'470R 1206 1% 250mW 200V'}}}},{'find':{'kind':'symbol','ref':'R997'}}])
@@ -71,7 +77,7 @@ c.send('project.add',{path:`${work}/proj`});const pc=await c.until(10000,()=>c.s
 c.send('thread.create',{project:pc.id,title:'httplib',env:'local'});const th=await c.until(10000,()=>c.seen.find(x=>x.$==='ThreadCreated'&&x.title==='httplib'));
 await c.until(10000,()=>c.seen.find(x=>x.$==='ProviderSet'&&x.id===th.id));const ts=await c.rpc('turn.start',{thread:th.id,text:'go',msg:'kh1'});console.log('turn.start',JSON.stringify(ts?.o).slice(0,400));
 for(let i=0;i<3000&&!existsSync(out);i++)await sleep(100);
-check('the stand-in finished',existsSync(out),readFileSync(`${work}/hub.log`,'utf8').slice(-600));
+check('the stand-in finished',existsSync(out),existsSync(out+'.err')?readFileSync(out+'.err','utf8').slice(-1500):readFileSync(`${work}/hub.log`,'utf8').slice(-600));
 const r=JSON.parse(readFileSync(out,'utf8'));writeFileSync(`${work}/answers.json`,JSON.stringify(r,null,1));
 const res=k=>r[k]?.body?.results??[];const raw=k=>res(k)[1]?.rows?.[0];
 const items=d=>(d?.definition?.items??[]).map(i=>(i.item?.['@type']??i['@type']??'').split('.').pop());
@@ -81,7 +87,13 @@ check('served: the answer says the headless KiCad served it',r.whole.body?.serve
 if(expectHollow){
  check('whole (without the fork fix): the empty template is refused, nothing placed',r.whole.error&&/template KiCad placed is empty/.test(r.whole.body?.error)&&/source symbol itself/.test(r.whole.body?.error),r.whole);
 }else check('whole: the HTTP part comes with its pins and graphics',!r.whole.error&&whole(raw('whole'))&&!!res('whole')[0]?.created?.[0]?.pins,r.whole);
-console.log(`info again: the HTTP part placed after Device:R comes ${whole(raw('again'))?'whole':'hollow'}`);
+if(expectHollow)console.log(`info again: the HTTP part placed after Device:R comes ${whole(raw('again'))?'whole':'hollow'}`);
+else{
+ check('missing: a part whose symbol does not exist is an error naming it, nothing placed',r.missing.error&&/not found/.test(JSON.stringify(r.missing.body))&&JSON.stringify(r.missing.body).includes('Missing symbol part'),r.missing);
+ check('missing: U999 is not on the sheet',(r.missing_find.body?.results?.[0]?.rows??[]).length===0,r.missing_find);
+ check('again: the HTTP part placed again in the same session is still whole',!r.again.error&&whole(raw('again')),r.again);
+ console.log(`info missing: ${JSON.stringify(r.missing.body).slice(0,400)}`);
+}
 check('relib: set raw definition is refused, not answered as done',r.relib.error&&/not changed by set/.test(r.relib.body?.error),r.relib);
 const ra=res('rawadd')[1]?.rows?.[0];
 if(expectHollow)check('rawadd (without the fork fix): refused as empty',r.rawadd.error&&/is empty/.test(r.rawadd.body?.error),r.rawadd);
