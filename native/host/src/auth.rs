@@ -29,6 +29,16 @@ impl Req {
     }
 }
 
+/// Browser-only authentication after the caller has verified the ingress, Host and Origin.
+pub fn browser_device(reg: &crate::net::pairing::Registry, req: &Req, verified_login: &str) -> Option<String> {
+    let mut values = req.headers.iter().filter(|(name, _)| name.eq_ignore_ascii_case("cookie"))
+        .flat_map(|(_, header)| header.split(';'))
+        .filter_map(|part| part.trim().strip_prefix("__Host-bp_web="));
+    let token = values.next()?;
+    if values.next().is_some() { return None }
+    reg.browser_verify(verified_login, token, None, false)
+}
+
 /// JS `!!d.revoked`: anything but false, null, 0, "" and a missing field is revoked ("yes", 1, [] ...). Never narrower than the JS rule.
 fn truthy(v: &serde_json::Value) -> bool {
     use serde_json::Value::*;

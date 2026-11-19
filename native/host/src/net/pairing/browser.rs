@@ -1,5 +1,7 @@
 //! A six-digit code compares two screens. A separate random cookie redeems approval.
 use super::*;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use tokio::sync::watch;
 
 const WAIT: u64 = 120_000;
 const DAY: u64 = 86_400_000;
@@ -18,13 +20,25 @@ struct Request {
     code: String,
     hash: String,
     until: u64,
-    approved: bool,
+    decision: Option<bool>,
+    waiting: Arc<AtomicBool>,
+    wake: watch::Sender<()>,
 }
 
 impl Request {
     fn public(&self) -> Value {
         json!({"id":self.id, "name":self.name, "code":self.code, "expiresAt":self.until})
     }
+}
+
+fn valid_credentials(login: &str, cookie: &str) -> bool {
+    !login.is_empty() && login.len() <= 320 && login != "tagged-devices" && cookie.len() == 64
+        && cookie.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+struct PollGuard(Arc<AtomicBool>);
+impl Drop for PollGuard {
+    fn drop(&mut self) { self.0.store(false, Ordering::Release); }
 }
 
 fn current(device: &Value, at: u64) -> bool {
@@ -45,7 +59,7 @@ impl Registry {
         if requests.pending.iter().any(|r| r.code == code) { return Err("retry") }
         let cookie = self.rand_hex(32);
         let req = Request { id: self.rand_hex(16), name: clean(name, 80), login: login.into(), code,
-            hash: digest(&cookie), until: at + WAIT, approved: false };
+            hash: digest(&cookie), until: at + WAIT, decision: None, waiting: Default::default(), wake: watch::channel(()).0 };
         let public = req.public();
         requests.pending.push(req);
         Ok((public, cookie))
@@ -54,7 +68,7 @@ impl Registry {
     pub fn browser_pending(&self) -> Value {
         let g = self.inner.lock().unwrap();
         let at = (self.now)();
-        Value::Array(g.browser.pending.iter().filter(|r| r.until > at && !r.approved).map(Request::public).collect())
+        Value::Array(g.browser.pending.iter().filter(|r| r.until > at && r.decision.is_none()).map(Request::public).collect())
     }
 
     pub fn browser_clear_pending(&self) { self.inner.lock().unwrap().browser.pending.clear(); }
@@ -63,19 +77,47 @@ impl Registry {
         let mut g = self.inner.lock().unwrap();
         let at = (self.now)();
         let pending = &mut g.browser.pending;
-        let Some(i) = pending.iter().position(|r| r.id == id && r.until > at && !r.approved) else { return false };
-        if approve { pending[i].approved = true } else { pending.swap_remove(i); }
+        let Some(i) = pending.iter().position(|r| r.id == id && r.until > at && r.decision.is_none()) else { return false };
+        pending[i].decision = Some(approve);
+        pending[i].wake.send_replace(());
         true
     }
 
-    pub fn browser_poll(&self, login: &str, cookie: &str) -> Result<Option<String>, &'static str> {
+    /// The guard is released even when the HTTP task is cancelled.
+    pub async fn browser_wait(&self, login: &str, cookie: &str) -> Result<Option<String>, &'static str> {
+        let (_guard, mut changed, remaining) = {
+            let mut g = self.inner.lock().unwrap();
+            let at = (self.now)();
+            let hash = digest(cookie);
+            let request = g.browser.pending.iter().find(|r| valid_credentials(login, cookie) && r.login == login && same(&r.hash, &hash));
+            let Some(r) = request else {
+                return Err(if g.browser.polls.take(login, at) { "unknown_request" } else { "rate_limited" });
+            };
+            if r.waiting.swap(true, Ordering::AcqRel) { return Err("rate_limited") }
+            (PollGuard(r.waiting.clone()), r.wake.subscribe(), r.until.saturating_sub(at).min(25_000))
+        };
+        match self.browser_poll(login, cookie)? {
+            Some(token) => Ok(Some(token)),
+            None => {
+                let _ = tokio::time::timeout(std::time::Duration::from_millis(remaining), changed.changed()).await;
+                self.browser_poll(login, cookie)
+            }
+        }
+    }
+
+    pub fn browser_clients(&self) -> Vec<u64> {
+        let g = self.inner.lock().unwrap();
+        g.clients.iter().filter(|(_,id)| g.devices.iter().any(|d| d["kind"] == "browser" && d["id"] == id.as_str())).map(|(client,_)| *client).collect()
+    }
+
+    fn browser_poll(&self, login: &str, cookie: &str) -> Result<Option<String>, &'static str> {
         let mut g = self.inner.lock().unwrap();
         let at = (self.now)();
-        if !g.browser.polls.take(login, at) { return Err("rate_limited") }
         let hash = digest(cookie);
-        let Some(i) = g.browser.pending.iter().position(|r| same(&r.hash, &hash) && r.login == login && r.until > at) else { return Err("unknown_request") };
+        let Some(i) = g.browser.pending.iter().position(|r| same(&r.hash, &hash) && r.login == login) else { return Err("unknown_request") };
         let req = &g.browser.pending[i];
-        if !req.approved { return Ok(None) }
+        if req.until <= at { return Err("expired") }
+        match req.decision { None => return Ok(None), Some(false) => { g.browser.pending.swap_remove(i); return Err("denied") }, Some(true) => {} }
         if g.devices.iter().filter(|d| live(d) && (d["kind"] != "browser" || current(d, at))).count() >= DEVICE_LIMIT { return Err("device_limit") }
         let token = self.rand_hex(32);
         let mut devices = g.devices.clone();
@@ -88,7 +130,7 @@ impl Registry {
     }
 
     pub fn browser_verify(&self, login: &str, cookie: &str, client: Option<u64>, activity: bool) -> Option<String> {
-        if cookie.len() != 64 || login.is_empty() { return None }
+        if !valid_credentials(login, cookie) { return None }
         let mut g = self.inner.lock().unwrap();
         let at = (self.now)();
         let hash = digest(cookie);
