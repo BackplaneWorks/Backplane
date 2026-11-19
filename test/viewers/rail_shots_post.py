@@ -9,30 +9,8 @@ import sys
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
-PAGES = [
-    ("idle", None, ""),
-    ("board", "rail:Board", "board"),
-    ("schematic", "rail:Schematic", "schematic"),
-    ("3d", "rail:3D", "3d"),
-    ("gerbers", "rail:Gerbers", "board"),
-    ("split", "rail:Split", "split"),
-    ("mech", "rail:Mech", "mech"),
-    ("split-after-mech", "rail:Split", "split"),
-    ("files", "rail:Files", "files"),
-    ("diff", "rail:Diff", "diff"),
-    ("review", "rail:Review", "review"),
-    ("browser", "rail:Browser", "browser"),
-]
-
-# Expected hub `open` (or active rail kind) per project kind.
-# On projects lacking a board/schematic/gerbers, the hub may refuse or show empty;
-# we record what is expected when the resource exists vs what actually happened.
-HAS_RESOURCE = {
-    "full": {"board", "schematic", "3d", "gerbers", "split", "mech", "split-after-mech", "files", "diff", "review", "browser"},
-    "schematic-only": {"schematic", "files", "diff", "review", "browser"},
-    "mech-only": {"mech", "files", "diff", "review", "browser"},
-    "no-design": {"files", "diff", "review", "browser"},
-}
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import rail_shots_manifest as M  # noqa: E402
 
 
 def load_font(size: int = 12):
@@ -48,18 +26,36 @@ def load_font(size: int = 12):
     return ImageFont.load_default()
 
 
+def parse_captures(kind_dir: Path) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    p = kind_dir / "captures.jsonl"
+    if not p.exists():
+        return out
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        name = rec.get("name")
+        if name:
+            out[name] = rec
+    return out
+
+
 def parse_client_log(log_path: Path) -> dict:
-    """Parse GPUI_METRIC lines from a client.log into per-page timeline data."""
-    layout = {}
-    controls = {}
-    shown = {"open": "", "key": ""}
+    """Parse GPUI_METRIC lines from client.log into per-shot state, presses, and layout snapshots."""
+    layout: dict = {}
+    controls: dict[str, dict] = {}
     current_mark = ""
-    by_page: dict[str, dict] = {}
-    close_info = {"pressed": False, "found": False, "pane": "", "shown_open": ""}
-    all_controls_seen: dict[str, set[str]] = {}
+    presses_by_mark: dict[str, list[dict]] = {}
+    shots: dict[str, dict] = {}
+    refused_shots: list[dict] = []
 
     if not log_path.exists():
-        return {"pages": by_page, "close": close_info, "controls_seen": {}}
+        return {"shots": shots, "presses": presses_by_mark, "refused_shots": refused_shots}
 
     for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
         if "GPUI_METRIC " not in line:
@@ -73,89 +69,34 @@ def parse_client_log(log_path: Path) -> dict:
             layout = ev["rects"]
         elif kind == "controls" and isinstance(ev.get("controls"), list):
             controls = {c.get("id", ""): c for c in ev["controls"] if isinstance(c, dict)}
-        elif kind == "shown":
-            shown = {
-                "open": ev.get("open") or "",
-                "key": ev.get("key") or "",
-            }
         elif kind == "mark":
             current_mark = ev.get("name") or ""
-            if ":" in current_mark:
-                phase, page = current_mark.split(":", 1)
-                if page == "close":
-                    continue
-                rec = by_page.setdefault(page, {
-                    "presses": [],
-                    "control_found": None,
-                    "loading_pane": "",
-                    "settled_pane": "",
-                    "shown_open": "",
-                    "shown_key": "",
-                    "layout": {},
-                    "controls_ids": [],
-                    "shot_ok": None,
-                    "loading_shot_ok": None,
-                })
-                if phase == "settled":
-                    rec["layout"] = dict(layout)
-                    rec["controls_ids"] = sorted(controls.keys())
-                    all_controls_seen[page] = set(controls.keys())
         elif kind == "press":
-            cid = ev.get("id") or ""
-            found = bool(ev.get("found"))
-            if current_mark == "press:close":
-                close_info["pressed"] = True
-                close_info["found"] = found
-            elif current_mark.startswith("press:"):
-                page = current_mark.split(":", 1)[1]
-                rec = by_page.setdefault(page, {})
-                rec.setdefault("presses", []).append(cid)
-                rec["control_found"] = found
-        elif kind == "read" and ev.get("what") == "pane":
-            txt = ev.get("text") or ""
-            if current_mark == "settled:close":
-                close_info["pane"] = txt
-                close_info["shown_open"] = shown.get("open", "")
-            elif ":" in current_mark:
-                phase, page = current_mark.split(":", 1)
-                rec = by_page.setdefault(page, {})
-                if phase == "loading":
-                    rec["loading_pane"] = txt
-                elif phase in ("settled", "page"):
-                    rec["settled_pane"] = txt
-                    rec["shown_open"] = shown.get("open", "")
-                    rec["shown_key"] = shown.get("key", "")
-                    rec["layout"] = dict(layout)
-                    rec["controls_ids"] = sorted(controls.keys())
+            presses_by_mark.setdefault(current_mark, []).append({
+                "id": ev.get("id") or "",
+                "found": bool(ev.get("found")),
+                "action": ev.get("action"),
+            })
         elif kind == "shot":
-            ok = bool(ev.get("ok"))
-            if ":" in current_mark:
-                phase, page = current_mark.split(":", 1)
-                rec = by_page.setdefault(page, {})
-                if phase == "loading":
-                    rec["loading_shot_ok"] = ok
-                else:
-                    rec["shot_ok"] = ok
-                    rec["layout"] = dict(layout)
+            if not ev.get("ok"):
+                refused_shots.append(ev)
+        elif kind == "shot-ready":
+            name = ev.get("name") or ""
+            if name:
+                shots[name] = {
+                    "name": name,
+                    "state": ev.get("state", ""),
+                    "settled": bool(ev.get("settled")),
+                    "viewer": ev.get("viewer") or {},
+                    "layout": dict(layout),
+                    "controls_ids": sorted(controls.keys()),
+                }
 
-    return {
-        "pages": by_page,
-        "close": close_info,
-        "controls_seen": {k: sorted(v) for k, v in all_controls_seen.items()},
-    }
+    return {"shots": shots, "presses": presses_by_mark, "refused_shots": refused_shots}
 
 
 def make_contact_sheet(kind_dir: Path, out_png: Path) -> bool:
-    """Build a contact sheet for one project kind using ImageMagick montage."""
-    ordered: list[Path] = []
-    for page, _, _ in PAGES:
-        if page != "idle":
-            lp = kind_dir / f"{page}-loading.png"
-            if lp.exists():
-                ordered.append(lp)
-        sp = kind_dir / f"{page}.png"
-        if sp.exists():
-            ordered.append(sp)
+    ordered = [kind_dir / f"{s}.png" for s in M.contact_shots() if (kind_dir / f"{s}.png").exists()]
     if not ordered:
         return False
     cmd = [
@@ -183,52 +124,45 @@ def crop_box(img: Image.Image, x: float, y: float, w: float, h: float) -> Image.
 
 
 def build_strips(outdir: Path, kinds: list[str], parsed: dict[str, dict]) -> None:
-    """Build OUTDIR/headers.png (stacked pane headers) and OUTDIR/rails.png (side-by-side rails)."""
     font = load_font(12)
     small_font = load_font(10)
-
     header_rows: list[tuple[str, Image.Image | None, str]] = []
     rail_cols: list[tuple[str, Image.Image]] = []
-
     HEADER_H = 68
 
     for kind in kinds:
         kind_dir = outdir / kind
-        pages_meta = parsed.get(kind, {}).get("pages", {})
-        for page, _, _ in PAGES:
-            img_path = kind_dir / f"{page}.png"
+        shots_meta = parsed.get(kind, {}).get("shots", {})
+        for slug, _, _, _ in M.PAGES:
+            img_path = kind_dir / f"{slug}.png"
             if not img_path.exists():
                 continue
             with Image.open(img_path) as im:
                 im = im.convert("RGB")
                 iw, ih = im.size
-                lay = pages_meta.get(page, {}).get("layout") or {}
+                lay = shots_meta.get(slug, {}).get("layout") or {}
                 topbar = lay.get("topbar") or {"x": 0, "y": 0, "w": iw, "h": 36}
                 rail = lay.get("rail") or {"x": iw - 72, "y": 36, "w": 72, "h": ih - 36}
                 main = lay.get("main") or {"x": 240, "y": 36, "w": iw - 240 - 72, "h": ih - 36}
 
-                # Rail crop (always present)
                 rc = crop_box(im, rail["x"], rail["y"], rail["w"], rail["h"])
                 short_kind = {"full": "full", "schematic-only": "sch-only", "mech-only": "mech-only", "no-design": "no-design"}.get(kind, kind)
-                short_page = {"split-after-mech": "split2", "schematic": "schem"}.get(page, page)
+                short_page = {"split-after-mech": "split2", "schematic": "schem"}.get(slug, slug)
                 rail_cols.append((f"{short_kind}\n{short_page}", rc))
 
-                # Pane header crop (for non-idle pages)
-                if page == "idle":
+                if slug == "idle":
                     continue
                 pane_x = main["x"] + main["w"]
                 pane_w = rail["x"] - pane_x
                 pane_y = topbar["y"] + topbar["h"]
                 if pane_w >= 40:
                     hc = crop_box(im, pane_x, pane_y, pane_w, HEADER_H)
-                    header_rows.append((f"{kind} / {page}", hc, ""))
+                    header_rows.append((f"{kind} / {slug}", hc, ""))
                 else:
-                    pane_txt = pages_meta.get(page, {}).get("settled_pane", "")
-                    err = pane_txt.split("|")[3] if pane_txt.count("|") >= 3 else ""
+                    err = (shots_meta.get(slug, {}).get("viewer") or {}).get("error", "")
                     note = f"(viewer shut){': ' + err if err else ''}"
-                    header_rows.append((f"{kind} / {page}", None, note))
+                    header_rows.append((f"{kind} / {slug}", None, note))
 
-    # Assemble OUTDIR/headers.png
     if header_rows:
         label_w = 210
         max_hw = max((c.width for _, c, _ in header_rows if c is not None), default=700)
@@ -248,7 +182,6 @@ def build_strips(outdir: Path, kinds: list[str], parsed: dict[str, dict]) -> Non
                 draw.text((label_w + 10, y + 16), note[:110], fill=(170, 176, 190), font=font)
         canvas.save(outdir / "headers.png")
 
-    # Assemble OUTDIR/rails.png
     if rail_cols:
         col_w = max(c.width for _, c in rail_cols)
         col_h = max(c.height for _, c in rail_cols)
@@ -265,149 +198,261 @@ def build_strips(outdir: Path, kinds: list[str], parsed: dict[str, dict]) -> Non
         canvas.save(outdir / "rails.png")
 
 
-def split_pane_read(raw: str) -> dict:
-    parts = raw.split("|") if raw else []
-    return {
-        "page": parts[0] if len(parts) > 0 else "",
-        "loading_line": parts[1] if len(parts) > 1 else "",
-        "active_kind": parts[2] if len(parts) > 2 else "",
-        "error": parts[3] if len(parts) > 3 else "",
-    }
+def evaluate_scorecard(
+    full_parsed: dict,
+    full_caps: dict[str, dict],
+    full_client_ok: bool,
+) -> list[dict]:
+    shots = full_parsed.get("shots", {})
+    presses = full_parsed.get("presses", {})
 
+    def shot_ok(name: str) -> tuple[bool, bool, list[dict]]:
+        cap = full_caps.get(name)
+        if not cap or not cap.get("ok") or cap.get("bytes", 0) <= 0:
+            return False, False, []
+        return True, bool(cap.get("obstructed")), cap.get("obstructions") or []
 
-def build_steps_json(outdir: Path, kinds: list[str], parsed: dict[str, dict]) -> None:
-    kinds_out: dict[str, dict] = {}
-    for kind in kinds:
-        pages_meta = parsed.get(kind, {}).get("pages", {})
-        kind_pages: dict[str, dict] = {}
-        avail = HAS_RESOURCE.get(kind, set())
-        for page, rail_id, expected_open in PAGES:
-            rec = pages_meta.get(page, {})
-            lp = split_pane_read(rec.get("loading_pane", ""))
-            sp = split_pane_read(rec.get("settled_pane", ""))
-            shown_open = rec.get("shown_open", "")
-            # Diff is carried in thread.diff (not thread.viewer.open), so active_kind / pane page shows diff
-            if page == "diff":
-                matched = (sp["page"] == "diff" or "diff" in sp["active_kind"])
-            elif page == "gerbers":
-                matched = (shown_open == "board" and sp["active_kind"] == "gerbers")
-            elif page == "idle":
-                matched = (shown_open == "" and sp["page"] == "")
-            else:
-                matched = (shown_open == expected_open)
-            kind_pages[page] = {
-                "presses": rec.get("presses", [] if rail_id is None else [rail_id]),
-                "control_found": rec.get("control_found"),
-                "resource_present": (page in avail) if page != "idle" else True,
-                "expected_open": expected_open,
-                "actual_open": shown_open,
-                "actual_active_kind": sp["active_kind"],
-                "shown_key": rec.get("shown_key", ""),
-                "matched_expected": matched,
-                "loading_300ms": lp,
-                "settled": sp,
-                "shot": str(outdir / kind / f"{page}.png"),
-                "loading_shot": str(outdir / kind / f"{page}-loading.png") if page != "idle" else None,
-            }
-        kinds_out[kind] = {
-            "pages": kind_pages,
-            "close": parsed.get(kind, {}).get("close", {}),
-        }
-
-    # Evaluate the 10 scorecard tasks from issue #1317 on the `full` project kind.
-    full = kinds_out.get("full", {})
-    fp = full.get("pages", {})
-    full_controls = parsed.get("full", {}).get("controls_seen", {})
-
-    def task_entry(tid: int, name: str, target_steps: int, presses: list[str], expected: str, actual: str, passed: bool, note: str = "") -> dict:
+    def make_task(
+        tid: int,
+        name: str,
+        budget: int,
+        used_presses: list[str],
+        outcome: str,
+        evidence: dict,
+        note: str = "",
+    ) -> dict:
         return {
             "task": tid,
             "name": name,
-            "target_steps": target_steps,
-            "presses": presses,
-            "expected_open": expected,
-            "actual_open": actual,
-            "passed": passed,
+            "step_budget": budget,
+            "presses_used": len(used_presses),
+            "within_budget": len(used_presses) <= budget,
+            "presses": used_presses,
+            "outcome": outcome,
+            "evidence": evidence,
             "note": note,
         }
 
-    close_rec = full.get("close", {})
-    close_pane = split_pane_read(close_rec.get("pane", ""))
-    board_ctls = set(full_controls.get("board", []))
-    gerbers_ctls = set(full_controls.get("gerbers", []))
+    tasks: list[dict] = []
 
-    scorecard_tasks = [
-        task_entry(
-            1, "Open the board", 1,
-            fp.get("board", {}).get("presses", ["rail:Board"]),
-            "board", fp.get("board", {}).get("actual_open", ""),
-            bool(fp.get("board", {}).get("matched_expected")),
-        ),
-        task_entry(
-            2, "Open the 3D view of the board", 1,
-            fp.get("3d", {}).get("presses", ["rail:3D"]),
-            "3d", fp.get("3d", {}).get("actual_open", ""),
-            bool(fp.get("3d", {}).get("matched_expected")),
-        ),
-        task_entry(
-            3, "Get back to the schematic from any page", 1,
-            fp.get("schematic", {}).get("presses", ["rail:Schematic"]),
-            "schematic", fp.get("schematic", {}).get("actual_open", ""),
-            bool(fp.get("schematic", {}).get("matched_expected")),
-        ),
-        task_entry(
-            4, "Compare Gerbers to the board side by side", 2,
-            fp.get("gerbers", {}).get("presses", ["rail:Gerbers"]),
-            "gerbers", fp.get("gerbers", {}).get("actual_active_kind", ""),
-            bool(fp.get("gerbers", {}).get("matched_expected")),
-            note="gerbers opens overlay ('vs board' toggle); no side-by-side split yet" if "ui:vs board" not in gerbers_ctls else "",
-        ),
-        task_entry(
-            5, "See schematic and board together and cross-probe a part", 2,
-            fp.get("split", {}).get("presses", ["rail:Split"]),
-            "split", fp.get("split", {}).get("actual_open", ""),
-            bool(fp.get("split", {}).get("matched_expected")),
-        ),
-        task_entry(
-            6, "Open a mech part", 2,
-            fp.get("mech", {}).get("presses", ["rail:Mech"]),
-            "mech", fp.get("mech", {}).get("actual_open", ""),
-            bool(fp.get("mech", {}).get("matched_expected")),
-        ),
-        task_entry(
-            7, "Run a simulation of the schematic", 2,
-            ["rail:Simulation"],
-            "simulation", "present" if "rail:Simulation" in board_ctls else "absent",
-            "rail:Simulation" in board_ctls,
-            note="rail:Simulation requires a KiCad runtime with sim-frame capability",
-        ),
-        task_entry(
-            8, "Move between Backplane's viewer and embedded KiCad editor", 1,
-            ["ui:Edit"],
-            "kicad-edit", "present" if "ui:Edit" in board_ctls else "absent",
-            "ui:Edit" in board_ctls,
-            note="checks ui:Edit availability on Board page",
-        ),
-        task_entry(
-            9, "Turn Follow agent on and see that it is on", 1,
-            ["follow-agent"],
-            "follow", "present" if "follow-agent" in board_ctls else "not_registered_as_ctl",
-            "follow-agent" in board_ctls,
-            note="follow-agent renders when thread.viewer.follow is present",
-        ),
-        task_entry(
-            10, "Close the viewer and get the thread's full width back", 1,
-            ["rail:Browser"],
-            "", close_rec.get("shown_open", ""),
-            bool(close_rec.get("found")) and close_rec.get("shown_open", "") == "" and close_pane["active_kind"] == "",
-        ),
-    ]
+    # Task 1: Open the board (budget 1)
+    s1 = shots.get("board", {})
+    v1 = s1.get("viewer") or {}
+    ok1, obs1, oblist1 = shot_ok("board")
+    p1 = [p["id"] for p in presses.get("press:board", [])]
+    if not full_client_ok or not ok1 or obs1:
+        o1 = "harness_failed"
+    elif (
+        s1.get("state") == "ready"
+        and v1.get("open") == "board"
+        and not v1.get("gerbers")
+        and str(v1.get("plot_key", "")).startswith("0|")
+        and v1.get("plot_none", "") == ""
+        and len(p1) <= 1
+    ):
+        o1 = "passed"
+    else:
+        o1 = "task_failed"
+    tasks.append(make_task(
+        1, "Open the board", 1, p1, o1,
+        {"state": s1.get("state"), "open": v1.get("open"), "plot_key": v1.get("plot_key"), "plot_none": v1.get("plot_none"), "capture_ok": ok1, "obstructed": obs1, "obstructions": oblist1},
+    ))
 
-    summary = {
-        "kinds": kinds_out,
-        "scorecard_tasks": scorecard_tasks,
-    }
-    (outdir / "steps.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    # Task 2: Open the 3D view of the board (budget 1)
+    s2 = shots.get("3d", {})
+    v2 = s2.get("viewer") or {}
+    ok2, obs2, oblist2 = shot_ok("3d")
+    p2 = [p["id"] for p in presses.get("press:3d", [])]
+    if not full_client_ok or not ok2 or obs2:
+        o2 = "harness_failed"
+    elif (
+        s2.get("state") == "ready"
+        and v2.get("open") == "3d"
+        and str(v2.get("key", "")).startswith("2|")
+        and v2.get("solid_key") == v2.get("key")
+        and int(v2.get("solid_painted") or 0) > 0
+        and len(p2) <= 1
+    ):
+        o2 = "passed"
+    else:
+        o2 = "task_failed"
+    tasks.append(make_task(
+        2, "Open the 3D view of the board", 1, p2, o2,
+        {"state": s2.get("state"), "open": v2.get("open"), "key": v2.get("key"), "solid_key": v2.get("solid_key"), "solid_painted": v2.get("solid_painted"), "capture_ok": ok2, "obstructed": obs2, "obstructions": oblist2},
+    ))
+
+    # Task 3: Get back to the schematic from every page (budget 1 per transition)
+    t3_results: dict[str, dict] = {}
+    t3_harness_bad = not full_client_ok
+    t3_all_ok = True
+    for src_slug, _, _ in M.TASK3_SOURCES:
+        sname = f"task3-from-{src_slug}"
+        sr = shots.get(sname, {})
+        vr = sr.get("viewer") or {}
+        okr, obsr, _ = shot_ok(sname)
+        pr = [p["id"] for p in presses.get(f"press:{sname}", [])]
+        if not okr or obsr:
+            t3_harness_bad = True
+            res = "harness_failed"
+        elif (
+            sr.get("state") == "ready"
+            and vr.get("open") == "schematic"
+            and str(vr.get("plot_key", "")).startswith("1|")
+            and vr.get("plot_none", "") == ""
+            and len(pr) == 1
+        ):
+            res = "passed"
+        else:
+            t3_all_ok = False
+            res = "task_failed"
+        t3_results[src_slug] = {"outcome": res, "presses": pr, "open": vr.get("open"), "plot_key": vr.get("plot_key"), "state": sr.get("state")}
+    o3 = "harness_failed" if t3_harness_bad else ("passed" if t3_all_ok else "task_failed")
+    tasks.append(make_task(
+        3, "Get back to the schematic from any page", 1, ["rail:Schematic"], o3,
+        {"transitions": t3_results},
+    ))
+
+    # Task 4: Compare Gerbers to the board side by side (budget 2)
+    s4 = shots.get("task4-gerbers-vs-board", {})
+    v4 = s4.get("viewer") or {}
+    ok4, obs4, oblist4 = shot_ok("task4-gerbers-vs-board")
+    p4 = [p["id"] for p in presses.get("press:gerbers", [])] + [p["id"] for p in presses.get("press:task4-gerbers-vs-board", [])]
+    if not full_client_ok or not ok4 or obs4:
+        o4 = "harness_failed"
+    elif (
+        s4.get("state") == "ready"
+        and int(v4.get("panes_count") or 0) >= 2
+        and len(p4) <= 2
+    ):
+        o4 = "passed"
+    else:
+        o4 = "task_failed"
+    note4 = (
+        f"no side-by-side Gerber/board split (panes_count={v4.get('panes_count', 0)}); "
+        f"'vs board' sets gerbersVsBoard={v4.get('gerbers_vs_board')} on a single overlay pane (key={v4.get('plot_key', '')})"
+    )
+    tasks.append(make_task(
+        4, "Compare Gerbers to the board side by side", 2, p4, o4,
+        {"state": s4.get("state"), "open": v4.get("open"), "gerbers": v4.get("gerbers"), "gerbers_vs_board": v4.get("gerbers_vs_board"), "panes_count": v4.get("panes_count"), "plot_key": v4.get("plot_key"), "capture_ok": ok4, "obstructed": obs4, "obstructions": oblist4},
+        note=note4,
+    ))
+
+    # Task 5: See schematic and board together and cross-probe a part (budget 2)
+    s5 = shots.get("task5-split-probe", {})
+    v5 = s5.get("viewer") or {}
+    ok5, obs5, oblist5 = shot_ok("task5-split-probe")
+    p5 = [p["id"] for p in presses.get("press:split", [])] + ["tap:slot2"]
+    picked_one = bool(v5.get("split_picked_pcb")) or bool(v5.get("split_picked_sch"))
+    lit_both = bool(v5.get("split_lit_sch")) and bool(v5.get("split_lit_pcb"))
+    if not full_client_ok or not ok5 or obs5:
+        o5 = "harness_failed"
+    elif (
+        s5.get("state") == "ready"
+        and v5.get("open") == "split"
+        and int(v5.get("panes_count") or 0) >= 2
+        and picked_one
+        and (lit_both or bool(v5.get("probe")))
+        and len(p5) <= 2
+    ):
+        o5 = "passed"
+    else:
+        o5 = "task_failed"
+    tasks.append(make_task(
+        5, "See schematic and board together and cross-probe a part", 2, p5, o5,
+        {"state": s5.get("state"), "open": v5.get("open"), "panes_count": v5.get("panes_count"), "probe": v5.get("probe"), "split_picked_sch": v5.get("split_picked_sch"), "split_picked_pcb": v5.get("split_picked_pcb"), "split_lit_sch": v5.get("split_lit_sch"), "split_lit_pcb": v5.get("split_lit_pcb"), "capture_ok": ok5, "obstructed": obs5, "obstructions": oblist5},
+    ))
+
+    # Task 6: Open a mech part (budget 2)
+    s6 = shots.get("mech", {})
+    v6 = s6.get("viewer") or {}
+    ok6, obs6, oblist6 = shot_ok("mech")
+    p6 = [p["id"] for p in presses.get("press:mech", [])]
+    if not full_client_ok or not ok6 or obs6:
+        o6 = "harness_failed"
+    elif (
+        s6.get("state") == "ready"
+        and v6.get("open") == "mech"
+        and str(v6.get("key", "")).endswith("mech/bracket.step")
+        and v6.get("solid_key") == v6.get("key")
+        and int(v6.get("solid_painted") or 0) > 0
+        and len(p6) <= 2
+    ):
+        o6 = "passed"
+    else:
+        o6 = "task_failed"
+    tasks.append(make_task(
+        6, "Open a mech part", 2, p6, o6,
+        {"state": s6.get("state"), "open": v6.get("open"), "key": v6.get("key"), "solid_key": v6.get("solid_key"), "solid_painted": v6.get("solid_painted"), "capture_ok": ok6, "obstructed": obs6, "obstructions": oblist6},
+    ))
+
+    # Task 7: Run a simulation of the schematic (unavailable in this PR)
+    tasks.append(make_task(
+        7, "Run a simulation of the schematic", 2, [], "unavailable",
+        {"rail_simulation_present": "rail:Simulation" in (s1.get("controls_ids") or [])},
+        note="requires a KiCad runtime with sim-frame capability (as test/kicad_embed/embed_sim_e2e.sh uses)",
+    ))
+
+    # Task 8: Move between Backplane's viewer and embedded KiCad editor (unavailable in this PR)
+    tasks.append(make_task(
+        8, "Move between Backplane's viewer and embedded KiCad editor", 1, [], "unavailable",
+        {"ui_edit_present": "ui:Edit" in (s1.get("controls_ids") or [])},
+        note="requires an embedded KiCad editor session (not launched in this viewer-rail harness)",
+    ))
+
+    # Task 9: Turn Follow agent on and see that it is on (budget 1)
+    s9 = shots.get("task9-follow-on", {})
+    v9 = s9.get("viewer") or {}
+    ok9, obs9, oblist9 = shot_ok("task9-follow-on")
+    p9_raw = presses.get("press:task9-follow-on", [])
+    p9 = [p["id"] for p in p9_raw]
+    p9_found = any(p.get("found") for p in p9_raw)
+    if not full_client_ok or not ok9 or obs9:
+        o9 = "harness_failed"
+    elif (
+        p9_found
+        and v9.get("follow_present") is True
+        and v9.get("follow_on") is True
+        and v9.get("follow_rect_visible") is True
+        and len(p9) <= 1
+    ):
+        o9 = "passed"
+    else:
+        o9 = "task_failed"
+    tasks.append(make_task(
+        9, "Turn Follow agent on and see that it is on", 1, p9, o9,
+        {"press_found": p9_found, "follow_present": v9.get("follow_present"), "follow_on": v9.get("follow_on"), "follow_rect_visible": v9.get("follow_rect_visible"), "capture_ok": ok9, "obstructed": obs9, "obstructions": oblist9},
+    ))
+
+    # Task 10: Close the viewer and get the thread's full width back (budget 1)
+    s_idle = shots.get("idle", {})
+    s10 = shots.get("task10-closed", {})
+    v10 = s10.get("viewer") or {}
+    ok10, obs10, oblist10 = shot_ok("task10-closed")
+    p10 = [p["id"] for p in presses.get("press:task10-closed", [])]
+    idle_main = (s_idle.get("layout") or {}).get("main") or {}
+    closed_main = (s10.get("layout") or {}).get("main") or {}
+    closed_rail = (s10.get("layout") or {}).get("rail") or {}
+    width_diff = abs(float(closed_main.get("w", -1)) - float(idle_main.get("w", -999))) if idle_main and closed_main else 999.0
+    pane_w_closed = float(closed_rail.get("x", 0)) - (float(closed_main.get("x", 0)) + float(closed_main.get("w", 0))) if closed_rail and closed_main else 999.0
+    if not full_client_ok or not ok10 or obs10:
+        o10 = "harness_failed"
+    elif (
+        v10.get("open") == ""
+        and v10.get("active_kind") == ""
+        and not v10.get("diff_open")
+        and width_diff <= 2.0
+        and pane_w_closed <= 2.0
+        and len(p10) <= 1
+    ):
+        o10 = "passed"
+    else:
+        o10 = "task_failed"
+    tasks.append(make_task(
+        10, "Close the viewer and get the thread's full width back", 1, p10, o10,
+        {"open": v10.get("open"), "active_kind": v10.get("active_kind"), "idle_main_w": idle_main.get("w"), "closed_main_w": closed_main.get("w"), "width_diff_px": round(width_diff, 2), "pane_w_closed_px": round(pane_w_closed, 2), "capture_ok": ok10, "obstructed": obs10, "obstructions": oblist10},
+    ))
+
+    return tasks
 
 
 def main() -> int:
@@ -416,11 +461,123 @@ def main() -> int:
         return 2
     outdir = Path(sys.argv[1])
     kinds = sys.argv[2:]
-    parsed = {k: parse_client_log(outdir / k / "client.log") for k in kinds}
-    for k in kinds:
-        make_contact_sheet(outdir / k, outdir / f"contact-{k}.png")
+
+    parsed: dict[str, dict] = {}
+    captures_by_kind: dict[str, dict[str, dict]] = {}
+    kinds_out: dict[str, dict] = {}
+    harness_errors: list[str] = []
+
+    for kind in kinds:
+        kdir = outdir / kind
+        p = parse_client_log(kdir / "client.log")
+        caps = parse_captures(kdir)
+        parsed[kind] = p
+        captures_by_kind[kind] = caps
+
+        exit_file = kdir / "client.exit"
+        client_exit = int(exit_file.read_text().strip()) if exit_file.exists() else -1
+        if client_exit != 0:
+            harness_errors.append(f"{kind}: client exited with {client_exit}")
+        if p.get("refused_shots"):
+            harness_errors.append(f"{kind}: client refused {len(p['refused_shots'])} shot step(s)")
+
+        expected = M.expected_shots(kind)
+        missing: list[str] = []
+        failed_caps: list[str] = []
+        obstructions_found: dict[str, list[dict]] = {}
+        for sname in expected:
+            rec = caps.get(sname)
+            png = kdir / f"{sname}.png"
+            if not rec or not png.exists() or png.stat().st_size == 0:
+                missing.append(sname)
+            elif not rec.get("ok"):
+                failed_caps.append(sname)
+            if rec and rec.get("obstructed"):
+                obstructions_found[sname] = rec.get("obstructions") or []
+
+        if missing:
+            harness_errors.append(f"{kind}: missing captures: {', '.join(missing)}")
+        if failed_caps:
+            harness_errors.append(f"{kind}: failed captures: {', '.join(failed_caps)}")
+
+        pages_summary: dict[str, dict] = {}
+        shots = p.get("shots", {})
+        presses = p.get("presses", {})
+        avail = M.HAS_RESOURCE.get(kind, set())
+        for slug, rail_id, _, expected_open in M.PAGES:
+            srec = shots.get(slug, {})
+            erec = shots.get(f"{slug}-300ms", {}) if slug != "idle" else {}
+            v = srec.get("viewer") or {}
+            cap = caps.get(slug, {})
+            ecap = caps.get(f"{slug}-300ms", {}) if slug != "idle" else {}
+            # Diff is read from thread.diff overlay, never viewer.open
+            if slug == "diff":
+                actual_page = "diff" if v.get("diff_open") else v.get("open", "")
+                matched = bool(v.get("diff_open"))
+            elif slug == "gerbers":
+                actual_page = "gerbers" if (v.get("open") == "board" and v.get("gerbers")) else v.get("open", "")
+                matched = bool(v.get("open") == "board" and v.get("gerbers"))
+            elif slug == "idle":
+                actual_page = v.get("open", "")
+                matched = (v.get("open") == "" and not v.get("diff_open"))
+            else:
+                actual_page = v.get("open", "")
+                matched = (v.get("open") == expected_open)
+
+            pages_summary[slug] = {
+                "presses": [x["id"] for x in presses.get(f"press:{slug}", [])] if rail_id else [],
+                "resource_present": (slug in avail) if slug != "idle" else True,
+                "expected_open": expected_open,
+                "actual_page": actual_page,
+                "settled_state": srec.get("state", ""),
+                "matched_expected": matched,
+                "obstructed": bool(cap.get("obstructed")),
+                "obstructions": cap.get("obstructions") or [],
+                "diff_open": v.get("diff_open") if slug == "diff" else None,
+                "diff_files": v.get("diff_files") if slug == "diff" else None,
+                "diff_summary": v.get("diff_summary") if slug == "diff" else None,
+                "viewer": v,
+                "early_300ms_state": erec.get("state", "") if slug != "idle" else None,
+                "early_300ms_obstructed": bool(ecap.get("obstructed")) if slug != "idle" else None,
+                "shot": str(kdir / f"{slug}.png"),
+                "early_shot": str(kdir / f"{slug}-300ms.png") if slug != "idle" else None,
+            }
+
+        kinds_out[kind] = {
+            "client_exit": client_exit,
+            "expected_shots": len(expected),
+            "captured_shots": sum(1 for s in expected if caps.get(s, {}).get("ok") and (kdir / f"{s}.png").exists()),
+            "missing_shots": missing,
+            "failed_captures": failed_caps,
+            "obstructions": obstructions_found,
+            "pages": pages_summary,
+        }
+        make_contact_sheet(kdir, outdir / f"contact-{kind}.png")
+
     build_strips(outdir, kinds, parsed)
-    build_steps_json(outdir, kinds, parsed)
+
+    full_client_ok = "full" in kinds_out and kinds_out["full"]["client_exit"] == 0 and not kinds_out["full"]["missing_shots"] and not kinds_out["full"]["failed_captures"]
+    scorecard_tasks = evaluate_scorecard(parsed.get("full", {}), captures_by_kind.get("full", {}), full_client_ok) if "full" in kinds else []
+
+    if harness_errors or any(t["outcome"] == "harness_failed" for t in scorecard_tasks):
+        overall = "harness_failed"
+    elif any(t["outcome"] == "task_failed" for t in scorecard_tasks):
+        overall = "task_failed"
+    else:
+        overall = "passed"
+
+    summary = {
+        "overall_outcome": overall,
+        "harness_errors": harness_errors,
+        "kinds": kinds_out,
+        "scorecard_tasks": scorecard_tasks,
+    }
+    (outdir / "steps.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+
+    if harness_errors:
+        for e in harness_errors:
+            print(f"rail-shots: HARNESS FAILED: {e}", file=sys.stderr)
+        return 1
     return 0
 
 

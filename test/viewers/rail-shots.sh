@@ -4,13 +4,17 @@
 #
 # Runs four isolated project kinds (full, schematic-only, mech-only, no-design) against a
 # private Xvfb (:500+) + i3 + llvmpipe display, temp homes, and stand-in agents only.
-# Captures every rail page (settled + ~300 ms loading state + Split after Mech), then writes:
-#   OUTDIR/<kind>/<page>.png and <page>-loading.png
+# Captures every rail page (settled + ~300 ms early state + Split after Mech + scorecard tasks)
+# externally via `import -window root` synchronized on `shot-ready` / `<name>.done`, then writes:
+#   OUTDIR/<kind>/<name>.png and captures.jsonl
 #   OUTDIR/contact-<kind>.png   (ImageMagick montage per kind)
 #   OUTDIR/headers.png          (tight pane-header crop strip across all pages)
 #   OUTDIR/rails.png            (tight rail crop strip across all pages)
-#   OUTDIR/steps.json           (presses, hub open/active_kind, and scorecard task checks)
+#   OUTDIR/steps.json           (outcomes, presses vs budget, obstructions, scorecard checks)
 set -euo pipefail
+
+# Strict display isolation: nothing inherits host DISPLAY or WAYLAND_DISPLAY.
+unset DISPLAY WAYLAND_DISPLAY
 
 if [ "$#" -lt 4 ]; then
   echo "usage: $0 CLIENT_BIN HUB_BIN ASSETS_DIR OUTDIR" >&2
@@ -23,6 +27,12 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 CLIENT_BIN=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 HUB_BIN=$(cd "$(dirname "$2")" && pwd)/$(basename "$2")
 ASSETS_DIR=$(cd "$3" && pwd)
+
+# Refuse a non-empty OUTDIR so stale captures can never contaminate a run.
+if [ -e "$4" ] && [ -n "$(ls -A "$4" 2>/dev/null)" ]; then
+  echo "rail-shots: refusing non-empty OUTDIR: $4 (use a fresh directory)" >&2
+  exit 2
+fi
 mkdir -p "$4"
 OUTDIR=$(cd "$4" && pwd)
 
@@ -41,15 +51,20 @@ RUN=$(mktemp -d "$BP_TMP/bp-rail-shots.XXXXXX")
 mkdir -p "$RUN/bin" "$RUN/fakehome/.cache" "$RUN/fakehome/.config" "$RUN/fakehome/.local/share"
 mkdir -p -m 700 "$RUN/run" "$RUN/tmp"
 
-HUB_PID=""
+stop_group() {
+  local pg=$1
+  [ -n "$pg" ] || return 0
+  kill -TERM -- "-$pg" 2>/dev/null || return 0
+  for _ in $(seq 20); do
+    kill -0 -- "-$pg" 2>/dev/null || return 0
+    sleep 0.15
+  done
+  kill -KILL -- "-$pg" 2>/dev/null || true
+}
+
 cleanup() {
   local rc=$?
   set +e
-  if [ -n "$HUB_PID" ]; then
-    kill -TERM "$HUB_PID" 2>/dev/null || true
-    sleep 0.3
-    kill -KILL "$HUB_PID" 2>/dev/null || true
-  fi
   own_stop || true
   if [ "${RAIL_KEEP_RUN:-0}" != "1" ]; then
     rm -rf "$RUN" 2>/dev/null || true
@@ -125,8 +140,23 @@ for _ in $(seq 40); do [ -S "$RUN/i3.sock" ] && break; sleep 0.1; done
 
 ICD=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -1 || true)
 
+# Pick a free loopback port >= 3799
 free_port() {
-  python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()'
+  python3 - <<'PY'
+import os, socket
+start = 3800 + (os.getpid() % 1000)
+for p in range(start, 60000):
+    s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        s.bind(("127.0.0.1", p))
+        print(p)
+        s.close()
+        raise SystemExit(0)
+    except OSError:
+        s.close()
+raise SystemExit(1)
+PY
 }
 
 PLOT_FIX="$REPO_ROOT/test/files/fixtures/plot"
@@ -145,12 +175,13 @@ seed_project() {
       mkdir -p "$dir/mech" "$dir/mfg/gerbers"
       cp "$MESH_FIX/bracket.step" "$dir/mech/bracket.step"
       if [ -n "$KICAD_CLI" ] && [ -x "$KICAD_CLI" ]; then
-        HOME="$RUN/fakehome" XDG_CONFIG_HOME="$RUN/fakehome/.config" XDG_CACHE_HOME="$RUN/fakehome/.cache" TMPDIR="$RUN/tmp" \
+        env -u DISPLAY -u WAYLAND_DISPLAY \
+          HOME="$RUN/fakehome" XDG_CONFIG_HOME="$RUN/fakehome/.config" XDG_CACHE_HOME="$RUN/fakehome/.cache" TMPDIR="$RUN/tmp" \
           "$KICAD_CLI" pcb export gerbers --layers "F.Cu,B.Cu,F.SilkS,F.Mask,B.Mask,Edge.Cuts" -o "$dir/mfg/gerbers/" "$dir/ecc83-pp.kicad_pcb" >/dev/null 2>&1 || true
-        HOME="$RUN/fakehome" XDG_CONFIG_HOME="$RUN/fakehome/.config" XDG_CACHE_HOME="$RUN/fakehome/.cache" TMPDIR="$RUN/tmp" \
+        env -u DISPLAY -u WAYLAND_DISPLAY \
+          HOME="$RUN/fakehome" XDG_CONFIG_HOME="$RUN/fakehome/.config" XDG_CACHE_HOME="$RUN/fakehome/.cache" TMPDIR="$RUN/tmp" \
           "$KICAD_CLI" pcb export drill -o "$dir/mfg/gerbers/" "$dir/ecc83-pp.kicad_pcb" >/dev/null 2>&1 || true
       fi
-      # Fallback minimal valid Gerber + drill if kicad-cli did not emit files
       if [ -z "$(ls -A "$dir/mfg/gerbers" 2>/dev/null)" ]; then
         cat >"$dir/mfg/gerbers/ecc83-pp-F_Cu.gbr" <<'GBR'
 %FSLAX46Y46*%
@@ -204,73 +235,42 @@ DRL
   (
     cd "$dir"
     git init -q -b main
-    git -c user.name=Test -c user.email=test@example.com add -A
-    git -c user.name=Test -c user.email=test@example.com commit -qm init
-    printf '\nUncommitted change for Diff page.\n' >>README.md
+    git config user.name "Fixture"
+    git config user.email "fixture@example.invalid"
+    git add -A
+    git commit -qm init
   )
 }
 
-write_script_json() {
-  local kind=$1 kind_out=$2 script_path=$3
-  python3 - "$kind_out" "$script_path" "${RAIL_LOAD_MS:-300}" "${RAIL_SETTLE_MS:-3000}" <<'PY'
-import json, sys
-from pathlib import Path
-
-kind_out = Path(sys.argv[1])
-script_path = Path(sys.argv[2])
-load_ms = int(sys.argv[3])
-settle_ms = int(sys.argv[4])
-heavy_ms = max(settle_ms, 5500)
-
-steps = [
-    {"select": 0},
-    {"wait": 1500},
-    {"mark": "page:idle"},
-    {"read": "pane"},
-    {"shot": str(kind_out / "idle.png")},
-]
-
-pages = [
-    ("board", "rail:Board", settle_ms),
-    ("schematic", "rail:Schematic", settle_ms),
-    ("3d", "rail:3D", heavy_ms),
-    ("gerbers", "rail:Gerbers", settle_ms),
-    ("split", "rail:Split", heavy_ms),
-    ("mech", "rail:Mech", heavy_ms),
-    ("split-after-mech", "rail:Split", heavy_ms),
-    ("files", "rail:Files", settle_ms),
-    ("diff", "rail:Diff", settle_ms),
-    ("review", "rail:Review", settle_ms),
-    ("browser", "rail:Browser", settle_ms),
-]
-
-for page, rail_id, wait_ms in pages:
-    steps.extend([
-        {"mark": f"press:{page}"},
-        {"press": rail_id},
-        {"wait": load_ms},
-        {"mark": f"loading:{page}"},
-        {"read": "pane"},
-        {"shot": str(kind_out / f"{page}-loading.png")},
-        {"wait": wait_ms},
-        {"mark": f"settled:{page}"},
-        {"read": "pane"},
-        {"shot": str(kind_out / f"{page}.png")},
-    ])
-
-steps.extend([
-    {"mark": "press:close"},
-    {"press": "rail:Browser"},
-    {"wait": 1200},
-    {"mark": "settled:close"},
-    {"read": "pane"},
-])
-
-script_path.write_text(json.dumps(steps, indent=2) + "\n", encoding="utf-8")
+# After the thread `t1` exists, write its turn/0 checkpoint and modify README.md so Diff has real changes.
+seed_thread_change() {
+  local dir=$1 thread_id=$2
+  python3 - "$dir" "$thread_id" <<'PY'
+import base64, os, subprocess, sys
+d, tid = sys.argv[1:3]
+g = lambda *a: subprocess.check_output(["git", *a], cwd=d, text=True).strip()
+git_dir = g("rev-parse", "--absolute-git-dir")
+idx = os.path.join(git_dir, "backplane-seed.index")
+env = dict(os.environ, GIT_INDEX_FILE=idx)
+if os.path.exists(idx):
+    os.remove(idx)
+subprocess.check_call(["git", "add", "-A"], cwd=d, env=env)
+tree = subprocess.check_output(["git", "write-tree"], cwd=d, env=env, text=True).strip()
+sha = subprocess.check_output(["git", "commit-tree", "-m", "checkpoint", tree], cwd=d, text=True).strip()
+if os.path.exists(idx):
+    os.remove(idx)
+b64 = base64.urlsafe_b64encode(tid.encode()).decode().rstrip("=")
+subprocess.check_call(["git", "update-ref", f"refs/backplane/checkpoints/{b64}/turn/0", sha], cwd=d)
+with open(os.path.join(d, "README.md"), "a", encoding="utf-8") as f:
+    f.write("\nChange made after thread creation for Diff check.\n")
 PY
 }
 
-KINDS=(${RAIL_KINDS:-full schematic-only mech-only no-design})
+if [ -n "${RAIL_KINDS:-}" ]; then
+  read -r -a KINDS <<<"$RAIL_KINDS"
+else
+  mapfile -t KINDS < <(python3 -c "import sys; sys.path.insert(0, '$SCRIPT_DIR'); import rail_shots_manifest as M; print('\n'.join(M.KINDS))")
+fi
 
 for kind in "${KINDS[@]}"; do
   echo "rail-shots: === kind=$kind ==="
@@ -278,8 +278,10 @@ for kind in "${KINDS[@]}"; do
   mkdir -p "$KIND_OUT"
   PROJ="$RUN/proj-$kind"
   HHOME="$RUN/home-$kind"
-  rm -rf "$HHOME"
-  mkdir -p "$HHOME"
+  SHOT_DIR="$RUN/shots-$kind"
+  STOP_FLAG="$RUN/stop-$kind"
+  rm -rf "$HHOME" "$SHOT_DIR" "$STOP_FLAG"
+  mkdir -p "$HHOME" "$SHOT_DIR"
 
   seed_project "$kind" "$PROJ"
 
@@ -296,8 +298,11 @@ with open(f"{hhome}/events.jsonl", "w", encoding="utf-8") as f:
         f.write(json.dumps(e, separators=(",", ":")) + "\n")
 PY
 
+  # Make the fixture's git change AFTER the thread exists so Diff compares against turn/0.
+  seed_thread_change "$PROJ" "t1"
+
   PORT=$(free_port)
-  env -u DISPLAY -u WAYLAND_DISPLAY \
+  own env -u DISPLAY -u WAYLAND_DISPLAY \
     HOME="$RUN/fakehome" \
     XDG_CONFIG_HOME="$RUN/fakehome/.config" \
     XDG_CACHE_HOME="$RUN/fakehome/.cache" \
@@ -309,8 +314,8 @@ PY
     BACKPLANE_NO_UPDATE=1 \
     BP_STANDIN_MODE=stream \
     BACKPLANE_KICAD_CLI="${KICAD_CLI:-}" \
-    "$HUB_BIN" --home "$HHOME" --port "$PORT" --host 127.0.0.1 --no-tailscale --foreground >"$KIND_OUT/hub.log" 2>&1 &
-  HUB_PID=$!
+    "$HUB_BIN" --home "$HHOME" --port "$PORT" --host 127.0.0.1 --no-tailscale --foreground >"$KIND_OUT/hub.log" 2>&1
+  HUB_PG=$!
 
   for _ in $(seq 80); do
     curl -s -m 1 -o /dev/null "http://127.0.0.1:$PORT/hello" && break
@@ -321,15 +326,20 @@ PY
     tail -n 20 "$KIND_OUT/hub.log" >&2 || true
     exit 1
   }
-  tr '\0' '\n' <"/proc/$HUB_PID/environ" | grep -q "^BACKPLANE_AGENTS=$RUN/bin\$" || {
-    echo "rail-shots: BACKPLANE_AGENTS missing on hub pid $HUB_PID" >&2
+  tr '\0' '\n' <"/proc/$HUB_PG/environ" | grep -q "^BACKPLANE_AGENTS=$RUN/bin\$" || {
+    echo "rail-shots: BACKPLANE_AGENTS missing on hub pid $HUB_PG" >&2
     exit 3
   }
 
   SCRIPT_JSON="$RUN/script-$kind.json"
-  write_script_json "$kind" "$KIND_OUT" "$SCRIPT_JSON"
+  python3 "$SCRIPT_DIR/rail_shots_driver.py" gen-script "$kind" "$SCRIPT_JSON" "${RAIL_EARLY_MS:-300}" "${RAIL_SETTLE_TIMEOUT_MS:-15000}"
 
-  env \
+  # Start external capture watcher (only watcher's `import` and `xwininfo` receive DISPLAY=$DISP)
+  own python3 "$SCRIPT_DIR/rail_shots_driver.py" watch "$DISP" "$KIND_OUT/client.log" "$SHOT_DIR" "$KIND_OUT" "$STOP_FLAG" >"$KIND_OUT/watch.log" 2>&1
+  WATCH_PG=$!
+
+  # Launch client in its own process group and check its real exit status
+  own env \
     HOME="$RUN/fakehome" \
     XDG_CONFIG_HOME="$RUN/fakehome/.config" \
     XDG_CACHE_HOME="$RUN/fakehome/.cache" \
@@ -344,19 +354,37 @@ PY
     VK_ICD_FILENAMES="$ICD" \
     BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" \
     BACKPLANE_GPUI_RECTS=1 \
-    "$CLIENT_BIN" --url "http://127.0.0.1:$PORT" --token-file "$HHOME/token" --script "$SCRIPT_JSON" --exit-after 240 >"$KIND_OUT/client.log" 2>&1 || true
+    BACKPLANE_GPUI_SHOT_DIR="$SHOT_DIR" \
+    "$CLIENT_BIN" --url "http://127.0.0.1:$PORT" --token-file "$HHOME/token" --script "$SCRIPT_JSON" --exit-after 300 >"$KIND_OUT/client.log" 2>&1
+  CLIENT_PG=$!
 
-  kill -TERM "$HUB_PID" 2>/dev/null || true
-  wait "$HUB_PID" 2>/dev/null || true
-  HUB_PID=""
+  set +e
+  wait "$CLIENT_PG"
+  CLIENT_RC=$?
+  set -e
+  printf '%d\n' "$CLIENT_RC" >"$KIND_OUT/client.exit"
+  if [ "$CLIENT_RC" -ne 0 ]; then
+    echo "rail-shots: client exited with $CLIENT_RC for kind=$kind" >&2
+  fi
+
+  touch "$STOP_FLAG"
+  for _ in $(seq 30); do
+    kill -0 -- "-$WATCH_PG" 2>/dev/null || break
+    sleep 0.1
+  done
+  stop_group "$WATCH_PG"
+  stop_group "$CLIENT_PG"
+  stop_group "$HUB_PG"
 done
 
 python3 "$SCRIPT_DIR/rail_shots_post.py" "$OUTDIR" "${KINDS[@]}"
+POST_RC=$?
 
-echo "rail-shots: done -> $OUTDIR"
+echo "rail-shots: done (post_rc=$POST_RC) -> $OUTDIR"
 for kind in "${KINDS[@]}"; do
   echo "  contact: $OUTDIR/contact-$kind.png"
 done
 echo "  headers: $OUTDIR/headers.png"
 echo "  rails:   $OUTDIR/rails.png"
 echo "  steps:   $OUTDIR/steps.json"
+exit "$POST_RC"
