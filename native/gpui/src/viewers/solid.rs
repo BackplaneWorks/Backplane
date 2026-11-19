@@ -569,7 +569,7 @@ impl Worker {
 impl Drop for Worker { fn drop(&mut self) { let (m, cv) = &*self.slot; m.lock().unwrap().shutdown = true; self.ticket.fetch_add(1, Ordering::Relaxed); cv.notify_one(); } }
 
 // ---- the page ---------------------------------------------------------------------------------------------------------
-#[derive(Clone, Copy, PartialEq)] enum Drag { Orbit, Pan, Roll }
+#[derive(Clone, Copy, PartialEq)] enum Drag { Orbit, Pan, Roll, Zoom }
 /// What the demo/metrics read: how many images arrived, the last render's time.
 #[derive(Clone, Debug, Default)] pub struct Stats { pub images: u64, pub painted: u64, pub last_ms: f64, pub last_tris: usize, pub last_size: (usize, usize), pub by: &'static str }
 
@@ -621,6 +621,8 @@ pub fn retry_watch(key: &str) -> Option<serde_json::Value> {
 /// `image`: its last picture, as CPU bytes (out of the atlas; painted again when it comes back, while a new one is drawn).
 struct Kept { key: String, mesh: Arc<Layers>, cam: Camera, touched: bool, fit_aspect: f32, parts: (u32, u32), groups: usize, image: Option<Arc<RenderImage>> }
 pub struct SolidPage {
+    /// the button now held down, whose release ends the drag (the table decides what it does)
+    press_btn: Option<MouseButton>,
     /** where the left button went down, until the pointer leaves it by 4 px (a click picks the part under it); the reference of the probed part (`set_probe`); the model with that part lit, for the model and reference it was made of (`drawn`) */ press: Option<Point<Pixels>>, probe: String, lit: Option<(Arc<Layers>, String, Option<Arc<Layers>>)>,
     /** the page names the probed part beside its tools (a Split names it in its own bar: off there) */ pub names_probe: bool,
     mesh: Option<Arc<Layers>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, /** what the camera was last fitted to (centre, radius) */ fitted: ([f32; 3], f32), /** the regions of this model asked to be refined (`settled`) */ refined: Vec<([f32; 3], f32)>, image: Option<Arc<RenderImage>>, /** pictures off the screen and the window frame they left it in (`collect`) */ retired: Vec<(Arc<RenderImage>, u64)>, frames: u64, drag: Option<(Drag, Point<Pixels>)>,
@@ -641,7 +643,7 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { press: None, probe: String::new(), lit: None, names_probe: true, mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, fitted: ([0.0; 3], 0.0), refined: Vec::new(), image: None, retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, prev: None, restored: None, failed: false, back: raster::Backdrop::DARK, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ reserve: 0.0, worker: Worker::spawn(tx),
+        SolidPage { press_btn: None, press: None, probe: String::new(), lit: None, names_probe: true, mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, fitted: ([0.0; 3], 0.0), refined: Vec::new(), image: None, retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, prev: None, restored: None, failed: false, back: raster::Backdrop::DARK, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ reserve: 0.0, worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), latest: 0, on_screen: 0, floor: 0, counted: 0, stats: Stats::default() }
     }
     /// The background to draw on (the setting resolved by the window): a change draws the picture again at once, the camera untouched.
@@ -657,6 +659,23 @@ impl SolidPage {
     }
     /// A click on a board's model (a press let go where it went down): the part under it is lit and told to the window (`SolidEvent::Pick`), which
     /// makes it the board's probe; the board itself or the background clears it. A model that names no parts (a STEP, a GLB) is not picked on.
+    /// A button went down: the table says what its drag does and whether its click selects.
+    fn mouse_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus);
+        let Some(b) = crate::mousecfg::button(e.button) else { return };
+        let (scheme, m) = (crate::mousecfg::solid(), crate::mousecfg::mods(&e.modifiers));
+        // a double click of the selecting button fits, as 0.14's did
+        if e.click_count >= 2 && scheme.selects(b, crate::mouse::Mods::NONE) { self.drag = None; self.press = None; self.set_view("fit"); cx.notify(); return }
+        self.press = scheme.selects(b, m).then_some(e.position);
+        self.drag = match scheme.drag(b, m) { crate::mouse::Action::Rotate => Some(Drag::Orbit), crate::mouse::Action::Pan => Some(Drag::Pan), crate::mouse::Action::Roll => Some(Drag::Roll), crate::mouse::Action::Zoom => Some(Drag::Zoom), _ => None }.map(|d| (d, e.position));
+        self.press_btn = Some(e.button);
+    }
+    /// A button came up: its drag ends, and a click of the selecting button that did not move picks.
+    fn mouse_up(&mut self, e: &MouseUpEvent, cx: &mut Context<Self>) {
+        if self.press_btn != Some(e.button) { return }
+        self.press_btn = None;
+        let click = self.press.take(); if self.drag.take().is_some() { self.settled(cx); cx.notify(); } if let Some(at) = click { self.click_at(at, cx); }
+    }
     fn click_at(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
         let (Some(model), Some(cam)) = (self.mesh.clone(), self.cam) else { return };
         if !has_refs(&model) { return }
@@ -935,13 +954,9 @@ impl Render for SolidPage {
             .when(self.image.is_some() && !making_other && !self.note.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().flex().items_center().gap_2().text_size(crate::scale::tpx(12.)).text_color(rgb(0x8a93a3)).child(note_words(&self.note))
                 .when(self.failed && !self.key.is_empty(), |d| d.child(self.retry_button(cx)))))
             .when(self.image.is_some() && !making_other && (!stage.is_empty() || !self.parts_progress().is_empty()), |d| d.child(div().id("solid-parts").absolute().bottom_2().right_2().px_2().text_size(crate::scale::tpx(12.)).text_color(rgb(0x8a93a3)).child(if stage.is_empty() { trs(&self.parts_progress()) } else { stage.clone() })))
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, window, cx| {
-                window.focus(&this.focus);
-                if e.click_count >= 2 { this.drag = None; this.press = None; this.set_view("fit"); cx.notify(); return } // a double click fits, as 0.14's did
-                this.press = (!e.modifiers.alt && !e.modifiers.shift && !e.modifiers.control).then_some(e.position);
-                this.drag = Some((if e.modifiers.alt { Drag::Roll } else if e.modifiers.shift || e.modifiers.control { Drag::Pan } else { Drag::Orbit }, e.position)); }))
-            .on_mouse_down(MouseButton::Right, cx.listener(|this, e: &MouseDownEvent, window, _| { window.focus(&this.focus); this.drag = Some((Drag::Pan, e.position)); }))
-            .on_mouse_down(MouseButton::Middle, cx.listener(|this, e: &MouseDownEvent, window, _| { window.focus(&this.focus); this.drag = Some((Drag::Pan, e.position)); }))
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, window, cx| this.mouse_down(e, window, cx)))
+            .on_mouse_down(crate::mousecfg::BUTTONS[1], cx.listener(|this, e: &MouseDownEvent, window, cx| this.mouse_down(e, window, cx)))
+            .on_mouse_down(crate::mousecfg::BUTTONS[2], cx.listener(|this, e: &MouseDownEvent, window, cx| this.mouse_down(e, window, cx)))
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
                 // (a press that moves is a turn, not a click)
                 if let Some(p) = this.press { if f32::from(e.position.x - p.x).abs() > 4.0 || f32::from(e.position.y - p.y).abs() > 4.0 { this.press = None; } }
@@ -949,26 +964,39 @@ impl Render for SolidPage {
                 if e.pressed_button.is_none() { this.drag = None; this.ask_render(false); cx.notify(); return } // the button went up where we could not see it
                 let (dx, dy) = (f32::from(e.position.x - last.x), f32::from(e.position.y - last.y));
                 let h = this.size.lock().unwrap()[1];
-                this.touched = true; if let Some(c) = &mut this.cam { match kind { Drag::Orbit => c.orbit(dx, dy), Drag::Pan => c.pan(dx, dy, h), Drag::Roll => c.roll(dx) } }
+                this.touched = true; if let Some(c) = &mut this.cam { match kind { Drag::Orbit => c.orbit(dx, dy), Drag::Pan => c.pan(dx, dy, h), Drag::Roll => c.roll(dx), Drag::Zoom => c.zoom_by(crate::mousecfg::drag_zoom_factor(dy, crate::mousecfg::invert()), 0.0, 0.0, 1.0) } }
                 this.drag = Some((kind, e.position)); this.ask_render(true); // a draft while dragging, the full image on release. No repaint here: the picture's arrival is what repaints
             }))
-            .on_mouse_up(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| { let click = this.press.take(); if this.drag.take().is_some() { this.settled(cx); cx.notify(); } if let Some(at) = click { this.click_at(at, cx); } }))
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, e: &MouseUpEvent, _, cx| this.mouse_up(e, cx)))
+            .on_mouse_up(crate::mousecfg::BUTTONS[1], cx.listener(|this, e: &MouseUpEvent, _, cx| this.mouse_up(e, cx)))
+            .on_mouse_up(crate::mousecfg::BUTTONS[2], cx.listener(|this, e: &MouseUpEvent, _, cx| this.mouse_up(e, cx)))
             .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| { this.press = None; if this.drag.take().is_some() { this.settled(cx); cx.notify(); } }))
-            .on_mouse_up(MouseButton::Right, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.settled(cx); cx.notify(); } }))
-            .on_mouse_up(MouseButton::Middle, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.settled(cx); cx.notify(); } }))
-            .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, window, cx| {
-                let k = match e.delta { ScrollDelta::Pixels(p) => wheel_zoom(None, f32::from(p.y), e.modifiers.control), ScrollDelta::Lines(l) => wheel_zoom(Some(l.y), 0.0, e.modifiers.control) };
+            .on_mouse_up_out(crate::mousecfg::BUTTONS[1], cx.listener(|this, _: &MouseUpEvent, _, cx| { this.press = None; if this.drag.take().is_some() { this.settled(cx); cx.notify(); } }))
+            .on_mouse_up_out(crate::mousecfg::BUTTONS[2], cx.listener(|this, _: &MouseUpEvent, _, cx| { this.press = None; if this.drag.take().is_some() { this.settled(cx); cx.notify(); } }))
+            .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, cx| {
+                // what a wheel or two-finger scroll means is the table's (mouse.rs)
+                let (lines, x, y) = crate::mousecfg::delta(&e.delta);
                 let [pw, ph, _, ox, oy] = *this.size.lock().unwrap();
-                let _ = window; // the pointer in panel coordinates, -1..1 with y up
-                let (nx, ny) = if pw > 0.0 && ph > 0.0 { ((f32::from(e.position.x) - ox) / pw * 2.0 - 1.0, 1.0 - (f32::from(e.position.y) - oy) / ph * 2.0) } else { (0.0, 0.0) };
-                if let Some(c) = &mut this.cam { c.zoom_by(k, nx.clamp(-1.0, 1.0), ny.clamp(-1.0, 1.0), pw / ph.max(1.0)); }
+                match crate::mousecfg::solid().scroll(crate::mousecfg::mods(&e.modifiers), lines, x, y, crate::mousecfg::invert()) {
+                    crate::mouse::Scroll::Zoom { lines, y, ctrl } => {
+                        let k = if lines { wheel_zoom(Some(y), 0.0, ctrl) } else { wheel_zoom(None, y, ctrl) };
+                        // the pointer in panel coordinates, -1..1 with y up
+                        let (nx, ny) = if pw > 0.0 && ph > 0.0 { ((f32::from(e.position.x) - ox) / pw * 2.0 - 1.0, 1.0 - (f32::from(e.position.y) - oy) / ph * 2.0) } else { (0.0, 0.0) };
+                        this.touched = true;
+                        if let Some(c) = &mut this.cam { c.zoom_by(k, nx.clamp(-1.0, 1.0), ny.clamp(-1.0, 1.0), pw / ph.max(1.0)); }
+                    }
+                    crate::mouse::Scroll::Pan { dx, dy } => { this.touched = true; if let Some(c) = &mut this.cam { c.pan(dx, dy, ph); } }
+                    crate::mouse::Scroll::None => return,
+                }
                 cx.stop_propagation(); this.moved(cx); // drafts while the wheel turns, the full picture when it rests
             }))
             // a trackpad pinch (macOS sends it as a magnify gesture, not a wheel) zooms at the pointer; two-finger scrolling stays the wheel's
             .on_pinch(cx.listener(|this, e: &PinchEvent, _, cx| {
                 let [pw, ph, _, ox, oy] = *this.size.lock().unwrap();
                 let (nx, ny) = if pw > 0.0 && ph > 0.0 { ((f32::from(e.position.x) - ox) / pw * 2.0 - 1.0, 1.0 - (f32::from(e.position.y) - oy) / ph * 2.0) } else { (0.0, 0.0) };
-                if let Some(c) = &mut this.cam { c.zoom_by(pinch_zoom(e.delta), nx.clamp(-1.0, 1.0), ny.clamp(-1.0, 1.0), pw / ph.max(1.0)); }
+                let f = crate::mousecfg::solid().pinch_factor(pinch_zoom(e.delta), crate::mousecfg::invert()); if f == 1.0 { return }
+                this.touched = true;
+                if let Some(c) = &mut this.cam { c.zoom_by(f, nx.clamp(-1.0, 1.0), ny.clamp(-1.0, 1.0), pw / ph.max(1.0)); }
                 cx.stop_propagation(); this.moved(cx);
             }))
     }

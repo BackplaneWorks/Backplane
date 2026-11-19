@@ -839,7 +839,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     let del=text(&session["drafts"],"@del");
     let deleting=if del.is_empty() { Value::Null }else{json!({"id":if del.contains('|'){del.to_string()}else{format!("{hub}|{del}")},"title":"Delete thread","body":st.threads.get(del.strip_prefix(&format!("{hub}|" )).unwrap_or(del)).map(|t|t.title.as_str()).unwrap_or(""),"yes":"Delete","no":"Cancel"})};
     let pages=json!([{"version":1,"hub":hub,"projects":projects_page,"active":null,"legacy":null}]);
-    let shown=json!({"projects":projects,"sidebarPages":pages,"nativeSidebar":1,"active":[],"legacy":[],"thread":shown_thread,"rooms":rooms(st,far,un,hub),"bots":bots(st,far,un,hub,opts.now),"theme":setting(st,"ui.theme"),
+    let shown=json!({"projects":projects,"sidebarPages":pages,"nativeSidebar":1,"active":[],"legacy":[],"thread":shown_thread,"rooms":rooms(st,far,un,hub),"bots":bots(st,far,un,hub,opts.now),"theme":setting(st,"ui.theme"),"mouse":json!({"2d":setting(st,"mouse.2d"),"3d":setting(st,"mouse.3d"),"invert":setting(st,"mouse.invert")}),
         "renaming":renaming,"deleting":deleting,"bot":null,"settings":if super::settings::is_open(&session) { super::settings::view(st,&session,p.get("hubInfo").unwrap_or(&Value::Null)) }else{Value::Null},"newRoom":super::botforms::new_room(st,hub,&session).unwrap_or(Value::Null),"newBot":super::botforms::new_bot(&session).unwrap_or(Value::Null),"projectHome":null});
     let mut shown=shown;
     if !far.is_empty() { shown["machines"]=machine_switch(far,un,&mpick); }
@@ -937,7 +937,7 @@ mod tests {
             // and a red row's want word (sidebar::want), drawn where its age goes
             for k in ["threads","settled","snoozed","archived"] { for r in o.get_mut(k).and_then(|v| v.as_array_mut()).into_iter().flatten() { if let Some(r)=r.as_object_mut() { r.remove("want"); } } } } } }
         // approved additions: the sidebar's sections, Ctrl+K's list, the groups a project moves to, a project's page (present/sections.rs), which 0.14 has none of
-        for path in ["/shown","/overlay/j"] { if let Some(o)=actual.pointer_mut(path).and_then(|v|v.as_object_mut()) { for k in ["sections","jump","groupsTo","projectPage"] { o.remove(k); } } }
+        for path in ["/shown","/overlay/j"] { if let Some(o)=actual.pointer_mut(path).and_then(|v|v.as_object_mut()) { for k in ["sections","jump","groupsTo","projectPage","mouse"] { o.remove(k); } } }
         let mut shown=expected["shown"].clone(); retain_root(&mut shown,OMITTED);
         assert_eq!(actual["shown"],shown,"retained GPUI shown fields differ (no value normalisations)");
         let mut overlay=expected["overlay"].clone(); retain_root(&mut overlay["j"],OVERLAY_OMITTED);
@@ -1212,6 +1212,12 @@ mod state_tests {
         policy.before_commit(2,vec![json!({"$":"ProjectCreated","id":"p2","title":"P2","root":"/p2","at":2})]);
         assert_eq!(policy.with_state(|st|st.projects.len()),Some(2));
         assert!(policy.commit_failed(2)); assert!(policy.with_state(|st|st.projects.len()).is_none());
+    }
+    #[test] fn the_mouse_settings_reach_the_picture_in_the_lean_copy() {
+        let mut st=State::new(); st.lean=true;
+        for (k,v) in [("mouse.2d","legacy"),("mouse.3d","kicad;wheel=pan"),("mouse.invert","on")] { event(&mut st,json!({"$":"SettingSet","key":k,"value":v,"at":4})); }
+        let v=recent(&st,&params()).unwrap();
+        assert_eq!(v["shown"]["mouse"],json!({"2d":"legacy","3d":"kicad;wheel=pan","invert":"on"}));
     }
     #[test] fn recent_lean_navigation_fields_follow_edits_and_deletions() {
         let mut st=State::new(); st.lean=true;
