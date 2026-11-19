@@ -47,6 +47,10 @@ pub struct PlotView {
     pub probe_at: String,
     /// Follow agent: how many times a person's hand moved this canvas (screens::follow), and the focus the camera takes once its plot is drawn.
     pub hands: u32, pub follow_to: Option<([f32; 4], serde_json::Value)>,
+    /// Per-window loading elapsed-time clock (scoped to this Backplane entity, never thread-local).
+    pub loading: super::panestate::LoadingClock,
+    /// Last Retry press time on this window (enforces the 1 s client cooldown).
+    pub last_retry: Option<std::time::Instant>,
 }
 
 /// What a tessellated plot depends on: the frame's chunks (by identity), the order and fade they are drawn in, the zoom and the canvas's
@@ -642,19 +646,27 @@ pub fn frame_on(app: &mut Backplane, slot: usize, pieces: &[(usize, usize)]) {
     pv.view = Some(v); pv.touched = true;
 }
 /// What the viewer shows now, for the hub's `viewer.state` (an agent's viewer_show answers with it): the page, its source, the part (Mech), the sheet (schematic), the active layer and the tapped piece. Sent only on change.
-pub fn report_state(app: &mut Backplane) {
-    let v = app.data["thread"]["viewer"].clone();
-    let open = v["open"].as_str().unwrap_or("").to_string();
-    let key = v["key"].as_str().unwrap_or("").to_string();
-    let card = [0usize, 1, 2].iter().find_map(|i| app.screens.pv(*i).card.clone());
+/// Pure viewer state snapshot reported to the hub for `viewer_show` read-back (includes `gerbers` and any `empty` reason).
+pub fn state_json(v: &serde_json::Value, card: Option<&super::plot::Card>, lit: usize) -> serde_json::Value {
+    let open = v["open"].as_str().unwrap_or("");
+    let key = v["key"].as_str().unwrap_or("");
     let layer = v["layerHead"].as_str().filter(|h| h.starts_with("Layer")).map(|h| h.trim_start_matches("Layer: ").to_string());
-    let lit: usize = (0..3).map(|i| app.screens.pv(i).lit.len()).sum();
-    let state = serde_json::json!({"open": open, "key": key,
+    let empty = v["empty"].as_str().filter(|s| !s.is_empty());
+    let mut state = serde_json::json!({"open": open, "key": key,
         "part": if open == "mech" { v["mech"]["rel"].clone() } else { serde_json::Value::Null },
         "sheet": if open == "schematic" { serde_json::json!(key.splitn(3, '|').nth(2).unwrap_or("")) } else { serde_json::Value::Null },
         "layer": layer, "layerMode": v["layerMode"],
         "selection": card.map(|c| serde_json::json!({"title": c.title, "rows": c.rows.iter().map(|r| serde_json::json!([r.0, r.1])).collect::<Vec<_>>()})),
         "lit": lit});
+    if v["gerbers"] == true { state["gerbers"] = serde_json::json!(true); }
+    if let Some(e) = empty { state["empty"] = serde_json::json!(e); }
+    state
+}
+pub fn report_state(app: &mut Backplane) {
+    let v = app.data["thread"]["viewer"].clone();
+    let card = [0usize, 1, 2].iter().find_map(|i| app.screens.pv(*i).card.clone());
+    let lit: usize = (0..3).map(|i| app.screens.pv(i).lit.len()).sum();
+    let state = state_json(&v, card.as_ref(), lit);
     let text = state.to_string();
     if text == app.screens.last_state || app.selected.is_empty() { return }
     app.screens.last_state = text;
@@ -777,5 +789,12 @@ mod tests {
         assert!(refit_needed(false, (480., 600.), 520., 930.));
         assert!(!refit_needed(false, (520., 930.), 521., 929.), "a pixel of jitter is not a change");
         assert!(!refit_needed(true, (480., 600.), 520., 930.), "a camera the person moved stays where they left it");
+    }
+    #[test] fn state_json_reports_gerbers_flag_and_empty_reason() {
+        let v = serde_json::json!({"open": "board", "key": "", "gerbers": true, "empty": "No Gerber files in this project yet"});
+        let s = state_json(&v, None, 0);
+        assert_eq!((s["open"].as_str(), s["gerbers"].as_bool(), s["empty"].as_str()), (Some("board"), Some(true), Some("No Gerber files in this project yet")));
+        let plain = state_json(&serde_json::json!({"open": "board", "key": "0|/p|"}), None, 0);
+        assert!(plain.get("gerbers").is_none() && plain.get("empty").is_none());
     }
 }

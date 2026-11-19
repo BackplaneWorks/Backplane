@@ -131,17 +131,41 @@ fn board_file(kind: &str, root: &str, rel: &str) -> String {
     match kind { "schematic" => abs.strip_suffix(".kicad_pcb").map(|b| format!("{b}.kicad_sch")).unwrap_or_default(), "board" | "3d" | "split" => abs, _ => String::new() }
 }
 
+/// Minimum interval (ms) between accepted `"retry"` actions in one session (1 s spam guard).
+pub const RETRY_COOLDOWN_MS: u64 = 1000;
+/// Pure spam guard: whether a `"retry"` at `now_ms` is allowed given the session's last retry timestamp (`@view.retry.at`).
+pub fn retry_allowed(last_ms: u64, now_ms: u64) -> bool {
+    now_ms == 0 || last_ms == 0 || now_ms.saturating_sub(last_ms) >= RETRY_COOLDOWN_MS
+}
+
 /// The `view` action for a drawing kind, or "" to close (the phones' idempotent `view`).
+/// `"retry"` re-sends the current page's complete `kicad.watch` with `force: true` (including Split's board/sheet and a far thread's `on`), rate-limited to once per second per session.
 pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option<ViewOut> {
-    // "mech\t<part>": an agent's viewer_show of a model opens Mech on that part (a path from the project's root, or absolute under it)
-    let (kind, part) = kind.split_once('\t').unwrap_or((kind, ""));
+    view_action_at(st, hub, session, kind, 0)
+}
+pub fn view_action_at(st: &State, hub: &str, session: &Value, kind: &str, now_ms: u64) -> Option<ViewOut> {
+    let sel = s(session, "sel");
+    let d = &session["drafts"];
+    let force_retry = kind == "retry";
+    // "retry": re-watch whatever page is currently open through the same presenter path
+    let (kind, part) = if force_retry {
+        if !simple(st, session, sel) { return None }
+        let cur = s(d, &format!("@view:{sel}"));
+        if cur.is_empty() { return Some(ViewOut { patch: json!({}), before: vec![], boards_look: false }) }
+        if cur == "board" && s(d, &format!("@view.gerbers:{sel}")) == "1" {
+            let f = s(d, &format!("@view.file:{sel}"));
+            if f.starts_with(crate::files::kicad::gerber::CMP) || f.starts_with("noboard\n") { ("gerbers", "board") } else { ("gerbers", "") }
+        } else { (cur, "") }
+    } else {
+        // "mech\t<part>": an agent's viewer_show of a model opens Mech on that part (a path from the project's root, or absolute under it)
+        kind.split_once('\t').unwrap_or((kind, ""))
+    };
     // Gerbers: the Board page drawing the project's fab output (its newest set under mfg/: kicad/gerber), the page marked as theirs
     let gerbers = kind == "gerbers";
     // "gerbers\tboard": the set on show compared with its board (kicad/gerber/compare.rs); "gerbers\t" (or none) the set alone
     let gerbers_vs_board = gerbers && part == "board";
     let kind = if gerbers { "board" } else { kind };
     if !(shows(kind) || kind.is_empty() || kind == "review") { return None }
-    let sel = s(session, "sel");
     // the Review tab: its first page (pages.rs asks for it; no source to watch)
     if kind == "review" {
         if sel.is_empty() || sel.contains('~') || sel.starts_with("project-home-") || sel.starts_with('@') || !st.threads.contains_key(sel) || !s(&session["drafts"], &format!("@view.file:{sel}")).is_empty() { return None }
@@ -149,28 +173,53 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
         return Some(ViewOut { patch, before, boards_look: false });
     }
     if !simple(st, session, sel) { return None }
-    let d = &session["drafts"]; let prev = s(d, &format!("@view:{sel}"));
+    let prev = s(d, &format!("@view:{sel}"));
     if !(prev.is_empty() || shows(prev)) { return None }
     // Files pressed while the Files tab is on show closes it (every other press opens its kind, and "" closes): the hub decides, never the button
-    let kind = if kind == "files" && files_kind(prev) { "" } else { kind };
+    let kind = if !force_retry && kind == "files" && files_kind(prev) { "" } else { kind };
     let root = root_of(st, sel);
     // what the hub is asked to watch: the kind and path View.ask sends (Mech's part is a 3D model; a split watches three sources)
     // Mech opened from the rail (no part named) shows the part chosen last in this thread, as it was left
     let kept_part = s(d, &format!("@mech.part:{sel}")).to_string();
     let part = if kind == "mech" && part.is_empty() { kept_part.as_str() } else { part };
+    let kept_sheet = if force_retry { s(d, &format!("@view.sheet:{sel}")).to_string() } else { String::new() };
     // (a board picked in the Boards menu stays the one shown on Board, Schematic, 3D and Split: its file is the source)
+    let mut gerbers_no_board = false;
     let picked = if gerbers {
         use crate::files::kicad::gerber as g;
-        // the set on show (a set or a file opened from Files), else the project's newest
+        // the set on show (a set or a file opened from Files), else the project's newest; none yet opens the empty Gerbers page instead of refusing the press
         let shown = s(d, &format!("@view.file:{sel}"));
-        let set = if s(d, &format!("@view.gerbers:{sel}")) == "1" && !shown.is_empty() { g::set_of(shown).to_string() } else { g::default_set(std::path::Path::new(&root))?.to_string_lossy().into_owned() };
-        if gerbers_vs_board { g::cmp_path(&set, &g::board_of(std::path::Path::new(&set))?.to_string_lossy()) } else { set }
+        let shown_set = shown.strip_prefix("noboard\n").unwrap_or(shown);
+        let set = if s(d, &format!("@view.gerbers:{sel}")) == "1" && !shown_set.is_empty() { Some(g::set_of(shown_set).to_string()) } else { g::default_set(std::path::Path::new(&root)).map(|p| p.to_string_lossy().into_owned()) };
+        match set {
+            Some(set) if gerbers_vs_board => match g::board_of(std::path::Path::new(&set)) {
+                Some(b) => g::cmp_path(&set, &b.to_string_lossy()),
+                None => { gerbers_no_board = true; format!("noboard\n{set}") }
+            },
+            Some(set) => set,
+            None => String::new(),
+        }
     }
         else if matches!(kind, "board" | "schematic" | "3d" | "split") { board_file(kind, &root, &chosen_board(d, sel)) } else { String::new() };
     let (want, wkind, wpath, board) = if kind == "mech" { let part = rel_in(&root, part); let ps = parts_of(&root, sel, &part); let (w, a) = mech_want(&root, &ps, &part); let k = if w.is_empty() { "" } else { "3d" }; (w, k.to_string(), a, String::new()) }
-        else { let base = key(kind, &root); let want = if base.is_empty() { base } else { format!("{base}{picked}") };
+        else if gerbers && (picked.is_empty() || gerbers_no_board) { (String::new(), String::new(), String::new(), String::new()) }
+        else { let base = key(kind, &root);
             // (Split watches its three sources from the board: the path stays its schematic's sheet, "" the root)
-            if kind == "split" { (want, kind.to_string(), String::new(), picked.clone()) } else { (want, kind.to_string(), picked.clone(), String::new()) } };
+            if kind == "split" {
+                let want = if base.is_empty() { base } else if kept_sheet.is_empty() { format!("{base}{picked}") } else { format!("{base}{picked}|{kept_sheet}") };
+                (want, kind.to_string(), kept_sheet.clone(), picked.clone())
+            } else {
+                let p = if kind == "schematic" && !kept_sheet.is_empty() { kept_sheet.clone() } else { picked.clone() };
+                let want = if base.is_empty() { base } else { format!("{base}{p}") };
+                (want, kind.to_string(), p, String::new())
+            }
+        };
+    if force_retry {
+        let last_ms: u64 = s(d, "@view.retry.at").parse().unwrap_or(0);
+        if !retry_allowed(last_ms, now_ms) {
+            return Some(ViewOut { patch: json!({}), before: vec![], boards_look: false });
+        }
+    }
     let at = s(d, "@view.at");
     let mut rid = session["rid"].as_u64().unwrap_or(0);
     let mut before = Vec::new();
@@ -178,22 +227,24 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     drafts.insert(format!("@view.file:{sel}"), json!(if kind == "split" { "" } else { picked.as_str() })); drafts.insert(format!("@view:{sel}"), json!(kind));
     drafts.insert(format!("@view.gerbers:{sel}"), json!(if gerbers { "1" } else { "" }));
     // vs board starts on one layer's differences (F.Cu, the others dimmed) unless a layer is already in focus: the list picks another
-    if gerbers_vs_board && !Focus::read(s(d, "@view.focus.board")).on() { drafts.insert("@view.focus.board".into(), json!(Focus { active: 12, mode: 1 }.show())); }
-    drafts.insert(format!("@view.sheet:{sel}"), json!(""));
+    if gerbers_vs_board && !gerbers_no_board && !Focus::read(s(d, "@view.focus.board")).on() { drafts.insert("@view.focus.board".into(), json!(Focus { active: 12, mode: 1 }.show())); }
+    if !force_retry { drafts.insert(format!("@view.sheet:{sel}"), json!("")); }
     if kind == "mech" { drafts.insert(format!("@mech.part:{sel}"), json!(rel_in(&root, part))); } // another page leaves Mech's choice as it is
     for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
-    if want != at {
+    if want != at || (force_retry && !want.is_empty()) {
         // View.ask: the kind, the root, the path ("" for the project's own file) and the board tree ("")
         // a thread of another machine (`<link>~<id>`, drawn from that machine's mirror: its root is a folder over there): the watch goes to it (`on`)
         let on = if sel.contains('~') { format!(",\"on\":{}", jstr(sel.split('~').next().unwrap_or(""))) } else { String::new() };
         let bd = if board.is_empty() { String::new() } else { format!(",\"board\":{}", jstr(&board)) };
-        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"{bd}{on}}}", jstr(if want.is_empty() { "" } else { &wkind }), jstr(&root), jstr(&wpath));
+        let fc = if force_retry { ",\"force\":true" } else { "" };
+        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"{bd}{on}{fc}}}", jstr(if want.is_empty() { "" } else { &wkind }), jstr(&root), jstr(&wpath));
         before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
         rid += 1; drafts.insert("@view.at".into(), json!(want));
+        if force_retry && now_ms > 0 { drafts.insert("@view.retry.at".into(), json!(now_ms.to_string())); }
     }
     let mut out = json!({"rid": rid, "drafts": drafts});
     patch::merge(&mut out, &pages::leave(session, sel));
-    Some(ViewOut { patch: out, before, boards_look: drawing(kind) && kind != "mech" && !drawing(prev) })
+    Some(ViewOut { patch: out, before, boards_look: !force_retry && drawing(kind) && kind != "mech" && !drawing(prev) })
 }
 
 /// Where the hub keeps a board's probe (0.14's Probe.key "probe:<root>|<board>"): the board picked, else the project's own; the same for every page of it.
@@ -215,6 +266,28 @@ pub fn probe_action(st: &State, hub: &str, session: &Value, value: &str) -> Opti
     if st.settings.get(&key).map(String::as_str).unwrap_or("") == value { return Some(vec![]) }
     let rid = session["rid"].as_u64().unwrap_or(0);
     Some(vec![json!({"type": "send", "hub": hub, "text": json!({"id": rid, "m": "setting.set", "p": {"key": key, "value": value}}).to_string()})])
+}
+
+/// When an empty Gerbers page is open and fab files appear on disk, start its `kicad.watch` from the presenter and record `@view.at` so closing always stops it.
+pub fn sync_gerbers(st: &State, hub: &str, session: &mut Value, cmds: &mut Vec<Value>) {
+    let sel = s(session, "sel").to_string();
+    if sel.is_empty() || sel.contains('~') { return }
+    let d = &session["drafts"];
+    if s(d, &format!("@view:{sel}")) != "board" || s(d, &format!("@view.gerbers:{sel}")) != "1" || !s(d, &format!("@view.file:{sel}")).is_empty() { return }
+    let root = root_of(st, &sel);
+    if root.is_empty() { return }
+    let Some(set) = crate::files::kicad::gerber::default_set(std::path::Path::new(&root)) else { return };
+    let set_s = set.to_string_lossy().into_owned();
+    let want = format!("{}{set_s}", key("board", &root));
+    let at = s(d, "@view.at").to_string();
+    if let Some(m) = session["drafts"].as_object_mut() { m.insert(format!("@view.file:{sel}"), json!(set_s)); }
+    if want != at {
+        let rid = session["rid"].as_u64().unwrap_or(0);
+        let p = format!("{{\"kind\":\"board\",\"root\":{},\"path\":{},\"tree\":\"\"}}", jstr(&root), jstr(&set_s));
+        cmds.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
+        session["rid"] = json!(rid + 1);
+        if let Some(m) = session["drafts"].as_object_mut() { m.insert("@view.at".into(), json!(want)); }
+    }
 }
 
 /// Settings opened: the viewer beside the thread shuts (0.14's Settings.viewer.shut), its watch stopped, Diff or Review put away; the board picked stays.
@@ -413,13 +486,32 @@ fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str) -> 
     // whether the project has fab output for a Gerbers tab (phones list the tab only then; the desktop's rail has it always)
     if matches!(kind, "board" | "schematic" | "3d") && !root.is_empty() { o.insert("hasGerbers".into(), json!(crate::files::kicad::gerber::default_set(std::path::Path::new(root)).is_some())); }
     // the Board page drawing a Gerber set (kicad/gerber): the rail lights Gerbers, the layer list is the set's
+    let mut k = k;
     if kind == "board" && !sel.is_empty() && s(drafts, &format!("@view.gerbers:{sel}")) == "1" {
         o.insert("gerbers".into(), json!(true));
+        let no_board = file.starts_with("noboard\n");
+        let raw_file = file.strip_prefix("noboard\n").unwrap_or(file);
         // compared with its board, or not (the bar's toggle)
-        o.insert("gerbersVsBoard".into(), json!(file.starts_with(crate::files::kicad::gerber::CMP)));
+        o.insert("gerbersVsBoard".into(), json!(no_board || raw_file.starts_with(crate::files::kicad::gerber::CMP)));
         // what "Open in GerbView" opens (the set's job, else its files): the desktop offers it where its KiCad has GerbView in process
-        let set = crate::files::kicad::gerber::set_of(file);
+        let set = crate::files::kicad::gerber::set_of(raw_file);
         let set = if set.is_empty() { crate::files::kicad::gerber::default_set(std::path::Path::new(root)) } else { Some(std::path::PathBuf::from(set)) };
+        if no_board {
+            k.clear();
+            o.insert("key".into(), json!(""));
+            o.insert("empty".into(), json!("No board to compare these Gerbers against."));
+            o.insert("emptyNext".into(), json!("Add a board to this project to compare them."));
+        } else if set.is_none() {
+            k.clear();
+            o.insert("key".into(), json!(""));
+            o.insert("empty".into(), json!("No Gerber files in this project yet"));
+            o.insert("emptyNext".into(), json!("Ask an agent to export fabrication files into mfg/."));
+        } else if file.is_empty() {
+            // fab files appeared on disk while the empty Gerbers page was open: key the page to the new Gerber set (never the plain board)
+            let s_path = set.as_ref().unwrap().to_string_lossy().into_owned();
+            k = format!("{}{s_path}", key("board", root));
+            o.insert("key".into(), json!(k));
+        }
         o.insert("gerberFiles".into(), json!(set.map(|p| crate::files::kicad::gerber::gerbview_files(&p)).unwrap_or_default()));
     }
     // View.layers: a 3D view draws the board's layers on its faces
@@ -639,6 +731,27 @@ fn rail_sources(root: &str) -> RailSources {
     }
 }
 
+/// Whether a Split sub-pane (`"schematic"`, `"board"`, `"3d"`) has no local source file to draw: `(empty, next)` when missing, `None` when present or on a far machine.
+pub fn split_pane_empty(kind: &str, root: &str, picked_board: &str, sheet: &str, far: bool) -> Option<(&'static str, &'static str)> {
+    if far || root.is_empty() { return None }
+    let proj = crate::files::kicad::project::read(root);
+    match kind {
+        "schematic" => {
+            let has = if !sheet.is_empty() { std::path::Path::new(sheet).is_file() }
+                else if !picked_board.is_empty() {
+                    let s = board_file("schematic", root, picked_board);
+                    (!s.is_empty() && std::path::Path::new(&s).is_file()) || (crate::files::kicad::project::is_altium(&proj) && !proj.sch.is_empty())
+                } else { !proj.sch.is_empty() };
+            (!has).then_some(("No schematic in this project yet", "Ask an agent to draw one."))
+        }
+        "board" | "3d" => {
+            let has = if !picked_board.is_empty() { std::path::Path::new(&format!("{root}/{picked_board}")).is_file() } else { !proj.pcb.is_empty() };
+            (!has).then_some(("No board in this project yet", "Ask an agent to lay one out."))
+        }
+        _ => None,
+    }
+}
+
 /// `thread.viewer`: the idle template with the page the thread's viewer has open. None for a page not ported.
 pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Value> {
     let sel = s(session, "sel");
@@ -696,8 +809,12 @@ fn viewer_page(st: &State, template: &Value, session: &Value) -> Option<Value> {
             let mut v = template.clone(); let o = v.as_object_mut()?;
             o.insert("open".into(), json!("mech")); o.insert("key".into(), json!(want));
             let chips: Vec<Value> = ps.iter().map(|p| json!({"label": stem(p), "value": p, "on": cur.as_deref() == Some(p.as_str())})).collect();
-            o.insert("mech".into(), json!({"say": if root.is_empty() { "Loading…" } else if sel.contains('~') && ps.is_empty() { "No parts in its mech/ folder on that machine yet." } else if ps.is_empty() { "No parts yet. Ask an agent to model one: it designs it in FreeCAD, keeps it in mech/, and renders it here." } else { "" },
-                "note": "", "parts": chips, "rel": cur.clone().unwrap_or_default(), "busy": false, "render": "Create renders", "err": "",
+            let (say, note) = if root.is_empty() { ("Loading…", "") }
+                else if sel.contains('~') && ps.is_empty() { ("No parts in its mech/ folder on that machine yet.", "") }
+                else if ps.is_empty() { ("No mechanical parts in this project yet", "Ask an agent to model one, or add a STEP file to mech/.") }
+                else { ("", "") };
+            o.insert("mech".into(), json!({"say": say,
+                "note": note, "parts": chips, "rel": cur.clone().unwrap_or_default(), "busy": false, "render": "Create renders", "err": "",
                 "name": cur.as_deref().map(stem).unwrap_or_default(), "path": cur.as_deref().map(|p| abs_of(&root, p)).unwrap_or_default(), "shots": [], "empty": ""}));
             v
         }
@@ -706,13 +823,19 @@ fn viewer_page(st: &State, template: &Value, session: &Value) -> Option<Value> {
             let mut v = template.clone(); let o = v.as_object_mut()?;
             o.insert("open".into(), json!("split")); o.insert("key".into(), json!(key("split", &root)));
             // a board picked in the Boards menu: each pane's source is that board's file (its schematic beside it), as kicad.watch's split keys them
-            let picked = board_file("board", &root, &chosen_board(&session["drafts"], sel));
+            let chosen = chosen_board(&session["drafts"], sel);
+            let picked = board_file("board", &root, &chosen);
             // a sheet opened in the schematic pane is its source (`view-sheet`)
             let sheet = s(&session["drafts"], &format!("@view.sheet:{sel}")).to_string();
+            let far = sel.contains('~');
             o.insert("panes".into(), Value::Array(["schematic", "board", "3d"].iter().map(|k| { let mut p = page(template, k, &root, &session["drafts"], "");
-                if !picked.is_empty() { let f = if *k == "schematic" { board_file("schematic", &root, &chosen_board(&session["drafts"], sel)) } else { picked.clone() }; let kk = format!("{}{f}", key(k, &root));
+                if !picked.is_empty() { let f = if *k == "schematic" { board_file("schematic", &root, &chosen) } else { picked.clone() }; let kk = format!("{}{f}", key(k, &root));
                     if *k != "3d" { p["layers"] = json!(kk); } else { p["layers"] = json!(""); } p["key"] = json!(kk); }
                 if *k == "schematic" && !sheet.is_empty() { let kk = format!("{}{sheet}", key("schematic", &root)); p["key"] = json!(kk); p["layers"] = json!(kk); }
+                if let Some((empty, next)) = split_pane_empty(k, &root, &chosen, &sheet, far) {
+                    p["empty"] = json!(empty);
+                    p["emptyNext"] = json!(next);
+                }
                 p }).collect()));
             if let Some(b) = boards_menu(session, sel, &root) { o.insert("boards".into(), b); }
             v
@@ -1240,9 +1363,14 @@ mod tests {
         // the Board page again: its own board, not marked
         let o = view_action(&st, "h", &s2, "board").unwrap();
         assert_eq!(o.patch["drafts"][format!("@view.gerbers:{th}")], "");
-        // a project with no fab output: no Gerbers page
+        // a project with no fab output: Gerbers opens its empty state instead of refusing with PRESENTER_UNAVAILABLE
         std::fs::remove_dir_all(d.join("mfg")).unwrap();
-        assert!(view_action(&st, "h", &session, "gerbers").is_none());
+        let o_empty = view_action(&st, "h", &session, "gerbers").expect("empty Gerbers page opens");
+        assert!(o_empty.before.is_empty(), "nothing to watch when there is no Gerber set");
+        let mut s_empty = session.clone(); crate::session::patch::merge(&mut s_empty, &o_empty.patch);
+        let v_empty = viewer_json(&st, &json!({}), &s_empty).unwrap();
+        assert_eq!((v_empty["open"].as_str(), v_empty["gerbers"].as_bool(), v_empty["hasGerbers"].as_bool(), v_empty["key"].as_str()), (Some("board"), Some(true), Some(false), Some("")));
+        assert_eq!((v_empty["empty"].as_str(), v_empty["emptyNext"].as_str()), (Some("No Gerber files in this project yet"), Some("Ask an agent to export fabrication files into mfg/.")));
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -1294,5 +1422,112 @@ mod tests {
         assert_eq!(page(&template, "schematic", "/p", &drafts, "t1")["key"], "1|/p|/p/amp.kicad_sch");
         assert_eq!(page(&template, "schematic", "/p", &drafts, "t2")["key"], "1|/p|", "another thread's sheet is not this one's");
         assert_eq!(page(&template, "board", "/p", &drafts, "t1")["key"], "0|/p|");
+    }
+
+    #[test] fn split_pane_empty_reports_only_missing_sources_and_ignores_far_machines() {
+        let d = crate::plat::tmp::dir("split-empty"); let root = d.to_string_lossy().into_owned();
+        // empty project: all three panes missing
+        assert_eq!(split_pane_empty("schematic", &root, "", "", false), Some(("No schematic in this project yet", "Ask an agent to draw one.")));
+        assert_eq!(split_pane_empty("board", &root, "", "", false), Some(("No board in this project yet", "Ask an agent to lay one out.")));
+        assert_eq!(split_pane_empty("3d", &root, "", "", false), Some(("No board in this project yet", "Ask an agent to lay one out.")));
+        // far machine: never reports local missing
+        assert_eq!(split_pane_empty("board", &root, "", "", true), None);
+        // schematic only: board & 3d missing, schematic present
+        std::fs::write(d.join("p.kicad_pro"), "{}").unwrap();
+        let sch = d.join("p.kicad_sch"); std::fs::write(&sch, "(kicad_sch)").unwrap();
+        assert_eq!(split_pane_empty("schematic", &root, "", &sch.to_string_lossy(), false), None);
+        if !crate::files::kicad::project::read(&root).sch.is_empty() {
+            assert_eq!(split_pane_empty("schematic", &root, "", "", false), None);
+            assert!(split_pane_empty("board", &root, "", "", false).is_some());
+            assert!(split_pane_empty("3d", &root, "", "", false).is_some());
+            // board added: all three present
+            std::fs::write(d.join("p.kicad_pcb"), "(kicad_pcb)").unwrap();
+            for k in ["schematic", "board", "3d"] { assert_eq!(split_pane_empty(k, &root, "", "", false), None, "{k}"); }
+        } else {
+            std::fs::write(d.join("p.kicad_pcb"), "(kicad_pcb)").unwrap();
+            assert_eq!(split_pane_empty("board", &root, "p.kicad_pcb", "", false), None);
+            assert_eq!(split_pane_empty("3d", &root, "p.kicad_pcb", "", false), None);
+        }
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test] fn retry_re_sends_complete_watch_for_split_and_far_threads() {
+        assert!(retry_allowed(0, 10_000));
+        assert!(!retry_allowed(10_000, 10_000));
+        assert!(!retry_allowed(10_000, 10_999));
+        assert!(retry_allowed(10_000, 11_000));
+        let (st, th, d) = files_world("retry"); let root = d.to_string_lossy().into_owned();
+        let mut s1 = sess(&th, json!({}));
+        let o = view_action(&st, "h", &s1, "split").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        let sub = format!("{root}/power.kicad_sch");
+        let o = sheet_action(&st, "h", &s1, &sub).unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        // First retry at t=10_000 ms emits forced Split watch preserving sheet and records @view.retry.at
+        let r = view_action_at(&st, "h", &s1, "retry", 10_000).unwrap();
+        assert_eq!(r.before.len(), 1, "retry re-sends forced kicad.watch");
+        let p = sent(&r.before[0]);
+        assert_eq!((p["kind"].as_str(), p["path"].as_str(), p["force"].as_bool()), (Some("split"), Some(sub.as_str()), Some(true)), "Split retry preserves kind, sheet and force: {p}");
+        crate::session::patch::merge(&mut s1, &r.patch);
+        // Spammed retry within 1 s is ignored; after 1 s it is accepted again
+        assert!(view_action_at(&st, "h", &s1, "retry", 10_500).unwrap().before.is_empty(), "spammed retry within 1 s is ignored");
+        let r2 = view_action_at(&st, "h", &s1, "retry", 11_000).unwrap();
+        assert_eq!(r2.before.len(), 1, "retry accepted again after 1 s");
+        // Standalone schematic with a picked board AND active subsheet: retry keeps the active subsheet (not the picked board's root schematic)
+        let mut s_sch = sess(&th, json!({format!("@view.board:{th}"): "sub/b.kicad_pcb"}));
+        let o = view_action(&st, "h", &s_sch, "schematic").unwrap(); crate::session::patch::merge(&mut s_sch, &o.patch);
+        let o = sheet_action(&st, "h", &s_sch, &sub).unwrap(); crate::session::patch::merge(&mut s_sch, &o.patch);
+        let rs = view_action_at(&st, "h", &s_sch, "retry", 10_000).unwrap();
+        assert_eq!(rs.before.len(), 1);
+        assert_eq!((sent(&rs.before[0])["path"].as_str(), sent(&rs.before[0])["force"].as_bool()), (Some(sub.as_str()), Some(true)), "standalone schematic retry keeps active subsheet even with picked board");
+        // far thread retry preserves `on` and `force: true`
+        let mut far_st = State::new();
+        for l in [r#"{"$":"ProjectCreated","id":"L~p1","title":"Board","root":"/desk/board","at":1}"#, r#"{"$":"ThreadCreated","id":"L~t1","project":"L~p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}"#] { far_st.apply_line(l); }
+        let mut fs = sess("L~t1", json!({}));
+        let o = view_action(&far_st, "h", &fs, "board").unwrap(); crate::session::patch::merge(&mut fs, &o.patch);
+        let fr = view_action_at(&far_st, "h", &fs, "retry", 10_000).unwrap();
+        assert_eq!(fr.before.len(), 1);
+        assert_eq!((sent(&fr.before[0])["on"].as_str(), sent(&fr.before[0])["force"].as_bool()), (Some("L"), Some(true)));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test] fn gerbers_empty_recovers_when_files_appear_and_vs_board_says_when_no_board() {
+        let d = crate::plat::tmp::dir("gerb-coh"); let root = d.to_string_lossy().into_owned();
+        let mut st = State::new(); for l in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(l); }
+        let th = "t1700000003-8"; let proj = st.threads.get(th).map(|t| t.project.clone()).unwrap();
+        if let Some(p) = st.projects.get_mut(&proj) { p.root = root.clone(); }
+        let mut s1 = sess(th, json!({}));
+        // 1. Open Gerbers when no fab output exists
+        let o = view_action(&st, "h", &s1, "gerbers").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        let v1 = viewer_json(&st, &json!({}), &s1).unwrap();
+        assert_eq!((v1["gerbers"].as_bool(), v1["key"].as_str(), v1["empty"].as_str()), (Some(true), Some(""), Some("No Gerber files in this project yet")));
+        assert_eq!(s(&s1["drafts"], "@view.at"), "");
+        // 2. Fab files appear on disk while the empty Gerbers page is open: presenter sync starts the watch and records @view.at
+        std::fs::create_dir_all(d.join("mfg/b/gerber")).unwrap();
+        std::fs::write(d.join("mfg/b/gerber/b-F_Cu.gbr"), "%FSLAX46Y46*%M02*").unwrap();
+        let mut cmds = vec![];
+        sync_gerbers(&st, "h", &mut s1, &mut cmds);
+        assert_eq!(cmds.len(), 1, "presenter starts Gerber watch once files appear");
+        let wp = sent(&cmds[0]);
+        assert_eq!(wp["kind"].as_str(), Some("board"));
+        assert!(wp["path"].as_str().unwrap_or("").contains("gerber"), "watch targets Gerber set: {wp}");
+        assert!(s1["drafts"]["@view.at"].as_str().unwrap_or("").contains("gerber"), "@view.at recorded");
+        let mut cmds2 = vec![];
+        sync_gerbers(&st, "h", &mut s1, &mut cmds2);
+        assert!(cmds2.is_empty(), "sync_gerbers is idempotent");
+        let v2 = viewer_json(&st, &json!({}), &s1).unwrap();
+        let k2 = v2["key"].as_str().unwrap();
+        assert!(k2.contains("mfg") && k2.contains("gerber"), "expected Gerber set key, got {k2:?}");
+        assert!(v2.get("empty").is_none());
+        // 3. Closing the recovered Gerbers page stops the watch (no subscription left)
+        let close = view_action(&st, "h", &s1, "").unwrap();
+        assert_eq!(close.before.len(), 1, "closing stops the presenter-started Gerber watch");
+        assert_eq!(sent(&close.before[0])["kind"].as_str(), Some(""));
+        assert_eq!(close.patch["drafts"]["@view.at"], "");
+        // 4. "vs board" with a Gerber set and no board says so instead of silently showing the plain set
+        let o_vs = view_action(&st, "h", &s1, "gerbers\tboard").unwrap();
+        let mut s_vs = s1.clone(); crate::session::patch::merge(&mut s_vs, &o_vs.patch);
+        let v_vs = viewer_json(&st, &json!({}), &s_vs).unwrap();
+        assert_eq!((v_vs["gerbers"].as_bool(), v_vs["gerbersVsBoard"].as_bool(), v_vs["key"].as_str()), (Some(true), Some(true), Some("")));
+        assert_eq!(v_vs["empty"].as_str(), Some("No board to compare these Gerbers against."));
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

@@ -7,11 +7,12 @@ use std::{collections::BTreeMap, sync::Arc};
 
 /// A CBOR value as far as plots use it (no tags: a frame's dictionary words are plain keys 1 and 31 for "t" and "key").
 #[derive(Clone, Debug, PartialEq)]
-pub enum C { U(i64), Bytes(Vec<u8>), Text(String), Arr(Vec<C>), Map(BTreeMap<String, C>) }
+pub enum C { U(i64), Bool(bool), Bytes(Vec<u8>), Text(String), Arr(Vec<C>), Map(BTreeMap<String, C>) }
 
 impl C {
     pub fn get(&self, k: &str) -> Option<&C> { if let C::Map(m) = self { m.get(k) } else { None } }
     pub fn int(&self) -> Option<i64> { if let C::U(n) = self { Some(*n) } else { None } }
+    pub fn bool(&self) -> Option<bool> { if let C::Bool(b) = self { Some(*b) } else { None } }
     pub fn text(&self) -> Option<&str> { if let C::Text(s) = self { Some(s) } else { None } }
 }
 
@@ -49,6 +50,8 @@ pub fn decode(b: &[u8]) -> Option<C> {
                     }
                     C::Map(m)
                 }
+                7 if n == 20 => C::Bool(false),
+                7 if n == 21 => C::Bool(true),
                 _ => return None,
             })
         }
@@ -142,36 +145,37 @@ fn fan(p: &[f32], tris: &mut Vec<f32>) {
 /// What the viewer draws: chunks in paint order, the plot's box, or why there is nothing.
 #[derive(Clone, Debug, Default)]
 /// `note`: the line the hub sends with a plot (a Gerber set's: where it is, its age against the board, what did not read, how it compares), `warn` amber.
-pub struct Frame { pub key: String, pub fam: String, pub bbox: [f32; 4], pub edge: [f32; 4], pub thick: f32, pub chunks: Vec<Arc<Chunk>>, pub none: String, pub note: String, pub warn: bool }
+pub struct Frame { pub key: String, pub fam: String, pub bbox: [f32; 4], pub edge: [f32; 4], pub thick: f32, pub chunks: Vec<Arc<Chunk>>, pub none: String, pub retryable: Option<bool>, pub note: String, pub warn: bool }
 
 /// The chunks this client holds per source (a delta names its `base` source; a Split watches a schematic and a board at once), the newest frame
 /// (`frame`, the one Board and Schematic draw) and each source's own (`frames`, what a Split's panes draw).
 #[derive(Default)]
-/* i18n-ok: kept in English in the frame; viewer.rs draws it through trs */ pub struct Store { pub sheets: Vec<Sheet>, /** each sheet file's references (Hier.refs), for "C39 is on the sheet ..." */ pub sheet_refs: Vec<(String, Vec<String>)>, held: std::collections::HashMap<String, Vec<Arc<Chunk>>>, held_key: String, pub frame: Option<Frame>, pub frames: std::collections::HashMap<String, Frame> }
+/* i18n-ok: kept in English in the frame; viewer.rs draws it through trs */ pub struct Store { pub sheets: Vec<Sheet>, /** each sheet file's references (Hier.refs), for "C39 is on the sheet ..." */ pub sheet_refs: Vec<(String, Vec<String>)>, held: std::collections::HashMap<String, Vec<Arc<Chunk>>>, held_key: String, pub frame: Option<Frame>, pub frames: std::collections::HashMap<String, Frame>, /** source keys currently waiting on a Retry with their start time (cleared only by a frame for that exact key, or after 15 s) */ pub retrying: std::collections::HashMap<String, std::time::Instant> }
 
 const MAX_SOURCES: usize = 6;
 
 impl Store {
-    pub fn reset(&mut self) { self.held.clear(); self.held_key.clear(); self.frame = None; self.frames.clear(); }
-    fn fail(&mut self, key: String, fam: String, why: &str) {
+    pub fn reset(&mut self) { self.held.clear(); self.held_key.clear(); self.frame = None; self.frames.clear(); self.retrying.clear(); }
+    fn fail(&mut self, key: String, fam: String, why: &str, retryable: Option<bool>) {
+        self.retrying.remove(&key);
         self.held.remove(&key); if self.held_key == key { self.held_key.clear(); }
-        let f = Frame { key: key.clone(), fam, none: why.to_string(), ..Default::default() };
+        let f = Frame { key: key.clone(), fam, none: why.to_string(), retryable, ..Default::default() };
         if !key.is_empty() { self.frames.insert(key, f.clone()); } else { self.held.clear(); self.frames.clear(); }
         self.frame = Some(f);
     }
     /// A frame the client will not take (over its size limit): said, not left on Loading.
-    /* i18n-ok: kept in English in the frame; viewer.rs draws it through trs */ pub fn too_big(&mut self, bytes: usize) { self.fail(String::new(), String::new(), &format!("This plot is {} MB, too large to show here.", bytes >> 20)); }
+    /* i18n-ok: kept in English in the frame; viewer.rs draws it through trs */ pub fn too_big(&mut self, bytes: usize) { self.fail(String::new(), String::new(), &format!("This plot is {} MB, too large to show here.", bytes >> 20), Some(false)); }
     /// The newest frame of the source named `key`.
     pub fn frame_for(&self, key: &str) -> Option<&Frame> { self.frames.get(key) }
     /// Apply one plot frame. Err names a frame that cannot be used; the store is then empty, as on the phones.
     pub fn receive(&mut self, bytes: &[u8]) -> Result<(), &'static str> {
-        /* i18n-ok: kept in English in the frame; viewer.rs draws it through trs */ let Some(o) = decode(bytes) else { self.fail(String::new(), String::new(), "The plot from the hub could not be read. Reopen the view to load it again."); return Err("undecodable plot frame") };
+        /* i18n-ok: kept in English in the frame; viewer.rs draws it through trs */ let Some(o) = decode(bytes) else { self.fail(String::new(), String::new(), "The plot from the hub could not be read. Reopen the view to load it again.", Some(true)); return Err("undecodable plot frame") };
         let key = o.get("key").and_then(C::text).unwrap_or("").to_string();
         let fam = o.get("fam").and_then(C::text).filter(|s| !s.is_empty()).unwrap_or(&key).to_string();
         // a 3D model rides the same socket; the mesh viewer is separate
         if key.starts_with("2|") || key.starts_with("3|") || key.starts_with("4|") { return Ok(()); }
         if let Some(why) = o.get("none").and_then(C::text) {
-            self.fail(key, fam, why);
+            self.fail(key, fam, why, o.get("retryable").and_then(C::bool));
             return Ok(());
         }
         let none: Vec<C> = Vec::new();
@@ -186,14 +190,15 @@ impl Store {
             match r {
                 C::U(k) if !stale_base && *k >= 0 && (*k as usize) < held.len() => cs.push(held[*k as usize].clone()),
                 C::Map(_) => cs.push(Arc::new(Chunk::decode(r))),
-                /* i18n-ok: kept in English in the frame; viewer.rs draws it through trs */ _ => { self.fail(key, fam, "Invalid geometry reference. Retry to reload this view."); return Err("invalid geometry reference"); }
+                /* i18n-ok: kept in English in the frame; viewer.rs draws it through trs */ _ => { self.fail(key, fam, "Invalid geometry reference. Retry to reload this view.", Some(true)); return Err("invalid geometry reference"); }
             }
         }
         let four = |k: &str| -> [f32; 4] { match o.get(k) { Some(C::Arr(a)) if a.len() >= 4 => [0, 1, 2, 3].map(|i| a[i].int().unwrap_or(0) as f32), _ => [0.; 4] } };
         if self.held.len() >= MAX_SOURCES && !self.held.contains_key(&key) { self.held.clear(); self.frames.clear(); }
         self.held.insert(key.clone(), cs.clone()); self.held_key = key.clone();
-        let f = Frame { key: key.clone(), fam, bbox: four("box"), edge: four("edge"), thick: o.get("thick").and_then(C::int).unwrap_or(1600) as f32, chunks: cs, none: String::new(),
+        let f = Frame { key: key.clone(), fam, bbox: four("box"), edge: four("edge"), thick: o.get("thick").and_then(C::int).unwrap_or(1600) as f32, chunks: cs, none: String::new(), retryable: None,
             note: o.get("note").and_then(C::text).unwrap_or("").to_string(), warn: o.get("warn").and_then(C::int).unwrap_or(0) != 0 };
+        self.retrying.remove(&key);
         self.frames.insert(key, f.clone()); self.frame = Some(f);
         Ok(())
     }
@@ -511,5 +516,20 @@ mod tests {
         assert_eq!(r.rows.len(), 3, "head, branch and the thread's turn checkpoint (0.14's menu listed turns too); an unknown kind is not offered");
         assert_eq!(compare_path(&r, "abc", "/p/b.kicad_pcb").unwrap(), "diff\ngit\t/p/.git\tabc\t2\t/p/b.kicad_pcb\n/p/b.kicad_pcb");
         assert!(compare_path(&r, "abc", "/elsewhere/b.kicad_pcb").is_none());
+    }
+
+    #[test] fn retrying_is_cleared_only_by_matching_source_key() {
+        let mut s = Store::default();
+        let k_hist = "0|/p|git\t/p/.git\tabc\t2\t/p/b.kicad_pcb".to_string();
+        let k_live = "0|/p|".to_string();
+        s.retrying.insert(k_hist.clone(), std::time::Instant::now());
+        // A frame for a different source (live board) must NOT clear retrying for the historical source
+        let mut other = Vec::new(); head(&mut other, 5, 3); text(&mut other, "t"); text(&mut other, "plot"); text(&mut other, "key"); text(&mut other, &k_live); text(&mut other, "none"); text(&mut other, "err");
+        s.receive(&other).unwrap();
+        assert!(s.retrying.contains_key(&k_hist), "unrelated key must not clear retrying");
+        // A frame for the exact retried source DOES clear retrying
+        let mut same = Vec::new(); head(&mut same, 5, 3); text(&mut same, "t"); text(&mut same, "plot"); text(&mut same, "key"); text(&mut same, &k_hist); text(&mut same, "none"); text(&mut same, "still failed");
+        s.receive(&same).unwrap();
+        assert!(!s.retrying.contains_key(&k_hist), "matching key clears retrying");
     }
 }

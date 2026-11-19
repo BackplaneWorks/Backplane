@@ -283,9 +283,16 @@ impl Backplane {
         if self.screens.solid.is_none() {
             let page = cx.new(crate::viewers::solid::SolidPage::new);
             let back = self.local.viewer_backdrop(self.light()); page.update(cx, |p, _| p.set_backdrop(back));
-            // the page's Retry: the same source asked for again (a failed source is read again when it is watched)
-            cx.subscribe(&page, |this, _, ev: &crate::viewers::solid::SolidEvent, _| match ev {
-                crate::viewers::solid::SolidEvent::Retry(key) => if let Some(p) = crate::viewers::solid::retry_watch(key) { let _ = this.tx.try_send(Command::Rpc("kicad.watch".into(), super::settings::Secret(p), "watch")); },
+            // the page's Retry: routed through the presenter's `"retry"` action (preserves Split, board/sheet and far `on`); throttled by 1 s client cooldown, error stays until next frame
+            cx.subscribe(&page, |this, _, ev: &crate::viewers::solid::SolidEvent, cx| match ev {
+                crate::viewers::solid::SolidEvent::Retry(_) => {
+                    let now = std::time::Instant::now();
+                    if !super::panestate::retry_ready(this.screens.plotview.last_retry, now) { return }
+                    if this.tx.try_send(Command::Action("view".into(), "retry".into())).is_ok() {
+                        this.screens.plotview.last_retry = Some(now);
+                        if let Some(s) = this.screens.solid.clone() { s.update(cx, |p, cx| p.retry_sent(cx)); }
+                    }
+                }
                 // zoomed in on a STEP: its solids there meshed finer by the hub, the model replaced when they are
                 crate::viewers::solid::SolidEvent::Refine(key, at, r) => { let _ = this.tx.try_send(Command::Rpc("kicad.refine".into(), super::settings::Secret(serde_json::json!({"key": key, "at": at, "r": r})), "refine")); }
                 // a part clicked on the board's model: the board's probe, lit on the schematic and the board as a tap there is

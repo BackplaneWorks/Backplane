@@ -272,7 +272,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                     if x["ok"]==true {if let Some(target)=v.saved.take(){v.drawn=true;v.session["sel"]=target["id"].clone();v.target=target;v.restored=Restore::AfterList;v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}}
                     // an update for a view the hub no longer holds (it restarted, or opened another for this connection): opened again, nothing to tell
                     if x["ok"]!=true&&x["error"]["code"]=="STALE_VIEW"&&method!="view.open" {if let Some(cursor)=paged {let _=events.send(Event::Older(cursor,None)).await;}v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}
-                    if x["ok"]!=true {if let Some(cursor)=paged {let _=events.send(Event::Older(cursor,None)).await;}let _=events.send(Event::Refused(refused_view_text(&x["error"]["code"]))).await;continue;}
+                    if x["ok"]!=true {eprintln!("GPUI_LOG {}",json!({"view_refused":method,"code":x["error"]["code"],"retryable":x["error"]["retryable"]}));if let Some(cursor)=paged {let _=events.send(Event::Older(cursor,None)).await;}let _=events.send(Event::Refused(refused_view_text(&x["error"]))).await;continue;}
                     let mut r:Value=x["result"].take();
                     if let Some(control)=r["controlId"].as_u64() {
                         let c=v.controls.remove(&control).filter(|c|c.done);
@@ -398,9 +398,21 @@ pub fn view_refusal(x:&Value,method:&str,drawn:bool,restored:Restore)->Refusal {
     }
 }
 
-/// What a refused view request says. STALE_VIEW of an opening is a thing this hub does not have (a thread, bot or room of another machine, or one
-/// deleted): said so; of an update it is only an old view, opened again without a word.
-pub fn refused_view_text(code:&Value)->String { if code=="STALE_VIEW" {crate::i18n::trs("This thread, bot or room is not on this hub: it was deleted, or it is on another machine.")} else {crate::i18n::tf("gpui.hub.view.refused", &[("code", code.to_string().into())])} }
+/// What a refused view request says in plain words (never a raw wire code). Accepts either the reply's `error` object (`{code, retryable}`)
+/// or a bare code string. STALE_VIEW of an opening is a thing this hub does not have (a thread, bot or room of another machine, or one
+/// deleted); PRESENTER_UNAVAILABLE is retryable (session/mod.rs).
+pub fn refused_view_text(err:&Value)->String {
+    let code=err["code"].as_str().or_else(||err.as_str()).unwrap_or("");
+    let retryable=err["retryable"].as_bool().unwrap_or(false);
+    match code {
+        "STALE_VIEW"=>crate::i18n::trs("This thread, bot or room is not on this hub: it was deleted, or it is on another machine."),
+        "PRESENTER_UNAVAILABLE"=>crate::i18n::t("gpui.hub.view.notready"),
+        "STALE_CONNECTION"=>crate::i18n::t("gpui.hub.view.staleconn"),
+        "INVALID_REQUEST"=>crate::i18n::t("gpui.hub.view.unavailable"),
+        _ if retryable=>crate::i18n::t("gpui.hub.view.notready"),
+        _=>crate::i18n::t("gpui.hub.view.unavailable"),
+    }
+}
 /// The words for a failed product RPC's answer: the hub's error may be a plain string, an object with a message or a code, or something else.
 pub fn rpc_error(x:&Value)->String {
     let e=&x["error"];
@@ -413,7 +425,22 @@ pub fn is_post(m:&str)->bool { ["message.send","thread.send","send","turn.start"
 pub fn client_cmd(c:&Value)->Option<Event>{let text=c["text"].as_str().unwrap_or("").to_string();match c["type"].as_str()?{"compose"=>Some(Event::Compose(c["thread"].as_str()?.to_string(),text)),"say" if c["tone"]=="note"=>Some(Event::Note(text)),"say" if c["of"]=="new-thread"=>Some(Event::Data("create-refused",serde_json::Value::String(text))),"say"=>Some(Event::Refused(text)),_=>None}}
 
 #[cfg(test)]
-mod refused_text_tests { #[test] fn a_stale_view_says_it_is_not_on_this_hub(){ assert!(super::refused_view_text(&serde_json::json!("STALE_VIEW")).contains("not on this hub")); assert_eq!(super::refused_view_text(&serde_json::json!("X")),"View request refused: \"X\""); } }
+mod refused_text_tests {
+    use serde_json::json;
+    #[test] fn refused_views_speak_plain_words_and_never_raw_codes() {
+        assert!(super::refused_view_text(&json!("STALE_VIEW")).contains("not on this hub"));
+        let busy = super::refused_view_text(&json!({"code":"PRESENTER_UNAVAILABLE","retryable":true}));
+        assert_eq!(busy, "Not ready yet. Try again.");
+        let stale = super::refused_view_text(&json!({"code":"STALE_CONNECTION","retryable":false}));
+        assert!(!stale.contains("Reconnecting"), "must not claim Reconnecting when session carries on: {stale}");
+        let unavail = super::refused_view_text(&json!({"code":"INVALID_REQUEST","retryable":false}));
+        assert_eq!(unavail, "That view isn't available here.");
+        let retry = super::refused_view_text(&json!({"code":"OTHER","retryable":true}));
+        assert_eq!(retry, "Not ready yet. Try again.");
+        let hard = super::refused_view_text(&json!("X"));
+        assert_eq!(hard, "That view isn't available here.");
+    }
+}
 #[cfg(test)]
 mod rpc_tests {
     use super::{is_post, rpc_error};
