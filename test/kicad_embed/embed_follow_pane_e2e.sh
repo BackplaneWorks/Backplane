@@ -11,6 +11,9 @@
 #   P4  the person's hand on KiCad's canvas pauses Follow (as on Backplane's viewer): the next edit is not followed; Resume, and the next is
 #   (a modal: KiCad refuses the agent's edit itself while one is open, so no edit lands to hold; `decide`'s Hold is unit-tested)
 #   P6  an agent's explicit viewer_show of the board still switches the pane from the Schematic to the Board
+#   P7  (issue 1355) on the Board page with the strip's Schematic on show, an explicit viewer_show of the board brings the Board; the
+#       agent's read-back names it
+#   P8  the same with a board edit instead: the Schematic stays
 # Copies only (seed_project.py), fork mode with SelectItems (bp.13+: canvas_input_ago_ms, tool_busy).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -155,6 +158,20 @@ echo "INFO P6 before viewer_show: $(shown_frame)"
 V=$(ask viewer_show "{\"path\":\"$PCB\"}"); echo "INFO P6 viewer_show: $(echo "$V" | cut -c1-200)"
 for _ in $(seq 40); do [ "$(shown_frame)" = PCB ] && break; sleep 0.25; done
 check "P6 an explicit viewer_show of the board switches the pane to the Board ($(shown_frame))" "$([ "$(shown_frame)" = PCB ] && echo 1 || echo 0)"
+
+# P7 (issue 1355): Board page, the person picks the Schematic on the strip; an agent's explicit viewer_show of the board brings the Board
+ctl "kicad-tab:SCH" 3; person_in_chat
+echo "INFO P7 before: $(shown_frame)"
+V=$(ask viewer_show "{\"path\":\"$PCB\",\"wait\":true}"); echo "INFO P7 viewer_show: $(echo "$V" | cut -c1-300)"
+for _ in $(seq 40); do [ "$(shown_frame)" = PCB ] && break; sleep 0.25; done
+check "P7 an explicit viewer_show of the board on the Board page brings KiCad from the strip's Schematic to the Board ($(shown_frame))" "$([ "$(shown_frame)" = PCB ] && echo 1 || echo 0)"
+check "P7 the pane did it as a tab press (kicad_bring PCB in the client's log)" "$(grep -q '"kicad_bring":"PCB"' "$OUT/client.log" && echo 1 || echo 0)"
+check "P7 the agent's read-back names the frame on show (kicadFrame PCB)" "$(echo "$V" | grep -q '"kicadFrame":"PCB"' && echo 1 || echo 0)" "$(echo "$V" | grep -o '"kicadFrame":"[A-Z_]*"')"
+# P8: the same, but a board edit (its implicit view push): the Schematic stays
+ctl "kicad-tab:SCH" 3; person_in_chat
+A=$(edit_move C1 -0.5); sleep 3
+check "P8 the agent's board edit landed" "$(landed "$A" && echo 1 || echo 0)" "$(echo "$A" | cut -c1-200)"
+check "P8 a board edit (no explicit viewer_show) leaves the strip's Schematic on show ($(shown_frame))" "$([ "$(shown_frame)" = SCH ] && echo 1 || echo 0)"
 
 hub_rpc "[{\"method\":\"editor.kicad.close\",\"params\":{\"project\":\"$PROJ/ecc83-pp.kicad_pro\",\"save\":\"discard\"}}]" >/dev/null || true
 finish_suite "embed_follow_pane_e2e ($EMBED_MODE)"
