@@ -64,3 +64,22 @@ if want('F24'):
         log('F24-%s' % name, opened and r is not None and not_run and ran and right,
             '%s: Run in terminal (%s) pressed; 3.5 s later the command had not run (no %s)=%s (f24-%s-typed.png); Enter ran it=%s, in %s (want %s)'
             % (name, k, marker, not_run, name, ran, [os.path.relpath(os.path.dirname(f), OUT) for f in places], os.path.relpath(where, OUT)))
+
+# ---- F25 a selection shows over inline code: in Bub's chat a drag across the inline command tints the command's shaded
+# background (its run used to paint that shade over the selection, so the text was selected but showed no highlight there), and Ctrl+C copies what is selected.
+if want('F25'):
+    from collections import Counter
+    opened = open_surface('bot:Bub'); pause(1)
+    k, r = probe_like('copy:ic-cp2-'); _, rr = probe_like('run:ic-cp2-')
+    if r and rr: r = dict(r, x=min(r['x'], rr['x']))   # the command's buttons start at its end: Run in terminal, then copy
+    def shade(img):   # the commonest colour in a strip just inside the code span's end, its background (not its glyphs)
+        x1 = int(r['x']) - 20; y = int(r['y'] + r['h'] / 2)
+        return Counter(list(img.crop((x1 - 40, y - 2, x1, y + 2)).getdata())).most_common(1)[0][0]
+    shot('f25-before'); before = shade(px('f25-before')) if r else None
+    clip_set('before')
+    # from the command's end back into it (the drag stays inside the span: what it tints is the code's shade alone)
+    if r: xin('drag', int(r['x']) - 10, int(r['y'] + r['h'] / 2), int(r['x']) - 150, int(r['y'] + r['h'] / 2)); pause(0.8)
+    shot('f25-selected'); after = shade(px('f25-selected')) if r else None
+    chord('ctrl c'); until(lambda: (clip() or 'before') != 'before', 5); got = clip() or ''
+    log('F25', opened and r is not None and before != after and len(got) > 5 and got in INLINE,
+        'Bub: drag over the inline command (%s); its shade %s before, %s selected (f25-selected.png); Ctrl+C copied %r' % (k, before, after, got[-80:]))
