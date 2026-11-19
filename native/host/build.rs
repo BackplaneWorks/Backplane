@@ -1,6 +1,8 @@
 //! Each checkpoint's stamp: a hash of the code its fold is made of (`src/fold_inputs.rs`). Done here so that only the numbers reach the binary, never the source.
 #[path = "src/fold_inputs.rs"]
 mod fold_inputs;
+#[path = "../winres.rs"]
+mod winres;
 use std::{env, fs, path::Path};
 
 fn main() {
@@ -14,6 +16,8 @@ fn main() {
     }
     fs::write(Path::new(&env::var("OUT_DIR").unwrap()).join("fold_stamps.rs"), out).unwrap();
     kistack();
+    // Windows: the logo and VERSIONINFO of backplane-hub.exe (and every other binary of this crate)
+    winres::embed("backplane-hub.exe", "Backplane hub");
 }
 
 /// KiStack's pinned skills (deploy/kistack, deploy/kistack.lock) compiled into the hub: `agents/kistack.rs` writes them into its home.

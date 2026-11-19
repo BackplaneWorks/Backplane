@@ -16,6 +16,10 @@ sha2 = "0.10"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[build-dependencies]
+# the Windows icon and VERSIONINFO resources (build.rs, native/winres.rs)
+embed-resource = "3.0"
+
 [profile.release]
 opt-level = 2
 strip = true

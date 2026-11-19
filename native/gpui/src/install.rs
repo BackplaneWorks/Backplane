@@ -123,8 +123,8 @@ fn shortcut(prefix: &Path) {
     let Some(appdata) = std::env::var_os("APPDATA") else { return };
     /* i18n-ok: file and env names */ let lnk = PathBuf::from(appdata).join(r"Microsoft\Windows\Start Menu\Programs\Backplane.lnk");
     let q = |p: &Path| p.display().to_string().replace('\'', "''");
-    /* i18n-ok: a PowerShell command */ let ps = format!("$s = (New-Object -ComObject WScript.Shell).CreateShortcut('{}'); $s.TargetPath = '{}'; $s.WorkingDirectory = '{}'; $s.WindowStyle = 7; $s.IconLocation = '{}'; $s.Description = 'Backplane'; $s.Save()",
-        q(&lnk), q(&prefix.join("backplane.exe")), q(prefix), q(&prefix.join("builds").join(tag()).join("backplane-gpui.exe")));
+    /* i18n-ok: a PowerShell command */ let ps = format!("$s = (New-Object -ComObject WScript.Shell).CreateShortcut('{}'); $s.TargetPath = '{}'; $s.WorkingDirectory = '{}'; $s.WindowStyle = 7; $s.IconLocation = '{},0'; $s.Description = 'Backplane'; $s.Save()",
+        q(&lnk), q(&prefix.join("backplane.exe")), q(prefix), q(&prefix.join("backplane.exe")));
     use std::os::windows::process::CommandExt;
     let _ = std::process::Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", &ps]).creation_flags(0x0800_0000).status();
 }

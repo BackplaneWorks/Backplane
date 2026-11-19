@@ -1,3 +1,5 @@
+#[path = "../winres.rs"]
+mod winres;
 use std::{env, fs, path::PathBuf};
 fn main() {
     // the cef feature links libcef.so dynamically; the cef crate copies it beside the binary, so find it there (docs/browser-cef.md)
@@ -8,17 +10,9 @@ fn main() {
     if env::var_os("CARGO_FEATURE_CEF").is_some() && env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") && env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
         println!("cargo:rustc-link-arg-bin=backplane-gpui=/DELAYLOAD:libcef.dll");
     }
-    // Windows: the app's icon as resource 1, the one gpui gives its windows (LoadImageW(module, 1)); also what the taskbar, Alt+Tab and Explorer show.
-    // Without it every window had the system's blank icon. (assets/icon/backplane.ico, made by scripts/icons.sh)
-    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
-        let ico = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../assets/icon/backplane.ico");
-        println!("cargo:rerun-if-changed={}", ico.display());
-        let ico = fs::canonicalize(&ico).unwrap();
-        let rc = PathBuf::from(env::var("OUT_DIR").unwrap()).join("backplane-icon.rc");
-        // (forward slashes: rc.exe and llvm-rc both take them, and a quoted path in .rc needs no escaping then)
-        fs::write(&rc, format!("1 ICON \"{}\"\n", ico.display().to_string().replace('\\', "/").trim_start_matches("//?/"))).unwrap();
-        embed_resource::compile(&rc, embed_resource::NONE).manifest_optional().unwrap();
-    }
+    // Windows: the app's icon as resource 1, the one gpui gives its windows (LoadImageW(module, 1)); also what the taskbar, Alt+Tab and Explorer show;
+    // and its VERSIONINFO (native/winres.rs; assets/icon/backplane.ico is made by scripts/icons.sh)
+    winres::embed("backplane-gpui.exe", "Backplane");
     let css_path=PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../assets/web/style.css");
     println!("cargo:rerun-if-changed={}",css_path.display());
     let css=fs::read_to_string(css_path).unwrap();
