@@ -1995,29 +1995,24 @@ mod tests {
         assert_eq!(super::next_tab("?", 1, &base), "PCB", "unknown tab forward lands on first shown");
         assert_eq!(super::next_tab("?", -1, &base), "PCB_3D", "unknown tab backward lands on last shown");
     }
-    #[test] fn tab_change_publishes_only_on_change_and_never_loops() {
+    #[test] fn on_pane_tab_notifies_once_and_sends_no_commands() {
         assert_eq!(super::tab_change("PCB", "SCH"), Some("SCH"));
         assert_eq!(super::tab_change("SCH", "SCH"), None, "unchanged wanted frame does not re-emit PaneTab");
-        // Real subscriber body (`on_pane_tab`) + command channel: a strip switch Board -> Schematic sends one
-        // `editor.kicad.show`, emits `PaneTab("SCH")` which notifies the parent to repaint, lights "schematic" on
-        // the rail while the hub's page stays "board", and never triggers a second `editor.kicad.show` RPC.
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<super::Command>(8);
-        let _ = tx.try_send(super::Command::Rpc("editor.kicad.show".into(), super::Secret(json!({"project": "/p/a.kicad_pro", "frame": "SCH"})), "kicad"));
+        // Drive the real subscriber body (`on_pane_tab`) with an empty command channel and assert it
+        // notifies the parent once and causes zero outgoing commands (no `editor.kicad.show` feedback).
+        let (_tx, mut rx) = tokio::sync::mpsc::channel::<super::Command>(8);
         let emitted = super::tab_change("PCB", "SCH");
         assert_eq!(emitted, Some("SCH"));
         let mut notified = 0usize;
         if emitted.is_some() { super::on_pane_tab(|| notified += 1); }
         assert_eq!(notified, 1, "PaneTab subscriber notifies the parent once");
+        assert!(matches!(rx.try_recv(), Err(tokio::sync::mpsc::error::TryRecvError::Empty)), "on_pane_tab sends no commands");
         let thread = json!({"viewer":{"open":"board","rail":[{"id":"board","state":"on"},{"id":"schematic","state":"off"}]}});
         assert_eq!(crate::ui::rail_lit_id(&thread, true, emitted, None).as_deref(), Some("schematic"));
         let mut last_hub = "board".to_string();
         assert_eq!(hub_open_step("board", &mut last_hub, "board", None), None, "unchanged hub page does not re-sync");
         assert_eq!(super::tab_change("SCH", "SCH"), None, "no second PaneTab");
-        let mut show_rpcs = 0usize;
-        while let Ok(cmd) = rx.try_recv() {
-            if matches!(cmd, super::Command::Rpc(ref m, _, _) if m == "editor.kicad.show") { show_rpcs += 1; }
-        }
-        assert_eq!(show_rpcs, 1, "exactly one editor.kicad.show sent in total");
+        assert!(matches!(rx.try_recv(), Err(tokio::sync::mpsc::error::TryRecvError::Empty)), "still zero outgoing commands");
     }
     #[test] fn set_info_close_fallback_publishes_once_only_when_wanted_frame_changes() {
         let i = |fs: &[&str]| json!({"pid": 7, "state": "ready", "frames": fs.iter().map(|k| json!({"kind": k})).collect::<Vec<_>>()});
