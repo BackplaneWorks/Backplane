@@ -1177,9 +1177,10 @@ mod tests {
         if let Some(p) = st.projects.get_mut(&proj) { p.root = root.clone(); }
         let session = json!({"sel": th, "rid": 1, "drafts": {}, "open": {}, "adding": false, "panel": false, "info": {}});
         let o = view_action(&st, "h", &session, "gerbers").unwrap();
-        use crate::plat::tmp::sl; let set = sl(format!("{root}/mfg/b/gerber"));
-        assert_eq!((o.patch["drafts"][format!("@view:{th}")].as_str(), o.patch["drafts"][format!("@view.file:{th}")].as_str().map(sl), o.patch["drafts"][format!("@view.gerbers:{th}")].as_str()), (Some("board"), Some(set.clone()), Some("1")));
-        let w = o.before[0]["text"].as_str().unwrap(); assert!(w.contains("\"kind\":\"board\"") && sl(w.replace("\\\\", "\\")).contains(&set), "{w}");
+        use crate::plat::tmp::sl; let want = sl(format!("{root}/mfg/b/gerber"));
+        assert_eq!((o.patch["drafts"][format!("@view:{th}")].as_str(), o.patch["drafts"][format!("@view.file:{th}")].as_str().map(sl), o.patch["drafts"][format!("@view.gerbers:{th}")].as_str()), (Some("board"), Some(want.clone()), Some("1")));
+        let w = o.before[0]["text"].as_str().unwrap(); assert!(w.contains("\"kind\":\"board\"") && sl(w.replace("\\\\", "\\")).contains(&want), "{w}");
+        let set = o.patch["drafts"][format!("@view.file:{th}")].as_str().unwrap().to_string(); // the set as the hub names it (Windows: with "\\")
         let mut s2 = session.clone(); crate::session::patch::merge(&mut s2, &o.patch);
         let v = viewer_json(&st, &json!({}), &s2).unwrap();
         assert_eq!((v["open"].as_str(), v["gerbers"].as_bool(), v["hasGerbers"].as_bool()), (Some("board"), Some(true), Some(true)));
@@ -1190,7 +1191,7 @@ mod tests {
         std::fs::write(d.join("b.kicad_pro"), "{}").unwrap(); std::fs::write(d.join("b.kicad_pcb"), "(kicad_pcb)").unwrap();
         let o2 = view_action(&st, "h", &s2, "gerbers\tboard").unwrap();
         let f = o2.patch["drafts"][format!("@view.file:{th}")].as_str().unwrap().to_string();
-        assert_eq!(f, format!("gerbercmp\n{set}\n{root}/b.kicad_pcb"));
+        assert_eq!(sl(&f), sl(format!("gerbercmp\n{set}\n{root}/b.kicad_pcb")));
         let mut s3 = s2.clone(); crate::session::patch::merge(&mut s3, &o2.patch);
         assert_eq!(viewer_json(&st, &json!({}), &s3).unwrap()["gerbersVsBoard"], true);
         assert_eq!(o2.patch["drafts"]["@view.focus.board"], "12|1", "on F.Cu's differences, the other layers dimmed");
