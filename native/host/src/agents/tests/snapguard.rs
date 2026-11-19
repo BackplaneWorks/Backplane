@@ -51,7 +51,7 @@ async fn turn(hub: &Arc<Hub>, text: &str) -> Vec<Value> {
     // a review: read-only to the hub's tools
     assert_eq!(ag.world().await.setting(&super::super::snapguard::review_key(T1)), "1");
     let b = work.join("board.kicad_pcb").to_string_lossy().into_owned();
-    let why = ag.write_guard(T1, &b).await.unwrap_err(); assert!(why.contains("this turn is a review") && why.contains("board.kicad_pcb"), "{why}");
+    let why = ag.write_guard(T1, &b).await.unwrap_err(); assert!(why.contains("in review mode") && why.contains("board.kicad_pcb"), "{why}");
     let why = ag.mass_guard(T1, &b, "kiapi.common.commands.DeleteItems", &json!({"item_ids":[1, 2]})).await.unwrap_err(); assert!(why.contains("read-only"), "{why}");
     assert!(ag.mass_guard(T1, &b, "kiapi.common.commands.GetItems", &json!({})).await.is_ok(), "reads go on");
     assert!(ag.files_write_guard(T1, &[".backplane/review.md"]).await.is_ok(), "the review's own report is no design file");
@@ -266,4 +266,66 @@ async fn turn(hub: &Arc<Hub>, text: &str) -> Vec<Value> {
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     ag.shutdown(); let _ = work;
+}
+
+/// A stand-in claude that writes every input line to seen.log and holds a turn whose message says `hold` until the file `go` exists.
+const HOLDER: &str = r#"#!/bin/sh
+sid="h-$$"
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> seen.log
+  case "$line" in *'"type":"user"'*)
+    case "$line" in *hold*) i=0; while [ ! -e go ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done ;; esac
+    printf '%s\n' '{"type":"system","subtype":"init","session_id":"'"$sid"'","cwd":"/tmp","tools":["Bash"],"model":"fake","permissionMode":"default"}'
+    printf '%s\n' '{"type":"assistant","message":{"id":"m'"$$"'","role":"assistant","content":[{"type":"text","text":"ok"}]},"session_id":"'"$sid"'"}'
+    printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"ok","session_id":"'"$sid"'","modelUsage":{"fake":{"contextWindow":200000}}}' ;;
+  esac
+done
+"#;
+
+/// #1305: a review's turn refuses a write; the person presses Allow edits (`thread.review {on:false}`) and the SAME write in the SAME turn goes
+/// through. The switch is logged, the bar's state is the setting, the agent is told at the review's start and at the switch, and the turn's end
+/// opens no "a review changed design files" ask. Read-only again switches it back on, at once too.
+#[tokio::test(flavor = "multi_thread")] async fn issue_1305_review_mode_switched_off_lets_the_running_turns_write_through() {
+    use crate::agents::snapguard as sg;
+    let bin = dir("sg1305-bin"); script(&bin, "claude", HOLDER);
+    let (hub, ag, _home, work) = start("sg-1305", |w| { std::fs::write(w.join("board.kicad_pcb"), board(20)).unwrap(); std::fs::write(w.join("board.kicad_pro"), "{}").unwrap(); base_log(w, 1, "") }, |_| Cli::standin(&bin)).await;
+    let from = len(&hub).await;
+    assert_eq!(rpc(&hub, "turn.start", json!({"thread":T1,"text":"review the board, hold"})).await["ok"], true);
+    let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| is(e, "ActivityLogged") && e["summary"].as_str().is_some_and(|s| s.starts_with(sg::REVIEW_WHY)))).await;
+    assert!(ev.iter().any(|e| is(e, "SettingSet") && e["key"] == sg::review_key(T1) && e["value"] == "1"), "review mode on: {ev:?}");
+    assert_eq!(crate::agents::review_mode::bar(ag.world().await.setting(&sg::review_key(T1)))["button"], "Allow edits", "the bar the thread shows");
+    wait_file(&work.join("seen.log")).await;
+    let b = work.join("board.kicad_pcb").to_string_lossy().into_owned();
+    let del = json!({"item_ids":[1]});
+    let why = ag.write_guard(T1, &b).await.unwrap_err();
+    assert!(why.contains("review mode") && why.contains("switch review mode off"), "the refusal says the person can lift it: {why}");
+    assert!(ag.mass_guard(T1, &b, "kiapi.common.commands.DeleteItems", &del).await.is_err());
+    // the person's press
+    let from = len(&hub).await;
+    assert_eq!(rpc(&hub, "thread.review", json!({"thread":T1,"on":false})).await["ok"], true);
+    assert_eq!(ag.world().await.threads[T1].turn, "running", "the same turn");
+    ag.write_guard(T1, &b).await.expect("the same write, allowed now");
+    ag.mass_guard(T1, &b, "kiapi.common.commands.DeleteItems", &del).await.expect("and through KiCad");
+    let ev = log_from(&hub, from).await;
+    assert!(ev.iter().any(|e| is(e, "SettingSet") && e["key"] == sg::review_key(T1) && e["value"] == "0"), "{ev:?}");
+    assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["summary"].as_str().is_some_and(|s| s.starts_with("You switched review mode off"))), "logged: {ev:?}");
+    assert_eq!(crate::agents::review_mode::bar(ag.world().await.setting(&sg::review_key(T1)))["button"], "Read-only again");
+    // and back on, at once
+    assert_eq!(rpc(&hub, "thread.review", json!({"thread":T1,"on":true})).await["ok"], true);
+    assert!(ag.write_guard(T1, &b).await.is_err(), "read-only again");
+    assert_eq!(rpc(&hub, "thread.review", json!({"thread":T1,"on":false})).await["ok"], true);
+    // the turn ends: the agent heard of each switch
+    let from = len(&hub).await;
+    std::fs::write(work.join("go"), "").unwrap();
+    until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed") || turn_is(e, "failed"))).await;
+    let end = Instant::now() + Duration::from_secs(20);
+    let seen = loop { let s = std::fs::read_to_string(work.join("seen.log")).unwrap_or_default(); if s.matches("switched review mode").count() >= 3 || Instant::now() > end { break s } tokio::time::sleep(Duration::from_millis(50)).await };
+    assert!(seen.contains("This request looked like a review"), "told at the start: {seen}");
+    assert!(seen.contains("The person switched review mode off") && seen.contains("The person switched review mode on"), "told at each switch: {seen}");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!log_from(&hub, 0).await.iter().any(|e| is(e, "AskOpened") && e["detail"].as_str().is_some_and(|d| d.contains("was a review"))), "no review-changed ask for a turn the person let edit");
+    // the next message decides afresh: the bar goes
+    turn(&hub, "thanks").await;
+    assert_eq!(ag.world().await.setting(&sg::review_key(T1)), "");
+    ag.shutdown();
 }

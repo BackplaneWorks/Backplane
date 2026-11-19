@@ -39,8 +39,14 @@ pub const MASS_TOOL: &str = "mass_delete";
 pub const CLAUDE_DENY: &[&str] = &["Edit(**/*.kicad_pcb)", "Edit(**/*.kicad_sch)", "Edit(**/*.kicad_pro)", "Edit(**/*.kicad_sym)", "Edit(**/*.kicad_mod)", "Edit(**/*.kicad_dru)", "Edit(**/fp-lib-table)", "Edit(**/sym-lib-table)", "Edit(**/*.step)", "Edit(**/*.FCStd)", "Edit(**/*.fab.json)",
     "Write(**/*.kicad_pcb)", "Write(**/*.kicad_sch)", "Write(**/*.kicad_pro)", "Write(**/*.kicad_sym)", "Write(**/*.kicad_mod)", "Write(**/*.kicad_dru)",
     "Bash(rm:*)", "Bash(mv:*)", "Bash(git checkout:*)", "Bash(git restore:*)", "Bash(git reset:*)", "Bash(git clean:*)", "Bash(git stash:*)", "Bash(git rm:*)"];
-/// The setting that says a thread's turns are reviews (read-only), "1" while they are.
-pub fn review_key(th: &str) -> String { format!("review.ro.{th}") }
+pub use super::review_mode::{review_key, REVIEW_WHY};
+/// What the agent is told with a review's message (agents/mod.rs), so it can say so rather than try and be refused.
+pub const REVIEW_NOTE: &str = "[Backplane] This request looked like a review, so this thread is in review mode: the project's design files are read-only for this turn (Backplane refuses writes to them). Review and report; do not try to edit. If changes are needed, say what you would change and tell the person they can switch review mode off with one press (Allow edits, over the message box) or say \"go ahead\".";
+/// What the agent is told when the person switches review mode off or on during a thread.
+pub fn review_told(on: bool) -> String {
+    if on { "[Backplane] The person switched review mode on: the project's design files are read-only from now on (Backplane refuses writes to them). Review and report; do not edit the design.".into() }
+    else { "[Backplane] The person switched review mode off: you may change the project's design files now (Backplane's tools no longer refuse it). Carry on with the edits that were asked for.".into() }
+}
 
 /// A snapshot that takes longer than this says so in the thread (the agent waits for it: it must hold the state before the turn).
 pub const SNAP_SAY: std::time::Duration = std::time::Duration::from_secs(1);
@@ -61,8 +67,7 @@ pub struct TurnGuard {
 pub const MASS_WAIT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// Whether the next turn is a review: a request for one starts it, and it lasts through the follow-ups until a message asks for a change.
-pub fn review_next(prev: bool, text: &str) -> bool { sn::is_review(text) || (prev && !asks_change(text)) }
-fn asks_change(text: &str) -> bool { !sn::is_review(&format!("review {text}")) }
+pub fn review_next(prev: bool, text: &str) -> bool { sn::is_review(text) || (prev && !sn::asks_change(text)) }
 /// What a review turn may still send to KiCad: reads, opening a document, the view (layers, selection), checks and exports.
 pub fn review_allows(ty: &str) -> bool {
     let n = ty.rsplit('.').next().unwrap_or(ty);
@@ -87,6 +92,23 @@ impl Agents {
     /// Settings > Projects and git > Keep Backplane's commits off my branch (settings/offbranch.rs, #1188): snapshots go on Backplane's refs
     /// even in a repository it made.
     async fn off_branch(&self) -> bool { crate::settings::offbranch::on(self.world().await.setting(crate::settings::offbranch::KEY)) }
+    /// `thread.review {thread, on}`: the person's press on the thread's review bar. Review mode switches on or off at once, the running turn's
+    /// guard too (its next write is refused or allowed), it is logged in the thread, and the agent is told (a running Claude turn at once,
+    /// another at its next Backplane tool result or its next turn).
+    pub async fn review_set(self: &Arc<Self>, th: &str, on: bool) -> Result<(), String> {
+        let cur = self.world().await.setting(&review_key(th)).to_string();
+        let was = cur == "1" || self.turn_guard(th).is_some_and(|g| g.review);
+        if let Some(g) = self.turn_guards.lock().unwrap().get_mut(th) { g.review = on }
+        let now = now_s(); let want = if on { "1" } else { "0" };
+        if cur != want { self.commit_events(vec![json!({"$":"SettingSet","key":review_key(th),"value":want,"at":now})]).await }
+        if was == on { return Ok(()) }
+        self.guard_say(th, "info", if on { "You switched review mode on: the design files are read-only for this thread until a message asks for a change.".into() } else { "You switched review mode off: the agent may change the design files.".into() }).await;
+        let id = hub_id("rv", now, self.seq_n());
+        // off the press's path: the thread's actor may be busy a moment (a snapshot), and the person's press answers at once
+        let (me, th2) = (self.clone(), th.to_string());
+        tokio::spawn(async move { if let Err(e) = me.ride_note(&th2, &id, &review_told(on)).await { eprintln!("snapguard: {th2}: review {on}: the agent was not told: {e}") } });
+        Ok(())
+    }
     /// Whether this thread's turn is a review (read-only).
     pub async fn in_review(&self, th: &str) -> bool { self.turn_guard(th).map_or_else(|| false, |g| g.review) || self.world().await.setting(&review_key(th)) == "1" }
 
@@ -108,10 +130,12 @@ impl Agents {
     /// `turn_guard_start`; `new_turn` false for a guard taken late, at a write of a turn that has none (an earlier turn's restore ask stays open).
     async fn guard_begin(self: &Arc<Self>, th: &str, cwd: &str, text: Option<&str>, new_turn: bool) {
         if crate::copy::on() || cwd.is_empty() { return }
-        let prev = self.world().await.setting(&review_key(th)) == "1";
+        let cur = self.world().await.setting(&review_key(th)).to_string(); let prev = cur == "1";
         let review = text.map_or(prev, |t| review_next(prev, t));
-        if review != prev { let now = now_s(); self.commit_events(vec![json!({"$":"SettingSet","key":review_key(th),"value":if review { "1" } else { "" },"at":now})]).await }
-        if review && !prev { self.guard_say(th, "info", "This request is a review: the design files are read-only for it (Backplane refuses writes to them). Ask for a change in a message and that turn may edit.".into()).await }
+        // a new message decides afresh; the person's "off" ("0") lasts until it, a late guard (no text) keeps what is set
+        let want = if review { "1" } else if text.is_none() { cur.as_str() } else { "" };
+        if want != cur { let now = now_s(); self.commit_events(vec![json!({"$":"SettingSet","key":review_key(th),"value":want,"at":now})]).await }
+        if review && !prev { self.guard_say(th, "info", format!("{REVIEW_WHY} Allow edits (over the message box) switches it off, or ask for a change in a message.")).await }
         if new_turn { self.close_restore_asks(th).await }
         let root = kc::design_root(cwd);
         if !std::path::Path::new(&root).is_dir() { self.turn_guards.lock().unwrap().insert(th.to_string(), TurnGuard { review, ..Default::default() }); return } // no folder: nothing to snapshot (the turn says why it cannot run there)
@@ -359,6 +383,12 @@ mod tests {
         assert!(review_next(true, "thanks, and the schematic?"), "a follow-up stays a review");
         assert!(!review_next(true, "ok, go ahead and fix the first three"), "a change request ends it");
         assert!(!review_next(false, "route the USB pair"));
+        // #1305: a design brief that asks for a summary starts none, and ends one
+        let pogo = include_str!("../../../../test/fixtures/review/i1305-pogo.txt");
+        assert!(!review_next(false, pogo) && !review_next(true, pogo));
+        for t in ["keep going", "yes please", "ok, continue", "carry on with the layout", "design a new footprint for J1", "write the fab.json"] { assert!(!review_next(true, t), "{t} ends a review") }
+        for t in ["and the power section?", "what about U3's decoupling?", "ok thanks, anything else on the silkscreen?"] { assert!(review_next(true, t), "{t}: a follow-up question stays a review") }
+        assert!(!review_next(false, "status?"), "a status question starts none");
     }
     #[test] fn a_review_may_read_check_and_export_but_not_write() {
         for ty in ["kiapi.common.commands.GetItems", "kiapi.common.commands.GetOpenDocuments", "kiapi.common.commands.OpenDocument", "kiapi.common.commands.SetVisibleLayers", "kiapi.board.commands.RunChecks", "kiapi.common.commands.ExportGerbers"] { assert!(review_allows(ty), "{ty}") }

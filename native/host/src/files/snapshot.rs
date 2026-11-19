@@ -353,17 +353,11 @@ where F: FnOnce(String, Vec<String>) -> Fut, Fut: std::future::Future<Output = S
     Ok(Some((short(top, &c).await, changed)))
 }
 
-/// Whether a request only asks for a review, an assessment or a summary: such a turn runs with the design files read-only. A request
-/// that also asks for a change (fix, update, route, delete...) is not one.
-pub fn is_review(text: &str) -> bool {
-    let t = format!(" {} ", text.to_lowercase().replace(|c: char| !c.is_alphanumeric() && c != '\'', " "));
-    const ASK: &[&str] = &[" review", " audit", " assess", " critique", " look over ", " check over ", " sanity check", " summarize", " summarise", " summary", " where we are", " where are we", " task list", " todo list", " to do list", " what's left", " what is left", " feedback on", " evaluate", " inspect"];
-    const CHANGE: &[&str] = &[" fix", " change ", " changes to", " apply", " update ", " add ", " remove", " delete", " route", " reroute", " place ", " move ", " implement", " go ahead", " modify", " redo", " rework", " start over", " replace", " rewrite", " refactor", " edit ", " make it", " make the", " correct ", " clean up", " tidy", " build ", " create a board", " create the board", " draw "];
-    ASK.iter().any(|w| t.contains(w)) && !CHANGE.iter().any(|w| t.contains(w))
-}
+/// Whether a request is plainly a review (files/reviewask.rs, #1305): such a turn runs with the design files read-only.
+pub use super::reviewask::{asks_change, is_review};
 /// What a review turn's refused write says.
 pub fn review_refusal(what: &str) -> String {
-    format!("Refused: this turn is a review, so the project's design files are read-only (Backplane enforces it). {what} was not changed. Report what should change instead; if the person wants the change made, they say so in their next message (\"go ahead and fix it\") and that turn may edit.")
+    format!("Refused: this thread is in review mode, so the project's design files are read-only (Backplane enforces it). {what} was not changed. Tell the person this turn is read-only and say what should change; they can switch review mode off with one press (the Read-only bar over the message box, Allow edits), or say \"go ahead\" in a message, and then you may edit.")
 }
 
 /// Items of a KiCad board (footprints, tracks, vias, arcs, zones, drawings, text) or schematic (symbols, wires, labels, junctions, sheets,
@@ -417,16 +411,6 @@ pub fn mass_loss(file: &str, before: usize, after: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test] fn review_requests_are_told_from_change_requests() {
-        for r in ["Please review the design and create a task list of things to work on", "Do a review of where we are at and summarize the progress towards our objective",
-                  "review my project", "Can you audit the schematic?", "Review this board for manufacturing", "what's left to do on this board?", "Give me feedback on the layout"] {
-            assert!(is_review(r), "{r}")
-        }
-        for c in ["Review the board and fix what you find", "review the DRC errors then reroute the USB pair", "delete the old footprints", "route the board", "Make the changes from the review",
-                  "add a decoupling cap to U3", "go ahead", "start over with a new layout"] {
-            assert!(!is_review(c), "{c}")
-        }
-    }
     #[test] fn items_are_counted_at_the_top_level_and_a_mass_deletion_needs_a_fifth_and_the_floor() {
         let pcb = "(kicad_pcb (version 20241229)\n (net 0 \"\")\n (footprint \"R\" (at 1 2) (pad \"1\" smd rect))\n (footprint \"C\" (property \"Reference\" \"(segment\"))\n (segment (start 0 0) (end 1 1))\n (via (at 1 1))\n (zone (net 1))\n (gr_line (start 0 0))\n)";
         assert_eq!(count_items(pcb, false), 6, "a '(segment' inside a string or a pad inside a footprint is no item");

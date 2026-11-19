@@ -1,0 +1,24 @@
+Create a temperature, humidity, and CO2 sensing puck with BLE/Thread. It will run off of a rechargeable battery. It can use USB-C for recharging. Battery life is paramount. Ensure that the PCB design has mounting features to snap into an injection molded case at a later date. Ensure the antenna/RF section is designed properly. Ensure that the outline of the board is properly routable. Ensure that parts chosen are in stock. Optimize for a size ~20-30mm x ~20-30mm or ~20-30mm in diameter.
+
+Use KiStack skills and Backplane MCP to generate the files. Initialize a Git repo for this project.
+---
+Own local LIBRARY footprint and its 3D model only: /home/user/Projects/compare/puck-astra-1/boards/puck/Puck.pretty/BMD-340.kicad_mod and matching model. No changes to canonical board or schematic, no Git. KiStack footprint and layout skills. Verify all pad dimensions and positions against u-blox BMD-340 datasheet Fig 12 (in /tmp/puck-spec/bmd.pdf), confirm antenna keepout boundary relative to footprint and placement [109.6,107] rot 0 extending left to board edge x100. Locate correct BMD-340 STEP preferably official and add project-relative model to library, validate registration visually/geometrically; if no accurate model, make a simple dimensionally correct envelope with FreeCAD as per Backplane (no fake connector). Notify parent if any critical discrepancy. I will refresh board footprint when ready. Report findings.
+---
+Own local LIBRARY files only under /home/user/Projects/compare/puck-astra-1/boards/puck/Puck.pretty and Puck.3dshapes (new files, preserve BMD). No canonical schematic/board writes, no git. The official footprint library has missing STEP models for U2 Sensirion SCD41-D-R2 and U3 BQ24074RGTR. Use KiStack footprint and layout skills. Find actual manufacturer models or use FreeCAD to create accurate mechanical envelopes if unavailable. Create Puck:SCD41 and Puck:BQ24074 as faithful copies of the selected Backplane KiCad stock land patterns (Sensor:Sensirion_SCD4x-1EP_10.1x10.1mm_P1.25mm_EP4.8x4.8mm and Package_DFN_QFN:VQFN-16-1EP_3x3mm_P0.5mm_EP1.6x1.6mm) with project-relative models positioned for correct XY/Z. Also Puck:Cell_thermistor_leads copied from Capacitor_THT:C_Disc_D3.0mm_W1.6mm_P2.50mm maintaining pad geometries and numbering and no capacitor body/model (NTC mounted on cell via formed insulated leads); check against Semitec 103AT-2 for lead size/assembly. Report local IDs and verification; I will change the schematic and re-import footprints by ref. Focus quick delivery. No board writes, no documentation edits beyond model provenance.
+---
+Using FreeCAD, research and design a perfect pick and place feeder for 8mm tape to begin, but with significant component similarity between this and later sizes:
+
+Optical encoder on a machined brass wheel/gear for our tooth indexing 
+Pogo pin connection w/ CAN + power for motors to contact pick and place machine (4 pins total, right angle out)
+
+A means of easily opening with automation to load reels, able to feed itself easily. 
+
+Able to present a bit of tape to a loading machine that uses a blade + vacuum + clamp to start pieces of tape and load feeder totally automatically
+
+Use STM32 or WCH for the control board
+
+Find a geared stepper or similar w/ encoder for stepping
+
+Ensure that we use sheet metal as much as possible, as few machined components as possible noting where there are requirements for precision.
+
+Use mcmaster parts otherwise.
