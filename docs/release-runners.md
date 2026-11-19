@@ -36,6 +36,7 @@ machine, so no workflow or pull request can change it. A non-zero exit fails the
 | `.github/workflows/nightly.yml@refs/heads/main` | schedule, workflow_dispatch (it calls release.yml; the ref stays nightly.yml's) |
 | `.github/workflows/release.yml@refs/tags/v…` | push (a tag release) |
 | `.github/workflows/release.yml@refs/heads/main` | workflow_dispatch (a dry run) |
+| `.github/workflows/release.yml@refs/heads/release/<name>` | workflow_dispatch (a release-branch dry run; dispatch needs write access, the same trust as main) |
 
 It refuses everything else: pull_request and pull_request_target (whatever their branch), other workflows, other branches, a ref with anything but
 `[A-Za-z0-9._/@-]` in it. The rules live in `scripts/runner-guard.sh` (macOS: copied to `~/bp-runner/runner-guard.sh`) and in `scripts/runner-guard.ps1`
