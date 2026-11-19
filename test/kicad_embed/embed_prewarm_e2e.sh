@@ -2,10 +2,11 @@
 # A pre-warm that KiCad stops with a dialog of its own (a schematic it repairs on loading: test/files/fixtures/broken-toplevel, the
 # project file's top-level sheet UUID not the schematic's) never leaves the pane on a silent "Starting KiCad…": the Schematic tab shows the
 # editor, or says which dialog KiCad has open. A KiCad that raises no dialog (bp.12 with the fork's fix) must also leave the pre-warmed
-# schematic unmodified. Every check counts only when the schematic was loaded hidden before the tab was pressed (by editor.kicad.prewarm,
-# or on bp.13.2 by the hub's checks' DRC parity): with neither, the Schematic tab loads it itself and the checks would pass on nothing.
-# KEMBED_FORCE_REFUSE=prewarm refuses the pre-warm; on bp.13.2 the checks' hidden load makes up for it. fork; KEMBED_PROJ_SRC for another
-# project.
+# schematic unmodified. Every check counts only when the schematic was loaded hidden before the tab was pressed: its hidden frame in the
+# report taken just before the press (loaded by editor.kicad.prewarm, or on bp.13.2 by the hub's checks' DRC parity), or the pre-warm's
+# reply building SCH before the press; with neither, the Schematic tab loads it itself and the checks would pass on nothing.
+# KEMBED_FORCE_REFUSE=prewarm refuses the pre-warm (with BACKPLANE_CHECKS_IN_KICAD=0 nothing else loads it, and the checks fail). fork;
+# KEMBED_PROJ_SRC for another project.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/lib/env_xvfb.sh"
@@ -33,23 +34,29 @@ f = next((f for f in r.get("frames", []) if f.get("xid") == r.get("shown") and f
 d = r.get("dialogs") or []
 print(r.get("sock") or "-", json.dumps(r.get("say") or "", ensure_ascii=False), json.dumps(d[-1] if d else "", ensure_ascii=False), f.get("painted", 0), sep="\t")' "$R")
 echo "INFO say=$SAY dialog=$DLG sch_painted=$PAINTED"
-# the schematic was loaded hidden before the tab was pressed (by the pre-warm, or on bp.13.2 by the hub's checks)
+# the schematic was loaded hidden before the tab was pressed: its hidden frame in the report taken just before the press, or the pre-warm
+# answered building it before the press
 IFS=$'\t' read -r PREWARMED PREWARM_SAY < <(python3 - "$OUT/client.log" "$OUT/hub.log" "$(last_kicad_report "$OUT/client.log" prewarmed)" <<'PY'
 import json, sys
 client, hub, rep = sys.argv[1], sys.argv[2], json.loads(sys.argv[3] or "{}")
-reply = None
+reply = None; press = None
 for l in open(client, errors="ignore"):
+    if '"id":"kicad-tab:SCH"' in l and press is None:
+        try: press = json.loads(l.split("GPUI_METRIC ", 1)[1]).get("epoch_ms")
+        except Exception: pass
     if "GPUI_LOG " not in l: continue
     try: o = json.loads(l.split("GPUI_LOG ", 1)[1])
     except Exception: continue
     if o.get("kicad_rpc_reply") == "editor.kicad.prewarm": reply = reply or o
 h = open(hub, errors="ignore").read()
 refused = [l for l in h.splitlines() if "not pre-warming" in l]
-# loaded hidden before the tab is pressed: its frame there and not shown, or (a dialog of its load holding the frame back) a load asked:
-# the client's pre-warm building SCH, or on bp.13.2 the hub's checks, whose DRC parity loads it hidden whatever the pre-warm's floor says
+# loaded hidden before the tab is pressed: its frame there and not shown in the report taken just before the press, or (a dialog of its
+# load holding the frame back) the client's pre-warm answered building SCH before the press. The checks' line "parity loads the schematic
+# hidden" is the hub's one-time capability line (it can, not that it did): wording only, never evidence
 sch = any(f.get("kind") == "SCH" and not f.get("shown") for f in rep.get("frames", []))
-by = [w for w, yes in (("the pre-warm", bool(reply) and "SCH" in (reply.get("prewarming") or [])), ("the checks' DRC parity", "parity loads the schematic hidden" in h)) if yes]
-ok = sch or bool(by)
+asked = bool(reply) and "SCH" in (reply.get("prewarming") or []) and press is not None and (reply.get("at_ms") or 0) < press
+by = [w for w, yes in (("the pre-warm", asked), ("the checks' DRC parity (can: capability line)", "parity loads the schematic hidden" in h)) if yes]
+ok = sch or asked
 print(int(ok), " ".join(map(str, ["SCH hidden:", sch, "by:", " or ".join(by) or "?", "pre-warm reply:", reply and reply.get("prewarming"), "|", refused[0] if refused else ""]))[:300], sep="\t")
 PY
 )
