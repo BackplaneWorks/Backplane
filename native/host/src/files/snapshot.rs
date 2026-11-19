@@ -444,6 +444,21 @@ mod tests {
         assert!(!s.made, "nothing changed since the first commit: {s:?}");
         let st = git::run_ro(&e.top, &["status", "--porcelain"]).await.out; assert_eq!(st, "", "the repository Backplane made is clean");
     }
+    #[tokio::test] async fn zz_probe_rev_parse_forms() {
+        let d = crate::plat::tmp::dir("snap-probe"); let root = d.to_string_lossy().into_owned();
+        std::fs::write(d.join("a.kicad_sch"), "(kicad_sch)").unwrap();
+        let e = ensure_repo(&root, None, false).await.unwrap();
+        let head = git::run_ro(&e.top, &["rev-parse", "-q", "--verify", "HEAD"]).await.out.trim().to_string();
+        let tree_plain = git::run_ro(&e.top, &["show", "-s", "--format=%T", "HEAD"]).await.out.trim().to_string();
+        println!("PROBE head={head} tree_plain={tree_plain}");
+        for a in ["HEAD^{tree}".to_string(), format!("{head}^{{tree}}"), "HEAD^{commit}".to_string(), "HEAD^{}".to_string(), format!("{head}^{{commit}}")] {
+            let r = git::run_ro(&e.top, &["rev-parse", &a]).await; println!("PROBE sh rev-parse {a:?} -> code {} out {:?}", r.code, r.out);
+            let r = git::run_ro(&e.top, &["rev-parse", "--verify", &a]).await; println!("PROBE sh rev-parse --verify {a:?} -> code {} out {:?}", r.code, r.out);
+            let r = git::proc_ro("git", &["rev-parse", &a], &e.top, &[]).await; println!("PROBE direct rev-parse {a:?} -> code {} out {:?}", r.code, r.out);
+        }
+        let r = git::run_ro(&e.top, &["echo-args"]).await; println!("PROBE n/a {}", r.code);
+        let r = git::sh_ro("printf '[%s]\\n' \"$@\"", &["x^{tree}", "a^b", "refs/x/1^{commit}"], &e.top, &[]).await; println!("PROBE printf args: {:?}", r.out);
+    }
     #[tokio::test] async fn a_huge_file_is_left_out_and_named() {
         let d = crate::plat::tmp::dir("snap-big"); let root = d.to_string_lossy().into_owned();
         std::fs::write(d.join("a.kicad_sch"), "(kicad_sch)").unwrap();
