@@ -311,7 +311,7 @@ fn tmp(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::named(&forma
     let (e, r) = ask(&h, "project.new", json!({"path": d.join("full").to_str().unwrap(), "empty": true})).await; assert!(e.is_empty()); assert_eq!(r["ok"], false);
     assert!(r["error"].as_str().unwrap().contains("not empty"), "{r}"); assert!(r["result"]["exists"].as_str().unwrap().ends_with("/full"), "{r}");
     std::fs::write(d.join("afile"), "x").unwrap();
-    let (_, r) = ask(&h, "project.new", json!({"path": d.join("afile").to_str().unwrap(), "empty": true})).await; assert_eq!(r["error"], format!("{} is there and is not a folder.", d.join("afile").display()), "{r}");
+    let (_, r) = ask(&h, "project.new", json!({"path": d.join("afile").to_str().unwrap(), "empty": true})).await; assert_eq!(r["error"], format!("{} is there and is not a folder.", crate::plat::tmp::sl(d.join("afile").display().to_string())), "the folder as the person reads it (Windows: C:/..., never Git's sh's /tmp/...): {r}");
     #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; let ro = d.join("ro"); std::fs::create_dir_all(&ro).unwrap(); std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).unwrap();
         if std::fs::write(ro.join("probe"), "").is_err() { // not root
             let (_, r) = ask(&h, "project.new", json!({"path": ro.join("x").to_str().unwrap(), "empty": true})).await; assert!(r["error"].as_str().unwrap().starts_with("No permission"), "{r}"); }
