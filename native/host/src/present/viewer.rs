@@ -810,7 +810,8 @@ pub fn surface(st: &State, viewer: &Value, params: &Value, thread: &str) -> Valu
     design_mode(Input {
         desktop: params["designDesktop"].as_u64(), linked, altium: viewer["cad"] == "altium", document,
         platform: Platform::host(), preference: Preference::read(st.settings.get(SETTING).map_or("", String::as_str)),
-        visit: Visit::Normal, runtime: Runtime::UNKNOWN,
+        visit: Visit::Normal, runtime: runtime_from_picture(&viewer["runtime"]), visit_started_after_stop: false,
+        frame: match page { "board" => Some(Frame::Board), "schematic" => Some(Frame::Schematic), _ => None },
     }, AUTO_PLATFORMS)
 }
 
