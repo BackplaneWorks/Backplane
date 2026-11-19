@@ -58,14 +58,19 @@ impl HttpHandler for MessageImage {
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, req: &'a Req) -> Fut<'a, HttpReply> {
         Box::pin(async move {
             if !root_credential(hub, req) { return HttpReply::text("401 Unauthorized", "this Backplane needs its pairing token") }
-            let (entry, path) = (pct(&req.param("entry")), pct(&req.param("path")));
-            let unavailable = || HttpReply::text("404 Not Found", "Image unavailable");
-            if !mimg::is_image(&path) || !mimg::no_climb(&path) { return unavailable() }
-            let s = match find_snapshot(hub, Some(&self.retained), &entry, &path).await { Some(s) => s, None => return unavailable() };
-            let (p, ct) = (s.path.to_string_lossy().into_owned(), fm::ctype(&s.path.to_string_lossy()));
-            tokio::task::spawn_blocking(move || serve::send(&p, ct, "")).await.unwrap_or_else(|_| unavailable())
+            snapshot_response(hub, req, Some(&self.retained)).await
         })
     }
+}
+
+/// Serve a snapshot already authorized by the native or browser HTTP boundary.
+pub(crate) async fn snapshot_response(hub: &Arc<Hub>, req: &Req, retained: Option<&Arc<AtomicUsize>>) -> HttpReply {
+    let (entry, path) = (pct(&req.param("entry")), pct(&req.param("path")));
+    let unavailable = || HttpReply::text("404 Not Found", "Image unavailable");
+    if !mimg::is_image(&path) || !mimg::no_climb(&path) { return unavailable() }
+    let s = match find_snapshot(hub, retained, &entry, &path).await { Some(s) => s, None => return unavailable() };
+    let (p, ct) = (s.path.to_string_lossy().into_owned(), fm::ctype(&s.path.to_string_lossy()));
+    tokio::task::spawn_blocking(move || serve::send(&p, ct, "")).await.unwrap_or_else(|_| unavailable())
 }
 
 /// MessageImage.changes: after a commit, each image an assistant message names gets its snapshot (a missing or rejected image never stops delivery).

@@ -5,6 +5,9 @@
 //! MagicDNS name, with the port) are what `Auth.owner.pair` accepts as `Host` (`Peering::set_own_hosts`).
 //! A main listener that already covers the tailnet address (--host 0.0.0.0 or the address itself) adds none, and
 //! its connections get no owner trust: the pairing then needs a proof, as in hub.
+#[path = "webingress.rs"]
+pub(crate) mod webingress;
+
 use super::{peering::Peering, routes::AuthRoutes, tailnet};
 use crate::{hub::Hub, wire};
 use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
