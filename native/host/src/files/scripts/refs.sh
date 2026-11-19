@@ -2,6 +2,9 @@ exec 2>/dev/null
 cd "$1" || exit 0
 name=$2
 if top=$(git rev-parse --show-toplevel 2>/dev/null) && [ -n "$top" ]; then
+  # git names the top by its real path (macOS: /private/var/... for /var/...); the History compares it with the path the person
+  # opened, so keep the folder's path as we were given it: the same folder, reached the way "$1" reached it (not on Windows' C:/...)
+  case $top in /*) lt=$(cd "./$(git rev-parse --show-cdup)" && pwd) && [ "$lt" != "$top" ] && [ "$(cd "$lt" && pwd -P)" = "$(cd "$top" && pwd -P)" ] && top=$lt ;; esac
   gd=$(cd "$(git rev-parse --git-common-dir)" && pwd) || exit 0
   printf '%s\n%s\n' "$gd" "$top"
   h=$(git rev-parse -q --verify HEAD) && printf 'head\tHEAD\t%s\n' "$h"
