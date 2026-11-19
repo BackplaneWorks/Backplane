@@ -928,6 +928,8 @@ impl Render for Backplane {
                         .when(show_popup, |d| d.child(div().relative().border_1().border_color(c("line")).bg(c("panel")).child(popup).children(popup_bar)))
                         .children(crate::screens::review::view(cx, light, &thread["review"]))
                         .children(crate::screens::order::view(cx, light, &thread["order"]))
+                        // #1304: the agent has not answered the person's mid-turn message (screens/unanswered.rs)
+                        .children(crate::screens::unanswered::view(cx, light, &thread["unanswered"]))
                         .children(crate::screens::asks::view(cx, light, &self.screens.ask_inputs, &thread["asks"]))
                         .children(crate::screens::voice::pending_view(cx, light, &self.screens.voice, &self.selected.clone()))
                         .children(self.screens.voice.views.get(&self.selected).cloned().and_then(|v| crate::screens::voice::view(cx, light, &v, self.screens.voice.level, self.screens.voice.fix.clone().as_ref())))

@@ -707,6 +707,8 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     let c = crate::session::composer::fields(draft, running, !atts.is_empty(), t.provider == "claude", &refs, lang).ok_or("composer.language")?;
     for (k, v) in state_keys { o.insert(k, v); }
     o.insert("asks".into(), Value::Array(asks_json(st, thread, draft)?));
+    // #1304: the person's mid-turn message the agent has not answered after a minute (agents/unanswered.rs): a notice over the composer, Interrupt or Send again
+    o.insert("unanswered".into(), crate::agents::unanswered::picture(st.settings.get(&crate::agents::unanswered::key(thread)).map(String::as_str).unwrap_or(""), running));
     o.insert("order".into(), order_json(st, thread, running));
     o.insert("review".into(), review_json(st, thread));
     // the messages waiting for the agent, above the composer (session/composer.rs queue_json)
@@ -782,7 +784,7 @@ mod tests {
         let got = as_helper(&got);
         for (k, w) in want.as_object().unwrap() { if k == "picker" { assert_eq!(&super::super::keys::as_helper(&got[k]), w); continue } assert_eq!(got.get(k), Some(w), "key {k}"); }
         // the Allowance chip's text (keys.rs `allowance`), the one chip (`combo`), the picker's other agents (`pickerAgents`) and the header's project (`project`) are Backplane's own: the recorded helper reply has no such keys
-        assert_eq!(got.as_object().unwrap().keys().filter(|k| !matches!(k.as_str(), "allowance" | "combo" | "pickerAgents" | "secretBox" | "commands" | "project" | "subView" | "planOnce" | "review")).count(), want.as_object().unwrap().len());
+        assert_eq!(got.as_object().unwrap().keys().filter(|k| !matches!(k.as_str(), "allowance" | "combo" | "pickerAgents" | "secretBox" | "commands" | "project" | "subView" | "planOnce" | "review" | "unanswered")).count(), want.as_object().unwrap().len());
     }
     // Diff opened on thread A leaves the session's panel on; a view of thread B (the + makes it and goes there) is accepted, not refused as an unported page
     #[test] fn a_view_of_another_thread_after_diff_on_one_is_accepted() {
