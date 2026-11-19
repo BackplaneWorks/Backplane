@@ -168,7 +168,7 @@ fn checklist_md(ts: &[Task]) -> String {
     for t in ts { if t.group != last { o.push_str(&format!("\n**{}**\n\n", t.group)) } o.push_str(if t.done { "- [x] " } else { "- [ ] " }); o.push_str(&t.text); o.push('\n'); last = &t.group }
     o
 }
-fn runs_md(rs: &[Run]) -> String {
+pub fn runs_md(rs: &[Run]) -> String {
     if rs.is_empty() { return String::new() }
     let mut o = String::from("\n## Custom checks\n\n| Check | Result | Output |\n|---|---|---|\n");
     for r in rs { o.push_str(&format!("| {} | {} | {} |\n", esc(&r.name), if r.ok { "pass" } else { "FAIL" }, esc(&bj::take(bj::trim(r.out.split('\n').next().unwrap_or("")), 120)))) }

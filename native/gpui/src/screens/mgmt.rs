@@ -192,6 +192,15 @@ pub fn review_panel(app: &mut Backplane, cx: &mut Context<Backplane>) -> Option<
     Some(shared_panel(app, &id, &scope, false, app.light(), cx))
 }
 
+pub(super) fn panel_state(app: &mut Backplane, id: &str, light: bool, line: String, loading: bool) -> AnyElement {
+    use super::panestate::{self, PaneState};
+    let state = if loading {
+        let secs = app.screens.plotview.loading.track_now(&format!("panel:{id}:{}", app.screens.mgmt.digest));
+        PaneState::loading(panestate::loading_line(&line, secs, 0))
+    } else { PaneState::empty(line, String::new()) };
+    panestate::view(light, &state, None)
+}
+
 fn shared_panel(app: &mut Backplane, id: &str, scope: &Value, bottom: bool, light: bool, cx: &mut Context<Backplane>) -> AnyElement {
     use crate::i18n::tf;
     let working = tf("history.workingcopy", &[]);
@@ -218,10 +227,15 @@ fn shared_panel(app: &mut Backplane, id: &str, scope: &Value, bottom: bool, ligh
     let body = if historical {
         let review = &app.data["thread"]["viewer"]["review"];
         let nodes = review["blocks"].as_array().map(Vec::as_slice).unwrap_or_default();
-        let parsed = super::md::parse(nodes);
-        div().id("comparison-bom").p_3().flex_1().min_h_0().overflow_y_scroll()
-            .children(super::timeline::blocks(cx, &app.screens.reg, light, &parsed, "comparison-bom"))
-            .when(nodes.is_empty() || review["busy"] == true, |d| d.child(div().text_color(theme::color(light, "dim")).child(trs(review["note"].as_str().unwrap_or(""))))).into_any_element()
+        if review["busy"] == true || nodes.is_empty() {
+            let busy = review["busy"] == true;
+            let line = trs(review["note"].as_str().unwrap_or(""));
+            panel_state(app, "comparison-bom", light, line, busy)
+        } else {
+            let parsed = super::md::parse(nodes);
+            div().id("comparison-bom").p_3().flex_1().min_h_0().overflow_y_scroll()
+                .children(super::timeline::blocks(cx, &app.screens.reg, light, &parsed, "comparison-bom")).into_any_element()
+        }
     } else {
         let data = app.screens.mgmt.data(id);
         if id == "checks" { super::mgmt_checks::body(app, &data, light, cx) }

@@ -632,15 +632,17 @@ impl Backplane {
         let reg = self.screens.reg.clone(); reg.borrow_mut().begin_outside(); reg.borrow_mut().app = Some(cx.entity().downgrade());
         // the Backplane KiCad update at Edit: a row of its own above the pane (screens/kicad_update.rs), only while an editor is up
         let update = if self.screens.kicad.is_some() { crate::screens::kicad_update::view(self, cx) } else { None };
+        self.screens.plotview.loading.begin_frame(self.data["thread"]["id"].as_str().unwrap_or(""));
         let review_panel = crate::screens::mgmt::review_panel(self, cx);
         let thread = &self.data["thread"];
         let editor = self.kicad_for(thread, cx);
         let el = crate::screens::viewer::page(cx, &reg, light, &self.screens.files, &self.screens.images, self.screens.attacher.target.as_ref(), thread, &self.screens.plot, &mut self.screens.plotview, &mut self.screens.split_pv, self.screens.solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b), editor.as_ref(), update, review_panel, &self.screens.mgmt.checks);
         { let rows = &self.data["thread"]["entries"]; reg.borrow_mut().resolve_by(|id| rows.as_array().and_then(|r| r.iter().position(|e| e["id"].as_str() == Some(id)))); }
         // full screen: the editor alone, without the management panels' strip under it
-        if crate::screens::viewer::KICAD_SCREEN.load(std::sync::atomic::Ordering::Relaxed) { return el }
-        // the management panels' strip and the open panel beside the design (screens/mgmt.rs)
-        crate::screens::mgmt::host(self, el, window, cx)
+        let el = if crate::screens::viewer::KICAD_SCREEN.load(std::sync::atomic::Ordering::Relaxed) { el }
+            else { crate::screens::mgmt::host(self, el, window, cx) };
+        self.screens.plotview.loading.end_frame_and_arm(cx);
+        el
     }
     /// The thread's messages, a part of the window (part.rs): a list that draws only the rows on screen.
     pub(crate) fn timeline_part(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {

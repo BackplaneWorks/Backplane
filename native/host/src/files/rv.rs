@@ -154,7 +154,10 @@ async fn checks_inputs(cli: &str, out: &str, dir: &str, home: &str, trigger: &st
     let tasks = checks::parse(or(&cl, checks::DEFAULT));
     let cmds: String = cfg.checks.iter().map(|c| format!("{}: {}\n", c.name, c.run)).collect();
     let pending_md = if ok { String::new() } else { format!("**This project's own checks wait for your OK.** `.backplane/checks.json` runs these commands; Backplane asks you in the thread before it runs them:\n\n```\n{cmds}```\n\n") };
-    J::obj(&[("err", J::Str(if ok { checks::execution(&fs) } else { WAIT_OK.into() })), ("md", J::Str(pending_md + &checks::md(&fs, &[], &runs))),
+    let markdown = if trigger == "release" {
+        checks::runs_md(&runs) + &checks::md(&fs, &[], &[])
+    } else { checks::md(&fs, &[], &runs) };
+    J::obj(&[("err", J::Str(if ok { checks::execution(&fs) } else { WAIT_OK.into() })), ("md", J::Str(pending_md + &markdown)),
         ("checklistGate", J::Flag(ok && cfg.gate.checklist)), ("otherGates", J::Str(checks::gate_all(&fs, &[], &runs, &cfg.gate))),
         ("gate", J::Str(if ok { checks::gate_all(&fs, &tasks, &runs, &cfg.gate) } else { WAIT_OK.into() })), ("line", J::Str(checks::line(&fs))), ("tasks", tasks_json(&tasks)),
         ("pending", J::Str(if ok { String::new() } else { hash })), ("pendrun", J::Str(if ok { String::new() } else { cmds }))])

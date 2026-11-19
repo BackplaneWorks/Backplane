@@ -800,7 +800,6 @@ pub fn editor_press(viewer: &Value) -> Option<String> {
 /// The panel (None while nothing is open). 520 px wide, between the thread and the rail.
 pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>, editor: Option<&Entity<crate::viewers::kicad_pane::KicadPane>>, update: Option<AnyElement>, review_panel: Option<AnyElement>, checks: &super::mgmt_checks::State) -> AnyElement {
     let shared_scroll = review_panel.is_some();
-    pv.loading.begin_frame(&string(thread, "id"));
     // KiCad itself in the pane (its Board, Schematic or 3D): its frames switch at once, and it stays until the hub moves the pane (kicad_pane.rs)
     let local = editor.is_some() && editor_local(thread);
     let Some((open, early)) = pane_page(thread, local) else { pv.loading.clear(); DRAWN.with(|d| *d.borrow_mut() = Default::default()); return Empty.into_any_element() };
@@ -891,7 +890,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         }
         else if open == "browser" { let a = acts(cx); match browser { Some(b) => in_corner(div().size_full().child(b.clone()).into_any_element(), a), None => pane_body_state(light, &super::panestate::PaneState::empty(trs("The browser page needs a connected hub."), String::new()), Some(a), None) } }
         else { let a = acts(cx); let secs = pv.loading.track_now(&format!("open:{open}")); pane_body_state(light, &super::panestate::PaneState::loading(super::panestate::loading_line(&trs("Opening…"), secs, 0)), Some(a), None) };
-    if editing { pv.loading.clear(); } else { pv.loading.end_frame_and_arm(cx); }
+    if editing { pv.loading.clear(); }
     // Keep main's exact scroll parent for the embedded editor (`editing`) and scrollable pages (Review, Diff, Mech);
     // only 3D (when not editing) joins files/image/pdf/text in omitting overflow_y_scroll so 3D's size_full() does not collapse under mgmt::host.
     if (matches!(open, "files" | "image" | "pdf" | "text" | "3d") || (shared_scroll && open == "review")) && !diff_on && !editing { div().id("viewer-body").size_full().child(body).into_any_element() } else { div().id("viewer-body").size_full().overflow_y_scroll().child(body).into_any_element() }

@@ -251,7 +251,7 @@ pub fn panel(app: &mut Backplane, d: &Value, bottom: bool, light: bool, cx: &mut
         cx.observe(&f, |_, _, cx| cx.notify()).detach();
         app.screens.mgmt.bom.filter = Some(f);
     }
-    if d.is_null() { return div().p_3().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(trs("Reading the schematic…")).into_any_element() }
+    if d.is_null() { return super::mgmt::panel_state(app, "bom", light, trs("Reading the schematic…"), true) }
     let all: Vec<Value> = d["lines"].as_array().cloned().unwrap_or_default();
     let q = filter_text(app, cx);
     let (col, desc) = (app.screens.mgmt.bom.sort, app.screens.mgmt.bom.desc);
@@ -290,7 +290,7 @@ pub fn panel(app: &mut Backplane, d: &Value, bottom: bool, light: bool, cx: &mut
             .on_click(cx.listener(move |this, _, _, cx| { let (a, b) = press((this.screens.mgmt.bom.sort, this.screens.mgmt.bom.desc), k); this.screens.mgmt.bom.sort = a; this.screens.mgmt.bom.desc = b; cx.notify(); })));
     }
     let mut list = div().id("bom-rows").track_scroll(&app.screens.mgmt.bom.scroll).flex_1().min_h_0().overflow_y_scroll().flex().flex_col().text_size(crate::scale::tpx(12.));
-    if rows.is_empty() { list = list.child(div().p_3().text_color(c("faint")).child(if all.is_empty() { trs("No parts.") } else { trs("No line matches the filter.") })); }
+    if rows.is_empty() { list = list.child(super::mgmt::panel_state(app, "bom", light, if all.is_empty() { trs("No parts.") } else { trs("No line matches the filter.") }, false)); }
     for l in rows {
         let id = s(&l, "id").to_string(); let dnp = l["dnp"] == true; let on = sel.as_deref() == Some(id.as_str());
         let refs: Vec<String> = l["refs"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
