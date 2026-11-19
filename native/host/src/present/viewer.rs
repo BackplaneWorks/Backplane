@@ -145,7 +145,7 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     // the Review tab: its first page (pages.rs asks for it; no source to watch)
     if kind == "review" {
         if sel.is_empty() || sel.contains('~') || sel.starts_with("project-home-") || sel.starts_with('@') || !st.threads.contains_key(sel) || !s(&session["drafts"], &format!("@view.file:{sel}")).is_empty() { return None }
-        let (patch, before) = pages::open_review(session, hub, sel, "bom");
+        let (patch, before) = pages::open_review(session, hub, sel, "bom", has_management(&root_of(st, sel)));
         return Some(ViewOut { patch, before, boards_look: false });
     }
     if !simple(st, session, sel) { return None }
@@ -653,6 +653,11 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
     if !sel.is_empty() && !sel.contains('~') {
         let root = root_of(st, sel);
         let sources = rail_sources(&root);
+        if (sources.board || sources.schematic) && !sources.altium && matches!(s(&v, "open"), "review" | "board" | "schematic" | "3d" | "split") {
+            let picked = board_file("board", &root, &chosen_board(&session["drafts"], sel));
+            let versions = if v["open"] == "review" { s(&session["drafts"], &format!("@rp.versions:{sel}")) } else { "" };
+            v["designPanels"] = design_panels(if picked.is_empty() { &root } else { &picked }, versions);
+        }
         if sources.altium { v["cad"] = json!("altium"); }
         if let Some(f) = crate::files::kicad::embed::rail_simulation(&root) { if let Some(o) = v.as_object_mut() { o.insert("simFrame".into(), json!(f)); } }
         let selected = v["choices"].as_array().and_then(|rows| rows.iter().find(|r| r["on"] == true)).and_then(|r| r["value"].as_str());
@@ -665,6 +670,24 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         v["rail"] = model;
     }
     Some(v)
+}
+pub(crate) fn has_management(root: &str) -> bool {
+    let files = crate::files::kicad::project::read(root);
+    !root.is_empty() && !crate::files::kicad::project::is_altium(&files)
+        && [files.pcb, files.sch].iter().any(|p| std::path::Path::new(p).is_file())
+}
+
+/// Both doors name the same live management publication. A comparison's BOM is
+/// a read-only report whose two labels come from the versions sent to review.bom.
+fn design_panels(project: &str, versions: &str) -> Value {
+    let mut panels = json!({"bom":{"project":project,"refresh":"mgmt.refresh"}, "checks":{"project":project,"refresh":"kicad.checks.run"}});
+    if let Some((old, new)) = versions.split_once('\n') {
+        let revision = |source: &str| source.strip_prefix("git\t").and_then(|s| s.split('\t').nth(1))
+            .map(|sha| sha.chars().take(8).collect::<String>()).unwrap_or_default();
+        panels["bom"]["refresh"] = json!("rv-run");
+        panels["bom"]["versions"] = json!([revision(old), revision(new)]);
+    }
+    panels
 }
 fn viewer_page(st: &State, template: &Value, session: &Value) -> Option<Value> {
     let sel = s(session, "sel");

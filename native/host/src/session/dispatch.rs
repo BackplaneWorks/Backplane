@@ -77,7 +77,10 @@ pub fn dispatch<F: Facts>(f: &F, params: &Value) -> Option<Dispatched> {
         patch::merge(&mut session, &o.session_patch); (o.cmds, o.next_target, false)
     } else if let Some(o) = thread_actions::act(f, hub, &params["session"], sel, action, value) {
         patch::merge(&mut session, &o.session_patch); (o.cmds, None, !o.look)
-    } else if let Some(o) = pages::act(hub, &params["session"], sel, action, value) {
+    } else if let Some(o) = pages::act_for(hub, &params["session"], sel, action, value, || {
+        let root = crate::files::kicad::canonical::design_root(&f.root_of(sel));
+        crate::present::viewer::has_management(&root)
+    }) {
         patch::merge(&mut session, &o.session_patch); (o.cmds, None, !o.look)
     } else if action == "select" {
         let o = select::select(f, hub, &params["session"], value)?;

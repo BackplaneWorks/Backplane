@@ -115,7 +115,7 @@ pub fn start(hub: &Arc<Hub>) { load(&hub.cfg.home); hub.register_rpc(Arc::new(Mg
 
 pub struct MgmtRpc;
 impl RpcHandler for MgmtRpc {
-    fn methods(&self) -> &'static [&'static str] { &["mgmt.watch", "mgmt.panel"] }
+    fn methods(&self) -> &'static [&'static str] { &["mgmt.watch", "mgmt.panel", "mgmt.refresh"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let err = |e: &str| vec![json!({"t":"reply","id":id,"ok":false,"error":e})];
@@ -123,6 +123,13 @@ impl RpcHandler for MgmtRpc {
             let dir = std::path::Path::new(&pro).parent().and_then(|p| p.to_str()).unwrap_or("").to_string();
             if !super::known_root(hub, &dir, "").await { return err("not in a project this hub knows") }
             let ps = all();
+            if m == "mgmt.refresh" {
+                match p["panel"].as_str() {
+                    Some("bom") => super::bompanel::refresh(hub, &pro).await,
+                    _ => return err("unknown panel"),
+                }
+                return vec![json!({"t":"reply","id":id,"ok":true,"result":{}})]
+            }
             if m == "mgmt.panel" {
                 let was = state_of(&pro);
                 let known: Vec<&str> = ps.iter().map(|x| x.id()).collect();
