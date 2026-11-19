@@ -92,7 +92,7 @@ impl Doc {
     }
     /// Every stream's path, storages walked (for diagnostics and tests).
     pub fn streams(&self) -> Vec<String> {
-        self.cf.walk().filter(|e| e.is_stream()).map(|e| e.path().to_string_lossy().trim_start_matches('/').to_string()).collect()
+        self.cf.walk().filter(|e| e.is_stream()).map(|e| write::entry_path(e.path())).collect()
     }
 }
 
