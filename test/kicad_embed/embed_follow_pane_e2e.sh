@@ -2,8 +2,8 @@
 # Follow agent in the embedded KiCad (host kicad/follow.rs `pane`, agents/design.rs). Board ecc83-pp; the agent's edits are kicad_edit
 # moves of one part (R1, C1, U1) through the hub, into the open KiCad. Each check needs the edit to have landed (saved by the editor's KiCad).
 #   P0  Follow off, Board on show: a board edit sends KiCad nothing (no SelectItems in the hub's log, KiCad's selection unchanged)
-#   P1  Follow off, Schematic on show: a board edit leaves the frame on show as it is (the edit's own view push is not sent while the
-#       page holds KiCad) and sends KiCad nothing
+#   P1  Follow off, the rail's Schematic page: a board edit leaves the frame on show as it is (the edit's own view push is not sent
+#       while the page holds KiCad; on main it switches to the Board) and sends KiCad nothing
 #   P2  Follow on, Board on show: a board edit selects the moved part in KiCad (GetSelection) and fits the view to it (the hub's
 #       SelectItems answered ok), and the frame on show stays the Board
 #   P3  Follow on, Schematic on show: a board edit sends nothing (the hub says Elsewhere: the line names the board), the Schematic stays on
@@ -34,7 +34,7 @@ ask() { local N; N="$1-$(date +%s%N)"; local before; before=$(calls)
   local text; text=$(python3 -c 'import json,sys; print(json.dumps("mcpcall:" + json.dumps({"name": sys.argv[1], "arguments": json.loads(sys.argv[2])})))' "$1" "$2")
   hub_rpc "[{\"method\":\"turn.start\",\"params\":{\"thread\":\"t1\",\"text\":$text,\"msg\":\"mcl$N\"}}]" >>"$OUT/rpc.log" 2>&1 || true
   for _ in $(seq 480); do [ "$(calls)" -gt "$before" ] && break; sleep 0.25; done; sleep 1.5
-  grep "^MCPCALL $1 " "$OUT/standin.log" | tail -1 | sed "s/^MCPCALL $1 //" | python3 -c 'import json,sys
+  { grep "^MCPCALL $1 " "$OUT/standin.log" || true; } | tail -1 | sed "s/^MCPCALL $1 //" | python3 -c 'import json,sys
 try: o=json.loads(sys.stdin.read()); print(o["result"]["content"][0]["text"].replace("\n"," "))
 except Exception as e: print("?")'; }
 # an agent's saving kicad_edit: part $1 moved by $2 mm in x
@@ -95,15 +95,16 @@ A=$(edit_move R1 0.5); echo "INFO P0 kicad_edit: $(echo "$A" | cut -c1-300)"; sl
 check "P0 the agent's board edit landed in the open KiCad" "$(landed "$A" && echo 1 || echo 0)" "$(echo "$A" | cut -c1-200)"
 check "P0 Follow off: nothing sent to KiCad (no follow call), selection unchanged" "$(since "$L" | grep -q '^follow: ' && echo 0 || ([ "$(sel pcb)" = "$S0" ] && echo 1 || echo 0))" "$(since "$L" | grep '^follow: ' | head -3) sel $S0 -> $(sel pcb)"
 
-# P1: Follow off, Schematic on show: the edit does not switch the frame
-ctl "kicad-tab:SCH" 3; F1=$(shown_frame); SS1=$(sel sch); L=$(hub_lines)
+# P1: Follow off, the rail's Schematic page: the edit's implicit view push (to the board) is not sent while the page holds KiCad, so
+# the frame does not switch (on main it opens the Board page and its frame)
+ctl "rail:Schematic" 4; person_in_chat; F1=$(shown_frame); SS1=$(sel sch); L=$(hub_lines)
 A=$(edit_move R1 -0.5); sleep 3
 check "P1 the agent's board edit landed" "$(landed "$A" && echo 1 || echo 0)" "$(echo "$A" | cut -c1-200)"
 check "P1 Follow off: the Schematic stays on show after a board edit ($F1 -> $(shown_frame))" "$([ "$F1" = SCH ] && [ "$(shown_frame)" = SCH ] && echo 1 || echo 0)"
 check "P1 Follow off: nothing sent to KiCad, the schematic's selection unchanged" "$(since "$L" | grep -q '^follow: ' && echo 0 || ([ "$(sel sch)" = "$SS1" ] && echo 1 || echo 0))" "$(since "$L" | grep '^follow: ' | head -3)"
 
 # P2: Follow on, Board on show
-ctl "kicad-tab:PCB" 3
+ctl "rail:Board" 4
 ctl "follow-agent" 2
 person_in_chat
 L=$(hub_lines)
@@ -122,7 +123,7 @@ A=$(edit_move U1 0.5); sleep 2.5
 check "P3 the agent's board edit landed" "$(landed "$A" && echo 1 || echo 0)" "$(echo "$A" | cut -c1-200)"
 check "P3 the hub decided Elsewhere and sent no SelectItems" "$(since "$L" | grep -q '^follow: Elsewhere t1' && ! since "$L" | grep -q '^follow: SelectItems' && echo 1 || echo 0)" "$(since "$L" | grep '^follow: ' | head -3 | cut -c1-300)"
 # the line under Follow agent says where the edit was (the client's drawn text, logged as it changes)
-for _ in $(seq 40); do LINE3=$(grep -o '"follow_line":"[^"]*","pane":"[^"]*"' "$OUT/client.log" | tail -1); echo "$LINE3" | grep -q '"pane":"elsewhere"' && break; sleep 0.25; done
+for _ in $(seq 40); do LINE3=$(grep -o '"follow_line":"[^"]*","pane":"[^"]*"' "$OUT/client.log" | tail -1 || true); echo "$LINE3" | grep -q '"pane":"elsewhere"' && break; sleep 0.25; done
 check "P3 the status line says the edit was on the board ($LINE3)" "$(echo "$LINE3" | grep -q '"follow_line":"Following: Board · edited U1","pane":"elsewhere"' && echo 1 || echo 0)"
 check "P3 the Schematic stays on show ($(shown_frame))" "$([ "$(shown_frame)" = SCH ] && echo 1 || echo 0)"
 check "P3 the Schematic's selection is unchanged (no cross-probe): $SS3 -> $(sel sch)" "$([ "$(sel sch)" = "$SS3" ] && echo 1 || echo 0)"
