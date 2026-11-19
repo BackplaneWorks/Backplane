@@ -770,12 +770,14 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         if let Some(f) = crate::files::kicad::embed::rail_simulation(&root) { if let Some(o) = v.as_object_mut() { o.insert("simFrame".into(), json!(f)); } }
         let selected = v["choices"].as_array().and_then(|rows| rows.iter().find(|r| r["on"] == true)).and_then(|r| r["value"].as_str());
         let page = if v["gerbers"] == true { "gerbers" } else { selected.unwrap_or_else(|| s(&v, "open")) };
-        let model = rail::rail(rail::RailInput {
+        let input = rail::RailInput {
             board: sources.board, schematic: sources.schematic, mech: sources.mech || v["mech"]["parts"].as_array().is_some_and(|p| !p.is_empty()),
             gerbers: v["hasGerbers"].as_bool().unwrap_or(sources.gerbers),
             simulation: v["simFrame"].is_string(), altium: sources.altium, page, diff: pages::diff_on(session, sel),
-        });
-        v["rail"] = model;
+        };
+        let has = json!({"board":input.board, "schematic":input.schematic, "mech":input.mech, "gerbers":input.gerbers});
+        v["rail"] = rail::rail(input);
+        v["has"] = has;
     }
     Some(v)
 }
@@ -924,7 +926,7 @@ mod tests {
         let mut s2 = session.clone(); crate::session::patch::merge(&mut s2, &o.patch);
         let v = viewer_json(&st, &template, &s2).expect("and draws it");
         assert_eq!((v["open"].as_str(), v["key"].as_str()), (Some("board"), Some("0|/desk/board|")));
-        assert!(v.get("rail").is_none(), "linked project files are on the other machine");
+        assert!(v.get("rail").is_none() && v.get("has").is_none(), "linked project files are on the other machine");
         // this machine's own thread asks for no machine
         let (mine, th) = state(); let own = json!({"sel": th, "rid": 1, "drafts": {}, "open": {}, "adding": false, "panel": false, "info": {}});
         assert!(!view_action(&mine, "h", &own, "board").unwrap().before[0]["text"].as_str().unwrap().contains("\"on\""));

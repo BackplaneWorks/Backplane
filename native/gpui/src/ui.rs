@@ -6,12 +6,12 @@ use gpui::{prelude::*, *};
 use serde_json::Value;
 
 #[derive(Default)]
-struct RailRow<'a> {
-    id: &'a str, label: &'a str, icon: &'a str, group: &'a str, key: &'a str,
-    state: &'a str, why: &'a str,
+pub(crate) struct RailRow<'a> {
+    pub id: &'a str, pub label: &'a str, icon: &'a str, group: &'a str, pub key: &'a str,
+    pub state: &'a str, why: &'a str,
 }
 
-fn rail_rows(viewer: &Value, simulation: bool) -> Vec<RailRow<'_>> {
+pub(crate) fn rail_rows(viewer: &Value, simulation: bool) -> Vec<RailRow<'_>> {
     if let Some(rows) = viewer["rail"].as_array() {
         return rows.iter().filter(|r| simulation || r["id"] != "simulation").map(|row| {
             let field = |name: &str| row[name].as_str().unwrap_or("");
@@ -20,14 +20,37 @@ fn rail_rows(viewer: &Value, simulation: bool) -> Vec<RailRow<'_>> {
         }).collect();
     }
     // Older hubs send choices and simFrame. Keep their existing rail and grouping.
-    [("terminal", "Terminal", "terminal", "tools"), ("commands", "Commands", "search", "tools"), // i18n-ok: fallback labels drawn through trs
-     ("board", "Board", "circuit-board", "design"), ("schematic", "Schematic", "cpu", "design"), // i18n-ok: fallback labels drawn through trs
-     ("3d", "3D", "box", "design"), ("simulation", "Simulation", "gauge", "design"), // i18n-ok: fallback labels drawn through trs
-     ("gerbers", "Gerbers", "file-stack", "design"), ("split", "Split", "layout-panel-left", "design"), // i18n-ok: fallback labels drawn through trs
-     ("mech", "Mech", "layers", "design"), ("files", "Files", "folder", "work"), ("diff", "Diff", "diff", "work"), // i18n-ok: fallback labels drawn through trs
-     ("review", "Review", "circle-check", "work"), ("browser", "Browser", "globe", "work")] // i18n-ok: fallback labels drawn through trs
+    [("board", "Board", "circuit-board", "design"), ("schematic", "Schematic", "cpu", "design"), // i18n-ok: fallback labels drawn through trs
+     ("3d", "3D", "box", "design"), ("gerbers", "Gerbers", "file-stack", "design"), // i18n-ok: fallback labels drawn through trs
+     ("simulation", "Simulation", "gauge", "design"), ("split", "Split", "layout-panel-left", "layout"), // i18n-ok: fallback labels drawn through trs
+     ("mech", "Mech", "wrench", "layout"), ("files", "Files", "folder", "work"), ("diff", "Diff", "diff", "work"), // i18n-ok: fallback labels drawn through trs
+     ("review", "Review", "circle-check", "work"), ("browser", "Browser", "globe", "work"), // i18n-ok: fallback labels drawn through trs
+     ("terminal", "Terminal", "terminal", "tools"), ("commands", "Commands", "search", "tools")] // i18n-ok: fallback labels drawn through trs
         .into_iter().filter(|(id, ..)| *id != "simulation" || simulation)
         .map(|(id, label, icon, group)| RailRow { id, label, icon, group, key: crate::keys::rail_letter(id), ..Default::default() }).collect()
+}
+
+pub(crate) fn rail_hint(local: &crate::local::Local, id: &str, key: &str) -> String {
+    let binding = match id { "diff" | "files" => id, "terminal" => "term", "commands" => "palette", _ => "" };
+    [key.to_uppercase(), crate::keys::hint(local, binding)].into_iter().filter(|k| !k.is_empty()).collect::<Vec<_>>().join(&format!(" {} ", trs("or")))
+}
+
+// The footer owns its rows and separator. Only the pages scroll in the remaining height.
+fn rail_layout(height: Pixels, row: Pixels, tools: usize) -> (Pixels, Pixels) {
+    let footer = if tools == 0 { px(0.) } else { (row * tools as f32 + px(1.)).min(height) };
+    (height - footer, footer)
+}
+
+fn rail_sections(pages: Vec<AnyElement>, tools: Vec<AnyElement>, rule: Rgba) -> impl IntoElement {
+    canvas(move |bounds, window, cx| {
+        let (page_h, footer_h) = rail_layout(bounds.size.height, crate::scale::tpx(48.), tools.len());
+        let mut sections = div().w(bounds.size.width).h(bounds.size.height).flex().flex_col()
+            .child(div().id("rail-pages").h(page_h).overflow_y_scroll().flex().flex_col().children(pages))
+            .when(!tools.is_empty(), |d| d.child(div().h(footer_h).flex_shrink_0().border_t_1().border_color(rule).flex().flex_col().children(tools)))
+            .into_any_element();
+        sections.prepaint_as_root(bounds.origin, bounds.size.map(AvailableSpace::Definite), window, cx);
+        sections
+    }, |_, mut sections, window, cx| sections.paint(window, cx)).size_full()
 }
 
 pub(crate) fn rail_enabled(viewer: &Value, id: &str) -> bool {
@@ -797,7 +820,8 @@ impl Render for Backplane {
         // the crumb after Backplane: the thread's project, or the project whose page is open, by name
         let crumb = match page.as_ref().and_then(|p| crate::screens::projects::find(&self.data, p)).map(|p| string(p, "title")).filter(|t| !t.is_empty()) {
             Some(t) => t, None if head_thread => { let t = string(&thread["project"], "title"); if t.is_empty() { trs("Project") } else { t } } None => trs("Projects") };
-        let mut rail: Vec<AnyElement> = Vec::new();
+        let mut rail_pages = Vec::new();
+        let mut rail_tools = Vec::new();
         // held Ctrl: each rail button's bare key in its corner (the old rail's keycaps), lit on the view on show
         let keycaps = self.screens.held == crate::keys::Held::Threads;
         let keycap = move |k: &str, lit: bool| (keycaps && !k.is_empty()).then(|| crate::screens::hints::cap(light, &k.to_uppercase(), lit).absolute().top(px(3.)).right(px(3.)));
@@ -808,9 +832,11 @@ impl Render for Backplane {
         let sim_on = sim_rail && !thread["diff"].is_object() && self.simulation_on(cx) && self.kicad_for(thread, cx).is_some();
         let mut previous_group = None;
         for row in rail_rows(&thread["viewer"], sim_rail) {
-            let block = match row.group { "layout" | "mech" => "design", group => group };
-            if previous_group.is_some_and(|group| group != block) { rail.push(div().h(px(12.)).into_any_element()); }
-            previous_group = Some(block);
+            let rail = if row.group == "tools" { &mut rail_tools } else { &mut rail_pages };
+            if row.group != "tools" && previous_group.is_some_and(|g| g != row.group) {
+                rail.push(div().h(px(12.)).flex_shrink_0().into_any_element());
+            }
+            previous_group = Some(row.group);
             let id = row.id;
             let disabled = row.state == "disabled";
             let active = !disabled && match id {
@@ -820,17 +846,27 @@ impl Render for Backplane {
                 _ => viewer_row_on(&row, self.screens.rail_pending.as_deref(), &active_kind),
             };
             let mut button = with_rect(div().id(SharedString::from(format!("rail-{}", row.label))), || format!("rail:{}", row.label))
-                .relative().flex().flex_col().items_center().h(crate::scale::tpx(48.)).justify_center().gap_1().text_size(rail_label())
+                .relative().flex().flex_col().items_center().h(crate::scale::tpx(48.)).flex_shrink_0().justify_center().gap_1().text_size(rail_label())
                 .when(active, |d| d.bg(c("raise")).border_l_2().border_color(c("accent")))
                 .text_color(c(if active { "text" } else { "dim" }))
                 .child(ic(light, art::icon_name(row.icon).unwrap_or("folder"), 18., if active { "accent" } else { "dim" })).child(trs(row.label));
             if disabled {
-                button = button.opacity(0.45).tooltip(crate::keys::tip(row.why, "", light));
+                let hovered = self.screens.rail_hover.as_deref() == Some(id);
+                let hover_id = id.to_owned();
+                button = button.opacity(0.45).on_hover(cx.listener(move |this, on: &bool, _, cx| {
+                    if *on { this.screens.rail_hover = Some(hover_id.clone()); }
+                    else if this.screens.rail_hover.as_deref() == Some(&hover_id) { this.screens.rail_hover = None; }
+                    cx.notify();
+                }));
+                if hovered {
+                    let height = crate::scale::tpx(26.);
+                    let tip = div().h(height).flex().items_center().px_2().whitespace_nowrap().bg(c("panel")).border_1().border_color(c("line")).text_color(c("text")).text_size(crate::scale::tpx(11.)).child(trs(row.why));
+                    button = button.child(div().absolute().left(px(-6.)).top((crate::scale::tpx(48.) - height) / 2.)
+                        .child(deferred(anchored().anchor(Corner::TopRight).child(tip)).with_priority(3)));
+                }
             } else {
-                let binding = match id { "diff" | "files" => id, "terminal" => "term", "commands" => "palette", _ => "" };
-                let chord = crate::keys::hint(&self.local, binding);
                 let letter = row.key;
-                let hint = [letter.to_uppercase(), chord].into_iter().filter(|k| !k.is_empty()).collect::<Vec<_>>().join(&format!(" {} ", trs("or")));
+                let hint = rail_hint(&self.local, id, letter);
                 button = button.cursor_pointer().hover(|s| s.bg(c("raise")).text_color(c("text")))
                     .tooltip(crate::keys::tip(row.label, &hint, light)).children(keycap(letter, active));
                 let action = match id {
@@ -1039,7 +1075,7 @@ impl Render for Backplane {
                 .children(crate::perf::mark("viewer"))
                 .children(crate::screens::viewer::is_open(thread).then(|| self.screens.parts.el(Backplane::viewer_part, StyleRefinement::default().flex_1().min_h_0(), cx)).and_then(|page| crate::screens::viewer::pane(cx, light, thread, page)))
                 // right rail
-                .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).children(crate::perf::mark("rail")).border_l_1().border_color(c("rule")).flex().flex_col().py_2().when(kscreen, |d| d.w(px(0.)).border_l_0().py_0().overflow_hidden()).children(rail)))
+                .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).children(crate::perf::mark("rail")).border_l_1().border_color(c("rule")).flex().flex_col().py_2().when(kscreen, |d| d.w(px(0.)).border_l_0().py_0().overflow_hidden()).when(!kscreen, |d| d.child(rail_sections(rail_pages, rail_tools, c("rule"))))))
             // the one-time telemetry notice (screens/tmnotice.rs)
             .children({ let (n, shown) = (self.screens.tm_notice.clone(), self.screens.tm_shown.clone()); crate::screens::tmnotice::strip(cx, n.as_ref(), &shown, light) })
             // the one-time notice that the hub no longer pushes on its own (#1171)
@@ -1097,9 +1133,17 @@ mod tests {
         assert_eq!((rows[0].id, rows[0].label, rows[0].state), ("files", "Project files", "on"));
         assert_eq!((rows[1].icon, rows[1].group, rows[1].key, rows[1].state, rows[1].why), ("cpu", "design", "b", "disabled", "No board"));
         assert!(rail_rows(&serde_json::json!({"rail":[]}), true).is_empty());
-        assert_eq!(rail_rows(&Value::Null, false)[0].id, "terminal");
+        assert_eq!(rail_rows(&Value::Null, false).last().unwrap().id, "commands");
     }
 
+    #[test]
+    fn short_rail_reserves_the_tools_before_allocating_scroll_space() {
+        use gpui::px;
+        for (height, pages) in [(720., 623.), (160., 63.), (97., 0.)] {
+            assert_eq!(super::rail_layout(px(height), px(48.), 2), (px(pages), px(97.)));
+        }
+        assert_eq!(super::rail_layout(px(160.), px(48.), 0), (px(160.), px(0.)));
+    }
     #[test]
     fn pending_press_lights_the_target_until_the_hub_replies() {
         let files = RailRow { id: "files", state: "on", ..Default::default() };
