@@ -19,10 +19,22 @@ async fn run(kind: Kind, cmd: &Path, args: &[&str], limit: Duration) -> Option<(
 }
 
 /// What the command `c` said within `limit`: stdin on /dev/null, killed when it runs over (kill-on-drop).
-async fn output_of(mut c: tokio::process::Command, limit: Duration) -> Option<(i32, String, String)> {
+async fn output_of(c: tokio::process::Command, limit: Duration) -> Option<(i32, String, String)> { output_or_why(c, limit).await.ok() }
+/// `output_of`, or why there is none: it did not start (the system's words), or it did not answer within `limit`.
+/// "Text file busy" is waited out: a program written a moment ago (a test's stand-in, a KiCad an update is unpacking) can still be open for
+/// writing in a child another thread just forked, for a few milliseconds (as kipc.rs and install.rs do).
+async fn output_or_why(mut c: tokio::process::Command, limit: Duration) -> Result<(i32, String, String), String> {
     c.stdin(std::process::Stdio::null()).kill_on_drop(true);
-    let out = tokio::time::timeout(limit, c.output()).await.ok()?.ok()?;
-    Some((out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned()))
+    let end = tokio::time::Instant::now() + limit; let mut tries = 0;
+    let out = loop {
+        match tokio::time::timeout_at(end, c.output()).await {
+            Err(_) => return Err(format!("it did not answer within {} s", limit.as_secs())),
+            Ok(Err(e)) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) && tries < 40 => { tries += 1; tokio::time::sleep(Duration::from_millis(25)).await }
+            Ok(Err(e)) => return Err(format!("it did not start: {e}")),
+            Ok(Ok(o)) => break o,
+        }
+    };
+    Ok((out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned()))
 }
 
 /// run, for FreeCAD: with no display and Qt offscreen (stepglb::headless)
@@ -74,10 +86,10 @@ async fn kicad_version(cli: &Path, limit: Duration) -> Value {
     let path = cli.to_string_lossy().into_owned();
     let (mut c, _home) = proc::kicad_probe_tokio(cli);
     c.arg("--version");
-    match output_of(c, limit).await {
-        Some((0, out, _)) => json!({"path": path, "version": version_of(&out), "runs": true}),
-        Some((code, _, err)) => json!({"path": path, "runs": false, "why": why(code, &err)}),
-        None => json!({"path": path, "runs": false, "why": "it did not start or did not answer"}),
+    match output_or_why(c, limit).await {
+        Ok((0, out, _)) => json!({"path": path, "version": version_of(&out), "runs": true}),
+        Ok((code, _, err)) => json!({"path": path, "runs": false, "why": why(code, &err)}),
+        Err(w) => json!({"path": path, "runs": false, "why": w}),
     }
 }
 fn why(code: i32, err: &str) -> String { let l = err.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").chars().take(120).collect::<String>(); if l.is_empty() { format!("exit code {code}") } else { format!("exit code {code}, {l}") } }
@@ -340,7 +352,7 @@ echo 10.99.0
         let start = std::time::Instant::now();
         let v = kicad_version(&cli, Duration::from_secs(2)).await;
         assert!(start.elapsed() < Duration::from_secs(8), "bounded: {:?}", start.elapsed());
-        assert_eq!((v["runs"].clone(), v["why"].clone()), (json!(false), json!("it did not start or did not answer")), "{v}");
+        assert_eq!((v["runs"].clone(), v["why"].clone()), (json!(false), json!("it did not answer within 2 s")), "{v}");
         let given = std::fs::read_to_string(&log).unwrap(); let f: Vec<&str> = given.split_whitespace().collect();
         let pid = f[0];
         // (reaped by the runtime: it has to run between the looks)
