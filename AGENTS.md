@@ -55,7 +55,7 @@ Every build, test and gate runs on our own machines. GitHub Actions is the fallb
 ## Rules
 
 - Stand-in agents only in tests: set `BACKPLANE_AGENTS=<dir>` (the stand-ins go first on PATH; a missing CLI is blocked, never the real one). Real model turns only on temp homes, with the person's go.
-- **A paid API key (the vault's `openai-test-api-key`) runs Codex only through `scripts/codex-apikey.sh`**: it pins the cheapest model (`gpt-5-nano`), refuses any other, and allows one short turn per run. The hub strips API-key variables from every Codex it starts.
+- **Testing only: a paid API key (the vault's `openai-test-api-key`) runs Codex only through `scripts/codex-apikey.sh`**: it pins the cheapest model (`gpt-5-nano`), refuses any other, and allows one short turn per run. A hub on stand-in agents (`BACKPLANE_AGENTS`) keeps inherited OpenAI key variables from its Codex children. Users' own Codex auth (ChatGPT sign-in, `codex login --with-api-key`, `OPENAI_API_KEY`, custom providers and base URLs) is never touched.
 - Never write to live user data (`~/.backplane*`, `~/.local/share/backplane`). Tests use a temp home, a port 3799+ and `--no-tailscale`. A hub on a copy of a real log runs with `BACKPLANE_COPY=1` (`docs/COPY-GUARD.md`); it starts no turn the person did not send there, whatever `restart.continue` says (gate 5).
 - **The repo is public: never put a real person's name, email, account label or home folder in code, tests, docs or fixtures**, even copied from a live log. Use placeholders (`person@example.com`, Alex, Sam, `/home/user`).
 - Never run the installed `backplane`/`backplane-hub` to probe it; ask `/hello`.
