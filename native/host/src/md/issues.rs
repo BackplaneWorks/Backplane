@@ -36,7 +36,9 @@ pub fn pieces(s: &str, repo: &str) -> Vec<Piece> {
                 // OWNER/REPO just before it, or nothing (a word before the # is not a reference)
                 let mut k = i; while k > from && (cs[k - 1].is_ascii_alphanumeric() || matches!(cs[k - 1], '-' | '_' | '.' | '/')) { k -= 1 }
                 let named: String = cs[k..i].iter().collect();
-                let start = if named.is_empty() { (opens(if i == 0 { None } else { Some(cs[i - 1]) })).then_some((i, repo.to_string())) }
+                // a list of references (`#1198/#1172`): the `/` after a reference's number does not make the next a path's
+                let listed = named == "/" && k == from && from > 0 && cs[from - 1].is_ascii_digit(); // right after the previous reference
+                let start = if named.is_empty() || listed { (listed || opens(if i == 0 { None } else { Some(cs[i - 1]) })).then_some((i, repo.to_string())) }
                     else { named.split_once('/').filter(|(o, r)| owner_ok(o) && repo_ok(r) && opens(if k == 0 { None } else { Some(cs[k - 1]) })).map(|(o, r)| (k, format!("{o}/{r}"))) };
                 if let Some((at, r)) = start.filter(|(_, r)| !r.is_empty()) {
                     if at > from { out.push(Piece::Text(cs[from..at].iter().collect())) }
@@ -88,6 +90,7 @@ mod tests {
         assert_eq!(refs("fixes #1163."), vec![one("#1163", R, 1163)]);
         assert_eq!(refs("#7 and (#12), see other/thing#3"), vec![one("#7", R, 7), one("#12", R, 12), one("other/thing#3", "other/thing", 3)]);
         assert_eq!(refs("BackplaneWorks/Backplane#1124: merged"), vec![one("BackplaneWorks/Backplane#1124", R, 1124)]);
+        assert_eq!(refs("#1198/#1172 and #1228/#1233."), vec![one("#1198", R, 1198), one("#1172", R, 1172), one("#1228", R, 1228), one("#1233", R, 1233)]);
         assert_eq!(url(R, 1163), "https://github.com/BackplaneWorks/Backplane/issues/1163");
         let p = pieces("see #5 now", R);
         assert_eq!(p, vec![Piece::Text("see ".into()), Piece::Issue("#5".into(), R.into(), 5), Piece::Text(" now".into())]);
