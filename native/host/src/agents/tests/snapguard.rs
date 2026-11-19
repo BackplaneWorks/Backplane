@@ -170,3 +170,27 @@ async fn turn(hub: &Arc<Hub>, text: &str) -> Vec<Value> {
     assert!(ev.iter().any(|e| turn_is(e, "completed")), "the turn ran: {ev:?}");
     ag.shutdown();
 }
+
+/// #1233, #1246: a snapshot that takes long (a big folder, a slow disk, Windows) holds the agent for at most the wait, never the whole snapshot.
+/// Here the repository's lock is held, so the snapshot cannot finish until the test lets go: the turn must still start and complete, and the
+/// snapshot's reference must appear once the lock is free.
+#[tokio::test(flavor = "multi_thread")] async fn a_slow_snapshot_does_not_hold_the_turn_past_the_wait() {
+    let bin = dir("sg-slow-bin"); script(&bin, "claude", DOER);
+    let (hub, ag, _home, work) = start("sg-slow", |w| {
+        std::fs::write(w.join("a.txt"), "one\n").unwrap();
+        git_out(w, &["init", "-q", "-b", "main"]); git_out(w, &["add", "."]); git_out(w, &["commit", "-qm", "mine"]);
+        base_log(w, 1, "") }, |_| Cli::standin(&bin)).await;
+    hub.commit(&json!({"$":"SettingSet","key":"snap.wait.ms","value":"300","at":1700000050})).await.unwrap();
+    let top = sn::top_of(&work.to_string_lossy()).await.unwrap();
+    let lock = sn::repo_lock(&top).await;
+    let t0 = std::time::Instant::now();
+    let ev = tokio::time::timeout(Duration::from_secs(20), turn(&hub, "hello")).await.expect("the turn ran while the snapshot waited");
+    assert!(t0.elapsed() < Duration::from_secs(10), "the turn started and ended in {:?}", t0.elapsed());
+    assert!(ev.iter().any(|e| turn_is(e, "completed")), "{ev:?}");
+    assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["summary"].as_str().is_some_and(|s| s.contains("taking more than"))), "said: {ev:?}");
+    assert!(sn::snaps(&top, T1).await.is_empty(), "the snapshot is still waiting for the lock");
+    drop(lock);
+    for _ in 0..100 { if !sn::snaps(&top, T1).await.is_empty() { break } tokio::time::sleep(Duration::from_millis(100)).await }
+    assert_eq!(sn::snaps(&top, T1).await.len(), 1, "the snapshot finished after the lock was free");
+    ag.shutdown();
+}
