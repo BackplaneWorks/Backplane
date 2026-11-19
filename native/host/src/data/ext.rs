@@ -498,12 +498,25 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
             "viewer.files" => { let root = crate::files::kicad::canonical::design_root(&root_of(hub, th).await?); let f = crate::files::kicad::project::read(&root);
                 let bd = f.pcb.strip_prefix(&format!("{root}/")).unwrap_or("").to_string();
                 let list = crate::files::kicad::boards::pick(&crate::files::kicad::boards::find(std::path::Path::new(&root)), &bd);
-                Ok(json!({"root":root,"pro":f.pro,"pcb":f.pcb,"sch":f.sch,"boards":machines::board_rows(&root, &list, &bd)})) }
+                let has_gerbers = crate::files::kicad::gerber::default_set(std::path::Path::new(&root)).is_some();
+                Ok(json!({"root":root,"pro":f.pro,"pcb":f.pcb,"sch":f.sch,"boards":machines::board_rows(&root, &list, &bd),"hasGerbers":has_gerbers})) }
             "viewer.watch" => {
                 // the design's folder, as viewer.files answers it: a hardware thread working in a code worktree has no board there
-                let root = crate::files::kicad::canonical::design_root(&root_of(hub, th).await?); let kind = s(p, "kind"); let path = s(p, "path");
-                if path.split('/').any(|x| x == "..") || path.contains('\0') { return Err(err("that path is not in this project")) }
-                let path = if path.is_empty() || crate::plat::fs::is_abs(path) { path.to_string() } else { format!("{root}/{path}") };
+                let root = crate::files::kicad::canonical::design_root(&root_of(hub, th).await?); let raw_kind = s(p, "kind"); let raw_path = s(p, "path");
+                if raw_path.split('/').any(|x| x == "..") || raw_path.contains('\0') { return Err(err("that path is not in this project")) }
+                let (kind, path) = if raw_kind == "gerbers" {
+                    let set = if raw_path.is_empty() {
+                        crate::files::kicad::gerber::default_set(std::path::Path::new(&root)).ok_or_else(|| err("no Gerbers in this project"))?.to_string_lossy().into_owned()
+                    } else {
+                        let full = if crate::plat::fs::is_abs(raw_path) { raw_path.to_string() } else { format!("{root}/{raw_path}") };
+                        if !full.starts_with(&format!("{root}/")) { return Err(err("that path is not in this project")) }
+                        full
+                    };
+                    ("board", set)
+                } else {
+                    let path = if raw_path.is_empty() || crate::plat::fs::is_abs(raw_path) { raw_path.to_string() } else { format!("{root}/{raw_path}") };
+                    (raw_kind, path)
+                };
                 let mut q = machines::on_link(json!({"kind":kind,"root":root,"path":path}), th);
                 if !s(p, "tree").is_empty() { q["tree"] = p["tree"].clone() }
                 if !s(p, "kept").is_empty() { q["kept"] = p["kept"].clone() }

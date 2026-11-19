@@ -65,10 +65,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -858,5 +858,62 @@ async fn viewer_rail_returns_hub_rail_for_local_and_far_threads() {
         let bad = ask(&mut ws, 10 + i as u64, "viewer.rail", json!({"thread":th,"page":"board"})).await;
         assert_eq!(bad["ok"], false, "expected refusal for thread {th}, got {bad}");
     }
+    drop(hub);
+}
+
+#[tokio::test]
+async fn viewer_gerbers_files_and_watch() {
+    struct WatchSpy(Arc<Mutex<Vec<Value>>>);
+    impl RpcHandler for WatchSpy {
+        fn methods(&self) -> &'static [&'static str] { &["kicad.watch"] }
+        fn call<'a>(&'a self, _h: &'a Arc<Hub>, _w: &'a Caller, id: &'a Value, _m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
+            self.0.lock().unwrap().push(p.clone());
+            let key = format!("0|{}|{}", s(p, "root"), s(p, "path"));
+            Box::pin(async move { vec![json!({"t":"reply","id":id,"ok":true,"result":{"keys":[key]}})] })
+        }
+    }
+
+    let proj = crate::plat::tmp::dir("viewer-gerbers");
+    let root = proj.to_string_lossy().into_owned();
+    let more = format!(
+        "{}\n{}\n",
+        json!({"$":"ProjectCreated","id":"pg","title":"gerb","root":root,"at":1700000040}),
+        json!({"$":"ThreadCreated","id":"tg","project":"pg","title":"Gerb","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000041}),
+    );
+    let (hub, port) = up_with("viewer-gerbers", &more).await;
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    hub.register_rpc(Arc::new(WatchSpy(seen.clone())));
+
+    let mut ws = open(port, "&enc=json").await;
+    let hello = next(&mut ws).await;
+    assert!(hello["features"].as_array().unwrap().iter().any(|f| f == "gerbers"));
+
+    // Without Gerbers: viewer.files reports hasGerbers=false, viewer.watch kind="gerbers" errors
+    let f0 = ask(&mut ws, 1, "viewer.files", json!({"thread":"tg"})).await;
+    assert_eq!(f0["ok"], true);
+    assert_eq!(f0["result"]["hasGerbers"], false);
+    let w0 = ask(&mut ws, 2, "viewer.watch", json!({"thread":"tg","kind":"gerbers"})).await;
+    assert_eq!(w0["ok"], false);
+    assert_eq!(w0["error"], "no Gerbers in this project");
+
+    // With Gerbers under gerbers/: viewer.files reports hasGerbers=true, viewer.watch resolves kind="board" + default set
+    let gdir = proj.join("gerbers");
+    std::fs::create_dir_all(&gdir).unwrap();
+    std::fs::write(gdir.join("board-F_Cu.gbr"), "G04 test*\nM02*\n").unwrap();
+    let f1 = ask(&mut ws, 3, "viewer.files", json!({"thread":"tg"})).await;
+    assert_eq!(f1["ok"], true);
+    assert_eq!(f1["result"]["hasGerbers"], true);
+
+    let w1 = ask(&mut ws, 4, "viewer.watch", json!({"thread":"tg","kind":"gerbers"})).await;
+    assert_eq!(w1["ok"], true, "{w1}");
+    let expected_set = gdir.to_string_lossy().into_owned();
+    let calls = seen.lock().unwrap().clone();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0]["kind"], "board");
+    assert_eq!(calls[0]["path"], expected_set);
+
+    // Path outside project is refused
+    let w_bad = ask(&mut ws, 5, "viewer.watch", json!({"thread":"tg","kind":"gerbers","path":"/etc/passwd"})).await;
+    assert_eq!(w_bad["ok"], false);
     drop(hub);
 }
