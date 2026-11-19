@@ -12,6 +12,8 @@ same hub that GitHub would build.
 | --- | --- | --- | --- |
 | `RELEASE_MAC_RUNNER` | build and smoke darwin-arm64 | `bp-mac` (the Mac mini, `~/bp-runner`) | macos-latest |
 | `RELEASE_WIN_RUNNER` | build and smoke windows-x64 | `bp-win-nightly` (bp-win, `C:\actions-runner`) | windows-latest |
+| | build windows-x64 (not a nightly) | `bp-winbuild-release` (bp-winbuild, 32 cores; `release-dispatch.sh` starts it under `winbuild-vm`) | windows-latest |
+| `RELEASE_LINUX_RUNNER` | build linux-x64 | `bp-linux-release` (an ubuntu:22.04 container, `scripts/ci-linux/up.sh`, on the Boat box named in `~/.config/bp-ci/linux-box`) | ubuntu-22.04 |
 
 A `RELEASE_*` variable applies to every run while it is set: tags, dry runs and nightlies. It comes ahead of the `NIGHTLY_*` ones (docs/nightly.md), which
 apply only to nightlies. linux-x64 (ubuntu-22.04, so the archive keeps glibc 2.35), linux-arm64 (ubuntu-22.04-arm; we have no ARM machine) and android
@@ -23,6 +25,13 @@ them once its jobs are done:
     gh variable delete RELEASE_MAC_RUNNER -R BackplaneWorks/Backplane; gh variable delete RELEASE_WIN_RUNNER -R BackplaneWorks/Backplane
 
 If a variable is set and its runner is offline, the job waits in the queue (up to 24 hours) and never falls back to GitHub. Start the machine and its runner first.
+
+Run a release through `scripts/release-dispatch.sh dispatch` (a dry run) or `watch RUN_ID` (a tag push): GitHub cannot start a deallocated VM or the
+mini's runner, and the script brings each named machine up under its lock and stops it after. Check first with
+`gh api repos/BackplaneWorks/Backplane/actions/runners`; on 2026-11-19 all four runners were offline, as they are between releases.
+
+Pre-merge gates never run on these runners (the guards below refuse pull requests). They run as scripts on our machines: `scripts/land.sh` on the
+desktop, `scripts/mac-build.sh` on the mini, `scripts/winbuild-kicad.sh` on bp-winbuild (AGENTS.md, "Builds and gates").
 
 ## Every self-hosted runner refuses all but the release and the nightly
 
@@ -36,6 +45,7 @@ machine, so no workflow or pull request can change it. A non-zero exit fails the
 | `.github/workflows/nightly.yml@refs/heads/main` | schedule, workflow_dispatch (it calls release.yml; the ref stays nightly.yml's) |
 | `.github/workflows/release.yml@refs/tags/v…` | push (a tag release) |
 | `.github/workflows/release.yml@refs/heads/main` | workflow_dispatch (a dry run) |
+| `.github/workflows/release.yml@refs/heads/release/<name>` | workflow_dispatch (a release-branch dry run; dispatch needs write access, the same trust as main) |
 
 It refuses everything else: pull_request and pull_request_target (whatever their branch), other workflows, other branches, a ref with anything but
 `[A-Za-z0-9._/@-]` in it. The rules live in `scripts/runner-guard.sh` (macOS: copied to `~/bp-runner/runner-guard.sh`) and in `scripts/runner-guard.ps1`
@@ -46,7 +56,7 @@ It refuses everything else: pull_request and pull_request_target (whatever their
 ## The machines
 
 **bp-win** (Azure VM, 4 vCPU, 16 GB). Runner `bp-win` (label `bp-win-nightly`) in `C:\actions-runner`, started at logon by the scheduled task
-`GitHubActionsRunner`. The VM is deallocated every day at 07:00 UTC; start it with `az vm start -g BP-WIN-RG -n bp-win` and give it a minute. Its Windows
+`GitHubActionsRunner`. The VM is deallocated every day at 07:00 UTC (its DevTestLab auto-shutdown), and by its idle watchdog after 30 minutes with nothing running: no ssh, RDP, session-agent or runner job, no GUI test process (Backplane, KiCad, python), no copy, nothing new under `C:\bp`, no hold, and the desktop holds it while `bp-win-ui` is held ([winbuild-vm.md](winbuild-vm.md)); start it with `az vm start -g BP-WIN-RG -n bp-win` and give it a minute. For a release window whose Windows jobs it takes, hold it: `scripts/winvm/winvm-hold.sh bp-win 6h`. Windows KiCad builds no longer run here: they run on bp-winbuild. Its Windows
 Update active hours are 05:00 to 23:00 UTC: outside them an update can restart it mid-build, as one nightly found. The job then fails, and its run is started
 again. It has no Chocolatey; the build takes CMake and Ninja from Visual Studio, and Git's `usr\bin` goes ahead of System32 (release.yml).
 

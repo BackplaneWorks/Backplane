@@ -15,7 +15,8 @@ repo=BackplaneWorks/Backplane; here=$(cd "$(dirname "$0")" && pwd)
 mode=${1:?usage: release-dispatch.sh dispatch [--ref REF] [-f k=v ...] | watch RUN_ID}; shift
 var() { gh variable get "$1" -R "$repo" 2>/dev/null || true; }
 # the variables, or the same names in the environment (a branch's test run, where the workflow takes the labels as inputs)
-win=${RELEASE_WIN_RUNNER-$(var RELEASE_WIN_RUNNER)}; mac=${RELEASE_MAC_RUNNER-$(var RELEASE_MAC_RUNNER)}
+win=${RELEASE_WIN_RUNNER-$(var RELEASE_WIN_RUNNER)}; mac=${RELEASE_MAC_RUNNER-$(var RELEASE_MAC_RUNNER)}; lin=${RELEASE_LINUX_RUNNER-$(var RELEASE_LINUX_RUNNER)}
+box=$(cat "$HOME/.config/bp-ci/linux-box" 2>/dev/null || true)
 
 # the job "build <target>" of run $1: its status (queued, in_progress, completed) or "none"
 job_status() { gh run view "$1" -R "$repo" --json jobs -q ".jobs[] | select(.name == \"build $2\") | .status" 2>/dev/null | head -1 | grep . || echo none; }
@@ -55,9 +56,18 @@ if [ "$win" = bp-winbuild-release ]; then
 fi
 if [ "$mac" = bp-mac ]; then
   "$here/bp-lock.sh" mac-heavy -- bash -c '
-    ssh -o BatchMode=yes hs-mac-mini "cd ~/bp-runner && df -h ~ | tail -1 && nohup ./run.sh >> runner.log 2>&1 < /dev/null & echo \$! > runner.pid" && echo "release-dispatch: mini runner up"
+    ssh -o BatchMode=yes hs-mac-mini "cd ~/bp-runner && df -h ~ | tail -1 && perl -MPOSIX -e \"setsid(); exec @ARGV\" ./run.sh >> runner.log 2>&1 < /dev/null & echo \$! > runner.pid" && echo "release-dispatch: mini runner up"
     "$1" _wait "$2" darwin-arm64; r=$?
-    ssh -o BatchMode=yes hs-mac-mini "cd ~/bp-runner && kill \$(cat runner.pid) 2>/dev/null; rm -f runner.pid"; echo "release-dispatch: mini runner stopped"; exit $r' _ "$0" "$run" &
+    ssh -o BatchMode=yes hs-mac-mini "cd ~/bp-runner && p=\$(cat runner.pid 2>/dev/null) && [ -n \"\$p\" ] && kill -TERM -- -\$p; rm -f runner.pid"; echo "release-dispatch: mini runner stopped"; exit $r' _ "$0" "$run" &
+  pids+=($!)
+fi
+if [ "$lin" = bp-linux-release ] && [ -n "$box" ]; then
+  "$here/bp-lock.sh" linux-release -- bash -c '
+    boat --no-update resume "$1" >/dev/null 2>&1 || true
+    for _ in $(seq 60); do boat --no-update ssh "$1" -- "docker start bp-linux-release-runner >/dev/null 2>&1; docker ps -q -f name=bp-linux-release-runner" 2>/dev/null | grep -q . && break; sleep 10; done
+    echo "release-dispatch: linux runner box $1 up"
+    "$2" _wait "$3" linux-x64; r=$?
+    boat --no-update stop "$1" >/dev/null 2>&1 && echo "release-dispatch: linux runner box $1 stopped"; exit $r' _ "$box" "$0" "$run" &
   pids+=($!)
 fi
 rc=0; for p in "${pids[@]}"; do wait "$p" || rc=1; done

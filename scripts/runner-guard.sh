@@ -5,7 +5,7 @@
 # its steps runs, and the hook lives on the runner, where no workflow can change it. (docs/release-runners.md)
 #   nightly.yml on main, from its schedule or by hand (it calls release.yml: GITHUB_WORKFLOW_REF stays nightly.yml's)
 #   release.yml on a v* tag, from the tag's push
-#   release.yml on main, by hand (a dry run)
+#   release.yml on main or a release/<name> branch, by hand (a dry run; workflow_dispatch needs write access, the same trust as main)
 r=${GITHUB_WORKFLOW_REF:-}; e=${GITHUB_EVENT_NAME:-}; w=BackplaneWorks/Backplane/.github/workflows
 [ "${GITHUB_REPOSITORY:-}" = BackplaneWorks/Backplane ] || { echo "refused: repository ${GITHUB_REPOSITORY:-?}" >&2; exit 1; }
 ok=; ro=
@@ -13,9 +13,9 @@ ok=; ro=
 [ ! -e "$(dirname "$0")/runner-guard.release-only" ] || ro=1
 case "$r" in *[!A-Za-z0-9._/@-]*) ;;   # a ref with anything else in it (a space, a glob) is refused outright
   "$w/nightly.yml@refs/heads/main") [ -n "$ro" ] || case "$e" in schedule|workflow_dispatch) ok=1;; esac;;
-  "$w/release.yml@refs/heads/main") [ "$e" = workflow_dispatch ] && ok=1;;
+  "$w/release.yml@refs/heads/main"|"$w/release.yml@refs/heads/release/"?*) [ "$e" = workflow_dispatch ] && ok=1;;
   "$w/release.yml@refs/tags/v"?*) [ "$e" = push ] && ok=1;;
 esac
 [ -z "$ok" ] || exit 0
-echo "this runner takes only nightly.yml and release.yml from main or a v* tag: ${e:-?} ${r:-?} refused" >&2
+echo "this runner takes only nightly.yml and release.yml from main, a release/* branch (by hand) or a v* tag: ${e:-?} ${r:-?} refused" >&2
 exit 1
