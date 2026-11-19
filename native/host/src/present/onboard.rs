@@ -401,10 +401,10 @@ fn kicad_row(f: &Facts, pkg: Option<&crate::files::kicad::install::Package>) -> 
             if kept > 0 && total > 0 { r["progress"] = json!(((kept.min(total) as f64 / total as f64) * 1000.).round() / 1000.); }
             r
         }
-        // the update: the installed version (its path is in Settings, CAD), what the new one adds over it, from what it lacks
+        // the update: the installed version (its path is in Settings, CAD), what the new one adds over it, from what it lacks, on the platform of the package offered
         Action::Offer if status == "ok" => {
             let have: Vec<&str> = i("kicad.caps").split(',').filter(|c| !c.is_empty()).collect();
-            let why = crate::files::kicad::install::update_reason(&have, i("kicad.version")).map_or(String::new(), |w| format!(" {w}"));
+            let why = { use crate::files::kicad::install as ki; let os = pkg.map_or(ki::this_os(), |p| if p.platform.starts_with("darwin") { "macos" } else if p.platform.starts_with("windows") { "windows" } else { "linux" }); ki::update_reason_os(&have, i("kicad.version"), os, pkg.is_some_and(ki::to13)) }.map_or(String::new(), |w| format!(" {w}"));
             let r = yourself(row("KiCad", &format!("Backplane KiCad{} is installed; Backplane KiCad{} is out.{why}", v(version), v(pkg.map_or("", |p| p.version))), vec![btn("Update KiCad", "ob-kicad-install", "", true)]));
             r
         }
