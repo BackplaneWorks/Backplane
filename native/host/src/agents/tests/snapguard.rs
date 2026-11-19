@@ -197,50 +197,73 @@ async fn turn(hub: &Arc<Hub>, text: &str) -> Vec<Value> {
     ag.shutdown();
 }
 
-/// #1233, #1246: a snapshot that takes long (a big folder, a slow disk, Windows) holds the agent for at most the wait, never the whole snapshot.
-/// Here the repository's lock is held, so the snapshot cannot finish until the test lets go: the turn must still start and complete, and the
-/// snapshot's reference must appear once the lock is free.
-#[tokio::test(flavor = "multi_thread")] async fn a_slow_snapshot_does_not_hold_the_turn_past_the_wait() {
+/// #1233, #1246, #1163: a slow snapshot (here the repository's lock is held, so it cannot finish) holds the agent back, so nothing the agent's own tools
+/// write (the stand-in writes a.txt directly, as Claude's Edit or a shell `sed -i` does) can be in the snapshot; the thread says it is waiting;
+/// and /restore brings the pre-turn content back.
+#[tokio::test(flavor = "multi_thread")] async fn a_slow_snapshot_holds_the_agent_back_and_restore_brings_back_the_pre_turn_content() {
     let bin = dir("sg-slow-bin"); script(&bin, "claude", DOER);
     let (hub, ag, _home, work) = start("sg-slow", |w| {
         std::fs::write(w.join("a.txt"), "one\n").unwrap();
         git_out(w, &["init", "-q", "-b", "main"]); git_out(w, &["add", "."]); git_out(w, &["commit", "-qm", "mine"]);
         base_log(w, 1, "") }, |_| Cli::standin(&bin)).await;
-    hub.commit(&json!({"$":"SettingSet","key":"snap.wait.ms","value":"300","at":1700000050})).await.unwrap();
     let top = sn::top_of(&work.to_string_lossy()).await.unwrap();
     let lock = sn::repo_lock(&top).await;
-    let t0 = std::time::Instant::now();
-    let ev = tokio::time::timeout(Duration::from_secs(20), turn(&hub, "hello")).await.expect("the turn ran while the snapshot waited");
-    assert!(t0.elapsed() < Duration::from_secs(10), "the turn started and ended in {:?}", t0.elapsed());
-    assert!(ev.iter().any(|e| turn_is(e, "completed")), "{ev:?}");
-    assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["summary"].as_str().is_some_and(|s| s.contains("taking more than"))), "said: {ev:?}");
-    assert!(sn::snaps(&top, T1).await.is_empty(), "the snapshot is still waiting for the lock");
+    let from = len(&hub).await;
+    let h2 = hub.clone();
+    let send = tokio::spawn(async move { rpc(&h2, "turn.start", json!({"thread":T1,"text":"please edit the notes"})).await });
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert_eq!(std::fs::read_to_string(work.join("a.txt")).unwrap(), "one\n", "the agent has not run");
+    assert!(!work.join("new.txt").exists());
+    let ev = log_from(&hub, from).await;
+    assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["summary"].as_str().is_some_and(|s| s.starts_with("Taking a snapshot of the project"))), "said: {ev:?}");
+    assert!(!ev.iter().any(|e| turn_is(e, "completed")), "the turn waits for its snapshot");
     drop(lock);
-    for _ in 0..100 { if !sn::snaps(&top, T1).await.is_empty() { break } tokio::time::sleep(Duration::from_millis(100)).await }
-    assert_eq!(sn::snaps(&top, T1).await.len(), 1, "the snapshot finished after the lock was free");
+    assert_eq!(send.await.unwrap()["ok"], true);
+    until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed") || turn_is(e, "failed"))).await;
+    assert_eq!(git_out(&work, &["show", &format!("{}:a.txt", sn::snap_ref(T1, 1))]), "one\n", "the snapshot is of the state before the agent wrote");
+    assert_eq!(std::fs::read_to_string(work.join("a.txt")).unwrap(), "agent\n");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(rpc(&hub, "turn.start", json!({"thread":T1,"text":"/restore"})).await["ok"], true);
+    assert_eq!(std::fs::read_to_string(work.join("a.txt")).unwrap(), "one\n", "restored to the pre-turn content");
     ag.shutdown();
 }
 
-/// The snapshot that outlasts the wait is still a snapshot from before the turn: a write through the hub (what the agent's kicad_edit and files_*
-/// calls do) waits for it, so the agent's edit cannot be in it, and /restore brings back the state before the turn.
-#[tokio::test(flavor = "multi_thread")] async fn a_write_during_a_late_snapshot_waits_and_is_not_in_the_snapshot() {
-    let bin = dir("sg-late-bin"); script(&bin, "claude", DOER);
-    let (hub, ag, _home, work) = start("sg-late", |w| {
-        std::fs::write(w.join("a.txt"), "one\n").unwrap();
-        git_out(w, &["init", "-q", "-b", "main"]); git_out(w, &["add", "."]); git_out(w, &["commit", "-qm", "mine"]);
+/// The snapshot is incremental: a second one over the same folder hashes only what changed (its private index keeps the stat data), so it is far quicker
+/// than the first, and still holds every change.
+#[tokio::test(flavor = "multi_thread")] async fn a_second_snapshot_is_incremental_and_still_complete() {
+    let d = crate::plat::tmp::dir("snap-incr"); let w = d.path().to_path_buf();
+    std::fs::create_dir_all(w.join("data")).unwrap();
+    for i in 0..400 { let mut b = vec![5u8; 200 * 1024]; b[..8].copy_from_slice(&(i as u64).to_le_bytes()); std::fs::write(w.join("data").join(format!("f{i}.bin")), b).unwrap(); }
+    git_out(&w, &["init", "-q", "-b", "main"]); std::fs::write(w.join("a.txt"), "one\n").unwrap();
+    let top = w.to_string_lossy().into_owned();
+    let t = std::time::Instant::now(); let s1 = sn::snapshot(&top, T1, &sn::snap_ref(T1, 1), "m1", false).await.unwrap(); let first = t.elapsed();
+    std::fs::write(w.join("a.txt"), "two\n").unwrap(); std::fs::write(w.join("data/f3.bin"), vec![1u8; 1000]).unwrap();
+    let t = std::time::Instant::now(); let s2 = sn::snapshot(&top, T1, &sn::snap_ref(T1, 2), "m2", false).await.unwrap(); let second = t.elapsed();
+    assert!(s1.made && s2.made);
+    assert_eq!(git_out(&w, &["show", &format!("{}:a.txt", sn::snap_ref(T1, 2))]), "two\n");
+    assert_eq!(git_out(&w, &["cat-file", "-s", &format!("{}:data/f3.bin", sn::snap_ref(T1, 2))]).trim(), "1000");
+    assert_eq!(git_out(&w, &["cat-file", "-s", &format!("{}:data/f9.bin", sn::snap_ref(T1, 2))]).trim(), (200 * 1024).to_string());
+    eprintln!("snapshot of 80 MB: first {first:?}, second {second:?}");
+    assert!(second < first, "the second snapshot ({second:?}) is quicker than the first ({first:?})");
+}
+
+/// #1246 measurement (by hand: `--ignored --nocapture`): send to first agent output on a large project folder, first turn then second.
+#[tokio::test(flavor = "multi_thread")] #[ignore] async fn measure_send_to_first_output() {
+    let bin = dir("sg-m-bin"); script(&bin, "claude", DOER);
+    let (hub, ag, _home, work) = start("sg-m", |w| {
+        for i in 0..20 { std::fs::write(w.join(format!("b{i}.kicad_pcb")), board(2000)).unwrap(); }
+        std::fs::create_dir_all(w.join("data")).unwrap();
+        for i in 0..2500 { let mut b = vec![7u8; 100 * 1024]; b[..8].copy_from_slice(&(i as u64).to_le_bytes()); std::fs::write(w.join("data").join(format!("f{i}.bin")), b).unwrap(); }
+        for i in 0..3 { let mut b = vec![9u8; 40 * 1024 * 1024]; b[..8].copy_from_slice(&(i as u64).to_le_bytes()); std::fs::write(w.join(format!("big{i}.dat")), b).unwrap(); }
+        if std::env::var("BP_M_REPO").is_ok() { git_out(w, &["init", "-q", "-b", "main"]); git_out(w, &["add", "b0.kicad_pcb"]); git_out(w, &["commit", "-qm", "mine"]); }
         base_log(w, 1, "") }, |_| Cli::standin(&bin)).await;
-    hub.commit(&json!({"$":"SettingSet","key":"snap.wait.ms","value":"300","at":1700000050})).await.unwrap();
-    let top = sn::top_of(&work.to_string_lossy()).await.unwrap();
-    let lock = sn::repo_lock(&top).await;
-    turn(&hub, "hello").await; // the agent ran while the snapshot waited
-    let file = work.join("a.txt");
-    let (ag2, f2) = (ag.clone(), file.clone());
-    let write = tokio::spawn(async move { ag2.write_guard(T1, &f2.to_string_lossy()).await.unwrap(); std::fs::write(&f2, "agent\n").unwrap(); });
-    tokio::time::sleep(Duration::from_millis(1000)).await;
-    assert!(!write.is_finished(), "the write waits for the turn's snapshot");
-    assert_eq!(std::fs::read_to_string(&file).unwrap(), "one\n");
-    drop(lock);
-    tokio::time::timeout(Duration::from_secs(20), write).await.expect("the write went ahead once the snapshot ended").unwrap();
-    assert_eq!(git_out(&work, &["show", &format!("{}:a.txt", sn::snap_ref(T1, 1))]), "one\n", "the snapshot is of the state before the agent's write");
-    ag.shutdown();
+    for n in 1..=3 {
+        let from = len(&hub).await; let t0 = std::time::Instant::now();
+        assert_eq!(rpc(&hub, "turn.start", json!({"thread":T1,"text":"hello"})).await["ok"], true);
+        let t_rpc = t0.elapsed();
+        until(&hub, from, 120, |ev| ev.iter().any(|e| turn_is(e, "completed") || turn_is(e, "failed"))).await;
+        eprintln!("MEASURE turn {n}: turn.start returned (agent started) {t_rpc:?}, first output {:?}", t0.elapsed());
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    ag.shutdown(); let _ = work;
 }

@@ -188,11 +188,17 @@ async fn big_files(top: &str) -> Vec<String> {
 /// ignored and the huge (a huge one HEAD has keeps HEAD's copy). Answers (tree, huge files left out).
 async fn work_tree(top: &str, tag: &str) -> Result<(String, Vec<String>), String> {
     let gd = ok(git::run_ro(top, &["rev-parse", "--absolute-git-dir"]).await, "rev-parse")?;
-    let idx = format!("{gd}/backplane-snap-{tag}.index");
-    let seed = git::proc("sh", &["-c", &format!("{}bp_safe; {}", git::SAFE, include_str!("scripts/index_seed.sh")), "sh", &idx], top, &[]).await;
-    if seed.code != 0 { let _ = std::fs::remove_file(&idx); }
-    if !Path::new(&idx).exists() { ok(g(top, Some(&idx), &["read-tree", "--empty"]).await, "read-tree")?; }
-    ok(g(top, Some(&idx), &["add", "-A", "--", "."]).await, "add")?;
+    // The private index stays between snapshots (`first` is the only one-off): its entries carry the stat data of what `add` hashed, so the next
+    // snapshot hashes only what changed since, not every file of the folder (a seeded copy of the real index has no stat data: every file read again).
+    let keep = tag != "first";
+    let idx = format!("{gd}/backplane-snap-{}.index", if keep { "turn" } else { tag });
+    let fail = |e: String| { if keep { let _ = std::fs::remove_file(&idx); } e }; // a failed one is made again from the real index next time
+    if !keep || !Path::new(&idx).exists() {
+        let seed = git::proc("sh", &["-c", &format!("{}bp_safe; {}", git::SAFE, include_str!("scripts/index_seed.sh")), "sh", &idx], top, &[]).await;
+        if seed.code != 0 { let _ = std::fs::remove_file(&idx); }
+        if !Path::new(&idx).exists() { ok(g(top, Some(&idx), &["read-tree", "--empty"]).await, "read-tree")?; }
+    }
+    ok(g(top, Some(&idx), &["add", "-A", "--", "."]).await, "add").map_err(fail)?;
     let big = big_files(top).await;
     let has_head = git::run_ro(top, &["rev-parse", "-q", "--verify", "HEAD"]).await.code == 0;
     for p in &big {
@@ -200,8 +206,8 @@ async fn work_tree(top: &str, tag: &str) -> Result<(String, Vec<String>), String
         if in_head { let _ = g(top, Some(&idx), &["reset", "-q", "HEAD", "--", p]).await; } else { let _ = g(top, Some(&idx), &["rm", "-q", "--cached", "--ignore-unmatch", "--", p]).await; }
     }
     let tree = ok(g(top, Some(&idx), &["write-tree"]).await, "write-tree");
-    let _ = std::fs::remove_file(&idx);
-    Ok((tree?, big))
+    if !keep { let _ = std::fs::remove_file(&idx); }
+    Ok((tree.map_err(fail)?, big))
 }
 /// The work tree now as a tree id (what a snapshot would hold), without committing anything.
 pub async fn tree_now(top: &str, tag: &str) -> Result<String, String> { work_tree(top, tag).await.map(|x| x.0) }
