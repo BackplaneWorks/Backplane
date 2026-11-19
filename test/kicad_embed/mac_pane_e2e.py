@@ -961,7 +961,8 @@ try:
         lines = client_log().splitlines()[log0:]
         last = next((j['kicad_host_push'] for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None); lastvis = next((j.get('visible') for _, j in reversed(PUSHES) if j.get('kicad_host_push')), None)
         f = kframe(); oke = bool(lastvis) and bool(f and last) and all(abs(a - b) <= 2 for a, b in zip(f[3], last))
-        print(f'INFO swap E: refusal waiting before the stop {bool(refused_e)}; reconnect seen {bool(rejoined)} ({[l.split("GPUI_LOG ", 1)[-1][:90] for l in lines if '"status"' in l][:3]}); pushes {[(round((t - te) * 1000), j["kicad_host_push"], j.get("visible"), j.get("retry")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; frame {f and f[3]}; last {last}', flush=True)
+        status_e = [l.split("GPUI_LOG ", 1)[-1][:90] for l in lines if '"status"' in l][:3]  # outside the f-string: the Mac mini's Python is 3.9
+        print(f'INFO swap E: refusal waiting before the stop {bool(refused_e)}; reconnect seen {bool(rejoined)} ({status_e}); pushes {[(round((t - te) * 1000), j["kicad_host_push"], j.get("visible"), j.get("retry")) for t, j in PUSHES[n0:] if j.get("kicad_host_push")]}; frame {f and f[3]}; last {last}', flush=True)
         check(bool(rejoined), 'swap E: the client dropped and re-made its hub connection')
         check(oke, f'swap E: after a reconnect with a refusal waiting, the frame ends visible at the LAST rect (frame {f and f[3]}, last {last}; refusal before {bool(refused_e)})')
         # #1225 (PR #1261): the new connection's pictures keep the Board viewer open. Each picture the client takes logs the hub's
@@ -1469,7 +1470,8 @@ try:
                 newk = [w for w in wins() if w[1] == kpid and w[0] not in kwins0]
                 if newk: bad.append(f'KiCad showed {len(newk)} new window(s): {[w[3] for w in newk]}')
                 for nl in notes: print(f'INFO undo_markers {E}: {nl}', flush=True)
-                print(f'INFO undo_markers {E}: checks {"run through the hub (RunChecks)" if ran_direct else "KiCad\'s own after each edit (RunChecks refused through the hub: " + str(rc)[:100] + ")"}', flush=True)
+                how = 'run through the hub (RunChecks)' if ran_direct else "KiCad's own after each edit (RunChecks refused through the hub: " + str(rc)[:100] + ')'  # Python 3.9: no backslash in an f-string
+                print(f'INFO undo_markers {E}: checks {how}', flush=True)
                 row(E, 'undo_markers', 'works' if not bad else ('nothing' if all(b.endswith('no edit') for b in bad) else 'wrong'), ('; '.join(bad) or f'every real item back at each undo ({sum(c0.values())}: {c0}), no dialog'))
                 if E == 'pcb':  # select_markers_agent_check (fork e7f1bdb7a3, Carbon's crash): Cmd+A with the check's markers in it, an agent's
                     # check frees them, the pointer moves over the canvas: KiCad keeps running, and the selection is the same minus the markers
