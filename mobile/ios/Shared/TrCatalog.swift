@@ -4513,6 +4513,10 @@ gpui.review.allow.tip	Switch review mode off: the agent may change the design fi
 gpui.review.off	Edits allowed: you switched review mode off for this thread.	編集可：このスレッドのレビューモードをオフにしました。	Cambios permitidos: desactivaste el modo revisión en este hilo.
 gpui.review.again	Read-only again	再び読み取り専用に	Volver a solo lectura
 gpui.review.again.tip	Switch review mode back on: the design files are read-only again	レビューモードをオンに戻す：設計ファイルは再び読み取り専用になります	Volver a activar el modo revisión: los archivos de diseño vuelven a ser de solo lectura
+gpui.rail.no.board	No board in this project	このプロジェクトには基板がありません	Este proyecto no tiene placa
+gpui.rail.no.schematic	No schematic in this project	このプロジェクトには回路図がありません	Este proyecto no tiene esquema
+gpui.rail.split.needs.both	Split needs a board and a schematic	分割表示には基板と回路図が必要です	La vista dividida requiere una placa y un esquema
+gpui.rail.no.mech	No mechanical parts in this project	このプロジェクトには機械部品がありません	Este proyecto no tiene piezas mecánicas
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
