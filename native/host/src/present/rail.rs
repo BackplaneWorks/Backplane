@@ -29,7 +29,7 @@ pub fn rail(input: RailInput<'_>) -> Value {
     add("schematic", "Schematic", "cpu", "design", "s", (!input.schematic).then_some("No schematic in this project"));
     add("3d", "3D", "box", "design", "3", no_board);
     if input.simulation && input.schematic && !input.altium { add("simulation", "Simulation", "gauge", "design", "", None); }
-    if input.gerbers { add("gerbers", "Gerbers", "file-stack", "design", "", None); }
+    if input.gerbers || page == "gerbers" { add("gerbers", "Gerbers", "file-stack", "design", "", None); }
     add("split", "Split", "layout-panel-left", "layout", "v", (!(input.board && input.schematic)).then_some("Split needs a board and a schematic"));
     add("mech", "Mech", "layers", "mech", "m", (!input.mech).then_some("No mechanical parts in this project"));
     add("files", "Files", "folder", "work", "f", None);
@@ -68,7 +68,7 @@ mod tests {
             for page in ["gerbers", "simulation"] {
                 let rows = rail(RailInput { gerbers, simulation, altium, schematic, page, ..Default::default() });
                 let optional: Vec<_> = rows.as_array().unwrap().iter().skip(5).take_while(|r| r["group"] == "design").collect();
-                let expected: Vec<_> = [("simulation", simulation && schematic && !altium), ("gerbers", gerbers)].into_iter().filter_map(|(id, show)| show.then_some(id)).collect();
+                let expected: Vec<_> = [("simulation", simulation && schematic && !altium), ("gerbers", gerbers || page == "gerbers")].into_iter().filter_map(|(id, show)| show.then_some(id)).collect();
                 assert_eq!(optional.len(), expected.len());
                 for (row, id) in optional.iter().zip(expected) {
                     assert_eq!(row["id"], id);

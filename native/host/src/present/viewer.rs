@@ -656,10 +656,10 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         if sources.altium { v["cad"] = json!("altium"); }
         if let Some(f) = crate::files::kicad::embed::rail_simulation(&root) { if let Some(o) = v.as_object_mut() { o.insert("simFrame".into(), json!(f)); } }
         let selected = v["choices"].as_array().and_then(|rows| rows.iter().find(|r| r["on"] == true)).and_then(|r| r["value"].as_str());
-        let page = selected.unwrap_or_else(|| s(&v, "open"));
+        let page = if v["gerbers"] == true { "gerbers" } else { selected.unwrap_or_else(|| s(&v, "open")) };
         let model = rail::rail(rail::RailInput {
             board: sources.board, schematic: sources.schematic, mech: sources.mech || v["mech"]["parts"].as_array().is_some_and(|p| !p.is_empty()),
-            gerbers: v["gerbers"] == true || v["hasGerbers"].as_bool().unwrap_or(sources.gerbers),
+            gerbers: v["hasGerbers"].as_bool().unwrap_or(sources.gerbers),
             simulation: v["simFrame"].is_string(), altium: sources.altium, page, diff: pages::diff_on(session, sel),
         });
         v["rail"] = model;
@@ -762,6 +762,18 @@ mod tests {
         let mut st = State::new();
         for l in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(l); }
         (st, "t1700000003-8".into())
+    }
+    #[test]
+    fn empty_gerbers_page_has_a_lit_rail_entry_until_closed() {
+        let (st, th) = state();
+        let session = json!({"sel":th});
+        let template = json!({"open":"board", "gerbers":true, "hasGerbers":false});
+        let v = viewer_json(&st, &template, &session).unwrap();
+        let rows = v["rail"].as_array().unwrap();
+        assert!(rows.iter().any(|r| r["id"] == "gerbers" && r["state"] == "on"));
+        assert_eq!(rows.iter().filter(|r| r["state"] == "on").count(), 1);
+        let closed = viewer_json(&st, &json!({"open":"", "hasGerbers":false}), &session).unwrap();
+        assert!(closed["rail"].as_array().unwrap().iter().all(|r| r["id"] != "gerbers"));
     }
     #[test] fn the_threads_browser_is_a_page_with_nothing_to_watch() {
         let (st, th) = state();
