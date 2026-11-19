@@ -7,7 +7,7 @@ set -euo pipefail
 name=${1:?up.sh RUNNER_NAME}; label=${RUNNER_LABEL:-bp-linux-release}
 here=$(cd "$(dirname "$0")" && pwd); ci=${BP_CI:-$HOME/bp-ci}
 mkdir -p "$ci/runner-home"
-install -m 755 "$here/runner-guard.sh" "$ci/runner-guard.sh"
+install -m 755 "$here/../runner-guard.sh" "$ci/runner-guard.sh"   # scripts/runner-guard.sh
 docker build -q -t bp-linux-release-runner --build-arg UID="$(id -u)" "$here"
 if [ ! -f "$ci/runner-home/actions-runner/.runner" ]; then
   [ ! -t 0 ] || { echo "not registered: pipe a registration token in" >&2; exit 1; }
