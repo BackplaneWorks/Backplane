@@ -4667,3 +4667,7 @@ gpui.review.allow.tip = レビューモードをオフにする：エージェ�
 gpui.review.off = 編集可：このスレッドのレビューモードをオフにしました。
 gpui.review.again = 再び読み取り専用に
 gpui.review.again.tip = レビューモードをオンに戻す：設計ファイルは再び読み取り専用になります
+gpui.rail.no.board = このプロジェクトには基板がありません
+gpui.rail.no.schematic = このプロジェクトには回路図がありません
+gpui.rail.split.needs.both = 分割表示には基板と回路図が必要です
+gpui.rail.no.mech = このプロジェクトには機械部品がありません

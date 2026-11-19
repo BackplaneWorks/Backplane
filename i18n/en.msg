@@ -4644,3 +4644,7 @@ gpui.review.allow.tip = Switch review mode off: the agent may change the design 
 gpui.review.off = Edits allowed: you switched review mode off for this thread.
 gpui.review.again = Read-only again
 gpui.review.again.tip = Switch review mode back on: the design files are read-only again
+gpui.rail.no.board = No board in this project
+gpui.rail.no.schematic = No schematic in this project
+gpui.rail.split.needs.both = Split needs a board and a schematic
+gpui.rail.no.mech = No mechanical parts in this project

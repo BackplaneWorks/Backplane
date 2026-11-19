@@ -13,35 +13,30 @@ struct RailRow<'a> {
 
 fn rail_rows(viewer: &Value, simulation: bool) -> Vec<RailRow<'_>> {
     if let Some(rows) = viewer["rail"].as_array() {
-        return rows.iter().map(|row| {
+        return rows.iter().filter(|r| simulation || r["id"] != "simulation").map(|row| {
             let field = |name: &str| row[name].as_str().unwrap_or("");
             RailRow { id: field("id"), label: field("label"), icon: field("icon"), group: field("group"),
                 key: field("key"), state: field("state"), why: field("why") }
         }).collect();
     }
     // Older hubs send choices and simFrame. Keep their existing rail and grouping.
-    [("terminal", "Terminal", "terminal", "tools"), ("commands", "Commands", "search", "tools"),
-     ("board", "Board", "circuit-board", "design"), ("schematic", "Schematic", "cpu", "design"),
-     ("3d", "3D", "box", "design"), ("simulation", "Simulation", "gauge", "design"),
-     ("gerbers", "Gerbers", "file-stack", "design"), ("split", "Split", "layout-panel-left", "design"),
-     ("mech", "Mech", "layers", "design"), ("files", "Files", "folder", "work"), ("diff", "Diff", "diff", "work"),
-     ("review", "Review", "circle-check", "work"), ("browser", "Browser", "globe", "work")]
+    [("terminal", "Terminal", "terminal", "tools"), ("commands", "Commands", "search", "tools"), // i18n-ok: fallback labels drawn through trs
+     ("board", "Board", "circuit-board", "design"), ("schematic", "Schematic", "cpu", "design"), // i18n-ok: fallback labels drawn through trs
+     ("3d", "3D", "box", "design"), ("simulation", "Simulation", "gauge", "design"), // i18n-ok: fallback labels drawn through trs
+     ("gerbers", "Gerbers", "file-stack", "design"), ("split", "Split", "layout-panel-left", "design"), // i18n-ok: fallback labels drawn through trs
+     ("mech", "Mech", "layers", "design"), ("files", "Files", "folder", "work"), ("diff", "Diff", "diff", "work"), // i18n-ok: fallback labels drawn through trs
+     ("review", "Review", "circle-check", "work"), ("browser", "Browser", "globe", "work")] // i18n-ok: fallback labels drawn through trs
         .into_iter().filter(|(id, ..)| *id != "simulation" || simulation)
         .map(|(id, label, icon, group)| RailRow { id, label, icon, group, key: crate::keys::rail_letter(id), ..Default::default() }).collect()
 }
 
-#[cfg(test)]
-#[core::prelude::v1::test]
-fn rail_rows_follow_hub_order_content_and_empty_list() {
-    let viewer = serde_json::json!({"rail":[
-        {"id":"files","label":"Project files","icon":"folder","group":"work","state":"on","key":"f"},
-        {"id":"board","label":"Board","icon":"cpu","group":"design","state":"disabled","key":"b","why":"No board"}]});
-    let rows = rail_rows(&viewer, false);
-    assert_eq!(rows.len(), 2);
-    assert_eq!((rows[0].id, rows[0].label, rows[0].state), ("files", "Project files", "on"));
-    assert_eq!((rows[1].icon, rows[1].group, rows[1].key, rows[1].state, rows[1].why), ("cpu", "design", "b", "disabled", "No board"));
-    assert!(rail_rows(&serde_json::json!({"rail":[]}), true).is_empty());
-    assert_eq!(rail_rows(&Value::Null, false)[0].id, "terminal");
+pub(crate) fn rail_enabled(viewer: &Value, id: &str) -> bool {
+    viewer["rail"].as_array().is_none_or(|rows| rows.iter().any(|r| r["id"] == id && r["state"] != "disabled"))
+}
+
+fn viewer_row_on(row: &RailRow, pending: Option<&str>, active_kind: &str) -> bool {
+    if let Some(pending) = pending { return pending == row.id; }
+    if row.state.is_empty() { active_kind == row.id } else { row.state == "on" }
 }
 
 fn pager_row(cx: &mut Context<Backplane>, id: String, pager: &Value, light: bool, ctl: &mut Vec<CtlEntry>) -> Option<AnyElement> {
@@ -807,23 +802,22 @@ impl Render for Backplane {
         let keycaps = self.screens.held == crate::keys::Held::Threads;
         let keycap = move |k: &str, lit: bool| (keycaps && !k.is_empty()).then(|| crate::screens::hints::cap(light, &k.to_uppercase(), lit).absolute().top(px(3.)).right(px(3.)));
         crate::screens::viewer::follow(&self.tx, thread);
-        let active_kind = if thread["diff"].is_object() { String::new() } else { crate::screens::viewer::active_kind(&thread["viewer"], self.screens.rail_pending.as_deref()) };
+        let active_kind = if thread["diff"].is_object() { "diff".to_owned() } else { crate::screens::viewer::active_kind(&thread["viewer"], self.screens.rail_pending.as_deref()) };
         // the rail's Simulation entry (the hub's word, in a window that can hold KiCad), lit while the pane is on KiCad's Simulator: the page under it is then not
         let sim_rail = crate::viewers::kicad_pane::rail_simulation(&thread["viewer"], crate::viewers::kicad_pane::local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), thread)).is_some();
         let sim_on = sim_rail && !thread["diff"].is_object() && self.simulation_on(cx) && self.kicad_for(thread, cx).is_some();
         let mut previous_group = None;
         for row in rail_rows(&thread["viewer"], sim_rail) {
-            if previous_group.is_some_and(|group| group != row.group) { rail.push(div().h(px(12.)).into_any_element()); }
-            previous_group = Some(row.group);
+            let block = match row.group { "layout" | "mech" => "design", group => group };
+            if previous_group.is_some_and(|group| group != block) { rail.push(div().h(px(12.)).into_any_element()); }
+            previous_group = Some(block);
             let id = row.id;
-            let disabled = row.state == "disabled" || (id == "simulation" && !sim_rail);
+            let disabled = row.state == "disabled";
             let active = !disabled && match id {
                 "terminal" => self.screens.term.open,
                 "simulation" if sim_on => true,
                 _ if sim_on => false,
-                _ if !row.state.is_empty() => row.state == "on",
-                "diff" => thread["diff"].is_object(),
-                _ => active_kind == id,
+                _ => viewer_row_on(&row, self.screens.rail_pending.as_deref(), &active_kind),
             };
             let mut button = with_rect(div().id(SharedString::from(format!("rail-{}", row.label))), || format!("rail:{}", row.label))
                 .relative().flex().flex_col().items_center().h(crate::scale::tpx(48.)).justify_center().gap_1().text_size(rail_label())
@@ -831,12 +825,11 @@ impl Render for Backplane {
                 .text_color(c(if active { "text" } else { "dim" }))
                 .child(ic(light, art::icon_name(row.icon).unwrap_or("folder"), 18., if active { "accent" } else { "dim" })).child(trs(row.label));
             if disabled {
-                let why = if row.why.is_empty() { "Simulation needs a local editor" } else { row.why };
-                button = button.opacity(0.45).tooltip(crate::keys::tip(why, "", light));
+                button = button.opacity(0.45).tooltip(crate::keys::tip(row.why, "", light));
             } else {
                 let binding = match id { "diff" | "files" => id, "terminal" => "term", "commands" => "palette", _ => "" };
                 let chord = crate::keys::hint(&self.local, binding);
-                let letter = if id == "commands" { "" } else { row.key };
+                let letter = row.key;
                 let hint = [letter.to_uppercase(), chord].into_iter().filter(|k| !k.is_empty()).collect::<Vec<_>>().join(&format!(" {} ", trs("or")));
                 button = button.cursor_pointer().hover(|s| s.bg(c("raise")).text_color(c("text")))
                     .tooltip(crate::keys::tip(row.label, &hint, light)).children(keycap(letter, active));
@@ -1089,3 +1082,32 @@ impl Render for Ghost { fn render(&mut self, _: &mut Window, _: &mut Context<Sel
 
 /// The width a project page's README is laid out to: the list's, in the page's 930 px column less its padding.
 pub fn page_doc_w(l: &ListState) -> f32 { (f32::from(l.viewport_bounds().size.width).min(930.) - 32.).max(300.) }
+
+#[cfg(test)]
+mod tests {
+    use super::{rail_rows, viewer_row_on, RailRow};
+    use serde_json::Value;
+    #[test]
+    fn rail_rows_follow_hub_order_content_and_empty_list() {
+        let viewer = serde_json::json!({"rail":[
+            {"id":"files","label":"Project files","icon":"folder","group":"work","state":"on","key":"f"},
+            {"id":"board","label":"Board","icon":"cpu","group":"design","state":"disabled","key":"b","why":"No board"}]});
+        let rows = rail_rows(&viewer, false);
+        assert_eq!(rows.len(), 2);
+        assert_eq!((rows[0].id, rows[0].label, rows[0].state), ("files", "Project files", "on"));
+        assert_eq!((rows[1].icon, rows[1].group, rows[1].key, rows[1].state, rows[1].why), ("cpu", "design", "b", "disabled", "No board"));
+        assert!(rail_rows(&serde_json::json!({"rail":[]}), true).is_empty());
+        assert_eq!(rail_rows(&Value::Null, false)[0].id, "terminal");
+    }
+
+    #[test]
+    fn pending_press_lights_the_target_until_the_hub_replies() {
+        let files = RailRow { id: "files", state: "on", ..Default::default() };
+        let board = RailRow { id: "board", state: "off", ..Default::default() };
+        assert!(viewer_row_on(&board, Some("board"), "files"));
+        assert!(!viewer_row_on(&files, Some("board"), "files"));
+        assert!(!viewer_row_on(&files, Some(""), "files"));
+        assert!(viewer_row_on(&files, None, "board"));
+        assert!(!viewer_row_on(&board, None, "board"));
+    }
+}
