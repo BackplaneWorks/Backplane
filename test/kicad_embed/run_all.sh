@@ -32,6 +32,8 @@ SUITES=(
   "embed_unsaved_person_e2e.sh:unsaved-person"
   # #1224: the zone fill of an agent's own kicad_edit is the agent's; the person's own Fill is theirs. Fork mode, coedit runtimes.
   "embed_fill_actor_e2e.sh:fill-actor"
+  # #1326: a schematic-only project's warm-up opens the schematic, never KiCad's "PCB does not exist, create it?". Fork mode only.
+  "embed_warm_sch_only_e2e.sh:warm-sch-only"
   # an agent's footprint exchange while the person's Choose Symbol has KiCad's full footprint load running: kicad_edit waits for each
   # library by its status (bp.13.2 b5/b6 Fix 1). Fork mode only.
   "embed_lib_wait_e2e.sh:lib-wait"
