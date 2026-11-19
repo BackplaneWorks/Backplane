@@ -294,6 +294,14 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, data: &Value, p: &Palette,
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).children(input).child(col)).into_any_element())
 }
 
+/// Test-mode helper for `ui::rail_inventory`: returns `(label, shortcut)` if the palette offers a command for rail `id`.
+pub(crate) fn rail_command_for(data: &Value, can_embed: bool, id: &str, local: &crate::local::Local) -> Option<(String, String)> {
+    items(data, can_embed).into_iter().find_map(|it| match &it.what {
+        Do::Rail(rid, _) if rid == id => Some((it.label.clone(), shortcut(&it, "", local))),
+        _ => None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

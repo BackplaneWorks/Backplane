@@ -65,10 +65,13 @@ def parse_embed_actions(kind_dir: Path) -> dict[str, dict]:
 
 
 def parse_client_log(log_path: Path) -> dict:
-    """Parse GPUI_METRIC lines from client.log into per-shot state, settled tags, presses, probes, kicad reports, and layout snapshots."""
+    """Parse GPUI_METRIC lines from client.log into per-shot state, settled tags, presses, probes, kicad reports, rail state/inventory, and layout snapshots."""
     layout: dict = {}
     controls: dict[str, dict] = {}
     probes: set[str] = set()
+    rail_drawn: dict | None = None
+    rail_metric_seen = False
+    rail_inventory: list[dict] | None = None
     current_mark = ""
     presses_by_mark: dict[str, list[dict]] = {}
     shots: dict[str, dict] = {}
@@ -77,7 +80,15 @@ def parse_client_log(log_path: Path) -> dict:
     refused_shots: list[dict] = []
 
     if not log_path.exists():
-        return {"shots": shots, "settled_tags": settled_tags, "kicad_tags": kicad_tags, "presses": presses_by_mark, "refused_shots": refused_shots}
+        return {
+            "shots": shots,
+            "settled_tags": settled_tags,
+            "kicad_tags": kicad_tags,
+            "presses": presses_by_mark,
+            "refused_shots": refused_shots,
+            "rail_metric_seen": rail_metric_seen,
+            "rail_inventory": rail_inventory,
+        }
 
     for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
         if "GPUI_METRIC " not in line:
@@ -97,6 +108,12 @@ def parse_client_log(log_path: Path) -> dict:
                 probes = set(pr.keys())
             elif isinstance(pr, list):
                 probes = {x.get("id", "") for x in pr if isinstance(x, dict) and x.get("id")}
+        elif kind == "rail" and isinstance(ev.get("rail"), dict):
+            rail_drawn = ev["rail"]
+            rail_metric_seen = True
+        elif kind == "rail_inventory" and isinstance(ev.get("entries"), list):
+            if ev["entries"]:
+                rail_inventory = ev["entries"]
         elif kind == "mark":
             current_mark = ev.get("name") or ""
         elif kind in ("press", "click"):
@@ -129,6 +146,7 @@ def parse_client_log(log_path: Path) -> dict:
                     "state": ev.get("state", ""),
                     "settled": bool(ev.get("settled")),
                     "viewer": ev.get("viewer") or {},
+                    "rail_drawn": dict(rail_drawn) if rail_drawn is not None else None,
                 }
         elif kind == "shot-ready":
             name = ev.get("name") or ""
@@ -141,9 +159,18 @@ def parse_client_log(log_path: Path) -> dict:
                     "layout": dict(layout),
                     "controls_ids": sorted(controls.keys()),
                     "probes_ids": sorted(probes),
+                    "rail_drawn": dict(rail_drawn) if rail_drawn is not None else None,
                 }
 
-    return {"shots": shots, "settled_tags": settled_tags, "kicad_tags": kicad_tags, "presses": presses_by_mark, "refused_shots": refused_shots}
+    return {
+        "shots": shots,
+        "settled_tags": settled_tags,
+        "kicad_tags": kicad_tags,
+        "presses": presses_by_mark,
+        "refused_shots": refused_shots,
+        "rail_metric_seen": rail_metric_seen,
+        "rail_inventory": rail_inventory,
+    }
 
 
 def _sensitive_tokens() -> list[str]:
@@ -390,6 +417,99 @@ def build_strips(outdir: Path, kinds: list[str], parsed: dict[str, dict], cleare
         canvas.save(outdir / "rails.png")
 
 
+def evaluate_b1_kind(kind: str, parsed_kind: dict, rail_map: dict[str, dict]) -> dict:
+    """Evaluate Rule B1 (one selection behaviour for every rail entry) for one project kind.
+
+    Requires client-drawn rail lighting via `GPUI_METRIC {"event":"rail", ...}` (PR #1359).
+    When absent, returns status="unavailable" so B1 is never guessed from hub state.
+    """
+    if not parsed_kind.get("rail_metric_seen"):
+        return {
+            "status": "unavailable",
+            "reason": "client did not emit GPUI_METRIC event=rail (requires PR #1359)",
+            "entries": {},
+        }
+
+    settled_tags = parsed_kind.get("settled_tags") or {}
+
+    def viewer_matches(eid: str, viewer: dict) -> bool:
+        if eid == "diff":
+            return bool(viewer.get("diff_open"))
+        if eid == "gerbers":
+            return viewer.get("open") == "board" and bool(viewer.get("gerbers"))
+        return viewer.get("open") == eid and not viewer.get("diff_open")
+
+    def viewer_closed(viewer: dict) -> bool:
+        return viewer.get("open") == "" and not viewer.get("diff_open")
+
+    def lit_list(rec: dict) -> list[str] | None:
+        rd = rec.get("rail_drawn")
+        if not isinstance(rd, dict) or not isinstance(rd.get("lit"), list):
+            return None
+        return [str(x) for x in rd["lit"]]
+
+    entries_out: dict[str, dict] = {}
+    for eid, label, _rail_id, settle_kind, _bare_key, _pal_q in M.B1_ENTRIES:
+        rentry = rail_map.get(settle_kind)
+        if rentry is None:
+            continue
+        is_disabled = rentry.get("state") == "disabled"
+        failed: list[str] = []
+        checks: dict[str, bool] = {}
+
+        if not is_disabled:
+            r_po = settled_tags.get(f"b1-press-open-{eid}", {})
+            po_ok = bool(r_po) and viewer_matches(eid, r_po.get("viewer") or {}) and (lit_list(r_po) == [label])
+            checks["press_open"] = po_ok
+            if not po_ok:
+                failed.append("press_open")
+
+            r_pc = settled_tags.get(f"b1-press-close-{eid}", {})
+            pc_ok = bool(r_pc) and viewer_closed(r_pc.get("viewer") or {}) and (lit_list(r_pc) == [])
+            checks["press_close"] = pc_ok
+            if not pc_ok:
+                failed.append("press_close")
+
+            r_ko = settled_tags.get(f"b1-key-open-{eid}", {})
+            ko_ok = bool(r_ko) and viewer_matches(eid, r_ko.get("viewer") or {}) and (lit_list(r_ko) == [label])
+            checks["key_open"] = ko_ok
+            if not ko_ok:
+                failed.append("key_open")
+
+            r_kc = settled_tags.get(f"b1-key-close-{eid}", {})
+            kc_ok = bool(r_kc) and viewer_closed(r_kc.get("viewer") or {}) and (lit_list(r_kc) == [])
+            checks["key_close"] = kc_ok
+            if not kc_ok:
+                failed.append("key_close")
+
+            r_pal = settled_tags.get(f"b1-palette-open-{eid}", {})
+            pal_ok = bool(r_pal) and viewer_matches(eid, r_pal.get("viewer") or {}) and (lit_list(r_pal) == [label])
+            checks["palette_open"] = pal_ok
+            if not pal_ok:
+                failed.append("palette_open")
+        else:
+            for cname, tag in (
+                ("disabled_press", f"b1-disabled-press-{eid}"),
+                ("disabled_key", f"b1-disabled-key-{eid}"),
+                ("disabled_palette", f"b1-disabled-palette-{eid}"),
+            ):
+                rec = settled_tags.get(tag, {})
+                ok = bool(rec) and viewer_closed(rec.get("viewer") or {}) and (lit_list(rec) == [])
+                checks[cname] = ok
+                if not ok:
+                    failed.append(cname)
+
+        entries_out[eid] = {
+            "label": label,
+            "disabled": is_disabled,
+            "passed": len(failed) == 0,
+            "checks": checks,
+            "failed": failed,
+        }
+
+    return {"status": "measured", "entries": entries_out}
+
+
 def evaluate_scorecard(
     outdir: Path,
     full_parsed: dict,
@@ -415,6 +535,47 @@ def evaluate_scorecard(
     def body_check(name: str) -> dict:
         lay = (shots.get(name) or {}).get("layout") or {}
         return pane_body_stats(full_dir / f"{name}.png", lay)
+
+    s_idle = shots.get("idle", {})
+    idle_main = (s_idle.get("layout") or {}).get("main") or {}
+
+    def check_closed_to_idle(shot_name: str, press_mark: str) -> dict:
+        sr = shots.get(shot_name, {})
+        vr = sr.get("viewer") or {}
+        ok, obs, oblist = shot_ok(shot_name)
+        p_raw = presses.get(press_mark, [])
+        p_ids = [p["id"] for p in p_raw]
+        p_found = any(p.get("found") for p in p_raw)
+        c_main = (sr.get("layout") or {}).get("main") or {}
+        c_rail = (sr.get("layout") or {}).get("rail") or {}
+        w_diff = abs(float(c_main.get("w", -1)) - float(idle_main.get("w", -999))) if idle_main and c_main else 999.0
+        pane_w = float(c_rail.get("x", 0)) - (float(c_main.get("x", 0)) + float(c_main.get("w", 0))) if c_rail and c_main else 999.0
+        closed_ok = (
+            ok
+            and not obs
+            and len(p_ids) == 1
+            and p_found
+            and vr.get("open") == ""
+            and vr.get("active_kind") == ""
+            and not vr.get("diff_open")
+            and w_diff <= 2.0
+            and pane_w <= 2.0
+        )
+        return {
+            "ok": closed_ok,
+            "presses": p_ids,
+            "press_found": p_found,
+            "open": vr.get("open"),
+            "active_kind": vr.get("active_kind"),
+            "diff_open": bool(vr.get("diff_open")),
+            "idle_main_w": idle_main.get("w"),
+            "closed_main_w": c_main.get("w"),
+            "width_diff_px": round(w_diff, 2),
+            "pane_w_closed_px": round(pane_w, 2),
+            "capture_ok": ok,
+            "obstructed": obs,
+            "obstructions": oblist,
+        }
 
     def make_task(
         tid: int,
@@ -451,13 +612,14 @@ def evaluate_scorecard(
 
     tasks: list[dict] = []
 
-    # Task 1: Open the board (budget 1)
+    # Task 1: Open the board (budget 1) + one step back (press rail:Board shuts viewer)
     s1 = shots.get("board", {})
     v1 = s1.get("viewer") or {}
     b1 = body_check("board")
     ok1, obs1, oblist1 = shot_ok("board")
     p1_raw = presses.get("press:board", [])
     p1 = [p["id"] for p in p1_raw]
+    t1_back = check_closed_to_idle("task1-back", "press:task1-back")
     if not full_client_ok or not ok1 or obs1:
         o1 = "harness_failed"
     elif (
@@ -474,17 +636,19 @@ def evaluate_scorecard(
         o1 = "task_failed"
     tasks.append(make_task(
         1, "Open the board", 1, p1, o1,
-        {"state": s1.get("state"), "open": v1.get("open"), "plot_key": v1.get("plot_key"), "plot_none": v1.get("plot_none"), **b1, "capture_ok": ok1, "obstructed": obs1, "obstructions": oblist1},
+        {"state": s1.get("state"), "open": v1.get("open"), "plot_key": v1.get("plot_key"), "plot_none": v1.get("plot_none"), **b1, "capture_ok": ok1, "obstructed": obs1, "obstructions": oblist1, "one_step_back": t1_back},
+        one_step_back=(t1_back["ok"] if "task1-back" in shots else "not_measured"),
         found=any(p.get("found") for p in p1_raw),
     ))
 
-    # Task 2: Open the 3D view of the board (budget 1)
+    # Task 2: Open the 3D view of the board (budget 1) + one step back (press rail:3D shuts viewer)
     s2 = shots.get("3d", {})
     v2 = s2.get("viewer") or {}
     b2 = body_check("3d")
     ok2, obs2, oblist2 = shot_ok("3d")
     p2_raw = presses.get("press:3d", [])
     p2 = [p["id"] for p in p2_raw]
+    t2_back = check_closed_to_idle("task2-back", "press:task2-back")
     if not full_client_ok or not ok2 or obs2:
         o2 = "harness_failed"
     elif (
@@ -504,8 +668,9 @@ def evaluate_scorecard(
     note2 = "" if o2 == "passed" else (f"pane body is flat/blank (non_bg_ratio={b2['non_bg_ratio']})" if not b2["body_non_flat"] else f"state={s2.get('state')} solid_painted_since_press={v2.get('solid_painted_since_press')}")
     tasks.append(make_task(
         2, "Open the 3D view of the board", 1, p2, o2,
-        {"state": s2.get("state"), "open": v2.get("open"), "key": v2.get("key"), "solid_key": v2.get("solid_key"), "solid_painted": v2.get("solid_painted"), "solid_painted_since_press": v2.get("solid_painted_since_press"), "solid_last_w": v2.get("solid_last_w"), "solid_last_h": v2.get("solid_last_h"), **b2, "capture_ok": ok2, "obstructed": obs2, "obstructions": oblist2},
+        {"state": s2.get("state"), "open": v2.get("open"), "key": v2.get("key"), "solid_key": v2.get("solid_key"), "solid_painted": v2.get("solid_painted"), "solid_painted_since_press": v2.get("solid_painted_since_press"), "solid_last_w": v2.get("solid_last_w"), "solid_last_h": v2.get("solid_last_h"), **b2, "capture_ok": ok2, "obstructed": obs2, "obstructions": oblist2, "one_step_back": t2_back},
         note=note2,
+        one_step_back=(t2_back["ok"] if "task2-back" in shots else "not_measured"),
         found=any(p.get("found") for p in p2_raw),
     ))
 
@@ -594,7 +759,7 @@ def evaluate_scorecard(
         found=(any(p.get("found") for p in p4_a) and any(p.get("found") for p in p4_b)),
     ))
 
-    # Task 5: See schematic and board together and cross-probe a known component (R1) (budget 2)
+    # Task 5: See schematic and board together and cross-probe a known component (R1) (budget 2) + one step back
     s5 = shots.get("task5-split-probe", {})
     v5 = s5.get("viewer") or {}
     ok5, obs5, oblist5 = shot_ok("task5-split-probe")
@@ -602,6 +767,23 @@ def evaluate_scorecard(
     p5 = [p["id"] for p in p5_raw] + ["tap:R1@slot2"]
     pcb_ref = v5.get("split_pcb_ref") or ""
     sch_ref = v5.get("split_sch_ref") or ""
+    t5_closed = check_closed_to_idle("task5-back", "press:task5-back")
+    s5b = shots.get("task5-back", {})
+    v5b = s5b.get("viewer") or {}
+    t5_returned_prev = (
+        t5_closed["capture_ok"]
+        and not t5_closed["obstructed"]
+        and len(t5_closed["presses"]) == 1
+        and t5_closed["press_found"]
+        and v5b.get("open") not in ("", "split")
+        and s5b.get("state") == "ready"
+    )
+    t5_back = {
+        **t5_closed,
+        "closed_viewer": t5_closed["ok"],
+        "returned_to": "closed" if t5_closed["ok"] else (v5b.get("open") or "split"),
+        "ok": t5_closed["ok"] or t5_returned_prev,
+    }
     if not full_client_ok or not ok5 or obs5:
         o5 = "harness_failed"
     elif (
@@ -620,12 +802,13 @@ def evaluate_scorecard(
     note5 = "" if o5 == "passed" else f"expected R1 in both panes; got pcb_ref={pcb_ref!r} sch_ref={sch_ref!r} lit_sch={v5.get('split_lit_sch')} lit_pcb={v5.get('split_lit_pcb')} probe={v5.get('probe')!r}"
     tasks.append(make_task(
         5, "See schematic and board together and cross-probe a part", 2, p5, o5,
-        {"state": s5.get("state"), "open": v5.get("open"), "panes_count": v5.get("panes_count"), "probe": v5.get("probe"), "split_pcb_ref": pcb_ref, "split_sch_ref": sch_ref, "split_picked_pcb": v5.get("split_picked_pcb"), "split_lit_sch": v5.get("split_lit_sch"), "split_lit_pcb": v5.get("split_lit_pcb"), "capture_ok": ok5, "obstructed": obs5, "obstructions": oblist5},
+        {"state": s5.get("state"), "open": v5.get("open"), "panes_count": v5.get("panes_count"), "probe": v5.get("probe"), "split_pcb_ref": pcb_ref, "split_sch_ref": sch_ref, "split_picked_pcb": v5.get("split_picked_pcb"), "split_lit_sch": v5.get("split_lit_sch"), "split_lit_pcb": v5.get("split_lit_pcb"), "capture_ok": ok5, "obstructed": obs5, "obstructions": oblist5, "one_step_back": t5_back},
         note=note5,
+        one_step_back=(t5_back["ok"] if "task5-back" in shots else "not_measured"),
         found=any(p.get("found") for p in p5_raw),
     ))
 
-    # Task 6: Open a mech part (budget 2)
+    # Task 6: Open a mech part (budget 2) + one step back (press rail:Mech shuts viewer)
     s6 = shots.get("mech", {})
     v6 = s6.get("viewer") or {}
     b6 = body_check("mech")
@@ -638,6 +821,10 @@ def evaluate_scorecard(
     ok6, obs6, oblist6 = shot_ok("mech")
     p6_raw = presses.get("press:mech", [])
     p6 = [p["id"] for p in p6_raw]
+    t6_start = settled_tags.get("task6-back-start", {})
+    t6_start_ok = bool(t6_start.get("settled")) and (t6_start.get("viewer") or {}).get("open") == "mech"
+    t6_closed = check_closed_to_idle("task6-back", "press:task6-back")
+    t6_back = {**t6_closed, "start_ok": t6_start_ok, "ok": t6_start_ok and t6_closed["ok"]}
     if not full_client_ok or not ok6 or obs6:
         o6 = "harness_failed"
     elif (
@@ -659,8 +846,9 @@ def evaluate_scorecard(
     note6 = "" if o6 == "passed" else f"state={s6.get('state')} solid_painted_since_press={v6.get('solid_painted_since_press')} body_non_flat={b6['body_non_flat']} diff_vs_3d={diff_vs_3d} diff_vs_mech_only={diff_vs_mech_only}"
     tasks.append(make_task(
         6, "Open a mech part", 2, p6, o6,
-        {"state": s6.get("state"), "open": v6.get("open"), "key": v6.get("key"), "solid_key": v6.get("solid_key"), "solid_painted": v6.get("solid_painted"), "solid_painted_since_press": v6.get("solid_painted_since_press"), "solid_last_w": v6.get("solid_last_w"), "solid_last_h": v6.get("solid_last_h"), **b6, "body_diff_vs_3d": diff_vs_3d, "body_diff_vs_mech_only": diff_vs_mech_only, "capture_ok": ok6, "obstructed": obs6, "obstructions": oblist6},
+        {"state": s6.get("state"), "open": v6.get("open"), "key": v6.get("key"), "solid_key": v6.get("solid_key"), "solid_painted": v6.get("solid_painted"), "solid_painted_since_press": v6.get("solid_painted_since_press"), "solid_last_w": v6.get("solid_last_w"), "solid_last_h": v6.get("solid_last_h"), **b6, "body_diff_vs_3d": diff_vs_3d, "body_diff_vs_mech_only": diff_vs_mech_only, "capture_ok": ok6, "obstructed": obs6, "obstructions": oblist6, "one_step_back": t6_back},
         note=note6,
+        one_step_back=(t6_back["ok"] if "task6-back" in shots else "not_measured"),
         found=any(p.get("found") for p in p6_raw),
     ))
 
@@ -815,13 +1003,39 @@ def evaluate_scorecard(
             note="run with --embed against an embedded KiCad runtime",
         ))
 
-    # Task 9: Turn Follow agent on and see that it is on (budget 1)
+    # Task 9: Turn Follow agent on and see that it is on (budget 1) + one step back (toggle off)
     s9 = shots.get("task9-follow-on", {})
     v9 = s9.get("viewer") or {}
     ok9, obs9, oblist9 = shot_ok("task9-follow-on")
     p9_raw = presses.get("press:task9-follow-on", [])
     p9 = [p["id"] for p in p9_raw]
     p9_found = any(p.get("found") for p in p9_raw)
+    s9b = shots.get("task9-follow-off", {})
+    v9b = s9b.get("viewer") or {}
+    ok9b, obs9b, oblist9b = shot_ok("task9-follow-off")
+    p9b_raw = presses.get("press:task9-follow-off", [])
+    p9b = [p["id"] for p in p9b_raw]
+    p9b_found = any(p.get("found") for p in p9b_raw)
+    t9_back_ok = (
+        ok9b
+        and not obs9b
+        and len(p9b) == 1
+        and p9b_found
+        and v9b.get("follow_present") is True
+        and v9b.get("follow_on") is False
+        and v9b.get("follow_rect_visible") is True
+    )
+    t9_back = {
+        "ok": t9_back_ok,
+        "presses": p9b,
+        "press_found": p9b_found,
+        "follow_present": v9b.get("follow_present"),
+        "follow_on": v9b.get("follow_on"),
+        "follow_rect_visible": v9b.get("follow_rect_visible"),
+        "capture_ok": ok9b,
+        "obstructed": obs9b,
+        "obstructions": oblist9b,
+    }
     if not full_client_ok or not ok9 or obs9:
         o9 = "harness_failed"
     elif (
@@ -836,18 +1050,17 @@ def evaluate_scorecard(
         o9 = "task_failed"
     tasks.append(make_task(
         9, "Turn Follow agent on and see that it is on", 1, p9, o9,
-        {"press_found": p9_found, "follow_present": v9.get("follow_present"), "follow_on": v9.get("follow_on"), "follow_rect_visible": v9.get("follow_rect_visible"), "capture_ok": ok9, "obstructed": obs9, "obstructions": oblist9},
+        {"press_found": p9_found, "follow_present": v9.get("follow_present"), "follow_on": v9.get("follow_on"), "follow_rect_visible": v9.get("follow_rect_visible"), "capture_ok": ok9, "obstructed": obs9, "obstructions": oblist9, "one_step_back": t9_back},
+        one_step_back=(t9_back_ok if "task9-follow-off" in shots else "not_measured"),
         found=p9_found,
     ))
 
     # Task 10: Close the viewer and get the thread's full width back (budget 1)
-    s_idle = shots.get("idle", {})
     s10 = shots.get("task10-closed", {})
     v10 = s10.get("viewer") or {}
     ok10, obs10, oblist10 = shot_ok("task10-closed")
     p10_raw = presses.get("press:task10-closed", [])
     p10 = [p["id"] for p in p10_raw]
-    idle_main = (s_idle.get("layout") or {}).get("main") or {}
     closed_main = (s10.get("layout") or {}).get("main") or {}
     closed_rail = (s10.get("layout") or {}).get("rail") or {}
     width_diff = abs(float(closed_main.get("w", -1)) - float(idle_main.get("w", -999))) if idle_main and closed_main else 999.0
@@ -1049,6 +1262,9 @@ def main(argv: list[str] | None = None) -> int:
             "cleared_shots": sorted(cleared_shots),
             "excluded_from_contact": [s for s in M.contact_shots() if (kdir / f"{s}.png").exists() and s not in cleared_shots],
             "rail": rail_map,
+            "rail_metric_seen": bool(p.get("rail_metric_seen")),
+            "rail_inventory": p.get("rail_inventory"),
+            "b1_checks": evaluate_b1_kind(kind, p, rail_map),
             "pages": pages_summary,
         }
 

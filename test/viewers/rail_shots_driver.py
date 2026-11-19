@@ -57,18 +57,51 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
                     {"wait": 600},
                     {"mark": "settled:task5-split-probe"},
                     {"shot": "task5-split-probe", "settle": "split", "timeout_ms": settle_timeout_ms},
+                    # Task 5 one step back: press lit rail:Split (closes viewer or returns to previous page)
+                    {"mark": "press:task5-back"},
+                    {"press": "rail:Split"},
+                    {"mark": "settled:task5-back"},
+                    {"shot": "task5-back", "settle": "", "timeout_ms": min(settle_timeout_ms, 5000)},
                 ])
             elif slug == "board":
-                # Task 9: press Follow agent on Board and verify viewer.follow.on + visible state
+                # Task 9: press Follow agent on Board and verify viewer.follow.on + visible state, then one step back
                 steps.extend([
                     {"mark": "press:task9-follow-on"},
                     {"press": "follow-agent"},
                     {"wait": 600},
                     {"mark": "settled:task9-follow-on"},
                     {"shot": "task9-follow-on", "settle": "board", "timeout_ms": settle_timeout_ms},
+                    {"mark": "press:task9-follow-off"},
+                    {"press": "follow-agent"},
+                    {"wait": 600},
+                    {"mark": "settled:task9-follow-off"},
+                    {"shot": "task9-follow-off", "settle": "board", "timeout_ms": settle_timeout_ms},
+                    # Task 1 one step back: press lit rail:Board to shut viewer and restore idle width
+                    {"mark": "press:task1-back"},
+                    {"press": "rail:Board"},
+                    {"mark": "settled:task1-back"},
+                    {"shot": "task1-back", "settle": "", "timeout_ms": settle_timeout_ms},
+                ])
+            elif slug == "3d":
+                # Task 2 one step back: press lit rail:3D to shut viewer and restore idle width
+                steps.extend([
+                    {"mark": "press:task2-back"},
+                    {"press": "rail:3D"},
+                    {"mark": "settled:task2-back"},
+                    {"shot": "task2-back", "settle": "", "timeout_ms": settle_timeout_ms},
                 ])
 
     if kind == "full":
+        # Task 6 one step back (kept separate so mech -> split-after-mech stays a direct transition)
+        steps.extend([
+            {"mark": "task6-back-setup"},
+            {"press": "rail:Mech"},
+            {"wait_settled": "mech", "tag": "task6-back-start", "timeout_ms": settle_timeout_ms},
+            {"mark": "press:task6-back"},
+            {"press": "rail:Mech"},
+            {"mark": "settled:task6-back"},
+            {"shot": "task6-back", "settle": "", "timeout_ms": settle_timeout_ms},
+        ])
         # Task 3: verify 1-press return to Schematic from every other page (each starting page settled first)
         for src_slug, src_rail, src_settle in M.TASK3_SOURCES:
             steps.extend([
@@ -86,38 +119,115 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
             {"press": "rail:Schematic"},
             {"mark": "settled:task10-closed"},
             {"shot": "task10-closed", "settle": "", "timeout_ms": settle_timeout_ms},
+            # Clear the Task 5 R1 probe so Esc moves focus out of the composer cleanly during B1 key checks.
+            {"action": ["view-probe", ""]},
+            {"wait": 100},
         ])
-        if embed:
-            # Task 8: move between Backplane's viewer and embedded KiCad editor (Board -> Edit -> View)
+    else:
+        # Close the last opened page (Browser) so Rule B1 probes start from idle.
+        steps.extend([
+            {"press": "rail:Browser"},
+            {"wait_settled": "", "tag": "b1-start-idle", "timeout_ms": min(settle_timeout_ms, 4000)},
+        ])
+
+    # Rule B1: one selection behaviour for every rail entry (press open/close, bare key open/close, palette open, disabled no-op).
+    avail = M.HAS_RESOURCE.get(kind, set())
+    for eid, _label, rail_id, settle_kind, bare_key, pal_query in M.B1_ENTRIES:
+        pal_type = " ".join(pal_query.lower())
+        if eid in avail:
             steps.extend([
-                {"mark": "task8-setup"},
-                {"press": "rail:Board"},
-                {"wait_settled": "board", "tag": "task8-start-board", "timeout_ms": settle_timeout_ms},
-                {"mark": "press:task8-edit"},
-                {"click": "ui:Edit", "within": 8000},
-                {"kicad": {"wait_painted": 60000, "kind": "PCB", "tag": "task8-edit"}},
-                {"wait": 500},
-                {"mark": "settled:task8-edit"},
-                {"shot": "task8-edit"},
-                {"mark": "press:task8-view"},
-                {"click": "ui:View", "within": 8000},
-                {"wait": 800},
-                {"kicad": {"report": True, "tag": "task8-view"}},
-                {"mark": "settled:task8-view"},
-                {"shot": "task8-view", "settle": "board", "timeout_ms": settle_timeout_ms},
-                # Task 7: run a simulation of the schematic (rail:Simulation -> Simulator -> Run)
-                {"mark": "press:task7-sim"},
-                {"click": "rail:Simulation", "within": 8000},
-                {"kicad": {"wait_painted": 60000, "kind": "SIMULATOR", "tag": "task7-sim"}},
-                {"wait": 800},
-                {"mark": "settled:task7-sim"},
-                {"shot": "task7-sim"},
-                {"mark": "embed:sim-run"},
-                {"wait": 3000},
-                {"kicad": {"report": True, "tag": "task7-sim-run"}},
-                {"mark": "settled:task7-sim-run"},
-                {"shot": "task7-sim-run"},
+                {"mark": f"b1:press-open:{eid}"},
+                {"press": rail_id},
+                {"wait_settled": settle_kind, "tag": f"b1-press-open-{eid}", "timeout_ms": min(settle_timeout_ms, 6000)},
+                {"mark": f"b1:press-close:{eid}"},
+                {"press": rail_id},
+                {"wait_settled": "", "tag": f"b1-press-close-{eid}", "timeout_ms": min(settle_timeout_ms, 3000)},
+                # Focus root_focus deterministically (ctrl-l focuses composer; escape moves to root_focus)
+                {"keys": "ctrl-l"},
+                {"wait": 60},
+                {"keys": "escape"},
+                {"wait": 60},
+                {"mark": f"b1:key-open:{eid}"},
+                {"keys": bare_key},
+                {"wait_settled": settle_kind, "tag": f"b1-key-open-{eid}", "timeout_ms": min(settle_timeout_ms, 2500)},
+                {"mark": f"b1:key-close:{eid}"},
+                {"keys": bare_key},
+                {"wait_settled": "", "tag": f"b1-key-close-{eid}", "timeout_ms": min(settle_timeout_ms, 2500)},
+                # Ensure viewer is closed before palette test (ctrl-l + escape closes if still open)
+                {"keys": "ctrl-l"},
+                {"wait": 50},
+                {"keys": "escape"},
+                {"wait": 80},
+                {"mark": f"b1:palette-open:{eid}"},
+                {"press": "rail:Commands"},
+                {"wait": 120},
+                {"keys": pal_type},
+                {"wait": 120},
+                {"keys": "enter"},
+                {"wait_settled": settle_kind, "tag": f"b1-palette-open-{eid}", "timeout_ms": min(settle_timeout_ms, 4000)},
+                # Close viewer (or palette if it didn't match) without ever toggling a closed viewer open
+                {"keys": "ctrl-l"},
+                {"wait": 40},
+                {"keys": "escape"},
+                {"wait_settled": "", "tag": f"b1-cleanup-{eid}", "timeout_ms": min(settle_timeout_ms, 2500)},
             ])
+        else:
+            steps.extend([
+                {"mark": f"b1:disabled-press:{eid}"},
+                {"press": rail_id},
+                {"wait": 150},
+                {"wait_settled": "", "tag": f"b1-disabled-press-{eid}", "timeout_ms": 1200},
+                {"keys": "ctrl-l"},
+                {"wait": 60},
+                {"keys": "escape"},
+                {"wait": 60},
+                {"mark": f"b1:disabled-key:{eid}"},
+                {"keys": bare_key},
+                {"wait": 150},
+                {"wait_settled": "", "tag": f"b1-disabled-key-{eid}", "timeout_ms": 1200},
+                {"mark": f"b1:disabled-palette:{eid}"},
+                {"press": "rail:Commands"},
+                {"wait": 120},
+                {"keys": pal_type},
+                {"wait": 120},
+                {"keys": "enter"},
+                {"wait": 150},
+                {"keys": "escape"},
+                {"wait": 80},
+                {"wait_settled": "", "tag": f"b1-disabled-palette-{eid}", "timeout_ms": 1200},
+            ])
+
+    if kind == "full" and embed:
+        # Task 8: move between Backplane's viewer and embedded KiCad editor (Board -> Edit -> View)
+        steps.extend([
+            {"mark": "task8-setup"},
+            {"press": "rail:Board"},
+            {"wait_settled": "board", "tag": "task8-start-board", "timeout_ms": settle_timeout_ms},
+            {"mark": "press:task8-edit"},
+            {"click": "ui:Edit", "within": 8000},
+            {"kicad": {"wait_painted": 60000, "kind": "PCB", "tag": "task8-edit"}},
+            {"wait": 500},
+            {"mark": "settled:task8-edit"},
+            {"shot": "task8-edit"},
+            {"mark": "press:task8-view"},
+            {"click": "ui:View", "within": 8000},
+            {"wait": 800},
+            {"kicad": {"report": True, "tag": "task8-view"}},
+            {"mark": "settled:task8-view"},
+            {"shot": "task8-view", "settle": "board", "timeout_ms": settle_timeout_ms},
+            # Task 7: run a simulation of the schematic (rail:Simulation -> Simulator -> Run)
+            {"mark": "press:task7-sim"},
+            {"click": "rail:Simulation", "within": 8000},
+            {"kicad": {"wait_painted": 60000, "kind": "SIMULATOR", "tag": "task7-sim"}},
+            {"wait": 800},
+            {"mark": "settled:task7-sim"},
+            {"shot": "task7-sim"},
+            {"mark": "embed:sim-run"},
+            {"wait": 3000},
+            {"kicad": {"report": True, "tag": "task7-sim-run"}},
+            {"mark": "settled:task7-sim-run"},
+            {"shot": "task7-sim-run"},
+        ])
 
     return steps
 
