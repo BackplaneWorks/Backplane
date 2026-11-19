@@ -3022,6 +3022,8 @@ async fn spawn_gui_session(
                             let ty = ev["type"].as_str().unwrap_or("");
                             let ty_n = ev["type"].as_i64().unwrap_or(0);
                             let detail = ev["detail"].as_str().unwrap_or("dialog").to_string();
+                            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("kicad embed event: {ev}"); }
+                            if let Some(m) = startup_dialog(&pro, gen, ev) { let _ = me.send(m); }
                             if let Some(n) = notice_of(ev) {
                                 let _ = me.send(Msg::Notice { pro: pro.clone(), gen, notice: n });
                             } else if ty == "ET_DIALOG_OPENED" || ty_n == 10 {
@@ -3091,7 +3093,7 @@ async fn spawn_gui_session(
                 match first_show_wait(&caps, std::env::var("BACKPLANE_KICAD_DECOR_SLEEP").ok().as_deref()) {
                     // bp.13: the fork shows embedded frames at once and says when the first one has drawn (ET_FRAME_DRAWN)
                     FirstShow::Drawn(cap) if win > 0 => {
-                        let drawn = wait_frame_drawn(&me, &sock, &desc, win, &mut ev_since, cap).await;
+                        let drawn = wait_frame_drawn(&me, &pro, gen, &sock, &desc, win, &mut ev_since, cap).await;
                         phase(if drawn { "drawn" } else { "drawn: not said within the cap" });
                     }
                     FirstShow::Sleep(ms) if win > 0 => {
@@ -3125,7 +3127,7 @@ async fn spawn_gui_session(
 }
 
 /// ET_FRAME_DRAWN (28) for `win` on the events socket within `cap_ms`; `since` moves past what was read (the events loop starts there).
-async fn wait_frame_drawn(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, win: u64, since: &mut u64, cap_ms: u64) -> bool {
+async fn wait_frame_drawn(me: &mpsc::UnboundedSender<Msg>, pro: &str, gen: u64, sock: &str, desc: &str, win: u64, since: &mut u64, cap_ms: u64) -> bool {
     let until = tokio::time::Instant::now() + Duration::from_millis(cap_ms);
     let ev_path = format!("{sock}.events");
     let mut seen: Vec<Value> = Vec::new();
@@ -3134,11 +3136,27 @@ async fn wait_frame_drawn(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &st
         let o = raw_on(me, &ev_path, desc, "kiapi.backplane.embed.NextEvents", json!({"since": *since, "wait_ms": left.min(1000), "max": 64}), left + 1000).await;
         if !o["ok"].as_bool().unwrap_or(false) { tokio::time::sleep(Duration::from_millis(30)).await; continue }
         let next = u64_of(&o["message"]["next"]);
-        for ev in o["message"]["events"].as_array().into_iter().flatten() { seen.push(ev.clone()); }
+        for ev in o["message"]["events"].as_array().into_iter().flatten() {
+            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("kicad embed event: {ev}"); }
+            // the recovery alert's close comes here when its answer let KiCad's API up: the session must not keep it open
+            if let Some(m) = startup_dialog(pro, gen, ev) { let _ = me.send(m); }
+            seen.push(ev.clone());
+        }
         if next > *since { *since = next; }
         if seen.iter().any(|ev| (ev["type"] == "ET_FRAME_DRAWN" || ev["type"].as_i64() == Some(28)) && u64_of(&ev["frame"]["window"]) == win) { return true }
     }
     false
+}
+
+/// A titled ET_DIALOG_OPENED/CLOSED read before the events loop runs (the start's handshake, the first frame's draw), for the session as
+/// the loop sends it: macOS's recovery alert (an NSAlert before KiCad's API is up, named by fork embed's MODAL_TITLE_SCOPE) reaches
+/// `dialogs`, so the pane says "KiCad is asking: Recover Unsaved Changes". An untitled one (an older fork) is left to StartupReason.
+fn startup_dialog(pro: &str, gen: u64, ev: &Value) -> Option<Msg> {
+    let (ty, ty_n) = (ev["type"].as_str().unwrap_or(""), ev["type"].as_i64().unwrap_or(0));
+    if !(matches!(ty, "ET_DIALOG_OPENED" | "ET_DIALOG_CLOSED") || matches!(ty_n, 10 | 11)) { return None }
+    let title = ev["detail"].as_str().unwrap_or("").to_string();
+    if title.is_empty() { return None }
+    Some(Msg::Dialog { pro: pro.to_string(), gen, open: ty == "ET_DIALOG_OPENED" || ty_n == 10, title })
 }
 
 /// KiCad's ET_NOTICE (29, `embed-notice`): a message box embedded KiCad did not show (it would have sat over a frame the host had not
@@ -3926,6 +3944,15 @@ mod tests {
         // unreadable (no objects): judged by times, as before
         let e = crate::plat::tmp::dir("hist-unread"); std::fs::create_dir_all(e.join(".history/.git")).unwrap(); std::fs::write(e.join(".history/.git/HEAD"), "ref: refs/heads/master\n").unwrap();
         assert_eq!(history_unsaved(&e), None);
+    }
+    #[test] fn a_titled_dialog_before_the_events_loop_reaches_the_session_and_an_untitled_one_does_not() {
+        let open = json!({"type": "ET_DIALOG_OPENED", "detail": "Recover Unsaved Changes"});
+        let Some(Msg::Dialog { open: o, title, gen, .. }) = startup_dialog("/p/a.kicad_pro", 3, &open) else { panic!("no dialog") };
+        assert!(o); assert_eq!((title.as_str(), gen), ("Recover Unsaved Changes", 3));
+        let Some(Msg::Dialog { open: o, .. }) = startup_dialog("/p/a.kicad_pro", 3, &json!({"type": 11, "detail": "Recover Unsaved Changes"})) else { panic!("no close") };
+        assert!(!o);
+        assert!(startup_dialog("/p/a.kicad_pro", 3, &json!({"type": "ET_DIALOG_OPENED"})).is_none());
+        assert!(startup_dialog("/p/a.kicad_pro", 3, &json!({"type": "ET_FRAME_DRAWN", "detail": "x"})).is_none());
     }
     #[test] fn a_macos_stall_is_kicads_recover_question_when_there_is_something_to_recover() {
         // nothing kept: the stall is a system prompt that names Backplane (the Documents prompt)
