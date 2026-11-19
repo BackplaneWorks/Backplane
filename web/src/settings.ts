@@ -20,7 +20,6 @@ export interface SettingsRow {
 export interface SettingsCallbacks {
   onLoadDevices: () => Promise<SettingsRow[]>;
   onDevicesAct: (action: string, value: string) => Promise<void>;
-  onSetTheme: (theme: "dark" | "light") => void;
   onLogout: () => Promise<void>;
 }
 
@@ -80,34 +79,6 @@ export class SettingsModal {
 
   public async refresh(): Promise<void> {
     const frag = document.createDocumentFragment();
-
-    // Appearance section
-    const appSec = document.createElement("section");
-    appSec.className = "bp-set-section";
-    const appHead = document.createElement("div");
-    appHead.className = "bp-set-head";
-    appHead.textContent = "Appearance";
-    const appRow = document.createElement("div");
-    appRow.className = "bp-set-row";
-    const themeLabel = document.createElement("span");
-    themeLabel.textContent = "Theme";
-    const themeBtns = document.createElement("div");
-    themeBtns.className = "bp-set-btns";
-    const isLight = document.documentElement.classList.contains("light");
-    const darkBtn = document.createElement("button");
-    darkBtn.type = "button";
-    darkBtn.className = isLight ? "" : "on";
-    darkBtn.textContent = "Dark";
-    darkBtn.addEventListener("click", () => { this.cb.onSetTheme("dark"); void this.refresh(); });
-    const lightBtn = document.createElement("button");
-    lightBtn.type = "button";
-    lightBtn.className = isLight ? "on" : "";
-    lightBtn.textContent = "Light";
-    lightBtn.addEventListener("click", () => { this.cb.onSetTheme("light"); void this.refresh(); });
-    themeBtns.append(darkBtn, lightBtn);
-    appRow.append(themeLabel, themeBtns);
-    appSec.append(appHead, appRow);
-    frag.appendChild(appSec);
 
     // This Browser section (self-logout)
     const selfSec = document.createElement("section");
@@ -187,7 +158,8 @@ export class SettingsModal {
     } catch (e) {
       const err = document.createElement("div");
       err.className = "bp-dim";
-      err.textContent = e instanceof Error ? e.message : "Could not load devices.";
+      const msg = e instanceof Error && e.message ? e.message : "Not available from a browser";
+      err.textContent = `${msg} — manage paired devices in Backplane › Settings › Devices on desktop or a paired phone.`;
       devSec.appendChild(err);
     }
 

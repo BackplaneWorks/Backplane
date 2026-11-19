@@ -3,10 +3,13 @@
 import { ChatView, type EntryItem, type ReviewBar, type UnansweredNotice } from "./chat";
 import { ComposerView, type MentionItem, type SlashCommand } from "./composer";
 import { setLocale } from "./i18n";
-import { DEFAULT_RAIL_ITEMS, RailView, type RailEntry } from "./rail";
+import { RailView, type RailEntry } from "./rail";
 import { SettingsModal, type SettingsRow } from "./settings";
 import { SidebarView, type BotItem, type ProjectItem, type RoomItem, type ThreadItem } from "./sidebar";
 import { HubClient, type DataPush, type HelloFrame } from "./ws";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore resolved by web/build.ts to ./viewers/viewer-pane.ts when present
+import { mountViewerPane } from "virtual:viewer-pane";
 
 export interface ViewerHostApi {
   hub: HubClient;
@@ -19,16 +22,13 @@ type ViewerMountFn = (el: HTMLElement, api: ViewerHostApi) => {
   close: () => void;
 };
 
-declare global {
-  interface Window {
-    __bpMountViewerPane?: ViewerMountFn;
-  }
-}
+type SubId = number | string;
 
-function applyTheme(theme: string | undefined): void {
+function applyHubTheme(theme: string | undefined): void {
   if (!theme) return;
   const light = theme === "light";
   document.documentElement.classList.toggle("light", light);
+  // Pre-connect paint hint only; the hub's hello.theme / theme push always wins on connect.
   try { localStorage.setItem("bp.theme", light ? "light" : "dark"); } catch { /* ignore */ }
 }
 
@@ -40,9 +40,9 @@ function mountApp(): void {
   const root = document.getElementById("root");
   if (!root) return;
 
+  // Pre-connect paint hint only; overwritten as soon as hello.theme arrives.
   try {
-    const saved = localStorage.getItem("bp.theme");
-    if (saved === "light") document.documentElement.classList.add("light");
+    if (localStorage.getItem("bp.theme") === "light") document.documentElement.classList.add("light");
   } catch { /* ignore */ }
 
   const topbar = document.createElement("header");
@@ -112,7 +112,8 @@ function mountApp(): void {
   let bots: BotItem[] = [];
   let rooms: RoomItem[] = [];
   let selectedThreadId = "";
-  let threadSubId = "";
+  let threadGen = 0;
+  let threadSubId: SubId | null = null;
   let olderCursor: string | null = null;
   let activeRailKind = "";
   let viewerController: ReturnType<ViewerMountFn> | null = null;
@@ -131,8 +132,9 @@ function mountApp(): void {
     },
     onToggleReview: (nextOn) => {
       if (!selectedThreadId) return;
+      const gen = threadGen;
       void hub.rpc<{ review?: ReviewBar | null }>("thread.review", { thread: selectedThreadId, on: nextOn })
-        .then((r) => chat.setReview(r.review ?? null))
+        .then((r) => { if (gen === threadGen) chat.setReview(r.review ?? null); })
         .catch(() => {});
     },
     onUnansweredAction: (action, value) => {
@@ -189,7 +191,6 @@ function mountApp(): void {
     onDevicesAct: async (action, value) => {
       await hub.rpc("devices.page.act", { action, value });
     },
-    onSetTheme: (theme) => applyTheme(theme),
     onLogout: async () => {
       try {
         await fetch("/auth/web/logout", {
@@ -232,8 +233,8 @@ function mountApp(): void {
     activeRailKind = kind;
     rail.setActive(kind);
     viewerEl.classList.remove("bp-hidden");
-    if (!viewerController && typeof window.__bpMountViewerPane === "function") {
-      viewerController = window.__bpMountViewerPane(viewerEl, {
+    if (!viewerController && typeof mountViewerPane === "function") {
+      viewerController = (mountViewerPane as ViewerMountFn)(viewerEl, {
         hub,
         getThreadId: () => selectedThreadId,
         closeViewer,
@@ -256,27 +257,31 @@ function mountApp(): void {
       head.append(lbl, closeBtn);
       const bodyMsg = document.createElement("div");
       bodyMsg.className = "bp-dim bp-viewer-msg";
-      bodyMsg.textContent = `Viewer pane ready (${kind}).`;
+      bodyMsg.textContent = `Viewer pane (${kind}).`;
       box.append(head, bodyMsg);
       viewerEl.replaceChildren(box);
     }
   }
 
-  async function refreshRail(threadId: string): Promise<void> {
+  async function refreshRail(threadId: string, gen: number): Promise<void> {
     if (!threadId || !hub.hasFeature("rail")) {
-      rail.setItems(DEFAULT_RAIL_ITEMS);
+      if (gen === threadGen) rail.setItems([]);
       return;
     }
     try {
       const res = await hub.rpc<{ rail?: RailEntry[]; items?: RailEntry[] }>("viewer.rail", { thread: threadId });
-      const items = res.rail ?? res.items ?? [];
-      rail.setItems(items.length > 0 ? items : DEFAULT_RAIL_ITEMS);
+      if (gen !== threadGen) return;
+      const items = Array.isArray(res.rail) ? res.rail : Array.isArray(res.items) ? res.items : [];
+      rail.setItems(items);
     } catch {
-      rail.setItems(DEFAULT_RAIL_ITEMS);
+      if (gen === threadGen) rail.setItems([]);
     }
   }
 
   async function loadLists(): Promise<void> {
+    // Old socket's subscriptions do not survive reconnect.
+    threadSubId = null;
+
     const [pRes, tRes] = await Promise.all([
       hub.rpc<{ projects?: ProjectItem[] }>("projects.list", { limit: 100 }),
       hub.rpc<{ threads?: ThreadItem[] }>("threads.list", { limit: 200, archived: false }),
@@ -295,30 +300,38 @@ function mountApp(): void {
     sidebar.setData(projects, threads, bots, rooms);
     await hub.rpc("subscribe", { topic: "lists" }).catch(() => {});
 
-    if (!selectedThreadId) {
+    // Always re-fetch & resubscribe the selected thread on (re)connect.
+    let targetId = selectedThreadId;
+    if (!targetId) {
       let saved = "";
       try { saved = localStorage.getItem("bp.lastThread") || ""; } catch { /* ignore */ }
       const candidate =
         threads.find((x) => x.id === saved) ??
         threads.find((x) => !x.archived && !x.swarm && !x.settled) ??
         threads.find((x) => !x.archived && !x.swarm);
-      if (candidate) {
-        await openThread(candidate.id);
-      } else {
-        composer.setState(false, false);
-        updateCrumb();
-      }
+      targetId = candidate?.id ?? "";
+    }
+
+    if (targetId && threads.some((x) => x.id === targetId)) {
+      await openThread(targetId);
     } else {
+      selectedThreadId = "";
+      rail.setItems([]);
+      composer.setState(false, false);
       updateCrumb();
     }
   }
 
   async function openThread(threadId: string): Promise<void> {
-    if (threadSubId) {
-      void hub.rpc("unsubscribe", { sub: threadSubId }).catch(() => {});
-      threadSubId = "";
+    const gen = ++threadGen;
+    const prevSub = threadSubId;
+    threadSubId = null;
+    if (prevSub !== null) {
+      void hub.rpc("unsubscribe", { sub: prevSub }).catch(() => {});
     }
+
     selectedThreadId = threadId;
+    olderCursor = null;
     try { localStorage.setItem("bp.lastThread", threadId); } catch { /* ignore */ }
     sidebar.setSelected(threadId);
     sidebarEl.classList.remove("bp-sidebar-open");
@@ -326,42 +339,66 @@ function mountApp(): void {
 
     const th = threads.find((x) => x.id === threadId) ?? null;
     composer.setState(true, th?.state === "working");
+    rail.setItems([]);
 
-    const res = await hub.rpc<{
+    let res: {
       entries?: EntryItem[];
       next?: string | null;
       unanswered?: UnansweredNotice | null;
-    }>("thread.entries", { thread: threadId, limit: 40 });
+    };
+    try {
+      res = await hub.rpc("thread.entries", { thread: threadId, limit: 40 });
+    } catch {
+      return;
+    }
+    if (gen !== threadGen) return;
     olderCursor = res.next ?? null;
 
     let review: ReviewBar | null = null;
     if (hub.hasFeature("reviewmode")) {
       try {
         const r = await hub.rpc<{ review?: ReviewBar | null }>("thread.review", { thread: threadId });
+        if (gen !== threadGen) return;
         review = r.review ?? null;
       } catch { /* ignore */ }
     }
+    if (gen !== threadGen) return;
 
     chat.setThread(th, res.entries ?? [], Boolean(olderCursor), review, res.unanswered ?? null);
 
     try {
-      const sub = await hub.rpc<{ sub?: string }>("subscribe", { topic: "thread", thread: threadId });
-      threadSubId = sub.sub ?? "";
+      const sub = await hub.rpc<{ sub?: SubId }>("subscribe", { topic: "thread", thread: threadId });
+      const subVal = sub.sub ?? null;
+      if (subVal !== null) {
+        if (gen !== threadGen) {
+          // Superseded while subscribe was in flight: drop the stale subscription immediately.
+          void hub.rpc("unsubscribe", { sub: subVal }).catch(() => {});
+          return;
+        }
+        threadSubId = subVal;
+      }
     } catch { /* ignore */ }
+    if (gen !== threadGen) return;
 
-    void refreshRail(threadId);
+    void refreshRail(threadId, gen);
     if (activeRailKind) openViewer(activeRailKind);
   }
 
   async function loadOlderEntries(): Promise<void> {
     if (!selectedThreadId || !olderCursor) return;
-    const res = await hub.rpc<{ entries?: EntryItem[]; next?: string | null }>("thread.entries", {
-      thread: selectedThreadId,
-      limit: 40,
-      before: olderCursor,
-    });
-    olderCursor = res.next ?? null;
-    chat.prependEntries(res.entries ?? [], Boolean(olderCursor));
+    const gen = threadGen;
+    const threadId = selectedThreadId;
+    const cursor = olderCursor;
+    try {
+      const res = await hub.rpc<{ entries?: EntryItem[]; next?: string | null }>("thread.entries", {
+        thread: threadId,
+        limit: 40,
+        before: cursor,
+      });
+      if (gen !== threadGen || selectedThreadId !== threadId) return;
+      olderCursor = res.next ?? null;
+      chat.prependEntries(res.entries ?? [], Boolean(olderCursor));
+    } catch { /* ignore */ }
   }
 
   async function createThread(projectId: string): Promise<void> {
@@ -380,9 +417,12 @@ function mountApp(): void {
 
   async function sendMessage(text: string): Promise<void> {
     if (!selectedThreadId) return;
+    const gen = threadGen;
+    const threadId = selectedThreadId;
     const clientId = makeClientId();
+    const localId = `local-${clientId}`;
     chat.upsertEntry({
-      id: `local-${clientId}`,
+      id: localId,
       kind: "user",
       text,
       at: Date.now(),
@@ -390,23 +430,31 @@ function mountApp(): void {
     });
     try {
       const res = await hub.rpc<{ entry?: EntryItem }>("message.send", {
-        thread: selectedThreadId,
+        thread: threadId,
         text,
         clientId,
       });
+      if (gen !== threadGen || selectedThreadId !== threadId) return;
       if (res.entry) chat.upsertEntry(res.entry);
     } catch (e) {
-      composer.showError(e instanceof Error ? e.message : "Failed to send message");
+      if (gen === threadGen && selectedThreadId === threadId) {
+        chat.removeEntry(localId);
+        composer.setDraft(text);
+        composer.showError(e instanceof Error ? e.message : "Failed to send message");
+      }
     }
   }
 
   async function runSlashCommand(text: string): Promise<void> {
     if (!selectedThreadId) return;
+    const gen = threadGen;
+    const threadId = selectedThreadId;
     try {
       const res = await hub.rpc<{ kind?: string; text?: string; error?: string }>("composer.run", {
-        thread: selectedThreadId,
+        thread: threadId,
         text,
       });
+      if (gen !== threadGen || selectedThreadId !== threadId) return;
       if (res.error) {
         composer.setDraft(text);
         composer.showError(res.error);
@@ -414,8 +462,10 @@ function mountApp(): void {
         composer.setDraft(res.text);
       }
     } catch (e) {
-      composer.setDraft(text);
-      composer.showError(e instanceof Error ? e.message : "Command refused");
+      if (gen === threadGen && selectedThreadId === threadId) {
+        composer.setDraft(text);
+        composer.showError(e instanceof Error ? e.message : "Command refused");
+      }
     }
   }
 
@@ -425,7 +475,7 @@ function mountApp(): void {
       if (res.thread) {
         threads = threads.map((x) => (x.id === res.thread!.id ? res.thread! : x));
         sidebar.setData(projects, threads, bots, rooms);
-        chat.updateThreadMeta(res.thread);
+        if (res.thread.id === selectedThreadId) chat.updateThreadMeta(res.thread);
       }
     } catch (e) {
       composer.showError(e instanceof Error ? e.message : `Action "${action}" not allowed`);
@@ -436,7 +486,7 @@ function mountApp(): void {
     if (state === "connected" && hello) {
       connEl.textContent = "Connected";
       connEl.className = "bp-conn-status bp-ok";
-      if (hello.theme) applyTheme(hello.theme);
+      if (hello.theme) applyHubTheme(hello.theme);
       if (hello.locale) setLocale(hello.locale);
       if (Array.isArray(hello.commands)) composer.setCommands(hello.commands as SlashCommand[]);
       void loadLists();
@@ -517,7 +567,7 @@ function mountApp(): void {
         break;
       }
       case "theme": {
-        if (typeof p.theme === "string") applyTheme(p.theme);
+        if (typeof p.theme === "string") applyHubTheme(p.theme);
         break;
       }
       default:

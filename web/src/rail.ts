@@ -1,5 +1,5 @@
 // Right viewer rail: 72px wide, 48px vertical items, 2px left accent bar when active.
-// Renders verbatim from the hub's `viewer.rail` model when available, with a desktop-parity fallback.
+// Renders verbatim from the hub's `viewer.rail` model — hub is the sole authority (no hardcoded fallback).
 
 export interface RailEntry {
   id: string;
@@ -10,21 +10,6 @@ export interface RailEntry {
   state: "on" | "off" | "disabled";
   why?: string;
 }
-
-export const DEFAULT_RAIL_ITEMS: RailEntry[] = [
-  { id: "terminal", label: "Terminal", icon: "terminal", group: "tools", key: "`", state: "off" },
-  { id: "commands", label: "Commands", icon: "search", group: "tools", key: "K", state: "off" },
-  { id: "board", label: "Board", icon: "circuit-board", group: "cad", key: "B", state: "off" },
-  { id: "schematic", label: "Schematic", icon: "cpu", group: "cad", key: "S", state: "off" },
-  { id: "3d", label: "3D", icon: "box", group: "cad", key: "3", state: "off" },
-  { id: "gerbers", label: "Gerbers", icon: "file-stack", group: "cad", key: "G", state: "off" },
-  { id: "split", label: "Split", icon: "layout-panel-left", group: "cad", key: "P", state: "off" },
-  { id: "mech", label: "Mech", icon: "layers", group: "cad", key: "M", state: "off" },
-  { id: "files", label: "Files", icon: "folder", group: "code", key: "F", state: "off" },
-  { id: "diff", label: "Diff", icon: "diff", group: "code", key: "D", state: "off" },
-  { id: "review", label: "Review", icon: "circle-check", group: "code", key: "R", state: "off" },
-  { id: "browser", label: "Browser", icon: "globe", group: "code", key: "W", state: "off" },
-];
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -67,7 +52,7 @@ function makeIcon(name: string): SVGSVGElement {
 
 export class RailView {
   private el: HTMLElement;
-  private items: RailEntry[] = DEFAULT_RAIL_ITEMS;
+  private items: RailEntry[] = [];
   private activeId = "";
   private onPress: (id: string) => void;
 
@@ -78,7 +63,7 @@ export class RailView {
   }
 
   public setItems(items: RailEntry[]): void {
-    this.items = items.length > 0 ? items : DEFAULT_RAIL_ITEMS;
+    this.items = items;
     this.render();
   }
 
