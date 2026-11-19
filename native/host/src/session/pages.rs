@@ -349,6 +349,8 @@ pub fn apply_reads(f: &dyn select::Facts, hub: &str, session: &mut Value, reads:
                 let mut i = Map::new();
                 i.insert(format!("rp.md:{k}"), json!(s(rep, "md"))); i.insert(format!("rp.err:{k}"), json!(s(rep, "err")));
                 i.insert(format!("rp.gate:{k}"), json!(s(rep, "gate"))); i.insert(format!("rp.line:{k}"), json!(s(rep, "line")));
+                i.insert(format!("rp.checklistGate:{k}"), json!(if rep["checklistGate"] == true { "1" } else { "" }));
+                i.insert(format!("rp.otherGates:{k}"), json!(s(rep, "otherGates")));
                 i.insert(format!("rp.tasks:{k}"), json!(rep.get("tasks").filter(|t| t.is_array()).map_or("[]".to_string(), |t| t.to_string())));
                 p = json!({"info": i, "drafts": {format!("@rp.busy:{}", s(rep, "thread")): "", format!("@rp.req:{id}"): ""}});
             }
@@ -419,7 +421,15 @@ pub fn review_json(session: &Value, sel: &str) -> Value {
     let checks = if report_page == "checks" {
         let tasks: Value = serde_json::from_str(info(session, &key("rp.tasks"))).unwrap_or(json!([]));
         let rows: Vec<Value> = tasks.as_array().into_iter().flatten().enumerate().map(|(i, t)| json!({"index": i, "text": s(t, "text"), "done": t["done"].as_bool().unwrap_or(false), "group": s(t, "group")})).collect();
-        json!({"gate": info(session, &key("rp.gate")), "line": info(session, &key("rp.line")), "tasks": rows})
+        let gate = if info(session, &key("rp.checklistGate")) == "1" {
+            let count = rows.iter().filter(|task| task["done"] == false).count();
+            let mut reasons = Vec::new();
+            let others = info(session, &key("rp.otherGates"));
+            if !others.is_empty() { reasons.push(others.to_owned()); }
+            if count > 0 { reasons.push(format!("Checklist: {count} unticked")); }
+            reasons.join("; ")
+        } else { info(session, &key("rp.gate")).to_owned() };
+        json!({"gate": gate, "line": info(session, &key("rp.line")), "tasks": rows})
     } else { Value::Null };
     let tabs: Vec<Value> = ["bom", "checks", "comments", "release"].iter().map(|p| tab(p, page)).collect();
     json!({"tabs": tabs, "title": title, "busy": busy, "note": note, "blocks": blocks, "checks": checks, "release": if page == "release" { json!({"note":"Tag this design and make its fabrication outputs: Gerbers, drill, CPL, BOM, PDFs and STEP, in .backplane/releases.", "blocks": md::nodes_json(&md::render(info(session, &format!("rp.md:{sel}:release"))))}) } else { Value::Null }})
@@ -509,13 +519,17 @@ mod tests {
         assert_eq!(cmd["p"]["trigger"], "release");
         patch::merge(&mut session, &open.session_patch);
         apply_reads(&M, "h", &mut session, &[json!({"method":"review.checks","ok":true,"id":5,"result":{"report":{
-            "page":"checks","thread":T,"gate":"Checklist: 1 unticked","tasks":[{"text":"ERC clean","done":false}],"md":"Project check output"
+            "page":"checks","thread":T,"checklistGate":true,"gate":"Checklist: 1 unticked","tasks":[{"text":"ERC clean","done":false}],"md":"Project check output"
         }}})]);
         let r = review_json(&session, T);
         assert_eq!(r["checks"]["gate"], "Checklist: 1 unticked");
         assert_eq!(r["checks"]["tasks"][0]["text"], "ERC clean");
         assert!(!r["blocks"].as_array().unwrap().is_empty());
         assert!(r["release"]["note"].is_string());
+        apply_reads(&M, "h", &mut session, &[json!({"method":"review.tick","result":{"ticked":{
+            "thread":T,"tasks":[{"text":"ERC clean","done":true}]
+        }}})]);
+        assert_eq!(review_json(&session, T)["checks"]["gate"], "");
     }
     #[test] fn changing_doors_does_not_run_a_second_working_copy_report() {
         for page in ["bom", "checks"] {
