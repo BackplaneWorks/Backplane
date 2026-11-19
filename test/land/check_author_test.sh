@@ -75,10 +75,28 @@ ok "$rc" "lane rebases over GitHub-committed main and checks only origin/main..H
 mk build@amemb.com unknown@invalid.example; rejected=$(git rev-parse HEAD)
 if ! printf 'refs/heads/lane %s refs/heads/lane %s\n' "$rejected" "$old" | "$hooks/pre-push" >"$T/rejected" 2>&1; then rc=0; else rc=1; fi
 ok "$rc" "installed pre-push rejects a new unknown identity"
-if ! git update-ref refs/remotes/origin/main "$rejected" "$upstream" >"$T/rejected" 2>&1 && [ "$(git rev-parse origin/main)" = "$upstream" ]; then rc=0; else rc=1; fi
-ok "$rc" "reference transaction rejects a new unknown identity without moving the ref"
+if ! sh scripts/check-author.sh origin/main..HEAD >"$T/rejected" 2>&1; then rc=0; else rc=1; fi
+ok "$rc" "a new unknown identity not yet on origin/main is rejected (land.sh's check)"
+# Commits already on the remote's main are published history: never checked, whoever wrote them (Nov 19). An outside contributor's commit
+# arrives on origin/main (a fetch), local main fast-forwards to it (land.sh's last step), and a lane's own new commits on top are still checked.
+git checkout -q --detach "$upstream"; mk 269316744+contributor@users.noreply.github.com i2cjak@users.noreply.github.com; outside=$(git rev-parse HEAD)
+if git update-ref refs/remotes/origin/main "$outside" "$upstream" && [ "$(git rev-parse origin/main)" = "$outside" ]; then rc=0; else rc=1; fi
+ok "$rc" "origin/main takes the remote's commits by an outside author"
+if git -C "$T/r" checkout -q main && git -C "$T/r" merge -q --ff-only "$outside"; then rc=0; else rc=1; fi
+ok "$rc" "local main fast-forwards to origin/main with an outside author on it"
+if sh scripts/check-author.sh "$outside" && sh scripts/check-author.sh "$outside" --not "$upstream"; then rc=0; else rc=1; fi
+ok "$rc" "the checker skips every commit reachable from origin/main"
+if CHECK_AUTHOR_UPSTREAM=none sh scripts/check-author.sh "$outside" --not "$upstream" >"$T/rejected" 2>&1; then rc=1; else rc=0; fi
+ok "$rc" "with no upstream exclusion the same commit is still refused (the approved list is unchanged)"
+mk build@amemb.com unknown@invalid.example; lanebad=$(git rev-parse HEAD)
+if ! sh scripts/check-author.sh origin/main..HEAD >"$T/rejected" 2>&1 && ! printf 'refs/heads/lane %s refs/heads/lane %s\n' "$lanebad" "$old" | "$hooks/pre-push" >"$T/rejected" 2>&1; then rc=0; else rc=1; fi
+ok "$rc" "a new unknown identity on top of origin/main is still rejected at land and push"
+mk build@amemb.com build@amemb.com; laneok=$(git rev-parse HEAD); git reset -q --hard "$outside"; mk build@amemb.com build@amemb.com; laneok=$(git rev-parse HEAD)
+if sh scripts/check-author.sh origin/main..HEAD; then rc=0; else rc=1; fi
+ok "$rc" "a lane's own accepted commit on top of the outside author's passes"
+upstream=$outside; git checkout -q lane; git reset -q --hard "$upstream"
 # Local main may still only follow origin/main, even for accepted identities.
-git reset -q --hard "$upstream"; mk build@amemb.com build@amemb.com
-if ! git update-ref refs/heads/main HEAD "$tip" >"$T/rejected" 2>&1 && grep -q 'not on origin/main' "$T/rejected"; then rc=0; else rc=1; fi
+mk build@amemb.com build@amemb.com
+if ! git update-ref refs/heads/main HEAD "$outside" >"$T/rejected" 2>&1 && grep -q 'not on origin/main' "$T/rejected"; then rc=0; else rc=1; fi
 ok "$rc" "local main cannot advance past origin/main"
 [ "$fails" = 0 ] && echo "check_author_test: $checks passed" || { echo "check_author_test: $fails/$checks failed"; exit 1; }
