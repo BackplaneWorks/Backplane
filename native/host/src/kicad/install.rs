@@ -77,7 +77,14 @@ pub fn none_here() -> String {
 }
 /// Where installs go: the folder `ipc::runtime` searches newest first. Windows: %LOCALAPPDATA%\Backplane\kicad, because the hub's home is in the
 /// roaming profile and a runtime of about a gigabyte does not belong there; everywhere else `<home>/kicad`.
-pub fn parent(home: &Path) -> PathBuf { managed_parent(cfg!(windows), std::env::var_os("LOCALAPPDATA").as_deref(), home) }
+pub fn parent(home: &Path) -> PathBuf {
+    let local = std::env::var_os("LOCALAPPDATA");
+    // a test never reads or writes the machine's own %LOCALAPPDATA%: only one the test made (under the tests' scratch, `real_hub`) counts, else
+    // beside its temp home (Nov 19: onboard's kept-download test left a fake 3 MB download in the runner's real folder, and the next test's
+    // failed install read as a paused one; on a developer's Windows it would have been continued by a real install)
+    #[cfg(test)] let local = local.filter(|d| { let b = crate::plat::tmp::base(); let (d, b) = (crate::plat::fs::canonicalize(Path::new(d)).unwrap_or_else(|_| d.into()), crate::plat::fs::canonicalize(&b).unwrap_or(b)); d.starts_with(&b) });
+    managed_parent(cfg!(windows), local.as_deref(), home)
+}
 pub fn managed_parent(windows: bool, local_app_data: Option<&std::ffi::OsStr>, home: &Path) -> PathBuf {
     match local_app_data.filter(|d| windows && !d.is_empty()) { Some(d) => Path::new(d).join("Backplane").join("kicad"), None => home.join("kicad") }
 }
