@@ -155,6 +155,7 @@ async fn checks_inputs(cli: &str, out: &str, dir: &str, home: &str, trigger: &st
     let cmds: String = cfg.checks.iter().map(|c| format!("{}: {}\n", c.name, c.run)).collect();
     let pending_md = if ok { String::new() } else { format!("**This project's own checks wait for your OK.** `.backplane/checks.json` runs these commands; Backplane asks you in the thread before it runs them:\n\n```\n{cmds}```\n\n") };
     J::obj(&[("err", J::Str(if ok { checks::execution(&fs) } else { WAIT_OK.into() })), ("md", J::Str(pending_md + &checks::md(&fs, &[], &runs))),
+        ("checklistGate", J::Flag(ok && cfg.gate.checklist)), ("otherGates", J::Str(checks::gate_all(&fs, &[], &runs, &cfg.gate))),
         ("gate", J::Str(if ok { checks::gate_all(&fs, &tasks, &runs, &cfg.gate) } else { WAIT_OK.into() })), ("line", J::Str(checks::line(&fs))), ("tasks", tasks_json(&tasks)),
         ("pending", J::Str(if ok { String::new() } else { hash })), ("pendrun", J::Str(if ok { String::new() } else { cmds }))])
 }
@@ -209,7 +210,7 @@ pub fn checks_answer(home: &str, ask: &str, answer: &str) -> bool {
 fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
 /// RvJob.checks.k
 fn checks_report(thread: &str, o: &J) -> Value {
-    json!({"report":{"thread":thread,"page":"checks","md":o.get_str("md",""),"err":o.get_str("err",""),"gate":o.get_str("gate",""),"line":o.get_str("line",""),
+    json!({"report":{"thread":thread,"page":"checks","md":o.get_str("md",""),"err":o.get_str("err",""),"gate":o.get_str("gate",""),"checklistGate":o.get_bool("checklistGate",false),"otherGates":o.get_str("otherGates",""),"line":o.get_str("line",""),
         "tasks":o.get("tasks").map(J::value).unwrap_or(json!([])),"pending":o.get_str("pending",""),"pendrun":o.get_str("pendrun","")}})
 }
 
