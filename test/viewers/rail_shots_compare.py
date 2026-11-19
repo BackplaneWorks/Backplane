@@ -56,7 +56,12 @@ def load_font(size: int = 13):
 
 
 def has_complete_privacy(steps: dict) -> tuple[bool, list[str]]:
-    """Validate per-kind, per-shot privacy clearance (not just top-level flags)."""
+    """Validate per-kind, per-shot privacy clearance for every expected capture in the manifest.
+
+    Every expected shot (pages, early 300ms captures, and task captures) must appear in
+    exactly one of cleared_shots, private_shots, or missing_shots, and page privacy booleans
+    must agree with private_shots.
+    """
     issues: list[str] = []
     if int(steps.get("evidence_schema") or 1) < 2:
         issues.append(f"evidence_schema={steps.get('evidence_schema', 1)} (< 2)")
@@ -66,25 +71,38 @@ def has_complete_privacy(steps: dict) -> tuple[bool, list[str]]:
     if not isinstance(kinds, dict) or not kinds:
         issues.append("no kinds present")
         return False, issues
+    embed_mode = bool(steps.get("embed_mode"))
     for kind, kdata in kinds.items():
         if not isinstance(kdata, dict):
             issues.append(f"{kind}: invalid kind entry")
             continue
+        try:
+            expected = M.expected_shots(kind, embed=(embed_mode and kind == "full"))
+        except ValueError as e:
+            issues.append(f"{kind}: {e}")
+            continue
         cleared = kdata.get("cleared_shots")
         priv = kdata.get("private_shots")
-        missing = set(kdata.get("missing_shots") or [])
-        if not isinstance(cleared, list) or not isinstance(priv, dict):
-            issues.append(f"{kind}: missing per-shot cleared_shots/private_shots")
+        missing = kdata.get("missing_shots")
+        if not isinstance(cleared, list) or not isinstance(priv, dict) or not isinstance(missing, list):
+            issues.append(f"{kind}: missing per-shot cleared_shots/private_shots/missing_shots")
             continue
         cleared_set = set(cleared)
         priv_set = set(priv.keys())
+        missing_set = set(missing)
+        for sname in expected:
+            buckets = (sname in cleared_set) + (sname in priv_set) + (sname in missing_set)
+            if buckets == 0:
+                issues.append(f"{kind}/{sname}: not accounted for in cleared_shots/private_shots/missing_shots")
+            elif buckets > 1:
+                issues.append(f"{kind}/{sname}: appears in multiple clearance sets")
         pages = kdata.get("pages") or {}
         for slug, pg in pages.items():
             if not isinstance(pg, dict) or not isinstance(pg.get("private"), bool):
                 issues.append(f"{kind}/{slug}: missing boolean private field")
                 continue
-            if slug not in cleared_set and slug not in priv_set and slug not in missing:
-                issues.append(f"{kind}/{slug}: not accounted for in cleared_shots/private_shots/missing_shots")
+            if pg["private"] != (slug in priv_set):
+                issues.append(f"{kind}/{slug}: page private={pg['private']} disagrees with private_shots")
     return len(issues) == 0, issues
 
 
@@ -602,7 +620,7 @@ def main(argv: list[str] | None = None) -> int:
             n_pos_clear = (n_cleared is not None and slug in n_cleared and not np.get("private") and not np.get("obstructed"))
             b_lbl = f"state={bp.get('settled_state', '?')} rail={bp.get('rail_state', '?')}"
             n_lbl = f"state={np.get('settled_state', '?')} rail={np.get('rail_state', '?')}"
-            if b_pos_clear and n_pos_clear:
+            if base_priv_ok and new_priv_ok and b_pos_clear and n_pos_clear:
                 out_png = pairs_dir / f"{kind}-{slug}.png"
                 make_pair_image(b_png, n_png, out_png, f"{kind} / {slug}", b_lbl, n_lbl)
                 cleared_pairs.append(str(out_png))

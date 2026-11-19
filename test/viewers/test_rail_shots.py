@@ -26,6 +26,17 @@ def write_non_flat_png(path: Path, color_a=(30, 34, 42), color_b=(220, 120, 40))
     im.save(path)
 
 
+def make_complete_kind(kind: str, *, embed: bool = False, private: dict[str, list[str]] | None = None, pages: dict | None = None) -> dict:
+    priv = dict(private or {})
+    expected = M.expected_shots(kind, embed=(embed and kind == "full"))
+    cleared = [s for s in expected if s not in priv]
+    pgs = dict(pages or {})
+    for slug, _, _, _ in M.PAGES:
+        if slug not in pgs:
+            pgs[slug] = {"settled_state": "ready", "private": slug in priv, "obstructed": False}
+    return {"pages": pgs, "cleared_shots": cleared, "private_shots": priv, "missing_shots": []}
+
+
 def make_schema2_steps(
     *,
     embed: bool = False,
@@ -40,7 +51,7 @@ def make_schema2_steps(
         "embed_mode": embed,
         "runtime": ({"embed_mode": embed, "runtime_root": "", "capabilities": caps or []} if runtime_known else None),
         "overall_outcome": "task_failed",
-        "kinds": kinds if kinds is not None else {"full": {"pages": {}, "cleared_shots": [], "private_shots": {}, "missing_shots": []}},
+        "kinds": kinds if kinds is not None else {"full": make_complete_kind("full", embed=embed)},
         "scorecard_tasks": tasks if tasks is not None else [],
     }
 
@@ -317,6 +328,102 @@ class RailShotsRegressionTests(unittest.TestCase):
         self.assertTrue(st["parts"]["within_budget"])
         self.assertFalse(st["parts"]["result_evidenced"])
         self.assertEqual(st["unmeasured_parts"], ["one_step_back"])
+
+    # --- Final re-review item 1: manifest-wide per-shot clearance (early + task shots) & valid manifests for shareable pairs ---
+    def test_final1_privacy_validates_early_and_task_shots_and_gates_shareable_pairs(self) -> None:
+        # Removing the 3 private embed task shots from private_shots (so they are in neither cleared nor private nor missing)
+        # must fail has_complete_privacy, fail --share, and prevent any pair from getting a shareable name.
+        tampered = make_schema2_steps(embed=True, caps=["sim-frame"])
+        tampered["kinds"]["full"]["cleared_shots"] = [
+            s for s in tampered["kinds"]["full"]["cleared_shots"] if s not in ("task8-edit", "task7-sim", "task7-sim-run")
+        ]
+        ok, issues = C.has_complete_privacy(tampered)
+        self.assertFalse(ok)
+        self.assertTrue(any("task7-sim" in i for i in issues))
+
+        # A shot appearing in BOTH cleared_shots and private_shots must also be rejected
+        dup = make_schema2_steps(embed=False)
+        dup["kinds"]["full"]["private_shots"]["board-300ms"] = ["obstructed"]
+        ok_dup, issues_dup = C.has_complete_privacy(dup)
+        self.assertFalse(ok_dup)
+        self.assertTrue(any("multiple clearance sets" in i for i in issues_dup))
+
+        # Even if `board` itself is in cleared_shots on both sides, a tampered manifest prevents shareable pair names
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            bdir, ndir = root / "b", root / "n"
+            write_non_flat_png(bdir / "full" / "board.png")
+            write_non_flat_png(ndir / "full" / "board.png")
+            valid = make_schema2_steps(embed=True, caps=["sim-frame"])
+            (bdir / "steps.json").write_text(json.dumps(tampered), encoding="utf-8")
+            (ndir / "steps.json").write_text(json.dumps(valid), encoding="utf-8")
+
+            share_out = root / "cmp_share"
+            self.assertEqual(C.main(["--share", str(bdir), str(ndir), str(share_out)]), 3)
+            self.assertFalse(share_out.exists())
+
+            out_dir = root / "cmp_nonshare"
+            self.assertEqual(C.main([str(bdir), str(ndir), str(out_dir)]), 0)
+            self.assertFalse((out_dir / "pairs" / "full-board.png").exists())
+            self.assertTrue((out_dir / "pairs" / "private-full-board.png").exists())
+
+    # --- Final re-review item 2: Task 7 requires non-empty identifiable result_summary ---
+    def test_final2_task7_rejects_empty_result_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            outdir = Path(td)
+            full_dir = outdir / "full"
+            write_non_flat_png(full_dir / "task7-sim.png", color_b=(90, 140, 200))
+            write_non_flat_png(full_dir / "task7-sim-run.png", color_b=(200, 90, 90))
+            lay = {
+                "topbar": {"x": 0, "y": 0, "w": 1440, "h": 36},
+                "main": {"x": 240, "y": 36, "w": 500, "h": 864},
+                "rail": {"x": 1368, "y": 36, "w": 72, "h": 864},
+            }
+            full_parsed = {
+                "shots": {
+                    "task7-sim": {"state": "ready", "viewer": {}, "layout": lay, "controls_ids": []},
+                    "task7-sim-run": {"state": "ready", "viewer": {}, "layout": lay, "controls_ids": []},
+                },
+                "settled_tags": {},
+                "kicad_tags": {
+                    "task7-sim": {"state": "ready", "in_gpui_tree": True, "shown": 100, "frames": [{"xid": 100, "kind": "SIMULATOR", "painted": 4000}]}
+                },
+                "presses": {"press:task7-sim": [{"id": "rail:Simulation", "found": True}]},
+            }
+            caps_clean = {
+                "task7-sim": {"name": "task7-sim", "ok": True, "bytes": 1234, "inspect_ok": True, "obstructed": False, "obstructions": []},
+                "task7-sim-run": {"name": "task7-sim-run", "ok": True, "bytes": 1234, "inspect_ok": True, "obstructed": False, "obstructions": []},
+            }
+            t7_empty = next(
+                t for t in P.evaluate_scorecard(
+                    outdir, full_parsed, caps_clean, True, embed=True,
+                    embed_actions={"sim-run": {"action": "sim-run", "ok": True, "observer": "spice_result", "result_evidenced": True, "result_summary": "   "}},
+                )
+                if t["task"] == 7
+            )
+            self.assertEqual(t7_empty["outcome"], "task_failed")
+            self.assertFalse(t7_empty["evidence"]["sim_result_evidenced"])
+            self.assertEqual(C.score_single_task(t7_empty)["points"], 0)
+
+    # --- Final re-review item 3: click metric delivery (`changed: true` / `action`) sets `found: true` ---
+    def test_final3_click_metric_sets_found_true_for_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "client.log"
+            log.write_text(
+                "\n".join([
+                    'GPUI_METRIC {"event":"mark","name":"press:task7-sim"}',
+                    'GPUI_METRIC {"id":"rail:Simulation","changed":true,"action":"kicad simulation","event":"click"}',
+                    'GPUI_METRIC {"event":"mark","name":"press:task8-edit"}',
+                    'GPUI_METRIC {"id":"ui:Edit","changed":true,"action":"kicad edit true","event":"click"}',
+                    'GPUI_METRIC {"event":"mark","name":"press:missing"}',
+                    'GPUI_METRIC {"id":"ui:Nope","error":"not found","event":"click"}',
+                ]) + "\n",
+                encoding="utf-8",
+            )
+            parsed = P.parse_client_log(log)
+            self.assertTrue(parsed["presses"]["press:task7-sim"][0]["found"])
+            self.assertTrue(parsed["presses"]["press:task8-edit"][0]["found"])
+            self.assertFalse(parsed["presses"]["press:missing"][0]["found"])
 
 
 if __name__ == "__main__":
