@@ -66,8 +66,25 @@ def contact_shots() -> list[str]:
     return out
 
 
+def validate_kinds(kinds: list[str]) -> list[str]:
+    """Validate requested project kinds strictly against KINDS (exact names, no path separators or '..')."""
+    if not kinds:
+        raise ValueError("at least one project kind is required")
+    allowed = set(KINDS)
+    seen: set[str] = set()
+    out: list[str] = []
+    for k in kinds:
+        if not isinstance(k, str) or "/" in k or "\\" in k or ".." in k or k not in allowed:
+            raise ValueError(f"invalid project kind {k!r} (allowed: {', '.join(KINDS)})")
+        if k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out
+
+
 def expected_shots(kind: str, embed: bool = False) -> list[str]:
     """Every shot slug that must be captured for `kind`."""
+    validate_kinds([kind])
     shots = list(contact_shots())
     if kind == "full":
         shots.extend([
@@ -81,3 +98,16 @@ def expected_shots(kind: str, embed: bool = False) -> list[str]:
         if embed:
             shots.extend(EMBED_SHOTS)
     return shots
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) >= 2 and sys.argv[1] == "validate":
+        try:
+            valid = validate_kinds(sys.argv[2:])
+        except ValueError as e:
+            print(f"rail-shots: {e}", file=sys.stderr)
+            raise SystemExit(2)
+        print("\n".join(valid))
+        raise SystemExit(0)
+    print("\n".join(KINDS))

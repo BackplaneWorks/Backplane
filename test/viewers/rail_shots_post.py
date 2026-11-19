@@ -154,8 +154,11 @@ EMBED_CANVAS_SHOTS = {"task8-edit", "task7-sim", "task7-sim-run"}
 
 
 def shot_privacy_reasons(cap: dict, srec: dict, shot_name: str = "", embed: bool = False) -> list[str]:
-    """Return reasons a shot must be marked private: true (native dialog, user path, or unscannable KiCad canvas)."""
+    """Return reasons a shot must be marked private: true (fail-closed on missing/failed inspection, dialog, user path, or KiCad canvas)."""
     reasons: list[str] = []
+    if cap.get("inspect_ok") is not True:
+        err = cap.get("inspect_error") or "inspect_ok missing or false"
+        reasons.append(f"obstruction inspection failed or missing (fail-closed: {err})")
     if cap.get("obstructed"):
         titles = [o.get("title") or "/".join(o.get("class") or []) for o in (cap.get("obstructions") or [])]
         reasons.append(f"native dialog/window visible ({', '.join(t for t in titles if t) or 'unknown'})")
@@ -414,10 +417,13 @@ def evaluate_scorecard(
         evidence: dict,
         note: str = "",
         one_step_back: bool | str = "not_measured",
+        found: bool | None = None,
     ) -> dict:
         within = len(used_presses) <= budget
+        if found is None:
+            found = bool(used_presses) if outcome not in ("unavailable", "harness_failed") else False
         parts = {
-            "found": bool(used_presses) if outcome not in ("unavailable", "harness_failed") else False,
+            "found": bool(found),
             "within_budget": within if outcome not in ("unavailable", "harness_failed") else False,
             "result_evidenced": outcome == "passed",
             "one_step_back": one_step_back,
@@ -657,13 +663,19 @@ def evaluate_scorecard(
             full_dir / "task7-sim-run.png",
             (shots.get("task7-sim-run") or {}).get("layout") or {},
         )
-        # On task7-sim-run, KiCad Simulator's own "New Simulation Tab" dialog is NOT a harness failure,
-        # but it IS a task_failed because no analysis completed (0 points for opening a setup dialog).
+        # On task7-sim-run, KiCad Simulator's own "New Simulation Tab" dialog proves failure (task_failed).
+        # Without a completion observer (trace / operating-point result), an otherwise unobstructed run
+        # is `unavailable` (never a pass).
         setup_dialog_open = any(o.get("title") == "New Simulation Tab" for o in oblist7b)
         unexpected_obs7b = [o for o in oblist7b if o.get("title") != "New Simulation Tab"]
-        sim_result_evidenced = bool(sim_act.get("result_evidenced")) and not setup_dialog_open
+        has_observer = bool(sim_act.get("observer"))
+        sim_result_evidenced = bool(has_observer and sim_act.get("result_evidenced")) and not setup_dialog_open
         if not full_client_ok or not ok7a or not ok7b or obs7a or bool(unexpected_obs7b):
             o7 = "harness_failed"
+        elif setup_dialog_open:
+            o7 = "task_failed"
+        elif not has_observer:
+            o7 = "unavailable"
         elif (
             k7.get("state") == "ready"
             and k7.get("in_gpui_tree") is True
@@ -682,8 +694,10 @@ def evaluate_scorecard(
             note7 = ""
         elif setup_dialog_open:
             note7 = "pressing Run opened 'New Simulation Tab' setup dialog with no completed analysis or trace (fixture has no SPICE models; 0 points for opening a dialog)"
+        elif o7 == "unavailable":
+            note7 = "no simulator completion observer wired to verify a trace or operating-point result"
         elif not sim_result_evidenced:
-            note7 = "no completed simulation analysis result (operating-point value or trace) evidenced"
+            note7 = "observer reported no completed simulation analysis result (operating-point value or trace)"
         else:
             note7 = f"kicad_state={k7.get('state')} shown_kind={k7_shown.get('kind')} painted={k7_shown.get('painted')} sim_run_ok={sim_act.get('ok')} body_diff={sim_diff}"
         tasks.append(make_task(
@@ -694,8 +708,10 @@ def evaluate_scorecard(
                 "shown_kind": k7_shown.get("kind"),
                 "shown_painted": k7_shown.get("painted"),
                 "sim_run_action": sim_act,
+                "observer": sim_act.get("observer"),
                 "setup_dialog_open": setup_dialog_open,
                 "sim_result_evidenced": sim_result_evidenced,
+                "result_summary": sim_act.get("result_summary", ""),
                 "body_open": b7a,
                 "body_after_run": b7b,
                 "body_diff_after_run": sim_diff,
@@ -704,6 +720,7 @@ def evaluate_scorecard(
                 "obstructions": oblist7a + oblist7b,
             },
             note=note7,
+            found=any(p.get("found") for p in p7_raw),
         ))
     else:
         tasks.append(make_task(
@@ -832,8 +849,8 @@ def evaluate_scorecard(
     return tasks
 
 
-def main() -> int:
-    raw_args = sys.argv[1:]
+def main(argv: list[str] | None = None) -> int:
+    raw_args = list(sys.argv[1:] if argv is None else argv)
     embed = "--embed" in raw_args
     share = "--share" in raw_args
     pos_args = [a for a in raw_args if a not in ("--embed", "--share")]
@@ -841,7 +858,11 @@ def main() -> int:
         print("usage: rail_shots_post.py [--embed] [--share] OUTDIR KIND [KIND ...]", file=sys.stderr)
         return 2
     outdir = Path(pos_args[0])
-    kinds = pos_args[1:]
+    try:
+        kinds = M.validate_kinds(pos_args[1:])
+    except ValueError as e:
+        print(f"rail-shots: {e}", file=sys.stderr)
+        return 2
 
     parsed: dict[str, dict] = {}
     captures_by_kind: dict[str, dict[str, dict]] = {}
@@ -851,13 +872,16 @@ def main() -> int:
     harness_errors: list[str] = []
     all_private: list[str] = []
 
-    runtime_info: dict = {"embed_mode": embed, "runtime_root": "", "capabilities": []}
+    # Missing runtime.json is unknown (None), never fabricated as an empty capabilities list.
+    runtime_info: dict | None = None
     rt_path = outdir / "runtime.json"
     if rt_path.exists():
         try:
-            runtime_info = json.loads(rt_path.read_text(encoding="utf-8"))
+            loaded = json.loads(rt_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict) and isinstance(loaded.get("capabilities"), list):
+                runtime_info = loaded
         except Exception:
-            pass
+            runtime_info = None
 
     for kind in kinds:
         kdir = outdir / kind
@@ -950,6 +974,9 @@ def main() -> int:
             ep_reasons = private_shots.get(f"{slug}-300ms", []) if slug != "idle" else []
             early_png = kdir / f"{slug}-300ms.png"
             early_cap_ok = bool(ecap.get("ok") and early_png.exists() and early_png.stat().st_size > 0) if slug != "idle" else False
+            ev = erec.get("viewer") or {}
+            early_loading_text = str(ev.get("loading_text") or ev.get("solid_stage") or "").strip() if slug != "idle" else ""
+            empty_text = str(v.get("empty_text") or v.get("plot_none") or v.get("solid_note") or (v.get("diff_summary") if slug == "diff" else "") or "").strip()
 
             pages_summary[slug] = {
                 "presses": [x["id"] for x in presses.get(f"press:{slug}", [])] if rail_id else [],
@@ -959,6 +986,7 @@ def main() -> int:
                 "expected_open": expected_open,
                 "actual_page": actual_page,
                 "settled_state": srec.get("state", ""),
+                "empty_text": empty_text,
                 "matched_expected": matched,
                 "body_non_flat": bstats["body_non_flat"] if bstats is not None else None,
                 "controls_ids": srec.get("controls_ids") or [],
@@ -971,6 +999,7 @@ def main() -> int:
                 "diff_summary": v.get("diff_summary") if slug == "diff" else None,
                 "viewer": v,
                 "early_300ms_state": erec.get("state", "") if slug != "idle" else None,
+                "early_loading_text": early_loading_text if slug != "idle" else None,
                 "early_capture_ok": early_cap_ok if slug != "idle" else None,
                 "early_300ms_obstructed": bool(ecap.get("obstructed")) if slug != "idle" else None,
                 "early_300ms_private": len(ep_reasons) > 0 if slug != "idle" else False,
@@ -1015,6 +1044,13 @@ def main() -> int:
     else:
         overall = "passed"
 
+    # Under --share, refuse BEFORE writing steps.json or any derived images.
+    if share and all_private:
+        print(f"rail-shots: --share refused: {len(all_private)} private shot(s) detected:", file=sys.stderr)
+        for item in all_private:
+            print(f"  - {item}", file=sys.stderr)
+        return 3
+
     summary = {
         "evidence_schema": 2,
         "privacy_checked": True,
@@ -1028,13 +1064,6 @@ def main() -> int:
         "scorecard_tasks": scorecard_tasks,
     }
     (outdir / "steps.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
-
-    # Under --share, refuse BEFORE writing any derived images (contact sheets, headers.png, rails.png).
-    if share and all_private:
-        print(f"rail-shots: --share refused: {len(all_private)} private shot(s) detected:", file=sys.stderr)
-        for item in all_private:
-            print(f"  - {item}", file=sys.stderr)
-        return 3
 
     for kind in kinds:
         make_contact_sheet(outdir / kind, outdir / f"contact-{kind}.png", cleared_by_kind[kind])
