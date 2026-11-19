@@ -1097,7 +1097,8 @@ mod tests {
         assert!(r.iter().all(|x| x["label"] != "Old"), "a revoked device is history, not listed");
         assert_eq!(by("Pairing link · open")["buttons"][0]["action"], "device-uninvite");
         assert!(r.iter().all(|x| x["label"] != "Pairing link · used · Phone"), "a used link whose device was revoked is history, not listed");
-        assert_eq!(r.len(), 1 + 1 + 1 + 1, "a machine invite is Bots' and is not listed");
+        assert_eq!(by("Browser access")["buttons"][0]["value"], "1", "browser access starts off");
+        assert_eq!(r.len(), 5, "a machine invite is Bots' and is not listed");
     }
     #[test] fn a_device_link_that_names_only_this_computer_says_so() {
         let inv = |local: bool| json!({"link": "http://127.0.0.1:3797/pair#invite=x", "code": "ABCD2345", "expiresAt": FAR, "routes": [if local { "http://127.0.0.1:3797" } else { "http://100.64.1.2:3797" }], "localOnly": local}).to_string();

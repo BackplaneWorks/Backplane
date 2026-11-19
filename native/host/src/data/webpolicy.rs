@@ -169,15 +169,26 @@ mod tests {
             (include_str!("term.rs"), "pub async fn call("),
         ] {
             let body = source.split_once(signature).unwrap().1.split_once("\n}").unwrap().0;
-            for line in body.lines().filter_map(|s| s.strip_prefix("        \"")) {
-                let Some((patterns, _)) = line.split_once("=>") else { continue };
-                let patterns = patterns.split(" if ").next().unwrap();
-                for part in patterns.split('|') {
-                    let method = part.trim().trim_matches('"');
-                    assert!(method == "composer.run" || ALLOWED.contains(&method) || RESTRICTED.contains(&method), "unclassified method {method}");
-                }
-            }
+            check_dispatch(body);
         }
         assert!(!allowed("unregistered", &Value::Null));
     }
+
+    fn check_dispatch(body: &str) {
+        for line in body.lines().filter_map(|s| s.strip_prefix("        \"")) {
+            let Some((patterns, _)) = line.split_once("=>") else { continue };
+            let patterns = patterns.split(" if ").next().unwrap();
+            for part in patterns.split('|') {
+                let method = part.trim().trim_matches('"');
+                assert!(method == "composer.run" || ALLOWED.contains(&method) || RESTRICTED.contains(&method), "unclassified method {method}");
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "unclassified method example.new")]
+    fn adding_an_unclassified_rpc_fails_the_check() {
+        check_dispatch(r#"        "example.new" => Ok(json!({}))"#);
+    }
+
 }
