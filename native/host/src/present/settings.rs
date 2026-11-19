@@ -1013,6 +1013,17 @@ mod tests {
         assert_eq!(lit(&st(&[("git.auto_push", "on")])), ["git.auto_push=on", "git.off_branch=off"]);
         assert_eq!(lit(&st(&[("git.auto_push", "off"), ("git.off_branch", "on")])), ["git.auto_push=off", "git.off_branch=on"]);
     }
+    /// #1232: the page is drawn from the lean copy of the state, which dropped `git.*`, so pressing On never lit On. Press both on and off, read the picture back.
+    #[test] fn projects_and_git_presses_light_their_chips_from_the_lean_state() {
+        let mut s = State::new(); s.lean = true;
+        let lit = |s: &State| { let v = view(s, &json!({"open": {"settings": true}, "drafts": {"@settings.page": "git"}}), &json!({})); v["rows"].as_array().unwrap().iter().flat_map(|r| r["buttons"].as_array().cloned().unwrap_or_default()).filter(|b| b["on"] == true).map(|b| b["value"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>() };
+        for (n, (k, v)) in [("git.off_branch", "on"), ("git.auto_push", "on"), ("git.off_branch", "off"), ("git.auto_push", "off")].into_iter().enumerate() {
+            s.apply(&json!({"$": "SettingSet", "key": k, "value": v, "at": n + 1}));
+            let want: Vec<String> = ["git.auto_push", "git.off_branch"].iter().map(|key| format!("{key}={}", s.settings.get(*key).map_or("off", |x| x.as_str()))).collect();
+            assert_eq!(lit(&s), want, "after {k}={v}");
+            if n == 0 { assert_eq!(lit(&s), ["git.auto_push=off", "git.off_branch=on"]); }
+        }
+    }
     #[test] fn about_says_what_this_windows_browser_tab_is() {
         let about = |client: Value| { let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {"@settings.page": "about"}}), &json!({"client": client})); labels(&v) };
         let notes = |client: Value| { let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {"@settings.page": "about"}}), &json!({"client": client})); v["rows"].as_array().unwrap().iter().map(|r| r["note"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>() };
