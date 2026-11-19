@@ -951,7 +951,10 @@ impl Run<'_> {
                             else { json!({"@type": format!("{BT}Via"), "type": s.ty, "pad_stack": {"type": "PST_NORMAL", "layers": [a, z], "drill": {"start_layer": a, "end_layer": z, "diameter": to_xy(s.drill, s.drill), "shape": "DS_CIRCLE"}, "copper_layers": [{"layer": "BL_F_Cu", "shape": "PSS_CIRCLE", "size": to_xy(s.size, s.size)}]}}) };
                         v["position"] = to_xy(p.0, p.1); v["net"] = json!({"name": net}); items.push(v) }
                     let mut ls: Vec<&str> = r.tracks.iter().map(|t| copper[t.2].as_str()).collect(); ls.sort(); ls.dedup();
-                    let row = json!({"net": net, "width": wof[&net], "length": (r.length * 1000.0).round() / 1000.0, "vias": r.vias.len(), "layers": ls});
+                    let mut row = json!({"net": net, "width": wof[&net], "length": (r.length * 1000.0).round() / 1000.0, "vias": r.vias.len(), "layers": ls});
+                    // where it went (the viewer's Follow brings itself there; the person reads it as the extent of the new copper)
+                    { let mut b = [f64::MAX, f64::MAX, f64::MIN, f64::MIN]; for (a, z, _) in &r.tracks { for p in [a, z] { b = [b[0].min(p.0), b[1].min(p.1), b[2].max(p.0), b[3].max(p.1)] } } for (p, _) in &r.vias { b = [b[0].min(p.0), b[1].min(p.1), b[2].max(p.0), b[3].max(p.1)] }
+                      if b[0] <= b[2] { row["box"] = json!([b[0], b[1], b[2], b[3]]) } }
                     match why { None => routed.push(row), Some(e) => failed.push(json!({"net": net, "why": e})) } }
                 // a part's nets (its pads moved: a footprint was exchanged): what is left of an old track past where it still joins something is
                 // cut back to there, or taken away when it joins nothing (KiCad calls it a dangling track)

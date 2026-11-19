@@ -56,6 +56,7 @@ pub mod projects;
 pub mod queue;
 pub mod unsent;
 pub mod plotview;
+pub mod follow;
 pub mod sheets;
 pub mod select;
 pub mod siderow;

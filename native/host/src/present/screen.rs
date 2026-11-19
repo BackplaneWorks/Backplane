@@ -691,6 +691,11 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             let Some(patch)=super::viewer::layer_action(sel_st,&session,action,value) else { return refused("action.layer-unported") };
             crate::session::patch::merge(&mut session,&patch);
         },
+        // Follow agent: the toggle, its pause (a person moved the view) and resume (kicad/follow.rs); the thread's own setting, so every client sees it
+        "follow" => {
+            let sel=session["sel"].as_str().unwrap_or("").to_string();
+            if sel.is_empty() || sel.contains('~') || !crate::files::kicad::follow::act(&sel,value) { return refused("action.follow-unported") }
+        },
         // a sheet of the schematic (present/viewer.rs `sheet_action`)
         "view-sheet" => {
             let Some(o)=super::viewer::sheet_action(sel_st,hub,&session,value) else { return refused("action.sheet-unported") };

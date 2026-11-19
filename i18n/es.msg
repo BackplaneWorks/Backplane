@@ -2967,6 +2967,14 @@ gpui.f2.aon.boat.learn = Más información sobre Boat
 gpui.f2.uberbot.what = Tu uberbot es el asistente con el que hablas primero. Te responde, inicia y sigue tus hilos y bots en todos tus proyectos y máquinas, y mantiene tus recordatorios y alertas del teléfono en marcha.
 gpui.acct.account.name.optional = Nombre de la cuenta (opcional: su correo una vez iniciada la sesión)
 
+gpui.follow.button = Seguir al agente
+gpui.follow.button.tip = Mantener la vista en lo que el agente está editando
+gpui.follow.route = Siguiendo: {page} · enrutó {net}{near}
+gpui.follow.edit = Siguiendo: {page} · editó {what}
+gpui.follow.near = cerca de {ref}
+gpui.follow.wait = Siguiendo: esperando la próxima edición del agente
+gpui.follow.paused = Seguimiento en pausa
+gpui.follow.resume = Reanudar
 # ---- android: new entries go here ----
 android.mgmt.all = Todo
 android.mgmt.judged = juzgado por agente

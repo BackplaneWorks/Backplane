@@ -630,6 +630,10 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
     if !sel.is_empty() && !sel.contains('~') && crate::files::kicad::project::altium_cached(&crate::files::kicad::canonical::design_root(&root_of(st, sel))) {
         if let Some(o) = v.as_object_mut() { o.insert("cad".into(), json!("altium")); }
     }
+    // Follow agent: the thread's setting and the last edit's focus (the phones read the same; kicad/follow.rs)
+    if !sel.is_empty() && !sel.contains('~') && v["open"].as_str().is_some_and(|o| matches!(o, "board" | "schematic" | "split")) {
+        if let Some(o) = v.as_object_mut() { o.insert("follow".into(), crate::files::kicad::follow::picture(sel)); }
+    }
     if !sel.is_empty() && !sel.contains('~') {
         if let Some(f) = crate::files::kicad::embed::rail_simulation(&root_of(st, sel)) { if let Some(o) = v.as_object_mut() { o.insert("simFrame".into(), json!(f)); } }
     }
@@ -793,6 +797,32 @@ mod tests {
         assert_eq!(viewer_json(&st, &template, &other), Some(template.clone()), "the panel left on by another thread: the idle viewer");
         let mut board = other.clone(); board["drafts"] = json!({format!("@view:{th}"): "board", "@view.at": "0|/tmp/soak2|"});
         assert!(viewer_json(&st, &template, &board).is_some(), "and its own drawing is drawn");
+    }
+    /// Follow agent (issue 1229): an agent's saved kicad_edit in a thread with Follow on is a focus (page, sheet, box) in the viewer's picture; not with it
+    /// off or paused, and a person's pause and resume are the thread's own state, the same for every client.
+    #[test] fn an_agents_edit_is_a_focus_in_the_viewer_picture_only_while_following() {
+        use crate::files::kicad::follow;
+        let (st, th) = state();
+        let template: Value = serde_json::from_str::<Value>(include_str!("thread_static.json")).unwrap()["viewer"].clone();
+        let o = view_action(&st, "h", &json!({"sel": th, "rid": 1, "drafts": {}, "open": {}, "adding": false, "panel": false, "info": {}}), "board").unwrap();
+        let mut session = json!({"sel": th, "rid": 1, "drafts": {}, "open": {}, "adding": false, "panel": false, "info": {}}); crate::session::patch::merge(&mut session, &o.patch);
+        let edit = json!({"saved": "/p/b.kicad_pcb", "results": [{"routed": [{"net": "+3V3", "length": 9.0, "vias": 0, "layers": ["F.Cu"], "box": [10.0, 20.0, 30.0, 24.0]}]}]});
+        let pic = |s: &Value| viewer_json(&st, &template, s).unwrap()["follow"].clone();
+        assert_eq!(pic(&session)["on"], json!(false), "off until the person turns it on");
+        assert!(follow::record(&th, "/p/b.kicad_pcb", "/p/b.kicad_sch", &edit).is_none());
+        assert_eq!(pic(&session)["focus"], Value::Null, "off: no focus in the picture");
+        follow::act(&th, "on");
+        follow::record(&th, "/p/b.kicad_pcb", "/p/b.kicad_sch", &edit).expect("on");
+        let p = pic(&session);
+        assert_eq!((p["on"].clone(), p["seq"].clone(), p["focus"]["page"].clone(), p["focus"]["sheet"].clone(), p["focus"]["net"].clone()), (json!(true), json!(1), json!("board"), json!(""), json!("+3V3")));
+        assert_eq!(p["focus"]["box"].as_array().map(|b| b.len()), Some(4));
+        follow::act(&th, "pause");
+        assert!(follow::record(&th, "/p/b.kicad_pcb", "/p/b.kicad_sch", &edit).is_none(), "paused: nothing new");
+        let p = pic(&session); assert_eq!((p["paused"].clone(), p["seq"].clone()), (json!(true), json!(1)));
+        follow::act(&th, "resume");
+        follow::record(&th, "/p/b.kicad_sch", "/p/b.kicad_sch", &json!({"results": [{"updated": [{"ref": "U5", "at": [1.0, 2.0]}]}]})).expect("resumed");
+        let p = pic(&session); assert_eq!((p["seq"].clone(), p["focus"]["page"].clone()), (json!(2), json!("schematic")));
+        follow::act(&th, "off");
     }
     #[test] fn the_view_action_and_the_viewer_of_board_schematic_and_3d_are_the_helpers() {
         let (st, th) = state(); let f = fx();

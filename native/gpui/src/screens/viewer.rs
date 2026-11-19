@@ -214,6 +214,17 @@ fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target
         }
         return row.child(close_button(cx, light)).into_any_element()
     }
+    // Follow agent: the thread's setting (the hub's), on Backplane's own viewer only; an open KiCad in Edit mode is left alone
+    if viewer["follow"].is_object() && !editing && !diff_on && !gerbers {
+        let f = &viewer["follow"]; let on = f["on"] == true;
+        let say = super::follow::line(f);
+        let toggle = btn(cx, light, "follow-agent".into(), t("gpui.follow.button"), on, Command::Action("follow".into(), (if on { "off" } else { "on" }).into()));
+        row = row.child(div().id("follow-agent-wrap").child(toggle).tooltip(crate::keys::tip(&t("gpui.follow.button.tip"), "", light)));
+        if !say.is_empty() {
+            row = row.child(div().id("follow-line").min_w_0().max_w(px(260.)).overflow_hidden().text_ellipsis().whitespace_nowrap().text_size(crate::scale::tpx(11.)).text_color(c(if f["paused"] == true { "warn" } else { "dim" })).child(say));
+            if f["paused"] == true { row = row.child(btn(cx, light, "follow-resume".into(), t("gpui.follow.resume"), false, Command::Action("follow".into(), "resume".into()))); }
+        }
+    }
     let offer = kicad_offer(has_design(viewer), gerbers, diff_on, editing, crate::viewers::kicad_pane::local(target.map(|t| t.addr.as_str()), thread));
     if offer == KicadOffer::Pane {
         let c2 = c(if editing { "accent" } else { "line" });

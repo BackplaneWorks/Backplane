@@ -2966,6 +2966,14 @@ gpui.f.tool.runs.nover = {name}  runs from {path}.
 gpui.f2.aon.boat.learn = Learn more about Boat
 gpui.f2.uberbot.what = Your uberbot is the assistant you talk to first. It answers you, starts and follows your threads and bots across projects and machines, and keeps your reminders and phone alerts going.
 gpui.acct.account.name.optional = Account name (optional: its email once signed in)
+gpui.follow.button = Follow agent
+gpui.follow.button.tip = Keep the view on what the agent is editing
+gpui.follow.route = Following: {page} · routed {net}{near}
+gpui.follow.edit = Following: {page} · edited {what}
+gpui.follow.near = near {ref}
+gpui.follow.wait = Following: waiting for the agent's next edit
+gpui.follow.paused = Following paused
+gpui.follow.resume = Resume
 
 # ---- android: new entries go here ----
 android.mgmt.all = All
