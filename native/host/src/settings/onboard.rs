@@ -14,7 +14,13 @@ const SLOW: Duration = Duration::from_secs(45);
 /// What a program said: its exit, its stdout and stderr; None when it could not start or ran out of time.
 async fn run(kind: Kind, cmd: &Path, args: &[&str], limit: Duration) -> Option<(i32, String, String)> {
     let mut c = proc::tokio_cmd(kind, cmd);
-    c.args(args).stdin(std::process::Stdio::null()).kill_on_drop(true);
+    c.args(args);
+    output_of(c, limit).await
+}
+
+/// What the command `c` said within `limit`: stdin on /dev/null, killed when it runs over (kill-on-drop).
+async fn output_of(mut c: tokio::process::Command, limit: Duration) -> Option<(i32, String, String)> {
+    c.stdin(std::process::Stdio::null()).kill_on_drop(true);
     let out = tokio::time::timeout(limit, c.output()).await.ok()?.ok()?;
     Some((out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned()))
 }
@@ -59,8 +65,16 @@ async fn kicad(hub: &Arc<Hub>, typed: &str) -> Value {
     let mut places: Vec<PathBuf> = pf.kicad_places.iter().map(PathBuf::from).collect();
     let managed = crate::files::kicad::ipc::runtime(hub).await.cli; if !managed.is_empty() { places.insert(0, managed.into()); }
     let Some(cli) = first_of(typed, &set, "BACKPLANE_KICAD_CLI", pf.kicad_names, places) else { return json!({"path": "", "runs": false}) };
+    kicad_version(&cli, TIMEOUT).await
+}
+/// The KiCad at `cli` asked its version, as a probe (#1204): KiCad loads, migrates and saves its settings even for `--version`, and one
+/// killed at the limit mid-save left `kicad_common.json.kicad-save-<pid>-0` in the person's settings; its settings, cache and documents
+/// folders are a throwaway one (proc::kicad_probe_tokio), removed once it has answered or been killed.
+async fn kicad_version(cli: &Path, limit: Duration) -> Value {
     let path = cli.to_string_lossy().into_owned();
-    match run(Kind::Local, &cli, &["--version"], TIMEOUT).await {
+    let (mut c, _home) = proc::kicad_probe_tokio(cli);
+    c.arg("--version");
+    match output_of(c, limit).await {
         Some((0, out, _)) => json!({"path": path, "version": version_of(&out), "runs": true}),
         Some((code, _, err)) => json!({"path": path, "runs": false, "why": why(code, &err)}),
         None => json!({"path": path, "runs": false, "why": "it did not start or did not answer"}),

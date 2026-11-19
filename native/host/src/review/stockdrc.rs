@@ -54,7 +54,9 @@ pub async fn find(runtime_cli: &str) -> Option<(PathBuf, String)> {
     let mut seen = std::collections::HashSet::new();
     for c in candidates() {
         if !c.is_file() || ours(&c, runtime_cli) || !seen.insert(std::fs::canonicalize(&c).unwrap_or(c.clone())) { continue }
-        let o = tokio::time::timeout(Duration::from_secs(20), crate::proc::tokio_cmd(crate::proc::Kind::Local, &c).arg("--version").stdin(std::process::Stdio::null()).kill_on_drop(true).output()).await;
+        // a probe: the stock KiCad's settings, cache and documents go to a throwaway folder, never the person's (#1204)
+        let (mut p, _home) = crate::proc::kicad_probe_tokio(&c);
+        let o = tokio::time::timeout(Duration::from_secs(20), p.arg("--version").stdin(std::process::Stdio::null()).kill_on_drop(true).output()).await;
         if let Ok(Ok(o)) = o { if let Some(v) = stock_version(&String::from_utf8_lossy(&o.stdout)) { return Some((c, v)) } }
     }
     None

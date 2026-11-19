@@ -168,11 +168,17 @@ impl ProbeHome {
         ProbeHome(d)
     }
     pub fn path(&self) -> &std::path::Path { &self.0 }
+    /// What a probed KiCad is given: its settings (`KICAD_CONFIG_HOME`), and the cache and documents folders KiCad makes at every start
+    /// (PATHS::EnsureUserPathsExist: `~/.cache/kicad/<ver>`, `~/.local/share/kicad/<ver>`, macOS and Windows `Documents/KiCad/<ver>`),
+    /// all in this throwaway folder: a probe leaves nothing in the person's home (#1204).
+    pub fn env(&self) -> [(&'static str, std::path::PathBuf); 3] {
+        [("KICAD_CONFIG_HOME", self.0.clone()), ("KICAD_CACHE_HOME", self.0.join("cache")), ("KICAD_DOCUMENTS_HOME", self.0.join("documents"))]
+    }
 }
 impl Drop for ProbeHome { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
 /// `std_cmd` for a probe of the KiCad at `cli`, with its throwaway settings folder (keep the guard until the probe has run).
 pub fn kicad_probe<S: AsRef<OsStr>>(cli: S) -> (std::process::Command, ProbeHome) {
-    let h = ProbeHome::new(); let mut c = std_cmd(Kind::Local, cli); c.env("KICAD_CONFIG_HOME", h.path()); (c, h)
+    let h = ProbeHome::new(); let mut c = std_cmd(Kind::Local, cli); c.envs(h.env()); (c, h)
 }
 /// How long a KiCad probe may run. A `--version` takes a few seconds; on macOS (#1160) some never exit: KiCad's start-up runs Python to
 /// find its interpreter (PYTHON_MANAGER::FindPythonInterpreter → wxExecute) and misses that child's exit, so the probe waits forever,
@@ -203,7 +209,7 @@ pub fn probe_output(mut c: std::process::Command, limit: std::time::Duration) ->
 /// `kicad_probe` as a tokio command.
 #[allow(dead_code)] // bp-plot includes this file
 pub fn kicad_probe_tokio<S: AsRef<OsStr>>(cli: S) -> (tokio::process::Command, ProbeHome) {
-    let h = ProbeHome::new(); let mut c = tokio_cmd(Kind::Local, cli); c.env("KICAD_CONFIG_HOME", h.path()); (c, h)
+    let h = ProbeHome::new(); let mut c = tokio_cmd(Kind::Local, cli); c.envs(h.env()); (c, h)
 }
 /// `std::process::Command::new`, gated.
 pub fn std_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> std::process::Command {
