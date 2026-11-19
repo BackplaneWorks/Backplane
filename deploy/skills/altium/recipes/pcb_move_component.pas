@@ -34,7 +34,7 @@ Comp.Rotation := RotDeg;
 PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
 PCBServer.PostProcess;
 Board.GraphicallyInvalidate;
-Emit(Designator + ' now ' + FormatFloat('0.###', CoordToMMs(Comp.x - Board.XOrigin)) + ',' + FormatFloat('0.###', CoordToMMs(Comp.y - Board.YOrigin))
-    + ' mm rot ' + FormatFloat('0.#', Comp.Rotation));
+Emit(Designator + ' now ' + BpFmt('0.###', CoordToMMs(Comp.x - Board.XOrigin)) + ',' + BpFmt('0.###', CoordToMMs(Comp.y - Board.YOrigin))
+    + ' mm rot ' + BpFmt('0.#', Comp.Rotation));
 // save at once (placing many parts: save once after the last move, in the same script)
 Emit('saved ' + BoolToStr(SD.DoFileSave(''), True));

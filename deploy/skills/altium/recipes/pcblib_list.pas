@@ -19,7 +19,7 @@ const
     Detail = '*';                    // footprints to list primitive by primitive: '*' = all, else one name; '' = summary only
 function F2(C : Integer) : String;
 begin
-    Result := FormatFloat('0.###', CoordToMMs(C));
+    Result := BpFmt('0.###', CoordToMMs(C));
 end;
 function ShapeName(S : Integer) : String;
 begin
@@ -54,7 +54,7 @@ begin
         if P.ObjectId = ePadObject then
         begin
             NPad := NPad + 1;
-            if Show then Det.Add('  pad ' + P.Name + ' at ' + F2(P.X - OX) + ',' + F2(P.Y - OY) + ' size ' + F2(P.TopXSize) + 'x' + F2(P.TopYSize) + ' ' + ShapeName(P.TopShape) + ' hole ' + F2(P.HoleSize) + ' ' + Layer2String(P.Layer) + ' rot ' + FloatToStr(P.Rotation));
+            if Show then Det.Add('  pad ' + P.Name + ' at ' + F2(P.X - OX) + ',' + F2(P.Y - OY) + ' size ' + F2(P.TopXSize) + 'x' + F2(P.TopYSize) + ' ' + ShapeName(P.TopShape) + ' hole ' + F2(P.HoleSize) + ' ' + Layer2String(P.Layer) + ' rot ' + BpFmt('0.#', P.Rotation));
         end
         else if P.ObjectId = eTrackObject then
         begin

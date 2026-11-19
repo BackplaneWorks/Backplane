@@ -240,5 +240,8 @@ not kept. `Sch:ResetUniqueIds` also works but raises a box and needs the sheet s
 - `PCB:Autoroute` `Action=Start`: "Situs Routing Strategies" (Route All).
 - `PCB:BatchPCBLibCreate`: "IPC... Footprints Batch generator" (Add Files opens the Windows file box "Open": `text 1 =`
   the path, `click Open`).
-- Altium's extensions show WPF windows (class `HwndWrapper[...]`, no child controls): the hub closes an unexpected one
-  (ActiveRoute's "Information") as Alt+F4 would.
+- Altium's extensions show WPF windows (class `HwndWrapper[...]`, no child controls the hub can read): the hub leaves an
+  unexpected one (ActiveRoute's "Information", "Unsaved Changes") for the person and names it in `dialogs`.
+- The ECO's "Information" box after Validate or Execute ("Component not found in available libraries": a footprint no
+  library has) has one button: the hub presses it while it works the ECO, and `pcb_update_from_sch.pas` then reports the
+  difference left (`differences after`) and fails the run with the board unsaved.
