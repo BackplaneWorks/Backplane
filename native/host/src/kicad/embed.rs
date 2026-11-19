@@ -94,6 +94,8 @@ pub struct Session {
     /// its peak so far, MB (Linux VmHWM, macOS lifetime maximum footprint, Windows peak working set; 0 unknown): the warm policy's measure
     /// of what a KiCad costs
     pub peak_mb: u64,
+    /// (rss_mb, peak_mb) as last published from the health tick ([`mem_moved`]), and whether the peak has been logged past the default
+    pub mem_pub: (u64, u64), pub peak_logged: bool,
     /// a request of the hub's drive (a show, a pre-warm) waits on KiCad's check or refill task (task-gate-reads): its description, "" for none
     pub task_wait: String,
     /// a start's last step ("spawned", "socket", "answering", "first show") and when KiCad was started (epoch ms): a pane waiting on it
@@ -121,7 +123,7 @@ impl Session {
             container: 0, toplevel: 0, holder: 0, display: String::new(), start_phase: String::new(), start_at: 0, lock_ask: Value::Null,
             sock: String::new(), events_sock: String::new(), sock_dir: String::new(),
             argv: String::new(), cli: String::new(), version: String::new(), desc: String::new(),
-            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], keys: vec![], rss_mb: 0, peak_mb: 0, task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None),
+            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], keys: vec![], rss_mb: 0, peak_mb: 0, mem_pub: (0, 0), peak_logged: false, task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None),
         }
     }
     pub fn spawned(mut self, pid: u32) -> Self { self.pid = pid; self }
@@ -711,6 +713,13 @@ pub fn warm_memory_line() -> String {
     let mb = |v: Option<u64>| v.map_or("unknown".to_string(), |m| format!("{m} MB"));
     format!("kicad embed: memory: free {}, total {}, pressure {}; warm-up needs a KiCad's {} MB (before one is measured) + headroom {} MB",
         mb(free), mb(total), super::mem::pressure_avg10().map_or("unknown".into(), |p| format!("{p:.2}")), cfg.kicad_mb, cfg.headroom_mb)
+}
+
+/// How far a KiCad's resident or peak memory moves before the session info is published again from the health tick.
+pub const MEM_PUBLISH_STEP_MB: u64 = 64;
+/// Whether (rss, peak) has moved `step` MB or more from what was last published (either figure, either way).
+pub fn mem_moved(published: (u64, u64), now: (u64, u64), step: u64) -> bool {
+    published.0.abs_diff(now.0) >= step || published.1.abs_diff(now.1) >= step
 }
 
 /// What the next KiCad will cost, and where the figure comes from: the largest peak of a KiCad running now, never below the default
@@ -2155,7 +2164,8 @@ impl Actor {
                 };
                 let (desc, _) = discover_desc(&self.hub.cfg.home, &env);
                 let quiet = !desc.is_empty() && proto::load(&desc).has_own("kiapi.backplane.embed.CancelProgress");
-                match warm_decision(&self.sessions, &pro, hardware, locked, MemNow::read(), quiet, warm_cfg()) {
+                let (mem, cfg) = (MemNow::read(), warm_cfg());
+                match warm_decision(&self.sessions, &pro, hardware, locked, mem, quiet, cfg) {
                     Warm::Have => {
                         if let Some(s) = self.sessions.get_mut(&pro) { s.touched_at = ipc::now_s(); }
                         let _ = reply.send(Ok(json!({"warm": true, "started": false})));
@@ -2166,7 +2176,9 @@ impl Actor {
                             eprintln!("kicad embed: evicting {v}: {} KiCads running, the cap is {} in all; room for {pro} (warm-up)", self.live_count(), WARM.max);
                             self.retire(&v);
                         }
-                        eprintln!("kicad embed: warming {pro}");
+                        let (cost, src) = kicad_cost_mb(&self.sessions, cfg);
+                        let mb = |v: Option<u64>| v.map_or("unknown".to_string(), |m| format!("{m} MB"));
+                        eprintln!("kicad embed: warming {pro} (free {}, KiCad {cost} MB ({src}), headroom {} MB, pressure {})", mb(mem.free_mb), cfg.headroom_mb, mem.pressure.map_or("unknown".into(), |p| format!("{p:.2}")));
                         let (tx, rx) = oneshot::channel();
                         // detached: no container yet (the fork parks its frames); Edit attaches it to the pane
                         self.attach(client, pro, root, files, frame, 0, 0, display, false, env, tx);
@@ -2521,7 +2533,16 @@ impl Actor {
                     }
                 } else { self.users_gone = None; }
                 for v in idle_victims(&self.sessions, ipc::now_s(), WARM.idle_s) { eprintln!("kicad embed: idle, closing {v}"); self.retire(&v); }
-                for s in self.sessions.values_mut().filter(|s| s.is_live() && s.pid > 0) { if let Some((now, peak)) = super::mem::proc_mb(s.pid) { s.rss_mb = now; s.peak_mb = peak; } }
+                // memory: read each tick (the warm-up's cost reads it), published when it has moved a step (the session info otherwise kept
+                // the first sample, taken while starting), and the peak logged once it passes the default (it is then the warm-up's cost)
+                let mut moved = vec![];
+                for s in self.sessions.values_mut().filter(|s| s.is_live() && s.pid > 0) {
+                    let Some((now, peak)) = super::mem::proc_mb(s.pid) else { continue };
+                    s.rss_mb = now; s.peak_mb = peak;
+                    if !s.peak_logged && peak > WARM.kicad_mb { s.peak_logged = true; eprintln!("kicad embed: {} peak {peak} MB, past the {} MB default: the warm-up's cost now", s.pro, WARM.kicad_mb); }
+                    if mem_moved(s.mem_pub, (now, peak), MEM_PUBLISH_STEP_MB) { s.mem_pub = (now, peak); moved.push(s.pro.clone()); }
+                }
+                for p in moved { if let Some(s) = self.sessions.get(&p) { self.publish(s, None); } }
                 let targets: Vec<Session> = self.sessions.values()
                     .filter(|s| matches!(s.state.as_str(), "ready" | "unresponsive") && !s.sock.is_empty())
                     .cloned().collect();
@@ -4321,6 +4342,16 @@ mod tests {
         // a closed KiCad's peak no longer counts
         let mut gone = live(9000); gone.values_mut().for_each(|s| *s = s.clone().exited(0, ""));
         assert_eq!(kicad_cost_mb(&gone, cfg), (KICAD_MB, "default"));
+    }
+    #[test] fn a_kicads_memory_is_published_again_when_it_moves_a_step() {
+        // Lane M's macOS run: the one sample published was (175, 63) at +0.6 s; the tick then read 480 -> 593 -> 715
+        assert!(mem_moved((0, 0), (175, 63), 64), "the first reading");
+        assert!(mem_moved((175, 63), (480, 480), 64));
+        assert!(!mem_moved((480, 480), (530, 530), 64), "under a step: not again");
+        assert!(mem_moved((480, 480), (544, 544), 64), "a step exactly");
+        assert!(mem_moved((715, 745), (600, 745), 64), "falling counts too (the peak never falls)");
+        assert!(!mem_moved((715, 745), (715, 800), 64));
+        assert!(mem_moved((715, 745), (715, 809), 64), "the peak alone");
     }
     #[test] fn the_warm_up_headroom_follows_the_machine() {
         assert_eq!(warm_headroom_mb(Some(8 * 1024)), 2048, "8 GB: the least");
