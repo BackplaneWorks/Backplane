@@ -96,7 +96,10 @@ fn side(kind: u32, path: &str) -> Option<Vec<Item>> {
 }
 fn u32_read(s: &str) -> u32 { if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) { 0 } else { s.parse().unwrap_or(0) } }
 /// Pv.child.plot: a source path as a plot (kind 0 board, 1 schematic)
-pub fn read(kind: u32, path: &str) -> Read {
+pub fn read(kind: u32, path: &str) -> Read { read_in(kind, path, None) }
+
+/// The same, confining Gerber reads and companion-board lookups to `root` when known.
+pub fn read_in(kind: u32, path: &str, root: Option<&std::path::Path>) -> Read {
     if kind_of(path) == 2 {
         let (a, b) = (side(kind, at(path, '\n', 1)), side(kind, at(path, '\n', 2)));
         let (Some(a), Some(b)) = (a, b) else { return Read::Half };
@@ -105,7 +108,7 @@ pub fn read(kind: u32, path: &str) -> Read {
         return Read::Plot(Box::new(p), t)
     }
     // a Gerber set (an mfg/ folder, or a Gerber or drill file) drawn on the board's layers (kicad/gerber)
-    if kind == 0 && (path.starts_with(super::gerber::CMP) || (kind_of(path) == 0 && super::gerber::is_set_path(std::path::Path::new(path)))) { return super::gerber::plot(path) }
+    if kind == 0 && (path.starts_with(super::gerber::CMP) || (kind_of(path) == 0 && super::gerber::is_set_path(std::path::Path::new(path)))) { return super::gerber::plot_in(path, root) }
     let fixed = kind_of(path) != 0;
     let b = version(path);
     if b.is_empty() { return if fixed { Read::Fail(plotgen::UNREAD.into()) } else { plotgen::empty(path) } }
