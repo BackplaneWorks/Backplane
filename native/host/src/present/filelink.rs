@@ -24,9 +24,19 @@ pub use crate::md::links::design_kind;
 
 /// The path a link names, absolute: `file://` and `%XX` taken off, a `:12`/`#L12` dropped, `~/` this home, a relative path from `base` (the
 /// thread's folder). None when it is no path or a relative one has no base.
+/// A `file://` address's path (what follows `file://`): `%XX` decoded, `localhost` taken off; on Windows `/C:/x` (from `file:///C:/x`) is `C:/x`.
+pub fn url_path(r: &str) -> String {
+    let p = crate::md::refs::unpct(r.strip_prefix("localhost").unwrap_or(r));
+    let b = p.as_bytes();
+    if cfg!(windows) && b.len() >= 3 && (b[0] == b'/' || b[0] == b'\\') && b[1].is_ascii_alphabetic() && b[2] == b':' { p[1..].to_string() } else { p }
+}
+/// On Windows "\\" read as "/" (a path compared or split by "/"; one byte for one, so lengths and offsets stay); elsewhere unchanged.
+fn fwd(s: &str) -> std::borrow::Cow<'_, str> { if cfg!(windows) && s.contains('\\') { s.replace('\\', "/").into() } else { s.into() } }
 pub fn absolute(href: &str, base: &str, home: &str) -> Option<String> {
     let h = href.trim();
-    let h = match h.strip_prefix("file://") { Some(r) => crate::md::refs::unpct(r.strip_prefix("localhost").unwrap_or(r)), None => h.to_string() };
+    let h = match h.strip_prefix("file://") { Some(r) => url_path(r), None => h.to_string() };
+    // Windows: "C:\\x\\y" and "C:/x/y" are one path, kept with "/" and its drive first ("C:/x/y", not "/C:/x/y")
+    let (h, base, home) = (fwd(&h).into_owned(), fwd(base), fwd(home)); let (base, home) = (base.as_ref(), home.as_ref());
     if h.is_empty() || h.contains(['\0', '\n']) || h.contains("://") { return None }
     let (p, _) = crate::data::link::split_line(&h);
     let p = p.to_string();
@@ -36,14 +46,16 @@ pub fn absolute(href: &str, base: &str, home: &str) -> Option<String> {
     // `..` is resolved by words, never followed out by a link
     let mut parts: Vec<&str> = vec![];
     for x in abs.split('/') { match x { "" | "." => {}, ".." => { parts.pop(); }, x => parts.push(x) } }
-    Some(format!("/{}", parts.join("/")))
+    let drive = cfg!(windows) && parts.first().is_some_and(|d| d.len() == 2 && d.ends_with(':'));
+    Some(if drive { parts.join("/") } else { format!("/{}", parts.join("/")) })
 }
 
-fn under(path: &str, root: &str) -> bool { let r = root.trim_end_matches('/'); !r.is_empty() && path.len() > r.len() && path.starts_with(r) && path.as_bytes()[r.len()] == b'/' }
+/// Whether `path` lies below the folder `root` (on Windows in either spelling of the separator).
+pub fn under(path: &str, root: &str) -> bool { let (path, root) = (fwd(path), fwd(root)); let r = root.trim_end_matches('/'); !r.is_empty() && path.len() > r.len() && path.starts_with(r) && path.as_bytes()[r.len()] == b'/' }
 /// The project the path lies in (the deepest folder wins: a project inside another's folder is its own), with the path from its root.
 pub fn owner<'a>(st: &'a State, path: &str) -> Option<(&'a str, String)> {
-    st.projects.iter().filter(|(id, p)| !p.removed && !id.contains('~') && under(path, &p.root)).max_by_key(|(_, p)| p.root.trim_end_matches('/').len())
-        .map(|(id, p)| (id.as_str(), path[p.root.trim_end_matches('/').len() + 1..].to_string()))
+    st.projects.iter().filter(|(id, p)| !p.removed && !id.contains('~') && under(path, &p.root)).max_by_key(|(_, p)| fwd(&p.root).trim_end_matches('/').len())
+        .map(|(id, p)| (id.as_str(), path[fwd(&p.root).trim_end_matches('/').len() + 1..].to_string()))
 }
 /// The folder a thread's files are from (its worktree's design root, else its project's).
 pub fn root_of(st: &State, sel: &str) -> String {

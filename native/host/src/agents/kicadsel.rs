@@ -274,7 +274,7 @@ mod tests {
             assert!(cmd.starts_with("@echo off\r\n") && cmd.ends_with("\r\n") && !cmd.replace("\r\n", "").contains('\n'), "{p}.cmd keeps CRLF");
             assert!(sh.starts_with("#!/bin/sh\n") && !sh.contains('\r'), "{p}: LF only, a shebang Git Bash sees: {sh:?}");
         }
-        assert_eq!(std::fs::read_to_string(shims.join("kicad-cli")).unwrap().lines().last().unwrap(), format!("exec '{}' \"$@\"", cli.display()));
+        assert_eq!(std::fs::read_to_string(shims.join("kicad-cli")).unwrap().lines().last().unwrap(), format!("exec '{}' \"$@\"", cli.display().to_string().replace('\\', "/")), "sh names the program with \"/\" (Windows)");
         assert!(GUI_PROGRAMS.iter().all(|p| std::fs::read_to_string(shims.join(p)).unwrap().contains("not for agents")), "every GUI sh shim refuses");
         let _ = std::fs::remove_dir_all(&d);
     }

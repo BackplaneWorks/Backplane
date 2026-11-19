@@ -112,30 +112,30 @@ mod tests {
     fn touch(p: std::path::PathBuf) { std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, "").unwrap() }
     #[test] fn project_in_the_root_wins_and_prefers_the_matching_name() {
         let r = tmp("a"); for f in ["x.kicad_pro", "x.kicad_pcb", "other.kicad_pcb", "x.kicad_sch", "sub/y.kicad_pro", "sub/y.kicad_pcb"] { touch(r.join(f)) }
-        let f = read(r.to_str().unwrap()); let root = r.to_str().unwrap();
-        assert_eq!((f.pro.as_str(), f.pcb.as_str(), f.sch.as_str()), (&format!("{root}/x.kicad_pro")[..], &format!("{root}/x.kicad_pcb")[..], &format!("{root}/x.kicad_sch")[..]));
+        let f = read(r.to_str().unwrap()); let root = crate::plat::tmp::sl(r.to_str().unwrap()); use crate::plat::tmp::sl;
+        assert_eq!((sl(&f.pro), sl(&f.pcb), sl(&f.sch)), (format!("{root}/x.kicad_pro"), format!("{root}/x.kicad_pcb"), format!("{root}/x.kicad_sch")));
         assert_eq!(f.all, vec!["x.kicad_pro".to_string(), "sub/y.kicad_pro".to_string()]); // find lists the root level too
     }
     #[test] fn shallowest_below_with_copies_last_and_hidden_skipped() {
         let r = tmp("b"); for f in ["archive/a.kicad_pro", "deep/er/c.kicad_pro", "hw/m.kicad_pro", "hw/m.kicad_pcb", ".backplane/worktrees/w/h.kicad_pro", "node_modules/z.kicad_pro", "k-backups/z.kicad_pro", "a/b/c/d/e/too.kicad_pro"] { touch(r.join(f)) }
         let f = read(r.to_str().unwrap());
         assert_eq!(f.all, vec!["hw/m.kicad_pro", "deep/er/c.kicad_pro", "archive/a.kicad_pro"]);
-        assert!(f.pro.ends_with("hw/m.kicad_pro") && f.pcb.ends_with("hw/m.kicad_pcb") && f.sch.is_empty());
+        use crate::plat::tmp::sl; assert!(sl(&f.pro).ends_with("hw/m.kicad_pro") && sl(&f.pcb).ends_with("hw/m.kicad_pcb") && f.sch.is_empty());
     }
     #[test] fn altium_project_when_there_is_no_kicad_one() {
-        let r = tmp("alt"); let root = r.to_str().unwrap().to_string();
+        let r = tmp("alt"); let root = r.to_str().unwrap().to_string(); use crate::plat::tmp::sl;
         touch(r.join("hw/Board.PcbDoc")); touch(r.join("hw/Top.SchDoc")); touch(r.join("Output/x.PrjPcb"));
         std::fs::write(r.join("hw/Thing.PrjPcb"), "[Design]\r\n[Document1]\r\nDocumentPath=Top.SchDoc\r\n[Document2]\r\nDocumentPath=Board.PcbDoc\r\n").unwrap();
         let f = read(&root);
-        assert_eq!((f.pro.clone(), f.pcb.clone(), f.sch.clone()), (format!("{root}/hw/Thing.PrjPcb"), format!("{root}/hw/Board.PcbDoc"), format!("{root}/hw/Top.SchDoc")));
+        assert_eq!((sl(&f.pro), sl(&f.pcb), sl(&f.sch)), (sl(format!("{root}/hw/Thing.PrjPcb")), sl(format!("{root}/hw/Board.PcbDoc")), sl(format!("{root}/hw/Top.SchDoc"))));
         assert!(is_altium(&f));
         touch(r.join("k.kicad_pro")); let f = read(&root); assert!(f.pro.ends_with("k.kicad_pro") && !is_altium(&f), "KiCad's project wins");
     }
     #[test] fn backplane_json_names_win() {
         let r = tmp("c"); touch(r.join("x.kicad_pro")); touch(r.join("custom/b.kicad_pcb"));
         std::fs::write(r.join(".backplane.json"), r#"{"pcb":"custom/b.kicad_pcb","schematic":"s/top.kicad_sch"}"#).unwrap();
-        let f = read(r.to_str().unwrap()); let root = r.to_str().unwrap();
-        assert_eq!(f.pcb, format!("{root}/custom/b.kicad_pcb")); assert_eq!(f.sch, format!("{root}/s/top.kicad_sch"));
+        let f = read(r.to_str().unwrap()); let root = r.to_str().unwrap(); use crate::plat::tmp::sl;
+        assert_eq!(sl(&f.pcb), sl(format!("{root}/custom/b.kicad_pcb"))); assert_eq!(sl(&f.sch), sl(format!("{root}/s/top.kicad_sch")));
         let e = tmp("d"); let f = read(e.to_str().unwrap()); assert_eq!((f.pro.as_str(), f.pcb.as_str()), ("", ""));
         assert_eq!(abs(r"C:\bp\proj", "sub/a.kicad_pcb"), r"C:\bp\proj\sub\a.kicad_pcb");
         assert_eq!(abs(r"C:\bp\proj\", "ecc83-pp.kicad_pro"), r"C:\bp\proj\ecc83-pp.kicad_pro");

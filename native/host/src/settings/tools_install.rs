@@ -544,7 +544,7 @@ mod tests {
     }
     #[test] fn each_agents_update_is_its_own_updater_and_codex_from_setup_is_installed_again() {
         let (t, x) = (Path::new("/h/.local/share/backplane/tools/bin"), Path::new("/h/.local/bin"));
-        let run = |id: &str| update_plan(id, &x.join(id), t, "linux", "x64", false);
+        let run = |id: &str| update_plan(id, Path::new(&format!("{}/{id}", x.display())), t, "linux", "x64", false); // a Linux path, spelled as Linux does on any system
         assert_eq!(run("claude"), Some(Plan::Run("/h/.local/bin/claude".into(), vec!["update".into()])));
         assert_eq!(run("opencode"), Some(Plan::Run("/h/.local/bin/opencode".into(), vec!["upgrade".into()])));
         assert_eq!(run("pi"), Some(Plan::Run("/h/.local/bin/pi".into(), vec!["update".into(), "--self".into()])));

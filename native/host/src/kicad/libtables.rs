@@ -193,7 +193,7 @@ mod tests {
         std::fs::write(cfg.join("10.99/fp-lib-table"), DEFAULT).unwrap();
         assert!(sync(&root, "10.99.0-bp.13", &cfg, &home).is_empty());
         let rec: Value = serde_json::from_str(&std::fs::read_to_string(home.join("kicad-libtables.json")).unwrap()).unwrap();
-        let key = cfg.join("10.99/fp-lib-table").to_string_lossy().to_string();
+        let key = cfg.join("10.99").join("fp-lib-table").to_string_lossy().to_string(); // the record's key is the table's path as the hub joins it
         assert_eq!(rec[&key], json!(["Backplane_Logo", "Backplane_Shoggoth"]), "{rec}");
         assert_eq!(std::fs::read_to_string(cfg.join("10.99/fp-lib-table")).unwrap(), DEFAULT, "the table is not written");
         // the person removes Backplane_Logo: it stays removed

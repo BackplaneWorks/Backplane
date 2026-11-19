@@ -138,7 +138,7 @@ mod tests {
         let home = crate::plat::tmp::dir("imp");
         let k = "ab".repeat(16); let th = thread_for(&k); let board = home.join("board"); std::fs::create_dir_all(&board).unwrap(); let board = board.to_string_lossy().into_owned();
         let log = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
-            format!(r#"{{"$":"ProjectCreated","id":"p1","title":"Board","root":"{board}","at":1}}"#), r#"{"$":"ProjectCreated","id":"p3","title":"Deleted folder","root":"/nonexistent/bp-imp-gone","at":1}"#, r#"{"$":"ProjectCreated","id":"p2","title":"Gone","root":"/work/gone","at":1}"#, r#"{"$":"ProjectRemoved","id":"p2","at":2}"#,
+            format!(r#"{{"$":"ProjectCreated","id":"p1","title":"Board","root":{},"at":1}}"#, json!(board)) /* JSON-escaped: a Windows root has "\\" */, r#"{"$":"ProjectCreated","id":"p3","title":"Deleted folder","root":"/nonexistent/bp-imp-gone","at":1}"#, r#"{"$":"ProjectCreated","id":"p2","title":"Gone","root":"/work/gone","at":1}"#, r#"{"$":"ProjectRemoved","id":"p2","at":2}"#,
             format!(r#"{{"$":"ThreadCreated","id":"{th}","project":"p1","title":"Report","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":3}}"#),
             format!(r#"{{"$":"MessagePosted","thread":"{th}","msg":"m1","role":"assistant","text":"The draft report.","at":4}}"#),
             r#"{"$":"SettingSet","key":"account.thread.improvement-X.claude","value":"{}","at":4}"#);

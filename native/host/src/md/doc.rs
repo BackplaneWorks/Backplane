@@ -354,7 +354,8 @@ fn collapse(t: &str) -> String {
 mod tests {
     use super::*;
     fn base() -> Base { Base { dir: PathBuf::from("/p/docs"), root: PathBuf::from("/p") } }
-    fn j(s: &str) -> String { serde_json::to_string(&super::super::nodes_json(&render(s, &base()))).unwrap() }
+    // on Windows the paths come joined with "\\" (JSON "\\\\"); the expectations are written with "/"
+    fn j(s: &str) -> String { let o = serde_json::to_string(&super::super::nodes_json(&render(s, &base()))).unwrap(); if cfg!(windows) { o.replace("\\\\", "/") } else { o } }
     #[test] fn a_centred_html_picture_is_a_picture_beside_the_readme() {
         let o = j("## Day 1\n\nWi-Fi\n\n<p align=\"center\">\n  <img src=\"img/day1.png\" alt=\"Day 1\" title=\"day1.png\" width=\"300\">\n</p>\n\nnext");
         assert!(o.contains(r#"{"tag":"h2","kids":[{"text":"Day 1"}],"id":"day-1"}"#), "{o}");

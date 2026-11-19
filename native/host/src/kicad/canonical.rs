@@ -14,8 +14,10 @@ fn under(p: &str, dir: &str) -> bool { !dir.is_empty() && p.starts_with(&format!
 
 /// `<main>/.backplane/worktrees/<name>/<rest>` split as (main, rest); None outside a worktree.
 pub fn split_worktree(p: &str) -> Option<(String, String)> {
-    let (main, after) = p.split_once(MARK)?;
-    let rest = after.split_once('/').map_or("", |x| x.1);
+    // on Windows a worktree's path may come with "\\" (a folder read back from the system): found in either spelling, the parts kept as given
+    let q = if cfg!(windows) { p.replace('\\', "/") } else { p.to_string() };
+    let i = q.find(MARK)?; let (main, after) = (&p[..i], &p[i + MARK.len()..]);
+    let rest = after.split_once(|c| c == '/' || (cfg!(windows) && c == '\\')).map_or("", |x| x.1);
     Some((main.to_string(), rest.to_string()))
 }
 /// A path's main-folder equivalent: a worktree path with the `worktrees/<name>` step removed.
@@ -498,14 +500,14 @@ mod tests {
 
     #[test] fn subfolder_boards_project_is_canonical_from_the_worktree() {
         let (_r, main, wt) = fixture("sub");
-        let f = for_cwd(&wt);
-        assert_eq!(f.pro, format!("{main}/boards/main/main.kicad_pro"));
-        assert_eq!(f.pcb, format!("{main}/boards/main/main.kicad_pcb"));
-        assert_eq!(f.sch, format!("{main}/boards/main/main.kicad_sch"));
+        let f = for_cwd(&wt); use crate::plat::tmp::sl;
+        assert_eq!(sl(&f.pro), sl(format!("{main}/boards/main/main.kicad_pro")));
+        assert_eq!(sl(&f.pcb), sl(format!("{main}/boards/main/main.kicad_pcb")));
+        assert_eq!(sl(&f.sch), sl(format!("{main}/boards/main/main.kicad_sch")));
         // and a subfolder project named only by discovery, board+schematic beside the .kicad_pro
         let r2 = tmp("disc"); touch(r2.join("boards/aux/aux.kicad_pro"), "{}"); touch(r2.join("boards/aux/aux.kicad_pcb"), "x");
         let f2 = for_cwd(r2.to_str().unwrap());
-        assert!(f2.pro.ends_with("boards/aux/aux.kicad_pro") && f2.pcb.ends_with("boards/aux/aux.kicad_pcb"), "{f2:?}");
+        assert!(sl(&f2.pro).ends_with("boards/aux/aux.kicad_pro") && sl(&f2.pcb).ends_with("boards/aux/aux.kicad_pcb"), "{f2:?}");
     }
 
     #[test] fn a_worktree_named_canonical_path_routes_to_main_for_both_routes() {

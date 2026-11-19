@@ -1177,9 +1177,9 @@ mod tests {
         if let Some(p) = st.projects.get_mut(&proj) { p.root = root.clone(); }
         let session = json!({"sel": th, "rid": 1, "drafts": {}, "open": {}, "adding": false, "panel": false, "info": {}});
         let o = view_action(&st, "h", &session, "gerbers").unwrap();
-        let set = format!("{root}/mfg/b/gerber");
-        assert_eq!((o.patch["drafts"][format!("@view:{th}")].as_str(), o.patch["drafts"][format!("@view.file:{th}")].as_str(), o.patch["drafts"][format!("@view.gerbers:{th}")].as_str()), (Some("board"), Some(set.as_str()), Some("1")));
-        let w = o.before[0]["text"].as_str().unwrap(); assert!(w.contains("\"kind\":\"board\"") && w.contains(&set), "{w}");
+        use crate::plat::tmp::sl; let set = sl(format!("{root}/mfg/b/gerber"));
+        assert_eq!((o.patch["drafts"][format!("@view:{th}")].as_str(), o.patch["drafts"][format!("@view.file:{th}")].as_str().map(sl), o.patch["drafts"][format!("@view.gerbers:{th}")].as_str()), (Some("board"), Some(set.clone()), Some("1")));
+        let w = o.before[0]["text"].as_str().unwrap(); assert!(w.contains("\"kind\":\"board\"") && sl(w.replace("\\\\", "\\")).contains(&set), "{w}");
         let mut s2 = session.clone(); crate::session::patch::merge(&mut s2, &o.patch);
         let v = viewer_json(&st, &json!({}), &s2).unwrap();
         assert_eq!((v["open"].as_str(), v["gerbers"].as_bool(), v["hasGerbers"].as_bool()), (Some("board"), Some(true), Some(true)));

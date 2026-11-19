@@ -91,8 +91,8 @@ mod tests {
         let t = crate::plat::tmp::dir("gerbview-files"); let d: &Path = &t;
         for f in ["b-F_Cu.gbr", "b-B_Cu.gbr", "b-PTH.drl", "notes.txt"] { std::fs::write(d.join(f), "x").unwrap() }
         let mut v = gerbview_files(d); v.sort();
-        assert_eq!(v.iter().map(|f| f.rsplit('/').next().unwrap()).collect::<Vec<_>>(), ["b-B_Cu.gbr", "b-F_Cu.gbr", "b-PTH.drl"]);
+        assert_eq!(v.iter().map(|f| f.rsplit(['/', '\\']).next().unwrap()).collect::<Vec<_>>(), ["b-B_Cu.gbr", "b-F_Cu.gbr", "b-PTH.drl"]);
         std::fs::write(d.join("b-job.gbrjob"), "{}").unwrap();
-        assert_eq!(gerbview_files(d).iter().map(|f| f.rsplit('/').next().unwrap()).collect::<Vec<_>>(), ["b-job.gbrjob"]);
+        assert_eq!(gerbview_files(d).iter().map(|f| f.rsplit(['/', '\\']).next().unwrap()).collect::<Vec<_>>(), ["b-job.gbrjob"]);
     }
 }

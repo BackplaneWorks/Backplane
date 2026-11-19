@@ -116,7 +116,8 @@ pub fn read(kind: u32, path: &str) -> Read {
 // A schematic's sheets: core/hier
 pub struct Kids { pub file: String, pub sheets: Vec<(String, String)> }
 /// Hier.dir: the folder of a path, with its trailing slash ("" for a bare name)
-fn dir(p: &str) -> &str { p.rfind('/').map(|i| &p[..=i]).unwrap_or("") }
+/// (on Windows "\\" separates too: a schematic opened as "C:\\x\\top.kicad_sch" had no folder, and every sub-sheet was looked for in the hub's cwd)
+fn dir(p: &str) -> &str { p.rfind(|c| c == '/' || (cfg!(windows) && c == '\\')).map(|i| &p[..=i]).unwrap_or("") }
 fn resolve(parent: &str, f: &str) -> String { if crate::plat::fs::is_abs(f) { f.to_string() } else { format!("{}{f}", dir(parent)) } }
 fn sheet_forms<'b>(fs: &'b Option<Vec<&'b [u8]>>) -> impl Iterator<Item = &'b [u8]> + 'b { fs.iter().flatten().copied().filter(|f| head(f) == b"sheet") }
 pub fn kids(file: &str, b: &[u8]) -> Kids {

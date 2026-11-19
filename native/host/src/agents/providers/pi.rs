@@ -422,7 +422,7 @@ mod tests {
     #[test] fn pi_loads_the_pinned_kistack_as_its_own_skills() {
         let h = crate::plat::tmp::dir("pi-kistack"); assert!(kistack_arg(&h.to_string_lossy()).is_empty(), "no copy, no flag");
         crate::agents::kistack::install(&h).unwrap();
-        assert_eq!(kistack_arg(&h.to_string_lossy()), vec!["--skill".to_string(), h.join("kistack/skills").to_string_lossy().into_owned()]);
+        assert_eq!(kistack_arg(&h.to_string_lossy()), vec!["--skill".to_string(), h.join("kistack").join("skills").to_string_lossy().into_owned()]);
         let _ = std::fs::remove_dir_all(&h);
     }
 }

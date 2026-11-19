@@ -56,7 +56,8 @@ pub fn view_in(home: &Path, root: Option<&Path>) -> Result<Value, String> {
     if let Some((dru, plan)) = drc_plan(root, &p, &c) { let text = std::fs::read_to_string(&dru).unwrap_or_default(); let mut s = drc::status(&text, &plan); s["file"] = json!(rel(root, &dru)); v["drc"] = s }
     Ok(v)
 }
-fn rel(root: &Path, p: &Path) -> String { p.strip_prefix(root).unwrap_or(p).to_string_lossy().into_owned() }
+/// `p` from `root`, with "/" on every system (the project-relative form agents and clients read; Windows joined it with "\\")
+fn rel(root: &Path, p: &Path) -> String { let s = p.strip_prefix(root).unwrap_or(p).to_string_lossy().into_owned(); if cfg!(windows) { s.replace('\\', "/") } else { s } }
 /// The project's rules file and the section the profile makes for it (none without a KiCad project).
 pub fn drc_plan(root: &Path, p: &Profile, c: &project::Choice) -> Option<(PathBuf, drc::Plan)> {
     let pro = crate::files::kicad::project::read(&root.to_string_lossy()).pro;

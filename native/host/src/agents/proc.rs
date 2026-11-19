@@ -640,7 +640,8 @@ mod tests {
         let (cmd, target) = match cli { "codex" => (NPM_CODEX_CMD.to_string(), "node_modules/@openai/codex/bin/codex.js".to_string()), "claude" => (NPM_CLAUDE_CMD.to_string(), "node_modules/@anthropic-ai/claude-code/bin/claude.exe".to_string()),
             other => (NPM_CODEX_CMD.replace("@openai\\codex\\bin\\codex.js", &format!("{other}\\bin\\{other}.js")), format!("node_modules/{other}/bin/{other}.js")) };
         std::fs::create_dir_all(d).unwrap(); std::fs::write(d.join(format!("{cli}.cmd")), cmd).unwrap(); std::fs::write(d.join(cli), NPM_SH.replace("@anthropic-ai/claude-code/bin/claude.exe", &target["node_modules/".len()..])).unwrap(); std::fs::write(d.join(format!("{cli}.ps1")), "#").unwrap();
-        touch(&d.join(&target)); d.join(&target)
+        // joined a part at a time: the path `unshim` gives is the .cmd's, "\\" between every part on Windows
+        let t = target.split('/').fold(d.to_path_buf(), |p, c| p.join(c)); touch(&t); t
     }
     #[test] fn an_npm_shim_is_resolved_to_what_it_starts() {
         let d = dir("npm"); let node = d.join("bin/node.exe"); touch(&node); let n = || Some(node.clone());
