@@ -4537,6 +4537,7 @@ settings.designmode.kicad	Always KiCad	常に KiCad	Siempre en KiCad
 settings.designmode.note	Auto opens KiCad by itself only where that is enabled for this platform.	自動を選ぶと、このプラットフォームで自動起動が有効な場合にだけ KiCad が開きます。	En modo automático, KiCad solo se abre por sí solo si esta plataforma lo permite.
 review.empty.title	Nothing to review yet	レビューするものはまだありません	Aún no hay nada que revisar
 review.empty.next	Add a schematic to see its parts here.	回路図を追加すると、ここに部品が表示されます。	Añade un esquemático para ver sus componentes aquí.
+viewer.diff.threadchanges	Thread changes	スレッドの変更	Cambios del hilo
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}

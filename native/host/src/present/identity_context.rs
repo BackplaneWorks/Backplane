@@ -30,7 +30,7 @@ fn revision(source: &str) -> Option<&str> {
     let rev = fields.next()?;
     fields.next()?.parse::<usize>().ok()?;
     fields.next()?;
-    (!rev.is_empty() && rev.len() <= 64 && rev.bytes().all(|b| b.is_ascii_hexdigit())).then_some(rev)
+    (!rev.is_empty() && rev.len() <= 64 && rev.bytes().all(|b| b.is_ascii_hexdigit())).then(|| &rev[..rev.len().min(8)])
 }
 
 fn history(source: &str) -> (String, Value) {
@@ -86,7 +86,7 @@ pub fn browser(info: &Value, sel: &str) -> (String, String) {
     (title.into(), url.into())
 }
 
-pub fn facts(st: &State, session: &Value, sel: &str) -> Value {
+pub fn facts(_st: &State, session: &Value, sel: &str, local_docs: &Value) -> Value {
     let info = &session["info"];
     let drafts = &session["drafts"];
     let field = |obj: &Value, k: &str| obj[format!("{k}:{sel}")].as_str().unwrap_or("").to_string();
@@ -97,18 +97,23 @@ pub fn facts(st: &State, session: &Value, sel: &str) -> Value {
         source = field(drafts, "@view.file");
         if source.is_empty() && kind == "schematic" { source = field(drafts, "@view.sheet"); }
     }
-    let docs = if !matches!(kind.as_str(), "board" | "split" | "schematic" | "3d" | "simulation" | "gerbers") {
-        Value::Null
+    let design = matches!(kind.as_str(), "board" | "split" | "schematic" | "3d" | "simulation" | "gerbers");
+    let far_docs;
+    let docs = if !design {
+        &Value::Null
     } else if sel.contains('~') {
-        crate::net::farfiles::documents(sel).unwrap_or(Value::Null)
+        far_docs = crate::net::farfiles::documents(sel).unwrap_or(Value::Null);
+        &far_docs
     } else {
-        local_documents(&super::filelink::root_of(st, sel))
+        local_docs
     };
     let name = |k: &str| docs[k].as_str().filter(|p| safe_relative(p)).unwrap_or("");
     let reported = &session["watchedHistory"];
 
-    let selected = if reported["kind"] == kind { Some(reported) } else { None };
-    let (version, comparison) = if matches!(kind.as_str(), "board" | "schematic" | "3d") {
+    let gerbers = kind == "board" && field(drafts, "@view.gerbers") == "1";
+    let design_history = matches!(kind.as_str(), "board" | "schematic" | "3d") && !gerbers;
+    let selected = (design_history && reported["kind"] == kind).then_some(reported);
+    let (version, comparison) = if design_history {
         history(&source)
     } else { (String::new(), Value::Null) };
     let (title, url) = browser(info, sel);
@@ -143,6 +148,36 @@ mod tests {
         assert_eq!(history(&format!("diff\n{old}\n{new}\n4")).1, json!({"from":"abc123","to":"def456"}));
         assert_eq!(history(&format!("diff\n{old}\n/private/project/file")).1["to"], "Working copy");
         assert_eq!(history("/private/project/file"), (String::new(), Value::Null));
+    }
+
+    #[test]
+    fn gerbers_suppresses_board_watch_and_draft_history() {
+        let path = "git\t/private/project/.git\tabcdef123456\t16\t/private/project/file";
+        let mut session = json!({"drafts":{"@view:t":"board","@view.file:t":path},
+            "watchedHistory":watched(&json!({"kind":"board","root":"/private/project","path":path}))});
+        let docs = json!({"board":"boards/main.kicad_pcb","hasBoard":true});
+        let state = State::new();
+        let board = facts(&state, &session, "t", &docs);
+        assert_eq!(board["board"], docs["board"]);
+        assert_eq!(board["version"], "abcdef12");
+        session["drafts"]["@view.gerbers:t"] = json!("1");
+        let gerbers = facts(&state, &session, "t", &docs);
+        assert_eq!(gerbers["version"], "");
+        assert_eq!(gerbers["historyRel"], "");
+        assert!(gerbers["comparison"].is_null());
+    }
+
+    #[test]
+    fn browser_omits_file_urls_and_private_paths() {
+        for (title, url, visible_title, visible_url) in [
+            ("Local file", "file:///private/project/file", "", ""),
+            ("Open /home/user/file", "https://example.com", "", "https://example.com"),
+            (r"C:\private\file", "about:blank", "", "about:blank"),
+            ("File", "https://example.com/Users/user/file", "File", ""),
+        ] {
+            let info = json!({"browser.tabs.t":json!({"tabs":[{"title":title,"url":url,"active":true}]}).to_string()});
+            assert_eq!(browser(&info, "t"), (visible_title.into(), visible_url.into()));
+        }
     }
 
     #[test]

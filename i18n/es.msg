@@ -4667,3 +4667,6 @@ settings.designmode.note = En modo automático, KiCad solo se abre por sí solo 
 
 review.empty.title = Aún no hay nada que revisar
 review.empty.next = Añade un esquemático para ver sus componentes aquí.
+
+# ---- viewer: header scope ----
+viewer.diff.threadchanges = Cambios del hilo

@@ -16,23 +16,39 @@ pub fn is_fab_file(name: &str) -> bool { is_gerber(name) || is_drill(name) || is
 
 /// The files of a set: a folder's fab files (and its subfolders', two deep: mfg/gerbers/), a job file's folder's, or the one file.
 pub fn set_files(path: &Path) -> Vec<PathBuf> {
-    if path.is_file() {
-        let n = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        return if is_job(&n) { path.parent().map(set_files).unwrap_or_default() } else { vec![path.to_path_buf()] }
-    }
+    set_listing(path).0
+}
+
+fn set_listing(path: &Path) -> (Vec<PathBuf>, Option<std::time::SystemTime>) {
+    let mut newest = None;
     let mut out = vec![];
-    fn walk(d: &Path, depth: u32, out: &mut Vec<PathBuf>) {
+    fn walk(d: &Path, depth: u32, out: &mut Vec<PathBuf>, newest: &mut Option<std::time::SystemTime>) {
         let Ok(rd) = std::fs::read_dir(d) else { return };
         let mut es: Vec<_> = rd.flatten().collect();
         es.sort_by_key(|e| e.file_name());
         for e in es {
-            let p = e.path(); let n = e.file_name().to_string_lossy().into_owned();
-            if p.is_dir() { if depth > 0 && !n.starts_with('.') { walk(&p, depth - 1, out) } } else if is_fab_file(&n) { out.push(p) }
+            let p = e.path();
+            let n = e.file_name().to_string_lossy().into_owned();
+            let Ok(meta) = p.metadata() else { continue };
+            if meta.is_dir() {
+                if depth > 0 && !n.starts_with('.') { walk(&p, depth - 1, out, newest) }
+            } else if is_fab_file(&n) {
+                if is_gerber(&n) || is_drill(&n) { *newest = (*newest).max(meta.modified().ok()); }
+                out.push(p);
+            }
             if out.len() >= 200 { return }
         }
     }
-    walk(path, 2, &mut out);
-    out
+    if let Ok(meta) = path.metadata() {
+        if meta.is_dir() { walk(path, 2, &mut out, &mut newest); }
+        else if is_job(&path.to_string_lossy()) {
+            if let Some(parent) = path.parent() { walk(parent, 2, &mut out, &mut newest); }
+        } else {
+            out.push(path.to_owned());
+            newest = meta.modified().ok();
+        }
+    }
+    (out, newest)
 }
 
 /// Whether a path is a Gerber set this reader draws: a fab file, or a folder holding some (directly).
@@ -42,6 +58,10 @@ pub fn is_set_path(p: &Path) -> bool {
 }
 /// A project's Gerbers: the folder under `<root>/mfg` (three deep) or `<root>/gerbers` holding fab files, the one written last.
 pub fn default_set(root: &Path) -> Option<PathBuf> {
+    newest_set(root).map(|(path, _)| path)
+}
+
+pub fn newest_set(root: &Path) -> Option<(PathBuf, std::time::SystemTime)> {
     let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
     fn walk(d: &Path, depth: u32, best: &mut Option<(std::time::SystemTime, PathBuf)>) {
         let Ok(rd) = std::fs::read_dir(d) else { return };
@@ -54,7 +74,7 @@ pub fn default_set(root: &Path) -> Option<PathBuf> {
         if let Some(t) = newest { if best.as_ref().map_or(true, |b| t > b.0) { *best = Some((t, d.to_path_buf())) } }
     }
     for top in ["mfg", "gerbers", "gerber"] { walk(&root.join(top), 3, &mut best) }
-    best.map(|b| b.1)
+    best.map(|(time, path)| (path, time))
 }
 
 
@@ -71,6 +91,17 @@ pub fn board_of(set: &Path) -> Option<std::path::PathBuf> {
 /// layers, else its Gerber and drill files.
 pub fn gerbview_files(set: &Path) -> Vec<String> {
     let fs = set_files(set);
+    open_files(&fs)
+}
+
+/// Use the same file listing for GerbView and the timestamp of an explicitly selected set.
+pub fn shown_set(set: &Path, newest: Option<std::time::SystemTime>) -> (Vec<String>, Option<u64>) {
+    let (files, listed_time) = set_listing(set);
+    let modified = newest.or(listed_time);
+    (open_files(&files), modified.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|t| t.as_secs()))
+}
+
+fn open_files(fs: &[PathBuf]) -> Vec<String> {
     if let Some(j) = fs.iter().find(|f| is_job(&f.to_string_lossy())) { return vec![j.to_string_lossy().into_owned()] }
     fs.iter().map(|f| f.to_string_lossy().into_owned()).collect()
 }
