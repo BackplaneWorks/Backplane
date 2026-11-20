@@ -7,7 +7,6 @@
 # that group was fixed by 8e343ceec9)
 
 # the gate's VM only (green on GitHub's windows-latest): the tests run in an ssh logon, not a runner service
-files::kicad::canonical::tests::subfolder_boards_project_is_canonical_from_the_worktree   # its git-worktree fixture: Os error 267 "The directory name is invalid" on bp-win
 
 # known flakes under load (bp-win has 4 cores, shared with the UI tests); each already has nextest's one retry, and failed both tries on bp-win
 flaky agents::tests::twenty_agents_stream_at_once_with_every_event_written_once   # "stats: left 14, right 20" on both tries; passes alone

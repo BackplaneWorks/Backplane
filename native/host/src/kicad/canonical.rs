@@ -505,9 +505,10 @@ mod tests {
         assert_eq!(sl(&f.pcb), sl(format!("{main}/boards/main/main.kicad_pcb")));
         assert_eq!(sl(&f.sch), sl(format!("{main}/boards/main/main.kicad_sch")));
         // and a subfolder project named only by discovery, board+schematic beside the .kicad_pro
-        let r2 = tmp("disc"); touch(r2.join("boards/aux/aux.kicad_pro"), "{}"); touch(r2.join("boards/aux/aux.kicad_pcb"), "x");
+        // (not "aux": AUX is a device name Windows reserves, so Windows Server 2022, the landing gate's VMs, refuses the folder: os error 267)
+        let r2 = tmp("disc"); touch(r2.join("boards/extra/extra.kicad_pro"), "{}"); touch(r2.join("boards/extra/extra.kicad_pcb"), "x");
         let f2 = for_cwd(r2.to_str().unwrap());
-        assert!(sl(&f2.pro).ends_with("boards/aux/aux.kicad_pro") && sl(&f2.pcb).ends_with("boards/aux/aux.kicad_pcb"), "{f2:?}");
+        assert!(sl(&f2.pro).ends_with("boards/extra/extra.kicad_pro") && sl(&f2.pcb).ends_with("boards/extra/extra.kicad_pcb"), "{f2:?}");
     }
 
     #[test] fn a_worktree_named_canonical_path_routes_to_main_for_both_routes() {
