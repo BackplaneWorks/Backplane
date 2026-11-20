@@ -612,6 +612,8 @@ pub struct KicadPane {
     /// since when this pane has seen KiCad starting, and the last whole second past STARTING_SAY it redrew for (the pane says
     /// what KiCad is doing from then: never a silent "Starting KiCad…", the release check's fresh-home stall)
     starting_since: Option<std::time::Instant>, starting_said: u64,
+    /// a redraw timer for the strip's opening label is running (one per pane)
+    pub opening_timer: Arc<std::sync::atomic::AtomicBool>,
     born: std::time::Instant, /// when an Edit (edit_keys, deliberate) last asked for the keyboard (the first Edit: `born`)
     want_keys_at: Option<std::time::Instant>, handoff_placed: Option<(std::time::Instant, u64)>, handoff_over: bool,
     /// macOS: the pane's screen rect (points) and our window's visibility last pushed to KiCad (`editor.kicad.host`)
@@ -891,7 +893,7 @@ impl KicadPane {
             let _ = drained_tx.send(());
         } }).detach();
         KicadPane { born: std::time::Instant::now(), want_keys_at: None, handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_press: None, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None, last_place: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, remounts: None, unshown_since: None, unshown_asks: 0, reattached_for: None, adrift_held_at: None, override_kind: None, pending_show: None, chosen_at: 0, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, generation: None, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, remounts: None, unshown_since: None, unshown_asks: 0, reattached_for: None, adrift_held_at: None, override_kind: None, pending_show: None, chosen_at: 0, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, generation: None, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0, opening_timer: Arc::default() }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
     pub fn edit_again(&mut self, cx: &mut Context<Self>) {
@@ -3177,9 +3179,9 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
     let opening = if pane.read(cx).info["state"] == "ready" { opening_of(&pane.read(cx).info) } else { None };
     let now_ms = crate::screens::kcomment::epoch_ms() as u64;
     // the seconds count on: one redraw timer at a time, however often the strip is drawn meanwhile
-    static OPENING_TIMER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    if opening.is_some() && !OPENING_TIMER.swap(true, std::sync::atomic::Ordering::SeqCst) {
-        cx.spawn(async move |v, cx| { cx.background_executor().timer(std::time::Duration::from_millis(500)).await; OPENING_TIMER.store(false, std::sync::atomic::Ordering::SeqCst); let _ = v.update(cx, |_, cx| cx.notify()); }).detach();
+    let timer = pane.read(cx).opening_timer.clone();
+    if opening.is_some() && !timer.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        cx.spawn(async move |v, cx| { cx.background_executor().timer(std::time::Duration::from_millis(500)).await; timer.store(false, std::sync::atomic::Ordering::SeqCst); let _ = v.update(cx, |_, cx| cx.notify()); }).detach();
     }
     for (kind, label) in TABS {
         if !shown.contains(kind) { continue }
