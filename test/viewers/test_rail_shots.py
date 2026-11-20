@@ -831,6 +831,8 @@ class RailShotsRegressionTests(unittest.TestCase):
             self.assertEqual(_sim(clean_sess, pane=None)["outcome"], "unavailable")  # hub inventory without a pane report
             self.assertEqual(_sim({"ok": False}, pane=...)["outcome"], "unavailable")  # pane report without a hub inventory
             self.assertEqual(_sim(clean_sess, pane={})["outcome"], "unavailable")  # `{}` is not a pane report
+            self.assertEqual(_sim(clean_sess, pane={"ok": False, "error": "not editing"})["outcome"], "passed")  # the pane's own "no pane" report
+            self.assertEqual(_sim(clean_sess, pane={"ok": False, "error": "boom"})["outcome"], "unavailable")
             self.assertEqual(_sim(clean_sess, pane={"state": "idle", "in_gpui_tree": False, "shown": None})["outcome"], "unavailable")  # no `ok`
             self.assertEqual(_sim({"ok": True, "inventory_complete": True, "sessions": {"e": {"frames": []}}})["outcome"], "unavailable")  # holder unobserved
             holder_parked = {"ok": True, "inventory_complete": True, "sessions": {"e": {"runtime": {"holder": "pane", "session": "parked"}, "frames": []}}}
@@ -996,7 +998,7 @@ class RailShotsRegressionTests(unittest.TestCase):
         # C2: full filtered list without target + hit_rect=True -> all 3 measured -> passed
         # a real pointer press at the drawn rect, calibrated by an enabled row that opened, and the disabled reason from the inventory
         parsed["presses"]["b1:disabled-press:board"] = [{"id": "rail:Board", "found": True, "pointer": True, "hit_rect": True, "seq": 10}]
-        parsed["rail_inventory"] = [{"id": "board", "state": "disabled", "tooltip_label": "No board in this project"}]
+        parsed["rail_inventory"] = [{"id": "board", "state": "disabled", "tooltip": "No board in this project"}]
         res_nocal = P.evaluate_b1_kind("schematic-only", parsed, rail_map, embed=True)
         self.assertEqual(res_nocal["entries"]["board"]["checks"]["disabled_press"], "unavailable")  # pointer route not calibrated
         parsed["presses"]["b1:pointer-calibration"] = [{"id": "rail:Files", "found": True, "pointer": True, "hit_rect": True, "seq": 1}]
@@ -1006,9 +1008,9 @@ class RailShotsRegressionTests(unittest.TestCase):
         self.assertEqual(P.evaluate_b1_kind("schematic-only", parsed, rail_map, embed=True)["entries"]["board"]["checks"]["disabled_press"], "unavailable")
         parsed["presses"]["b1:disabled-press:board"] = [{"id": "rail:Board", "found": True, "pointer": True, "hit_rect": True, "seq": 10}]
         # reason: empty or different tooltip fails; no inventory is unavailable
-        bad = json.loads(json.dumps(parsed)); bad["rail_inventory"][0]["tooltip_label"] = ""
+        bad = json.loads(json.dumps(parsed)); bad["rail_inventory"][0]["tooltip"] = ""
         self.assertIs(P.evaluate_b1_kind("schematic-only", bad, rail_map, embed=True)["entries"]["board"]["checks"]["disabled_reason"], False)
-        bad["rail_inventory"][0]["tooltip_label"] = "Something else"
+        bad["rail_inventory"][0]["tooltip"] = "Something else"
         self.assertIs(P.evaluate_b1_kind("schematic-only", bad, rail_map, embed=True)["entries"]["board"]["checks"]["disabled_reason"], False)
         bad["rail_inventory"] = None
         self.assertEqual(P.evaluate_b1_kind("schematic-only", bad, rail_map, embed=True)["entries"]["board"]["checks"]["disabled_reason"], "unavailable")

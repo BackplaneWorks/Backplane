@@ -754,7 +754,7 @@ def evaluate_b1_kind(kind: str, parsed_kind: dict, rail_map: dict[str, dict], em
             if inv_row is None or not why_hub:
                 dr_res: bool | str = "unavailable"
             else:
-                tip = str(inv_row.get("tooltip_label") or "").strip()
+                tip = str(inv_row.get("tooltip") or "").strip()
                 dr_res = bool(inv_row.get("state") == "disabled" and tip and tip == why_hub)
 
             # 2. disabled_key: bare key delivered + fresh read:rail no-op
@@ -1684,16 +1684,19 @@ def evaluate_extra_checks(
                     for fr in (sinfo.get("frames") or []):
                         if isinstance(fr, dict) and fr.get("shown") is True:
                             shown_hub_frames.append(f"{sid}:{fr.get('kind', '?')}")
-            # A detached-pane observation is the pane's own real report: `ok` true, `in_gpui_tree` a bool and `shown` present (`{}` is none)
-            has_pane_report = (
+            # A detached-pane observation is the pane's own real report: either it is still reporting (`ok` true, `in_gpui_tree` a bool,
+            # `shown` present) or it says there is no pane editing (`ok` false, `error` "not editing"). `{}` or any other shape is none.
+            pane_attached_report = (
                 isinstance(k_sc, dict) and k_sc.get("ok") is True
                 and isinstance(k_sc.get("in_gpui_tree"), bool) and "shown" in k_sc
             )
+            pane_detached_report = isinstance(k_sc, dict) and k_sc.get("ok") is False and k_sc.get("error") == "not editing"
+            has_pane_report = pane_attached_report or pane_detached_report
             obstructed_sc = bool(c_sc.get("obstructed"))
             sc_fails: list[str] = []
-            if has_pane_report and k_sc.get("in_gpui_tree") is True:
+            if pane_attached_report and k_sc.get("in_gpui_tree") is True:
                 sc_fails.append("KicadPane still mounted in GPUI tree after Simulation cleanup")
-            if has_pane_report and k_sc.get("shown"):
+            if pane_attached_report and k_sc.get("shown"):
                 sc_fails.append(f"pane kicad report still has shown={k_sc.get('shown')!r}")
             if holders:
                 sc_fails.append(f"hub KiCad session still has a holder: {', '.join(holders)}")

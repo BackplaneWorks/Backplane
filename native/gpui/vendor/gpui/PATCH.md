@@ -49,3 +49,6 @@ gpui 0.2.2 (Apache-2.0) vendored without `examples/` (and its `[[example]]` targ
   `b_path_data`), where every vertex carried them (104 bytes); the vertex list is one buffer kept between frames. Measured on a routed
   8-layer board (608 000 vertices): the renderer's vertex list 42 ms -> 7 ms a frame, its upload 8 ms -> 2 ms. The Metal and DirectX
   renderers are as upstream.
+
+- `src/window.rs`: `DispatchEventResult` is `pub` (was `pub(crate)`), so the client's test-mode `pointer` script step can call the public
+  `Window::dispatch_event` with a mouse move, down and up at a control's rect (scripted e2e only; no behaviour change).

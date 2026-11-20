@@ -1273,8 +1273,11 @@ impl Window {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct DispatchEventResult {
+/// What dispatching one platform input event did.
+pub struct DispatchEventResult {
+    /// Whether the event should keep propagating to the platform.
     pub propagate: bool,
+    /// Whether a handler prevented the default action.
     pub default_prevented: bool,
 }
 
