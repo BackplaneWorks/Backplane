@@ -130,6 +130,45 @@ pub async fn bind_private_backend(
     super::webtransport::BrowserListener::bind(directory, authority, proxy)
 }
 
+/// Called with the same authority that was validated when binding the socket.
+/// The public address endpoint carries no credential. Leave proxy settings,
+/// curl config files, redirects and user credentials out of the verification.
+pub async fn https_address_answers(authority: &str) -> bool {
+    if crate::copy::on() {
+        return false;
+    }
+    let address = format!("https://{authority}");
+    let url = format!("{address}/auth/web/info");
+    let result = crate::proc::tokio_cmd(crate::proc::Kind::Net, "/usr/bin/curl")
+        .args([
+            "-q",
+            "--silent",
+            "--fail",
+            "--proto",
+            "=https",
+            "--noproxy",
+            "*",
+            "--max-time",
+            "5",
+            "--max-filesize",
+            "1024",
+            "--write-out",
+            "\n%{http_code}",
+            "--url",
+            &url,
+        ])
+        .kill_on_drop(true)
+        .output()
+        .await;
+    result.is_ok_and(|out| out.status.success() && address_response_matches(&out.stdout, &address))
+}
+
+fn address_response_matches(body_and_status: &[u8], address: &str) -> bool {
+    body_and_status.strip_suffix(b"\n200").is_some_and(|body| {
+        serde_json::from_slice::<Value>(body).ok() == Some(serde_json::json!({"address":address}))
+    })
+}
+
 /// Pick a spare node HTTPS port from the status snapshot. Recheck before
 /// applying a configuration change; this selection alone grants no ownership.
 pub fn spare_node_port(config: &Value) -> Option<u16> {
@@ -251,6 +290,24 @@ pub fn private_remove_args(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn verify_requires_the_exact_https_address_and_a_successful_response() {
+        let address = "https://bp.example.ts.net";
+        let body = br#"{"address":"https://bp.example.ts.net"}"#;
+        assert!(address_response_matches(
+            &[body.as_slice(), b"\n200"].concat(),
+            address
+        ));
+        assert!(!address_response_matches(
+            &[body.as_slice(), b"\n302"].concat(),
+            address
+        ));
+        assert!(!address_response_matches(
+            &[body.as_slice(), b"\n200"].concat(),
+            "https://other.example.ts.net"
+        ));
+    }
 
     #[test]
     fn disable_preserves_a_reassigned_service_endpoint() {
