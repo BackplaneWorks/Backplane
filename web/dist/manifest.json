@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 20631,
-  "styleTokensSha256": "553065bb02cda4fc70b85df890e052e94f8601530d5a963c4243d5e324ccb229",
+  "totalAssetGzipBytes": 20608,
+  "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "common.cancel",
     "common.delete",
@@ -56,9 +56,9 @@
       "sha256": "3bdb6005ce35145fb9ba17a88c60aba249b9300a30197174dc4096692e630c33"
     },
     "assets/style.css": {
-      "bytes": 18431,
-      "gzipBytes": 4557,
-      "sha256": "8256693ef9c68ad8a032236bc465eda58717de84d830c25077a4eecf593fb346"
+      "bytes": 18152,
+      "gzipBytes": 4534,
+      "sha256": "25cd5660fd5b6112e3e1b740ba236456a2be5fceef4900d33f4a7c9808736c33"
     },
     "index.html": {
       "bytes": 454,

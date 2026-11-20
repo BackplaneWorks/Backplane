@@ -10,6 +10,9 @@
   /* the structural rules (pane edges, the top bar's and the header's bottom, the composer's top): one step over --line, which is left to
      secondary separators and control borders */
   --rule: #353c49;
+  --rail-rule: #495260;
+  --rail-disabled: #798391;
+  --rail-disabled-icon: #454a54;
   --text: #d9dde4;
   --dim: #8a93a3;
   --faint: #5c6473;
@@ -37,6 +40,9 @@ html.light, .app.light, .bub-move.light {
   --raise: #e8e7e2;
   --line: #d3d1ca;
   --rule: #bcbab2;
+  --rail-rule: #aaa89f;
+  --rail-disabled: #696f77;
+  --rail-disabled-icon: #b2b4b7;
   --text: #1b1d21;
   --dim: #5b6068;
   /* (as dark as needed to read small notes on a panel, still a step under
@@ -84,12 +90,6 @@ html { touch-action: manipulation; -webkit-text-size-adjust: 100%; text-size-adj
 button {
   background: var(--raise); border: 1px solid var(--line); padding: 3px 9px; cursor: pointer;
 }
-button:hover { border-color: var(--faint); }
-button.on { border-color: var(--accent); color: var(--accent); }
-button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-button.primary.stop { background: var(--bad); border-color: var(--bad); }
-button.icon { padding: 0 7px; background: none; border-color: transparent; color: var(--dim); }
-button.icon:hover { color: var(--text); border-color: var(--line); }
 
 /* Backplane Web UI shell — square corners, quiet colours from assets/web/style.css, GPUI parity. */
 
