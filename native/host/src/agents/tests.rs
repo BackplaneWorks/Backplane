@@ -932,8 +932,11 @@ async fn codex_start(name: &str) -> (Arc<Hub>, Arc<Agents>, crate::plat::tmp::Te
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_person_message_to_a_running_codex_turn_steers_it() {
     let (hub, ag, _sd) = codex_start("cx3").await; let from = len(&hub).await;
+    // the person's message comes once "par" has streamed, inside the stand-in's 2 s (a fixed 500 ms came before it on a loaded Windows VM)
+    let d0 = ag.stats.deltas.load(Relaxed);
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"slow first"})).await;
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    let end = Instant::now() + Duration::from_secs(60); while ag.stats.deltas.load(Relaxed) == d0 && Instant::now() < end { tokio::time::sleep(Duration::from_millis(10)).await }
+    assert!(ag.stats.deltas.load(Relaxed) > d0, "no text streamed");
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"second while running"})).await;
     let ev0 = log_from(&hub, from).await;
     assert!(ev0.iter().any(|e| is(e, "MessagePosted") && e["role"] == "user" && e["text"] == "second while running"), "posted at once");

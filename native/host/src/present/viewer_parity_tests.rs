@@ -13,10 +13,32 @@ use serde_json::{json, Value};
 
 const SNAPSHOT_REL: &str = "src/present/testdata/viewer_legacy_parity_main.json";
 
+/// `<ROOT>\a\b` (or `<ROOT>\\a\\b` inside JSON text) as `<ROOT>/a/b`: only the separators of a path that starts at <ROOT>.
+fn unix_under_root(s: &str) -> String {
+    let mut out = String::with_capacity(s.len()); let mut rest = s;
+    while let Some(i) = rest.find("<ROOT>") {
+        out.push_str(&rest[..i + 6]); rest = &rest[i + 6..];
+        let b = rest.as_bytes(); let mut j = 0;
+        while j < b.len() && !matches!(b[j], b'"' | b'\t' | b'|' | b' ' | b'\n') {
+            if b[j] == b'\\' {
+                if b.get(j + 1) == Some(&b'"') { break } // an escaped quote ends a JSON string: the path ended before it
+                out.push('/'); j += if b.get(j + 1) == Some(&b'\\') { 2 } else { 1 }; continue;
+            }
+            let c = rest[j..].chars().next().unwrap(); out.push(c); j += c.len_utf8();
+        }
+        rest = &rest[j..];
+    }
+    out.push_str(rest); out
+}
+
 fn normalize(v: &Value, root: &str) -> Value {
     match v {
         Value::String(s) => {
-            let s = s.replace(root, "<ROOT>");
+            // the root as written, and as written inside a command's JSON text (a Windows root's `\` doubled there)
+            let s = s.replace(&root.replace('\\', "\\\\"), "<ROOT>").replace(root, "<ROOT>");
+            // on Windows a file under the root keeps the OS's `\` (kicad::project's own names): the snapshot is Linux's, so a path under <ROOT> is
+            // read with `/`, up to its end (a quote, tab, `|`, space or line end)
+            let s = if cfg!(windows) { unix_under_root(&s) } else { s };
             // history sources carry the repo top's byte length before it (`rv::hist_git`): it varies with the temp folder's name
             let mut parts: Vec<String> = s.split('\t').map(str::to_string).collect();
             for i in 0..parts.len().saturating_sub(1) {
@@ -372,4 +394,12 @@ fn agent_show_from_idle_matches_main_view_for_each_kind() {
         diff_paths(&want[i], &got, &format!("/{k}"), &mut diffs);
     }
     assert!(diffs.is_empty(), "view-show differs from main's `view` from idle (main vs branch):\n{}", diffs.join("\n"));
+}
+
+#[test]
+fn a_windows_path_under_the_root_reads_as_the_snapshots() {
+    assert_eq!(unix_under_root("<ROOT>\\proj.kicad_pro"), "<ROOT>/proj.kicad_pro");
+    assert_eq!(unix_under_root("{\"root\":\"<ROOT>\\\\sub\\\\a.kicad_pcb\",\"x\":1}"), "{\"root\":\"<ROOT>/sub/a.kicad_pcb\",\"x\":1}");
+    assert_eq!(unix_under_root("0|<ROOT>|<ROOT>\\a\tb\\c"), "0|<ROOT>|<ROOT>/a\tb\\c");
+    assert_eq!(unix_under_root("no root \\ here"), "no root \\ here");
 }

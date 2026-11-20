@@ -294,6 +294,13 @@ pub mod creds {
         c.CredentialBlobSize = blob.len() as u32; c.CredentialBlob = blob.as_mut_ptr();
         unsafe { CredWriteW(&c, 0) != 0 }
     }
+    /// Whether this logon has no credential store at all: an ssh (network) logon gets ERROR_NO_SUCH_LOGON_SESSION (1312) from CredWriteW,
+    /// where a person's desktop logon and a runner service have one (tests: the vault then keeps its key in a file).
+    #[cfg(test)] pub fn no_logon_session() -> bool {
+        let t = "backplane-vault/probe-logon-session";
+        if put(t, "x") { delete(t); return false }
+        std::io::Error::last_os_error().raw_os_error() == Some(1312)
+    }
     /// Gone from the store (tests).
     pub fn delete(target: &str) -> bool { let t = wide(target); unsafe { CredDeleteW(t.as_ptr(), CRED_TYPE_GENERIC, 0) != 0 } }
 }
