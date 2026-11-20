@@ -75,7 +75,9 @@ impl Agents {
         }
         match r {
             Ok(mut v) => { let p = via.person.lock().unwrap().clone(); if !p.is_null() { v["person"] = p }
-                if v["saved"].as_str() == Some(path) && a["show"].as_bool().unwrap_or(true) { if self.viewer_show(thread, path, "", false).await.0 { v["shown"] = json!(true) } }
+                // as kicad_edit's: no push while the page holds the embedded KiCad (the frame on show is the person's; kicad/follow.rs `tool_shows`)
+                let saved = v["saved"].as_str() == Some(path);
+                if super::follow::tool_shows(saved, saved && super::follow::in_pane(thread, path), a["show"].as_bool().unwrap_or(true)) { if self.viewer_show(thread, path, "", false, false).await.0 { v["shown"] = json!(true) } }
                 (true, v) }
             Err(e) => fail(&e),
         }

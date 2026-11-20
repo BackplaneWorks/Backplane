@@ -221,7 +221,7 @@ impl Agents {
                 // agent's own viewer_show still does); Follow brings KiCad's view to it in the frame on show (kicad/follow.rs `pane`)
                 let in_pane = v["saved"].as_str() == Some(path) && crate::files::kicad::follow::in_pane(thread, path);
                 if followed && in_pane { crate::files::kicad::follow::pane(&self.hub, thread, path).await; self.hub.bump_views(); }
-                if v["saved"].as_str() == Some(path) && !in_pane && (followed || a["show"].as_bool().unwrap_or(true)) { if self.viewer_show(thread, path, "", false).await.0 { v["shown"] = json!(true) } }
+                if crate::files::kicad::follow::tool_shows(v["saved"].as_str() == Some(path), in_pane, followed || a["show"].as_bool().unwrap_or(true)) { if self.viewer_show(thread, path, "", false, false).await.0 { v["shown"] = json!(true) } }
                 (true, v)
             }
             Err(e) => (false, json!({"error": e, "served_by": served})),
@@ -235,14 +235,16 @@ impl Agents {
     /// The MCP tool `viewer_show`: the person's viewer shows `path` (a canonical board named by its worktree twin shows main's live copy).
     /// `wait`: the answer carries what the viewer then shows (kind, source, part, sheet, layer, selection) as the client reports it; a client
     /// that does not answer in 2 s leaves the last report, marked. Without it the viewer is told and nothing is waited for.
-    pub async fn viewer_show(self: &Arc<Self>, thread: &str, path: &str, kind: &str, wait: bool) -> (bool, Value) {
+    /// `explicit`: the agent's own viewer_show (the MCP tool), the one call that may bring the embedded pane to the shown file's frame
+    /// (issue 1355); a tool's own show after a save (kicad_edit, kicad_sim) never does.
+    pub async fn viewer_show(self: &Arc<Self>, thread: &str, path: &str, kind: &str, wait: bool, explicit: bool) -> (bool, Value) {
         let shown = kc::route(path);
         let cwd = self.world().await.cwd(thread); let roots = [kc::design_root(&cwd), cwd];
         if let Some(why) = crate::present::viewer::show_refusal(kind, &shown, &roots) { return fail(&why) }
         let before = crate::files::kicad::watch::viewer_state(thread).0;
         // the window holding the project's embedded KiCad shows another frame (the person's strip tab): its pane is brought to this one,
         // unless KiCad is busy, which the answer says (issue 1355; a kicad_edit's own push never comes here while the page holds KiCad)
-        let (frame, busy) = crate::files::kicad::follow::bring_frame(thread, &shown).await;
+        let (frame, busy) = if explicit { crate::files::kicad::follow::bring_frame(thread, &shown).await } else { (None, String::new()) };
         let mut push = json!({"t":"view","thread":thread,"path":shown,"kind":kind});
         if let Some(f) = frame { push["frame"] = json!(f) }
         self.hub.push_all(&push);

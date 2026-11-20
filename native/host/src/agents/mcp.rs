@@ -324,7 +324,7 @@ impl Mcp {
             "secret_run" => { let cwd = ag.world().await.cwd(thread); crate::settings::secret::tool_run(thread, &cwd, &a).await }
             "order_review" | "order_ask" | "order_quote" | "order_status" => crate::settings::order::call(ag, thread, name, &a).await,
             n if crate::term::tools::NAMES.contains(&n) => crate::term::tools::call(&ag.hub, thread, n, &a).await.unwrap_or_else(|| fail("unknown tool")),
-            "viewer_show" => ag.viewer_show(thread, sv(&a, "path"), sv(&a, "kind"), true).await,
+            "viewer_show" => ag.viewer_show(thread, sv(&a, "path"), sv(&a, "kind"), true, true).await,
             n if ag.tool_sets().iter().any(|s| s.owns(n)) => {
                 // a board or schematic written directly holds its document's lock, as a KiCad write does
                 let gate = if n == "files_write" { match ag.files_doc(thread, sv(&a, "path")).await { Some(doc) => ag.doc_gate(thread, &doc).await.err(), None => None } } else { None };
