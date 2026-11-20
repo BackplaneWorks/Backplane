@@ -321,8 +321,9 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
     up.enabled = trail.len() > 1;
     up.icon = Some("arrow-up");
     let mut tools = vec![up];
-    for (i, cr) in trail.iter().enumerate() {
-        tools.push(command(cx, format!("crumb-{i}"), cr.label.clone(), i + 1 == trail.len(), &cr.action, cr.value.clone()));
+    for (i, cr) in trail.iter().enumerate().filter(|_| trail.len() > 1) {
+        let label = if cr.value.is_empty() { trs(&cr.label) } else { cr.label.clone() };
+        tools.push(command(cx, format!("crumb-{i}"), label, i + 1 == trail.len(), &cr.action, cr.value.clone()));
     }
     for (id, icon, label, action) in [
         ("fm-new", "folder-plus", t("gpui.b.files.new"), Do::NewFolder),

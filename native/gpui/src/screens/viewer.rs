@@ -267,11 +267,48 @@ fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target
     if offer == KicadOffer::There { row = row.child(btn(cx, light, "kicad-open".into(), kicad_open_label(target.map(|t| t.addr.as_str()), thread["mark"]["name"].as_str()), false, kicad_open(viewer))); }
     row.child(close_button(cx, light)).into_any_element()
 }
-// The shared header places the same Close control independently of the optional actions.
-thread_local! { static SEPARATE_CLOSE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
 fn close_button(cx: &mut Context<Backplane>, light: bool) -> AnyElement {
-    if SEPARATE_CLOSE.with(|flag| flag.get()) { Empty.into_any_element() }
-    else { viewer_close(cx, light, None).into_any_element() }
+    viewer_close(cx, light, None).into_any_element()
+}
+
+fn header_actions(cx: &Context<Backplane>, light: bool, thread: &Value, target: Option<&super::attach::Target>, diff_on: bool) -> Vec<Tool> {
+    let viewer = &thread["viewer"];
+    let gerbers = viewer["gerbers"] == true;
+    let addr = target.map(|t| t.addr.as_str());
+    let mut tools = Vec::new();
+    let status = |id, label: String, color| {
+        content(id, label.clone(), div().text_size(crate::scale::tpx(11.)).text_color(theme::color(light, color))
+            .max_w(px(200.)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(label))
+    };
+    if super::badge::place_text(&thread["mark"], "").is_some() {
+        tools.push(status("viewer-from", super::badge::from_machine(&thread["mark"], &source(viewer, diff_on)), "dim"));
+    }
+    if is_altium(viewer) {
+        if has_design(viewer) && !gerbers && !diff_on {
+            tools.push(hint(command(cx, "altium-open", t("gpui.c.altium.open"), false, "kicad-open", shown_key(viewer)), t("gpui.c.altium.open.tip"), ""));
+        }
+        return tools;
+    }
+    let f = &viewer["follow"];
+    if f.is_object() && !diff_on && !gerbers {
+        let on = f["on"] == true;
+        tools.push(hint(command(cx, "follow-agent", t("gpui.follow.button"), on, "follow", if on { "off" } else { "on" }.into()), t("gpui.follow.button.tip"), ""));
+        let say = super::follow::line(f);
+        if !say.is_empty() {
+            tools.push(status("follow-line", say, if f["paused"] == true { "warn" } else { "dim" }));
+            if f["paused"] == true { tools.push(command(cx, "follow-resume", t("gpui.follow.resume"), false, "follow", "resume".into())); }
+        }
+    }
+    match kicad_offer(edit_design(viewer, viewer["open"].as_str().unwrap_or("")), gerbers, diff_on, false, crate::viewers::kicad_pane::local(addr, thread)) {
+        KicadOffer::Pane => {
+            let pending = crate::viewers::kicad_pane::edit_pending(crate::screens::attach::raw_id(thread["id"].as_str().unwrap_or("")));
+            crate::viewers::kicad_pane::log_edit_label(if pending { "opening" } else { "edit" });
+            tools.push(hint(button(cx, "kicad-edit", if pending { trs("Opening…") } else { trs("Open in KiCad") }, Press::Edit), trs("Edit in the real KiCad, here in the pane"), ""));
+        }
+        KicadOffer::There => tools.push(command(cx, "kicad-open", kicad_open_label(addr, thread["mark"]["name"].as_str()), false, "kicad-open", shown_key(viewer))),
+        _ => {}
+    }
+    tools
 }
 
 fn viewer_close(cx: &mut Context<Backplane>, light: bool, page: Option<&str>) -> impl IntoElement {
@@ -508,12 +545,18 @@ fn plot_pane_inner(cx: &mut Context<Backplane>, light: bool, slot: usize, open: 
             if on { tools.push(content("gerbers-legend", format!("{} · {}", trs("board only"), trs("Gerbers only")), div().id("gerbers-legend").flex_shrink_0().flex().items_center().gap_1().text_size(crate::scale::tpx(11.)).text_color(c("dim"))
                 .child(div().size(px(9.)).bg(rgb(0xe5484d))).child(trs("board only"))
                 .child(div().ml_1().w(px(9.)).h(px(9.)).flex().flex_col().justify_between().children((0..3).map(|_| div().h(px(2.)).bg(rgb(0x30a46c))))).child(trs("Gerbers only")))); }
-            if !frame.note.is_empty() { tools.push(content("gerbers-note", frame.note.clone(), div().id("gerbers-note").min_w_0().flex_shrink().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(crate::scale::tpx(11.)).text_color(c(if frame.warn { "warn" } else { "dim" })).child(frame.note.clone()))); }
+            if frame.warn {
+                let label = t("gpui.older");
+                tools.push(content("gerbers-warning", label.clone(), div().text_size(crate::scale::tpx(11.)).text_color(c("warn")).child(label)));
+            }
         }
     }
     match actions {
         // one line on the header's band while it fits; in a pane too narrow for it (a panel docked at the side) the pane's controls go to a line of their own, no word cut
-        Some(a) => col = col.child(pane_header(light, a.identity, tools, a.controls)),
+        Some(a) => {
+            let identity = if viewer["gerbers"] == true { a.identity.with_set_note(&frame.note) } else { a.identity };
+            col = col.child(pane_header(light, identity, tools, a.controls));
+        }
 
         None => {}
     }
@@ -676,6 +719,7 @@ fn split_bar(cx: &mut Context<Backplane>, light: bool, hide: &str, probed: Optio
         let mut chip = button(cx, "split-probe", words.join(" · "), Press::FocusProbe);
         chip.active = true;
         tools.push(hint(chip, full, ""));
+        tools.push(hint(button(cx, "split-probe-clear", trs("Clear"), Press::ClearProbe), trs("Clear"), &t("native.key.esc")));
     }
     pane_header(light, actions.identity, tools, actions.controls)
 }
@@ -863,13 +907,8 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
     let header = |cx: &mut Context<Backplane>| {
         let facts = &viewer["identity"];
         let identity = Identity::new(page_key, if facts["page"] == page_key { facts } else { &Value::Null });
-        let actions = SEPARATE_CLOSE.with(|flag| {
-            let previous = flag.replace(true);
-            let actions = acts(cx);
-            flag.set(previous);
-            actions
-        });
-        let controls = Controls { actions, close: viewer_close(cx, light, Some(page_key)).into_any_element() };
+        let controls = Controls { actions: Empty.into_any_element(), tools: header_actions(cx, light, thread, target, diff_on),
+            close: viewer_close(cx, light, Some(page_key)).into_any_element() };
         Header { identity, controls }
     };
     let body: AnyElement = if editing {
