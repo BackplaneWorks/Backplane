@@ -583,7 +583,7 @@ html.light .bp-code-block { background: var(--panel); }
   flex-shrink: 0;
   border-top: 1px solid var(--line);
   background: var(--bg);
-  padding: 12px 24px 14px;
+  padding: 10px 14px 12px;
 }
 .bp-composer-inner {
   position: relative;
@@ -622,20 +622,22 @@ html.light .bp-code-block { background: var(--panel); }
 .bp-composer-err { color: var(--bad); font-size: 12px; }
 .bp-composer-input {
   width: 100%;
-  min-height: 54px;
+  min-height: 68px;
   max-height: 180px;
   resize: none;
   background: var(--bg);
   border: 1px solid var(--line);
-  padding: 10px 12px;
+  padding: 8px 10px;
+  line-height: 1.45;
   outline: none;
 }
 .bp-composer-input:focus { border-color: var(--accent); }
 .bp-composer-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
 }
 .bp-attach-strip {
   display: flex;
@@ -661,8 +663,8 @@ html.light .bp-code-block { background: var(--panel); }
   padding: 2px 4px;
 }
 .bp-composer-model {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 108px;
+  min-width: 108px;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -719,8 +721,8 @@ html.light .bp-code-block { background: var(--panel); }
   position: relative;
 }
 .bp-right-area.bp-has-viewer.bp-has-mgmt {
-  width: 60%;
-  min-width: 540px;
+  width: 53%;
+  min-width: 520px;
 }
 .bp-right-top {
   flex: 1;
