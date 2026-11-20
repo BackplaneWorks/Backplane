@@ -234,7 +234,45 @@ fn act_whole(tone: &str) -> bool { tone.contains("error") || tone.contains("rest
         for t in ["info", "", "tool"] { assert!(!super::act_whole(t), "{t}") }
     }
 }
-fn rail_label() -> Pixels { crate::scale::tpx_max(11., 12.5) }
+// Fit all labels to the 72 px rail, less the separator and reserved selection stripe.
+fn rail_label_fit(target: f32, fits: impl Fn(f32) -> bool) -> (f32, bool) {
+    const FLOOR: f32 = 9.5;
+    let target = target.max(FLOOR);
+    if fits(target) { return (target, false); }
+    if !fits(FLOOR) { return (FLOOR, true); }
+    // Find the largest fitting size at 1/64 px precision using actual shaped widths.
+    let (mut lo, mut hi) = ((FLOOR * 64.) as u32, (target * 64.).ceil() as u32);
+    while hi - lo > 1 {
+        let mid = (lo + hi) / 2;
+        if fits(mid as f32 / 64.) { lo = mid; } else { hi = mid; }
+    }
+    (lo as f32 / 64., false)
+}
+
+#[derive(Default)]
+pub(crate) struct RailLabels {
+    labels: Vec<String>,
+    font: String,
+    target: f32,
+    fit: (f32, bool),
+}
+
+impl RailLabels {
+    fn size(&mut self, labels: &[String], family: &str, target: f32, window: &mut Window) -> (f32, bool) {
+        if self.target != target || self.font != family || self.labels != labels {
+            let font = gpui::font(SharedString::from(family.to_owned()));
+            self.fit = rail_label_fit(target, |size| labels.iter().all(|label| {
+                let run = TextRun { len: label.len(), font: font.clone(), color: Hsla::default(),
+                    background_color: None, underline: None, strikethrough: None };
+                window.text_system().shape_line(SharedString::from(label.clone()), px(size), &[run], None).width <= px(69.)
+            }));
+            self.labels = labels.to_vec();
+            self.font = family.to_owned();
+            self.target = target;
+        }
+        self.fit
+    }
+}
 fn chip(light: bool, label: String) -> Div {
     let c = |name: &str| theme::color(light, name);
     div().px_3().py_1().flex().items_center().justify_center().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).whitespace_nowrap().child(label)
@@ -918,7 +956,9 @@ impl Render for Backplane {
         let emit_rail = rail_rects_on();
         let (mut m_page_lit, mut m_page_entries, mut m_page_disabled): (Vec<&str>, Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new(), Vec::new());
         let (mut m_tool_lit, mut m_tool_entries, mut m_tool_disabled): (Vec<&str>, Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new(), Vec::new());
-        for row in rows {
+        let labels: Vec<_> = rows.iter().map(|row| trs(row.label)).collect();
+        let (label_size, ellipsis) = self.screens.rail_labels.size(&labels, &self.local.font, f32::from(crate::scale::tpx(11.)), window);
+        for (row, label) in rows.into_iter().zip(labels) {
             let is_tool = row.group == "tools";
             let rail = if is_tool { &mut rail_tools } else { &mut rail_pages };
             if !is_tool {
@@ -946,11 +986,11 @@ impl Render for Backplane {
             }
             let icon_resolved = art::icon_name(row.icon);
             let mut button = with_rect(div().id(SharedString::from(format!("rail-{}", row.label))), || format!("rail:{}", row.label))
-                .relative().flex().flex_col().items_center().h(crate::scale::tpx(48.)).flex_shrink_0().justify_center().gap_1().text_size(rail_label())
+                .relative().flex().flex_col().items_center().h(crate::scale::tpx(48.)).flex_shrink_0().justify_center().gap_1().text_size(px(label_size))
                 .border_l_2().border_color(gpui::transparent_black())
                 .when(active, |d| d.bg(c("raise")).border_color(c("accent")))
                 .text_color(c(if active { "text" } else if disabled { "rail-disabled" } else { "dim" }))
-                .child(ic(light, icon_resolved.unwrap_or("folder"), 18., if active { "accent" } else if disabled { "faint" } else { "dim" })).child(trs(row.label));
+                .child(ic(light, icon_resolved.unwrap_or("folder"), 18., if active { "accent" } else if disabled { "rail-disabled-icon" } else { "dim" })).child(div().max_w_full().when(ellipsis, |d| d.whitespace_nowrap().overflow_hidden().text_ellipsis()).child(label));
             if disabled {
                 button = button.tooltip(crate::keys::tip(row.why, "", light));
                 if collect_inv {
@@ -1302,6 +1342,22 @@ fn emit_rail_inventory_if_changed(started: std::time::Instant, data: &Value, can
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn translated_rail_labels_fit_as_a_group_at_both_text_scales() {
+        // Fixed test font advances in em, independent of the machine's font installation.
+        for (label, advance) in [("Simulation", 0.5_f32), ("Esquemático", 0.55), ("シミュレーション", 1.)] {
+            let em = label.chars().count() as f32 * advance;
+            for target in [11., 13.75] {
+                let fits = |size| em * size <= 69.;
+                let (size, ellipsis) = super::rail_label_fit(target, fits);
+                assert!((9.5..=target).contains(&size));
+                assert_eq!(ellipsis, !fits(9.5));
+                if ellipsis { assert_eq!(size, 9.5); }
+                else { assert!(fits(size)); assert!(size == target || !fits(size + 1./64.)); }
+            }
+        }
+    }
+
     use super::{kicad_lit_id, kicad_rail_id, rail_inventory_json, rail_lit_id, rail_metric_change, rail_rows, viewer_row_on, RailInvRow, RailRow};
     use serde_json::{json, Value};
     #[test]
