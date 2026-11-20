@@ -4670,3 +4670,6 @@ settings.designmode.note = Auto opens KiCad by itself only where that is enabled
 
 review.empty.title = Nothing to review yet
 review.empty.next = Add a schematic to see its parts here.
+
+# ---- viewer: header scope ----
+viewer.diff.threadchanges = Thread changes

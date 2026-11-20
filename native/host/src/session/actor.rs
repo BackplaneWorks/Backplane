@@ -221,6 +221,10 @@ impl ViewActor {
         // Ui.reselect fires when the selection changes, whatever action did it.
         let sel = session.get("sel").and_then(Value::as_str).unwrap_or("").to_string();
         let reselected = self.sel.as_deref().map_or(true, |o| o != sel);
+        if moved || (!first && reselected) {
+            self.watch_order += 1;
+            self.watched = None;
+        }
         let th = owner(&target, self.bot.as_ref());
         let mut drafts = session.get("drafts").and_then(Value::as_object).cloned().unwrap_or_default();
         drafts.retain(|k, _| !render_scratch(k) && !k.starts_with("@away."));
@@ -410,6 +414,26 @@ pub fn forget(client: u64) { ACTORS.lock().unwrap().remove(&client); }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn watch_replies_follow_request_order_and_navigation() {
+        let client = 990_831;
+        let req = json!({"target":{"kind":"thread","id":"t"}});
+        let pol = json!({"session":{"sel":"t"}});
+        apply(client, "v", &req, &pol);
+        let older = begin_watch(client);
+        let newer = begin_watch(client);
+        let history = json!({"kind":"board","root":"/project","path":"git\t/project/.git\tabcdef123456\t1\t/project/file"});
+        assert!(finish_watch(client, newer, &history));
+        assert!(!finish_watch(client, older, &json!({"path":"/project/file"})));
+        let pending = begin_watch(client);
+        apply(client, "other", &req, &pol);
+        apply(client, "v", &req, &pol);
+        assert!(!finish_watch(client, pending, &history));
+        assert!(ACTORS.lock().unwrap()[&client].input("v", &req)["watchedHistory"].is_null());
+        forget(client);
+    }
+
     use serde_json::Map;
     fn pol(sel: &str, extra: &[(&str, &str)]) -> Value {
         let mut d = Map::new();
