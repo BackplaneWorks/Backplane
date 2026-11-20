@@ -477,11 +477,13 @@ def _gate_a2(marks, kt, logs, comp, actions) -> dict:
     if not kicad_got:
         return _rec(gid, name, "passed", f"with focus_follows_mouse={config}, the pointer over the pane and no click, the whole marker landed in the composer and KiCad took none", ev)
     where = "KiCad (or elsewhere): the composer got " + repr(got)
+    label = "known failure, owned by the KiCad lead (pane input on Linux): "
     if config == "no":
-        ev["verdict"] = "PRODUCT FAULT CANDIDATE: focus_follows_mouse is off, no click and no pointer motion beyond the one move, yet the keys did not stay with the composer"
-        return _rec(gid, name, "failed", f"focus_follows_mouse=no: the typed marker went to {where}", ev)
-    ev["verdict"] = "window manager: this harness's i3 follows the pointer for focus; people on sloppy-focus desktops see the same. Not a product verdict (reported)"
-    return _rec(gid, name, "unavailable", f"focus_follows_mouse={config}: the typed marker went to {where}; reported, not a product verdict", ev)
+        ev["verdict"] = "PRODUCT FAULT: focus_follows_mouse is off, no click, one pointer move, and the keys did not stay with the composer"
+    else:
+        ev["verdict"] = ("the same happens with i3's focus_follows_mouse off (the dedicated a2-ffm-no run), so it is not the window manager: with X focus on Backplane's "
+                         "toplevel and KiCad's frame a descendant, core X hands keys to the frame under the pointer (no input shield on Linux)")
+    return _rec(gid, name, "failed", f"{label}focus_follows_mouse={config}: the typed marker went to {where}", ev)
 
 
 def _holder_is_this_client(rt: dict, logs: list[dict], marks: dict, hub_clients: dict[str, int], report: dict) -> dict:
