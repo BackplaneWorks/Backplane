@@ -617,7 +617,7 @@ pub struct KicadPane {
     poked: Option<(String, std::time::Instant)>, unmapped_since: Option<(u64, std::time::Instant)>, remounts: Option<(u64, u32)>, unshown_since: Option<(String, std::time::Instant)>, override_kind: Option<String>, pending_show: Option<String>,
     /// the "wanted frame exists but was never shown" re-asks so far (their backoff, `remount_wait`), and the KiCad (pid) this pane last
     /// attached to again because it was started outside the pane (`adrift`): once per KiCad
-    unshown_asks: u32, reattached_for: Option<u64>,
+    unshown_asks: u32, reattached_for: Option<u64>, adrift_held_at: Option<std::time::Instant>,
     /// the theme told to the hub at least once; the main window (its first home), where Pop back in returns it
     theme_sent: bool, home: u64,
     /// files changed on disk that KiCad holds back over the person's unsaved edits (info `kicad.reload.<digest>`)
@@ -836,7 +836,7 @@ impl KicadPane {
             let _ = drained_tx.send(());
         } }).detach();
         KicadPane { born: std::time::Instant::now(), want_keys_at: None, handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_press: None, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None, last_place: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, remounts: None, unshown_since: None, unshown_asks: 0, reattached_for: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, generation: None, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, remounts: None, unshown_since: None, unshown_asks: 0, reattached_for: None, adrift_held_at: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, generation: None, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
     pub fn edit_again(&mut self, cx: &mut Context<Self>) {
@@ -1353,10 +1353,11 @@ impl KicadPane {
             // KiCad started outside this pane (no container, or another one): attached again with the pane's container, once per KiCad;
             // a show would only show the frame in KiCad's own window (bp.13.3 first install: 750 shows in 21 minutes)
             let pid = self.info["pid"].as_u64().unwrap_or(0);
-            if self.is_adrift() && self.reattached_for != Some(pid) && since.elapsed() >= std::time::Duration::from_millis(1200) {
-                self.reattached_for = Some(pid);
-                // the person's Edit pane: the attach is theirs (KiCad gets the keyboard); one something else opened: automatic (it shows,
-                // the keys stay with Backplane)
+            // (the app sets reattached_for when it acts; one it held, its project not on screen, is asked again every 2 s until it acts)
+            if self.is_adrift() && self.reattached_for != Some(pid) && since.elapsed() >= std::time::Duration::from_millis(1200)
+                && self.adrift_held_at.map_or(true, |t| t.elapsed() >= std::time::Duration::from_secs(2)) {
+                self.adrift_held_at = Some(std::time::Instant::now());
+                // the safety net never moves the keyboard (reattach_why)
                 let why = reattach_why(AdriftRoad::SafetyNet, true, false);
                 eprintln!("GPUI_LOG {}", json!({"kicad_reattach": {"road": "adrift", "why": format!("{why:?}"), "pid": pid, "its_container": self.info["container"], "pane_container": self.container}}));
                 cx.emit(PaneAdrift(why));
@@ -2930,7 +2931,7 @@ impl crate::Backplane {
         // the person closed KiCad itself (Close, or KiCad's quit): the viewer, and no automatic attach until their own Edit
         { let k = closed_key; cx.subscribe(&page, move |this, _, _: &PaneKicadClosed, cx| { this.screens.kicad_closed.insert(k.clone()); this.kicad_view(cx) }).detach(); }
         // no KiCad of its project in the pane's container (an install after a refused Edit, a restart with no container): attached again
-        cx.subscribe(&page, |this, p, e: &PaneAdrift, cx| { this.kicad_adrift(&p, e.0, cx); }).detach();
+        cx.subscribe(&page, |this, p, e: &PaneAdrift, cx| { this.kicad_adrift(&p, e.0, true, cx); }).detach();
         cx.subscribe(&page, |this, _, e: &PaneKey, cx| {
             if e.0 == "ctrl-;" || e.0 == ";" { this.kcomment_open(None, cx); return }
             // the pane's "Open the KiCad app instead" (the editor could not be here): back to the viewer, and the hub starts KiCad on what it shows
@@ -2966,18 +2967,22 @@ impl crate::Backplane {
     /// A pane with no KiCad of its project in its container attached again: the pane let go (as View does) and the same design page
     /// opened through `kicad_attach`, so the hub's rules apply as to every attach (a stale generation changes nothing; the person's close
     /// keeps an automatic one away). `why`: Deliberate for the person's Edit or their Install's reopen, Automatic otherwise.
-    pub(crate) fn kicad_adrift(&mut self, pane: &Entity<KicadPane>, why: ShowBy, cx: &mut Context<Self>) -> bool {
+    /// `guarded`: the safety net's road, once per KiCad of the project (the pane is let go, so the guard is the app's); the Install's
+    /// reopen is once per install already (`reopened`) and is not guarded, so a later Try again or reinstall is never blocked.
+    pub(crate) fn kicad_adrift(&mut self, pane: &Entity<KicadPane>, why: ShowBy, guarded: bool, cx: &mut Context<Self>) -> bool {
         if self.screens.kicad.as_ref() != Some(pane) { return false }
         let (open, generation, project, pid) = { let p = pane.read(cx); (p.open.clone(), p.generation, p.project.clone(), p.info["pid"].as_u64().unwrap_or(0)) };
         // only for the pane's own project on screen: kicad_attach opens the thread shown now, and the pane outlives a thread switch
-        // (an Install's download, an agent's restart while another thread is shown): never another thread's design. Its next showing does it
+        // (an Install's download, an agent's restart while another thread is shown): never another thread's design. Held: the safety net
+        // asks again (every 2 s) and acts once the project is shown; the Install's reopen is not asked again (the pane says KiCad could not
+        // start, and the person's Edit there, or its Try again, works now)
         let thread = self.data["thread"].clone();
         if self.kicad_for(&thread, cx).as_ref() != Some(pane) {
-            eprintln!("GPUI_LOG {}", json!({"kicad_attach_again": {"road": "adrift", "held": "its project is not on screen", "project": project}}));
+            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_attach_again": {"road": "adrift", "held": "its project is not on screen", "project": project}})); }
             return false
         }
-        // once per KiCad of the project (the pane is let go, so the guard is the app's)
-        if !self.screens.kicad_adrift_tried.insert((project.clone(), pid)) { return false }
+        if guarded && !self.screens.kicad_adrift_tried.insert((project.clone(), pid)) { pane.update(cx, |p, _| p.reattached_for = Some(pid)); return false }
+        pane.update(cx, |p, _| p.reattached_for = Some(pid));
         let open = if matches!(open.as_str(), "board" | "schematic" | "3d") { open } else { "board".to_string() }; // i18n-ok: rail page kinds
         eprintln!("GPUI_LOG {}", json!({"kicad_attach_again": {"road": "adrift", "why": format!("{why:?}"), "open": open, "pid": pid}}));
         self.kicad_view(cx);
