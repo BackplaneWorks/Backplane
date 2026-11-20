@@ -68,6 +68,8 @@ echo "INFO an agent read the board $READS times over $(( $(date +%s) - T0 )) s a
 check "L4 away while an agent keeps using that KiCad past the idle time: the same pid" "$([ -n "$PID4" ] && [ "$PID4" = "$PID0" ] && [ "$READS" -ge 5 ] && echo 1 || echo 0)" "pid $PID0 -> ${PID4:-gone}, $READS reads"
 
 mark idlewait || true
+# closed as idle: its process may take a while to end (it did under load, Nov 20: the close path's, not this row's), so up to 30 s
+for _ in $(seq 60); do [ -z "$(kpid)" ] && break; sleep 0.5; done
 PIDI=$(kpid); WHY=$(grep -o "kicad embed: idle, closing [^ ]*$(basename "$PRO") ([^)]*)" "$OUT/hub.log" | head -1 || true)
 echo "INFO after the agent stopped: pid ${PIDI:-gone}; hub: ${WHY:-no idle close}"
 check "L1 left and unused past the idle time: closed as idle, the hub log says it left the pane by a thread switch" "$([ -z "$PIDI" ] && echo "$WHY" | grep -q "left the pane: thread" && echo 1 || echo 0)" "pid ${PIDI:-gone}; $WHY"

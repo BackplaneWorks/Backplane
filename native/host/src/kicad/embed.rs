@@ -318,6 +318,8 @@ impl Session {
             "display": self.display,
             "frames": self.frames.iter().map(Frame::to_json).collect::<Vec<_>>(),
             "autosaves": if self.state == CLOSED { json!(self.autosaves()) } else { json!([]) },
+            // the hub is closing this KiCad and its process has not ended (closing_not_reused): a pane on it lets it go
+            "closing": closing_not_reused(self),
             "agent_unsaved": json!(agent_unsaved(&self.pro).iter().map(|d| Path::new(d).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect::<Vec<_>>()),
             "dialogs": self.dialogs,
             "notices": self.notices,
@@ -1105,6 +1107,11 @@ pub fn app_gone_victims(sessions: &HashMap<String, Session>) -> Vec<String> {
     let mut v: Vec<String> = sessions.values().filter(|s| s.is_live() && !s.closing && s.unsaved_docs().is_empty()).map(|s| s.pro.clone()).collect();
     v.sort(); v
 }
+/// Whether an attach must not reuse this session: its KiCad is being closed (the hub's Close: idle, the cap, the person's or an
+/// agent's; or a runtime move) and its process has not ended yet. Answered "closing"; the client waits and attaches again once the
+/// picture says it stopped, which starts a fresh KiCad (#1470 finding 1: on Windows a KiCad that answered its Close lingered 2.5 min and
+/// the next Edit attached to it). A restart's placeholder (`closing` while "starting" under its new generation) is joined as before.
+pub fn closing_not_reused(s: &Session) -> bool { s.closing && matches!(s.state.as_str(), "ready" | "unresponsive") }
 /// What a leave or back did (`Session::leave`).
 #[derive(Debug, PartialEq, Eq)]
 pub enum LeaveStep { NotHolder, Left, Back(String), Same }
@@ -2071,6 +2078,8 @@ impl Actor {
         let Some(vs) = self.sessions.get_mut(victim) else { return };
         vs.closing = true; vs.stop_reason = why.into();
         let vs_snap = vs.clone();
+        // the picture says it is closing (`closing`): a pane on it lets it go, an attach waits for its end (closing_not_reused)
+        self.publish(&vs_snap, None);
         if vs_snap.mode == "fork" && !vs_snap.sock.is_empty() {
             let me = self.me.clone();
             tokio::spawn(async move {
@@ -2083,6 +2092,12 @@ impl Actor {
 
     fn attach(&mut self, client: u64, pro: String, root: String, files: Files, frame: String, container: u64, toplevel: u64, display: String, wait: bool, env: Env, reply: oneshot::Sender<Result<Value, String>>) {
         let now = ipc::now_s();
+        // its KiCad is closing and not gone yet: never attached to it (closing_not_reused); the client attaches again once it has stopped
+        if let Some(s) = self.sessions.get(&pro).filter(|s| closing_not_reused(s)) {
+            eprintln!("kicad embed: {pro}: an attach while its KiCad (pid {}) is closing ({}): not reused, answered closing", s.pid, if s.stop_reason.is_empty() { "closing" } else { s.stop_reason.as_str() });
+            let mut out = s.info_json(); out["closing"] = json!(true);
+            let _ = reply.send(Ok(out)); return
+        }
         // which client's pane holds this project's KiCad (Follow agent: kicad/follow.rs follows into that window's pane only)
         if container > 0 { attach_clients().lock().unwrap().insert(norm_pro_key(&pro), client); }
         // the runtime selected now is another than the one this project's KiCad runs (Backplane KiCad installed or updated since it started,
@@ -5510,6 +5525,20 @@ mod tests {
         let m: HashMap<String, Session> = [mk("/p/agent.kicad_pro", 0, "", now - 10), mk("/p/old.kicad_pro", 0, "", now - 301),
             mk("/p/left-agent.kicad_pro", 5, "thread", now - 10), mk("/p/left-old.kicad_pro", 5, "thread", now - 301)].into_iter().collect();
         assert_eq!(idle_victims(&m, now, idle), ["/p/left-old.kicad_pro", "/p/old.kicad_pro"]);
+    }
+    #[test] fn an_attach_never_reuses_a_kicad_that_is_closing() {
+        let ready = || Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0).spawned(41);
+        assert!(!closing_not_reused(&ready()), "a live KiCad is attached to");
+        for why in ["idle", "evicted", "closeAsked", "agentClosed", ""] {
+            let mut s = ready(); s.closing = true; s.stop_reason = why.into();
+            assert!(closing_not_reused(&s), "{why}: closing, its process not gone: not reused");
+            let mut u = s.clone(); u.state = "unresponsive".into(); assert!(closing_not_reused(&u), "{why}: unresponsive while closing");
+            // once it has ended the session is stopped: not live, so the attach starts a fresh KiCad (the start path)
+            let st = s.exited(0, ""); assert!(!closing_not_reused(&st) && !st.is_live(), "{why}: stopped: a fresh start, {}", st.state);
+        }
+        // a restart's placeholder (closing, "starting" under the new generation): joined, as before
+        let mut r = ready(); r.closing = true; r.state = "starting".into(); r.reason = "restarting".into();
+        assert!(!closing_not_reused(&r));
     }
     #[test] fn the_cap_evicts_the_left_kicad_used_longest_ago_never_one_with_a_dialog_or_unsaved_work() {
         let mk = |pro: &str, left: &str, dialog: bool, dirty: bool, t: u64| {

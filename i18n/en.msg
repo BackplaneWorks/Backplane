@@ -2202,6 +2202,7 @@ gpui.c.kicad.missing.edit = KiCad isn't installed. Press Edit to install it here
 gpui.c.kicad.full.screen = Full screen
 gpui.c.kicad.exit.full.screen = Exit full screen
 gpui.c.kicad.the.editor.takes.the.whole = The editor takes the whole window; only this row stays
+gpui.c.kicad.closing = KiCad is closing. The editor opens again once it has closed.
 
 # ---- gpui-d: setup, pairing, hubs, palette, picker, projects, composer, menus ----
 gpui.assets.missing = Assets missing in {dir}: {files}
