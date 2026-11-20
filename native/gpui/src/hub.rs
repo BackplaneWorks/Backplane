@@ -129,9 +129,10 @@ impl View {
             p["accountProfiles"]=json!(1); // the account page: the hub offers its `accounts` grant only to a view that declares this version
             p["client"]=json!({"kind":"desktop","os":match std::env::consts::OS{"macos"=>"darwin",o=>o},"launcher":self.launcher,"browser":if cfg!(feature="cef"){"cef"}else{"frames"}});
             if let Some(d)=licenses_dir(){p["client"]["licenses"]=json!(d.to_string_lossy());} // Settings > About: where this install's notices are // browser: what Settings > About says this window's Browser tab is // setup's words for keys, and whether another home can be chosen
-            // Offer keyed deltas against the newest body held; the hub answers whole or with ops from it.
-            p["viewDelta"]=json!({"version":1,"token":self.bases.newest});
-            self.offered.insert(self.next,self.bases.newest.clone());
+            // Offer keyed deltas against this target's last held body (else newest so sidebar/chrome still diff).
+            let offer = self.bases.offer_for(&self.target).to_string();
+            p["viewDelta"]=json!({"version":1,"token":offer});
+            self.offered.insert(self.next,offer);
             if self.offered.len()>64 {self.offered.clear();}
         }
         self.pending.insert(self.next,(self.revision,self.target.clone(),method.into()));
@@ -294,7 +295,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                     if r.get("viewDelta").is_some() {
                         let draft=v.req_draft.remove(&id);
                         match delta::picture(r,&offered,revision,&v.bases,draft.as_deref()) {
-                            Ok((full,token,body))=>{v.bases.keep(token,body);r=full;},
+                            Ok((full,token,body))=>{v.bases.keep_for(&target,token,body);r=full;},
                             Err(error)=>{ // fail this reply and ask for the whole view next time
                                 eprintln!("GPUI_LOG {{\"delta\":{}}}",Value::String(format!("{error:#}")));
                                 v.bases.clear();v.dirty=true;continue;

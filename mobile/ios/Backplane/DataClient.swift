@@ -206,15 +206,15 @@ final class DataClient {
         links = HubList.adopt(links, link, key: Pairing.key)
         PairingStore.save(links)
         needsRepair = false; adding = false; uberAfterPair = true
-        if changed { reset() }
+        if changed { reset(); loadCache() }
         connect()
     }
-    /// Switch to another paired hub: it goes first, this phone's copy of the last one's threads is dropped, and the socket moves.
+    /// Switch to another paired hub: it goes first, its disk cache paints at once, and the socket moves.
     func useHub(_ key: String) {
         guard Pairing.key(link ?? "") != key else { return }
         let next = HubList.use(links, key, key: Pairing.key)
         guard next != links else { return }
-        close(); leaveHome(); links = next; PairingStore.save(links); reset(); loadOutbox()
+        close(); leaveHome(); links = next; PairingStore.save(links); reset(); loadCache(); loadOutbox()
         needsRepair = false; pairingError = ""; failure = ""
         connect()
     }
@@ -222,22 +222,30 @@ final class DataClient {
     func forgetHub(_ key: String) {
         let current = Pairing.key(link ?? "") == key
         try? FileManager.default.removeItem(at: Self.outboxURL(key))
+        try? FileManager.default.removeItem(at: Self.cacheURL(for: key))
         links = HubList.forget(links, key, key: Pairing.key); PairingStore.save(links)
-        if key == homeKey { setHome(""); if onHome { leaveHome(); close(); reset(); loadOutbox(); connect() } }
+        if key == homeKey { setHome(""); if onHome { leaveHome(); close(); reset(); loadCache(); loadOutbox(); connect() } }
         guard current else { return }
-        close(); reset(); loadOutbox(); needsRepair = false; pairingError = ""
+        close(); reset(); loadCache(); loadOutbox(); needsRepair = false; pairingError = ""
         if link != nil { connect() } else { conn = .offline }
     }
     /// Forget every hub.
     func unpair() {
-        for l in links { if let k = Pairing.key(l) { try? FileManager.default.removeItem(at: Self.outboxURL(k)) } }
-        links = []; adding = false; PairingStore.save(links); setHome(""); leaveHome(); reset(); close(); conn = .offline; outbox = Outbox()
+        for l in links {
+            if let k = Pairing.key(l) {
+                try? FileManager.default.removeItem(at: Self.outboxURL(k))
+                try? FileManager.default.removeItem(at: Self.cacheURL(for: k))
+            }
+        }
+        try? FileManager.default.removeItem(at: Self.legacyCacheURL)
+        links = []; adding = false; PairingStore.save(links); setHome(""); leaveHome(); reset(clearDisk: true); close(); conn = .offline; outbox = Outbox()
     }
-    private func reset() {
+    private func reset(clearDisk: Bool = false) {
+        saveTask?.cancel()
         notice = HubNotice(); star = nil; telemetryNotice = nil; migration = DMigration(); migrationOpen = false; migrationError = ""
         dueThreads = []; dueProjects = []
         projects = []; threads = []; entries = [:]; older = [:]; loadedThreads = []; listsLoaded = false; open = nil; queues = [:]; queueError = [:]
-        try? FileManager.default.removeItem(at: cacheURL)
+        if clearDisk, let k = link.flatMap({ Pairing.key($0) }) { try? FileManager.default.removeItem(at: Self.cacheURL(for: k)) }
     }
 
     // MARK: the Hub screen: plain HTTP from the pairing alone, whatever the socket is doing
@@ -311,7 +319,7 @@ final class DataClient {
         close()
         conn = .offline
         if downSince == nil { downSince = Date() }
-        if onHome, needsRepair { needsRepair = false; leaveHome(); reset(); loadOutbox(); connect(); return }   // the home refused this phone: back to the hub chosen
+        if onHome, needsRepair { needsRepair = false; leaveHome(); reset(); loadCache(); loadOutbox(); connect(); return }   // the home refused this phone: back to the hub chosen
         guard link != nil, !needsRepair else { return }
         failover()
         let wait = backoff
@@ -388,7 +396,7 @@ final class DataClient {
             let up = await Self.answers(home)
             guard !onHome, HubList.onHome(main: Pairing.key(main) ?? "", home: homeKey, now: false, down: down, homeUp: up, mainUp: false) else { return }
             logPair("home", homeKey)
-            close(); onHome = true; reset(); loadOutbox(); connect()
+            close(); onHome = true; reset(); loadCache(); loadOutbox(); connect()
             homeWatch = Task { [weak self] in
                 while !Task.isCancelled {
                     try? await Task.sleep(for: .seconds(10))
@@ -396,7 +404,7 @@ final class DataClient {
                     let back = await Self.answers(m)
                     if !HubList.onHome(main: Pairing.key(m) ?? "", home: self.homeKey, now: true, down: 0, homeUp: true, mainUp: back) {
                         self.logPair("back", Pairing.key(m) ?? "")
-                        self.close(); self.leaveHome(); self.reset(); self.loadOutbox(); self.connect(); return
+                        self.close(); self.leaveHome(); self.reset(); self.loadCache(); self.loadOutbox(); self.connect(); return
                     }
                 }
             }
@@ -583,14 +591,29 @@ final class DataClient {
         if split { for p in settledOpen { await loadSettled(p, g: g) } }
         await parentsOf(g)
     }
-    /// The parents of subagents and subthreads the list left out (a settled one): read one by one, so a child sits under its parent, as on the desktop. A few at most.
+    /// The parents of subagents and subthreads the list left out (a settled one): read concurrently in one round-trip, so a child sits under its parent, as on the desktop. A few at most.
     private func parentsOf(_ g: Int) async {
         let have = Set(threads.map(\.id))
         var seen = Set<String>()
-        for pid in threads.map(\.parent) where !pid.isEmpty && !have.contains(pid) && seen.insert(pid).inserted && seen.count <= 20 {
-            guard let r: DEntriesPage = try? await call("thread.entries", ["thread": pid, "limit": 1]), g == gen, let t = r.thread else { continue }
-            if !threads.contains(where: { $0.id == t.id }) { threads.append(t) }
+        var missing: [String] = []
+        for pid in threads.map(\.parent) where !pid.isEmpty && !have.contains(pid) && seen.insert(pid).inserted {
+            missing.append(pid)
+            if missing.count >= 20 { break }
         }
+        guard !missing.isEmpty else { return }
+        let fetched: [DThread] = await withTaskGroup(of: DThread?.self) { group in
+            for pid in missing {
+                group.addTask { @MainActor [weak self] in
+                    guard let self, let r: DEntriesPage = try? await self.call("thread.entries", ["thread": pid, "limit": 1]), g == self.gen else { return nil }
+                    return r.thread
+                }
+            }
+            var out: [DThread] = []
+            for await t in group { if let t { out.append(t) } }
+            return out
+        }
+        guard g == gen else { return }
+        for t in fetched where !threads.contains(where: { $0.id == t.id }) { threads.append(t) }
         scheduleSave()
     }
     func setSettled(open on: Bool, _ project: String) {
@@ -1170,7 +1193,7 @@ final class DataClient {
     func openPush(thread: String, ask: String, link: String = "", hub: String = "") {
         // a push from another hub on the list (its url in `hub`): that hub first, then what it links to
         if let k = Pairing.key(hub), !k.isEmpty, k != usingKey, links.contains(where: { Pairing.key($0) == k }) {
-            if k == homeKey, links.first.flatMap(Pairing.key) != k { if !onHome { close(); onHome = true; reset(); loadOutbox(); connect() } }
+            if k == homeKey, links.first.flatMap(Pairing.key) != k { if !onHome { close(); onHome = true; reset(); loadCache(); loadOutbox(); connect() } }
             else { useHub(k) }
         }
         // a link the hub put on it opens that instead: "account:<id>" is that account's sign-in (an expired sign-in's alert)
@@ -1180,16 +1203,23 @@ final class DataClient {
     }
     var viewing: String? { open }
 
-    // MARK: cache (paints at launch, replaced as soon as the hub answers)
+    // MARK: cache (per-hub disk cache: paints at launch and on hub switch, replaced as soon as the hub answers)
     private struct Cache: Codable { var hub: String; var projects: [DProject]; var threads: [DThread]; var entries: [String: [DEntry]]; var older: [String: String] }
-    private var cacheURL: URL {
+    private static var legacyCacheURL: URL {
         let d = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
         return d.appendingPathComponent("data-cache-v1.json")
     }
+    private static func cacheURL(for hubKey: String) -> URL {
+        let d = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        let safe = String(hubKey.map { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "." || $0 == "-") ? $0 : "_" })
+        return d.appendingPathComponent("data-cache-v1-\(safe).json")
+    }
     private func loadCache() {
-        guard let hub = link.flatMap({ Pairing.key($0) }), let d = try? Data(contentsOf: cacheURL),
-              let c = try? JSONDecoder().decode(Cache.self, from: d), c.hub == hub else { return }
+        guard let hub = link.flatMap({ Pairing.key($0) }) else { return }
+        let d = (try? Data(contentsOf: Self.cacheURL(for: hub))) ?? (try? Data(contentsOf: Self.legacyCacheURL))
+        guard let d, let c = try? JSONDecoder().decode(Cache.self, from: d), c.hub == hub else { return }
         projects = c.projects; threads = c.threads; entries = c.entries; older = c.older; listsLoaded = !c.threads.isEmpty || !c.projects.isEmpty
     }
     private func scheduleSave() {
@@ -1197,12 +1227,12 @@ final class DataClient {
         saveTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled, let self, let hub = self.link.flatMap({ Pairing.key($0) }) else { return }
-            // the ten most recent threads' newest entries
-            let recent = Set(self.threads.prefix(10).map(\.id))
+            // the twenty most recent threads' newest entries
+            let recent = Set(self.threads.prefix(20).map(\.id))
             var e: [String: [DEntry]] = [:]
             for (k, v) in self.entries where recent.contains(k) { e[k] = Array(v.filter { !$0.sending && !$0.failed }.suffix(40)) }
             let c = Cache(hub: hub, projects: self.projects, threads: self.threads, entries: e, older: self.older.filter { recent.contains($0.key) })
-            let url = self.cacheURL
+            let url = Self.cacheURL(for: hub)
             await Task.detached(priority: .utility) { if let d = try? JSONEncoder().encode(c) { try? d.write(to: url, options: .atomic) } }.value
         }
     }
