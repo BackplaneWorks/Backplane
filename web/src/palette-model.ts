@@ -8,7 +8,6 @@ export type PaletteAction =
   | { type: "thread"; id: string }
   | { type: "rail"; id: string }
   | { type: "thread-act"; action: string }
-  | { type: "fork"; projectId: string }
   | { type: "rename" }
   | { type: "prev-thread" }
   | { type: "next-thread" }
@@ -144,16 +143,8 @@ export function buildPaletteItems(state: PaletteState, labels: PaletteLabels = D
     });
   }
 
-  // 2. Active thread actions
+  // 2. Active thread actions (only actions supported by data/1 `thread.act`)
   if (cur) {
-    if (cur.project) {
-      out.push({
-        label: t("tools.forkthread", "Fork thread"),
-        place: "",
-        kind: "action",
-        action: { type: "fork", projectId: cur.project },
-      });
-    }
     out.push({
       label: cur.pinned ? t("menu.unpin", "Unpin") : t("menu.pin", "Pin"),
       place: "",

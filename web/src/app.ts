@@ -148,17 +148,9 @@ function mountApp(): void {
   stateWord.className = "bp-top-state-word";
   stateBox.append(stateLbl, stateDot, stateWord);
 
-  // Thread action buttons in top bar (Fork thread, Pin, Settle, ▾ menu)
+  // Thread action buttons in top bar (Pin, Settle, ▾ menu)
   const topActs = document.createElement("div");
   topActs.className = "bp-top-acts bp-hide-phone bp-hidden";
-
-  const forkBtn = document.createElement("button");
-  forkBtn.type = "button";
-  forkBtn.className = "bp-btn-ghost bp-top-act";
-  forkBtn.setAttribute("data-testid", "fork-thread-btn");
-  const forkLbl = document.createElement("span");
-  forkLbl.textContent = t("tools.forkthread", "Fork thread");
-  forkBtn.append(makeMiniIcon(["M6 3v12", "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M18 9a9 9 0 0 1-9 9"]), forkLbl);
 
   const pinBtn = document.createElement("button");
   pinBtn.type = "button";
@@ -188,7 +180,7 @@ function mountApp(): void {
   threadMenuPop.setAttribute("data-testid", "thread-menu");
   menuWrap.append(threadMenuBtn, threadMenuPop);
 
-  topActs.append(forkBtn, pinBtn, settleBtn, menuWrap);
+  topActs.append(pinBtn, settleBtn, menuWrap);
 
   // Right controls: Improvements, command box, search icon, settings gear
   const topRight = document.createElement("div");
@@ -363,6 +355,22 @@ function mountApp(): void {
     showError: (msg) => composer.showError(msg),
   });
 
+  function renameThread(th: ThreadItem): void {
+    const next = window.prompt("Rename thread", th.title || "");
+    if (!next || !next.trim()) return;
+    void hub.rpc<{ thread?: ThreadItem }>("thread.act", { thread: th.id, action: "rename", title: next.trim() })
+      .then((res) => {
+        if (res.thread) {
+          threads = threads.map((x) => (x.id === res.thread!.id ? res.thread! : x));
+          updateHeader();
+          void refreshSections();
+        }
+      })
+      .catch((e) => {
+        composer.showError(e instanceof Error ? e.message : "Could not rename thread");
+      });
+  }
+
   function executePaletteAction(act: PaletteAction): void {
     switch (act.type) {
       case "thread":
@@ -376,25 +384,12 @@ function mountApp(): void {
       case "thread-act":
         if (selectedThreadId) void runThreadAct(selectedThreadId, act.action);
         break;
-      case "fork":
       case "new-thread":
         void createThread(act.projectId);
         break;
       case "rename": {
         const th = threads.find((x) => x.id === selectedThreadId);
-        if (!th) break;
-        const next = window.prompt("Rename thread", th.title || "");
-        if (next && next.trim()) {
-          void hub.rpc<{ thread?: ThreadItem }>("thread.act", { thread: th.id, action: "rename", title: next.trim() })
-            .then((res) => {
-              if (res.thread) {
-                threads = threads.map((x) => (x.id === res.thread!.id ? res.thread! : x));
-                updateHeader();
-                void refreshSections();
-              }
-            })
-            .catch(() => {});
-        }
+        if (th) renameThread(th);
         break;
       }
       case "prev-thread":
@@ -477,10 +472,6 @@ function mountApp(): void {
     },
   });
 
-  forkBtn.addEventListener("click", () => {
-    const th = threads.find((x) => x.id === selectedThreadId);
-    if (th?.project) void createThread(th.project);
-  });
   pinBtn.addEventListener("click", () => {
     const th = threads.find((x) => x.id === selectedThreadId);
     if (th) void runThreadAct(th.id, th.pinned ? "unpin" : "pin");
@@ -500,20 +491,7 @@ function mountApp(): void {
     const items: Array<{ label: string; danger?: boolean; run: () => void }> = [
       {
         label: "Rename…",
-        run: () => {
-          const next = window.prompt("Rename thread", th.title || "");
-          if (next && next.trim()) {
-            void hub.rpc<{ thread?: ThreadItem }>("thread.act", { thread: th.id, action: "rename", title: next.trim() })
-              .then((res) => {
-                if (res.thread) {
-                  threads = threads.map((x) => (x.id === res.thread!.id ? res.thread! : x));
-                  updateHeader();
-                  void refreshSections();
-                }
-              })
-              .catch(() => {});
-          }
-        },
+        run: () => renameThread(th),
       },
       { label: th.pinned ? t("menu.unpin", "Unpin") : t("menu.pin", "Pin"), run: () => { void runThreadAct(th.id, th.pinned ? "unpin" : "pin"); } },
       { label: th.settled ? t("phone.unsettle", "Unsettle") : t("menu.settle", "Settle"), run: () => { void runThreadAct(th.id, th.settled ? "unsettle" : "settle"); } },
@@ -1099,7 +1077,6 @@ function mountApp(): void {
 
   onLocaleChange(() => {
     renderConnStatus(hub.getState());
-    forkLbl.textContent = t("tools.forkthread", "Fork thread");
     impLbl.textContent = t("gpui.improvements", "Improvements");
     settingsBtn.title = t("palette.settings", "Settings");
     settingsBtn.setAttribute("aria-label", t("palette.settings", "Settings"));

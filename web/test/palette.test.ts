@@ -61,6 +61,10 @@ describe("Command Palette pure logic", () => {
       word: "/btw",
       runDirectly: false,
     });
+
+    // data/1 does not expose `thread.fork`; palette must not offer a misleading Fork action
+    expect(items.some((i) => i.label.toLowerCase().includes("fork"))).toBe(false);
+    expect(items.some((i) => i.action.type === "new-thread" && i.label === "New thread in Demo Board")).toBe(true);
   });
 
   test("empty query surfaces waiting threads first", () => {
