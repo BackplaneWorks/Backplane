@@ -560,10 +560,17 @@ mod imp {
     pub fn show_local(container: u64, show: Option<u64>, mine: &[u64]) -> bool {
         let Some(g) = conn() else { return false }; let c = g.as_ref().unwrap();
         let state = |w: u64| c.get_window_attributes(w as u32).ok().and_then(|q| q.reply().ok()).map(|a| a.map_state);
-        if let Some(k) = show.filter(|k| mine.contains(k)) {
-            if state(k) == Some(MapState::VIEWABLE) && mine.iter().filter(|o| **o != k).all(|o| state(*o) == Some(MapState::UNMAPPED)) { return false }
-        }
         let size = c.get_geometry(container as u32).ok().and_then(|q| q.reply().ok()).map(|g| (g.width as u32, g.height as u32));
+        if let Some(k) = show.filter(|k| mine.contains(k)) {
+            if state(k) == Some(MapState::VIEWABLE) && mine.iter().filter(|o| **o != k).all(|o| state(*o) == Some(MapState::UNMAPPED)) {
+                // nothing to map; still told its place if it differs from the one it was told (KiCad mapped this frame itself after
+                // the window moved while another was on show: its popups would open at the old place). TOLD dedupes: usually nothing
+                if let (Some(root), Some((w, h))) = (root(c), size) {
+                    if let Some(t) = c.translate_coordinates(container as u32, root, 0, 0).ok().and_then(|q| q.reply().ok()) { tell(c, k as u32, (t.dst_x as i32, t.dst_y as i32, w, h), "shown"); }
+                }
+                return false
+            }
+        }
         if let Some(k) = show.filter(|k| mine.contains(k)) {
             // a frame never shown at this size (one shown here for the first time) is sized to the container; one already so is not touched
             if let (Some((w, h)), Some(fg)) = (size, c.get_geometry(k as u32).ok().and_then(|q| q.reply().ok())) {

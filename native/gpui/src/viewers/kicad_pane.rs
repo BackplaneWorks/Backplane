@@ -1421,12 +1421,15 @@ impl KicadPane {
             // (the app sets reattached_for when it acts; one it held, its project not on screen, is asked again every 2 s until it acts)
             if self.is_adrift() && self.reattached_for != Some(pid) && since.elapsed() >= std::time::Duration::from_millis(1200)
                 && self.adrift_held_at.map_or(true, |t| t.elapsed() >= std::time::Duration::from_secs(2)) {
-                self.adrift_held_at = Some(std::time::Instant::now());
-                // the safety net never moves the keyboard (reattach_why)
+                // the safety net never moves the keyboard (reattach_why); said once per KiCad (every ask with BACKPLANE_KICAD_DEBUG)
                 let why = reattach_why(AdriftRoad::SafetyNet, true, false);
-                eprintln!("GPUI_LOG {}", json!({"kicad_reattach": {"road": "adrift", "why": format!("{why:?}"), "pid": pid, "its_container": self.info["container"], "pane_container": self.container}}));
+                if self.adrift_held_at.is_none() || std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+                    eprintln!("GPUI_LOG {}", json!({"kicad_reattach": {"road": "adrift", "why": format!("{why:?}"), "pid": pid, "its_container": self.info["container"], "pane_container": self.container}}));
+                }
+                self.adrift_held_at = Some(std::time::Instant::now());
                 cx.emit(PaneAdrift(why));
-            } else if since.elapsed() >= std::time::Duration::from_millis(1200)
+            // (never while adrift: a show cannot bring the frame into a pane its KiCad is not in; the re-attach above is the way)
+            } else if !self.is_adrift() && since.elapsed() >= std::time::Duration::from_millis(1200)
                 && self.poked.as_ref().map_or(true, |(k, t)| k != &want || t.elapsed() >= remount_wait(self.unshown_asks))
             {
                 if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_unshown": want, "ms": since.elapsed().as_millis() as u64, "asked": self.unshown_asks})); }
@@ -3098,7 +3101,8 @@ impl crate::Backplane {
             if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_attach_again": {"road": "adrift", "held": "its project is not on screen", "project": project}})); }
             return false
         }
-        if guarded && !self.screens.kicad_adrift_tried.insert((project.clone(), pid)) { pane.update(cx, |p, _| p.reattached_for = Some(pid)); return false }
+        // the Install's reopen marks the KiCad as tried too, without asking (so the safety net does not fire once more for it)
+        if !self.screens.kicad_adrift_tried.insert((project.clone(), pid)) && guarded { pane.update(cx, |p, _| p.reattached_for = Some(pid)); return false }
         pane.update(cx, |p, _| p.reattached_for = Some(pid));
         let open = if matches!(open.as_str(), "board" | "schematic" | "3d") { open } else { "board".to_string() }; // i18n-ok: rail page kinds
         eprintln!("GPUI_LOG {}", json!({"kicad_attach_again": {"road": "adrift", "why": format!("{why:?}"), "open": open, "pid": pid}}));
