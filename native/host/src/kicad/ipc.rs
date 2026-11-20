@@ -734,9 +734,22 @@ mod tests {
     #[cfg(unix)] fn writing_cli(dir: &std::path::Path, person: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
         use std::os::unix::fs::PermissionsExt;
         let (cli, log) = (dir.join("kicad-cli"), dir.join("probe.log"));
-        std::fs::write(&cli, format!("#!/bin/sh\necho \"$KICAD_CONFIG_HOME\" >> '{log}'\nif [ -n \"$KICAD_CONFIG_HOME\" ]; then mkdir -p \"$KICAD_CONFIG_HOME/10.0\"; echo rewritten > \"$KICAD_CONFIG_HOME/10.0/kicad_common.json\"; else echo rewritten > '{person}'; fi\nif [ \"$1\" = api-server ]; then echo '{{\"version\":\"10.99.0-bp.13\"}}'; else echo 10.0.8; fi\n", log = log.display(), person = person.display())).unwrap();
+        std::fs::write(&cli, format!("#!/bin/sh\n[ \"$1\" = {NOOP} ] && exit 0\necho \"$KICAD_CONFIG_HOME\" >> '{log}'\nif [ -n \"$KICAD_CONFIG_HOME\" ]; then mkdir -p \"$KICAD_CONFIG_HOME/10.0\"; echo rewritten > \"$KICAD_CONFIG_HOME/10.0/kicad_common.json\"; else echo rewritten > '{person}'; fi\nif [ \"$1\" = api-server ]; then echo '{{\"version\":\"10.99.0-bp.13\"}}'; else echo 10.0.8; fi\n", log = log.display(), person = person.display())).unwrap();
         std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        started(&cli);
         (cli, log)
+    }
+    /// The stand-ins' argument that makes them exit at once, doing nothing (logged nowhere): `started` runs it.
+    const NOOP: &str = "--bp-test-noop";
+    /// "Text file busy": a script written a moment ago can still be open for writing in a child another test thread just forked, until that
+    /// child's exec (longer on a loaded box), and the probe's spawn then fails as if KiCad did not run. Run the stand-in with NOOP until it
+    /// starts: the same approach as `wait_execs` in agents/proc.rs's tests (4cfb8c3356) and the reaper tests' group() (799609fe53), with
+    /// the NOOP argument because these stand-ins act when run (the hung one records its pid and hangs).
+    #[cfg(unix)] fn started(cli: &std::path::Path) {
+        let t = std::time::Instant::now();
+        loop { match std::process::Command::new(cli).arg(NOOP).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status() {
+            Err(e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) && t.elapsed() < std::time::Duration::from_secs(120) => std::thread::sleep(std::time::Duration::from_millis(25)),
+            _ => break } }
     }
 
     /// Every probe of a KiCad (start-up and Settings > CAD, an agent's KiCad selection, a check run's match) runs with its settings in a
@@ -765,24 +778,30 @@ mod tests {
         let t = crate::plat::tmp::dir("kprobe-hang");
         let (cli, pids, once) = (t.path().join("kicad-cli"), t.path().join("pids"), t.path().join("hung-once"));
         // the first run (or every run with ALWAYS) records its pid and hangs as the stuck probes did: SIGTERM ignored, the same pid (exec)
-        std::fs::write(&cli, format!("#!/bin/sh\necho $$ >> '{p}'\nif [ ! -e '{o}' ] || [ -e '{o}.always' ]; then touch '{o}'; trap '' TERM; exec sleep 60; fi\necho 10.99.0\n", p = pids.display(), o = once.display())).unwrap();
+        std::fs::write(&cli, format!("#!/bin/sh\n[ \"$1\" = {NOOP} ] && exit 0\necho $$ >> '{p}'\nif [ ! -e '{o}' ] || [ -e '{o}.always' ]; then touch '{o}'; trap '' TERM; exec sleep 60; fi\necho 10.99.0\n", p = pids.display(), o = once.display())).unwrap();
         std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        started(&cli);
         let gone = |pid: &str| { let r = std::process::Command::new("kill").args(["-0", pid]).stderr(std::process::Stdio::null()).status().unwrap(); !r.success() };
-        let limit = std::time::Duration::from_millis(1500);
+        let ran = || -> Vec<String> { std::fs::read_to_string(&pids).unwrap_or_default().lines().map(String::from).collect() };
+        // the limit the test gives the probe (the hub's own, PROBE_LIMIT, is not the test's): the hung run is killed at it, and the run that
+        // answers must start a shell and say the version within it. 1.5 s was too tight on a loaded box (a land gate at load 25-29); 5 s is
+        // not, and the test is 15 s at most. What is proven is unchanged: a run hung, was killed and reaped, the probe asked once more and
+        // that run answered; elapsed time is only bounded, generously
+        let limit = std::time::Duration::from_secs(5);
         let at = std::time::Instant::now();
         let out = cli_version_within(&cli.to_string_lossy(), limit).expect("the second run answers");
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "10.99.0");
-        assert!(at.elapsed() < limit * 2 + std::time::Duration::from_secs(5), "bounded: {:?}", at.elapsed());
-        let ran: Vec<String> = std::fs::read_to_string(&pids).unwrap().lines().map(String::from).collect();
-        assert_eq!(ran.len(), 2, "asked twice: {ran:?}");
-        assert!(gone(&ran[0]), "the hung run is killed and reaped, not left alive or a zombie: pid {}", ran[0]);
+        assert!(at.elapsed() < limit * 2 + std::time::Duration::from_secs(60), "bounded: {:?}", at.elapsed());
+        let first = ran();
+        assert_eq!(first.len(), 2, "asked twice: {first:?}");
+        assert!(gone(&first[0]), "the hung run is killed and reaped, not left alive or a zombie: pid {}", first[0]);
 
         std::fs::write(once.with_extension("always"), "").unwrap(); std::fs::remove_file(&pids).unwrap();
         let at = std::time::Instant::now();
         assert!(cli_version_within(&cli.to_string_lossy(), limit).is_none(), "a KiCad that always hangs has no version");
-        assert!(at.elapsed() < limit * 2 + std::time::Duration::from_secs(5), "bounded: {:?}", at.elapsed());
-        let ran: Vec<String> = std::fs::read_to_string(&pids).unwrap().lines().map(String::from).collect();
-        assert_eq!(ran.len(), 2, "{ran:?}"); for p in &ran { assert!(gone(p), "pid {p} left behind"); }
+        assert!(at.elapsed() < limit * 2 + std::time::Duration::from_secs(60), "bounded: {:?}", at.elapsed());
+        let always = ran();
+        assert_eq!(always.len(), 2, "{always:?}"); for p in &always { assert!(gone(p), "pid {p} left behind"); }
     }
 
     #[test] fn the_backplane_library_is_said_by_its_bundle_label_and_short_commit() {
