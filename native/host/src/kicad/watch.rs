@@ -1006,7 +1006,8 @@ mod tests {
         assert_eq!(wroot, piped.to_string_lossy());
         // Feed the presenter's actual watch request into Plots::watch and verify Src.root is preserved intact (not split on '|')
         let home = crate::plat::tmp::dir("gerb-pipe-home");
-        let hub = Hub::test(&home);
+        let cfg = crate::hub::Cfg { home: home.to_path_buf(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
         let plots = Plots::new(&home);
         let keys = plots.watch(&hub, 1, Some(wkind), wroot, wpath, "", ("", 0), false);
         assert_eq!(keys.len(), 1);
