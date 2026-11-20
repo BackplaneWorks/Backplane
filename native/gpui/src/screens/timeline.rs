@@ -623,11 +623,14 @@ impl Backplane {
         out
     }
     fn timeline_pos(&self, p: Point<Pixels>) -> Option<Pos> { self.screens.reg.borrow().hit(p) }
-    pub(crate) fn timeline_down(&mut self, e: &MouseDownEvent, cx: &mut Context<Self>) {
+    pub(crate) fn timeline_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let Some(pos) = self.timeline_pos(e.position) else { return };
         if e.button == MouseButton::Right {
+            // a selection's Copy first, then a link's own items
             let link = self.screens.reg.borrow().link_at(pos).cloned();
-            if let Some(l) = link { let items = super::ctxmenu::link_items(&l.href, l.file); self.ctx_open(e.position, items, cx); }
+            let mut items = super::ctxmenu::selection_items(&self.timeline_selected());
+            if let Some(l) = link { items.extend(super::ctxmenu::link_items(&l.href, l.file)); }
+            if !items.is_empty() { self.ctx_open(e.position, items, cx); }
             return;
         }
         let mut r = self.screens.reg.borrow_mut();
@@ -637,7 +640,10 @@ impl Backplane {
             n if n >= 3 => { if let Some(s) = select::block_range(&texts, pos.block) { r.select(s); } }
             _ => { if e.modifiers.shift { r.extend(pos); } else { r.select(Selection { anchor: pos, head: pos }); } r.dragging = true; }
         }
-        drop(r); cx.notify();
+        let picked = e.click_count >= 2;
+        drop(r);
+        if picked { self.timeline_selection_made(window, cx); }
+        cx.notify();
     }
     pub(crate) fn timeline_move(&mut self, e: &MouseMoveEvent, cx: &mut Context<Self>) {
         if !self.screens.reg.borrow().dragging {
@@ -647,7 +653,7 @@ impl Backplane {
         }
         if let Some(pos) = self.timeline_pos(e.position) { self.screens.reg.borrow_mut().extend(pos); cx.notify(); }
     }
-    pub(crate) fn timeline_up(&mut self, e: &MouseUpEvent, cx: &mut Context<Self>) {
+    pub(crate) fn timeline_up(&mut self, e: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
         let was = std::mem::replace(&mut self.screens.reg.borrow_mut().dragging, false);
         if !was { return; }
         // a click without a drag on a link opens it
@@ -657,10 +663,21 @@ impl Backplane {
             self.screens.reg.borrow_mut().hover.clear();
             self.open_link(&l, cx);
         }
-        // a finished selection is the X11 PRIMARY selection too (middle-click paste in other apps)
-        #[cfg(target_os = "linux")]
-        { let s = self.timeline_selected(); if !s.is_empty() { cx.write_to_primary(ClipboardItem::new_string(s)); } }
+        self.timeline_selection_made(window, cx);
         cx.notify();
+    }
+    /// A selection was made in the timeline (a drag, a double or a triple click): it is the PRIMARY selection on Linux (middle-click paste in
+    /// other programs), and the copy chord (Ctrl+C, Cmd+C on a Mac) copies it from now on, wherever the keyboard was (`copy_claim`).
+    fn timeline_selection_made(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let s = self.timeline_selected();
+        if s.is_empty() { return }
+        #[cfg(target_os = "linux")]
+        cx.write_to_primary(ClipboardItem::new_string(s));
+        match copy_claim(self.input.focus_handle(cx).is_focused(window), self.screens.root_focus.is_focused(window)) {
+            Claim::ComposerDrops => self.input.update(cx, |c, cx| c.drop_selection(cx)),
+            Claim::Root => window.focus(&self.screens.root_focus),
+            Claim::Stay => {}
+        }
     }
     /// Open a link of the timeline or a document: a file in the viewer, a web address in the browser, a document's `#anchor` scrolled to.
     pub(crate) fn open_link(&mut self, l: &Link, cx: &mut Context<Self>) {
@@ -699,6 +716,21 @@ impl Backplane {
     fn timeline_selected(&self) -> String { self.screens.reg.borrow().selected(self.data["thread"]["entries"].as_array().map_or(&[], |r| r.as_slice())) }
 }
 
+/// What a selection made in the timeline does with the keyboard, so that the copy chord copies it (the chord goes where the keyboard is).
+#[derive(Debug, PartialEq)]
+pub enum Claim {
+    /// The composer keeps the keyboard (the person goes on typing) and drops its own selection: its Copy, with nothing of its own selected,
+    /// copies the timeline's (`ComposerEvent::CopyTimeline`). One selection in the window, the newest, as a web page has.
+    ComposerDrops,
+    /// Anywhere else (a terminal, a viewer, a search box, a copy button, nothing at all) the window's own handle takes it: its Copy is the timeline's.
+    Root,
+    /// The window's handle has it already.
+    Stay,
+}
+pub fn copy_claim(composer_focused: bool, root_focused: bool) -> Claim {
+    if composer_focused { Claim::ComposerDrops } else if root_focused { Claim::Stay } else { Claim::Root }
+}
+
 /// How far ahead of the reader rows are measured and history is asked for: about two screens, the web's runway. The two are one number on purpose: the
 /// list counts only rows it has measured, so a reader this near the top of the measured rows is this near the top of the rows held.
 pub const RUNWAY: f32 = 1600.;
@@ -709,6 +741,13 @@ pub fn near_top(y: f32, max: f32) -> bool { y.min(max) < RUNWAY }
 mod tests {
     use super::*;
     use core::prelude::v1::test;
+    #[test] fn a_selection_in_the_timeline_is_what_the_copy_chord_copies_wherever_the_keyboard_was() {
+        // the composer's own Ctrl+C would copy its older selection (a draft copied before): it is dropped, the keyboard stays to type on
+        assert_eq!(copy_claim(true, false), Claim::ComposerDrops);
+        // a terminal (Ctrl+C is its ^C), a search box, a copy button or no focus at all (no keys reach the window): the window's handle takes it
+        assert_eq!(copy_claim(false, false), Claim::Root);
+        assert_eq!(copy_claim(false, true), Claim::Stay);
+    }
     #[test] fn a_document_picture_takes_the_size_it_asks_for_and_never_more_than_the_page() {
         let img = |w: Option<Dim>, h: Option<Dim>| Img { width: w, height: h, ..Default::default() };
         assert_eq!(doc_img_size(&img(None, None), Some((1200., 600.)), 800.), Some((800., 400.)));

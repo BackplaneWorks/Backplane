@@ -35,6 +35,8 @@ pub const LOCAL_KICAD_EMBED: &str = "local:kicad-embed";
 pub const LOCAL_SUB: &str = "local:sub";
 fn s(v: &Value, k: &str) -> String { v[k].as_str().unwrap_or("").to_string() }
 fn raw(id: &str) -> &str { id.rsplit('|').next().unwrap_or(id) }
+/// A right-click with text selected in the timeline: its Copy (nothing without a selection).
+/* i18n-ok: menu labels, drawn through trs in render */ pub fn selection_items(selected: &str) -> Vec<Item> { if selected.is_empty() { vec![] } else { vec![item("Copy", LOCAL_COPY, selected, false)] } }
 fn item(label: &str, action: &str, value: &str, confirm: bool) -> Item { Item { label: label.into(), action: action.into(), value: value.into(), confirm, note: String::new() } }
 
 /// The menu of a link in a message: a file opens, shows in its folder, or has its path copied; a web address opens or is copied; any other link is copied.

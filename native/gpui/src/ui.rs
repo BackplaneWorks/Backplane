@@ -329,7 +329,7 @@ fn msg_tools(cx: &mut Context<Backplane>, light: bool, id: &str, text: &str) -> 
     let copy_btn = div().id(SharedString::from(format!("copy-{rid}"))).px_1().cursor_pointer().text_size(crate::scale::tpx(11.)).text_color(c(if done { "ok" } else { "faint" })).hover(|s| s.text_color(c("text")))
         .flex().items_center().gap_1().child(crate::art::icon(if done { "check" } else { "copy" }, 11., c(if done { "ok" } else { "faint" })))
         /* i18n-ok: drawn through trs */ .child(trs(if done { "Copied" } else { "Copy" }))
-        .on_click(move |_, window, cx| { cx.stop_propagation(); crate::screens::copyable::copy(&cid, &copy, window, cx) });
+        .relative().child(crate::art::probe_rect(format!("msgcopy:{rid}"))).on_click(move |_, window, cx| { cx.stop_propagation(); crate::screens::copyable::copy(&cid, &copy, window, cx) });
     /* i18n-ok: drawn through trs in btn */ div().flex().gap_2().child(copy_btn)
         /* i18n-ok: drawn through trs in btn */ .child(btn("reply", "Reply").on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("reply".into(), reply.clone())); cx.notify(); })))
 }
@@ -752,9 +752,9 @@ impl Backplane {
         let has_thread = thread.is_object();
         let no_rows = thread["entries"].as_array().map_or(true, |e| e.is_empty());
         div().id("timeline").size_full().relative().flex().flex_col()
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_down(e, cx))).on_mouse_down(MouseButton::Right, cx.listener(|this, e, _, cx| this.timeline_down(e, cx)))
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, e, w, cx| this.timeline_down(e, w, cx))).on_mouse_down(MouseButton::Right, cx.listener(|this, e, w, cx| this.timeline_down(e, w, cx)))
             .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, _| this.scroll_note(e)))
-            .on_mouse_move(cx.listener(|this, e, _, cx| this.timeline_move(e, cx))).on_mouse_up(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_up(e, cx))).on_mouse_up_out(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_up(e, cx)))
+            .on_mouse_move(cx.listener(|this, e, _, cx| this.timeline_move(e, cx))).on_mouse_up(MouseButton::Left, cx.listener(|this, e, w, cx| this.timeline_up(e, w, cx))).on_mouse_up_out(MouseButton::Left, cx.listener(|this, e, w, cx| this.timeline_up(e, w, cx)))
             .children(if has_thread && self.selected.rsplit('|').next() == Some(self.screens.find.thread.as_str()) { crate::screens::find::bar(cx, light, &self.screens.find) } else { None })
             .when(!self.screens.reg.borrow().hover.is_empty(), |d| { let t = self.screens.reg.borrow().hover.clone(); d.child(div().absolute().left_0().bottom_0().max_w_full().px_2().py_px().bg(c("raise")).border_t_1().border_r_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).overflow_hidden().whitespace_nowrap().child(t)) })
             .when(no_rows, |d| d.child(div().flex_1().flex().justify_center().items_end().child(div().w_full().max_w(px(930.)).px_4().py_6().text_color(c("dim")).child(if has_thread && thread["loading"] == true { trs("Loading…") } else if has_thread { trs("Start a conversation.") } else { trs("Pick a thread, or start one with + next to a project.") }))))

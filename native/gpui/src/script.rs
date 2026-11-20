@@ -196,8 +196,11 @@ impl Backplane {
         if crate::art::rects_on() {
             // links in messages as this frame painted them (the check harness aims at these; a code block's Copy is not one)
             let links: Vec<Value> = self.link_and_copy_rects().into_iter().filter(|(id, _, _)| id.starts_with("link:")).map(|(id, href, b)| json!({"id": id, "href": href, "rect": {"x": f32::from(b.origin.x), "y": f32::from(b.origin.y), "w": f32::from(b.size.width), "h": f32::from(b.size.height)}})).collect();
-            let text = serde_json::to_string(&links).unwrap_or_default();
-            if !self.links_sent || text != self.links_last { self.links_sent = true; self.links_last = text; metric(started, "links", json!({"links": links, "supported": true})); }
+            // and every selectable text block of them, its text's start and its box (the copy e2e drags across these)
+            let blocks: Vec<Value> = self.screens.reg.borrow().blocks.iter().filter_map(|b| b.layout.as_ref().map(|l| (b, l.bounds())))
+                .map(|(b, r)| json!({"text": b.text.chars().take(60).collect::<String>(), "rect": {"x": f32::from(r.origin.x), "y": f32::from(r.origin.y), "w": f32::from(r.size.width), "h": f32::from(r.size.height)}})).collect();
+            let text = serde_json::to_string(&(&links, &blocks)).unwrap_or_default();
+            if !self.links_sent || text != self.links_last { self.links_sent = true; self.links_last = text; metric(started, "links", json!({"links": links, "blocks": blocks, "supported": true})); }
         }
     }
 

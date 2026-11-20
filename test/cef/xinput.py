@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real X input through XTest (no xdotool here): xinput.py move X Y | click X Y [button] | drag X1 Y1 X2 Y2 | type TEXT | key KEYSYM-NAME | chord MOD... KEYSYM-NAME | down KEYSYM-NAME | up KEYSYM-NAME | focus TITLE | pos
+"""Real X input through XTest (no xdotool here): xinput.py move X Y | click X Y [button] | drag X1 Y1 X2 Y2 | dblclick X Y | tripleclick X Y | type TEXT | key KEYSYM-NAME | chord MOD... KEYSYM-NAME | down KEYSYM-NAME | up KEYSYM-NAME | focus TITLE | pos
 (`down`/`up`: a key held across commands, e.g. Control_L held while a screenshot is taken. `focus`: give the keyboard to the window whose title starts with
 TITLE, as a window manager does on a click: without a FocusIn, GPUI's X11 client sees no modifier changes and thinks its window inactive.)
 Uses $DISPLAY. Events go through the X server, so they reach the GPUI window exactly like a person's mouse and keyboard."""
@@ -71,5 +71,6 @@ elif cmd == 'bdown':  # bdown X Y: the left button pressed there and held (a dra
     move(a[0], a[1]); xt.XTestFakeButtonEvent(d, 1, 1, 0); x11.XSync(d, 0); time.sleep(0.05)
 elif cmd == 'bup': xt.XTestFakeButtonEvent(d, 1, 0, 0); x11.XSync(d, 0); time.sleep(0.05)
 elif cmd == 'dblclick': move(a[0], a[1]); click(1); click(1)
+elif cmd == 'tripleclick': move(a[0], a[1]); click(1); click(1); click(1)
 elif cmd == 'wheel': move(a[0], a[1]); click(4 if int(a[2]) > 0 else 5)
 x11.XFlush(d)
