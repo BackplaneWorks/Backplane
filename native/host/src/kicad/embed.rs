@@ -121,6 +121,15 @@ pub struct Session {
     pub lock_ask: Value,
     /// in no pane, its frames left in the client's kept (unmapped) container: as good as detached for the warm cap and idleness
     pub parked: bool,
+    /// #1345: the pane holding it is no longer on screen because the person moved away (another thread, the viewer closed or replaced:
+    /// `editor.kicad.leave` from the holder), or its holder's connection went and did not come back (`HOLDER_GONE`): why, "" while it is
+    /// on screen. As good as detached for the idle close and the cap's eviction, but kept parented: back within the idle time it is the
+    /// same KiCad. Cleared by an attach, a detach, a back and a stop
+    pub left: String,
+    /// when the pane's holder (`pane_cid`) was last seen without a connection (epoch s; 0: connected or no holder)
+    pub holder_gone_at: u64,
+    /// the last use (epoch s): an attach, a show, a warm-up's Have, a leave or back, an agent's or a panel's request to it, a job of its
+    /// running (`note_use`); the idle close counts from it
     pub touched_at: u64,
     pub closing: bool,
     /// KiCad said it lost its parent (ET_DETACHED) since the last attach: the next attach re-parents even into a container of the same id
@@ -179,7 +188,7 @@ impl Session {
             container: 0, toplevel: 0, holder: 0, display: String::new(), start_phase: String::new(), start_at: 0, lock_ask: Value::Null,
             sock: String::new(), events_sock: String::new(), sock_dir: String::new(),
             argv: String::new(), cli: String::new(), version: String::new(), desc: String::new(),
-            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], keys: vec![], rss_mb: 0, peak_mb: 0, mem_pub: (0, 0), peak_logged: false, stop_reason: String::new(), stopped_at: 0, closed_frames: vec![], pane_cid: String::new(), active_by: Value::Null, task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None), opening: None, lib_opened: None,
+            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], keys: vec![], rss_mb: 0, peak_mb: 0, mem_pub: (0, 0), peak_logged: false, stop_reason: String::new(), stopped_at: 0, closed_frames: vec![], pane_cid: String::new(), active_by: Value::Null, task_wait: String::new(), parked: false, left: String::new(), holder_gone_at: 0, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None), opening: None, lib_opened: None,
         }
     }
     pub fn spawned(mut self, pid: u32) -> Self { self.pid = pid; self }
@@ -233,8 +242,19 @@ impl Session {
         for n in self.notices.iter_mut().filter(|n| n["id"].as_u64() == Some(id)) { n["dismissed"] = json!(true); }
         self
     }
+    /// #1345 a leave (`left`) or back from the pane's holder (`holder`: `leave_counts`) at `now`: the idle clock starts at the leave and
+    /// again at the back, once each (a second leave on a left session, or a back on one that never left, changes nothing).
+    pub fn leave(&mut self, holder: bool, left: bool, why: &str, now: u64) -> LeaveStep {
+        if !holder { return LeaveStep::NotHolder }
+        self.holder_gone_at = 0;
+        match (left, self.left.is_empty()) {
+            (true, true) => { self.left = if why.is_empty() { "away".into() } else { why.into() }; self.touched_at = now; LeaveStep::Left }
+            (false, false) => { let was = std::mem::take(&mut self.left); self.touched_at = now; LeaveStep::Back(was) }
+            _ => LeaveStep::Same,
+        }
+    }
     pub fn detached(mut self, now: u64) -> Self {
-        self.container = 0; self.touched_at = now; self
+        self.container = 0; self.left.clear(); self.touched_at = now; self
     }
     pub fn failed(mut self, why: &str) -> Self {
         self.state = "failed".into(); self.reason = why.into(); self.pid = 0; self.holder = 0;
@@ -244,7 +264,7 @@ impl Session {
         self.state = "stopped".into(); self.reason = reason.into(); self.pid = 0; self.holder = 0;
         self.frames.clear(); self.dialogs.clear(); self.ended(); self
     }
-    fn ended(&mut self) { self.stopped_at = ipc::now_s(); self.closed_frames.clear(); self.pane_cid.clear(); }
+    fn ended(&mut self) { self.stopped_at = ipc::now_s(); self.closed_frames.clear(); self.pane_cid.clear(); self.left.clear(); self.holder_gone_at = 0; }
     /// KiCad's process ended: `how` its exit ("signal 9 (SIGKILL)", "code 1"; empty: code alone), `tail` its last output lines (kept in
     /// the hub's log only). After it was ready it closed unexpectedly (a crash, a kill): said as that, with how, never its output. Before
     /// it was ready its start failed: the reason is an error line of its output, never start-up noise (Fontconfig, GTK, GLib, Mesa).
@@ -714,7 +734,7 @@ pub fn evict_warm(sessions: &HashMap<String, Session>, keep_pro: &str, max_warm:
     let live = sessions.values().filter(|s| s.pro != keep_pro && s.is_live()).count();
     if live < max_warm { return None }
     sessions.values()
-        .filter(|s| s.pro != keep_pro && s.state == "ready" && (s.container == 0 || s.parked) && s.unsaved_docs().is_empty())
+        .filter(|s| s.pro != keep_pro && s.state == "ready" && out_of_pane(s) && s.unsaved_docs().is_empty())
         .min_by_key(|s| s.touched_at)
         .map(|s| s.pro.clone())
 }
@@ -1085,10 +1105,27 @@ pub fn app_gone_victims(sessions: &HashMap<String, Session>) -> Vec<String> {
     let mut v: Vec<String> = sessions.values().filter(|s| s.is_live() && !s.closing && s.unsaved_docs().is_empty()).map(|s| s.pro.clone()).collect();
     v.sort(); v
 }
-/// The sessions to close for idleness: up, in no pane, nothing unsaved, not used for `idle_s`.
+/// What a leave or back did (`Session::leave`).
+#[derive(Debug, PartialEq, Eq)]
+pub enum LeaveStep { NotHolder, Left, Back(String), Same }
+/// The last use of a KiCad (epoch s): its `touched` so far, a named client's request to it at `named` (0: none), and now while a job of
+/// its runs. Never later than now, never earlier than it was.
+pub fn last_use(touched: u64, named: u64, job_running: bool, now: u64) -> u64 { if job_running { now } else { touched.max(named.min(now)) } }
+/// Whether a session is out of every pane for the idle close and the cap's eviction: detached, parked (View kept its container), or
+/// left (#1345: its pane is off screen because the person moved away, or its holder went) with no dialog of KiCad's up (the person
+/// is in the middle of something there).
+pub fn out_of_pane(s: &Session) -> bool { s.container == 0 || s.parked || (!s.left.is_empty() && s.dialogs.is_empty()) }
+/// Whether a leave or back from the connection whose client is `caller_cid` counts for a session held by `pane_cid`: only the holder's
+/// (a second window, or a client that is not the one whose pane holds it, never marks that pane left or back).
+pub fn leave_counts(pane_cid: &str, caller_cid: Option<&str>) -> bool { !pane_cid.is_empty() && caller_cid == Some(pane_cid) }
+/// How long a pane's holder may be without a connection (a crash, the network) before its KiCad counts as left: a reconnect is no leave.
+pub const HOLDER_GONE_S: u64 = APP_GONE_S;
+/// The word a holder's loss puts in `left`.
+pub const HOLDER_GONE: &str = "holderGone";
+/// The sessions to close for idleness: up, out of the pane (`out_of_pane`), nothing unsaved, not used for `idle_s` (`touched_at`).
 pub fn idle_victims(sessions: &HashMap<String, Session>, now: u64, idle_s: u64) -> Vec<String> {
     let mut v: Vec<String> = sessions.values()
-        .filter(|s| s.state == "ready" && (s.container == 0 || s.parked) && !s.closing && s.unsaved_docs().is_empty() && now.saturating_sub(s.touched_at) >= idle_s)
+        .filter(|s| s.state == "ready" && out_of_pane(s) && !s.closing && s.unsaved_docs().is_empty() && now.saturating_sub(s.touched_at) >= idle_s)
         .map(|s| s.pro.clone()).collect();
     v.sort(); v
 }
@@ -1747,6 +1784,8 @@ enum Msg {
         container: u64, toplevel: u64, display: String, wait: bool, env: Env,
         reply: oneshot::Sender<Result<Value, String>>,
     },
+    /// #1345 `editor.kicad.leave`: the holder's pane left the screen (`left`, with `why`) or came back
+    Leave { client: u64, pro: String, left: bool, why: String, reply: oneshot::Sender<Result<Value, String>> },
     Show {
         client: u64, pro: String, frame: String, doc: String, item: String, remount: bool, focus: bool, by: Value,
         reply: oneshot::Sender<Result<Value, String>>,
@@ -2067,7 +2106,7 @@ impl Actor {
                 if toplevel > 0 { existing.toplevel = toplevel; }
                 if !display.is_empty() { existing.display = display; }
                 existing.active = canon_frame(&frame).into(); existing.active_by = show_by(client_cid(client), &Value::Null);
-                existing.touched_at = now; existing.parked = false;
+                existing.touched_at = now; existing.parked = false; existing.left.clear(); existing.holder_gone_at = 0;
                 let snap = existing.clone();
                 if wait {
                     self.publish(&snap, Some(client));
@@ -2087,7 +2126,7 @@ impl Actor {
                 if toplevel > 0 { existing.toplevel = toplevel; }
                 if !display.is_empty() { existing.display = display; }
                 existing.active = canon_frame(&frame).into(); existing.active_by = show_by(client_cid(client), &Value::Null);
-                existing.touched_at = now; existing.parked = false;
+                existing.touched_at = now; existing.parked = false; existing.left.clear(); existing.holder_gone_at = 0;
                 let snap = existing.clone();
                 // the client's kept container again (its last View kept KiCad's frames in it): nothing to re-parent, and a realized frame is the
                 // client's to map; the attach only says the session is in use again
@@ -2139,7 +2178,8 @@ impl Actor {
         let sweep_locks = self.sessions.get(&pro).is_some_and(|s| s.state == "failed" || s.state == CLOSED || s.reason == "restarting");
         self.start_env.insert(pro.clone(), env.clone());
 
-        // Warm-session cap: retire the oldest detached clean session before starting a 4th GUI KiCad.
+        // Warm-session cap: retire the oldest detached clean session before starting a 4th GUI KiCad (least recently used first)
+        self.note_use();
         if let Some(victim) = evict_warm(&self.sessions, &pro, MAX_WARM) {
             eprintln!("kicad embed: evicting {victim}: {} KiCads running, the cap is {MAX_WARM} in all; room for {pro} (Edit)", self.live_count());
             self.retire(&victim, "evicted");
@@ -2357,6 +2397,7 @@ impl Actor {
         };
         // View with the client keeping its container: KiCad stays parented in it, only no longer in a pane
         s.pane_cid.clear();   // no window holds the pane now (viewer.runtime.holder)
+        s.left.clear(); s.holder_gone_at = 0; // a detach is its own way out of the pane
         if keep && s.container > 0 {
             s.parked = true; s.touched_at = ipc::now_s();
             let snap = s.clone();
@@ -2382,6 +2423,49 @@ impl Actor {
         } else {
             let out = snap.info_json();
             self.publish_and_reply(&snap, Some(client), reply, Ok(out));
+        }
+    }
+
+    /// #1345: the holder's pane left the screen (the person moved to another thread, or the viewer closed or was replaced) or came back.
+    /// Left, the KiCad counts as out of the pane for the idle close and the cap's eviction (`out_of_pane`) but stays parented and warm:
+    /// back within the idle time it is the same process. Only the holder's word counts (`leave_counts`); nothing is asked of KiCad, and
+    /// the keyboard and the frames are not touched. The clock starts at the leave (once: a leave on a left session changes nothing).
+    fn leave(&mut self, client: u64, pro: String, left: bool, why: String, reply: oneshot::Sender<Result<Value, String>>) {
+        let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.is_live()) else { let _ = reply.send(Ok(json!({"left": false, "why": "no KiCad"}))); return };
+        let holder = leave_counts(&s.pane_cid, client_cid(client).as_deref());
+        match s.leave(holder, left, &why, ipc::now_s()) {
+            LeaveStep::NotHolder => eprintln!("kicad embed: {pro}: a {} from connection {client}, not the pane's holder: no change", if left { "leave" } else { "back" }),
+            LeaveStep::Left => eprintln!("kicad embed: {pro} left the pane ({}): out of the pane for the idle close ({} s) and the cap", s.left, warm_idle_s()),
+            LeaveStep::Back(was) => eprintln!("kicad embed: {pro} back in the pane (it had left: {was})"),
+            LeaveStep::Same => {}
+        }
+        let _ = reply.send(Ok(json!({"left": !s.left.is_empty(), "holder": holder})));
+    }
+
+    /// The last use of each live KiCad into `touched_at`: an agent's or a panel's request to it (a named client of `gui_call_in`, at its
+    /// start and its end) and a job of KiCad's running (ET_PROGRESS: DRC, a zone fill, a plot) are use, whatever pane it is in.
+    fn note_use(&mut self) {
+        let now = ipc::now_s();
+        for s in self.sessions.values_mut().filter(|s| s.is_live()) {
+            let named = if s.sock.is_empty() { 0 } else { gui_use().lock().unwrap().get(&s.sock).map_or(0, |(_, at)| at / 1000) };
+            s.touched_at = last_use(s.touched_at, named, super::progress::has_jobs(&s.pro), now);
+        }
+    }
+
+    /// A pane whose holder's connection went (a crash, the network) and did not come back within `HOLDER_GONE_S`: its KiCad counts as
+    /// left (`HOLDER_GONE`), so it is not held in a pane nobody shows for ever; a reconnect of the same client (its cid) is no loss.
+    fn note_holders(&mut self) {
+        let now = ipc::now_s();
+        let hub = self.hub.clone();
+        for s in self.sessions.values_mut().filter(|s| s.state == "ready" && !s.pane_cid.is_empty() && s.left.is_empty() && s.container != 0 && !s.parked) {
+            let c = rt().lock().unwrap().client_of.get(&s.pane_cid).copied();
+            let held = c.is_some_and(|c| hub.is_attached(c));
+            if held { s.holder_gone_at = 0; continue }
+            if s.holder_gone_at == 0 { s.holder_gone_at = now; continue }
+            if now.saturating_sub(s.holder_gone_at) >= HOLDER_GONE_S {
+                eprintln!("kicad embed: {}: its pane's holder {} has had no connection for {} s: left ({HOLDER_GONE})", s.pro, s.pane_cid, now - s.holder_gone_at);
+                s.left = HOLDER_GONE.into(); s.touched_at = now;
+            }
         }
     }
 
@@ -2512,6 +2596,7 @@ impl Actor {
                 self.show(client, pro, frame, doc, item, remount, focus, by, reply)
             }
             Msg::Detach { client, pro, keep, reply } => self.detach(client, pro, keep, reply),
+            Msg::Leave { client, pro, left, why, reply } => self.leave(client, pro, left, why, reply),
             Msg::Warm { client, pro, root, files, frame, display, hardware, locked, env, reply } => {
                 self.note_user(client);
                 // a warm-up is never asked for a document: it starts KiCad on one that exists (a schematic-only project's schematic), and
@@ -2526,6 +2611,7 @@ impl Actor {
                 let quiet = !desc.is_empty() && proto::load(&desc).has_own("kiapi.backplane.embed.CancelProgress");
                 rt_set_support(runtime_support(&env.status, desc_quiet(&desc)));
                 let (mem, cfg) = (MemNow::read(), warm_cfg());
+                self.note_use(); // the cap's victim is the least recently used
                 match warm_decision(&self.sessions, &pro, hardware, locked, mem, quiet, cfg) {
                     Warm::Have => {
                         if let Some(s) = self.sessions.get_mut(&pro) { s.touched_at = ipc::now_s(); }
@@ -2954,7 +3040,12 @@ impl Actor {
                         for v in app_gone_victims(&self.sessions) { eprintln!("kicad embed: the app closed, closing {v}"); self.retire(&v, "appClosed"); }
                     }
                 } else { self.users_gone = None; }
-                for v in idle_victims(&self.sessions, ipc::now_s(), warm_idle_s()) { eprintln!("kicad embed: idle, closing {v}"); self.retire(&v, "idle"); }
+                self.note_holders(); self.note_use();
+                for v in idle_victims(&self.sessions, ipc::now_s(), warm_idle_s()) {
+                    let why = self.sessions.get(&v).map(|s| if !s.left.is_empty() { format!("left the pane: {}", s.left) } else if s.parked { "viewed".into() } else { "detached".into() }).unwrap_or_default();
+                    eprintln!("kicad embed: idle, closing {v} ({why}, unused for {} s)", warm_idle_s());
+                    self.retire(&v, "idle");
+                }
                 // memory: read each tick (the warm-up's cost reads it), published when it has moved a step (the session info otherwise kept
                 // the first sample, taken while starting), and the peak logged once it passes the default (it is then the warm-up's cost)
                 let mut moved = vec![];
@@ -3967,6 +4058,7 @@ const METHODS: &[&str] = &[
     "editor.kicad.attach",
     "editor.kicad.show",
     "editor.kicad.detach",
+    "editor.kicad.leave",
     "editor.kicad.close",
     "editor.kicad.restart",
     "editor.kicad.frames",
@@ -4016,7 +4108,7 @@ impl RpcHandler for EmbedRpc {
             if let Some(t) = p["theme"].as_str().filter(|t| matches!(*t, "light" | "dark")) { themes().lock().unwrap().insert(norm_pro_key(&resolved.pro), t.to_string()); }
             // a request decided on a session the client saw (`generation`, the runtime's): stale once that session has stopped or another
             // runs, so a late automatic attach or show never reopens what the person closed nor drives a KiCad started since. Answered, no change
-            if matches!(method, "editor.kicad.attach" | "editor.kicad.show") {
+            if matches!(method, "editor.kicad.attach" | "editor.kicad.show" | "editor.kicad.leave") {
                 if let Some(g) = p["generation"].as_u64() {
                     let pic = runtime_picture_of(&resolved.pro);
                     if stale_generation(g, &pic) {
@@ -4167,6 +4259,9 @@ impl RpcHandler for EmbedRpc {
                     actor_tx.send(Msg::Warm {
                         client, pro: resolved.pro, root: resolved.root, files: resolved.files, frame: resolved.frame, display, hardware, locked, env, reply: tx,
                     })
+                }
+                "editor.kicad.leave" => {
+                    actor_tx.send(Msg::Leave { client, pro: resolved.pro, left: p["left"].as_bool().unwrap_or(true), why: p["why"].as_str().unwrap_or("").chars().take(32).collect(), reply: tx })
                 }
                 "editor.kicad.detach" => {
                     actor_tx.send(Msg::Detach { client, pro: resolved.pro, keep: p["keep"].as_bool().unwrap_or(false), reply: tx })
@@ -5367,6 +5462,57 @@ mod tests {
         let a = next_show(sock); assert!(show_current(sock, a));
         let b = next_show(sock); assert!(!show_current(sock, a), "an older show waiting on the task gives way"); assert!(show_current(sock, b));
         assert!(show_current("/t/other.sock", 99), "another KiCad's shows are its own");
+    }
+    #[test] fn a_kicad_left_by_a_thread_switch_closes_as_idle_but_not_with_a_dialog_or_unsaved_work() {
+        // #1345: in a pane (container 5, not parked) and left: idle after the idle time; kept with a dialog up or unsaved work, and while
+        // it has not left
+        let mk = |p: &str, left: &str, dialog: bool, modified: bool| { let mut s = Session::new(p, "/p", "fork", "PCB", 1, 0).ready("/s", "", 0); s.container = 5; s.pane_cid = "c1".into(); s.left = left.into();
+            if dialog { s = s.dialog(true, "Track Width"); }
+            if modified { s.frames.push(Frame { kind: "PCB".into(), doc: p.into(), title: String::new(), modified: true, shown: true, realized: true, xid: 1, min_w: 0, min_h: 0 }); } (p.to_string(), s) };
+        let m: HashMap<String, Session> = [mk("/p/left.kicad_pro", "thread", false, false), mk("/p/held.kicad_pro", "", false, false), mk("/p/dialog.kicad_pro", "thread", true, false),
+            mk("/p/dirty.kicad_pro", "thread", false, true), mk("/p/gone.kicad_pro", HOLDER_GONE, false, false)].into_iter().collect();
+        assert_eq!(idle_victims(&m, 300, 300), ["/p/gone.kicad_pro", "/p/left.kicad_pro"]);
+        assert!(idle_victims(&m, 299, 300).is_empty(), "not before the idle time");
+    }
+    #[test] fn only_the_holders_leave_counts() {
+        assert!(leave_counts("c1", Some("c1")));
+        assert!(!leave_counts("c1", Some("c2")), "a second window's");
+        assert!(!leave_counts("c1", None), "a connection with no view (an agent's)");
+        assert!(!leave_counts("", Some("c1")), "no pane holds it (detached): nothing to leave");
+        let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0); s.container = 5; s.pane_cid = "c1".into();
+        assert_eq!(s.leave(false, true, "thread", 10), LeaveStep::NotHolder); assert!(s.left.is_empty() && s.touched_at == 0, "not the holder's: no change");
+        assert_eq!(s.leave(true, true, "thread", 10), LeaveStep::Left); assert_eq!((s.left.as_str(), s.touched_at), ("thread", 10));
+        assert_eq!(s.leave(true, true, "viewer", 50), LeaveStep::Same); assert_eq!((s.left.as_str(), s.touched_at), ("thread", 10), "a second leave never restarts the clock");
+        assert_eq!(s.leave(false, false, "", 60), LeaveStep::NotHolder); assert_eq!(s.left, "thread", "a back from another window");
+        assert_eq!(s.leave(true, false, "", 70), LeaveStep::Back("thread".into())); assert!(s.left.is_empty()); assert_eq!(s.touched_at, 70);
+        assert_eq!(s.leave(true, false, "", 80), LeaveStep::Same); assert_eq!(s.touched_at, 70);
+        s.left = "thread".into(); let s = s.detached(90); assert!(s.left.is_empty(), "a detach clears it");
+        let mut t = Session::new("/p/b.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0); t.left = "thread".into(); let t = t.stopped("idle"); assert!(t.left.is_empty(), "a stop clears it");
+    }
+    #[test] fn a_kicad_in_use_is_not_idle_left_or_not() {
+        assert_eq!(last_use(10, 0, false, 400), 10, "nothing since");
+        assert_eq!(last_use(10, 350, false, 400), 350, "an agent's request at 350");
+        assert_eq!(last_use(360, 350, false, 400), 360, "never earlier than it was");
+        assert_eq!(last_use(10, 900, false, 400), 400, "never later than now");
+        assert_eq!(last_use(10, 0, true, 400), 400, "a job running: in use now");
+        // left at 0, an agent's request at 250: not idle at 300 (300 s idle time), idle at 550
+        let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0); s.container = 5; s.left = "thread".into();
+        s.touched_at = last_use(s.touched_at, 250, false, 300);
+        let m: HashMap<String, Session> = [("/p/a.kicad_pro".to_string(), s)].into_iter().collect();
+        assert!(idle_victims(&m, 300, 300).is_empty()); assert_eq!(idle_victims(&m, 550, 300), ["/p/a.kicad_pro"]);
+    }
+    #[test] fn the_cap_evicts_the_left_kicad_used_longest_ago_never_one_with_a_dialog_or_unsaved_work() {
+        let mk = |pro: &str, left: &str, dialog: bool, dirty: bool, t: u64| {
+            let mut s = Session::new(pro, "/p", "fork", "PCB", 1, t).ready("/s", "10.99.0-bp.13", t); s.container = 55; s.pane_cid = "c1".into(); s.left = left.into();
+            if dialog { s = s.dialog(true, "Board Setup"); }
+            if dirty { s.frames.push(Frame { kind: "PCB".into(), doc: "/p/x.kicad_pcb".into(), title: "*x".into(), modified: true, shown: true, realized: false, xid: 1, min_w: 0, min_h: 0 }); }
+            (pro.to_string(), s)
+        };
+        let m: HashMap<String, Session> = [mk("/p/1.kicad_pro", "", false, false, 1), mk("/p/2.kicad_pro", "thread", true, false, 2), mk("/p/3.kicad_pro", "thread", false, true, 3),
+            mk("/p/4.kicad_pro", "thread", false, false, 9), mk("/p/5.kicad_pro", "thread", false, false, 7)].into_iter().collect();
+        assert_eq!(evict_warm(&m, "/p/new.kicad_pro", 3).as_deref(), Some("/p/5.kicad_pro"), "of the left ones, the one used longest ago");
+        let m: HashMap<String, Session> = [mk("/p/1.kicad_pro", "", false, false, 1), mk("/p/2.kicad_pro", "thread", true, false, 2), mk("/p/3.kicad_pro", "thread", false, true, 3)].into_iter().collect();
+        assert_eq!(evict_warm(&m, "/p/new.kicad_pro", 3), None, "held, a dialog up, unsaved work: none evicted");
     }
     #[test] fn warm_eviction_picks_oldest_detached_clean_session() {
         let mut m = HashMap::new();

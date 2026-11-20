@@ -644,6 +644,9 @@ pub struct KicadPane {
     /// Schematic or 3D page with no Gerber set or Diff over it, or popped out into its own window). macOS: a frame with no hitbox hides
     /// KiCad's frame only when this is false (`mac_shown`; #1199: the viewer closed, KiCad's PCB Editor stayed on screen)
     pub in_page: bool,
+    /// #1345: the pane off screen because the person moved away (another thread, the viewer closed or replaced), told to the hub once
+    /// settled (`LeaveState`)
+    leave: LeaveState,
     /// macOS: KiCad's frame is not above our window by the window server's own list though we ordered ours below it (the Mac mini gate,
     /// Nov 16: a 1900 pt window on a 1920 pt display, the pane blank with the frame behind ours): the tries, since when, and whether the
     /// bound passed, when the pane says so and offers Pop out rather than staying blank
@@ -831,6 +834,28 @@ pub fn pointer_over(p: (f64, f64), r: (i32, i32, i32, i32)) -> bool {
 }
 /// An automatic pane's own attach, show and pre-warm say so (`auto`): the hub holds its checks off for them as for the person's, but does not
 /// take them for the person's activity (checkrun `host_touched`)
+/// How long the pane must stay off screen before the hub hears it left (#1345): a thread switch that comes straight back (its frames
+/// in between) is no leave.
+pub const LEAVE_SETTLE: std::time::Duration = std::time::Duration::from_millis(300);
+/// #1345: the pane's leave and back as the hub hears them: a leave once the pane has been off screen for `LEAVE_SETTLE`, once; a back at
+/// once, and only after a leave was sent. Nothing else: a leave takes no keyboard, moves no window and asks nothing of KiCad.
+#[derive(Default, Debug)]
+pub struct LeaveState { since: Option<std::time::Instant>, why: &'static str, sent: bool }
+#[derive(Debug, PartialEq, Eq)]
+pub enum LeaveSend { Leave(&'static str), Back }
+impl LeaveState {
+    /// `in_page` changed to the value given (`why`: what took the pane off screen, "thread" or "viewer").
+    pub fn on(&mut self, in_page: bool, why: &'static str, now: std::time::Instant) -> Option<LeaveSend> {
+        if !in_page { if self.since.is_none() { self.since = Some(now); self.why = why; } return None }
+        self.since = None;
+        std::mem::take(&mut self.sent).then_some(LeaveSend::Back)
+    }
+    /// The settle's end: the leave, if the pane is still off screen and it was not sent yet.
+    pub fn due(&mut self, now: std::time::Instant) -> Option<LeaveSend> {
+        if self.sent || !self.since.is_some_and(|t| now.saturating_duration_since(t) >= LEAVE_SETTLE) { return None }
+        self.sent = true; Some(LeaveSend::Leave(self.why))
+    }
+}
 pub fn mark_auto(name: &str, mut params: Value, why: ShowBy) -> Value {
     if why == ShowBy::Automatic && matches!(name, "editor.kicad.attach" | "editor.kicad.show" | "editor.kicad.prewarm") { params["auto"] = json!(true); }
     params
@@ -839,6 +864,10 @@ pub fn mark_auto(name: &str, mut params: Value, why: ShowBy) -> Value {
 /// quit) where the last one said it was starting or live
 pub fn person_closed_kicad(old: &Value, new: &Value) -> bool {
     new["runtime"]["session"] == "closedByPerson" && matches!(old["runtime"]["session"].as_str(), Some("live" | "starting"))
+}
+/// #1345: the hub closed this pane's KiCad as idle (`idleStopped`, after it was starting or live) while the pane was off screen.
+pub fn closed_idle_away(old: &Value, new: &Value, in_page: bool) -> bool {
+    !in_page && new["runtime"]["session"] == "idleStopped" && matches!(old["runtime"]["session"].as_str(), Some("live" | "starting"))
 }
 /// Whether an attach may open `project`: the person's own (Deliberate) always; Backplane's (Automatic) not once the person has closed it
 pub fn may_attach(closed: &std::collections::HashSet<String>, project: &str, why: ShowBy) -> bool { why == ShowBy::Deliberate || !closed.contains(project) }
@@ -940,7 +969,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { born: std::time::Instant::now(), edit_key: asked_key(!deferred_open(), trigger_key()), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_press: None, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None, last_place: None, screen_key: None,
+        KicadPane { born: std::time::Instant::now(), edit_key: asked_key(!deferred_open(), trigger_key()), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, leave: LeaveState::default(), mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_press: None, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None, last_place: None, screen_key: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, remounts: None, unshown_since: None, unshown_asks: 0, reattached_for: None, adrift_held_at: None, override_kind: None, pending_show: None, chosen_at: 0, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, generation: None, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0, opening_timer: Arc::default() }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
@@ -2002,6 +2031,25 @@ impl KicadPane {
         eprintln!("GPUI_LOG {}", json!({"kicad_mac_press_hand_in": {"frame": f, "at_ms": crate::screens::kcomment::epoch_ms() as u64}}));
         nc::focus(f);
     }
+    /// #1345: the page holds this pane this frame or no longer does (ui.rs, on a change only): `why` what took it off screen ("thread":
+    /// the person moved to another thread or design; "viewer": the viewer closed or shows another page). The hub hears a leave once the
+    /// pane has been off screen for LEAVE_SETTLE, and the back at once. Only `editor.kicad.leave` is sent: no keyboard, no window, no call
+    /// that waits on KiCad.
+    pub fn set_in_page(&mut self, in_page: bool, why: &'static str, cx: &mut Context<Self>) {
+        self.in_page = in_page;
+        match self.leave.on(in_page, why, std::time::Instant::now()) {
+            Some(s) => self.send_leave(s),
+            None if !in_page => { cx.spawn(async move |this, cx| { cx.background_executor().timer(LEAVE_SETTLE).await; let _ = this.update(cx, |p, _| if let Some(s) = p.leave.due(std::time::Instant::now()) { p.send_leave(s) }); }).detach(); }
+            None => {}
+        }
+    }
+    fn send_leave(&self, s: LeaveSend) {
+        let (left, why) = match s { LeaveSend::Leave(w) => (true, w), LeaveSend::Back => (false, "") };
+        let mut params = json!({"project": self.project, "left": left, "why": why});
+        if let Some(g) = self.generation.or_else(|| self.info["runtime"]["generation"].as_u64()) { params["generation"] = json!(g); }
+        eprintln!("GPUI_LOG {}", json!({"kicad_leave": left, "why": why, "project": self.project, "generation": params["generation"], "at_ms": crate::screens::kcomment::epoch_ms() as u64}));
+        self.rpc("editor.kicad.leave", params);
+    }
     /// Back to the viewer: the editor's windows leave the pane (KiCad stays warm in the hub).
     pub fn detach(&mut self) {
         // macOS: KiCad's frame leaves the screen with the pane (its windows are its own; nothing of ours to unmap)
@@ -2305,6 +2353,32 @@ mod tests {
             assert!(mark_auto(m, json!({"project": "/p"}), ShowBy::Deliberate).get("auto").is_none(), "{m}");
         }
         assert!(mark_auto("editor.kicad.host", json!({}), ShowBy::Automatic).get("auto").is_none());
+    }
+    /// #1345: a leave reaches the hub once the pane has been off screen LEAVE_SETTLE, once; a quick away-and-back sends nothing; a back
+    /// only after a leave
+    #[test] fn a_pane_off_screen_is_told_to_the_hub_once_settled_and_back_at_once() {
+        use super::{LeaveSend, LeaveState, LEAVE_SETTLE};
+        let t0 = std::time::Instant::now(); let ms = |n: u64| t0 + std::time::Duration::from_millis(n);
+        let mut l = LeaveState::default();
+        assert_eq!(l.on(false, "thread", t0), None);
+        assert_eq!(l.on(true, "", ms(120)), None, "back within the settle: no back, as no leave was sent");
+        assert_eq!(l.due(t0 + LEAVE_SETTLE), None, "and the settle's timer then sends nothing");
+        assert_eq!(l.on(false, "thread", ms(1000)), None);
+        assert_eq!(l.on(false, "viewer", ms(1100)), None, "still away: the first reason and time stand");
+        assert_eq!(l.due(ms(1200)), None, "not settled yet");
+        assert_eq!(l.due(ms(1300)), Some(LeaveSend::Leave("thread")));
+        assert_eq!(l.due(ms(1400)), None, "once");
+        assert_eq!(l.on(true, "", ms(5000)), Some(LeaveSend::Back));
+        assert_eq!(l.on(true, "", ms(5001)), None, "once");
+        assert_eq!(l.due(ms(9000)), None);
+    }
+    #[test] fn a_kicad_closed_as_idle_while_away_gives_the_viewer_back() {
+        use super::closed_idle_away;
+        let rt = |s: &str| json!({"runtime": {"session": s}});
+        assert!(closed_idle_away(&rt("live"), &rt("idleStopped"), false));
+        assert!(!closed_idle_away(&rt("live"), &rt("idleStopped"), true), "on screen: the pane's own word stands");
+        assert!(!closed_idle_away(&rt("idleStopped"), &rt("idleStopped"), false), "once");
+        for other in ["closedByPerson", "failed", "live"] { assert!(!closed_idle_away(&rt("live"), &rt(other), false), "{other}"); }
     }
     /// PR B: the person closing KiCad (the runtime's closedByPerson after starting or live) is told apart from an idle stop, a crash or a
     /// detach; once closed, only the person's own Edit opens that project again
@@ -3002,7 +3076,10 @@ impl crate::Backplane {
         let (has_pane, matched, pane_proj) = match self.screens.kicad.clone() {
             Some(p) => {
                 let (m, prj) = { let pr = p.read(cx); (pr.matches(&v), pr.project.clone()) };
+                let idle_away = m && closed_idle_away(&p.read(cx).info, &v, p.read(cx).in_page);
                 if m { p.update(cx, |p, cx| p.set_info(v.clone(), cx)); }
+                // #1345: closed as idle while the person was away: coming back shows Backplane's viewer, never a pane on a KiCad that is gone
+                if idle_away { eprintln!("GPUI_LOG {}", json!({"kicad_idle_closed_away": prj})); self.kicad_view(cx); }
                 (true, m, prj)
             }
             None => (false, false, String::new()),
