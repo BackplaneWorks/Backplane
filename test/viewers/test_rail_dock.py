@@ -73,6 +73,7 @@ class RailDockHarnessTests(unittest.TestCase):
             ]) + "\n", encoding="utf-8")
             parsed = P.parse_client_log(log)
             self.assertTrue(parsed["tiles_metric_seen"])
+            self.assertFalse(parsed["refusal_metric_declared"])  # the event did not declare `refusal_metric`
             # String "false" MUST be parsed as False (strict bool)
             self.assertIs(parsed["drags"]["b7:resize-drag"][0]["ok"], False)
             self.assertGreater(parsed["shots"]["b7-after-resize"]["tiles_seq"], parsed["mark_seqs"]["b7:resize-drag"])
@@ -223,6 +224,16 @@ class RailDockHarnessTests(unittest.TestCase):
             del p_rect["shots"]["task4-dock-split"]["tiles"][0]["rect"]
             self.assertEqual(DOCK.evaluate_task4_dock(fdir, p_rect, caps, True, cleared_shots=cleared)["outcome"], "unavailable")
 
+            # 4d. A missing rect in the INITIAL or the RETURN shot is a width gap -> unavailable, never width_restored=False -> task_failed
+            for shot in ("task4-dock-gerbers", "task4-dock-back"):
+                p_w = json.loads(json.dumps(parsed))
+                del p_w["shots"][shot]["tiles"][0]["rect"]
+                self.assertEqual(DOCK.evaluate_task4_dock(fdir, p_w, caps, True, cleared_shots=cleared)["outcome"], "unavailable", shot)
+            # ... while a measured narrow return width still fails
+            p_narrow = json.loads(json.dumps(parsed))
+            p_narrow["shots"]["task4-dock-back"]["tiles"][0]["rect"] = {"x": 753, "y": 36, "w": 300, "h": 835}
+            self.assertEqual(DOCK.evaluate_task4_dock(fdir, p_narrow, caps, True, cleared_shots=cleared)["outcome"], "task_failed")
+
             # 5. Not in per-shot privacy clearance -> harness_failed (fail-closed)
             self.assertEqual(DOCK.evaluate_task4_dock(fdir, parsed, caps, True, cleared_shots={"task4-dock-gerbers"})["outcome"], "harness_failed")
 
@@ -292,6 +303,7 @@ class RailDockHarnessTests(unittest.TestCase):
             cleared = set(shots.keys())
             parsed = {
                 "tiles_metric_seen": True,
+                "refusal_metric_declared": True,
                 "mark_seqs": mark_seqs,
                 "shots": shots,
                 "presses": {
@@ -356,12 +368,26 @@ class RailDockHarnessTests(unittest.TestCase):
             for k in ("b7-overlay-incompat", "b7-overlay-incompat-before"):
                 p_tree["shots"][k]["viewer"]["layout"]["root"]["b"]["kind"] = "schematic"
             self.assertEqual(_ref(p_tree)["status"], "unavailable")
-            # a refusal reported BEFORE the delivered press does not count; none after it with layouts present -> failed
+            # a refusal reported BEFORE the delivered press does not count: with refusals declared observable -> failed;
+            # with no such declaration in the run -> unavailable (nothing proves a refusal could be seen)
             p_old = json.loads(json.dumps(parsed))
             p_old["refusals"]["b7:overlay-incompatible"][0]["seq"] = 100
             r_old = _ref(p_old)
             self.assertEqual(r_old["status"], "measured")
             self.assertIs(r_old["passed"], False)
+            p_undeclared = json.loads(json.dumps(p_old))
+            p_undeclared["refusal_metric_declared"] = False
+            self.assertEqual(_ref(p_undeclared)["status"], "unavailable")
+            p_none = json.loads(json.dumps(parsed))
+            p_none["refusals"] = {}
+            self.assertIs(_ref(p_none)["passed"], False)
+            p_none["refusal_metric_declared"] = False
+            self.assertEqual(_ref(p_none)["status"], "unavailable")
+            # an event that exists but is wrong still fails without any declaration
+            p_wrong = json.loads(json.dumps(parsed))
+            p_wrong["refusal_metric_declared"] = False
+            p_wrong["refusals"]["b7:overlay-incompatible"][0]["code"] = "locked"
+            self.assertIs(_ref(p_wrong)["passed"], False)
             # press on some other control / undelivered -> unavailable
             p_other = json.loads(json.dumps(parsed))
             p_other["presses"]["b7:overlay-incompatible"][0]["id"] = "tile:tb:overlay-gerbers"
