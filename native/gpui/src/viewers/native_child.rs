@@ -863,7 +863,7 @@ mod imp {
     /// The Win32 calls of this module, each through #1343's probe (above); same names and signatures as windows-sys's.
     #[allow(non_snake_case, clippy::too_many_arguments, dead_code)]
     mod w32p {
-        use windows_sys::Win32::{Foundation::*, Graphics::Gdi::*, UI::WindowsAndMessaging::*, UI::Input::KeyboardAndMouse::*};
+        use windows_sys::Win32::{Graphics::Gdi::*, UI::WindowsAndMessaging::*, UI::Input::KeyboardAndMouse::*};
     #[inline] pub unsafe fn AttachThreadInput(idattach: u32, idattachto: u32, fattach: windows_sys::core::BOOL) -> windows_sys::core::BOOL { let _g = super::probe::enter("AttachThreadInput"); if super::probe::no_attach() { return 1 } unsafe { windows_sys::Win32::System::Threading::AttachThreadInput(idattach, idattachto, fattach) } }
     #[inline] pub unsafe fn BitBlt(hdc: HDC, x: i32, y: i32, cx: i32, cy: i32, hdcsrc: HDC, x1: i32, y1: i32, rop: ROP_CODE) -> windows_sys::core::BOOL { let _g = super::probe::enter("BitBlt"); unsafe { windows_sys::Win32::Graphics::Gdi::BitBlt(hdc, x, y, cx, cy, hdcsrc, x1, y1, rop) } }
     #[inline] pub unsafe fn ClientToScreen(hwnd: windows_sys::Win32::Foundation::HWND, lppoint: *mut windows_sys::Win32::Foundation::POINT) -> windows_sys::core::BOOL { let _g = super::probe::enter("ClientToScreen"); unsafe { windows_sys::Win32::Graphics::Gdi::ClientToScreen(hwnd, lppoint) } }
