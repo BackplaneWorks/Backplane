@@ -220,6 +220,12 @@ mod tests {
         let r = open();
         assert!(r.browser_verify("other@example.com", &token, None, false).is_none());
         let id = r.browser_verify(login, &token, Some(42), false).unwrap();
+        assert_eq!(r.browser_owner(42).as_deref(), Some(id.as_str()));
+        let invite = r.create(&["http://127.0.0.1:3799".into()]);
+        let phone = r.enroll("fixture", invite["code"].as_str().unwrap(), "Fixture phone");
+        let phone_token = phone["token"].as_str().unwrap();
+        assert!(r.resolve(phone_token, 43, "/ws") == phone_token);
+        assert_eq!(r.browser_owner(43), None);
         clock.fetch_add(29 * DAY, Ordering::SeqCst);
         assert!(r.browser_connection(&id, 42, false));
         clock.fetch_add(DAY, Ordering::SeqCst);
