@@ -259,7 +259,7 @@ pub enum SolidFrame { Model(String, Mesh), /// why there is no model (the hub's 
     Part(String, Mesh, u32),
     /// what the hub is doing to make the model (`text`, "" when done), for how long already and about how long it took the last time (ms, 0 unknown)
     Stage(String, String, u64, u64) }
-fn is_solid_key(k: &str) -> bool { k.starts_with("2|") || k.starts_with("3|") || k.starts_with("4|") }
+pub(crate) fn is_solid_key(k: &str) -> bool { k.starts_with("2|") || k.starts_with("3|") || k.starts_with("4|") }
 /// `parts:{of, rev}`: the map is not an `Item` (read_frame skips maps), so it is read here: the frame's `parts` value's `of`.
 fn read_parts(b: &[u8]) -> Option<u32> {
     let mut at = 0; let (major, n) = head(b, &mut at)?; if major != 5 || n > 256 { return None }
