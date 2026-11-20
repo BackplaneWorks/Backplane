@@ -70,7 +70,7 @@ pub(crate) fn rail_enabled(viewer: &Value, id: &str) -> bool {
 /// The rail entry lit for an embedded KiCad pane's wanted frame (`KicadPane::tab()`, which can be
 /// ahead of KiCad while `pending_show` is set). Symbols and Footprints light their owning design
 /// entry (Schematic and Board); Simulator lights Simulation. Pure mapping: never calls back into the pane.
-fn kicad_rail_id(frame: &str) -> Option<&'static str> {
+pub(crate) fn kicad_rail_id(frame: &str) -> Option<&'static str> {
     match frame {
         "PCB" | "FOOTPRINT_EDITOR" => Some("board"), // i18n-ok: wire frame kind enum names
         "SCH" | "SYMBOL_EDITOR" => Some("schematic"), // i18n-ok: wire frame kind enum names

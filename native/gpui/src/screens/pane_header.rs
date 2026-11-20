@@ -29,6 +29,7 @@ impl Identity {
         let field = |v: &Value, k: &str| v[k].as_str().unwrap_or_default().to_owned();
         let fallback_key = match page {
             "board" => "viewer.board", "schematic" => "viewer.schematic", "gerbers" => "gpui.gerbers",
+            "3d" => "viewer.solid", "simulation" => "gpui.simulation", "kicad" => "gpui.f.name.kicad",
             "split" => "gpui.split", "diff" => "viewer.diff", "review" => "viewer.review", "files" => "viewer.files", _ => page,
         };
         let label = facts["label"].as_str().map(trs).unwrap_or_else(|| t(fallback_key));
@@ -252,6 +253,36 @@ fn shorten(identity: &Identity, basename: &str, room: f32, measure: impl Fn(&str
     candidate(lo)
 }
 
+// PaneTab may lead the hub picture. A previous frame's file must never label this frame.
+fn embedded_identity(frame: &str, facts: &Value) -> Identity {
+    let page = crate::ui::kicad_rail_id(frame).unwrap_or("kicad");
+    let mut identity = Identity::new(page, &Value::Null);
+    if facts["page"] == page {
+        if let Some(label) = facts["label"].as_str() { identity.label = trs(label); }
+        identity.rel = facts["source"]["rel"].as_str().unwrap_or_default().to_owned();
+    }
+    identity
+}
+
+pub fn embedded_title(frame: &str, facts: &Value, light: bool) -> impl IntoElement {
+    let identity = embedded_identity(frame, facts);
+    canvas(move |bounds, w, cx| {
+        let full = identity.text(&identity.rel);
+        let width = f32::from(bounds.size.width);
+        let measure = |s: &str| f32::from(w.text_system().shape_line(s.to_owned().into(), crate::scale::tpx(12.),
+            &[w.text_style().to_run(s.len())], None).width);
+        let basename = identity.rel.rsplit('/').next().unwrap_or_default();
+        let text = if measure(&full) <= width || basename.is_empty() { full.clone() }
+            else if measure(&identity.text(basename)) <= width { identity.text(basename) }
+            else { shorten(&identity, basename, width, measure) };
+        let mut label = with_rect(div().id("embedded-identity"), || format!("pane-identity:{}:{text}", identity.page))
+            .flex().items_center().size_full().text_size(crate::scale::tpx(12.)).tooltip(crate::keys::tip(&full, "", light))
+            .child(div().min_w_0().truncate().child(text)).into_any_element();
+        label.prepaint_as_root(bounds.origin, size(bounds.size.width.into(), bounds.size.height.into()), w, cx);
+        label
+    }, |_, mut label, w, cx| label.paint(w, cx)).flex_1().min_w_0().h_full()
+}
+
 // GPUI can measure a control at its intrinsic size, then prepaint that same element
 // at the position assigned to its canvas. This keeps nested menus and handlers intact.
 fn measured(mut el: AnyElement, w: &mut Window, cx: &mut App) -> (f32, AnyElement) {
@@ -386,6 +417,19 @@ pub fn pane_header(light: bool, identity: Identity, tools: Vec<PaneTool<ToolActi
 #[cfg(test)]
 mod tests {
     use super::{layout, Identity};
+    #[test]
+    fn embedded_title_only_uses_the_wanted_frames_file() {
+        let board = serde_json::json!({"page":"board","source":{"rel":"boards/main.kicad_pcb"}});
+        for frame in ["PCB", "FOOTPRINT_EDITOR"] {
+            assert_eq!(super::embedded_identity(frame, &board).rel, "boards/main.kicad_pcb");
+        }
+        for (frame, page) in [("SCH","schematic"), ("SIMULATOR","simulation"), ("PCB_3D","3d"), ("unknown","kicad")] {
+            let identity = super::embedded_identity(frame, &board);
+            assert_eq!(identity.page, page);
+            assert!(identity.rel.is_empty());
+        }
+    }
+
     #[test]
     fn primary_tools_survive_before_pane_actions_and_secondary_tools() {
         for (scale, counts) in [(1., [2, 3, 4, 5]), (1.25, [1, 2, 3, 5])] {
