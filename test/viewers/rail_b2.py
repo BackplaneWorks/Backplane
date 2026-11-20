@@ -54,8 +54,14 @@ def tool_orders(reports):
             if "tools" not in result:
                 continue
             ids = result["tools"]
-            inline = [key for key in expected if key in ids]
-            missing = [key for key in expected if key not in ids]
+            current = expected
+            if page == "gerbers" and result is narrow:
+                # GerbView availability arrives asynchronously in each isolated client.
+                present = ids + result.get("menu_rows", [])
+                current = [key.lstrip("?") for key in schema
+                           if not key.startswith("?") or key[1:] in present]
+            inline = [key for key in current if key in ids]
+            missing = [key for key in current if key not in ids]
             order_ok = ids == inline and (
                 (not result["more"] and not missing) if result is wide else
                 (result["more"] == bool(missing) and result.get("menu_rows", []) == missing))
@@ -265,9 +271,18 @@ def evaluate(directory, size, rc):
                           if k.startswith(prefix) and v.get("folded") is True}
                 trigger = shot["probe_rects"][f"pane-more:{page}"]
                 result["checks"]["folded_inventory"] = (
-                    set(folded) == set(result["menu_rows"]) and all(
+                    set(folded) == set(result["menu_rows"]) - (
+                        {"gerbers-gerbview"} if page == "gerbers" and
+                        prefix + "gerbers-gerbview" not in inventory else set()) and all(
                         entry.get("rect") and box(entry["rect"]) == box(trigger)
                         for entry in folded.values()))
+                menu_trigger = probes.get(f"pane-more:{page}")
+                menu_inventory = {key[len(prefix):]: v for key, v in menu_shot["header_controls"].items()
+                                  if key.startswith(prefix) and v.get("folded")}
+                result["checks"]["menu_inventory"] = bool(menu_trigger and
+                    set(menu_inventory) == set(result["menu_rows"]) and all(
+                        entry.get("rect") and box(entry["rect"]) == box(menu_trigger)
+                        for entry in menu_inventory.values()))
                 if page == "gerbers":
                     alias = inventory.get("ui:vs board", {})
                     result["checks"]["comparison_alias"] = bool(alias.get("folded") and alias.get("wired")
