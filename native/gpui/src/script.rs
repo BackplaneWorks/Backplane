@@ -875,12 +875,10 @@ impl Backplane {
             "review" => {
                 if diff_on || open != "review" || !v["review"].is_object() { return None; }
                 if v["review"]["empty"].is_object() { return Some("empty"); }
-                if let Some((state, _)) = &self.screens.mgmt.review_snapshot {
-                    return (*state != "loading").then_some(*state);
-                }
-                let r = &v["review"];
-                if r["busy"] == true { return None; }
-                if r["blocks"].as_array().is_some_and(|b| !b.is_empty()) || r["checks"].is_object() { Some("ready") } else { Some("empty") }
+                // Wait for the Review pane's first paint to populate review_snapshot rather than
+                // settling prematurely as "empty" with empty_text="" before mgmt renders.
+                let (state, _) = self.screens.mgmt.review_snapshot.as_ref()?;
+                (*state != "loading").then_some(*state)
             }
             "browser" => {
                 if diff_on || open != "browser" { return None; }
