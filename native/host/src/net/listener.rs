@@ -340,3 +340,7 @@ pub(crate) mod webtransport;
 #[cfg(target_os = "linux")]
 #[path = "webprovision.rs"]
 pub(crate) mod webprovision;
+
+#[cfg(target_os = "linux")]
+#[path = "webprobe.rs"]
+pub(crate) mod webprobe;
