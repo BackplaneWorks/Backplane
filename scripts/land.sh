@@ -8,6 +8,8 @@
 #   3b. the Windows gate, on the same tree, also BEFORE anything is pushed: scripts/land-windows.sh (LAND_WIN_TEST overrides the command) under the bp-win-gate lock
 #      (scripts/bp-lock.sh; landings queue, one gate on the VMs at a time): the hub's tests as ci.yml's windows-latest job runs them (bp-sh, then nextest with
 #      ci-hub-windows-filter.sh and --retries 1), on bp-win holding bp-win-ui, else bp-winbuild holding winbuild-vm (neither waited for), swept of all it made on every exit; the tree goes by git push over ssh to the VM, never to GitHub. Its time is said.
+#      Without it (a PR touching nothing the hub's Windows build reads: docs, web sources, mobile, scripts), the PR merges after the Linux gate and the
+#      Windows gate runs on the merged main in the background (scripts/land-postmerge.sh), logged, a failure told on the PR at once.
 #      Run only when what the hub's Windows tests build from or read ($win_paths below) changed against origin/main, and skipped when this tree passed it already
 #      (<git-dir>/land-tested-windows). Failed: "land: FAILED", nothing pushed. No VM free and up (or a run that would cross its daily auto-shutdown): one "land: HELD" line
 #      naming each VM tried and why, exit 4, nothing pushed. LAND_WINDOWS=skip skips it, on a person's or lead's word only: said in the output and in the PR body.
@@ -57,8 +59,15 @@ git remote get-url origin > /dev/null 2>&1 || die "no origin remote"
 mark=$(git rev-parse --git-dir)/land-tested; wmark=$(git rev-parse --git-dir)/land-tested-windows
 win=${LAND_WINDOWS:-}; win_note=
 case "$win" in ''|skip) ;; *) die "LAND_WINDOWS=$win: only LAND_WINDOWS=skip (on a person's or lead's word) or unset";; esac
-# what the hub's Windows tests build from or read (native/host, and the files its tests open by path); a change elsewhere does not run the Windows gate
-win_paths='native/host native/gpui/Cargo.toml native/gpui/build.rs native/gpui/src/install.rs native/guard/Cargo.toml native/guard/build.rs skills assets deploy docs/reporting files/scripts test/agents test/bots test/commands test/files test/fixtures test/google test/hub test/mobile scripts/ci-hub-windows-filter.sh scripts/kistack.py scripts/codex-apikey.sh .github/workflows/ci.yml'
+# What the hub's Windows build and tests read: native/host; everything outside it its sources name (scripts/hub-outside-files.py: #[path],
+# include_*!, CARGO_MANIFEST_DIR joins, build.rs's inputs, Cargo path dependencies: web/dist, i18n, deploy, test fixtures ...), derived from the
+# tree being gated at each try, so a new embed is never missed; by hand only what tests read by a plain relative path, which no source names
+# (winres_tests.rs: ../gpui, ../guard), and which tests the gate runs (ci-hub-windows-filter.sh). A PR touching none of these merges without the blocking Windows gate; the
+# Windows gate then runs on the merged main in the background (scripts/land-postmerge.sh), its result logged, a failure told on the PR at once.
+win_by_hand='native/gpui/Cargo.toml native/gpui/build.rs native/gpui/src/install.rs native/guard/Cargo.toml native/guard/build.rs skills files/scripts scripts/ci-hub-windows-filter.sh .github/workflows/ci.yml'
+win_inputs() { d=$(python3 -I "$here/hub-outside-files.py" "$(pwd)") || die "scripts/hub-outside-files.py could not list what the hub reads outside native/host (above); nothing pushed"
+  win_paths="native/host $(printf '%s' "$d" | tr '\n' ' ') $win_by_hand"; }
+wskip=; merged=
 tries=${LAND_TRIES:-3}; n=0; poll=${LAND_POLL_S:-2}
 gh_prog=${LAND_GH:-gh}
 repo=${LAND_REPO:-$(git remote get-url origin | sed -E 's#^.*github\.com[:/]([^/]+/[^/]+)$#\1#; s#\.git$##')}
@@ -101,8 +110,9 @@ fix: git config user.name i2cjak && git config user.email build@amemb.com (this 
     printf '%s\n' "$tree" > "$mark"
   fi
   # the Windows gate: the hub's Windows tests on this same tree on bp-win (else bp-winbuild), under the bp-win-gate lock, before anything is pushed
-  if [ "$win" = skip ]; then win_note=1; say "LAND_WINDOWS=skip: the Windows gate is NOT run on this tree (only on a person's or lead's word); the PR body says so"
-  elif git diff --quiet origin/main HEAD -- $win_paths; then say "Windows gate skipped: nothing the hub's Windows tests build from or read changed against origin/main"
+  win_inputs; wskip=
+  if [ "$win" = skip ]; then wskip=1; win_note=1; say "LAND_WINDOWS=skip: the Windows gate is NOT run on this tree (only on a person's or lead's word); the PR body says so"
+  elif git diff --quiet origin/main HEAD -- $win_paths; then wskip=1; say "Windows gate skipped: nothing the hub's Windows build or tests read changed against origin/main (it runs on main after the merge, in the background)"
   elif [ "$(cat "$wmark" 2>/dev/null)" = "$tree" ]; then say "Windows tests already passed on this tree ($(printf %s "$tree" | cut -c1-10))"
   else
     say "Windows gate: the hub's Windows tests on $(git rev-parse --short HEAD) (lock bp-win-gate; another landing's gate runs first)"
@@ -173,12 +183,20 @@ fix: git config user.name i2cjak && git config user.email build@amemb.com (this 
     pstate=$(ghi pr view "$num" -R "$repo" --json state -q .state 2>/dev/null || true); [ "$pstate" = MERGED ] && break; sleep "$poll"
   done
   [ "$pstate" = MERGED ] || die "PR #$num was merged but GitHub does not say MERGED yet; run scripts/land.sh --resume"
-  break
+  merged=1; break
 done
 # After the merge nothing may turn the result non-zero but a failed fast-forward of local main (and that says the merge is done).
 if ! git fetch -q origin main; then say "the merge of ${num:+PR #$num }is DONE, but git fetch origin main failed here; local main is not updated (run: git fetch origin main, then fast-forward main)"; exit 0; fi
 # local main follows what GitHub made of the commits (a rebase merge rewrites them: the branch's own shas are not main's): fast-forward it in the checkout that has it
 tip=$(git rev-parse origin/main)
+# the Windows gate after a merge that skipped it: on the merged main, detached (this land ends now), from a private copy; its result in
+# ~/.cache/bp-land-windows/postmerge.log, a failure told on the PR at once (LAND_POSTMERGE=off turns it off; LAND_POSTMERGE_TEST replaces the run)
+if [ -n "$merged" ] && [ -n "$wskip" ] && [ "${LAND_POSTMERGE:-}" != off ]; then
+  pm=$(mktemp "${TMPDIR:-/tmp}/land-postmerge.XXXXXX") && cp "$here/land-postmerge.sh" "$pm" && {
+    if command -v setsid >/dev/null 2>&1; then setsid -f sh "$pm" "$tip" "${num:-}" "$(pwd)" </dev/null >/dev/null 2>&1; else nohup sh "$pm" "$tip" "${num:-}" "$(pwd)" </dev/null >/dev/null 2>&1 & fi
+    say "the Windows gate runs on main $(git rev-parse --short "$tip") in the background (post-merge; its result: ${LAND_POSTMERGE_LOG:-~/.cache/bp-land-windows/postmerge.log})"; } ||
+    say "could not start the post-merge Windows gate on $(git rev-parse --short "$tip"): run sh scripts/land-postmerge.sh $tip ${num:-} \"$(pwd)\""
+fi
 mainwt=$(git worktree list --porcelain | awk '/^worktree /{w=substr($0,10)} /^branch refs\/heads\/main$/{print w}')
 if git merge-base --is-ancestor main "$tip" 2>/dev/null; then
   if [ -n "$mainwt" ]; then git -C "$mainwt" merge -q --ff-only "$tip" || { say "the merge is DONE (main is $(git rev-parse --short "$tip") on origin), but local main in $mainwt cannot fast-forward (its working tree is in the way); run: git -C $mainwt merge --ff-only origin/main"; exit 1; }

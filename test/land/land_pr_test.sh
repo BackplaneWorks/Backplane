@@ -2,8 +2,12 @@
 # scripts/land.sh against a local bare origin and a stand-in gh (fake-gh): the gate before the push, the branch and PR, the wait for a review (exit 3), the merge once it is
 # approved (without a new gate while the tree is the tested one), the dry merge, a main that moved, a failing gate, --resume with no PR. No network, no GitHub.
 set -u
+# run from inside a land (its gate), the outer land's private copy must not leak into the lands this test starts
+unset LAND_COPY LAND_HERE LAND_TEST LAND_WIN_TEST GH_TOKEN
 HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../.." && pwd)
 T=$(mktemp -d "${TMPDIR:-/tmp}/land-test.XXXXXX"); trap '[ -n "${KEEP:-}" ] || rm -rf "$T"' EXIT
+# the land runs' own temporary folder (their private copies, land-run.*, are looked for here alone), and the post-merge log
+export TMPDIR=$T/tmp LAND_POSTMERGE_LOG=$T/pm/postmerge.log; mkdir -p "$TMPDIR"
 export ORIGIN=$T/origin.git FAKE=$T/fake LAND_GH=$HERE/fake-gh LAND_REPO=x/y LAND_POLL_S=0 LAND_MIN_FREE_GB=0
 # the Windows gate's lock: no hub answers (a closed loopback port), so scripts/bp-lock.sh takes a flock in $T/locks
 export BACKPLANE_LOCK_URL=http://127.0.0.1:9 BACKPLANE_LOCK_HOME=$T/nohub BACKPLANE_LOCK_DIR=$T/locks; mkdir -p "$T/locks"
@@ -13,6 +17,8 @@ export LAND_WIN_STATE=$T/state LAND_WIN_EST_MIN=0 LAND_WIN_MARGIN_MIN=0
 # a stand-in az for every case (never the real one): each VM's power in $T/power.<vm> (running unless said), every call logged to $AZLOG;
 # bp-winbuild's public address is 203.0.113.7, and this machine's 198.51.100.1
 export AZLOG=$T/azlog LAND_WIN_AZ=$T/azf LAND_WIN_MYIP=198.51.100.1 POWER=$T/power
+# never a real VM from here: ssh is a stand-in that reaches nothing unless a case gives its own, and the post-merge gate is off unless a case turns it on
+printf '#!/bin/sh\nexit 255\n' > "$T/nossh"; chmod +x "$T/nossh"; export LAND_WIN_SSH=$T/nossh LAND_POSTMERGE=off
 cat > "$T/azf" <<'EOS'
 #!/bin/sh
 n=; a="$*"; while [ $# -gt 0 ]; do [ "$1" = -n ] && n=$2; shift; done
@@ -33,7 +39,7 @@ g() { git -C "$W" "$@"; }
 export GIT_AUTHOR_NAME=i2cjak GIT_AUTHOR_EMAIL=build@amemb.com GIT_COMMITTER_NAME=i2cjak GIT_COMMITTER_EMAIL=build@amemb.com
 git init -q --bare -b main "$ORIGIN"
 W=$T/main; git clone -q "$ORIGIN" "$W" 2>/dev/null; g checkout -q -b main 2>/dev/null
-mkdir -p "$W/scripts"; cp "$ROOT/scripts/land.sh" "$ROOT/scripts/land-windows.sh" "$ROOT/scripts/bp-lock.sh" "$W/scripts/"; printf '#!/bin/sh\nexit 0\n' > "$W/scripts/check-author.sh"; chmod +x "$W/scripts/"*.sh
+mkdir -p "$W/scripts"; cp "$ROOT/scripts/land.sh" "$ROOT/scripts/land-windows.sh" "$ROOT/scripts/bp-lock.sh" "$ROOT/scripts/hub-outside-files.py" "$ROOT/scripts/land-postmerge.sh" "$W/scripts/"; printf '#!/bin/sh\nexit 0\n' > "$W/scripts/check-author.sh"; chmod +x "$W/scripts/"*.sh
 echo base > "$W/f"; g add -A; g commit -qm base; g push -q origin main
 LANE=$T/lane; g worktree add -q -b lane "$LANE" 2>/dev/null; W=$LANE
 echo one > "$LANE/doc"; g add -A; g commit -qm "docs: one"
@@ -46,7 +52,7 @@ LAND_TEST=false land > "$T/o1"; rc=$?; [ $rc != 0 ] && ! git --git-dir="$ORIGIN"
 land --resume > "$T/o2"; rc=$?; [ $rc != 0 ] && grep -q "no open pull request" "$T/o2"; ok $? "--resume with no PR is refused"
 # 3. gate green, PR blocked on review: exit 3 and the line
 land > "$T/o3"; rc=$?; [ $rc = 3 ] && grep -q "PR #101 open, gate green on $(g rev-parse --short HEAD), waiting for an approving review" "$T/o3" && [ "$(wc -l < "$GATES")" = 1 ] && [ ! -f "$FAKE/merges" ]; ok $? "blocked on review: exit 3, the PR and the sha named, one gate, nothing merged (rc $rc)"
-grep -q "Windows gate skipped: nothing the hub's Windows tests build from or read changed" "$T/o3" && [ ! -s "$WINS" ]; ok $? "no host change: the Windows gate is skipped, and said"
+grep -q "Windows gate skipped: nothing the hub's Windows build or tests read changed" "$T/o3" && [ ! -s "$WINS" ]; ok $? "no host change: the Windows gate is skipped, and said"
 [ "$(git --git-dir="$ORIGIN" rev-parse refs/heads/lane)" = "$(g rev-parse HEAD)" ]; ok $? "the gated branch is on origin"
 # 4. rerunning while still blocked does not gate again and opens no second PR
 land > "$T/o4"; rc=$?; [ $rc = 3 ] && [ "$(wc -l < "$GATES")" = 1 ] && [ "$(cat "$FAKE/next")" = 101 ]; ok $? "rerun while blocked: exit 3, no new gate, no second PR"
@@ -189,4 +195,26 @@ step k; echo deallocated > "$POWER.bp-winbuild"; ( flock 9; exec sleep 60 ) 9>"$
 [ $rc = 3 ] && grep -q '^bpadmin@203.0.113.7 run' "$VMLOG" && grep -q "bp-winbuild is deallocated: starting it" "$T/o29" && grep -q "bp-winbuild: deallocated (the gate started it)" "$T/o29" \
   && [ "$(grep -c -x 'vm start -g BP-WIN-RG -n bp-winbuild\|vm deallocate -g BP-WIN-RG -n bp-winbuild --no-wait\|network nsg rule delete -g BP-WIN-RG --nsg-name bp-winbuild-gate-nsg -n land-gate-ssh' "$AZLOG")" = 3 ] \
   && [ "$(cat "$POWER.bp-winbuild")" = deallocated ] && pushed; ok $? "deallocated: started, run directly, deallocated after, rule closed (rc $rc)"
+# 30. what may merge without the blocking Windows gate: a PR touching nothing the hub's Windows build or tests read (web sources, docs, mobile)
+# merges after the Linux gate; the Windows gate then runs on the merged main in the background, its result logged
+g fetch -q origin main; g reset -q --hard origin/main; echo CLEAN > "$FAKE/mergestate"; echo APPROVED > "$FAKE/review"
+pmwait() { for _ in $(seq 100); do [ -f "$LAND_POSTMERGE_LOG" ] && [ "$(wc -l < "$LAND_POSTMERGE_LOG")" -ge "$1" ] && return 0; sleep 0.1; done; return 1; }
+mkdir -p "$LANE/web/src" "$LANE/docs" "$LANE/mobile"; echo a > "$LANE/web/src/app.ts"; echo a > "$LANE/docs/d.md"; echo a > "$LANE/mobile/m.kt"; g add -A; g commit -qm "web, docs, mobile only"
+nw=$(wc -l < "$WINS"); LAND_POSTMERGE= LAND_POSTMERGE_TEST="echo pm >> $T/pmruns" land > "$T/o30"; rc=$?; pmwait 1
+[ $rc = 0 ] && [ "$(wc -l < "$WINS")" = "$nw" ] && grep -q "landed lane" "$T/o30" && grep -q "the Windows gate runs on main .* in the background" "$T/o30" \
+  && [ "$(cat "$T/pmruns")" = pm ] && grep -q "main $(git --git-dir="$ORIGIN" rev-parse --short=10 main) PR #[0-9]* PASSED" "$LAND_POSTMERGE_LOG"; ok $? "web/docs/mobile only: merged without the blocking Windows gate; the post-merge gate ran on the merged main and logged PASSED (rc $rc)"
+# 31. a post-merge failure is logged, kept in the failures file and said on the PR at once
+echo b > "$LANE/docs/d.md"; g commit -qam "docs again"
+LAND_POSTMERGE= LAND_POSTMERGE_TEST="echo '  FAILED on bp-winbuild after 1m: Summary; failing on Windows, and not known to:'; echo '    a::broke'; exit 1" land > "$T/o31"; rc=$?; pmwait 2
+n=$(cat "$FAKE/next"); [ $rc = 0 ] && grep -q "FAILED .*a::broke" "$LAND_POSTMERGE_LOG" && grep -q "a::broke" "$T/pm/postmerge-failures.log" && grep -q "Post-merge Windows gate FAILED on main .*a::broke.*fixes forward within the hour" "$FAKE/comments.$n"; ok $? "a post-merge failure: logged, in the failures file, said on the PR (rc $rc)"
+# 32. a host PR still blocks: the Windows gate runs before anything is pushed, and no post-merge gate after it
+mkdir -p "$LANE/native/host/src"; echo 'fn a() {}' > "$LANE/native/host/src/a.rs"; g add -A; g commit -qm "host"; nw=$(wc -l < "$WINS"); np=$(wc -l < "$LAND_POSTMERGE_LOG")
+land > "$T/o32"; rc=$?; sleep 1
+[ $rc = 0 ] && [ "$(wc -l < "$WINS")" = $((nw + 1)) ] && ! grep -q "in the background" "$T/o32" && [ "$(wc -l < "$LAND_POSTMERGE_LOG")" = "$np" ]; ok $? "a host PR: the blocking Windows gate runs, no post-merge gate (rc $rc)"
+# 33. web/dist, embedded by the hub (include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../web/dist/", ...))), changed alone still blocks
+mkdir -p "$LANE/web/dist"; echo '<html>1' > "$LANE/web/dist/index.html"
+printf '%s\n' 'macro_rules! asset { ($p:literal) => { include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../web/dist/", $p)) } }' > "$LANE/native/host/src/webingress.rs"
+g add -A; g commit -qm "host: embeds web/dist"; land > "$T/o33a"
+echo '<html>2' > "$LANE/web/dist/index.html"; g commit -qam "web/dist only"; nw=$(wc -l < "$WINS"); land > "$T/o33"; rc=$?
+[ $rc = 0 ] && [ "$(wc -l < "$WINS")" = $((nw + 1)) ] && ! grep -q "Windows gate skipped" "$T/o33"; ok $? "a web/dist-only PR still blocks on the Windows gate (rc $rc)"
 [ $fails = 0 ] && echo "land_pr_test: all passed" || { echo "land_pr_test: $fails failed"; exit 1; }
