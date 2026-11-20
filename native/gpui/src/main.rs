@@ -30,6 +30,7 @@ mod screens;
 mod script;
 mod swatch;
 mod streamer;
+mod pane_tool;
 mod ui;
 mod viewers;
 mod theme;

@@ -242,7 +242,7 @@ impl Render for CefPage {
         let tabs: Vec<super::chrome::TabView> = self.tabs.iter().enumerate().map(|(i, t)| { let st = t.st.lock().unwrap(); super::chrome::TabView { id: i.to_string(), title: st.title.clone(), url: st.url.clone(), active: i == self.active } }).collect();
         let cur_url = self.tab().map(|t| t.st.lock().unwrap().url.clone()).unwrap_or_default();
         let value = if bar_focused && self.bar_edit { self.bar_text.clone() } else if cur_url == "about:blank" { String::new() } else { cur_url };
-        let (strip, chrome) = super::chrome::render(super::chrome::In { light: self.light, tabs: &tabs, value, focused: bar_focused, taken: self.taken, have: !self.tabs.is_empty(), loading, can_back: back, can_forward: fwd, bar_focus: &self.bar_focus }, cx,
+        let (strip, chrome) = super::chrome::render(&tabs, super::chrome::NavIn { light: self.light, value, focused: bar_focused, taken: self.taken, have: !self.tabs.is_empty(), loading, can_back: back, can_forward: fwd, bar_focus: &self.bar_focus }, cx,
             |this: &mut CefPage, a, w, cx| this.act(a, w, cx), |this, e, w, cx| this.key_down(e, w, cx));
         let c = |n: &str| crate::theme::color(self.light, n);
         // windowed: nothing gpui draws shows over Chromium's window, so the load error and the download line go at the end of the tab strip
