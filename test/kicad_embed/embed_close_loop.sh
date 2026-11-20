@@ -71,6 +71,7 @@ for i in $(seq "$CYCLES"); do
     MODE=discard
     if [ "${CLOSE_SAVE:-0}" = 1 ]; then
       MODE=save; SEG0=$(grep -c "(segment" "$PROJ/ecc83-pp.kicad_pcb" || true)
+      HIST0=$(git -C "$PROJ/.history" rev-list --all --count 2>/dev/null || echo 0)
       python3 "$IPC_PY" agent-add-track "$SOCK" 100 $((100 + i)) 104 $((100 + i)) 0.25 3 >"$OUT/track-$i.out" 2>&1 || true
       MOD=$(python3 "$IPC_PY" modified "$SOCK" pcb 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("modified"))' 2>/dev/null || echo "?")
     fi
@@ -92,7 +93,9 @@ for i in $(seq "$CYCLES"); do
     sleep 1
   done
   fi
+  TC=$(date +%s%N)
   for _ in $(seq "$EXIT_TRIES"); do [ "$KPID" -gt 0 ] && kill -0 "$KPID" 2>/dev/null || break; sleep 0.25; done
+  EXIT_MS=$(( ($(date +%s%N) - TC) / 1000000 ))
   sleep 1.5
   ENDED=$(tail -n +"$((N0 + 1))" "$OUT/hub.log" | grep -m1 -E " ended (while closing |after its close )?\(" || true)
   if [ -n "$ENDED" ] && echo "$ENDED" | grep -q "after its close (signal 9"; then
@@ -104,9 +107,12 @@ for i in $(seq "$CYCLES"); do
     echo "cycle $i: CRASHED ($HOW) frames=$FRAMES; last: $LAST"; SUMMARY+=("$HOW: $LAST")
     { echo "== cycle $i (frames $FRAMES)"; tail -n +"$((N0 + 1))" "$OUT/hub.log" | sed -n -E '/ ended (while closing |after its close )?\(/,/^kicad embed: publish/p' | head -60; } >>"$OUT/crashes.txt"
   elif kill -0 "$KPID" 2>/dev/null; then
-    echo "cycle $i: KiCad still running after the close ($(cat "$OUT/close-$i.out" | tail -c 200))"; OTHER=$((OTHER + 1)); kill -9 "$KPID" 2>/dev/null
+    echo "cycle $i: KiCad still running after the close ($(cat "$OUT/close-$i.out" | tail -c 200))"; OTHER=$((OTHER + 1))
+    # CLOSE_HANG_STACK=1: a KiCad running under gdb (the -gdb runtimes) is interrupted, so gdb writes every thread's stack, then killed
+    if [ "${CLOSE_HANG_STACK:-0}" = 1 ]; then kill -INT "$KPID" 2>/dev/null; sleep 15; fi
+    kill -9 "$KPID" 2>/dev/null
   else
-    CLEAN=$((CLEAN + 1)); echo "cycle $i: clean (frames=$FRAMES)"
+    CLEAN=$((CLEAN + 1)); echo "cycle $i: clean (frames=$FRAMES, exited ${EXIT_MS} ms after the close answered)"
   fi
   if [ "${CLOSE_SAVE:-0}" = 1 ]; then
     # the saved board: complete and loadable (kicad-cli reads it and exports), the track there, no temp file as its only copy
@@ -116,7 +122,8 @@ for i in $(seq "$CYCLES"); do
     TEMPS=$(ls -a "$PROJ" | grep -E '^\.?ecc83-pp\.kicad_pcb.+' | grep -v '\.backplane\.json$' | tr '\n' ' ')
     OK=$([ "$SIZE" -gt 0 ] && [ "$LOADS" = 1 ] && [ "$SEG1" = $((SEG0 + 1)) ] && echo 1 || echo 0)
     [ "$OK" = 1 ] && SAVED_OK=$((SAVED_OK + 1)) || SAVED_BAD=$((SAVED_BAD + 1))
-    echo "cycle $i save: modified=$MOD size=$SIZE segments $SEG0->$SEG1 loads=$LOADS temps=[${TEMPS}] -> $([ "$OK" = 1 ] && echo intact || echo BAD)"
+    HIST1=$(git -C "$PROJ/.history" rev-list --all --count 2>/dev/null || echo 0)
+    echo "cycle $i save: history commits $HIST0->$HIST1 modified=$MOD size=$SIZE segments $SEG0->$SEG1 loads=$LOADS temps=[${TEMPS}] -> $([ "$OK" = 1 ] && echo intact || echo BAD)"
   fi
   kill "$CP" 2>/dev/null; wait "$CP" 2>/dev/null
   sleep 1
