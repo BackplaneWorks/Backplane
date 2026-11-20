@@ -1,8 +1,8 @@
 // The us-intl dead acute through ibus over XIM, on Xvfb (Boat only): dead_acute then e in the composer must give "é", and the client must live.
 // ibus sends the accent's preedit as the COMPOUND_TEXT byte 0xB4 and the commit as 0xE9 (ISO 8859-1, CT's default GR); a client that reads them
 // as UTF-8 panicked in zed-xim (client.rs:237, "Encoding Error: Utf8Error ... bytes: [180]").
-// On a Boat box (never the desktop), with the hub, the client and its assets/ in test/e2e/bin: sh test/e2e/boat-inner.sh input-deadkey
-//   (that is: bun test/e2e/input/deadkey-run.mjs --hub-bin PATH --gpui-bin PATH [--out DIR], under dbus-run-session, after provisioning ibus and setxkbmap)
+// On a Boat box only, never the desktop: bun test/e2e/input/deadkey-run.mjs --hub-bin PATH --gpui-bin PATH [--out DIR] under dbus-run-session, with Xvfb,
+// ibus and setxkbmap installed; deadkey/README.md has the container it ran in (deadkey/Dockerfile, deadkey/row.sh).
 // Exit 0 = pass, 1 = the app failed (no é, or the client died), 3 = harness (ibus or the layout could not be set up: says nothing about the app).
 import {readFileSync,writeFileSync,mkdirSync,appendFileSync} from 'node:fs';import {spawn,execFileSync} from 'node:child_process';import {resolve} from 'node:path';
 import {startDisplay,installMissing} from '../lib/capture.mjs';import {startFixtureHub} from '../lib/hubfx.mjs';import {Input} from './driver.mjs';import {startIme} from './ime.mjs';
@@ -21,9 +21,9 @@ if(ime.status!=='started'||!/intl/.test(ime.engine)||!deadKeycode){ime.stop();ds
 const fx=await startFixtureHub({bin:hubBin,root:resolve('out/e2e-run/deadkey'),port:3814,threads:2});
 let g=null,gExit=null,code=3;const clientLog=out+'/client.stderr.log';writeFileSync(clientLog,'');
 try{
-  const sf=out+'/hold.script.json';writeFileSync(sf,JSON.stringify([{select:0},...Array.from({length:60},()=>[{wait:1000},{read:'composer'}]).flat()]));
+  const sf=out+'/hold.script.json';writeFileSync(sf,JSON.stringify([{select:0},...Array.from({length:180},()=>[{wait:1000},{read:'composer'}]).flat()]));
   const metrics=[];let buf='';
-  g=spawn(gpuBin,['--url',fx.state.url,'--token-file',fx.state.root+'/home/token','--script',sf],{env:{...dsp.env,...ime.env,LC_ALL:'C.UTF-8',HOME:fx.state.root+'/fakehome',BACKPLANE_GPUI_RECTS:'1'},stdio:['ignore','ignore','pipe']});
+  g=spawn(gpuBin,['--url',fx.state.url,'--token-file',fx.state.root+'/home/token','--script',sf],{env:{...dsp.env,...ime.env,LC_ALL:ime.locale,HOME:fx.state.root+'/fakehome',BACKPLANE_GPUI_RECTS:'1'},stdio:['ignore','ignore','pipe']});
   g.on('exit',(c,s)=>{gExit={code:c,signal:s}});
   g.stderr.on('data',d=>{appendFileSync(clientLog,d);buf+=d;let i;while((i=buf.indexOf('\n'))>=0){const l=buf.slice(0,i);buf=buf.slice(i+1);const k=l.indexOf('GPUI_METRIC ');if(k>=0)try{metrics.push(JSON.parse(l.slice(k+12)))}catch{}}});
   const inp=new Input(dsp.display,out);let win=null;
@@ -41,7 +41,7 @@ try{
   try{sent=readFileSync(evPath,'utf8').split('\n').filter(l=>l.includes('"MessagePosted"')&&l.includes('"role":"user"')).map(l=>JSON.parse(l)).filter(e=>e.at>=t0).at(-1)||null}catch{}
   const err=readFileSync(clientLog,'utf8');const panic=(err.match(/panicked at [^\n]*\n?[^\n]*/)||[null])[0];
   summary.client={exit:gExit,alive:!gExit,panic,ximDropWarnings:(err.match(/xim: dropped[^\n]*/g)||[]).slice(0,3)};summary.hubMessageText=sent?.text??null;
-  const composed=sent?.text==='é'||summary.composerRead?.text==='é';
+  const composed=sent?.text==='é'; // the hub received é: the composer read alone is evidence, not the verdict
   if(panic||gExit)done(1,'fail','the client died on dead_acute e: '+(panic||JSON.stringify(gExit)));
   if(!composed)done(1,'fail','dead_acute e did not give "é" (composer read '+JSON.stringify(summary.composerRead)+', hub got '+JSON.stringify(sent?.text??null)+')');
   done(0,'pass','dead_acute e gave "é" (hub got '+JSON.stringify(sent?.text??null)+', composer read '+JSON.stringify(summary.composerRead?.text??null)+'); the client is alive');

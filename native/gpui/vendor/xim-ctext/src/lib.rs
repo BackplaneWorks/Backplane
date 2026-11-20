@@ -100,7 +100,7 @@ enum Set {
     Katakana,
     /// The right half of another 96-character ISO 8859 set, decoded by its single-byte encoding.
     Right96(&'static encoding_rs::Encoding),
-    /// A 94^2 set (GB 2312, JIS X 0208, KS C 5601): two bytes, decoded as their EUC form.
+    /// A 94^2 set (GB 2312, JIS X 0208, KS C 5601): two bytes, decoded as their EUC form (GB 2312 through GBK, which contains it).
     Double(&'static encoding_rs::Encoding),
 }
 
@@ -115,6 +115,10 @@ impl Set {
     /// Decodes `bytes` (one character, the 7-bit value of each byte) into `out`.
     fn push(self, bytes: &[u8], out: &mut String) -> Result<(), DecodeError> {
         let c = bytes[0] & 0x7F;
+        // a 94 or 94^2 set has no character at 0x20 / 0x7F (GR 0xA0 / 0xFF); every byte of a character is in 0x21..=0x7E once masked
+        if !matches!(self, Set::Latin1 | Set::Right96(_)) && bytes.iter().any(|&b| !(0x21..=0x7E).contains(&(b & 0x7F))) {
+            return Err(DecodeError::InvalidEncoding);
+        }
         let ch = match self {
             Set::Ascii => c as char,
             Set::Latin1 => (c | 0x80) as char,
@@ -180,6 +184,8 @@ fn set96(f: u8) -> Result<Set, DecodeError> {
         b'_' => Set::Right96(ISO_8859_14),
         b'b' => Set::Right96(ISO_8859_15),
         b'f' => Set::Right96(ISO_8859_16),
+        // TIS-620 (ISO 8859-11), Thai: windows-874's right half
+        b'T' => Set::Right96(WINDOWS_874),
         _ => return Err(DecodeError::UnsupportedEncoding),
     })
 }
@@ -222,7 +228,7 @@ pub fn compound_text_to_utf8(bytes: &[u8]) -> Result<String, DecodeError> {
                 }
                 match &bytes[start..j] {
                     b"(" => gl = set94(f)?,
-                    b")" => gr = set94(f)?,
+                    b")" if f != b'B' => gr = set94(f)?,
                     b"-" => gr = set96(f)?,
                     b"$(" => gl = set94n(f)?,
                     b"$)" => gr = set94n(f)?,
@@ -242,14 +248,12 @@ pub fn compound_text_to_utf8(bytes: &[u8]) -> Result<String, DecodeError> {
                 }
                 i = j + 1;
             }
-            // CSI: a direction sequence (parameters, then a final byte); the text's order is kept as it is
-            0x9B => {
-                let mut j = i + 1;
-                while j < bytes.len() && !(0x40..=0x7E).contains(&bytes[j]) {
-                    j += 1;
-                }
-                i = j + 1;
-            }
+            // CSI 1 ] / CSI 2 ] / CSI ]: a direction sequence, skipped (the text's order is kept as it is); any other CSI is an error
+            0x9B => match bytes.get(i + 1..) {
+                Some([b'1' | b'2', b']', ..]) => i += 3,
+                Some([b']', ..]) => i += 2,
+                _ => return Err(DecodeError::InvalidEncoding),
+            },
             // C0 controls (HT, NL) and space are themselves whatever is designated
             0x00..=0x20 | 0x7F => {
                 out.push(b as char);
@@ -314,6 +318,8 @@ mod tests {
         assert_eq!(crate::compound_text_to_utf8(&[0x1B, 0x29, 0x49, 0xB1]).unwrap(), "\u{FF71}");
         // a direction sequence is skipped
         assert_eq!(crate::compound_text_to_utf8(&[0x9B, b'1', b']', b'a', 0x9B, b']']).unwrap(), "a");
+        // TIS-620 (0xA1 is U+0E01)
+        assert_eq!(crate::compound_text_to_utf8(&[0x1B, 0x2D, 0x54, 0xA1]).unwrap(), "\u{E01}");
         // a UTF-8 segment without its end marker runs to the end of the text
         assert_eq!(crate::compound_text_to_utf8(&[0x1B, 0x25, 0x47, 0xC3, 0xA9]).unwrap(), "é");
     }
@@ -328,6 +334,19 @@ mod tests {
             &[0x85][..],
             &[0x1B, 0x29, 0x49, 0xF0][..],
             &[0x1B, 0x25, 0x2F, 0x31, 0x80, 0x80][..],
+            // a two-byte character whose trail is an escape, a space, a newline, or not a graphic byte
+            &[0x1B, 0x24, 0x28, 0x41, 0x30, 0x1B, 0x28, 0x42][..],
+            &[0x1B, 0x24, 0x28, 0x41, 0x30, 0x20][..],
+            &[0x1B, 0x24, 0x28, 0x41, 0x30, 0x0A][..],
+            &[0x1B, 0x24, 0x28, 0x43, 0x30, 0x20][..],
+            &[0x1B, 0x24, 0x29, 0x41, 0xA0, 0xA1][..],
+            // a 94 set in GR has nothing at 0xA0 / 0xFF; ASCII is not designated to GR
+            &[0x1B, 0x29, 0x4A, 0xA0][..],
+            &[0x1B, 0x29, 0x4A, 0xFF][..],
+            &[0x1B, 0x29, 0x42, 0xC1][..],
+            // a CSI that is not a direction sequence
+            &[0x9B, 0xE9, 0xE9, b'a'][..],
+            &[0x9B][..],
         ] {
             assert!(crate::compound_text_to_utf8(bad).is_err(), "{:?}", bad);
         }

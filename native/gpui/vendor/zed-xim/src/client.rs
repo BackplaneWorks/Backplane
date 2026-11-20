@@ -49,17 +49,24 @@ impl fmt::Display for ClientError {
 #[cfg(feature = "std")]
 impl std::error::Error for ClientError {}
 
-/// An IM's COMPOUND_TEXT as UTF-8, or None when it cannot be decoded: that text is dropped (said once per process), never a panic.
-fn decode_ctext(what: &str, bytes: &[u8]) -> Option<String> {
-    static SAID: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// An IM's COMPOUND_TEXT as UTF-8. Text that does not decode is dropped and becomes "" (said once per message kind, never a panic): the
+/// handler still runs, so an empty preedit clears the marked text and an empty commit ends the composition instead of leaving it stale.
+fn decode_ctext(what: &str, bytes: &[u8]) -> String {
+    use core::sync::atomic::{AtomicBool, Ordering};
+    static SAID: [AtomicBool; 3] = [AtomicBool::new(false), AtomicBool::new(false), AtomicBool::new(false)];
     match xim_ctext::compound_text_to_utf8(bytes) {
-        Ok(s) => Some(s),
+        Ok(s) => s,
         Err(e) => {
-            if !SAID.swap(true, core::sync::atomic::Ordering::Relaxed) {
+            let kind = match what {
+                "Commit" => 0,
+                "PreeditDraw" => 1,
+                _ => 2,
+            };
+            if !SAID[kind].swap(true, Ordering::Relaxed) {
                 // the length only: the text is what the person typed
                 log::warn!("xim: dropped a {} the IM sent that is not decodable COMPOUND_TEXT ({}, {} bytes)", what, e, bytes.len());
             }
-            None
+            String::new()
         }
     }
 }
@@ -155,9 +162,8 @@ pub fn handle_request<C: ClientCore>(
             input_context_id,
             preedit_string,
         } => {
-            if let Some(preedit_string) = decode_ctext("ResetIcReply", &preedit_string) {
-                handler.handle_reset_ic(client, input_method_id, input_context_id, &preedit_string);
-            }
+            let preedit_string = decode_ctext("ResetIcReply", &preedit_string);
+            handler.handle_reset_ic(client, input_method_id, input_context_id, &preedit_string);
             Ok(())
         }
         Request::Error { code, detail, .. } => Err(ClientError::XimError(code, detail)),
@@ -198,9 +204,8 @@ pub fn handle_request<C: ClientCore>(
                 commited,
                 syncronous,
             } => {
-                if let Some(commited) = decode_ctext("Commit", &commited) {
-                    handler.handle_commit(client, input_method_id, input_context_id, &commited)?;
-                }
+                let commited = decode_ctext("Commit", &commited);
+                handler.handle_commit(client, input_method_id, input_context_id, &commited)?;
 
                 if syncronous {
                     client.send_req(Request::SyncReply {
@@ -245,9 +250,7 @@ pub fn handle_request<C: ClientCore>(
             status,
             feedbacks,
         } => {
-            let Some(preedit_string) = decode_ctext("PreeditDraw", &preedit_string) else {
-                return Ok(());
-            };
+            let preedit_string = decode_ctext("PreeditDraw", &preedit_string);
             handler.handle_preedit_draw(
                 client,
                 input_method_id,
@@ -624,10 +627,10 @@ mod decode_tests {
     #[test]
     fn latin1_decodes_and_bad_text_is_dropped() {
         // ibus's us-intl dead acute preedit (0xB4) and composed commit (0xE9)
-        assert_eq!(super::decode_ctext("PreeditDraw", &[180]).as_deref(), Some("\u{B4}"));
-        assert_eq!(super::decode_ctext("Commit", &[0xE9]).as_deref(), Some("é"));
-        // invalid UTF-8 in a UTF-8 segment, a bare ESC: dropped, twice (said once), no panic
-        assert_eq!(super::decode_ctext("Commit", &[0x1B, 0x25, 0x47, 0xFF]), None);
-        assert_eq!(super::decode_ctext("Commit", &[0x1B]), None);
+        assert_eq!(super::decode_ctext("PreeditDraw", &[180]), "\u{B4}");
+        assert_eq!(super::decode_ctext("Commit", &[0xE9]), "é");
+        // invalid UTF-8 in a UTF-8 segment, a bare ESC: dropped as "" (said once), no panic
+        assert_eq!(super::decode_ctext("Commit", &[0x1B, 0x25, 0x47, 0xFF]), "");
+        assert_eq!(super::decode_ctext("Commit", &[0x1B]), "");
     }
 }
