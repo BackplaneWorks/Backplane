@@ -23,7 +23,7 @@
 # Exit: 0 passed; 1 the tests (or the Windows build) failed; 75 held: no VM could run it, with one line naming each VM tried and why.
 # A VM lost under a run (ssh drops: deallocated, shut down) or a run cut off is a VM that could not run it, never a pass: the next VM is tried.
 # Env: LAND_WIN_VMS (bp-win bp-winbuild), LAND_WIN_SSH (ssh), LAND_WIN_AZ (az), WINVM_RG (BP-WIN-RG), LAND_WIN_START_S, LAND_WIN_EST_MIN, LAND_WIN_MARGIN_MIN,
-# LAND_WIN_STATE, LAND_WIN_RUN_MAX_S (7200), LAND_WIN_HOLD_MIN, LAND_WIN_LOG, BACKPLANE_LOCK_DIR (/tmp: where a held lock is seen).
+# LAND_WIN_STATE, LAND_WIN_RUN_MAX_S (7200), LAND_WIN_THREADS (bp-winbuild 16), LAND_WIN_HOLD_MIN, LAND_WIN_LOG, BACKPLANE_LOCK_DIR (/tmp: where a held lock is seen).
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 ssh_prog=${LAND_WIN_SSH:-ssh}; az_prog=${LAND_WIN_AZ:-az}; rg=${WINVM_RG:-BP-WIN-RG}
@@ -140,6 +140,9 @@ EOF
 rc=$?; [ $rc = 0 ] || { [ $rc = 255 ] && unavailable "ssh dropped while preparing ($host)"; say "preparing $vm failed:"; tail -n 20 "$log" >&2; unavailable "could not prepare C:\\bp\\gate (see $log)"; }
 git -c core.sshCommand="$ssh_prog -o BatchMode=yes -o ConnectTimeout=15" push -q -f --receive-pack='git receive-pack' "$host:C:/bp/gate/src" "$sha:refs/heads/gate" >> "$log" 2>&1 ||
   unavailable "could not push the tree to $host (see $log)"
+# test threads: nextest's default (one per core) on bp-win's 4, as GitHub's runner; at most 16 on bp-winbuild's 32, where the hub's timing-bound
+# tests (written for 4 cores) failed both tries beside 31 others and passed alone (a_job_holds_its_lock..., checkpoint::stop_while..., 2026-11-20)
+threads=; case "$vm" in bp-winbuild) threads="--test-threads ${LAND_WIN_THREADS:-16}";; *) [ -z "${LAND_WIN_THREADS:-}" ] || threads="--test-threads $LAND_WIN_THREADS";; esac
 # the run's bound: LAND_WIN_RUN_MAX_S, and always 5 minutes before the VM's auto-shutdown
 max_s=$run_max_s; [ -z "${LAND_WIN_LEFT:-}" ] || { b=$(( (LAND_WIN_LEFT - 5) * 60 - ($(date +%s) - t0) )); [ "$b" -ge "$max_s" ] || max_s=$b; }
 [ "$max_s" -gt 0 ] || unavailable "too close to its auto-shutdown to run"
@@ -159,7 +162,7 @@ cd /c/bp/gate/src && git checkout -q -f --detach $sha && git clean -q -ffdx -e /
 echo "tree \$(git rev-parse HEAD^{tree}) at $sha"
 m='C:\\bp\\gate\\src\\native\\host\\Cargo.toml'   # cargo and nextest name it: the sweep finds them by it
 cargo build --manifest-path "\$m" --locked --bin bp-sh || exit 1
-cd native/host && cargo nextest run --manifest-path "\$m" --locked --no-fail-fast --retries 1 -E "\$(sh ../../scripts/ci-hub-windows-filter.sh)" || exit 1
+cd native/host && cargo nextest run --manifest-path "\$m" --locked --no-fail-fast --retries 1 $threads -E "\$(sh ../../scripts/ci-hub-windows-filter.sh)" || exit 1
 EOF
 rpid=$!; rc=0; wait "$rpid" || rc=$?; rpid=
 dt=$(( $(date +%s) - t0 )); took="$((dt / 60))m$((dt % 60))s"
