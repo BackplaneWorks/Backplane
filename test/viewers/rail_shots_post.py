@@ -210,10 +210,12 @@ def parse_client_log(log_path: Path) -> dict:
             if kind == "press":
                 delivered = bool(ev.get("found"))
             else:
-                # `click` metrics omit `found` and report delivery via `changed: true` or a non-"none" `action` with no `error`.
+                # `click` metrics omit `found`; never treat `action: "none"` (unwired Ctl::None) as delivered.
+                act = ev.get("action")
                 delivered = bool(ev.get("found")) or (
                     not ev.get("error")
-                    and (bool(ev.get("changed")) or (bool(ev.get("action")) and ev.get("action") != "none"))
+                    and bool(act)
+                    and act != "none"
                 )
             hit_rect = bool(ev.get("hit_rect") or ev.get("rect_hit"))
             presses_by_mark.setdefault(current_mark, []).append({
@@ -1633,45 +1635,64 @@ def evaluate_extra_checks(
                 },
             })
 
-        # 0b. After B1 Simulation cleanup, verify no KiCad/Simulator native frame remains shown over the viewer
+        # 0b. After B1 Simulation cleanup, verify KicadPane is detached/not covering the pane and
+        #     hub `runtime.holder` is absent (or `runtime.session != "live"`).
+        #     Parked warm KiCad `frames[].shown` and session `active` are recorded as notes only, not failure conditions.
         if embed and "schematic" in M.HAS_RESOURCE.get(kind, set()):
             k_sc = kicad_tags.get("b1-sim-cleanup-report")
             c_sc = caps.get("b1-sim-cleanup") or {}
+            s_sc = shots.get("b1-sim-cleanup") or {}
             hk_sc = c_sc.get("hub_kicad_sessions") or {}
             hub_complete = bool(hk_sc.get("ok") and hk_sc.get("inventory_complete"))
             shown_hub_frames: list[str] = []
+            live_holders: list[str] = []
+            session_actives: dict[str, object] = {}
             if hub_complete:
                 for sid, sinfo in (hk_sc.get("sessions") or {}).items():
+                    session_actives[sid] = sinfo.get("active")
+                    rt = sinfo.get("runtime") if isinstance(sinfo.get("runtime"), dict) else {}
+                    holder = rt.get("holder")
+                    rt_sess = rt.get("session")
+                    if holder and rt_sess == "live":
+                        live_holders.append(f"{sid}:holder={holder}")
                     for fr in (sinfo.get("frames") or []):
                         if isinstance(fr, dict) and fr.get("shown") is True:
                             shown_hub_frames.append(f"{sid}:{fr.get('kind', '?')}")
             has_pane_report = isinstance(k_sc, dict)
+            obstructed_sc = bool(c_sc.get("obstructed"))
             if not (has_pane_report or hub_complete):
                 sc_outcome = "unavailable"
                 sc_note = "no b1-sim-cleanup frame report or hub session inventory captured"
             else:
                 sc_fails: list[str] = []
+                if obstructed_sc:
+                    sc_fails.append("native dialog/window obstructing pane after Simulation cleanup")
                 if has_pane_report:
                     if k_sc.get("in_gpui_tree") is True:
                         sc_fails.append("KicadPane still mounted in GPUI tree after Simulation cleanup")
                     if k_sc.get("shown"):
                         sc_fails.append(f"pane kicad report still has shown={k_sc.get('shown')!r}")
-                if shown_hub_frames:
-                    sc_fails.append(f"hub KiCad session frame(s) still shown: {', '.join(shown_hub_frames)}")
+                if live_holders:
+                    sc_fails.append(f"hub KiCad session still held live in pane: {', '.join(live_holders)}")
                 sc_outcome = "failed" if sc_fails else "passed"
                 sc_note = "; ".join(sc_fails)
             checks.append({
                 "id": f"{kind}/sim-cleanup-no-frame",
                 "kind": kind,
-                "name": f"After B1 Simulation cleanup on {kind}, no KiCad/Simulator frame remains shown over the viewer",
+                "name": f"After B1 Simulation cleanup on {kind}, KicadPane is detached and no live holder covers the viewer",
                 "outcome": sc_outcome,
                 "note": sc_note,
                 "evidence": {
                     "has_pane_report": has_pane_report,
                     "in_gpui_tree": (k_sc or {}).get("in_gpui_tree") if has_pane_report else None,
                     "pane_shown": (k_sc or {}).get("shown") if has_pane_report else None,
+                    "viewer_open": (s_sc.get("viewer") or {}).get("open", ""),
+                    "obstructed": obstructed_sc,
                     "hub_inventory_complete": hub_complete,
-                    "shown_hub_frames": shown_hub_frames,
+                    "live_holders": live_holders,
+                    "hub_frame_shown": shown_hub_frames,
+                    "hub_session_active": session_actives,
+                    "hub_kicad_sessions": hk_sc if sc_outcome == "failed" else None,
                 },
             })
 

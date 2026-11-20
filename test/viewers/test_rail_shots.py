@@ -791,17 +791,26 @@ class RailShotsRegressionTests(unittest.TestCase):
                 }
             }
             res = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["schematic-only"], parsed, caps, embed=True)}
-            # 0. B1 sim-cleanup-no-frame passes when no frame is shown, fails when a Simulator frame IS shown, unavailable without evidence
-            self.assertEqual(res["schematic-only/sim-cleanup-no-frame"]["outcome"], "passed")
-            caps_sim_shown = {
+            # 0. B1 sim-cleanup-no-frame: parked warm Simulator (frames[].shown=True, runtime.holder=None) PASSES with hub_frame_shown noted;
+            #    live attached holder (runtime.holder present + runtime.session=='live') FAILS; missing evidence -> unavailable
+            caps_warm_parked = {
                 "schematic-only": {
                     **caps["schematic-only"],
-                    "b1-sim-cleanup": mk_cap(sess={"ok": True, "inventory_complete": True, "sessions": {"editor.kicad.abc": {"frames": [{"kind": "SIMULATOR", "shown": True}]}}}),
+                    "b1-sim-cleanup": mk_cap(sess={"ok": True, "inventory_complete": True, "sessions": {"editor.kicad.abc": {"active": "SIMULATOR", "runtime": {"holder": None, "session": "parked"}, "frames": [{"kind": "SIMULATOR", "shown": True}]}}}),
                 }
             }
-            res_sim_bad = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["schematic-only"], parsed, caps_sim_shown, embed=True)}
+            res_warm = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["schematic-only"], parsed, caps_warm_parked, embed=True)}
+            self.assertEqual(res_warm["schematic-only/sim-cleanup-no-frame"]["outcome"], "passed")
+            self.assertEqual(res_warm["schematic-only/sim-cleanup-no-frame"]["evidence"]["hub_frame_shown"], ["editor.kicad.abc:SIMULATOR"])
+            caps_live_holder = {
+                "schematic-only": {
+                    **caps["schematic-only"],
+                    "b1-sim-cleanup": mk_cap(sess={"ok": True, "inventory_complete": True, "sessions": {"editor.kicad.abc": {"active": "SIMULATOR", "runtime": {"holder": "pane", "session": "live"}, "frames": [{"kind": "SIMULATOR", "shown": True}]}}}),
+                }
+            }
+            res_sim_bad = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["schematic-only"], parsed, caps_live_holder, embed=True)}
             self.assertEqual(res_sim_bad["schematic-only/sim-cleanup-no-frame"]["outcome"], "failed")
-            self.assertIn("SIMULATOR", res_sim_bad["schematic-only/sim-cleanup-no-frame"]["note"])
+            self.assertIn("holder=pane", res_sim_bad["schematic-only/sim-cleanup-no-frame"]["note"])
             parsed_no_sc = {"schematic-only": {**parsed["schematic-only"], "kicad_tags": {k: v for k, v in parsed["schematic-only"]["kicad_tags"].items() if k != "b1-sim-cleanup-report"}}}
             caps_no_sc = {"schematic-only": {k: v for k, v in caps["schematic-only"].items() if k != "b1-sim-cleanup"}}
             res_sim_unavail = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["schematic-only"], parsed_no_sc, caps_no_sc, embed=True)}

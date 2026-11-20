@@ -16,7 +16,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 /* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<name>","settle":"<kind>"?,"timeout_ms":N?}: wait until settled (if requested) and painted, emit shot-ready, wait for <BACKPLANE_GPUI_SHOT_DIR>/<name>.done */ Shot { name: String, settle: Option<String>, timeout_ms: u64 }, /** {"wait_settled":"<kind>","tag":"<tag>","timeout_ms":N?}: wait until the page settles and emit a `settled` metric with its viewer state */ WaitSettled { kind: String, tag: String, timeout_ms: u64 }, Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
-pub enum Ctl { Header(String), /** the composer chip's account menu, and Settings' Accounts page */ AccountMenu, AccountsPage, /** the sidebar hub picker */ Hub(crate::screens::hubpick::Act), PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, Rail(String), PickFiles, /** the ▾ beside the thread's name: its menu */ ThreadMenu, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), /** a hub page of the Settings nav */ SettingsPage(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch, /** a bots-page press (screens::bots::press): its kind and value */ Bot(String, String), /** a chat terminal's card: focus, expand, pop, stop; its key */ Term(String, String), /** a subagent's own view (its key; "" goes back) */ Sub(String), /** a card's button that sends the hub an action (a halt card's Resume...): `Command::Action` */ Go(String, String), /** the viewer's Edit (true: the real KiCad in the pane) and View (false) */ KicadEdit(bool), /** the editor strip: a tab (its kind), full, popout, popin */ KicadAct(String), /** a management panel's press (screens/mgmt.rs `act`) */ Mgmt(String) }
+pub enum Ctl { Header(String), /** the composer chip's account menu, and Settings' Accounts page */ AccountMenu, AccountsPage, /** the sidebar hub picker */ Hub(crate::screens::hubpick::Act), PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, ToggleTerminal, Rail(String), PickFiles, /** the ▾ beside the thread's name: its menu */ ThreadMenu, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), /** a hub page of the Settings nav */ SettingsPage(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch, /** a bots-page press (screens::bots::press): its kind and value */ Bot(String, String), /** a chat terminal's card: focus, expand, pop, stop; its key */ Term(String, String), /** a subagent's own view (its key; "" goes back) */ Sub(String), /** a card's button that sends the hub an action (a halt card's Resume...): `Command::Action` */ Go(String, String), /** the viewer's Edit (true: the real KiCad in the pane) and View (false) */ KicadEdit(bool), /** the editor strip: a tab (its kind), full, popout, popin */ KicadAct(String), /** a management panel's press (screens/mgmt.rs `act`) */ Mgmt(String) }
 #[derive(Clone, Debug)]
 pub struct CtlEntry { pub id: String, pub label: String, pub ctl: Ctl }
 #[derive(Clone, Debug)]
@@ -761,6 +761,14 @@ impl Backplane {
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::AccountMenu => { self.screens.acct.script_menu = true; self.ui_epoch += 1; cx.notify(); "account menu".into() }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::AccountsPage => { if !crate::screens::settings::is_open(self) { self.open_settings(cx); } self.screens.settings_ui.device = false; self.screens.settings_ui.accounts = true; crate::screens::accounts::open_page(self, cx); self.ui_epoch += 1; "accounts page".into() }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::OpenPalette => { self.palette_open(cx); self.ui_epoch += 1; "open palette".into() }
+            Ctl::ToggleTerminal => {
+                let entity = cx.entity();
+                if let Some(win) = cx.windows().into_iter().next() {
+                    cx.defer(move |cx| { let _ = win.update(cx, |_, window, cx| { entity.update(cx, |this, cx| this.term_toggle(window, cx)); }); });
+                }
+                self.ui_epoch += 1;
+                /* i18n-ok: scripted e2e input and its metrics, not drawn */ "toggle terminal".into()
+            }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::FocusSearch => { self.focus_search(cx); self.ui_epoch += 1; "focus search".into() }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::RenameSave(id) => { let text = self.screens.fields.get("title").map(|s| s.input.read(cx).content.to_string()).unwrap_or_default(); if let Some(c) = crate::screens::tools::rename_save(id, &text) { let _ = self.tx.try_send(c); } "view.action rename-save".into() }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Imp(id) => { crate::screens::improvements::act(self, id, cx); self.ui_epoch += 1; format!("improvements {id}") }
@@ -883,7 +891,12 @@ impl Backplane {
             }
             "review" => {
                 if diff_on || open != "review" || !v["review"].is_object() { return None; }
-                if v["review"]["empty"].is_object() { return Some("empty"); }
+                if v["review"]["empty"].is_object() {
+                    // Require the drawn empty-state text before settling as "empty" (test-mode only).
+                    let drawn = crate::screens::viewer::drawn();
+                    let empty_drawn = drawn.strip_prefix("review|").unwrap_or("").trim();
+                    return (!empty_drawn.is_empty()).then_some("empty");
+                }
                 // Wait for the Review pane's first paint to populate review_snapshot rather than
                 // settling prematurely as "empty" with empty_text="" before mgmt renders.
                 let (state, _) = self.screens.mgmt.review_snapshot.as_ref()?;

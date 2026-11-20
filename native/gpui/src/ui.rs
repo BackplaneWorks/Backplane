@@ -1020,7 +1020,7 @@ impl Render for Backplane {
                 button = button.cursor_pointer().hover(|s| s.bg(c("raise")).text_color(c("text")))
                     .tooltip(crate::keys::tip(row.label, &hint, light)).children(cap_el);
                 let action = match id {
-                    "terminal" => Ctl::None, "commands" => Ctl::OpenPalette, "simulation" => Ctl::KicadAct("simulation".into()),
+                    "terminal" => Ctl::ToggleTerminal, "commands" => Ctl::OpenPalette, "simulation" => Ctl::KicadAct("simulation".into()),
                     "diff" => Ctl::Node("diff".into(), "".into()), _ => Ctl::Rail(id.into()),
                 };
                 ctl.push(CtlEntry { id: format!("rail:{}", row.label), label: row.label.into(), ctl: action });
