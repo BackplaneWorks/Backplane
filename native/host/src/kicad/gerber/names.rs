@@ -142,6 +142,13 @@ pub fn board_of_in(set: &Path, root: Option<&Path>) -> Option<std::path::PathBuf
     None
 }
 
+/// The RPC watch validates operands against the registered spelling of the root.
+pub fn board_for_watch(set: &Path, root: &Path) -> Option<PathBuf> {
+    let canonical_root = root.canonicalize().ok()?;
+    let board = board_of_in(set, Some(&canonical_root))?;
+    Some(root.join(board.strip_prefix(canonical_root).ok()?))
+}
+
 /// The board a set was made from (unbounded ancestors; prefer `board_of_in` when the project root is known).
 pub fn board_of(set: &Path) -> Option<std::path::PathBuf> { board_of_in(set, None) }
 /// The path of a set compared with its board (kicad/plotread.rs reads it here): "gerbercmp\n<set>\n<board>".
