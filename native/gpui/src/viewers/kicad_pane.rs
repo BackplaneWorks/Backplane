@@ -90,12 +90,15 @@ pub fn remount_wait(asked: u32) -> std::time::Duration {
 /// The pane's own `editor.kicad.show`s still waiting for their echo (KiCad's active frame becoming that kind), oldest first: kind,
 /// sequence number (`seq`, shared with the person's choices, `chosen_at`) and when it was sent. KiCad changes its active frame once per
 /// show, in the order asked, so an echo answers the OLDEST show of its kind, never a newer one (Board, Schematic, Board sent quicker than
-/// the hub: the first Board's echo must leave the second Board's in flight). A show that gets no echo (the hub's active frame is that
-/// kind already, an error, a KiCad gone) must not stay: shows of the active kind are not recorded, a failed one is dropped, a new KiCad,
-/// a stopped one and a detach clear all, and any older than `FLIGHT_TTL` is dropped on every info and every send.
+/// the hub: the first Board's echo must leave the second Board's in flight), and the shows sent before it are done (an echo the hub
+/// coalesced into a later one's). A show that gets no echo (the hub's active frame is that kind already, a KiCad gone) must not stay:
+/// shows of the active kind are not recorded, a new KiCad, a stopped one and a detach clear all, and any older than `FLIGHT_TTL` is
+/// dropped on every info and every send. A show the hub refused is NOT dropped on its error: the hub sets its active frame before it
+/// asks KiCad and keeps it on a refusal, so the refused show's echo still comes in the next info (and the reply says no seq or sender).
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct Flights(pub Vec<(String, u64, std::time::Instant)>);
-pub const FLIGHT_TTL: std::time::Duration = std::time::Duration::from_secs(15);
+/// Above the hub's worst show (ShowFrame's own 15 s, a cold editor's first show, the lock gate): ~35 s.
+pub const FLIGHT_TTL: std::time::Duration = std::time::Duration::from_secs(40);
 impl Flights {
     /// A show of `kind` sent as `seq` while the hub's active frame is `hub_active`: recorded unless KiCad is on that kind already with
     /// none of ours in flight (then it changes nothing and no echo comes: macOS's key hand-in re-shows the active kind). With others in
@@ -108,13 +111,12 @@ impl Flights {
     }
     /// Drops shows older than `FLIGHT_TTL` (no echo will come for them now).
     pub fn prune(&mut self, now: std::time::Instant) { self.0.retain(|(_, _, t)| now.saturating_duration_since(*t) < FLIGHT_TTL); }
-    /// The echo of `kind`: the oldest show of that kind is answered (removed); its sequence number, or None when none of ours is.
+    /// The echo of `kind`: the oldest show of that kind is answered, and every show sent before it with it (KiCad took them in order);
+    /// its sequence number, or None when none of ours is.
     pub fn answer(&mut self, kind: &str) -> Option<u64> {
         let i = self.0.iter().position(|(k, _, _)| k == kind)?;
-        Some(self.0.remove(i).1)
+        Some(self.0.drain(..=i).last()?.1)
     }
-    /// A show refused by the hub (an error reply; replies carry no frame): the oldest is dropped, its echo will not come.
-    pub fn failed(&mut self) { if !self.0.is_empty() { self.0.remove(0); } }
 }
 /// What the pane does with a change of KiCad's active frame to `act` (the hub's info), given the show it waits for (`pending`), its
 /// shows in flight and the sequence number of the person's last choice (`chosen_at`). Answers the oldest in-flight show of `act` in every
@@ -2388,6 +2390,21 @@ mod tests {
         assert_eq!(on_active(&mut f, &mut pending, "PCB", 7), Echo::ChosenPast, "the second Board's echo after the local Schematic");
         assert!(f.0.is_empty());
         assert_eq!(on_active(&mut f, &mut pending, "PCB", 7), Echo::Follow, "then KiCad's own switch is followed");
+
+        // delta review: a show the hub refused still echoes (it set its active frame before asking KiCad and keeps it): the remount's
+        // `show PCB` (5) refused, the person's local Schematic (6), the next info says PCB: the record is still there, not followed
+        let mut f = Flights::default(); let mut pending = None;
+        f.send("PCB", 5, Some("PCB_3D"), t);
+        // (the error reply changes nothing in flight)
+        assert_eq!(on_active(&mut f, &mut pending, "PCB", 6), Echo::ChosenPast, "the refused show's echo after the person's Schematic");
+
+        // an echo the hub coalesced: Board (2) then 3D (4) quicker than its publish, only 3D echoed; the Board's record goes with it, so
+        // a later Board of KiCad's own is followed
+        let mut f = Flights::default(); let mut pending = None;
+        f.send("PCB", 2, Some("SCH"), t); f.send("PCB_3D", 4, Some("SCH"), t);
+        assert_eq!(on_active(&mut f, &mut pending, "PCB_3D", 5), Echo::ChosenPast);
+        assert!(f.0.is_empty(), "the Board's show answered with the 3D's: {f:?}");
+        assert_eq!(on_active(&mut f, &mut pending, "PCB", 5), Echo::Follow);
     }
     #[test] fn a_show_whose_echo_will_not_come_does_not_stay_in_flight() {
         use super::{Flights, FLIGHT_TTL};
@@ -2404,10 +2421,7 @@ mod tests {
         f.prune(t + FLIGHT_TTL); assert!(f.0.is_empty(), "too old");
         f.send("SCH", 4, Some("PCB"), t); f.send("PCB_3D", 5, Some("PCB"), t + FLIGHT_TTL);
         assert_eq!(f.0.iter().map(|(k, _, _)| k.as_str()).collect::<Vec<_>>(), vec!["PCB_3D"], "a send prunes too");
-        // a refused show: the oldest dropped
-        f.send("SCH", 6, Some("PCB"), t + FLIGHT_TTL); f.failed();
-        assert_eq!(f.0.iter().map(|(_, n, _)| *n).collect::<Vec<_>>(), vec![6]);
-        f.failed(); f.failed(); assert!(f.0.is_empty());
+        f.prune(t + FLIGHT_TTL * 2); assert!(f.0.is_empty());
         // at most 16
         for n in 0..20 { f.send("SCH", n, Some("PCB"), t + FLIGHT_TTL); }
         assert_eq!(f.0.len(), 16); assert_eq!(f.0[0].1, 4);
@@ -2729,8 +2743,6 @@ impl crate::Backplane {
         }
         if reply["ok"] != true {
             let why = crate::hub::rpc_error(&reply);
-            // a show the hub refused: its echo will not come (`Flights::failed`)
-            if method == "editor.kicad.show" { if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| p.in_flight.failed()); } }
             // macOS: KiCad refused a host push (a task running: "SetHostGeometry: a task is running: DRC", e2e-macos 44274808579, the
             // frame then never shown): the latest push is sent again until KiCad takes it or a newer one replaces it (HostSends)
             if method == "editor.kicad.host" {
