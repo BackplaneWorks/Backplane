@@ -11,6 +11,7 @@ import { Plot2DViewer, type LayerMasks } from "./plot2d";
 import { Solid3DViewer } from "./solid3d";
 import {
   HistoryStripState,
+  matchesCompareKey,
   SOLID_VIEW_PRESETS,
   type ViewerRef,
 } from "./viewer-tools";
@@ -199,6 +200,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   let playTimer = 0;
   let compareMenuOpen = false;
   let compareKeyPrefix = "";
+  let compareCommit = "";
   let activeCompareSig = "";
 
   document.addEventListener("click", (e) => {
@@ -265,6 +267,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     const cmp = history.compareRequest();
     if (!cmp) {
       compareKeyPrefix = "";
+      compareCommit = "";
       activeCompareSig = "";
       await startWatch(false);
       return;
@@ -285,9 +288,8 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     clearPending();
     watchPending = true;
     compareKeyPrefix = "";
-    activeCompareSig = "";
+    compareCommit = cmp.commit;
     activeCompareSig = sig;
-    compareKeyPrefix = "";
     try {
       const res = await api.hub.rpc<{ root?: string }>("viewer.compare", {
         thread: threadId,
@@ -300,6 +302,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       const root = typeof res?.root === "string" ? res.root : "";
       const kindNum = page === "schematic" ? "1" : "0";
       compareKeyPrefix = root ? `${kindNum}|${root}|diff\n` : `${kindNum}|`;
+      compareCommit = cmp.commit;
       watchPending = false;
       const queued = pendingQueue;
       clearPending();
@@ -317,6 +320,8 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       if (gen !== watchGen) return;
       watchPending = false;
       compareKeyPrefix = "";
+      compareCommit = "";
+      activeCompareSig = "";
       clearPending();
       setBanner(err instanceof Error ? err.message : String(err), true);
     }
@@ -977,6 +982,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
 
     watchPending = true;
     compareKeyPrefix = "";
+    compareCommit = "";
     activeCompareSig = "";
     try {
       const res = await api.hub.rpc<{ keys?: string[] }>("viewer.watch", params);
@@ -1008,9 +1014,10 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       return;
     }
     if (!activeKeys.has(key)) {
-      if (compareKeyPrefix && key.startsWith(compareKeyPrefix)) {
+      if (matchesCompareKey(key, compareKeyPrefix, compareCommit)) {
         activeKeys.add(key);
         compareKeyPrefix = "";
+        compareCommit = "";
       } else {
         return;
       }
@@ -1036,9 +1043,10 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     const key = typeof map.key === "string" ? map.key : "";
     if (!key) return;
     if (!activeKeys.has(key)) {
-      if (compareKeyPrefix && key.startsWith(compareKeyPrefix)) {
+      if (matchesCompareKey(key, compareKeyPrefix, compareCommit)) {
         activeKeys.add(key);
         compareKeyPrefix = "";
+        compareCommit = "";
       } else {
         return;
       }
@@ -1137,6 +1145,9 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       watchPending = false;
       stopHistoryPlay();
       compareMenuOpen = false;
+      compareKeyPrefix = "";
+      compareCommit = "";
+      activeCompareSig = "";
       history.goLive();
       solidBarEl.hidden = true;
       historyBarEl.hidden = true;
