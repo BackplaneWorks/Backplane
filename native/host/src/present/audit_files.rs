@@ -10,4 +10,12 @@ pub mod kicad { pub mod canonical { pub fn design_root(root: &str) -> String { r
     pub fn read(_: &str) -> Files { Files { pcb: String::new(), sch: String::new() } }
     pub fn is_altium(_: &Files) -> bool { false } } pub use super::follow_real as follow; }
 #[path="../kicad/follow.rs"] #[allow(dead_code)] pub mod follow_real;
+/// What follow.rs's embedded-KiCad part reaches for (its `super::`): the audit has no KiCad, so no pane holds one and nothing is sent.
+#[allow(dead_code)] pub mod ipc { pub fn pro_of(_: &str) -> String { String::new() } }
+#[allow(dead_code)] pub mod embed { use serde_json::Value; #[derive(Clone)] pub struct GuiRoute { pub pro: String }
+    pub fn kind_of_fk_val(_: &Value) -> &'static str { "" } pub fn pane_client(_: &str) -> Option<u64> { None } pub fn norm_pro_key(p: &str) -> String { p.to_string() }
+    pub fn gui_route(_: &str) -> Option<GuiRoute> { None } pub async fn gui_call(_: &GuiRoute, _: &str, _: Value) -> Value { Value::Null } pub fn session_state(_: &str) -> Value { Value::Null } }
+#[allow(dead_code)] pub mod watch { pub fn pane_frame_of(_: u64, _: &str) -> Option<String> { None } }
+#[allow(dead_code)] pub mod xprobe { pub fn has_select_items(_: &super::embed::GuiRoute) -> bool { false } }
+#[allow(dead_code)] pub mod coedit { pub fn person_selection_at(_: &str, _: &str) -> Option<std::time::Instant> { None } }
 #[path="../kicad/gerber/names.rs"] #[allow(dead_code)] pub mod gerber_names;
