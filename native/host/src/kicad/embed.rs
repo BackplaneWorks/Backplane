@@ -5607,22 +5607,26 @@ mod tests {
         })).await;
         assert_eq!(rep[0]["ok"], json!(true), "{rep:?}");
         let key = info_key(&pro.to_string_lossy());
-        let mut kpid = 0u32;
-        for _ in 0..80 {
-            if let Some(txt) = hub.info_now()[&key].as_str() {
-                if let Ok(v) = serde_json::from_str::<Value>(txt) {
-                    if let Some(p) = v["pid"].as_u64().filter(|p| *p > 0) {
-                        kpid = p as u32;
-                        if sub_pid_file.is_file() { break }
-                    }
+        // Polled until both are there, bounded: the hub publishes KiCad's pid as it starts, and the stand-in's shell writes the sub-child's pid
+        // later. Its redirect creates the file before printf fills it, so a file that exists may still be empty: wait for a pid that parses.
+        let (mut kpid, mut sub_pid, mut sub_raw) = (0u32, 0u32, String::new());
+        let t0 = std::time::Instant::now();
+        while (kpid == 0 || sub_pid == 0) && t0.elapsed() < Duration::from_secs(10) {
+            if kpid == 0 {
+                if let Some(v) = hub.info_now()[&key].as_str().and_then(|t| serde_json::from_str::<Value>(t).ok()) {
+                    kpid = v["pid"].as_u64().unwrap_or(0) as u32;
                 }
             }
-            tokio::time::sleep(Duration::from_millis(25)).await;
+            sub_raw = std::fs::read_to_string(&sub_pid_file).unwrap_or_default();
+            sub_pid = sub_raw.trim().parse().unwrap_or(0);
+            if kpid == 0 || sub_pid == 0 { tokio::time::sleep(Duration::from_millis(25)).await; }
         }
-        assert!(kpid > 0, "stock KiCad stand-in did not publish pid");
-        let sub_pid: u32 = std::fs::read_to_string(&sub_pid_file).unwrap_or_default().trim().parse().unwrap_or(0);
-        assert!(sub_pid > 0, "stock KiCad stand-in sub-child pid missing");
-        std::fs::write(base.join("ready"), format!("{kpid} {sub_pid}\n")).unwrap();
+        assert!(kpid > 0, "stock KiCad stand-in did not publish its pid in the hub's info within 10 s");
+        assert!(sub_pid > 0, "stock KiCad stand-in's sub-child pid never appeared in {} within 10 s (last read {sub_raw:?})", sub_pid_file.display());
+        // written whole, then renamed: the parent never reads it half written
+        let tmp = base.join("ready.tmp");
+        std::fs::write(&tmp, format!("{kpid} {sub_pid}\n")).unwrap();
+        std::fs::rename(&tmp, base.join("ready")).unwrap();
         std::future::pending::<()>().await;
     }
 
@@ -5641,19 +5645,22 @@ mod tests {
             .spawn()
             .expect("spawn probe hub");
         let hub_pid = hub_child.id();
+        // Polled until it holds both pids (the probe renames it in whole, but a file that exists is never taken for one that is complete),
+        // bounded, and given up as soon as the probe hub has ended.
         let t0 = Instant::now();
-        while !ready.is_file() && t0.elapsed() < Duration::from_secs(15) {
+        let mut nums: Vec<u32> = Vec::new();
+        let mut text = String::new();
+        while t0.elapsed() < Duration::from_secs(15) {
+            text = std::fs::read_to_string(&ready).unwrap_or_default();
+            nums = text.split_whitespace().filter_map(|s| s.parse().ok()).filter(|p| *p > 0).collect();
+            if nums.len() >= 2 || hub_child.try_wait().ok().flatten().is_some() { break }
             std::thread::sleep(Duration::from_millis(25));
         }
-        let text = match std::fs::read_to_string(&ready) {
-            Ok(t) => t,
-            Err(_) => {
-                let _ = hub_child.kill();
-                let out = hub_child.wait_with_output().unwrap();
-                panic!("probe hub did not reach ready: {}", String::from_utf8_lossy(&out.stderr));
-            }
-        };
-        let nums: Vec<u32> = text.split_whitespace().filter_map(|s| s.parse().ok()).collect();
+        if nums.len() < 2 {
+            let _ = hub_child.kill();
+            let out = hub_child.wait_with_output().unwrap();
+            panic!("probe hub did not write KiCad's and its sub-child's pids to {} within 15 s (last read {text:?}): {}", ready.display(), String::from_utf8_lossy(&out.stderr));
+        }
         let (kpid, sub_pid) = (nums[0], nums[1]);
         assert!(crate::plat::proc::alive(kpid) && crate::plat::proc::alive(sub_pid), "stock KiCad and sub-child should be alive before SIGTERM");
 
