@@ -980,7 +980,7 @@ impl Backplane {
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::AccountsPage => { if !crate::screens::settings::is_open(self) { self.open_settings(cx); } self.screens.settings_ui.device = false; self.screens.settings_ui.accounts = true; crate::screens::accounts::open_page(self, cx); self.ui_epoch += 1; "accounts page".into() }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::ModelChip => { self.win_op = Some("model"); self.ui_epoch += 1; "open model menu".into() }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::SettingsPage(p) if p.starts_with('@') => { // the three pages that are not the hub's: this device, hubs, accounts
-                let ui = &mut self.screens.settings_ui; ui.device = p == "@device"; ui.hubs = p == "@hubs"; ui.accounts = p == "@accounts"; self.ui_epoch += 1; cx.notify(); format!("settings page {p}") }
+                let ui = &mut self.screens.settings_ui; ui.device = p == "@device"; ui.hubs = p == "@hubs"; ui.accounts = p == "@accounts"; self.ui_epoch += 1; cx.notify(); /* i18n-ok: scripted e2e metric, not drawn */ format!("settings page {p}") }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::OpenPalette => { self.palette_open(cx); self.ui_epoch += 1; "open palette".into() }
             Ctl::ToggleTerminal => {
                 let entity = cx.entity();
