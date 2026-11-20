@@ -405,14 +405,24 @@ pub fn masks(sch: bool, off: u32, f: Focus) -> (u32, u32) {
 pub fn pick(f: Focus, l: u32) -> Focus { if f.on() && f.active == l { Focus { active: l, mode: 0 } } else { Focus { active: l, mode: if f.mode == 0 { 1 } else { f.mode } } } }
 /// Lyr.first by what the plot draws: the first layer in the list's order with art on it (`present`, a bit each, 0 when the plot is not known), else front copper or the schematic's first layer.
 fn first_art(sch: bool, present: u32) -> u32 {
+    first_art_kind(if sch { "schematic" } else { "board" }, present)
+}
+fn first_art_kind(kind: &str, present: u32) -> u32 {
     let has = |l: &u32| present & bit(*l) != 0;
-    let first = if sch { (0..SCH_LAYERS.len() as u32).find(has) } else { BOARD_LAYERS.iter().map(|x| x.0).find(has) };
-    first.unwrap_or(if sch { 0 } else { 12 })
+    let first = match kind {
+        "schematic" => (0..SCH_LAYERS.len() as u32).find(has),
+        "gerbers" => GERBER_LAYERS.iter().chain(GERBER_MORE.iter()).map(|x| x.0).find(has),
+        _ => BOARD_LAYERS.iter().map(|x| x.0).find(has),
+    };
+    first.unwrap_or(if kind == "schematic" { 0 } else { 12 })
+}
+fn set_mode_kind(kind: &str, f: Focus, mode: u32, present: u32) -> Focus {
+    let bare = f.active == NONE || (present != 0 && present & bit(f.active) == 0);
+    Focus { active: if bare { first_art_kind(kind, present) } else { f.active }, mode: mode.min(2) }
 }
 /// Lyr.set: All / Dim / Only (the first layer with art is active when none is, or when the one kept has no art on this plot).
 pub fn set_mode(sch: bool, f: Focus, mode: u32, present: u32) -> Focus {
-    let bare = f.active == NONE || (present != 0 && present & bit(f.active) == 0);
-    Focus { active: if bare { first_art(sch, present) } else { f.active }, mode: mode.min(2) }
+    set_mode_kind(if sch { "schematic" } else { "board" }, f, mode, present)
 }
 /// Lyr.cycle: Ctrl+H, as in KiCad: the layers other than the active one as they are, dimmed, hidden, and around again.
 pub fn cycle(sch: bool, f: Focus, present: u32) -> Focus { set_mode(sch, f, if f.mode == 2 { 0 } else { f.mode + 1 }, present) }
@@ -587,13 +597,13 @@ fn layer_fields(o: &mut serde_json::Map<String, Value>, kind: &str, off: u32, f:
 /// `action`: "" (as they are), toggle, pick, mode, cycle or reset; `present`: the layers the plot on show has, a bit each. None for another kind or action.
 pub fn layer_reply(kind: &str, present: u32, off: u32, focus: &str, action: &str, value: &str) -> Option<Value> {
     if !matches!(kind, "board" | "schematic" | "gerbers") { return None }
-    let sch = kind == "schematic"; let (mut off, mut f) = (off, Focus::read(focus)); let v = value.trim().parse::<u32>();
+    let (mut off, mut f) = (off, Focus::read(focus)); let v = value.trim().parse::<u32>();
     match action {
         "" => {}
         "toggle" => off ^= bit(v.ok().filter(|l| *l < 31)?),
         "pick" => f = pick(f, v.ok()?),
-        "mode" => f = set_mode(sch, f, v.ok()?, present),
-        "cycle" => f = cycle(sch, f, present),
+        "mode" => f = set_mode_kind(kind, f, v.ok()?, present),
+        "cycle" => f = set_mode_kind(kind, f, if f.mode == 2 { 0 } else { f.mode + 1 }, present),
         "reset" => { off = 0; f = Focus { active: NONE, mode: 0 }; }
         _ => return None,
     }

@@ -1153,3 +1153,45 @@ async fn socket_with_browser_drops_in_flight_handle_reply_when_disabled_mid_call
     assert!(matches!(next, None | Some(Ok(Message::Close(_))) | Some(Err(_))), "in-flight reply must not be sent after disable, got {next:?}");
     let _ = tokio::time::timeout(Duration::from_secs(1), srv).await.unwrap();
 }
+
+#[tokio::test]
+async fn viewer_rail_omits_split_for_browser_only() {
+    let base = crate::plat::tmp::dir("rail-principal-split");
+    let proj = base.join("proj");
+    std::fs::create_dir_all(&proj).unwrap();
+    let root = proj.to_string_lossy().into_owned();
+    let more = format!(
+        "{}\n{}\n{}\n",
+        json!({"$":"SettingSet","key":"web.enabled","value":"1","at":1700000040}),
+        json!({"$":"ProjectCreated","id":"pr","title":"rail","root":root,"at":1700000041}),
+        json!({"$":"ThreadCreated","id":"tr","project":"pr","title":"Rail","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000042}),
+    );
+    let (hub, port) = up_with("rail-principal-split", &more).await;
+    // Native/phone principal keeps `split` in viewer.rail.
+    let mut native_ws = open(port, "&enc=json").await;
+    let rn = ask(&mut native_ws, 1, "viewer.rail", json!({"thread":"tr","page":"board"})).await;
+    assert_eq!(rn["ok"], true, "{rn}");
+    assert!(rn["result"]["rail"].as_array().unwrap().iter().any(|x| x["id"] == "split"), "native/phone rail must keep split: {rn}");
+
+    // Browser principal omits `split` in viewer.rail.
+    let (reg, _routes) = crate::net::start::open(&hub.hub.cfg.home, "127.0.0.1", 0).unwrap();
+    let (req_json, poll_cookie) = reg.browser_request("person@example.com", "Rail Browser").unwrap();
+    assert!(reg.browser_decide(req_json["id"].as_str().unwrap(), true));
+    let session_cookie = reg.browser_wait("person@example.com", &poll_cookie).await.unwrap().unwrap();
+    let device_id = reg.browser_verify("person@example.com", &session_cookie, None, false).unwrap();
+
+    let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+    let h2 = hub.hub.clone();
+    let srv = tokio::spawn(async move { socket_with(h2, server_io, true, Principal::Browser { device_id }, "bp.ts.net".into()).await });
+    let (mut bws, _) = tokio_tungstenite::client_async("ws://bp.ts.net/ws?data=1&enc=json", client_io).await.unwrap();
+    let _hello: Value = serde_json::from_str(&bws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+    bws.send(Message::Text(json!({"id":2,"m":"viewer.rail","p":{"thread":"tr","page":"board"}}).to_string().into())).await.unwrap();
+    let rb: Value = serde_json::from_str(&tokio::time::timeout(Duration::from_secs(2), bws.next()).await.unwrap().unwrap().unwrap().into_text().unwrap()).unwrap();
+    assert_eq!(rb["ok"], true, "{rb}");
+    assert!(!rb["result"]["rail"].as_array().unwrap().iter().any(|x| x["id"] == "split"), "browser rail must omit split: {rb}");
+    assert!(rb["result"]["rail"].as_array().unwrap().iter().any(|x| x["id"] == "board"), "browser rail keeps other entries: {rb}");
+    drop(bws);
+    let _ = tokio::time::timeout(Duration::from_secs(1), srv).await;
+    drop(hub);
+    let _ = std::fs::remove_dir_all(&base);
+}

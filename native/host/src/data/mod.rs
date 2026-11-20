@@ -458,7 +458,7 @@ fn attachment_get(hub: &Hub, p: &Value) -> Result<Value, Value> {
     Ok(json!({"mime":mime_of(file),"data":base64::engine::general_purpose::STANDARD.encode(bytes)}))
 }
 
-async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value, Value> {
+async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool) -> Result<Value, Value> {
     match m {
         "projects.list" => {
             // a machine just linked whose origins are not known yet is asked first (bounded), so its copies are in the merged rows of this answer
@@ -572,7 +572,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
         // Improvements: the projects of every machine a request may go to (searched on the hub) and the last one chosen, as the desktop gets them
         "improvements.projects" | "improvements.project" => Ok(rpc(hub, c, m, p.clone()).await?["result"].clone()),
         "turn.interrupt" => { rpc(hub, c, "turn.interrupt", json!({"thread":s(p, "thread")})).await?; Ok(json!({})) }
-        _ => match ext::call(hub, c, m, p).await { Some(r) => r, None => Err(err("unknown method")) },
+        _ => match ext::call(hub, c, m, p, is_browser).await { Some(r) => r, None => Err(err("unknown method")) },
     }
 }
 
@@ -785,6 +785,10 @@ pub fn phone_info_frame(v: &Value) -> Option<Value> {
 pub fn phone_info(key: &str) -> bool { key == "hub.offer" || key.starts_with("mgmt.") || key.starts_with("kicad.checks.") || key.starts_with("review.") }
 
 async fn handle(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, v: &Value) -> Value {
+    handle_for(hub, c, subs, v, false).await
+}
+
+async fn handle_for(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, v: &Value, is_browser: bool) -> Value {
     let (id, m, p) = (v["id"].clone(), s(v, "m"), v.get("p").cloned().unwrap_or(Value::Null));
     let res = match m {
         "subscribe" => match (s(&p, "topic"), s(&p, "thread")) {
@@ -797,7 +801,7 @@ async fn handle(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, v: &Value) -> Val
             _ => Err(err("topic: lists, thread or sub")),
         },
         "unsubscribe" => { let n = p["sub"].as_u64().unwrap_or(0); subs.subs.retain(|(i, _)| *i != n); Ok(json!({})) }
-        _ => match term::call(hub, c.client, &mut subs.terms, m, &p).await { Some(r) => r, None => call(hub, c, m, &p).await },
+        _ => match term::call(hub, c.client, &mut subs.terms, m, &p).await { Some(r) => r, None => call(hub, c, m, &p, is_browser).await },
     };
     match res { Ok(r) => json!({"t":"reply","id":id,"ok":true,"result":r}), Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}) }
 }
@@ -932,15 +936,16 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
                     }
                 }
                 if waits_far(&v) {
+                    let is_browser = browser.is_some();
                     let (hub, late, id, m, p) = (hub.clone(), late_tx.clone(), v["id"].clone(), v["m"].as_str().unwrap_or("").to_string(), v.get("p").cloned().unwrap_or(Value::Null));
                     let mut c2 = Conn { local_view_socket: false, sent: vec![], client: conn.client, gen: conn.gen.clone(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
                     tokio::spawn(async move {
-                        let res = match term::far_wait(&m, &p) { true => term::far_call(&hub, c2.client, &m, &p).await, false => call(&hub, &mut c2, &m, &p).await };
+                        let res = match term::far_wait(&m, &p) { true => term::far_call(&hub, c2.client, &m, &p).await, false => call(&hub, &mut c2, &m, &p, is_browser).await };
                         let _ = late.send(match res { Ok(r) => json!({"t":"reply","id":id,"ok":true,"result":r}), Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}) });
                     });
                     continue
                 }
-                let r = handle(&hub, &mut conn, &mut subs, &v).await;
+                let r = handle_for(&hub, &mut conn, &mut subs, &v, browser.is_some()).await;
                 if !send_frame(&mut tx, &hub, browser.as_ref(), conn.client, pack(&r, json_mode)).await? { return Ok(()) }
             }
             r = late_rx.recv() => {
