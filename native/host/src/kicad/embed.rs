@@ -1126,6 +1126,8 @@ pub fn bound_kill(s: &Session) -> Result<(), String> {
     if !s.dialogs.is_empty() { return Err(format!("a dialog of KiCad's is up ({})", s.dialogs.join(", "))) }
     Ok(())
 }
+/// Whether KiCad refused a Close (an answer with its status, not ok), as against no answer at all (closed, timed out: going or hung).
+pub fn close_refused(o: &Value) -> bool { o["ok"] != true && o["status"].as_str().is_some_and(|t| !t.is_empty()) }
 /// What a leave or back did (`Session::leave`).
 #[derive(Debug, PartialEq, Eq)]
 pub enum LeaveStep { NotHolder, Left, Back(String), Same }
@@ -2102,11 +2104,19 @@ impl Actor {
             // is a hang, ended (Msg::CloseBound); every other close is the close-wait PR's
             let bound = matches!(why, "idle" | "evicted").then(|| (me.clone(), vs_snap.pro.clone(), vs_snap.gen, vs_snap.pid, std::time::Instant::now()));
             tokio::spawn(async move {
-                let _ = raw_on(&me, &vs_snap.sock, &vs_snap.desc, "kiapi.backplane.embed.Close", json!({"mode":"CM_FAIL_IF_MODIFIED"}), 10000).await;
+                let o = raw_on(&me, &vs_snap.sock, &vs_snap.desc, "kiapi.backplane.embed.Close", json!({"mode":"CM_FAIL_IF_MODIFIED"}), 10000).await;
+                // refused by KiCad (a status: it became modified since it was chosen, or its task holds it): it keeps running, and is not
+                // closing any more, or every later Edit would wait on a close that never comes (closing_not_reused). No answer at all (a
+                // KiCad already going, or hung) is no refusal: the bound below takes it
+                if close_refused(&o) {
+                    eprintln!("kicad embed: {}: its {} close was refused ({}): it keeps running", vs_snap.pro, vs_snap.stop_reason, o["error"].as_str().unwrap_or(""));
+                    let _ = me.send(Msg::CloseRefused { pro: vs_snap.pro.clone(), gen: vs_snap.gen });
+                    return
+                }
+                if let Some((me, pro, gen, pid, since)) = bound.filter(|b| b.3 > 0) {
+                    tokio::time::sleep(idle_close_bound()).await; let _ = me.send(Msg::CloseBound { pro, gen, pid, since });
+                }
             });
-            if let Some((me, pro, gen, pid, since)) = bound.filter(|b| b.3 > 0) {
-                tokio::spawn(async move { tokio::time::sleep(idle_close_bound()).await; let _ = me.send(Msg::CloseBound { pro, gen, pid, since }); });
-            }
         } else {
             Self::kill_pid(vs_snap.pid);
         }
@@ -2687,7 +2697,11 @@ impl Actor {
                     Err(why) => eprintln!("kicad embed: {pro}: pid {pid} still running {ms} ms after the hub's {} close, not killed: {why}", s.stop_reason),
                 }
             }
-            Msg::CloseRefused { pro, gen } => { if let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.is_live()) { s.stop_reason.clear(); } }
+            Msg::CloseRefused { pro, gen } => {
+                let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.is_live()) else { return };
+                let was = s.closing; s.stop_reason.clear(); s.closing = false;
+                if was { let snap = s.clone(); self.publish(&snap, None); }
+            }
             Msg::FrameOpen { pro, gen, kind, open } => {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen) else { return };
                 // the library editor being opened closed before it came: nothing is on its way any more
@@ -5556,6 +5570,13 @@ mod tests {
         let m: HashMap<String, Session> = [mk("/p/agent.kicad_pro", 0, "", now - 10), mk("/p/old.kicad_pro", 0, "", now - 301),
             mk("/p/left-agent.kicad_pro", 5, "thread", now - 10), mk("/p/left-old.kicad_pro", 5, "thread", now - 301)].into_iter().collect();
         assert_eq!(idle_victims(&m, now, idle), ["/p/left-old.kicad_pro", "/p/old.kicad_pro"]);
+    }
+    #[test] fn a_refused_idle_close_ends_the_closing_but_no_answer_does_not() {
+        assert!(close_refused(&json!({"ok": false, "status": "AS_BUSY", "error": "a task is running: DRC"})));
+        assert!(close_refused(&json!({"ok": false, "status": "AS_UNHANDLED", "error": "modified"})));
+        assert!(!close_refused(&json!({"ok": true})));
+        assert!(!close_refused(&json!({"ok": false, "error": "no reply", "fallback": true})), "no answer: going or hung, the bound takes it");
+        assert!(!close_refused(&json!({"ok": false, "error": "KiCad IPC connection failed"})));
     }
     #[test] fn an_attach_never_reuses_a_kicad_that_is_closing() {
         let ready = || Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0).spawned(41);
