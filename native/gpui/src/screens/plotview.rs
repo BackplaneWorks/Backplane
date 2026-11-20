@@ -113,16 +113,6 @@ fn finish_tess(running: &std::cell::Cell<bool>, current: bool) -> bool {
     current
 }
 
-#[cfg(test)]
-#[test]
-fn stale_tessellation_releases_its_originating_slot() {
-    let slot = PlotView::default();
-    let job = slot.tess_ahead.clone();
-    assert!(!job.replace(true));
-    assert!(!finish_tess(&job, false));
-    assert!(!slot.tess_ahead.replace(true));
-}
-
 fn color(c: &Chunk, factor: f32) -> Hsla { let mut r = rgb(c.color); r.a = c.alpha * factor; r.into() }
 
 /// A chunk's stroke width in pixels: the hub's width is in micrometres on the capsule (radius = width / 2).
@@ -711,6 +701,14 @@ pub fn report_state(app: &mut Backplane) {
 mod tests {
     use super::*;
     use core::prelude::v1::test;
+    #[test]
+    fn stale_tessellation_releases_its_originating_slot() {
+        let slot = PlotView::default();
+        let job = slot.tess_ahead.clone();
+        assert!(!job.replace(true));
+        assert!(!finish_tess(&job, false));
+        assert!(!slot.tess_ahead.replace(true));
+    }
     #[test] fn the_plan_is_drawn_on_the_board_only_while_its_panel_is_open() {
         assert!(plan_shown(&serde_json::json!({"open": "plan"})));
         for st in [serde_json::json!({"open": ""}), serde_json::json!({"open": "bom"}), serde_json::Value::Null] { assert!(!plan_shown(&st), "{st}"); }
