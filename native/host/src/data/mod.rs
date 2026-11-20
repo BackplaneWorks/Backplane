@@ -23,7 +23,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -426,7 +426,16 @@ fn store_attachments(hub: &Hub, thread: &str, list: &Value) -> Result<(Vec<Value
     }
     Ok((meta, paths))
 }
-async fn send_message(hub: &Arc<Hub>, c: &mut Conn, thread: &str, text: &str, client_id: &str, attachments: &Value, voice: &Value) -> Result<Value, Value> {
+/// Feature `reply`: `replyTo {id, text}` on a send is the desktop's Reply (session/composer.rs): the message answered and its text as the phone shows it. The hub keeps the
+/// `<in_reply_to msg=… chars=…>` block ahead of what the person wrote (bots/reply.rs `wrap`), so the agent reads the same as from the desktop. (the block, the entry's `replyTo`)
+fn reply_of(reply: &Value, body: &str) -> Option<(String, Value)> {
+    let (id, quoted) = (reply["id"].as_str().unwrap_or("").trim(), reply["text"].as_str().unwrap_or(""));
+    if id.is_empty() || quoted.trim().is_empty() || body.trim().is_empty() || id.contains(char::is_whitespace) || id.contains('>') { return None }
+    let full = crate::bots::reply::wrap(id, quoted, body);
+    let q = crate::bots::reply::of(&full).map(|(_, q, _)| q).unwrap_or_default();
+    Some((full, json!({"id": id, "quote": q.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("")})))
+}
+async fn send_message(hub: &Arc<Hub>, c: &mut Conn, thread: &str, text: &str, client_id: &str, attachments: &Value, voice: &Value, reply: &Value) -> Result<Value, Value> {
     let has = attachments.as_array().map_or(false, |a| !a.is_empty());
     if text.trim().is_empty() && !has { return Err(err("empty message")) }
     // a command of the composer is never a message: an app that does not know `composer.run` would post a side question to the thread, or a secret to the log
@@ -436,13 +445,15 @@ async fn send_message(hub: &Arc<Hub>, c: &mut Conn, thread: &str, text: &str, cl
     if far { if !hub.far().map_or(false, |f| f.has(thread)) { return Err(err("unknown thread")) } if has { return Err(err("Images go to threads on this machine only.")) } }
     else if !hub.model().await.threads.get(thread).map_or(false, |t| !t.deleted) { return Err(err("unknown thread")) }
     let (meta, paths) = store_attachments(hub, thread, attachments)?;
+    let rto = reply_of(reply, text); let body = text; let text = rto.as_ref().map_or(text, |(f, _)| f.as_str());
     let agent_text = if paths.is_empty() { String::new() } else { format!("{}{}{}", text, if text.is_empty() { "" } else { "\n\n" }, paths.iter().map(|p| format!("[attachment: {p}]")).collect::<Vec<_>>().join("\n")) };
     let msg = if client_id.is_empty() { format!("m{}-{}", now_ms(), hub.fresh_client()) } else { client_id.to_string() };
     let mut p = json!({"thread":thread,"text":text,"msg":msg});
     if !meta.is_empty() { p["attachments"] = json!(meta); p["agentText"] = json!(agent_text) }
     if voice.is_object() { p["voice"] = voice.clone() } // dictated (voice/mark.rs): the agent is told
     rpc(hub, c, "turn.start", p).await?;
-    let mut e = json!({"id":msg,"kind":"user","text":text,"at":now_ms()});
+    let mut e = json!({"id":msg,"kind":"user","text":body,"at":now_ms()});
+    if let Some((_, r)) = &rto { e["replyTo"] = r.clone() }
     if voice.is_object() { e["voice"] = voice.clone() }
     if !meta.is_empty() { e["attachments"] = json!(meta) }
     if !client_id.is_empty() { e["clientId"] = json!(client_id); remember(client_id, &e) }
@@ -586,12 +597,12 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool
             if !s(p, "effort").is_empty() { rpc(hub, c, "thread.effort", json!({"thread":id,"effort":s(p, "effort")})).await?; }
             if !s(p, "speed").is_empty() { rpc(hub, c, "thread.speed", json!({"thread":id,"speed":s(p, "speed")})).await?; }
             // (a thread just made on a linked machine is not in the mirror yet: its first message goes straight there)
-            if !s(p, "text").is_empty() { if far { rpc(hub, c, "turn.start", json!({"thread":id,"text":s(p, "text"),"msg":format!("m{}-{}", now_ms(), hub.fresh_client())})).await?; } else { send_message(hub, c, &id, s(p, "text"), "", &Value::Null, &Value::Null).await?; } }
+            if !s(p, "text").is_empty() { if far { rpc(hub, c, "turn.start", json!({"thread":id,"text":s(p, "text"),"msg":format!("m{}-{}", now_ms(), hub.fresh_client())})).await?; } else { send_message(hub, c, &id, s(p, "text"), "", &Value::Null, &Value::Null, &Value::Null).await?; } }
             let g = hub.model().await; let asks = open_ask_counts(hub);
             if far { return Ok(json!({"thread":far_made(hub, &g, &id, project, s(p, "title"))})) }
             thread_json(hub, &g, &id, &asks).map(|t| json!({"thread":t})).ok_or_else(|| err("no thread was made"))
         }
-        "message.send" => Ok(json!({"entry":send_message(hub, c, s(p, "thread"), s(p, "text"), s(p, "clientId"), p.get("attachments").unwrap_or(&Value::Null), p.get("voice").unwrap_or(&Value::Null)).await?})),
+        "message.send" => Ok(json!({"entry":send_message(hub, c, s(p, "thread"), s(p, "text"), s(p, "clientId"), p.get("attachments").unwrap_or(&Value::Null), p.get("voice").unwrap_or(&Value::Null), p.get("replyTo").unwrap_or(&Value::Null)).await?})),
         "attachment.get" => attachment_get(hub, p),
         "message.image" => message_image(hub, p).await,
         "ask.answer" => { rpc(hub, c, "ask.answer", json!({"id":s(p, "ask"),"answer":s(p, "answer")})).await?; Ok(json!({})) }
