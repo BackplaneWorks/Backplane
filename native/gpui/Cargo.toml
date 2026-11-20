@@ -44,6 +44,7 @@ rustls-native-certs = "0.8"
 unicode-segmentation = "1"
 # a document's SVG pictures (README badges) drawn here, sharp and in their own colours: the version and features gpui already builds
 resvg = { version = "0.45.0", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb = { version = "0.13", default-features = false, features = ["shape", "xfixes"] }

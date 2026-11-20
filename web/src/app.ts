@@ -260,12 +260,37 @@ function mountApp(): void {
   let olderCursor: string | null = null;
   let activeRailKind = "";
   let viewerController: ReturnType<ViewerMountFn> | null = null;
+  const THREAD_CACHE_MAX = 20;
+  let shellHashes: Record<string, string> = {};
   const threadCache = new Map<string, {
     entries: EntryItem[];
+    ids: string[];
     olderCursor: string | null;
     review: ReviewBar | null;
     unanswered: UnansweredNotice | null;
+    rail: RailEntry[];
+    hashes: Record<string, string>;
   }>();
+  function putThreadCache(
+    id: string,
+    val: {
+      entries: EntryItem[];
+      ids: string[];
+      olderCursor: string | null;
+      review: ReviewBar | null;
+      unanswered: UnansweredNotice | null;
+      rail: RailEntry[];
+      hashes: Record<string, string>;
+    },
+  ): void {
+    threadCache.delete(id);
+    threadCache.set(id, val);
+    while (threadCache.size > THREAD_CACHE_MAX) {
+      const oldest = threadCache.keys().next().value;
+      if (oldest !== undefined) threadCache.delete(oldest);
+      else break;
+    }
+  }
 
   const sidebar = new SidebarView(sidebarEl, {
     onSelectThread: (id) => {
@@ -772,7 +797,46 @@ function mountApp(): void {
       } catch { /* ignore */ }
     }
 
-    if (hub.hasFeature("sections")) {
+    if (hub.hasFeature("shell")) {
+      const sRes = await hub.rpc<{
+        projects?: ProjectItem[];
+        threads?: ThreadItem[];
+        sections?: SidebarSection[] | { sections?: SidebarSection[] };
+        removed?: string[];
+        h?: Record<string, string>;
+        sub?: SubId;
+      }>("shell.sync", { have: shellHashes, settled: 25 });
+      const removed = new Set(sRes.removed ?? []);
+      const updatedPids = new Set((sRes.projects ?? []).map((p) => p.id));
+      if (removed.size > 0 || updatedPids.size > 0) {
+        projects = [
+          ...projects.filter((p) => !removed.has(p.id) && !updatedPids.has(p.id)),
+          ...(sRes.projects ?? []),
+        ];
+        threads = [
+          ...threads.filter((t) => !removed.has(t.project) && !updatedPids.has(t.project)),
+          ...(sRes.threads ?? []),
+        ];
+      } else if (Array.isArray(sRes.threads) && sRes.threads.length > 0) {
+        const byId = new Map(threads.map((t) => [t.id, t]));
+        for (const t of sRes.threads) byId.set(t.id, t);
+        threads = Array.from(byId.values());
+      }
+      if (sRes.sections !== undefined) {
+        const list = Array.isArray(sRes.sections)
+          ? sRes.sections
+          : Array.isArray(sRes.sections?.sections)
+            ? sRes.sections.sections
+            : null;
+        if (list) {
+          sections = list;
+          syncProjectsFromSections(list);
+        }
+      }
+      if (sRes.h) shellHashes = sRes.h;
+      sidebar.setData(projects, threads, bots, rooms);
+      sidebar.setSections(sections, bots, rooms);
+    } else if (hub.hasFeature("sections")) {
       const [secRes, tRes] = await Promise.all([
         hub.rpc<{ sections?: SidebarSection[] }>("sidebar.sections", {
           open: Array.from(openSectionFolds),
@@ -806,6 +870,7 @@ function mountApp(): void {
         sidebar.setSections(null, bots, rooms);
         sidebar.setData(projects, threads, bots, rooms);
       }
+      await hub.rpc("subscribe", { topic: "lists" }).catch(() => {});
     } else {
       sections = null;
       const [pRes, tRes] = await Promise.all([
@@ -816,9 +881,8 @@ function mountApp(): void {
       threads = tRes.threads ?? [];
       sidebar.setSections(null, bots, rooms);
       sidebar.setData(projects, threads, bots, rooms);
+      await hub.rpc("subscribe", { topic: "lists" }).catch(() => {});
     }
-
-    await hub.rpc("subscribe", { topic: "lists" }).catch(() => {});
 
     let targetId = selectedThreadId;
     if (!targetId) {
@@ -854,11 +918,14 @@ function mountApp(): void {
       const held = chat.getEntries();
       if (held.length > 0) {
         const prev = threadCache.get(selectedThreadId);
-        threadCache.set(selectedThreadId, {
+        putThreadCache(selectedThreadId, {
           entries: held,
+          ids: prev?.ids ?? held.map((e) => e.id),
           olderCursor,
           review: prev?.review ?? null,
           unanswered: prev?.unanswered ?? null,
+          rail: prev?.rail ?? railItems,
+          hashes: prev?.hashes ?? {},
         });
       }
     }
@@ -879,15 +946,108 @@ function mountApp(): void {
     sidebarEl.classList.remove("bp-sidebar-open");
     updateHeader();
 
-    const th = threads.find((x) => x.id === threadId) ?? null;
+    let th = threads.find((x) => x.id === threadId) ?? null;
     if (cached) {
       chat.setThread(th, cached.entries, Boolean(cached.olderCursor), cached.review, cached.unanswered);
+      railItems = cached.rail;
+      rail.setItems(cached.rail);
     } else {
       chat.setLoading(th);
+      railItems = [];
+      rail.setItems([]);
     }
     composer.setState(true, th?.state === "working");
-    railItems = [];
-    rail.setItems([]);
+
+    if (hub.hasFeature("open")) {
+      const have: Record<string, string> = {};
+      if (cached) {
+        for (const [k, v] of Object.entries(cached.hashes)) have[k] = v;
+        for (const e of cached.entries) {
+          if (e.h) have[e.id] = e.h;
+        }
+      }
+      let res: {
+        sub?: SubId;
+        thread?: ThreadItem;
+        ids?: string[];
+        entries?: EntryItem[];
+        next?: string | null;
+        unanswered?: UnansweredNotice | null;
+        rail?: { rail?: RailEntry[]; items?: RailEntry[]; has?: RailHas } | RailEntry[];
+        h?: Record<string, string>;
+      };
+      try {
+        res = await hub.rpc("thread.open", { thread: threadId, limit: 40, have });
+      } catch (e) {
+        if (gen === threadGen) {
+          const msg = e instanceof Error && e.message ? e.message : "Could not load messages.";
+          chat.setError(th, msg, () => { void openThread(threadId); });
+        }
+        return;
+      }
+      if (gen !== threadGen) {
+        if (res.sub !== undefined && res.sub !== null) {
+          void hub.rpc("unsubscribe", { sub: res.sub }).catch(() => {});
+        }
+        return;
+      }
+      threadSubId = res.sub ?? null;
+      if (res.thread) {
+        th = res.thread;
+        const idx = threads.findIndex((x) => x.id === res.thread!.id);
+        if (idx >= 0) threads[idx] = res.thread;
+        else threads.unshift(res.thread);
+        updateHeader();
+        composer.setState(true, th.state === "working");
+      }
+      if ("next" in res) olderCursor = res.next ?? null;
+
+      const byId = new Map<string, EntryItem>();
+      if (cached) {
+        for (const e of cached.entries) byId.set(e.id, e);
+      }
+      for (const e of res.entries ?? []) byId.set(e.id, e);
+      const ids = res.ids ?? cached?.ids ?? (res.entries ?? []).map((e) => e.id);
+      const entries = ids.map((id) => byId.get(id)).filter((e): e is EntryItem => Boolean(e));
+
+      let nextRail = cached?.rail ?? [];
+      if (res.rail !== undefined) {
+        if (Array.isArray(res.rail)) {
+          nextRail = res.rail;
+        } else {
+          nextRail = Array.isArray(res.rail?.rail)
+            ? res.rail.rail
+            : Array.isArray(res.rail?.items)
+              ? res.rail.items
+              : [];
+          if (res.rail?.has) {
+            viewerController?.reconcileHas?.(res.rail.has);
+            if (activeRailKind && !hasForKind(res.rail.has, activeRailKind)) {
+              closeViewer(true);
+            }
+          }
+        }
+      }
+      railItems = nextRail;
+      rail.setItems(nextRail);
+
+      let review: ReviewBar | null = cached?.review ?? null;
+      if (hub.hasFeature("reviewmode")) {
+        try {
+          const r = await hub.rpc<{ review?: ReviewBar | null }>("thread.review", { thread: threadId });
+          if (gen !== threadGen) return;
+          review = r.review ?? null;
+        } catch { /* ignore */ }
+      }
+      if (gen !== threadGen) return;
+
+      const unanswered = "unanswered" in res ? (res.unanswered ?? null) : (cached?.unanswered ?? null);
+      const hashes = res.h ?? cached?.hashes ?? {};
+      putThreadCache(threadId, { entries, ids, olderCursor, review, unanswered, rail: nextRail, hashes });
+      chat.setThread(th, entries, Boolean(olderCursor), review, unanswered);
+      if (activeRailKind) openViewer(activeRailKind);
+      return;
+    }
 
     let res: {
       thread?: ThreadItem;
@@ -925,7 +1085,15 @@ function mountApp(): void {
 
     const entries = res.entries ?? [];
     const unanswered = res.unanswered ?? null;
-    threadCache.set(threadId, { entries, olderCursor, review, unanswered });
+    putThreadCache(threadId, {
+      entries,
+      ids: entries.map((e) => e.id),
+      olderCursor,
+      review,
+      unanswered,
+      rail: cached?.rail ?? [],
+      hashes: cached?.hashes ?? {},
+    });
     chat.setThread(th, entries, Boolean(olderCursor), review, unanswered);
 
     try {

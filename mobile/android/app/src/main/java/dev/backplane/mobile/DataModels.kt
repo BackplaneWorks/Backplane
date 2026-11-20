@@ -26,6 +26,7 @@ data class DEntry(
     val voice: DVoiceMark? = null, // spoken (data/1 `voice`): the mic on the bubble, the engine and its confidence
     val copy: List<CopyPiece>? = null, // what of a reply or a notice is to copy (feature `copy`, data/1 `copy`); null: the hub said nothing
     val restore: DRestore? = null, // the person's message: the snapshot before the turn it started (data/1 `restore`): Restore to before this
+    val h: String = "", // content hash for thread.open / sub.d resume (docs/PHONE-DATA.md, Phase 1)
 )
 /** Restore to before this (data/1 `restore`): the turn (0: a snapshot from before it was named), its short commit, the short info its confirm shows. */
 data class DRestore(val turn: Long, val commit: String, val info: String)
@@ -101,6 +102,7 @@ fun parseEntry(o: JSONObject) = DEntry(
     voice = o.optJSONObject("voice")?.let(::parseVoiceMark),
     copy = parseCopy(o.optJSONArray("copy")),
     restore = o.optJSONObject("restore")?.let { DRestore(it.lng("turn"), it.str("commit"), it.str("info")) },
+    h = o.str("h"),
 )
 fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("root"), o.optInt("threadCount", 0), o.lng("updatedAt"), o.optInt("waiting", 0), o.optString("icon", "folder"), o.optString("css"), if (o.has("settledCount") && !o.isNull("settledCount")) o.optInt("settledCount") else null,
     parseMark(o.optJSONObject("mark")), o.str("also"), o.optJSONArray("newOn").list { DNewOn(it.str("value"), it.str("label"), it.optBoolean("away")) }, o.str("runsOn"), o.str("key"))

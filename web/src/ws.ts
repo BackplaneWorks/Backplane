@@ -1,5 +1,6 @@
 // data/1 JSON + binary CBOR WebSocket client for Backplane web UI.
 // Authenticates strictly via the HttpOnly __Host-bp_web cookie (never ?token=).
+import { RawInflater } from "./inflate";
 
 export interface HelloFrame {
   t: "hello";
@@ -9,6 +10,7 @@ export interface HelloFrame {
   version: string;
   epoch: string;
   now: number;
+  z?: string;
   features?: string[];
   commands?: Array<{ word: string; label: string; desc: string }>;
   theme?: string;
@@ -40,6 +42,8 @@ export class HubClient {
   private reconnectDelay = 500;
   private reconnectTimer: number | null = null;
   private closed = false;
+  private inflater: RawInflater | null = null;
+  private textDecoder = new TextDecoder();
 
   public hello: HelloFrame | null = null;
   private features = new Set<string>();
@@ -121,27 +125,24 @@ export class HubClient {
 
   private openSocket(): void {
     if (this.closed) return;
+    this.inflater = null;
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${proto}//${window.location.host}/ws?data=1&enc=json`;
+    const url = `${proto}//${window.location.host}/ws?data=1&enc=json&z=deflate`;
     const ws = new WebSocket(url);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
 
-    ws.addEventListener("message", (ev) => {
-      if (ev.data instanceof ArrayBuffer) {
-        for (const fn of this.binaryListeners) fn(ev.data);
-        return;
-      }
-      if (typeof ev.data !== "string") return;
+    const handleJson = (text: string): void => {
       let frame: JsonFrame;
       try {
-        frame = JSON.parse(ev.data) as JsonFrame;
+        frame = JSON.parse(text) as JsonFrame;
       } catch {
         return;
       }
       if (frame.t === "hello") {
         this.hello = frame as HelloFrame;
         this.features = new Set(this.hello.features ?? []);
+        this.inflater = this.hello.z === "deflate" ? new RawInflater() : null;
         this.reconnectDelay = 500;
         this.setState("connected");
       } else if (frame.t === "reply" && typeof frame.id === "number") {
@@ -165,6 +166,43 @@ export class HubClient {
         return;
       }
       for (const fn of this.frameListeners) fn(frame);
+    };
+
+    ws.addEventListener("message", (ev) => {
+      if (ev.data instanceof ArrayBuffer) {
+        if (this.inflater) {
+          let raw: Uint8Array;
+          try {
+            raw = this.inflater.feed(new Uint8Array(ev.data));
+          } catch {
+            // Broken deflate stream: close and reconnect.
+            ws.close();
+            return;
+          }
+          // Binary CBOR plot frame (header 0xA0..0xB7, 0x01, 0x64 "plot") vs JSON text frame.
+          const isPlot =
+            raw.length > 7 &&
+            raw[0] >= 0xa0 &&
+            raw[0] <= 0xb7 &&
+            raw[1] === 1 &&
+            raw[2] === 0x64 &&
+            raw[3] === 0x70 &&
+            raw[4] === 0x6c &&
+            raw[5] === 0x6f &&
+            raw[6] === 0x74;
+          if (isPlot) {
+            const copy = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
+            for (const fn of this.binaryListeners) fn(copy);
+          } else {
+            handleJson(this.textDecoder.decode(raw));
+          }
+          return;
+        }
+        for (const fn of this.binaryListeners) fn(ev.data);
+        return;
+      }
+      if (typeof ev.data !== "string") return;
+      handleJson(ev.data);
     });
 
     ws.addEventListener("close", (ev) => {
