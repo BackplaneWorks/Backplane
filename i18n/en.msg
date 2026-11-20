@@ -1871,6 +1871,7 @@ gpui.this.thread.orders.the.project = This thread orders the project's parts
 gpui.tokens.cost.and.context.the = Tokens, cost and context: the thread's numbers
 gpui.commands = Commands
 gpui.newer = Newer
+viewer.gerbers.older.board = Older than the board
 gpui.older = Older
 gpui.b.replying.to = ↩ Replying to: {line}
 gpui.b.in.reply.to = ↩ In reply to: {quote}

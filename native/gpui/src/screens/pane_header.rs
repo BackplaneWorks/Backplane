@@ -11,7 +11,6 @@ pub struct Header {
 }
 
 pub struct Controls {
-    pub actions: AnyElement,
     pub tools: Vec<Tool>,
     pub close: AnyElement,
 }
