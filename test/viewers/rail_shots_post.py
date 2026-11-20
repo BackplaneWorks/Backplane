@@ -195,7 +195,9 @@ def parse_client_log(log_path: Path) -> dict:
                     "settled": bool(ev.get("settled")),
                     "viewer": ev.get("viewer") or {},
                     "layout": dict(layout),
+                    "controls_captured": len(controls) > 0,
                     "controls_ids": sorted(controls.keys()),
+                    "drawn_controls_ids": sorted(cid for cid, c in controls.items() if isinstance(c.get("rect"), dict)),
                     "probes_ids": sorted(probes),
                     "seq": ev_seq,
                     "rail_drawn": dict(rail_drawn) if rail_drawn is not None else None,
@@ -230,7 +232,13 @@ def _sensitive_tokens() -> list[str]:
     return sorted(set(tokens))
 
 
-EMBED_CANVAS_SHOTS = {"task8-edit", "task7-sim", "task7-sim-run"}
+EMBED_CANVAS_SHOTS = {
+    "task8-edit",
+    "task7-sim",
+    "task7-sim-run",
+    *M.EXTRA_EDIT_SHOTS,
+    *(s for xs in M.EXTRA_MISSING_SHOTS.values() for s in xs),
+}
 
 
 def shot_privacy_reasons(cap: dict, srec: dict, shot_name: str = "", embed: bool = False) -> list[str]:
@@ -1004,9 +1012,8 @@ def evaluate_scorecard(
             full_dir / "task7-sim-run.png",
             (shots.get("task7-sim-run") or {}).get("layout") or {},
         )
-        # On task7-sim-run, KiCad Simulator's own "New Simulation Tab" dialog proves failure (task_failed).
-        # Without a completion observer (trace / operating-point result), an otherwise unobstructed run
-        # is `unavailable` (never a pass).
+        # Without a simulator completion observer, Task 7 is `unavailable` (not measurable until a later KiCad build
+        # exposes a read of a GUI-started simulation). When an observer IS wired, "New Simulation Tab" proves task_failed.
         setup_dialog_open = any(o.get("title") == "New Simulation Tab" for o in oblist7b)
         unexpected_obs7b = [o for o in oblist7b if o.get("title") != "New Simulation Tab"]
         has_observer = bool(sim_act.get("observer"))
@@ -1035,7 +1042,7 @@ def evaluate_scorecard(
         if o7 == "passed":
             note7 = ""
         elif o7 == "unavailable":
-            note7 = "not measurable until a later KiCad build (no simulator completion observer wired)"
+            note7 = "not measurable until a later KiCad build (no read of a GUI-started simulation)"
         elif setup_dialog_open:
             note7 = "pressing Run opened 'New Simulation Tab' setup dialog with no completed analysis or trace (fixture has no SPICE models; 0 points for opening a dialog)"
         elif not sim_result_evidenced:
@@ -1222,6 +1229,395 @@ def evaluate_scorecard(
     return tasks
 
 
+def _frame_sig(frames: list | None) -> list[tuple]:
+    return sorted((f.get("kind"), bool(f.get("shown"))) for f in (frames or []) if isinstance(f, dict))
+
+
+def _compare_hub_kicad(before_cap: dict | None, after_cap: dict | None) -> dict:
+    """Compare hub `editor.kicad.<digest>` sessions at the two interval endpoints (keys, pid, generation, state, active, frames).
+
+    Fail-closed: returns status="unavailable" if either endpoint lacks a complete session inventory.
+    Records any warm-up session (present before with identical pid/generation/state/active/frames after) separately.
+    """
+    bs = (before_cap or {}).get("hub_kicad_sessions")
+    as_ = (after_cap or {}).get("hub_kicad_sessions")
+    if not (isinstance(bs, dict) and bs.get("ok") and bs.get("inventory_complete") is True
+            and isinstance(as_, dict) and as_.get("ok") and as_.get("inventory_complete") is True):
+        return {
+            "assertion": "no session change observed at the two endpoints",
+            "status": "unavailable",
+            "reason": "complete hub editor.kicad.<digest> session inventory missing at one or both endpoints",
+            "sessions_before": (bs or {}).get("sessions") if isinstance(bs, dict) else None,
+            "sessions_after": (as_ or {}).get("sessions") if isinstance(as_, dict) else None,
+            "warmup_sessions": [],
+        }
+    sess_b = bs.get("sessions") or {}
+    sess_a = as_.get("sessions") or {}
+    warmup: list[dict] = []
+    changes: list[str] = []
+
+    if set(sess_b.keys()) != set(sess_a.keys()):
+        added = sorted(set(sess_a.keys()) - set(sess_b.keys()))
+        removed = sorted(set(sess_b.keys()) - set(sess_a.keys()))
+        changes.append(f"session set changed (added={added}, removed={removed})")
+    for k, sv_a in sorted(sess_a.items()):
+        sv_b = sess_b.get(k)
+        if not sv_b:
+            continue
+        gen_b, gen_a = sv_b.get("generation"), sv_a.get("generation")
+        same_gen = (gen_b == gen_a) if (gen_b is not None or gen_a is not None) else True
+        same_pid = sv_b.get("pid") == sv_a.get("pid")
+        same_state = sv_b.get("state") == sv_a.get("state")
+        same_active = sv_b.get("active") == sv_a.get("active")
+        same_frames = _frame_sig(sv_b.get("frames")) == _frame_sig(sv_a.get("frames"))
+        if same_gen and same_pid and same_state and same_active and same_frames:
+            warmup.append({"key": k, "pid": sv_a.get("pid"), "state": sv_a.get("state"), "generation": gen_a, "frames": sv_a.get("frames") or []})
+        else:
+            changes.append(
+                f"session {k} changed (before pid={sv_b.get('pid')} state={sv_b.get('state')} gen={gen_b} active={sv_b.get('active')} frames={_frame_sig(sv_b.get('frames'))}; "
+                f"after pid={sv_a.get('pid')} state={sv_a.get('state')} gen={gen_a} active={sv_a.get('active')} frames={_frame_sig(sv_a.get('frames'))})"
+            )
+
+    return {
+        "assertion": "no session change observed at the two endpoints",
+        "status": "changed" if changes else "unchanged",
+        "reason": "; ".join(changes),
+        "sessions_before": sess_b,
+        "sessions_after": sess_a,
+        "warmup_sessions": warmup,
+    }
+
+
+def _page_empty_words(page: str, viewer: dict) -> str:
+    """Positive empty-state words from this page's own fields only (never solid_note on board/schematic)."""
+    if page == "3d":
+        return str(viewer.get("empty_text") or viewer.get("solid_note") or "").strip()
+    return str(viewer.get("empty_text") or viewer.get("plot_none") or "").strip()
+
+
+def evaluate_extra_checks(
+    outdir: Path,
+    kinds: list[str],
+    parsed_by_kind: dict[str, dict],
+    captures_by_kind: dict[str, dict[str, dict]],
+    embed: bool = False,
+) -> list[dict]:
+    """Evaluate fail-closed extra checks (missing-document, no-editor pages, present-design Edit, scripted Edit) outside the 40-pt scorecard."""
+    checks: list[dict] = []
+    # Ordered settled page slugs to find the immediately preceding capture for interval comparisons.
+    settled_order = [slug for slug, _, _, _ in M.PAGES]
+
+    for kind in kinds:
+        kdir = outdir / kind
+        p = parsed_by_kind.get(kind) or {}
+        shots = p.get("shots") or {}
+        settled_tags = p.get("settled_tags") or {}
+        kicad_tags = p.get("kicad_tags") or {}
+        presses = p.get("presses") or {}
+        caps = captures_by_kind.get(kind) or {}
+
+        # A. Missing-document checks via viewshow (schematic-only: board, 3d; board-only: schematic)
+        if kind in M.EXTRA_MISSING_SHOTS:
+            missing_specs = (
+                [("missing-board", "extra-missing-board", "board", "browser"),
+                 ("missing-3d", "extra-missing-3d", "3d", "extra-missing-board")]
+                if kind == "schematic-only"
+                else [("missing-schematic", "extra-missing-schematic", "schematic", "browser")]
+            )
+            for cid, sname, expected_open, prev_shot in missing_specs:
+                srec = shots.get(sname) or {}
+                cap = caps.get(sname) or {}
+                prev_cap = caps.get(prev_shot)
+                png = kdir / f"{sname}.png"
+                cap_ok = bool(cap.get("ok") and png.exists() and png.stat().st_size > 0)
+                inspect_ok = bool(cap.get("inspect_ok"))
+                obstructed = bool(cap.get("obstructed"))
+                obstructions = cap.get("obstructions") or []
+                controls_captured = bool(srec.get("controls_captured"))
+                v = srec.get("viewer") or {}
+                empty_text = _page_empty_words(expected_open, v)
+                drawn_edit = [c for c in (srec.get("drawn_controls_ids") or []) if c in ("ui:Edit", "ui:Open in KiCad")]
+                hk = _compare_hub_kicad(prev_cap, cap)
+                unavail: list[str] = []
+                fails: list[str] = []
+                if not cap_ok:
+                    outcome = "harness_failed"
+                    fails.append("capture missing or failed")
+                else:
+                    if not inspect_ok:
+                        unavail.append("obstruction inspection failed/missing")
+                    elif obstructed:
+                        titles = [o.get("title") or "/".join(o.get("class") or []) for o in obstructions]
+                        fails.append(f"native dialog/obstruction ({', '.join(t for t in titles if t) or 'unknown'})")
+                    if not controls_captured:
+                        unavail.append("control inventory not captured")
+                    elif drawn_edit:
+                        fails.append(f"Edit/Open in KiCad offered ({', '.join(drawn_edit)})")
+                    if v.get("open") != expected_open:
+                        fails.append(f"viewer.open={v.get('open')!r} (expected {expected_open!r})")
+                    if srec.get("state") != "empty":
+                        fails.append(f"settled_state={srec.get('state')!r} (expected 'empty')")
+                    if not empty_text:
+                        fails.append("empty state has no words")
+                    if hk["status"] == "unavailable":
+                        unavail.append(hk["reason"])
+                    elif hk["status"] == "changed":
+                        fails.append(f"KiCad session/process changed: {hk['reason']}")
+                    outcome = "failed" if fails else ("unavailable" if unavail else "passed")
+                checks.append({
+                    "id": f"{kind}/{cid}",
+                    "kind": kind,
+                    "name": f"Missing document ({expected_open}) on {kind}",
+                    "outcome": outcome,
+                    "note": "; ".join(fails + unavail),
+                    "evidence": {
+                        "shot": str(png),
+                        "capture_ok": cap_ok,
+                        "inspect_ok": inspect_ok,
+                        "controls_captured": controls_captured,
+                        "viewer_open": v.get("open", ""),
+                        "settled_state": srec.get("state", ""),
+                        "empty_text": empty_text,
+                        "drawn_edit_controls": drawn_edit,
+                        "obstructed": obstructed,
+                        "obstructions": obstructions,
+                        "hub_kicad": hk,
+                    },
+                })
+
+            # B. No-editor pages (Files, Review, Browser, Mech, Split): NO drawn Edit/Open in KiCad, no session change at endpoints
+            ref_shot = shots.get("idle") or (next(iter(shots.values())) if shots else {})
+            rail_map = infer_rail_map(ref_shot)
+            for slug in M.NO_EDITOR_CHECK_PAGES:
+                srec = shots.get(slug) or {}
+                cap = caps.get(slug) or {}
+                idx = settled_order.index(slug)
+                prev_cap = caps.get(settled_order[idx - 1]) if idx > 0 else None
+                png = kdir / f"{slug}.png"
+                cap_ok = bool(cap.get("ok") and png.exists() and png.stat().st_size > 0)
+                inspect_ok = bool(cap.get("inspect_ok"))
+                obstructed = bool(cap.get("obstructed"))
+                controls_captured = bool(srec.get("controls_captured"))
+                v_open = (srec.get("viewer") or {}).get("open", "")
+                rentry = rail_map.get(slug) or {}
+                rail_state = rentry.get("state", "hidden" if slug not in rail_map else "unknown")
+                drawn_edit = [c for c in (srec.get("drawn_controls_ids") or []) if c in ("ui:Edit", "ui:Open in KiCad")]
+                hk = _compare_hub_kicad(prev_cap, cap)
+                unavail = []
+                fails = []
+                if not cap_ok:
+                    outcome = "harness_failed"
+                    fails.append("capture missing or failed")
+                elif v_open != slug:
+                    if rail_state == "disabled":
+                        outcome = "unavailable"
+                        why = rentry.get("why") or "disabled"
+                        unavail.append(f"rail entry {slug!r} confirmed disabled ({why}); page never opened")
+                    else:
+                        outcome = "failed"
+                        fails.append(f"enabled rail entry {slug!r} failed to open (rail_state={rail_state!r}, viewer.open={v_open!r})")
+                else:
+                    if not inspect_ok:
+                        unavail.append("obstruction inspection failed/missing")
+                    elif obstructed:
+                        fails.append("obstructed by native dialog")
+                    if not controls_captured:
+                        unavail.append("control inventory not captured")
+                    elif drawn_edit:
+                        fails.append(f"Edit/Open in KiCad offered ({', '.join(drawn_edit)})")
+                    if hk["status"] == "unavailable":
+                        unavail.append(hk["reason"])
+                    elif hk["status"] == "changed":
+                        fails.append(f"KiCad session changed: {hk['reason']}")
+                    outcome = "failed" if fails else ("unavailable" if unavail else "passed")
+                checks.append({
+                    "id": f"{kind}/no-edit-{slug}",
+                    "kind": kind,
+                    "name": f"No Edit control & no session change observed at the two endpoints on {kind}/{slug}",
+                    "outcome": outcome,
+                    "note": "; ".join(fails + unavail),
+                    "evidence": {
+                        "shot": str(png),
+                        "rail_state": rail_state,
+                        "viewer_open": v_open,
+                        "controls_captured": controls_captured,
+                        "drawn_edit_controls": drawn_edit,
+                        "inspect_ok": inspect_ok,
+                        "obstructed": obstructed,
+                        "hub_kicad": hk,
+                    },
+                })
+
+            # C. Present design pages: Edit/Open in KiCad MUST be drawn
+            for slug in M.PRESENT_DESIGN_EDIT_PAGES.get(kind, []):
+                srec = shots.get(slug) or {}
+                cap = caps.get(slug) or {}
+                png = kdir / f"{slug}.png"
+                cap_ok = bool(cap.get("ok") and png.exists() and png.stat().st_size > 0)
+                controls_captured = bool(srec.get("controls_captured"))
+                drawn_edit = [c for c in (srec.get("drawn_controls_ids") or []) if c in ("ui:Edit", "ui:Open in KiCad")]
+                if not cap_ok:
+                    outcome, note = "harness_failed", "capture missing or failed"
+                elif not controls_captured:
+                    outcome, note = "unavailable", "control inventory not captured"
+                elif drawn_edit:
+                    outcome, note = "passed", ""
+                else:
+                    outcome, note = "failed", "Edit/Open in KiCad not drawn on present design page"
+                checks.append({
+                    "id": f"{kind}/has-edit-{slug}",
+                    "kind": kind,
+                    "name": f"Edit control present on {kind}/{slug}",
+                    "outcome": outcome,
+                    "note": note,
+                    "evidence": {
+                        "shot": str(png),
+                        "controls_captured": controls_captured,
+                        "drawn_edit_controls": drawn_edit,
+                    },
+                })
+
+            # D. Scripted Edit from Files/Review/Browser under --embed -> switches to design page & paints SCH/PCB
+            if embed:
+                expected_frame = "SCH" if kind == "schematic-only" else "PCB"
+                expected_page = "schematic" if kind == "schematic-only" else "board"
+                prev_for_edit = M.EXTRA_MISSING_SHOTS[kind][-1]
+                for slug, _, _ in M.EXTRA_EDIT_PAGES:
+                    sname = f"extra-edit-{slug}"
+                    cap = caps.get(sname) or {}
+                    prev_cap = caps.get(prev_for_edit)
+                    prev_for_edit = sname
+                    png = kdir / f"{sname}.png"
+                    cap_ok = bool(cap.get("ok") and png.exists() and png.stat().st_size > 0)
+                    inspect_ok = bool(cap.get("inspect_ok"))
+                    obstructed = bool(cap.get("obstructed"))
+                    obstructions = cap.get("obstructions") or []
+                    start_tag = settled_tags.get(f"{sname}-start") or {}
+                    start_ok = bool(start_tag.get("settled") and start_tag.get("kind") == slug)
+                    p_evs = presses.get(f"press:{sname}", [])
+                    press_delivered = any(ev.get("id") == "ui:Edit" and ev.get("found") for ev in p_evs)
+                    k = kicad_tags.get(f"{sname}-report") or kicad_tags.get(sname)
+                    k_frames = (k or {}).get("frames") or []
+                    k_shown = next((f for f in k_frames if f.get("xid") == (k or {}).get("shown")), {})
+                    shown_painted = int(k_shown.get("painted") or 0)
+                    hk = _compare_hub_kicad(prev_cap, cap)
+                    unavail = []
+                    fails = []
+                    hfail = []
+                    if not cap_ok:
+                        hfail.append("capture missing or failed")
+                    if not inspect_ok:
+                        unavail.append("obstruction inspection failed/missing")
+                    if not start_ok:
+                        unavail.append(f"starting page tag {sname}-start not verified")
+                    if not press_delivered:
+                        unavail.append("ui:Edit press not delivered")
+                    if k is None:
+                        hfail.append("kicad report missing")
+                    if not hfail and not unavail:
+                        if obstructed:
+                            titles = [o.get("title") or "/".join(o.get("class") or []) for o in obstructions]
+                            fails.append(f"obstructed by native dialog ({', '.join(t for t in titles if t) or 'unknown'})")
+                        if k.get("state") != "ready":
+                            fails.append(f"kicad_state={k.get('state')!r}")
+                        if k.get("in_gpui_tree") is not True:
+                            fails.append(f"in_gpui_tree={k.get('in_gpui_tree')!r}")
+                        if k_shown.get("kind") != expected_frame:
+                            fails.append(f"shown_kind={k_shown.get('kind')!r} (expected {expected_frame!r})")
+                        if shown_painted <= 0:
+                            fails.append(f"shown_painted={shown_painted} (expected > 0)")
+                        v_shot = (shots.get(sname) or {}).get("viewer") or {}
+                        if v_shot.get("open") != expected_page:
+                            fails.append(f"viewer.open={v_shot.get('open')!r} (expected {expected_page!r})")
+                    outcome = "harness_failed" if hfail else ("failed" if fails else ("unavailable" if unavail else "passed"))
+                    checks.append({
+                        "id": f"{kind}/scripted-edit-{slug}",
+                        "kind": kind,
+                        "name": f"Scripted Edit from {slug} on {kind} (expect {expected_page}/{expected_frame})",
+                        "outcome": outcome,
+                        "note": "; ".join(hfail + fails + unavail),
+                        "evidence": {
+                            "shot": str(png),
+                            "capture_ok": cap_ok,
+                            "inspect_ok": inspect_ok,
+                            "start_verified": start_ok,
+                            "press_delivered": press_delivered,
+                            "expected_page": expected_page,
+                            "expected_frame": expected_frame,
+                            "viewer_open": ((shots.get(sname) or {}).get("viewer") or {}).get("open", ""),
+                            "kicad_state": (k or {}).get("state"),
+                            "in_gpui_tree": (k or {}).get("in_gpui_tree"),
+                            "shown_kind": k_shown.get("kind"),
+                            "shown_painted": shown_painted,
+                            "obstructed": obstructed,
+                            "obstructions": obstructions,
+                            "hub_kicad": hk,
+                        },
+                    })
+
+        # E. No-design / mech-only scripted Edit on Files: requires verified start tag + delivered ui:Edit + no session started
+        elif kind in M.NO_DESIGN_KINDS and embed:
+            sname = "extra-edit-files"
+            cap = caps.get(sname) or {}
+            prev_cap = caps.get("browser")
+            png = kdir / f"{sname}.png"
+            cap_ok = bool(cap.get("ok") and png.exists() and png.stat().st_size > 0)
+            inspect_ok = bool(cap.get("inspect_ok"))
+            obstructed = bool(cap.get("obstructed"))
+            start_tag = settled_tags.get(f"{sname}-start") or {}
+            start_ok = bool(start_tag.get("settled") and start_tag.get("kind") == "files")
+            p_evs = presses.get(f"press:{sname}", [])
+            press_delivered = any(ev.get("id") == "ui:Edit" and ev.get("found") for ev in p_evs)
+            v_shot = (shots.get(sname) or {}).get("viewer") or {}
+            files_status = str(v_shot.get("files_status") or v_shot.get("status") or "").strip()
+            hk = _compare_hub_kicad(prev_cap, cap)
+            sess_a = hk.get("sessions_after") or {}
+            k = kicad_tags.get(f"{sname}-report") or {}
+            unavail = []
+            fails = []
+            if not cap_ok:
+                outcome = "harness_failed"
+                fails.append("capture missing or failed")
+            else:
+                if not inspect_ok:
+                    unavail.append("obstruction inspection failed/missing")
+                elif obstructed:
+                    fails.append("obstructed by native dialog")
+                if not start_ok:
+                    unavail.append(f"starting page tag {sname}-start not verified")
+                if not press_delivered:
+                    unavail.append("ui:Edit press not delivered")
+                if not files_status:
+                    unavail.append("Files status line not exposed in client state")
+                if hk["status"] == "unavailable":
+                    unavail.append(hk["reason"])
+                elif sess_a:
+                    fails.append(f"unexpected KiCad sessions: {list(sess_a.keys())}")
+                if k.get("in_gpui_tree") is True:
+                    fails.append("KicadPane unexpectedly mounted in GPUI tree")
+                outcome = "failed" if fails else ("unavailable" if unavail else "passed")
+            checks.append({
+                "id": f"{kind}/scripted-edit-files",
+                "kind": kind,
+                "name": f"Scripted Edit from files on {kind} starts no KiCad (no session change observed at the two endpoints)",
+                "outcome": outcome,
+                "note": "; ".join(fails + unavail),
+                "evidence": {
+                    "shot": str(png),
+                    "capture_ok": cap_ok,
+                    "inspect_ok": inspect_ok,
+                    "start_verified": start_ok,
+                    "press_delivered": press_delivered,
+                    "files_status": files_status,
+                    "obstructed": obstructed,
+                    "in_gpui_tree": k.get("in_gpui_tree"),
+                    "hub_kicad": hk,
+                },
+            })
+
+    return checks
+
+
 def main(argv: list[str] | None = None) -> int:
     raw_args = list(sys.argv[1:] if argv is None else argv)
     embed = "--embed" in raw_args
@@ -1272,7 +1668,8 @@ def main(argv: list[str] | None = None) -> int:
         if p.get("refused_shots"):
             harness_errors.append(f"{kind}: client refused {len(p['refused_shots'])} shot step(s)")
 
-        expected = M.expected_shots(kind, embed=(embed and kind == "full"))
+        kind_embed = embed
+        expected = M.expected_shots(kind, embed=kind_embed)
         missing: list[str] = []
         failed_caps: list[str] = []
         obstructions_found: dict[str, list[dict]] = {}
@@ -1289,7 +1686,7 @@ def main(argv: list[str] | None = None) -> int:
                 failed_caps.append(sname)
             if rec and rec.get("obstructed"):
                 obstructions_found[sname] = rec.get("obstructions") or []
-            reasons = shot_privacy_reasons(rec or {}, shots.get(sname) or {}, shot_name=sname, embed=(embed and kind == "full"))
+            reasons = shot_privacy_reasons(rec or {}, shots.get(sname) or {}, shot_name=sname, embed=kind_embed)
             if reasons:
                 private_shots[sname] = reasons
                 all_private.append(f"{kind}/{sname}: {'; '.join(reasons)}")
@@ -1413,6 +1810,8 @@ def main(argv: list[str] | None = None) -> int:
         embed_actions=embed_actions_by_kind.get("full"),
     ) if "full" in kinds else []
 
+    extra_checks = evaluate_extra_checks(outdir, kinds, parsed, captures_by_kind, embed=embed)
+
     if harness_errors or any(t["outcome"] == "harness_failed" for t in scorecard_tasks):
         overall = "harness_failed"
     elif any(t["outcome"] == "task_failed" for t in scorecard_tasks):
@@ -1443,6 +1842,7 @@ def main(argv: list[str] | None = None) -> int:
         "task_part_coverage": task_part_coverage,
         "kinds": kinds_out,
         "scorecard_tasks": scorecard_tasks,
+        "extra_checks": extra_checks,
     }
     (outdir / "steps.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
 

@@ -451,7 +451,7 @@ for kind in "${KINDS[@]}"; do
   seed_project "$kind" "$RUN/proj-$kind"
 
   USE_EMBED=0
-  if [ "$EMBED_MODE_FLAG" = "1" ] && [ "$kind" = "full" ]; then
+  if [ "$EMBED_MODE_FLAG" = "1" ]; then
     USE_EMBED=1
   fi
 
@@ -534,7 +534,8 @@ PY
   python3 "$SCRIPT_DIR/rail_shots_driver.py" gen-script "$kind" "$SCRIPT_JSON" "${RAIL_EARLY_MS:-300}" "${RAIL_SETTLE_TIMEOUT_MS:-15000}" "${DRV_EXTRA[@]}"
 
   # Start external capture watcher (only watcher's `import` and `xwininfo` receive DISPLAY=$DISP)
-  own python3 "$SCRIPT_DIR/rail_shots_driver.py" watch "$DISP" "$KIND_OUT/client.log" "$SHOT_DIR" "$KIND_OUT" "$STOP_FLAG" >"$KIND_OUT/watch.log" 2>&1
+  own env RAIL_HUB_PORT="$PORT" RAIL_HUB_TOKEN_FILE="$HHOME/token" RAIL_BUN_BIN="$BUN_BIN" \
+    python3 "$SCRIPT_DIR/rail_shots_driver.py" watch "$DISP" "$KIND_OUT/client.log" "$SHOT_DIR" "$KIND_OUT" "$STOP_FLAG" >"$KIND_OUT/watch.log" 2>&1
   WATCH_PG=$!
 
   # Launch client in its own process group and check its real exit status

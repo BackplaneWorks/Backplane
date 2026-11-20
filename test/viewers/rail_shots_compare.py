@@ -78,7 +78,7 @@ def has_complete_privacy(steps: dict) -> tuple[bool, list[str]]:
             issues.append(f"{kind}: invalid kind entry")
             continue
         try:
-            expected = M.expected_shots(kind, embed=(embed_mode and kind == "full"), schema=schema)
+            expected = M.expected_shots(kind, embed=embed_mode, schema=schema)
         except ValueError as e:
             issues.append(f"{kind}: {e}")
             continue
@@ -815,6 +815,10 @@ def main(argv: list[str] | None = None) -> int:
             "common_tasks": common_tasks,
         },
         "consistency": {"base": b_cons, "new": n_cons},
+        "extra_checks": {
+            "base": base_steps.get("extra_checks") or [],
+            "new": new_steps.get("extra_checks") or [],
+        },
     }
     (out_dir / "score.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
@@ -955,6 +959,25 @@ def main(argv: list[str] | None = None) -> int:
         extra = f", {sd['unscored_non_loading']} generic early unscored" if sub == "loading" else ""
         lines.append(f"- **{sub}**: {fmt_opt_pts(sd['points'], 1)} ({sd['clean']}/{sd['checked']}{extra})" + (f" — violations: {', '.join(sd['violations'])}" if sd["violations"] else ""))
     lines.append("")
+
+    b_extra = {c["id"]: c for c in (base_steps.get("extra_checks") or []) if isinstance(c, dict) and c.get("id")}
+    n_extra = {c["id"]: c for c in (new_steps.get("extra_checks") or []) if isinstance(c, dict) and c.get("id")}
+    if b_extra or n_extra:
+        all_ids = list(dict.fromkeys([*b_extra.keys(), *n_extra.keys()]))
+        lines.extend([
+            "## Extra Checks (outside 40-pt task score)",
+            "",
+            "| Check | Base | New |",
+            "|---|---|---|",
+        ])
+        def fmt_extra(c: dict | None) -> str:
+            if not c:
+                return "`missing`"
+            note = c.get("note") or ""
+            return f"`{c.get('outcome', '?')}`" + (f" ({note})" if note else "")
+        for cid in all_ids:
+            lines.append(f"| `{cid}` | {fmt_extra(b_extra.get(cid))} | {fmt_extra(n_extra.get(cid))} |")
+        lines.append("")
 
     md = "\n".join(lines) + "\n"
     (out_dir / "score.md").write_text(md, encoding="utf-8")
