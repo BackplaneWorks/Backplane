@@ -949,6 +949,7 @@ html.light .bp-code-block { background: var(--panel); }
   z-index: 5;
 }
 
+.bp-viewer-pane[hidden],
 .bp-v-overlay[hidden],
 .bp-v-layers[hidden],
 .bp-v-info[hidden],
@@ -1082,14 +1083,14 @@ html.light .bp-v-overlay {
   }
 }
 
-/* ---- Phone (390 px) ---- */
+/* ---- Phone (390 px): full width between 38 px top bar and 46 px bottom tab strip ---- */
 @media (max-width: 600px) {
   .bp-viewer-pane {
     position: fixed;
-    top: 36px;
-    bottom: 0;
+    top: 38px;
+    bottom: 46px;
     left: 0;
-    right: 56px;
+    right: 0;
     width: auto;
     min-width: 0;
     border-left: 0;
