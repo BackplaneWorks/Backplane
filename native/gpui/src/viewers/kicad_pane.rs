@@ -173,6 +173,11 @@ pub fn warm_target(project: String, root: String) -> String {
 
 /// Whether the pre-warm may start by itself on an idle pane (2 s after the first editor is placed, with no new placement): everywhere but
 /// Windows, and there only on a runtime whose pre-warm never takes the keyboard from the shown editor (`prewarm-keeps-focus`).
+/// Whether a re-place needs no geometry: a frame to show at exactly the rect last placed in this container (`prev`: that placement's
+/// rect and frame). The pane's re-places after a tab switch, the frames poll and the hub's echo of the switch are such.
+pub fn no_geometry(prev: Option<(Option<nc::R>, Option<u64>)>, at: Option<nc::R>, show: Option<u64>) -> bool {
+    matches!((prev, at, show), (Some((Some(p), _)), Some(a), Some(_)) if p == a)
+}
 pub fn idle_prewarm(windows: bool, keeps_focus: bool) -> bool { !windows || keeps_focus }
 
 /// Path without any file extension on its final segment (dots in parent folder names are preserved).
@@ -567,6 +572,10 @@ pub struct KicadPane {
     /// macOS: a show waiting for the pane's layout to settle: its rect and since when (show_settled).
     mac_show_held: Option<((i32, i32, i32, i32), std::time::Instant)>,
     last_root: (i32, i32), placed: Option<(Option<nc::R>, Option<u64>, Vec<nc::R>)>,
+    /// What was last actually placed (container, rect, frame on show; None after the pane left): `placed` is reset to force a re-place
+    /// (a tab switch, a frames change, the hub's echo of it), this is not. A re-place at this same rect needs no geometry (Linux:
+    /// `nc::show_local` maps the frame and nothing else), and `kicad_place`'s `changed` / `frame_changed` compare with it.
+    last_place: Option<(u64, nc::R, Option<u64>)>,
     focus: FocusHandle, keys: bool, pub light: bool, _subs: Vec<Subscription>,
     /// the fork's holder already in our save-set; reserved chords pressed in KiCad, waiting to be pressed in gpui
     kept: u64, pub press: Vec<String>,
@@ -762,7 +771,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_press: None, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None,
+        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_press: None, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None, last_place: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, remounts: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, generation: None, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
@@ -805,8 +814,11 @@ impl KicadPane {
         }
         if info["pid"] != self.info["pid"] {
             let had_pid = !self.info["pid"].is_null();
-            self.poked = None; self.unmapped_since = None; self.kept = 0; self.placed = None; if had_pid || self.override_kind.as_deref() != Some(SIM) { self.override_kind = None; } cause = format!("hub info: KiCad pid {} -> {}", self.info["pid"], info["pid"]); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
+            self.poked = None; self.unmapped_since = None; self.kept = 0; self.placed = None; self.last_place = None; if had_pid || self.override_kind.as_deref() != Some(SIM) { self.override_kind = None; } cause = format!("hub info: KiCad pid {} -> {}", self.info["pid"], info["pid"]); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
             if had_pid { self.pending_show = None; }
+            // another KiCad (a restart): its frames are new and are told their root position again (X may reuse a window id)
+            #[cfg(target_os = "linux")]
+            nc::told_reset();
         }
         if matches!(info["state"].as_str(), Some("failed" | "stopped")) { self.pending_show = None; }
         // macOS: a KiCad that became ready, or another one (a restart), has not had this pane's rect: pushed again on the next frame
@@ -1080,8 +1092,10 @@ impl KicadPane {
     /// BACKPLANE_KICAD_DEBUG: one line each time the pane places KiCad's native window (Linux and Windows; macOS says `kicad_host_push`):
     /// `kicad_place` the pane's rect (null: taken off screen), `visible`, `changed` (the rect differs from the last placement's; false: the
     /// same rect again), `frame` the window shown and `frame_changed`, its `kind`, `container`, `local` (the client maps the frames itself),
-    /// `why` (layout, kept: an Edit back into the kept container, leave: View or another thread), `at_ms`. A frame switch at the same
-    /// rect is `changed: false, frame_changed: true`. The X11 side's own sends are `kicad_place_notify` (native_child.rs).
+    /// `why` (layout, shown: a re-place at the same rect that only maps the frame (Linux), kept: an Edit back into the kept container,
+    /// leave: View or another thread), `at_ms`. `changed` / `frame_changed` compare with the last placement actually made (`last_place`;
+    /// before, with `placed`, which the pane resets to force a re-place: every such re-place read `changed: true` at an identical rect).
+    /// A frame switch at the same rect is `changed: false, frame_changed: true`. The X11 side's own sends are `kicad_place_notify`.
     fn log_place(&self, why: &str, c: u64, at: Option<nc::R>, show: Option<u64>, prev: Option<(Option<nc::R>, Option<u64>)>, local: bool) {
         if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_none() { return }
         let (pr, ps) = prev.unwrap_or((None, None));
@@ -1387,7 +1401,7 @@ impl KicadPane {
         // it was, with no round trip and no frame of the pane's background
         if let Some(k) = take_kept(top, &self.project) {
             self.container = Some(k.container); self.ever_shown = k.ever_shown; self.frames = nc::frames(k.container);
-            if let (Some(r), Some(w)) = (k.rect, self.want()) { nc::place_local(k.container, Some(r), Some(w), &self.ever_shown, &mut self.last_root); self.log_place("kept", k.container, Some(r), Some(w), None, true); self.placed = Some((Some(r), Some(w), Vec::new())); }
+            if let (Some(r), Some(w)) = (k.rect, self.want()) { nc::place_local(k.container, Some(r), Some(w), &self.ever_shown, &mut self.last_root); self.log_place("kept", k.container, Some(r), Some(w), None, true); self.placed = Some((Some(r), Some(w), Vec::new())); self.last_place = Some((k.container, r, Some(w))); }
             self.handoff_over = true; // mapped in this very frame: nothing to hand over
         } else {
             self.container = nc::container_for(top, &self.project);
@@ -1506,9 +1520,17 @@ impl KicadPane {
             if let (Some(at), Some(show)) = (at, show) { nc::sync_root(c, at, show, &mut self.last_root); }
             return;
         }
-        let prev = self.placed.as_ref().map(|(r, s, _)| (*r, *s));
-        if local { nc::place_local(c, at, show, &self.ever_shown, &mut self.last_root); } else { nc::place(c, at, show, managed.as_deref(), &mut self.last_root); }
-        self.log_place("layout", c, at, show, prev, local);
+        let prev = self.last_place.filter(|(lc, _, _)| *lc == c).map(|(_, r, s)| (Some(r), s));
+        // Linux, the client mapping KiCad's frames: a re-place at the rect last placed (a tab switch, the frames poll, the hub's echo of
+        // the switch) only maps the frame on show (raised, the others unmapped), with no configure and no synthetic ConfigureNotify; a
+        // move of the pane on screen is still told by sync_root (rail-round4: three same-rect placements per Board<->Schematic switch)
+        let shown_only = cfg!(target_os = "linux") && local && no_geometry(prev, at, show);
+        if shown_only {
+            #[cfg(target_os = "linux")]
+            { nc::show_local(c, show, &self.ever_shown); if let (Some(at), Some(show)) = (at, show) { nc::sync_root(c, at, show, &mut self.last_root); } }
+        } else if local { nc::place_local(c, at, show, &self.ever_shown, &mut self.last_root); } else { nc::place(c, at, show, managed.as_deref(), &mut self.last_root); }
+        self.log_place(if shown_only { "shown" } else { "layout" }, c, at, show, prev, local);
+        self.last_place = at.map(|r| (c, r, show));
         if let (Some(w), Some(_), false, None) = (show, at, self.handoff_over, self.handoff_placed) { self.handoff_placed = Some((std::time::Instant::now(), w)); }
         // a KiCad dialog with the keyboard keeps it: the shown frame can change under an open dialog (a dialog of a dialog, Change
         // Footprints over Footprint Properties, re-placed the frame twice), and the hand-in took the keyboard from the dialog to the frame
@@ -1716,8 +1738,8 @@ impl KicadPane {
         #[cfg(target_os = "macos")]
         if let Some((x, y, w, h, true)) = self.host_sent.take() { self.host_rpc(json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": false, "raise": false})); }
         let Some(c) = self.container.take() else { return };
-        let prev = self.placed.as_ref().map(|(r, s, _)| (*r, *s));
-        nc::place(c, None, None, None, &mut self.last_root); self.log_place("leave", c, None, None, prev, false); nc::grab_escape(self.toplevel, false);
+        let prev = self.last_place.filter(|(lc, _, _)| *lc == c).map(|(_, r, s)| (Some(r), s));
+        nc::place(c, None, None, None, &mut self.last_root); self.log_place("leave", c, None, None, prev, false); self.last_place = None; nc::grab_escape(self.toplevel, false);
         // the keyboard back to Backplane's window on leaving the pane (View, another thread)
         if self.keys { nc::focus(self.toplevel); self.keys = false; }
         // kept, unmapped, with KiCad's frames in it (still attached in the hub): the next Edit of this project in this window maps it at once
@@ -2220,6 +2242,18 @@ mod tests {
         assert!(super::prewarm_builds_nothing(&json!({"ok": false, "error": "x"})), "an error");
         assert!(!super::prewarm_builds_nothing(&json!({"ok": true, "prewarming": ["SCH"]})));
         assert!(!super::prewarm_builds_nothing(&json!({"ok": true, "prewarming": true})), "an older hub's memory refusal: indistinguishable, kept");
+    }
+    #[test] fn a_switch_at_the_same_rect_needs_no_geometry() {
+        let r = |x, w| super::nc::R { x, y: 100, w, h: 745 };
+        let at = Some(r(755, 611));
+        assert!(super::no_geometry(Some((at, Some(1))), at, Some(2)), "Board -> Schematic at the same rect: the new frame shown, no geometry");
+        assert!(super::no_geometry(Some((at, Some(2))), at, Some(2)), "the frames poll's or the hub's re-place of the same frame");
+        assert!(!super::no_geometry(Some((at, Some(1))), Some(r(700, 611)), Some(2)), "the pane moved: placed");
+        assert!(!super::no_geometry(Some((at, Some(1))), Some(r(755, 500)), Some(1)), "resized: placed");
+        assert!(!super::no_geometry(None, at, Some(1)), "nothing placed in this container yet (a new container, after leave, a restart)");
+        assert!(!super::no_geometry(Some((None, None)), at, Some(1)));
+        assert!(!super::no_geometry(Some((at, Some(1))), None, None), "taken off screen: placed (unmapped)");
+        assert!(!super::no_geometry(Some((at, Some(1))), at, None), "no frame to show: placed");
     }
     #[test] fn idle_prewarm_waits_on_windows_without_prewarm_keeps_focus() {
         assert!(super::idle_prewarm(false, false), "Linux: the pre-warm starts by itself");
