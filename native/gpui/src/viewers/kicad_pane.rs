@@ -336,6 +336,8 @@ pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<Strin
         "closed_unexpectedly" => Some(crate::i18n::t(if info["autosaves"].as_array().is_some_and(|a| !a.is_empty()) { "gpui.c.kicad.closed.kept" } else { "gpui.c.kicad.closed.lost" })),
         "unresponsive" => Some(crate::i18n::trs("KiCad is not responding.")),
         "stopped" => Some(crate::i18n::trs("KiCad was closed.")),
+        // #1470: the hub is closing this project's KiCad and its process has not ended: the pane attaches again once it has
+        "closing" => Some(crate::i18n::t("gpui.c.kicad.closing")),
         _ if have_frame => None,
         // KiCad has a dialog of its own open (a notice from loading a file, its own progress): said, not a silent "Starting KiCad…"
         _ if info["dialogs"].as_array().is_some_and(|d| !d.is_empty()) => {
@@ -649,6 +651,9 @@ pub struct KicadPane {
     leave: LeaveState,
     /// the thread whose page last held this pane on screen (ui.rs): a leave from another thread is a thread switch, not the viewer's
     pub page_thread: String,
+    /// the pid of a KiCad the hub was closing when this pane attached (its answer `closing`): the pane says KiCad is closing and attaches
+    /// again once the hub's picture of the project no longer has that process live, which starts a fresh KiCad
+    closing_pid: Option<u64>,
     /// macOS: KiCad's frame is not above our window by the window server's own list though we ordered ours below it (the Mac mini gate,
     /// Nov 16: a 1900 pt window on a 1920 pt display, the pane blank with the frame behind ours): the tries, since when, and whether the
     /// bound passed, when the pane says so and offers Pop out rather than staying blank
@@ -867,6 +872,14 @@ pub fn mark_auto(name: &str, mut params: Value, why: ShowBy) -> Value {
 pub fn person_closed_kicad(old: &Value, new: &Value) -> bool {
     new["runtime"]["session"] == "closedByPerson" && matches!(old["runtime"]["session"].as_str(), Some("live" | "starting"))
 }
+/// #1470: the hub is closing this pane's KiCad (`closing`: the idle close or the cap) while the pane is off screen: the pane goes at once,
+/// as at its end (`closed_idle_away`), so coming back never shows a pane on a KiCad whose process is still ending (Linux under load, and
+/// Windows, have kept one for minutes)
+pub fn closing_away(info: &Value, in_page: bool) -> bool { !in_page && info["closing"] == true }
+/// Whether the hub's picture `info` still has the closing KiCad `pid` live (the pane keeps waiting on it).
+pub fn still_closing(pid: u64, info: &Value) -> bool {
+    info["pid"].as_u64() == Some(pid) && matches!(info["state"].as_str(), Some("ready" | "unresponsive" | "starting"))
+}
 /// #1345: the hub closed this pane's KiCad as idle (`idleStopped`, after it was starting or live) while the pane was off screen.
 pub fn closed_idle_away(old: &Value, new: &Value, in_page: bool) -> bool {
     !in_page && new["runtime"]["session"] == "idleStopped" && matches!(old["runtime"]["session"].as_str(), Some("live" | "starting"))
@@ -971,7 +984,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { born: std::time::Instant::now(), edit_key: asked_key(!deferred_open(), trigger_key()), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, page_thread: String::new(), leave: LeaveState::default(), mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_press: None, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None, last_place: None, screen_key: None,
+        KicadPane { born: std::time::Instant::now(), edit_key: asked_key(!deferred_open(), trigger_key()), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, closing_pid: None, page_thread: String::new(), leave: LeaveState::default(), mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_press: None, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None, last_place: None, screen_key: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, remounts: None, unshown_since: None, unshown_asks: 0, reattached_for: None, adrift_held_at: None, override_kind: None, pending_show: None, chosen_at: 0, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, generation: None, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0, opening_timer: Arc::default() }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
@@ -1028,6 +1041,16 @@ impl KicadPane {
     /// The hub's `editor.kicad.<digest>` for this project changed.
     pub fn set_info(&mut self, info: Value, cx: &mut Context<Self>) {
         if info == self.info { return }
+        // waiting on a KiCad that is closing: its own pictures change nothing here; once it is gone (stopped, failed, another process)
+        // the pane attaches again, and the hub starts a fresh one
+        if let Some(pid) = self.closing_pid {
+            if still_closing(pid, &info) { return }
+            self.closing_pid = None;
+            eprintln!("GPUI_LOG {}", json!({"kicad_closing_over": pid, "state": info["state"], "pid": info["pid"], "project": self.project}));
+            self.info = info; self.placed = None;
+            self.reattach(); cx.notify();
+            return
+        }
         // (only a frame this pane has shown: a new pane, Edit pressed again, starts from the hub's last word, which may still list the
         // frame closed before it and not yet the one KiCad opens anew)
         // (macOS: KiCad places its own frames, nothing is mapped locally and first_placed stays unset; a frame on show is the mark there)
@@ -1730,6 +1753,15 @@ impl KicadPane {
         let weak = cx.entity().downgrade();
         window.on_frame_drawn(move |window, cx| weak.update(cx, |this, cx| this.after_frame(window, cx)).is_ok());
     }
+    /// The hub answered this pane's attach `closing` (its KiCad, pid `pid`, is being closed and has not ended): said in the pane, and
+    /// attached again once it has ended (`set_info`). Nothing of the closing KiCad is shown or mapped meanwhile.
+    pub fn wait_close(&mut self, pid: u64, cx: &mut Context<Self>) {
+        eprintln!("GPUI_LOG {}", json!({"kicad_attach_closing": pid, "project": self.project}));
+        self.closing_pid = Some(pid);
+        self.info = json!({"state": "closing", "project": self.info["project"].as_str().unwrap_or(&self.project), "mode": self.info["mode"]});
+        self.pending_show = None; self.placed = None;
+        cx.notify();
+    }
     /// Re-send `editor.kicad.attach` after a WebSocket reconnect so any info transition missed while disconnected is recovered.
     /// KiCad's start failed: the pane offers Try again.
     pub fn failed(&self) -> bool { try_again(&self.seen_info()) && !no_kicad(&self.seen_info()) }
@@ -2375,6 +2407,18 @@ mod tests {
         assert_eq!(l.on(true, "", ms(5000)), Some(LeaveSend::Back));
         assert_eq!(l.on(true, "", ms(5001)), None, "once");
         assert_eq!(l.due(ms(9000)), None);
+    }
+    #[test] fn a_pane_waits_on_a_closing_kicad_until_its_process_is_gone() {
+        use super::{still_closing, waiting_on};
+        assert!(still_closing(41, &json!({"state": "ready", "pid": 41})));
+        assert!(still_closing(41, &json!({"state": "unresponsive", "pid": 41})));
+        assert!(!still_closing(41, &json!({"state": "stopped", "pid": null})), "stopped: attach again (a fresh start)");
+        assert!(!still_closing(41, &json!({"state": "failed", "pid": null})));
+        assert!(!still_closing(41, &json!({"state": "starting", "pid": 57})), "another KiCad started: attach to it");
+        assert!(waiting_on(&json!({"state": "closing"}), false, false).is_some_and(|w| w.contains("KiCad")), "the pane says KiCad is closing");
+        assert!(super::closing_away(&json!({"state": "ready", "closing": true}), false), "off screen: the pane goes at the close");
+        assert!(!super::closing_away(&json!({"state": "ready", "closing": true}), true), "on screen: the pane waits (wait_close)");
+        assert!(!super::closing_away(&json!({"state": "ready", "closing": false}), false));
     }
     #[test] fn a_kicad_closed_as_idle_while_away_gives_the_viewer_back() {
         use super::closed_idle_away;
@@ -3080,7 +3124,7 @@ impl crate::Backplane {
         let (has_pane, matched, pane_proj) = match self.screens.kicad.clone() {
             Some(p) => {
                 let (m, prj) = { let pr = p.read(cx); (pr.matches(&v), pr.project.clone()) };
-                let idle_away = m && closed_idle_away(&p.read(cx).info, &v, p.read(cx).in_page);
+                let idle_away = m && (closed_idle_away(&p.read(cx).info, &v, p.read(cx).in_page) || closing_away(&v, p.read(cx).in_page));
                 if m { p.update(cx, |p, cx| p.set_info(v.clone(), cx)); }
                 // #1345: closed as idle while the person was away: coming back shows Backplane's viewer, never a pane on a KiCad that is gone
                 if idle_away { eprintln!("GPUI_LOG {}", json!({"kicad_idle_closed_away": prj, "by": "stopped"})); self.kicad_view(cx); }
@@ -3120,6 +3164,15 @@ impl crate::Backplane {
             return;
         }
         if method == "editor.kicad.host" { self.screens.host_sends.borrow_mut().reply(true, std::time::Instant::now()); eprintln!("GPUI_LOG {}", json!({"kicad_host_reply": reply["applied"], "why": reply["why"], "error": reply["error"], "id": reply["id"], "at_ms": crate::screens::kcomment::epoch_ms() as u64})); }
+        // its KiCad is closing (the hub never attaches to it): the pane waits and attaches again once it has ended
+        if method == "editor.kicad.attach" && reply["closing"] == true {
+            if let Some(p) = self.screens.kicad.clone() {
+                if let Some(pro) = reply["project"].as_str().filter(|s| !s.is_empty()) { let pro = pro.to_string(); p.update(cx, |p, _| p.bound = pro); }
+                let pid = reply["pid"].as_u64().unwrap_or(0);
+                p.update(cx, |p, cx| p.wait_close(pid, cx));
+            }
+            return;
+        }
         if method == "editor.kicad.attach" && reply["state"].is_string() {
             let mut v = reply;
             if let Some(obj) = v.as_object_mut() { obj.remove("t"); obj.remove("id"); obj.remove("ok"); }
