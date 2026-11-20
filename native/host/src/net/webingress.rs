@@ -297,6 +297,7 @@ fn static_asset(path: &str, paired: bool) -> Option<(&'static str, &'static [u8]
         "/" => asset!("text/html; charset=utf-8", "pair.html"),
         "/assets/pair.js" => asset!("application/javascript", "assets/pair.js"),
         "/assets/app.js" if paired => asset!("application/javascript", "assets/app.js"),
+        "/assets/mesh-worker.js" if paired => asset!("application/javascript", "assets/mesh-worker.js"),
         "/assets/style.css" => asset!("text/css", "assets/style.css"),
         "/assets/favicon.svg" => asset!("image/svg+xml", "assets/favicon.svg"),
         "/assets/favicon-light.svg" => asset!("image/svg+xml", "assets/favicon-light.svg"),
