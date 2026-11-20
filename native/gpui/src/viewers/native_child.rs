@@ -488,6 +488,11 @@ mod imp {
             if let Some(t) = c.translate_coordinates(container, root, 0, 0).ok().and_then(|r| r.reply().ok()) {
                 let at = (t.dst_x as i32, t.dst_y as i32);
                 if managed.is_some() || at != *last_root {
+                    // BACKPLANE_KICAD_DEBUG: the synthetic ConfigureNotify this placement sends the frame (its root position: X does not tell
+                    // a child that its parent moved): `why` managed (every placement of a managed frame) or moved (the pane moved on screen)
+                    if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+                        eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_place_notify": [t.dst_x, t.dst_y, w, h], "frame": k, "why": if at != *last_root { "moved" } else { "managed" }, "at_ms": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)}));
+                    }
                     *last_root = at;
                     let ev = ConfigureNotifyEvent { response_type: CONFIGURE_NOTIFY_EVENT, sequence: 0, event: k, window: k, above_sibling: x11rb::NONE,
                         x: t.dst_x, y: t.dst_y, width: w as u16, height: h as u16, border_width: 0, override_redirect: false };
@@ -517,6 +522,10 @@ mod imp {
         let Some(t) = c.translate_coordinates(container, root, 0, 0).ok().and_then(|q| q.reply().ok()) else { if resized { let _ = c.flush(); } return };
         let at = (t.dst_x as i32, t.dst_y as i32);
         if resized || at != *last_root {
+            // BACKPLANE_KICAD_DEBUG: as place's (sync_root: an unchanged placement whose frame was resized or whose pane moved)
+            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+                eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_place_notify": [t.dst_x, t.dst_y, uw, uh], "frame": show, "why": if resized { "resized" } else { "moved" }, "sync": true, "at_ms": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)}));
+            }
             *last_root = at;
             let (w, h) = (uw as u16, uh as u16);
             let ev = ConfigureNotifyEvent { response_type: CONFIGURE_NOTIFY_EVENT, sequence: 0, event: show, window: show, above_sibling: x11rb::NONE,

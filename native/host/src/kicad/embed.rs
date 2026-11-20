@@ -943,6 +943,8 @@ pub fn note_client_cid(client: u64, cid: &str) {
         if r.cid_of.get(&client).map(String::as_str) == Some(cid) && r.client_of.get(cid) == Some(&client) { return }
         r.cid_of.insert(client, cid.to_string());
         let prev = r.client_of.insert(cid.to_string(), client);
+        // which connection a desktop client is now: viewer.runtime.holder is this number (a test matches it to the client's own cid)
+        if prev != Some(client) { eprintln!("kicad embed: connection {client} is client {cid}"); }
         if r.cid_of.len() > 4096 { let keep: HashSet<u64> = r.client_of.values().copied().collect(); r.cid_of.retain(|c, _| keep.contains(c)); }
         prev != Some(client) && r.entries.values().any(|e| e.session.as_ref().is_some_and(|s| s.pane_cid == cid))
     };

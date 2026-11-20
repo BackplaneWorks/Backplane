@@ -1047,6 +1047,18 @@ impl KicadPane {
         { nc::yield_to(w); self.rpc("editor.kicad.show", json!({"project": self.project, "frame": self.wanted_kind(), "focus": true})); }
         self.keys = true; nc::grab_escape(self.toplevel, true); cx.notify();
     }
+    /// BACKPLANE_KICAD_DEBUG: one line each time the pane places KiCad's native window (Linux and Windows; macOS says `kicad_host_push`):
+    /// `kicad_place` the pane's rect (null: taken off screen), `visible`, `changed` (the rect differs from the last placement's; false: the
+    /// same rect again), `frame` the window shown and `frame_changed`, its `kind`, `container`, `local` (the client maps the frames itself),
+    /// `why` (layout, kept: an Edit back into the kept container, leave: View or another thread), `at_ms`. A frame switch at the same
+    /// rect is `changed: false, frame_changed: true`. The X11 side's own sends are `kicad_place_notify` (native_child.rs).
+    fn log_place(&self, why: &str, c: u64, at: Option<nc::R>, show: Option<u64>, prev: Option<(Option<nc::R>, Option<u64>)>, local: bool) {
+        if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_none() { return }
+        let (pr, ps) = prev.unwrap_or((None, None));
+        let kind = show.and_then(|w| self.frames.iter().find(|f| f.window == w)).map(|f| f.kind);
+        eprintln!("GPUI_LOG {}", json!({"kicad_place": at.map(|r| [r.x, r.y, r.w, r.h]), "visible": at.is_some() && show.is_some(), "changed": pr != at,
+            "frame": show, "frame_changed": ps != show, "kind": kind, "container": c, "local": local, "why": why, "at_ms": crate::screens::kcomment::epoch_ms() as u64}));
+    }
     fn want(&self) -> Option<u64> { if self.info.is_null() || (cfg!(windows) && self.info["mode"] == "stock") { return None } pick_local(self.wanted_kind(), &self.info, &self.frames, &self.ever_shown) }
     fn tick(&mut self, cx: &mut Context<Self>) {
         // Windows: Backplane in front with nothing holding the keyboard (a jump away from the editor it was lent from) gets it
@@ -1327,7 +1339,7 @@ impl KicadPane {
         // it was, with no round trip and no frame of the pane's background
         if let Some(k) = take_kept(top, &self.project) {
             self.container = Some(k.container); self.ever_shown = k.ever_shown; self.frames = nc::frames(k.container);
-            if let (Some(r), Some(w)) = (k.rect, self.want()) { nc::place_local(k.container, Some(r), Some(w), &self.ever_shown, &mut self.last_root); self.placed = Some((Some(r), Some(w), Vec::new())); }
+            if let (Some(r), Some(w)) = (k.rect, self.want()) { nc::place_local(k.container, Some(r), Some(w), &self.ever_shown, &mut self.last_root); self.log_place("kept", k.container, Some(r), Some(w), None, true); self.placed = Some((Some(r), Some(w), Vec::new())); }
             self.handoff_over = true; // mapped in this very frame: nothing to hand over
         } else {
             self.container = nc::container_for(top, &self.project);
@@ -1446,7 +1458,9 @@ impl KicadPane {
             if let (Some(at), Some(show)) = (at, show) { nc::sync_root(c, at, show, &mut self.last_root); }
             return;
         }
+        let prev = self.placed.as_ref().map(|(r, s, _)| (*r, *s));
         if local { nc::place_local(c, at, show, &self.ever_shown, &mut self.last_root); } else { nc::place(c, at, show, managed.as_deref(), &mut self.last_root); }
+        self.log_place("layout", c, at, show, prev, local);
         if let (Some(w), Some(_), false, None) = (show, at, self.handoff_over, self.handoff_placed) { self.handoff_placed = Some((std::time::Instant::now(), w)); }
         // a KiCad dialog with the keyboard keeps it: the shown frame can change under an open dialog (a dialog of a dialog, Change
         // Footprints over Footprint Properties, re-placed the frame twice), and the hand-in took the keyboard from the dialog to the frame
@@ -1628,7 +1642,8 @@ impl KicadPane {
         #[cfg(target_os = "macos")]
         if let Some((x, y, w, h, true)) = self.host_sent.take() { self.host_rpc(json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": false, "raise": false})); }
         let Some(c) = self.container.take() else { return };
-        nc::place(c, None, None, None, &mut self.last_root); nc::grab_escape(self.toplevel, false);
+        let prev = self.placed.as_ref().map(|(r, s, _)| (*r, *s));
+        nc::place(c, None, None, None, &mut self.last_root); self.log_place("leave", c, None, None, prev, false); nc::grab_escape(self.toplevel, false);
         // the keyboard back to Backplane's window on leaving the pane (View, another thread)
         if self.keys { nc::focus(self.toplevel); self.keys = false; }
         // kept, unmapped, with KiCad's frames in it (still attached in the hub): the next Edit of this project in this window maps it at once
@@ -1662,7 +1677,7 @@ impl KicadPane {
         let shown_meta = shown.and_then(|w| nc::window_meta(w, self.container, self.toplevel));
         json!({"ok": true, "project": self.project, "root": self.root, "open": self.open, "want": self.wanted_kind(), "say": waiting(&self.seen_info(), shown.is_some()), "dialogs": self.seen_info()["dialogs"], "notice": open_notice(&self.info).map(|(_, t)| t), "jobs": self.jobs, "local_map": self.info["local_map"], "ever_shown": self.ever_shown.len(), "conflicts": self.conflicts,
             "state": self.info["state"], "reason": self.info["reason"], "mode": self.info["mode"], "pid": self.info["pid"],
-            "holder": self.info["holder"], "sock": self.info["sock"], "pane": pane,
+            "holder": self.info["holder"], "cid": crate::hub::cid(), "sock": self.info["sock"], "pane": pane,
             "container": self.container.map_or(Value::Null, |c| { let mut v = g(c); v["xid"] = c.into(); v }),
             "toplevel": self.toplevel, "toplevel_depth": top_depth, "keys": self.keys, "handoff": self.handoff(),
             "frames": frames_src.iter().map(|f| { let mut v = g(f.window); v["xid"] = f.window.into(); v["kind"] = f.kind.into(); v["title"] = f.title.clone().into(); v }).collect::<Vec<_>>(),
