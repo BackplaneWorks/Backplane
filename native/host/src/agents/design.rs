@@ -266,21 +266,22 @@ impl Agents {
         // settled: the report is the one of a session that applied this token (`view-show` answered, and no refusal) and it shows exactly the page and source asked
         // (already showing counts). A client that did not advertise the new report (`report` < 2: an older desktop answers plain `view`, never a token) is read
         // back as on main: a newer report, in the frame brought.
-        let on_frame = |s: &(u64, Value)| frame.map_or(true, |f| s.1["kicadFrame"] == f);
-        let settled = |s: &(u64, Value)| {
+        let on_frame = |s: &(u64, u64, Value)| frame.map_or(true, |f| s.2["kicadFrame"] == f);
+        let settled = |s: &(u64, u64, Value)| {
             if !on_frame(s) { return false }
-            if s.1["report"].as_u64().unwrap_or(0) < 2 { return s.0 > before }
-            crate::present::viewer::show_applied_by(&token, crate::files::kicad::watch::viewer_client(thread)) && crate::present::viewer::show_settled(&want, &s.1, &defaults)
+            if s.2["report"].as_u64().unwrap_or(0) < 2 { return s.0 > before }
+            // (the counter, the reporting client and its picture are one snapshot: never A's picture with B's acknowledgement)
+            crate::present::viewer::show_applied_by(&token, s.1) && crate::present::viewer::show_settled_with(&want, &s.2, &defaults, crate::present::viewer::show_resolved(&token, s.1).as_ref())
         };
-        let mut now = crate::files::kicad::watch::viewer_state(thread);
+        let mut now = crate::files::kicad::watch::viewer_snapshot(thread);
         for _ in 0..60 {
             // a refusal any session recorded is part of the answer whatever else was seen: the agent is told why
-            if let Some(why) = crate::present::viewer::show_refusal_of(&token) { return (false, json!({"error": why, "shown": shown, "viewer": now.1, "settled": settled(&now)})) }
+            if let Some(why) = crate::present::viewer::show_refusal_of(&token) { return (false, json!({"error": why, "shown": shown, "viewer": now.2, "settled": settled(&now)})) }
             if settled(&now) { break }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await; now = crate::files::kicad::watch::viewer_state(thread);
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await; now = crate::files::kicad::watch::viewer_snapshot(thread);
         }
-        if let Some(why) = crate::present::viewer::show_refusal_of(&token) { return (false, json!({"error": why, "shown": shown, "viewer": now.1, "settled": settled(&now)})) }
-        (true, note(json!({"shown":shown,"viewer":now.1,"settled":settled(&now)})))
+        if let Some(why) = crate::present::viewer::show_refusal_of(&token) { return (false, json!({"error": why, "shown": shown, "viewer": now.2, "settled": settled(&now)})) }
+        (true, note(json!({"shown":shown,"viewer":now.2,"settled":settled(&now)})))
     }
     /// The same gate for a direct write of a board or schematic (`files_write`): Err names the holder.
     pub async fn doc_gate(&self, thread: &str, doc: &str) -> Result<(), String> {

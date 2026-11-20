@@ -1337,7 +1337,7 @@ pub enum LayoutOut {
 /// `TOKEN_LIFE` after it was issued; several sessions on a thread may each apply one broadcast once. The table is bounded.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ShowOutcome { Pending, Applied, Refused(String) }
-struct ShowRec { thread: String, kind: String, path: String, issued: std::time::Instant, applied_by: std::collections::HashSet<u64>, outcomes: std::collections::HashMap<u64, ShowOutcome> }
+struct ShowRec { thread: String, kind: String, path: String, issued: std::time::Instant, applied_by: std::collections::HashSet<u64>, outcomes: std::collections::HashMap<u64, ShowOutcome>, resolved: std::collections::HashMap<u64, (String, String)> }
 struct Shows { next: u64, recs: std::collections::BTreeMap<u64, ShowRec>, newest: std::collections::HashMap<String, u64> }
 /// How long a pushed show can still be applied.
 pub const TOKEN_LIFE: std::time::Duration = std::time::Duration::from_secs(20);
@@ -1352,7 +1352,7 @@ pub fn issue_show(thread: &str, kind: &str, path: &str) -> String { issue_show_a
 fn issue_show_at(thread: &str, kind: &str, path: &str, at: std::time::Instant) -> String {
     let mut m = shows_map().lock().unwrap_or_else(|e| e.into_inner());
     let n = m.next; m.next += 1;
-    m.recs.insert(n, ShowRec { thread: thread.into(), kind: kind.into(), path: path.into(), issued: at, applied_by: Default::default(), outcomes: Default::default() });
+    m.recs.insert(n, ShowRec { thread: thread.into(), kind: kind.into(), path: path.into(), issued: at, applied_by: Default::default(), outcomes: Default::default(), resolved: Default::default() });
     m.newest.insert(thread.to_string(), n);
     // bounded: what expired goes, then the oldest beyond the cap
     let now = std::time::Instant::now();
@@ -1367,6 +1367,11 @@ fn issue_show_at(thread: &str, kind: &str, path: &str, at: std::time::Instant) -
 pub fn show_refusal_of(token: &str) -> Option<String> {
     let m = shows_map().lock().unwrap_or_else(|e| e.into_inner());
     token_id(token).and_then(|n| m.recs.get(&n)).and_then(|r| r.outcomes.values().find_map(|o| if let ShowOutcome::Refused(w) = o { Some(w.clone()) } else { None }))
+}
+/// The board and schematic a session resolved an agent's Split show to (what it applied; the read-back checks those).
+pub fn show_resolved(token: &str, client: u64) -> Option<(String, String)> {
+    let m = shows_map().lock().unwrap_or_else(|e| e.into_inner());
+    token_id(token).and_then(|n| m.recs.get(&n)).and_then(|r| r.resolved.get(&client).cloned())
 }
 /// Whether `client` applied the token (it has an outcome from that session, and it was not a refusal).
 pub fn show_applied_by(token: &str, client: u64) -> bool {
@@ -1417,7 +1422,15 @@ fn view_show_token_at(st: &State, hub: &str, session: &Value, client_id: Option<
     let who = client_id.unwrap_or(0);
     let out = viewer_show_action(st, hub, session, client_id, locale, kind, path);
     match &out {
-        Some(LayoutOut::Ok(_)) => record_outcome(token, who, ShowOutcome::Applied),
+        Some(LayoutOut::Ok(_)) => {
+            record_outcome(token, who, ShowOutcome::Applied);
+            if show_kind(kind, path) == "split" {
+                let (root, linked) = (if sel.contains('~') { st.threads.get(sel).map(|t| if !t.worktree.is_empty() { t.worktree.clone() } else { st.projects.get(&t.project).map(|p| p.root.clone()).unwrap_or_default() }).unwrap_or_default() } else { root_of(st, sel) }, sel.contains('~'));
+                let pair = split_sources(session, &root, linked, path);
+                let mut m = shows_map().lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(r) = token_id(token).and_then(|n| m.recs.get_mut(&n)) { r.resolved.insert(who, pair); }
+            }
+        }
         Some(LayoutOut::Refused { text, .. }) => record_outcome(token, who, ShowOutcome::Refused(text.to_string())),
         None => {}
     }
@@ -1478,7 +1491,9 @@ pub fn show_want(kind: &str, shown: &str, root: &str, d: &ShowDefaults) -> ShowW
 /// the one `want` names: the page, and its source compared whole (a key with no path is the project's own file, resolved to its name first). Already
 /// showing counts. A report with no page, no key or an empty one never matches a page that has a source; only Browser and Review, and Files with no
 /// folder named, match by page alone.
-pub fn show_settled(want: &ShowWant, report: &Value, d: &ShowDefaults) -> bool {
+pub fn show_settled(want: &ShowWant, report: &Value, d: &ShowDefaults) -> bool { show_settled_with(want, report, d, None) }
+/// `show_settled`, with the board and schematic the session resolved a Split show to (else the board asked and its sibling).
+pub fn show_settled_with(want: &ShowWant, report: &Value, d: &ShowDefaults, resolved: Option<&(String, String)>) -> bool {
     let open = report["open"].as_str().or_else(|| report["kind"].as_str()).unwrap_or("");
     let gerbers = report["gerbers"] == true;
     let kind_ok = match want.kind.as_str() {
@@ -1495,23 +1510,26 @@ pub fn show_settled(want: &ShowWant, report: &Value, d: &ShowDefaults) -> bool {
     let path_of = |key: &str| -> Option<String> { let mut it = key.splitn(3, '|'); it.next()?; it.next()?; it.next().map(str::to_string) };
     let key_path = || -> Option<String> { path_of(report["key"].as_str().filter(|k| !k.is_empty())?) };
     let default_of = |kind: &str| match kind { "schematic" => d.sch.as_str(), "gerbers" => d.set.as_str(), _ => d.pcb.as_str() };
-    let resolved = |p: Option<String>, kind: &str| -> Option<String> { let p = p?; Some(if p.is_empty() { default_of(kind).to_string() } else { trim_end(&p) }) };
+    let resolve_path = |p: Option<String>, kind: &str| -> Option<String> { let p = p?; Some(if p.is_empty() { default_of(kind).to_string() } else { trim_end(&p) }) };
     match want.kind.as_str() {
         "board" | "3d" | "schematic" | "gerbers" => {
             if want.source.is_empty() { return false }
-            resolved(key_path(), &want.kind).is_some_and(|have| !have.is_empty() && have == want.source)
+            resolve_path(key_path(), &want.kind).is_some_and(|have| !have.is_empty() && have == want.source)
         }
         // Split settles on the board its panes draw: the pane keyed `0|`, not the Split's own key
         "split" => {
             if want.source.is_empty() { return false }
             // a stored layout is reported by its tiles ("kind\tsource", the source from the project's root): it holds the Board (and Schematic) asked for
             if let Some(tiles) = report["tiles"].as_array() {
+                // the tiles the desktop reports are the VISIBLE ones ("kind\tsource"): the Board asked for and the Schematic that is its sibling
                 let rel = rel_in(&d.root, &want.source);
-                let holds = |kind: &str| tiles.iter().filter_map(Value::as_str).any(|t| t.split_once('\t').is_some_and(|(k, s)| k == kind && (s == rel)));
-                return holds("board") && tiles.iter().filter_map(Value::as_str).any(|t| t.starts_with("schematic\t"));
+                let (board, sch) = resolved.cloned().unwrap_or_else(|| (rel.clone(), if rel.is_empty() { String::new() } else { schematic_for_board(&rel) }));
+                let board = if board.is_empty() { rel } else { board };
+                let has = |kind: &str, src: &str| tiles.iter().filter_map(Value::as_str).any(|t| t.split_once('\t').is_some_and(|(k, s)| k == kind && (src.is_empty() || s == src)));
+                return has("board", &board) && has("schematic", &sch);
             }
             let pane = report["panes"].as_array().and_then(|ps| ps.iter().filter_map(Value::as_str).find(|k| k.starts_with("0|")));
-            resolved(pane.and_then(path_of), "board").is_some_and(|have| !have.is_empty() && have == want.source)
+            resolve_path(pane.and_then(path_of), "board").is_some_and(|have| !have.is_empty() && have == want.source)
         }
         "mech" => report["part"].as_str().is_some_and(|p| !p.is_empty() && p == want.source),
         "files" => want.source.is_empty() || report["dir"].as_str().is_some_and(|d| trim_end(d) == want.source),
@@ -2570,6 +2588,19 @@ pub fn layout_action(
     }
 }
 
+/// The board and schematic (root-relative) an agent's Split show means: the board it names, else the session's current pick, else the project's own;
+/// the schematic is that board's sibling (the project's own schematic for the project's own board). The mutation and the read-back use the same pair.
+pub fn split_sources(session: &Value, root: &str, linked: bool, path: &str) -> (String, String) {
+    let sel = s(session, "sel");
+    let l = path.to_ascii_lowercase();
+    let named = if l.ends_with(".kicad_pcb") || l.ends_with(".pcbdoc") { super::layout::sanitize_rel(root, path) } else { String::new() };
+    let pick = if named.is_empty() { chosen_board(&session["drafts"], sel, root) } else { named };
+    if !pick.is_empty() { let sch = schematic_for_board(&pick); return (pick, sch) }
+    if linked || root.is_empty() { return (String::new(), String::new()) }
+    let f = crate::files::kicad::project::read(root);
+    (super::layout::sanitize_rel(root, &f.pcb), super::layout::sanitize_rel(root, &f.sch))
+}
+
 /// Under a KiCad holder's dialog a show may only re-show the locked tile: the only tile, the page the show names, and the source it names (an
 /// empty requested source is never "the same": it would stand for whatever the page's default is).
 pub fn show_preserves_locked(cur: &super::layout::Layout, locked_id: &str, pk: Option<super::layout::PageKind>, rel: &str) -> bool {
@@ -2612,9 +2643,7 @@ pub fn viewer_show_action(
         // Split is not a tile kind: over a stored layout an agent's Split show never discards the person's tiles. A layout already holding the
         // Board and the Schematic of that source is focused on its Board; otherwise the missing one is added beside; else it is refused with why.
         if nk == "split" {
-            let l = path.to_ascii_lowercase();
-            let board = if l.ends_with(".kicad_pcb") || l.ends_with(".pcbdoc") { rel.clone() } else { String::new() };
-            let sch = if board.is_empty() { String::new() } else { schematic_for_board(&board) };
+            let (board, sch) = split_sources(session, &root, linked, path);
             return Some(match layout::show_split(&cur, &board, &sch, guard.client_has_kicad, guard.locked.as_deref()) {
                 Err(r) => LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) },
                 Ok(next) => LayoutOut::Ok(commit_layout(st, hub, session, sel, &root, &next, false)),
@@ -2679,11 +2708,11 @@ pub fn viewer_show_action(
                 // the board that owns the schematic: a file of this folder, or (a thread of another machine) one of that project's boards as listed
                 let boards = s(&session["info"], &format!("fab.boards:{sel}"));
                 let known = |o: &str| if linked { boards.lines().any(|l| l == o) } else { std::path::Path::new(&abs_of(&root, o)).is_file() };
-                let pick = match owner {
-                    Some(o) if known(&o) => { owned = linked; if o == own_board { String::new() } else { o } }
-                    _ => String::new(),
-                };
-                extra.insert(format!("@view.board:{sel}"), json!(pick));
+                // only a top-level schematic selects its owner; a child sheet (no board owns it) leaves the pick as the person's own sheet action does
+                if let Some(o) = owner.filter(|o| known(o)) {
+                    owned = linked;
+                    extra.insert(format!("@view.board:{sel}"), json!(if o == own_board { String::new() } else { o }));
+                }
             }
             "gerbers" if !abs.is_empty() => {
                 extra.insert(format!("@view.gerbers:{sel}"), json!("1"));

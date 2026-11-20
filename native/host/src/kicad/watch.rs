@@ -719,25 +719,20 @@ pub fn family(ky: &str) -> String {
 }
 
 /// What each thread's viewer shows, as the client reports it (`viewer.state`): kind, source key, part, sheet, layer, selection; with a counter that moves at every report.
-static VIEWER_STATE: std::sync::OnceLock<Mutex<HashMap<String, (u64, Value)>>> = std::sync::OnceLock::new();
-fn vs() -> &'static Mutex<HashMap<String, (u64, Value)>> { VIEWER_STATE.get_or_init(Default::default) }
+static VIEWER_STATE: std::sync::OnceLock<Mutex<HashMap<String, (u64, u64, Value)>>> = std::sync::OnceLock::new();
+fn vs() -> &'static Mutex<HashMap<String, (u64, u64, Value)>> { VIEWER_STATE.get_or_init(Default::default) }
 pub fn viewer_report(thread: &str, state: Value) { viewer_report_from(0, thread, state) }
-/// The client whose report of the thread's viewer is the latest (`viewer_state`'s): an agent's show is read back from the session that applied it.
-static VIEWER_CLIENT: std::sync::OnceLock<Mutex<HashMap<String, u64>>> = std::sync::OnceLock::new();
-fn vclients() -> &'static Mutex<HashMap<String, u64>> { VIEWER_CLIENT.get_or_init(Default::default) }
-pub fn viewer_client(thread: &str) -> u64 { vclients().lock().unwrap().get(thread).copied().unwrap_or(0) }
 /// A client's viewer.state. A desktop client says whether its pane holds the embedded KiCad (`kicad`) and the frame it shows (`kicadFrame`):
 /// kept per window (`pane_key`: its `cid`, the same across a reconnect), so two windows on one hub (two projects' KiCads, two threads) each
 /// keep their own and a window that reconnects keeps its own; a report with no `kicad` (a phone, the web, an older client) says nothing of
 /// any pane.
 pub fn viewer_report_from(client: u64, thread: &str, state: Value) {
-    { let mut c = vclients().lock().unwrap(); if c.len() > 512 && !c.contains_key(thread) { c.clear(); } c.insert(thread.to_string(), client); }
     if let Some(k) = state.get("kicad").and_then(Value::as_bool) {
         let key = pane_key(client);
         let mut p = panes().lock().unwrap();
         if k { if p.len() > 64 && !p.contains_key(&key) { p.clear() } p.insert(key, (thread.to_string(), state["kicadFrame"].as_str().unwrap_or("").to_string())); } else { p.remove(&key); }
     }
-    let mut m = vs().lock().unwrap(); if m.len() > 512 && !m.contains_key(thread) { m.clear(); } let n = m.get(thread).map_or(0, |x| x.0) + 1; m.insert(thread.to_string(), (n, state)); }
+    let mut m = vs().lock().unwrap(); if m.len() > 512 && !m.contains_key(thread) { m.clear(); } let n = m.get(thread).map_or(0, |x| x.0) + 1; m.insert(thread.to_string(), (n, client, state)); }
 /// The key of a connection's window: its desktop client's `cid` (said at its view.open, kept across reconnects: embed's registry, #1379),
 /// else the connection itself (`c<id>`: a client with no cid, a test).
 pub fn pane_key(client: u64) -> String { super::embed::client_cid(client).unwrap_or_else(|| format!("c{client}")) }
@@ -753,7 +748,10 @@ pub fn pane_frame_of(key: &str, thread: &str) -> Option<String> {
     panes().lock().unwrap().get(key).filter(|(t, _)| !thread.is_empty() && t == thread).map(|(_, f)| f.clone())
 }
 /// (report counter, state) of a thread's viewer; (0, null) before any report.
-pub fn viewer_state(thread: &str) -> (u64, Value) { vs().lock().unwrap().get(thread).cloned().unwrap_or((0, Value::Null)) }
+pub fn viewer_state(thread: &str) -> (u64, Value) { let (n, _, s) = viewer_snapshot(thread); (n, s) }
+/// (report counter, the client that made the report, its state) of a thread's viewer: ONE snapshot under one lock, so a picture is never paired with
+/// another client's acknowledgement (an agent's show is read back from the session whose report this is).
+pub fn viewer_snapshot(thread: &str) -> (u64, u64, Value) { vs().lock().unwrap().get(thread).cloned().unwrap_or((0, 0, Value::Null)) }
 
 pub struct KicadRpc(pub Arc<Plots>);
 impl RpcHandler for KicadRpc {

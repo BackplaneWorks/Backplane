@@ -1055,6 +1055,52 @@ mod tests {
         assert!(viewer::show_settled(&sp, &json!({"open":"board","tiles":["board\tunit.kicad_pcb","schematic\tunit.kicad_sch"]}), &dflt));
         assert!(!viewer::show_settled(&sp, &json!({"open":"board","tiles":["board\talt/alt.kicad_pcb","schematic\tunit.kicad_sch"]}), &dflt));
     }
+    /// Review round 3: a child sheet keeps the person's pick; a stored Split restores a maximized pair and is read back on the visible, sibling pair.
+    #[test]
+    fn rail_show_child_sheet_keeps_the_pick_and_stored_split_reads_back_the_visible_sibling_pair() {
+        let d = crate::plat::tmp::dir("rail-show-r3");
+        let root = d.to_string_lossy().into_owned();
+        for f in ["unit.kicad_pcb", "unit.kicad_sch", "power.kicad_sch"] { std::fs::write(d.join(f), "()").unwrap(); }
+        std::fs::create_dir_all(d.join("alt")).unwrap(); for f in ["alt/alt.kicad_pcb", "alt/alt.kicad_sch"] { std::fs::write(d.join(f), "()").unwrap(); }
+        let mut st = crate::state::State::new();
+        st.apply_line(&json!({"$":"ProjectCreated","id":"p","title":"Board","root":root,"at":1}).to_string());
+        st.apply_line(&json!({"$":"ThreadCreated","id":"tr","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+        let show = |session: &Value, kind: &str, path: &str, client: u64| -> (viewer::LayoutOut, String) {
+            let push = viewer::show_push("tr", kind, path); let tok = push["token"].as_str().unwrap().to_string();
+            (viewer::view_show_token(&st, "h", session, Some(client), "en", kind, path, &tok).unwrap(), tok)
+        };
+        // 1. Board B is picked; a child sheet (no board owns it) is shown; the next Board press still shows B
+        let picked = json!({"sel":"tr","rid":1,"drafts":{"@view:tr":"board","@view.board:tr":"alt/alt.kicad_pcb","@view.file:tr":format!("{root}/alt/alt.kicad_pcb"),"@view.at":format!("0|{root}|{root}/alt/alt.kicad_pcb")},"panel":false,
+            "info":{"fab.board:tr":"unit.kicad_pcb","fab.boards:tr":"unit.kicad_pcb\nalt/alt.kicad_pcb"}});
+        let (viewer::LayoutOut::Ok(vo), _) = show(&picked, "schematic", &format!("{root}/power.kicad_sch"), 1) else { panic!() };
+        let mut s = picked.clone(); crate::session::patch::merge(&mut s, &vo.patch);
+        assert_eq!(s["drafts"]["@view.board:tr"], "alt/alt.kicad_pcb", "a child sheet leaves the pick");
+        assert_eq!(s["drafts"]["@view.sheet:tr"], format!("{root}/power.kicad_sch"));
+        let b = viewer::view_action(&st, "h", &s, "board").unwrap();
+        let mut after = s.clone(); crate::session::patch::merge(&mut after, &b.patch);
+        assert_eq!(after["drafts"]["@view.file:tr"], format!("{root}/alt/alt.kicad_pcb"), "the next Board press shows B");
+
+        // 2. a stored layout with the matching Board maximized: the show restores the pair; the read-back is of the visible, sibling pair
+        let tile = |id: &str, kind, src: &str| layout::Tile { id: id.into(), kind, source: src.into(), explicit: true, version: None, unresolved_version: false, overlay: None };
+        let mut l = layout::add(&layout::Layout::single(tile("t1", layout::PageKind::Board, "unit.kicad_pcb")).unwrap(), Some("t1"), layout::Side::Right, tile("t2", layout::PageKind::Schematic, "unit.kicad_sch"), false, None).unwrap();
+        l.maximized = Some("t1".into());
+        let stored = json!({"sel":"tr","rid":1,"drafts":{"@view:tr":"board","@view.layout:tr":serde_json::to_string(&l).unwrap()},"panel":false,"info":{}});
+        let (viewer::LayoutOut::Ok(vo), tok) = show(&stored, "split", &format!("{root}/unit.kicad_pcb"), 5) else { panic!() };
+        let nl: layout::Layout = serde_json::from_str(vo.patch["drafts"]["@view.layout:tr"].as_str().unwrap()).unwrap();
+        assert!(nl.maximized.is_none(), "the pair is shown: a maximized tile is restored");
+        assert_eq!(viewer::show_resolved(&tok, 5), Some(("unit.kicad_pcb".to_string(), "unit.kicad_sch".to_string())));
+        let dflt = viewer::ShowDefaults { root: root.clone(), pcb: format!("{root}/unit.kicad_pcb"), sch: format!("{root}/unit.kicad_sch"), set: String::new() };
+        let want = viewer::show_want("split", &format!("{root}/unit.kicad_pcb"), &root, &dflt);
+        let res = viewer::show_resolved(&tok, 5);
+        let settled = |tiles: Value| viewer::show_settled_with(&want, &json!({"open":"board","tiles":tiles}), &dflt, res.as_ref());
+        assert!(!settled(json!(["board\tunit.kicad_pcb"])), "a Board alone on screen is not the Split");
+        assert!(settled(json!(["board\tunit.kicad_pcb", "schematic\tunit.kicad_sch"])));
+        assert!(!settled(json!(["board\tunit.kicad_pcb", "schematic\talt/alt.kicad_sch"])), "the Schematic must be the board's sibling, not any schematic");
+        // an unnamed Split means the session's current pick (else the project's own): the mutation and the read-back share it
+        assert_eq!(viewer::split_sources(&picked, &root, false, ""), ("alt/alt.kicad_pcb".to_string(), "alt/alt.kicad_sch".to_string()));
+        let own = crate::files::kicad::project::read(&root);
+        assert_eq!(viewer::split_sources(&json!({"sel":"tr","drafts":{}}), &root, false, ""), (layout::sanitize_rel(&root, &own.pcb), layout::sanitize_rel(&root, &own.sch)), "the project's own pair, as the hub finds it");
+    }
     struct Mine; impl Screen for Mine {
         fn name(&self) -> &'static str { "mine" }
         fn view(&self, p: &Value) -> Option<Value> { if p["target"]["kind"] == "thread" { Some(json!({"shown":{"by":"rust"}})) } else { None } }
