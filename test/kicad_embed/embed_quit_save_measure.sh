@@ -52,6 +52,21 @@ SEG1=$(grep -c "(segment" "$PCB" || true); WIRE1=$(grep -c "(wire" "$SCH" || tru
 "${KICAD_CLI:-kicad-cli}" pcb export svg --output "$OUT/pcb.svg" --layers F.Cu "$PCB" >"$OUT/cli-pcb.out" 2>&1; PCBOK=$?
 "${KICAD_CLI:-kicad-cli}" sch export svg --output "$OUT/sch-svg" "$SCH" >"$OUT/cli-sch.out" 2>&1; SCHOK=$?
 echo "INFO after: board segments $SEG0 -> $SEG1 (kicad-cli $PCBOK), schematic wires $WIRE0 -> $WIRE1 (kicad-cli $SCHOK); KiCad alive: $(kill -0 "$KPID" 2>/dev/null && echo yes || echo no)"
+KILLS=$(grep -c "a hang after .*pid $KPID" "$OUT/hub.log" || true)
+SESS=$(hub_rpc "[]" 2>/dev/null | grep '^INFO ' | grep '"key":"editor.kicad.' | tail -1 | cut -c6- | python3 -c 'import json,sys
+try: v=json.load(sys.stdin).get("value") or {}
+except Exception: v={}
+if isinstance(v,str): v=json.loads(v)
+print((v.get("runtime") or {}).get("session",""))' 2>/dev/null || true)
+ASKED=$(grep -c '"answered"' "$OUT/timeline.jsonl" || true); ALIVE_AT_ASK=$(python3 -c 'import json,sys
+alive=None; first=None
+for l in open(sys.argv[1]):
+    j=json.loads(l)
+    if "alive" in j: alive=j["alive"]
+    if "answered" in j and first is None: first=alive
+print(int(bool(first)))' "$OUT/timeline.jsonl")
+echo "INFO the question answered $ASKED time(s); KiCad alive when the first was answered: $ALIVE_AT_ASK; hub kills $KILLS; the session after: $SESS"
+check "b the person's Quit with unsaved changes, the question left up ${ASK} s: KiCad never killed, alive until answered, recorded as closed by the person" "$([ "$ALIVE_AT_ASK" = 1 ] && [ "${KILLS:-0}" = 0 ] && [ "$SESS" = closedByPerson ] && echo 1 || echo 0)" "alive $ALIVE_AT_ASK kills $KILLS session $SESS"
 check "the save after the question was answered is complete: both files load, the track and the wire are in them" "$([ "$PCBOK" = 0 ] && [ "$SCHOK" = 0 ] && [ "$SEG1" -gt "$SEG0" ] && [ "$WIRE1" -gt "$WIRE0" ] && echo 1 || echo 0)" "segments $SEG0->$SEG1 wires $WIRE0->$WIRE1 cli $PCBOK/$SCHOK"
 kill "$CP" 2>/dev/null; wait "$CP" 2>/dev/null || true
 finish_suite "embed_quit_save_measure ($EMBED_MODE)"
