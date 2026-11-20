@@ -203,6 +203,7 @@ def parse_client_log(log_path: Path) -> dict:
                     "rail_drawn": dict(rail_drawn) if rail_drawn is not None else None,
                     "rail_drawn_seq": rail_drawn_seq,
                     "probe_rects": probe_rects,
+                    "header_controls": {k: v for k, v in controls.items() if k.startswith("pane-tool:") or k == "ui:vs board"},
                 }
 
     return {

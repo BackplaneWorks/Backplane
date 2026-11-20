@@ -354,6 +354,7 @@ def watch_and_capture(disp: str, client_log: Path, shot_dir: Path, kind_out: Pat
     seen: set[str] = set()
     seen_marks: set[str] = set()
     last_kicad: dict = {}
+    probes = {}
     pos = 0
     buf = ""
     env = dict(os.environ, DISPLAY=disp)
@@ -375,6 +376,9 @@ def watch_and_capture(disp: str, client_log: Path, shot_dir: Path, kind_out: Pat
                     except Exception:
                         continue
                     etype = ev.get("event")
+                    if etype == "probes":
+                        rows = ev.get("probes") or ev.get("rects") or []
+                        probes = rows if isinstance(rows, dict) else {r["id"]: r for r in rows}
                     if etype == "kicad":
                         last_kicad = ev
                         continue
@@ -412,6 +416,21 @@ def watch_and_capture(disp: str, client_log: Path, shot_dir: Path, kind_out: Pat
                         "state": ev.get("state", ""),
                         "settled": ev.get("settled", False),
                     }
+                    if os.environ.get("RAIL_B2_SIZE") == "minimum" and ok and inspect_ok and not obstructions:
+                        page = name.split("-menu")[0]
+                        target = f"pane-more:{page}"
+                        if name == "gerbers-menu":
+                            target = "pane-menu-row:gerbers:gerbers-vs-board"
+                            if target not in probes:
+                                target = "pane-tool:gerbers:gerbers-vs-board"
+                        if name == page or name == "gerbers-menu":
+                            rect = probes.get(target)
+                            if rect:
+                                x, y = (round(rect[k] + rect[d]/2) for k, d in (("x", "w"), ("y", "h")))
+                                helper = Path(__file__).resolve().parents[1] / "cef" / "xinput.py"
+                                click = subprocess.run([sys.executable, str(helper), "click", str(x), str(y)],
+                                                       env=env, timeout=10)
+                                rec["click"] = {"target": target, "point": [x, y], "ok": click.returncode == 0}
                     with captures_path.open("a", encoding="utf-8") as cf:
                         cf.write(json.dumps(rec, separators=(",", ":")) + "\n")
                     done_tmp = shot_dir / f".{name}.done.tmp"
