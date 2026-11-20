@@ -296,4 +296,5 @@ pub fn mac_chord(chord: &str) -> String {
 }
 pub fn poke(_w: u64, _keysym: u32, _mods: u16) {}
 pub fn report(_w: u64) -> Option<(R, bool, usize)> { None }
+pub fn mapped(_w: u64) -> Option<bool> { None }
 pub fn window_meta(_w: u64, _container: Option<u64>, _toplevel: u64) -> Option<(u8, (i32, i32), usize, bool)> { None }

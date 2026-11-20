@@ -1175,7 +1175,7 @@ impl KicadPane {
         // fork KiCad: if the placed frame stayed unmapped (e.g. cold-start wxGTK decor-extents deferral), ask the hub to remount it once cooldown passes.
         if self.info["mode"] == "fork" && self.info["state"] == "ready" && self.pending_show.is_none() {
             if let Some((Some(_), Some(w), _)) = &self.placed {
-                if nc::report(*w).is_some_and(|(_, on, _)| !on) {
+                if nc::mapped(*w) == Some(false) { // visibility only: report() also reads the frame's pixels (#1403)
                     let since = match self.unmapped_since {
                         Some((uw, t)) if uw == *w => t,
                         _ => { let now = std::time::Instant::now(); self.unmapped_since = Some((*w, now)); now }
