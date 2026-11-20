@@ -196,7 +196,7 @@ pub fn view_action_at(st: &State, hub: &str, session: &Value, kind: &str, now_ms
         let shown_set = shown.strip_prefix("noboard\n").unwrap_or(shown);
         let set = if s(d, &format!("@view.gerbers:{sel}")) == "1" && !shown_set.is_empty() { Some(g::set_of(shown_set).to_string()) } else { g::default_set(std::path::Path::new(&root)).map(|p| p.to_string_lossy().into_owned()) };
         match set {
-            Some(set) if gerbers_vs_board => match g::board_of_in(std::path::Path::new(&set), Some(std::path::Path::new(&root))) {
+            Some(set) if gerbers_vs_board => match g::board_for_watch(std::path::Path::new(&set), std::path::Path::new(&root)) {
                 Some(b) => g::cmp_path(&set, &b.to_string_lossy()),
                 None => { gerbers_no_board = true; format!("noboard\n{set}") }
             },
@@ -1586,6 +1586,24 @@ mod tests {
         }
         std::fs::remove_dir_all(root.join("mfg")).unwrap();
         assert_eq!(viewer_json(&st, &json!({}), &session).unwrap()["identity"]["missing"], true);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn comparison_watch_keeps_both_operands_under_the_registered_root_alias() {
+        let (mut st, th, root) = files_world("identity-gerber-root-alias");
+        let aliases = crate::plat::tmp::dir("identity-root-alias");
+        let alias = aliases.join("project");
+        std::os::unix::fs::symlink(&*root, &alias).unwrap();
+        let project = st.threads[&th].project.clone();
+        st.projects.get_mut(&project).unwrap().root = alias.to_string_lossy().into_owned();
+        std::fs::create_dir(root.join("mfg")).unwrap();
+        std::fs::write(root.join("mfg/copper.gbr"), "").unwrap();
+        std::fs::write(root.join("a.kicad_pro"), "{}").unwrap();
+        let session = sess(&th, json!({}));
+        let action = view_action(&st, "h", &session, "gerbers\tboard").unwrap();
+        let watch: Value = serde_json::from_str(action.before[0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(watch["p"]["path"], format!("gerbercmp\n{0}/mfg\n{0}/a.kicad_pcb", alias.display()));
     }
 
     #[cfg(unix)]
