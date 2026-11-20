@@ -565,25 +565,33 @@ impl Backplane {
             }
             Step::Pointer(id) => {
                 // Real pointer route: what a person's mouse does at the control's drawn rect, dispatched through GPUI's own window input.
+                // Deferred: the click handlers update this entity, so the dispatch must run after this update has ended.
                 let rect = crate::art::ctl_rects().get(id.as_str()).copied().filter(|r| r[2] > 0. && r[3] > 0.);
-                let before = self.ui_epoch;
-                match (rect, cx.windows().into_iter().next()) {
+                let win = cx.windows().into_iter().next();
+                let entity = cx.entity();
+                match (rect, win) {
                     (Some(r), Some(win)) => {
                         let at = gpui::point(px(r[0] + r[2] / 2.), px(r[1] + r[3] / 2.));
-                        let ok = win.update(cx, |_, window, cx| {
-                            use gpui::{MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Modifiers, PlatformInput};
-                            window.dispatch_event(PlatformInput::MouseMove(MouseMoveEvent { position: at, pressed_button: None, modifiers: Modifiers::default() }), cx);
-                            window.dispatch_event(PlatformInput::MouseDown(MouseDownEvent { button: MouseButton::Left, position: at, modifiers: Modifiers::default(), click_count: 1, first_mouse: false }), cx);
-                            window.dispatch_event(PlatformInput::MouseUp(MouseUpEvent { button: MouseButton::Left, position: at, modifiers: Modifiers::default(), click_count: 1 }), cx);
-                        }).is_ok();
-                        self.m("pointer", json!({"id": id, "hit_rect": true, "x": r[0] + r[2] / 2., "y": r[1] + r[3] / 2., "dispatched": ok}));
+                        cx.defer(move |cx| {
+                            let ok = win.update(cx, |_, window, cx| {
+                                use gpui::{MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Modifiers, PlatformInput};
+                                window.dispatch_event(PlatformInput::MouseMove(MouseMoveEvent { position: at, pressed_button: None, modifiers: Modifiers::default() }), cx);
+                                window.dispatch_event(PlatformInput::MouseDown(MouseDownEvent { button: MouseButton::Left, position: at, modifiers: Modifiers::default(), click_count: 1, first_mouse: false }), cx);
+                                window.dispatch_event(PlatformInput::MouseUp(MouseUpEvent { button: MouseButton::Left, position: at, modifiers: Modifiers::default(), click_count: 1 }), cx);
+                            }).is_ok();
+                            entity.update(cx, |this, cx| {
+                                this.m("pointer", json!({"id": id, "hit_rect": true, "x": r[0] + r[2] / 2., "y": r[1] + r[3] / 2., "dispatched": ok}));
+                                this.ui_epoch += 1;
+                                cx.notify();
+                                this.pump(cx);
+                            });
+                        });
                     }
-                    _ => self.m("pointer", json!({"id": id, "hit_rect": false, "dispatched": false, "error": if rect.is_none() { "no drawn rect" } else { "no window" }})),
+                    _ => {
+                        self.m("pointer", json!({"id": id, "hit_rect": false, "dispatched": false, "error": if rect.is_none() { "no drawn rect" } else { "no window" }}));
+                        cx.defer(move |cx| entity.update(cx, |this, cx| this.pump(cx)));
+                    }
                 }
-                self.ui_epoch = before + 1;
-                cx.notify();
-                let entity = cx.entity();
-                cx.defer(move |cx| entity.update(cx, |this, cx| this.pump(cx)));
             }
             Step::Fit => { self.screens.plotview.view = None; self.ui_epoch += 1; self.begin("fit".into(), Goal::Frame, cx); cx.notify(); }
             Step::Expect(what) => { // a run that cannot measure what it claims stops itself: "canvas" needs a plot canvas with real height
