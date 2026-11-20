@@ -14,6 +14,8 @@
 #   P7  (issue 1355) on the Board page with the strip's Schematic on show, an explicit viewer_show of the board brings the Board; the
 #       agent's read-back names it
 #   P8  the same with a board edit instead: the Schematic stays
+#   P9  the same explicit viewer_show while the person types in the composer: the Board comes, the keyboard stays Backplane's
+#   P10 and while KiCad has the keyboard: the Board comes and KiCad keeps it
 # Copies only (seed_project.py), fork mode with SelectItems (bp.13+: canvas_input_ago_ms, tool_busy).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -83,7 +85,7 @@ cat >"$OUT/script.json" <<'JSON'
  {"kicad":{"wait_painted":90000,"kind":"PCB","tag":"ready"}},{"click":"kicad-tab:SCH"},{"kicad":{"wait_painted":90000,"kind":"SCH","tag":"sch"}},
  {"click":"kicad-tab:PCB"},{"wait":2500},{"kicad":{"report":true,"tag":"placed"}},{"mark":"edit_ready"},{"wait":900000},{"mark":"done"}]
 JSON
-HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_HOLD=1 \
+HOME="$OUT/fh" BACKPLANE_KICAD_DEBUG=1 BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_HOLD=1 \
 "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 1000 >"$OUT/client.log" 2>&1 &
 CP=$!; track_pid "$CP"
 wait_for_log "$OUT/client.log" '"name":"edit_ready","event":"mark"' 300 || { echo "FAIL the board never opened in KiCad"; tail -n 30 "$OUT/client.log"; exit 1; }
@@ -172,6 +174,44 @@ ctl "kicad-tab:SCH" 3; person_in_chat
 A=$(edit_move C1 -0.5); sleep 3
 check "P8 the agent's board edit landed" "$(landed "$A" && echo 1 || echo 0)" "$(echo "$A" | cut -c1-200)"
 check "P8 a board edit (no explicit viewer_show) leaves the strip's Schematic on show ($(shown_frame))" "$([ "$(shown_frame)" = SCH ] && echo 1 || echo 0)"
+
+# P9 (an agent's show never takes the keyboard): the person typing in the composer, the strip on the Schematic; an agent's viewer_show of
+# the board brings the Board, the keyboard stays Backplane's (X focus outside KiCad's container, no kicad_keys_flip to true) and what
+# the person types lands in the composer's draft
+CONT=$(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); print(int((r.get("container") or {}).get("xid") or 0))' "$R")
+# whether X's keyboard focus is inside KiCad's container now
+kicad_has_keys() { python3 - "$CONT" <<'PY'
+import ctypes, ctypes.util, os, sys
+X = ctypes.CDLL(ctypes.util.find_library("X11")); X.XOpenDisplay.restype = ctypes.c_void_p
+D = ctypes.c_void_p(X.XOpenDisplay(os.environ["DISPLAY"].encode())); w = ctypes.c_ulong(); r = ctypes.c_int()
+X.XGetInputFocus(D, ctypes.byref(w), ctypes.byref(r)); c = w.value; cont = int(sys.argv[1])
+root = ctypes.c_ulong(); par = ctypes.c_ulong(); ch = ctypes.POINTER(ctypes.c_ulong)(); n = ctypes.c_uint()
+for _ in range(40):
+    if c == cont: print(1); sys.exit()
+    if not X.XQueryTree(D, ctypes.c_ulong(c), ctypes.byref(root), ctypes.byref(par), ctypes.byref(ch), ctypes.byref(n)) or par.value in (0, root.value): break
+    c = par.value
+print(0)
+PY
+}
+flips_to_kicad() { tail -n +"$(( $1 + 1 ))" "$OUT/client.log" | grep -c '"kicad_keys_flip":{"to":true' || true; }
+ctl "kicad-tab:SCH" 3; person_in_chat; sleep 0.5
+CL=$(wc -l <"$OUT/client.log"); K0=$(kicad_has_keys)
+V=$(ask viewer_show "{\"path\":\"$PCB\"}"); echo "INFO P9 viewer_show: $(echo "$V" | cut -c1-200)"
+for _ in $(seq 40); do [ "$(shown_frame)" = PCB ] && break; sleep 0.25; done; sleep 1
+K1=$(kicad_has_keys); FL=$(flips_to_kicad "$CL")
+for k in p n i n e; do python3 "$XINPUT_PY" key "$k"; sleep 0.08; done; sleep 2.5
+DRAFT=$(cat "$OUT/home/gpui-drafts.json" 2>/dev/null || true)
+check "P9 the agent's viewer_show brought the Board from the strip's Schematic ($(shown_frame))" "$([ "$(shown_frame)" = PCB ] && echo 1 || echo 0)"
+check "P9 the keyboard stayed Backplane's: X focus not in KiCad's container ($K0 -> $K1), no kicad_keys_flip to true ($FL)" "$([ "$K0" = 0 ] && [ "$K1" = 0 ] && [ "$FL" = 0 ] && echo 1 || echo 0)"
+check "P9 what the person typed landed in the composer's draft" "$(echo "$DRAFT" | grep -q 'pnine' && echo 1 || echo 0)" "$(echo "$DRAFT" | cut -c1-200)"
+# P10 (its mirror): KiCad has the keyboard (a click in the pane), the strip on the Schematic: the bring switches the frame and KiCad keeps it
+ctl "kicad-tab:SCH" 3
+python3 "$XINPUT_PY" click $((FX + FW / 2)) $((FY + FH / 2)); sleep 0.4; python3 "$XINPUT_PY" key Escape; sleep 1
+K2=$(kicad_has_keys)
+V=$(ask viewer_show "{\"path\":\"$PCB\"}")
+for _ in $(seq 40); do [ "$(shown_frame)" = PCB ] && break; sleep 0.25; done; sleep 1
+K3=$(kicad_has_keys)
+check "P10 KiCad holding the keyboard: the bring switched to the Board ($(shown_frame)) and KiCad kept the keyboard ($K2 -> $K3)" "$([ "$(shown_frame)" = PCB ] && [ "$K2" = 1 ] && [ "$K3" = 1 ] && echo 1 || echo 0)"
 
 hub_rpc "[{\"method\":\"editor.kicad.close\",\"params\":{\"project\":\"$PROJ/ecc83-pp.kicad_pro\",\"save\":\"discard\"}}]" >/dev/null || true
 finish_suite "embed_follow_pane_e2e ($EMBED_MODE)"

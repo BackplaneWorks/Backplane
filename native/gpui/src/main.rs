@@ -80,14 +80,15 @@ impl Backplane {
         let _=self.tx.try_send(screens::viewer::view_kind(&match part {Some(p)=>format!("{k}\t{p}"),None=>k})); cx.notify();
     }
     /// An agent's viewer_show named the KiCad frame the embedded pane is to show (the hub saw it show another: the person's strip tab;
-    /// issue 1355): the pane shows it as a tab press would (show_kind_by), so it publishes the change itself. Only the window whose page
+    /// issue 1355): the pane shows it as a tab press would (show_kind_as), so it publishes the change itself, but as Automatic: the keyboard
+    /// stays where it is (the person typing in the composer keeps it; KiCad keeps it if it had it). Only the window whose page
     /// holds the embedded KiCad for that thread.
     pub(crate) fn kicad_bring(&mut self,thread:&str,frame:&str,cx:&mut Context<Self>){
         if frame.is_empty()||!(self.selected==thread||self.selected.ends_with(&format!("|{thread}"))) {return}
         let Some(p)=self.screens.kicad.clone() else {return};
         if !p.read(cx).in_page||p.read(cx).tab()==frame {return}
         eprintln!("GPUI_LOG {}",serde_json::json!({"kicad_bring":frame,"from":p.read(cx).tab()}));
-        let f=frame.to_string(); p.update(cx,|p,cx|p.show_kind_by(&f,"an agent's viewer_show (issue 1355)",cx)); cx.notify(); // i18n-ok: a debug log cause
+        let f=frame.to_string(); p.update(cx,|p,cx|p.show_kind_as(&f,"an agent's viewer_show (issue 1355)",crate::viewers::kicad_pane::ShowBy::Automatic,cx)); cx.notify(); // i18n-ok: a debug log cause
     }
     pub(crate) fn new(window:&mut Window,cx:&mut Context<Self>,config:hub::Config,started:Instant)->Self {
         let (swatches,gallery,fonts,theme)=(config.swatches,config.gallery,config.fonts,config.theme.clone());let steps:VecDeque<Step>=config.script.as_ref().map(|p|script::load(p)).unwrap_or_default();let script_total=steps.len();
