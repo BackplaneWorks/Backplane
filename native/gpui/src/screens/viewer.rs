@@ -477,14 +477,14 @@ fn plot_pane_inner(cx: &mut Context<Backplane>, light: bool, slot: usize, open: 
             let rk = rk.clone();
             super::panestate::retry_btn(cx, light, format!("plot-retry-{slot}"), ready, move |this, cx| {
                 let now = std::time::Instant::now();
-                if !super::panestate::retry_ready(this.screens.plotview.last_retry, now) { return }
+                if !super::panestate::retry_ready(this.screens.plots[0].last_retry, now) { return }
                 let sent = if slot == 0 {
                     super::histbar::retry_watch(this).unwrap_or_else(|| this.tx.try_send(Command::Action("view".into(), "retry".into())).is_ok())
                 } else {
                     this.tx.try_send(Command::Action("view".into(), "retry".into())).is_ok()
                 };
                 if sent {
-                    this.screens.plotview.last_retry = Some(now);
+                    this.screens.plots[0].last_retry = Some(now);
                     this.screens.plot.retrying.insert(rk.clone(), now);
                     cx.notify();
                 }
@@ -675,7 +675,7 @@ fn split_edge(cx: &mut Context<Backplane>, light: bool, main: bool, row: bool) -
     };
     let d = if main { d.on_drag(SplitMain, |_, _, _, cx| cx.new(|_| Ghost)).on_drag_move(cx.listener(move |this, e: &DragMoveEvent<SplitMain>, _, cx| moved(this, e.event.position, cx))) }
         else { d.on_drag(SplitSide, |_, _, _, cx| cx.new(|_| Ghost)).on_drag_move(cx.listener(move |this, e: &DragMoveEvent<SplitSide>, _, cx| moved(this, e.event.position, cx))) };
-    d.on_click(reset).into_any_element()
+    crate::ui::with_rect(d.on_click(reset), || id.to_owned()).into_any_element()
 }
 /// A pane's head (0.14's combo-head): its name, and × to put it away.
 fn split_head(cx: &mut Context<Backplane>, light: bool, pane: &'static str, name: &'static str, more: Option<AnyElement>) -> Div {
@@ -741,7 +741,7 @@ pub fn probe_words(card: &super::plot::Card) -> Vec<String> {
 /// Split (0.14's combined view): the schematic beside the board and its 3D model (stacked the other way on a pane taller than wide), each under a head that
 /// names it and puts it away, the bar's toggles bring each back, and the dividers between them resize them (kept on this device). Every pane is a page of
 /// `viewer.panes` (key, camera), all watched at once; a tap in the schematic or the board lights the part or net in both.
-fn split_page(cx: &mut Context<Backplane>, light: bool, viewer: &Value, plot: &super::plot::Store, pvs: &mut [super::plotview::PlotView; 2], clock: &mut super::panestate::LoadingClock, last_retry: Option<std::time::Instant>, solid: Option<&Entity<crate::viewers::solid::SolidPage>>, have: &str, boards: Option<Tool>, actions: Header) -> AnyElement {
+fn split_page(cx: &mut Context<Backplane>, light: bool, viewer: &Value, plot: &super::plot::Store, pvs: [&mut super::plotview::PlotView; 2], clock: &mut super::panestate::LoadingClock, last_retry: Option<std::time::Instant>, solid: Option<&Entity<crate::viewers::solid::SolidPage>>, have: &str, boards: Option<Tool>, actions: Header) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let panes: Vec<&Value> = viewer["panes"].as_array().map(|a| a.iter().collect()).unwrap_or_default();
     if panes.len() < 3 {
@@ -755,11 +755,11 @@ fn split_page(cx: &mut Context<Backplane>, light: bool, viewer: &Value, plot: &s
     // landscape (the pane wider than tall): the schematic on the left, the board over the 3D on the right; portrait: the schematic on top, the board beside the 3D
     let wide = split_box(0).map_or(true, |b| b.size.width >= b.size.height);
     let [sch_pv, brd_pv] = pvs;
-    let pane = |head: Div, body: AnyElement| div().flex().flex_col().min_w_0().min_h_0().child(head).child(div().relative().flex_1().min_h_0().min_w_0().child(body));
+    let pane = |id: &str, head: Div, body: AnyElement| crate::ui::with_rect(div().flex().flex_col().min_w_0().min_h_0().child(head).child(div().relative().flex_1().min_h_0().min_w_0().child(body)), || format!("tile:{id}"));
     // the schematic pane's sheets (0.14's combo-sheets): the sheet on show in its head, the hierarchy in a menu under it
     let sheets_el = split_sheets(cx, light, &plot.sheets, &string(panes[0], "key"), sch_pv);
-    let sch = s_on.then(|| { /* i18n-ok: split_head draws the name through trs */ let h = split_head(cx, light, "sch", "Schematic", sheets_el); let b = plot_pane_inner(cx, light, 1, "schematic", panes[0], plot.frame_for(&string(panes[0], "key")), sch_pv, false, &plot.sheets, &plot.sheet_refs, None, false, Some(&mut *clock), Some(&plot.retrying), last_retry); pane(h, b) });
-    let brd = b_on.then(|| { /* i18n-ok: split_head draws the name through trs */ let h = split_head(cx, light, "pcb", "Board", None); let b = plot_pane_inner(cx, light, 2, "board", panes[1], plot.frame_for(&string(panes[1], "key")), brd_pv, false, &[], &[], None, false, Some(&mut *clock), Some(&plot.retrying), last_retry); pane(h, b) });
+    let sch = s_on.then(|| { /* i18n-ok: split_head draws the name through trs */ let h = split_head(cx, light, "sch", "Schematic", sheets_el); let b = plot_pane_inner(cx, light, 1, "schematic", panes[0], plot.frame_for(&string(panes[0], "key")), sch_pv, false, &plot.sheets, &plot.sheet_refs, None, false, Some(&mut *clock), Some(&plot.retrying), last_retry); pane("sch", h, b) });
+    let brd = b_on.then(|| { /* i18n-ok: split_head draws the name through trs */ let h = split_head(cx, light, "pcb", "Board", None); let b = plot_pane_inner(cx, light, 2, "board", panes[1], plot.frame_for(&string(panes[1], "key")), brd_pv, false, &[], &[], None, false, Some(&mut *clock), Some(&plot.retrying), last_retry); pane("pcb", h, b) });
     let d3 = t_on.then(|| {
         let want3 = string(panes[2], "key");
         let empty3 = string(panes[2], "empty");
@@ -774,7 +774,7 @@ fn split_page(cx: &mut Context<Backplane>, light: bool, viewer: &Value, plot: &s
         } else {
             match solid { Some(s) if solid_ready(&want3, &have) && !have.is_empty() => div().size_full().child(s.clone()).into_any_element(), _ => model_loading(clock, &format!("split-3d:{want3}"), &super::panestate::loading_for("3d", false)) }
         };
-        let h = split_head(cx, light, "3d", "3D", None); pane(h, model)
+        let h = split_head(cx, light, "3d", "3D", None); pane("3d", h, model)
     });
     // the side group: the board and the 3D, one beside (or over) the other with the divider between them
     let side_row = !wide;
@@ -857,7 +857,7 @@ fn ask_boards_once(cx: &mut Context<Backplane>, thread: &str) {
 }
 /// The page the pane shows and whether it is a press the hub has not answered yet: a rail press shuts the pane, or opens it laid out as that page, at once;
 /// None while nothing is open.
-fn pane_page(thread: &Value, local: bool) -> Option<(String, bool)> {
+pub(crate) fn pane_page(thread: &Value, local: bool) -> Option<(String, bool)> {
     let viewer = &thread["viewer"]; let diff_on = thread["diff"].is_object();
     let open = viewer["open"].as_str().unwrap_or("");
     let press = pressed(&if diff_on { "diff".to_string() } else { active_kind(viewer, None) });
@@ -885,7 +885,7 @@ pub fn editor_press(viewer: &Value) -> Option<String> {
     pressed(&active_kind(viewer, None)).filter(|k| matches!(k.as_str(), "board" | "schematic" | "3d")) // i18n-ok: rail page kinds
 }
 /// The panel (None while nothing is open). 520 px wide, between the thread and the rail.
-pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>, editor: Option<&Entity<crate::viewers::kicad_pane::KicadPane>>, update: Option<AnyElement>, review_panel: Option<AnyElement>, checks: &super::mgmt_checks::State) -> AnyElement {
+pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: Option<[&mut super::plotview::PlotView; 2]>, solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>, editor: Option<&Entity<crate::viewers::kicad_pane::KicadPane>>, update: Option<AnyElement>, review_panel: Option<AnyElement>, checks: &super::mgmt_checks::State) -> AnyElement {
     let shared_scroll = review_panel.is_some();
     // KiCad itself in the pane (its Board, Schematic or 3D): its frames switch at once, and it stays until the hub moves the pane (kicad_pane.rs)
     let local = editor.is_some() && editor_local(thread);
@@ -958,7 +958,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         else if matches!(open, "image" | "pdf" | "text") && viewer["file"].is_object() { let a = acts(cx); super::filesui::preview_page(cx, reg, light, open, viewer, files_ui, images, target, a) }
         else if open == "review" && viewer["review"].is_object() { let a = header(cx); review_page(cx, reg, light, &viewer["review"], &mut pv.loading, a, review_panel) }
         else if matches!(open, "board" | "schematic") { let a = header(cx); plot_page(cx, light, open, viewer, plot, pv, a) }
-        else if open == "split" { let have = solid.map(|s| s.read(cx).shown_key().to_string()).unwrap_or_default(); let a = header(cx); let b = crate::viewers::boards::pane_tool(cx, light, viewer, &pv.boards); let lr = pv.last_retry; split_page(cx, light, viewer, plot, split_pv, &mut pv.loading, lr, solid, &have, b, a) }
+        else if open == "split" { let have = solid.map(|s| s.read(cx).shown_key().to_string()).unwrap_or_default(); let a = header(cx); let b = crate::viewers::boards::pane_tool(cx, light, viewer, &pv.boards); let lr = pv.last_retry; split_page(cx, light, viewer, plot, split_pv.unwrap(), &mut pv.loading, lr, solid, &have, b, a) }
         else if matches!(open, "3d" | "mech") {
             let key_empty = string(viewer, "key").is_empty();
             let want = string(viewer, "key");
@@ -1003,11 +1003,11 @@ pub fn pane(cx: &mut Context<Backplane>, light: bool, thread: &Value, page: AnyE
     // the embedded editor's full size: the pane takes the room of the sidebar and the thread (ui.rs folds them for it)
     if KICAD_FULL.load(std::sync::atomic::Ordering::Relaxed) && matches!(open, "board" | "schematic" | "3d") {
         let screen = KICAD_SCREEN.load(std::sync::atomic::Ordering::Relaxed);
-        return Some(div().flex_1().min_w_0().h_full().relative().when(!screen, |d| d.border_l_1()).border_color(c("rule")).flex().flex_col().child(page).into_any_element())
+        return Some(div().flex_1().min_w_0().h_full().relative().when(!screen, |d| d.border_l_1()).border_color(c("rule")).flex().flex_col().when(crate::art::rects_on(), |d| d.child(crate::art::probe_rect("tile:main".into()))).child(page).into_any_element())
     }
     // The pane gives way to the thread: it shrinks (down to its least) before the composer row is squeezed, so Attach and Send stay reachable
     Some(div().w(px(width)).max_w(relative(if width > base { 1. } else { 0.62 })).min_w(px(PANE_LEAST.load(std::sync::atomic::Ordering::Relaxed) as f32)).h_full().flex_shrink().relative().border_l_1().border_color(c("rule")).flex().flex_col()
-        .child(resize_handle(cx)).child(page).into_any_element())
+        .when(crate::art::rects_on(), |d| d.child(crate::art::probe_rect("tile:main".into()))).child(resize_handle(cx)).child(page).into_any_element())
 }
 
 /// The pane's own width on a page: this device's, and for a Split at least a desktop's.
