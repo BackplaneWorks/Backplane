@@ -2470,7 +2470,8 @@ pub fn viewer_show_action(
             let guard = hub_kicad_guard(&cur_derived, &root, &picked_abs, client_id, None, None, linked);
             if let Some(lid) = guard.locked.as_deref() {
                 if let Some(lt) = cur_derived.tile(lid) {
-                    let same_source = rel.is_empty() || rel == lt.source;
+                    // exact: the page the show names, with the source it names (an unnamed source is the tile's only when the tile is not one the person picked)
+                    let same_source = rel == lt.source || (rel.is_empty() && !lt.explicit);
                     let preserves = cur_derived.tiles().len() == 1
                         && lt.kind == pk
                         && lt.version.is_none()

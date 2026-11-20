@@ -4709,7 +4709,7 @@
       "cmds": [],
       "drafts": {
         "@view:t": "board",
-        "@view.file:t": "git\t<ROOT>/.git\t1111111\t53\t<ROOT>/board.kicad_pcb"
+        "@view.file:t": "git\t<ROOT>/.git\t1111111\t<LEN>\t<ROOT>/board.kicad_pcb"
       },
       "info": {
         "fab.board:t": "board.kicad_pcb",
@@ -4717,9 +4717,9 @@
       },
       "viewer": {
         "open": "board",
-        "key": "0|<ROOT>|git\t<ROOT>/.git\t1111111\t53\t<ROOT>/board.kicad_pcb",
+        "key": "0|<ROOT>|git\t<ROOT>/.git\t1111111\t<LEN>\t<ROOT>/board.kicad_pcb",
         "hasGerbers": true,
-        "layers": "0|<ROOT>|git\t<ROOT>/.git\t1111111\t53\t<ROOT>/board.kicad_pcb",
+        "layers": "0|<ROOT>|git\t<ROOT>/.git\t1111111\t<LEN>\t<ROOT>/board.kicad_pcb",
         "layerModes": true,
         "layerMarks": [
           {
@@ -5038,7 +5038,7 @@
       "cmds": [],
       "drafts": {
         "@view:t": "board",
-        "@view.file:t": "cmp\ngit\t<ROOT>/.git\t1111111\t53\t<ROOT>/board.kicad_pcb\ngit\t<ROOT>/.git\t2222222\t53\t<ROOT>/board.kicad_pcb"
+        "@view.file:t": "cmp\ngit\t<ROOT>/.git\t1111111\t<LEN>\t<ROOT>/board.kicad_pcb\ngit\t<ROOT>/.git\t2222222\t<LEN>\t<ROOT>/board.kicad_pcb"
       },
       "info": {
         "fab.board:t": "board.kicad_pcb",
@@ -5046,9 +5046,9 @@
       },
       "viewer": {
         "open": "board",
-        "key": "0|<ROOT>|cmp\ngit\t<ROOT>/.git\t1111111\t53\t<ROOT>/board.kicad_pcb\ngit\t<ROOT>/.git\t2222222\t53\t<ROOT>/board.kicad_pcb",
+        "key": "0|<ROOT>|cmp\ngit\t<ROOT>/.git\t1111111\t<LEN>\t<ROOT>/board.kicad_pcb\ngit\t<ROOT>/.git\t2222222\t<LEN>\t<ROOT>/board.kicad_pcb",
         "hasGerbers": true,
-        "layers": "0|<ROOT>|cmp\ngit\t<ROOT>/.git\t1111111\t53\t<ROOT>/board.kicad_pcb\ngit\t<ROOT>/.git\t2222222\t53\t<ROOT>/board.kicad_pcb",
+        "layers": "0|<ROOT>|cmp\ngit\t<ROOT>/.git\t1111111\t<LEN>\t<ROOT>/board.kicad_pcb\ngit\t<ROOT>/.git\t2222222\t<LEN>\t<ROOT>/board.kicad_pcb",
         "layerModes": true,
         "layerMarks": [
           {
