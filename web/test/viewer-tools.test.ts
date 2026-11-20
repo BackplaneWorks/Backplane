@@ -76,16 +76,26 @@ describe("viewer-tools", () => {
     expect(st.isLive()).toBe(true);
   });
 
-  test("matchesCompareKey routes only exact requested commit and rejects delayed previous commit frame", () => {
+  test("matchesCompareKey routes only exact requested commit and file, rejecting delayed commit or sibling sheet frames", () => {
     const prefix = "0|/proj|diff\n";
-    const frameA = "0|/proj|diff\ngit\t/proj\taaa111\t12\tboard.kicad_pcb";
-    const frameB = "0|/proj|diff\ngit\t/proj\tbbb222\t12\tboard.kicad_pcb";
+    const frameA = "0|/proj|diff\ngit\t/proj\taaa111\t5\t/proj/board.kicad_pcb\n/proj/board.kicad_pcb";
+    const frameB = "0|/proj|diff\ngit\t/proj\tbbb222\t5\t/proj/board.kicad_pcb\n/proj/board.kicad_pcb";
     // Delayed Compare A -> B: only B matches while waiting for bbb222
-    expect(matchesCompareKey(frameA, prefix, "bbb222")).toBe(false);
-    expect(matchesCompareKey(frameB, prefix, "bbb222")).toBe(true);
+    expect(matchesCompareKey(frameA, prefix, "bbb222", "/proj/board.kicad_pcb")).toBe(false);
+    expect(matchesCompareKey(frameB, prefix, "bbb222", "/proj/board.kicad_pcb")).toBe(true);
+
+    // Same commit, two schematic sheets: late frame for sheet A cannot satisfy sheet B
+    const schPrefix = "1|/proj|diff\n";
+    const sheetA = "1|/proj|diff\ngit\t/proj\tbbb222\t5\t/proj/power.kicad_sch\n/proj/power.kicad_sch";
+    const sheetB = "1|/proj|diff\ngit\t/proj\tbbb222\t5\t/proj/amp.kicad_sch\n/proj/amp.kicad_sch";
+    expect(matchesCompareKey(sheetA, schPrefix, "bbb222", "/proj/amp.kicad_sch")).toBe(false);
+    expect(matchesCompareKey(sheetB, schPrefix, "bbb222", "/proj/amp.kicad_sch")).toBe(true);
+    expect(matchesCompareKey(sheetA, schPrefix, "bbb222", "amp.kicad_sch")).toBe(false);
+    expect(matchesCompareKey(sheetB, schPrefix, "bbb222", "amp.kicad_sch")).toBe(true);
+
     // Rejects wrong prefix or empty guards
-    expect(matchesCompareKey(frameB, "1|/proj|diff\n", "bbb222")).toBe(false);
-    expect(matchesCompareKey(frameB, "", "bbb222")).toBe(false);
-    expect(matchesCompareKey(frameB, prefix, "")).toBe(false);
+    expect(matchesCompareKey(frameB, "1|/proj|diff\n", "bbb222", "/proj/board.kicad_pcb")).toBe(false);
+    expect(matchesCompareKey(frameB, "", "bbb222", "/proj/board.kicad_pcb")).toBe(false);
+    expect(matchesCompareKey(frameB, prefix, "", "/proj/board.kicad_pcb")).toBe(false);
   });
 });

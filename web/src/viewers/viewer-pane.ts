@@ -201,6 +201,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   let compareMenuOpen = false;
   let compareKeyPrefix = "";
   let compareCommit = "";
+  let compareFile = "";
   let activeCompareSig = "";
 
   document.addEventListener("click", (e) => {
@@ -268,6 +269,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     if (!cmp) {
       compareKeyPrefix = "";
       compareCommit = "";
+      compareFile = "";
       activeCompareSig = "";
       await startWatch(false);
       return;
@@ -289,6 +291,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     watchPending = true;
     compareKeyPrefix = "";
     compareCommit = cmp.commit;
+    compareFile = "";
     activeCompareSig = sig;
     try {
       const res = await api.hub.rpc<{ root?: string }>("viewer.compare", {
@@ -303,6 +306,12 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       const kindNum = page === "schematic" ? "1" : "0";
       compareKeyPrefix = root ? `${kindNum}|${root}|diff\n` : `${kindNum}|`;
       compareCommit = cmp.commit;
+      const rawFile = selectedPath || (page === "schematic" ? filesInfo.sch : filesInfo.pcb) || "";
+      compareFile = rawFile
+        ? (rawFile.startsWith("/") || /^[A-Za-z]:[\\/]/.test(rawFile) || !root
+            ? rawFile
+            : `${root.replace(/\/+$/, "")}/${rawFile.replace(/^\/+/, "")}`)
+        : "";
       watchPending = false;
       const queued = pendingQueue;
       clearPending();
@@ -321,6 +330,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       watchPending = false;
       compareKeyPrefix = "";
       compareCommit = "";
+      compareFile = "";
       activeCompareSig = "";
       clearPending();
       setBanner(err instanceof Error ? err.message : String(err), true);
@@ -983,6 +993,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     watchPending = true;
     compareKeyPrefix = "";
     compareCommit = "";
+    compareFile = "";
     activeCompareSig = "";
     try {
       const res = await api.hub.rpc<{ keys?: string[] }>("viewer.watch", params);
@@ -1014,10 +1025,11 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       return;
     }
     if (!activeKeys.has(key)) {
-      if (matchesCompareKey(key, compareKeyPrefix, compareCommit)) {
+      if (matchesCompareKey(key, compareKeyPrefix, compareCommit, compareFile)) {
         activeKeys.add(key);
         compareKeyPrefix = "";
         compareCommit = "";
+        compareFile = "";
       } else {
         return;
       }
@@ -1043,10 +1055,11 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     const key = typeof map.key === "string" ? map.key : "";
     if (!key) return;
     if (!activeKeys.has(key)) {
-      if (matchesCompareKey(key, compareKeyPrefix, compareCommit)) {
+      if (matchesCompareKey(key, compareKeyPrefix, compareCommit, compareFile)) {
         activeKeys.add(key);
         compareKeyPrefix = "";
         compareCommit = "";
+        compareFile = "";
       } else {
         return;
       }
@@ -1147,6 +1160,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       compareMenuOpen = false;
       compareKeyPrefix = "";
       compareCommit = "";
+      compareFile = "";
       activeCompareSig = "";
       history.goLive();
       solidBarEl.hidden = true;
