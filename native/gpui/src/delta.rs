@@ -7,18 +7,41 @@ use std::collections::{HashMap, VecDeque};
 
 const MAX_OPS: usize = 20000;
 const MAX_DEPTH: usize = 96;
-pub const BASES: usize = 8;
+pub const BASES: usize = 16;
 const FIELDS: [&str; 4] = ["shown", "session", "window", "overlay"];
 
-/// The last bodies received, by token, bounded.
+/// The last bodies received, by token, bounded, plus the newest token per view target so
+/// switching back to a recently opened thread diffs against that thread's own cached body.
 #[derive(Default)]
-pub struct Bases { map: HashMap<String, Value>, order: VecDeque<String>, pub newest: String }
+pub struct Bases { map: HashMap<String, Value>, order: VecDeque<String>, by_target: HashMap<String, String>, pub newest: String }
 impl Bases {
-    pub fn clear(&mut self) { self.map.clear(); self.order.clear(); self.newest.clear(); }
+    pub fn clear(&mut self) { self.map.clear(); self.order.clear(); self.by_target.clear(); self.newest.clear(); }
+    pub fn target_key(target: &Value) -> String {
+        format!("{}:{}", target["kind"].as_str().unwrap_or(""), target["id"].as_str().unwrap_or(""))
+    }
     pub fn keep(&mut self, token: String, body: Value) {
         if self.map.insert(token.clone(), body).is_none() { self.order.push_back(token.clone()); }
         self.newest = token;
-        while self.order.len() > BASES { if let Some(old) = self.order.pop_front() { self.map.remove(&old); } }
+        while self.order.len() > BASES {
+            if let Some(old) = self.order.pop_front() {
+                self.map.remove(&old);
+                self.by_target.retain(|_, v| v != &old);
+            }
+        }
+    }
+    pub fn keep_for(&mut self, target: &Value, token: String, body: Value) {
+        let key = Self::target_key(target);
+        self.keep(token.clone(), body);
+        if !key.is_empty() { self.by_target.insert(key, token); }
+    }
+    /// Best base token to offer for `target`: the newest cached body for that same target if still
+    /// held, else the newest body overall (so the sidebar and chrome still diff cleanly).
+    pub fn offer_for(&self, target: &Value) -> &str {
+        let key = Self::target_key(target);
+        if let Some(tok) = self.by_target.get(&key) {
+            if self.map.contains_key(tok) { return tok.as_str(); }
+        }
+        self.newest.as_str()
     }
     pub fn get(&self, token: &str) -> Option<&Value> { self.map.get(token) }
 }
@@ -194,5 +217,22 @@ mod tests {
     #[test] fn array_specs_reuse_and_copy() {
         let out = apply(Some(json!({"a":[{"x":1},{"x":2}]})), &json!([["a",["a"],[[0,1],[1,{"x":9}],[0,1],[0,0]]]]), None).unwrap();
         assert_eq!(out, json!({"a":[{"x":2},{"x":9},{"x":2},{"x":1}]}));
+    }
+    #[test] fn offer_for_prefers_same_target_then_newest_and_respects_lru_eviction() {
+        let mut bases = Bases::default();
+        let t0 = json!({"kind":"thread","id":"t0"});
+        let t1 = json!({"kind":"thread","id":"t1"});
+        let t2 = json!({"kind":"thread","id":"t2"});
+        bases.keep_for(&t0, "1".into(), json!({"shown":0}));
+        bases.keep_for(&t1, "2".into(), json!({"shown":1}));
+        assert_eq!(bases.offer_for(&t0), "1", "switching back to t0 offers t0's own cached body");
+        assert_eq!(bases.offer_for(&t1), "2");
+        assert_eq!(bases.offer_for(&t2), "2", "unseen target falls back to newest for sidebar diff");
+        // Evict token "1" by pushing BASES newer bodies
+        for i in 3..=(BASES as u64 + 3) {
+            bases.keep_for(&json!({"kind":"thread","id":format!("tx{i}")}), i.to_string(), json!({"shown":i}));
+        }
+        assert!(bases.get("1").is_none());
+        assert_eq!(bases.offer_for(&t0), (BASES as u64 + 3).to_string(), "evicted target falls back to newest");
     }
 }

@@ -122,29 +122,38 @@ object DataClient {
         if (Pairing.key(l) == null) { pairingError = Msg.android_pair_link_none; return }
         val changed = Pairing.key(link ?: "") != Pairing.key(l)
         save(HubList.adopt(links, l) { Pairing.key(it) }); needsRepair = false; adding = false; uberAfterPair = true
-        if (changed) reset()
+        if (changed) { reset(); loadCache() }
         connect()
     }
-    /** Switch to another paired hub: it goes first, this phone's copy of the last one's threads is dropped, and the socket moves. */
+    /** Switch to another paired hub: it goes first, its disk cache paints at once, and the socket moves. */
     fun useHub(key: String) {
         if (Pairing.key(link ?: "") == key) return
         val next = HubList.use(links, key) { Pairing.key(it) }; if (next == links) return
-        close(); leaveHome(); save(next); reset(); needsRepair = false; pairingError = ""; failure = ""; connect()
+        close(); leaveHome(); save(next); reset(); loadCache(); needsRepair = false; pairingError = ""; failure = ""; connect()
     }
     /** Forget one hub; when it was the one in use, the next paired hub is used (none left: the pairing screen). */
     fun forgetHub(key: String) {
         val current = Pairing.key(link ?: "") == key
+        cacheFile(key).delete()
         save(HubList.forget(links, key) { Pairing.key(it) })
-        if (key == homeKey) { setHome(""); if (onHome) { leaveHome(); close(); reset(); connect() } }
+        if (key == homeKey) { setHome(""); if (onHome) { leaveHome(); close(); reset(); loadCache(); connect() } }
         if (!current) return
-        close(); reset(); needsRepair = false; pairingError = ""
+        close(); reset(); loadCache(); needsRepair = false; pairingError = ""
         if (link != null) connect() else { conn = Conn.OFFLINE; askLink = null; pairEpoch++ }
     }
     /** bumped by unpair(): the pairing screen starts again with empty fields */
     var pairEpoch by mutableStateOf(0); private set
     // forgets the hub and everything a pairing attempt left: a revoked mark, the last message, a pending question
-    fun unpair() { setHome(""); leaveHome(); keepOutbox(Outbox()); links = emptyList(); adding = false; prefs().edit().remove("link").remove("links").apply(); reset(); close(); conn = Conn.OFFLINE; needsRepair = false; pairingError = ""; askLink = null; pairEpoch++ }
-    private fun reset() { Swarms.reset(); notice = HubNotice(); star = null; telemetryNotice = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null; cacheFile().delete() }
+    fun unpair() {
+        for (l in links) { Pairing.key(l)?.let { cacheFile(it).delete() } }
+        legacyCacheFile().delete()
+        setHome(""); leaveHome(); keepOutbox(Outbox()); links = emptyList(); adding = false; prefs().edit().remove("link").remove("links").apply(); reset(clearDisk = true); close(); conn = Conn.OFFLINE; needsRepair = false; pairingError = ""; askLink = null; pairEpoch++
+    }
+    private fun reset(clearDisk: Boolean = false) {
+        saveJob?.cancel()
+        Swarms.reset(); notice = HubNotice(); star = null; telemetryNotice = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null
+        if (clearDisk) link?.let { Pairing.key(it) }?.let { cacheFile(it).delete() }
+    }
 
     // ---- connection
     fun connect() {
@@ -186,7 +195,7 @@ object DataClient {
         if (g != gen) return
         failure = why; close(); conn = Conn.OFFLINE
         if (downSince == 0L) downSince = System.currentTimeMillis()
-        if (onHome && needsRepair) { needsRepair = false; leaveHome(); reset(); connect(); return }   // the home refused this phone: back to the hub chosen
+        if (onHome && needsRepair) { needsRepair = false; leaveHome(); reset(); loadCache(); connect(); return }   // the home refused this phone: back to the hub chosen
         if (link == null || needsRepair) return
         failover()
         val w = backoff; backoff = minOf(backoff * 2, 4000)
@@ -281,13 +290,13 @@ object DataClient {
                 val up = answers(home)
                 if (onHome || !HubList.onHome(main, homeKey, false, down, up, false)) return@launch
                 log("home", homeKey)
-                close(); onHome = true; reset(); connect()
+                close(); onHome = true; reset(); loadCache(); connect()
                 homeWatch = scope.launch {
                     while (isActive) {
                         delay(10_000)
                         if (!onHome) return@launch
                         val m = links.firstOrNull() ?: return@launch
-                        if (!HubList.onHome(Pairing.key(m) ?: "", homeKey, true, 0, true, answers(m))) { log("back", Pairing.key(m) ?: ""); close(); leaveHome(); reset(); connect(); return@launch }
+                        if (!HubList.onHome(Pairing.key(m) ?: "", homeKey, true, 0, true, answers(m))) { log("back", Pairing.key(m) ?: ""); close(); leaveHome(); reset(); loadCache(); connect(); return@launch }
                     }
                 }
             } finally { probing = false }
@@ -297,7 +306,7 @@ object DataClient {
     fun openHub(hub: String) {
         val k = Pairing.key(hub)?.takeIf { it.isNotEmpty() && it != usingKey } ?: return
         if (links.none { Pairing.key(it) == k }) return
-        if (k == homeKey && links.firstOrNull()?.let { Pairing.key(it) } != k) { if (!onHome) { close(); onHome = true; reset(); connect() } } else useHub(k)
+        if (k == homeKey && links.firstOrNull()?.let { Pairing.key(it) } != k) { if (!onHome) { close(); onHome = true; reset(); loadCache(); connect() } } else useHub(k)
     }
 
     /** the hub answered ok:false: it said no (any other failure of a call is the socket's) */
@@ -426,13 +435,21 @@ object DataClient {
         if (split) for (p in settledOpen) loadSettled(p, g = g)
         parentsOf(g)
     }
-    /** The parents of subagents and subthreads that are not in the list (a settled one the page left out): read one by one, so a child sits under its parent, as on the
+    /** The parents of subagents and subthreads that are not in the list (a settled one the page left out): read concurrently in one round-trip, so a child sits under its parent, as on the
      *  desktop, and not on its own among the active threads. A few at most. */
     private suspend fun parentsOf(g: Int) {
         val have = threads.map { it.id }.toSet()
-        for (pid in threads.map { it.parent }.filter { it.isNotEmpty() && it !in have }.distinct().take(20)) {
-            val t = runCatching { call("thread.entries", JSONObject().put("thread", pid).put("limit", 1)).optJSONObject("thread") }.getOrNull() ?: continue
-            if (g != gen) return
+        val missing = threads.map { it.parent }.filter { it.isNotEmpty() && it !in have }.distinct().take(20)
+        if (missing.isEmpty()) return
+        val fetched = coroutineScope {
+            missing.map { pid ->
+                async {
+                    runCatching { call("thread.entries", JSONObject().put("thread", pid).put("limit", 1)).optJSONObject("thread") }.getOrNull()
+                }
+            }.awaitAll().filterNotNull()
+        }
+        if (g != gen) return
+        for (t in fetched) {
             val p = parseThread(t); if (threads.none { it.id == p.id }) threads = threads + p
         }
         save()
@@ -1063,8 +1080,12 @@ object DataClient {
         java.io.ByteArrayOutputStream().also { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, it) }.toByteArray()
     }.getOrNull()
 
-    // ---- cache (paints at launch, replaced as soon as the hub answers)
-    private fun cacheFile() = java.io.File(app.filesDir, "data-cache-v1.json")
+    // ---- cache (per-hub disk cache: paints at launch and on hub switch, replaced as soon as the hub answers)
+    private fun legacyCacheFile() = java.io.File(app.filesDir, "data-cache-v1.json")
+    private fun cacheFile(hub: String): java.io.File {
+        val safe = hub.map { if (it.isLetterOrDigit() || it == '.' || it == '-') it else '_' }.joinToString("")
+        return java.io.File(app.filesDir, "data-cache-v1-$safe.json")
+    }
     private fun J(o: DEntry) = JSONObject().put("id", o.id).put("kind", o.kind).put("text", o.text).put("at", o.at).apply {
         if (o.agentOnly) put("agentOnly", true)
         o.copy?.let { put("copy", copyJson(it)) }
@@ -1077,7 +1098,8 @@ object DataClient {
     private fun loadCache() {
         val hub = link?.let { Pairing.key(it) } ?: return
         runCatching {
-            val c = JSONObject(cacheFile().readText()); if (c.optString("hub") != hub) return
+            val f = cacheFile(hub).takeIf { it.exists() } ?: legacyCacheFile()
+            val c = JSONObject(f.readText()); if (c.optString("hub") != hub) return
             projects = parseProjects(c.optJSONArray("projects")); threads = parseThreads(c.optJSONArray("threads"))
             val e = c.optJSONObject("entries"); entries = e?.keys()?.asSequence()?.associateWith { parseEntries(e.optJSONArray(it)) } ?: emptyMap()
             listsLoaded = threads.isNotEmpty() || projects.isNotEmpty()
@@ -1089,14 +1111,14 @@ object DataClient {
             delay(1000)
             val hub = link?.let { Pairing.key(it) } ?: return@launch
             val ps = projects; val ts = threads
-            val recent = ts.take(10).map { it.id }.toSet()
+            val recent = ts.take(20).map { it.id }.toSet()
             val es = entries.filterKeys { it in recent }.mapValues { (_, v) -> v.filter { !it.sending && !it.failed }.takeLast(40) }
             withContext(Dispatchers.IO) {
                 val j = JSONObject().put("hub", hub)
                     .put("projects", JSONArray(ps.map { JSONObject().put("id", it.id).put("title", it.title).put("root", it.root).put("threadCount", it.threadCount).apply { it.settledCount?.let { n -> put("settledCount", n) } }.put("updatedAt", it.updatedAt).put("waiting", it.waiting).put("also", it.also).put("mark", markJson(it.mark)) }))
                     .put("threads", JSONArray(ts.map { JSONObject().put("id", it.id).put("project", it.project).put("title", it.title).put("state", it.state).put("updatedAt", it.updatedAt).put("pinned", it.pinned).put("pinOrder", it.pinOrder).put("settled", it.settled).put("settledAt", it.settledAt).put("archived", it.archived).put("provider", it.provider).put("model", it.model).put("effort", it.effort).put("runtime", it.runtime).put("chip", it.chip).put("preview", it.preview).put("waiting", it.waiting).put("mark", markJson(it.mark)).put("swarm", it.swarm) }))
                     .put("entries", JSONObject().also { o -> es.forEach { (k, v) -> o.put(k, JSONArray(v.map(::J))) } })
-                runCatching { cacheFile().writeText(j.toString()) }
+                runCatching { cacheFile(hub).writeText(j.toString()) }
             }
         }
     }
