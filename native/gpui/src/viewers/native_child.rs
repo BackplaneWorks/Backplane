@@ -1062,7 +1062,19 @@ mod imp {
         const IDLE: Duration = Duration::from_secs(10);
         fn dbg() -> bool { std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() }
         /// A hand-in to KiCad (posted on the UI thread as before): noted, so a hand-back still in flight does not pull the keyboard out after.
-        pub fn kicad() { let (q, cv) = st(); q.lock().unwrap().ask(To::Kicad, Instant::now()); cv.notify_all(); }
+        pub fn kicad() {
+            let (q, cv) = st(); q.lock().unwrap().ask(To::Kicad, Instant::now()); cv.notify_all();
+            // (#1403 step 2's DETACH measurement: whether the detached KiCad thread shares our input again at the next hand-in)
+            let kt = DETACHED.load(std::sync::atomic::Ordering::SeqCst);
+            if kt != 0 && dbg() { let ui = unsafe { super::GetCurrentThreadId() }; eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_hand_in_detach": {"kicad_thread": kt, "shared": shared(kt, ui)}})); }
+        }
+        static DETACHED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        /// whether threads `a` and `b` share input state (a joined queue): both report the same focus and active window (reads, no message)
+        fn shared(a: u32, b: u32) -> serde_json::Value {
+            let info = |t: u32| { let mut g = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..unsafe { std::mem::zeroed() } }; (unsafe { super::GetGUIThreadInfo(t, &mut g) } != 0).then(|| (g.hwndFocus as usize as u64, g.hwndActive as usize as u64)) };
+            let (x, y) = (info(a), info(b));
+            serde_json::json!({"same": x.is_some() && x == y && x.is_some_and(|(f, a)| f != 0 || a != 0), "kicad": x, "ui": y})
+        }
         /// The keyboard to our window `w` (`activate`: made the foreground too), from `ui` (Backplane's UI thread id).
         pub fn ours(w: u64, activate: bool, ui: u32) {
             let (q, cv) = st();
@@ -1102,6 +1114,26 @@ mod imp {
                 return true
             }
             let me = unsafe { super::GetCurrentThreadId() };
+            // #1403 step 2's measurement only (BP_KICAD_HANDBACK_DETACH=1): KiCad's thread (the keyboard's holder now) is detached from
+            // our UI thread's input before the hand-back; logged: what AttachThreadInput returned, and whether the two still share input
+            // state then, after the hand-back, and 1, 5 and 30 s later (Windows may join them again: a child window's parent link)
+            if std::env::var("BP_KICAD_HANDBACK_DETACH").is_ok_and(|v| v == "1") {
+                let mut g0 = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..unsafe { std::mem::zeroed() } };
+                let kt = if unsafe { super::GetGUIThreadInfo(0, &mut g0) } != 0 && !g0.hwndFocus.is_null() { unsafe { super::GetWindowThreadProcessId(g0.hwndFocus, std::ptr::null_mut()) } } else { 0 };
+                if kt != 0 && kt != ui && kt != me {
+                    let r = unsafe { super::AttachThreadInput(kt, ui, 0) };
+                    let err = if r == 0 { unsafe { windows_sys::Win32::Foundation::GetLastError() } } else { 0 };
+                    if dbg() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_hand_back_detach": {"kicad_thread": kt, "ui": ui, "returned": r, "error": err, "shared_after": shared(kt, ui)}})); }
+                    DETACHED.store(kt, std::sync::atomic::Ordering::SeqCst);
+                    std::thread::Builder::new().name("kicad-detach-probe".into()).spawn(move || {
+                        let t0 = Instant::now();
+                        for at in [1u64, 5, 30] {
+                            std::thread::sleep(Duration::from_secs(at).saturating_sub(t0.elapsed()));
+                            eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_detach_probe": {"kicad_thread": kt, "after_s": at, "shared": shared(kt, ui)}}));
+                        }
+                    }).ok();
+                } else if dbg() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_hand_back_detach": {"kicad_thread": kt, "ui": ui, "skipped": "the keyboard is not in another thread"}})); }
+            }
             let joined = unsafe { super::AttachThreadInput(me, ui, 1) } != 0;
             if activate {
                 let ok = unsafe { super::SetForegroundWindow(h) };
@@ -1112,6 +1144,8 @@ mod imp {
             let focus_tid = if unsafe { super::GetGUIThreadInfo(0, &mut gti) } != 0 && !gti.hwndFocus.is_null() { unsafe { super::GetWindowThreadProcessId(gti.hwndFocus, std::ptr::null_mut()) } } else { 0 };
             if joined { unsafe { super::AttachThreadInput(me, ui, 0); } }
             let ours = focus_tid == 0 || focus_tid == ui;
+            let kt = DETACHED.load(std::sync::atomic::Ordering::SeqCst);
+            if kt != 0 && dbg() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_hand_back_detach_after": {"kicad_thread": kt, "shared": shared(kt, ui), "focus_ours": ours}})); }
             super::FOCUS_ESCAPED.store(focus_tid != 0 && focus_tid != ui, std::sync::atomic::Ordering::SeqCst);
             ours
         }
