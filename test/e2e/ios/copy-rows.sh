@@ -52,5 +52,5 @@ for s in r["metrics"]["steps"]: print(" ", "ok  " if s.get("ok") else "FAIL", s[
 for n in r.get("notes", [])[:-1]: print("  note", n[:240])
 PY
 done
-ls "$OUT"/copy-*.json "$OUT"/reply-*.json >/dev/null 2>&1 || { [ "$rc" = 0 ] && rc=5; }
+[ -n "$(ls "$OUT"/copy-*.json "$OUT"/reply-*.json 2>/dev/null)" ] || { [ "$rc" = 0 ] && rc=5; }
 echo "xcodebuild exit $rc"; exit "$rc"
