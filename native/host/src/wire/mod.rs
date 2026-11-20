@@ -203,13 +203,16 @@ pub fn live_notice_every(seen: &(String, usize), thread: &str, len: usize, since
 
 /// A view stream with no credential of its own (tests, no pairing registry installed). Fails closed once one is.
 pub async fn socket(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool) -> Result<()> {
-    socket_inner(hub, s, cbor_wanted, String::new(), false).await
+    socket_inner(hub, s, cbor_wanted, String::new(), false, None).await
 }
 /// `token` is the credential the /ws upgrade presented (`Auth::credential`).
-pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool, token: String, local_view_socket: bool) -> Result<()> {
+/// `z`: the frame codec the request asked for and this hub has (wire/z.rs), None for frames as they are.
+pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool, token: String, local_view_socket: bool, z: Option<&'static str>) -> Result<()> {
     let mut cfg = WebSocketConfig::default(); cfg.max_message_size = Some(524288); cfg.max_frame_size = Some(524288);
-    let (mut tx, mut rx) = tokio_tungstenite::accept_async_with_config(s, Some(cfg)).await?.split();
-    let (mut conn, greeting) = hub.connect(cbor_wanted);
+    let (tx, mut rx) = tokio_tungstenite::accept_async_with_config(s, Some(cfg)).await?.split();
+    let mut tx = z::ZSink::new(tx, z);
+    let (mut conn, mut greeting) = hub.connect(cbor_wanted);
+    if let (Some(c), Some(o)) = (z, greeting.as_object_mut()) { o.insert("z".into(), json!(c)); }
     conn.local_view_socket = local_view_socket;
     let mut outbox = hub.attach(conn.client);
     struct Detach(Arc<Hub>, u64); impl Drop for Detach { fn drop(&mut self) { self.0.detach(self.1) } }
@@ -217,6 +220,7 @@ pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool, token:
     // attached first, then admitted: a revoke after this point finds the outbox and closes the stream; before it, the credential no longer holds
     if !hub.admit_blocking(conn.client, token.clone()).await { return Ok(()) }
     tx.send(pack(&conn, &greeting)).await?;
+    tx.arm(); // the greeting went as it is: what follows is compressed (when a codec was chosen)
     if let Some(info) = hub.view_info_frame() { tx.send(pack(&conn, &info)).await?; }
     let mut changes = hub.changed.subscribe();
     let mut beat = tokio::time::interval(Duration::from_millis(15000)); beat.tick().await;
@@ -368,7 +372,7 @@ pub async fn serve_with(hub: Arc<Hub>, s: TcpStream, trusted: bool) -> Result<()
             let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
             s.write_all(&response("401 Unauthorized", "text/plain; charset=utf-8", "", b"this Backplane needs its pairing token")).await?; s.shutdown().await.ok(); return Ok(());
         }
-        if req.param("data") == "1" { return crate::data::socket(hub, s, req.param("enc") == "json", Auth::credential(&req), req.header("host").to_string()).await } // the phone data API (docs/PHONE-DATA.md)
+        if req.param("data") == "1" { return crate::data::socket(hub, s, req.param("enc") == "json", Auth::credential(&req), req.header("host").to_string(), z::choose(&req.param("z"))).await } // the phone data API (docs/PHONE-DATA.md)
         let (view, mobile) = (req.param("view") == "1", req.param("mobile") == "1");
         // BACKPLANE_WS_DEBUG=1: what the client offers on the upgrade (does it ask for permessage-deflate?), once per connection, to stderr
         if std::env::var("BACKPLANE_WS_DEBUG").map_or(false, |v| v == "1") { eprintln!("ws upgrade: extensions={:?} user-agent={:?}", req.header("sec-websocket-extensions"), req.header("user-agent")) }
@@ -380,7 +384,7 @@ pub async fn serve_with(hub: Arc<Hub>, s: TcpStream, trusted: bool) -> Result<()
             s.write_all(&response("400 Bad Request", "text/plain; charset=utf-8", "", b"this hub serves renderer mobile only")).await?; s.shutdown().await.ok(); return Ok(());
         }
         let local = local_view_socket(req.peer.is_some_and(|p| p.ip().is_loopback()), &req.headers);
-        return socket_inner(hub, s, req.param("enc") == "cbor", Auth::credential(&req), local).await;
+        return socket_inner(hub, s, req.param("enc") == "cbor", Auth::credential(&req), local, z::choose(&req.param("z"))).await;
     }
     let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
     http(&hub, s, req).await
@@ -391,3 +395,4 @@ pub fn rejected(e: &str) -> ErrorResponse { let mut r = ErrorResponse::new(Some(
 
 #[cfg(test)]
 mod tests;
+pub mod z;

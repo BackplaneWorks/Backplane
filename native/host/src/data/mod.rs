@@ -23,7 +23,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -877,8 +877,8 @@ async fn browser_alive(hub: &Arc<Hub>, reg: &Arc<crate::net::pairing::Registry>,
 
 /// Validates a browser principal immediately before writing any outbound frame so no reply, projection delta,
 /// terminal chunk, viewer plot, or delayed response escapes after revocation, disable, or expiry.
-async fn send_frame<S: AsyncRead + AsyncWrite + Unpin + Send>(
-    tx: &mut futures_util::stream::SplitSink<tokio_tungstenite::WebSocketStream<S>, Message>,
+async fn send_frame<T: futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin>(
+    tx: &mut T,
     hub: &Arc<Hub>,
     browser: Option<&(String, Arc<crate::net::pairing::Registry>)>,
     client: u64,
@@ -894,12 +894,17 @@ async fn send_frame<S: AsyncRead + AsyncWrite + Unpin + Send>(
     Ok(true)
 }
 
-pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String, host: String) -> Result<()> {
-    socket_with(hub, s, json_mode, Principal::Native(token), host).await
+/// `z`: the codec the request asked for and this hub has (`wire::z::choose`), None for frames as they are.
+pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String, host: String, z: Option<&'static str>) -> Result<()> {
+    socket_with_reg(hub, s, json_mode, Principal::Native(token), host, None, z).await
 }
 
 pub async fn socket_with<S: AsyncRead + AsyncWrite + Unpin + Send>(hub: Arc<Hub>, stream: S, json_mode: bool, principal: Principal, host: String) -> Result<()> {
-    socket_with_reg(hub, stream, json_mode, principal, host, None).await
+    socket_with_reg(hub, stream, json_mode, principal, host, None, None).await
+}
+/// `socket_with`, its frames compressed with `z` (the browser's socket asks with `z=deflate`).
+pub async fn socket_with_z<S: AsyncRead + AsyncWrite + Unpin + Send>(hub: Arc<Hub>, stream: S, json_mode: bool, principal: Principal, host: String, z: Option<&'static str>) -> Result<()> {
+    socket_with_reg(hub, stream, json_mode, principal, host, None, z).await
 }
 
 async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
@@ -909,9 +914,12 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
     principal: Principal,
     host: String,
     test_reg: Option<Arc<crate::net::pairing::Registry>>,
+    z: Option<&'static str>,
 ) -> Result<()> {
     let mut cfg = WebSocketConfig::default(); cfg.max_message_size = Some(40 << 20); cfg.max_frame_size = Some(40 << 20); // (images come as base64 in one JSON frame: 4 x 8 MB)
-    let (mut tx, mut rx) = tokio_tungstenite::accept_async_with_config(stream, Some(cfg)).await?.split();
+    let (tx, mut rx) = tokio_tungstenite::accept_async_with_config(stream, Some(cfg)).await?.split();
+    // every frame after the hello compressed when the client asked for a codec this hub has (docs/PHONE-DATA.md, Compression)
+    let mut tx = crate::wire::z::ZSink::new(tx, z);
     let (mut conn, _) = hub.connect(true);
     let mut outbox = hub.attach(conn.client);
     struct Detach(Arc<Hub>, u64); impl Drop for Detach { fn drop(&mut self) { layout::global(&self.0.cfg.home).forget_client(self.1); self.0.detach(self.1) } }
@@ -954,7 +962,9 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
             crate::import014::phone_state(&hub).await,
         )
     };
-    tx.send(pack(&json!({"t":"hello","proto":PROTO,"hub":host,"name":name,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"theme":theme,"locale":locale,"hubOffer":hub_offer,"hubBack":hub.info_now()["hub.back"].as_str().unwrap_or(""),"commands":crate::session::composer::words(),"notice":notice,"migrating":migrating}), json_mode)).await?;
+    let mut hello = json!({"t":"hello","proto":PROTO,"hub":host,"name":name,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"theme":theme,"locale":locale,"hubOffer":hub_offer,"hubBack":hub.info_now()["hub.back"].as_str().unwrap_or(""),"commands":crate::session::composer::words(),"notice":notice,"migrating":migrating}); if let Some(c) = z { hello["z"] = json!(c) }
+    tx.send(pack(&hello, json_mode)).await?;
+    tx.arm(); // the hello went as it is: what follows is compressed (when a codec was chosen)
     let (late_tx, mut late_rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
     let (mut changes, mut frames) = (hub.changed.subscribe(), hub.frames.subscribe());
     let mut seen = hub.store.len(); let mut subs = Subs::default();

@@ -65,10 +65,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -1086,7 +1086,7 @@ async fn socket_with_browser_refused_and_passive_rpcs_do_not_extend_idle_and_out
 
     let (client_io, server_io) = tokio::io::duplex(64 * 1024);
     let (h2, r2, dev2) = (hub.hub.clone(), reg.clone(), device_id.clone());
-    let srv = tokio::spawn(async move { socket_with_reg(h2, server_io, true, Principal::Browser { device_id: dev2 }, "bp.ts.net".into(), Some(r2)).await });
+    let srv = tokio::spawn(async move { socket_with_reg(h2, server_io, true, Principal::Browser { device_id: dev2 }, "bp.ts.net".into(), Some(r2), None).await });
     let (mut ws, _) = tokio_tungstenite::client_async("ws://bp.ts.net/ws?data=1&enc=json", client_io).await.unwrap();
     let hello: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
     assert_eq!(hello["t"], "hello");
@@ -1349,4 +1349,33 @@ async fn viewer_layout_over_a_socket_is_per_device_pushed_and_refuses_in_code_ke
     let g = h.model().await; assert_eq!(preview_of(&h, &g, "t1"), "hi, how can I help with this long reply that goes on"); assert_eq!(preview_of(&h, &g, "t2"), ""); drop(g);
     h.commit_many(&[json!({"$":"MessagePosted","thread":"t1","msg":"m9","role":"assistant","text":"a newer\nreply","at":1700000300})]).await.unwrap();
     let g = h.model().await; assert_eq!(preview_of(&h, &g, "t1"), "a newer reply");
+}
+
+/// `z=deflate` (docs/PHONE-DATA.md, Compression): the hello as it is and naming the codec, then every frame binary raw DEFLATE on one stream; no `z`, frames as before.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn a_client_that_asks_for_deflate_gets_compressed_frames_after_a_plain_hello() {
+    use flate2::{Decompress, FlushDecompress};
+    let (_h, port) = up("zdeflate").await;
+    let mut ws = open(port, "&enc=json&z=deflate").await;
+    let hello = match tokio::time::timeout(Duration::from_secs(5), ws.next()).await.unwrap().unwrap().unwrap() { Message::Text(t) => serde_json::from_str::<Value>(t.as_str()).unwrap(), m => panic!("the hello is plain text: {m:?}") };
+    assert_eq!((hello["t"].as_str(), hello["z"].as_str()), (Some("hello"), Some("deflate")), "{hello}");
+    assert!(hello["features"].as_array().unwrap().iter().any(|f| f == "deflate"));
+    let mut z = Decompress::new(false);
+    let mut inflate = |b: &[u8]| { let mut out = Vec::with_capacity(b.len() * 8 + 1024); let start = z.total_in();
+        loop { let done = (z.total_in() - start) as usize; if out.capacity() - out.len() < 64 { out.reserve(out.capacity()) }
+            z.decompress_vec(&b[done..], &mut out, FlushDecompress::Sync).unwrap(); if (z.total_in() - start) as usize == b.len() && out.len() < out.capacity() { break } }
+        serde_json::from_slice::<Value>(&out).unwrap() };
+    let (mut raw, mut plain) = (0, 0);
+    for (id, m) in [(1u64, "projects.list"), (2, "threads.list"), (3, "projects.list")] {
+        ws.send(Message::Text(json!({"id":id,"m":m,"p":{}}).to_string().into())).await.unwrap();
+        loop {
+            let f = tokio::time::timeout(Duration::from_secs(5), ws.next()).await.unwrap().unwrap().unwrap();
+            let Message::Binary(b) = f else { panic!("after the hello every frame is binary: {f:?}") };
+            let v = inflate(&b); raw += b.len(); plain += v.to_string().len();
+            if v["t"] == "reply" && v["id"] == id { assert_eq!(v["ok"], true, "{v}"); break }
+        }
+    }
+    assert!(raw * 2 < plain, "compressed: {raw} B for {plain} B of JSON");
+    // no z: as before
+    let mut ws = open(port, "&enc=json").await; let hello = next(&mut ws).await; assert!(hello.get("z").is_none());
+    let r = ask(&mut ws, 1, "projects.list", json!({})).await; assert_eq!(r["ok"], true);
 }
