@@ -1,6 +1,7 @@
 #!/bin/bash
 # The copy button and Run in terminal on an iOS simulator on the Mac, headless (simctl only), through real taps (XCUITest CopyRows) against a private hub on a
 # temp home here: test/e2e/ios/copy-rows.sh HUB_BIN [OUT] [TEST...]   TEST: test_copy_rows (default) and/or test_copy_shot
+#   CLASS (default CopyRows): another XCUITest class on the same hub (reply-rows.sh: ReplyRows)
 #   the hub: copy-hub.mjs (a project thread, the uberbot Bub's chat, the bot Pip's chat and a room, each with the same reply); its control port: f-ctl.mjs
 #   (PORT+1, /find for the markers Run in terminal writes); both reach the simulator through ssh -R. The app is built on the Mac from this checkout
 #   (mobile/ios, DATA_APP Debug). Take the work_run lock mac-heavy around it; the Mac side holds its lockf too. Stops what it started, by pid.
@@ -8,7 +9,7 @@ set -u
 HUB=$(realpath "${1:?hub binary}"); ROOT=$(cd "$(dirname "$0")/../../.." && pwd); OUT=${2:-$ROOT/build/e2e-ios-copy}; OUT=$(mkdir -p "$OUT" && cd "$OUT" && pwd)
 shift; [ $# -gt 0 ] && shift; TESTS=${*:-test_copy_rows}
 PORT=${PORT:-$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));p=s.getsockname()[1];s.close();print(p)')}
-MAC_DIR=${MAC_DIR:-bp-copyable-ios}; SIM=${SIM:-bp-copy-rows}; APP_ID=${APP_ID:-dev.backplane.gpui}
+CLASS=${CLASS:-CopyRows}; MAC_DIR=${MAC_DIR:-bp-copyable-ios}; SIM=${SIM:-bp-copy-rows}; APP_ID=${APP_ID:-dev.backplane.gpui}
 M=${MAC_SSH:-$(dirname "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)")/build/gpui/mac-ssh}
 . "$ROOT/test/e2e/lib/own-group.sh"; rm -rf "$OUT"/*; pids=()
 stop() { curl -s -m3 "http://127.0.0.1:$((PORT+1))/stop" >/dev/null 2>&1; sleep 1; for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done; own_stop; }
@@ -24,7 +25,7 @@ TOK=$(python3 -c "import json;print(json.load(open('$OUT/hub/state.json'))['toke
 $M hs-mac-mini "mkdir -p $MAC_DIR/mobile" || exit 1
 RSYNC_RSH=$M rsync -a --delete --exclude build "$ROOT/mobile/ios/" hs-mac-mini:$MAC_DIR/mobile/ios/ || exit 1
 RSYNC_RSH=$M rsync -a --delete "$ROOT/test/e2e/ios/" hs-mac-mini:$MAC_DIR/e2e/ || exit 1
-ONLY=$(for t in $TESTS; do printf ' -only-testing:BackplaneE2E/CopyRows/%s' "$t"; done)
+ONLY=$(for t in $TESTS; do printf ' -only-testing:BackplaneE2E/$CLASS/%s' "$t"; done)
 $M hs-mac-mini "
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer; cd ~/$MAC_DIR
 lockf -k /tmp/bp-mac-heavy.lockf sh -c '
@@ -44,12 +45,12 @@ rc=\$?; kill -INT \$REC 2>/dev/null; wait \$REC 2>/dev/null
 rm -f c-token; xcrun simctl shutdown \$U 2>/dev/null; exit \$rc
 '" 2>&1 | tail -15 | tee "$OUT/run.log"; rc=${PIPESTATUS[0]}
 RSYNC_RSH=$M rsync -a hs-mac-mini:$MAC_DIR/c-out/ "$OUT/"
-for j in "$OUT"/copy-rows.json "$OUT"/copy-shot.json; do [ -f "$j" ] || continue; python3 - "$j" <<'PY' 2>&1 | tee -a "$OUT/run.log"
+for j in "$OUT"/copy-rows.json "$OUT"/copy-shot.json "$OUT"/reply-rows.json; do [ -f "$j" ] || continue; python3 - "$j" <<'PY' 2>&1 | tee -a "$OUT/run.log"
 import json,sys
 r=json.load(open(sys.argv[1])); print(r["journey"], "status", r.get("status"))
 for s in r["metrics"]["steps"]: print(" ", "ok  " if s.get("ok") else "FAIL", s["do"])
 for n in r.get("notes", [])[:-1]: print("  note", n[:240])
 PY
 done
-ls "$OUT"/copy-*.json >/dev/null 2>&1 || { [ "$rc" = 0 ] && rc=5; }
+ls "$OUT"/copy-*.json "$OUT"/reply-*.json >/dev/null 2>&1 || { [ "$rc" = 0 ] && rc=5; }
 echo "xcodebuild exit $rc"; exit "$rc"
