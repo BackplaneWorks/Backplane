@@ -39,7 +39,8 @@ log, lib_dir = sys.argv[1], sys.argv[2]; sys.path.insert(0, lib_dir)
 import x11_embed_driver as d
 lib = d.load_lib(); seen = {}; t0 = time.time()
 while time.time() - t0 < 90:
-    if os.path.exists(log) and '"id":"ui:Edit"' in open(log, errors="ignore").read(): break
+    # the press itself, not the controls/rects inventory that names the button (BACKPLANE_GPUI_RECTS=1 logs it from the start)
+    if os.path.exists(log) and any('"id":"ui:Edit","changed"' in l and '"event":"click"' in l for l in open(log, errors="ignore")): break
     for w in d.list_all_windows(lib):
         k = (w["title"] + " " + w["wm_class"]).lower()
         if w["shown"] and not w["override_redirect"] and w["w"] >= 50 and ("kicad" in k or "editor" in k) and "backplane" not in k: seen.setdefault(w["xid"], w["title"])
@@ -56,7 +57,9 @@ if grep -q '"name":"prewarmed","event":"mark"' "$OUT/client.log" 2>/dev/null; th
   PSOCK=$(last_kicad_report "$OUT/client.log" prewarmed | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sock") or "-")')
   PRE=$(python3 "$IPC_PY" modified "$PSOCK" sch 2>/dev/null | python3 -c 'import json,sys; print({True: "yes", False: "no"}.get(json.load(sys.stdin).get("modified"), "n/a"))' 2>/dev/null || echo n/a)
   # still before the first switch (the client's 5 s pause): else the read is not the pre-warm's state
-  grep -q '"id":"kicad-tab:SCH"' "$OUT/client.log" && PRE="n/a (read after the Schematic tab was shown)"
+  # the tab's click, not the controls/rects inventory that names the tab (BACKPLANE_GPUI_RECTS=1 logs it before the mark: every read
+  # was thrown away as "after the tab was shown", rail-k1's runs from 2727a49894 on)
+  grep '"id":"kicad-tab:SCH","changed"' "$OUT/client.log" | grep -q '"event":"click"' && PRE="n/a (read after the Schematic tab was shown)"
 fi
 for _ in $(seq 1500); do grep -q '"name":"save","event":"mark"' "$OUT/client.log" 2>/dev/null && break; kill -0 "$CP" 2>/dev/null || break; sleep 0.1; done
 R=$(last_kicad_report "$OUT/client.log" save_ready)
@@ -72,7 +75,7 @@ import json, sys
 client, hub, rep = sys.argv[1], sys.argv[2], json.loads(sys.argv[3] or "{}")
 asked_before_edit = False; edit = False; warm = prewarm = None
 for l in open(client, errors="ignore"):
-    if '"id":"ui:Edit"' in l: edit = True
+    if '"id":"ui:Edit","changed"' in l and '"event":"click"' in l: edit = True
     if "GPUI_LOG " not in l: continue
     try: o = json.loads(l.split("GPUI_LOG ", 1)[1])
     except Exception: continue
