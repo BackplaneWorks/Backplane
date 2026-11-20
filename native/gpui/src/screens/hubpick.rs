@@ -12,6 +12,66 @@ pub fn parse(action: &str) -> Option<Act> {
     match a { "menu" => Some(Act::Menu), "add" => Some(Act::Add), _ => a.strip_prefix("use:").map(|k| Act::Use(k.into())).or_else(|| a.strip_prefix("forget:").map(|k| Act::Forget(k.into()))) }
 }
 fn note(what: &str, text: &str) { eprintln!("GPUI_LOG {}", serde_json::json!({"hub": what, "text": text})); }
+/// Resolve the active hub from `list` to `(ws_url, token_file, paired)` for in-process switching.
+/// Returns `None` if switching to the local hub and no local token file exists yet (so `restart` can launch it).
+pub fn resolve_target(list: &[hubs::Hub]) -> Option<(String, std::path::PathBuf, bool)> {
+    resolve_target_with(
+        list,
+        |k| hubs::credential_saved(k).filter(|p| p.is_file()),
+        || crate::plat::user_home().map(|h| std::path::PathBuf::from(h).join(".backplane-gpui/token")).filter(|p| p.is_file()),
+    )
+}
+fn resolve_target_with(
+    list: &[hubs::Hub],
+    cred_for: impl Fn(&str) -> Option<std::path::PathBuf>,
+    default_local_token: impl Fn() -> Option<std::path::PathBuf>,
+) -> Option<(String, std::path::PathBuf, bool)> {
+    match hubs::target(list, |k| cred_for(k).is_some()) {
+        hubs::Target::Remote { key, ws } => Some((ws, cred_for(&key)?, true)),
+        hubs::Target::Local => {
+            if let Some((origin, token)) = hubs::local_target(list) {
+                return Some((crate::pairing::ws_of(&origin), token, false));
+            }
+            let token = default_local_token()?;
+            Some(("ws://127.0.0.1:3799".into(), token, false))
+        }
+    }
+}
+/// Switch to the first hub in `this.hubs` in-process (zero OS relaunch) with 0 ms cached paint when
+/// returning to a previously visited hub; falls back to `restart` only when a local hub must be launched.
+fn switch_hub(this: &mut Backplane, prev_key: &str, cx: &mut Context<Backplane>) {
+    if this.pair.is_none() {
+        if let Some((ws, token_file, paired)) = resolve_target(&this.hubs) {
+            let new_key = this.hubs.first().map(|h| h.key.clone()).unwrap_or_default();
+            if !prev_key.is_empty() && this.data.is_object() {
+                if this.screens.offers.hub_cache.len() >= 8 && !this.screens.offers.hub_cache.contains_key(prev_key) {
+                    if let Some(k) = this.screens.offers.hub_cache.keys().next().cloned() { this.screens.offers.hub_cache.remove(&k); }
+                }
+                this.screens.offers.hub_cache.insert(prev_key.to_string(), this.data.clone());
+            }
+            crate::viewers::kicad_pane::release_all();
+            this.screens.drafts.flush();
+            this.paired = paired;
+            this.screens.elsewhere = hubs::elsewhere(&ws);
+            this.screens.offers.on_home = None;
+            this.error.clear();
+            this.note.clear();
+            if let Some(cached) = this.screens.offers.hub_cache.get(&new_key).cloned() {
+                this.data = cached;
+                this.ui_epoch += 1;
+            } else {
+                this.data = serde_json::Value::Null;
+                this.selected.clear();
+            }
+            /* i18n-ok: connection status, compared with Connected; drawn through trs */ this.status = "Connecting…".into();
+            note("switch", &new_key);
+            let _ = this.tx.try_send(crate::hub::Command::SwitchHub(ws, token_file, paired));
+            cx.notify();
+            return;
+        }
+    }
+    restart(this, cx);
+}
 /// Start again on the saved list, whose first hub is the one to connect to. Returns only when that failed.
 fn restart(this: &mut Backplane, cx: &mut Context<Backplane>) {
     note("restart", this.hubs.first().map_or("", |h| h.key.as_str()));
@@ -24,17 +84,22 @@ pub fn act(this: &mut Backplane, a: Act, cx: &mut Context<Backplane>) {
         Act::Add => crate::screens::pair::add(this, cx),
         Act::Use(k) => {
             this.hub_menu = false;
+            let prev = this.hubs.first().map(|h| h.key.clone()).unwrap_or_default();
             match hubs::use_saved(&k) {
-                Ok(Some(list)) => { this.hubs = list; note("use", &k); restart(this, cx) }
+                Ok(Some(list)) => { this.hubs = list; note("use", &k); switch_hub(this, &prev, cx) }
                 Ok(None) => cx.notify(),
                 Err(_) => { this.status = crate::i18n::trs("The choice could not be saved here."); cx.notify() }
             }
         }
-        Act::Forget(k) => match hubs::forget_saved(&k) {
-            Ok(Some((list, moved))) => { this.hubs = list; note("forget", &k); if moved { restart(this, cx) } else { cx.notify() } }
-            Ok(None) => cx.notify(),
-            Err(_) => { this.status = crate::i18n::trs("The hub could not be forgotten here."); cx.notify() }
-        },
+        Act::Forget(k) => {
+            let prev = this.hubs.first().map(|h| h.key.clone()).unwrap_or_default();
+            this.screens.offers.hub_cache.remove(&k);
+            match hubs::forget_saved(&k) {
+                Ok(Some((list, moved))) => { this.hubs = list; note("forget", &k); if moved { switch_hub(this, &prev, cx) } else { cx.notify() } }
+                Ok(None) => cx.notify(),
+                Err(_) => { this.status = crate::i18n::trs("The hub could not be forgotten here."); cx.notify() }
+            }
+        }
     }
 }
 
@@ -56,6 +121,8 @@ pub struct Offers {
     pub on_home: Option<String>,
     /// the picker's Forget pressed once on this hub: a second press forgets it
     pub forget_arm: Option<String>,
+    /// last rendered picture per hub key, so switching back to a hub paints at 0 ms while reconnecting
+    pub hub_cache: std::collections::HashMap<String, serde_json::Value>,
 }
 /// The device token this client holds for the hub in use: a paired hub's credential; None on this computer's own hub (its home token: the client takes a link).
 fn token_in_use(this: &Backplane) -> Option<String> {
@@ -245,5 +312,16 @@ mod tests {
         assert_eq!(acts(1), [("Use", "hub:use:b:2"), ("Forget", "hub:forget:b:2")]);
         assert_eq!(acts(2), [("Use", "hub:use:local")], "this computer's hub is never forgotten");
         assert_eq!(acts(3), [("Add a hub", "hub:add")]);
+    }
+    #[test] fn resolve_target_picks_paired_remote_or_local_without_relaunch() {
+        let remote = hubs::Hub::remote("https://box.ts.net:8451");
+        let list = vec![remote.clone(), hubs::Hub::local()];
+        let cred = std::path::PathBuf::from("/tmp/box.token");
+        let got = resolve_target_with(&list, |k| (k == remote.key).then(|| cred.clone()), || None);
+        assert_eq!(got, Some(("wss://box.ts.net:8451".into(), cred, true)));
+        // Missing remote credential falls back to local; without local token returns None (triggers restart to launch local hub)
+        assert_eq!(resolve_target_with(&list, |_| None, || None), None);
+        let local_tok = std::path::PathBuf::from("/tmp/local.token");
+        assert_eq!(resolve_target_with(&[hubs::Hub::local()], |_| None, || Some(local_tok.clone())), Some(("ws://127.0.0.1:3799".into(), local_tok, false)));
     }
 }
