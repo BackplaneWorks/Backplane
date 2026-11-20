@@ -273,7 +273,7 @@ html.light .bp-v-overlay {
 
 /* ---- Phone (390 px): full width between 38 px top bar and 46 px bottom tab strip ---- */
 @media (max-width: 600px) {
-  .bp-thread {
+  .bp-center {
     min-height: 0;
   }
   .bp-viewer-pane {
