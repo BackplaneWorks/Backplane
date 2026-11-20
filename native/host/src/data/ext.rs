@@ -181,7 +181,7 @@ async fn accounts(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Va
     }
 }
 
-pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Result<Value, Value>> {
+pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool) -> Option<Result<Value, Value>> {
     Some(match m {
         "thread.act" => thread_act(hub, c, p).await,
         "device.register" | "device.drop" | "device.prefs" | "push.seen" => rpc(hub, c, m, p.clone()).await.map(|_| json!({})),
@@ -255,7 +255,7 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
             match r { Ok(_) => thread_now(hub, th).await.map(|t| json!({"thread":t})), Err(e) => Err(e) }
         }
         "mentions.list" => mentions(hub, p).await,
-        "viewer.files" | "viewer.watch" | "viewer.probe" | "viewer.info" | "viewer.layers" | "viewer.refs" | "viewer.compare" | "viewer.rail" | "viewer.follow" | "files.entries" | "mech.list" | "browser" => viewers(hub, c, m, p).await?,
+        "viewer.files" | "viewer.watch" | "viewer.probe" | "viewer.info" | "viewer.layers" | "viewer.refs" | "viewer.compare" | "viewer.rail" | "viewer.follow" | "files.entries" | "mech.list" | "browser" => viewers(hub, c, m, p, is_browser).await?,
         "thread.again" => { let th = s(p, "thread"); if th.is_empty() { return Some(Err(err("thread"))) } rpc(hub, c, "thread.again", json!({"thread":th})).await.map(|_| json!({})) }
         "voice.start" | "voice.stop" | "voice.act" | "voice.view" | "voice.key" | "voice.page" | "voice.page.act" | "voice.always" => voice(hub, c, m, p).await,
         "machines.page" | "machines.page.act" | "devices.page" | "devices.page.act" | "notify.page" | "notify.page.act" | "ring.list" | "ring.get" | "ring.search" | "ring.hear" | "ring.send" | "ring.setup" | "ring.page" | "ring.page.act" | "mcp.page" | "mcp.page.act" => {
@@ -485,7 +485,7 @@ fn entries_of(text: &str) -> Vec<Value> {
     text.lines().filter_map(|l| { let mut it = l.splitn(3, '\t'); let (k, size, name) = (it.next()?, it.next()?, it.next()?);
         Some(json!({"dir":k.starts_with('d'),"size":size.parse::<u64>().unwrap_or(0),"name":name})) }).collect()
 }
-async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Result<Value, Value>> {
+async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool) -> Option<Result<Value, Value>> {
     let th = s(p, "thread");
     Some(async {
         match m {
@@ -529,7 +529,7 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
             "viewer.rail" => {
                 use crate::present::rail::{rail, RailInput};
                 let (page, diff) = (s(p, "page"), p["diff"] == true);
-                let (items, has) = if machines::is_far(th) {
+                let (mut items, has) = if machines::is_far(th) {
                     machines::far_root(hub, th).ok_or_else(|| err("that thread has no folder"))?;
                     (
                         rail(RailInput { board: true, schematic: true, mech: true, gerbers: false, simulation: false, altium: false, page, diff }),
@@ -543,6 +543,12 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
                         json!({"board": src.board, "schematic": src.schematic, "mech": src.mech, "gerbers": src.gerbers}),
                     )
                 };
+                // Goes away when viewer.layout exists on data/1: browser clients omit Split while phones keep it.
+                if is_browser {
+                    if let Some(arr) = items.as_array_mut() {
+                        arr.retain(|it| it["id"].as_str() != Some("split"));
+                    }
+                }
                 Ok(json!({"rail": items, "has": has, "mode": "viewer"}))
             }
             "viewer.follow" => {
