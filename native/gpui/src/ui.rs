@@ -103,7 +103,7 @@ fn viewer_row_on(row: &RailRow, kicad_on: Option<&str>, pending: Option<&str>, a
 }
 
 /// Whether `BACKPLANE_GPUI_RECTS` is enabled for the process (checked once; off in normal use).
-fn rail_rects_on() -> bool {
+pub(crate) fn rail_rects_on() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("BACKPLANE_GPUI_RECTS").is_some_and(|v| !v.is_empty() && v != "0"))
 }
