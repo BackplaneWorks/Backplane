@@ -6,6 +6,7 @@
 import { ChatView, type EntryItem, type ReviewBar, type UnansweredNotice } from "./chat";
 import { ComposerView, type MentionItem, type SlashCommand } from "./composer";
 import { onLocaleChange, setLocale, t } from "./i18n";
+import { MgmtStrip } from "./mgmt";
 import { CommandPalette, type PaletteAction, type PaletteSearchResult } from "./palette";
 import { RailView, type RailEntry } from "./rail";
 import { SettingsModal, type SettingsRow } from "./settings";
@@ -353,6 +354,12 @@ function mountApp(): void {
     setRecording: (active) => composer.setVoiceRecording(active),
     setLevel: (level) => composer.setVoiceLevel(level),
     showError: (msg) => composer.showError(msg),
+  });
+
+  const mgmt = new MgmtStrip(centerEl, {
+    hub,
+    getThreadId: () => selectedThreadId,
+    onSendText: (text) => { void sendMessage(text); },
   });
 
   function renameThread(th: ThreadItem): void {
@@ -942,7 +949,27 @@ function mountApp(): void {
     if (gen !== threadGen) return;
 
     void refreshRail(threadId, gen);
+    void watchMgmtForThread(threadId, gen);
     if (activeRailKind) openViewer(activeRailKind);
+  }
+
+  async function watchMgmtForThread(threadId: string, gen: number): Promise<void> {
+    if (!threadId || !hub.hasFeature("mgmt")) {
+      if (gen === threadGen) mgmt.clear();
+      return;
+    }
+    const th = threads.find((x) => x.id === threadId);
+    let projectPath = th?.project ? (projects.find((p) => p.id === th.project)?.root ?? "") : "";
+    if (!projectPath && hub.hasFeature("viewers")) {
+      try {
+        const files = await hub.rpc<{ root?: string; pcb?: string; sch?: string }>("viewer.files", { thread: threadId });
+        if (gen !== threadGen) return;
+        projectPath = files.pcb || files.sch || files.root || "";
+      } catch { /* ignore */ }
+    }
+    if (gen !== threadGen) return;
+    if (projectPath) await mgmt.watchProject(projectPath);
+    else mgmt.clear();
   }
 
   async function loadOlderEntries(): Promise<void> {
@@ -1113,6 +1140,10 @@ function mountApp(): void {
       voice.handleFrame(frame as Record<string, unknown>);
       return;
     }
+    if (frame.t === "info" && frame.info && typeof frame.info === "object") {
+      mgmt.handleInfo(frame.info as Record<string, unknown>);
+      return;
+    }
     if (frame.t !== "d") return;
     const p = frame as DataPush;
     switch (p.k) {
@@ -1200,6 +1231,7 @@ function mountApp(): void {
     } else if (e.key === "Escape") {
       if (palette.isOpen()) palette.close();
       else if (settings.isOpen()) settings.close();
+      else if (mgmt.isOpen()) mgmt.closePanel();
     }
   });
 
