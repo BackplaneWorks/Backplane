@@ -4717,3 +4717,14 @@ review.empty.next = 回路図を追加すると、ここに部品が表示され
 
 # ---- viewer: header scope ----
 viewer.diff.threadchanges = スレッドの変更
+viewer.layout.refusal.locked = KiCad でダイアログが開いています
+viewer.layout.refusal.tooSmall = KiCad の表示領域が小さすぎます
+viewer.layout.refusal.oneKicad = KiCad タイルは 1 つまでです
+viewer.layout.refusal.incompatibleOverlay = これらのビューは重ね合わせできません
+viewer.layout.refusal.notFound = そのタイルはもう開いていません
+viewer.layout.refusal.noOverlay = そのタイルに重ね合わせはありません
+viewer.layout.refusal.invalidSource = そのファイルはこのプロジェクト外です
+viewer.layout.refusal.sameTile = 異なる 2 つのタイルを選んでください
+viewer.layout.refusal.invalidRatio = 分割比率が無効です
+viewer.layout.refusal.duplicateId = タイルは既に存在します
+viewer.layout.refusal.unknownFrame = 不明な KiCad フレームです

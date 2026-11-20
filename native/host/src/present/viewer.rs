@@ -176,6 +176,41 @@ pub fn view_action_at(st: &State, hub: &str, session: &Value, kind: &str, now_ms
         let (patch, before) = pages::open_review(session, hub, sel, "bom", has_management(&root_of(st, sel)));
         return Some(ViewOut { patch, before, boards_look: false });
     }
+    if !force_retry && !kind.is_empty() && kind != "split" {
+        if let Some(cur_layout) = parse_stored_layout(d, sel) {
+            if cur_layout.tiles().len() >= 2 {
+                let target_kind = if gerbers {
+                    super::layout::PageKind::Gerbers
+                } else {
+                    super::layout::PageKind::from_page_str(kind).unwrap_or(super::layout::PageKind::Board)
+                };
+                let root = if sel.contains('~') {
+                    st.threads.get(sel).map(|t| if !t.worktree.is_empty() { t.worktree.clone() } else { st.projects.get(&t.project).map(|p| p.root.clone()).unwrap_or_default() }).unwrap_or_default()
+                } else {
+                    root_of(st, sel)
+                };
+                let default_src = if !part.is_empty() && kind == "mech" {
+                    super::layout::sanitize_rel(&root, part)
+                } else {
+                    String::new()
+                };
+                if let Ok(next_layout) = super::layout::rail_press(&cur_layout, target_kind, default_src, |_| true, None) {
+                    let mut drafts = serde_json::Map::new();
+                    write_layout_drafts(&mut drafts, sel, &root, &next_layout);
+                    for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
+                    let mut out = json!({"rid": session["rid"].as_u64().unwrap_or(0), "drafts": drafts});
+                    patch::merge(&mut out, &pages::leave(session, sel));
+                    return Some(ViewOut { patch: out, before: vec![], boards_look: false });
+                }
+            }
+        }
+    }
+    if kind.is_empty() {
+        let mut drafts = serde_json::Map::new();
+        drafts.insert(format!("@view.layout:{sel}"), json!(""));
+        // fall through to normal close so legacy drafts & watch stop still run
+        let _ = drafts;
+    }
     if !simple(st, session, sel) { return None }
     let prev = s(d, &format!("@view:{sel}"));
     if !(prev.is_empty() || shows(prev)) { return None }
@@ -230,6 +265,11 @@ pub fn view_action_at(st: &State, hub: &str, session: &Value, kind: &str, now_ms
     let mut drafts = serde_json::Map::new();
     drafts.insert(format!("@view.file:{sel}"), json!(if kind == "split" { "" } else { picked.as_str() })); drafts.insert(format!("@view:{sel}"), json!(kind));
     drafts.insert(format!("@view.gerbers:{sel}"), json!(if gerbers { "1" } else { "" }));
+    if !force_retry {
+        // Legacy single-page / close / Split transitions clear `@view.layout:<sel>` so `viewer_json`
+        // derives the fresh layout cleanly (multi-tile `rail_press` returned early above).
+        drafts.insert(format!("@view.layout:{sel}"), json!(""));
+    }
     // vs board starts on one layer's differences (F.Cu, the others dimmed) unless a layer is already in focus: the list picks another
     if gerbers_vs_board && !gerbers_no_board && !Focus::read(s(d, "@view.focus.board")).on() { drafts.insert("@view.focus.board".into(), json!(Focus { active: 12, mode: 1 }.show())); }
     if !force_retry { drafts.insert(format!("@view.sheet:{sel}"), json!("")); }
@@ -853,23 +893,22 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         }
         if sources.altium { v["cad"] = json!("altium"); }
         if let Some(f) = crate::files::kicad::embed::rail_simulation(&root) { if let Some(o) = v.as_object_mut() { o.insert("simFrame".into(), json!(f)); } }
-        let selected = v["choices"].as_array().and_then(|rows| rows.iter().find(|r| r["on"] == true)).and_then(|r| r["value"].as_str());
-        let page = if v["gerbers"] == true { "gerbers" } else { selected.unwrap_or_else(|| s(&v, "open")) };
-        let input = rail::RailInput {
-            board: sources.board, schematic: sources.schematic, mech: sources.mech || v["mech"]["parts"].as_array().is_some_and(|p| !p.is_empty()),
-            gerbers: v["hasGerbers"].as_bool().unwrap_or(sources.gerbers),
-            simulation: v["simFrame"].is_string(), altium: sources.altium, page, diff: pages::diff_on(session, sel),
-        };
-        let has = json!({"board":input.board, "schematic":input.schematic, "mech":input.mech, "gerbers":input.gerbers});
-        v["rail"] = rail::rail(input);
-        v["has"] = has;
     }
-    // Diagnostic `viewer.layout`: derived for both local threads (reusing `rail_sources` + `v["panes"]`
-    // with zero filesystem calls) and linked-machine threads (from mirrored values only, never calling
-    // `root_of` / `canonical::design_root` or probing local disk).
+    // A restored template can already show the default set before the thread has a page draft.
+    if local && v["gerbers"] == true && shown.has.is_none() && !root.is_empty() {
+        shown.has = Some(sources.gerbers);
+        if let Some((path, time)) = &sources.newest {
+            shown.path = path.to_string_lossy().into_owned();
+            shown.made_at = time.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs());
+        }
+    }
+    // `viewer.layout` + `viewer.tiles`: reads `@view.layout:<sel>` when present (source of truth),
+    // otherwise derives from today's single-page / Split drafts. Zero extra filesystem discovery;
+    // linked-machine threads use mirrored values only.
+    let mut active_layout = super::layout::Layout::empty();
     if !sel.is_empty() {
         let linked = sel.contains('~');
-        let (root, default_pcb, default_sch, default_gerber_set) = if local {
+        let (eff_root_local, default_pcb, default_sch, default_gerber_set) = if local {
             (root.as_str(), sources.pcb.as_str(), sources.sch.as_str(), sources.gerber_set.as_str())
         } else { ("", "", "", "") };
         let linked_root = if linked {
@@ -880,12 +919,10 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         } else {
             String::new()
         };
-        let eff_root = if linked { linked_root.as_str() } else { root };
+        let eff_root = if linked { linked_root.as_str() } else { eff_root_local };
         let drafts = &session["drafts"];
         let picked_board = chosen_board(drafts, sel, eff_root);
         let open = s(&v, "open");
-        // Derive `picked_sch` strictly from the already-built picture (`v["panes"][0]` / `v["key"]`)
-        // with zero filesystem probes, and never invent a sibling schematic on linked threads.
         let picked_sch = if picked_board.is_empty() || linked {
             String::new()
         } else if open == "split" {
@@ -908,31 +945,69 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         } else {
             String::new()
         };
-        let derived = super::layout::derive_layout(&super::layout::DeriveInput {
-            root: eff_root,
-            open,
-            diff_on: pages::diff_on(session, sel),
-            gerbers: v["gerbers"] == true,
-            gerbers_vs_board: v["gerbersVsBoard"] == true,
-            file: s(drafts, &format!("@view.file:{sel}")),
-            sheet: s(drafts, &format!("@view.sheet:{sel}")),
-            picked_board: &picked_board,
-            picked_sch: &picked_sch,
-            mech_rel: s(&v["mech"], "rel"),
-            files_dir: s(drafts, &format!("@files.dir:{sel}")),
-            default_pcb,
-            default_sch,
-            default_gerber_set,
+        active_layout = parse_stored_layout(drafts, sel).unwrap_or_else(|| {
+            super::layout::derive_layout(&super::layout::DeriveInput {
+                root: eff_root,
+                open,
+                diff_on: pages::diff_on(session, sel),
+                gerbers: v["gerbers"] == true,
+                gerbers_vs_board: v["gerbersVsBoard"] == true,
+                file: s(drafts, &format!("@view.file:{sel}")),
+                sheet: s(drafts, &format!("@view.sheet:{sel}")),
+                picked_board: &picked_board,
+                picked_sch: &picked_sch,
+                mech_rel: s(&v["mech"], "rel"),
+                files_dir: s(drafts, &format!("@files.dir:{sel}")),
+                default_pcb,
+                default_sch,
+                default_gerber_set,
+            })
         });
-        v["layout"] = serde_json::to_value(derived).unwrap_or(Value::Null);
+        v["layout"] = serde_json::to_value(&active_layout).unwrap_or(Value::Null);
+        let src_ref = local.then_some(&*sources);
+        v["tiles"] = build_tiles_picture(&active_layout, eff_root, &v, drafts, src_ref, &shown, linked);
     }
-    // A restored template can already show the default set before the thread has a page draft.
-    if local && v["gerbers"] == true && shown.has.is_none() && !root.is_empty() {
-        shown.has = Some(sources.gerbers);
-        if let Some((path, time)) = &sources.newest {
-            shown.path = path.to_string_lossy().into_owned();
-            shown.made_at = time.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs());
-        }
+    if local {
+        let selected = v["choices"].as_array().and_then(|rows| rows.iter().find(|r| r["on"] == true)).and_then(|r| r["value"].as_str());
+        let focused_kind = active_layout
+            .focus
+            .as_deref()
+            .and_then(|fid| active_layout.tile(fid))
+            .map(|t| {
+                if t.kind == super::layout::PageKind::Board
+                    && t.overlay.as_ref().is_some_and(|o| o.kind == super::layout::PageKind::Gerbers)
+                {
+                    "gerbers"
+                } else {
+                    t.kind.as_str()
+                }
+            });
+        let page = if parse_stored_layout(&session["drafts"], sel).is_some() {
+            focused_kind.unwrap_or("")
+        } else if v["gerbers"] == true {
+            "gerbers"
+        } else {
+            selected.unwrap_or_else(|| s(&v, "open"))
+        };
+        let present: Vec<&str> = active_layout.tiles().iter().map(|t| {
+            if t.kind == super::layout::PageKind::Board
+                && t.overlay.as_ref().is_some_and(|o| o.kind == super::layout::PageKind::Gerbers)
+            {
+                "gerbers"
+            } else {
+                t.kind.as_str()
+            }
+        }).collect();
+        let input = rail::RailInput {
+            board: sources.board, schematic: sources.schematic, mech: sources.mech || v["mech"]["parts"].as_array().is_some_and(|p| !p.is_empty()),
+            gerbers: v["hasGerbers"].as_bool().unwrap_or(sources.gerbers),
+            simulation: v["simFrame"].is_string(), altium: sources.altium, page, diff: pages::diff_on(session, sel),
+            present: &present,
+        };
+        let has = json!({"board":input.board, "schematic":input.schematic, "mech":input.mech, "gerbers":input.gerbers});
+        let rail_val = rail::rail(input);
+        v["rail"] = rail_val;
+        v["has"] = has;
     }
     if let identity @ Value::Object(_) = header_identity(st, session, &v, &root, &sources, &shown) { v["identity"] = identity; }
     Some(v)
@@ -993,6 +1068,532 @@ fn header_identity(st: &State, session: &Value, viewer: &Value, root: &str, rail
         }
     }
     id
+}
+
+/// Outcome of a `layout-*` or `viewer_show_action` call.
+pub enum LayoutOut {
+    Ok(ViewOut),
+    Refused {
+        code: &'static str,
+        key: &'static str,
+        text: &'static str,
+    },
+}
+
+fn parse_stored_layout(drafts: &Value, sel: &str) -> Option<super::layout::Layout> {
+    let raw = s(drafts, &format!("@view.layout:{sel}"));
+    if raw.is_empty() {
+        return None;
+    }
+    serde_json::from_str::<super::layout::Layout>(raw).ok()
+}
+
+fn is_split_preset(layout: &super::layout::Layout) -> bool {
+    let ts = layout.tiles();
+    ts.len() == 3
+        && ts[0].kind == super::layout::PageKind::Schematic
+        && ts[1].kind == super::layout::PageKind::Board
+        && ts[2].kind == super::layout::PageKind::Solid3d
+}
+
+/// Write `@view.layout:<sel>` (source of truth) and keep legacy `@view:<sel>` etc. derived from
+/// the focused tile for one release so older clients and phones keep working.
+fn write_layout_drafts(drafts: &mut serde_json::Map<String, Value>, sel: &str, root: &str, layout: &super::layout::Layout) {
+    use super::layout::PageKind;
+    if layout.is_empty() {
+        drafts.insert(format!("@view.layout:{sel}"), json!(""));
+        drafts.insert(format!("@view:{sel}"), json!(""));
+        drafts.insert(format!("@view.file:{sel}"), json!(""));
+        drafts.insert(format!("@view.gerbers:{sel}"), json!(""));
+        drafts.insert(format!("@view.sheet:{sel}"), json!(""));
+        return;
+    }
+    drafts.insert(format!("@view.layout:{sel}"), json!(serde_json::to_string(layout).unwrap_or_default()));
+    if is_split_preset(layout) {
+        drafts.insert(format!("@view:{sel}"), json!("split"));
+        drafts.insert(format!("@view.gerbers:{sel}"), json!(""));
+        drafts.insert(format!("@view.file:{sel}"), json!(""));
+        return;
+    }
+    let Some(ft) = layout.focus.as_deref().and_then(|id| layout.tile(id)).or_else(|| layout.tiles().into_iter().next()) else {
+        return;
+    };
+    let abs = |rel: &str| if rel.is_empty() || root.is_empty() { String::new() } else { format!("{}/{rel}", root.trim_end_matches('/')) };
+    match ft.kind {
+        PageKind::Board if ft.overlay.as_ref().is_some_and(|o| o.kind == PageKind::Gerbers) => {
+            let ov = ft.overlay.as_ref().unwrap();
+            let set_abs = abs(&ov.source);
+            let board_abs = abs(&ft.source);
+            let file = if board_abs.is_empty() {
+                if set_abs.is_empty() { String::new() } else { format!("noboard\n{set_abs}") }
+            } else {
+                crate::files::kicad::gerber::cmp_path(&set_abs, &board_abs)
+            };
+            drafts.insert(format!("@view:{sel}"), json!("board"));
+            drafts.insert(format!("@view.gerbers:{sel}"), json!("1"));
+            drafts.insert(format!("@view.file:{sel}"), json!(file));
+        }
+        PageKind::Gerbers => {
+            drafts.insert(format!("@view:{sel}"), json!("board"));
+            drafts.insert(format!("@view.gerbers:{sel}"), json!("1"));
+            drafts.insert(format!("@view.file:{sel}"), json!(abs(&ft.source)));
+        }
+        PageKind::Mech => {
+            drafts.insert(format!("@view:{sel}"), json!("mech"));
+            drafts.insert(format!("@view.gerbers:{sel}"), json!(""));
+            drafts.insert(format!("@mech.part:{sel}"), json!(ft.source));
+        }
+        PageKind::Files => {
+            drafts.insert(format!("@view:{sel}"), json!("files"));
+            drafts.insert(format!("@view.gerbers:{sel}"), json!(""));
+            drafts.insert(format!("@files.dir:{sel}"), json!(ft.source));
+            drafts.insert(format!("@view.file:{sel}"), json!(""));
+        }
+        PageKind::Schematic => {
+            drafts.insert(format!("@view:{sel}"), json!("schematic"));
+            drafts.insert(format!("@view.gerbers:{sel}"), json!(""));
+            drafts.insert(format!("@view.sheet:{sel}"), json!(if ft.explicit { abs(&ft.source) } else { String::new() }));
+            drafts.insert(format!("@view.file:{sel}"), json!(""));
+        }
+        k => {
+            drafts.insert(format!("@view:{sel}"), json!(k.as_str()));
+            drafts.insert(format!("@view.gerbers:{sel}"), json!(""));
+            drafts.insert(format!("@view.file:{sel}"), json!(if ft.explicit { abs(&ft.source) } else { String::new() }));
+        }
+    }
+}
+
+/// Build the per-tile `identity` object by reusing `viewer_identity::identity` (PR #1411)
+/// with already-known tile & project facts (zero filesystem access).
+fn tile_identity(
+    tile: &super::layout::Tile,
+    root: &str,
+    viewer: &Value,
+    sources: Option<&RailSources>,
+    shown: &ShownGerbers,
+) -> Value {
+    use super::layout::PageKind;
+    let is_gvb = tile.kind == PageKind::Board
+        && tile.overlay.as_ref().is_some_and(|o| o.kind == PageKind::Gerbers);
+    let page = if is_gvb { "gerbers" } else { tile.kind.as_str() };
+    let rel = if is_gvb {
+        tile.overlay.as_ref().map(|o| o.source.as_str()).unwrap_or("")
+    } else {
+        tile.source.as_str()
+    };
+    let root_sheet = sources.map(|s| s.root_sheet.as_str()).unwrap_or("");
+    let made_at = shown.made_at.or_else(|| {
+        sources
+            .and_then(|s| s.newest.as_ref())
+            .and_then(|(_, t)| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+    });
+    let id_sources = viewer_identity::Sources {
+        root,
+        board: if matches!(page, "board" | "3d") { rel } else { "" },
+        schematic: if matches!(page, "schematic" | "simulation") { rel } else { "" },
+        file: if matches!(page, "image" | "pdf" | "text") { rel } else { "" },
+        sheet: if page == "schematic" && tile.explicit { rel } else { "" },
+        directory: if page == "files" { rel } else { "" },
+        root_sheet,
+        has_board: sources.map(|s| s.board),
+        has_sheet: sources.map(|s| s.schematic),
+        has_set: shown.has.or_else(|| sources.map(|s| s.gerbers)),
+        set: if page == "gerbers" { rel } else { "" },
+        made_at,
+    };
+    let mut id = viewer_identity::identity(page, viewer, &id_sources, &|r| {
+        if r.is_empty() { return Some(false) }
+        if tile.version.is_some() { return Some(true) }
+        if let Some(src) = sources {
+            if page == "gerbers" { return Some(src.gerbers || shown.has == Some(true)) }
+            if src.docs["board"] == r { return src.docs["hasBoard"].as_bool() }
+            if src.docs["sheet"] == r { return src.docs["hasSheet"].as_bool() }
+        }
+        Some(true)
+    });
+    if let Some(ver) = &tile.version {
+        id["version"] = json!(ver.label);
+    }
+    if let Some(ov) = &tile.overlay {
+        if let (Some(ov_ver), Some(base_ver)) = (&ov.version, &tile.version) {
+            id["scope"] = json!(format!("{} → {}", ov_ver.label, base_ver.label));
+        }
+    }
+    id
+}
+
+/// Build `viewer.tiles`: per-tile map keyed by `TileId` carrying today's page values plus `identity`
+/// (from `viewer_identity::identity`) with zero extra filesystem discovery.
+fn build_tiles_picture(
+    layout: &super::layout::Layout,
+    root: &str,
+    viewer: &Value,
+    drafts: &Value,
+    sources: Option<&RailSources>,
+    shown: &ShownGerbers,
+    linked: bool,
+) -> Value {
+    use super::layout::{OverlayMode, PageKind};
+    let mut map = serde_json::Map::new();
+    let probe = s(viewer, "probe");
+    let default_pcb = sources.map(|s| s.pcb.as_str()).unwrap_or("");
+    let default_sch = sources.map(|s| s.sch.as_str()).unwrap_or("");
+    let join = |rel: &str| if rel.is_empty() || root.is_empty() { String::new() } else { format!("{}/{rel}", root.trim_end_matches('/')) };
+
+    for tile in layout.tiles() {
+        let mut o = serde_json::Map::new();
+        o.insert("id".into(), json!(tile.id));
+        o.insert("kind".into(), json!(tile.kind.as_str()));
+        o.insert("source".into(), json!(tile.source));
+        if let Some(v) = &tile.version {
+            o.insert("version".into(), serde_json::to_value(v).unwrap_or(Value::Null));
+        }
+        if let Some(ov) = &tile.overlay {
+            o.insert("overlay".into(), serde_json::to_value(ov).unwrap_or(Value::Null));
+        }
+        let is_gvb = tile.kind == PageKind::Board
+            && tile.overlay.as_ref().is_some_and(|ov| ov.kind == PageKind::Gerbers);
+        let is_gerbers = tile.kind == PageKind::Gerbers || is_gvb;
+
+        let plot_key = match tile.kind {
+            PageKind::Board if is_gvb => {
+                let ov = tile.overlay.as_ref().unwrap();
+                if tile.source.is_empty() || ov.source.is_empty() || root.is_empty() {
+                    String::new()
+                } else {
+                    match ov.mode {
+                        OverlayMode::Diff => format!("0|{root}|{}", crate::files::kicad::gerber::cmp_path(&join(&ov.source), &join(&tile.source))),
+                        OverlayMode::Old => format!("0|{root}|{}", join(&ov.source)),
+                        OverlayMode::New => {
+                            let abs = join(&tile.source);
+                            let at = if !tile.explicit && abs == default_pcb { "" } else { abs.as_str() };
+                            format!("0|{root}|{at}")
+                        }
+                    }
+                }
+            }
+            PageKind::Board => {
+                if root.is_empty() { String::new() } else {
+                    let abs = if tile.source.is_empty() { default_pcb.to_string() } else { join(&tile.source) };
+                    if abs.is_empty() { String::new() } else {
+                        let at = if !tile.explicit && abs == default_pcb { "" } else { abs.as_str() };
+                        format!("0|{root}|{at}")
+                    }
+                }
+            }
+            PageKind::Schematic => {
+                if root.is_empty() { String::new() } else {
+                    let abs = if tile.source.is_empty() { default_sch.to_string() } else { join(&tile.source) };
+                    if abs.is_empty() { String::new() } else {
+                        let at = if !tile.explicit && abs == default_sch { "" } else { abs.as_str() };
+                        format!("1|{root}|{at}")
+                    }
+                }
+            }
+            PageKind::Solid3d => {
+                if root.is_empty() { String::new() } else {
+                    let abs = if tile.source.is_empty() { default_pcb.to_string() } else { join(&tile.source) };
+                    if abs.is_empty() { String::new() } else {
+                        let at = if !tile.explicit && abs == default_pcb { "" } else { abs.as_str() };
+                        format!("2|{root}|{at}")
+                    }
+                }
+            }
+            PageKind::Gerbers => {
+                if root.is_empty() || tile.source.is_empty() { String::new() } else { format!("0|{root}|{}", join(&tile.source)) }
+            }
+            PageKind::Mech => {
+                if root.is_empty() || tile.source.is_empty() { String::new() } else { format!("2|{root}|{}", join(&tile.source)) }
+            }
+            _ => String::new(),
+        };
+        o.insert("key".into(), json!(plot_key));
+        let layers_key = if tile.kind == PageKind::Solid3d {
+            if !root.is_empty() && !tile.explicit { format!("0|{root}|") } else { String::new() }
+        } else {
+            plot_key.clone()
+        };
+        o.insert("layers".into(), json!(layers_key));
+
+        if matches!(tile.kind, PageKind::Board | PageKind::Schematic | PageKind::Solid3d | PageKind::Gerbers) {
+            o.insert("probe".into(), json!(probe));
+        }
+        if matches!(tile.kind, PageKind::Board | PageKind::Schematic | PageKind::Gerbers) {
+            let lkind = if tile.kind == PageKind::Schematic { "schematic" } else { "board" };
+            let off: u32 = s(drafts, &format!("@view.off.{lkind}")).parse().unwrap_or(0);
+            let f = Focus::read(s(drafts, &format!("@view.focus.{lkind}")));
+            layer_fields(&mut o, lkind, off, f);
+            if is_gerbers {
+                o.insert("gerbers".into(), json!(true));
+                o.insert("gerbersVsBoard".into(), json!(is_gvb));
+                let rows: Vec<Value> = GERBER_LAYERS.iter().chain(GERBER_MORE.iter())
+                    .map(|(n, name)| json!({"layer": n, "name": name, "on": off & bit(*n) == 0, "active": f.on() && f.active == *n}))
+                    .collect();
+                o.insert("layerList".into(), Value::Array(rows));
+            } else if tile.kind == PageKind::Board {
+                o.insert("gerbers".into(), json!(false));
+            }
+        }
+        if tile.kind == PageKind::Mech && viewer["mech"].is_object() {
+            o.insert("mech".into(), viewer["mech"].clone());
+        }
+        if tile.kind == PageKind::Files && viewer["files"].is_object() {
+            o.insert("files".into(), viewer["files"].clone());
+        }
+        if !linked {
+            if let Some(src) = sources {
+                match tile.kind {
+                    PageKind::Board if !is_gvb && !src.board && tile.source.is_empty() => {
+                        o.insert("empty".into(), json!("No board in this project yet"));
+                        o.insert("emptyNext".into(), json!("Ask an agent to lay one out."));
+                    }
+                    PageKind::Board if is_gvb && tile.source.is_empty() => {
+                        o.insert("empty".into(), json!("No board to compare these Gerbers against."));
+                        o.insert("emptyNext".into(), json!("Add a board to this project to compare them."));
+                    }
+                    PageKind::Schematic if !src.schematic && tile.source.is_empty() => {
+                        o.insert("empty".into(), json!("No schematic in this project yet"));
+                        o.insert("emptyNext".into(), json!("Ask an agent to draw one."));
+                    }
+                    PageKind::Solid3d if !src.board && tile.source.is_empty() => {
+                        o.insert("empty".into(), json!("No board in this project yet"));
+                        o.insert("emptyNext".into(), json!("Ask an agent to lay one out."));
+                    }
+                    PageKind::Gerbers if !src.gerbers && tile.source.is_empty() => {
+                        o.insert("empty".into(), json!("No Gerber files in this project yet"));
+                        o.insert("emptyNext".into(), json!("Ask an agent to export fabrication files into mfg/."));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        o.insert("identity".into(), tile_identity(tile, root, viewer, sources, shown));
+        map.insert(tile.id.clone(), Value::Object(o));
+    }
+    Value::Object(map)
+}
+
+fn parse_side(s: &str) -> Option<super::layout::Side> {
+    match s.to_ascii_lowercase().as_str() {
+        "left" => Some(super::layout::Side::Left),
+        "right" => Some(super::layout::Side::Right),
+        "top" => Some(super::layout::Side::Top),
+        "bottom" => Some(super::layout::Side::Bottom),
+        _ => None,
+    }
+}
+
+fn parse_overlay_mode(s: &str) -> super::layout::OverlayMode {
+    match s.to_ascii_lowercase().as_str() {
+        "old" => super::layout::OverlayMode::Old,
+        "new" => super::layout::OverlayMode::New,
+        _ => super::layout::OverlayMode::Diff,
+    }
+}
+
+/// Thin hub action handler over `present::layout` pure operations.
+///
+/// Handles: `layout-add`, `layout-close`, `layout-focus`, `layout-resize`, `layout-swap`,
+/// `layout-move`, `layout-overlay`, `layout-unsplit`, `layout-maximize`, `layout-restore`.
+/// `client_id` is the hub-stamped `designDesktop` connection id used by [`layout::effective_lock`].
+/// `layout-resize` never changes watches.
+pub fn layout_action(
+    st: &State,
+    _hub: &str,
+    session: &Value,
+    client_id: Option<u64>,
+    action: &str,
+    value: &str,
+) -> Option<LayoutOut> {
+    use super::layout::{self, Overlay, PageKind, Tile, TileVersion};
+    let sel = s(session, "sel");
+    if sel.is_empty() || !st.threads.contains_key(sel) {
+        return None;
+    }
+    let linked = sel.contains('~');
+    let root = if linked {
+        st.threads.get(sel).map(|t| if !t.worktree.is_empty() { t.worktree.clone() } else { st.projects.get(&t.project).map(|p| p.root.clone()).unwrap_or_default() }).unwrap_or_default()
+    } else {
+        root_of(st, sel)
+    };
+    let drafts = &session["drafts"];
+    let payload: Value = if value.trim().is_empty() { json!({}) } else { serde_json::from_str(value).ok()? };
+    let sources = if linked { RailSources::default() } else { rail_sources(&root) };
+    let cur = parse_stored_layout(drafts, sel).unwrap_or_else(|| {
+        let picked_board = chosen_board(drafts, sel, &root);
+        layout::derive_layout(&layout::DeriveInput {
+            root: &root,
+            open: s(drafts, &format!("@view:{sel}")),
+            diff_on: pages::diff_on(session, sel),
+            gerbers: s(drafts, &format!("@view.gerbers:{sel}")) == "1",
+            gerbers_vs_board: {
+                let f = s(drafts, &format!("@view.file:{sel}"));
+                f.starts_with(crate::files::kicad::gerber::CMP) || f.starts_with("noboard\n")
+            },
+            file: s(drafts, &format!("@view.file:{sel}")),
+            sheet: s(drafts, &format!("@view.sheet:{sel}")),
+            picked_board: &picked_board,
+            picked_sch: "",
+            mech_rel: s(drafts, &format!("@mech.part:{sel}")),
+            files_dir: s(drafts, &format!("@files.dir:{sel}")),
+            default_pcb: &sources.pcb,
+            default_sch: &sources.sch,
+            default_gerber_set: &sources.gerber_set,
+        })
+    });
+
+    let client_locked = payload["locked"].as_str();
+    let client_kicad_tile = payload["kicadTile"].as_str();
+    let client_has_kicad = payload["clientHasKicad"].as_bool().unwrap_or(false);
+    let locked = layout::effective_lock(&cur, &session["info"], client_id, client_locked, client_kicad_tile);
+    let locked_ref = locked.as_deref();
+
+    let res = match action {
+        "layout-add" => {
+            let kind = PageKind::from_page_str(payload["kind"].as_str().unwrap_or(""))?;
+            let side = parse_side(payload["side"].as_str().unwrap_or("right"))?;
+            let target = payload["target"].as_str().filter(|s| !s.is_empty());
+            let explicit_source = payload["source"].as_str().unwrap_or("");
+            let source = if !explicit_source.is_empty() {
+                explicit_source.to_string()
+            } else {
+                match kind {
+                    PageKind::Board | PageKind::Solid3d => layout::sanitize_rel(&root, &sources.pcb),
+                    PageKind::Schematic | PageKind::Simulation => layout::sanitize_rel(&root, &sources.sch),
+                    PageKind::Gerbers => layout::sanitize_rel(&root, &sources.gerber_set),
+                    _ => String::new(),
+                }
+            };
+            let version: Option<TileVersion> = match payload.get("version") {
+                Some(v) if !v.is_null() => Some(serde_json::from_value(v.clone()).ok()?),
+                _ => None,
+            };
+            let tile = Tile {
+                id: cur.next_tile_id(),
+                kind,
+                source,
+                explicit: !explicit_source.is_empty(),
+                version,
+                unresolved_version: false,
+                overlay: None,
+            };
+            layout::add(&cur, target, side, tile, client_has_kicad, locked_ref)
+        }
+        "layout-close" => {
+            let tile = payload["tile"].as_str()?;
+            layout::close(&cur, tile, locked_ref)
+        }
+        "layout-focus" => {
+            let tile = payload["tile"].as_str()?;
+            layout::focus_tile(&cur, tile, locked_ref)
+        }
+        "layout-resize" => {
+            let split = payload["split"].as_str()?;
+            let ratio = payload["ratio"].as_f64()? as f32;
+            let bounds = payload["bounds"].as_array().and_then(|a| {
+                if a.len() == 2 { Some((a[0].as_f64()? as f32, a[1].as_f64()? as f32)) } else { None }
+            })?;
+            layout::resize(&cur, split, ratio, bounds, layout::default_min_for(client_kicad_tile), locked_ref)
+        }
+        "layout-swap" => {
+            let a = payload["a"].as_str()?;
+            let b = payload["b"].as_str()?;
+            layout::swap(&cur, a, b, locked_ref)
+        }
+        "layout-move" => {
+            let tile = payload["tile"].as_str()?;
+            let target = payload["target"].as_str()?;
+            let side = parse_side(payload["side"].as_str().unwrap_or("right"))?;
+            layout::move_tile(&cur, tile, target, side, locked_ref)
+        }
+        "layout-overlay" => {
+            let base = payload["base"].as_str().or_else(|| payload["a"].as_str())?;
+            let mode = parse_overlay_mode(payload["mode"].as_str().unwrap_or("diff"));
+            if let Some(ov_tile) = payload["overlay"].as_str().or_else(|| payload["b"].as_str()) {
+                layout::merge_overlay(&cur, base, ov_tile, mode, None, None, None, locked_ref)
+            } else if payload["overlay"].is_object() {
+                let ov: Overlay = serde_json::from_value(payload["overlay"].clone()).ok()?;
+                layout::overlay(&cur, base, Some(ov), locked_ref)
+            } else {
+                layout::overlay(&cur, base, None, locked_ref)
+            }
+        }
+        "layout-unsplit" => {
+            let tile = payload["tile"].as_str()?;
+            let side = parse_side(payload["side"].as_str().unwrap_or("right"))?;
+            layout::split_overlay(&cur, tile, side, None, locked_ref).map(|o| o.layout)
+        }
+        "layout-maximize" => {
+            let tile = payload["tile"].as_str()?;
+            layout::maximize(&cur, tile, locked_ref)
+        }
+        "layout-restore" => layout::restore(&cur, locked_ref),
+        _ => return None,
+    };
+
+    match res {
+        Err(r) => Some(LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text() }),
+        Ok(next) => {
+            let mut out_drafts = serde_json::Map::new();
+            write_layout_drafts(&mut out_drafts, sel, &root, &next);
+            let mut patch = json!({"rid": session["rid"].as_u64().unwrap_or(0), "drafts": out_drafts});
+            patch::merge(&mut patch, &pages::leave(session, sel));
+            Some(LayoutOut::Ok(ViewOut { patch, before: vec![], boards_look: false }))
+        }
+    }
+}
+
+/// Route an agent's `viewer_show(kind, path)` through `layout::viewer_show` on `@view.layout:<sel>`:
+/// updates and focuses an existing tile of `kind`, else replaces the focused tile, else opens a 1-tile layout.
+pub fn viewer_show_action(
+    st: &State,
+    _hub: &str,
+    session: &Value,
+    client_id: Option<u64>,
+    kind: &str,
+    path: &str,
+) -> Option<LayoutOut> {
+    use super::layout::{self, PageKind};
+    let sel = s(session, "sel");
+    if sel.is_empty() || !st.threads.contains_key(sel) {
+        return None;
+    }
+    let pk = PageKind::from_page_str(kind)?;
+    let linked = sel.contains('~');
+    let root = if linked {
+        st.threads.get(sel).map(|t| if !t.worktree.is_empty() { t.worktree.clone() } else { st.projects.get(&t.project).map(|p| p.root.clone()).unwrap_or_default() }).unwrap_or_default()
+    } else {
+        root_of(st, sel)
+    };
+    let drafts = &session["drafts"];
+    let cur = parse_stored_layout(drafts, sel).unwrap_or_else(|| {
+        let sources = if linked { RailSources::default() } else { rail_sources(&root) };
+        layout::derive_layout(&layout::DeriveInput {
+            root: &root,
+            open: s(drafts, &format!("@view:{sel}")),
+            diff_on: pages::diff_on(session, sel),
+            gerbers: s(drafts, &format!("@view.gerbers:{sel}")) == "1",
+            file: s(drafts, &format!("@view.file:{sel}")),
+            sheet: s(drafts, &format!("@view.sheet:{sel}")),
+            default_pcb: &sources.pcb,
+            default_sch: &sources.sch,
+            default_gerber_set: &sources.gerber_set,
+            ..Default::default()
+        })
+    });
+    let rel = layout::sanitize_rel(&root, path);
+    let locked = layout::effective_lock(&cur, &session["info"], client_id, None, None);
+    match layout::viewer_show(&cur, pk, rel, locked.as_deref()) {
+        Err(r) => Some(LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text() }),
+        Ok(next) => {
+            let mut out_drafts = serde_json::Map::new();
+            write_layout_drafts(&mut out_drafts, sel, &root, &next);
+            let mut patch = json!({"rid": session["rid"].as_u64().unwrap_or(0), "drafts": out_drafts});
+            patch::merge(&mut patch, &pages::leave(session, sel));
+            Some(LayoutOut::Ok(ViewOut { patch, before: vec![], boards_look: false }))
+        }
+    }
 }
 
 /// Choose the surface for this connection and the document the frame would open.

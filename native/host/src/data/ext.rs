@@ -532,14 +532,14 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: b
                 let (mut items, has) = if machines::is_far(th) {
                     machines::far_root(hub, th).ok_or_else(|| err("that thread has no folder"))?;
                     (
-                        rail(RailInput { board: true, schematic: true, mech: true, gerbers: false, simulation: false, altium: false, page, diff }),
+                        rail(RailInput { board: true, schematic: true, mech: true, gerbers: false, simulation: false, altium: false, page, diff, present: &[] }),
                         json!({"board": true, "schematic": true, "mech": true, "gerbers": false}),
                     )
                 } else {
                     let root = crate::files::kicad::canonical::design_root(&root_of(hub, th).await?);
                     let src = crate::present::viewer::rail_sources(&root);
                     (
-                        rail(RailInput { board: src.board, schematic: src.schematic, mech: src.mech, gerbers: src.gerbers, simulation: false, altium: src.altium, page, diff }),
+                        rail(RailInput { board: src.board, schematic: src.schematic, mech: src.mech, gerbers: src.gerbers, simulation: false, altium: src.altium, page, diff, present: &[] }),
                         json!({"board": src.board, "schematic": src.schematic, "mech": src.mech, "gerbers": src.gerbers}),
                     )
                 };

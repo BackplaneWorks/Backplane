@@ -829,7 +829,7 @@ async fn viewer_rail_returns_hub_rail_for_local_and_far_threads() {
     assert_eq!(r["result"]["mode"], "viewer");
     let expected_local = serde_json::to_value(rail(RailInput {
         board: src.board, schematic: src.schematic, mech: src.mech, gerbers: src.gerbers,
-        simulation: false, altium: src.altium, page: "files", diff: false,
+        simulation: false, altium: src.altium, page: "files", diff: false, present: &[],
     })).unwrap();
     assert_eq!(r["result"]["rail"], expected_local);
     assert_eq!(r["result"]["has"], json!({"board": src.board, "schematic": src.schematic, "mech": src.mech, "gerbers": src.gerbers}));
@@ -844,7 +844,7 @@ async fn viewer_rail_returns_hub_rail_for_local_and_far_threads() {
     assert_eq!(rd["ok"], true);
     let expected_diff = serde_json::to_value(rail(RailInput {
         board: src.board, schematic: src.schematic, mech: src.mech, gerbers: src.gerbers,
-        simulation: false, altium: src.altium, page: "files", diff: true,
+        simulation: false, altium: src.altium, page: "files", diff: true, present: &[],
     })).unwrap();
     assert_eq!(rd["result"]["rail"], expected_diff);
 
@@ -854,7 +854,7 @@ async fn viewer_rail_returns_hub_rail_for_local_and_far_threads() {
     assert_eq!(rf["result"]["mode"], "viewer");
     let expected_far = serde_json::to_value(rail(RailInput {
         board: true, schematic: true, mech: true, gerbers: false,
-        simulation: false, altium: false, page: "board", diff: false,
+        simulation: false, altium: false, page: "board", diff: false, present: &[],
     })).unwrap();
     assert_eq!(rf["result"]["rail"], expected_far);
     assert_eq!(rf["result"]["has"], json!({"board": true, "schematic": true, "mech": true, "gerbers": false}));

@@ -409,6 +409,104 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&d);
     }
+
+    #[test]
+    fn rail_v_2a_layout_actions_tiles_rail_present_phone_press_and_holder_lock() {
+        let d = crate::plat::tmp::dir("rail-v-2a");
+        let root = d.to_string_lossy().into_owned();
+        std::fs::write(d.join("unit.kicad_pcb"), "(kicad_pcb)").unwrap();
+        std::fs::write(d.join("unit.kicad_sch"), "(kicad_sch)").unwrap();
+        std::fs::create_dir_all(d.join("mfg/rev1")).unwrap();
+        std::fs::write(d.join("mfg/rev1/unit-F_Cu.gbr"), "%FSLAX46Y46*%M02*").unwrap();
+
+        let mut st = crate::state::State::new();
+        st.apply_line(&json!({"$":"ProjectCreated","id":"p","title":"Board","root":root,"at":1}).to_string());
+        st.apply_line(&json!({"$":"ThreadCreated","id":"t","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+
+        let mut sess = json!({"sel":"t","rid":1,"drafts":{"@view:t":"board"},"panel":false,"info":{}});
+
+        // 1. Add a Gerbers tile beside the Board tile (Scorecard Task 4)
+        let out = viewer::layout_action(&st, "h", &sess, Some(10), "layout-add", r#"{"side":"right","kind":"gerbers"}"#).unwrap();
+        let viewer::LayoutOut::Ok(vo) = out else { panic!("expected Ok") };
+        crate::session::patch::merge(&mut sess, &vo.patch);
+        let v = viewer::viewer_json(&st, &json!({}), &sess).unwrap();
+        let l: layout::Layout = serde_json::from_value(v["layout"].clone()).unwrap();
+        assert_eq!(l.tiles().len(), 2);
+        assert_eq!(l.focus.as_deref(), Some("t2"));
+        // viewer.tiles has both t1 (Board) and t2 (Gerbers) with plot keys, layers, identity
+        assert_eq!(v["tiles"]["t1"]["kind"], "board");
+        assert_eq!(v["tiles"]["t1"]["key"], format!("0|{root}|"));
+        assert_eq!(v["tiles"]["t1"]["identity"]["page"], "board");
+        assert_eq!(v["tiles"]["t1"]["identity"]["source"]["rel"], "unit.kicad_pcb");
+        assert_eq!(v["tiles"]["t2"]["kind"], "gerbers");
+        assert_eq!(v["tiles"]["t2"]["gerbers"], true);
+        assert_eq!(v["tiles"]["t2"]["key"], format!("0|{root}|{root}/mfg/rev1"));
+        assert_eq!(v["tiles"]["t2"]["identity"]["page"], "gerbers");
+        assert_eq!(v["tiles"]["t2"]["identity"]["set"]["rel"], "mfg/rev1");
+
+        // 2. viewer.rail[].present is true for both board & gerbers, while state=="on" is ONLY gerbers (focused)
+        let rail_row = |v: &Value, id: &str| v["rail"].as_array().unwrap().iter().find(|r| r["id"] == id).unwrap().clone();
+        assert_eq!(rail_row(&v, "board")["present"], true);
+        assert_eq!(rail_row(&v, "board")["state"], "off");
+        assert_eq!(rail_row(&v, "gerbers")["present"], true);
+        assert_eq!(rail_row(&v, "gerbers")["state"], "on");
+        assert_eq!(rail_row(&v, "schematic")["present"], false);
+
+        // 3. Phone (or any client) pressing "board" while desktop shows Board + Gerbers focuses Board and preserves Gerbers!
+        let phone_press = viewer::view_action(&st, "h", &sess, "board").unwrap();
+        crate::session::patch::merge(&mut sess, &phone_press.patch);
+        let v_after_phone = viewer::viewer_json(&st, &json!({}), &sess).unwrap();
+        let l_after_phone: layout::Layout = serde_json::from_value(v_after_phone["layout"].clone()).unwrap();
+        assert_eq!(l_after_phone.tiles().len(), 2, "desktop's second tile must survive phone tab press of present kind");
+        assert_eq!(l_after_phone.focus.as_deref(), Some("t1"));
+        assert_eq!(rail_row(&v_after_phone, "board")["state"], "on");
+        assert_eq!(rail_row(&v_after_phone, "gerbers")["present"], true);
+        assert_eq!(rail_row(&v_after_phone, "gerbers")["state"], "off");
+
+        // 4. layout-resize never emits watches; tooSmall returns catalog refusal code + key + text
+        let res_ok = viewer::layout_action(&st, "h", &sess, Some(10), "layout-resize", r#"{"split":"s1","ratio":0.6,"bounds":[1000,800],"kicadTile":"t1"}"#).unwrap();
+        let viewer::LayoutOut::Ok(vo_r) = res_ok else { panic!("expected resize Ok") };
+        assert!(vo_r.before.is_empty(), "layout-resize must never change watches");
+        let res_small = viewer::layout_action(&st, "h", &sess, Some(10), "layout-resize", r#"{"split":"s1","ratio":0.5,"bounds":[500,800],"kicadTile":"t1"}"#).unwrap();
+        assert!(matches!(res_small, viewer::LayoutOut::Refused { code: "tooSmall", key: "viewer.layout.refusal.tooSmall", text: "Too small for KiCad" }));
+
+        // 5. Ruling 1: `locked` honoured ONLY for holder; non-holder's `locked` ignored; hub open dialog locks even without client `locked`
+        sess["info"]["editor.kicad.abc"] = json!({"holder": 10, "dialogs": [], "runtime": {"holder": 10}});
+        // Holder (10) sends locked="t1" -> close("t1") refused with catalog text
+        let r_holder = viewer::layout_action(&st, "h", &sess, Some(10), "layout-close", r#"{"tile":"t1","locked":"t1"}"#).unwrap();
+        assert!(matches!(r_holder, viewer::LayoutOut::Refused { code: "locked", key: "viewer.layout.refusal.locked", text: "KiCad has a dialog open" }));
+        // Non-holder (99) sends locked="t1" -> ignored, close succeeds
+        let r_other = viewer::layout_action(&st, "h", &sess, Some(99), "layout-close", r#"{"tile":"t1","locked":"t1"}"#).unwrap();
+        assert!(matches!(r_other, viewer::LayoutOut::Ok(_)));
+        // Hub session info shows open KiCad dialog -> hub refuses even when client (10) forgot `locked`!
+        sess["info"]["editor.kicad.abc"]["dialogs"] = json!(["Save Changes"]);
+        let r_dialog = viewer::layout_action(&st, "h", &sess, Some(10), "layout-close", r#"{"tile":"t1"}"#).unwrap();
+        assert!(matches!(r_dialog, viewer::LayoutOut::Refused { code: "locked", text: "KiCad has a dialog open", .. }));
+        sess["info"]["editor.kicad.abc"]["dialogs"] = json!([]);
+
+        // 6. Overlay toggle: merge t2 (Gerbers) onto t1 (Board), then unsplit back to 2 tiles
+        let ov_out = viewer::layout_action(&st, "h", &sess, Some(10), "layout-overlay", r#"{"base":"t1","overlay":"t2","mode":"diff"}"#).unwrap();
+        let viewer::LayoutOut::Ok(vo_ov) = ov_out else { panic!("expected overlay Ok") };
+        crate::session::patch::merge(&mut sess, &vo_ov.patch);
+        let v_ov = viewer::viewer_json(&st, &json!({}), &sess).unwrap();
+        assert_eq!(v_ov["tiles"]["t1"]["gerbersVsBoard"], true);
+        let un_out = viewer::layout_action(&st, "h", &sess, Some(10), "layout-unsplit", r#"{"tile":"t1","side":"right"}"#).unwrap();
+        let viewer::LayoutOut::Ok(vo_un) = un_out else { panic!("expected unsplit Ok") };
+        crate::session::patch::merge(&mut sess, &vo_un.patch);
+        let v_un = viewer::viewer_json(&st, &json!({}), &sess).unwrap();
+        let l_un: layout::Layout = serde_json::from_value(v_un["layout"].clone()).unwrap();
+        assert_eq!(l_un.tiles().len(), 2);
+
+        // 7. viewer_show_action updates & focuses existing tile of kind, else replaces focused
+        let vs = viewer::viewer_show_action(&st, "h", &sess, Some(10), "board", &format!("{root}/unit.kicad_pcb")).unwrap();
+        let viewer::LayoutOut::Ok(vo_vs) = vs else { panic!("expected viewer_show Ok") };
+        crate::session::patch::merge(&mut sess, &vo_vs.patch);
+        let v_vs = viewer::viewer_json(&st, &json!({}), &sess).unwrap();
+        assert_eq!(v_vs["layout"]["focus"], "t1");
+
+        println!("RAIL_V_2A_TILES_EXAMPLE={}", json!({"layout": v["layout"], "tiles": v["tiles"]}));
+        let _ = std::fs::remove_dir_all(&d);
+    }
     struct Mine; impl Screen for Mine {
         fn name(&self) -> &'static str { "mine" }
         fn view(&self, p: &Value) -> Option<Value> { if p["target"]["kind"] == "thread" { Some(json!({"shown":{"by":"rust"}})) } else { None } }
