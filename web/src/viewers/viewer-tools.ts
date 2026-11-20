@@ -60,24 +60,21 @@ export function matchesCompareKey(
   key: string,
   prefix: string,
   commit: string,
-  expectedFile?: string
+  expectedFile: string
 ): boolean {
-  if (!key || !prefix || !commit) return false;
+  if (!key || !prefix || !commit || !expectedFile) return false;
   if (!key.startsWith(prefix)) return false;
   const lines = key.slice(prefix.length).split("\n");
   const oldParts = (lines[0] || "").split("\t");
   if (oldParts[0] !== "git" || oldParts[2] !== commit) return false;
-  if (expectedFile) {
-    const keyFile = lines[1] || oldParts.slice(4).join("\t");
-    const normKey = keyFile.replace(/\\/g, "/");
-    const normExp = expectedFile.replace(/\\/g, "/");
-    if (normExp.startsWith("/") || /^[A-Za-z]:\//.test(normExp)) {
-      if (normKey !== normExp) return false;
-    } else if (normKey !== normExp && !normKey.endsWith(`/${normExp}`)) {
-      return false;
-    }
+  const keyFile = lines[1] || oldParts.slice(4).join("\t");
+  if (!keyFile) return false;
+  const normKey = keyFile.replace(/\\/g, "/");
+  const normExp = expectedFile.replace(/\\/g, "/");
+  if (normExp.startsWith("/") || /^[A-Za-z]:\//.test(normExp)) {
+    return normKey === normExp;
   }
-  return true;
+  return normKey === normExp || normKey.endsWith(`/${normExp}`);
 }
 
 /**
