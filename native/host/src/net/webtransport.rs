@@ -23,6 +23,17 @@ pub(crate) struct BrowserListener {
     proxy: ProxyIdentity,
 }
 
+fn validate_authority(authority: &str) -> io::Result<()> {
+        let (host, port) = authority.split_once(':').map_or((authority, None), |(h,p)| (h, Some(p)));
+        if !host.ends_with(".ts.net") || host.split('.').count() < 4 || host.len() > 253
+            || host.split('.').any(|label| label.is_empty() || label.len() > 63 || label.starts_with('-')
+                || label.ends_with('-') || !label.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'))
+            || port.is_some_and(|p| p.parse::<u16>().map_or(true, |n| matches!(n, 0 | 443) || n.to_string() != p)) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid browser proxy configuration"));
+        }
+    Ok(())
+}
+
 impl BrowserListener {
     /// Caller owns the private runtime directory and its socket lifecycle.
     /// An occupied path fails the bind, including after an unclean shutdown.
@@ -32,12 +43,9 @@ impl BrowserListener {
             || meta.uid() != unsafe { libc::geteuid() } {
             return Err(io::Error::new(io::ErrorKind::PermissionDenied, "private browser runtime directory required"));
         }
-        let (host, port) = authority.split_once(':').map_or((authority.as_str(), None), |(h,p)| (h, Some(p)));
-        if proxy.pid <= 0 || !host.ends_with(".ts.net") || host.split('.').count() < 4 || host.len() > 253
-            || host.split('.').any(|label| label.is_empty() || label.len() > 63 || label.starts_with('-')
-                || label.ends_with('-') || !label.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'))
-            || port.is_some_and(|p| p.parse::<u16>().map_or(true, |n| matches!(n, 0 | 443) || n.to_string() != p)) {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid browser proxy configuration"));
+        validate_authority(&authority)?;
+        if proxy.pid <= 0 {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid proxy pid"));
         }
         let listener = UnixListener::bind(directory.join("browser.sock"))?;
         Ok(Self { listener, authority, proxy })
