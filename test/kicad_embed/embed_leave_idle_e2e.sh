@@ -76,7 +76,8 @@ mark l5 || true
 R=$(last_kicad_report "$OUT/client.log" l5)
 read -r PANE NOTICE < <(python3 -c 'import json,sys; r=json.loads(sys.argv[1] or "{}"); print(int(bool(r.get("project")) and bool(r.get("pane"))), json.dumps(r.get("notice")))' "${R:-{\}}")
 AWAYV=$(grep -c '"kicad_idle_closed_away"' "$OUT/client.log" || true)
-echo "INFO back after the idle close: pane $PANE, notice $NOTICE, viewer given back $AWAYV; $(echo "$R" | cut -c1-200)"
+AWAYBY=$(grep -o '"kicad_idle_closed_away":[^}]*"by":"[a-z ]*"' "$OUT/client.log" | grep -o '"by":"[a-z ]*"' | head -1 || true) # "stopped" (Linux: the stop first) or "frames closed" (Windows: the frames first)
+echo "INFO back after the idle close: pane $PANE, notice $NOTICE, viewer given back $AWAYV ($AWAYBY); $(echo "$R" | cut -c1-200)"
 check "L5 back after the idle close: Backplane's viewer, no pane on a gone KiCad, no error notice" "$([ "$PANE" = 0 ] && [ "$AWAYV" -ge 1 ] && { [ "$NOTICE" = null ] || [ -z "$NOTICE" ]; } && echo 1 || echo 0)" "pane $PANE notice $NOTICE away $AWAYV"
 
 mark edit2 || true

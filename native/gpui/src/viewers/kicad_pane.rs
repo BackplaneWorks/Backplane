@@ -3083,7 +3083,7 @@ impl crate::Backplane {
                 let idle_away = m && closed_idle_away(&p.read(cx).info, &v, p.read(cx).in_page);
                 if m { p.update(cx, |p, cx| p.set_info(v.clone(), cx)); }
                 // #1345: closed as idle while the person was away: coming back shows Backplane's viewer, never a pane on a KiCad that is gone
-                if idle_away { eprintln!("GPUI_LOG {}", json!({"kicad_idle_closed_away": prj})); self.kicad_view(cx); }
+                if idle_away { eprintln!("GPUI_LOG {}", json!({"kicad_idle_closed_away": prj, "by": "stopped"})); self.kicad_view(cx); }
                 (true, m, prj)
             }
             None => (false, false, String::new()),
@@ -3296,7 +3296,13 @@ impl crate::Backplane {
         // the pane's wanted frame changed (strip click, Ctrl+Tab, KiCad's active frame): repaint the rail without calling back into show_kind
         cx.subscribe(&page, |_, _, _: &PaneTab, cx| on_pane_tab(|| cx.notify())).detach();
         // the editor's frame closed in KiCad (Ctrl+W, File > Close): back to View, Edit there again (a fresh frame on the next Edit)
-        { let k = closed_key.clone(); cx.subscribe(&page, move |this, _, _: &PaneFrameClosed, cx| { this.screens.kicad_closed.insert(k.clone()); this.kicad_view(cx) }).detach(); }
+        // #1345: closed while the pane was off screen (no one could press Ctrl+W in it): the hub's idle close or the cap, whose KiCad closes
+        // its frames before it exits (Windows: Carbon's rows, ET_FRAME_CLOSED first; Linux: the stop first, `closed_idle_away`). The viewer
+        // back as for that, and not the person's close: no hold on the next automatic attach
+        { let k = closed_key.clone(); cx.subscribe(&page, move |this, p, _: &PaneFrameClosed, cx| {
+            if p.read(cx).in_page { this.screens.kicad_closed.insert(k.clone()); } else { eprintln!("GPUI_LOG {}", json!({"kicad_idle_closed_away": k, "by": "frames closed"})); }
+            this.kicad_view(cx)
+        }).detach(); }
         // the person closed KiCad itself (Close, or KiCad's quit): the viewer, and no automatic attach until their own Edit
         { let k = closed_key; cx.subscribe(&page, move |this, _, _: &PaneKicadClosed, cx| { this.screens.kicad_closed.insert(k.clone()); this.kicad_view(cx) }).detach(); }
         // no KiCad of its project in the pane's container (an install after a refused Edit, a restart with no container): attached again
