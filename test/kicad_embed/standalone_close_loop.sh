@@ -34,6 +34,14 @@ for i in $(seq "$CYCLES"); do
   if [ -z "$W" ]; then echo "cycle $i: no window"; OTHER=$((OTHER + 1)); kill -9 "$P" 2>/dev/null; wait "$P" 2>/dev/null; continue; fi
   sleep 4
   python3 "$KEMBED_LIB/wm_ctl.py" close "$W" >/dev/null 2>&1
+  # the PCB editor opens this board modified even after the upgrade (its "Save Changes?" held every close): answered Save, its default
+  # button, as the person's Return would (the copy is ours); the cycle then measures the save-and-close exit
+  ASKED=0
+  for _ in $(seq 12); do
+    D=$(xwininfo -root -tree 2>/dev/null | grep -m1 '"Save Changes?"' | awk '{print $1}')
+    if [ -n "$D" ]; then python3 "$KEMBED_LIB/wm_ctl.py" activate "$D" >/dev/null 2>&1; sleep 0.4; python3 "$XINPUT_PY" key Return >/dev/null 2>&1; ASKED=1; break; fi
+    kill -0 "$P" 2>/dev/null || break; sleep 0.25
+  done
   for _ in $(seq 120); do kill -0 "$P" 2>/dev/null || break; sleep 0.25; done
   if kill -0 "$P" 2>/dev/null; then
     # what is on screen of its own (a dialog that held the close is not a hang of its exit)
@@ -41,7 +49,7 @@ for i in $(seq "$CYCLES"); do
     HUNG=$((HUNG + 1)); echo "cycle $i: still running 30 s after its window was closed; on screen: $WINS"; kill -9 "$P" 2>/dev/null; wait "$P" 2>/dev/null
   else
     wait "$P"; st=$?
-    if [ "$st" = 0 ]; then CLEAN=$((CLEAN + 1)); echo "cycle $i: clean"
+    if [ "$st" = 0 ]; then CLEAN=$((CLEAN + 1)); echo "cycle $i: clean$([ "$ASKED" = 1 ] && echo " (Save Changes? answered Save)")"
     else CRASHED=$((CRASHED + 1)); echo "cycle $i: ended with status $st; last: $(grep -v '^$' "$OUT/sa-$i.log" | tail -1)"; fi
   fi
   sleep 1
