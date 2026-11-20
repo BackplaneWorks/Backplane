@@ -34,6 +34,18 @@ pub mod fs {
     pub fn sync_dir(d: &std::path::Path) -> std::io::Result<()> { std::fs::File::open(d)?.sync_all() }
     /// Random bytes from the OS (no fallback).
     pub fn random(b: &mut [u8]) -> std::io::Result<()> { use std::io::Read; std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(b)) }
+    /// The real path of an open file, from the handle itself (what was opened, whatever the path's links do after): Linux `/proc/self/fd`,
+    /// macOS `F_GETPATH`.
+    pub fn path_of(f: &std::fs::File) -> std::io::Result<std::path::PathBuf> {
+        use std::os::fd::AsRawFd;
+        #[cfg(target_os = "macos")] {
+            let mut b = vec![0u8; libc::PATH_MAX as usize + 1];
+            if unsafe { libc::fcntl(f.as_raw_fd(), libc::F_GETPATH, b.as_mut_ptr()) } == -1 { return Err(std::io::Error::last_os_error()) }
+            let n = b.iter().position(|c| *c == 0).unwrap_or(b.len());
+            return Ok(std::path::PathBuf::from(name_from(&b[..n])))
+        }
+        #[cfg(not(target_os = "macos"))] { std::fs::read_link(format!("/proc/self/fd/{}", f.as_raw_fd())) }
+    }
 }
 
 /// The OS error numbers the hub names.

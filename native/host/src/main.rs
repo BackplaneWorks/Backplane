@@ -487,7 +487,7 @@ mod auth_wire_tests {
         let (h, b) = raw(link.clone(), String::new()).await; assert!(h.starts_with("HTTP/1.1 200") && b == data, "a share needs no other credential: {h}");
         assert!(raw(format!("/s/{}/x", "0".repeat(48)), String::new()).await.0.starts_with("HTTP/1.1 404"), "an unknown token");
         assert!(crate::files::share::create(&hub, "t1", &json!({"path": proj.join(".env").to_string_lossy()})).await.is_err(), "no share of a secret");
-        crate::files::share::sweep(&hub, made["id"].as_str()).await;
+        crate::files::share::sweep(&hub, made["id"].as_str()).await.unwrap();
         assert!(raw(link, String::new()).await.0.starts_with("HTTP/1.1 404"), "revoked");
         reg.revoked.store(true, SeqCst);
         assert!(raw(zip, dev).await.0.starts_with("HTTP/1.1 401"), "a revoked device");

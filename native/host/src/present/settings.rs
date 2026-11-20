@@ -375,6 +375,8 @@ pub fn devices(st: &State, session: &Value, info: &Value) -> Vec<Value> {
         r.push(row(&format!("Pairing link · {state}{who}"), "", vec![btn("Revoke", "device-uninvite", s(i, "id"), false)]));
     }
     // the files agents shared (files/share.rs, `file_share`): each works without pairing until it expires or is revoked here
+    let e = draft(session, "@share.err");
+    if !e.is_empty() { r.push(row_tone("Shared files", e, "bad")) }
     for sh in info["shares"].as_array().into_iter().flatten() {
         let until = crate::agents::rules::when(&zone_of(st).0, sh["expires"].as_u64().unwrap_or(0), now / 1000);
         let tail = if s(sh, "url").is_empty() { String::new() } else { format!(" · also on the tailnet: {}", s(sh, "url")) };
@@ -464,7 +466,7 @@ pub fn device_act(action: &str, value: &str) -> Option<Value> {
         }
         "device-revoke" => { crate::net::start::revoke("revoke", value); json!({}) }
         "device-uninvite" => { crate::net::start::revoke("uninvite", value); json!({}) }
-        "device-share-revoke" => { crate::files::share::revoke_now(value); json!({}) }
+        "device-share-revoke" => json!({"drafts": {"@share.err": crate::files::share::revoke_now(value).err().map_or(String::new(), |e| format!("Could not revoke that share: {e}."))}}),
         _ => return None,
     })
 }

@@ -126,7 +126,7 @@ pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
         let shared = req.route().starts_with("/s/");
         if !shared && !hub.auth.allowed(&req) { s.write_all(&response("401 Unauthorized", "text/plain; charset=utf-8", "", b"this Backplane needs its pairing token")).await.ok(); s.shutdown().await.ok(); return Ok(()) }
         let h = hub.arc();
-        let r = if shared { crate::files::share::serve_share(&h, &mut s, &req).await } else if req.route() == "/file" { crate::files::share::serve_file(&h, &mut s, crate::files::share::Who::Native, &req).await } else { crate::files::share::serve_files_get(&h, &mut s, crate::files::share::Who::Native, &req).await };
+        let r = if shared { crate::files::share::serve_share(&h, &mut s, crate::files::share::Who::Share, &req.peer.map(|p| p.ip().to_string()).unwrap_or_default(), &req).await } else if req.route() == "/file" { crate::files::share::serve_file(&h, &mut s, crate::files::share::Who::Native, &req).await } else { crate::files::share::serve_files_get(&h, &mut s, crate::files::share::Who::Native, &req).await };
         if r.is_ok() { s.shutdown().await.ok(); }
         return Ok(());
     }
