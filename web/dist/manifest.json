@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 60635,
+  "totalAssetGzipBytes": 60611,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -86,16 +86,16 @@
     "web/src/viewers/solid3d.ts": "1db566e722a0621bc0df85d7339fae735d5bc06454f7291b88703906ce5af0dc",
     "web/src/viewers/viewer-pane.ts": "c11cbc313a2daf6b5eacedd7c38258fe3cddc4c4780947d9e8ecc42af56069ba",
     "web/src/voice.ts": "f401f1d5bd1685c7d7270fc02a8ff16f54bde7ae98aee21b4e802f0357063345",
-    "web/src/ws.ts": "b7b4926452a3b99f5b4db65f60b7c066dd13c3ae006b93a6e060fb96867e4afd",
+    "web/src/ws.ts": "a854ef329bb4fdb60b590d0549cb876273f4587cd8a0efbc4c3fc6ea2b8b21f8",
     "web/build.ts": "c32254f4abe4cea4e8e1f65aeced47aae007c0efd292236b2cf65d296651bcca",
     "assets/web/favicon.svg": "5b0f22a3329f59809216aabe58d8dbbedbd46d29e4a2373a727529daa2441a2c",
     "assets/web/favicon-light.svg": "9aa4fb973f8a719c602e351c84d3344bac377db049f59eaa52d617e84eada5b6"
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 147919,
-      "gzipBytes": 43766,
-      "sha256": "2a1e6c53b25201d99003d569c484bdeedd322d14404a6a7f9eec45ebb969feb0"
+      "bytes": 147838,
+      "gzipBytes": 43742,
+      "sha256": "ca46e2e921443862bc75b8f452c65073c1324c4345189121252b9750c57784c1"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,
