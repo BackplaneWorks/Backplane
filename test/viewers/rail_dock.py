@@ -33,7 +33,11 @@ Every assertion in Task 4 and Rule B7 reads ONLY from the metrics below and clea
 | menu entries after `add-beside` | `add-beside:<kind>` / `add-beside:<kind>:<right\|left\|bottom\|top>` | control ids | Page and side entries (kind and side are fixed words, not tile ids). `add-beside:<kind>` means right. |
 | `GPUI_METRIC {"event":"refusal"}` | emitted when the hub refuses a layout change | event | After `overlay-gerbers` on the Files tile: `code` is `incompatibleOverlay`, `text` human words. The refusal must leave `viewer.layout` unchanged. |
 
-Task 4 route: `rail:Gerbers` -> `@tile[kind=gerbers].add-beside` -> `add-beside:board` -> (one step back) `@tile[kind=board].close`.
+| splitter drag hook | `set_splitter_drag` | real pointer path | The hook must deliver a pointer press, moves and release at the splitter's drawn rect THROUGH the window's hit-testing (as the `pointer` step does for rail rows); calling the hub resize or setting a ratio directly is not a drag and makes `resize_drag` meaningless. |
+| incompatible overlay | `@tile[kind=files].overlay-gerbers` | control offered by the UI | Exercised only through a control the product really draws. If the UI never offers an overlay on a Files tile, the press is not delivered and `incompatible_overlay_refusal` is `unavailable` BY DESIGN (never a pass); to measure it the renderer must either offer that control and let the hub refuse, or the driver is changed to another pair the UI offers and the hub refuses. |
+| `viewer.layout` before/after the refusal | `viewer_state_json` forwards the hub's `viewer.layout` untouched into the `viewer` block of `settled`/`shot-ready` metrics | tree | Starting tree must be exactly Board + Files; layouts before and after must be equal; two empty dicts are not "equal". |
+
+Task 4 route: `rail:Gerbers` -> `@tile[kind=gerbers].add-beside` -> `add-beside:board` (the exact ordered ids, each delivered) -> (one step back) `@tile[kind=board].close`.
 Freshness: each shot's tile inventory must carry a `tiles` event whose seq is after the last DELIVERED input (press or drag) of its transition.
 
 Every check stays `unavailable` until a build emits `GPUI_METRIC {"event":"tiles", ...}` and
@@ -336,6 +340,13 @@ def _add_beside(kind_sel: str, kind: str, side: str | None = None) -> list[dict]
     return [{"press": f"@tile[{kind_sel}].add-beside"}, {"wait": 120}, {"press": entry}, {"wait": 300}]
 
 
+def _exact_chain(presses: dict[str, list[dict]], mark: str, expected: list[str]) -> list[dict]:
+    """The presses of one mark, only when their ids are EXACTLY `expected`, in order, each delivered (executed)."""
+    evs = presses.get(mark) or []
+    ok = [e.get("id") for e in evs] == expected and all(e.get("found") is True for e in evs)
+    return evs if ok else []
+
+
 def build_task4_dock_steps(settle_timeout_ms: int = 15000) -> list[dict]:
     """User-facing Task 4: Gerbers -> Add beside... -> Board in the UI, then close the added tile (one step back).
 
@@ -472,19 +483,18 @@ def evaluate_task4_dock(
     s_g = shots["task4-dock-gerbers"]
     s_split = shots["task4-dock-split"]
 
-    # Fresh tile inventory required for every shot (strictly after its mark).
-    fg_ok, fg_err = _fresh_tiles_after_mark(s_g, mark_seqs, "press:task4-dock-gerbers", _chain(presses, "press:task4-dock-gerbers"))
-    fs_ok, fs_err = _fresh_tiles_after_mark(s_split, mark_seqs, "press:task4-dock-split", _chain(presses, "press:task4-dock-split"))
-    if not (fg_ok and fs_ok):
+    # Fresh tile inventory for every shot: after the last delivered press of the EXACT ordered route
+    # (rail Gerbers by id, the drawn Gerbers tile's `add-beside`, then `add-beside:board`, then the drawn Board tile's `close`).
+    fg_ok, fg_err = _fresh_tiles_after_mark(s_g, mark_seqs, "press:task4-dock-gerbers", _exact_chain(presses, "press:task4-dock-gerbers", ["rail:Gerbers"]))
+    if not fg_ok:
         return {
             "outcome": "unavailable",
-            "note": fg_err or fs_err,
+            "note": fg_err,
             "one_step_back": False,
             "found": found_route,
             "presses": observed_presses,
-            "evidence": {"fresh_gerbers": fg_err, "fresh_split": fs_err},
+            "evidence": {"fresh_gerbers": fg_err},
         }
-
     g_tiles = s_g.get("tiles") or []
     v_g = s_g.get("viewer") or {}
     if len(g_tiles) != 1 or str(g_tiles[0].get("kind") or "") != "gerbers":
@@ -496,6 +506,21 @@ def evaluate_task4_dock(
             "presses": observed_presses,
             "evidence": {"init_tiles": g_tiles},
         }
+    gid = str(g_tiles[0].get("id") or "")
+    fs_ok, fs_err = _fresh_tiles_after_mark(
+        s_split, mark_seqs, "press:task4-dock-split",
+        _exact_chain(presses, "press:task4-dock-split", [f"tile:{gid}:add-beside", "add-beside:board"]),
+    )
+    if not fs_ok:
+        return {
+            "outcome": "unavailable",
+            "note": fs_err,
+            "one_step_back": False,
+            "found": found_route,
+            "presses": observed_presses,
+            "evidence": {"fresh_split": fs_err},
+        }
+
     init_id = str(g_tiles[0].get("id") or "")
     init_src = _tile_source(g_tiles[0], v_g)
     init_rect = _rect_tuple(g_tiles[0].get("rect"))
@@ -508,11 +533,6 @@ def evaluate_task4_dock(
     if not found_route:
         fails.append("Task 4 user-facing presses not delivered")
     board_ids = [str(t.get("id") or "") for t in tiles if t.get("kind") == "board"]
-    split_press_ids = [p.get("id") for p in p_s]
-    if init_id and f"tile:{init_id}:add-beside" not in split_press_ids:
-        fails.append(f"Add beside was not pressed on the drawn Gerbers tile {init_id!r} (pressed {split_press_ids})")
-    if board_ids and p_b and f"tile:{board_ids[0]}:close" not in [p.get("id") for p in p_b]:
-        fails.append(f"close was not pressed on the drawn Board tile {board_ids[0]!r}")
     if len(tiles) != 2:
         fails.append(f"expected 2 tiles, got {len(tiles)}")
     kinds = {str(t.get("kind") or "") for t in tiles}
@@ -522,8 +542,15 @@ def evaluate_task4_dock(
     rects = [_rect_tuple(t.get("rect")) for t in tiles]
     body_rects = [_rect_tuple(t.get("body")) for t in tiles]
     if any(r is None for r in rects):
-        fails.append("one or more tiles missing positive-area rect")
-    elif len(rects) == 2 and not _rects_disjoint(rects[0], rects[1]):
+        return {
+            "outcome": "unavailable",
+            "note": "tile metric missing outer `rect` (measured geometry absent, not a product failure)",
+            "one_step_back": False,
+            "found": found_route,
+            "presses": observed_presses,
+            "evidence": {"tiles": tiles},
+        }
+    if len(rects) == 2 and not _rects_disjoint(rects[0], rects[1]):
         fails.append("tile rects overlap")
     if any(b is None for b in body_rects):
         return {
@@ -559,7 +586,7 @@ def evaluate_task4_dock(
     back_note = err_b
     if ok_b:
         s_back = shots["task4-dock-back"]
-        fb_ok, fb_err = _fresh_tiles_after_mark(s_back, mark_seqs, "press:task4-dock-back", _chain(presses, "press:task4-dock-back"))
+        fb_ok, fb_err = _fresh_tiles_after_mark(s_back, mark_seqs, "press:task4-dock-back", _exact_chain(presses, "press:task4-dock-back", [f"tile:{board_ids[0]}:close"] if board_ids else []))
         if not fb_ok:
             back_note = fb_err
         elif not p_b:
@@ -687,7 +714,11 @@ def evaluate_b7_dock(
             dir_results[side] = "unavailable"
             dir_notes.append(f"{side}: missing measured body rect")
             continue
-        if not (rb and rs and _rects_disjoint(rb, rs)):
+        if rb is None or rs is None:
+            dir_results[side] = "unavailable"
+            dir_notes.append(f"{side}: missing outer tile rect")
+            continue
+        if not _rects_disjoint(rb, rs):
             dir_results[side] = False
             dir_notes.append(f"{side}: invalid or overlapping rects")
             continue
@@ -965,23 +996,44 @@ def evaluate_b7_dock(
         else:
             s_pre, s_inc = shots["b7-overlay-incompat-before"], shots["b7-overlay-incompat"]
             v_pre, v_inc = s_pre.get("viewer") or {}, s_inc.get("viewer") or {}
-            ref_evs = [r for r in refusals.get("b7:overlay-incompatible", []) if str(r.get("text") or "").strip()]
-            code = str((ref_evs[-1].get("code") if ref_evs else None) or v_inc.get("refusal_code") or "").strip()
-            msg = str((ref_evs[-1].get("text") if ref_evs else None) or v_inc.get("refusal") or "").strip()
-            code_ok = code in INCOMPATIBLE_OVERLAY_CODES
-            raw_code = bool(RAW_REFUSAL_CODE_RE.search(msg)) if msg else False
             lay_pre, lay_post = v_pre.get("layout"), v_inc.get("layout")
-            layout_eq = isinstance(lay_pre, dict) and isinstance(lay_post, dict) and lay_pre == lay_post
-            ok_ref = bool(code_ok and msg and not raw_code and layout_eq)
-            if not (isinstance(lay_pre, dict) and isinstance(lay_post, dict)):
-                checks["incompatible_overlay_refusal"] = _rec("unavailable", None, "hub layout (`viewer.layout`) not observed before and after the refused overlay")
+            leaves_pre, leaves_post = layout_leaves(lay_pre), layout_leaves(lay_post)
+
+            def _unavail(note: str) -> None:
+                checks["incompatible_overlay_refusal"] = _rec("unavailable", None, note)
+
+            files_ids = [i for i, t in leaves_pre.items() if t.get("kind") == "files"]
+            if not leaves_pre or not leaves_post:
+                # `{}`, a missing key or a tree with no tile leaves is not an observed layout (two empties are not "unchanged")
+                _unavail("hub layout (`viewer.layout`, tile leaves under `root`) not observed before and after the refused overlay")
+            elif {t.get("kind") for t in leaves_pre.values()} != {"board", "files"} or len(leaves_pre) != 2:
+                _unavail(f"starting tree is not exactly Board + Files ({sorted(str(t.get('kind')) for t in leaves_pre.values())})")
             else:
-                checks["incompatible_overlay_refusal"] = _rec(
-                    "measured",
-                    ok_ref,
-                    "" if ok_ref else f"code={code!r} (ok={code_ok}) text={msg!r} raw_code={raw_code} layout_eq={layout_eq}",
-                    {"code": code, "refusal_text": msg, "layout_equal": layout_eq},
-                )
+                # Bound to the delivered press: that exact control on the drawn Files tile, then a refusal reported AFTER it
+                chain = _exact_chain(presses, "b7:overlay-incompatible", [f"tile:{files_ids[0]}:overlay-gerbers"])
+                if not chain:
+                    _unavail(
+                        f"overlay press not delivered on the drawn Files tile {files_ids[0]!r} "
+                        "(a build that does not offer Files overlay leaves this check unavailable by design)"
+                    )
+                else:
+                    press_seq = max(int(e.get("seq") or 0) for e in chain)
+                    ref_evs = [r for r in refusals.get("b7:overlay-incompatible", []) if int(r.get("seq") or 0) > press_seq]
+                    code = str((ref_evs[-1].get("code") if ref_evs else "") or "").strip()
+                    msg = str((ref_evs[-1].get("text") if ref_evs else "") or "").strip()
+                    code_ok = code in INCOMPATIBLE_OVERLAY_CODES
+                    raw_code = bool(RAW_REFUSAL_CODE_RE.search(msg)) if msg else False
+                    layout_eq = lay_pre == lay_post
+                    ok_ref = bool(ref_evs and code_ok and msg and not raw_code and layout_eq)
+                    checks["incompatible_overlay_refusal"] = _rec(
+                        "measured",
+                        ok_ref,
+                        "" if ok_ref else (
+                            "no refusal observed after the delivered overlay press" if not ref_evs
+                            else f"code={code!r} (ok={code_ok}) text={msg!r} raw_code={raw_code} layout_eq={layout_eq}"
+                        ),
+                        {"code": code, "refusal_text": msg, "layout_equal": layout_eq, "press_seq": press_seq},
+                    )
 
     measured = [(k, c) for k, c in checks.items() if c["status"] == "measured" and isinstance(c["passed"], bool)]
     if not measured:

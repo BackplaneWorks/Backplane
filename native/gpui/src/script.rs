@@ -1054,6 +1054,8 @@ impl Backplane {
             "gerbers": v["gerbers"] == true,
             "gerbers_vs_board": v["gerbersVsBoard"] == true,
             "sim_frame": v["simFrame"] == true,
+            // the hub's own layout tree (`viewer.layout`, present/layout.rs), forwarded untouched; absent when the hub sent none
+            "layout": v["layout"].clone(),
             "rail": rail,
             "panes_count": panes,
             "plot_key": plot_key,

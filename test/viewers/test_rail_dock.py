@@ -208,6 +208,21 @@ class RailDockHarnessTests(unittest.TestCase):
             del p_nostart["shots"]["task4-dock-gerbers"]
             self.assertEqual(DOCK.evaluate_task4_dock(fdir, p_nostart, caps, True, cleared_shots=cleared)["outcome"], "unavailable")
 
+            # 4b. Route not exact (an extra or reordered press), or the wrong tile's control -> unavailable, never passed
+            for bad in (
+                [{"id": "add-beside:board", "found": True, "seq": 22}, {"id": "tile:tile-g:add-beside", "found": True, "seq": 21}],
+                [{"id": "tile:tile-b:add-beside", "found": True, "seq": 21}, {"id": "add-beside:board", "found": True, "seq": 22}],
+                [{"id": "tile:tile-g:add-beside", "found": True, "seq": 21}],
+                [{"id": "tile:tile-g:add-beside", "found": True, "seq": 21}, {"id": "add-beside:board", "found": True, "seq": 22}, {"id": "x", "found": True, "seq": 23}],
+            ):
+                p_bad = json.loads(json.dumps(parsed))
+                p_bad["presses"]["press:task4-dock-split"] = bad
+                self.assertEqual(DOCK.evaluate_task4_dock(fdir, p_bad, caps, True, cleared_shots=cleared)["outcome"], "unavailable")
+            # 4c. Outer rect missing while the body is present -> unavailable (not a product failure)
+            p_rect = json.loads(json.dumps(parsed))
+            del p_rect["shots"]["task4-dock-split"]["tiles"][0]["rect"]
+            self.assertEqual(DOCK.evaluate_task4_dock(fdir, p_rect, caps, True, cleared_shots=cleared)["outcome"], "unavailable")
+
             # 5. Not in per-shot privacy clearance -> harness_failed (fail-closed)
             self.assertEqual(DOCK.evaluate_task4_dock(fdir, parsed, caps, True, cleared_shots={"task4-dock-gerbers"})["outcome"], "harness_failed")
 
@@ -279,9 +294,12 @@ class RailDockHarnessTests(unittest.TestCase):
                 "tiles_metric_seen": True,
                 "mark_seqs": mark_seqs,
                 "shots": shots,
-                "presses": {m: [{"id": "tile:x:" + m, "found": True, "seq": q + 1}] for m, q in mark_seqs.items() if m not in ("b7:resize-drag", "b7:overlay-incompatible")},
+                "presses": {
+                    **{m: [{"id": "tile:x:" + m, "found": True, "seq": q + 1}] for m, q in mark_seqs.items() if m not in ("b7:resize-drag", "b7:overlay-incompatible")},
+                    "b7:overlay-incompatible": [{"id": "tile:tf:overlay-gerbers", "found": True, "seq": 121}],
+                },
                 "drags": {"b7:resize-drag": [{"ok": True, "splitter": "sp-x", "from": [1061, 420], "to": [975, 420], "moves": 6, "seq": 71}]},
-                "refusals": {"b7:overlay-incompatible": [{"code": "incompatibleOverlay", "text": "Those views cannot be overlaid"}]},
+                "refusals": {"b7:overlay-incompatible": [{"code": "incompatibleOverlay", "text": "Those views cannot be overlaid", "seq": 122}]},
             }
 
             b7 = DOCK.evaluate_b7_dock(fdir, parsed, caps, cleared_shots=cleared)
@@ -323,9 +341,35 @@ class RailDockHarnessTests(unittest.TestCase):
             self.assertIs(DOCK.evaluate_b7_dock(fdir, p_across, caps, cleared_shots=cleared)["checks"]["resize_drag"]["passed"], False)
 
             # Refusal: hub layout not observed -> unavailable; raw code in the human text -> failed
+            def _ref(p):
+                return DOCK.evaluate_b7_dock(fdir, p, caps, cleared_shots=cleared)["checks"]["incompatible_overlay_refusal"]
             p_nolay = json.loads(json.dumps(parsed))
             del p_nolay["shots"]["b7-overlay-incompat"]["viewer"]["layout"]
-            self.assertEqual(DOCK.evaluate_b7_dock(fdir, p_nolay, caps, cleared_shots=cleared)["checks"]["incompatible_overlay_refusal"]["status"], "unavailable")
+            self.assertEqual(_ref(p_nolay)["status"], "unavailable")
+            # two empty dicts are not "unchanged"
+            p_empty = json.loads(json.dumps(parsed))
+            p_empty["shots"]["b7-overlay-incompat"]["viewer"]["layout"] = {}
+            p_empty["shots"]["b7-overlay-incompat-before"]["viewer"]["layout"] = {}
+            self.assertEqual(_ref(p_empty)["status"], "unavailable")
+            # starting tree must be Board + Files
+            p_tree = json.loads(json.dumps(parsed))
+            for k in ("b7-overlay-incompat", "b7-overlay-incompat-before"):
+                p_tree["shots"][k]["viewer"]["layout"]["root"]["b"]["kind"] = "schematic"
+            self.assertEqual(_ref(p_tree)["status"], "unavailable")
+            # a refusal reported BEFORE the delivered press does not count; none after it with layouts present -> failed
+            p_old = json.loads(json.dumps(parsed))
+            p_old["refusals"]["b7:overlay-incompatible"][0]["seq"] = 100
+            r_old = _ref(p_old)
+            self.assertEqual(r_old["status"], "measured")
+            self.assertIs(r_old["passed"], False)
+            # press on some other control / undelivered -> unavailable
+            p_other = json.loads(json.dumps(parsed))
+            p_other["presses"]["b7:overlay-incompatible"][0]["id"] = "tile:tb:overlay-gerbers"
+            self.assertEqual(_ref(p_other)["status"], "unavailable")
+            # layout changed by the refused press -> failed
+            p_chg = json.loads(json.dumps(parsed))
+            p_chg["shots"]["b7-overlay-incompat"]["viewer"]["layout"]["root"]["ratio"] = 0.3
+            self.assertIs(_ref(p_chg)["passed"], False)
             p_raw = json.loads(json.dumps(parsed))
             p_raw["refusals"]["b7:overlay-incompatible"][0]["text"] = "incompatibleOverlay"
             self.assertIs(DOCK.evaluate_b7_dock(fdir, p_raw, caps, cleared_shots=cleared)["checks"]["incompatible_overlay_refusal"]["passed"], False)
