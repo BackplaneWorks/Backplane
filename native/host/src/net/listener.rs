@@ -337,3 +337,6 @@ mod tests {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[path = "webtransport.rs"]
 pub(crate) mod webtransport;
+#[cfg(target_os = "linux")]
+#[path = "webprovision.rs"]
+pub(crate) mod webprovision;
