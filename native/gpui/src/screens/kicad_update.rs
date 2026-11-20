@@ -93,7 +93,7 @@ fn reopen(app: &mut Backplane, cx: &mut Context<Backplane>) {
         // a pane whose Edit had no KiCad in it (refused: "KiCad was not found", before the install) attaches with its own container: a
         // restart has no container to start KiCad in and started it in a window of its own (bp.13.3 first install). A pane on a running
         // KiCad keeps the restart, which keeps that session's container
-        if p.read(cx).is_adrift() { app.kicad_adrift(&p, crate::viewers::kicad_pane::ShowBy::Deliberate, cx); return }
+        if p.read(cx).is_adrift() { { let why = crate::viewers::kicad_pane::reattach_why(crate::viewers::kicad_pane::AdriftRoad::InstallReopen, p.read(cx).why); app.kicad_adrift(&p, why, cx) }; return }
         let project = p.read(cx).project.clone();
         let _ = app.tx.try_send(Command::Rpc("editor.kicad.restart".into(), Secret(json!({"project": project})), "kicad"));
     }
