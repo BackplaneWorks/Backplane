@@ -1251,12 +1251,6 @@ mod imp {
         unsafe fn apply(w: u64, activate: bool, ui: u32) -> bool {
             let h = super::hwnd(w);
             if unsafe { super::IsWindow(h) } == 0 { return true }
-            // #1403 step 2's measurement only (BP_KICAD_HANDBACK_SKIP=1): no hand-back at all, so a row tells whether the person's own
-            // input to Backplane (a real click's release, typed keys) waits on the hand-back's focus change or on something else
-            if std::env::var("BP_KICAD_HANDBACK_SKIP").is_ok_and(|v| v == "1") {
-                if dbg() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_hand_back_skipped": {"window": w}})); }
-                return true
-            }
             let me = unsafe { super::GetCurrentThreadId() };
             let joined = unsafe { super::AttachThreadInput(me, ui, 1) } != 0;
             if activate {
