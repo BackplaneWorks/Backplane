@@ -600,44 +600,37 @@ def evaluate_b1_kind(kind: str, parsed_kind: dict, rail_map: dict[str, dict]) ->
             checks["palette_open"] = pal_ok
             if not pal_ok:
                 failed.append("palette_open")
+            entries_out[eid] = {
+                "label": label,
+                "disabled": False,
+                "status": "measured",
+                "passed": len(failed) == 0,
+                "checks": checks,
+                "failed": failed,
+            }
         else:
-            # Disabled press: input recorded (press event emitted for rail_id, even with found=False since disabled), fresh rail snapshot still lit==[]
-            m_dp = f"b1:disabled-press:{eid}"
-            p_dp = [p for p in presses_by_mark.get(m_dp, []) if p.get("id") == rail_id]
-            dp_ok = check_transition(m_dp, f"b1-disabled-press-{eid}", label, p_dp[0].get("seq") if p_dp else None, True, [], [], viewer_closed)
-            checks["disabled_press"] = dp_ok
-            if not dp_ok:
-                failed.append("disabled_press")
-
-            # Disabled key: bare key delivered, fresh rail snapshot still lit==[]
-            m_dk = f"b1:disabled-key:{eid}"
-            k_dk = [k for k in keys_by_mark.get(m_dk, []) if k.get("keys") == bare_key]
-            dk_ok = check_transition(m_dk, f"b1-disabled-key-{eid}", label, k_dk[0].get("seq") if k_dk else None, True, [], [], viewer_closed)
-            checks["disabled_key"] = dk_ok
-            if not dk_ok:
-                failed.append("disabled_key")
-
-            # Disabled palette: palette read confirms open & target NOT selected, Enter delivered, post-Enter fresh rail snapshot BEFORE Escape still lit==[]
-            m_dpal = f"b1:disabled-palette:{eid}"
-            preads = [r for r in pal_reads_by_mark.get(m_dpal, []) if r.get("supported") and (r.get("snapshot") or {}).get("open") is True and (r.get("snapshot") or {}).get("selected_id") != f"rail:{eid}"]
-            enters = [k for k in keys_by_mark.get(m_dpal, []) if k.get("keys") == "enter" and (not preads or int(k.get("seq") or 0) > int(preads[-1].get("seq") or 0))]
-            dpal_seq = enters[0].get("seq") if (preads and enters) else None
-            dpal_ok = check_transition(m_dpal, f"b1-disabled-palette-{eid}", label, dpal_seq, True, [], [], viewer_closed)
-            checks["disabled_palette"] = dpal_ok
-            if not dpal_ok:
-                failed.append("disabled_palette")
-
-        entries_out[eid] = {
-            "label": label,
-            "disabled": is_disabled,
-            "passed": len(failed) == 0,
-            "checks": checks,
-            "failed": failed,
-        }
+            # TODO(https://github.com/BackplaneWorks/Backplane/issues/1317): once PR #1359 lands and a
+            # one-shot on-demand rail snapshot request is wired in the rail paint path, re-enable
+            # disabled press/key/palette assertions. When re-enabling disabled_palette, distinguish
+            # "target absent from the palette" from "another command was selected and run".
+            entries_out[eid] = {
+                "label": label,
+                "disabled": True,
+                "status": "unavailable",
+                "passed": None,
+                "reason": "disabled-entry assertions require a one-shot on-demand rail snapshot after PR #1359 lands",
+                "checks": {
+                    "disabled_press": "unavailable",
+                    "disabled_key": "unavailable",
+                    "disabled_palette": "unavailable",
+                },
+                "failed": [],
+            }
 
     return {
         "status": "measured_partial",
         "omitted_entries": list(M.B1_OMITTED_ENTRIES),
+        "disabled_entries_measured": False,
         "entries": entries_out,
     }
 

@@ -871,17 +871,16 @@ impl Render for Backplane {
                 page_top += crate::scale::tpx(48.);
             }
             let icon_resolved = art::icon_name(row.icon);
-            let drawn_label = trs(row.label);
             let mut button = with_rect(div().id(SharedString::from(format!("rail-{}", row.label))), || format!("rail:{}", row.label))
                 .relative().flex().flex_col().items_center().h(crate::scale::tpx(48.)).flex_shrink_0().justify_center().gap_1().text_size(rail_label())
                 .when(active, |d| d.bg(c("raise")).border_l_2().border_color(c("accent")))
                 .text_color(c(if active { "text" } else { "dim" }))
-                .child(ic(light, icon_resolved.unwrap_or("folder"), 18., if active { "accent" } else { "dim" })).child(drawn_label.clone());
+                .child(ic(light, icon_resolved.unwrap_or("folder"), 18., if active { "accent" } else { "dim" })).child(trs(row.label));
             if disabled {
                 button = button.opacity(0.45).tooltip(crate::keys::tip(row.why, "", light));
                 if collect_inv {
                     inv_rows.push(RailInvRow {
-                        id: id.into(), label: drawn_label, group: row.group.into(), state: row.state.into(), disabled: true,
+                        id: id.into(), label: trs(row.label), group: row.group.into(), state: row.state.into(), disabled: true,
                         icon: row.icon.into(), icon_known: icon_resolved.is_some(),
                         tooltip_label: trs(row.why), tooltip_hint: String::new(),
                         key: row.key.into(), keycap_drawn: String::new(), keycap_eligible: false,
@@ -891,17 +890,17 @@ impl Render for Backplane {
                 let letter = row.key;
                 let hint = rail_hint(&self.local, id, letter);
                 let cap_el = keycap(letter, active);
-                let cap_drawn = if cap_el.is_some() { letter.to_uppercase() } else { String::new() };
-                button = button.cursor_pointer().hover(|s| s.bg(c("raise")).text_color(c("text")))
-                    .tooltip(crate::keys::tip(row.label, &hint, light)).children(cap_el);
                 if collect_inv {
+                    let cap_drawn = if cap_el.is_some() { letter.to_uppercase() } else { String::new() };
                     inv_rows.push(RailInvRow {
-                        id: id.into(), label: drawn_label, group: row.group.into(), state: row.state.into(), disabled: false,
+                        id: id.into(), label: trs(row.label), group: row.group.into(), state: row.state.into(), disabled: false,
                         icon: row.icon.into(), icon_known: icon_resolved.is_some(),
-                        tooltip_label: trs(row.label), tooltip_hint: hint,
+                        tooltip_label: trs(row.label), tooltip_hint: hint.clone(),
                         key: letter.into(), keycap_drawn: cap_drawn, keycap_eligible: letter.chars().count() == 1,
                     });
                 }
+                button = button.cursor_pointer().hover(|s| s.bg(c("raise")).text_color(c("text")))
+                    .tooltip(crate::keys::tip(row.label, &hint, light)).children(cap_el);
                 let action = match id {
                     "terminal" => Ctl::None, "commands" => Ctl::OpenPalette, "simulation" => Ctl::KicadAct("simulation".into()),
                     "diff" => Ctl::Node("diff".into(), "".into()), _ => Ctl::Rail(id.into()),

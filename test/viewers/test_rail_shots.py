@@ -515,23 +515,22 @@ class RailShotsRegressionTests(unittest.TestCase):
             self.assertEqual(cons_no["B1"]["status"], "unavailable")
             self.assertIsNone(cons_no["B1"]["points"])
 
-            # Hold 1 regression: a single idle snapshot must NOT pass disabled checks without delivered input + fresh post-input rail snapshot!
+            # Hold 1 regression: disabled-entry assertions are ALWAYS unavailable (never passed) until
+            # a one-shot on-demand rail snapshot is wired after PR #1359 lands.
             log_stale = Path(td) / "stale_rail.log"
             log_stale.write_text("\n".join([
                 'GPUI_METRIC {"event":"rail","rail":{"lit":[],"entries":["Split"],"disabled":["Split"]}}',
                 'GPUI_METRIC {"event":"mark","name":"b1:disabled-press:split"}',
                 'GPUI_METRIC {"event":"press","id":"rail:Split","found":false}',
-                # No fresh post-input event=rail emitted before settled -> must fail!
                 'GPUI_METRIC {"event":"settled","tag":"b1-disabled-press-split","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
-                'GPUI_METRIC {"event":"mark","name":"b1:disabled-key:split"}',
-                'GPUI_METRIC {"event":"settled","tag":"b1-disabled-key-split","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
-                'GPUI_METRIC {"event":"mark","name":"b1:disabled-palette:split"}',
-                'GPUI_METRIC {"event":"settled","tag":"b1-disabled-palette-split","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
             ]) + "\n", encoding="utf-8")
             p_stale = P.parse_client_log(log_stale)
             b1_stale = P.evaluate_b1_kind("full", p_stale, {"split": {"state": "disabled", "why": "No schematic"}})
-            self.assertFalse(b1_stale["entries"]["split"]["passed"])
-            self.assertEqual(b1_stale["entries"]["split"]["failed"], ["disabled_press", "disabled_key", "disabled_palette"])
+            self.assertEqual(b1_stale["entries"]["split"]["status"], "unavailable")
+            self.assertIsNone(b1_stale["entries"]["split"]["passed"])
+            self.assertEqual(b1_stale["entries"]["split"]["checks"]["disabled_press"], "unavailable")
+            self.assertEqual(b1_stale["entries"]["split"]["checks"]["disabled_key"], "unavailable")
+            self.assertEqual(b1_stale["entries"]["split"]["checks"]["disabled_palette"], "unavailable")
 
             # With full pre-snapshot + input + palette read + fresh post-input rail snapshot -> scored 0-3 (partial) with failing entries listed
             log_rail = Path(td) / "with_rail.log"
@@ -607,13 +606,17 @@ class RailShotsRegressionTests(unittest.TestCase):
             b1_yes = P.evaluate_b1_kind("full", p_yes, rmap)
             self.assertEqual(b1_yes["status"], "measured_partial")
             self.assertEqual(b1_yes["omitted_entries"], ["simulation", "terminal", "commands"])
+            self.assertFalse(b1_yes["disabled_entries_measured"])
             self.assertTrue(b1_yes["entries"]["board"]["passed"])
             self.assertFalse(b1_yes["entries"]["gerbers"]["passed"])
             self.assertIn("key_open", b1_yes["entries"]["gerbers"]["failed"])
-            self.assertTrue(b1_yes["entries"]["split"]["passed"])
+            self.assertEqual(b1_yes["entries"]["split"]["status"], "unavailable")
+            self.assertIsNone(b1_yes["entries"]["split"]["passed"])
             cons_yes = C.score_consistency({"kinds": {"full": {"rail_metric_seen": True, "b1_checks": b1_yes, "pages": {}}}})
             self.assertEqual(cons_yes["B1"]["status"], "measured_partial")
-            self.assertEqual(cons_yes["B1"]["points"], 2.0)  # 2/3 * 3.0
+            self.assertEqual(cons_yes["B1"]["checked"], 2)  # enabled entries only; disabled excluded
+            self.assertEqual(cons_yes["B1"]["disabled_unmeasured"], 1)
+            self.assertEqual(cons_yes["B1"]["points"], 1.5)  # 1/2 * 3.0
             self.assertIn("full/gerbers:", cons_yes["B1"]["violations"][0])
 
     # --- rail-p item 3 (Hold 2): Rule B5 checks tooltip_hint & palette_shortcut and labels partial ---
