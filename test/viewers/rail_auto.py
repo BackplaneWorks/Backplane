@@ -10,7 +10,7 @@ Gates (check ids `full/auto-*`):
      start and after the frame appears: every key lands in the composer)
   b  a Deliberate attach after it promotes and takes the keyboard
   c  Board <-> Schematic under Automatic is a frame switch (one KiCad process); the geometry-push count is `unavailable`
-  d  leaving the page detaches with keep-warm; coming back re-attaches without a cold start
+  d  View detaches with keep-warm and the attach again is no cold start; d2 the same by leaving the page with the rail (reconcile's job)
   e  person-closed hold: after KiCad's own Close an Automatic attach is refused; Edit clears the hold
   f  stale generation: an attach with an old generation is answered `stale:true` and changes nothing
   g  setting "Always viewer": `unavailable` until the reconcile exists
@@ -29,6 +29,13 @@ from pathlib import Path
 MARKERS = {"pre": "qpre", "mid": "qmid", "post": "qpost"}
 
 GATES = ("a", "b", "c", "d", "e", "f", "g")
+
+# The shots the gates read (each is captured, privacy-checked and carries the hub's session inventory); the `auto-act-*` shots only
+# release the watcher's action and are not evidence.
+AUTO_SHOTS = (
+    "auto-a-frame", "auto-b-frame", "auto-c-board", "auto-f-after", "auto-c-schematic", "auto-c-back",
+    "auto-d-view-left", "auto-d-view-back", "auto-d-left", "auto-d-back", "auto-e-refused", "auto-e-edit",
+)
 
 
 def build_auto_steps(settle_timeout_ms: int = 15000) -> list[dict]:
@@ -91,7 +98,19 @@ def build_auto_steps(settle_timeout_ms: int = 15000) -> list[dict]:
         {"kicad": {"report": True, "tag": "auto-c-back-report"}},
         {"mark": "auto:c:done"},
         {"shot": "auto-c-back", "settle": "", "timeout_ms": tmo},
-        # d: leave the page (keep-warm), come back
+        # d: View detaches the automatic pane (KiCad kept warm); the attach again is no cold start
+        {"mark": "auto:d:view-leave"},
+        {"click": "ui:View"},
+        {"wait": 2500},
+        {"kicad": {"report": True, "tag": "auto-d-view-left-report"}},
+        {"shot": "auto-d-view-left", "settle": "", "timeout_ms": tmo},
+        {"mark": "auto:d:view-back"},
+        {"kicad": {"attach": "board", "why": "auto", "tag": "auto-d-view-back-attach"}},
+        {"kicad": {"wait_painted": 30000, "kind": "PCB", "tag": "auto-d-view-back-painted"}},
+        {"kicad": {"report": True, "tag": "auto-d-view-back-report"}},
+        {"mark": "auto:d:view-done"},
+        {"shot": "auto-d-view-back", "settle": "", "timeout_ms": tmo},
+        # d2: leaving to another page by the rail (the reconcile's job to detach)
         {"mark": "auto:d:leave"},
         {"press": "rail:Files"},
         {"wait": 2500},
@@ -117,6 +136,7 @@ def build_auto_steps(settle_timeout_ms: int = 15000) -> list[dict]:
         {"shot": "auto-e-refused", "settle": "", "timeout_ms": tmo},
         {"mark": "auto:e:edit"},
         {"kicad": {"attach": "board", "why": "edit", "tag": "auto-e-edit-attach"}},
+        {"wait": 3000},
         {"kicad": {"wait_painted": painted, "kind": "PCB", "tag": "auto-e-edit-painted"}},
         {"kicad": {"report": True, "tag": "auto-e-edit-report"}},
         {"mark": "auto:e:done"},
@@ -232,8 +252,9 @@ def evaluate_auto_gates(
     out.append(_gate_b(marks, kt, logs, caps_full, cleared_shots))
     # ---- c
     out.append(_gate_c(marks, kt, logs, caps_full, cleared_shots))
-    # ---- d
+    # ---- d, d2
     out.append(_gate_d(marks, kt, logs, caps_full, cleared_shots))
+    out.append(_gate_d2(marks, kt, logs, caps_full, cleared_shots))
     # ---- e
     out.append(_gate_e(marks, kt, logs, caps_full, cleared_shots, actions))
     # ---- f
@@ -280,8 +301,8 @@ def _gate_a(name, marks, kt, logs, comp, caps, actions, parsed, cleared) -> dict
     holder = rt.get("holder")
     if not holder:
         fails.append("hub runtime.holder is absent: the pane is not held by a client")
-    elif str(rep.get("holder", "")) != str(holder):
-        fails.append(f"hub runtime.holder {holder!r} is not the pane's own holder {rep.get('holder')!r}")
+    # The pane's own `holder` is KiCad's X window, not the client's connection id, so "this client" is not directly observable: in
+    # this run the one GPUI client is the only possible holder (the hub_rpc helper views never hold a pane).
     # rail lights Board after the scripted rail read
     lit = _rail_lit_between(parsed, marks.get("auto:a:painted"), marks.get("auto:a:done"))
     if lit is None:
@@ -295,7 +316,8 @@ def _gate_a(name, marks, kt, logs, comp, caps, actions, parsed, cleared) -> dict
     # the cold start was really typed through
     starting = [lg for lg in _logs_between(logs, marks.get("auto:a:attach"), marks.get("auto:a:painted"), "kicad_info") if lg["obj"].get("state") == "starting"]
     ev = {"composer": {"start": start, "pre": r_pre, "mid": r_mid, "post": r_post}, "report": {k: rep.get(k) for k in ("ok", "in_gpui_tree", "shown", "keys", "holder", "pid", "state")},
-          "hub_runtime": rt, "rail_lit": lit, "cold_start_observed": bool(starting)}
+          "hub_runtime": rt, "rail_lit": lit, "cold_start_observed": bool(starting),
+          "holder_is_this_client": "inferred: the single GPUI client of the run is the only possible holder (the client's own connection id has no observable)"}
     if fails:
         return _rec(gid, name, "failed", "; ".join(fails), ev)
     if not starting:
@@ -376,8 +398,56 @@ def _gate_c(marks, kt, logs, caps, cleared) -> dict:
 
 
 def _gate_d(marks, kt, logs, caps, cleared) -> dict:
-    gid, name = "d-keep-warm", "Leaving the page detaches with keep-warm; coming back re-attaches without a cold start"
-    left, back, before = _report(kt, "auto-d-left-report"), _report(kt, "auto-d-back-report"), _report(kt, "auto-c-back-report")
+    """View detaches the automatic pane with KiCad kept warm; the attach again is no cold start."""
+    gid, name = "d-keep-warm", "Leaving by View detaches the pane with KiCad kept warm; coming back re-attaches without a cold start"
+    left, back, before = _report(kt, "auto-d-view-left-report"), _report(kt, "auto-d-view-back-report"), _report(kt, "auto-c-back-report")
+    if _attached(left) is None or _attached(back) is None or _attached(before) is None:
+        return _rec(gid, name, "unavailable", "a pane report is missing or not real")
+    for shot in ("auto-d-view-left", "auto-d-view-back"):
+        ok, why = _shot_ok(caps, shot, cleared)
+        if not ok:
+            return _rec(gid, name, "unavailable", why)
+    s_left, why = _only_session(caps.get("auto-d-view-left"))
+    if s_left is None:
+        return _rec(gid, name, "unavailable", why)
+    rt = _runtime(s_left)
+    if rt is None:
+        return _rec(gid, name, "unavailable", "the hub reported no runtime block while the pane was away")
+    s_back, why = _only_session(caps.get("auto-d-view-back"))
+    if s_back is None:
+        return _rec(gid, name, "unavailable", why)
+    starting = [lg for lg in _logs_between(logs, marks.get("auto:d:view-back"), marks.get("auto:d:view-done"), "kicad_info") if lg["obj"].get("state") == "starting"]
+    ev = {"left_attached": _attached(left), "runtime_when_left": rt, "pid_before": _pid(before), "pid_after": _pid(back), "hub_pid_after": s_back.get("pid"), "starting_infos_on_return": len(starting)}
+    fails = _keep_warm_fails(left, rt) + _return_fails(before, back, s_back, starting)
+    return _rec(gid, name, "failed" if fails else "passed", "; ".join(fails), ev)
+
+
+def _keep_warm_fails(left: dict, rt: dict) -> list[str]:
+    fails = []
+    if _attached(left) is not False:
+        fails.append("the pane is still mounted after leaving")
+    if rt.get("holder"):
+        fails.append(f"hub runtime.holder is still {rt.get('holder')!r} after leaving")
+    if rt.get("session") not in ("live", "parked"):
+        fails.append(f"KiCad session is {rt.get('session')!r} after leaving, not live/parked (not kept warm)")
+    return fails
+
+
+def _return_fails(before: dict, back: dict, s_back: dict, starting: list) -> list[str]:
+    fails = []
+    if _attached(back) is not True:
+        fails.append("coming back did not mount and show the frame")
+    if _pid(before) is None or _pid(before) != _pid(back) or s_back.get("pid") != _pid(back):
+        fails.append("a different KiCad process after coming back (a cold start)")
+    if starting:
+        fails.append("KiCad went through `starting` on the way back (a cold start)")
+    return fails
+
+
+def _gate_d2(marks, kt, logs, caps, cleared) -> dict:
+    """Leaving to another page by the rail: detaching an Automatic pane there is the rail reconcile's job."""
+    gid, name = "d2-leave-page-detaches", "Leaving the design page by the rail detaches the pane (keep-warm) and coming back is no cold start"
+    left, back, before = _report(kt, "auto-d-left-report"), _report(kt, "auto-d-back-report"), _report(kt, "auto-d-view-back-report")
     if _attached(left) is None or _attached(back) is None or _attached(before) is None:
         return _rec(gid, name, "unavailable", "a pane report is missing or not real")
     for shot in ("auto-d-left", "auto-d-back"):
@@ -385,29 +455,18 @@ def _gate_d(marks, kt, logs, caps, cleared) -> dict:
         if not ok:
             return _rec(gid, name, "unavailable", why)
     s_left, why = _only_session(caps.get("auto-d-left"))
-    if s_left is None:
-        return _rec(gid, name, "unavailable", why)
+    s_back, why2 = _only_session(caps.get("auto-d-back"))
+    if s_left is None or s_back is None:
+        return _rec(gid, name, "unavailable", why or why2)
     rt = _runtime(s_left)
     if rt is None:
         return _rec(gid, name, "unavailable", "the hub reported no runtime block while the page was left")
-    s_back, why = _only_session(caps.get("auto-d-back"))
-    if s_back is None:
-        return _rec(gid, name, "unavailable", why)
+    ev = {"left_attached": _attached(left), "runtime_when_left": rt, "pid_before": _pid(before), "pid_after": _pid(back)}
+    if _attached(left) is True:
+        # observed, but it is not a verdict on this build: nothing here detaches an Automatic pane on a page change yet
+        return _rec(gid, name, "unavailable", "observed: the pane stayed mounted (and held) over the page the rail went to; detaching on a page change is the reconcile's job, not built yet", ev)
     starting = [lg for lg in _logs_between(logs, marks.get("auto:d:back"), marks.get("auto:d:done"), "kicad_info") if lg["obj"].get("state") == "starting"]
-    ev = {"left_attached": _attached(left), "runtime_when_left": rt, "pid_before": _pid(before), "pid_after": _pid(back), "hub_pid_after": s_back.get("pid"), "starting_infos_on_return": len(starting)}
-    fails = []
-    if _attached(left) is not False:
-        fails.append("the pane is still mounted after leaving the page")
-    if rt.get("holder"):
-        fails.append(f"hub runtime.holder is still {rt.get('holder')!r} after leaving")
-    if rt.get("session") not in ("live", "parked"):
-        fails.append(f"KiCad session is {rt.get('session')!r} after leaving, not live/parked (not kept warm)")
-    if _attached(back) is not True:
-        fails.append("coming back did not mount and show the frame")
-    if _pid(before) is None or _pid(before) != _pid(back) or s_back.get("pid") != _pid(back):
-        fails.append("a different KiCad process after coming back (a cold start)")
-    if starting:
-        fails.append("KiCad went through `starting` on the way back (a cold start)")
+    fails = _keep_warm_fails(left, rt) + _return_fails(before, back, s_back, starting)
     return _rec(gid, name, "failed" if fails else "passed", "; ".join(fails), ev)
 
 

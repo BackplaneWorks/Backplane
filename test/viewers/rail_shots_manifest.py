@@ -2,6 +2,12 @@
 """Single shared manifest for rail-shots.sh, rail_shots_driver.py, and rail_shots_post.py."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import rail_auto  # noqa: E402
+
 KINDS = ["full", "board-only", "schematic-only", "mech-only", "no-design"]
 
 # (slug, rail_control_id, settle_kind, expected_open)
@@ -158,6 +164,7 @@ def expected_shots(kind: str, embed: bool = False, schema: int = 3) -> list[str]
         if embed:
             shots.append("b1-sim-cleanup")
             shots.extend(EMBED_SHOTS)
+            shots.extend(rail_auto.AUTO_SHOTS)
     elif kind in EXTRA_MISSING_SHOTS:
         shots.append("extra-missing-start-idle")
         shots.extend(EXTRA_MISSING_SHOTS[kind])
