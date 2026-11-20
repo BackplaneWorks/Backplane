@@ -684,11 +684,16 @@ pub fn person_closed_kicad(old: &Value, new: &Value) -> bool {
 pub fn may_attach(closed: &std::collections::HashSet<String>, project: &str, why: ShowBy) -> bool { why == ShowBy::Deliberate || !closed.contains(project) }
 /// What `kicad_attach` does with the pane already there.
 #[derive(Debug, PartialEq, Eq)]
-pub enum AttachStep { New, Promote, Again }
+pub enum AttachStep { New, Promote, Again, Keys }
 /// An attach for the design the pane already shows is never a second pane (the reconcile asks again and again): a deliberate one on an
-/// automatic pane makes it deliberate (the keyboard to it), anything else only what Edit on its own pane did (`edit_again`).
+/// automatic pane makes it deliberate (the keyboard to it); the person's Edit on their own pane gives KiCad the keyboard too (`edit_keys`,
+/// #1403 step 2's end-a row: View during a DRC then Edit left the keys in Backplane, since `edit_again` alone does nothing while KiCad
+/// still has the frame); an automatic ask only what Edit on its own pane did (`edit_again`).
 pub fn attach_step(pane_is_this_design: bool, pane: ShowBy, why: ShowBy) -> AttachStep {
-    if !pane_is_this_design { AttachStep::New } else if why == ShowBy::Deliberate && pane == ShowBy::Automatic { AttachStep::Promote } else { AttachStep::Again }
+    if !pane_is_this_design { AttachStep::New }
+    else if why == ShowBy::Deliberate && pane == ShowBy::Automatic { AttachStep::Promote }
+    else if why == ShowBy::Deliberate { AttachStep::Keys }
+    else { AttachStep::Again }
 }
 
 /// A chord KiCad handed back that the window acts on at once (the comment window: screens/kcomment.rs).
@@ -783,6 +788,13 @@ impl KicadPane {
         self.placed = None; self.pending_show = Some(want.clone());
         self.rpc("editor.kicad.show", json!({"project": self.project, "frame": want, "focus": true}));
         cx.notify();
+    }
+    /// The person's Edit on their own (deliberate) pane: the keyboard to KiCad's frame on show, as on the pane's first Edit. Nothing when
+    /// KiCad has it already (no placement again, no geometry pushed). Placed again on the next frame: the hand-in is the placement's.
+    pub fn edit_keys(&mut self, cx: &mut Context<Self>) {
+        if self.keys { return }
+        self.chose("edit"); self.want_keys = true; self.placed = None; cx.notify(); // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+        if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_edit_keys": {"open": self.open}})); }
     }
     /// An automatic pane the person asked for after all (Edit, Open in KiCad on it): the keyboard to its frame on show, as a deliberate open.
     pub fn deliberate(&mut self, cx: &mut Context<Self>) {
@@ -1980,7 +1992,7 @@ mod tests {
         assert_eq!(attach_step(false, Deliberate, Automatic), AttachStep::New, "another design (or none): a pane");
         assert_eq!(attach_step(true, Automatic, Automatic), AttachStep::Again);
         assert_eq!(attach_step(true, Deliberate, Automatic), AttachStep::Again, "an automatic ask on a deliberate pane changes nothing");
-        assert_eq!(attach_step(true, Deliberate, Deliberate), AttachStep::Again, "Edit on its own pane: edit_again, as before");
+        assert_eq!(attach_step(true, Deliberate, Deliberate), AttachStep::Keys, "the person's Edit on their own pane: the keyboard to KiCad, and edit_again");
         assert_eq!(attach_step(true, Automatic, Deliberate), AttachStep::Promote);
     }
     #[test] fn macos_hides_kicads_frame_when_the_page_lets_the_editor_go() {
@@ -2752,6 +2764,7 @@ impl crate::Backplane {
                 AttachStep::New => {}
                 AttachStep::Promote => { p.update(cx, |p, cx| { p.deliberate(cx); if sim { p.open_simulation(cx) } else { p.edit_again(cx) } }); return true }
                 AttachStep::Again => { p.update(cx, |p, cx| if sim { p.open_simulation(cx) } else { p.edit_again(cx) }); return true }
+                AttachStep::Keys => { p.update(cx, |p, cx| { p.edit_keys(cx); if sim { p.open_simulation(cx) } else { p.edit_again(cx) } }); return true }
             }
         }
         let (hub, infos, hub_open, sends) = (self.tx.clone(), self.screens.kicad_infos.clone(), open_now.to_string(), self.screens.host_sends.clone());
