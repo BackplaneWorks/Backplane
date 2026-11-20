@@ -25,8 +25,22 @@ fn icon_button(light: bool, id: String, name: &'static str, on: bool) -> Statefu
 }
 
 /// (the tab strip, the toolbar).
-pub fn render<T: 'static>(tabs: &[TabView], i: NavIn, cx: &mut Context<T>, on: fn(&mut T, Act, &mut Window, &mut Context<T>), key: fn(&mut T, &KeyDownEvent, &mut Window, &mut Context<T>)) -> (AnyElement, AnyElement) {
+pub fn render<T: 'static>(owner: Option<&WeakEntity<crate::Backplane>>, tabs: &[TabView], i: NavIn, cx: &mut Context<T>, on: fn(&mut T, Act, &mut Window, &mut Context<T>), key: fn(&mut T, &KeyDownEvent, &mut Window, &mut Context<T>)) -> (AnyElement, AnyElement) {
     let strip = tab_strip(i.light, tabs, cx, on);
+    if let Some(owner) = owner {
+        let field = address(&i, cx, on, key);
+        if let Ok(header) = owner.update(cx, |app, cx| {
+            use crate::screens::pane_header::{button, content, Press};
+            let mut tools: Vec<_> = nav_tools(i.have, i.can_back, i.can_forward, i.loading, i.taken).into_iter().map(|nav| {
+                let mut tool = button(cx, nav.id, nav.label, Press::Browser(nav.action));
+                tool.icon = nav.icon;
+                tool.enabled = nav.enabled;
+                tool
+            }).collect();
+            tools.insert(3, content("br-url", crate::i18n::trs("Search or enter address"), div().w(px(140.)).child(field)));
+            crate::screens::viewer::browser_header(app, cx, i.light, tools)
+        }) { return (header, strip) }
+    }
     (strip, navigation(i, cx, on, key))
 }
 
@@ -66,8 +80,6 @@ pub fn nav_tools(have: bool, back: bool, forward: bool, loading: bool, taken: bo
 
 pub fn navigation<T: 'static>(i: NavIn, cx: &mut Context<T>, on: fn(&mut T, Act, &mut Window, &mut Context<T>), key: fn(&mut T, &KeyDownEvent, &mut Window, &mut Context<T>)) -> AnyElement {
     let light = i.light; let c = |n: &str| theme::color(light, n);
-    let border = if i.focused { c("accent") } else { c("line") };
-    let shown = if i.value.is_empty() { crate::i18n::trs("Search or enter address") } else { i.value.clone() };
     let mut bar = div().h(crate::scale::tpx(40.)).flex().flex_row().items_center().gap_1().px_2().bg(c("bg")).border_b_1().border_color(c("line"));
     let mut hand_back = None;
     for tool in nav_tools(i.have, i.can_back, i.can_forward, i.loading, i.taken) {
@@ -77,15 +89,22 @@ pub fn navigation<T: 'static>(i: NavIn, cx: &mut Context<T>, on: fn(&mut T, Act,
         } else { hand_back = Some(tool); }
     }
     let bar = bar
-        .child(div().id("br-url").flex_1().h(crate::scale::tpx(28.)).px_2().flex().flex_row().items_center().gap_2().text_size(crate::scale::tpx(13.)).bg(c("panel")).border_1().border_color(border)
+        .child(address(&i, cx, on, key))
+        .when_some(hand_back, |d, tool| d.child(div().id(SharedString::from(tool.id)).h(crate::scale::tpx(28.)).px_3().flex().items_center().cursor_pointer().bg(c("accent")).text_color(c("on-accent")).text_size(crate::scale::tpx(12.)).child(tool.label)
+            .on_click(cx.listener(move |this, _, w, cx| on(this, tool.action.clone(), w, cx)))));
+    bar.into_any_element()
+}
+
+fn address<T: 'static>(i: &NavIn, cx: &Context<T>, on: fn(&mut T, Act, &mut Window, &mut Context<T>), key: fn(&mut T, &KeyDownEvent, &mut Window, &mut Context<T>)) -> AnyElement {
+    let c = |n: &str| theme::color(i.light, n);
+    let border = if i.focused { c("accent") } else { c("line") };
+    let shown = if i.value.is_empty() { crate::i18n::trs("Search or enter address") } else { i.value.clone() };
+    div().id("br-url").flex_1().h(crate::scale::tpx(28.)).px_2().flex().flex_row().items_center().gap_2().text_size(crate::scale::tpx(13.)).bg(c("panel")).border_1().border_color(border)
             .track_focus(i.bar_focus).key_context("BrowserBar").key_context("Viewer").cursor_text()
             .on_key_down(cx.listener(move |this, e, w, cx| key(this, e, w, cx)))
             .on_click(cx.listener(move |this, _, w, cx| on(this, Act::FocusBar, w, cx)))
             .child(art::icon("globe", 14., c("dim")))
-            .child(div().flex_1().overflow_hidden().text_color(c(if i.value.is_empty() { "dim" } else { "text" })).child(format!("{}{}", shown, if i.focused { "▏" } else { "" }))))
-        .when_some(hand_back, |d, tool| d.child(div().id(SharedString::from(tool.id)).h(crate::scale::tpx(28.)).px_3().flex().items_center().cursor_pointer().bg(c("accent")).text_color(c("on-accent")).text_size(crate::scale::tpx(12.)).child(tool.label)
-            .on_click(cx.listener(move |this, _, w, cx| on(this, tool.action.clone(), w, cx)))));
-    bar.into_any_element()
+            .child(div().flex_1().overflow_hidden().text_color(c(if i.value.is_empty() { "dim" } else { "text" })).child(format!("{}{}", shown, if i.focused { "▏" } else { "" }))).into_any_element()
 }
 
 #[cfg(test)]

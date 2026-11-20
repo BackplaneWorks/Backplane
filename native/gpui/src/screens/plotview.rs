@@ -43,6 +43,7 @@ pub struct PlotView {
     /// What the probe lights, tessellated for that exact camera and those lit pieces (a hash of `lit`).
     pub lit_tess: Option<(TessKey, u64, std::rc::Rc<Vec<(Path<Pixels>, Hsla)>>)>,
     /// The Boards menu (viewers::boards), held on the Board/Schematic page's camera for every page that shows it.
+    pub part_search: Option<Entity<super::composer::Composer>>,
     pub boards: crate::viewers::boards::BoardsUi,
     /// The hub's probe this canvas last lit, with the source it was lit on ("<key>\u{1}<info>"): another source or another probe lights it again.
     pub probe_at: String,

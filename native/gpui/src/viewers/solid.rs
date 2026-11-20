@@ -847,7 +847,7 @@ pub struct SolidPage {
     /** what the hub said it is doing for a model (Stage), shown with its time running; whether a second's tick is running for it */ stage: Option<Stage>, ticking: bool,
     /** the share of DRAFT_PIXELS a picture in motion gets, from how long the last ones took (draft_scale) */ draft_scale: f32,
     /** the hub could not make this source's model (its Note): the page offers Retry when retryable */ failed: bool, retryable: Option<bool>, /** last Retry press time (1 s client cooldown) */ last_retry: Option<std::time::Instant>,
-    pub note: String, /** room (px) the page's floating tools leave free at its top right, for the viewer pane's controls */ pub reserve: f32, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */,
+    pub note: String, /** the canvas supplies its own controls in Split */ pub inline_controls: bool, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */,
     /** runs in normal clients too (one relaxed atomic per qualifying paint); measures the GPUI paint callback with non-zero bounds, not GPU presentation */
     painted: Arc<AtomicU64>, painted_gen: Arc<AtomicU64>, pub stats: Stats,
 }
@@ -859,7 +859,7 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { press_btn: None, press: None, names_probe: true, core: SolidCore::new(), drag: None, fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, failed: false, retryable: None, last_retry: None, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ reserve: 0.0, worker: Worker::spawn(tx),
+        SolidPage { press_btn: None, press: None, names_probe: true, core: SolidCore::new(), drag: None, fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, failed: false, retryable: None, last_retry: None, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ inline_controls: true, worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), painted: Arc::new(AtomicU64::new(0)), painted_gen: Arc::new(AtomicU64::new(0)), stats: Stats::default() }
     }
     /// The background to draw on (the setting resolved by the window): a change draws the picture again at once, the camera untouched.
@@ -1192,8 +1192,8 @@ impl Render for SolidPage {
                 crate::screens::panestate::view_on_backdrop(self.core.back, &st, retry)
             }
         };
-        let tools = (self.core.mesh.is_some() && !making_other).then(|| {
-            self.view_controls(cx).absolute().top(px(TOOL_TOP)).left_2().right(px(8. + self.reserve))
+        let tools = (self.inline_controls && self.core.mesh.is_some() && !making_other).then(|| {
+            self.view_controls(cx).absolute().top(px(TOOL_TOP)).left_2().right_2()
         });
         div().id("solid-page").size_full().overflow_hidden().relative().track_focus(&self.focus).key_context("Viewer").child(body).child(probe).children(tools)
             .on_key_down(cx.listener(|this, e: &KeyDownEvent, _, cx| if this.on_key(e, cx) { cx.stop_propagation() }))
