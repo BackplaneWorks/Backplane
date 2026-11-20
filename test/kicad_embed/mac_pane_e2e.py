@@ -1050,9 +1050,13 @@ try:
                 cwa = next((w for w in wins() if w[0] == cw[0]), cw); click(cwa[3][0] + 200, cwa[3][1] + 28 + 300); time.sleep(1.5)
                 print(f'INFO hide (race): frames {f0} -> {kicad_frames()} (changed {bool(changed)}), Backplane clicked at once; KiCad active {active(kpid)}, Backplane active {active(client.pid)}', flush=True)
                 check(bool(changed) and not active(kpid), 'hide (race): a click in Backplane as KiCad\'s frame set changes keeps the keyboard in Backplane')
-        else:
+        elif 'embed-key-on-activate' in caps:
             check(bool(wait_for(lambda: active(kpid), 5, 0.1)), 'hide: after Edit, with no click, KiCad is the active app')
             canvas_takes_keys('after Edit, with no click')
+        else:
+            # without the fork's key-on-activate, Edit's show leaves KiCad active with no key window; the keyboard comes across only by
+            # the re-show after KiCad's frame set changes (~4 s on), so one Cmd+A at once is lost on main's client too (#1368's rows, Nov 19)
+            print('INFO hide: after-Edit keys check skipped: the runtime lacks embed-key-on-activate', flush=True)
         # the first click into an inactive KiCad (#1198, fork fix/1198-key-on-activate): KiCad's activation lands after the click, and the
         # frame's makeKeyWindow ran before it and was ignored (KiCad active with no key window, keys going nowhere until a second click).
         # Backplane is made active first (a click in its message area), then one click on the canvas, then keys
