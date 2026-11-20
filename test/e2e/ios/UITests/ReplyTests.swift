@@ -58,8 +58,9 @@ final class ReplyRows: XCTestCase {
 
         // a swipe right on the person's own message replies to it
         let mine = d.label("can you speed up the builds?")
-        // (scrolled on a message of the conversation: the composer is a scroll view too, and the keyboard swipe-types)
-        d.step("the person's message is on screen", timeout: 10, act: { var n = 0; while !mine.isHittable && n < 12 { (answer.isHittable ? answer : chip).swipeDown(velocity: .slow); n += 1 } }, expect: { mine.isHittable })
+        // (scrolled by a drag in the conversation, between the header and the composer: the composer is a scroll view too, and the keyboard swipe-types)
+        d.step("the person's message is on screen", timeout: 10, act: { var n = 0; while !mine.isHittable && n < 12 {
+            let from = d.app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.22)); from.press(forDuration: 0.05, thenDragTo: d.app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.48))); n += 1 } }, expect: { mine.isHittable })
         d.step("a swipe right on it is Reply, sender You", timeout: 10, act: {
             let a = mine.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)), b = a.withOffset(CGVector(dx: 140, dy: 0))
             a.press(forDuration: 0.05, thenDragTo: b)
