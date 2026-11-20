@@ -207,6 +207,15 @@ button.primary.stop {
   color: var(--faint);
   letter-spacing: 0.08em;
 }
+.bp-side-section-toggle {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.bp-side-section-toggle:hover { color: var(--text); }
 .bp-proj-group { margin-bottom: 4px; }
 .bp-proj-head {
   display: flex;
