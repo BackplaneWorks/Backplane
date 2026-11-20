@@ -14,6 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import rail_dock as DOCK
 import rail_shots_manifest as M  # noqa: E402
 
+# R1's position (mm) in the full fixture's board (test/files/fixtures/plot/ecc83-pp.kicad_pcb: `(at 136.271 107.95 -90)`):
+# the client maps it through the drawn view, so the tap lands on R1 at any pane size or text scale
+R1_AT_MM = (136.271, 107.95)
 SHOT_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 
 
@@ -54,7 +57,7 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
                 # Task 5: tap known component R1 on the board pane (slot 2) in Split and check cross-probe
                 steps.extend([
                     {"mark": "press:task5-split-probe"},
-                    {"tap": [0.325, 0.470, 2]},
+                    {"tap_mm": [R1_AT_MM[0], R1_AT_MM[1], 2]},
                     {"wait": 600},
                     {"mark": "settled:task5-split-probe"},
                     {"shot": "task5-split-probe", "settle": "split", "timeout_ms": settle_timeout_ms},

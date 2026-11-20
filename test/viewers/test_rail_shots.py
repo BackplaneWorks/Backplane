@@ -1209,6 +1209,17 @@ class RailShotsRegressionTests(unittest.TestCase):
         r = D._parse_hub_kicad_sessions_output(info({"runtime": {"holder": None, "session": "parked"}, "frames": []}))
         self.assertEqual(r["sessions"]["editor.kicad.abc"]["runtime"], {"holder": None, "session": "parked"})
 
+    def test_task5_taps_r1_by_its_board_position_not_a_canvas_fraction(self) -> None:
+        steps = D.build_script("full", 300, 15000, embed=False)
+        tap = next(s for s in steps if "tap_mm" in s)
+        self.assertFalse([s for s in steps if "tap" in s])  # no fixed canvas-fraction tap
+        pcb = (Path(__file__).resolve().parents[2] / "test/files/fixtures/plot/ecc83-pp.kicad_pcb").read_text(encoding="utf-8")
+        i = pcb.index('(property "Reference" "R1"')
+        head = pcb[:i]
+        at = head[head.rindex("(at "):].split(")")[0].split()
+        self.assertEqual((float(at[1]), float(at[2])), (tap["tap_mm"][0], tap["tap_mm"][1]))
+        self.assertEqual(tap["tap_mm"][2], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

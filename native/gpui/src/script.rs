@@ -48,7 +48,7 @@ pub(crate) fn resolve_selector(sel: &str, tiles: &[Value], splitters: &[Value]) 
 }
 
 #[derive(Clone, Debug)]
-/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<name>","settle":"<kind>"?,"timeout_ms":N?}: wait until settled (if requested) and painted, emit shot-ready, wait for <BACKPLANE_GPUI_SHOT_DIR>/<name>.done */ Shot { name: String, settle: Option<String>, timeout_ms: u64 }, /** {"wait_settled":"<kind>","tag":"<tag>","timeout_ms":N?}: wait until the page settles and emit a `settled` metric with its viewer state */ WaitSettled { kind: String, tag: String, timeout_ms: u64 }, /** {"pointer":"<control id>"}: a real mouse move, down and up at the centre of the control's drawn rect, through the window's own dispatch (no registered control needed) */ Pointer(String), /** {"drag":{"splitter":"@splitter"|id,"dx":N,"dy":N,"moves":N}}: a pointer drag on a drawn splitter, along its axis */ Drag(Value), Fit, Unsupported(String) }
+/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<name>","settle":"<kind>"?,"timeout_ms":N?}: wait until settled (if requested) and painted, emit shot-ready, wait for <BACKPLANE_GPUI_SHOT_DIR>/<name>.done */ Shot { name: String, settle: Option<String>, timeout_ms: u64 }, /** {"wait_settled":"<kind>","tag":"<tag>","timeout_ms":N?}: wait until the page settles and emit a `settled` metric with its viewer state */ WaitSettled { kind: String, tag: String, timeout_ms: u64 }, /** {"pointer":"<control id>"}: a real mouse move, down and up at the centre of the control's drawn rect, through the window's own dispatch (no registered control needed) */ Pointer(String), /** {"drag":{"splitter":"@splitter"|id,"dx":N,"dy":N,"moves":N}}: a pointer drag on a drawn splitter, along its axis */ Drag(Value), /** {"tap_mm":[x,y,slot]}: a tap at a board point in millimetres (a part's position from the design file), wherever the view has put it */ TapMm(f32, f32, usize), Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
 pub enum Ctl { Header(String), /** the composer chip's account menu, and Settings' Accounts page */ AccountMenu, AccountsPage, /** the sidebar hub picker */ Hub(crate::screens::hubpick::Act), PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, ToggleTerminal, Rail(String), PickFiles, /** the ▾ beside the thread's name: its menu */ ThreadMenu, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), /** a hub page of the Settings nav */ SettingsPage(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch, /** a bots-page press (screens::bots::press): its kind and value */ Bot(String, String), /** a chat terminal's card: focus, expand, pop, stop; its key */ Term(String, String), /** a subagent's own view (its key; "" goes back) */ Sub(String), /** a card's button that sends the hub an action (a halt card's Resume...): `Command::Action` */ Go(String, String), /** the viewer's Edit (true: the real KiCad in the pane) and View (false) */ KicadEdit(bool), /** the editor strip: a tab (its kind), full, popout, popin */ KicadAct(String), /** a management panel's press (screens/mgmt.rs `act`) */ Mgmt(String) }
@@ -141,6 +141,7 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if v.get("compare").is_some() { Some(Step::Compare(v["compare"].as_u64().map(|n| n as usize))) }
         else if let Some(on) = v["sheets"].as_bool() { Some(Step::Sheets(on)) }
         else if let Some(a) = v["tap"].as_array() { Some(Step::Tap(a.first().and_then(Value::as_f64).unwrap_or(0.5) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.5) as f32, a.get(2).and_then(Value::as_u64).unwrap_or(0) as usize)) }
+        else if let Some(a) = v["tap_mm"].as_array() { Some(Step::TapMm(a.first().and_then(Value::as_f64).unwrap_or(0.) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.) as f32, a.get(2).and_then(Value::as_u64).unwrap_or(0) as usize)) }
         else if let Some(t) = v["popup"].as_str() { Some(Step::Popup(t.into())) }
         else if let Some(t) = v["type"].as_str() { Some(Step::Type(t.into())) }
         else if let Some(t) = v["keys"].as_str() { Some(Step::Keys(t.into())) }
@@ -656,6 +657,23 @@ impl Backplane {
                 let entity = cx.entity();
                 cx.defer(move |cx| entity.update(cx, |this, cx| this.pump(cx)));
             }
+            Step::TapMm(x_mm, y_mm, slot) => { // a tap at board millimetres: the drawn view's own transform puts it on the screen, so it lands on the part at any pane size
+                let (view, bounds) = { let pv = self.screens.pv(slot); (pv.view, pv.bounds) };
+                let panes = self.data["thread"]["viewer"]["panes"].as_array().cloned().unwrap_or_default();
+                let (key, offs) = if slot == 0 { (self.screens.plot.frame.as_ref().map(|f| f.key.clone()).unwrap_or_default(), self.data["thread"]["viewer"]["off"].as_u64().unwrap_or(0) as u32) }
+                    else { let p = panes.get(slot - 1).cloned().unwrap_or_default(); (p["key"].as_str().unwrap_or("").to_string(), p["off"].as_u64().unwrap_or(0) as u32) };
+                let mut at_px = Value::Null;
+                if let (Some(v), Some(b)) = (view, bounds) {
+                    let (w, h) = (f32::from(b.size.width), f32::from(b.size.height));
+                    let (sx, sy) = v.to_px(x_mm * 1000., y_mm * 1000., w, h);
+                    let inside = sx >= 0. && sy >= 0. && sx <= w && sy <= h;
+                    at_px = json!({"x": f32::from(b.origin.x) + sx, "y": f32::from(b.origin.y) + sy, "fx": sx / w, "fy": sy / h, "inside": inside});
+                    if inside { crate::screens::plotview::tap_at(self, slot, &key, offs, (f32::from(b.origin.x) + sx, f32::from(b.origin.y) + sy), Some(v), Some(b)); }
+                }
+                let got = self.screens.pv(slot).picked.is_some();
+                /* i18n-ok: test-mode script metric */ self.m("tap", json!({"mm": [x_mm, y_mm], "slot": slot, "picked": got, "at": at_px}));
+                self.ui_epoch += 1; self.begin("tap".into(), Goal::Frame, cx); cx.notify();
+            }
             Step::Fit => { self.screens.plotview.view = None; self.ui_epoch += 1; self.begin("fit".into(), Goal::Frame, cx); cx.notify(); }
             Step::Expect(what) => { // a run that cannot measure what it claims stops itself: "canvas" needs a plot canvas with real height
                 let h = self.screens.plotview.bounds.map_or(0.0, |b| f32::from(b.size.height));
@@ -1096,6 +1114,11 @@ mod tests {
 
     use super::*;
     use core::prelude::v1::test;
+    #[test] fn tap_mm_loads_board_millimetres_and_a_slot() {
+        let p = crate::tmp::file("script", "t.json");
+        std::fs::write(&p, r#"[{"tap_mm":[136.271,107.95,2]}]"#).unwrap();
+        assert!(matches!(&load(&p)[0], Step::TapMm(x, y, 2) if (*x - 136.271).abs() < 1e-3 && (*y - 107.95).abs() < 1e-3));
+    }
     #[test] fn selectors_resolve_ids_from_the_drawn_inventory_and_refuse_ambiguity() {
         let tiles = vec![json!({"id": "t7", "kind": "board", "focused": false, "source": "a.kicad_pcb"}), json!({"id": "t9", "kind": "schematic", "focused": true})];
         let splitters = vec![json!({"id": "s3", "axis": "x"})];
