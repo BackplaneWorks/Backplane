@@ -57,7 +57,11 @@ pub fn plot_in(path: &str, root: Option<&Path>) -> super::plotgen::Read {
     let (items, kind) = match cmp_board {
         None => (r.items, super::plotgen::GERBER),
         Some(b) => {
-            let bytes = std::fs::read(&b).unwrap_or_default();
+            let b_path = match root.and_then(|r| std::fs::canonicalize(r).ok()) {
+                Some(cr) => canon_in(Path::new(&b), &cr),
+                None => std::fs::canonicalize(&b).ok(),
+            };
+            let bytes = b_path.and_then(|p| std::fs::read(p).ok()).unwrap_or_default();
             let bi = super::sexpr::forms(&bytes).map(|fs| super::plotgen::board_items(&fs)).unwrap_or_default();
             let t0 = std::time::Instant::now();
             let (marks, layers) = compare::compare(&r.items, &bi);
