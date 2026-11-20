@@ -12,6 +12,7 @@
 #                         and print the main hash;                                                                                                   exit 0
 #        waiting for an approving review     "land: PR #N open, gate green on <sha>, waiting for an approving review"                                exit 3
 #                         (stop and report the PR number; when it is approved, run scripts/land.sh --resume: the gate is not run again while this tree is the tested one)
+#        main moved since the gate (origin/main is not the base the gate ran on, checked right before the merge)  back to 1 (#1374)
 #        behind or conflicting (main moved)  back to 1 (rebase, gate again, force-with-lease push), up to LAND_TRIES (3)
 #   --resume   the branch must already have an open PR: the same run, so an approved PR is merged without a new gate when its head is still the tested tree and main has not moved
 #   --dry-merge   (or LAND_DRY_MERGE=1) everything up to the merge, which is only said ("would merge"); nothing is merged or fast-forwarded
@@ -73,6 +74,7 @@ while :; do
   n=$((n + 1))
   git fetch -q origin main || die "git fetch origin main failed (offline?); nothing pushed"
   if ! git rebase -q origin/main; then git rebase --abort 2>/dev/null || true; die "git rebase origin/main conflicts; resolve it by hand (git rebase origin/main), then land again"; fi
+  base=$(git rev-parse origin/main) # the main this tree is gated on: it must still be origin/main at the merge (#1374)
   [ -n "$(git rev-list -1 origin/main..HEAD)" ] || { say "nothing to land: $br is already on origin/main"; break; }
   "$here/check-author.sh" origin/main..HEAD || die "a commit has the wrong author or committer (see above)"
   # the lane's own commits are always i2cjak <build@amemb.com>, author and committer (check-author.sh also lets the other contributor's through; a land does not)
@@ -124,6 +126,12 @@ fix: git config user.name i2cjak && git config user.email build@amemb.com (this 
         *) say "PR #$num open, gate green on $(git rev-parse --short "$sha"), blocked ($merge_st, review $review): a required check or another rule has not passed"; exit 3;;
       esac;;
   esac
+  # main must still be the base the gate ran on: GitHub's rebase merge would put the PR on a newer main, a tree no gate ran (#1374)
+  git fetch -q origin main || die "git fetch origin main failed before the merge (offline?); PR #$num is left open, gated on $(git rev-parse --short "$base")"
+  if [ "$(git rev-parse origin/main)" != "$base" ]; then
+    [ "$n" -lt "$tries" ] || die "main keeps moving: it moved again after the gate on try $n of $tries ($(git rev-parse --short "$base") -> $(git rev-parse --short origin/main)); PR #$num left open, nothing merged"
+    say "main moved after the gate ($(git rev-parse --short "$base") -> $(git rev-parse --short origin/main)): rebasing and testing again ($((n + 1))/$tries)"; continue
+  fi
   if [ "$dry" = 1 ]; then say "dry run: PR #$num is mergeable ($merge_st) at $(git rev-parse --short "$sha"); would run: gh pr merge $num --rebase --match-head-commit $sha, wait for MERGED, then fast-forward local main"; exit 0; fi
   if ! ghi pr merge "$num" -R "$repo" --rebase --match-head-commit "$sha"; then
     git fetch -q origin main || true
