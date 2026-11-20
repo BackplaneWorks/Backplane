@@ -1,182 +1,190 @@
 //! Browser data/1 requests are authorized before dispatch, including forwarded requests.
 use serde_json::Value;
 
-const ALLOWED: &[&str] = &[
-    "ask.answer",
-    "attachment.get",
-    "badge.list",
-    "bot.cat",
-    "bot.delete",
-    "bot.say",
-    "bots.list",
-    "cat.rig",
-    "dirs.list",
-    "fab.profile",
-    "files.entries",
-    "find",
-    "history.list",
-    "improvements.project",
-    "improvements.projects",
-    "kicad.checks.fix",
-    "kicad.checks.focus",
-    "kicad.checks.list",
-    "kicad.checks.run",
-    "kicad.checks.watch",
-    "link.resolve",
-    "locks.list",
-    "mech.list",
-    "mentions.list",
-    "message.image",
-    "message.send",
-    "mgmt.bom.alts",
-    "mgmt.bom.edit",
-    "mgmt.life.part",
-    "mgmt.panel",
-    "mgmt.watch",
-    "models.list",
-    "plan.approve",
-    "plan.focus",
-    "plan.stop",
-    "project.act",
-    "project.add",
-    "project.card",
-    "projects.list",
-    "queue.act",
-    "review.comment",
-    "review.list",
-    "review.page",
-    "review.tick",
-    "room.delete",
-    "room.keep",
-    "room.post",
-    "room.posts",
-    "search",
-    "sidebar.act",
-    "sidebar.sections",
-    "subscribe",
-    "swarm.act",
-    "swarm.create",
-    "swarm.get",
-    "swarm.list",
-    "swarm.post",
-    "term.list",
-    "term.new",
-    "term.read",
-    "term.resize",
-    "term.stop",
-    "term.unwatch",
-    "term.watch",
-    "term.write",
-    "thread.act",
-    "thread.again",
-    "thread.create",
-    "thread.entries",
-    "thread.model",
-    "thread.order",
-    "thread.picker",
-    "thread.queue",
-    "thread.review",
-    "thread.sub",
-    "thread.work",
-    "threads.list",
-    "turn.interrupt",
-    "unsubscribe",
-    "viewer.compare",
-    "viewer.diff",
-    "viewer.files",
-    "viewer.follow",
-    "viewer.info",
-    "viewer.layers",
-    "viewer.probe",
-    "viewer.rail",
-    "viewer.refs",
-    "viewer.watch",
-    "voice.act",
-    "voice.always",
-    "voice.page",
-    "voice.start",
-    "voice.stop",
-    "voice.view",
-    "work.act",
-];
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Policy { Passive, Activity, Devices, Denied }
 
-#[cfg(test)]
-const RESTRICTED: &[&str] = &[
-    // Native provider account administration.
-    "account.act",
-    "account.view",
-    "accounts.page",
-    // Changes hub software, installation or update channel.
-    "app.update",
-    "update.channel",
-    "update.check",
-    "update.now",
-    "update.status",
-    // Controls the browser running on the hub machine.
-    "browser",
-    // Requires a native push registration or changes its delivery settings.
-    "device.drop",
-    "device.prefs",
-    "device.register",
-    "push.prefs",
-    "push.seen",
-    "push.state",
-    "notify.page",
-    "notify.page.act",
-    // Native Devices can approve, revoke and change ingress; its page also renders pending comparison codes.
-    "devices.page",
-    "devices.page.act",
-    // Controls host discovery, migration or ingress.
-    "hub.offer.done",
-    "hub.offer.take",
-    "machines.page",
-    "machines.page.act",
-    "onboard.act",
-    "onboard.view",
-    // Displays or changes installed MCP service configuration.
-    "mcp.page",
-    "mcp.page.act",
-    // Initiates an order or checkout.
-    "order.buy",
-    "thread.buy",
-    // Native ring transport setup and delivery.
-    "ring.get",
-    "ring.hear",
-    "ring.list",
-    "ring.page",
-    "ring.page.act",
-    "ring.search",
-    "ring.send",
-    "ring.setup",
-    // Vault or provider credential management.
-    "secret.asks",
-    "secret.dismiss",
-    "secret.set",
-    "voice.key",
-    // Host-wide notification, telemetry or suggestion preferences.
-    "star.nudge",
-    "star.offer",
-    "telemetry.notice",
-    "telemetry.notice.act",
-    // Native voice configuration, including model installation and settings writes.
-    "voice.page.act",
-];
+/// None identifies an unclassified method in the coverage test. Dispatch denies it.
+fn classify(method: &str, params: &Value) -> Option<Policy> {
+    use Policy::*;
+    Some(match method {
+        "devices.page" => Devices,
+        "thread.pick" => match params["action"].as_str() {
+            Some("provider" | "model" | "effort" | "speed" | "runtime") => Activity,
+            _ => Denied,
+        },
+        "composer.run" => {
+            use crate::session::composer::{word_of, Word};
+            match word_of(params["text"].as_str().unwrap_or("")) {
+                Some(Word::Btw(_) | Word::Settle | Word::Intent(_) | Word::Project(_) | Word::Give) => Activity,
+                _ => Denied,
+            }
+        }
+        "ask.answer"
+        | "bot.say"
+        | "find"
+        | "kicad.checks.focus"
+        | "kicad.checks.run"
+        | "message.send"
+        | "mgmt.bom.edit"
+        | "mgmt.panel"
+        | "project.act"
+        | "project.add"
+        | "queue.act"
+        | "review.comment"
+        | "review.tick"
+        | "room.keep"
+        | "room.post"
+        | "search"
+        | "sidebar.act"
+        | "swarm.act"
+        | "swarm.create"
+        | "swarm.post"
+        | "term.new"
+        | "term.resize"
+        | "term.stop"
+        | "term.write"
+        | "thread.act"
+        | "thread.again"
+        | "thread.create"
+        | "thread.model"
+        | "thread.review"
+        | "turn.interrupt"
+        | "viewer.compare"
+        | "viewer.follow"
+        | "viewer.watch"
+        | "voice.act"
+        | "voice.start"
+        | "voice.stop"
+        | "work.act" => Activity,
+        "attachment.get"
+        | "badge.list"
+        | "bot.cat"
+        | "bot.delete"
+        | "bots.list"
+        | "cat.rig"
+        | "dirs.list"
+        | "fab.profile"
+        | "files.entries"
+        | "history.list"
+        | "improvements.project"
+        | "improvements.projects"
+        | "kicad.checks.fix"
+        | "kicad.checks.list"
+        | "kicad.checks.watch"
+        | "link.resolve"
+        | "locks.list"
+        | "mech.list"
+        | "mentions.list"
+        | "message.image"
+        | "mgmt.bom.alts"
+        | "mgmt.life.part"
+        | "mgmt.watch"
+        | "models.list"
+        | "plan.approve"
+        | "plan.focus"
+        | "plan.stop"
+        | "project.card"
+        | "projects.list"
+        | "review.list"
+        | "review.page"
+        | "room.delete"
+        | "room.posts"
+        | "sidebar.sections"
+        | "subscribe"
+        | "swarm.get"
+        | "swarm.list"
+        | "term.list"
+        | "term.read"
+        | "term.unwatch"
+        | "term.watch"
+        | "thread.entries"
+        | "thread.order"
+        | "thread.picker"
+        | "thread.queue"
+        | "thread.sub"
+        | "thread.work"
+        | "threads.list"
+        | "unsubscribe"
+        | "viewer.diff"
+        | "viewer.files"
+        | "viewer.info"
+        | "viewer.layers"
+        | "viewer.probe"
+        | "viewer.rail"
+        | "viewer.refs"
+        | "voice.always"
+        | "voice.page"
+        | "voice.view" => Passive,
+        // Native provider account administration.
+        "account.act"
+        | "account.view"
+        | "accounts.page" => Denied,
+        // Changes hub software, installation or update channel.
+        "app.update"
+        | "update.channel"
+        | "update.check"
+        | "update.now"
+        | "update.status" => Denied,
+        // Controls the browser running on the hub machine.
+        "browser" => Denied,
+        // Requires a native push registration or changes its delivery settings.
+        "device.drop"
+        | "device.prefs"
+        | "device.register"
+        | "push.prefs"
+        | "push.seen"
+        | "push.state"
+        | "notify.page"
+        | "notify.page.act" => Denied,
+        // Native Devices can approve, revoke and change ingress; its page also renders pending comparison codes.
+        "devices.page.act" => Denied,
+        // Controls host discovery, migration or ingress.
+        "hub.offer.done"
+        | "hub.offer.take"
+        | "machines.page"
+        | "machines.page.act"
+        | "onboard.act"
+        | "onboard.view" => Denied,
+        // Displays or changes installed MCP service configuration.
+        "mcp.page"
+        | "mcp.page.act" => Denied,
+        // Initiates an order or checkout.
+        "order.buy"
+        | "thread.buy" => Denied,
+        // Native ring transport setup and delivery.
+        "ring.get"
+        | "ring.hear"
+        | "ring.list"
+        | "ring.page"
+        | "ring.page.act"
+        | "ring.search"
+        | "ring.send"
+        | "ring.setup" => Denied,
+        // Vault or provider credential management.
+        "secret.asks"
+        | "secret.dismiss"
+        | "secret.set"
+        | "voice.key" => Denied,
+        // Host-wide notification, telemetry or suggestion preferences.
+        "star.nudge"
+        | "star.offer"
+        | "telemetry.notice"
+        | "telemetry.notice.act" => Denied,
+        // Native voice configuration, including model installation and settings writes.
+        "voice.page.act" => Denied,
+        _ => return None,
+    })
+}
 
-pub fn allowed(method: &str, params: &Value) -> bool {
-    // The native picker also supports switching the provider account.
-    if method == "thread.pick" {
-        return matches!(params["action"].as_str(), Some("provider" | "model" | "effort" | "speed" | "runtime"));
-    }
-    if method == "composer.run" {
-        use crate::session::composer::{word_of, Word};
-        return matches!(word_of(params["text"].as_str().unwrap_or("")), Some(Word::Btw(_) | Word::Settle | Word::Intent(_) | Word::Project(_) | Word::Give));
-    }
-    ALLOWED.contains(&method)
+pub fn policy(method: &str, params: &Value) -> Policy {
+    classify(method, params).unwrap_or(Policy::Denied)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn allowed(m: &str, p: &Value) -> bool { matches!(policy(m, p), Policy::Passive | Policy::Activity) }
 
     #[test]
     fn browser_can_manage_threads_without_changing_provider_credentials() {
@@ -186,7 +194,8 @@ mod tests {
         assert!(!allowed("thread.pick", &json!({"action":"account"})));
         assert!(!allowed("composer.run", &json!({"text":"/secret example"})));
         assert!(allowed("composer.run", &json!({"text":"/settle"})));
-        for method in RESTRICTED { assert!(!allowed(method, &Value::Null), "{method}"); }
+        assert_eq!(policy("devices.page", &Value::Null), Policy::Devices);
+        assert_eq!(policy("devices.page.act", &Value::Null), Policy::Denied);
     }
 
     #[test]
@@ -209,7 +218,7 @@ mod tests {
             let patterns = patterns.split(" if ").next().unwrap();
             for part in patterns.split('|') {
                 let method = part.trim().trim_matches('"');
-                assert!(matches!(method, "composer.run" | "thread.pick") || ALLOWED.contains(&method) || RESTRICTED.contains(&method), "unclassified method {method}");
+                assert!(classify(method, &Value::Null).is_some(), "unclassified method {method}");
             }
         }
     }

@@ -807,55 +807,6 @@ pub enum Principal {
     Browser { device_id: String },
 }
 
-/// Only deliberate user actions extend a browser session's 30-day idle deadline.
-/// Background refreshes, subscriptions, heartbeats, and refused requests never do.
-fn is_deliberate_activity(method: &str) -> bool {
-    matches!(
-        method,
-        "ask.answer"
-            | "bot.say"
-            | "composer.run"
-            | "find"
-            | "message.send"
-            | "plan.act"
-            | "project.act"
-            | "project.add"
-            | "queue.act"
-            | "review.comment"
-            | "review.tick"
-            | "room.keep"
-            | "room.post"
-            | "search"
-            | "sidebar.act"
-            | "swarm.act"
-            | "swarm.create"
-            | "swarm.post"
-            | "term.new"
-            | "term.resize"
-            | "term.stop"
-            | "term.write"
-            | "thread.act"
-            | "thread.again"
-            | "thread.create"
-            | "thread.model"
-            | "thread.pick"
-            | "thread.restore"
-            | "thread.review"
-            | "turn.interrupt"
-            | "viewer.compare"
-            | "viewer.follow"
-            | "viewer.watch"
-            | "voice.act"
-            | "voice.start"
-            | "voice.stop"
-            | "work.act"
-            | "kicad.checks.focus"
-            | "kicad.checks.run"
-            | "mgmt.bom.edit"
-            | "mgmt.panel"
-    )
-}
-
 async fn browser_alive(hub: &Arc<Hub>, reg: &Arc<crate::net::pairing::Registry>, device_id: &str, client: u64, activity: bool) -> bool {
     if hub.setting("web.enabled").await.as_deref() != Some("1") { return false }
     let (r, dev) = (reg.clone(), device_id.to_string());
@@ -949,21 +900,23 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
                     if !browser_alive(&hub, reg, device_id, conn.client, false).await { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
                     // 2. Enforce allow-list before recording any activity.
                     let (method, params) = (s(&v, "m"), v.get("p").unwrap_or(&Value::Null));
-                    // Native Devices includes pairing controls. Select the browser view
-                    // from the authenticated connection before dispatching native RPCs.
-                    if method == "devices.page" {
-                        let page = crate::net::devicespage::browser_page(reg, device_id);
-                        let reply = pack(&json!({"t":"reply","id":v["id"],"ok":true,"result":page}), json_mode);
-                        if !send_frame(&mut tx, &hub, browser.as_ref(), conn.client, reply).await? { return Ok(()) }
-                        continue
-                    }
-                    if !webpolicy::allowed(method, params) {
-                        tx.send(pack(&json!({"t":"reply","id":v["id"],"ok":false,"error":"not allowed for browser"}), json_mode)).await?;
-                        continue
-                    }
-                    // 3. Touch idle deadline only for authorized deliberate user actions.
-                    if is_deliberate_activity(method) && !browser_alive(&hub, reg, device_id, conn.client, true).await {
-                        let _ = tx.send(Message::Close(None)).await; return Ok(())
+                    match webpolicy::policy(method, params) {
+                        webpolicy::Policy::Devices => {
+                            let page = crate::net::devicespage::browser_page(reg, device_id);
+                            let reply = pack(&json!({"t":"reply","id":v["id"],"ok":true,"result":page}), json_mode);
+                            if !send_frame(&mut tx, &hub, browser.as_ref(), conn.client, reply).await? { return Ok(()) }
+                            continue
+                        }
+                        webpolicy::Policy::Denied => {
+                            tx.send(pack(&json!({"t":"reply","id":v["id"],"ok":false,"error":"not allowed for browser"}), json_mode)).await?;
+                            continue
+                        }
+                        webpolicy::Policy::Activity => {
+                            if !browser_alive(&hub, reg, device_id, conn.client, true).await {
+                                let _ = tx.send(Message::Close(None)).await; return Ok(())
+                            }
+                        }
+                        webpolicy::Policy::Passive => {}
                     }
                 }
                 if waits_far(&v) {
