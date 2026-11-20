@@ -996,6 +996,7 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
             if (DataDevices.available) { DevicesSettings(); DLine() }
             if (DataMachines.available) { MachinesSettings(); DLine() }
             if (DataNotify.available) { NotifySettings(); DLine() }
+            if (DataBrowserStart.available) { BrowserStartSettings(); DLine() }
             if (DataRing.available) { RingSettings(); DLine() }
             DMono(Msg.android_alerts_head, dfaint)
             var alerts by remember { mutableStateOf(AppSettings.alertsOn()) }

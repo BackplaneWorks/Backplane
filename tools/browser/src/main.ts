@@ -214,6 +214,11 @@ function normalizeUrl(raw: string): string {
   return (loopback ? "http://" : "https://") + url;
 }
 
+// a page that shows nothing yet: a new tab, or one still on about:blank
+function blankPage(url: string): boolean {
+  return url === "" || url === "about:blank" || url.startsWith("chrome://newtab") || url.startsWith("chrome://new-tab-page");
+}
+
 // Browser lifecycle
 // -----------------
 
@@ -1137,6 +1142,8 @@ const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
     const p = await ensurePage(name);
     await sizePage(o, p);
     if (a.url) await p.goto(normalizeUrl(a.url), { waitUntil: "load", timeout: timeoutOf(a) });
+    // no address: the start page (the hub's homeUrl), only on a page that shows nothing yet
+    else if (a.homeUrl && blankPage(p.url())) await p.goto(normalizeUrl(a.homeUrl), { waitUntil: "load", timeout: timeoutOf(a) });
     await shotNow(name);
     return status(name);
   },

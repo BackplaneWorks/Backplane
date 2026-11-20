@@ -3021,6 +3021,15 @@ settings.git.autopush.note	Backplane commits design files locally at each turn's
 settings.git.notice	Backplane no longer pushes automatically. Turn it on in Settings if you want it.	Backplane は自動でプッシュしなくなりました。必要なら設定でオンにしてください。	Backplane ya no envía automáticamente. Actívalo en Ajustes si lo quieres.
 settings.git.offbranch	Keep Backplane's commits off my branch	Backplane のコミットを自分のブランチに入れない	No hacer commits de Backplane en mi rama
 settings.git.offbranch.note	Off: at each turn's end and save, Backplane commits the design files an agent changed to your branch. On: it records the same changes on its own refs (refs/backplane/design/<branch>) and never commits to your branch or index, so your branch shows the design files as modified until you commit them yourself. /restore and the KiCad history work either way.	オフ: 各ターンの終わりと保存のたびに、エージェントが変更した設計ファイルを Backplane があなたのブランチにコミットします。オン: 同じ変更を Backplane 自身の ref (refs/backplane/design/<branch>) に記録し、あなたのブランチやインデックスには一切コミットしません。そのため、自分でコミットするまで、ブランチでは設計ファイルが変更ありと表示されます。/restore と KiCad の履歴はどちらでも使えます。	Desactivado: al final de cada turno y en cada guardado, Backplane hace commit en tu rama de los archivos de diseño que cambió un agente. Activado: registra los mismos cambios en sus propias refs (refs/backplane/design/<branch>) y nunca hace commit en tu rama ni en tu índice, así que tu rama muestra los archivos de diseño como modificados hasta que hagas commit tú. /restore y el historial de KiCad funcionan igual.
+settings.browser.start	Start page	開始ページ	Página de inicio
+settings.browser.start.note	What a new Browser tab opens, yours and an agent's. An http or https address; a bare name like example.com gets https://.	新しいブラウザータブ（あなたのタブもエージェントのタブも）が開くページです。http または https のアドレス。example.com のような名前だけなら https:// を付けます。	Lo que abre una pestaña nueva del Navegador, tuya o de un agente. Una dirección http o https; a un nombre solo como example.com se le añade https://.
+settings.browser.opens	Opens	開くページ	Abre
+settings.browser.reset	Reset to default	既定に戻す	Restablecer predeterminada
+settings.browser.blank	Blank	空白	En blanco
+settings.browser.now.default	New tabs open {url}, the default.	新しいタブは既定の {url} を開きます。	Las pestañas nuevas abren {url}, la predeterminada.
+settings.browser.now.blank	New tabs open blank.	新しいタブは空白で開きます。	Las pestañas nuevas se abren en blanco.
+settings.browser.now	New tabs open {url}.	新しいタブは {url} を開きます。	Las pestañas nuevas abren {url}.
+settings.browser.bad	The start page must be an http or https address.	開始ページは http または https のアドレスにしてください。	La página de inicio debe ser una dirección http o https.
 gpui.f.group.install	Install	インストール	Instalar
 gpui.f.group.agents	Agents	エージェント	Agentes
 gpui.f.group.cad	CAD tools	CADツール	Herramientas CAD
@@ -4185,6 +4194,7 @@ cat.color.bad	Type a colour like #6fb3f2.	#6fb3f2 のように色を入力して
 android.copy.run	Run in terminal	ターミナルで実行	Ejecutar en la terminal
 android.copy.fullscreen	The terminal is running a full-screen program: quit it, then try again.	ターミナルで全画面のプログラムが動いています。終了してからもう一度お試しください。	La terminal está ejecutando un programa a pantalla completa: ciérralo y vuelve a intentarlo.
 android.term.chat.old	This hub has no terminal for chats yet. Update it to use one here.	このハブにはまだチャットのターミナルがありません。使うにはハブを更新してください。	Este hub aún no tiene terminal para los chats. Actualízalo para usarla aquí.
+android.browser.head	BROWSER	ブラウザー	NAVEGADOR
 sidebar.sections.needs	Needs you	対応が必要	Te necesita
 sidebar.sections.pinned	Pinned	ピン留め	Fijados
 sidebar.sections.active	Active	進行中	Activos
@@ -6134,6 +6144,12 @@ viewer.diff.threadchanges	Thread changes	スレッドの変更	Cambios del hilo
 
     /// gpui.e.picker.clone.typed = Clone {origin}
     static func gpui_e_picker_clone_typed(origin: String) -> String { f("gpui.e.picker.clone.typed", ["origin": origin]) }
+
+    /// settings.browser.now.default = New tabs open {url}, the default.
+    static func settings_browser_now_default(url: String) -> String { f("settings.browser.now.default", ["url": url]) }
+
+    /// settings.browser.now = New tabs open {url}.
+    static func settings_browser_now(url: String) -> String { f("settings.browser.now", ["url": url]) }
 
     /// gpui.f.counter = {i, number} of {n, number}
     static func gpui_f_counter(i: Int, n: Int) -> String { f("gpui.f.counter", ["i": String(i), "n": String(n)]) }

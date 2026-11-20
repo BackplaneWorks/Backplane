@@ -14,7 +14,7 @@ pub struct CefPage {
     tabs: Vec<Arc<Tab>>, active: usize, focus: FocusHandle, bar_focus: FocusHandle, bar_text: String, bar_edit: bool,
     bounds: Arc<Mutex<Option<Bounds<Pixels>>>>, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>,
     wake: async_channel::Sender<()>, hub: tokio::sync::mpsc::Sender<Command>, owner: String, port: u16,
-    pub taken: bool, pub light: bool, fresh: bool, sample: [u8; 3], lat_probe: Option<(std::time::Instant, [u8; 3])>, lat_ms: f64, stats: (u32, u32, usize), buttons: u32, visible: bool, composing: bool, attached: Vec<String>, pub status: String, last_mouse: (i32, i32),
+    pub taken: bool, pub light: bool, /** what a new or empty tab opens (the hub's start page) */ pub start: String, fresh: bool, sample: [u8; 3], lat_probe: Option<(std::time::Instant, [u8; 3])>, lat_ms: f64, stats: (u32, u32, usize), buttons: u32, visible: bool, composing: bool, attached: Vec<String>, pub status: String, last_mouse: (i32, i32),
     /// windowed: the client window (None until the first render decides; Some(None): off screen), the pane's marker hitbox in the last frame,
     /// where each tab's child was put (by tab), whether something drawn later covers the pane, gpui keys from the page waiting for a window
     host: Option<Option<native::Host>>, marker: Arc<Mutex<Option<HitboxId>>>, placed: std::collections::HashMap<usize, (Option<native::R>, u64)>, covered: bool,
@@ -31,7 +31,7 @@ impl CefPage {
                 cx.background_executor().timer(std::time::Duration::from_millis(16)).await; // at most ~60 repaints a second
             }
         }).detach();
-        let mut me = CefPage { tabs: Vec::new(), active: 0, focus: cx.focus_handle(), bar_focus: cx.focus_handle(), bar_text: String::new(), bar_edit: false, bounds: Arc::default(), image: None, retired: Vec::new(), wake, hub, owner, port, taken: false, light: false, fresh: false, sample: [0; 3], lat_probe: None, lat_ms: -1.0, buttons: 0, visible: false, composing: false, attached: Vec::new(), status: String::new(), stats: (0, 0, 0), last_mouse: (0, 0),
+        let mut me = CefPage { tabs: Vec::new(), active: 0, focus: cx.focus_handle(), bar_focus: cx.focus_handle(), bar_text: String::new(), bar_edit: false, bounds: Arc::default(), image: None, retired: Vec::new(), wake, hub, owner, port, taken: false, light: false, start: "about:blank".into(), fresh: false, sample: [0; 3], lat_probe: None, lat_ms: -1.0, buttons: 0, visible: false, composing: false, attached: Vec::new(), status: String::new(), stats: (0, 0, 0), last_mouse: (0, 0),
             host: None, marker: Arc::default(), placed: Default::default(), covered: false, from_page: Vec::new(), lat_native: Arc::new(Mutex::new(-1.0)), want_focus: false, want_yank: false, dispatching: Arc::default(), subs: Vec::new() };
         me
     }
@@ -123,7 +123,7 @@ impl CefPage {
         let act = self.tabs.get(self.active).cloned();
         self.tabs.retain(|t| !t.st.lock().unwrap().closed);
         if self.tabs.len() != before { self.active = act.and_then(|a| self.tabs.iter().position(|t| Arc::ptr_eq(t, &a))).unwrap_or(self.tabs.len().saturating_sub(1)); self.image = None; }
-        if self.tabs.is_empty() && self.host.is_some() { self.new_tab("about:blank", cx); }
+        if self.tabs.is_empty() && self.host.is_some() { self.new_tab(&self.start.clone(), cx); }
         if let Some(t) = self.tab().cloned() {
             if let Some(f) = t.take_frame() {
                 // the probe pixel (page x,y 350,350, a square the bench page flips on click) and a resize probe: how long from the input to a painted frame that shows it
@@ -199,7 +199,7 @@ impl CefPage {
         match a {
             Back => { if let Some(t) = self.tab() { t.back(); } } Forward => { if let Some(t) = self.tab() { t.forward(); } }
             Reload => { if let Some(t) = self.tab() { if t.st.lock().unwrap().loading { t.stop() } else { t.reload() } } }
-            NewTab => { self.new_tab("about:blank", cx); window.focus(&self.bar_focus); self.bar_edit = true; self.bar_text.clear(); }
+            NewTab => { self.new_tab(&self.start.clone(), cx); window.focus(&self.bar_focus); self.bar_edit = true; self.bar_text.clear(); }
             Select(i) => { if let Ok(i) = i.parse::<usize>() { if i < self.tabs.len() { self.active = i; self.image = None; if let Some(t) = self.tab() { t.hidden(false); t.resize(1, 1, 1.0); } } } cx.notify(); }
             Close(i) => { if let Some(t) = i.parse::<usize>().ok().and_then(|i| self.tabs.get(i)) { t.close(); } }
             FocusBar => { window.focus(&self.bar_focus); self.bar_edit = true; self.bar_text = self.tab().map(|t| t.st.lock().unwrap().url.clone()).unwrap_or_default(); self.fresh = true; cx.notify(); }
@@ -219,7 +219,7 @@ impl Render for CefPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         for old in self.retired.drain(..) { let _ = window.drop_image(old); }
         if self.host.is_none() { self.decide(window, cx); }
-        if self.tabs.is_empty() { self.new_tab("about:blank", cx); }
+        if self.tabs.is_empty() { self.new_tab(&self.start.clone(), cx); }
         if std::mem::take(&mut self.want_focus) && !self.focus.is_focused(window) { window.focus(&self.focus); self.bar_edit = false; }
         if std::mem::take(&mut self.want_yank) && !self.focus.is_focused(window) && window.is_window_active() { if let Some(t) = self.tab() { t.give_keyboard(false); } }
         if !self.from_page.is_empty() {
@@ -315,7 +315,7 @@ impl CefPage {
         use serde_json::json;
         let op = v["op"].as_str().unwrap_or("report");
         let r = match (op, self.tab().cloned()) {
-            ("new_tab", _) => { self.new_tab(v["url"].as_str().unwrap_or("about:blank"), cx); json!({"ok": true}) }
+            ("new_tab", _) => { let u = v["url"].as_str().map_or_else(|| self.start.clone(), str::to_string); self.new_tab(&u, cx); json!({"ok": true}) }
             ("close_tab", _) => match self.tabs.get(v["index"].as_u64().unwrap_or(0) as usize) { Some(t) => { t.close(); json!({"ok": true}) } None => json!({"ok": false, "error": "no such tab"}) }, // i18n-ok: an e2e answer
             ("report", _) => json!({"ok": true}),
             /* i18n-ok: an e2e answer */ (_, None) => json!({"ok": false, "error": "no tab"}),

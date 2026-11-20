@@ -79,6 +79,11 @@ impl Browser {
     /// `agent`: the call is an agent's, and is refused (never sent) if the person has the page now: checked under the same lock that sends it.
     pub async fn ask_as(self: &Arc<Self>, owner: &str, op: &str, args: &Value, agent: bool) -> String {
         if crate::copy::on() { return fail(&crate::copy::refusal("the browser helper")) }
+        // an open with no address (an agent's preview_open, a Browser tab with no page yet) shows the start page on a new or blank page
+        let with_home;
+        let args = if op == "open" && args.get("url").and_then(Value::as_str).map_or(true, |u| u.trim().is_empty()) {
+            with_home = with_home_url(args, self.home_url().await.as_deref()); &with_home
+        } else { args };
         let (id, rx) = {
             let mut st = self.st.lock().await;
             if agent && st.drive.get(owner).map_or(false, |m| !m.is_empty()) { return fail(REFUSAL) }
@@ -179,12 +184,16 @@ impl Browser {
 
     /// A client that shows this page (a phone with its Browser tab open: `screen.jpg` is its poll) holds a lease: the helper screencasts for a few seconds from the
     /// last request. Without a request nothing is cast and no JPEG is encoded (the native window draws its own page and never asks). At most one `cast` a second per page.
+    /// The start page a new or empty page opens (Settings › Browser › Start page), None for a blank one.
+    pub async fn home_url(&self) -> Option<String> { crate::settings::browser_start::home(&self.hub.setting(crate::settings::browser_start::KEY).await.unwrap_or_default()) }
     pub async fn watch(self: &Arc<Self>, owner: &str) {
         { let mut st = self.st.lock().await; let now = std::time::Instant::now();
           if st.cast.get(owner).map_or(false, |t| now.duration_since(*t) < Duration::from_secs(1)) { return }
           if st.cast.len() >= MAX_OWNERS { st.cast.clear() } st.cast.insert(owner.to_string(), now); }
         let (me, o) = (self.clone(), owner.to_string());
-        tokio::spawn(async move { let _ = me.ask(&o, "cast", &json!({"ms": 2500})).await; });
+        // a phone's first look at a page that has none yet opens the start page (the helper does it once, on a page with no tabs)
+        let home = self.home_url().await;
+        tokio::spawn(async move { let _ = me.ask(&o, "cast", &with_home_url(&json!({"ms": 2500}), home.as_deref())).await; });
     }
     /// Who drives an owner's page: "" (the agent), "teach" or "takeover" (docs/teach.md `drive.<bot>`).
     /// Past MAX_OWNERS owners a new mode is refused (false) and the caller must not hand the page over; an existing owner's can always change.
@@ -199,6 +208,13 @@ impl Browser {
     /// The latest `tabs` event of a page (what `browser.tabs.<page>` info carries).
     pub async fn tabs_of(&self, page: &str) -> Option<String> { self.st.lock().await.tabs.get(page).cloned() }
     }
+
+/// `args` with `homeUrl` set to the start page (left out for a blank one): the helper opens it only on a page that is new or blank.
+pub fn with_home_url(args: &Value, home: Option<&str>) -> Value {
+    let mut a = args.clone();
+    if let (Some(o), Some(h)) = (a.as_object_mut(), home) { o.insert("homeUrl".into(), h.into()); }
+    a
+}
 
 /// Preview.content: the helper's reply as an MCP result's content blocks: the result as text, a screenshot as an image block; an error is
 /// one text block and the call is flagged.

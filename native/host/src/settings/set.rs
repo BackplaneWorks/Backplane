@@ -19,6 +19,7 @@ impl RpcHandler for SettingSet {
             // quiet hours are a window the push gate can read, or off; urgent is on or off: a value it could not read would silently turn the respect off
             if key == crate::push::QUIET && !(value.is_empty() || value == "off" || crate::push::window(value).is_some()) { return vec![json!({"t":"reply","id":id,"ok":false,"error":"quiet hours are HH:MM-HH:MM, or off"})] }
             if key == crate::push::QUIET_URGENT && !matches!(value, "" | "on" | "off") { return vec![json!({"t":"reply","id":id,"ok":false,"error":"urgent is on or off"})] }
+            if key == super::browser_start::KEY && !super::browser_start::storable(value) { return vec![json!({"t":"reply","id":id,"ok":false,"error":super::browser_start::BAD})] }
             if key.starts_with("peer.own.") { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that setting is the hub's own"})] }
             // a zone is only right once its rule is known: person.tz goes through zone.set (settings/zone.rs), which looks the rule up and refuses a name that is not a zone
             if key == "person.tz" { if let Some(z) = hub.rpc_for("zone.set") { return z.call(hub, _who, id, "zone.set", &json!({"zone": value})).await } }

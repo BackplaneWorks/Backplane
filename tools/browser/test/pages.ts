@@ -91,6 +91,15 @@ async function ok(p: Promise<any>, what: string) {
   const away = await ok(call("status", {page:"fresh"}), "existing Browser status");
   check("lease preserves navigation",away.url===`${base}/elsewhere`,away);
   await ok(call("close", {page:"fresh"}), "close home-page fixture");
+  // preview_open with no address: the start page on a new page, nothing changed on a page that shows something
+  const opened = await ok(call("open", {page:"agent", homeUrl:`${base}/start`}), "open with no url opens the start page");
+  check("start page is loaded", opened.url===`${base}/start`, opened);
+  await ok(call("navigate", {page:"agent",url:`${base}/elsewhere`}), "agent navigates away");
+  const kept = await ok(call("open", {page:"agent", homeUrl:`${base}/start`}), "open again with no url");
+  check("open with no url keeps a page that shows something", kept.url===`${base}/elsewhere`, kept);
+  const blank = await ok(call("open", {page:"blank-start"}), "open with a blank start page");
+  check("no homeUrl leaves the page blank", blank.url==="about:blank", blank);
+  await ok(call("close", {page:"agent"}), "close start-page fixture"); await ok(call("close", {page:"blank-start"}), "close blank fixture");
   await ok(call("open", { url: `${base}/shared`, width: 640, height: 480 }), "shared open");
   await ok(call("frames", { on: true, maxFps: 10 }), "shared raw frames on");
   await ok(call("open", { page: "bot-1", url: `${base}/anim`, width: 800, height: 600 }), "bot-1 open");

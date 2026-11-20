@@ -2690,6 +2690,15 @@ settings.git.autopush.note = Backplane は各ターンの終わりに設計フ�
 settings.git.notice = Backplane は自動でプッシュしなくなりました。必要なら設定でオンにしてください。
 settings.git.offbranch = Backplane のコミットを自分のブランチに入れない
 settings.git.offbranch.note = オフ: 各ターンの終わりと保存のたびに、エージェントが変更した設計ファイルを Backplane があなたのブランチにコミットします。オン: 同じ変更を Backplane 自身の ref (refs/backplane/design/<branch>) に記録し、あなたのブランチやインデックスには一切コミットしません。そのため、自分でコミットするまで、ブランチでは設計ファイルが変更ありと表示されます。/restore と KiCad の履歴はどちらでも使えます。
+settings.browser.start = 開始ページ
+settings.browser.start.note = 新しいブラウザータブ（あなたのタブもエージェントのタブも）が開くページです。http または https のアドレス。example.com のような名前だけなら https:// を付けます。
+settings.browser.opens = 開くページ
+settings.browser.reset = 既定に戻す
+settings.browser.blank = 空白
+settings.browser.now.default = 新しいタブは既定の {url} を開きます。
+settings.browser.now.blank = 新しいタブは空白で開きます。
+settings.browser.now = 新しいタブは {url} を開きます。
+settings.browser.bad = 開始ページは http または https のアドレスにしてください。
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = インストール
@@ -3861,6 +3870,7 @@ cat.color.bad = #6fb3f2 のように色を入力してください。
 android.copy.run = ターミナルで実行
 android.copy.fullscreen = ターミナルで全画面のプログラムが動いています。終了してからもう一度お試しください。
 android.term.chat.old = このハブにはまだチャットのターミナルがありません。使うにはハブを更新してください。
+android.browser.head = ブラウザー
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number}件実行中
 ios.alerts.ask = スレッドがあなたを必要とするとき、Bub が通知できます。

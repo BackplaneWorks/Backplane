@@ -2667,6 +2667,15 @@ settings.git.autopush.note = Backplane hace commit de los archivos de diseño en
 settings.git.notice = Backplane ya no envía automáticamente. Actívalo en Ajustes si lo quieres.
 settings.git.offbranch = No hacer commits de Backplane en mi rama
 settings.git.offbranch.note = Desactivado: al final de cada turno y en cada guardado, Backplane hace commit en tu rama de los archivos de diseño que cambió un agente. Activado: registra los mismos cambios en sus propias refs (refs/backplane/design/<branch>) y nunca hace commit en tu rama ni en tu índice, así que tu rama muestra los archivos de diseño como modificados hasta que hagas commit tú. /restore y el historial de KiCad funcionan igual.
+settings.browser.start = Página de inicio
+settings.browser.start.note = Lo que abre una pestaña nueva del Navegador, tuya o de un agente. Una dirección http o https; a un nombre solo como example.com se le añade https://.
+settings.browser.opens = Abre
+settings.browser.reset = Restablecer predeterminada
+settings.browser.blank = En blanco
+settings.browser.now.default = Las pestañas nuevas abren {url}, la predeterminada.
+settings.browser.now.blank = Las pestañas nuevas se abren en blanco.
+settings.browser.now = Las pestañas nuevas abren {url}.
+settings.browser.bad = La página de inicio debe ser una dirección http o https.
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = Instalar
@@ -3838,6 +3847,7 @@ cat.color.bad = Escribe un color como #6fb3f2.
 android.copy.run = Ejecutar en la terminal
 android.copy.fullscreen = La terminal está ejecutando un programa a pantalla completa: ciérralo y vuelve a intentarlo.
 android.term.chat.old = Este hub aún no tiene terminal para los chats. Actualízalo para usarla aquí.
+android.browser.head = NAVEGADOR
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number} ejecutándose
 ios.alerts.ask = Bub puede avisarte cuando un hilo te necesite.

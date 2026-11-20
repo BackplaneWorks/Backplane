@@ -319,7 +319,8 @@ impl Backplane {
             self.screens.browser = Some((owner, page));
         }
         let light = self.light();
-        if let Some((_, page)) = &self.screens.browser { page.update(cx, |p, cx| { p.set_light(light, cx); p.set_visible(true, cx) }); }
+        let start = start_page(&self.data);
+        if let Some((_, page)) = &self.screens.browser { page.update(cx, |p, cx| { p.set_start(&start, cx); p.set_light(light, cx); p.set_visible(true, cx) }); }
     }
 
 }
@@ -331,6 +332,12 @@ pub fn browser_owner(data: &serde_json::Value, selected: &str) -> String {
     selected.rsplit('|').next().unwrap_or(selected).to_string()
 }
 
+/// The start page a new or empty Browser tab opens: the hub's `browserStart` (Settings › Browser › Start page; about:blank for a blank one),
+/// the default for a hub from before it said.
+pub fn start_page(data: &serde_json::Value) -> String {
+    data["browserStart"].as_str().filter(|s| !s.is_empty()).unwrap_or("https://www.google.com").to_string() /* i18n-ok: an address */
+}
+
 /// How far below the screen the thread may go on before "Latest" is offered (about a screen of rows).
 pub const FAR: f32 = 600.0;
 static LATEST_FAR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -339,6 +346,12 @@ pub fn far_from(max: f32, y: f32) -> bool { max - y > FAR }
 
 #[cfg(test)]
 mod tests {
+    #[core::prelude::v1::test] fn a_new_tab_opens_the_hubs_start_page_and_google_from_an_older_hub() {
+        use serde_json::json;
+        assert_eq!(super::start_page(&json!({"browserStart": "https://example.com"})), "https://example.com");
+        assert_eq!(super::start_page(&json!({"browserStart": "about:blank"})), "about:blank");
+        assert_eq!(super::start_page(&json!({})), "https://www.google.com");
+    }
     #[core::prelude::v1::test] fn enter_runs_a_command_typed_in_full_and_completes_the_rest() {
         use super::enter_completes as e;
         assert!(!e("/settle", "/settle"), "typed out: Enter runs it"); assert!(!e("/settle", "/settle "), "a trailing space too");

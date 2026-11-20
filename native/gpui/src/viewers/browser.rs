@@ -139,6 +139,13 @@ impl BrowserPage {
         #[cfg(feature = "cef")]
         if let Some(c) = &self.cef { c.update(cx, |p, cx| { if p.light != light { p.light = light; cx.notify(); } }); }
     }
+    /// The start page a new or empty tab opens (the hub's `browserStart`, Settings › Browser): only embedded Chromium opens tabs itself.
+    pub fn set_start(&mut self, start: &str, cx: &mut Context<Self>) {
+        #[cfg(feature = "cef")]
+        if let Some(c) = &self.cef { let start = start.to_string(); c.update(cx, |p, _| p.start = start); }
+        #[cfg(not(feature = "cef"))]
+        let _ = (start, cx);
+    }
     /// The hub refused to open or drive the page (a toolbar or open request answered an error): said in the tab with what to do, until a frame arrives.
     pub fn open_failed(&mut self, why: &str, cx: &mut Context<Self>) { if self.image.is_none() { self.open_error = Some(why.to_string()); cx.notify(); } }
     fn retry(&mut self, cx: &mut Context<Self>) { self.open_error = None; self.opening_since = Instant::now(); self.bar.rpc(serde_json::json!({"bot": self.bar.owner, "op": "open"})); cx.notify(); }
