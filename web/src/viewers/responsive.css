@@ -137,6 +137,15 @@
   z-index: 5;
 }
 
+.bp-v-overlay[hidden],
+.bp-v-layers[hidden],
+.bp-v-info[hidden],
+.bp-v-banner[hidden],
+.bp-vh-sep[hidden],
+.bp-vh-file[hidden] {
+  display: none;
+}
+
 html.light .bp-v-overlay {
   background: rgba(245, 246, 248, 0.84);
 }
