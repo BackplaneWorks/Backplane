@@ -686,7 +686,7 @@ def run_auto_action(name: str, last_kicad: dict, kind_out: Path, disp: str) -> N
             if not sock:
                 raise RuntimeError("the last pane report carries no KiCad socket")
             r = subprocess.run([sys.executable, str(ipc), "close", str(sock), "discard"], capture_output=True, text=True, timeout=30)
-            rec["output"] = (r.stdout or r.stderr or "").strip()[:300]
+            rec["output"] = (r.stdout or r.stderr or "").strip()[-600:]
             rec["ok"] = r.returncode == 0 and '"ok": true' in (r.stdout or "").replace('"ok":true', '"ok": true')
         elif name == "auto-act-kill":
             rec.update({"action": "kill"})
@@ -698,7 +698,21 @@ def run_auto_action(name: str, last_kicad: dict, kind_out: Path, disp: str) -> N
             if "kicad" not in cmdline:
                 raise RuntimeError(f"pid {pid} is not a KiCad process")
             os.kill(pid, 9)
-            rec.update({"pid": pid, "ok": True})
+            for _ in range(50):  # the process is gone before the stale files are cleared
+                if not Path(f"/proc/{pid}").exists():
+                    break
+                time.sleep(0.1)
+            # A real crash leaves KiCad's lock and autosave files behind, and the next start then asks about them in a modal dialog that
+            # (rightly) takes the keyboard. That is the crash-recovery path, not the Automatic attach under test: clear them from the
+            # run's own throwaway project so the restart is a plain cold start.
+            cleared = []
+            if pro:
+                for pat in ("~*.lck", "_autosave-*", "*-backups"):
+                    for f in Path(pro).parent.glob(pat):
+                        if f.is_file():
+                            f.unlink()
+                            cleared.append(f.name)
+            rec.update({"pid": pid, "ok": True, "stale_files_cleared": cleared})
         else:
             return
     except Exception as e:

@@ -484,7 +484,9 @@ def _gate_c(marks, kt, logs, caps) -> dict:
         evs = [lg["obj"] for lg in _logs_between(logs, marks.get(lo), marks.get(hi), "kicad_place")]
         placed[label] = [{"changed": e.get("changed"), "frame_changed": e.get("frame_changed"), "why": e.get("why"), "frame": e.get("frame")} for e in evs]
     ev["placements"] = placed
-    ev["place_notifies"] = len([lg for lg in logs if "kicad_place_notify" in lg["obj"]])
+    notifies = {label: len(_logs_between(logs, marks.get(lo), marks.get(hi), "kicad_place_notify")) for label, lo, hi in switches}
+    ev["place_notifies"] = notifies
+    ev["place_notify_note"] = f"kicad_place_notify per switch {notifies}: same-rect synthetic ConfigureNotifies are expected and are not geometry pushes"
     seen = all(placed[label] for label, _lo, _hi in switches)
     if seen:
         for label, _lo, _hi in switches:
@@ -498,8 +500,8 @@ def _gate_c(marks, kt, logs, caps) -> dict:
     if not seen:
         return _rec(gid, name, "unavailable",
                     "measured: each switch ended in a painted PCB/SCH frame and the hub's pid equals the pane's pid every time (one process, two frames). "
-                    "Unproven: no geometry push per switch, since no `kicad_place` log lines exist in this run (the client logs them with BACKPLANE_KICAD_DEBUG once it has them)", ev)
-    return _rec(gid, name, "passed", "", ev)
+                    "Unproven: no geometry push per switch, since no `kicad_place` log lines exist in this run (they need BACKPLANE_KICAD_DEBUG and a client built from main with PR #1455)", ev)
+    return _rec(gid, name, "passed", ev["place_notify_note"], ev)
 
 
 def _keep_warm_fails(left: dict, rt: dict) -> list[str]:

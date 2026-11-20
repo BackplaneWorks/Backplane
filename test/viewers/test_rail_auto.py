@@ -335,7 +335,10 @@ class AutoGateTests(unittest.TestCase):
         self.assertEqual(r["outcome"], "unavailable")
         self.assertIn("no `kicad_place` log lines", r["note"])
         sw = {"changed": False, "frame_changed": True, "why": "layout", "frame": "SCH"}
-        self.assertEqual(c_with([sw], [{**sw, "frame": "PCB"}])["outcome"], "passed")
+        ok = c_with([sw], [{**sw, "frame": "PCB"}])
+        self.assertEqual(ok["outcome"], "passed")
+        self.assertIn("kicad_place_notify per switch", ok["note"])  # reported separately, as a note
+        self.assertEqual(ok["evidence"]["place_notifies"], {"board->schematic": 0, "schematic->board": 0})
         # one switch observed and the other not: still unavailable (not earned)
         self.assertEqual(c_with([sw], [])["outcome"], "unavailable")
         # a new geometry pushed on a switch, or no frame_changed placement: failed
