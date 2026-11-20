@@ -37,8 +37,11 @@ export async function startHub({bin, rig, port}) {
   rmSync(rig + '/home', {recursive: true, force: true}); mkdirSync(rig + '/home', {recursive: true}); mkdirSync(rig + '/agents', {recursive: true});
   for (const n of ['claude', 'codex', 'grok', 'muse']) { writeFileSync(rig + '/agents/' + n, '#!/bin/sh\nexit 1\n'); chmodSync(rig + '/agents/' + n, 0o755); }
   const log = rig + '/hub.log'; const out = require_fs().openSync(log, 'w');
+  const envForHub = {...process.env};
+  delete envForHub.DISPLAY;
+  delete envForHub.WAYLAND_DISPLAY;
   const p = spawn(bin, ['--home', rig + '/home', '--port', String(port), '--host', '127.0.0.1', '--no-tailscale', '--foreground'],
-    {env: {...process.env, BACKPLANE_AGENTS: rig + '/agents', BACKPLANE_NO_UPDATE: '1', HOME: rig + '/fakehome'}, stdio: ['ignore', out, out]});
+    {env: {...envForHub, QT_QPA_PLATFORM: 'offscreen', BACKPLANE_AGENTS: rig + '/agents', BACKPLANE_NO_UPDATE: '1', HOME: rig + '/fakehome'}, stdio: ['ignore', out, out]});
   for (let i = 0; i < 100; i++) { try { const r = await fetch(`http://127.0.0.1:${port}/hello`); if (r.ok) break } catch {} await sleep(150) }
   const kids = (() => { try { return sh('.', 'pgrep', '-P', String(p.pid)).trim() } catch { return '' } })();
   const env = readFileSync(`/proc/${p.pid}/environ`, 'utf8').split('\0');

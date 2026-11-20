@@ -372,7 +372,11 @@ impl Backplane {
         h
     }
     /// Returns (consume the probe, clear all local and hub highlights, close the viewer).
-    fn escape_plan(open: Option<&str>, diff: bool, split: &[&str], lit: [bool; 3], kept: bool, solid_probe: bool) -> (bool, bool, bool) {
+    fn escape_plan(open: Option<&str>, diff: bool, split: &[&str], lit: [bool; 3], kept: bool, solid_probe: bool, tiles: Option<&[(bool, bool)]>) -> (bool, bool, bool) {
+        if let Some(tiles) = tiles {
+            let consume = tiles.iter().any(|&(visible, lit)| visible && lit);
+            return (consume, kept || tiles.iter().any(|&(_, lit)| lit), false);
+        }
         let consume = !diff && match open {
             Some("board" | "schematic" | "gerbers") => lit[0],
             Some("split") => (split.contains(&"sch") && lit[1]) || (split.contains(&"pcb") && lit[2])
@@ -404,8 +408,19 @@ impl Backplane {
         let split = if open == Some("split") { crate::screens::viewer::split_visible() } else { Vec::new() };
         let kept = thread["viewer"]["probe"].as_str().is_some_and(|p| !p.is_empty());
         let lit = [0, 1, 2].map(|id| { let p = &self.screens.plots[id]; p.picked.is_some() || p.card.is_some() || !p.lit.is_empty() });
+        let viewer = &thread["viewer"];
+        let tiled = crate::screens::viewer::is_tiled(viewer);
+        let tiles: Vec<_> = viewer["tiles"].as_object().into_iter().flatten().map(|(id, _)| {
+            let visible = viewer["layout"]["maximized"].as_str().is_none_or(|shown| shown == id);
+            let plot_lit = self.screens.plots.tile_slot(id).is_some_and(|slot| {
+                let plot = &self.screens.plots[slot];
+                plot.picked.is_some() || plot.card.is_some() || !plot.lit.is_empty()
+            });
+            let solid_lit = self.screens.tile_solid(id).is_some_and(|page| page.read(cx).probe_tool().is_some());
+            (visible, plot_lit || solid_lit)
+        }).collect();
         let (consume, clear_all, close) = Self::escape_plan(open, thread["diff"].is_object(), &split, lit, kept,
-            kept && !crate::screens::plotview::probed_part(self).is_empty());
+            kept && !crate::screens::plotview::probed_part(self).is_empty(), tiled.then_some(tiles.as_slice()));
         if !consume {
             // A focused browser or an open management panel gets Escape before the viewer closes.
             let in_viewer = window.context_stack().iter().any(|k| k.contains("Viewer"));
@@ -527,7 +542,7 @@ mod tests {
     fn d(key: &str, ctx: &[&str]) -> String { does(&Local::default(), key, ctx) }
 
     #[test] fn escape_routes_by_the_page_and_split_panes_on_show() {
-        let plan = Backplane::escape_plan;
+        let plan = |open, diff, split, lit, kept, solid| Backplane::escape_plan(open, diff, split, lit, kept, solid, None);
         // Main consumes Escape for any lit slot. The first three cases fail there:
         // focus stays in the composer, Diff stays open, or a hidden board prevents Split closing.
         assert_eq!(plan(None, false, &[], [true, false, false], false, false), (false, true, false));
@@ -536,6 +551,15 @@ mod tests {
         assert_eq!(plan(Some("split"), false, &["sch"], [false, true, false], true, false), (true, true, false));
         assert_eq!(plan(Some("3d"), false, &[], [false; 3], true, true), (true, true, false));
         assert_eq!(plan(None, false, &[], [false; 3], true, false), (false, true, false));
+    }
+    #[test] fn escape_keeps_the_layout_and_only_consumes_visible_highlights() {
+        let plan = |tiles: &[(bool, bool)]| Backplane::escape_plan(Some("board"), false, &[], [false; 3], false, false, Some(tiles));
+        assert_eq!(plan(&[(true, true), (true, false)]), (true, true, false));
+        assert_eq!(plan(&[(true, false), (false, true)]), (false, true, false));
+        // Both plans fall through to the shared composer/root focus toggle.
+        let closed = Backplane::escape_plan(None, false, &[], [false; 3], false, false, None);
+        assert_eq!(closed, (false, false, false));
+        assert_eq!(plan(&[(true, false), (true, false)]), closed);
     }
     #[test] fn a_closed_viewers_stale_highlight_leaves_escape_for_composer_blur() {
         let mut plots: [crate::screens::plotview::PlotView; 3] = Default::default();

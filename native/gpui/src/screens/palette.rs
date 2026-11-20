@@ -8,7 +8,7 @@ use gpui::{prelude::*, *};
 use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Do { Rail(String, String), Thread(String), /** a message found by what it says: its thread and the message */ Message(String, String), Action(String, String), Settings, Sidebar, Models, Prev, Next, Uber, Shortcuts, /** streamer mode on or off (streamer.rs) */ Streamer, Hub(String) }
+pub enum Do { AddBeside, Rail(String, String), Thread(String), /** a message found by what it says: its thread and the message */ Message(String, String), Action(String, String), Settings, Sidebar, Models, Prev, Next, Uber, Shortcuts, /** streamer mode on or off (streamer.rs) */ Streamer, Hub(String) }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item { pub label: String, pub place: String, pub kind: &'static str, pub what: Do, /** a thread's row (its status, state and want): its dot and what it wants */ pub row: Value }
 /// The key that does what an item does, as the person reads it ("" for none).
@@ -22,7 +22,7 @@ pub fn shortcut(it: &Item, current: &str, l: &crate::local::Local) -> String {
 }
 
 #[derive(Default)]
-pub struct Palette { can_embed: bool, pub focus: bool, pub open: bool, pub input: Option<Entity<Composer>>, pub q: String, pub ix: usize,
+pub struct Palette { can_embed: bool, pub(crate) editor_active: bool, pub focus: bool, pub open: bool, pub input: Option<Entity<Composer>>, pub q: String, pub ix: usize,
     /// "Search in thread": the thread (its raw id) the box searches, "" for the whole palette
     pub scope: String,
     /// Find across threads (Ctrl+Shift+F): the box lists only what was said, and the threads named by the words
@@ -90,6 +90,9 @@ fn items(data: &Value, can_embed: bool) -> Vec<Item> {
         }
     }
     let viewer = &thread["viewer"];
+    if super::tile_menu::picker_target(thread).is_some() {
+        v.push(Item { label: crate::i18n::t("viewer.tile.add.tip"), place: trs("viewer"), kind: "action", what: Do::AddBeside, row: Value::Null });
+    }
     let simulation = crate::viewers::kicad_pane::rail_simulation(viewer, can_embed).is_some();
     for row in crate::ui::rail_rows(viewer, simulation) {
         if row.state == "disabled" || row.id == "commands" || (!thread.is_object() && row.id != "terminal") { continue }
@@ -167,6 +170,7 @@ pub fn listed(data: &Value, p: &Palette) -> Vec<Item> {
     if p.find_all { let mut v = hits; if answered { v.extend(p.titles.iter().take(6).cloned()); } return v }
     // the sidebar's rows, then the hub's title hits for threads it does not hold (settled, older pages)
     let mut all = items(data, p.can_embed);
+    if p.editor_active { all.retain(|item| item.what != Do::AddBeside); }
     if answered { let held: std::collections::HashSet<Do> = all.iter().map(|it| it.what.clone()).collect(); all.extend(p.titles.iter().filter(|t| !held.contains(&t.what)).cloned()); }
     let mut v = found(all, &p.q, 10);
     let room = 14usize.saturating_sub(v.len());
@@ -196,8 +200,13 @@ impl Backplane {
         self.screens.palette.find_all = true;
         /* i18n-ok: placeholders drawn through trs by the input, and the text through trs */ if let Some(i) = self.screens.palette.input.clone() { i.update(cx, |i, _| i.set_placeholder("Type a word said in any thread")); }
     }
+    pub(crate) fn dock_editor_active(&self, thread: &Value, can_embed: bool, cx: &App) -> bool {
+        can_embed && super::viewer::holds_editor(thread) && !super::viewer::is_tiled(&thread["viewer"])
+            && self.kicad_for(thread, cx).is_some()
+    }
     pub(crate) fn palette_open(&mut self, cx: &mut Context<Self>) {
         self.screens.palette.can_embed = crate::viewers::kicad_pane::local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), &self.data["thread"]);
+        self.screens.palette.editor_active = self.dock_editor_active(&self.data["thread"], self.screens.palette.can_embed, cx);
         self.kicad_lend(cx);
         if self.screens.palette.input.is_none() {
             let input = cx.new(|cx| Composer::with_context(cx, "PickInput"));
@@ -237,6 +246,12 @@ impl Backplane {
             Do::Thread(id) => self.go("select", id, cx),
             // a message found: its thread at the message, marked, with the find bar holding the words for the next and previous ones there
             Do::Message(id, msg) => { let q = self.screens.palette.q.trim().to_string(); self.find_open_at(&id, &msg, &q, cx); }
+            Do::AddBeside => {
+                if self.dock_editor_active(&self.data["thread"], self.screens.palette.can_embed, cx) { return; }
+                if let Some(target) = super::tile_menu::picker_target(&self.data["thread"]) {
+                    super::tile_menu::Action::Open(Some(target)).run(self, cx);
+                }
+            }
             Do::Rail(id, _) => match id.as_str() {
                 "terminal" => cx.defer(|cx| cx.dispatch_action(&crate::keys::ToggleTerminal)),
                 "simulation" => self.open_simulation(cx),
@@ -312,6 +327,7 @@ pub(crate) fn selected_snapshot(data: &Value, p: &Palette) -> Value {
     let list = if p.open { listed(data, p) } else { Vec::new() };
     let sel = list.get(p.ix);
     let sel_id = sel.map(|it| match &it.what {
+        Do::AddBeside => "add-beside".into(),
         Do::Rail(id, _) => format!("rail:{id}"),
         Do::Thread(id) => format!("thread:{id}"),
         Do::Action(a, v) => if v.is_empty() { format!("action:{a}") } else { format!("action:{a}:{v}") },

@@ -152,10 +152,18 @@ pub struct Frame { pub key: String, pub fam: String, pub bbox: [f32; 4], pub edg
 #[derive(Default)]
 /* i18n-ok: kept in English in the frame; viewer.rs draws it through trs */ pub struct Store { pub sheets: Vec<Sheet>, /** each sheet file's references (Hier.refs), for "C39 is on the sheet ..." */ pub sheet_refs: Vec<(String, Vec<String>)>, held: std::collections::HashMap<String, Vec<Arc<Chunk>>>, held_key: String, pub frame: Option<Frame>, pub frames: std::collections::HashMap<String, Frame>, /** source keys currently waiting on a Retry with their start time (cleared only by a frame for that exact key, or after 15 s) */ pub retrying: std::collections::HashMap<String, std::time::Instant> }
 
-const MAX_SOURCES: usize = 6;
+const MAX_SOURCES: usize = 16;
 
 impl Store {
     pub fn reset(&mut self) { self.held.clear(); self.held_key.clear(); self.frame = None; self.frames.clear(); self.retrying.clear(); }
+    /// Drop sources the acknowledged watch set no longer streams, including their delta bases.
+    pub fn retain_keys(&mut self, keys: &[String]) {
+        self.frames.retain(|key, _| keys.contains(key));
+        self.held.retain(|key, _| keys.contains(key));
+        self.retrying.retain(|key, _| keys.contains(key));
+        if !self.held.contains_key(&self.held_key) { self.held_key.clear(); }
+        if self.frame.as_ref().is_some_and(|frame| !keys.contains(&frame.key)) { self.frame = None; }
+    }
     fn fail(&mut self, key: String, fam: String, why: &str, retryable: Option<bool>) {
         self.retrying.remove(&key);
         self.held.remove(&key); if self.held_key == key { self.held_key.clear(); }

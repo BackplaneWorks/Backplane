@@ -4723,6 +4723,18 @@ web.clone.no.folders	No folders here	フォルダがありません	No hay carpe
 gpui.c.kicad.opening	Opening the {editor}: {job}… {secs} s	{editor}を開いています: {job}… {secs} 秒	Abriendo el {editor}: {job}… {secs} s
 gpui.c.kicad.openingbare	Opening the {editor}… {secs} s	{editor}を開いています… {secs} 秒	Abriendo el {editor}… {secs} s
 gpui.c.kicad.openfailed	The {editor} did not open	{editor}が開きませんでした	El {editor} no se abrió
+viewer.tile.rail.add	Shift-click or middle-click to add beside the focused tile.	Shift＋クリックまたは中央クリックで、選択中のタイルの隣に追加します。	Mayús+clic o clic central para añadir junto al panel activo.
+viewer.tile.add	Add beside	隣に追加	Añadir al lado
+viewer.tile.maximize	Maximize tile	タイルを最大化	Maximizar panel
+viewer.tile.restore	Restore tile	タイルを元に戻す	Restaurar panel
+viewer.tile.focus	Focus tile	タイルを選択	Enfocar panel
+viewer.tile.embedded	Return to the viewer to add a tile beside this one.	隣にタイルを追加するにはビューアーに戻ってください。	Vuelve al visor para añadir un panel al lado.
+viewer.tile.simulation.single	Close the other tiles to open Simulation in KiCad.	ほかのタイルを閉じると、KiCad でシミュレーションを開けます。	Cierra los demás paneles para abrir Simulación en KiCad.
+viewer.tile.add.tip	Add beside…	隣に追加…	Añadir al lado…
+viewer.tile.left	Add on the left	左に追加	Añadir a la izquierda
+viewer.tile.right	Add on the right	右に追加	Añadir a la derecha
+viewer.tile.top	Add above	上に追加	Añadir arriba
+viewer.tile.bottom	Add below	下に追加	Añadir abajo
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}

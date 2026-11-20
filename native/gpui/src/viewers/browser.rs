@@ -155,6 +155,12 @@ impl BrowserPage {
     pub fn open_failed(&mut self, why: &str, cx: &mut Context<Self>) { if self.image.is_none() { self.open_error = Some(why.to_string()); cx.notify(); } }
     fn retry(&mut self, cx: &mut Context<Self>) { self.open_error = None; self.opening_since = Instant::now(); self.bar.rpc(serde_json::json!({"bot": self.bar.owner, "op": "open"})); cx.notify(); }
     pub fn set_tabs(&mut self, text: &str, cx: &mut Context<Self>) { self.bar.set_tabs(text); cx.notify(); }
+    pub(crate) fn settled(&self, _cx: &App) -> Option<&'static str> {
+        #[cfg(feature = "cef")]
+        if let Some(page) = &self.cef { return page.read(_cx).settled(); }
+        if self.image.is_some() { return Some(if self.status.is_empty() { "ready" } else { "error" }); }
+        open_message(&self.open_error, self.opening_since.elapsed()).map(|_| "error")
+    }
     pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
         #[cfg(feature = "cef")]
         if let Some(c) = &self.cef { let v = visible; c.update(cx, |p, _| p.set_visible(v)); } self.visible.store(visible, Ordering::Relaxed); }

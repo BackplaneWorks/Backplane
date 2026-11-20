@@ -188,6 +188,7 @@ mod tests {
         let l_idle: layout::Layout = serde_json::from_value(v_idle["layout"].clone()).unwrap();
         layout::check_invariants(&l_idle).unwrap();
         assert!(l_idle.is_empty());
+        assert!(v_idle.get("tiled").is_none());
 
         // 1. One page (board)
         let v_one = picture(json!({"@view:t": "board"}));
@@ -195,12 +196,14 @@ mod tests {
         layout::check_invariants(&l_one).unwrap();
         assert_eq!(l_one.tile("t1").unwrap().kind, layout::PageKind::Board);
         assert_eq!(l_one.tile("t1").unwrap().source, "unit.kicad_pcb");
+        assert!(v_one.get("tiled").is_none());
 
         // 2. Split
         let v_split = picture(json!({"@view:t": "split"}));
         let l_split: layout::Layout = serde_json::from_value(v_split["layout"].clone()).unwrap();
         layout::check_invariants(&l_split).unwrap();
         assert_eq!(l_split.tiles().len(), 3);
+        assert!(v_split.get("tiled").is_none());
         let ctx = layout::WatchContext::from_root(&root);
         let mut resolver = layout::VersionSourceMap::new();
         resolver.register(format!("{root}/.git"), root.clone());
@@ -599,6 +602,7 @@ mod tests {
         let vb3 = viewer::viewer_json(&st, &json!({}), &sess_b).unwrap();
         assert_eq!(vb3["layout"]["focus"], "t2");
         assert_eq!(vb3["tiles"].as_object().unwrap().len(), 2);
+        assert_eq!(vb3["tiled"], true);
 
         // Legacy single-tile mode: repeated `view-show files` does NOT close Files
         let sess_files = json!({"sel":"t","rid":1,"drafts":{"@view:t":"files"},"panel":false,"info":{}});

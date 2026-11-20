@@ -4858,3 +4858,16 @@ web.clone.no.folders = No hay carpetas aquí
 gpui.c.kicad.opening = Abriendo el {editor}: {job}… {secs} s
 gpui.c.kicad.openingbare = Abriendo el {editor}… {secs} s
 gpui.c.kicad.openfailed = El {editor} no se abrió
+
+viewer.tile.rail.add = Mayús+clic o clic central para añadir junto al panel activo.
+viewer.tile.add = Añadir al lado
+viewer.tile.maximize = Maximizar panel
+viewer.tile.restore = Restaurar panel
+viewer.tile.focus = Enfocar panel
+viewer.tile.embedded = Vuelve al visor para añadir un panel al lado.
+viewer.tile.simulation.single = Cierra los demás paneles para abrir Simulación en KiCad.
+viewer.tile.add.tip = Añadir al lado…
+viewer.tile.left = Añadir a la izquierda
+viewer.tile.right = Añadir a la derecha
+viewer.tile.top = Añadir arriba
+viewer.tile.bottom = Añadir abajo

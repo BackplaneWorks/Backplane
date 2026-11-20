@@ -79,6 +79,7 @@ fn normalize(v: &Value, root: &str) -> Value {
 /// from a viewer picture so every legacy field is compared in full against `origin/main`.
 fn strip_additive_2a(mut v: Value) -> Value {
     if let Some(o) = v.as_object_mut() {
+        assert!(o.get("tiled").is_none());
         o.remove("layout");
         o.remove("tiles");
         o.remove("showToken");

@@ -396,6 +396,16 @@ pub fn apply_reads(f: &dyn select::Facts, hub: &str, session: &mut Value, reads:
 /// `thread.diff`: null unless Diff is on show; the armed Revert rides with it
 pub fn diff_json(session: &Value, sel: &str) -> Value {
     if !diff_on(session, sel) { return Value::Null }
+    diff_picture(session, sel)
+}
+
+pub fn tile_diff(session: &Value, sel: &str) -> Value {
+    let mut picture = diff_picture(session, sel);
+    picture["ready"] = json!(session["info"].get(&format!("diff:{sel}")).is_some());
+    picture
+}
+
+fn diff_picture(session: &Value, sel: &str) -> Value {
     let mut o = diff_object(info(session, &format!("diff:{sel}")), info(session, &format!("diff.none:{sel}")));
     o["reverting"] = json!(reverting(session, sel));
     o
@@ -408,7 +418,12 @@ fn tab(page: &str, cur: &str) -> Value {
 /// `viewer.review`: null unless the Review tab is on (Rv.json: the pages, the title, the report's Markdown as the timeline's nodes, what to say without one)
 pub fn review_json(session: &Value, sel: &str) -> Value {
     if sel.is_empty() || info(session, &format!("view.kind:{sel}")) != "review" { return Value::Null }
-    let page = match info(session, &format!("view.path:{sel}")) { "" => "bom", p => p };
+    let page = info(session, &format!("view.path:{sel}"));
+    tile_review(session, sel, page)
+}
+
+pub fn tile_review(session: &Value, sel: &str, page: &str) -> Value {
+    let page = if page.is_empty() { "bom" } else { page };
     let report_page = if page == "release" { "checks" } else { page };
     let key = |k: &str| format!("{k}:{sel}:{report_page}");
     let (md_text, err) = (info(session, &key("rp.md")), info(session, &key("rp.err")));
@@ -433,7 +448,11 @@ pub fn review_json(session: &Value, sel: &str) -> Value {
         json!({"gate": gate, "line": info(session, &key("rp.line")), "tasks": rows})
     } else { Value::Null };
     let tabs: Vec<Value> = ["bom", "checks", "comments", "release"].iter().map(|p| tab(p, page)).collect();
-    json!({"tabs": tabs, "title": title, "busy": busy, "note": note, "blocks": blocks, "checks": checks, "release": if page == "release" { json!({"note":"Tag this design and make its fabrication outputs: Gerbers, drill, CPL, BOM, PDFs and STEP, in .backplane/releases.", "blocks": md::nodes_json(&md::render(info(session, &format!("rp.md:{sel}:release"))))}) } else { Value::Null }})
+    let mut picture = json!({"tabs": tabs, "title": title, "busy": busy, "note": note, "blocks": blocks, "checks": checks, "release": if page == "release" { json!({"note":"Tag this design and make its fabrication outputs: Gerbers, drill, CPL, BOM, PDFs and STEP, in .backplane/releases.", "blocks": md::nodes_json(&md::render(info(session, &format!("rp.md:{sel}:release"))))}) } else { Value::Null }});
+    if !err.is_empty() {
+        picture["error"] = json!(err);
+    }
+    picture
 }
 
 #[cfg(test)]
@@ -444,6 +463,17 @@ mod tests {
     const T: &str = "t1700000002-3";
     fn sess() -> Value { json!({"sel": T, "rid": 5, "panel": false, "drafts": {}, "info": {}}) }
     const DIFF: &str = "diff --git a/a.txt b/a.txt\nindex 1..2 100644\n--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,4 @@\n one\n-two\n+2\n three\n+four\ndiff --git a/gone.txt b/gone.txt\ndeleted file mode 100644\nindex 3..0\n--- a/gone.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\n";
+    #[test]
+    fn tile_read_distinguishes_pending_diff_clean_diff_and_report_failure() {
+        let mut session = sess();
+        assert_eq!(tile_diff(&session, T)["ready"], false);
+        session["info"][format!("diff:{T}")] = json!("");
+        assert_eq!(tile_diff(&session, T)["ready"], true);
+        assert!(tile_review(&session, T, "checks").get("error").is_none());
+        session["info"][format!("rp.err:{T}:checks")] = json!("Could not read the report");
+        assert_eq!(tile_review(&session, T, "checks")["error"], "Could not read the report");
+    }
+
     #[test] fn a_unified_diff_is_read_file_by_file_with_numbered_lines() {
         let o = diff_object(DIFF, "");
         assert_eq!(o["summary"], json!("2 files, +2 −2"));

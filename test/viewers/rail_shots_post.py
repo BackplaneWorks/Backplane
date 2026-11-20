@@ -300,6 +300,8 @@ def parse_client_log(log_path: Path) -> dict:
                 "found": bool(ev.get("dispatched")) and bool(ev.get("hit_rect")),
                 "executed": False,
                 "pointer": True,
+                "modifier": ev.get("modifier"),
+                "button": ev.get("button"),
                 "hit_rect": bool(ev.get("hit_rect")),
                 "action": None,
                 "seq": ev_seq,
@@ -365,6 +367,8 @@ def parse_client_log(log_path: Path) -> dict:
                     "rail_drawn_seq": rail_drawn_seq,
                     "probe_rects": probe_rects,
                     "header_controls": {k: v for k, v in controls.items() if k.startswith("pane-tool:") or k == "ui:vs board"},
+                    # the drawn controls of the docking tiles' own headers (`tile:<id>:<verb>`), as measured at this shot (None: no controls measurement at all)
+                    "tile_controls": ({k: {"rect": v.get("rect"), "visible": v.get("visible"), "enabled": v.get("enabled")} for k, v in controls.items() if k.startswith("tile:")} if controls else None),
                     "tiles": list(tiles_current),
                     "splitters": list(splitters_current),
                     "tiles_seq": tiles_seq,
@@ -1271,7 +1275,7 @@ def evaluate_scorecard(
     ))
 
     # Task 4: Compare Gerbers to the board side by side (budget 2)
-    t4_dock = DOCK.evaluate_task4_dock(full_dir, full_parsed, full_caps, full_client_ok, cleared_shots=cleared_shots)
+    t4_dock = DOCK.evaluate_task4_dock(full_dir, full_parsed, full_caps, full_client_ok, cleared_shots=cleared_shots, route="shift")
     if t4_dock is not None:
         tasks.append(make_task(
             4, "Compare Gerbers to the board side by side", 2, t4_dock["presses"], t4_dock["outcome"],
@@ -2239,6 +2243,12 @@ def main(argv: list[str] | None = None) -> int:
 
         kind_embed = embed
         expected = M.expected_shots(kind, embed=kind_embed)
+        if kind == "full":
+            # Inspect docking shots by the same rules as the original manifest.
+            # Older runs of this schema may predate those script steps.
+            dock_steps = DOCK.build_task4_dock_steps() + DOCK.build_task4_dock_steps(route="menu") + DOCK.build_b7_steps()
+            expected.extend(step["shot"] for step in dock_steps
+                            if "shot" in step and step["shot"] in caps and step["shot"] not in expected)
         missing: list[str] = []
         failed_caps: list[str] = []
         obstructions_found: dict[str, list[dict]] = {}
@@ -2385,6 +2395,10 @@ def main(argv: list[str] | None = None) -> int:
     ) if "full" in kinds else []
 
     extra_checks = evaluate_extra_checks(outdir, kinds, parsed, captures_by_kind, embed=embed)
+    if "full" in kinds:
+        menu_route = DOCK.task4_menu_route_check(outdir / "full", parsed.get("full", {}), captures_by_kind.get("full", {}), full_client_ok, cleared_shots=cleared_by_kind.get("full"))
+        if menu_route is not None:
+            extra_checks.append(menu_route)
     if embed and "full" in kinds:
         extra_checks += AUTO.evaluate_auto_gates(
             outdir, {**parsed.get("full", {}), "hub_clients": parse_hub_clients(outdir / "full" / "hub.log")}, captures_by_kind.get("full", {}), parse_auto_actions(outdir / "full"),

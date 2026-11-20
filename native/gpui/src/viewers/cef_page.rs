@@ -36,6 +36,16 @@ impl CefPage {
             host: None, marker: Arc::default(), placed: Default::default(), covered: false, from_page: Vec::new(), lat_native: Arc::new(Mutex::new(-1.0)), want_focus: false, want_yank: false, dispatching: Arc::default(), subs: Vec::new() };
         me
     }
+    pub(super) fn settled(&self) -> Option<&'static str> {
+        let tab = self.tab()?;
+        let state = tab.st.lock().unwrap();
+        if !state.load_error.is_empty() { return Some("error"); }
+        if state.loading || state.url.is_empty() { return None; }
+        let shown = if tab.windowed() {
+            self.placed.get(&(Arc::as_ptr(tab) as usize)).is_some_and(|(rect, handle)| rect.is_some() && *handle != 0)
+        } else { self.image.is_some() };
+        shown.then_some("ready")
+    }
     fn windowed(&self) -> bool { matches!(self.host, Some(Some(_))) }
     /// First render: windowed when the client's window can be Chromium's parent and BACKPLANE_CEF_OSR is not set, else off screen; said in the log.
     fn decide(&mut self, window: &mut Window, cx: &mut Context<Self>) {

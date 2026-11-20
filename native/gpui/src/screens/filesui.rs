@@ -107,7 +107,7 @@ impl FileRow { pub fn down(&self) -> String { self.down.clone() } }
 // ------------------------------------------------------------------ state, events
 
 fn thread_id(this: &Backplane) -> String { let t = this.data["thread"]["id"].as_str().unwrap_or(""); t.rsplit_once('|').map_or(t, |(_, i)| i).to_string() }
-fn rows_now(this: &Backplane) -> (Vec<FileRow>, String) { let f = &this.data["thread"]["viewer"]["files"]; (viewer::file_rows(f), cur_dir(f)) }
+fn rows_now(this: &Backplane) -> (Vec<FileRow>, String) { let f = super::tile_pages::focused_files(&this.data["thread"]); (viewer::file_rows(f), cur_dir(f)) }
 fn filter_text(this: &Backplane, cx: &App) -> String { this.screens.files.filter.as_ref().map_or(String::new(), |f| f.read(cx).content.to_string()) }
 
 /// Called each frame (glue.rs): make the fields once, reset on a new folder, start the fetch a preview needs.
@@ -123,7 +123,7 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let viewer = &this.data["thread"]["viewer"];
     let open = viewer["open"].as_str().unwrap_or("").to_string();
     if open == "files" {
-        let dir = cur_dir(&viewer["files"]);
+        let dir = cur_dir(super::tile_pages::focused_files(&this.data["thread"]));
         if dir != this.screens.files.dir { this.screens.files.dir = dir; this.screens.files.sel = None; this.screens.files.menu = None; this.screens.files.mode = Mode::Browse;
             if let Some(f) = this.screens.files.filter.clone() { f.update(cx, |i, cx| i.set(String::new(), cx)); } }
     }
@@ -230,7 +230,7 @@ pub fn act(this: &mut Backplane, d: Do, window: Option<&mut Window>, cx: &mut Co
         Do::Up => { let _ = this.tx.try_send(Command::Action("fm-up".into(), String::new())); }
         Do::Back => { let _ = this.tx.try_send(Command::Action("fm".into(), String::new())); }
         Do::Download(i) => if let Some(r) = row(i) { download(this, r.down(), r.label.clone(), r.kind == "folder", cx) },
-        Do::DownloadDir => { let url = this.data["thread"]["viewer"]["files"]["zip"].as_str().unwrap_or("").to_string(); let n = this.data["thread"]["viewer"]["files"]["zipName"].as_str().unwrap_or("project.zip").to_string(); download(this, url, n, true, cx) }
+        Do::DownloadDir => { let f = super::tile_pages::focused_files(&this.data["thread"]); let url = f["zip"].as_str().unwrap_or("").to_string(); let n = f["zipName"].as_str().unwrap_or("project.zip").to_string(); download(this, url, n, true, cx) }
         Do::Rename(i) => if let Some(r) = row(i) { this.screens.files.mode = Mode::Rename(r.value.clone()); if let Some(n) = this.screens.files.name.clone() { n.update(cx, |x, cx| x.set(r.label.clone(), cx)); if let Some(w) = window { w.focus(&n.read(cx).focus_handle(cx)); } } },
         Do::NewFolder => { this.screens.files.mode = Mode::NewFolder; if let Some(n) = this.screens.files.name.clone() { n.update(cx, |x, cx| x.set(String::new(), cx)); if let Some(w) = window { w.focus(&n.read(cx).focus_handle(cx)); } } }
         Do::Delete(i) => if let Some(r) = row(i) { this.screens.files.mode = Mode::Delete(r.value.clone()) },
@@ -307,13 +307,13 @@ fn small_btn(cx: &mut Context<Backplane>, light: bool, id: &str, icon: &'static 
 
 /// `actions`: the viewer pane's own controls (screens::viewer), at the end of the page's bar.
 pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &FilesUi, actions: super::pane_header::Header) -> AnyElement {
-    let c = |n: &str| theme::color(light, n);
-    let rows = viewer::file_rows(files);
-    let q = ui.filter.as_ref().map(|f| f.read(cx).content.to_string()).unwrap_or_default();
-    let vis = visible(&rows, &q);
+    let bar = super::pane_header::pane_header(light, actions.identity, files_tools(cx, files), actions.controls);
+    files_body(cx, light, files, ui, Some(bar))
+}
+
+pub(super) fn files_tools(cx: &Context<Backplane>, files: &Value) -> Vec<super::pane_header::Tool> {
+    use super::pane_header::{Press, button, command};
     let trail = viewer::crumbs(files);
-    let focus = ui.focus.clone();
-    use super::pane_header::{Press, button, command, pane_header};
     let mut up = button(cx, "fm-up", trs("Up"), Press::File(Do::Up));
     up.enabled = trail.len() > 1;
     up.icon = Some("arrow-up");
@@ -337,7 +337,16 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
         tool.icon = Some("folder");
         tools.push(tool);
     }
-    let bar = pane_header(light, actions.identity, tools, actions.controls);
+    tools
+}
+
+pub(super) fn files_body(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &FilesUi, bar: Option<AnyElement>) -> AnyElement {
+    let standalone = bar.is_some();
+    let c = |n: &str| theme::color(light, n);
+    let rows = viewer::file_rows(files);
+    let q = ui.filter.as_ref().map(|f| f.read(cx).content.to_string()).unwrap_or_default();
+    let vis = visible(&rows, &q);
+    let focus = ui.focus.clone();
     let mut col = div().size_full().flex().flex_col().relative();
     if let Some(f) = focus.clone() { col = col.track_focus(&f); }
     col = col.key_context("FilesPage").on_key_down(cx.listener(|this, e: &KeyDownEvent, w, cx| {
@@ -348,7 +357,7 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
         let key = if (m.control || m.platform) && k == "f" { "find".to_string() } else if m.control || m.alt || m.platform { return } else { k.to_string() };
         act(this, Do::Key(key), Some(w), cx);
     }));
-    col = col.child(bar);
+    col = col.children(bar);
     // filter + status line
     let filt = div().flex().items_center().gap_2().px_3().py_1().border_b_1().border_color(c("line")).child(crate::art::icon("search", 13., c("dim")))
         .child(div().flex_1().min_w_0().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).children(ui.filter.clone()))
@@ -386,7 +395,7 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
     if rows.len() > MAX_ROWS { list = list.child(div().px_3().py_1().text_color(c("dim")).child(tf("gpui.b.files.more", &[("n", (rows.len() - MAX_ROWS).into())]))); }
     if vis.is_empty() { list = list.child(div().px_3().py_2().text_color(c("dim")).child(if files["ready"] == false { trs("Loading…") } else if !files["error"].as_str().unwrap_or("").is_empty() { trs(files["error"].as_str().unwrap_or("")) } else if rows.is_empty() { trs("Empty folder. Drop files here to upload.") } else { trs("Nothing matches") })); }
     list = list.on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| { this.m("files_drop", json!({"paths": paths.paths().iter().map(|p| p.display().to_string()).collect::<Vec<_>>()})); act(this, Do::Upload(paths.paths().to_vec()), None, cx) }));
-    col = col.child(super::viewer::main_body(list));
+    col = col.child(if standalone { super::viewer::main_body(list) } else { list });
     if let Some((i, pos)) = ui.menu {
         if let Some(r) = vis.get(i).and_then(|&k| rows.get(k)) {
             let items = menu_items(r);

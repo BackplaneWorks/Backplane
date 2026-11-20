@@ -8,7 +8,7 @@ use serde_json::Value;
 #[derive(Default)]
 pub(crate) struct RailRow<'a> {
     pub id: &'a str, pub label: &'a str, icon: &'a str, group: &'a str, pub key: &'a str,
-    pub state: &'a str, why: &'a str,
+    pub state: &'a str, why: &'a str, present: bool,
 }
 
 pub(crate) fn rail_rows(viewer: &Value, simulation: bool) -> Vec<RailRow<'_>> {
@@ -16,7 +16,7 @@ pub(crate) fn rail_rows(viewer: &Value, simulation: bool) -> Vec<RailRow<'_>> {
         return rows.iter().filter(|r| simulation || r["id"] != "simulation").map(|row| {
             let field = |name: &str| row[name].as_str().unwrap_or("");
             RailRow { id: field("id"), label: field("label"), icon: field("icon"), group: field("group"),
-                key: field("key"), state: field("state"), why: field("why") }
+                key: field("key"), state: field("state"), why: field("why"), present: row["present"] == true }
         }).collect();
     }
     // Older hubs send choices and simFrame. Keep their existing rail and grouping.
@@ -741,11 +741,16 @@ impl Backplane {
         let update = if self.screens.kicad.is_some() { crate::screens::kicad_update::view(self, cx) } else { None };
         self.screens.plots[0].loading.begin_frame(self.data["thread"]["id"].as_str().unwrap_or(""));
         let review_panel = crate::screens::mgmt::review_panel(self, cx);
-        let thread = &self.data["thread"];
-        let editor = self.kicad_for(thread, cx);
-        let solid = self.screens.active_solid().cloned();
-        let (pv, split) = self.screens.plots.views();
-        let el = crate::screens::viewer::page(cx, &reg, light, &self.screens.files, &self.screens.images, self.screens.attacher.target.as_ref(), thread, &self.screens.plot, pv, split, solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b), editor.as_ref(), update, review_panel, &self.screens.mgmt.checks);
+        let docked = crate::screens::viewer::is_tiled(&self.data["thread"]["viewer"]);
+        let el = if docked {
+            crate::screens::tiles::page(self, cx, light, review_panel)
+        } else {
+            let thread = &self.data["thread"];
+            let editor = self.kicad_for(thread, cx);
+            let solid = self.screens.active_solid().cloned();
+            let (pv, split) = self.screens.plots.views();
+            crate::screens::viewer::page(cx, &reg, light, &self.screens.files, &self.screens.images, self.screens.attacher.target.as_ref(), thread, &self.screens.plot, pv, split, solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b), editor.as_ref(), update, review_panel, &self.screens.mgmt.checks, &self.screens.tile_menu)
+        };
         { let rows = &self.data["thread"]["entries"]; reg.borrow_mut().resolve_by(|id| rows.as_array().and_then(|r| r.iter().position(|e| e["id"].as_str() == Some(id)))); }
         // full screen: the editor alone, without the management panels' strip under it
         let el = if crate::screens::viewer::KICAD_SCREEN.load(std::sync::atomic::Ordering::Relaxed) { el }
@@ -805,9 +810,15 @@ impl Render for Backplane {
         for page in self.screens.retired_solids.drain(..) { page.update(cx, |p, _| p.release(window)); }
         let back = self.local.viewer_backdrop(self.light()); back.make_current();
         if let Some(s) = self.screens.active_solid().cloned() { let (part, split) = (crate::screens::plotview::probed_part(self), self.data["thread"]["viewer"]["open"] == "split"); s.update(cx, |p, _| { p.set_backdrop(back); p.set_probe(&part); p.names_probe = !split; }); }
+        if crate::screens::viewer::is_tiled(&self.data["thread"]["viewer"]) {
+            let part = crate::screens::plotview::probed_part(self);
+            for page in self.screens.tile_solids() {
+                page.update(cx, |p, _| { p.set_backdrop(back); p.set_probe(&part); p.collect(window); });
+            }
+        }
         for (slot, page) in &self.screens.solids {
             if page.read(cx).atlas_images() > 0 {
-                let shown = self.screens.solid_slot.as_ref().is_some_and(|active| active == slot)
+                let shown = self.screens.plots.watches(slot) || self.screens.solid_slot.as_ref().is_some_and(|active| active == slot)
                     && crate::screens::viewer::shows_solid(&self.data["thread"]);
                 page.update(cx, |p, _| { if !shown { p.put_away(); } p.collect(window); });
             }
@@ -844,16 +855,17 @@ impl Render for Backplane {
         if crate::screens::viewer::fit(win_w, self.local.sidebar_px as f32, self.sidebar_open, false, viewer_open).0 { self.screens.side_force = false; } // room again: "anyway" is over
         let (side_shown, thread_least, pane_least, share) = crate::screens::viewer::fit(win_w, self.local.sidebar_px as f32, self.sidebar_open, self.screens.side_force, viewer_open);
         // the embedded editor at full size: the sidebar folds and the thread gives all its room (screens/viewer.rs pane)
-        let kedit = viewer_open && self.screens.kicad.is_some() && self.screens.kicad_window.is_none() && matches!(thread["viewer"]["open"].as_str(), Some("board" | "schematic" | "3d"));
+        let docked = crate::screens::viewer::is_tiled(&thread["viewer"]);
+        let kedit = !docked && viewer_open && self.screens.kicad.is_some() && self.screens.kicad_window.is_none() && matches!(thread["viewer"]["open"].as_str(), Some("board" | "schematic" | "3d"));
         // full screen: the editor and its strip are the whole window (no top bar, sidebar, thread, rail or pane bar)
         if !kedit { self.screens.kicad_screen = false; } // the editor left the pane: the next Edit starts in the pane, not over the window
         let kscreen = self.screens.kicad_screen && kedit;
-        let kfull = kscreen || (self.screens.kicad_full && viewer_open && self.screens.kicad.is_some() && matches!(thread["viewer"]["open"].as_str(), Some("board" | "schematic" | "3d")));
+        let kfull = kscreen || (!docked && self.screens.kicad_full && viewer_open && self.screens.kicad.is_some() && matches!(thread["viewer"]["open"].as_str(), Some("board" | "schematic" | "3d")));
         crate::screens::viewer::KICAD_SCREEN.store(kscreen, std::sync::atomic::Ordering::Relaxed);
         // whether the page holds the embedded editor this frame (popped out: its own window does), from this frame's state: macOS hides
         // KiCad's frame by it when the pane is not drawn (#1199: the viewer closed, the PCB Editor stayed on screen)
         if let Some(p) = self.screens.kicad.clone() {
-            let in_page = self.screens.kicad_window.is_some() || (self.kicad_for(thread, cx).is_some() && crate::screens::viewer::holds_editor(thread));
+            let in_page = self.screens.kicad_window.is_some() || (!docked && self.kicad_for(thread, cx).is_some() && crate::screens::viewer::holds_editor(thread));
             if p.read(cx).in_page != in_page { p.update(cx, |p, _| p.in_page = in_page); }
         }
         // Follow agent in KiCad: the hub learns whether this thread's page holds KiCad and which frame it shows (viewer.state, on change)
@@ -964,6 +976,8 @@ impl Render for Backplane {
         let active_kind = if thread["diff"].is_object() { "diff".to_owned() } else { crate::screens::viewer::active_kind(&thread["viewer"], self.screens.rail_pending.as_deref()) };
         // the rail's Simulation entry (the hub's word, in a window that can hold KiCad)
         let can_embed = crate::viewers::kicad_pane::local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), thread);
+        let dock_editor_active = self.dock_editor_active(thread, can_embed, cx);
+        self.screens.palette.editor_active = dock_editor_active;
         let sim_rail = crate::viewers::kicad_pane::rail_simulation(&thread["viewer"], can_embed).is_some();
         let rows = rail_rows(&thread["viewer"], sim_rail);
         // when the local embedded KiCad pane is on show in this thread, light the rail from its wanted frame (`KicadPane::tab()`,
@@ -1009,7 +1023,7 @@ impl Render for Backplane {
             let icon_resolved = art::icon_name(row.icon);
             let mut button = with_rect(div().id(SharedString::from(format!("rail-{}", row.label))), || format!("rail:{}", row.label))
                 .relative().flex().flex_col().items_center().h(crate::scale::tpx(48.)).flex_shrink_0().justify_center().gap_1().text_size(px(label_size))
-                .border_l_2().border_color(gpui::transparent_black())
+                .border_l_2().border_color(if row.present { gpui::Rgba { a: 0.6, ..c("accent") } } else { gpui::transparent_black().into() })
                 .when(active, |d| d.bg(c("raise")).border_color(c("accent")))
                 .text_color(c(if active { "text" } else if disabled { "rail-disabled" } else { "dim" }))
                 .child(ic(light, icon_resolved.unwrap_or("folder"), 18., if active { "accent" } else if disabled { "rail-disabled-icon" } else { "dim" })).child(div().max_w_full().when(ellipsis, |d| d.whitespace_nowrap().overflow_hidden().text_ellipsis()).child(label));
@@ -1036,15 +1050,29 @@ impl Render for Backplane {
                         key: letter.into(), keycap_drawn: cap_drawn, keycap_eligible: letter.chars().count() == 1,
                     });
                 }
+                let layout = &thread["viewer"]["layout"];
+                let add_beside = !is_tool && id != "split" && layout["focus"].is_string()
+                    && !dock_editor_active;
+                let mut tooltip = crate::keys::tip_text(&trs(row.label), &hint);
+                if add_beside {
+                    tooltip.push('\n');
+                    tooltip.push_str(&crate::i18n::t("viewer.tile.rail.add"));
+                    let kind = id.to_owned();
+                    button = button.on_mouse_up(MouseButton::Middle, cx.listener(move |this, _, _, cx| {
+                        crate::screens::tile_menu::rail_add(this, &kind, cx);
+                        cx.stop_propagation();
+                    }));
+                }
                 button = button.cursor_pointer().hover(|s| s.bg(c("raise")).text_color(c("text")))
-                    .tooltip(crate::keys::tip(row.label, &hint, light)).children(cap_el);
+                    .tooltip(crate::keys::tip_raw(&tooltip, "", light)).children(cap_el);
                 let action = match id {
                     "terminal" => Ctl::ToggleTerminal, "commands" => Ctl::OpenPalette, "simulation" => Ctl::KicadAct("simulation".into()),
                     "diff" => Ctl::Node("diff".into(), "".into()), _ => Ctl::Rail(id.into()),
                 };
                 ctl.push(CtlEntry { id: format!("rail:{}", row.label), label: row.label.into(), ctl: action });
                 let id = id.to_owned();
-                button = button.on_click(cx.listener(move |this, _, window, cx| match id.as_str() {
+                button = button.on_click(cx.listener(move |this, event: &ClickEvent, window, cx| match id.as_str() {
+                    kind if add_beside && event.modifiers().shift => crate::screens::tile_menu::rail_add(this, kind, cx),
                     "terminal" => this.term_toggle(window, cx), "commands" => this.palette_open(cx),
                     "simulation" => this.open_simulation(cx), "diff" => this.rail_press("diff", "", cx),
                     kind => this.rail_press("view-kind", kind, cx),
@@ -1410,10 +1438,11 @@ mod tests {
     #[test]
     fn rail_rows_follow_hub_order_content_and_empty_list() {
         let viewer = json!({"rail":[
-            {"id":"files","label":"Project files","icon":"folder","group":"work","state":"on","key":"f"},
+            {"id":"files","label":"Project files","icon":"folder","group":"work","state":"on","key":"f","present":true},
             {"id":"board","label":"Board","icon":"cpu","group":"design","state":"disabled","key":"b","why":"No board"}]});
         let rows = rail_rows(&viewer, false);
         assert_eq!(rows.len(), 2);
+        assert!(rows[0].present && !rows[1].present);
         assert_eq!((rows[0].id, rows[0].label, rows[0].state), ("files", "Project files", "on"));
         assert_eq!((rows[1].icon, rows[1].group, rows[1].key, rows[1].state, rows[1].why), ("cpu", "design", "b", "disabled", "No board"));
         assert!(rail_rows(&json!({"rail":[]}), true).is_empty());
