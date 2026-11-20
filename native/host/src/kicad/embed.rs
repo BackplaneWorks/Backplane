@@ -261,8 +261,6 @@ impl Session {
     }
     /// A close that did not happen (KiCad refused it, or at the bound it was not clean any more or in use): live again, its close
     /// forgotten, and its idle time counted from now (not chosen again at the next tick).
-    /// The previous KiCad waited on (`old`) is gone: forgotten, unless the session has since kept another one.
-    pub fn waited_gone(&mut self, old: u32) { if self.last_pid == old { self.last_pid = 0; } }
     pub fn live_again(&mut self, now: u64) { self.closing = false; self.stop_reason.clear(); self.touched_at = now; }
     pub fn detached(mut self, now: u64) -> Self {
         self.container = 0; self.left.clear(); self.touched_at = now; self
@@ -333,6 +331,8 @@ impl Session {
             "autosaves": if self.state == CLOSED { json!(self.autosaves()) } else { json!([]) },
             // the hub is closing this KiCad and its process has not ended (closing_not_reused): a pane on it lets it go
             "closing": closing_not_reused(self),
+            // held "starting" while the project's previous KiCad ends (HELD_REASON): the pane says KiCad is closing, not a hung start
+            "waits_previous": self.state == "starting" && self.reason == HELD_REASON,
             "agent_unsaved": json!(agent_unsaved(&self.pro).iter().map(|d| Path::new(d).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect::<Vec<_>>()),
             "dialogs": self.dialogs,
             "notices": self.notices,
@@ -1568,18 +1568,27 @@ fn put_route(s: &Session, tx: &mpsc::UnboundedSender<Msg>) {
 pub const CHECKS_CLIENT: &str = "hub:checks";
 /// Per GUI socket: the requests in flight from other clients than the checks, and when the last named client's began or ended (ms).
 fn gui_use() -> &'static Mutex<HashMap<String, (u32, u64)>> { static U: OnceLock<Mutex<HashMap<String, (u32, u64)>>> = OnceLock::new(); U.get_or_init(Default::default) }
-/// Attaches held until the project's previous KiCad is gone (#1470 review): what the pane said meanwhile is not lost. A leave that came
-/// for a session that is not live yet is applied once the held attach has run; a detach cancels the held attach (the pane let it go).
-#[derive(Default, Debug)]
-pub struct Deferred { held: HashMap<String, (Option<String>, bool)> }
-impl Deferred {
-    pub fn begin(&mut self, pro: &str) { self.held.entry(pro.to_string()).or_insert((None, false)); }
-    pub fn holds(&self, pro: &str) -> bool { self.held.contains_key(pro) }
-    /// a leave (`Some(why)`) or back (`None`) meanwhile: kept, the last one wins; false when nothing is held
-    pub fn on_leave(&mut self, pro: &str, left: Option<String>) -> bool { match self.held.get_mut(pro) { Some(h) => { h.0 = left; true } None => false } }
-    pub fn on_detach(&mut self, pro: &str) -> bool { match self.held.get_mut(pro) { Some(h) => { h.1 = true; h.0 = None; true } None => false } }
-    /// the held attach ends: (a leave to apply, whether a detach cancelled it)
-    pub fn end(&mut self, pro: &str) -> (Option<String>, bool) { self.held.remove(pro).unwrap_or((None, false)) }
+/// The reason of a session held "starting" while the project's previous KiCad ends (`attach`): every attach, leave and detach in that
+/// time acts on it as on any starting session, and the one real start reads it when the previous KiCad is gone (Msg::StartHeld).
+pub const HELD_REASON: &str = "waiting for the KiCad before it";
+/// How long a held start waits for the previous KiCad to end. It never kills it: that KiCad may be finishing a save (Local History after
+/// a CM_SAVE answer) or asking the person something; a close's own path ends a hang. Past it the held session fails, saying so.
+pub const HELD_WAIT: Duration = Duration::from_secs(15);
+/// The session a start is held as while the project's previous KiCad (`prev.last_pid`) ends: "starting" under generation `gen`, with
+/// the attach's pane. It is live, so a later attach joins it (attach's starting branch) and never holds a second start.
+pub fn held_session(prev: &Session, gen: u64, now: u64, root: &str, frame: &str, container: u64, toplevel: u64, display: &str, pane_cid: &str) -> Session {
+    let mut ph = Session::new(&prev.pro, root, if prev.mode.is_empty() { "fork" } else { &prev.mode }, frame, gen, now);
+    ph.reason = HELD_REASON.into(); ph.last_pid = prev.last_pid;
+    ph.container = container; ph.toplevel = toplevel; ph.display = display.into(); ph.pane_cid = pane_cid.into();
+    ph
+}
+/// Whether `s` is still the start held under generation `gen` (not failed, closed, started or held again since).
+pub fn is_held(s: &Session, gen: u64) -> bool { s.gen == gen && s.state == "starting" && s.reason == HELD_REASON }
+/// Waits up to `limit` for the process `old` to end; true once it has. Nothing is killed.
+pub async fn held_wait(old: u32, limit: Duration) -> bool {
+    let end = tokio::time::Instant::now() + limit;
+    while tokio::time::Instant::now() < end && crate::plat::proc::group_alive(old) { tokio::time::sleep(Duration::from_millis(50)).await; }
+    !crate::plat::proc::group_alive(old)
 }
 /// The project's previous KiCad, when its process is still there (`alive`): its session stopped (a close's answer) before it ended. A
 /// fresh start waits for it to be gone.
@@ -1842,11 +1851,8 @@ enum Msg {
         container: u64, toplevel: u64, display: String, wait: bool, env: Env,
         reply: oneshot::Sender<Result<Value, String>>,
     },
-    /// an attach whose project's previous KiCad was still there, once it is gone (or would not go: `waited`)
-    AttachAfterGone {
-        client: u64, pro: String, root: String, files: Files, frame: String, container: u64, toplevel: u64, display: String, wait: bool, env: Env,
-        old: u32, waited: String, reply: oneshot::Sender<Result<Value, String>>,
-    },
+    /// a start held for the project's previous KiCad (`HELD_REASON`, generation `gen`): `old` is gone, or still there at HELD_WAIT
+    StartHeld { pro: String, gen: u64, old: u32, gone: bool },
     /// #1345 `editor.kicad.leave`: the holder's pane left the screen (`left`, with `why`) or came back
     Leave { client: u64, pro: String, left: bool, why: String, reply: oneshot::Sender<Result<Value, String>> },
     Show {
@@ -1937,8 +1943,6 @@ struct Actor {
     /// after there was one: the app closed, so its KiCads close too (APP_GONE_S)
     users: HashSet<u64>,
     users_gone: Option<u64>,
-    /// attaches held until the project's previous KiCad is gone (`Deferred`): a leave or a detach that comes meanwhile is kept for it
-    deferred: Deferred,
 }
 
 /// Whether a failed start is tried once more by itself: only a missed start window (KiCad ran but its socket or its first answer came after
@@ -2162,6 +2166,13 @@ impl Actor {
         }
     }
 
+    /// The mode a start of `env`'s KiCad runs in (fork or stock), its API description and what describing the CLI said.
+    fn start_mode(&self, env: &Env) -> (&'static str, String, Option<Value>) {
+        let (desc, has_embed_schema) = discover_desc(&self.hub.cfg.home, env);
+        let override_mode = std::env::var("BACKPLANE_KICAD_EMBED_MODE").ok();
+        let described = if override_mode.is_none() && !has_embed_schema && env.version.is_empty() { describe_cli(&env.cli) } else { None };
+        (mode_with(override_mode.as_deref(), env, has_embed_schema, described.as_ref()), desc, described)
+    }
     fn attach(&mut self, client: u64, pro: String, root: String, files: Files, frame: String, container: u64, toplevel: u64, display: String, wait: bool, env: Env, reply: oneshot::Sender<Result<Value, String>>) {
         let now = ipc::now_s();
         // its KiCad is closing and not gone yet: never attached to it (closing_not_reused); the client attaches again once it has stopped
@@ -2263,15 +2274,22 @@ impl Actor {
         }
 
         // the project's previous KiCad still there (its session stopped as its Close answered, its process not gone yet): never a second
-        // beside it, into its lock. Waited for, with restart's kill if it stays (gone_before_retry), then this attach again
-        if let Some(old) = self.sessions.get(&pro).and_then(|s| previous_alive(s, crate::plat::proc::group_alive)) {
-            eprintln!("kicad embed: {pro}: its previous KiCad (pid {old}) is still there: the next starts once it is gone");
-            self.deferred.begin(&pro);
+        // beside it, into its lock. The session is held "starting" (HELD_REASON) under a new generation at once: every later attach (a
+        // warm-up, the pane's Edit, a re-attach) joins it as any starting session, a leave or a detach acts on it as on any session, and
+        // the one real start reads it once the previous KiCad has ended (Msg::StartHeld); never killed from here (HELD_WAIT)
+        if let Some(prev) = self.sessions.get(&pro).filter(|s| previous_alive(s, crate::plat::proc::group_alive).is_some()).cloned() {
+            let old = prev.last_pid;
+            self.next_gen += 1;
+            let g = self.next_gen;
+            let mut ph = held_session(&prev, g, now, &root, &frame, container, toplevel, &display, &pane_cid);
+            ph.mode = self.start_mode(&env).0.into(); // the mode the start will run in (the runtime may have changed since)
+            eprintln!("kicad embed: {pro}: its previous KiCad (pid {old}) is still there: held (generation {g}) until it is gone");
+            self.start_env.insert(pro.clone(), env);
+            self.sessions.insert(pro.clone(), ph.clone());
+            if wait { self.publish(&ph, Some(client)); self.attach_waiters.entry(pro.clone()).or_default().push((client, reply)); }
+            else { let out = ph.info_json(); self.publish_and_reply(&ph, Some(client), reply, Ok(out)); }
             let me = self.me.clone();
-            tokio::spawn(async move {
-                let waited = gone_before_retry(old, &root, &pro, RETRY_TERM_WAIT, RETRY_KILL_WAIT).await;
-                let _ = me.send(Msg::AttachAfterGone { client, pro, root, files, frame, container, toplevel, display, wait, env, old, waited, reply });
-            });
+            tokio::spawn(async move { let gone = held_wait(old, HELD_WAIT).await; let _ = me.send(Msg::StartHeld { pro, gen: g, old, gone }); });
             return;
         }
         let sweep_locks = self.sessions.get(&pro).is_some_and(|s| s.state == "failed" || s.state == CLOSED || s.reason == "restarting");
@@ -2291,14 +2309,7 @@ impl Actor {
                 .and_then(|root| super::hostlibs::gui_program(root, &self.hub.cfg.home.join("kicad-embed-cache").join("hostlibs"))).unwrap_or(b).to_string_lossy().to_string(),
             Err(why) => { let _ = reply.send(Err(why)); return; }
         };
-        let (desc, has_embed_schema) = discover_desc(&self.hub.cfg.home, &env);
-        let override_mode = std::env::var("BACKPLANE_KICAD_EMBED_MODE").ok();
-        let described = if override_mode.is_none() && !has_embed_schema && env.version.is_empty() {
-            describe_cli(&env.cli)
-        } else {
-            None
-        };
-        let mode = mode_with(override_mode.as_deref(), &env, has_embed_schema, described.as_ref());
+        let (mode, desc, described) = self.start_mode(&env);
         // Backplane KiCad reads the person's own KiCad settings (`<config>/kicad/10.99`): its wheel zooms at the pointer (set once; a copy
         // of the log writes nothing of the person's)
         // (not while another KiCad of ours is up: it would write its own settings back over this when it closes)
@@ -2491,8 +2502,6 @@ impl Actor {
     }
 
     fn detach(&mut self, client: u64, pro: String, keep: bool, reply: oneshot::Sender<Result<Value, String>>) {
-        // an attach held for the previous KiCad's end: the pane let it go, so it is not started
-        if !self.sessions.get(&pro).is_some_and(|s| s.is_live()) && self.deferred.on_detach(&pro) { let _ = reply.send(Ok(json!({"detached": true, "held": true}))); return }
         let Some(s) = self.sessions.get_mut(&pro) else {
             let _ = reply.send(Ok(json!({"detached":true}))); return;
         };
@@ -2532,9 +2541,6 @@ impl Actor {
     /// back within the idle time it is the same process. Only the holder's word counts (`leave_counts`); nothing is asked of KiCad, and
     /// the keyboard and the frames are not touched. The clock starts at the leave (once: a leave on a left session changes nothing).
     fn leave(&mut self, client: u64, pro: String, left: bool, why: String, reply: oneshot::Sender<Result<Value, String>>) {
-        if !self.sessions.get(&pro).is_some_and(|s| s.is_live()) && self.deferred.on_leave(&pro, left.then(|| if why.is_empty() { "away".to_string() } else { why.clone() })) {
-            let _ = reply.send(Ok(json!({"left": left, "held": true}))); return // the start it waits on takes it
-        }
         let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.is_live()) else { let _ = reply.send(Ok(json!({"left": false, "why": "no KiCad"}))); return };
         let holder = leave_counts(&s.pane_cid, client_cid(client).as_deref());
         match s.leave(holder, left, &why, ipc::now_s()) {
@@ -2704,25 +2710,31 @@ impl Actor {
             }
             Msg::Detach { client, pro, keep, reply } => self.detach(client, pro, keep, reply),
             Msg::Leave { client, pro, left, why, reply } => self.leave(client, pro, left, why, reply),
-            Msg::AttachAfterGone { client, pro, root, files, frame, container, toplevel, display, wait, env, old, waited, reply } => {
-                let (left, detached) = self.deferred.end(&pro);
-                if waited.starts_with("was still there") {
-                    let why = format!("the KiCad before it would not close ({waited})");
-                    eprintln!("kicad embed: {pro}: {why}; not starting another");
-                    let _ = reply.send(Err(why)); return
+            Msg::StartHeld { pro, gen, old, gone } => {
+                // the held session as it is now (whatever joined, left or detached it meanwhile); a newer generation, or a session that is
+                // not held any more (failed, closed, already started), is not this start's
+                let Some(ph) = self.sessions.get(&pro).filter(|s| is_held(s, gen)).cloned() else { return };
+                if !gone {
+                    let why = format!("the KiCad before it is still closing (pid {old}, {} s): it was not ended, as it may be saving or asking; try again once it has closed", HELD_WAIT.as_secs());
+                    eprintln!("kicad embed: {pro}: {why}");
+                    if let Some(s) = self.sessions.get_mut(&pro) { *s = s.clone().failed(&why); s.last_pid = old; let snap = s.clone(); self.publish(&snap, None); }
+                    self.finish_attach_waiters(&pro, Err(why));
+                    return
                 }
-                // only the process waited on is known gone (a later stop may have kept another)
-                if let Some(s) = self.sessions.get_mut(&pro) { s.waited_gone(old); }
-                if detached {
-                    eprintln!("kicad embed: {pro}: the KiCad before {waited}; the pane let it go meanwhile (a detach): not started");
-                    let _ = reply.send(Ok(json!({"detached": true}))); return
-                }
-                eprintln!("kicad embed: {pro}: the KiCad before {waited}; starting the next");
-                self.attach(client, pro.clone(), root, files, frame, container, toplevel, display, wait, env, reply);
-                // a leave the pane said meanwhile: the new KiCad starts out of the pane, as it would have been
-                if let (Some(why), Some(s)) = (left, self.sessions.get_mut(&pro)) {
-                    eprintln!("kicad embed: {pro}: left the pane ({why}) while its start waited: kept");
-                    s.left = why; s.touched_at = ipc::now_s();
+                eprintln!("kicad embed: {pro}: the KiCad before it (pid {old}) has ended: starting the held generation {gen}");
+                let Some(env) = self.start_env.get(&pro).cloned() else { return };
+                // the one real start, from the held session's fields: its waiters are finished when KiCad is ready, as any start's
+                let client = rt().lock().unwrap().client_of.get(&ph.pane_cid).copied().unwrap_or(0);
+                self.sessions.remove(&pro);
+                let (tx, _rx) = oneshot::channel();
+                let files = project::read(&ph.root);
+                self.attach(client, pro.clone(), ph.root.clone(), files, ph.active.clone(), ph.container, ph.toplevel, ph.display.clone(), true, env, tx);
+                if let Some(s) = self.sessions.get_mut(&pro) {
+                    // what the pane said while it was held: its holder, and out of the pane if it left
+                    if !ph.pane_cid.is_empty() { s.pane_cid = ph.pane_cid.clone(); }
+                    s.parked = ph.parked; // a View that kept its container meanwhile
+                    if !ph.left.is_empty() { eprintln!("kicad embed: {pro}: left the pane ({}) while its start was held: kept", ph.left); s.left = ph.left.clone(); s.touched_at = ipc::now_s(); }
+                    let snap = s.clone(); self.publish(&snap, None);
                 }
             }
             Msg::Warm { client, pro, root, files, frame, display, hardware, locked, env, reply } => {
@@ -4191,7 +4203,7 @@ pub fn start(hub: &Arc<Hub>) {
     let mut a = Actor {
         hub: hub.clone(), me: tx.clone(), info_tx, helper: None, hgen: 0, next_id: 0, next_gen: 0,
         pend: HashMap::new(), sessions: HashMap::new(), attach_waiters: HashMap::new(), start_env: HashMap::new(), start_retried: Default::default(), lock_waits: HashMap::new(),
-        users: HashSet::new(), users_gone: None, deferred: Deferred::default(),
+        users: HashSet::new(), users_gone: None,
     };
     tokio::spawn(async move { while let Some(m) = rx.recv().await { a.handle(m) } });
     let tick = tx.clone();
@@ -5677,24 +5689,42 @@ mod tests {
         let live = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0).spawned(pid);
         assert_eq!(previous_alive(&live, |_| true), None, "a live session is attached to, not waited on");
     }
-    #[test] fn a_leave_or_a_detach_while_a_start_waits_on_the_previous_kicad_is_kept_for_it() {
-        let mut d = Deferred::default();
-        assert!(!d.on_leave("/p/a", Some("thread".into())), "nothing held: the leave goes its usual way");
-        d.begin("/p/a"); assert!(d.holds("/p/a"));
-        assert!(d.on_leave("/p/a", Some("thread".into())));
-        assert_eq!(d.end("/p/a"), (Some("thread".to_string()), false), "the held start applies the leave");
-        d.begin("/p/a"); d.on_leave("/p/a", Some("thread".into())); d.on_leave("/p/a", None);
-        assert_eq!(d.end("/p/a"), (None, false), "back again meanwhile: no leave");
-        d.begin("/p/a"); d.on_leave("/p/a", Some("viewer".into())); assert!(d.on_detach("/p/a"));
-        assert_eq!(d.end("/p/a"), (None, true), "a detach meanwhile cancels the start");
-        assert!(!d.holds("/p/a"));
+    #[test] fn a_start_held_for_the_previous_kicad_is_one_session_that_every_attach_joins() {
+        let prev = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 7, 0).ready("/s", "", 0).spawned(41).stopped("");
+        assert_eq!(previous_alive(&prev, |p| p == 41), Some(41), "its KiCad still there: the start is held");
+        let ph = held_session(&prev, 8, 100, "/p", "PCB", 9001, 8001, ":0", "c1");
+        assert_eq!((ph.state.as_str(), ph.reason.as_str(), ph.gen, ph.last_pid, ph.container, ph.pane_cid.as_str()), ("starting", HELD_REASON, 8, 41, 9001, "c1"));
+        // live ("starting"): a warm-up, the pane's Edit or a re-attach takes attach's starting branch and joins it; none holds a second start
+        assert!(ph.is_live() && previous_alive(&ph, |_| true).is_none());
+        assert!(!closing_not_reused(&ph), "not a closing KiCad: joined, never answered closing");
+        assert_eq!(runtime_session(&ph.state, &ph.reason, &ph.stop_reason), "starting");
+        assert_eq!(ph.info_json()["waits_previous"], json!(true), "the pane says KiCad is closing, not a hung start");
+        // idle and eviction never pick it
+        let m: HashMap<String, Session> = [(ph.pro.clone(), ph.clone())].into_iter().collect();
+        assert!(idle_victims(&m, 10_000, 300).is_empty() && evict_warm(&m, "/p/x.kicad_pro", 1).is_none());
+        assert!(is_held(&ph, 8) && !is_held(&ph, 7), "only its own generation's end starts it");
     }
-    #[test] fn a_held_start_clears_only_the_pid_it_waited_on() {
-        let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0).spawned(41).stopped("");
-        assert_eq!(s.last_pid, 41);
-        s.waited_gone(7); assert_eq!(s.last_pid, 41, "another pid waited on: kept");
-        s.waited_gone(41); assert_eq!(s.last_pid, 0);
-        assert_eq!(BUSY_QUIET_MS, 10_000, "an agent's calls a few seconds apart keep it in use");
+    #[test] fn a_leave_or_a_detach_while_a_start_is_held_is_kept_by_its_session() {
+        let prev = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 7, 0).ready("/s", "", 0).spawned(41).stopped("");
+        let mut ph = held_session(&prev, 8, 100, "/p", "PCB", 9001, 8001, ":0", "c1");
+        // the pane leaves (the holder's word); another window's back changes nothing: the held session carries it to the start
+        assert_eq!(ph.leave(leave_counts(&ph.pane_cid, Some("c1")), true, "thread", 110), LeaveStep::Left);
+        assert_eq!(ph.leave(leave_counts(&ph.pane_cid, Some("c2")), false, "", 111), LeaveStep::NotHolder);
+        assert_eq!(ph.left, "thread");
+        // the old session's generation is stale against the held one (#1435): a late leave or attach of it changes nothing
+        assert!(stale_generation(7, &json!({"generation": 8, "session": "starting"})));
+        assert!(!stale_generation(8, &json!({"generation": 8, "session": "starting"})));
+        // a detach meanwhile: no pane; it stays the held start, which then starts out of any pane
+        let d = ph.clone().detached(120); assert_eq!((d.container, d.left.as_str(), is_held(&d, 8)), (0, "", true));
+    }
+    #[tokio::test] async fn a_held_start_begins_once_the_previous_kicad_is_gone() {
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let old = child.id();
+        assert!(!held_wait(old, Duration::from_millis(300)).await, "still there: held");
+        assert!(crate::plat::proc::alive(old), "never killed from the held start");
+        let _ = child.kill(); let _ = child.wait();
+        assert!(held_wait(old, Duration::from_secs(2)).await, "gone: the held start begins");
+        assert_eq!(HELD_WAIT, Duration::from_secs(15));
     }
     #[test] fn a_close_that_did_not_happen_leaves_the_kicad_live_and_not_closing() {
         let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0).spawned(41); s.closing = true; s.stop_reason = "idle".into();

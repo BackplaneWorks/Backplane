@@ -338,6 +338,9 @@ pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<Strin
         "stopped" => Some(crate::i18n::trs("KiCad was closed.")),
         // #1470: the hub is closing this project's KiCad and its process has not ended: the pane attaches again once it has
         "closing" => Some(crate::i18n::t("gpui.c.kicad.closing")),
+        // a start held while the project's previous KiCad ends (the hub's `waits_previous`): said as that, never a start that looks hung;
+        // it ends started, or failed with its reason (Try again)
+        "starting" if info["waits_previous"] == true => Some(crate::i18n::t("gpui.c.kicad.closing")),
         _ if have_frame => None,
         // KiCad has a dialog of its own open (a notice from loading a file, its own progress): said, not a silent "Starting KiCad…"
         _ if info["dialogs"].as_array().is_some_and(|d| !d.is_empty()) => {
@@ -2428,6 +2431,7 @@ mod tests {
         assert!(!still_closing(41, &json!({"state": "failed", "pid": null})));
         assert!(!still_closing(41, &json!({"state": "starting", "pid": 57})), "another KiCad started: attach to it");
         assert!(waiting_on(&json!({"state": "closing"}), false, false).is_some_and(|w| w.contains("KiCad")), "the pane says KiCad is closing");
+        assert_eq!(waiting_on(&json!({"state": "starting", "waits_previous": true}), false, false), waiting_on(&json!({"state": "closing"}), false, false), "a start held for the KiCad before it says the same");
         assert!(super::waits_on_close(super::ShowBy::Deliberate), "the person's Edit waits and starts fresh");
         assert!(!super::waits_on_close(super::ShowBy::Automatic), "an automatic pane goes: no KiCad started by itself after a close");
         assert!(super::closing_away(&json!({"state": "ready", "closing": true}), false), "off screen: the pane goes at the close");
