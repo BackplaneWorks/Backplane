@@ -22,6 +22,10 @@ SHOT_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 
 
 def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000, embed: bool = False) -> list[dict]:
+    if kind == "full" and embed and os.environ.get("RAIL_AUTO_ONLY") == "a2":
+        # a2-only run (the focus-follows-mouse comparison): nothing but the gate, no other page, task or check
+        return [{"select": 0}, {"shot": "idle", "settle": "", "timeout_ms": settle_timeout_ms}, *AUTO.build_a2_steps(min(settle_timeout_ms, 8000)),
+                {"click": "ui:View"}, {"wait": 1000}]
     steps: list[dict] = [
         {"select": 0},
         {"shot": "idle", "settle": "", "timeout_ms": settle_timeout_ms},
@@ -600,6 +604,40 @@ def query_hub_kicad_sessions(port: str, token_file: str, bun_bin: str) -> dict:
     return _parse_hub_kicad_sessions_output(out)
 
 
+PANE_POINTER = (1060, 470)  # inside the viewer pane of the 1440x900 test window (a2: the pointer rests over where KiCad will be shown)
+_BG: dict = {}  # the background typing process of gate (a)
+
+
+def x_focus_trace(disp: str) -> dict:
+    """Who owns the X input focus right now (the focus window and its parent chain with names), the window manager's `_NET_ACTIVE_WINDOW`
+    and the pointer position. Observation only: it changes nothing."""
+    env = dict(os.environ, DISPLAY=disp)
+    code = r'''
+import ctypes, ctypes.util, os, json
+x = ctypes.CDLL(ctypes.util.find_library("X11")); x.XOpenDisplay.restype = ctypes.c_void_p
+d = ctypes.c_void_p(x.XOpenDisplay(os.environ["DISPLAY"].encode()))
+w = ctypes.c_ulong(); r = ctypes.c_int(); x.XGetInputFocus(d, ctypes.byref(w), ctypes.byref(r)); f = w.value
+root = ctypes.c_ulong(); par = ctypes.c_ulong(); ch = ctypes.POINTER(ctypes.c_ulong)(); n = ctypes.c_uint(); chain = []
+for _ in range(8):
+    nm = ctypes.c_char_p(); x.XFetchName(d, ctypes.c_ulong(f), ctypes.byref(nm)); chain.append("%#x:%s" % (f, (nm.value or b"").decode(errors="replace")[:40]))
+    if f < 2 or not x.XQueryTree(d, ctypes.c_ulong(f), ctypes.byref(root), ctypes.byref(par), ctypes.byref(ch), ctypes.byref(n)) or par.value in (0, root.value): break
+    f = par.value
+rw = ctypes.c_ulong(); cw = ctypes.c_ulong(); rx = ctypes.c_int(); ry = ctypes.c_int(); wx = ctypes.c_int(); wy = ctypes.c_int(); m = ctypes.c_uint()
+x.XQueryPointer(d, x.XDefaultRootWindow(d), ctypes.byref(rw), ctypes.byref(cw), ctypes.byref(rx), ctypes.byref(ry), ctypes.byref(wx), ctypes.byref(wy), ctypes.byref(m))
+print(json.dumps({"focus_chain": chain, "revert_to": r.value, "pointer": [rx.value, ry.value]}))
+'''
+    out: dict = {"at_ms": round(time.time() * 1000)}
+    try:
+        out.update(json.loads(subprocess.check_output([sys.executable, "-c", code], env=env, text=True, timeout=10)))
+    except Exception as e:
+        out["error"] = str(e)[:200]
+    try:
+        out["net_active_window"] = subprocess.check_output(["xprop", "-root", "_NET_ACTIVE_WINDOW"], env=env, text=True, timeout=10).strip()
+    except Exception as e:
+        out["net_active_window"] = f"unavailable: {str(e)[:80]}"
+    return out
+
+
 COMPOSER_POINTER = (440, 790)  # inside the composer of the 1440x900 test window (left of the viewer pane)
 _FIRST_GENERATION: list[int] = []  # the running KiCad's generation seen by the first stale probe (the "old" one after Edit restarts it)
 
@@ -627,22 +665,54 @@ def run_auto_action(name: str, last_kicad: dict, kind_out: Path, disp: str) -> N
     port, token, bun, pro = (os.environ.get(k, "") for k in ("RAIL_HUB_PORT", "RAIL_HUB_TOKEN_FILE", "RAIL_BUN_BIN", "RAIL_PRO"))
     rec: dict = {"shot": name, "ok": False, "error": None}
     try:
-        if name.startswith("auto-act-type-"):
+        xenv = dict(os.environ, DISPLAY=disp)
+
+        def xin(*args: str, timeout: int = 30) -> None:
+            subprocess.run([sys.executable, str(xinput), *args], env=xenv, check=True, timeout=timeout)
+
+        if name == "auto-act-type-bg-start":
+            # a person typing in the composer has the pointer over Backplane's own window: leave it there. The long marker starts typing
+            # NOW, in the background (keys queued before the attach request that the script sends next).
+            rec.update({"action": "type-bg-start", "text_len": len(AUTO.BG_MARKER)})
+            xin("move", str(COMPOSER_POINTER[0]), str(COMPOSER_POINTER[1]), timeout=10)
+            time.sleep(0.2)
+            rec["t_ms"] = round(time.time() * 1000)
+            _BG["proc"] = subprocess.Popen([sys.executable, str(xinput), "type", AUTO.BG_MARKER], env=xenv)
+            rec["ok"] = True
+        elif name == "auto-act-type-bg-end":
+            rec.update({"action": "type-bg-end"})
+            proc = _BG.get("proc")
+            if proc is None:
+                raise RuntimeError("no background typing was started")
+            rc = proc.wait(timeout=180)
+            rec["t_ms"] = round(time.time() * 1000)
+            rec["returncode"] = rc
+            rec["ok"] = rc == 0
+        elif name == "auto-act-a2-pointer":
+            rec.update({"action": "a2-pointer", "focus_follows_mouse": os.environ.get("RAIL_I3_FFM", "default"), "clicks": 0, "motions": 1})
+            rec["trace"] = {"before_move": x_focus_trace(disp)}
+            xin("move", str(PANE_POINTER[0]), str(PANE_POINTER[1]), timeout=10)
+            time.sleep(0.3)
+            after = x_focus_trace(disp)
+            rec["trace"]["after_move_before_attach"] = after
+            rec["pointer_xy"] = after.get("pointer")
+            rec["ok"] = True
+        elif name == "auto-act-a2-type":
+            rec.update({"action": "a2-type", "text": AUTO.A2_MARKER})
+            rec["trace_frame"] = x_focus_trace(disp)
+            rec["trace_typing_start"] = x_focus_trace(disp)
+            xin("type", AUTO.A2_MARKER)  # real X keys at the pointer's own position: no click, no motion
+            time.sleep(0.4)
+            rec["trace_typing_end"] = x_focus_trace(disp)
+            rec["ok"] = True
+        elif name.startswith("auto-act-type-"):
             tag = name[len("auto-act-type-"):]
             text = AUTO.MARKERS[tag]
             rec.update({"action": f"type-{tag}", "text": text})
-            if tag == "mid":
-                sess = _single_session(port, token, bun)
-                rec["kicad_state_before"] = (sess or {}).get("state")
-            # a person typing in the composer has the pointer over Backplane's own window (the window manager follows the pointer for
-            # focus): leave it there, not over the embedded KiCad where an earlier click left it (that would hand KiCad the keys)
-            subprocess.run([sys.executable, str(xinput), "move", str(COMPOSER_POINTER[0]), str(COMPOSER_POINTER[1])], env=dict(os.environ, DISPLAY=disp), check=True, timeout=10)
+            xin("move", str(COMPOSER_POINTER[0]), str(COMPOSER_POINTER[1]), timeout=10)
             time.sleep(0.2)
-            subprocess.run([sys.executable, str(xinput), "type", text], env=dict(os.environ, DISPLAY=disp), check=True, timeout=30)
+            xin("type", text)
             time.sleep(0.4)
-            if tag == "mid":
-                sess = _single_session(port, token, bun)
-                rec["kicad_state_after"] = (sess or {}).get("state")
             rec["ok"] = True
         elif name in ("auto-act-stale-future", "auto-act-stale-old"):
             label = name[len("auto-act-stale-"):]
