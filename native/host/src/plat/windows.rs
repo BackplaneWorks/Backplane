@@ -302,6 +302,10 @@ pub mod hub {
     }
     /// No descriptor limit to raise.
     pub fn raise_nofile() {}
+    /// No signals to inherit (unix.rs: a blocked or ignored SIGCHLD, #1456).
+    pub fn reset_inherited_signals() -> Option<String> { None }
+    /// Windows waits on process handles, never on a signal: nothing to watch.
+    pub fn watch_reaping(_every: std::time::Duration) {}
     /// Ctrl+C or Ctrl+Break, the console closing, logoff or shutdown end the hub, said in hub.log, exit 130 (as SIGINT).
     pub fn exit_on_signals(on_exit: fn()) {
         tokio::spawn(async move { if tokio::signal::ctrl_c().await.is_ok() { on_exit(); eprintln!("backplane-hub: Ctrl+C received, exiting"); std::process::exit(130) } });

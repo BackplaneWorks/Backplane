@@ -106,6 +106,14 @@ fn moved_to(me: &Path, prefix: &Path, current: &str, exists: impl Fn(&Path) -> b
 
 fn detached(cmd: &mut std::process::Command) {
     #[cfg(unix)] { use std::os::unix::process::CommandExt; cmd.process_group(0); }
+    // the guard and the hub start with every signal unblocked and SIGCHLD at its default: this runs on a background thread (GCD's on macOS,
+    // which blocks SIGCHLD, SIGTERM, SIGHUP...), and std's posix_spawn passes that mask on, so the hub never saw a child end (#1456)
+    #[cfg(unix)] unsafe { use std::os::unix::process::CommandExt; cmd.pre_exec(|| {
+        let mut none: libc::sigset_t = std::mem::zeroed(); libc::sigemptyset(&mut none); libc::sigprocmask(libc::SIG_SETMASK, &none, std::ptr::null_mut());
+        let mut old: libc::sigaction = std::mem::zeroed();
+        if libc::sigaction(libc::SIGCHLD, std::ptr::null(), &mut old) == 0 && old.sa_sigaction == libc::SIG_IGN { let mut dfl: libc::sigaction = std::mem::zeroed(); dfl.sa_sigaction = libc::SIG_DFL; libc::sigaction(libc::SIGCHLD, &dfl, std::ptr::null_mut()); }
+        Ok(())
+    }); }
     // a console of its own that is never shown (CREATE_NO_WINDOW), shared by what the hub starts (git, sh), in its own group (CREATE_NEW_PROCESS_GROUP):
     // started from this window program with nothing, Windows would open a console window for the hub
     #[cfg(windows)] { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000 | 0x0000_0200); }

@@ -7,6 +7,18 @@ use std::{path::Path, process::{Child, Command, ExitStatus}};
     extern "C" fn on_stop(_: libc::c_int) { STOP.store(true, SeqCst); }
     pub fn watch_stop() { unsafe { for s in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] { libc::signal(s, on_stop as extern "C" fn(libc::c_int) as libc::sighandler_t); } libc::signal(libc::SIGPIPE, libc::SIG_IGN); } }
     pub fn stop_asked() -> bool { STOP.load(SeqCst) }
+    /// First thing, before any thread: every signal unblocked and an ignored SIGCHLD at its default. The desktop app starts the guard from a GCD
+    /// worker thread on macOS, whose mask blocks SIGTERM, SIGHUP, SIGCHLD...: the guard's own stop handler never ran, and std's posix_spawn passed
+    /// the mask on to the hub, which then never saw a child end (#1456). The hub puts it right itself too; this keeps the guard stoppable.
+    pub fn clean_signals() {
+        unsafe {
+            let mut none: libc::sigset_t = std::mem::zeroed(); libc::sigemptyset(&mut none); libc::pthread_sigmask(libc::SIG_SETMASK, &none, std::ptr::null_mut());
+            let mut old: libc::sigaction = std::mem::zeroed();
+            if libc::sigaction(libc::SIGCHLD, std::ptr::null(), &mut old) == 0 && old.sa_sigaction == libc::SIG_IGN {
+                let mut dfl: libc::sigaction = std::mem::zeroed(); dfl.sa_sigaction = libc::SIG_DFL; libc::sigaction(libc::SIGCHLD, &dfl, std::ptr::null_mut());
+            }
+        }
+    }
     pub fn signal(pid: u32, sig: i32) { unsafe { libc::kill(pid as i32, sig); } }
     pub fn term(pid: u32) { signal(pid, libc::SIGTERM) }
     /// SIGABRT: a hung hub leaves a core if the machine keeps them, then dies
@@ -24,6 +36,7 @@ use std::{path::Path, process::{Child, Command, ExitStatus}};
 }
 #[cfg(windows)] mod os {
     pub fn watch_stop() {}
+    pub fn clean_signals() {}
     pub fn stop_asked() -> bool { false }
     pub fn term(pid: u32) { let _ = quiet("taskkill").args(["/PID", &pid.to_string()]).output(); }
     pub fn abort(pid: u32) { let _ = quiet("taskkill").args(["/F", "/PID", &pid.to_string()]).output(); }
@@ -41,7 +54,7 @@ use std::{path::Path, process::{Child, Command, ExitStatus}};
     fn quiet(name: &str) -> std::process::Command { use std::os::windows::process::CommandExt; let mut c = std::process::Command::new(name); c.creation_flags(NO_WINDOW); c }
     pub fn signal_of(_: &std::process::ExitStatus) -> Option<i32> { None }
 }
-pub use os::{abort, alive, detach, signal_of, space, stop_asked, term, watch_stop};
+pub use os::{abort, alive, clean_signals, detach, signal_of, space, stop_asked, term, watch_stop};
 pub fn free_bytes(p: &Path) -> Option<u64> { space(p).map(|s| s.0) }
 
 /// The hub program in a build folder.

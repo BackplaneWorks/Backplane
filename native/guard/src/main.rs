@@ -234,6 +234,7 @@ fn headless(a: &[String]) -> i32 {
 }
 
 fn main() {
+    sys::clean_signals(); // before any thread or child (#1456)
     let a: Vec<String> = std::env::args().skip(1).collect();
     let code = match a.first().map(String::as_str) {
         Some("hub") => hub(&a[1..]),
