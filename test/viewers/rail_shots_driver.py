@@ -151,6 +151,21 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
             {"wait_settled": "", "tag": "b1-start-idle", "timeout_ms": min(settle_timeout_ms, 4000)},
         ])
 
+    # Pointer-route calibration: a real mouse press at an ENABLED row's rect must open it, so a later pointer press that does
+    # nothing on a disabled row is a measured no-op and not a click that missed.
+    steps.extend([
+        {"mark": "b1:pointer-calibration"},
+        {"pointer": "rail:Files"},
+        {"wait_settled": "files", "tag": "b1-pointer-calibration", "timeout_ms": min(settle_timeout_ms, 4000)},
+        {"keys": "ctrl-l"},
+        {"wait": 80},
+        {"keys": "escape"},
+        {"wait": 80},
+        {"keys": "escape"},
+        {"wait": 80},
+        {"wait_settled": "", "tag": "b1-pointer-calibration-idle", "timeout_ms": min(settle_timeout_ms, 3000)},
+    ])
+
     # Rule B1: one selection behaviour for every rail entry (press open/close, bare key open/close, palette open, disabled no-op).
     avail = M.HAS_RESOURCE.get(kind, set())
     for eid, _label, rail_id, settle_kind, bare_key, pal_query in M.B1_ENTRIES:
@@ -200,7 +215,7 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
         else:
             steps.extend([
                 {"mark": f"b1:disabled-press:{eid}"},
-                {"press": rail_id},
+                {"pointer": rail_id},
                 {"wait": 150},
                 {"read": "rail"},
                 {"wait": 60},

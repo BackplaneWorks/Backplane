@@ -13,7 +13,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<name>","settle":"<kind>"?,"timeout_ms":N?}: wait until settled (if requested) and painted, emit shot-ready, wait for <BACKPLANE_GPUI_SHOT_DIR>/<name>.done */ Shot { name: String, settle: Option<String>, timeout_ms: u64 }, /** {"wait_settled":"<kind>","tag":"<tag>","timeout_ms":N?}: wait until the page settles and emit a `settled` metric with its viewer state */ WaitSettled { kind: String, tag: String, timeout_ms: u64 }, Fit, Unsupported(String) }
+/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<name>","settle":"<kind>"?,"timeout_ms":N?}: wait until settled (if requested) and painted, emit shot-ready, wait for <BACKPLANE_GPUI_SHOT_DIR>/<name>.done */ Shot { name: String, settle: Option<String>, timeout_ms: u64 }, /** {"wait_settled":"<kind>","tag":"<tag>","timeout_ms":N?}: wait until the page settles and emit a `settled` metric with its viewer state */ WaitSettled { kind: String, tag: String, timeout_ms: u64 }, /** {"pointer":"<control id>"}: a real mouse move, down and up at the centre of the control's drawn rect, through the window's own dispatch (no registered control needed) */ Pointer(String), Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
 pub enum Ctl { Header(String), /** the composer chip's account menu, and Settings' Accounts page */ AccountMenu, AccountsPage, /** the sidebar hub picker */ Hub(crate::screens::hubpick::Act), PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, ToggleTerminal, Rail(String), PickFiles, /** the ▾ beside the thread's name: its menu */ ThreadMenu, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), /** a hub page of the Settings nav */ SettingsPage(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch, /** a bots-page press (screens::bots::press): its kind and value */ Bot(String, String), /** a chat terminal's card: focus, expand, pop, stop; its key */ Term(String, String), /** a subagent's own view (its key; "" goes back) */ Sub(String), /** a card's button that sends the hub an action (a halt card's Resume...): `Command::Action` */ Go(String, String), /** the viewer's Edit (true: the real KiCad in the pane) and View (false) */ KicadEdit(bool), /** the editor strip: a tab (its kind), full, popout, popin */ KicadAct(String), /** a management panel's press (screens/mgmt.rs `act`) */ Mgmt(String) }
@@ -118,6 +118,7 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let (Some(id), Some(ms)) = (v["click"].as_str(), v["within"].as_u64()) { Some(Step::ClickWithin(id.into(), ms)) }
         else if let Some(id) = v["click"].as_str() { Some(Step::Click(id.into())) }
         else if let Some(id) = v["press"].as_str() { Some(Step::Press(id.into())) }
+        else if let Some(id) = v["pointer"].as_str() { Some(Step::Pointer(id.into())) }
         else if let Some(op) = v["imp"].as_str() { Some(Step::Imp(op.into())) }
         else if let Some(what) = v["read"].as_str() { Some(Step::Read(what.into())) }
         else if let Some(on) = v["layers"].as_bool() { Some(Step::Layers(on, v["max_h"].as_f64().map(|x| x as f32), v["scroll"].as_f64().unwrap_or(0.0) as f32)) }
@@ -562,6 +563,28 @@ impl Backplane {
                 self.begin_for(format!("wait_settled:{tag}"), Goal::WaitSettled { kind, tag, timeout_ms, polling: false }, fail_s, cx);
                 cx.notify();
             }
+            Step::Pointer(id) => {
+                // Real pointer route: what a person's mouse does at the control's drawn rect, dispatched through GPUI's own window input.
+                let rect = crate::art::ctl_rects().get(id.as_str()).copied().filter(|r| r[2] > 0. && r[3] > 0.);
+                let before = self.ui_epoch;
+                match (rect, cx.windows().into_iter().next()) {
+                    (Some(r), Some(win)) => {
+                        let at = gpui::point(px(r[0] + r[2] / 2.), px(r[1] + r[3] / 2.));
+                        let ok = win.update(cx, |_, window, cx| {
+                            use gpui::{MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Modifiers, PlatformInput};
+                            window.dispatch_event(PlatformInput::MouseMove(MouseMoveEvent { position: at, pressed_button: None, modifiers: Modifiers::default() }), cx);
+                            window.dispatch_event(PlatformInput::MouseDown(MouseDownEvent { button: MouseButton::Left, position: at, modifiers: Modifiers::default(), click_count: 1, first_mouse: false }), cx);
+                            window.dispatch_event(PlatformInput::MouseUp(MouseUpEvent { button: MouseButton::Left, position: at, modifiers: Modifiers::default(), click_count: 1 }), cx);
+                        }).is_ok();
+                        self.m("pointer", json!({"id": id, "hit_rect": true, "x": r[0] + r[2] / 2., "y": r[1] + r[3] / 2., "dispatched": ok}));
+                    }
+                    _ => self.m("pointer", json!({"id": id, "hit_rect": false, "dispatched": false, "error": if rect.is_none() { "no drawn rect" } else { "no window" }})),
+                }
+                self.ui_epoch = before + 1;
+                cx.notify();
+                let entity = cx.entity();
+                cx.defer(move |cx| entity.update(cx, |this, cx| this.pump(cx)));
+            }
             Step::Fit => { self.screens.plotview.view = None; self.ui_epoch += 1; self.begin("fit".into(), Goal::Frame, cx); cx.notify(); }
             Step::Expect(what) => { // a run that cannot measure what it claims stops itself: "canvas" needs a plot canvas with real height
                 let h = self.screens.plotview.bounds.map_or(0.0, |b| f32::from(b.size.height));
@@ -645,9 +668,8 @@ impl Backplane {
                     PRESS_SOLID.with(|c| *c.borrow_mut() = (sr.key().to_string(), sr.painted_count()));
                 }
                 let found = self.find_script_control(&id);
-                let hit_rect = crate::art::ctl_rects().get(id.as_str()).is_some_and(|r| r[2] > 0. && r[3] > 0.);
                 let action = found.map(|e| self.do_click(&e.ctl, cx));
-                self.m("press", json!({"id": id, "found": action.is_some(), "action": action, "hit_rect": hit_rect}));
+                self.m("press", json!({"id": id, "found": action.is_some(), "action": action}));
                 self.ui_epoch += 1;
                 cx.notify();
                 // Header dispatch borrows the window after this update. Preserve script
@@ -810,9 +832,6 @@ impl Backplane {
             let on = v["gerbersVsBoard"] == true;
             /* i18n-ok: scripted e2e control id, not drawn */ return Some(CtlEntry { id: id.into(), label: "vs board".into(), ctl: Ctl::Node("view".into(), if on { "gerbers" } else { "gerbers\tboard" }.into()) });
         }
-        // A drawn rail row with no registered control is a disabled one: its button has no click handler,
-        // so a press on it is `none` (the press metric's `hit_rect` says the row was really drawn).
-        if id.starts_with("rail:") && rects.get(id).is_some_and(|r| r[2] > 0. && r[3] > 0.) { return Some(CtlEntry { id: id.into(), label: id.into(), ctl: Ctl::None }); }
         None
     }
     /// Whether the requested viewer page has settled into one of `ready`, `empty`, `error`, `refused`, `disabled`, or `hidden`.
