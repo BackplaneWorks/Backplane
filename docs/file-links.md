@@ -69,8 +69,8 @@ listener. `expires` is seconds or `30m`/`12h`/`7d`, default 1 day, at most 30 da
 is checked again on every request, so a share of a file that has since become a secret or left its project stops working.
 
 **Settings.** Settings → Devices lists each live share (`Shared file · <name>`, its path and expiry, and its tailnet address) with **Revoke**
-(`device-share-revoke`). The phones' `devices.page` draws the same rows. The data RPCs are `shares.list` → `{shares}` and `shares.revoke
-{id}` → `{shares}`.
+(`device-share-revoke`). The phones' `devices.page` draws the same rows and its Revoke goes through `devices.page.act`. The desktop's
+protocol (`/ws`, CBOR) also answers `shares.list` → `{shares}` and `shares.revoke {id}` → `{shares}`; data/1 has no such methods.
 
 ## The Files and Mech tabs
 - Files rows have `down` (a `/files/get` URL) and `downName`. A row on another machine's thread now has one too (a folder's zip does not). When
