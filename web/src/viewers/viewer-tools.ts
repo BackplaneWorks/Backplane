@@ -52,12 +52,32 @@ export interface ViewerRef {
 }
 
 /**
- * Match an incoming hub compare plot key against the exact expected prefix (`<kind>|<root>|diff\n`)
- * and commit hash (`\t<commit>\t`) so a buffered frame from an earlier Compare A cannot satisfy Compare B.
+ * Match an incoming hub compare plot key against the exact expected prefix (`<kind>|<root>|diff\n`),
+ * commit hash (`oldParts[2]`), and file path (`lines[1]`) so neither a delayed frame from an earlier
+ * Compare A nor a late frame for another sheet at the same commit can satisfy Compare B.
  */
-export function matchesCompareKey(key: string, prefix: string, commit: string): boolean {
+export function matchesCompareKey(
+  key: string,
+  prefix: string,
+  commit: string,
+  expectedFile?: string
+): boolean {
   if (!key || !prefix || !commit) return false;
-  return key.startsWith(prefix) && key.includes(`\t${commit}\t`);
+  if (!key.startsWith(prefix)) return false;
+  const lines = key.slice(prefix.length).split("\n");
+  const oldParts = (lines[0] || "").split("\t");
+  if (oldParts[0] !== "git" || oldParts[2] !== commit) return false;
+  if (expectedFile) {
+    const keyFile = lines[1] || oldParts.slice(4).join("\t");
+    const normKey = keyFile.replace(/\\/g, "/");
+    const normExp = expectedFile.replace(/\\/g, "/");
+    if (normExp.startsWith("/") || /^[A-Za-z]:\//.test(normExp)) {
+      if (normKey !== normExp) return false;
+    } else if (normKey !== normExp && !normKey.endsWith(`/${normExp}`)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
