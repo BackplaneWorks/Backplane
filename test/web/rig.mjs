@@ -162,6 +162,12 @@ async function main(binary, output) {
             await browserTasks({ context, origin, rpc, thread: 't1',
               assets: [{path:'/files/get?thread=t1&path=sample.txt',body:Buffer.from('Backplane fixture')}],
               replyText:'Browser stand-in reply',
+              nativeShot: process.env.BP_WEB_GPUI && (async name => {
+                const helper = new URL('./native-shot.sh', import.meta.url).pathname;
+                const proc = spawn('bash', [helper, temp, String(nativePort), output, name], {stdio:'inherit'});
+                const [status] = await once(proc, 'exit');
+                assert.equal(status, 0, name + ' capture failed');
+              }),
               screenshot: (page, name) => page.screenshot({path:path.join(output, name + '.png')}) });
           });
         } finally { ws.close(); }

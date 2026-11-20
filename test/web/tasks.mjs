@@ -10,10 +10,11 @@ async function deviceButton(rpc, name, action) {
   return { row, button: row.buttons.find(button => button.action === action) };
 }
 
-export async function browserTasks({ context, origin, rpc, thread, assets, replyText, screenshot }) {
+export async function browserTasks({ context, origin, rpc, thread, assets, replyText, screenshot, nativeShot }) {
   const page = await context.newPage();
   const name = 'Headless browser';
   const testId = id => page.getByTestId(id);
+  await page.setViewportSize({width:1440, height:900});
   await page.goto(origin);
   await testId('pair-card').waitFor();
   await screenshot(page, 'before-pair');
@@ -22,8 +23,10 @@ export async function browserTasks({ context, origin, rpc, thread, assets, reply
   await testId('pair-code').waitFor();
   const code = (await testId('pair-code').innerText()).replaceAll(' ', '');
   assert.match(code, /^\d{6}$/);
+  await screenshot(page, 'pair-code');
   const approval = await deviceButton(rpc, name, 'device-web-approve');
   assert.ok(approval.row.note.includes(code), 'browser and native comparison codes differ');
+  if (nativeShot) await nativeShot('native-devices');
   const connected = page.waitForEvent('websocket', socket => new URL(socket.url()).pathname === '/ws');
   const approvedAt = performance.now();
   await rpc('devices.page.act', approval.button);
@@ -42,6 +45,12 @@ export async function browserTasks({ context, origin, rpc, thread, assets, reply
   await testId('timeline').getByText(replyText, { exact: true }).waitFor();
   await screenshot(page, 'paired-chat');
 
+  if (nativeShot) await nativeShot('native-chat');
+  for (const [width, height] of [[820, 1180], [390, 844]]) {
+    await page.setViewportSize({width, height});
+    await screenshot(page, 'paired-chat-' + width);
+  }
+  await page.setViewportSize({width:1440, height:900});
   const revocation = await deviceButton(rpc, name, 'device-revoke');
   const closed = socket.waitForEvent('close', { timeout: 1000 });
   await Promise.all([closed, rpc('devices.page.act', revocation.button)]);
