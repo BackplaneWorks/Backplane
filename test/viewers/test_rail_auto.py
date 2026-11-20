@@ -133,6 +133,7 @@ class AutoGateTests(unittest.TestCase):
         a2_end = next(i for i, s in enumerate(auto) if s == {"mark": "auto:a2:done"})
         a2_steps = auto[a2:a2_end]
         self.assertFalse([s for s in a2_steps if "click" in s or "tap" in s or "pointer" in s])
+        self.assertIn({"keys": "ctrl-l"}, auto[a2 - 3:a2], "the composer is focused before the marker is typed")
         self.assertLess(idx["auto-act-a2-pointer"], next(i for i, s in enumerate(auto) if s.get("kicad", {}).get("tag") == "auto-a2-attach"))
         self.assertGreater(idx["auto-act-a2-type"], next(i for i, s in enumerate(auto) if s.get("kicad", {}).get("tag") == "auto-a2-painted"))
 
