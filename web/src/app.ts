@@ -359,6 +359,7 @@ function mountApp(): void {
   const mgmt = new MgmtStrip(centerEl, {
     hub,
     getThreadId: () => selectedThreadId,
+    getThreadGen: () => threadGen,
     onSendText: (text) => { void sendMessage(text); },
   });
 

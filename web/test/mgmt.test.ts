@@ -2,11 +2,14 @@ import { describe, expect, test } from "bun:test";
 import {
   abbrev,
   badgeOf,
+  buildBomUndoParams,
   drcWords,
   filterBomLines,
   filterCheckGroups,
   findingRefs,
   formatUtcDay,
+  isBomWriteCurrent,
+  isChecksFixCurrent,
   lifeWord,
   mgmtPanelsOf,
   money,
@@ -83,5 +86,38 @@ describe("Management strip pure model", () => {
     expect(drcWords("stale")).toEqual({ text: "The DRC rules have older fab limits", button: "Update" });
     expect(drcWords("current").button).toBeNull();
     expect(tierWords("extra")).toBe("costs-more limits");
+  });
+
+  test("delayed BOM edit is discarded after switching project or editor part, and Undo sends original project/refs", () => {
+    const startA = { watchGen: 1, editGen: 1, project: "/proj/A", editId: "R1" };
+    // Still on project A, same editor -> applies
+    expect(isBomWriteCurrent(startA, { watchGen: 1, editGen: 1, project: "/proj/A", editId: "R1" })).toBe(true);
+    // Switched to project B and selected a different part -> stale save discarded
+    expect(isBomWriteCurrent(startA, { watchGen: 2, editGen: 2, project: "/proj/B", editId: "C4" })).toBe(false);
+    // Switched editor to another part in same project -> stale save discarded
+    expect(isBomWriteCurrent(startA, { watchGen: 1, editGen: 2, project: "/proj/A", editId: "R2" })).toBe(false);
+    // Closed and reopened same part (editGen bumped) -> stale save discarded
+    expect(isBomWriteCurrent(startA, { watchGen: 1, editGen: 3, project: "/proj/A", editId: "R1" })).toBe(false);
+
+    // Undo record binds its original project and refs, independent of any other open editor refs
+    const undo = { project: "/proj/A", editId: "R1", refs: ["R1", "R2"], field: "mpn", was: "OLD-MPN" };
+    expect(buildBomUndoParams(undo)).toEqual({
+      project: "/proj/A",
+      refs: ["R1", "R2"],
+      field: "mpn",
+      value: "OLD-MPN",
+    });
+  });
+
+  test("delayed Checks Fix is discarded after switching threads within the same project or switching projects", () => {
+    const start = { watchGen: 1, project: "/proj/A", threadId: "t1", threadGen: 5 };
+    // Same thread & generation -> allowed to send
+    expect(isChecksFixCurrent(start, { watchGen: 1, project: "/proj/A", threadId: "t1", threadGen: 5 })).toBe(true);
+    // Switched to t2 within the SAME project -> discarded, t2 receives no message
+    expect(isChecksFixCurrent(start, { watchGen: 1, project: "/proj/A", threadId: "t2", threadGen: 6 })).toBe(false);
+    // Switched away and back to t1 (threadGen bumped) -> stale fix discarded
+    expect(isChecksFixCurrent(start, { watchGen: 1, project: "/proj/A", threadId: "t1", threadGen: 7 })).toBe(false);
+    // Switched project -> discarded
+    expect(isChecksFixCurrent(start, { watchGen: 2, project: "/proj/B", threadId: "t1", threadGen: 5 })).toBe(false);
   });
 });

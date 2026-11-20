@@ -350,3 +350,61 @@ export function drcWords(state: string): { text: string; button: string | null }
 export function tierWords(tier: string): string {
   return tier === "extra" ? "costs-more limits" : "base-price limits";
 }
+
+export interface BomUndoRecord {
+  project: string;
+  editId: string;
+  refs: string[];
+  field: string;
+  was: string;
+}
+
+export interface BomWriteSnapshot {
+  watchGen: number;
+  editGen: number;
+  project: string;
+  editId: string;
+}
+
+export interface ChecksFixSnapshot {
+  watchGen: number;
+  project: string;
+  threadId: string;
+  threadGen: number;
+}
+
+export function isBomWriteCurrent(start: BomWriteSnapshot, now: BomWriteSnapshot): boolean {
+  return (
+    start.watchGen === now.watchGen &&
+    start.editGen === now.editGen &&
+    start.project !== "" &&
+    start.project === now.project &&
+    start.editId !== "" &&
+    start.editId === now.editId
+  );
+}
+
+export function buildBomUndoParams(undo: BomUndoRecord): {
+  project: string;
+  refs: string[];
+  field: string;
+  value: string;
+} {
+  return {
+    project: undo.project,
+    refs: undo.refs.slice(),
+    field: undo.field,
+    value: undo.was,
+  };
+}
+
+export function isChecksFixCurrent(start: ChecksFixSnapshot, now: ChecksFixSnapshot): boolean {
+  return (
+    start.watchGen === now.watchGen &&
+    start.project !== "" &&
+    start.project === now.project &&
+    start.threadId !== "" &&
+    start.threadId === now.threadId &&
+    start.threadGen === now.threadGen
+  );
+}

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 66571,
+  "totalAssetGzipBytes": 66957,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -62,14 +62,14 @@
   ],
   "i18nSubsetSha256": "4c705eced28ff9413294541faf00674c958619317f33a8875b74678d5d129137",
   "inputs": {
-    "web/src/app.ts": "1213454408d541a5782c8bb41a67dc99572bba5448aea6c79a6f9c16ede1c6ea",
+    "web/src/app.ts": "ec68e39ca65562bcd65cde31ddfc1c369fcf7b688a45004b38bcd9961f3f9210",
     "web/src/chat.ts": "ab668e1fa4a7da8b3cd5a06a49b425b684240c0bf2254acba350142bd26441ae",
     "web/src/composer.ts": "b78e16d39ecec108b8259f5d619a751878f5dc65cc23676c7f9aa99d2a8e5ae5",
     "web/src/i18n.ts": "40bb973e3acda75aea4bc5d16746757e59487b95225f5ed36cdfe13c813cf66d",
     "web/src/index.html": "a661afef2f425bd880bccd134f90969b4d037cf455da827c921a99764ffd83a4",
     "web/src/md.ts": "c606d1ec598b3ce132c7cc9366383dacafc3fcb71c0fccd97b41ec0e19a96c78",
-    "web/src/mgmt-model.ts": "80542000f756356617014eee1824bd31f27a0da5a09663162e7e73192edebdf0",
-    "web/src/mgmt.ts": "64cd25ccd01af235e94835b2b362b8b31be86be85f333d6b125fe57e9871a445",
+    "web/src/mgmt-model.ts": "51bcae6bacfe7daaaad049783eff37b20def07cca07b23be34464aae3a73d014",
+    "web/src/mgmt.ts": "0ed78f844f1146838f08ce936a55d7d978e484f7cd610cf2532e753564d132fa",
     "web/src/pair.html": "cf7b94703316f910718356e9ff8e99e088b68211db39b5200213b623c9275f6e",
     "web/src/pair.ts": "58723bde49e067295e34c471a78aa96544567fe2c668789497373234955b1d88",
     "web/src/palette-model.ts": "6e9cc7079aa4ea6193a983bf326d7a59f6693e396aaa49cb1a46089a5fdb2720",
@@ -94,9 +94,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 172976,
-      "gzipBytes": 49121,
-      "sha256": "71eafb3ad78702f4814a6f97dcb86be99cb46612687a5e04df26a6d0c8290fc8"
+      "bytes": 174701,
+      "gzipBytes": 49507,
+      "sha256": "d7e160f7557fe88ba6eb24a00ecf5279a370fea88b15a917cacf0be416b66c7a"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,
