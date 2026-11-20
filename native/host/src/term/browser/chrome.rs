@@ -81,3 +81,53 @@ async fn real_chrome_through_the_driver_preview_teach_and_task() {
     let (ok, _) = drv.tool(bot, "task_end", &json!({"run":rid,"status":"ok","summary":"done"})).await; assert!(ok);
     assert_eq!(rpc(&hub, "browser.close", json!({"thread":bot})).await["ok"], true);
 }
+
+/// Settings › Browser › Start page end to end: the setting written as a client writes it, an agent's preview_open with no address opens it on a new page and leaves a
+/// page that shows something alone, a phone's first look at a page with none opens it too (the screen.jpg lease), Blank leaves a new page empty, a bad address is refused
+/// by setting.set and browser.page.act alike, and preview_open with an address is unchanged. The start page is this test's loopback page (no real site).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] #[ignore]
+async fn real_chrome_start_page_follows_the_setting() {
+    use crate::settings::browser_start as bs;
+    let exe = std::env::var("BP_REAL_BROWSER").expect("BP_REAL_BROWSER"); std::env::set_var("BACKPLANE_BROWSER", exe);
+    let d = crate::plat::tmp::dir("chrome-start");
+    let mut log = String::from("{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"f\",\"root\":\"/tmp\",\"at\":1700000000}\n");
+    for t in ["t1", "t2", "t3", "t4"] { log += &format!("{{\"$\":\"ThreadCreated\",\"id\":\"{t}\",\"project\":\"p1\",\"title\":\"T\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000001}}\n"); }
+    std::fs::write(d.join("events.jsonl"), log).unwrap();
+    let hub = Hub::start(Cfg { home: d.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    super::super::start(hub.clone());
+    hub.register_rpc(Arc::new(crate::settings::set::SettingSet { agents: None })); hub.register_rpc(Arc::new(bs::BrowserPage));
+    let port = serve().await; let start = format!("http://127.0.0.1:{port}/start");
+    let href = |bot: &'static str| { let hub = hub.clone(); async move { eval(&hub, bot, "location.href").await } };
+
+    // a bad address is refused wherever it is written, and nothing is stored
+    assert_eq!(rpc(&hub, "setting.set", json!({"key": bs::KEY, "value": "javascript:alert(1)"})).await["error"], bs::BAD);
+    assert_eq!(rpc(&hub, "browser.page.act", json!({"action": bs::ACTION, "value": "save", "fields": {"bstart": "ftp://x"}})).await["error"], bs::BAD);
+    assert_eq!(hub.setting(bs::KEY).await, None);
+    let rows = rpc(&hub, "browser.page", json!({})).await["rows"].clone(); assert_eq!(rows[0]["fields"][0]["value"], bs::DEFAULT, "the default until one is chosen: {rows}");
+
+    // the start page chosen as the desktop's Settings writes it; an agent's preview_open with no address opens it on its new page
+    assert_eq!(rpc(&hub, "setting.set", json!({"key": bs::KEY, "value": start})).await["ok"], true);
+    let (ok, b) = preview(&hub, "t1", "preview_open", &json!({})).await; assert!(ok, "{b}");
+    assert_eq!(href("t1").await, json!(start)); assert_eq!(eval(&hub, "t1", "document.title").await, json!("start"));
+    // a page that shows something stays where it is
+    let elsewhere = format!("http://127.0.0.1:{port}/elsewhere");
+    let (ok, b) = preview(&hub, "t1", "preview_navigate", &json!({"url": elsewhere})).await; assert!(ok, "{b}");
+    let (ok, b) = preview(&hub, "t1", "preview_open", &json!({})).await; assert!(ok, "{b}"); assert_eq!(href("t1").await, json!(elsewhere));
+    // preview_open with an address is unchanged
+    let (ok, b) = preview(&hub, "t2", "preview_open", &json!({"url": elsewhere})).await; assert!(ok, "{b}"); assert_eq!(href("t2").await, json!(elsewhere));
+
+    // a phone opening a Browser tab with no page yet: its first screen.jpg lease opens the start page
+    let br = super::get(&hub).unwrap(); br.watch("t3").await;
+    let mut seen = Value::Null;
+    for _ in 0..100 { let s: Value = serde_json::from_str(&br.ask("t3", "status", &json!({})).await).unwrap(); seen = s["result"]["url"].clone(); if seen == json!(start) { break } tokio::time::sleep(Duration::from_millis(100)).await; }
+    assert_eq!(seen, json!(start), "the phone's Browser tab opens the start page");
+
+    // Blank, pressed on a phone: a new page stays empty
+    assert_eq!(rpc(&hub, "browser.page.act", json!({"action": bs::ACTION, "value": "blank", "fields": {}})).await["ok"], true);
+    assert_eq!(hub.setting(bs::KEY).await.as_deref(), Some("blank"));
+    let (ok, b) = preview(&hub, "t4", "preview_open", &json!({})).await; assert!(ok, "{b}"); assert_eq!(href("t4").await, json!("about:blank"));
+    // and Reset to default goes back to the default (not opened here: no real site in a test)
+    assert_eq!(rpc(&hub, "browser.page.act", json!({"action": bs::ACTION, "value": "reset", "fields": {}})).await["ok"], true);
+    assert_eq!(hub.setting(bs::KEY).await, None); assert_eq!(br.home_url().await.as_deref(), Some(bs::DEFAULT));
+    let _ = std::fs::remove_dir_all(&d);
+}
