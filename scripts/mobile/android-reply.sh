@@ -23,6 +23,10 @@ gone() { local what=$1; shift; for i in $(seq 6); do has "$@" || { ok "$what"; r
 tapt() { local p; p=$(xy "$@") || { bad "no '$1' to tap"; return 1; }; $A input tap $p; sleep 1.2; }
 longt() { local p; p=$(xy "$@") || { bad "no '$1' to long-press"; return 1; }; set -- $p; $A input swipe $1 $2 $1 $2 900; sleep 1.2; }
 swiper() { local p; p=$(xy "$@") || { bad "no '$1' to swipe"; return 1; }; set -- $p; $A input swipe $(( $1 - 120 )) $2 $(( $1 + 160 )) $2 350; sleep 1.2; }
+# the last node with this exact text (a menu's item is drawn after the list); false when there is none
+tapl() { local n; n=$($UI count "$1" exact 2>/dev/null || echo 0); [ "${n:-0}" -gt 0 ] || { bad "no '$1' to tap"; return 1; }; set -- $($UI bounds "$1" exact $(( n - 1 ))); $A input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 )); sleep 1.2; }
+# a fresh AVD's Bluetooth crashes once over whatever is on screen (scripts/android-emu.sh): close its dialog
+nobt() { for i in 1 2 3; do has "keeps stopping" || return 0; tapt "Close app" exact; sleep 1; done; }
 logged() { for i in $(seq ${2:-20}); do grep -Eq "$1" "$OUT/hub/home/events.jsonl" && return 0; sleep 1; done; return 1; }
 
 # the hub, and the emulator (its own port, headless)
@@ -36,23 +40,26 @@ $E adb reverse tcp:$PORT tcp:$PORT >/dev/null
 TOK=$(python3 -c "import json;print(json.load(open('$OUT/hub/state.json'))['token'])")
 ENC=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" "http://127.0.0.1:$PORT/#token=$TOK")
 $A pm clear $PKG >/dev/null; $A pm grant $PKG android.permission.POST_NOTIFICATIONS >/dev/null 2>&1
-$A "am start -n $PKG/dev.backplane.mobile.DataActivity -d 'bpgpui://pair?url=$ENC'" >/dev/null; sleep 6
+$A "am start -n $PKG/dev.backplane.mobile.DataActivity -d 'bpgpui://pair?url=$ENC'" >/dev/null; sleep 6; nobt
 if has "Pair with this hub?"; then set -- $($UI bounds "Pair" exact $(( $($UI count "Pair" exact) - 1 ))); $A input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 )); sleep 4; fi
-has "Skip" exact && tapt "Skip" exact
+nobt; has "Skip" exact && tapt "Skip" exact; nobt
 
-want "the thread is listed" "Needs a package"; tapt "Needs a package"
+# a paired app opens on the uberbot's chat (Bub), its home: the thread by its link
+$A "am start -n $PKG/dev.backplane.mobile.DataActivity -d 'bpgpui://thread/t5'" >/dev/null; sleep 3; nobt
+want "the thread is open" "Needs a package"
 want "the agent's reply is shown" "Then tell me"; shot 01-thread
 
 # long-press the reply's footer: Reply and Copy; Reply puts the strip over the box
 # (the footer is the time, then Reply: the press goes on the time, just left of Reply)
-set -- $($UI bounds "Reply" exact $(( $($UI count "Reply" exact) - 1 ))); $A input swipe $(( $1 - 50 )) $(( ($2 + $4) / 2 )) $(( $1 - 50 )) $(( ($2 + $4) / 2 )) 900; sleep 1.2
-want "a long-press offers Copy" "Copy" exact; [ "$($UI count "Reply" exact)" -ge 2 ] && ok "and Reply" || bad "no Reply in the menu"; shot 02-menu
-set -- $($UI bounds "Reply" exact $(( $($UI count "Reply" exact) - 1 ))); $A input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 )); sleep 1.2
+n=$($UI count "Reply" exact 2>/dev/null || echo 0); if [ "${n:-0}" -gt 0 ]; then set -- $($UI bounds "Reply" exact $(( n - 1 ))); $A input swipe $(( $1 - 50 )) $(( ($2 + $4) / 2 )) $(( $1 - 50 )) $(( ($2 + $4) / 2 )) 900; sleep 1.2; else bad "no Reply under the agent's message"; fi
+# (the menu is a popup window of its own: uiautomator reads only it, so its Reply and Copy are what is on screen)
+want "a long-press offers Copy" "Copy" exact; want "and Reply" "Reply" exact; shot 02-menu
+tapl "Reply"
 want "the strip names the sender" "Agent" exact; want "and the first line" "Replying to: One thing needs you"; shot 03-strip
 tapt "Cancel reply"; gone "× drops the reply" "Replying to:"
 
 # Reply under the message, then a send
-set -- $($UI bounds "Reply" exact $(( $($UI count "Reply" exact) - 1 ))); $A input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 )); sleep 1.2
+tapl "Reply"
 want "Reply under the message puts the strip back" "Replying to: One thing needs you"
 p=$($UI edit 0) && $A input tap $p; sleep 1; $A input text "zqecho%smake%sit%sso"; sleep 1
 tapt "Send" exact
