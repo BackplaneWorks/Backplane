@@ -12,6 +12,7 @@ pub mod fs;
 pub mod reorder;
 pub mod home;
 pub mod seam;
+pub mod clone;
 pub mod worktree;
 pub mod merge;
 #[cfg(test)]
@@ -31,6 +32,7 @@ pub fn start_with(hub: Arc<Hub>, seam: Option<Arc<dyn seam::Seam>>) {
     // catch the fold up now, off the request path: the first command (a new thread) must not fold the whole log while the person waits
     { let (fold, hub) = (fold.clone(), hub.clone()); tokio::task::spawn_blocking(move || { let _ = fold.blocking_lock().sync(&hub.store); }); }
     hub.register_rpc(Arc::new(Commands { fold, seam }));
+    clone::install(&hub);
 }
 
 pub fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }

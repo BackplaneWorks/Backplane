@@ -3,6 +3,7 @@
 // sidebar (This computer, ACTIVE/BOTS/ROOMS, bottom-left Connected status),
 // bottom-anchored chat timeline, tall composer + toolbar row, hub-driven right rail
 // with PR #1367 `has` reconciliation + `railGen` staleness guard, and Settings › Devices modal.
+import { AddProjectDialog } from "./addproject";
 import { ChatView, type EntryItem, type ReviewBar, type UnansweredNotice } from "./chat";
 import { ComposerView, type MentionItem, type SlashCommand } from "./composer";
 import { onLocaleChange, setLocale, t } from "./i18n";
@@ -340,6 +341,7 @@ function mountApp(): void {
       void refreshSections();
     },
     hasRoomView: false,
+    onAddProject: () => addProject.open({ mode: "folder" }),
   });
 
   const chat = new ChatView(centerEl, {
@@ -501,6 +503,19 @@ function mountApp(): void {
       return hub.rpc<PaletteSearchResult>("search", { q, limit: 20 });
     },
     onExecute: executePaletteAction,
+  });
+
+  const addProject = new AddProjectDialog(root, {
+    hub,
+    onProjectAdded: (project) => {
+      // as a phone does after project.add (no starter thread from the hub): its first thread, opened
+      void refreshSections();
+      if (project.id) void createThread(project.id);
+    },
+    onCloneDone: (job) => {
+      void refreshSections();
+      if (job.thread) void openThread(job.thread);
+    },
   });
 
   const rail = new RailView(railEl, (id) => {
@@ -1256,7 +1271,7 @@ function mountApp(): void {
     const gen = threadGen;
     const threadId = selectedThreadId;
     try {
-      const res = await hub.rpc<{ kind?: string; text?: string; error?: string }>("composer.run", {
+      const res = await hub.rpc<{ kind?: string; text?: string; repo?: string; error?: string }>("composer.run", {
         thread: threadId,
         text,
       });
@@ -1266,6 +1281,10 @@ function mountApp(): void {
         composer.showError(res.error);
       } else if (res.kind === "edit" && typeof res.text === "string") {
         composer.setDraft(res.text);
+      } else if (res.kind === "project") {
+        addProject.open({ mode: "folder" });
+      } else if (res.kind === "clone") {
+        addProject.open({ mode: "clone", repo: res.repo ?? "", text: res.text ?? "" });
       }
     } catch (e) {
       if (gen === threadGen && selectedThreadId === threadId) {
@@ -1326,6 +1345,7 @@ function mountApp(): void {
     composer.refreshLocale();
     rail.render();
     settings.refreshLocale();
+    addProject.refreshLocale();
   });
 
   hub.onState((state, hello: HelloFrame | null) => {
@@ -1345,6 +1365,8 @@ function mountApp(): void {
         helloCommands = [];
       }
       void loadLists();
+      // a clone's pushes may have been missed while the socket was down
+      addProject.reconcile();
     } else {
       voice.cancel();
       renderConnStatus(state);
@@ -1362,6 +1384,10 @@ function mountApp(): void {
     }
     if (frame.t !== "d") return;
     const p = frame as DataPush;
+    if (p.k === "clone" || p.k === "clone.repos" || p.k === "clone.signin") {
+      addProject.handleFrame(p);
+      return;
+    }
     switch (p.k) {
       case "project": {
         const proj = p.project as ProjectItem | undefined;
@@ -1446,6 +1472,7 @@ function mountApp(): void {
       else palette.open();
     } else if (e.key === "Escape") {
       if (palette.isOpen()) palette.close();
+      else if (addProject.isOpen()) addProject.escape();
       else if (settings.isOpen()) settings.close();
       else if (mgmt.isOpen()) mgmt.closePanel();
     }

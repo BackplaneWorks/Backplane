@@ -560,37 +560,56 @@ struct DataNewProjectSheet: View {
     @State private var path = ""
     @State private var error = ""
     @State private var busy = false
+    // Clone from git (feature clone): the second way in, its form kept while the sheet is open
+    @State private var cloning = false
+    @State private var clone = CloneForm()
 
-    private func row(_ name: String, _ icon: String, _ to: String) -> some View {
-        Button { Task { await go(to) } } label: {
-            HStack(spacing: 10) { Image(systemName: icon).font(.system(size: 13)).foregroundStyle(BackplaneDesign.dim).frame(width: 18); Text(name).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(1); Spacer() }
-                .padding(.horizontal, 14).frame(minHeight: 40).contentShape(Rectangle())
-        }.buttonStyle(.plain).dataRow()
-    }
+    private func row(_ name: String, _ icon: String, _ to: String) -> some View { DataDirRow(name: name, icon: icon) { Task { await go(to) } } }
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 0) {
-                TextField(Tr.t("Folder on the hub's computer"), text: $path).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .padding(.horizontal, 10).frame(height: 40).dbox().padding(12).accessibilityIdentifier("data.project.path")
-                if !error.isEmpty { Text(Tr.t(error)).dmono(12).foregroundStyle(BackplaneDesign.bad).padding(.horizontal, 12).padding(.bottom, 8) }
-                DLine()
-                List {
-                    if let d = dirs {
-                        if d.parent != d.path { row("..", "arrow.up.left", d.parent) }
-                        ForEach(d.dirs, id: \.self) { n in row(n, "folder", d.path.hasSuffix("/") ? d.path + n : d.path + "/" + n) }
-                    }
-                }.listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
+                if client.has("clone") { DataProjectModes(clone: $cloning) }
+                if cloning && client.has("clone") { DataCloneView(client: client, form: clone, finish: finish) } else { folder }
             }
             .background(BackplaneDesign.panel)
             .dataBar(Tr.t("Add project"), back: false)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(Tr.t("Cancel")) { dismiss() }.dmono(13) }.dflat()
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(Tr.t("Add")) { Task { await add() } }.dmono(13, bold: true).disabled(busy || path.trimmingCharacters(in: .whitespaces).isEmpty).accessibilityIdentifier("data.project.add.confirm")
+                    if cloning && client.has("clone") {
+                        if clone.job == nil { Button(Tr.t("Clone")) { Task { await clone.start(client) } }.dmono(13, bold: true).disabled(!clone.canStart).accessibilityIdentifier("data.clone.go") }
+                    } else {
+                        Button(Tr.t("Add")) { Task { await add() } }.dmono(13, bold: true).disabled(busy || path.trimmingCharacters(in: .whitespaces).isEmpty).accessibilityIdentifier("data.project.add.confirm")
+                    }
                 }.dflat()
             }
             .task { await go(nil) }
+            // `/project <address>`: open on Clone from git with that repository and the message after it
+            .onAppear { if let c = client.pendingClone { client.pendingClone = nil; cloning = true; clone.repoText = c.repo; clone.text = c.text } }
         }.dataSheet()
+    }
+    // a done clone: its thread, else its project, else just close
+    private func finish(_ a: Clone.After) {
+        switch a {
+        case .thread(let t): client.pendingThread = t
+        case .project(let p): client.focusProject = p
+        case .stay, .dismiss: break
+        }
+        dismiss()
+    }
+    private var folder: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            TextField(Tr.t("Folder on the hub's computer"), text: $path).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
+                .padding(.horizontal, 10).frame(height: 40).dbox().padding(12).accessibilityIdentifier("data.project.path")
+            if !error.isEmpty { Text(Tr.t(error)).dmono(12).foregroundStyle(BackplaneDesign.bad).padding(.horizontal, 12).padding(.bottom, 8) }
+            DLine()
+            List {
+                if let d = dirs {
+                    if d.parent != d.path { row("..", "arrow.up.left", d.parent) }
+                    ForEach(d.dirs, id: \.self) { n in row(n, "folder", d.path.hasSuffix("/") ? d.path + n : d.path + "/" + n) }
+                }
+            }.listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
+        }
     }
     private func go(_ p: String?) async {
         do { let d = try await client.dirs(p); dirs = d; path = d.path; error = "" } catch { self.error = error.localizedDescription }
@@ -1092,6 +1111,8 @@ struct DataThreadView: View {
                 case "intent": notice = "Intent saved"; text = ""; client.setDraft(id, "")
                 // /project: alone, the Add project sheet; made, its first thread opens; a folder that holds something, Add existing under the reason
                 case "project": text = ""; client.setDraft(id, ""); client.openAddProject = true
+                // /project <address>: Add project opens on Clone from git with it, the rest of the line as the first thread's first message
+                case "clone": text = ""; client.setDraft(id, ""); client.pendingClone = (r.repo ?? "", r.text ?? ""); client.openAddProject = true
                 case "made": text = ""; client.setDraft(id, ""); notice = r.note ?? ""; if let th = r.thread, !th.isEmpty { client.pendingThread = th }
                 case "exists": notice = r.error ?? ""; existing = r.path
                 default: text = ""; client.setDraft(id, "")

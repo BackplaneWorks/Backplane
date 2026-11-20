@@ -99,6 +99,13 @@ pub fn project_args(rest: &str) -> Result<Option<(String, String)>, String> {
     project_folder_ok(&path)?;
     Ok(Some((path, text)))
 }
+/// `/project <address> [first message]`: a repository's address (a URL, `git@host:...`, `host.tld/o/r`: never `owner/repo`, which is a folder
+/// here) and the rest; None when the first word is no address.
+pub fn clone_args(rest: &str) -> Option<(String, String)> {
+    let rest = rest.trim();
+    let (first, text) = rest.split_once(char::is_whitespace).map(|(a, b)| (a, b.trim())).unwrap_or((rest, ""));
+    crate::commands::clone::parse_address(first).map(|_| (first.to_string(), text.to_string()))
+}
 /// Np.name: a folder the command can make. Never a control character, a `.` or `..` part; a bare name (no folder before it) holds none of
 /// the characters a folder's name cannot have on some system (`< > : " | ? * \`) and is at most 255 bytes.
 pub fn project_folder_ok(path: &str) -> Result<(), String> {
@@ -154,6 +161,14 @@ fn run(cx: &SendCtx, session: &Value, sel: &str, w: Word) -> ActOut {
         // `/intent` alone has nothing to save, and saving nothing would empty the file: it opens the intent to edit
         Word::Intent(body) if body.is_empty() => intent_borrow(cx.hub, session, sel),
         Word::Intent(body) => ActOut { session_patch: json!({"rid": rid + 1}), cmds: vec![req("fab.intent", json!({"thread": sel, "text": body}))] },
+        // `/project <repository address> [first message]`: the Add project dialog on Clone from git, at its destination step (commands/clone)
+        Word::Project(rest) if clone_args(&rest).is_some() => {
+            let (repo, text) = clone_args(&rest).unwrap_or_default();
+            // (`@proj.text` empty: the dialog proposes where it goes, present/picker.rs)
+            let mut drafts = Map::new(); drafts.insert(sel.to_string(), json!(""));
+            for (k, v) in [("@proj.open", "1"), ("@proj.mode", "clone"), ("@proj.text", ""), ("@proj.clone", repo.as_str()), ("@proj.first", text.as_str()), ("@proj.job", ""), ("@proj.err", ""), ("@proj.nothread", ""), ("@menu", "")] { drafts.insert(k.into(), json!(v)); }
+            ActOut { session_patch: json!({"drafts": drafts}), cmds: compose(cx.hub, sel, "") }
+        }
         Word::Project(rest) => match project_args(&rest) {
             Err(e) => say(&e),
             // `/project` alone: the Add project dialog, as its button opens it (commands/actions.rs `picker-open`); the client focuses its field
@@ -510,6 +525,16 @@ mod tests {
         assert_eq!(word_of("/settle"), Some(Word::Settle)); assert_eq!(word_of(" /settle \n"), Some(Word::Settle)); assert_eq!(word_of("/settled"), None);
         assert_eq!(word_of("/give >x note"), Some(Word::Give)); assert_eq!(word_of("/secret"), Some(Word::Secret("".into()))); assert_eq!(word_of("/secret github-token"), Some(Word::Secret("github-token".into())));
         assert_eq!(word_of("/intent\n# Goal\nlamp"), Some(Word::Intent("# Goal\nlamp".into()))); assert_eq!(word_of("/compact"), None); assert_eq!(word_of("hi /btw"), None); assert_eq!(word_of("/btwx"), None);
+    }
+    // `/project <address>`: Add project on Clone from git, at its destination step, the rest kept as the first message; owner/repo stays a folder
+    #[test] fn slash_project_with_an_address_opens_clone_from_git() {
+        if crate::commands::clone::parse_address("https://github.com/o/kit").is_none() { return } // screen-audit's build has no clone module (its stub takes no address)
+        assert_eq!(clone_args("https://github.com/o/kit.git lay it out"), Some(("https://github.com/o/kit.git".into(), "lay it out".into())));
+        assert_eq!(clone_args("git@github.com:o/kit.git"), Some(("git@github.com:o/kit.git".into(), "".into())));
+        assert_eq!(clone_args("o/kit"), None); assert_eq!(clone_args("~/x hi"), None);
+        let o = send(&cx(), &with("/project https://github.com/o/kit go")).unwrap(); let d = &o.session_patch["drafts"];
+        assert_eq!((d["@proj.open"].as_str(), d["@proj.mode"].as_str(), d["@proj.clone"].as_str(), d["@proj.first"].as_str(), d[T].as_str()), (Some("1"), Some("clone"), Some("https://github.com/o/kit"), Some("go"), Some("")));
+        assert!(o.cmds.iter().all(|c| c["type"] != "send"), "nothing is cloned until the person says where");
     }
     #[test] fn slash_project_reads_its_folder_and_first_message() {
         assert_eq!(word_of("/project ~/x Build a sensor puck"), Some(Word::Project("~/x Build a sensor puck".into()))); assert_eq!(word_of("/new-project puck"), Some(Word::Project("puck".into())));

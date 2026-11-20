@@ -41,6 +41,8 @@ pub struct Projects {
     /// What the person picked on each project's runs-on line here (`run-on`): project id -> the target project id (`<link>~<id>` for a linked
     /// machine's). A page's Send never goes to another machine than this (`page_send`)
     pub picked: std::collections::HashMap<String, String>,
+    /// The clone this window went to by itself already (`auto_open`)
+    pub clone_opened: String,
 }
 
 /// What Edit puts in the composer: `/intent` and the goal and notes (the hub's `intent_edit`; its Send saves them), the template for none.
@@ -91,20 +93,28 @@ pub fn boards(snap: &Value, card: &Value, root: &str) -> Vec<String> {
     out.truncate(12); out
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct Item { pub label: String, pub action: String, pub value: String, pub kind: String, /// "project", "KiCad", "git" or none: what the folder is or looks like.
     pub tag: String, /// What the field shows on going into the row ("~/x/"); an older hub sends none and the value is shown.
     pub field: String, /// The project this folder is already (its id): a click opens its page.
-    pub project: String }
+    pub project: String, /// A suggested repository's description; a toggle's state; a note's tone ("bad": a refusal).
+    pub sub: String, pub on: bool, pub tone: String }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Folders { pub text: String, pub hint: String, pub error: String, pub items: Vec<Item>, /// Folders that match past the rows sent.
-    pub more: u64 }
+    pub more: u64, /// Clone from git (docs/CLONE.md): "clone" or "folder"; the two tabs; the field's icon ("git"); the repository being cloned (its
+    /// label, Change goes back); the clone under way (`job`, as the hub sends it) and GitHub's sign-in (`signin`), Null when there is none.
+    pub mode: String, pub tabs: Vec<Item>, pub icon: String, pub repo: Option<Item>, pub job: Value, pub signin: Value }
 
 pub fn folders(data: &Value) -> Option<Folders> {
     let f = data["folders"].as_object()?;
     let s = |k: &str| f.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-    let items = f.get("items").and_then(Value::as_array).into_iter().flatten().take(200).map(|i| Item { label: string(i, "label"), action: string(i, "action"), value: string(i, "value"), kind: string(i, "kind"), tag: string(i, "tag"), field: string(i, "field"), project: string(i, "project") }).collect();
-    Some(Folders { text: s("text"), hint: s("hint"), error: s("error"), items, more: f.get("more").and_then(Value::as_u64).unwrap_or(0) })
+    let item = |i: &Value| Item { label: string(i, "label"), action: string(i, "action"), value: string(i, "value"), kind: string(i, "kind"), tag: string(i, "tag"), field: string(i, "field"), project: string(i, "project"),
+        sub: string(i, "sub"), on: i["on"] == true, tone: string(i, "tone") };
+    let items = f.get("items").and_then(Value::as_array).into_iter().flatten().take(200).map(item).collect();
+    let tabs = f.get("tabs").and_then(Value::as_array).into_iter().flatten().map(item).collect();
+    let repo = f.get("repo").filter(|r| r.is_object()).map(item);
+    Some(Folders { text: s("text"), hint: s("hint"), error: s("error"), items, more: f.get("more").and_then(Value::as_u64).unwrap_or(0),
+        mode: s("mode"), tabs, icon: s("icon"), repo, job: f.get("job").cloned().unwrap_or(Value::Null), signin: f.get("signin").cloned().unwrap_or(Value::Null) })
 }
 pub fn query(data: &Value) -> String { string(&data["search"], "query") }
 /* i18n-ok: the hint, drawn through trs by the composer */ pub fn hint(data: &Value) -> String { let h = string(&data["search"], "hint"); if h.is_empty() { "Search projects".into() } else { h } }
@@ -149,7 +159,7 @@ pub fn give_back(text: String, box_now: &str, restore: &mut Option<String>) -> O
     if box_now.trim().is_empty() { Some(text) } else { *restore = Some(text); None }
 }
 /// The rows the arrow keys walk: the folders and "..", never the Add row (that is Enter in the field) or a note.
-fn walkable(i: &Item) -> bool { !i.action.is_empty() && i.kind != "add" }
+fn walkable(i: &Item) -> bool { !i.action.is_empty() && i.kind != "add" && i.kind != "toggle" }
 /// Up and Down in the picker: from the field (none) Down takes the first folder row; Up from the first goes back to the field; the ends hold.
 /// A row that is gone (the hub's rows changed) counts as the field.
 pub fn step(items: &[Item], cur: Option<usize>, d: i32) -> Option<usize> {
@@ -203,7 +213,7 @@ pub fn back(before: &str, now: &str) -> Option<String> {
 pub fn hints(f: &Folders, typed: &str, ix: Option<usize>) -> Vec<(&'static str, &'static str)> {
     let mut out = vec![];
     if f.items.iter().any(walkable) { out.push(("↑↓", "select")); }
-    if let Some(i) = marked(f, ix) { out.push(("Enter", if matches!(take(i), Key::Open(_)) { "open project" } else { "go into" })); } // i18n-ok: a key and its words, drawn through trs
+    if let Some(i) = marked(f, ix) { out.push(("Enter", match take(i) { Key::Open(_) => "open project", Key::Run(..) => "pick", _ => "go into" })); } // i18n-ok: a key and its words, drawn through trs
     if marked(f, ix).is_some() || (!typed.ends_with('/') && f.items.iter().any(|i| i.kind == "dir")) { out.push(("Tab", "complete")); }  // i18n-ok: a key and its words, drawn through trs
     out
 }
@@ -217,7 +227,9 @@ pub fn fit(s: &str, max: usize) -> String {
 /// The marked row once the hub's rows are for what the field holds (until then the mark is on a row of an older list and no key takes it).
 fn marked_now<'a>(f: &'a Folders, typed: &str, ix: Option<usize>) -> Option<&'a Item> { if f.text == typed { marked(f, ix) } else { None } }
 /// What taking a folder row does: a project's page is opened, any other folder is gone into.
-fn take(i: &Item) -> Key { if i.kind == "dir" && !i.project.is_empty() { Key::Open(i.project.clone()) } else { Key::Cd(into(i)) } }
+fn take(i: &Item) -> Key {
+    if i.kind == "dir" && !i.project.is_empty() { Key::Open(i.project.clone()) } else if matches!(i.kind.as_str(), "dir" | "up") { Key::Cd(into(i)) } else { Key::Run(i.action.clone(), i.value.clone()) }
+}
 /// Enter: the marked folder is taken; with none marked it is the Add or Create row (`submit_cmd`).
 pub fn enter(data: &Value, typed: &str, ix: Option<usize>) -> Option<Key> {
     let f = folders(data)?;
@@ -251,7 +263,24 @@ fn cd(this: &mut Backplane, path: String, cx: &mut Context<Backplane>) {
     cx.notify();
 }
 fn key(this: &mut Backplane, k: Option<Key>, cx: &mut Context<Backplane>) {
-    match k { Some(Key::Cd(p)) => cd(this, p, cx), Some(Key::Open(pid)) => { let _ = this.tx.try_send(close_cmd()); this.open_project(pid, cx); } Some(Key::Run(a, v)) => { if a == "proj-add" || a == "proj-new" { this.arm_new(); } let _ = this.tx.try_send(Command::Action(a, v)); cx.notify(); } None => {} }
+    match k { Some(Key::Cd(p)) => cd(this, p, cx), Some(Key::Open(pid)) => { let _ = this.tx.try_send(close_cmd()); this.open_project(pid, cx); }
+        Some(Key::Run(a, v)) if a == "proj-clone-open" => open_clone(this, &v, cx),
+        Some(Key::Run(a, v)) => { if a == "proj-clone-go" || a.starts_with("proj-mode") || a == "proj-clone" || a == "proj-clone-back" { this.screens.projects.folder_ix = None; } if a == "proj-add" || a == "proj-new" { this.arm_new(); } let _ = this.tx.try_send(Command::Action(a, v)); cx.notify(); } None => {} }
+}
+/// A clone that is done (`<thread>\u{1f}<project>`, the hub's): the dialog shuts and the window goes to its first thread, else its project's page.
+fn open_clone(this: &mut Backplane, v: &str, cx: &mut Context<Backplane>) {
+    let (th, pid) = v.split_once('\u{1f}').unwrap_or((v, ""));
+    let _ = this.tx.try_send(close_cmd());
+    if !th.is_empty() { this.screens.projects.made = Some((th.to_string(), std::time::Instant::now())); this.adopt_new(cx); } else if !pid.is_empty() { this.open_project(pid.to_string(), cx); }
+    cx.notify();
+}
+/// The clone the window goes to by itself: done, with nothing to read first (the hub's `job.open`), once per job.
+pub fn auto_open(f: &Folders, done: &mut String) -> Option<String> {
+    let id = f.job["id"].as_str().unwrap_or("");
+    let o = f.job.get("open").filter(|o| o.is_object())?;
+    if id.is_empty() || done == id { return None }
+    *done = id.to_string();
+    Some(format!("{}\u{1f}{}", o["thread"].as_str().unwrap_or(""), o["project"].as_str().unwrap_or("")))
 }
 pub fn close_cmd() -> Command { Command::Action("proj-close".into(), String::new()) }
 /// Esc leaves the folder picker while it is open.
@@ -327,6 +356,7 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
     match folders(&this.data) {
         None => { this.screens.projects.folder_open = false; this.screens.projects.sent_f.clear(); this.screens.projects.folder_ix = None; }
         Some(f) => {
+            if let Some(v) = auto_open(&f, &mut this.screens.projects.clone_opened) { open_clone(this, &v, cx); return; }
             if this.screens.projects.folder.is_none() {
                 let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
                 // the arrows and Tab come here as the popup's keys do (one line: they have nothing to move in the field)
@@ -392,13 +422,28 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, p: &Projects, data: &Value
         let row = crate::ui::with_rect(div().id(SharedString::from(format!("folder-{i}"))), move || format!("folder-{i}")).flex().flex_none().items_center().gap_2().w_full().when(faint, |d| d.opacity(0.45));
         match it.kind.as_str() {
             "add" => top.push(row.h(crate::scale::tpx(34.)).px(px(11.)).bg(c("accent")).text_size(crate::scale::tpx(13.)).text_color(c("on-accent")).when(!faint, |d| d.cursor_pointer().hover(|s| s.opacity(0.9)))
-                .child(crate::ui::ic(light, if a == "proj-add" { "plus" } else if a == "proj-new" { "folder-plus" } else { "folder-down" }, 15., "on-accent"))
+                .child(crate::ui::ic(light, if a == "proj-add" { "plus" } else if a == "proj-new" { "folder-plus" } else if a.starts_with("proj-clone") { "git-branch" } else { "folder-down" }, 15., "on-accent"))
                 .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(fit(&crate::i18n::trs(&it.label), 72)))
                 .when(mark.is_none() && !faint, |d| d.child(div().flex_none().text_size(crate::scale::tpx(11.)).opacity(0.7).child("Enter" /* i18n-ok: a key's name */)))
                 .on_click(hit).into_any_element()),
-            "note" => top.push(row.h(crate::scale::tpx(34.)).px(px(10.)).border_1().border_color(c("line")).text_size(crate::scale::tpx(13.)).text_color(c("dim"))
-                .child(crate::ui::ic(light, "circle-check", 14., "ok"))
+            "note" => top.push(row.h(crate::scale::tpx(34.)).px(px(10.)).border_1().border_color(c(if it.tone == "bad" { "bad" } else { "line" })).text_size(crate::scale::tpx(13.)).text_color(c("dim"))
+                .child(if it.tone == "bad" { crate::ui::ic(light, "x", 14., "bad") } else if it.action.is_empty() && it.label.ends_with('…') { crate::ui::ic(light, "clock", 14., "dim") } else { crate::ui::ic(light, "circle-check", 14., "ok") })
                 .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(fit(&crate::i18n::trs(&it.label), 76))).into_any_element()),
+            // Clone from git's "Start a thread in it": a box that is ticked or not
+            "toggle" => top.push(row.h(crate::scale::tpx(30.)).px(px(10.)).text_size(crate::scale::tpx(13.)).text_color(c("text")).cursor_pointer()
+                .child(div().size(px(14.)).flex().items_center().justify_center().border_1().border_color(c(if it.on { "accent" } else { "line" })).when(it.on, |d| d.bg(c("accent")).child(div().size(px(6.)).bg(c("on-accent")))))
+                .child(div().flex_1().child(crate::i18n::trs(&it.label))).on_click(hit).into_any_element()),
+            // a suggested repository (the person's on GitHub): its name, what it is, "private"
+            "repo" => {
+                dirs += 1; let on = mark == Some(i);
+                list = list.child(row.min_h(crate::scale::tpx(28.)).py(px(3.)).px(px(10.)).border_l_2().border_color(if on { c("accent") } else { gpui::Rgba { r: 0., g: 0., b: 0., a: 0. } })
+                    .text_size(crate::scale::tpx(13.)).text_color(c("text")).when(on, |d| d.bg(c("raise"))).when(live && !on && !faint, |d| d.cursor_pointer().hover(|s| s.bg(c("panel"))))
+                    .child(crate::ui::ic(light, "git-branch", 14., "accent"))
+                    .child(div().flex_none().whitespace_nowrap().child(crate::i18n::trs(&it.label)))
+                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(it.sub.clone()))
+                    .when(!it.tag.is_empty(), |d| d.child(div().flex_none().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(crate::i18n::trs(&it.tag))))
+                    .on_click(hit));
+            }
             kind => {
                 let up = kind == "up"; if !up { dirs += 1; }
                 let on = mark == Some(i); let added = it.tag == "project";
@@ -423,14 +468,98 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, p: &Projects, data: &Value
     Some(div().id("folders-q").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().items_center().px_6().pt(px(56.)).pb_4()
         .child(div().flex().flex_col().w_full().max_w(px(680.)).flex_1().min_h_0().gap_2()
             .child(div().flex().flex_none().items_center().justify_between().pb_1().child(div().text_size(crate::scale::tpx(15.)).font_weight(FontWeight::SEMIBOLD).child(crate::i18n::trs("Add project"))).child(cancel))
-            .children(p.folder.clone().map(|i| div().flex().flex_none().items_center().gap_2().w_full().h(crate::scale::tpx(36.)).px(px(10.)).border_1().border_color(c(if f.error.is_empty() { "line" } else { "bad" })).bg(c("view")).text_size(crate::scale::tpx(14.))
-                .child(crate::ui::ic(light, "folder", 15., "dim")).child(div().flex_1().min_w_0().child(i))))
+            .when(!f.tabs.is_empty(), |d| d.child(tabs_row(cx, light, &f.tabs)))
+            .children(f.repo.clone().map(|r| repo_row(cx, light, &r)))
+            .when(!f.job.is_object(), |d| d.children(p.folder.clone().map(|i| div().flex().flex_none().items_center().gap_2().w_full().h(crate::scale::tpx(36.)).px(px(10.)).border_1().border_color(c(if f.error.is_empty() { "line" } else { "bad" })).bg(c("view")).text_size(crate::scale::tpx(14.))
+                .child(crate::ui::ic(light, if f.icon == "git" { "git-branch" } else { "folder" }, 15., "dim")).child(div().flex_1().min_w_0().child(i)))))
             .when(!f.error.is_empty(), |d| d.child(div().flex_none().w_full().px(px(10.)).text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(crate::i18n::trs(&f.error))))
+            .when(f.job.is_object(), |d| d.child(job_box(cx, light, &f.job)))
+            .when(f.signin.is_object(), |d| d.child(signin_box(cx, light, &f.signin)))
             .children(top)
             .child(list)
             // the keys sit right under the last row (the list takes only the height of its rows), not at the foot of the window
             .when(!keys.is_empty(), |d| d.child(div().flex().flex_none().gap_4().h(crate::scale::tpx(22.)).px(px(12.)).items_end().text_size(crate::scale::tpx(11.)).text_color(c("faint")).children(keys))))
         .into_any_element())
+}
+
+fn run_cmd(action: String, value: String) -> impl Fn(&mut Backplane, &gpui::ClickEvent, &mut Window, &mut Context<Backplane>) + 'static {
+    move |this, _, _, cx| key(this, Some(Key::Run(action.clone(), value.clone())), cx)
+}
+/// Open folder | Clone from git
+fn tabs_row(cx: &mut Context<Backplane>, light: bool, tabs: &[Item]) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let mut row = div().flex().flex_none().gap_1().w_full();
+    for (n, t) in tabs.iter().enumerate() {
+        let id = format!("proj-tab-{n}");
+        row = row.child(crate::ui::with_rect(div().id(SharedString::from(id.clone())), move || id.clone()).h(crate::scale::tpx(28.)).px(px(12.)).flex().items_center().text_size(crate::scale::tpx(13.))
+            .border_b_2().border_color(if t.on { c("accent") } else { gpui::Rgba { r: 0., g: 0., b: 0., a: 0. } }).text_color(c(if t.on { "text" } else { "dim" }))
+            .when(!t.on, |d| d.cursor_pointer().hover(|s| s.text_color(c("text")))).child(crate::i18n::trs(&t.label))
+            .on_click(cx.listener(run_cmd(t.action.clone(), t.value.clone()))));
+    }
+    row.into_any_element()
+}
+/// The repository the destination step clones, with Change (back to the repository step).
+fn repo_row(cx: &mut Context<Backplane>, light: bool, r: &Item) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    div().flex().flex_none().items_center().gap_2().w_full().h(crate::scale::tpx(28.)).px(px(10.)).text_size(crate::scale::tpx(13.)).text_color(c("text"))
+        .child(crate::ui::ic(light, "git-branch", 14., "accent")).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(r.label.clone()))
+        .child(crate::ui::with_rect(div().id("clone-change"), || "clone-change".to_string()).text_size(crate::scale::tpx(12.)).text_color(c("accent")).cursor_pointer().child(crate::i18n::trs("Change"))
+            .on_click(cx.listener(run_cmd(r.action.clone(), r.value.clone()))))
+        .into_any_element()
+}
+fn button(cx: &mut Context<Backplane>, light: bool, id: String, label: &str, primary: bool, action: String, value: String) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let rid = id.clone();
+    crate::ui::with_rect(div().id(SharedString::from(id)), move || rid.clone()).h(crate::scale::tpx(28.)).px(px(12.)).flex().items_center().text_size(crate::scale::tpx(13.)).cursor_pointer()
+        .when(primary, |d| d.bg(c("accent")).text_color(c("on-accent")).hover(|s| s.opacity(0.9))).when(!primary, |d| d.border_1().border_color(c("line")).text_color(c("text")).hover(|s| s.bg(c("raise"))))
+        .child(crate::i18n::trs(label)).on_click(cx.listener(run_cmd(action, value))).into_any_element()
+}
+/// The share of the bar a clone's progress fills (none: the phase is drawn without a bar).
+pub fn bar(job: &Value) -> Option<f32> { job["pct"].as_u64().map(|p| (p.min(100) as f32) / 100.) }
+/// The clone under way: what it is doing (git's phase, its percent and rate), its notes, why it failed, and what can be done now.
+fn job_box(cx: &mut Context<Backplane>, light: bool, j: &Value) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let s = |k: &str| j[k].as_str().unwrap_or("").to_string();
+    let state = s("state");
+    let line = { let mut l = crate::i18n::trs(&s("phase")); if let Some(p) = j["pct"].as_u64() { l = format!("{l} {p}%"); } let d = s("detail"); if !d.is_empty() { l = format!("{l} · {d}"); } l };
+    let mut col = div().id("clone-job").flex().flex_col().flex_none().gap_2().w_full().p(px(12.)).border_1().border_color(c(if state == "failed" { "bad" } else { "line" })).bg(c("view"))
+        .child(div().text_size(crate::scale::tpx(14.)).text_color(c("text")).child(s("title")));
+    if state == "running" {
+        let w = bar(j);
+        col = col.child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(line))
+            .child(div().h(px(4.)).w_full().bg(c("raise")).children(w.map(|w| div().h_full().w(relative(w)).bg(c("accent")))));
+    }
+    if state == "failed" { col = col.child(div().text_size(crate::scale::tpx(13.)).text_color(c("bad")).child(crate::i18n::trs(&s("error")))); }
+    for n in j["notes"].as_array().into_iter().flatten().filter_map(Value::as_str) { col = col.child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(crate::i18n::trs(n))); }
+    let mut btns = div().flex().gap_2().pt_1();
+    for (n, a) in j["actions"].as_array().into_iter().flatten().enumerate() {
+        let g = |k: &str| a[k].as_str().unwrap_or("").to_string();
+        btns = btns.child(button(cx, light, format!("clone-act-{n}"), &g("label"), g("kind") == "primary", g("action"), g("value")));
+    }
+    col.child(btns).into_any_element()
+}
+/// GitHub's device sign-in: the code to enter and where (any device), then whether it worked.
+fn signin_box(cx: &mut Context<Backplane>, light: bool, si: &Value) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let s = |k: &str| si[k].as_str().unwrap_or("").to_string();
+    let mut col = div().id("clone-signin").flex().flex_col().flex_none().gap_2().w_full().p(px(12.)).border_1().border_color(c("line")).bg(c("view")).text_size(crate::scale::tpx(13.)).text_color(c("text"));
+    match s("state").as_str() {
+        "waiting" => {
+            let (code, url) = (s("code"), s("url"));
+            let (code2, url2) = (code.clone(), url.clone());
+            col = col.child(div().child(crate::i18n::trs("Sign in to GitHub: enter this code at the address below, on any device.")))
+                .child(div().flex().items_center().gap_3()
+                    .child(div().text_size(crate::scale::tpx(20.)).font_weight(FontWeight::SEMIBOLD).child(code.clone()))
+                    .child(crate::ui::with_rect(div().id("signin-copy"), || "signin-copy".to_string()).cursor_pointer().child(crate::ui::ic(light, "copy", 14., "dim"))
+                        .on_click(cx.listener(move |_, _, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(code2.clone())))))
+                    .child(crate::ui::with_rect(div().id("signin-open"), || "signin-open".to_string()).flex().items_center().gap_1().cursor_pointer().text_color(c("accent")).child(url.clone()).child(crate::ui::ic(light, "external-link", 13., "accent"))
+                        .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&url2)))));
+        }
+        "starting" => col = col.child(div().text_color(c("dim")).child(crate::i18n::trs("Asking GitHub for a sign-in code…"))),
+        "done" => col = col.child(div().child(crate::i18n::trs("Signed in to GitHub. Try again."))),
+        _ => col = col.child(div().text_color(c("bad")).child(crate::i18n::trs(&s("error")))),
+    }
+    col.into_any_element()
 }
 
 /// The top bar's place while a project's page is on show: the project's name (its page stands for the selection, not the last thread).
@@ -696,7 +825,10 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
 pub fn controls(data: &Value) -> Vec<(String, String, Ctl)> {
     /* i18n-ok: ctl labels and ui: ids are what drivers press */ let mut out = vec![("ui:Add project".to_string(), "Add project".to_string(), Ctl::Node("picker-open".into(), String::new()))];
     if let Some(f) = folders(data) {
-        for (i, it) in f.items.iter().enumerate() { if !it.action.is_empty() { out.push((format!("folder-{i}"), it.label.clone(), Ctl::Node(it.action.clone(), it.value.clone()))); } }
+        for (i, it) in f.items.iter().enumerate() { if !it.action.is_empty() { out.push((format!("folder-{i}"), it.label.clone(), Ctl::Node(it.action.clone(), it.value.clone()))); } else if it.kind == "note" { out.push((format!("folder-note-{i}"), it.label.clone(), Ctl::Node(String::new(), String::new()))); } }
+        // Clone from git: the tabs and what the clone under way can do now
+        for (n, t) in f.tabs.iter().enumerate() { out.push((format!("proj-tab-{n}"), t.label.clone(), Ctl::Node(t.action.clone(), t.value.clone()))); }
+        for (n, a) in f.job["actions"].as_array().into_iter().flatten().enumerate() { out.push((format!("clone-act-{n}"), a["label"].as_str().unwrap_or("").to_string(), Ctl::Node(a["action"].as_str().unwrap_or("").to_string(), a["value"].as_str().unwrap_or("").to_string()))); }
         /* i18n-ok: ctl labels and ui: ids are what drivers press */ out.push(("folders-cancel".into(), "Cancel".into(), Ctl::Node("proj-close".into(), String::new())));
     }
     out
@@ -797,7 +929,7 @@ mod tests {
         assert_eq!(fit("Add ~/基板/日本語のとても長いフォルダ名/プロジェクト", 15), "Add …ルダ名/プロジェクト"); assert_eq!(fit("基板基板基板基板基板基板", 8), "…板基板基板基板"); assert_eq!(fit("éééé", 3), "éééé", "too narrow to cut: as it is");
         assert_eq!(fit(&"é ".repeat(20), 9).chars().count(), 9);
         assert_eq!(fresh("~/基板/É", "~/基板/éc"), Fresh::Same("éc".into())); assert_eq!(fresh("~/基板/", "~/基"), Fresh::Away);
-        let it = |l: &str| Item { label: l.into(), action: "proj-cd".into(), value: String::new(), kind: "dir".into(), tag: String::new(), field: String::new(), project: String::new() };
+        let it = |l: &str| Item { label: l.into(), action: "proj-cd".into(), value: String::new(), kind: "dir".into(), tag: String::new(), field: String::new(), project: String::new(), ..Default::default() };
         assert_eq!(shows(&it("Écran/"), &Fresh::Same("éc".into())), (true, false)); assert_eq!(shows(&it("基板/"), &Fresh::Same("é".into())), (false, false));
         assert_eq!(back("~/基板/", "~/基板").as_deref(), Some("~/")); assert_eq!(back("~/a/é/", "~/a/é").as_deref(), Some("~/a/")); assert_eq!(back("é/", "é"), None, "no folder above");
     }
@@ -902,5 +1034,21 @@ mod home_tests {
         assert_eq!(viewer_buttons(&snap).iter().map(|v| v.1).collect::<Vec<_>>(), ["board", "3d", "mech", "files"]);
         assert_eq!(viewer_buttons(&Value::Null).iter().map(|v| v.1).collect::<Vec<_>>(), ["files"]);
         assert_eq!((size_text(2048), size_text(3 << 20)), ("2 KB".to_string(), "3.0 MB".to_string()));
+    }
+    // Clone from git (docs/CLONE.md): the tabs, the repository and the clone are read; a repository row is taken by Enter as its action; a clone
+    // that is done with nothing to read is gone to once
+    #[test] fn the_clone_picture_reads_and_a_done_clone_opens_once() {
+        let j = |s: &str| -> Value { serde_json::from_str(s).unwrap() };
+        let d = j(r#"{"folders":{"text":"kit","mode":"clone","icon":"git","tabs":[{"label":"Open folder","action":"proj-mode","value":"folder","on":false},{"label":"Clone from git","action":"proj-mode","value":"clone","on":true}],
+            "items":[{"label":"Clone o/kit","action":"proj-clone","value":"kit","kind":"add"},{"label":"o/kit","action":"proj-clone","value":"o/kit","kind":"repo","sub":"a board","tag":"private"}]}}"#);
+        let f = folders(&d).unwrap(); assert_eq!((f.mode.as_str(), f.tabs.len(), f.tabs[1].on, f.items[1].sub.as_str()), ("clone", 2, true, "a board"));
+        assert_eq!(walk(&d, "kit", None, 1), Some((Some(1), 0)), "the suggestion is walked to");
+        assert_eq!(enter(&d, "kit", Some(1)), Some(Key::Run("proj-clone".into(), "o/kit".into())));
+        let done = j(r#"{"folders":{"text":"","mode":"clone","items":[],"job":{"id":"c1","state":"done","pct":100,"open":{"thread":"t9","project":"p9"}}}}"#);
+        let f = folders(&done).unwrap(); let mut seen = String::new();
+        assert_eq!(auto_open(&f, &mut seen), Some("t9\u{1f}p9".into())); assert_eq!(auto_open(&f, &mut seen), None, "once");
+        assert_eq!(bar(&f.job), Some(1.0));
+        let noted = j(r#"{"folders":{"text":"","items":[],"job":{"id":"c2","state":"done","notes":["Found 2 KiCad projects"]}}}"#);
+        assert_eq!(auto_open(&folders(&noted).unwrap(), &mut seen), None, "notes are read first");
     }
 }

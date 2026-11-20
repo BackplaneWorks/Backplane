@@ -23,7 +23,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -557,6 +557,8 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool
             let v = hub.setting(&crate::agents::review_mode::review_key(th)).await.unwrap_or_default();
             Ok(json!({"review":crate::agents::review_mode::bar(&v)})) }
         "dirs.list" => dirs(p),
+        // Clone from git (commands/clone): the clone runs on this hub's machine; its progress comes as `{"t":"d","k":"clone"}`
+        m if m.starts_with("clone.") => crate::commands::clone::call(hub, m, p).await.map_err(err),
         "project.add" => {
             let path = s(p, "path"); if path.is_empty() { return Err(err("path")) }
             let want = crate::plat::fs::canonicalize(path).map(|x| x.to_string_lossy().into_owned()).unwrap_or_else(|_| path.to_string());
@@ -792,6 +794,10 @@ fn live_pushes(f: &Value, subs: &mut Subs) -> Vec<Value> {
         "delta_end" => { if let Some(l) = subs.live.get_mut(&th) { l.end() } }
         // what a thread's queue strip shows changed with no line in the log (a message on its way to another machine: net/farsend.rs): ask thread.queue again
         "queue" => for sub in subs.threads(&th) { out.push(d(sub, "queue", json!({"thread":th}))) },
+        // a clone's progress (commands/clone): every app, each client follows the jobs it started; the repository list or GitHub's sign-in moved
+        "clone" => out.push(json!({"t":"d","k":"clone","clone":f["job"]})),
+        "clone.repos" => out.push(json!({"t":"d","k":"clone.repos"})),
+        "clone.signin" => out.push(json!({"t":"d","k":"clone.signin","signin":f["signin"]})),
         // the hub the person's home moved to (net/homemove.rs): the phone adds it by itself
         "info" => if let Some(m) = f["info"].as_object() {
             // the hub offer, and what the management windows and checks draw (feature "mgmt"): the phones show the same panels
@@ -840,6 +846,7 @@ fn waits_far(v: &Value) -> bool {
     let (m, p) = (s(v, "m"), v.get("p").unwrap_or(&Value::Null));
     if m.starts_with("term.") { return term::far_wait(m, p) }
     if matches!(m, "subscribe" | "unsubscribe" | "thread.entries" | "link.resolve") { return false }
+    if m == "clone.repos" || m == "clone.signin" { return true } // gh may take seconds: answered later, the socket keeps answering meanwhile
     machines::is_far(s(p, "thread")) || machines::is_far(s(p, "project")) || matches!(m, "viewer.info" | "viewer.probe" | "viewer.watch")
 }
 /// Who owns a `data/1` WebSocket connection.
