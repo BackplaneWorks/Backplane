@@ -2980,6 +2980,27 @@ fn held_elsewhere(sock: &str, kind: &str) -> Option<String> {
         .then(|| format!("{} is open in another KiCad: not shown until the person answers", Path::new(&doc).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()))
 }
 
+/// #1344: how the start's show of `active` went, as the hub's log line ("first show of PCB: ok after N ms, its frames [...]" / "FAILED after
+/// N ms: why"), and the notice the pane shows when it failed: KiCad refused or never answered, or answered and has no frame of that
+/// editor. Unknown (its frames could not be read after a show that worked): logged, no notice. Pure.
+pub fn first_show_outcome(active: &str, ms: u64, r: &Result<Option<Vec<Frame>>, String>) -> (String, Option<Value>) {
+    let kind = canon_frame(active);
+    let name = match kind { "PCB" => "board", "SCH" => "schematic", "PCB_3D" => "3D view", "SYMBOL_EDITOR" => "Symbol Editor", "FOOTPRINT_EDITOR" => "Footprint Editor", _ => "editor" };
+    let notice = |why: &str| json!({"kind": "first_show_failed", "frame": kind, "error": true,
+        "title": format!("The {name} did not open in KiCad"), "detail": format!("{why}; its tab above opens it again")});
+    match r {
+        Ok(Some(frames)) => {
+            let ours: Vec<String> = frames.iter().filter(|f| f.kind == kind).map(|f| format!("{}{}", f.kind, if f.shown { " shown" } else { "" })).collect();
+            if ours.is_empty() {
+                let why = format!("KiCad answered but has no {kind} frame");
+                (format!("first show of {kind}: FAILED after {ms} ms: {why}"), Some(notice(&why)))
+            } else { (format!("first show of {kind}: ok after {ms} ms, its frames {ours:?}"), None) }
+        }
+        Ok(None) => (format!("first show of {kind}: shown after {ms} ms, frames unknown (GetFrames failed)"), None),
+        Err(e) => (format!("first show of {kind}: FAILED after {ms} ms: {e}"), Some(notice(e))),
+    }
+}
+
 /// Show `kind` in fork mode and hide every other currently-shown frame via `HideFrame` so GTK3/wxMSW owns frame map state cleanly.
 async fn switch_fork_frame(
     me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, kind: &str, doc: &str, item: &str, remount: bool, focus: bool,
@@ -3522,12 +3543,11 @@ async fn spawn_gui_session(
         // #1344: the start's show of the editor asked for, and how it went (an Err here was dropped without a word: a blank pane after Ready)
         let t_show = std::time::Instant::now();
         let first = switch_fork_frame(&me, &sock, &desc, &active, "", "", false, false).await;
-        let opened = |f: &Vec<Frame>| f.iter().filter(|x| x.kind == canon_frame(&active)).map(|x| format!("{}{}", x.kind, if x.shown { " shown" } else { "" })).collect::<Vec<_>>();
-        match &first {
-            Ok(Some((_, _, f))) => eprintln!("kicad embed: {pro}: first show of {active}: ok after {} ms, its frames {:?}", t_show.elapsed().as_millis(), opened(f)),
-            Ok(None) => eprintln!("kicad embed: {pro}: first show of {active}: shown after {} ms, frames unknown (GetFrames failed)", t_show.elapsed().as_millis()),
-            Err(e) => eprintln!("kicad embed: {pro}: first show of {active}: FAILED after {} ms: {e}", t_show.elapsed().as_millis()),
-        }
+        let (line, notice) = first_show_outcome(&active, t_show.elapsed().as_millis() as u64, &first.as_ref().map(|o| o.as_ref().map(|(_, _, f)| f.clone())).map_err(|e| e.clone()));
+        eprintln!("kicad embed: {pro}: {line}");
+        // a first show that failed is said in the pane (the session's notices: "KiCad says: …"), never a blank pane with nothing said; the
+        // editor's tab shows it again (a tab press asks KiCad once more)
+        if let Some(n) = notice { let _ = me.send(Msg::Notice { pro: pro.clone(), gen, notice: n }); }
         if let Ok(Some((h2, ev2, f2))) = first {
             holder = h2;
             if !ev2.is_empty() { events_sock = ev2; }
@@ -4003,6 +4023,22 @@ mod tests {
         assert_eq!(pane_key_from(true, "gpui-1-2", false, Some(7)), None, "that window not connected (quit, or between connections): no pane to follow into");
         assert_eq!(pane_key_from(true, "", false, Some(7)).as_deref(), Some("c7"), "a client with no cid: its attaching connection, as before");
         assert_eq!(pane_key_from(false, "gpui-1-2", true, Some(7)), None, "KiCad in no pane (parked, detached, not ready)");
+    }
+    #[test] fn a_start_whose_first_show_failed_says_so_in_the_pane_and_the_log() {
+        let f = |kind: &str, shown: bool| Frame { kind: kind.into(), doc: String::new(), title: String::new(), modified: false, shown, realized: shown, xid: 1, min_w: 0, min_h: 0 };
+        let (line, n) = first_show_outcome("PCB", 2400, &Ok(Some(vec![f("PCB", true), f("SCH", false)])));
+        assert_eq!(line, "first show of PCB: ok after 2400 ms, its frames [\"PCB shown\"]"); assert!(n.is_none(), "shown: nothing to say");
+        let (line, n) = first_show_outcome("PCB", 1300, &Err("KiCad answered AS_BUSY: a task is running".into()));
+        assert_eq!(line, "first show of PCB: FAILED after 1300 ms: KiCad answered AS_BUSY: a task is running");
+        let n = n.expect("a failed first show is said in the pane");
+        assert_eq!((n["kind"].clone(), n["frame"].clone(), n["error"].clone()), (json!("first_show_failed"), json!("PCB"), json!(true)));
+        assert_eq!(n["title"], json!("The board did not open in KiCad"));
+        assert!(n["detail"].as_str().unwrap().contains("AS_BUSY") && n["detail"].as_str().unwrap().contains("its tab above opens it again"));
+        let (line, n) = first_show_outcome("SCH", 900, &Ok(Some(vec![f("PCB", true)])));
+        assert!(line.contains("FAILED") && line.contains("no SCH frame"), "answered but nothing opened (the original sighting): {line}");
+        assert_eq!(n.unwrap()["title"], json!("The schematic did not open in KiCad"));
+        let (line, n) = first_show_outcome("PCB", 50, &Ok(None));
+        assert!(line.contains("frames unknown") && n.is_none(), "unknown is logged, not put to the person");
     }
     #[cfg(unix)]
     #[test] fn a_restart_sweep_removes_only_this_hosts_unheld_locks() {
