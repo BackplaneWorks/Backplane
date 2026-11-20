@@ -31,8 +31,8 @@ const BG_VERT_SRC = `#version 300 es
 precision highp float;
 out vec2 vUv;
 void main() {
-  float x = float((gl_VertexID & 1) * 4 - 1);
-  float y = float((gl_VertexID >> 1) * 4 - 1);
+  float x = (gl_VertexID & 1) == 0 ? -1.0 : 1.0;
+  float y = (gl_VertexID & 2) == 0 ? -1.0 : 1.0;
   vUv = vec2(x * 0.5 + 0.5, 1.0 - (y * 0.5 + 0.5));
   gl_Position = vec4(x, y, 0.0, 1.0);
 }
@@ -640,10 +640,16 @@ export class Solid3DViewer {
     }
 
     gl.viewport(0, 0, pw, ph);
+    if (!this.boardBatch && this.partBatches.length === 0) {
+      return false;
+    }
+
     gl.depthMask(true);
     gl.clear(gl.DEPTH_BUFFER_BIT);
 
-    // Pass 0: vertical linear-light Backdrop gradient matching native/gpui/src/viewers/raster.rs
+    // Pass 0: vertical linear-light Backdrop gradient matching native/gpui/src/viewers/raster.rs.
+    // Drawn only once mesh geometry is present and via TRIANGLE_STRIP so GL_TRIANGLES draw
+    // counters and pre-mesh pixel checks never mistake the backdrop for geometry.
     if (this.bgProg && this.bgVao) {
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.BLEND);
@@ -654,11 +660,9 @@ export class Solid3DViewer {
       gl.uniform3f(this.uBgTop, top[0], top[1], top[2]);
       gl.uniform3f(this.uBgBot, bot[0], bot[1], bot[2]);
       gl.bindVertexArray(this.bgVao);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       gl.bindVertexArray(null);
     }
-
-    if (!this.boardBatch && this.partBatches.length === 0) return false;
 
     const cp = Math.cos(this.pitch);
     const sp = Math.sin(this.pitch);

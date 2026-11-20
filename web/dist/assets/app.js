@@ -12,8 +12,8 @@ ${t}`:e,this.autoGrow(),this.textarea.focus()}showError(e){this.errorEl.textCont
 precision highp float;
 out vec2 vUv;
 void main() {
-  float x = float((gl_VertexID & 1) * 4 - 1);
-  float y = float((gl_VertexID >> 1) * 4 - 1);
+  float x = (gl_VertexID & 1) == 0 ? -1.0 : 1.0;
+  float y = (gl_VertexID & 2) == 0 ? -1.0 : 1.0;
   vUv = vec2(x * 0.5 + 0.5, 1.0 - (y * 0.5 + 0.5));
   gl_Position = vec4(x, y, 0.0, 1.0);
 }
