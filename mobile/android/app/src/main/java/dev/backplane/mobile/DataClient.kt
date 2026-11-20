@@ -68,6 +68,12 @@ object DataClient {
     val hubName get() = link?.let { Pairing.key(it) } ?: ""
 
     private var ws: WebSocket? = null
+    private var inflater: java.util.zip.Inflater? = null
+    private var shellHashes = HashMap<String, String>()
+    private var threadHashes = HashMap<String, Map<String, String>>()
+    private var threadIds = HashMap<String, List<String>>()
+    private var subEntriesById = HashMap<String, DEntry>()
+    private var subEntryIds = emptyList<String>()
     private var gen = 0
     private var nextId = 1
     private val calls = ConcurrentHashMap<Int, CompletableDeferred<JSONObject>>()
@@ -151,6 +157,7 @@ object DataClient {
     }
     private fun reset(clearDisk: Boolean = false) {
         saveJob?.cancel()
+        shellHashes.clear(); threadHashes.clear(); threadIds.clear(); subEntriesById.clear(); subEntryIds = emptyList()
         Swarms.reset(); notice = HubNotice(); star = null; telemetryNotice = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null
         if (clearDisk) link?.let { Pairing.key(it) }?.let { cacheFile(it).delete() }
     }
@@ -163,10 +170,10 @@ object DataClient {
         val g = ++gen
         conn = Conn.CONNECTING
         heard = System.currentTimeMillis()
-        val url = base + (if (base.contains("?")) "&" else "?") + "data=1&enc=json"
+        val url = base + (if (base.contains("?")) "&" else "?") + "data=1&enc=json&z=deflate"
         ws = http.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
             override fun onMessage(webSocket: WebSocket, text: String) { scope.launch { if (g == gen) { heard = System.currentTimeMillis(); handle(text, g) } } }
-            override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) { val b = bytes.toByteArray(); if (PlotStore.isPlot(b)) scope.launch { if (g == gen) plots.receive(b) } }
+            override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) { val b = bytes.toByteArray(); scope.launch { if (g == gen) { heard = System.currentTimeMillis(); handleBinary(b, g) } } }
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { scope.launch { lost(g, "closed") } }
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 val st = response?.code ?: 0
@@ -187,8 +194,37 @@ object DataClient {
         gen++
         watchdog?.cancel(); reconnect?.cancel()
         ws?.cancel(); ws = null
+        inflater?.end(); inflater = null
         calls.values.forEach { it.completeExceptionally(Exception(Msg.android_offline_cap)) }; calls.clear()
         listSub = 0; threadSub = 0
+    }
+    private fun handleBinary(bytes: ByteArray, g: Int) {
+        val inf = inflater
+        if (inf == null) {
+            if (PlotStore.isPlot(bytes)) plots.receive(bytes)
+            return
+        }
+        val raw = try {
+            inf.setInput(bytes)
+            val out = java.io.ByteArrayOutputStream(minOf(bytes.size * 3, 16 shl 20))
+            val buf = ByteArray(16384)
+            while (true) {
+                val n = inf.inflate(buf)
+                if (n > 0) {
+                    if (out.size() + n > (16 shl 20)) throw IllegalStateException("inflated frame exceeds 16 MiB")
+                    out.write(buf, 0, n)
+                } else {
+                    if (inf.needsDictionary()) throw IllegalStateException("unexpected deflate dictionary")
+                    if (inf.finished() || inf.needsInput()) break
+                }
+            }
+            out.toByteArray()
+        } catch (e: Exception) {
+            lost(g, "deflate")
+            return
+        }
+        if (PlotStore.isPlot(raw)) plots.receive(raw)
+        else handle(String(raw, Charsets.UTF_8), g)
     }
     fun foreground() { if (link != null && (conn != Conn.ONLINE || System.currentTimeMillis() - heard > 20_000)) connect() else if (link != null) scope.launch { syncPush() } }
     private fun lost(g: Int, why: String) {
@@ -207,6 +243,8 @@ object DataClient {
         when (o.optString("t")) {
             "hello" -> {
                 if (!o.optString("proto").startsWith("data/")) { failure = Msg.android_proto_old; lost(g, failure); return }
+                inflater?.end()
+                inflater = if (o.optString("z") == "deflate") java.util.zip.Inflater(true) else null
                 features = o.optJSONArray("features")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
                 notice = HubRescue.notice(o.optJSONObject("notice"))
                 heardMigrating(o.optJSONObject("migrating"))
@@ -323,11 +361,44 @@ object DataClient {
     // ---- sync
     private suspend fun synchronise(g: Int) {
         try {
-            listSub = call("subscribe", JSONObject().put("topic", "lists")).optInt("sub")
-            if (g != gen) return
-            coroutineScope { launch { loadProjects(g) }; launch { loadThreads(g) }; launch { runCatching { loadLocks() } }; launch { runCatching { loadStar() } }; launch { runCatching { loadTelemetryNotice() } }; launch { loadHistory() }; launch { Swarms.load() }; launch { loadSections() } }
+            if (has("shell") && machine.isEmpty()) {
+                val have = JSONObject().also { h -> shellHashes.forEach { (k, v) -> h.put(k, v) } }
+                val r = call("shell.sync", JSONObject().put("have", have).put("settled", 25))
+                if (g != gen) return
+                listSub = r.optInt("sub")
+                val removed = r.optJSONArray("removed")?.let { a -> (0 until a.length()).map { a.optString(it) }.toSet() } ?: emptySet()
+                val gotProjs = parseProjects(r.optJSONArray("projects"))
+                val changedPids = gotProjs.map { it.id }.toSet()
+                if (removed.isNotEmpty() || changedPids.isNotEmpty()) {
+                    projects = (projects.filter { it.id !in removed && it.id !in changedPids } + gotProjs).sortedByDescending { it.updatedAt }
+                    val gotThreads = parseThreads(r.optJSONArray("threads"))
+                    threads = (threads.filter { it.project !in removed && it.project !in changedPids } + gotThreads).sortedByDescending { it.updatedAt }
+                } else if (r.has("threads")) {
+                    val gotThreads = parseThreads(r.optJSONArray("threads"))
+                    if (gotThreads.isNotEmpty()) {
+                        val byId = threads.associateBy { it.id }.toMutableMap()
+                        for (t in gotThreads) byId[t.id] = t
+                        threads = byId.values.sortedByDescending { it.updatedAt }
+                    }
+                }
+                r.optJSONObject("sections")?.let { s ->
+                    sections = DSection.list(s.optJSONArray("sections"))
+                    groupsTo = DSection.groups(s.optJSONArray("groupsTo"))
+                } ?: r.optJSONArray("sections")?.let { a -> sections = DSection.list(a) }
+                r.optJSONObject("h")?.let { h ->
+                    val next = HashMap<String, String>()
+                    h.keys().forEach { k -> next[k] = h.optString(k) }
+                    shellHashes = next
+                }
+                listsLoaded = true; save()
+                coroutineScope { launch { runCatching { loadLocks() } }; launch { runCatching { loadStar() } }; launch { runCatching { loadTelemetryNotice() } }; launch { loadHistory() }; launch { Swarms.load() } }
+            } else {
+                listSub = call("subscribe", JSONObject().put("topic", "lists")).optInt("sub")
+                if (g != gen) return
+                coroutineScope { launch { loadProjects(g) }; launch { loadThreads(g) }; launch { runCatching { loadLocks() } }; launch { runCatching { loadStar() } }; launch { runCatching { loadTelemetryNotice() } }; launch { loadHistory() }; launch { Swarms.load() }; launch { loadSections() } }
+            }
             syncPush()
-            open?.let { subscribeThread(it, g); refreshThread(it) }
+            open?.let { if (has("open")) openThreadBundled(it, g) else { subscribeThread(it, g); refreshThread(it) } }
             subOpen?.let { (t, k) -> subSub = 0; runCatching { readSub(t, k, g) } }
             flushOutbox(g)
         } catch (e: Exception) { if (g == gen) failure = e.message ?: "" }
@@ -380,14 +451,21 @@ object DataClient {
         scope.launch { runCatching { readSub(thread, key, gen) } }
     }
     private suspend fun readSub(thread: String, key: String, g: Int) {
-        val s = call("subscribe", JSONObject().put("topic", "sub").put("thread", thread).put("key", key)).optInt("sub")
+        val subParams = JSONObject().put("topic", "sub").put("thread", thread).put("key", key).put("parts", 1)
+        val s = call("subscribe", subParams).optInt("sub")
         if (g != gen || subOpen != thread to key) { runCatching { call("unsubscribe", JSONObject().put("sub", s)) }; return }
         subSub = s
         val v = call("thread.sub", JSONObject().put("thread", thread).put("key", key)).optJSONObject("view")
-        if (subOpen == thread to key) { subView = v?.let(::parseSubView); subGone = v == null }
+        if (subOpen == thread to key) {
+            val parsed = v?.let(::parseSubView)
+            subView = parsed; subGone = parsed == null
+            subEntriesById.clear()
+            parsed?.entries?.forEach { subEntriesById[it.id] = it }
+            subEntryIds = parsed?.entries?.map { it.id } ?: emptyList()
+        }
     }
     fun closeSub() {
-        subOpen = null; subView = null; subGone = false
+        subOpen = null; subView = null; subGone = false; subEntriesById.clear(); subEntryIds = emptyList()
         val s = subSub; subSub = 0
         if (s != 0 && conn == Conn.ONLINE) scope.launch { runCatching { call("unsubscribe", JSONObject().put("sub", s)) } }
     }
@@ -481,7 +559,50 @@ object DataClient {
         if (conn != Conn.ONLINE) return
         val g = gen
         if (has("push")) scope.launch { runCatching { call("push.seen", JSONObject().put("thread", id)) }; syncPush() }
-        scope.launch { launch { runCatching { subscribeThread(id, g) } }; refreshThread(id) }
+        if (has("open")) {
+            scope.launch { openThreadBundled(id, g) }
+        } else {
+            scope.launch { launch { runCatching { subscribeThread(id, g) } }; refreshThread(id) }
+        }
+    }
+    private suspend fun openThreadBundled(id: String, g: Int) {
+        val have = JSONObject()
+        threadHashes[id]?.forEach { (k, v) -> have.put(k, v) }
+        (entries[id] ?: emptyList()).forEach { e -> if (e.h.isNotEmpty()) have.put(e.id, e.h) }
+        val r = runCatching { call("thread.open", JSONObject().put("thread", id).put("limit", 40).put("have", have)) }.getOrNull() ?: return
+        val sub = r.optInt("sub", 0)
+        if (g != gen || open != id) {
+            if (sub != 0) runCatching { call("unsubscribe", JSONObject().put("sub", sub)) }
+            return
+        }
+        if (sub != 0) threadSub = sub
+        val byId = (entries[id] ?: emptyList()).associateBy { it.id }.toMutableMap()
+        val delta = parseEntries(r.optJSONArray("entries"))
+        for (e in delta) byId[e.id] = e
+        val ids = r.optJSONArray("ids")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: threadIds[id] ?: delta.map { it.id }
+        threadIds[id] = ids
+        val fresh = ids.mapNotNull { byId[it] }
+        val pending = (entries[id] ?: emptyList()).filter { (it.sending || it.failed) && fresh.none { f -> f.clientId != null && f.clientId == it.clientId } }
+        entries = entries + (id to fresh + pending)
+        if (r.has("next")) older = if (r.isNull("next")) older - id else older + (id to r.optString("next"))
+        r.optJSONObject("thread")?.let { upsert(parseThread(it)) }
+        if (r.has("work")) {
+            val w = r.optJSONObject("work")
+            setWork(id, w?.optJSONObject("subs") ?: w)
+        }
+        if (r.has("queue")) {
+            val a = r.optJSONObject("queue")?.optJSONArray("rows")
+            val rows = if (a == null) emptyList() else (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { row ->
+                val b = row.optJSONArray("buttons"); QRow(row.optString("msg"), row.optString("tag"), row.optString("text"), if (b == null) emptyList() else (0 until b.length()).mapNotNull { b.optJSONObject(it) }.map { QButton(it.optString("label"), it.optString("action"), it.optString("value")) })
+            }
+            queues = if (rows.isEmpty()) queues - id else queues + (id to rows)
+        }
+        r.optJSONObject("h")?.let { h ->
+            val next = HashMap<String, String>()
+            h.keys().forEach { k -> next[k] = h.optString(k) }
+            threadHashes[id] = next
+        }
+        save()
     }
     // cache-first, as the iOS app: a thread is read ahead when its row shows and again when a finger goes down on it, so opening it paints from memory
     private val prefetched = HashMap<String, Long>()
@@ -549,7 +670,21 @@ object DataClient {
             "project" -> o.optJSONObject("project")?.let { val p = parseProject(it); projects = (projects.filter { x -> x.id != p.id } + p).sortedByDescending { x -> x.updatedAt }; save() }
             "entry" -> o.optJSONObject("entry")?.let { put(parseEntry(it), o.optString("thread")) }
             "work" -> setWork(o.optString("thread"), o.optJSONObject("subs"))
-            "sub" -> if (subOpen == o.optString("thread") to o.optString("key")) o.optJSONObject("view")?.let { subView = parseSubView(it); subGone = false }
+            "sub" -> if (subOpen == o.optString("thread") to o.optString("key")) o.optJSONObject("view")?.let {
+                val parsed = parseSubView(it)
+                subView = parsed; subGone = false
+                subEntriesById.clear(); parsed.entries.forEach { e -> subEntriesById[e.id] = e }
+                subEntryIds = parsed.entries.map { e -> e.id }
+            }
+            "sub.d" -> if (subOpen == o.optString("thread") to o.optString("key")) {
+                o.optJSONArray("entries")?.let { a -> parseEntries(a).forEach { e -> subEntriesById[e.id] = e } }
+                o.optJSONArray("ids")?.let { a -> subEntryIds = (0 until a.length()).map { a.optString(it) } }
+                val base = o.optJSONObject("head")?.let(::parseSubView) ?: subView
+                if (base != null) {
+                    subView = base.copy(entries = subEntryIds.mapNotNull { subEntriesById[it] })
+                    subGone = false
+                }
+            }
             "queue" -> { val tid = o.optString("thread"); scope.launch { runCatching { loadQueue(tid) } } } // a far thread's held messages moved
             "term" -> Terms.push(o)
             "locks" -> locks = parseLocks(o.optJSONArray("locks"))

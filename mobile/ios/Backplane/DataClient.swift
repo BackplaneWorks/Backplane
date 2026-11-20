@@ -1,8 +1,52 @@
 import Foundation
 import SwiftUI
+import Compression
 import CryptoKit
 import UIKit
 import UserNotifications
+
+/// Per-socket RFC 1951 raw DEFLATE stream decoder (Apple Compression `COMPRESSION_ZLIB` is raw deflate).
+private final class RawInflater {
+    private var stream: compression_stream
+    private var active = false
+    init?() {
+        var s = compression_stream(dst_ptr: UnsafeMutablePointer<UInt8>.allocate(capacity: 1), dst_size: 0, src_ptr: UnsafePointer<UInt8>(bitPattern: 1)!, src_size: 0, state: nil)
+        s.dst_ptr.deallocate()
+        guard compression_stream_init(&s, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB) == COMPRESSION_STATUS_OK else { return nil }
+        self.stream = s
+        self.active = true
+    }
+    deinit {
+        if active { compression_stream_destroy(&stream) }
+    }
+    func feed(_ data: Data, maxBytes: Int = 16 << 20) throws -> Data {
+        guard active else { throw DError(code: "DEFLATE", message: "Stream closed") }
+        var out = Data()
+        out.reserveCapacity(min(data.count * 3, maxBytes))
+        let chunkCap = 16384
+        let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: chunkCap)
+        defer { buf.deallocate() }
+        try data.withUnsafeBytes { raw in
+            guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
+            stream.src_ptr = base
+            stream.src_size = data.count
+            while true {
+                stream.dst_ptr = buf
+                stream.dst_size = chunkCap
+                let st = compression_stream_process(&stream, 0)
+                let produced = chunkCap - stream.dst_size
+                if produced > 0 {
+                    if out.count + produced > maxBytes { throw DError(code: "DEFLATE", message: "Inflated frame exceeds limit") }
+                    out.append(buf, count: produced)
+                }
+                if st == COMPRESSION_STATUS_ERROR { throw DError(code: "DEFLATE", message: "Corrupt deflate frame") }
+                if st == COMPRESSION_STATUS_END { break }
+                if stream.src_size == 0 && produced < chunkCap { break }
+            }
+        }
+        return out
+    }
+}
 
 // The phone's whole link to a hub, docs/PHONE-DATA.md (data/1): one WebSocket of plain JSON data, typed values in, typed values out, a disk cache
 // that paints at launch, deltas for the lists and the open thread only. No server-drawn views, no bridge, no engine.
@@ -129,6 +173,12 @@ final class DataClient {
     var hubName: String { link.flatMap { Pairing.key($0) } ?? "" }
 
     @ObservationIgnored private var task: URLSessionWebSocketTask?
+    @ObservationIgnored private var inflater: RawInflater?
+    @ObservationIgnored private var shellHashes: [String: String] = [:]
+    @ObservationIgnored private var threadHashes: [String: [String: String]] = [:]
+    @ObservationIgnored private var threadIds: [String: [String]] = [:]
+    @ObservationIgnored private var subEntriesById: [String: DEntry] = [:]
+    @ObservationIgnored private var subEntryIds: [String] = []
     @ObservationIgnored private var gen = 0
     @ObservationIgnored private var nextId = 1
     @ObservationIgnored private var calls: [Int: CheckedContinuation<Data, Error>] = [:]
@@ -242,6 +292,7 @@ final class DataClient {
     }
     private func reset(clearDisk: Bool = false) {
         saveTask?.cancel()
+        shellHashes = [:]; threadHashes = [:]; threadIds = [:]; subEntriesById = [:]; subEntryIds = []
         notice = HubNotice(); star = nil; telemetryNotice = nil; migration = DMigration(); migrationOpen = false; migrationError = ""
         dueThreads = []; dueProjects = []
         projects = []; threads = []; entries = [:]; older = [:]; loadedThreads = []; listsLoaded = false; open = nil; queues = [:]; queueError = [:]
@@ -258,7 +309,7 @@ final class DataClient {
     // MARK: connection
     func connect() {
         guard let link, let base = Pairing.socket(link), var c = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return }
-        c.queryItems = (c.queryItems ?? []) + [URLQueryItem(name: "data", value: "1"), URLQueryItem(name: "enc", value: "json")]
+        c.queryItems = (c.queryItems ?? []) + [URLQueryItem(name: "data", value: "1"), URLQueryItem(name: "enc", value: "json"), URLQueryItem(name: "z", value: "deflate")]
         guard let url = c.url else { return }
         close()
         gen += 1
@@ -282,6 +333,7 @@ final class DataClient {
         gen += 1
         watchdog?.cancel(); reconnectTask?.cancel()
         task?.cancel(with: .goingAway, reason: nil); task = nil
+        inflater = nil
         for (_, k) in calls { k.resume(throwing: DError(code: "OFFLINE", message: "Offline")) }
         calls = [:]
         listSub = 0; threadSub = 0
@@ -301,7 +353,15 @@ final class DataClient {
                     self.heard = Date()
                     switch m {
                     case .string(let s): self.handle(Data(s.utf8), g)
-                    case .data(let d): if PlotStore.isPlot(d) { self.plots.receive(d) } else { self.handle(d, g) }
+                    case .data(let d):
+                        let raw: Data
+                        if let inf = self.inflater {
+                            do { raw = try inf.feed(d) }
+                            catch { self.lost(g, "deflate"); return }
+                        } else {
+                            raw = d
+                        }
+                        if PlotStore.isPlot(raw) { self.plots.receive(raw) } else { self.handle(raw, g) }
                     @unknown default: break
                     }
                     self.receive(t, g)
@@ -417,6 +477,7 @@ final class DataClient {
         switch t {
         case "hello":
             guard (o["proto"] as? String)?.hasPrefix("data/") == true else { failure = "This hub does not speak the phone data protocol (update it)."; lost(g, failure); return }
+            inflater = (o["z"] as? String) == "deflate" ? RawInflater() : nil
             features = Set((o["features"] as? [String]) ?? [])
             notice = HubRescue.notice(o["notice"] as? [String: Any])
             heardMigration(o["migrating"])
@@ -466,11 +527,33 @@ final class DataClient {
     // MARK: sync
     private func synchronise(_ g: Int) async {
         do {
-            let s: DSubReply = try await call("subscribe", ["topic": "lists"]); guard g == gen else { return }; listSub = s.sub
-            Task { await self.flushOutbox(g) }
-            async let p = loadProjects(g), t = loadThreads(g), h: Void = loadHistory()
-            _ = try await (p, t, h)
-            await loadSections()   // the sidebar's sections (feature sections): the list draws them once they come
+            if has("shell") && machine.isEmpty {
+                let r: DShellSyncReply = try await call("shell.sync", ["have": shellHashes, "settled": 25])
+                guard g == gen else { return }
+                listSub = r.sub
+                Task { await self.flushOutbox(g) }
+                flushLists()
+                let removed = Set(r.removed ?? [])
+                let changedPids = Set((r.projects ?? []).map(\.id))
+                if !removed.isEmpty || !changedPids.isEmpty {
+                    projects = (projects.filter { !removed.contains($0.id) && !changedPids.contains($0.id) } + (r.projects ?? [])).sorted { $0.updatedAt > $1.updatedAt }
+                    threads = (threads.filter { !removed.contains($0.project) && !changedPids.contains($0.project) } + (r.threads ?? [])).sorted { $0.updatedAt > $1.updatedAt }
+                } else if let gotThreads = r.threads, !gotThreads.isEmpty {
+                    var byId = Dictionary(uniqueKeysWithValues: threads.map { ($0.id, $0) })
+                    for t in gotThreads { byId[t.id] = t }
+                    threads = Array(byId.values).sorted { $0.updatedAt > $1.updatedAt }
+                }
+                if let s = r.sections { sections = s.sections; groupsTo = s.groupsTo }
+                if let h = r.h { shellHashes = h }
+                listsLoaded = true; scheduleSave()
+                await loadHistory()
+            } else {
+                let s: DSubReply = try await call("subscribe", ["topic": "lists"]); guard g == gen else { return }; listSub = s.sub
+                Task { await self.flushOutbox(g) }
+                async let p = loadProjects(g), t = loadThreads(g), h: Void = loadHistory()
+                _ = try await (p, t, h)
+                await loadSections()   // the sidebar's sections (feature sections): the list draws them once they come
+            }
             await loadBots()
             await loadSwarms()
             await voice.resync()
@@ -479,7 +562,10 @@ final class DataClient {
             await loadStar()
             await loadTelemetryNotice()
             terms.resync()
-            if let open { try await subscribeThread(open, g); await refreshThread(open) }
+            if let open {
+                if has("open") { await openThreadBundled(open, g) }
+                else { try await subscribeThread(open, g); await refreshThread(open) }
+            }
             if let r = subOpen { subSub = 0; await readSub(r, g) }
         } catch { if g == gen { failure = error.localizedDescription } }
     }
@@ -640,12 +726,40 @@ final class DataClient {
         guard conn == .online else { return }
         let g = gen
         if has("push") { Task { _ = try? await self.call("push.seen", ["thread": id], as: DEmpty.self); await self.syncPush() } }
-        // the subscribe and the newest page go out back to back on the one socket (it keeps their order): no round trip between them
-        Task {
-            async let sub: Void? = try? await self.subscribeThread(id, g)
-            await refreshThread(id)
-            _ = await sub
+        if has("open") {
+            Task { await self.openThreadBundled(id, g) }
+        } else {
+            // the subscribe and the newest page go out back to back on the one socket (it keeps their order): no round trip between them
+            Task {
+                async let sub: Void? = try? await self.subscribeThread(id, g)
+                await refreshThread(id)
+                _ = await sub
+            }
         }
+    }
+    private func openThreadBundled(_ id: String, _ g: Int) async {
+        var have: [String: String] = threadHashes[id] ?? [:]
+        for e in entries[id] ?? [] where !e.h.isEmpty { have[e.id] = e.h }
+        guard let r: DThreadOpenReply = try? await call("thread.open", ["thread": id, "limit": 40, "have": have]) else { return }
+        if g != gen || open != id {
+            if r.sub != 0 { _ = try? await call("unsubscribe", ["sub": r.sub], as: DEmpty.self) }
+            return
+        }
+        if r.sub != 0 { threadSub = r.sub }
+        var byId = Dictionary(uniqueKeysWithValues: (entries[id] ?? []).map { ($0.id, $0) })
+        for e in r.entries { byId[e.id] = e }
+        let ids = r.ids ?? threadIds[id] ?? r.entries.map(\.id)
+        threadIds[id] = ids
+        let fresh = ids.compactMap { byId[$0] }
+        let pending = (entries[id] ?? []).filter { $0.sending || $0.failed }
+        entries[id] = fresh + pending.filter { p in !fresh.contains { $0.clientId != nil && $0.clientId == p.clientId } }
+        if r.hasNext { older[id] = r.next }
+        loadedThreads.insert(id)
+        if let t = r.thread { upsert(t) }
+        if let w = r.work { work[id] = w.subs }
+        if let q = r.queue { queues[id] = q.rows.isEmpty ? nil : q.rows }
+        if let h = r.h { threadHashes[id] = h }
+        scheduleSave()
     }
 
     // MARK: cache-first: what the list shows is read ahead, so opening it paints from memory
@@ -683,14 +797,16 @@ final class DataClient {
         let g = gen; Task { await readSub(r, g) }
     }
     private func readSub(_ r: DSubRoute, _ g: Int) async {
-        guard let s: DSubReply = try? await call("subscribe", ["topic": "sub", "thread": r.thread, "key": r.key]) else { return }
+        guard let s: DSubReply = try? await call("subscribe", ["topic": "sub", "thread": r.thread, "key": r.key, "parts": 1]) else { return }
         guard g == gen, subOpen == r else { _ = try? await call("unsubscribe", ["sub": s.sub], as: DEmpty.self); return }
         subSub = s.sub
         guard let v: DSubViewReply = try? await call("thread.sub", ["thread": r.thread, "key": r.key]), subOpen == r else { return }
         subView = v.view; subGone = v.view == nil
+        subEntriesById = Dictionary(uniqueKeysWithValues: (v.view?.entries ?? []).map { ($0.id, $0) })
+        subEntryIds = (v.view?.entries ?? []).map(\.id)
     }
     func closeSub() {
-        subOpen = nil; subView = nil; subGone = false
+        subOpen = nil; subView = nil; subGone = false; subEntriesById = [:]; subEntryIds = []
         let s = subSub; subSub = 0
         if s != 0, conn == .online { Task { _ = try? await call("unsubscribe", ["sub": s], as: DEmpty.self) } }
     }
@@ -752,7 +868,20 @@ final class DataClient {
         case "work":
             if let tid = o["thread"] as? String { work[tid] = decode("subs", DWork.self) }
         case "sub":
-            if let tid = o["thread"] as? String, let key = o["key"] as? String, subOpen == DSubRoute(thread: tid, key: key), let v = decode("view", DSubView.self) { subView = v; subGone = false }
+            if let tid = o["thread"] as? String, let key = o["key"] as? String, subOpen == DSubRoute(thread: tid, key: key), let v = decode("view", DSubView.self) {
+                subView = v; subGone = false
+                subEntriesById = Dictionary(uniqueKeysWithValues: v.entries.map { ($0.id, $0) })
+                subEntryIds = v.entries.map(\.id)
+            }
+        case "sub.d":
+            if let tid = o["thread"] as? String, let key = o["key"] as? String, subOpen == DSubRoute(thread: tid, key: key) {
+                if let es = decode("entries", [DEntry].self) { for e in es { subEntriesById[e.id] = e } }
+                if let ids = o["ids"] as? [String] { subEntryIds = ids }
+                if var base = decode("head", DSubView.self) ?? subView {
+                    base.entries = subEntryIds.compactMap { subEntriesById[$0] }
+                    subView = base; subGone = false
+                }
+            }
         case "queue":
             // the strip's rows changed with no line in the log (a message on its way to another machine): ask again
             if let tid = o["thread"] as? String { Task { await self.loadQueue(tid) } }

@@ -321,10 +321,10 @@ async fn failover(config:&Config,cfg:&Config,on_home:Option<&str>,down:Duration,
 async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,queued:&mut VecDeque<Command>,events:&async_channel::Sender<Event>,v:&mut View,back:Option<String>)->Result<SessionEnd> {
     let token=std::fs::read_to_string(&config.token_file)?;
     /* i18n-ok: connection errors, logged as GPUI_LOG disconnect */ ensure!(token.trim().chars().all(|c|c.is_ascii_alphanumeric()||c=='-'||c=='_'),"invalid token file");
-    let url=format!("{}/ws?view=1&mobile=1&token={}",config.hub.trim_end_matches('/'),token.trim());
+    let url=format!("{}/ws?view=1&mobile=1&z=deflate&token={}",config.hub.trim_end_matches('/'),token.trim());
     let limits=WebSocketConfig::default().max_message_size(Some(64<<20)).max_frame_size(Some(64<<20));
     let (socket,_)=tokio::time::timeout(Duration::from_secs(5),tokio_tungstenite::connect_async_with_config(url,Some(limits),true)).await??;
-    let (mut sink,mut source)=socket.split();let mut last=tokio::time::Instant::now();
+    let (mut sink,mut source)=socket.split();let mut last=tokio::time::Instant::now();let mut inflater:Option<wire::Inflater>=None;
     let mut heartbeat=tokio::time::interval(Duration::from_secs(10));
     loop {tokio::select! {
         command=async { if let Some(c)=queued.pop_front() { Some(c) } else { commands.recv().await } }, if !v.greeting.is_null()=>{
@@ -347,13 +347,28 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,queued:&mu
             sink.send(Message::Binary(wire::encode(&request).into())).await?;
         },
         frame=source.next()=>{
-            let frame=frame.context("hub closed")??;last=tokio::time::Instant::now();crate::perf::wire(frame.len());if let Message::Binary(b)=&frame {if crate::screens::plot::is_plot(b) {if b.len()<=(32<<20) {let _=events.send(Event::Plot(b.to_vec())).await;}else{let _=events.send(Event::PlotTooBig(b.len())).await;}continue;}}let recv=std::time::Instant::now();let mut size=0usize;
-            let mut x=match frame {Message::Binary(bytes)=>{size=bytes.len();wire::decode(&bytes)?},Message::Text(text)=>serde_json::from_str(&text)?,Message::Ping(bytes)=>{sink.send(Message::Pong(bytes)).await?;continue},Message::Close(_)=>anyhow::bail!("closed"),_=>continue};
+            let frame=frame.context("hub closed")??;last=tokio::time::Instant::now();crate::perf::wire(frame.len());
+            let recv=std::time::Instant::now();let mut size=0usize;
+            let mut x=match frame {
+                Message::Binary(bytes)=>{
+                    size=bytes.len();
+                    let raw=if let Some(inf)=inflater.as_mut() { std::borrow::Cow::Owned(inf.feed(&bytes)?) } else { std::borrow::Cow::Borrowed(&bytes[..]) };
+                    if crate::screens::plot::is_plot(&raw) {
+                        if raw.len()<=(32<<20) {let _=events.send(Event::Plot(raw.into_owned())).await;}else{let _=events.send(Event::PlotTooBig(raw.len())).await;}
+                        continue;
+                    }
+                    wire::decode(&raw)?
+                },
+                Message::Text(text)=>serde_json::from_str(&text)?,
+                Message::Ping(bytes)=>{sink.send(Message::Pong(bytes)).await?;continue},
+                Message::Close(_)=>anyhow::bail!("closed"),
+                _=>continue
+            };
             let decoded=std::time::Instant::now();
             match x["t"].as_str().unwrap_or("") {
                 "voice"=>{let _=events.send(Event::Voice(x)).await;continue;}
                 "google"=>{let _=events.send(Event::Data("google-changed",Value::Null)).await;continue;}
-                /* i18n-ok: connection errors, logged */ "view"=>{if x.get("version").is_none()&&x["thread"].is_string()&&x["kind"].is_string() {let g=|k:&str|x[k].as_str().unwrap_or("").to_string();let _=events.send(Event::ViewShow(g("thread"),g("kind"),g("path"),g("frame"),g("token"))).await;continue;}ensure!(x["version"]==1&&x["renderer"]=="mobile"&&x["generation"].is_string()&&x["epoch"].is_string(),"unsupported hub greeting");eprintln!("GPUI_LOG {}",json!({"hub_connected":{"cid":v.cid,"generation":x["generation"],"epoch":x["epoch"],"at_ms":millis()}}));v.greeting=x;let _=events.send(Event::Hello).await;v.drawn=false;if v.target["kind"]!="recent"&&v.restored==Restore::None&&v.saved.is_none(){v.restored=Restore::First;}let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;
+                /* i18n-ok: connection errors, logged */ "view"=>{if x.get("version").is_none()&&x["thread"].is_string()&&x["kind"].is_string() {let g=|k:&str|x[k].as_str().unwrap_or("").to_string();let _=events.send(Event::ViewShow(g("thread"),g("kind"),g("path"),g("frame"),g("token"))).await;continue;}ensure!(x["version"]==1&&x["renderer"]=="mobile"&&x["generation"].is_string()&&x["epoch"].is_string(),"unsupported hub greeting");inflater=(x["z"].as_str()==Some("deflate")).then(wire::Inflater::new);eprintln!("GPUI_LOG {}",json!({"hub_connected":{"cid":v.cid,"generation":x["generation"],"epoch":x["epoch"],"at_ms":millis()}}));v.greeting=x;let _=events.send(Event::Hello).await;v.drawn=false;if v.target["kind"]!="recent"&&v.restored==Restore::None&&v.saved.is_none(){v.restored=Restore::First;}let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;
                     // the star suggestion, if it is still out (a reconnect shows it again until it is decided)
                     let id=rpc_id();v.rpcs.insert(id,"star");sink.send(Message::Binary(wire::encode(&json!({"id":id,"m":"star.offer","p":{}})).into())).await?;
                     // the one-time telemetry notice, if the hub offers it (screens/tmnotice.rs)

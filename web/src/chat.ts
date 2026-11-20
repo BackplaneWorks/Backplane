@@ -22,6 +22,7 @@ export interface EntryAttachment {
 }
 export interface EntryItem {
   id: string;
+  h?: string;
   kind: string;
   text: string;
   at: number;

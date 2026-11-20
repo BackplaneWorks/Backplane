@@ -530,6 +530,7 @@ dependencies = [
  "cef",
  "embed-resource",
  "env_logger",
+ "flate2",
  "futures-util",
  "gpui",
  "image",

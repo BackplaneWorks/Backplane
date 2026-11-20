@@ -78,11 +78,12 @@ struct DEntry: Codable, Equatable, Identifiable {
     var voice: DVoiceMark?   // spoken (data/1 `voice`): the mic on the bubble, the engine and its confidence
     var restore: DRestore?   // the person's message: the snapshot before the turn it started (data/1 `restore`): Restore to before this
     var copy: [DCopyPiece]?   // what to copy in it, as the hub lists it (`copy: [{text, cmd}]`, md/copy.rs); nil: the phone's own rules (Copyable)
+    var h: String = ""        // content hash for thread.open / sub.d resume (docs/PHONE-DATA.md, Phase 1)
     // phone-only, never on the wire: a message sent and not yet confirmed, or one the hub refused
     var sending = false
     var failed = false
     var localImages: [Data] = []   // the pictures of a message this phone is sending (JPEG), shown before the hub has them
-    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, images, replyTo, voice, copy, restore }
+    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, images, replyTo, voice, copy, restore, h }
     init(id: String, kind: String, text: String, at: Int, clientId: String? = nil, live: Bool = false) {
         self.id = id; self.kind = kind; self.text = text; self.at = at; self.clientId = clientId; self.live = live
     }
@@ -103,6 +104,7 @@ struct DEntry: Codable, Equatable, Identifiable {
         copy = try? c.decode([DCopyPiece].self, forKey: .copy)
         voice = try? c.decode(DVoiceMark.self, forKey: .voice)
         restore = try? c.decode(DRestore.self, forKey: .restore)
+        h = c.str(.h)
     }
 }
 
@@ -458,6 +460,48 @@ struct DSubView: Decodable, Equatable {
 }
 struct DSubViewReply: Decodable { let view: DSubView? }
 struct DSubRoute: Hashable { let thread: String; let key: String }
+struct DShellSyncReply: Decodable {
+    let sub: Int
+    let projects: [DProject]?
+    let threads: [DThread]?
+    let removed: [String]?
+    let sections: DSections?
+    let h: [String: String]?
+    enum CodingKeys: String, CodingKey { case sub, projects, threads, removed, sections, h }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        sub = (try? c.decode(Int.self, forKey: .sub)) ?? 0
+        projects = try? c.decode([DProject].self, forKey: .projects)
+        threads = try? c.decode([DThread].self, forKey: .threads)
+        removed = try? c.decode([String].self, forKey: .removed)
+        sections = try? c.decode(DSections.self, forKey: .sections)
+        h = try? c.decode([String: String].self, forKey: .h)
+    }
+}
+struct DThreadOpenReply: Decodable {
+    let sub: Int
+    let thread: DThread?
+    let ids: [String]?
+    let entries: [DEntry]
+    let hasNext: Bool
+    let next: String?
+    let work: DWorkReply?
+    let queue: DQueueReply?
+    let h: [String: String]?
+    enum CodingKeys: String, CodingKey { case sub, thread, ids, entries, next, work, queue, h }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        sub = (try? c.decode(Int.self, forKey: .sub)) ?? 0
+        thread = try? c.decode(DThread.self, forKey: .thread)
+        ids = try? c.decode([String].self, forKey: .ids)
+        entries = (try? c.decode([DEntry].self, forKey: .entries)) ?? []
+        hasNext = c.contains(.next)
+        next = try? c.decode(String.self, forKey: .next)
+        work = try? c.decode(DWorkReply.self, forKey: .work)
+        queue = try? c.decode(DQueueReply.self, forKey: .queue)
+        h = try? c.decode([String: String].self, forKey: .h)
+    }
+}
 /// A long result shows three lines until tapped (the desktop's subview.rs `result_lines`).
 func dSubResultLines(_ text: String, open: Bool) -> (String, Bool) {
     let ls = text.components(separatedBy: "\n"); if open || ls.count <= 3 { return (text, false) }
