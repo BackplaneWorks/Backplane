@@ -6,7 +6,8 @@
 #   L4  away while an agent keeps reading the board in that KiCad past the idle time: the same pid (use is not idle)
 #   L1  then nothing for longer than the idle time: KiCad closed as idle, and the hub log says why ("left the pane: thread")
 #   L5  back to the thread after the idle close: Backplane's viewer (no pane on a KiCad that is gone), no error notice
-#   L3  Edit again, an agent's unsaved track, away past the idle time: the same pid (unsaved work is kept)
+#   L3  Edit again, an agent's unsaved track, the viewer closed (a leave, "viewer") past the idle time: the same pid (unsaved work is
+#       kept). (Not another thread here: once this thread's Board is open again the other thread of the same project shows it too.)
 # Each fails on main (no leave there: nothing closes after a thread switch, and nothing is counted). Fork only; copies (seed_project.py).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -20,7 +21,7 @@ IDLE=20
 export BACKPLANE_KICAD_IDLE_S=$IDLE BACKPLANE_KICAD_WARM_HEADROOM_MB=0
 start_xvfb_and_wm; start_hub
 echo "INFO hub on $HPORT, project $PRO, idle time $IDLE s"
-kpid() { pgrep -u "$(id -u)" -f -- "--embedded.*--parent-pid.*$(basename "$PRO")" 2>/dev/null | tail -1 || true; }
+kpid() { pgrep -u "$(id -u)" -f -- "--embedded.*--parent-pid.*$PRO" 2>/dev/null | tail -1 || true; } # this run's KiCad only (its copy's path)
 ask() { local want=$2 before n; before=$(grep -c "^MCPCALL" "$OUT/standin.log" 2>/dev/null || true); before=${before:-0}
   local text; text=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1")
   hub_rpc "[{\"method\":\"turn.start\",\"params\":{\"thread\":\"t1\",\"text\":$text,\"msg\":\"mlv$(date +%s%N)\"}}]" >>"$OUT/rpc.log" 2>&1
@@ -36,8 +37,8 @@ s = [{"select": 1}, {"wait": 2200}, {"click": "rail:Board"}, {"wait": 2500}, {"c
      {"select": 0}, {"wait": 6000}, {"mark": "away1"}, {"select": 1}, {"kicad": {"wait_painted": 8000, "kind": "PCB", "tag": "back1"}}, {"wait": 1500}, {"mark": "back1"},
      {"select": 0}, {"mark": "agentaway"}, {"wait": 40000}, {"mark": "agentdone"}, {"wait": 40000}, {"mark": "idlewait"},
      {"select": 1}, {"wait": 3000}, {"kicad": {"report": True, "tag": "l5"}}, {"mark": "l5"},
-     {"click": "ui:Edit"}, {"kicad": {"wait_painted": 90000, "kind": "PCB", "tag": "edit2"}}, {"mark": "edit2"}, {"wait": 25000},
-     {"select": 0}, {"mark": "unsavedaway"}, {"wait": 40000}, {"mark": "unsaveddone"}, {"wait": 1000}]
+     {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit"}, {"kicad": {"wait_painted": 90000, "kind": "PCB", "tag": "edit2"}}, {"mark": "edit2"}, {"wait": 25000},
+     {"click": "rail:Files"}, {"wait": 2000}, {"kicad": {"report": True, "tag": "uaway"}}, {"mark": "unsavedaway"}, {"wait": 40000}, {"mark": "unsaveddone"}, {"wait": 1000}]
 json.dump(s, open(sys.argv[1], "w"))
 PY
 HOME="$OUT/fh" BACKPLANE_KICAD_DEBUG=1 BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 400 >"$OUT/client.log" 2>&1 &
@@ -88,7 +89,8 @@ print(len(v.get("agent_unsaved") or []) + len(v.get("unsaved") or []))' 2>/dev/n
 mark unsaveddone || true
 PID6=$(kpid)
 echo "INFO Edit again: KiCad $PID5 (unsaved docs in the info: $UNS); away past the idle time: ${PID6:-gone}"
-check "L3 unsaved work, away past the idle time: the same KiCad kept" "$([ -n "$PID5" ] && [ "$PID6" = "$PID5" ] && echo 1 || echo 0)" "pid $PID5 -> ${PID6:-gone}"
+VLEAVE=$(grep -c "left the pane (viewer)" "$OUT/hub.log" || true)
+check "L3 unsaved work, the viewer on Files (a leave) and past the idle time: the same KiCad kept" "$([ -n "$PID5" ] && [ "$PID6" = "$PID5" ] && [ "${VLEAVE:-0}" -ge 1 ] && echo 1 || echo 0)" "pid $PID5 -> ${PID6:-gone}; viewer leaves $VLEAVE"
 
 echo "INFO hub: $(grep -c 'left the pane (' "$OUT/hub.log" || true) leave(s), $(grep -c 'back in the pane' "$OUT/hub.log" || true) back(s), $(grep -c 'not the pane.s holder' "$OUT/hub.log" || true) refused"
 grep -E "kicad embed: .*(left the pane|back in the pane|idle, closing)" "$OUT/hub.log" | cut -c1-220 | sed 's/^/INFO   /' || true

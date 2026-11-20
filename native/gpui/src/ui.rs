@@ -869,7 +869,10 @@ impl Render for Backplane {
             let in_page = self.screens.kicad_window.is_some() || (!docked && mine && crate::screens::viewer::holds_editor(thread));
             // #1345: off screen because the person moved away (another thread or design, or the viewer closed or on another page): the hub
             // hears it once settled (KicadPane::set_in_page), so the idle close and the cap can apply to it; a sheet over the pane is not this
-            if p.read(cx).in_page != in_page { p.update(cx, |p, cx| p.set_in_page(in_page, if mine { "viewer" } else { "thread" }, cx)); } // i18n-ok: wire words
+            // ("thread": another thread than the one the pane was last on screen in, the same project's included; "viewer": the same thread)
+            let tid = thread["id"].as_str().unwrap_or("");
+            if p.read(cx).in_page != in_page { p.update(cx, |p, cx| p.set_in_page(in_page, if mine && p.page_thread == tid { "viewer" } else { "thread" }, cx)); } // i18n-ok: wire words
+            if in_page && p.read(cx).page_thread != tid { let t = tid.to_string(); p.update(cx, |p, _| p.page_thread = t); }
         }
         // Follow agent in KiCad: the hub learns whether this thread's page holds KiCad and which frame it shows (viewer.state, on change)
         let kshown = match self.screens.kicad.clone() { Some(p) if p.read(cx).in_page => (true, p.read(cx).tab()), _ => (false, String::new()) };
