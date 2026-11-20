@@ -127,8 +127,12 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         | "update.check"
         | "update.now"
         | "update.status" => Denied,
-        // Controls the browser running on the hub machine.
-        "browser" => Denied,
+        // Phone pane input. Native debugger attachment is outside this interface.
+        "browser" => match params["op"].as_str() {
+            Some("navigate" | "click" | "type" | "press" | "scroll" | "takeover" | "handback") => Activity,
+            Some("toolbar") if matches!(params["command"].as_str(), Some("back" | "forward" | "reload")) => Activity,
+            _ => Denied,
+        },
         // Requires a native push registration or changes its delivery settings.
         "device.drop"
         | "device.prefs"
@@ -197,6 +201,20 @@ mod tests {
         assert!(allowed("composer.run", &json!({"text":"/settle"})));
         assert_eq!(policy("devices.page", &Value::Null), Policy::Devices);
         assert_eq!(policy("devices.page.act", &Value::Null), Policy::Denied);
+    }
+
+    #[test]
+    fn browser_pane_allows_phone_input_only() {
+        use serde_json::json;
+        for op in ["navigate", "click", "type", "press", "scroll", "takeover", "handback"] {
+            assert_eq!(policy("browser", &json!({"op":op})), Policy::Activity);
+        }
+        for command in ["back", "forward", "reload"] {
+            assert_eq!(policy("browser", &json!({"op":"toolbar", "command":command})), Policy::Activity);
+        }
+        for op in ["attach", "detach", "unknown", "toolbar", ""] {
+            assert_eq!(policy("browser", &json!({"op":op})), Policy::Denied);
+        }
     }
 
     #[test]
