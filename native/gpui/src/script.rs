@@ -12,8 +12,43 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
     eprintln!("GPUI_METRIC {}", fields);
 }
 
+/// The tile renderer's last inventory (`tiles`, `splitters`), what `@tile[..]`/`@splitter` selectors resolve against.
+thread_local! { static TILES: std::cell::RefCell<(Vec<Value>, Vec<Value>)> = const { std::cell::RefCell::new((Vec::new(), Vec::new())) }; }
+/// A pointer drag on a splitter: (splitter id, from, to, moves) -> dispatched. The tile renderer registers it; none registered: the drag step reports `ok:false`.
+pub type SplitterDrag = Box<dyn Fn(&str, [f32; 2], [f32; 2], u32) -> bool>;
+thread_local! { static DRAG_HOOK: std::cell::RefCell<Option<SplitterDrag>> = const { std::cell::RefCell::new(None) }; }
+/// Called by the tile renderer on every tile, layout or frame change: stores what is drawn (selectors resolve against it) and emits the `tiles` metric.
+#[allow(dead_code)]
+pub fn tiles_metric(started: Instant, tiles: Vec<Value>, splitters: Vec<Value>) {
+    metric(started, "tiles", json!({"tiles": tiles, "splitters": splitters}));
+    TILES.with(|t| *t.borrow_mut() = (tiles, splitters));
+}
+/// Called by the tile renderer once: how a scripted splitter drag is delivered as a real pointer drag.
+#[allow(dead_code)]
+pub fn set_splitter_drag(f: SplitterDrag) { DRAG_HOOK.with(|h| *h.borrow_mut() = Some(f)); }
+fn rect_center(v: &Value) -> Option<[f32; 2]> {
+    let f = |k: &str| v["rect"][k].as_f64().map(|x| x as f32);
+    let (x, y, w, h) = (f("x")?, f("y")?, f("w")?, f("h")?);
+    (w > 0. && h > 0.).then(|| [x + w / 2., y + h / 2.])
+}
+/// `@tile[kind=board,focused].close` -> `tile:<id>:close`; `@splitter[axis=x]` -> the splitter's id. Filters: `kind=`, `source=`, `focused`,
+/// `unfocused`, `axis=`; exactly one drawn tile or splitter must match (ids come from the drawn inventory, never guessed).
+pub(crate) fn resolve_selector(sel: &str, tiles: &[Value], splitters: &[Value]) -> Result<String, String> {
+    let rest = sel.strip_prefix('@').ok_or("not a selector")?;
+    let (role, tail) = rest.split_once('[').map_or((rest, ""), |(r, t)| (r, t));
+    let (filters, verb) = match tail.split_once(']') { Some((f, v)) => (f, v.strip_prefix('.').unwrap_or("")), None => ("", role.split_once('.').map_or("", |(_, v)| v)) };
+    let role = role.split('.').next().unwrap_or("");
+    let pool = match role { "tile" => tiles, "splitter" => splitters, _ => return Err(format!("unknown selector role {role:?}")) };
+    let hits: Vec<&Value> = pool.iter().filter(|t| filters.split(',').filter(|f| !f.is_empty()).all(|f| match f.split_once('=') {
+        Some(("kind", v)) => t["kind"] == v, Some(("source", v)) => t["source"] == v, Some(("axis", v)) => t["axis"] == v,
+        None if f == "focused" => t["focused"] == true, None if f == "unfocused" => t["focused"] == false, _ => false })).collect();
+    let [hit] = hits[..] else { return Err(format!("{} drawn {role}(s) match {sel:?} of {}", hits.len(), pool.len())) };
+    let id = hit["id"].as_str().filter(|i| !i.is_empty()).ok_or("matched entry has no id")?;
+    if role == "splitter" { Ok(id.to_string()) } else if verb.is_empty() { Err("tile selector needs a .verb".into()) } else { Ok(format!("tile:{id}:{verb}")) }
+}
+
 #[derive(Clone, Debug)]
-/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<name>","settle":"<kind>"?,"timeout_ms":N?}: wait until settled (if requested) and painted, emit shot-ready, wait for <BACKPLANE_GPUI_SHOT_DIR>/<name>.done */ Shot { name: String, settle: Option<String>, timeout_ms: u64 }, /** {"wait_settled":"<kind>","tag":"<tag>","timeout_ms":N?}: wait until the page settles and emit a `settled` metric with its viewer state */ WaitSettled { kind: String, tag: String, timeout_ms: u64 }, /** {"pointer":"<control id>"}: a real mouse move, down and up at the centre of the control's drawn rect, through the window's own dispatch (no registered control needed) */ Pointer(String), Fit, Unsupported(String) }
+/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<name>","settle":"<kind>"?,"timeout_ms":N?}: wait until settled (if requested) and painted, emit shot-ready, wait for <BACKPLANE_GPUI_SHOT_DIR>/<name>.done */ Shot { name: String, settle: Option<String>, timeout_ms: u64 }, /** {"wait_settled":"<kind>","tag":"<tag>","timeout_ms":N?}: wait until the page settles and emit a `settled` metric with its viewer state */ WaitSettled { kind: String, tag: String, timeout_ms: u64 }, /** {"pointer":"<control id>"}: a real mouse move, down and up at the centre of the control's drawn rect, through the window's own dispatch (no registered control needed) */ Pointer(String), /** {"drag":{"splitter":"@splitter"|id,"dx":N,"dy":N,"moves":N}}: a pointer drag on a drawn splitter, along its axis */ Drag(Value), Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
 pub enum Ctl { Header(String), /** the composer chip's account menu, and Settings' Accounts page */ AccountMenu, AccountsPage, /** the sidebar hub picker */ Hub(crate::screens::hubpick::Act), PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, ToggleTerminal, Rail(String), PickFiles, /** the ▾ beside the thread's name: its menu */ ThreadMenu, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), /** a hub page of the Settings nav */ SettingsPage(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch, /** a bots-page press (screens::bots::press): its kind and value */ Bot(String, String), /** a chat terminal's card: focus, expand, pop, stop; its key */ Term(String, String), /** a subagent's own view (its key; "" goes back) */ Sub(String), /** a card's button that sends the hub an action (a halt card's Resume...): `Command::Action` */ Go(String, String), /** the viewer's Edit (true: the real KiCad in the pane) and View (false) */ KicadEdit(bool), /** the editor strip: a tab (its kind), full, popout, popin */ KicadAct(String), /** a management panel's press (screens/mgmt.rs `act`) */ Mgmt(String) }
@@ -125,6 +160,7 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let Some(name) = v["mark"].as_str() { Some(Step::Mark(name.into())) }
         else if let Some(name) = v["shot"].as_str() { Some(Step::Shot { name: name.into(), settle: v["settle"].as_str().map(String::from), timeout_ms: v["timeout_ms"].as_u64().unwrap_or(15_000) }) }
         else if let Some(kind) = v["wait_settled"].as_str() { Some(Step::WaitSettled { kind: kind.into(), tag: v["tag"].as_str().unwrap_or(kind).into(), timeout_ms: v["timeout_ms"].as_u64().unwrap_or(15_000) }) }
+        else if v["drag"].is_object() { Some(Step::Drag(v["drag"].clone())) }
         else if v["fit"].as_bool() == Some(true) { Some(Step::Fit) }
         else if let Some(what) = v["expect"].as_str() { Some(Step::Expect(what.into())) }
         else if v["cef"].is_object() { Some(Step::Cef(v["cef"].clone())) }
@@ -593,6 +629,33 @@ impl Backplane {
                     }
                 }
             }
+            Step::Drag(spec) => {
+                let (tiles, splitters) = TILES.with(|t| t.borrow().clone());
+                let want = spec["splitter"].as_str().unwrap_or("");
+                let id = if want.starts_with('@') { resolve_selector(want, &tiles, &splitters) } else { Ok(want.to_string()) };
+                let moves = spec["moves"].as_u64().unwrap_or(6) as u32;
+                let report = match id {
+                    Err(e) => json!({"ok": false, "splitter": want, "error": e}),
+                    Ok(id) => match splitters.iter().find(|s| s["id"] == id.as_str()) {
+                        None => json!({"ok": false, "splitter": id, "error": "splitter not in the drawn inventory"}),
+                        Some(sp) => {
+                            let axis = sp["axis"].as_str().unwrap_or("");
+                            let from = rect_center(sp).unwrap_or([0., 0.]);
+                            let (dx, dy) = (spec["dx"].as_f64().unwrap_or(0.) as f32, spec["dy"].as_f64().unwrap_or(0.) as f32);
+                            // a splitter moves only along its axis ("x": a vertical bar dragged sideways)
+                            let to = if axis == "x" { [from[0] + dx, from[1]] } else { [from[0], from[1] + dy] };
+                            let ok = DRAG_HOOK.with(|h| h.borrow().as_ref().map(|f| f(&id, from, to, moves)));
+                            match ok {
+                                Some(ok) => json!({"ok": ok, "splitter": id, "axis": axis, "from": from, "to": to, "moves": moves}),
+                                None => json!({"ok": false, "splitter": id, "axis": axis, "from": from, "to": to, "moves": moves, "error": "no_drag_handler"}),
+                            }
+                        }
+                    },
+                };
+                self.m("drag", report);
+                let entity = cx.entity();
+                cx.defer(move |cx| entity.update(cx, |this, cx| this.pump(cx)));
+            }
             Step::Fit => { self.screens.plotview.view = None; self.ui_epoch += 1; self.begin("fit".into(), Goal::Frame, cx); cx.notify(); }
             Step::Expect(what) => { // a run that cannot measure what it claims stops itself: "canvas" needs a plot canvas with real height
                 let h = self.screens.plotview.bounds.map_or(0.0, |b| f32::from(b.size.height));
@@ -670,14 +733,26 @@ impl Backplane {
                 self.steps.push_front(Step::Wait(250));
                 self.pump(cx);
             }
-            Step::Press(id) => {
+            Step::Press(sel) => {
+                let (tiles, splitters) = TILES.with(|t| t.borrow().clone());
+                let id = if sel.starts_with('@') {
+                    match resolve_selector(&sel, &tiles, &splitters) {
+                        Ok(id) => id,
+                        Err(e) => {
+                            self.m("press", json!({"id": sel, "selector": sel, "found": false, "action": Value::Null, "error": e}));
+                            let entity = cx.entity();
+                            cx.defer(move |cx| entity.update(cx, |this, cx| this.pump(cx)));
+                            return;
+                        }
+                    }
+                } else { sel.clone() };
                 if let Some(s) = &self.screens.solid {
                     let sr = s.read(cx);
                     PRESS_SOLID.with(|c| *c.borrow_mut() = (sr.key().to_string(), sr.painted_count()));
                 }
                 let found = self.find_script_control(&id);
                 let action = found.map(|e| self.do_click(&e.ctl, cx));
-                self.m("press", json!({"id": id, "found": action.is_some(), "action": action}));
+                self.m("press", json!({"id": id, "selector": if sel != id { json!(sel) } else { Value::Null }, "found": action.is_some(), "action": action}));
                 self.ui_epoch += 1;
                 cx.notify();
                 // Header dispatch borrows the window after this update. Preserve script
@@ -1016,8 +1091,23 @@ impl Backplane {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use core::prelude::v1::test;
+    #[test] fn selectors_resolve_ids_from_the_drawn_inventory_and_refuse_ambiguity() {
+        let tiles = vec![json!({"id": "t7", "kind": "board", "focused": false, "source": "a.kicad_pcb"}), json!({"id": "t9", "kind": "schematic", "focused": true})];
+        let splitters = vec![json!({"id": "s3", "axis": "x"})];
+        assert_eq!(resolve_selector("@tile[kind=schematic].close", &tiles, &splitters).unwrap(), "tile:t9:close");
+        assert_eq!(resolve_selector("@tile[unfocused].add-beside", &tiles, &splitters).unwrap(), "tile:t7:add-beside");
+        assert_eq!(resolve_selector("@splitter[axis=x]", &tiles, &splitters).unwrap(), "s3");
+        assert!(resolve_selector("@tile.close", &tiles, &splitters).is_err(), "two tiles match: ambiguous");
+        assert!(resolve_selector("@tile[kind=files].close", &tiles, &splitters).is_err(), "nothing drawn: no guessed id");
+        assert!(resolve_selector("@tile[kind=board]", &tiles, &splitters).is_err(), "a tile selector needs its verb");
+        assert!(resolve_selector("@splitter", &tiles, &[]).is_err());
+        let p = crate::tmp::file("script", "d.json");
+        std::fs::write(&p, r#"[{"drag":{"splitter":"@splitter","dx":-80}}]"#).unwrap();
+        assert!(matches!(&load(&p)[0], Step::Drag(_)));
+    }
     #[test] fn open_settings_is_a_click_on_the_gear_and_paste_image_is_still_not_implemented() {
         let p = crate::tmp::file("script", "s.json");
         std::fs::write(&p, r#"[{"open_settings":true},{"paste_image":true},{"click":"ui:Settings"}]"#).unwrap();

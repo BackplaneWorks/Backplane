@@ -371,13 +371,7 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
             {"shot": "task7-sim-run"},
         ])
 
-    if kind == "full":
-        # Docking/tiling steps (Task 4 user route + Rule B7): scheduled in the normal `full` run;
-        # evaluated as `unavailable` until a build emits `GPUI_METRIC event=tiles`.
-        steps.extend(DOCK.build_task4_dock_steps(settle_timeout_ms))
-        steps.extend(DOCK.build_b7_steps(settle_timeout_ms))
-
-    elif kind in M.EXTRA_MISSING_SHOTS and embed:
+    if kind in M.EXTRA_MISSING_SHOTS and embed:
         # Scripted Edit from Files/Review/Browser via test-mode `script:kicad-edit` (PR #1353 route: navigates to design page, then edits).
         expected_frame = "SCH" if kind == "schematic-only" else "PCB"
         for slug, rail_id, settle_kind in M.EXTRA_EDIT_PAGES:
@@ -408,6 +402,12 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
             {"kicad": {"report": True, "tag": "extra-edit-files-report"}},
             {"shot": "extra-edit-files"},
         ])
+
+    if kind == "full":
+        # Docking/tiling (Task 4 user route, Rule B7): scheduled in the normal `full` run, UI controls and drawn-inventory selectors only;
+        # every check stays `unavailable` until a build emits `GPUI_METRIC event=tiles` (docs: rail_dock.py contract table).
+        steps.extend(DOCK.build_task4_dock_steps(settle_timeout_ms))
+        steps.extend(DOCK.build_b7_steps(settle_timeout_ms))
 
     return steps
 

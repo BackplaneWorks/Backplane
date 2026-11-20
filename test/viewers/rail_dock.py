@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Docking/tiling measurement helpers for Scorecard Task 4 and Rule B7.
+r"""Docking/tiling measurement helpers for Scorecard Task 4 and Rule B7.
 
 ## Required Renderer & Script Contract (for Tile Renderer / Worker A)
 
@@ -25,8 +25,16 @@ Every assertion in Task 4 and Rule B7 reads ONLY from the metrics below and clea
 | `GPUI_METRIC {"event":"drag", ...}` | `splitter` | `str` | Control / splitter id targeted by the drag. |
 | `GPUI_METRIC {"event":"drag", ...}` | `from`, `to` | `[float, float]` | Start and end pointer coordinates in window pixels (must move along splitter axis). |
 | `GPUI_METRIC {"event":"refusal", ...}` | `code`, `text` | `str`, `str` | Catalog refusal code (e.g. `incompatibleOverlay` / `viewer.layout.refusal.incompatibleOverlay`) and localized human words (no raw internal codes). |
-| `viewer.layout` (hub picture) | `root` | `dict` | Hub `Layout` tree (`native/host/src/present/layout.rs`): recursive `split` (`axis: "row"\|"col"`, `a`, `b`) and `leaf` (`tile: {id, kind, source, overlay}`). |
-| UI controls (for Task 4 user route) | `ui:Add beside`, `add-beside:board`, `tile-close:<id>` | script `press` | User-facing Task 4 route: Gerbers -> `ui:Add beside` -> `add-beside:board`, then close the added tile. |
+| `viewer.layout` (hub picture, in the `viewer` block of settled/shot metrics) | `root` | `dict` | Hub `Layout` (`native/host/src/present/layout.rs`): `{"type":"tile","id","kind","source","overlay"}` leaves and `{"type":"split","id","axis":"row"\|"col","ratio","a","b"}`. No other shape is read (no `tiles` list, no `leaf`/`tile` wrappers). |
+| `crate::script::tiles_metric(started, tiles, splitters)` | call | fn | The renderer calls this on every tile/layout/frame change: it emits the `tiles` event AND stores the inventory that script selectors resolve against. |
+| `crate::script::set_splitter_drag(f)` | call | `Fn(&str id, [f32;2] from, [f32;2] to, u32 moves) -> bool` | The renderer registers how a scripted drag is delivered as a real pointer drag on splitter `id`; returns whether it was dispatched. Without it the `drag` step reports `ok:false, error:"no_drag_handler"`. |
+| script step `press` with a selector | `@tile[kind=K,source=S,focused\|unfocused].VERB` | str | Resolved by the client from the drawn inventory (exactly one match, else `found:false`) to control id `tile:<tile id>:VERB`. The renderer registers these controls (`Ctl` entries): `add-beside`, `close`, `swap` (with the other tile), `maximize`, `restore`, `overlay-gerbers` (toggle). The `press` metric carries the resolved `id` and the `selector`. |
+| script step `drag` | `{"drag":{"splitter":"@splitter[axis=x]"\|"<id>","dx":N,"dy":N,"moves":N}}` | obj | Drags the drawn splitter along its axis (`dx` for `x`, `dy` for `y`); emits `drag` with `ok`, `splitter`, `axis`, `from`, `to`, `moves`. |
+| menu entries after `add-beside` | `add-beside:<kind>` / `add-beside:<kind>:<right\|left\|bottom\|top>` | control ids | Page and side entries (kind and side are fixed words, not tile ids). `add-beside:<kind>` means right. |
+| `GPUI_METRIC {"event":"refusal"}` | emitted when the hub refuses a layout change | event | After `overlay-gerbers` on the Files tile: `code` is `incompatibleOverlay`, `text` human words. The refusal must leave `viewer.layout` unchanged. |
+
+Task 4 route: `rail:Gerbers` -> `@tile[kind=gerbers].add-beside` -> `add-beside:board` -> (one step back) `@tile[kind=board].close`.
+Freshness: each shot's tile inventory must carry a `tiles` event whose seq is after the last DELIVERED input (press or drag) of its transition.
 
 Every check stays `unavailable` until a build emits `GPUI_METRIC {"event":"tiles", ...}` and
 draws real multi-tile layouts. Every visual assertion enforces per-shot privacy/obstruction
@@ -75,7 +83,11 @@ def axis_from_hub(hub_axis: str | None) -> str | None:
 
 
 def layout_leaves(layout: dict | None) -> dict[str, dict]:
-    """Walk hub `viewer.layout.root` (`native/host/src/present/layout.rs`) and return `{tile_id: tile_dict}`."""
+    """Hub `viewer.layout` (`native/host/src/present/layout.rs`): `{tile_id: tile}` for the `{"type":"tile",...}` leaves under `root`.
+
+    The hub's tree is `Node::Tile {id, kind, source, overlay}` and `Node::Split {id, axis: "row"|"col", ratio, a, b}`
+    (serde tag `type`); nothing else is accepted, so a build that sends another shape earns nothing here.
+    """
     out: dict[str, dict] = {}
     if not isinstance(layout, dict):
         return out
@@ -83,19 +95,25 @@ def layout_leaves(layout: dict | None) -> dict[str, dict]:
     def _walk(node: object) -> None:
         if not isinstance(node, dict):
             return
-        # Supports both tagged (`{"leaf": {"tile": ...}}` / `{"split": {"a": ..., "b": ...}}`)
-        # and externally/internally tagged serde shapes (`{"type":"leaf","tile":...}` / `{"a":...,"b":...}`).
-        if isinstance(node.get("leaf"), dict):
-            _walk(node["leaf"])
-            return
-        if isinstance(node.get("split"), dict):
-            _walk(node["split"])
-            return
-        tile = node.get("tile")
-        if isinstance(tile, dict) and tile.get("id"):
-            out[str(tile["id"])] = tile
-            return
-        if "a" in node or "b" in node:
+        if node.get("type") == "tile" and node.get("id"):
+            out[str(node["id"])] = node
+        elif node.get("type") == "split":
+            _walk(node.get("a"))
+            _walk(node.get("b"))
+
+    _walk(layout.get("root"))
+    return out
+
+
+def layout_splits(layout: dict | None) -> dict[str, dict]:
+    """`{split_id: {"axis": "x"|"y", "ratio": float}}` for the hub's `Node::Split`s, `row` -> `x` and `col` -> `y` translated explicitly."""
+    out: dict[str, dict] = {}
+    if not isinstance(layout, dict):
+        return out
+
+    def _walk(node: object) -> None:
+        if isinstance(node, dict) and node.get("type") == "split":
+            out[str(node.get("id") or "")] = {"axis": axis_from_hub(node.get("axis")), "ratio": node.get("ratio")}
             _walk(node.get("a"))
             _walk(node.get("b"))
 
@@ -197,26 +215,12 @@ def tile_bodies_pixel_diff(img_a: Path, rect_a: dict | None, img_b: Path, rect_b
 
 
 def _tile_source(tile: dict, viewer: dict) -> str:
-    """Extract a tile's own source from the tile metric, `viewer.tiles[id]`, or `viewer.layout.root` leaf."""
-    for k in ("source", "identity", "file", "key"):
-        val = str(tile.get(k) or "").strip()
-        if val:
-            return val
-    tid = str(tile.get("id") or "")
-    vtiles = viewer.get("tiles")
-    if isinstance(vtiles, dict) and tid and isinstance(vtiles.get(tid), dict):
-        tinfo = vtiles[tid]
-        for k in ("source", "identity", "file", "path", "key"):
-            val = str(tinfo.get(k) or "").strip()
-            if val:
-                return val
-    leaves = layout_leaves(viewer.get("layout"))
-    if tid and tid in leaves:
-        for k in ("source", "identity", "file", "path"):
-            val = str(leaves[tid].get(k) or "").strip()
-            if val:
-                return val
-    return ""
+    """A tile's own source: the tile metric's `source`, else the hub layout leaf (`viewer.layout.root`) with the same id."""
+    val = str(tile.get("source") or "").strip()
+    if val:
+        return val
+    leaf = layout_leaves(viewer.get("layout")).get(str(tile.get("id") or ""))
+    return str((leaf or {}).get("source") or "").strip()
 
 
 def _splitter_between(
@@ -230,10 +234,7 @@ def _splitter_between(
     for sp in splitters:
         if not isinstance(sp, dict):
             continue
-        sp_axis = sp.get("axis")
-        if sp_axis in HUB_AXIS_TO_RENDERER:
-            sp_axis = HUB_AXIS_TO_RENDERER[sp_axis]
-        if sp_axis != axis:
+        if sp.get("axis") != axis:
             continue
         sr = _rect_tuple(sp.get("rect"))
         if sr is None:
@@ -292,24 +293,32 @@ def _shot_cleared(
     return True, ""
 
 
-def _fresh_tiles_after_mark(shot: dict, mark_seqs: dict[str, int], mark_name: str) -> tuple[bool, str]:
-    """Require a fresh `GPUI_METRIC event=tiles` strictly after `mark_name` (never a stale carried-forward inventory)."""
+def _fresh_tiles_after_mark(shot: dict, mark_seqs: dict[str, int], mark_name: str, events: list[dict] | None = None) -> tuple[bool, str]:
+    """A tile inventory drawn strictly AFTER the transition: after the last delivered event (press, drag, refusal) of its mark.
+
+    With no delivered event the transition never happened, so nothing is fresh; the mark alone is not enough.
+    """
     mseq = mark_seqs.get(mark_name)
     tseq = shot.get("tiles_seq")
     if not isinstance(mseq, int) or mseq <= 0:
         return False, f"mark {mark_name!r} not recorded"
-    if not isinstance(tseq, int) or tseq <= mseq:
-        return False, f"stale tile inventory (tiles_seq={tseq} <= mark_seq={mseq} for {mark_name!r})"
+    delivered = [int(e.get("seq") or 0) for e in (events or []) if e.get("found", e.get("ok")) is True]
+    if not delivered:
+        return False, f"no delivered input for {mark_name!r}"
+    after = max(delivered)
+    if not isinstance(tseq, int) or tseq <= after:
+        return False, f"stale tile inventory (tiles_seq={tseq} <= delivered input seq={after} for {mark_name!r})"
     return True, ""
 
 
-def build_task4_dock_steps(settle_timeout_ms: int = 15000) -> list[dict]:
-    """User-facing Task 4 route: Gerbers -> Add beside... -> Board, then close the added tile (one step back).
+def _chain(presses: dict[str, list[dict]], mark: str) -> list[dict]:
+    """The presses of one transition's mark, only when EVERY one was delivered (a half-delivered route is not a transition)."""
+    evs = presses.get(mark) or []
+    return evs if evs and all(e.get("found") is True for e in evs) else []
 
-    Uses UI controls (`rail:Gerbers`, `ui:Add beside`, `add-beside:board`, `tile-close:board`) rather than
-    direct hub `layout-*` actions, and resets to idle first so `rail:Gerbers` never toggles Gerbers off.
-    """
-    tmo = min(settle_timeout_ms, 8000)
+
+def _reset_idle(tag: str, tmo: int) -> list[dict]:
+    """Back to no open page, so a following `rail:Board` opens Board (pressed on a focused Board it would close it)."""
     return [
         {"keys": "ctrl-l"},
         {"wait": 60},
@@ -317,104 +326,104 @@ def build_task4_dock_steps(settle_timeout_ms: int = 15000) -> list[dict]:
         {"wait": 60},
         {"keys": "escape"},
         {"wait": 60},
-        {"wait_settled": "", "tag": "task4-dock-start-idle", "timeout_ms": min(tmo, 3000)},
+        {"wait_settled": "", "tag": tag, "timeout_ms": min(tmo, 3000)},
+    ]
+
+
+def _add_beside(kind_sel: str, kind: str, side: str | None = None) -> list[dict]:
+    """The user route: the tile's Add beside control, then the menu entry for the page (and side). Tile ids come from the drawn inventory."""
+    entry = f"add-beside:{kind}" + (f":{side}" if side else "")
+    return [{"press": f"@tile[{kind_sel}].add-beside"}, {"wait": 120}, {"press": entry}, {"wait": 300}]
+
+
+def build_task4_dock_steps(settle_timeout_ms: int = 15000) -> list[dict]:
+    """User-facing Task 4: Gerbers -> Add beside... -> Board in the UI, then close the added tile (one step back).
+
+    No direct hub `layout-*` action; tile ids are selectors resolved by the client from the drawn inventory
+    (`@tile[kind=gerbers].add-beside` -> `tile:<real id>:add-beside`). Resets to idle first so `rail:Gerbers` never toggles Gerbers off.
+    """
+    tmo = min(settle_timeout_ms, 8000)
+    return [
+        *_reset_idle("task4-dock-start-idle", tmo),
         {"mark": "press:task4-dock-gerbers"},
         {"press": "rail:Gerbers"},
         {"shot": "task4-dock-gerbers", "settle": "gerbers", "timeout_ms": tmo},
         {"mark": "press:task4-dock-split"},
-        {"press": "ui:Add beside"},
-        {"wait": 120},
-        {"press": "add-beside:board"},
-        {"wait": 300},
+        *_add_beside("kind=gerbers", "board"),
         {"shot": "task4-dock-split", "settle": "board", "timeout_ms": tmo},
         {"mark": "press:task4-dock-back"},
-        {"press": "tile-close:board"},
+        {"press": "@tile[kind=board].close"},
         {"wait": 300},
         {"shot": "task4-dock-back", "settle": "gerbers", "timeout_ms": tmo},
     ]
 
 
 def build_b7_steps(settle_timeout_ms: int = 15000) -> list[dict]:
-    """Rule B7 (one split and compare model) steps on `full`.
+    """Rule B7 (one split and compare model) steps on `full`, all through the UI controls.
 
-    Resets to idle before every direction trial so `rail:Board` never closes an already-focused Board,
-    and addresses tiles/splitters via UI controls or live inventory selectors (never literal `t0`/`t1`/`splitter:0`).
+    Idle reset before every trial (never `rail:Board` on a focused Board). Tiles and the splitter are selectors the client resolves
+    from the drawn inventory; the drag is a pointer drag on that splitter (`ok` only if one was dispatched).
     """
     tmo = min(settle_timeout_ms, 8000)
-    def _reset_idle(tag: str) -> list[dict]:
-        return [
-            {"keys": "ctrl-l"},
-            {"wait": 60},
-            {"keys": "escape"},
-            {"wait": 60},
-            {"keys": "escape"},
-            {"wait": 60},
-            {"wait_settled": "", "tag": tag, "timeout_ms": min(tmo, 3000)},
-        ]
-
     steps: list[dict] = []
-    # 1. Add beside in all 4 directions (starting from idle -> Board each time)
     for side in ("right", "left", "bottom", "top"):
-        steps.extend(_reset_idle(f"b7-add-{side}-idle"))
-        steps.extend([
+        steps += _reset_idle(f"b7-add-{side}-idle", tmo)
+        steps += [
             {"press": "rail:Board"},
             {"wait_settled": "board", "tag": f"b7-add-{side}-start", "timeout_ms": tmo},
             {"mark": f"b7:add-{side}"},
-            {"action": ["layout-add", json.dumps({"kind": "schematic", "side": side})]},
-            {"wait": 300},
+            *_add_beside("kind=board", "schematic", side),
             {"shot": f"b7-add-{side}", "settle": "schematic", "timeout_ms": tmo},
             {"mark": f"b7:close-{side}"},
-            {"press": "tile-close:schematic"},
+            {"press": "@tile[kind=schematic].close"},
             {"wait": 250},
             {"shot": f"b7-close-{side}", "settle": "board", "timeout_ms": tmo},
-        ])
-    # 2. Swap + Resize (drag active splitter control) + Maximize/Restore
-    steps.extend(_reset_idle("b7-pair-idle"))
-    steps.extend([
+        ]
+    steps += _reset_idle("b7-pair-idle", tmo)
+    steps += [
         {"press": "rail:Board"},
         {"wait_settled": "board", "tag": "b7-pair-start", "timeout_ms": tmo},
-        {"action": ["layout-add", json.dumps({"kind": "schematic", "side": "right"})]},
-        {"wait": 300},
+        {"mark": "b7:pair"},
+        *_add_beside("kind=board", "schematic", "right"),
         {"shot": "b7-before-swap", "settle": "schematic", "timeout_ms": tmo},
         {"mark": "b7:swap"},
-        {"press": "ui:Swap tiles"},
+        {"press": "@tile[kind=schematic].swap"},
         {"wait": 300},
         {"shot": "b7-after-swap", "settle": "schematic", "timeout_ms": tmo},
         {"mark": "b7:resize-drag"},
-        {"drag": {"from": "tile-splitter:primary", "to": [980, 420], "moves": 6}},
+        {"drag": {"splitter": "@splitter[axis=x]", "dx": -90, "moves": 6}},
         {"wait": 300},
         {"shot": "b7-after-resize", "settle": "schematic", "timeout_ms": tmo},
         {"mark": "b7:maximize"},
-        {"press": "ui:Maximize tile"},
+        {"press": "@tile[kind=schematic].maximize"},
         {"wait": 250},
         {"shot": "b7-maximized", "settle": "schematic", "timeout_ms": tmo},
         {"mark": "b7:restore"},
-        {"press": "ui:Restore tiles"},
+        {"press": "@tile[kind=schematic].restore"},
         {"wait": 250},
         {"shot": "b7-restored", "settle": "schematic", "timeout_ms": tmo},
-    ])
-    # 3. Overlay on/off (Board + Gerbers) + incompatible overlay refusal (Board + Files)
-    steps.extend(_reset_idle("b7-overlay-idle"))
-    steps.extend([
+    ]
+    steps += _reset_idle("b7-overlay-idle", tmo)
+    steps += [
         {"press": "rail:Board"},
         {"wait_settled": "board", "tag": "b7-overlay-base", "timeout_ms": tmo},
         {"shot": "b7-overlay-plain", "settle": "board", "timeout_ms": tmo},
         {"mark": "b7:overlay-on"},
-        {"press": "ui:Overlay Gerbers"},
+        {"press": "@tile[kind=board].overlay-gerbers"},
         {"wait": 300},
         {"shot": "b7-overlay-on", "settle": "board", "timeout_ms": tmo},
         {"mark": "b7:overlay-off"},
-        {"press": "ui:Overlay Gerbers"},
+        {"press": "@tile[kind=board].overlay-gerbers"},
         {"wait": 300},
         {"shot": "b7-overlay-off", "settle": "board", "timeout_ms": tmo},
-        {"action": ["layout-add", json.dumps({"kind": "files", "side": "right"})]},
-        {"wait": 250},
+        {"mark": "b7:overlay-files"},
+        *_add_beside("kind=board", "files", "right"),
         {"shot": "b7-overlay-incompat-before", "settle": "files", "timeout_ms": tmo},
         {"mark": "b7:overlay-incompatible"},
-        {"press": "ui:Overlay incompatible"},
+        {"press": "@tile[kind=files].overlay-gerbers"},
         {"wait": 250},
         {"shot": "b7-overlay-incompat", "settle": "files", "timeout_ms": tmo},
-    ])
+    ]
     return steps
 
 
@@ -464,8 +473,8 @@ def evaluate_task4_dock(
     s_split = shots["task4-dock-split"]
 
     # Fresh tile inventory required for every shot (strictly after its mark).
-    fg_ok, fg_err = _fresh_tiles_after_mark(s_g, mark_seqs, "press:task4-dock-gerbers")
-    fs_ok, fs_err = _fresh_tiles_after_mark(s_split, mark_seqs, "press:task4-dock-split")
+    fg_ok, fg_err = _fresh_tiles_after_mark(s_g, mark_seqs, "press:task4-dock-gerbers", _chain(presses, "press:task4-dock-gerbers"))
+    fs_ok, fs_err = _fresh_tiles_after_mark(s_split, mark_seqs, "press:task4-dock-split", _chain(presses, "press:task4-dock-split"))
     if not (fg_ok and fs_ok):
         return {
             "outcome": "unavailable",
@@ -498,6 +507,12 @@ def evaluate_task4_dock(
     fails: list[str] = []
     if not found_route:
         fails.append("Task 4 user-facing presses not delivered")
+    board_ids = [str(t.get("id") or "") for t in tiles if t.get("kind") == "board"]
+    split_press_ids = [p.get("id") for p in p_s]
+    if init_id and f"tile:{init_id}:add-beside" not in split_press_ids:
+        fails.append(f"Add beside was not pressed on the drawn Gerbers tile {init_id!r} (pressed {split_press_ids})")
+    if board_ids and p_b and f"tile:{board_ids[0]}:close" not in [p.get("id") for p in p_b]:
+        fails.append(f"close was not pressed on the drawn Board tile {board_ids[0]!r}")
     if len(tiles) != 2:
         fails.append(f"expected 2 tiles, got {len(tiles)}")
     kinds = {str(t.get("kind") or "") for t in tiles}
@@ -544,7 +559,7 @@ def evaluate_task4_dock(
     back_note = err_b
     if ok_b:
         s_back = shots["task4-dock-back"]
-        fb_ok, fb_err = _fresh_tiles_after_mark(s_back, mark_seqs, "press:task4-dock-back")
+        fb_ok, fb_err = _fresh_tiles_after_mark(s_back, mark_seqs, "press:task4-dock-back", _chain(presses, "press:task4-dock-back"))
         if not fb_ok:
             back_note = fb_err
         elif not p_b:
@@ -624,6 +639,7 @@ def evaluate_b7_dock(
     shots = parsed_full.get("shots") or {}
     mark_seqs = parsed_full.get("mark_seqs") or {}
     drags = parsed_full.get("drags") or {}
+    presses = parsed_full.get("presses") or {}
     refusals = parsed_full.get("refusals") or {}
     checks: dict[str, dict] = {}
 
@@ -647,7 +663,7 @@ def evaluate_b7_dock(
             dir_results[side] = "unavailable"
             dir_notes.append(f"{side}: {err}")
             continue
-        fr_ok, fr_err = _fresh_tiles_after_mark(shots[sname], mark_seqs, f"b7:add-{side}")
+        fr_ok, fr_err = _fresh_tiles_after_mark(shots[sname], mark_seqs, f"b7:add-{side}", _chain(presses, f"b7:add-{side}"))
         if not fr_ok:
             dir_results[side] = "unavailable"
             dir_notes.append(f"{side}: {fr_err}")
@@ -710,7 +726,7 @@ def evaluate_b7_dock(
             checks["close"] = _rec("unavailable", None, err)
         else:
             srec = shots[close_sname]
-            fr_ok, fr_err = _fresh_tiles_after_mark(srec, mark_seqs, f"b7:close-{close_side}")
+            fr_ok, fr_err = _fresh_tiles_after_mark(srec, mark_seqs, f"b7:close-{close_side}", _chain(presses, f"b7:close-{close_side}"))
             pr = _pane_rect_from_layout(srec.get("layout"))
             if not fr_ok:
                 checks["close"] = _rec("unavailable", None, fr_err)
@@ -739,7 +755,7 @@ def evaluate_b7_dock(
         if not (ok1 and ok2):
             checks["swap"] = _rec("unavailable", None, e1 or e2)
         else:
-            fr_ok, fr_err = _fresh_tiles_after_mark(shots["b7-after-swap"], mark_seqs, "b7:swap")
+            fr_ok, fr_err = _fresh_tiles_after_mark(shots["b7-after-swap"], mark_seqs, "b7:swap", _chain(presses, "b7:swap"))
             if not fr_ok:
                 checks["swap"] = _rec("unavailable", None, fr_err)
             else:
@@ -793,17 +809,18 @@ def evaluate_b7_dock(
         elif not drag_evs:
             checks["resize_drag"] = _rec("unavailable", None, "no delivered drag event (strict ok=True with splitter id) recorded for b7:resize-drag")
         else:
-            fr_ok, fr_err = _fresh_tiles_after_mark(shots["b7-after-resize"], mark_seqs, "b7:resize-drag")
+            fr_ok, fr_err = _fresh_tiles_after_mark(shots["b7-after-resize"], mark_seqs, "b7:resize-drag", drags.get("b7:resize-drag", []))
             if not fr_ok:
                 checks["resize_drag"] = _rec("unavailable", None, fr_err)
             else:
                 d0 = drag_evs[-1]
                 d_from, d_to = d0.get("from"), d0.get("to")
-                moved_ok = (
-                    isinstance(d_from, list) and isinstance(d_to, list)
-                    and len(d_from) == 2 and len(d_to) == 2
-                    and (abs(float(d_to[0]) - float(d_from[0])) >= 10.0 or abs(float(d_to[1]) - float(d_from[1])) >= 10.0)
-                )
+                sp_drawn = {str(sp.get("id") or ""): sp for sp in (shots["b7-after-swap"].get("splitters") or []) if isinstance(sp, dict)}
+                sp_axis = (sp_drawn.get(str(d0.get("splitter") or "")) or {}).get("axis")
+                moved_ok = False
+                if isinstance(d_from, list) and isinstance(d_to, list) and len(d_from) == 2 and len(d_to) == 2 and sp_axis in ("x", "y"):
+                    along, across = (0, 1) if sp_axis == "x" else (1, 0)
+                    moved_ok = abs(float(d_to[along]) - float(d_from[along])) >= 10.0 and abs(float(d_to[across]) - float(d_from[across])) <= 3.0
                 pre_by_id = {str(t.get("id") or ""): t for t in (shots["b7-after-swap"].get("tiles") or []) if t.get("id")}
                 post_by_id = {str(t.get("id") or ""): t for t in (shots["b7-after-resize"].get("tiles") or []) if t.get("id")}
                 common = sorted(set(pre_by_id) & set(post_by_id))
@@ -833,7 +850,7 @@ def evaluate_b7_dock(
                             checks["resize_drag"] = _rec(
                                 "measured",
                                 ok_rsz,
-                                "" if ok_rsz else f"moved={moved_ok} ratio {r_pre:.3f}->{r_post:.3f} frames_adv={frames_adv} bodies=({b0},{b1}) inter={inter}",
+                                "" if ok_rsz else f"moved_along_axis={moved_ok} (splitter {d0.get('splitter')!r} axis {sp_axis!r} in the drawn inventory) ratio {r_pre:.3f}->{r_post:.3f} frames_adv={frames_adv} bodies=({b0},{b1}) inter={inter}",
                                 {"splitter": d0.get("splitter"), "ratio_before": round(r_pre, 3), "ratio_after": round(r_post, 3)},
                             )
 
@@ -847,8 +864,8 @@ def evaluate_b7_dock(
             checks["maximize_restore"] = _rec("unavailable", None, e1 or e2)
         else:
             sm, sr = shots["b7-maximized"], shots["b7-restored"]
-            fm_ok, fm_err = _fresh_tiles_after_mark(sm, mark_seqs, "b7:maximize")
-            fr_ok, fr_err = _fresh_tiles_after_mark(sr, mark_seqs, "b7:restore")
+            fm_ok, fm_err = _fresh_tiles_after_mark(sm, mark_seqs, "b7:maximize", _chain(presses, "b7:maximize"))
+            fr_ok, fr_err = _fresh_tiles_after_mark(sr, mark_seqs, "b7:restore", _chain(presses, "b7:restore"))
             pm = _pane_rect_from_layout(sm.get("layout"))
             if not (fm_ok and fr_ok):
                 checks["maximize_restore"] = _rec("unavailable", None, fm_err or fr_err)
@@ -893,8 +910,8 @@ def evaluate_b7_dock(
             checks["overlay_on_off"] = _rec("unavailable", None, e0 or e1 or e2)
         else:
             s_on, s_off = shots["b7-overlay-on"], shots["b7-overlay-off"]
-            fon_ok, fon_err = _fresh_tiles_after_mark(s_on, mark_seqs, "b7:overlay-on")
-            foff_ok, foff_err = _fresh_tiles_after_mark(s_off, mark_seqs, "b7:overlay-off")
+            fon_ok, fon_err = _fresh_tiles_after_mark(s_on, mark_seqs, "b7:overlay-on", _chain(presses, "b7:overlay-on"))
+            foff_ok, foff_err = _fresh_tiles_after_mark(s_off, mark_seqs, "b7:overlay-off", _chain(presses, "b7:overlay-off"))
             if not (fon_ok and foff_ok):
                 checks["overlay_on_off"] = _rec("unavailable", None, fon_err or foff_err)
             else:
@@ -956,12 +973,15 @@ def evaluate_b7_dock(
             lay_pre, lay_post = v_pre.get("layout"), v_inc.get("layout")
             layout_eq = isinstance(lay_pre, dict) and isinstance(lay_post, dict) and lay_pre == lay_post
             ok_ref = bool(code_ok and msg and not raw_code and layout_eq)
-            checks["incompatible_overlay_refusal"] = _rec(
-                "measured",
-                ok_ref,
-                "" if ok_ref else f"code={code!r} (ok={code_ok}) text={msg!r} raw_code={raw_code} layout_eq={layout_eq}",
-                {"code": code, "refusal_text": msg, "layout_equal": layout_eq},
-            )
+            if not (isinstance(lay_pre, dict) and isinstance(lay_post, dict)):
+                checks["incompatible_overlay_refusal"] = _rec("unavailable", None, "hub layout (`viewer.layout`) not observed before and after the refused overlay")
+            else:
+                checks["incompatible_overlay_refusal"] = _rec(
+                    "measured",
+                    ok_ref,
+                    "" if ok_ref else f"code={code!r} (ok={code_ok}) text={msg!r} raw_code={raw_code} layout_eq={layout_eq}",
+                    {"code": code, "refusal_text": msg, "layout_equal": layout_eq},
+                )
 
     measured = [(k, c) for k, c in checks.items() if c["status"] == "measured" and isinstance(c["passed"], bool)]
     if not measured:

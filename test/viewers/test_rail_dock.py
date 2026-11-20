@@ -78,18 +78,24 @@ class RailDockHarnessTests(unittest.TestCase):
             self.assertGreater(parsed["shots"]["b7-after-resize"]["tiles_seq"], parsed["mark_seqs"]["b7:resize-drag"])
             self.assertEqual(parsed["refusals"]["b7:overlay-incompatible"][0]["code"], "incompatibleOverlay")
 
-            # Hub layout.root leaves + row/col -> x/y translation
+            # The hub's real shape (present/layout.rs): `{"type":"tile",...}` leaves and `{"type":"split","axis":"row"|"col","a","b"}`
             hub_layout = {
-                "root": {
-                    "split": {
-                        "axis": "row",
-                        "a": {"leaf": {"tile": {"id": "tile-a", "kind": "gerbers", "source": "mfg/gerbers"}}},
-                        "b": {"leaf": {"tile": {"id": "tile-b", "kind": "board", "source": "ecc83-pp.kicad_pcb"}}},
-                    }
-                }
+                "version": 1,
+                "root": {"type": "split", "id": "s1", "axis": "row", "ratio": 0.5,
+                         "a": {"type": "tile", "id": "tile-a", "kind": "gerbers", "source": "mfg/gerbers"},
+                         "b": {"type": "split", "id": "s2", "axis": "col", "ratio": 0.4,
+                               "a": {"type": "tile", "id": "tile-b", "kind": "board", "source": "ecc83-pp.kicad_pcb"},
+                               "b": {"type": "tile", "id": "tile-c", "kind": "files", "source": ""}}},
+                "focus": "tile-b",
             }
             leaves = DOCK.layout_leaves(hub_layout)
-            self.assertEqual(set(leaves.keys()), {"tile-a", "tile-b"})
+            self.assertEqual(set(leaves.keys()), {"tile-a", "tile-b", "tile-c"})
+            self.assertEqual(DOCK.layout_splits(hub_layout), {"s1": {"axis": "x", "ratio": 0.5}, "s2": {"axis": "y", "ratio": 0.4}})
+            # Guessed shapes (nested leaf/tile wrappers, `viewer.layout.tiles`) earn nothing
+            self.assertEqual(DOCK.layout_leaves({"root": {"split": {"axis": "row", "a": {"leaf": {"tile": {"id": "x"}}}}}}), {})
+            self.assertEqual(DOCK.layout_leaves({"tiles": [{"id": "t0"}]}), {})
+            self.assertEqual(DOCK._tile_source({"id": "tile-a"}, {"layout": hub_layout}), "mfg/gerbers")
+            self.assertEqual(DOCK._tile_source({"id": "tile-a"}, {"tiles": {"tile-a": {"source": "guess"}}}), "")
             self.assertEqual(DOCK.axis_from_hub("row"), "x")
             self.assertEqual(DOCK.axis_from_hub("col"), "y")
 
@@ -108,14 +114,30 @@ class RailDockHarnessTests(unittest.TestCase):
         self.assertIn("b7:overlay-on", marks)
         self.assertIn("b7:overlay-off", marks)
         self.assertIn("b7:overlay-incompatible", marks)
-        # Task 4 uses user-facing UI controls, not direct layout-add
-        t4_start = marks.index("press:task4-dock-split")
         t4_steps = [s for s in steps if isinstance(s, dict)]
         idx_mark = next(i for i, s in enumerate(t4_steps) if s.get("mark") == "press:task4-dock-split")
-        self.assertEqual(t4_steps[idx_mark + 1].get("press"), "ui:Add beside")
+        # Task 4 is the user route: Add beside on the drawn Gerbers tile, then the Board entry; no direct hub layout action anywhere
+        self.assertEqual(t4_steps[idx_mark + 1].get("press"), "@tile[kind=gerbers].add-beside")
+        self.assertEqual(t4_steps[idx_mark + 3].get("press"), "add-beside:board")
+        self.assertFalse([s for s in t4_steps if "action" in s and str(s["action"][0]).startswith("layout")])
+        # No literal tile/splitter ids: every tile or splitter target is a selector resolved from the drawn inventory
+        for s in t4_steps:
+            for key in ("press", "click"):
+                v = str(s.get(key) or "")
+                self.assertNotRegex(v, r"^(tile-close|tile-splitter|splitter):", s)
+        drag = next(s for s in t4_steps if "drag" in s)
+        self.assertEqual(drag["drag"]["splitter"], "@splitter[axis=x]")
         # Between direction trials, idle reset occurs before pressing rail:Board
         idx_left_idle = next(i for i, s in enumerate(t4_steps) if s.get("tag") == "b7-add-left-idle")
         self.assertEqual(t4_steps[idx_left_idle + 1].get("press"), "rail:Board")
+        # and rail:Board is never pressed twice without an idle reset between
+        first_dock = next(i for i, s in enumerate(t4_steps) if s.get("mark") == "press:task4-dock-gerbers")
+        board_presses = [i for i, s in enumerate(t4_steps) if s.get("press") == "rail:Board" and i > first_dock]
+        for i in board_presses:
+            self.assertTrue(any(t4_steps[j].get("keys") == "escape" for j in range(i - 6, i)), i)
+        # the other kinds are still scheduled (the elif chain around the dock block stayed intact)
+        self.assertTrue(D.build_script("schematic-only", 300, 15000, embed=True))
+        self.assertFalse([s for s in D.build_script("mech-only", 300, 15000) if "mark" in s and str(s["mark"]).startswith("b7:")])
 
     def test_task4_dock_passes_and_catches_stale_identical_missing_start_and_privacy(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -135,8 +157,8 @@ class RailDockHarnessTests(unittest.TestCase):
                 "mark_seqs": {"press:task4-dock-gerbers": 10, "press:task4-dock-split": 20, "press:task4-dock-back": 30},
                 "presses": {
                     "press:task4-dock-gerbers": [{"id": "rail:Gerbers", "found": True, "seq": 11}],
-                    "press:task4-dock-split": [{"id": "ui:Add beside", "found": True, "seq": 21}, {"id": "add-beside:board", "found": True, "seq": 22}],
-                    "press:task4-dock-back": [{"id": "tile-close:board", "found": True, "seq": 31}],
+                    "press:task4-dock-split": [{"id": "tile:tile-g:add-beside", "found": True, "seq": 21}, {"id": "add-beside:board", "found": True, "seq": 22}],
+                    "press:task4-dock-back": [{"id": "tile:tile-b:close", "found": True, "seq": 31}],
                 },
                 "shots": {
                     "task4-dock-gerbers": {
@@ -227,7 +249,7 @@ class RailDockHarnessTests(unittest.TestCase):
                     d["overlay"] = overlay
                 return d
 
-            inc_layout = {"root": {"split": {"axis": "row", "a": {"leaf": {"tile": {"id": "tb", "kind": "board"}}}, "b": {"leaf": {"tile": {"id": "tf", "kind": "files"}}}}}}
+            inc_layout = {"root": {"type": "split", "id": "s1", "axis": "row", "ratio": 0.5, "a": {"type": "tile", "id": "tb", "kind": "board", "source": "b.kicad_pcb"}, "b": {"type": "tile", "id": "tf", "kind": "files", "source": ""}}}
             mark_seqs = {
                 "b7:add-right": 10, "b7:add-left": 20, "b7:add-bottom": 30, "b7:add-top": 40,
                 "b7:close-right": 50, "b7:swap": 60, "b7:resize-drag": 70,
@@ -257,7 +279,8 @@ class RailDockHarnessTests(unittest.TestCase):
                 "tiles_metric_seen": True,
                 "mark_seqs": mark_seqs,
                 "shots": shots,
-                "drags": {"b7:resize-drag": [{"ok": True, "splitter": "sp-x", "from": [1061, 420], "to": [975, 420], "moves": 6}]},
+                "presses": {m: [{"id": "tile:x:" + m, "found": True, "seq": q + 1}] for m, q in mark_seqs.items() if m not in ("b7:resize-drag", "b7:overlay-incompatible")},
+                "drags": {"b7:resize-drag": [{"ok": True, "splitter": "sp-x", "from": [1061, 420], "to": [975, 420], "moves": 6, "seq": 71}]},
                 "refusals": {"b7:overlay-incompatible": [{"code": "incompatibleOverlay", "text": "Those views cannot be overlaid"}]},
             }
 
@@ -278,6 +301,46 @@ class RailDockHarnessTests(unittest.TestCase):
             p_strfalse["drags"]["b7:resize-drag"] = [{"ok": "false", "splitter": "sp-x", "from": [1061, 420], "to": [975, 420]}]
             b7_sf = DOCK.evaluate_b7_dock(fdir, p_strfalse, caps, cleared_shots=cleared)
             self.assertEqual(b7_sf["checks"]["resize_drag"]["status"], "unavailable")
+
+            # Stale inventory: tiles drawn BEFORE the delivered press (carried forward) -> unavailable, per transition
+            p_stale = json.loads(json.dumps(parsed))
+            p_stale["shots"]["b7-after-swap"]["tiles_seq"] = 60  # the swap press was delivered at seq 61
+            b7_st = DOCK.evaluate_b7_dock(fdir, p_stale, caps, cleared_shots=cleared)
+            self.assertEqual(b7_st["checks"]["swap"]["status"], "unavailable")
+            self.assertIn("stale", b7_st["checks"]["swap"]["note"])
+
+            # A transition whose press was never delivered is not fresh either (the mark alone is not enough)
+            p_nopress = json.loads(json.dumps(parsed))
+            p_nopress["presses"]["b7:maximize"][0]["found"] = False
+            self.assertEqual(DOCK.evaluate_b7_dock(fdir, p_nopress, caps, cleared_shots=cleared)["checks"]["maximize_restore"]["status"], "unavailable")
+
+            # Drag naming a splitter that is not in the drawn inventory, or moving across its axis, fails (measured)
+            p_wrong = json.loads(json.dumps(parsed))
+            p_wrong["drags"]["b7:resize-drag"][0]["splitter"] = "ghost"
+            self.assertIs(DOCK.evaluate_b7_dock(fdir, p_wrong, caps, cleared_shots=cleared)["checks"]["resize_drag"]["passed"], False)
+            p_across = json.loads(json.dumps(parsed))
+            p_across["drags"]["b7:resize-drag"][0]["to"] = [1061, 300]
+            self.assertIs(DOCK.evaluate_b7_dock(fdir, p_across, caps, cleared_shots=cleared)["checks"]["resize_drag"]["passed"], False)
+
+            # Refusal: hub layout not observed -> unavailable; raw code in the human text -> failed
+            p_nolay = json.loads(json.dumps(parsed))
+            del p_nolay["shots"]["b7-overlay-incompat"]["viewer"]["layout"]
+            self.assertEqual(DOCK.evaluate_b7_dock(fdir, p_nolay, caps, cleared_shots=cleared)["checks"]["incompatible_overlay_refusal"]["status"], "unavailable")
+            p_raw = json.loads(json.dumps(parsed))
+            p_raw["refusals"]["b7:overlay-incompatible"][0]["text"] = "incompatibleOverlay"
+            self.assertIs(DOCK.evaluate_b7_dock(fdir, p_raw, caps, cleared_shots=cleared)["checks"]["incompatible_overlay_refusal"]["passed"], False)
+
+            # Identical bodies in pixels (two tiles painted alike) -> add_beside_directions fails
+            _write_painted_png(fdir / "b7-add-right.png", [(r_l, c_brd, True), (r_r, c_brd, True)])
+            b7_id = DOCK.evaluate_b7_dock(fdir, parsed, caps, cleared_shots=cleared)
+            self.assertIs(b7_id["checks"]["add_beside_directions"]["passed"], False)
+
+            # Per-shot privacy clearance is consulted
+            self.assertEqual(DOCK.evaluate_b7_dock(fdir, parsed, caps, cleared_shots=set())["checks"]["swap"]["status"], "unavailable")
+
+            # Scored over all seven: one unmeasured check is not earned
+            self.assertEqual(b7_ng["total"], 7)
+
 
 
 if __name__ == "__main__":
