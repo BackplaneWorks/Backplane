@@ -343,7 +343,6 @@ pub(crate) fn sha256_file(f: &Path) -> Result<String, String> {
     loop { let n = std::io::Read::read(&mut r, &mut b).map_err(|e| e.to_string())?; if n == 0 { break } h.update(&b[..n]) }
     Ok(hex::encode(h.finalize()))
 }
-/// One program to its end (through proc.rs, in its own group, its output into the log); Err with its last line when it fails.
 /// Spawn `c`, again for a moment while exec says "Text file busy": a program written a moment ago (a test's stand-in curl, an installer
 /// just fetched) is still open for writing in a child another thread forked meanwhile, which holds the descriptor until its own exec. It
 /// passes in milliseconds (at most 40 x 25 ms here). Unanswered, `length` read no size (the full hub suite, Nov 20: "already downloaded"
@@ -357,6 +356,7 @@ async fn spawn_busy(c: &mut tokio::process::Command) -> std::io::Result<tokio::p
         }
     }
 }
+/// One program to its end (through proc.rs, in its own group, its output into the log); Err with its last line when it fails.
 pub(crate) async fn tool(prog: &Path, args: &[String], log: &Path, mut tick: impl FnMut()) -> Result<String, String> {
     let out = std::fs::OpenOptions::new().create(true).append(true).open(log).map_err(|e| e.to_string())?;
     let err = out.try_clone().map_err(|e| e.to_string())?;
@@ -1117,8 +1117,8 @@ cp \"$f\" \"$out\"
         let t = tools_in(false, None, &sysdirs(&bin)).unwrap(); let curl = bin.join("curl");
         let hold = |ms: u64| { let f = std::fs::OpenOptions::new().append(true).open(&curl).unwrap(); std::thread::spawn(move || { std::thread::sleep(std::time::Duration::from_millis(ms)); drop(f) }) };
         let size = std::fs::metadata(r.join("serve").join(p.asset)).unwrap().len();
-        let h = hold(150); assert_eq!(rt().block_on(length(&t.get, &format!("https://x/r/{}", p.asset))), size, "the size, once the program is free"); h.join().unwrap();
-        let h = hold(150); let got = rt().block_on(tool(&curl, &["--proto".into(), "=https".into(), "-fsSIL".into(), format!("https://x/r/{}", p.asset)], &r.join("log"), || {}));
+        let h = hold(400); assert_eq!(rt().block_on(length(&t.get, &format!("https://x/r/{}", p.asset))), size, "the size, once the program is free"); h.join().unwrap();
+        let h = hold(400); let got = rt().block_on(tool(&curl, &["--proto".into(), "=https".into(), "-fsSIL".into(), format!("https://x/r/{}", p.asset)], &r.join("log"), || {}));
         assert!(got.as_ref().is_ok_and(|o| content_length(o) == size), "{got:?}"); h.join().unwrap();
     }
     #[cfg(unix)] #[test] fn a_stopped_download_is_kept_said_and_continued() {
