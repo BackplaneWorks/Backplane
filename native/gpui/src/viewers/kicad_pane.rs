@@ -171,14 +171,14 @@ pub fn warm_target(project: String, root: String) -> String {
     if kicad || root.is_empty() { project } else { root }
 }
 
-/// Whether the pre-warm may start by itself on an idle pane (2 s after the first editor is placed, with no new placement): everywhere but
-/// Windows, and there only on a runtime whose pre-warm never takes the keyboard from the shown editor (`prewarm-keeps-focus`).
 /// Whether a re-place needs no geometry: a frame to show at exactly the rect where the last placement in this container showed one
 /// (`prev`: that placement's rect and frame; one that showed none left the container unmapped, and a full placement maps it). The
 /// pane's re-places after a tab switch, the frames poll and the hub's echo of the switch are such.
 pub fn no_geometry(prev: Option<(Option<nc::R>, Option<u64>)>, at: Option<nc::R>, show: Option<u64>) -> bool {
     matches!((prev, at, show), (Some((Some(p), Some(_))), Some(a), Some(_)) if p == a)
 }
+/// Whether the pre-warm may start by itself on an idle pane (2 s after the first editor is placed, with no new placement): everywhere but
+/// Windows, and there only on a runtime whose pre-warm never takes the keyboard from the shown editor (`prewarm-keeps-focus`).
 pub fn idle_prewarm(windows: bool, keeps_focus: bool) -> bool { !windows || keeps_focus }
 
 /// Path without any file extension on its final segment (dots in parent folder names are preserved).
