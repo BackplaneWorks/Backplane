@@ -6,9 +6,11 @@
 #   L4  away while an agent keeps reading the board in that KiCad past the idle time: the same pid (use is not idle)
 #   L1  then nothing for longer than the idle time: KiCad closed as idle, and the hub log says why ("left the pane: thread")
 #   L5  back to the thread after the idle close: Backplane's viewer (no pane on a KiCad that is gone), no error notice
-#   L3  Edit again, an agent's unsaved track, the viewer closed (a leave, "viewer") past the idle time: the same pid (unsaved work is
-#       kept). (Not another thread here: once this thread's Board is open again the other thread of the same project shows it too.)
-# Each fails on main (no leave there: nothing closes after a thread switch, and nothing is counted). Fork only; copies (seed_project.py).
+#   L3  Edit again, an agent's unsaved track, the viewer on Files (a leave, "viewer") past the idle time: the same pid, and the hub
+#       heard the leave (unsaved work is kept). (Not another thread here: once this thread's Board is open again, the other thread of
+#       the same project shows the editor too: on screen, no leave.)
+# On main (2b6f5300af) L1, L2, L3 and L5 fail (no leave: nothing closes after a thread switch); L4 passes there too (nothing closes).
+# Fork only; copies (seed_project.py).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/lib/env_xvfb.sh"
