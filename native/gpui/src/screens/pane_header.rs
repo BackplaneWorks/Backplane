@@ -379,8 +379,10 @@ pub fn pane_header(light: bool, identity: Identity, tools: Vec<PaneTool<ToolActi
             .child(title).when(!widths.is_empty(), |r| r.child(strip)).child(close).into_any_element();
         row.prepaint_as_root(bounds.origin, size(bounds.size.width.into(), bounds.size.height.into()), w, cx);
         row
-    }, |_, mut row, w, cx| row.paint(w, cx)).size_full();
-    with_rect(div().flex_shrink_0(), || format!("pane-header:{}", identity_page)).child(viewer::bar(light).child(inner)).into_any_element()
+    }, |_, mut row, w, cx| row.paint(w, cx)).flex_1().min_w_0().h_full();
+    // Measure in the bar stretched by the page column. An auto-width bar nested
+    // inside a block can shrink to its padding because the canvas has no intrinsic width.
+    with_rect(viewer::bar(light).w_full(), || format!("pane-header:{}", identity_page)).child(inner).into_any_element()
 }
 
 #[cfg(test)]
