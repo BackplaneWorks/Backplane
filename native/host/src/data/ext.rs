@@ -255,7 +255,7 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: 
             match r { Ok(_) => thread_now(hub, th).await.map(|t| json!({"thread":t})), Err(e) => Err(e) }
         }
         "mentions.list" => mentions(hub, p).await,
-        "viewer.files" | "viewer.watch" | "viewer.probe" | "viewer.info" | "viewer.layers" | "viewer.refs" | "viewer.compare" | "viewer.rail" | "viewer.follow" | "files.entries" | "mech.list" | "browser" => viewers(hub, c, m, p, is_browser).await?,
+        "viewer.files" | "viewer.watch" | "viewer.probe" | "viewer.info" | "viewer.layers" | "viewer.refs" | "viewer.compare" | "viewer.rail" | "viewer.follow" | "viewer.layout" | "viewer.layout.act" | "files.entries" | "mech.list" | "browser" => viewers(hub, c, m, p, is_browser).await?,
         "thread.again" => { let th = s(p, "thread"); if th.is_empty() { return Some(Err(err("thread"))) } rpc(hub, c, "thread.again", json!({"thread":th})).await.map(|_| json!({})) }
         "voice.start" | "voice.stop" | "voice.act" | "voice.view" | "voice.key" | "voice.page" | "voice.page.act" | "voice.always" => voice(hub, c, m, p).await,
         "machines.page" | "machines.page.act" | "devices.page" | "devices.page.act" | "notify.page" | "notify.page.act" | "ring.list" | "ring.get" | "ring.search" | "ring.hear" | "ring.send" | "ring.setup" | "ring.page" | "ring.page.act" | "mcp.page" | "mcp.page.act" | "browser.page" | "browser.page.act" => {
@@ -473,7 +473,7 @@ pub fn project_card(card: &Value) -> Value {
     json!({"goal": card["goal"].as_str().unwrap_or(""), "boards": boards})
 }
 // ---- viewers, files, browser (each the hub's own request, for the folder of the thread) ----
-async fn root_of(hub: &Arc<Hub>, thread: &str) -> Result<String, Value> {
+pub(super) async fn root_of(hub: &Arc<Hub>, thread: &str) -> Result<String, Value> {
     // a thread of a linked machine: the folder over there (its mirror holds the project's root and the thread's worktree)
     if let Some((_, root)) = machines::far_root(hub, thread) { return Ok(root) }
     crate::files::root_of(hub, thread).await.map(|p| p.to_string_lossy().into_owned()).ok_or_else(|| err("that thread has no folder"))
@@ -489,6 +489,8 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: b
     let th = s(p, "thread");
     Some(async {
         match m {
+            // the docking layout for this device (data/layout.rs, feature `layout`)
+            "viewer.layout" | "viewer.layout.act" => super::layout::call(hub, c, m, p).await,
             "viewer.files" if machines::is_far(th) => { let (_, root) = machines::far_root(hub, th).ok_or_else(|| err("that thread has no folder"))?;
                 let r = result(rpc(hub, c, "boards.list", json!({"thread":th})).await?); let mut v = machines::board_files(&root, s(&r, "board_default"));
                 let list: Vec<String> = r["board_list"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
@@ -501,7 +503,11 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: b
                 let list = crate::files::kicad::boards::pick(&crate::files::kicad::boards::find(std::path::Path::new(&root)), &bd);
                 let has_gerbers = crate::files::kicad::gerber::has_gerbers(std::path::Path::new(&root));
                 Ok(json!({"root":root,"pro":f.pro,"pcb":f.pcb,"sch":f.sch,"boards":machines::board_rows(&root, &list, &bd),"hasGerbers":has_gerbers})) }
+            "viewer.watch" if s(p, "kind") == "layout" => super::layout::watch(hub, c, p).await,
             "viewer.watch" => {
+                // a watch of one source lets this connection's layout set go (the hub's `kicad.watch.set` is released by `leave`): the connection stops holding it only
+                // once the hub's handler has answered this watch, so an invalid request changes nothing
+                let leaving = super::layout::global(&hub.cfg.home).held(c.client).is_some();
                 // the design's folder, as viewer.files answers it: a hardware thread working in a code worktree has no board there
                 let raw_kind = s(p, "kind"); let raw_path = s(p, "path");
                 if raw_kind == "gerbers" && machines::is_far(th) { return Err(err("Gerbers of a project on another machine are not shown yet")) }
@@ -520,10 +526,12 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: b
                 if !s(p, "tree").is_empty() { q["tree"] = p["tree"].clone() }
                 if !s(p, "kept").is_empty() { q["kept"] = p["kept"].clone() }
                 if p["force"] == true { q["force"] = json!(true) }
+                if leaving { q["leave"] = json!(true) }
                 // Split of a board picked in the viewer (`viewer.files` → `boards`, a row's `pcb`): its file and the schematic beside it are the panes' sources
                 let board = s(p, "board"); if kind == "split" && !board.is_empty() { if !board.starts_with(&format!("{root}/")) || board.split('/').any(|x| x == "..") || board.contains('\0') { return Err(err("that board is not in this project")) } q["board"] = json!(board); }
                 q["fresh"] = json!(true); // a phone holds only what `kept` names after a switch: models and parts come again (kicad/watch.rs `forget`) // the model the phone has cached (plot::mesh_id, hex): not sent again
                 let r = result(rpc(hub, c, "kicad.watch", q).await?);
+                if leaving { super::layout::global(&hub.cfg.home).hold(c.client, None) }
                 Ok(json!({"root":root,"keys":r.get("keys").cloned().unwrap_or(json!([]))})) // the plots this view shows: a phone drops what comes late for the one it left
             }
             "viewer.rail" => {
@@ -608,7 +616,7 @@ pub(crate) fn browser_requests(th: &str, p: &Value) -> Result<Vec<Value>, String
 }
 /// Frames the hub pushes to this connection that a phone's viewer reads: a plot (binary CBOR, or JSON for "none") and a browser frame's announcement.
 pub fn wants_raw(b: &[u8]) -> bool { b.len() > 7 && (0xA0..=0xB7).contains(&b[0]) && b[1] == 1 && b[2..7] == [0x64, b'p', b'l', b'o', b't'] }
-pub fn wants_value(v: &Value) -> bool { matches!(s(v, "t"), "plot" | "shot" | "voice" | "star" | "migrating" | "hub.restarting") || (s(v, "t") == "d" && s(v, "k") == "btw") }
+pub fn wants_value(v: &Value) -> bool { matches!(s(v, "t"), "plot" | "shot" | "voice" | "star" | "migrating" | "hub.restarting" | "layout") || (s(v, "t") == "d" && s(v, "k") == "btw") }
 
 /// `composer.run {thread, text}`: the draft is one of `hello.commands`, run the way the desktop runs it (session/composer.rs). The answer's `kind` says what became of it: `btw` (a side
 /// question, its answer comes as a push `{t:"d",k:"btw",thread,q,a}` to this socket only), `give`, `secret` (the app opens its masked box for `name`; `secret.set` saves), `intent`, or
