@@ -1537,7 +1537,11 @@ try:
                     try: return int(json.loads(l.split('GPUI_LOG ', 1)[1]).get('frames') or 0)
                     except ValueError: return 0
             return 0
-        if os.environ.get('HIDE_RACE') == '1':
+        if os.environ.get('HIDE_PLAIN') == '1':
+            # the hide row as it ran before the first-click and after-Edit steps were added (e2e-macos 44735548017, 44661130991): those
+            # steps left macOS 15 letting KiCad activate by itself after the unhide, so the original failure did not show (#1198 fix's proof)
+            print('INFO hide: HIDE_PLAIN: no after-Edit or first-click steps before Cmd+H', flush=True)
+        elif os.environ.get('HIDE_RACE') == '1':
             f0 = kicad_frames()
             if f0 >= 2: print(f'INFO hide (race): KiCad\'s frame set had already changed ({f0} frames) before the run got here: not hit', flush=True)
             else:
@@ -1552,14 +1556,15 @@ try:
             # without the fork's key-on-activate, Edit's show leaves KiCad active with no key window; the keyboard comes across only by
             # the re-show after KiCad's frame set changes (~4 s on), so one Cmd+A at once is lost on main's client too (#1368's rows, Nov 19)
             print('INFO hide: after-Edit keys check skipped: the runtime lacks embed-key-on-activate', flush=True)
-        # the first click into an inactive KiCad (#1198, fork fix/1198-key-on-activate): KiCad's activation lands after the click, and the
-        # frame's makeKeyWindow ran before it and was ignored (KiCad active with no key window, keys going nowhere until a second click).
-        # Backplane is made active first (a click in its message area), then one click on the canvas, then keys
-        cwa = next((w for w in wins() if w[0] == cw[0]), cw); click(cwa[3][0] + 200, cwa[3][1] + 28 + 300); time.sleep(1)
-        check(not active(kpid), f'hide: before the first click KiCad is not the active app (Backplane active {active(client.pid)})')
-        click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); time.sleep(0.6)
-        check(bool(wait_for(lambda: active(kpid), 2, 0.1)), 'hide: the first click into an inactive KiCad makes it the active app')
-        canvas_takes_keys('after the first click into an inactive KiCad')
+        if os.environ.get('HIDE_PLAIN') != '1':
+            # the first click into an inactive KiCad (#1198, fork fix/1198-key-on-activate): KiCad's activation lands after the click, and the
+            # frame's makeKeyWindow ran before it and was ignored (KiCad active with no key window, keys going nowhere until a second click).
+            # Backplane is made active first (a click in its message area), then one click on the canvas, then keys
+            cwa = next((w for w in wins() if w[0] == cw[0]), cw); click(cwa[3][0] + 200, cwa[3][1] + 28 + 300); time.sleep(1)
+            check(not active(kpid), f'hide: before the first click KiCad is not the active app (Backplane active {active(client.pid)})')
+            click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); time.sleep(0.6)
+            check(bool(wait_for(lambda: active(kpid), 2, 0.1)), 'hide: the first click into an inactive KiCad makes it the active app')
+            canvas_takes_keys('after the first click into an inactive KiCad')
         for who in ('kicad', 'backplane'):
             if who == 'kicad': canvas_click()
             else:
