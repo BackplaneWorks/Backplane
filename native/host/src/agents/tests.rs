@@ -2030,6 +2030,21 @@ fn desktop(hub: &std::sync::Arc<crate::hub::Hub>, client: u64, applied: bool, re
     }
 }
 
+/// The report, the reporting client and its counter are one snapshot: two clients reporting interleaved never give A's picture with B's id.
+#[test] fn a_viewer_report_and_its_client_are_one_snapshot() {
+    use crate::files::kicad::watch::{viewer_report_from, viewer_snapshot};
+    let writers: Vec<_> = [21u64, 22].into_iter().map(|c| std::thread::spawn(move || { for _ in 0..20000 { viewer_report_from(c, "tsnap", json!({"who": c})); } })).collect();
+    let mut seen = 0;
+    for _ in 0..40000 {
+        let (n, client, state) = viewer_snapshot("tsnap");
+        if n == 0 { continue }
+        assert_eq!(state["who"].as_u64(), Some(client), "a picture is paired with the client that made it (report {n})");
+        seen += 1;
+    }
+    for w in writers { w.join().unwrap(); }
+    assert!(seen > 0);
+}
+
 // ---- Settle: the thread's turn and everything it owns stop, and nothing starts it again ----
 async fn tool_of(ag: &Arc<Agents>, name: &str) -> Arc<dyn mcp::ToolSet> { ag.tool_sets().into_iter().find(|s| s.owns(name)).expect("tool set") }
 #[tokio::test(flavor = "multi_thread")] async fn settling_stops_the_turn_and_all_the_work_and_nothing_starts_it_again() {

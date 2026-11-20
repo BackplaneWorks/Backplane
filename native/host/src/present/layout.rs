@@ -1488,7 +1488,8 @@ pub fn show_split(layout: &Layout, board: &str, sch: &str, client_has_kicad_tile
     }
     let id = holds(&next, PageKind::Board, board).ok_or(Refusal::NotFound)?;
     next.focus = Some(id.clone());
-    if next.maximized.as_deref() != Some(id.as_str()) { next.maximized = None; }
+    // the pair is shown: a maximized tile (the Board, or any) is restored so the Schematic is visible beside it
+    next.maximized = None;
     check_lock_preserved(layout, &next, locked)?;
     Ok(next)
 }
