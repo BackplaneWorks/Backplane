@@ -34,17 +34,17 @@ fn rect_center(v: &Value) -> Option<[f32; 2]> {
 /// `@tile[kind=board,focused].close` -> `tile:<id>:close`; `@splitter[axis=x]` -> the splitter's id. Filters: `kind=`, `source=`, `focused`,
 /// `unfocused`, `axis=`; exactly one drawn tile or splitter must match (ids come from the drawn inventory, never guessed).
 pub(crate) fn resolve_selector(sel: &str, tiles: &[Value], splitters: &[Value]) -> Result<String, String> {
-    let rest = sel.strip_prefix('@').ok_or("not a selector")?;
+    let rest = sel.strip_prefix('@').ok_or("not a selector")?; // i18n-ok: test-mode script diagnostic
     let (role, tail) = rest.split_once('[').map_or((rest, ""), |(r, t)| (r, t));
     let (filters, verb) = match tail.split_once(']') { Some((f, v)) => (f, v.strip_prefix('.').unwrap_or("")), None => ("", role.split_once('.').map_or("", |(_, v)| v)) };
     let role = role.split('.').next().unwrap_or("");
-    let pool = match role { "tile" => tiles, "splitter" => splitters, _ => return Err(format!("unknown selector role {role:?}")) };
+    let pool = match role { "tile" => tiles, "splitter" => splitters, _ => return Err(format!("unknown selector role {role:?}")) }; // i18n-ok: test-mode script diagnostic
     let hits: Vec<&Value> = pool.iter().filter(|t| filters.split(',').filter(|f| !f.is_empty()).all(|f| match f.split_once('=') {
         Some(("kind", v)) => t["kind"] == v, Some(("source", v)) => t["source"] == v, Some(("axis", v)) => t["axis"] == v,
         None if f == "focused" => t["focused"] == true, None if f == "unfocused" => t["focused"] == false, _ => false })).collect();
-    let [hit] = hits[..] else { return Err(format!("{} drawn {role}(s) match {sel:?} of {}", hits.len(), pool.len())) };
-    let id = hit["id"].as_str().filter(|i| !i.is_empty()).ok_or("matched entry has no id")?;
-    if role == "splitter" { Ok(id.to_string()) } else if verb.is_empty() { Err("tile selector needs a .verb".into()) } else { Ok(format!("tile:{id}:{verb}")) }
+    let [hit] = hits[..] else { return Err(format!("{} drawn {role}(s) match {sel:?} of {}", hits.len(), pool.len())) }; // i18n-ok: test-mode script diagnostic
+    let id = hit["id"].as_str().filter(|i| !i.is_empty()).ok_or("matched entry has no id")?; // i18n-ok: test-mode script diagnostic
+    if role == "splitter" { Ok(id.to_string()) } else if verb.is_empty() { Err("tile selector needs a .verb".into()) } else { Ok(format!("tile:{id}:{verb}")) } // i18n-ok: test-mode script diagnostic
 }
 
 #[derive(Clone, Debug)]
@@ -637,7 +637,7 @@ impl Backplane {
                 let report = match id {
                     Err(e) => json!({"ok": false, "splitter": want, "error": e}),
                     Ok(id) => match splitters.iter().find(|s| s["id"] == id.as_str()) {
-                        None => json!({"ok": false, "splitter": id, "error": "splitter not in the drawn inventory"}),
+                        None => json!({"ok": false, "splitter": id, "error": "splitter not in the drawn inventory"}), // i18n-ok: test-mode script diagnostic
                         Some(sp) => {
                             let axis = sp["axis"].as_str().unwrap_or("");
                             let from = rect_center(sp).unwrap_or([0., 0.]);
@@ -647,7 +647,7 @@ impl Backplane {
                             let ok = DRAG_HOOK.with(|h| h.borrow().as_ref().map(|f| f(&id, from, to, moves)));
                             match ok {
                                 Some(ok) => json!({"ok": ok, "splitter": id, "axis": axis, "from": from, "to": to, "moves": moves}),
-                                None => json!({"ok": false, "splitter": id, "axis": axis, "from": from, "to": to, "moves": moves, "error": "no_drag_handler"}),
+                                None => json!({"ok": false, "splitter": id, "axis": axis, "from": from, "to": to, "moves": moves, "error": "no_drag_handler"}), // i18n-ok: test-mode script diagnostic
                             }
                         }
                     },
