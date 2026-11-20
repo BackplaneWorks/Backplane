@@ -28,12 +28,13 @@ export class TerminalSwitchState {
     return gen === this.gen;
   }
 
-  /** Complete an async `term.new` reply. Returns true only if this generation is still current. */
-  resolveNew(gen: number, key: string): boolean {
+  /** Complete an async `term.new` reply. Returns whether this generation is still current and the prior key to unwatch. */
+  resolveNew(gen: number, key: string): { applied: boolean; prevKey: string } {
     this.rememberKey(key);
-    if (gen !== this.gen) return false;
+    if (gen !== this.gen) return { applied: false, prevKey: "" };
+    const prevKey = this.activeKey;
     this.activeKey = key;
-    return true;
+    return { applied: true, prevKey };
   }
 
   /** Complete an async `term.watch` snapshot. Returns true only if still current for `key`. */
