@@ -16,6 +16,9 @@ pub struct Update {
     pub refused: String,
     /// the restart onto the new runtime was asked for (once per install)
     pub reopened: bool,
+    /// when the person pressed this row's Install/Update, and when they last did anything in Backplane (a click, a key): the reopen after
+    /// the install hands KiCad the keyboard only if they are still there for it (`kicad_pane::reattach_why`)
+    pub pressed_at: Option<std::time::Instant>, pub person_at: Option<std::time::Instant>,
 }
 
 impl Update {
@@ -85,15 +88,32 @@ fn unsaved(app: &Backplane, cx: &App) -> bool {
 }
 fn install(app: &mut Backplane) {
     app.screens.kicad_update.refused.clear();
+    app.screens.kicad_update.pressed_at = Some(std::time::Instant::now());
     let _ = app.tx.try_send(Command::Rpc("kicad.install".into(), Secret(json!({"consent": true})), "kicad"));
 }
+/// Whether the person did anything in Backplane after the Install press (or the Install was not this row's: pressed in Settings). Pure.
+pub fn turned_since(pressed: Option<std::time::Instant>, person: Option<std::time::Instant>) -> bool {
+    match (pressed, person) { (None, _) => true, (Some(p), Some(a)) => a > p, (Some(_), None) => false }
+}
+/// A click or a key in Backplane (ui.rs): noted for `turned_since`.
+pub fn person_acted(app: &mut Backplane) { app.screens.kicad_update.person_at = Some(std::time::Instant::now()); }
 fn reopen(app: &mut Backplane, cx: &mut Context<Backplane>) {
     app.screens.kicad_update.reopened = true;
     if let Some(p) = app.screens.kicad.clone() {
         // a pane whose Edit had no KiCad in it (refused: "KiCad was not found", before the install) attaches with its own container: a
         // restart has no container to start KiCad in and started it in a window of its own (bp.13.3 first install). A pane on a running
         // KiCad keeps the restart, which keeps that session's container
-        if p.read(cx).is_adrift() { { let why = crate::viewers::kicad_pane::reattach_why(crate::viewers::kicad_pane::AdriftRoad::InstallReopen, p.read(cx).why); app.kicad_adrift(&p, why, cx) }; return }
+        if p.read(cx).is_adrift() {
+            use crate::viewers::kicad_pane::{reattach_why, AdriftRoad};
+            let thread = app.data["thread"].clone();
+            let on_screen = app.kicad_for(&thread, cx).as_ref() == Some(&p);
+            let u = &app.screens.kicad_update;
+            let turned = turned_since(u.pressed_at, u.person_at);
+            let why = reattach_why(AdriftRoad::InstallReopen, on_screen, turned);
+            // not its project on screen: nothing now (the pane says KiCad could not start, and the person's Edit there works now)
+            app.kicad_adrift(&p, why, cx);
+            return
+        }
         let project = p.read(cx).project.clone();
         let _ = app.tx.try_send(Command::Rpc("editor.kicad.restart".into(), Secret(json!({"project": project})), "kicad"));
     }
@@ -138,6 +158,14 @@ pub fn view(app: &mut Backplane, cx: &mut Context<Backplane>) -> Option<AnyEleme
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn the_person_turned_away_from_the_install_if_they_did_anything_since_its_press() {
+        let t0 = std::time::Instant::now(); let later = t0 + std::time::Duration::from_secs(5); let before = t0 - std::time::Duration::from_secs(5);
+        assert!(!turned_since(Some(t0), None), "nothing done since the press: still there");
+        assert!(!turned_since(Some(t0), Some(before)), "the last act was before the press (the press's own click comes first)");
+        assert!(turned_since(Some(t0), Some(later)), "a click or a key after the press: turned away");
+        assert!(turned_since(None, Some(later)), "no press of this row's (an Install in Settings, then closing it): taken as turned");
+        assert!(turned_since(None, None));
+    }
     use core::prelude::v1::test;
     fn offer() -> Value { json!({"offer": true, "from": "10.99.0-bp.12.4", "to": "10.99.0-bp.13", "reason": "Backplane KiCad bp.13 is out: panels that fit the pane", "mb": 1083, "size": "about 1.1 GB"}) }
     #[test] fn the_update_row_says_what_the_hub_says_and_goes_when_put_off() {

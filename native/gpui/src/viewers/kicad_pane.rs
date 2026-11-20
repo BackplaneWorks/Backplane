@@ -106,11 +106,13 @@ pub fn adrift(container: Option<u64>, info: &Value, me: &str) -> bool {
 /// net (a KiCad started outside it, found in `tick`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdriftRoad { InstallReopen, SafetyNet }
-/// Who gets the keyboard when an adrift pane is attached again: the person's own asking (their Install, or the safety net on a pane they
-/// opened with Edit) is Deliberate, KiCad takes the keys; the safety net on a pane something else opened (an automatic open, an agent's
-/// show, an agent's restart pulled into a pane the person only views) is Automatic: KiCad shows, the keys stay with Backplane. Pure.
-pub fn reattach_why(road: AdriftRoad, pane: ShowBy) -> ShowBy {
-    match (road, pane) { (AdriftRoad::InstallReopen, _) | (AdriftRoad::SafetyNet, ShowBy::Deliberate) => ShowBy::Deliberate, _ => ShowBy::Automatic }
+/// Who gets the keyboard when an adrift pane is attached again. The keyboard moves only on the person's own act: their Install press (the
+/// update row's), and only if they are still there for it: the pane's project still on screen (`on_screen`) and nothing done in Backplane
+/// since the press (`turned`: a click, a key, an overlay). Everything else is Automatic, KiCad shows and the keys stay where they are: the
+/// safety net (an agent's restart, a stray KiCad pulled in), even on the person's own Edit pane; an Install pressed in Settings (closing
+/// Settings is a click); an Install the person turned away from. Their next click or Edit hands in. Pure.
+pub fn reattach_why(road: AdriftRoad, on_screen: bool, turned: bool) -> ShowBy {
+    if road == AdriftRoad::InstallReopen && on_screen && !turned { ShowBy::Deliberate } else { ShowBy::Automatic }
 }
 pub fn remount_wait(asked: u32) -> std::time::Duration {
     std::time::Duration::from_millis(match asked { 0 | 1 => 1000, 2 => 2000, 3 => 4000, _ => 10_000 })
@@ -1351,11 +1353,11 @@ impl KicadPane {
             // KiCad started outside this pane (no container, or another one): attached again with the pane's container, once per KiCad;
             // a show would only show the frame in KiCad's own window (bp.13.3 first install: 750 shows in 21 minutes)
             let pid = self.info["pid"].as_u64().unwrap_or(0);
-            if self.is_adrift() && self.reattached_for != Some(pid) {
+            if self.is_adrift() && self.reattached_for != Some(pid) && since.elapsed() >= std::time::Duration::from_millis(1200) {
                 self.reattached_for = Some(pid);
                 // the person's Edit pane: the attach is theirs (KiCad gets the keyboard); one something else opened: automatic (it shows,
                 // the keys stay with Backplane)
-                let why = reattach_why(AdriftRoad::SafetyNet, self.why);
+                let why = reattach_why(AdriftRoad::SafetyNet, true, false);
                 eprintln!("GPUI_LOG {}", json!({"kicad_reattach": {"road": "adrift", "why": format!("{why:?}"), "pid": pid, "its_container": self.info["container"], "pane_container": self.container}}));
                 cx.emit(PaneAdrift(why));
             } else if since.elapsed() >= std::time::Duration::from_millis(1200)
@@ -2409,10 +2411,12 @@ mod tests {
     }
     #[test] fn who_gets_the_keyboard_when_an_adrift_pane_attaches_again() {
         use super::{reattach_why, AdriftRoad::*, ShowBy::*};
-        assert_eq!(reattach_why(InstallReopen, Deliberate), Deliberate, "the person pressed Edit, was refused, pressed Install: their KiCad, their keys");
-        assert_eq!(reattach_why(InstallReopen, Automatic), Deliberate, "the Install itself is the person's press, whatever opened the pane");
-        assert_eq!(reattach_why(SafetyNet, Deliberate), Deliberate, "the person's Edit pane, its KiCad started outside it: the person asked for KiCad");
-        assert_eq!(reattach_why(SafetyNet, Automatic), Automatic, "an agent's restart pulled into a pane the person is only viewing: shown, keys stay with Backplane");
+        assert_eq!(reattach_why(InstallReopen, true, false), Deliberate, "the person's Install, its project still on screen, nothing done since: their keys");
+        assert_eq!(reattach_why(InstallReopen, true, true), Automatic, "they clicked, typed or opened an overlay during the download: shown, keys stay");
+        assert_eq!(reattach_why(InstallReopen, false, false), Automatic, "they went to another thread: never the keys (and the attach waits for the project)");
+        assert_eq!(reattach_why(SafetyNet, true, false), Automatic, "an agent's restart pulled into a pane the person is only viewing: shown, keys stay");
+        assert_eq!(reattach_why(SafetyNet, true, true), Automatic, "the safety net never moves the keyboard, even on the person's Edit pane");
+        assert_eq!(reattach_why(SafetyNet, false, false), Automatic);
     }
     #[test] fn the_unshown_re_ask_backs_off() {
         let w: Vec<u64> = (0..6).map(|n| super::remount_wait(n).as_millis() as u64).collect();
@@ -2926,7 +2930,7 @@ impl crate::Backplane {
         // the person closed KiCad itself (Close, or KiCad's quit): the viewer, and no automatic attach until their own Edit
         { let k = closed_key; cx.subscribe(&page, move |this, _, _: &PaneKicadClosed, cx| { this.screens.kicad_closed.insert(k.clone()); this.kicad_view(cx) }).detach(); }
         // no KiCad of its project in the pane's container (an install after a refused Edit, a restart with no container): attached again
-        cx.subscribe(&page, |this, p, e: &PaneAdrift, cx| this.kicad_adrift(&p, e.0, cx)).detach();
+        cx.subscribe(&page, |this, p, e: &PaneAdrift, cx| { this.kicad_adrift(&p, e.0, cx); }).detach();
         cx.subscribe(&page, |this, _, e: &PaneKey, cx| {
             if e.0 == "ctrl-;" || e.0 == ";" { this.kcomment_open(None, cx); return }
             // the pane's "Open the KiCad app instead" (the editor could not be here): back to the viewer, and the hub starts KiCad on what it shows
@@ -2962,13 +2966,24 @@ impl crate::Backplane {
     /// A pane with no KiCad of its project in its container attached again: the pane let go (as View does) and the same design page
     /// opened through `kicad_attach`, so the hub's rules apply as to every attach (a stale generation changes nothing; the person's close
     /// keeps an automatic one away). `why`: Deliberate for the person's Edit or their Install's reopen, Automatic otherwise.
-    pub(crate) fn kicad_adrift(&mut self, pane: &Entity<KicadPane>, why: ShowBy, cx: &mut Context<Self>) {
-        if self.screens.kicad.as_ref() != Some(pane) { return }
-        let (open, generation) = { let p = pane.read(cx); (p.open.clone(), p.generation) };
+    pub(crate) fn kicad_adrift(&mut self, pane: &Entity<KicadPane>, why: ShowBy, cx: &mut Context<Self>) -> bool {
+        if self.screens.kicad.as_ref() != Some(pane) { return false }
+        let (open, generation, project, pid) = { let p = pane.read(cx); (p.open.clone(), p.generation, p.project.clone(), p.info["pid"].as_u64().unwrap_or(0)) };
+        // only for the pane's own project on screen: kicad_attach opens the thread shown now, and the pane outlives a thread switch
+        // (an Install's download, an agent's restart while another thread is shown): never another thread's design. Its next showing does it
+        let thread = self.data["thread"].clone();
+        if self.kicad_for(&thread, cx).as_ref() != Some(pane) {
+            eprintln!("GPUI_LOG {}", json!({"kicad_attach_again": {"road": "adrift", "held": "its project is not on screen", "project": project}}));
+            return false
+        }
+        // once per KiCad of the project (the pane is let go, so the guard is the app's)
+        if !self.screens.kicad_adrift_tried.insert((project.clone(), pid)) { return false }
         let open = if matches!(open.as_str(), "board" | "schematic" | "3d") { open } else { "board".to_string() }; // i18n-ok: rail page kinds
-        eprintln!("GPUI_LOG {}", json!({"kicad_attach_again": {"road": "adrift", "why": format!("{why:?}"), "open": open}}));
+        eprintln!("GPUI_LOG {}", json!({"kicad_attach_again": {"road": "adrift", "why": format!("{why:?}"), "open": open, "pid": pid}}));
         self.kicad_view(cx);
-        self.kicad_attach(&open, why, generation, cx);
+        // a Deliberate one (the person's Install) is a new open of theirs: no old generation to be answered stale against
+        self.kicad_attach(&open, why, if why == ShowBy::Deliberate { None } else { generation }, cx);
+        true
     }
     pub(crate) fn kicad_view(&mut self, cx: &mut Context<Self>) { if let Some(p) = self.screens.kicad.take() { p.update(cx, |p, _| p.detach()); } cx.notify(); }
     /// The editor for the thread's design when the person is editing it (None: the viewer draws the page).
