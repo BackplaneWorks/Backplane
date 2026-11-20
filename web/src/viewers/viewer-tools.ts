@@ -52,6 +52,15 @@ export interface ViewerRef {
 }
 
 /**
+ * Match an incoming hub compare plot key against the exact expected prefix (`<kind>|<root>|diff\n`)
+ * and commit hash (`\t<commit>\t`) so a buffered frame from an earlier Compare A cannot satisfy Compare B.
+ */
+export function matchesCompareKey(key: string, prefix: string, commit: string): boolean {
+  if (!key || !prefix || !commit) return false;
+  return key.startsWith(prefix) && key.includes(`\t${commit}\t`);
+}
+
+/**
  * Pure state machine for the Board / Schematic bottom history strip.
  * `index === -1` means Live working tree; `0..refs.length - 1` selects a saved ref
  * (ordered newest-first as returned by `viewer.refs`).
@@ -59,12 +68,16 @@ export interface ViewerRef {
 export class HistoryStripState {
   refs: ViewerRef[] = [];
   index = -1; // -1 = Live
+  lastCommit = "";
   highlightEdits = false;
   playing = false;
 
   setRefs(refs: ViewerRef[]): void {
     this.refs = refs;
-    if (this.index >= refs.length) this.index = -1;
+    if (this.index >= refs.length) {
+      this.index = -1;
+      this.highlightEdits = false;
+    }
   }
 
   isLive(): boolean {
@@ -80,13 +93,17 @@ export class HistoryStripState {
     if (this.refs.length === 0) return false;
     const prev = this.index;
     if (delta > 0) {
-      // Older snapshot
       this.index = Math.min(this.refs.length - 1, this.index + 1);
     } else {
-      // Newer snapshot (down to -1 = Live)
       this.index = Math.max(-1, this.index - 1);
     }
-    if (this.index === -1) this.playing = false;
+    if (this.index === -1) {
+      this.playing = false;
+      this.highlightEdits = false;
+    } else {
+      this.lastCommit = this.refs[this.index].commit;
+      this.highlightEdits = true;
+    }
     return this.index !== prev;
   }
 
@@ -96,31 +113,45 @@ export class HistoryStripState {
     }
     const idx = this.refs.findIndex((r) => r.commit === commit);
     if (idx < 0) return false;
-    const changed = this.index !== idx;
+    const changed = this.index !== idx || !this.highlightEdits;
     this.index = idx;
+    this.lastCommit = commit;
+    this.highlightEdits = true;
     return changed;
   }
 
   goLive(): boolean {
-    const changed = this.index !== -1 || this.playing;
+    const changed = this.index !== -1 || this.playing || this.highlightEdits;
     this.index = -1;
     this.playing = false;
+    this.highlightEdits = false;
     return changed;
   }
 
+  /**
+   * Toggle Highlight edits (compare diff on/off).
+   * Turning ON compares against `lastCommit` (or newest ref); turning OFF returns to Live
+   * so the canvas always reflects the toggle state rather than changing only a banner.
+   */
   toggleHighlight(): boolean {
-    this.highlightEdits = !this.highlightEdits;
-    // If toggling Highlight edits on while Live and refs exist, compare against the newest ref.
-    if (this.highlightEdits && this.isLive() && this.refs.length > 0) {
-      this.index = 0;
+    if (this.highlightEdits) {
+      this.goLive();
+      return false;
     }
-    return this.highlightEdits;
+    if (this.refs.length === 0) return false;
+    const targetIdx = this.lastCommit
+      ? this.refs.findIndex((r) => r.commit === this.lastCommit)
+      : 0;
+    this.index = targetIdx >= 0 ? targetIdx : 0;
+    this.lastCommit = this.refs[this.index].commit;
+    this.highlightEdits = true;
+    return true;
   }
 
   /** Payload for `viewer.compare` when comparing, or null when Live. `bits: 0` compares all layers. */
   compareRequest(): { commit: string; bits: number } | null {
     const ref = this.activeRef();
-    if (!ref) return null;
+    if (!ref || !this.highlightEdits) return null;
     return { commit: ref.commit, bits: 0 };
   }
 }
