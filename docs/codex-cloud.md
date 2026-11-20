@@ -1,18 +1,20 @@
 # Backplane in Codex Cloud
 
-Research and design, Nov 19 2026. No code yet.
+Research and design, Nov 19 2026; trial run Nov 20 2026 (§9). Spike code on branch `spike/codex-cloud`, not for merging.
 
 The question: can people install Backplane into a **Codex Cloud environment**, so a Codex cloud task gets Backplane's MCP tools
 (kicad_edit, kicad_sim, fab_profile, the parts search and so on), headless KiCad and the skills?
 
-**Short answer: yes, with one thing unproven.** A Codex Cloud environment is a Linux VM that we set up with an install script, and it can
-download from GitHub during setup. Backplane's hub already runs headless, KiCad already runs headless as `kicad-cli` and its IPC API server,
-and the board tools need no login. What we don't know yet: **whether a cloud task loads MCP servers from the repo's or the VM's Codex config.**
-OpenAI's docs don't say. So the design gives the same tools two ways:
-1. **a shell command** (`backplane tool <name> '<json>'`), driven by a skill checked into the repo. Repo skills are documented to work in cloud tasks.
-2. **an MCP server** for when the config is honoured.
+**Short answer: yes, through a shell command and a repo skill. Tried in a real Codex Cloud task.** A Codex Cloud environment is a Linux VM
+that we set up with an install script, and it can download from GitHub during setup. Backplane's hub runs headless there, Backplane KiCad
+runs headless as `kicad-cli` and its IPC API server, and the board tools need no login. In the trial (§9), a cloud task on a current
+published environment:
+- **did not load our MCP server.** It listed only `codex_apps`, although setup wrote `mcp_servers.backplane` to `~/.codex/config.toml`
+  and the repo has the same entry in `.codex/config.toml`;
+- **did use the repo skill and `backplane-hub --tool`.** It moved a part with kicad_edit, got KiCad's DRC delta, and committed and
+  pushed the board.
 
-The command works either way. The MCP path needs one live check in a real environment, which needs the person's OK because it spends their ChatGPT quota.
+So the shell route is the product. The MCP server (`--mcp-attach`) is kept for when Codex Cloud loads configured servers.
 
 ## 1. What a Codex Cloud environment is
 
@@ -172,17 +174,28 @@ review.
 | Live check in a real Codex Cloud environment (with the person's OK) and fixes | 1–2 |
 | **MVP total** | **about 2.5–3 weeks** |
 
-A spike that answers the open question takes 2–3 days: the installer and `backplane tool` against the existing hub, tried once in a real
-environment. Phase 2 (Tailscale) is about another 1.5 weeks plus a security review.
+The spike (§9) has done the installer, `backplane tool` and the live check, so about 2 weeks remain: the release cuts, the attached
+thread done properly (tests, the cloud tool list, refusals), the skill and AGENTS.md text, and Settings. Phase 2 (Tailscale) is about
+another 1.5 weeks plus a security review.
 
 ## 7. Open questions and blockers
 
-- **MCP in cloud tasks (unknown, the main one).** Does a cloud task load `mcp_servers` from `~/.codex/config.toml` written by setup,
-  from the repo's `.codex/config.toml`, or from a skill's `openai.yaml`? Do stdio servers run in the VM? Only a live task answers that.
-  The design doesn't depend on it: the `backplane tool` command plus the repo skill works with shell access alone.
-- **Disk on Plus (8 GiB).** The KiCad cloud cut fits. The full KiCad (4.6 GB) plus a large repo may not. The installer checks free space and says so.
+- **MCP in cloud tasks: not loaded (trial, §9).** On a current published environment, neither `~/.codex/config.toml` written by setup
+  nor the repo's `.codex/config.toml` gave the task a `backplane` server. Not tried: a skill's `agents/openai.yaml` MCP dependency (it
+  names a URL, and our server is stdio on loopback), and Legacy environments. The shell route doesn't depend on any of them.
+- **The tool list.** `--tool --list` shows all 95 hub tools, including ones that can't work in the cloud (threads, browser, vault,
+  accounts). The MVP lists only the cloud-capable ones (§3) and answers the rest with what they would need.
+- **PRs.** The task pushed its branch, but GitHub's API answered Forbidden when it tried to open the PR. Codex Cloud's own "Create PR"
+  button is the way. The skill should say so instead of retrying.
+- **Big diffs for small edits.** A 1 mm move rewrote 1039/966 lines of the .kicad_pcb (KiCad's save plus the pour refill). Review on the
+  desktop should use Backplane's board diff, not the text diff.
+- **The CLI can't see current environments or their tasks.** `codex cloud list` showed no tasks after the trial ran
+  ([openai/codex#50182](https://github.com/openai/codex/issues/50182)). The person starts tasks in ChatGPT. We can't launch or track
+  them from Backplane until OpenAI ships that.
+- **Disk on Plus (8 GiB).** The install is 1.2 GB with the KiCad cloud cut. The full KiCad (4.6 GB) plus a large repo may not fit. The
+  installer checks free space and says so.
 - **Two environment generations.** The scripts are the same, but where they go in the UI differs (Install script and Start skill vs. setup and
-  maintenance scripts). The Legacy agent phase has no internet by default, and that switches off the parts search there. The doc covers both.
+  maintenance scripts). The Legacy agent phase has no internet by default, and that switches off the parts search there.
 - **Terms.** We install open-source software (the hub, GPL KiCad) into an environment the person owns, and use no OpenAI account or API
   ourselves. That is ordinary use of a setup script, not a ToS issue. KiCad's GPL source stays offered beside the binary, as today.
 - **No scripting of environments.** People create the environment in ChatGPT. We give them the text to paste, which is enough.
@@ -191,9 +204,31 @@ environment. Phase 2 (Tailscale) is about another 1.5 weeks plus a security revi
 
 ## 8. Recommendation
 
-Build it in two steps:
-1. **The 2–3 day spike**: installer plus `backplane tool`, tried once in a real Codex Cloud environment on the cheapest model, with the
-   person's OK. It settles the MCP question and checks disk and timing on a Plus VM.
-2. **The MVP (§4)**: if MCP is honoured, ship both ways in. If not, ship the command plus skill and keep the MCP config for when Codex adds it.
+Build the MVP (§4) on the shell route: `backplane tool` plus the repo skill and AGENTS.md section, with the tool list cut to what works in
+the cloud. Keep `--mcp-attach` and the `.codex/config.toml` entry, since they cost little, and check again when Codex Cloud documents MCP for
+cloud tasks. Hold phase 2 (the person's hub over Tailscale) until the MVP is in use and the security review is done.
 
-Hold phase 2 (the person's hub over Tailscale) until the MVP is in use and the security review is done.
+## 9. Trial (Nov 20 2026)
+
+Setup: spike hub from `spike/codex-cloud` (an attached thread through `GET /dev/attach?dir=`, `backplane-hub --tool`, `--tool --describe`,
+`--mcp-attach`; about 120 lines in `agents/attach.rs`), built on Debian bookworm (glibc 2.36). A private test repo held the KiCad `ecc83`
+demo, `setup/codex-cloud.sh`, the hub (20 MB gzipped), `AGENTS.md`, `.agents/skills/backplane/` and `.codex/config.toml`.
+
+**Stand-in (clean `ubuntu:24.04` container on this machine):**
+- **Install:** 52 s. Downloading KiCad (970 MB from GitHub) took 30 s and unpacking it without 3D models and demos about 20 s. The install is 1.2 GB on disk (KiCad 1.1 GB).
+- **Startup:** the hub served in 70 ms. The first tool call started headless KiCad's IPC server: "KiCad server: ready for ecc83-pp".
+- **kicad_edit** (move R1 by 1 mm, from a subfolder of the repo): saved, with KiCad's DRC delta, in 1.9 s (`served_by: headless`).
+- **design_review** (scope "order"): 2.5 s. fab_profile answered from the bundled profiles with no network.
+- **MCP:** `--mcp-attach` answered `initialize` and `tools/list` over stdio.
+
+**Codex Cloud (current published environment, set up and started by the person in ChatGPT, cheapest model in the picker):**
+- **MCP:** the task's MCP list had only `codex_apps`. It said `backplane` wasn't connected and used `backplane-hub --tool`, as the skill tells it to.
+- **The edit:** it moved R1 +1.000 mm in x, from (136.271, 107.950) to (137.271, 107.950). kicad_edit's check reported the same five new
+  DRC findings as the stand-in (R1 pad to the bottom GND zone clearance, R1/U1 courtyard overlap, R1's reference over its pad, two silk
+  overlaps), 32 remaining.
+- **Git:** one commit, board file only (KiCad's save and the refill), on branch `move-r1-1mm-x`, pushed. Opening the PR through GitHub's
+  API was Forbidden. `git status` was clean.
+- **Setup time in the cloud:** not captured. The environment's setup report has it, and the stand-in's 52 s is the estimate.
+- **Quota:** the weekly allowance (Pro, 7-day window) went from 47% to 51% used over the trial's window. That covers the environment's
+  setup run, the task, and any other Codex use on the account in those hours, so the trial cost at most 4 points. The credit balance was
+  unchanged (6230.85). It was read from Codex's `account/rateLimits/read` before and after, with no turn.
