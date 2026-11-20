@@ -77,9 +77,9 @@ mod tests {
 
     #[tokio::test]
     async fn bind_requires_a_private_directory_and_canonical_authority() {
-        use std::os::unix::fs::{symlink, DirBuilderExt, PermissionsExt};
-        let dir = std::env::temp_dir().join(format!("bp-web-bind-{}", std::process::id()));
-        std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let tmp = crate::plat::tmp::dir("web-bind"); let dir = tmp.to_path_buf(); // removed when `tmp` drops, also when an assert fails
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
         let bind = |path: &Path, host: &str, pid| BrowserListener::bind(path, host.into(),
             ProxyIdentity { uid: crate::plat::effective_uid(), pid });
         let host = "hub.example.ts.net";
@@ -100,7 +100,6 @@ mod tests {
         assert!(bind(&dir, host, 1).is_err());
         drop(listener);
         std::fs::remove_file(dir.join("browser.sock")).unwrap();
-        std::fs::remove_dir(dir).unwrap();
     }
 
     #[tokio::test]
