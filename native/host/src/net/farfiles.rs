@@ -26,6 +26,11 @@ static BOUND: OnceLock<(Weak<Hub>, Arc<super::farsync::FarSync>)> = OnceLock::ne
 
 pub fn bind(hub: &Arc<Hub>, sync: Arc<super::farsync::FarSync>) { let _ = BOUND.set((Arc::downgrade(hub), sync)); hub.register_rpc(Arc::new(Own)); }
 
+/// One request to another machine's /far/rpc (`files::share`'s `file.piece`): None when this hub is not bound to its links.
+pub async fn ask(hub: &Arc<Hub>, link: &str, body: &str) -> Option<(u16, String)> {
+    let sync = BOUND.get().map(|(_, s)| s.clone())?;
+    Some(super::rpc::post(&sync, hub, link, body).await)
+}
 /// What a folder of a thread elsewhere (`<link>~<id>`) holds, as `files::dir::list` words it; None until that machine has answered once.
 pub fn listing(thread: &str, dir: &str) -> Option<Result<String, String>> { seen(&DIRS, thread, dir, "files.dir", json!({"path": dir})) }
 /// This machine's copy of a file of a thread elsewhere (its absolute path here); None while it is on its way, Err when that machine refused.

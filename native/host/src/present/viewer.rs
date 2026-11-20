@@ -952,14 +952,17 @@ fn project_title(st: &State, sel: &str) -> String { st.threads.get(sel).and_then
 fn files_page(st: &State, root: &str, sel: &str, dir: &str) -> Value {
     // the folder is watched on disk while this page shows it (files/watch_dir.rs): a change there makes the hub tell the views to draw it again
     // a project on another machine (`<link>~<id>`): its folder is listed there, not read from this disk
-    // a project on another machine (`<link>~<id>`): its folder is listed there and the listing comes over (net/farfiles.rs); downloads are that machine's
+    // a project on another machine (`<link>~<id>`): its folder is listed there and the listing comes over (net/farfiles.rs); its files download through here
     let far = sel.contains('~');
     let listed = if far { match crate::net::farfiles::listing(sel, dir) { Some(r) => r, None => return json!({"trail": files_trail(dir), "rows": [], "ready": false, "error": "", "zip": "", "zipName": ""}) } }
         else if root.is_empty() { Err("This thread has no project folder.".to_string()) } else { crate::files::dir::list(std::path::Path::new(root), dir).map_err(|e| crate::plat::privacy_block(root).unwrap_or_else(|| e.to_string())) };
     if let (false, Ok(t)) = (far, &listed) { crate::files::watch_dir::touch(root, dir, crate::files::watch_dir::signature(t)); }
     let (mut rows, err) = match listed { Ok(t) => (rows_of(&t, sel, dir), String::new()), Err(e) => (vec![], e) };
-    if far { for r in rows.iter_mut() { r["down"] = json!(""); } }
-    json!({"trail": files_trail(dir), "rows": rows, "ready": true, "error": err, "zip": if far { String::new() } else { down_url(sel, dir, true) }, "zipName": zip_name(&project_title(st, sel), dir)})
+    // a file of another machine downloads through this hub (files/share.rs streams it over the link, piece by piece); a folder's zip does not
+    if far { for r in rows.iter_mut() { if r["kind"] == "folder" { r["down"] = json!(""); } } }
+    // the project's manufacturing outputs (mfg/: Gerbers, BOM, CPL) one press away, from anywhere else in its files
+    let mfg = !far && dir != "mfg" && !root.is_empty() && std::path::Path::new(root).join("mfg").is_dir();
+    json!({"trail": files_trail(dir), "rows": rows, "ready": true, "error": err, "zip": if far { String::new() } else { down_url(sel, dir, true) }, "zipName": zip_name(&project_title(st, sel), dir), "mfg": if mfg { "mfg" } else { "" }})
 }
 /// File.json: an opened image, PDF or note: its name, its kind, where the hub serves it (`/img` takes an absolute path).
 fn file_page(kind: &str, abs: &str) -> Value {
@@ -3101,14 +3104,16 @@ fn viewer_page<'a>(st: &State, template: &Value, session: &Value, root: &str, so
             let (want, _) = mech_want(root, &ps, s(&session["drafts"], &format!("@mech.part:{sel}")));
             let mut v = template.clone(); let o = v.as_object_mut()?;
             o.insert("open".into(), json!("mech")); o.insert("key".into(), json!(want));
-            let chips: Vec<Value> = ps.iter().map(|p| json!({"label": stem(p), "value": p, "on": cur.as_deref() == Some(p.as_str())})).collect();
+            // each part downloads as its file (files/share.rs streams `/files/get`, ranged, to a client on any machine)
+            let chips: Vec<Value> = ps.iter().map(|p| json!({"label": stem(p), "value": p, "on": cur.as_deref() == Some(p.as_str()), "down": down_url(sel, p, false), "downName": crate::files::fm::last(p)})).collect();
             let (say, note) = if root.is_empty() { ("Loading…", "") }
                 else if sel.contains('~') && ps.is_empty() { ("No parts in its mech/ folder on that machine yet.", "") }
                 else if ps.is_empty() { ("No mechanical parts in this project yet", "Ask an agent to model one, or add a STEP file to mech/.") }
                 else { ("", "") };
             o.insert("mech".into(), json!({"say": say,
                 "note": note, "parts": chips, "rel": cur.clone().unwrap_or_default(), "busy": false, "render": "Create renders", "err": "",
-                "name": cur.as_deref().map(stem).unwrap_or_default(), "path": cur.as_deref().map(|p| abs_of(root, p)).unwrap_or_default(), "shots": [], "empty": ""}));
+                "name": cur.as_deref().map(stem).unwrap_or_default(), "path": cur.as_deref().map(|p| abs_of(root, p)).unwrap_or_default(), "shots": [], "empty": "",
+                "down": cur.as_deref().map(|p| down_url(sel, p, false)).unwrap_or_default(), "downName": cur.as_deref().map(crate::files::fm::last).unwrap_or_default()}));
             v
         }
         // Split (Split.*): the schematic, the board and its 3D model, each a page of its own

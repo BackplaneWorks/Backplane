@@ -397,6 +397,8 @@ pub fn entries_w(es: &[Ent], running: bool, waiting: bool, unread: &str, open: &
             let (text, blocks, s) = if e.id.starts_with("@live:") { ("Working".to_string(), md_blocks("Working"), String::new()) } else if api_err(&e.text) { (e.text.clone(), md_blocks(&api_say(&e.text)), s) } else { (e.text.clone(), md_blocks(&e.text), s) };
             let imgs = if newest_replies.contains(e.id.as_str()) { images(&e.id, &e.text) } else { vec![] };
             let mut row = json!({"id": e.id, "kind": "assistant", "text": text, "blocks": blocks, "images": imgs, "stamp": if mid { String::new() } else { s.clone() }});
+            // the files it names that every client may open or download (files/share.rs)
+            if !e.id.starts_with("@live:") { let f = crate::files::share::linkable(&e.text); if !f.is_empty() { row["files"] = json!(f) } }
             if mid && !s.is_empty() { row["hover"] = json!(s) }
             out.push(row);
         }

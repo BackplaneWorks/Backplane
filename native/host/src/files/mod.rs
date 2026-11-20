@@ -16,6 +16,7 @@ pub mod reviewask;
 pub mod misc;
 pub mod rv;
 pub mod serve;
+pub mod share;
 pub mod threadpath;
 pub mod webimg;
 #[path = "../kicad/mod.rs"]
@@ -39,6 +40,7 @@ pub fn start(hub: Arc<Hub>) {
     hub.register_rpc(Arc::new(export10::Export10));
     kicad::start(&hub);
     imgroutes::start(&hub);
+    share::start(&hub);
 }
 
 /// ThreadPath.of for the read model (threadpath.rs): the folder of a thread or `project-home-<id>`, None when it does not resolve.

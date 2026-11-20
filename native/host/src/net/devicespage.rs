@@ -24,7 +24,7 @@ fn state_of(session: &Value) -> String {
 }
 /// The page for a session: `{rows, state}`.
 pub fn page(session: &Value) -> Value {
-    let info = json!({"devices": super::start::routes().map_or(Value::Null, |r| r.devices())});
+    let info = json!({"devices": super::start::routes().map_or(Value::Null, |r| r.devices()), "shares": crate::files::share::listed_now()});
     let rows = crate::statehost::policies().and_then(|p| p.with_state(|st| crate::present::settings::devices(st, session, &info))).unwrap_or_default();
     json!({"rows": rows, "state": state_of(session)})
 }
