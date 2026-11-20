@@ -201,6 +201,9 @@ impl<'a> Ctx<'a> {
     pub fn triage_ask(&mut self, id: &str, th: &str, tool: &str, detail: &str) -> Step {
         let tt = self.w.triage_thread();
         if tt.is_empty() { return Step::none() }
+        // Git missing (agents/snapguard.rs) is about this computer, not the work: the thread shows the ask, the person's Install Git answers it, and no
+        // coordinator can. As mail it made a loop: every run and private lane it started opened the same ask, itself mail again (bare gate, 4966 turns).
+        if tool == crate::agents::snapguard::GIT_TOOL { return Step::none() }
         // Push.gate: the uberbot's own ask is the one ask that may reach a phone by itself (it cannot call notify_person while it waits). Any other thread's ask only reaches the uberbot, below
         if th == tt {
             let Some(src) = crate::push::Source::notify(self.w, &self.w.uber_bot()).filter(|_| self.policy_on("needs")) else { return Step::none() };

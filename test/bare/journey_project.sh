@@ -120,6 +120,38 @@ phase "Schematic"; if markt sch 720; then S_T=$(since); tms schematic-painted ra
   [ "$S_D" -gt 30 ] && { bad "the first Schematic took $S_D s after the PCB editor (must-fix: under 30 s)"; cut_ 1 schematic "the first Schematic took $S_D s after the PCB editor on a fresh install ($(basename "$KDIR"))"; }
 else bad "Schematic never reported in 180 s"; fi
 phase "back to the PCB, the agent's turn"; markt back 800 && { sleep 1; shot 09-back-before-agent; }
+# A stock desktop has no git, and since #1163 no agent turn starts without it: the thread gets an Install Git ask instead. The a44963adbc run
+# sent every agent step below into that ask (and the mailroom then looped on it: 4966 stand-in turns). So the gate checks the ask and that
+# nothing else follows it, then installs git as the person's Install Git press does (the distro package; the box has no polkit agent for
+# setup's pkexec), and the agent steps run on a computer with git.
+if ! in_box sh -c 'command -v git' >/dev/null; then
+  N0=$(grep -c . "$HH/coedit.json.turns" 2>/dev/null || echo 0)
+  hub rpc turn.start "{\"thread\":\"$tid\",\"text\":\"bare gate: a turn without git\"}" >"$OUT/logs/turn-start-nogit.json"
+  GA=; for _ in $(seq 60); do GA=$(python3 - "$HUBH/events.jsonl" "$tid" <<'PY'
+import json,sys
+for l in open(sys.argv[1], errors='replace'):
+    try: e=json.loads(l)
+    except Exception: continue
+    if e.get('$')=='AskOpened' and e.get('thread')==sys.argv[2] and e.get('tool')=='git_install': print(e['id'])
+PY
+); [ -n "$GA" ] && break; sleep 0.25; done
+  [ -n "$GA" ] && ok "without git, a turn shows the Install Git ask in its thread ($GA)" || bad "without git, a turn showed no Install Git ask ($(head -c 200 "$OUT/logs/turn-start-nogit.json"))"
+  sleep 10   # room for what the a44963adbc hub did next: mail runs and private lanes, each opening the same ask
+  read -r NR NA < <(python3 - "$HUBH/events.jsonl" <<'PY'
+import json,sys
+nr=na=0
+for l in open(sys.argv[1], errors='replace'):
+    try: e=json.loads(l)
+    except Exception: continue
+    nr+=e.get('$')=='RunSet'; na+=e.get('$')=='AskOpened' and e.get('tool')=='git_install'
+print(nr, na)
+PY
+)
+  N1=$(grep -c . "$HH/coedit.json.turns" 2>/dev/null || echo 0)
+  [ "${NR:-0}" = 0 ] && [ "${NA:-0}" -le 1 ] && [ "$N1" = "$N0" ] && ok "the Install Git ask starts nothing else (no mail run, no other ask, no agent turn)" \
+    || { bad "the Install Git ask set off more: $NR mail runs, $NA Install Git asks, $((N1 - N0)) stand-in turns in 10 s"; cut_ 1 agent "without git, one turn's Install Git ask set off the mailroom: $NR runs, $NA asks in 10 s"; }
+  pkg_install git && in_box sh -c 'command -v git' >/dev/null && ok "git installed, as Install Git does (the distro package)" || bad "git did not install in the box ($(tail -2 "$OUT/logs/box-pkg.log"))"
+fi
 # the agent's turn (stand-in): kicad_ipc on the live board, save, a comment
 TRACKS0=$(grep -c "(segment" "$HPCB")
 hub rpc turn.start "{\"thread\":\"$tid\",\"text\":\"add a track beside the first part, save, and comment\"}" >"$OUT/logs/turn-start.json"
