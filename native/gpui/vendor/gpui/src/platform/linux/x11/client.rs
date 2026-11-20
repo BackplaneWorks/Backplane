@@ -193,6 +193,8 @@ pub struct X11ClientState {
     pub(crate) _resource_database: Database,
     pub(crate) atoms: XcbAtoms,
     pub(crate) windows: HashMap<xproto::Window, WindowRef>,
+    /// Backplane patch (PATCH.md): each window's key proxy (proxy -> window), see `open_window`
+    pub(crate) key_proxies: HashMap<xproto::Window, xproto::Window>,
     pub(crate) mouse_focused_window: Option<xproto::Window>,
     pub(crate) keyboard_focused_window: Option<xproto::Window>,
     pub(crate) xkb: xkbc::State,
@@ -249,6 +251,7 @@ impl X11ClientStatePtr {
         if state.keyboard_focused_window == Some(x_window) {
             state.keyboard_focused_window = None;
         }
+        state.key_proxies.retain(|_, w| *w != x_window);
         state.cursor_styles.remove(&x_window);
 
         if state.windows.is_empty() {
@@ -508,6 +511,7 @@ impl X11Client {
             _resource_database: resource_database,
             atoms,
             windows: HashMap::default(),
+            key_proxies: HashMap::default(),
             mouse_focused_window: None,
             keyboard_focused_window: None,
             xkb: xkb_state,
@@ -532,6 +536,23 @@ impl X11Client {
         }))))
     }
 
+    /// Backplane patch (PATCH.md): a key read by a window's key proxy is the window's own
+    fn from_key_proxy(&self, mut event: Event) -> Event {
+        let state = self.0.borrow();
+        let target = match &mut event {
+            Event::KeyPress(e) => Some(&mut e.event),
+            Event::KeyRelease(e) => Some(&mut e.event),
+            _ => None,
+        };
+        if let Some(target) = target
+            && let Some(&w) = state.key_proxies.get(target)
+        {
+            *target = w;
+        }
+        drop(state);
+        event
+    }
+
     pub fn process_x11_events(
         &self,
         xcb_connection: &XCBConnection,
@@ -549,6 +570,7 @@ impl X11Client {
             loop {
                 match xcb_connection.poll_for_event() {
                     Ok(Some(event)) => {
+                        let event = self.from_key_proxy(event);
                         match event {
                             Event::Expose(expose_event) => {
                                 windows_to_refresh.insert(expose_event.window);
@@ -1570,6 +1592,9 @@ impl LinuxClient for X11Client {
         };
 
         state.windows.insert(x_window, window_ref);
+        if let Some(proxy) = key_proxy(&state.xcb_connection, x_window) {
+            state.key_proxies.insert(proxy, x_window);
+        }
         Ok(Box::new(window))
     }
 
@@ -2565,4 +2590,49 @@ fn get_dpi_factor((width_px, height_px): (u32, u32), (width_mm, height_mm): (u64
 #[inline]
 fn valid_scale_factor(scale_factor: f32) -> bool {
     scale_factor.is_sign_positive() && scale_factor.is_normal()
+}
+
+/// Backplane patch (PATCH.md): a window's key proxy, an InputOnly 1x1 child outside the window that reads its keys, named in the window's
+/// `_BACKPLANE_KEY_PROXY` property. With the X focus on the window itself, core X gives each key to the window under the pointer when
+/// that is inside it: a native child of the window (the KiCad pane) took the keys typed with the pointer resting over it. A program that
+/// embeds such a child focuses the proxy instead while the keyboard is this window's (Backplane's native_child); a key event never
+/// propagates above the focus window, so the proxy reads them itself and they are handled as the window's (`from_key_proxy`). A focus on
+/// the proxy is a focus inside the window: its FocusOut is detail Inferior (not a deactivation), and leaving the proxy for another
+/// program is NonlinearVirtual on the window (a deactivation, as before).
+fn key_proxy(xcb: &XCBConnection, x_window: xproto::Window) -> Option<xproto::Window> {
+    let proxy = xcb.generate_id().ok()?;
+    xcb.create_window(
+        0,
+        proxy,
+        x_window,
+        -10,
+        -10,
+        1,
+        1,
+        0,
+        xproto::WindowClass::INPUT_ONLY,
+        x11rb::COPY_FROM_PARENT,
+        &xproto::CreateWindowAux::new()
+            .event_mask(xproto::EventMask::KEY_PRESS | xproto::EventMask::KEY_RELEASE),
+    )
+    .ok()?
+    .check()
+    .ok()?;
+    xcb.map_window(proxy).ok()?;
+    let atom = xcb
+        .intern_atom(false, b"_BACKPLANE_KEY_PROXY")
+        .ok()?
+        .reply()
+        .ok()?
+        .atom;
+    xcb.change_property32(
+        xproto::PropMode::REPLACE,
+        x_window,
+        atom,
+        xproto::AtomEnum::WINDOW,
+        &[proxy],
+    )
+    .ok()?;
+    xcb_flush(xcb);
+    Some(proxy)
 }

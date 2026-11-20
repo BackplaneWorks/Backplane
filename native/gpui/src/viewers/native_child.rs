@@ -152,15 +152,14 @@ mod imp {
     /// Per top-level that holds a pane: a window of ours that is not an ancestor of KiCad's frame, holding the X focus while Backplane has
     /// the keyboard. With the focus on the top-level itself, core X gave every key to the window under the pointer when that was inside it,
     /// and KiCad's frame is (the top-level > our container > KiCad): typing in the composer with the pointer resting over the pane ran KiCad's
-    /// hotkeys (the right-rail lead's gate a2; as long as the pane has been embedded on Linux). Focused here, the keys go to this window and
-    /// propagate to the top-level (it selects none), where GPUI reads them as before; GPUI's window stays active (a FocusOut with detail
-    /// Inferior is not a deactivation: client.rs). InputOnly, 1x1, outside the window: never under the pointer, never drawn.
+    /// hotkeys (the right-rail lead's gate a2; as long as the pane has been embedded on Linux). Focused here, the keys go to this window,
+    /// which GPUI made and reads as the top-level's own (a key never propagates above the focus window); GPUI's window stays active (a
+    /// FocusOut with detail Inferior is not a deactivation: client.rs). InputOnly, 1x1, outside the window: never under the pointer.
     fn proxies() -> &'static Mutex<std::collections::HashMap<u32, u32>> { static P: OnceLock<Mutex<std::collections::HashMap<u32, u32>>> = OnceLock::new(); P.get_or_init(Default::default) }
     fn focus_proxy(c: &RustConnection, top: u32) -> Option<u32> {
         if let Some(p) = proxies().lock().unwrap().get(&top).copied() { return Some(p) }
-        let id = c.generate_id().ok()?;
-        c.create_window(0, id, top, -10, -10, 1, 1, 0, WindowClass::INPUT_ONLY, x11rb::COPY_FROM_PARENT, &CreateWindowAux::new()).ok()?.check().ok()?;
-        let _ = c.map_window(id);
+        // GPUI's own (vendor gpui PATCH.md, x11 `key_proxy`): it reads the keys, since a key never propagates above the focus window
+        let id = prop32(c, top, atom(c, "_BACKPLANE_KEY_PROXY"), AtomEnum::WINDOW).first().copied().filter(|&p| p != 0)?;
         // the top-level's focus changes come to our connection too (each client selects its own): a focus put on it (the window manager,
         // GPUI's activate) moves on to the proxy at once (pump)
         let mask = c.get_window_attributes(top).ok().and_then(|r| r.reply().ok()).map(|a| u32::from(a.your_event_mask)).unwrap_or(0);
