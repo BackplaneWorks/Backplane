@@ -24,15 +24,18 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 
 EMBED_MODE_FLAG=0
 SHARE_FLAG=0
+B2=0
 COMPARE_MODE=0
 POS_ARGS=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --b2) B2=1; shift ;;
     --embed) EMBED_MODE_FLAG=1; shift ;;
     --share) SHARE_FLAG=1; shift ;;
     --compare) COMPARE_MODE=1; shift ;;
     -h|--help)
       echo "usage: $0 [--embed] [--share] CLIENT_BIN HUB_BIN ASSETS_DIR OUTDIR" >&2
+      echo "       $0 --b2 CLIENT_BIN HUB_BIN ASSETS_DIR OUTDIR" >&2
       echo "       $0 --compare [--share] BASE_DIR NEW_DIR [OUT_DIR]" >&2
       exit 0
       ;;
@@ -41,6 +44,11 @@ while [ "$#" -gt 0 ]; do
     *) POS_ARGS+=("$1"); shift ;;
   esac
 done
+
+if [ "$B2" = 1 ]; then
+  [[ ${#POS_ARGS[@]} == 4 && $COMPARE_MODE$SHARE_FLAG$EMBED_MODE_FLAG == 000 ]] || exit 2
+  exec python3 "$SCRIPT_DIR/rail_b2.py" "${POS_ARGS[@]}"
+fi
 
 if [ "$COMPARE_MODE" = "1" ]; then
   if [ "${#POS_ARGS[@]}" -lt 2 ] || [ "${#POS_ARGS[@]}" -gt 3 ]; then
@@ -293,7 +301,11 @@ d=$((520 + $$ % 200))
 while [ -e "/tmp/.X11-unix/X$d" ] || [ -e "/tmp/.X$d-lock" ]; do d=$((d + 1)); done
 DISP=":$d"
 
-own env LD_LIBRARY_PATH="$XVFB_LD" "$XVFB_BIN" "$DISP" -screen 0 1440x900x24 -nolisten tcp -xkbdir /usr/share/X11/xkb >"$RUN/xvfb.log" 2>&1
+screen_width=1440
+[[ ${RAIL_B2_SIZE:-} != wide ]] || screen_width=2200
+# Folded sidebar 44 + thread 360 + minimum viewer 320 + rail 72.
+[[ ${RAIL_B2_SIZE:-} != minimum ]] || screen_width=796
+own env LD_LIBRARY_PATH="$XVFB_LD" "$XVFB_BIN" "$DISP" -screen 0 "${screen_width}x900x24" -nolisten tcp -xkbdir /usr/share/X11/xkb >"$RUN/xvfb.log" 2>&1
 for _ in $(seq 40); do [ -e "/tmp/.X11-unix/X$d" ] && break; sleep 0.1; done
 [ -e "/tmp/.X11-unix/X$d" ] || { echo "rail-shots: Xvfb failed to start on $DISP" >&2; cat "$RUN/xvfb.log" >&2; exit 1; }
 
@@ -531,7 +543,11 @@ PY
   SCRIPT_JSON="$RUN/script-$kind.json"
   DRV_EXTRA=()
   [ "$USE_EMBED" = "1" ] && DRV_EXTRA+=(--embed)
-  python3 "$SCRIPT_DIR/rail_shots_driver.py" gen-script "$kind" "$SCRIPT_JSON" "${RAIL_EARLY_MS:-300}" "${RAIL_SETTLE_TIMEOUT_MS:-15000}" "${DRV_EXTRA[@]}"
+  if [[ -n ${RAIL_B2_SIZE:-} ]]; then
+    python3 "$SCRIPT_DIR/rail_b2.py" --script >"$SCRIPT_JSON"
+  else
+    python3 "$SCRIPT_DIR/rail_shots_driver.py" gen-script "$kind" "$SCRIPT_JSON" "${RAIL_EARLY_MS:-300}" "${RAIL_SETTLE_TIMEOUT_MS:-15000}" "${DRV_EXTRA[@]}"
+  fi
 
   # Start external capture watcher (only watcher's `import` and `xwininfo` receive DISPLAY=$DISP)
   own python3 "$SCRIPT_DIR/rail_shots_driver.py" watch "$DISP" "$KIND_OUT/client.log" "$SHOT_DIR" "$KIND_OUT" "$STOP_FLAG" >"$KIND_OUT/watch.log" 2>&1
@@ -576,6 +592,9 @@ PY
   stop_group "$HUB_PG"
 done
 
+if [[ -n ${RAIL_B2_SIZE:-} ]]; then
+  exit "$CLIENT_RC"
+fi
 POST_EXTRA=()
 [ "$EMBED_MODE_FLAG" = "1" ] && POST_EXTRA+=(--embed)
 [ "$SHARE_FLAG" = "1" ] && POST_EXTRA+=(--share)
