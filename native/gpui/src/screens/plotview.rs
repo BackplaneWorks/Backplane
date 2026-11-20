@@ -8,6 +8,7 @@ use crate::mouse::{Action, Scroll};
 
 #[derive(Default)]
 pub struct PlotView {
+    pub presented: u64,
     pub view: Option<View>, pub fitted: f32, pub key: String, pub drag: Option<(f32, f32)>, /** what the drag now held does (the table's), and the button that holds it */ pub drag_act: Option<Action>, pub drag_btn: Option<MouseButton>,
     /// The canvas size the camera was fitted to, and whether the person has moved it since: an untouched camera is fitted again when the canvas turns out bigger or smaller than first assumed.
     pub fit_wh: (f32, f32), pub touched: bool,
@@ -370,7 +371,7 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
         let (w, h) = (f32::from(b.size.width), f32::from(b.size.height));
         this.update(cx, |app, _| { app.screens.pv(slot).bounds = Some(b); });
         let Some(v) = view else { return };
-        let measure = this.update(cx, |app, _| app.screens.pv(slot).measure);
+        let measure = this.update(cx, |app, _| { let pv = app.screens.pv(slot); if crate::art::rects_on() { pv.presented += 1; } pv.measure });
         let t0 = measure.then(std::time::Instant::now); let mut sp = [0f32; 3];
         let (lit, probe) = this.update(cx, |app, _| { let pv = app.screens.pv(slot); (pv.picked.clone(), pv.lit.clone()) });
         // the paths kept from an earlier paint are drawn again, moved by what the camera moved since (a drag tessellates nothing here);
