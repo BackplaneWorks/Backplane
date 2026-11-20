@@ -270,9 +270,8 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
     ])
 
     # Extra missing-document checks run BEFORE B1 Simulation (under --embed) so each starts from a known clean state
-    # without a lingering SIMULATOR frame from B1 Simulation.
+    # without a lingering SIMULATOR frame from B1 Simulation; capture hub session inventory AT the idle reset.
     if kind in M.EXTRA_MISSING_SHOTS:
-        # Close viewer to a known idle state before viewshow checks.
         steps.extend([
             {"keys": "ctrl-l"},
             {"wait": 60},
@@ -280,7 +279,8 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
             {"wait": 60},
             {"keys": "escape"},
             {"wait": 60},
-            {"wait_settled": "", "tag": "extra-missing-start-idle", "timeout_ms": min(settle_timeout_ms, 3000)},
+            {"mark": "extra:extra-missing-start-idle"},
+            {"shot": "extra-missing-start-idle", "settle": "", "timeout_ms": min(settle_timeout_ms, 3000)},
         ])
         missing_targets = [("board", "extra-missing-board"), ("3d", "extra-missing-3d")] if kind == "schematic-only" else [("schematic", "extra-missing-schematic")]
         for view_kind, shot_name in missing_targets:
@@ -319,7 +319,8 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
             {"wait": 80},
             {"keys": "escape"},
             {"wait": 100},
-            {"wait_settled": "", "tag": "b1-sim-cleanup", "timeout_ms": min(settle_timeout_ms, 3000)},
+            {"kicad": {"report": True, "tag": "b1-sim-cleanup-report"}},
+            {"shot": "b1-sim-cleanup", "settle": "", "timeout_ms": min(settle_timeout_ms, 3000)},
         ])
 
     if kind == "full" and embed:
@@ -355,7 +356,7 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
         ])
 
     elif kind in M.EXTRA_MISSING_SHOTS and embed:
-        # Scripted Edit from remaining unmigrated no-editor pages (Files/Review dropped after PR #1412 removed ui:Edit there).
+        # Scripted Edit from Files/Review/Browser via test-mode `script:kicad-edit` (PR #1353 route: navigates to design page, then edits).
         expected_frame = "SCH" if kind == "schematic-only" else "PCB"
         for slug, rail_id, settle_kind in M.EXTRA_EDIT_PAGES:
             shot_name = f"extra-edit-{slug}"
@@ -364,7 +365,7 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
                 {"press": rail_id},
                 {"wait_settled": settle_kind, "tag": f"{shot_name}-start", "timeout_ms": settle_timeout_ms},
                 {"mark": f"press:{shot_name}"},
-                {"click": "ui:Edit", "within": 4000},
+                {"click": "script:kicad-edit", "within": 4000},
                 {"kicad": {"wait_painted": 20000, "kind": expected_frame, "tag": shot_name}},
                 {"wait": 600},
                 {"kicad": {"report": True, "tag": f"{shot_name}-report"}},
@@ -373,6 +374,18 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
                 {"click": "ui:View", "within": 4000},
                 {"wait": 500},
             ])
+    elif kind in M.NO_DESIGN_KINDS and embed:
+        # Scripted Edit on a project with no KiCad document: must start no KiCad and report Files status.
+        steps.extend([
+            {"mark": "extra:extra-edit-files"},
+            {"press": "rail:Files"},
+            {"wait_settled": "files", "tag": "extra-edit-files-start", "timeout_ms": settle_timeout_ms},
+            {"mark": "press:extra-edit-files"},
+            {"click": "script:kicad-edit", "within": 1500},
+            {"wait": 800},
+            {"kicad": {"report": True, "tag": "extra-edit-files-report"}},
+            {"shot": "extra-edit-files"},
+        ])
 
     return steps
 

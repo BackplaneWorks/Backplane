@@ -777,6 +777,7 @@ impl Backplane {
     }
     /// Find a registered control, or a probed viewer bar control (`follow-agent`, `ui:vs board`) when currently drawn.
     fn find_script_control(&self, id: &str) -> Option<CtlEntry> {
+        /* i18n-ok: test-mode scripted kicad_edit route (PR #1353), inert outside --script */ if id == "script:kicad-edit" { return Some(CtlEntry { id: id.into(), label: "Edit".into(), ctl: Ctl::KicadEdit(true) }); }
         let header = HEADER.with_borrow(|registry| registry.actions.get(id).map(|a| CtlEntry {
             id: id.into(), label: a.label.clone(), ctl: if a.press.is_some() { Ctl::Header(id.into()) } else { Ctl::None },
         }));
