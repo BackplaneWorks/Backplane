@@ -3231,7 +3231,9 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
         }
     });
     if let Some((text, tone)) = opening_text {
-        mid = mid.child(crate::ui::with_rect(div().id("kicad-opening"), || "kicad:opening".to_string()).ml_2().max_w(px(320.)).overflow_hidden().whitespace_nowrap().text_ellipsis()
+        // at a narrow pane the tabs keep their place and this gives way: from 80 px it is cut short with an ellipsis (its basis, so the
+        // wrapping row keeps it on the first line and shrinks it), below that it wraps onto the clipped second line, shown not at all
+        mid = mid.child(crate::ui::with_rect(div().id("kicad-opening"), || "kicad:opening".to_string()).ml_2().flex_basis(px(80.)).flex_grow().min_w(px(80.)).max_w(px(320.)).overflow_hidden().whitespace_nowrap().text_ellipsis()
             .text_size(crate::scale::tpx(11.)).text_color(c(tone)).child(text));
     } else if let Some(j) = jobs.first() {
         let (id, f) = (j["id"].as_u64().unwrap_or(0), j["fraction"].as_f64().unwrap_or(-1.0));
