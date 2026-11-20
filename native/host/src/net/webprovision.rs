@@ -234,6 +234,31 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn private_socket_directory_rejects_a_writable_parent() {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        let parent =
+            std::env::temp_dir().join(format!("bp-web-unsafe-parent-{}", std::process::id()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&parent)
+            .unwrap();
+        let child = parent.join("private");
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&child)
+            .unwrap();
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o770)).unwrap();
+        assert_eq!(
+            protected_directory(&child.canonicalize().unwrap())
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        std::fs::remove_dir(child).unwrap();
+        std::fs::remove_dir(parent).unwrap();
+    }
+
+    #[test]
     fn node_port_selection_preserves_existing_and_foreground_routes() {
         let config = json!({"TCP":{"8443":{"HTTPS":true}},
             "Foreground":{"test":{"Web":{"hub.example.ts.net:8444":{"Handlers":{}}}}}});
