@@ -7,8 +7,12 @@ import type { Plot2DFrame, PlotChunk } from "./cbor.ts";
 export interface LayerMasks {
   off: number;
   dim: number;
+  /** Layer index to lift on top (255 = NO_LIFT), matching GPUI layers.rs `Masks::lift`. */
   lift: number;
 }
+
+const NO_LIFT = 255;
+const LAYER_DIM = 0.25;
 
 export interface PickHit {
   at: number;
@@ -31,7 +35,7 @@ export class Plot2DViewer {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private frame: Plot2DFrame | null = null;
-  private masks: LayerMasks = { off: 0, dim: 0, lift: 0 };
+  private masks: LayerMasks = { off: 0, dim: 0, lift: NO_LIFT };
   private highlights = new Set<string>();
   private lightTheme = false;
 
@@ -40,6 +44,9 @@ export class Plot2DViewer {
   private cy = 0;
   private scale = 1e-4;
   private fittedKey = "";
+  private fitW = 0;
+  private fitH = 0;
+  private userMoved = false;
   private dirty = false;
   private rafId = 0;
 
@@ -108,22 +115,43 @@ export class Plot2DViewer {
     if (!this.frame) return 0;
     let mask = 0;
     for (const ch of this.frame.chunks) {
-      if (ch.layer < 31) mask |= 1 << ch.layer;
+      if (ch.layer < 32) mask = (mask | (1 << ch.layer)) >>> 0;
     }
     return mask >>> 0;
   }
 
-  fit(): void {
-    if (!this.frame) return;
+  /** First chunk colour per present layer (0xRRGGBB), for the Layers popover swatches. */
+  presentColors(): Map<number, number> {
+    const out = new Map<number, number>();
+    if (!this.frame) return out;
+    for (const ch of this.frame.chunks) {
+      if (!out.has(ch.layer)) out.set(ch.layer, ch.color);
+    }
+    return out;
+  }
+
+  private applyFit(w: number, h: number): void {
+    if (!this.frame || w < 10 || h < 10) return;
     const b = this.frame.box;
     const bw = Math.max(b[2] - b[0], 1000);
     const bh = Math.max(b[3] - b[1], 1000);
-    const rect = this.canvas.getBoundingClientRect();
-    const w = Math.max(rect.width, 200);
-    const h = Math.max(rect.height, 200);
     this.cx = (b[0] + b[2]) * 0.5;
     this.cy = (b[1] + b[3]) * 0.5;
     this.scale = Math.min(w / bw, h / bh) * 0.92;
+    this.fitW = w;
+    this.fitH = h;
+    this.userMoved = false;
+  }
+
+  fit(): void {
+    if (!this.frame) return;
+    this.userMoved = false;
+    this.fitW = 0;
+    this.fitH = 0;
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width >= 10 && rect.height >= 10) {
+      this.applyFit(rect.width, rect.height);
+    }
     this.scheduleDraw();
   }
 
@@ -141,6 +169,7 @@ export class Plot2DViewer {
     this.cx = (x0 + x1) * 0.5;
     this.cy = (y0 + y1) * 0.5;
     this.scale = Math.min(w / bw, h / bh) * 0.85;
+    this.userMoved = true;
     this.scheduleDraw();
   }
 
@@ -168,11 +197,17 @@ export class Plot2DViewer {
 
     const ctx = this.ctx;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = this.lightTheme ? "#f5f6f8" : "#14161a";
+    // Match GPUI plotview.rs `.bg(c("view"))` (`--view` in assets/web/style.css).
+    ctx.fillStyle = this.lightTheme ? "#f5f4ef" : "#08090b";
     ctx.fillRect(0, 0, w, h);
 
     const frame = this.frame;
     if (!frame) return;
+
+    // Auto-refit untouched camera when first painted or when the canvas resizes (matches GPUI `refit_needed`).
+    if (!this.userMoved && w >= 10 && h >= 10 && (Math.abs(this.fitW - w) > 2 || Math.abs(this.fitH - h) > 2)) {
+      this.applyFit(w, h);
+    }
 
     const halfW = w * 0.5;
     const halfH = h * 0.5;
@@ -186,14 +221,16 @@ export class Plot2DViewer {
     const vy0 = cy - halfH / scale;
     const vy1 = cy + halfH / scale;
 
-    // Order chunks: normal layers first, lifted layers on top
+    // Order chunks exactly like GPUI `viewers::layers::plan`:
+    // hidden layers (`off` bitmask) omitted; layers outside 0..31 always shown;
+    // `lift` is a layer index (255 = NO_LIFT) painted after all other layers.
     const { off, dim, lift } = this.masks;
     const normalOrder: number[] = [];
     const liftedOrder: number[] = [];
     for (let i = 0; i < frame.chunks.length; i++) {
-      const bit = frame.chunks[i].layer < 31 ? (1 << frame.chunks[i].layer) >>> 0 : 0;
-      if (bit && (off & bit) !== 0) continue;
-      if (bit && (lift & bit) !== 0) liftedOrder.push(i);
+      const layer = frame.chunks[i].layer;
+      if (layer < 32 && ((off >>> layer) & 1) === 1) continue;
+      if (layer === lift) liftedOrder.push(i);
       else normalOrder.push(i);
     }
 
@@ -204,9 +241,8 @@ export class Plot2DViewer {
     for (let oi = 0; oi < drawOrder.length; oi++) {
       const ci = drawOrder[oi];
       const ch = frame.chunks[ci];
-      const bit = ch.layer < 31 ? (1 << ch.layer) >>> 0 : 0;
-      const isDim = bit !== 0 && (dim & bit) !== 0;
-      const alpha = ch.alpha * (isDim ? 0.16 : 1);
+      const isDim = ch.layer < 32 && ((dim >>> ch.layer) & 1) === 1;
+      const alpha = ch.alpha * (isDim ? LAYER_DIM : 1);
       if (alpha <= 0.01) continue;
 
       this.drawChunk(ctx, ch, ci, alpha, vx0, vy0, vx1, vy1, cx, cy, scale, halfW, halfH);
@@ -346,8 +382,7 @@ export class Plot2DViewer {
 
     for (let ci = frame.chunks.length - 1; ci >= 0; ci--) {
       const ch = frame.chunks[ci];
-      const bit = ch.layer < 31 ? (1 << ch.layer) >>> 0 : 0;
-      if (bit && (off & bit) !== 0) continue;
+      if (ch.layer < 32 && ((off >>> ch.layer) & 1) === 1) continue;
       for (let pi = 0; pi < ch.pieces.length; pi++) {
         const p = ch.pieces[pi];
         if (wx < p.x0 - tol || wx > p.x1 + tol || wy < p.y0 - tol || wy > p.y1 + tol) continue;
@@ -401,6 +436,7 @@ export class Plot2DViewer {
       this.scale = nextScale;
       this.cx = this.pinchStart.cx + ox / this.pinchStart.scale - nx / nextScale;
       this.cy = this.pinchStart.cy + oy / this.pinchStart.scale - ny / nextScale;
+      this.userMoved = true;
       this.cbs.onUserMove?.();
       this.scheduleDraw();
       return;
@@ -413,6 +449,7 @@ export class Plot2DViewer {
       if (this.dragStart.moved) {
         this.cx = this.dragStart.cx - dx / this.scale;
         this.cy = this.dragStart.cy - dy / this.scale;
+        this.userMoved = true;
         this.cbs.onUserMove?.();
         this.scheduleDraw();
       }
@@ -442,6 +479,7 @@ export class Plot2DViewer {
     this.cx += sx / this.scale - sx / nextScale;
     this.cy += sy / this.scale - sy / nextScale;
     this.scale = nextScale;
+    this.userMoved = true;
     this.cbs.onUserMove?.();
     this.scheduleDraw();
   };
