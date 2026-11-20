@@ -247,7 +247,7 @@ impl Plots {
         if path.is_empty() || kind > 1 { return }
         let ky = key(kind, root, path);
         let need = { let mut st = self.st.lock().unwrap();
-            let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind, file: path.to_string(), ..Default::default() });
+            let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind, root: root.to_string(), file: path.to_string(), ..Default::default() });
             let need = s.plot.is_none() && !s.busy; self.gc(&mut st); need };
         if need { self.read(hub, &ky) }
     }
@@ -924,7 +924,7 @@ mod tests {
         let plots = Plots::new(&home); let ky = "2|/p/mech/lid.step|".to_string();
         let mut out = hub.attach(7);
         { let mut st = plots.st.lock().unwrap();
-          st.srcs.insert(ky.clone(), Src { kind: 2, file: "/p/mech/lid.step".into(), stamp: None, busy: true, plot: None, again: false, parts: vec![], stop: None, focus: None });
+          st.srcs.insert(ky.clone(), Src { kind: 2, root: "/p".into(), file: "/p/mech/lid.step".into(), stamp: None, busy: true, plot: None, again: false, parts: vec![], stop: None, focus: None });
           st.subs.insert(7, vec![Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0, parts_at: 0 }]); }
         let raw = |out: &mut crate::hub::Outbox| { let mut v = vec![]; while let Ok(o) = out.try_recv() { if let Out::Raw(b) = o { v.push(String::from_utf8_lossy(&b).into_owned()) } } v };
         let old = plots.step_stream(&ky);
