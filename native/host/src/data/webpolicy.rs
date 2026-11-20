@@ -52,6 +52,7 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         | "turn.interrupt"
         | "viewer.compare"
         | "viewer.follow"
+        | "viewer.layout.act"
         | "viewer.watch"
         | "voice.act"
         | "POST /voice/in"
@@ -111,6 +112,7 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         | "viewer.files"
         | "viewer.info"
         | "viewer.layers"
+        | "viewer.layout"
         | "viewer.probe"
         | "viewer.rail"
         | "viewer.refs"
@@ -218,6 +220,16 @@ mod tests {
         for op in ["attach", "detach", "unknown", "toolbar", ""] {
             assert_eq!(policy("browser", &json!({"op":op})), Policy::Denied);
         }
+    }
+
+    #[test]
+    fn browser_may_read_and_change_its_own_layout_and_nothing_else_of_it() {
+        use serde_json::json;
+        assert_eq!(policy("viewer.layout", &json!({"thread":"t","bounds":[800,600]})), Policy::Passive);
+        assert_eq!(policy("viewer.layout.act", &json!({"thread":"t","op":"add"})), Policy::Activity);
+        // a method that merely starts like it is not covered by it
+        assert_eq!(policy("viewer.layout.reset", &Value::Null), Policy::Denied);
+        assert_eq!(policy("viewer.layouts", &Value::Null), Policy::Denied);
     }
 
     #[test]

@@ -7,6 +7,7 @@ pub(crate) mod ext;
 pub(crate) mod link;
 pub mod term;
 pub mod webpolicy;
+pub mod layout;
 pub mod machines;
 /// What a phone hears of a push on its socket (ext.rs `notify_of`).
 pub fn ext_notify(e: &Value) -> Value { ext::notify_of(e) }
@@ -22,7 +23,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -895,7 +896,7 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
     let (mut tx, mut rx) = tokio_tungstenite::accept_async_with_config(stream, Some(cfg)).await?.split();
     let (mut conn, _) = hub.connect(true);
     let mut outbox = hub.attach(conn.client);
-    struct Detach(Arc<Hub>, u64); impl Drop for Detach { fn drop(&mut self) { self.0.detach(self.1) } }
+    struct Detach(Arc<Hub>, u64); impl Drop for Detach { fn drop(&mut self) { layout::global(&self.0.cfg.home).forget_client(self.1); self.0.detach(self.1) } }
     let _detach = Detach(hub.clone(), conn.client);
     let browser = match principal {
         Principal::Native(token) => {
@@ -912,6 +913,15 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
             Some((device_id, reg))
         }
     };
+    // who this connection is for the docking layouts (data/layout.rs): a paired device, a browser device or the hub token
+    {
+        let reg = crate::net::start::registry(&hub.cfg.home);
+        let native = reg.as_ref().and_then(|r| r.device_of(conn.client));
+        let device = layout::device_key(native, browser.as_ref().map(|(d, _)| d.as_str()));
+        let store = layout::global(&hub.cfg.home);
+        store.register_client(conn.client, &device);
+        if let Some(r) = &reg { store.prune_to(&r.device_ids(), now_ms()); }
+    }
     // `name`: the machine's name (BACKPLANE_NAME, else its host name), for the phone's title instead of the address it was paired at
     static NAME: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
     let name = NAME.get_or_init(crate::net::botnet::name).await.clone();

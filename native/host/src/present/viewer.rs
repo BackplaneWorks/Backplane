@@ -1930,7 +1930,7 @@ fn tile_resolvable(root: &str, t: &super::layout::Tile, resolver: &super::layout
 /// The sources a layout of several tiles watches, every tile's (an unresolved historical tile has none, and never falls back to live artwork), each named by
 /// its opaque tile id; a source several tiles draw is listed for each of them (the hub subscribes it once and answers each tile with the keys it draws from).
 /// `force` marks the focused tile's sources: a Retry re-reads those only. A default source's path is "" and a named one's the file, as one `kicad.watch` carries it.
-fn watch_sources(l: &super::layout::Layout, root: &str, linked: bool, force: bool) -> Vec<Value> {
+pub(crate) fn watch_sources(l: &super::layout::Layout, root: &str, linked: bool, force: bool) -> Vec<Value> {
     let (pcb, sch) = if linked { (String::new(), String::new()) } else { let f = crate::files::kicad::project::read(root); (f.pcb, f.sch) };
     let ctx = super::layout::WatchContext { root: root.to_string(), default_pcb: pcb, default_sch: sch };
     let resolver = project_version_resolver(root);

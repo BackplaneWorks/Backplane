@@ -445,27 +445,7 @@ impl Refusal {
 
     /// Catalog lookup from compile-time-embedded `i18n/{en,es,ja}.msg` for the session's locale (no runtime file reads, no duplicate table).
     pub fn text_for(self, locale: &str) -> &'static str {
-        fn parse_msg(src: &'static str) -> HashMap<&'static str, &'static str> {
-            src.lines()
-                .filter_map(|l| {
-                    let t = l.trim();
-                    if t.is_empty() || t.starts_with('#') { return None; }
-                    let (k, v) = t.split_once('=')?;
-                    Some((k.trim(), v.trim()))
-                })
-                .collect()
-        }
-        static EN: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| parse_msg(include_str!("../../../../i18n/en.msg")));
-        static ES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| parse_msg(include_str!("../../../../i18n/es.msg")));
-        static JA: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| parse_msg(include_str!("../../../../i18n/ja.msg")));
-        let key = self.i18n_key();
-        let lang = locale.split(['-', '_']).next().unwrap_or("en");
-        let table = match lang {
-            "ja" => &*JA,
-            "es" => &*ES,
-            _ => &*EN,
-        };
-        table.get(key).copied().or_else(|| EN.get(key).copied()).unwrap_or(self.code())
+        catalog_text(self.i18n_key(), locale).unwrap_or(self.code())
     }
 }
 
@@ -2240,6 +2220,30 @@ fn plan_tile_watches(
         }
         PageKind::Files | PageKind::Diff | PageKind::Review | PageKind::Browser | PageKind::Simulation => Ok(Vec::new()),
     }
+}
+
+/// A catalog message for the locale (English when the locale has none); None when no catalog holds the key.
+pub fn catalog_text(key: &str, locale: &str) -> Option<&'static str> {
+        fn parse_msg(src: &'static str) -> HashMap<&'static str, &'static str> {
+            src.lines()
+                .filter_map(|l| {
+                    let t = l.trim();
+                    if t.is_empty() || t.starts_with('#') { return None; }
+                    let (k, v) = t.split_once('=')?;
+                    Some((k.trim(), v.trim()))
+                })
+                .collect()
+        }
+        static EN: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| parse_msg(include_str!("../../../../i18n/en.msg")));
+        static ES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| parse_msg(include_str!("../../../../i18n/es.msg")));
+        static JA: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| parse_msg(include_str!("../../../../i18n/ja.msg")));
+        let lang = locale.split(['-', '_']).next().unwrap_or("en");
+        let table = match lang {
+            "ja" => &*JA,
+            "es" => &*ES,
+            _ => &*EN,
+        };
+    table.get(key).copied().or_else(|| EN.get(key).copied())
 }
 
 #[cfg(test)]

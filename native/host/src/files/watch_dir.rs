@@ -17,6 +17,8 @@ pub fn touch(root: &str, dir: &str, sig: u64) {
     if w.len() >= MAX && !w.contains_key(&(root.to_string(), dir.to_string())) { if let Some(old) = w.iter().min_by_key(|(_, v)| v.0).map(|(k, _)| k.clone()) { w.remove(&old); } }
     w.insert((root.to_string(), dir.to_string()), (Instant::now(), sig));
 }
+/// Tests only: forget every folder of `root` (a test's folder is removed when it ends, and its listing would then differ from what a page drew, which another test's poll would count).
+#[cfg(test)] pub fn forget_root(root: &str) { WATCHED.lock().unwrap().retain(|(r, _), _| r != root); }
 /// One poll: the folders whose listing differs from what was last drawn or seen (their signature is replaced, so each change is reported once), expired ones dropped.
 pub fn poll() -> usize {
     let keys: Vec<(Key, u64)> = { let mut w = WATCHED.lock().unwrap(); w.retain(|_, v| v.0.elapsed() < KEEP); w.iter().map(|(k, v)| (k.clone(), v.1)).collect() };

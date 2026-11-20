@@ -41,7 +41,7 @@ impl Drop for PollGuard {
     fn drop(&mut self) { self.0.store(false, Ordering::Release); }
 }
 
-fn current(device: &Value, at: u64) -> bool {
+pub(super) fn current(device: &Value, at: u64) -> bool {
     let within = |field: &str, span| device[field].as_u64().and_then(|start| at.checked_sub(start)).is_some_and(|age| age < span);
     device["kind"] == "browser" && live(device) && within("createdAt", 90 * DAY) && within("lastSeen", 30 * DAY)
 }
@@ -231,5 +231,29 @@ mod tests {
         clock.fetch_add(DAY, Ordering::SeqCst);
         assert!(!r.browser_connection(&id, 42, true));
         assert_eq!(r.revoke(&id)["clients"], json!([42]));
+    }
+    /// An expired browser session is not live for the layouts' prune (as revocation is not): its docking layouts go at the next prune.
+    #[test]
+    fn an_expired_browser_session_loses_its_layouts_at_the_next_prune() {
+        let home = crate::plat::tmp::dir("browser-expiry-layouts");
+        let clock = Arc::new(AtomicU64::new(DAY));
+        let time = clock.clone();
+        let r = Registry::with(&home, "test", Box::new(move || time.load(Ordering::SeqCst)), Box::new(urandom)).unwrap();
+        let login = "person@example.com";
+        let (req, poll) = r.browser_request(login, "Browser").unwrap();
+        assert!(r.browser_decide(req["id"].as_str().unwrap(), true));
+        let token = r.browser_poll(login, &poll).unwrap().unwrap();
+        let id = r.browser_verify(login, &token, Some(42), false).unwrap();
+        let store = crate::data::layout::Store::new();
+        let mut e = crate::data::layout::Entry::default();
+        e.drafts.insert("@view.layout:t".into(), json!("{}"));
+        e.rev = 1;
+        store.put(&format!("browser:{id}"), "t", e);
+        assert!(r.device_ids().contains(&id));
+        // idle 31 days: not live, so a prune against the registry's own list drops what it holds
+        clock.fetch_add(31 * DAY, Ordering::SeqCst);
+        assert!(!r.device_ids().contains(&id));
+        store.prune_to(&r.device_ids(), 10_000_000_000);
+        assert!(store.entry(&format!("browser:{id}"), "t").is_none());
     }
 }

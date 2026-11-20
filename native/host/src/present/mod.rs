@@ -10,6 +10,7 @@ pub mod picker;
 pub mod thread;
 pub mod design_mode;
 pub mod layout;
+pub mod layout_fit;
 pub mod rail;
 pub mod identity_context;
 pub mod viewer;

@@ -4585,6 +4585,9 @@ viewer.layout.refusal.unknownframe	Unknown KiCad frame	不明な KiCad フレー
 viewer.layout.refusal.invalidinput	Invalid layout request	無効なレイアウト要求です	Solicitud de diseño no válida
 viewer.layout.refusal.toomany	Too many tiles open	タイルが多すぎます	Demasiados mosaicos abiertos
 viewer.layout.refusal.toomanysources	Too many sources in one layout	レイアウトのソースが多すぎます	Demasiadas fuentes en un diseño
+viewer.layout.refusal.linked	That layout is shown on its own machine only for now.	そのレイアウトは今のところ元のマシンでのみ表示されます。	Ese diseño solo se muestra por ahora en su propia máquina.
+viewer.layout.refusal.notondevice	That cannot be a tile here.	ここではタイルにできません。	Eso no puede ser un mosaico aquí.
+viewer.layout.refusal.starting	The hub is starting.	ハブを起動しています。	El hub se está iniciando.
 viewer.footprinteditor	Footprint Editor	フットプリントエディター	Editor de huellas
 viewer.symboleditor	Symbol Editor	シンボルエディター	Editor de símbolos
 """#
