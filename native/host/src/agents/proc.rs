@@ -498,6 +498,11 @@ mod tests {
         let _ = child.kill(); let _ = child.wait();
     }
     use super::*;
+    /// Runs `f` (no arguments, no environment, output dropped) until its exec is no longer "Text file busy" (at most 120 s): a script written a moment ago can
+    /// still be open for writing in a child another test thread just forked, until that child execs.
+    #[cfg(unix)]
+    fn wait_execs(f: &Path) { let t = std::time::Instant::now();
+        while matches!(std::process::Command::new(f).env_clear().stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status(), Err(ref e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY)) && t.elapsed() < std::time::Duration::from_secs(120) { std::thread::sleep(std::time::Duration::from_millis(25)) } }
     fn dir(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("agents-{name}")) }
     fn script(d: &Path, name: &str, body: &str) -> PathBuf { use crate::plat::fs::PermissionsExt; let p = d.join(name); std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); p }
 
@@ -566,6 +571,9 @@ mod tests {
         let h = dir("shell");
         // a stand-in shell: interactive (-ilc) it reads "rc" (prints a greeting, adds .grok/bin, or hangs when told to), then runs the command
         let sh = script(&h, "fakesh", "case \"$1\" in -ilc) echo hello from rc; [ -f \"$HOME/hang\" ] && sleep 30; PATH=\"$HOME/.grok/bin:$PATH\";; esac\nPATH=\"$HOME/.login/bin:$PATH\"\nexport PATH\neval \"$2\"");
+        // "Text file busy": the script written a moment ago can still be open for writing in a child another test thread just forked, and then the probe gets no PATH
+        // at all (a full --all-targets run under load, once). Wait until it execs, as a_launcher_that_needs_node_answers_with_the_agents_path does.
+        wait_execs(&sh);
         let got = shell_path_dirs(sh.to_str().unwrap(), Some(&h), 5);
         assert_eq!(got[..2], [h.join(".login/bin"), h.join(".grok/bin")], "{got:?}");
         std::fs::write(h.join("hang"), "").unwrap(); let t = std::time::Instant::now();
@@ -581,8 +589,7 @@ mod tests {
         let pi = script(&d, "pi", &format!("exec {} \"$@\"", real.display()));
         // "Text file busy": a script written a moment ago is still open for writing in a child another test thread just forked (until that child's exec); the launcher chain would
         // fail with 126 instead of the 127 or the version this test is about. Wait until each one execs (whatever it then answers), as stepglb.rs and kipc.rs do.
-        for f in [d.join("fakenode-bp"), real.clone(), pi.clone()] { let t = std::time::Instant::now();
-            while matches!(std::process::Command::new(&f).env_clear().stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status(), Err(ref e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY)) && t.elapsed() < std::time::Duration::from_secs(120) { std::thread::sleep(std::time::Duration::from_millis(25)) } }
+        for f in [d.join("fakenode-bp"), real.clone(), pi.clone()] { wait_execs(&f) }
         let run = |path: Option<std::ffi::OsString>| { let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, &pi); c.arg("--version").env_clear(); if let Some(p) = path { c.env("PATH", p); } else { c.env("PATH", "/usr/bin:/bin"); }
             c.output().ok().map(|o| (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned())) };
         let bare = run(None); assert_ne!(bare.as_ref().unwrap().0, 0, "without node: {bare:?}");
