@@ -472,6 +472,8 @@ pub async fn check(hub: &Arc<Hub>, link: &str) -> Result<Value, String> {
 // ---- the sending side ----
 
 static STATE: Mutex<Option<Value>> = Mutex::new(None);
+/// The sending side's move job while it runs or after it failed (`{state, step, note}`), else null: the home object's `moving` (net/home.rs).
+pub fn job() -> Value { STATE.lock().unwrap().clone().filter(|v| v["state"] == "moving" || v["state"] == "failed").unwrap_or(Value::Null) }
 /// The check's warnings for the move running now (or the last one), shown with its state: what the bots there wait for (`warnings`).
 static WARN: Mutex<Vec<String>> = Mutex::new(Vec::new());
 async fn tell(hub: &Arc<Hub>, state: &str, step: &str, note: &str) {
