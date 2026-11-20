@@ -42,4 +42,5 @@ run mcp-page McpPageTests.swift "" McpPage.swift
 run cat-pick CatPickTests.swift "" CatPick.swift
 run reply-images ReplyImagesTests.swift "" ReplyImages.swift
 run viewer-rail ViewerRailTests.swift "" ViewerRail.swift
+run hub-restart HubRestartTests.swift "" HubRestart.swift
 sh "$ROOT/scripts/mobile/ios-outbox-test.sh" && echo "ok outbox"

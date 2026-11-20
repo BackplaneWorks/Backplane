@@ -154,7 +154,7 @@ struct DataThreadsView: View {
             DataTelemetryBanner(client: client)
             DataStarBanner(client: client)
             DataAlertsBanner(client: client)
-            if client.conn != .online { DataConnectionBanner(client: client) }
+            if client.restartLine != .none { DataConnectionBanner(client: client) }
             HStack(spacing: 8) {
                 if client.has("search") {
                     TextField(Tr.t("Search projects and threads"), text: $query).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -471,6 +471,15 @@ struct DataConnectionBanner: View {
     let client: DataClient
     var body: some View {
         VStack(spacing: 0) {
+            // the hub's words around a restart (HubRestart) in place of the usual look
+            if case .note(let text) = client.restartLine {
+                HStack(spacing: 8) {
+                    DDot(color: BackplaneDesign.warn, size: 8)
+                    Text(Tr.t(text)).dmono(12).lineLimit(2).accessibilityIdentifier("data.connection.restart")
+                    Spacer()
+                    NavigationLink(value: DPage(name: "hub")) { Text(Tr.t("Hub")) }.dmono(12, bold: true).foregroundStyle(BackplaneDesign.accent).accessibilityIdentifier("conn.hub")
+                }.padding(.horizontal, 12).padding(.vertical, 8).background(BackplaneDesign.raised)
+            } else {
             HStack(spacing: 8) {
                 DDot(color: client.conn == .connecting ? BackplaneDesign.warn : BackplaneDesign.bad, size: 8)
                 VStack(alignment: .leading, spacing: 2) {
@@ -481,6 +490,7 @@ struct DataConnectionBanner: View {
                 NavigationLink(value: DPage(name: "hub")) { Text(Tr.t("Hub")) }.dmono(12, bold: true).foregroundStyle(BackplaneDesign.accent).accessibilityIdentifier("conn.hub")
                 if client.conn == .offline { Button(Tr.t("Retry")) { client.connect() }.dmono(12, bold: true).foregroundStyle(BackplaneDesign.accent) }
             }.padding(.horizontal, 12).padding(.vertical, 8).background(BackplaneDesign.raised)
+            }
             DLine()
         }.accessibilityIdentifier("data.connection.banner")
     }
@@ -786,7 +796,7 @@ struct DataThreadView: View {
             DataTelemetryBanner(client: client)
             DataStarBanner(client: client)
             DataAlertsBanner(client: client)
-            if client.conn != .online { DataConnectionBanner(client: client) }
+            if client.restartLine != .none { DataConnectionBanner(client: client) }
             stateStrip
             if let m = thread?.mark { Text(dAway(Tr.ios_machine_on(machine: m.name), m.away)).dmono(11).foregroundStyle(BackplaneDesign.faint).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 3).accessibilityIdentifier("data.thread.machine") }
             if findOpen { findBar }
