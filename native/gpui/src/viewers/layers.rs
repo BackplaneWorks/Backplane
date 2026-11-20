@@ -55,14 +55,11 @@ pub fn strip(viewer: &Value, present: &BTreeMap<u32, u32>) -> Strip {
 
 /// The Layers button and, while open, its menu: All/Dim/Only (a board), a swatch per layer in its colour (show or hide it), its name (make it the active layer,
 /// again: all back), Reset layers while anything differs. Stays open so several layers can be turned on and off in a row. The button is lit while a layer stands out; `key` is the focus key, for its tooltip.
-pub fn strip_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, key: &str, open: bool) -> AnyElement {
-    let c = |n: &str| theme::color(light, n);
-    if s.rows.is_empty() { return div().into_any_element(); }
-    let head = crate::screens::viewer::tall(div().id("layers-btn").px_2().text_size(crate::scale::tpx(12.))).cursor_pointer().border_1().border_color(c(if s.mode > 0 || open { "accent" } else { "line" })).when(open, |d| d.bg(c("panel"))).bg(c("raise")).when(s.mode > 0, |d| d.text_color(c("accent"))).child(trs(&s.head))
-        .tooltip(crate::keys::tip(&trs("Layers: others as they are, dimmed, hidden"), key, light))
-        // a press outside the open panel shut it already when that press was on this button: it stays shut (screens/popover.rs)
-        .on_click(cx.listener(|this, _, _, cx| { let pv = &mut this.screens.plotview; if !pv.layers_open && crate::screens::popover::just_shut("layers") { return } pv.layers_open = !pv.layers_open; cx.notify(); }));
-    head.into_any_element()
+pub fn toggle(this: &mut Backplane, cx: &mut Context<Backplane>) {
+    let pv = &mut this.screens.plotview;
+    if !pv.layers_open && crate::screens::popover::just_shut("layers") { return; }
+    pv.layers_open = !pv.layers_open;
+    cx.notify();
 }
 
 /// Escape while the Layers panel is open shuts it (main.rs's ClosePopup). True when it took the key.
