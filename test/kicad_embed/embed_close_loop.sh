@@ -4,6 +4,7 @@
 # or how it ended (a signal, a code) with its last output line. One hub for the run; a client (and so a KiCad) per cycle.
 #   CYCLES=N                 cycles (30)
 #   CLOSE_PREWARM=0          no schematic pre-warm (the hub refuses it: BACKPLANE_KICAD_PREWARM_FREE_MB above any machine's memory)
+#   CLOSE_VIA=kicad          KiCad's own Close on its socket (the person's Quit), not the hub's editor.kicad.close
 #   CLOSE_FOREIGN_LOCK=0     no lock file on the project from another KiCad (removed before each start); 1: one left by a KiCad "elsewhere"
 # Prints a line per cycle and `close loop: N cycles, C clean, X crashed (...)`; each crash's hub log lines are kept in $OUT/crashes.txt.
 # Copies only (seed_project.py), fork mode. Measured on h@backplane (test/kicad_embed/remote.sh), never as a load on the desktop.
@@ -52,6 +53,11 @@ for i in $(seq "$CYCLES"); do
   R=$(last_kicad_report "$CLOG" ready)
   KPID=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("pid") or 0)' "$R")
   read -r STATE FRAMES _ < <(info_now)
+  # CLOSE_VIA=kicad: KiCad's own Close on its socket (the person's Quit as the hub sees it, as embed_attach_gen_e2e G3), not the hub's close
+  if [ "${CLOSE_VIA:-hub}" = kicad ]; then
+    SOCK=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("sock") or "")' "$R")
+    for _ in $(seq 60); do python3 "$IPC_PY" close "$SOCK" discard >"$OUT/close-$i.out" 2>&1 && grep -q '"exiting": true' "$OUT/close-$i.out" && break; sleep 1; done
+  else
   # (KiCad refuses a close while one of its tasks runs: the editor's automatic DRC or ERC. Asked again each second, as a person waits)
   for _ in $(seq 60); do
     hub_rpc "[{\"method\":\"editor.kicad.close\",\"timeout_ms\":60000,\"params\":{\"project\":\"$PRO\",\"save\":\"discard\"}}]" >"$OUT/close-$i.out" 2>&1 || true
@@ -59,6 +65,7 @@ for i in $(seq "$CYCLES"); do
     grep -q 'a task is running' "$OUT/close-$i.out" || break
     sleep 1
   done
+  fi
   for _ in $(seq 240); do [ "$KPID" -gt 0 ] && kill -0 "$KPID" 2>/dev/null || break; sleep 0.25; done
   sleep 1.5
   ENDED=$(tail -n +"$((N0 + 1))" "$OUT/hub.log" | grep -m1 -E " ended (while closing )?\(" || true)
@@ -75,7 +82,7 @@ for i in $(seq "$CYCLES"); do
   kill "$CP" 2>/dev/null; wait "$CP" 2>/dev/null
   sleep 1
 done
-echo "close loop: $CYCLES cycles, $CLEAN clean, $CRASHED crashed, $OTHER other (pre-warm ${CLOSE_PREWARM:-1}, foreign lock ${CLOSE_FOREIGN_LOCK:-as found}; $(basename "$(dirname "$(dirname "$KICAD_BIN")")"))"
+echo "close loop: $CYCLES cycles, $CLEAN clean, $CRASHED crashed, $OTHER other (close via ${CLOSE_VIA:-hub}, pre-warm ${CLOSE_PREWARM:-1}, foreign lock ${CLOSE_FOREIGN_LOCK:-as found}; $(basename "$(dirname "$(dirname "$KICAD_BIN")")"))"
 printf '%s\n' "${SUMMARY[@]}" | sort | uniq -c | sed 's/^/  /'
 check "close loop: no crash in $CYCLES closes" "$([ "$CRASHED" = 0 ] && echo 1 || echo 0)" "$CRASHED crashed"
 finish_suite "embed_close_loop ($EMBED_MODE)"
