@@ -70,6 +70,27 @@ mod tests {
     }
 
     #[test]
+    fn unix_proxy_requires_each_forwarded_field_once() {
+        let authority = "bp.example.test:8443";
+        let request = Req::new("POST", "/", vec![("Host".into(), "localhost".into()),
+            ("X-Forwarded-Host".into(), authority.into()), ("X-Forwarded-Proto".into(), "https".into())]);
+        for i in 0..3 {
+            let mut duplicate = request.clone();
+            duplicate.headers.push(request.headers[i].clone());
+            assert!(!normalize_unix_authority(&mut duplicate, authority));
+            let mut wrong = request.clone();
+            wrong.headers[i].1 = "other".into();
+            assert!(!normalize_unix_authority(&mut wrong, authority));
+        }
+        let mut req = request;
+        assert!(normalize_unix_authority(&mut req, authority));
+        let ingress = BrowserIngress { authority, verified_login: "person@example.com" };
+        assert!(!ingress.accepts(&req, false));
+        req.headers.push(("Origin".into(), format!("https://{authority}")));
+        assert!(ingress.accepts(&req, false));
+    }
+
+    #[test]
     fn dedicated_authority_and_requester_required() {
         let request = Req::new("GET", "/", vec![("Host".into(), "web.example.test".into())]);
         let ingress = BrowserIngress { authority: "web.example.test", verified_login: "person@example.com" };
@@ -185,6 +206,30 @@ async fn pair_response(hub: &crate::hub::Hub, req: &Req, login: &str) -> Vec<u8>
 pub(crate) async fn serve<S>(hub: std::sync::Arc<crate::hub::Hub>, stream: S, authority: &str)
     -> anyhow::Result<()>
 where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
+    serve_request(hub, stream, authority, false).await
+}
+
+/// Called only after the transport authenticates the Unix peer.
+#[cfg(unix)]
+pub(crate) async fn serve_unix(hub: std::sync::Arc<crate::hub::Hub>, stream: tokio::net::UnixStream, authority: &str) -> anyhow::Result<()> {
+    serve_request(hub, stream, authority, true).await
+}
+
+fn normalize_unix_authority(req: &mut Req, authority: &str) -> bool {
+    if single_header(req, "host") != Some("localhost")
+        || single_header(req, "x-forwarded-host") != Some(authority)
+        || single_header(req, "x-forwarded-proto") != Some("https") {
+        return false;
+    }
+    for (name, value) in &mut req.headers {
+        if name.eq_ignore_ascii_case("host") { *value = authority.to_owned(); }
+    }
+    true
+}
+
+async fn serve_request<S>(hub: std::sync::Arc<crate::hub::Hub>, stream: S, authority: &str, unix_proxy: bool)
+    -> anyhow::Result<()>
+where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use serde_json::json;
     use std::time::Duration;
@@ -212,7 +257,7 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
     let upgrade = req.route() == "/ws";
     let reply = if hub.setting("web.enabled").await.as_deref() != Some("1") {
         json_response("404 Not Found", json!({}), "")
-    } else if !ingress.accepts(&req, upgrade) || login == "tagged-devices" {
+    } else if (unix_proxy && !normalize_unix_authority(&mut req, authority)) || !ingress.accepts(&req, upgrade) || login == "tagged-devices" {
         json_response("401 Unauthorized", json!({"state":"unauthorized"}), "")
     } else if req.target.split_once('?').is_some_and(|(_, query)| query.split('&').any(|field| {
         let key = field.split('=').next().unwrap_or("");
