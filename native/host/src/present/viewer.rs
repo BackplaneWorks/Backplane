@@ -717,17 +717,30 @@ pub fn files_action(st: &State, hub: &str, session: &Value, action: &str, value:
 
 use super::rail;
 
-#[derive(Clone, Copy, Default)]
-pub struct RailSources { pub board: bool, pub schematic: bool, pub mech: bool, pub gerbers: bool, pub altium: bool }
+#[derive(Clone, Default)]
+pub struct RailSources {
+    pub board: bool,
+    pub schematic: bool,
+    pub mech: bool,
+    pub gerbers: bool,
+    pub altium: bool,
+    pub pcb: String,
+    pub sch: String,
+    pub gerber_set: String,
+}
 
 pub fn rail_sources(root: &str) -> RailSources {
     use std::path::Path;
     if root.is_empty() { return RailSources::default(); }
     let files = crate::files::kicad::project::read(root);
+    let gerber_set = crate::files::kicad::gerber::default_set(Path::new(root))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
     RailSources {
         board: Path::new(&files.pcb).is_file(), schematic: Path::new(&files.sch).is_file(),
-        mech: !mech_parts(root).is_empty(), gerbers: crate::files::kicad::gerber::default_set(Path::new(root)).is_some(),
+        mech: !mech_parts(root).is_empty(), gerbers: !gerber_set.is_empty(),
         altium: crate::files::kicad::project::is_altium(&files),
+        pcb: files.pcb, sch: files.sch, gerber_set,
     }
 }
 
@@ -763,6 +776,7 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
     if !sel.is_empty() && !sel.contains('~') && v["open"].as_str().is_some_and(|o| matches!(o, "board" | "schematic" | "split")) {
         if let Some(o) = v.as_object_mut() { o.insert("follow".into(), crate::files::kicad::follow::picture(sel)); }
     }
+    let mut layout_sources: Option<(String, RailSources)> = None;
     if !sel.is_empty() && !sel.contains('~') {
         let root = root_of(st, sel);
         let sources = rail_sources(&root);
@@ -787,14 +801,37 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         let has = json!({"board":input.board, "schematic":input.schematic, "mech":input.mech, "gerbers":input.gerbers});
         v["rail"] = rail::rail(input);
         v["has"] = has;
-        let proj = crate::files::kicad::project::read(&root);
-        let default_gerber_set = crate::files::kicad::gerber::default_set(std::path::Path::new(&root))
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_default();
+        layout_sources = Some((root, sources));
+    }
+    // Diagnostic `viewer.layout`: derived for both local threads (reusing `rail_sources` with zero extra
+    // filesystem discovery) and linked-machine threads (from the mirrored picture without local probes).
+    if !sel.is_empty() {
+        let linked = sel.contains('~');
+        let (root, default_pcb, default_sch, default_gerber_set, altium) = match &layout_sources {
+            Some((r, src)) => (r.as_str(), src.pcb.as_str(), src.sch.as_str(), src.gerber_set.as_str(), src.altium),
+            None => ("", "", "", "", v["cad"] == "altium"),
+        };
+        let linked_root = if linked { root_of(st, sel) } else { String::new() };
+        let eff_root = if linked { linked_root.as_str() } else { root };
         let drafts = &session["drafts"];
         let picked_board = chosen_board(drafts, sel);
+        let picked_sch = if picked_board.is_empty() {
+            String::new()
+        } else if altium {
+            let abs_b = format!("{eff_root}/{picked_board}");
+            if abs_b == default_pcb { default_sch.to_string() } else { String::new() }
+        } else {
+            let cand = board_file("schematic", eff_root, &picked_board);
+            if linked {
+                cand
+            } else if !cand.is_empty() && std::path::Path::new(&cand).is_file() {
+                cand
+            } else {
+                String::new()
+            }
+        };
         let derived = super::layout::derive_layout(&super::layout::DeriveInput {
-            root: &root,
+            root: eff_root,
             open: s(&v, "open"),
             diff_on: pages::diff_on(session, sel),
             gerbers: v["gerbers"] == true,
@@ -802,11 +839,12 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
             file: s(drafts, &format!("@view.file:{sel}")),
             sheet: s(drafts, &format!("@view.sheet:{sel}")),
             picked_board: &picked_board,
+            picked_sch: &picked_sch,
             mech_rel: s(&v["mech"], "rel"),
             files_dir: s(drafts, &format!("@files.dir:{sel}")),
-            default_pcb: &proj.pcb,
-            default_sch: &proj.sch,
-            default_gerber_set: &default_gerber_set,
+            default_pcb,
+            default_sch,
+            default_gerber_set,
         });
         v["layout"] = serde_json::to_value(derived).unwrap_or(Value::Null);
     }
