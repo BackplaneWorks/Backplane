@@ -670,6 +670,10 @@ pub enum TurnedTo { Click, Typing, Overlay }
 /// Whether a waiting hand-in is dropped: the person turned to Backplane before KiCad's frame came (an Edit pressed during a DRC, or under
 /// the lock question, gives KiCad the keys only if the person is still waiting for it). Nothing to drop once KiCad has the keys. Pure.
 pub fn hand_in_dropped(want_keys: bool, keys: bool, _how: TurnedTo) -> bool { want_keys && !keys }
+/// A key down that reaches Backplane's window root (`ui.rs`'s capture listener): the person typing in Backplane, unless it is a held
+/// key's repeat (a held Enter, or the shortcut that pressed Edit, never drops its own hand-in). KiCad's reserved keys it forwards come
+/// while KiCad has the keys (`keys`), so they drop nothing. Pure.
+pub fn key_turns_to_backplane(is_held: bool) -> Option<TurnedTo> { (!is_held).then_some(TurnedTo::Typing) }
 /// macOS: whether the pointer (global points from the top left, `nc::pointer_global`) is over the pane's rect as pushed to KiCad
 /// (`host_sent`, the same coordinates), edges included.
 pub fn pointer_over(p: (f64, f64), r: (i32, i32, i32, i32)) -> bool {
@@ -1571,6 +1575,8 @@ impl KicadPane {
             eprintln!("GPUI_LOG {}", json!({"kicad_switch_busy": {"frame": show, "jobs": self.jobs.iter().map(|j| j["title"].clone()).collect::<Vec<_>>(), "task_wait": self.info["task_wait"], "keys": self.keys, "want_keys": self.want_keys, "epoch_ms": crate::screens::kcomment::epoch_ms() as u64}}));
         }
         let hand_in = hand_in_now(self.keys, self.want_keys, show, prev_show, kicad_dialog_has_keys);
+        // a KiCad dialog has the keys: a waiting hand-in to the frame under it is over (not handed in late at the next placement change)
+        if self.want_keys && kicad_dialog_has_keys && show.is_some() && show == prev_show { self.want_keys = false; }
         if hand_in && show != prev_show {
             if let Some(w) = show {
                 if self.want_keys && nc::button_over(w) == Some(false) { self.press_gave_keys = true; }
@@ -1835,7 +1841,7 @@ impl Render for KicadPane {
         let say = if buried { Some(crate::i18n::t("gpui.c.kicad.mac.buried")) } else { say };
         let full = (self.mac_full || self.mac_buried) && self.info["state"] == "ready";
         let marker = self.marker.clone(); let focus = self.focus.clone();
-        let keys = self.keys; let weak = cx.entity().downgrade();
+        let keys = self.keys;
         // its rect as `kicad:pane` (an e2e judges KiCad's frame against the pane as it is drawn now: a panel, Full size, Full screen change it)
         crate::ui::with_rect(div().id("kicad-pane"), || "kicad:pane".to_string()).size_full().relative().when(!handoff, |d| d.bg(rgb(0x001023))).track_focus(&focus)
             .on_mouse_down_out(cx.listener(|this, _, _, cx| {
@@ -1858,11 +1864,7 @@ impl Render for KicadPane {
             // in a warm hand-over the outline is the pane's navy where it would be clear (the picture under it otherwise showed in those 2 px,
             // then turned navy at the hold's end: a change after KiCad had finished painting, GPU display bp.12.4)
             .border_2().border_color(if keys { c("accent") } else if handoff { Rgba::from(rgb(0x001023)) } else { Rgba { a: 0., ..c("accent") } })
-            .child(canvas(move |b, window, _| { *marker.lock().unwrap() = Some(window.insert_hitbox(b, HitboxBehavior::Normal).id); }, move |_, _, window, _| {
-                // a key that reaches Backplane (not KiCad, which has none of its keys) while a hand-in waits: the person is typing here
-                let weak = weak.clone();
-                window.on_key_event(move |_: &KeyDownEvent, phase, _, cx| { if phase == DispatchPhase::Capture { let _ = weak.update(cx, |p: &mut KicadPane, _| p.turned_to_backplane(TurnedTo::Typing)); } });
-            }).size_full())
+            .child(canvas(move |b, window, _| { *marker.lock().unwrap() = Some(window.insert_hitbox(b, HitboxBehavior::Normal).id); }, |_, _, _, _| {}).size_full())
             .when_some(say, |d, s| d.child(div().absolute().inset_0().flex().flex_col().gap_2().items_center().justify_center().text_color(c("faint")).child(s)
                 .when_some(notice, |d, n| d.child(crate::ui::with_rect(div().id("kicad-notice-start"), || "kicad:notice-start".to_string()).max_w(px(520.)).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(n)))
                 .when(again, |d| d.child(crate::ui::with_rect(div().id("kicad-open-again"), || "kicad:open-again".to_string()).px_3().py_1().rounded_md().cursor_pointer()
@@ -1898,7 +1900,12 @@ mod tests {
         assert!(!super::hand_in_dropped(true, true, super::TurnedTo::Click), "KiCad has the keys already: nothing waits");
         assert!(!super::hand_in_dropped(false, false, super::TurnedTo::Click), "nothing waiting");
     }
-    #[test] fn an_edits_waiting_hand_in_is_dropped_by_typing_in_backplane() { assert!(super::hand_in_dropped(true, false, super::TurnedTo::Typing)); }
+    #[test] fn an_edits_waiting_hand_in_is_dropped_by_typing_in_backplane() {
+        let how = super::key_turns_to_backplane(false).expect("a key typed in Backplane");
+        assert!(super::hand_in_dropped(true, false, how));
+        assert_eq!(super::key_turns_to_backplane(true), None, "a held key's repeat (the shortcut that pressed Edit, a held Enter) drops nothing");
+        assert!(!super::hand_in_dropped(true, true, how), "KiCad's forwarded reserved keys come while KiCad has the keys: nothing dropped");
+    }
     #[test] fn an_edits_waiting_hand_in_is_dropped_by_an_overlay_opening() { assert!(super::hand_in_dropped(true, false, super::TurnedTo::Overlay)); }
     #[test] fn the_first_edits_waiting_hand_in_is_dropped_the_same_way() {
         // the first Edit's want_keys (opening_wants_keys) is the same flag: dropped by the same acts
