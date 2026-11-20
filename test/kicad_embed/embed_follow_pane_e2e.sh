@@ -203,6 +203,11 @@ for k in p n i n e; do python3 "$XINPUT_PY" key "$k"; sleep 0.08; done; sleep 2.
 DRAFT=$(cat "$OUT/home/gpui-drafts.json" 2>/dev/null || true)
 check "P9 the agent's viewer_show brought the Board from the strip's Schematic ($(shown_frame))" "$([ "$(shown_frame)" = PCB ] && echo 1 || echo 0)"
 check "P9 the keyboard stayed Backplane's: X focus not in KiCad's container ($K0 -> $K1), no kicad_keys_flip to true ($FL)" "$([ "$K0" = 0 ] && [ "$K1" = 0 ] && [ "$FL" = 0 ] && echo 1 || echo 0)"
+# a dialog of KiCad's on screen (typed letters taken as KiCad hotkeys open one: Footprint Properties for an `e`)
+DLG9=$(python3 "$DRIVER_PY" list-windows --pid "$KP" 2>/dev/null | python3 -c 'import json,sys
+d=[w.get("title") or "?" for w in json.load(sys.stdin) if w.get("shown") and not w.get("override_redirect") and w.get("w",0)>=200 and w.get("h",0)>=100 and "Editor" not in (w.get("title") or "")]
+print(";".join(d))' 2>/dev/null || echo "?")
+check "P9 no KiCad dialog opened (${DLG9:-none})" "$([ -z "$DLG9" ] && echo 1 || echo 0)"
 check "P9 what the person typed landed in the composer's draft" "$(echo "$DRAFT" | grep -q 'pnine' && echo 1 || echo 0)" "$(echo "$DRAFT" | cut -c1-200)"
 # P10 (its mirror): KiCad has the keyboard (a click in the pane), the strip on the Schematic: the bring switches the frame and KiCad keeps it
 ctl "kicad-tab:SCH" 3
