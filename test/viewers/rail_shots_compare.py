@@ -478,30 +478,23 @@ def score_consistency(steps: dict) -> dict:
                 if is_priv or not pg.get("matched_expected"):
                     b3_unscored += 1
                 else:
-                    # B3 counts only DRAWN controls (rect != null) and DRAWN follow-agent (follow_rect_visible == True),
-                    # never registered-but-undrawn script/context-menu controls (e.g. ui:Edit with rect=null).
-                    drawn_ctls = pg.get("drawn_controls_ids")
-                    all_ctls = pg.get("controls_ids")
+                    # B3 counts ONLY controls drawn with positive-area rect inside the page header bounds
+                    # (`header_drawn_controls_ids`) and drawn `follow-agent` (`follow_rect_visible: bool`).
+                    # Missing geometry is UNSCORED — never fall back to registered `controls_ids` or `follow_present`.
+                    hdr_ctls = pg.get("header_drawn_controls_ids")
                     viewer = pg.get("viewer") or {}
-                    if isinstance(drawn_ctls, list):
-                        ctls_for_b3 = drawn_ctls
-                        has_inv = bool(drawn_ctls) or (isinstance(all_ctls, list) and bool(all_ctls))
-                    elif isinstance(all_ctls, list) and all_ctls:
-                        ctls_for_b3 = all_ctls
-                        has_inv = True
+                    follow_vis = viewer.get("follow_rect_visible")
+                    if not (isinstance(hdr_ctls, list) and isinstance(follow_vis, bool)):
+                        b3_unscored += 1
                     else:
-                        ctls_for_b3 = []
-                        has_inv = False
-                    if has_inv:
                         b3_checked += 1
                         bad = []
                         non_design_context = (slug in M.NON_DESIGN_PAGES) or (kind in ("no-design", "mech-only"))
                         if non_design_context:
                             for leaked in ("ui:Open in KiCad", "ui:Open in Altium", "ui:Edit"):
-                                if leaked in ctls_for_b3:
+                                if leaked in hdr_ctls:
                                     bad.append(leaked)
-                        follow_drawn = viewer.get("follow_rect_visible") if "follow_rect_visible" in viewer else viewer.get("follow_present")
-                        if slug not in M.FOLLOW_PAGES and follow_drawn:
+                        if slug not in M.FOLLOW_PAGES and follow_vis is True:
                             bad.append("follow-agent")
                         if bad:
                             b3_misplaced.append(f"{kind}/{slug}: {', '.join(bad)}")

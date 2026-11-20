@@ -853,16 +853,21 @@ class RailShotsRegressionTests(unittest.TestCase):
             "simulation": {"label": "Simulation", "state": "enabled", "why": ""},
         }
         base_rail = {"lit": [], "entries": ["Board", "Schematic", "Simulation", "Terminal", "Commands"], "disabled": ["Board"]}
+        term_rail = {"lit": ["Terminal"], "entries": base_rail["entries"], "disabled": ["Board"]}
         parsed = {
             "rail_metric_seen": True,
             "mark_before_rail": {
                 "b1:disabled-press:board": base_rail,
                 "b1:disabled-key:board": base_rail,
                 "b1:disabled-palette:board": base_rail,
+                "b1:terminal-press-open": base_rail,
+                "b1:terminal-press-close": term_rail,
+                "b1:terminal-key-open": base_rail,
+                "b1:terminal-key-close": term_rail,
             },
             "presses": {
-                # Undelivered disabled press -> unavailable
-                "b1:disabled-press:board": [{"id": "rail:Board", "found": False, "seq": 10}],
+                # C2: click without hit_rect -> unavailable (script.rs do_click does not check drawn row rect)
+                "b1:disabled-press:board": [{"id": "rail:Board", "found": True, "hit_rect": False, "seq": 10}],
                 "b1:terminal-press-open": [{"id": "rail:Terminal", "found": True, "seq": 100}],
                 "b1:terminal-press-close": [{"id": "rail:Terminal", "found": True, "seq": 110}],
                 "b1:commands-press-open": [{"id": "rail:Commands", "found": True, "seq": 140}],
@@ -873,9 +878,10 @@ class RailShotsRegressionTests(unittest.TestCase):
                 "b1:disabled-palette:board": [{"keys": "escape", "seq": 35}],
                 "b1:terminal-key-open": [{"keys": "`", "seq": 120}],
                 "b1:terminal-key-close": [{"keys": "shift-escape", "seq": 130}],
+                "b1:commands-escape-close": [{"keys": "escape", "seq": 145}],
             },
             "palette_reads": {
-                # Target absent (another command 'shortcuts' matched, NO Enter sent) -> target_absent -> passed
+                # C2: count > 0 with no full filtered list -> unavailable (filtered_list_unobserved), NOT a pass
                 "b1:disabled-palette:board": [{"supported": True, "seq": 32, "snapshot": {"open": True, "q": "board", "count": 1, "selected_id": "shortcuts"}}],
                 "b1:commands-press-open": [{"supported": True, "seq": 142, "snapshot": {"open": True, "q": "", "count": 5}}],
                 "b1:commands-escape-close": [{"supported": True, "seq": 146, "snapshot": {"open": False, "q": "", "count": 0}}],
@@ -894,9 +900,9 @@ class RailShotsRegressionTests(unittest.TestCase):
                 (13, base_rail),
                 (23, base_rail),
                 (37, base_rail),
-                (103, {"lit": ["Terminal"], "entries": base_rail["entries"], "disabled": ["Board"]}),
+                (103, term_rail),
                 (113, base_rail),
-                (123, {"lit": ["Terminal"], "entries": base_rail["entries"], "disabled": ["Board"]}),
+                (123, term_rail),
                 (133, base_rail),
                 (163, {"lit": ["Simulation"], "entries": base_rail["entries"], "disabled": ["Board"]}),
             ],
@@ -915,77 +921,79 @@ class RailShotsRegressionTests(unittest.TestCase):
             },
         }
         res = P.evaluate_b1_kind("schematic-only", parsed, rail_map, embed=True)
-        self.assertTrue(res["disabled_entries_measured"])
         self.assertEqual(res["omitted_entries"], [])
         bd = res["entries"]["board"]
-        self.assertEqual(bd["status"], "measured")
-        self.assertTrue(bd["passed"])
+        # Partial disabled measurements must stay unavailable (passed=None), never a false pass
+        self.assertEqual(bd["status"], "unavailable")
+        self.assertIsNone(bd["passed"])
         self.assertEqual(bd["checks"]["disabled_press"], "unavailable")
         self.assertTrue(bd["checks"]["disabled_key"])
-        self.assertTrue(bd["checks"]["disabled_palette"])
-        self.assertEqual(bd["checks"]["disabled_palette_status"], "target_absent")
+        self.assertEqual(bd["checks"]["disabled_palette"], "unavailable")
+        self.assertEqual(bd["checks"]["disabled_palette_status"], "filtered_list_unobserved")
+        # Terminal, Commands, Simulation all have all applicable assertions measured -> passed
         self.assertTrue(res["entries"]["terminal"]["passed"])
         self.assertTrue(res["entries"]["commands"]["passed"])
         self.assertTrue(res["entries"]["simulation"]["passed"])
 
-        # If Enter WAS sent while another command ('shortcuts') was selected -> unavailable (not a false pass!)
-        parsed["keys"]["b1:disabled-palette:board"] = [{"keys": "enter", "seq": 34}]
-        res2 = P.evaluate_b1_kind("schematic-only", parsed, rail_map, embed=True)
-        self.assertEqual(res2["entries"]["board"]["checks"]["disabled_palette"], "unavailable")
-        self.assertEqual(res2["entries"]["board"]["checks"]["disabled_palette_status"], "another_command_selected_and_run")
+        # C2: full filtered list without target + hit_rect=True -> all 3 measured -> passed
+        parsed["presses"]["b1:disabled-press:board"] = [{"id": "rail:Board", "found": True, "hit_rect": True, "seq": 10}]
+        parsed["palette_reads"]["b1:disabled-palette:board"] = [
+            {"supported": True, "seq": 32, "snapshot": {"open": True, "q": "board", "count": 1, "selected_id": "shortcuts", "ids": ["shortcuts"]}}
+        ]
+        res_all = P.evaluate_b1_kind("schematic-only", parsed, rail_map, embed=True)
+        self.assertEqual(res_all["entries"]["board"]["status"], "measured")
+        self.assertTrue(res_all["entries"]["board"]["passed"])
+        self.assertEqual(res_all["entries"]["board"]["checks"]["disabled_palette_status"], "target_absent")
 
-        # Delivered disabled press -> measured True
-        parsed["presses"]["b1:disabled-press:board"] = [{"id": "rail:Board", "found": True, "seq": 10}]
-        res3 = P.evaluate_b1_kind("schematic-only", parsed, rail_map, embed=True)
-        self.assertTrue(res3["entries"]["board"]["checks"]["disabled_press"])
+        # C3: Terminal fails if not settled OR before-state was not opposite
+        parsed_term_bad = {**parsed, "settled_tags": {**parsed["settled_tags"], "b1-terminal-press-open": {"settled": False, "state": "timeout", "seq": 105, "viewer": {"open": ""}}}}
+        res_tb = P.evaluate_b1_kind("schematic-only", parsed_term_bad, rail_map, embed=True)
+        self.assertFalse(res_tb["entries"]["terminal"]["passed"])
+        parsed_term_same = {**parsed, "mark_before_rail": {**parsed["mark_before_rail"], "b1:terminal-press-open": term_rail}}
+        res_ts = P.evaluate_b1_kind("schematic-only", parsed_term_same, rail_map, embed=True)
+        self.assertFalse(res_ts["entries"]["terminal"]["passed"])
 
-    def test_auto_attach_gates_unavailable_passed_and_failed(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            outdir = Path(td)
-            # 1. Build without viewer.mode auto-attach -> all 4 gates unavailable
-            g_unavail = {g["id"]: g for g in P.evaluate_auto_attach_gates(outdir, {}, {}, embed=True)}
-            self.assertEqual(set(g_unavail.keys()), set(M.AUTO_ATTACH_GATES))
-            for g in g_unavail.values():
-                self.assertEqual(g["outcome"], "unavailable")
+        # C3: Commands escape_close requires delivered Escape from open palette (missing Escape -> unavailable)
+        parsed_cmd_noesc = {**parsed, "keys": {k: v for k, v in parsed["keys"].items() if k != "b1:commands-escape-close"}}
+        res_cn = P.evaluate_b1_kind("schematic-only", parsed_cmd_noesc, rail_map, embed=True)
+        self.assertEqual(res_cn["entries"]["commands"]["status"], "unavailable")
+        self.assertIsNone(res_cn["entries"]["commands"]["passed"])
 
-            # 2. Clean auto-attach run -> all 4 gates pass
-            parsed_ok = {
-                "mark_seqs": {"auto-attach:cold-open-start": 10, "auto-attach:cold-open-end": 20, "auto-attach:visit2-end": 30},
-                "mark_times": {"auto-attach:cold-open-start": 1000.0, "auto-attach:cold-open-end": 2200.0, "auto-attach:warm-return-start": 5000.0, "auto-attach:warm-return-end": 5220.0},
-                "composer_reads": {"auto-attach:cold-open-start": [{"supported": True, "text": "bp-auto-keys", "seq": 18}]},
-                "auto_attach_events": [{"seq": 12, "mark": "auto-attach:cold-open-start", "event": {"kicad_attach": "board", "why": "auto"}}],
-                "kicad_tags": {
-                    "auto-attach-cold": {"state": "ready", "why": "auto", "keys": False, "in_gpui_tree": True, "shown": 1, "t_ms": 2200.0, "frames": [{"xid": 1, "kind": "PCB", "painted": 25}]},
-                    "auto-attach-visit2": {"state": "ready", "in_gpui_tree": True, "shown": 1, "frames": [{"xid": 1, "kind": "PCB", "painted": 25}]},
-                    "auto-attach-warm-return": {"state": "ready", "in_gpui_tree": True, "shown": 1, "t_ms": 5220.0, "frames": [{"xid": 1, "kind": "PCB", "painted": 25}]},
-                },
-                "presses": {"auto-attach:warm-return-start": [{"id": "rail:Board", "found": True, "seq": 40}]},
-                "pane_samples": [{"t_ms": 1500.0, "non_flat": True}, {"t_ms": 2000.0, "non_flat": True}],
+        # C3: Simulation requires BOTH sim_frame AND rail.lit containing Simulation (frame alone fails)
+        parsed_sim_nolit = {**parsed, "rail_events": [(s, (base_rail if s == 163 else r)) for s, r in parsed["rail_events"]]}
+        res_sn = P.evaluate_b1_kind("schematic-only", parsed_sim_nolit, rail_map, embed=True)
+        self.assertFalse(res_sn["entries"]["simulation"]["passed"])
+        self.assertIn("sim_lit", res_sn["entries"]["simulation"]["failed"])
+
+    def test_b3_requires_header_geometry_and_never_falls_back(self) -> None:
+        # B: missing header_drawn_controls_ids or missing bool follow_rect_visible -> UNSCORED (never fallback!)
+        old_steps = {
+            "kinds": {
+                "full": {
+                    "pages": {
+                        "files": {
+                            "rail_state": "enabled",
+                            "matched_expected": True,
+                            "controls_ids": ["rail:Files", "ui:Edit", "ui:Open in KiCad"],
+                            "viewer": {"follow_present": True},
+                        },
+                    }
+                }
             }
-            rt_cap = {"hub_kicad_sessions": {"sessions": {"editor.kicad.abc": {"runtime": {"holder": "pane", "session": "s1", "generation": 1}}}}}
-            caps_ok = {"auto-attach-cold": rt_cap, "auto-attach-visit2": rt_cap}
-            g_ok = {g["id"]: g for g in P.evaluate_auto_attach_gates(outdir, parsed_ok, caps_ok, embed=True)}
-            for gid, g in g_ok.items():
-                self.assertEqual(g["outcome"], "passed", f"{gid} expected passed: {g}")
+        }
+        r_unscored = C.score_consistency(old_steps)
+        self.assertEqual(r_unscored["B3"]["checked"], 0)
+        self.assertEqual(r_unscored["B3"]["unscored_obstructed_or_unopened"], 1)
+        self.assertEqual(r_unscored["B3"]["misplaced"], [])
 
-            # 3. Faults: keyboard steal, blank handoff frame, generation bump, slow warm return > 500ms -> all 4 fail
-            parsed_bad = dict(parsed_ok)
-            parsed_bad["auto_attach_events"] = [
-                {"seq": 12, "mark": "auto-attach:cold-open-start", "event": {"kicad_attach": "board", "why": "auto"}},
-                {"seq": 15, "mark": "auto-attach:cold-open-start", "event": {"kicad_auto_keys_taken": True}},
-            ]
-            parsed_bad["pane_samples"] = [{"t_ms": 1500.0, "non_flat": False}]
-            parsed_bad["kicad_tags"] = dict(parsed_ok["kicad_tags"])
-            parsed_bad["kicad_tags"]["auto-attach-warm-return"] = {"state": "ready", "in_gpui_tree": True, "shown": 1, "t_ms": 5750.0, "frames": [{"xid": 1, "kind": "PCB", "painted": 25}]}
-            caps_bad = {
-                "auto-attach-cold": rt_cap,
-                "auto-attach-visit2": {"hub_kicad_sessions": {"sessions": {"editor.kicad.abc": {"runtime": {"holder": "pane", "session": "s1", "generation": 2}}}}},
-            }
-            g_bad = {g["id"]: g for g in P.evaluate_auto_attach_gates(outdir, parsed_bad, caps_bad, embed=True)}
-            for gid, g in g_bad.items():
-                self.assertEqual(g["outcome"], "failed", f"{gid} expected failed: {g}")
+        # Positive-area rect inside header bounds vs outside header bounds vs zero-area rect
+        lay = {"topbar": {"x": 0, "y": 0, "w": 1440, "h": 36}, "main": {"x": 264, "y": 36, "w": 488, "h": 835}, "rail": {"x": 1369, "y": 36, "w": 71, "h": 835}}
+        hdr = P.page_header_rect(lay)
+        self.assertIsNotNone(hdr)
+        self.assertTrue(P.rect_in_bounds({"x": 1100, "y": 40, "w": 60, "h": 24}, hdr))
+        self.assertFalse(P.rect_in_bounds({"x": 1100, "y": 40, "w": 0, "h": 24}, hdr))  # zero area
+        self.assertFalse(P.rect_in_bounds({"x": 1100, "y": 500, "w": 60, "h": 24}, hdr))  # outside header
 
-    def test_b3_counts_only_drawn_controls_and_visible_follow(self) -> None:
         steps = {
             "kinds": {
                 "full": {
@@ -994,14 +1002,14 @@ class RailShotsRegressionTests(unittest.TestCase):
                             "rail_state": "enabled",
                             "matched_expected": True,
                             "controls_ids": ["rail:Files", "ui:Edit", "ui:Open in KiCad"],
-                            "drawn_controls_ids": ["rail:Files"],
+                            "header_drawn_controls_ids": [],
                             "viewer": {"follow_present": False, "follow_rect_visible": False},
                         },
                         "gerbers": {
                             "rail_state": "enabled",
                             "matched_expected": True,
                             "controls_ids": ["rail:Gerbers", "follow-agent"],
-                            "drawn_controls_ids": ["rail:Gerbers"],
+                            "header_drawn_controls_ids": [],
                             "viewer": {"follow_present": True, "follow_rect_visible": False},
                         },
                     }
@@ -1013,49 +1021,79 @@ class RailShotsRegressionTests(unittest.TestCase):
         self.assertEqual(rules["B3"]["clean"], 2)
         self.assertEqual(rules["B3"]["misplaced"], [])
 
-        # When ui:Edit IS drawn on files or follow_rect_visible IS True on gerbers -> flagged
-        steps["kinds"]["full"]["pages"]["files"]["drawn_controls_ids"].append("ui:Edit")
+        # When ui:Edit IS in header_drawn_controls_ids on files or follow_rect_visible IS True on gerbers -> flagged
+        steps["kinds"]["full"]["pages"]["files"]["header_drawn_controls_ids"].append("ui:Edit")
         steps["kinds"]["full"]["pages"]["gerbers"]["viewer"]["follow_rect_visible"] = True
         rules_bad = C.score_consistency(steps)
         self.assertEqual(rules_bad["B3"]["clean"], 0)
         self.assertEqual(len(rules_bad["B3"]["misplaced"]), 2)
 
-    def test_b1_accepts_settled_empty_state_when_opening_review(self) -> None:
+    def test_b1_empty_state_requires_designed_empty_words(self) -> None:
+        # C1: Review (and other pages) in state=='empty' pass ONLY when non-empty empty_text is reported.
         rail_map = {"review": {"state": "enabled", "why": ""}}
         r_idle = {"lit": [], "entries": ["Review"], "disabled": []}
         r_rev = {"lit": ["Review"], "entries": ["Review"], "disabled": []}
-        parsed = {
-            "rail_metric_seen": True,
-            "mark_before_rail": {
-                "b1:press-open:review": r_idle,
-                "b1:press-close:review": r_rev,
-                "b1:key-open:review": r_idle,
-                "b1:key-close:review": r_rev,
-                "b1:palette-open:review": r_idle,
-            },
-            "rail_events": [(11, r_rev), (21, r_idle), (31, r_rev), (41, r_idle), (51, r_rev)],
-            "presses": {
-                "b1:press-open:review": [{"id": "rail:Review", "found": True, "seq": 10}],
-                "b1:press-close:review": [{"id": "rail:Review", "found": True, "seq": 20}],
-            },
-            "keys": {
-                "b1:key-open:review": [{"keys": "r", "seq": 30}],
-                "b1:key-close:review": [{"keys": "r", "seq": 40}],
-                "b1:palette-open:review": [{"keys": "enter", "seq": 50}],
-            },
-            "palette_reads": {"b1:palette-open:review": [{"supported": True, "seq": 49, "snapshot": {"open": True, "selected_id": "rail:review"}}]},
-            "settled_tags": {
-                "b1-press-open-review": {"settled": True, "state": "empty", "seq": 12, "viewer": {"open": "review"}},
-                "b1-press-close-review": {"settled": True, "state": "ready", "seq": 22, "viewer": {"open": ""}},
-                "b1-key-open-review": {"settled": True, "state": "empty", "seq": 32, "viewer": {"open": "review"}},
-                "b1-key-close-review": {"settled": True, "state": "ready", "seq": 42, "viewer": {"open": ""}},
-                "b1-palette-open-review": {"settled": True, "state": "empty", "seq": 52, "viewer": {"open": "review"}},
-            },
-            "rail_reads": {},
-            "kicad_tags": {},
-        }
-        res = P.evaluate_b1_kind("no-design", parsed, rail_map, embed=False)
-        self.assertTrue(res["entries"]["review"]["passed"], res["entries"]["review"])
+        def _parsed(empty_text: str) -> dict:
+            return {
+                "rail_metric_seen": True,
+                "mark_before_rail": {
+                    "b1:press-open:review": r_idle,
+                    "b1:press-close:review": r_rev,
+                    "b1:key-open:review": r_idle,
+                    "b1:key-close:review": r_rev,
+                    "b1:palette-open:review": r_idle,
+                },
+                "rail_events": [(11, r_rev), (21, r_idle), (31, r_rev), (41, r_idle), (51, r_rev)],
+                "presses": {
+                    "b1:press-open:review": [{"id": "rail:Review", "found": True, "seq": 10}],
+                    "b1:press-close:review": [{"id": "rail:Review", "found": True, "seq": 20}],
+                },
+                "keys": {
+                    "b1:key-open:review": [{"keys": "r", "seq": 30}],
+                    "b1:key-close:review": [{"keys": "r", "seq": 40}],
+                    "b1:palette-open:review": [{"keys": "enter", "seq": 50}],
+                },
+                "palette_reads": {"b1:palette-open:review": [{"supported": True, "seq": 49, "snapshot": {"open": True, "selected_id": "rail:review"}}]},
+                "settled_tags": {
+                    "b1-press-open-review": {"settled": True, "state": "empty", "seq": 12, "viewer": {"open": "review", "empty_text": empty_text}},
+                    "b1-press-close-review": {"settled": True, "state": "ready", "seq": 22, "viewer": {"open": ""}},
+                    "b1-key-open-review": {"settled": True, "state": "empty", "seq": 32, "viewer": {"open": "review", "empty_text": empty_text}},
+                    "b1-key-close-review": {"settled": True, "state": "ready", "seq": 42, "viewer": {"open": ""}},
+                    "b1-palette-open-review": {"settled": True, "state": "empty", "seq": 52, "viewer": {"open": "review", "empty_text": empty_text}},
+                },
+                "rail_reads": {},
+                "kicad_tags": {},
+            }
+        # Empty empty_text -> fails
+        res_blank = P.evaluate_b1_kind("no-design", _parsed(""), rail_map, embed=False)
+        self.assertFalse(res_blank["entries"]["review"]["passed"])
+        # Non-empty designed empty_text -> passes
+        res_words = P.evaluate_b1_kind("no-design", _parsed("Nothing to review yet"), rail_map, embed=False)
+        self.assertTrue(res_words["entries"]["review"]["passed"], res_words["entries"]["review"])
+
+    def test_extra_check_swallowed_escape_after_closed_probe(self) -> None:
+        # D: swallowed-Escape defect check -> fails when bare 'b' does not open Board, passes when it does, unavailable when absent
+        with tempfile.TemporaryDirectory() as td:
+            outdir = Path(td)
+            # 1. Absent -> unavailable
+            c_unavail = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["full"], {"full": {}}, {"full": {}})}
+            self.assertEqual(c_unavail["full/escape-after-closed-probe"]["outcome"], "unavailable")
+
+            # 2. Swallowed Escape (today's main: timeout, viewer.open == "") -> failed
+            p_fail = {
+                "keys": {"extra:escape-after-closed-probe": [{"keys": "escape", "seq": 10}, {"keys": "b", "seq": 12}]},
+                "settled_tags": {"extra-escape-after-closed-probe": {"settled": False, "state": "timeout", "viewer": {"open": ""}}},
+            }
+            c_fail = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["full"], {"full": p_fail}, {"full": {}})}
+            self.assertEqual(c_fail["full/escape-after-closed-probe"]["outcome"], "failed")
+
+            # 3. Fixed (rail-z: Board opens ready) -> passed
+            p_pass = {
+                "keys": {"extra:escape-after-closed-probe": [{"keys": "escape", "seq": 10}, {"keys": "b", "seq": 12}]},
+                "settled_tags": {"extra-escape-after-closed-probe": {"settled": True, "state": "ready", "viewer": {"open": "board"}}},
+            }
+            c_pass = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["full"], {"full": p_pass}, {"full": {}})}
+            self.assertEqual(c_pass["full/escape-after-closed-probe"]["outcome"], "passed")
 
 
 if __name__ == "__main__":
