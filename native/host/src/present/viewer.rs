@@ -1471,7 +1471,7 @@ fn opaque_tile_key(tile: &super::layout::Tile, root: &str) -> String {
     let rel = super::layout::sanitize_rel(root, &tile.source);
     let prefix = if is_tile_versioned(tile) { "hist" } else { "tile" };
     let base = if let Some(v) = &tile.version {
-        format!("{prefix}:{}:{}:{}", tile.kind.as_str(), v.commit, rel)
+        format!("{prefix}:{}:{}:{}", tile.kind.as_str(), v.id, rel)
     } else if tile.unresolved_version {
         format!("{prefix}:{}:unresolved:{}", tile.kind.as_str(), rel)
     } else {
@@ -1479,7 +1479,7 @@ fn opaque_tile_key(tile: &super::layout::Tile, root: &str) -> String {
     };
     if let Some(ov) = &tile.overlay {
         let ov_rel = super::layout::sanitize_rel(root, &ov.source);
-        let ov_ver = ov.version.as_ref().map(|v| v.commit.as_str()).unwrap_or("live");
+        let ov_ver = ov.version.as_ref().map(|v| v.id.as_str()).unwrap_or("live");
         format!("{base}:ov:{}:{}:{}", ov.kind.as_str(), ov_ver, ov_rel)
     } else {
         base
