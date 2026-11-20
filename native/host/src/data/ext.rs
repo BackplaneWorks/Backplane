@@ -265,7 +265,11 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: 
         "thread.work" => Ok(json!({"thread":s(p, "thread"),"subs":work_now(hub, s(p, "thread")).await})),
         // feature "subview": one subagent's own timeline (present/panels.rs `sub_view`), opened from its fold row's `tool.sub` or its Subagents row's `key`
         "thread.sub" => { let (th, k) = (s(p, "thread"), s(p, "key")); if th.is_empty() || k.is_empty() { return Some(Err(err("thread and key"))) }
-            Ok(json!({"thread":th,"key":k,"view":hub.sub_view_for(th, k).await})) }
+            let view = hub.sub_view_for(th, k).await;
+            // `have`: by parts, as a `parts:1` subscription pushes them (data/open.rs `sub_parts`)
+            if let Some(h) = p.get("have").and_then(Value::as_object) { let mut held: HashMap<String, String> = h.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect();
+                return Some(Ok(super::open::sub_parts(th, k, &view, &mut held))) }
+            Ok(json!({"thread":th,"key":k,"view":view})) }
         // feature "queue": what waits for the agent, the desktop's strip over the composer (session/composer.rs `queue_json`): `thread.queue {thread}` → `{rows, more}`;
         // `queue.act {thread, action, value}` → `{}` presses a row's button as the row names it (q-steer, q-remove, q-up, q-resume); q-edit takes the message out of the queue
         // and answers `{text}`, for the app to put back into the draft

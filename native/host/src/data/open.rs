@@ -82,3 +82,42 @@ pub(super) async fn shell_sync(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, p:
     out.insert("h".into(), Value::Object(h)); out.insert("sub".into(), json!(subs.next));
     Ok(Value::Object(out))
 }
+
+/// A subagent's view by parts (feature `subview`, `parts:1`): `{thread, key, head?, ids?, entries, h}` against the parts `have` holds. `head` is the view without its
+/// entries, `ids` its entries' ids oldest → newest, `entries` those new or changed (each with its `h`). `held` is updated to what the client holds after this.
+pub fn sub_parts(thread: &str, key: &str, view: &Value, held: &mut HashMap<String, String>) -> Value {
+    let have = Value::Object(held.iter().map(|(k, v)| (k.clone(), json!(v))).collect());
+    let (mut out, mut h) = (serde_json::Map::new(), serde_json::Map::new());
+    out.insert("thread".into(), json!(thread)); out.insert("key".into(), json!(key));
+    let mut head = view.clone(); let list = head.as_object_mut().and_then(|o| o.remove("entries")).and_then(|e| e.as_array().cloned()).unwrap_or_default();
+    put(&mut out, &mut h, &have, "@head", "head", head);
+    put(&mut out, &mut h, &have, "@ids", "ids", json!(list.iter().map(|e| e["id"].clone()).collect::<Vec<_>>()));
+    let mut sent = vec![]; let mut now: HashMap<String, String> = h.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect();
+    for mut e in list {
+        let x = part_hash(&e); let id = e["id"].as_str().unwrap_or("").to_string();
+        if held.get(&id) != Some(&x) { e["h"] = json!(x); sent.push(e); }
+        now.insert(id, x);
+    }
+    out.insert("entries".into(), Value::Array(sent)); out.insert("h".into(), Value::Object(h));
+    *held = now; Value::Object(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn view(state: &str, steps: &[(&str, &str)]) -> Value { json!({"key":"k1","title":"Explore","state":state,"entries":steps.iter().map(|(i, t)| json!({"id":i,"kind":"tool","text":t})).collect::<Vec<_>>()}) }
+    #[test] fn a_subagent_view_goes_by_what_moved() {
+        let mut held = HashMap::new();
+        let first = sub_parts("t1", "k1", &view("working", &[("s1", "ls"), ("s2", "grep")]), &mut held);
+        assert!(first.get("head").is_some() && first.get("ids").is_some()); assert_eq!(first["entries"].as_array().unwrap().len(), 2, "the first push carries everything");
+        assert!(first["head"].get("entries").is_none(), "the head is the view without its entries");
+        let same = sub_parts("t1", "k1", &view("working", &[("s1", "ls"), ("s2", "grep")]), &mut held);
+        assert!(same.get("head").is_none() && same.get("ids").is_none() && same["entries"] == json!([]) && is_empty_parts(&same), "nothing moved: {same}");
+        let step = sub_parts("t1", "k1", &view("working", &[("s1", "ls"), ("s2", "grep -n"), ("s3", "cat")]), &mut held);
+        assert!(step.get("head").is_none()); assert_eq!(step["ids"], json!(["s1", "s2", "s3"]));
+        assert_eq!(step["entries"].as_array().unwrap().iter().map(|e| e["id"].clone()).collect::<Vec<_>>(), [json!("s2"), json!("s3")], "a step changed in place and a new one: {step}");
+        let done = sub_parts("t1", "k1", &view("completed", &[("s1", "ls"), ("s2", "grep -n"), ("s3", "cat")]), &mut held);
+        assert_eq!((done["head"]["state"].as_str(), done.get("ids").is_none(), done["entries"].as_array().unwrap().len()), (Some("completed"), true, 0));
+        assert_eq!(part_hash(&json!({"a":1})), part_hash(&json!({"a":1}))); assert_eq!(part_hash(&json!(1)).len(), 16);
+    }
+}
