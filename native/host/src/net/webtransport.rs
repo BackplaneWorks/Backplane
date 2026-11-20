@@ -40,7 +40,7 @@ impl BrowserListener {
     pub fn bind(directory: &Path, authority: String, proxy: ProxyIdentity) -> io::Result<Self> {
         let meta = std::fs::symlink_metadata(directory)?;
         if !directory.is_absolute() || !meta.is_dir() || meta.mode() & 0o777 != 0o700
-            || meta.uid() != unsafe { libc::geteuid() } {
+            || meta.uid() != crate::plat::effective_uid() {
             return Err(io::Error::new(io::ErrorKind::PermissionDenied, "private browser runtime directory required"));
         }
         validate_authority(&authority)?;
@@ -81,7 +81,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("bp-web-bind-{}", std::process::id()));
         std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
         let bind = |path: &Path, host: &str, pid| BrowserListener::bind(path, host.into(),
-            ProxyIdentity { uid: unsafe { libc::geteuid() }, pid });
+            ProxyIdentity { uid: crate::plat::effective_uid(), pid });
         let host = "hub.example.ts.net";
         assert!(bind(Path::new("."), host, 1).is_err());
         let link = dir.join("link");
@@ -106,7 +106,7 @@ mod tests {
     #[tokio::test]
     async fn browser_transport_checks_peer_process_as_well_as_user() {
         let (stream, _peer) = UnixStream::pair().unwrap();
-        let identity = ProxyIdentity { uid: unsafe { libc::geteuid() }, pid: std::process::id() as i32 };
+        let identity = ProxyIdentity { uid: crate::plat::effective_uid(), pid: std::process::id() as i32 };
         assert!(identity.accepts(&stream));
         let other_process = ProxyIdentity { pid: identity.pid + 1, ..identity };
         assert!(!other_process.accepts(&stream));

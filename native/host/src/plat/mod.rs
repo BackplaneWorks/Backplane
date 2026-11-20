@@ -5,6 +5,10 @@
 #[cfg(unix)] pub use unix::*;
 #[cfg(windows)] mod windows;
 #[cfg(windows)] pub use windows::*;
+#[cfg(target_os = "linux")]
+pub mod browser_peer;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub fn effective_uid() -> u32 { unsafe { libc::geteuid() } }
 pub mod dirs;
 #[cfg(test)] pub mod tmp;
 
