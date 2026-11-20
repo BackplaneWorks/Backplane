@@ -809,6 +809,7 @@ pub enum Principal {
 
 async fn browser_alive(hub: &Arc<Hub>, reg: &Arc<crate::net::pairing::Registry>, device_id: &str, client: u64, activity: bool) -> bool {
     if hub.setting("web.enabled").await.as_deref() != Some("1") { return false }
+    if !activity { return reg.browser_connection(device_id, client, false) }
     let (r, dev) = (reg.clone(), device_id.to_string());
     tokio::task::spawn_blocking(move || r.browser_connection(&dev, client, activity)).await.unwrap_or(false)
 }

@@ -338,7 +338,11 @@ pub fn devices(st: &State, session: &Value, info: &Value) -> Vec<Value> {
         vec![btn(if enabled { "Turn off" } else { "Turn on" }, "device-web-access", if enabled { "0" } else { "1" }, false)]));
     if enabled {
         for req in list["browserPending"].as_array().into_iter().flatten() {
-            r.push(row(s(req, "name"), &format!("Compare {} with the code in your browser.", s(req, "code")),
+            let code = s(req, "code");
+            let grouped = if code.len() == 6 && code.bytes().all(|b| b.is_ascii_digit()) {
+                format!("{} {}", &code[..3], &code[3..])
+            } else { code.to_owned() };
+            r.push(row(s(req, "name"), &format!("{} · Compare {grouped} with the code in your browser.", s(req, "login")),
                 vec![btn("Approve", "device-web-approve", s(req, "id"), false), btn("Deny", "device-web-deny", s(req, "id"), false)]));
         }
     }
