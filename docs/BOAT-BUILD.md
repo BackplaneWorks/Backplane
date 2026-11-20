@@ -9,11 +9,14 @@ same command on a Boat sandbox and the caller cannot tell, except for a line on 
 2. `bo_box`: pool box `bp-build-N`, running (resumed if stopped, created from the snapshot `bp-build-base` if missing; `boat list --all`, stopped boxes are not in the plain list).
 3. `bo_sync`: `git ls-files --cached --others --exclude-standard` → rsync over `boat ssh` (`scripts/boat-ssh.sh`) into `~/ws/src`, by checksum, mtimes not kept (cargo sees a changed file as new);
    `scripts/boat-prune.py` removes what the worktree does not have. Targets live in `~/target/*`, outside the copy, so they stay warm. sccache: `~/.cache/sccache` on the box.
+   Then `bo_guard` runs `scripts/boat-disk.py guard` there: over `BP_BOAT_DISK_HIGH` % (80) it removes, oldest first, until under `BP_BOAT_DISK_LOW` % (70): stale cargo `incremental/`
+   state, then the rest of it outside target dirs used in the last hour, then dependency artifacts unused for 3 days, then whole cold target dirs; sccache is trimmed to
+   `SCCACHE_CACHE_SIZE`. What it removed goes to `BUILD_LOCK_DIR/boat.log`. The box's home is a lazy FUSE mount whose `df` shows only what was hydrated: the guard measures with du.
 4. `bo_run`: the job script (build knobs only, `bo_env`) runs `scripts/cargo-q ...` / `scripts/dev-build.sh` on the box through `scripts/boat-run.py` (detached, attached, re-attached after a cut connection without repeating output; ^C or TERM kills the remote command).
    stdout and stderr stay separate; the exit code is the command's. `--offline` is dropped there (the box has the network, no registry copy).
 5. `bo_pull`: `build` → executables (`scripts/boat-artifacts.py`); `dev-build.sh` → hub, window, voice, guard (and Chromium's files only when this machine has no cached runtime). Hashed on the box, rsynced, `sha256sum -c` here.
    `dev-build.sh` then stages, **smoke-starts** (always, for a box's build) and publishes locally as ever.
-6. `bo_finish`: removes the job, sets the box's own TTL (`BP_BOAT_IDLE`+600 s) and starts `scripts/boat-pool.sh reap`, which stops a box idle for `BP_BOAT_IDLE` (300 s). A stopped box keeps its disk (14 days): the next job resumes it warm.
+6. `bo_finish`: removes the job, saves `scripts/boat-disk.py report` as `BUILD_LOCK_DIR/boat.N.disk` (`boat-pool.sh status` shows it while the box is stopped), sets the box's own TTL (`BP_BOAT_IDLE`+600 s) and starts `scripts/boat-pool.sh reap`, which stops a box idle for `BP_BOAT_IDLE` (300 s). A stopped box keeps its disk (14 days): the next job resumes it warm.
 
 Anything wrong before the command starts is exit 98: the caller waits for a local slot as before, and offloading is off for `BP_BOAT_COOLDOWN` (300 s). A command that cannot give the same result on a box is never offloaded
 (`bo_cargo_ok`). Not offloaded: the main builder (`BQ_MAIN`), iOS/macOS (Mac mini, `mac-heavy`).
@@ -26,4 +29,5 @@ The job gets `RUST_*`, `CARGO_*` knobs, `PROFILE`, `BACKPLANE_COMMIT`, ...; a na
 ## Cost
 
 Large box (8 vCPU, 16 GB) at the plan's rate; `scripts/boat-pool.sh status` shows seconds and dollars per box. Idle stop after 300 s, a pool of 2, boxes only when slots are busy.
-Env: `BP_NO_BOAT`, `BP_BOAT_POOL`, `BP_BOAT_TYPE`, `BP_BOAT_IDLE`, `BP_BOAT_COOLDOWN`, `BP_BOAT_PASS`, `BP_BOAT_BASE`.
+Env: `BP_NO_BOAT`, `BP_BOAT_POOL`, `BP_BOAT_TYPE`, `BP_BOAT_IDLE`, `BP_BOAT_COOLDOWN`, `BP_BOAT_PASS`, `BP_BOAT_BASE`, `BP_BOAT_DISK_HIGH`, `BP_BOAT_DISK_LOW`.
+Test: `bash test/boat-disk.sh` (CI, the `author` job).

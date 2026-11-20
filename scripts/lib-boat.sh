@@ -14,13 +14,22 @@
 # Secrets: nothing of the person's goes to a box. The box is made from a snapshot taken on a sandbox with no environment (`--no-env`, env bp-build injects nothing),
 # the job gets only the variables bo_env allows (build knobs, never a name that looks like a credential), and only `git ls-files` sources are copied (no .git, no home).
 # Env: BP_NO_BOAT, BP_BOAT_POOL (boxes, default 2), BP_BOAT_TYPE (small|default|large|xlarge; default large), BP_BOAT_IDLE (seconds idle before the box is stopped, default 300),
-#      BP_BOAT_COOLDOWN (seconds without offloading after boat itself failed, default 300), BP_BOAT_PASS (extra variable names to forward), BP_BOAT_BASE (snapshot name).
+#      BP_BOAT_COOLDOWN (seconds without offloading after boat itself failed, default 300), BP_BOAT_PASS (extra variable names to forward), BP_BOAT_BASE (snapshot name),
+#      BP_BOAT_DISK_HIGH / BP_BOAT_DISK_LOW (the disk guard's marks, default 80 / 70 %, scripts/boat-disk.py).
 BO_HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 bo_dir() { echo "${BUILD_LOCK_DIR:-$HOME/.cache/backplane-build.locks}"; }
 bo_say() { echo "boat: $*" >&2; }
 bo_b() { boat --no-update "$@"; }
 # the python helper for JSON: bo_py CODE ARGS... (stdin is the JSON)
 bo_py() { local c=$1; shift; python3 -I -c "$c" "$@"; }
+
+# bo_out: the command's stdout from `boat exec --json` on stdin (one JSON object, or a stream of JSON lines for a longer command)
+bo_out() { bo_py 'import sys,json
+for l in sys.stdin:
+    try: j=json.loads(l)
+    except ValueError: continue
+    if j.get("type") == "stdout": sys.stdout.write(j.get("data") or "")
+    elif "stdout" in j and "type" not in j: sys.stdout.write(j["stdout"] or "")'; }
 
 # Offloading is possible: not switched off, not already on a box, the tools are here, boat did not fail a moment ago.
 bo_ready() {
@@ -75,7 +84,15 @@ bo_sync() { local id=$1 root=$2 job=$3 lf rc=0
   if [ "$rc" = 0 ]; then
     bo_b exec "$id" --timeout 120 "mkdir -p ~/.bpjobs/$job && echo $(gzip -c "$lf" | base64 -w0) | base64 -d | gunzip > ~/.bpjobs/$job/list && python3 -I ~/ws/src/scripts/boat-prune.py ~/ws/src ~/.bpjobs/$job/list" > /dev/null || rc=$?
   fi
-  rm -f "$lf"; return "$rc"; }
+  rm -f "$lf"; [ "$rc" = 0 ] && bo_guard "$id"; return "$rc"; }
+
+# bo_guard ID: before the job, keep the box's disk from filling (scripts/boat-disk.py: over BP_BOAT_DISK_HIGH % (80) the oldest build output goes until under BP_BOAT_DISK_LOW % (70));
+# what it removed goes to BUILD_LOCK_DIR/boat.log and stderr. A guard that fails does not stop the job.
+bo_guard() { local id=$1 out
+  out=$(bo_b exec "$id" --json --timeout 900 "python3 -I ~/ws/src/scripts/boat-disk.py guard --high ${BP_BOAT_DISK_HIGH:-80} --low ${BP_BOAT_DISK_LOW:-70}" 2>/dev/null | bo_out)
+  [ -n "$out" ] || return 0
+  printf '%s\n' "$out" | sed "s/^/$(date +%T) $id /" >> "$(bo_dir)/boat.log"
+  printf '%s\n' "$out" | head -1 | sed 's/^boat-disk: //' | while read -r l; do bo_say "disk on $id: $l"; done; }
 
 # bo_run ID JOB CWD BODY: write the job script (the allowed env, cd CWD, BODY) to the box and run it; stdout and stderr are the command's, the exit code is its own
 bo_run() { local id=$1 job=$2 cwd=$3 body=$4 s
@@ -100,8 +117,9 @@ bo_pull() { local id=$1 job=$2 rb=$3 lb=$4 lf sf rc=0
 
 # bo_finish IDX ID JOB: after a job, however it ended
 bo_finish() { local i=$1 id=$2 job=$3 d; d=$(bo_dir)
-  [ -n "$id" ] && bo_b exec "$id" --timeout 30 "rm -rf ~/.bpjobs/$job" > /dev/null 2>&1
-  date +%s > "$d/boat.$i.last"
+  # the disk as the job left it, for `boat-pool.sh status` while the box is stopped (its df cannot be read then)
+  [ -n "$id" ] && bo_b exec "$id" --json --timeout 300 "rm -rf ~/.bpjobs/$job; python3 -I ~/ws/src/scripts/boat-disk.py report" 2>/dev/null | bo_out | tail -1 > "$d/boat.$i.disk.tmp" && [ -s "$d/boat.$i.disk.tmp" ] && mv -f "$d/boat.$i.disk.tmp" "$d/boat.$i.disk"
+  rm -f "$d/boat.$i.disk.tmp"; date +%s > "$d/boat.$i.last"
   [ -n "$id" ] && bo_b extend "$id" --ttl $(( ${BP_BOAT_IDLE:-300} + 600 )) > /dev/null 2>&1   # the server's own limit, if this machine dies before the reaper below stops the box
   ( setsid nohup "$BO_HERE/boat-pool.sh" reap > /dev/null 2>&1 < /dev/null & ) 2> /dev/null; }
 
