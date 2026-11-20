@@ -535,8 +535,12 @@ impl Backplane {
                         (out.join("\n"), true) }
                     // the open palette's highlighted item (label + canonical id) before Enter, for B1 verification
                     "palette" => (crate::screens::palette::selected_snapshot(&self.data, &self.screens.palette).to_string(), true),
-                    // on-demand rail snapshot trigger (forces a fresh repaint; once PR #1359's rail metric is present, clears its dedup cache too)
-                    "rail" => { cx.notify(); (String::new(), false) }
+                    // on-demand rail snapshot trigger (test-mode only: clears the rail metric dedup cache so the next paint re-emits it)
+                    "rail" => {
+                        let on = crate::ui::rail_rects_on();
+                        if on { self.screens.rail_metric = None; cx.notify(); }
+                        (String::new(), on)
+                    }
                     _ => (String::new(), false) };
                 self.m("read", json!({"what": what, "text": text, "supported": supported}));
                 self.pump(cx);

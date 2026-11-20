@@ -1998,8 +1998,9 @@ mod tests {
     #[test] fn on_pane_tab_notifies_once_and_sends_no_commands() {
         assert_eq!(super::tab_change("PCB", "SCH"), Some("SCH"));
         assert_eq!(super::tab_change("SCH", "SCH"), None, "unchanged wanted frame does not re-emit PaneTab");
-        // Drive the real subscriber body (`on_pane_tab`) with an empty command channel and assert it
-        // notifies the parent once and causes zero outgoing commands (no `editor.kicad.show` feedback).
+        // Drive the real subscriber body (`on_pane_tab`) and assert it notifies the parent once.
+        // The "no commands" guarantee comes from `on_pane_tab`'s signature (`fn on_pane_tab(notify: impl FnOnce())`),
+        // which takes no command sender or pane handle and therefore cannot send `editor.kicad.show` feedback.
         let (_tx, mut rx) = tokio::sync::mpsc::channel::<super::Command>(8);
         let emitted = super::tab_change("PCB", "SCH");
         assert_eq!(emitted, Some("SCH"));
