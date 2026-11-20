@@ -193,6 +193,11 @@ pub fn person_touched(pro: &str) {
     TOUCHED.get_or_init(Default::default).lock().unwrap().insert(pro.to_string(), now);
     PERSON.get_or_init(Default::default).lock().unwrap().insert(pro.to_string(), now);
 }
+/// Backplane's own show or attach of the editor (an automatic attach): automatic runs wait EDIT_QUIET_MS after it, as after the person's,
+/// but it is not the person's activity (PERSON)
+pub fn host_touched(pro: &str) {
+    TOUCHED.get_or_init(Default::default).lock().unwrap().insert(pro.to_string(), now_ms());
+}
 /// Input KiCad saw on its canvas at `at` (ms; a run it held for it): automatic runs wait EDIT_QUIET_MS after it, as after a press.
 fn canvas_touched(pro: &str, at: u64) {
     let mut t = TOUCHED.get_or_init(Default::default).lock().unwrap();
@@ -989,6 +994,15 @@ mod tests {
     /// once J's review set its source, its findings stand instead (a second-opinion note leaves DRC clean).
     /// A real ET_MARKER_CLICKED (Collar on bp.13 batch 3, run 5) finds its row among the project's DRC findings, the same as the
     /// editor's run gave them (items_detail in the event, KIIDs in the row); a host marker's click is not this one's.
+    /// Backplane's own attach (an automatic one) holds the checks off as the person's does, but is not the person's activity
+    #[test] fn an_automatic_attach_holds_checks_off_but_is_not_the_person() {
+        let pro = "/checkrun-test/host-touched/a.kicad_pro";
+        super::host_touched(pro);
+        assert!(super::TOUCHED.get().unwrap().lock().unwrap().contains_key(pro));
+        assert!(!super::PERSON.get_or_init(Default::default).lock().unwrap().contains_key(pro));
+        super::person_touched(pro);
+        assert!(super::PERSON.get().unwrap().lock().unwrap().contains_key(pro));
+    }
     #[test] fn a_kicad_marker_click_finds_its_row() {
         let ev: Value = serde_json::from_str(r#"{"seq":"68","type":"ET_MARKER_CLICKED","frame":{"kind":"FK_PCB","document":"/c/collar_main.kicad_pcb"},"selection":{},
             "drc_marker":{"type":"clearance","severity":"error","message":"Clearance violation (netclass 'Default' clearance 0.1000 mm; actual 0.0809 mm)","at_nm":{"x_nm":"97870000","y_nm":"99485000"},

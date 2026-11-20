@@ -592,6 +592,9 @@ pub struct KicadPane {
     pub why: ShowBy,
     /// an automatic pane whose KiCad took the keyboard with no act of the person's: said once (`kicad_auto_keys_taken`)
     auto_taken_said: bool,
+    /// the KiCad session generation `kicad_attach` decided on (the hub's `viewer.runtime.generation`), sent with the first attach: the hub
+    /// answers a late one for a session gone `stale` and changes nothing
+    pub generation: Option<u64>,
     /// macOS, debug: the order plan last logged (`kicad_mac_plan`)
     mac_plan_said: String,
     /// Windows: the editor given the keyboard as its frame came on show, and when. The focus request posted then can reach KiCad
@@ -631,6 +634,19 @@ pub fn pointer_over(p: (f64, f64), r: (i32, i32, i32, i32)) -> bool {
     let (x, y, w, h) = (r.0 as f64, r.1 as f64, r.2 as f64, r.3 as f64);
     w > 0. && h > 0. && p.0 >= x && p.0 <= x + w && p.1 >= y && p.1 <= y + h
 }
+/// An automatic pane's own attach, show and pre-warm say so (`auto`): the hub holds its checks off for them as for the person's, but does not
+/// take them for the person's activity (checkrun `host_touched`)
+pub fn mark_auto(name: &str, mut params: Value, why: ShowBy) -> Value {
+    if why == ShowBy::Automatic && matches!(name, "editor.kicad.attach" | "editor.kicad.show" | "editor.kicad.prewarm") { params["auto"] = json!(true); }
+    params
+}
+/// Whether the hub's runtime picture says the person has just closed this project's KiCad (`closedByPerson`: Close in Backplane, or KiCad
+/// quit) where the last one said it was starting or live
+pub fn person_closed_kicad(old: &Value, new: &Value) -> bool {
+    new["runtime"]["session"] == "closedByPerson" && matches!(old["runtime"]["session"].as_str(), Some("live" | "starting"))
+}
+/// Whether an attach may open `project`: the person's own (Deliberate) always; Backplane's (Automatic) not once the person has closed it
+pub fn may_attach(closed: &std::collections::HashSet<String>, project: &str, why: ShowBy) -> bool { why == ShowBy::Deliberate || !closed.contains(project) }
 /// What `kicad_attach` does with the pane already there.
 #[derive(Debug, PartialEq, Eq)]
 pub enum AttachStep { New, Promote, Again }
@@ -647,6 +663,10 @@ impl EventEmitter<PaneKey> for KicadPane {}
 /// changes itself): its kind. The page leaves Edit for View, or moves to the page's own editor when it was one of the extra tabs.
 pub struct PaneFrameClosed(pub String);
 impl EventEmitter<PaneFrameClosed> for KicadPane {}
+/// The person closed this project's KiCad (Close in Backplane, or KiCad's own quit: the runtime's `closedByPerson`), as opposed to a
+/// detach, an idle stop or a crash: its owner shows the viewer and attaches it again only on the person's own Edit.
+pub struct PaneKicadClosed;
+impl EventEmitter<PaneKicadClosed> for KicadPane {}
 /// The kind of the frame KiCad closed under the pane: the one it showed (`wanted`), in the old info and in the new one no longer, the
 /// same KiCad (pid) still ready. None while KiCad starts, restarts or is gone (those say so themselves).
 /// KiCad is up and has no frame of `kind` (closed in KiCad, or never opened).
@@ -718,7 +738,7 @@ impl KicadPane {
             let _ = drained_tx.send(());
         } }).detach();
         KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, generation: None, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
     pub fn edit_again(&mut self, cx: &mut Context<Self>) {
@@ -739,7 +759,7 @@ impl KicadPane {
     fn chose(&mut self, by: &str) {
         if self.why == ShowBy::Automatic { self.why = ShowBy::Deliberate; eprintln!("GPUI_LOG {}", json!({"kicad_auto_to_deliberate": by})); }
     }
-    fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
+    fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(mark_auto(name, params, self.why)), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
     pub fn set_info(&mut self, info: Value, cx: &mut Context<Self>) {
         if info == self.info { return }
@@ -747,6 +767,7 @@ impl KicadPane {
         // frame closed before it and not yet the one KiCad opens anew)
         // (macOS: KiCad places its own frames, nothing is mapped locally and first_placed stays unset; a frame on show is the mark there)
         let closed = closed_frame(&self.info, &info, self.wanted_kind()).filter(|_| self.first_placed.is_some() || self.shown_once || self.placed.as_ref().is_some_and(|p| p.1.is_some())).map(|k| { let next = after_close(&k, frame_for(&self.open), &info); (k, next) });
+        let kicad_closed = person_closed_kicad(&self.info, &info);
         let was_tab = self.tab(); let mut cause = String::from("hub info"); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
         if info["pid"] != self.info["pid"] { self.ever_shown.clear(); self.shown_once = false; }
         // shown once, or realized (bp.9: KiCad says the client may map it itself, e.g. a pre-warmed editor): the client's to map
@@ -799,6 +820,7 @@ impl KicadPane {
                 None => cx.emit(PaneFrameClosed(k)),
             }
         }
+        if kicad_closed { eprintln!("GPUI_LOG {}", json!({"kicad_closed_by_person": self.project})); cx.emit(PaneKicadClosed); }
         self.note_tab(&was_tab, &cause, cx);
         cx.notify();
     }
@@ -1333,7 +1355,9 @@ impl KicadPane {
         let display = std::env::var("DISPLAY").unwrap_or_default();
         let kind = self.attach_kind();
         self.pending_show = Some(kind.to_string());
-        self.rpc("editor.kicad.attach", json!({"project": self.project, "container": c, "toplevel": top, "display": display, "frame": kind, "wait": false, "theme": if self.light { "light" } else { "dark" }}));
+        let mut params = json!({"project": self.project, "container": c, "toplevel": top, "display": display, "frame": kind, "wait": false, "theme": if self.light { "light" } else { "dark" }});
+        if let Some(g) = self.generation { params["generation"] = json!(g); }
+        self.rpc("editor.kicad.attach", params);
         let weak = cx.entity().downgrade();
         window.on_frame_drawn(move |window, cx| weak.update(cx, |this, cx| this.after_frame(window, cx)).is_ok());
     }
@@ -1771,6 +1795,32 @@ mod tests {
         assert!(!pointer_over((429.0, 400.0), pane) && !pointer_over((600.0, 676.0), pane), "outside");
         assert!(!pointer_over((200.0, 900.0), pane), "the composer, left and below the pane");
         assert!(!pointer_over((0.0, 0.0), (0, 0, 0, 0)), "no rect pushed yet");
+    }
+    /// PR B: an automatic pane's attach, show and pre-warm say `auto` (the hub keeps them from counting as the person's); a deliberate
+    /// pane's never do, nor its other requests
+    #[test] fn an_automatic_panes_requests_say_auto() {
+        use super::{mark_auto, ShowBy};
+        for m in ["editor.kicad.attach", "editor.kicad.show", "editor.kicad.prewarm"] {
+            assert_eq!(mark_auto(m, json!({"project": "/p"}), ShowBy::Automatic)["auto"], true, "{m}");
+            assert!(mark_auto(m, json!({"project": "/p"}), ShowBy::Deliberate).get("auto").is_none(), "{m}");
+        }
+        assert!(mark_auto("editor.kicad.host", json!({}), ShowBy::Automatic).get("auto").is_none());
+    }
+    /// PR B: the person closing KiCad (the runtime's closedByPerson after starting or live) is told apart from an idle stop, a crash or a
+    /// detach; once closed, only the person's own Edit opens that project again
+    #[test] fn the_persons_close_is_its_own_event_and_holds_automatic_attaches_off() {
+        use super::{may_attach, person_closed_kicad, ShowBy};
+        let rt = |s: &str| json!({"runtime": {"session": s}});
+        assert!(person_closed_kicad(&rt("live"), &rt("closedByPerson")));
+        assert!(person_closed_kicad(&rt("starting"), &rt("closedByPerson")));
+        assert!(!person_closed_kicad(&rt("closedByPerson"), &rt("closedByPerson")), "said once");
+        for other in ["idleStopped", "failed", "cold"] { assert!(!person_closed_kicad(&rt("live"), &rt(other)), "{other}"); }
+        let mut closed = std::collections::HashSet::new();
+        assert!(may_attach(&closed, "/p/a.kicad_pro", ShowBy::Automatic));
+        closed.insert("/p/a.kicad_pro".to_string());
+        assert!(!may_attach(&closed, "/p/a.kicad_pro", ShowBy::Automatic));
+        assert!(may_attach(&closed, "/p/a.kicad_pro", ShowBy::Deliberate), "the person's Edit always");
+        assert!(may_attach(&closed, "/q/b.kicad_pro", ShowBy::Automatic), "another project");
     }
     #[test] fn a_repeated_attach_for_the_design_on_show_is_one_pane() {
         use super::{attach_step, ShowBy::*, AttachStep};
@@ -2365,6 +2415,12 @@ impl crate::Backplane {
             }
             return;
         }
+        // a late automatic attach or show, for a KiCad session that is gone (the hub's `stale`): the pane it made goes, nothing reopens
+        if matches!(method.as_str(), "editor.kicad.attach" | "editor.kicad.show") && reply["stale"] == true {
+            eprintln!("GPUI_LOG {}", json!({"kicad_stale": method, "generation": reply["generation"], "session": reply["session"]}));
+            if self.screens.kicad.as_ref().is_some_and(|p| p.read(cx).why == ShowBy::Automatic) { self.kicad_view(cx); }
+            return;
+        }
         if method == "editor.kicad.host" { self.screens.host_sends.borrow_mut().reply(true, std::time::Instant::now()); eprintln!("GPUI_LOG {}", json!({"kicad_host_reply": reply["applied"], "why": reply["why"], "error": reply["error"], "id": reply["id"], "at_ms": crate::screens::kcomment::epoch_ms() as u64})); }
         if method == "editor.kicad.attach" && reply["state"].is_string() {
             let mut v = reply;
@@ -2460,11 +2516,11 @@ impl crate::Backplane {
     /// click is), `why` says whether the person asked for it (`ShowBy`). `generation`: the KiCad session generation the decision was made on, for
     /// dropping a late answer (not used yet: the hub's `runtime.generation`).
     pub(crate) fn kicad_attach(&mut self, open: &str, why: ShowBy, generation: Option<u64>, cx: &mut Context<Self>) -> bool {
-        let _ = generation;
-        eprintln!("GPUI_LOG {}", json!({"kicad_attach": open, "why": format!("{why:?}")}));
-        self.kicad_open(Some(open), why, cx)
+        eprintln!("GPUI_LOG {}", json!({"kicad_attach": open, "why": format!("{why:?}"), "generation": generation}));
+        self.kicad_open_at(Some(open), why, generation, cx)
     }
-    fn kicad_open(&mut self, page_asked: Option<&str>, why: ShowBy, cx: &mut Context<Self>) -> bool {
+    fn kicad_open(&mut self, page_asked: Option<&str>, why: ShowBy, cx: &mut Context<Self>) -> bool { self.kicad_open_at(page_asked, why, None, cx) }
+    fn kicad_open_at(&mut self, page_asked: Option<&str>, why: ShowBy, generation: Option<u64>, cx: &mut Context<Self>) -> bool {
         // #1347: KiCad opens over a design page only. From a page with no editor of its own (a context menu's, the boards menu's, a
         // script's, a kept Edit), the design page whose document the project has first, as Simulation and GerbView do; neither: said
         // where the person is (Files' status line) and no KiCad. The Simulator's own page is the Schematic its caller pressed.
@@ -2504,6 +2560,12 @@ impl crate::Backplane {
             return false
         };
         *EDIT_PENDING.lock().unwrap() = None;
+        // the person closed this project's KiCad, or its editor: an automatic attach leaves it closed; their own Edit opens it again
+        if !may_attach(&self.screens.kicad_closed, &project, why) {
+            eprintln!("GPUI_LOG {}", json!({"kicad_attach": "refused", "why": "closed by the person", "project": project}));
+            return false
+        }
+        if why == ShowBy::Deliberate { self.screens.kicad_closed.remove(&project); }
         // the rail's Simulation asked for this Edit: the pane opens on the Simulator
         let sim = EDIT_TAB.lock().unwrap().take().is_some_and(|k| k == SIM);
         let open_now = viewer["open"].as_str().unwrap_or("");
@@ -2528,13 +2590,16 @@ impl crate::Backplane {
         }
         let (hub, infos, hub_open, sends) = (self.tx.clone(), self.screens.kicad_infos.clone(), open_now.to_string(), self.screens.host_sends.clone());
         self.host_retry_watch(cx);
-        let page = cx.new(move |cx| { let mut p = KicadPane::new(cx, project, root, pid, open, hub_open, hub, why); p.host_sends = sends; if let Some(v) = infos.values().find(|v| p.matches(v)).cloned() { p.info = v; } if sim { p.override_kind = Some(SIM.into()); } p });
+        let closed_key = project.clone();
+        let page = cx.new(move |cx| { let mut p = KicadPane::new(cx, project, root, pid, open, hub_open, hub, why); p.host_sends = sends; p.generation = generation; if let Some(v) = infos.values().find(|v| p.matches(v)).cloned() { p.info = v; } if sim { p.override_kind = Some(SIM.into()); } p });
         // the warm hand-over's end: the page drawn again without the viewer's picture under the pane
         cx.subscribe(&page, |_, _, _: &PaneShown, cx| cx.notify()).detach();
         // the pane's wanted frame changed (strip click, Ctrl+Tab, KiCad's active frame): repaint the rail without calling back into show_kind
         cx.subscribe(&page, |_, _, _: &PaneTab, cx| on_pane_tab(|| cx.notify())).detach();
         // the editor's frame closed in KiCad (Ctrl+W, File > Close): back to View, Edit there again (a fresh frame on the next Edit)
-        cx.subscribe(&page, |this, _, _: &PaneFrameClosed, cx| this.kicad_view(cx)).detach();
+        { let k = closed_key.clone(); cx.subscribe(&page, move |this, _, _: &PaneFrameClosed, cx| { this.screens.kicad_closed.insert(k.clone()); this.kicad_view(cx) }).detach(); }
+        // the person closed KiCad itself (Close, or KiCad's quit): the viewer, and no automatic attach until their own Edit
+        { let k = closed_key; cx.subscribe(&page, move |this, _, _: &PaneKicadClosed, cx| { this.screens.kicad_closed.insert(k.clone()); this.kicad_view(cx) }).detach(); }
         cx.subscribe(&page, |this, _, e: &PaneKey, cx| {
             if e.0 == "ctrl-;" || e.0 == ";" { this.kcomment_open(None, cx); return }
             // the pane's "Open the KiCad app instead" (the editor could not be here): back to the viewer, and the hub starts KiCad on what it shows
