@@ -59,6 +59,7 @@ export class RailView {
   private items: RailEntry[] = [];
   private activeId = "";
   private onPress: (id: string) => void;
+  private pagesRo: ResizeObserver | null = null;
 
   constructor(container: HTMLElement, onPress: (id: string) => void) {
     this.el = container;
@@ -125,6 +126,21 @@ export class RailView {
       prevGroup = item.group;
       pagesWrap.appendChild(this.renderButton(item));
     }
+
+    const syncFade = (): void => {
+      const canLeft = pagesWrap.scrollLeft > 2;
+      const canRight = pagesWrap.scrollLeft + pagesWrap.clientWidth < pagesWrap.scrollWidth - 2;
+      pagesWrap.classList.toggle("bp-fade-left", canLeft);
+      pagesWrap.classList.toggle("bp-fade-right", canRight);
+    };
+    pagesWrap.addEventListener("scroll", syncFade, { passive: true });
+    this.pagesRo?.disconnect();
+    this.pagesRo = null;
+    if (typeof ResizeObserver !== "undefined") {
+      this.pagesRo = new ResizeObserver(syncFade);
+      this.pagesRo.observe(pagesWrap);
+    }
+    requestAnimationFrame(syncFade);
 
     const frag = document.createDocumentFragment();
     frag.appendChild(pagesWrap);

@@ -342,6 +342,7 @@ button.primary.stop {
 .bp-center {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg);
@@ -761,6 +762,103 @@ html.light .bp-code-block { background: var(--panel); }
 .bp-set-info { min-width: 0; }
 .bp-set-btns { display: flex; gap: 6px; flex-shrink: 0; }
 
+/* ---- Command Palette (matches GPUI native/gpui/src/screens/palette.rs) ---- */
+.bp-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 90px 16px 24px;
+  z-index: 60;
+}
+.bp-palette-box {
+  width: 560px;
+  max-width: 100%;
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  overflow: hidden;
+  font-size: 13px;
+}
+.bp-palette-input-wrap {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.bp-palette-input {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  padding: 2px 0;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+.bp-palette-input:focus { border: 0; outline: none; }
+.bp-palette-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+}
+.bp-palette-empty {
+  padding: 10px 12px;
+  color: var(--faint);
+  font-size: 12px;
+}
+.bp-palette-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 12px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+}
+.bp-palette-row:hover,
+.bp-palette-row.active {
+  background: var(--raise);
+}
+.bp-palette-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bp-palette-msg { color: var(--dim); }
+.bp-palette-mark { color: var(--text); font-weight: 700; }
+.bp-palette-want {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--bad);
+}
+.bp-palette-want.dim { color: var(--dim); }
+.bp-palette-key {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+}
+.bp-palette-place {
+  flex-shrink: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--faint);
+}
+
 /* ---- Responsive: Tablet (<= 900px) & Phone (<= 600px) ---- */
 @media (max-width: 960px) {
   .bp-hide-tablet { display: none !important; }
@@ -783,11 +881,13 @@ html.light .bp-code-block { background: var(--panel); }
   .bp-topbar { gap: 8px; padding: 0 8px; }
   .bp-brand { flex: 1; min-width: 0; }
   .bp-crumb-thread { max-width: none; }
-  .bp-timeline-scroll { padding: 12px 12px 8px; }
+  .bp-timeline-scroll { padding: 12px 12px 16px; }
   .bp-composer { padding: 8px 12px 10px; }
   .bp-entry-user { max-width: 88%; }
+  .bp-palette-backdrop { padding: 48px 10px 16px; }
+  .bp-palette-place { max-width: 110px; }
 
-  /* Phone layout: Android-style bottom tab bar with clean independent scroll and zero overlap */
+  /* Phone layout: Android-style bottom tab bar with clean independent scroll and edge fade */
   .bp-body { flex-direction: column; }
   .bp-rail {
     width: 100%;
@@ -807,6 +907,18 @@ html.light .bp-code-block { background: var(--panel); }
     -ms-overflow-style: none;
     flex: 1 1 auto;
     min-width: 0;
+  }
+  .bp-rail-pages.bp-fade-right {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent 100%);
+    mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent 100%);
+  }
+  .bp-rail-pages.bp-fade-left {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 18px);
+    mask-image: linear-gradient(to right, transparent 0, #000 18px);
+  }
+  .bp-rail-pages.bp-fade-left.bp-fade-right {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 18px, #000 calc(100% - 22px), transparent 100%);
+    mask-image: linear-gradient(to right, transparent 0, #000 18px, #000 calc(100% - 22px), transparent 100%);
   }
   .bp-rail-pages::-webkit-scrollbar { display: none; }
   .bp-rail-tools {

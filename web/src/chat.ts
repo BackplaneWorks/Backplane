@@ -120,6 +120,7 @@ export class ChatView {
   private btwNote: { q: string; a: string } | null = null;
   private liveNodes = new Map<string, HTMLElement>();
   private imageCache = new Map<string, string>();
+  private pinnedToBottom = true;
 
   constructor(container: HTMLElement, cb: ChatCallbacks) {
     this.cb = cb;
@@ -144,12 +145,27 @@ export class ChatView {
     });
 
     // Load older messages automatically on scroll near top (matching desktop paging)
+    // and track whether the viewport is pinned to the latest message so resizes
+    // (e.g. narrow 390px layout or composer wrap) never clip the last entry under the composer.
     this.scrollEl.addEventListener("scroll", () => {
+      this.pinnedToBottom = this.isNearBottom();
       if (this.hasMore && !this.loadingOlder && this.scrollEl.scrollTop < 48) {
         this.loadingOlder = true;
         this.cb.onLoadOlder();
       }
     });
+
+    if (typeof ResizeObserver !== "undefined") {
+      let lastHeight = 0;
+      const ro = new ResizeObserver(() => {
+        const h = this.scrollEl.clientHeight;
+        if (lastHeight > 0 && h !== lastHeight && this.pinnedToBottom) {
+          this.scrollToBottom();
+        }
+        lastHeight = h;
+      });
+      ro.observe(this.scrollEl);
+    }
 
     this.listEl = document.createElement("div");
     this.listEl.className = "bp-timeline-list";
@@ -268,7 +284,7 @@ export class ChatView {
 
   public upsertEntry(entry: EntryItem): void {
     if (isHiddenSystemNote(entry)) return;
-    const atBottom = this.isNearBottom();
+    const atBottom = this.isNearBottom() || (entry.kind === "user" && Boolean(entry.clientId));
     let idx = this.entries.findIndex((e) => e.id === entry.id);
     if (idx < 0 && entry.clientId) {
       idx = this.entries.findIndex((e) => e.clientId && e.clientId === entry.clientId);
@@ -312,6 +328,7 @@ export class ChatView {
   }
 
   private scrollToBottom(): void {
+    this.pinnedToBottom = true;
     this.scrollEl.scrollTop = this.scrollEl.scrollHeight;
   }
 
