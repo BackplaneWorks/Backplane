@@ -15,6 +15,9 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/lib/env_xvfb.sh"
 [ "$EMBED_MODE" = "fork" ] || { echo "embed_close_loop: fork only"; exit 0; }
 CYCLES=${CYCLES:-30}
+# a slow KiCad (under valgrind): CLOSE_SLOW=1 gives each step minutes, not seconds
+if [ "${CLOSE_SLOW:-0}" = 1 ]; then READY_TRIES=7200; PAINT_MS=1500000; EXIT_TRIES=2400; CLIENT_S=3000; export BACKPLANE_KICAD_START_WINDOW_S=1500
+else READY_TRIES=600; PAINT_MS=120000; EXIT_TRIES=240; CLIENT_S=400; fi
 # CLOSE_CORES=1: core dumps allowed for KiCad (apport keeps them in /var/lib/apport/coredump), for a backtrace of a crash
 [ "${CLOSE_CORES:-0}" = 1 ] && ulimit -c unlimited
 discover_bins
@@ -31,8 +34,9 @@ for _ in $(seq 60); do hub_rpc "[]" >/dev/null 2>&1 && break; sleep 0.5; done
 
 cat >"$OUT/script.json" <<'JSON'
 [{"select":0},{"wait":1500},{"click":"rail:Board"},{"wait":1500},{"click":"ui:Edit"},
- {"kicad":{"wait_painted":120000,"kind":"PCB","tag":"up"}},{"wait":4000},{"kicad":{"report":true,"tag":"ready"}},{"mark":"ready"},{"wait":600000}]
+ {"kicad":{"wait_painted":PAINT_MS,"kind":"PCB","tag":"up"}},{"wait":4000},{"kicad":{"report":true,"tag":"ready"}},{"mark":"ready"},{"wait":600000}]
 JSON
+sed -i "s/PAINT_MS/$PAINT_MS/" "$OUT/script.json"
 info_now() { hub_rpc "[]" | grep '^INFO ' | grep '"key":"editor.kicad.' | tail -1 | cut -c6- | python3 -c 'import json,sys
 try: v=json.load(sys.stdin).get("value") or {}; print(v.get("state","-"), len(v.get("frames") or []), (v.get("runtime") or {}).get("session","-"))
 except Exception: print("- 0 -")' 2>/dev/null || echo "- 0 -"; }
@@ -48,9 +52,9 @@ for i in $(seq "$CYCLES"); do
   N0=$(wc -l <"$OUT/hub.log")
   CLOG="$OUT/client-$i.log"
   HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" \
-    --script "$OUT/script.json" --exit-after 400 >"$CLOG" 2>&1 &
+    --script "$OUT/script.json" --exit-after "$CLIENT_S" >"$CLOG" 2>&1 &
   CP=$!; track_pid "$CP"
-  if ! wait_for_log "$CLOG" '"name":"ready","event":"mark"' 600; then
+  if ! wait_for_log "$CLOG" '"name":"ready","event":"mark"' "$READY_TRIES"; then
     echo "cycle $i: KiCad never came up ($(info_now))"; OTHER=$((OTHER + 1)); kill "$CP" 2>/dev/null; wait "$CP" 2>/dev/null; continue
   fi
   R=$(last_kicad_report "$CLOG" ready)
@@ -69,7 +73,7 @@ for i in $(seq "$CYCLES"); do
     sleep 1
   done
   fi
-  for _ in $(seq 240); do [ "$KPID" -gt 0 ] && kill -0 "$KPID" 2>/dev/null || break; sleep 0.25; done
+  for _ in $(seq "$EXIT_TRIES"); do [ "$KPID" -gt 0 ] && kill -0 "$KPID" 2>/dev/null || break; sleep 0.25; done
   sleep 1.5
   ENDED=$(tail -n +"$((N0 + 1))" "$OUT/hub.log" | grep -m1 -E " ended (while closing |after its close )?\(" || true)
   if [ -n "$ENDED" ] && echo "$ENDED" | grep -q "after its close (signal 9"; then
