@@ -26,9 +26,14 @@ fn icon_button(light: bool, id: &'static str, name: &'static str, on: bool) -> S
 
 /// (the tab strip, the toolbar).
 pub fn render<T: 'static>(i: In, cx: &mut Context<T>, on: fn(&mut T, Act, &mut Window, &mut Context<T>), key: fn(&mut T, &KeyDownEvent, &mut Window, &mut Context<T>)) -> (AnyElement, AnyElement) {
-    let light = i.light; let c = |n: &str| theme::color(light, n);
+    let strip = tab_strip(i.light, i.tabs, cx, on);
+    (strip, navigation(i, cx, on, key))
+}
+
+fn tab_strip<T: 'static>(light: bool, tabs: &[TabView], cx: &mut Context<T>, on: fn(&mut T, Act, &mut Window, &mut Context<T>)) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
     let mut strip = div().h(crate::scale::tpx(32.)).flex().flex_row().items_end().bg(c("panel")).border_b_1().border_color(c("line")).text_size(crate::scale::tpx(12.)).px_1().gap_px().overflow_hidden();
-    for (n, t) in i.tabs.iter().enumerate() {
+    for (n, t) in tabs.iter().enumerate() {
         let (sel, close, active) = (t.id.clone(), t.id.clone(), t.active);
         strip = strip.child(div().h(crate::scale::tpx(28.)).min_w(px(96.)).max_w(px(200.)).flex().flex_row().items_center().gap_1().pl_3().pr_1()
             .border_1().border_b_0().border_color(c(if active { "line" } else { "panel" })).bg(c(if active { "bg" } else { "panel" })).text_color(c(if active { "text" } else { "dim" }))
@@ -39,6 +44,11 @@ pub fn render<T: 'static>(i: In, cx: &mut Context<T>, on: fn(&mut T, Act, &mut W
     }
     strip = strip.child(div().id("br-new").w(px(28.)).h(px(28.)).flex().items_center().justify_center().cursor_pointer().hover(|s| s.bg(c("raise"))).child(art::icon("plus", 14., c("text")))
         .on_click(cx.listener(move |this, _, w, cx| on(this, Act::NewTab, w, cx))));
+    strip.into_any_element()
+}
+
+pub fn navigation<T: 'static>(i: In, cx: &mut Context<T>, on: fn(&mut T, Act, &mut Window, &mut Context<T>), key: fn(&mut T, &KeyDownEvent, &mut Window, &mut Context<T>)) -> AnyElement {
+    let light = i.light; let c = |n: &str| theme::color(light, n);
     let border = if i.focused { c("accent") } else { c("line") };
     let shown = if i.value.is_empty() { crate::i18n::trs("Search or enter address") } else { i.value.clone() };
     let bar = div().h(crate::scale::tpx(40.)).flex().flex_row().items_center().gap_1().px_2().bg(c("bg")).border_b_1().border_color(c("line"))
@@ -53,7 +63,7 @@ pub fn render<T: 'static>(i: In, cx: &mut Context<T>, on: fn(&mut T, Act, &mut W
             .child(div().flex_1().overflow_hidden().text_color(c(if i.value.is_empty() { "dim" } else { "text" })).child(format!("{}{}", shown, if i.focused { "▏" } else { "" }))))
         .when(i.taken, |d| d.child(div().id("br-hand").h(crate::scale::tpx(28.)).px_3().flex().items_center().cursor_pointer().bg(c("accent")).text_color(c("on-accent")).text_size(crate::scale::tpx(12.)).child(crate::i18n::trs("Hand back"))
             .on_click(cx.listener(move |this, _, w, cx| on(this, Act::HandBack, w, cx)))));
-    (strip.into_any_element(), bar.into_any_element())
+    bar.into_any_element()
 }
 
 #[cfg(test)]

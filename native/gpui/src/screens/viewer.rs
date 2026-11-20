@@ -151,12 +151,19 @@ fn btn(cx: &mut Context<Backplane>, light: bool, id: String, label: String, on: 
 }
 
 /// Mech: a chip per part over the part's 3D; the bar stays on the header's line, and empty/loading states sit centred in the pane body below it.
+fn mech_controls(viewer: &Value) -> (impl Iterator<Item = (String, bool, Command)>, Command) {
+    let parts = mech_parts(viewer).into_iter().map(|part| {
+        (part.label, part.on, Command::Action("mech-part".into(), part.value))
+    });
+    (parts, Command::Action("mech-refresh".into(), String::new()))
+}
+
 fn mech_chrome(cx: &mut Context<Backplane>, light: bool, viewer: &Value, actions: AnyElement) -> AnyElement {
-    let parts = mech_parts(viewer);
+    let (parts, refresh) = mech_controls(viewer);
     let mut row = div().flex().flex_wrap().items_center().gap_2();
-    for (i, p) in parts.iter().enumerate() { row = row.child(btn(cx, light, format!("mech-part-{i}"), p.label.clone(), p.on, Command::Action("mech-part".into(), p.value.clone()))); }
+    for (i, (label, on, pick)) in parts.enumerate() { row = row.child(btn(cx, light, format!("mech-part-{i}"), label, on, pick)); }
     // (no Renders button: the renders page is not drawn here yet, and an offered button must lead somewhere)
-    row = row.child(btn(cx, light, "mech-refresh".into(), trs("Refresh"), false, Command::Action("mech-refresh".into(), String::new())));
+    row = row.child(btn(cx, light, "mech-refresh".into(), trs("Refresh"), false, refresh));
     // the bar: the parts, the pane's controls at the end of its first line (the parts wrap under them)
     bar_wrap(light).flex_nowrap().items_start().child(div().flex_1().min_w_0().child(row)).child(actions).into_any_element()
 }
