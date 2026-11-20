@@ -30,6 +30,8 @@ pub fn opening_of(info: &Value) -> Option<(String, u64, bool)> {
     let o = &info["opening"];
     Some((o["kind"].as_str()?.to_string(), o["since_ms"].as_u64().unwrap_or(0), o["failed"].as_bool().unwrap_or(false)))
 }
+/// Whether the opening is drawn now: the hub publishes it unsaid while KiCad is unresponsive (still there for the person's choice).
+pub fn opening_said(info: &Value) -> bool { info["opening"]["said"].as_bool().unwrap_or(true) }
 /// How long an opening goes unsaid: a quick open (macOS ~0.14 s, a warm second Ctrl+E) never flashes the strip.
 pub const OPENING_DWELL_MS: u64 = 400;
 /// What the strip does with library editor `kind`'s tab and its text, `ms` after its opening began (`failed`: KiCad said nothing for 30 s),
@@ -2101,6 +2103,8 @@ mod tests {
         assert_eq!(opening_tab("SYMBOL_EDITOR", "SCH", None, 12_000), Normal);
         assert_eq!(super::opening_of(&serde_json::json!({"opening": {"kind": "FOOTPRINT_EDITOR", "since_ms": 5, "failed": false}})), Some(("FOOTPRINT_EDITOR".into(), 5, false)));
         assert_eq!(super::opening_of(&serde_json::json!({"opening": null})), None);
+        assert!(!super::opening_said(&serde_json::json!({"opening": {"kind": "SYMBOL_EDITOR", "since_ms": 5, "said": false}})), "unsaid while KiCad is unresponsive");
+        assert!(super::opening_of(&serde_json::json!({"opening": {"kind": "SYMBOL_EDITOR", "since_ms": 5, "said": false}})).is_some(), "but there: the person's choice is still sent");
     }
     #[test] fn a_show_waits_only_when_the_hub_is_on_another_frame() {
         assert_eq!(super::pending_for(Some("PCB"), "PCB"), None, "the hub is on the board already: nothing to wait for (#1389 fp1: the wait never cleared)");
@@ -3176,7 +3180,8 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
     let shown = strip_tabs(&at, &have);
     // a library editor KiCad is opening (Ctrl+E, its libraries loading): after a short dwell, its tab is a placeholder that is never
     // selected, and the text beside the tabs says what KiCad is doing
-    let opening = if pane.read(cx).info["state"] == "ready" { opening_of(&pane.read(cx).info) } else { None };
+    // drawn only when said (KiCad ready) and not once its own tab is the one on show
+    let opening = if pane.read(cx).info["state"] == "ready" && opening_said(&pane.read(cx).info) { opening_of(&pane.read(cx).info).filter(|(k, _, _)| *k != at) } else { None };
     let now_ms = crate::screens::kcomment::epoch_ms() as u64;
     // the seconds count on: one redraw timer at a time, however often the strip is drawn meanwhile
     let timer = pane.read(cx).opening_timer.clone();
@@ -3188,6 +3193,9 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
         match opening_tab(kind, &at, opening.as_ref(), now_ms) {
             OpeningTab::Normal => {}
             OpeningTab::Hidden => continue,
+            // a narrow pane (under 520 px) has no room for a tab more: the placeholder would push Pop out past the pane's edge (380 px:
+            // 36 px out); the text beside the tabs says it, or nothing does
+            OpeningTab::Placeholder if narrow => continue,
             OpeningTab::Placeholder => {
                 row = row.child(crate::ui::with_rect(div().id(SharedString::from(format!("kicad-tab-{kind}"))), { let k = kind.to_string(); move || format!("kicad-opening:{k}") }).when(narrow, |d| d.px_1()).when(!narrow, |d| d.px_2()).py(px(3.)).text_size(crate::scale::tpx(12.))
                     .text_color(c("dim")).opacity(0.6).flex().items_center().gap_1()

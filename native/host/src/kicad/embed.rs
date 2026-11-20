@@ -139,6 +139,9 @@ pub const LIB_FRESH: Duration = Duration::from_secs(2);
 /// Whether the session's `opening` is said now: the same KiCad, and ready (an unresponsive one, two pings missed during a long library load,
 /// keeps it, unsaid). The hub's `active` is not asked: a tab the client maps itself never reaches the hub, so it may lag. Pure.
 pub fn opening_current(o: &Opening, pid: u32, state: &str) -> bool { o.pid == pid && state == "ready" }
+/// Whether the session's `opening` is published: the same KiCad, live (an unresponsive one's too, marked unsaid, so the client still
+/// sends the person's choice made meanwhile). Pure.
+pub fn opening_published(o: &Opening, pid: u32, live: bool) -> bool { o.pid == pid && live }
 /// Whether the session's `opening` is over: another KiCad (a restart) or one no longer live (stopped, failed). Pure.
 pub fn opening_over(o: &Opening, pid: u32, live: bool) -> bool { o.pid != pid || !live }
 
@@ -153,7 +156,8 @@ pub const OPENING_SILENT: Duration = Duration::from_secs(30);
 pub const OPENING_SAID: Duration = Duration::from_secs(6);
 impl Opening {
     pub fn new(kind: &str, pid: u32, now: std::time::Instant) -> Self { Opening { kind: kind.into(), pid, since_ms: ipc::now_ms() as u64, last: now, person_switched: false, failed_at: None } }
-    pub fn json(&self) -> Value { json!({"kind": self.kind, "since_ms": self.since_ms, "failed": self.failed_at.is_some()}) }
+    /// `said`: drawn in the strip (KiCad ready); unsaid while it is unresponsive, but still there for the person's choice
+    pub fn json(&self, said: bool) -> Value { json!({"kind": self.kind, "since_ms": self.since_ms, "failed": self.failed_at.is_some(), "said": said}) }
 }
 /// What the hub's tick does with an `Opening`. Pure.
 #[derive(Debug, PartialEq, Eq)]
@@ -304,7 +308,7 @@ impl Session {
             "runtime": runtime_picture_of(&self.pro),
             "task_wait": self.task_wait,
             // a library editor KiCad is opening (its editor request not come yet): the pane's strip says so
-            "opening": self.opening.as_ref().filter(|o| opening_current(o, self.pid, &self.state)).map(Opening::json),
+            "opening": self.opening.as_ref().filter(|o| opening_published(o, self.pid, self.is_live())).map(|o| o.json(opening_current(o, self.pid, &self.state))),
             "start_phase": self.start_phase, "start_at": self.start_at, "lock_ask": self.lock_ask,
             // what the embedded editor can do beyond the basics (embed-gerbview, embed-editor-requested, ...): the client gates on these
             "embed_caps": self.caps.iter().filter(|c| c.starts_with("embed-") || c.starts_with("prewarm-") || *c == SIM_FRAME).collect::<Vec<_>>(),
@@ -2738,7 +2742,10 @@ impl Actor {
                 }
             }
             Msg::ForkShowRequested { pro, gen, kind, item, editor, actor } => {
-                let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.state == "ready") else { return };
+                // (an unresponsive KiCad's editor request for the editor it is opening is taken too: it comes right after a blocking library
+                // load, before the next ping is answered; dropped, the strip went on saying "Opening…", then "did not open")
+                let opening_req = editor && self.sessions.get(&pro).is_some_and(|s| s.state == "unresponsive" && s.opening.as_ref().is_some_and(|o| o.kind == canon_frame(&kind)));
+                let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && (s.state == "ready" || opening_req)) else { return };
                 // a library editor is shown on KiCad's ET_EDITOR_REQUESTED (embedded, on its item), never on the ET_SHOW_REQUESTED KiCad sends
                 // before it (three of them on Ctrl+E: showing then floated a 900x720 top-level over the pane for ~0.8 s)
                 // embed-request-actor (bp.13 after batch 4): the request says which API client caused it, "" for the person or KiCad itself:
@@ -4938,12 +4945,31 @@ mod tests {
         a.sessions.get_mut(&pro).unwrap().state = "unresponsive".into();
         a.handle(Msg::Tick);
         assert_eq!(opening(&a).map(|o| o.person_switched), Some(true), "an unresponsive KiCad keeps the opening and the person's choice");
-        assert!(a.sessions[&pro].info_json()["opening"].is_null(), "unsaid while unresponsive");
+        assert_eq!(a.sessions[&pro].info_json()["opening"]["said"], false, "unsaid while unresponsive (published for the person's choice)");
         a.sessions.get_mut(&pro).unwrap().state = "ready".into();
-        assert_eq!(a.sessions[&pro].info_json()["opening"]["kind"], "SYMBOL_EDITOR", "said again once ready");
+        assert_eq!(a.sessions[&pro].info_json()["opening"]["said"], true, "said again once ready");
         a.sessions.get_mut(&pro).unwrap().state = "stopped".into();
         a.handle(Msg::Tick);
         assert!(opening(&a).is_none(), "a stopped KiCad's opening is over");
+
+        // the delta review's A and B: while KiCad is unresponsive (a blocking library load), the opening is published unsaid (so the client
+        // sends the person's choice), the choice counts, and the editor request is taken (not dropped with the opening kept)
+        { let s = a.sessions.get_mut(&pro).unwrap(); s.state = "ready".into(); s.active = "SCH".into(); s.editor_req = Default::default(); }
+        a.handle(opened("SYMBOL_EDITOR")); a.handle(req("FK_SYMBOL_EDITOR", false, ""));
+        a.sessions.get_mut(&pro).unwrap().state = "unresponsive".into();
+        assert_eq!(info(&a)["said"], false, "published, unsaid, while unresponsive");
+        a.handle(Msg::PersonChose { pro: pro.clone(), frame: "PCB".into() });
+        assert_eq!(opening(&a).map(|o| o.person_switched), Some(true), "a choice made while unresponsive counts");
+        a.handle(req("FK_SYMBOL_EDITOR", true, ""));
+        assert!(opening(&a).is_none(), "the editor request while unresponsive is taken: the opening ends");
+        assert_eq!(a.sessions[&pro].active, "SCH", "and the person's choice stands");
+        // and without a choice, an editor request while unresponsive puts it on show
+        { let s = a.sessions.get_mut(&pro).unwrap(); s.state = "ready".into(); s.editor_req = Default::default(); }
+        a.handle(opened("FOOTPRINT_EDITOR")); a.handle(req("FK_FOOTPRINT_EDITOR", false, ""));
+        a.sessions.get_mut(&pro).unwrap().state = "unresponsive".into();
+        a.handle(req("FK_FOOTPRINT_EDITOR", true, ""));
+        assert!(opening(&a).is_none());
+        assert_eq!(a.sessions[&pro].active, "FOOTPRINT_EDITOR", "put on show though a ping was missed");
     }
 
     #[test] fn a_shown_project_is_kept_warm_within_the_cap_memory_and_locks() {
