@@ -196,7 +196,15 @@ impl Session {
     /// it was ready its start failed: the reason is an error line of its output, never start-up noise (Fontconfig, GTK, GLib, Mesa).
     pub fn exited(self, code: i32, tail: &str) -> Self { self.exited_how(code, "", tail) }
     pub fn exited_how(self, code: i32, how: &str, tail: &str) -> Self {
-        if self.closing { return self.stopped("") }
+        // a close the hub asked for: stopped, as asked. How KiCad ended is still logged when it was not a clean exit (a crash on its way
+        // out was silent: bp.13.3 row 1m counts them)
+        if self.closing {
+            if code != 0 || !how.is_empty() {
+                let how = if how.is_empty() { format!("code {code}") } else { how.to_string() };
+                eprintln!("kicad embed: {} ended while closing ({how}); its last output:\n{}", self.pro, tail.trim_end());
+            }
+            return self.stopped("")
+        }
         // KiCad quit by itself (its window closed, its own File > Exit): said, so the pane and a later request never read "stopped ()"; a
         // close the hub was asked for (stop_reason set by `close`) keeps its reason
         if code == 0 && how.is_empty() { let mut s = self; if s.stop_reason.is_empty() { s.stop_reason = "kicadQuit".into(); } return s.stopped("KiCad was closed") }
