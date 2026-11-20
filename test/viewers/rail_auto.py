@@ -48,13 +48,14 @@ def build_auto_steps(settle_timeout_ms: int = 15000) -> list[dict]:
         {"keys": "ctrl-l"},
         {"wait": 400},
         {"read": "composer"},
-        # a: Automatic attach, typing before / during the cold start / after the frame appears
-        {"mark": "auto:a:pre"},
-        {"shot": "auto-act-type-pre", "settle": "", "timeout_ms": tmo},
-        {"read": "composer"},
+        # a: the Automatic attach is asked at once (KiCad is still starting from the thread's warm-up), and the marker is typed while it
+        # starts (pre), while the frame comes on show (mid) and after it is up (post)
         {"mark": "auto:a:attach"},
         {"press": "rail:Board"},
         {"kicad": {"attach": "board", "why": "auto", "tag": "auto-a-attach"}},
+        {"mark": "auto:a:pre"},
+        {"shot": "auto-act-type-pre", "settle": "", "timeout_ms": tmo},
+        {"read": "composer"},
         {"mark": "auto:a:mid"},
         {"shot": "auto-act-type-mid", "settle": "", "timeout_ms": tmo},
         {"read": "composer"},
@@ -314,14 +315,15 @@ def _gate_a(name, marks, kt, logs, comp, caps, actions, parsed, cleared) -> dict
     if taken or flips:
         fails.append(f"the client says KiCad took the keyboard ({[list(x['obj'])[0] for x in taken + flips]})")
     # the cold start was really typed through
-    starting = [lg for lg in _logs_between(logs, marks.get("auto:a:attach"), marks.get("auto:a:painted"), "kicad_info") if lg["obj"].get("state") == "starting"]
+    # the attach was asked while KiCad was starting and the first marker was typed before it was ready
+    starting = [lg for lg in _logs_between(logs, marks.get("auto:a:attach"), marks.get("auto:a:mid"), "kicad_info") if lg["obj"].get("state") == "starting"]
     ev = {"composer": {"start": start, "pre": r_pre, "mid": r_mid, "post": r_post}, "report": {k: rep.get(k) for k in ("ok", "in_gpui_tree", "shown", "keys", "holder", "pid", "state")},
           "hub_runtime": rt, "rail_lit": lit, "cold_start_observed": bool(starting),
           "holder_is_this_client": "inferred: the single GPUI client of the run is the only possible holder (the client's own connection id has no observable)"}
     if fails:
         return _rec(gid, name, "failed", "; ".join(fails), ev)
     if not starting:
-        return _rec(gid, name, "unavailable", "the keyboard stayed with the composer, but no KiCad `starting` state was observed between the attach and the frame: the 'during the cold start' typing is not proven", ev)
+        return _rec(gid, name, "unavailable", "the keyboard stayed with the composer, but no KiCad `starting` state was observed between the attach and the frame: the typing while KiCad starts is not proven (KiCad was already up when the attach was asked)", ev)
     return _rec(gid, name, "passed", "", ev)
 
 
