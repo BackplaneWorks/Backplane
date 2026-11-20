@@ -1,47 +1,49 @@
 import Foundation
 import SwiftUI
-import Compression
+import zlib
 import CryptoKit
 import UIKit
 import UserNotifications
 
-/// Per-socket RFC 1951 raw DEFLATE stream decoder (Apple Compression `COMPRESSION_ZLIB` is raw deflate).
+/// Per-socket RFC 1951 raw DEFLATE stream decoder (`zlib` with windowBits = -15 and `Z_SYNC_FLUSH`).
 private final class RawInflater {
-    private var stream: compression_stream
+    private var stream = z_stream()
     private var active = false
     init?() {
-        var s = compression_stream(dst_ptr: UnsafeMutablePointer<UInt8>.allocate(capacity: 1), dst_size: 0, src_ptr: UnsafePointer<UInt8>(bitPattern: 1)!, src_size: 0, state: nil)
-        s.dst_ptr.deallocate()
-        guard compression_stream_init(&s, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB) == COMPRESSION_STATUS_OK else { return nil }
-        self.stream = s
+        guard inflateInit2_(&stream, -15, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size)) == Z_OK else { return nil }
         self.active = true
     }
     deinit {
-        if active { compression_stream_destroy(&stream) }
+        if active { inflateEnd(&stream) }
     }
     func feed(_ data: Data, maxBytes: Int = 16 << 20) throws -> Data {
         guard active else { throw DError(code: "DEFLATE", message: "Stream closed") }
         var out = Data()
         out.reserveCapacity(min(data.count * 3, maxBytes))
         let chunkCap = 16384
-        let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: chunkCap)
-        defer { buf.deallocate() }
+        var buf = [UInt8](repeating: 0, count: chunkCap)
         try data.withUnsafeBytes { raw in
             guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
-            stream.src_ptr = base
-            stream.src_size = data.count
+            stream.next_in = UnsafeMutablePointer(mutating: base)
+            stream.avail_in = uInt(data.count)
             while true {
-                stream.dst_ptr = buf
-                stream.dst_size = chunkCap
-                let st = compression_stream_process(&stream, 0)
-                let produced = chunkCap - stream.dst_size
+                let st: Int32 = buf.withUnsafeMutableBufferPointer { dst in
+                    stream.next_out = dst.baseAddress
+                    stream.avail_out = uInt(chunkCap)
+                    return inflate(&stream, Z_SYNC_FLUSH)
+                }
+                let produced = chunkCap - Int(stream.avail_out)
                 if produced > 0 {
                     if out.count + produced > maxBytes { throw DError(code: "DEFLATE", message: "Inflated frame exceeds limit") }
-                    out.append(buf, count: produced)
+                    out.append(contentsOf: buf[0..<produced])
                 }
-                if st == COMPRESSION_STATUS_ERROR { throw DError(code: "DEFLATE", message: "Corrupt deflate frame") }
-                if st == COMPRESSION_STATUS_END { break }
-                if stream.src_size == 0 && produced < chunkCap { break }
+                if st == Z_DATA_ERROR || st == Z_MEM_ERROR || st == Z_NEED_DICT || st == Z_STREAM_ERROR {
+                    throw DError(code: "DEFLATE", message: "Corrupt deflate frame (\(st))")
+                }
+                if st == Z_STREAM_END {
+                    throw DError(code: "DEFLATE", message: "Unexpected deflate stream end")
+                }
+                if stream.avail_in == 0 && produced < chunkCap { break }
             }
         }
         return out

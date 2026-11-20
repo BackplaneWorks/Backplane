@@ -179,22 +179,12 @@ export class HubClient {
             ws.close();
             return;
           }
-          // Binary CBOR plot frame (header 0xA0..0xB7, 0x01, 0x64 "plot") vs JSON text frame.
-          const isPlot =
-            raw.length > 7 &&
-            raw[0] >= 0xa0 &&
-            raw[0] <= 0xb7 &&
-            raw[1] === 1 &&
-            raw[2] === 0x64 &&
-            raw[3] === 0x70 &&
-            raw[4] === 0x6c &&
-            raw[5] === 0x6f &&
-            raw[6] === 0x74;
-          if (isPlot) {
+          // Treat frames starting with '{' (0x7b) as JSON text; everything else (plots, binary CBOR) goes to binary listeners.
+          if (raw.length > 0 && raw[0] === 0x7b) {
+            handleJson(this.textDecoder.decode(raw));
+          } else {
             const copy = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
             for (const fn of this.binaryListeners) fn(copy);
-          } else {
-            handleJson(this.textDecoder.decode(raw));
           }
           return;
         }
