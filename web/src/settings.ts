@@ -42,12 +42,12 @@ export class SettingsModal {
     const head = document.createElement("div");
     head.className = "bp-modal-head";
     const title = document.createElement("h2");
-    title.textContent = "Settings · Devices";
+    title.textContent = `${t("palette.settings", "Settings")} · Devices`;
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "icon";
     closeBtn.textContent = "×";
-    closeBtn.setAttribute("aria-label", "Close settings");
+    closeBtn.setAttribute("aria-label", t("common.close", "Close"));
     closeBtn.addEventListener("click", () => this.close());
     head.append(title, closeBtn);
 
@@ -94,7 +94,7 @@ export class SettingsModal {
     const logoutBtn = document.createElement("button");
     logoutBtn.type = "button";
     logoutBtn.className = "primary stop";
-    logoutBtn.textContent = "Sign out";
+    logoutBtn.textContent = t("agy.signout", "Sign out");
     logoutBtn.setAttribute("data-testid", "logout-btn");
     logoutBtn.addEventListener("click", () => {
       logoutBtn.disabled = true;

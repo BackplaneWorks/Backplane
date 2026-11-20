@@ -1,5 +1,8 @@
 // Right viewer rail: 72px wide, 48px vertical items, 2px left accent bar when active.
-// Renders verbatim from the hub's `viewer.rail` model — hub is the sole authority (no hardcoded fallback).
+// Renders verbatim from the hub's `viewer.rail` model (PR #1367 / #1376):
+// hub order, disabled entry dimmed via --rail-disabled / --rail-disabled-icon with hub `why`,
+// tools group separated by --rail-rule at bottom, Split pane omitted until docking tiles land.
+import { trs } from "./i18n";
 
 export interface RailEntry {
   id: string;
@@ -24,6 +27,7 @@ const ICON_PATHS: Record<string, string[]> = {
   "file-stack": ["M16 2H6v12h10V2z", "M20 6v12H10", "M4 18h10v4H4z"],
   "layout-panel-left": ["M3 3h18v18H3z", "M10 3v18"],
   layers: ["M12 2L2 7l10 5 10-5-10-5z", "M2 12l10 5 10-5", "M2 17l10 5 10-5"],
+  wrench: ["M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"],
   folder: ["M3 6h6l2 2h10v11H3z"],
   diff: ["M12 5v10", "M7 10h10", "M7 19h10"],
   "circle-check": ["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z", "M9 12l2 2 4-4"],
@@ -41,7 +45,7 @@ function makeIcon(name: string): SVGSVGElement {
   svg.setAttribute("stroke-linecap", "square");
   svg.setAttribute("stroke-linejoin", "miter");
   svg.setAttribute("aria-hidden", "true");
-  const paths = ICON_PATHS[name] ?? ICON_PATHS.box;
+  const paths = ICON_PATHS[name] ?? ICON_PATHS.folder;
   for (const d of paths) {
     const p = document.createElementNS(SVG_NS, "path");
     p.setAttribute("d", d);
@@ -63,48 +67,75 @@ export class RailView {
   }
 
   public setItems(items: RailEntry[]): void {
-    this.items = items;
+    // Omit Split pane (rejected for docking tiles, not approved yet).
+    this.items = items.filter((item) => item.id !== "split");
     this.render();
   }
 
   public setActive(id: string): void {
-    this.activeId = id;
+    this.activeId = id === "split" ? "" : id;
     this.render();
   }
 
-  public render(): void {
-    const frag = document.createDocumentFragment();
-    let prevGroup: string | undefined;
+  private renderButton(item: RailEntry): HTMLButtonElement {
+    const isDisabled = item.state === "disabled";
+    const isOn = !isDisabled && (item.state === "on" || (this.activeId !== "" && item.id === this.activeId));
+    const label = trs(item.label);
+    const why = item.why ? trs(item.why) : "";
 
-    for (const item of this.items) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "bp-rail-btn" + (isOn ? " active" : "") + (isDisabled ? " disabled" : "");
+    btn.disabled = isDisabled;
+    btn.setAttribute("aria-pressed", isOn ? "true" : "false");
+    if (isDisabled) {
+      btn.title = why || label;
+      if (why) btn.setAttribute("data-why", why);
+    } else {
+      btn.title = item.key ? `${label} (${item.key.toUpperCase()})` : label;
+    }
+    btn.setAttribute("data-rail-id", item.id);
+    btn.setAttribute("data-testid", `rail-${item.id}`);
+
+    btn.appendChild(makeIcon(item.icon));
+    const lbl = document.createElement("span");
+    lbl.className = "bp-rail-lbl";
+    lbl.textContent = label;
+    btn.appendChild(lbl);
+
+    if (!isDisabled) {
+      btn.addEventListener("click", () => this.onPress(item.id));
+    }
+    return btn;
+  }
+
+  public render(): void {
+    const pages = this.items.filter((x) => x.group !== "tools");
+    const tools = this.items.filter((x) => x.group === "tools");
+
+    const pagesWrap = document.createElement("div");
+    pagesWrap.className = "bp-rail-pages";
+    let prevGroup: string | undefined;
+    for (const item of pages) {
       if (prevGroup !== undefined && item.group !== prevGroup) {
         const sep = document.createElement("div");
-        sep.className = "bp-rail-gap";
-        frag.appendChild(sep);
+        sep.className = "bp-rail-rule";
+        pagesWrap.appendChild(sep);
       }
       prevGroup = item.group;
+      pagesWrap.appendChild(this.renderButton(item));
+    }
 
-      const isOn = item.state === "on" || (this.activeId !== "" && item.id === this.activeId);
-      const isDisabled = item.state === "disabled";
+    const frag = document.createDocumentFragment();
+    frag.appendChild(pagesWrap);
 
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "bp-rail-btn" + (isOn ? " active" : "") + (isDisabled ? " disabled" : "");
-      btn.disabled = isDisabled;
-      btn.title = item.why ? `${item.label} — ${item.why}` : item.key ? `${item.label} (${item.key})` : item.label;
-      btn.setAttribute("data-rail-id", item.id);
-      btn.setAttribute("data-testid", `rail-${item.id}`);
-
-      btn.appendChild(makeIcon(item.icon));
-      const lbl = document.createElement("span");
-      lbl.className = "bp-rail-lbl";
-      lbl.textContent = item.label;
-      btn.appendChild(lbl);
-
-      if (!isDisabled) {
-        btn.addEventListener("click", () => this.onPress(item.id));
+    if (tools.length > 0) {
+      const toolsWrap = document.createElement("div");
+      toolsWrap.className = "bp-rail-tools";
+      for (const item of tools) {
+        toolsWrap.appendChild(this.renderButton(item));
       }
-      frag.appendChild(btn);
+      frag.appendChild(toolsWrap);
     }
 
     this.el.replaceChildren(frag);

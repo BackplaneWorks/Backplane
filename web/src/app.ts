@@ -2,7 +2,7 @@
 // wires sidebar, chat timeline, composer, hub-driven right rail, viewer host slot, and settings.
 import { ChatView, type EntryItem, type ReviewBar, type UnansweredNotice } from "./chat";
 import { ComposerView, type MentionItem, type SlashCommand } from "./composer";
-import { setLocale } from "./i18n";
+import { setLocale, t } from "./i18n";
 import { RailView, type RailEntry } from "./rail";
 import { SettingsModal, type SettingsRow } from "./settings";
 import { SidebarView, type BotItem, type ProjectItem, type RoomItem, type ThreadItem } from "./sidebar";
@@ -180,6 +180,7 @@ function mountApp(): void {
   });
 
   const rail = new RailView(railEl, (id) => {
+    if (id === "split") return;
     if (id === "commands") {
       sidebar.focusFilter();
       return;
@@ -519,7 +520,7 @@ function mountApp(): void {
 
   hub.onState((state, hello: HelloFrame | null) => {
     if (state === "connected" && hello) {
-      connEl.textContent = "Connected";
+      connEl.textContent = t("gpui.acct.connected", "Connected");
       connEl.className = "bp-conn-status bp-ok";
       if (hello.theme) applyHubTheme(hello.theme);
       if (hello.locale) setLocale(hello.locale);
@@ -529,7 +530,7 @@ function mountApp(): void {
       connEl.textContent = "Reconnecting…";
       connEl.className = "bp-conn-status bp-warn";
     } else if (state === "revoked") {
-      connEl.textContent = "Signed out";
+      connEl.textContent = t("agy.signout", "Sign out");
       connEl.className = "bp-conn-status bp-bad";
     } else {
       connEl.textContent = "Connecting…";
