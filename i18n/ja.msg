@@ -2226,6 +2226,7 @@ gpui.c.kicad.full.screen = 全画面
 gpui.c.kicad.exit.full.screen = 全画面を終了
 gpui.c.kicad.the.editor.takes.the.whole = エディタがウィンドウ全体を使います。この行だけが残ります
 gpui.c.kicad.closing = KiCad を閉じています。閉じ終わるとエディタがもう一度開きます。
+gpui.c.kicad.closing.ask = KiCad は閉じる前に応答を待っています:「{title}」。そのウィンドウが別のウィンドウの後ろにあるかもしれません。
 
 # ---- gpui-d: setup, pairing, hubs, palette, picker, projects, composer, menus ----
 gpui.assets.missing = {dir} にアセットがありません: {files}
