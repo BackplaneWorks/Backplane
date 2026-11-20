@@ -655,6 +655,9 @@ pub fn opening_wants_keys(why: ShowBy) -> bool { why.takes_keys() }
 pub fn hand_in_now(keys: bool, want_keys: bool, show: Option<u64>, prev_show: Option<u64>, dialog_has_keys: bool) -> bool {
     show.is_some() && if show != prev_show { (keys || want_keys) && !dialog_has_keys } else { want_keys }
 }
+/// macOS (#1399): after a reserved chord from KiCad gave the keyboard back to Backplane (nc::hand_back), whether to ask for our activation
+/// once more: only the first check (one retry), only when it did not take, and only when nothing else moved the keyboard since.
+pub fn hand_back_retry(attempt: u8, taken: bool, unchanged: bool) -> bool { attempt == 0 && !taken && unchanged }
 /// macOS (#1198): whether a press of the person's hands the keyboard to KiCad's frame. Only when the window the press hit is the pane's
 /// frame on show (not another app's window or a sheet of ours lying over that area), Backplane is the active app while KiCad is not
 /// (macOS 15, where the click alone does not activate KiCad; on 26.5 KiCad is already active by then), nothing of Backplane's is drawn
@@ -1933,6 +1936,14 @@ mod tests {
     }
     /// macOS 15 (#1198): a press hands KiCad the keyboard only when it hit KiCad's frame with Backplane active and KiCad not, nothing
     /// drawn over the pane, no dialog, and the pane not leaving.
+    /// macOS (#1399): the hand-back after a reserved chord retries once, only when our activate did not take and nothing moved since.
+    #[test] fn a_hand_back_that_did_not_take_retries_once() {
+        use super::hand_back_retry;
+        assert!(hand_back_retry(0, false, true), "not taken at the first check: one retry");
+        assert!(!hand_back_retry(0, true, true), "taken: nothing more");
+        assert!(!hand_back_retry(1, false, true), "after the retry: said, never again");
+        assert!(!hand_back_retry(0, false, false), "a hand-in or another move since: that one stands");
+    }
     #[test] fn only_the_persons_press_on_kicads_frame_with_backplane_active_hands_kicad_the_keys() {
         use super::press_hands_in;
         // #1198 (macOS 15): a press that hit KiCad's frame while Backplane is active and KiCad is not hands in

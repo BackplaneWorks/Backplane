@@ -218,7 +218,29 @@ unsafe fn send_activate_self(a: *mut c_void) {
     if responds(a, sel(c"respondsToSelector:"), sel(c"activate")) { send0(a, c"activate"); }
     else { let f: unsafe extern "C" fn(*mut c_void, *mut c_void, bool) = std::mem::transmute(objc_msgSend as *const ()); f(a, sel(c"activateIgnoringOtherApps:"), true); }
 }
-pub fn hand_back(w: u64) { focus(w) }
+/// The keyboard back to Backplane after a reserved chord from KiCad (Cmd+K, the escape chord; the only callers). macOS 14+ honours our
+/// activate only with the active app's consent, which KiCad gives when it hands a reserved chord over (fork, #1399): whether it took is
+/// said 50 ms on (`kicad_mac_focus_taken`), and once more after one retry 50 ms later when it did not (the consent and the chord can
+/// land in either order). No retry once anything else moved the keyboard since (a hand-in, our own focus: the yield generation).
+pub fn hand_back(w: u64) {
+    focus(w);
+    hand_back_check(w, 0, YIELD_GEN.load(std::sync::atomic::Ordering::SeqCst));
+}
+fn hand_back_check(w: u64, attempt: u8, yield_gen: u64) {
+    extern "C" fn check(ctx: *mut c_void) {
+        let (w, attempt, yield_gen) = *unsafe { Box::from_raw(ctx as *mut (u64, u8, u64)) };
+        let taken = unsafe { send_bool(app(), c"isActive") };
+        let unchanged = YIELD_GEN.load(std::sync::atomic::Ordering::SeqCst) == yield_gen;
+        let retry = crate::viewers::kicad_pane::hand_back_retry(attempt, taken, unchanged);
+        eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_focus_taken": {"taken": taken, "attempt": attempt, "retry": retry, "moved_since": !unchanged}}));
+        if retry {
+            unsafe { send_activate_self(app()); let nw = ns_window(w); if !nw.is_null() { send0(nw, c"makeKeyWindow"); } }
+            hand_back_check(w, attempt + 1, yield_gen);
+        }
+    }
+    let ctx = Box::into_raw(Box::new((w, attempt, yield_gen))) as *mut c_void;
+    unsafe { dispatch_after_f(dispatch_time(0, 50_000_000), std::ptr::addr_of!(_dispatch_main_q) as *const c_void, ctx, check); }
+}
 /// Consent for KiCad to activate itself (macOS 14+), without activating it: the hub's ShowFrame{focus} then has KiCad take the keyboard
 /// onto its canvas (TakeFocusForClick). Activating KiCad from here first put wx's focus on a toolbar field, and ShowFrame{focus} leaves a
 /// focus already inside the frame where it is: the canvas never had the keys (client runs 9, 10).
