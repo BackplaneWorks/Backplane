@@ -245,7 +245,7 @@ impl Agents {
         // the window holding the project's embedded KiCad shows another frame (the person's strip tab): its pane is brought to this one,
         // unless KiCad is busy, which the answer says (issue 1355; a kicad_edit's own push never comes here while the page holds KiCad)
         let (frame, busy) = if explicit { crate::files::kicad::follow::bring_frame(thread, &shown).await } else { (None, String::new()) };
-        let mut push = json!({"t":"view","thread":thread,"path":shown,"kind":kind});
+        let mut push = json!({"t":"view","action":"view-show","thread":thread,"path":shown,"kind":kind});
         if let Some(f) = frame { push["frame"] = json!(f) }
         self.hub.push_all(&push);
         // (the owner's windows on other machines show it too)
@@ -253,10 +253,24 @@ impl Agents {
         let note = |mut v: Value| { if !busy.is_empty() { v["kicad"] = json!(busy) } v };
         if !wait { return (true, note(json!({"shown":shown}))) }
         let mut now = crate::files::kicad::watch::viewer_state(thread);
-        // a frame brought: the read-back waits for the window's report of it (its kicadFrame), not only for any report
-        let brought = |s: &(u64, Value)| frame.map_or(true, |f| s.1["kicadFrame"] == f);
-        for _ in 0..60 { if now.0 > before && brought(&now) { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await; now = crate::files::kicad::watch::viewer_state(thread); }
-        (true, note(json!({"shown":shown,"viewer":now.1,"settled":now.0 > before})))
+        // a frame brought: the read-back waits for the window's report of it (its kicadFrame), AND
+        // for the reported kind/source to match what was requested when specified
+        let want_kind = match kind {
+            "pcb" => "board",
+            "sch" => "schematic",
+            "" if shown.to_ascii_lowercase().ends_with(".kicad_pcb") => "board",
+            "" if shown.to_ascii_lowercase().ends_with(".kicad_sch") => "schematic",
+            "" if crate::present::viewer::is_model(&shown) => "mech",
+            k => k,
+        };
+        let matches_target = |s: &(u64, Value)| {
+            let brought = frame.map_or(true, |f| s.1["kicadFrame"] == f);
+            let kind_ok = want_kind.is_empty() || s.1["kind"].as_str().map_or(true, |k| k == want_kind || (want_kind == "gerbers" && k == "board"));
+            let src_ok = shown.is_empty() || s.1["key"].as_str().map_or(true, |k| k.is_empty() || k.ends_with(&shown) || s.1["part"].as_str().is_some_and(|p| shown.ends_with(p)));
+            brought && kind_ok && src_ok
+        };
+        for _ in 0..60 { if now.0 > before && matches_target(&now) { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await; now = crate::files::kicad::watch::viewer_state(thread); }
+        (true, note(json!({"shown":shown,"viewer":now.1,"settled":now.0 > before && matches_target(&now)})))
     }
     /// The same gate for a direct write of a board or schematic (`files_write`): Err names the holder.
     pub async fn doc_gate(&self, thread: &str, doc: &str) -> Result<(), String> {
