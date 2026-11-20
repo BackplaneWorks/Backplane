@@ -2238,7 +2238,11 @@ const ANSWERS: &str = "#!/bin/sh\nD=$(dirname \"$0\")\necho '{\"type\":\"system\
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_bots_message_and_a_report_restart_a_running_codex_turn_at_once() {
     let (hub, ag, sd) = codex_start("cxcut").await; let from = len(&hub).await;
-    rpc(&hub, "turn.start", json!({"thread":T1,"text":"slow first"})).await; tokio::time::sleep(Duration::from_millis(500)).await;
+    // the stand-in streams "par", then waits 2 s: the message must come inside that wait, once the text has streamed (a fixed 500 ms was
+    // before the first text on a loaded Windows runner, where the turn's snapshot and the process start take longer: nothing had streamed to keep)
+    let streamed = |d0: u64| { let ag = ag.clone(); async move { let end = Instant::now() + Duration::from_secs(60); while ag.stats.deltas.load(Relaxed) == d0 && Instant::now() < end { tokio::time::sleep(Duration::from_millis(10)).await } assert!(ag.stats.deltas.load(Relaxed) > d0, "no text streamed") } };
+    let d0 = ag.stats.deltas.load(Relaxed);
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"slow first"})).await; streamed(d0).await;
     ag.deliver_as("user", T1, "m-bot-2", "a bot says stop", Some(("bot:b1".into(), "bot".into(), String::new())), vec![]).await.unwrap();
     let ev = log_from(&hub, from).await;
     assert!(!ev.iter().any(|e| is(e, "SettingSet") && e["key"] == format!("ride.{T1}") && !e["value"].as_str().unwrap_or("").is_empty()), "nothing waits as a ride");
@@ -2247,7 +2251,8 @@ const ANSWERS: &str = "#!/bin/sh\nD=$(dirname \"$0\")\necho '{\"type\":\"system\
     assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant" && e["msg"].as_str().map_or(false, |m| m.ends_with(":before"))), "what had streamed is kept");
     until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await; tokio::time::sleep(Duration::from_millis(300)).await;
     let from2 = len(&hub).await;
-    rpc(&hub, "turn.start", json!({"thread":T1,"text":"slow second"})).await; tokio::time::sleep(Duration::from_millis(500)).await;
+    let d0 = ag.stats.deltas.load(Relaxed);
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"slow second"})).await; streamed(d0).await;
     ag.wake_ride(T1, "rep-2", "a launched thread reported").await.unwrap();
     let ev = log_from(&hub, from2).await;
     assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "steer"), "a report steers too: {ev:?}");
