@@ -1605,6 +1605,20 @@ mod tests {
         let v_vs = viewer_json(&st, &json!({}), &s_vs).unwrap();
         assert_eq!((v_vs["gerbers"].as_bool(), v_vs["gerbersVsBoard"].as_bool(), v_vs["key"].as_str()), (Some(true), Some(true), Some("")));
         assert_eq!(v_vs["empty"].as_str(), Some("No board to compare these Gerbers against."));
+        // 5. Nested project with Gerbers and a parent project's board outside its root still refuses "vs board"
+        let nested = d.join("nested");
+        std::fs::create_dir_all(nested.join("mfg")).unwrap();
+        std::fs::write(nested.join("mfg/n-F_Cu.gbr"), "%FSLAX46Y46*%M02*").unwrap();
+        std::fs::write(d.join("parent.kicad_pro"), "{}").unwrap();
+        std::fs::write(d.join("parent.kicad_pcb"), "(kicad_pcb)").unwrap();
+        if let Some(p) = st.projects.get_mut(&proj) { p.root = nested.to_string_lossy().into_owned(); }
+        let mut sn = sess(th, json!({}));
+        let o_ng = view_action(&st, "h", &sn, "gerbers").unwrap(); crate::session::patch::merge(&mut sn, &o_ng.patch);
+        let o_nvs = view_action(&st, "h", &sn, "gerbers\tboard").unwrap();
+        crate::session::patch::merge(&mut sn, &o_nvs.patch);
+        let v_nvs = viewer_json(&st, &json!({}), &sn).unwrap();
+        assert_eq!((v_nvs["gerbers"].as_bool(), v_nvs["gerbersVsBoard"].as_bool(), v_nvs["key"].as_str()), (Some(true), Some(true), Some("")));
+        assert_eq!(v_nvs["empty"].as_str(), Some("No board to compare these Gerbers against."));
         let _ = std::fs::remove_dir_all(&d);
     }
 }

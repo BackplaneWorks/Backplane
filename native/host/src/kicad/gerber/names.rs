@@ -191,9 +191,6 @@ mod tests {
         std::fs::write(base.join("parent.kicad_pro"), "{}").unwrap();
         std::fs::write(base.join("parent.kicad_pcb"), "(kicad_pcb)").unwrap();
         assert!(board_of_in(&set, Some(&proj)).is_none(), "companion board outside root must be skipped");
-        // Comparison reader also refuses an out-of-root comparison board at the read boundary
-        let bad_cmp = cmp_path(&set.to_string_lossy(), &base.join("parent.kicad_pcb").to_string_lossy());
-        assert!(matches!(super::super::plot_in(&bad_cmp, Some(&proj)), super::super::super::plotgen::Read::Fail(_)), "plot_in must refuse comparison board outside root");
         std::fs::write(proj.join("local.kicad_pro"), "{}").unwrap();
         std::fs::write(proj.join("local.kicad_pcb"), "(kicad_pcb)").unwrap();
         assert_eq!(board_of_in(&set, Some(&proj)).unwrap().file_name().unwrap(), "local.kicad_pcb");

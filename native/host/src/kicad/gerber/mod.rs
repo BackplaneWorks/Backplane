@@ -370,4 +370,20 @@ mod tests {
         let s0 = set_stamp(&d); rewrite("M48\nMETRIC\nT1C0.400\n%\nT1\nX1.0Y-2.0\nM30\n", 20); assert_ne!(set_stamp(&d), s0);
         let _ = std::fs::remove_dir_all(&d);
     }
+    #[test] fn plot_in_refuses_comparison_board_outside_project_root() {
+        let base = crate::plat::tmp::dir("gerber-cmp-contain");
+        let proj = base.join("proj");
+        let mfg = proj.join("mfg");
+        std::fs::create_dir_all(&mfg).unwrap();
+        std::fs::write(mfg.join("in-F_Cu.gbr"), "%FSLAX46Y46*%\n%MOMM*%\n%ADD10C,0.25*%\nD10*\nX0Y0D03*\nM02*\n").unwrap();
+        std::fs::write(base.join("parent.kicad_pro"), "{}").unwrap();
+        std::fs::write(base.join("parent.kicad_pcb"), "(kicad_pcb)").unwrap();
+        let bad_cmp = cmp_path(&mfg.to_string_lossy(), &base.join("parent.kicad_pcb").to_string_lossy());
+        assert!(matches!(plot_in(&bad_cmp, Some(&proj)), super::plotgen::Read::Fail(_)), "plot_in must refuse comparison board outside root");
+        std::fs::write(proj.join("local.kicad_pro"), "{}").unwrap();
+        std::fs::write(proj.join("local.kicad_pcb"), "(kicad_pcb)").unwrap();
+        let good_cmp = cmp_path(&mfg.to_string_lossy(), &proj.join("local.kicad_pcb").to_string_lossy());
+        assert!(matches!(plot_in(&good_cmp, Some(&proj)), super::plotgen::Read::Plot(_, _)), "plot_in allows comparison board inside root");
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
