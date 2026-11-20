@@ -42,6 +42,14 @@ impl BrowserIngress<'_> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn terminal_lazy_assets_require_paired_session() {
+        for path in ["/assets/terminal.js", "/assets/xterm.css"] {
+            assert!(static_asset(path, false).is_none(), "{path} must require pairing");
+            assert!(static_asset(path, true).is_some(), "{path} must be served when paired");
+        }
+    }
+
     #[tokio::test]
     async fn pairing_limits_and_deadline() {
         use crate::net::pairing::{Registry, GUESS_ALL, GUESS_CLIENT, urandom};

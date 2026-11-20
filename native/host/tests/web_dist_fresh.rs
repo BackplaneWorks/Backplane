@@ -138,9 +138,10 @@ fn web_dist_is_fresh_and_meets_csp_and_size_budget() {
         "web/dist is stale: web i18n keys changed in i18n/*.msg (run scripts/build-web.sh)"
     );
 
-    // 2. Every file under web/src/** must be recorded in manifest.inputs.
+    // 2. Every file under web/src/** and web/vendor/** must be recorded in manifest.inputs.
     let mut src_files = Vec::new();
     walk_files(&root.join("web/src"), &mut src_files);
+    walk_files(&root.join("web/vendor"), &mut src_files);
     for full in src_files {
         let rel = full
             .strip_prefix(&root)
@@ -149,9 +150,13 @@ fn web_dist_is_fresh_and_meets_csp_and_size_budget() {
             .replace('\\', "/");
         assert!(
             inputs.contains_key(&rel),
-            "web/dist is stale: new source file {rel} is not in web/dist/manifest.json (run scripts/build-web.sh)"
+            "web/dist is stale: new source/vendor file {rel} is not in web/dist/manifest.json (run scripts/build-web.sh)"
         );
     }
+    assert!(
+        inputs.contains_key("web/build.ts"),
+        "web/dist/manifest.json must record web/build.ts so build-time rewrites cannot drift"
+    );
 
     // 3. Every recorded output must exist in web/dist and match its SHA-256, with no extra files.
     let outputs = manifest["outputs"]
@@ -224,5 +229,23 @@ fn web_dist_is_fresh_and_meets_csp_and_size_budget() {
                 "{html_name} <script> tag must have empty body"
             );
         }
+    }
+
+    // 6. S8 CSP guard for lazy terminal chunk: vendored xterm rewrite must leave no
+    //    inline-style writes (`createElement("style")`, `setAttribute("style", ...)`,
+    //    or `.style.cssText`) that strict `style-src 'self'` would block.
+    let term_js = fs::read_to_string(dist.join("assets/terminal.js"))
+        .expect("missing web/dist/assets/terminal.js");
+    for forbidden in [
+        "createElement(\"style\")",
+        "createElement('style')",
+        "setAttribute(\"style\"",
+        "setAttribute('style'",
+        ".style.cssText",
+    ] {
+        assert!(
+            !term_js.contains(forbidden),
+            "web/dist/assets/terminal.js must not contain CSP-blocked inline style pattern: {forbidden}"
+        );
     }
 }
