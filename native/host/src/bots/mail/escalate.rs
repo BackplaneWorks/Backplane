@@ -213,6 +213,10 @@ impl<'a> Ctx<'a> {
             let text = format!("Private triage is waiting on its own tool permission or question; evidence gathering is incomplete. This is not a source worker approval or evidence that the person must act. Review privately and resolve coordination within existing authority; keep internal tool arguments out of user updates.\nRun: {}\nPending run ask: {id}. It remains pending; no authorization was granted.", ref_uri("thread", th));
             return self.run_escalate(&r.bot, &r.conv, "bot", &text)
         }
+        // Mail is a person's message or a report meant for the person, never the mailroom's own work: an ask raised in a private lane, in any
+        // other run, or in a bot's own thread stays open where it is (its thread shows it). Filed as mail, a lane's ask started a run whose ask
+        // started a lane... (bare gate, a44963adbc).
+        if self.w.private_is(th) || self.w.mail.run_of(th).is_some() || self.w.is_bot_thread(th) { return Step::none() }
         let text = format!("Actual pending ask {id}: {tool} {detail}\nSource: {}\nThe real approval remains at its source and must be answered by the person.", ref_uri("thread", th));
         self.operational(Origin::new(&self.w.mail_addr(th), "ask", id), &self.w.triage_thread(), &text, &format!("triage-ask:{id}"), "act", vec![])
     }

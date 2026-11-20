@@ -47,6 +47,10 @@ pub struct Facts {
     pub last: HashMap<String, (String, String)>,
 }
 
+/// Run.cap: the most runs a bot's mailroom starts in a minute.
+pub const RUN_CAP: usize = 12;
+/// Run.cap's trips: the minute each bot last tripped it (one log line and one mark a minute)
+static CAPPED: std::sync::LazyLock<std::sync::Mutex<HashMap<String, u64>>> = std::sync::LazyLock::new(Default::default);
 #[derive(Default)]
 struct Over { runs: HashMap<String, Run>, active: HashMap<String, String>, delta: HashMap<String, i64> }
 
@@ -198,7 +202,9 @@ impl<'a> Ctx<'a> {
     /// Run.spawn: a live run takes the mail, else a new run starts
     fn run_spawn(&mut self, body: &Body, bot: &str) -> Step {
         let live = self.live(bot, &body.mail.conv);
-        if live.is_empty() { let th = self.id("run"); self.spawn_new(bot, &body.mail.conv, body, &th) } else { self.run_deliver(body, &live) }
+        if !live.is_empty() { return self.run_deliver(body, &live) }
+        if let Some(st) = self.run_capped(bot) { return st } // the mail stays filed, unread in the bot's mailbox
+        let th = self.id("run"); self.spawn_new(bot, &body.mail.conv, body, &th)
     }
     /// Run.deliver: into a run's thread; while its first brief is pending, as a received-input note the brief carries
     fn run_deliver(&mut self, body: &Body, th: &str) -> Step {
@@ -217,7 +223,11 @@ impl<'a> Ctx<'a> {
     fn run_queue_admit(&mut self, body: &Body, bot: &str) -> Step {
         let conv = body.mail.conv.clone(); let live = self.live(bot, &conv);
         if self.setting(&format!("run.bound.{live}"), "") == body.mail.id { return Step::none() }
-        if !self.held(bot, &conv) && live.is_empty() && self.queue(bot, &conv).is_empty() { let th = self.id("run"); self.spawn_new(bot, &conv, body, &th) } else { self.run_enqueue(body, bot) }
+        if !self.held(bot, &conv) && live.is_empty() && self.queue(bot, &conv).is_empty() {
+            // over the cap the input waits in the queue; the minute tick starts it (Bots::queues_due)
+            if let Some(st) = self.run_capped(bot) { let q = self.run_enqueue(body, bot); return st.cat(q) }
+            let th = self.id("run"); self.spawn_new(bot, &conv, body, &th)
+        } else { self.run_enqueue(body, bot) }
     }
     fn run_enqueue(&mut self, body: &Body, bot: &str) -> Step {
         let conv = &body.mail.conv; let mut ids = self.queue(bot, conv);
@@ -229,6 +239,7 @@ impl<'a> Ctx<'a> {
     pub fn queue_start(&mut self, bot: &str, conv: &str) -> Step {
         let ready = !self.owner_redirect(bot) && !self.held(bot, conv) && self.triage_owner(bot) && self.live(bot, conv).is_empty();
         if !ready { return Step::none() }
+        if let Some(st) = self.run_capped(bot) { return st } // the queue stays as it is until the next minute
         let ids = self.queue(bot, conv);
         let Some((id, rest)) = ids.split_first() else { return Step::none() };
         let Some(m) = self.w.mail.headers(conv).iter().find(|h| h.id == *id).cloned() else { return self.queue_missing(bot, conv) };
@@ -264,6 +275,23 @@ impl<'a> Ctx<'a> {
         let alarm = self.run_alarm(bot, conv); cs.extend(alarm.clone()); self.replay(&alarm);
         let head = self.run_brief(bot, conv);
         Step { cs, outs: vec![RouteOut::RunStart { thread: th.into(), conv: conv.into(), head }] }
+    }
+    /// Run.cap: the loop breaker. A bot's mailroom starts at most RUN_CAP runs (its private lanes count) in any minute, whatever their sources:
+    /// a loop of mail and asks between runs, lanes and bots (bare gate, a44963adbc: an Install Git ask, 4966 turns in twenty minutes, the
+    /// hub at 5.4 GB) came from a new thread each round, so no per-sender count would have caught it. Some: over the cap, the run does not
+    /// start, its mail stays filed (an owner's input in its queue), and the hub logs it once a minute.
+    fn run_capped(&mut self, bot: &str) -> Option<Step> {
+        let since = self.now.saturating_sub(60);
+        let mut ths: std::collections::HashSet<&str> = self.over.runs.values().filter(|r| r.bot == bot && r.at > since).map(|r| r.thread.as_str()).collect();
+        ths.extend(self.w.mail.runs.values().filter(|r| r.bot == bot && r.at > since).map(|r| r.thread.as_str()));
+        if ths.len() < RUN_CAP { return None }
+        // once a bot and minute for the whole hub: decisions run side by side (each mail's own job), so a mark in the log comes too late for the next
+        let window = self.now / 60;
+        { let mut m = CAPPED.lock().unwrap(); if m.get(bot) == Some(&window) { return Some(Step::none()) } m.insert(bot.to_string(), window); }
+        let (key, window) = (format!("mail.capped.{bot}"), window.to_string());
+        eprintln!("mailroom: bot {bot} started {} runs in a minute (cap {RUN_CAP}); its new runs wait for the next minute, their mail stays filed", ths.len());
+        let cs = vec![json!({"$":"SettingSet","key":key,"value":window,"at":self.now})]; self.replay(&cs);
+        Some(Step { cs, outs: vec![] })
     }
     /// Run.alarm: more than six live runs for a bot say so once an hour
     fn run_alarm(&self, bot: &str, conv: &str) -> Vec<Value> {
