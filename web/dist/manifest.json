@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 38104,
+  "totalAssetGzipBytes": 41933,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -66,12 +66,12 @@
     "web/src/pair.ts": "92ea9ca625aebb53e200004db7a6e3350898654b339d22624ccf60c4ae73367c",
     "web/src/rail.ts": "c5757e65826b7fe393f1d2d1f1e0cb824af1feab052948a2fb6cb14b797505c3",
     "web/src/settings.ts": "3e56690eddd2fe03f661116121c873499308b3e2233a88177b04173312933a3f",
-    "web/src/shell.css": "bc95967e30f574eca21649f8b61c66bbe105a4d05616b3fc7cbeb92728c8b3dc",
-    "web/src/sidebar.ts": "2412c1ec3f66be04625d093ec1cc986f1bee222e14bf5306a878b710919dc60a",
+    "web/src/shell.css": "12bc5a1012c9f22749db0d97fd23525c1b61197c9c4f95dc564426edae558161",
+    "web/src/sidebar.ts": "504239aed76554c4fbb0f52e0522da6295d9af623d2c900879750d17e39edb18",
     "web/src/viewers/cbor.ts": "98a300dad42941cef83acf8748b9e8a14e376ae3fbbd4a18178fd56b3ec68af1",
     "web/src/viewers/mesh-worker.ts": "b7a5094d136cdcba42132ab54615a1518b7e6a13eb232e055065d9d00ba1f4ab",
     "web/src/viewers/plot2d.ts": "763bb4cd04b5ef6de0baa911604a68dd5b04be8fc8b896d0c8dd99b6892a9fee",
-    "web/src/viewers/responsive.css": "3bfc6aaefe3e6c945c7bbf5a682201e30637d1889e98cf2f75497d96743c6450",
+    "web/src/viewers/responsive.css": "25bcf8ecce22145cb97422e6650a5d9bc56c74485108698b7f1fa9a4d81e0f6a",
     "web/src/viewers/solid3d.ts": "3706d9990c4ae9a6100183235aae7b03c4e62f45827829db91647d141843075f",
     "web/src/viewers/viewer-pane.ts": "f1c11fa12d9edb0e1e4a3b3fa0cd10c4cb3e925f0740a80f4b59e12880924dd3",
     "web/src/ws.ts": "bff5636759f3871df89395c792d5c69aef90a5e1e9ecd8247ac522ebb40badc9",
@@ -81,9 +81,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 85915,
-      "gzipBytes": 25910,
-      "sha256": "039d06452d55554d5b5678c6405b985bdf704cf9dfc18c0df84d281bd9a7ead9"
+      "bytes": 96978,
+      "gzipBytes": 28928,
+      "sha256": "61a76f5f2f8e81477f685dc3afabf390b3a1cb9828e07bab3d5354d1e2be7d55"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,
@@ -106,9 +106,9 @@
       "sha256": "19df58b5636001d5fcdd89592c6944ff4e108c410c9375ef208a3de45fd11a37"
     },
     "assets/style.css": {
-      "bytes": 23831,
-      "gzipBytes": 5438,
-      "sha256": "2a2adf542d7f1904b51f084cf67bbd0fe289b30135555352f619140bba029e7b"
+      "bytes": 27646,
+      "gzipBytes": 6249,
+      "sha256": "33474d8240da77d70c7eaa1554c5d540b005a39b8f49e7478075aa129e983fbd"
     },
     "index.html": {
       "bytes": 454,
