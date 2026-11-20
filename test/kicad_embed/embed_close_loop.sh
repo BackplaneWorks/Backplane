@@ -52,7 +52,13 @@ for i in $(seq "$CYCLES"); do
   R=$(last_kicad_report "$CLOG" ready)
   KPID=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("pid") or 0)' "$R")
   read -r STATE FRAMES _ < <(info_now)
-  hub_rpc "[{\"method\":\"editor.kicad.close\",\"timeout_ms\":60000,\"params\":{\"project\":\"$PRO\",\"save\":\"discard\"}}]" >"$OUT/close-$i.out" 2>&1 || true
+  # (KiCad refuses a close while one of its tasks runs: the editor's automatic DRC or ERC. Asked again each second, as a person waits)
+  for _ in $(seq 60); do
+    hub_rpc "[{\"method\":\"editor.kicad.close\",\"timeout_ms\":60000,\"params\":{\"project\":\"$PRO\",\"save\":\"discard\"}}]" >"$OUT/close-$i.out" 2>&1 || true
+    grep -q '"closed":true' "$OUT/close-$i.out" && break
+    grep -q 'a task is running' "$OUT/close-$i.out" || break
+    sleep 1
+  done
   for _ in $(seq 240); do [ "$KPID" -gt 0 ] && kill -0 "$KPID" 2>/dev/null || break; sleep 0.25; done
   sleep 1.5
   ENDED=$(tail -n +"$((N0 + 1))" "$OUT/hub.log" | grep -m1 -E " ended (while closing )?\(" || true)
