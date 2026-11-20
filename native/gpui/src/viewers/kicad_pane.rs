@@ -80,6 +80,23 @@ impl ShowBy {
     /// Whether the show hands KiCad the keyboard: only the person's; an agent's never takes it from the composer.
     pub fn takes_keys(self) -> bool { self == ShowBy::Deliberate }
 }
+/// How long after its last ask the pane asks the hub again to show a placed frame that stays hidden (the "stayed unmapped" check),
+/// `asked` asks in: 1 s, 2 s, 4 s, then every 10 s for as long as it lasts. A KiCad that keeps it hidden is not asked every second, and a
+/// frame it would show still comes back: never given up. The count starts over when the frame is seen on show, for another frame, on
+/// the person's act in the pane (`chose`) and when the frame set changes. Pure.
+pub fn remount_wait(asked: u32) -> std::time::Duration {
+    std::time::Duration::from_millis(match asked { 0 | 1 => 1000, 2 => 2000, 3 => 4000, _ => 10_000 })
+}
+/// #1389: the show the pane waits for after asking the hub for `kind`: none when the hub's active frame is that already (its answer
+/// changes nothing, so nothing would clear the wait, and the next change of the hub's frame, KiCad's own editor request, was then not
+/// followed). Pure.
+pub fn pending_for(hub_active: Option<&str>, kind: &str) -> Option<String> { (hub_active != Some(kind)).then(|| kind.to_string()) }
+/// #1389: whether a KiCad window that took the foreground is one of KiCad's library editors in this session (its frames as the hub lists
+/// them, kind `SYMBOL_EDITOR` / `FOOTPRINT_EDITOR`): KiCad opening the editor the person asked for (Ctrl+E), never a stray. The F5
+/// guard's own case, a pre-warmed hidden Schematic or Board frame, is not one. Pure.
+pub fn library_editor(info: &Value, window: u64) -> bool {
+    info["frames"].as_array().into_iter().flatten().any(|f| f["xid"].as_u64() == Some(window) && matches!(f["kind"].as_str(), Some("SYMBOL_EDITOR" | "FOOTPRINT_EDITOR"))) // i18n-ok: wire frame kind enum names
+}
 /// KiCad's Simulator frame (bp.13.2, capability `sim-frame`): the rail's Simulation entry opens the pane on it.
 pub const SIM: &str = "SIMULATOR"; // i18n-ok: wire frame kind
 /// The frame the rail's Simulation entry opens, from the hub's viewer (`simFrame`: its KiCad embeds the Simulator and the project has a
@@ -556,7 +573,7 @@ pub struct KicadPane {
     /// when a reserved key pressed in KiCad (Ctrl+K, Ctrl+J...) last went to Backplane's own actions (`lent`)
     lent_at: Option<std::time::Instant>,
     /// stock KiCad: the editor last asked for with its shortcut, and when; auxiliary frame (Symbol/Footprint/3D) opened from inside KiCad
-    poked: Option<(String, std::time::Instant)>, unmapped_since: Option<(u64, std::time::Instant)>, unshown_since: Option<(String, std::time::Instant)>, override_kind: Option<String>, pending_show: Option<String>,
+    poked: Option<(String, std::time::Instant)>, unmapped_since: Option<(u64, std::time::Instant)>, remounts: Option<(u64, u32)>, unshown_since: Option<(String, std::time::Instant)>, override_kind: Option<String>, pending_show: Option<String>,
     /// the theme told to the hub at least once; the main window (its first home), where Pop back in returns it
     theme_sent: bool, home: u64,
     /// files changed on disk that KiCad holds back over the person's unsaved edits (info `kicad.reload.<digest>`)
@@ -738,7 +755,7 @@ impl KicadPane {
             let _ = drained_tx.send(());
         } }).detach();
         KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, generation: None, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, remounts: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, generation: None, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
     pub fn edit_again(&mut self, cx: &mut Context<Self>) {
@@ -757,6 +774,8 @@ impl KicadPane {
     }
     /// The person acted on the pane (`by`): an automatic pane is deliberate from now on.
     fn chose(&mut self, by: &str) {
+        // the person's act in the pane: a frame still hidden is asked about again from the start of remount_wait's schedule
+        self.remounts = None;
         if self.why == ShowBy::Automatic { self.why = ShowBy::Deliberate; eprintln!("GPUI_LOG {}", json!({"kicad_auto_to_deliberate": by})); }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(mark_auto(name, params, self.why)), "kicad")); }
@@ -789,6 +808,9 @@ impl KicadPane {
         if let Some(act) = info["active"].as_str().filter(|a| !a.is_empty()) {
             if self.pending_show.as_deref() == Some(act) {
                 self.pending_show = None;
+            } else if Some(act) != self.info["active"].as_str() && self.pending_show.is_some() && std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+                // #1389's measurement: the hub's active frame changed and the pane does not follow it (a show of its own is pending)
+                eprintln!("GPUI_LOG {}", json!({"kicad_active_not_followed": {"active": act, "prev_active": self.info["active"], "pending_show": self.pending_show, "tab": self.tab(), "override": self.override_kind}}));
             } else if self.pending_show.is_none() && Some(act) != self.info["active"].as_str() {
                 self.override_kind = (act != frame_for(&self.open)).then(|| act.to_string());
                 cause = format!("hub info active {} -> {act} (KiCad's active frame)", self.info["active"]); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
@@ -797,7 +819,7 @@ impl KicadPane {
         if info["mode"] == "fork" && self.info["mode"] != "fork" { if let Some(c) = self.container { nc::grab_click(c, false); } }
         if info["frames"] != self.info["frames"] {
             if let Some(c) = self.container { self.frames = nc::frames(c); }
-            self.placed = None; self.unmapped_since = None;
+            self.placed = None; self.unmapped_since = None; self.remounts = None;
         }
         // macOS: the reserved chords pressed in KiCad come through the hub (its window cannot post to ours): queued as the events the
         // other platforms read from the window system; a session's earlier chords are never replayed
@@ -856,7 +878,7 @@ impl KicadPane {
         if self.attached && matches!(self.info["state"].as_str(), Some("stopped" | "failed")) { self.reattach(); }
         else if self.attached && self.locally_shown(kind) { self.placed = None; }
         else if self.attached {
-            self.pending_show = (self.info["active"].as_str() != Some(kind)).then(|| kind.to_string());
+            self.pending_show = pending_for(self.info["active"].as_str(), kind);
             self.rpc("editor.kicad.show", json!({"project": self.project, "frame": kind, "focus": self.keys}));
         }
         cx.notify();
@@ -956,7 +978,7 @@ impl KicadPane {
         self.placed = None;
         if self.attached && matches!(self.info["state"].as_str(), Some("stopped" | "failed")) { self.reattach(); }
         else if self.attached && self.locally_shown(kind) {}
-        else if self.attached { self.pending_show = Some(kind.to_string()); self.rpc("editor.kicad.show", json!({"project": self.project, "frame": kind})); }
+        else if self.attached { self.pending_show = pending_for(self.info["active"].as_str(), kind); self.rpc("editor.kicad.show", json!({"project": self.project, "frame": kind})); }
         cx.notify();
     }
     /// bp.10+ local map: `kind`'s frame is one KiCad has shown or pre-warmed, so the client maps it itself and asks KiCad nothing. A hub
@@ -1100,10 +1122,10 @@ impl KicadPane {
             } else {
                 let mut last = last_stray;
                 if let (true, Some(w)) = (self.keys, self.want()) {
-                    if let Some((stray, title)) = nc::invisible_kicad_foreground(w) {
+                    if let Some((stray, title)) = nc::invisible_kicad_foreground(w).filter(|(s, _)| !(library_editor(&self.info, *s) || self.frames.iter().any(|f| f.window == *s && matches!(f.kind, "SYMBOL_EDITOR" | "FOOTPRINT_EDITOR")))) { // i18n-ok: wire frame kind enum names
                         if stray != last_stray {
                             last = stray;
-                            eprintln!("GPUI_LOG {}", json!({"kicad_stray_foreground": {"frame": w, "stray": stray, "title": title, "during": "prewarm", "after_prewarm_request_ms": started.elapsed().as_millis() as u64}}));
+                            eprintln!("GPUI_LOG {}", json!({"kicad_stray_foreground": {"frame": w, "stray": stray, "own_frame": self.info["frames"].as_array().into_iter().flatten().any(|f| f["xid"].as_u64() == Some(stray)) || self.frames.iter().any(|f| f.window == stray), "stray_kind": self.info["frames"].as_array().into_iter().flatten().find(|f| f["xid"].as_u64() == Some(stray)).map(|f| f["kind"].clone()).or_else(|| self.frames.iter().find(|f| f.window == stray).map(|f| json!(f.kind))), "hub_active": self.info["active"], "title": title, "during": "prewarm", "after_prewarm_request_ms": started.elapsed().as_millis() as u64}}));
                             nc::focus(w);
                         }
                     }
@@ -1164,7 +1186,7 @@ impl KicadPane {
                     self.override_kind = None;
                 }
             }
-            self.frames = f; self.placed = None;
+            self.frames = f; self.placed = None; self.remounts = None;
             self.note_tab(&was_tab, "X frames changed (stock new editor / overridden editor closed)", cx); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
             cx.notify();
         }
@@ -1173,23 +1195,40 @@ impl KicadPane {
         }
         let want = self.wanted_kind().to_string();
         // fork KiCad: if the placed frame stayed unmapped (e.g. cold-start wxGTK decor-extents deferral), ask the hub to remount it once cooldown passes.
+        if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+            // what the check below sees, logged when it changes: one run names the precondition that keeps it from firing
+            static LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+            let placed = self.placed.as_ref().map(|(at, w, _)| json!({"at": at.is_some(), "window": w}));
+            let visible = self.placed.as_ref().and_then(|(_, w, _)| *w).map(|w| json!({"mapped": nc::mapped(w), "frame_windows": self.frames.iter().map(|f| f.window).collect::<Vec<_>>()}));
+            let line = json!({"kicad_unmapped_check": {"mode": self.info["mode"], "state": self.info["state"], "pending_show": self.pending_show, "placed": placed, "visible": visible, "want": &want, "hub_active": self.info["active"]}}).to_string();
+            let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+            if *last != line { eprintln!("GPUI_LOG {line}"); *last = line; }
+        }
         if self.info["mode"] == "fork" && self.info["state"] == "ready" && self.pending_show.is_none() {
             if let Some((Some(_), Some(w), _)) = &self.placed {
-                if nc::mapped(*w) == Some(false) { // visibility only: report() also reads the frame's pixels (#1403)
+                // (never while the pane itself is not on show: our window minimised or the pane's container hidden; that frame is hidden on
+                // purpose, as are the pre-warm's frames, which are never the placed one)
+                if nc::mapped(*w) == Some(false) && nc::mapped(c) == Some(true) { // visibility only, no pixel read (#1403)
                     let since = match self.unmapped_since {
                         Some((uw, t)) if uw == *w => t,
                         _ => { let now = std::time::Instant::now(); self.unmapped_since = Some((*w, now)); now }
                     };
+                    // asked again on a backoff for as long as the frame stays hidden (remount_wait)
+                    let asked = self.remounts.filter(|(rw, _)| rw == w).map_or(0, |(_, n)| n);
                     if since.elapsed() >= std::time::Duration::from_millis(800)
-                        && self.poked.as_ref().map_or(true, |(k, t)| k != &want || t.elapsed() >= std::time::Duration::from_millis(1500))
+                        && self.poked.as_ref().map_or(true, |(k, t)| k != &want || t.elapsed() >= remount_wait(asked))
                     {
+                        if asked == 3 && std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_remount_backoff": {"frame": &want, "window": w, "asked": asked}})); }
+                        self.remounts = Some((*w, asked.saturating_add(1)));
                         self.poked = Some((want.clone(), std::time::Instant::now()));
                         self.unmapped_since = None;
                         self.placed = None;
+                        if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_remount": {"why": "placed frame stayed unmapped", "frame": &want, "asked": asked + 1, "hub_active": self.info["active"], "pending_show": self.pending_show}})); }
                         self.rpc("editor.kicad.show", json!({"project": self.project, "frame": &want, "remount": true, "focus": self.keys}));
                     }
                 } else {
-                    self.unmapped_since = None;
+                    // on show: a later hiding is asked about afresh
+                    self.unmapped_since = None; self.remounts = None;
                 }
             } else {
                 self.unmapped_since = None;
@@ -1208,6 +1247,7 @@ impl KicadPane {
             {
                 if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_unshown": want, "ms": since.elapsed().as_millis() as u64})); }
                 self.poked = Some((want.clone(), std::time::Instant::now()));
+                if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_remount": {"why": "wanted frame exists but was never shown", "frame": &want, "hub_active": self.info["active"], "pending_show": self.pending_show}})); }
                 self.rpc("editor.kicad.show", json!({"project": self.project, "frame": &want, "remount": true, "focus": self.keys}));
             }
         } else {
@@ -1428,9 +1468,9 @@ impl KicadPane {
         }
         if let Some((w, since)) = self.verify_handin {
             if !self.keys || show != Some(w) || since.elapsed() > std::time::Duration::from_millis(1500) { self.verify_handin = None; }
-            else if let Some((stray, title)) = nc::invisible_kicad_foreground(w) {
+            else if let Some((stray, title)) = nc::invisible_kicad_foreground(w).filter(|(s, _)| !(library_editor(&self.info, *s) || self.frames.iter().any(|f| f.window == *s && matches!(f.kind, "SYMBOL_EDITOR" | "FOOTPRINT_EDITOR")))) { // i18n-ok: wire frame kind enum names
                 self.verify_handin = None;
-                eprintln!("GPUI_LOG {}", json!({"kicad_stray_foreground": {"frame": w, "stray": stray, "title": title, "after_ms": since.elapsed().as_millis() as u64}}));
+                eprintln!("GPUI_LOG {}", json!({"kicad_stray_foreground": {"frame": w, "stray": stray, "own_frame": self.info["frames"].as_array().into_iter().flatten().any(|f| f["xid"].as_u64() == Some(stray)) || self.frames.iter().any(|f| f.window == stray), "stray_kind": self.info["frames"].as_array().into_iter().flatten().find(|f| f["xid"].as_u64() == Some(stray)).map(|f| f["kind"].clone()).or_else(|| self.frames.iter().find(|f| f.window == stray).map(|f| json!(f.kind))), "hub_active": self.info["active"], "title": title, "after_ms": since.elapsed().as_millis() as u64}}));
                 nc::focus(w);
             } else { cx.notify(); }
         }
@@ -1769,6 +1809,26 @@ mod tests {
         assert_eq!(id, 3);
         assert_eq!(text, crate::i18n::tf("gpui.c.kicad.firstshow", &[("editor", crate::i18n::trs("Board").into()), ("why", "KiCad answered AS_BUSY: a task is running".into())]));
         assert!(text.contains("AS_BUSY") && !text.starts_with("KiCad says"), "Backplane's own words, not 'KiCad says'");
+    }
+    #[test] fn a_frame_that_stays_hidden_is_asked_again_on_a_backoff_never_given_up() {
+        let ms = |n| super::remount_wait(n).as_millis() as u64;
+        assert_eq!((ms(1), ms(2), ms(3)), (1000, 2000, 4000), "1 s, 2 s, 4 s");
+        assert_eq!((ms(4), ms(50), ms(u32::MAX)), (10_000, 10_000, 10_000), "then every 10 s, never stopped: a frame KiCad would show comes back");
+        // a minute hidden: about ten asks, not sixty
+        let (mut t, mut n) = (0u64, 1u32); while t < 60_000 { t += ms(n); n += 1; }
+        assert!(n <= 10, "{n} asks in a minute");
+    }
+    #[test] fn a_show_waits_only_when_the_hub_is_on_another_frame() {
+        assert_eq!(super::pending_for(Some("PCB"), "PCB"), None, "the hub is on the board already: nothing to wait for (#1389 fp1: the wait never cleared)");
+        assert_eq!(super::pending_for(Some("SCH"), "PCB").as_deref(), Some("PCB"));
+        assert_eq!(super::pending_for(None, "PCB").as_deref(), Some("PCB"), "the hub's frame not known yet: wait for it");
+    }
+    #[test] fn a_library_editor_kicad_opened_is_never_a_stray() {
+        use serde_json::json;
+        let info = json!({"frames": [{"kind": "SCH", "xid": 11}, {"kind": "PCB", "xid": 12}, {"kind": "SYMBOL_EDITOR", "xid": 13}, {"kind": "FOOTPRINT_EDITOR", "xid": 14}]});
+        assert!(super::library_editor(&info, 13) && super::library_editor(&info, 14), "Ctrl+E's editors");
+        assert!(!super::library_editor(&info, 11) && !super::library_editor(&info, 12), "a pre-warmed Schematic or Board (F5's own case) still is");
+        assert!(!super::library_editor(&info, 99), "a window not KiCad's frame");
     }
     #[test] fn only_the_persons_show_hands_kicad_the_keyboard() {
         use super::ShowBy;
