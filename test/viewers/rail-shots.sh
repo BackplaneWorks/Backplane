@@ -557,7 +557,7 @@ PY
   fi
 
   # Start external capture watcher (only watcher's `import` and `xwininfo` receive DISPLAY=$DISP)
-  own env RAIL_HUB_PORT="$PORT" RAIL_HUB_TOKEN_FILE="$HHOME/token" RAIL_BUN_BIN="$BUN_BIN" \
+  own env RAIL_HUB_PORT="$PORT" RAIL_HUB_TOKEN_FILE="$HHOME/token" RAIL_BUN_BIN="$BUN_BIN" RAIL_PRO="$PROJ/ecc83-pp.kicad_pro" \
     python3 "$SCRIPT_DIR/rail_shots_driver.py" watch "$DISP" "$KIND_OUT/client.log" "$SHOT_DIR" "$KIND_OUT" "$STOP_FLAG" >"$KIND_OUT/watch.log" 2>&1
   WATCH_PG=$!
 
@@ -579,7 +579,8 @@ PY
     BACKPLANE_GPUI_RECTS=1 \
     BACKPLANE_GPUI_SHOT_DIR="$SHOT_DIR" \
     BACKPLANE_GPUI_LOCAL="$RUN/local-settings.json" \
-    "$CLIENT_BIN" --url "http://127.0.0.1:$PORT" --token-file "$HHOME/token" --script "$SCRIPT_JSON" --exit-after 420 >"$KIND_OUT/client.log" 2>&1
+    $([ "$USE_EMBED" = "1" ] && echo BACKPLANE_KICAD_DEBUG=1) \
+    "$CLIENT_BIN" --url "http://127.0.0.1:$PORT" --token-file "$HHOME/token" --script "$SCRIPT_JSON" --exit-after "$([ "$USE_EMBED" = "1" ] && echo 900 || echo 420)" >"$KIND_OUT/client.log" 2>&1
   CLIENT_PG=$!
 
   set +e

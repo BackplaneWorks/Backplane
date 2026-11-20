@@ -12,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import rail_dock as DOCK
+import rail_auto as AUTO
 import rail_shots_manifest as M  # noqa: E402
 
 # R1's position (mm) in the full fixture's board (test/files/fixtures/plot/ecc83-pp.kicad_pcb: `(at 136.271 107.95 -90)`):
@@ -406,6 +407,11 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
             {"shot": "extra-edit-files"},
         ])
 
+    if kind == "full" and embed:
+        # Decision-5 gates (auto-attach): KiCad is still cold here, before any page opens it; see rail_auto.py
+        AUTO_INSERT_AT = 2  # right after the idle shot
+        steps[AUTO_INSERT_AT:AUTO_INSERT_AT] = AUTO.build_auto_steps(settle_timeout_ms)
+
     if kind == "full":
         # Docking/tiling (Task 4 user route, Rule B7): scheduled in the normal `full` run, UI controls and drawn-inventory selectors only;
         # every check stays `unavailable` until a build emits `GPUI_METRIC event=tiles` (docs: rail_dock.py contract table).
@@ -595,6 +601,70 @@ def query_hub_kicad_sessions(port: str, token_file: str, bun_bin: str) -> dict:
     return _parse_hub_kicad_sessions_output(out)
 
 
+def run_auto_action(name: str, last_kicad: dict, kind_out: Path, disp: str) -> None:
+    """The watcher's half of an auto-attach gate, run BEFORE the script's shot is released (the script waits on `<name>.done`).
+
+    `auto-act-type-<tag>`: real X keys (XTest) typing the marker as a person does; `auto-act-stale`: an `editor.kicad.attach` with an
+    old generation (and a control with the running one) straight to the hub; `auto-act-close`: KiCad's own Close on its socket
+    (the person's Quit as the hub sees it). Every outcome is a record in `auto_actions.jsonl`; a failure is recorded, never raised.
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    xinput = repo_root / "test" / "cef" / "xinput.py"
+    ipc = repo_root / "test" / "kicad_embed" / "lib" / "gui_ipc_probe.py"
+    hub_rpc = repo_root / "test" / "kicad_embed" / "lib" / "hub_rpc.mjs"
+    rec: dict = {"shot": name, "ok": False, "error": None}
+    try:
+        if name.startswith("auto-act-type-"):
+            tag = name[len("auto-act-type-"):]
+            text = AUTO.MARKERS[tag]
+            rec.update({"action": f"type-{tag}", "text": text})
+            subprocess.run([sys.executable, str(xinput), "type", text], env=dict(os.environ, DISPLAY=disp), check=True, timeout=30)
+            time.sleep(0.4)
+            rec["ok"] = True
+        elif name == "auto-act-stale":
+            rec.update({"action": "stale"})
+            port, token, bun, pro = (os.environ.get(k, "") for k in ("RAIL_HUB_PORT", "RAIL_HUB_TOKEN_FILE", "RAIL_BUN_BIN", "RAIL_PRO"))
+            inv = query_hub_kicad_sessions(port, token, bun)
+            sessions = list((inv.get("sessions") or {}).values()) if inv.get("ok") and inv.get("inventory_complete") else []
+            gen = ((sessions[0].get("runtime") or {}).get("generation")) if len(sessions) == 1 else None
+            if not isinstance(gen, int) or not pro or not hub_rpc.exists():
+                raise RuntimeError(f"no single session generation / project path / helper (generation={gen!r})")
+            rec.update({"generation": gen, "sent_generation": gen + 7})
+            env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+
+            def rpc(method: str, params: dict) -> dict | None:
+                out = subprocess.check_output([bun, str(hub_rpc), port, token, json.dumps([{"m": method, "p": params}])], env=env, text=True, timeout=20)
+                for line in out.splitlines():
+                    if line.startswith("{"):
+                        try:
+                            r = json.loads(line)
+                        except Exception:
+                            continue
+                        if r.get("m") == method:
+                            return r
+                return None
+
+            old = rpc("editor.kicad.attach", {"project": pro, "frame": "PCB", "wait": False, "auto": True, "generation": gen + 7})
+            cur = rpc("editor.kicad.show", {"project": pro, "frame": "PCB", "generation": gen})
+            rec["stale"] = None if old is None else bool((old.get("result") or {}).get("stale") is True or (old.get("reply") or {}).get("stale") is True)
+            rec["current_stale"] = None if cur is None else bool((cur.get("result") or {}).get("stale") is True or (cur.get("reply") or {}).get("stale") is True)
+            rec["ok"] = old is not None
+        elif name == "auto-act-close":
+            rec.update({"action": "close"})
+            sock = last_kicad.get("sock")
+            if not sock:
+                raise RuntimeError("the last pane report carries no KiCad socket")
+            r = subprocess.run([sys.executable, str(ipc), "close", str(sock), "discard"], capture_output=True, text=True, timeout=30)
+            rec["output"] = (r.stdout or r.stderr or "").strip()[:300]
+            rec["ok"] = r.returncode == 0 and '"ok": true' in (r.stdout or "").replace('"ok":true', '"ok": true')
+        else:
+            return
+    except Exception as e:
+        rec["error"] = str(e)[:300]
+    with (kind_out / "auto_actions.jsonl").open("a", encoding="utf-8") as af:
+        af.write(json.dumps(rec, separators=(",", ":")) + "\n")
+
+
 def watch_and_capture(disp: str, client_log: Path, shot_dir: Path, kind_out: Path, stop_flag: Path) -> int:
     """Tail client_log for shot-ready markers, capture with `import -window root`, touch <name>.done."""
     captures_path = kind_out / "captures.jsonl"
@@ -688,6 +758,8 @@ def watch_and_capture(disp: str, client_log: Path, shot_dir: Path, kind_out: Pat
                                 rec["click"] = {"target": target, "point": [x, y], "ok": click.returncode == 0}
                     with captures_path.open("a", encoding="utf-8") as cf:
                         cf.write(json.dumps(rec, separators=(",", ":")) + "\n")
+                    if name.startswith("auto-act-"):
+                        run_auto_action(name, last_kicad, kind_out, disp)
                     done_tmp = shot_dir / f".{name}.done.tmp"
                     done_tmp.write_text("ok\n", encoding="utf-8")
                     done_tmp.replace(shot_dir / f"{name}.done")
