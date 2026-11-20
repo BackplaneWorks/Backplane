@@ -16,7 +16,8 @@ gpui 0.2.2 (Apache-2.0) vendored without `examples/` (and its `[[example]]` targ
   frame last drawn, a hitbox's visible bounds and those of every hitbox drawn after it over them): the windowed Browser tab places Chromium's native window over its pane
   and hides it under anything gpui draws on top (`viewers/cef_page.rs`).
 - `src/platform/linux/x11/window.rs`: `X11Window` gives its window id as a raw window handle (upstream: `unimplemented!()`), the parent of Chromium's window.
-- `src/platform/linux/x11/client.rs`: a `FocusOut` with detail `Inferior` (the keyboard went to a child window of ours, the Browser tab's Chromium) leaves the window active.
+- `src/platform/linux/x11/client.rs`: a `FocusOut` with detail `Inferior` (the keyboard went to a child window of ours: the Browser tab's Chromium, or the
+  window's key proxy below) leaves the window active.
 - `src/platform/linux/x11/client.rs`: each window gets a key proxy (`key_proxy`: an InputOnly 1x1 child outside the window, selecting only key events, named in the
   window's `_BACKPLANE_KEY_PROXY` property), and a key it reads is the window's own (`from_key_proxy`). With the X focus on the window itself, core X gives a key
   to the window under the pointer when that is inside it, so a native child (the embedded KiCad pane) took keys typed with the pointer resting over it; the client
