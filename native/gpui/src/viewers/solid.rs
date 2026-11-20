@@ -1099,6 +1099,31 @@ impl SolidPage {
         self.core.retired.retain(|(i, at)| if gone_from_gpu(*at, frames) { let _ = window.drop_image(i.clone()); false } else { true });
         if self.core.image.is_none() && self.core.retired.is_empty() && before > 0 { eprintln!("GPUI_METRIC {{\"event\":\"solid_put_away\",\"images_dropped\":{before},\"atlas_images\":{}}}", self.atlas_images()); }
     }
+
+    fn view_controls(&self, cx: &mut Context<Self>) -> Div {
+        let mut bar = div().flex().flex_wrap().gap_1();
+        for (key, view) in [("viewer.fit", "fit"), ("viewer.c.view.iso", "iso"), ("viewer.c.view.top", "top"), ("viewer.c.view.bottom", "bottom"), ("viewer.c.view.front", "front"), ("viewer.c.view.right", "right"), ("viewer.c.view.back", "back"), ("viewer.c.view.left", "left"), ("viewer.c.view.snap", "snap")] {
+            bar = bar.child(div().id(SharedString::from(format!("solid-{view}"))).px_2().h(crate::scale::tpx(TOOL_H)).flex().items_center().text_size(crate::scale::tpx(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0x3a4456)).cursor_pointer()
+                .hover(|d| d.bg(rgba(0x2a3548ee))).child(t(key))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if view == "snap" {
+                        /* i18n-ok: a folder name */ let dir = std::env::var_os("BACKPLANE_GPUI_SNAP_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| crate::plat::user_home().map(|h| h.join("Pictures/Backplane")).unwrap_or_default());
+                        /* i18n-ok: the note is drawn through note_words */ this.note = match this.snap(&dir) { Ok(p) => format!("Saved {}", p.display()), Err(e) => format!("Snap view failed: {e}") };
+                    } else { this.set_view(view); }
+                    cx.notify();
+                })));
+        }
+        // the probed part, when this model has it: its name in the colour it is lit in, and a press to put it away
+        if self.names_probe && self.core.lit.as_ref().is_some_and(|l| l.1 == self.core.probe && l.2.is_some()) {
+            bar = bar.child(div().id("solid-probe").pl_2().pr(px(2.)).h(crate::scale::tpx(TOOL_H)).flex().items_center().gap_1().text_size(crate::scale::tpx(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0xffe066))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(self.core.probe.clone())
+                .child(div().id("solid-probe-clear").p(px(2.)).cursor_pointer().hover(|d| d.bg(rgba(0x2a3548ee))).child(crate::art::icon("x", 12., rgb(0x8a93a3)))
+                    .on_click(cx.listener(|this, _, _, cx| { this.set_probe(""); cx.emit(SolidEvent::Pick(String::new())); cx.notify(); }))));
+        }
+        bar
+    }
 }
 impl Render for SolidPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1134,29 +1159,7 @@ impl Render for SolidPage {
             }
         };
         let tools = (self.core.mesh.is_some() && !making_other).then(|| {
-            // the first row of buttons centred on the thread's header row (32 px, ui.rs `thread-head`), so their line is the pane's line
-            let mut bar = div().absolute().top(px(TOOL_TOP)).left_2().right(px(8. + self.reserve)).flex().flex_wrap().gap_1();
-            for (key, view) in [("viewer.fit", "fit"), ("viewer.c.view.iso", "iso"), ("viewer.c.view.top", "top"), ("viewer.c.view.bottom", "bottom"), ("viewer.c.view.front", "front"), ("viewer.c.view.right", "right"), ("viewer.c.view.back", "back"), ("viewer.c.view.left", "left"), ("viewer.c.view.snap", "snap")] {
-                bar = bar.child(div().id(SharedString::from(format!("solid-{view}"))).px_2().h(crate::scale::tpx(TOOL_H)).flex().items_center().text_size(crate::scale::tpx(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0x3a4456)).cursor_pointer()
-                    .hover(|d| d.bg(rgba(0x2a3548ee))).child(t(key))
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if view == "snap" {
-                            /* i18n-ok: a folder name */ let dir = std::env::var_os("BACKPLANE_GPUI_SNAP_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| crate::plat::user_home().map(|h| h.join("Pictures/Backplane")).unwrap_or_default());
-                            /* i18n-ok: the note is drawn through note_words */ this.note = match this.snap(&dir) { Ok(p) => format!("Saved {}", p.display()), Err(e) => format!("Snap view failed: {e}") };
-                        } else { this.set_view(view); }
-                        cx.notify();
-                    })));
-            }
-            // the probed part, when this model has it: its name in the colour it is lit in, and a press to put it away
-            if self.names_probe && self.core.lit.as_ref().is_some_and(|l| l.1 == self.core.probe && l.2.is_some()) {
-                bar = bar.child(div().id("solid-probe").pl_2().pr(px(2.)).h(crate::scale::tpx(TOOL_H)).flex().items_center().gap_1().text_size(crate::scale::tpx(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0xffe066))
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(self.core.probe.clone())
-                    .child(div().id("solid-probe-clear").p(px(2.)).cursor_pointer().hover(|d| d.bg(rgba(0x2a3548ee))).child(crate::art::icon("x", 12., rgb(0x8a93a3)))
-                        .on_click(cx.listener(|this, _, _, cx| { this.set_probe(""); cx.emit(SolidEvent::Pick(String::new())); cx.notify(); }))));
-            }
-            bar
+            self.view_controls(cx).absolute().top(px(TOOL_TOP)).left_2().right(px(8. + self.reserve))
         });
         div().id("solid-page").size_full().overflow_hidden().relative().track_focus(&self.focus).key_context("Viewer").child(body).child(probe).children(tools)
             .on_key_down(cx.listener(|this, e: &KeyDownEvent, _, cx| if this.on_key(e, cx) { cx.stop_propagation() }))
