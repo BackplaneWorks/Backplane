@@ -13,6 +13,17 @@ const T1: &str = "t1700000001-2";
 
 /// a folder per call: helpers shared by several tests (`deliveries`) ask by the same name, and tests run side by side
 fn dir(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("ag-{name}")) }
+/// The pids a stand-in writes to `files` (two of them), polled until each parses, bounded by `within`; on timeout it says what it waited for and what it last read.
+async fn wait_pids(files: &[PathBuf; 2], within: Duration, what: &str) -> (u32, u32) {
+    let end = Instant::now() + within;
+    loop {
+        let raw: Vec<String> = files.iter().map(|f| std::fs::read_to_string(f).unwrap_or_default()).collect();
+        let pids: Vec<u32> = raw.iter().map(|r| r.trim().parse().unwrap_or(0)).collect();
+        if pids.iter().all(|p| *p > 0) { return (pids[0], pids[1]) }
+        assert!(Instant::now() < end, "{what}: pids never appeared in {} and {} within {within:?} (last read {:?} and {:?})", files[0].display(), files[1].display(), raw[0], raw[1]);
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
 fn script(d: &Path, name: &str, body: &str) { use crate::plat::fs::PermissionsExt; let p = d.join(name); std::fs::write(&p, body).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
 /// The JS test fleet's stand-in (test/tools/perf_standin.ts) with the settings the recordings used.
 fn perf_standin(d: &Path, secs: u32) { script(d, "claude", &STANDIN.replacen("\n", &format!("\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS={secs} FAKE_LOG=/dev/null\n"), 1)); }
@@ -321,11 +332,13 @@ fn renames(ev: &[Value]) -> Vec<String> { ev.iter().filter(|e| is(e, "ThreadRena
     ag.shutdown();
 }
 #[tokio::test(flavor = "multi_thread")] async fn shutdown_leaves_no_process_behind() {
-    let sd = dir("s-bin"); script(&sd, "claude", "#!/bin/sh\nsleep 600 &\necho $! > \"$0.kid\"\necho $$ > \"$0.pid\"\nwait\n");
+    // the stand-in writes each pid whole and renames it in: a pid file that exists is complete
+    let sd = dir("s-bin"); script(&sd, "claude", "#!/bin/sh\nsleep 600 &\necho $! > \"$0.kid.tmp\" && mv \"$0.kid.tmp\" \"$0.kid\"\necho $$ > \"$0.pid.tmp\" && mv \"$0.pid.tmp\" \"$0.pid\"\nwait\n");
     let (hub, ag, _h, _w) = start("s", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await;
-    rpc(&hub, "turn.start", json!({"thread":T1,"text":"go"})).await; tokio::time::sleep(Duration::from_millis(600)).await;
-    let rd = |f: &str| std::fs::read_to_string(sd.join(f)).unwrap().trim().parse::<u32>().unwrap();
-    let (pid, kid) = (rd("claude.pid"), rd("claude.kid")); assert!(proc::alive(pid) && proc::alive(kid));
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"go"})).await;
+    // polled until both pids parse, bounded (a fixed wait loses to a loaded machine)
+    let (pid, kid) = wait_pids(&[sd.join("claude.pid"), sd.join("claude.kid")], Duration::from_secs(20), "the stand-in agent and its child").await;
+    assert!(proc::alive(pid) && proc::alive(kid));
     ag.shutdown();
     for _ in 0..80 { if !proc::alive(pid) && !proc::alive(kid) { break } tokio::time::sleep(Duration::from_millis(100)).await }
     assert!(!proc::alive(pid), "the agent outlived shutdown"); assert!(!proc::alive(kid), "the agent's child outlived shutdown");
@@ -993,7 +1006,8 @@ async fn codex_start(name: &str) -> (Arc<Hub>, Arc<Agents>, crate::plat::tmp::Te
 #[tokio::test(flavor = "multi_thread")] async fn sigkill_helper() {
     let Ok(d) = std::env::var("BP_SIGKILL_DIR") else { return };
     let d = PathBuf::from(d); proc::set_owner(&d.to_string_lossy());
-    let sh = d.join("agent"); script(&d, "agent", "#!/bin/sh\nsleep 300 &\necho $! > \"$(dirname \"$0\")/grandchild\"\necho $$ > \"$(dirname \"$0\")/child\"\nsleep 300\n");
+    // each pid written whole and renamed in: a pid file that exists is complete
+    let sh = d.join("agent"); script(&d, "agent", "#!/bin/sh\nsleep 300 &\nd=$(dirname \"$0\")\necho $! > \"$d/grandchild.tmp\" && mv \"$d/grandchild.tmp\" \"$d/grandchild\"\necho $$ > \"$d/child.tmp\" && mv \"$d/child.tmp\" \"$d/child\"\nsleep 300\n");
     let p = proc::spawn(&sh, &[], &d, None, &[]).unwrap(); let _keep = p;
     std::fs::write(d.join("ready"), "1").unwrap(); tokio::time::sleep(Duration::from_secs(600)).await;
 }
@@ -1002,10 +1016,10 @@ async fn codex_start(name: &str) -> (Arc<Hub>, Arc<Agents>, crate::plat::tmp::Te
 #[tokio::test(flavor = "multi_thread")] async fn a_killed_hub_leaves_no_agent_behind() {
     let d = dir("kill"); let exe = std::env::current_exe().unwrap();
     let mut h = std::process::Command::new(exe).args(["agents::tests::sigkill_helper", "--exact", "--nocapture", "--test-threads=1"]).env("BP_SIGKILL_DIR", &d).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
-    let end = Instant::now() + Duration::from_secs(20); while !d.join("grandchild").exists() || !d.join("child").exists() { assert!(Instant::now() < end, "helper did not start"); tokio::time::sleep(Duration::from_millis(50)).await }
+    // polled until both pids parse, bounded; then the old settle before the kill
+    let (child, grand) = wait_pids(&[d.join("child"), d.join("grandchild")], Duration::from_secs(20), "the helper's agent and its background sleep").await;
     tokio::time::sleep(Duration::from_millis(200)).await;
-    let rd = |n: &str| -> u32 { std::fs::read_to_string(d.join(n)).unwrap().trim().parse().unwrap() };
-    let (child, grand) = (rd("child"), rd("grandchild")); assert!(proc::alive(child) && proc::alive(grand));
+    assert!(proc::alive(child) && proc::alive(grand));
     crate::plat::proc::kill(h.id(), crate::plat::proc::KILL); let _ = h.wait();
     let end = Instant::now() + Duration::from_secs(5); while proc::alive(child) && Instant::now() < end { tokio::time::sleep(Duration::from_millis(50)).await }
     assert!(!proc::alive(child), "the agent dies with its hub (PDEATHSIG on Linux, the reaper watcher elsewhere)");
