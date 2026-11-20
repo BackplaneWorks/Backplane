@@ -61,7 +61,7 @@ def build_auto_steps(settle_timeout_ms: int = 15000) -> list[dict]:
         {"mark": "auto:start"},
         {"read": "composer"},
         {"shot": "auto-act-kill", "settle": "", "timeout_ms": tmo},
-        {"wait": 5000},
+        {"wait": 300},  # the hub restarts KiCad within seconds: type and attach while it is still starting
         # a: "pre" is typed BEFORE the attach; "mid" right after the attach request while KiCad starts; "post" once the frame is up
         {"mark": "auto:a:pre"},
         {"shot": "auto-act-type-pre", "settle": "", "timeout_ms": tmo},
@@ -482,8 +482,14 @@ def _gate_c(marks, kt, logs, caps) -> dict:
     placed: dict = {}
     for label, lo, hi in switches:
         evs = [lg["obj"] for lg in _logs_between(logs, marks.get(lo), marks.get(hi), "kicad_place")]
-        placed[label] = [{"changed": e.get("changed"), "frame_changed": e.get("frame_changed"), "why": e.get("why"), "frame": e.get("frame")} for e in evs]
+        placed[label] = [{"changed": e.get("changed"), "frame_changed": e.get("frame_changed"), "why": e.get("why"), "frame": e.get("frame"), "rect": e.get("kicad_place")} for e in evs]
     ev["placements"] = placed
+    # the rect each switch's placements carry against the last rect placed before the switch (same rect + changed:true = a push of unchanged geometry)
+    for label, lo, _hi in switches:
+        before = [lg["obj"].get("kicad_place") for lg in logs if marks.get(lo) is not None and lg["seq"] < marks[lo] and isinstance(lg["obj"].get("kicad_place"), list)]
+        prev = before[-1] if before else None
+        ev.setdefault("rect_before_switch", {})[label] = prev
+        ev.setdefault("rect_unchanged_by_switch", {})[label] = bool(prev is not None and placed[label] and all(e["rect"] == prev for e in placed[label] if e["rect"] is not None))
     notifies = {label: len(_logs_between(logs, marks.get(lo), marks.get(hi), "kicad_place_notify")) for label, lo, hi in switches}
     ev["place_notifies"] = notifies
     ev["place_notify_note"] = f"kicad_place_notify per switch {notifies}: same-rect synthetic ConfigureNotifies are expected and are not geometry pushes"
@@ -494,7 +500,8 @@ def _gate_c(marks, kt, logs, caps) -> dict:
             if not any(e["frame_changed"] is True and e["changed"] is False for e in evs):
                 fails.append(f"{label}: no placement with frame_changed:true and changed:false (placements {evs})")
             if any(e["changed"] is True for e in evs):
-                fails.append(f"{label}: a new geometry was pushed on a frame switch (changed:true)")
+                fails.append(f"{label}: {len([e for e in evs if e['changed'] is True])} placement(s) with changed:true on a frame switch"
+                             f" (rect identical to the one before the switch: {ev['rect_unchanged_by_switch'][label]})")
     if fails:
         return _rec(gid, name, "failed", "; ".join(fails), ev)
     if not seen:
