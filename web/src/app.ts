@@ -2,7 +2,7 @@
 // wires sidebar, chat timeline, composer, hub-driven right rail, viewer host slot, and settings.
 import { ChatView, type EntryItem, type ReviewBar, type UnansweredNotice } from "./chat";
 import { ComposerView, type MentionItem, type SlashCommand } from "./composer";
-import { setLocale, t } from "./i18n";
+import { onLocaleChange, setLocale, t } from "./i18n";
 import { RailView, type RailEntry } from "./rail";
 import { SettingsModal, type SettingsRow } from "./settings";
 import { SidebarView, type BotItem, type ProjectItem, type RoomItem, type ThreadItem } from "./sidebar";
@@ -518,23 +518,40 @@ function mountApp(): void {
     }
   }
 
-  hub.onState((state, hello: HelloFrame | null) => {
-    if (state === "connected" && hello) {
+  function renderConnStatus(state: string): void {
+    if (state === "connected") {
       connEl.textContent = t("gpui.acct.connected", "Connected");
       connEl.className = "bp-conn-status bp-ok";
-      if (hello.theme) applyHubTheme(hello.theme);
-      if (hello.locale) setLocale(hello.locale);
-      if (Array.isArray(hello.commands)) composer.setCommands(hello.commands as SlashCommand[]);
-      void loadLists();
     } else if (state === "reconnecting") {
       connEl.textContent = "Reconnecting…";
       connEl.className = "bp-conn-status bp-warn";
     } else if (state === "revoked") {
-      connEl.textContent = t("agy.signout", "Sign out");
+      connEl.textContent = t("gpui.acct.sign.in.expired", "Sign-in expired");
       connEl.className = "bp-conn-status bp-bad";
     } else {
       connEl.textContent = "Connecting…";
       connEl.className = "bp-conn-status";
+    }
+  }
+
+  onLocaleChange(() => {
+    renderConnStatus(hub.getState());
+    sidebar.refreshLocale();
+    chat.refreshLocale();
+    composer.refreshLocale();
+    rail.render();
+    settings.refreshLocale();
+  });
+
+  hub.onState((state, hello: HelloFrame | null) => {
+    if (state === "connected" && hello) {
+      if (hello.locale) setLocale(hello.locale);
+      if (hello.theme) applyHubTheme(hello.theme);
+      renderConnStatus(state);
+      if (Array.isArray(hello.commands)) composer.setCommands(hello.commands as SlashCommand[]);
+      void loadLists();
+    } else {
+      renderConnStatus(state);
     }
   });
 

@@ -4,6 +4,7 @@
 import { CATALOGS } from "virtual:i18n";
 
 let currentLocale = detectLocale();
+const localeListeners = new Set<(locale: string) => void>();
 
 // Reverse lookup: English string -> catalog key (mirrors GPUI's trs() for hub-supplied labels & whys).
 const EN_TO_KEY = new Map<string, string>();
@@ -20,12 +21,31 @@ function detectLocale(): string {
   return "en";
 }
 
-export function setLocale(locale: string | undefined | null): void {
-  if (!locale) return;
+function syncDocumentLang(): void {
+  if (typeof document !== "undefined" && document.documentElement) {
+    document.documentElement.lang = currentLocale;
+  }
+}
+
+syncDocumentLang();
+
+export function onLocaleChange(fn: (locale: string) => void): () => void {
+  localeListeners.add(fn);
+  return () => { localeListeners.delete(fn); };
+}
+
+export function setLocale(locale: string | undefined | null): boolean {
+  if (!locale) return false;
   const low = locale.toLowerCase();
-  if (low.startsWith("ja")) currentLocale = "ja";
-  else if (low.startsWith("es")) currentLocale = "es";
-  else if (low.startsWith("en")) currentLocale = "en";
+  const next = low.startsWith("ja") ? "ja" : low.startsWith("es") ? "es" : low.startsWith("en") ? "en" : "";
+  if (!next) return false;
+  const changed = next !== currentLocale;
+  currentLocale = next;
+  syncDocumentLang();
+  if (changed) {
+    for (const fn of localeListeners) fn(currentLocale);
+  }
+  return changed;
 }
 
 export function getLocale(): string {

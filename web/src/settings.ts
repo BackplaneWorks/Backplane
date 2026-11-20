@@ -25,6 +25,8 @@ export interface SettingsCallbacks {
 
 export class SettingsModal {
   private backdrop: HTMLElement;
+  private titleEl: HTMLElement;
+  private closeBtn: HTMLButtonElement;
   private bodyEl: HTMLElement;
   private cb: SettingsCallbacks;
   private openState = false;
@@ -41,15 +43,15 @@ export class SettingsModal {
 
     const head = document.createElement("div");
     head.className = "bp-modal-head";
-    const title = document.createElement("h2");
-    title.textContent = `${t("palette.settings", "Settings")} · Devices`;
-    const closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "icon";
-    closeBtn.textContent = "×";
-    closeBtn.setAttribute("aria-label", t("common.close", "Close"));
-    closeBtn.addEventListener("click", () => this.close());
-    head.append(title, closeBtn);
+    this.titleEl = document.createElement("h2");
+    this.titleEl.textContent = `${t("palette.settings", "Settings")} · Devices`;
+    this.closeBtn = document.createElement("button");
+    this.closeBtn.type = "button";
+    this.closeBtn.className = "icon";
+    this.closeBtn.textContent = "×";
+    this.closeBtn.setAttribute("aria-label", t("common.close", "Close"));
+    this.closeBtn.addEventListener("click", () => this.close());
+    head.append(this.titleEl, this.closeBtn);
 
     this.bodyEl = document.createElement("div");
     this.bodyEl.className = "bp-modal-body";
@@ -75,6 +77,12 @@ export class SettingsModal {
   public close(): void {
     this.openState = false;
     this.backdrop.classList.add("bp-hidden");
+  }
+
+  public refreshLocale(): void {
+    this.titleEl.textContent = `${t("palette.settings", "Settings")} · Devices`;
+    this.closeBtn.setAttribute("aria-label", t("common.close", "Close"));
+    if (this.openState) void this.refresh();
   }
 
   public async refresh(): Promise<void> {

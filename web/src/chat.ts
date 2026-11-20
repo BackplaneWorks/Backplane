@@ -135,6 +135,17 @@ export class ChatView {
     return this.entries.slice();
   }
 
+  public refreshLocale(): void {
+    const savedScroll = this.scrollEl.scrollTop;
+    this.olderBtn.textContent = t("android.load.earlier", "Load earlier");
+    this.renderHead();
+    this.renderBanners();
+    if (this.thread && this.entries.length > 0) {
+      this.renderEntries(false);
+    }
+    this.scrollEl.scrollTop = savedScroll;
+  }
+
   public setThread(
     thread: ThreadItem | null,
     entries: EntryItem[],
