@@ -260,10 +260,11 @@ fn probe_key(session: &Value, sel: &str, root: &str) -> String {
 /// The probe kept for the board on show ("" none): the tapped piece as kicad.info's text ("title;k=v;...").
 fn probe_of(st: &State, session: &Value, sel: &str, root: &str) -> String { st.settings.get(&probe_key(session, sel, root)).cloned().unwrap_or_default() }
 /// `view-probe <info>`: a piece tapped on any page (or "" for none): kept as the hub's setting for this board, so Board, Schematic, Split and every
-/// opening (and the phones) light it again. None off a drawing page; at most 2000 characters, one line.
+/// opening (and the phones) light it again. Only a clear is accepted off a drawing page. Probe text is one line, at most 2000 bytes.
 pub fn probe_action(st: &State, hub: &str, session: &Value, value: &str) -> Option<Vec<Value>> {
     let sel = s(session, "sel");
-    if !simple(st, session, sel) || !matches!(s(&session["drafts"], &format!("@view:{sel}")), "board" | "schematic" | "3d" | "split") { return None }
+    if !simple(st, session, sel) { return None }
+    if !value.is_empty() && !matches!(s(&session["drafts"], &format!("@view:{sel}")), "board" | "schematic" | "3d" | "split") { return None }
     if value.len() > 2000 || value.contains('\n') { return None }
     let root = root_of(st, sel); if root.is_empty() { return None }
     let key = probe_key(session, sel, &root);
@@ -1373,6 +1374,12 @@ mod tests {
         let c = probe_action(&st, "h", &s1, "fp;ref=C5;value=1u").unwrap();
         assert_eq!(sent(&c[0])["key"], json!(format!("probe:{root}|")), "{c:?}");
         st.settings.insert(format!("probe:{root}|"), "fp;ref=C5;value=1u".into());
+        let closed = sess(&th, json!({}));
+        assert!(probe_action(&st, "linked", &closed, "fp;ref=C5").is_none());
+        let clear = probe_action(&st, "linked", &closed, "").unwrap();
+        assert_eq!(clear.len(), 1);
+        assert_eq!(clear[0]["hub"], "linked");
+        assert_eq!(sent(&clear[0]), json!({"key": format!("probe:{root}|"), "value": ""}));
         assert_eq!(viewer_json(&st, &template, &s1).unwrap()["probe"], "fp;ref=C5;value=1u");
         assert!(probe_action(&st, "h", &s1, "fp;ref=C5;value=1u").unwrap().is_empty(), "the same probe again sends nothing");
         let o = view_action(&st, "h", &s1, "split").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
