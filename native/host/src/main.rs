@@ -108,8 +108,14 @@ fn render_cli() -> i32 {
 }
 
 
-#[tokio::main]
-async fn main() {
+/// The signals first, then the runtime: every thread takes the mask of the thread that makes it, and `#[tokio::main]` made tokio's workers
+/// before main's first line, so a SIGCHLD the launcher had blocked (macOS's GCD thread in the desktop app, #1456) stayed blocked in all of them.
+fn main() {
+    let inherited = plat::hub::reset_inherited_signals();
+    tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("the hub's runtime").block_on(hub_main(inherited))
+}
+
+async fn hub_main(inherited: Option<String>) {
     plat::hub::raise_nofile();
     if std::env::args().nth(1).as_deref() == Some("--agent-reaper") { std::process::exit(agents::proc::reaper_main()) }
     if std::env::args().nth(1).as_deref() == Some("--mcp-stdio") { std::process::exit(agents::mcp_stdio::main()) }
@@ -117,6 +123,8 @@ async fn main() {
     if std::env::args().nth(1).as_deref() == Some("--mcp-headers") { let a: Vec<String> = std::env::args().skip(2).collect(); std::process::exit(mcpx::run::headers_main(&a)) }
     if std::env::args().nth(1).as_deref() == Some("--render") { std::process::exit(render_cli()) }
     let args = match parse() { Ok(a) => a, Err(code) => std::process::exit(code) };
+    if let Some(what) = inherited { eprintln!("backplane-hub: started with {what}: reset, so the hub sees its children end (#1456)"); }
+    plat::hub::watch_reaping(Duration::from_secs(2));
     plat::hub::exit_on_signals(files::kicad::embed::shutdown_all);
     if let Err(e) = run(args).await { eprintln!("backplane-hub: {e:#}"); std::process::exit(exit_code(&e)) }
 }

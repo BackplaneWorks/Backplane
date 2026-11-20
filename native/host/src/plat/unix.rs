@@ -128,6 +128,58 @@ pub mod hub {
             if l.rlim_cur < want { l.rlim_cur = want; libc::setrlimit(libc::RLIMIT_NOFILE, &l); }
         }
     }
+    /// What the hub was started with that keeps it from seeing its children's exits, put right before any thread is made (threads take the
+    /// mask of the thread that makes them): every signal unblocked, and an ignored SIGCHLD back at its default. Other ignored signals stay
+    /// (nohup's SIGHUP is the launcher's choice, `exit_on_signals`). Some(what was found) when anything was changed, for hub.log.
+    /// macOS (#1456): the desktop app starts the guard from a GCD worker thread, which blocks every catchable signal but the synchronous ones;
+    /// std's posix_spawn passes that mask on, the guard passed it to the hub, and with SIGCHLD blocked tokio never learnt that a child had
+    /// ended: zombies piled up, and a `wait()` or `output()` whose child closed its pipes before it exited waited forever (a turn's snapshot).
+    pub fn reset_inherited_signals() -> Option<String> {
+        let mut found = vec![];
+        unsafe {
+            let mut m: libc::sigset_t = std::mem::zeroed(); libc::pthread_sigmask(libc::SIG_BLOCK, std::ptr::null(), &mut m);
+            let blocked: Vec<String> = (1..32).filter(|s| libc::sigismember(&m, *s) == 1).map(|s| s.to_string()).collect();
+            if !blocked.is_empty() {
+                found.push(format!("signals {} blocked{}", blocked.join(","), if libc::sigismember(&m, libc::SIGCHLD) == 1 { " (SIGCHLD among them)" } else { "" }));
+                let mut none: libc::sigset_t = std::mem::zeroed(); libc::sigemptyset(&mut none); libc::pthread_sigmask(libc::SIG_SETMASK, &none, std::ptr::null_mut());
+            }
+            if signal_ignored(libc::SIGCHLD) {
+                found.push("SIGCHLD ignored".into());
+                let mut dfl: libc::sigaction = std::mem::zeroed(); dfl.sa_sigaction = libc::SIG_DFL; libc::sigaction(libc::SIGCHLD, &dfl, std::ptr::null_mut());
+            }
+        }
+        (!found.is_empty()).then(|| found.join(", "))
+    }
+    /// One child of this process that has exited and is not reaped yet, left as it is (waitid WNOWAIT), or None.
+    pub fn exited_child() -> Option<u32> {
+        unsafe {
+            let mut si: libc::siginfo_t = std::mem::zeroed();
+            if libc::waitid(libc::P_ALL, 0, &mut si, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) != 0 { return None }
+            let pid = si.si_pid(); (pid > 0).then_some(pid as u32)
+        }
+    }
+    /// The hub's reaping does not hang on a SIGCHLD that never came (#1456). tokio reaps a child (and wakes its `wait()`) only when SIGCHLD
+    /// arrives, so a thread of its own takes SIGCHLD whatever mask the others have, and every `every` it looks for a child that exited and was
+    /// not reaped since the last look: then it says so in hub.log (once per child) and sends the hub a SIGCHLD, which makes tokio look again.
+    /// A child std started and dropped unwaited stays a zombie; it is said once, and the extra SIGCHLD costs nothing.
+    pub fn watch_reaping(every: std::time::Duration) {
+        let _ = std::thread::Builder::new().name("reap-watch".into()).spawn(move || {
+            unsafe { let mut s: libc::sigset_t = std::mem::zeroed(); libc::sigemptyset(&mut s); libc::sigaddset(&mut s, libc::SIGCHLD); libc::pthread_sigmask(libc::SIG_UNBLOCK, &s, std::ptr::null_mut()); }
+            let (mut last, mut said) = (None::<u32>, std::collections::HashSet::<u32>::new());
+            loop {
+                std::thread::sleep(every);
+                let now = exited_child();
+                if let Some(pid) = now.filter(|p| last == Some(*p)) {
+                    if said.insert(pid) {
+                        eprintln!("proc: child {pid} exited more than {} s ago and is not reaped (its SIGCHLD was missed{}): waking the reaper", every.as_secs(),
+                            if signal_ignored(libc::SIGCHLD) { "; SIGCHLD is ignored" } else { "" });
+                    }
+                    unsafe { libc::kill(libc::getpid(), libc::SIGCHLD); }
+                }
+                last = now;
+            }
+        });
+    }
     /// A signal that ends the hub says so in hub.log and exits nonzero (128 + the signal); SIGKILL cannot be caught.
     /// SIGHUP and SIGINT stay as the parent left them when it ignored them (nohup, a background `&`): registering would override that.
     pub fn exit_on_signals(on_exit: fn()) {
