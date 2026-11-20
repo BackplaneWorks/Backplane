@@ -37,6 +37,29 @@ interface ViewerFilesReply {
   hasGerbers?: boolean;
 }
 
+export interface RailHas {
+  board?: boolean;
+  schematic?: boolean;
+  mech?: boolean;
+  gerbers?: boolean;
+}
+
+function pageHasBacking(page: string, has: RailHas): boolean {
+  switch (page) {
+    case "board":
+    case "3d":
+      return has.board !== false;
+    case "schematic":
+      return has.schematic !== false;
+    case "mech":
+      return has.mech !== false;
+    case "gerbers":
+      return has.gerbers !== false;
+    default:
+      return true;
+  }
+}
+
 function basename(path: string | undefined): string {
   if (!path) return "";
   const clean = path.replace(/\\/g, "/").replace(/\/+$/, "");
@@ -58,6 +81,7 @@ function pageLabel(page: string): string {
 export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   open: (kind: string, threadId: string) => void;
   close: () => void;
+  reconcileHas: (has: RailHas) => void;
 } {
   const header = document.createElement("div");
   header.className = "bp-vh";
@@ -584,8 +608,14 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
             .catch(() => {});
         }
       }
+      // Rule (3): switching pages sends the destination page's viewer.watch directly (no separate stop first).
       page = kind;
       void startWatch(false);
+    },
+    reconcileHas(has: RailHas) {
+      if (page && !pageHasBacking(page, has)) {
+        api.closeViewer();
+      }
     },
     close() {
       watchGen++;
