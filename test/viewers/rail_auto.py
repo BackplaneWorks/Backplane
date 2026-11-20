@@ -26,7 +26,10 @@ from pathlib import Path
 
 # What the watcher types with real X keys at each `auto-act-type-<tag>` shot (lower-case letters only: no shift, no KiCad hotkey
 # that opens a dialog is ever typed into KiCad by a passing run).
-MARKERS = {"pre": "qpre", "mid": "qmid", "post": "qpost"}
+MARKERS = {"pre": "qpre", "post": "qpost"}
+# typed in the background (keys queued BEFORE the attach is sent) at xinput's fixed per-key pace, ~12 s: long enough to span KiCad's start
+BG_MARKER = "qbg" * 40
+A2_MARKER = "qatwoqatwo"
 
 GATES = ("a", "b", "c", "d", "e", "f", "g")
 
@@ -41,6 +44,28 @@ AUTO_SHOTS = (
 def is_action_only_shot(name: str) -> bool:
     """`auto-act-*` shots only release the watcher's action: no screenshot is saved for them (nothing to review, nothing to leak)."""
     return name.startswith("auto-act-")
+
+
+def build_a2_steps(tmo: int = 8000, painted: int = 90000) -> list[dict]:
+    """Gate a2, "pointer over the pane": the pointer is moved (no click) over where the pane will be, an Automatic attach is asked, and a
+    marker is typed with real X keys at the pointer. The watcher records the X input focus owner at every step (`auto-act-a2-*`)."""
+    return [
+        {"click": "ui:View"},
+        {"wait": 2000},
+        {"mark": "auto:a2:start"},
+        {"read": "composer"},
+        {"shot": "auto-act-a2-pointer", "settle": "", "timeout_ms": tmo},
+        {"mark": "auto:a2:attach"},
+        {"press": "rail:Board"},
+        {"kicad": {"attach": "board", "why": "auto", "tag": "auto-a2-attach"}},
+        {"kicad": {"wait_painted": painted, "kind": "PCB", "tag": "auto-a2-painted"}},
+        {"mark": "auto:a2:painted"},
+        {"shot": "auto-act-a2-type", "settle": "", "timeout_ms": tmo},
+        {"read": "composer"},
+        {"wait": 800},
+        {"kicad": {"report": True, "tag": "auto-a2-report"}},
+        {"mark": "auto:a2:done"},
+    ]
 
 
 def build_auto_steps(settle_timeout_ms: int = 15000) -> list[dict]:
@@ -68,12 +93,14 @@ def build_auto_steps(settle_timeout_ms: int = 15000) -> list[dict]:
         {"read": "composer"},
         {"mark": "auto:a:attach"},
         {"press": "rail:Board"},
+        # the long marker starts typing (queued keys) BEFORE the attach is sent and runs on while KiCad starts and the frame comes on show
+        {"shot": "auto-act-type-bg-start", "settle": "", "timeout_ms": tmo},
         {"kicad": {"attach": "board", "why": "auto", "tag": "auto-a-attach"}},
         {"mark": "auto:a:mid"},
-        {"shot": "auto-act-type-mid", "settle": "", "timeout_ms": tmo},
-        {"read": "composer"},
         {"kicad": {"wait_painted": painted, "kind": "PCB", "tag": "auto-a-painted"}},
         {"mark": "auto:a:painted"},
+        {"shot": "auto-act-type-bg-end", "settle": "", "timeout_ms": tmo},
+        {"read": "composer"},
         {"shot": "auto-act-type-post", "settle": "", "timeout_ms": tmo},
         {"read": "composer"},
         {"kicad": {"report": True, "tag": "auto-a-report"}},
@@ -159,6 +186,7 @@ def build_auto_steps(settle_timeout_ms: int = 15000) -> list[dict]:
         {"mark": "auto:f:old"},
         {"shot": "auto-act-stale-old", "settle": "", "timeout_ms": tmo},
         {"wait": 500},
+        *build_a2_steps(tmo, painted),
         # back to a clean viewer
         {"click": "ui:View"},
         {"wait": 1500},
@@ -318,6 +346,7 @@ def evaluate_auto_gates(
     presses = parsed_full.get("presses") or {}
     return [
         _gate_a(marks, kt, logs, comp, caps_full, actions, parsed_full),
+        _gate_a2(marks, kt, logs, comp, actions),
         _gate_b(marks, kt, logs, caps_full),
         _gate_c(marks, kt, logs, caps_full),
         _gate_d(marks, kt, logs, caps_full, presses),
@@ -335,11 +364,11 @@ KEY_LOGS = ("kicad_auto_keys_taken", "kicad_auto_to_deliberate", "kicad_key", "k
 
 def _gate_a(marks, kt, logs, comp, caps, actions, parsed) -> dict:
     gid = "a-frame-no-keyboard"
-    name = "Automatic attach shows KiCad in the pane and never takes the keyboard (marker typed before, during the start, after)"
-    typed = {t: _action(actions, f"type-{t}") for t in MARKERS}
-    for t, acts in typed.items():
+    name = "Automatic attach shows KiCad in the pane and never takes the keyboard (pointer away; marker typed before, across the start, after)"
+    need = {"pre": _action(actions, "type-pre"), "bg-start": _action(actions, "type-bg-start"), "bg-end": _action(actions, "type-bg-end"), "post": _action(actions, "type-post")}
+    for t, acts in need.items():
         if not acts or acts[-1].get("ok") is not True:
-            return _rec(gid, name, "unavailable", f"real X typing of the `{t}` marker was not delivered ({acts[-1].get('error') if acts else 'no action recorded'})")
+            return _rec(gid, name, "unavailable", f"real X typing step `{t}` was not delivered ({acts[-1].get('error') if acts else 'no action recorded'})")
     ok, why = _shot_ok(caps, "auto-a-frame")
     if not ok:
         return _rec(gid, name, "unavailable", why)
@@ -353,16 +382,18 @@ def _gate_a(marks, kt, logs, comp, caps, actions, parsed) -> dict:
         return _rec(gid, name, "unavailable", "no complete hub runtime block, or no real pane report / paint report to observe the frame")
     reads = _composer_reads_in(comp, marks.get("auto:start"), marks.get("auto:a:done"))
     if len(reads) < 4 or marks.get("auto:a:attach") is None:
-        return _rec(gid, name, "unavailable", f"expected 4 composer reads (start, pre, mid, post) and the attach mark, got {len(reads)} reads")
-    start, r_pre, r_mid, r_post = (r["text"] for r in reads[:4])
-    fails: list[str] = []
-    # "pre" was typed BEFORE the attach request
+        return _rec(gid, name, "unavailable", f"expected 4 composer reads (start, pre, after the long marker, post) and the attach mark, got {len(reads)} reads")
+    start, r_pre, r_bg, r_post = (r["text"] for r in reads[:4])
     if not reads[1]["seq"] < marks["auto:a:attach"]:
         return _rec(gid, name, "unavailable", "the `pre` composer read is not before the attach request")
-    exp = [start + MARKERS["pre"], start + MARKERS["pre"] + MARKERS["mid"], start + MARKERS["pre"] + MARKERS["mid"] + MARKERS["post"]]
-    for label, got, want in (("before", r_pre, exp[0]), ("during", r_mid, exp[1]), ("after", r_post, exp[2])):
+    exp_pre = start + MARKERS["pre"]
+    exp_bg = exp_pre + BG_MARKER
+    exp_post = exp_bg + MARKERS["post"]
+    fails: list[str] = []
+    for label, got, want in (("before the attach", r_pre, exp_pre), ("across the start", r_bg, exp_bg), ("after the frame", r_post, exp_post)):
         if got != want:
-            fails.append(f"composer after typing {label} the attach is {got!r}, expected {want!r} (keys went elsewhere)")
+            n_ok = next((i for i, (x, y) in enumerate(zip(got, want)) if x != y), min(len(got), len(want)))
+            fails.append(f"composer after typing {label} is not the expected text (first difference at character {n_ok} of {len(want)}): keys went elsewhere")
     if not _painted_ok(painted, "PCB"):
         fails.append(f"the Automatic attach did not end in a painted PCB frame (paint report state={painted.get('state')!r})")
     if _attached(rep) is not True:
@@ -388,17 +419,67 @@ def _gate_a(marks, kt, logs, comp, caps, actions, parsed) -> dict:
         fails.append(f"the client says KiCad took the keyboard ({taken})")
     if kicad_keys:
         fails.append(f"KiCad's container saw key events ({kicad_keys[:2]})")
-    mid = typed["mid"][-1]
-    mid_state = mid.get("kicad_state_before")
-    ev = {"composer": {"start": start, "pre": r_pre, "mid": r_mid, "post": r_post}, "report": {k: rep.get(k) for k in ("ok", "in_gpui_tree", "shown", "keys", "pid", "state")},
-          "hub_runtime": rt, "rail_lit": lit, "mid_typed_while_kicad_state": mid_state, "mid_typing_after_state": mid.get("kicad_state_after"),
+    t0, t1 = need["bg-start"][-1].get("t_ms"), need["bg-end"][-1].get("t_ms")
+    t_frame = painted.get("epoch_ms")
+    timing = {"typing_started_ms": t0, "typing_ended_ms": t1, "frame_painted_ms": t_frame,
+              "frame_after_typing_start_ms": None if not (_is_num(t0) and _is_num(t_frame)) else round(t_frame - t0), "typing_ended_after_frame_ms": None if not (_is_num(t1) and _is_num(t_frame)) else round(t1 - t_frame)}
+    ev = {"composer": {"start": start, "pre": r_pre, "after_long_marker_len": len(r_bg) - len(exp_pre), "post": r_post}, "long_marker_chars": len(BG_MARKER), "timing": timing,
+          "report": {k: rep.get(k) for k in ("ok", "in_gpui_tree", "shown", "keys", "pid", "state")}, "hub_runtime": rt, "rail_lit": lit,
           "kicad_side": "composer received all; KiCad-side: no kicad_key / kicad_key_dispatch log in the interval (those fire for keys KiCad's container receives)",
           "holder_is_this_client": holder_ev["note"]}
     if fails:
         return _rec(gid, name, "failed", "; ".join(fails), ev)
-    if mid_state != "starting":
-        return _rec(gid, name, "unavailable", f"composer received all of the marker and KiCad took none, but `mid` began when KiCad's state was {mid_state!r}, not `starting`: the typing during the start is not proven", ev)
-    return _rec(gid, name, "passed", "", ev)
+    if not (_is_num(t0) and _is_num(t1) and _is_num(t_frame)):
+        return _rec(gid, name, "unavailable", "composer received all of the marker and KiCad took none, but the typing or frame timestamps were not observed", ev)
+    if not t0 <= t_frame <= t1:
+        where = "after the typing ended" if t_frame > t1 else "before the typing began"
+        return _rec(gid, name, "unavailable", f"composer received all of the marker and KiCad took none, but the frame appeared {where} (typing {t0:.0f}-{t1:.0f} ms, frame {t_frame:.0f} ms): typing across the start is not proven", ev)
+    return _rec(gid, name, "passed", f"the frame appeared {timing['frame_after_typing_start_ms']} ms into a {round(t1 - t0)} ms typing window; every character landed in the composer in order", ev)
+
+
+def _is_num(v: object) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _gate_a2(marks, kt, logs, comp, actions) -> dict:
+    """Pointer over the pane, no click. Reported separately from (a), with the X input focus owner at every step."""
+    gid = "a2-pointer-over-pane"
+    name = "Automatic attach with the pointer over the pane (no click): where the typed marker goes, with the X focus trace"
+    ptr, typ = _action(actions, "a2-pointer"), _action(actions, "a2-type")
+    if not ptr or ptr[-1].get("ok") is not True or not typ or typ[-1].get("ok") is not True:
+        return _rec(gid, name, "unavailable", f"the pointer move or the real X typing was not delivered ({(ptr or typ or [{}])[-1].get('error')})")
+    p, t = ptr[-1], typ[-1]
+    config = p.get("focus_follows_mouse", "default")
+    rep = _report(kt, "auto-a2-report")
+    painted = _report(kt, "auto-a2-painted")
+    reads = _composer_reads_in(comp, marks.get("auto:a2:start"), marks.get("auto:a2:done"))
+    if not isinstance(rep, dict) or not isinstance(painted, dict) or len(reads) < 2:
+        return _rec(gid, name, "unavailable", "pane or paint report, or the composer reads, are missing")
+    pane = rep.get("pane") if isinstance(rep.get("pane"), dict) else None
+    px, py = p.get("pointer_xy") or (None, None)
+    inside = bool(pane and _is_num(px) and _is_num(py) and pane.get("x") <= px <= pane["x"] + pane["w"] and pane.get("y") <= py <= pane["y"] + pane["h"])
+    start, after = reads[0]["text"], reads[1]["text"]
+    got = after[len(start):] if after.startswith(start) else after
+    kicad_keys = [lg["obj"] for key in ("kicad_key", "kicad_key_dispatch") for lg in _logs_between(logs, marks.get("auto:a2:attach"), marks.get("auto:a2:done"), key)]
+    taken = [lg["obj"] for key in ("kicad_auto_keys_taken", "kicad_auto_to_deliberate") for lg in _logs_between(logs, marks.get("auto:a2:attach"), marks.get("auto:a2:done"), key)]
+    ev = {"focus_follows_mouse": config, "trace": {"before_attach": p.get("trace"), "frame_appeared": t.get("trace_frame"), "typing_start": t.get("trace_typing_start"), "typing_end": t.get("trace_typing_end")},
+          "pointer": {"xy": [px, py], "inside_pane_report_rect": inside, "pane_rect": pane, "motions": p.get("motions"), "clicks": p.get("clicks")},
+          "typed": A2_MARKER, "composer_received": got, "pane_keys": rep.get("keys"), "kicad_key_logs": kicad_keys[:3], "client_says_keyboard_taken": taken[:2],
+          "painted_ok": _painted_ok(painted, "PCB"), "frame_mounted": _attached(rep)}
+    if not inside or p.get("clicks") != 0:
+        return _rec(gid, name, "unavailable", f"the pointer was not over the pane (inside={inside}) or a click happened (clicks={p.get('clicks')})", ev)
+    if not _painted_ok(painted, "PCB") or _attached(rep) is not True:
+        return _rec(gid, name, "unavailable", "the Automatic attach did not end in a mounted, painted PCB frame: nothing to type into", ev)
+    all_in_composer = got == A2_MARKER
+    kicad_got = bool(kicad_keys) or rep.get("keys") is True or bool(taken) or not all_in_composer
+    if not kicad_got:
+        return _rec(gid, name, "passed", f"with focus_follows_mouse={config}, the pointer over the pane and no click, the whole marker landed in the composer and KiCad took none", ev)
+    where = "KiCad (or elsewhere): the composer got " + repr(got)
+    if config == "no":
+        ev["verdict"] = "PRODUCT FAULT CANDIDATE: focus_follows_mouse is off, no click and no pointer motion beyond the one move, yet the keys did not stay with the composer"
+        return _rec(gid, name, "failed", f"focus_follows_mouse=no: the typed marker went to {where}", ev)
+    ev["verdict"] = "window manager: this harness's i3 follows the pointer for focus; people on sloppy-focus desktops see the same. Not a product verdict (reported)"
+    return _rec(gid, name, "unavailable", f"focus_follows_mouse={config}: the typed marker went to {where}; reported, not a product verdict", ev)
 
 
 def _holder_is_this_client(rt: dict, logs: list[dict], marks: dict, hub_clients: dict[str, int], report: dict) -> dict:
@@ -477,37 +558,44 @@ def _gate_c(marks, kt, logs, caps) -> dict:
         fails.append(f"Board and Schematic are not two different frames of the one KiCad (shown {ev['frames']})")
     sent = _logs_between(logs, marks.get("auto:c:schematic"), marks.get("auto:c:done"), "kicad_rpc_sent")
     ev["rpcs_sent_during_switches"] = [s["obj"]["kicad_rpc_sent"] for s in sent]
-    # second half: a frame switch with no new geometry is `kicad_place` changed:false, frame_changed:true (and no changed:true push)
+    # second half, judged on what is real (NOT the log's `changed` flag, which compares with the pane's `placed` that the pane resets to force a
+    # re-place): count the placements (`kicad_place` lines with a rect) and the synthetic notifies of each switch and compare the rects
+    # ourselves. A switch is one placement at the unchanged rect (the tab switch's own, which the map needs) and no further same-rect ones.
     switches = (("board->schematic", "auto:c:schematic", "auto:c:back"), ("schematic->board", "auto:c:back", "auto:c:done"))
-    placed: dict = {}
+    seq: dict = {}
     for label, lo, hi in switches:
-        evs = [lg["obj"] for lg in _logs_between(logs, marks.get(lo), marks.get(hi), "kicad_place")]
-        placed[label] = [{"changed": e.get("changed"), "frame_changed": e.get("frame_changed"), "why": e.get("why"), "frame": e.get("frame"), "rect": e.get("kicad_place")} for e in evs]
-    ev["placements"] = placed
-    # the rect each switch's placements carry against the last rect placed before the switch (same rect + changed:true = a push of unchanged geometry)
+        seq[label] = [{"place": lg["obj"].get("kicad_place"), "visible": lg["obj"].get("visible"), "frame": lg["obj"].get("frame"), "kind": lg["obj"].get("kind"),
+                       "why": lg["obj"].get("why"), "at_ms": lg["obj"].get("at_ms"), "log_changed": lg["obj"].get("changed"), "log_frame_changed": lg["obj"].get("frame_changed")}
+                      for lg in _logs_between(logs, marks.get(lo), marks.get(hi), "kicad_place")]
+    notifies = {label: [{"rect": lg["obj"].get("kicad_place_notify"), "why": lg["obj"].get("why"), "frame": lg["obj"].get("frame")}
+                        for lg in _logs_between(logs, marks.get(lo), marks.get(hi), "kicad_place_notify")] for label, lo, hi in switches}
+    rect_before = {}
     for label, lo, _hi in switches:
         before = [lg["obj"].get("kicad_place") for lg in logs if marks.get(lo) is not None and lg["seq"] < marks[lo] and isinstance(lg["obj"].get("kicad_place"), list)]
-        prev = before[-1] if before else None
-        ev.setdefault("rect_before_switch", {})[label] = prev
-        ev.setdefault("rect_unchanged_by_switch", {})[label] = bool(prev is not None and placed[label] and all(e["rect"] == prev for e in placed[label] if e["rect"] is not None))
-    notifies = {label: len(_logs_between(logs, marks.get(lo), marks.get(hi), "kicad_place_notify")) for label, lo, hi in switches}
-    ev["place_notifies"] = notifies
-    ev["place_notify_note"] = f"kicad_place_notify per switch {notifies}: same-rect synthetic ConfigureNotifies are expected and are not geometry pushes"
-    seen = all(placed[label] for label, _lo, _hi in switches)
+        rect_before[label] = before[-1] if before else None
+    counts = {label: {"placements": len([x for x in seq[label] if isinstance(x["place"], list)]), "null_placements": len([x for x in seq[label] if x["place"] is None]),
+                      "notifies": len(notifies[label]), "same_rect_as_before_switch": all(x["place"] == rect_before[label] for x in seq[label] if isinstance(x["place"], list))}
+              for label, _lo, _hi in switches}
+    ev["place_sequence"] = seq
+    ev["place_notify_sequence"] = notifies
+    ev["place_counts"] = counts
+    ev["rect_before_switch"] = rect_before
+    ev["place_notify_note"] = f"counts per switch {counts}: one placement at an unchanged rect is the tab switch's own; the others (the X frames poll, the hub's frames echo) each send KiCad a synthetic ConfigureNotify"
+    seen = all(seq[label] for label, _lo, _hi in switches)
     if seen:
         for label, _lo, _hi in switches:
-            evs = placed[label]
-            if not any(e["frame_changed"] is True and e["changed"] is False for e in evs):
-                fails.append(f"{label}: no placement with frame_changed:true and changed:false (placements {evs})")
-            if any(e["changed"] is True for e in evs):
-                fails.append(f"{label}: {len([e for e in evs if e['changed'] is True])} placement(s) with changed:true on a frame switch"
-                             f" (rect identical to the one before the switch: {ev['rect_unchanged_by_switch'][label]})")
+            c = counts[label]
+            if c["placements"] != 1 or not c["same_rect_as_before_switch"] or c["null_placements"]:
+                fails.append(f"{label}: {c['placements']} placement(s) (+{c['null_placements']} off-screen), {c['notifies']} notify line(s), rect unchanged: {c['same_rect_as_before_switch']}; "
+                             "expected exactly one placement at an unchanged rect")
     if fails:
-        return _rec(gid, name, "failed", "; ".join(fails), ev)
+        known = [f for f in fails if "placement(s)" in f]
+        prefix = "known failure, pane re-places more than once at an unchanged rect; owned by the KiCad lead / Climb W: " if known else ""
+        return _rec(gid, name, "failed", prefix + "; ".join(fails), ev)
     if not seen:
         return _rec(gid, name, "unavailable",
                     "measured: each switch ended in a painted PCB/SCH frame and the hub's pid equals the pane's pid every time (one process, two frames). "
-                    "Unproven: no geometry push per switch, since no `kicad_place` log lines exist in this run (they need BACKPLANE_KICAD_DEBUG and a client built from main with PR #1455)", ev)
+                    "Unproven: the placements per switch, since no `kicad_place` log lines exist in this run (they need BACKPLANE_KICAD_DEBUG and a client built from main with PR #1455)", ev)
     return _rec(gid, name, "passed", ev["place_notify_note"], ev)
 
 
@@ -666,3 +754,31 @@ def _gate_f(actions) -> dict:
         missing = {k: v for k, v in results.items() if not isinstance(v, dict)}
         return _rec(gid, name, "unavailable", "both the future-generation and the old-generation probes must be measured; not measured: " + "; ".join(f"{k}: {v}" for k, v in missing.items()), ev)
     return _rec(gid, name, "passed", "", ev)
+
+
+def _main(argv: list[str]) -> int:
+    """`rail_auto.py a2 RUN_KIND_DIR`: evaluate gate a2 of an a2-only run and write `a2-trace.json` beside the run's log (the X focus trace
+    at every step, for the KiCad lead). Exit 0 always: the verdict is in the printed record."""
+    import json
+    import sys
+
+    if len(argv) != 3 or argv[1] != "a2":
+        print("usage: rail_auto.py a2 RUN_KIND_DIR", file=sys.stderr)
+        return 2
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import rail_shots_post as P
+
+    kdir = Path(argv[2])
+    parsed = P.parse_client_log(kdir / "client.log")
+    actions = P.parse_auto_actions(kdir)
+    marks = parsed.get("mark_seqs") or {}
+    rec = _gate_a2(marks, parsed.get("kicad_tags") or {}, parsed.get("gpui_logs") or [], parsed.get("composer_reads") or [], actions)
+    (kdir / "a2-trace.json").write_text(json.dumps({"gate": rec, "actions": [a for a in actions if str(a.get("action", "")).startswith("a2-")]}, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(rec, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    raise SystemExit(_main(sys.argv))

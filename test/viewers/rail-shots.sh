@@ -63,6 +63,7 @@ fi
 
 # RAIL_THEME=dark|light and RAIL_TEXT_PCT=100|125 (both optional); anything else exits 2 (rail_local_settings.py)
 python3 "$SCRIPT_DIR/rail_local_settings.py" --check || exit 2
+case "${RAIL_I3_FFM:-}" in ""|yes|no) ;; *) echo "rail-shots: RAIL_I3_FFM must be yes or no" >&2; exit 2 ;; esac
 
 if [ "${#POS_ARGS[@]}" -lt 4 ]; then
   echo "usage: $0 [--embed] [--share] CLIENT_BIN HUB_BIN ASSETS_DIR OUTDIR" >&2
@@ -325,6 +326,8 @@ default_border none
 hide_edge_borders both
 ipc-socket $RUN/i3.sock
 EOF
+# RAIL_I3_FFM=yes|no sets i3's focus_follows_mouse (unset: i3's default, which follows the pointer)
+[ -z "${RAIL_I3_FFM:-}" ] || echo "focus_follows_mouse $RAIL_I3_FFM" >>"$RUN/i3.conf"
 own env DISPLAY="$DISP" XDG_RUNTIME_DIR="$RUN/run" i3 -c "$RUN/i3.conf" >"$RUN/i3.log" 2>&1
 for _ in $(seq 40); do [ -S "$RUN/i3.sock" ] && break; sleep 0.1; done
 
