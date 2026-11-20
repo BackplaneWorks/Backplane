@@ -58,7 +58,11 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         | "POST /voice/in"
         | "voice.start"
         | "voice.stop"
-        | "work.act" => Activity,
+        | "work.act"
+        | "clone.start"
+        | "clone.cancel"
+        | "clone.retry"
+        | "clone.signin" => Activity,
         "attachment.get"
         | "badge.list"
         | "bot.cat"
@@ -66,6 +70,9 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         | "bots.list"
         | "cat.rig"
         | "dirs.list"
+        | "clone.status"
+        | "clone.repos"
+        | "clone.dest"
         | "fab.profile"
         | "files.entries"
         | "history.list"

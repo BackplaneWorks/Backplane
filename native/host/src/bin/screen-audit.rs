@@ -14,6 +14,8 @@
 #[path="../present/swarm_need.rs"] #[allow(dead_code)] pub mod swarm_need;
 #[path="../session/slash.rs"] mod slash;
 #[path="../session/composer.rs"] pub mod composer;
+/// The composer's `/project <address>` asks the hub's clone module, which this program does not have: no address is one here.
+mod commands { pub mod clone { pub fn parse_address(_: &str) -> Option<()> { None } } }
 #[path="../session/patch.rs"] pub mod patch;
 #[path="../session/select.rs"] pub mod select;
 #[path="../session/pages.rs"] pub mod pages;

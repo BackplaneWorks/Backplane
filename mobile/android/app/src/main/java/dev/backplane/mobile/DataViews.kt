@@ -98,7 +98,7 @@ internal fun dAgo(ms: Long): String {
 @Composable internal fun DDot(c: Color, size: Int = 6) = Box(Modifier.size(size.dp).background(c))
 @Composable internal fun DLine() = Box(Modifier.fillMaxWidth().height(1.dp).background(dcs.outlineVariant))
 
-private sealed interface Page { object Improve : Page; data class Room(val room: DataClient.Room) : Page; data class Viewer(val id: String, val file: String = "", val line: Int = 0) : Page; object Home : Page; data class Hub(val from: Page) : Page; data class Thread(val id: String, val from: Page? = null) : Page; data class Swarm(val room: String) : Page; data class Sub(val id: String, val key: String) : Page; object Settings : Page; object Folders : Page; data class New(val project: String) : Page; object Accounts : Page; object Mcp : Page; data class Term(val key: String, val from: Page) : Page; data class Terms(val project: String?, val from: Page) : Page; data class Account(val id: String, val start: Boolean, val n: Long = System.nanoTime()) : Page }
+private sealed interface Page { object Improve : Page; data class Room(val room: DataClient.Room) : Page; data class Viewer(val id: String, val file: String = "", val line: Int = 0) : Page; object Home : Page; data class Hub(val from: Page) : Page; data class Thread(val id: String, val from: Page? = null) : Page; data class Swarm(val room: String) : Page; data class Sub(val id: String, val key: String) : Page; object Settings : Page; data class Folders(val clone: CloneAsk? = null) : Page; data class New(val project: String) : Page; object Accounts : Page; object Mcp : Page; data class Term(val key: String, val from: Page) : Page; data class Terms(val project: String?, val from: Page) : Page; data class Account(val id: String, val start: Boolean, val n: Long = System.nanoTime()) : Page }
 
 @Composable
 fun DataRoot() {
@@ -107,7 +107,9 @@ fun DataRoot() {
     LaunchedEffect(DataClient.openAccount) { DataClient.openAccount?.let { page = Page.Account(it, true); DataClient.openAccount = null } }
     LaunchedEffect(DataClient.openFromIntent) { DataClient.openFromIntent?.let { page = if (DataClient.openViewerTab != null) Page.Viewer(it) else Page.Thread(it); DataClient.openFromIntent = null } }
     // a link the hub resolved (DataLinks.kt): its screen
-    LaunchedEffect(DataClient.openAddProject) { if (DataClient.openAddProject) { DataClient.openAddProject = false; page = Page.Folders } }
+    LaunchedEffect(DataClient.openAddProject) { if (DataClient.openAddProject) { DataClient.openAddProject = false; page = Page.Folders() } }
+    // /project <address>: Add project on Clone from git with it
+    LaunchedEffect(Clones.ask) { Clones.ask?.let { page = Page.Folders(it); Clones.ask = null } }
     LaunchedEffect(DataClient.linkTarget) {
         val t = DataClient.linkTarget ?: return@LaunchedEffect
         DataClient.linkTarget = null
@@ -126,7 +128,7 @@ fun DataRoot() {
     Box(Modifier.fillMaxSize().background(dcs.background).windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.ime))) {
         if (DataClient.link == null || DataClient.needsRepair || DataClient.adding) { if (DataClient.adding && DataClient.link != null) BackHandler { DataClient.adding = false }; PairScreen() }
         else CompositionLocalProvider(LocalTermOpen provides { k: String -> page = Page.Term(k, page.let { if (it is Page.Term) it.from else it }) }, LocalTermsOpen provides { pr: String? -> page = Page.Terms(pr, page) }) { when (val p = page) {
-            Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Hub(Page.Home) }, { page = Page.Folders }, { page = Page.New(it) }, { page = Page.Swarm(it) }) { page = Page.Room(it) }
+            Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Hub(Page.Home) }, { page = Page.Folders() }, { page = Page.New(it) }, { page = Page.Swarm(it) }) { page = Page.Room(it) }
             is Page.Term -> { BackHandler { page = p.from }; TermFull(p.key, Msg.palette_terminal) { page = p.from } }
             is Page.Terms -> { BackHandler { page = p.from }; TermsScreen(p.project, { page = p.from }) { page = Page.Term(it, p) } }
             is Page.Viewer -> { BackHandler { page = Page.Thread(p.id) }; DataClient.threads.firstOrNull { it.id == p.id }?.let { ViewerScreen(it, p.file, p.line) { page = Page.Thread(p.id) } }
@@ -141,7 +143,7 @@ fun DataRoot() {
             is Page.Account -> { BackHandler { page = Page.Accounts }; key(p) { AccountScreen(p.id, p.start, { page = Page.Accounts }) { page = Page.Account(it, false) } } } // each opening its own screen: an alert's tap reads the account afresh and starts the sign-in
             is Page.Hub -> { BackHandler { page = p.from }; HubScreen { page = p.from } }
             Page.Improve -> { BackHandler { page = Page.Settings }; ImproveScreen { page = Page.Settings } }
-            Page.Folders -> { BackHandler { page = Page.Home }; FolderScreen({ page = Page.Home }) { page = Page.New(it) } }
+            is Page.Folders -> { BackHandler { page = Page.Home }; key(p) { FolderScreen(p.clone, { page = Page.Home }, { page = Page.New(it) }) { t -> page = if (t != null) Page.Thread(t) else Page.Home } } }
             is Page.New -> { BackHandler { page = Page.Home }; NewThreadScreen(p.project, { page = Page.Home }) { page = Page.Thread(it) } }
         } }
         DataClient.askLink?.let { AskPair(it) }
@@ -745,6 +747,8 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
                             "intent" -> { notice = Msg.intent_saved; put("") }
                             // /project: alone, the Add project screen; made, its first thread opens; a folder that holds something, Add existing under the reason
                             "project" -> { put(""); DataClient.openAddProject = true }
+                            // /project <repository address> [message]: Add project's Clone from git on it, the message kept for its first thread
+                            "clone" -> { put(""); Clones.ask = CloneAsk(r.optString("repo"), r.optString("text")) }
                             "made" -> { put(""); notice = r.optString("note"); r.optString("thread").takeIf { it.isNotEmpty() }?.let { DataClient.linkTarget = LinkTarget(LinkTarget.Kind.THREAD, it) } }
                             "exists" -> { notice = r.optString("error"); existing = r.optString("path") }
                             else -> put("")
@@ -1110,25 +1114,41 @@ private fun UpdateSection() {
     }
 }
 
+/** Add project: Open folder (a folder on the hub's machine) or, when the hub has it (feature "clone"), Clone from git. */
 @Composable
-private fun FolderScreen(back: () -> Unit, added: (String) -> Unit) {
+private fun FolderScreen(ask: CloneAsk?, back: () -> Unit, added: (String) -> Unit, cloned: (String?) -> Unit) {
     val scope = rememberCoroutineScope()
-    var path by remember { mutableStateOf<String?>(null) }
+    val can = DataClient.has("clone")
+    // on Clone from git when /project named a repository, or while a clone this phone started runs
+    var clone by remember { mutableStateOf(can && (ask != null || Clones.jobs[Clones.following]?.running == true)) }
+    var err by remember { mutableStateOf("") }
+    Column(Modifier.fillMaxSize()) {
+        DBar(Msg.android_project_add, back)
+        if (can) ModeSwitch(clone) { clone = it }
+        if (can && clone) Box(Modifier.weight(1f)) { CloneBody(ask, cloned) }
+        else Box(Modifier.weight(1f)) {
+            FolderBrowser(null, Msg.android_folder_use, "folders.use", err) { cur -> scope.launch { try { added(DataClient.addProject(cur).id) } catch (e: Exception) { err = e.message ?: "" } } }
+        }
+    }
+}
+/** The hub machine's folders (dirs.list) from [start] (null: the hub's own start), and a button that takes the one shown. */
+@Composable
+internal fun FolderBrowser(start: String?, label: String, tag: String, refusal: String = "", use: (String) -> Unit) {
+    var path by remember { mutableStateOf(start) }
     var cur by remember { mutableStateOf("") }
     var parent by remember { mutableStateOf<String?>(null) }
     var dirs by remember { mutableStateOf<List<String>>(emptyList()) }
     var err by remember { mutableStateOf("") }
     LaunchedEffect(path) { try { val (p, par, d) = DataClient.dirs(path); cur = p; parent = par; dirs = d; err = "" } catch (e: Exception) { err = e.message ?: "" } }
     Column(Modifier.fillMaxSize()) {
-        DBar(Msg.android_project_add, back)
         DMono(cur, dcs.onSurface, 12, Modifier.padding(12.dp))
-        if (err.isNotEmpty()) Text(Tr.t(err), color = dcs.error, modifier = Modifier.padding(horizontal = 12.dp))
+        err.ifEmpty { refusal }.takeIf { it.isNotEmpty() }?.let { Text(Tr.t(it), color = dcs.error, modifier = Modifier.padding(horizontal = 12.dp)) }
         LazyColumn(Modifier.weight(1f)) {
             if (parent != null) item { FolderRow("..") { path = parent } }
             items(dirs) { d -> FolderRow(d) { path = cur.trimEnd('/') + "/" + d } }
         }
         DLine()
-        Box(Modifier.padding(12.dp)) { DBtn(Msg.android_folder_use, true, cur.isNotEmpty(), Modifier.testTag("folders.use")) { scope.launch { try { added(DataClient.addProject(cur).id) } catch (e: Exception) { err = e.message ?: "" } } } }
+        Box(Modifier.padding(12.dp)) { DBtn(label, true, cur.isNotEmpty(), Modifier.testTag(tag)) { use(cur) } }
     }
 }
 @Composable private fun FolderRow(name: String, onClick: () -> Unit) {

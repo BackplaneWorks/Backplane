@@ -115,6 +115,8 @@ export interface SidebarCallbacks {
   onNeedAct?: (a: NeedAction) => Promise<void>;
   /** this client has a room view: a need's `board` opens it */
   hasRoomView?: boolean;
+  /** The + beside the projects' heading: Add project. */
+  onAddProject?: () => void;
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -166,6 +168,7 @@ export class SidebarView {
   private filterText = "";
   private showSettled = new Set<string>();
   private collapsedProjects = new Set<string>();
+  private addShown = false;
 
   private sections: SidebarSection[] | null = null;
   private projects: ProjectItem[] = [];
@@ -298,6 +301,34 @@ export class SidebarView {
     this.filterInput.placeholder = ph;
     this.filterInput.setAttribute("aria-label", ph);
     this.render();
+  }
+
+  /** A projects heading with Add project's + at its right (the first projects heading only). */
+  private projectsHead(title: string): HTMLElement {
+    const head = document.createElement("div");
+    head.className = "bp-side-section-head";
+    if (!this.cb.onAddProject || this.addShown) {
+      head.textContent = title;
+      return head;
+    }
+    this.addShown = true;
+    head.classList.add("bp-side-section-row");
+    const lbl = document.createElement("span");
+    lbl.textContent = title;
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "bp-side-sec-plus bp-side-sec-btn";
+    add.textContent = "+";
+    const tip = t("sidebar.add.project", "Add project");
+    add.title = tip;
+    add.setAttribute("aria-label", tip);
+    add.setAttribute("data-testid", "sidebar-add-project");
+    add.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.cb.onAddProject?.();
+    });
+    head.append(lbl, add);
+    return head;
   }
 
   private renderSectionThreadRow(row: SectionThreadRow, showTreeBranch: boolean): HTMLElement {
@@ -464,10 +495,7 @@ export class SidebarView {
           });
           secWrap.appendChild(headBtn);
         } else {
-          const head = document.createElement("div");
-          head.className = "bp-side-section-head";
-          head.textContent = sec.title.toUpperCase();
-          secWrap.appendChild(head);
+          secWrap.appendChild(this.projectsHead(sec.title.toUpperCase()));
         }
 
         if (!isFoldable || sec.open || Boolean(q)) {
@@ -556,6 +584,7 @@ export class SidebarView {
   }
 
   public render(): void {
+    this.addShown = false;
     const frag = document.createDocumentFragment();
     const q = this.filterText;
 
@@ -574,10 +603,7 @@ export class SidebarView {
         byProject.set(th.project, list);
       }
 
-      const activeHead = document.createElement("div");
-      activeHead.className = "bp-side-section-head";
-      activeHead.textContent = "ACTIVE";
-      frag.appendChild(activeHead);
+      frag.appendChild(this.projectsHead("ACTIVE"));
 
       if (this.projects.length === 0 && this.threads.length === 0) {
         const empty = document.createElement("div");

@@ -260,7 +260,8 @@ export class ComposerView {
   }
 
   public setCommands(cmds: SlashCommand[]): void {
-    this.commands = cmds;
+    // the hub's words carry their slash ("/project", session/composer.rs WORDS); the composer keeps the bare word
+    this.commands = cmds.map((c) => ({ ...c, word: c.word.replace(/^\//, "") }));
   }
 
   public setModelChip(chip: string, provider?: string, ctxPct?: number): void {

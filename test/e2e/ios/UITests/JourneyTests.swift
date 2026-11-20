@@ -1234,6 +1234,52 @@ final class Journeys: XCTestCase {
         d.step("3: the Unsent row is gone", timeout: 15, act: {}, expect: { !(0..<tags.count).contains { tags.element(boundBy: $0).label.uppercased().contains("UNSENT") } })
         d.shot("3b-far-link-back-delivered")
     }
+
+    // Clone from git (docs/CLONE.md) on a Rust hub of our own (scripts/mobile/ios-clone-journey.sh: a stand-in gh that starts signed out and signs in
+    // as "alex" by its device code, a temp HOME whose ~/Documents/kit holds something). CLONE_REPO: a large local bare repository with a KiCad project
+    // (file:///...), CLONE_REPO2: a small one without. Sign in, suggestions, the destination and its refusal, Cancel, Try again, the notes, its
+    // thread; then `/project <address> <message>` in the composer opens Clone on it and the clone's thread gets the message.
+    func test_data_clone() {
+        d = Driver("data-clone"); defer { d.finish() }
+        let d = self.d!
+        let repo = d.env["CLONE_REPO"] ?? "", repo2 = d.env["CLONE_REPO2"] ?? ""
+        guard !repo.isEmpty, !repo2.isEmpty else { d.block("CLONE_REPO and CLONE_REPO2 are not set"); return }
+        func lab(_ id: String) -> String { let e = d.el(id); return e.exists ? e.label : "" }   // never read a missing element (XCUITest fails the test at once)
+        func val(_ id: String) -> String { let e = d.el(id); return e.exists ? (e.value as? String ?? "") : "" }
+        func clear(_ f: XCUIElement) { d.tap(f); let n = (f.value as? String)?.count ?? 0; if n > 0 { f.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: n + 2)) } }
+        d.launch()
+        guard d.step("Add project", act: { d.tap(d.el("data.project.add")) }, expect: { d.el("data.project.mode.clone").waitForExistence(timeout: 10) }) else { return }
+        d.shot("sheet")
+        guard d.step("Clone from git", act: { d.tap(d.el("data.project.mode.clone")) }, expect: { d.el("data.clone.repo").exists }) else { return }
+        d.step("signed out: the hint and Sign in", timeout: 25, act: {}, expect: { d.el("data.clone.hint").exists && d.el("data.clone.signin").exists })
+        d.shot("signedout")
+        d.step("Sign in shows the device code", timeout: 20, act: { d.tap(d.el("data.clone.signin")) }, expect: { lab("data.clone.signin.code") == "ABCD-1234" && d.el("data.clone.signin.open").exists })
+        d.shot("signin-code")
+        let f = d.el("data.clone.repo")
+        d.step("signed in: suggestions as I type", timeout: 45, act: { d.tap(f); d.type(f, "kit") }, expect: { d.el("data.clone.suggest.alex/kit-board").exists })
+        d.shot("suggestions")
+        d.step("a typed address: its destination", timeout: 15, act: { clear(f); d.type(f, repo) }, expect: { lab("data.clone.dest").contains("Documents/kit-2") })
+        d.shot("dest")
+        let name = d.el("data.clone.name"), go = d.app.buttons["data.clone.go"]   // the button, not the bar item around it (which is always enabled)
+        d.step("a folder that holds something: refused, Clone off", timeout: 15, act: { clear(name); name.typeText("kit") }, expect: { lab("data.clone.dest.error").contains("isn't empty") && !go.isEnabled })
+        d.shot("refused")
+        d.step("a free name: Clone on", timeout: 15, act: { clear(name); name.typeText("kit-board") }, expect: { !d.el("data.clone.dest.error").exists && go.isEnabled && lab("data.clone.dest").contains("kit-board") })
+        guard d.step("Clone: progress", timeout: 20, act: { d.tap(go) }, expect: { d.el("data.clone.cancel").exists && d.el("data.clone.job.progress").exists }) else { return }
+        d.shot("progress")
+        d.step("Cancel", timeout: 20, act: { d.tap(d.el("data.clone.cancel")) }, expect: { d.el("data.clone.retry").exists && lab("data.clone.job.error") == "Cancelled" })
+        d.shot("cancelled")
+        d.step("Try again: done, with the notes", timeout: 120, act: { d.tap(d.el("data.clone.retry")) }, expect: { d.el("data.clone.note").exists && d.el("data.clone.open").exists })
+        d.notes.append("note: " + lab("data.clone.note"))
+        d.shot("done-notes")
+        d.step("Open thread", timeout: 20, act: { d.tap(d.el("data.clone.open")) }, expect: { d.el("thread.composer").waitForExistence(timeout: 15) })
+        d.shot("thread")
+        let comp = d.el("thread.composer")
+        d.step("/project <address> <message>: Clone opens on it", timeout: 20, act: { d.tap(comp); d.type(comp, "/project \(repo2) hello from the clone"); d.tap(d.el("thread.send")) },
+               expect: { d.el("data.clone.repo").exists && val("data.clone.repo") == repo2 && d.el("data.clone.dest").exists })
+        d.shot("slash-project")
+        d.step("Clone: no notes, its thread at once with the message", timeout: 60, act: { d.tap(d.el("data.clone.go")) }, expect: { d.el("thread.composer").exists && !d.el("data.clone.repo").exists && d.label("hello from the clone").exists })
+        d.shot("thread2")
+    }
 }
 
 extension XCUIElement {

@@ -469,6 +469,23 @@ hub.acct.claude.cli.login	Claude CLI login	Claude CLI ログイン	Sesión de Cl
 hub.acct.codex.cli.login	Codex CLI login	Codex CLI ログイン	Sesión de Codex CLI
 hub.acct.fable.weekly	Fable weekly	Fable 週間	Semanal Fable
 ios.acct.also	Also added as {names}: the same account, counted once	{names} としても追加済み：同じアカウントとして一度だけ数えます	También añadida como {names}: la misma cuenta, contada una vez
+ios.clone.mode	Clone from git	Gitからクローン	Clonar desde git
+ios.clone.repo.hint	https or ssh URL, or owner/repo	https または ssh の URL、または owner/repo	URL https o ssh, o owner/repo
+ios.clone.signin	Sign in to GitHub	GitHub にサインイン	Iniciar sesión en GitHub
+ios.clone.change	Change folder	フォルダを変更	Cambiar carpeta
+ios.clone.name	Folder name	フォルダ名	Nombre de la carpeta
+ios.clone.thread	Start a thread	スレッドを始める	Empezar un hilo
+ios.clone.go	Clone	クローン	Clonar
+ios.clone.into	Into {dest}	保存先：{dest}	En {dest}
+ios.clone.same	That folder is a clone of it already: it is added as it is.	そのフォルダはすでにこのリポジトリのクローンです。そのまま追加します。	Esa carpeta ya es un clon: se añade tal cual.
+ios.clone.title	Cloning {repo}	{repo} をクローン中	Clonando {repo}
+ios.clone.cloned	Cloned {repo}	{repo} をクローンしました	{repo} clonado
+ios.clone.cancelled	Cancelled	キャンセルしました	Cancelado
+ios.clone.code	Enter this code at {url}	このコードを {url} で入力してください	Introduce este código en {url}
+ios.clone.signin.starting	Starting the sign-in…	サインインを開始中…	Iniciando la sesión…
+ios.clone.signin.done	Signed in to GitHub.	GitHub にサインインしました。	Sesión iniciada en GitHub.
+ios.clone.signin.open	Open the page	ページを開く	Abrir la página
+ios.clone.loading	Reading your repositories…	リポジトリを読み込み中…	Leyendo tus repositorios…
 common.cancel	Cancel	キャンセル	Cancelar
 common.delete	Delete	削除	Eliminar
 common.save	Save	保存	Guardar
@@ -4207,6 +4224,39 @@ android.copy.run	Run in terminal	ターミナルで実行	Ejecutar en la termina
 android.copy.fullscreen	The terminal is running a full-screen program: quit it, then try again.	ターミナルで全画面のプログラムが動いています。終了してからもう一度お試しください。	La terminal está ejecutando un programa a pantalla completa: ciérralo y vuelve a intentarlo.
 android.term.chat.old	This hub has no terminal for chats yet. Update it to use one here.	このハブにはまだチャットのターミナルがありません。使うにはハブを更新してください。	Este hub aún no tiene terminal para los chats. Actualízalo para usarla aquí.
 android.browser.head	BROWSER	ブラウザー	NAVEGADOR
+android.clone.mode.folder	Open folder	フォルダを開く	Abrir carpeta
+android.clone.mode.git	Clone from git	Git からクローン	Clonar desde git
+android.clone.repo.hint	https or ssh URL, or owner/repo	https または ssh の URL、または owner/repo	URL https o ssh, o propietario/repo
+android.clone.private	private	非公開	privado
+android.clone.signin	Sign in to GitHub	GitHub にサインイン	Iniciar sesión en GitHub
+android.clone.into	Clone into	クローン先	Clonar en
+android.clone.folder.change	Change folder	フォルダを変更	Cambiar carpeta
+android.clone.folder.use	Clone into this folder	このフォルダにクローン	Clonar en esta carpeta
+android.clone.name.hint	Folder name	フォルダ名	Nombre de la carpeta
+android.clone.thread	Start a thread	スレッドを開始	Iniciar un hilo
+android.clone.go	Clone	クローン	Clonar
+android.clone.same	That folder is already a clone of this repository: it's added as it is.	そのフォルダはすでにこのリポジトリのクローンです。そのまま追加します。	Esa carpeta ya es un clon de este repositorio: se añade tal cual.
+android.clone.retry	Try again	もう一度試す	Reintentar
+android.clone.loading	Reading your repositories…	リポジトリを読み込んでいます…	Leyendo tus repositorios…
+android.clone.signin.code	Enter this code on GitHub's sign-in page:	GitHub のサインインページでこのコードを入力してください:	Escribe este código en la página de inicio de sesión de GitHub:
+android.clone.signin.wait	Starting the sign-in…	サインインを開始しています…	Iniciando el inicio de sesión…
+android.clone.signin.done	Signed in to GitHub.	GitHub にサインインしました。	Sesión iniciada en GitHub.
+android.clone.signin.failed	The GitHub sign-in didn't finish.	GitHub へのサインインが完了しませんでした。	El inicio de sesión en GitHub no terminó.
+android.clone.hint.nogh	Install the GitHub CLI (gh) on this machine to see your GitHub repositories here.	このマシンに GitHub CLI (gh) をインストールすると、ここに GitHub のリポジトリが表示されます。	Instala la CLI de GitHub (gh) en esta máquina para ver aquí tus repositorios de GitHub.
+android.clone.hint.signedout	Sign in to GitHub to see your repositories here.	GitHub にサインインすると、ここにリポジトリが表示されます。	Inicia sesión en GitHub para ver aquí tus repositorios.
+android.clone.hint.error	Couldn't list your GitHub repositories.	GitHub のリポジトリを一覧できませんでした。	No se pudieron listar tus repositorios de GitHub.
+android.clone.phase.starting	Starting	開始中	Iniciando
+android.clone.phase.connecting	Connecting	接続中	Conectando
+android.clone.phase.counting	Counting objects	オブジェクトを数えています	Contando objetos
+android.clone.phase.compressing	Compressing objects	オブジェクトを圧縮しています	Comprimiendo objetos
+android.clone.phase.receiving	Receiving objects	オブジェクトを受信しています	Recibiendo objetos
+android.clone.phase.resolving	Resolving deltas	差分を解決しています	Resolviendo deltas
+android.clone.phase.updating	Updating files	ファイルを更新しています	Actualizando archivos
+android.clone.phase.lfs	Downloading large files (LFS)	大きなファイル (LFS) をダウンロードしています	Descargando archivos grandes (LFS)
+android.clone.phase.adding	Adding the project	プロジェクトを追加しています	Añadiendo el proyecto
+android.clone.phase.cancelled	Cancelled	キャンセルしました	Cancelado
+android.clone.busy	{path} already exists and isn't empty. Pick another folder or name.	{path} はすでにあり、空ではありません。別のフォルダか名前を選んでください。	{path} ya existe y no está vacía. Elige otra carpeta u otro nombre.
+android.clone.file	{path} is a file. Pick another folder or name.	{path} はファイルです。別のフォルダか名前を選んでください。	{path} es un archivo. Elige otra carpeta u otro nombre.
 sidebar.sections.needs	Needs you	対応が必要	Te necesita
 sidebar.sections.pinned	Pinned	ピン留め	Fijados
 sidebar.sections.active	Active	進行中	Activos
@@ -4242,6 +4292,31 @@ gpui.picker.key.complete	complete	補完	completar
 gpui.picker.key.open	open project	プロジェクトを開く	abrir proyecto
 gpui.picker.added	added	追加済み	añadido
 gpui.picker.more.typed	{n} more: type to filter	ほか{n}件: 入力して絞り込む	{n} más: escribe para filtrar
+gpui.clone.tab	Clone from git	Gitからクローン	Clonar desde git
+gpui.clone.change	Change	変更	Cambiar
+gpui.clone.thread	Start a thread in it	スレッドを始める	Empezar un hilo en él
+gpui.clone.retry	Try again	もう一度	Reintentar
+gpui.clone.signin	Sign in to GitHub	GitHubにサインイン	Iniciar sesión en GitHub
+gpui.clone.back	Back	戻る	Atrás
+gpui.clone.open.thread	Open the thread	スレッドを開く	Abrir el hilo
+gpui.clone.open.project	Open the project	プロジェクトを開く	Abrir el proyecto
+gpui.clone.private	private	非公開	privado
+gpui.clone.loading	Loading your GitHub repositories…	GitHubのリポジトリを読み込み中…	Cargando tus repositorios de GitHub…
+gpui.clone.signin.list	Sign in to GitHub to see your repositories here	GitHubにサインインするとリポジトリがここに出ます	Inicia sesión en GitHub para ver aquí tus repositorios
+gpui.clone.signin.code	Sign in to GitHub: enter this code at the address below, on any device.	GitHubにサインイン: どの端末からでも、下のアドレスでこのコードを入力してください。	Inicia sesión en GitHub: introduce este código en la dirección de abajo, desde cualquier dispositivo.
+gpui.clone.signin.asking	Asking GitHub for a sign-in code…	GitHubにサインインコードを求めています…	Pidiendo a GitHub un código de inicio de sesión…
+gpui.clone.signin.done	Signed in to GitHub. Try again.	GitHubにサインインしました。もう一度お試しください。	Sesión iniciada en GitHub. Reinténtalo.
+gpui.clone.cancel	Cancel	キャンセル	Cancelar
+gpui.picker.key.pick	pick	選ぶ	elegir
+gpui.clone.phase.connecting	Connecting	接続中	Conectando
+gpui.clone.phase.receiving	Receiving objects	オブジェクトを受信中	Recibiendo objetos
+gpui.clone.phase.resolving	Resolving deltas	差分を解決中	Resolviendo deltas
+gpui.clone.phase.updating	Updating files	ファイルを更新中	Actualizando archivos
+gpui.clone.phase.counting	Counting objects	オブジェクトを数えています	Contando objetos
+gpui.clone.phase.compressing	Compressing objects	オブジェクトを圧縮中	Comprimiendo objetos
+gpui.clone.phase.lfs	Downloading large files (LFS)	大きなファイルをダウンロード中 (LFS)	Descargando archivos grandes (LFS)
+gpui.clone.phase.adding	Adding the project	プロジェクトを追加中	Añadiendo el proyecto
+gpui.clone.phase.starting	Starting	開始中	Empezando
 gpui.assembly	Assembly	アセンブリ	Ensamblaje
 gpui.mech	Mech	機構	Mech
 gpui.readme	README	README	README
@@ -4590,6 +4665,32 @@ viewer.layout.refusal.notondevice	That cannot be a tile here.	ここではタイ
 viewer.layout.refusal.starting	The hub is starting.	ハブを起動しています。	El hub se está iniciando.
 viewer.footprinteditor	Footprint Editor	フットプリントエディター	Editor de huellas
 viewer.symboleditor	Symbol Editor	シンボルエディター	Editor de símbolos
+web.clone.tab	Clone from git	git からクローン	Clonar desde git
+web.clone.repo.placeholder	https or ssh URL, or owner/repo	https / ssh の URL、または owner/repo	URL https o ssh, o propietario/repositorio
+web.clone.private	private	非公開	privado
+web.clone.signin	Sign in to GitHub	GitHub にサインイン	Iniciar sesión en GitHub
+web.clone.signin.wait	Starting GitHub sign-in…	GitHub のサインインを開始しています…	Iniciando sesión en GitHub…
+web.clone.signin.enter	Enter this code on GitHub:	このコードを GitHub に入力してください:	Introduce este código en GitHub:
+web.clone.signin.done	Signed in to GitHub	GitHub にサインインしました	Sesión iniciada en GitHub
+web.clone.copied	Copied	コピーしました	Copiado
+web.clone.change.folder	Change folder	フォルダを変更	Cambiar carpeta
+web.clone.folder.name	Folder name	フォルダ名	Nombre de la carpeta
+web.clone.start.thread	Start a thread	スレッドを開始	Empezar un hilo
+web.clone.first	First message: {text}	最初のメッセージ: {text}	Primer mensaje: {text}
+web.clone.same	Already cloned there: it is added as it is.	すでにそこにクローンされています: そのまま追加します。	Ya está clonado ahí: se añade tal cual.
+web.clone.go	Clone	クローン	Clonar
+web.clone.cloning	Cloning {repo} into {dest}	{repo} を {dest} にクローン中	Clonando {repo} en {dest}
+web.clone.cloned	Cloned {repo} into {dest}	{repo} を {dest} にクローンしました	{repo} clonado en {dest}
+web.clone.stopped	Stopped cloning {repo}	{repo} のクローンを中止しました	Se detuvo la clonación de {repo}
+web.clone.retry	Try again	もう一度	Reintentar
+web.clone.back	Back	戻る	Atrás
+web.clone.open.thread	Open the thread	スレッドを開く	Abrir el hilo
+web.clone.open.project	Open the project	プロジェクトを開く	Abrir el proyecto
+web.clone.add.dir	Add {dir}	{dir} を追加	Añadir {dir}
+web.clone.use.dir	Use {dir}	{dir} を使う	Usar {dir}
+web.clone.up	Up	上へ	Subir
+web.clone.loading	Loading…	読み込み中…	Cargando…
+web.clone.no.folders	No folders here	フォルダがありません	No hay carpetas aquí
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -7019,6 +7120,12 @@ viewer.symboleditor	Symbol Editor	シンボルエディター	Editor de símbolo
     /// android.buy.ask = Start a buy thread for {project}?
     static func android_buy_ask(project: String) -> String { f("android.buy.ask", ["project": project]) }
 
+    /// android.clone.busy = {path} already exists and isn't empty. Pick another folder or name.
+    static func android_clone_busy(path: String) -> String { f("android.clone.busy", ["path": path]) }
+
+    /// android.clone.file = {path} is a file. Pick another folder or name.
+    static func android_clone_file(path: String) -> String { f("android.clone.file", ["path": path]) }
+
     /// ios.sections.running = {n, number} running
     static func ios_sections_running(n: Int) -> String { f("ios.sections.running", ["n": String(n)]) }
 
@@ -7256,6 +7363,18 @@ viewer.symboleditor	Symbol Editor	シンボルエディター	Editor de símbolo
     /// ios.acct.also = Also added as {names}: the same account, counted once
     static func ios_acct_also(names: String) -> String { f("ios.acct.also", ["names": names]) }
 
+    /// ios.clone.into = Into {dest}
+    static func ios_clone_into(dest: String) -> String { f("ios.clone.into", ["dest": dest]) }
+
+    /// ios.clone.title = Cloning {repo}
+    static func ios_clone_title(repo: String) -> String { f("ios.clone.title", ["repo": repo]) }
+
+    /// ios.clone.cloned = Cloned {repo}
+    static func ios_clone_cloned(repo: String) -> String { f("ios.clone.cloned", ["repo": repo]) }
+
+    /// ios.clone.code = Enter this code at {url}
+    static func ios_clone_code(url: String) -> String { f("ios.clone.code", ["url": url]) }
+
     /// gpui.sections.move.to = Move to {group}
     static func gpui_sections_move_to(group: String) -> String { f("gpui.sections.move.to", ["group": group]) }
 
@@ -7387,4 +7506,22 @@ viewer.symboleditor	Symbol Editor	シンボルエディター	Editor de símbolo
 
     /// history.snap = Before turn {turn}
     static func history_snap(turn: String) -> String { f("history.snap", ["turn": turn]) }
+
+    /// web.clone.first = First message: {text}
+    static func web_clone_first(text: String) -> String { f("web.clone.first", ["text": text]) }
+
+    /// web.clone.cloning = Cloning {repo} into {dest}
+    static func web_clone_cloning(repo: String, dest: String) -> String { f("web.clone.cloning", ["repo": repo, "dest": dest]) }
+
+    /// web.clone.cloned = Cloned {repo} into {dest}
+    static func web_clone_cloned(repo: String, dest: String) -> String { f("web.clone.cloned", ["repo": repo, "dest": dest]) }
+
+    /// web.clone.stopped = Stopped cloning {repo}
+    static func web_clone_stopped(repo: String) -> String { f("web.clone.stopped", ["repo": repo]) }
+
+    /// web.clone.add.dir = Add {dir}
+    static func web_clone_add_dir(dir: String) -> String { f("web.clone.add.dir", ["dir": dir]) }
+
+    /// web.clone.use.dir = Use {dir}
+    static func web_clone_use_dir(dir: String) -> String { f("web.clone.use.dir", ["dir": dir]) }
 }

@@ -642,6 +642,11 @@ async fn composer_run(hub: &Arc<Hub>, c: &mut Conn, p: &Value) -> Result<Value, 
         Some(Word::Settle) => rpc(hub, c, "thread.settle", json!({"thread":th})).await.map(|_| json!({"kind":"settle"})),
         Some(Word::Intent(b)) if b.is_empty() => { let card = crate::settings::fab::look(hub, th).await; Ok(json!({"kind":"edit","text":intent_edit(card["intent"].as_str().unwrap_or(""))})) }
         Some(Word::Intent(b)) => rpc(hub, c, "fab.intent", json!({"thread":th,"text":b})).await.map(|_| json!({"kind":"intent"})),
+        // a repository's address: the app opens its Clone from git on it (`clone.dest` says where it goes), the rest kept as the first message
+        Some(Word::Project(rest)) if crate::session::composer::clone_args(&rest).is_some() => {
+            let (repo, first) = crate::session::composer::clone_args(&rest).unwrap_or_default();
+            Ok(json!({"kind":"clone","repo":repo,"text":first}))
+        }
         Some(Word::Project(rest)) => match crate::session::composer::project_args(&rest) {
             Err(e) => Err(err(e)),
             Ok(None) => Ok(json!({"kind":"project"})), // the app opens its Add project screen

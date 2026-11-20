@@ -37,6 +37,7 @@ run viewer-backdrop ViewerBackdropTests.swift "" ViewerBackdrop.swift
 run browser-input BrowserInputTests.swift "$ROOT/test/mobile/browser_input_cases.json" BrowserInput.swift
 run google-loop GoogleLoopTests.swift "" GoogleLoopLogic.swift
 run swarm-model SwarmModelTests.swift "" SwarmModel.swift Copyable.swift
+run clone-model CloneModelTests.swift "" CloneModel.swift
 run section-menu SectionMenuTests.swift "" SectionMenu.swift
 run mcp-page McpPageTests.swift "" McpPage.swift
 run cat-pick CatPickTests.swift "" CatPick.swift

@@ -261,6 +261,7 @@ object DataClient {
                 restarting = null; heardBack(o.optString("hubBack"))
                 if (!onHome) downSince = 0L
                 scope.launch { synchronise(g) }
+                scope.launch { Clones.reconcile() }   // a clone followed across the reconnect: its pushes meanwhile were missed
                 heardOffer(o.optString("hubOffer"))
             }
             "reply" -> {
@@ -709,6 +710,7 @@ object DataClient {
             }
             "queue" -> { val tid = o.optString("thread"); scope.launch { runCatching { loadQueue(tid) } } } // a far thread's held messages moved
             "term" -> Terms.push(o)
+            "clone", "clone.repos", "clone.signin" -> Clones.pushed(o) // Clone from git (DataClone.kt): a job moved, the repository list was read again, GitHub's sign-in moved
             "locks" -> locks = parseLocks(o.optJSONArray("locks"))
             "swarm" -> Swarms.pushed(o.optString("room")) // a swarm's board, state or member turns moved: its list again, and an open board reads what is newer
             "text" -> {

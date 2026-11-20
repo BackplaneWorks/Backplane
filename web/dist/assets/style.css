@@ -1265,6 +1265,95 @@ html.light .bp-code-block { background: var(--panel); }
   }
 }
 
+/* ---- Add project (addproject.ts): Open folder, Clone from git ---- */
+.bp-side-sec-btn { background: transparent; border: 0; padding: 0 2px; line-height: 1; cursor: pointer; }
+.bp-side-sec-btn:hover { color: var(--text); }
+.bp-btn-line { background: var(--panel); border: 1px solid var(--line); color: var(--text); padding: 4px 10px; }
+.bp-btn-line:hover:not(:disabled) { border-color: var(--faint); }
+.bp-btn-line:disabled { opacity: 0.5; cursor: default; }
+.bp-ap { max-width: 560px; }
+.bp-ap-tabs { display: flex; border-bottom: 1px solid var(--rule); flex-shrink: 0; }
+.bp-ap-tab {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--dim);
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.bp-ap-tab:hover { color: var(--text); }
+.bp-ap-tab.on { color: var(--text); border-bottom-color: var(--accent); }
+.bp-ap-body { flex: 1; min-height: 0; gap: 10px; }
+.bp-ap-form, .bp-ap-job { display: flex; flex-direction: column; gap: 10px; }
+.bp-ap-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
+.bp-ap-foot button { padding: 5px 14px; }
+.bp-ap-err { color: var(--bad); font-size: 12px; }
+.bp-ap-note, .bp-ap-first, .bp-ap-detail { font-size: 12px; }
+.bp-ap-first { white-space: pre-wrap; word-break: break-word; }
+.bp-ap-lbl { color: var(--dim); font-size: 12px; flex-shrink: 0; }
+
+.bp-fb { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
+.bp-fb-head { display: flex; gap: 6px; align-items: center; }
+.bp-fb-up { flex-shrink: 0; border-color: var(--line); }
+.bp-fb-path { font-family: var(--mono); font-size: 12px; }
+.bp-fb-list { height: min(320px, 45vh); overflow-y: auto; border: 1px solid var(--line); background: var(--bg); }
+.bp-fb-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+}
+.bp-fb-row:hover { background: var(--raise); }
+.bp-fb-icon { color: var(--faint); font-size: 10px; }
+.bp-fb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-fb-empty { padding: 10px; color: var(--faint); font-size: 12px; }
+
+.bp-ap-repo { display: flex; flex-direction: column; }
+.bp-ap-suggest { border: 1px solid var(--line); border-top: 0; background: var(--bg); max-height: 220px; overflow-y: auto; }
+.bp-ap-sug {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 10px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+}
+.bp-ap-sug:hover, .bp-ap-sug.active { background: var(--raise); }
+.bp-ap-sug-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bp-ap-sug-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-ap-sug-desc { color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-ap-sug-note { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; color: var(--dim); font-size: 12px; }
+.bp-ap-tag { border: 1px solid var(--line); color: var(--dim); font-size: 10px; padding: 0 5px; flex-shrink: 0; }
+
+.bp-ap-dest { display: flex; flex-direction: column; gap: 8px; }
+.bp-ap-where { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.bp-ap-dest-path { font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.bp-ap-name { display: flex; align-items: center; gap: 8px; }
+.bp-ap-check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+
+.bp-ap-signin { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); background: var(--bg); }
+.bp-ap-code-row { display: flex; align-items: center; gap: 10px; }
+.bp-ap-code { font-family: var(--mono); font-size: 18px; font-weight: 700; letter-spacing: 0.12em; }
+.bp-ap-link { color: var(--accent); font-size: 12px; word-break: break-all; }
+
+.bp-ap-job-title { font-weight: 600; word-break: break-word; }
+.bp-ap-phase { color: var(--text); }
+.bp-ap-bar { position: relative; height: 4px; background: var(--line); overflow: hidden; }
+.bp-ap-bar-fill { height: 100%; width: 0; background: var(--accent); transition: width 0.2s linear; }
+.bp-ap-bar.indeterminate .bp-ap-bar-fill { position: absolute; width: 30%; animation: bp-ap-slide 1.2s ease-in-out infinite; }
+@keyframes bp-ap-slide { from { left: -30%; } to { left: 100%; } }
+.bp-ap-notes { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--dim); }
+
 
 /* Web viewer pane + 1440 / 820 / 390 px responsive styles.
    Auto-concatenated into web/dist/assets/style.css by web/build.ts.

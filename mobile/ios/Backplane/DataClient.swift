@@ -59,6 +59,12 @@ final class DataClient {
     var pendingThread: String?
     /// `/project` alone in a composer: the home screen opens its Add project sheet.
     var openAddProject = false
+    /// `/project <address>` in a composer (the hub's kind "clone"): the Add project sheet opens on Clone from git with this repository, and `text` goes to clone.start
+    var pendingClone: (repo: String, text: String)?
+    /// Clone from git (feature clone, docs/CLONE.md): each job as its last `clone` push said, the sign-in's last word, and a count of `clone.repos` pushes (the list was read again)
+    private(set) var cloneJobs: [String: DCloneJob] = [:]
+    private(set) var cloneSignin: DCloneSignin?
+    private(set) var cloneReposGen = 0
     /// Just paired: once the hub's bots are in, its uberbot's chat opens (phones have no setup; docs/ALWAYS-ON.md, D9).
     private var uberAfterPair = false
     /// a tapped link the hub resolved (DataLinks.swift): the root screen opens it; a link that opens nothing leaves a short note
@@ -875,6 +881,9 @@ final class DataClient {
         guard let k = o["k"] as? String else { return }
         if k == "btw", let th = o["thread"] as? String, let q = o["q"] as? String, btw[th]?.q == q { btw[th] = Btw(q: q, a: o["a"] as? String ?? ""); return }
         if k == "term" { terms.push(o); return }
+        if k == "clone" { if let j = WireJSON.decode(o["clone"], as: DCloneJob.self), !j.id.isEmpty { cloneJobs[j.id] = j }; return }
+        if k == "clone.repos" { cloneReposGen += 1; return }
+        if k == "clone.signin" { if let s = WireJSON.decode(o["signin"], as: DCloneSignin.self) { cloneSignin = s }; return }
         if k == "bots" { Task { await loadBots() }; return } // the bots or the home moved: read them again (an open uberbot chat follows it)
         if k == "secret" { let th = o["thread"] as? String ?? ""; Task { await refreshSecretAsks(th) }; return }
         // a null (`"subs":null` when a thread's work ends) or any non-JSON value decodes to nil instead of raising
@@ -1155,6 +1164,13 @@ final class DataClient {
         upsert(r.thread)
         return r.thread
     }
+    /// A clone.* answer that is a job (start, status, cancel, retry): kept as the pushes are, so a push and an answer land in one place.
+    func cloneJob(_ m: String, _ p: [String: Any]) async throws -> DCloneJob {
+        let j: DCloneJob = try await call(m, p)
+        if !j.id.isEmpty, Clone.follow(cloneJobs[j.id], j, id: j.id) == j { cloneJobs[j.id] = j }
+        return j
+    }
+    func cloneSignIn(restart: Bool = true) async throws { let s: DCloneSignin = try await call("clone.signin", restart ? ["restart": true] : [:]); cloneSignin = s }
     func dirs(_ path: String?) async throws -> DDirs { try await call("dirs.list", path.map { ["path": $0] } ?? [:]) }
     func setDraft(_ tid: String, _ text: String) {
         voice.typed(tid, old: drafts[tid] ?? "", new: text)
@@ -1167,7 +1183,7 @@ final class DataClient {
     }
 
     // MARK: the composer's own commands (feature commands): the hub runs them, the draft stays until it said yes
-    struct CommandResult: Decodable { let kind: String; var q: String?; var name: String?; var text: String?; var thread: String?; var path: String?; var error: String?; var note: String? }
+    struct CommandResult: Decodable { let kind: String; var q: String?; var name: String?; var text: String?; var thread: String?; var path: String?; var error: String?; var note: String?; var repo: String? }
     private struct SecretAsks: Decodable { let asks: [SecretAsk] }
     /// The command this draft is, by the hub's own rule (session/composer.rs command_is): the word alone, or followed by a space or a new line.
     func commandOf(_ draft: String) -> Word? {
