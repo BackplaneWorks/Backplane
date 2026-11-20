@@ -1,9 +1,10 @@
 // Raw WebGL2 3D viewer for Backplane boards (+ streaming parts) and Mech STEP models.
-// Mirrors native/gpui/src/viewers/solid.rs & solid_gpu.rs:
-//   - Linear RGB colors (0xTTRRGGBB), sRGB gamma applied once in fragment shader
-//   - Smooth vertex normals decoded off-thread by mesh-worker.ts
-//   - 300 ms fade-in per streaming part frame; zero idle repaint loops!
-//   - Free-orbit camera (35° FOV, left-drag orbit, right/middle/shift pan, wheel zoom, touch orbit+pinch)
+// Ports native/gpui/src/viewers/solid.wgsl & raster.rs:
+//   - Linear RGB colors (0xTTRRGGBB, TT = transparency 0..255), sRGB transfer once on output
+//   - PBR color-estimate material model (estimate, GGX lit, analytic studio env, fresnel, glossy soldermask coat)
+//   - Two-pass rendering: opaque pass (depthMask true) -> translucent pass (TT > 0, depthMask false) -> fading parts
+//   - Vertical linear-light Backdrop gradient (DARK #4d535e->#353a43, LIGHT #f5f6f8->#e1e4e9)
+//   - Smooth vertex normals decoded off-thread by mesh-worker.ts; zero idle repaint loops
 
 import { fnv1a64Hex, type CborValue } from "./cbor.ts";
 
@@ -12,40 +13,36 @@ export interface Solid3DCallbacks {
   onUserMove?: () => void;
 }
 
-interface GpuBatch {
+interface GpuSubBatch {
   vao: WebGLVertexArrayObject;
   posBuf: WebGLBuffer;
   nrmBuf: WebGLBuffer;
   colBuf: WebGLBuffer;
   vertCount: number;
+}
+
+interface GpuBatch {
+  opaque: GpuSubBatch | null;
+  translucent: GpuSubBatch | null;
   fadeStartMs: number; // 0 = board (always 1.0), >0 = streaming part fading in over 300ms
 }
 
-const VERT_SRC = `#version 300 es
+const BG_VERT_SRC = `#version 300 es
 precision highp float;
-layout(location = 0) in vec3 aPos;
-layout(location = 1) in vec3 aNrm;
-layout(location = 2) in vec4 aCol;
-
-uniform mat4 uMvp;
-uniform mat3 uNrmMat;
-
-out vec3 vNrm;
-out vec4 vCol;
-
+out vec2 vUv;
 void main() {
-  vNrm = normalize(uNrmMat * aNrm);
-  vCol = aCol;
-  gl_Position = uMvp * vec4(aPos, 1.0);
+  float x = float((gl_VertexID & 1) * 4 - 1);
+  float y = float((gl_VertexID >> 1) * 4 - 1);
+  vUv = vec2(x * 0.5 + 0.5, 1.0 - (y * 0.5 + 0.5));
+  gl_Position = vec4(x, y, 0.0, 1.0);
 }
 `;
 
-const FRAG_SRC = `#version 300 es
+const BG_FRAG_SRC = `#version 300 es
 precision highp float;
-in vec3 vNrm;
-in vec4 vCol;
-
-uniform float uFade;
+in vec2 vUv;
+uniform vec3 uBgTop;
+uniform vec3 uBgBot;
 out vec4 outColor;
 
 vec3 linearToSrgb(vec3 c) {
@@ -55,27 +52,155 @@ vec3 linearToSrgb(vec3 c) {
 }
 
 void main() {
-  vec3 n = normalize(vNrm);
-  if (!gl_FrontFacing) n = -n;
-
-  // Studio three-point lighting in camera space matching Backplane's solid.wgsl
-  vec3 keyDir = normalize(vec3(0.38, 0.52, 0.76));
-  vec3 fillDir = normalize(vec3(-0.62, -0.25, 0.74));
-  vec3 rimDir = normalize(vec3(0.10, -0.78, -0.62));
-
-  float key = max(dot(n, keyDir), 0.0);
-  float fill = max(dot(n, fillDir), 0.0);
-  float rim = max(dot(n, rimDir), 0.0);
-
-  vec3 viewDir = vec3(0.0, 0.0, 1.0);
-  vec3 halfKey = normalize(keyDir + viewDir);
-  float spec = pow(max(dot(n, halfKey), 0.0), 36.0) * 0.22;
-
-  vec3 lit = vCol.rgb * (0.24 + 0.68 * key + 0.22 * fill + 0.10 * rim) + vec3(spec);
-  float alpha = vCol.a * uFade;
-  outColor = vec4(linearToSrgb(clamp(lit, 0.0, 1.0)), alpha);
+  vec3 lin = mix(uBgTop, uBgBot, clamp(vUv.y, 0.0, 1.0));
+  outColor = vec4(linearToSrgb(clamp(lin, 0.0, 1.0)), 1.0);
 }
 `;
+
+const VERT_SRC = `#version 300 es
+precision highp float;
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aNrm;
+layout(location = 2) in vec4 aCol;
+
+uniform mat4 uMvp;
+
+out vec3 vPos;
+out vec3 vNrm;
+out vec4 vCol;
+
+void main() {
+  vPos = aPos;
+  vNrm = aNrm;
+  vCol = aCol;
+  gl_Position = uMvp * vec4(aPos, 1.0);
+}
+`;
+
+const FRAG_SRC = `#version 300 es
+precision highp float;
+in vec3 vPos;
+in vec3 vNrm;
+in vec4 vCol;
+
+uniform vec3 uEye;
+uniform vec3 uRight;
+uniform vec3 uUp;
+uniform vec3 uFwd;
+uniform float uFade;
+
+out vec4 outColor;
+
+const float PI = 3.14159265;
+
+vec3 linearToSrgb(vec3 c) {
+  vec3 lo = c * 12.92;
+  vec3 hi = 1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055;
+  return mix(lo, hi, step(vec3(0.0031308), c));
+}
+
+vec3 estimate(vec3 c) {
+  float hi = max(c.r, max(c.g, c.b));
+  float lo = min(c.r, min(c.g, c.b));
+  if (hi < 0.12 && hi - lo < max(0.015, hi * 0.45)) return vec3(0.63, 0.0, 0.12);
+  if (lo > 0.9) return vec3(0.82, 0.0, 0.0);
+  if (c.r > 0.18 && c.g > c.r * 0.55 && c.g < c.r * 1.02 && c.b < c.g * 0.45) return vec3(0.3, 0.86, 0.0);
+  if (hi - lo < hi * 0.16 && lo > 0.18 && hi < 0.9) return vec3(0.28, 0.82, 0.0);
+  if (c.r > c.b * 1.25 && c.g > c.b * 1.12 && c.r > 0.06) return vec3(0.72, 0.0, 0.0);
+  if (hi - lo > max(0.015, hi * 0.28)) return vec3(0.36, 0.0, 0.35);
+  return vec3(0.55, 0.0, 0.0);
+}
+
+vec3 fresnel(vec3 f0, float h) {
+  return f0 + (vec3(1.0) - f0) * pow(1.0 - h, 5.0);
+}
+
+vec3 lit(vec3 N, vec3 V, vec3 L, vec3 base, vec3 f0, float rough, float metal) {
+  vec3 H = normalize(V + L);
+  float nl = max(dot(N, L), 0.0);
+  float nv = max(dot(N, V), 0.001);
+  float nh = max(dot(N, H), 0.0);
+  float a = rough * rough;
+  float a2 = a * a;
+  float d = nh * nh * (a2 - 1.0) + 1.0;
+  float D = a2 / max(PI * d * d, 0.0001);
+  float k = (rough + 1.0) * (rough + 1.0) / 8.0;
+  float G = (nl / (nl * (1.0 - k) + k)) * (nv / (nv * (1.0 - k) + k));
+  vec3 F = fresnel(f0, max(dot(V, H), 0.0));
+  return (base * (1.0 - metal) * (vec3(1.0) - F) / PI + F * D * G / max(4.0 * nl * nv, 0.001)) * nl;
+}
+
+vec3 studio(vec3 R, float rough, float metal) {
+  vec3 q = vec3(dot(R, uRight), dot(R, uUp), -dot(R, uFwd));
+  float power = mix(110.0, 3.0, rough * rough);
+  float key = pow(max(dot(q, normalize(vec3(-0.55, 0.75, 0.65))), 0.0), power);
+  float fill = pow(max(dot(q, normalize(vec3(0.85, 0.25, 0.35))), 0.0), power * 0.65);
+  float sky = 0.12 + 0.2 * smoothstep(-0.4, 0.25, q.y) + 0.7 * smoothstep(0.45, 0.85, q.y);
+  return vec3(sky * mix(0.15, 1.0, metal)) + vec3(1.5, 1.48, 1.42) * key + vec3(0.65, 0.72, 0.85) * fill;
+}
+
+void main() {
+  vec3 base = vCol.rgb;
+  float alpha = vCol.a;
+  vec3 m = estimate(base);
+  // Translucent non-silk layer (soldermask): glossy coat matching solid.wgsl / raster.rs
+  if (alpha < 0.996 && m.x < 0.8) {
+    m = vec3(0.24, 0.0, 1.0);
+  }
+  float rough = m.x;
+  float metal = m.y;
+  float coat = m.z;
+
+  vec3 V = normalize(uEye - vPos);
+  vec3 N = normalize(vNrm);
+  if (dot(N, V) < 0.0) N = -N;
+  float nv = max(dot(N, V), 0.0);
+  vec3 f0 = mix(vec3(0.04), base, metal);
+
+  vec3 keyDir = normalize(-uRight * 0.55 + uUp * 0.75 - uFwd * 0.65);
+  vec3 fillDir = normalize(uRight * 0.85 + uUp * 0.25 - uFwd * 0.35);
+
+  vec3 rgb = base * (1.0 - metal) * (mix(0.34, 0.80, step(0.8, rough)) + 0.10 * max(dot(N, uUp), 0.0));
+  rgb += lit(N, V, keyDir, base, f0, rough, metal) * 1.5;
+  rgb += lit(N, V, fillDir, base, f0, rough, metal) * 0.85;
+
+  vec3 R = reflect(-V, N);
+  rgb += studio(R, rough, metal) * fresnel(f0, nv) * (1.0 - rough * 0.35);
+  if (coat > 0.0) {
+    rgb += studio(R, 0.3, 0.0) * fresnel(vec3(0.04), nv) * coat;
+  }
+  // Soft highlight shoulder
+  rgb = rgb / (vec3(1.0) + max(rgb - vec3(0.8), vec3(0.0)) * 0.28);
+  outColor = vec4(linearToSrgb(clamp(rgb, 0.0, 1.0)), alpha * uFade);
+}
+`;
+
+function srgbToLinearByte(c: number): number {
+  const v = c / 255;
+  return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+}
+
+// Backdrop::DARK (#4d535e -> #353a43) and Backdrop::LIGHT (#f5f6f8 -> #e1e4e9) in linear light
+const BG_DARK_TOP: [number, number, number] = [
+  srgbToLinearByte(0x4d),
+  srgbToLinearByte(0x53),
+  srgbToLinearByte(0x5e),
+];
+const BG_DARK_BOT: [number, number, number] = [
+  srgbToLinearByte(0x35),
+  srgbToLinearByte(0x3a),
+  srgbToLinearByte(0x43),
+];
+const BG_LIGHT_TOP: [number, number, number] = [
+  srgbToLinearByte(0xf5),
+  srgbToLinearByte(0xf6),
+  srgbToLinearByte(0xf8),
+];
+const BG_LIGHT_BOT: [number, number, number] = [
+  srgbToLinearByte(0xe1),
+  srgbToLinearByte(0xe4),
+  srgbToLinearByte(0xe9),
+];
 
 function compileShader(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader {
   const s = gl.createShader(type);
@@ -90,9 +215,9 @@ function compileShader(gl: WebGL2RenderingContext, type: number, src: string): W
   return s;
 }
 
-function linkProgram(gl: WebGL2RenderingContext): WebGLProgram {
-  const vs = compileShader(gl, gl.VERTEX_SHADER, VERT_SRC);
-  const fs = compileShader(gl, gl.FRAGMENT_SHADER, FRAG_SRC);
+function linkProgram(gl: WebGL2RenderingContext, vertSrc: string, fragSrc: string): WebGLProgram {
+  const vs = compileShader(gl, gl.VERTEX_SHADER, vertSrc);
+  const fs = compileShader(gl, gl.FRAGMENT_SHADER, fragSrc);
   const prog = gl.createProgram();
   if (!prog) throw new Error("createProgram failed");
   gl.attachShader(prog, vs);
@@ -155,9 +280,16 @@ function dot3(a: [number, number, number], b: [number, number, number]): number 
 export class Solid3DViewer {
   private canvas: HTMLCanvasElement;
   private gl: WebGL2RenderingContext | null = null;
+  private bgProg: WebGLProgram | null = null;
+  private bgVao: WebGLVertexArrayObject | null = null;
+  private uBgTop: WebGLUniformLocation | null = null;
+  private uBgBot: WebGLUniformLocation | null = null;
   private prog: WebGLProgram | null = null;
   private uMvp: WebGLUniformLocation | null = null;
-  private uNrmMat: WebGLUniformLocation | null = null;
+  private uEye: WebGLUniformLocation | null = null;
+  private uRight: WebGLUniformLocation | null = null;
+  private uUp: WebGLUniformLocation | null = null;
+  private uFwd: WebGLUniformLocation | null = null;
   private uFade: WebGLUniformLocation | null = null;
   private worker: Worker | null = null;
 
@@ -201,12 +333,19 @@ export class Solid3DViewer {
     });
     if (gl) {
       this.gl = gl;
-      this.prog = linkProgram(gl);
+      this.bgProg = linkProgram(gl, BG_VERT_SRC, BG_FRAG_SRC);
+      this.bgVao = gl.createVertexArray();
+      this.uBgTop = gl.getUniformLocation(this.bgProg, "uBgTop");
+      this.uBgBot = gl.getUniformLocation(this.bgProg, "uBgBot");
+
+      this.prog = linkProgram(gl, VERT_SRC, FRAG_SRC);
       this.uMvp = gl.getUniformLocation(this.prog, "uMvp");
-      this.uNrmMat = gl.getUniformLocation(this.prog, "uNrmMat");
+      this.uEye = gl.getUniformLocation(this.prog, "uEye");
+      this.uRight = gl.getUniformLocation(this.prog, "uRight");
+      this.uUp = gl.getUniformLocation(this.prog, "uUp");
+      this.uFwd = gl.getUniformLocation(this.prog, "uFwd");
       this.uFade = gl.getUniformLocation(this.prog, "uFade");
       gl.enable(gl.DEPTH_TEST);
-      gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     } else {
       this.cbs.onStatus?.("WebGL2 is unavailable in this browser");
@@ -333,33 +472,14 @@ export class Solid3DViewer {
     }
   }
 
-  private uploadBatch(
+  private createSubBatch(
     positions: Float32Array,
     normals: Float32Array,
-    triColors: Uint32Array,
-    fadeStartMs: number
-  ): GpuBatch | null {
+    colFloats: Float32Array,
+    vertCount: number
+  ): GpuSubBatch | null {
     const gl = this.gl;
-    if (!gl) return null;
-    const vertCount = positions.length / 3;
-    const triCount = triColors.length;
-    const colFloats = new Float32Array(vertCount * 4);
-    for (let t = 0; t < triCount; t++) {
-      const c = triColors[t];
-      // Wire color is 0xTTRRGGBB in linear light (TT = transparency, 0 = opaque)
-      const a = 1 - ((c >>> 24) & 0xff) / 255;
-      const r = ((c >>> 16) & 0xff) / 255;
-      const g = ((c >>> 8) & 0xff) / 255;
-      const b = (c & 0xff) / 255;
-      for (let k = 0; k < 3; k++) {
-        const o = (t * 3 + k) * 4;
-        colFloats[o] = r;
-        colFloats[o + 1] = g;
-        colFloats[o + 2] = b;
-        colFloats[o + 3] = a;
-      }
-    }
-
+    if (!gl || vertCount === 0) return null;
     const vao = gl.createVertexArray();
     const posBuf = gl.createBuffer();
     const nrmBuf = gl.createBuffer();
@@ -383,16 +503,94 @@ export class Solid3DViewer {
     gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 0, 0);
 
     gl.bindVertexArray(null);
-    return { vao, posBuf, nrmBuf, colBuf, vertCount, fadeStartMs };
+    return { vao, posBuf, nrmBuf, colBuf, vertCount };
+  }
+
+  /** Split triangles into opaque (TT == 0) and translucent (TT > 0) sub-batches for two-pass rendering. */
+  private uploadBatch(
+    positions: Float32Array,
+    normals: Float32Array,
+    triColors: Uint32Array,
+    fadeStartMs: number
+  ): GpuBatch | null {
+    if (!this.gl) return null;
+    const triCount = triColors.length;
+    let opqTris = 0;
+    let trnTris = 0;
+    for (let t = 0; t < triCount; t++) {
+      if ((triColors[t] >>> 24) === 0) opqTris++;
+      else trnTris++;
+    }
+
+    const opqPos = opqTris > 0 ? new Float32Array(opqTris * 9) : null;
+    const opqNrm = opqTris > 0 ? new Float32Array(opqTris * 9) : null;
+    const opqCol = opqTris > 0 ? new Float32Array(opqTris * 12) : null;
+
+    const trnPos = trnTris > 0 ? new Float32Array(trnTris * 9) : null;
+    const trnNrm = trnTris > 0 ? new Float32Array(trnTris * 9) : null;
+    const trnCol = trnTris > 0 ? new Float32Array(trnTris * 12) : null;
+
+    let oi = 0;
+    let ti = 0;
+    for (let t = 0; t < triCount; t++) {
+      const c = triColors[t];
+      const clear = (c >>> 24) & 0xff;
+      const a = 1 - clear / 255;
+      const r = ((c >>> 16) & 0xff) / 255;
+      const g = ((c >>> 8) & 0xff) / 255;
+      const b = (c & 0xff) / 255;
+      const src9 = t * 9;
+
+      if (clear === 0 && opqPos && opqNrm && opqCol) {
+        const dst9 = oi * 9;
+        for (let j = 0; j < 9; j++) {
+          opqPos[dst9 + j] = positions[src9 + j];
+          opqNrm[dst9 + j] = normals[src9 + j];
+        }
+        const dst12 = oi * 12;
+        for (let k = 0; k < 3; k++) {
+          opqCol[dst12 + k * 4] = r;
+          opqCol[dst12 + k * 4 + 1] = g;
+          opqCol[dst12 + k * 4 + 2] = b;
+          opqCol[dst12 + k * 4 + 3] = 1;
+        }
+        oi++;
+      } else if (trnPos && trnNrm && trnCol) {
+        const dst9 = ti * 9;
+        for (let j = 0; j < 9; j++) {
+          trnPos[dst9 + j] = positions[src9 + j];
+          trnNrm[dst9 + j] = normals[src9 + j];
+        }
+        const dst12 = ti * 12;
+        for (let k = 0; k < 3; k++) {
+          trnCol[dst12 + k * 4] = r;
+          trnCol[dst12 + k * 4 + 1] = g;
+          trnCol[dst12 + k * 4 + 2] = b;
+          trnCol[dst12 + k * 4 + 3] = a;
+        }
+        ti++;
+      }
+    }
+
+    const opaque = opqPos && opqNrm && opqCol ? this.createSubBatch(opqPos, opqNrm, opqCol, opqTris * 3) : null;
+    const translucent = trnPos && trnNrm && trnCol ? this.createSubBatch(trnPos, trnNrm, trnCol, trnTris * 3) : null;
+    if (!opaque && !translucent) return null;
+    return { opaque, translucent, fadeStartMs };
+  }
+
+  private deleteSubBatch(sb: GpuSubBatch | null): void {
+    const gl = this.gl;
+    if (!gl || !sb) return;
+    gl.deleteVertexArray(sb.vao);
+    gl.deleteBuffer(sb.posBuf);
+    gl.deleteBuffer(sb.nrmBuf);
+    gl.deleteBuffer(sb.colBuf);
   }
 
   private deleteBatch(b: GpuBatch | null): void {
-    const gl = this.gl;
-    if (!gl || !b) return;
-    gl.deleteVertexArray(b.vao);
-    gl.deleteBuffer(b.posBuf);
-    gl.deleteBuffer(b.nrmBuf);
-    gl.deleteBuffer(b.colBuf);
+    if (!b) return;
+    this.deleteSubBatch(b.opaque);
+    this.deleteSubBatch(b.translucent);
   }
 
   private clearParts(): void {
@@ -420,6 +618,12 @@ export class Solid3DViewer {
     });
   }
 
+  private drawSubBatch(sb: GpuSubBatch | null): void {
+    if (!sb || !this.gl) return;
+    this.gl.bindVertexArray(sb.vao);
+    this.gl.drawArrays(this.gl.TRIANGLES, 0, sb.vertCount);
+  }
+
   private draw(now: number): boolean {
     const gl = this.gl;
     if (!gl || !this.prog) return false;
@@ -436,12 +640,23 @@ export class Solid3DViewer {
     }
 
     gl.viewport(0, 0, pw, ph);
-    if (this.lightTheme) {
-      gl.clearColor(0.92, 0.93, 0.95, 1);
-    } else {
-      gl.clearColor(0.24, 0.27, 0.31, 1);
+    gl.depthMask(true);
+    gl.clear(gl.DEPTH_BUFFER_BIT);
+
+    // Pass 0: vertical linear-light Backdrop gradient matching native/gpui/src/viewers/raster.rs
+    if (this.bgProg && this.bgVao) {
+      gl.disable(gl.DEPTH_TEST);
+      gl.disable(gl.BLEND);
+      gl.depthMask(false);
+      gl.useProgram(this.bgProg);
+      const top = this.lightTheme ? BG_LIGHT_TOP : BG_DARK_TOP;
+      const bot = this.lightTheme ? BG_LIGHT_BOT : BG_DARK_BOT;
+      gl.uniform3f(this.uBgTop, top[0], top[1], top[2]);
+      gl.uniform3f(this.uBgBot, bot[0], bot[1], bot[2]);
+      gl.bindVertexArray(this.bgVao);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.bindVertexArray(null);
     }
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     if (!this.boardBatch && this.partBatches.length === 0) return false;
 
@@ -469,11 +684,6 @@ export class Solid3DViewer {
       right[2], up[2], -fwd[2], 0,
       -dot3(right, eye), -dot3(up, eye), dot3(fwd, eye), 1,
     ]);
-    const nrmMat = new Float32Array([
-      right[0], up[0], -fwd[0],
-      right[1], up[1], -fwd[1],
-      right[2], up[2], -fwd[2],
-    ]);
     const near = Math.max(0.05, this.dist * 0.01);
     const far = Math.max(this.dist * 10, this.radius * 20);
     const proj = perspective((35 * Math.PI) / 180, pw / ph, near, far);
@@ -481,23 +691,48 @@ export class Solid3DViewer {
 
     gl.useProgram(this.prog);
     gl.uniformMatrix4fv(this.uMvp, false, mvp);
-    gl.uniformMatrix3fv(this.uNrmMat, false, nrmMat);
-
-    if (this.boardBatch) {
-      gl.uniform1f(this.uFade, 1.0);
-      gl.bindVertexArray(this.boardBatch.vao);
-      gl.drawArrays(gl.TRIANGLES, 0, this.boardBatch.vertCount);
-    }
+    gl.uniform3f(this.uEye, eye[0], eye[1], eye[2]);
+    gl.uniform3f(this.uRight, right[0], right[1], right[2]);
+    gl.uniform3f(this.uUp, up[0], up[1], up[2]);
+    gl.uniform3f(this.uFwd, fwd[0], fwd[1], fwd[2]);
 
     let stillFading = false;
+    const settledParts: GpuBatch[] = [];
+    const fadingParts: Array<{ batch: GpuBatch; fade: number }> = [];
     for (const batch of this.partBatches) {
       const elapsed = now - batch.fadeStartMs;
       const fade = batch.fadeStartMs === 0 ? 1 : Math.min(1, Math.max(0, elapsed / 300));
-      if (fade < 1) stillFading = true;
-      gl.uniform1f(this.uFade, fade);
-      gl.bindVertexArray(batch.vao);
-      gl.drawArrays(gl.TRIANGLES, 0, batch.vertCount);
+      if (fade < 1) {
+        stillFading = true;
+        if (fade > 0) fadingParts.push({ batch, fade });
+      } else {
+        settledParts.push(batch);
+      }
     }
+
+    // Pass 1: Opaque geometry (depth write ON, blending OFF)
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
+    gl.uniform1f(this.uFade, 1.0);
+    if (this.boardBatch) this.drawSubBatch(this.boardBatch.opaque);
+    for (const b of settledParts) this.drawSubBatch(b.opaque);
+
+    // Pass 2: Translucent geometry (TT > 0, e.g. soldermask & courtyard outlines; depth write OFF, blending ON)
+    gl.depthMask(false);
+    gl.enable(gl.BLEND);
+    gl.uniform1f(this.uFade, 1.0);
+    if (this.boardBatch) this.drawSubBatch(this.boardBatch.translucent);
+    for (const b of settledParts) this.drawSubBatch(b.translucent);
+
+    // Pass 3: Streaming parts currently fading in over 300 ms
+    for (const { batch, fade } of fadingParts) {
+      gl.uniform1f(this.uFade, fade);
+      this.drawSubBatch(batch.opaque);
+      this.drawSubBatch(batch.translucent);
+    }
+
+    gl.depthMask(true);
     gl.bindVertexArray(null);
     return stillFading;
   }
@@ -538,11 +773,11 @@ export class Solid3DViewer {
 
     if (prev.button === 2 || prev.button === 1 || prev.shift) {
       // Pan
-      const panScale = (this.dist * 0.0014);
+      const panScale = this.dist * 0.0014;
       const cy = Math.cos(this.yaw);
       const sy = Math.sin(this.yaw);
-      this.target[0] -= (dx * cy) * panScale;
-      this.target[1] -= (dx * sy) * panScale;
+      this.target[0] -= dx * cy * panScale;
+      this.target[1] -= dx * sy * panScale;
       this.target[2] += dy * panScale;
     } else {
       // Orbit
@@ -586,7 +821,11 @@ export class Solid3DViewer {
     this.canvas.removeEventListener("contextmenu", this.onContextMenu);
     this.deleteBatch(this.boardBatch);
     this.clearParts();
-    if (this.gl && this.prog) this.gl.deleteProgram(this.prog);
+    if (this.gl) {
+      if (this.bgVao) this.gl.deleteVertexArray(this.bgVao);
+      if (this.bgProg) this.gl.deleteProgram(this.bgProg);
+      if (this.prog) this.gl.deleteProgram(this.prog);
+    }
     this.worker?.terminate();
     this.canvas.remove();
   }
