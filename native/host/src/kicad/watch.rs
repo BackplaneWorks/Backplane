@@ -994,7 +994,7 @@ mod tests {
         let th = "t1700000003-8";
         let proj = st.threads.get(th).map(|t| t.project.clone()).unwrap();
         if let Some(p) = st.projects.get_mut(&proj) { p.root = piped.to_string_lossy().into_owned(); }
-        let mut s = json!({"selected": th, "drafts": {}, "rid": 0});
+        let mut s = json!({"sel": th, "rid": 1, "drafts": {}, "open": {}, "adding": false, "panel": false, "info": {}});
         let o_g = crate::present::viewer::view_action(&st, "h", &s, "gerbers").unwrap();
         crate::session::patch::merge(&mut s, &o_g.patch);
         let o_vs = crate::present::viewer::view_action(&st, "h", &s, "gerbers\tboard").unwrap();
