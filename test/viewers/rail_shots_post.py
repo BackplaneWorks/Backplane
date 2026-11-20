@@ -10,6 +10,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import rail_dock as DOCK
 import rail_shots_manifest as M  # noqa: E402
 
 
@@ -122,6 +123,11 @@ def parse_client_log(log_path: Path) -> dict:
     rail_metric_seen = False
     rail_events: list[tuple[int, dict]] = []
     rail_inventory: list[dict] | None = None
+    tiles_current: list[dict] = []
+    splitters_current: list[dict] = []
+    tiles_metric_seen = False
+    drags_by_mark: dict[str, list[dict]] = {}
+    refusals_by_mark: dict[str, list[dict]] = {}
     current_mark = ""
     mark_seqs: dict[str, int] = {}
     mark_before_rail: dict[str, dict | None] = {}
@@ -150,9 +156,21 @@ def parse_client_log(log_path: Path) -> dict:
             "refused_shots": refused_shots,
             "rail_metric_seen": rail_metric_seen,
             "rail_inventory": rail_inventory,
+            "tiles_metric_seen": tiles_metric_seen,
+            "drags": drags_by_mark,
+            "refusals": refusals_by_mark,
         }
 
     for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if "GPUI_LOG " in line:
+            try:
+                lev = json.loads(line.split("GPUI_LOG ", 1)[1])
+            except Exception:
+                lev = None
+            if isinstance(lev, dict) and isinstance(lev.get("refused"), str) and lev["refused"].strip():
+                ev_seq += 1
+                refusals_by_mark.setdefault(current_mark, []).append({"text": lev["refused"].strip(), "seq": ev_seq})
+            continue
         if "GPUI_METRIC " not in line:
             continue
         try:
@@ -180,6 +198,23 @@ def parse_client_log(log_path: Path) -> dict:
         elif kind == "rail_inventory" and isinstance(ev.get("entries"), list):
             if ev["entries"]:
                 rail_inventory = ev["entries"]
+        elif kind == "tiles" and isinstance(ev.get("tiles"), list):
+            tiles_current = [t for t in ev["tiles"] if isinstance(t, dict)]
+            splitters_current = [s for s in (ev.get("splitters") or []) if isinstance(s, dict)]
+            tiles_metric_seen = True
+        elif kind == "drag":
+            drags_by_mark.setdefault(current_mark, []).append({
+                "ok": bool(ev.get("ok")),
+                "from": ev.get("from"),
+                "to": ev.get("to"),
+                "moves": ev.get("moves"),
+                "error": ev.get("error"),
+                "seq": ev_seq,
+            })
+        elif kind == "refusal":
+            txt = str(ev.get("text") or ev.get("refused") or "").strip()
+            if txt:
+                refusals_by_mark.setdefault(current_mark, []).append({"text": txt, "code": ev.get("code"), "seq": ev_seq})
         elif kind == "mark":
             current_mark = ev.get("name") or ""
             if current_mark:
@@ -278,6 +313,8 @@ def parse_client_log(log_path: Path) -> dict:
                     "rail_drawn_seq": rail_drawn_seq,
                     "probe_rects": probe_rects,
                     "header_controls": {k: v for k, v in controls.items() if k.startswith("pane-tool:") or k == "ui:vs board"},
+                    "tiles": list(tiles_current),
+                    "splitters": list(splitters_current),
                 }
 
     return {
@@ -294,6 +331,9 @@ def parse_client_log(log_path: Path) -> dict:
         "refused_shots": refused_shots,
         "rail_metric_seen": rail_metric_seen,
         "rail_inventory": rail_inventory,
+        "tiles_metric_seen": tiles_metric_seen,
+        "drags": drags_by_mark,
+        "refusals": refusals_by_mark,
     }
 
 
@@ -1172,32 +1212,43 @@ def evaluate_scorecard(
     ))
 
     # Task 4: Compare Gerbers to the board side by side (budget 2)
-    s4 = shots.get("task4-gerbers-vs-board", {})
-    v4 = s4.get("viewer") or {}
-    ok4, obs4, oblist4 = shot_ok("task4-gerbers-vs-board")
-    p4_a = presses.get("press:gerbers", [])
-    p4_b = presses.get("press:task4-gerbers-vs-board", [])
-    p4 = [p["id"] for p in p4_a] + [p["id"] for p in p4_b]
-    if not full_client_ok or not ok4 or obs4:
-        o4 = "harness_failed"
-    elif (
-        s4.get("state") == "ready"
-        and int(v4.get("panes_count") or 0) >= 2
-        and len(p4) <= 2
-    ):
-        o4 = "passed"
+    t4_dock = DOCK.evaluate_task4_dock(full_dir, full_parsed, full_caps, full_client_ok)
+    if t4_dock is not None:
+        p4_dock = ["rail:Gerbers", "layout-add:board:right"]
+        tasks.append(make_task(
+            4, "Compare Gerbers to the board side by side", 2, p4_dock, t4_dock["outcome"],
+            t4_dock["evidence"],
+            note=t4_dock["note"],
+            found=True,
+            one_step_back=t4_dock["one_step_back"],
+        ))
     else:
-        o4 = "task_failed"
-    note4 = (
-        f"no side-by-side Gerber/board split (panes_count={v4.get('panes_count', 0)}); "
-        f"'vs board' sets gerbersVsBoard={v4.get('gerbers_vs_board')} on a single overlay pane"
-    )
-    tasks.append(make_task(
-        4, "Compare Gerbers to the board side by side", 2, p4, o4,
-        {"state": s4.get("state"), "open": v4.get("open"), "gerbers": v4.get("gerbers"), "gerbers_vs_board": v4.get("gerbers_vs_board"), "panes_count": v4.get("panes_count"), "plot_key": v4.get("plot_key"), "capture_ok": ok4, "obstructed": obs4, "obstructions": oblist4},
-        note=note4,
-        found=(any(p.get("found") for p in p4_a) and any(p.get("found") for p in p4_b)),
-    ))
+        s4 = shots.get("task4-gerbers-vs-board", {})
+        v4 = s4.get("viewer") or {}
+        ok4, obs4, oblist4 = shot_ok("task4-gerbers-vs-board")
+        p4_a = presses.get("press:gerbers", [])
+        p4_b = presses.get("press:task4-gerbers-vs-board", [])
+        p4 = [p["id"] for p in p4_a] + [p["id"] for p in p4_b]
+        if not full_client_ok or not ok4 or obs4:
+            o4 = "harness_failed"
+        elif (
+            s4.get("state") == "ready"
+            and int(v4.get("panes_count") or 0) >= 2
+            and len(p4) <= 2
+        ):
+            o4 = "passed"
+        else:
+            o4 = "task_failed"
+        note4 = (
+            f"no side-by-side Gerber/board split (panes_count={v4.get('panes_count', 0)}); "
+            f"'vs board' sets gerbersVsBoard={v4.get('gerbers_vs_board')} on a single overlay pane"
+        )
+        tasks.append(make_task(
+            4, "Compare Gerbers to the board side by side", 2, p4, o4,
+            {"state": s4.get("state"), "open": v4.get("open"), "gerbers": v4.get("gerbers"), "gerbers_vs_board": v4.get("gerbers_vs_board"), "panes_count": v4.get("panes_count"), "plot_key": v4.get("plot_key"), "capture_ok": ok4, "obstructed": obs4, "obstructions": oblist4},
+            note=note4,
+            found=(any(p.get("found") for p in p4_a) and any(p.get("found") for p in p4_b)),
+        ))
 
     # Task 5: See schematic and board together and cross-probe a known component (R1) (budget 2) + one step back
     s5 = shots.get("task5-split-probe", {})
@@ -2256,6 +2307,7 @@ def main(argv: list[str] | None = None) -> int:
             "rail_metric_seen": bool(p.get("rail_metric_seen")),
             "rail_inventory": p.get("rail_inventory"),
             "b1_checks": evaluate_b1_kind(kind, p, rail_map, embed=embed),
+            "b7_checks": DOCK.evaluate_b7_dock(kdir, p, caps) if kind == "full" else None,
             "pages": pages_summary,
         }
 

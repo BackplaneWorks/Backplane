@@ -575,11 +575,20 @@ def score_consistency(steps: dict) -> dict:
     b6_total = round(sum(b6_parts), 2) if b6_parts else None
     b6_measured_max = float(len(b6_parts))
 
+    b7_raw = ((kinds.get("full") or {}).get("b7_checks")) or steps.get("b7_checks") or {}
+    b7_status = str(b7_raw.get("status") or "unavailable") if isinstance(b7_raw, dict) else "unavailable"
+    b7_checked = int(b7_raw.get("checked") or 0) if isinstance(b7_raw, dict) else 0
+    b7_clean = int(b7_raw.get("clean") or 0) if isinstance(b7_raw, dict) else 0
+    b7_violations = list(b7_raw.get("violations") or []) if isinstance(b7_raw, dict) else []
+    b7_pts = pts_of(b7_clean, b7_checked, 3.0) if b7_status in ("measured", "measured_partial") else None
+
     def rule_status(code: str) -> str:
         if code == "B1":
             return "measured_partial" if b1_available else "unavailable"
         if code == "B5":
             return "measured_partial" if b5_available else "unavailable"
+        if code == "B7":
+            return b7_status if b7_status in ("measured", "measured_partial") else "unavailable"
         if code in ("B3", "B4", "B6"):
             return "measured_partial"
         return "not measured by the harness"
@@ -641,6 +650,17 @@ def score_consistency(steps: dict) -> dict:
             "loading": {"checked": b6_loading_checked, "clean": b6_loading_clean, "unscored_non_loading": b6_loading_unscored, "points": b6_loading_pts, "max_points": 1, "violations": b6_loading_violations},
             "empty": {"checked": b6_empty_checked, "clean": b6_empty_clean, "points": b6_empty_pts, "max_points": 1, "violations": b6_empty_violations},
             "error": {"checked": b6_error_checked, "clean": b6_error_clean, "points": b6_error_pts, "max_points": 1, "violations": b6_error_violations},
+        },
+        "B7": {
+            "rule": RULE_BY_ID["B7"],
+            "scope": "Docking/tiling model (add beside 4 directions, close, swap, drag resize, maximize/restore, overlay on/off, incompatible overlay refusal)",
+            "status": b7_status if b7_status in ("measured", "measured_partial") else "unavailable",
+            "reason": "" if b7_status in ("measured", "measured_partial") else str(b7_raw.get("reason") or "client did not emit GPUI_METRIC event=tiles"),
+            "max_points": 3,
+            "checked": b7_checked,
+            "clean": b7_clean,
+            "points": b7_pts,
+            "violations": b7_violations,
         },
         "rules": [
             {"rule": code, "text": text, "max_points": 3, "status": rule_status(code)}
@@ -934,6 +954,13 @@ def main(argv: list[str] | None = None) -> int:
                 f"{fmt_opt_pts(n_cons['B6']['points'], n_cons['B6']['measured_max_points'] or 3)} ({n_cons['B6']['unscored_private_or_obstructed']} unscored) | "
                 f"loading={fmt_opt_pts(n_cons['B6']['loading']['points'], 1)}, empty={fmt_opt_pts(n_cons['B6']['empty']['points'], 1)}, error={fmt_opt_pts(n_cons['B6']['error']['points'], 1)} |"
             )
+        elif code == "B7":
+            def fmt_b7(c: dict) -> str:
+                if c.get("status") not in ("measured", "measured_partial"):
+                    return "`unavailable`"
+                return f"{fmt_opt_pts(c['points'], 3)} ({c['clean']}/{c['checked']} clean)"
+            note = n_cons["B7"].get("reason") or f"{n_cons['B7']['status']}; {len(n_cons['B7']['violations'])} failing"
+            lines.append(f"| **B7** | {text} | {fmt_b7(b_cons['B7'])} | {fmt_b7(n_cons['B7'])} | {note} |")
         else:
             lines.append(f"| **{code}** | {text} | not measured | not measured | not measured by the harness |")
 
