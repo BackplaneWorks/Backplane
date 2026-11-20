@@ -1390,6 +1390,7 @@ try:
         if DRIVER == 'vnc':
             import importlib
             globals()['NSRunningApplication'] = importlib.import_module('AppKit').NSRunningApplication
+            KEYNAME[4] = 'h'  # Cmd+H through the relay
         P = last_push()[0]
         def at(fx, fy): return (P[0] + P[2] * fx, P[1] + P[3] * fy)
         def menus():
@@ -1439,7 +1440,9 @@ try:
         # an empty point of the canvas for the drag (a drag that starts on an item moves it): probe clicks with KiCad active
         key(K_ESC); time.sleep(0.4)
         empty = None
-        for fx, fy in ((0.12, 0.30), (0.88, 0.30), (0.12, 0.92), (0.88, 0.92), (0.50, 0.95), (0.30, 0.25), (0.70, 0.25)):
+        # right of the board's middle first: the drag goes right to left (KiCad's crossing selection takes what it touches; left to right
+        # takes only what it encloses)
+        for fx, fy in ((0.88, 0.92), (0.88, 0.30), (0.70, 0.25), (0.50, 0.95), (0.12, 0.92), (0.12, 0.30), (0.30, 0.25)):
             x, y = at(fx, fy); n0 = len(hub_log().splitlines()); click(x, y); time.sleep(1.0)
             sels = ev_since(n0, 'ET_SELECTION_CHANGED')
             if not any((e.get('selection') or {}).get('references') for e in sels): empty = (fx, fy); break
@@ -1461,7 +1464,7 @@ try:
             # D: a drag from empty canvas: selects, edits nothing
             if empty:
                 ok = start(how); n0 = len(client_log().splitlines()); h0 = len(hub_log().splitlines())
-                x0, y0 = at(*empty); x1, y1 = at(0.5, 0.5); drag(x0, y0, x1, y1); time.sleep(1.5)
+                x0, y0 = at(*empty); x1, y1 = at(min(0.35, empty[0] - 0.3), 0.5); drag(x0, y0, x1, y1); time.sleep(1.5)
                 sels = ev_since(h0, 'ET_SELECTION_CHANGED'); edits = ev_since(h0, 'ET_DOCUMENT_EDITED'); hi = handins_since(n0)
                 refs = max((len((e.get('selection') or {}).get('references') or []) for e in sels), default=0)
                 print(f'INFO held D ({how}): start ok {ok}; selection events {len(sels)} (most {refs} refs); edits {len(edits)}; press hand-ins {hi}; KiCad active {active(kpid)}', flush=True)
