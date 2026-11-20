@@ -1653,7 +1653,7 @@ fn commit_layout(
     // writer (clearing `@view.layout:<sel>` and leaving zero stale `@view.file`/`@view.sheet`/`@view.gerbers`).
     if !keep_stored && ts_all.len() == 1 {
         let ft = ts_all[0];
-        if !matches!(ft.kind, PageKind::Review | PageKind::Diff) && !ft.explicit {
+        if ft.kind != PageKind::Diff && !ft.explicit {
             let legacy_arg = match ft.kind {
                 PageKind::Board if ft.overlay.as_ref().is_some_and(|o| o.kind == PageKind::Gerbers) => "gerbers\tboard".to_string(),
                 PageKind::Gerbers => "gerbers".to_string(),
