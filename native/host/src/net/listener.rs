@@ -333,3 +333,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(h);
     }
 }
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[path = "webtransport.rs"]
+pub(crate) mod webtransport;
