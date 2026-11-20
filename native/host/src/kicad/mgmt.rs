@@ -160,7 +160,8 @@ mod tests {
         std::fs::write(d.join("alt.PrjPcb"), "").unwrap();
         assert!(!has_management(root));
         for name in ["a", "sub/b"] {
-            let pro = d.join(format!("{name}.kicad_pro"));
+            // joined part by part: Windows answers with its own separators, so "sub/b" in one join would not compare equal
+            let pro = name.split('/').fold(d.clone(), |p, part| p.join(part)).with_extension("kicad_pro");
             std::fs::create_dir_all(pro.parent().unwrap()).unwrap();
             std::fs::write(&pro, "{}").unwrap();
             let sch = pro.with_extension("kicad_sch");
