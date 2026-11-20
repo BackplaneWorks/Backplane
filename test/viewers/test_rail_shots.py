@@ -14,6 +14,7 @@ from PIL import Image, ImageDraw
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import rail_shots_compare as C  # noqa: E402
+import rail_shots_driver as D  # noqa: E402
 import rail_shots_manifest as M  # noqa: E402
 import rail_shots_post as P  # noqa: E402
 
@@ -749,20 +750,20 @@ class RailShotsRegressionTests(unittest.TestCase):
                         "extra-missing-board": {"state": "empty", "viewer": {"open": "board", "plot_none": "No board yet"}, "controls_captured": True, "drawn_controls_ids": []},
                         # Only solid_note on board would NOT count; on 3d solid_note counts, but here state is ready (fails positive empty check) + ui:Edit drawn + frame changed
                         "extra-missing-3d": {"state": "ready", "viewer": {"open": "3d", "solid_note": "No board yet"}, "controls_captured": True, "drawn_controls_ids": ["ui:Edit"]},
-                        "extra-edit-files": {"state": "ready", "viewer": {"open": "schematic"}},
-                        "extra-edit-review": {"state": "ready", "viewer": {"open": "schematic"}},
-                        "extra-edit-browser": {"state": "ready", "viewer": {"open": "schematic"}},
+                        "extra-edit-files": {"state": "ready", "viewer": {"open": "schematic"}, "seq": 30},
+                        "extra-edit-review": {"state": "ready", "viewer": {"open": "schematic"}, "seq": 60},
+                        "extra-edit-browser": {"state": "ready", "viewer": {"open": "schematic"}, "seq": 90},
                     },
                     "settled_tags": {
-                        "extra-edit-files-start": {"kind": "files", "settled": True},
-                        "extra-edit-review-start": {"kind": "review", "settled": True},
-                        "extra-edit-browser-start": {"kind": "browser", "settled": True},
+                        "extra-edit-files-start": {"kind": "files", "settled": True, "seq": 10},
+                        "extra-edit-review-start": {"kind": "review", "settled": True, "seq": 40},
+                        "extra-edit-browser-start": {"kind": "browser", "settled": True, "seq": 70},
                     },
                     "presses": {
-                        "press:extra-edit-files": [{"id": "ui:Edit", "found": True}],
-                        "press:extra-edit-review": [{"id": "ui:Edit", "found": True}],
+                        "press:extra-edit-files": [{"id": "ui:Edit", "found": True, "seq": 20}],
+                        "press:extra-edit-review": [{"id": "ui:Edit", "found": True, "seq": 50}],
                         # Cleanup ui:View delivered under mark does NOT satisfy ui:Edit delivery!
-                        "press:extra-edit-browser": [{"id": "ui:Edit", "found": False}, {"id": "ui:View", "found": True}],
+                        "press:extra-edit-browser": [{"id": "ui:Edit", "found": False, "seq": 80}, {"id": "ui:View", "found": True, "seq": 85}],
                     },
                     "kicad_tags": {
                         "extra-edit-files-report": {"state": "ready", "in_gpui_tree": True, "shown": 10, "frames": [{"xid": 10, "kind": "SCH", "painted": 20}]},
@@ -817,6 +818,33 @@ class RailShotsRegressionTests(unittest.TestCase):
             caps["schematic-only"]["extra-missing-board"] = mk_cap(insp=False)
             res3 = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["schematic-only"], parsed, caps, embed=True)}
             self.assertEqual(res3["schematic-only/missing-board"]["outcome"], "unavailable")
+
+            # 5. Out-of-order edit sequence (edit_seq not strictly between start_seq and shot_seq) -> unavailable
+            parsed["schematic-only"]["presses"]["press:extra-edit-files"] = [{"id": "ui:Edit", "found": True, "seq": 5}]
+            res4 = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["schematic-only"], parsed, caps, embed=True)}
+            self.assertEqual(res4["schematic-only/scripted-edit-files"]["outcome"], "unavailable")
+            self.assertIn("order not verified", res4["schematic-only/scripted-edit-files"]["note"])
+
+            # 6. Missing rail evidence when page didn't open -> rail_state='unknown' and outcome='unavailable' (not 'failed')
+            parsed["schematic-only"]["shots"]["idle"]["viewer"]["rail"] = []
+            res5 = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["schematic-only"], parsed, caps, embed=True)}
+            self.assertEqual(res5["schematic-only/no-edit-split"]["evidence"]["rail_state"], "unknown")
+            self.assertEqual(res5["schematic-only/no-edit-split"]["outcome"], "unavailable")
+
+    def test_hub_kicad_sessions_parser_distinguishes_empty_from_unconfirmed(self) -> None:
+        # Confirmed hub.status reply with zero INFO lines -> genuinely empty complete inventory
+        empty_ok = D._parse_hub_kicad_sessions_output('{"m":"hub.status","ok":true,"result":{"ok":true}}\n')
+        self.assertTrue(empty_ok["ok"])
+        self.assertTrue(empty_ok["inventory_complete"])
+        self.assertEqual(empty_ok["sessions"], {})
+
+        # Unrecognised method or empty stdout -> incomplete (fails closed)
+        bad_method = D._parse_hub_kicad_sessions_output('{"m":"threads.list","ok":false,"error":"unknown method"}\n')
+        self.assertFalse(bad_method["ok"])
+        self.assertFalse(bad_method["inventory_complete"])
+        nothing = D._parse_hub_kicad_sessions_output("")
+        self.assertFalse(nothing["ok"])
+        self.assertFalse(nothing["inventory_complete"])
 
 
 if __name__ == "__main__":
