@@ -276,17 +276,6 @@ mod tests {
         for k in ["onboard.step", "onboard.skipped", "onboard.seen", "onboard.done", "onboard.checks", "onboard.usage", "freecad.path"] { assert!(lean_keeps(k), "{k}: setup reads it, and without it every press forgets the last"); }
         for k in ["ride.t1", "tok.basis.t1", "uber.op.u.m.1", "todos.base.t1", "session.t1.claude"] { assert!(!lean_keeps(k), "{k}"); }
     }
-    #[test] fn lean_devices_page_tracks_browser_approval_switch() {
-        let mut core = Core::new();
-        let info = json!({"devices":{"browserPending":[{"id":"pending","name":"Browser","code":"123456"}]}});
-        for enabled in ["1", "0"] {
-            core.st.apply(&json!({"$":"SettingSet","key":"web.enabled","value":enabled,"at":1}));
-            let rows = crate::present::settings::devices(&core.st, &json!({}), &info);
-            let approve = rows.iter().flat_map(|row| row["buttons"].as_array().into_iter().flatten())
-                .any(|button| button["action"] == "device-web-approve");
-            assert_eq!(approve, enabled == "1");
-        }
-    }
     #[test] fn lean_thread_screen_gate_preserves_exact_values_and_only_thread_key_presence() {
         let mut core=Core::new();
         for (key,value) in [("files.max.mb","10"),("person.tz","America/New_York"),("person.tz.device","Etc/UTC"),("tz.machine","Etc/UTC"),("think","off"),("permissions.default","ask")] {

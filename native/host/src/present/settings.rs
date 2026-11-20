@@ -1027,6 +1027,18 @@ mod tests {
         assert_eq!(sent("settings-page", "ring", json!({})).iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), ["ring.search"]);
         assert!(act("h", &json!({}), "ring-op", "rm:n1").is_none());
     }
+    #[test] fn lean_devices_page_tracks_browser_approval_switch() {
+        let mut state = State::new();
+        state.lean = true;
+        let info = json!({"devices":{"browserPending":[{"id":"pending","name":"Browser","code":"123456"}]}});
+        for enabled in ["1", "0"] {
+            state.apply(&json!({"$":"SettingSet","key":"web.enabled","value":enabled,"at":1}));
+            let rows = devices(&state, &json!({}), &info);
+            let approve = rows.iter().flat_map(|row| row["buttons"].as_array().into_iter().flatten())
+                .any(|button| button["action"] == "device-web-approve");
+            assert_eq!(approve, enabled == "1");
+        }
+    }
     #[test] fn voice_choices_are_lit_from_the_lean_state() {
         let mut s = State::new(); s.lean = true;
         for (k, v) in [("voice.engine", "local"), ("voice.model", "parakeet-v3"), ("voice.device", "mic2"), ("voice.e.kicad", "KiCad = key cad"), ("voice.l.jason", "JSON\t2\t0")] {
