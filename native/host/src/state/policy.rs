@@ -49,6 +49,8 @@ pub fn lean_keeps(k: &str) -> bool {
     if k == "git.auto_push" || k == "git.off_branch" { return true }
     // the viewer's probe, one per board (present/viewer.rs `probe_action`: the tapped piece's info line, at most 2000 characters)
     if k.starts_with("probe:") { return true }
+    // a project's remembered viewer layout (present/viewer.rs `memory_key`): opaque root-relative tiles, a few KB at most; every client's copy needs it to bring it back
+    if k.starts_with("layout:") { return true }
     // a halt card's facts (agents/halt.rs), one per turn that ended out of memory or out of context: the thread view draws the card from it (a few KB at most)
     if k.starts_with("halt.") { return true }
     if k.starts_with("unanswered.") { return true } // #1304: the thread view draws the "hasn't answered" notice from it (agents/unanswered.rs)

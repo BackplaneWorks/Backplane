@@ -1538,10 +1538,30 @@ pub fn show_settled_with(want: &ShowWant, report: &Value, d: &ShowDefaults, reso
     }
 }
 
-/// Cached Gerber-set member availability resolved when layout or watch changes (never during picture rendering).
-fn gerber_set_state() -> &'static std::sync::Mutex<std::collections::HashMap<(String, String), bool>> {
-    static MAP: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<(String, String), bool>>> = std::sync::OnceLock::new();
-    MAP.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+/// Cached Gerber-set member availability resolved when layout or watch changes (never during picture rendering): (root, set) -> (has members, when it was last
+/// resolved). Bounded: at most `GERBER_PER_ROOT` entries a project and `GERBER_TOTAL` in all, the least recently resolved leaving first; a layout that no longer
+/// holds a set drops it (`refresh_gerber_sets`).
+const GERBER_PER_ROOT: usize = 16;
+const GERBER_TOTAL: usize = 256;
+struct GerberCache { seq: u64, map: std::collections::HashMap<(String, String), (bool, u64)> }
+fn gerber_set_state() -> &'static std::sync::Mutex<GerberCache> {
+    static MAP: std::sync::OnceLock<std::sync::Mutex<GerberCache>> = std::sync::OnceLock::new();
+    MAP.get_or_init(|| std::sync::Mutex::new(GerberCache { seq: 0, map: Default::default() }))
+}
+fn gerber_put(c: &mut GerberCache, root: &str, rel: &str, ok: bool) {
+    c.seq += 1;
+    let at = c.seq;
+    c.map.insert((root.to_string(), rel.to_string()), (ok, at));
+    // a project's own bound, then the whole
+    let mut mine: Vec<(u64, String)> = c.map.iter().filter(|((r, _), _)| r == root).map(|((_, s), (_, at))| (*at, s.clone())).collect();
+    if mine.len() > GERBER_PER_ROOT {
+        mine.sort();
+        for (_, s) in mine.into_iter().take(c.map.iter().filter(|((r, _), _)| r == root).count() - GERBER_PER_ROOT) { c.map.remove(&(root.to_string(), s)); }
+    }
+    while c.map.len() > GERBER_TOTAL {
+        let Some(old) = c.map.iter().min_by_key(|(_, (_, at))| *at).map(|(k, _)| k.clone()) else { break };
+        c.map.remove(&old);
+    }
 }
 fn has_gerber_members(root: &str, set_rel: &str) -> bool {
     if root.is_empty() || set_rel.is_empty() { return false; }
@@ -1549,7 +1569,7 @@ fn has_gerber_members(root: &str, set_rel: &str) -> bool {
     crate::files::fm::contained(root_p, set_rel)
         .is_some_and(|p| !crate::files::kicad::gerber::set_files_in(&p, Some(root_p)).is_empty())
 }
-/// Resolve contained Gerber members for all Gerber tiles in `layout` and keep the results in state.
+/// Resolve contained Gerber members for all Gerber tiles in `layout` and keep the results in state; the sets of this project the layout no longer holds are dropped.
 pub fn refresh_gerber_sets(root: &str, layout: &super::layout::Layout) {
     use super::layout::PageKind;
     if root.is_empty() { return; }
@@ -1568,30 +1588,26 @@ pub fn refresh_gerber_sets(root: &str, layout: &super::layout::Layout) {
             updates.push((set_rel.to_string(), has_gerber_members(root, set_rel)));
         }
     }
-    if !updates.is_empty() {
-        let mut map = gerber_set_state().lock().unwrap_or_else(|e| e.into_inner());
-        for (rel, ok) in updates {
-            map.insert((root.to_string(), rel), ok);
-        }
-    }
+    let mut c = gerber_set_state().lock().unwrap_or_else(|e| e.into_inner());
+    let held: std::collections::HashSet<&String> = updates.iter().map(|(r, _)| r).collect();
+    c.map.retain(|(r, s), _| r != root || held.contains(s));
+    for (rel, ok) in &updates { gerber_put(&mut c, root, rel, *ok); }
 }
 /// Re-check all tracked Gerber sets under `root` when a watch updates.
 pub fn refresh_gerber_sets_for_root(root: &str) {
     if root.is_empty() { return; }
     let keys: Vec<String> = {
-        let map = gerber_set_state().lock().unwrap_or_else(|e| e.into_inner());
-        map.keys().filter(|(r, _)| r == root).map(|(_, rel)| rel.clone()).collect()
+        let c = gerber_set_state().lock().unwrap_or_else(|e| e.into_inner());
+        c.map.keys().filter(|(r, _)| r == root).map(|(_, rel)| rel.clone()).collect()
     };
     if keys.is_empty() { return; }
     let updates: Vec<(String, bool)> = keys.into_iter().map(|rel| { let ok = has_gerber_members(root, &rel); (rel, ok) }).collect();
-    let mut map = gerber_set_state().lock().unwrap_or_else(|e| e.into_inner());
-    for (rel, ok) in updates {
-        map.insert((root.to_string(), rel), ok);
-    }
+    let mut c = gerber_set_state().lock().unwrap_or_else(|e| e.into_inner());
+    for (rel, ok) in &updates { gerber_put(&mut c, root, rel, *ok); }
 }
 fn cached_gerber_set_exists(root: &str, set_rel: &str) -> Option<bool> {
-    let map = gerber_set_state().lock().unwrap_or_else(|e| e.into_inner());
-    map.get(&(root.to_string(), set_rel.to_string())).copied()
+    let c = gerber_set_state().lock().unwrap_or_else(|e| e.into_inner());
+    c.map.get(&(root.to_string(), set_rel.to_string())).map(|(ok, _)| *ok)
 }
 
 /// Real legacy open page: reads `@view:<sel>`, falling back to `info["view.kind:<sel>"] == "review"`
@@ -1742,6 +1758,7 @@ fn commit_layout(st: &State, hub: &str, session: &Value, sel: &str, root: &str, 
 /// pages behind: whichever writer made the single page, the file, sheet and Gerber drafts it did not set are cleared.
 fn commit_layout_force(st: &State, hub: &str, session: &Value, sel: &str, root: &str, next: &super::layout::Layout, geometry_only: bool, force: bool) -> ViewOut {
     let had_stored = !s(&session["drafts"], &format!("@view.layout:{sel}")).is_empty();
+    let prev_multi = parse_stored_layout(&session["drafts"], sel).is_some_and(|l| l.tiles().len() >= 2);
     let mut vo = commit_layout_core(st, hub, session, sel, root, next, geometry_only, force);
     let ts = next.tiles();
     let keep_stored = ts.len() >= 2 || (ts.len() == 1 && ts.iter().all(|t| is_tile_versioned(t)));
@@ -1753,7 +1770,96 @@ fn commit_layout_force(st: &State, hub: &str, session: &Value, sel: &str, root: 
         }
         if !dm.is_empty() { vo.patch["drafts"] = Value::Object(dm); }
     }
+    let multi = ts.len() >= 2;
+    let linked = sel.contains('~');
+    let set_key = format!("@view.set:{sel}");
+    // A layout of several tiles watches every distinct source it draws, once, through `kicad.watch.set`; the focused tile's own single watch is not sent
+    // (it would replace the set), and a focus move that leaves the set of sources as it is sends nothing at all (`@view.at` still follows the focus).
+    // Only a stored layout of several tiles gets here, which no shipped client enters: a single-tile session keeps main's one `kicad.watch`.
+    if multi && !geometry_only && !root.is_empty() {
+        vo.before.retain(|c| !c["text"].as_str().is_some_and(|x| x.contains("\"m\":\"kicad.watch\"")));
+        let (sources, sig) = watch_sources(next, root, linked);
+        if force || sig != s(&session["drafts"], &set_key) {
+            let mut rid = vo.patch["rid"].as_u64().unwrap_or_else(|| session["rid"].as_u64().unwrap_or(0));
+            let mut p = json!({"root": root, "sources": sources});
+            if linked { p["on"] = json!(sel.split('~').next().unwrap_or("")); }
+            if force { p["force"] = json!(true); }
+            vo.before.push(json!({"type": "send", "hub": hub, "text": json!({"id": rid, "m": "kicad.watch.set", "p": p}).to_string()}));
+            rid += 1; vo.patch["rid"] = json!(rid);
+            vo.patch["drafts"][&set_key] = json!(sig);
+        }
+    } else if !multi && !s(&session["drafts"], &set_key).is_empty() {
+        vo.patch["drafts"][&set_key] = json!("");
+    }
+    // The project's layout is remembered: written when a layout of several tiles changes, cleared when the person closes down to one tile (a hub setting
+    // `layout:<root>`, the project's, shared by every client of this hub). Opaque, root-relative tiles only; a tile that cannot be resolved is left out.
+    if !linked && !root.is_empty() {
+        let key = memory_key(root);
+        let have = st.settings.get(&key).map(String::as_str).unwrap_or("");
+        let want = if multi { memory_value(next) } else if prev_multi { Some(String::new()) } else { None };
+        if let Some(w) = want {
+            if w != have {
+                let rid = vo.patch["rid"].as_u64().unwrap_or_else(|| session["rid"].as_u64().unwrap_or(0));
+                vo.before.push(json!({"type": "send", "hub": hub, "text": json!({"id": rid, "m": "setting.set", "p": {"key": key, "value": w}}).to_string()}));
+                vo.patch["rid"] = json!(rid + 1);
+            }
+        }
+    }
     vo
+}
+
+/// The hub setting that holds a project's remembered layout.
+pub fn memory_key(root: &str) -> String { format!("layout:{}", root.trim_end_matches('/')) }
+
+/// The remembered form of a layout: tiles with root-relative sources (and versioned tiles by source id and commit), an unresolved tile left out; None when
+/// fewer than two tiles would be left.
+fn memory_value(l: &super::layout::Layout) -> Option<String> {
+    let mut out = l.clone();
+    for t in l.tiles() {
+        if t.unresolved_version {
+            out = super::layout::close(&out, &t.id, None).ok()?;
+        }
+    }
+    // (what is remembered is the arrangement: a focus move or a maximize is not a change of it)
+    out.maximized = None;
+    out.focus = out.tiles().first().map(|t| t.id.clone());
+    (out.tiles().len() >= 2).then(|| serde_json::to_string(&out).ok()).flatten()
+}
+
+/// The layout a project remembers, checked again now: every versioned tile must resolve in this project, an invalid layout or one with fewer than two
+/// tiles left applies nothing.
+fn memory_layout(st: &State, root: &str) -> Option<super::layout::Layout> {
+    let raw = st.settings.get(&memory_key(root))?;
+    let mut l: super::layout::Layout = serde_json::from_str(raw).ok()?;
+    super::layout::check_invariants(&l).ok()?;
+    let resolver = project_version_resolver(root);
+    use super::layout::VersionResolver;
+    for t in l.tiles().into_iter().cloned().collect::<Vec<_>>() {
+        let versions = [t.version.as_ref(), t.overlay.as_ref().and_then(|o| o.version.as_ref())];
+        if t.unresolved_version || versions.iter().flatten().any(|v| resolver.resolve(&v.source_id).is_none()) {
+            l = super::layout::close(&l, &t.id, None).ok()?;
+        }
+    }
+    (l.tiles().len() >= 2 && l.tiles().len() <= super::layout::MAX_TILES).then_some(l)
+}
+
+/// The sources a layout of several tiles watches: each tile's (an unresolved historical tile has none, and never falls back to live artwork), each distinct
+/// source once, with the opaque tile id that first asked for it; and the sorted list of their keys, the layout's watch identity.
+fn watch_sources(l: &super::layout::Layout, root: &str, linked: bool) -> (Vec<Value>, String) {
+    let (pcb, sch) = if linked { (String::new(), String::new()) } else { let f = crate::files::kicad::project::read(root); (f.pcb, f.sch) };
+    let ctx = super::layout::WatchContext { root: root.to_string(), default_pcb: pcb, default_sch: sch };
+    let resolver = project_version_resolver(root);
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = vec![];
+    for t in l.tiles() {
+        let Ok(single) = super::layout::Layout::single(t.clone()) else { continue };
+        let Ok(specs) = super::layout::plan_watches(&single, &ctx, &resolver) else { continue };
+        for sp in specs {
+            let kind = match sp.kind { 0 => "board", 1 => "schematic", 2 => "3d", _ => continue };
+            if seen.insert(sp.key.clone()) { out.push(json!({"tile": t.id, "kind": kind, "path": sp.path})); }
+        }
+    }
+    (out, seen.into_iter().collect::<Vec<_>>().join("\n"))
 }
 
 fn commit_layout_core(
@@ -2335,10 +2441,48 @@ fn parse_overlay_mode(s: &str) -> Option<super::layout::OverlayMode> {
     }
 }
 
+/// The remembered layout of the session's project, applied through `commit_layout` (every guard, one writer). `explicit`: the person asked (`layout-restore-saved`),
+/// whatever is open; else it is the by-itself return: only for a thread of this machine with nothing open in this session (no page, no stored layout, no Diff or
+/// Review). Never starts KiCad: it only sets the layout and its watches. None: nothing to apply.
+pub fn apply_memory(st: &State, hub: &str, session: &Value, client_id: Option<u64>, locale: &str, explicit: bool) -> Option<LayoutOut> {
+    let sel = s(session, "sel");
+    if sel.is_empty() || sel.contains('~') || !st.threads.contains_key(sel) { return None }
+    let root = root_of(st, sel);
+    if root.is_empty() { return None }
+    let d = &session["drafts"];
+    let open = legacy_open(session, sel);
+    if !explicit && (!open.is_empty() || parse_stored_layout(d, sel).is_some() || pages::diff_on(session, sel) || !s(d, "@view.bare").is_empty()) { return None }
+    let mem = memory_layout(st, &root)?;
+    if explicit {
+        // under a KiCad holder's dialog the layout in use does not change
+        let cur = parse_stored_layout(d, sel).unwrap_or_else(|| super::layout::derive_layout(&super::layout::DeriveInput {
+            root: &root, open, diff_on: pages::diff_on(session, sel), gerbers: s(d, &format!("@view.gerbers:{sel}")) == "1",
+            file: s(d, &format!("@view.file:{sel}")), sheet: s(d, &format!("@view.sheet:{sel}")), picked_board: &chosen_board(d, sel, &root), ..Default::default() }));
+        let picked_abs = board_file("board", &root, &chosen_board(d, sel, &root));
+        if hub_kicad_guard(&cur, &root, &picked_abs, client_id, None, None, false).locked.is_some() {
+            let r = super::layout::Refusal::Locked;
+            return Some(LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) });
+        }
+    }
+    Some(LayoutOut::Ok(commit_layout(st, hub, session, sel, &root, &mem, false)))
+}
+
+/// `layout-forget`: the project's remembered layout is cleared.
+fn forget_memory(st: &State, hub: &str, session: &Value) -> Option<LayoutOut> {
+    let sel = s(session, "sel");
+    if sel.is_empty() || sel.contains('~') || !st.threads.contains_key(sel) { return None }
+    let root = root_of(st, sel);
+    if root.is_empty() { return None }
+    let key = memory_key(&root);
+    if st.settings.get(&key).is_none_or(|v| v.is_empty()) { return Some(LayoutOut::Ok(ViewOut { patch: json!({}), before: vec![], boards_look: false })) }
+    let rid = session["rid"].as_u64().unwrap_or(0);
+    Some(LayoutOut::Ok(ViewOut { patch: json!({"rid": rid + 1}), before: vec![json!({"type": "send", "hub": hub, "text": json!({"id": rid, "m": "setting.set", "p": {"key": key, "value": ""}}).to_string()})], boards_look: false }))
+}
+
 /// Thin hub action handler over `present::layout` pure operations (per-session `@view.layout:<sel>`).
 ///
 /// Handles: `layout-add`, `layout-close`, `layout-focus`, `layout-resize`, `layout-swap`,
-/// `layout-move`, `layout-overlay`, `layout-unsplit`, `layout-maximize`, `layout-restore`.
+/// `layout-move`, `layout-overlay`, `layout-unsplit`, `layout-maximize`, `layout-restore`, and the project's memory: `layout-restore-saved`, `layout-forget`.
 /// Every malformed JSON, kind, side, mode, or field returns `LayoutOut::Refused` (`invalidInput`)
 /// localized for `locale` with layout, drafts, and watches untouched.
 /// `layout-resize` is geometry-only (never changes watches and never dismisses Diff/Review).
@@ -2366,6 +2510,9 @@ pub fn layout_action(
             _ => return refuse(Refusal::InvalidInput),
         }
     };
+    // the project's remembered layout: restored on the person's word, or forgotten (named so it cannot be taken for maximize's `layout-restore`)
+    if action == "layout-restore-saved" { return apply_memory(st, hub, session, client_id, locale, true).or_else(|| refuse(Refusal::NotFound)) }
+    if action == "layout-forget" { return forget_memory(st, hub, session) }
     let linked = sel.contains('~');
     let root = if linked {
         st.threads.get(sel).map(|t| if !t.worktree.is_empty() { t.worktree.clone() } else { st.projects.get(&t.project).map(|p| p.root.clone()).unwrap_or_default() }).unwrap_or_default()
@@ -2933,6 +3080,22 @@ mod tests {
         let mut st = State::new();
         for l in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(l); }
         (st, "t1700000003-8".into())
+    }
+    /// The Gerber set cache is bounded: a project's oldest sets leave past `GERBER_PER_ROOT`, the least recently resolved leave past `GERBER_TOTAL`.
+    #[test] fn the_gerber_set_cache_is_bounded_and_keeps_what_was_resolved_last() {
+        let root = "/p/evict-per-root";
+        { let mut c = gerber_set_state().lock().unwrap(); for i in 0..(GERBER_PER_ROOT + 5) { gerber_put(&mut c, root, &format!("mfg/r{i}"), true); } }
+        assert_eq!(cached_gerber_set_exists(root, "mfg/r0"), None, "the oldest is gone");
+        assert_eq!(cached_gerber_set_exists(root, &format!("mfg/r{}", GERBER_PER_ROOT + 4)), Some(true), "the newest stays");
+        { let mut c = gerber_set_state().lock().unwrap(); for i in 0..(GERBER_TOTAL + 10) { gerber_put(&mut c, &format!("/p/evict-total-{i}"), "mfg/a", false); } }
+        let total = gerber_set_state().lock().unwrap().map.len();
+        assert!(total <= GERBER_TOTAL, "the whole cache is bounded: {total}");
+        assert_eq!(cached_gerber_set_exists(&format!("/p/evict-total-{}", GERBER_TOTAL + 9), "mfg/a"), Some(false));
+        // a layout that no longer holds a project's sets drops them
+        let r2 = "/p/evict-layout";
+        { let mut c = gerber_set_state().lock().unwrap(); gerber_put(&mut c, r2, "mfg/old", true); }
+        refresh_gerber_sets(r2, &super::super::layout::Layout::empty());
+        assert_eq!(cached_gerber_set_exists(r2, "mfg/old"), None);
     }
     #[test]
     fn empty_gerbers_page_has_a_lit_rail_entry_until_closed() {

@@ -40,7 +40,7 @@ pub struct Carry {
 const SKIP_T: &[&str] = &["UberOp", "LockChanged", "SessionSet", "WorktreeSet", "PeerSet", "ProjectCreated", "ProjectRemoved", "TaskDelegated", "TaskDelivered", "TaskStateSet", "PushCleared"];
 const DEVICE_T: &[&str] = &["DeviceRegistered", "DevicePrefs", "DeviceDropped"];
 /// Settings of this machine, or naming it, or a project thread's: they stay.
-const SKIP_K: &[&str] = &["machine.", "peer.", "uber.", "projects.", "probe:", "lock.", "locks.", "accounts.", "account.", "allowance.", "limit.", "session.", "tz.checked",
+const SKIP_K: &[&str] = &["machine.", "peer.", "uber.", "projects.", "probe:", "layout:", "lock.", "locks.", "accounts.", "account.", "allowance.", "limit.", "session.", "tz.checked",
     "restart.", "liveness.", "hub.", "update.", "sandbox.", "far.", "home.", "push.apns.", "ring.front"];
 
 fn subject(e: &Value) -> &str {

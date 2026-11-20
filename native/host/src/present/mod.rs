@@ -428,6 +428,9 @@ mod tests {
         st.apply_line(&json!({"$":"ProjectCreated","id":"p","title":"Board","root":root,"at":1}).to_string());
         st.apply_line(&json!({"$":"ThreadCreated","id":"t","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
 
+        let set_of = |vo: &viewer::ViewOut| -> Value {
+            vo.before.iter().filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).find(|m| m["m"] == "kicad.watch.set").map(|m| m["p"].clone()).expect("a layout of several tiles watches through one kicad.watch.set")
+        };
         let watch_msg = |vo: &viewer::ViewOut| -> Option<Value> {
             vo.before.first().and_then(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).map(|m| m["p"].clone())
         };
@@ -439,9 +442,10 @@ mod tests {
         // Session A adds Gerbers beside Board -> emits exact kicad.watch for Gerbers and updates @view.at
         let out = viewer::layout_action(&st, "h", &sess_a, Some(10), "en", "layout-add", r#"{"side":"right","kind":"gerbers"}"#).unwrap();
         let viewer::LayoutOut::Ok(vo) = out else { panic!("expected Ok") };
-        let wp = watch_msg(&vo).expect("layout-add focusing new Gerbers tile must emit kicad.watch");
-        assert_eq!(wp["kind"], "board");
-        assert_eq!(wp["path"], format!("{root}/mfg/rev1"));
+        assert!(watch_msg(&vo).is_some_and(|p| p.get("sources").is_some()), "two tiles: one set, not the single watch");
+        let set = set_of(&vo);
+        let g = set["sources"].as_array().unwrap().iter().find(|x| x["tile"] == "t2").expect("the Gerbers tile's source is in the set");
+        assert_eq!((g["kind"].as_str(), g["path"].as_str()), (Some("board"), Some(format!("{root}/mfg/rev1").as_str())));
         crate::session::patch::merge(&mut sess_a, &vo.patch);
         assert_eq!(sess_a["drafts"]["@view.at"], format!("0|{root}|{root}/mfg/rev1"));
 
@@ -482,7 +486,7 @@ mod tests {
         sess_diff["info"]["view.kind:t"] = json!("diff");
         let res_diff = viewer::layout_action(&st, "h", &sess_diff, Some(10), "en", "layout-resize", r#"{"split":"s1","ratio":0.6,"bounds":[1000,800]}"#).unwrap();
         let viewer::LayoutOut::Ok(vo_rd) = res_diff else { panic!("expected resize Ok") };
-        assert!(vo_rd.before.is_empty(), "layout-resize must emit zero watches");
+        assert!(vo_rd.before.iter().all(|c| !c["text"].as_str().unwrap_or("").contains("kicad.watch")), "layout-resize must emit zero watches (the remembered layout is written, nothing is watched)");
         assert!(vo_rd.patch.get("panel").is_none(), "layout-resize must NOT call pages::leave or dismiss Diff");
 
         // 4. Hub-only KiCad guard (`resolve_kicad_guard`): NEVER trusts session["info"];
@@ -553,7 +557,8 @@ mod tests {
         assert_eq!(v_unres["tiles"]["t1"]["error"], "Unresolved version");
         let focus_unres = viewer::layout_action(&st, "h", &sess_unres, Some(10), "en", "layout-focus", r#"{"tile":"t1"}"#).unwrap();
         let viewer::LayoutOut::Ok(vo_fu) = focus_unres else { panic!() };
-        assert_eq!(watch_msg(&vo_fu).unwrap()["kind"], "", "focusing unresolved version tile must stop watch, NEVER watch live board");
+        let set_fu = set_of(&vo_fu);
+        assert!(set_fu["sources"].as_array().unwrap().iter().all(|x| x["tile"] != "t1" && x["path"] != format!("{root}/unit.kicad_pcb")), "an unresolved version tile has no source, NEVER the live board: {set_fu}");
 
         // 7. Unfocused Mech & Files tiles carry their own rel/dir; multi-tile `sheet_action` updates stored focused tile
         let out_m = viewer::layout_action(&st, "h", &sess_b, Some(11), "en", "layout-add", r#"{"side":"right","kind":"mech","source":"mech/case.step"}"#).unwrap();
@@ -773,9 +778,9 @@ mod tests {
         let on_show = sh["drafts"]["@view.at"].as_str().unwrap().to_string();
         assert!(!on_show.is_empty(), "the historical tile is the one watched");
         let viewer::LayoutOut::Ok(vr) = viewer::view_action_for(&st, "h", &sh, Some(1), "en", "retry", 5000).unwrap() else { panic!() };
-        let wp = watch(&vr).expect("Retry on a historical tile whose key is on show must still send its watch");
-        assert_eq!((wp["force"].clone(), wp["kind"].clone()), (json!(true), json!("board")));
-        assert!(wp["path"].as_str().unwrap().contains("1111aaaa"), "the historical source, not live artwork: {wp}");
+        let wp = vr.before.iter().filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).find(|m| m["m"] == "kicad.watch.set").map(|m| m["p"].clone()).expect("Retry on a layout whose sources are on show still sends its set, forced");
+        assert_eq!(wp["force"], json!(true));
+        assert!(wp["sources"].as_array().unwrap().iter().any(|x| x["kind"] == "board" && x["path"].as_str().unwrap().contains("1111aaaa")), "the historical source, not live artwork: {wp}");
         crate::session::patch::merge(&mut sh, &vr.patch);
         assert_eq!(sh["drafts"]["@view.at"].as_str().unwrap(), on_show);
         // (a second Retry inside the second is the spam guard's)
@@ -1029,7 +1034,8 @@ mod tests {
         let stored = json!({"sel":"ts","rid":1,"drafts":{"@view:ts":"board","@view.layout:ts":serde_json::to_string(&base).unwrap(),"@view.at":format!("0|{root}|")},"panel":false,"info":{"fab.board:ts":"unit.kicad_pcb"}});
         let alt = format!("{root}/alt/alt.kicad_pcb");
         let vo = ok(show(&stored, "ts", "pcb", &alt, 4));
-        let w = watches(&vo); assert_eq!(w.len(), 1, "{w:?}"); assert_eq!(w[0]["path"], alt, "the watch carries the named board, not the default");
+        let set: Value = vo.before.iter().filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).find(|m| m["m"] == "kicad.watch.set").map(|m| m["p"].clone()).expect("the set");
+        assert!(set["sources"].as_array().unwrap().iter().any(|x| x["tile"] == "t1" && x["path"] == alt), "the set carries the named board, not the default: {set}");
         let l: layout::Layout = serde_json::from_str(vo.patch["drafts"]["@view.layout:ts"].as_str().unwrap()).unwrap();
         assert!(l.tile("t1").unwrap().explicit && l.tile("t1").unwrap().source == "alt/alt.kicad_pcb");
 
@@ -1100,6 +1106,128 @@ mod tests {
         assert_eq!(viewer::split_sources(&picked, &root, false, ""), ("alt/alt.kicad_pcb".to_string(), "alt/alt.kicad_sch".to_string()));
         let own = crate::files::kicad::project::read(&root);
         assert_eq!(viewer::split_sources(&json!({"sel":"tr","drafts":{}}), &root, false, ""), (layout::sanitize_rel(&root, &own.pcb), layout::sanitize_rel(&root, &own.sch)), "the project's own pair, as the hub finds it");
+    }
+    /// 2b: a layout of several tiles watches its distinct sources through one `kicad.watch.set`; a single tile keeps main's one `kicad.watch`; a focus move sends
+    /// nothing; versioned tiles never watch live artwork; every watch of a linked thread carries `on`; the number of tiles is bounded.
+    #[test]
+    fn rail_2b_multi_tile_watch_set_is_inert_for_one_tile_and_exact_for_several() {
+        let d = crate::plat::tmp::dir("rail-2b-watch");
+        let root = d.to_string_lossy().into_owned();
+        for f in ["unit.kicad_pcb", "unit.kicad_sch"] { std::fs::write(d.join(f), "()").unwrap(); }
+        let mut st = crate::state::State::new();
+        st.apply_line(&json!({"$":"ProjectCreated","id":"p","title":"Board","root":root,"at":1}).to_string());
+        st.apply_line(&json!({"$":"ThreadCreated","id":"tb","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+        st.apply_line(&json!({"$":"ProjectCreated","id":"peer~p","title":"Remote","root":"/remote/proj","at":1}).to_string());
+        st.apply_line(&json!({"$":"ThreadCreated","id":"peer~tb","project":"peer~p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+        let calls = |vo: &viewer::ViewOut, m: &str| vo.before.iter().filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).filter(|x| x["m"] == m).map(|x| x["p"].clone()).collect::<Vec<_>>();
+        let ok = |o: viewer::LayoutOut| match o { viewer::LayoutOut::Ok(v) => v, viewer::LayoutOut::Refused { text, .. } => panic!("refused: {text}") };
+        // 1. one tile: exactly main's one watch, no set, nothing of the layout in the session
+        let idle = json!({"sel":"tb","rid":1,"drafts":{},"panel":false,"info":{}});
+        let vo = viewer::view_action(&st, "h", &idle, "board").unwrap();
+        assert_eq!((calls(&vo, "kicad.watch").len(), calls(&vo, "kicad.watch.set").len()), (1, 0));
+        assert!(vo.patch["drafts"].get("@view.set:tb").is_none() && vo.patch["drafts"].get("@view.layout:tb").is_none());
+        let mut s = idle.clone(); crate::session::patch::merge(&mut s, &vo.patch);
+        // 2. two tiles: one set with both sources, named by their opaque tile ids; no single watch
+        let vo = ok(viewer::layout_action(&st, "h", &s, Some(1), "en", "layout-add", r#"{"kind":"schematic","side":"right"}"#).unwrap());
+        assert_eq!(calls(&vo, "kicad.watch").len(), 0, "the set replaces the single watch");
+        let sets = calls(&vo, "kicad.watch.set"); assert_eq!(sets.len(), 1);
+        let kinds: Vec<(&str, &str)> = sets[0]["sources"].as_array().unwrap().iter().map(|x| (x["tile"].as_str().unwrap(), x["kind"].as_str().unwrap())).collect();
+        assert_eq!(kinds, [("t1", "board"), ("t2", "schematic")]);
+        assert!(sets[0]["sources"].as_array().unwrap().iter().all(|x| x["tile"].as_str().unwrap().len() <= 4), "tiles are named by their opaque ids");
+        crate::session::patch::merge(&mut s, &vo.patch);
+        // 3. a focus move leaves the set of sources as it is: no watch traffic of any kind
+        let vo = ok(viewer::layout_action(&st, "h", &s, Some(1), "en", "layout-focus", r#"{"tile":"t1"}"#).unwrap());
+        assert!(calls(&vo, "kicad.watch").is_empty() && calls(&vo, "kicad.watch.set").is_empty(), "a focus move sends no stop and no start: {:?}", vo.before);
+        // 4. a third tile on the board's own source (3D): the set grows by its source only
+        let vo = ok(viewer::layout_action(&st, "h", &s, Some(1), "en", "layout-add", r#"{"kind":"3d","side":"bottom"}"#).unwrap());
+        let n = calls(&vo, "kicad.watch.set")[0]["sources"].as_array().unwrap().len();
+        assert_eq!(n, 3, "board, schematic and 3D");
+        // 5. versioned tiles: a resolved one watches its history source, an unresolved one nothing, neither the live board
+        let sid = layout::opaque_source_id(&format!("{root}/.git"), &root);
+        let tile = |id: &str, src: &str, v: Option<layout::TileVersion>| layout::Tile { id: id.into(), kind: layout::PageKind::Board, source: src.into(), explicit: true, version: v, unresolved_version: false, overlay: None };
+        let ver = |sid: &str| layout::TileVersion { source_id: sid.into(), id: "1111aaaa99998888777766665555444433332222".into(), label: "1111aaaa".into() };
+        let mut hl = layout::add(&layout::Layout::single(tile("t1", "unit.kicad_pcb", None)).unwrap(), Some("t1"), layout::Side::Right, tile("t2", "unit.kicad_pcb", Some(ver(&sid))), false, None).unwrap();
+        hl = layout::add(&hl, Some("t2"), layout::Side::Bottom, tile("t3", "unit.kicad_pcb", Some(ver("vsrc-unknown00000000"))), false, None).unwrap();
+        hl.focus = Some("t2".into());
+        let hs = json!({"sel":"tb","rid":1,"drafts":{"@view:tb":"board","@view.layout:tb":serde_json::to_string(&hl).unwrap()},"panel":false,"info":{}});
+        let vo = ok(viewer::layout_action(&st, "h", &hs, Some(1), "en", "layout-focus", r#"{"tile":"t1"}"#).unwrap());
+        let src = calls(&vo, "kicad.watch.set")[0]["sources"].as_array().unwrap().clone();
+        assert_eq!(src.len(), 2, "the live board and the resolved version; the unresolved tile has no source: {src:?}");
+        assert!(src.iter().all(|x| x["tile"] != "t3"));
+        let hist = src.iter().find(|x| x["tile"] == "t2").unwrap();
+        assert!(hist["path"].as_str().unwrap().contains("1111aaaa"), "a versioned tile watches its history source");
+        // 6. a thread of another machine: its set goes there
+        let far_l = layout::add(&layout::Layout::single(layout::Tile { id: "t1".into(), kind: layout::PageKind::Board, source: "unit.kicad_pcb".into(), explicit: true, version: None, unresolved_version: false, overlay: None }).unwrap(),
+            Some("t1"), layout::Side::Right, layout::Tile { id: "t2".into(), kind: layout::PageKind::Schematic, source: "unit.kicad_sch".into(), explicit: true, version: None, unresolved_version: false, overlay: None }, false, None).unwrap();
+        let fs = json!({"sel":"peer~tb","rid":1,"drafts":{"@view:peer~tb":"board","@view.layout:peer~tb":serde_json::to_string(&far_l).unwrap(),"@view.at":"0|/remote/proj|"},"panel":false,"info":{}});
+        let vo = ok(viewer::layout_action(&st, "h", &fs, Some(1), "en", "layout-focus", r#"{"tile":"t2"}"#).unwrap());
+        assert!(calls(&vo, "kicad.watch").is_empty());
+        // (a focus move: nothing; a structural change: the set, to its machine)
+        let vo = ok(viewer::layout_action(&st, "h", &fs, Some(1), "en", "layout-add", r#"{"kind":"files","side":"bottom"}"#).unwrap());
+        let sets = calls(&vo, "kicad.watch.set"); assert_eq!(sets.len(), 1); assert_eq!(sets[0]["on"], "peer");
+        // 7. the number of tiles is bounded, with a reason
+        let mut big = layout::Layout::single(tile("t1", "unit.kicad_pcb", None)).unwrap();
+        for i in 2..=layout::MAX_TILES { big = layout::add(&big, None, layout::Side::Right, layout::Tile { kind: layout::PageKind::Files, ..tile(&format!("t{i}"), "", None) }, false, None).unwrap(); }
+        let bs = json!({"sel":"tb","rid":1,"drafts":{"@view:tb":"board","@view.layout:tb":serde_json::to_string(&big).unwrap()},"panel":false,"info":{}});
+        match viewer::layout_action(&st, "h", &bs, Some(1), "en", "layout-add", r#"{"kind":"files","side":"right"}"#).unwrap() {
+            viewer::LayoutOut::Refused { code, text, .. } => { assert_eq!(code, "tooManyTiles"); assert_eq!(text, "Too many tiles open"); }
+            _ => panic!("the ninth tile is refused"),
+        }
+    }
+
+    /// 2b: a project's layout is remembered (written on a change of several tiles, cleared when the person closes down to one), restored on the person's word or by
+    /// itself only where the client can draw it and nothing is open, forgotten on request, and never applied when fewer than two tiles can be resolved.
+    #[test]
+    fn rail_2b_layout_memory_is_written_cleared_restored_and_forgotten() {
+        let d = crate::plat::tmp::dir("rail-2b-mem");
+        let root = d.to_string_lossy().into_owned();
+        for f in ["unit.kicad_pcb", "unit.kicad_sch"] { std::fs::write(d.join(f), "()").unwrap(); }
+        let mut st = crate::state::State::new();
+        st.apply_line(&json!({"$":"ProjectCreated","id":"p","title":"Board","root":root,"at":1}).to_string());
+        st.apply_line(&json!({"$":"ThreadCreated","id":"tm","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+        let key = viewer::memory_key(&root);
+        let sets = |vo: &viewer::ViewOut| vo.before.iter().filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).filter(|x| x["m"] == "setting.set").map(|x| x["p"].clone()).collect::<Vec<_>>();
+        let ok = |o: viewer::LayoutOut| match o { viewer::LayoutOut::Ok(v) => v, viewer::LayoutOut::Refused { text, .. } => panic!("refused: {text}") };
+        let idle = json!({"sel":"tm","rid":1,"drafts":{},"panel":false,"info":{}});
+        let board = viewer::view_action(&st, "h", &idle, "board").unwrap();
+        let mut s = idle.clone(); crate::session::patch::merge(&mut s, &board.patch);
+        // written when the layout of several tiles comes to be
+        let vo = ok(viewer::layout_action(&st, "h", &s, Some(1), "en", "layout-add", r#"{"kind":"schematic","side":"right"}"#).unwrap());
+        let w = sets(&vo); assert_eq!(w.len(), 1); assert_eq!(w[0]["key"], key.as_str());
+        let stored: layout::Layout = serde_json::from_str(w[0]["value"].as_str().unwrap()).unwrap();
+        assert_eq!(stored.tiles().len(), 2);
+        assert!(!w[0]["value"].as_str().unwrap().contains(&root), "the memory holds opaque root-relative tiles, no absolute path");
+        crate::session::patch::merge(&mut s, &vo.patch);
+        st.apply_line(&json!({"$":"SettingSet","key":key,"value":w[0]["value"],"at":3}).to_string());
+        // unchanged: not written again
+        let vo = ok(viewer::layout_action(&st, "h", &s, Some(1), "en", "layout-focus", r#"{"tile":"t1"}"#).unwrap());
+        assert!(sets(&vo).is_empty(), "a layout that is as remembered is not written again");
+        // by itself, onto a session with nothing open; never onto one with a page open
+        let fresh = json!({"sel":"tm","rid":1,"drafts":{},"panel":false,"info":{}});
+        let back = ok(viewer::apply_memory(&st, "h", &fresh, Some(2), "en", false).expect("the remembered layout comes back"));
+        let mut b = fresh.clone(); crate::session::patch::merge(&mut b, &back.patch);
+        assert_eq!(serde_json::from_str::<layout::Layout>(b["drafts"]["@view.layout:tm"].as_str().unwrap()).unwrap().tiles().len(), 2);
+        assert!(back.before.iter().all(|c| !c["text"].as_str().unwrap().contains("kicad.open") && !c["text"].as_str().unwrap().contains("embed")), "the memory never starts KiCad");
+        assert!(viewer::apply_memory(&st, "h", &json!({"sel":"tm","rid":1,"drafts":{"@view:tm":"files"},"panel":false,"info":{}}), Some(2), "en", false).is_none(), "a session with a page open is never changed");
+        assert!(viewer::apply_memory(&st, "h", &s, Some(2), "en", false).is_none(), "nor one that has its layout");
+        // on the person's word it applies whatever is open
+        let one = json!({"sel":"tm","rid":1,"drafts":{"@view:tm":"files"},"panel":false,"info":{}});
+        let r = ok(viewer::layout_action(&st, "h", &one, Some(2), "en", "layout-restore-saved", "").unwrap());
+        let mut o = one.clone(); crate::session::patch::merge(&mut o, &r.patch);
+        assert_eq!(serde_json::from_str::<layout::Layout>(o["drafts"]["@view.layout:tm"].as_str().unwrap()).unwrap().tiles().len(), 2);
+        // closing down to one tile on purpose clears it
+        let vo = ok(viewer::layout_action(&st, "h", &s, Some(1), "en", "layout-close", r#"{"tile":"t2"}"#).unwrap());
+        let w = sets(&vo); assert_eq!((w.len(), w[0]["key"].as_str(), w[0]["value"].as_str()), (1, Some(key.as_str()), Some("")));
+        // forgotten on request
+        let vo = ok(viewer::layout_action(&st, "h", &s, Some(1), "en", "layout-forget", "").unwrap());
+        assert_eq!(sets(&vo)[0]["value"], "");
+        // a memory with a tile that cannot be resolved, leaving fewer than two, applies nothing
+        let tile = |id: &str, v: Option<layout::TileVersion>| layout::Tile { id: id.into(), kind: layout::PageKind::Board, source: "unit.kicad_pcb".into(), explicit: true, version: v, unresolved_version: false, overlay: None };
+        let bad = layout::add(&layout::Layout::single(tile("t1", None)).unwrap(), Some("t1"), layout::Side::Right, tile("t2", Some(layout::TileVersion { source_id: "vsrc-unknown00000000".into(), id: "1111aaaa99998888777766665555444433332222".into(), label: "x".into() })), false, None).unwrap();
+        st.apply_line(&json!({"$":"SettingSet","key":key,"value":serde_json::to_string(&bad).unwrap(),"at":4}).to_string());
+        assert!(viewer::apply_memory(&st, "h", &fresh, Some(2), "en", false).is_none(), "fewer than two resolvable tiles: nothing applies");
+        st.apply_line(&json!({"$":"SettingSet","key":key,"value":"not json","at":5}).to_string());
+        assert!(viewer::apply_memory(&st, "h", &fresh, Some(2), "en", false).is_none());
     }
     struct Mine; impl Screen for Mine {
         fn name(&self) -> &'static str { "mine" }
