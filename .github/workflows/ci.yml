@@ -214,8 +214,12 @@ jobs:
           wait $a; ra=$?; wait $b; rb=$?; exit $((ra | rb))
       - name: lifecycle
         run: |
-          # the CEF runtime the build put beside the client (the cef crate's distribution): what a dev build and the archive carry
-          G=native/gpui/target/fast; for f in libcef.so icudtl.dat resources.pak v8_context_snapshot.bin locales/en-US.pak; do [ -e $G/$f ] || { echo "::error::$f missing beside the client"; exit 1; }; done
+          # the CEF runtime beside the client, as a dev build and the archive carry it. The cef crate's build script copies it there only when it
+          # runs: with rust-cache restoring the build, it does not, and the cache keeps only build/ (every run since the job began failed here).
+          # So it comes from the cef-dll-sys build dir, as release.yml takes it (scripts/cef-runtime-files.sh fails naming any file missing).
+          G=native/gpui/target/fast; R=$(dirname "$(find $G/build -path '*cef-dll-sys*' -name libcef.so | head -1)")
+          [ -f "$G/libcef.so" ] || { [ -f "$R/libcef.so" ] || { echo "::error::libcef.so is neither beside the client nor in the cef-dll-sys build dir"; exit 1; }; sh scripts/cef-runtime-files.sh "$R" "$G" linux; }
+          for f in libcef.so icudtl.dat resources.pak v8_context_snapshot.bin locales/en-US.pak; do [ -e $G/$f ] || { echo "::error::$f missing beside the client"; exit 1; }; done
           export BACKPLANE_CEF=$PWD/$G E2E_ASSETS=$PWD/assets OUT=$RUNNER_TEMP/cef-life
           sh test/cef/lifecycle_e2e.sh $G/backplane-gpui native/host/target/fast/backplane-hub 2>&1 | grep -v '^GPUI_METRIC' | tee lifecycle.txt; test ${PIPESTATUS[0]} = 0
       - name: link only
