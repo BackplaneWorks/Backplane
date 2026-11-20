@@ -4693,3 +4693,6 @@ settings.designmode.note = 自動を選ぶと、このプラットフォーム�
 
 review.empty.title = レビューするものはまだありません
 review.empty.next = 回路図を追加すると、ここに部品が表示されます。
+
+# ---- viewer: header scope ----
+viewer.diff.threadchanges = スレッドの変更
