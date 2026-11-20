@@ -16,9 +16,11 @@ bq_jobs() { local n g c j; n=$(bq_slots); g=$(( $(bq_mem_gb) / (2 * n) )); c=$((
 # BQ_SCOPE: a build runs in a transient scope of its own in bpbuild.slice, never in the scope of whoever started it. An agent's build used to run inside the hub's scope
 # (the hub, its agents, their builds and tests: 28 GB), so systemd-oomd's pressure kill took the whole hub with it (Nov 12 01:25 and 02:16). Now a build is its own
 # candidate: oomd kills the build, the hub's scope (ManagedOOMPreference=avoid, fresh.sh) is picked last. MemoryMax (BQ_MEM_MAX, 60%) stops one runaway build alone.
-# No user systemd (a Boat box, the Mac, a container) or BQ_NO_SCOPE=1: the command runs as it is.
+# No user systemd (the Mac, a container), a Boat box (BP_ON_BOAT) or BQ_NO_SCOPE=1: the command runs as it is. A Boat box has user systemd, but it
+# runs nothing but builds, and 60% of its memory (9 GB of a 15 GB box) is less than the hub's test build needs: the scope's memory cgroup
+# killed rustc there and systemd then sent the rest of the build SIGTERM (exit 143 at about 55 s, Nov 20, bp-build-1 23:21:58).
 bq_scope() { BQ_SCOPE=()
-  [ -z "${BQ_NO_SCOPE:-}" ] && command -v systemd-run > /dev/null 2>&1 && [ -S "${XDG_RUNTIME_DIR:-/nonexistent}/bus" ] || return 0
+  [ -z "${BQ_NO_SCOPE:-}" ] && [ -z "${BP_ON_BOAT:-}" ] && command -v systemd-run > /dev/null 2>&1 && [ -S "${XDG_RUNTIME_DIR:-/nonexistent}/bus" ] || return 0
   BQ_SCOPE=(systemd-run --user --scope -q --collect --slice=bpbuild.slice -p "MemoryMax=${BQ_MEM_MAX:-60%}" -p ManagedOOMPreference=none --); }
 # bq_run CALLBACK CMD...: run CMD holding a slot, waiting for a free one (CALLBACK, if any, is run once when it has to wait, with the number of local builds ahead of it). `flock -o` closes the lock's descriptor in CMD,
 # so nothing CMD leaves running in the background (a sleep, a server) can keep the slot after CMD ends; the flock process itself holds it until CMD exits.
