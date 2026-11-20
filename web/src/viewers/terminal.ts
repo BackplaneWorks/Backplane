@@ -4,6 +4,7 @@
 
 import { Terminal } from "../../vendor/xterm/xterm.js";
 import { FitAddon } from "../../vendor/xterm/addon-fit.js";
+import { TerminalSwitchState } from "./terminal-state";
 import type { ViewerHostApi } from "../app";
 
 export interface TerminalPaneHandle {
@@ -96,9 +97,7 @@ export function mountTerminalPane(
   ensureXtermCss();
 
   let alive = true;
-  let activeKey = "";
-  let inputReady = false;
-  let knownKeys: string[] = [];
+  const sw = new TerminalSwitchState();
   let lastCols = 0;
   let lastRows = 0;
   let fitRaf = 0;
@@ -159,13 +158,13 @@ export function mountTerminalPane(
   term.open(host);
 
   function syncSessionSelect(): void {
-    selectEl.hidden = knownKeys.length <= 1;
+    selectEl.hidden = sw.knownKeys.length <= 1;
     selectEl.replaceChildren();
-    knownKeys.forEach((k, idx) => {
+    sw.knownKeys.forEach((k, idx) => {
       const opt = document.createElement("option");
       opt.value = k;
       opt.textContent = k === threadId ? "Primary" : `Shell ${idx + 1}`;
-      opt.selected = k === activeKey;
+      opt.selected = k === sw.activeKey;
       selectEl.append(opt);
     });
   }
@@ -182,8 +181,8 @@ export function mountTerminalPane(
     if (cols === lastCols && rows === lastRows) return;
     lastCols = cols;
     lastRows = rows;
-    if (activeKey && inputReady) {
-      void api.hub.rpc("term.resize", { key: activeKey, cols, rows }).catch(() => {});
+    if (sw.canSendInput()) {
+      void api.hub.rpc("term.resize", { key: sw.activeKey, cols, rows }).catch(() => {});
     }
   }
 
@@ -199,45 +198,54 @@ export function mountTerminalPane(
   resizeObs.observe(host);
 
   // Key-by-key input + paste directly to hub `term.write` as base64 bytes.
-  // Gated on `inputReady` so switching shells never routes typing/paste before the
+  // Gated on `sw.canSendInput()` so switching shells never routes typing/paste before the
   // selected shell's snapshot has replaced the screen.
   const dataDisp = term.onData((data) => {
-    if (!alive || !inputReady || !activeKey || !data) return;
-    void api.hub.rpc("term.write", { key: activeKey, b: encodeBase64Utf8(data) }).catch(() => {});
+    if (!alive || !sw.canSendInput() || !data) return;
+    void api.hub.rpc("term.write", { key: sw.activeKey, b: encodeBase64Utf8(data) }).catch(() => {});
   });
 
-  async function watchKey(key: string): Promise<void> {
-    inputReady = false;
-    term.reset();
-    if (activeKey && activeKey !== key) {
-      void api.hub.rpc("term.unwatch", { key: activeKey }).catch(() => {});
+  async function watchKey(key: string, existingGen?: number): Promise<void> {
+    const prevKey = sw.activeKey;
+    const gen = existingGen !== undefined ? existingGen : sw.beginSelect(key);
+    if (existingGen !== undefined) {
+      sw.inputReady = false;
+      sw.activeKey = key;
+      sw.rememberKey(key);
     }
-    activeKey = key;
-    if (!knownKeys.includes(key)) knownKeys.push(key);
+    term.reset();
+    if (prevKey && prevKey !== key) {
+      void api.hub.rpc("term.unwatch", { key: prevKey }).catch(() => {});
+    }
     syncSessionSelect();
     statusEl.textContent = `${key} · connecting…`;
 
     try {
       const snap = await api.hub.rpc<{ b?: string; reset?: unknown; state?: string }>("term.watch", { key });
-      if (!alive || activeKey !== key) return;
+      if (!alive || !sw.resolveWatch(gen, key)) {
+        if (key !== sw.activeKey) {
+          void api.hub.rpc("term.unwatch", { key }).catch(() => {});
+        }
+        return;
+      }
       term.reset();
       if (typeof snap?.b === "string" && snap.b.length > 0) {
         term.write(decodeBase64Bytes(snap.b));
       }
-      inputReady = true;
       statusEl.textContent = snap?.state ? `${key} · ${snap.state}` : key;
       lastCols = 0;
       lastRows = 0;
       scheduleFit();
       term.focus();
     } catch (err) {
-      if (!alive || activeKey !== key) return;
-      inputReady = false;
+      if (!alive || !sw.isCurrent(gen)) return;
+      sw.inputReady = false;
       statusEl.textContent = err instanceof Error ? err.message : String(err);
     }
   }
 
   async function openPrimary(): Promise<void> {
+    const gen = sw.beginSelect();
     try {
       fitAddon.fit();
     } catch {}
@@ -253,15 +261,19 @@ export function mountTerminalPane(
       });
       if (!alive) return;
       const key = typeof res?.key === "string" && res.key ? res.key : threadId;
-      await watchKey(key);
+      if (!sw.resolveNew(gen, key)) {
+        syncSessionSelect();
+        return;
+      }
+      await watchKey(key, gen);
     } catch (err) {
-      if (!alive) return;
+      if (!alive || !sw.isCurrent(gen)) return;
       statusEl.textContent = err instanceof Error ? err.message : String(err);
     }
   }
 
   async function createExtraShell(): Promise<void> {
-    inputReady = false;
+    const gen = sw.beginSelect();
     term.reset();
     try {
       fitAddon.fit();
@@ -277,40 +289,44 @@ export function mountTerminalPane(
       });
       if (!alive) return;
       if (typeof res?.key === "string" && res.key) {
-        await watchKey(res.key);
+        if (!sw.resolveNew(gen, res.key)) {
+          syncSessionSelect();
+          return;
+        }
+        await watchKey(res.key, gen);
       }
     } catch (err) {
-      if (!alive) return;
+      if (!alive || !sw.isCurrent(gen)) return;
       statusEl.textContent = err instanceof Error ? err.message : String(err);
     }
   }
 
   selectEl.addEventListener("change", () => {
-    if (selectEl.value && selectEl.value !== activeKey) {
+    if (selectEl.value && (selectEl.value !== sw.activeKey || !sw.inputReady)) {
       void watchKey(selectEl.value);
     }
   });
   newBtn.addEventListener("click", () => void createExtraShell());
   stopBtn.addEventListener("click", () => {
-    if (!activeKey) return;
-    const k = activeKey;
+    if (!sw.activeKey) return;
+    const k = sw.activeKey;
     void api.hub.rpc("term.stop", { key: k }).then(
       () => {
-        if (alive && activeKey === k) statusEl.textContent = `${k} · stopped`;
+        if (alive && sw.activeKey === k) statusEl.textContent = `${k} · stopped`;
       },
       () => {}
     );
   });
 
   const unsub = api.hub.onFrame((f) => {
-    if (!alive || !inputReady || f.t !== "d" || f.k !== "term") return;
-    if (f.key !== activeKey) return;
+    if (!alive || !sw.inputReady || f.t !== "d" || f.k !== "term") return;
+    if (f.key !== sw.activeKey) return;
     if (f.reset) term.reset();
     if (typeof f.b === "string" && f.b.length > 0) {
       term.write(decodeBase64Bytes(f.b));
     }
     if (typeof f.state === "string" && f.state) {
-      statusEl.textContent = `${activeKey} · ${f.state}`;
+      statusEl.textContent = `${sw.activeKey} · ${f.state}`;
     }
   });
 
@@ -327,8 +343,8 @@ export function mountTerminalPane(
       dataDisp.dispose();
       unsub();
       term.dispose();
-      if (activeKey) {
-        void api.hub.rpc("term.unwatch", { key: activeKey }).catch(() => {});
+      if (sw.activeKey) {
+        void api.hub.rpc("term.unwatch", { key: sw.activeKey }).catch(() => {});
       }
     },
   };
