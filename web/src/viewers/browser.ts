@@ -23,6 +23,7 @@ export function mountBrowserPane(
   let objectUrl = "";
   let fetching = false;
   let fetchAgain = false;
+  let lastShotN = -1;
   let abortCtrl: AbortController | null = null;
   const queue = new SerialQueue();
 
@@ -58,6 +59,7 @@ export function mountBrowserPane(
   urlInput.spellcheck = false;
   urlInput.setAttribute("data-testid", "browser-url");
   const goBtn = mkBtn("Go", "browser-go", "Navigate");
+  goBtn.type = "submit";
   urlForm.append(urlInput, goBtn);
 
   const driveBtn = mkBtn("Take over", "browser-takeover");
@@ -148,6 +150,8 @@ export function mountBrowserPane(
         await api.hub.rpc("browser", { thread: threadId, op, ...extra });
         if (!alive) return;
         onOk?.();
+        // Renew the hub's 2500 ms screencast lease on interaction (zero idle polling when stationary).
+        void loadFrame();
       } catch (err) {
         if (!alive) return;
         setError(err instanceof Error ? err.message : String(err));
@@ -171,6 +175,12 @@ export function mountBrowserPane(
     const url = normalizeBrowserUrl(urlInput.value);
     if (!url) return;
     urlInput.value = url;
+    if (!driving) {
+      runOp("takeover", {}, () => {
+        driving = true;
+        syncDrivingUi();
+      });
+    }
     runOp("navigate", { url }, () => {
       driving = true;
       syncDrivingUi();
@@ -302,20 +312,19 @@ export function mountBrowserPane(
   const unsub = api.hub.onFrame((f) => {
     if (!alive) return;
     if (f.t === "shot" && f.bot === threadId) {
+      if (typeof f.n === "number") {
+        if (f.n === lastShotN) return;
+        lastShotN = f.n;
+      }
       void loadFrame();
     }
   });
-
-  const pollTimer = window.setInterval(() => {
-    if (alive) void loadFrame();
-  }, 2000);
 
   void loadFrame();
 
   return {
     destroy() {
       alive = false;
-      window.clearInterval(pollTimer);
       unsub();
       abortCtrl?.abort();
       if (objectUrl) {
