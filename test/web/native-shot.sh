@@ -12,8 +12,22 @@ mkdir -m 700 "$work/home" "$work/run"
 case "$name" in
   native-devices) steps='[{"select":0},{"open_settings":true},{"click":"set-nav:devices","within":4000},{"wait":500},{"shot":"native-devices"}]' ;;
   native-chat) steps='[{"select":0},{"wait":500},{"shot":"native-chat"}]' ;;
+  native-viewers)
+    steps=$(python3 - "$root/test/viewers" "$name" <<'PYSHOT'
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from rail_shots_manifest import PAGES
+steps = [{"select": 0}]
+for slug, control, settle, _ in PAGES:
+    if slug in {"board", "schematic", "3d", "gerbers", "mech"}:
+        steps.extend([{"press":control}, {"wait":300}, {"shot":"native-" + slug, "settle":settle, "timeout_ms":20000}])
+print(json.dumps(steps))
+PYSHOT
+)
+    ;;
   *) exit 2 ;;
 esac
+[[ "$name" != native-viewers ]] || name=native-mech
 echo "$steps" > "$work/script.json"
 d=$((500 + $$ % 10000))
 while [[ -e /tmp/.X11-unix/X$d || -e /tmp/.X$d-lock ]]; do ((d+=1)); done
@@ -34,7 +48,7 @@ own env -i PATH="$PATH" HOME="$work/home" DISPLAY="$display" XDG_RUNTIME_DIR="$w
 for ((i=0; i<100; i++)); do [[ -S "$work/i3.sock" ]] && break; sleep .05; done
 [[ -S "$work/i3.sock" ]]
 own python3 "$root/test/viewers/rail_shots_driver.py" watch "$display" "$work/client.log" "$work" "$out" "$work/stop"
-own env -i PATH="$PATH" HOME="$work/home" XDG_CONFIG_HOME="$work/home/config" XDG_DATA_HOME="$work/home/data" XDG_CACHE_HOME="$work/home/cache" XDG_RUNTIME_DIR="$work/run" DISPLAY="$display" LC_ALL=C LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe LP_NUM_THREADS=2 BACKPLANE_GPUI_RECTS=1 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json BACKPLANE_GPUI_ASSETS="$root/assets" BACKPLANE_GPUI_SHOT_DIR="$work" "$BP_WEB_GPUI" --url "http://127.0.0.1:$port" --token-file "$fixture/hub/token" --script "$work/script.json" --exit-after 45 >"$work/client.log" 2>&1
+own env -i PATH="$PATH" HOME="$work/home" XDG_CONFIG_HOME="$work/home/config" XDG_DATA_HOME="$work/home/data" XDG_CACHE_HOME="$work/home/cache" XDG_RUNTIME_DIR="$work/run" DISPLAY="$display" LC_ALL=C LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe LP_NUM_THREADS=2 BACKPLANE_GPUI_RECTS=1 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json BACKPLANE_GPUI_ASSETS="$root/assets" BACKPLANE_GPUI_SHOT_DIR="$work" "$BP_WEB_GPUI" --url "http://127.0.0.1:$port" --token-file "$fixture/hub/token" --script "$work/script.json" --exit-after 140 >"$work/client.log" 2>&1
 client=$!
 if ! wait "$client" || [[ ! -f "$work/$name.done" ]]; then
   python3 - "$work/client.log" <<'PYLOG'
