@@ -270,7 +270,7 @@ Every phase is independently shippable, gated by `hello.features` capability neg
 
 ## 9. One Home for the Uberbot Across Machines
 
-> Status: **Proposal — three decisions for the person at the end.** Requirement: one machine holds the uberbot (Bub), the bots and their state; every
+> Status: **Approved 2026-11-20 — being built (Home P1, P2); the person's decisions in 9.7.** Requirement: one machine holds the uberbot (Bub), the bots and their state; every
 > other machine of the person shows the same conversation live and sends to the one Bub; settings and history are shared; the home can move.
 
 ### 9.1 What exists and is reused (`native/host/`)
@@ -344,9 +344,21 @@ same row, "Home (<name>) is away since HH:MM · N queued", Bub's chat and memory
 
 Byte budgets (section 5.2) hold: Bub's chat on a non-home machine is a local replica read (0 B on open) plus the link's shared lines.
 
-### 9.7 Decisions for the person
+### 9.7 The person's decisions (2026-11-20)
 
-1. **Offline home:** the replica plus a queue with a manual *Take over here* (recommended), or automatic failover to the always-on Boat after a long
-   absence (off by default).
-2. **What is shared:** the settings allowlist in 9.2 (3), or more or less of it.
-3. **A lost home's vault:** offer an encrypted vault backup with a recovery code, or accept that a lost home means signing in to its secrets again.
+1. **Home offline:** other machines go read-only (the replica) and queue what is sent; no takeover, no automatic failover. (`canTakeOver` and
+   *Take over here* in 9.3–9.6 are not built.)
+2. **Where the home runs is explicit:** `home.kind` is `local` | `peer` | `boat`, so a hosted always-on Boat slots in later and self-hosting stays supported.
+3. **Moving the home is a manual button** in Settings, "Make this machine the home", with handover: `home.move {to:"back"}` (net/homemove.rs). Not automatic.
+4. Not yet decided: the settings allowlist (9.2, 3) and an encrypted vault backup (9.5).
+
+The wire shape is docs/PHONE-DATA.md, The home: `{kind, id, name, online, awaySince?, queuedCount, canMoveHere, moving?}` in `hello`, `k:"home"` and
+`?view=1`'s `shown.home`.
+
+### 9.8 Phases
+
+- **Home P1 (hub):** port `uber.sync` (the op exchange, the holder's beat, the lease term as the switch of a move); the `home` object and its pushes;
+  queued sends to an away home marked `queued`; "Make this machine the home" over `home.move {to:"back"}`.
+- **Home P2 (hub):** the shared-settings allowlist over the same exchange; the persistent hub-to-hub binary socket (live streamed text between machines,
+  replacing `curl` + `fsync` and `viewer.pull`).
+- **Clients:** `home` from `hello` / `k:"home"` / `shown.home`; the away row on Bub's row and thread; Settings → Home machine from hub data.

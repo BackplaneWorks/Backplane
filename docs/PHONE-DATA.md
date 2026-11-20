@@ -387,3 +387,23 @@ push on this subscription. The first push after subscribing carries everything. 
 ### Byte budgets (native/host/src/data/budget_tests.rs)
 Held in the tests, over the wire, compressed: a cold sidebar (`shell.sync`, 8 projects / 64 threads) ≤ 6 KB; a cold `thread.open` of a 50-message thread ≤ 3 KB; a return to a
 held thread (`thread.open` with `have`, or `?view=1` with a held base) ≤ 500 B.
+
+## The home (feature `home`; docs/remote-architecture.md section 9)
+Where the person's uberbot and bots live, as the hub a client is connected to sees it. Clients draw it and decide nothing.
+```
+Home = {kind, id, name, online, awaySince?, queuedCount, canMoveHere, moving?}
+       kind        "local" (this hub is the home) | "peer" (another machine of the person's) | "boat" (the person's always-on Boat, `alwayson.boat`)
+       id          the home machine's id (bots/mesh.rs `mid`, 16 hex); name: its machine name
+       online      the home answers over the owner link (always true for "local")
+       awaySince?  unix ms since the home stopped answering; only when !online
+       queuedCount what this hub holds for the home (messages, settings, launches), sent when it is back; 0 for "local"
+       canMoveHere "Make this machine the home" is offered: this hub is not the home, the home is online and no move is running
+       moving?     a move in progress or just failed: {to, state: "moving"|"failed", step?, note?}; absent otherwise
+```
+- `hello.home`: the Home at connect. `subscribe {topic:"lists"}` pushes `k:"home"` `{home}` whenever any field changes.
+- `?view=1`: the native sidebar's `shown.home` (the same object); Settings → Machines draws the home's rows and buttons as today (net/homemove.rs `rows`).
+- While `!online`: Bub's conversation, memory and the bots read from this hub's replica; a message to Bub is accepted and queued (its entry is
+  shown with `queued: true` until the home takes it), as during a move. Draw "Home (<name>) is away since HH:MM · N queued".
+- **Make this machine the home:** `home.move {to: "back"}` → `{state, …}` (the holder hands everything over: net/homemove.rs). Progress comes as
+  `moving` on `k:"home"`; the move ends with `kind:"local"`, or `moving.state:"failed"` and the home where it was. Offered only when `canMoveHere`.
+- No takeover while the home is offline (the person's decision, 2026-11-20): other machines stay read-only and queue.
