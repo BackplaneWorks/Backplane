@@ -294,11 +294,44 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, data: &Value, p: &Palette,
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).children(input).child(col)).into_any_element())
 }
 
-/// Test-mode helper for `ui::rail_inventory`: returns `(label, shortcut)` if the palette offers a command for rail `id`.
-pub(crate) fn rail_command_for(data: &Value, can_embed: bool, id: &str, local: &crate::local::Local) -> Option<(String, String)> {
-    items(data, can_embed).into_iter().find_map(|it| match &it.what {
-        Do::Rail(rid, _) if rid == id => Some((it.label.clone(), shortcut(&it, "", local))),
-        _ => None,
+/// Test-mode helper for `ui.rs` rail inventory: builds the palette's rail-command lookup once per snapshot
+/// (`rail id -> (drawn label, drawn shortcut)`).
+pub(crate) fn rail_commands_map(data: &Value, can_embed: bool, local: &crate::local::Local) -> std::collections::HashMap<String, (String, String)> {
+    let mut map = std::collections::HashMap::new();
+    for it in items(data, can_embed) {
+        if let Do::Rail(rid, _) = &it.what {
+            map.insert(rid.clone(), (it.label.clone(), shortcut(&it, "", local)));
+        }
+    }
+    map
+}
+
+/// Test-mode helper for `script::Step::Read("palette")`: reports whether the palette is open and
+/// the currently highlighted item's label and canonical id (`"rail:<id>"`, `"thread:<id>"`, etc.).
+pub(crate) fn selected_snapshot(data: &Value, p: &Palette) -> Value {
+    let list = if p.open { listed(data, p) } else { Vec::new() };
+    let sel = list.get(p.ix);
+    let sel_id = sel.map(|it| match &it.what {
+        Do::Rail(id, _) => format!("rail:{id}"),
+        Do::Thread(id) => format!("thread:{id}"),
+        Do::Action(a, v) => if v.is_empty() { format!("action:{a}") } else { format!("action:{a}:{v}") },
+        Do::Settings => "settings".into(),
+        Do::Sidebar => "sidebar".into(),
+        Do::Models => "models".into(),
+        Do::Prev => "prev".into(),
+        Do::Next => "next".into(),
+        Do::Uber => "uber".into(),
+        Do::Shortcuts => "shortcuts".into(),
+        Do::Streamer => "streamer".into(),
+        Do::Hub(a) => format!("hub:{a}"),
+        Do::Message(t, m) => format!("message:{t}:{m}"),
+    }).unwrap_or_default();
+    serde_json::json!({
+        "open": p.open,
+        "q": p.q,
+        "count": list.len(),
+        "selected_label": sel.map(|it| it.label.as_str()).unwrap_or(""),
+        "selected_id": sel_id,
     })
 }
 

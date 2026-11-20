@@ -130,12 +130,6 @@ impl Backplane {
             let links: Vec<Value> = self.link_and_copy_rects().into_iter().filter(|(id, _, _)| id.starts_with("link:")).map(|(id, href, b)| json!({"id": id, "href": href, "rect": {"x": f32::from(b.origin.x), "y": f32::from(b.origin.y), "w": f32::from(b.size.width), "h": f32::from(b.size.height)}})).collect();
             let text = serde_json::to_string(&links).unwrap_or_default();
             if !self.links_sent || text != self.links_last { self.links_sent = true; self.links_last = text; metric(started, "links", json!({"links": links, "supported": true})); }
-            // B5: drawn right-rail inventory (icon, label, tooltip, keycap, palette command), on change; inert unless BACKPLANE_GPUI_RECTS is set
-            { static LAST_INV: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
-              let inv = crate::ui::rail_inventory(self);
-              let text = serde_json::to_string(&inv).unwrap_or_default();
-              let mut g = LAST_INV.lock().unwrap();
-              if *g != text { *g = text; metric(started, "rail_inventory", json!({"entries": inv})); } }
         }
     }
 
@@ -539,6 +533,10 @@ impl Backplane {
                         for e in t["entries"].as_array().map_or(&[][..], |r| r.as_slice()) {
                             out.push(format!("{}: {}", e["role"].as_str().or(e["kind"].as_str()).unwrap_or(""), e["text"].as_str().unwrap_or("").replace('\n', " "))); }
                         (out.join("\n"), true) }
+                    // the open palette's highlighted item (label + canonical id) before Enter, for B1 verification
+                    "palette" => (crate::screens::palette::selected_snapshot(&self.data, &self.screens.palette).to_string(), true),
+                    // on-demand rail snapshot trigger (forces a fresh repaint; once PR #1359's rail metric is present, clears its dedup cache too)
+                    "rail" => { cx.notify(); (String::new(), false) }
                     _ => (String::new(), false) };
                 self.m("read", json!({"what": what, "text": text, "supported": supported}));
                 self.pump(cx);
