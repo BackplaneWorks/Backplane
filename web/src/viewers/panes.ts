@@ -1,4 +1,4 @@
-// Browser rail panes: Files, Diff, Review (Checks / BOM / Comments), and Terminal.
+// Browser rail panes: Files, Diff, and Review (Checks / BOM / Comments).
 // Zero-dependency DOM renderers driven strictly by hub data/1 RPCs and /files/get.
 // All dynamic text uses textContent (never innerHTML).
 
@@ -68,7 +68,7 @@ export function mountFilesPane(
   stage: HTMLElement,
   api: ViewerHostApi,
   threadId: string,
-  onOpenViewer: (kind: string) => void
+  onOpenViewer: (kind: string, relPath: string) => void
 ): PaneHandle {
   let alive = true;
   let currentDir = "";
@@ -126,7 +126,8 @@ export function mountFilesPane(
     if (vk) {
       const openBtn = el("button", "bp-v-btn is-primary", `Open in ${vk}`);
       openBtn.type = "button";
-      openBtn.addEventListener("click", () => onOpenViewer(vk));
+      openBtn.setAttribute("data-testid", "files-open-viewer");
+      openBtn.addEventListener("click", () => onOpenViewer(vk, relPath));
       acts.append(openBtn);
     }
     const url = `/files/get?thread=${encodeURIComponent(threadId)}&path=${encodeURIComponent(relPath)}`;
@@ -174,9 +175,41 @@ export function mountFilesPane(
           previewEl.append(img);
           return;
         }
-        const buf = await res.arrayBuffer();
+        // Bounded streaming read: cancel the body stream as soon as MAX_PREVIEW_BYTES is reached.
+        const MAX_PREVIEW_BYTES = 256 * 1024;
+        const chunks: Uint8Array[] = [];
+        let total = 0;
+        let truncated = false;
+        if (res.body) {
+          const reader = res.body.getReader();
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done || !value) break;
+              if (total + value.byteLength > MAX_PREVIEW_BYTES) {
+                const remain = MAX_PREVIEW_BYTES - total;
+                if (remain > 0) {
+                  chunks.push(value.subarray(0, remain));
+                  total += remain;
+                }
+                truncated = true;
+                await reader.cancel();
+                break;
+              }
+              chunks.push(value);
+              total += value.byteLength;
+            }
+          } finally {
+            reader.releaseLock();
+          }
+        }
         if (!alive || selectedPath !== relPath) return;
-        const slice = new Uint8Array(buf, 0, Math.min(buf.byteLength, 256 * 1024));
+        const slice = new Uint8Array(total);
+        let offset = 0;
+        for (const c of chunks) {
+          slice.set(c, offset);
+          offset += c.byteLength;
+        }
         // Detect NUL bytes -> binary
         let binary = false;
         for (let i = 0; i < Math.min(slice.length, 4096); i++) {
@@ -184,11 +217,11 @@ export function mountFilesPane(
         }
         loading.remove();
         if (binary) {
-          previewEl.append(el("div", "bp-pane-empty", `Binary file (${formatSize(buf.byteLength)}). Use Download to save.`));
+          previewEl.append(el("div", "bp-pane-empty", `Binary file (${formatSize(size || total)}). Use Download to save.`));
           return;
         }
         const text = new TextDecoder("utf-8", { fatal: false }).decode(slice);
-        const pre = el("pre", "bp-files-code", text + (buf.byteLength > slice.length ? "\n… (truncated)" : ""));
+        const pre = el("pre", "bp-files-code", text + (truncated ? "\n… (truncated at 256 KB)" : ""));
         previewEl.append(pre);
       } catch (err) {
         if (!alive || selectedPath !== relPath) return;
@@ -561,212 +594,3 @@ export function mountReviewPane(
   };
 }
 
-// ============================================================================
-// 4. Terminal Pane (data/term.rs)
-// ============================================================================
-
-function decodeBase64Utf8(b64: string): string {
-  try {
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-  } catch {
-    return "";
-  }
-}
-
-// Strip ANSI CSI / OSC / ESC control sequences for clean readable text output.
-function stripAnsi(s: string): string {
-  return s
-    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
-    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
-    .replace(/\x1b[@-Z\\-_]/g, "");
-}
-
-export function mountTerminalPane(
-  stage: HTMLElement,
-  api: ViewerHostApi,
-  threadId: string
-): PaneHandle {
-  let alive = true;
-  let activeKey = "";
-  let buffer = "";
-
-  const root = el("div", "bp-pane bp-term-pane");
-  root.setAttribute("data-testid", "pane-terminal");
-
-  const bar = el("div", "bp-pane-bar");
-  const statusEl = el("span", "bp-term-status", "Connecting…");
-  const acts = el("div", "bp-vh-actions");
-  const newBtn = el("button", "bp-v-btn", "+ New");
-  newBtn.type = "button";
-  const ctrlCBtn = el("button", "bp-v-btn", "Ctrl+C");
-  ctrlCBtn.type = "button";
-  const stopBtn = el("button", "bp-v-btn", "Stop");
-  stopBtn.type = "button";
-  acts.append(newBtn, ctrlCBtn, stopBtn);
-  bar.append(statusEl, acts);
-
-  const outEl = el("pre", "bp-term-out");
-  outEl.tabIndex = 0;
-  outEl.setAttribute("data-testid", "terminal-output");
-
-  const inputForm = el("form", "bp-term-input-row");
-  const inputEl = el("input", "bp-term-input");
-  inputEl.type = "text";
-  inputEl.autocomplete = "off";
-  inputEl.spellcheck = false;
-  inputEl.placeholder = "Type a command and press Enter…";
-  inputEl.setAttribute("data-testid", "terminal-input");
-  const sendBtn = el("button", "bp-v-btn is-primary", "Run");
-  sendBtn.type = "submit";
-  inputForm.append(inputEl, sendBtn);
-
-  root.append(bar, outEl, inputForm);
-  stage.replaceChildren(root);
-
-  function appendOutput(chunk: string, reset = false): void {
-    if (reset) buffer = "";
-    const clean = stripAnsi(chunk);
-    // Apply simple \r carriage-return line overwrites and backspace
-    for (let i = 0; i < clean.length; i++) {
-      const ch = clean[i];
-      if (ch === "\r") {
-        if (clean[i + 1] === "\n") continue;
-        const nl = buffer.lastIndexOf("\n");
-        buffer = nl >= 0 ? buffer.slice(0, nl + 1) : "";
-      } else if (ch === "\b") {
-        if (buffer.length > 0 && buffer[buffer.length - 1] !== "\n") {
-          buffer = buffer.slice(0, -1);
-        }
-      } else {
-        buffer += ch;
-      }
-    }
-    if (buffer.length > 120_000) {
-      buffer = buffer.slice(buffer.length - 100_000);
-    }
-    outEl.textContent = buffer;
-    outEl.scrollTop = outEl.scrollHeight;
-  }
-
-  async function watchKey(key: string): Promise<void> {
-    if (activeKey && activeKey !== key) {
-      void api.hub.rpc("term.unwatch", { key: activeKey }).catch(() => {});
-    }
-    activeKey = key;
-    statusEl.textContent = key;
-    const snap = await api.hub.rpc<{ b?: string; text?: string; state?: string }>("term.watch", { key });
-    if (!alive || activeKey !== key) return;
-    if (typeof snap?.b === "string") appendOutput(decodeBase64Utf8(snap.b), true);
-    else if (typeof snap?.text === "string") appendOutput(snap.text, true);
-    else appendOutput("", true);
-    if (snap?.state) statusEl.textContent = `${key} · ${snap.state}`;
-  }
-
-  async function createNew(): Promise<void> {
-    statusEl.textContent = "Starting shell…";
-    try {
-      const res = await api.hub.rpc<{ key?: string; b?: string }>("term.new", {
-        thread: threadId,
-        cols: 100,
-        rows: 28,
-      });
-      if (!alive) return;
-      if (res?.key) {
-        await watchKey(res.key);
-      } else {
-        statusEl.textContent = "Terminal unavailable";
-      }
-    } catch (err) {
-      if (!alive) return;
-      statusEl.textContent = err instanceof Error ? err.message : String(err);
-    }
-  }
-
-  async function init(): Promise<void> {
-    try {
-      const res = await api.hub.rpc<{ terms?: Array<{ key?: string; state?: string }> }>("term.list", {
-        thread: threadId,
-      });
-      if (!alive) return;
-      const list = Array.isArray(res?.terms) ? res.terms : [];
-      const running = list.find((t) => t.key && t.state !== "exited") || list[0];
-      if (running?.key) {
-        await watchKey(running.key);
-      } else {
-        await createNew();
-      }
-    } catch (err) {
-      if (!alive) return;
-      statusEl.textContent = err instanceof Error ? err.message : String(err);
-    }
-  }
-
-  function sendText(text: string): void {
-    if (!activeKey || !text) return;
-    void api.hub.rpc("term.write", { key: activeKey, text }).catch(() => {});
-  }
-
-  inputForm.addEventListener("submit", (ev) => {
-    ev.preventDefault();
-    sendText(inputEl.value + "\r");
-    inputEl.value = "";
-  });
-
-  ctrlCBtn.addEventListener("click", () => sendText("\x03"));
-  newBtn.addEventListener("click", () => void createNew());
-  stopBtn.addEventListener("click", () => {
-    if (!activeKey) return;
-    const k = activeKey;
-    void api.hub.rpc("term.stop", { key: k }).then(() => {
-      if (alive && activeKey === k) statusEl.textContent = `${k} · stopped`;
-    }, () => {});
-  });
-
-  // Direct keyboard input when terminal output area is focused
-  outEl.addEventListener("keydown", (ev) => {
-    if (!activeKey) return;
-    if (ev.metaKey) return;
-    if (ev.ctrlKey && ev.key.length === 1) {
-      const code = ev.key.toUpperCase().charCodeAt(0) - 64;
-      if (code >= 1 && code <= 26) {
-        ev.preventDefault();
-        sendText(String.fromCharCode(code));
-      }
-      return;
-    }
-    if (ev.key === "Enter") { ev.preventDefault(); sendText("\r"); }
-    else if (ev.key === "Backspace") { ev.preventDefault(); sendText("\x7f"); }
-    else if (ev.key === "Tab") { ev.preventDefault(); sendText("\t"); }
-    else if (ev.key === "ArrowUp") { ev.preventDefault(); sendText("\x1b[A"); }
-    else if (ev.key === "ArrowDown") { ev.preventDefault(); sendText("\x1b[B"); }
-    else if (ev.key === "ArrowRight") { ev.preventDefault(); sendText("\x1b[C"); }
-    else if (ev.key === "ArrowLeft") { ev.preventDefault(); sendText("\x1b[D"); }
-    else if (ev.key.length === 1 && !ev.altKey) { ev.preventDefault(); sendText(ev.key); }
-  });
-
-  const unsub = api.hub.onFrame((f) => {
-    if (!alive || f.t !== "d" || f.k !== "term") return;
-    if (f.key !== activeKey) return;
-    if (typeof f.b === "string") {
-      appendOutput(decodeBase64Utf8(f.b), Boolean(f.reset));
-    }
-    if (typeof f.state === "string" && f.state) {
-      statusEl.textContent = `${activeKey} · ${f.state}`;
-    }
-  });
-
-  void init();
-
-  return {
-    destroy() {
-      alive = false;
-      unsub();
-      if (activeKey) {
-        void api.hub.rpc("term.unwatch", { key: activeKey }).catch(() => {});
-      }
-    },
-  };
-}
