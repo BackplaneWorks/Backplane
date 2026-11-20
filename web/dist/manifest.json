@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 58623,
+  "totalAssetGzipBytes": 58400,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -48,7 +48,6 @@
     "settings.lang",
     "sidebar.search.projects",
     "thread.new",
-    "tools.forkthread",
     "tools.pinned",
     "tools.retry",
     "tour.title.bots",
@@ -61,9 +60,9 @@
     "viewer.solid",
     "viewer.terminal"
   ],
-  "i18nSubsetSha256": "dd76bf5fb41a5af84154d52e3d7d729ac37d528fcba0c27836e90ac1e3c27848",
+  "i18nSubsetSha256": "4c705eced28ff9413294541faf00674c958619317f33a8875b74678d5d129137",
   "inputs": {
-    "web/src/app.ts": "32bd8563bc1e2f9130592eed4d674c54663196a8a281b5bb836123814805d52e",
+    "web/src/app.ts": "4319fc95e46e09e2fe2512d89c8ca733e85d2bb831d28cc5963cba762973ba22",
     "web/src/chat.ts": "ab668e1fa4a7da8b3cd5a06a49b425b684240c0bf2254acba350142bd26441ae",
     "web/src/composer.ts": "b78e16d39ecec108b8259f5d619a751878f5dc65cc23676c7f9aa99d2a8e5ae5",
     "web/src/i18n.ts": "40bb973e3acda75aea4bc5d16746757e59487b95225f5ed36cdfe13c813cf66d",
@@ -71,7 +70,7 @@
     "web/src/md.ts": "c606d1ec598b3ce132c7cc9366383dacafc3fcb71c0fccd97b41ec0e19a96c78",
     "web/src/pair.html": "cf7b94703316f910718356e9ff8e99e088b68211db39b5200213b623c9275f6e",
     "web/src/pair.ts": "58723bde49e067295e34c471a78aa96544567fe2c668789497373234955b1d88",
-    "web/src/palette-model.ts": "3aca815a21205c9bb0a554c63be6cff48c36e4bb084c70e56a4a4818965f0e3a",
+    "web/src/palette-model.ts": "6e9cc7079aa4ea6193a983bf326d7a59f6693e396aaa49cb1a46089a5fdb2720",
     "web/src/palette.ts": "e9e741943ae2fb8c6bfd9001dee5398f05a38f116bfe38edb2c7aa427c6a0fe7",
     "web/src/qr.ts": "04b634557884b8f512a7b03ad9638c1c15a299ffaea0103d1bdeec6338d9b9d3",
     "web/src/rail.ts": "5fb391094992578cb6f54d35d53559951a584c43fcfc2ee6f4f2cc3897acfe46",
@@ -93,9 +92,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 142681,
-      "gzipBytes": 41723,
-      "sha256": "e834be34d41d57fe887827adeffb1001f8a636ef9da6e7ef8c7e9b3f96bc13b1"
+      "bytes": 141768,
+      "gzipBytes": 41531,
+      "sha256": "1d3bb01709dd3fdbd1f9b8ecf8f8793bd587c073a1af8c7cf76603b226af6512"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,
@@ -113,9 +112,9 @@
       "sha256": "123b6a27f255d339b505c8fd83609674f0bddf9b46c0e907fce23befa96b1eec"
     },
     "assets/pair.js": {
-      "bytes": 17563,
-      "gzipBytes": 6600,
-      "sha256": "2b21a726909f08879f51c58eea4461f4290a583f7b9764edc1e7e46e1b491378"
+      "bytes": 17452,
+      "gzipBytes": 6569,
+      "sha256": "c3016c01af10511d1bce4a7cff3c500e8614bad821204543f039d774e28c0eee"
     },
     "assets/style.css": {
       "bytes": 41037,
