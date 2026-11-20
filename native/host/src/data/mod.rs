@@ -949,6 +949,13 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
                     if !browser_alive(&hub, reg, device_id, conn.client, false).await { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
                     // 2. Enforce allow-list before recording any activity.
                     let (method, params) = (s(&v, "m"), v.get("p").unwrap_or(&Value::Null));
+                    // Native Devices includes pairing controls. Select the browser view
+                    // from the authenticated connection before dispatching native RPCs.
+                    if method == "devices.page" {
+                        let page = crate::net::devicespage::browser_page(reg, device_id);
+                        tx.send(pack(&json!({"t":"reply","id":v["id"],"ok":true,"result":page}), json_mode)).await?;
+                        continue
+                    }
                     if !webpolicy::allowed(method, params) {
                         tx.send(pack(&json!({"t":"reply","id":v["id"],"ok":false,"error":"not allowed for browser"}), json_mode)).await?;
                         continue

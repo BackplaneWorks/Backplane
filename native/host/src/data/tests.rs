@@ -986,6 +986,12 @@ async fn socket_with_browser_enforces_policy_activity_and_revoke_over_generic_st
     ws.send(Message::Text(json!({"id":2,"m":"devices.page.act","p":{"action":"device-invite"}}).to_string().into())).await.unwrap();
     let r2: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
     assert_eq!((r2["id"].clone(), r2["ok"].clone(), r2["error"].clone()), (json!(2), json!(false), json!("not allowed for browser")));
+    reg.browser_request("another@example.com", "Pending device").unwrap();
+    for params in [json!({}), json!({"view":"native","action":"device-invite","state":{"invite":"show"}})] {
+        ws.send(Message::Text(json!({"id":3,"m":"devices.page","p":params}).to_string().into())).await.unwrap();
+        let page: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+        assert_eq!(page["result"], json!({"rows":[{"title":"Test Browser","detail":"This browser"}]}));
+    }
     let revoked = reg.revoke(&device_id);
     let clients: Vec<u64> = revoked["clients"].as_array().into_iter().flatten().filter_map(Value::as_u64).collect();
     assert!(!clients.is_empty(), "browser socket must be bound to registry device");
