@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import rail_dock as DOCK
+import rail_auto as AUTO
 import rail_shots_manifest as M  # noqa: E402
 
 
@@ -62,6 +63,21 @@ def parse_embed_actions(kind_dir: Path) -> dict[str, dict]:
         act = rec.get("action")
         if act:
             out[act] = rec
+    return out
+
+
+def parse_auto_actions(kind_dir: Path) -> list[dict]:
+    """Every record the watcher wrote for the auto-attach gates (`auto_actions.jsonl`: real X typing, the stale attach, KiCad's own Close)."""
+    p = kind_dir / "auto_actions.jsonl"
+    out: list[dict] = []
+    if p.exists():
+        for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(rec, dict):
+                out.append(rec)
     return out
 
 
@@ -135,6 +151,8 @@ def parse_client_log(log_path: Path) -> dict:
     mark_before_rail: dict[str, dict | None] = {}
     presses_by_mark: dict[str, list[dict]] = {}
     taps_by_mark: dict[str, list[dict]] = {}
+    composer_reads: list[dict] = []
+    gpui_logs: list[dict] = []
     keys_by_mark: dict[str, list[dict]] = {}
     palette_reads_by_mark: dict[str, list[dict]] = {}
     rail_reads_by_mark: dict[str, list[dict]] = {}
@@ -151,6 +169,8 @@ def parse_client_log(log_path: Path) -> dict:
             "kicad_tags": kicad_tags,
             "presses": presses_by_mark,
             "taps": taps_by_mark,
+            "composer_reads": composer_reads,
+            "gpui_logs": gpui_logs,
             "keys": keys_by_mark,
             "palette_reads": palette_reads_by_mark,
             "rail_reads": rail_reads_by_mark,
@@ -172,6 +192,9 @@ def parse_client_log(log_path: Path) -> dict:
                 lev = json.loads(line.split("GPUI_LOG ", 1)[1])
             except Exception:
                 lev = None
+            if isinstance(lev, dict) and any(k.startswith("kicad_") for k in lev):
+                # KiCad pane/attach decisions the auto-attach gates read (ordered with the metrics by `seq`)
+                gpui_logs.append({"seq": ev_seq + 0.5, "mark": current_mark, "obj": lev})
             if isinstance(lev, dict) and isinstance(lev.get("refused"), str) and lev["refused"].strip():
                 ev_seq += 1
                 refusals_by_mark.setdefault(current_mark, []).append({"text": lev["refused"].strip(), "seq": ev_seq})
@@ -233,6 +256,8 @@ def parse_client_log(log_path: Path) -> dict:
                 "keys": ev.get("keys") or "",
                 "seq": ev_seq,
             })
+        elif kind == "read" and ev.get("what") == "composer":
+            composer_reads.append({"seq": ev_seq, "mark": current_mark, "text": ev.get("text") if isinstance(ev.get("text"), str) else None})
         elif kind == "read" and ev.get("what") == "palette":
             parsed_pal: dict = {}
             try:
@@ -335,6 +360,8 @@ def parse_client_log(log_path: Path) -> dict:
         "kicad_tags": kicad_tags,
         "presses": presses_by_mark,
         "taps": taps_by_mark,
+        "composer_reads": composer_reads,
+        "gpui_logs": gpui_logs,
         "keys": keys_by_mark,
         "palette_reads": palette_reads_by_mark,
         "rail_reads": rail_reads_by_mark,
@@ -2341,6 +2368,11 @@ def main(argv: list[str] | None = None) -> int:
     ) if "full" in kinds else []
 
     extra_checks = evaluate_extra_checks(outdir, kinds, parsed, captures_by_kind, embed=embed)
+    if embed and "full" in kinds:
+        extra_checks += AUTO.evaluate_auto_gates(
+            outdir, parsed.get("full", {}), captures_by_kind.get("full", {}), parse_auto_actions(outdir / "full"),
+            cleared_shots=cleared_by_kind.get("full"),
+        )
 
     if harness_errors or any(t["outcome"] == "harness_failed" for t in scorecard_tasks):
         overall = "harness_failed"
