@@ -1,5 +1,6 @@
 //! Metrics contract and scripted input. See README.md.
-use crate::Backplane;
+use crate::{Backplane, screens::pane_header::Press as HeaderPress};
+use std::{cell::RefCell, collections::BTreeMap};
 use gpui::*;
 use serde_json::{json, Value};
 use std::{collections::VecDeque, path::Path, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
@@ -15,7 +16,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 /* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<name>","settle":"<kind>"?,"timeout_ms":N?}: wait until settled (if requested) and painted, emit shot-ready, wait for <BACKPLANE_GPUI_SHOT_DIR>/<name>.done */ Shot { name: String, settle: Option<String>, timeout_ms: u64 }, /** {"wait_settled":"<kind>","tag":"<tag>","timeout_ms":N?}: wait until the page settles and emit a `settled` metric with its viewer state */ WaitSettled { kind: String, tag: String, timeout_ms: u64 }, Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
-pub enum Ctl { /** the composer chip's account menu, and Settings' Accounts page */ AccountMenu, AccountsPage, /** the sidebar hub picker */ Hub(crate::screens::hubpick::Act), PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, Rail(String), PickFiles, /** the ▾ beside the thread's name: its menu */ ThreadMenu, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), /** a hub page of the Settings nav */ SettingsPage(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch, /** a bots-page press (screens::bots::press): its kind and value */ Bot(String, String), /** a chat terminal's card: focus, expand, pop, stop; its key */ Term(String, String), /** a subagent's own view (its key; "" goes back) */ Sub(String), /** a card's button that sends the hub an action (a halt card's Resume...): `Command::Action` */ Go(String, String), /** the viewer's Edit (true: the real KiCad in the pane) and View (false) */ KicadEdit(bool), /** the editor strip: a tab (its kind), full, popout, popin */ KicadAct(String), /** a management panel's press (screens/mgmt.rs `act`) */ Mgmt(String) }
+pub enum Ctl { Header(String), /** the composer chip's account menu, and Settings' Accounts page */ AccountMenu, AccountsPage, /** the sidebar hub picker */ Hub(crate::screens::hubpick::Act), PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, Rail(String), PickFiles, /** the ▾ beside the thread's name: its menu */ ThreadMenu, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), /** a hub page of the Settings nav */ SettingsPage(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch, /** a bots-page press (screens::bots::press): its kind and value */ Bot(String, String), /** a chat terminal's card: focus, expand, pop, stop; its key */ Term(String, String), /** a subagent's own view (its key; "" goes back) */ Sub(String), /** a card's button that sends the hub an action (a halt card's Resume...): `Command::Action` */ Go(String, String), /** the viewer's Edit (true: the real KiCad in the pane) and View (false) */ KicadEdit(bool), /** the editor strip: a tab (its kind), full, popout, popin */ KicadAct(String), /** a management panel's press (screens/mgmt.rs `act`) */ Mgmt(String) }
 #[derive(Clone, Debug)]
 pub struct CtlEntry { pub id: String, pub label: String, pub ctl: Ctl }
 #[derive(Clone, Debug)]
@@ -25,6 +26,64 @@ pub struct Pending { pub label: String, pub started: Instant, pub goal: Goal, pu
 thread_local! {
     /// SolidPage (key, painted) snapshot taken when a script press/click runs, so `viewer_settled` requires a newly painted frame for a new model.
     static PRESS_SOLID: std::cell::RefCell<(String, u64)> = const { std::cell::RefCell::new((String::new(), 0)) };
+}
+
+struct HeaderAction {
+    label: String,
+    folded: bool,
+    rect_id: String,
+    press: Option<HeaderPress>,
+}
+
+#[derive(Default)]
+struct HeaderRegistry {
+    present: bool,
+    window: Option<AnyWindowHandle>,
+    actions: BTreeMap<String, HeaderAction>,
+}
+
+thread_local! {
+    static HEADER: RefCell<HeaderRegistry> = RefCell::default();
+}
+
+fn header_alias(id: &str) -> Option<&'static str> {
+    // i18n-ok: stable script control IDs
+    Some(match id {
+        "kicad-edit" => "ui:Edit",
+        "kicad-open" => "ui:Open in KiCad", // i18n-ok: stable script control IDs
+        "altium-open" => "ui:Open in Altium", // i18n-ok: stable script control IDs
+        "gerbers-vs-board" => "ui:vs board", // i18n-ok: stable script control IDs
+        "gerbers-gerbview" => "ui:Open in GerbView", // i18n-ok: stable script control IDs
+        "follow-agent" => "follow-agent",
+        "follow-resume" => "follow-resume",
+        _ => return None,
+    })
+}
+
+pub(crate) fn header_present() {
+    HEADER.with_borrow_mut(|registry| registry.present = true);
+}
+
+impl HeaderRegistry {
+    fn replaces(&self, id: &str) -> bool {
+        // i18n-ok: compatibility IDs shared with the older viewer toolbar.
+        self.actions.contains_key(id) || self.present && matches!(id,
+            "ui:Edit" | "ui:View" | "ui:Open in KiCad" | "ui:Open in Altium" | "ui:Open in GerbView") // i18n-ok: stable script control IDs
+    }
+}
+
+/// Called by the measured header with the same action that its button runs.
+pub(crate) fn header_action(page: &str, id: &str, label: &str, folded: bool, press: Option<HeaderPress>) {
+    HEADER.with_borrow_mut(|registry| {
+        if registry.window.is_none() { return; }
+        let key = format!("pane-tool:{page}:{id}");
+        let rect_id = if folded { format!("pane-more:{page}") } else { key.clone() };
+        for key in header_alias(id).map(str::to_owned).into_iter().chain(std::iter::once(key)) {
+            registry.actions.insert(key, HeaderAction {
+                label: label.into(), folded, rect_id: rect_id.clone(), press: press.clone(),
+            });
+        }
+    });
 }
 
 /// Shot marker names must be lowercase ASCII slugs (`[a-z0-9-]+`) so they are safe filenames in `BACKPLANE_GPUI_SHOT_DIR`.
@@ -111,7 +170,16 @@ impl Backplane {
             if snap != self.last_layout { self.last_layout = snap.clone(); metric(started, "layout", json!({"rects": serde_json::from_str::<Value>(&snap).unwrap_or(Value::Null)})); }
             // G4: the controls on screen, on change
             let rects = crate::art::ctl_rects();
-            let ctl: Vec<Value> = self.all_controls().map(|c| json!({"id": c.id, "label": c.label, "rect": rects.get(&c.id).map(|r| json!({"x": r[0], "y": r[1], "w": r[2], "h": r[3]})), "enabled": !matches!(c.ctl, Ctl::None), "visible": true, "wired": !matches!(c.ctl, Ctl::None), "disabled_look": matches!(c.ctl, Ctl::None)})).collect();
+            let ctl = HEADER.with_borrow(|registry| {
+                let inventory = |id: &str, label: &str, rect_id: &str, enabled: bool, folded: bool| {
+                    json!({"id": id, "label": label, "rect": rects.get(rect_id).map(|r| json!({"x": r[0], "y": r[1], "w": r[2], "h": r[3]})),
+                        "enabled": enabled, "visible": true, "wired": enabled, "disabled_look": !enabled, "folded": folded})
+                };
+                self.all_controls().filter(|c| !registry.replaces(&c.id))
+                    .map(|c| inventory(&c.id, &c.label, &c.id, !matches!(c.ctl, Ctl::None), false))
+                    .chain(registry.actions.iter().map(|(id, a)| inventory(id, &a.label, &a.rect_id, a.press.is_some(), a.folded)))
+                    .collect::<Vec<_>>()
+            });
             let text = serde_json::to_string(&ctl).unwrap_or_default();
             if text != self.ctl_last {
                 self.ctl_last = text; metric(started, "controls", json!({"controls": ctl}));
@@ -135,6 +203,13 @@ impl Backplane {
 
     /// Called from render: arms first_frame, usable, and the pending step's result.
     pub fn frame_marks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.script_total > 0 || crate::art::rects_on() {
+            HEADER.with_borrow_mut(|registry| {
+                registry.window = Some(window.window_handle());
+                registry.actions.clear();
+                registry.present = false;
+            });
+        }
         let started = self.started;
         let this = cx.entity().downgrade();
         if !self.first_frame {
@@ -548,7 +623,7 @@ impl Backplane {
             Step::PairFill(link, addr, code) => { crate::screens::pair::fill(self, &link, &addr, &code, cx); self.pump(cx); }
             Step::ClickWithin(id, ms) => {
                 // not drawn yet: wait 250 ms and look again; found, or out of time: the plain click (which reports found:false)
-                if ms == 0 || self.all_controls().any(|c| c.id == id) { self.steps.push_front(Step::Click(id)); self.pump(cx); return; }
+                if ms == 0 || self.find_script_control(&id).is_some() { self.steps.push_front(Step::Click(id)); self.pump(cx); return; }
                 self.steps.push_front(Step::ClickWithin(id, ms.saturating_sub(250)));
                 self.steps.push_front(Step::Wait(250));
                 self.pump(cx);
@@ -561,7 +636,12 @@ impl Backplane {
                 let found = self.find_script_control(&id);
                 let action = found.map(|e| self.do_click(&e.ctl, cx));
                 self.m("press", json!({"id": id, "found": action.is_some(), "action": action}));
-                self.ui_epoch += 1; cx.notify(); self.pump(cx);
+                self.ui_epoch += 1;
+                cx.notify();
+                // Header dispatch borrows the window after this update. Preserve script
+                // ordering for a press immediately followed by another input or read.
+                let entity = cx.entity();
+                cx.defer(move |cx| entity.update(cx, |this, cx| this.pump(cx)));
             }
             Step::Click(id) => {
                 let epoch = self.ui_epoch;
@@ -632,6 +712,19 @@ impl Backplane {
     pub fn do_click(&mut self, ctl: &Ctl, cx: &mut Context<Self>) -> String {
         use crate::hub::Command;
         match ctl {
+            Ctl::Header(id) => {
+                let action = HEADER.with_borrow(|r| Some((r.window?, r.actions.get(id)?.press.clone()?)));
+                let Some((handle, press)) = action else { return "none".into() };
+                let entity = cx.entity();
+                cx.defer(move |cx| {
+                    let _ = handle.update(cx, |_, window, cx| entity.update(cx, |this, cx| {
+                        press.run(this, window, cx);
+                        this.ui_epoch += 1;
+                        cx.notify();
+                    }));
+                });
+                format!("header {id}") // i18n-ok: script result diagnostic
+            }
             Ctl::Hub(a) => { crate::screens::hubpick::act(self, a.clone(), cx); self.ui_epoch += 1; "hub".into() }
             Ctl::PairGo => { crate::screens::pair::go(self, cx); self.ui_epoch += 1; "pair".into() }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::PairYes => { crate::screens::pair::confirm(self, cx); self.ui_epoch += 1; "pair confirmed".into() }
@@ -681,6 +774,10 @@ impl Backplane {
     }
     /// Find a registered control, or a probed viewer bar control (`follow-agent`, `ui:vs board`) when currently drawn.
     fn find_script_control(&self, id: &str) -> Option<CtlEntry> {
+        let header = HEADER.with_borrow(|registry| registry.actions.get(id).map(|a| CtlEntry {
+            id: id.into(), label: a.label.clone(), ctl: if a.press.is_some() { Ctl::Header(id.into()) } else { Ctl::None },
+        }));
+        if header.is_some() || HEADER.with_borrow(|r| r.replaces(id)) { return header; }
         if let Some(c) = self.all_controls().find(|c| c.id == id).cloned() { return Some(c); }
         let rects = crate::art::ctl_rects();
         let v = &self.data["thread"]["viewer"];
@@ -850,7 +947,7 @@ impl Backplane {
             "follow_present": v["follow"].is_object(),
             "follow_on": v["follow"]["on"] == true,
             "follow_paused": v["follow"]["paused"] == true,
-            "follow_rect_visible": rects.contains_key("follow-agent"),
+            "follow_rect_visible": HEADER.with_borrow(|r| r.actions.get("follow-agent").map_or_else(|| rects.contains_key("follow-agent"), |a| rects.contains_key(&a.rect_id))),
             "probe": v["probe"].as_str().unwrap_or(""),
             "split_picked_sch": split_sch_picked,
             "split_picked_pcb": split_pcb_picked,
