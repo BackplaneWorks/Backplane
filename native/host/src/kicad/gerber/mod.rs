@@ -61,7 +61,8 @@ pub fn plot_in(path: &str, root: Option<&Path>) -> super::plotgen::Read {
                 Some(cr) => canon_in(Path::new(&b), &cr),
                 None => std::fs::canonicalize(&b).ok(),
             };
-            let bytes = b_path.and_then(|p| std::fs::read(p).ok()).unwrap_or_default();
+            let Some(b_path) = b_path else { return super::plotgen::Read::Fail("that board is not in this project".into()) };
+            let bytes = std::fs::read(&b_path).unwrap_or_default();
             let bi = super::sexpr::forms(&bytes).map(|fs| super::plotgen::board_items(&fs)).unwrap_or_default();
             let t0 = std::time::Instant::now();
             let (marks, layers) = compare::compare(&r.items, &bi);

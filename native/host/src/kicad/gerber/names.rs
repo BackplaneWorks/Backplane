@@ -78,7 +78,7 @@ pub fn has_gerbers(root: &Path) -> bool {
     ["mfg", "gerbers", "gerber"].iter().any(|top| walk(&canon_root.join(top), 3, &canon_root))
 }
 /// A project's Gerbers: the folder under `<root>/mfg` (three deep) or `<root>/gerbers` holding fab files inside the canonical root, the one written last.
-/// Returns the canonical path of the chosen set directory.
+/// Returns the path spelled under `root` (keeping watch keys consistent when `root` itself is a symlink) after verifying canonical containment.
 pub fn default_set(root: &Path) -> Option<PathBuf> {
     let canon_root = std::fs::canonicalize(root).ok()?;
     let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
@@ -95,7 +95,7 @@ pub fn default_set(root: &Path) -> Option<PathBuf> {
         if let Some(t) = newest { if best.as_ref().map_or(true, |b| t > b.0) { *best = Some((t, cd)) } }
     }
     for top in ["mfg", "gerbers", "gerber"] { walk(&canon_root.join(top), 3, &canon_root, &mut best) }
-    best.map(|b| b.1)
+    best.and_then(|(_, cd)| cd.strip_prefix(&canon_root).ok().map(|rel| root.join(rel)))
 }
 
 
@@ -191,8 +191,20 @@ mod tests {
         std::fs::write(base.join("parent.kicad_pro"), "{}").unwrap();
         std::fs::write(base.join("parent.kicad_pcb"), "(kicad_pcb)").unwrap();
         assert!(board_of_in(&set, Some(&proj)).is_none(), "companion board outside root must be skipped");
+        // Comparison reader also refuses an out-of-root comparison board at the read boundary
+        let bad_cmp = cmp_path(&set.to_string_lossy(), &base.join("parent.kicad_pcb").to_string_lossy());
+        assert!(matches!(super::super::plot_in(&bad_cmp, Some(&proj)), super::super::super::plotgen::Read::Fail(_)), "plot_in must refuse comparison board outside root");
         std::fs::write(proj.join("local.kicad_pro"), "{}").unwrap();
         std::fs::write(proj.join("local.kicad_pcb"), "(kicad_pcb)").unwrap();
         assert_eq!(board_of_in(&set, Some(&proj)).unwrap().file_name().unwrap(), "local.kicad_pcb");
+
+        // 4. Project root that is itself a symlink keeps watch-key spelling under the symlink while I/O reads canonical files
+        let sym_root = base.join("proj-link");
+        symlink(&proj, &sym_root).unwrap();
+        let sym_set = default_set(&sym_root).expect("symlinked root finds its in-root set");
+        assert!(sym_set.starts_with(&sym_root), "watch-key spelling stays under symlinked root: {sym_set:?}");
+        let sym_files = set_files_in(&sym_set, Some(&sym_root));
+        assert_eq!(sym_files.len(), 1);
+        assert_eq!(sym_files[0], std::fs::canonicalize(mfg.join("in-F_Cu.gbr")).unwrap(), "I/O paths returned are canonical");
     }
 }

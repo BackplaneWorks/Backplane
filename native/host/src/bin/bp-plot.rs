@@ -70,7 +70,8 @@ fn main() {
         println!();
         return
     }
-    match plotread::read(kind, file) {
+    let root = std::env::var_os("BACKPLANE_PLOT_ROOT").filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
+    match plotread::read_in(kind, file, root.as_deref()) {
         plotgen::Read::Plot(p, infos) => {
             if let Some(i) = a.get(2) { plotgen::write_infos(i, &infos) }
             std::io::stdout().write_all(&plotgen::lines(&p)).unwrap();
