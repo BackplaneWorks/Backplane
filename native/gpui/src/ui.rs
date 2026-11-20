@@ -865,8 +865,11 @@ impl Render for Backplane {
         // whether the page holds the embedded editor this frame (popped out: its own window does), from this frame's state: macOS hides
         // KiCad's frame by it when the pane is not drawn (#1199: the viewer closed, the PCB Editor stayed on screen)
         if let Some(p) = self.screens.kicad.clone() {
-            let in_page = self.screens.kicad_window.is_some() || (!docked && self.kicad_for(thread, cx).is_some() && crate::screens::viewer::holds_editor(thread));
-            if p.read(cx).in_page != in_page { p.update(cx, |p, _| p.in_page = in_page); }
+            let mine = self.kicad_for(thread, cx).is_some();
+            let in_page = self.screens.kicad_window.is_some() || (!docked && mine && crate::screens::viewer::holds_editor(thread));
+            // #1345: off screen because the person moved away (another thread or design, or the viewer closed or on another page): the hub
+            // hears it once settled (KicadPane::set_in_page), so the idle close and the cap can apply to it; a sheet over the pane is not this
+            if p.read(cx).in_page != in_page { p.update(cx, |p, cx| p.set_in_page(in_page, if mine { "viewer" } else { "thread" }, cx)); } // i18n-ok: wire words
         }
         // Follow agent in KiCad: the hub learns whether this thread's page holds KiCad and which frame it shows (viewer.state, on change)
         let kshown = match self.screens.kicad.clone() { Some(p) if p.read(cx).in_page => (true, p.read(cx).tab()), _ => (false, String::new()) };
