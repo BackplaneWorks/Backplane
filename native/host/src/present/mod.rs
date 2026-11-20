@@ -579,6 +579,25 @@ mod tests {
         let v_far = viewer::viewer_json(&st_far, &json!({}), &sess_far).unwrap();
         assert_eq!(v_far["layout"]["root"]["a"]["source"], "power.kicad_sch");
 
+        // 9. Idempotent `view-show` (`viewer_show_action`) NEVER closes an already-focused tile (multi-tile or legacy Files)
+        assert!(viewer::show_refusal("mech", "mech/case.step", &[root.clone()]).is_none());
+        let vs1 = viewer::viewer_show_action(&st, "h", &sess_b, Some(11), "en", "mech", &format!("{root}/mech/case.step")).unwrap();
+        let viewer::LayoutOut::Ok(vo_vs1) = vs1 else { panic!() };
+        crate::session::patch::merge(&mut sess_b, &vo_vs1.patch);
+        // Repeat show of already-focused Mech -> must stay open (2 tiles, focused on t2), NEVER close!
+        let vs2 = viewer::viewer_show_action(&st, "h", &sess_b, Some(11), "en", "mech", &format!("{root}/mech/case.step")).unwrap();
+        let viewer::LayoutOut::Ok(vo_vs2) = vs2 else { panic!() };
+        crate::session::patch::merge(&mut sess_b, &vo_vs2.patch);
+        let vb3 = viewer::viewer_json(&st, &json!({}), &sess_b).unwrap();
+        assert_eq!(vb3["layout"]["focus"], "t2");
+        assert_eq!(vb3["tiles"].as_object().unwrap().len(), 2);
+
+        // Legacy single-tile mode: repeated `view-show files` does NOT close Files
+        let sess_files = json!({"sel":"t","rid":1,"drafts":{"@view:t":"files"},"panel":false,"info":{}});
+        let vs_files = viewer::viewer_show_action(&st, "h", &sess_files, None, "en", "files", "").unwrap();
+        let viewer::LayoutOut::Ok(vo_vf) = vs_files else { panic!() };
+        assert!(vo_vf.patch.as_object().unwrap().is_empty(), "repeated view-show files is an idempotent no-op");
+
         // 10. Legacy replay parity: with no stored `@view.layout:t`, legacy actions NEVER write `@view.layout:t`
         // and Review from a watched drawing emits exactly ONE stop command.
         let mut s_leg = json!({"sel":"t","rid":1,"drafts":{},"panel":false,"info":{}});
@@ -670,8 +689,9 @@ mod tests {
         let v_shsp = viewer::viewer_json(&st, &json!({}), &s_sp).unwrap();
         assert_eq!(v_shsp["tiles"]["sch"]["source"], "power.kicad_sch", "sheet change in stored Split with Board focused must update Schematic leaf");
 
-        // 16. A plain `view` is main's `view`: Files pressed while Files is on show closes it
+        // 16. A plain `view` is always main's `view`: right after an agent's push it still toggles Files closed, as on main (nothing is inferred)
         let sess_old_files = json!({"sel":"t","rid":1,"drafts":{"@view:t":"files"},"panel":false,"info":{}});
+        let _tok = viewer::issue_show("t", "files", "");
         let old_ans = viewer::view_action_for(&st, "h", &sess_old_files, Some(42), "en", "files", 0).unwrap();
         let viewer::LayoutOut::Ok(vo_oa) = old_ans else { panic!() };
         assert_eq!(vo_oa.patch["drafts"]["@view:t"], "", "a plain `view files` right after a push closes Files, as on main");
@@ -773,6 +793,190 @@ mod tests {
         let three_d = pic(&two(mk(ver("1111aaaa"), layout::PageKind::Solid3d)));
         assert!(three_d["tiles"]["t1"]["layers"].as_str().unwrap().contains("1111aaaa99998888777766665555444433332222"), "a historical 3D layer key names its revision");
         assert!(!three_d["tiles"]["t1"]["layers"].as_str().unwrap().contains(&root));
+    }
+    /// An agent's show is applied only through its token (kind and full path unchanged, this thread), for every kind; the read-back settles exactly.
+    #[test]
+    fn rail_v_2a_show_tokens_apply_exactly_and_read_back_exactly() {
+        let d = crate::plat::tmp::dir("rail-v-2a-show");
+        let root = d.to_string_lossy().into_owned();
+        for f in ["unit.kicad_pcb", "unit.kicad_sch"] { std::fs::write(d.join(f), "()").unwrap(); }
+        std::fs::create_dir_all(d.join("alt")).unwrap(); std::fs::write(d.join("alt/alt.kicad_pcb"), "()").unwrap();
+        std::fs::create_dir_all(d.join("mech")).unwrap(); std::fs::write(d.join("mech/case.step"), "ISO-10303-21;").unwrap();
+        std::fs::create_dir_all(d.join("mfg/rev1")).unwrap(); std::fs::write(d.join("mfg/rev1/u-F_Cu.gbr"), "%FSLAX46Y46*%M02*").unwrap();
+        let mut st = crate::state::State::new();
+        st.apply_line(&json!({"$":"ProjectCreated","id":"p","title":"Board","root":root,"at":1}).to_string());
+        st.apply_line(&json!({"$":"ThreadCreated","id":"t","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+        let idle = json!({"sel":"t","rid":1,"drafts":{},"panel":false,"info":{}});
+        let shows = [("board", format!("{root}/unit.kicad_pcb")), ("pcb", format!("{root}/alt/alt.kicad_pcb")), ("schematic", format!("{root}/unit.kicad_sch")), ("3d", format!("{root}/unit.kicad_pcb")),
+            ("gerbers", format!("{root}/mfg/rev1")), ("split", format!("{root}/unit.kicad_pcb")), ("mech", format!("{root}/mech/case.step")), ("3d", format!("{root}/mech/case.step")),
+            ("files", String::new()), ("browser", String::new()), ("review", String::new())];
+        for (k, p) in &shows {
+            let tok = viewer::issue_show("t", k, p);
+            assert_eq!(viewer::show_outcome(&tok), viewer::ShowOutcome::Pending);
+            let viewer::LayoutOut::Ok(vo) = viewer::view_show_token(&st, "h", &idle, Some(1), "en", k, p, &tok).unwrap() else { panic!("{k} refused") };
+            assert!(vo.patch.as_object().is_some_and(|o| !o.is_empty()), "{k} {p}: the show applies");
+            assert_eq!(viewer::show_outcome(&tok), viewer::ShowOutcome::Applied, "{k}");
+            // the same token with another kind, another path, another thread, or no token of the hub's: nothing applies
+            let k2 = if *k == "board" { "schematic" } else { "board" };
+            for (k2, p2, t2, why) in [(k2, p.as_str(), "t", "another kind"), (*k, "/elsewhere/x.kicad_pcb", "t", "another path"), (*k, p.as_str(), "u", "another thread")] {
+                let issued = viewer::issue_show(t2, if why == "another kind" { *k } else { k2 }, if why == "another path" { p.as_str() } else { p.as_str() });
+                let viewer::LayoutOut::Ok(none) = viewer::view_show_token(&st, "h", &idle, Some(1), "en", k2, p2, &issued).unwrap() else { panic!() };
+                assert!(none.patch.as_object().unwrap().is_empty() && none.before.is_empty(), "{k}: {why}: a token for something else applies nothing");
+            }
+            let viewer::LayoutOut::Ok(none) = viewer::view_show_token(&st, "h", &idle, Some(1), "en", k, p, "show-nonsense").unwrap() else { panic!() };
+            assert!(none.patch.as_object().unwrap().is_empty(), "an unknown token applies nothing");
+            let viewer::LayoutOut::Ok(none) = viewer::view_show_token(&st, "h", &idle, Some(1), "en", k, p, "").unwrap() else { panic!() };
+            assert!(none.patch.as_object().unwrap().is_empty(), "an empty token applies nothing");
+        }
+        // another thread's token never applies here
+        let other = viewer::issue_show("u", "board", &format!("{root}/unit.kicad_pcb"));
+        let viewer::LayoutOut::Ok(none) = viewer::view_show_token(&st, "h", &idle, Some(1), "en", "board", &format!("{root}/unit.kicad_pcb"), &other).unwrap() else { panic!() };
+        assert!(none.patch.as_object().unwrap().is_empty());
+
+        // the read-back: exact page and source, the project's own file resolved to its name first
+        let dflt = viewer::ShowDefaults { pcb: format!("{root}/unit.kicad_pcb"), sch: format!("{root}/unit.kicad_sch"), set: format!("{root}/mfg/rev1") };
+        let want = |k: &str, p: &str| viewer::show_want(k, p, &root, &dflt);
+        let own = want("board", &format!("{root}/unit.kicad_pcb"));
+        assert!(viewer::show_settled(&own, &json!({"open":"board","key":format!("0|{root}|")}), &dflt), "a key with no path is the project's own board");
+        assert!(viewer::show_settled(&own, &json!({"open":"board","key":format!("0|{root}|{root}/unit.kicad_pcb")}), &dflt));
+        assert!(viewer::show_settled(&want("board", ""), &json!({"open":"board","key":format!("0|{root}|")}), &dflt), "a show with no path is the project's own board");
+        assert!(!viewer::show_settled(&own, &json!({"open":"board","key":format!("0|{root}|{root}/alt/alt.kicad_pcb")}), &dflt), "another board");
+        assert!(!viewer::show_settled(&own, &json!({"open":"board","key":format!("0|{root}|x{root}/unit.kicad_pcb")}), &dflt), "no suffix matching");
+        let alt = want("pcb", &format!("{root}/alt/alt.kicad_pcb"));
+        assert!(!viewer::show_settled(&alt, &json!({"open":"board","key":format!("0|{root}|")}), &dflt), "the own board is not the alt board");
+        for bad in [json!({}), json!({"open":"board"}), json!({"open":"board","key":""}), json!({"key":format!("0|{root}|")}), json!({"open":"schematic","key":format!("0|{root}|")})] {
+            assert!(!viewer::show_settled(&own, &bad, &dflt), "{bad}");
+        }
+        assert!(!viewer::show_settled(&own, &json!({"open":"board","gerbers":true,"key":format!("0|{root}|")}), &dflt), "Gerbers are not the board");
+        let set = want("gerbers", "");
+        assert!(viewer::show_settled(&set, &json!({"open":"board","gerbers":true,"key":format!("0|{root}|")}), &dflt));
+        assert!(!viewer::show_settled(&set, &json!({"open":"board","key":format!("0|{root}|")}), &dflt));
+        let mech = want("mech", &format!("{root}/mech/case.step"));
+        assert!(viewer::show_settled(&mech, &json!({"open":"mech","part":"mech/case.step"}), &dflt));
+        for bad in [json!({"open":"mech","part":""}), json!({"open":"mech"}), json!({"open":"mech","part":"mech/other.step"}), json!({"open":"mech","part":"x/mech/case.step"})] { assert!(!viewer::show_settled(&mech, &bad, &dflt), "{bad}"); }
+        assert!(viewer::show_settled(&want("browser", ""), &json!({"open":"browser"}), &dflt));
+        // Split settles on the board its panes draw, not on the Split's own key
+        let split = want("split", &format!("{root}/alt/alt.kicad_pcb"));
+        let panes = |board: &str| json!({"open":"split","key":format!("split|{root}|"),"panes":[format!("1|{root}|"), format!("0|{root}|{board}"), format!("2|{root}|{board}")]});
+        assert!(viewer::show_settled(&split, &panes(&format!("{root}/alt/alt.kicad_pcb")), &dflt));
+        assert!(!viewer::show_settled(&split, &panes(""), &dflt), "the own board is not the alt board");
+        assert!(!viewer::show_settled(&split, &json!({"open":"split","key":format!("split|{root}|")}), &dflt), "the Split's own key says nothing of its board");
+        assert!(viewer::show_settled(&want("split", ""), &panes(""), &dflt));
+        // a named Files folder or file settles only on that folder or that file's preview; no folder named is the page alone
+        assert!(viewer::show_settled(&want("files", ""), &json!({"open":"files"}), &dflt));
+        assert!(viewer::show_settled(&want("files", &format!("{root}/mech")), &json!({"open":"files","dir":"mech"}), &dflt));
+        assert!(!viewer::show_settled(&want("files", &format!("{root}/mech")), &json!({"open":"files","dir":""}), &dflt));
+        let txt = want("files", &format!("{root}/mech/notes.txt"));
+        assert_eq!(txt.kind, "file");
+        assert!(viewer::show_settled(&txt, &json!({"open":"text","file":format!("/img?path={}", root.replace('/', "%2F") + "%2Fmech%2Fnotes.txt")}), &dflt));
+        assert!(!viewer::show_settled(&txt, &json!({"open":"text","file":format!("/img?path={}", root.replace('/', "%2F") + "%2Fmech%2Fother.txt")}), &dflt));
+        assert!(!viewer::show_settled(&txt, &json!({"open":"files","dir":"mech"}), &dflt), "the folder is not the file's preview");
+        // (a repeated identical show: the picture already shows it, so it settles with no newer report)
+
+        // under a KiCad holder's dialog a show may only re-show the locked tile with the source it names
+        let board = layout::derive_layout(&layout::DeriveInput { root: &root, open: "board", picked_board: "alt/alt.kicad_pcb", ..Default::default() });
+        let lid = board.tiles()[0].id.clone();
+        assert!(viewer::show_preserves_locked(&board, &lid, Some(layout::PageKind::Board), "alt/alt.kicad_pcb"));
+        assert!(!viewer::show_preserves_locked(&board, &lid, Some(layout::PageKind::Board), "unit.kicad_pcb"), "another board is refused");
+        assert!(!viewer::show_preserves_locked(&board, &lid, Some(layout::PageKind::Board), ""), "an empty source is never the same");
+        assert!(!viewer::show_preserves_locked(&board, &lid, Some(layout::PageKind::Schematic), "alt/alt.kicad_pcb"));
+        assert!(!viewer::show_preserves_locked(&board, &lid, None, "alt/alt.kicad_pcb"), "Split is not the locked page");
+    }
+    /// An agent's raw push, through the token handler a desktop answers with, to the page and source the hub then draws: every kind, the
+    /// normalized kinds ("" with a board path, "3d" with a model) and another board or sheet included.
+    #[test]
+    fn rail_show_raw_push_to_token_handler_to_the_selected_page_and_source() {
+        let d = crate::plat::tmp::dir("rail-show-push");
+        let root = d.to_string_lossy().into_owned();
+        for f in ["unit.kicad_pcb", "unit.kicad_sch", "power.kicad_sch"] { std::fs::write(d.join(f), "()").unwrap(); }
+        std::fs::create_dir_all(d.join("alt")).unwrap(); std::fs::write(d.join("alt/alt.kicad_pcb"), "()").unwrap();
+        std::fs::create_dir_all(d.join("mech")).unwrap(); std::fs::write(d.join("mech/case.step"), "ISO-10303-21;").unwrap(); std::fs::write(d.join("mech/notes.txt"), "hi").unwrap();
+        std::fs::create_dir_all(d.join("mfg/rev1")).unwrap(); std::fs::write(d.join("mfg/rev1/u-F_Cu.gbr"), "%FSLAX46Y46*%M02*").unwrap();
+        let mut st = crate::state::State::new();
+        st.apply_line(&json!({"$":"ProjectCreated","id":"p","title":"Board","root":root,"at":1}).to_string());
+        st.apply_line(&json!({"$":"ThreadCreated","id":"tp","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+        let idle = json!({"sel":"tp","rid":1,"drafts":{},"panel":false,"info":{"fab.board:tp":"unit.kicad_pcb","fab.boards:tp":"unit.kicad_pcb\nalt/alt.kicad_pcb"}});
+        // the project's own files as the hub finds them (the agent's read-back resolves a key with no path the same way)
+        let own = crate::files::kicad::project::read(&root);
+        let dflt = viewer::ShowDefaults { pcb: own.pcb, sch: own.sch, set: crate::files::kicad::gerber::default_set(std::path::Path::new(&root)).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default() };
+        // what the desktop reports of a picture (gpui `plotview::state_json`)
+        let report = |v: &Value| {
+            let open = v["open"].as_str().unwrap_or("");
+            let mut r = json!({"open": open, "key": v["key"], "part": if open == "mech" { v["mech"]["rel"].clone() } else { Value::Null }});
+            if v["gerbers"] == true { r["gerbers"] = json!(true) }
+            if open == "split" { r["panes"] = json!(v["panes"].as_array().unwrap().iter().filter_map(|p| p["key"].as_str()).collect::<Vec<_>>()) }
+            if open == "files" { r["dir"] = json!(v["files"]["trail"].as_array().and_then(|t| t.last()).and_then(|c| c["value"].as_str()).unwrap_or("")) }
+            if matches!(open, "image" | "pdf" | "text") { r["file"] = v["file"]["url"].clone() }
+            r
+        };
+        let shows = [("board", String::new()), ("board", format!("{root}/unit.kicad_pcb")), ("pcb", format!("{root}/alt/alt.kicad_pcb")), ("", format!("{root}/alt/alt.kicad_pcb")),
+            ("schematic", String::new()), ("schematic", format!("{root}/unit.kicad_sch")), ("schematic", format!("{root}/power.kicad_sch")), ("", format!("{root}/power.kicad_sch")),
+            ("3d", format!("{root}/unit.kicad_pcb")), ("3d", format!("{root}/mech/case.step")), ("", format!("{root}/mech/case.step")), ("mech", format!("{root}/mech/case.step")),
+            ("gerbers", String::new()), ("gerbers", format!("{root}/mfg/rev1")), ("split", format!("{root}/unit.kicad_pcb")), ("split", format!("{root}/alt/alt.kicad_pcb")),
+            ("files", String::new()), ("files", format!("{root}/mech")), ("files", format!("{root}/mech/notes.txt")), ("browser", String::new())];
+        for (k, p) in &shows {
+            // the push the hub sends, and what a desktop answers with from it
+            let push = viewer::show_push("tp", k, p);
+            let value = format!("{}\t{}\t{}", push["kind"].as_str().unwrap(), push["path"].as_str().unwrap(), push["token"].as_str().unwrap());
+            let mut parts = value.splitn(3, '\t'); let (pk, pp, tok) = (parts.next().unwrap(), parts.next().unwrap(), parts.next().unwrap());
+            let out = viewer::view_show_token(&st, "h", &idle, Some(1), "en", pk, pp, tok).unwrap_or_else(|| panic!("{k} {p}: unanswered"));
+            let viewer::LayoutOut::Ok(vo) = out else { panic!("{k} {p}: refused") };
+            assert_eq!(viewer::show_outcome(tok), viewer::ShowOutcome::Applied, "{k} {p}");
+            let mut s = idle.clone(); crate::session::patch::merge(&mut s, &vo.patch);
+            let pic = viewer::viewer_json(&st, &json!({}), &s).unwrap_or(Value::Null);
+            let want = viewer::show_want(k, p, &root, &dflt);
+            assert!(viewer::show_settled(&want, &report(&pic), &dflt), "{k} {p}: the hub draws {} (key {}), not {want:?}", pic["open"], pic["key"]);
+            // a close is never what a show does
+            assert!(pic["open"].as_str().is_some_and(|o| !o.is_empty()), "{k} {p}: a show never closes");
+        }
+        // Review is the page of the pages writer (it is no viewer picture): the show opens it
+        let push = viewer::show_push("tp", "review", "");
+        let viewer::LayoutOut::Ok(vo) = viewer::view_show_token(&st, "h", &idle, Some(2), "en", "review", "", push["token"].as_str().unwrap()).unwrap() else { panic!() };
+        assert_eq!(vo.patch["info"]["view.kind:tp"], "review");
+        // the normalized kinds say what they are: a model under "3d" is Mech, a board under "" is that board (and the other board is the picked one)
+        let alt = format!("{root}/alt/alt.kicad_pcb");
+        let push = viewer::show_push("tp", "", &alt);
+        let viewer::LayoutOut::Ok(vo) = viewer::view_show_token(&st, "h", &idle, Some(3), "en", "", &alt, push["token"].as_str().unwrap()).unwrap() else { panic!() };
+        assert_eq!((vo.patch["drafts"]["@view:tp"].as_str(), vo.patch["drafts"]["@view.board:tp"].as_str()), (Some("board"), Some("alt/alt.kicad_pcb")));
+    }
+
+    /// A token is applied at most once per session, only while it is the thread's newest show, and only for its lifetime; several sessions each
+    /// apply one broadcast once; the table stays bounded.
+    #[test]
+    fn rail_show_token_lifetime_once_per_session_superseded_expiring_and_bounded() {
+        let d = crate::plat::tmp::dir("rail-show-life");
+        let root = d.to_string_lossy().into_owned();
+        std::fs::write(d.join("unit.kicad_pcb"), "()").unwrap();
+        let mut st = crate::state::State::new();
+        st.apply_line(&json!({"$":"ProjectCreated","id":"p","title":"Board","root":root,"at":1}).to_string());
+        st.apply_line(&json!({"$":"ThreadCreated","id":"tl","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+        let idle = json!({"sel":"tl","rid":1,"drafts":{},"panel":false,"info":{}});
+        let applies = |client: u64, k: &str, p: &str, tok: &str| -> bool {
+            let viewer::LayoutOut::Ok(vo) = viewer::view_show_token(&st, "h", &idle, Some(client), "en", k, p, tok).unwrap() else { panic!() };
+            vo.patch.as_object().is_some_and(|o| !o.is_empty())
+        };
+        // once per session; another session applies the same broadcast once too
+        let tok = viewer::show_push("tl", "files", "")["token"].as_str().unwrap().to_string();
+        assert!(applies(1, "files", "", &tok));
+        assert!(!applies(1, "files", "", &tok), "a session applies a token once");
+        assert!(applies(2, "files", "", &tok), "another session on the thread applies the broadcast once");
+        assert!(!applies(2, "files", "", &tok));
+        // a newer show for the thread supersedes it
+        let old = viewer::show_push("tl", "browser", "")["token"].as_str().unwrap().to_string();
+        let newer = viewer::show_push("tl", "files", "")["token"].as_str().unwrap().to_string();
+        assert!(!applies(3, "browser", "", &old), "a superseded token applies nothing");
+        assert!(applies(3, "files", "", &newer));
+        // another thread's show does not supersede this one
+        let mine = viewer::show_push("tl", "files", "")["token"].as_str().unwrap().to_string();
+        let _other = viewer::show_push("tother", "files", "");
+        assert!(applies(4, "files", "", &mine));
+        // it expires: a token issued longer ago than its life applies nothing
+        let past = std::time::Instant::now().checked_sub(viewer::TOKEN_LIFE + std::time::Duration::from_secs(1)).unwrap();
+        let stale = viewer::issue_show_at_for_test("tl", "files", "", past);
+        assert!(!applies(5, "files", "", &stale), "an expired token applies nothing");
+        // bounded
+        for i in 0..400 { viewer::show_push(&format!("tb{i}"), "files", ""); }
+        assert!(viewer::shows_len_for_test() <= 128, "the token table is bounded: {}", viewer::shows_len_for_test());
     }
     struct Mine; impl Screen for Mine {
         fn name(&self) -> &'static str { "mine" }

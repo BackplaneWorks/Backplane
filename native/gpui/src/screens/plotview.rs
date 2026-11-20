@@ -658,6 +658,10 @@ pub fn state_json(v: &serde_json::Value, card: Option<&super::plot::Card>, lit: 
         "layer": layer, "layerMode": v["layerMode"],
         "selection": card.map(|c| serde_json::json!({"title": c.title, "rows": c.rows.iter().map(|r| serde_json::json!([r.0, r.1])).collect::<Vec<_>>()})),
         "lit": lit});
+    // what an agent's show is read back against: Split's panes' keys (the board it draws is the pane keyed `0|`), Files' folder and a preview's file
+    if open == "split" { state["panes"] = serde_json::json!(v["panes"].as_array().map(|ps| ps.iter().filter_map(|p| p["key"].as_str()).collect::<Vec<_>>()).unwrap_or_default()); }
+    if open == "files" { state["dir"] = serde_json::json!(v["files"]["trail"].as_array().and_then(|t| t.last()).and_then(|c| c["value"].as_str()).unwrap_or("")); }
+    if matches!(open, "image" | "pdf" | "text") { state["file"] = v["file"]["url"].clone(); }
     if v["gerbers"] == true { state["gerbers"] = serde_json::json!(true); }
     if let Some(e) = empty { state["empty"] = serde_json::json!(e); }
     state
@@ -792,6 +796,18 @@ mod tests {
         assert!(refit_needed(false, (480., 600.), 520., 930.));
         assert!(!refit_needed(false, (520., 930.), 521., 929.), "a pixel of jitter is not a change");
         assert!(!refit_needed(true, (480., 600.), 520., 930.), "a camera the person moved stays where they left it");
+    }
+    /// What the hub reads an agent's show back against: Split's pane keys, Files' folder, a preview's file.
+    #[test] fn state_json_reports_split_panes_files_folder_and_preview_file() {
+        use serde_json::json;
+        let split = state_json(&json!({"open": "split", "key": "split|/p|", "panes": [{"key": "1|/p|"}, {"key": "0|/p|/p/alt.kicad_pcb"}, {"key": "2|/p|/p/alt.kicad_pcb"}]}), None, 0);
+        assert_eq!(split["panes"], json!(["1|/p|", "0|/p|/p/alt.kicad_pcb", "2|/p|/p/alt.kicad_pcb"]));
+        let files = state_json(&json!({"open": "files", "files": {"trail": [{"label": "Project", "value": ""}, {"label": "docs", "value": "docs"}]}}), None, 0);
+        assert_eq!(files["dir"], "docs");
+        let img = state_json(&json!({"open": "image", "file": {"url": "/img?path=%2Fp%2Fa.png", "name": "a.png"}}), None, 0);
+        assert_eq!(img["file"], "/img?path=%2Fp%2Fa.png");
+        let plain = state_json(&json!({"open": "board", "key": "0|/p|"}), None, 0);
+        assert!(plain.get("panes").is_none() && plain.get("dir").is_none() && plain.get("file").is_none());
     }
     #[test] fn state_json_reports_gerbers_flag_and_empty_reason() {
         let v = serde_json::json!({"open": "board", "key": "", "gerbers": true, "empty": "No Gerber files in this project yet"});

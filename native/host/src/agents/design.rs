@@ -241,22 +241,37 @@ impl Agents {
         let shown = kc::route(path);
         let cwd = self.world().await.cwd(thread); let roots = [kc::design_root(&cwd), cwd];
         if let Some(why) = crate::present::viewer::show_refusal(kind, &shown, &roots) { return fail(&why) }
-        let before = crate::files::kicad::watch::viewer_state(thread).0;
         // the window holding the project's embedded KiCad shows another frame (the person's strip tab): its pane is brought to this one,
         // unless KiCad is busy, which the answer says (issue 1355; a kicad_edit's own push never comes here while the page holds KiCad)
         let (frame, busy) = if explicit { crate::files::kicad::follow::bring_frame(thread, &shown).await } else { (None, String::new()) };
-        let mut push = json!({"t":"view","thread":thread,"path":shown,"kind":kind});
+        // the push carries what is asked (kind and the whole source path) and a token the desktop answers with (`view-show`), so the hub applies nothing by guesswork
+        let mut push = crate::present::viewer::show_push(thread, kind, &shown);
+        let token = push["token"].as_str().unwrap_or("").to_string();
         if let Some(f) = frame { push["frame"] = json!(f) }
         self.hub.push_all(&push);
         // (the owner's windows on other machines show it too)
         { let (hub, ann) = (self.hub.clone(), json!({"thread":thread,"path":shown.clone(),"kind":kind})); tokio::spawn(async move { hub.far_announce("viewer.show", &ann).await }); }
         let note = |mut v: Value| { if !busy.is_empty() { v["kicad"] = json!(busy) } v };
         if !wait { return (true, note(json!({"shown":shown}))) }
+        // settled: the picture the client reports is, now or when it reports, exactly the page and source asked (already showing counts), in the frame
+        // brought; a show the hub refused (a KiCad dialog is open) answers with its reason instead of waiting out the time
+        let root = roots[0].clone();
+        let defaults = { let r = root.clone(); tokio::task::spawn_blocking(move || {
+            let f = crate::files::kicad::project::read(&r);
+            let set = crate::files::kicad::gerber::default_set(std::path::Path::new(&r)).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+            crate::present::viewer::ShowDefaults { pcb: f.pcb, sch: f.sch, set }
+        }).await.unwrap_or_default() };
+        let want = crate::present::viewer::show_want(kind, &shown, &root, &defaults);
+        let settled = |s: &(u64, Value)| frame.map_or(true, |f| s.1["kicadFrame"] == f) && crate::present::viewer::show_settled(&want, &s.1, &defaults);
         let mut now = crate::files::kicad::watch::viewer_state(thread);
-        // a frame brought: the read-back waits for the window's report of it (its kicadFrame), not only for any report
-        let brought = |s: &(u64, Value)| frame.map_or(true, |f| s.1["kicadFrame"] == f);
-        for _ in 0..60 { if now.0 > before && brought(&now) { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await; now = crate::files::kicad::watch::viewer_state(thread); }
-        (true, note(json!({"shown":shown,"viewer":now.1,"settled":now.0 > before})))
+        for _ in 0..60 {
+            // a refusal the desktop recorded is the answer, checked before the picture (a page that happens to match does not hide it)
+            if let crate::present::viewer::ShowOutcome::Refused(why) = crate::present::viewer::show_outcome(&token) { return (false, json!({"error": why, "shown": shown, "viewer": now.1, "settled": false})) }
+            if settled(&now) { break }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await; now = crate::files::kicad::watch::viewer_state(thread);
+        }
+        if let crate::present::viewer::ShowOutcome::Refused(why) = crate::present::viewer::show_outcome(&token) { return (false, json!({"error": why, "shown": shown, "viewer": now.1, "settled": false})) }
+        (true, note(json!({"shown":shown,"viewer":now.1,"settled":settled(&now)})))
     }
     /// The same gate for a direct write of a board or schematic (`files_write`): Err names the holder.
     pub async fn doc_gate(&self, thread: &str, doc: &str) -> Result<(), String> {
