@@ -1,6 +1,8 @@
 #!/bin/sh
 # A lease-backed hub lock, or a POSIX flock when no hub answers initially.
+# BP_LOCK_TRY=1: take it only if it is free now; held by another, exit 75 at once without running CMD (and without queueing).
 set -eu
+try=${BP_LOCK_TRY:-}
 name=${1:-}
 case "$name" in ''|*[!A-Za-z0-9_-]*) echo 'usage: bp-lock.sh NAME -- CMD ARGS...' >&2; exit 2 ;; esac
 [ ${#name} -le 64 ] || exit 2
@@ -38,17 +40,21 @@ remove_nonce() {
   rmdir "$nonce" 2>/dev/null || :
 }
 holder="pid:$$@$host:${nonce##*/}"
-body="{\"name\":\"$name\",\"holder\":\"$holder\",\"note\":\"bp-lock.sh\",\"wait\":true}"
+wait=true; [ -z "$try" ] || wait=false
+body="{\"name\":\"$name\",\"holder\":\"$holder\",\"note\":\"bp-lock.sh\",\"wait\":$wait}"
 post() { printf 'Authorization: Bearer %s\n' "$token" | curl -fsS --connect-timeout 2 --max-time 35 -H @- -H 'Content-Type: application/json' -d "$body" "$url/lock/$1"; }
 held() { printf '%s' "$1" | tr -d ' \n\r\t' | grep -q '"held":true'; }
 if ! answer=$(post acquire 2>/dev/null); then
   remove_nonce
   path="${BACKPLANE_LOCK_DIR:-/tmp}/bp-$name.lock"
-  if command -v flock >/dev/null 2>&1; then exec flock "$path" "$@"; fi
+  if command -v flock >/dev/null 2>&1; then exec flock ${try:+-n -E 75} "$path" "$@"; fi
   # macOS has flock(2), but usually no flock(1).
-  exec perl -MFcntl=:flock -e 'my $path = shift; open(my $f, ">>", $path) or die "$path: $!"; flock($f, LOCK_EX) or die "flock: $!"; $^F = fileno($f); exec @ARGV or die "exec: $!"' "$path" "$@"
+  exec perl -MFcntl=:flock -e 'my $path = shift; my $nb = shift; open(my $f, ">>", $path) or die "$path: $!"; flock($f, LOCK_EX | ($nb ? LOCK_NB : 0)) or exit 75; $^F = fileno($f); exec @ARGV or die "exec: $!"' "$path" "$try" "$@"
 fi
 case "$answer" in *'"error"'*) echo "$answer" >&2; remove_nonce; exit 1 ;; esac
+if [ -n "$try" ] && ! printf '%s' "$answer" | tr -d ' \n\r\t' | grep -q '"held":true'; then
+  post cancel >/dev/null 2>&1 || :; post release >/dev/null 2>&1 || :; remove_nonce; echo "bp-lock: $name is held by another; not waiting (BP_LOCK_TRY)" >&2; exit 75
+fi
 owner_pid=$$
 owner_stamp=$(ps -o lstart= -p "$owner_pid")
 cmd_pid= renew_pid=

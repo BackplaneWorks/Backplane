@@ -7,9 +7,9 @@
 #      tree passed it already (recorded in <git-dir>/land-tested);
 #   3b. the Windows gate, on the same tree, also BEFORE anything is pushed: scripts/land-windows.sh (LAND_WIN_TEST overrides the command) under the bp-win-gate lock
 #      (scripts/bp-lock.sh; landings queue, one gate on the VMs at a time): the hub's tests as ci.yml's windows-latest job runs them (bp-sh, then nextest with
-#      ci-hub-windows-filter.sh and --retries 1), on bp-win, else bp-winbuild; the tree goes by git push over ssh to the VM, never to GitHub. Its time is said.
+#      ci-hub-windows-filter.sh and --retries 1), on bp-win holding bp-win-ui, else bp-winbuild holding winbuild-vm (neither waited for), swept of all it made on every exit; the tree goes by git push over ssh to the VM, never to GitHub. Its time is said.
 #      Run only when what the hub's Windows tests build from or read ($win_paths below) changed against origin/main, and skipped when this tree passed it already
-#      (<git-dir>/land-tested-windows). Failed: "land: FAILED", nothing pushed. No VM up (or each within 45 min of its daily auto-shutdown): one "land: HELD" line
+#      (<git-dir>/land-tested-windows). Failed: "land: FAILED", nothing pushed. No VM free and up (or a run that would cross its daily auto-shutdown): one "land: HELD" line
 #      naming each VM tried and why, exit 4, nothing pushed. LAND_WINDOWS=skip skips it, on a person's or lead's word only: said in the output and in the PR body.
 #   4. the branch goes to origin (git push --force-with-lease: it is only ever this lane's gated tip), and its pull request is opened or the open one reused
 #      (gh pr create --fill --base main); gh always runs as i2cjak (GH_TOKEN from `gh auth token --user i2cjak`, never printed or stored), whatever account gh has active;
@@ -112,7 +112,7 @@ fix: git config user.name i2cjak && git config user.email build@amemb.com (this 
     case "$rc" in
       0) printf '%s\n' "$tree" > "$wmark"; say "Windows gate passed: $took in all, the lock's wait included";;
       75) say "held after $took: no Windows VM could run the gate (the line above names each); nothing pushed or merged"; exit 4;;
-      *) die "the Windows tests failed ($took; the output: $(git rev-parse --git-dir)/land-windows.log); nothing pushed";;
+      *) die "the Windows gate did not pass: the tests failed or it was stopped ($took; the output: $(git rev-parse --git-dir)/land-windows.log); nothing pushed";;
     esac
   fi
   sha=$(git rev-parse HEAD)
