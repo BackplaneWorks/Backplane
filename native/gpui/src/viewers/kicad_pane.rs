@@ -79,6 +79,36 @@ fn press_in_backplane(w: u64) -> bool {
     #[cfg(not(target_os = "macos"))]
     { nc::button_over(w) == Some(false) }
 }
+/// #1362: the pane's hand-in state, driven at the pane's own call sites (the hand-in, the keys poll, the hub's info, the person's
+/// hand-back), so the sequence a run logs can be replayed through it in a test.
+#[derive(Debug, Default, Clone)]
+pub struct HandIn {
+    /// The frame last placed on show, kept across a re-placement (`placed` is reset when KiCad's frame set changes)
+    last_show: Option<u64>,
+    /// The person's last hand-in still waits for KiCad's confirmation (the hub's trusted `focused`)
+    unconfirmed: bool,
+}
+impl HandIn {
+    /// A placement of `show` (None: nothing on show): whether it hands KiCad the keyboard (reshow_focus); it is recorded
+    pub fn placement(&mut self, show: Option<u64>, person_chose: bool, kicad_active_now: bool, press_in_backplane: bool) -> bool {
+        let same_frame = show.is_some() && show == self.last_show;
+        let hand_in = show.is_some() && reshow_focus(person_chose, same_frame, self.unconfirmed, kicad_active_now, press_in_backplane);
+        if show.is_some() { self.last_show = show; }
+        hand_in
+    }
+    /// A hand-in was sent: the person's own (Edit, a tab, the rail's page) waits for KiCad's word
+    pub fn handed_in(&mut self, person_chose: bool) { if person_chose { self.unconfirmed = true; } }
+    /// The keys poll saw the keyboard move (`has`: KiCad's). Nothing changes: right after a yield the poll reads Backplane still active
+    /// while KiCad activates (bp.13.2: false, then true, before KiCad's frame is key), which is no departure of the person's; clearing
+    /// here dropped the repair hand-in (169b07e110)
+    pub fn keys_flip(&mut self, _has: bool) {}
+    /// The hub's `focused` (KiCad's word, only from a runtime with embed-key-on-activate): confirmed when it names a frame
+    pub fn kicad_said(&mut self, focused: u64) { if focused != 0 { self.unconfirmed = false; } }
+    /// The person took the keyboard back to Backplane themselves (Escape, a key the client handles): nothing waits for them any more
+    pub fn person_left(&mut self) { self.unconfirmed = false; }
+    /// A new KiCad: nothing on show, nothing waiting
+    pub fn new_kicad(&mut self) { *self = HandIn::default(); }
+}
 
 fn is_abs_path(s: &str) -> bool {
     s.starts_with('/') || s.starts_with('\\')
@@ -500,7 +530,7 @@ pub struct KicadPane {
     mac_hot: Option<std::time::Instant>, mac_seen: (bool, Option<u64>), mac_pressed: bool, mac_looked: Option<std::time::Instant>,
     /// #1362: the frame last placed on show, kept across a re-placement (`placed` is reset when KiCad's frame set changes), and whether
     /// the person's last hand-in still waits for KiCad's confirmation (the hub's `focused`, KiCad's ET_FOCUS_IN): reshow_focus
-    last_show: Option<u64>, handin_unconfirmed: bool,
+    handin: HandIn,
     /// the .kicad_pro the hub resolved this pane's project to (its attach reply), "" until then
     pub bound: String,
     pub project: String, pub root: String, pub project_id: String, pub open: String, last_hub_open: String, hub: tokio::sync::mpsc::Sender<Command>,
@@ -660,7 +690,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, last_show: None, handin_unconfirmed: false, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None,
+        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, handin: HandIn::default(), busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
@@ -690,12 +720,12 @@ impl KicadPane {
         }
         if info["pid"] != self.info["pid"] {
             let had_pid = !self.info["pid"].is_null();
-            self.poked = None; self.unmapped_since = None; self.kept = 0; self.placed = None; self.last_show = None; self.handin_unconfirmed = false; if had_pid || self.override_kind.as_deref() != Some(SIM) { self.override_kind = None; } cause = format!("hub info: KiCad pid {} -> {}", self.info["pid"], info["pid"]); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
+            self.poked = None; self.unmapped_since = None; self.kept = 0; self.placed = None; self.handin.new_kicad(); if had_pid || self.override_kind.as_deref() != Some(SIM) { self.override_kind = None; } cause = format!("hub info: KiCad pid {} -> {}", self.info["pid"], info["pid"]); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
             if had_pid { self.pending_show = None; }
         }
         if matches!(info["state"].as_str(), Some("failed" | "stopped")) { self.pending_show = None; }
         // KiCad says a frame of it has the keyboard (ET_FOCUS_IN): the person's hand-in got across (#1362)
-        if info["focused"].as_u64().unwrap_or(0) != 0 { self.handin_unconfirmed = false; }
+        self.handin.kicad_said(info["focused"].as_u64().unwrap_or(0));
         // macOS: a KiCad that became ready, or another one (a restart), has not had this pane's rect: pushed again on the next frame
         if info["state"] != self.info["state"] || info["pid"] != self.info["pid"] { self.host_sent = None; }
         #[cfg(target_os = "macos")]
@@ -1170,21 +1200,21 @@ impl KicadPane {
         if has != self.keys && std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
             eprintln!("GPUI_LOG {}", json!({"kicad_keys_flip": {"to": has, "in_dialog": in_dialog, "has_focus": nc::has_focus(c), "why": nc::focus_debug(c)}}));
         }
-        if has != self.keys { self.keys = has; nc::grab_escape(self.toplevel, has); self.grab_click(c, !has); if has { self.touched(); } else { self.handin_unconfirmed = false; } cx.notify(); }
+        if has != self.keys { self.keys = has; nc::grab_escape(self.toplevel, has); self.grab_click(c, !has); if has { self.touched(); } self.handin.keys_flip(has); cx.notify(); }
         if let Some(h) = self.info["holder"].as_u64().filter(|h| *h > 0 && *h != self.kept) { nc::keep(h); self.kept = h; }
         for e in nc::events() {
             // what reached Backplane from the editor (the e2e reads it: one click in KiCad, then a reserved chord, must arrive)
             eprintln!("GPUI_LOG {}", json!({"kicad_ev": match &e { nc::Ev::Escape => "escape".to_string(), nc::Ev::Click => "click".to_string(), nc::Ev::ShieldClick => "shield click".to_string(), nc::Ev::Key(k) => format!("key {k}"), nc::Ev::Focus(w) => format!("focus {w}") }}));
             match e {
                 // the keyboard back to the client's window; a reserved chord is then pressed in gpui (after_frame, which has the window)
-                nc::Ev::Escape => { self.refocus = None; nc::hand_back(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true); cx.notify(); }
+                nc::Ev::Escape => { self.handin.person_left(); self.refocus = None; nc::hand_back(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true); cx.notify(); }
                 nc::Ev::Click => { if let Some(w) = self.want() { self.grab_click(c, false); nc::focus(w); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } }
                 // the shield did the hand-in itself and replays the press: the state only (no second focus call landing
                 // after the replayed press, which closed a right click's menu before it opened)
                 nc::Ev::ShieldClick => { if self.want().is_some() { self.grab_click(c, false); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } }
                 // Ctrl+Tab / Ctrl+Shift+Tab pressed in KiCad: the next editor tab, and KiCad keeps the keyboard
                 nc::Ev::Key(k) if k == "ctrl-tab" || k == "ctrl-shift-tab" => { let have: Vec<String> = self.info["frames"].as_array().into_iter().flatten().filter_map(|f| f["kind"].as_str().map(String::from)).collect(); let to = next_open_tab(self.wanted_kind(), if k == "ctrl-tab" { 1 } else { -1 }, &have); self.show_kind_by(to, &format!("host shortcut {k} (KiCad key hook)"), cx); } // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
-                nc::Ev::Key(k) => { eprintln!("GPUI_LOG {}", json!({"kicad_key": k, "at_ms": crate::screens::kcomment::epoch_ms() as u64})); self.refocus = None; nc::hand_back(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true);
+                nc::Ev::Key(k) => { eprintln!("GPUI_LOG {}", json!({"kicad_key": k, "at_ms": crate::screens::kcomment::epoch_ms() as u64})); self.handin.person_left(); self.refocus = None; nc::hand_back(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true);
                     // the comment chord (and bp.13's ';', KiCad's own comment key) opens the window now, from this event (no keystroke round trip through the next frame)
                     // the comment chord and the management panels' keys are acted on here, from the event: replayed as a keystroke after a
                     // comment window had the keyboard they reached no action (gpui's dispatch in this window found none), so they go by name
@@ -1335,13 +1365,12 @@ impl KicadPane {
         let kicad_dialog_has_keys = self.info["mode"] == "fork" && nc::focus_in_pid(self.info["pid"].as_u64().unwrap_or(0) as u32) && !nc::has_focus(c);
         // #1362: read now, not from what the pane noted: the person's choice, or KiCad active with no press in Backplane (the same frame
         // re-placed only while the person's hand-in is unconfirmed). Windows: has_focus misses a frame's child with the keys (as the poll)
-        let same_frame = show.is_some() && show == self.last_show;
         let kicad_now = nc::has_focus(c) || (cfg!(windows) && self.keys && !nc::keys_really_backplanes(c));
-        let hand_in = show.is_some_and(|w| reshow_focus(self.want_keys, same_frame, self.handin_unconfirmed, kicad_now, press_in_backplane(w)));
-        if show.is_some() { self.last_show = show; }
+        let press = show.is_some_and(press_in_backplane);
+        let hand_in = self.handin.placement(show, self.want_keys, kicad_now, press);
         if (self.keys || self.want_keys) && show != prev_show && !kicad_dialog_has_keys && hand_in {
             if let Some(w) = show {
-                if self.want_keys { self.handin_unconfirmed = true; }
+                self.handin.handed_in(self.want_keys);
                 if self.want_keys && nc::button_over(w) == Some(false) { self.press_gave_keys = true; }
                 #[cfg(not(target_os = "macos"))]
                 nc::focus(w);
@@ -1356,7 +1385,7 @@ impl KicadPane {
         } else if self.want_keys && show.is_some() && show == prev_show {
             // already on show (Full size, the tab of the editor shown): the keyboard to it now
             let w = show.unwrap();
-            self.handin_unconfirmed = true;
+            self.handin.handed_in(true);
             if nc::button_over(w) == Some(false) { self.press_gave_keys = true; }
             #[cfg(not(target_os = "macos"))]
             nc::focus(w);
@@ -1954,6 +1983,34 @@ mod tests {
         assert_eq!(super::rail_simulation(&v, true).as_deref(), Some("SIMULATOR")); assert_eq!(super::rail_simulation(&v, false), None); assert_eq!(super::rail_simulation(&serde_json::json!({"open": "schematic"}), true), None);
         // closed in KiCad: back to View, whatever else is open
         assert_eq!(super::after_close("SIMULATOR", "SCH", &serde_json::json!({"frames": [{"kind": "SCH"}]})), None); assert_eq!(super::after_close("GERBVIEW", "PCB", &serde_json::json!({"frames": [{"kind": "PCB"}]})).as_deref(), Some("PCB")); assert_eq!(super::next_tab("?", 1), "SCH");
+    }
+    /// #1362, replayed from the #1198 lane's and Lane M's plain bp.13.2 runs at 169b07e110 (f1368-default-1 client.log l.1016-1039):
+    /// Edit's hand-in (yield gen 1), the keys poll's transient false then true while KiCad activates, no `focused` (no capability),
+    /// frames 1 -> 2 and the re-placement of the same frame: the repair hand-in (gen 2) must go out, as main's did.
+    #[test] fn bp13_2_edit_then_the_frames_change_hands_in_again_while_kicad_has_not_confirmed() {
+        use super::HandIn;
+        let board = Some(7632);
+        let mut h = HandIn::default();
+        // Edit: the person's own placement of the board (Backplane still active at the yield)
+        assert!(h.placement(board, true, false, false), "Edit's hand-in");
+        h.handed_in(true);
+        // the keys poll: Backplane still active for a moment, then KiCad (l.1021, l.1024); the hub's info has no `focused`
+        h.keys_flip(false); h.kicad_said(0); h.keys_flip(true); h.kicad_said(0);
+        // frames 1 -> 2 (l.1039): `placed` reset, the same frame placed again, KiCad active, no press in Backplane
+        assert!(h.placement(board, false, true, false), "the repair hand-in (gen 2) goes out while KiCad has not confirmed the keyboard");
+        // with the capability KiCad's word comes after Edit's show: the same re-placement then hands in nothing (the race closed)
+        let mut h = HandIn::default();
+        assert!(h.placement(board, true, false, false)); h.handed_in(true);
+        h.keys_flip(false); h.keys_flip(true); h.kicad_said(7632);
+        assert!(!h.placement(board, false, true, false), "confirmed: no hand-in on the same frame");
+        // the person took the keyboard back themselves (Escape): no hand-in either
+        let mut h = HandIn::default();
+        assert!(h.placement(board, true, false, false)); h.handed_in(true); h.person_left();
+        assert!(!h.placement(board, false, true, false));
+        // a new KiCad: nothing waits, and its frame is another frame
+        let mut h = HandIn::default();
+        assert!(h.placement(board, true, false, false)); h.handed_in(true); h.new_kicad();
+        assert!(h.placement(Some(9000), false, true, false), "a new KiCad's frame: KiCad active, no press");
     }
     #[test] fn a_reshow_hands_in_the_keyboard_as_read_at_send_time() {
         use super::reshow_focus;
