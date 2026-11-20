@@ -749,10 +749,17 @@ pub fn rail_sources(root: &str) -> RailSources {
     rail_sources_for(root, "", "", "", "")
 }
 
+// A history watch names a render request. The selected working document still
+// supplies the rail, management panels and embedded-editor availability.
+fn working_file(file: &str) -> &str {
+    if file.starts_with("git\t") || file.starts_with("diff\n") { "" } else { file }
+}
+
 fn rail_sources_for(root: &str, selected: &str, kind: &str, file: &str, sheet: &str) -> RailSources {
     use std::path::Path;
     if root.is_empty() { return RailSources::default(); }
     let files = crate::files::kicad::project::read(root);
+    let file = working_file(file);
     let board_path = if matches!(kind,"board"|"3d") && !file.is_empty() { file } else if selected.is_empty() { &files.pcb } else { selected };
     let root_sheet = if selected.is_empty() || files.sch.to_ascii_lowercase().ends_with(".schdoc") {
         files.sch.clone()
@@ -855,7 +862,7 @@ fn header_identity(st: &State, session: &Value, viewer: &Value, root: &str, rail
     if page.is_empty() { return Value::Null }
     let far = sel.contains('~');
     let draft = |key: &str| s(&session["drafts"],&format!("{key}:{sel}"));
-    let file = draft("@view.file");
+    let file = working_file(draft("@view.file"));
     let sheet = draft("@view.sheet");
     let selected = chosen_board(&session["drafts"], sel, &root);
     let context = super::identity_context::facts(st, session, sel, &rail.docs);
