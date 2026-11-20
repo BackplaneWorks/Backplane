@@ -539,7 +539,7 @@ pub struct KicadPane {
     mac_raise: RaiseState, mac_buried: bool, mac_watching: bool,
     /// macOS: until when the watch looks every frame's time (a push, a re-order, an activation or a press of ours just happened), and
     /// what was last seen, to tell a change (our window key, the frame on show)
-    mac_hot: Option<std::time::Instant>, mac_seen: (bool, Option<u64>), mac_pressed: bool, mac_looked: Option<std::time::Instant>,
+    mac_hot: Option<std::time::Instant>, mac_seen: (bool, Option<u64>), mac_pressed: bool, mac_press: Option<u64>, mac_looked: Option<std::time::Instant>,
     /// the .kicad_pro the hub resolved this pane's project to (its attach reply), "" until then
     pub bound: String,
     pub project: String, pub root: String, pub project_id: String, pub open: String, last_hub_open: String, hub: tokio::sync::mpsc::Sender<Command>,
@@ -644,6 +644,14 @@ pub fn opening_wants_keys(why: ShowBy) -> bool { why.takes_keys() }
 /// KiCad dialog has them; the frame already on show gets it only when the pane wants the keys (Full size, the tab of the editor shown).
 pub fn hand_in_now(keys: bool, want_keys: bool, show: Option<u64>, prev_show: Option<u64>, dialog_has_keys: bool) -> bool {
     show.is_some() && if show != prev_show { (keys || want_keys) && !dialog_has_keys } else { want_keys }
+}
+/// macOS (#1198): whether a press of the person's hands the keyboard to KiCad's frame. Only when the window the press hit is the pane's
+/// frame on show (not another app's window or a sheet of ours lying over that area), Backplane is the active app while KiCad is not
+/// (macOS 15, where the click alone does not activate KiCad; on 26.5 KiCad is already active by then), nothing of Backplane's is drawn
+/// over the pane, no dialog or lock question is up, and the pane is not leaving (View, another thread: its frame's last frames on screen).
+/// Read at the button's down edge (what was hit) and again at its up edge (the click over: a held right click keeps its menu open).
+pub fn press_hands_in(hit_frame: bool, backplane_active: bool, kicad_active: bool, covered: bool, dialog: bool, leaving: bool) -> bool {
+    hit_frame && backplane_active && !kicad_active && !covered && !dialog && !leaving
 }
 /// macOS: whether the pointer (global points from the top left, `nc::pointer_global`) is over the pane's rect as pushed to KiCad
 /// (`host_sent`, the same coordinates), edges included.
@@ -754,7 +762,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None,
+        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_press: None, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, remounts: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, generation: None, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
@@ -1656,6 +1664,8 @@ impl KicadPane {
             }
         }
         let pressed = nc::mouse_down();
+        if pressed && !self.mac_pressed { self.mac_press = self.mac_press_target(true); }
+        if !pressed && self.mac_pressed { self.mac_press_up(); }
         if pressed != self.mac_pressed { self.mac_pressed = pressed; self.mac_heat(); }
         let hot = self.mac_hot.is_some_and(|t| t > std::time::Instant::now());
         // the list itself is read at raise_watch_ms' pace; between its looks only the button is
@@ -1673,6 +1683,30 @@ impl KicadPane {
             else if self.mac_order(show, visible, "watch") { cx.notify(); } // i18n-ok: a log word
         }
         33
+    }
+    /// macOS 15 (#1198): a press of the person's on KiCad's frame while Backplane is the active app. macOS 15 does not activate KiCad on
+    /// that mouse-down (26.5 does), and KiCad's own activate from its click (TakeFocusForClick) is refused unless the active app has
+    /// yielded to it: after Cmd+H with Backplane focused and the unhide, the click selected nothing and the keyboard stayed with Backplane
+    /// (e2e-macos 44735548017, b6's package; KiCad's trace: NSApp.active 0 a run-loop turn and 250 ms after the click). The press is the
+    /// person's choice of KiCad (as `chose` reads it for an automatic pane): what it hit is read at the button's down edge, and the
+    /// keyboard goes to the frame the usual way (nc::focus: yield, then activate) at its up edge, once the click is over (a held right
+    /// click's menu stays open, a drag is not cut). No advance yield: an automatic attach, a re-show or typing in Backplane hand nothing in.
+    #[cfg(target_os = "macos")]
+    fn mac_press_target(&self, at_down: bool) -> Option<u64> {
+        let (Some(c), Some((.., sent_visible))) = (self.container, self.host_sent) else { return None };
+        let f = self.want()?;
+        let dialog = self.seen_info()["dialogs"].as_array().is_some_and(|d| !d.is_empty());
+        let hit = !at_down || nc::window_at_pointer() == f;
+        let leaving = !self.in_page || !sent_visible;
+        press_hands_in(hit, nc::self_active(), nc::has_focus(c), self.mac_covered || lock_asked(&self.info), dialog, leaving).then_some(f)
+    }
+    #[cfg(target_os = "macos")]
+    fn mac_press_up(&mut self) {
+        let Some(f) = self.mac_press.take() else { return };
+        if self.mac_press_target(false) != Some(f) { return }
+        self.chose("a press over the pane, macOS (KiCad's own window)"); // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+        eprintln!("GPUI_LOG {}", json!({"kicad_mac_press_hand_in": {"frame": f, "at_ms": crate::screens::kcomment::epoch_ms() as u64}}));
+        nc::focus(f);
     }
     /// Back to the viewer: the editor's windows leave the pane (KiCad stays warm in the hub).
     pub fn detach(&mut self) {
@@ -1870,6 +1904,24 @@ mod tests {
         assert!(!pointer_over((429.0, 400.0), pane) && !pointer_over((600.0, 676.0), pane), "outside");
         assert!(!pointer_over((200.0, 900.0), pane), "the composer, left and below the pane");
         assert!(!pointer_over((0.0, 0.0), (0, 0, 0, 0)), "no rect pushed yet");
+    }
+    /// macOS 15 (#1198): a press hands KiCad the keyboard only when it hit KiCad's frame with Backplane active and KiCad not, nothing
+    /// drawn over the pane, no dialog, and the pane not leaving.
+    #[test] fn only_the_persons_press_on_kicads_frame_with_backplane_active_hands_kicad_the_keys() {
+        use super::press_hands_in;
+        // #1198 (macOS 15): a press that hit KiCad's frame while Backplane is active and KiCad is not hands in
+        assert!(press_hands_in(true, true, false, false, false, false));
+        // a press that hit anything else (the composer, Backplane's own window, another app's window over the pane's area) never does
+        assert!(!press_hands_in(false, true, false, false, false, false));
+        // KiCad already active (26.5 activates it on the mouse-down; or it had the keys): nothing to do
+        assert!(!press_hands_in(true, true, true, false, false, false));
+        // Backplane not the active app (another app in front): not ours to hand over
+        assert!(!press_hands_in(true, false, false, false, false, false));
+        // Backplane drawing over the pane (a sheet, the palette, a lock question), or a dialog up: never
+        assert!(!press_hands_in(true, true, false, true, false, false));
+        assert!(!press_hands_in(true, true, false, false, true, false));
+        // the pane leaving (View, a thread switch: the frame's last frames on screen): never brings KiCad back with the keyboard
+        assert!(!press_hands_in(true, true, false, false, false, true));
     }
     /// PR B: an automatic pane's attach, show and pre-warm say `auto` (the hub keeps them from counting as the person's); a deliberate
     /// pane's never do, nor its other requests

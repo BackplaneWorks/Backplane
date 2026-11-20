@@ -120,6 +120,19 @@ pub fn pointer_global() -> Option<(f64, f64)> {
 /// Seconds since the last left or right mouse press anywhere, by the window server's count (kCGEventSourceStateCombinedSessionState):
 /// a press in KiCad's own window, which the client never hears of, counts too
 pub fn secs_since_press() -> f64 { unsafe { CGEventSourceSecondsSinceLastEventType(0, 1).min(CGEventSourceSecondsSinceLastEventType(0, 3)) } }
+/// Backplane itself is the active app (macOS 14+ cooperative activation: only the active app may hand activation to another).
+pub fn self_active() -> bool { unsafe { send_bool(app(), c"isActive") } }
+/// The window on top at the pointer, across every app (NSWindow windowNumberAtPoint:belowWindowWithWindowNumber:, the pointer from
+/// NSEvent mouseLocation, both in the screen's bottom-left points), 0 when none: whether a press over the pane hit KiCad's frame or a
+/// window lying over that area (another app's, a sheet of ours) (#1198)
+pub fn window_at_pointer() -> u64 {
+    unsafe {
+        let loc: unsafe extern "C" fn(*mut c_void, *mut c_void) -> CgPoint = std::mem::transmute(objc_msgSend as *const ());
+        let p = loc(class(c"NSEvent"), sel(c"mouseLocation")); // i18n-ok: an Objective-C class name
+        let at: unsafe extern "C" fn(*mut c_void, *mut c_void, CgPoint, isize) -> isize = std::mem::transmute(objc_msgSend as *const ());
+        at(class(c"NSWindow"), sel(c"windowNumberAtPoint:belowWindowWithWindowNumber:"), p, 0).max(0) as u64 // i18n-ok: an Objective-C class name
+    }
+}
 /// A mouse button is down (anywhere): a press on our window brings it in front of KiCad's frame before we hear of it, if we ever do.
 pub fn mouse_down() -> bool { unsafe { send_usize(class(c"NSEvent"), c"pressedMouseButtons") != 0 } } // i18n-ok: an Objective-C class name
 /// For a log line: the on-screen normal windows front to back as (number, whose), ours `u`, the frame `f`, KiCad's other windows `k`,
