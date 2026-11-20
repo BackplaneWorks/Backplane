@@ -86,6 +86,9 @@ pub struct Session {
     /// macOS (`embed-reserved-key-event`): the reserved chords pressed in KiCad (ET_RESERVED_KEY), the last 8 as [seq, index in
     /// SetReservedKeys or 63 for the comment key]; elsewhere they reach the client's window directly (_BACKPLANE_KEY / WM_APP)
     pub keys: Vec<(u64, u64)>,
+    /// The frame window of KiCad's last ET_FOCUS_IN (its `focused`: on macOS the app active, the frame key and wx's focus inside it),
+    /// 0 after ET_FOCUS_OUT or none yet: whether KiCad has the keyboard, confirmed by KiCad (#1362: the client's hand-in rule)
+    pub focused: u64,
     /// KiCad's resident memory, MB (Linux, sampled on the health tick; 0 unknown): the warm policy's measure of what a KiCad costs
     pub rss_mb: u64,
     /// a request of the hub's drive (a show, a pre-warm) waits on KiCad's check or refill task (task-gate-reads): its description, "" for none
@@ -115,7 +118,7 @@ impl Session {
             container: 0, toplevel: 0, holder: 0, display: String::new(), start_phase: String::new(), start_at: 0, lock_ask: Value::Null,
             sock: String::new(), events_sock: String::new(), sock_dir: String::new(),
             argv: String::new(), cli: String::new(), version: String::new(), desc: String::new(),
-            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], keys: vec![], rss_mb: 0, task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None),
+            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], keys: vec![], focused: 0, rss_mb: 0, task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None),
         }
     }
     pub fn spawned(mut self, pid: u32) -> Self { self.pid = pid; self }
@@ -228,6 +231,7 @@ impl Session {
             "notices": self.notices,
             "drawn": self.drawn,
             "keys": self.keys,
+            "focused": self.focused,
             "rss_mb": self.rss_mb,
             "task_wait": self.task_wait,
             "start_phase": self.start_phase, "start_at": self.start_at, "lock_ask": self.lock_ask,
@@ -1388,6 +1392,8 @@ enum Msg {
     FrameDrawn { pro: String, gen: u64, window: u64, drawn: bool },
     /// macOS: a reserved chord pressed in KiCad (ET_RESERVED_KEY), for the client (Session.keys)
     ReservedKey { pro: String, gen: u64, seq: u64, index: u64 },
+    /// KiCad's ET_FOCUS_IN (a frame's window) or ET_FOCUS_OUT (0)
+    Focused { pro: String, gen: u64, window: u64 },
     /// the person dismissed a notice in the pane
     NoticeDismiss { pro: String, id: u64 },
     ForkSync { pro: String, gen: u64 },
@@ -2337,6 +2343,12 @@ impl Actor {
                 let snap = s.clone();
                 self.publish(&snap, None);
             }
+            Msg::Focused { pro, gen, window } => {
+                let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.is_live() && s.focused != window) else { return };
+                s.focused = window;
+                let snap = s.clone();
+                self.publish(&snap, None);
+            }
             Msg::ReservedKey { pro, gen, seq, index } => {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.is_live()) else { return };
                 s.keys.push((seq, index)); if s.keys.len() > 8 { s.keys.remove(0); }
@@ -3270,6 +3282,11 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                         let window = u64_of(&ev["frame"]["window"]);
                         if window != 0 && me.send(Msg::FrameDrawn { pro: pro.clone(), gen, window, drawn: true }).is_err() { return }
                         continue
+                    }
+                    // #1362: KiCad says which frame has the keyboard (on to the handlers below, as before)
+                    if matches!(ty, "ET_FOCUS_IN" | "ET_FOCUS_OUT") || matches!(ty_n, 7 | 8) {
+                        let window = if ty == "ET_FOCUS_IN" || ty_n == 7 { u64_of(&ev["frame"]["window"]) } else { 0 };
+                        if me.send(Msg::Focused { pro: pro.clone(), gen, window }).is_err() { return }
                     }
                     if ty == "ET_RESERVED_KEY" || ty_n == 30 {
                         let (seq, index) = (u64_of(&ev["seq"]), u64_of(&ev["reserved_key"]["index"]));
