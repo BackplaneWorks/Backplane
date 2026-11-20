@@ -447,13 +447,24 @@ fn waiting(ev: &[Value]) -> Vec<String> { let mut m = std::collections::BTreeMap
 
 // ---- load: twenty agents ----
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn twenty_agents_stream_at_once_with_every_event_written_once() {
-    let sd = dir("l-bin"); perf_standin(&sd, 1);
+    // the stand-ins sleep once per message, not per tick: on Windows each process Git's sh starts costs 0.2-0.6 s under load, and the last agents'
+    // 80 ticks took up to 73 s of the 60 s this waits (the hub's part is what is measured: every event written once)
+    let sd = dir("l-bin"); script(&sd, "claude", &STANDIN.replacen("\n", "\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_SLEEP_BLOCK=1 FAKE_LOG=/dev/null\n", 1));
     let (hub, ag, _h, _w) = start("l", |w| base_log(w, 20, ""), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
     let ids: Vec<String> = (0..20).map(|i| if i == 0 { T1.to_string() } else { format!("t17000010{i:02}-{i}") }).collect();
     let t0 = Instant::now();
     for id in &ids { assert_eq!(rpc(&hub, "turn.start", json!({"thread":id,"text":"zqshort go"})).await["ok"], true) }
+    let started = t0.elapsed();
     let ev = until(&hub, from, 60, |ev| ev.iter().filter(|e| turn_is(e, "completed")).count() == 20).await;
-    assert_eq!(ev.iter().filter(|e| turn_is(e, "completed")).count(), 20, "stats {:?}", ag.stats.events);
+    // each thread's way to its end, in ms from the first event: when its turn ran, its snapshot was logged, its agent's session began, it ended
+    let at0 = ev.iter().filter_map(|e| e["at"].as_u64()).min().unwrap_or(0);
+    let path = |id: &str| -> String { ev.iter().filter(|e| e["thread"] == id || e["id"] == id).filter_map(|e| { let t = e["at"].as_u64()?.saturating_sub(at0);
+        let what = if is(e, "TurnChanged") { format!("turn {}", e["state"].as_str()?) } else if is(e, "ActivityLogged") && e["kind"] == "git" { format!("git: {}", e["summary"].as_str()?.chars().take(40).collect::<String>()) } else if is(e, "SessionSet") { "session".into() } else if is(e, "ActivityLogged") && e["tone"] == "step" { "step".into() } else if is(e, "MessagePosted") && e["role"] == "assistant" { "msg".into() } else { return None };
+        Some(format!("{t} {what}")) }).collect::<Vec<_>>().into_iter().fold(Vec::<String>::new(), |mut v, x| { let m = x.ends_with(" msg"); if m && v.len() >= 2 && v[v.len() - 1].ends_with(" msg") && v[v.len() - 2].ends_with(" msg") { *v.last_mut().unwrap() = x } else { v.push(x) } v }).join(" | ") };
+    let left: Vec<String> = ids.iter().filter(|id| !ev.iter().any(|e| turn_is(e, "completed") && e["thread"] == id.as_str())).map(|id| format!("{id}: {}", path(id))).collect();
+    let mut paths: Vec<String> = ids.iter().map(|id| path(id)).collect(); paths.sort_by_key(|p| p.rsplit(" | ").next().and_then(|l| l.split(' ').next()?.parse::<u64>().ok()).unwrap_or(0));
+    eprintln!("20 agents: turn.start x20 took {started:?}; the three last to end:\n{}", paths.iter().rev().take(3).cloned().collect::<Vec<_>>().join("\n"));
+    assert_eq!(ev.iter().filter(|e| turn_is(e, "completed")).count(), 20, "stats {:?}; turn.start x20 took {started:?}; not ended:\n{}", ag.stats.events, left.join("\n"));
     for id in &ids { let mine: Vec<&Value> = ev.iter().filter(|e| e["thread"] == id.as_str() || e["id"] == id.as_str()).collect();
         assert_eq!(mine.iter().filter(|e| is(e, "MessagePosted") && e["role"] == "assistant").count(), 16, "{id}"); // 80 ticks / 5 per message
         assert_eq!(mine.iter().filter(|e| is(e, "SessionSet")).count(), 1); }
