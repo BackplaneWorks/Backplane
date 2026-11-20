@@ -3636,6 +3636,11 @@ impl Window {
             .unwrap_or_else(|| action.name().to_string())
     }
 
+    /// Deliver synthetic input through the normal event handlers.
+    pub fn dispatch_script_input(&mut self, event: PlatformInput, cx: &mut App) {
+        self.dispatch_event(event, cx);
+    }
+
     /// Dispatch a mouse or keyboard event on the window.
     #[profiling::function]
     pub fn dispatch_event(&mut self, event: PlatformInput, cx: &mut App) -> DispatchEventResult {

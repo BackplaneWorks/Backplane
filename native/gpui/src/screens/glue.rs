@@ -257,6 +257,9 @@ impl Backplane {
     }
     /// A picture was applied: the drafts, the asks' boxes and the settings fields follow what the hub just drew.
     pub(crate) fn picture_applied(&mut self, cx: &mut Context<Self>) {
+        let thread = &self.data["thread"];
+        self.screens.plots.sync(thread["id"].as_str().unwrap_or(""), thread["viewer"]["open"] == "split");
+        self.sync_solid_slot();
         self.draft_from_hub(cx);
         // the pressed rail kind gives way when the hub marks it (or after PRESS_WAIT): a streamed picture arriving first does not flicker it back
         if let Some(p) = self.screens.rail_pending.clone() {
@@ -278,19 +281,45 @@ impl Backplane {
         let open = super::settings::is_open(self);
         if open != self.screens.settings_was_open { self.screens.settings_was_open = open; if open { self.screens.focus_settings = true; } else { self.want_focus = true; } }
     }
+    fn sync_solid_slot(&mut self) {
+        let thread = &self.data["thread"];
+        let viewer = &thread["viewer"];
+        let slot = match (thread["id"].as_str(), viewer["open"].as_str()) {
+            (Some(owner), Some(open @ ("3d" | "mech" | "split"))) if !thread["diff"].is_object() => {
+                let (id, source) = if open == "split" { ("3d", &viewer["panes"][2]["key"]) } else { ("main", &viewer["key"]) };
+                source.as_str().filter(|key| !key.is_empty()).map(|key| ((owner.to_owned(), id.to_owned()), key.to_owned()))
+            }
+            _ => None,
+        };
+        if self.screens.solid_slot != slot {
+            if let Some((old, _)) = self.screens.solid_slot.take() {
+                if let Some(page) = self.screens.solids.remove(&old) { self.screens.retired_solids.push(page); }
+            }
+            self.screens.solid_slot = slot;
+        }
+    }
+
     /// A plot-lane frame arrived on the socket: a solid (3D) frame goes to the 3D page, anything else to the plot store.
     pub(crate) fn plot_received(&mut self, bytes: Vec<u8>, cx: &mut Context<Self>) {
-        if self.screens.solid.is_none() {
+        let key = crate::viewers::solid::peek_key(&bytes);
+        if !key.as_deref().is_some_and(crate::viewers::solid::is_solid_key) {
+            if let Err(e) = self.screens.plot.receive(&bytes) { eprintln!("GPUI_LOG {{\"plot\":\"{e}\"}}"); }
+            return;
+        }
+        let Some((slot, source)) = &self.screens.solid_slot else { return };
+        if key.as_ref() != Some(source) { return }
+        let slot = slot.clone();
+        if !self.screens.solids.contains_key(&slot) {
             let page = cx.new(crate::viewers::solid::SolidPage::new);
             let back = self.local.viewer_backdrop(self.light()); page.update(cx, |p, _| p.set_backdrop(back));
             // the page's Retry: routed through the presenter's `"retry"` action (preserves Split, board/sheet and far `on`); throttled by 1 s client cooldown, error stays until next frame
-            cx.subscribe(&page, |this, _, ev: &crate::viewers::solid::SolidEvent, cx| match ev {
+            cx.subscribe(&page, |this, sender, ev: &crate::viewers::solid::SolidEvent, cx| match ev {
                 crate::viewers::solid::SolidEvent::Retry(_) => {
                     let now = std::time::Instant::now();
-                    if !super::panestate::retry_ready(this.screens.plotview.last_retry, now) { return }
+                    if !super::panestate::retry_ready(this.screens.plots[0].last_retry, now) { return }
                     if this.tx.try_send(Command::Action("view".into(), "retry".into())).is_ok() {
-                        this.screens.plotview.last_retry = Some(now);
-                        if let Some(s) = this.screens.solid.clone() { s.update(cx, |p, cx| p.retry_sent(cx)); }
+                        this.screens.plots[0].last_retry = Some(now);
+                        sender.update(cx, |p, cx| p.retry_sent(cx));
                     }
                 }
                 // zoomed in on a STEP: its solids there meshed finer by the hub, the model replaced when they are
@@ -298,12 +327,10 @@ impl Backplane {
                 // a part clicked on the board's model: the board's probe, lit on the schematic and the board as a tap there is
                 crate::viewers::solid::SolidEvent::Pick(r) => super::plotview::probe_part(this, r),
             }).detach();
-            self.screens.solid = Some(page);
+            self.screens.solids.insert(slot.clone(), page);
         }
-        let solid = self.screens.solid.clone().unwrap();
-        if let Some(k) = crate::viewers::solid::peek_key(&bytes) { eprintln!("GPUI_LOG {{\"plot_frame\":{{\"key\":{},\"bytes\":{}}}}}", serde_json::Value::String(k), bytes.len()); }
-        let Some(bytes) = solid.update(cx, |p, _| p.accept(bytes)) else { cx.notify(); return };
-        if let Err(e) = self.screens.plot.receive(&bytes) { eprintln!("GPUI_LOG {{\"plot\":\"{e}\"}}"); }
+        self.screens.solids[&slot].update(cx, |p, _| { p.accept(bytes); });
+        cx.notify();
     }
     /// The Browser page exists while the Browser kind is open (one per thread, polling only while shown); the owner is `browser_owner` (the bot's id on a bot's screen, else the thread).
     pub(crate) fn browser_page(&mut self, cx: &mut Context<Self>) {

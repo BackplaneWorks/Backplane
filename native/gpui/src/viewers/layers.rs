@@ -61,14 +61,14 @@ pub fn strip_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, key: &str, 
     let head = crate::screens::viewer::tall(div().id("layers-btn").px_2().text_size(crate::scale::tpx(12.))).cursor_pointer().border_1().border_color(c(if s.mode > 0 || open { "accent" } else { "line" })).when(open, |d| d.bg(c("panel"))).bg(c("raise")).when(s.mode > 0, |d| d.text_color(c("accent"))).child(trs(&s.head))
         .tooltip(crate::keys::tip(&trs("Layers: others as they are, dimmed, hidden"), key, light))
         // a press outside the open panel shut it already when that press was on this button: it stays shut (screens/popover.rs)
-        .on_click(cx.listener(|this, _, _, cx| { let pv = &mut this.screens.plotview; if !pv.layers_open && crate::screens::popover::just_shut("layers") { return } pv.layers_open = !pv.layers_open; cx.notify(); }));
+        .on_click(cx.listener(|this, _, _, cx| { let pv = &mut this.screens.plots[0]; if !pv.layers_open && crate::screens::popover::just_shut("layers") { return } pv.layers_open = !pv.layers_open; cx.notify(); }));
     head.into_any_element()
 }
 
 /// Escape while the Layers panel is open shuts it (main.rs's ClosePopup). True when it took the key.
 pub fn escape(this: &mut Backplane, cx: &mut Context<Backplane>) -> bool {
-    if !this.screens.plotview.layers_open { return false }
-    this.screens.plotview.layers_open = false; cx.notify(); true
+    if !this.screens.plots[0].layers_open { return false }
+    this.screens.plots[0].layers_open = false; cx.notify(); true
 }
 /// The open Layers panel: absolute over the canvas (the button row keeps its height, so the canvas never jumps), its own scroll past `max_h`.
 pub fn panel_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, open: bool, cap: f32, scroll: &ScrollHandle) -> Option<AnyElement> {
@@ -78,7 +78,7 @@ pub fn panel_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, open: bool,
     let mh: Length = if cap > 0. { px(cap).into() } else { relative(0.96).into() };
     let mut panel = div().id("layers-panel").absolute().top(px(4.)).left(px(12.)).max_h(mh).overflow_y_scroll().track_scroll(scroll).flex().flex_col().gap_1().p_2().border_1().border_color(c("line")).bg(c("panel")).occlude()
         // a press outside shuts it (presses inside keep it open, so several layers can be turned in a row); Escape shuts it too (`escape`)
-        .on_mouse_down_out(cx.listener(|this, _, _, cx| { this.screens.plotview.layers_open = false; crate::screens::popover::shut("layers"); cx.notify(); }));
+        .on_mouse_down_out(cx.listener(|this, _, _, cx| { this.screens.plots[0].layers_open = false; crate::screens::popover::shut("layers"); cx.notify(); }));
     if s.modes {
         let present = s.present;
         /* i18n-ok: drawn through trs */ panel = panel.child(div().flex().gap_1().children(["All", "Dim", "Only"].iter().enumerate().map(|(i, label)| {

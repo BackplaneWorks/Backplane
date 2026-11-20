@@ -12,7 +12,42 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<name>","settle":"<kind>"?,"timeout_ms":N?}: wait until settled (if requested) and painted, emit shot-ready, wait for <BACKPLANE_GPUI_SHOT_DIR>/<name>.done */ Shot { name: String, settle: Option<String>, timeout_ms: u64 }, /** {"wait_settled":"<kind>","tag":"<tag>","timeout_ms":N?}: wait until the page settles and emit a `settled` metric with its viewer state */ WaitSettled { kind: String, tag: String, timeout_ms: u64 }, Fit, Unsupported(String) }
+/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Drag(Drag), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<name>","settle":"<kind>"?,"timeout_ms":N?}: wait until settled (if requested) and painted, emit shot-ready, wait for <BACKPLANE_GPUI_SHOT_DIR>/<name>.done */ Shot { name: String, settle: Option<String>, timeout_ms: u64 }, /** {"wait_settled":"<kind>","tag":"<tag>","timeout_ms":N?}: wait until the page settles and emit a `settled` metric with its viewer state */ WaitSettled { kind: String, tag: String, timeout_ms: u64 }, Fit, Unsupported(String) }
+/// Script coordinates use physical window pixels, as do the painted control rectangles.
+#[derive(Clone, Debug)]
+pub struct Drag { from: DragStart, to: [f32; 2], moves: usize }
+
+#[derive(Clone, Debug)]
+enum DragStart { Control(String), Point([f32; 2]) }
+
+impl Drag {
+    fn parse(value: &Value) -> Option<Self> {
+        fn point(value: &Value) -> Option<[f32; 2]> {
+            let xy: [f32; 2] = serde_json::from_value(value.clone()).ok()?;
+            xy.iter().all(|v| v.is_finite()).then_some(xy)
+        }
+        let from = match value["from"].as_str() {
+            Some(id) => DragStart::Control(id.to_owned()),
+            None => DragStart::Point(point(&value["from"])?),
+        };
+        let moves = value.get("moves").map_or(Some(8), Value::as_u64)?;
+        (2..=120).contains(&moves).then_some(Self { from, to: point(&value["to"])?, moves: moves as usize })
+    }
+
+    fn events(&self, start: [f32; 2], scale: f32) -> Vec<PlatformInput> {
+        let at = |xy: [f32; 2]| point(px(xy[0] / scale), px(xy[1] / scale));
+        let button = MouseButton::Left;
+        let mut events = vec![PlatformInput::MouseDown(MouseDownEvent { button, position: at(start), click_count: 1, ..Default::default() })];
+        for i in 1..=self.moves {
+            let t = i as f32 / self.moves as f32;
+            let xy = std::array::from_fn(|n| start[n] + (self.to[n] - start[n]) * t);
+            events.push(PlatformInput::MouseMove(MouseMoveEvent { position: at(xy), pressed_button: Some(button), ..Default::default() }));
+        }
+        events.push(PlatformInput::MouseUp(MouseUpEvent { button, position: at(self.to), click_count: 1, ..Default::default() }));
+        events
+    }
+}
+
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
 pub enum Ctl { /** the composer chip's account menu, and Settings' Accounts page */ AccountMenu, AccountsPage, /** the sidebar hub picker */ Hub(crate::screens::hubpick::Act), PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, Rail(String), PickFiles, /** the ▾ beside the thread's name: its menu */ ThreadMenu, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), /** a hub page of the Settings nav */ SettingsPage(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch, /** a bots-page press (screens::bots::press): its kind and value */ Bot(String, String), /** a chat terminal's card: focus, expand, pop, stop; its key */ Term(String, String), /** a subagent's own view (its key; "" goes back) */ Sub(String), /** a card's button that sends the hub an action (a halt card's Resume...): `Command::Action` */ Go(String, String), /** the viewer's Edit (true: the real KiCad in the pane) and View (false) */ KicadEdit(bool), /** the editor strip: a tab (its kind), full, popout, popin */ KicadAct(String), /** a management panel's press (screens/mgmt.rs `act`) */ Mgmt(String) }
@@ -49,6 +84,7 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let Some(a) = v["tap"].as_array() { Some(Step::Tap(a.first().and_then(Value::as_f64).unwrap_or(0.5) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.5) as f32, a.get(2).and_then(Value::as_u64).unwrap_or(0) as usize)) }
         else if let Some(t) = v["popup"].as_str() { Some(Step::Popup(t.into())) }
         else if let Some(t) = v["type"].as_str() { Some(Step::Type(t.into())) }
+        else if let Some(spec) = v.get("drag") { Some(Drag::parse(spec).map(Step::Drag).unwrap_or_else(|| Step::Unsupported("invalid_drag".into()))) }
         else if let Some(t) = v["keys"].as_str() { Some(Step::Keys(t.into())) }
         else if v["send"].as_bool() == Some(true) { Some(Step::Send) }
         else if let Some(p) = v["attach"].as_str() { Some(Step::Attach(p.into())) }
@@ -97,6 +133,32 @@ fn rail_row_state(viewer: &Value, want: &str) -> Option<&'static str> {
     }
 }
 
+fn tile_inventory(kind: &str, picked: Option<usize>, rects: &std::collections::HashMap<String, [f32; 4]>) -> Value {
+    let rect = |r: &[f32; 4]| json!({"x":r[0],"y":r[1],"w":r[2],"h":r[3]});
+    let mut tiles = Vec::new();
+    let mut splitters = Vec::new();
+    if kind == "split" {
+        for (id, page) in [("sch","schematic"), ("pcb","board"), ("3d","3d")] {
+            if let Some(r) = rects.get(&format!("tile:{id}")) {
+                tiles.push(json!({"id":id,"kind":page,"rect":rect(r),"focused":false}));
+            }
+        }
+        let selected = match picked { Some(2) => "pcb", Some(1) => "sch", _ => "" };
+        let focus = tiles.iter().position(|t| t["id"] == selected).unwrap_or(0);
+        if let Some(tile) = tiles.get_mut(focus) { tile["focused"] = true.into(); }
+        for id in ["split-resize-main", "split-resize-side"] {
+            if let Some(r) = rects.get(id) {
+                splitters.push(json!({"id":id,"rect":rect(r),"axis":if r[2] < r[3] { "x" } else { "y" }}));
+            }
+        }
+    } else if !kind.is_empty() {
+        if let Some(r) = rects.get("tile:main") {
+            tiles.push(json!({"id":"main","kind":kind,"rect":rect(r),"focused":true}));
+        }
+    }
+    json!({"tiles":tiles,"splitters":splitters})
+}
+
 impl Backplane {
     pub fn m(&self, event: &str, fields: Value) { metric(self.started, event, fields); }
 
@@ -111,6 +173,9 @@ impl Backplane {
             if snap != self.last_layout { self.last_layout = snap.clone(); metric(started, "layout", json!({"rects": serde_json::from_str::<Value>(&snap).unwrap_or(Value::Null)})); }
             // G4: the controls on screen, on change
             let rects = crate::art::ctl_rects();
+            let kind = crate::screens::viewer::pane_page(&self.data["thread"], false).map(|p| p.0).unwrap_or_default();
+            let inventory = tile_inventory(&kind, self.screens.pick_slot, &rects);
+            if inventory != self.tiles_last { self.m("tiles", inventory.clone()); self.tiles_last = inventory; }
             let ctl: Vec<Value> = self.all_controls().map(|c| json!({"id": c.id, "label": c.label, "rect": rects.get(&c.id).map(|r| json!({"x": r[0], "y": r[1], "w": r[2], "h": r[3]})), "enabled": !matches!(c.ctl, Ctl::None), "visible": true, "wired": !matches!(c.ctl, Ctl::None), "disabled_look": matches!(c.ctl, Ctl::None)})).collect();
             let text = serde_json::to_string(&ctl).unwrap_or_default();
             if text != self.ctl_last {
@@ -341,6 +406,31 @@ impl Backplane {
                 self.open_project(raw.clone(), cx);
             }
             Step::Popup(text) => { self.begin(format!("popup:{text}"), Goal::Popup, cx); self.set_text(text, cx); }
+            Step::Drag(drag) => {
+                let from = match &drag.from {
+                    DragStart::Point(xy) => Some(*xy),
+                    DragStart::Control(id) => crate::art::ctl_rects().get(id).map(|[x,y,w,h]| [x+w/2., y+h/2.]),
+                };
+                let Some(from) = from else {
+                    self.m("drag", json!({"ok": false, "error": "control_missing"}));
+                    self.pump(cx);
+                    return;
+                };
+                let handle = self.script_window;
+                let this = cx.weak_entity();
+                cx.defer(move |cx| {
+                    let _ = handle.update(cx, |_, window, cx| {
+                        for event in drag.events(from, window.scale_factor()) {
+                            window.dispatch_script_input(event, cx);
+                        }
+                        let _ = this.update(cx, |app, cx| {
+                            app.m("drag", json!({"ok": true, "from": from, "to": drag.to, "moves": drag.moves}));
+                            app.begin("drag".into(), Goal::Frame, cx);
+                            cx.notify();
+                        });
+                    });
+                });
+            }
             Step::Keys(keys) => { self.m("keys", json!({"keys": keys})); self.screens.term.script = Some(keys); self.begin("keys".into(), Goal::Frame, cx); cx.notify(); }
             Step::Type(text) => {
                 let full = format!("{}{}", self.input.read(cx).content, text);
@@ -357,10 +447,10 @@ impl Backplane {
                 if let Some((name, frames)) = self.recording.take() {
                     self.m("frames", json!({"name": name, "n": frames.len(), "frames_ms": frames}));
                     // the plot canvas's own CPU per paint while the record was open (culling, path building, tessellation, submission), not the rasterizer's time
-                    let mut ms = std::mem::take(&mut self.screens.plotview.paint_ms);
+                    let mut ms = std::mem::take(&mut self.screens.plots[0].paint_ms);
                     if !ms.is_empty() {
                         ms.sort_by(|a, b| a.partial_cmp(b).unwrap()); let p = |q: f32| ms[((ms.len() - 1) as f32 * q).round() as usize];
-                        let sp = std::mem::take(&mut self.screens.plotview.split);
+                        let sp = std::mem::take(&mut self.screens.plots[0].split);
                         let part = |k: usize| { let mut v: Vec<f32> = sp.iter().map(|x| x[k]).collect(); v.sort_by(|a, b| a.partial_cmp(b).unwrap()); if v.is_empty() { (0.0, 0.0) } else { (v[(v.len() - 1) / 2], v[((v.len() - 1) as f32 * 0.95).round() as usize]) } };
                         let (lp, tess, sub) = (part(0), part(1), part(2));
                         self.m("plot_paint", json!({"name": name, "n": ms.len(), "p50_ms": p(0.5), "p95_ms": p(0.95), "max_ms": p(1.0), "loop_cull_build_p50_p95_ms": [lp.0, lp.1], "tessellate_p50_p95_ms": [tess.0, tess.1], "paint_path_p50_p95_ms": [sub.0, sub.1]}));
@@ -476,22 +566,22 @@ impl Backplane {
                 self.begin_for(format!("wait_settled:{tag}"), Goal::WaitSettled { kind, tag, timeout_ms, polling: false }, fail_s, cx);
                 cx.notify();
             }
-            Step::Fit => { self.screens.plotview.view = None; self.ui_epoch += 1; self.begin("fit".into(), Goal::Frame, cx); cx.notify(); }
+            Step::Fit => { self.screens.plots[0].view = None; self.ui_epoch += 1; self.begin("fit".into(), Goal::Frame, cx); cx.notify(); }
             Step::Expect(what) => { // a run that cannot measure what it claims stops itself: "canvas" needs a plot canvas with real height
-                let h = self.screens.plotview.bounds.map_or(0.0, |b| f32::from(b.size.height));
+                let h = self.screens.plots[0].bounds.map_or(0.0, |b| f32::from(b.size.height));
                 /* i18n-ok: scripted e2e input and its metrics, not drawn */ if what == "canvas" && h < 200.0 { self.m("not_usable", json!({"why": "plot canvas has no height", "canvas_h": h})); eprintln!("expect canvas: height {h} px: stopping"); std::process::exit(4); }
                 self.m("expect", json!({"what": what, "canvas_h": h})); self.pump(cx);
             }
-            Step::Layers(on, cap, scroll) => { let pv = &mut self.screens.plotview; pv.layers_cap = cap; pv.layers_scroll.set_offset(point(px(0.), px(-scroll)));
-                self.screens.plotview.layers_open = on; self.ui_epoch += 1; self.begin("layers".into(), Goal::Frame, cx); cx.notify(); }
+            Step::Layers(on, cap, scroll) => { let pv = &mut self.screens.plots[0]; pv.layers_cap = cap; pv.layers_scroll.set_offset(point(px(0.), px(-scroll)));
+                self.screens.plots[0].layers_open = on; self.ui_epoch += 1; self.begin("layers".into(), Goal::Frame, cx); cx.notify(); }
             Step::ViewShow(kind, path) => { let t = self.selected.clone(); self.view_show(&t, &kind, &path, cx); self.m("viewshow", json!({"kind": kind, "path": path})); self.ui_epoch += 1; self.begin("viewshow".into(), Goal::Frame, cx); cx.notify(); }
             Step::Compare(i) => { // the Compare menu's row i (null: put the comparison away); the versions are asked for first
                 match i { None => crate::screens::histbar::compare(self, None),
-                    Some(i) => { if self.screens.plotview.hist.refs.is_none() { crate::screens::histbar::ask_refs(self); } let r = self.screens.plotview.hist.refs.clone().and_then(|r| r.rows.get(i).cloned());
+                    Some(i) => { if self.screens.plots[0].hist.refs.is_none() { crate::screens::histbar::ask_refs(self); } let r = self.screens.plots[0].hist.refs.clone().and_then(|r| r.rows.get(i).cloned());
                         /* i18n-ok: scripted e2e input and its metrics, not drawn */ if let Some((_, name, commit)) = r { crate::screens::histbar::compare(self, Some((&commit, &name))); } else { self.m("compare", json!({"error": "no such version yet"})); } } }
                 self.ui_epoch += 1; self.begin("compare".into(), Goal::Frame, cx); cx.notify(); }
             Step::Hist(i) => { // the history bar's step i (0-based; null or negative: live); the steps are asked for first
-                if self.screens.plotview.hist.steps.is_none() { crate::screens::histbar::ask_steps(self); self.m("hist", json!({"asked": true})); }
+                if self.screens.plots[0].hist.steps.is_none() { crate::screens::histbar::ask_steps(self); self.m("hist", json!({"asked": true})); }
                 else { crate::screens::histbar::select(self, i.filter(|n| *n >= 0).map(|n| n as usize)); self.m("hist", json!({"at": i})); }
                 self.ui_epoch += 1; self.begin("hist".into(), Goal::Frame, cx); cx.notify(); }
             Step::HistMode(m) => { crate::screens::histbar::mode(self, m); self.ui_epoch += 1; self.begin("histmode".into(), Goal::Frame, cx); cx.notify(); }
@@ -506,11 +596,11 @@ impl Backplane {
                 let got = self.screens.pv(slot).picked.is_some(); self.m("tap", json!({"fx": fx, "fy": fy, "slot": slot, "picked": got})); self.ui_epoch += 1; self.begin("tap".into(), Goal::Frame, cx); cx.notify();
             }
             Step::Pan(dx, dy) => { // a drag of the plot canvas by (dx, dy) window px
-                let pv = &mut self.screens.plotview; if let Some(v) = pv.view { pv.view = Some(v.pan(dx, dy)); }
+                let pv = &mut self.screens.plots[0]; if let Some(v) = pv.view { pv.view = Some(v.pan(dx, dy)); }
                 self.ui_epoch += 1; self.begin("pan".into(), Goal::Frame, cx); cx.notify();
             }
             Step::Zoom(steps, fx, fy) => { // wheel notches at (fx, fy) as fractions of the canvas
-                let pv = &mut self.screens.plotview;
+                let pv = &mut self.screens.plots[0];
                 if let (Some(v), Some(b)) = (pv.view, pv.bounds) {
                     let (w, h) = (f32::from(b.size.width), f32::from(b.size.height));
                     pv.view = Some(v.zoom((1.0 + steps * 16.0 * 0.0015).clamp(0.5, 2.0), fx * w, fy * h, w, h, pv.fitted));
@@ -554,7 +644,7 @@ impl Backplane {
                 self.pump(cx);
             }
             Step::Press(id) => {
-                if let Some(s) = &self.screens.solid {
+                if let Some(s) = self.screens.active_solid() {
                     let sr = s.read(cx);
                     PRESS_SOLID.with(|c| *c.borrow_mut() = (sr.key().to_string(), sr.painted_count()));
                 }
@@ -704,7 +794,7 @@ impl Backplane {
         let active = if diff_on { "diff".to_string() } else { crate::screens::viewer::active_kind(v, None) };
         let (press_key, press_painted) = PRESS_SOLID.with(|c| c.borrow().clone());
         let solid_state = |want_key: &str| -> Option<&'static str> {
-            let Some(s) = &self.screens.solid else { return None };
+            let Some(s) = self.screens.active_solid() else { return None };
             let sr = s.read(cx);
             if !want_key.is_empty() && sr.key() != want_key { return None; }
             if !sr.note.is_empty() { return Some("empty"); }
@@ -796,7 +886,7 @@ impl Backplane {
         let d = &th["diff"];
         let rects = crate::art::ctl_rects();
         let (_, press_painted) = PRESS_SOLID.with(|c| c.borrow().clone());
-        let (solid_key, solid_image_key, solid_shown, solid_note, solid_stage, solid_painted, solid_last_w, solid_last_h) = match &self.screens.solid {
+        let (solid_key, solid_image_key, solid_shown, solid_note, solid_stage, solid_painted, solid_last_w, solid_last_h) = match self.screens.active_solid() {
             Some(s) => { let sr = s.read(cx); (sr.key().to_string(), sr.image_key().to_string(), sr.shown_key().to_string(), sr.note.clone(), sr.stage_text(), sr.painted_count(), sr.stats.last_size.0, sr.stats.last_size.1) }
             None => (String::new(), String::new(), String::new(), String::new(), String::new(), 0, 0, 0),
         };
@@ -808,12 +898,12 @@ impl Backplane {
         let card_ref = |pv: &crate::screens::plotview::PlotView| -> String {
             pv.card.as_ref().and_then(|c| c.rows.iter().find(|r| r.0 == "ref").map(|r| r.1.clone())).unwrap_or_default()
         };
-        let split_sch_picked = self.screens.split_pv[0].picked.is_some();
-        let split_pcb_picked = self.screens.split_pv[1].picked.is_some();
-        let split_sch_lit = !self.screens.split_pv[0].lit.is_empty();
-        let split_pcb_lit = !self.screens.split_pv[1].lit.is_empty();
-        let split_sch_ref = card_ref(&self.screens.split_pv[0]);
-        let split_pcb_ref = card_ref(&self.screens.split_pv[1]);
+        let split_sch_picked = self.screens.plots[1].picked.is_some();
+        let split_pcb_picked = self.screens.plots[2].picked.is_some();
+        let split_sch_lit = !self.screens.plots[1].lit.is_empty();
+        let split_pcb_lit = !self.screens.plots[2].lit.is_empty();
+        let split_sch_ref = card_ref(&self.screens.plots[1]);
+        let split_pcb_ref = card_ref(&self.screens.plots[2]);
         let diff_file_names: Vec<String> = d["files"].as_array().into_iter().flatten().filter_map(|f| f["name"].as_str().map(String::from)).collect();
         let rail: Vec<Value> = v["rail"].as_array().into_iter().flatten().map(|r| json!({
             "id": r["id"].as_str().unwrap_or(""),
@@ -867,6 +957,31 @@ impl Backplane {
 mod tests {
     use super::*;
     use core::prelude::v1::test;
+    #[test]
+    fn inventory_tracks_visible_split_slots_and_their_painted_divider() {
+        let rects = [("tile:main", [0.,0.,300.,200.]), ("tile:pcb",[0.,0.,145.,200.]),
+            ("tile:3d",[155.,0.,145.,200.]), ("split-resize-side",[145.,0.,10.,200.])]
+            .map(|(key, rect)| (key.to_string(), rect)).into_iter().collect();
+        let split = tile_inventory("split", Some(2), &rects);
+        assert_eq!(split["tiles"].as_array().unwrap().len(), 2);
+        assert_eq!(split["tiles"][0]["focused"], true);
+        assert_eq!(split["splitters"][0]["axis"], "x");
+        assert_eq!(tile_inventory("board", None, &rects)["tiles"][0]["kind"], "board");
+        assert_eq!(tile_inventory("", None, &rects)["tiles"], json!([]));
+    }
+    #[test]
+    fn drag_dispatches_held_intermediate_moves_in_window_coordinates() {
+        let drag = Drag::parse(&json!({"from": "split-edge", "to": [60, 80], "moves": 2})).unwrap();
+        assert!(matches!(drag.from, DragStart::Control(ref id) if id == "split-edge"));
+        let events = drag.events([20., 40.], 2.);
+        assert!(matches!(&events[..], [PlatformInput::MouseDown(d), PlatformInput::MouseMove(m),
+            PlatformInput::MouseMove(end), PlatformInput::MouseUp(u)]
+            if d.position == point(px(10.), px(20.)) && m.position == point(px(20.), px(30.))
+            && m.dragging() && end.dragging() && end.position == point(px(30.), px(40.))
+            && end.position == u.position && d.button == u.button));
+        assert!(matches!(Drag::parse(&json!({"from":[0,1],"to":[2,3]})).unwrap().from, DragStart::Point(_)));
+        assert!(Drag::parse(&json!({"from":[0],"to":[2,3]})).is_none());
+    }
     #[test] fn open_settings_is_a_click_on_the_gear_and_paste_image_is_still_not_implemented() {
         let p = crate::tmp::file("script", "s.json");
         std::fs::write(&p, r#"[{"open_settings":true},{"paste_image":true},{"click":"ui:Settings"}]"#).unwrap();

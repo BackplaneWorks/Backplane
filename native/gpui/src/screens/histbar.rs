@@ -78,8 +78,8 @@ pub fn ask_steps(app: &mut Backplane) {
 fn ensure(app: &mut Backplane) {
     let Some((_, key, _, _)) = open_file(app) else { return };
     let want = format!("{}\n{key}", app.selected);
-    if app.screens.plotview.hist.asked == want { return }
-    let h = &mut app.screens.plotview.hist; h.asked = want; h.steps = None; h.at = None; h.playing = false; h.play += 1;
+    if app.screens.plots[0].hist.asked == want { return }
+    let h = &mut app.screens.plots[0].hist; h.asked = want; h.steps = None; h.at = None; h.playing = false; h.play += 1;
     ask_steps(app);
 }
 /// A picture came: another thread starts its bar over; a new design step in this one (a step row, or a folded run's count of them) asks for the track again.
@@ -92,10 +92,10 @@ pub fn picture(app: &mut Backplane) {
     }
     let sig = h.finish();
     let open = app.data["thread"]["viewer"]["open"].as_str().unwrap_or("");
-    if !matches!(open, "board" | "schematic") && (app.screens.plotview.compare.is_some() || app.screens.plotview.hist.at.is_some()) {
-        let pv = &mut app.screens.plotview; pv.compare = None; pv.menu = 0; pv.hist.at = None; pv.hist.playing = false; pv.hist.play += 1;
+    if !matches!(open, "board" | "schematic") && (app.screens.plots[0].compare.is_some() || app.screens.plots[0].hist.at.is_some()) {
+        let pv = &mut app.screens.plots[0]; pv.compare = None; pv.menu = 0; pv.hist.at = None; pv.hist.playing = false; pv.hist.play += 1;
     }
-    let hist = &mut app.screens.plotview.hist;
+    let hist = &mut app.screens.plots[0].hist;
     if hist.thread != th { *hist = Hist { thread: th, sig, play: hist.play + 1, ..Hist::default() }; return }
     if hist.sig == sig { return }
     hist.sig = sig;
@@ -115,7 +115,7 @@ pub fn retry_watch_payload(kind: &str, root: &str, cmp: &Cmp) -> serde_json::Val
 /// Returns `None` when the pane is on a live source (caller should use the presenter's `"retry"` action).
 pub fn retry_watch(app: &mut Backplane) -> Option<bool> {
     let (kind, key, root, _) = open_file(app)?;
-    let cmp = app.screens.plotview.compare.as_ref().filter(|c| c.base == key)?;
+    let cmp = app.screens.plots[0].compare.as_ref().filter(|c| c.base == key)?;
     let p = retry_watch_payload(&kind, &root, cmp);
     Some(app.tx.try_send(Command::Rpc("kicad.watch".into(), super::settings::Secret(p), "cmp")).is_ok())
 }
@@ -126,15 +126,15 @@ pub fn set(app: &mut Backplane, c: Option<Cmp>) {
     let c = c.map(|c| Cmp { bits, ..c });
     let path = match &c { Some(c) => shown(c), None => if kind == "board" { String::new() } else { own } };
     // (the camera stays: versions of one file share its family, so the canvas keeps its view from step to step, as 0.14's merged scene did)
-    app.screens.plotview.compare = c; app.screens.plotview.menu = 0;
-    if app.screens.plotview.compare.is_none() { app.screens.plotview.hist.at = None; app.screens.plotview.hist.playing = false; }
+    app.screens.plots[0].compare = c; app.screens.plots[0].menu = 0;
+    if app.screens.plots[0].compare.is_none() { app.screens.plots[0].hist.at = None; app.screens.plots[0].hist.playing = false; }
     watch(app, &path);
 }
 /// The layer focus moved: a comparison on show keeps its marks to the new active layer (the web's rv-bits). The camera stays where it is.
 pub fn follow_focus(app: &mut Backplane) {
     let Some((_, key, _, _)) = open_file(app) else { return };
     let bits = crate::viewers::layers::bits(&app.data["thread"]["viewer"]);
-    let Some(c) = app.screens.plotview.compare.as_mut().filter(|c| c.base == key && c.bits != bits) else { return };
+    let Some(c) = app.screens.plots[0].compare.as_mut().filter(|c| c.base == key && c.bits != bits) else { return };
     let before = shown(c); c.bits = bits; let path = shown(c);
     if path != before { watch(app, &path); }
 }
@@ -142,27 +142,27 @@ pub fn follow_focus(app: &mut Backplane) {
 pub fn compare(app: &mut Backplane, commit: Option<(&str, &str)>) {
     let Some((kind, _, _, own)) = open_file(app) else { return };
     let Some((commit, label)) = commit else { return set(app, None) };
-    let Some(r) = app.screens.plotview.hist.refs.clone() else { return };
+    let Some(r) = app.screens.plots[0].hist.refs.clone() else { return };
     let file = file_of(&kind, &own, &r.pcb, &r.sch);
     let v = version(&r.git, &r.top, commit, &file); if v.is_empty() { return }
-    let side = app.screens.plotview.hist.side; pick(app, side, v, label.to_string());
+    let side = app.screens.plots[0].hist.side; pick(app, side, v, label.to_string());
 }
 /// The file as step `i` left it, on the menu's side (the compare menu's step rows).
 pub fn compare_step(app: &mut Backplane, i: usize) {
-    let Some(s) = app.screens.plotview.hist.steps.as_ref().and_then(|h| h.steps.get(i).cloned()) else { return }; if s.new.is_empty() { return }
-    let side = app.screens.plotview.hist.side; pick(app, side, s.new, s.label);
+    let Some(s) = app.screens.plots[0].hist.steps.as_ref().and_then(|h| h.steps.get(i).cloned()) else { return }; if s.new.is_empty() { return }
+    let side = app.screens.plots[0].hist.side; pick(app, side, s.new, s.label);
 }
 /// The live file on show (the working copy) and the viewer's key, when a board or schematic shows.
 fn live(app: &Backplane) -> Option<(String, String)> {
     let (kind, key, _, own) = open_file(app)?;
-    let (pcb, sch) = app.screens.plotview.hist.steps.as_ref().map(|h| (h.pcb.clone(), h.sch.clone())).or_else(|| app.screens.plotview.hist.refs.as_ref().map(|r| (r.pcb.clone(), r.sch.clone()))).unwrap_or_default();
+    let (pcb, sch) = app.screens.plots[0].hist.steps.as_ref().map(|h| (h.pcb.clone(), h.sch.clone())).or_else(|| app.screens.plots[0].hist.refs.as_ref().map(|r| (r.pcb.clone(), r.sch.clone()))).unwrap_or_default();
     Some((key, file_of(&kind, &own, &pcb, &sch)))
 }
 /// A version picked for a side (0 old, 1 new; `path` a version path, or the live file for the working copy): the comparison on show keeps its
 /// other side; with none on show the new side is the working copy. Diff first.
 pub fn pick(app: &mut Backplane, side: u8, path: String, label: String) {
     let Some((key, file)) = live(app) else { return };
-    let cur = app.screens.plotview.compare.clone().filter(|c| c.base == key && app.screens.plotview.hist.at.is_none());
+    let cur = app.screens.plots[0].compare.clone().filter(|c| c.base == key && app.screens.plots[0].hist.at.is_none());
     let (old, new, name, to) = match (side, cur) {
         (0, Some(c)) => (path, c.new, label, c.to),
         (0, None) => (path, file, label, String::new()),
@@ -170,17 +170,17 @@ pub fn pick(app: &mut Backplane, side: u8, path: String, label: String) {
         (_, None) => return,
     };
     if old.is_empty() || new.is_empty() { return }
-    app.screens.plotview.hist.at = None; app.screens.plotview.hist.playing = false;
+    app.screens.plots[0].hist.at = None; app.screens.plots[0].hist.playing = false;
     set(app, Some(Cmp { base: key, label: name, old, new, mode: 1, bits: 0, to }));
 }
 /// The step `i` of the track on show (None: the live file): the file as the step left it, or with Highlight edits its edits on the step before.
 pub fn select(app: &mut Backplane, i: Option<usize>) {
     let Some((_, key, _, _)) = open_file(app) else { return };
-    let Some(h) = app.screens.plotview.hist.steps.clone() else { return };
+    let Some(h) = app.screens.plots[0].hist.steps.clone() else { return };
     let Some(i) = i.filter(|i| *i < h.steps.len()) else { return set(app, None) };
     let s = &h.steps[i]; if s.new.is_empty() { return }
-    let mode = if app.screens.plotview.hist.diff { 1 } else { 2 };
-    app.screens.plotview.hist.at = Some(i);
+    let mode = if app.screens.plots[0].hist.diff { 1 } else { 2 };
+    app.screens.plots[0].hist.at = Some(i);
     set(app, Some(Cmp { base: key, label: s.label.clone(), old: s.old.clone(), new: s.new.clone(), mode, bits: 0 , to: String::new() }));
     warm(app, &h, i, mode);
 }
@@ -199,21 +199,21 @@ pub fn near(h: &Steps, i: usize, mode: u8, bits: u32) -> (String, String) {
     (at(i.checked_sub(1)), at(Some(i + 1)))
 }
 /// Old / Diff / New of the comparison on show.
-pub fn mode(app: &mut Backplane, m: u8) { if let Some(mut c) = app.screens.plotview.compare.clone() { c.mode = m; set(app, Some(c)); } }
+pub fn mode(app: &mut Backplane, m: u8) { if let Some(mut c) = app.screens.plots[0].compare.clone() { c.mode = m; set(app, Some(c)); } }
 /// Highlight edits: a step shows as what it changed (removed, changed, added) on the step before; from the live file it shows the newest step.
 pub fn highlight(app: &mut Backplane) {
-    let n = app.screens.plotview.hist.steps.as_ref().map_or(0, |h| h.steps.len()); if n == 0 { return }
-    let h = &mut app.screens.plotview.hist; h.diff = !h.diff;
+    let n = app.screens.plots[0].hist.steps.as_ref().map_or(0, |h| h.steps.len()); if n == 0 { return }
+    let h = &mut app.screens.plots[0].hist; h.diff = !h.diff;
     let at = h.at; let on = h.diff;
     match at { Some(i) => select(app, Some(i)), None if on => select(app, Some(n - 1)), None => {} }
 }
 /// Hist.back / Hist.fwd: from the live file back is the newest step and forward stays live; past the newest step forward is live.
 pub fn back(at: Option<usize>, n: usize) -> Option<usize> { if n == 0 { return None } match at { None => Some(n - 1), Some(i) => Some(i.saturating_sub(1)) } }
 pub fn fwd(at: Option<usize>, n: usize) -> Option<usize> { match at { Some(i) if i + 1 < n => Some(i + 1), _ => None } }
-fn stop(app: &mut Backplane) { app.screens.plotview.hist.playing = false; app.screens.plotview.hist.play += 1; }
+fn stop(app: &mut Backplane) { app.screens.plots[0].hist.playing = false; app.screens.plots[0].hist.play += 1; }
 /// Go to the point of the thread the step on show followed (when the rows on screen have it).
 pub fn jump(app: &mut Backplane) {
-    let Some(s) = app.screens.plotview.hist.at.and_then(|i| app.screens.plotview.hist.steps.as_ref().and_then(|h| h.steps.get(i).cloned())) else { return };
+    let Some(s) = app.screens.plots[0].hist.at.and_then(|i| app.screens.plots[0].hist.steps.as_ref().and_then(|h| h.steps.get(i).cloned())) else { return };
     let held = |app: &Backplane, id: &str| !id.is_empty() && app.data["thread"]["entries"].as_array().is_some_and(|r| r.iter().any(|e| e["id"].as_str() == Some(id)));
     // (only among the rows held: the timeline's paging lands a row read later in another place)
     for id in [s.row.as_str(), s.entry.as_str()] { if held(app, id) { return app.timeline_goto(id) } }
@@ -221,18 +221,18 @@ pub fn jump(app: &mut Backplane) {
 
 /// Step playback: from the step after the one on show (the first from live) every 1.2 s to the newest, then back to live. A press while it plays stops it.
 pub fn play(app: &mut Backplane, cx: &mut Context<Backplane>) {
-    if app.screens.plotview.hist.playing { return stop(app) }
-    let n = app.screens.plotview.hist.steps.as_ref().map_or(0, |h| h.steps.len()); if n == 0 { return }
-    app.screens.plotview.hist.playing = true; app.screens.plotview.hist.play += 1; let token = app.screens.plotview.hist.play;
-    let first = match app.screens.plotview.hist.at { Some(i) if i + 1 < n => i + 1, _ => 0 };
-    select(app, Some(first)); app.screens.plotview.hist.playing = true;
+    if app.screens.plots[0].hist.playing { return stop(app) }
+    let n = app.screens.plots[0].hist.steps.as_ref().map_or(0, |h| h.steps.len()); if n == 0 { return }
+    app.screens.plots[0].hist.playing = true; app.screens.plots[0].hist.play += 1; let token = app.screens.plots[0].hist.play;
+    let first = match app.screens.plots[0].hist.at { Some(i) if i + 1 < n => i + 1, _ => 0 };
+    select(app, Some(first)); app.screens.plots[0].hist.playing = true;
     cx.spawn(async move |weak, cx| loop {
         cx.background_executor().timer(std::time::Duration::from_millis(1200)).await;
         let go = weak.update(cx, |app, cx| {
-            if app.screens.plotview.hist.play != token || !app.screens.plotview.hist.playing { return false }
-            let n = app.screens.plotview.hist.steps.as_ref().map_or(0, |h| h.steps.len());
-            match app.screens.plotview.hist.at { Some(i) if i + 1 < n => { select(app, Some(i + 1)); app.screens.plotview.hist.playing = true; } _ => { app.screens.plotview.hist.playing = false; select(app, None); } }
-            cx.notify(); app.screens.plotview.hist.playing
+            if app.screens.plots[0].hist.play != token || !app.screens.plots[0].hist.playing { return false }
+            let n = app.screens.plots[0].hist.steps.as_ref().map_or(0, |h| h.steps.len());
+            match app.screens.plots[0].hist.at { Some(i) if i + 1 < n => { select(app, Some(i + 1)); app.screens.plots[0].hist.playing = true; } _ => { app.screens.plots[0].hist.playing = false; select(app, None); } }
+            cx.notify(); app.screens.plots[0].hist.playing
         }).unwrap_or(false);
         if !go { break }
     }).detach();
@@ -247,22 +247,22 @@ pub fn row_kinds(text: &str) -> Vec<String> {
 pub fn show_step(app: &mut Backplane, id: &str, text: &str) {
     let mut kinds = row_kinds(text); if kinds.is_empty() { return }
     let kind = kinds.remove(0);
-    app.screens.plotview.hist.pending = Some((id.to_string(), kinds));
+    app.screens.plots[0].hist.pending = Some((id.to_string(), kinds));
     let open = app.data["thread"]["viewer"]["open"].as_str().unwrap_or("").to_string();
-    if open == kind && app.screens.plotview.hist.steps.is_some() { return arrived(app) }
+    if open == kind && app.screens.plots[0].hist.steps.is_some() { return arrived(app) }
     let _ = app.tx.try_send(super::viewer::view_kind(&kind));
 }
 /// A track came: a step row pressed is shown when it is on it; else the next kind it changed is opened, or nothing.
 pub fn arrived(app: &mut Backplane) {
-    let Some((id, mut rest)) = app.screens.plotview.hist.pending.clone() else { return };
+    let Some((id, mut rest)) = app.screens.plots[0].hist.pending.clone() else { return };
     // (an answer for the kind shown before the press is not the one to look in)
     let open = app.data["thread"]["viewer"]["open"].as_str().unwrap_or("").to_string();
-    if app.screens.plotview.hist.steps.as_ref().is_some_and(|h| !h.kind.is_empty() && h.kind != open) { return }
-    let i = app.screens.plotview.hist.steps.as_ref().and_then(|h| h.steps.iter().position(|s| s.id == id));
+    if app.screens.plots[0].hist.steps.as_ref().is_some_and(|h| !h.kind.is_empty() && h.kind != open) { return }
+    let i = app.screens.plots[0].hist.steps.as_ref().and_then(|h| h.steps.iter().position(|s| s.id == id));
     match i {
-        Some(i) => { app.screens.plotview.hist.pending = None; stop(app); select(app, Some(i)) }
-        None if !rest.is_empty() => { let k = rest.remove(0); app.screens.plotview.hist.pending = Some((id, rest)); let _ = app.tx.try_send(super::viewer::view_kind(&k)); }
-        None => app.screens.plotview.hist.pending = None,
+        Some(i) => { app.screens.plots[0].hist.pending = None; stop(app); select(app, Some(i)) }
+        None if !rest.is_empty() => { let k = rest.remove(0); app.screens.plots[0].hist.pending = Some((id, rest)); let _ = app.tx.try_send(super::viewer::view_kind(&k)); }
+        None => app.screens.plots[0].hist.pending = None,
     }
 }
 /// A design step's row in the thread: its words with the history mark; a press shows that change in the viewer.
@@ -280,19 +280,19 @@ pub fn step_row(cx: &mut Context<Backplane>, light: bool, e: &Value) -> AnyEleme
 
 /// The compare menu opens or shuts (asking for the versions, and making its field the first time).
 pub fn toggle_menu(app: &mut Backplane, side: u8, cx: &mut Context<Backplane>) {
-    let m = if app.screens.plotview.menu == 1 && app.screens.plotview.hist.side == side { 0 } else { 1 }; app.screens.plotview.menu = m; app.screens.plotview.hist.side = side;
+    let m = if app.screens.plots[0].menu == 1 && app.screens.plots[0].hist.side == side { 0 } else { 1 }; app.screens.plots[0].menu = m; app.screens.plots[0].hist.side = side;
     if m != 1 { return }
-    ask_refs(app); app.screens.plotview.hist.ref_err.clear();
-    if app.screens.plotview.hist.ref_input.is_none() {
+    ask_refs(app); app.screens.plots[0].hist.ref_err.clear();
+    if app.screens.plots[0].hist.ref_input.is_none() {
         let input = cx.new(|cx| super::composer::Composer::with_context(cx, "AskInput"));
         input.update(cx, |i, _| i.set_placeholder(&trs("Commit, branch or tag")));
         cx.subscribe(&input, |this, input, ev: &super::composer::ComposerEvent, cx| if matches!(ev, super::composer::ComposerEvent::Submit) {
             let text = input.read(cx).content.trim().to_string(); if text.is_empty() { return }
             let t = this.selected.clone(); if t.is_empty() { return }
-            this.screens.plotview.hist.ref_err.clear();
-            let _ = this.tx.try_send(Command::Rpc("history.resolve".into(), super::settings::Secret(json!({"thread": t, "side": if this.screens.plotview.hist.side == 1 { "b" } else { "a" }, "ref": text})), "resolve")); cx.notify();
+            this.screens.plots[0].hist.ref_err.clear();
+            let _ = this.tx.try_send(Command::Rpc("history.resolve".into(), super::settings::Secret(json!({"thread": t, "side": if this.screens.plots[0].hist.side == 1 { "b" } else { "a" }, "ref": text})), "resolve")); cx.notify();
         }).detach();
-        app.screens.plotview.hist.ref_input = Some(input);
+        app.screens.plots[0].hist.ref_input = Some(input);
     }
 }
 /// The hub's answer to a typed version (RvJob.resolve): compared with the file on show, or why not, under the field.
@@ -303,9 +303,9 @@ pub fn resolved(app: &mut Backplane, r: &Value, cx: &mut Context<Backplane>) {
     let path = version(git, top, commit, &file);
     if commit.is_empty() || path.is_empty() {
         let why = r["error"].as_str().filter(|w| !w.is_empty()).map_or_else(|| if commit.is_empty() { trs("No commit, branch or tag by that name here") } else { trs("That version has no copy of this file") }, |w| w.lines().next().unwrap_or(w).to_string());
-        app.screens.plotview.hist.ref_err = why; cx.notify(); return }
-    if let Some(i) = app.screens.plotview.hist.ref_input.clone() { i.update(cx, |i, cx| i.set(String::new(), cx)); }
-    app.screens.plotview.hist.ref_err.clear();
+        app.screens.plots[0].hist.ref_err = why; cx.notify(); return }
+    if let Some(i) = app.screens.plots[0].hist.ref_input.clone() { i.update(cx, |i, cx| i.set(String::new(), cx)); }
+    app.screens.plots[0].hist.ref_err.clear();
     pick(app, if v["side"] == "b" { 1 } else { 0 }, path, name.to_string());
 }
 
@@ -316,7 +316,7 @@ pub fn same_file(key: &str, have: &str, want: &str) -> bool {
     !key.is_empty() && of(have) && of(want)
 }
 /// Escape shuts the compare menu first (0.14's scrim took it).
-pub fn escape(app: &mut Backplane) -> bool { if app.screens.plotview.menu == 0 { return false } app.screens.plotview.menu = 0; true }
+pub fn escape(app: &mut Backplane) -> bool { if app.screens.plots[0].menu == 0 { return false } app.screens.plots[0].menu = 0; true }
 
 /// The menu's rows of versions: (label, what it is, what a press does).
 #[derive(Clone, Debug, PartialEq)]
@@ -409,13 +409,13 @@ pub fn bar_el(cx: &mut Context<Backplane>, light: bool, pv: &PlotView, key: &str
     } else {
         let loading = hist.steps.is_none();
         let title = match (&step, &hist.steps) { (Some(s), _) => hub_words(&s.title), (None, Some(h)) => hub_words(&h.live), (None, None) => trs("Live") };
-        let on = |app: &Backplane| app.screens.plotview.hist.steps.as_ref().map_or(0, |h| h.steps.len());
+        let on = |app: &Backplane| app.screens.plots[0].hist.steps.as_ref().map_or(0, |h| h.steps.len());
         // the three words go to a line of their own in a pane too narrow for the row (a panel docked at the side), not cut
         let row = div().flex().flex_wrap().items_center().gap(px(4.)).min_w_0()
             .child(icon_btn(cx, light, "hist-first", "skip-back", &trs("The first step"), "dim", n > 0, move |app, _| { stop(app); if on(app) > 0 { select(app, Some(0)) } }))
-            .child(icon_btn(cx, light, "hist-prev", "chevron-left", &trs("The step before"), "dim", n > 0, move |app, _| { stop(app); let n = on(app); let a = app.screens.plotview.hist.at; select(app, back(a, n)) }))
+            .child(icon_btn(cx, light, "hist-prev", "chevron-left", &trs("The step before"), "dim", n > 0, move |app, _| { stop(app); let n = on(app); let a = app.screens.plots[0].hist.at; select(app, back(a, n)) }))
             .child(icon_btn(cx, light, "hist-play", if hist.playing { "pause" } else { "play" }, &if hist.playing { trs("Pause") } else { trs("Play the steps") }, "accent", n > 0, |app, cx| play(app, cx)))
-            .child(icon_btn(cx, light, "hist-next", "chevron-right", &trs("The step after"), "dim", n > 0, move |app, _| { stop(app); let n = on(app); let a = app.screens.plotview.hist.at; select(app, fwd(a, n)) }))
+            .child(icon_btn(cx, light, "hist-next", "chevron-right", &trs("The step after"), "dim", n > 0, move |app, _| { stop(app); let n = on(app); let a = app.screens.plots[0].hist.at; select(app, fwd(a, n)) }))
             .child(icon_btn(cx, light, "hist-last", "skip-forward", &trs("The last step"), "dim", n > 0, move |app, _| { stop(app); let n = on(app); if n > 0 { select(app, Some(n - 1)) } }))
             .child({ let tip = if step.is_none() { hist.steps.as_ref().map_or(String::new(), |h| h.live_tip.clone()) } else { String::new() };
                 let t = div().id("hist-title").mx(px(8.)).min_w_0().flex_shrink().child(div().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c("text")).child(title));

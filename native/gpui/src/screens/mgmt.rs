@@ -208,7 +208,7 @@ pub(super) fn panel_state(app: &mut Backplane, id: &str, light: bool, line: Stri
         app.screens.mgmt.panel_placeholder = Some((if loading { "loading" } else { "empty" }, line.clone()));
     }
     let state = if loading {
-        let secs = app.screens.plotview.loading.track_now(&format!("panel:{id}:{}", app.screens.mgmt.digest));
+        let secs = app.screens.plots[0].loading.track_now(&format!("panel:{id}:{}", app.screens.mgmt.digest));
         PaneState::loading(panestate::loading_line(&line, secs, 0))
     } else { PaneState::empty(line, String::new()) };
     panestate::view(light, &state, None)
