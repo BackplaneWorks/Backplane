@@ -812,10 +812,10 @@ mod tests {
             ("files", String::new()), ("browser", String::new()), ("review", String::new())];
         for (k, p) in &shows {
             let tok = viewer::issue_show("t", k, p);
-            assert_eq!(viewer::show_outcome(&tok), viewer::ShowOutcome::Pending);
+            assert!(!viewer::show_applied_by(&tok, 1) && viewer::show_refusal_of(&tok).is_none());
             let viewer::LayoutOut::Ok(vo) = viewer::view_show_token(&st, "h", &idle, Some(1), "en", k, p, &tok).unwrap() else { panic!("{k} refused") };
             assert!(vo.patch.as_object().is_some_and(|o| !o.is_empty()), "{k} {p}: the show applies");
-            assert_eq!(viewer::show_outcome(&tok), viewer::ShowOutcome::Applied, "{k}");
+            assert!(viewer::show_applied_by(&tok, 1), "{k}");
             // the same token with another kind, another path, another thread, or no token of the hub's: nothing applies
             let k2 = if *k == "board" { "schematic" } else { "board" };
             for (k2, p2, t2, why) in [(k2, p.as_str(), "t", "another kind"), (*k, "/elsewhere/x.kicad_pcb", "t", "another path"), (*k, p.as_str(), "u", "another thread")] {
@@ -834,7 +834,7 @@ mod tests {
         assert!(none.patch.as_object().unwrap().is_empty());
 
         // the read-back: exact page and source, the project's own file resolved to its name first
-        let dflt = viewer::ShowDefaults { pcb: format!("{root}/unit.kicad_pcb"), sch: format!("{root}/unit.kicad_sch"), set: format!("{root}/mfg/rev1") };
+        let dflt = viewer::ShowDefaults { root: root.clone(), pcb: format!("{root}/unit.kicad_pcb"), sch: format!("{root}/unit.kicad_sch"), set: format!("{root}/mfg/rev1") };
         let want = |k: &str, p: &str| viewer::show_want(k, p, &root, &dflt);
         let own = want("board", &format!("{root}/unit.kicad_pcb"));
         assert!(viewer::show_settled(&own, &json!({"open":"board","key":format!("0|{root}|")}), &dflt), "a key with no path is the project's own board");
@@ -898,7 +898,7 @@ mod tests {
         let idle = json!({"sel":"tp","rid":1,"drafts":{},"panel":false,"info":{"fab.board:tp":"unit.kicad_pcb","fab.boards:tp":"unit.kicad_pcb\nalt/alt.kicad_pcb"}});
         // the project's own files as the hub finds them (the agent's read-back resolves a key with no path the same way)
         let own = crate::files::kicad::project::read(&root);
-        let dflt = viewer::ShowDefaults { pcb: own.pcb, sch: own.sch, set: crate::files::kicad::gerber::default_set(std::path::Path::new(&root)).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default() };
+        let dflt = viewer::ShowDefaults { root: root.clone(), pcb: own.pcb, sch: own.sch, set: crate::files::kicad::gerber::default_set(std::path::Path::new(&root)).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default() };
         // what the desktop reports of a picture (gpui `plotview::state_json`)
         let report = |v: &Value| {
             let open = v["open"].as_str().unwrap_or("");
@@ -921,7 +921,7 @@ mod tests {
             let mut parts = value.splitn(3, '\t'); let (pk, pp, tok) = (parts.next().unwrap(), parts.next().unwrap(), parts.next().unwrap());
             let out = viewer::view_show_token(&st, "h", &idle, Some(1), "en", pk, pp, tok).unwrap_or_else(|| panic!("{k} {p}: unanswered"));
             let viewer::LayoutOut::Ok(vo) = out else { panic!("{k} {p}: refused") };
-            assert_eq!(viewer::show_outcome(tok), viewer::ShowOutcome::Applied, "{k} {p}");
+            assert!(viewer::show_applied_by(tok, 1), "{k} {p}");
             let mut s = idle.clone(); crate::session::patch::merge(&mut s, &vo.patch);
             let pic = viewer::viewer_json(&st, &json!({}), &s).unwrap_or(Value::Null);
             let want = viewer::show_want(k, p, &root, &dflt);
@@ -977,6 +977,83 @@ mod tests {
         // bounded
         for i in 0..400 { viewer::show_push(&format!("tb{i}"), "files", ""); }
         assert!(viewer::shows_len_for_test() <= 128, "the token table is bounded: {}", viewer::shows_len_for_test());
+    }
+    /// Review round on the agent show: a prior board pick, a linked thread, a stored layout's named board and Split, an already-open preview.
+    #[test]
+    fn rail_show_applies_the_named_source_over_a_pick_a_stored_layout_and_a_preview() {
+        let d = crate::plat::tmp::dir("rail-show-src");
+        let root = d.to_string_lossy().into_owned();
+        for f in ["unit.kicad_pcb", "unit.kicad_sch"] { std::fs::write(d.join(f), "()").unwrap(); }
+        std::fs::create_dir_all(d.join("alt")).unwrap(); for f in ["alt/alt.kicad_pcb", "alt/alt.kicad_sch"] { std::fs::write(d.join(f), "()").unwrap(); }
+        let mut st = crate::state::State::new();
+        st.apply_line(&json!({"$":"ProjectCreated","id":"p","title":"Board","root":root,"at":1}).to_string());
+        st.apply_line(&json!({"$":"ThreadCreated","id":"ts","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+        st.apply_line(&json!({"$":"ProjectCreated","id":"peer~p","title":"Remote","root":"/remote/proj","at":1}).to_string());
+        st.apply_line(&json!({"$":"ThreadCreated","id":"peer~ts","project":"peer~p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+        let show = |session: &Value, thread: &str, kind: &str, path: &str, client: u64| -> viewer::LayoutOut {
+            let push = viewer::show_push(thread, kind, path);
+            viewer::view_show_token(&st, "h", session, Some(client), "en", kind, path, push["token"].as_str().unwrap()).unwrap()
+        };
+        let ok = |o: viewer::LayoutOut| match o { viewer::LayoutOut::Ok(v) => v, viewer::LayoutOut::Refused { text, .. } => panic!("refused: {text}") };
+        let watches = |vo: &viewer::ViewOut| vo.before.iter().filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).filter(|m| m["m"] == "kicad.watch").map(|m| m["p"].clone()).collect::<Vec<_>>();
+
+        // 1. an alternate board is picked; the project's own schematic is shown by its full path: the pick follows the schematic
+        let picked = json!({"sel":"ts","rid":1,"drafts":{"@view:ts":"board","@view.board:ts":"alt/alt.kicad_pcb","@view.file:ts":format!("{root}/alt/alt.kicad_pcb"),"@view.at":format!("0|{root}|{root}/alt/alt.kicad_pcb")},"panel":false,
+            "info":{"fab.board:ts":"unit.kicad_pcb","fab.boards:ts":"unit.kicad_pcb\nalt/alt.kicad_pcb"}});
+        let own_sch = format!("{root}/unit.kicad_sch");
+        let vo = ok(show(&picked, "ts", "schematic", &own_sch, 1));
+        let mut s = picked.clone(); crate::session::patch::merge(&mut s, &vo.patch);
+        assert_eq!(s["drafts"]["@view.board:ts"], "", "the own board is no pick");
+        let pic = viewer::viewer_json(&st, &json!({}), &s).unwrap();
+        let own_files = crate::files::kicad::project::read(&root);
+        let dflt = viewer::ShowDefaults { root: root.clone(), pcb: own_files.pcb, sch: own_files.sch, set: String::new() };
+        let report = json!({"open": pic["open"], "key": pic["key"]});
+        assert!(viewer::show_settled(&viewer::show_want("schematic", &own_sch, &root, &dflt), &report, &dflt), "the own schematic is on show, not the alternate board's: {}", pic["key"]);
+        // ... and the alternate board's own schematic shows with its board picked
+        let alt_sch = format!("{root}/alt/alt.kicad_sch");
+        let vo = ok(show(&json!({"sel":"ts","rid":1,"drafts":{},"panel":false,"info":{"fab.board:ts":"unit.kicad_pcb"}}), "ts", "schematic", &alt_sch, 1));
+        assert_eq!(vo.patch["drafts"]["@view.board:ts"], "alt/alt.kicad_pcb");
+        // on a linked thread the same rule, to the machine that has the files
+        let far = json!({"sel":"peer~ts","rid":1,"drafts":{"@view:peer~ts":"board","@view.board:peer~ts":"alt/alt.kicad_pcb"},"panel":false,"info":{"fab.board:peer~ts":"unit.kicad_pcb","fab.boards:peer~ts":"unit.kicad_pcb\nalt/alt.kicad_pcb"}});
+        let vo = ok(show(&far, "peer~ts", "schematic", "/remote/proj/unit.kicad_sch", 2));
+        assert_eq!(vo.patch["drafts"]["@view.board:peer~ts"], "", "a linked show of the own board's schematic clears the alternate pick");
+        let vo = ok(show(&far, "peer~ts", "schematic", "/remote/proj/alt/alt.kicad_sch", 2));
+        assert_eq!(vo.patch["drafts"]["@view.board:peer~ts"], "alt/alt.kicad_pcb", "a linked show picks the board that owns the schematic");
+        let vo = ok(show(&json!({"sel":"peer~ts","rid":1,"drafts":{},"panel":false,"info":{}}), "peer~ts", "schematic", "/remote/proj/sub/child.kicad_sch", 3));
+        assert!(watches(&vo).iter().all(|w| w["on"] == "peer"), "every watch of a linked show goes to its machine: {:?}", watches(&vo));
+        assert_eq!(vo.patch["drafts"]["@view.sheet:peer~ts"], "/remote/proj/sub/child.kicad_sch");
+
+        // 2. a stored layout, a named drawing: the tile is explicit and the watch carries the named path
+        let tile = |id: &str, kind, src: &str, explicit| layout::Tile { id: id.into(), kind, source: src.into(), explicit, version: None, unresolved_version: false, overlay: None };
+        let base = layout::add(&layout::Layout::single(tile("t1", layout::PageKind::Board, "unit.kicad_pcb", false)).unwrap(), Some("t1"), layout::Side::Right, tile("t2", layout::PageKind::Schematic, "unit.kicad_sch", false), false, None).unwrap();
+        let stored = json!({"sel":"ts","rid":1,"drafts":{"@view:ts":"board","@view.layout:ts":serde_json::to_string(&base).unwrap(),"@view.at":format!("0|{root}|")},"panel":false,"info":{"fab.board:ts":"unit.kicad_pcb"}});
+        let alt = format!("{root}/alt/alt.kicad_pcb");
+        let vo = ok(show(&stored, "ts", "pcb", &alt, 4));
+        let w = watches(&vo); assert_eq!(w.len(), 1, "{w:?}"); assert_eq!(w[0]["path"], alt, "the watch carries the named board, not the default");
+        let l: layout::Layout = serde_json::from_str(vo.patch["drafts"]["@view.layout:ts"].as_str().unwrap()).unwrap();
+        assert!(l.tile("t1").unwrap().explicit && l.tile("t1").unwrap().source == "alt/alt.kicad_pcb");
+
+        // 3. a stored layout, Split: never discarded; satisfied by the Board and Schematic it holds, else the missing one is added, else refused
+        let vo = ok(show(&stored, "ts", "split", &format!("{root}/unit.kicad_pcb"), 5));
+        let l: layout::Layout = serde_json::from_str(vo.patch["drafts"]["@view.layout:ts"].as_str().unwrap()).expect("the layout is kept");
+        assert_eq!(l.tiles().len(), 2, "a layout holding Board and Schematic is only focused");
+        let files_only = layout::add(&layout::Layout::single(tile("t1", layout::PageKind::Board, "unit.kicad_pcb", false)).unwrap(), Some("t1"), layout::Side::Right, tile("t2", layout::PageKind::Files, "", false), false, None).unwrap();
+        let s2 = json!({"sel":"ts","rid":1,"drafts":{"@view:ts":"board","@view.layout:ts":serde_json::to_string(&files_only).unwrap()},"panel":false,"info":{}});
+        let vo = ok(show(&s2, "ts", "split", &format!("{root}/unit.kicad_pcb"), 6));
+        let l: layout::Layout = serde_json::from_str(vo.patch["drafts"]["@view.layout:ts"].as_str().unwrap()).unwrap();
+        assert!(l.tiles().iter().any(|t| t.kind == layout::PageKind::Schematic) && l.tiles().iter().any(|t| t.kind == layout::PageKind::Files), "the Schematic is added beside, the person's Files stays");
+        assert!(layout::show_split(&files_only, "", "", false, Some("t1")).is_ok_and(|l| l.tile("t1").is_some()), "adding beside the locked tile leaves it as it is");
+        assert_eq!(layout::show_split(&files_only, "/abs/x.kicad_pcb", "", false, None), Err(layout::Refusal::InvalidSource), "a Split that cannot be shown is refused with a reason, never by clearing the layout");
+
+        // 4. an unnamed Files show over an already-open preview settles on the preview
+        let dflt = viewer::ShowDefaults { root: root.clone(), ..Default::default() };
+        let want = viewer::show_want("files", "", &root, &dflt);
+        for open in ["files", "image", "pdf", "text"] { assert!(viewer::show_settled(&want, &json!({"open": open}), &dflt), "{open}"); }
+        assert!(!viewer::show_settled(&viewer::show_want("files", &format!("{root}/alt"), &root, &dflt), &json!({"open": "image"}), &dflt), "a named folder is not satisfied by a preview");
+        // a stored layout reports its tiles; Split is read off them
+        let sp = viewer::show_want("split", &format!("{root}/unit.kicad_pcb"), &root, &viewer::ShowDefaults { root: root.clone(), pcb: format!("{root}/unit.kicad_pcb"), ..Default::default() });
+        assert!(viewer::show_settled(&sp, &json!({"open":"board","tiles":["board\tunit.kicad_pcb","schematic\tunit.kicad_sch"]}), &dflt));
+        assert!(!viewer::show_settled(&sp, &json!({"open":"board","tiles":["board\talt/alt.kicad_pcb","schematic\tunit.kicad_sch"]}), &dflt));
     }
     struct Mine; impl Screen for Mine {
         fn name(&self) -> &'static str { "mine" }

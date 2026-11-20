@@ -243,6 +243,7 @@ impl Agents {
         if let Some(why) = crate::present::viewer::show_refusal(kind, &shown, &roots) { return fail(&why) }
         // the window holding the project's embedded KiCad shows another frame (the person's strip tab): its pane is brought to this one,
         // unless KiCad is busy, which the answer says (issue 1355; a kicad_edit's own push never comes here while the page holds KiCad)
+        let before = crate::files::kicad::watch::viewer_state(thread).0;
         let (frame, busy) = if explicit { crate::files::kicad::follow::bring_frame(thread, &shown).await } else { (None, String::new()) };
         // the push carries what is asked (kind and the whole source path) and a token the desktop answers with (`view-show`), so the hub applies nothing by guesswork
         let mut push = crate::present::viewer::show_push(thread, kind, &shown);
@@ -259,18 +260,26 @@ impl Agents {
         let defaults = { let r = root.clone(); tokio::task::spawn_blocking(move || {
             let f = crate::files::kicad::project::read(&r);
             let set = crate::files::kicad::gerber::default_set(std::path::Path::new(&r)).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
-            crate::present::viewer::ShowDefaults { pcb: f.pcb, sch: f.sch, set }
+            crate::present::viewer::ShowDefaults { root: r.clone(), pcb: f.pcb, sch: f.sch, set }
         }).await.unwrap_or_default() };
         let want = crate::present::viewer::show_want(kind, &shown, &root, &defaults);
-        let settled = |s: &(u64, Value)| frame.map_or(true, |f| s.1["kicadFrame"] == f) && crate::present::viewer::show_settled(&want, &s.1, &defaults);
+        // settled: the report is the one of a session that applied this token (`view-show` answered, and no refusal) and it shows exactly the page and source asked
+        // (already showing counts). A client that did not advertise the new report (`report` < 2: an older desktop answers plain `view`, never a token) is read
+        // back as on main: a newer report, in the frame brought.
+        let on_frame = |s: &(u64, Value)| frame.map_or(true, |f| s.1["kicadFrame"] == f);
+        let settled = |s: &(u64, Value)| {
+            if !on_frame(s) { return false }
+            if s.1["report"].as_u64().unwrap_or(0) < 2 { return s.0 > before }
+            crate::present::viewer::show_applied_by(&token, crate::files::kicad::watch::viewer_client(thread)) && crate::present::viewer::show_settled(&want, &s.1, &defaults)
+        };
         let mut now = crate::files::kicad::watch::viewer_state(thread);
         for _ in 0..60 {
-            // a refusal the desktop recorded is the answer, checked before the picture (a page that happens to match does not hide it)
-            if let crate::present::viewer::ShowOutcome::Refused(why) = crate::present::viewer::show_outcome(&token) { return (false, json!({"error": why, "shown": shown, "viewer": now.1, "settled": false})) }
+            // a refusal any session recorded is part of the answer whatever else was seen: the agent is told why
+            if let Some(why) = crate::present::viewer::show_refusal_of(&token) { return (false, json!({"error": why, "shown": shown, "viewer": now.1, "settled": settled(&now)})) }
             if settled(&now) { break }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await; now = crate::files::kicad::watch::viewer_state(thread);
         }
-        if let crate::present::viewer::ShowOutcome::Refused(why) = crate::present::viewer::show_outcome(&token) { return (false, json!({"error": why, "shown": shown, "viewer": now.1, "settled": false})) }
+        if let Some(why) = crate::present::viewer::show_refusal_of(&token) { return (false, json!({"error": why, "shown": shown, "viewer": now.1, "settled": settled(&now)})) }
         (true, note(json!({"shown":shown,"viewer":now.1,"settled":settled(&now)})))
     }
     /// The same gate for a direct write of a board or schematic (`files_write`): Err names the holder.
