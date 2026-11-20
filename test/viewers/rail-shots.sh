@@ -461,7 +461,7 @@ hhome, proj, kind, use_embed, kcli = sys.argv[1:6]
 now = int(time.time())
 ev = [
     {"$": "ProjectCreated", "id": "p1", "title": kind, "root": proj, "at": now},
-    {"$": "ThreadCreated", "id": "t1", "project": "p1", "title": f"{kind} rail check", "env": "local", "branch": "", "worktree": "", "provider": "claude", "model": "", "at": now},
+    {"$": "ThreadCreated", "id": "t1", "project": "p1", "title": f"project {kind}", "env": "local", "branch": "", "worktree": "", "provider": "claude", "model": "", "at": now},
 ]
 if use_embed == "1" and kcli:
     ev.append({"$": "SettingSet", "key": "kicad.path", "value": kcli, "at": now})
