@@ -106,6 +106,8 @@ fn own_file(kind: u32, root: &str) -> String { let f = project::read(root); if k
 /// `warming`: each board's prewarm converting now, by its file: its stop, set when the board's 3D view starts its own parts (start_parts)
 struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, waiting: HashMap<u64, Wait>, wait_busy: bool, polling: bool, idle: Vec<String>, prewarmed: HashMap<String, String>, took: HashMap<String, u64>, mech_warming: std::collections::HashSet<String>, warming: HashMap<String, Arc<std::sync::atomic::AtomicBool>> }
 
+/// The most distinct sources one client's `kicad.watch.set` holds.
+pub const MAX_WATCH_SOURCES: usize = 12;
 pub struct Plots { gen: std::sync::atomic::AtomicU64, st: Mutex<State>, bin: PathBuf, dir: PathBuf, home: PathBuf, readers: tokio::sync::Semaphore, solid: tokio::sync::Mutex<()> }
 
 impl Plots {
@@ -206,6 +208,49 @@ impl Plots {
         if !sch.is_empty() { self.sheets(hub, client, root, path, tree) }
         keys
     }
+    /// kicad.watch.set: the client's whole set of sources at once, for a layout of several tiles (each distinct source once: a Split's Board and 3D tiles share
+    /// the board's plot). A source that stays keeps what the client holds of it: nothing is sent again, no stop and no start; a source that is gone is dropped.
+    /// `views`: (kind, path) as `kicad.watch` takes them ("" the project's own file; a history source by its wire path). At most `MAX_WATCH_SOURCES`.
+    pub fn watch_set(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, root: &str, views: &[(u32, String)], force: bool) -> Result<Vec<String>, &'static str> {
+        if !root.is_empty() { crate::present::viewer::refresh_gerber_sets_for_root(root); }
+        let mut planned: Vec<(u32, String, String)> = vec![];
+        for (kind, path) in views {
+            let file = if path.is_empty() { own_file(*kind, root) } else { path.clone() };
+            if file.is_empty() { continue }
+            let ky = key(*kind, root, path);
+            if !planned.iter().any(|p| p.1 == ky) { planned.push((*kind, ky, file.clone())) }
+            if solid_kind(*kind) && file.ends_with(".kicad_pcb") {
+                let (bk, bf) = (key(0, root, path), if path.is_empty() { own_file(0, root) } else { path.clone() });
+                if !planned.iter().any(|p| p.1 == bk) { planned.push((0, bk, bf)) }
+            }
+        }
+        if planned.len() > MAX_WATCH_SOURCES { return Err("too many sources in one layout") }
+        if planned.is_empty() { self.drop_subs(client); return Ok(vec![]) }
+        self.st.lock().unwrap().waiting.remove(&client);
+        let keys: Vec<String> = planned.iter().map(|p| p.1.clone()).collect();
+        let mut todo = vec![];
+        { let mut st = self.st.lock().unwrap();
+          let mut old = st.subs.remove(&client).unwrap_or_default();
+          for (k, ky, file) in planned {
+              if !force {
+                  if let Some(i) = old.iter().position(|o| o.key == ky) { let o = old.swap_remove(i); st.subs.entry(client).or_default().push(o); continue }
+              }
+              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0, parts_at: 0 });
+              let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, root: root.to_string(), file: file.clone(), ..Default::default() });
+              s.root = root.to_string();
+              s.file = file;
+              let rt = (!s.root.is_empty()).then(|| std::path::Path::new(&s.root));
+              if force { s.plot = None; s.stamp = None; }
+              else if !s.busy && !is_version(&s.file) && s.stamp.as_ref() != Some(&stamp_in(&s.file, rt)) { s.plot = None }
+              todo.push(ky);
+          }
+          self.gc(&mut st);
+          if !st.polling { st.polling = true; let me = self.clone(); let hub = hub.clone(); tokio::spawn(async move { me.poll(hub).await }); } }
+        for ky in todo { self.fan_one(hub, &ky, Some(client)) }
+        Ok(keys)
+    }
+    /// The keys of the sources this client's watch set holds now (tests, and the hub's accounting).
+    pub fn watched_keys(&self, client: u64) -> Vec<String> { self.st.lock().unwrap().subs.get(&client).map(|v| v.iter().map(|s| s.key.clone()).collect()).unwrap_or_default() }
     pub fn stop(&self, client: u64) { self.drop_subs(client) }
     /// A watch that starts afresh (`fresh`, the phones'): what this client was sent is not taken as held, so the next watch sends its model
     /// and parts again (`kept` still names a model it has). A phone drops the last view's model and parts when it switches views; the hub
@@ -755,7 +800,7 @@ pub fn viewer_snapshot(thread: &str) -> (u64, u64, Value) { vs().lock().unwrap()
 
 pub struct KicadRpc(pub Arc<Plots>);
 impl RpcHandler for KicadRpc {
-    fn methods(&self) -> &'static [&'static str] { &["kicad.watch", "kicad.refine", "kicad.info", "kicad.warm", "kicad.probe", "kicad.open", "kicad.install", "viewer.state", "history.steps"] }
+    fn methods(&self) -> &'static [&'static str] { &["kicad.watch", "kicad.watch.set", "kicad.refine", "kicad.info", "kicad.warm", "kicad.probe", "kicad.open", "kicad.install", "viewer.state", "history.steps"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -776,6 +821,29 @@ impl RpcHandler for KicadRpc {
                     else { self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree"), kept_of(&k), force) };
                     if crate::session::finish_watch(who.client, ticket, p) { hub.bump_views(); }
                     vec![json!({"t":"reply","id":id,"ok":true,"result":{"keys":keys}})]
+                }
+                // a layout of several tiles: the client's whole set of sources at once (each distinct source once; one that stays is not restarted); every tile is named
+                // by its opaque id, and a thread of another machine's request carries `on` as for kicad.watch
+                "kicad.watch.set" => {
+                    let root = s("root");
+                    if !(crate::files::threadpath::absolute(&root)) { return vec![crate::files::threadpath::refusal(id)] }
+                    if !super::known_root(hub, &root, "").await { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that folder is not in this project"})] }
+                    let Some(list) = p.get("sources").and_then(Value::as_array) else { return vec![json!({"t":"reply","id":id,"ok":false,"error":"sources are a list"})] };
+                    if list.len() > crate::present::layout::MAX_TILES { return vec![json!({"t":"reply","id":id,"ok":false,"error":"too many tiles"})] }
+                    let mut views = vec![]; let mut tiles = serde_json::Map::new();
+                    for src in list {
+                        let (tile, kind, path) = (src["tile"].as_str().unwrap_or(""), src["kind"].as_str().unwrap_or(""), src["path"].as_str().unwrap_or("").to_string());
+                        let Some(k) = kind_of(kind).filter(|k| *k <= 2) else { return vec![json!({"t":"reply","id":id,"ok":false,"error":"a tile watches a board, a schematic or a 3D model"})] };
+                        if tile.is_empty() || tile.len() > 32 { return vec![json!({"t":"reply","id":id,"ok":false,"error":"a tile has an id"})] }
+                        if !path.is_empty() && !super::known_root(hub, &root, &path).await { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that folder is not in this project"})] }
+                        tiles.insert(tile.to_string(), json!(key(k, &root, &path)));
+                        views.push((k, path));
+                    }
+                    let force = p.get("force").and_then(Value::as_bool) == Some(true);
+                    match self.0.watch_set(hub, who.client, &root, &views, force) {
+                        Ok(_) => vec![json!({"t":"reply","id":id,"ok":true,"result":{"tiles":tiles}})],
+                        Err(why) => vec![json!({"t":"reply","id":id,"ok":false,"error":why})],
+                    }
                 }
                 // the client zoomed in on a STEP: its solids there meshed finer, the model replaced when they are (Plots::refine)
                 "kicad.refine" => {
@@ -889,6 +957,44 @@ mod tests {
         plots.watch(&hub, 7, Some(0), &root, "", "", ("", 0), false); assert_eq!(plots.st.lock().unwrap().waiting.get(&7).map(|w| w.kind), Some(0), "a board view waits for the board");
         plots.watch(&hub, 7, None, "", "", "", ("", 0), false); assert!(plots.st.lock().unwrap().waiting.is_empty());
         let _ = std::fs::remove_dir_all(&home); let _ = std::fs::remove_dir_all(&proj);
+    }
+    /// A layout's watch set: each distinct source once, a source that stays is not restarted (no frames, no stop and start), one that is gone is dropped,
+    /// the set is bounded.
+    #[tokio::test] async fn a_watch_set_holds_each_distinct_source_once_and_a_focus_move_sends_nothing() {
+        use crate::{hub::{Cfg, Out}, presenter::Canned};
+        let (home, proj) = (crate::plat::tmp::dir("wset-home"), crate::plat::tmp::dir("wset-proj"));
+        let cfg = Cfg { home: home.to_path_buf(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let plots = Plots::new(&home);
+        let root = proj.to_string_lossy().into_owned();
+        let fx = concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/files/fixtures/plot/ecc83-pp.kicad_sch");
+        std::fs::write(proj.join("b.kicad_pro"), "{}").unwrap();
+        std::fs::copy(fx, proj.join("b.kicad_sch")).unwrap();
+        std::fs::write(proj.join("b.kicad_pcb"), "not a valid kicad_pcb").unwrap();
+        let mut out = hub.attach(9);
+        let views = vec![(1u32, String::new()), (0, String::new()), (1, String::new()), (0, String::new())];
+        let keys = plots.watch_set(&hub, 9, &root, &views, false).unwrap();
+        assert_eq!(keys.len(), 2, "two tiles drawing the same two sources: each watched once: {keys:?}");
+        assert_eq!(plots.watched_keys(9).len(), 2);
+        // the frames of the start arrive; then a focus move (the same set again) sends nothing
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        while out.try_recv().is_ok() {}
+        let again = plots.watch_set(&hub, 9, &root, &views, false).unwrap();
+        assert_eq!(again, keys);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let mut frames = 0; while let Ok(o) = out.try_recv() { if let Out::Value(v) = o { if v["t"] == "plot" { frames += 1 } } }
+        assert_eq!(frames, 0, "an unchanged set sends no frame: no stop, no start");
+        // a source that is gone is dropped, the one that stays is kept
+        plots.watch_set(&hub, 9, &root, &[(1, String::new())], false).unwrap();
+        assert_eq!(plots.watched_keys(9), vec![key(1, &root, "")]);
+        // nothing at all stops them
+        plots.watch_set(&hub, 9, &root, &[], false).unwrap();
+        assert!(plots.watched_keys(9).is_empty());
+        // bounded
+        let many: Vec<(u32, String)> = (0..=MAX_WATCH_SOURCES).map(|i| (1u32, format!("{root}/s{i}.kicad_sch"))).collect();
+        for i in 0..=MAX_WATCH_SOURCES { std::fs::write(proj.join(format!("s{i}.kicad_sch")), "(kicad_sch)").unwrap(); }
+        assert!(plots.watch_set(&hub, 9, &root, &many, false).is_err(), "more than MAX_WATCH_SOURCES sources are refused");
+        assert!(plots.watched_keys(9).is_empty(), "a refused set changes nothing");
     }
     #[tokio::test] async fn a_forced_split_watch_re_reads_a_failed_unchanged_source_and_keeps_siblings() {
         use crate::{hub::{Cfg, Out}, presenter::Canned};

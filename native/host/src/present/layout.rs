@@ -389,7 +389,12 @@ pub enum Refusal {
     UnknownFrame,
     /// Malformed action payload (invalid JSON, kind, side, mode, or missing required field).
     InvalidInput,
+    /// The layout already holds `MAX_TILES` tiles (each tile can hold watch subscriptions on the hub).
+    TooManyTiles,
 }
+
+/// The most tiles one session's layout holds (a bound on the hub's per-session watch subscriptions: at most `MAX_WATCH_SOURCES` distinct sources).
+pub const MAX_TILES: usize = 8;
 
 impl Refusal {
     pub fn code(self) -> &'static str {
@@ -406,6 +411,7 @@ impl Refusal {
             Refusal::InvalidRatio => "invalidRatio",
             Refusal::UnknownFrame => "unknownFrame",
             Refusal::InvalidInput => "invalidInput",
+            Refusal::TooManyTiles => "tooManyTiles",
         }
     }
 
@@ -424,6 +430,7 @@ impl Refusal {
             Refusal::InvalidRatio => "viewer.layout.refusal.invalidratio",
             Refusal::UnknownFrame => "viewer.layout.refusal.unknownframe",
             Refusal::InvalidInput => "viewer.layout.refusal.invalidinput",
+            Refusal::TooManyTiles => "viewer.layout.refusal.toomany",
         }
     }
 
@@ -809,6 +816,9 @@ pub fn add(
     validate_tile(&tile)?;
     if layout.contains_tile(&tile.id) {
         return Err(Refusal::DuplicateId);
+    }
+    if layout.tiles().len() >= MAX_TILES {
+        return Err(Refusal::TooManyTiles);
     }
     let next = match &layout.root {
         None => Layout::single(tile)?,
@@ -2644,6 +2654,7 @@ mod tests {
             Refusal::InvalidRatio,
             Refusal::UnknownFrame,
             Refusal::InvalidInput,
+            Refusal::TooManyTiles,
         ];
         for (lang, text) in [
             ("en", include_str!("../../../../i18n/en.msg")),

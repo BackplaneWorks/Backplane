@@ -9,7 +9,7 @@ use std::{collections::HashMap, sync::{Arc, Mutex, OnceLock}, time::{Duration, I
 
 /// The methods a window of another machine may run here for what it watches: only the viewers' reads.
 /// The thread's terminal is one too: a shell there, in the thread's folder, its output forwarded like the drawings' frames (`pull_loop`).
-pub const METHODS: &[&str] = &["kicad.watch", "kicad.info", "kicad.warm", "kicad.probe", "history.steps", "term.open", "term.input", "term.resize"];
+pub const METHODS: &[&str] = &["kicad.watch", "kicad.watch.set", "kicad.info", "kicad.warm", "kicad.probe", "history.steps", "term.open", "term.input", "term.resize"];
 pub fn is_viewer(m: &str) -> bool { METHODS.contains(&m) }
 /// The most a window may hold open here at once (a thread of its own per window), and how long one may sit unread.
 const MAX_SUBS: usize = 64;

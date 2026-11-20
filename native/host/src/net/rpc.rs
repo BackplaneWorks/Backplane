@@ -53,7 +53,7 @@ impl Router {
     /// The machine a window's viewer read goes to: the one named by its params, else the one its watch is on (a read about a piece it tapped names only the plot's key).
     fn viewer_link(&self, client: u64, m: &str, p: &Value) -> String {
         let named = far::params_link(p);
-        if !named.is_empty() || m == "kicad.watch" { return named }
+        if !named.is_empty() || m == "kicad.watch" || m == "kicad.watch.set" { return named }
         let w = self.watching.lock().unwrap();
         let Some((link, root)) = w.get(&client) else { return String::new() };
         let on_root = p["key"].as_str().map_or(false, |k| k.split('|').nth(1) == Some(root.as_str())) || p["root"].as_str() == Some(root.as_str());
@@ -124,12 +124,12 @@ impl Parts {
         let (mut code, mut text) = post(&sync, hub, l, &body).await;
         // a new thread there whose request got no answer is asked once more (a link that dropped a request is not a machine that is away)
         if code == 0 && m == "thread.create" { tokio::time::sleep(std::time::Duration::from_millis(800)).await; (code, text) = post(&sync, hub, l, &body).await; }
-        if viewer && code == 200 && (m == "kicad.watch" || m == "term.open") {
+        if viewer && code == 200 && (m == "kicad.watch" || m == "kicad.watch.set" || m == "term.open") {
             let ok = serde_json::from_str::<Value>(&text).map_or(false, |v| v["ok"] == true);
             // a drawing watched there, or its terminal opened: what that machine pushes for this window is pulled and forwarded (a terminal keeps the
             // drawing's root, so the reads about it still go there)
-            if ok && (m == "term.open" || !p["kind"].as_str().unwrap_or("").is_empty()) {
-                let root = if m == "kicad.watch" { p["root"].as_str().unwrap_or("").to_string() } else { watching.lock().unwrap().get(&client).filter(|(wl, _)| wl == l).map(|(_, r)| r.clone()).unwrap_or_default() };
+            if ok && (m == "term.open" || p["sources"].as_array().map_or(false, |a| !a.is_empty()) || !p["kind"].as_str().unwrap_or("").is_empty()) {
+                let root = if m == "kicad.watch" || m == "kicad.watch.set" { p["root"].as_str().unwrap_or("").to_string() } else { watching.lock().unwrap().get(&client).filter(|(wl, _)| wl == l).map(|(_, r)| r.clone()).unwrap_or_default() };
                 watching.lock().unwrap().insert(client, (l.to_string(), root));
                 if pulling.lock().unwrap().insert(client) { pull_loop(sync.clone(), hub.clone(), watching.clone(), pulling.clone(), client, l.to_string()); }
             } else if ok { watching.lock().unwrap().remove(&client); }
@@ -147,7 +147,7 @@ impl FarRouter for Router {
         if super::farview::is_viewer(m) {
             let l = self.viewer_link(client, m, p);
             // a watch of a project of this machine: what the window held from another machine is let go
-            if l.is_empty() && m == "kicad.watch" { self.watching.lock().unwrap().remove(&client); }
+            if l.is_empty() && (m == "kicad.watch" || m == "kicad.watch.set") { self.watching.lock().unwrap().remove(&client); }
             return !l.is_empty()
         }
         self.wants(m, p)

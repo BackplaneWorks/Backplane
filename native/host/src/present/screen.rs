@@ -735,7 +735,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         },
         // docking/tiling layout actions (present/viewer.rs `layout_action`)
         "layout-add" | "layout-close" | "layout-focus" | "layout-resize" | "layout-swap"
-        | "layout-move" | "layout-overlay" | "layout-unsplit" | "layout-maximize" | "layout-restore" => {
+        | "layout-move" | "layout-overlay" | "layout-unsplit" | "layout-maximize" | "layout-restore" | "layout-restore-saved" | "layout-forget" => {
             let locale=p["locale"].as_str().filter(|s|!s.is_empty()).unwrap_or_else(||st.settings.get("ui.lang").map_or("",String::as_str));
             match super::viewer::layout_action(sel_st, hub, &session, p["designDesktop"].as_u64(), locale, action, value) {
                 Some(super::viewer::LayoutOut::Ok(o)) => {
@@ -769,6 +769,14 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     let tst: &State=far.iter().map(|(_,f)|*f).find(|f|thread.contains('~') && f.threads.contains_key(thread)).unwrap_or(st);
     if !thread.is_empty() { super::viewer::sync_gerbers(tst,hub,&mut session,&mut cmds); }
     if thread.contains('~') && std::ptr::eq(tst,st) { return refused("thread.far-unknown") }
+    // A remembered layout comes back by itself: only on a client that says it can draw tiles (`tiles` in its request), once per session and thread, onto a
+    // thread of this machine with nothing open in this session; any other client, or a session with a page open, is never changed.
+    if action.is_empty() && p["tiles"]==true && !thread.is_empty() && !thread.contains('~') && text(&session["drafts"],&format!("@view.mem:{thread}")).is_empty() {
+        let locale=p["locale"].as_str().filter(|s|!s.is_empty()).unwrap_or_else(||st.settings.get("ui.lang").map_or("",String::as_str));
+        let applied=super::viewer::apply_memory(st,hub,&session,p["designDesktop"].as_u64(),locale,false);
+        session["drafts"][format!("@view.mem:{thread}")]=json!("1");
+        if let Some(super::viewer::LayoutOut::Ok(o))=applied { crate::session::patch::merge(&mut session,&o.patch); cmds.extend(o.before); }
+    }
     let shown_thread=if thread.is_empty() { Value::Null }else{
         if !p["window"].is_object() { return refused("window.missing") }
         let mut params=p.clone(); params["session"]=session.clone();
@@ -1589,6 +1597,53 @@ mod thread_binding_tests {
         // The seam itself is checked against the indexed JS-window fixtures by present::window.
         p["window"]=json!({"remaining":0});
         (st,p,pair["out"]["shown"]["thread"].clone())
+    }
+    /// The dispatcher's answer to `view`: the page's drafts, the watch it sends, the project's boards asked for when a drawing opens from nothing; and, over a
+    /// stored layout of several tiles, a close takes the focused tile only.
+    #[test] fn the_dispatcher_answers_view_with_the_page_the_watch_and_the_boards_asked_for() {
+        use crate::present::layout;
+        let (st,p0,_)=fixture(true);
+        let tid=p0["target"]["id"].as_str().unwrap().to_string();
+        let run=|session: Value, action: &str, value: &str| { let mut q=p0.clone(); q["session"]=session; q["action"]=json!(action); q["value"]=json!(value); recent(&st,&q).unwrap_or_else(|| panic!("{action} {value:?} unanswered")) };
+        let idle=json!({"rid":1,"open":{},"drafts":{},"panel":false,"info":{}});
+        let sends=|v: &Value| v["cmds"].as_array().into_iter().flatten().filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).collect::<Vec<_>>();
+        let out=run(idle.clone(),"view","board");
+        assert_eq!(out["session"]["drafts"][format!("@view:{tid}")],"board");
+        let ms: Vec<String>=sends(&out).iter().map(|m|m["m"].as_str().unwrap_or("").to_string()).collect();
+        assert!(ms.contains(&"kicad.watch".to_string()),"the page's watch is sent: {ms:?}");
+        assert!(ms.contains(&"boards.list".to_string()),"the project's boards are asked for when a drawing opens from nothing: {ms:?}");
+        assert!(!ms.contains(&"kicad.watch.set".to_string()),"one page: main's one watch, no set");
+        // over a stored layout of two tiles a close takes the focused tile only, and the answer is the layout's
+        let tile=|id: &str,kind| layout::Tile { id: id.into(), kind, source: String::new(), explicit: false, version: None, unresolved_version: false, overlay: None };
+        let l=layout::add(&layout::Layout::single(tile("t1",layout::PageKind::Board)).unwrap(),Some("t1"),layout::Side::Right,tile("t2",layout::PageKind::Schematic),false,None).unwrap();
+        let mut two=idle.clone(); two["drafts"][format!("@view:{tid}")]=json!("board"); two["drafts"][format!("@view.layout:{tid}")]=json!(serde_json::to_string(&l).unwrap());
+        let out=run(two,"view","");
+        let kept=out["session"]["drafts"][format!("@view.layout:{tid}")].as_str().unwrap_or("");
+        assert!(kept.is_empty() || serde_json::from_str::<layout::Layout>(kept).unwrap().tiles().len()==1,"a close takes one tile: {kept}");
+        assert_eq!(out["session"]["drafts"][format!("@view:{tid}")],"board","the remaining tile is still on show");
+    }
+    /// A remembered layout returns by itself only to a client that says it can draw tiles, onto a session with nothing open, once.
+    #[test] fn a_remembered_layout_returns_only_to_a_client_that_draws_tiles_with_nothing_open() {
+        use crate::present::layout;
+        let (mut st,p0,_)=fixture(true);
+        let tid=p0["target"]["id"].as_str().unwrap().to_string();
+        let root=st.projects[&st.threads[&tid].project].root.clone();
+        let tile=|id: &str,kind,src: &str| layout::Tile { id: id.into(), kind, source: src.into(), explicit: false, version: None, unresolved_version: false, overlay: None };
+        let l=layout::add(&layout::Layout::single(tile("t1",layout::PageKind::Board,"a.kicad_pcb")).unwrap(),Some("t1"),layout::Side::Right,tile("t2",layout::PageKind::Schematic,"a.kicad_sch"),false,None).unwrap();
+        assert!(st.apply(&json!({"$":"SettingSet","key":crate::present::viewer::memory_key(&root),"value":serde_json::to_string(&l).unwrap(),"at":9})));
+        let req=|tiles: Option<bool>,drafts: Value| { let mut q=p0.clone(); q["session"]=json!({"rid":1,"open":{},"drafts":drafts,"panel":false,"info":{}}); if let Some(t)=tiles { q["tiles"]=json!(t); } recent(&st,&q).unwrap() };
+        let layout_of=|o: &Value| o["session"]["drafts"][format!("@view.layout:{tid}")].as_str().unwrap_or("").to_string();
+        let sets=|o: &Value| o["cmds"].as_array().into_iter().flatten().filter(|c|c["text"].as_str().is_some_and(|x|x.contains("kicad.watch.set"))).count();
+        assert!(layout_of(&req(None,json!({}))).is_empty(),"a client that does not say it draws tiles is never changed");
+        assert!(layout_of(&req(Some(false),json!({}))).is_empty());
+        let out=req(Some(true),json!({}));
+        assert_eq!(serde_json::from_str::<layout::Layout>(&layout_of(&out)).unwrap().tiles().len(),2,"it comes back");
+        assert_eq!(sets(&out),1,"with its watches");
+        assert!(layout_of(&req(Some(true),json!({format!("@view:{tid}"):"files"}))).is_empty(),"a session with a page open is not changed");
+        // once per session and thread: the same session, asked again, is left as it is (the person may have closed the tiles)
+        let mut again=p0.clone(); again["tiles"]=json!(true); again["session"]=out["session"].clone(); again["session"]["drafts"][format!("@view.layout:{tid}")]=json!(""); again["session"]["drafts"][format!("@view:{tid}")]=json!("");
+        let o2=recent(&st,&again).unwrap();
+        assert!(layout_of(&o2).is_empty(),"not applied a second time in this session");
     }
     #[test] fn thread_root_binds_the_complete_recorded_thread_and_window() {
         for lean in [false,true] {
