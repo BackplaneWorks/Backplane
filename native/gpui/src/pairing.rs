@@ -94,6 +94,8 @@ pub fn from_code(address: &str, code: &str) -> Option<Invitation> {
 }
 /// What the form holds: the link if there is one, else the address and code. Err: what to say.
 pub fn submit(link: &str, address: &str, code: &str) -> Result<Invitation, &'static str> {
+    // a whole link pasted in the address box is the link
+    let (link, address) = if link.trim().is_empty() && invitation(address).is_some() { (address, "") } else { (link, address) };
     if !link.trim().is_empty() {
         /* i18n-ok: English (logged); pair.rs draws it through trs */ let i = invitation(link).ok_or("That is not a pairing link. Copy it again from Settings → Devices.")?;
         return match refusal(&i) { Some(why) => Err(why), None => Ok(i) };
@@ -284,6 +286,7 @@ mod tests {
         assert_eq!(submit("", "h:1", "ABCD2345"), Ok(code("http://h:1", "ABCD2345").unwrap()));
         assert!(submit("nonsense", "h:1", "ABCD2345").is_err(), "a bad link is not passed over for the code");
         assert!(submit("", "", "").is_err() && submit("", "h:1", "").is_err() && submit("", "h:1", "x").is_err());
+        assert_eq!(submit("", &format!("http://h:1/pair#invite={SECRET}"), ""), Ok(inv("http://h:1", SECRET).unwrap()), "a link pasted in the address box is the link");
     }
     #[test] fn every_refusal_has_the_phones_words() {
         assert_eq!(message("wrong_code"), "That code is not correct. Check it and try again.");

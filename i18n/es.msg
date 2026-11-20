@@ -1583,6 +1583,11 @@ gpui.paste.the.address.the.browser2 = Pega la dirección en la que aterrizó el 
 gpui.confirm.remove = Confirmar quitar
 gpui.submit = Enviar
 
+gpui.paste.a.pairing.link.pair = Pega un enlace de vinculación (…/pair#invite=…)
+gpui.hub.address.e.g.https = Dirección del hub, p. ej. https://desktop.tail9e0cf2.ts.net:8451
+gpui.on.the.hub.s.machine = En la máquina del hub: Ajustes → Dispositivos → Añadir un dispositivo, y pega aquí su enlace.
+gpui.select.all = Seleccionar todo
+
 # ---- gpui-a: improvements, accounts, bots ----
 gpui.imp.could.not.keep.this.draft = No se pudo guardar este borrador en este dispositivo. Reintenta.
 gpui.imp.describe.the.change = Describe el cambio…

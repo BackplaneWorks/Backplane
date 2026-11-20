@@ -1582,6 +1582,10 @@ gpui.paste.the.address.the.browser = Paste the address the browser landed on.
 gpui.paste.the.address.the.browser2 = Paste the address the browser landed on
 gpui.confirm.remove = Confirm remove
 gpui.submit = Submit
+gpui.paste.a.pairing.link.pair = Paste a pairing link (…/pair#invite=…)
+gpui.hub.address.e.g.https = Hub address, e.g. https://desktop.tail9e0cf2.ts.net:8451
+gpui.on.the.hub.s.machine = On the hub's machine: Settings → Devices → Add a device, then paste its link here.
+gpui.select.all = Select all
 
 # ---- gpui-a: improvements, accounts, bots ----
 gpui.imp.could.not.keep.this.draft = Could not keep this draft on this device. Retry.

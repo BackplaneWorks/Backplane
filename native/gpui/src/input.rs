@@ -44,6 +44,8 @@ pub struct TextInput {
     is_selecting: bool,
     /// How far the line is scrolled left so the caret stays in the box (a line longer than the box: a pasted link)
     scroll_x: Pixels,
+    /// a form field: it fills its box (with a box that gave it no width, nothing of it drew) and its hint is the dim colour
+    form: bool,
 }
 
 impl TextInput {
@@ -589,8 +591,10 @@ impl Element for TextElement {
 
 impl Render for TextInput {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let form = self.form;
         div()
             .flex()
+            .when(form, |d| d.w_full())
             .key_context("TextInput")
             .track_focus(&self.focus_handle(cx))
             .cursor(CursorStyle::IBeam)
@@ -634,8 +638,13 @@ impl TextInput {
     pub fn new(cx: &mut Context<Self>) -> Self { Self {
         /* i18n-ok: the hint, drawn through trs where it is painted */ focus_handle: cx.focus_handle(), content: "".into(), placeholder: "Ask anything: @bot, >thread, %project, #room, $skill, /btw".into(),
         selected_range: 0..0, selection_reversed: false, marked_range: None,
-        last_layout: None, last_bounds: None, is_selecting: false, scroll_x: px(0.),
+        last_layout: None, last_bounds: None, is_selecting: false, scroll_x: px(0.), form: false,
     }}
+    /// A field of a form: as wide as its box, its hint legible.
+    pub fn field(mut self) -> Self { self.form = true; self }
+    /// What a right-click menu's Paste, Select all and Clear do (the keys' own actions).
+    pub fn paste_clipboard(&mut self, window: &mut Window, cx: &mut Context<Self>) { self.paste(&Paste, window, cx) }
+    pub fn select_everything(&mut self, cx: &mut Context<Self>) { self.move_to(0, cx); self.select_to(self.content.len(), cx) }
     /// What it says while empty.
     pub fn hint(mut self, text: SharedString) -> Self { self.placeholder = text; self }
     pub fn set(&mut self, text: String, cx: &mut Context<Self>) {
