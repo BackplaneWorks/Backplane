@@ -941,15 +941,20 @@ pub fn note_client_cid(client: u64, cid: &str) {
 }
 /// The `cid` a connection said at its `view.open` (None: no desktop view on it: an agent's or a tool's connection).
 pub fn client_cid(client: u64) -> Option<String> { rt().lock().unwrap().cid_of.get(&client).cloned() }
-/// The holder of a pane held by `cid`: that client's latest connection while it is attached.
-fn holder_of(r: &Rt, cid: &str) -> Option<u64> {
+/// The holder of a pane held by `cid`: that client's latest connection while it is attached (`attached`: the hub's own test, or a test's).
+fn holder_of(r: &Rt, cid: &str, attached: &dyn Fn(u64) -> bool) -> Option<u64> {
     if cid.is_empty() { return None }
     let c = *r.client_of.get(cid)?;
-    match r.hub.as_ref().and_then(|w| w.upgrade()) { Some(h) => h.is_attached(c).then_some(c), None => Some(c) }
+    attached(c).then_some(c)
+}
+/// Whether a connection is attached to this hub (true when the hub is not known: a test without one).
+fn hub_attached(r: &Rt) -> impl Fn(u64) -> bool {
+    let hub = r.hub.as_ref().and_then(|w| w.upgrade());
+    move |c| hub.as_ref().map_or(true, |h| h.is_attached(c))
 }
 
 /// The picture of an entry (`viewer.runtime`).
-fn rt_picture(r: &Rt, e: Option<&RtEntry>) -> Value {
+fn rt_picture(r: &Rt, e: Option<&RtEntry>, attached: &dyn Fn(u64) -> bool) -> Value {
     let def = RtEntry::default();
     let e = e.unwrap_or(&def);
     let mut v = json!({"support": r.support, "session": "cold", "closedFrames": [], "warmBlock": if e.warm.block.is_empty() { "none" } else { e.warm.block }});
@@ -959,12 +964,14 @@ fn rt_picture(r: &Rt, e: Option<&RtEntry>) -> Value {
         v["closedFrames"] = json!(s.closed_frames);
         if s.generation > 0 { v["generation"] = json!(s.generation); }
         if !s.stop_reason.is_empty() { v["stopReason"] = json!(s.stop_reason); v["stoppedAt"] = json!(s.stopped_at); }
-        if let Some(h) = holder_of(r, &s.pane_cid) { v["holder"] = json!(h); }
+        if let Some(h) = holder_of(r, &s.pane_cid, attached) { v["holder"] = json!(h); }
     }
     v
 }
 /// `viewer.runtime` for a project's canonical .kicad_pro (as the session info carries it).
-pub fn runtime_picture_of(pro: &str) -> Value { let r = rt().lock().unwrap(); rt_picture(&r, r.entries.get(&norm_pro_key(pro))) }
+pub fn runtime_picture_of(pro: &str) -> Value { let r = rt().lock().unwrap(); let a = hub_attached(&r); rt_picture(&r, r.entries.get(&norm_pro_key(pro)), &a) }
+#[cfg(test)]
+fn runtime_picture_attached(pro: &str, attached: &dyn Fn(u64) -> bool) -> Value { let r = rt().lock().unwrap(); rt_picture(&r, r.entries.get(&norm_pro_key(pro)), attached) }
 /// `viewer.runtime` for a thread's project folder and the board or schematic the viewer shows ("" for the folder's own): the KiCad Edit
 /// would open (a folder of several boards: the chosen one's). Sync and cheap: the folder is resolved at most every 5 s.
 pub fn runtime_picture(root: &str, board_file: &str) -> Value {
@@ -978,7 +985,8 @@ pub fn runtime_picture(root: &str, board_file: &str) -> Value {
         }
     };
     let r = rt().lock().unwrap();
-    rt_picture(&r, if pro.is_empty() { None } else { r.entries.get(&norm_pro_key(&pro)) })
+    let a = hub_attached(&r);
+    rt_picture(&r, if pro.is_empty() { None } else { r.entries.get(&norm_pro_key(&pro)) }, &a)
 }
 
 /// How long after the last desktop client that used KiCad went before its KiCads are closed: a reconnect (a new connection id) is not a close.
@@ -4694,7 +4702,8 @@ mod tests {
     #[test] fn the_runtime_picture_follows_the_session_the_warm_up_and_the_holder() {
         // its own project and cids: the registry is the process's
         let pro = "/rt-test/picture/a.kicad_pro";
-        let picture = || runtime_picture_of(pro);
+        // (a hub another test started may be the process's: connections 905/909 are taken as attached here, 913 as gone)
+        let picture = || runtime_picture_attached(pro, &|c| c != 913);
         assert_eq!(picture()["session"], "cold"); assert!(picture().get("generation").is_none() && picture().get("holder").is_none());
         // a warm-up refused for memory, then started
         rt_note_warm(pro, Block::Memory, "too little free memory (free 1 MB < KiCad 2048 MB (default) + headroom 2048 MB)");
@@ -4710,6 +4719,9 @@ mod tests {
         assert_eq!((picture()["session"].as_str(), picture()["holder"].as_u64()), (Some("live"), Some(905)));
         note_client_cid(909, "gpui-rt-test-1");
         assert_eq!(picture()["holder"].as_u64(), Some(909), "the same app, connected again");
+        note_client_cid(913, "gpui-rt-test-1");
+        assert!(picture().get("holder").is_none(), "its connection gone: no holder until it is back");
+        note_client_cid(909, "gpui-rt-test-1");
         assert_eq!(client_cid(905).as_deref(), Some("gpui-rt-test-1")); assert_eq!(client_cid(123_456_789), None, "an agent's connection");
         assert!(!rt_update(pro, |_| {}), "nothing changed: no bump");
         // parked (View kept the container): no holder
