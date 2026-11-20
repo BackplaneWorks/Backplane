@@ -1162,16 +1162,24 @@ pub fn quit_by_frames(s: &Session) -> bool { matches!(s.state.as_str(), "ready" 
 /// Close KiCad answered `exiting` has written its saves before it answers (measured), and the hub's own closes (idle, eviction, the app
 /// gone) were chosen clean and in no pane: their frames are teardown and do not hold the kill. KiCad's own Quit has no frame left.
 #[derive(Debug, PartialEq, Eq)]
-pub enum BoundStep { Kill, Wait(String), Stop }
+pub enum BoundStep { Kill, Wait(String), Live(String), Stop }
 pub fn bound_check(s: &Session, job: Option<&str>) -> BoundStep {
     if !s.closing { return BoundStep::Stop }
     if let Some(d) = s.dialogs.last() { return BoundStep::Wait(format!("a dialog of KiCad's is up ({d}): it waits for an answer")) }
     if let Some(j) = job { return BoundStep::Wait(format!("KiCad reports a job ({j})")) }
     if s.busy { return BoundStep::Wait("a request of an agent's or a panel's is running in it".into()) }
-    let unsaved = s.unsaved_docs();
-    if !unsaved.is_empty() { return BoundStep::Wait(format!("it has unsaved work ({})", unsaved.join(", "))) }
     let hubs_own = matches!(s.stop_reason.as_str(), "idle" | "evicted" | "appClosed");
     let left = frames_left(s);
+    // unsaved work only where it can still be: a KiCad with no frame left (its own Quit: every frame closed, each saved or discarded by
+    // the person's answer) or that answered our Close (its saves written) has none, whatever the hub's last picture says (row b on
+    // bp.13.3: the board saved after KiCad's last event, the picture still "modified", the hung KiCad never ended)
+    let no_frames = !s.gone_kinds.is_empty() && left == 0;
+    let unsaved = if no_frames || s.close_answered { vec![] } else { s.unsaved_docs() };
+    if !unsaved.is_empty() {
+        let why = format!("it has unsaved work ({})", unsaved.join(", "));
+        // the hub's own close of a KiCad that has work now did not happen: live again, reachable (#1470's review); any other waits
+        return if hubs_own { BoundStep::Live(why) } else { BoundStep::Wait(why) }
+    }
     if !hubs_own && !s.close_answered && left > 0 { return BoundStep::Wait(format!("{left} frame(s) not closed yet, and its Close had no answer")) }
     BoundStep::Kill
 }
@@ -2858,6 +2866,10 @@ impl Actor {
                 let job = super::progress::running_for(&pro);
                 match bound_check(s, job.as_deref()) {
                     BoundStep::Stop => {}
+                    BoundStep::Live(why) => {
+                        eprintln!("kicad embed: {pro}: pid {pid} still running {ms} ms after the hub's {} close, not killed: {why}; it is live again", s.stop_reason);
+                        s.live_again(ipc::now_s()); let snap = s.clone(); self.publish(&snap, None);
+                    }
                     BoundStep::Kill => {
                         let what = if s.stop_reason == "kicadQuit" { "quit" } else { "close" };
                         eprintln!("kicad embed: {pro}: a hang after its {} {what}: pid {pid} still running {ms} ms after it, killed", s.stop_reason);
@@ -5874,9 +5886,9 @@ mod tests {
         let m: HashMap<String, Session> = [mk("/p/1.kicad_pro", true, 1), mk("/p/2.kicad_pro", true, 5), mk("/p/3.kicad_pro", true, 9)].into_iter().collect();
         assert_eq!(evict_warm(&m, "/p/new.kicad_pro", 3), None, "all in use: none evicted");
         let mut c = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0).spawned(41); c.closing = true; c.stop_reason = "evicted".into(); c.busy = true;
-        assert!(bound_kill(&c).is_err_and(|w| w.contains("running in it")), "an agent's operation or a job in it: not ended");
-        c.busy = false; assert_eq!(bound_kill(&c), Ok(()));
-        let mut a = c.clone(); a.stop_reason = "appClosed".into(); assert_eq!(bound_kill(&a), Ok(()), "the app gone: its clean KiCads have the bound too");
+        assert!(matches!(bound_check(&c, None), BoundStep::Wait(w) if w.contains("running in it")), "an agent's operation or a job in it: not ended");
+        c.busy = false; assert_eq!(bound_check(&c, None), BoundStep::Kill);
+        let mut a = c.clone(); a.stop_reason = "appClosed".into(); assert_eq!(bound_check(&a, None), BoundStep::Kill, "the app gone: its clean KiCads have the bound too");
     }
     #[test] fn a_refused_idle_close_ends_the_closing_but_no_answer_does_not() {
         assert!(close_refused(&json!({"ok": false, "status": "AS_BUSY", "error": "a task is running: DRC"})));
@@ -5919,9 +5931,15 @@ mod tests {
         for why in ["idle", "closeAsked"] {
             let d = closing(why).dialog(true, "Save Changes?"); assert!(matches!(bound_check(&d, None), BoundStep::Wait(w) if w.contains("Save Changes?")), "{why}: a dialog");
             assert!(matches!(bound_check(&closing(why), Some("Local History")), BoundStep::Wait(w) if w.contains("Local History")), "{why}: a job (the history commit)");
-            let mut m = closing(why); m.frames[0].modified = true; assert!(matches!(bound_check(&m, None), BoundStep::Wait(w) if w.contains("unsaved")), "{why}: unsaved");
+            let mut m = closing(why); m.frames[0].modified = true;
+            if why == "idle" { assert!(matches!(bound_check(&m, None), BoundStep::Live(w) if w.contains("unsaved")), "the hub's own close of a KiCad with work now: live again"); }
+            else { assert!(matches!(bound_check(&m, None), BoundStep::Wait(w) if w.contains("unsaved")), "{why}: unsaved, no answer: waits"); }
+            // no frame left, or the Close answered: the picture's "modified" is stale, nothing unsaved can be in it (row b)
+            let mut q = m.clone(); q.gone_kinds = vec!["PCB".into(), "SCH".into()]; assert_eq!(bound_check(&q, None), BoundStep::Kill, "{why}: no frame left");
+            let mut a = m.clone(); a.close_answered = true; assert_eq!(bound_check(&a, None), BoundStep::Kill, "{why}: answered");
         }
         let mut n = closing("idle"); n.closing = false; assert_eq!(bound_check(&n, None), BoundStep::Stop, "not closing: nothing");
+        let mut b = closing("evicted"); b.busy = true; assert!(matches!(bound_check(&b, None), BoundStep::Wait(w) if w.contains("running in it")), "an agent's request in flight: not ended");
         // killed, its exit is recorded as the close (stopped, the reason kept)
         let st = closing("idle").exited(-9, ""); assert_eq!((st.state.as_str(), st.stop_reason.as_str(), st.is_live()), ("stopped", "idle", false));
     }
