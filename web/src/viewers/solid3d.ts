@@ -8,7 +8,7 @@
 import { fnv1a64Hex, type CborValue } from "./cbor.ts";
 
 export interface Solid3DCallbacks {
-  onStatus?: (msg: string) => void;
+  onStatus?: (msg: string, streaming?: boolean) => void;
   onUserMove?: () => void;
 }
 
@@ -325,9 +325,9 @@ export class Solid3DViewer {
       if (batch) this.partBatches.push(batch);
       this.partsDone = msg.done || this.partsDone + 1;
       if (this.partsTotal > 0 && this.partsDone < this.partsTotal) {
-        this.cbs.onStatus?.(`Loading parts ${this.partsDone}/${this.partsTotal}…`);
+        this.cbs.onStatus?.(`Loading parts ${this.partsDone}/${this.partsTotal}…`, true);
       } else {
-        this.cbs.onStatus?.("");
+        this.cbs.onStatus?.("", true);
       }
       this.scheduleDraw();
     }
