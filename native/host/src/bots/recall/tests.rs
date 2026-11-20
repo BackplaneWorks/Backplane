@@ -212,6 +212,8 @@ impl Rig {
 
 #[tokio::test(flavor = "multi_thread")] async fn every_client_hears_how_far_the_memory_is_written_held_behind_and_caught_up() {
     let r = rig("progress", 40, StandIn { skip: AtomicUsize::new(1), ..Default::default() }).await;
+    // one call at a time: with two at once (recall.jobs' default) the stand-in fails only one, and the other's answer clears the hold
+    r.hub.commit_many(&[json!({"$":"SettingSet","key":"recall.jobs","value":"1","at":1700000000})]).await.unwrap();
     let _ = r.bots.world().await;
     // nothing written: the long messages are behind, the short ones are their own lines already
     let p = r.rc.measure(TH).await; let long = (0..40).filter(|i| i % 7 == 3 && i % 5 != 4).count() as u64;
