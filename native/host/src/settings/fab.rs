@@ -519,8 +519,20 @@ mod tests {
         assert_eq!(c["board_files"], look_in(&home, Some(&main), "t1", false, "http://127.0.0.1:9", &[])["board_files"]);
     }
     #[test] fn a_kept_card_is_answered_until_something_it_read_changes() {
-        // the clock's tick is not waited for: no time is too recent here (racy 0), and every change is a new size or a new entry
+        // the clock's tick is not waited for: no time is too recent here (racy 0). A file's time comes from a coarse clock (a few ms a tick), so a change
+        // in the tick of the read before it would look like none; each change here moves the times of what it touched and of the folders above it on, apart
         let (home, work) = (tmp("kepthome"), tmp("keptwork")); let none = std::time::Duration::ZERO;
+        let tick = std::cell::Cell::new(0u64);
+        let moved = |p: &Path| {
+            let open = |d: &Path| -> Option<std::fs::File> {
+                #[cfg(windows)] { use std::os::windows::fs::OpenOptionsExt; std::fs::OpenOptions::new().access_mode(0x0100).custom_flags(0x0200_0000).open(d).ok() }
+                #[cfg(not(windows))] { std::fs::File::open(d).ok() }
+            };
+            tick.set(tick.get() + 1); let t = std::time::SystemTime::now() - std::time::Duration::from_secs(100_000) + std::time::Duration::from_secs(tick.get() * 10);
+            let mut q = Some(p.to_path_buf());
+            while let Some(d) = q { if let Some(f) = open(&d) { let _ = f.set_modified(t); } if d == work.to_path_buf() || d == home.to_path_buf() { break } q = d.parent().map(Path::to_path_buf); }
+        };
+        let put = |p: PathBuf, t: &str| { put(p.clone(), t); moved(&p) };
         put(work.join("boards/amp/amp.kicad_pro"), "{}"); put(work.join("boards/amp/amp.kicad_pcb"), "(kicad_pcb)"); put(work.join("amp.fab.json"), r#"{"name":"Amp","kind":"pcb","features":{}}"#);
         let look = || look_kept_racy(&home, Some(&work), "t1", false, "", &[], none);
         let (first, hit) = look(); assert!(!hit, "the first look reads"); assert_eq!(first, look_in(&home, Some(&work), "t1", false, "", &[]));
@@ -533,12 +545,12 @@ mod tests {
         put(work.join("mech/deep/case.fab.json"), r#"{"name":"Case","kind":"3dp","features":{}}"#); let (c, hit) = look(); assert!(!hit); assert_eq!(c["parts"].as_array().unwrap().len(), 2, "a fab file in a new folder");
         assert!(look().1);
         put(work.join("boards/b2/b2.kicad_pcb"), "(kicad_pcb)"); put(work.join("boards/b2/b2.kicad_pro"), "{}"); let (c, hit) = look(); assert!(!hit); assert_eq!(c["board_files"].as_array().unwrap().len(), 2, "a board added");
-        std::fs::remove_file(work.join("mech/deep/case.fab.json")).unwrap(); let (c, hit) = look(); assert!(!hit); assert_eq!(c["parts"].as_array().unwrap().len(), 1, "a fab file removed");
+        std::fs::remove_file(work.join("mech/deep/case.fab.json")).unwrap(); moved(&work.join("mech/deep")); let (c, hit) = look(); assert!(!hit); assert_eq!(c["parts"].as_array().unwrap().len(), 1, "a fab file removed");
         put(home.join("orders/q_1.json"), r#"{"thread":"b1","status":"paid"}"#);
         let buy = ["b1".to_string()]; assert!(!look_kept_racy(&home, Some(&work), "t1", false, "", &buy, none).1); assert!(look_kept_racy(&home, Some(&work), "t1", false, "", &buy, none).1);
         put(home.join("orders/q_1.json"), r#"{"thread":"b1","status":"shipped"}"#); let (c, hit) = look_kept_racy(&home, Some(&work), "t1", false, "", &buy, none); assert!(!hit); assert_eq!(c["order"], "shipped", "an order's state moved on");
         // what was just written is not trusted to its folder's clock
-        put(work.join("amp.fab.json"), r#"{"name":"Amp2","kind":"pcb","features":{}}"#);
+        std::fs::write(work.join("amp.fab.json"), r#"{"name":"Amp2","kind":"pcb","features":{}}"#).unwrap(); // a real, fresh time: no `moved`
         assert!(!look_kept_racy(&home, Some(&work), "t1", false, "", &[], std::time::Duration::from_secs(3600)).1); assert!(!look_kept_racy(&home, Some(&work), "t1", false, "", &[], std::time::Duration::from_secs(3600)).1, "a racy read is not kept");
         // a priced card: the order server is asked once (here a loopback one that counts what it is asked), then the card is kept
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); let url = format!("http://{}", l.local_addr().unwrap());
