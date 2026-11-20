@@ -30,4 +30,5 @@ The job gets `RUST_*`, `CARGO_*` knobs, `PROFILE`, `BACKPLANE_COMMIT`, ...; a na
 
 Large box (8 vCPU, 16 GB) at the plan's rate; `scripts/boat-pool.sh status` shows seconds and dollars per box. Idle stop after 300 s, a pool of 2, boxes only when slots are busy.
 Env: `BP_NO_BOAT`, `BP_BOAT_POOL`, `BP_BOAT_TYPE`, `BP_BOAT_IDLE`, `BP_BOAT_COOLDOWN`, `BP_BOAT_PASS`, `BP_BOAT_BASE`, `BP_BOAT_DISK_HIGH`, `BP_BOAT_DISK_LOW`.
+h@backplane (`scripts/bp-slot.sh`) runs the same guard before each job with `--lanes ~/bp-gpui-build`: lane trees unused for two days go whole after stale incremental state, never the job's own lane or one a running process is in (`BP_DISK_HIGH` / `BP_DISK_LOW`, log `~/bp-gpui-build/.disk.log`).
 Test: `bash test/boat-disk.sh` (CI, the `author` job).

@@ -10,6 +10,12 @@ if ! command -v clang >/dev/null 2>&1; then
 fi
 [ -x "$HOME/.cargo/bin/sccache" ] && export RUSTC_WRAPPER=$HOME/.cargo/bin/sccache
 cd "$B/$LANE" || exit 70
+# Disk guard (scripts/boat-disk.py, as on the Boat boxes): over 80 % of the disk, stale incremental state, then lane trees unused for two days, then older build output go
+# until under 70 %; never this lane or one a running job is in. One guard at a time; what went is in $B/.disk.log, its first line on stderr.
+if [ -f scripts/boat-disk.py ] && command -v python3 > /dev/null 2>&1; then
+  g=$(flock -n "$B/.disk.lock" python3 -I scripts/boat-disk.py guard --lanes "$B" --keep "$LANE" --high "${BP_DISK_HIGH:-80}" --low "${BP_DISK_LOW:-70}" 2>&1) || true
+  [ -n "$g" ] && { printf '%s\n' "$g" | sed "s|^|$(date '+%F %T') $LANE |" >> "$B/.disk.log"; printf '%s\n' "$g" | head -1 >&2; }
+fi
 while :; do
   s=1
   while [ "$s" -le "$N" ]; do
