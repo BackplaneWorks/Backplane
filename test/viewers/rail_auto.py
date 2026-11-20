@@ -52,6 +52,8 @@ def build_a2_steps(tmo: int = 8000, painted: int = 90000) -> list[dict]:
     return [
         {"click": "ui:View"},
         {"wait": 2000},
+        {"keys": "ctrl-l"},  # the composer has the keyboard, as it does for a person typing in it (a bare key would be a rail shortcut)
+        {"wait": 300},
         {"mark": "auto:a2:start"},
         {"read": "composer"},
         {"shot": "auto-act-a2-pointer", "settle": "", "timeout_ms": tmo},
