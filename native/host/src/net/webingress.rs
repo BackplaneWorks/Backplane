@@ -51,6 +51,100 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ws_upgrade_targets_enforce_exact_allowlist_and_auth() {
+        use futures_util::{SinkExt, StreamExt};
+        use serde_json::{json, Value};
+        use std::sync::Arc;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+
+        let dir = crate::plat::tmp::dir("webingress-ws-targets");
+        std::fs::write(dir.join("token"), "tok").unwrap();
+        std::fs::write(
+            dir.join("events.jsonl"),
+            "{\"$\":\"SettingSet\",\"key\":\"web.enabled\",\"value\":\"1\",\"at\":1700000040}\n",
+        )
+        .unwrap();
+        let cfg = crate::hub::Cfg {
+            home: dir.to_path_buf(),
+            version: "0.16.4".into(),
+            commit: "test".into(),
+            listen: "127.0.0.1:0".into(),
+            os: "linux".into(),
+            arch: "x64".into(),
+        };
+        let hub = crate::hub::Hub::start(cfg, Arc::new(crate::presenter::Canned { reply: json!({}) }))
+            .await
+            .unwrap();
+        let (reg, _routes) = crate::net::start::open(&hub.cfg.home, "127.0.0.1", 0).unwrap();
+        let (req_json, poll_cookie) = reg.browser_request("person@example.com", "Test Browser").unwrap();
+        assert!(reg.browser_decide(req_json["id"].as_str().unwrap(), true));
+        let session_cookie = reg.browser_wait("person@example.com", &poll_cookie).await.unwrap().unwrap();
+        let authority = "web.example.test:8443";
+
+        let raw_status = |target: String, cookie: Option<String>| {
+            let hub = hub.clone();
+            async move {
+                let (mut client, server) = tokio::io::duplex(16 * 1024);
+                let srv = tokio::spawn(async move { serve(hub, server, authority).await });
+                let mut req = format!(
+                    "GET {target} HTTP/1.1\r\nHost: {authority}\r\nOrigin: https://{authority}\r\n\
+                     Tailscale-User-Login: person@example.com\r\nConnection: Upgrade\r\n\
+                     Upgrade: websocket\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+                     Sec-WebSocket-Version: 13\r\n"
+                );
+                if let Some(c) = cookie {
+                    req.push_str(&format!("Cookie: __Host-bp_web={c}\r\n"));
+                }
+                req.push_str("\r\n");
+                client.write_all(req.as_bytes()).await.unwrap();
+                let mut resp = Vec::new();
+                client.read_to_end(&mut resp).await.unwrap();
+                let _ = srv.await;
+                let text = String::from_utf8_lossy(&resp);
+                text.lines().next().unwrap_or("").to_owned()
+            }
+        };
+
+        for target in ["/ws?data=1&enc=json", "/ws?data=1&enc=json&z=deflate"] {
+            // Unpaired upgrade must get 401 on both exact URLs.
+            let status = raw_status(target.to_owned(), None).await;
+            assert!(status.starts_with("HTTP/1.1 401 "), "{target} unpaired: got {status}");
+
+            // Paired upgrade must succeed and answer data/1 RPC uncompressed.
+            let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+            let h2 = hub.clone();
+            let srv = tokio::spawn(async move { serve(h2, server_io, authority).await });
+            let mut ws_req = format!("ws://{authority}{target}").into_client_request().unwrap();
+            let headers = ws_req.headers_mut();
+            headers.insert("Origin", format!("https://{authority}").parse().unwrap());
+            headers.insert("Tailscale-User-Login", "person@example.com".parse().unwrap());
+            headers.insert("Cookie", format!("__Host-bp_web={session_cookie}").parse().unwrap());
+            let (mut ws, _) = tokio_tungstenite::client_async(ws_req, client_io).await.unwrap();
+            let hello: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+            assert_eq!(hello["t"], "hello", "{target}: expected hello frame");
+            assert!(hello.get("z").is_none(), "{target}: browser ingress stays uncompressed");
+            ws.send(Message::Text(json!({"id":1,"m":"projects.list","p":{}}).to_string().into())).await.unwrap();
+            let reply: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+            assert_eq!(reply["t"], "reply", "{target}: expected data/1 reply");
+            assert_eq!(reply["id"], 1);
+            assert_eq!(reply["ok"], true);
+            let _ = ws.close(None).await;
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(1), srv).await;
+        }
+
+        // Unknown query parameters must still be refused with 404 even when paired.
+        for bad in [
+            "/ws?data=1&enc=json&z=deflate&extra=1",
+            "/ws?data=1&enc=json&z=gzip",
+            "/ws?data=1&enc=cbor",
+        ] {
+            let status = raw_status(bad.to_owned(), Some(session_cookie.clone())).await;
+            assert!(status.starts_with("HTTP/1.1 404 "), "{bad} must be refused, got {status}");
+        }
+    }
+
+    #[tokio::test]
     async fn pairing_limits_and_deadline() {
         use crate::net::pairing::{Registry, GUESS_ALL, GUESS_CLIENT, urandom};
         use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
@@ -274,7 +368,7 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
         json_response("400 Bad Request", json!({"state":"invalid_request"}), "")
     } else if req.method == "GET" && req.target == "/auth/web/info" {
         json_response("200 OK", json!({"address":format!("https://{authority}")}), "")
-    } else if upgrade && req.method == "GET" && req.target == "/ws?data=1&enc=json" {
+    } else if upgrade && req.method == "GET" && is_browser_ws_target(&req.target) {
         let registry = crate::net::start::registry(&hub.cfg.home);
         if let Some(device_id) = registry.and_then(|r| crate::auth::browser_device(&r, &req, &login)) {
             let stream = tokio::io::join(std::io::Cursor::new(bytes).chain(reader), writer);
@@ -363,6 +457,10 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
     Ok(())
 }
 
+
+fn is_browser_ws_target(target: &str) -> bool {
+    matches!(target, "/ws?data=1&enc=json" | "/ws?data=1&enc=json&z=deflate")
+}
 
 fn is_protected_asset(path: &str) -> bool {
     matches!(path, "/files/get" | "/message-image") ||

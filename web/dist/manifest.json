@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 61323,
+  "totalAssetGzipBytes": 141334,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -95,15 +95,20 @@
     "web/src/viewers/viewer-pane.ts": "43856424aead844991d0cc17e77acac1c87597d1170b1df2cc7b107035ea8efa",
     "web/src/voice.ts": "f401f1d5bd1685c7d7270fc02a8ff16f54bde7ae98aee21b4e802f0357063345",
     "web/src/ws.ts": "9ad03421260b8ff06d5ae86d1a1adcc2de94130006f6ece71b33ba98ab521e44",
-    "web/build.ts": "c32254f4abe4cea4e8e1f65aeced47aae007c0efd292236b2cf65d296651bcca",
+    "web/vendor/xterm/LICENSE": "b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd",
+    "web/vendor/xterm/VERSION": "d8a60d9ace43d33ee184e5679b0b6815e8c6750331b6e6787b98e6f03d77180c",
+    "web/vendor/xterm/addon-fit.js": "bdaefa370b1bfc42ee88d46fe6072400902a4d4b2d45cd93438dda9b23c97089",
+    "web/vendor/xterm/xterm.css": "ba8e6985669488981ccf40c0cefe3aba80722cb6c92de7ad628b0bd717faf2b6",
+    "web/vendor/xterm/xterm.js": "1f991ac3b4b283ebf96e60ae23a00a52765dd3a2e46fa6fdda9f1aab032f7495",
+    "web/build.ts": "61d9868431d337a0b05144961ccbe751bc8596f585394822d2b8b255328dc05c",
     "assets/web/favicon.svg": "5b0f22a3329f59809216aabe58d8dbbedbd46d29e4a2373a727529daa2441a2c",
     "assets/web/favicon-light.svg": "9aa4fb973f8a719c602e351c84d3344bac377db049f59eaa52d617e84eada5b6"
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 149304,
-      "gzipBytes": 44230,
-      "sha256": "36296b5107ae29dbe4dba648a2d4c601220708db685361a7a7cefdfa332a38e8"
+      "bytes": 160927,
+      "gzipBytes": 47929,
+      "sha256": "4cf151b2dae4b9b74569a954739e106d394e51f8f082eef2cabf828e335ddf51"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,
