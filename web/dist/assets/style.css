@@ -1398,6 +1398,13 @@ html.light .bp-v-overlay {
   white-space: pre-wrap;
 }
 
+.bp-term-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .bp-term-status {
   font-size: 11px;
   font-family: var(--mono);
@@ -1407,40 +1414,16 @@ html.light .bp-v-overlay {
   white-space: nowrap;
 }
 
-.bp-term-out {
+.bp-term-host {
   flex: 1 1 auto;
   min-height: 0;
-  margin: 0;
-  padding: 8px 10px;
-  overflow: auto;
+  padding: 6px;
   background: var(--view);
-  color: var(--text);
-  font-family: var(--mono);
-  font-size: 11px;
-  line-height: 1.4;
-  white-space: pre-wrap;
-  word-break: break-all;
-  outline: none;
+  overflow: hidden;
 }
 
-.bp-term-input-row {
-  display: flex;
-  gap: 6px;
-  padding: 6px 8px;
-  background: var(--panel);
-  border-top: 1px solid var(--rule);
-  flex-shrink: 0;
-}
-
-.bp-term-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 4px 8px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  color: var(--text);
-  font-family: var(--mono);
-  font-size: 12px;
+.bp-term-host .xterm {
+  height: 100%;
 }
 
 .bp-v-layers {

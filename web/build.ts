@@ -177,9 +177,45 @@ async function buildInto(outDir: string): Promise<void> {
     },
   };
 
+  // Keep vendored @xterm/xterm@5.5.0 verbatim on disk while replacing its 3 inline-style
+  // DOM calls with CSP-safe Constructable Stylesheets (`adoptedStyleSheets`) + CSSOM `setProperty`.
+  const xtermCspPlugin: Bun.BunPlugin = {
+    name: "backplane-xterm-csp",
+    setup(build) {
+      build.onLoad({ filter: /vendor\/xterm\/xterm\.js$/ }, ({ path }) => {
+        let src = readFileSync(path, "utf8");
+        const sheetShim =
+          `(()=>{const __s=new CSSStyleSheet(),__d=this._document;__d.adoptedStyleSheets=[...__d.adoptedStyleSheets,__s];return{set textContent(v){__s.replaceSync(v)},remove(){__d.adoptedStyleSheets=__d.adoptedStyleSheets.filter(x=>x!==__s)}}})()`;
+        const replacements: [string, string][] = [
+          [
+            `this._dimensionsStyleElement||(this._dimensionsStyleElement=this._document.createElement("style"),this._screenElement.appendChild(this._dimensionsStyleElement))`,
+            `this._dimensionsStyleElement||(this._dimensionsStyleElement=${sheetShim})`,
+          ],
+          [
+            `this._themeStyleElement||(this._themeStyleElement=this._document.createElement("style"),this._screenElement.appendChild(this._themeStyleElement))`,
+            `this._themeStyleElement||(this._themeStyleElement=${sheetShim})`,
+          ],
+          [
+            `_addStyle(e,t){e.setAttribute("style",\`\${e.getAttribute("style")||""}\${t};\`)`,
+            `_addStyle(e,t){const i=t.indexOf(":");if(i>0)e.style.setProperty(t.slice(0,i).trim(),t.slice(i+1).trim())`,
+          ],
+        ];
+        for (const [from, to] of replacements) {
+          if (!src.includes(from)) {
+            throw new Error(`xterm CSP rewrite target not found in ${path}: ${from.slice(0, 48)}`);
+          }
+          src = src.replace(from, to);
+        }
+        return { contents: src, loader: "js" };
+      });
+    },
+  };
+
   const entrypoints = [join(SRC_DIR, "app.ts"), join(SRC_DIR, "pair.ts")];
   const workerEntry = join(SRC_DIR, "viewers/mesh-worker.ts");
   if (existsSync(workerEntry)) entrypoints.push(workerEntry);
+  const termEntry = join(SRC_DIR, "viewers/terminal.ts");
+  if (existsSync(termEntry)) entrypoints.push(termEntry);
 
   const res = await Bun.build({
     entrypoints,
@@ -190,17 +226,19 @@ async function buildInto(outDir: string): Promise<void> {
     sourcemap: "none",
     splitting: false,
     naming: "[name].[ext]",
-    plugins: [i18nPlugin, viewerPlugin],
+    plugins: [i18nPlugin, viewerPlugin, xtermCspPlugin],
   });
   if (!res.success) {
     for (const log of res.logs) console.error(log);
     process.exit(1);
   }
 
-  // Copy HTML shells and favicons
+  // Copy HTML shells, favicons, and lazy vendor assets (xterm.css loaded only when Terminal opens)
   writeFileSync(join(outDir, "index.html"), readFileSync(join(SRC_DIR, "index.html")));
   writeFileSync(join(outDir, "pair.html"), readFileSync(join(SRC_DIR, "pair.html")));
   writeFileSync(join(assetsDir, "style.css"), buildCss(), "utf8");
+  const xtermCss = join(WEB_DIR, "vendor/xterm/xterm.css");
+  if (existsSync(xtermCss)) writeFileSync(join(assetsDir, "xterm.css"), readFileSync(xtermCss));
   for (const icon of ["favicon.svg", "favicon-light.svg"]) {
     const src = join(ROOT, "assets/web", icon);
     if (existsSync(src)) writeFileSync(join(assetsDir, icon), readFileSync(src));
@@ -210,6 +248,7 @@ async function buildInto(outDir: string): Promise<void> {
   const inputs: Record<string, string> = {};
   for (const f of [
     ...walkFiles(SRC_DIR),
+    ...walkFiles(join(WEB_DIR, "vendor")),
     join(WEB_DIR, "build.ts"),
     join(ROOT, "assets/web/favicon.svg"),
     join(ROOT, "assets/web/favicon-light.svg"),

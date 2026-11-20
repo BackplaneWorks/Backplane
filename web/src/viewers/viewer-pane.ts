@@ -95,7 +95,7 @@ function isLayerPage(p: string): boolean {
 }
 
 function isNonPlotPane(p: string): boolean {
-  return p === "files" || p === "diff" || p === "review";
+  return p === "files" || p === "diff" || p === "review" || p === "terminal";
 }
 
 export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
@@ -177,6 +177,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   let plot2d: Plot2DViewer | null = null;
   let solid3d: Solid3DViewer | null = null;
   let activePane: PaneHandle | null = null;
+  let activeTerm: { setTheme(light: boolean): void; destroy(): void } | null = null;
 
   function isLight(): boolean {
     return document.documentElement.classList.contains("light");
@@ -186,6 +187,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     const light = isLight();
     plot2d?.setTheme(light);
     solid3d?.setTheme(light);
+    activeTerm?.setTheme(light);
   });
   themeObs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
 
@@ -525,6 +527,8 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   function clearStage(): void {
     activePane?.destroy();
     activePane = null;
+    activeTerm?.destroy();
+    activeTerm = null;
     plot2d?.destroy();
     plot2d = null;
     solid3d?.destroy();
@@ -553,7 +557,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     renderHeader();
 
     if (isNonPlotPane(page)) {
-      // Non-plot panes (Files, Diff, Review) use their own data/1 RPCs directly.
+      // Non-plot panes (Files, Diff, Review, Terminal) use their own data/1 RPCs directly.
       void api.hub.rpc("viewer.watch", { thread: threadId, kind: "" }).catch(() => {});
       if (page === "files") {
         activePane = mountFilesPane(stage, api, threadId, (kind, relPath) => {
@@ -566,6 +570,24 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
         activePane = mountDiffPane(stage, api, threadId);
       } else if (page === "review") {
         activePane = mountReviewPane(stage, api, threadId);
+      } else if (page === "terminal") {
+        setOverlay("loading", "Loading terminal…");
+        const termUrl = "/assets/terminal.js";
+        void import(/* @vite-ignore */ termUrl).then(
+          (mod: { mountTerminalPane?: (s: HTMLElement, a: ViewerHostApi, t: string, l: boolean) => { setTheme(l: boolean): void; destroy(): void } }) => {
+            if (gen !== watchGen) return;
+            setOverlay("none");
+            if (mod?.mountTerminalPane) {
+              activeTerm = mod.mountTerminalPane(stage, api, threadId, isLight());
+            } else {
+              setOverlay("error", "Terminal chunk missing", true);
+            }
+          },
+          (err: unknown) => {
+            if (gen !== watchGen) return;
+            setOverlay("error", err instanceof Error ? err.message : String(err), true);
+          }
+        );
       }
       return;
     }
