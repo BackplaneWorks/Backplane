@@ -736,6 +736,64 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&d);
     }
+    /// One writer for every survivor (C), Retry on a resolved historical tile (D) and opaque historical identities (F).
+    #[test]
+    fn rail_v_2a_survivors_retry_and_historical_identities() {
+        let d = crate::plat::tmp::dir("rail-v-2a-surv");
+        let root = d.to_string_lossy().into_owned();
+        for f in ["unit.kicad_pcb", "unit.kicad_sch", "power.kicad_sch"] { std::fs::write(d.join(f), "()").unwrap(); }
+        let mut st = crate::state::State::new();
+        st.apply_line(&json!({"$":"ProjectCreated","id":"p","title":"Board","root":root,"at":1}).to_string());
+        st.apply_line(&json!({"$":"ThreadCreated","id":"t","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+        let tile = |id: &str, kind, source: &str, explicit| layout::Tile { id: id.into(), kind, source: source.into(), explicit, version: None, unresolved_version: false, overlay: None };
+        let watch = |vo: &viewer::ViewOut| -> Option<Value> { vo.before.iter().find_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok().filter(|m| m["m"] == "kicad.watch")).map(|m| m["p"].clone()) };
+
+        // C: a child Schematic closed while Review survives: nothing of the sheet stays, and the layout is gone
+        let mut l = layout::add(&layout::Layout::single(tile("t1", layout::PageKind::Review, "", false)).unwrap(), Some("t1"), layout::Side::Right,
+            tile("t2", layout::PageKind::Schematic, "power.kicad_sch", true), false, None).unwrap();
+        l.focus = Some("t2".into());
+        let sheet = format!("{root}/power.kicad_sch");
+        let mut s = json!({"sel":"t","rid":1,"drafts":{"@view:t":"schematic","@view.sheet:t":sheet,"@view.at":format!("1|{root}|{sheet}"),"@view.layout:t":serde_json::to_string(&l).unwrap()},"panel":false,"info":{}});
+        let viewer::LayoutOut::Ok(vo) = viewer::layout_action(&st, "h", &s, Some(1), "en", "layout-close", r#"{"tile":"t2"}"#).unwrap() else { panic!("close refused") };
+        assert!(watch(&vo).is_some_and(|p| p["kind"] == ""), "the child sheet's watch stops");
+        crate::session::patch::merge(&mut s, &vo.patch);
+        for k in ["@view.layout:t", "@view.sheet:t", "@view.file:t", "@view.gerbers:t", "@view:t"] {
+            assert_eq!(s["drafts"][k].as_str().unwrap_or(""), "", "{k} must not outlive the layout");
+        }
+        assert_eq!(s["info"]["view.kind:t"], "review");
+
+        // D: Retry on a resolved historical tile whose key is already the one on show still sends the watch, forced
+        let sid = layout::opaque_source_id(&format!("{root}/.git"), &root);
+        let ver = |label: &str| layout::TileVersion { source_id: sid.clone(), id: "1111aaaa99998888777766665555444433332222".into(), label: label.into() };
+        let hist = layout::Tile { version: Some(ver("1111aaaa")), ..tile("t1", layout::PageKind::Board, "unit.kicad_pcb", false) };
+        let hl = layout::add(&layout::Layout::single(hist).unwrap(), Some("t1"), layout::Side::Right, tile("t2", layout::PageKind::Schematic, "unit.kicad_sch", false), false, None).unwrap();
+        let mut sh = json!({"sel":"t","rid":1,"drafts":{"@view:t":"board","@view.layout:t":serde_json::to_string(&hl).unwrap()},"panel":false,"info":{}});
+        let viewer::LayoutOut::Ok(vf) = viewer::layout_action(&st, "h", &sh, Some(1), "en", "layout-focus", r#"{"tile":"t1"}"#).unwrap() else { panic!() };
+        crate::session::patch::merge(&mut sh, &vf.patch);
+        let on_show = sh["drafts"]["@view.at"].as_str().unwrap().to_string();
+        assert!(!on_show.is_empty(), "the historical tile is the one watched");
+        let viewer::LayoutOut::Ok(vr) = viewer::view_action_for(&st, "h", &sh, Some(1), "en", "retry", 5000).unwrap() else { panic!() };
+        let wp = watch(&vr).expect("Retry on a historical tile whose key is on show must still send its watch");
+        assert_eq!((wp["force"].clone(), wp["kind"].clone()), (json!(true), json!("board")));
+        assert!(wp["path"].as_str().unwrap().contains("1111aaaa"), "the historical source, not live artwork: {wp}");
+        crate::session::patch::merge(&mut sh, &vr.patch);
+        assert_eq!(sh["drafts"]["@view.at"].as_str().unwrap(), on_show);
+        // (a second Retry inside the second is the spam guard's)
+        let viewer::LayoutOut::Ok(vr2) = viewer::view_action_for(&st, "h", &sh, Some(1), "en", "retry", 5500).unwrap() else { panic!() };
+        assert!(vr2.before.is_empty());
+
+        // F: the same revision of another source, and the 3D page of a revision, are different identities
+        let other = layout::TileVersion { source_id: layout::opaque_source_id("/elsewhere/.git", "/elsewhere"), ..ver("1111aaaa") };
+        let mk = |v: layout::TileVersion, kind| layout::Tile { version: Some(v), ..tile("t1", kind, "unit.kicad_pcb", false) };
+        let two = |a: layout::Tile| layout::add(&layout::Layout::single(a).unwrap(), Some("t1"), layout::Side::Right, tile("t2", layout::PageKind::Schematic, "unit.kicad_sch", false), false, None).unwrap();
+        let pic = |l: &layout::Layout| { let mut s = sh.clone(); s["drafts"]["@view.layout:t"] = json!(serde_json::to_string(l).unwrap()); s["drafts"]["@view.at"] = json!(""); viewer::viewer_json(&st, &json!({}), &s).unwrap() };
+        let a = pic(&two(mk(ver("1111aaaa"), layout::PageKind::Board)));
+        let b = pic(&two(mk(other.clone(), layout::PageKind::Board)));
+        assert_ne!(a["tiles"]["t1"]["key"], b["tiles"]["t1"]["key"], "the source id is part of a historical subscription identity");
+        let three_d = pic(&two(mk(ver("1111aaaa"), layout::PageKind::Solid3d)));
+        assert!(three_d["tiles"]["t1"]["layers"].as_str().unwrap().contains("1111aaaa99998888777766665555444433332222"), "a historical 3D layer key names its revision");
+        assert!(!three_d["tiles"]["t1"]["layers"].as_str().unwrap().contains(&root));
+    }
     struct Mine; impl Screen for Mine {
         fn name(&self) -> &'static str { "mine" }
         fn view(&self, p: &Value) -> Option<Value> { if p["target"]["kind"] == "thread" { Some(json!({"shown":{"by":"rust"}})) } else { None } }

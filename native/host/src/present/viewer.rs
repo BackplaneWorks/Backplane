@@ -190,7 +190,7 @@ pub fn view_action_for(
                 } else {
                     root_of(st, sel)
                 };
-                let mut vo = commit_layout(st, hub, session, sel, &eff_root, cur_layout, false);
+                let mut vo = commit_layout_force(st, hub, session, sel, &eff_root, cur_layout, false, true);
                 if now_ms > 0 {
                     if let Some(dm) = vo.patch["drafts"].as_object_mut() {
                         dm.insert("@view.retry.at".into(), json!(now_ms.to_string()));
@@ -1471,7 +1471,7 @@ fn opaque_tile_key(tile: &super::layout::Tile, root: &str) -> String {
     let rel = super::layout::sanitize_rel(root, &tile.source);
     let prefix = if is_tile_versioned(tile) { "hist" } else { "tile" };
     let base = if let Some(v) = &tile.version {
-        format!("{prefix}:{}:{}:{}", tile.kind.as_str(), v.id, rel)
+        format!("{prefix}:{}:{}:{}:{}", tile.kind.as_str(), v.source_id, v.id, rel)
     } else if tile.unresolved_version {
         format!("{prefix}:{}:unresolved:{}", tile.kind.as_str(), rel)
     } else {
@@ -1479,7 +1479,7 @@ fn opaque_tile_key(tile: &super::layout::Tile, root: &str) -> String {
     };
     if let Some(ov) = &tile.overlay {
         let ov_rel = super::layout::sanitize_rel(root, &ov.source);
-        let ov_ver = ov.version.as_ref().map(|v| v.id.as_str()).unwrap_or("live");
+        let ov_ver = ov.version.as_ref().map(|v| format!("{}:{}", v.source_id, v.id)).unwrap_or_else(|| "live".into());
         format!("{base}:ov:{}:{}:{}", ov.kind.as_str(), ov_ver, ov_rel)
     } else {
         base
@@ -1586,7 +1586,30 @@ fn project_version_resolver(root: &str) -> super::layout::VersionSourceMap {
 /// When `geometry_only` is `true` (`layout-resize`, `layout-maximize`, `layout-restore`, or a
 /// structural move/swap that keeps the focused tile identical), emits ZERO watch commands and
 /// does NOT call `pages::leave` (so resizing with Diff or Review up never dismisses it).
-fn commit_layout(
+fn commit_layout(st: &State, hub: &str, session: &Value, sel: &str, root: &str, next: &super::layout::Layout, geometry_only: bool) -> ViewOut {
+    commit_layout_force(st, hub, session, sel, root, next, geometry_only, false)
+}
+
+/// `commit_layout` that, when `force` (a Retry), sends the focused tile's watch even when its key is already the one on show, with `force:true`
+/// (the hub re-reads a failed unchanged source), as main's Retry does for a live page. A leave to one tile leaves nothing of the layout's
+/// pages behind: whichever writer made the single page, the file, sheet and Gerber drafts it did not set are cleared.
+fn commit_layout_force(st: &State, hub: &str, session: &Value, sel: &str, root: &str, next: &super::layout::Layout, geometry_only: bool, force: bool) -> ViewOut {
+    let had_stored = !s(&session["drafts"], &format!("@view.layout:{sel}")).is_empty();
+    let mut vo = commit_layout_core(st, hub, session, sel, root, next, geometry_only, force);
+    let ts = next.tiles();
+    let keep_stored = ts.len() >= 2 || (ts.len() == 1 && ts.iter().all(|t| is_tile_versioned(t)));
+    if had_stored && !geometry_only && !keep_stored {
+        let mut dm = vo.patch.get("drafts").and_then(Value::as_object).cloned().unwrap_or_default();
+        for k in ["@view.file", "@view.sheet", "@view.gerbers"] {
+            let key = format!("{k}:{sel}");
+            if !dm.contains_key(&key) && !s(&session["drafts"], &key).is_empty() { dm.insert(key, json!("")); }
+        }
+        if !dm.is_empty() { vo.patch["drafts"] = Value::Object(dm); }
+    }
+    vo
+}
+
+fn commit_layout_core(
     st: &State,
     hub: &str,
     session: &Value,
@@ -1594,6 +1617,7 @@ fn commit_layout(
     root: &str,
     next: &super::layout::Layout,
     geometry_only: bool,
+    force: bool,
 ) -> ViewOut {
     use super::layout::{OverlayMode, PageKind};
     let d = &session["drafts"];
@@ -1783,9 +1807,10 @@ fn commit_layout(
         drafts.insert(format!("@view.sheet:{sel}"), json!(""));
         drafts.insert(format!("@view.file:{sel}"), json!(wpath));
         let at = s(d, "@view.at");
-        if want != at {
+        if want != at || (force && !want.is_empty()) {
             let on = if sel.contains('~') { format!(",\"on\":{}", jstr(sel.split('~').next().unwrap_or(""))) } else { String::new() };
-            let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"{on}}}", jstr(if want.is_empty() { "" } else { wkind }), jstr(root), jstr(&wpath));
+            let fc = if force { ",\"force\":true" } else { "" };
+            let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"{on}{fc}}}", jstr(if want.is_empty() { "" } else { wkind }), jstr(root), jstr(&wpath));
             before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
             rid += 1;
             drafts.insert("@view.at".into(), json!(want));
@@ -2072,6 +2097,7 @@ fn build_tiles_picture(
         let layers_key = if tile.kind == PageKind::Solid3d {
             if version_error || source_missing { String::new() }
             else if is_focused && !is_versioned { s(viewer, "layers").to_string() }
+            else if is_versioned { opaque_tile_key(&layout::Tile { kind: PageKind::Board, ..tile.clone() }, root) }
             else { format!("tile:board:{}", layout::sanitize_rel(root, &tile.source)) }
         } else {
             plot_key.clone()
@@ -2433,7 +2459,7 @@ pub fn viewer_show_action(
     if sel.is_empty() || !st.threads.contains_key(sel) {
         return None;
     }
-    let pk = PageKind::from_page_str(kind)?;
+    let pk = PageKind::from_page_str(kind);
     let linked = sel.contains('~');
     let root = if linked {
         st.threads.get(sel).map(|t| if !t.worktree.is_empty() { t.worktree.clone() } else { st.projects.get(&t.project).map(|p| p.root.clone()).unwrap_or_default() }).unwrap_or_default()
@@ -2443,6 +2469,10 @@ pub fn viewer_show_action(
     let drafts = &session["drafts"];
     let rel = layout::sanitize_rel(&root, path);
     if let Some(cur) = parse_stored_layout(drafts, sel) {
+        // Split is not a tile kind: with a stored layout it is main's Split writer (guarded like every other transition), which ends the layout
+        let Some(pk) = pk else {
+            return if kind == "split" { view_action_for(st, hub, session, client_id, locale, "split", 0) } else { None };
+        };
         let picked_abs = board_file("board", &root, &chosen_board(drafts, sel, &root));
         let guard = hub_kicad_guard(&cur, &root, &picked_abs, client_id, None, None, linked);
         return Some(match layout::viewer_show(&cur, pk, rel, guard.locked.as_deref()) {
@@ -2473,7 +2503,7 @@ pub fn viewer_show_action(
                     // exact: the page the show names, with the source it names (an unnamed source is the tile's only when the tile is not one the person picked)
                     let same_source = rel == lt.source || (rel.is_empty() && !lt.explicit);
                     let preserves = cur_derived.tiles().len() == 1
-                        && lt.kind == pk
+                        && Some(lt.kind) == pk
                         && lt.version.is_none()
                         && lt.overlay.is_none()
                         && same_source;
@@ -2486,12 +2516,24 @@ pub fn viewer_show_action(
         }
     }
     let prev = s(drafts, &format!("@view:{sel}"));
-    if pk == PageKind::Files && files_kind(prev) && path.is_empty() {
+    if pk == Some(PageKind::Files) && files_kind(prev) && path.is_empty() {
         return Some(LayoutOut::Ok(ViewOut { patch: json!({}), before: vec![], boards_look: false }));
+    }
+    // main's own `view` writer, without Files' toggle (a show never closes): every kind it draws is exactly what `view <kind>` does
+    let named_file = matches!(pk, Some(PageKind::Files)) && !path.is_empty();
+    if !named_file {
+        let wire = match pk {
+            Some(PageKind::Mech) if !path.is_empty() => format!("mech\t{path}"),
+            Some(k) => k.as_str().to_string(),
+            None => kind.to_string(),
+        };
+        if let Some(vo) = legacy_view_inner(st, hub, session, &wire, 0, true) {
+            return Some(LayoutOut::Ok(vo));
+        }
     }
     let single = layout::Layout::single(layout::Tile {
         id: "t1".into(),
-        kind: pk,
+        kind: pk?,
         source: rel,
         explicit: !path.is_empty(),
         version: None,

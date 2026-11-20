@@ -723,6 +723,13 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
                 Some(super::viewer::LayoutOut::Ok(o)) => {
                     crate::session::patch::merge(&mut session, &o.patch);
                     cmds = [read_cmds.clone(), o.before].concat();
+                    // the same tail as `view` (the fab's look, the project's boards): a show is a view that never closes
+                    crate::session::dispatch::fab_tail(&crate::session::dispatch::StateFacts(st), hub, &mut session, &mut cmds);
+                    if o.boards_look {
+                        let rid = session["rid"].as_u64().unwrap_or(0);
+                        cmds.push(json!({"type":"send","hub":hub,"text":format!("{{\"id\":{rid},\"m\":\"boards.list\",\"p\":{{\"thread\":{}}}}}",serde_json::to_string(thread).unwrap_or_default())}));
+                        session["rid"] = json!(rid + 1);
+                    }
                 }
                 Some(super::viewer::LayoutOut::Refused { code, key, text }) => {
                     cmds.push(json!({"type":"say","tone":"note","code":code,"key":key,"text":text}));
@@ -1549,6 +1556,27 @@ mod state_tests {
         let out=recent(&st,&p).unwrap(); assert_eq!(out["shown"]["sidebarPages"][0]["projects"]["offset"],8);
         assert_eq!(out["shown"]["projects"].as_array().unwrap().len(),4); assert_eq!(out["cmds"],json!([])); assert_eq!(seq,st.seq);
         p["value"]=json!("forged"); assert_eq!(recent(&st,&p).unwrap()["refused"],true);
+    }
+    /// An agent's show reaches the hub as `view-show`, main's was `view`: from idle the dispatcher's answer (commands, with the fab's look and the boards
+    /// list, and the session's drafts) is the same for every kind an agent can show.
+    #[test] fn view_show_from_idle_answers_as_the_dispatcher_does_for_view() {
+        let d=crate::plat::tmp::canonical("show-tail"); use crate::plat::tmp::sl;
+        std::fs::write(d.join("a.kicad_pcb"),"(kicad_pcb)").unwrap(); std::fs::write(d.join("a.kicad_sch"),"(kicad_sch)").unwrap();
+        std::fs::create_dir_all(d.join("mech")).unwrap(); std::fs::write(d.join("mech/case.step"),"ISO-10303-21;").unwrap();
+        let root=sl(&d);
+        let mut st=State::new(); st.lean=true;
+        for e in [json!({"$":"ProjectCreated","id":"pa","title":"Amp","root":root,"at":1}),
+                  json!({"$":"ThreadCreated","id":"ta","project":"pa","title":"A","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":5})] { event(&mut st,e); }
+        let map=HashMap::new(); let marks=HashMap::new(); let un=Unified{ far:&map, marks:&marks, here:"desk", rows:&HashMap::new() };
+        let run=|action: &str,value: &str| { let mut q=params(); q["target"]=json!({"kind":"thread","id":"ta"});
+            q["window"]=json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderNext":"","hasMore":false,"remaining":0,"newer":0,"total":0});
+            q["action"]=json!(action); q["value"]=json!(value); recent_unified(&st,&[],&un,&q).unwrap_or_else(|| panic!("{action} {value:?} unanswered")) };
+        for kind in ["board","schematic","3d","split","browser","mech\tmech/case.step","files","gerbers"] {
+            let (v,s)=(run("view",kind),run("view-show",kind));
+            assert_eq!(v["cmds"],s["cmds"],"{kind}: commands");
+            assert_eq!(v["session"]["drafts"],s["session"]["drafts"],"{kind}: drafts");
+            assert_eq!(v["session"]["rid"],s["session"]["rid"],"{kind}: rid");
+        }
     }
 }
 
