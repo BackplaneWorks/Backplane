@@ -525,7 +525,8 @@ mod tests {
         let tick = std::cell::Cell::new(0u64);
         let moved = |p: &Path| {
             let open = |d: &Path| -> Option<std::fs::File> {
-                #[cfg(windows)] { use std::os::windows::fs::OpenOptionsExt; std::fs::OpenOptions::new().access_mode(0x0100).custom_flags(0x0200_0000).open(d).ok() }
+                // std's own OpenOptionsExt, by name: the module's (crate::plat::fs) has a custom_flags too, a no-op on Windows (#1510's E0034)
+                #[cfg(windows)] { use std::os::windows::fs::OpenOptionsExt as W; let mut o = std::fs::OpenOptions::new(); W::access_mode(&mut o, 0x0100); W::custom_flags(&mut o, 0x0200_0000); o.open(d).ok() }
                 #[cfg(not(windows))] { std::fs::File::open(d).ok() }
             };
             tick.set(tick.get() + 1); let t = std::time::SystemTime::now() - std::time::Duration::from_secs(100_000) + std::time::Duration::from_secs(tick.get() * 10);
