@@ -102,6 +102,15 @@ def run_one(size, pct, port, disp):
             if shutil.which('i3'): spawn(['i3', '-c', os.path.join(d, 'i3.conf')], 'i3.log'); time.sleep(1)   # no i3 (this desktop): the window is placed by the client itself, which is enough on a bare Xvfb of the same size
             env.update(VK_ICD_FILENAMES=(sorted(glob.glob('/usr/share/vulkan/icd.d/lvp_icd*.json')) or ['/usr/share/vulkan/icd.d/lvp_icd.json'])[0], LP_NUM_THREADS='2')
             def grab(f):
+                # ImageMagick's import, then xwd when it returns a black image (the CI runner's ImageMagick 6 does, as in gpui-f-rows.py); PIL's grab last
+                try:
+                    if shutil.which('import'):
+                        subprocess.run(['import', '-window', 'root', f], env=env, timeout=30)
+                        from PIL import Image
+                        if Image.open(f).convert('L').getextrema()[1] == 0 and shutil.which('xwd'):
+                            subprocess.run(['sh', '-c', 'xwd -root -silent | convert xwd:- "png:$1"', 'sh', f], env=env, timeout=30)
+                        return
+                except Exception: pass
                 from PIL import ImageGrab
                 ImageGrab.grab(xdisplay=disp_s).save(f)
         else:

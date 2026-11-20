@@ -44,7 +44,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libasound2-dev libwayland-dev libvulkan-dev xvfb i3 x11-xserver-utils mesa-vulkan-drivers libvulkan1 python3-pil > /dev/null
+          sudo apt-get install -y -qq --no-install-recommends libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libasound2-dev libwayland-dev libvulkan-dev xvfb i3 x11-apps x11-xserver-utils imagemagick mesa-vulkan-drivers libvulkan1 python3-pil > /dev/null
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
