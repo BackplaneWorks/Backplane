@@ -2127,6 +2127,7 @@ gpui.c.kicad.phase.answering = KiCad está abriendo el proyecto
 gpui.c.kicad.phase.show = KiCad está dibujando el editor
 gpui.c.kicad.task.wait = KiCad está ejecutando {what}; el editor sigue cuando termine.
 gpui.c.kicad.notice = KiCad dice: {what}
+gpui.c.kicad.firstshow = {editor} no se abrió en KiCad ({why}). Su pestaña de arriba lo vuelve a abrir.
 gpui.c.kicad.this.window.cannot.hold.another = esta ventana no puede alojar la de otro programa (solo X11 y XWayland por ahora)
 gpui.c.kicad.no.x11.connection = sin conexión X11
 gpui.c.kicad.could.not.create.container = no se pudo crear la ventana contenedora
