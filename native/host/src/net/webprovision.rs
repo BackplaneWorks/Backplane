@@ -331,7 +331,12 @@ fn missing_setup_component(admin: bool) -> Option<&'static str> {
     use std::os::unix::fs::{FileTypeExt, PermissionsExt};
     let executable = |path: &str| std::fs::metadata(path).is_ok_and(|file|
         file.is_file() && file.permissions().mode() & 0o111 != 0);
-    if !std::fs::metadata("/run/tailscale/tailscaled.sock").is_ok_and(|file| file.file_type().is_socket()) {
+    let socket = std::fs::metadata("/run/tailscale/tailscaled.sock").is_ok_and(|file| file.file_type().is_socket());
+    setup_component_reason(admin, socket, executable)
+}
+
+fn setup_component_reason(admin: bool, socket: bool, executable: impl Fn(&str) -> bool) -> Option<&'static str> {
+    if !socket {
         return Some("Start Tailscale. Backplane needs its system socket at /run/tailscale/tailscaled.sock.");
     }
     if !executable("/usr/bin/tailscale") { return Some("HTTPS setup requires the Tailscale command at /usr/bin/tailscale."); }
@@ -541,6 +546,17 @@ async fn remove_private_mapping(service: Option<&str>, host: &str, port: u16, so
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn missing_components_name_the_path_and_only_admin_setup_requires_polkit() {
+        assert!(setup_component_reason(false, false, |_| true).unwrap().contains("/run/tailscale/tailscaled.sock"));
+        for path in ["/usr/bin/tailscale", "/usr/bin/curl"] {
+            assert!(setup_component_reason(false, true, |candidate| candidate != path).unwrap().contains(path));
+        }
+        let without_polkit = |candidate: &str| candidate != "/usr/bin/pkexec";
+        assert!(setup_component_reason(false, true, without_polkit).is_none());
+        assert!(setup_component_reason(true, true, without_polkit).unwrap().contains("/usr/bin/pkexec"));
+    }
 
     #[tokio::test]
     async fn disabling_before_bind_cleans_up_a_mapping_installed_by_the_pending_prompt() {
