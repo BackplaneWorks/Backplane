@@ -4728,3 +4728,4 @@ viewer.layout.refusal.sameTile = 異なる 2 つのタイルを選んでくだ�
 viewer.layout.refusal.invalidRatio = 分割比率が無効です
 viewer.layout.refusal.duplicateId = タイルは既に存在します
 viewer.layout.refusal.unknownFrame = 不明な KiCad フレームです
+viewer.layout.refusal.invalidInput = 無効なレイアウト要求です

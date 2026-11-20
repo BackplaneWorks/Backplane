@@ -486,14 +486,22 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             // a thread of another machine is drawn from that machine's mirror (its project folder is a folder over there); the watch it asks for goes there too
             let vsel=text(&session,"sel").to_string();
             let vst: &State=far.iter().map(|(_,f)|*f).find(|f|vsel.contains('~') && f.threads.contains_key(vsel.as_str())).unwrap_or(st);
-            let Some(o)=super::viewer::view_action_at(vst,hub,&session,value,p["now"].as_u64().unwrap_or(0)) else { return refused("action.view-unported") };
-            crate::session::patch::merge(&mut session,&o.patch);
-            cmds=[read_cmds.clone(),o.before].concat();
-            crate::session::dispatch::fab_tail(&crate::session::dispatch::StateFacts(st),hub,&mut session,&mut cmds);
-            if o.boards_look {
-                let rid=session["rid"].as_u64().unwrap_or(0);
-                cmds.push(json!({"type":"send","hub":hub,"text":format!("{{\"id\":{rid},\"m\":\"boards.list\",\"p\":{{\"thread\":{}}}}}",serde_json::to_string(thread).unwrap_or_default())}));
-                session["rid"]=json!(rid+1);
+            let locale=p["locale"].as_str().filter(|s|!s.is_empty()).unwrap_or_else(||st.settings.get("ui.lang").map_or("",String::as_str));
+            match super::viewer::view_action_for(vst,hub,&session,p["designDesktop"].as_u64(),locale,value,p["now"].as_u64().unwrap_or(0)) {
+                Some(super::viewer::LayoutOut::Ok(o)) => {
+                    crate::session::patch::merge(&mut session,&o.patch);
+                    cmds=[read_cmds.clone(),o.before].concat();
+                    crate::session::dispatch::fab_tail(&crate::session::dispatch::StateFacts(st),hub,&mut session,&mut cmds);
+                    if o.boards_look {
+                        let rid=session["rid"].as_u64().unwrap_or(0);
+                        cmds.push(json!({"type":"send","hub":hub,"text":format!("{{\"id\":{rid},\"m\":\"boards.list\",\"p\":{{\"thread\":{}}}}}",serde_json::to_string(thread).unwrap_or_default())}));
+                        session["rid"]=json!(rid+1);
+                    }
+                }
+                Some(super::viewer::LayoutOut::Refused { code, key, text }) => {
+                    cmds.push(json!({"type":"say","tone":"note","code":code,"key":key,"text":text}));
+                }
+                None => return refused("action.view-unported"),
             }
         },
         "bot" => {
@@ -705,7 +713,8 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         // docking/tiling layout actions (present/viewer.rs `layout_action`)
         "layout-add" | "layout-close" | "layout-focus" | "layout-resize" | "layout-swap"
         | "layout-move" | "layout-overlay" | "layout-unsplit" | "layout-maximize" | "layout-restore" => {
-            match super::viewer::layout_action(sel_st, hub, &session, p["designDesktop"].as_u64(), action, value) {
+            let locale=p["locale"].as_str().filter(|s|!s.is_empty()).unwrap_or_else(||st.settings.get("ui.lang").map_or("",String::as_str));
+            match super::viewer::layout_action(sel_st, hub, &session, p["designDesktop"].as_u64(), locale, action, value) {
                 Some(super::viewer::LayoutOut::Ok(o)) => {
                     crate::session::patch::merge(&mut session, &o.patch);
                     cmds = [read_cmds.clone(), o.before].concat();
