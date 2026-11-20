@@ -119,8 +119,11 @@ fn origin(f: &str, k: &str, r: &str) -> (String, String, String) { (f.into(), k.
     assert!(!bots.mail_tool(&lane, "tell_person", &json!({"text":"t","key":"k","x":"y"})).await.0);
     assert!(!bots.mail_tool(&lane, "tell_person", &json!({"text":"The report is in.","key":"ev-1"})).await.0, "no kind, no material: refused"); settle(&bots).await;
     let ask = "The report needs your answer: ship it to the Mac mini first?";
-    assert!(bots.mail_tool(&lane, "tell_person", &json!({"text":ask,"key":"ev-1","kind":"needs_you"})).await.0); settle(&bots).await;
-    assert!(bots.mail_tool(&lane, "tell_person", &json!({"text":ask,"key":"ev-1","kind":"needs_you"})).await.0, "said again: no second post"); settle(&bots).await;
+    assert!(!bots.mail_tool(&lane, "tell_person", &json!({"text":ask,"key":"ev-1","kind":"needs_you"})).await.0, "no ref: refused"); settle(&bots).await;
+    assert!(!bots.mail_tool(&lane, "tell_person", &json!({"text":ask,"key":"ev-1","kind":"needs_you","ref":"ask:q-tell-1"})).await.0, "no such open ask: refused"); settle(&bots).await;
+    hub.commit(&json!({"$":"AskOpened","id":"q-tell-1","thread":th,"kind":"question","tool":"AskUserQuestion","detail":"Ship it to the Mac mini first?","options":"","at":now_s()})).await.unwrap();
+    assert!(bots.mail_tool(&lane, "tell_person", &json!({"text":ask,"key":"ev-1","kind":"needs_you","ref":"ask:q-tell-1"})).await.0); settle(&bots).await;
+    assert!(bots.mail_tool(&lane, "tell_person", &json!({"text":ask,"key":"ev-1b","kind":"needs_you","ref":"ask:q-tell-1"})).await.0, "said again, another key, the same ask: no second post"); settle(&bots).await;
     let posted: Vec<Value> = log(&hub).into_iter().filter(|e| e["$"] == "MessagePosted" && e["thread"] == chat.as_str() && e["role"] == "assistant").collect(); assert_eq!(posted.len(), 1, "{posted:?}"); assert_eq!(posted[0]["text"], ask);
     assert!(rec.notes.lock().unwrap().iter().any(|r| r.0 == chat && r.1.starts_with("told:")), "the owner's agent hears what was said");
     assert!(!rec.rides.lock().unwrap().iter().any(|r| r.1.starts_with("told:")), "a tell is a note alone: it starts no turn in the person's conversation");
@@ -389,6 +392,8 @@ fn shown_lines(hub: &Arc<Hub>, chat: &str) -> Vec<String> {
 async fn due_now(hub: &Arc<Hub>, bots: &Arc<Bots>, bub: &str) { hub.commit(&json!({"$":"SettingSet","key":crate::bots::mail::done::due_key(bub),"value":"1","at":now_s()})).await.unwrap(); bots.done_tick().await; settle(bots).await }
 /// the gate's batch is due now (its 30 minutes are over): the tick sends it
 async fn tell_now(hub: &Arc<Hub>, bots: &Arc<Bots>, bub: &str) { hub.commit(&json!({"$":"SettingSet","key":crate::bots::mail::gate::due_key(bub),"value":"1","at":now_s()})).await.unwrap(); bots.done_tick().await; settle(bots).await }
+/// GitHub's word, in a test: this ref is merged or published
+fn verified(r: &str) { let r = crate::bots::mail::gate::Ref::parse(r).unwrap(); crate::bots::mail::gate::test_verified().lock().unwrap().insert(r.key()); }
 /// the tell_person key a done lane's brief gives it
 fn lane_tell_key(rec: &Arc<Rec>, lane: &str) -> String { let ride = rec.rides.lock().unwrap().iter().find(|r| r.0 == lane).cloned().unwrap(); ride.2.split("tell_person key: ").nth(1).unwrap().lines().next().unwrap().to_string() }
 fn lanes(hub: &Arc<Hub>, bub: &str) -> Vec<String> { runs(hub).iter().filter_map(|r| r["thread"].as_str().filter(|t| t.starts_with(&format!("mailcoord-{bub}-"))).map(str::to_string)).collect() }
@@ -407,9 +412,13 @@ fn lanes(hub: &Arc<Hub>, bub: &str) -> Vec<String> { runs(hub).iter().filter_map
     let key = ride.2.split("tell_person key: ").nth(1).unwrap().lines().next().unwrap().to_string();
     running(&hub, &ls[0]).await; settle(&bots).await;
     let line = "KiCad embed landed (1a2b3c4): not in your running build yet, it needs a hub restart; then open a board and press Open in KiCad.";
-    assert!(!bots.mail_tool(&ls[0], "tell_person", &json!({"text":line,"key":key})).await.0, "a tell names its kind"); settle(&bots).await;
-    assert!(bots.mail_tool(&ls[0], "tell_person", &json!({"text":line,"key":key,"kind":"landed"})).await.0); settle(&bots).await;
-    assert!(bots.mail_tool(&ls[0], "tell_person", &json!({"text":line,"key":key,"kind":"landed"})).await.0); settle(&bots).await;
+    let rf = "commit:BackplaneWorks/Backplane@1a2b3c4";
+    assert!(!bots.mail_tool(&ls[0], "tell_person", &json!({"text":line,"key":key,"ref":rf})).await.0, "a tell names its kind"); settle(&bots).await;
+    assert!(!bots.mail_tool(&ls[0], "tell_person", &json!({"text":line,"key":key,"kind":"landed"})).await.0, "and its ref"); settle(&bots).await;
+    assert!(!bots.mail_tool(&ls[0], "tell_person", &json!({"text":line,"key":key,"kind":"landed","ref":rf})).await.0, "a commit GitHub does not have on main"); settle(&bots).await;
+    verified(rf);
+    assert!(bots.mail_tool(&ls[0], "tell_person", &json!({"text":line,"key":key,"kind":"landed","ref":rf})).await.0); settle(&bots).await;
+    assert!(bots.mail_tool(&ls[0], "tell_person", &json!({"text":line,"key":key,"kind":"landed","ref":rf})).await.0); settle(&bots).await;
     end(&hub, &ls[0], "completed").await; settle(&bots).await;
     assert!(shown_lines(&hub, &chat).is_empty(), "a landing waits for the batch"); tell_now(&hub, &bots, &bub).await;
     assert_eq!(shown_lines(&hub, &chat), vec![line.to_string()], "one visible line, shown although the chat's last input was the hub's");
@@ -423,7 +432,7 @@ fn lanes(hub: &Arc<Hub>, bub: &str) -> Vec<String> { runs(hub).iter().filter_map
     assert_eq!(shown_lines(&hub, &chat).len(), 1);
 }
 
-#[tokio::test] async fn two_finishes_within_a_minute_are_one_batched_line_and_a_silent_lanes_landing_digest_is_told() {
+#[tokio::test] async fn two_finishes_within_a_minute_are_one_lane_and_a_silent_lanes_digest_is_never_told() {
     let (hub, bots, rec, bub, chat) = uber("done-two").await;
     report(&bots, &chat, "t1794400000-2", "launch", &crate::agents::launch::note("t1794400000-2", "Sync-token fix", "completed", "Landed 5d6e7f8 on main.")).await;
     report(&bots, &chat, "t1794400000-3", "launch", &crate::agents::launch::note("t1794400000-3", "Scroll fixes", "completed", "Chat scrolls up without jumps.")).await; settle(&bots).await;
@@ -431,11 +440,10 @@ fn lanes(hub: &Arc<Hub>, bub: &str) -> Vec<String> { runs(hub).iter().filter_map
     due_now(&hub, &bots, &bub).await;
     let ls = lanes(&hub, &bub); assert_eq!(ls.len(), 1, "both finishes in one lane");
     let ride = rec.rides.lock().unwrap().iter().find(|r| r.0 == ls[0]).cloned().unwrap(); assert!(ride.2.contains("Sync-token fix") && ride.2.contains("Scroll fixes") && ride.2.contains("Finished (2)"));
-    // the lane says nothing and ends: the hub posts the plain digest, once
+    // the lane says nothing and ends: the hub's digest names no verified ref, so nothing is posted (Nov 20: 56 "Done: …" digests reached the person)
     running(&hub, &ls[0]).await; settle(&bots).await; end(&hub, &ls[0], "completed").await; settle(&bots).await;
     end(&hub, &ls[0], "failed").await; settle(&bots).await; tell_now(&hub, &bots, &bub).await;
-    let shown = shown_lines(&hub, &chat); assert_eq!(shown.len(), 1, "{shown:?}");
-    assert_eq!(shown[0], "Done:\n- Sync-token fix: Landed 5d6e7f8 on main. (backplane://thread/t1794400000-2)\n- Scroll fixes: Chat scrolls up without jumps. (backplane://thread/t1794400000-3)");
+    let shown = shown_lines(&hub, &chat); assert!(shown.is_empty(), "{shown:?}");
     assert!(!rec.rides.lock().unwrap().iter().any(|r| r.1.starts_with("lost:")), "a done lane is not handed over as lost");
     bots.done_tick().await; settle(&bots).await; assert_eq!(lanes(&hub, &bub).len(), 1, "nothing left to flush");
 }
@@ -497,8 +505,8 @@ const QUIET: [&str; 10] = ["Nothing landed, and your build is unchanged. PR #136
         report(&bots, &chat, th, "launch", &crate::agents::launch::note(th, &format!("Fix {i}"), "completed", &format!("Landed {sha} on main."))).await; settle(&bots).await;
         due_now(&hub, &bots, &bub).await; let ls = lanes(&hub, &bub); assert_eq!(ls.len(), i + 1); let lane = ls.iter().find(|l| !said.iter().any(|(x, _): &(String, String)| x == *l)).unwrap().clone();
         let key = lane_tell_key(&rec, &lane); running(&hub, &lane).await; settle(&bots).await;
-        let line = format!("Fix {i} landed on main ({sha}); it will be in your next build.");
-        let r = bots.mail_tool(&lane, "tell_person", &json!({"text":line,"key":key,"kind":"landed"})).await; assert!(r.0 && r.1["told"] == "batched", "{}", r.1);
+        let line = format!("Fix {i} landed on main ({sha}); it will be in your next build."); let rf = format!("commit:BackplaneWorks/Backplane@{sha}"); verified(&rf);
+        let r = bots.mail_tool(&lane, "tell_person", &json!({"text":line,"key":key,"kind":"landed","ref":rf})).await; assert!(r.0 && r.1["told"] == "batched", "{}", r.1);
         assert!(r.1["sends_at"].as_u64().unwrap() >= now_s() + crate::bots::mail::gate::BATCH - 5, "collected for 30 minutes");
         end(&hub, &lane, "completed").await; settle(&bots).await; said.push((lane, line));
         assert!(shown_lines(&hub, &chat).is_empty(), "collected, not sent");
@@ -510,7 +518,8 @@ const QUIET: [&str; 10] = ["Nothing landed, and your build is unchanged. PR #136
     report(&bots, &chat, "t1794400001-4", "launch", &crate::agents::launch::note("t1794400001-4", "Fix 4", "completed", "Landed 335f784238 on main.")).await; settle(&bots).await;
     due_now(&hub, &bots, &bub).await; let lane = lanes(&hub, &bub).into_iter().find(|l| !said.iter().any(|(x, _)| x == l)).unwrap();
     let key = lane_tell_key(&rec, &lane); running(&hub, &lane).await; settle(&bots).await;
-    let r = bots.mail_tool(&lane, "tell_person", &json!({"text":"Fix 4 landed on main (335f784238).","key":key,"kind":"landed"})).await;
+    verified("commit:BackplaneWorks/Backplane@335f784238");
+    let r = bots.mail_tool(&lane, "tell_person", &json!({"text":"Fix 4 landed on main (335f784238).","key":key,"kind":"landed","ref":"commit:BackplaneWorks/Backplane@335f784238"})).await;
     assert!(r.0 && r.1["told"] == "batched" && r.1["sends_at"].as_u64().unwrap() >= now_s() + crate::bots::mail::gate::BATCH - 5, "{}", r.1);
     bots.done_tick().await; settle(&bots).await; assert_eq!(shown_lines(&hub, &chat).len(), 1, "never several in a row");
 }
@@ -519,13 +528,15 @@ const QUIET: [&str; 10] = ["Nothing landed, and your build is unchanged. PR #136
     let (hub, bots, rec, bub, chat) = uber("gate-needs").await;
     report(&bots, &chat, "t1794400002-1", "launch", &crate::agents::launch::note("t1794400002-1", "Lead: KiCad", "completed", "Landed 9dfb99ed5 on main; the licence choice is yours to make.")).await; settle(&bots).await;
     due_now(&hub, &bots, &bub).await; let lane = lanes(&hub, &bub)[0].clone(); let key = lane_tell_key(&rec, &lane); running(&hub, &lane).await; settle(&bots).await;
-    assert!(bots.mail_tool(&lane, "tell_person", &json!({"text":"PR #1406 landed on main (9dfb99ed5).","key":format!("{key}-a"),"kind":"landed"})).await.0);
+    verified("pr:BackplaneWorks/Backplane#1406");
+    assert!(bots.mail_tool(&lane, "tell_person", &json!({"text":"PR #1406 landed on main (9dfb99ed5).","key":format!("{key}-a"),"kind":"landed","ref":"BackplaneWorks/Backplane#1406"})).await.0);
+    for q in ["q-lic", "q-priv"] { hub.commit(&json!({"$":"AskOpened","id":q,"thread":"t1794400002-1","kind":"question","tool":"AskUserQuestion","detail":"x","options":"","at":now_s()})).await.unwrap(); }
     assert!(shown_lines(&hub, &chat).is_empty());
-    let r = bots.mail_tool(&lane, "tell_person", &json!({"text":"KiCad bp.13.x licence: GPL-only or keep the extra notices? Your call.","key":format!("{key}-b"),"kind":"needs_you"})).await;
+    let r = bots.mail_tool(&lane, "tell_person", &json!({"text":"KiCad bp.13.x licence: GPL-only or keep the extra notices? Your call.","key":format!("{key}-b"),"kind":"needs_you","ref":"ask:q-lic"})).await;
     assert!(r.0 && r.1["told"] == "now", "{}", r.1); settle(&bots).await;
     let shown = shown_lines(&hub, &chat); assert_eq!(shown.len(), 1, "{shown:?}");
     assert!(shown[0].starts_with("- KiCad bp.13.x licence") && shown[0].contains("PR #1406 landed"), "the ask first, the landing with it: {}", shown[0]);
-    let r = bots.mail_tool(&lane, "tell_person", &json!({"text":"Approve the Mac mini privacy prompt?","key":format!("{key}-c"),"kind":"needs_you"})).await;
+    let r = bots.mail_tool(&lane, "tell_person", &json!({"text":"Approve the Mac mini privacy prompt?","key":format!("{key}-c"),"kind":"needs_you","ref":"ask:q-priv"})).await;
     assert!(r.0 && r.1["told"] == "batched", "a second ask within a minute waits: {}", r.1); settle(&bots).await;
     assert_eq!(shown_lines(&hub, &chat).len(), 1);
 }

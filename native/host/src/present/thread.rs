@@ -168,8 +168,10 @@ pub fn bot_private(id: &str, role: &str, text: &str) -> bool {
 /// The hub's routine bookkeeping in a thread, which every client leaves out of the timeline (the log keeps it; agents read it with thread_read):
 /// the snapshot before each turn (agents/snapguard.rs, files/snapshot.rs `Snap::line`; the user message's Restore to before this carries it
 /// instead), a folder made a git repository, and the design files committed or recorded at a turn's end (agents/design.rs). A warning or an
-/// error is never quiet, nor a commit line that says its push failed.
+/// error is never quiet, nor a commit line that says its push failed. Also the delivery bookkeeping of waiting messages (agents/codex.rs `ride_done`: "Delivered
+/// with a new turn: N waiting message(s)", "Delivered with the steer: …"; Nov 20, a "ride Delivered with a new turn: 41 waiting message(s)" row in Bub's chat).
 pub fn quiet_act(role: &str, akind: &str, text: &str) -> bool {
+    if akind == "ride" && role == "info" { return text.starts_with("Delivered ") }
     if akind != "git" || role != "info" { return false }
     if snap_line(text).is_some() || text.starts_with("Made this folder a git repository") || text.starts_with("The snapshot of this project is taking more than") { return true }
     (text.starts_with("Committed ") || text.starts_with("Recorded ")) && text.contains(" design file") && !text.contains("not pushed")
@@ -1027,6 +1029,8 @@ mod tests {
         for (tone, x) in [("warn", "Design files not committed to main: the project is not in a git repository"), ("info", "Committed 1 design file to main as abc1234; not pushed: fatal: no remote"),
             ("info", "This request is a review: the design files are read-only for it"), ("info", "Restored the project to before turn 3 (snapshot 1234abc) as 9999999."), ("warn", "No snapshot before this turn: disk full")] { assert!(!quiet_act(tone, "git", x), "{x}") }
         assert!(!quiet_act("info", "tool", snap_new), "only the hub's git rows");
+        for x in ["Delivered with a new turn: 41 waiting message(s)", "Delivered with the steer: 2 waiting message(s)"] { assert!(quiet_act("info", "ride", x), "{x}") }
+        assert!(!quiet_act("warn", "ride", "Delivered with a new turn: 1 waiting message(s)") && !quiet_act("info", "tool", "Delivered with a new turn: 1 waiting message(s)"), "only the hub's own ride rows");
         // a thread: two turns, the same warning each turn
         let warn = "Design files not committed to main: the project is not in a git repository";
         let es = vec![m("u1", "user", "route it", 1), g("s1", "info", snap_new), m("a1", "assistant", "done", 2), g("c1", "info", "Committed 1 design file to main as abc1234: a.kicad_pcb"), g("w1", "warn", warn),
