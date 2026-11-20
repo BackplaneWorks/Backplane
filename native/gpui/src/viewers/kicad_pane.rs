@@ -69,6 +69,13 @@ pub fn tab_change<'a>(was: &str, now: &'a str) -> Option<&'a str> { (now != was)
 /// Reaction to `PaneTab`: repaint only (never call back into `show_kind` or send a hub RPC).
 /// Both `kicad_edit`'s subscription and the no-feedback unit test call this function.
 fn on_pane_tab(notify: impl FnOnce()) { notify(); }
+/// Who chose a frame the pane shows: the person (a tab, a key, the rail) or the hub for an agent (an agent's viewer_show).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShowBy { Deliberate, Automatic }
+impl ShowBy {
+    /// Whether the show hands KiCad the keyboard: only the person's; an agent's never takes it from the composer.
+    pub fn takes_keys(self) -> bool { self == ShowBy::Deliberate }
+}
 /// KiCad's Simulator frame (bp.13.2, capability `sim-frame`): the rail's Simulation entry opens the pane on it.
 pub const SIM: &str = "SIMULATOR"; // i18n-ok: wire frame kind
 /// The frame the rail's Simulation entry opens, from the hub's viewer (`simFrame`: its KiCad embeds the Simulator and the project has a
@@ -739,7 +746,7 @@ impl KicadPane {
         if let Some((k, next)) = closed {
             eprintln!("GPUI_LOG {}", json!({"kicad_frame_closed": k, "to": next}));
             match next {
-                Some(to) => { self.override_kind = None; self.show_kind_inner(&to, cx); cause = "the frame shown closed in KiCad: the page's own editor".into(); } // i18n-ok: a debug log cause
+                Some(to) => { self.override_kind = None; self.show_kind_inner(&to, ShowBy::Deliberate, cx); cause = "the frame shown closed in KiCad: the page's own editor".into(); } // i18n-ok: a debug log cause
                 None => cx.emit(PaneFrameClosed(k)),
             }
         }
@@ -865,11 +872,15 @@ impl KicadPane {
         if !self.open_gerbers(files, cx) { self.want_gerbers = files.to_vec(); cx.notify(); }
     }
     pub fn show_kind(&mut self, kind: &str, cx: &mut Context<Self>) { self.show_kind_by(kind, "show_kind", cx) }
-    pub fn show_kind_by(&mut self, kind: &str, cause: &str, cx: &mut Context<Self>) {
-        let was_tab = self.tab(); self.show_kind_inner(kind, cx); self.note_tab(&was_tab, cause, cx);
+    pub fn show_kind_by(&mut self, kind: &str, cause: &str, cx: &mut Context<Self>) { self.show_kind_as(kind, cause, ShowBy::Deliberate, cx) }
+    /// The same show, saying who chose it: the person's (Deliberate: a tab, a key, the rail) hands KiCad the keyboard; the hub's or an
+    /// agent's (Automatic: an agent's viewer_show, issue 1355) switches the frame and leaves the keyboard where it is (KiCad keeps it
+    /// if it had it, as a rail page switch does). The same idea as the attach's `Deliberate` / `Automatic`.
+    pub fn show_kind_as(&mut self, kind: &str, cause: &str, by: ShowBy, cx: &mut Context<Self>) {
+        let was_tab = self.tab(); self.show_kind_inner(kind, by, cx); self.note_tab(&was_tab, cause, cx);
     }
-    fn show_kind_inner(&mut self, kind: &str, cx: &mut Context<Self>) {
-        self.want_keys = true;
+    fn show_kind_inner(&mut self, kind: &str, by: ShowBy, cx: &mut Context<Self>) {
+        if by.takes_keys() { self.want_keys = true; }
         if kind == frame_for(&self.open) { self.override_kind = None; } else { self.override_kind = Some(kind.to_string()); }
         self.placed = None;
         if self.attached && matches!(self.info["state"].as_str(), Some("stopped" | "failed")) { self.reattach(); }
@@ -1637,6 +1648,11 @@ impl Render for KicadPane {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn only_the_persons_show_hands_kicad_the_keyboard() {
+        use super::ShowBy;
+        assert!(ShowBy::Deliberate.takes_keys(), "a tab, a key, the rail: the person chose the editor");
+        assert!(!ShowBy::Automatic.takes_keys(), "an agent's viewer_show switches the frame, never the keyboard");
+    }
     /// #1199: on macOS KiCad's frame leaves the screen when the page lets the editor go (the viewer closed, another thread or page), not
     /// on a frame that only missed the pane's hitbox (our window inactive while KiCad has the keyboard, d563d8a5ab), and never while
     /// KiCad has a dialog open; it comes back only once the pane is drawn again.
