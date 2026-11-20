@@ -17,6 +17,10 @@ gpui 0.2.2 (Apache-2.0) vendored without `examples/` (and its `[[example]]` targ
   and hides it under anything gpui draws on top (`viewers/cef_page.rs`).
 - `src/platform/linux/x11/window.rs`: `X11Window` gives its window id as a raw window handle (upstream: `unimplemented!()`), the parent of Chromium's window.
 - `src/platform/linux/x11/client.rs`: a `FocusOut` with detail `Inferior` (the keyboard went to a child window of ours, the Browser tab's Chromium) leaves the window active.
+- `src/platform/linux/x11/client.rs`: each window gets a key proxy (`key_proxy`: an InputOnly 1x1 child outside the window, selecting only key events, named in the
+  window's `_BACKPLANE_KEY_PROXY` property), and a key it reads is the window's own (`from_key_proxy`). With the X focus on the window itself, core X gives a key
+  to the window under the pointer when that is inside it, so a native child (the embedded KiCad pane) took keys typed with the pointer resting over it; the client
+  focuses the proxy instead while the keyboard is Backplane's (`viewers/native_child.rs`). A key never propagates above the focus window: the proxy must read it.
 
 - `src/platform/windows/directx_renderer.rs`: the DirectComposition target is not topmost (`CreateTargetForHwnd(hwnd, false)`), so child windows (the Browser tab's
   Chromium) are composited above gpui's drawing; topmost, DWM put gpui's visual over them and the page could not be seen.

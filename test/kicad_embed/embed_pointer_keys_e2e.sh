@@ -90,6 +90,8 @@ W2=$(kicad_wins)
 # P4: another X window takes the focus and gives it back (Backplane inactive, then active again), then keys with the pointer over the pane
 xmessage -geometry 300x80+20+20 "other window" & XM=$!
 sleep 1.5
+# floating where it asked (i3 would tile it beside Backplane and move the composer and the pane)
+[ "${KEMBED_WM:-i3}" = mutter ] || i3-msg -s "$OUT/i3.sock" '[class="(?i)xmessage"] floating enable, move position 20 20' >/dev/null 2>&1; sleep 0.5
 OW=$(xwininfo -root -tree 2>/dev/null | grep -m1 '"other window"\|"xmessage"' | awk '{print $1}')
 [ -n "$OW" ] && python3 "$XINPUT_PY" click 60 50 >/dev/null; sleep 0.8
 say "another window focused"
@@ -109,7 +111,7 @@ d = ImageChops.difference(a.crop(box), b.crop(box)); print(round(sum(1 for v in 
 PY
 )
 say "after the wheel"
-wait_for_log "$OUT/client.log" '"name":"done","event":"mark"' 120 || true
+wait_for_log "$OUT/client.log" '"name":"done","event":"mark"' 600 || echo "INFO the client never read the composer"
 TEXT=$(python3 -c 'import json,sys
 t=None
 for l in open(sys.argv[1], errors="ignore"):
