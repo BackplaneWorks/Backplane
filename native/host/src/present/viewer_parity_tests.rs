@@ -17,7 +17,12 @@ fn normalize(v: &Value, root: &str) -> Value {
     match v {
         Value::String(s) => {
             let s = s.replace(root, "<ROOT>");
-            Value::String(s)
+            // history sources carry the repo top's byte length before it (`rv::hist_git`): it varies with the temp folder's name
+            let mut parts: Vec<String> = s.split('\t').map(str::to_string).collect();
+            for i in 0..parts.len().saturating_sub(1) {
+                if !parts[i].is_empty() && parts[i].bytes().all(|b| b.is_ascii_digit()) && parts[i + 1].starts_with("<ROOT>") { parts[i] = "<LEN>".into(); }
+            }
+            Value::String(parts.join("\t"))
         }
         Value::Array(arr) => Value::Array(arr.iter().map(|x| normalize(x, root)).collect()),
         Value::Object(map) => {
