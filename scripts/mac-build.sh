@@ -14,6 +14,10 @@ COLD=0; CHECK=0; [ "${1:-}" = cold ] && { COLD=1; shift; }; [ "${1:-}" = check ]
 export RSYNC_RSH="$SSH"
 $SSH $HOST "mkdir -p ~/$DEST/src/i18n ~/$DEST/src/native/host/src/term ~/$DEST/src/assets/web ~/$DEST/src/scripts ~/$DEST/dist ~/$DEST/logs"
 rsync -a --delete --exclude target --exclude '*.rs.bk' "$ROOT/native/gpui/" $HOST:$DEST/src/native/gpui/
+# every file outside native/gpui the client's build reads (its #[path] modules and include_str!/include_bytes!, followed): derived from the
+# sources each time (scripts/gpui-outside-files.py), so a fresh copy builds (Nov 20: native/winres.rs and three hub files were missing)
+OUTSIDE=$(python3 -I "$ROOT/scripts/gpui-outside-files.py" "$ROOT")
+printf '%s\n' "$OUTSIDE" | rsync -a --files-from=- "$ROOT/" $HOST:$DEST/src/
 rsync -a --exclude cat-rigs "$ROOT/assets/" $HOST:$DEST/src/assets/   # the client compiles in fonts, provider marks and the web colours
 rsync -a --delete "$ROOT/i18n/" $HOST:$DEST/src/i18n/   # the client compiles in the language catalogs (i18n.rs include_str!)
 rsync -a "$ROOT/native/host/src/term/vt.rs" $HOST:$DEST/src/native/host/src/term/   # the client's terminal parser is the hub's (main.rs `mod vt`)
