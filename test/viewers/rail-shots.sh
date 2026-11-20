@@ -544,7 +544,7 @@ PY
   DRV_EXTRA=()
   [ "$USE_EMBED" = "1" ] && DRV_EXTRA+=(--embed)
   if [[ -n ${RAIL_B2_SIZE:-} ]]; then
-    python3 "$SCRIPT_DIR/rail_b2.py" --script >"$SCRIPT_JSON"
+    RAIL_B2_KIND="$kind" python3 "$SCRIPT_DIR/rail_b2.py" --script >"$SCRIPT_JSON"
   else
     python3 "$SCRIPT_DIR/rail_shots_driver.py" gen-script "$kind" "$SCRIPT_JSON" "${RAIL_EARLY_MS:-300}" "${RAIL_SETTLE_TIMEOUT_MS:-15000}" "${DRV_EXTRA[@]}"
   fi

@@ -1,4 +1,4 @@
-"""Run rail-shots.sh --b2 CLIENT HUB ASSETS EMPTY_OUTDIR for the two-width header check."""
+"""Run rail-shots.sh --b2 CLIENT HUB ASSETS EMPTY_OUTDIR for the three-width header check."""
 import json
 import os
 from pathlib import Path
@@ -50,7 +50,7 @@ def tool_orders(reports):
             "files": ["kicad-edit"] if "kicad-edit" in observed else [],
         }
         expected += actions.get(page, [])
-        for result in (wide, narrow):
+        for result in [wide, narrow] + ([reports["615"][page]] if "615" in reports else []):
             if "tools" not in result:
                 continue
             ids = result["tools"]
@@ -63,7 +63,7 @@ def tool_orders(reports):
             inline = [key for key in current if key in ids]
             missing = [key for key in current if key not in ids]
             order_ok = ids == inline and (
-                (not result["more"] and not missing) if result is wide else
+                (not result["more"] and not missing) if result is not narrow else
                 (result["more"] == bool(missing) and result.get("menu_rows", []) == missing))
             result["checks"]["expected_tools"] = order_ok
             if not order_ok:
@@ -72,10 +72,15 @@ def tool_orders(reports):
 
 def script():
     steps = [{"select": 0}]
-    for title in IDENTITY:
+    for title in (["Review"] if os.environ.get("RAIL_B2_KIND") == "no-design" else IDENTITY):
         page = title.lower()
         steps.extend([{"mark": page}, {"press": f"rail:{title}"},
-                      {"shot": page, "settle": page, "timeout_ms": 20000}])
+                      {"wait_settled": page, "timeout_ms": 20000}])
+        if page == "review":
+            steps.append({"wait": 1200})
+        if page == "files":
+            steps.append({"files": "select:README.md"})
+        steps.append({"shot": page, "settle": page, "timeout_ms": 20000})
         if os.environ.get("RAIL_B2_SIZE") == "minimum":
             steps.extend([{"wait": 300}, {"shot": page + "-menu"}])
             if page == "gerbers":
@@ -210,9 +215,11 @@ def measure(image, shot, title, size, crop):
     checks = {"page": current == page, "settled": shot["settled"],
               "identity": label in labels, "row_height": bool(header and reference and abs(header["h"]-reference["h"]) <= 1),
               "header_aligned": bool(header and max(abs(a-b) for a,b in zip(box(header), bounds)) <= 2),
-              "width": abs(right-left-320) <= 2 if size == "minimum" else right-left >= 600}
+              "width": abs(right-left-320) <= 2 if size == "minimum" else abs(right-left-(743 if page == "split" else 615)) <= 2 if size == "615" else right-left >= 600}
     rects = [box(probes[n]) if n in probes else None for n in names]
     identity, tools, close = rects
+    checks["identity_width"] = bool(identity and identity[2]-identity[0] >= identity_font(round(height*12/32)).getlength(label))
+    checks["close_at_right"] = bool(close and 0 <= right-close[2] <= height/2)
     checks["identity_painted"] = bool(identity and contains(bounds, identity) and label in labels
                                       and identity_pixels(image, identity, label, height))
     checks["close_painted"] = bool(close and contains(bounds, close) and close_pixels(image, close))
@@ -224,12 +231,53 @@ def measure(image, shot, title, size, crop):
             "crop": crop.name}
 
 
-def evaluate(directory, size, rc):
-    fixture = directory / "full"
+def content_evidence(image, shot, page, kind, files_selected):
+    viewer = shot["viewer"]
+    state = shot["state"]
+    body = (box(shot["layout"]["main"])[2], box(shot["layout"]["topbar"])[3]+32,
+            box(shot["layout"]["rail"])[0], image.height)
+    if page == "review":
+        rows = [key for key, rect in shot["probe_rects"].items()
+                if key.startswith("mgmt:bom:row:") and contains(body, box(rect)) and painted(image, box(rect))]
+        empty = viewer.get("empty_text")
+        ok = (state == "empty" and empty == "Nothing to review yet" and not rows
+              if kind == "no-design" else state == "ready" and "mgmt:bom:row:C1" in rows)
+        return ok, dict(state=state, painted_rows=rows, empty_text=empty)
+    if page == "files":
+        return state == "ready" and files_selected, dict(selected_readme=files_selected)
+    if page == "diff":
+        names = viewer.get("diff_file_names", [])
+        return state == "ready" and "README.md" in names, dict(files=names)
+    # Colored drawing pixels below the controls distinguish a drawing from a status line.
+    x, y, right, bottom = body
+    colors = image.crop((x+4, y+64, right-4, bottom-24)).convert("RGB").getcolors(image.width*image.height)
+    ink = sum(n for n, rgb in colors if max(rgb)-min(rgb) > 40)
+    key = viewer.get("plot_key", "")
+    if page == "split":
+        ok = viewer.get("panes_count") == 3 and viewer.get("solid_painted", 0) > 0
+    else:
+        ok = key and key == viewer.get("key") and not viewer.get("plot_none")
+    return bool(ok and state == "ready" and ink > 100), dict(state=state, colored_pixels=ink,
+        plot_kind=key.split("|")[0], panes=viewer.get("panes_count"), solid_frames=viewer.get("solid_painted"))
+
+
+def theme_evidence(image, shot, theme):
+    left = box(shot["layout"]["main"])[2] + 4
+    right = box(shot["layout"]["rail"])[0] - 4
+    top = box(shot["layout"]["topbar"])[3] + 64
+    body = image.crop((left, top, right, image.height-24)).convert("RGB")
+    count, rgb = max(body.getcolors(body.width*body.height))
+    palette = {"light": (250, 250, 248), "dark": (13, 15, 18)}
+    return rgb == palette[theme] and count > body.width*body.height/2, dict(
+        requested=theme, dominant_rgb=rgb, pixels=count, total=body.width*body.height)
+
+
+def evaluate(directory, size, rc, kind="full", theme="dark"):
+    fixture = directory / kind
     parsed = parse_client_log(fixture / "client.log")
     captures = parse_captures(fixture)
     results = {}
-    for title in IDENTITY:
+    for title in (["Review"] if kind == "no-design" else IDENTITY):
         page = title.lower()
         cap = captures.get(page, {})
         shot = parsed["shots"].get(page, {})
@@ -237,7 +285,23 @@ def evaluate(directory, size, rc):
             if rc or not cap.get("ok") or not shot or shot_privacy_reasons(cap, shot):
                 raise ValueError(f"missing or uncleared capture, runner exit {rc}")
             with Image.open(fixture / f"{page}.png") as image:
-                result = measure(image, shot, title, size, directory / f"{page}-header.png")
+                result = measure(image, shot, title, size, fixture / f"{page}-header.png")
+                selected = False
+                if page == "files":
+                    for line in (fixture / "client.log").read_text().splitlines():
+                        if "GPUI_METRIC " in line:
+                            event = json.loads(line.split("GPUI_METRIC ", 1)[1])
+                            if event.get("event") == "files" and event.get("step") == "select:README.md":
+                                selected = event.get("ok") is True
+                result["checks"]["content"], result["body"] = content_evidence(image, shot, page, kind, selected)
+                result["shot"] = str((fixture / f"{page}.png").resolve())
+                if kind == "full" and page in ("review", "diff", "files"):
+                    result["checks"]["theme"], result["theme"] = theme_evidence(image, shot, theme)
+                result["crop"] = f"{kind}/{page}-header.png"
+                if page == "review" and size != "minimum":
+                    result["checks"]["four_inline_tabs"] = result["tools"][:4] == TOOL_ORDER["review"]
+                if not all(result["checks"].values()):
+                    result["outcome"] = "task_failed"
             if size == "minimum" and result.get("more"):
                 name = page + "-menu"
                 menu_shot, menu_cap = parsed["shots"][name], captures[name]
@@ -315,13 +379,19 @@ def main(client, hub, assets, output):
     root.mkdir(parents=True, exist_ok=True)
     if any(root.iterdir()):
         raise SystemExit("B2 needs an empty output directory")
+    theme = os.environ.get("RAIL_B2_THEME", "dark")
+    if theme not in ("dark", "light"):
+        raise SystemExit("RAIL_B2_THEME must be light or dark")
+    theme_file = root.resolve() / "theme.json"
+    theme_file.write_text(json.dumps({"theme": theme, "text_pct": 100}))
     reports = {}
-    for size in ("wide", "minimum"):
+    for size in ("615", "wide", "minimum"):
         directory = root / size
         rc = subprocess.run(["bash", str(Path(__file__).with_name("rail-shots.sh")),
                              client, hub, assets, str(directory)],
-                            env=dict(os.environ, RAIL_B2_SIZE=size, RAIL_KINDS="full")).returncode
-        reports[size] = evaluate(directory, size, rc)
+                            env=dict(os.environ, BACKPLANE_GPUI_LOCAL=str(theme_file), RAIL_B2_SIZE=size, RAIL_KINDS="full no-design")).returncode
+        reports[size] = evaluate(directory, size, rc, theme=theme)
+        reports[size]["review-empty"] = evaluate(directory, size, rc, "no-design", theme)["review"]
         if all("crop" in r for r in reports[size].values()):
             crops = [Image.open(directory / r["crop"]) for r in reports[size].values()]
             strip = Image.new("RGB", (max(im.width for im in crops), sum(im.height for im in crops)))
@@ -332,6 +402,7 @@ def main(client, hub, assets, output):
                 im.close()
             strip.save(root / (size + "-strip.png"))
     tool_orders(reports)
+    tool_orders({size: {**pages, "review": pages["review-empty"]} for size, pages in reports.items()})
     outcomes = {r["outcome"] for results in reports.values() for r in results.values()}
     overall = next(o for o in ("harness_failed", "task_failed", "passed") if o in outcomes)
     (root / "b2.json").write_text(json.dumps({"outcome": overall, "sizes": reports}, indent=2) + "\n")
