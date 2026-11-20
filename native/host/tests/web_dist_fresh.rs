@@ -242,6 +242,7 @@ fn web_dist_is_fresh_and_meets_csp_and_size_budget() {
         "setAttribute(\"style\"",
         "setAttribute('style'",
         ".style.cssText",
+        "style=",
     ] {
         assert!(
             !term_js.contains(forbidden),

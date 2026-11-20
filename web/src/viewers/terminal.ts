@@ -205,8 +205,8 @@ export function mountTerminalPane(
     void api.hub.rpc("term.write", { key: sw.activeKey, b: encodeBase64Utf8(data) }).catch(() => {});
   });
 
-  async function watchKey(key: string, existingGen?: number): Promise<void> {
-    const prevKey = sw.activeKey;
+  async function watchKey(key: string, existingGen?: number, priorKeyOverride?: string): Promise<void> {
+    const prevKey = priorKeyOverride !== undefined ? priorKeyOverride : sw.activeKey;
     const gen = existingGen !== undefined ? existingGen : sw.beginSelect(key);
     if (existingGen !== undefined) {
       sw.inputReady = false;
@@ -261,11 +261,12 @@ export function mountTerminalPane(
       });
       if (!alive) return;
       const key = typeof res?.key === "string" && res.key ? res.key : threadId;
-      if (!sw.resolveNew(gen, key)) {
+      const { applied, prevKey } = sw.resolveNew(gen, key);
+      if (!applied) {
         syncSessionSelect();
         return;
       }
-      await watchKey(key, gen);
+      await watchKey(key, gen, prevKey);
     } catch (err) {
       if (!alive || !sw.isCurrent(gen)) return;
       statusEl.textContent = err instanceof Error ? err.message : String(err);
@@ -273,6 +274,7 @@ export function mountTerminalPane(
   }
 
   async function createExtraShell(): Promise<void> {
+    const priorKey = sw.activeKey;
     const gen = sw.beginSelect();
     term.reset();
     try {
@@ -289,15 +291,26 @@ export function mountTerminalPane(
       });
       if (!alive) return;
       if (typeof res?.key === "string" && res.key) {
-        if (!sw.resolveNew(gen, res.key)) {
+        const { applied, prevKey } = sw.resolveNew(gen, res.key);
+        if (!applied) {
           syncSessionSelect();
           return;
         }
-        await watchKey(res.key, gen);
+        await watchKey(res.key, gen, prevKey);
+      } else if (sw.isCurrent(gen) && priorKey) {
+        await watchKey(priorKey, gen, "");
       }
     } catch (err) {
       if (!alive || !sw.isCurrent(gen)) return;
-      statusEl.textContent = err instanceof Error ? err.message : String(err);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (priorKey) {
+        await watchKey(priorKey, gen, "");
+        if (alive && sw.isCurrent(gen)) {
+          statusEl.textContent = `${priorKey} · new shell failed: ${msg}`;
+        }
+      } else {
+        statusEl.textContent = msg;
+      }
     }
   }
 
