@@ -367,6 +367,7 @@ def score_consistency(steps: dict) -> dict:
     b1_available = False
     b1_checked = 0
     b1_clean = 0
+    b1_disabled_unmeasured = 0
     b1_violations: list[str] = []
 
     b5_available = False
@@ -400,12 +401,15 @@ def score_consistency(steps: dict) -> dict:
     b6_unscored_private = 0
 
     for kind, kdata in kinds.items():
-        # B1: One selection behaviour for every rail entry (partial: 10 viewer entries; requires PR #1359 rail metric)
+        # B1: One selection behaviour for every rail entry (partial: 10 enabled viewer entries; disabled entries & Simulation/Terminal/Commands unmeasured; requires PR #1359 rail metric)
         b1_k = kdata.get("b1_checks") or {}
         if isinstance(b1_k, dict) and b1_k.get("status") in ("measured", "measured_partial") and kdata.get("rail_metric_seen"):
             b1_available = True
             for eid, edata in (b1_k.get("entries") or {}).items():
                 if not isinstance(edata, dict):
+                    continue
+                if edata.get("status") == "unavailable" or edata.get("passed") is None:
+                    b1_disabled_unmeasured += 1
                     continue
                 b1_checked += 1
                 if edata.get("passed"):
@@ -571,9 +575,11 @@ def score_consistency(steps: dict) -> dict:
     return {
         "B1": {
             "rule": RULE_BY_ID["B1"],
-            "scope": "Partial: 10 viewer rail entries (press, press again, key, palette, disabled no-op; omits Simulation, Terminal, Commands)",
+            "scope": "Partial: 10 enabled viewer rail entries (press, press again, key, palette; omits Simulation, Terminal, Commands; disabled entries: not measured)",
             "status": "measured_partial" if b1_available else "unavailable",
             "omitted_entries": list(M.B1_OMITTED_ENTRIES),
+            "disabled_entries_measured": False,
+            "disabled_unmeasured": b1_disabled_unmeasured,
             "reason": "" if b1_available else "client did not emit GPUI_METRIC event=rail (requires PR #1359)",
             "max_points": 3,
             "checked": b1_checked,
@@ -876,7 +882,7 @@ def main(argv: list[str] | None = None) -> int:
                 if c.get("status") not in ("measured", "measured_partial"):
                     return "`unavailable`"
                 return f"{fmt_opt_pts(c['points'], 3)} ({c['clean']}/{c['checked']} clean)"
-            note = n_cons["B1"].get("reason") or f"partial (omits {', '.join(n_cons['B1'].get('omitted_entries') or [])}); {len(n_cons['B1']['violations'])} failing"
+            note = n_cons["B1"].get("reason") or f"partial (omits {', '.join(n_cons['B1'].get('omitted_entries') or [])}; disabled entries: not measured); {len(n_cons['B1']['violations'])} failing"
             lines.append(f"| **B1** | {text} | {fmt_b1(b_cons['B1'])} | {fmt_b1(n_cons['B1'])} | {note} |")
         elif code == "B3":
             lines.append(
@@ -908,7 +914,7 @@ def main(argv: list[str] | None = None) -> int:
     if n_cons["B1"].get("status") not in ("measured", "measured_partial"):
         lines.append(f"### B1: `unavailable` ({n_cons['B1'].get('reason', 'no client rail metric')})")
     else:
-        lines.append(f"### B1 (partial — omits {', '.join(n_cons['B1'].get('omitted_entries') or [])}): Failing rail selection entries ({len(n_cons['B1']['violations'])})")
+        lines.append(f"### B1 (partial — omits {', '.join(n_cons['B1'].get('omitted_entries') or [])}; disabled entries: not measured): Failing rail selection entries ({len(n_cons['B1']['violations'])})")
         if not n_cons["B1"]["violations"]:
             lines.append("- None")
         else:
