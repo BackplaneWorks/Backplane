@@ -189,8 +189,14 @@ fn walk_rs(d: &Path, out: &mut Vec<PathBuf>) {
         let rel = f.strip_prefix(&r).unwrap().to_string_lossy().replace('\\', "/");
         let Ok(t) = fs::read_to_string(&f) else { continue };
         let mut in_test = false;
-        for (i, raw) in t.lines().enumerate() {
-            if raw.trim_start().starts_with("#[cfg(test)]") { in_test = true }
+        let lines: Vec<&str> = t.lines().collect();
+        for (i, raw) in lines.iter().copied().enumerate() {
+            // a test module (`#[cfg(test)] mod …`, on its line or the next) makes the rest of the file test code; a single `#[cfg(test)]` item
+            // (a helper fn, as embed.rs has had since 1c2d6f45ae) does not, or the production lines after it would be read as tests
+            if let Some(rest) = raw.trim_start().strip_prefix("#[cfg(test)]") {
+                let item = if rest.trim().is_empty() { lines.get(i + 1).map_or("", |n| n.trim_start()) } else { rest.trim_start() };
+                if item.starts_with("mod ") || item.starts_with("pub mod ") || item.starts_with("pub(crate) mod ") { in_test = true }
+            }
             let l = code(raw).split("//").next().unwrap_or("");
             if l.is_empty() { continue }
             if l.contains(concat!("temp_dir()", ".join(")) && !(!in_test && allowed_prod_join.contains(&rel.as_str())) {
