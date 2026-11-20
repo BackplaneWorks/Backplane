@@ -4607,7 +4607,7 @@ gpui.f2.uber.p.lilac = ライラック
 gpui.f2.uber.p.rose = ローズ
 gpui.f2.uber.p.mint = ミント
 gpui.f2.uber.p.cherry = チェリー
-gpui.simulation = シミュレーション
+gpui.simulation = 回路解析
 gpui.c.sheets.find = シートを探す
 
 # Restore to before this on the person's message; a turn's snapshot in Compare

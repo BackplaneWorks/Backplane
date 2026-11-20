@@ -4455,7 +4455,7 @@ gpui.f2.uber.p.lilac	Lilac	ライラック	Lila
 gpui.f2.uber.p.rose	Rose	ローズ	Rosa
 gpui.f2.uber.p.mint	Mint	ミント	Menta
 gpui.f2.uber.p.cherry	Cherry	チェリー	Cereza
-gpui.simulation	Simulation	シミュレーション	Simulación
+gpui.simulation	Simulation	回路解析	Simulación
 gpui.c.sheets.find	Find a sheet	シートを探す	Buscar una hoja
 history.snap	Before turn {turn}	ターン{turn}の前	Antes del turno {turn}
 history.ref.snap	this thread's snapshot, before the turn	このスレッドのスナップショット（ターンの前）	instantánea de este hilo, antes del turno
