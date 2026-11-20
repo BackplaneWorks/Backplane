@@ -10,6 +10,7 @@
   --rule: #353c49;
   --rail-rule: #495260;
   --rail-disabled: #798391;
+  --rail-disabled-icon: #454a54;
   --text: #d9dde4;
   --dim: #8a93a3;
   --faint: #5c6473;
@@ -39,6 +40,7 @@ html.light, .app.light, .bub-move.light {
   --rule: #bcbab2;
   --rail-rule: #aaa89f;
   --rail-disabled: #696f77;
+  --rail-disabled-icon: #b2b4b7;
   --text: #1b1d21;
   --dim: #5b6068;
   /* (as dark as needed to read small notes on a panel, still a step under
