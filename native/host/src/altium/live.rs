@@ -531,6 +531,7 @@ pub fn fdb_captions(b: &[u8], into: &mut std::collections::HashMap<String, Vec<S
 /// execution?", with a Cancel button (IDCANCEL). Cancel stops the script. This is the only box the hub answers on its own:
 /// every other box or window is the person's to answer, whoever raised it (the hub cannot tell a script's box from theirs).
 /// In a localized Altium the words may differ ("Zeile"); the line and column numbers stay, so two numbers are enough.
+#[cfg(any(windows, test))] // the Windows box watcher (win, below) and the tests are its only callers
 pub fn is_script_error(class: &str, title: &str, exe_stem: &str, text: &str, has_cancel: bool) -> bool {
     let numbers = text.split(|c: char| !c.is_ascii_digit()).filter(|p| !p.is_empty()).count();
     class == "#32770" && has_cancel && title.eq_ignore_ascii_case(exe_stem) && (text.contains("Line:") && text.contains("Char:") || numbers >= 2)
