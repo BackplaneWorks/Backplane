@@ -268,17 +268,30 @@ pub struct PlotSlots {
     slots: HashMap<usize, plotview::PlotView>,
     empty: plotview::PlotView,
     pub measure: bool,
+    // A hub probe survives closing the viewer. Retain just its selected primitive per
+    // slot so it can be drawn again if that exact source and probe are still on show.
+    closed_picks: HashMap<usize, (String, plot::Pick)>,
 }
 
 impl PlotSlots {
     pub fn sync(&mut self, owner: &str, open: bool, split: bool) {
-        if self.owner != owner || !open {
+        if self.owner != owner {
+            self.closed_picks.clear();
             self.slots.clear();
             self.owner = owner.into();
         }
-        if open {
-            self.slot(0);
-            if split { self.slot(1); self.slot(2); }
+        if !open {
+            for (id, view) in self.slots.drain() {
+                if let Some(pick) = view.picked {
+                    self.closed_picks.insert(id, (view.probe_at, pick));
+                }
+            }
+        } else {
+            for &id in if split { &[0, 1, 2][..] } else { &[0][..] } {
+                let pick = self.closed_picks.remove(&id);
+                let view = self.slot(id);
+                if pick.is_some() { view.restore_pick = pick; }
+            }
         }
     }
 
