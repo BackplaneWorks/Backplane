@@ -1627,6 +1627,115 @@ html.light .bp-v-overlay {
   text-overflow: ellipsis;
 }
 
+/* ---- Browser pane (phone parity: /bots/<thread>/screen.jpg + browser RPC) ---- */
+.bp-browser-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--view, var(--bg));
+}
+
+.bp-browser-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.bp-browser-url-form {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.bp-browser-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.bp-browser-drive-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--rule);
+  flex-shrink: 0;
+}
+
+.bp-browser-keys-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.bp-browser-quick-keys {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+}
+
+.bp-browser-err {
+  padding: 4px 10px;
+  font-size: 11px;
+  color: #f06a6a;
+  background: var(--bg);
+  border-bottom: 1px solid var(--rule);
+  flex-shrink: 0;
+}
+
+.bp-browser-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--view, var(--bg));
+}
+
+.bp-browser-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: top center;
+  user-select: none;
+}
+
+.bp-browser-img.is-driving {
+  cursor: pointer;
+}
+
+.bp-browser-hint {
+  padding: 5px 10px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--panel);
+  border-top: 1px solid var(--rule);
+  flex-shrink: 0;
+}
+
+.bp-browser-drive-bar[hidden],
+.bp-browser-err[hidden],
+.bp-browser-img[hidden],
+.bp-browser-hint[hidden],
+.bp-pane-empty[hidden] {
+  display: none;
+}
+
 /* ---- Tablet (820 px) ---- */
 @media (max-width: 900px) {
   .bp-viewer-pane {
