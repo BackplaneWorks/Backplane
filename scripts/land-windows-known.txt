@@ -5,8 +5,6 @@
 
 # Windows faults on main: path text with a / where Windows gives \ (also red on GitHub's windows-latest, ci.yml hub job, at 2122ce898f; the rest of
 # that group was fixed by 8e343ceec9)
-present::viewer_parity_tests::legacy_single_page_flows_match_origin_main_snapshot   # Windows product faults left: gerberFiles as \\?\C:\... (a canonicalized path), and a file preview under the project named by its whole path with no identity
-present::viewer_parity_tests::agent_show_from_idle_matches_main_view_for_each_kind   # as above: gerberFiles as \\?\C:\...
 
 # the gate's VM only (green on GitHub's windows-latest): the tests run in an ssh logon, not a runner service
 files::kicad::canonical::tests::subfolder_boards_project_is_canonical_from_the_worktree   # its git-worktree fixture: Os error 267 "The directory name is invalid" on bp-win

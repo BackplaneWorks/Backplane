@@ -13,6 +13,16 @@ use serde_json::{json, Value};
 
 const SNAPSHOT_REL: &str = "src/present/testdata/viewer_legacy_parity_main.json";
 
+/// %XX as the byte it stands for (a preview url's path).
+fn pct_decode(s: &str) -> String {
+    let b = s.as_bytes(); let mut out = Vec::with_capacity(b.len()); let mut i = 0;
+    let hex = |c: u8| (c as char).to_digit(16).map(|d| d as u8);
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() { if let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) { out.push(h << 4 | l); i += 3; continue } }
+        out.push(b[i]); i += 1
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
 /// `<ROOT>\a\b` (or `<ROOT>\\a\\b` inside JSON text) as `<ROOT>/a/b`: only the separators of a path that starts at <ROOT>.
 fn unix_under_root(s: &str) -> String {
     let mut out = String::with_capacity(s.len()); let mut rest = s;
@@ -38,6 +48,8 @@ fn normalize(v: &Value, root: &str) -> Value {
             let s = s.replace(&root.replace('\\', "\\\\"), "<ROOT>").replace(root, "<ROOT>");
             // on Windows a file under the root keeps the OS's `\` (kicad::project's own names): the snapshot is Linux's, so a path under <ROOT> is
             // read with `/`, up to its end (a quote, tab, `|`, space or line end)
+            // a preview's url carries the path percent-encoded (Windows' `:` and `\` too): read it decoded, as the snapshot's has nothing to encode
+            let s = if cfg!(windows) && s.starts_with("/img?path=") { format!("/img?path={}", pct_decode(&s["/img?path=".len()..])).replace(&root.replace('\\', "\\\\"), "<ROOT>").replace(root, "<ROOT>") } else { s };
             let s = if cfg!(windows) { unix_under_root(&s) } else { s };
             // history sources carry the repo top's byte length before it (`rv::hist_git`): it varies with the temp folder's name
             let mut parts: Vec<String> = s.split('\t').map(str::to_string).collect();
@@ -403,4 +415,5 @@ fn a_windows_path_under_the_root_reads_as_the_snapshots() {
     assert_eq!(unix_under_root("{\"root\":\"<ROOT>\\\\sub\\\\a.kicad_pcb\",\"x\":1}"), "{\"root\":\"<ROOT>/sub/a.kicad_pcb\",\"x\":1}");
     assert_eq!(unix_under_root("0|<ROOT>|<ROOT>\\a\tb\\c"), "0|<ROOT>|<ROOT>/a\tb\\c");
     assert_eq!(unix_under_root("no root \\ here"), "no root \\ here");
+    assert_eq!(pct_decode("C%3A%5Cp%5Cdocs%5Cread%20me.txt"), "C:\\p\\docs\\read me.txt"); assert_eq!(pct_decode("a%2"), "a%2");
 }

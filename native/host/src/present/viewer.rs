@@ -966,7 +966,9 @@ fn files_page(st: &State, root: &str, sel: &str, dir: &str) -> Value {
 }
 /// File.json: an opened image, PDF or note: its name, its kind, where the hub serves it (`/img` takes an absolute path).
 fn file_page(kind: &str, abs: &str) -> Value {
-    let mut v = json!({"name": crate::files::fm::last(abs), "kind": kind, "url": format!("/img?path={}", pct(abs, true))});
+    // the file's own name, after either separator on Windows (a preview there is opened by C:\p\docs\readme.txt, and fm::last cuts at '/' only)
+    let name = abs.rsplit(crate::plat::fs::SEPS).next().unwrap_or(abs);
+    let mut v = json!({"name": name, "kind": kind, "url": format!("/img?path={}", pct(abs, true))});
     // a Markdown note is sent as a document's nodes (md/doc.rs: GitHub's Markdown, its pictures beside it), so the clients draw it rendered; plain text stays the client's to fetch
     let l = abs.to_ascii_lowercase();
     if kind == "text" && (l.ends_with(".md") || l.ends_with(".markdown")) {
