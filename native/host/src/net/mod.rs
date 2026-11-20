@@ -14,6 +14,7 @@ mod copy_outs;
 pub mod alwayson;
 pub mod botnet;
 pub mod homemove;
+pub mod home;
 pub mod farfiles;
 pub mod devices;
 pub mod devicespage;

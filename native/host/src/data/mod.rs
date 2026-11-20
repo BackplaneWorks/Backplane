@@ -24,7 +24,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -977,6 +977,8 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
         )
     };
     let mut hello = json!({"t":"hello","proto":PROTO,"hub":host,"name":name,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"theme":theme,"locale":locale,"hubOffer":hub_offer,"hubBack":hub.info_now()["hub.back"].as_str().unwrap_or(""),"commands":crate::session::composer::words(),"notice":notice,"migrating":migrating}); if let Some(c) = z { hello["z"] = json!(c) }
+    // the home (feature "home", net/home.rs): where the uberbot lives, as this hub sees it; `k:"home"` pushes follow it on a lists subscription
+    let mut home_sent = crate::net::home::now(&hub).await; hello["home"] = home_sent.clone();
     tx.send(pack(&hello, json_mode)).await?;
     tx.arm(); // the hello went as it is: what follows is compressed (when a codec was chosen)
     let (late_tx, mut late_rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
@@ -1081,7 +1083,11 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
                         let frame = if v["t"] == "plot" { let mut b = Vec::new(); cbor_plain(&v, &mut b); Message::Binary(b.into()) } else { pack(&v, json_mode) };
                         if !send_frame(&mut tx, &hub, browser.as_ref(), conn.client, frame).await? { return Ok(()) }
                     } } }
-            _ = far_beat.tick() => { if !subs.subs.is_empty() {
+            _ = far_beat.tick() => { if !subs.lists().is_empty() {
+                let h = crate::net::home::now(&hub).await;
+                if h != home_sent { home_sent = h.clone(); for sub in subs.lists() { if !send_frame(&mut tx, &hub, browser.as_ref(), conn.client, pack(&d(sub, "home", json!({"home": h})), json_mode)).await? { return Ok(()) } } }
+            }
+            if !subs.subs.is_empty() {
                 for f in far_pushes(&hub, &mut subs).await {
                     if !send_frame(&mut tx, &hub, browser.as_ref(), conn.client, pack(&f, json_mode)).await? { return Ok(()) }
                 }

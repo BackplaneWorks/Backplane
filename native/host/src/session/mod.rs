@@ -191,6 +191,8 @@ impl Hub {
         c.lastrev = rev;
         // a view.open keeps the bodies held: the next thread's picture is ops from the last one (the sidebar and chrome are the same), not the whole of it again
         let mut result = self.assemble(&p, &view_id, rev, &pol);
+        // the home (docs/PHONE-DATA.md, The home): where the uberbot lives, for the away row under Bub; a field of the picture, so the keyed delta carries it
+        if let Some(o) = result.get_mut("shown").and_then(Value::as_object_mut) { o.insert("home".into(), crate::net::home::now(&self.arc()).await); }
         if let (Some(w), Some(o)) = (window, result.as_object_mut()) { if o.contains_key("window") { o.insert("window".into(), w); } }
         let result = Self::delta_reply(c, &p, result);
         // Hub.autosettle.read_view: runs after any rendered view.open (its context's anchor is always 0, `Hub.thin.dispatch` kind 0, so the request's
