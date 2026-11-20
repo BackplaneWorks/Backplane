@@ -1196,7 +1196,6 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
                 default_gerber_set,
             });
         }
-        v["showToken"] = json!(true); // this hub answers an agent show's token (`view-show`): a desktop without it sends plain `view`
         v["layout"] = serde_json::to_value(&active_layout).unwrap_or(Value::Null);
         let src_ref = local.then_some(&*sources);
         v["tiles"] = build_tiles_picture(&active_layout, eff_root, &v, drafts, src_ref, &shown, linked);
@@ -1319,7 +1318,7 @@ fn header_identity(st: &State, session: &Value, viewer: &Value, root: &str, rail
     id
 }
 
-/// Outcome of a `layout-*` or `viewer_show_action` call.
+/// Outcome of a `layout-*` or guarded `view` call.
 pub enum LayoutOut {
     Ok(ViewOut),
     Refused {
@@ -1327,120 +1326,6 @@ pub enum LayoutOut {
         key: &'static str,
         text: &'static str,
     },
-}
-
-/// An agent's show (`viewer_show`): the hub issues a token with the push; a desktop that knows the protocol (the picture says `showToken`) answers
-/// `view-show` with the kind, the full source path and the token UNCHANGED, and nothing is inferred for any other answer: a plain `view` is always
-/// main's `view`.
-#[derive(Clone, Debug, PartialEq)]
-pub enum ShowOutcome { Pending, Applied, Refused(String) }
-struct ShowRec { thread: String, kind: String, path: String, outcome: ShowOutcome }
-struct Shows { next: u64, recs: std::collections::BTreeMap<u64, ShowRec> }
-fn shows_map() -> &'static std::sync::Mutex<Shows> {
-    static MAP: std::sync::OnceLock<std::sync::Mutex<Shows>> = std::sync::OnceLock::new();
-    MAP.get_or_init(|| std::sync::Mutex::new(Shows { next: 1, recs: Default::default() }))
-}
-fn token_id(token: &str) -> Option<u64> { token.strip_prefix("show-")?.parse().ok() }
-/// A token for a push of `kind`/`path` to `thread` (the newest 128 are kept).
-pub fn issue_show(thread: &str, kind: &str, path: &str) -> String {
-    let mut m = shows_map().lock().unwrap_or_else(|e| e.into_inner());
-    let n = m.next; m.next += 1;
-    m.recs.insert(n, ShowRec { thread: thread.into(), kind: kind.into(), path: path.into(), outcome: ShowOutcome::Pending });
-    while m.recs.len() > 128 { let first = *m.recs.keys().next().unwrap(); m.recs.remove(&first); }
-    format!("show-{n}")
-}
-/// What a desktop's `view-show` did with the token (Pending until one answers).
-pub fn show_outcome(token: &str) -> ShowOutcome {
-    let m = shows_map().lock().unwrap_or_else(|e| e.into_inner());
-    token_id(token).and_then(|n| m.recs.get(&n)).map_or(ShowOutcome::Pending, |r| r.outcome.clone())
-}
-fn token_is(token: &str, thread: &str, kind: &str, path: &str) -> bool {
-    let m = shows_map().lock().unwrap_or_else(|e| e.into_inner());
-    token_id(token).and_then(|n| m.recs.get(&n)).is_some_and(|r| r.thread == thread && r.kind == kind && r.path == path)
-}
-fn record_outcome(token: &str, out: ShowOutcome) {
-    let mut m = shows_map().lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(r) = token_id(token).and_then(|n| m.recs.get_mut(&n)) { if r.outcome != ShowOutcome::Applied { r.outcome = out } }
-}
-/// (tests) a desktop's refusal of a token, as `view_show_token` records it.
-#[cfg(test)]
-pub fn test_refuse(token: &str, why: &str) { record_outcome(token, ShowOutcome::Refused(why.into())) }
-/// `view-show` with a token: applies the show only when the token is the hub's, for this thread, with the kind and path it was issued for;
-/// records the outcome for the agent's read-back (a refusal says why).
-pub fn view_show_token(st: &State, hub: &str, session: &Value, client_id: Option<u64>, locale: &str, kind: &str, path: &str, token: &str) -> Option<LayoutOut> {
-    let sel = s(session, "sel");
-    if !token_is(token, sel, kind, path) { return Some(LayoutOut::Ok(ViewOut { patch: json!({}), before: vec![], boards_look: false })) }
-    let out = viewer_show_action(st, hub, session, client_id, locale, kind, path);
-    match &out {
-        Some(LayoutOut::Ok(_)) => record_outcome(token, ShowOutcome::Applied),
-        Some(LayoutOut::Refused { text, .. }) => record_outcome(token, ShowOutcome::Refused(text.to_string())),
-        None => {}
-    }
-    out
-}
-/// The viewer page an agent's show names (`kind` and `path` as the tool took them).
-pub fn show_kind(kind: &str, path: &str) -> String {
-    let l = path.to_ascii_lowercase();
-    let model = is_model(path);
-    match kind {
-        "board" | "pcb" => "board",
-        "schematic" | "sch" => "schematic",
-        "3d" if model => "mech",
-        "" if l.ends_with(".kicad_pcb") || l.ends_with(".pcbdoc") => "board",
-        "" if l.ends_with(".kicad_sch") || l.ends_with(".schdoc") => "schematic",
-        "" if model => "mech",
-        k => k,
-    }.to_string()
-}
-/// The project's own board, schematic and newest Gerber set (absolute; "" for none): what a show or a report with no source stands for.
-#[derive(Clone, Debug, Default)]
-pub struct ShowDefaults { pub pcb: String, pub sch: String, pub set: String }
-/// What a show asks of the viewer: the page and its source (an absolute file; a Mech part's path from the root; "" for a page with no source).
-#[derive(Clone, Debug, PartialEq)]
-pub struct ShowWant { pub kind: String, pub source: String }
-fn trim_end(p: &str) -> String { p.trim_end_matches('/').to_string() }
-pub fn show_want(kind: &str, shown: &str, root: &str, d: &ShowDefaults) -> ShowWant {
-    let nk = show_kind(kind, shown);
-    let l = shown.to_ascii_lowercase();
-    let pcb = l.ends_with(".kicad_pcb") || l.ends_with(".pcbdoc");
-    let sch = l.ends_with(".kicad_sch") || l.ends_with(".schdoc");
-    let source = match nk.as_str() {
-        "board" | "3d" | "split" => if pcb { trim_end(&abs_of(root, shown)) } else { d.pcb.clone() },
-        "schematic" => if sch { trim_end(&abs_of(root, shown)) } else { d.sch.clone() },
-        "mech" => rel_in(root, shown),
-        "gerbers" => if shown.is_empty() { d.set.clone() } else { trim_end(&abs_of(root, shown)) },
-        _ => String::new(),
-    };
-    ShowWant { kind: nk, source }
-}
-/// Whether the page a client reports (`viewer.state`: `open`, `key`, `part`, `gerbers`) is exactly the one `want` names: the page, and its source
-/// compared whole (a key with no path is the project's own file, resolved to its name first). Already showing counts. A report with no page, no key
-/// or an empty one never matches a page that has a source.
-pub fn show_settled(want: &ShowWant, report: &Value, d: &ShowDefaults) -> bool {
-    let open = report["open"].as_str().or_else(|| report["kind"].as_str()).unwrap_or("");
-    let gerbers = report["gerbers"] == true;
-    let kind_ok = match want.kind.as_str() {
-        "gerbers" => open == "board" && gerbers,
-        "board" => open == "board" && !gerbers,
-        "files" => matches!(open, "files" | "image" | "pdf" | "text"),
-        k => !open.is_empty() && open == k,
-    };
-    if !kind_ok { return false }
-    let key_path = || -> Option<&str> {
-        let key = report["key"].as_str().filter(|k| !k.is_empty())?;
-        let mut it = key.splitn(3, '|'); it.next()?; it.next()?; it.next()
-    };
-    let default_of = |kind: &str| match kind { "schematic" => d.sch.as_str(), "gerbers" => d.set.as_str(), _ => d.pcb.as_str() };
-    match want.kind.as_str() {
-        "board" | "3d" | "split" | "schematic" | "gerbers" => {
-            if want.source.is_empty() { return false }
-            let Some(p) = key_path() else { return false };
-            let have = if p.is_empty() { default_of(&want.kind).to_string() } else { trim_end(p) };
-            !have.is_empty() && have == want.source
-        }
-        "mech" => report["part"].as_str().is_some_and(|p| !p.is_empty() && p == want.source),
-        _ => true,
-    }
 }
 
 /// Cached Gerber-set member availability resolved when layout or watch changes (never during picture rendering).
@@ -2491,106 +2376,6 @@ pub fn layout_action(
         Err(r) => refuse(r),
         Ok(next) => Some(LayoutOut::Ok(commit_layout(st, hub, session, sel, &root, &next, geometry_only))),
     }
-}
-
-/// Under a KiCad holder's dialog a show may only re-show the locked tile: the only tile, the page the show names, and the source it names (an
-/// empty requested source is never "the same": it would stand for whatever the page's default is).
-pub fn show_preserves_locked(cur: &super::layout::Layout, locked_id: &str, pk: Option<super::layout::PageKind>, rel: &str) -> bool {
-    let Some(lt) = cur.tile(locked_id) else { return true };
-    cur.tiles().len() == 1 && Some(lt.kind) == pk && lt.version.is_none() && lt.overlay.is_none() && !rel.is_empty() && rel == lt.source
-}
-
-/// Route an agent's idempotent `viewer_show(kind, path)` (`view-show` action):
-/// - In multi-tile mode: routes through `layout::viewer_show` (focus or retarget, NEVER closes).
-/// - In legacy single-tile/idle mode: idempotently opens/updates the requested page/source (NEVER closes
-///   even if `kind` is already focused, including `"files"`).
-pub fn viewer_show_action(
-    st: &State,
-    hub: &str,
-    session: &Value,
-    client_id: Option<u64>,
-    locale: &str,
-    kind: &str,
-    path: &str,
-) -> Option<LayoutOut> {
-    use super::layout::{self, PageKind};
-    let sel = s(session, "sel");
-    if sel.is_empty() || !st.threads.contains_key(sel) {
-        return None;
-    }
-    let pk = PageKind::from_page_str(kind);
-    let linked = sel.contains('~');
-    let root = if linked {
-        st.threads.get(sel).map(|t| if !t.worktree.is_empty() { t.worktree.clone() } else { st.projects.get(&t.project).map(|p| p.root.clone()).unwrap_or_default() }).unwrap_or_default()
-    } else {
-        root_of(st, sel)
-    };
-    let drafts = &session["drafts"];
-    let rel = layout::sanitize_rel(&root, path);
-    if let Some(cur) = parse_stored_layout(drafts, sel) {
-        // Split is not a tile kind: with a stored layout it is main's Split writer (guarded like every other transition), which ends the layout
-        let Some(pk) = pk else {
-            return if kind == "split" { view_action_for(st, hub, session, client_id, locale, "split", 0) } else { None };
-        };
-        let picked_abs = board_file("board", &root, &chosen_board(drafts, sel, &root));
-        let guard = hub_kicad_guard(&cur, &root, &picked_abs, client_id, None, None, linked);
-        return Some(match layout::viewer_show(&cur, pk, rel, guard.locked.as_deref()) {
-            Err(r) => LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) },
-            Ok(next) => LayoutOut::Ok(commit_layout(st, hub, session, sel, &root, &next, false)),
-        });
-    }
-    // Legacy single-tile / idle mode: guard the CURRENT open tile (NOT the requested tile),
-    // and check exact kind + source preservation before allowing during a dialog.
-    let picked_board = chosen_board(drafts, sel, &root);
-    let picked_abs = board_file("board", &root, &picked_board);
-    if client_id.is_some() {
-        let open = legacy_open(session, sel);
-        if !open.is_empty() {
-            let cur_derived = layout::derive_layout(&layout::DeriveInput {
-                root: &root,
-                open,
-                diff_on: pages::diff_on(session, sel),
-                gerbers: s(drafts, &format!("@view.gerbers:{sel}")) == "1",
-                file: s(drafts, &format!("@view.file:{sel}")),
-                sheet: s(drafts, &format!("@view.sheet:{sel}")),
-                picked_board: &picked_board,
-                ..Default::default()
-            });
-            let guard = hub_kicad_guard(&cur_derived, &root, &picked_abs, client_id, None, None, linked);
-            if let Some(lid) = guard.locked.as_deref() {
-                if !show_preserves_locked(&cur_derived, lid, pk, &rel) {
-                    let r = layout::Refusal::Locked;
-                    return Some(LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) });
-                }
-            }
-        }
-    }
-    let prev = s(drafts, &format!("@view:{sel}"));
-    if pk == Some(PageKind::Files) && files_kind(prev) && path.is_empty() {
-        return Some(LayoutOut::Ok(ViewOut { patch: json!({}), before: vec![], boards_look: false }));
-    }
-    // main's own `view` writer, without Files' toggle (a show never closes): every kind it draws is exactly what `view <kind>` does
-    let named_file = matches!(pk, Some(PageKind::Files)) && !path.is_empty();
-    if !named_file {
-        let wire = match pk {
-            Some(PageKind::Mech) if !path.is_empty() => format!("mech\t{path}"),
-            Some(k) => k.as_str().to_string(),
-            None => kind.to_string(),
-        };
-        if let Some(vo) = legacy_view_inner(st, hub, session, &wire, 0, true) {
-            return Some(LayoutOut::Ok(vo));
-        }
-    }
-    let single = layout::Layout::single(layout::Tile {
-        id: "t1".into(),
-        kind: pk?,
-        source: rel,
-        explicit: !path.is_empty(),
-        version: None,
-        unresolved_version: false,
-        overlay: None,
-    }).ok()?;
-    Some(LayoutOut::Ok(commit_layout(st, hub, session, sel, &root, &single, false)))
 }
 
 /// Choose the surface for this connection and the document the frame would open.
