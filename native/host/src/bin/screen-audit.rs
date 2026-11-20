@@ -33,7 +33,7 @@ mod settings { pub mod order { pub use crate::order_view::*; } pub mod models { 
 #[path="../present/ready.rs"] pub mod ready;
 mod identity_context {
     use serde_json::Value;
-    pub fn facts(_: &crate::state::State, _: &Value, _: &str, _: &Value) -> Value { Value::Null }
+    pub fn facts(_: &crate::state::State, _: &Value, _: &str, local_docs: &Value) -> Value { local_docs.clone() }
     pub fn browser(_: &Value, _: &str) -> (String, String) { Default::default() }
     pub fn far_exists(_: &str, _: &str) -> Option<bool> { None }
 }
