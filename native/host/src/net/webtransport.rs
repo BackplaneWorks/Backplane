@@ -33,10 +33,10 @@ impl BrowserListener {
             return Err(io::Error::new(io::ErrorKind::PermissionDenied, "private browser runtime directory required"));
         }
         let (host, port) = authority.split_once(':').map_or((authority.as_str(), None), |(h,p)| (h, Some(p)));
-        if proxy.pid <= 0 || !host.ends_with(".ts.net") || host.len() > 253
+        if proxy.pid <= 0 || !host.ends_with(".ts.net") || host.split('.').count() < 4 || host.len() > 253
             || host.split('.').any(|label| label.is_empty() || label.len() > 63 || label.starts_with('-')
                 || label.ends_with('-') || !label.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'))
-            || port.is_some_and(|p| p.parse::<u16>().map_or(true, |n| n == 0 || n.to_string() != p)) {
+            || port.is_some_and(|p| p.parse::<u16>().map_or(true, |n| matches!(n, 0 | 443) || n.to_string() != p)) {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid browser proxy configuration"));
         }
         let listener = UnixListener::bind(directory.join("browser.sock"))?;
@@ -45,7 +45,15 @@ impl BrowserListener {
 
     pub async fn run(self, hub: Arc<crate::hub::Hub>) -> io::Result<()> {
         loop {
-            let (stream, _) = self.listener.accept().await?;
+            let stream = match self.listener.accept().await {
+                Ok((stream, _)) => stream,
+                Err(e) if matches!(e.kind(), io::ErrorKind::ConnectionAborted | io::ErrorKind::Interrupted) => continue,
+                Err(e) if matches!(e.raw_os_error(), Some(libc::EMFILE | libc::ENFILE)) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
             if self.proxy.accepts(&stream) {
                 let hub = hub.clone();
                 let authority = self.authority.clone();
@@ -58,6 +66,34 @@ impl BrowserListener {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn bind_requires_a_private_directory_and_canonical_authority() {
+        use std::os::unix::fs::{symlink, DirBuilderExt, PermissionsExt};
+        let dir = std::env::temp_dir().join(format!("bp-web-bind-{}", std::process::id()));
+        std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        let bind = |path: &Path, host: &str, pid| BrowserListener::bind(path, host.into(),
+            ProxyIdentity { uid: unsafe { libc::geteuid() }, pid });
+        let host = "hub.example.ts.net";
+        assert!(bind(Path::new("."), host, 1).is_err());
+        let link = dir.join("link");
+        symlink(&dir, &link).unwrap();
+        assert!(bind(&link, host, 1).is_err());
+        std::fs::remove_file(link).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(bind(&dir, host, 1).is_err());
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(bind(&dir, host, 0).is_err());
+        for invalid in ["example.org", "a.ts.net", "A.example.ts.net", "-a.example.ts.net",
+            "a-.example.ts.net", "a.b.ts.net:0", "a.b.ts.net:08443", "a.b.ts.net:443"] {
+            assert!(bind(&dir, invalid, 1).is_err(), "{invalid}");
+        }
+        let listener = bind(&dir, "hub.example.ts.net:8443", 1).unwrap();
+        assert!(bind(&dir, host, 1).is_err());
+        drop(listener);
+        std::fs::remove_file(dir.join("browser.sock")).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
 
     #[tokio::test]
     async fn browser_transport_checks_peer_process_as_well_as_user() {
