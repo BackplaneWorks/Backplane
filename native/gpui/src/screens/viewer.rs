@@ -1070,7 +1070,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
     if editing { pv.loading.clear(); }
     let container = crate::ui::with_rect(div().id("viewer-body").size_full(), || format!("tile-page:{page_key}"));
     // The shared Review panel scrolls its own body. Canvas and Browser pages fill the available height.
-    if shared_scroll && open == "review" && !diff_on && !editing { return container.child(body).into_any_element(); }
+    if shared_scroll && open == "review" && !diff_on && !editing { return container.relative().child(div().absolute().inset_0().flex().flex_col().child(body)).into_any_element(); }
     if matches!(open, "files" | "image" | "pdf" | "text" | "3d" | "mech" | "browser") && !diff_on && !editing { container.child(body).into_any_element() } else { container.overflow_y_scroll().child(body).into_any_element() }
 }
 /// The pane around the page on show: its width, the left edge's drag and border; `page` (the page itself, `page()`, drawn as a part of the
