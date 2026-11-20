@@ -412,8 +412,16 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
          } else if cleanup_pending {
             refused_plan = None;
             let service = hub.setting("web.service").await.unwrap_or_else(|| "bp".into());
+            let cleanup_row = &mut status_row;
+            let request = requested.as_deref();
             cleanup_pending = !cleanup_disabled(ts, &service, &socket, |scope, host, port, path| async move {
-                remove_private_mapping(scope.as_deref(), &host, port, &path).await
+                let plan = format!("Remove private HTTPS forwarding for {host}:{port} to {}", path.display());
+                let elevated = request == Some(plan.as_str());
+                let result = remove_private_mapping(scope.as_deref(), &host, port, &path, elevated).await;
+                if result == Removal::Permission || elevated {
+                    cleanup_row["cleanup"] = Value::from(plan);
+                }
+                result == Removal::Submitted
             }).await;
             if cleanup_pending {
                 status_row["reason"] = Value::from("Browser access is off. Tailscale mapping removal could not be confirmed.");
@@ -488,36 +496,88 @@ fn removal_update(mut config: Value, etag: &str, service: Option<&str>, hostname
     Some(config)
 }
 
-async fn remove_private_mapping(service: Option<&str>, host: &str, port: u16, socket: &std::path::Path) -> bool {
-    use std::process::Stdio;
-    use tokio::io::AsyncWriteExt;
-    if system_proxy_identity().await.is_err() { return false; }
-    let local_api = || {
-        let mut cmd = crate::proc::tokio_cmd(crate::proc::Kind::Net, "/usr/bin/curl");
+#[derive(PartialEq, Eq)]
+enum Removal { Pending, Permission, Submitted }
+
+async fn remove_private_mapping(service: Option<&str>, host: &str, port: u16, socket: &std::path::Path, elevated: bool) -> Removal {
+    if system_proxy_identity().await.is_err() { return Removal::Pending; }
+    remove_with_local_api(service, host, port, socket, elevated, |as_admin| {
+        let mut cmd = if as_admin {
+            let mut cmd = crate::proc::tokio_cmd(crate::proc::Kind::Net, "/usr/bin/pkexec");
+            cmd.args(["--disable-internal-agent", "/usr/bin/curl"]);
+            cmd
+        } else {
+            crate::proc::tokio_cmd(crate::proc::Kind::Net, "/usr/bin/curl")
+        };
         cmd.args(["-q", "--silent", "--fail", "--max-time", "5", "--max-filesize", "1048576",
             "--noproxy", "*", "--unix-socket", "/run/tailscale/tailscaled.sock",
             "http://local-tailscaled.sock/localapi/v0/serve-config"]);
         cmd
-    };
-    let Ok(reply) = local_api().args(["--write-out", "\n%header{etag}"]).output().await else { return false; };
-    if !reply.status.success() { return false; }
-    let Ok(text) = std::str::from_utf8(&reply.stdout) else { return false; };
-    let Some((body, etag)) = text.rsplit_once('\n') else { return false; };
-    if etag.bytes().any(|b| b.is_ascii_control()) { return false; }
-    let Ok(config) = serde_json::from_str(body) else { return false; };
-    let Some(updated) = removal_update(config, etag, service, host, port, socket) else { return false; };
-    let Ok(mut child) = local_api().args(["--data-binary", "@-", "--header", "Content-Type: application/json",
-        "--header", &format!("If-Match: {etag}")]).stdin(Stdio::piped()).stdout(Stdio::null()).kill_on_drop(true).spawn() else { return false; };
-    let Some(mut input) = child.stdin.take() else { return false; };
-    if input.write_all(updated.to_string().as_bytes()).await.is_err() { return false; }
+    }).await
+}
+
+async fn remove_with_local_api(service: Option<&str>, host: &str, port: u16, socket: &std::path::Path, elevated: bool,
+    local_api: impl Fn(bool) -> tokio::process::Command) -> Removal {
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt;
+    let read_args = ["--write-out", "\n%header{etag}\n%{http_code}"];
+    let Ok(mut reply) = local_api(false).args(read_args).output().await else { return Removal::Pending; };
+    if elevated && reply.stdout.ends_with(b"\n403") {
+        let Ok(privileged_read) = local_api(true).args(read_args).output().await else { return Removal::Pending; };
+        reply = privileged_read;
+    }
+    if reply.stdout.ends_with(b"\n403") { return Removal::Permission; }
+    if !reply.status.success() { return Removal::Pending; }
+    let Ok(text) = std::str::from_utf8(&reply.stdout) else { return Removal::Pending; };
+    let Some((body, etag)) = text.strip_suffix("\n200").and_then(|text| text.rsplit_once('\n')) else { return Removal::Pending; };
+    if etag.bytes().any(|b| b.is_ascii_control()) { return Removal::Pending; }
+    let Ok(config) = serde_json::from_str(body) else { return Removal::Pending; };
+    let Some(updated) = removal_update(config, etag, service, host, port, socket) else { return Removal::Pending; };
+    let Ok(mut child) = local_api(elevated).args(["--write-out", "%{http_code}", "--data-binary", "@-", "--header", "Content-Type: application/json",
+        "--header", &format!("If-Match: {etag}")]).stdin(Stdio::piped()).stdout(Stdio::piped()).kill_on_drop(true).spawn() else { return Removal::Pending; };
+    let Some(mut input) = child.stdin.take() else { return Removal::Pending; };
+    if input.write_all(updated.to_string().as_bytes()).await.is_err() { return Removal::Pending; }
     drop(input);
-    child.wait().await.is_ok_and(|s| s.success())
+    match child.wait_with_output().await {
+        Ok(out) if out.status.success() => Removal::Submitted,
+        Ok(out) if out.stdout.ends_with(b"403") => Removal::Permission,
+        _ => Removal::Pending,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn removal_requests_permission_and_preserves_state_on_decline() {
+        let path = std::path::Path::new("/private/browser.sock");
+        let config = json!({"TCP":{"8443":{"HTTPS":true}},"Web":{"node.example.ts.net:8443":{
+            "Handlers":{"/":{"Proxy":"unix:/private/browser.sock"}}}}});
+        for (authorized, declined, expected) in [(false, false, Removal::Permission),
+            (true, true, Removal::Pending), (true, false, Removal::Submitted)] {
+            let elevated_calls = std::cell::Cell::new(0);
+            let result = remove_with_local_api(None, "node.example.ts.net", 8443, path, authorized, |admin| {
+                let mut cmd = crate::proc::tokio_cmd(crate::proc::Kind::Net, "/bin/sh");
+                elevated_calls.set(elevated_calls.get() + usize::from(admin));
+                cmd.env("FIXTURE_CONFIG", config.to_string()).args(["-c", if admin && declined {
+                    "exit 126"
+                } else if admin {
+                    r#"case "$*" in *"If-Match: fixture-etag"*) ;; *) exit 1;; esac
+                    payload=$(cat)
+                    case "$payload" in *browser.sock*) exit 1;; esac
+                    test -n "$payload" && printf 200"#
+                } else {
+                    r#"case "$*" in *--data-binary*) cat >/dev/null; printf 403; exit 22;; esac
+                    printf '%s\nfixture-etag\n200' "$FIXTURE_CONFIG""#
+                }, "fixture"]);
+                cmd
+            }).await;
+            assert!(result == expected);
+            assert_eq!(elevated_calls.get(), usize::from(authorized));
+        }
+    }
 
     #[tokio::test]
     async fn disabling_before_bind_cleans_up_a_mapping_installed_by_the_pending_prompt() {
