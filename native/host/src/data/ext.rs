@@ -519,6 +519,7 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
                 let mut q = machines::on_link(json!({"kind":kind,"root":root,"path":path}), th);
                 if !s(p, "tree").is_empty() { q["tree"] = p["tree"].clone() }
                 if !s(p, "kept").is_empty() { q["kept"] = p["kept"].clone() }
+                if p["force"] == true { q["force"] = json!(true) }
                 // Split of a board picked in the viewer (`viewer.files` → `boards`, a row's `pcb`): its file and the schematic beside it are the panes' sources
                 let board = s(p, "board"); if kind == "split" && !board.is_empty() { if !board.starts_with(&format!("{root}/")) || board.split('/').any(|x| x == "..") || board.contains('\0') { return Err(err("that board is not in this project")) } q["board"] = json!(board); }
                 q["fresh"] = json!(true); // a phone holds only what `kept` names after a switch: models and parts come again (kicad/watch.rs `forget`) // the model the phone has cached (plot::mesh_id, hex): not sent again

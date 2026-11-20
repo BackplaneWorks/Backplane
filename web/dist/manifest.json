@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 37634,
+  "totalAssetGzipBytes": 37759,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -73,7 +73,7 @@
     "web/src/viewers/plot2d.ts": "83e15a35339830ef2714d9c5aa1a323b89e9477a70d62b0896751b98f8fe1f4d",
     "web/src/viewers/responsive.css": "33fbd36ada26a717375dbe5b1cd61782f656d73f80fa1173ee7f1ea10a26aa3d",
     "web/src/viewers/solid3d.ts": "3706d9990c4ae9a6100183235aae7b03c4e62f45827829db91647d141843075f",
-    "web/src/viewers/viewer-pane.ts": "e4c3cfae7780c5f5f15d8deb34053ad29bed4529acf599c85fba34e85c4dd7f2",
+    "web/src/viewers/viewer-pane.ts": "7c0c7657cc74de30576afed003a679efc70965e11edafb635e3d9ed8e2a84c8b",
     "web/src/ws.ts": "bff5636759f3871df89395c792d5c69aef90a5e1e9ecd8247ac522ebb40badc9",
     "web/build.ts": "c32254f4abe4cea4e8e1f65aeced47aae007c0efd292236b2cf65d296651bcca",
     "assets/web/favicon.svg": "5b0f22a3329f59809216aabe58d8dbbedbd46d29e4a2373a727529daa2441a2c",
@@ -81,9 +81,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 84835,
-      "gzipBytes": 25474,
-      "sha256": "b2358f68f9a3f88dcd5d5dde45d9ed6c843aac5a1b4f114a68cd5e89f5b726db"
+      "bytes": 85098,
+      "gzipBytes": 25599,
+      "sha256": "2fb058d35f384db339089c32d2e8d80aa714fc615e774156ee7200fa9d0e28eb"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,

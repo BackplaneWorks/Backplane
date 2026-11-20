@@ -132,7 +132,10 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   let threadId = "";
   let page = "";
   let watchGen = 0;
+  let watchPending = false;
   let activeKeys = new Set<string>();
+  let pendingBinary: ArrayBuffer[] = [];
+  let pendingNone: Array<{ key: string; none: string; retryable: boolean }> = [];
   let heldChunks = new Map<string, PlotChunk[]>();
   let filesInfo: ViewerFilesReply = {};
   let mechParts: string[] = [];
@@ -448,6 +451,10 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   async function startWatch(force: boolean): Promise<void> {
     if (!threadId || !page) return;
     const gen = ++watchGen;
+    activeKeys.clear();
+    watchPending = true;
+    pendingBinary = [];
+    pendingNone = [];
     clearStage();
     renderHeader();
     setOverlay("loading", "Loading…");
@@ -523,8 +530,19 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       const res = await api.hub.rpc<{ keys?: string[] }>("viewer.watch", params);
       if (gen !== watchGen) return;
       activeKeys = new Set(Array.isArray(res.keys) ? res.keys : []);
+      watchPending = false;
+      const queuedBin = pendingBinary;
+      const queuedNone = pendingNone;
+      pendingBinary = [];
+      pendingNone = [];
+      for (const buf of queuedBin) handleBinary(buf);
+      for (const item of queuedNone) handlePlotNone(item.key, item.none, item.retryable);
     } catch (err) {
       if (gen !== watchGen) return;
+      watchPending = false;
+      activeKeys.clear();
+      pendingBinary = [];
+      pendingNone = [];
       const msg = err instanceof Error ? err.message : String(err);
       const permanent = /no gerbers|not in this project|another machine/i.test(msg);
       setOverlay(permanent ? "empty" : "error", msg, !permanent);
@@ -532,12 +550,20 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   }
 
   function handlePlotNone(key: string, none: string, retryable: boolean): void {
-    if (activeKeys.size > 0 && !activeKeys.has(key)) return;
+    if (watchPending) {
+      if (pendingNone.length < 32) pendingNone.push({ key, none, retryable });
+      return;
+    }
+    if (!activeKeys.has(key)) return;
     setOverlay(retryable ? "error" : "empty", none || "Nothing to display", retryable);
   }
 
   function handleBinary(buf: ArrayBuffer): void {
     if (!page) return;
+    if (watchPending) {
+      if (pendingBinary.length < 64) pendingBinary.push(buf);
+      return;
+    }
     const bytes = new Uint8Array(buf);
     if (!isPlotFrame(bytes)) return;
     const decoded = decodeCbor(bytes);
@@ -545,8 +571,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     const map = decoded as Record<string, CborValue>;
     if (map.t !== "plot") return;
     const key = typeof map.key === "string" ? map.key : "";
-    if (!key) return;
-    if (activeKeys.size > 0 && !activeKeys.has(key)) return;
+    if (!key || !activeKeys.has(key)) return;
 
     if (typeof map.none === "string") {
       handlePlotNone(key, map.none, map.retryable === 1 || (map.retryable as unknown) === true);
@@ -619,6 +644,9 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     },
     close() {
       watchGen++;
+      watchPending = false;
+      pendingBinary = [];
+      pendingNone = [];
       if (threadId) {
         void api.hub.rpc("viewer.watch", { thread: threadId, kind: "" }).catch(() => {});
       }
