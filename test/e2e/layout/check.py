@@ -74,10 +74,13 @@ def check(frame, scen):
         if not any(s in t['s'] for t in texts): add('missing', s, 'text not painted')
     return out
 
+import re
+def norm(t): return re.sub(r'/\S*(?:sm-|sizes)\S*', '<out>', t)[:80]
+def key(f): return '%s|%s' % (f['rule'], norm(f['text']))
 def split_known(findings, known):
     """known: {"rule|text": "why"}; a finding in it is reported but does not fail the run"""
     new, old = [], []
-    for f in findings: (old if '%s|%s' % (f['rule'], f['text']) in known else new).append(f)
+    for f in findings: (old if key(f) in known else new).append(f)
     return new, old
 
 if __name__ == '__main__':

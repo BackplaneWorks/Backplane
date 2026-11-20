@@ -31,6 +31,12 @@
    "name": "picker",
    "steps": [
     {
+     "select": 0
+    },
+    {
+     "wait": 500
+    },
+    {
      "click": "ui:Model"
     },
     {
@@ -49,8 +55,6 @@
     "picker"
    ],
    "present": [
-    "picker-agents",
-    "picker-list",
     "pick-m-0"
    ],
    "min_w": {
@@ -79,6 +83,12 @@
   {
    "name": "thread-menu",
    "steps": [
+    {
+     "select": 0
+    },
+    {
+     "wait": 500
+    },
     {
      "click": "ui:Thread menu"
     },

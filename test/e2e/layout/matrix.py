@@ -173,6 +173,6 @@ open(P('report.md'), 'w').write('\n'.join(L) + '\n')
 if A.allow_known:
     kn = dict(KNOWN)
     for r in report:
-        for f in r['new']: kn['%s|%s' % (f['rule'], f['text'])] = 'seen on %s %s t%d' % (A.platform, r['size'], r['text_pct'])
+        for f in r['new']: kn[check.key(f)] = 'seen on %s %s t%d' % (A.platform, r['size'], r['text_pct'])
     json.dump(kn, open(os.path.join(HERE, 'known.json'), 'w'), indent=1, sort_keys=True)
 sys.exit(1 if any(r['new'] for r in report) and not A.allow_known else 0)
