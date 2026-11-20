@@ -365,8 +365,14 @@ function mountApp(): void {
       }
     },
     onReplyEntry: (entry) => {
-      const firstLine = (entry.text || "").split("\n")[0]?.slice(0, 100) ?? "";
-      if (firstLine) composer.prependDraft(`> ${firstLine}\n`);
+      // feature `reply`: the hub keeps the desktop's <in_reply_to> block (docs/PHONE-DATA.md); an older hub: the first line quoted in the draft
+      if (!hub.hasFeature("reply")) {
+        const firstLine = (entry.text || "").split("\n")[0]?.slice(0, 100) ?? "";
+        if (firstLine) composer.prependDraft(`> ${firstLine}\n`);
+        return;
+      }
+      if (!entry.text || !entry.text.trim() || entry.live || entry.id.startsWith("local-")) return;
+      startReply({ id: entry.id, text: entry.text, role: entry.kind === "user" ? "user" : "assistant" });
     },
     onLoadImage: async (entryId, path) => {
       try {
@@ -993,6 +999,7 @@ function mountApp(): void {
 
     const gen = ++threadGen;
     railGen++;
+    startReply(null);
     const prevSub = threadSubId;
     threadSubId = null;
     if (prevSub !== null) {
@@ -1231,6 +1238,20 @@ function mountApp(): void {
     }
   }
 
+  /** Reply on a message (feature `reply`): the message the composer's strip answers, for the selected thread only. */
+  let replying: { id: string; text: string; role: "user" | "assistant" } | null = null;
+  function replyLine(t0: string): string {
+    return (t0.split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "").slice(0, 200);
+  }
+  function startReply(r: { id: string; text: string; role: "user" | "assistant" } | null): void {
+    replying = r;
+    composer.setReply(
+      r ? { who: r.role === "user" ? t("secret.you", "You") : t("model.col.agent", "Agent"), line: replyLine(r.text) } : null,
+      () => { if (replying) chat.goTo(replying.id); },
+      () => startReply(null),
+    );
+  }
+
   async function sendMessage(
     text: string,
     attachments: Array<{ name: string; mime: string; data: string }> = [],
@@ -1240,12 +1261,15 @@ function mountApp(): void {
     const threadId = selectedThreadId;
     const clientId = makeClientId();
     const localId = `local-${clientId}`;
+    const reply = replying && text.trim() && hub.hasFeature("reply") ? replying : null;
+    if (reply) startReply(null);
     chat.upsertEntry({
       id: localId,
       kind: "user",
       text,
       at: Date.now(),
       clientId,
+      ...(reply ? { replyTo: { id: reply.id, quote: replyLine(reply.text) } } : {}),
       attachments: attachments.map((a) => ({
         name: a.name,
         mime: a.mime,
@@ -1259,6 +1283,7 @@ function mountApp(): void {
         clientId,
       };
       if (attachments.length > 0) params.attachments = attachments;
+      if (reply) params.replyTo = { id: reply.id, text: reply.text };
       const res = await hub.rpc<{ entry?: EntryItem }>("message.send", params);
       if (gen !== threadGen || selectedThreadId !== threadId) return;
       if (res.entry) chat.upsertEntry(res.entry);
@@ -1266,6 +1291,7 @@ function mountApp(): void {
       if (gen === threadGen && selectedThreadId === threadId) {
         chat.removeEntry(localId);
         composer.setDraft(text);
+        if (reply && !replying) startReply(reply);
         composer.showError(e instanceof Error ? e.message : "Failed to send message");
       }
     }

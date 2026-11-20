@@ -535,7 +535,15 @@ button.primary.stop {
 }
 .bp-entry-act:hover { color: var(--text); }
 .bp-entry-time { color: var(--faint); }
-.bp-reply-quote { font-size: 11px; color: var(--dim); border-left: 2px solid var(--line); padding-left: 8px; }
+.bp-reply-quote { font-size: 11px; color: var(--dim); border-left: 2px solid var(--line); padding-left: 8px; cursor: pointer; }
+.bp-reply-quote:hover { color: var(--text); }
+.bp-entry-flash { outline: 1px solid var(--accent); outline-offset: 2px; }
+.bp-reply-strip { display: flex; align-items: stretch; border: 1px solid var(--line); border-left: 2px solid var(--accent); background: var(--panel); margin-bottom: 6px; }
+.bp-reply-strip-body { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 4px 8px; background: none; border: 0; cursor: pointer; text-align: left; }
+.bp-reply-strip-who { font-size: 11px; font-weight: 600; color: var(--accent); }
+.bp-reply-strip-line { font-size: 11px; color: var(--dim); max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.bp-reply-strip-drop { padding: 0 10px; color: var(--dim); }
+.bp-reply-strip-drop:hover { color: var(--bad); }
 .bp-entry-images { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .bp-reply-img { max-width: 420px; max-height: 300px; border: 1px solid var(--line); }
 
