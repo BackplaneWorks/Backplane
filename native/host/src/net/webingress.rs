@@ -269,3 +269,46 @@ fn static_asset(path: &str, paired: bool) -> Option<(&'static str, &'static [u8]
         _ => None,
     }
 }
+
+#[cfg(all(test, unix))]
+static FIXTURE_AUTHORITY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+#[cfg(all(test, unix))]
+pub(crate) fn start_fixture_proxy(hub: &std::sync::Arc<crate::hub::Hub>) -> anyhow::Result<()> {
+    let Some(authority) = FIXTURE_AUTHORITY.get() else { return Ok(()) };
+    let listener = tokio::net::UnixListener::bind(hub.cfg.home.join("browser.sock"))?;
+    let hub = hub.clone();
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            let hub = hub.clone();
+            tokio::spawn(async move { let _ = serve(hub, stream, authority).await; });
+        }
+    });
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "started by the test/web browser rig"]
+async fn isolated_browser_hub() {
+    use std::path::PathBuf;
+    assert!(std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none());
+    let root = PathBuf::from(std::env::var_os("BP_WEB_FIXTURE").expect("test/web rig directory"));
+    let home = root.join("hub");
+    std::fs::create_dir(&home).expect("new hub home");
+    let port = std::env::var("BP_WEB_NATIVE_PORT").unwrap().parse::<u16>().unwrap();
+    let tls = std::env::var("BP_WEB_TLS_PORT").unwrap().parse::<u16>().unwrap();
+    assert!(port >= 3799 && tls >= 3799 && port != tls);
+    assert_eq!(PathBuf::from(std::env::var_os("BACKPLANE_AGENTS").unwrap()), root.join("agents"));
+    FIXTURE_AUTHORITY.set(format!("backplane.example.test:{tls}")).unwrap();
+    let project = root.join("project");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::write(project.join("sample.txt"), "Backplane fixture").unwrap();
+    let log = [
+        serde_json::json!({"$":"ProjectCreated","id":"p1","title":"Browser fixture","root":project,"at":1700000000}),
+        serde_json::json!({"$":"ThreadCreated","id":"t1","project":"p1","title":"Browser test","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000001}),
+    ].map(|e| e.to_string()).join("\n") + "\n";
+    std::fs::write(home.join("events.jsonl"), log).unwrap();
+    crate::run(crate::Args { window: None, home, port, host: "127.0.0.1".into(), version: "test".into(),
+        commit: "test".into(), tailscale: false, https: false }).await.unwrap();
+}
