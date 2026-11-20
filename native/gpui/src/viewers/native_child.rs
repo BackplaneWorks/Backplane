@@ -744,7 +744,10 @@ mod imp {
         let w = w as u32;
         let g = conn()?; let c = g.as_ref().unwrap();
         let geo = c.get_geometry(w).ok()?.reply().ok()?;
-        let mapped = c.get_window_attributes(w).ok()?.reply().ok()?.map_state == MapState::VIEWABLE;
+        drop(g);
+        // the same visibility the pane's own checks read (`mapped`): one rule, never two
+        let mapped = mapped(w as u64)?;
+        let g = conn()?; let c = g.as_ref().unwrap();
         let painted = if mapped {
             c.get_image(ImageFormat::Z_PIXMAP, w, 0, 0, geo.width, geo.height, !0).ok().and_then(|r| r.reply().ok()).map_or(0, |img| {
                 let mut lit = 0usize;
