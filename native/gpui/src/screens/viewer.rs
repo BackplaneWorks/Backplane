@@ -1142,7 +1142,7 @@ pub fn follow(tx: &tokio::sync::mpsc::Sender<Command>, thread: &Value) {
 mod tests {
     /// An agent's `viewer_show` reaches the hub as `view-show` (idempotent: focus or retarget, never close or toggle); a rail press stays `view`.
     #[test] fn an_agents_show_is_the_view_show_action_and_a_rail_press_stays_view() {
-        use crate::data::Command;
+        use crate::hub::Command;
         assert!(matches!(super::view_show_kind("files"), Command::Action(a, v) if a == "view-show" && v == "files"));
         assert!(matches!(super::view_show_kind("mech\tmech/a.step"), Command::Action(a, v) if a == "view-show" && v == "mech\tmech/a.step"));
         assert!(matches!(super::view_kind("files"), Command::Action(a, v) if a == "view" && v == "files"));
