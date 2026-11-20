@@ -1364,6 +1364,11 @@ impl KicadPane {
         // a KiCad dialog with the keyboard keeps it: the shown frame can change under an open dialog (a dialog of a dialog, Change
         // Footprints over Footprint Properties, re-placed the frame twice), and the hand-in took the keyboard from the dialog to the frame
         let kicad_dialog_has_keys = self.info["mode"] == "fork" && nc::focus_in_pid(self.info["pid"].as_u64().unwrap_or(0) as u32) && !nc::has_focus(c);
+        // #1343's probe (Windows, BACKPLANE_KICAD_DEBUG=1): each switch of the frame on show with what says KiCad is busy (its jobs, the
+        // hub's task wait), so a freeze's run shows whether "busy" would have covered it
+        if cfg!(windows) && show != prev_show && show.is_some() && std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+            eprintln!("GPUI_LOG {}", json!({"kicad_switch_busy": {"frame": show, "jobs": self.jobs.iter().map(|j| j["title"].clone()).collect::<Vec<_>>(), "task_wait": self.info["task_wait"], "keys": self.keys, "want_keys": self.want_keys, "epoch_ms": crate::screens::kcomment::epoch_ms() as u64}}));
+        }
         if (self.keys || self.want_keys) && show != prev_show && !kicad_dialog_has_keys {
             if let Some(w) = show {
                 if self.want_keys && nc::button_over(w) == Some(false) { self.press_gave_keys = true; }
