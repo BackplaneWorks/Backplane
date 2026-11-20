@@ -219,6 +219,8 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
         crate::files::fm::from_uri(key).eq_ignore_ascii_case("token")
     })) {
         json_response("400 Bad Request", json!({"state":"invalid_request"}), "")
+    } else if req.method == "GET" && req.target == "/auth/web/info" {
+        json_response("200 OK", json!({"address":format!("https://{authority}")}), "")
     } else if upgrade && req.method == "GET" && req.target == "/ws?data=1&enc=json" {
         let registry = crate::net::start::registry(&hub.cfg.home);
         if let Some(device_id) = registry.and_then(|r| crate::auth::browser_device(&r, &req, &login)) {
