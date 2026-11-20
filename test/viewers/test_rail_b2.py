@@ -42,18 +42,21 @@ class HeaderChecks(unittest.TestCase):
         reports = {size: {} for size in ("wide", "minimum")}
         for page, schema in TOOL_ORDER.items():
             ids = [i for i in schema if not i.startswith("?")]
+            if page in ("board", "schematic"):
+                ids.extend(["follow-agent", "kicad-edit"])
+            if page == "split":
+                ids.append("follow-agent")
             for size in reports:
                 reports[size][page] = dict(checks={}, outcome="passed", tools=ids[:], more=False)
-                reports[size][page]["inline_controls"] = (["follow-agent", "ui:Edit"] if page in ("board", "schematic")
-                                                         else ["follow-agent"] if page == "split" else [])
-        for size in reports:
-            reports[size]["review"]["inline_controls"] = ["ui:Edit"]  # main, before #1353
-        reports["minimum"]["schematic"].update(inline_controls=[], more=True)
         reports["minimum"]["board"]["tools"] = []
-        reports["minimum"]["review"].update(tools=["rv-0"], more=True)
+        reports["minimum"]["schematic"].update(tools=["plot-fit-0"], more=True,
+            menu_rows=["layers-btn", "follow-agent", "kicad-edit"])
+        reports["minimum"]["review"].update(tools=["rv-0"], more=True, menu_rows=["rv-1", "rv-2", "rv-3"])
+        reports["minimum"]["diff"].update(tools=[], more=True, menu_rows=["revert-ask"])
         reports["wide"]["files"]["tools"].reverse()
         tool_orders(reports)
         self.assertEqual(reports["minimum"]["board"]["outcome"], "task_failed")
         self.assertEqual(reports["minimum"]["schematic"]["outcome"], "passed")
         self.assertEqual(reports["minimum"]["review"]["outcome"], "passed")
         self.assertEqual(reports["wide"]["files"]["outcome"], "task_failed")
+        self.assertEqual(reports["minimum"]["diff"]["outcome"], "task_failed")
