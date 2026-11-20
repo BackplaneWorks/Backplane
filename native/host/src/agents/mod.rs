@@ -786,6 +786,7 @@ impl Actor {
         // carries priority now (on an idle process it is just the next turn, and it is set always so a message sent as a turn is starting does not wait for it)
         self.steer_now = true;
         // #1304: the person's own message into a running turn: the agent is told to answer it before its next tool call, and the thread says so if it has not after a while
+        if person && role == "user" && origin.is_none() { devturns::person_sent(&self.th, now_s()); } // a new build waits for this turn (fresh-watch.sh, /dev/turns waited)
         let midturn = person && role == "user" && origin.is_none() && (self.cx.running || t.turn == "running");
         let codex = t.provider != "claude";
         if codex && (self.cx.running || t.turn == "running") { // any other provider: posted, and the running turn starts again with it (Steer.go), what it had streamed kept
