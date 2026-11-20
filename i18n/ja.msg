@@ -4730,3 +4730,4 @@ viewer.layout.refusal.duplicateid = タイルは既に存在します
 viewer.layout.refusal.unknownframe = 不明な KiCad フレームです
 viewer.layout.refusal.invalidinput = 無効なレイアウト要求です
 viewer.layout.refusal.toomany = タイルが多すぎます
+viewer.layout.refusal.toomanysources = レイアウトのソースが多すぎます

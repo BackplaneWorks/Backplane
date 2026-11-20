@@ -53,6 +53,11 @@ async fn kicad_with(argv: &[String], ro: bool) -> Ran {
 // Versions: core/hist
 fn field(p: &str, i: usize) -> &str { p.split('\t').nth(i).unwrap_or("") }
 /// Hist.git
+/// Whether the revision `id` of the repository at `git_dir` holds the file `rel` (a read of the object store, nothing is checked out).
+pub fn version_has_file(git_dir: &str, id: &str, rel: &str) -> bool {
+    crate::proc::std_cmd(crate::proc::Kind::Local, "git").args(["--git-dir", git_dir, "cat-file", "-e", &format!("{id}:{rel}")])
+        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success())
+}
 pub fn hist_git(g: &str, c: &str, top: &str, rel: &str) -> String { format!("git\t{g}\t{c}\t{}\t{top}/{rel}", bj::len(top)) }
 /// Hist.rebase: another live file in the same commit as version p; abs itself when p is live
 pub fn rebase(p: &str, abs: &str) -> String { if plotread::kind_of(p) == 1 { format!("git\t{}\t{}\t{}\t{abs}", field(p, 1), field(p, 2), field(p, 3)) } else { abs.to_string() } }

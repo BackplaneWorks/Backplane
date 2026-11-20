@@ -4573,6 +4573,7 @@ viewer.layout.refusal.duplicateid	Tile already exists	タイルは既に存在�
 viewer.layout.refusal.unknownframe	Unknown KiCad frame	不明な KiCad フレームです	Marco de KiCad desconocido
 viewer.layout.refusal.invalidinput	Invalid layout request	無効なレイアウト要求です	Solicitud de diseño no válida
 viewer.layout.refusal.toomany	Too many tiles open	タイルが多すぎます	Demasiados mosaicos abiertos
+viewer.layout.refusal.toomanysources	Too many sources in one layout	レイアウトのソースが多すぎます	Demasiadas fuentes en un diseño
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}

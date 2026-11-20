@@ -391,6 +391,8 @@ pub enum Refusal {
     InvalidInput,
     /// The layout already holds `MAX_TILES` tiles (each tile can hold watch subscriptions on the hub).
     TooManyTiles,
+    /// The layout would watch more distinct sources than a session's watch set holds (`watch::MAX_WATCH_SOURCES`; a 3D tile of a board is two).
+    TooManySources,
 }
 
 /// The most tiles one session's layout holds (a bound on the hub's per-session watch subscriptions: at most `MAX_WATCH_SOURCES` distinct sources).
@@ -412,6 +414,7 @@ impl Refusal {
             Refusal::UnknownFrame => "unknownFrame",
             Refusal::InvalidInput => "invalidInput",
             Refusal::TooManyTiles => "tooManyTiles",
+            Refusal::TooManySources => "tooManySources",
         }
     }
 
@@ -431,6 +434,7 @@ impl Refusal {
             Refusal::UnknownFrame => "viewer.layout.refusal.unknownframe",
             Refusal::InvalidInput => "viewer.layout.refusal.invalidinput",
             Refusal::TooManyTiles => "viewer.layout.refusal.toomany",
+            Refusal::TooManySources => "viewer.layout.refusal.toomanysources",
         }
     }
 
@@ -2655,6 +2659,7 @@ mod tests {
             Refusal::UnknownFrame,
             Refusal::InvalidInput,
             Refusal::TooManyTiles,
+            Refusal::TooManySources,
         ];
         for (lang, text) in [
             ("en", include_str!("../../../../i18n/en.msg")),

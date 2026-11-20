@@ -172,7 +172,7 @@ pub fn view_action_for(
     // resolver — NEVER fall through to main's live board/schematic watch path.
     if force_retry {
         if let Some(cur_layout) = &stored {
-            if cur_layout.focus.as_deref().and_then(|id| cur_layout.tile(id)).is_some_and(is_tile_versioned) {
+            if cur_layout.tiles().len() >= 2 || cur_layout.focus.as_deref().and_then(|id| cur_layout.tile(id)).is_some_and(is_tile_versioned) {
                 let last_ms: u64 = s(d, "@view.retry.at").parse().unwrap_or(0);
                 if !retry_allowed(last_ms, now_ms) {
                     return Some(LayoutOut::Ok(ViewOut { patch: json!({}), before: vec![], boards_look: false }));
@@ -183,7 +183,7 @@ pub fn view_action_for(
                 } else {
                     root_of(st, sel)
                 };
-                let mut vo = commit_layout_force(st, hub, session, sel, &eff_root, cur_layout, false, true);
+                let mut vo = commit_layout_force(st, hub, session, sel, &eff_root, cur_layout, false, true, client_id.unwrap_or(0));
                 if now_ms > 0 {
                     if let Some(dm) = vo.patch["drafts"].as_object_mut() {
                         dm.insert("@view.retry.at".into(), json!(now_ms.to_string()));
@@ -256,7 +256,7 @@ pub fn view_action_for(
                 };
                 return Some(match next_res {
                     Err(r) => LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) },
-                    Ok(next_layout) => LayoutOut::Ok(commit_layout(st, hub, session, sel, &eff_root, &next_layout, false)),
+                    Ok(next_layout) => commit_checked(st, hub, session, sel, &eff_root, &next_layout, false, client_id.unwrap_or(0), locale),
                 });
             }
         } else if client_id.is_some() {
@@ -522,7 +522,7 @@ pub fn board_action_for(st: &State, hub: &str, session: &Value, client_id: Optio
                         if let Some(r) = &mut next.root {
                             set_tile_explicit(r, fid, !own);
                         }
-                        let mut vo = commit_layout(st, hub, session, sel, &root, &next, false);
+                        let mut vo = commit_layout(st, hub, session, sel, &root, &next, false, client_id.unwrap_or(0));
                         if let Some(dm) = vo.patch["drafts"].as_object_mut() {
                             dm.insert(format!("@view.board:{sel}"), json!(if own { "" } else { rel }));
                         }
@@ -708,7 +708,7 @@ pub fn sheet_action_for(st: &State, hub: &str, session: &Value, client_id: Optio
                     if let Some(r) = &mut next.root {
                         set_tile_explicit(r, &tid, !file.is_empty());
                     }
-                    LayoutOut::Ok(commit_layout(st, hub, session, sel, &root, &next, false))
+                    LayoutOut::Ok(commit_layout(st, hub, session, sel, &root, &next, false, client_id.unwrap_or(0)))
                 }
             });
         }
@@ -1539,29 +1539,33 @@ pub fn show_settled_with(want: &ShowWant, report: &Value, d: &ShowDefaults, reso
 }
 
 /// Cached Gerber-set member availability resolved when layout or watch changes (never during picture rendering): (root, set) -> (has members, when it was last
-/// resolved). Bounded: at most `GERBER_PER_ROOT` entries a project and `GERBER_TOTAL` in all, the least recently resolved leaving first; a layout that no longer
-/// holds a set drops it (`refresh_gerber_sets`).
+/// resolved). Bounded: at most `GERBER_PER_ROOT` entries a project and `GERBER_TOTAL` in all, the least recently resolved leaving first, the sets some live
+/// session's layout names (`refs`: per owner, the sets its layout holds) last of all; a referenced set that has to go is resolved again when it is next needed.
 const GERBER_PER_ROOT: usize = 16;
 const GERBER_TOTAL: usize = 256;
-struct GerberCache { seq: u64, map: std::collections::HashMap<(String, String), (bool, u64)> }
+const GERBER_OWNERS: usize = 256;
+struct GerberCache { seq: u64, map: std::collections::HashMap<(String, String), (bool, u64)>, refs: std::collections::BTreeMap<(u64, String), (u64, std::collections::BTreeSet<String>)> }
 fn gerber_set_state() -> &'static std::sync::Mutex<GerberCache> {
     static MAP: std::sync::OnceLock<std::sync::Mutex<GerberCache>> = std::sync::OnceLock::new();
-    MAP.get_or_init(|| std::sync::Mutex::new(GerberCache { seq: 0, map: Default::default() }))
+    MAP.get_or_init(|| std::sync::Mutex::new(GerberCache { seq: 0, map: Default::default(), refs: Default::default() }))
+}
+fn gerber_referenced(c: &GerberCache, root: &str, set: &str) -> bool { c.refs.iter().any(|((_, r), (_, sets))| r == root && sets.contains(set)) }
+/// The keys to drop to bring `keys` to `keep` entries: the unreferenced, oldest first, then the referenced, oldest first.
+fn gerber_victims(c: &GerberCache, mut keys: Vec<(String, String)>, keep: usize) -> Vec<(String, String)> {
+    if keys.len() <= keep { return vec![] }
+    keys.sort_by_key(|k| (gerber_referenced(c, &k.0, &k.1), c.map.get(k).map_or(0, |v| v.1)));
+    let n = keys.len() - keep;
+    keys.into_iter().take(n).collect()
 }
 fn gerber_put(c: &mut GerberCache, root: &str, rel: &str, ok: bool) {
     c.seq += 1;
     let at = c.seq;
     c.map.insert((root.to_string(), rel.to_string()), (ok, at));
     // a project's own bound, then the whole
-    let mut mine: Vec<(u64, String)> = c.map.iter().filter(|((r, _), _)| r == root).map(|((_, s), (_, at))| (*at, s.clone())).collect();
-    if mine.len() > GERBER_PER_ROOT {
-        mine.sort();
-        for (_, s) in mine.into_iter().take(c.map.iter().filter(|((r, _), _)| r == root).count() - GERBER_PER_ROOT) { c.map.remove(&(root.to_string(), s)); }
-    }
-    while c.map.len() > GERBER_TOTAL {
-        let Some(old) = c.map.iter().min_by_key(|(_, (_, at))| *at).map(|(k, _)| k.clone()) else { break };
-        c.map.remove(&old);
-    }
+    let mine: Vec<(String, String)> = c.map.keys().filter(|(r, _)| r == root).cloned().collect();
+    for k in gerber_victims(c, mine, GERBER_PER_ROOT) { c.map.remove(&k); }
+    let all: Vec<(String, String)> = c.map.keys().cloned().collect();
+    for k in gerber_victims(c, all, GERBER_TOTAL) { c.map.remove(&k); }
 }
 fn has_gerber_members(root: &str, set_rel: &str) -> bool {
     if root.is_empty() || set_rel.is_empty() { return false; }
@@ -1569,30 +1573,30 @@ fn has_gerber_members(root: &str, set_rel: &str) -> bool {
     crate::files::fm::contained(root_p, set_rel)
         .is_some_and(|p| !crate::files::kicad::gerber::set_files_in(&p, Some(root_p)).is_empty())
 }
-/// Resolve contained Gerber members for all Gerber tiles in `layout` and keep the results in state; the sets of this project the layout no longer holds are dropped.
-pub fn refresh_gerber_sets(root: &str, layout: &super::layout::Layout) {
+/// The Gerber sets of the tiles of a layout (root-relative).
+fn layout_gerber_sets(layout: &super::layout::Layout) -> std::collections::BTreeSet<String> {
     use super::layout::PageKind;
+    layout.tiles().into_iter().filter_map(|tile| {
+        let is_gvb = tile.kind == PageKind::Board && tile.overlay.as_ref().is_some_and(|ov| ov.kind == PageKind::Gerbers);
+        let set_rel = if is_gvb { tile.overlay.as_ref().map(|ov| ov.source.as_str()).unwrap_or("") } else if tile.kind == PageKind::Gerbers { tile.source.as_str() } else { "" };
+        (!set_rel.is_empty()).then(|| set_rel.to_string())
+    }).collect()
+}
+/// Resolve contained Gerber members for the Gerber tiles of `owner`'s layout and keep the results in state; the owner's references are what its layout names now
+/// (another session's sets are never dropped for it).
+pub fn refresh_gerber_sets_for(owner: u64, root: &str, layout: &super::layout::Layout) {
     if root.is_empty() { return; }
-    let mut updates = Vec::new();
-    for tile in layout.tiles() {
-        let is_gvb = tile.kind == PageKind::Board
-            && tile.overlay.as_ref().is_some_and(|ov| ov.kind == PageKind::Gerbers);
-        let set_rel = if is_gvb {
-            tile.overlay.as_ref().map(|ov| ov.source.as_str()).unwrap_or("")
-        } else if tile.kind == PageKind::Gerbers {
-            tile.source.as_str()
-        } else {
-            ""
-        };
-        if !set_rel.is_empty() {
-            updates.push((set_rel.to_string(), has_gerber_members(root, set_rel)));
-        }
-    }
+    let sets = layout_gerber_sets(layout);
+    let updates: Vec<(String, bool)> = sets.iter().map(|r| (r.clone(), has_gerber_members(root, r))).collect();
     let mut c = gerber_set_state().lock().unwrap_or_else(|e| e.into_inner());
-    let held: std::collections::HashSet<&String> = updates.iter().map(|(r, _)| r).collect();
-    c.map.retain(|(r, s), _| r != root || held.contains(s));
+    c.seq += 1;
+    let at = c.seq;
+    if sets.is_empty() { c.refs.remove(&(owner, root.to_string())); } else { c.refs.insert((owner, root.to_string()), (at, sets)); }
+    while c.refs.len() > GERBER_OWNERS { let oldest = c.refs.iter().min_by_key(|(_, v)| v.0).map(|(k, _)| k.clone()); if let Some(k) = oldest { c.refs.remove(&k); } else { break } }
     for (rel, ok) in &updates { gerber_put(&mut c, root, rel, *ok); }
 }
+/// `refresh_gerber_sets_for` for an owner that is not a session (tests).
+pub fn refresh_gerber_sets(root: &str, layout: &super::layout::Layout) { refresh_gerber_sets_for(0, root, layout) }
 /// Re-check all tracked Gerber sets under `root` when a watch updates.
 pub fn refresh_gerber_sets_for_root(root: &str) {
     if root.is_empty() { return; }
@@ -1604,6 +1608,15 @@ pub fn refresh_gerber_sets_for_root(root: &str) {
     let updates: Vec<(String, bool)> = keys.into_iter().map(|rel| { let ok = has_gerber_members(root, &rel); (rel, ok) }).collect();
     let mut c = gerber_set_state().lock().unwrap_or_else(|e| e.into_inner());
     for (rel, ok) in &updates { gerber_put(&mut c, root, rel, *ok); }
+}
+/// Whether the set has Gerber members: from the cache, else resolved now and kept (a referenced set the caps dropped is never answered by the project's
+/// availability as a whole).
+fn gerber_set_resolved(root: &str, set_rel: &str) -> bool {
+    if let Some(ok) = cached_gerber_set_exists(root, set_rel) { return ok }
+    let ok = has_gerber_members(root, set_rel);
+    let mut c = gerber_set_state().lock().unwrap_or_else(|e| e.into_inner());
+    gerber_put(&mut c, root, set_rel, ok);
+    ok
 }
 fn cached_gerber_set_exists(root: &str, set_rel: &str) -> Option<bool> {
     let c = gerber_set_state().lock().unwrap_or_else(|e| e.into_inner());
@@ -1749,19 +1762,29 @@ fn project_version_resolver(root: &str) -> super::layout::VersionSourceMap {
 /// When `geometry_only` is `true` (`layout-resize`, `layout-maximize`, `layout-restore`, or a
 /// structural move/swap that keeps the focused tile identical), emits ZERO watch commands and
 /// does NOT call `pages::leave` (so resizing with Diff or Review up never dismisses it).
-fn commit_layout(st: &State, hub: &str, session: &Value, sel: &str, root: &str, next: &super::layout::Layout, geometry_only: bool) -> ViewOut {
-    commit_layout_force(st, hub, session, sel, root, next, geometry_only, false)
+fn commit_layout(st: &State, hub: &str, session: &Value, sel: &str, root: &str, next: &super::layout::Layout, geometry_only: bool, owner: u64) -> ViewOut {
+    commit_layout_force(st, hub, session, sel, root, next, geometry_only, false, owner)
 }
 
 /// `commit_layout` that, when `force` (a Retry), sends the focused tile's watch even when its key is already the one on show, with `force:true`
 /// (the hub re-reads a failed unchanged source), as main's Retry does for a live page. A leave to one tile leaves nothing of the layout's
 /// pages behind: whichever writer made the single page, the file, sheet and Gerber drafts it did not set are cleared.
-fn commit_layout_force(st: &State, hub: &str, session: &Value, sel: &str, root: &str, next: &super::layout::Layout, geometry_only: bool, force: bool) -> ViewOut {
+fn commit_layout_force(st: &State, hub: &str, session: &Value, sel: &str, root: &str, next: &super::layout::Layout, geometry_only: bool, force: bool, owner: u64) -> ViewOut {
     let had_stored = !s(&session["drafts"], &format!("@view.layout:{sel}")).is_empty();
     let prev_multi = parse_stored_layout(&session["drafts"], sel).is_some_and(|l| l.tiles().len() >= 2);
-    let mut vo = commit_layout_core(st, hub, session, sel, root, next, geometry_only, force);
     let ts = next.tiles();
-    let keep_stored = ts.len() >= 2 || (ts.len() == 1 && ts.iter().all(|t| is_tile_versioned(t)));
+    let multi = ts.len() >= 2;
+    let keep_stored = multi || (ts.len() == 1 && ts.iter().all(|t| is_tile_versioned(t)));
+    let linked = sel.contains('~');
+    // Leaving several tiles: the connection still holds the layout's set, whatever single page is left. The page's own watch (or stop) must go out even
+    // when its key is the one on show, so the core is told nothing is on show (a value no key equals).
+    let leaving = prev_multi && !multi && !geometry_only;
+    let marked;
+    let sref = if leaving {
+        marked = { let mut s2 = session.clone(); s2["drafts"]["@view.at"] = json!(format!("0|{root}|\u{0}set")); s2 };
+        &marked
+    } else { session };
+    let mut vo = commit_layout_core(st, hub, sref, sel, root, next, geometry_only, force && !multi);
     if had_stored && !geometry_only && !keep_stored {
         let mut dm = vo.patch.get("drafts").and_then(Value::as_object).cloned().unwrap_or_default();
         for k in ["@view.file", "@view.sheet", "@view.gerbers"] {
@@ -1770,33 +1793,27 @@ fn commit_layout_force(st: &State, hub: &str, session: &Value, sel: &str, root: 
         }
         if !dm.is_empty() { vo.patch["drafts"] = Value::Object(dm); }
     }
-    let multi = ts.len() >= 2;
-    let linked = sel.contains('~');
-    let set_key = format!("@view.set:{sel}");
-    // A layout of several tiles watches every distinct source it draws, once, through `kicad.watch.set`; the focused tile's own single watch is not sent
-    // (it would replace the set), and a focus move that leaves the set of sources as it is sends nothing at all (`@view.at` still follows the focus).
-    // Only a stored layout of several tiles gets here, which no shipped client enters: a single-tile session keeps main's one `kicad.watch`.
+    // A layout of several tiles watches every source it draws through `kicad.watch.set`, which the hub holds authoritatively for the connection: each change of
+    // the layout sends the whole set (the hub keeps what stays, stops what is no longer named, and re-reads only the sources marked `force`: a Retry's, the focused
+    // tile's); the focused tile's own single watch is not sent (it would replace the set). A focus move that leaves the sources as they are therefore changes
+    // nothing on the hub: no stop, no start. Only a stored layout of several tiles gets here, which no shipped client enters: a single tile keeps main's one
+    // `kicad.watch`.
     if multi && !geometry_only && !root.is_empty() {
         vo.before.retain(|c| !c["text"].as_str().is_some_and(|x| x.contains("\"m\":\"kicad.watch\"")));
-        let (sources, sig) = watch_sources(next, root, linked);
-        if force || sig != s(&session["drafts"], &set_key) {
-            let mut rid = vo.patch["rid"].as_u64().unwrap_or_else(|| session["rid"].as_u64().unwrap_or(0));
-            let mut p = json!({"root": root, "sources": sources});
-            if linked { p["on"] = json!(sel.split('~').next().unwrap_or("")); }
-            if force { p["force"] = json!(true); }
-            vo.before.push(json!({"type": "send", "hub": hub, "text": json!({"id": rid, "m": "kicad.watch.set", "p": p}).to_string()}));
-            rid += 1; vo.patch["rid"] = json!(rid);
-            vo.patch["drafts"][&set_key] = json!(sig);
-        }
-    } else if !multi && !s(&session["drafts"], &set_key).is_empty() {
-        vo.patch["drafts"][&set_key] = json!("");
+        let sources = watch_sources(next, root, linked, force);
+        let mut rid = vo.patch["rid"].as_u64().unwrap_or_else(|| session["rid"].as_u64().unwrap_or(0));
+        let mut p = json!({"root": root, "sources": sources});
+        if linked { p["on"] = json!(sel.split('~').next().unwrap_or("")); }
+        vo.before.push(json!({"type": "send", "hub": hub, "text": json!({"id": rid, "m": "kicad.watch.set", "p": p}).to_string()}));
+        rid += 1; vo.patch["rid"] = json!(rid);
     }
-    // The project's layout is remembered: written when a layout of several tiles changes, cleared when the person closes down to one tile (a hub setting
-    // `layout:<root>`, the project's, shared by every client of this hub). Opaque, root-relative tiles only; a tile that cannot be resolved is left out.
+    // The project's layout is remembered: written when a layout of several tiles changes, cleared when the person closes down to one tile or when what can be
+    // remembered of it is fewer than two tiles (a hub setting `layout:<root>`, the project's, shared by every client of this hub). Opaque, root-relative tiles
+    // only; a tile that cannot be resolved is left out.
     if !linked && !root.is_empty() {
         let key = memory_key(root);
         let have = st.settings.get(&key).map(String::as_str).unwrap_or("");
-        let want = if multi { memory_value(next) } else if prev_multi { Some(String::new()) } else { None };
+        let want = if multi { Some(memory_value(next).unwrap_or_default()) } else if prev_multi { Some(String::new()) } else { None };
         if let Some(w) = want {
             if w != have {
                 let rid = vo.patch["rid"].as_u64().unwrap_or_else(|| session["rid"].as_u64().unwrap_or(0));
@@ -1805,7 +1822,29 @@ fn commit_layout_force(st: &State, hub: &str, session: &Value, sel: &str, root: 
             }
         }
     }
+    // the Gerber sets this connection's layout names (the cache keeps them while it does)
+    if !linked && !root.is_empty() { refresh_gerber_sets_for(owner, root, next); }
     vo
+}
+
+/// `commit_layout` after the limits: a layout with more distinct sources than a session's watch set holds is refused with its own reason, before anything is
+/// recorded or sent (the number of tiles is bounded by `layout::add`, with its own reason).
+fn commit_checked(st: &State, hub: &str, session: &Value, sel: &str, root: &str, next: &super::layout::Layout, geometry_only: bool, owner: u64, locale: &str) -> LayoutOut {
+    if let Err(r) = limits_ok(next, root, sel.contains('~')) { return LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) } }
+    LayoutOut::Ok(commit_layout(st, hub, session, sel, root, next, geometry_only, owner))
+}
+/// Tiles and sources are counted apart: at most `MAX_TILES` tiles (`layout::add`) and `MAX_WATCH_SOURCES` distinct subscriptions (a 3D tile of a board is two).
+fn limits_ok(l: &super::layout::Layout, root: &str, linked: bool) -> Result<(), super::layout::Refusal> {
+    if l.tiles().len() > super::layout::MAX_TILES { return Err(super::layout::Refusal::TooManyTiles) }
+    if l.tiles().len() >= 2 && !root.is_empty() {
+        let mut keys = std::collections::BTreeSet::new();
+        for e in watch_sources(l, root, linked, false) {
+            let kind = match e["kind"].as_str() { Some("board") => 0, Some("schematic") => 1, _ => 2 };
+            for k in crate::files::kicad::watch::Plots::keys_for(kind, root, e["path"].as_str().unwrap_or("")) { keys.insert(k); }
+        }
+        if keys.len() > crate::files::kicad::watch::MAX_WATCH_SOURCES { return Err(super::layout::Refusal::TooManySources) }
+    }
+    Ok(())
 }
 
 /// The hub setting that holds a project's remembered layout.
@@ -1833,33 +1872,52 @@ fn memory_layout(st: &State, root: &str) -> Option<super::layout::Layout> {
     let mut l: super::layout::Layout = serde_json::from_str(raw).ok()?;
     super::layout::check_invariants(&l).ok()?;
     let resolver = project_version_resolver(root);
-    use super::layout::VersionResolver;
+    // every tile must resolve NOW: a live drawing's file exists (a Gerber set has members, a folder is there), a version's revision holds the file; the rest are left out
     for t in l.tiles().into_iter().cloned().collect::<Vec<_>>() {
-        let versions = [t.version.as_ref(), t.overlay.as_ref().and_then(|o| o.version.as_ref())];
-        if t.unresolved_version || versions.iter().flatten().any(|v| resolver.resolve(&v.source_id).is_none()) {
+        if t.unresolved_version || !tile_resolvable(root, &t, &resolver) {
             l = super::layout::close(&l, &t.id, None).ok()?;
         }
     }
     (l.tiles().len() >= 2 && l.tiles().len() <= super::layout::MAX_TILES).then_some(l)
 }
 
-/// The sources a layout of several tiles watches: each tile's (an unresolved historical tile has none, and never falls back to live artwork), each distinct
-/// source once, with the opaque tile id that first asked for it; and the sorted list of their keys, the layout's watch identity.
-fn watch_sources(l: &super::layout::Layout, root: &str, linked: bool) -> (Vec<Value>, String) {
+/// Whether a remembered tile can be drawn now.
+fn tile_resolvable(root: &str, t: &super::layout::Tile, resolver: &super::layout::VersionSourceMap) -> bool {
+    use super::layout::{PageKind, VersionResolver};
+    let root_p = std::path::Path::new(root);
+    let live = |kind: PageKind, src: &str| -> bool {
+        if src.is_empty() { return true }
+        let Some(p) = crate::files::fm::contained(root_p, src) else { return false };
+        match kind { PageKind::Files => p.is_dir(), PageKind::Gerbers => !crate::files::kicad::gerber::set_files_in(&p, Some(root_p)).is_empty(), _ => p.is_file() }
+    };
+    let version = |v: &super::layout::TileVersion, rel: &str| -> bool {
+        rel.is_empty() || resolver.resolve(&v.source_id).is_some_and(|src| crate::files::rv::version_has_file(&src.git_dir, &v.id, rel))
+    };
+    let base = match &t.version { Some(v) => version(v, &t.source), None => live(t.kind, &t.source) };
+    let ov = t.overlay.as_ref().map_or(true, |ov| match &ov.version { Some(v) => version(v, &ov.source), None => live(ov.kind, &ov.source) });
+    base && ov
+}
+
+/// The sources a layout of several tiles watches, every tile's (an unresolved historical tile has none, and never falls back to live artwork), each named by
+/// its opaque tile id; a source several tiles draw is listed for each of them (the hub subscribes it once and answers each tile with the keys it draws from).
+/// `force` marks the focused tile's sources: a Retry re-reads those only. A default source's path is "" and a named one's the file, as one `kicad.watch` carries it.
+fn watch_sources(l: &super::layout::Layout, root: &str, linked: bool, force: bool) -> Vec<Value> {
     let (pcb, sch) = if linked { (String::new(), String::new()) } else { let f = crate::files::kicad::project::read(root); (f.pcb, f.sch) };
     let ctx = super::layout::WatchContext { root: root.to_string(), default_pcb: pcb, default_sch: sch };
     let resolver = project_version_resolver(root);
-    let mut seen = std::collections::BTreeSet::new();
     let mut out = vec![];
     for t in l.tiles() {
         let Ok(single) = super::layout::Layout::single(t.clone()) else { continue };
         let Ok(specs) = super::layout::plan_watches(&single, &ctx, &resolver) else { continue };
+        let focused = force && l.focus.as_deref() == Some(t.id.as_str());
         for sp in specs {
             let kind = match sp.kind { 0 => "board", 1 => "schematic", 2 => "3d", _ => continue };
-            if seen.insert(sp.key.clone()) { out.push(json!({"tile": t.id, "kind": kind, "path": sp.path})); }
+            let mut e = json!({"tile": t.id, "kind": kind, "path": sp.path});
+            if focused { e["force"] = json!(true); }
+            out.push(e);
         }
     }
-    (out, seen.into_iter().collect::<Vec<_>>().join("\n"))
+    out
 }
 
 fn commit_layout_core(
@@ -1879,9 +1937,6 @@ fn commit_layout_core(
     let mut before = Vec::new();
     let abs = |rel: &str| if rel.is_empty() || root.is_empty() { String::new() } else { format!("{}/{rel}", root.trim_end_matches('/')) };
 
-    if !sel.contains('~') && !root.is_empty() {
-        refresh_gerber_sets(root, next);
-    }
 
     if next.is_empty() {
         if let Some(mut vo) = legacy_view_inner(st, hub, session, "", 0, true) {
@@ -2306,7 +2361,7 @@ fn build_tiles_picture(
             if set_rel.is_empty() || set_rel == default_gerber_rel {
                 !src.gerbers
             } else {
-                !cached_gerber_set_exists(root, set_rel).unwrap_or(src.gerbers)
+                !gerber_set_resolved(root, set_rel)
             }
         });
         let explicit_missing = !linked && tile.explicit && !tile.source.is_empty() && sources.is_some_and(|src| {
@@ -2464,7 +2519,7 @@ pub fn apply_memory(st: &State, hub: &str, session: &Value, client_id: Option<u6
             return Some(LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) });
         }
     }
-    Some(LayoutOut::Ok(commit_layout(st, hub, session, sel, &root, &mem, false)))
+    Some(commit_checked(st, hub, session, sel, &root, &mem, false, client_id.unwrap_or(0), locale))
 }
 
 /// `layout-forget`: the project's remembered layout is cleared.
@@ -2731,7 +2786,7 @@ pub fn layout_action(
 
     match res {
         Err(r) => refuse(r),
-        Ok(next) => Some(LayoutOut::Ok(commit_layout(st, hub, session, sel, &root, &next, geometry_only))),
+        Ok(next) => Some(commit_checked(st, hub, session, sel, &root, &next, geometry_only, client_id.unwrap_or(0), locale)),
     }
 }
 
@@ -2793,13 +2848,13 @@ pub fn viewer_show_action(
             let (board, sch) = split_sources(session, &root, linked, path);
             return Some(match layout::show_split(&cur, &board, &sch, guard.client_has_kicad, guard.locked.as_deref()) {
                 Err(r) => LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) },
-                Ok(next) => LayoutOut::Ok(commit_layout(st, hub, session, sel, &root, &next, false)),
+                Ok(next) => commit_checked(st, hub, session, sel, &root, &next, false, client_id.unwrap_or(0), locale),
             });
         }
         let Some(pk) = pk else { return None };
         return Some(match layout::viewer_show(&cur, pk, rel, guard.locked.as_deref()) {
             Err(r) => LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) },
-            Ok(next) => LayoutOut::Ok(commit_layout(st, hub, session, sel, &root, &next, false)),
+            Ok(next) => commit_checked(st, hub, session, sel, &root, &next, false, client_id.unwrap_or(0), locale),
         });
     }
     // Legacy single-tile / idle mode: guard the CURRENT open tile (NOT the requested tile),
@@ -2912,7 +2967,7 @@ pub fn viewer_show_action(
         unresolved_version: false,
         overlay: None,
     }).ok()?;
-    Some(LayoutOut::Ok(commit_layout(st, hub, session, sel, &root, &single, false)))
+    Some(LayoutOut::Ok(commit_layout(st, hub, session, sel, &root, &single, false, client_id.unwrap_or(0))))
 }
 
 /// Choose the surface for this connection and the document the frame would open.
@@ -3081,21 +3136,38 @@ mod tests {
         for l in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(l); }
         (st, "t1700000003-8".into())
     }
-    /// The Gerber set cache is bounded: a project's oldest sets leave past `GERBER_PER_ROOT`, the least recently resolved leave past `GERBER_TOTAL`.
-    #[test] fn the_gerber_set_cache_is_bounded_and_keeps_what_was_resolved_last() {
-        let root = "/p/evict-per-root";
-        { let mut c = gerber_set_state().lock().unwrap(); for i in 0..(GERBER_PER_ROOT + 5) { gerber_put(&mut c, root, &format!("mfg/r{i}"), true); } }
-        assert_eq!(cached_gerber_set_exists(root, "mfg/r0"), None, "the oldest is gone");
-        assert_eq!(cached_gerber_set_exists(root, &format!("mfg/r{}", GERBER_PER_ROOT + 4)), Some(true), "the newest stays");
+    /// The Gerber set cache is bounded, never drops a set a live session's layout names while unreferenced entries can go instead, one session's refresh never
+    /// removes another's, and a referenced set the caps did drop is resolved again, not answered by the project as a whole.
+    #[test] fn the_gerber_set_cache_is_bounded_and_keeps_what_live_layouts_name() {
+        use super::super::layout::{Layout, PageKind, Tile};
+        let gerbers = |src: &str| Layout::single(Tile { id: "t1".into(), kind: PageKind::Gerbers, source: src.into(), explicit: true, version: None, unresolved_version: false, overlay: None }).unwrap();
+        let d = crate::plat::tmp::dir("gcache");
+        let root = d.to_string_lossy().into_owned();
+        for set in ["a", "b"] { std::fs::create_dir_all(d.join(format!("mfg/{set}"))).unwrap(); std::fs::write(d.join(format!("mfg/{set}/x-F_Cu.gbr")), "%FSLAX46Y46*%M02*").unwrap(); }
+        // two sessions of one project: B's refresh does not remove A's set, below every limit
+        refresh_gerber_sets_for(701, &root, &gerbers("mfg/a"));
+        refresh_gerber_sets_for(702, &root, &gerbers("mfg/b"));
+        assert_eq!(cached_gerber_set_exists(&root, "mfg/a"), Some(true), "session A's set stays when session B refreshes its own");
+        assert_eq!(cached_gerber_set_exists(&root, "mfg/b"), Some(true));
+        // past the project's bound the unreferenced entries go first, oldest first; the referenced stay
+        { let mut c = gerber_set_state().lock().unwrap(); for i in 0..(GERBER_PER_ROOT + 5) { gerber_put(&mut c, &root, &format!("mfg/old{i}"), true); } }
+        assert_eq!(cached_gerber_set_exists(&root, "mfg/old0"), None, "the oldest unreferenced entry is gone");
+        assert_eq!(cached_gerber_set_exists(&root, "mfg/a"), Some(true), "a set a live layout names is kept while others can go");
+        assert_eq!(cached_gerber_set_exists(&root, "mfg/b"), Some(true));
+        // the whole cache is bounded too
         { let mut c = gerber_set_state().lock().unwrap(); for i in 0..(GERBER_TOTAL + 10) { gerber_put(&mut c, &format!("/p/evict-total-{i}"), "mfg/a", false); } }
         let total = gerber_set_state().lock().unwrap().map.len();
         assert!(total <= GERBER_TOTAL, "the whole cache is bounded: {total}");
         assert_eq!(cached_gerber_set_exists(&format!("/p/evict-total-{}", GERBER_TOTAL + 9), "mfg/a"), Some(false));
-        // a layout that no longer holds a project's sets drops them
-        let r2 = "/p/evict-layout";
-        { let mut c = gerber_set_state().lock().unwrap(); gerber_put(&mut c, r2, "mfg/old", true); }
-        refresh_gerber_sets(r2, &super::super::layout::Layout::empty());
-        assert_eq!(cached_gerber_set_exists(r2, "mfg/old"), None);
+        // a referenced set the caps had to drop is resolved again, never the project's availability as a whole
+        { let mut c = gerber_set_state().lock().unwrap(); c.map.remove(&(root.clone(), "mfg/a".to_string())); }
+        assert_eq!(cached_gerber_set_exists(&root, "mfg/a"), None);
+        assert!(gerber_set_resolved(&root, "mfg/a"), "resolved on demand");
+        assert!(!gerber_set_resolved(&root, "mfg/never-there"), "a set with no members is not 'available' because the project has some");
+        // an owner whose layout no longer names the set releases it
+        refresh_gerber_sets_for(701, &root, &Layout::empty());
+        let c = gerber_set_state().lock().unwrap();
+        assert!(!gerber_referenced(&c, &root, "mfg/a") && gerber_referenced(&c, &root, "mfg/b"));
     }
     #[test]
     fn empty_gerbers_page_has_a_lit_rail_entry_until_closed() {
