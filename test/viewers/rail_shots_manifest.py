@@ -87,9 +87,8 @@ EXTRA_MISSING_SHOTS = {
     "board-only": ["extra-missing-schematic"],
 }
 
+# Files and Review no longer register ui:Edit after PR #1412's unified pane header; keep Browser while unmigrated.
 EXTRA_EDIT_PAGES = [
-    ("files", "rail:Files", "files"),
-    ("review", "rail:Review", "review"),
     ("browser", "rail:Browser", "browser"),
 ]
 
@@ -160,8 +159,6 @@ def expected_shots(kind: str, embed: bool = False, schema: int = 3) -> list[str]
         shots.extend(EXTRA_MISSING_SHOTS[kind])
         if embed:
             shots.extend(EXTRA_EDIT_SHOTS)
-    elif kind in NO_DESIGN_KINDS and embed:
-        shots.append("extra-edit-files")
     return shots
 
 

@@ -805,11 +805,17 @@ class RailShotsRegressionTests(unittest.TestCase):
             self.assertIn("enabled rail entry 'split' failed to open", res["schematic-only/no-edit-split"]["note"])
             self.assertEqual(res["schematic-only/has-edit-schematic"]["outcome"], "passed")
 
-            # 3. Scripted edit: files passes (SCH, painted=20), review fails (painted=0), browser unavailable (only ui:View delivered, not ui:Edit)
-            self.assertEqual(res["schematic-only/scripted-edit-files"]["outcome"], "passed")
-            self.assertEqual(res["schematic-only/scripted-edit-review"]["outcome"], "failed")
-            self.assertIn("shown_painted=0", res["schematic-only/scripted-edit-review"]["note"])
+            # 3. Scripted edit: Files/Review dropped after PR #1412 removed ui:Edit there; browser unavailable (only ui:View delivered, not ui:Edit)
+            self.assertNotIn("schematic-only/scripted-edit-files", res)
+            self.assertNotIn("schematic-only/scripted-edit-review", res)
             self.assertEqual(res["schematic-only/scripted-edit-browser"]["outcome"], "unavailable")
+
+            # Verify extra-missing-board runs BEFORE b1:sim-press-open under --embed so Simulator never leaks into it
+            steps_sch = D.build_script("schematic-only", 300, 15000, embed=True)
+            marks = [s.get("mark") for s in steps_sch if isinstance(s, dict) and "mark" in s]
+            self.assertIn("extra:extra-missing-board", marks)
+            self.assertIn("b1:sim-press-open", marks)
+            self.assertLess(marks.index("extra:extra-missing-board"), marks.index("b1:sim-press-open"))
 
             # 4. Incomplete session inventory or failed inspection -> unavailable (never passed)
             caps["schematic-only"]["extra-missing-board"] = mk_cap(sess=incomplete_sess)
@@ -820,10 +826,10 @@ class RailShotsRegressionTests(unittest.TestCase):
             self.assertEqual(res3["schematic-only/missing-board"]["outcome"], "unavailable")
 
             # 5. Out-of-order edit sequence (edit_seq not strictly between start_seq and shot_seq) -> unavailable
-            parsed["schematic-only"]["presses"]["press:extra-edit-files"] = [{"id": "ui:Edit", "found": True, "seq": 5}]
+            parsed["schematic-only"]["presses"]["press:extra-edit-browser"] = [{"id": "ui:Edit", "found": True, "seq": 5}]
             res4 = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["schematic-only"], parsed, caps, embed=True)}
-            self.assertEqual(res4["schematic-only/scripted-edit-files"]["outcome"], "unavailable")
-            self.assertIn("order not verified", res4["schematic-only/scripted-edit-files"]["note"])
+            self.assertEqual(res4["schematic-only/scripted-edit-browser"]["outcome"], "unavailable")
+            self.assertIn("order not verified", res4["schematic-only/scripted-edit-browser"]["note"])
 
             # 6. Missing rail evidence when page didn't open -> rail_state='unknown' and outcome='unavailable' (not 'failed')
             parsed["schematic-only"]["shots"]["idle"]["viewer"]["rail"] = []
