@@ -72,6 +72,9 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
     var target by remember { mutableStateOf<Target?>(when { fx == "kicad_pcb" || fx == "pcbdoc" -> Target("Board", file); fx == "kicad_sch" || fx == "schdoc" -> Target("Schematic", file); fx in setOf("step", "stp", "glb") -> Target("Mech", file); else -> null }) }
     var files by remember(thread.id) { mutableStateOf<DataClient.ProjectFiles?>(null) }
     var railState by remember(thread.id) { mutableStateOf(ViewerRailState(threadId = thread.id)) }
+    var railRefreshTick by remember(thread.id) { mutableIntStateOf(0) }
+    var filesListingSig by remember(thread.id) { mutableStateOf("") }
+    val viewerScope = rememberCoroutineScope()
     val hasRail = DataClient.has("rail")
     val hasGerbers = DataClient.has("gerbers")
     val strip = remember(railState, hasRail, hasGerbers) {
@@ -89,6 +92,7 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
         DataClient.plots.frame?.key.orEmpty(),
         DataClient.plots.frame?.none.orEmpty(),
         DataClient.plots.mesh?.none.orEmpty(),
+        filesListingSig,
     ).joinToString("|")
     LaunchedEffect(hasRail) {
         railState = railState.onFeatureChanged(hasRail)
@@ -104,7 +108,7 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
         if (!hasRail && files?.pcb?.isNotEmpty() == true && tab == "Files" && file.isEmpty() && railState.localSelectionSeq == 0) tab = "Board"
         DataClient.openViewerTab?.takeIf { it in tabs }?.let { tab = it; railState = railState.onLocalSelect(); DataClient.openViewerTab = null }
     }
-    LaunchedEffect(thread.id, online, hasRail, hasGerbers, sourceSignal) {
+    LaunchedEffect(thread.id, online, hasRail, hasGerbers, sourceSignal, railRefreshTick) {
         if (!hasRail) {
             railState = railState.onFeatureChanged(false)
             return@LaunchedEffect
@@ -116,18 +120,21 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
         res.onSuccess { got ->
             val out = railState.onReply(
                 token = req,
-                entries = got,
+                entries = got.entries,
+                has = got.has,
                 hasRail = DataClient.has("rail"),
                 gerbersSupported = DataClient.has("gerbers"),
                 currentTab = tab,
                 hasFileLink = file.isNotEmpty(),
             )
-            if (out.accepted) {
+            if (out.refetch) {
+                railRefreshTick++
+            } else if (out.accepted) {
                 railState = out.state
                 if (out.stopWatch) {
-                    DataClient.stopWatch(thread.id)
-                    target = null
+                    DataClient.stopWatchAwait(thread.id)
                 }
+                if (out.tab != tab) target = null
                 tab = out.tab
             }
         }.onFailure {
@@ -165,8 +172,16 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
                             val out = railState.tap(item, tab)
                             railState = out.state
                             if (out.tabChanged) {
-                                tab = out.tab
-                                target = null
+                                if (out.stopWatch) {
+                                    viewerScope.launch {
+                                        DataClient.stopWatchAwait(thread.id)
+                                        target = null
+                                        tab = out.tab
+                                    }
+                                } else {
+                                    target = null
+                                    tab = out.tab
+                                }
                             }
                         }
                         .padding(horizontal = 14.dp, vertical = 12.dp)
@@ -197,7 +212,13 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
                 "Diff" -> DiffTab(thread)
                 "Review" -> ReviewTab(thread)
                 "Mech" -> MechTab(thread, target?.path?.takeIf { target?.tab == "Mech" })
-                "Files" -> FilesTab(thread, if (fx == "kicad_pcb" || fx == "kicad_sch" || fx == "pcbdoc" || fx == "schdoc") "" else file, line) { t -> target = t; tab = t.tab; railState = railState.onLocalSelect() }
+                "Files" -> FilesTab(
+                    thread,
+                    if (fx == "kicad_pcb" || fx == "kicad_sch" || fx == "pcbdoc" || fx == "schdoc") "" else file,
+                    line,
+                    refreshKey = "${liveThread?.state.orEmpty()}|${liveThread?.updatedAt ?: 0L}",
+                    onListingChanged = { filesListingSig = it },
+                ) { t -> target = t; tab = t.tab; railState = railState.onLocalSelect() }
                 "Browser" -> BrowserTab(thread)
                 "" -> Box(Modifier.fillMaxSize())
                 else -> BrowserTab(thread)
@@ -485,14 +506,30 @@ private val textExt = setOf("txt", "md", "csv", "json", "log", "yaml", "yml", "t
 private fun ext(name: String) = name.substringAfterLast('.', "").lowercase()
 
 @Composable
-private fun FilesTab(thread: DThread, start: String, startLine: Int, open: (Target) -> Unit) {
+private fun FilesTab(
+    thread: DThread,
+    start: String,
+    startLine: Int,
+    refreshKey: String = "",
+    onListingChanged: (String) -> Unit = {},
+    open: (Target) -> Unit,
+) {
     // a linked file: its folder behind it, the file open at the line
     var dir by remember { mutableStateOf(start.substringBeforeLast('/', "")) }
     var list by remember { mutableStateOf<List<DataClient.Entry>?>(null) }
     var err by remember { mutableStateOf("") }
     var preview by remember { mutableStateOf<String?>(start.ifEmpty { null }) }
     var previewLine by remember { mutableStateOf(startLine) }
-    LaunchedEffect(thread.id, dir) { list = null; err = ""; runCatching { DataClient.entries(thread.id, dir) }.onSuccess { list = it }.onFailure { err = it.message ?: "" } }
+    LaunchedEffect(thread.id, dir, refreshKey) {
+        if (list == null) err = ""
+        runCatching { DataClient.entries(thread.id, dir) }
+            .onSuccess {
+                list = it
+                err = ""
+                onListingChanged("$dir|" + it.joinToString(",") { e -> "${e.name}:${e.dir}:${e.size}" })
+            }
+            .onFailure { err = it.message ?: "" }
+    }
     if (preview != null) { FilePreview(thread, preview!!, previewLine) { preview = null; previewLine = 0 }; return }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {

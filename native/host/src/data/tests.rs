@@ -832,7 +832,12 @@ async fn viewer_rail_returns_hub_rail_for_local_and_far_threads() {
         simulation: false, altium: src.altium, page: "files", diff: false,
     })).unwrap();
     assert_eq!(r["result"]["rail"], expected_local);
+    assert_eq!(r["result"]["has"], json!({"board": src.board, "schematic": src.schematic, "mech": src.mech, "gerbers": src.gerbers}));
     assert!(!r["result"]["rail"].as_array().unwrap().iter().any(|x| x["id"] == "simulation"));
+    // Even when page=="gerbers" with no Gerber set, `has.gerbers` stays false so phones reconcile away from a removed source
+    let rg = ask(&mut ws, 4, "viewer.rail", json!({"thread":"t1","page":"gerbers"})).await;
+    assert_eq!(rg["ok"], true);
+    assert_eq!(rg["result"]["has"]["gerbers"], src.gerbers);
 
     // diff=true lights the diff entry regardless of page
     let rd = ask(&mut ws, 2, "viewer.rail", json!({"thread":"t1","page":"files","diff":true})).await;
@@ -852,6 +857,7 @@ async fn viewer_rail_returns_hub_rail_for_local_and_far_threads() {
         simulation: false, altium: false, page: "board", diff: false,
     })).unwrap();
     assert_eq!(rf["result"]["rail"], expected_far);
+    assert_eq!(rf["result"]["has"], json!({"board": true, "schematic": true, "mech": true, "gerbers": false}));
 
     // Refused cases: unknown/deleted/unshown/rootless linked threads, unknown local, rootless local
     for (i, th) in ["L~nope", "L~del", "L~noroot", "H~t1", "nope", "t_noroot"].iter().enumerate() {
