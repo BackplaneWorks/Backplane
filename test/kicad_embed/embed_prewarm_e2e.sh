@@ -41,7 +41,7 @@ import json, sys
 client, hub, rep = sys.argv[1], sys.argv[2], json.loads(sys.argv[3] or "{}")
 reply = None; press = None
 for l in open(client, errors="ignore"):
-    if '"id":"kicad-tab:SCH"' in l and press is None:
+    if '"id":"kicad-tab:SCH","changed"' in l and '"event":"click"' in l and press is None:   # the press, not the controls/rects inventory
         try: press = json.loads(l.split("GPUI_METRIC ", 1)[1]).get("epoch_ms")
         except Exception: pass
     if "GPUI_LOG " not in l: continue
