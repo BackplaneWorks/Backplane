@@ -1560,10 +1560,10 @@ mod state_tests {
     /// An agent's show reaches the hub as `view-show`, main's was `view`: from idle the dispatcher's answer (commands, with the fab's look and the boards
     /// list, and the session's drafts) is the same for every kind an agent can show.
     #[test] fn view_show_from_idle_answers_as_the_dispatcher_does_for_view() {
-        let d=crate::plat::tmp::canonical("show-tail"); use crate::plat::tmp::sl;
+        let d=crate::plat::tmp::canonical("show-tail");
         std::fs::write(d.join("a.kicad_pcb"),"(kicad_pcb)").unwrap(); std::fs::write(d.join("a.kicad_sch"),"(kicad_sch)").unwrap();
         std::fs::create_dir_all(d.join("mech")).unwrap(); std::fs::write(d.join("mech/case.step"),"ISO-10303-21;").unwrap();
-        let root=sl(&d);
+        let root=d.to_string_lossy().to_string();
         let mut st=State::new(); st.lean=true;
         for e in [json!({"$":"ProjectCreated","id":"pa","title":"Amp","root":root,"at":1}),
                   json!({"$":"ThreadCreated","id":"ta","project":"pa","title":"A","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":5})] { event(&mut st,e); }
