@@ -6,6 +6,7 @@
 //! line to an agent, and `secret::prompt()` / `keys::prompt(..)` in the prompt. See docs/HUB-API.md.
 pub mod accounts;
 pub mod autopush;
+pub mod browser_start;
 pub mod offbranch;
 pub mod alerts;
 pub mod accounts_hub;
@@ -99,6 +100,7 @@ pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
     hub.register_rpc(Arc::new(set::SettingSet { agents: agents.clone() }));
     hub.register_rpc(Arc::new(telemetry::TelemetryRpc));
     hub.register_rpc(Arc::new(autopush::AutoPushRpc));
+    hub.register_rpc(Arc::new(browser_start::BrowserPage));
     { let h = hub.clone(); tokio::spawn(async move { autopush::boot(&h).await; autopush::changed(&h).await }); } // #1171: an upgraded install is told once that it no longer pushes
     telemetry_send::start(&hub); // the sender: nothing runs in a build with no baked endpoint and key (docs/telemetry.md)
     hub.register_rpc(Arc::new(diagnostics::DiagnosticsRpc));

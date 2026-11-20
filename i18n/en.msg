@@ -2667,6 +2667,15 @@ settings.git.autopush.note = Backplane commits design files locally at each turn
 settings.git.notice = Backplane no longer pushes automatically. Turn it on in Settings if you want it.
 settings.git.offbranch = Keep Backplane's commits off my branch
 settings.git.offbranch.note = Off: at each turn's end and save, Backplane commits the design files an agent changed to your branch. On: it records the same changes on its own refs (refs/backplane/design/<branch>) and never commits to your branch or index, so your branch shows the design files as modified until you commit them yourself. /restore and the KiCad history work either way.
+settings.browser.start = Start page
+settings.browser.start.note = What a new Browser tab opens, yours and an agent's. An http or https address; a bare name like example.com gets https://.
+settings.browser.opens = Opens
+settings.browser.reset = Reset to default
+settings.browser.blank = Blank
+settings.browser.now.default = New tabs open {url}, the default.
+settings.browser.now.blank = New tabs open blank.
+settings.browser.now = New tabs open {url}.
+settings.browser.bad = The start page must be an http or https address.
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = Install
@@ -3838,6 +3847,7 @@ cat.color.bad = Type a colour like #6fb3f2.
 android.copy.run = Run in terminal
 android.copy.fullscreen = The terminal is running a full-screen program: quit it, then try again.
 android.term.chat.old = This hub has no terminal for chats yet. Update it to use one here.
+android.browser.head = BROWSER
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number} running
 ios.alerts.ask = Bub can alert you when a thread needs you.

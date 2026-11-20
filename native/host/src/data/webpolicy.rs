@@ -133,6 +133,9 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
             Some("toolbar") if matches!(params["command"].as_str(), Some("back" | "forward" | "reload")) => Activity,
             _ => Denied,
         },
+        // Settings › Browser: the hub's start page, a setting of the hub machine's browser.
+        "browser.page"
+        | "browser.page.act" => Denied,
         // Requires a native push registration or changes its delivery settings.
         "device.drop"
         | "device.prefs"

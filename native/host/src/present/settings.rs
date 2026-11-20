@@ -12,7 +12,7 @@ pub fn set_version(v: &str) { let _ = VERSION.set(v.to_string()); }
 pub fn version() -> &'static str { VERSION.get().map(String::as_str).unwrap_or("") }
 
 /// The ported pages in the order the desktop menu lists them (Settings.menu.pages): page id and title.
-pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("git", "Projects and git"), ("notifications", "Notifications"), ("agents", "Agents"), ("mcp", "MCP servers"), ("writing", "Writing"), ("cad", "CAD"), ("mouse", "Mouse and trackpad"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("machines", "Machines"), ("voice", "Voice"), ("ring", "Ring"), ("keys", "API keys"), ("timezone", "Time zone"), ("rules", "Rules and task board"), ("usage", "Usage"), ("setup", "Setup"), ("import", "Import from 0.14"), ("about", "About"), ("privacy", "Privacy"), ("developer", "Developer")];
+pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("git", "Projects and git"), ("notifications", "Notifications"), ("agents", "Agents"), ("mcp", "MCP servers"), ("writing", "Writing"), ("cad", "CAD"), ("mouse", "Mouse and trackpad"), ("browser", "Browser"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("machines", "Machines"), ("voice", "Voice"), ("ring", "Ring"), ("keys", "API keys"), ("timezone", "Time zone"), ("rules", "Rules and task board"), ("usage", "Usage"), ("setup", "Setup"), ("import", "Import from 0.14"), ("about", "About"), ("privacy", "Privacy"), ("developer", "Developer")];
 
 pub struct Out { pub patch: Value, pub cmds: Vec<Value> }
 
@@ -63,6 +63,12 @@ fn update_row(version: &str, status: &str) -> Value {
     let mut b = if check { vec![btn("Check now", "update-check", "", false)] } else { vec![] };
     if waiting { b.push(btn("Update now", "update-now", "", false)); }
     row(&format!("Backplane {version}"), &line, b)
+}
+
+/// Settings › Browser: the start page a new or empty Browser tab opens (settings/browser_start.rs, the phones draw the same rows from `browser.page`).
+fn browser(st: &State, session: &Value) -> Vec<Value> {
+    let typed = session["drafts"]["@f.bstart"].as_str();
+    crate::settings::browser_start::rows(set(st, crate::settings::browser_start::KEY, ""), typed, draft(session, "@bstart.err"))
 }
 
 fn appearance(st: &State) -> Vec<Value> {
@@ -813,7 +819,7 @@ fn mcp_patch(p: serde_json::Map<String, Value>) -> Value {
 
 /// One page's rows (without the way back).
 fn rows_of(st: &State, session: &Value, info: &Value, p: &str) -> Vec<Value> {
-    match p { "appearance" => appearance(st), "threads" => threads(st, session), "git" => git(st), "notifications" => notifications(st, session, info), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "mouse" => mouse(st), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(st, session, info), "machines" => { let mut r = crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string());
+    match p { "appearance" => appearance(st), "threads" => threads(st, session), "git" => git(st), "notifications" => notifications(st, session, info), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "mouse" => mouse(st), "browser" => browser(st, session), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(st, session, info), "machines" => { let mut r = crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string());
             r.extend(crate::net::homemove::rows(!set(st, "uber.bot", "").is_empty(), set(st, "home.at", ""), info["home.move"].as_str().unwrap_or(""), &info["machines"]["linked"]));
             r.extend(crate::net::alwayson::rows::machines_rows(info, set(st, crate::net::alwayson::other::STAYS_ON, "") == "on"));
             r.extend(super::signin_there::open_rows(info)); r }, "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "ring" => ring(st, session, info), "usage" => usage(st), "developer" => developer(st), "mcp" => mcp(session, info), _ => vec![] }
@@ -974,7 +980,7 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
         "key-err" => json!({"drafts": {"@key.err": value}}),
         "bfield" => {
             let (name, text) = value.split_once('\u{1f}')?;
-            if !matches!(name, "whurl" | "whsec" | "tzname" | "kpath" | "fpath" | "kname" | "vterm" | "rtext" | "btitle" | "maddr" | "mcode" | "fcode" | "rfrom" | "rname" | "qfrom" | "qto" | "aonaddr" | "aoncode" | "mpaste" | "mname" | "mcmd" | "menv" | "mcwd" | "murl" | "mhdr" | "mgarg") { return None }
+            if !matches!(name, "whurl" | "whsec" | "tzname" | "kpath" | "fpath" | "kname" | "vterm" | "rtext" | "btitle" | "maddr" | "mcode" | "fcode" | "rfrom" | "rname" | "qfrom" | "qto" | "aonaddr" | "aoncode" | "mpaste" | "mname" | "mcmd" | "menv" | "mcwd" | "murl" | "mhdr" | "mgarg" | "bstart") { return None }
             json!({"drafts": {format!("@f.{name}"): text}})
         }
         "telemetry-on" => { send(session, hub, "telemetry.choice", json!({"value": "on", "expected": value, "decision": "", "popup": false}), &mut cmds, &mut rid); json!({}) }
@@ -996,6 +1002,14 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             let raw = draft(session, "@f.whsec").trim().to_string();
             send(session, hub, "setting.set", json!({"key": "push.webhook.secret", "value": raw}), &mut cmds, &mut rid);
             json!({"drafts": {"@f.whsec": raw}})
+        }
+        // Settings › Browser › Start page (settings/browser_start.rs): Save reads the typed address, Reset and Blank need none
+        a if a == crate::settings::browser_start::ACTION => {
+            use crate::settings::browser_start as b;
+            match b::act(value, draft(session, "@f.bstart")) {
+                Ok(v) => { send(session, hub, "setting.set", json!({"key": b::KEY, "value": v}), &mut cmds, &mut rid); json!({"drafts": {"@bstart.err": "", "@f.bstart": Value::Null}}) }
+                Err(e) => json!({"drafts": {"@bstart.err": e}}),
+            }
         }
         "tz-set" => {
             let z = draft(session, "@f.tzname").trim().to_string();

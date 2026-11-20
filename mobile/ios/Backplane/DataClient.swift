@@ -50,6 +50,7 @@ final class DataClient {
     let voice = VoiceModel()
     let machines = MachinesModel()
     let notify = NotifyModel()
+    let browserStart = BrowserStartModel()
     let ring = RingModel()
     let devices = DevicesModel()
     let terms = TermStore()
@@ -157,6 +158,7 @@ final class DataClient {
         voice.client = self
         machines.client = self
         notify.client = self
+        browserStart.client = self
         ring.client = self
         devices.client = self
         terms.client = self

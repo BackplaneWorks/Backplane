@@ -95,7 +95,7 @@ impl Echo {
 #[derive(Default)]
 pub struct SettingsUi { pub accounts: bool, pub nav: Vec<(String, String)>, /** page -> the labels of its rows, one a line (the hub's `words`): what the search finds besides titles */ pub words: HashMap<String, String>, pub page: String, pub q: String, pub search: Option<Entity<Composer>>, pub auto: bool, pub open_local: bool, pub device: bool, /** the Hubs page of this device */ pub hubs: bool }
 /// The pages in the order and groups the nav shows them (the hub's menu order, grouped with a divider between groups). An unknown page goes last.
-const GROUPS: [&[&str]; 5] = [&["appearance", "threads", "git", "notifications", "agents", "mcp", "writing"], &["cad", "mouse", "ordering", "devices"], &["network", "voice", "keys", "timezone"], &["rules"], &["usage", "setup", "about", "privacy"]];
+const GROUPS: [&[&str]; 5] = [&["appearance", "threads", "git", "notifications", "agents", "mcp", "writing"], &["cad", "mouse", "browser", "ordering", "devices"], &["network", "voice", "keys", "timezone"], &["rules"], &["usage", "setup", "about", "privacy"]];
 pub fn group_of(page: &str) -> usize { GROUPS.iter().position(|g| g.contains(&page)).unwrap_or(GROUPS.len()) }
 /// How the dialog fits a window of `w` x `h` px: the margin around it, the page list's width, and whether a row's controls go under its words
 /// (a narrow page has no room beside them). The page list and the rows each scroll on their own, so nothing is out of reach on a short window.
@@ -188,7 +188,7 @@ fn nav_title(t: &str) -> Div { div().min_w_0().overflow_hidden().whitespace_nowr
 /// An icon (from the set the client carries) for each page.
 pub fn nav_icon(page: &str) -> &'static str {
     match page { "appearance" => "sun", "threads" => "message-square", "git" => "git-branch", "notifications" => "bell", "agents" => "cpu", "mcp" => "plug", "writing" => "square-pen", "cad" => "circuit-board", "ordering" => "shopping-cart",
-        "devices" => "link", "network" => "globe", "voice" => "mic", "keys" => "code", "timezone" => "clock", "rules" => "circle-check", "usage" => "gauge", "about" => "book", "privacy" => "file-text", _ => "settings" }
+        "devices" => "link", "network" => "globe", "browser" => "globe", "voice" => "mic", "keys" => "code", "timezone" => "clock", "rules" => "circle-check", "usage" => "gauge", "about" => "book", "privacy" => "file-text", _ => "settings" }
 }
 /// The hub shows its page menu (rows that are each one `settings-page` button naming a page) or one page (its first row is the way back).
 #[derive(Debug, PartialEq)]

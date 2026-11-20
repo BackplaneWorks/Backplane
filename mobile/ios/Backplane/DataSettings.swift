@@ -7,7 +7,7 @@ import SwiftUI
 /// A page under Settings (DPage name); Accounts & Usage and Improvements are pages of their own ("accounts", "improvements").
 enum DSettingsPage: String, CaseIterable {
     case hubs = "settings.hubs", agents = "settings.agents", machines = "settings.machines", notifications = "settings.notifications",
-         appearance = "settings.appearance", updates = "settings.updates"
+         appearance = "settings.appearance", updates = "settings.updates", browser = "settings.browser"
 }
 
 /// One row of the top level: where it goes, its icon, its title, and whether this hub has it.
@@ -33,6 +33,7 @@ struct DataSettingsView: View {
         top.append(DSettingsGroup(id: "settings.hubs", icon: "server.rack", title: Tr.t("Hubs"), page: DPage(name: DSettingsPage.hubs.rawValue)))
         var work: [DSettingsGroup] = []
         if client.has("mcpsettings") || client.has("voice") || client.has("cats") || client.bots.contains(where: { $0.delete }) { work.append(DSettingsGroup(id: "settings.agents", icon: "cpu", title: Tr.t("Agents"), page: DPage(name: DSettingsPage.agents.rawValue))) }
+        if client.has("browserstart") { work.append(DSettingsGroup(id: "settings.browser", icon: "globe", title: Tr.t("Browser"), page: DPage(name: DSettingsPage.browser.rawValue))) }
         if client.has("machines") || client.has("devices") { work.append(DSettingsGroup(id: "settings.machines", icon: "desktopcomputer", title: Tr.t("Machines & devices"), page: DPage(name: DSettingsPage.machines.rawValue))) }
         let phone = [DSettingsGroup(id: "settings.notifications", icon: "bell", title: Tr.t("Notifications"), page: DPage(name: DSettingsPage.notifications.rawValue)),
                      DSettingsGroup(id: "settings.appearance", icon: "textformat", title: Tr.t("Appearance"), page: DPage(name: DSettingsPage.appearance.rawValue))]
@@ -61,6 +62,7 @@ struct DataSettingsView: View {
         if client.has("voice") { all.append(e(Tr.t("Voice"), agents)) }
         if client.has("machines") { all.append(e(Tr.t("Machines"), machines)) }
         if client.has("devices") { all.append(e(Tr.t("Devices"), machines)) }
+        if client.has("browserstart") { all += [e(Tr.t("Browser"), DSettingsPage.browser.rawValue), e(Tr.t("Start page"), DSettingsPage.browser.rawValue)] }
         return all.compactMap { $0 }
     }
     private var found: [DSettingsEntry] {
@@ -195,6 +197,7 @@ struct DataSettingsPageView: View {
         case .notifications: Tr.t("Notifications")
         case .appearance: Tr.t("Appearance")
         case .updates: Tr.t("Updates")
+        case .browser: Tr.t("Browser")
         }
     }
     var body: some View {
@@ -213,6 +216,7 @@ struct DataSettingsPageView: View {
                     if client.has("machines") { DataMachinesSection(client: client) }
                     if client.has("devices") { if client.has("machines") { DLine() }; DataDevicesSection(client: client) }
                 case .updates: DataUpdateSection(client: client)
+                case .browser: DataBrowserStartSection(client: client)
                 }
             }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
         }

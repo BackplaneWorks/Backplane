@@ -258,7 +258,7 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: 
         "viewer.files" | "viewer.watch" | "viewer.probe" | "viewer.info" | "viewer.layers" | "viewer.refs" | "viewer.compare" | "viewer.rail" | "viewer.follow" | "files.entries" | "mech.list" | "browser" => viewers(hub, c, m, p, is_browser).await?,
         "thread.again" => { let th = s(p, "thread"); if th.is_empty() { return Some(Err(err("thread"))) } rpc(hub, c, "thread.again", json!({"thread":th})).await.map(|_| json!({})) }
         "voice.start" | "voice.stop" | "voice.act" | "voice.view" | "voice.key" | "voice.page" | "voice.page.act" | "voice.always" => voice(hub, c, m, p).await,
-        "machines.page" | "machines.page.act" | "devices.page" | "devices.page.act" | "notify.page" | "notify.page.act" | "ring.list" | "ring.get" | "ring.search" | "ring.hear" | "ring.send" | "ring.setup" | "ring.page" | "ring.page.act" | "mcp.page" | "mcp.page.act" => {
+        "machines.page" | "machines.page.act" | "devices.page" | "devices.page.act" | "notify.page" | "notify.page.act" | "ring.list" | "ring.get" | "ring.search" | "ring.hear" | "ring.send" | "ring.setup" | "ring.page" | "ring.page.act" | "mcp.page" | "mcp.page.act" | "browser.page" | "browser.page.act" => {
             rpc(hub, c, m, p.clone()).await.map(|mut r| { if let Some(o) = r.as_object_mut() { for k in ["t", "id", "ok"] { o.remove(k); } } r })
         }
         "viewer.diff" | "review.page" | "review.tick" | "review.comment" | "review.list" => review(hub, c, m, p).await?,
