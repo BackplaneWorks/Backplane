@@ -331,3 +331,59 @@ The hub's own terminals: the chat terminals a thread opens (an agent's `terminal
 - `plan.approve {pro, layer?, ids?, approve}` -> `{result}`: the person's approval (or rejection) of items, a layer, or all; `plan.stop {pro}`;
   `plan.focus {pro, id}`. The same hub calls as the desktop's.
 
+
+## Compression and one-round-trip reads (features `deflate`, `shell`, `open`; docs/remote-architecture.md, Phase 1)
+Every addition is opt-in: a client that asks for none of it gets data/1 and `?view=1` exactly as before.
+
+### Compression (`z=`)
+- A client asks with `z=<codecs>` on the socket's query, its choices in order of preference, comma-separated: `/ws?data=1&z=deflate&token=…`, `/ws?view=1&z=deflate&token=…`.
+  The only codec now is `deflate`; `zstd` may be added later under the same parameter (`z=zstd,deflate`), so a client must accept whichever the hub names.
+- The first frame (`hello` on data/1, the greeting on `?view=1`) is always sent uncompressed, as today, and says what the hub chose: `"z":"deflate"`, or no `z` when it compresses
+  nothing (an older hub, or no codec in common). A client decides from that field alone, never from its own request.
+- With `z:"deflate"`, every later frame from the hub is a **binary** WebSocket frame whose payload is raw DEFLATE (RFC 1951, no zlib or gzip header) of the frame as it would
+  otherwise be sent: the JSON text (`enc=json`), the plain CBOR (data/1's default) or the dict-CBOR (`?view=1`), and raw frames (plots) too.
+  - One DEFLATE stream per connection: later frames refer back to earlier ones (a 32 KiB window), so keep one decompressor for the socket's life and feed it every frame in order.
+  - Each frame ends with a sync flush (its last four bytes are `00 00 ff ff`, left in): decompressing a frame's bytes yields exactly that frame, whole, before the next arrives.
+  - A frame decompresses to at most 512 KiB (the hub's frame limit). A frame that does not decompress is a broken connection: close and reconnect.
+  - Frames from the client stay uncompressed (text for `enc=json`, else binary), as today.
+- Decoders: web `new DecompressionStream("deflate-raw")`, one per socket, its writer fed each frame; iOS the Compression framework's `COMPRESSION_ZLIB` (raw deflate) with
+  one `compression_stream` per socket; Android `java.util.zip.Inflater(true)`, one per socket; GPUI `flate2::Decompress::new(false)`.
+- `hello.features` lists `deflate` on a hub that has it.
+
+### Parts and their hashes (`h`)
+The bundled reads send each part of a screen with a short hash of it, and a client that already holds a part sends its hash back: the hub then leaves that part out. This is
+the resume cursor. A hash covers the part exactly as sent, so a part changed in place (a tool call done, an ask answered, a message given its Restore point) is sent again,
+which a sequence number alone would miss.
+- `h` is an opaque string (16 hex characters now); compare it, never parse it. Each `Entry` in these replies carries its own `h`.
+- `have` is an object of the parts held: `{"<key>": "<h>", …}`. Leave out what is not held. Keys are given per method below.
+
+### `thread.open {thread, limit?=40, have?}` (feature `open`)
+Subscribes to the thread (as `subscribe {topic:"thread"}`) and answers its newest page and its panels in one reply:
+`{sub, thread?, ids?, entries, next?, work?, queue?, buy?, rail?, h}`.
+- `have` keys: `"@thread"`, `"@ids"`, `"@work"`, `"@queue"`, `"@buy"`, `"@rail"`, and each held entry's id (`"<entryId>": "<h>"`).
+- A field is present only when the client's hash for it differs or is missing; `h` holds every part's hash in the same keys (`{"@thread": …, "@ids": …, …}`), so the
+  client stores them for the next `have`. Entries are keyed by their own id and `h`.
+- `ids`: the newest page's entry ids, oldest → newest. `entries`: only the entries of that page the client does not hold as they are (new, or changed). The client draws the
+  page as `ids` mapped through its held entries and these. `next`: the cursor for older pages (`thread.entries {before}`), as today.
+- `thread`, `work`, `queue`, `buy`, `rail` are what `thread.entries`' `thread`, `thread.work`, `thread.queue`, `thread.buy` and `viewer.rail` answer today. `thread.picker`
+  is not in it: ask it when the picker opens.
+- A return to a thread held and unchanged answers `{sub, entries:[], h}` (about 300 bytes before compression). Pushes then follow on `sub` as for `subscribe`.
+
+### `shell.sync {have?, settled?=25}` (feature `shell`)
+The sidebar in one reply, in place of `projects.list` + `threads.list` + `sidebar.sections`:
+`{projects?, threads?, sections?, removed?, h, sub}` and a `lists` subscription (`sub`), as `subscribe {topic:"lists"}`.
+- `have` keys: `"@sections"`, and per project `"p:<projectId>"`: the hash of that project's row and its listed threads together.
+- Per project the hub lists every active and pinned thread and the newest `settled` settled ones (its `settledCount` says how many there are; the rest come from
+  `threads.list {project, settled:true}` when its shelf is opened). Idle subagents and subthreads are left out unless their parent is listed.
+- `projects` and `threads`: the rows of the projects whose hash differs or is missing (each project with all of its listed threads). `removed`: the project ids in `have`
+  that are gone. `sections`: as `sidebar.sections`, when its hash differs.
+- A reconnect with nothing changed answers `{h, sub}` (about 150 bytes plus a hash per project).
+
+### Subagent views by parts (feature `subview`, `parts:1`)
+`subscribe {topic:"sub", thread, key, parts:1}`: instead of the whole view on each step (`k:"sub"`), the hub pushes `k:"sub.d"` `{thread, key, head?, ids?, entries, h}`:
+`head` is the view without its `entries` (when it changed), `ids` its entries' ids oldest → newest (when they changed), `entries` the entries new or changed since the last
+push on this subscription. The first push after subscribing carries everything. `thread.sub {thread, key, have?}` reads it the same way.
+
+### Byte budgets (native/host/src/data/budget_tests.rs)
+Held in the tests, over the wire, compressed: a cold sidebar (`shell.sync`, 8 projects / 64 threads) ≤ 6 KB; a cold `thread.open` of a 50-message thread ≤ 3 KB; a return to a
+held thread (`thread.open` with `have`, or `?view=1` with a held base) ≤ 500 B.
