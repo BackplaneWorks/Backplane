@@ -17,6 +17,24 @@ impl ProxyIdentity {
     }
 }
 
+#[cfg(target_os = "linux")]
+async fn refresh_for_peer(
+    proxy: &mut ProxyIdentity,
+    stream: &UnixStream,
+    last_lookup: &mut Option<std::time::Instant>,
+    lookup: impl std::future::Future<Output = io::Result<ProxyIdentity>>,
+) -> bool {
+    if !stream.peer_cred().is_ok_and(|peer| peer.uid() == proxy.uid)
+        || last_lookup.is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(1)) {
+        return false;
+    }
+    *last_lookup = Some(std::time::Instant::now());
+    let Ok(current) = lookup.await else { return false; };
+    if current.uid != proxy.uid || !current.accepts(stream) { return false; }
+    *proxy = current;
+    true
+}
+
 pub(crate) struct BrowserListener {
     listener: UnixListener,
     authority: String,
@@ -51,7 +69,9 @@ impl BrowserListener {
         Ok(Self { listener, authority, proxy })
     }
 
-    pub async fn run(self, hub: Arc<crate::hub::Hub>) -> io::Result<()> {
+    pub async fn run(mut self, hub: Arc<crate::hub::Hub>) -> io::Result<()> {
+        #[cfg(target_os = "linux")]
+        let mut last_lookup = None;
         loop {
             let stream = match self.listener.accept().await {
                 Ok((stream, _)) => stream,
@@ -62,7 +82,11 @@ impl BrowserListener {
                 }
                 Err(e) => return Err(e),
             };
-            if self.proxy.accepts(&stream) {
+            let admitted = self.proxy.accepts(&stream);
+            #[cfg(target_os = "linux")]
+            let admitted = admitted || refresh_for_peer(&mut self.proxy, &stream, &mut last_lookup,
+                super::webprovision::system_proxy_identity()).await;
+            if admitted {
                 let hub = hub.clone();
                 let authority = self.authority.clone();
                 tokio::spawn(async move { let _ = super::webingress::serve_unix(hub, stream, &authority).await; });
@@ -74,6 +98,25 @@ impl BrowserListener {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn restarted_proxy_must_match_fresh_daemon_credentials() {
+        let (stream, _peer) = UnixStream::pair().unwrap();
+        let uid = crate::plat::effective_uid();
+        let pid = std::process::id() as i32;
+        let mut cached = ProxyIdentity { uid, pid: pid + 1 };
+        let mut last = None;
+        assert!(!refresh_for_peer(&mut cached, &stream, &mut last,
+            std::future::ready(Ok(ProxyIdentity { uid, pid: pid + 2 }))).await);
+        assert!(!refresh_for_peer(&mut cached, &stream, &mut last,
+            async { panic!("rate-limited lookup") }).await);
+        assert!(!cached.accepts(&stream));
+        last = None;
+        assert!(refresh_for_peer(&mut cached, &stream, &mut last,
+            std::future::ready(Ok(ProxyIdentity { uid, pid }))).await);
+        assert!(cached.accepts(&stream));
+    }
 
     #[tokio::test]
     async fn bind_requires_a_private_directory_and_canonical_authority() {
