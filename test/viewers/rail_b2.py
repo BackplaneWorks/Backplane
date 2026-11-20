@@ -28,7 +28,7 @@ TOOL_ORDER = {
                 "?gerbers-gerbview", "?gerbers-legend"],
     "split": ["?boards-btn", "split-pick-sch", "split-pick-pcb", "split-pick-3d", "?split-probe"],
     "3d": ["?boards-btn", "solid-fit", "solid-iso", "solid-top", "solid-bottom", "solid-front", "solid-right", "solid-back", "solid-left", "solid-snap", "?solid-probe-clear"],
-    "mech": ["mech-refresh"],
+    "mech": ["mech-refresh", "solid-fit", "solid-iso", "solid-top", "solid-bottom", "solid-front", "solid-right", "solid-back", "solid-left", "solid-snap", "?solid-probe-clear"],
     "browser": ["br-back", "br-fwd", "br-reload", "br-url", "?br-hand"],
     "diff": ["git-commit_push", "git-commit_push_pr", "revert-ask"],
     "review": ["rv-0", "rv-1", "rv-2", "rv-3"],

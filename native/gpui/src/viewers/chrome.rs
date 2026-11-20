@@ -32,12 +32,14 @@ pub fn render<T: 'static>(owner: Option<&WeakEntity<crate::Backplane>>, tabs: &[
         if let Ok(header) = owner.update(cx, |app, cx| {
             use crate::screens::pane_header::{button, content, Press};
             let mut tools: Vec<_> = nav_tools(i.have, i.can_back, i.can_forward, i.loading, i.taken).into_iter().map(|nav| {
+                let hand_back = matches!(nav.action, Act::HandBack);
                 let mut tool = button(cx, nav.id, nav.label, Press::Browser(nav.action));
                 tool.icon = nav.icon;
                 tool.enabled = nav.enabled;
+                tool.active = hand_back;
                 tool
             }).collect();
-            tools.insert(3, content("br-url", crate::i18n::trs("Search or enter address"), div().w(px(140.)).child(field)));
+            tools.insert(3, content("br-url", crate::i18n::trs("Search or enter address"), field));
             crate::screens::viewer::browser_header(app, cx, i.light, tools)
         }) { return (header, strip) }
     }
