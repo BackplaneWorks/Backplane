@@ -50,11 +50,62 @@ export interface RoomItem {
   name: string;
 }
 
+export interface SectionThreadRow {
+  id: string;
+  title: string;
+  word?: string;
+  say?: string;
+  want?: string;
+  status?: string;
+  state?: string;
+  ago?: string;
+  activity?: number;
+  pinned?: boolean;
+  project?: string;
+  projectKey?: string;
+  off?: boolean;
+  nav?: string;
+  kind?: string;
+}
+
+export interface SectionProjectRow {
+  id: string;
+  title: string;
+  key?: string;
+  nav?: string;
+  css?: string;
+  color?: string;
+  pinned?: boolean;
+  threads?: SectionThreadRow[];
+  swarms?: SectionThreadRow[];
+  more?: number;
+  running?: number;
+  needsCount?: number;
+  fold?: string;
+  folded?: boolean;
+  under?: number;
+  off?: boolean;
+}
+
+export interface SidebarSection {
+  id: string;
+  kind: string;
+  title: string;
+  count?: number;
+  fold?: boolean;
+  open?: boolean;
+  toggle?: string;
+  hint?: string;
+  rows: Array<SectionProjectRow | SectionThreadRow>;
+}
+
 export interface SidebarCallbacks {
   onSelectThread: (threadId: string) => void;
   onNewThread: (projectId: string) => void;
   onSelectBot: (bot: BotItem) => void;
   onThreadAct: (threadId: string, action: string) => void;
+  onToggleSection?: (toggle: string) => void;
+  onToggleProjectFold?: (projectKey: string) => void;
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -75,12 +126,16 @@ function makeFolderIcon(): SVGSVGElement {
   return svg;
 }
 
-function statusClass(th: ThreadItem): string {
-  const s = th.status || th.state;
-  if (s === "active" || s === "working") return "bp-dot-work";
-  if (s === "finished") return "bp-dot-done";
-  if (s === "waiting" || s === "asking" || s === "blocked" || s === "failed" || (th.waiting ?? 0) > 0) return "bp-dot-need";
+function statusClassFromWords(status?: string, word?: string, state?: string, waiting?: number): string {
+  const s = status || word || state || "";
+  if (s === "active" || s === "working" || s === "running" || s === "run") return "bp-dot-work";
+  if (s === "finished" || s === "done") return "bp-dot-done";
+  if (s === "waiting" || s === "asking" || s === "blocked" || s === "needs" || s === "failed" || s === "fail" || s === "cut" || s === "interrupted" || s === "limit" || s === "monitoring" || (waiting ?? 0) > 0) return "bp-dot-need";
   return "bp-dot-idle";
+}
+
+function statusClass(th: ThreadItem): string {
+  return statusClassFromWords(th.status, undefined, th.state, th.waiting);
 }
 
 function formatAge(ts: number): string {
@@ -103,6 +158,7 @@ export class SidebarView {
   private showSettled = new Set<string>();
   private collapsedProjects = new Set<string>();
 
+  private sections: SidebarSection[] | null = null;
   private projects: ProjectItem[] = [];
   private threads: ThreadItem[] = [];
   private bots: BotItem[] = [];
@@ -171,6 +227,13 @@ export class SidebarView {
     this.render();
   }
 
+  public setSections(sections: SidebarSection[] | null, bots: BotItem[], rooms: RoomItem[]): void {
+    this.sections = sections;
+    this.bots = bots;
+    this.rooms = rooms;
+    this.render();
+  }
+
   public setSelected(threadId: string): void {
     this.selectedThreadId = threadId;
     this.render();
@@ -187,158 +250,307 @@ export class SidebarView {
     this.render();
   }
 
+  private renderSectionThreadRow(row: SectionThreadRow, showTreeBranch: boolean): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "bp-thread-row" +
+      (row.id === this.selectedThreadId ? " active" : "") +
+      (row.off ? " bp-dim" : "");
+    el.setAttribute("data-thread-id", row.id);
+    el.setAttribute("data-testid", `thread-row-${row.id}`);
+
+    if (showTreeBranch) {
+      const branch = document.createElement("span");
+      branch.className = "bp-tree-branch";
+      branch.setAttribute("aria-hidden", "true");
+      el.appendChild(branch);
+    }
+
+    const dot = document.createElement("span");
+    dot.className = `bp-dot ${statusClassFromWords(row.status, row.word, row.state)}`;
+
+    const title = document.createElement("div");
+    title.className = "bp-thread-title";
+    title.textContent = row.title || "Untitled thread";
+
+    el.append(dot, title);
+
+    if (row.word === "needs") {
+      const badge = document.createElement("span");
+      badge.className = "bp-badge-need";
+      badge.textContent = row.want === "approval" ? "!" : "•";
+      if (row.say) badge.title = row.say;
+      el.appendChild(badge);
+    } else if (row.ago) {
+      const age = document.createElement("span");
+      age.className = "bp-thread-age";
+      age.textContent = row.ago;
+      if (row.pinned) age.title = t("tools.pinned", "Pinned");
+      el.appendChild(age);
+    }
+
+    const target = row.nav || row.id;
+    if (!row.off && target && !target.startsWith("@room:")) {
+      el.addEventListener("click", () => this.cb.onSelectThread(target));
+    }
+    return el;
+  }
+
+  private renderHubSections(frag: DocumentFragment, q: string): void {
+    const sections = this.sections ?? [];
+    const listedThreadIds = new Set<string>();
+    for (const sec of sections) {
+      if (sec.kind === "threads") {
+        for (const r of sec.rows as SectionThreadRow[]) listedThreadIds.add(r.id);
+      } else if (sec.kind === "projects") {
+        for (const p of sec.rows as SectionProjectRow[]) {
+          for (const th of p.threads ?? []) listedThreadIds.add(th.id);
+        }
+      }
+    }
+    const selectedMeta = this.selectedThreadId
+      ? this.threads.find((x) => x.id === this.selectedThreadId) ?? null
+      : null;
+
+    let anyProjectRows = false;
+    for (const sec of sections) {
+      if (sec.kind === "projects" && sec.rows.length > 0) anyProjectRows = true;
+    }
+
+    for (const sec of sections) {
+      if (sec.kind === "bub") continue;
+
+      if (sec.kind === "threads") {
+        const rows = (sec.rows as SectionThreadRow[]).filter((r) => {
+          if (!q) return true;
+          return `${r.title} ${r.project ?? ""}`.toLowerCase().includes(q);
+        });
+        if (rows.length === 0) continue;
+
+        const secWrap = document.createElement("section");
+        secWrap.className = "bp-side-section";
+        secWrap.setAttribute("data-section-id", sec.id);
+
+        const head = document.createElement("div");
+        head.className = "bp-side-section-head";
+        head.textContent = sec.title.toUpperCase();
+        secWrap.appendChild(head);
+
+        for (const r of rows) {
+          secWrap.appendChild(this.renderSectionThreadRow(r, false));
+        }
+        frag.appendChild(secWrap);
+        continue;
+      }
+
+      if (sec.kind === "projects") {
+        const projRows = (sec.rows as SectionProjectRow[]).filter((p) => {
+          if (!q) return true;
+          if ((p.title || p.id).toLowerCase().includes(q)) return true;
+          if ((p.threads ?? []).some((th) => th.title.toLowerCase().includes(q))) return true;
+          if ((p.swarms ?? []).some((sw) => sw.title.toLowerCase().includes(q))) return true;
+          return false;
+        });
+
+        const isFoldable = Boolean(sec.fold && sec.toggle);
+        if (q && projRows.length === 0) continue;
+        if (!isFoldable && sec.id !== "active" && projRows.length === 0) continue;
+
+        const secWrap = document.createElement("section");
+        secWrap.className = "bp-side-section";
+        secWrap.setAttribute("data-section-id", sec.id);
+
+        if (isFoldable) {
+          const headBtn = document.createElement("button");
+          headBtn.type = "button";
+          headBtn.className = "bp-side-section-head bp-side-section-toggle";
+          const count = sec.count ?? projRows.length;
+          const arrow = sec.open ? "▾" : "▸";
+          headBtn.textContent = `${sec.title.toUpperCase()} (${count}) ${arrow}`;
+          if (sec.hint) headBtn.title = sec.hint;
+          headBtn.addEventListener("click", () => {
+            if (sec.toggle) this.cb.onToggleSection?.(sec.toggle);
+          });
+          secWrap.appendChild(headBtn);
+        } else {
+          const head = document.createElement("div");
+          head.className = "bp-side-section-head";
+          head.textContent = sec.title.toUpperCase();
+          secWrap.appendChild(head);
+        }
+
+        if (!isFoldable || sec.open || Boolean(q)) {
+          if (sec.id === "active" && !anyProjectRows && !q) {
+            const empty = document.createElement("div");
+            empty.className = "bp-side-empty";
+            empty.textContent = "No projects yet.";
+            secWrap.appendChild(empty);
+          }
+
+          for (const proj of projRows) {
+            const group = document.createElement("div");
+            group.className = "bp-proj-group" + (proj.off ? " bp-dim" : "");
+            group.setAttribute("data-project-id", proj.id);
+            if (proj.nav || proj.key) group.setAttribute("data-project-key", proj.nav || proj.key || "");
+
+            const header = document.createElement("div");
+            header.className = "bp-proj-head";
+
+            const toggle = document.createElement("button");
+            toggle.type = "button";
+            toggle.className = "bp-proj-toggle";
+            const folder = makeFolderIcon();
+            if (proj.css) folder.style.color = proj.css;
+            const nameSpan = document.createElement("span");
+            nameSpan.className = "bp-proj-name";
+            nameSpan.textContent = proj.title || proj.id;
+            toggle.append(folder, nameSpan);
+            if (proj.fold === "project-fold" && proj.nav) {
+              toggle.addEventListener("click", () => this.cb.onToggleProjectFold?.(proj.nav!));
+            }
+
+            const addBtn = document.createElement("button");
+            addBtn.type = "button";
+            addBtn.className = "icon bp-proj-add";
+            addBtn.title = t("thread.new", "New thread");
+            addBtn.textContent = "+";
+            addBtn.setAttribute("data-testid", `new-thread-${proj.id}`);
+            if (proj.off) addBtn.disabled = true;
+            addBtn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              this.cb.onNewThread(proj.id);
+            });
+
+            header.append(toggle, addBtn);
+            group.appendChild(header);
+
+            if (!proj.folded || Boolean(q)) {
+              const projNameMatches = Boolean(q) && (proj.title || proj.id).toLowerCase().includes(q);
+              for (const sw of proj.swarms ?? []) {
+                if (q && !projNameMatches && !sw.title.toLowerCase().includes(q)) continue;
+                group.appendChild(this.renderSectionThreadRow(sw, true));
+              }
+              for (const th of proj.threads ?? []) {
+                if (q && !projNameMatches && !th.title.toLowerCase().includes(q)) continue;
+                group.appendChild(this.renderSectionThreadRow(th, true));
+              }
+              // Mirror GPUI's `on_show` rule (`sections.rs:340-341`): since `data/1` `sidebar.sections`
+              // passes `selected: ""`, keep the currently selected thread visible under its project
+              // without altering the order of hub-returned rows.
+              if (
+                selectedMeta &&
+                selectedMeta.project === proj.id &&
+                !listedThreadIds.has(selectedMeta.id) &&
+                (!q || projNameMatches || selectedMeta.title.toLowerCase().includes(q))
+              ) {
+                group.appendChild(this.renderSectionThreadRow({
+                  id: selectedMeta.id,
+                  title: selectedMeta.title,
+                  status: selectedMeta.status,
+                  state: selectedMeta.state,
+                  ago: formatAge(selectedMeta.updatedAt),
+                  pinned: selectedMeta.pinned,
+                  nav: selectedMeta.id,
+                }, true));
+              }
+            }
+
+            secWrap.appendChild(group);
+          }
+        }
+
+        frag.appendChild(secWrap);
+      }
+    }
+  }
+
   public render(): void {
     const frag = document.createDocumentFragment();
     const q = this.filterText;
 
-    const byProject = new Map<string, ThreadItem[]>();
-    const childrenByParent = new Map<string, ThreadItem[]>();
-    for (const th of this.threads) {
-      if (th.archived || th.swarm) continue;
-      if (q) {
-        const hay = `${th.title} ${th.preview ?? ""}`.toLowerCase();
-        if (!hay.includes(q)) continue;
-      }
-      if (th.parent) {
-        const list = childrenByParent.get(th.parent) ?? [];
-        list.push(th);
-        childrenByParent.set(th.parent, list);
-      } else {
+    if (this.sections !== null) {
+      this.renderHubSections(frag, q);
+    } else {
+      const byProject = new Map<string, ThreadItem[]>();
+      for (const th of this.threads) {
+        if (th.archived || th.swarm) continue;
+        if (q) {
+          const hay = `${th.title} ${th.preview ?? ""}`.toLowerCase();
+          if (!hay.includes(q)) continue;
+        }
         const list = byProject.get(th.project) ?? [];
         list.push(th);
         byProject.set(th.project, list);
       }
-    }
 
-    const renderThreadRow = (th: ThreadItem, depth: number): HTMLElement => {
-      const row = document.createElement("div");
-      row.className = "bp-thread-row" +
-        (th.id === this.selectedThreadId ? " active" : "") +
-        (depth > 0 ? " nested" : "");
-      row.setAttribute("data-thread-id", th.id);
-      row.setAttribute("data-testid", `thread-row-${th.id}`);
+      const activeHead = document.createElement("div");
+      activeHead.className = "bp-side-section-head";
+      activeHead.textContent = "ACTIVE";
+      frag.appendChild(activeHead);
 
-      const branch = document.createElement("span");
-      branch.className = "bp-tree-branch";
-      branch.setAttribute("aria-hidden", "true");
-
-      const dot = document.createElement("span");
-      dot.className = `bp-dot ${statusClass(th)}`;
-
-      const title = document.createElement("div");
-      title.className = "bp-thread-title";
-      title.textContent = th.title || "Untitled thread";
-
-      row.append(branch, dot, title);
-
-      if ((th.waiting ?? 0) > 0) {
-        const badge = document.createElement("span");
-        badge.className = "bp-badge-need";
-        badge.textContent = String(th.waiting);
-        row.appendChild(badge);
-      } else {
-        const age = document.createElement("span");
-        age.className = "bp-thread-age";
-        age.textContent = formatAge(th.updatedAt);
-        if (th.pinned) age.title = t("tools.pinned", "Pinned");
-        row.appendChild(age);
+      if (this.projects.length === 0 && this.threads.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "bp-side-empty";
+        empty.textContent = "No projects yet.";
+        frag.appendChild(empty);
       }
 
-      row.addEventListener("click", () => this.cb.onSelectThread(th.id));
-      return row;
-    };
+      for (const proj of this.projects) {
+        const pThreads = byProject.get(proj.id) ?? [];
+        if (q && pThreads.length === 0 && !proj.title.toLowerCase().includes(q)) continue;
 
-    const activeHead = document.createElement("div");
-    activeHead.className = "bp-side-section-head";
-    activeHead.textContent = "ACTIVE";
-    frag.appendChild(activeHead);
+        const sec = document.createElement("section");
+        sec.className = "bp-proj-group";
+        sec.setAttribute("data-project-id", proj.id);
 
-    if (this.projects.length === 0 && this.threads.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "bp-side-empty";
-      empty.textContent = "No projects yet.";
-      frag.appendChild(empty);
-    }
+        const header = document.createElement("div");
+        header.className = "bp-proj-head";
 
-    for (const proj of this.projects) {
-      const pThreads = byProject.get(proj.id) ?? [];
-      if (q && pThreads.length === 0 && !proj.title.toLowerCase().includes(q)) continue;
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "bp-proj-toggle";
+        const collapsed = this.collapsedProjects.has(proj.id) && !q;
+        const folder = makeFolderIcon();
+        if (proj.css) folder.style.color = proj.css;
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "bp-proj-name";
+        nameSpan.textContent = proj.title || proj.id;
+        toggle.append(folder, nameSpan);
+        toggle.addEventListener("click", () => {
+          if (this.collapsedProjects.has(proj.id)) this.collapsedProjects.delete(proj.id);
+          else this.collapsedProjects.add(proj.id);
+          this.render();
+        });
 
-      const sec = document.createElement("section");
-      sec.className = "bp-proj-group";
-      sec.setAttribute("data-project-id", proj.id);
+        const addBtn = document.createElement("button");
+        addBtn.type = "button";
+        addBtn.className = "icon bp-proj-add";
+        addBtn.title = t("thread.new", "New thread");
+        addBtn.textContent = "+";
+        addBtn.setAttribute("data-testid", `new-thread-${proj.id}`);
+        addBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.cb.onNewThread(proj.id);
+        });
 
-      const header = document.createElement("div");
-      header.className = "bp-proj-head";
+        header.append(toggle, addBtn);
+        sec.appendChild(header);
 
-      const toggle = document.createElement("button");
-      toggle.type = "button";
-      toggle.className = "bp-proj-toggle";
-      const collapsed = this.collapsedProjects.has(proj.id) && !q;
-      const folder = makeFolderIcon();
-      if (proj.css) folder.style.color = proj.css;
-      const nameSpan = document.createElement("span");
-      nameSpan.className = "bp-proj-name";
-      nameSpan.textContent = proj.title || proj.id;
-      toggle.append(folder, nameSpan);
-      toggle.addEventListener("click", () => {
-        if (this.collapsedProjects.has(proj.id)) this.collapsedProjects.delete(proj.id);
-        else this.collapsedProjects.add(proj.id);
-        this.render();
-      });
-
-      const addBtn = document.createElement("button");
-      addBtn.type = "button";
-      addBtn.className = "icon bp-proj-add";
-      addBtn.title = t("thread.new", "New thread");
-      addBtn.textContent = "+";
-      addBtn.setAttribute("data-testid", `new-thread-${proj.id}`);
-      addBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.cb.onNewThread(proj.id);
-      });
-
-      header.append(toggle, addBtn);
-      sec.appendChild(header);
-
-      if (!collapsed) {
-        const pinned = pThreads.filter((x) => x.pinned).sort((a, b) => (a.pinOrder ?? 0) - (b.pinOrder ?? 0));
-        const active = pThreads.filter((x) => !x.pinned && !x.settled).sort((a, b) => b.updatedAt - a.updatedAt);
-        const settled = pThreads.filter((x) => !x.pinned && x.settled).sort((a, b) => b.updatedAt - a.updatedAt);
-
-        const appendWithKids = (list: ThreadItem[]) => {
-          for (const th of list) {
-            sec.appendChild(renderThreadRow(th, 0));
-            const kids = childrenByParent.get(th.id);
-            if (kids) {
-              for (const k of kids.sort((a, b) => b.updatedAt - a.updatedAt)) {
-                sec.appendChild(renderThreadRow(k, 1));
-              }
-            }
+        if (!collapsed) {
+          for (const th of pThreads) {
+            sec.appendChild(this.renderSectionThreadRow({
+              id: th.id,
+              title: th.title,
+              status: th.status,
+              state: th.state,
+              ago: formatAge(th.updatedAt),
+              pinned: th.pinned,
+              nav: th.id,
+            }, true));
           }
-        };
-
-        appendWithKids(pinned);
-        appendWithKids(active);
-
-        if (settled.length > 0) {
-          const open = this.showSettled.has(proj.id) || Boolean(q);
-          const settledToggle = document.createElement("button");
-          settledToggle.type = "button";
-          settledToggle.className = "bp-settled-toggle";
-          const settledLabel = t("notify.settled", "Settled");
-          settledToggle.textContent = open ? `${settledLabel} (${settled.length}) ▾` : `${settledLabel} (${settled.length}) ▸`;
-          settledToggle.addEventListener("click", () => {
-            if (this.showSettled.has(proj.id)) this.showSettled.delete(proj.id);
-            else this.showSettled.add(proj.id);
-            this.render();
-          });
-          sec.appendChild(settledToggle);
-          if (open) appendWithKids(settled);
         }
-      }
 
-      frag.appendChild(sec);
+        frag.appendChild(sec);
+      }
     }
 
     if (!q) {

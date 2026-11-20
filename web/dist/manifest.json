@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 26423,
+  "totalAssetGzipBytes": 27841,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -56,7 +56,7 @@
   ],
   "i18nSubsetSha256": "8ecf146a898d58bf5daa9b7f009037e8cd96a27d6f9c00f412b8d0de40e2cbf7",
   "inputs": {
-    "web/src/app.ts": "ee7df3a8cb4826e835110109525666653e92410d8170a3a815d45ef9ba3a5746",
+    "web/src/app.ts": "81578adc879f3c472a0fb04fdd6f7f2cbec1631c3b0fbb372fccce969e3fbd27",
     "web/src/chat.ts": "a1c8d40f610e172a62206489893509461dd9a14149046ec1c1c98209f7c4b974",
     "web/src/composer.ts": "00d4ed7de705904e6ddf2b76e824f18253e1e393a23c8addb6df10471948af32",
     "web/src/i18n.ts": "40bb973e3acda75aea4bc5d16746757e59487b95225f5ed36cdfe13c813cf66d",
@@ -66,8 +66,8 @@
     "web/src/pair.ts": "92ea9ca625aebb53e200004db7a6e3350898654b339d22624ccf60c4ae73367c",
     "web/src/rail.ts": "c5757e65826b7fe393f1d2d1f1e0cb824af1feab052948a2fb6cb14b797505c3",
     "web/src/settings.ts": "3e56690eddd2fe03f661116121c873499308b3e2233a88177b04173312933a3f",
-    "web/src/shell.css": "d52a5429285f09279f72ba39b2347395589484ffa09e3086ee8071e3bce5d96e",
-    "web/src/sidebar.ts": "ab0d7c8defbdbff543ef06831f9d9d556322f732bc0b00c1e775e5a5a3643d7a",
+    "web/src/shell.css": "12bc5a1012c9f22749db0d97fd23525c1b61197c9c4f95dc564426edae558161",
+    "web/src/sidebar.ts": "504239aed76554c4fbb0f52e0522da6295d9af623d2c900879750d17e39edb18",
     "web/src/ws.ts": "bff5636759f3871df89395c792d5c69aef90a5e1e9ecd8247ac522ebb40badc9",
     "web/build.ts": "c32254f4abe4cea4e8e1f65aeced47aae007c0efd292236b2cf65d296651bcca",
     "assets/web/favicon.svg": "5b0f22a3329f59809216aabe58d8dbbedbd46d29e4a2373a727529daa2441a2c",
@@ -75,9 +75,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 57884,
-      "gzipBytes": 16515,
-      "sha256": "fbee8f4716b80ad25364451945187d9174ab369f411b1b13eafdd9d0ceb0dff4"
+      "bytes": 63416,
+      "gzipBytes": 17908,
+      "sha256": "d4f011a14dd66ea5025ab89517aa2ff34ac15a2eaecc275560b958d857dad14d"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,
@@ -95,9 +95,9 @@
       "sha256": "19df58b5636001d5fcdd89592c6944ff4e108c410c9375ef208a3de45fd11a37"
     },
     "assets/style.css": {
-      "bytes": 22215,
-      "gzipBytes": 5374,
-      "sha256": "3d9b514828dd0f2b3dac95d3e22b34cf7ca2dda5c56a56776d9e8e887e44efb8"
+      "bytes": 22409,
+      "gzipBytes": 5399,
+      "sha256": "14f7af2b1ce7005341b6998a8b707ab72e65c66b38e53ae034bf0e8b852ffa36"
     },
     "index.html": {
       "bytes": 454,

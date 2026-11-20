@@ -8,7 +8,16 @@ import { ComposerView, type MentionItem, type SlashCommand } from "./composer";
 import { onLocaleChange, setLocale, t } from "./i18n";
 import { RailView, type RailEntry } from "./rail";
 import { SettingsModal, type SettingsRow } from "./settings";
-import { SidebarView, type BotItem, type ProjectItem, type RoomItem, type ThreadItem } from "./sidebar";
+import {
+  SidebarView,
+  type BotItem,
+  type ProjectItem,
+  type RoomItem,
+  type SectionProjectRow,
+  type SectionThreadRow,
+  type SidebarSection,
+  type ThreadItem,
+} from "./sidebar";
 import { HubClient, type DataPush, type HelloFrame } from "./ws";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore resolved by web/build.ts to ./viewers/viewer-pane.ts when present
@@ -210,6 +219,10 @@ function mountApp(): void {
   root.append(topbar, body);
 
   const hub = new HubClient();
+  let sections: SidebarSection[] | null = null;
+  const openSectionFolds = new Set<string>();
+  let sectionsGen = 0;
+  let sectionsRefreshTimer: number | null = null;
   let projects: ProjectItem[] = [];
   let threads: ThreadItem[] = [];
   let bots: BotItem[] = [];
@@ -233,6 +246,16 @@ function mountApp(): void {
     onNewThread: (projectId) => { void createThread(projectId); },
     onSelectBot: (bot) => { void openThread(bot.thread); },
     onThreadAct: (id, action) => { void runThreadAct(id, action); },
+    onToggleSection: (toggle) => {
+      if (openSectionFolds.has(toggle)) openSectionFolds.delete(toggle);
+      else openSectionFolds.add(toggle);
+      void refreshSections();
+    },
+    onToggleProjectFold: (projectKey) => {
+      void hub.rpc("sidebar.act", { action: "project-fold", value: projectKey })
+        .then(() => refreshSections())
+        .catch(() => {});
+    },
   });
 
   const chat = new ChatView(centerEl, {
@@ -430,15 +453,78 @@ function mountApp(): void {
     }
   }
 
+  function firstSectionThreadId(list: SidebarSection[]): string {
+    for (const sec of list) {
+      if (sec.kind === "threads") {
+        for (const r of sec.rows as SectionThreadRow[]) {
+          if (!r.off && (r.nav || r.id) && !(r.nav || "").startsWith("@room:")) return r.nav || r.id;
+        }
+      } else if (sec.kind === "projects") {
+        for (const p of sec.rows as SectionProjectRow[]) {
+          for (const th of p.threads ?? []) {
+            if (!th.off && (th.nav || th.id) && !(th.nav || "").startsWith("@room:")) return th.nav || th.id;
+          }
+        }
+      }
+    }
+    return "";
+  }
+
+  function hasSectionThreadId(list: SidebarSection[], id: string): boolean {
+    for (const sec of list) {
+      if (sec.kind === "threads") {
+        if ((sec.rows as SectionThreadRow[]).some((r) => (r.nav || r.id) === id)) return true;
+      } else if (sec.kind === "projects") {
+        for (const p of sec.rows as SectionProjectRow[]) {
+          if ((p.threads ?? []).some((th) => (th.nav || th.id) === id)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function syncProjectsFromSections(list: SidebarSection[]): void {
+    const out: ProjectItem[] = [];
+    for (const sec of list) {
+      if (sec.kind !== "projects") continue;
+      for (const p of sec.rows as SectionProjectRow[]) {
+        out.push({ id: p.id, title: p.title, css: p.css, color: p.color });
+      }
+    }
+    if (out.length > 0) projects = out;
+  }
+
+  async function refreshSections(): Promise<boolean> {
+    if (!hub.hasFeature("sections")) return false;
+    const gen = ++sectionsGen;
+    try {
+      const res = await hub.rpc<{ sections?: SidebarSection[] }>("sidebar.sections", {
+        open: Array.from(openSectionFolds),
+      });
+      if (gen !== sectionsGen) return true;
+      const list = Array.isArray(res.sections) ? res.sections : [];
+      sections = list;
+      syncProjectsFromSections(list);
+      sidebar.setData(projects, threads, bots, rooms);
+      sidebar.setSections(list, bots, rooms);
+      updateHeader();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function scheduleSectionsRefresh(): void {
+    if (!hub.hasFeature("sections")) return;
+    if (sectionsRefreshTimer !== null) window.clearTimeout(sectionsRefreshTimer);
+    sectionsRefreshTimer = window.setTimeout(() => {
+      sectionsRefreshTimer = null;
+      void refreshSections();
+    }, 150);
+  }
+
   async function loadLists(): Promise<void> {
     threadSubId = null;
-
-    const [pRes, tRes] = await Promise.all([
-      hub.rpc<{ projects?: ProjectItem[] }>("projects.list", { limit: 100 }),
-      hub.rpc<{ threads?: ThreadItem[] }>("threads.list", { limit: 200, archived: false }),
-    ]);
-    projects = pRes.projects ?? [];
-    threads = tRes.threads ?? [];
 
     if (hub.hasFeature("bots")) {
       try {
@@ -448,21 +534,72 @@ function mountApp(): void {
       } catch { /* ignore */ }
     }
 
-    sidebar.setData(projects, threads, bots, rooms);
+    if (hub.hasFeature("sections")) {
+      const [secRes, tRes] = await Promise.all([
+        hub.rpc<{ sections?: SidebarSection[] }>("sidebar.sections", {
+          open: Array.from(openSectionFolds),
+        }).catch(() => null),
+        hub.rpc<{ threads?: ThreadItem[] }>("threads.list", { limit: 200, archived: false }).catch(() => ({ threads: [] })),
+      ]);
+      threads = tRes.threads ?? [];
+      if (secRes && Array.isArray(secRes.sections)) {
+        let list = secRes.sections;
+        // If all open project sections are empty but a folded section (e.g. Quiet) has projects,
+        // expand it once so the user isn't left with a blank sidebar.
+        const hasVisibleProj = list.some((s) => s.kind === "projects" && s.rows.length > 0);
+        if (!hasVisibleProj) {
+          const folded = list.find((s) => s.kind === "projects" && s.fold && s.toggle && (s.count ?? 0) > 0);
+          if (folded?.toggle && !openSectionFolds.has(folded.toggle)) {
+            openSectionFolds.add(folded.toggle);
+            const reopened = await hub.rpc<{ sections?: SidebarSection[] }>("sidebar.sections", {
+              open: Array.from(openSectionFolds),
+            }).catch(() => null);
+            if (reopened && Array.isArray(reopened.sections)) list = reopened.sections;
+          }
+        }
+        sections = list;
+        syncProjectsFromSections(list);
+        sidebar.setData(projects, threads, bots, rooms);
+        sidebar.setSections(list, bots, rooms);
+      } else {
+        sections = null;
+        const pRes = await hub.rpc<{ projects?: ProjectItem[] }>("projects.list", { limit: 100 });
+        projects = pRes.projects ?? [];
+        sidebar.setSections(null, bots, rooms);
+        sidebar.setData(projects, threads, bots, rooms);
+      }
+    } else {
+      sections = null;
+      const [pRes, tRes] = await Promise.all([
+        hub.rpc<{ projects?: ProjectItem[] }>("projects.list", { limit: 100 }),
+        hub.rpc<{ threads?: ThreadItem[] }>("threads.list", { limit: 200, archived: false }),
+      ]);
+      projects = pRes.projects ?? [];
+      threads = tRes.threads ?? [];
+      sidebar.setSections(null, bots, rooms);
+      sidebar.setData(projects, threads, bots, rooms);
+    }
+
     await hub.rpc("subscribe", { topic: "lists" }).catch(() => {});
 
     let targetId = selectedThreadId;
     if (!targetId) {
       let saved = "";
       try { saved = localStorage.getItem("bp.lastThread") || ""; } catch { /* ignore */ }
-      const candidate =
-        threads.find((x) => x.id === saved) ??
-        threads.find((x) => !x.archived && !x.swarm && !x.settled) ??
-        threads.find((x) => !x.archived && !x.swarm);
-      targetId = candidate?.id ?? "";
+      if (saved && ((sections && hasSectionThreadId(sections, saved)) || threads.some((x) => x.id === saved))) {
+        targetId = saved;
+      } else if (sections) {
+        targetId = firstSectionThreadId(sections);
+      }
+      if (!targetId) {
+        const candidate =
+          threads.find((x) => !x.archived && !x.swarm && !x.settled) ??
+          threads.find((x) => !x.archived && !x.swarm);
+        targetId = candidate?.id ?? "";
+      }
     }
 
-    if (targetId && threads.some((x) => x.id === targetId)) {
+    if (targetId && ((sections && hasSectionThreadId(sections, targetId)) || threads.some((x) => x.id === targetId))) {
       await openThread(targetId);
     } else {
       selectedThreadId = "";
@@ -512,6 +649,7 @@ function mountApp(): void {
     rail.setItems([]);
 
     let res: {
+      thread?: ThreadItem;
       entries?: EntryItem[];
       next?: string | null;
       unanswered?: UnansweredNotice | null;
@@ -526,6 +664,12 @@ function mountApp(): void {
       return;
     }
     if (gen !== threadGen) return;
+    if (res.thread) {
+      const idx = threads.findIndex((x) => x.id === res.thread!.id);
+      if (idx >= 0) threads[idx] = res.thread;
+      else threads.unshift(res.thread);
+      updateHeader();
+    }
     olderCursor = res.next ?? null;
 
     let review: ReviewBar | null = null;
@@ -588,6 +732,7 @@ function mountApp(): void {
       if (res.thread) {
         threads = [res.thread, ...threads.filter((x) => x.id !== res.thread!.id)];
         sidebar.setData(projects, threads, bots, rooms);
+        void refreshSections();
         await openThread(res.thread.id);
         composer.focus();
       }
@@ -661,6 +806,7 @@ function mountApp(): void {
           updateHeader();
         }
       }
+      void refreshSections();
     } catch (e) {
       composer.showError(e instanceof Error ? e.message : `Action "${action}" not allowed`);
     }
@@ -715,6 +861,7 @@ function mountApp(): void {
         else projects.unshift(proj);
         sidebar.setData(projects, threads, bots, rooms);
         updateHeader();
+        scheduleSectionsRefresh();
         break;
       }
       case "thread": {
@@ -729,12 +876,14 @@ function mountApp(): void {
           updateHeader();
           composer.setState(true, th.state === "working");
         }
+        scheduleSectionsRefresh();
         break;
       }
       case "thread.removed": {
         const id = String(p.id ?? "");
         threads = threads.filter((x) => x.id !== id);
         sidebar.setData(projects, threads, bots, rooms);
+        scheduleSectionsRefresh();
         break;
       }
       case "entry": {
@@ -755,6 +904,7 @@ function mountApp(): void {
           composer.setState(true, st === "working");
           void refreshRail(selectedThreadId, threadGen);
         }
+        scheduleSectionsRefresh();
         break;
       }
       case "btw": {
