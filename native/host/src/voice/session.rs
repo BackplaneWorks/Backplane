@@ -61,8 +61,23 @@ fn live_args(home: &Path, engine: &str, model: &str, upload: bool, device: &str,
 }
 fn frame(thread: &str, ev: &str, mut body: Value) -> Value { body["t"] = json!("voice"); body["thread"] = json!(thread); body["ev"] = json!(ev); body }
 
-/// `cut`: a send while dictating, to the session's reader (Reader::cut).
-struct Live { browser_owner: Option<String>, chunk_window: Instant, chunks: u32, always: bool, id: u64, client: u64, thread: String, key: String, upload: bool, audio: Option<mpsc::Sender<Vec<u8>>>, stopped: Option<Instant>, ctl: mpsc::UnboundedSender<Ctl> }
+// Match the resident recognizer's maximum input of 120 seconds at 16 kHz, signed 16-bit PCM.
+const BROWSER_AUDIO_BYTES: usize = 120 * 16_000 * 2;
+
+fn browser_audio_total(accepted: usize, chunk: usize) -> Result<usize, &'static str> {
+    accepted.checked_add(chunk).filter(|total| *total <= BROWSER_AUDIO_BYTES)
+        .ok_or("413 Payload Too Large")
+}
+
+#[test]
+fn browser_audio_session_ceiling() {
+    assert_eq!(browser_audio_total(BROWSER_AUDIO_BYTES - 2, 2), Ok(BROWSER_AUDIO_BYTES));
+    assert_eq!(browser_audio_total(BROWSER_AUDIO_BYTES, 0), Ok(BROWSER_AUDIO_BYTES));
+    assert_eq!(browser_audio_total(BROWSER_AUDIO_BYTES, 1), Err("413 Payload Too Large"));
+}
+
+/// Active dictation and its client audio channel.
+struct Live { browser_owner: Option<String>, chunk_window: Instant, chunks: u32, accepted_bytes: usize, always: bool, id: u64, client: u64, thread: String, key: String, upload: bool, audio: Option<mpsc::Sender<Vec<u8>>>, stopped: Option<Instant>, ctl: mpsc::UnboundedSender<Ctl> }
 /// To a live session's reader: a client's send while dictating (cut, seq), Keep talking in an end-of-turn countdown, Jev's answer about a pause.
 enum Ctl { Cut(u64, u64), Hold, Jev(u64, Option<f64>), /** always on: the open thread changed (between messages only) */ Target(String) }
 /// Always-on (always.rs): who turned it on and how to start it again; why it is paused ("" listening); muted by the person; the window's focus.
@@ -118,7 +133,7 @@ impl Voice {
         let browser_owner = crate::net::start::registry(&hub.cfg.home).and_then(|r| r.browser_owner(client));
         let upload_info = if browser_owner.is_some() { json!({"session":key}) }
             else if upload { json!({"path":format!("/voice/in?s={key}")}) } else { json!({"path":""}) };
-        let id = { let mut g = self.st.lock().unwrap(); g.next += 1; let id = g.next; g.live = Some(Live { browser_owner, chunk_window: Instant::now(), chunks: 0, always, id, client, thread: thread.clone(), key: key.clone(), upload, audio: Some(tx), stopped: None, ctl: ctl_tx.clone() }); id };
+        let id = { let mut g = self.st.lock().unwrap(); g.next += 1; let id = g.next; g.live = Some(Live { browser_owner, chunk_window: Instant::now(), chunks: 0, accepted_bytes: 0, always, id, client, thread: thread.clone(), key: key.clone(), upload, audio: Some(tx), stopped: None, ctl: ctl_tx.clone() }); id };
         self.with(&thread, |x| { x.begin(); x.engine = engine.to_string(); x.always = always; });
         self.tell(hub, client, &thread);
         if upload { hub.push(client, frame(&thread, "audio", upload_info.clone())); }
@@ -266,7 +281,9 @@ impl Voice {
         if live.chunks >= 64 { return Err("429 Too Many Requests") }
         live.chunks += 1;
         let tx = live.audio.as_ref().ok_or("409 Conflict")?;
+        let total = browser_audio_total(live.accepted_bytes, body.len())?;
         if !body.is_empty() { tx.try_send(body).map_err(|_| "429 Too Many Requests")?; }
+        live.accepted_bytes = total;
         if end { live.audio = None; live.stopped.get_or_insert_with(Instant::now); }
         Ok(live.client)
     }
