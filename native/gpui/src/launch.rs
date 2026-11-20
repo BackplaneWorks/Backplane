@@ -119,7 +119,7 @@ fn detached(cmd: &mut std::process::Command) {
     #[cfg(windows)] { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000 | 0x0000_0200); }
 }
 /// systemd-run's arguments for the hub's own scope, when a user systemd answers here, with only the properties a probe scope took (an older
-/// systemd has no OOMPolicy, before 243, or ManagedOOMPreference, before 248: scopeprobe.rs); None elsewhere (no user manager, a container,
+/// systemd takes OOMPolicy in a scope only from 253 or a late 252 point release, and ManagedOOMPreference from 248: scopeprobe.rs); None elsewhere (no user manager, a container,
 /// WSL), or with BACKPLANE_NO_SCOPE, and then the hub starts unscoped.
 fn hub_scope() -> Option<Vec<String>> {
     if !cfg!(target_os = "linux") { return None }
