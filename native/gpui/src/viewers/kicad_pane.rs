@@ -656,8 +656,12 @@ pub fn hand_in_now(keys: bool, want_keys: bool, show: Option<u64>, prev_show: Op
     show.is_some() && if show != prev_show { (keys || want_keys) && !dialog_has_keys } else { want_keys }
 }
 /// macOS (#1399): after a reserved chord from KiCad gave the keyboard back to Backplane (nc::hand_back), whether to ask for our activation
-/// once more: only the first check (one retry), only when it did not take, and only when nothing else moved the keyboard since.
-pub fn hand_back_retry(attempt: u8, taken: bool, unchanged: bool) -> bool { attempt == 0 && !taken && unchanged }
+/// once more. Only the first check (one retry), only when it did not take, and only in the refused case itself: KiCad still the active
+/// app. Never when the person moved on since (Backplane hidden by Cmd+H, another app in front, a new press anywhere) or a hand-in or
+/// another focus of ours came since (`unchanged` false): the retry must never undo what the person just did.
+pub fn hand_back_retry(attempt: u8, taken: bool, unchanged: bool, hidden: bool, kicad_active: bool, pressed_since: bool) -> bool {
+    attempt == 0 && !taken && unchanged && !hidden && kicad_active && !pressed_since
+}
 /// macOS (#1198): whether a press of the person's hands the keyboard to KiCad's frame. Only when the window the press hit is the pane's
 /// frame on show (not another app's window or a sheet of ours lying over that area), Backplane is the active app while KiCad is not
 /// (macOS 15, where the click alone does not activate KiCad; on 26.5 KiCad is already active by then), nothing of Backplane's is drawn
@@ -1934,16 +1938,20 @@ mod tests {
         assert!(!pointer_over((200.0, 900.0), pane), "the composer, left and below the pane");
         assert!(!pointer_over((0.0, 0.0), (0, 0, 0, 0)), "no rect pushed yet");
     }
-    /// macOS 15 (#1198): a press hands KiCad the keyboard only when it hit KiCad's frame with Backplane active and KiCad not, nothing
-    /// drawn over the pane, no dialog, and the pane not leaving.
-    /// macOS (#1399): the hand-back after a reserved chord retries once, only when our activate did not take and nothing moved since.
+    /// macOS (#1399): the hand-back after a reserved chord retries once, only in the refused case (KiCad still active), and never undoes
+    /// what the person did since: Backplane hidden (Cmd+H), another app in front (Cmd+Tab), a new press, or a hand-in or focus of ours.
     #[test] fn a_hand_back_that_did_not_take_retries_once() {
         use super::hand_back_retry;
-        assert!(hand_back_retry(0, false, true), "not taken at the first check: one retry");
-        assert!(!hand_back_retry(0, true, true), "taken: nothing more");
-        assert!(!hand_back_retry(1, false, true), "after the retry: said, never again");
-        assert!(!hand_back_retry(0, false, false), "a hand-in or another move since: that one stands");
+        assert!(hand_back_retry(0, false, true, false, true, false), "refused, KiCad still active: one retry");
+        assert!(!hand_back_retry(0, true, true, false, false, false), "taken: nothing more");
+        assert!(!hand_back_retry(1, false, true, false, true, false), "after the retry: said, never again");
+        assert!(!hand_back_retry(0, false, false, false, true, false), "a hand-in or another focus of ours since: that one stands");
+        assert!(!hand_back_retry(0, false, true, true, true, false), "Backplane hidden (Cmd+H replayed as HideApp): never unhidden by us");
+        assert!(!hand_back_retry(0, false, true, false, false, false), "another app in front (Cmd+Tab): not taken back from it");
+        assert!(!hand_back_retry(0, false, true, false, true, true), "a press since (a click in KiCad): the person's choice stands");
     }
+    /// macOS 15 (#1198): a press hands KiCad the keyboard only when it hit KiCad's frame with Backplane active and KiCad not, nothing
+    /// drawn over the pane, no dialog, and the pane not leaving.
     #[test] fn only_the_persons_press_on_kicads_frame_with_backplane_active_hands_kicad_the_keys() {
         use super::press_hands_in;
         // #1198 (macOS 15): a press that hit KiCad's frame while Backplane is active and KiCad is not hands in
