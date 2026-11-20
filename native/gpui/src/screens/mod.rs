@@ -147,6 +147,7 @@ pub struct Screens {
     /// The 3D page (fed the hub's solid frames) and the Browser page (polls the thread's frame while it is shown); made when first needed.
     pub solids: HashMap<(String, String), Entity<crate::viewers::solid::SolidPage>>,
     pub solid_slot: Option<((String, String), String)>,
+    pub early_solids: EarlySolids,
     pub retired_solids: Vec<Entity<crate::viewers::solid::SolidPage>>,
     pub browser: Option<(String, Entity<crate::viewers::browser::BrowserPage>)>,
     /// The embedded KiCad editor (viewers/kicad_pane.rs) while the person edits, and every `editor.kicad.<digest>` the hub published (JSON).
@@ -266,35 +267,27 @@ pub struct PlotSlots {
     pub owner: String,
     slots: HashMap<usize, plotview::PlotView>,
     empty: plotview::PlotView,
-    // The thread's last tapped primitive accompanies its hub probe across page switches.
-    selection: Option<(usize, String, plot::Pick)>,
+    pub measure: bool,
 }
 
 impl PlotSlots {
-    pub fn sync(&mut self, owner: &str, split: bool) {
-        if self.owner != owner {
-            self.selection = None;
+    pub fn sync(&mut self, owner: &str, open: bool, split: bool) {
+        if self.owner != owner || !open {
             self.slots.clear();
             self.owner = owner.into();
         }
-        if !split {
-            for id in [1, 2] {
-                if let Some(view) = self.slots.remove(&id) {
-                    if let Some(pick) = view.picked { self.selection = Some((id, view.probe_at, pick)); }
-                }
-            }
-        }
-        self.slots.entry(0).or_default();
-        if split {
-            for id in [1, 2] { self.slots.entry(id).or_default(); }
-            if let Some((id, tag, pick)) = self.selection.take() {
-                self.slots.get_mut(&id).unwrap().restore_pick = Some((tag, pick));
-            }
+        if open {
+            self.slot(0);
+            if split { self.slot(1); self.slot(2); }
         }
     }
 
+    fn slot(&mut self, id: usize) -> &mut plotview::PlotView {
+        self.slots.entry(id).or_insert_with(|| plotview::PlotView { measure: self.measure, ..Default::default() })
+    }
+
     pub fn views(&mut self) -> (&mut plotview::PlotView, Option<[&mut plotview::PlotView; 2]>) {
-        self.slots.entry(0).or_default();
+        self.slot(0);
         let [main, sch, pcb] = self.slots.get_disjoint_mut([&0, &1, &2]);
         (main.unwrap(), sch.zip(pcb).map(|(s,b)| [s,b]))
     }
@@ -305,7 +298,48 @@ impl std::ops::Index<usize> for PlotSlots {
     fn index(&self, slot: usize) -> &Self::Output { self.slots.get(&slot).unwrap_or(&self.empty) }
 }
 impl std::ops::IndexMut<usize> for PlotSlots {
-    fn index_mut(&mut self, slot: usize) -> &mut Self::Output { self.slots.entry(slot).or_default() }
+    fn index_mut(&mut self, slot: usize) -> &mut Self::Output { self.slot(slot) }
+}
+
+/// A watch can send its cached frame before the corresponding viewer picture.
+#[derive(Default)]
+pub struct EarlySolids(std::collections::VecDeque<(String, Vec<u8>)>);
+impl EarlySolids {
+    pub fn hold(&mut self, key: String, frame: Vec<u8>) {
+        self.take(&key);
+        if self.0.len() == 2 { self.0.pop_front(); }
+        self.0.push_back((key, frame));
+    }
+    pub fn take(&mut self, key: &str) -> Option<Vec<u8>> {
+        let i = self.0.iter().position(|(k, _)| k == key)?;
+        self.0.remove(i).map(|(_, frame)| frame)
+    }
+}
+
+#[cfg(test)]
+mod slot_tests {
+    use super::*;
+    #[test] fn plot_state_lasts_for_one_open_viewer_and_measure_lasts_for_the_window() {
+        let mut slots = PlotSlots { measure: true, ..Default::default() };
+        slots.sync("thread", true, true);
+        slots[1].hands = 3;
+        slots[2].hands = 4;
+        slots.sync("thread", true, false);
+        assert_eq!((slots[1].hands, slots[2].hands), (3, 4));
+        slots.sync("other", true, true);
+        assert_eq!(slots[2].hands, 0);
+        assert!(slots[0].measure && slots[1].measure);
+        slots.sync("other", false, false);
+        assert!(slots.slots.is_empty());
+    }
+    #[test] fn early_frames_are_bounded_and_delivered_only_to_the_matching_key() {
+        let mut frames = EarlySolids::default();
+        for (key, n) in [("a", 1), ("b", 2), ("b", 3), ("c", 4)] { frames.hold(key.into(), vec![n]); }
+        assert_eq!(frames.take("a"), None);
+        assert_eq!(frames.take("b"), Some(vec![3]));
+        assert_eq!(frames.take("b"), None);
+        assert_eq!(frames.take("c"), Some(vec![4]));
+    }
 }
 
 impl Screens {
@@ -317,6 +351,6 @@ impl Screens {
     pub fn new<T: 'static>(_cx: &mut Context<T>, target: Option<attach::Target>, drafts_path: std::path::PathBuf, saved: HashMap<String, String>) -> Self {
         let imp = improvements::Imp::new(&drafts_path, target.clone());
         let unsent = unsent::Unsent::open(drafts_path.with_file_name("gpui-unsent.json"));
-        Self { parts: Default::default(), side_force: false, side_shown: true, runs_at: Default::default(), hubbar: Default::default(), elsewhere: None, offers: Default::default(), star: None, tm_notice: None, tm_shown: String::new(), gp_notice: None, term: term::Term::new(_cx.focus_handle()), pad: None, voice: Default::default(), streamer: Default::default(), setup: Default::default(), setup_focus: _cx.focus_handle(), keysheet: false, halt_open: Default::default(), kcomment: None, acct: Default::default(), ctx_open: false, ctx_chip: Default::default(), box_at: Default::default(), split_pv: Default::default(), pick_slot: None, last_state: String::new(), kicad_shown: (false, String::new()), ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), unsent, offsets: HashMap::new(), seeking: None, streamed: String::new(), restore_ask: String::new(), paging: None, reg: Default::default(), projects: Default::default(), files: Default::default(), solids: Default::default(), solid_slot: None, retired_solids: Vec::new(), browser: None, kicad: None, kicad_loan: None, kicad_update: kicad_update::Update::from_env(), kicad_infos: HashMap::new(), kicad_closed: Default::default(), host_sends: Default::default(), mgmt: Default::default(), kicad_window: None, kicad_full: false, kicad_screen: false, kicad_comments_seen: Default::default(), xprobe: Default::default(), rail_scroll: Default::default(), rail_last_lit: None, rail_pending: None, rail_at: None, rail_metric: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, pick: Default::default(), panels: Default::default(), head: Default::default(), palette: Default::default(), find: Default::default(), lightbox: None, known_refs: vec![], popup_off: None, popup_shut: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), born: HashMap::new(), pages_read: Default::default(), shown_at: std::time::Instant::now(), images: Default::default(), ctx_img: None, ctx_save: None, img_poll: false, home_scroll: Default::default(), home_list: gpui::ListState::new(0, gpui::ListAlignment::Top, gpui::px(1200.)), home_list_key: String::new(), home_doc_w: 600., home_anchors: Default::default(), await_draft: None, pending_draft: None, draft_timer: false, imp, devbar: None, devbar_confirm: None, ctx: None, scroll_logged: None, popup_ix: 0, popup_key: String::new(), popup_scroll: Default::default(), held: Default::default(), hold_threads: vec![], hold_projects: vec![], root_focus: _cx.focus_handle(), side_focus: _cx.focus_handle(), side_hover: None, edit_after: None, rail_labels: Default::default() }
+        Self { parts: Default::default(), side_force: false, side_shown: true, runs_at: Default::default(), hubbar: Default::default(), elsewhere: None, offers: Default::default(), star: None, tm_notice: None, tm_shown: String::new(), gp_notice: None, term: term::Term::new(_cx.focus_handle()), pad: None, voice: Default::default(), streamer: Default::default(), setup: Default::default(), setup_focus: _cx.focus_handle(), keysheet: false, halt_open: Default::default(), kcomment: None, acct: Default::default(), ctx_open: false, ctx_chip: Default::default(), box_at: Default::default(), pick_slot: None, last_state: String::new(), kicad_shown: (false, String::new()), ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), unsent, offsets: HashMap::new(), seeking: None, streamed: String::new(), restore_ask: String::new(), paging: None, reg: Default::default(), projects: Default::default(), files: Default::default(), solids: Default::default(), solid_slot: None, early_solids: Default::default(), retired_solids: Vec::new(), browser: None, kicad: None, kicad_loan: None, kicad_update: kicad_update::Update::from_env(), kicad_infos: HashMap::new(), kicad_closed: Default::default(), host_sends: Default::default(), mgmt: Default::default(), kicad_window: None, kicad_full: false, kicad_screen: false, kicad_comments_seen: Default::default(), xprobe: Default::default(), rail_scroll: Default::default(), rail_last_lit: None, rail_pending: None, rail_at: None, rail_metric: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plots: Default::default(), picker_open: false, pick: Default::default(), panels: Default::default(), head: Default::default(), palette: Default::default(), find: Default::default(), lightbox: None, known_refs: vec![], popup_off: None, popup_shut: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), born: HashMap::new(), pages_read: Default::default(), shown_at: std::time::Instant::now(), images: Default::default(), ctx_img: None, ctx_save: None, img_poll: false, home_scroll: Default::default(), home_list: gpui::ListState::new(0, gpui::ListAlignment::Top, gpui::px(1200.)), home_list_key: String::new(), home_doc_w: 600., home_anchors: Default::default(), await_draft: None, pending_draft: None, draft_timer: false, imp, devbar: None, devbar_confirm: None, ctx: None, scroll_logged: None, popup_ix: 0, popup_key: String::new(), popup_scroll: Default::default(), held: Default::default(), hold_threads: vec![], hold_projects: vec![], root_focus: _cx.focus_handle(), side_focus: _cx.focus_handle(), side_hover: None, edit_after: None, rail_labels: Default::default() }
     }
 }

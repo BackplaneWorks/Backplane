@@ -420,7 +420,7 @@ fn main()->anyhow::Result<()> {
                 else if !saved.url.is_empty()&&env.is_none() {c.hub=saved.url.replacen("http://","ws://",1);c.token_file=saved.token_file.into();c.pending=false;c.paired=true;/* a hub the chooser paired with: its 401 means this device was revoked */cx.open_window(opts,move|window,cx|cx.new(|cx|Backplane::new(window,cx,c,started))).unwrap_or_else(window_failed);}
                 else {let auto=env.or_else(||(!saved.home.is_empty()).then(||saved.home.clone().into()));cx.open_window(opts,move|window,cx|cx.new(|cx|screens::first::First::new(window,cx,c,started,auto))).unwrap_or_else(window_failed);}
             } else {
-            cx.open_window(opts,move|window,cx|cx.new(|cx|{let mut b=Backplane::new(window,cx,config,started);b.screens.plots[0].measure=measure;b})).unwrap_or_else(window_failed);
+            cx.open_window(opts,move|window,cx|cx.new(|cx|{let mut b=Backplane::new(window,cx,config,started);b.screens.plots.measure=measure;b})).unwrap_or_else(window_failed);
             }
         }
         cx.activate(true);
