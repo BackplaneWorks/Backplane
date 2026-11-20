@@ -460,6 +460,18 @@ def evaluate_task4_dock(
     mark_seqs = parsed_full.get("mark_seqs") or {}
     presses = parsed_full.get("presses") or {}
 
+    # The inventory predates the Add beside control. A single painted Gerbers
+    # tile and a measured missing control establish that this route is unavailable.
+    start = shots.get("task4-dock-gerbers", {})
+    tiles = start.get("tiles") or []
+    if full_client_ok and start.get("settled") and start.get("controls_captured") and len(tiles) == 1 and tiles[0].get("kind") == "gerbers":
+        control = f"tile:{tiles[0]['id']}:add-beside"
+        attempts = presses.get("press:task4-dock-split", [])
+        if control not in start.get("controls_ids", []) and any(p.get("id") == control and p.get("found") is False for p in attempts):
+            return {"outcome": "unavailable", "note": "Single Gerbers tile has no Add beside control",
+                    "one_step_back": False, "found": False, "presses": [],
+                    "evidence": {"tile": tiles[0]["id"], "missing_control": control}}
+
     ok_g, err_g = _shot_cleared(full_dir, "task4-dock-gerbers", caps_full, shots, cleared_shots)
     ok_s, err_s = _shot_cleared(full_dir, "task4-dock-split", caps_full, shots, cleared_shots)
     ok_b, err_b = _shot_cleared(full_dir, "task4-dock-back", caps_full, shots, cleared_shots)
