@@ -69,7 +69,11 @@ pub fn tab_change<'a>(was: &str, now: &'a str) -> Option<&'a str> { (now != was)
 /// Reaction to `PaneTab`: repaint only (never call back into `show_kind` or send a hub RPC).
 /// Both `kicad_edit`'s subscription and the no-feedback unit test call this function.
 fn on_pane_tab(notify: impl FnOnce()) { notify(); }
-/// Who chose a frame the pane shows: the person (a tab, a key, the rail) or the hub for an agent (an agent's viewer_show).
+/// Who chose what the pane shows. A frame (`show_kind_as`): the person (a tab, a key, the rail) or the hub for an agent (an agent's
+/// viewer_show). The pane itself (`kicad_attach`): the person asked for the editor (Edit, Open in KiCad, Try again, a context menu's or
+/// the boards menu's Edit), or Backplane showed it by itself (the rail's design mode, a thread opened on its Board page): an automatic
+/// pane is shown without focus, never `want_keys`, never KiCad made the active app; the person's first act on it (a click in it, a tab,
+/// Edit) hands the keys over as on any pane, and makes it Deliberate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShowBy { Deliberate, Automatic }
 impl ShowBy {
@@ -578,6 +582,12 @@ pub struct KicadPane {
     /// Edit, a tab, Full size: the person chose the editor, so it gets the keyboard the moment its frame is on show (KiCad's hotkeys work with
     /// no canvas click first; lane A: Ctrl+Shift+R after Edit reached nothing)
     pub want_keys: bool,
+    /// Deliberate or automatic (`ShowBy`); automatic until the person acts on the pane (a click or press in it, a tab, `deliberate`)
+    pub why: ShowBy,
+    /// an automatic pane whose KiCad took the keyboard with no act of the person's: said once (`kicad_auto_keys_taken`)
+    auto_taken_said: bool,
+    /// macOS, debug: the order plan last logged (`kicad_mac_plan`)
+    mac_plan_said: String,
     /// Windows: the editor given the keyboard as its frame came on show, and when. The focus request posted then can reach KiCad
     /// before the client's ShowWindowAsync of the frame and container, and KiCad rejects a request for a frame not yet visible
     /// (opening-focus run Bp-repost: ignored at show, accepted once the pane was shown), so it is posted once more on the first
@@ -599,6 +609,23 @@ pub struct KicadPane {
     /// the keyboard was in a KiCad dialog last tick: when it closes, the keyboard goes back to the editor (a window manager hands it to
     /// Backplane's window)
     was_dialog: bool,
+}
+
+/// A new pane's `want_keys`: only a deliberate open asks for the keyboard.
+pub fn opening_wants_keys(why: ShowBy) -> bool { why.takes_keys() }
+/// After a placement (`after_frame`): whether the keyboard is handed to the frame on show now. A frame that came on show (another than
+/// before: the first show, a tab, the frames-change re-show) gets it when the pane wants the keys or KiCad already has them, unless a
+/// KiCad dialog has them; the frame already on show gets it only when the pane wants the keys (Full size, the tab of the editor shown).
+pub fn hand_in_now(keys: bool, want_keys: bool, show: Option<u64>, prev_show: Option<u64>, dialog_has_keys: bool) -> bool {
+    show.is_some() && if show != prev_show { (keys || want_keys) && !dialog_has_keys } else { want_keys }
+}
+/// What `kicad_attach` does with the pane already there.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AttachStep { New, Promote, Again }
+/// An attach for the design the pane already shows is never a second pane (the reconcile asks again and again): a deliberate one on an
+/// automatic pane makes it deliberate (the keyboard to it), anything else only what Edit on its own pane did (`edit_again`).
+pub fn attach_step(pane_is_this_design: bool, pane: ShowBy, why: ShowBy) -> AttachStep {
+    if !pane_is_this_design { AttachStep::New } else if why == ShowBy::Deliberate && pane == ShowBy::Automatic { AttachStep::Promote } else { AttachStep::Again }
 }
 
 /// A chord KiCad handed back that the window acts on at once (the comment window: screens/kcomment.rs).
@@ -644,7 +671,7 @@ const HANDOFF_PAINT: std::time::Duration = std::time::Duration::from_millis(150)
 const HANDOFF_MAX: std::time::Duration = std::time::Duration::from_secs(3);
 
 impl KicadPane {
-    pub fn new(cx: &mut Context<Self>, project: String, root: String, project_id: String, open: String, hub_open: String, hub: tokio::sync::mpsc::Sender<Command>) -> Self {
+    pub fn new(cx: &mut Context<Self>, project: String, root: String, project_id: String, open: String, hub_open: String, hub: tokio::sync::mpsc::Sender<Command>, why: ShowBy) -> Self {
         // the tick: adopt stock KiCad's new frames, read the container's frames, and give the editor the keyboard on a click over it
         // and at once when our X connection has something to read (a key KiCad hands back: the comment window opens on it with no 40 ms wait;
         // Linux: a thread waits on the connection's socket, native_child `conn_fd`)
@@ -679,7 +706,7 @@ impl KicadPane {
             let _ = drained_tx.send(());
         } }).detach();
         KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
     pub fn edit_again(&mut self, cx: &mut Context<Self>) {
@@ -689,6 +716,16 @@ impl KicadPane {
         self.placed = None; self.pending_show = Some(want.clone());
         self.rpc("editor.kicad.show", json!({"project": self.project, "frame": want, "focus": true}));
         cx.notify();
+    }
+    /// An automatic pane the person asked for after all (Edit, Open in KiCad on it): the keyboard to its frame on show, as a deliberate open.
+    pub fn deliberate(&mut self, cx: &mut Context<Self>) {
+        // placed again on the next frame: the hand-in is the placement's (`after_frame` returns early on an unchanged placement, so
+        // want_keys alone waited for the next layout change: the #1198 lane's row E, 9.2 s until the viewer closed)
+        self.chose("deliberate"); self.want_keys = true; self.placed = None; cx.notify(); // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+    }
+    /// The person acted on the pane (`by`): an automatic pane is deliberate from now on.
+    fn chose(&mut self, by: &str) {
+        if self.why == ShowBy::Automatic { self.why = ShowBy::Deliberate; eprintln!("GPUI_LOG {}", json!({"kicad_auto_to_deliberate": by})); }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
@@ -822,7 +859,7 @@ impl KicadPane {
         // the editor in another window now (popped out, or back in): its keys are handed in when it is placed there
         // (bp9 Nov 15: set at open_window, the old window's next frame used the request before the move, and the editor
         // in the new window never got the keys)
-        self.want_keys = true;
+        self.chose("rehome"); self.want_keys = true; // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
         self.grab_click(new, !self.keys);
         self.reattach();
     }
@@ -880,7 +917,7 @@ impl KicadPane {
         let was_tab = self.tab(); self.show_kind_inner(kind, by, cx); self.note_tab(&was_tab, cause, cx);
     }
     fn show_kind_inner(&mut self, kind: &str, by: ShowBy, cx: &mut Context<Self>) {
-        if by.takes_keys() { self.want_keys = true; }
+        if by.takes_keys() { self.chose("show_kind"); self.want_keys = true; } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
         if kind == frame_for(&self.open) { self.override_kind = None; } else { self.override_kind = Some(kind.to_string()); }
         self.placed = None;
         if self.attached && matches!(self.info["state"].as_str(), Some("stopped" | "failed")) { self.reattach(); }
@@ -990,7 +1027,7 @@ impl KicadPane {
             let activated = nc::activated_after_close(self.toplevel, popped);
             if activated || at.elapsed() >= std::time::Duration::from_millis(1000) {
                 self.await_close = None;
-                self.want_keys = true; self.placed = None;
+                self.chose("popped window closed"); self.want_keys = true; self.placed = None; // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
                 if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
                     eprintln!("GPUI_LOG {}", json!({"kicad_close_handin": {"path": if activated { "activated" } else { "timeout" }, "after_ms": at.elapsed().as_millis() as u64}}));
                 }
@@ -1149,9 +1186,9 @@ impl KicadPane {
             // BACKPLANE_KICAD_FOCUS_ON_PRESS: the old way (focus mid-press), to check a KiCad that must cope with it
             let fork = self.info["mode"] == "fork" && std::env::var_os("BACKPLANE_KICAD_FOCUS_ON_PRESS").is_none();
             match (nc::button_over(w), nc::has_focus(c)) {
-                (Some(true), false) if fork => { self.press_focus = Some(w); self.press_in = true; self.busy_in_kicad(); }
-                (Some(true), false) => { nc::focus(w); self.press_in = true; self.busy_in_kicad(); }
-                (Some(true), true) => { self.press_in = true; self.busy_in_kicad(); }
+                (Some(true), false) if fork => { self.press_focus = Some(w); self.press_in = true; self.chose("press"); self.busy_in_kicad(); } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+                (Some(true), false) => { nc::focus(w); self.press_in = true; self.chose("press"); self.busy_in_kicad(); } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+                (Some(true), true) => { self.press_in = true; self.chose("press"); self.busy_in_kicad(); } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
                 // a press that began over the editor stays the editor's until it ends, however the layout moves under it: a drag in KiCad
                 // that hits one of its DRC markers opens the Checks panel, the pane shrinks under the pointer, and the keyboard went to
                 // Backplane mid-drag (lane B, Hubble: the person's next Escape closed the viewer and the editor with it)
@@ -1194,6 +1231,16 @@ impl KicadPane {
         if has != self.keys && std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
             eprintln!("GPUI_LOG {}", json!({"kicad_keys_flip": {"to": has, "in_dialog": in_dialog, "has_focus": nc::has_focus(c), "why": nc::focus_debug(c)}}));
         }
+        // an automatic pane: KiCad took the keyboard with no click, press or deliberate() of the person's. Said once, always (the rows fail on
+        // this line; the trace is for the fork): never patched around here
+        // macOS: a click in KiCad's frame goes to KiCad's window, never through ours (button_over has nothing to say there): KiCad
+        // active within a second of a press is the person's click, not KiCad taking the keyboard by itself (#1198 lane's row C)
+        #[cfg(target_os = "macos")]
+        if has && !self.keys && self.why == ShowBy::Automatic && nc::secs_since_press() < 1.0 { self.chose("a press, macOS (KiCad's own window)"); } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+        if has && !self.keys && self.why == ShowBy::Automatic && !self.auto_taken_said {
+            self.auto_taken_said = true;
+            eprintln!("GPUI_LOG {}", json!({"kicad_auto_keys_taken": {"frame": self.want(), "in_dialog": in_dialog, "has_focus": nc::has_focus(c), "why": nc::focus_debug(c), "after_ms": self.born.elapsed().as_millis() as u64}}));
+        }
         if has != self.keys { self.keys = has; nc::grab_escape(self.toplevel, has); self.grab_click(c, !has); if has { self.touched(); } cx.notify(); }
         if let Some(h) = self.info["holder"].as_u64().filter(|h| *h > 0 && *h != self.kept) { nc::keep(h); self.kept = h; }
         for e in nc::events() {
@@ -1202,10 +1249,10 @@ impl KicadPane {
             match e {
                 // the keyboard back to the client's window; a reserved chord is then pressed in gpui (after_frame, which has the window)
                 nc::Ev::Escape => { self.refocus = None; nc::hand_back(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true); cx.notify(); }
-                nc::Ev::Click => { if let Some(w) = self.want() { self.grab_click(c, false); nc::focus(w); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } }
+                nc::Ev::Click => { self.chose("click"); if let Some(w) = self.want() { self.grab_click(c, false); nc::focus(w); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
                 // the shield did the hand-in itself and replays the press: the state only (no second focus call landing
                 // after the replayed press, which closed a right click's menu before it opened)
-                nc::Ev::ShieldClick => { if self.want().is_some() { self.grab_click(c, false); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } }
+                nc::Ev::ShieldClick => { self.chose("shield click"); if self.want().is_some() { self.grab_click(c, false); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
                 // Ctrl+Tab / Ctrl+Shift+Tab pressed in KiCad: cycle only the tabs shown on the strip, keeping KiCad's keyboard.
                 // `have` is the pane's own frames chained with the hub's (the same list `strip` uses), and feeds both `strip_tabs` and `next_open_tab`'s Simulator rule.
                 nc::Ev::Key(k) if k == "ctrl-tab" || k == "ctrl-shift-tab" => {
@@ -1220,7 +1267,7 @@ impl KicadPane {
                     // the comment chord and the management panels' keys are acted on here, from the event: replayed as a keystroke after a
                     // comment window had the keyboard they reached no action (gpui's dispatch in this window found none), so they go by name
                     if k == "ctrl-;" || k == ";" || k.starts_with("alt-shift-") { cx.emit(PaneKey(k)); } else { self.press.push(k); } cx.notify(); }
-                nc::Ev::Focus(_) => { if let Some(w) = self.want() { self.took = Some((w, std::time::Instant::now())); } if !self.keys { self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); self.grab_click(c, false); cx.notify(); } }
+                nc::Ev::Focus(_) => { self.chose("KiCad's click focus (_BACKPLANE_FOCUS)"); if let Some(w) = self.want() { self.took = Some((w, std::time::Instant::now())); } if !self.keys { self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); self.grab_click(c, false); cx.notify(); } } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
             }
         }
     }
@@ -1369,7 +1416,8 @@ impl KicadPane {
         if cfg!(windows) && show != prev_show && show.is_some() && std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
             eprintln!("GPUI_LOG {}", json!({"kicad_switch_busy": {"frame": show, "jobs": self.jobs.iter().map(|j| j["title"].clone()).collect::<Vec<_>>(), "task_wait": self.info["task_wait"], "keys": self.keys, "want_keys": self.want_keys, "epoch_ms": crate::screens::kcomment::epoch_ms() as u64}}));
         }
-        if (self.keys || self.want_keys) && show != prev_show && !kicad_dialog_has_keys {
+        let hand_in = hand_in_now(self.keys, self.want_keys, show, prev_show, kicad_dialog_has_keys);
+        if hand_in && show != prev_show {
             if let Some(w) = show {
                 if self.want_keys && nc::button_over(w) == Some(false) { self.press_gave_keys = true; }
                 #[cfg(not(target_os = "macos"))]
@@ -1382,7 +1430,7 @@ impl KicadPane {
                 if self.want_keys && !self.keys { self.keys = true; nc::grab_escape(self.toplevel, true); self.grab_click(c, false); self.touched(); }
                 self.want_keys = false;
             }
-        } else if self.want_keys && show.is_some() && show == prev_show {
+        } else if hand_in {
             // already on show (Full size, the tab of the editor shown): the keyboard to it now
             let w = show.unwrap();
             if nc::button_over(w) == Some(false) { self.press_gave_keys = true; }
@@ -1466,6 +1514,11 @@ impl KicadPane {
         if seen != self.mac_seen { self.mac_seen = seen; self.mac_heat(); }
         let (true, Some(f)) = (visible, show) else { self.mac_raise = RaiseState::default(); self.mac_buried = false; return was };
         let plan = order_plan(&nc::stack(self.toplevel, f));
+        // what the order rule found, each time it changes (BACKPLANE_KICAD_DEBUG): a frame on show that never reaches the screen is Idle here
+        if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() && format!("{plan:?}") != self.mac_plan_said {
+            self.mac_plan_said = format!("{plan:?}");
+            eprintln!("GPUI_LOG {}", json!({"kicad_mac_plan": self.mac_plan_said, "frame": f, "stack": nc::stacking(self.toplevel, f), "kicad_active": nc::has_focus(0), "at_ms": crate::screens::kcomment::epoch_ms() as u64}));
+        }
         match raise_step(plan == OrderPlan::Above, plan != OrderPlan::Idle, &mut self.mac_raise, &mut self.mac_buried, std::time::Instant::now()) {
             RaiseStep::Retry(n) => {
                 let before = nc::stacking(self.toplevel, f);
@@ -1661,6 +1714,37 @@ mod tests {
     /// #1199: on macOS KiCad's frame leaves the screen when the page lets the editor go (the viewer closed, another thread or page), not
     /// on a frame that only missed the pane's hitbox (our window inactive while KiCad has the keyboard, d563d8a5ab), and never while
     /// KiCad has a dialog open; it comes back only once the pane is drawn again.
+    /// An automatic attach (the rail's design mode, a thread opened on its Board page) never hands the keyboard to KiCad by itself: not at
+    /// the first show, not at the frames-change re-show (the pre-warm at 2 s, the checks' hidden schematic), not when the frame is placed
+    /// again. KiCad gets it on the person's act (a click: `keys` true; `deliberate`: `want_keys` true), as on a deliberate pane.
+    #[test] fn an_automatic_attach_never_hands_the_keyboard_in_until_the_person_acts() {
+        use super::{hand_in_now, opening_wants_keys, ShowBy};
+        let (board, other) = (Some(7_u64), Some(9_u64));
+        let want = opening_wants_keys(ShowBy::Automatic);
+        assert!(!want, "an automatic pane does not want the keyboard");
+        // first show, the same frame placed again (a resize), the frames change's re-placement (another xid), back: nothing, with KiCad not holding the keys
+        for (show, prev) in [(board, None), (board, board), (other, board), (board, other), (None, board)] {
+            assert!(!hand_in_now(false, want, show, prev, false), "{show:?} after {prev:?}: no hand-in on an automatic pane");
+        }
+        // the person's click gave KiCad the keys (keys true): a new frame on show gets them, as on any pane
+        assert!(hand_in_now(true, false, other, board, false));
+        // deliberate() (Edit on the automatic pane): want_keys, the frame already on show gets them now
+        assert!(hand_in_now(false, true, board, board, false));
+        // a deliberate open: the first show hands in, as every pane always has
+        assert!(opening_wants_keys(ShowBy::Deliberate) && hand_in_now(false, opening_wants_keys(ShowBy::Deliberate), board, None, false));
+        // a KiCad dialog with the keys keeps them across a re-placement
+        assert!(!hand_in_now(true, true, other, board, true));
+    }
+    /// The reconcile asks again and again for the design on show: one pane, a deliberate ask makes an automatic pane deliberate, and an
+    /// automatic ask never takes a deliberate pane's keyboard state away.
+    #[test] fn a_repeated_attach_for_the_design_on_show_is_one_pane() {
+        use super::{attach_step, ShowBy::*, AttachStep};
+        assert_eq!(attach_step(false, Deliberate, Automatic), AttachStep::New, "another design (or none): a pane");
+        assert_eq!(attach_step(true, Automatic, Automatic), AttachStep::Again);
+        assert_eq!(attach_step(true, Deliberate, Automatic), AttachStep::Again, "an automatic ask on a deliberate pane changes nothing");
+        assert_eq!(attach_step(true, Deliberate, Deliberate), AttachStep::Again, "Edit on its own pane: edit_again, as before");
+        assert_eq!(attach_step(true, Automatic, Deliberate), AttachStep::Promote);
+    }
     #[test] fn macos_hides_kicads_frame_when_the_page_lets_the_editor_go() {
         use super::mac_shown;
         // (show, host_visible, hitbox, in_page, covered, dialog, was_visible)
@@ -2186,6 +2270,8 @@ fn test_holding() -> bool {
 static EDIT_TAB: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 /// An Edit pressed before the viewer knew its file: the thread, and when (kept 60 s).
 static EDIT_PENDING: std::sync::Mutex<Option<(String, std::time::Instant)>> = std::sync::Mutex::new(None);
+/// The kept open's kind (an automatic attach before the viewer had a file stays automatic when it is acted on)
+static EDIT_PENDING_WHY: std::sync::Mutex<ShowBy> = std::sync::Mutex::new(ShowBy::Deliberate);
 /// BACKPLANE_KICAD_DEBUG: each change of what the Edit button says ("edit", "opening", "view"), as drawn (a screenshot's timing cannot
 /// prove the "Opening…" of an early press: Carbon, bp-win key-hold runs, Nov 14).
 pub fn log_edit_label(kind: &str) {
@@ -2327,12 +2413,23 @@ impl crate::Backplane {
         let key = crate::screens::viewer::shown_key(&thread["viewer"]);
         let has = edit_target(&self.data, &key, &crate::keys::project_of(&self.data, &tid)).is_some() && !test_holding();
         match pending_edit_now(pending.as_ref().map(|(t, at)| (t.as_str(), at.elapsed())), &tid, has) {
-            Some(true) => { *EDIT_PENDING.lock().unwrap() = None; self.kicad_edit(cx); }
+            Some(true) => { *EDIT_PENDING.lock().unwrap() = None; let why = *EDIT_PENDING_WHY.lock().unwrap(); self.kicad_open(None, why, cx); }
             Some(false) => { *EDIT_PENDING.lock().unwrap() = None; *EDIT_TAB.lock().unwrap() = None; }
             None => {}
         }
     }
-    pub(crate) fn kicad_edit(&mut self, cx: &mut Context<Self>) -> bool {
+    /// Edit (and every deliberate open: Open in KiCad, a context menu's or the boards menu's Edit, Try again).
+    pub(crate) fn kicad_edit(&mut self, cx: &mut Context<Self>) -> bool { self.kicad_open(None, ShowBy::Deliberate, cx) }
+    /// The thread's design in the embedded KiCad on the design page `open` ("board", "schematic", "3d"), for the rail's reconcile: idempotent
+    /// (this design's pane already here: nothing new; on another of its pages, the rail's press of that page is the frame switch, as a rail
+    /// click is), `why` says whether the person asked for it (`ShowBy`). `generation`: the KiCad session generation the decision was made on, for
+    /// dropping a late answer (not used yet: the hub's `runtime.generation`).
+    pub(crate) fn kicad_attach(&mut self, open: &str, why: ShowBy, generation: Option<u64>, cx: &mut Context<Self>) -> bool {
+        let _ = generation;
+        eprintln!("GPUI_LOG {}", json!({"kicad_attach": open, "why": format!("{why:?}")}));
+        self.kicad_open(Some(open), why, cx)
+    }
+    fn kicad_open(&mut self, page_asked: Option<&str>, why: ShowBy, cx: &mut Context<Self>) -> bool {
         // #1347: KiCad opens over a design page only. From a page with no editor of its own (a context menu's, the boards menu's, a
         // script's, a kept Edit), the design page whose document the project has first, as Simulation and GerbView do; neither: said
         // where the person is (Files' status line) and no KiCad. The Simulator's own page is the Schematic its caller pressed.
@@ -2340,7 +2437,10 @@ impl crate::Backplane {
             let v = &self.data["thread"]["viewer"];
             let now = v["open"].as_str().unwrap_or("").to_string();
             let page = crate::screens::viewer::pressed(&now).unwrap_or(now);
-            match crate::screens::viewer::edit_go(v, &page) {
+            // an attach names its page: there, as a rail press would go (the page shown now otherwise)
+            let (page, asked) = match page_asked { Some(a) if a != page => (page, Some(a)), _ => (page, None) };
+            match crate::screens::viewer::edit_go(v, asked.unwrap_or(&page)) {
+                crate::screens::viewer::EditGo::Here if asked.is_some() => Some((page, asked.unwrap())),
                 crate::screens::viewer::EditGo::Here => None,
                 crate::screens::viewer::EditGo::To(to) => Some((page, to)),
                 crate::screens::viewer::EditGo::Nothing => {
@@ -2364,7 +2464,7 @@ impl crate::Backplane {
             // the viewer has no file yet (its first picture still on the way: bp-win after an update, 8 s to the key, 15 s to the paint):
             // the press is kept and acted on when the picture says what to edit (edit_pending_due); the button says Opening… meanwhile
             if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_edit": "pending", "key": key, "project": pid})); }
-            *EDIT_PENDING.lock().unwrap() = Some((tid.to_string(), std::time::Instant::now()));
+            *EDIT_PENDING.lock().unwrap() = Some((tid.to_string(), std::time::Instant::now())); *EDIT_PENDING_WHY.lock().unwrap() = why;
             self.ui_epoch += 1; cx.notify();
             return false
         };
@@ -2385,11 +2485,15 @@ impl crate::Backplane {
             let pr = p.read(cx);
             // Edit on this design's own pane: if KiCad no longer has the editor it wants (its frame closed and the pane missed the close), it
             // is asked for it again: never an Edit that does nothing
-            if belongs_to(&pr.project, &pr.root, &pr.project_id, &key, &pid) { p.update(cx, |p, cx| if sim { p.open_simulation(cx) } else { p.edit_again(cx) }); return true }
+            match attach_step(belongs_to(&pr.project, &pr.root, &pr.project_id, &key, &pid), pr.why, why) {
+                AttachStep::New => {}
+                AttachStep::Promote => { p.update(cx, |p, cx| { p.deliberate(cx); if sim { p.open_simulation(cx) } else { p.edit_again(cx) } }); return true }
+                AttachStep::Again => { p.update(cx, |p, cx| if sim { p.open_simulation(cx) } else { p.edit_again(cx) }); return true }
+            }
         }
         let (hub, infos, hub_open, sends) = (self.tx.clone(), self.screens.kicad_infos.clone(), open_now.to_string(), self.screens.host_sends.clone());
         self.host_retry_watch(cx);
-        let page = cx.new(move |cx| { let mut p = KicadPane::new(cx, project, root, pid, open, hub_open, hub); p.host_sends = sends; if let Some(v) = infos.values().find(|v| p.matches(v)).cloned() { p.info = v; } if sim { p.override_kind = Some(SIM.into()); } p });
+        let page = cx.new(move |cx| { let mut p = KicadPane::new(cx, project, root, pid, open, hub_open, hub, why); p.host_sends = sends; if let Some(v) = infos.values().find(|v| p.matches(v)).cloned() { p.info = v; } if sim { p.override_kind = Some(SIM.into()); } p });
         // the warm hand-over's end: the page drawn again without the viewer's picture under the pane
         cx.subscribe(&page, |_, _, _: &PaneShown, cx| cx.notify()).detach();
         // the pane's wanted frame changed (strip click, Ctrl+Tab, KiCad's active frame): repaint the rail without calling back into show_kind
