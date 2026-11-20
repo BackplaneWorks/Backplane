@@ -1676,8 +1676,10 @@ def evaluate_extra_checks(
                 for sid, sinfo in (hk_sc.get("sessions") or {}).items():
                     session_actives[sid] = sinfo.get("active")
                     rt = sinfo.get("runtime")
-                    # holder absence must be OBSERVED: a runtime block carrying the `holder` key (null = absent)
-                    if not (isinstance(rt, dict) and "holder" in rt):
+                    # holder absence must be OBSERVED: the hub sends `runtime.holder` only while a window holds the pane
+                    # (kicad/embed.rs: `if let Some(h) = holder_of(..) { v["holder"] = ..}`), so absence of the key counts only inside a
+                    # runtime block the hub really sent (it carries `session`); no runtime block at all is not an observation.
+                    if not (isinstance(rt, dict) and "session" in rt):
                         holder_unobserved.append(str(sid))
                     elif rt.get("holder"):
                         holders.append(f"{sid}:holder={rt.get('holder')}:session={rt.get('session')}")

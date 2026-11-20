@@ -838,9 +838,13 @@ class RailShotsRegressionTests(unittest.TestCase):
             def _info(val):
                 return D._parse_hub_kicad_sessions_output('INFO ' + json.dumps({"key": "editor.kicad.abc", "value": val}) + '\n{"m":"hub.status","ok":true,"result":{"ok":true}}\n')
             self.assertEqual(_sim(_info({"frames": []}))["outcome"], "unavailable")
-            self.assertEqual(_sim(_info({"runtime": {"session": "parked"}, "frames": []}))["outcome"], "unavailable")
+            self.assertEqual(_sim(_info({"runtime": {}, "frames": []}))["outcome"], "unavailable")
+            self.assertEqual(_sim(_info({"runtime": {"holder": None}, "frames": []}))["outcome"], "unavailable")  # no session: not a runtime block the hub reported
+            # the hub omits `holder` when no window holds the pane: a reported runtime block without it is an observed absence
+            self.assertEqual(_sim(_info({"runtime": {"session": "parked", "generation": 1}, "frames": []}))["outcome"], "passed")
+            self.assertEqual(_sim(_info({"runtime": {"session": "live", "holder": 3}, "frames": []}))["outcome"], "failed")
             self.assertEqual(_sim(_info({"runtime": {"holder": None, "session": "parked"}, "frames": []}))["outcome"], "passed")
-            self.assertEqual(_sim({"ok": True, "inventory_complete": True, "sessions": {"e": {"frames": []}}})["outcome"], "unavailable")  # holder unobserved
+            self.assertEqual(_sim({"ok": True, "inventory_complete": True, "sessions": {"e": {"frames": []}}})["outcome"], "unavailable")  # no runtime block
             holder_parked = {"ok": True, "inventory_complete": True, "sessions": {"e": {"runtime": {"holder": "pane", "session": "parked"}, "frames": []}}}
             self.assertEqual(_sim(holder_parked)["outcome"], "failed")  # any holder, not only a live session
             self.assertEqual(_sim(clean_sess, pane={"ok": True, "in_gpui_tree": True, "shown": 7})["outcome"], "failed")
