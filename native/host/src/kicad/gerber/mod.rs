@@ -379,11 +379,11 @@ mod tests {
         std::fs::write(base.join("parent.kicad_pro"), "{}").unwrap();
         std::fs::write(base.join("parent.kicad_pcb"), "(kicad_pcb)").unwrap();
         let bad_cmp = cmp_path(&mfg.to_string_lossy(), &base.join("parent.kicad_pcb").to_string_lossy());
-        assert!(matches!(plot_in(&bad_cmp, Some(&proj)), super::plotgen::Read::Fail(_)), "plot_in must refuse comparison board outside root");
+        assert!(matches!(plot_in(&bad_cmp, Some(&proj)), super::super::plotgen::Read::Fail(_)), "plot_in must refuse comparison board outside root");
         std::fs::write(proj.join("local.kicad_pro"), "{}").unwrap();
         std::fs::write(proj.join("local.kicad_pcb"), "(kicad_pcb)").unwrap();
         let good_cmp = cmp_path(&mfg.to_string_lossy(), &proj.join("local.kicad_pcb").to_string_lossy());
-        assert!(matches!(plot_in(&good_cmp, Some(&proj)), super::plotgen::Read::Plot(_, _)), "plot_in allows comparison board inside root");
+        assert!(matches!(plot_in(&good_cmp, Some(&proj)), super::super::plotgen::Read::Plot(_, _)), "plot_in allows comparison board inside root");
         let _ = std::fs::remove_dir_all(&base);
     }
 }
