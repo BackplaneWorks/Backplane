@@ -198,8 +198,7 @@ class RailShotsRegressionTests(unittest.TestCase):
                 "presses": {"press:task7-sim": [{"id": "rail:Simulation", "found": True}]},
             }
 
-            # Case A: without a completion observer, Task 7 is unavailable ("not measurable until a later KiCad build");
-            # with an observer wired, an open setup dialog is task_failed (0 pts).
+            # Case A: no observer -> unavailable with explicit reason (even if setup dialog opens)
             caps_dialog = {
                 "task7-sim": {"name": "task7-sim", "ok": True, "bytes": 1234, "inspect_ok": True, "obstructed": False, "obstructions": []},
                 "task7-sim-run": {
@@ -207,22 +206,24 @@ class RailShotsRegressionTests(unittest.TestCase):
                     "obstructions": [{"xid": "0x1", "title": "New Simulation Tab", "class": ["kicad.real", "KiCad"]}],
                 },
             }
-            t7a_unavail = next(t for t in P.evaluate_scorecard(outdir, full_parsed, caps_dialog, True, embed=True, embed_actions={"sim-run": {"action": "sim-run", "ok": True, "observer": None}}) if t["task"] == 7)
-            self.assertEqual(t7a_unavail["outcome"], "unavailable")
-            self.assertIn("later KiCad build", t7a_unavail["note"])
-            self.assertFalse(C.score_single_task(t7a_unavail)["scored"])
+            t7a = next(t for t in P.evaluate_scorecard(outdir, full_parsed, caps_dialog, True, embed=True, embed_actions={"sim-run": {"action": "sim-run", "ok": True, "observer": None}}) if t["task"] == 7)
+            self.assertEqual(t7a["outcome"], "unavailable")
+            self.assertEqual(t7a["note"], "not measurable until a later KiCad build (no read of a GUI-started simulation)")
+            self.assertFalse(C.score_single_task(t7a)["scored"])
 
-            t7a = next(t for t in P.evaluate_scorecard(outdir, full_parsed, caps_dialog, True, embed=True, embed_actions={"sim-run": {"action": "sim-run", "ok": True, "observer": "spice_result", "result_evidenced": False}}) if t["task"] == 7)
-            self.assertEqual(t7a["outcome"], "task_failed")
-            self.assertEqual(C.score_single_task(t7a)["points"], 0)
+            # Case A2: observer wired + setup dialog open -> task_failed (0 pts)
+            t7a2 = next(t for t in P.evaluate_scorecard(outdir, full_parsed, caps_dialog, True, embed=True, embed_actions={"sim-run": {"action": "sim-run", "ok": True, "observer": "spice_result"}}) if t["task"] == 7)
+            self.assertEqual(t7a2["outcome"], "task_failed")
+            self.assertEqual(C.score_single_task(t7a2)["points"], 0)
 
-            # Case B: no setup dialog, but no completion observer -> unavailable (unscored, NEVER passed)
+            # Case B: no setup dialog, no completion observer -> unavailable (unscored, NEVER passed)
             caps_clean = {
                 "task7-sim": {"name": "task7-sim", "ok": True, "bytes": 1234, "inspect_ok": True, "obstructed": False, "obstructions": []},
                 "task7-sim-run": {"name": "task7-sim-run", "ok": True, "bytes": 1234, "inspect_ok": True, "obstructed": False, "obstructions": []},
             }
             t7b = next(t for t in P.evaluate_scorecard(outdir, full_parsed, caps_clean, True, embed=True, embed_actions={"sim-run": {"action": "sim-run", "ok": True, "observer": None}}) if t["task"] == 7)
             self.assertEqual(t7b["outcome"], "unavailable")
+            self.assertEqual(t7b["note"], "not measurable until a later KiCad build (no read of a GUI-started simulation)")
             self.assertFalse(C.score_single_task(t7b)["scored"])
 
             # Case C: completion observer reports evidenced result -> passed
@@ -716,6 +717,106 @@ class RailShotsRegressionTests(unittest.TestCase):
         self.assertEqual(ct["coverage_mismatch_tasks"], [1])
         self.assertIsNone(ct["delta"], "common-task delta must be refused when part coverage differs")
         self.assertEqual(ct["common_parts_delta"], 0, "common parts (found, within_budget, result_evidenced) had 0 real delta")
+
+    def test_extra_checks_missing_document_and_edit_from_no_editor(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            outdir = Path(td)
+            kdir = outdir / "schematic-only"
+            for name in ("idle", "board", "schematic", "3d", "gerbers", "split", "mech", "split-after-mech", "files", "diff", "review", "browser",
+                         "extra-missing-board", "extra-missing-3d", "extra-edit-files", "extra-edit-review", "extra-edit-browser"):
+                write_non_flat_png(kdir / f"{name}.png")
+
+            ok_sess = {"ok": True, "inventory_complete": True, "sessions": {"editor.kicad.abc": {"state": "ready", "active": "SCH", "pid": 101, "generation": 1, "frames": [{"kind": "SCH", "shown": False}]}}}
+            frame_changed_sess = {"ok": True, "inventory_complete": True, "sessions": {"editor.kicad.abc": {"state": "ready", "active": "SCH", "pid": 101, "generation": 1, "frames": [{"kind": "PCB", "shown": True}]}}}
+            incomplete_sess = {"ok": True, "inventory_complete": False, "sessions": {}}
+
+            parsed = {
+                "schematic-only": {
+                    "shots": {
+                        "idle": {"state": "ready", "viewer": {"open": "", "rail": [
+                            {"id": "schematic", "state": "off"}, {"id": "files", "state": "off"},
+                            {"id": "review", "state": "off"}, {"id": "browser", "state": "off"},
+                            {"id": "mech", "state": "disabled", "why": "No mechanical parts"},
+                            {"id": "split", "state": "off"},
+                        ]}},
+                        "schematic": {"state": "ready", "viewer": {"open": "schematic"}, "controls_captured": True, "drawn_controls_ids": ["ui:Edit"]},
+                        "files": {"state": "ready", "viewer": {"open": "files"}, "controls_captured": True, "drawn_controls_ids": []},
+                        "review": {"state": "ready", "viewer": {"open": "review"}, "controls_captured": True, "drawn_controls_ids": ["ui:Edit"]},
+                        "browser": {"state": "ready", "viewer": {"open": "browser"}, "controls_captured": False, "drawn_controls_ids": []},
+                        "mech": {"state": "ready", "viewer": {"open": "schematic"}, "controls_captured": True, "drawn_controls_ids": []},
+                        "split": {"state": "ready", "viewer": {"open": "schematic"}, "controls_captured": True, "drawn_controls_ids": []},
+                        # Positive empty state with board's own plot_none; no drawn Edit
+                        "extra-missing-board": {"state": "empty", "viewer": {"open": "board", "plot_none": "No board yet"}, "controls_captured": True, "drawn_controls_ids": []},
+                        # Only solid_note on board would NOT count; on 3d solid_note counts, but here state is ready (fails positive empty check) + ui:Edit drawn + frame changed
+                        "extra-missing-3d": {"state": "ready", "viewer": {"open": "3d", "solid_note": "No board yet"}, "controls_captured": True, "drawn_controls_ids": ["ui:Edit"]},
+                        "extra-edit-files": {"state": "ready", "viewer": {"open": "schematic"}},
+                        "extra-edit-review": {"state": "ready", "viewer": {"open": "schematic"}},
+                        "extra-edit-browser": {"state": "ready", "viewer": {"open": "schematic"}},
+                    },
+                    "settled_tags": {
+                        "extra-edit-files-start": {"kind": "files", "settled": True},
+                        "extra-edit-review-start": {"kind": "review", "settled": True},
+                        "extra-edit-browser-start": {"kind": "browser", "settled": True},
+                    },
+                    "presses": {
+                        "press:extra-edit-files": [{"id": "ui:Edit", "found": True}],
+                        "press:extra-edit-review": [{"id": "ui:Edit", "found": True}],
+                        # Cleanup ui:View delivered under mark does NOT satisfy ui:Edit delivery!
+                        "press:extra-edit-browser": [{"id": "ui:Edit", "found": False}, {"id": "ui:View", "found": True}],
+                    },
+                    "kicad_tags": {
+                        "extra-edit-files-report": {"state": "ready", "in_gpui_tree": True, "shown": 10, "frames": [{"xid": 10, "kind": "SCH", "painted": 20}]},
+                        "extra-edit-review-report": {"state": "ready", "in_gpui_tree": True, "shown": 10, "frames": [{"xid": 10, "kind": "SCH", "painted": 0}]},
+                        "extra-edit-browser-report": {"state": "ready", "in_gpui_tree": True, "shown": 10, "frames": [{"xid": 10, "kind": "SCH", "painted": 20}]},
+                    },
+                }
+            }
+            def mk_cap(obs=False, insp=True, sess=ok_sess):
+                return {"ok": True, "inspect_ok": insp, "obstructed": obs, "obstructions": [{"title": "Dialog"}] if obs else [], "hub_kicad_sessions": sess}
+
+            caps = {
+                "schematic-only": {
+                    "idle": mk_cap(), "board": mk_cap(), "schematic": mk_cap(), "3d": mk_cap(), "gerbers": mk_cap(),
+                    "split": mk_cap(), "mech": mk_cap(), "split-after-mech": mk_cap(), "files": mk_cap(), "diff": mk_cap(),
+                    "review": mk_cap(), "browser": mk_cap(),
+                    "extra-missing-board": mk_cap(),
+                    "extra-missing-3d": mk_cap(sess=frame_changed_sess),
+                    "extra-edit-files": mk_cap(),
+                    "extra-edit-review": mk_cap(),
+                    "extra-edit-browser": mk_cap(),
+                }
+            }
+            res = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["schematic-only"], parsed, caps, embed=True)}
+            # 1. Missing board passes with warm-up session recorded; missing 3d fails (ready, Edit drawn, frames changed)
+            self.assertEqual(res["schematic-only/missing-board"]["outcome"], "passed")
+            self.assertEqual(len(res["schematic-only/missing-board"]["evidence"]["hub_kicad"]["warmup_sessions"]), 1)
+            self.assertEqual(res["schematic-only/missing-3d"]["outcome"], "failed")
+            self.assertIn("Edit/Open in KiCad offered", res["schematic-only/missing-3d"]["note"])
+            self.assertIn("frames=", res["schematic-only/missing-3d"]["note"])
+
+            # 2. No-editor pages: files passes, review fails (ui:Edit drawn), browser unavailable (controls_captured=False),
+            #    mech unavailable (confirmed disabled in rail), split FAILS (enabled in rail yet failed to open!)
+            self.assertEqual(res["schematic-only/no-edit-files"]["outcome"], "passed")
+            self.assertEqual(res["schematic-only/no-edit-review"]["outcome"], "failed")
+            self.assertEqual(res["schematic-only/no-edit-browser"]["outcome"], "unavailable")
+            self.assertEqual(res["schematic-only/no-edit-mech"]["outcome"], "unavailable")
+            self.assertEqual(res["schematic-only/no-edit-split"]["outcome"], "failed")
+            self.assertIn("enabled rail entry 'split' failed to open", res["schematic-only/no-edit-split"]["note"])
+            self.assertEqual(res["schematic-only/has-edit-schematic"]["outcome"], "passed")
+
+            # 3. Scripted edit: files passes (SCH, painted=20), review fails (painted=0), browser unavailable (only ui:View delivered, not ui:Edit)
+            self.assertEqual(res["schematic-only/scripted-edit-files"]["outcome"], "passed")
+            self.assertEqual(res["schematic-only/scripted-edit-review"]["outcome"], "failed")
+            self.assertIn("shown_painted=0", res["schematic-only/scripted-edit-review"]["note"])
+            self.assertEqual(res["schematic-only/scripted-edit-browser"]["outcome"], "unavailable")
+
+            # 4. Incomplete session inventory or failed inspection -> unavailable (never passed)
+            caps["schematic-only"]["extra-missing-board"] = mk_cap(sess=incomplete_sess)
+            res2 = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["schematic-only"], parsed, caps, embed=True)}
+            self.assertEqual(res2["schematic-only/missing-board"]["outcome"], "unavailable")
+            caps["schematic-only"]["extra-missing-board"] = mk_cap(insp=False)
+            res3 = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["schematic-only"], parsed, caps, embed=True)}
+            self.assertEqual(res3["schematic-only/missing-board"]["outcome"], "unavailable")
 
 
 if __name__ == "__main__":

@@ -241,6 +241,48 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
             {"shot": "task7-sim-run"},
         ])
 
+    elif kind in M.EXTRA_MISSING_SHOTS:
+        # Missing-document checks: open the missing page the way an agent's viewer_show does.
+        missing_targets = [("board", "extra-missing-board"), ("3d", "extra-missing-3d")] if kind == "schematic-only" else [("schematic", "extra-missing-schematic")]
+        for view_kind, shot_name in missing_targets:
+            steps.extend([
+                {"mark": f"extra:{shot_name}"},
+                {"viewshow": [view_kind, ""]},
+                {"wait": 800},
+                {"shot": shot_name, "settle": view_kind, "timeout_ms": min(settle_timeout_ms, 8000)},
+            ])
+        if embed:
+            # Scripted Edit from no-editor pages: open Files/Review/Browser and trigger ui:Edit.
+            expected_frame = "SCH" if kind == "schematic-only" else "PCB"
+            for slug, rail_id, settle_kind in M.EXTRA_EDIT_PAGES:
+                shot_name = f"extra-edit-{slug}"
+                steps.extend([
+                    {"mark": f"extra:{shot_name}"},
+                    {"press": rail_id},
+                    {"wait_settled": settle_kind, "tag": f"{shot_name}-start", "timeout_ms": settle_timeout_ms},
+                    {"mark": f"press:{shot_name}"},
+                    {"click": "ui:Edit", "within": 4000},
+                    {"kicad": {"wait_painted": 20000, "kind": expected_frame, "tag": shot_name}},
+                    {"wait": 600},
+                    {"kicad": {"report": True, "tag": f"{shot_name}-report"}},
+                    {"shot": shot_name},
+                    {"mark": f"cleanup:{shot_name}"},
+                    {"click": "ui:View", "within": 4000},
+                    {"wait": 500},
+                ])
+    elif kind in M.NO_DESIGN_KINDS and embed:
+        # Scripted Edit on a project with no KiCad document: must start no KiCad.
+        steps.extend([
+            {"mark": "extra:extra-edit-files"},
+            {"press": "rail:Files"},
+            {"wait_settled": "files", "tag": "extra-edit-files-start", "timeout_ms": settle_timeout_ms},
+            {"mark": "press:extra-edit-files"},
+            {"click": "ui:Edit", "within": 1500},
+            {"wait": 800},
+            {"kicad": {"report": True, "tag": "extra-edit-files-report"}},
+            {"shot": "extra-edit-files"},
+        ])
+
     return steps
 
 
@@ -348,6 +390,64 @@ def trigger_sim_run(disp: str, last_kicad: dict, kind_out: Path) -> None:
         af.write(json.dumps(rec, separators=(",", ":")) + "\n")
 
 
+def query_hub_kicad_sessions(port: str, token_file: str, bun_bin: str) -> dict:
+    """Read `editor.kicad.<digest>` sessions from this run's hub via hub_rpc.mjs.
+
+    Sends a real RPC (`threads.list`) so we only mark `inventory_complete: True` after a confirmed
+    hub round-trip; any RPC error or malformed `editor.kicad.*` INFO line fails closed (`ok: False`).
+    """
+    if not port or not token_file or not bun_bin:
+        return {"ok": False, "inventory_complete": False, "error": "hub_rpc env missing", "sessions": {}}
+    helper = Path(__file__).resolve().parents[1] / "kicad_embed" / "lib" / "hub_rpc.mjs"
+    if not helper.exists():
+        return {"ok": False, "inventory_complete": False, "error": f"hub_rpc helper missing: {helper}", "sessions": {}}
+    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+    try:
+        out = subprocess.check_output(
+            [bun_bin, str(helper), str(port), token_file, '[{"m":"threads.list","p":{}}]'],
+            env=env, text=True, stderr=subprocess.PIPE, timeout=10,
+        )
+    except Exception as e:
+        return {"ok": False, "inventory_complete": False, "error": str(e), "sessions": {}}
+    rpc_ok = False
+    sessions: dict[str, dict] = {}
+    for line in out.splitlines():
+        if line.startswith("INFO "):
+            try:
+                obj = json.loads(line[5:])
+            except Exception as e:
+                return {"ok": False, "inventory_complete": False, "error": f"malformed INFO json: {e}", "sessions": {}}
+            key = obj.get("key") or ""
+            if not key.startswith("editor.kicad."):
+                continue
+            val = obj.get("value")
+            if not isinstance(val, dict):
+                return {"ok": False, "inventory_complete": False, "error": f"non-object session value for {key}", "sessions": {}}
+            rt = val.get("runtime") if isinstance(val.get("runtime"), dict) else {}
+            frames = [
+                {"kind": f.get("kind"), "shown": bool(f.get("shown"))}
+                for f in (val.get("frames") or [])
+                if isinstance(f, dict)
+            ]
+            sessions[key] = {
+                "state": val.get("state"),
+                "active": val.get("active"),
+                "pid": val.get("pid"),
+                "generation": rt.get("generation", val.get("generation")),
+                "frames": frames,
+            }
+        elif line.startswith("{"):
+            try:
+                rep = json.loads(line)
+                if rep.get("m") == "threads.list" and rep.get("ok") is True:
+                    rpc_ok = True
+            except Exception:
+                pass
+    if not rpc_ok:
+        return {"ok": False, "inventory_complete": False, "error": "hub_rpc did not confirm threads.list reply", "sessions": {}}
+    return {"ok": True, "inventory_complete": True, "sessions": sessions}
+
+
 def watch_and_capture(disp: str, client_log: Path, shot_dir: Path, kind_out: Path, stop_flag: Path) -> int:
     """Tail client_log for shot-ready markers, capture with `import -window root`, touch <name>.done."""
     captures_path = kind_out / "captures.jsonl"
@@ -399,6 +499,13 @@ def watch_and_capture(disp: str, client_log: Path, shot_dir: Path, kind_out: Pat
                     except Exception as e:
                         err = str(e)
                     obstructions, inspect_ok, inspect_error = detect_obstructions(disp)
+                    hub_sessions = None
+                    if not name.endswith("-300ms"):
+                        hub_sessions = query_hub_kicad_sessions(
+                            os.environ.get("RAIL_HUB_PORT", ""),
+                            os.environ.get("RAIL_HUB_TOKEN_FILE", ""),
+                            os.environ.get("RAIL_BUN_BIN", ""),
+                        )
                     rec = {
                         "name": name,
                         "path": str(out_png),
@@ -409,6 +516,7 @@ def watch_and_capture(disp: str, client_log: Path, shot_dir: Path, kind_out: Pat
                         "inspect_error": inspect_error,
                         "obstructed": len(obstructions) > 0,
                         "obstructions": obstructions,
+                        "hub_kicad_sessions": hub_sessions,
                         "state": ev.get("state", ""),
                         "settled": ev.get("settled", False),
                     }

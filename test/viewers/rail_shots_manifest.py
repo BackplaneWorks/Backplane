@@ -72,6 +72,31 @@ B1_ENTRIES = [
 
 B1_OMITTED_ENTRIES = ["simulation", "terminal", "commands"]
 
+# Extra check shots for partial-design kinds (missing document + edit from no-editor pages).
+EXTRA_MISSING_SHOTS = {
+    "schematic-only": ["extra-missing-board", "extra-missing-3d"],
+    "board-only": ["extra-missing-schematic"],
+}
+
+EXTRA_EDIT_PAGES = [
+    ("files", "rail:Files", "files"),
+    ("review", "rail:Review", "review"),
+    ("browser", "rail:Browser", "browser"),
+]
+
+EXTRA_EDIT_SHOTS = [f"extra-edit-{slug}" for slug, _, _ in EXTRA_EDIT_PAGES]
+
+NO_EDITOR_CHECK_PAGES = ["files", "review", "browser", "mech", "split"]
+
+PRESENT_DESIGN_EDIT_PAGES = {
+    "schematic-only": ["schematic"],
+    "board-only": ["board", "3d"],
+}
+
+NO_DESIGN_KINDS = {"no-design", "mech-only"}
+
+KICAD_DOCUMENT_KINDS = {"full", "board-only", "schematic-only"}
+
 
 def contact_shots() -> list[str]:
     """Ordered shot slugs shown in each kind's contact sheet."""
@@ -122,6 +147,12 @@ def expected_shots(kind: str, embed: bool = False, schema: int = 3) -> list[str]
             shots.append(f"task3-from-{src_slug}")
         if embed:
             shots.extend(EMBED_SHOTS)
+    elif kind in EXTRA_MISSING_SHOTS:
+        shots.extend(EXTRA_MISSING_SHOTS[kind])
+        if embed:
+            shots.extend(EXTRA_EDIT_SHOTS)
+    elif kind in NO_DESIGN_KINDS and embed:
+        shots.append("extra-edit-files")
     return shots
 
 
