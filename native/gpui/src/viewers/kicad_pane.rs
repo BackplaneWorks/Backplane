@@ -647,6 +647,8 @@ pub struct KicadPane {
     /// #1345: the pane off screen because the person moved away (another thread, the viewer closed or replaced), told to the hub once
     /// settled (`LeaveState`)
     leave: LeaveState,
+    /// the thread whose page last held this pane on screen (ui.rs): a leave from another thread is a thread switch, not the viewer's
+    pub page_thread: String,
     /// macOS: KiCad's frame is not above our window by the window server's own list though we ordered ours below it (the Mac mini gate,
     /// Nov 16: a 1900 pt window on a 1920 pt display, the pane blank with the frame behind ours): the tries, since when, and whether the
     /// bound passed, when the pane says so and offers Pop out rather than staying blank
@@ -969,7 +971,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { born: std::time::Instant::now(), edit_key: asked_key(!deferred_open(), trigger_key()), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, leave: LeaveState::default(), mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_press: None, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None, last_place: None, screen_key: None,
+        KicadPane { born: std::time::Instant::now(), edit_key: asked_key(!deferred_open(), trigger_key()), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, page_thread: String::new(), leave: LeaveState::default(), mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_press: None, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None, last_place: None, screen_key: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, remounts: None, unshown_since: None, unshown_asks: 0, reattached_for: None, adrift_held_at: None, override_kind: None, pending_show: None, chosen_at: 0, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, generation: None, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0, opening_timer: Arc::default() }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
@@ -2037,6 +2039,7 @@ impl KicadPane {
     /// that waits on KiCad.
     pub fn set_in_page(&mut self, in_page: bool, why: &'static str, cx: &mut Context<Self>) {
         self.in_page = in_page;
+        if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_in_page": in_page, "why": why, "project": self.project})); }
         match self.leave.on(in_page, why, std::time::Instant::now()) {
             Some(s) => self.send_leave(s),
             None if !in_page => { cx.spawn(async move |this, cx| { cx.background_executor().timer(LEAVE_SETTLE).await; let _ = this.update(cx, |p, _| if let Some(s) = p.leave.due(std::time::Instant::now()) { p.send_leave(s) }); }).detach(); }
