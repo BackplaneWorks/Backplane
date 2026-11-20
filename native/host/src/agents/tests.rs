@@ -1963,51 +1963,69 @@ async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_
 #[cfg(test)] mod checkpoint;
 #[cfg(test)] mod snapguard;
 
+/// A desktop of the new protocol answering the hub's push for `T1`: what it does with the token (`applied`: it answered `view-show`; `refuse`: its reason) and the report it then makes.
+fn desktop(hub: &std::sync::Arc<crate::hub::Hub>, client: u64, applied: bool, refuse: Option<&'static str>, report: Value) -> tokio::task::JoinHandle<()> {
+    let mut c = hub.attach(hub.fresh_client());
+    tokio::spawn(async move {
+        while let Some(o) = c.recv().await {
+            if let crate::hub::Out::Value(f) = o { if f["t"] == "view" && f["thread"] == T1 {
+                let tok = f["token"].as_str().expect("the push carries a token").to_string();
+                if let Some(why) = refuse { crate::present::viewer::test_refuse(&tok, client, why) }
+                if applied { crate::present::viewer::test_applied(&tok, client) }
+                if !report.is_null() { crate::files::kicad::watch::viewer_report_from(client, T1, report.clone()) }
+                break } }
+        }
+    })
+}
+
 #[tokio::test(flavor = "multi_thread")] async fn viewer_show_answers_with_what_the_viewer_then_shows() {
     let sd = dir("vs-bin"); perf_standin(&sd, 1);
     let (hub, ag, _h, _w) = start("vs", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await;
-    // a client that reports in time: the answer carries its state, settled. It reports when the hub's `view` frame reaches it, not after a time
     let cwd = ag.world().await.cwd(T1); std::fs::create_dir_all(std::path::Path::new(&cwd).join("mech")).unwrap(); std::fs::write(std::path::Path::new(&cwd).join("mech/a.step"), "ISO-10303-21;").unwrap();
-    let mut client = hub.attach(hub.fresh_client());
-    let late = tokio::spawn(async move { while let Some(o) = client.recv().await { if let crate::hub::Out::Value(f) = o { if f["t"] == "view" && f["thread"] == T1 { break } } } crate::files::kicad::watch::viewer_report(T1, json!({"open": "mech", "part": "mech/a.step", "selection": null})); });
-    let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"viewer_show","arguments":{"kind":"mech","path":"mech/a.step"}})).await; late.await.unwrap();
-    let t = tool_text(&r); assert_eq!(t["settled"], true); assert_eq!(t["viewer"]["part"], "mech/a.step"); assert_eq!(t["shown"], "mech/a.step");
-    // a client that says nothing: the last report, marked unsettled
-    let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"viewer_show","arguments":{"kind":"board","path":""}})).await;
-    let t = tool_text(&r); assert_eq!(t["settled"], false); assert_eq!(t["viewer"]["open"], "mech");
-    // a client reporting missing kind/open or empty key for a named source must NOT count as settled
-    let mut c2 = hub.attach(hub.fresh_client());
-    let bad = tokio::spawn(async move {
-        while let Some(o) = c2.recv().await {
-            if let crate::hub::Out::Value(f) = o { if f["t"] == "view" && f["thread"] == T1 { break } }
-        }
-        crate::files::kicad::watch::viewer_report(T1, json!({"open": "mech", "key": ""}));
-    });
-    let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"viewer_show","arguments":{"kind":"mech","path":"mech/a.step"}})).await;
-    bad.await.unwrap();
-    let t = tool_text(&r); assert_eq!(t["settled"], false, "empty key must NOT count as settled: {t}");
-    // the picture already shows what is asked: settled at once, with no newer report (a repeated identical show)
-    crate::files::kicad::watch::viewer_report(T1, json!({"open": "mech", "part": "mech/a.step", "key": ""}));
-    let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"viewer_show","arguments":{"kind":"mech","path":"mech/a.step"}})).await;
-    let t = tool_text(&r); assert_eq!(t["settled"], true, "already showing settles: {t}");
-    // a desktop that refuses the show (a KiCad dialog is open) gives the agent its reason, not a timeout
     std::fs::write(std::path::Path::new(&cwd).join("a.kicad_pcb"), "(kicad_pcb)").unwrap();
-    let mut c3 = hub.attach(hub.fresh_client());
-    let refuse = tokio::spawn(async move {
-        while let Some(o) = c3.recv().await {
-            if let crate::hub::Out::Value(f) = o { if f["t"] == "view" && f["thread"] == T1 {
-                assert_eq!(f["kind"], "board"); assert!(f["path"].as_str().unwrap().ends_with("a.kicad_pcb"), "the push names the kind and the whole path: {f}");
-                crate::present::viewer::test_refuse(f["token"].as_str().expect("the push carries a token"), "KiCad has a dialog open"); break } }
-        }
-    });
+    let show = |k: &'static str, p: &'static str| { let ag = ag.clone(); async move { let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"viewer_show","arguments":{"kind":k,"path":p}})).await; r } };
+    // a desktop that applied the token and reports what it shows: settled
+    let d = desktop(&hub, 11, true, None, json!({"open": "mech", "part": "mech/a.step", "key": "", "report": 2}));
+    let r = show("mech", "mech/a.step").await; d.await.unwrap();
+    let t = tool_text(&r); assert_eq!(t["settled"], true); assert_eq!(t["viewer"]["part"], "mech/a.step"); assert_eq!(t["shown"], "mech/a.step");
+    // a desktop that says nothing: the last report, unsettled (its report is not of an applied token)
+    let r = show("board", "").await; let t = tool_text(&r); assert_eq!(t["settled"], false); assert_eq!(t["viewer"]["open"], "mech");
+    // a report with an empty key for a named source never settles, applied or not
+    let d = desktop(&hub, 11, true, None, json!({"open": "mech", "key": "", "report": 2}));
+    let r = show("mech", "mech/a.step").await; d.await.unwrap();
+    assert_eq!(tool_text(&r)["settled"], false, "an empty part must not settle: {r}");
+    // the picture already shows what is asked: the desktop answers the token and it settles at once (a repeated identical show)
+    crate::files::kicad::watch::viewer_report_from(11, T1, json!({"open": "mech", "part": "mech/a.step", "key": "", "report": 2}));
+    let d = desktop(&hub, 11, true, None, Value::Null);
     let started = std::time::Instant::now();
-    let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"viewer_show","arguments":{"kind":"board","path":"a.kicad_pcb"}})).await;
-    refuse.await.unwrap();
+    let r = show("mech", "mech/a.step").await; d.await.unwrap();
+    assert_eq!(tool_text(&r)["settled"], true, "already showing settles: {r}"); assert!(started.elapsed() < std::time::Duration::from_millis(1500));
+    // a matching report of a client that did not apply the token is not settled
+    let r = show("mech", "mech/a.step").await;
+    assert_eq!(tool_text(&r)["settled"], false, "no session applied this token: {r}");
+    // two desktops with different outcomes: one applied and shows it, the other's dialog refused: the agent is told the reason, with settled as observed
+    let refusing = desktop(&hub, 12, false, Some("KiCad has a dialog open"), Value::Null);
+    let applying = desktop(&hub, 11, true, None, json!({"open": "mech", "part": "mech/a.step", "key": "", "report": 2}));
+    let started = std::time::Instant::now();
+    let r = show("mech", "mech/a.step").await; refusing.await.unwrap(); applying.await.unwrap();
     assert!(started.elapsed() < std::time::Duration::from_millis(2500), "a refusal does not wait out the time");
     assert_eq!(r["result"]["isError"], true, "{r}"); assert!(tool_text(&r).to_string().contains("KiCad has a dialog open"), "{r}");
+    // a refusal alone is the answer, the push naming the kind and the whole path
+    let mut c3 = hub.attach(hub.fresh_client());
+    let only = tokio::spawn(async move { while let Some(o) = c3.recv().await { if let crate::hub::Out::Value(f) = o { if f["t"] == "view" && f["thread"] == T1 {
+        assert_eq!(f["kind"], "board"); assert!(f["path"].as_str().unwrap().ends_with("a.kicad_pcb"), "{f}");
+        crate::present::viewer::test_refuse(f["token"].as_str().unwrap(), 13, "KiCad has a dialog open"); break } } } });
+    let r = show("board", "a.kicad_pcb").await; only.await.unwrap();
+    assert_eq!(r["result"]["isError"], true, "{r}"); assert!(tool_text(&r).to_string().contains("KiCad has a dialog open"), "{r}");
+    // an older desktop (no `report` field in its report) answers plain `view`, never a token: read back as on main, a newer report in the frame, even for
+    // a named Split whose pane keys it cannot report
+    let cwd_s = cwd.clone();
+    let old = desktop(&hub, 14, false, None, json!({"open": "split", "key": format!("split|{cwd_s}|")}));
+    let r = show("split", "a.kicad_pcb").await; old.await.unwrap();
+    assert_eq!(tool_text(&r)["settled"], true, "an older desktop's report settles as on main: {r}");
     // a model that is not there, or a file Mech has no page for, is refused, not acknowledged while another part shows (issue 1102)
     for (k, p) in [("mech", "mech/gone.step"), ("mech", "notes.md"), ("teapot", "")] {
-        let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"viewer_show","arguments":{"kind":k,"path":p}})).await;
+        let r = show(k, p).await;
         assert_eq!(r["result"]["isError"], true, "{k} {p}: {r}");
     }
 }

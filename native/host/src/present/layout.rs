@@ -1433,10 +1433,17 @@ pub fn viewer_show(
     if !is_relative_source(&source) {
         return Err(Refusal::InvalidSource);
     }
+    // a show that names a source makes its tile explicit: the tile draws the file named, not the project's default
+    let named = !source.is_empty();
+    let mark = |l: Layout, id: &str| -> Layout {
+        if !named { return l }
+        let root = l.root.as_ref().and_then(|r| map_tile(r, id, &|t| Tile { explicit: true, ..t.clone() }));
+        Layout { root: root.or(l.root.clone()), ..l }
+    };
     if let Some(existing) = layout.tiles().into_iter().find(|t| t.kind == kind) {
         let id = existing.id.clone();
-        let updated = if !source.is_empty() && source != existing.source {
-            retarget(layout, &id, kind, source, locked)?
+        let updated = if named && (source != existing.source || !existing.explicit) {
+            mark(retarget(layout, &id, kind, source, locked)?, &id)
         } else {
             layout.clone()
         };
@@ -1449,17 +1456,41 @@ pub fn viewer_show(
         return Ok(next);
     }
     if let Some(fid) = layout.focus.as_deref() {
-        return retarget(layout, fid, kind, source, locked);
+        let fid = fid.to_string();
+        return Ok(mark(retarget(layout, &fid, kind, source, locked)?, &fid));
     }
     Layout::single(Tile {
         id: layout.next_tile_id(),
         kind,
         source,
-        explicit: false,
+        explicit: named,
         version: None,
         unresolved_version: false,
         overlay: None,
     })
+}
+
+/// An agent's Split show over a stored layout: never discards the person's tiles. The layout already holding a Board and a Schematic of the
+/// source (a source of "" is any) is satisfied by focusing the Board; otherwise the missing one is added beside the focused tile (through
+/// `can_add` and the lock); a refusal says why. `board` and `sch` are root-relative sources ("" for the project's own).
+pub fn show_split(layout: &Layout, board: &str, sch: &str, client_has_kicad_tile: bool, locked: Option<&str>) -> Result<Layout, Refusal> {
+    if !is_relative_source(board) || !is_relative_source(sch) {
+        return Err(Refusal::InvalidSource);
+    }
+    let holds = |l: &Layout, kind: PageKind, src: &str| l.tiles().into_iter().find(|t| t.kind == kind && t.version.is_none() && t.overlay.is_none() && (src.is_empty() || t.source == src)).map(|t| t.id.clone());
+    let mut next = layout.clone();
+    for (kind, src) in [(PageKind::Board, board), (PageKind::Schematic, sch)] {
+        if holds(&next, kind, src).is_some() { continue }
+        can_add(&next, kind, client_has_kicad_tile)?;
+        let tile = Tile { id: next.next_tile_id(), kind, source: src.to_string(), explicit: !src.is_empty(), version: None, unresolved_version: false, overlay: None };
+        let anchor = next.focus.clone();
+        next = add(&next, anchor.as_deref(), Side::Right, tile, client_has_kicad_tile, locked)?;
+    }
+    let id = holds(&next, PageKind::Board, board).ok_or(Refusal::NotFound)?;
+    next.focus = Some(id.clone());
+    if next.maximized.as_deref() != Some(id.as_str()) { next.maximized = None; }
+    check_lock_preserved(layout, &next, locked)?;
+    Ok(next)
 }
 
 /// Verify all structural invariants of a layout.

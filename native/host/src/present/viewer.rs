@@ -1337,7 +1337,7 @@ pub enum LayoutOut {
 /// `TOKEN_LIFE` after it was issued; several sessions on a thread may each apply one broadcast once. The table is bounded.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ShowOutcome { Pending, Applied, Refused(String) }
-struct ShowRec { thread: String, kind: String, path: String, issued: std::time::Instant, applied_by: std::collections::HashSet<u64>, outcome: ShowOutcome }
+struct ShowRec { thread: String, kind: String, path: String, issued: std::time::Instant, applied_by: std::collections::HashSet<u64>, outcomes: std::collections::HashMap<u64, ShowOutcome> }
 struct Shows { next: u64, recs: std::collections::BTreeMap<u64, ShowRec>, newest: std::collections::HashMap<String, u64> }
 /// How long a pushed show can still be applied.
 pub const TOKEN_LIFE: std::time::Duration = std::time::Duration::from_secs(20);
@@ -1352,7 +1352,7 @@ pub fn issue_show(thread: &str, kind: &str, path: &str) -> String { issue_show_a
 fn issue_show_at(thread: &str, kind: &str, path: &str, at: std::time::Instant) -> String {
     let mut m = shows_map().lock().unwrap_or_else(|e| e.into_inner());
     let n = m.next; m.next += 1;
-    m.recs.insert(n, ShowRec { thread: thread.into(), kind: kind.into(), path: path.into(), issued: at, applied_by: Default::default(), outcome: ShowOutcome::Pending });
+    m.recs.insert(n, ShowRec { thread: thread.into(), kind: kind.into(), path: path.into(), issued: at, applied_by: Default::default(), outcomes: Default::default() });
     m.newest.insert(thread.to_string(), n);
     // bounded: what expired goes, then the oldest beyond the cap
     let now = std::time::Instant::now();
@@ -1363,10 +1363,15 @@ fn issue_show_at(thread: &str, kind: &str, path: &str, at: std::time::Instant) -
     m.newest.retain(|_, n| live.contains(n));
     format!("show-{n}")
 }
-/// What desktops' `view-show` did with the token (Pending until one answers).
-pub fn show_outcome(token: &str) -> ShowOutcome {
+/// A refusal any session recorded for the token (its reason), if there is one: the agent is told it whatever else was seen.
+pub fn show_refusal_of(token: &str) -> Option<String> {
     let m = shows_map().lock().unwrap_or_else(|e| e.into_inner());
-    token_id(token).and_then(|n| m.recs.get(&n)).map_or(ShowOutcome::Pending, |r| r.outcome.clone())
+    token_id(token).and_then(|n| m.recs.get(&n)).and_then(|r| r.outcomes.values().find_map(|o| if let ShowOutcome::Refused(w) = o { Some(w.clone()) } else { None }))
+}
+/// Whether `client` applied the token (it has an outcome from that session, and it was not a refusal).
+pub fn show_applied_by(token: &str, client: u64) -> bool {
+    let m = shows_map().lock().unwrap_or_else(|e| e.into_inner());
+    token_id(token).and_then(|n| m.recs.get(&n)).is_some_and(|r| r.outcomes.get(&client) == Some(&ShowOutcome::Applied))
 }
 /// Whether `session` (a client) may apply `token` now, and if so mark it applied: the hub's, for this thread with this kind and path, the thread's
 /// newest, unexpired, and not applied by this session before.
@@ -1379,19 +1384,23 @@ fn take_token(token: &str, thread: &str, kind: &str, path: &str, session: u64, n
     r.applied_by.insert(session);
     true
 }
-fn record_outcome(token: &str, out: ShowOutcome) {
+/// The outcome of `session`'s answer (kept per session: a refusal by one is never hidden by another's success).
+fn record_outcome(token: &str, session: u64, out: ShowOutcome) {
     let mut m = shows_map().lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(r) = token_id(token).and_then(|n| m.recs.get_mut(&n)) { if r.outcome != ShowOutcome::Applied { r.outcome = out } }
+    if let Some(r) = token_id(token).and_then(|n| m.recs.get_mut(&n)) { r.outcomes.insert(session, out); }
 }
 /// (tests) a desktop's refusal of a token, as `view_show_token` records it.
 #[cfg(test)]
-pub fn test_refuse(token: &str, why: &str) { record_outcome(token, ShowOutcome::Refused(why.into())) }
+pub fn test_refuse(token: &str, session: u64, why: &str) { record_outcome(token, session, ShowOutcome::Refused(why.into())) }
 /// (tests) a token issued at a given time.
 #[cfg(test)]
 pub fn issue_show_at_for_test(thread: &str, kind: &str, path: &str, at: std::time::Instant) -> String { issue_show_at(thread, kind, path, at) }
 /// (tests) how many tokens the table holds.
 #[cfg(test)]
 pub fn shows_len_for_test() -> usize { shows_map().lock().unwrap_or_else(|e| e.into_inner()).recs.len() }
+/// (tests) a desktop's answer applying a token.
+#[cfg(test)]
+pub fn test_applied(token: &str, session: u64) { record_outcome(token, session, ShowOutcome::Applied) }
 /// The frame the hub pushes to every desktop for an agent's show.
 pub fn show_push(thread: &str, kind: &str, shown: &str) -> Value {
     json!({"t":"view","thread":thread,"path":shown,"kind":kind,"token":issue_show(thread, kind, shown)})
@@ -1405,10 +1414,11 @@ pub fn view_show_token(st: &State, hub: &str, session: &Value, client_id: Option
 fn view_show_token_at(st: &State, hub: &str, session: &Value, client_id: Option<u64>, locale: &str, kind: &str, path: &str, token: &str, now: std::time::Instant) -> Option<LayoutOut> {
     let sel = s(session, "sel");
     if !take_token(token, sel, kind, path, client_id.unwrap_or(0), now) { return Some(LayoutOut::Ok(ViewOut { patch: json!({}), before: vec![], boards_look: false })) }
+    let who = client_id.unwrap_or(0);
     let out = viewer_show_action(st, hub, session, client_id, locale, kind, path);
     match &out {
-        Some(LayoutOut::Ok(_)) => record_outcome(token, ShowOutcome::Applied),
-        Some(LayoutOut::Refused { text, .. }) => record_outcome(token, ShowOutcome::Refused(text.to_string())),
+        Some(LayoutOut::Ok(_)) => record_outcome(token, who, ShowOutcome::Applied),
+        Some(LayoutOut::Refused { text, .. }) => record_outcome(token, who, ShowOutcome::Refused(text.to_string())),
         None => {}
     }
     out
@@ -1429,7 +1439,7 @@ pub fn show_kind(kind: &str, path: &str) -> String {
 }
 /// The project's own board, schematic and newest Gerber set (absolute; "" for none): what a show or a report with no source stands for.
 #[derive(Clone, Debug, Default)]
-pub struct ShowDefaults { pub pcb: String, pub sch: String, pub set: String }
+pub struct ShowDefaults { pub root: String, pub pcb: String, pub sch: String, pub set: String }
 /// What a show asks of the viewer: the page and its source (an absolute file; a Mech part's path from the root; a Files folder from the root;
 /// "" for a page with no source). A named file the Files tab previews is the page `file` (the preview kinds), not `files`.
 #[derive(Clone, Debug, PartialEq)]
@@ -1475,6 +1485,10 @@ pub fn show_settled(want: &ShowWant, report: &Value, d: &ShowDefaults) -> bool {
         "gerbers" => open == "board" && gerbers,
         "board" => open == "board" && !gerbers,
         "file" => matches!(open, "image" | "pdf" | "text"),
+        // no folder named: any Files-family page (a preview that was already open is the show's no-op)
+        "files" if want.source.is_empty() => matches!(open, "files" | "image" | "pdf" | "text"),
+        // a stored layout reports its tiles, and its page is the focused tile's: Split is read off the tiles
+        "split" if report["tiles"].is_array() => true,
         k => !open.is_empty() && open == k,
     };
     if !kind_ok { return false }
@@ -1490,6 +1504,12 @@ pub fn show_settled(want: &ShowWant, report: &Value, d: &ShowDefaults) -> bool {
         // Split settles on the board its panes draw: the pane keyed `0|`, not the Split's own key
         "split" => {
             if want.source.is_empty() { return false }
+            // a stored layout is reported by its tiles ("kind\tsource", the source from the project's root): it holds the Board (and Schematic) asked for
+            if let Some(tiles) = report["tiles"].as_array() {
+                let rel = rel_in(&d.root, &want.source);
+                let holds = |kind: &str| tiles.iter().filter_map(Value::as_str).any(|t| t.split_once('\t').is_some_and(|(k, s)| k == kind && (s == rel)));
+                return holds("board") && tiles.iter().filter_map(Value::as_str).any(|t| t.starts_with("schematic\t"));
+            }
             let pane = report["panes"].as_array().and_then(|ps| ps.iter().filter_map(Value::as_str).find(|k| k.starts_with("0|")));
             resolved(pane.and_then(path_of), "board").is_some_and(|have| !have.is_empty() && have == want.source)
         }
@@ -2587,12 +2607,20 @@ pub fn viewer_show_action(
     let drafts = &session["drafts"];
     let rel = layout::sanitize_rel(&root, path);
     if let Some(cur) = parse_stored_layout(drafts, sel) {
-        // Split is not a tile kind: with a stored layout it is main's Split writer (guarded like every other transition), which ends the layout
-        let Some(pk) = pk else {
-            return if nk == "split" { view_action_for(st, hub, session, client_id, locale, "split", 0) } else { None };
-        };
         let picked_abs = board_file("board", &root, &chosen_board(drafts, sel, &root));
         let guard = hub_kicad_guard(&cur, &root, &picked_abs, client_id, None, None, linked);
+        // Split is not a tile kind: over a stored layout an agent's Split show never discards the person's tiles. A layout already holding the
+        // Board and the Schematic of that source is focused on its Board; otherwise the missing one is added beside; else it is refused with why.
+        if nk == "split" {
+            let l = path.to_ascii_lowercase();
+            let board = if l.ends_with(".kicad_pcb") || l.ends_with(".pcbdoc") { rel.clone() } else { String::new() };
+            let sch = if board.is_empty() { String::new() } else { schematic_for_board(&board) };
+            return Some(match layout::show_split(&cur, &board, &sch, guard.client_has_kicad, guard.locked.as_deref()) {
+                Err(r) => LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) },
+                Ok(next) => LayoutOut::Ok(commit_layout(st, hub, session, sel, &root, &next, false)),
+            });
+        }
+        let Some(pk) = pk else { return None };
         return Some(match layout::viewer_show(&cur, pk, rel, guard.locked.as_deref()) {
             Err(r) => LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) },
             Ok(next) => LayoutOut::Ok(commit_layout(st, hub, session, sel, &root, &next, false)),
@@ -2638,10 +2666,24 @@ pub fn viewer_show_action(
         let abs = if path.is_empty() { String::new() } else { trim_end(&abs_of(&root, path)) };
         let mut base = session.clone();
         let mut extra = serde_json::Map::new();
+        let mut owned = false; // (a linked thread: the schematic is the one its owning board shows)
         match nk.as_str() {
             "board" | "3d" | "split" if pcb_path && !rel.is_empty() => {
                 let own = s(&session["info"], &format!("fab.board:{sel}")) == rel;
                 extra.insert(format!("@view.board:{sel}"), json!(if own { "" } else { rel.as_str() }));
+            }
+            // the schematic shown owns its board: the pick is that board (the project's own is no pick), whatever board was picked before
+            "schematic" if sch_path && !rel.is_empty() => {
+                let owner = rel.strip_suffix(".kicad_sch").map(|s| format!("{s}.kicad_pcb"));
+                let own_board = s(&session["info"], &format!("fab.board:{sel}"));
+                // the board that owns the schematic: a file of this folder, or (a thread of another machine) one of that project's boards as listed
+                let boards = s(&session["info"], &format!("fab.boards:{sel}"));
+                let known = |o: &str| if linked { boards.lines().any(|l| l == o) } else { std::path::Path::new(&abs_of(&root, o)).is_file() };
+                let pick = match owner {
+                    Some(o) if known(&o) => { owned = linked; if o == own_board { String::new() } else { o } }
+                    _ => String::new(),
+                };
+                extra.insert(format!("@view.board:{sel}"), json!(pick));
             }
             "gerbers" if !abs.is_empty() => {
                 extra.insert(format!("@view.gerbers:{sel}"), json!("1"));
@@ -2657,13 +2699,29 @@ pub fn viewer_show_action(
         };
         if let Some(mut vo) = legacy_view_inner(st, hub, &base, &wire, 0, true) {
             if let Some(dm) = vo.patch["drafts"].as_object_mut() { for (k, v) in &extra { dm.entry(k.clone()).or_insert(v.clone()); } }
-            // a named sheet other than the project's own schematic is the schematic's sheet (main's `sheet_action`, guarded the same way)
-            if nk == "schematic" && sch_path && !linked && abs != crate::files::kicad::project::read(&root).sch {
-                let mut after = base.clone(); patch::merge(&mut after, &vo.patch);
-                match sheet_action_for(st, hub, &after, client_id, locale, &abs) {
-                    Some(LayoutOut::Ok(v2)) => { patch::merge(&mut vo.patch, &v2.patch); vo.before.extend(v2.before); }
-                    Some(refused @ LayoutOut::Refused { .. }) => return Some(refused),
-                    None => {}
+            // a named sheet other than the schematic the picked board shows is the schematic's sheet (main's `sheet_action`, guarded the same way);
+            // on a thread of another machine the sheet goes to that machine (`on`)
+            if nk == "schematic" && sch_path {
+                let shown = vo.patch["drafts"][format!("@view.file:{sel}")].as_str().unwrap_or("").to_string();
+                let shown = if shown.is_empty() { if linked { String::new() } else { crate::files::kicad::project::read(&root).sch } } else { shown };
+                if abs != shown && !owned {
+                    let mut after = base.clone(); patch::merge(&mut after, &vo.patch);
+                    match sheet_action_for(st, hub, &after, client_id, locale, &abs) {
+                        Some(LayoutOut::Ok(v2)) => {
+                            patch::merge(&mut vo.patch, &v2.patch);
+                            for mut c in v2.before {
+                                if linked {
+                                    if let Some(txt) = c["text"].as_str().and_then(|x| serde_json::from_str::<Value>(x).ok()) {
+                                        let mut m = txt; m["p"]["on"] = json!(sel.split('~').next().unwrap_or(""));
+                                        c["text"] = json!(m.to_string());
+                                    }
+                                }
+                                vo.before.push(c);
+                            }
+                        }
+                        Some(refused @ LayoutOut::Refused { .. }) => return Some(refused),
+                        None => {}
+                    }
                 }
             }
             return Some(LayoutOut::Ok(vo));

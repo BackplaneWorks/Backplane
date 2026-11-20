@@ -659,6 +659,10 @@ pub fn state_json(v: &serde_json::Value, card: Option<&super::plot::Card>, lit: 
         "selection": card.map(|c| serde_json::json!({"title": c.title, "rows": c.rows.iter().map(|r| serde_json::json!([r.0, r.1])).collect::<Vec<_>>()})),
         "lit": lit});
     // what an agent's show is read back against: Split's panes' keys (the board it draws is the pane keyed `0|`), Files' folder and a preview's file
+    // this client reports the fields an agent's show is read back from: a hub that finds none reads it back as it always did
+    state["report"] = serde_json::json!(2);
+    // a stored layout of several tiles: what it holds ("kind\tsource"), since the page is only the focused tile's
+    if open != "split" { if let Some(ts) = v["tiles"].as_object().filter(|t| t.len() >= 2) { state["tiles"] = serde_json::json!(ts.values().map(|t| format!("{}\t{}", t["kind"].as_str().unwrap_or(""), t["source"].as_str().unwrap_or(""))).collect::<Vec<_>>()); } }
     if open == "split" { state["panes"] = serde_json::json!(v["panes"].as_array().map(|ps| ps.iter().filter_map(|p| p["key"].as_str()).collect::<Vec<_>>()).unwrap_or_default()); }
     if open == "files" { state["dir"] = serde_json::json!(v["files"]["trail"].as_array().and_then(|t| t.last()).and_then(|c| c["value"].as_str()).unwrap_or("")); }
     if matches!(open, "image" | "pdf" | "text") { state["file"] = v["file"]["url"].clone(); }
@@ -807,7 +811,11 @@ mod tests {
         let img = state_json(&json!({"open": "image", "file": {"url": "/img?path=%2Fp%2Fa.png", "name": "a.png"}}), None, 0);
         assert_eq!(img["file"], "/img?path=%2Fp%2Fa.png");
         let plain = state_json(&json!({"open": "board", "key": "0|/p|"}), None, 0);
-        assert!(plain.get("panes").is_none() && plain.get("dir").is_none() && plain.get("file").is_none());
+        assert!(plain.get("panes").is_none() && plain.get("dir").is_none() && plain.get("file").is_none() && plain.get("tiles").is_none());
+        assert_eq!(plain["report"], 2, "this client says it reports the fields a show is read back from");
+        let stored = state_json(&json!({"open": "board", "key": "0|/p|", "tiles": {"t1": {"kind": "board", "source": "a.kicad_pcb"}, "t2": {"kind": "schematic", "source": "a.kicad_sch"}}}), None, 0);
+        let mut ts: Vec<String> = stored["tiles"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect(); ts.sort();
+        assert_eq!(ts, ["board\ta.kicad_pcb", "schematic\ta.kicad_sch"]);
     }
     #[test] fn state_json_reports_gerbers_flag_and_empty_reason() {
         let v = serde_json::json!({"open": "board", "key": "", "gerbers": true, "empty": "No Gerber files in this project yet"});
