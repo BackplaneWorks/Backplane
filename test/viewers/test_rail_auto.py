@@ -344,6 +344,16 @@ class AutoGateTests(unittest.TestCase):
         # a new geometry pushed on a switch, or no frame_changed placement: failed
         self.assertEqual(c_with([{**sw, "changed": True}], [sw])["outcome"], "failed")
         self.assertEqual(c_with([{**sw, "frame_changed": False}], [sw])["outcome"], "failed")
+        # the failure says whether the pushed rect was the one already placed (a push of unchanged geometry)
+        parsed, caps, actions = good()
+        m = parsed["mark_seqs"]
+        parsed["gpui_logs"].append(log(m["auto:c:board"], kicad_place=[1, 2, 3, 4], changed=True, frame_changed=True))
+        parsed["gpui_logs"].append(log(m["auto:c:schematic"] + 1, kicad_place=[1, 2, 3, 4], changed=True, frame_changed=True))
+        parsed["gpui_logs"].append(log(m["auto:c:back"] + 1, kicad_place=[1, 2, 3, 4], changed=False, frame_changed=True))
+        r = run(parsed, caps, actions)["c-frame-switch"]
+        self.assertEqual(r["outcome"], "failed")
+        self.assertIn("rect identical to the one before the switch: True", r["note"])
+        self.assertEqual(r["evidence"]["rect_unchanged_by_switch"]["board->schematic"], True)
 
     def test_state_of_requires_every_part(self) -> None:
         good_sess = {"pid": 5, "runtime": {"session": "live", "generation": 2}, "frames": [{"kind": "PCB", "shown": True}]}
