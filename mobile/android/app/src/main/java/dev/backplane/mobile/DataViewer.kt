@@ -26,6 +26,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -67,29 +70,69 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
     val fx = ext(file)
     var tab by remember { mutableStateOf(when { file.isEmpty() -> "Files"; fx == "kicad_pcb" || fx == "pcbdoc" -> "Board"; fx == "kicad_sch" || fx == "schdoc" -> "Schematic"; fx in setOf("step", "stp", "glb") -> "Mech"; else -> "Files" }) }
     var target by remember { mutableStateOf<Target?>(when { fx == "kicad_pcb" || fx == "pcbdoc" -> Target("Board", file); fx == "kicad_sch" || fx == "schdoc" -> Target("Schematic", file); fx in setOf("step", "stp", "glb") -> Target("Mech", file); else -> null }) }
-    var files by remember { mutableStateOf<DataClient.ProjectFiles?>(null) }
-    var railEntries by remember(thread.id) { mutableStateOf<List<ViewerRailEntry>?>(null) }
-    var userPressed by remember(thread.id) { mutableStateOf(false) }
-    var disabledWhy by remember(thread.id) { mutableStateOf("") }
+    var files by remember(thread.id) { mutableStateOf<DataClient.ProjectFiles?>(null) }
+    var railState by remember(thread.id) { mutableStateOf(ViewerRailState(threadId = thread.id)) }
     val hasRail = DataClient.has("rail")
     val hasGerbers = DataClient.has("gerbers")
-    val strip = remember(railEntries, hasGerbers) {
-        railEntries?.let { ViewerRail.phoneTabs(it, gerbersSupported = hasGerbers) } ?: ViewerRail.fallbackTabs
+    val strip = remember(railState, hasRail, hasGerbers) {
+        railState.strip(hasRail = hasRail, gerbersSupported = hasGerbers)
     }
     val online = DataClient.conn == DataClient.Conn.ONLINE
-    LaunchedEffect(thread.id, online) {
-        if (files != null) return@LaunchedEffect
-        // a slow or dropped answer is asked again (three tries): without it the picker and the pages' files never came until the viewer was reopened
-        for (i in 0 until 3) { files = runCatching { DataClient.viewerFiles(thread.id) }.getOrNull(); if (files != null) break; kotlinx.coroutines.delay(1500L * (i + 1)) }
-        if (files?.pcb?.isNotEmpty() == true && tab == "Files" && file.isEmpty() && !userPressed) tab = "Board"
-        DataClient.openViewerTab?.takeIf { it in tabs }?.let { tab = it; userPressed = true; DataClient.openViewerTab = null }
+    val liveThread = DataClient.threads.firstOrNull { it.id == thread.id }
+    val sourceSignal = listOf(
+        liveThread?.state.orEmpty(),
+        liveThread?.updatedAt?.toString().orEmpty(),
+        files?.root.orEmpty(),
+        files?.pcb.orEmpty(),
+        files?.sch.orEmpty(),
+        files?.boards?.size?.toString().orEmpty(),
+        DataClient.plots.frame?.key.orEmpty(),
+        DataClient.plots.frame?.none.orEmpty(),
+        DataClient.plots.mesh?.none.orEmpty(),
+    ).joinToString("|")
+    LaunchedEffect(hasRail) {
+        railState = railState.onFeatureChanged(hasRail)
     }
-    LaunchedEffect(thread.id, online, hasRail) {
-        if (!hasRail) return@LaunchedEffect
-        val got = runCatching { DataClient.viewerRail(thread.id, page = ViewerRail.idForTab(tab), diff = tab == "Diff") }.getOrNull() ?: return@LaunchedEffect
-        railEntries = got
-        val mapped = ViewerRail.phoneTabs(got, gerbersSupported = DataClient.has("gerbers"))
-        tab = ViewerRail.activeTab(mapped, tab, userPressed = userPressed, hasFileLink = file.isNotEmpty())
+    LaunchedEffect(thread.id, online, liveThread?.state) {
+        if (!online) return@LaunchedEffect
+        if (files == null) {
+            // a slow or dropped answer is asked again (three tries): without it the picker and the pages' files never came until the viewer was reopened
+            for (i in 0 until 3) { files = runCatching { DataClient.viewerFiles(thread.id) }.getOrNull(); if (files != null) break; kotlinx.coroutines.delay(1500L * (i + 1)) }
+        } else if (liveThread?.state != "working") {
+            runCatching { DataClient.viewerFiles(thread.id) }.getOrNull()?.let { files = it }
+        }
+        if (!hasRail && files?.pcb?.isNotEmpty() == true && tab == "Files" && file.isEmpty() && railState.localSelectionSeq == 0) tab = "Board"
+        DataClient.openViewerTab?.takeIf { it in tabs }?.let { tab = it; railState = railState.onLocalSelect(); DataClient.openViewerTab = null }
+    }
+    LaunchedEffect(thread.id, online, hasRail, hasGerbers, sourceSignal) {
+        if (!hasRail) {
+            railState = railState.onFeatureChanged(false)
+            return@LaunchedEffect
+        }
+        if (!online) return@LaunchedEffect
+        val (nextState, req) = railState.beginRequest(thread.id, hasRail = true)
+        railState = nextState
+        val res = runCatching { DataClient.viewerRail(thread.id, page = ViewerRail.idForTab(tab), diff = tab == "Diff") }
+        res.onSuccess { got ->
+            val out = railState.onReply(
+                token = req,
+                entries = got,
+                hasRail = DataClient.has("rail"),
+                gerbersSupported = DataClient.has("gerbers"),
+                currentTab = tab,
+                hasFileLink = file.isNotEmpty(),
+            )
+            if (out.accepted) {
+                railState = out.state
+                if (out.stopWatch) {
+                    DataClient.stopWatch(thread.id)
+                    target = null
+                }
+                tab = out.tab
+            }
+        }.onFailure {
+            railState = railState.onFailure(req, hasRail = DataClient.has("rail"))
+        }
     }
     // the project's boards (two or more: the hub's `boards`): a pick shows that board on Board, Schematic, 3D and Split, as the desktop's Boards menu does
     var boardPick by remember(thread.id) { mutableStateOf("") }
@@ -107,26 +150,35 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
                 val active = !item.disabled && t == tab
                 val fg = if (active) dcs.onPrimary else if (item.disabled) dfaint else dcs.onSurface
                 val bg = if (active) dcs.primary else dcs.surfaceVariant
-                DMono(
-                    tabLabel(t),
-                    fg,
-                    12,
-                    Modifier.background(bg).clickable {
-                        if (item.disabled) {
-                            disabledWhy = item.why
-                        } else {
-                            disabledWhy = ""
-                            userPressed = true
-                            tab = t
-                            target = null
+                val label = if (item.label.isNotEmpty()) Tr.t(item.label) else tabLabel(t)
+                Box(
+                    Modifier
+                        .heightIn(min = 48.dp)
+                        .background(bg)
+                        .semantics {
+                            selected = active
+                            if (item.disabled) {
+                                stateDescription = if (item.why.isEmpty()) Msg.gpui_disabled else "${Msg.gpui_disabled}: ${Tr.t(item.why)}"
+                            }
                         }
-                    }.padding(horizontal = 14.dp, vertical = 12.dp).testTag("vtab.$t"),
-                    bold = active,
-                )
+                        .clickable {
+                            val out = railState.tap(item, tab)
+                            railState = out.state
+                            if (out.tabChanged) {
+                                tab = out.tab
+                                target = null
+                            }
+                        }
+                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                        .testTag("vtab.$t"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    DMono(label, fg, 12, bold = active)
+                }
             }
         }
-        if (disabledWhy.isNotEmpty()) {
-            DMono(Tr.t(disabledWhy), dfaint, 11, Modifier.fillMaxWidth().background(dcs.surface).padding(horizontal = 12.dp, vertical = 6.dp).testTag("vtab.why"), lines = 1)
+        if (railState.disabledWhy.isNotEmpty()) {
+            DMono(Tr.t(railState.disabledWhy), dfaint, 11, Modifier.fillMaxWidth().background(dcs.surface).padding(horizontal = 12.dp, vertical = 6.dp).testTag("vtab.why"), lines = 1)
         }
         DLine()
         if (board != null && tab in setOf("Board", "Schematic", "3D", "Split")) BoardPicker(files?.boards.orEmpty(), board) { boardPick = it.value; target = null; DataClient.lightRefs = emptyList() }
@@ -145,7 +197,9 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
                 "Diff" -> DiffTab(thread)
                 "Review" -> ReviewTab(thread)
                 "Mech" -> MechTab(thread, target?.path?.takeIf { target?.tab == "Mech" })
-                "Files" -> FilesTab(thread, if (fx == "kicad_pcb" || fx == "kicad_sch" || fx == "pcbdoc" || fx == "schdoc") "" else file, line) { t -> target = t; tab = t.tab }
+                "Files" -> FilesTab(thread, if (fx == "kicad_pcb" || fx == "kicad_sch" || fx == "pcbdoc" || fx == "schdoc") "" else file, line) { t -> target = t; tab = t.tab; railState = railState.onLocalSelect() }
+                "Browser" -> BrowserTab(thread)
+                "" -> Box(Modifier.fillMaxSize())
                 else -> BrowserTab(thread)
             }
         }
@@ -327,8 +381,10 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
         if (!three && layersPresent.isNotEmpty() && l != null) {
             Row(Modifier.align(Alignment.TopStart).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 ViewChip(Tr.t(l.head), l.mode > 0, "viewer.layers") { refs = null; menu = !menu }
-                if (comparing.isEmpty()) ViewChip(Msg.viewer_history_compare, refs != null, "viewer.compare") { menu = false; if (refs != null) refs = null else scope.launch { refs = runCatching { DataClient.refs(thread.id) }.getOrDefault(emptyList()) } }
-                else ViewChip(Msg.android_compare_close, true, "viewer.compare.close") { comparing = ""; scope.launch { runCatching { DataClient.watch(thread.id, kind, path) }.onFailure { error = it.message ?: "" } } }
+                if (kind != "gerbers") {
+                    if (comparing.isEmpty()) ViewChip(Msg.viewer_history_compare, refs != null, "viewer.compare") { menu = false; if (refs != null) refs = null else scope.launch { refs = runCatching { DataClient.refs(thread.id) }.getOrDefault(emptyList()) } }
+                    else ViewChip(Msg.android_compare_close, true, "viewer.compare.close") { comparing = ""; scope.launch { runCatching { DataClient.watch(thread.id, kind, path) }.onFailure { error = it.message ?: "" } } }
+                }
             }
             if (menu) LayerMenu(l, layersPresent, act, Modifier.align(Alignment.TopStart).padding(top = 44.dp, start = 8.dp))
             refs?.let { rows -> RefMenu(rows, { c -> refs = null; scope.launch { runCatching { DataClient.compare(thread.id, kind, c, l.bits, path); comparing = c }.onFailure { error = it.message ?: "" } } }, Modifier.align(Alignment.TopStart).padding(top = 44.dp, start = 8.dp)) }

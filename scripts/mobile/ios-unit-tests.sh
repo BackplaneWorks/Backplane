@@ -1,8 +1,13 @@
 #!/bin/sh
-# The iOS app's unit tests on a Mac itself (CI: the ios job): each swiftc-compiles one app source with its test (mobile/ios/Tests, a main.swift)
-# and runs it, no app and no simulator. The ios-*-test.sh scripts here do the same through the Mac mini over ssh.
+# The iOS app's unit tests: must run on macOS (locally on hs-mac-mini under the mac-heavy lock, or in the macOS CI job).
+# Each step swiftc-compiles one app source with its test (mobile/ios/Tests, a main.swift) and runs it, no app and no simulator.
+# The ios-*-test.sh scripts here do the same through the Mac mini over ssh.
 # First the catalog gates: every iOS word goes through i18n/*.msg and the generated TrCatalog.swift is current (docs/i18n/README.md).
 set -eu
+if [ "$(uname -s)" != "Darwin" ]; then
+  echo "ios-unit-tests.sh: must run on macOS (Mac mini under the mac-heavy lock), not $(uname -s)" >&2
+  exit 2
+fi
 ROOT=$(cd "$(dirname "$0")/../.." && pwd); S=$ROOT/mobile/ios/Backplane; T=$ROOT/mobile/ios/Tests
 python3 "$ROOT/scripts/i18n-check.py"
 python3 "$ROOT/scripts/i18n-ios.py" --check
