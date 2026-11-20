@@ -60,8 +60,8 @@ func boardName(_ label: String) -> (String, String) { if let i = label.lastIndex
 
 extension DataClient {
     func viewerFiles(_ thread: String) async -> DProjectFiles? { try? await call("viewer.files", ["thread": thread]) }
-    func viewerRail(_ thread: String, page: String = "", diff: Bool = false) async -> [DViewerRailEntry]? {
-        ((try? await call("viewer.rail", ["thread": thread, "page": page, "diff": diff]) as DViewerRailReply)?.rail)
+    func viewerRail(_ thread: String, page: String = "", diff: Bool = false) async -> DViewerRailReply? {
+        try? await call("viewer.rail", ["thread": thread, "page": page, "diff": diff])
     }
     /// A viewer (tab, file, thread) opens: the last one's plots go at once and late ones for it are dropped (PlotStore.begin/shown);
     /// a 3D view shows its own cached model once the hub names that model's file among the view's.
@@ -120,6 +120,8 @@ struct DataViewerView: View {
     @State private var target: (tab: String, path: String)?
     @State private var files: DProjectFiles?
     @State private var railState = ViewerRailState()
+    @State private var railRefreshTick = 0
+    @State private var filesListingSig = ""
     // the project's boards (two or more: the hub's `boards`): a pick shows that board on Board, Schematic, 3D and Split, as the desktop's Boards menu does
     @State private var boardPick = ""
     @State private var sheetPick = ""
@@ -152,6 +154,8 @@ struct DataViewerView: View {
             client.plots.frame?.key ?? "",
             client.plots.frame?.none ?? "",
             client.plots.mesh?.none ?? "",
+            filesListingSig,
+            String(railRefreshTick),
         ].joined(separator: "|")
         VStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
@@ -164,8 +168,16 @@ struct DataViewerView: View {
                             let out = railState.tap(item, currentTab: tab)
                             railState = out.state
                             if out.tabChanged {
-                                tab = out.tab
-                                target = nil
+                                if out.stopWatch {
+                                    Task {
+                                        try? await client.watch(thread.id, kind: "")
+                                        target = nil
+                                        tab = out.tab
+                                    }
+                                } else {
+                                    target = nil
+                                    tab = out.tab
+                                }
                             }
                         } label: {
                             Text(label).dmono(12, bold: active)
@@ -210,7 +222,14 @@ struct DataViewerView: View {
                 case "Diff": DataDiffTab(client: client, thread: thread)
                 case "Review": DataReviewTab(client: client, thread: thread)
                 case "Mech": DataMechTab(client: client, thread: thread, open: target?.tab == "Mech" ? target!.path : nil)
-                case "Files": DataFilesTab(client: client, thread: thread, start: ["kicad_pcb", "kicad_sch", "pcbdoc", "schdoc"].contains(ext(openFile)) ? "" : openFile, line: line) { target = $0; tab = $0.tab; railState = railState.onLocalSelect() }
+                case "Files": DataFilesTab(
+                    client: client,
+                    thread: thread,
+                    start: ["kicad_pcb", "kicad_sch", "pcbdoc", "schdoc"].contains(ext(openFile)) ? "" : openFile,
+                    line: line,
+                    refreshKey: "\(liveThread?.state ?? "")|\(liveThread?.updatedAt ?? 0)",
+                    onListingChanged: { filesListingSig = $0 }
+                ) { target = $0; tab = $0.tab; railState = railState.onLocalSelect() }
                 case "Browser": DataBrowserTab(client: client, thread: thread)
                 case "": Color.clear
                 default: DataBrowserTab(client: client, thread: thread)
@@ -247,18 +266,21 @@ struct DataViewerView: View {
             if let got = await client.viewerRail(thread.id, page: ViewerRail.idForTab(tab), diff: tab == "Diff") {
                 let out = railState.onReply(
                     req,
-                    entries: got,
+                    entries: got.rail,
+                    has: got.has,
                     hasRail: client.has("rail"),
                     gerbersSupported: client.has("gerbers"),
                     currentTab: tab,
                     hasFileLink: !openFile.isEmpty
                 )
-                if out.accepted {
+                if out.refetch {
+                    railRefreshTick += 1
+                } else if out.accepted {
                     railState = out.state
                     if out.stopWatch {
-                        target = nil
-                        Task { try? await client.watch(thread.id, kind: "") }
+                        try? await client.watch(thread.id, kind: "")
                     }
+                    if out.tab != tab { target = nil }
                     tab = out.tab
                 }
             } else {
@@ -577,6 +599,8 @@ struct DataFilesTab: View {
     let thread: DThread
     var start = ""
     var line = 0
+    var refreshKey = ""
+    var onListingChanged: (String) -> Void = { _ in }
     let open: ((tab: String, path: String)) -> Void
     @State private var dir = ""
     @State private var list: [DEntryRow]?
@@ -613,7 +637,17 @@ struct DataFilesTab: View {
                 Spacer(minLength: 0)
             }
         }
-        .task(id: dir) { list = nil; err = ""; do { list = try await client.entries(thread.id, path: dir) } catch { self.err = error.localizedDescription } }
+        .task(id: "\(dir)|\(refreshKey)") {
+            if list == nil { err = "" }
+            do {
+                let got = try await client.entries(thread.id, path: dir)
+                list = got
+                err = ""
+                onListingChanged(dir + "|" + got.map { "\($0.name):\($0.dir):\($0.size)" }.joined(separator: ","))
+            } catch {
+                self.err = error.localizedDescription
+            }
+        }
         .onAppear {
             // a linked file: its folder behind it, the file open at the line
             guard !started, !start.isEmpty else { return }
