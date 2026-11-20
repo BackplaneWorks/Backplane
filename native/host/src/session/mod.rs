@@ -114,6 +114,8 @@ impl Hub {
         }
         if m != "view.open" && p.get("viewId").and_then(Value::as_str) != Some(c.view_id.as_str()) { return vec![error(&id, "STALE_VIEW")] }
         let view_id = if m == "view.open" { format!("{}:{}", c.gen, rid) } else { c.view_id.clone() };
+        // the desktop client's cid (one per app process, kept across reconnects): which window holds a KiCad pane (kicad/embed.rs)
+        if m == "view.open" { if let Some(cid) = p.get("cid").and_then(Value::as_str) { crate::files::kicad::embed::note_client_cid(c.client, cid); } }
         let rev = self.revision().await;
         // the home moved: the window is told where the same bot or chat is now (its identity fields stay the request's), and opens it there
         if let Some(next) = self.follow_home(&p).await {
