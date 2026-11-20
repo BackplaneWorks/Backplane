@@ -4707,3 +4707,4 @@ viewer.layout.refusal.duplicateid = Tile already exists
 viewer.layout.refusal.unknownframe = Unknown KiCad frame
 viewer.layout.refusal.invalidinput = Invalid layout request
 viewer.layout.refusal.toomany = Too many tiles open
+viewer.layout.refusal.toomanysources = Too many sources in one layout

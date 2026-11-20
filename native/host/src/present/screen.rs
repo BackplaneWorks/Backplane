@@ -1629,7 +1629,7 @@ mod thread_binding_tests {
         let tid=p0["target"]["id"].as_str().unwrap().to_string();
         let root=st.projects[&st.threads[&tid].project].root.clone();
         let tile=|id: &str,kind,src: &str| layout::Tile { id: id.into(), kind, source: src.into(), explicit: false, version: None, unresolved_version: false, overlay: None };
-        let l=layout::add(&layout::Layout::single(tile("t1",layout::PageKind::Board,"a.kicad_pcb")).unwrap(),Some("t1"),layout::Side::Right,tile("t2",layout::PageKind::Schematic,"a.kicad_sch"),false,None).unwrap();
+        let l=layout::add(&layout::Layout::single(tile("t1",layout::PageKind::Board,"")).unwrap(),Some("t1"),layout::Side::Right,tile("t2",layout::PageKind::Schematic,""),false,None).unwrap();
         assert!(st.apply(&json!({"$":"SettingSet","key":crate::present::viewer::memory_key(&root),"value":serde_json::to_string(&l).unwrap(),"at":9})));
         let req=|tiles: Option<bool>,drafts: Value| { let mut q=p0.clone(); q["session"]=json!({"rid":1,"open":{},"drafts":drafts,"panel":false,"info":{}}); if let Some(t)=tiles { q["tiles"]=json!(t); } recent(&st,&q).unwrap() };
         let layout_of=|o: &Value| o["session"]["drafts"][format!("@view.layout:{tid}")].as_str().unwrap_or("").to_string();
