@@ -338,6 +338,7 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
     let directory = hub.cfg.home.join("web");
     let socket = directory.join("browser.sock");
     let mut cleanup_pending = directory.exists();
+    let mut refused_plan = None;
     loop {
         let requested = requests.try_recv().ok();
         let mut status_row = serde_json::json!({"canEnable":true});
@@ -358,13 +359,30 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
             if !node.is_empty() && configured_authority(&config, &service, node, &socket).is_none() {
                 if let Some(args) = spare_node_port(&config).and_then(|port| private_serve_args(None, port, &socket)) {
                     let quoted = args.iter().map(|arg| format!("'{}'", arg.replace('\'', "'\\''"))).collect::<Vec<_>>();
-                    let plan = format!("sudo /usr/bin/tailscale {}", quoted.join(" "));
+                    let user_plan = format!("/usr/bin/tailscale {}", quoted.join(" "));
+                    let admin = refused_plan.as_ref() == Some(&user_plan);
+                    let mut plan = if admin { format!("sudo {user_plan}") } else { user_plan.clone() };
                     if requested.as_ref() == Some(&plan) {
                         let _ = std::fs::DirBuilder::new().mode(0o700).create(&directory);
                         if protected_directory(&directory).is_ok() && system_proxy_identity().await.is_ok() {
-                            let _ = crate::proc::tokio_cmd(crate::proc::Kind::Net, "/usr/bin/pkexec")
-                                .arg("--disable-internal-agent").arg("/usr/bin/tailscale").args(&args)
-                                .stdin(std::process::Stdio::null()).status().await;
+                            let mut cmd = if admin {
+                                let mut cmd = crate::proc::tokio_cmd(crate::proc::Kind::Net, "/usr/bin/pkexec");
+                                cmd.arg("--disable-internal-agent").arg("/usr/bin/tailscale");
+                                cmd
+                            } else {
+                                crate::proc::tokio_cmd(crate::proc::Kind::Net, "/usr/bin/tailscale")
+                            };
+                            if let Ok(out) = cmd.args(&args).env("LC_ALL", "C").stdin(std::process::Stdio::null()).output().await {
+                                let reason = String::from_utf8_lossy(&out.stderr).to_ascii_lowercase();
+                                if out.status.success() {
+                                    refused_plan = None;
+                                } else if !admin && ["permission denied", "access denied", "requires root"].iter().any(|m| reason.contains(m)) {
+                                    plan = format!("sudo {user_plan}");
+                                    refused_plan = Some(user_plan);
+                                } else {
+                                    status_row["reason"] = Value::from("Private HTTPS setup did not complete.");
+                                }
+                            }
                         }
                     }
                     status_row["command"] = Value::from(plan);
@@ -392,6 +410,7 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
                 }
             }
          } else if cleanup_pending {
+            refused_plan = None;
             let service = hub.setting("web.service").await.unwrap_or_else(|| "bp".into());
             cleanup_pending = !cleanup_disabled(ts, &service, &socket, |scope, host, port, path| async move {
                 remove_private_mapping(scope.as_deref(), &host, port, &path).await

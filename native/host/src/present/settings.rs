@@ -318,7 +318,7 @@ fn web_ui(st: &State, info: &Value) -> Vec<Value> {
     rows.push(row("Browser access", if available { "Pair each browser in Settings › Devices. Paired browsers can use the terminal." } else { reason }, buttons));
     if enabled && !available {
         if let Some(command) = status["command"].as_str() {
-            rows.push(row("Set up private HTTPS forwarding", command, vec![btn("Authorize setup", "device-web-setup", command, false)]));
+            rows.push(row("Set up private HTTPS forwarding", command, vec![btn(if command.starts_with("sudo ") { "Authorize as administrator" } else { "Set up forwarding" }, "device-web-setup", command, false)]));
         }
     }
     if enabled && available {
