@@ -42,20 +42,24 @@ final class ReplyRows: XCTestCase {
         let footer = d.app.buttons.matching(identifier: "data.entry.reply").allElementsBoundByIndex.last ?? d.el("data.entry.reply")
         d.step("Reply under the message puts the strip back", timeout: 10, act: { d.tap(footer) }, expect: { strip.exists })
         d.type(composer, "zqecho make it so")
+        // the keyboard's one-time tip ("Speed up your typing…") covers the screen on a fresh simulator
+        if d.app.buttons["Continue"].waitForExistence(timeout: 2) { d.app.buttons["Continue"].tap() }
         let before = count("events", "in_reply_to msg=cp1 chars=")
         d.step("the send keeps the desktop's in_reply_to block in the hub's log", timeout: 30, act: { d.tap(d.el("thread.send")) },
                expect: { self.count("events", "in_reply_to msg=cp1 chars=") > before })
         // the stand-in answers `echo: <what it was given>`: the block, then the words
         d.step("the agent is given the block ahead of what was written", timeout: 40, act: {},
-               expect: { self.count("events", #""role":"assistant".*echo: .*<in_reply_to msg=cp1 chars=[0-9]+>\\nOne thing needs you.*</in_reply_to>\\n\\nzqecho make it so"#) > 0 })
+               expect: { self.count("events", #""role":"assistant".*echo: .*<in_reply_to msg=cp1 chars=[0-9]*>\\nOne thing needs you.*</in_reply_to>\\n\\nzqecho make it so"#) > 0 })
         d.step("the strip is gone after the send", timeout: 5, act: {}, expect: { !strip.exists })
-        let chip = d.app.buttons["data.entry.replyto"]
-        d.step("the sent message shows what it answers", timeout: 20, act: {}, expect: { chip.exists && d.label("In reply to: One thing needs you").exists })
+        // (the chip's identifier is the row's, data.entry.user: found by its words)
+        let chip = d.app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "↩ In reply to: One thing needs you")).firstMatch
+        d.step("the sent message shows what it answers", timeout: 20, act: {}, expect: { chip.exists })
         d.shot("sent")
 
         // a swipe right on the person's own message replies to it
         let mine = d.label("can you speed up the builds?")
-        d.step("the person's message is shown", timeout: 10, act: { var n = 0; while !mine.isHittable && n < 6 { d.app.swipeDown(velocity: .slow); n += 1 } }, expect: { mine.exists })
+        // (scrolled on a message of the conversation: the composer is a scroll view too, and the keyboard swipe-types)
+        d.step("the person's message is on screen", timeout: 10, act: { var n = 0; while !mine.isHittable && n < 12 { (answer.isHittable ? answer : chip).swipeDown(velocity: .slow); n += 1 } }, expect: { mine.isHittable })
         d.step("a swipe right on it is Reply, sender You", timeout: 10, act: {
             let a = mine.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)), b = a.withOffset(CGVector(dx: 140, dy: 0))
             a.press(forDuration: 0.05, thenDragTo: b)

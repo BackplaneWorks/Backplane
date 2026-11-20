@@ -25,7 +25,7 @@ TOK=$(python3 -c "import json;print(json.load(open('$OUT/hub/state.json'))['toke
 $M hs-mac-mini "mkdir -p $MAC_DIR/mobile" || exit 1
 RSYNC_RSH=$M rsync -a --delete --exclude build "$ROOT/mobile/ios/" hs-mac-mini:$MAC_DIR/mobile/ios/ || exit 1
 RSYNC_RSH=$M rsync -a --delete "$ROOT/test/e2e/ios/" hs-mac-mini:$MAC_DIR/e2e/ || exit 1
-ONLY=$(for t in $TESTS; do printf ' -only-testing:BackplaneE2E/$CLASS/%s' "$t"; done)
+ONLY=$(for t in $TESTS; do printf ' -only-testing:BackplaneE2E/%s/%s' "$CLASS" "$t"; done)
 $M hs-mac-mini "
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer; cd ~/$MAC_DIR
 lockf -k /tmp/bp-mac-heavy.lockf sh -c '
