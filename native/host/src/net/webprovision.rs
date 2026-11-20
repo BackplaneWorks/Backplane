@@ -280,6 +280,128 @@ pub fn private_route_matches(
         && *handlers == serde_json::json!({"/":{"Proxy":format!("unix:{path}")}})
 }
 
+/// Prefer a configured Service; fall back to this node's own HTTPS mapping.
+fn configured_authority(
+    config: &Value,
+    service: &str,
+    node: &str,
+    socket: &std::path::Path,
+) -> Option<String> {
+    let suffix = node.split_once('.')?.1;
+    let service_host = format!("{service}.{suffix}");
+    let scope_name = format!("svc:{service}");
+    for (scope, host) in [
+        (Some(scope_name.as_str()), service_host.as_str()),
+        (None, node),
+    ] {
+        let settings = scope.map_or(config, |key| &config["Services"][key]);
+        let Some(entries) = settings["Web"].as_object() else {
+            continue;
+        };
+        for key in entries.keys() {
+            let Some((name, port)) = key.rsplit_once(':') else {
+                continue;
+            };
+            let Ok(port) = port.parse::<u16>() else {
+                continue;
+            };
+            if name == host && private_route_matches(config, scope, host, port, socket) {
+                return Some(if port == 443 {
+                    host.to_owned()
+                } else {
+                    key.to_owned()
+                });
+            }
+        }
+    }
+    None
+}
+
+// A setup request exists only while this hub's tailnet monitor is running.
+type SetupRequests = std::collections::HashMap<std::path::PathBuf, tokio::sync::mpsc::Sender<String>>;
+static SETUP_REQUESTS: std::sync::OnceLock<std::sync::Mutex<SetupRequests>> = std::sync::OnceLock::new();
+
+pub fn request_setup(home: &std::path::Path, plan: &str) -> Result<(), &'static str> {
+    if plan.len() > 4096 { return Err("invalid setup plan"); }
+    let requests = SETUP_REQUESTS.get().ok_or("web setup unavailable")?.lock().unwrap();
+    requests.get(home).ok_or("web setup unavailable")?.try_send(plan.to_owned()).map_err(|_| "setup already pending")
+}
+
+pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tailscale) {
+    use std::os::unix::fs::DirBuilderExt;
+    use std::time::Duration;
+    if crate::copy::on() {
+        return;
+    }
+    let (sender, mut requests) = tokio::sync::mpsc::channel(1);
+    SETUP_REQUESTS.get_or_init(Default::default).lock().unwrap().insert(hub.cfg.home.clone(), sender);
+    let directory = hub.cfg.home.join("web");
+    let socket = directory.join("browser.sock");
+    loop {
+        let requested = requests.try_recv().ok();
+        let mut status_row = serde_json::json!({"canEnable":true});
+        if hub.setting("web.enabled").await.as_deref() == Some("1") {
+            let status: Value = serde_json::from_str(&ts.status().await).unwrap_or(Value::Null);
+            let config: Value =
+                serde_json::from_str(&ts.serve_status().await).unwrap_or(Value::Null);
+            let node = status["Self"]["DNSName"]
+                .as_str()
+                .unwrap_or("")
+                .trim_end_matches('.');
+            let service = hub
+                .setting("web.service")
+                .await
+                .unwrap_or_else(|| "bp".into());
+            status_row["reason"] = Value::from("Waiting for a verified private Tailscale HTTPS mapping.");
+            if !node.is_empty() && configured_authority(&config, &service, node, &socket).is_none() {
+                if let Some(args) = spare_node_port(&config).and_then(|port| private_serve_args(None, port, &socket)) {
+                    let quoted = args.iter().map(|arg| format!("'{}'", arg.replace('\'', "'\\''"))).collect::<Vec<_>>();
+                    let plan = format!("sudo /usr/bin/tailscale {}", quoted.join(" "));
+                    if requested.as_ref() == Some(&plan) {
+                        let _ = std::fs::DirBuilder::new().mode(0o700).create(&directory);
+                        if protected_directory(&directory).is_ok() && system_proxy_identity().await.is_ok() {
+                            let _ = crate::proc::tokio_cmd(crate::proc::Kind::Net, "/usr/bin/pkexec")
+                                .arg("--disable-internal-agent").arg("/usr/bin/tailscale").args(&args)
+                                .stdin(std::process::Stdio::null()).status().await;
+                        }
+                    }
+                    status_row["command"] = Value::from(plan);
+                }
+            }
+            if let Some(authority) = configured_authority(&config, &service, node, &socket) {
+                let _ = std::fs::DirBuilder::new().mode(0o700).create(&directory);
+                if let Ok(listener) = bind_private_backend(&directory, authority.clone()).await {
+                    let mut task = tokio::spawn(listener.run(hub.clone()));
+                    if https_address_answers(&hub.cfg.home, &authority).await {
+                        let active = serde_json::json!({"available":true, "address":format!("https://{authority}")});
+                        hub.set_info("web.status", &active.to_string()).await;
+                        loop {
+                            tokio::select! {
+                                _ = &mut task => break,
+                                _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                                    if hub.setting("web.enabled").await.as_deref() != Some("1") {break;}
+                                }
+                            }
+                        }
+                    }
+                    task.abort();
+                    let _ = std::fs::remove_file(&socket);
+                    if hub.setting("web.enabled").await.as_deref() != Some("1") {
+                        let (host, port) = authority.rsplit_once(':').map_or((authority.as_str(), 443),
+                            |(host, port)| (host, port.parse().unwrap_or(0)));
+                        let scope = (host != node).then_some(service.as_str());
+                        if !remove_private_mapping(scope, host, port, &socket).await {
+                            status_row["reason"] = Value::from("Browser access is off. Tailscale mapping removal could not be confirmed.");
+                        }
+                    }
+                }
+            }
+        }
+        hub.set_info("web.status", &status_row.to_string()).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
 /// An administrator may have reassigned the endpoint since setup. Only
 /// produce a removal command when the fresh status still names our backend.
 pub fn private_remove_args(
@@ -299,10 +421,74 @@ pub fn private_remove_args(
     Some(args)
 }
 
+/// Prepare the minimal Serve config update for a conditional LocalAPI write.
+/// The caller must submit the original GET's ETag in If-Match.
+fn removal_update(mut config: Value, etag: &str, service: Option<&str>, hostname: &str,
+                  port: u16, socket: &std::path::Path) -> Option<Value> {
+    if etag.trim().is_empty() || etag == "*" { return None; }
+    private_remove_args(&config, service, hostname, port, socket)?;
+    let scope = match service {
+        Some(name) => config.get_mut("Services")?.get_mut(format!("svc:{name}"))?,
+        None => &mut config,
+    };
+    let key = format!("{hostname}:{port}");
+    let web = scope.get_mut("Web")?.as_object_mut()?;
+    // A port can have multiple host handlers. Preserve its HTTPS listener
+    // when another host uses it.
+    web.remove(&key)?;
+    let suffix = format!(":{port}");
+    if !web.keys().any(|authority| authority.ends_with(&suffix)) {
+        scope.get_mut("TCP")?.as_object_mut()?.remove(&port.to_string())?;
+    }
+    Some(config)
+}
+
+async fn remove_private_mapping(service: Option<&str>, host: &str, port: u16, socket: &std::path::Path) -> bool {
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt;
+    if system_proxy_identity().await.is_err() { return false; }
+    let local_api = || {
+        let mut cmd = crate::proc::tokio_cmd(crate::proc::Kind::Net, "/usr/bin/curl");
+        cmd.args(["-q", "--silent", "--fail", "--max-time", "5", "--max-filesize", "1048576",
+            "--noproxy", "*", "--unix-socket", "/run/tailscale/tailscaled.sock",
+            "http://local-tailscaled.sock/localapi/v0/serve-config"]);
+        cmd
+    };
+    let Ok(reply) = local_api().args(["--write-out", "\n%header{etag}"]).output().await else { return false; };
+    if !reply.status.success() { return false; }
+    let Ok(text) = std::str::from_utf8(&reply.stdout) else { return false; };
+    let Some((body, etag)) = text.rsplit_once('\n') else { return false; };
+    if etag.bytes().any(|b| b.is_ascii_control()) { return false; }
+    let Ok(config) = serde_json::from_str(body) else { return false; };
+    let Some(updated) = removal_update(config, etag, service, host, port, socket) else { return false; };
+    let Ok(mut child) = local_api().args(["--data-binary", "@-", "--header", "Content-Type: application/json",
+        "--header", &format!("If-Match: {etag}")]).stdin(Stdio::piped()).stdout(Stdio::null()).kill_on_drop(true).spawn() else { return false; };
+    let Some(mut input) = child.stdin.take() else { return false; };
+    if input.write_all(updated.to_string().as_bytes()).await.is_err() { return false; }
+    drop(input);
+    child.wait().await.is_ok_and(|s| s.success())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn conditional_removal_preserves_another_authority_on_the_port() {
+        let socket = std::path::Path::new("/run/private/browser.sock");
+        let config = json!({"TCP":{"8443":{"HTTPS":true}}, "Web":{
+            "node.example.ts.net:8443":{"Handlers":{"/":{"Proxy":"unix:/run/private/browser.sock"}}},
+            "another.example.ts.net:8443":{"Handlers":{"/":{"Text":"other"}}}
+        }});
+        for etag in ["", "*"] {
+            assert!(removal_update(config.clone(), etag, None, "node.example.ts.net", 8443, socket).is_none());
+        }
+        let update = removal_update(config.clone(), "revision", None, "node.example.ts.net", 8443, socket).unwrap();
+        assert_eq!(update["TCP"], config["TCP"]);
+        assert_eq!(update["Web"].as_object().unwrap().len(), 1);
+        assert_eq!(update["Web"]["another.example.ts.net:8443"], config["Web"]["another.example.ts.net:8443"]);
+    }
 
     #[test]
     fn disable_preserves_a_reassigned_service_endpoint() {
