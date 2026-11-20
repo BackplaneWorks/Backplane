@@ -15,13 +15,17 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 /// The tile renderer's last inventory (`tiles`, `splitters`), what `@tile[..]`/`@splitter` selectors resolve against.
 thread_local! { static TILES: std::cell::RefCell<(Vec<Value>, Vec<Value>)> = const { std::cell::RefCell::new((Vec::new(), Vec::new())) }; }
 /// A pointer drag on a splitter: (splitter id, from, to, moves) -> dispatched. The tile renderer registers it; none registered: the drag step reports `ok:false`.
-pub type SplitterDrag = Box<dyn Fn(&str, [f32; 2], [f32; 2], u32) -> bool>;
+pub type SplitterDrag = Box<dyn Fn(&str, [f32; 2], [f32; 2], u32, &mut App) -> bool>;
 thread_local! { static DRAG_HOOK: std::cell::RefCell<Option<SplitterDrag>> = const { std::cell::RefCell::new(None) }; }
 /// Called by the tile renderer on every tile, layout or frame change: stores what is drawn (selectors resolve against it) and emits the `tiles` metric.
 #[allow(dead_code)]
 pub fn tiles_metric(started: Instant, tiles: Vec<Value>, splitters: Vec<Value>) {
-    metric(started, "tiles", json!({"tiles": tiles, "splitters": splitters}));
-    TILES.with(|t| *t.borrow_mut() = (tiles, splitters));
+    TILES.with_borrow_mut(|last| {
+        if last.0 != tiles || last.1 != splitters {
+            metric(started, "tiles", json!({"tiles": tiles, "splitters": splitters}));
+            *last = (tiles, splitters);
+        }
+    });
 }
 /// Called by the tile renderer once: how a scripted splitter drag is delivered as a real pointer drag.
 #[allow(dead_code)]
@@ -51,25 +55,9 @@ pub(crate) fn resolve_selector(sel: &str, tiles: &[Value], splitters: &[Value]) 
 /* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<name>","settle":"<kind>"?,"timeout_ms":N?}: wait until settled (if requested) and painted, emit shot-ready, wait for <BACKPLANE_GPUI_SHOT_DIR>/<name>.done */ Shot { name: String, settle: Option<String>, timeout_ms: u64 }, /** {"wait_settled":"<kind>","tag":"<tag>","timeout_ms":N?}: wait until the page settles and emit a `settled` metric with its viewer state */ WaitSettled { kind: String, tag: String, timeout_ms: u64 }, /** {"pointer":"<control id>"}: a real mouse move, down and up at the centre of the control's drawn rect, through the window's own dispatch (no registered control needed) */ Pointer(String), /** {"drag":{"splitter":"@splitter"|id,"dx":N,"dy":N,"moves":N}}: a pointer drag on a drawn splitter, along its axis */ Drag(Value), /** {"tap_mm":[x,y,slot]}: a tap at a board point in millimetres (a part's position from the design file), wherever the view has put it */ TapMm(f32, f32, usize), Fit, Unsupported(String) }
 /// Script coordinates use physical window pixels, as do the painted control rectangles.
 #[derive(Clone, Debug)]
-pub struct Drag { from: DragStart, to: [f32; 2], moves: usize }
-
-#[derive(Clone, Debug)]
-enum DragStart { Control(String), Point([f32; 2]) }
+pub struct Drag { to: [f32; 2], moves: usize }
 
 impl Drag {
-    fn parse(value: &Value) -> Option<Self> {
-        fn point(value: &Value) -> Option<[f32; 2]> {
-            let xy: [f32; 2] = serde_json::from_value(value.clone()).ok()?;
-            xy.iter().all(|v| v.is_finite()).then_some(xy)
-        }
-        let from = match value["from"].as_str() {
-            Some(id) => DragStart::Control(id.to_owned()),
-            None => DragStart::Point(point(&value["from"])?),
-        };
-        let moves = value.get("moves").map_or(Some(8), Value::as_u64)?;
-        (2..=120).contains(&moves).then_some(Self { from, to: point(&value["to"])?, moves: moves as usize })
-    }
-
     fn events(&self, start: [f32; 2], scale: f32) -> Vec<PlatformInput> {
         let at = |xy: [f32; 2]| point(px(xy[0] / scale), px(xy[1] / scale));
         let button = MouseButton::Left;
@@ -259,7 +247,7 @@ impl Backplane {
     pub fn m(&self, event: &str, fields: Value) { metric(self.started, event, fields); }
 
     /// After each painted frame (check mode): the layout, the controls, the shown thread, the probes and the links, each on change.
-    pub fn drawn_marks(&mut self) {
+    pub fn drawn_marks(&mut self, cx: &App) {
         let started = self.started;
         // the frame just painted is what is on screen: the controls and probes read below are its own (art::ctl_rects)
         crate::art::probes_frame_done();
@@ -269,29 +257,29 @@ impl Backplane {
             if snap != self.last_layout { self.last_layout = snap.clone(); metric(started, "layout", json!({"rects": serde_json::from_str::<Value>(&snap).unwrap_or(Value::Null)})); }
             // G4: the controls on screen, on change
             let rects = crate::art::ctl_rects();
-            let kind = crate::screens::viewer::pane_page(&self.data["thread"], false).map(|p| p.0).unwrap_or_default();
-            let inventory = tile_inventory(&kind, self.screens.pick_slot, &rects);
+            let kind = rects.keys().find_map(|k| k.strip_prefix("tile-page:")).unwrap_or("");
+            let inventory = tile_inventory(kind, self.screens.pick_slot, &rects);
             let mut tiles = inventory["tiles"].as_array().unwrap().clone();
-            self.tile_frame += 1;
             let facts = &self.data["thread"]["viewer"]["identity"];
-            for tile in &mut tiles {
+            tiles.retain_mut(|tile| {
                 let id = tile["id"].as_str().unwrap();
-                let kind = tile["kind"].as_str().unwrap();
-                let identity = facts["panes"].as_array().and_then(|p| p.iter().find(|p| p["page"] == kind)).unwrap_or(facts);
-                let source = ["rel", "name"].iter().find_map(|key| identity["source"][key].as_str().filter(|s| !s.is_empty())).unwrap_or(kind).to_owned();
-                let mut body = tile["rect"].clone();
-                if let Some([x,y,w,h]) = rects.get(&format!("tile-body:{id}")) {
-                    body = json!({"x":x,"y":y,"w":w,"h":h});
-                } else if let Some([_,y,_,h]) = rects.get(&format!("pane-header:{kind}")) {
-                    let bottom = body["y"].as_f64().unwrap() + body["h"].as_f64().unwrap();
-                    body["y"] = (y+h).into();
-                    body["h"] = (bottom-f64::from(y+h)).max(0.).into();
-                }
+                let page = tile["kind"].as_str().unwrap();
+                let Some([x,y,w,h]) = rects.get(&format!("tile-body:{id}")) else { return false };
+                let identity = if facts["page"] != kind { &Value::Null }
+                    else if kind == "split" { facts["panes"].as_array().and_then(|p| p.iter().find(|p| p["page"] == page)).unwrap_or(&Value::Null) }
+                    else { facts };
+                let source = ["rel","name"].iter().find_map(|k| identity["source"][k].as_str().filter(|v| !v.is_empty())).unwrap_or("");
+                let frame = match page {
+                    "board" | "schematic" | "gerbers" => self.screens.plots[match id { "sch" => 1, "pcb" => 2, _ => 0 }].presented,
+                    "3d" | "mech" => self.screens.active_solid().map_or(0, |s| s.read(cx).painted_count()),
+                    _ => 0,
+                };
+                tile["frame"] = frame.into();
+                tile["body"] = json!({"x":x,"y":y,"w":w,"h":h});
                 tile["source"] = source.into();
-                tile["body"] = body;
                 tile["overlay"] = Value::Null;
-                tile["frame"] = self.tile_frame.into();
-            }
+                true
+            });
             tiles_metric(started, tiles, inventory["splitters"].as_array().unwrap().clone());
             let ctl = HEADER.with_borrow(|registry| {
                 let inventory = |id: &str, label: &str, rect_id: &str, enabled: bool, folded: bool| {
@@ -344,19 +332,15 @@ impl Backplane {
             // rectangles from that paint are both known (from render they were a frame behind, and an idle window then wrote nothing more:
             // a panel opened by a click showed in the log only at the next unrelated redraw)
             if crate::art::rects_on() {
-                let app = cx.to_async();
                 let handle = window.window_handle();
-                set_splitter_drag(Box::new(move |_, from, to, moves| {
+                set_splitter_drag(Box::new(move |_, from, to, moves, cx| {
                     if !(1..=120).contains(&moves) { return false }
-                    app.spawn(async move |cx| {
-                        let _ = handle.update(cx, |_, window, cx| {
-                            let drag = Drag { from: DragStart::Point(from), to, moves: moves as usize };
-                            for event in drag.events(from, window.scale_factor()) { window.dispatch_event(event, cx); }
-                        });
-                    }).detach();
-                    true
+                    handle.update(cx, |_, window, cx| {
+                        let drag = Drag { to, moves: moves as usize };
+                        for event in drag.events(from, window.scale_factor()) { window.dispatch_event(event, cx); }
+                    }).is_ok()
                 }));
-                let me = this.clone(); window.on_frame_drawn(move |_, cx| me.update(cx, |v, _| v.drawn_marks()).is_ok()); }
+                let me = this.clone(); window.on_frame_drawn(move |_, cx| me.update(cx, |v, cx| v.drawn_marks(cx)).is_ok()); }
             window.on_next_frame(move |_, _| metric(started, "first_frame", json!({})));
             match window.gpu_specs() {
                 Some(g) => metric(started, "gpu", json!({"device": g.device_name, "driver": g.driver_name, "driver_info": g.driver_info, "software": g.is_software_emulated})),
@@ -729,20 +713,6 @@ impl Backplane {
                 }
             }
             Step::Drag(spec) => {
-                if spec.get("from").is_some() {
-                    let result = Drag::parse(&spec).and_then(|drag| {
-                        let from = match drag.from {
-                            DragStart::Point(p) => p,
-                            DragStart::Control(ref id) => {
-                                let [x,y,w,h] = *crate::art::ctl_rects().get(id)?;
-                                [x+w/2., y+h/2.]
-                            }
-                        };
-                        DRAG_HOOK.with(|h| h.borrow().as_ref().map(|f| f("", from, drag.to, drag.moves as u32)))
-                    });
-                    self.m("drag", json!({"ok":result.unwrap_or(false),"from":spec["from"],"to":spec["to"],"moves":spec["moves"]}));
-                    self.begin("drag".into(), Goal::Frame, cx); cx.notify(); return;
-                }
                 let (tiles, splitters) = TILES.with(|t| t.borrow().clone());
                 let want = spec["splitter"].as_str().unwrap_or("");
                 let id = if want.starts_with('@') { resolve_selector(want, &tiles, &splitters) } else { Ok(want.to_string()) };
@@ -757,11 +727,17 @@ impl Backplane {
                             let (dx, dy) = (spec["dx"].as_f64().unwrap_or(0.) as f32, spec["dy"].as_f64().unwrap_or(0.) as f32);
                             // a splitter moves only along its axis ("x": a vertical bar dragged sideways)
                             let to = if axis == "x" { [from[0] + dx, from[1]] } else { [from[0], from[1] + dy] };
-                            let ok = DRAG_HOOK.with(|h| h.borrow().as_ref().map(|f| f(&id, from, to, moves)));
-                            match ok {
-                                Some(ok) => json!({"ok": ok, "splitter": id, "axis": axis, "from": from, "to": to, "moves": moves}),
-                                None => json!({"ok": false, "splitter": id, "axis": axis, "from": from, "to": to, "moves": moves, "error": "no_drag_handler"}), // i18n-ok: test-mode script diagnostic
-                            }
+                            let axis = axis.to_owned();
+                            let entity = cx.entity();
+                            cx.defer(move |cx| {
+                                let ok = DRAG_HOOK.with_borrow(|h| h.as_ref().is_some_and(|f| f(&id, from, to, moves, cx)));
+                                entity.update(cx, |app, cx| {
+                                    app.m("drag", json!({"ok":ok,"splitter":id,"axis":axis,"from":from,"to":to,"moves":moves}));
+                                    app.pump(cx);
+                                });
+                            });
+                            return;
+
                         }
                     },
                 };
@@ -1255,16 +1231,13 @@ mod tests {
     }
     #[test]
     fn drag_dispatches_held_intermediate_moves_in_window_coordinates() {
-        let drag = Drag::parse(&json!({"from": "split-edge", "to": [60, 80], "moves": 2})).unwrap();
-        assert!(matches!(drag.from, DragStart::Control(ref id) if id == "split-edge"));
+        let drag = Drag { to:[60.,80.], moves:2 };
         let events = drag.events([20., 40.], 2.);
         assert!(matches!(&events[..], [PlatformInput::MouseDown(d), PlatformInput::MouseMove(m),
             PlatformInput::MouseMove(end), PlatformInput::MouseUp(u)]
             if d.position == point(px(10.), px(20.)) && m.position == point(px(20.), px(30.))
             && m.dragging() && end.dragging() && end.position == point(px(30.), px(40.))
             && end.position == u.position && d.button == u.button));
-        assert!(matches!(Drag::parse(&json!({"from":[0,1],"to":[2,3]})).unwrap().from, DragStart::Point(_)));
-        assert!(Drag::parse(&json!({"from":[0],"to":[2,3]})).is_none());
     }
     #[test] fn open_settings_is_a_click_on_the_gear_and_paste_image_is_still_not_implemented() {
         let p = crate::tmp::file("script", "s.json");
