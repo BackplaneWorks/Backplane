@@ -208,6 +208,8 @@ if [ "$EMBED_MODE_FLAG" = "1" ]; then
   if [ -d "$KICAD_TEST_ROOT" ]; then
     for cand in $(ls -1dt "$KICAD_TEST_ROOT"/10.99.0-bp.*/bin/kicad 2>/dev/null || true); do
       [ -n "$cand" ] || continue
+      # debugger wrappers (-vg valgrind, -gdb) are not runtimes: their `bin/kicad` execs a tool that may not exist (exit 127)
+      case "$cand" in */10.99.0-bp.*-vg/bin/kicad|*/10.99.0-bp.*-gdb/bin/kicad) continue ;; esac
       if is_fork_kicad "$cand" && [ -x "$(dirname "$cand")/kicad-cli" ] && has_sim_frame "$(dirname "$cand")/kicad-cli"; then
         EMBED_KICAD_BIN="$cand"
         EMBED_KICAD_CLI="$(dirname "$cand")/kicad-cli"
