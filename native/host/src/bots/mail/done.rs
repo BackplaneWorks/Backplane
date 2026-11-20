@@ -1,8 +1,9 @@
 //! Done is material (Nov 11, the person: "are you not receiving and bubbling up status updates from the mailroom?"). A launched thread that finished its turn
 //! (the launcher's report "… completed") is work the person asked for coming in: it is not routine FYI for triage to keep quiet. Such a report skips the
 //! triage run and joins the owner's done batch; finishes that come within `WINDOW` seconds of the first go out together. The batch is one private lane whose
-//! brief asks for exactly one tell_person (one short line per item: what landed, whether it is in the running build, what to try). A lane that ends without
-//! telling (it chose silence, failed, or a restart cut it) has the hub post the plain digest itself, so a finish always reaches the person once.
+//! brief asks for at most one tell_person, and only for what is material (gate.rs: a landing, a release, or an ask; Nov 20, pref.fewer-progress-notes). A lane
+//! that ends without telling has the hub's plain digest go through the same gate: a landing joins the 30-minute batch, progress is not told. A turn-end
+//! report that opens with no-change words makes no lane at all.
 //! Progress (a thread's message mid-turn, a report while its work still runs) and asks keep their own paths. No message text or address is logged here.
 use super::{escalate::private_told_key, route::{jshow, ref_uri, take_chars, Ctx, Step}, Body};
 use crate::bots::rpc::{now_s, Bots};
@@ -51,7 +52,7 @@ pub fn digest(xs: &[Value]) -> String {
 pub fn running_build() -> String {
     std::env::current_exe().ok().and_then(|p| p.parent().and_then(|d| d.file_name()).map(|n| n.to_string_lossy().to_string())).filter(|n| n.matches('-').count() >= 2).unwrap_or_default()
 }
-const DONE_HEAD: &str = "[Private mailroom: finished work. Done is material: each item below is a launched thread that finished work the person asked for (or landed it on main). The person's rule (pref.report-completions) is to hear it right away, so you MUST call tell_person exactly once, with the key given below, before you end. Write ONE message, one short plain line per item: what landed or finished, whether it is live in their running build (or needs a hub restart, a rebuild or a merge first), and what to try. No preamble, no raw report text. Leave out an item only when its thread_read shows it is plainly intermediate progress and not a finish; if every item is, still call tell_person with a single line saying where they stand. Asks and approvals stay at their source. If you end without telling, the hub posts a plain digest of these items for you.]\n";
+const DONE_HEAD: &str = "[Private mailroom: launched threads ended a turn. Each item below is a launched thread (often a lead) that ended a turn; most turn-ends are progress, not news. The person's rules in <owner_preferences> (pref.fewer-progress-notes among them) rule here: speak only when something landed on main, was released for them to try, or needs their decision, approval or answer. For each item, thread_read it if unsure. If one is material, call tell_person ONCE with the key given below and its kind (landed, release or needs_you): one short plain line per material item, what landed and whether it is in their running build, or exactly what they must decide. If nothing is material, end silently with no tell: that is the right outcome. Never tell \"nothing landed\", \"nothing to try\", \"still waiting\", \"in review\", \"queued\" or \"rebased\": the hub refuses it. Landings are collected and reach the person at most every 30 minutes; needs_you goes at once.]\n";
 
 impl<'a> Ctx<'a> {
     /// Done.admit (Mail.route, the owner's inbound launch report of a finish): the report joins the batch instead of a triage run; its ticket is claimed so the
@@ -60,6 +61,10 @@ impl<'a> Ctx<'a> {
         let m = &body.mail; if m.kind != "launch" { return None }
         if !self.setting(&item_key(&m.id), "").is_empty() { return Some(Step::none()) }
         let (thread, title) = done_report(&body.text).or_else(|| done_report(&m.head))?;
+        // Gate.quiet: a turn-end that opens with no-change words and asks nothing is no finish: no lane, nothing told
+        if super::gate::quiet_report(&summary(&body.text)) {
+            let mut cs = self.owner_claim(&m.id); cs.push(set(item_key(&m.id), "quiet", self.now)); self.replay(&cs); return Some(Step { cs, outs: vec![] })
+        }
         let mut xs = items(&self.setting(&batch_key(bot), "[]"));
         let title = if title.is_empty() { self.th(&thread).title } else { title };
         xs.push(json!({"input":m.id,"conv":m.conv,"thread":thread,"title":title,"summary":summary(&body.text),"at":self.now}));
@@ -96,7 +101,9 @@ impl<'a> Ctx<'a> {
         let cs = vec![set(handed_key(lane), &self.now.to_string(), self.now)]; self.replay(&cs);
         let bot = self.w.private_owner(lane);
         if key.is_empty() || text.is_empty() || !self.setting(&private_told_key(&bot, &key), "").is_empty() { return Some(Step { cs, outs: vec![] }) }
-        let told = self.private_tell(lane, &text, &key); Some(Step { cs, outs: vec![] }.cat(told))
+        // Gate.tell: the hub's digest is gated like any tell: a digest of progress is not told, a landing joins the batch
+        let st = Step { cs, outs: vec![] };
+        match self.tell_gate(lane, &text, &key, "landed") { Ok((told, _)) => Some(st.cat(told)), Err(_) => Some(st) }
     }
     /// the owners with a done batch whose window is over
     pub fn done_due(&self) -> Vec<String> {
@@ -109,7 +116,7 @@ impl Bots {
     /// Done.tick: the minute tick, and the timer a batch's first finish sets, flush what is due
     pub async fn done_tick(self: &Arc<Self>) {
         if crate::copy::on() { return }
-        let outs = self.decide(&[], |c| { let mut st = Step::none(); for b in c.done_due() { let s = c.done_flush(&b); st = st.cat(s) } st }).await;
+        let outs = self.decide(&[], |c| { let mut st = Step::none(); for b in c.done_due() { let s = c.done_flush(&b); st = st.cat(s) } for b in c.tell_due() { let s = c.tell_flush(&b); st = st.cat(s) } st }).await;
         self.perform(outs).await
     }
     /// Done.timer: once a batch opens, a flush when its window is over (the minute tick covers a restart in between)

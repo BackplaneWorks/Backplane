@@ -30,7 +30,7 @@ pub fn tool(name: &str) -> Value {
         "charter_set" => def(name, "Front of house only: replace your mailroom charter.", json!({"text":p("string","The full charter."),"reason":p("string","Why it changed.")}), &["text", "reason"]),
         "mail_dispose" => def(name, "Live Mailroom run only: durably handle ONE exact current notice. done/defer acknowledge a routine status or known hold without completing work or granting permission. reply files FYI to that input's existing local sender, without starting an agent. Pending/unknown replies are never automatically resent. Substantive decisions/escalations and external/product actions retain their existing review.", json!({"input":p("string","Exact current actionable input ID from the run brief or incoming mail heading."),"mode":p("string","done, defer, or reply. This does not mark the conversation or objective complete."),"reason":p("string","Why this notice needs no new action, is already handled, or remains deferred. Required, up to 2000 characters."),"text":p("string","For reply only: internal FYI text, up to 4000 characters. Target and conversation are fixed by the current input.")}), &["input", "mode", "reason"]),
         "mail_context" => def(name, "Read your coordinator's full stored conversation history, including older context beyond the brief. Owner identity is fixed by this live run; no target argument is accepted. With query, search text; before pages older rows by seq; use next from the result. Read-only; never acknowledges mail or answers approvals.", json!({"query":p("string","Text to find, or empty for recent history."),"before":p("integer","Read rows before this seq; zero means newest.")}), &[]),
-        "tell_person" => def(name, "The ONLY explicit publication from a private coordinator turn into its original user conversation. All ordinary final/commentary text stays private; empty output is successful. Writes your own contextual text once per owner/event key, with provenance and a told ledger receipt. Never grants approval or completes source work. Target is authenticated owner, never caller supplied.", json!({"text":p("string","Your fresh contextual message with actionable source links."),"key":p("string","Stable exact event/version key; repeated calls do not post twice.")}), &["text", "key"]),
+        "tell_person" => def(name, "The ONLY explicit publication from a private coordinator turn into its original user conversation, and only for what is material: kind landed (merged to main), release (a build or release the person can try now) or needs_you (a decision, approval or blocker only the person can resolve). The hub refuses anything else: no-change status (nothing landed, nothing to try, unchanged, still waiting or testing, in review, queued, rebased) is never told, so end silently instead. Material tells are collected and reach the person as one message at most every 30 minutes; needs_you goes at once. All ordinary final/commentary text stays private; empty output is successful. Once per owner/event key, with provenance and a told ledger receipt. Never grants approval or completes source work. Target is authenticated owner, never caller supplied.", json!({"text":p("string","Your fresh contextual message with actionable source links: what landed or was released and what to try, or exactly what the person must decide."),"key":p("string","Stable exact event/version key; repeated calls do not post twice."),"kind":p("string","landed, release or needs_you.")}), &["text", "key", "kind"]),
         _ => Value::Null,
     }
 }
@@ -76,7 +76,7 @@ fn dispose_args(a: &Value) -> bool {
 /// Private.args: only text and key, both given and within their bounds
 fn private_args(a: &Value) -> bool {
     let Some(o) = a.as_object() else { return false };
-    if !o.iter().all(|(k, v)| ["text", "key"].contains(&k.as_str()) && v.is_string()) { return false }
+    if !o.iter().all(|(k, v)| ["text", "key", "kind"].contains(&k.as_str()) && v.is_string()) { return false }
     let (t, k) = (gs(a, "text").trim(), gs(a, "key").trim()); !t.is_empty() && t.chars().count() <= 32000 && !k.is_empty() && k.chars().count() <= 200
 }
 const SCOPE: &str = "current notice only; no work completion or permission grant";
@@ -123,7 +123,7 @@ impl Bots {
     /// notice goes through the coordinator
     pub async fn notify_relay(self: &Arc<Self>, thread: &str, a: &Value) -> Option<Res> {
         let (private, managed, run) = { let w = self.world().await; (w.private_is(thread), w.managed(thread), w.run_of(thread).cloned()) };
-        if private { return Some(fail("Private coordinator: use tell_person(text, key) to publish into the original user conversation. No message was sent and no approval or source input was handled.")) }
+        if private { return Some(fail("Private coordinator: use tell_person(text, key, kind) to publish only what is material (landed, release, needs_you) into the original user conversation. No message was sent and no approval or source input was handled.")) }
         if !managed { return None }
         let (reason, text) = (gs(a, "reason").to_string(), gs(a, "text").to_string());
         let (res, outs) = self.decide_with(&[], |c| match &run {
@@ -136,11 +136,19 @@ impl Bots {
         match name {
             "mail_dispose" => { let (r, outs) = self.decide_with(&[], |c| dispose(c, thread, a)).await; self.perform(outs).await; r }
             "tell_person" => {
+                // Gate.tell: only material tells, collected into one message at most every 30 minutes (needs_you at once)
+                let mut due = 0;
                 let (r, outs) = self.decide_with(&[], |c| {
                     let allowed = c.w.private_is(thread) && c.th(thread).turn == "running" && private_args(a);
-                    let st = if allowed { c.private_tell(thread, gs(a, "text").trim(), gs(a, "key").trim()) } else { Step::none() };
-                    ((allowed, json!({"ok":allowed,"scope":"Explicit publication to this private coordinator's original conversation only; no approval or source work changed"})), st)
-                }).await; self.perform(outs).await; r
+                    if !allowed { return ((false, json!({"ok":false,"scope":"Explicit publication to this private coordinator's original conversation only; no approval or source work changed"})), Step::none()) }
+                    match c.tell_gate(thread, gs(a, "text").trim(), gs(a, "key").trim(), gs(a, "kind")) {
+                        Err(why) => ((false, json!({"ok":false,"told":false,"error":why})), Step::none()),
+                        Ok((st, at)) => { due = at; let sent = at != 0 && at <= c.now;
+                            ((true, json!({"ok":true,"told":if sent { "now" } else if at == 0 { "already" } else { "batched" },"sends_at":at,"scope":"Explicit publication to this private coordinator's original conversation only; no approval or source work changed"})), st) }
+                    }
+                }).await; self.perform(outs).await;
+                if due > now_s() { self.done_timer(due) }
+                r
             }
             "decide" | "escalate" | "charter_set" => {
                 let on = { let w = self.world().await; w.setting("mail.on", "off") == "on" || (mail_uber(&w, thread) && w.run_is(thread)) };

@@ -8,6 +8,7 @@ pub mod requests;
 pub mod mailbox;
 pub mod charter;
 pub mod done;
+pub mod gate;
 pub mod escalate;
 pub mod funnel;
 pub mod prompt;
