@@ -231,16 +231,26 @@ function mountApp(): void {
   const centerEl = document.createElement("main");
   centerEl.className = "bp-center";
 
+  const rightAreaEl = document.createElement("div");
+  rightAreaEl.className = "bp-right-area bp-hidden";
+  rightAreaEl.setAttribute("data-testid", "right-area");
+
+  const rightTopEl = document.createElement("div");
+  rightTopEl.className = "bp-right-top";
+
   const viewerEl = document.createElement("section");
   viewerEl.className = "bp-viewer-pane bp-hidden";
   viewerEl.setAttribute("data-testid", "viewer-pane");
+
+  rightTopEl.appendChild(viewerEl);
+  rightAreaEl.appendChild(rightTopEl);
 
   const railEl = document.createElement("nav");
   railEl.className = "bp-rail";
   railEl.setAttribute("aria-label", "Viewer rail");
   railEl.setAttribute("data-testid", "viewer-rail");
 
-  body.append(sidebarEl, centerEl, viewerEl, railEl);
+  body.append(sidebarEl, centerEl, rightAreaEl, railEl);
   root.append(topbar, body);
 
   const hub = new HubClient();
@@ -356,11 +366,20 @@ function mountApp(): void {
     showError: (msg) => composer.showError(msg),
   });
 
-  const mgmt = new MgmtStrip(centerEl, {
+  function syncRightArea(): void {
+    const viewerOpen = activeRailKind !== "";
+    const panelOpen = mgmt.isOpen();
+    rightAreaEl.classList.toggle("bp-hidden", !viewerOpen && !panelOpen);
+    rightAreaEl.classList.toggle("bp-has-viewer", viewerOpen);
+    rightAreaEl.classList.toggle("bp-has-mgmt", panelOpen);
+  }
+
+  const mgmt = new MgmtStrip(rightTopEl, rightAreaEl, {
     hub,
     getThreadId: () => selectedThreadId,
     getThreadGen: () => threadGen,
     onSendText: (text) => { void sendMessage(text); },
+    onOpenChange: () => syncRightArea(),
   });
 
   function renameThread(th: ThreadItem): void {
@@ -624,6 +643,7 @@ function mountApp(): void {
     rail.setActive("");
     viewerEl.classList.add("bp-hidden");
     viewerController?.close();
+    syncRightArea();
     if (notifyHub && selectedThreadId && hub.getState() === "connected") {
       void hub.rpc("viewer.watch", { thread: selectedThreadId, kind: "" }).catch(() => {});
     }
@@ -634,6 +654,7 @@ function mountApp(): void {
     activeRailKind = kind;
     rail.setActive(kind);
     viewerEl.classList.remove("bp-hidden");
+    syncRightArea();
     if (!viewerController && typeof mountViewerPane === "function") {
       viewerController = (mountViewerPane as ViewerMountFn)(viewerEl, {
         hub,

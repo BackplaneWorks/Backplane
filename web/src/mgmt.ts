@@ -40,6 +40,7 @@ export interface MgmtCallbacks {
   getThreadId: () => string;
   getThreadGen: () => number;
   onSendText: (text: string) => void;
+  onOpenChange?: (open: boolean) => void;
 }
 
 export class MgmtStrip {
@@ -78,23 +79,31 @@ export class MgmtStrip {
 
   private fabStatus = "";
 
-  constructor(container: HTMLElement, cb: MgmtCallbacks) {
+  constructor(panelSlot: HTMLElement, stripSlot: HTMLElement, cb: MgmtCallbacks) {
     this.cb = cb;
 
-    this.hostEl = document.createElement("section");
-    this.hostEl.className = "bp-mgmt-host bp-hidden";
-    this.hostEl.setAttribute("data-testid", "mgmt-host");
-    this.hostEl.setAttribute("aria-label", "Project management panels");
-
-    this.panelEl = document.createElement("div");
+    this.hostEl = stripSlot;
+    this.panelEl = document.createElement("aside");
     this.panelEl.className = "bp-mgmt-panel bp-hidden";
+    this.panelEl.setAttribute("aria-label", "Project management panel");
 
     this.stripEl = document.createElement("div");
-    this.stripEl.className = "bp-mgmt-strip";
+    this.stripEl.className = "bp-mgmt-strip bp-hidden";
     this.stripEl.setAttribute("data-testid", "mgmt-strip");
+    this.stripEl.setAttribute("aria-label", "Project management tabs");
 
-    this.hostEl.append(this.panelEl, this.stripEl);
-    container.appendChild(this.hostEl);
+    panelSlot.appendChild(this.panelEl);
+    stripSlot.appendChild(this.stripEl);
+  }
+
+  public openTab(id: string): void {
+    const state = this.getStateInfo();
+    if (!mgmtPanelsOf(state).some((p) => p.id === id)) return;
+    if (this.openPanel !== id) this.togglePanel(id);
+  }
+
+  public getTabs(): Array<{ id: string; label: string }> {
+    return mgmtPanelsOf(this.getStateInfo());
   }
 
   public isOpen(): boolean {
@@ -240,14 +249,16 @@ export class MgmtStrip {
     const state = this.getStateInfo();
     const tabs = mgmtPanelsOf(state);
     if (!this.digest || tabs.length === 0) {
-      this.hostEl.classList.add("bp-hidden");
+      this.stripEl.classList.add("bp-hidden");
       this.panelEl.classList.add("bp-hidden");
+      this.panelEl.removeAttribute("data-testid");
       this.panelEl.replaceChildren();
       this.stripEl.replaceChildren();
+      this.cb.onOpenChange?.(false);
       return;
     }
 
-    this.hostEl.classList.remove("bp-hidden");
+    this.stripEl.classList.remove("bp-hidden");
 
     // 1. Render tab strip verbatim from hub `mgmt.state.<digest>.panels`
     const stripFrag = document.createDocumentFragment();
@@ -297,11 +308,13 @@ export class MgmtStrip {
       this.panelEl.classList.add("bp-hidden");
       this.panelEl.removeAttribute("data-testid");
       this.panelEl.replaceChildren();
+      this.cb.onOpenChange?.(false);
       return;
     }
 
     this.panelEl.classList.remove("bp-hidden");
     this.panelEl.setAttribute("data-testid", `mgmt-panel-${this.openPanel}`);
+    this.cb.onOpenChange?.(true);
     const body = document.createDocumentFragment();
     if (this.errorMsg) {
       const err = document.createElement("div");
@@ -1231,7 +1244,7 @@ export class MgmtStrip {
       listEl.appendChild(chRow);
     }
 
-    // Limits table
+    // Limits table (matches native/gpui/src/screens/mgmt_fab.rs: Limit | Base price | Costs more | Read)
     const limits = Array.isArray(d.limits) ? d.limits : [];
     if (limits.length > 0) {
       const lh = document.createElement("div");
@@ -1245,7 +1258,10 @@ export class MgmtStrip {
       const c2 = document.createElement("span");
       c2.className = "bp-mgmt-col";
       c2.textContent = "Costs more";
-      lh.append(c0, c1, c2);
+      const c3 = document.createElement("span");
+      c3.className = "bp-mgmt-col bp-mgmt-col-read";
+      c3.textContent = "Read";
+      lh.append(c0, c1, c2, c3);
       listEl.appendChild(lh);
 
       for (const l of limits) {
@@ -1262,10 +1278,36 @@ export class MgmtStrip {
         const ex = document.createElement("span");
         ex.className = "bp-mgmt-col bp-dim";
         ex.textContent = l.extra?.text || "—";
-        ll.append(nm, f, ex);
+
+        const side = l.free && typeof l.free === "object" ? l.free : l.extra;
+        const day = side?.fetched ?? "";
+        const derived = Boolean(day) && side?.confidence !== "published";
+        const readText = day ? (derived ? `${day}*` : day) : "—";
+        const srcUrl = side?.source ?? "";
+        let rd: HTMLElement;
+        if (srcUrl.startsWith("https://") && day) {
+          const a = document.createElement("a");
+          a.className = "bp-mgmt-col bp-mgmt-col-read bp-mgmt-read-link";
+          a.href = srcUrl;
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          a.textContent = readText;
+          rd = a;
+        } else {
+          const sp = document.createElement("span");
+          sp.className = "bp-mgmt-col bp-mgmt-col-read bp-mgmt-faint";
+          sp.textContent = readText;
+          rd = sp;
+        }
+        ll.append(nm, f, ex, rd);
         lr.appendChild(ll);
         listEl.appendChild(lr);
       }
+
+      const foot = document.createElement("div");
+      foot.className = "bp-mgmt-note bp-mgmt-faint";
+      foot.textContent = "* worked out from the fab's page. Dimmed: the rigid board's value. A date opens the source page.";
+      listEl.appendChild(foot);
     }
 
     wrap.appendChild(listEl);
