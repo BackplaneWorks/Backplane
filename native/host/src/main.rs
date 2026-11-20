@@ -1,7 +1,7 @@
 //! backplane-hub: the Backplane hub for native clients (GPUI, SwiftUI, Compose).
 //! HTTP + authenticated WebSocket; renderer `mobile`; the picture comes from the presenter.
 mod agents; mod memscope; mod scopeprobe; mod api; mod fab; mod plan; mod review; mod google; mod import014; mod auth; mod bots; mod cbor; mod commands; mod data; mod copy; mod delta; mod files; mod guard; mod hub; mod md; mod mcpx; mod mirror; mod model; mod mouse; mod net; mod plat; #[cfg(test)] #[path = "plat/tests.rs"] mod plat_tests; mod present;
-mod presenter; mod proc; mod push; mod session; mod settings; mod shelf; mod sidebar; mod signal; mod stamp; mod state; #[path = "state/host.rs"] mod statehost; mod ckpt; mod ckptrun; #[cfg(test)] mod fold_inputs; /* the build scripts it runs are the Linux and macOS build machines' (dev-build.sh), not the Windows hub's */ #[cfg(all(test, unix))] mod oneshot_script_tests; #[cfg(all(test, unix))] mod codex_apikey_tests; mod startup; mod store; mod term; mod update; mod voice; mod wire; mod window;
+mod presenter; mod proc; mod restarting; mod push; mod session; mod settings; mod shelf; mod sidebar; mod signal; mod stamp; mod state; #[path = "state/host.rs"] mod statehost; mod ckpt; mod ckptrun; #[cfg(test)] mod fold_inputs; /* the build scripts it runs are the Linux and macOS build machines' (dev-build.sh), not the Windows hub's */ #[cfg(all(test, unix))] mod oneshot_script_tests; #[cfg(all(test, unix))] mod codex_apikey_tests; mod startup; mod store; mod term; mod update; mod voice; mod wire; mod window;
 
 #[cfg(test)] #[path = "../../winres.rs"] mod winres; #[cfg(test)] mod winres_tests;
 
@@ -125,7 +125,7 @@ async fn hub_main(inherited: Option<String>) {
     let args = match parse() { Ok(a) => a, Err(code) => std::process::exit(code) };
     if let Some(what) = inherited { eprintln!("backplane-hub: started with {what}: reset, so the hub sees its children end (#1456)"); }
     plat::hub::watch_reaping(Duration::from_secs(2));
-    plat::hub::exit_on_signals(files::kicad::embed::shutdown_all);
+    plat::hub::exit_on_signals(restarting::on_exit);
     if let Err(e) = run(args).await { eprintln!("backplane-hub: {e:#}"); std::process::exit(exit_code(&e)) }
 }
 
@@ -182,6 +182,7 @@ async fn run(a: Args) -> Result<()> {
     session::composer::mention::set_models(settings::models::all);
     let hub = Hub::start(hub::Cfg { home: a.home.clone(), version: a.version, commit: a.commit, listen: listen.clone(), os: match std::env::consts::OS { "macos" => "darwin", o => o }.into(), arch: match std::env::consts::ARCH { "x86_64" => "x64", "aarch64" => "arm64", a => a }.into() }, presenter).await?;
     startup::mark("hub started");
+    restarting::start(&hub).await;
     ckptrun::start(hub.clone());
     recent.bind(&hub);
     guard::start(&hub);

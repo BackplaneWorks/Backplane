@@ -45,7 +45,9 @@ go() {  # go BUILD_DIR WHAT(client|both): relaunch on that build
   export BIN=$b FRESH_TAILNET_PORT=$(cat "$D/tailnet.port" 2>/dev/null || true)
   [ -n "$FRESH_TAILNET_PORT" ] || unset FRESH_TAILNET_PORT
   if [ "$2" = client ]; then p=$(pid client); alive "$p" && kill "$p"; rm -f "$D/client.pid"; sleep 1
-  else p=$(pid hub); FRESH_RESTART=1 "$HERE/fresh.sh" stop >/dev/null; local i=0; while alive "$p" && [ $i -lt 100 ]; do sleep 0.2; i=$((i+1)); done; fi
+  # the hub tells every window and phone why it goes (native/host/src/restarting.rs): this file names the build it comes back on
+  else printf '{"reason":"build","build":"%s"}\n' "$(basename "$b")" > "$H/restart.next" 2>/dev/null || true
+       p=$(pid hub); FRESH_RESTART=1 "$HERE/fresh.sh" stop >/dev/null; local i=0; while alive "$p" && [ $i -lt 100 ]; do sleep 0.2; i=$((i+1)); done; fi
   "$HERE/fresh.sh" start || return 1
   local i=0; while [ $i -lt "$BOOT" ]; do hello && return 0; alive "$(pid hub)" || return 1; sleep 1; i=$((i+1)); done; return 1
 }

@@ -246,6 +246,12 @@ apierr.say = {kind, select, overloaded {La API de Claude estaba sobrecargada} ra
 apierr.details = detalles
 restart.continuing = Continuando tras el reinicio
 restart.told = lo que se le dijo
+restart.interrupted = Interrumpido por un reinicio a las {clock}; se retoma
+restart.interrupted.plain = Interrumpido por un reinicio; se retoma
+hub.restarting = Reiniciando Backplane…
+hub.restarting.build = Reiniciando Backplane… (nueva compilación {build})
+hub.stopped = Backplane se detuvo
+hub.back.crash = Backplane volvió tras detenerse de forma inesperada
 
 # bot tabs and moods
 bots.tab.chat = Chat
