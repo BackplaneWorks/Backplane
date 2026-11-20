@@ -27,7 +27,7 @@ fn home_log() -> String {
 }
 
 // ---- ?view=1 (the remote desktop) ----
-struct View { c: Conn, id: u64, rev: u64, token: String, by_target: HashMap<String, String> }
+struct View { c: Conn, id: u64, rev: u64, token: String, by_target: HashMap<String, String>, z: crate::wire::z::Deflater, zbytes: usize }
 impl View {
     /// One view request as the desktop sends it (native sidebar, keyed deltas offered against `base`), its reply's bytes on the wire and its delta ops (None: whole).
     async fn ask(&mut self, hub: &Hub, m: &str, target: Value, base: &str) -> (usize, Option<usize>) {
@@ -36,6 +36,8 @@ impl View {
             "session":{"sel":target["id"],"rid":1,"drafts":{},"open":{},"adding":false,"panel":false,"info":{}},"nativeSidebar":1,"viewDelta":{"version":1,"token":base}});
         let out = hub.request(&mut self.c, &json!({"id":(1u64 << 47) + self.id,"m":m,"p":p})).await;
         let bytes: usize = out.iter().map(|f| crate::cbor::encode(f).len()).sum();
+        // the same frames through the connection's one deflate stream (`z=deflate`): what they cost compressed
+        self.zbytes = out.iter().map(|f| self.z.frame(&crate::cbor::encode(f)).len()).sum();
         let r = &out.last().expect("a reply")["result"];
         if std::env::var_os("BUDGET_DUMP").is_some() { for op in r["viewDelta"]["ops"].as_array().into_iter().flatten() { eprintln!("OP {m} {target}: {} {} B", op[1], op.get(2).map_or(0, |x| x.to_string().len())) } }
         if let Some(t) = r["viewDelta"]["token"].as_str() { self.token = t.to_string(); self.by_target.insert(target.to_string(), t.to_string()); }
@@ -66,20 +68,22 @@ async fn real_hub(name: &str) -> (crate::hub::TestHub, u16) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn budget_child() {
     if std::env::var_os("BP_BUDGET_CHILD").is_none() { return }
     let (h, port) = real_hub("data-budget").await;
-    view_budget(&h.hub).await; data_budget(port).await;
+    view_budget(&h.hub).await; data_budget(port).await; phase1_budget(port).await;
     println!("budget_child_ok");
 }
 /// `?view=1`: a thread switch is ops from a body the client holds, a return to a held thread and an update with nothing changed are near nothing.
 async fn view_budget(hub: &Arc<Hub>) {
     let (c, _greeting) = hub.connect(true);
-    let mut v = View { c, id: 0, rev: 0, token: String::new(), by_target: HashMap::new() };
+    let mut v = View { c, id: 0, rev: 0, token: String::new(), by_target: HashMap::new(), z: Default::default(), zbytes: 0 };
     let (cold_recent, _) = v.ask(&hub, "view.open", json!({"kind":"recent","id":""}), "").await;
     let base = v.token.clone(); let (cold_open, _) = v.ask(&hub, "view.open", thread("t000"), &base).await;
     let base = v.token.clone(); let (switch, switch_ops) = v.ask(&hub, "view.open", thread("t001"), &base).await;
-    let back_base = v.by_target[&thread("t000").to_string()].clone(); let (back, back_ops) = v.ask(&hub, "view.open", thread("t000"), &back_base).await;
-    let base = v.token.clone(); let (noop, noop_ops) = v.ask(&hub, "view.update", thread("t000"), &base).await;
+    let switch_z = v.zbytes;
+    let back_base = v.by_target[&thread("t000").to_string()].clone(); let (back, back_ops) = v.ask(&hub, "view.open", thread("t000"), &back_base).await; let back_z = v.zbytes;
+    let base = v.token.clone(); let (noop, noop_ops) = v.ask(&hub, "view.update", thread("t000"), &base).await; let noop_z = v.zbytes;
     let (whole, _) = v.ask(&hub, "view.open", thread("t001"), "").await;
-    eprintln!("BUDGET view=1: cold recent {cold_recent} B, open t000 {cold_open} B, switch t000->t001 {switch} B ({switch_ops:?} ops; whole {whole} B), back to t000 on its own base {back} B ({back_ops:?} ops), unchanged view.update {noop} B ({noop_ops:?} ops)");
+    eprintln!("BUDGET view=1: cold recent {cold_recent} B, open t000 {cold_open} B, switch t000->t001 {switch} B ({switch_ops:?} ops; whole {whole} B), back to t000 on its own base {back} B ({back_ops:?} ops), unchanged view.update {noop} B ({noop_ops:?} ops); deflated: switch {switch_z} B, back {back_z} B, update {noop_z} B");
+    assert!(back_z <= WARM_Z_MAX && noop_z <= WARM_Z_MAX, "deflated, a return to a held thread {back_z} B and an unchanged update {noop_z} B, at most {WARM_Z_MAX}");
     assert!(switch_ops.is_some() && back_ops.is_some(), "a thread switch is ops from a body the client holds, not the whole picture");
     assert!(switch * 2 < whole && switch <= SWITCH_MAX, "a switch costs well under the whole picture: {switch} B of {whole} B, at most {SWITCH_MAX}");
     assert!(back_ops.map_or(false, |n| n <= 4), "back to a thread whose picture the client holds, nothing changed: only the session's own fields ({back_ops:?} ops)");
@@ -89,6 +93,8 @@ async fn view_budget(hub: &Arc<Hub>) {
 }
 /// Phase 0's ceilings (measured: 26.7 KB for a switch to a thread not held, 769 B back to one held, 241 B an unchanged update); Phase 1 holds a warm switch to 500 B.
 const SWITCH_MAX: usize = 32 * 1024;
+/// Phase 1: a warm switch (a held thread, or nothing changed), compressed.
+const WARM_Z_MAX: usize = 500;
 const BACK_MAX: usize = 1024;
 const NOOP_MAX: usize = 512;
 
@@ -129,3 +135,47 @@ async fn data_budget(port: u16) {
 /// Phase 0's ceilings (measured: 31.6 KB and 6.6 KB, JSON); Phase 1's compression and `shell.sync`/`thread.open` bring them to 6 KB and 3 KB.
 const LISTS_MAX: usize = 36 * 1024;
 const OPEN_MAX: usize = 8 * 1024;
+
+// ---- Phase 1: compressed, one round trip (docs/PHONE-DATA.md, Compression and one-round-trip reads) ----
+/// A `z=deflate` socket's reply to one request: the reply, and the compressed bytes of every frame up to it.
+struct Zws { ws: Ws, z: flate2::Decompress }
+impl Zws {
+    async fn ask(&mut self, id: u64, m: &str, p: Value) -> (Value, usize) {
+        use flate2::FlushDecompress;
+        self.ws.send(Message::Text(json!({"id":id,"m":m,"p":p}).to_string().into())).await.unwrap();
+        let mut n = 0;
+        loop {
+            let f = tokio::time::timeout(Duration::from_secs(10), self.ws.next()).await.expect("a frame in time").unwrap().unwrap();
+            let Message::Binary(b) = f else { continue }; n += b.len();
+            let mut out = Vec::with_capacity(b.len() * 8 + 1024); let start = self.z.total_in();
+            loop { let done = (self.z.total_in() - start) as usize; if out.capacity() - out.len() < 64 { out.reserve(out.capacity()) }
+                self.z.decompress_vec(&b[done..], &mut out, FlushDecompress::Sync).unwrap(); if (self.z.total_in() - start) as usize == b.len() && out.len() < out.capacity() { break } }
+            let v: Value = serde_json::from_slice(&out).unwrap();
+            if v["t"] == "reply" && v["id"] == id { assert_eq!(v["ok"], true, "{m}: {v}"); return (v["result"].clone(), n) }
+        }
+    }
+}
+/// The client's `have` after a reply: its part hashes, and each entry's own.
+fn have_after(r: &Value, held: &mut serde_json::Map<String, Value>) {
+    for (k, v) in r["h"].as_object().into_iter().flatten() { held.insert(k.clone(), v.clone()); }
+    for e in r["entries"].as_array().into_iter().flatten() { held.insert(e["id"].as_str().unwrap_or("").into(), e["h"].clone()); }
+}
+async fn phase1_budget(port: u16) {
+    let mut c = Zws { ws: open(port, "&enc=json&z=deflate").await, z: flate2::Decompress::new(false) };
+    let hello = match c.ws.next().await.unwrap().unwrap() { Message::Text(t) => serde_json::from_str::<Value>(t.as_str()).unwrap(), m => panic!("{m:?}") }; assert_eq!(hello["z"], "deflate");
+    let (shell, shell_z) = c.ask(1, "shell.sync", json!({})).await;
+    let (_, shell_warm_z) = c.ask(2, "shell.sync", json!({"have": shell["h"]})).await;
+    let (t0, open_z) = c.ask(3, "thread.open", json!({"thread":"t000"})).await;
+    let (t1, switch_z) = c.ask(4, "thread.open", json!({"thread":"t001"})).await;
+    let mut held = serde_json::Map::new(); have_after(&t0, &mut held);
+    let (back, back_z) = c.ask(5, "thread.open", json!({"thread":"t000","have":held})).await;
+    let _ = t1;
+    eprintln!("BUDGET phase 1 data/1 json+deflate: cold shell.sync {shell_z} B (warm {shell_warm_z} B), cold thread.open t000 {open_z} B, t001 {switch_z} B, back to t000 held {back_z} B");
+    assert_eq!(back["entries"], json!([]), "held and unchanged: nothing of the page again");
+    assert!(shell_z <= SHELL_Z_MAX, "a cold sidebar: {shell_z} B, at most {SHELL_Z_MAX}");
+    assert!(open_z <= OPEN_Z_MAX && switch_z <= OPEN_Z_MAX, "a cold thread open: {open_z} / {switch_z} B, at most {OPEN_Z_MAX}");
+    assert!(back_z <= WARM_Z_MAX && shell_warm_z <= WARM_Z_MAX, "warm: thread {back_z} B, sidebar {shell_warm_z} B, at most {WARM_Z_MAX}");
+}
+/// Phase 1's ceilings (docs/remote-architecture.md, Pillar 5): a cold sidebar 6 KB, a cold thread open 3 KB, compressed.
+const SHELL_Z_MAX: usize = 6 * 1024;
+const OPEN_Z_MAX: usize = 3 * 1024;

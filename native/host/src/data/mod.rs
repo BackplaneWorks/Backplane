@@ -622,7 +622,9 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool
 #[derive(Clone, PartialEq)]
 enum Topic { Lists, Thread(String), Sub(String, String) }
 #[derive(Default)]
-struct Subs { far_rows: HashMap<String, (HashSet<String>, String)>, far_seen: Option<HashMap<String, String>>, proj_seen: Option<HashMap<String, String>>, next: u64, subs: Vec<(u64, Topic)>, live: HashMap<String, Streams>, counts: HashMap<String, (u64, u64)>, terms: HashSet<String> }
+struct Subs { far_rows: HashMap<String, (HashSet<String>, String)>, far_seen: Option<HashMap<String, String>>, proj_seen: Option<HashMap<String, String>>, next: u64, subs: Vec<(u64, Topic)>, live: HashMap<String, Streams>, counts: HashMap<String, (u64, u64)>, terms: HashSet<String>,
+    /// `parts:1` subagent subscriptions: the parts each one's client holds (data/open.rs `sub_parts`), so a push carries only what moved
+    sub_held: HashMap<u64, HashMap<String, String>> }
 /// A thread's streamed replies on one connection. Frames (deltas, their end) and log lines (the reply's final message) reach the connection on two channels, so
 /// the final message of a reply a person's message cut can arrive after the next reply has begun streaming. Each stream has its own entry (`live:<thread>`, then
 /// `live:<thread>.<n>`), a stream ends at its `delta_end` frame (which comes in order with the deltas), and a final message replaces the oldest stream that ended
@@ -646,6 +648,8 @@ impl Subs {
 fn swarm_of(th: &str) -> Option<String> { crate::statehost::policies().and_then(|p| p.with_state(|st| st.swarm_of.get(th).cloned())).flatten() }
 fn is_swarm(room: &str) -> bool { crate::statehost::policies().and_then(|p| p.with_state(|st| st.rooms_nav.get(room).map_or(false, |r| r.swarm()))).unwrap_or(false) }
 fn d(sub: u64, k: &str, mut body: Value) -> Value { body["t"] = json!("d"); body["sub"] = json!(sub); body["k"] = json!(k); body }
+/// A `sub.d` push that carries nothing new (no head, no ids, no entries): not sent.
+pub(crate) fn is_empty_parts(b: &Value) -> bool { b.get("head").is_none() && b.get("ids").is_none() && b["entries"].as_array().map_or(true, Vec::is_empty) }
 fn turn_word(state: &str) -> &'static str { match state { "running" => "working", "failed" => "failed", _ => "idle" } }
 
 /// The pushes for new log lines, for the lists and threads this connection subscribed to.
@@ -723,7 +727,9 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     }
     // a lock moving changes the rows of every thread with a place on it, so each open thread is sent its own again
     if locks_moved { for (_, t) in &subs.subs { if let Topic::Thread(th) = t { if !worked.contains(th) { worked.push(th.clone()) } } } }
-    for (sub, th, k) in &viewed { let v = hub.sub_view_for(th, k).await; out.push(d(*sub, "sub", json!({"thread":th,"key":k,"view":v}))) }
+    for (sub, th, k) in &viewed { let v = hub.sub_view_for(th, k).await;
+        match subs.sub_held.get_mut(sub) { Some(held) => { let body = open::sub_parts(th, k, &v, held); if !is_empty_parts(&body) { out.push(d(*sub, "sub.d", body)) } }
+            None => out.push(d(*sub, "sub", json!({"thread":th,"key":k,"view":v}))) } }
     for th in &worked { let subs_now = ext::work_now(hub, th).await; for sub in subs.threads(th) { out.push(d(sub, "work", json!({"thread":th,"subs":subs_now}))) } }
     if bots_moved { for sub in subs.lists() { out.push(d(sub, "bots", json!({}))) } }
     if locks_moved { let l = ext::locks_now(hub).await; for sub in subs.lists() { out.push(d(sub, "locks", json!({"locks":l}))) } }
@@ -842,11 +848,14 @@ async fn handle_for(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, v: &Value, is
             ("thread", th) if hub.model().await.threads.get(th).map_or(false, |t| !t.deleted) || hub.far().map_or(false, |f| f.has(th)) => { subs.next += 1; subs.subs.push((subs.next, Topic::Thread(th.into()))); far_seed(hub, subs, th); Ok(json!({"sub":subs.next})) }
             ("thread", _) => Err(err("unknown thread")),
             // feature "subview": one subagent's view, pushed whole (`k:"sub"` {thread, key, view}) when its log, its row or its turn moves
-            ("sub", th) if !s(&p, "key").is_empty() && hub.model().await.threads.get(th).map_or(false, |t| !t.deleted) => { subs.next += 1; subs.subs.push((subs.next, Topic::Sub(th.into(), s(&p, "key").into()))); Ok(json!({"sub":subs.next})) }
+            ("sub", th) if !s(&p, "key").is_empty() && hub.model().await.threads.get(th).map_or(false, |t| !t.deleted) => { subs.next += 1; subs.subs.push((subs.next, Topic::Sub(th.into(), s(&p, "key").into())));
+                // `parts:1`: pushes `k:"sub.d"` with what moved (the first one everything), not the whole view each step
+                if p["parts"] == json!(1) { subs.sub_held.insert(subs.next, HashMap::new()); }
+                Ok(json!({"sub":subs.next})) }
             ("sub", _) => Err(err("unknown thread or key")),
             _ => Err(err("topic: lists, thread or sub")),
         },
-        "unsubscribe" => { let n = p["sub"].as_u64().unwrap_or(0); subs.subs.retain(|(i, _)| *i != n); Ok(json!({})) }
+        "unsubscribe" => { let n = p["sub"].as_u64().unwrap_or(0); subs.subs.retain(|(i, _)| *i != n); subs.sub_held.remove(&n); Ok(json!({})) }
         // feature "open": the thread's page and panels in one reply, by hashed parts (data/open.rs)
         "thread.open" => open::thread_open(hub, c, subs, &p, is_browser).await,
         // feature "shell": the sidebar in one reply, by hashed parts per project (data/open.rs)
