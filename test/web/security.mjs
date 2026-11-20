@@ -25,6 +25,9 @@ export async function checkRequestBoundary(socketPath, origin, session) {
   const ws = '/ws?data=1&enc=json';
   assert.equal(await status('GET', ws, {...upgrade, Origin:origin}), 401);
   const Cookie = '__Host-bp_web=' + session;
+  const otherLogin = {'Tailscale-User-Login':'second@example.test', Cookie, Origin:origin};
+  assert.equal(await status('GET','/files/get?thread=t1&path=sample.txt',otherLogin),401);
+  assert.equal(await status('GET',ws,{...upgrade,...otherLogin}),401);
   for (const originHeaders of [{}, {Origin:'https://other.example.test'}]) {
     assert.equal(await status('POST','/auth/web/logout',{Cookie,...originHeaders}), 401);
     assert.equal(await status('GET',ws,{Cookie,...upgrade,...originHeaders}), 401);

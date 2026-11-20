@@ -10,11 +10,18 @@ async function deviceButton(rpc, name, action) {
   return { row, button: row.buttons.find(button => button.action === action) };
 }
 
-export async function browserTasks({ context, origin, rpc, thread, assets, replyText, screenshot, nativeShot, readRegistry, checkLogs, checkBoundary, registeredRoutes }) {
+export async function browserTasks({ context, origin, rpc, thread, canary, assets, replyText, screenshot, nativeShot, readRegistry, checkLogs, checkBoundary, registeredRoutes }) {
+  let leaked = false;
+  const bodies = [];
+  const inspect = bytes => { if (Buffer.from(bytes).includes(canary)) leaked = true; };
+  context.on('response', response => bodies.push(response.body().then(inspect, () => {})));
   const urls = new Set();
   context.on('request', req => urls.add(req.url()));
   const page = await context.newPage();
-  page.on('websocket', ws => urls.add(ws.url()));
+  page.on('websocket', ws => {
+    urls.add(ws.url());
+    ws.on('framereceived', ({payload}) => inspect(payload));
+  });
   const name = 'Headless browser';
   const testId = id => page.getByTestId(id);
   await page.setViewportSize({width:1440, height:900});
@@ -31,7 +38,8 @@ export async function browserTasks({ context, origin, rpc, thread, assets, reply
   assert.match(code, /^\d{6}$/);
   await screenshot(page, 'pair-code');
   const approval = await deviceButton(rpc, name, 'device-web-approve');
-  assert.ok(approval.row.note.includes(code), 'browser and native comparison codes differ');
+  assert.ok(approval.row.note.replaceAll(' ', '').includes(code), 'browser and native comparison codes differ');
+  assert.ok(approval.row.note.includes('person@example.com'), 'native approval omitted verified login');
   if (nativeShot) await nativeShot('native-devices');
   const connected = page.waitForEvent('websocket', socket => new URL(socket.url()).pathname === '/ws');
   const approvedAt = performance.now();
@@ -51,6 +59,7 @@ export async function browserTasks({ context, origin, rpc, thread, assets, reply
 
   await testId('thread-row-' + thread).click();
   await testId('timeline').waitFor();
+  await testId('timeline').getByText('Mask check: ' + '•'.repeat(canary.length), {exact:true}).waitFor({timeout:5000});
   const earliest = testId('timeline').getByText('History entry 0', {exact:true});
   await testId('load-older-btn').waitFor();
   assert.equal(await earliest.count(), 0);
@@ -90,6 +99,8 @@ export async function browserTasks({ context, origin, rpc, thread, assets, reply
   await testId('pair-card').waitFor();
   await checkProtectedAssets(page, origin, assets, false);
   await screenshot(page, 'revoked');
+  await Promise.all(bodies);
+  assert.equal(leaked, false, 'raw fixture value visible in browser traffic');
   checkLogs(session);
   for (const address of urls) {
     assert.ok(!address.includes(session) && !new URL(address).searchParams.has('token'), 'credential in a browser URL');

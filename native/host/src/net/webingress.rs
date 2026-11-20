@@ -312,9 +312,15 @@ static FIXTURE_AUTHORITY: std::sync::OnceLock<String> = std::sync::OnceLock::new
 pub(crate) fn start_fixture_proxy(hub: &std::sync::Arc<crate::hub::Hub>) -> anyhow::Result<()> {
     let Some(authority) = FIXTURE_AUTHORITY.get() else { return Ok(()) };
     std::fs::write(hub.cfg.home.join("fixture-http-routes.json"), serde_json::to_vec(&hub.http_routes())?)?;
+    let value = std::env::var("BP_WEB_MASK_FIXTURE")?;
+    anyhow::ensure!(std::env::var("BACKPLANE_VAULT_KEYRING").as_deref() == Ok("file"));
+    anyhow::ensure!(crate::settings::vault::put("browser-fixture", &value, "Synthetic masking test", "fixture") == "ok");
+    let marker = format!("Mask check: {value}");
     let listener = tokio::net::UnixListener::bind(hub.cfg.home.join("browser.sock"))?;
     let hub = hub.clone();
     tokio::spawn(async move {
+        hub.commit(&serde_json::json!({"$":"MessagePosted","thread":"t1","msg":"mask-check",
+            "role":"assistant","text":marker,"at":1700000100})).await.expect("fixture entry");
         while let Ok((stream, _)) = listener.accept().await {
             let hub = hub.clone();
             tokio::spawn(async move { let _ = serve(hub, stream, authority).await; });
@@ -338,7 +344,7 @@ async fn isolated_browser_hub() {
     assert_eq!(PathBuf::from(std::env::var_os("BACKPLANE_AGENTS").unwrap()), root.join("agents"));
     FIXTURE_AUTHORITY.set(format!("backplane.example.test:{tls}")).unwrap();
     let project = root.join("project");
-    std::fs::create_dir(&project).unwrap();
+    assert!(project.join("ecc83-pp.kicad_pro").is_file());
     std::fs::write(project.join("sample.txt"), "Backplane fixture").unwrap();
     let mut log = [
         serde_json::json!({"$":"ProjectCreated","id":"p1","title":"Browser fixture","root":project,"at":1700000000}),
