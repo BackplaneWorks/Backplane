@@ -173,6 +173,27 @@ mod imp {
         if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_focus_proxy": id, "top": top})); }
         Some(id)
     }
+    /// The wake thread's redirect, at most REDIRECTS_PER within REDIRECT_SPAN: a window manager that puts the focus back on the top-level
+    /// each time it moves (none seen; the review's guard) gets the proxy a few times, then the top-level is left focused for REDIRECT_REST,
+    /// said once, instead of the two of them trading the focus as fast as the X server allows
+    const REDIRECTS_PER: u32 = 4;
+    const REDIRECT_SPAN: std::time::Duration = std::time::Duration::from_millis(100);
+    const REDIRECT_REST: std::time::Duration = std::time::Duration::from_secs(1);
+    fn redirect_allowed() -> bool {
+        static S: Mutex<Option<(std::time::Instant, u32, Option<std::time::Instant>)>> = Mutex::new(None);
+        let mut g = S.lock().unwrap_or_else(|e| e.into_inner());
+        let now = std::time::Instant::now();
+        let (start, n, rest) = g.get_or_insert((now, 0, None));
+        if let Some(r) = *rest { if now < r { return false } *rest = None; *start = now; *n = 0; }
+        if now.duration_since(*start) > REDIRECT_SPAN { *start = now; *n = 0; }
+        *n += 1;
+        if *n > REDIRECTS_PER {
+            *rest = Some(now + REDIRECT_REST);
+            eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_focus_proxy_rest": {"redirects": *n - 1, "within_ms": REDIRECT_SPAN.as_millis() as u64}}));
+            return false;
+        }
+        true
+    }
     /// The window the keyboard goes to when it is Backplane's in top-level `w`: its focus proxy, else `w` itself
     fn home_of(w: u32) -> u32 { proxies().lock().unwrap().get(&w).copied().unwrap_or(w) }
     /// Every child of `old` (stock KiCad's frames, or the fork's holder) moved into `new`, unmapped where it was not shown: a pane moved to
@@ -211,6 +232,13 @@ mod imp {
         let container = container as u32;
         containers().lock().unwrap().remove(&container);
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
+        // the last container in its top-level gone: no pane there any more, so no proxy kept for it (the focus is left where it is: on the
+        // proxy, GPUI reads its keys as before; a later focus on the top-level stays there, as in a window that never had a pane)
+        let parent_of = |w: u32| c.query_tree(w).ok().and_then(|q| q.reply().ok()).map(|t| t.parent);
+        if let Some(top) = parent_of(container) {
+            let others = containers().lock().unwrap().iter().copied().collect::<Vec<_>>();
+            if !others.into_iter().any(|o| parent_of(o) == Some(top)) { proxies().lock().unwrap().remove(&top); }
+        }
         let _ = c.allow_events(Allow::REPLAY_POINTER, x11rb::CURRENT_TIME);
         let _ = c.ungrab_button(ButtonIndex::ANY, container, ModMask::ANY);
         let _ = c.destroy_window(container); let _ = c.flush();
@@ -618,7 +646,8 @@ mod imp {
     /// X11: no activation takes the keys back after a close: hand in at once
     pub fn activated_after_close(_main: u64, _popped: u64) -> bool { true }
     pub fn keep_focus(_top: u64) -> bool { false }
-    /// Whether KiCad has the keyboard now (the pane's tick): while it has, a focus on the top-level is left where it is (pump)
+    /// Whether KiCad has the keyboard now (the pane's tick). Its change to Backplane moves a focus left on a top-level to its proxy; the
+    /// wake thread's redirect (pump) does not wait for it
     static PANE_KEYS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     pub fn note_pane_keys(kicad: bool) {
         // (called every tick: only a change to Backplane's keyboard looks at the focus)
@@ -797,7 +826,7 @@ mod imp {
                 x11rb::protocol::Event::FocusIn(f) => {
                     let proxy = proxies().lock().unwrap().get(&f.event).copied();
                     if let Some(p) = proxy {
-                        if c.get_input_focus().ok().and_then(|r| r.reply().ok()).is_some_and(|r| r.focus == f.event) {
+                        if c.get_input_focus().ok().and_then(|r| r.reply().ok()).is_some_and(|r| r.focus == f.event) && redirect_allowed() {
                             let _ = c.set_input_focus(InputFocus::PARENT, p, x11rb::CURRENT_TIME);
                         }
                     }
