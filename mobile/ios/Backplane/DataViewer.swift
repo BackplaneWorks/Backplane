@@ -60,6 +60,9 @@ func boardName(_ label: String) -> (String, String) { if let i = label.lastIndex
 
 extension DataClient {
     func viewerFiles(_ thread: String) async -> DProjectFiles? { try? await call("viewer.files", ["thread": thread]) }
+    func viewerRail(_ thread: String, page: String = "", diff: Bool = false) async -> [DViewerRailEntry]? {
+        ((try? await call("viewer.rail", ["thread": thread, "page": page, "diff": diff]) as DViewerRailReply)?.rail)
+    }
     /// A viewer (tab, file, thread) opens: the last one's plots go at once and late ones for it are dropped (PlotStore.begin/shown);
     /// a 3D view shows its own cached model once the hub names that model's file among the view's.
     func watch(_ thread: String, kind: String, path: String = "", board: String = "", tree: String = "") async throws {
@@ -95,7 +98,7 @@ extension DataClient {
     func screenBytes(_ thread: String) async -> Data? { await fetch("/bots/\(thread)/screen.jpg") }
 }
 
-private let tabs = ["Board", "Schematic", "3D", "Split", "Mech", "Files", "Diff", "Review", "Browser"]
+private let tabs = ["Board", "Schematic", "3D", "Gerbers", "Split", "Mech", "Files", "Diff", "Review", "Browser"]
 
 /// The Viewer the Metal view wants, with the defaults the hub's own view would send; only what the data app decides (layers, the picked piece) varies.
 private func plainViewer(open: String, source: String, picked: String, off: UInt32, dim: UInt32, lift: Int) -> Viewer? {
@@ -116,6 +119,9 @@ struct DataViewerView: View {
     @State private var tab: String
     @State private var target: (tab: String, path: String)?
     @State private var files: DProjectFiles?
+    @State private var railEntries: [DViewerRailEntry]?
+    @State private var userPressed = false
+    @State private var disabledWhy = ""
     // the project's boards (two or more: the hub's `boards`): a pick shows that board on Board, Schematic, 3D and Split, as the desktop's Boards menu does
     @State private var boardPick = ""
     @State private var sheetPick = ""
@@ -128,15 +134,37 @@ struct DataViewerView: View {
         _target = State(initialValue: e == "kicad_pcb" || e == "pcbdoc" ? ("Board", openFile) : e == "kicad_sch" || e == "schdoc" ? ("Schematic", openFile) : ["step", "stp", "glb"].contains(e) ? ("Mech", openFile) : nil)
     }
     var body: some View {
+        let strip = railEntries.map { ViewerRail.phoneTabs($0, gerbersSupported: client.has("gerbers")) } ?? ViewerRail.fallbackTabs
         VStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
-                    ForEach(tabs, id: \.self) { t in
-                        Button { tab = t; target = nil } label: { Text(Tr.t(t)).dmono(12, bold: t == tab).foregroundStyle(t == tab ? BackplaneDesign.onAccent : BackplaneDesign.text).padding(.horizontal, 14).padding(.vertical, 10).background(t == tab ? BackplaneDesign.accent : BackplaneDesign.panel) }
-                            .accessibilityIdentifier("data.vtab." + t)
+                    ForEach(strip) { item in
+                        let t = item.tab
+                        let active = !item.disabled && t == tab
+                        Button {
+                            if item.disabled {
+                                disabledWhy = item.why
+                            } else {
+                                disabledWhy = ""
+                                userPressed = true
+                                tab = t
+                                target = nil
+                            }
+                        } label: {
+                            Text(Tr.t(t)).dmono(12, bold: active)
+                                .foregroundStyle(active ? BackplaneDesign.onAccent : item.disabled ? BackplaneDesign.dim : BackplaneDesign.text)
+                                .padding(.horizontal, 14).padding(.vertical, 10)
+                                .background(active ? BackplaneDesign.accent : BackplaneDesign.panel)
+                        }
+                        .accessibilityIdentifier("data.vtab." + t)
                     }
                 }
             }.background(BackplaneDesign.panel)
+            if !disabledWhy.isEmpty {
+                Text(Tr.t(disabledWhy)).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(BackplaneDesign.background).accessibilityIdentifier("data.vtab.why")
+            }
             DLine()
             let board = files?.board(boardPick)
             if let on = board, ["Board", "Schematic", "3D", "Split"].contains(tab) {
@@ -156,6 +184,7 @@ struct DataViewerView: View {
                 case "Schematic": DataPlotTab(client: client, thread: thread, kind: "schematic", path: schPath, has: files == nil || !(files?.sch ?? "").isEmpty || board != nil || target != nil, none: "No schematic in this project yet", tree: board?.sch ?? "")
                 // unknown files (no hub yet) still open the 3D view: it shows the model it showed last
                 case "3D": DataPlotTab(client: client, thread: thread, kind: "3d", path: board?.pcb ?? "", has: files == nil || !(files?.pcb ?? "").isEmpty || board != nil, none: "No board in this project yet")
+                case "Gerbers": DataPlotTab(client: client, thread: thread, kind: "gerbers", path: "", has: true, none: "No Gerbers in this project yet")
                 case "Split": DataSplitTab(client: client, thread: thread, files: files, board: board)
                 case "Diff": DataDiffTab(client: client, thread: thread)
                 case "Review": DataReviewTab(client: client, thread: thread)
@@ -168,13 +197,18 @@ struct DataViewerView: View {
         .background(BackplaneDesign.background)
         .dataBar(thread.title.isEmpty ? Tr.t("New thread") : thread.title)
         .task(id: client.conn == .online) {
+            if client.has("rail"), let got = await client.viewerRail(thread.id, page: ViewerRail.idForTab(tab), diff: tab == "Diff") {
+                railEntries = got
+                let mapped = ViewerRail.phoneTabs(got, gerbersSupported: client.has("gerbers"))
+                tab = ViewerRail.activeTab(mapped, current: tab, userPressed: userPressed, hasFileLink: !openFile.isEmpty)
+            }
             guard files == nil else { return }
             // a slow or dropped answer is asked again (three tries): without it the picker and the pages' files never came until the viewer was reopened
             for i in 0..<3 { files = await client.viewerFiles(thread.id); if files != nil { break }; try? await Task.sleep(nanoseconds: UInt64(1_500_000_000 * (i + 1))) }
-            if !(files?.pcb ?? "").isEmpty && tab == "Files" && openFile.isEmpty { tab = "Board" }
+            if !(files?.pcb ?? "").isEmpty && tab == "Files" && openFile.isEmpty && !userPressed { tab = "Board" }
             #if DEBUG || BP_MEASURE
             // a check without hands: BACKPLANE_VTAB opens that tab (BACKPLANE_SELECT=viewer:<thread> opens the viewer)
-            if let t = ProcessInfo.processInfo.environment["BACKPLANE_VTAB"], tabs.contains(t) { tab = t }
+            if let t = ProcessInfo.processInfo.environment["BACKPLANE_VTAB"], tabs.contains(t) { tab = t; userPressed = true }
             #endif
         }
         .onDisappear { Task { try? await client.watch(thread.id, kind: "") } }
@@ -351,12 +385,13 @@ struct DataPlotTab: View {
             .accessibilityIdentifier(id)
     }
     /// A press: the hub answers what it does; a comparison on show keeps its marks to the active layer.
+    private var layerKind: String { kind == "gerbers" ? "board" : kind }
     private func act(_ action: String, _ value: String, _ present: UInt32) {
         Task {
-            guard let r = await client.layers(kind, present: present, own: layers?.own ?? 0, focus: layers?.focus ?? "", action: action, value: value) else { return }
+            guard let r = await client.layers(layerKind, present: present, own: layers?.own ?? 0, focus: layers?.focus ?? "", action: action, value: value) else { return }
             let moved = (layers?.layerBits ?? 0) != r.layerBits
             layers = r
-            if moved && !comparing.isEmpty { try? await client.compare(thread.id, kind: kind, commit: comparing, bits: r.layerBits, path: path) }
+            if moved && !comparing.isEmpty { try? await client.compare(thread.id, kind: layerKind, commit: comparing, bits: r.layerBits, path: path) }
         }
     }
     private func open(_ commit: String) {
