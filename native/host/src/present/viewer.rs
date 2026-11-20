@@ -253,7 +253,7 @@ pub fn view_action_at(st: &State, hub: &str, session: &Value, kind: &str, now_ms
 
 /// Where the hub keeps a board's probe (0.14's Probe.key "probe:<root>|<board>"): the board picked, else the project's own; the same for every page of it.
 fn probe_key(session: &Value, sel: &str, root: &str) -> String {
-    let b = chosen_board(&session["drafts"], sel, &root);
+    let b = chosen_board(&session["drafts"], sel, root);
     let b = if b.is_empty() { s(&session["info"], &format!("fab.board:{sel}")).to_string() } else { b };
     format!("probe:{root}|{b}")
 }
@@ -321,7 +321,7 @@ fn boards_menu(session: &Value, sel: &str, root: &str) -> Option<Value> {
     let list: Vec<&str> = s(&session["info"], &format!("fab.boards:{sel}")).lines().filter(|l| !l.trim().is_empty()).collect();
     if list.len() < 2 { return None }
     let own = s(&session["info"], &format!("fab.board:{sel}"));
-    let chosen = chosen_board(&session["drafts"], sel, &root);
+    let chosen = chosen_board(&session["drafts"], sel, root);
     let on_abs = s(&session["drafts"], &format!("@view.file:{sel}"));
     let on = if !chosen.is_empty() { chosen } else if !on_abs.is_empty() && on_abs.ends_with(".kicad_pcb") { on_abs.strip_prefix(&format!("{root}/")).unwrap_or(on_abs).to_string() } else { own.to_string() };
     // nothing known of the board on show (the project's own not read yet): no row is lit and the picker says "Select board". It lit the first
@@ -477,7 +477,6 @@ const MARK_LAYERS: [(u32, &str); 3] = [(26, "Removed"), (27, "Changed"), (28, "A
 const SCH_LAYERS: [&str; 24] = ["page", "sheet fill", "body fill", "sheet", "graphic", "note", "body", "pin", "pin name", "pin number", "field", "field other", "bus", "bus entry", "wire", "no connect",
     "junction", "label", "global label", "hier label", "sheet name", "sheet file", "sheet pin", "dnp"];
 
-/// One drawing page as `View.json.single` writes it: open, key, the layers it draws, the layer list.
 #[derive(Default)]
 struct ShownGerbers {
     path: String,
@@ -485,6 +484,7 @@ struct ShownGerbers {
     has: Option<bool>,
 }
 
+/// One drawing page, including the source facts from its GerbView listing.
 fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str, sources: &RailSources, shown: &mut ShownGerbers) -> Value {
     // View.key.at: a schematic's sheet is part of its source key
     let sheet = if kind == "schematic" && !sel.is_empty() { s(drafts, &format!("@view.sheet:{sel}")) } else { "" };
@@ -756,7 +756,7 @@ fn rail_sources_for(root: &str, selected: &str, kind: &str, file: &str, sheet: &
     let board_path = if matches!(kind,"board"|"3d") && !file.is_empty() { file } else if selected.is_empty() { &files.pcb } else { selected };
     let root_sheet = if selected.is_empty() || files.sch.to_ascii_lowercase().ends_with(".schdoc") {
         files.sch.clone()
-    } else { schematic_for_board(&selected) };
+    } else { schematic_for_board(selected) };
     let sheet_path = if matches!(kind, "schematic"|"split") && !sheet.is_empty() { sheet }
         else if kind == "schematic" && !file.is_empty() { file } else { &root_sheet };
     let doc = |path| {
@@ -805,7 +805,7 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         rail_sources_for(&root, &chosen_board(drafts, sel, &root), kind, draft("@view.file"), draft("@view.sheet"))
     } else { RailSources::default() });
     let mut shown = ShownGerbers::default();
-    let mut v = viewer_page(st, template, session, &root, &|| &*sources, &mut shown)?;
+    let mut v = viewer_page(st, template, session, &root, || &*sources, &mut shown)?;
     // Follow agent: the thread's setting and the last edit's focus (the phones read the same; kicad/follow.rs)
     if !sel.is_empty() && !sel.contains('~') && v["open"].as_str().is_some_and(|o| matches!(o, "board" | "schematic" | "split")) {
         if let Some(o) = v.as_object_mut() { o.insert("follow".into(), crate::files::kicad::follow::picture(sel)); }
@@ -833,6 +833,14 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         v["rail"] = rail::rail(input);
         v["has"] = has;
     }
+    // A restored template can already show the default set before the thread has a page draft.
+    if local && v["gerbers"] == true && shown.has.is_none() && !root.is_empty() {
+        shown.has = Some(sources.gerbers);
+        if let Some((path, time)) = &sources.newest {
+            shown.path = path.to_string_lossy().into_owned();
+            shown.made_at = time.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs());
+        }
+    }
     if let identity @ Value::Object(_) = header_identity(st, session, &v, &root, &sources, &shown) { v["identity"] = identity; }
     Some(v)
 }
@@ -851,10 +859,11 @@ fn header_identity(st: &State, session: &Value, viewer: &Value, root: &str, rail
     let sheet = draft("@view.sheet");
     let selected = chosen_board(&session["drafts"], sel, &root);
     let context = super::identity_context::facts(st, session, sel, &rail.docs);
-    let root_sheet = if !far { rail.root_sheet.clone() } else if selected.is_empty() { s(&context,"sheet").to_owned() } else {
+    let docs = if far { &context } else { &rail.docs };
+    let root_sheet = if !far { rail.root_sheet.clone() } else if selected.is_empty() { s(docs,"sheet").to_owned() } else {
         schematic_for_board(&selected)
     };
-    let mut board: &str = if selected.is_empty() { s(&context,"board") } else { &selected };
+    let mut board: &str = if selected.is_empty() { s(docs,"board") } else { &selected };
     let mut schematic = root_sheet.as_str();
     if !file.is_empty() {
         match page { "board"|"3d"=>board=file, "schematic"=>schematic=file, _=>{} }
@@ -866,13 +875,13 @@ fn header_identity(st: &State, session: &Value, viewer: &Value, root: &str, rail
         match page { "board" | "3d" => board = historical, "schematic" => schematic = historical, _ => {} }
     }
     let sources = viewer_identity::Sources { root:&root, board, schematic, root_sheet:&root_sheet,
-        has_board:context["hasBoard"].as_bool(), has_sheet:context["hasSheet"].as_bool(), has_set:shown.has,
+        has_board:docs["hasBoard"].as_bool(), has_sheet:docs["hasSheet"].as_bool(), has_set:shown.has,
         file, sheet, directory:draft("@files.dir"), set:&shown.path, made_at:shown.made_at };
     let mut id = viewer_identity::identity(page,viewer,&sources,&|rel| {
         if !historical.is_empty() && historical == rel { return Some(true) }
         if page == "gerbers" { return shown.has }
-        if context["board"] == rel { return context["hasBoard"].as_bool() }
-        if context["sheet"] == rel { return context["hasSheet"].as_bool() }
+        if docs["board"] == rel { return docs["hasBoard"].as_bool() }
+        if docs["sheet"] == rel { return docs["hasSheet"].as_bool() }
         if far { return super::identity_context::far_exists(sel,rel) }
         if page == "mech" { return Some(viewer["mech"]["parts"].as_array()?.iter().any(|p| p["value"] == rel)) }
         if page == "files" { return (viewer["files"]["ready"] == true).then(|| viewer["files"]["error"] == "") }
@@ -952,7 +961,7 @@ fn panel_scope(project: &str, versions: &str) -> Value {
     }
     panels
 }
-fn viewer_page<'a>(st: &State, template: &Value, session: &Value, root: &str, sources: &impl Fn() -> &'a RailSources, shown: &mut ShownGerbers) -> Option<Value> {
+fn viewer_page<'a>(st: &State, template: &Value, session: &Value, root: &str, sources: impl FnOnce() -> &'a RailSources, shown: &mut ShownGerbers) -> Option<Value> {
     let sel = s(session, "sel");
     let kind = s(&session["drafts"], &format!("@view:{sel}"));
     // a panel the helper opened (Diff, Files, Mech, Review: view.kind/view.path in the info, panel on) is the helper's page, not an idle viewer
@@ -973,11 +982,12 @@ fn viewer_page<'a>(st: &State, template: &Value, session: &Value, root: &str, so
     if !s(info, &format!("view.kind:{sel}")).is_empty() || !s(info, &format!("view.path:{sel}")).is_empty() { return None }
     if kind.is_empty() { return Some(template.clone()) }
     if !shows(kind) || !simple(st, session, sel) { return None }
+    let sources = sources();
     let mut v = match kind {
         // Mech: the part on show as a 3D model (View.want: "2|<root>|<abs part>"), the parts as chips (Mech.json)
         "mech" => {
-            let ps = parts_of(&root, sel, s(&session["drafts"], &format!("@mech.part:{sel}"))); let cur = mech_current(&ps, s(&session["drafts"], &format!("@mech.part:{sel}")));
-            let (want, _) = mech_want(&root, &ps, s(&session["drafts"], &format!("@mech.part:{sel}")));
+            let ps = parts_of(root, sel, s(&session["drafts"], &format!("@mech.part:{sel}"))); let cur = mech_current(&ps, s(&session["drafts"], &format!("@mech.part:{sel}")));
+            let (want, _) = mech_want(root, &ps, s(&session["drafts"], &format!("@mech.part:{sel}")));
             let mut v = template.clone(); let o = v.as_object_mut()?;
             o.insert("open".into(), json!("mech")); o.insert("key".into(), json!(want));
             let chips: Vec<Value> = ps.iter().map(|p| json!({"label": stem(p), "value": p, "on": cur.as_deref() == Some(p.as_str())})).collect();
@@ -987,36 +997,36 @@ fn viewer_page<'a>(st: &State, template: &Value, session: &Value, root: &str, so
                 else { ("", "") };
             o.insert("mech".into(), json!({"say": say,
                 "note": note, "parts": chips, "rel": cur.clone().unwrap_or_default(), "busy": false, "render": "Create renders", "err": "",
-                "name": cur.as_deref().map(stem).unwrap_or_default(), "path": cur.as_deref().map(|p| abs_of(&root, p)).unwrap_or_default(), "shots": [], "empty": ""}));
+                "name": cur.as_deref().map(stem).unwrap_or_default(), "path": cur.as_deref().map(|p| abs_of(root, p)).unwrap_or_default(), "shots": [], "empty": ""}));
             v
         }
         // Split (Split.*): the schematic, the board and its 3D model, each a page of its own
         "split" => {
             let mut v = template.clone(); let o = v.as_object_mut()?;
-            o.insert("open".into(), json!("split")); o.insert("key".into(), json!(key("split", &root)));
+            o.insert("open".into(), json!("split")); o.insert("key".into(), json!(key("split", root)));
             // a board picked in the Boards menu: each pane's source is that board's file (its schematic beside it), as kicad.watch's split keys them
-            let chosen = chosen_board(&session["drafts"], sel, &root);
-            let picked = board_file("board", &root, &chosen);
+            let chosen = chosen_board(&session["drafts"], sel, root);
+            let picked = board_file("board", root, &chosen);
             // a sheet opened in the schematic pane is its source (`view-sheet`)
             let sheet = s(&session["drafts"], &format!("@view.sheet:{sel}")).to_string();
             let far = sel.contains('~');
-            o.insert("panes".into(), Value::Array(["schematic", "board", "3d"].iter().map(|k| { let mut p = page(template, k, &root, &session["drafts"], "", sources(), shown);
-                if !picked.is_empty() { let f = if *k == "schematic" { board_file("schematic", &root, &chosen) } else { picked.clone() }; let kk = format!("{}{f}", key(k, &root));
+            o.insert("panes".into(), Value::Array(["schematic", "board", "3d"].iter().map(|k| { let mut p = page(template, k, root, &session["drafts"], "", sources, shown);
+                if !picked.is_empty() { let f = if *k == "schematic" { board_file("schematic", root, &chosen) } else { picked.clone() }; let kk = format!("{}{f}", key(k, root));
                     if *k != "3d" { p["layers"] = json!(kk); } else { p["layers"] = json!(""); } p["key"] = json!(kk); }
-                if *k == "schematic" && !sheet.is_empty() { let kk = format!("{}{sheet}", key("schematic", &root)); p["key"] = json!(kk); p["layers"] = json!(kk); }
-                if let Some((empty, next)) = (!far && !root.is_empty()).then(|| pane_empty(k, sources())).flatten() {
+                if *k == "schematic" && !sheet.is_empty() { let kk = format!("{}{sheet}", key("schematic", root)); p["key"] = json!(kk); p["layers"] = json!(kk); }
+                if let Some((empty, next)) = (!far && !root.is_empty()).then(|| pane_empty(k, sources)).flatten() {
                     p["empty"] = json!(empty);
                     p["emptyNext"] = json!(next);
                 }
                 p }).collect()));
-            if let Some(b) = boards_menu(session, sel, &root) { o.insert("boards".into(), b); }
+            if let Some(b) = boards_menu(session, sel, root) { o.insert("boards".into(), b); }
             v
         }
         // Files: the folder on show, or an image, a PDF or a note opened from it (Fm.tab: they belong to Files)
         "files" => {
             let mut v = template.clone(); let o = v.as_object_mut()?;
             o.insert("open".into(), json!("files")); o.insert("key".into(), json!(""));
-            o.insert("files".into(), files_page(st, &root, sel, s(&session["drafts"], &format!("@files.dir:{sel}"))));
+            o.insert("files".into(), files_page(st, root, sel, s(&session["drafts"], &format!("@files.dir:{sel}"))));
             v
         }
         "image" | "pdf" | "text" => {
@@ -1031,13 +1041,13 @@ fn viewer_page<'a>(st: &State, template: &Value, session: &Value, root: &str, so
             o.insert("file".into(), page);
             v
         }
-        _ => { let mut v = page(template, kind, &root, &session["drafts"], sel, sources(), shown); if matches!(kind, "board" | "schematic" | "3d") { if let Some(b) = boards_menu(session, sel, &root) { v["boards"] = b; } } v }
+        _ => { let mut v = page(template, kind, root, &session["drafts"], sel, sources, shown); if matches!(kind, "board" | "schematic" | "3d") { if let Some(b) = boards_menu(session, sel, root) { v["boards"] = b; } } v }
     };
     // the folder the Boards menu's paths are from (0.14's "Folder: <root>")
     if v["boards"].is_array() { v["boardsRoot"] = json!(root); }
     // the probe kept for this board, on the page and on each of Split's panes (each canvas lights it on its own source)
     if matches!(kind, "board" | "schematic" | "3d" | "split") {
-        let pr = probe_of(st, session, sel, &root);
+        let pr = probe_of(st, session, sel, root);
         if let Some(ps) = v["panes"].as_array_mut() { for p in ps.iter_mut() { p["probe"] = json!(pr); } }
         v["probe"] = json!(pr);
     }
