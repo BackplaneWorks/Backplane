@@ -693,6 +693,7 @@ hub.restarting	Restarting Backplane…	Backplaneを再起動しています…	R
 hub.restarting.build	Restarting Backplane… (new build {build})	Backplaneを再起動しています…（新しいビルド {build}）	Reiniciando Backplane… (nueva compilación {build})
 hub.stopped	Backplane stopped	Backplaneは停止しました	Backplane se detuvo
 hub.back.crash	Backplane is back after it stopped unexpectedly	予期せず停止したBackplaneが戻りました	Backplane volvió tras detenerse de forma inesperada
+hub.watcher.missing	Auto-update watcher not running: new builds will not reach this app	自動更新の監視が動いていません：新しいビルドはこのアプリに届きません	El vigilante de actualizaciones no está en marcha: las compilaciones nuevas no llegarán a esta app
 bots.tab.chat	Chat	チャット	Chat
 bots.tab.space	Space	スペース	Space
 bots.tab.browser	Browser	ブラウザ	Navegador
