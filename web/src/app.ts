@@ -346,6 +346,7 @@ function mountApp(): void {
 
   const chat = new ChatView(centerEl, {
     onLoadOlder: () => { void loadOlderEntries(); },
+    onGoToEntry: (id) => { void goToEntry(id); },
     onAnswerAsk: (askId, answer) => {
       void hub.rpc("ask.answer", { ask: askId, answer }).catch(() => {});
     },
@@ -1201,6 +1202,18 @@ function mountApp(): void {
     else mgmt.clear();
   }
 
+  /** Go to a message (a reply's quote or strip): older pages are read until it is loaded (at most 25), for this thread only. */
+  async function goToEntry(id: string): Promise<void> {
+    const gen = threadGen;
+    for (let i = 0; i < 25 && gen === threadGen; i++) {
+      if (chat.goTo(id)) return;
+      if (!olderCursor) return;
+      const before = olderCursor;
+      await loadOlderEntries();
+      if (olderCursor === before) return; // nothing more came
+    }
+  }
+
   async function loadOlderEntries(): Promise<void> {
     if (!selectedThreadId || !olderCursor) {
       chat.clearLoadingOlder();
@@ -1247,7 +1260,7 @@ function mountApp(): void {
     replying = r;
     composer.setReply(
       r ? { who: r.role === "user" ? t("secret.you", "You") : t("model.col.agent", "Agent"), line: replyLine(r.text) } : null,
-      () => { if (replying) chat.goTo(replying.id); },
+      () => { if (replying) void goToEntry(replying.id); },
       () => startReply(null),
     );
   }

@@ -50,6 +50,8 @@ export interface ChatCallbacks {
   onToggleReview: (nextOn: boolean) => void;
   onUnansweredAction: (action: string, value: string) => void;
   onReplyEntry: (entry: EntryItem) => void;
+  /** a reply's quote: go to the message it answers, reading older pages until it is loaded */
+  onGoToEntry?: (entryId: string) => void;
   onLoadImage: (entryId: string, path: string) => Promise<{ mime: string; data: string } | null>;
 }
 
@@ -572,8 +574,9 @@ export class ChatView {
         rq.setAttribute("role", "button");
         rq.tabIndex = 0;
         rq.setAttribute("data-testid", "entry-reply-quote");
-        rq.addEventListener("click", () => this.goTo(to));
-        rq.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); this.goTo(to); } });
+        const go = () => { if (this.cb.onGoToEntry) this.cb.onGoToEntry(to); else this.goTo(to); };
+        rq.addEventListener("click", go);
+        rq.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
         row.appendChild(rq);
       }
 
