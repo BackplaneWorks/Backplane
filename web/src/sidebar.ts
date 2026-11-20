@@ -107,6 +107,7 @@ export interface SidebarCallbacks {
   onThreadAct: (threadId: string, action: string) => void;
   onToggleSection?: (toggle: string) => void;
   onToggleProjectFold?: (projectKey: string) => void;
+  onCollapseSidebar?: () => void;
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -173,12 +174,25 @@ export class SidebarView {
 
     const hostRow = document.createElement("div");
     hostRow.className = "bp-side-host";
+    const hostLeft = document.createElement("div");
+    hostLeft.className = "bp-side-host-left";
     this.hostLabel = document.createElement("span");
     this.hostLabel.textContent = "This computer";
     const chev = document.createElement("span");
     chev.className = "bp-dim";
     chev.textContent = "›";
-    hostRow.append(this.hostLabel, chev);
+    hostLeft.append(this.hostLabel, chev);
+
+    const collapseBtn = document.createElement("button");
+    collapseBtn.type = "button";
+    collapseBtn.className = "icon bp-side-collapse";
+    collapseBtn.textContent = "‹";
+    collapseBtn.title = "Collapse sidebar";
+    collapseBtn.setAttribute("aria-label", "Collapse sidebar");
+    collapseBtn.setAttribute("data-testid", "sidebar-collapse");
+    collapseBtn.addEventListener("click", () => this.cb.onCollapseSidebar?.());
+
+    hostRow.append(hostLeft, collapseBtn);
 
     const head = document.createElement("div");
     head.className = "bp-side-head";
@@ -186,7 +200,7 @@ export class SidebarView {
     this.filterInput = document.createElement("input");
     this.filterInput.type = "search";
     this.filterInput.className = "bp-input bp-side-search";
-    const ph = t("gpui.filter.projects.and.threads", "Search projects");
+    const ph = t("sidebar.search.projects", "Search projects");
     this.filterInput.placeholder = ph;
     this.filterInput.setAttribute("aria-label", ph);
     this.filterInput.setAttribute("data-testid", "sidebar-filter");
@@ -194,7 +208,20 @@ export class SidebarView {
       this.filterText = this.filterInput.value.trim().toLowerCase();
       this.render();
     });
-    head.appendChild(this.filterInput);
+
+    const quickAdd = document.createElement("button");
+    quickAdd.type = "button";
+    quickAdd.className = "icon bp-side-add";
+    quickAdd.textContent = "+";
+    quickAdd.title = t("thread.new", "New thread");
+    quickAdd.setAttribute("aria-label", t("thread.new", "New thread"));
+    quickAdd.setAttribute("data-testid", "sidebar-new-thread");
+    quickAdd.addEventListener("click", () => {
+      const firstProj = this.firstProjectId();
+      if (firstProj) this.cb.onNewThread(firstProj);
+    });
+
+    head.append(this.filterInput, quickAdd);
 
     this.listEl = document.createElement("div");
     this.listEl.className = "bp-side-list";
@@ -244,8 +271,20 @@ export class SidebarView {
     this.filterInput.focus();
   }
 
+  private firstProjectId(): string {
+    if (this.sections) {
+      for (const sec of this.sections) {
+        if (sec.kind === "projects" && sec.rows.length > 0) {
+          const p = sec.rows[0] as SectionProjectRow;
+          if (p.id && !p.off) return p.id;
+        }
+      }
+    }
+    return this.projects[0]?.id ?? "";
+  }
+
   public refreshLocale(): void {
-    const ph = t("gpui.filter.projects.and.threads", "Search projects");
+    const ph = t("sidebar.search.projects", "Search projects");
     this.filterInput.placeholder = ph;
     this.filterInput.setAttribute("aria-label", ph);
     this.render();
@@ -558,8 +597,14 @@ export class SidebarView {
       const botSec = document.createElement("section");
       botSec.className = "bp-proj-group bp-bots-group";
       const botHead = document.createElement("div");
-      botHead.className = "bp-side-section-head";
-      botHead.textContent = t("tour.title.bots", "Bots").toUpperCase();
+      botHead.className = "bp-side-section-head bp-side-section-row";
+      const botLbl = document.createElement("span");
+      botLbl.textContent = t("tour.title.bots", "Bots").toUpperCase();
+      const botAdd = document.createElement("span");
+      botAdd.className = "bp-side-sec-plus";
+      botAdd.textContent = "+";
+      botAdd.setAttribute("aria-hidden", "true");
+      botHead.append(botLbl, botAdd);
       botSec.appendChild(botHead);
       for (const bot of this.bots) {
         const row = document.createElement("div");
@@ -579,8 +624,14 @@ export class SidebarView {
       const roomSec = document.createElement("section");
       roomSec.className = "bp-proj-group";
       const roomHead = document.createElement("div");
-      roomHead.className = "bp-side-section-head";
-      roomHead.textContent = t("bots.rooms", "Rooms").toUpperCase();
+      roomHead.className = "bp-side-section-head bp-side-section-row";
+      const roomLbl = document.createElement("span");
+      roomLbl.textContent = t("bots.rooms", "Rooms").toUpperCase();
+      const roomAdd = document.createElement("span");
+      roomAdd.className = "bp-side-sec-plus";
+      roomAdd.textContent = "+";
+      roomAdd.setAttribute("aria-hidden", "true");
+      roomHead.append(roomLbl, roomAdd);
       roomSec.appendChild(roomHead);
       for (const room of this.rooms) {
         const row = document.createElement("div");

@@ -14,6 +14,12 @@ export interface EntryAsk {
   options?: Array<{ id: string; label: string }>;
   answered?: string;
 }
+export interface EntryAttachment {
+  name?: string;
+  mime?: string;
+  path?: string;
+  previewUrl?: string;
+}
 export interface EntryItem {
   id: string;
   kind: string;
@@ -26,6 +32,7 @@ export interface EntryItem {
   ask?: EntryAsk;
   replyTo?: { id: string; quote: string };
   images?: string[];
+  attachments?: EntryAttachment[];
 }
 export interface ReviewBar { on?: boolean; text?: string; button?: string; }
 export interface UnansweredNotice {
@@ -44,10 +51,42 @@ export interface ChatCallbacks {
   onLoadImage: (entryId: string, path: string) => Promise<{ mime: string; data: string } | null>;
 }
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function makeTinyIcon(paths: string[]): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "12");
+  svg.setAttribute("height", "12");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.8");
+  svg.setAttribute("aria-hidden", "true");
+  for (const d of paths) {
+    const p = document.createElementNS(SVG_NS, "path");
+    p.setAttribute("d", d);
+    svg.appendChild(p);
+  }
+  return svg;
+}
+
+function toMs(ts: number): number {
+  return ts < 10_000_000_000 ? ts * 1000 : ts;
+}
+
 function formatTime24(ms: number): string {
   if (!ms) return "";
-  const d = new Date(ms < 10_000_000_000 ? ms * 1000 : ms);
+  const d = new Date(toMs(ms));
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+function formatDuration(deltaMs: number): string {
+  if (!Number.isFinite(deltaMs) || deltaMs <= 0 || deltaMs > 3600_000) return "";
+  const secs = Math.max(1, Math.round(deltaMs / 1000));
+  if (secs < 60) return `${secs}s`;
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
 
 function isHiddenSystemNote(e: EntryItem): boolean {
@@ -347,7 +386,7 @@ export class ChatView {
     this.bannerEl.replaceChildren(frag);
   }
 
-  private makeEntryActions(entry: EntryItem, isUser: boolean): HTMLElement {
+  private makeEntryActions(entry: EntryItem, isUser: boolean, prevUserAt?: number): HTMLElement {
     const foot = document.createElement("div");
     foot.className = "bp-entry-foot" + (isUser ? " user" : "");
 
@@ -355,18 +394,28 @@ export class ChatView {
     copyBtn.type = "button";
     copyBtn.className = "bp-entry-act";
     const copyLbl = t("common.copy", "Copy");
-    copyBtn.textContent = copyLbl;
+    const copySpan = document.createElement("span");
+    copySpan.textContent = copyLbl;
+    copyBtn.append(
+      makeTinyIcon(["M9 9h11v11H9z", "M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"]),
+      copySpan,
+    );
     copyBtn.addEventListener("click", () => {
       navigator.clipboard?.writeText(entry.text || "").then(() => {
-        copyBtn.textContent = "✓";
-        window.setTimeout(() => { copyBtn.textContent = copyLbl; }, 1000);
+        copySpan.textContent = "✓";
+        window.setTimeout(() => { copySpan.textContent = copyLbl; }, 1000);
       }).catch(() => {});
     });
 
     const replyBtn = document.createElement("button");
     replyBtn.type = "button";
     replyBtn.className = "bp-entry-act";
-    replyBtn.textContent = "Reply";
+    const replySpan = document.createElement("span");
+    replySpan.textContent = "Reply";
+    replyBtn.append(
+      makeTinyIcon(["M9 17l-5-5 5-5", "M20 18v-2a4 4 0 0 0-4-4H4"]),
+      replySpan,
+    );
     replyBtn.addEventListener("click", () => this.cb.onReplyEntry(entry));
 
     const timeEl = document.createElement("span");
@@ -376,7 +425,9 @@ export class ChatView {
       timeEl.textContent = ts;
       foot.append(copyBtn, replyBtn, timeEl);
     } else {
-      timeEl.textContent = entry.live ? "Streaming…" : (ts ? `Finished ${ts}` : "");
+      const dur = prevUserAt && entry.at ? formatDuration(toMs(entry.at) - toMs(prevUserAt)) : "";
+      const finished = ts ? (dur ? `Finished ${ts} · ${dur}` : `Finished ${ts}`) : "";
+      timeEl.textContent = entry.live ? "Streaming…" : finished;
       foot.append(timeEl, copyBtn, replyBtn);
     }
     return foot;
@@ -402,7 +453,9 @@ export class ChatView {
       this.listEl.replaceChildren(frag);
       return;
     }
+    let lastUserAt = 0;
     for (const entry of this.entries) {
+      if (entry.kind === "user" && entry.at) lastUserAt = entry.at;
       const row = document.createElement("article");
       row.className = `bp-entry bp-entry-${entry.kind}` + (entry.live ? " is-live" : "");
       row.setAttribute("data-entry-id", entry.id);
@@ -471,6 +524,12 @@ export class ChatView {
         continue;
       }
 
+      // Hub visibility rule: never draw an empty message bubble with no text, images, or attachments.
+      const hasBody = Boolean(entry.text && entry.text.trim().length > 0);
+      const hasImages = Boolean(entry.images && entry.images.length > 0);
+      const hasAtts = Boolean(entry.attachments && entry.attachments.length > 0);
+      if (!hasBody && !hasImages && !hasAtts && !entry.live) continue;
+
       if (entry.replyTo?.quote) {
         const rq = document.createElement("div");
         rq.className = "bp-reply-quote";
@@ -478,13 +537,34 @@ export class ChatView {
         row.appendChild(rq);
       }
 
-      const body = document.createElement("div");
-      body.className = "bp-entry-body";
-      if (entry.kind === "user") body.textContent = entry.text;
-      else body.appendChild(renderMarkdown(entry.text || ""));
-      if (entry.live) this.liveNodes.set(entry.id, body);
+      if (hasBody || entry.live) {
+        const body = document.createElement("div");
+        body.className = "bp-entry-body";
+        if (entry.kind === "user") body.textContent = entry.text;
+        else body.appendChild(renderMarkdown(entry.text || ""));
+        if (entry.live) this.liveNodes.set(entry.id, body);
+        row.appendChild(body);
+      }
 
-      row.appendChild(body);
+      if (hasAtts && entry.attachments) {
+        const atts = document.createElement("div");
+        atts.className = "bp-entry-images";
+        for (const a of entry.attachments) {
+          if (a.previewUrl) {
+            const img = document.createElement("img");
+            img.className = "bp-reply-img";
+            img.src = a.previewUrl;
+            img.alt = a.name || "attachment";
+            atts.appendChild(img);
+          } else if (a.path || a.name) {
+            const pill = document.createElement("span");
+            pill.className = "bp-tool-pill";
+            pill.textContent = a.name || a.path || "image";
+            atts.appendChild(pill);
+          }
+        }
+        if (atts.childElementCount > 0) row.appendChild(atts);
+      }
 
       if (entry.images && entry.images.length > 0) {
         const imgs = document.createElement("div");
@@ -509,7 +589,7 @@ export class ChatView {
         row.appendChild(imgs);
       }
 
-      row.appendChild(this.makeEntryActions(entry, entry.kind === "user"));
+      row.appendChild(this.makeEntryActions(entry, entry.kind === "user", entry.kind === "assistant" ? lastUserAt : undefined));
       frag.appendChild(row);
     }
     this.listEl.replaceChildren(frag);
