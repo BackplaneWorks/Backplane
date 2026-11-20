@@ -84,6 +84,15 @@ impl ShowBy {
 /// `asked` asks in: 1 s, 2 s, 4 s, then every 10 s for as long as it lasts. A KiCad that keeps it hidden is not asked every second, and a
 /// frame it would show still comes back: never given up. The count starts over when the frame is seen on show, for another frame, on
 /// the person's act in the pane (`chose`) and when the frame set changes. Pure.
+/// Whether a pane that holds a container is not in it: no live KiCad session for the project (a refused or failed start: "KiCad was not
+/// found", and the install the person then ran), or one started in no container or another one (a restart with no container: bp.13.3's
+/// first install, KiCad in a window of its own and the pane on "Starting KiCad..." for ever). Such a pane attaches again with its own
+/// container (`reattach`); asking for a show cannot bring a frame into it. Pure.
+pub fn adrift(container: Option<u64>, info: &Value) -> bool {
+    let Some(c) = container.filter(|c| *c > 0) else { return false };
+    let live = matches!(info["state"].as_str(), Some("starting" | "ready" | "unresponsive"));
+    !live || info["container"].as_u64().is_some_and(|k| k != c)
+}
 pub fn remount_wait(asked: u32) -> std::time::Duration {
     std::time::Duration::from_millis(match asked { 0 | 1 => 1000, 2 => 2000, 3 => 4000, _ => 10_000 })
 }
@@ -585,6 +594,9 @@ pub struct KicadPane {
     lent_at: Option<std::time::Instant>,
     /// stock KiCad: the editor last asked for with its shortcut, and when; auxiliary frame (Symbol/Footprint/3D) opened from inside KiCad
     poked: Option<(String, std::time::Instant)>, unmapped_since: Option<(u64, std::time::Instant)>, remounts: Option<(u64, u32)>, unshown_since: Option<(String, std::time::Instant)>, override_kind: Option<String>, pending_show: Option<String>,
+    /// the "wanted frame exists but was never shown" re-asks so far (their backoff, `remount_wait`), and the KiCad (pid) this pane last
+    /// attached to again because it was started outside the pane (`adrift`): once per KiCad
+    unshown_asks: u32, reattached_for: Option<u64>,
     /// the theme told to the hub at least once; the main window (its first home), where Pop back in returns it
     theme_sent: bool, home: u64,
     /// files changed on disk that KiCad holds back over the person's unsaved edits (info `kicad.reload.<digest>`)
@@ -800,7 +812,7 @@ impl KicadPane {
             let _ = drained_tx.send(());
         } }).detach();
         KicadPane { born: std::time::Instant::now(), want_keys_at: None, handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_press: None, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None, last_place: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, remounts: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, generation: None, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, remounts: None, unshown_since: None, unshown_asks: 0, reattached_for: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, generation: None, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
     pub fn edit_again(&mut self, cx: &mut Context<Self>) {
@@ -1314,16 +1326,24 @@ impl KicadPane {
         let exists = self.info["frames"].as_array().is_some_and(|a| a.iter().any(|f| f["kind"].as_str() == Some(want.as_str())));
         if self.info["mode"] == "fork" && self.info["state"] == "ready" && self.pending_show.is_none() && exists && self.want().is_none() {
             let since = match &self.unshown_since { Some((k, t)) if *k == want => *t, _ => { let now = std::time::Instant::now(); self.unshown_since = Some((want.clone(), now)); now } };
-            if since.elapsed() >= std::time::Duration::from_millis(1200)
-                && self.poked.as_ref().map_or(true, |(k, t)| k != &want || t.elapsed() >= std::time::Duration::from_millis(2000))
+            // KiCad started outside this pane (no container, or another one): attached again with the pane's container, once per KiCad;
+            // a show would only show the frame in KiCad's own window (bp.13.3 first install: 750 shows in 21 minutes)
+            let pid = self.info["pid"].as_u64().unwrap_or(0);
+            if adrift(self.container, &self.info) && self.reattached_for != Some(pid) {
+                self.reattached_for = Some(pid);
+                eprintln!("GPUI_LOG {}", json!({"kicad_reattach": {"why": "KiCad is running outside this pane", "pid": pid, "its_container": self.info["container"], "pane_container": self.container}}));
+                self.reattach();
+            } else if since.elapsed() >= std::time::Duration::from_millis(1200)
+                && self.poked.as_ref().map_or(true, |(k, t)| k != &want || t.elapsed() >= remount_wait(self.unshown_asks))
             {
-                if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_unshown": want, "ms": since.elapsed().as_millis() as u64})); }
+                if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_unshown": want, "ms": since.elapsed().as_millis() as u64, "asked": self.unshown_asks})); }
                 self.poked = Some((want.clone(), std::time::Instant::now()));
+                self.unshown_asks = self.unshown_asks.saturating_add(1);
                 if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_remount": {"why": "wanted frame exists but was never shown", "frame": &want, "hub_active": self.info["active"], "pending_show": self.pending_show}})); }
                 self.rpc("editor.kicad.show", json!({"project": self.project, "frame": &want, "remount": true, "focus": self.keys}));
             }
         } else {
-            self.unshown_since = None;
+            self.unshown_since = None; self.unshown_asks = 0;
         }
         // stock KiCad (Linux only): the wanted editor not open yet, asked for with its own shortcut (at most every 4 s; the fork opens it through ShowFrame)
         if !cfg!(windows) && self.info["mode"] == "stock" && pick(&want, &self.info, &self.frames).is_none() && self.poked.as_ref().map_or(true, |(k, t)| k != &want || t.elapsed().as_secs() >= 4) {
@@ -1488,6 +1508,8 @@ impl KicadPane {
     /// Re-send `editor.kicad.attach` after a WebSocket reconnect so any info transition missed while disconnected is recovered.
     /// KiCad's start failed: the pane offers Try again.
     pub fn failed(&self) -> bool { try_again(&self.seen_info()) }
+    /// Whether this pane holds a container but no KiCad of the project is in it (`adrift`).
+    pub fn is_adrift(&self) -> bool { adrift(self.container, &self.info) }
     pub fn reattach(&mut self) {
         let Some(c) = self.container else { return };
         let display = std::env::var("DISPLAY").unwrap_or_default();
@@ -2341,6 +2363,23 @@ mod tests {
         assert!(!super::no_geometry(Some((at, None)), at, Some(1)), "the last placement showed no frame (container unmapped): placed");
         assert!(!super::no_geometry(Some((at, Some(1))), None, None), "taken off screen: placed (unmapped)");
         assert!(!super::no_geometry(Some((at, Some(1))), at, None), "no frame to show: placed");
+    }
+    #[test] fn a_pane_with_no_kicad_in_its_container_is_adrift() {
+        use serde_json::json;
+        let c = Some(15663962);
+        assert!(super::adrift(c, &json!(null)), "no session at all: Edit refused (KiCad was not found)");
+        assert!(super::adrift(c, &json!({"state": "failed", "container": 0})), "a failed start");
+        assert!(super::adrift(c, &json!({"state": "stopped", "container": 15663962})), "stopped");
+        assert!(super::adrift(c, &json!({"state": "ready", "container": 0})), "a restart with no container: KiCad in a window of its own");
+        assert!(super::adrift(c, &json!({"state": "ready", "container": 777})), "another window's container");
+        assert!(!super::adrift(c, &json!({"state": "ready", "container": 15663962})), "in this pane");
+        assert!(!super::adrift(c, &json!({"state": "starting", "container": 15663962})));
+        assert!(!super::adrift(c, &json!({"state": "ready"})), "a hub that does not say its container: not taken as adrift");
+        assert!(!super::adrift(None, &json!(null)), "a pane with no container has nothing to attach");
+    }
+    #[test] fn the_unshown_re_ask_backs_off() {
+        let w: Vec<u64> = (0..6).map(|n| super::remount_wait(n).as_millis() as u64).collect();
+        assert_eq!(w, [1000, 1000, 2000, 4000, 10000, 10000], "1, 2, 4, then every 10 s: never every 2 s for as long as it lasts");
     }
     #[test] fn idle_prewarm_waits_on_windows_without_prewarm_keeps_focus() {
         assert!(super::idle_prewarm(false, false), "Linux: the pre-warm starts by itself");
