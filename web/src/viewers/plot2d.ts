@@ -245,14 +245,27 @@ export class Plot2DViewer {
       const alpha = ch.alpha * (isDim ? LAYER_DIM : 1);
       if (alpha <= 0.01) continue;
 
-      this.drawChunk(ctx, ch, ci, alpha, vx0, vy0, vx1, vy1, cx, cy, scale, halfW, halfH);
+      this.drawChunk(ctx, ch, alpha, vx0, vy0, vx1, vy1, cx, cy, scale, halfW, halfH);
+    }
+
+    // Cross-probe highlight pass (matches GPUI plotview.rs PROBE_DIM + lit_paths):
+    // dim the rest of the plot towards the canvas ground, then redraw lit pieces at full strength + edge outline.
+    if (this.highlights.size > 0) {
+      ctx.fillStyle = this.lightTheme ? "rgba(245,244,239,0.72)" : "rgba(8,9,11,0.72)";
+      ctx.fillRect(0, 0, w, h);
+      const edgeColor = this.lightTheme ? "rgba(27,29,33,0.77)" : "rgba(217,221,228,0.77)";
+      for (let oi = 0; oi < drawOrder.length; oi++) {
+        const ci = drawOrder[oi];
+        const ch = frame.chunks[ci];
+        if (ch.own) continue;
+        this.drawLitPieces(ctx, ch, ci, edgeColor, vx0, vy0, vx1, vy1, cx, cy, scale, halfW, halfH);
+      }
     }
   }
 
   private drawChunk(
     ctx: CanvasRenderingContext2D,
     ch: PlotChunk,
-    chunkIdx: number,
     alpha: number,
     vx0: number,
     vy0: number,
@@ -265,9 +278,7 @@ export class Plot2DViewer {
     halfH: number
   ): void {
     const pts = ch.pts;
-    const hasHl = this.highlights.size > 0;
     const baseColor = rgbCss(ch.color, alpha);
-    const hlColor = "rgba(255, 224, 64, 0.95)";
 
     if (ch.mode === 0) {
       // Fill polygons
@@ -334,36 +345,61 @@ export class Plot2DViewer {
       }
       if (count > 0) ctx.stroke();
     }
+  }
 
-    // Highlighted pieces overlay
-    if (hasHl) {
-      for (let pi = 0; pi < ch.pieces.length; pi++) {
-        const p = ch.pieces[pi];
-        if (!this.highlights.has(`${chunkIdx}:${p.info}`)) continue;
-        ctx.strokeStyle = hlColor;
-        ctx.fillStyle = hlColor;
-        ctx.lineWidth = Math.max(2, ch.r * 2 * scale + 2);
+  private drawLitPieces(
+    ctx: CanvasRenderingContext2D,
+    ch: PlotChunk,
+    chunkIdx: number,
+    edgeColor: string,
+    vx0: number,
+    vy0: number,
+    vx1: number,
+    vy1: number,
+    cx: number,
+    cy: number,
+    scale: number,
+    halfW: number,
+    halfH: number
+  ): void {
+    const pts = ch.pts;
+    const ownColor = rgbCss(ch.color, ch.alpha);
+    for (let pi = 0; pi < ch.pieces.length; pi++) {
+      const p = ch.pieces[pi];
+      if (!this.highlights.has(`${chunkIdx}:${p.info}`)) continue;
+      if (p.x1 < vx0 || p.x0 > vx1 || p.y1 < vy0 || p.y0 > vy1) continue;
+      const x0 = (pts[p.at] - cx) * scale + halfW;
+      const y0 = (pts[p.at + 1] - cy) * scale + halfH;
+      if (p.kind === 2) {
+        const rad = Math.max(1.5, ch.r * scale);
+        ctx.fillStyle = ownColor;
         ctx.beginPath();
-        const x0 = (pts[p.at] - cx) * scale + halfW;
-        const y0 = (pts[p.at + 1] - cy) * scale + halfH;
-        if (p.kind === 2) {
-          ctx.arc(x0, y0, Math.max(3, ch.r * scale + 2), 0, Math.PI * 2);
-          ctx.fill();
-        } else {
-          ctx.moveTo(x0, y0);
-          for (let k = 1; k < p.n; k++) {
-            ctx.lineTo(
-              (pts[p.at + k * 2] - cx) * scale + halfW,
-              (pts[p.at + k * 2 + 1] - cy) * scale + halfH
-            );
-          }
-          if (p.kind === 0) {
-            ctx.closePath();
-            ctx.stroke();
-          } else {
-            ctx.stroke();
-          }
+        ctx.arc(x0, y0, rad, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = edgeColor;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      } else if (p.kind === 0 && p.n >= 3) {
+        ctx.fillStyle = ownColor;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        for (let k = 1; k < p.n; k++) {
+          ctx.lineTo((pts[p.at + k * 2] - cx) * scale + halfW, (pts[p.at + k * 2 + 1] - cy) * scale + halfH);
         }
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = edgeColor;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      } else {
+        ctx.strokeStyle = ownColor;
+        ctx.lineWidth = Math.max(2.5, ch.r * 2 * scale);
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        for (let k = 1; k < p.n; k++) {
+          ctx.lineTo((pts[p.at + k * 2] - cx) * scale + halfW, (pts[p.at + k * 2 + 1] - cy) * scale + halfH);
+        }
+        ctx.stroke();
       }
     }
   }

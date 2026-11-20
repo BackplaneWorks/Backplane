@@ -555,12 +555,13 @@ fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str, sou
 
 /// What a page's Layers menu and canvas are drawn from, for the desktop's picture and the phones' `viewer.layers` alike.
 fn layer_fields(o: &mut serde_json::Map<String, Value>, kind: &str, off: u32, f: Focus) {
-    o.insert("layerModes".into(), json!(kind == "board"));
-    let sch = kind == "schematic"; let draws = matches!(kind, "board" | "schematic");
+    o.insert("layerModes".into(), json!(matches!(kind, "board" | "gerbers")));
+    let sch = kind == "schematic"; let draws = matches!(kind, "board" | "schematic" | "gerbers");
     let (moff, mdim) = masks(sch, off, f);
     let row = |n: u32, name: &str| json!({"layer": n, "name": name, "on": off & bit(n) == 0, "active": f.on() && f.active == n});
     let rows: Vec<Value> = match kind {
         "board" => BOARD_LAYERS.iter().map(|(n, name)| row(*n, name)).collect(),
+        "gerbers" => GERBER_LAYERS.iter().chain(GERBER_MORE.iter()).map(|(n, name)| row(*n, name)).collect(),
         "schematic" => SCH_LAYERS.iter().enumerate().map(|(n, name)| row(n as u32, name)).collect(),
         _ => vec![],
     };
@@ -574,7 +575,9 @@ fn layer_fields(o: &mut serde_json::Map<String, Value>, kind: &str, off: u32, f:
     o.insert("layerReset".into(), json!(off != 0 || f.on()));
     o.insert("layerBits".into(), json!(compare_bits(sch, f)));
     if f.on() {
-        let nm = if sch { SCH_LAYERS.get(f.active as usize).map(|x| x.to_string()) } else { BOARD_LAYERS.iter().find(|(n, _)| *n == f.active).map(|(_, x)| x.to_string()) };
+        let nm = if sch { SCH_LAYERS.get(f.active as usize).map(|x| x.to_string()) }
+            else if kind == "gerbers" { GERBER_LAYERS.iter().chain(GERBER_MORE.iter()).find(|(n, _)| *n == f.active).map(|(_, x)| x.to_string()) }
+            else { BOARD_LAYERS.iter().find(|(n, _)| *n == f.active).map(|(_, x)| x.to_string()) };
         let nm = nm.or_else(|| MARK_LAYERS.iter().find(|(n, _)| *n == f.active).map(|(_, x)| x.to_string()));
         if let Some(nm) = nm { o.insert("layerHead".into(), json!(format!("Layer: {nm}"))); }
     }
@@ -583,7 +586,7 @@ fn layer_fields(o: &mut serde_json::Map<String, Value>, kind: &str, off: u32, f:
 /// `viewer.layers`: the phones keep `off` (what the person hid) and `focus` ("<active>|<mode>") and hold no rule: this answers what a press does to them and what to draw.
 /// `action`: "" (as they are), toggle, pick, mode, cycle or reset; `present`: the layers the plot on show has, a bit each. None for another kind or action.
 pub fn layer_reply(kind: &str, present: u32, off: u32, focus: &str, action: &str, value: &str) -> Option<Value> {
-    if !matches!(kind, "board" | "schematic") { return None }
+    if !matches!(kind, "board" | "schematic" | "gerbers") { return None }
     let sch = kind == "schematic"; let (mut off, mut f) = (off, Focus::read(focus)); let v = value.trim().parse::<u32>();
     match action {
         "" => {}
@@ -1911,5 +1914,18 @@ mod tests {
         assert_eq!((v_nvs["gerbers"].as_bool(), v_nvs["gerbersVsBoard"].as_bool(), v_nvs["key"].as_str()), (Some(true), Some(true), Some("")));
         assert_eq!(v_nvs["empty"].as_str(), Some("No board to compare these Gerbers against."));
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn gerbers_layer_reply_exposes_gerber_layers_and_modes() {
+        let r = layer_reply("gerbers", (1 << 14) | (1 << 12) | (1 << 24), 0, "", "", "").expect("gerbers layer reply");
+        assert_eq!(r["layerModes"], json!(true));
+        let names: Vec<&str> = r["layerList"].as_array().unwrap().iter().filter_map(|row| row["name"].as_str()).collect();
+        assert!(names.contains(&"F.Mask") && names.contains(&"Drills") && names.contains(&"F.Fab"), "{names:?}");
+        let picked = layer_reply("gerbers", (1 << 14) | (1 << 12), 0, "", "pick", "14").unwrap();
+        assert_eq!(picked["layerHead"], json!("Layer: F.Mask"));
+        assert_eq!(picked["lift"], json!(14));
+        let toggled = layer_reply("gerbers", (1 << 14) | (1 << 12), 0, "", "toggle", "14").unwrap();
+        assert_eq!(toggled["off"], json!(1 << 14));
     }
 }

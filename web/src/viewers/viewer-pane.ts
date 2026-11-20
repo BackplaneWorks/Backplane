@@ -6,6 +6,7 @@
 import { onLocaleChange, t } from "../i18n";
 import type { ViewerHostApi } from "../app";
 import { decodeCbor, decodePlot2DFrame, isPlotFrame, type CborValue, type PlotChunk } from "./cbor";
+import { mountDiffPane, mountFilesPane, mountReviewPane, mountTerminalPane, type PaneHandle } from "./panes";
 import { Plot2DViewer, type LayerMasks } from "./plot2d";
 import { Solid3DViewer } from "./solid3d";
 
@@ -81,8 +82,20 @@ function pageLabel(page: string): string {
     case "3d": return t("viewer.solid", "3D");
     case "gerbers": return t("gpui.gerbers", "Gerbers");
     case "mech": return t("viewer.mech", "Mech");
+    case "files": return t("viewer.files", "Files");
+    case "diff": return t("viewer.diff", "Diff");
+    case "review": return t("viewer.review", "Review");
+    case "terminal": return t("viewer.terminal", "Terminal");
     default: return page ? page.charAt(0).toUpperCase() + page.slice(1) : "";
   }
+}
+
+function isLayerPage(p: string): boolean {
+  return p === "board" || p === "schematic" || p === "gerbers";
+}
+
+function isNonPlotPane(p: string): boolean {
+  return p === "files" || p === "diff" || p === "review" || p === "terminal";
 }
 
 export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
@@ -162,6 +175,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
 
   let plot2d: Plot2DViewer | null = null;
   let solid3d: Solid3DViewer | null = null;
+  let activePane: PaneHandle | null = null;
 
   function isLight(): boolean {
     return document.documentElement.classList.contains("light");
@@ -240,7 +254,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       controlsEl.append(sel);
     }
 
-    if (page === "board" || page === "schematic") {
+    if (isLayerPage(page)) {
       const layersBtn = document.createElement("button");
       layersBtn.type = "button";
       layersBtn.className = "bp-v-btn" + (layersOpen ? " is-on" : "");
@@ -365,7 +379,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   }
 
   async function syncLayers(action: string, value: string): Promise<void> {
-    if (page !== "board" && page !== "schematic") return;
+    if (!isLayerPage(page)) return;
     const gen = watchGen;
     try {
       const res = await api.hub.rpc<LayersReply>("viewer.layers", {
@@ -419,38 +433,96 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     } catch {}
   }
 
+  function clearProbe(): void {
+    infoEl.hidden = true;
+    infoEl.replaceChildren();
+    plot2d?.setHighlights([]);
+  }
+
+  function renderProbeCard(info: string): { ref?: string; net?: string } {
+    const parts = info.split(";").filter(Boolean);
+    const title = parts.shift() || info;
+    const rows: Array<[string, string]> = [];
+    let ref = "";
+    let net = "";
+    for (const part of parts) {
+      if (part.startsWith("g=")) continue;
+      const eq = part.indexOf("=");
+      if (eq > 0) {
+        const k = part.slice(0, eq);
+        const v = part.slice(eq + 1);
+        if ((k === "ref" || k === "symbol") && !ref) ref = v;
+        if (k === "net" && !net) net = v;
+        rows.push([k, v]);
+      } else {
+        rows.push([part, ""]);
+      }
+    }
+
+    const head = document.createElement("div");
+    head.className = "bp-v-info-head";
+    const titleEl = document.createElement("span");
+    titleEl.className = "bp-v-info-title";
+    titleEl.textContent = title;
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "bp-v-info-x";
+    closeBtn.textContent = "×";
+    closeBtn.setAttribute("aria-label", "Clear selection");
+    closeBtn.addEventListener("click", clearProbe);
+    head.append(titleEl, closeBtn);
+
+    const grid = document.createElement("div");
+    grid.className = "bp-v-info-rows";
+    for (const [k, v] of rows) {
+      const chip = document.createElement("span");
+      chip.className = "bp-v-info-chip";
+      chip.textContent = v ? `${k}: ${v}` : k;
+      grid.append(chip);
+    }
+
+    infoEl.replaceChildren(head, ...(rows.length > 0 ? [grid] : []));
+    infoEl.hidden = false;
+    return { ref: ref || undefined, net: net || undefined };
+  }
+
   async function onPick2D(hit: { at: number; idx: number } | null): Promise<void> {
     if (!hit) {
-      infoEl.hidden = true;
-      plot2d?.setHighlights([]);
+      clearProbe();
       return;
     }
     const key = Array.from(activeKeys)[0] || "";
     if (!key) return;
+    const gen = watchGen;
     try {
       const res = await api.hub.rpc<{ info?: string }>("viewer.info", { key, at: hit.at, idx: hit.idx });
+      if (gen !== watchGen) return;
       const info = typeof res.info === "string" ? res.info : "";
       if (!info) {
-        infoEl.hidden = true;
+        clearProbe();
         return;
       }
-      infoEl.textContent = info;
-      infoEl.hidden = false;
-      const netMatch = info.match(/net=([^;]+)/);
-      if (netMatch && netMatch[1]) {
-        const probe = await api.hub.rpc<{ matches?: [number, number][] }>("viewer.probe", {
-          key,
-          name: "net",
-          value: netMatch[1],
-        });
-        if (Array.isArray(probe.matches)) plot2d?.setHighlights(probe.matches);
+      const { ref, net } = renderProbeCard(info);
+      const queries: Array<[string, string]> = [];
+      if (ref) queries.push(["ref", ref]);
+      if (net) queries.push(["net", net]);
+      const allMatches: [number, number][] = [[hit.at, hit.idx]];
+      for (const [name, value] of queries) {
+        const probe = await api.hub.rpc<{ matches?: [number, number][] }>("viewer.probe", { key, name, value });
+        if (gen !== watchGen) return;
+        if (Array.isArray(probe.matches)) {
+          for (const m of probe.matches) allMatches.push(m);
+        }
       }
+      plot2d?.setHighlights(allMatches);
     } catch {
-      infoEl.hidden = true;
+      clearProbe();
     }
   }
 
   function clearStage(): void {
+    activePane?.destroy();
+    activePane = null;
     plot2d?.destroy();
     plot2d = null;
     solid3d?.destroy();
@@ -459,6 +531,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     layersOpen = false;
     layersPop.hidden = true;
     infoEl.hidden = true;
+    infoEl.replaceChildren();
     setBanner("", false);
     setOverlay("none");
   }
@@ -476,6 +549,25 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     clearPending();
     clearStage();
     renderHeader();
+
+    if (isNonPlotPane(page)) {
+      // Non-plot panes (Files, Diff, Review, Terminal) use their own data/1 RPCs directly.
+      void api.hub.rpc("viewer.watch", { thread: threadId, kind: "" }).catch(() => {});
+      if (page === "files") {
+        activePane = mountFilesPane(stage, api, threadId, (kind) => {
+          page = kind;
+          void startWatch(false);
+        });
+      } else if (page === "diff") {
+        activePane = mountDiffPane(stage, api, threadId);
+      } else if (page === "review") {
+        activePane = mountReviewPane(stage, api, threadId);
+      } else if (page === "terminal") {
+        activePane = mountTerminalPane(stage, api, threadId);
+      }
+      return;
+    }
+
     setOverlay("loading", "Loading…");
 
     // Fetch project viewer metadata once per thread
@@ -623,7 +715,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     if (plot2d) {
       plot2d.setFrame(frame);
       const present = plot2d.presentMask();
-      if (present !== layerPresent && (page === "board" || page === "schematic")) {
+      if (present !== layerPresent && isLayerPage(page)) {
         layerPresent = present;
         void syncLayers("", "");
       }
@@ -639,6 +731,12 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   const unsubLocale = onLocaleChange(() => {
     if (page) renderHeader();
   });
+  const onKeyDown = (ev: KeyboardEvent): void => {
+    if (ev.key === "Escape" && page && !infoEl.hidden) {
+      clearProbe();
+    }
+  };
+  window.addEventListener("keydown", onKeyDown);
 
   return {
     open(kind: string, nextThread: string) {
