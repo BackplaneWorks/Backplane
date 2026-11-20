@@ -61,6 +61,9 @@ if [ "$COMPARE_MODE" = "1" ]; then
   exec python3 "$SCRIPT_DIR/rail_shots_compare.py" "${CMP_ARGS[@]}"
 fi
 
+# RAIL_THEME=dark|light and RAIL_TEXT_PCT=100|125 (both optional); anything else exits 2 (rail_local_settings.py)
+python3 "$SCRIPT_DIR/rail_local_settings.py" --check || exit 2
+
 if [ "${#POS_ARGS[@]}" -lt 4 ]; then
   echo "usage: $0 [--embed] [--share] CLIENT_BIN HUB_BIN ASSETS_DIR OUTDIR" >&2
   exit 2
@@ -94,9 +97,6 @@ OUTDIR=$(cd "$RAW_OUTDIR" && pwd)
 
 REAL_HOME="$HOME"
 export REAL_HOME
-# RAIL_THEME=dark|light: the client's own theme setting (seeded in a private local-settings file); unset follows the hub
-case "${RAIL_THEME:-}" in ""|dark|light) ;; *) echo "rail-shots: RAIL_THEME must be dark or light" >&2; exit 2 ;; esac
-case "${RAIL_TEXT_PCT:-}" in ""|[0-9][0-9][0-9]) ;; *) echo "rail-shots: RAIL_TEXT_PCT must be 3 digits (100, 125)" >&2; exit 2 ;; esac
 
 # shellcheck source=../../scripts/lib-bptmp.sh
 . "$REPO_ROOT/scripts/lib-bptmp.sh"
@@ -137,10 +137,8 @@ trap cleanup EXIT INT TERM
 
 RUN=$(mktemp -d "$BP_TMP/bp-rail-shots.XXXXXX")
 mkdir -p "$RUN/bin" "$RUN/fakehome/.cache" "$RUN/fakehome/.config" "$RUN/fakehome/.local/share"
-if [ -n "${RAIL_THEME:-}${RAIL_TEXT_PCT:-}" ]; then
-  # the client's own settings (private file): theme dark|light and/or text size percent (100, 125)
-  printf '{"theme":"%s","text_pct":%s}\n' "${RAIL_THEME:-dark}" "${RAIL_TEXT_PCT:-100}" >"$RUN/local-settings.json"
-fi
+# the client ALWAYS reads and saves its own settings from this private file (BACKPLANE_GPUI_LOCAL), knobs or not: an inherited path never leaks in
+python3 "$SCRIPT_DIR/rail_local_settings.py" "$RUN/local-settings.json"
 mkdir -p -m 700 "$RUN/run" "$RUN/tmp"
 
 # Atomic mode-0700 neutral alias directory under /var/tmp so fixture paths carry no OS user name.
@@ -580,7 +578,7 @@ PY
     BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" \
     BACKPLANE_GPUI_RECTS=1 \
     BACKPLANE_GPUI_SHOT_DIR="$SHOT_DIR" \
-    ${RAIL_THEME:+BACKPLANE_GPUI_LOCAL="$RUN/local-settings.json"} ${RAIL_TEXT_PCT:+BACKPLANE_GPUI_LOCAL="$RUN/local-settings.json"} \
+    BACKPLANE_GPUI_LOCAL="$RUN/local-settings.json" \
     "$CLIENT_BIN" --url "http://127.0.0.1:$PORT" --token-file "$HHOME/token" --script "$SCRIPT_JSON" --exit-after 420 >"$KIND_OUT/client.log" 2>&1
   CLIENT_PG=$!
 
