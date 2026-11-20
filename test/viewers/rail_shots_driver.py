@@ -119,9 +119,11 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
             {"press": "rail:Schematic"},
             {"mark": "settled:task10-closed"},
             {"shot": "task10-closed", "settle": "", "timeout_ms": settle_timeout_ms},
-            # Clear the Task 5 R1 probe so Esc moves focus out of the composer cleanly during B1 key checks.
+            # Clear the Task 5 R1 probe (hub + PlotView pv.picked/pv.lit) so Esc moves focus out of the composer cleanly during B1 key checks.
             {"action": ["view-probe", ""]},
             {"wait": 100},
+            {"keys": "escape"},
+            {"wait": 60},
         ])
     else:
         # Close the last opened page (Browser) so Rule B1 probes start from idle.
@@ -167,9 +169,10 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
                 {"wait_settled": settle_kind, "tag": f"b1-palette-open-{eid}", "timeout_ms": min(settle_timeout_ms, 4000)},
                 # Close viewer (or palette if it didn't match) without ever toggling a closed viewer open
                 {"keys": "ctrl-l"},
-                {"wait": 40},
+                {"wait": 100},
                 {"keys": "escape"},
-                {"wait_settled": "", "tag": f"b1-cleanup-{eid}", "timeout_ms": min(settle_timeout_ms, 2500)},
+                {"wait": 100},
+                {"wait_settled": "", "tag": f"b1-cleanup-{eid}", "timeout_ms": min(settle_timeout_ms, 3000)},
             ])
         else:
             steps.extend([
