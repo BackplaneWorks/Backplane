@@ -195,7 +195,7 @@ pub fn review_panel(app: &mut Backplane, cx: &mut Context<Backplane>) -> Option<
     if !scope["versions"].is_array() { want(app, scope["project"].as_str()?) }
     app.screens.mgmt.panel_w = super::viewer::pane_width() as f32;
     app.screens.mgmt.panel_placeholder = None;
-    let panel = shared_panel(app, &id, &scope, false, app.light(), cx);
+    let panel = shared_panel(app, &id, &scope, PanelLocation::Review, app.light(), cx);
     if crate::art::rects_on() {
         app.screens.mgmt.review_snapshot = Some(app.screens.mgmt.panel_placeholder.take().unwrap_or(("ready", String::new())));
     }
@@ -214,12 +214,16 @@ pub(super) fn panel_state(app: &mut Backplane, id: &str, light: bool, line: Stri
     panestate::view(light, &state, None)
 }
 
-fn shared_panel(app: &mut Backplane, id: &str, scope: &Value, bottom: bool, light: bool, cx: &mut Context<Backplane>) -> AnyElement {
+enum PanelLocation { Review, Dock { bottom: bool } }
+
+fn shared_panel(app: &mut Backplane, id: &str, scope: &Value, location: PanelLocation, light: bool, cx: &mut Context<Backplane>) -> AnyElement {
     use crate::i18n::tf;
     let working = tf("history.workingcopy", &[]);
     let historical = scope["versions"].is_array();
     let key = scope["title"].as_str().unwrap_or("");
-    let title = if historical {
+    let title = if matches!(location, PanelLocation::Review) {
+        tf(if id == "bom" { "review.bom" } else { "review.checks" }, &[])
+    } else if historical {
         let label = |n: usize| scope["versions"][n].as_str().filter(|s| !s.is_empty()).unwrap_or(&working).to_owned();
         tf(key, &[("old", label(0).into()), ("new", label(1).into())])
     } else if id == "bom" { tf(key, &[]) }
@@ -252,7 +256,7 @@ fn shared_panel(app: &mut Backplane, id: &str, scope: &Value, bottom: bool, ligh
     } else {
         let data = app.screens.mgmt.data(id);
         if id == "checks" { super::mgmt_checks::body(app, &data, light, cx) }
-        else { super::mgmt_bom::panel(app, &data, bottom, light, cx) }
+        else { super::mgmt_bom::panel(app, &data, matches!(location, PanelLocation::Dock { bottom: true }), light, cx) }
     };
     div().flex_1().min_h_0().flex().flex_col().overflow_hidden().child(head).when(!app.screens.mgmt.error.is_empty(), |d| d.child(div().text_color(theme::color(light, "bad")).child(app.screens.mgmt.error.clone()))).child(body).into_any_element()
 }
@@ -319,7 +323,7 @@ pub fn host(app: &mut Backplane, page: AnyElement, window: &mut Window, cx: &mut
     let size = fit(asked, avail);
     app.screens.mgmt.panel_w = if bottom { super::viewer::pane_width() as f32 } else { size };
     let scope = app.data["thread"]["viewer"]["designPanels"][&open].clone();
-    let body = if scope.is_object() { shared_panel(app, &open, &scope, bottom, light, cx) } else { match VIEWS.iter().find(|v| v.id == open) { Some(v) => (v.body)(app, &data, light, cx), None => div().into_any_element() } };
+    let body = if scope.is_object() { shared_panel(app, &open, &scope, PanelLocation::Dock { bottom }, light, cx) } else { match VIEWS.iter().find(|v| v.id == open) { Some(v) => (v.body)(app, &data, light, cx), None => div().into_any_element() } };
     let handle = div().id("mgmt-edge").flex_shrink_0().bg(c("rule")).hover(|s| s.bg(c("accent")))
         .map(|d| if bottom { d.h(px(1.)).w_full().cursor_row_resize() } else { d.w(px(1.)).h_full().cursor_col_resize() })
         .child(div().absolute().map(|d| if bottom { d.left_0().right_0().top(px(-2.)).h(px(HANDLE)) } else { d.top_0().bottom_0().left(px(-2.)).w(px(HANDLE)) }))
