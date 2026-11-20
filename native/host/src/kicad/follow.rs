@@ -246,6 +246,10 @@ async fn attempt(key: &str) -> Step {
     step
 }
 
+/// Whether a saving tool's own show (kicad_edit, kicad_sim: `show`, default true; or Follow) pushes the viewer to the file it saved:
+/// never while the thread's page holds the embedded KiCad (`in_pane`), so a tool never switches the frame the person's KiCad shows;
+/// only an agent's explicit viewer_show does (`Agents::viewer_show` with `explicit`). Pure.
+pub fn tool_shows(saved: bool, in_pane: bool, asked: bool) -> bool { saved && !in_pane && asked }
 /// An agent's explicit viewer_show of `target` ("PCB" / "SCH") while the window's pane shows `shown`: whether the pane is brought to it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Bring { No, Yes, Busy }
@@ -414,5 +418,11 @@ mod tests {
         assert_eq!(bring("PCB", "SCH", false, true), Bring::Busy, "mid-drag: said, not done");
         assert_eq!(bring("PCB", "PCB", true, true), Bring::No, "nothing to bring: nothing to refuse");
         assert_eq!(bring("PCB", "PCB_3D", false, false), Bring::Yes, "3D on show: the board editor");
+    }
+    #[test] fn a_saving_tool_never_pushes_the_view_while_the_page_holds_kicad() {
+        assert!(tool_shows(true, false, true), "no KiCad on the page: the viewer turns to the saved file, as before");
+        assert!(!tool_shows(true, true, true), "kicad_edit / kicad_sim saving while the page holds KiCad: no push, the frame stays");
+        assert!(!tool_shows(true, false, false), "show: false");
+        assert!(!tool_shows(false, false, true), "nothing saved");
     }
 }
