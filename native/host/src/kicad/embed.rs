@@ -975,7 +975,7 @@ fn rt_picture(r: &Rt, e: Option<&RtEntry>, attached: &dyn Fn(u64) -> bool) -> Va
         v["closedFrames"] = json!(s.closed_frames);
         if s.generation > 0 { v["generation"] = json!(s.generation); }
         if !s.stop_reason.is_empty() { v["stopReason"] = json!(s.stop_reason); v["stoppedAt"] = json!(s.stopped_at); }
-        if let Some(h) = holder_of(r, &s.pane_cid, attached) { v["holder"] = json!(h); }
+        if let Some(h) = holder_of(r, &s.pane_cid, attached) { v["holder"] = json!(h); v["holderCid"] = json!(s.pane_cid); }
     }
     v
 }
@@ -4858,6 +4858,7 @@ mod tests {
         assert_eq!((picture()["session"].as_str(), picture()["holder"].as_u64()), (Some("live"), Some(905)));
         note_client_cid(909, "gpui-rt-test-1");
         assert_eq!(picture()["holder"].as_u64(), Some(909), "the same app, connected again");
+        assert_eq!(picture()["holderCid"], "gpui-rt-test-1", "the holder's client id beside it: a pane tells another client's KiCad from its own");
         note_client_cid(913, "gpui-rt-test-1");
         assert!(picture().get("holder").is_none(), "its connection gone: no holder until it is back");
         note_client_cid(909, "gpui-rt-test-1");

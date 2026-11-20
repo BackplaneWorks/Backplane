@@ -85,13 +85,22 @@ impl ShowBy {
 /// frame it would show still comes back: never given up. The count starts over when the frame is seen on show, for another frame, on
 /// the person's act in the pane (`chose`) and when the frame set changes. Pure.
 /// Whether a pane that holds a container is not in it: no live KiCad session for the project (a refused or failed start: "KiCad was not
-/// found", and the install the person then ran), or one started in no container or another one (a restart with no container: bp.13.3's
-/// first install, KiCad in a window of its own and the pane on "Starting KiCad..." for ever). Such a pane attaches again with its own
-/// container (`reattach`); asking for a show cannot bring a frame into it. Pure.
-pub fn adrift(container: Option<u64>, info: &Value) -> bool {
+/// found", and the install the person then ran), or one started in no container (a restart with no container: bp.13.3's first install,
+/// KiCad in a window of its own and the pane on "Starting KiCad..." for ever), or in another container that no other client's pane holds
+/// (`runtime.holderCid`, the client cid whose window holds it: a KiCad another window holds is never taken). Such a pane attaches again,
+/// through the attach every open takes (`Backplane::kicad_adrift`); asking for a show cannot bring a frame into it. `me`: this client's
+/// cid. Pure.
+pub fn adrift(container: Option<u64>, info: &Value, me: &str) -> bool {
     let Some(c) = container.filter(|c| *c > 0) else { return false };
     let live = matches!(info["state"].as_str(), Some("starting" | "ready" | "unresponsive"));
-    !live || info["container"].as_u64().is_some_and(|k| k != c)
+    if !live { return true }
+    match info["container"].as_u64() {
+        None => false,
+        Some(k) if k == c => false,
+        Some(0) => true,
+        // in another container: only if no other client's pane holds it
+        Some(_) => info["runtime"]["holderCid"].as_str().map_or(true, |h| h.is_empty() || h == me),
+    }
 }
 pub fn remount_wait(asked: u32) -> std::time::Duration {
     std::time::Duration::from_millis(match asked { 0 | 1 => 1000, 2 => 2000, 3 => 4000, _ => 10_000 })
@@ -741,6 +750,9 @@ impl EventEmitter<PaneFrameClosed> for KicadPane {}
 /// detach, an idle stop or a crash: its owner shows the viewer and attaches it again only on the person's own Edit.
 pub struct PaneKicadClosed;
 impl EventEmitter<PaneKicadClosed> for KicadPane {}
+/// The pane holds a container with no KiCad of its project in it (`adrift`): attached again by the app, through `kicad_attach`, with this `why`.
+pub struct PaneAdrift(pub ShowBy);
+impl EventEmitter<PaneAdrift> for KicadPane {}
 /// The kind of the frame KiCad closed under the pane: the one it showed (`wanted`), in the old info and in the new one no longer, the
 /// same KiCad (pid) still ready. None while KiCad starts, restarts or is gone (those say so themselves).
 /// KiCad is up and has no frame of `kind` (closed in KiCad, or never opened).
@@ -1329,10 +1341,13 @@ impl KicadPane {
             // KiCad started outside this pane (no container, or another one): attached again with the pane's container, once per KiCad;
             // a show would only show the frame in KiCad's own window (bp.13.3 first install: 750 shows in 21 minutes)
             let pid = self.info["pid"].as_u64().unwrap_or(0);
-            if adrift(self.container, &self.info) && self.reattached_for != Some(pid) {
+            if self.is_adrift() && self.reattached_for != Some(pid) {
                 self.reattached_for = Some(pid);
-                eprintln!("GPUI_LOG {}", json!({"kicad_reattach": {"why": "KiCad is running outside this pane", "pid": pid, "its_container": self.info["container"], "pane_container": self.container}}));
-                self.reattach();
+                // the person's Edit pane: the attach is theirs (KiCad gets the keyboard); one something else opened: automatic (it shows,
+                // the keys stay with Backplane)
+                let why = if self.why == ShowBy::Deliberate { ShowBy::Deliberate } else { ShowBy::Automatic };
+                eprintln!("GPUI_LOG {}", json!({"kicad_reattach": {"road": "adrift", "why": format!("{why:?}"), "pid": pid, "its_container": self.info["container"], "pane_container": self.container}}));
+                cx.emit(PaneAdrift(why));
             } else if since.elapsed() >= std::time::Duration::from_millis(1200)
                 && self.poked.as_ref().map_or(true, |(k, t)| k != &want || t.elapsed() >= remount_wait(self.unshown_asks))
             {
@@ -1509,7 +1524,7 @@ impl KicadPane {
     /// KiCad's start failed: the pane offers Try again.
     pub fn failed(&self) -> bool { try_again(&self.seen_info()) }
     /// Whether this pane holds a container but no KiCad of the project is in it (`adrift`).
-    pub fn is_adrift(&self) -> bool { adrift(self.container, &self.info) }
+    pub fn is_adrift(&self) -> bool { adrift(self.container, &self.info, &crate::hub::cid()) }
     pub fn reattach(&mut self) {
         let Some(c) = self.container else { return };
         let display = std::env::var("DISPLAY").unwrap_or_default();
@@ -2366,16 +2381,21 @@ mod tests {
     }
     #[test] fn a_pane_with_no_kicad_in_its_container_is_adrift() {
         use serde_json::json;
-        let c = Some(15663962);
-        assert!(super::adrift(c, &json!(null)), "no session at all: Edit refused (KiCad was not found)");
-        assert!(super::adrift(c, &json!({"state": "failed", "container": 0})), "a failed start");
-        assert!(super::adrift(c, &json!({"state": "stopped", "container": 15663962})), "stopped");
-        assert!(super::adrift(c, &json!({"state": "ready", "container": 0})), "a restart with no container: KiCad in a window of its own");
-        assert!(super::adrift(c, &json!({"state": "ready", "container": 777})), "another window's container");
-        assert!(!super::adrift(c, &json!({"state": "ready", "container": 15663962})), "in this pane");
-        assert!(!super::adrift(c, &json!({"state": "starting", "container": 15663962})));
-        assert!(!super::adrift(c, &json!({"state": "ready"})), "a hub that does not say its container: not taken as adrift");
-        assert!(!super::adrift(None, &json!(null)), "a pane with no container has nothing to attach");
+        let (c, me) = (Some(15663962), "gpui-1-2");
+        let adrift = |i: serde_json::Value| super::adrift(c, &i, me);
+        assert!(adrift(json!(null)), "no session at all: Edit refused (KiCad was not found)");
+        assert!(adrift(json!({"state": "failed", "container": 0})), "a failed start");
+        assert!(adrift(json!({"state": "stopped", "container": 15663962})), "stopped");
+        assert!(adrift(json!({"state": "ready", "container": 0})), "a restart with no container: KiCad in a window of its own");
+        assert!(!adrift(json!({"state": "ready", "container": 15663962})), "in this pane");
+        assert!(!adrift(json!({"state": "starting", "container": 15663962})));
+        assert!(!adrift(json!({"state": "ready"})), "a hub that does not say its container: not taken as adrift");
+        assert!(!super::adrift(None, &json!(null), me), "a pane with no container has nothing to attach");
+        // in another container: never a KiCad another client's window holds; one nobody holds (its holder gone), or this client's own, is
+        assert!(!adrift(json!({"state": "ready", "container": 777, "runtime": {"holderCid": "gpui-9-9"}})), "held by another live client: left alone");
+        assert!(adrift(json!({"state": "ready", "container": 777, "runtime": {}})), "its holder gone");
+        assert!(adrift(json!({"state": "ready", "container": 777, "runtime": {"holderCid": ""}})));
+        assert!(adrift(json!({"state": "ready", "container": 777, "runtime": {"holderCid": "gpui-1-2"}})), "this client's own (another of its containers)");
     }
     #[test] fn the_unshown_re_ask_backs_off() {
         let w: Vec<u64> = (0..6).map(|n| super::remount_wait(n).as_millis() as u64).collect();
@@ -2888,6 +2908,8 @@ impl crate::Backplane {
         { let k = closed_key.clone(); cx.subscribe(&page, move |this, _, _: &PaneFrameClosed, cx| { this.screens.kicad_closed.insert(k.clone()); this.kicad_view(cx) }).detach(); }
         // the person closed KiCad itself (Close, or KiCad's quit): the viewer, and no automatic attach until their own Edit
         { let k = closed_key; cx.subscribe(&page, move |this, _, _: &PaneKicadClosed, cx| { this.screens.kicad_closed.insert(k.clone()); this.kicad_view(cx) }).detach(); }
+        // no KiCad of its project in the pane's container (an install after a refused Edit, a restart with no container): attached again
+        cx.subscribe(&page, |this, p, e: &PaneAdrift, cx| this.kicad_adrift(&p, e.0, cx)).detach();
         cx.subscribe(&page, |this, _, e: &PaneKey, cx| {
             if e.0 == "ctrl-;" || e.0 == ";" { this.kcomment_open(None, cx); return }
             // the pane's "Open the KiCad app instead" (the editor could not be here): back to the viewer, and the hub starts KiCad on what it shows
@@ -2920,6 +2942,17 @@ impl crate::Backplane {
         }).detach();
     }
     /// View: back to Backplane's own viewer (KiCad stays open in the hub, warm for the next Edit).
+    /// A pane with no KiCad of its project in its container attached again: the pane let go (as View does) and the same design page
+    /// opened through `kicad_attach`, so the hub's rules apply as to every attach (a stale generation changes nothing; the person's close
+    /// keeps an automatic one away). `why`: Deliberate for the person's Edit or their Install's reopen, Automatic otherwise.
+    pub(crate) fn kicad_adrift(&mut self, pane: &Entity<KicadPane>, why: ShowBy, cx: &mut Context<Self>) {
+        if self.screens.kicad.as_ref() != Some(pane) { return }
+        let (open, generation) = { let p = pane.read(cx); (p.open.clone(), p.generation) };
+        let open = if matches!(open.as_str(), "board" | "schematic" | "3d") { open } else { "board".to_string() }; // i18n-ok: rail page kinds
+        eprintln!("GPUI_LOG {}", json!({"kicad_attach_again": {"road": "adrift", "why": format!("{why:?}"), "open": open}}));
+        self.kicad_view(cx);
+        self.kicad_attach(&open, why, generation, cx);
+    }
     pub(crate) fn kicad_view(&mut self, cx: &mut Context<Self>) { if let Some(p) = self.screens.kicad.take() { p.update(cx, |p, _| p.detach()); } cx.notify(); }
     /// The editor for the thread's design when the person is editing it (None: the viewer draws the page).
     pub(crate) fn kicad_for(&self, thread: &Value, cx: &App) -> Option<Entity<KicadPane>> {
