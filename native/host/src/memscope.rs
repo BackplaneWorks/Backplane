@@ -7,7 +7,7 @@
 //!
 //! Off when there is no user systemd answering (no `systemd-run`, no user bus, a container or WSL without one), on a copy, in tests, or with
 //! `BACKPLANE_NO_SCOPE`: then commands start as before, with one log line. A scope gets only the properties a probe scope here took
-//! (`scopeprobe.rs`: systemd before 243 has no OOMPolicy, before 248 no ManagedOOMPreference), and a scoped launch that still fails is
+//! (`scopeprobe.rs`: a scope takes OOMPolicy from 253 or a late 252 point release, ManagedOOMPreference from 248), and a scoped launch that still fails is
 //! started again unscoped, and scopes stay off for the session (`spawn`). macOS has no equivalent (no cgroups; a memory cap per process tree would be a sampler that kills, not done); Windows' is a Job
 //! Object memory limit with the same caps (`cap_job`; allocations past it fail, nothing is killed or told). KiCad and the browser helper have
 //! scopes of their own (`wrap_helper`).
@@ -57,7 +57,7 @@ pub fn on() -> bool { *ON.get().unwrap_or(&false) && !OFF.load(std::sync::atomic
 static OFF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// The properties this machine's systemd took in a scope (`scopeprobe::probe`): a subset of `WANTED`.
 static PROPS: OnceLock<Vec<String>> = OnceLock::new();
-/// Every scope's properties but its cap, each used only where systemd takes it (OOMPolicy came in 243, ManagedOOMPreference in 248).
+/// Every scope's properties but its cap, each used only where systemd takes it (a scope's OOMPolicy from 253 or a late 252 point release, ManagedOOMPreference from 248).
 const WANTED: [&str; 3] = ["MemorySwapMax=1G", "OOMPolicy=continue", "ManagedOOMPreference=none"];
 fn wanted() -> Vec<String> { std::iter::once(format!("MemoryMax={}", scope_max())).chain(WANTED.iter().map(|s| s.to_string())).collect() }
 /// The properties a scope gets here: those the probe found (or every one, before it ran: only tests).
@@ -354,7 +354,7 @@ mod tests {
     /// command runs; one that systemd made runs scoped.
     #[cfg(target_os = "linux")]
     #[tokio::test] async fn a_launch_whose_scope_fails_runs_unscoped() {
-        let (_d, f) = super::probe_tests::fake("memscope", 239, &["OOMPolicy"], false);
+        let (_d, f) = super::probe_tests::fake("memscope", 249, &["OOMPolicy"], false); // Ubuntu 22.04's answer (#1312)
         let tries = std::sync::Arc::new(std::sync::Mutex::new(Vec::<bool>::new()));
         let run = |wrap: Option<Vec<String>>| {
             let t = tries.clone(); let f = f.clone();
@@ -391,13 +391,14 @@ pub mod probe_tests {
     use std::process::{Command, Stdio};
     use std::time::Duration;
     /// A stand-in systemd-run: `version` for --version, rejecting every property in `rejects` the way systemd does ("Unknown assignment"),
-    /// else running what follows `--`. `None` for the version: one that cannot make any scope (no user manager).
+    /// else running what follows `--`; `no_manager`: one that cannot make any scope (no user manager). Each call's arguments are appended
+    /// to `<its path>.calls` (`scopes_made`).
     /// (its folder, removed when dropped; the stand-in's path)
     pub fn fake(name: &str, version: u32, rejects: &[&str], no_manager: bool) -> (crate::plat::tmp::TempDir, std::path::PathBuf) {
         let d = crate::plat::tmp::dir(&format!("scopeprobe-{name}"));
         let p = d.join("systemd-run");
         let rej: String = rejects.iter().map(|r| format!("{r}=*) echo \"Unknown assignment: $a\" >&2; exit 1;; ")).collect();
-        let body = format!("#!/bin/sh\ncase \"$1\" in --version) echo \"systemd {version} (test)\"; echo +PAM; exit 0;; esac\n{}for a; do case \"$a\" in {rej}esac; done\nwhile [ $# -gt 0 ] && [ \"$1\" != -- ]; do shift; done; shift; exec \"$@\"\n",
+        let body = format!("#!/bin/sh\necho \"$*\" >> \"$0.calls\"\ncase \"$1\" in --version) echo \"systemd {version} (test)\"; echo +PAM; exit 0;; esac\n{}for a; do case \"$a\" in {rej}esac; done\nwhile [ $# -gt 0 ] && [ \"$1\" != -- ]; do shift; done; shift; exec \"$@\"\n",
             if no_manager { "echo 'Failed to create bus connection: No such file or directory' >&2; exit 1\n" } else { "" });
         std::fs::write(&p, body).unwrap();
         use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -406,6 +407,39 @@ pub mod probe_tests {
         (d, p)
     }
     fn w(v: &[&str]) -> Vec<String> { v.iter().map(|s| s.to_string()).collect() }
+    /// The scopes a stand-in was asked to make (each call's arguments, `--version` left out).
+    fn scopes_made(f: &std::path::Path) -> Vec<String> {
+        std::fs::read_to_string(f.with_extension("calls")).unwrap_or_default().lines().filter(|l| !l.starts_with("--version")).map(String::from).collect()
+    }
+    /// #1312: systemd 249 (Ubuntu 22.04) refuses OOMPolicy for a scope, 253 takes it, and 252 takes it in some point releases only. Each gets
+    /// a scope with what it takes, 249 without ever being asked for OOMPolicy, and a systemd that refuses one anyway ("Unknown assignment"
+    /// where its version says it should not) is asked again without it. A current one is probed once.
+    #[test] fn each_systemd_version_gets_a_scope_with_what_it_takes() {
+        let want = w(&["MemoryMax=40%", "MemorySwapMax=1G", "OOMPolicy=continue", "ManagedOOMPreference=none"]);
+        let no_oom = w(&["MemoryMax=40%", "MemorySwapMax=1G", "ManagedOOMPreference=none"]);
+        let probe = |name: &str, v: u32, rejects: &[&str]| { let (d, f) = fake(name, v, rejects, false); let s = probe_in(&|p| Command::new(p), f.to_str().unwrap(), true, &[], &want); (s, scopes_made(&f), d) };
+
+        let (s, made, _d) = probe("v249", 249, &["OOMPolicy"]);
+        assert!(s.ok, "{s:?}"); assert_eq!(s.props, no_oom); assert_eq!(made.len(), 1, "one probe scope: {made:?}");
+        assert!(!made.iter().any(|m| m.contains("OOMPolicy")), "249 is never asked for OOMPolicy: {made:?}");
+        assert_eq!(describe(&s, &want), "systemd 249; without OOMPolicy=continue (not supported here)");
+
+        let (s, made, _d) = probe("v252-0", 252, &["OOMPolicy"]); // 252.0: refuses it, so the retry leaves it out
+        assert!(s.ok); assert_eq!(s.props, no_oom); assert!(made[0].contains("OOMPolicy=continue"), "{made:?}");
+        assert!(!made[1].contains("-p "), "then the scope alone: {made:?}");
+        assert_eq!(made.len(), 6, "all four at once, the scope alone, then each of the four alone: {made:?}");
+
+        let (s, made, _d) = probe("v252-39", 252, &[]); // Debian 12's 252.39 takes it
+        assert_eq!(s.props, want); assert_eq!(made.len(), 1);
+
+        for v in [253, 255] {
+            let (s, made, _d) = probe(&format!("v{v}"), v, &[]);
+            assert!(s.ok); assert_eq!(s.props, want, "systemd {v}"); assert_eq!(made.len(), 1, "systemd {v}: one probe scope");
+            assert_eq!(describe(&s, &want), format!("systemd {v}"));
+        }
+        let (s, _, _d) = probe("v253-odd", 253, &["OOMPolicy"]); // a build that refuses it anyway: the probe, not the version, decides
+        assert!(s.ok); assert_eq!(s.props, no_oom);
+    }
     #[test] fn an_older_systemd_gets_a_scope_without_the_properties_it_rejects() {
         let (_d, f) = fake("old", 239, &["OOMPolicy", "ManagedOOMPreference"], false);
         let want = w(&["MemoryMax=40%", "MemorySwapMax=1G", "OOMPolicy=continue", "ManagedOOMPreference=none"]);
@@ -414,7 +448,7 @@ pub mod probe_tests {
         assert_eq!(s.props, w(&["MemoryMax=40%", "MemorySwapMax=1G"]));
         assert_eq!(describe(&s, &want), "systemd 239; without OOMPolicy=continue, ManagedOOMPreference=none (not supported here)");
 
-        let (_d, f) = fake("mid", 250, &["OOMPolicy"], false); // knows OOMPolicy, not for scopes: the probe, not the version, decides
+        let (_d, f) = fake("mid", 250, &["OOMPolicy"], false); // knows OOMPolicy for services only: never tried for a scope
         assert_eq!(probe_in(&|p| Command::new(p), f.to_str().unwrap(), true, &[], &want).props, w(&["MemoryMax=40%", "MemorySwapMax=1G", "ManagedOOMPreference=none"]));
         let (_d, f) = fake("new", 255, &[], false);
         let s = probe_in(&|p| Command::new(p), f.to_str().unwrap(), true, &[], &want); assert_eq!(s.props, want); assert_eq!(describe(&s, &want), "systemd 255");
