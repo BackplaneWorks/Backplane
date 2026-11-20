@@ -258,8 +258,19 @@ impl Backplane {
     /// A picture was applied: the drafts, the asks' boxes and the settings fields follow what the hub just drew.
     pub(crate) fn picture_applied(&mut self, cx: &mut Context<Self>) {
         let thread = &self.data["thread"];
-        self.screens.plots.sync(thread["id"].as_str().unwrap_or(""), thread["viewer"]["open"] == "split");
+        let owner = thread["id"].as_str().unwrap_or("");
+        let open = super::viewer::is_open(thread);
+        let switched = self.screens.plots.owner != owner;
+        let closed = !open && !self.screens.solids.is_empty();
+        if switched || closed {
+            self.screens.retired_solids.extend(self.screens.solids.drain().map(|(_, page)| page));
+            self.screens.early_solids = Default::default();
+        }
+        self.screens.plots.sync(owner, open, thread["viewer"]["open"] == "split");
         self.sync_solid_slot();
+        if let Some((_, key)) = &self.screens.solid_slot {
+            if let Some(frame) = self.screens.early_solids.take(key) { self.plot_received(frame, cx); }
+        }
         self.draft_from_hub(cx);
         // the pressed rail kind gives way when the hub marks it (or after PRESS_WAIT): a streamed picture arriving first does not flicker it back
         if let Some(p) = self.screens.rail_pending.clone() {
@@ -291,12 +302,7 @@ impl Backplane {
             }
             _ => None,
         };
-        if self.screens.solid_slot != slot {
-            if let Some((old, _)) = self.screens.solid_slot.take() {
-                if let Some(page) = self.screens.solids.remove(&old) { self.screens.retired_solids.push(page); }
-            }
-            self.screens.solid_slot = slot;
-        }
+        self.screens.solid_slot = slot;
     }
 
     /// A plot-lane frame arrived on the socket: a solid (3D) frame goes to the 3D page, anything else to the plot store.
@@ -306,8 +312,11 @@ impl Backplane {
             if let Err(e) = self.screens.plot.receive(&bytes) { eprintln!("GPUI_LOG {{\"plot\":\"{e}\"}}"); }
             return;
         }
-        let Some((slot, source)) = &self.screens.solid_slot else { return };
-        if key.as_ref() != Some(source) { return }
+        let key = key.unwrap();
+        let Some((slot, _)) = self.screens.solid_slot.as_ref().filter(|(_, source)| source == &key) else {
+            self.screens.early_solids.hold(key, bytes);
+            return;
+        };
         let slot = slot.clone();
         if !self.screens.solids.contains_key(&slot) {
             let page = cx.new(crate::viewers::solid::SolidPage::new);
