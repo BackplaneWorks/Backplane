@@ -64,6 +64,8 @@ fi
 # RAIL_THEME=dark|light and RAIL_TEXT_PCT=100|125 (both optional); anything else exits 2 (rail_local_settings.py)
 python3 "$SCRIPT_DIR/rail_local_settings.py" --check || exit 2
 case "${RAIL_I3_FFM:-}" in ""|yes|no) ;; *) echo "rail-shots: RAIL_I3_FFM must be yes or no" >&2; exit 2 ;; esac
+# RAIL_B7_VIA=more|header|palette: how Rule B7 initiates its adds (default: more, a tile's physical More button then its Add beside row, at every width); anything else exits 2
+case "${RAIL_B7_VIA:-}" in ""|more|header|palette) ;; *) echo "rail-shots: RAIL_B7_VIA must be more, header or palette" >&2; exit 2 ;; esac
 
 if [ "${#POS_ARGS[@]}" -lt 4 ]; then
   echo "usage: $0 [--embed] [--share] CLIENT_BIN HUB_BIN ASSETS_DIR OUTDIR" >&2
@@ -310,9 +312,11 @@ while [ -e "/tmp/.X11-unix/X$d" ] || [ -e "/tmp/.X$d-lock" ]; do d=$((d + 1)); d
 DISP=":$d"
 
 screen_width=1440
-[[ ${RAIL_B2_SIZE:-} != wide ]] || screen_width=2200
+# RAIL_WINDOW_SIZE selects geometry independently of the B2-only script.
+window_size=${RAIL_WINDOW_SIZE:-${RAIL_B2_SIZE:-}}
+[[ $window_size != wide ]] || screen_width=2200
 # Folded sidebar 44 + thread 360 + minimum viewer 320 + rail 72.
-[[ ${RAIL_B2_SIZE:-} != minimum ]] || screen_width=796
+[[ $window_size != minimum ]] || screen_width=796
 own env LD_LIBRARY_PATH="$XVFB_LD" "$XVFB_BIN" "$DISP" -screen 0 "${screen_width}x900x24" -nolisten tcp -xkbdir /usr/share/X11/xkb >"$RUN/xvfb.log" 2>&1
 for _ in $(seq 40); do [ -e "/tmp/.X11-unix/X$d" ] && break; sleep 0.1; done
 [ -e "/tmp/.X11-unix/X$d" ] || { echo "rail-shots: Xvfb failed to start on $DISP" >&2; cat "$RUN/xvfb.log" >&2; exit 1; }
@@ -553,7 +557,9 @@ PY
   SCRIPT_JSON="$RUN/script-$kind.json"
   DRV_EXTRA=()
   [ "$USE_EMBED" = "1" ] && DRV_EXTRA+=(--embed)
-  if [[ -n ${RAIL_B2_SIZE:-} ]]; then
+  if [[ -n ${RAIL_SCRIPT_FILE:-} ]]; then
+    cp -- "$RAIL_SCRIPT_FILE" "$SCRIPT_JSON"
+  elif [[ -n ${RAIL_B2_SIZE:-} ]]; then
     python3 "$SCRIPT_DIR/rail_b2.py" --script >"$SCRIPT_JSON"
   else
     python3 "$SCRIPT_DIR/rail_shots_driver.py" gen-script "$kind" "$SCRIPT_JSON" "${RAIL_EARLY_MS:-300}" "${RAIL_SETTLE_TIMEOUT_MS:-15000}" "${DRV_EXTRA[@]}"
@@ -605,7 +611,7 @@ PY
   stop_group "$HUB_PG"
 done
 
-if [[ -n ${RAIL_B2_SIZE:-} ]]; then
+if [[ -n ${RAIL_B2_SIZE:-} || -n ${RAIL_SCRIPT_FILE:-} ]]; then
   exit "$CLIENT_RC"
 fi
 POST_EXTRA=()

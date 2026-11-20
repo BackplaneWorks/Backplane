@@ -131,9 +131,11 @@ pub fn zoom_pending(app: &mut Backplane) {
     let v = app.data["thread"]["viewer"].clone();
     if want.is_empty() || v["probe"].as_str() != Some(want.as_str()) { return }
     let panes = v["panes"].as_array().cloned().unwrap_or_default();
-    let slots: Vec<(usize, String)> = if panes.len() >= 3 { vec![(1, crate::string(&panes[0], "key")), (2, crate::string(&panes[1], "key"))] }
+    let slots: Vec<(usize, String)> = if crate::screens::viewer::is_tiled(&v) {
+        super::plotview::dock_plot_targets(app)
+    } else if panes.len() >= 3 { vec![(1, crate::string(&panes[0], "key")), (2, crate::string(&panes[1], "key"))] }
         else { vec![(0, app.screens.plot.frame.as_ref().map(|f| f.key.clone()).unwrap_or_default())] };
-    if slots.iter().any(|(s, k)| k.is_empty() || app.screens.plot.frame_for(k).is_none() || app.screens.pv(*s).bounds.is_none()) { return }
+    if slots.is_empty() || slots.iter().any(|(s, k)| k.is_empty() || app.screens.plot.frame_for(k).is_none() || app.screens.pv(*s).bounds.is_none()) { return }
     app.screens.xprobe.zoom = None;
     eprintln!("GPUI_LOG {}", json!({"event": "xprobe_zoom", "probe": want, "slots": slots.iter().map(|s| s.0).collect::<Vec<_>>()}));
     let card = super::plot::card(&want);

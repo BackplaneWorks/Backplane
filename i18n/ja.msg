@@ -4881,3 +4881,16 @@ web.clone.no.folders = フォルダがありません
 gpui.c.kicad.opening = {editor}を開いています: {job}… {secs} 秒
 gpui.c.kicad.openingbare = {editor}を開いています… {secs} 秒
 gpui.c.kicad.openfailed = {editor}が開きませんでした
+
+viewer.tile.rail.add = Shift＋クリックまたは中央クリックで、選択中のタイルの隣に追加します。
+viewer.tile.add = 隣に追加
+viewer.tile.maximize = タイルを最大化
+viewer.tile.restore = タイルを元に戻す
+viewer.tile.focus = タイルを選択
+viewer.tile.embedded = 隣にタイルを追加するにはビューアーに戻ってください。
+viewer.tile.simulation.single = ほかのタイルを閉じると、KiCad でシミュレーションを開けます。
+viewer.tile.add.tip = 隣に追加…
+viewer.tile.left = 左に追加
+viewer.tile.right = 右に追加
+viewer.tile.top = 上に追加
+viewer.tile.bottom = 下に追加

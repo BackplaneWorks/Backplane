@@ -773,7 +773,10 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
                     cmds = [read_cmds.clone(), o.before].concat();
                 }
                 Some(super::viewer::LayoutOut::Refused { code, key, text }) => {
-                    cmds.push(json!({"type":"say","tone":"note","code":code,"key":key,"text":text}));
+                    let payload = serde_json::from_str::<Value>(value).unwrap_or_default();
+                    let tile = ["tile", "target", "base", "a"].iter().find_map(|k| payload[*k].as_str());
+                    cmds.push(json!({"type":"say","tone":"note","code":code,"key":key,"text":text,
+                        "thread":session["sel"], "tile":tile}));
                 }
                 None => return refused("action.layout-unported"),
             }
@@ -1741,7 +1744,7 @@ mod thread_binding_tests {
             let (st,p,expected)=fixture(lean);
             let out=recent(&st,&p).expect("plain thread root is supported");
             // the Allowance chip's text (keys.rs `allowance`), the picker's other agents (`pickerAgents`) and the masked box and the composer's commands (`secretBox`, `commands`; `btw` is the helper's own key) are Backplane's own: the recorded helper reply has no such keys
-            let bare=|mut t:Value|{ t["viewer"].as_object_mut().unwrap().remove("runtime"); assert_eq!(t["viewer"].as_object_mut().unwrap().remove("mode").unwrap()["want"], "viewer"); assert!(t["viewer"].as_object_mut().unwrap().remove("rail").unwrap().is_array()); assert!(t["viewer"].as_object_mut().unwrap().remove("has").unwrap().is_object()); assert!(t["viewer"].as_object_mut().unwrap().remove("layout").unwrap().is_object()); assert!(t["viewer"].as_object_mut().unwrap().remove("tiles").unwrap().is_object()); assert_eq!(t["viewer"].as_object_mut().unwrap().remove("showToken").unwrap(), true); for k in ["allowance","combo","pickerAgents","secretBox","commands","project","subView","planOnce","review","unanswered"] { t.as_object_mut().unwrap().remove(k); } t["picker"]=crate::present::keys::as_helper(&t["picker"]); t };
+            let bare=|mut t:Value|{ assert!(t["viewer"].get("tiled").is_none()); t["viewer"].as_object_mut().unwrap().remove("runtime"); assert_eq!(t["viewer"].as_object_mut().unwrap().remove("mode").unwrap()["want"], "viewer"); assert!(t["viewer"].as_object_mut().unwrap().remove("rail").unwrap().is_array()); assert!(t["viewer"].as_object_mut().unwrap().remove("has").unwrap().is_object()); assert!(t["viewer"].as_object_mut().unwrap().remove("layout").unwrap().is_object()); assert!(t["viewer"].as_object_mut().unwrap().remove("tiles").unwrap().is_object()); assert_eq!(t["viewer"].as_object_mut().unwrap().remove("showToken").unwrap(), true); for k in ["allowance","combo","pickerAgents","secretBox","commands","project","subView","planOnce","review","unanswered"] { t.as_object_mut().unwrap().remove(k); } t["picker"]=crate::present::keys::as_helper(&t["picker"]); t };
             assert_eq!(bare(out["shown"]["thread"].clone()),expected); assert_eq!(bare(out["overlay"]["j"]["thread"].clone()),expected);
             assert_eq!(out["session"]["sel"],p["target"]["id"]); assert_eq!(out["window"],p["window"]);
             assert_eq!(out["shown"]["nativeSidebar"],1);

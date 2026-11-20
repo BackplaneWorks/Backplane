@@ -14,6 +14,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::LazyLock;
 
 pub const LAYOUT_VERSION: u32 = 1;
+pub const SPLIT_GUTTER_PX: f32 = 8.0;
+const HALF_GUTTER: f32 = SPLIT_GUTTER_PX / 2.;
 pub const MIN_TILE_PX: f32 = 180.0;
 pub const MIN_KICAD_W_PX: f32 = 380.0;
 pub const MIN_KICAD_H_PX: f32 = 300.0;
@@ -793,6 +795,56 @@ pub fn default_min_for(kicad_tile_id: Option<&str>) -> impl Fn(&Tile) -> (f32, f
     }
 }
 
+/// An add opens at 1:1. Bounds are the target leaf's outer size, in logical pixels.
+fn add_side(side: Option<Side>, (w, h): (f32, f32), (mw, mh): (f32, f32)) -> Result<Side, Refusal> {
+    if !w.is_finite() || !h.is_finite() || w <= 0. || h <= 0. { return Err(Refusal::InvalidInput); }
+    let row = w >= 2. * mw + SPLIT_GUTTER_PX && h >= mh;
+    let col = h >= 2. * mh + SPLIT_GUTTER_PX && w >= mw;
+    // Keep ordinary-width comparisons beside one another. In a tall pane where
+    // each drawing would have less than 1.5 minimum widths, prefer stacking.
+    let chosen = side.unwrap_or_else(|| {
+        if col && (!row || (w < h && w < 3. * mw + SPLIT_GUTTER_PX)) { Side::Bottom } else { Side::Right }
+    });
+    if match chosen.axis() { Axis::Row => row, Axis::Col => col } { Ok(chosen) } else { Err(Refusal::TooSmall) }
+}
+
+fn child_bounds(axis: Axis, ratio: f32, (w, h): (f32, f32)) -> [(f32, f32); 2] {
+    match axis {
+        Axis::Row => [(w * ratio - HALF_GUTTER, h), (w * (1.0 - ratio) - HALF_GUTTER, h)],
+        Axis::Col => [(w, h * ratio - HALF_GUTTER), (w, h * (1.0 - ratio) - HALF_GUTTER)],
+    }
+}
+
+fn restored_bounds(node: &Node, id: &str, bounds: (f32, f32)) -> Option<(f32, f32)> {
+    match node {
+        Node::Tile(t) => (t.id == id).then_some(bounds),
+        Node::Split { axis, ratio, a, b, .. } => {
+            let [ab, bb] = child_bounds(*axis, *ratio, bounds);
+            restored_bounds(a, id, ab).or_else(|| restored_bounds(b, id, bb))
+        }
+    }
+}
+
+pub fn add_in_bounds(layout: &Layout, target: Option<&str>, side: Option<Side>, tile: Tile,
+    bounds: Option<(f32, f32)>, client_has_kicad: bool, kicad: Option<&str>, locked: Option<&str>) -> Result<Layout, Refusal> {
+    let mut side = side;
+    if let (Some(bounds), Some(root)) = (bounds, layout.root.as_ref()) {
+        let anchor = match target.or(layout.focus.as_deref()) {
+            Some(id) => layout.tile(id),
+            None => layout.tiles().first().copied(),
+        }.ok_or(Refusal::NotFound)?;
+        let bounds = if layout.maximized.as_deref() == Some(anchor.id.as_str()) {
+            // Adding restores the tree. A maximized tile was measured across the whole pane.
+            restored_bounds(root, &anchor.id, bounds).ok_or(Refusal::NotFound)?
+        } else { bounds };
+        let min = default_min_for(kicad);
+        let (aw, ah) = min(anchor);
+        let (bw, bh) = min(&tile);
+        side = Some(add_side(side, bounds, (aw.max(bw), ah.max(bh)))?);
+    }
+    add(layout, target, side.unwrap_or(Side::Right), tile, client_has_kicad, locked)
+}
+
 /// Add a new tile beside `target` (or the focused/first tile if `target` is `None`, or as the root
 /// if the layout is empty). Enforces `can_add` (`oneKicad`) and `locked` (refuses if adding would
 /// move/resize/cover the locked tile).
@@ -991,8 +1043,8 @@ pub fn subtree_min<F: Fn(&Tile) -> (f32, f32)>(node: &Node, min_for: &F) -> (f32
             let (bw, bh) = subtree_min(b, min_for);
             let r = *ratio;
             match axis {
-                Axis::Row => ((aw / r).max(bw / (1.0 - r)), ah.max(bh)),
-                Axis::Col => (aw.max(bw), (ah / r).max(bh / (1.0 - r))),
+                Axis::Row => (((aw + HALF_GUTTER) / r).max((bw + HALF_GUTTER) / (1.0 - r)), ah.max(bh)),
+                Axis::Col => (aw.max(bw), ((ah + HALF_GUTTER) / r).max((bh + HALF_GUTTER) / (1.0 - r))),
             }
         }
     }
@@ -1052,11 +1104,11 @@ fn resize_node<F: Fn(&Tile) -> (f32, f32)>(
                     Axis::Row => (bounds.0, min_aw, min_bw, bounds.1, min_ah.max(min_bh)),
                     Axis::Col => (bounds.1, min_ah, min_bh, bounds.0, min_aw.max(min_bw)),
                 };
-                if cross_min > cross_total || min_a + min_b > total {
+                if cross_min > cross_total || min_a + min_b + SPLIT_GUTTER_PX > total {
                     return Err(Refusal::TooSmall);
                 }
-                let lo = min_a / total;
-                let hi = 1.0 - min_b / total;
+                let lo = (min_a + HALF_GUTTER) / total;
+                let hi = (total - min_b - HALF_GUTTER) / total;
                 if lo > hi || lo <= 0.0 || hi >= 1.0 {
                     return Err(Refusal::TooSmall);
                 }
@@ -1069,10 +1121,7 @@ fn resize_node<F: Fn(&Tile) -> (f32, f32)>(
                     b: b.clone(),
                 });
             }
-            let (a_bounds, b_bounds) = match axis {
-                Axis::Row => ((bounds.0 * ratio, bounds.1), (bounds.0 * (1.0 - ratio), bounds.1)),
-                Axis::Col => ((bounds.0, bounds.1 * ratio), (bounds.0, bounds.1 * (1.0 - ratio))),
-            };
+            let [a_bounds, b_bounds] = child_bounds(*axis, *ratio, bounds);
             match resize_node(a, split_id, desired_ratio, a_bounds, min_for) {
                 Ok(na) => Ok(Node::Split { id: id.clone(), axis: *axis, ratio: *ratio, a: Box::new(na), b: b.clone() }),
                 Err(Refusal::NotFound) => {
@@ -2319,6 +2368,33 @@ mod tests {
     }
 
     #[test]
+    fn measured_add_prefers_usable_width_and_preserves_explicit_direction() {
+        let choose = |side, w, h| add_side(side, (w,h), (180.,180.));
+        assert_eq!(choose(None, 320., 720.), Ok(Side::Bottom));
+        assert_eq!(choose(None, 380., 720.), Ok(Side::Bottom));
+        assert_eq!(choose(None, 616., 835.), Ok(Side::Right));
+        assert_eq!(choose(None, 320., 320.), Err(Refusal::TooSmall));
+        assert_eq!(choose(Some(Side::Left), 367., 720.), Err(Refusal::TooSmall));
+        assert_eq!(choose(Some(Side::Left), 368., 720.), Ok(Side::Left));
+        assert_eq!(choose(Some(Side::Top), 720., 367.), Err(Refusal::TooSmall));
+        assert_eq!(choose(None, f32::NAN, 700.), Err(Refusal::InvalidInput));
+    }
+
+    #[test]
+    fn adding_from_a_maximized_tile_uses_its_restored_width() {
+        let board = Layout::single(tile("t1", PageKind::Board, "main.kicad_pcb")).unwrap();
+        let mut pair = add(&board, None, Side::Right, tile("t2", PageKind::Files, ""), false, None).unwrap();
+        pair.maximized = Some("t2".into());
+        let next = || tile("t3", PageKind::Schematic, "main.kicad_sch");
+        // Restoring the 720 px pane leaves 356 px for Files (half, less its half-gutter).
+        assert_eq!(add_in_bounds(&pair, Some("t2"), Some(Side::Right), next(), Some((720., 800.)), false, None, None), Err(Refusal::TooSmall));
+        let stacked = add_in_bounds(&pair, Some("t2"), None, next(), Some((720., 800.)), false, None, None).unwrap();
+        let bounds = restored_bounds(stacked.root.as_ref().unwrap(), "t3", (720., 800.));
+        assert_eq!(bounds, Some((356., 396.)));
+        assert_eq!(pair.maximized.as_deref(), Some("t2"));
+    }
+
+    #[test]
     fn add_enforces_one_kicad_for_simulation_and_allows_beside_viewer_board() {
         let l = Layout::single(tile("t1", PageKind::Board, "main.kicad_pcb")).unwrap();
         assert_eq!(
@@ -2353,7 +2429,7 @@ mod tests {
         let Node::Split { ratio: stored_r, .. } = wide.root.as_ref().unwrap() else { panic!() };
         assert!((*stored_r - 0.02).abs() < 1e-5, "expected stored 0.02, got {stored_r}");
         let (min_w, _) = subtree_min(wide.root.as_ref().unwrap(), &default_min_for(None));
-        assert!((min_w - 9000.0).abs() < 1.0, "expected 180/0.02 = 9000px, got {min_w}");
+        assert!((min_w - 9200.0).abs() < 1.0, "expected (180+4)/0.02 = 9200px, got {min_w}");
 
         // Counterexample: repeated 1e-6 ancestor resizes must NEVER drift a locked tile
         let mut cur = l.clone();
@@ -2367,7 +2443,7 @@ mod tests {
         }
         assert_eq!(tile_rect(&cur, "k"), tile_rect(&l, "k"));
 
-        // Descendant ratio test: 80/20 row of two 180px leaves requires 900px; inside 1200px -> min ratio 0.75
+        // The 20% child needs 180px plus half its gutter; the parent adds its own half gutter.
         let nested = Layout {
             version: LAYOUT_VERSION,
             root: Some(Node::Split {
@@ -2388,7 +2464,8 @@ mod tests {
         };
         let resized = resize(&nested, "parent", 0.4, (1200.0, 800.0), default_min_for(None), None).unwrap();
         let Node::Split { ratio, .. } = resized.root.as_ref().unwrap() else { panic!() };
-        assert!((*ratio - 0.75).abs() < 1e-4, "expected 0.75, got {ratio}");
+        let expected = ((180.0 + 4.0) / 0.2 + 4.0) / 1200.0;
+        assert!((*ratio - expected).abs() < 1e-4, "expected {expected}, got {ratio}");
     }
 
     #[test]

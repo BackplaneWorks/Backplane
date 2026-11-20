@@ -22,7 +22,7 @@ thread_local! { static DRAG_HOOK: std::cell::RefCell<Option<SplitterDrag>> = con
 pub fn tiles_metric(started: Instant, tiles: Vec<Value>, splitters: Vec<Value>) {
     TILES.with_borrow_mut(|last| {
         if last.0 != tiles || last.1 != splitters {
-            metric(started, "tiles", json!({"tiles": tiles, "splitters": splitters}));
+            metric(started, "tiles", json!({"tiles": tiles, "splitters": splitters, "refusal_metric":true}));
             *last = (tiles, splitters);
         }
     });
@@ -52,7 +52,7 @@ pub(crate) fn resolve_selector(sel: &str, tiles: &[Value], splitters: &[Value]) 
 }
 
 #[derive(Clone, Debug)]
-/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { /** {"clipboard":"text"}: the system clipboard, for a Ctrl+V keystroke after it */ Clipboard(String), /** Escape, as the person presses it */ Escape, /** the last frame's painted text, boxes and named divs (BACKPLANE_GPUI_AUDIT=1) */ Audit(String), PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<name>","settle":"<kind>"?,"timeout_ms":N?}: wait until settled (if requested) and painted, emit shot-ready, wait for <BACKPLANE_GPUI_SHOT_DIR>/<name>.done */ Shot { name: String, settle: Option<String>, timeout_ms: u64 }, /** {"wait_settled":"<kind>","tag":"<tag>","timeout_ms":N?}: wait until the page settles and emit a `settled` metric with its viewer state */ WaitSettled { kind: String, tag: String, timeout_ms: u64 }, /** {"pointer":"<control id>"}: a real mouse move, down and up at the centre of the control's drawn rect, through the window's own dispatch (no registered control needed); "link=<text>" aims at the last message link drawn whose address contains the text, a "right:" prefix presses the right button */ Pointer(String), /** {"drag":{"splitter":"@splitter"|id,"dx":N,"dy":N,"moves":N}}: a pointer drag on a drawn splitter, along its axis */ Drag(Value), /** {"tap_mm":[x,y,slot]}: a tap at a board point in millimetres (a part's position from the design file), wherever the view has put it */ TapMm(f32, f32, usize), Fit, Unsupported(String) }
+/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { /** {"clipboard":"text"}: the system clipboard, for a Ctrl+V keystroke after it */ Clipboard(String), /** Escape, as the person presses it */ Escape, /** the last frame's painted text, boxes and named divs (BACKPLANE_GPUI_AUDIT=1) */ Audit(String), PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<name>","settle":"<kind>"?,"timeout_ms":N?}: wait until settled (if requested) and painted, emit shot-ready, wait for <BACKPLANE_GPUI_SHOT_DIR>/<name>.done */ Shot { name: String, settle: Option<String>, timeout_ms: u64 }, /** {"wait_settled":"<kind>","tag":"<tag>","timeout_ms":N?}: wait until the page settles and emit a `settled` metric with its viewer state */ WaitSettled { kind: String, tag: String, timeout_ms: u64 }, /** {"pointer":"<control id>"}: a real mouse move, down and up at the centre of the control's drawn rect, through the window's own dispatch (no registered control needed); "link=<text>" aims at the last message link drawn whose address contains the text, a "right:" prefix presses the right button */ Pointer { id: String, shift: bool, middle: bool }, /** {"drag":{"splitter":"@splitter"|id,"dx":N,"dy":N,"moves":N}}: a pointer drag on a drawn splitter, along its axis */ Drag(Value), /** {"tap_mm":[x,y,slot]}: a tap at a board point in millimetres (a part's position from the design file), wherever the view has put it */ TapMm(f32, f32, usize), Fit, Unsupported(String) }
 /// Script coordinates use physical window pixels, as do the painted control rectangles.
 #[derive(Clone, Debug)]
 pub struct Drag { to: [f32; 2], moves: usize }
@@ -104,7 +104,8 @@ thread_local! {
     static HEADER: RefCell<HeaderRegistry> = RefCell::default();
 }
 
-fn header_alias(id: &str) -> Option<&'static str> {
+fn header_alias(id: &str) -> Option<&str> {
+    if id.starts_with("tile:") || id.starts_with("add-beside:") { return Some(id); }
     // i18n-ok: stable script control IDs
     Some(match id {
         "kicad-edit" => "ui:Edit",
@@ -118,11 +119,29 @@ fn header_alias(id: &str) -> Option<&'static str> {
     })
 }
 
+/// A scripted or instrumented window has armed the header registry for this frame.
+pub(crate) fn header_tracking() -> bool {
+    HEADER.with_borrow(|registry| registry.window.is_some())
+}
+
 pub(crate) fn header_present() {
     HEADER.with_borrow_mut(|registry| registry.present = true);
 }
 
 impl HeaderRegistry {
+    /// A tile selector names the action; the measured header chooses its location.
+    fn selector_action(&self, id: String) -> String {
+        if !self.actions.contains_key(&id) {
+            if let Some(tile) = id.strip_prefix("tile:").and_then(|s| s.strip_suffix(":add-beside")) {
+                let folded = format!("tile:{tile}:more:add-beside");
+                if self.actions.get(&folded).is_some_and(|action| action.folded) {
+                    return folded;
+                }
+            }
+        }
+        id
+    }
+
     fn replaces(&self, id: &str) -> bool {
         // i18n-ok: compatibility IDs shared with the older viewer toolbar.
         self.actions.contains_key(id) || self.present && matches!(id,
@@ -178,7 +197,12 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let (Some(id), Some(ms)) = (v["click"].as_str(), v["within"].as_u64()) { Some(Step::ClickWithin(id.into(), ms)) }
         else if let Some(id) = v["click"].as_str() { Some(Step::Click(id.into())) }
         else if let Some(id) = v["press"].as_str() { Some(Step::Press(id.into())) }
-        else if let Some(id) = v["pointer"].as_str() { Some(Step::Pointer(id.into())) }
+        else if let Some(id) = v["pointer"].as_str() { match (v.get("modifier"), v.get("button")) {
+            (m, b) if m.is_none_or(|m| matches!(m.as_str(), Some("none" | "shift")))
+                && b.is_none_or(|b| matches!(b.as_str(), Some("left" | "middle"))) =>
+                Some(Step::Pointer { id: id.into(), shift: v["modifier"] == "shift", middle: v["button"] == "middle" }),
+            _ => Some(Step::Unsupported("pointer_options".into())),
+        } }
         else if let Some(op) = v["imp"].as_str() { Some(Step::Imp(op.into())) }
         else if let Some(what) = v["read"].as_str() { Some(Step::Read(what.into())) }
         else if let Some(on) = v["layers"].as_bool() { Some(Step::Layers(on, v["max_h"].as_f64().map(|x| x as f32), v["scroll"].as_f64().unwrap_or(0.0) as f32)) }
@@ -218,6 +242,68 @@ fn rail_row_state(viewer: &Value, want: &str) -> Option<&'static str> {
         Some(_) => None,
         None => Some("hidden"),
     }
+}
+
+type DrawnRects = std::collections::HashMap<String, [f32; 4]>;
+
+fn measured_rect(rects: &DrawnRects, name: String) -> Option<Value> {
+    let &[x, y, w, h] = rects.get(&name)?;
+    (w > 0. && h > 0.).then(|| json!({"x":x,"y":y,"w":w,"h":h}))
+}
+
+// Switching source/overlay replaces a tile's renderer and resets its local
+// counter. Accumulate the actual increments across renderer replacements.
+#[derive(Default)]
+struct TilePaints {
+    slot: Option<usize>,
+    previous: u64,
+    total: u64,
+}
+
+impl TilePaints {
+    fn observe(&mut self, slot: Option<usize>, count: u64) -> u64 {
+        let previous = if slot == self.slot && count >= self.previous { self.previous } else { 0 };
+        self.total += count - previous;
+        self.previous = count;
+        self.slot = slot;
+        self.total
+    }
+}
+
+thread_local! {
+    static TILE_PAINTS: RefCell<(String, BTreeMap<String, TilePaints>)> = RefCell::new(Default::default());
+}
+
+// Walk in layout order so the metric stays stable. Only the current paint can
+// supply geometry or a frame counter. A maximized sibling has neither.
+fn dock_inventory(layout: &Value, rects: &DrawnRects, mut frame_count: impl FnMut(&str, &str) -> u64) -> (Vec<Value>, Vec<Value>) {
+    let mut tiles = Vec::new();
+    let mut splitters = Vec::new();
+    let mut todo = vec![&layout["root"]];
+    while let Some(node) = todo.pop() {
+        let Some(id) = node["id"].as_str() else { continue };
+        match node["type"].as_str() {
+            Some("split") => {
+                todo.extend([&node["b"], &node["a"]]);
+                let axis = match node["axis"].as_str() {
+                    Some("row") => "x", Some("col") => "y", _ => continue,
+                };
+                if let Some(rect) = measured_rect(rects, format!("splitter:{id}")) {
+                    splitters.push(json!({"id":id,"rect":rect,"axis":axis}));
+                }
+            }
+            Some("tile") => {
+                let Some(rect) = measured_rect(rects, format!("tile:{id}")) else { continue };
+                let Some(body) = measured_rect(rects, format!("tile-body:{id}")) else { continue };
+                let frame = frame_count(id, node["kind"].as_str().unwrap_or(""));
+                tiles.push(json!({"id":id,"kind":node["kind"],"source":node["source"],
+                    "overlay":node["overlay"],"focused":layout["focus"] == id,
+                    "rect":rect,"body":body,"frame":frame}));
+            }
+            _ => {}
+        }
+    }
+    (tiles, splitters)
 }
 
 fn tile_inventory(kind: &str, picked: Option<usize>, rects: &std::collections::HashMap<String, [f32; 4]>) -> Value {
@@ -260,33 +346,62 @@ impl Backplane {
             if snap != self.last_layout { self.last_layout = snap.clone(); metric(started, "layout", json!({"rects": serde_json::from_str::<Value>(&snap).unwrap_or(Value::Null)})); }
             // G4: the controls on screen, on change
             let rects = crate::art::ctl_rects();
-            let kind = rects.keys().find_map(|k| k.strip_prefix("tile-page:")).unwrap_or("");
-            let inventory = tile_inventory(kind, self.screens.pick_slot, &rects);
-            let mut tiles = inventory["tiles"].as_array().unwrap().clone();
-            let facts = &self.data["thread"]["viewer"]["identity"];
-            tiles.retain_mut(|tile| {
-                let id = tile["id"].as_str().unwrap();
-                let page = tile["kind"].as_str().unwrap();
-                let Some([x,y,w,h]) = rects.get(&format!("tile-body:{id}")) else { return false };
-                let identity = if facts["page"] != kind { &Value::Null }
-                    else if kind == "split" { facts["panes"].as_array().and_then(|p| p.iter().find(|p| p["page"] == page)).unwrap_or(&Value::Null) }
-                    else { facts };
-                let source = ["rel","name"].iter().find_map(|k| identity["source"][k].as_str().filter(|v| !v.is_empty())).unwrap_or("");
-                let frame = match page {
-                    "board" | "schematic" | "gerbers" => self.screens.plots[match id { "sch" => 1, "pcb" => 2, _ => 0 }].presented,
-                    "3d" | "mech" => self.screens.active_solid().map_or(0, |s| s.read(cx).painted_count()),
-                    _ => 0,
-                };
-                tile["frame"] = frame.into();
-                tile["body"] = json!({"x":x,"y":y,"w":w,"h":h});
-                tile["source"] = source.into();
-                tile["overlay"] = Value::Null;
-                true
-            });
-            tiles_metric(started, tiles, inventory["splitters"].as_array().unwrap().clone());
+            let layout = &self.data["thread"]["viewer"]["layout"];
+            let (tiles, splitters) = if crate::screens::viewer::is_tiled(&self.data["thread"]["viewer"]) {
+                let picture = &self.data["thread"]["viewer"]["tiles"];
+                TILE_PAINTS.with_borrow_mut(|(owner, counts)| {
+                    if owner != &self.selected {
+                        counts.clear();
+                        owner.clone_from(&self.selected);
+                    }
+                    counts.retain(|id, _| picture.get(id.as_str()).is_some());
+                    dock_inventory(layout, &rects, |id, kind| {
+                        let paints = counts.entry(id.to_owned()).or_default();
+                        let count = match kind {
+                            "board" | "schematic" | "gerbers" | "mech" | "3d" => self.screens.tile_presented(id, cx),
+                            // For non-canvas pages, the body probe itself painted this frame.
+                            _ => { paints.total += 1; return paints.total; }
+                        };
+                        paints.observe(self.screens.plots.tile_slot(id), count)
+                    })
+                })
+            } else {
+                let kind = rects.keys().find_map(|k| k.strip_prefix("tile-page:")).unwrap_or("");
+                let inventory = tile_inventory(kind, self.screens.pick_slot, &rects);
+                let mut tiles = inventory["tiles"].as_array().unwrap().clone();
+                let facts = &self.data["thread"]["viewer"]["identity"];
+                tiles.retain_mut(|tile| {
+                    let id = tile["id"].as_str().unwrap();
+                    let page = tile["kind"].as_str().unwrap();
+                    let Some([x,y,w,h]) = rects.get(&format!("tile-body:{id}")) else { return false };
+                    let identity = if facts["page"] != kind { &Value::Null }
+                        else if kind == "split" { facts["panes"].as_array().and_then(|p| p.iter().find(|p| p["page"] == page)).unwrap_or(&Value::Null) }
+                        else { facts };
+                    let source = ["rel","name"].iter().find_map(|k| identity["source"][k].as_str().filter(|v| !v.is_empty())).unwrap_or("");
+                    let frame = match page {
+                        "board" | "schematic" | "gerbers" => self.screens.plots[match id { "sch" => 1, "pcb" => 2, _ => 0 }].presented,
+                        "3d" | "mech" => self.screens.active_solid().map_or(0, |s| s.read(cx).painted_count()),
+                        _ => 0,
+                    };
+                    let single = id == "main" && layout["root"]["type"] == "tile" && layout["root"]["kind"] == page;
+                    tile["frame"] = frame.into();
+                    tile["body"] = json!({"x":x,"y":y,"w":w,"h":h});
+                    tile["source"] = source.into();
+                    let leaf = &layout["root"];
+                    if single {
+                        tile["id"] = leaf["id"].clone();
+                        tile["overlay"] = leaf["overlay"].clone();
+                    } else {
+                        tile["overlay"] = Value::Null;
+                    }
+                    true
+                });
+                (tiles, inventory["splitters"].as_array().unwrap().clone())
+            };
+            tiles_metric(started, tiles, splitters);
             let ctl = HEADER.with_borrow(|registry| {
                 let inventory = |id: &str, label: &str, rect_id: &str, enabled: bool, folded: bool| {
-                    json!({"id": id, "label": label, "rect": rects.get(rect_id).map(|r| json!({"x": r[0], "y": r[1], "w": r[2], "h": r[3]})),
+                    json!({"id": id, "label": label, "rect": rects.get(rect_id).or_else(|| rects.get(id)).map(|r| json!({"x": r[0], "y": r[1], "w": r[2], "h": r[3]})),
                         "enabled": enabled, "visible": true, "wired": enabled, "disabled_look": !enabled, "folded": folded})
                 };
                 self.all_controls().filter(|c| !registry.replaces(&c.id))
@@ -337,7 +452,7 @@ impl Backplane {
             if crate::art::rects_on() {
                 let handle = window.window_handle();
                 set_splitter_drag(Box::new(move |_, from, to, moves, cx| {
-                    if !(1..=120).contains(&moves) { return false }
+                    if from == to || !(1..=120).contains(&moves) { return false }
                     handle.update(cx, |_, window, cx| {
                         let drag = Drag { to, moves: moves as usize };
                         for event in drag.events(from, window.scale_factor()) { window.dispatch_event(event, cx); }
@@ -689,7 +804,8 @@ impl Backplane {
                 self.begin_for(format!("wait_settled:{tag}"), Goal::WaitSettled { kind, tag, timeout_ms, polling: false }, fail_s, cx);
                 cx.notify();
             }
-            Step::Pointer(id) => {
+            Step::Pointer { id, shift, middle } => {
+                let modifier = if shift { "shift" } else { "none" };
                 // Real pointer route: what a person's mouse does at the control's drawn rect, dispatched through GPUI's own window input.
                 // Deferred: the click handlers update this entity, so the dispatch must run after this update has ended.
                 // "right:<id>": the right button; "link=<text>": the last message link drawn (the newest row) whose address contains the text
@@ -698,7 +814,7 @@ impl Backplane {
                     Some(want) => self.link_and_copy_rects().into_iter().rev().find(|(l, href, _)| l.starts_with("link:") && href.contains(want)).map(|(_, _, b)| [f32::from(b.origin.x), f32::from(b.origin.y), f32::from(b.size.width).min(16.), f32::from(b.size.height)]),
                     None => crate::art::ctl_rects().get(target.as_str()).copied(),
                 }.filter(|r| r[2] > 0. && r[3] > 0.);
-                let button = if right { gpui::MouseButton::Right } else { gpui::MouseButton::Left };
+                let (button, button_name) = if right { (gpui::MouseButton::Right, "right") } else if middle { (gpui::MouseButton::Middle, "middle") } else { (gpui::MouseButton::Left, "left") };
                 let win = cx.windows().into_iter().next();
                 let entity = cx.entity();
                 match (rect, win) {
@@ -707,12 +823,13 @@ impl Backplane {
                         cx.defer(move |cx| {
                             let ok = win.update(cx, |_, window, cx| {
                                 use gpui::{MouseDownEvent, MouseMoveEvent, MouseUpEvent, Modifiers, PlatformInput};
-                                window.dispatch_event(PlatformInput::MouseMove(MouseMoveEvent { position: at, pressed_button: None, modifiers: Modifiers::default() }), cx);
-                                window.dispatch_event(PlatformInput::MouseDown(MouseDownEvent { button, position: at, modifiers: Modifiers::default(), click_count: 1, first_mouse: false }), cx);
-                                window.dispatch_event(PlatformInput::MouseUp(MouseUpEvent { button, position: at, modifiers: Modifiers::default(), click_count: 1 }), cx);
+                                let modifiers = Modifiers { shift, ..Default::default() };
+                                window.dispatch_event(PlatformInput::MouseMove(MouseMoveEvent { position: at, pressed_button: None, modifiers }), cx);
+                                window.dispatch_event(PlatformInput::MouseDown(MouseDownEvent { button, position: at, modifiers, click_count: 1, first_mouse: false }), cx);
+                                window.dispatch_event(PlatformInput::MouseUp(MouseUpEvent { button, position: at, modifiers, click_count: 1 }), cx);
                             }).is_ok();
                             entity.update(cx, |this, cx| {
-                                this.m("pointer", json!({"id": id, "hit_rect": true, "x": r[0] + r[2] / 2., "y": r[1] + r[3] / 2., "dispatched": ok}));
+                                this.m("pointer", json!({"id": id, "modifier": modifier, "button": button_name, "error": if ok { None } else { Some("window_closed") }, "hit_rect": true, "x": r[0] + r[2] / 2., "y": r[1] + r[3] / 2., "dispatched": ok}));
                                 this.ui_epoch += 1;
                                 cx.notify();
                                 this.pump(cx);
@@ -720,7 +837,7 @@ impl Backplane {
                         });
                     }
                     _ => {
-                        /* i18n-ok: test-mode script diagnostic */ self.m("pointer", json!({"id": id, "hit_rect": false, "dispatched": false, "error": if rect.is_none() { "no drawn rect" } else { "no window" }}));
+                        /* i18n-ok: test-mode script diagnostic */ self.m("pointer", json!({"id": id, "modifier": modifier, "button": button_name, "x": rect.map(|r| r[0]+r[2]/2.), "y": rect.map(|r| r[1]+r[3]/2.), "hit_rect": rect.is_some(), "dispatched": false, "error": if rect.is_none() { "no drawn rect" } else { "no window" }}));
                         cx.defer(move |cx| entity.update(cx, |this, cx| this.pump(cx)));
                     }
                 }
@@ -729,7 +846,7 @@ impl Backplane {
                 let (tiles, splitters) = TILES.with(|t| t.borrow().clone());
                 let want = spec["splitter"].as_str().unwrap_or("");
                 let id = if want.starts_with('@') { resolve_selector(want, &tiles, &splitters) } else { Ok(want.to_string()) };
-                let moves = spec["moves"].as_u64().unwrap_or(6) as u32;
+                let moves = u32::try_from(spec["moves"].as_u64().unwrap_or(6)).unwrap_or(0);
                 let report = match id {
                     Err(e) => json!({"ok": false, "splitter": want, "error": e}),
                     Ok(id) => match splitters.iter().find(|s| s["id"] == id.as_str()) {
@@ -857,7 +974,7 @@ impl Backplane {
                 let (tiles, splitters) = TILES.with(|t| t.borrow().clone());
                 let id = if sel.starts_with('@') {
                     match resolve_selector(&sel, &tiles, &splitters) {
-                        Ok(id) => id,
+                        Ok(id) => HEADER.with_borrow(|registry| registry.selector_action(id)),
                         Err(e) => {
                             self.m("press", json!({"id": sel, "selector": sel, "found": false, "action": Value::Null, "error": e}));
                             let entity = cx.entity();
@@ -871,7 +988,7 @@ impl Backplane {
                     PRESS_SOLID.with(|c| *c.borrow_mut() = (sr.key().to_string(), sr.painted_count()));
                 }
                 let found = self.find_script_control(&id);
-                let action = found.map(|e| self.do_click(&e.ctl, cx));
+                let action = found.filter(|e| !matches!(e.ctl, Ctl::None)).map(|e| self.do_click(&e.ctl, cx));
                 self.m("press", json!({"id": id, "selector": if sel != id { json!(sel) } else { Value::Null }, "found": action.is_some(), "action": action}));
                 self.ui_epoch += 1;
                 cx.notify();
@@ -1045,6 +1162,12 @@ impl Backplane {
         let th = &self.data["thread"];
         let v = &th["viewer"];
         if let Some(st) = rail_row_state(v, want) { return Some(st); }
+        if crate::screens::viewer::is_tiled(v) && matches!(want, "files" | "review" | "diff" | "browser") {
+            let id = v["layout"]["focus"].as_str()?;
+            let row = &v["tiles"][id];
+            if row["kind"] != want || !crate::art::ctl_rects().contains_key(&format!("tile-body:{id}")) { return None; }
+            return crate::screens::tile_pages::settled(&self.screens, th, row, cx);
+        }
         let diff_on = th["diff"].is_object();
         let open = v["open"].as_str().unwrap_or("");
         let active = if diff_on { "diff".to_string() } else { crate::screens::viewer::active_kind(v, None) };
@@ -1219,6 +1342,27 @@ mod tests {
         std::fs::write(&p, r#"[{"tap_mm":[136.271,107.95,2]}]"#).unwrap();
         assert!(matches!(&load(&p)[0], Step::TapMm(x, y, 2) if (*x - 136.271).abs() < 1e-3 && (*y - 107.95).abs() < 1e-3));
     }
+    #[test]
+    fn add_selectors_dispatch_to_the_registered_location_on_the_matched_tile() {
+        let mut registry = HeaderRegistry::default();
+        for (kind, tile) in [("gerbers", "t2"), ("board", "t4")] {
+            let tiles = [json!({"kind": kind, "id": tile})];
+            let id = resolve_selector(&format!("@tile[kind={kind}].add-beside"), &tiles, &[]).unwrap();
+            let folded = format!("tile:{tile}:more:add-beside");
+            let action = |folded| HeaderAction {
+                label: String::new(), folded, rect_id: String::new(),
+                press: Some(HeaderPress::Tile(crate::screens::tile_menu::Action::Open(None))),
+            };
+            assert_eq!(registry.selector_action(id.clone()), id);
+            registry.actions.insert(folded.clone(), action(true));
+            let target = registry.selector_action(id.clone());
+            assert_eq!(target, folded);
+            assert!(registry.actions[&target].press.is_some());
+            registry.actions.insert(id.clone(), action(false));
+            assert_eq!(registry.selector_action(id.clone()), id);
+        }
+    }
+
     #[test] fn selectors_resolve_ids_from_the_drawn_inventory_and_refuse_ambiguity() {
         let tiles = vec![json!({"id": "t7", "kind": "board", "focused": false, "source": "a.kicad_pcb"}), json!({"id": "t9", "kind": "schematic", "focused": true})];
         let splitters = vec![json!({"id": "s3", "axis": "x"})];
@@ -1232,6 +1376,39 @@ mod tests {
         let p = crate::tmp::file("script", "d.json");
         std::fs::write(&p, r#"[{"drag":{"splitter":"@splitter","dx":-80}}]"#).unwrap();
         assert!(matches!(&load(&p)[0], Step::Drag(_)));
+    }
+    #[test]
+    fn tile_sequence_survives_canvas_replacement() {
+        let mut paints = TilePaints::default();
+        assert_eq!(paints.observe(Some(3), 8), 8);
+        assert_eq!(paints.observe(Some(3), 8), 8);
+        assert_eq!(paints.observe(Some(4), 1), 9);
+        assert_eq!(paints.observe(Some(4), 4), 12);
+    }
+    #[test]
+    fn dock_inventory_joins_only_painted_leaves_to_their_own_frames() {
+        let layout = json!({"focus":"right","root":{"type":"split","id":"bar","axis":"row",
+            "a":{"type":"tile","id":"left","kind":"board","source":"a","overlay":{"kind":"gerbers"}},
+            "b":{"type":"tile","id":"right","kind":"board","source":"b"}}});
+        let mut rects: DrawnRects = [
+            ("tile:left",[0.,0.,200.,150.]), ("tile-body:left",[0.,25.,200.,125.]),
+            ("splitter:bar",[200.,0.,6.,150.]), ("tile:right",[206.,0.,180.,150.]),
+            ("tile-body:right",[206.,20.,180.,130.]),
+        ].map(|(k, r)| (k.to_owned(), r)).into_iter().collect();
+        let count = |id: &str, _: &str| if id == "left" { 13 } else { 2 };
+        let (tiles, splitters) = dock_inventory(&layout, &rects, count);
+        assert_eq!(tiles[0]["frame"], 13);
+        assert_eq!(tiles[0]["overlay"]["kind"], "gerbers");
+        assert_eq!(tiles[1]["frame"], 2);
+        assert_eq!(tiles[1]["focused"], true);
+        assert_eq!(tiles[1]["body"]["y"], 20.0);
+        assert_eq!(splitters[0]["axis"], "x");
+        rects.remove("tile-body:left");
+        rects.remove("splitter:bar");
+        let (tiles, splitters) = dock_inventory(&layout, &rects, count);
+        assert_eq!(tiles.len(), 1);
+        assert_eq!(tiles[0]["id"], "right");
+        assert!(splitters.is_empty());
     }
     #[test]
     fn inventory_tracks_visible_split_slots_and_their_painted_divider() {
@@ -1269,6 +1446,17 @@ mod tests {
         let steps = load(&p);
         assert!(matches!(&steps[0], Step::ClickWithin(id, 8000) if id == "ui:Edit"), "{:?}", steps[0]);
         assert!(matches!(&steps[1], Step::Click(id) if id == "ui:Edit"), "{:?}", steps[1]);
+    }
+    #[test] fn pointer_steps_keep_the_requested_button_and_modifier() {
+        let path = crate::tmp::file("script", "pointer.json");
+        std::fs::write(&path, r#"[{"pointer":"rail:Board"},{"pointer":"rail:Board","modifier":"shift"},{"pointer":"rail:Board","button":"middle"},{"pointer":"rail:Board","modifier":"unknown"}]"#).unwrap();
+        let mut steps = load(&path);
+        assert!(matches!(steps.make_contiguous(), [
+            Step::Pointer { shift: false, middle: false, .. },
+            Step::Pointer { shift: true, middle: false, .. },
+            Step::Pointer { shift: false, middle: true, .. },
+            Step::Unsupported(_),
+        ]));
     }
     #[test] fn shot_step_loads_name_and_settle_options() {
         let p = crate::tmp::file("script", "shot.json");

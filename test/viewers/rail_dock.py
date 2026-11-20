@@ -27,9 +27,9 @@ Every assertion in Task 4 and Rule B7 reads ONLY from the metrics below and clea
 | `GPUI_METRIC {"event":"drag", ...}` | `from`, `to` | `[float, float]` | Start and end pointer coordinates in window pixels (must move along splitter axis). |
 | `GPUI_METRIC {"event":"refusal", ...}` | `code`, `text` | `str`, `str` | Catalog refusal code (e.g. `incompatibleOverlay` / `viewer.layout.refusal.incompatibleOverlay`) and localized human words (no raw internal codes). |
 | `viewer.layout` (hub picture, in the `viewer` block of settled/shot metrics) | `root` | `dict` | Hub `Layout` (`native/host/src/present/layout.rs`): `{"type":"tile","id","kind","source","overlay"}` leaves and `{"type":"split","id","axis":"row"\|"col","ratio","a","b"}`. No other shape is read (no `tiles` list, no `leaf`/`tile` wrappers). |
-| `crate::script::tiles_metric(started, tiles, splitters)` | call | fn | The renderer calls this on every tile/layout/frame change: it emits the `tiles` event AND stores the inventory that script selectors resolve against. |
-| `crate::script::set_splitter_drag(f)` | call | `Fn(&str id, [f32;2] from, [f32;2] to, u32 moves) -> bool` | The renderer registers how a scripted drag is delivered as a real pointer drag on splitter `id`; returns whether it was dispatched. Without it the `drag` step reports `ok:false, error:"no_drag_handler"`. |
-| script step `press` with a selector | `@tile[kind=K,source=S,focused\|unfocused].VERB` | str | Resolved by the client from the drawn inventory (exactly one match, else `found:false`) to control id `tile:<tile id>:VERB`. The renderer registers these controls (`Ctl` entries): `add-beside`, `close`, `swap` (with the other tile), `maximize`, `restore`, `overlay-gerbers` (toggle). The `press` metric carries the resolved `id` and the `selector`. |
+| `crate::script::tiles_metric(started, tiles, splitters)` | call | fn | After paint, the script joins hub leaves to measured `tile:<id>`, `tile-body:<id>`, and `splitter:<id>` rectangles. This function emits the `tiles` event AND stores the inventory that script selectors resolve against. |
+| `crate::script::set_splitter_drag(f)` | call | `Fn(&str id, [f32;2] from, [f32;2] to, u32 moves, &mut App) -> bool` | The script registers the window dispatch hook on its first frame. A scripted drag is delivered as a real pointer drag on splitter `id`; returns whether it was dispatched. Without it the `drag` step reports `ok:false, error:"no_drag_handler"`. |
+| script step `press` with a selector | `@tile[kind=K,source=S,focused\|unfocused].VERB` | str | Resolved by the client from the drawn inventory (exactly one match, else `found:false`) to control id `tile:<tile id>:VERB`. The tile header registers its drawn actions with the script registry: `add-beside`, `close`, `swap` (with the other tile), `maximize`, `restore`, `overlay-gerbers` (toggle). The `press` metric carries the resolved `id` and the `selector`. |
 | script step `drag` | `{"drag":{"splitter":"@splitter[axis=x]"\|"<id>","dx":N,"dy":N,"moves":N}}` | obj | Drags the drawn splitter along its axis (`dx` for `x`, `dy` for `y`); emits `drag` with `ok`, `splitter`, `axis`, `from`, `to`, `moves`. |
 | menu entries after `add-beside` | `add-beside:<kind>` / `add-beside:<kind>:<right\|left\|bottom\|top>` | control ids | Page and side entries (kind and side are fixed words, not tile ids). `add-beside:<kind>` means right. |
 | `GPUI_METRIC {"event":"refusal"}` | emitted when the hub refuses a layout change | event | After `overlay-gerbers` on the Files tile: `code` is `incompatibleOverlay`, `text` human words. The refusal must leave `viewer.layout` unchanged. |
@@ -38,7 +38,9 @@ Every assertion in Task 4 and Rule B7 reads ONLY from the metrics below and clea
 | incompatible overlay | `@tile[kind=files].overlay-gerbers` | control offered by the UI | Exercised only through a control the product really draws. If the UI never offers an overlay on a Files tile, the press is not delivered and `incompatible_overlay_refusal` is `unavailable` BY DESIGN (never a pass); to measure it the renderer must either offer that control and let the hub refuse, or the driver is changed to another pair the UI offers and the hub refuses. |
 | `viewer.layout` before/after the refusal | `viewer_state_json` forwards the hub's `viewer.layout` untouched into the `viewer` block of `settled`/`shot-ready` metrics | tree | Starting tree must be exactly Board + Files; layouts before and after must be equal; two empty dicts are not "equal". |
 
-Task 4 route: `rail:Gerbers` -> `@tile[kind=gerbers].add-beside` -> `add-beside:board` (the exact ordered ids, each delivered) -> (one step back) `@tile[kind=board].close`.
+Task 4 route (budget two): `rail:Gerbers` -> `{"pointer":"rail:Board","modifier":"shift"}` (or `"button":"middle"`): a physical Shift+left-click / middle-click on the rail's Board row,
+through real hit-testing (the pointer metric carries `id`, `modifier` none|shift, `button` left|middle, `hit_rect`, `dispatched`, `x`, `y`, `error`) -> (one step back) `@tile[kind=board].close`.
+A separate measured menu route (three presses): `rail:Gerbers` -> `@tile[kind=gerbers].add-beside` -> `add-beside:board`, with its own shots `task4-menu-*`.
 Freshness: each shot's tile inventory must carry a `tiles` event whose seq is after the last DELIVERED input (press or drag) of its transition.
 
 Every check stays `unavailable` until a build emits `GPUI_METRIC {"event":"tiles", ...}` and
@@ -49,6 +51,7 @@ clearance (fail-closed on missing/failed `inspect_ok`, native dialogs, or unclea
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -78,6 +81,40 @@ INCOMPATIBLE_OVERLAY_CODES = {
 RAW_REFUSAL_CODE_RE = re.compile(
     r"\b(ERR_[A-Z0-9_]+|INTERNAL_[A-Z0-9_]+|PRESENTER_[A-Z0-9_]+|ECONNREFUSED|ENOENT|HTTP\s+5\d\d|Refusal::|panic|backtrace|incompatibleOverlay)\b"
 )
+
+
+# Logical-pixel minima and gutter from present/layout.rs for the Board/Schematic trials.
+def _direction_fits(axis: str, width: float, height: float) -> bool:
+    """The splitter takes eight logical pixels between the two tile minima.
+
+    >>> _direction_fits("x", 367, 760), _direction_fits("x", 368, 760)
+    (False, True)
+    """
+    along, across = (width, height) if axis == "x" else (height, width)
+    return along >= 2 * 180 + 8 and across >= 180
+
+
+def _default_stacks(width: float, height: float) -> bool:
+    """The default uses the target tile dimensions.
+
+    >>> [_default_stacks(w, 800) for w in (320, 375, 616, 1040)]
+    [True, True, False, False]
+    """
+    return _direction_fits("y", width, height) and (
+        not _direction_fits("x", width, height) or (width < height and width < 3 * 180 + 8))
+
+
+def _resize_fraction(rects, axis):
+    """Measure the first tile along the splitter's actual axis.
+
+    >>> _resize_fraction([(8,101,300,300), (8,0,300,100)], "y")
+    0.25
+    >>> _resize_fraction([(205,0,200,400), (0,0,200,400)], "x")
+    0.5
+    """
+    pos = 0 if axis == "x" else 1
+    first, second = sorted(rects, key=lambda rect: rect[pos])
+    return first[pos+2] / (first[pos+2] + second[pos+2])
 
 
 def axis_from_hub(hub_axis: str | None) -> str | None:
@@ -325,6 +362,7 @@ def _chain(presses: dict[str, list[dict]], mark: str) -> list[dict]:
 def _reset_idle(tag: str, tmo: int) -> list[dict]:
     """Back to no open page, so a following `rail:Board` opens Board (pressed on a focused Board it would close it)."""
     return [
+        {"mark": f"reset:{tag}"},
         {"keys": "ctrl-l"},
         {"wait": 60},
         {"keys": "escape"},
@@ -335,83 +373,197 @@ def _reset_idle(tag: str, tmo: int) -> list[dict]:
     ]
 
 
-def _add_beside(kind_sel: str, kind: str, side: str | None = None) -> list[dict]:
-    """The user route: the tile's Add beside control, then the menu entry for the page (and side). Tile ids come from the drawn inventory."""
+PALETTE_ADD_KEYS = "a d d space b e s i d e"
+
+
+def _add_beside(kind_sel: str, kind: str, side: str | None = None, via: str = "header") -> list[dict]:
+    """The user route: the tile's Add beside control, then the menu entry for the page (and side). Tile ids come from the drawn inventory.
+
+    `via="more"` (the B7 default, every width): the tile's physical More button, then its Add beside row. `via="header"`: the visible Add beside button.
+    `via="palette"` (a separate evidence run): the command palette's "Add beside…" (`viewer.tile.add.tip`) opens the SAME picker for
+    the focused tile, so the page entry is the same control id (`add-beside:<kind>` automatic, `add-beside:<kind>:left|right|top|bottom` explicit). The palette is read
+    before Enter (its highlighted item must be `add-beside`), and the target is the focused tile (the lone Board tile of every B7 trial). No hub action is used.
+    """
     entry = f"add-beside:{kind}" + (f":{side}" if side else "")
+    if via == "more":
+        # a tiled layout's header always has its physical More button; Add beside is its first row (`tile:<id>:more:add-beside`), whatever fits in the header
+        return [{"press": f"@tile[{kind_sel}].more"}, {"wait": 120}, {"press": f"@tile[{kind_sel}].more:add-beside"}, {"wait": 120}, {"press": entry}, {"wait": 300}]
+    if via == "palette":
+        return [{"press": "rail:Commands"}, {"wait": 120}, {"keys": PALETTE_ADD_KEYS}, {"wait": 120}, {"read": "palette"}, {"keys": "enter"}, {"wait": 150},
+                {"press": entry}, {"wait": 300}]
     return [{"press": f"@tile[{kind_sel}].add-beside"}, {"wait": 120}, {"press": entry}, {"wait": 300}]
 
 
-def _exact_chain(presses: dict[str, list[dict]], mark: str, expected: list[str]) -> list[dict]:
-    """The presses of one mark, only when their ids are EXACTLY `expected`, in order, each delivered (executed)."""
+def _tile_row(kind_sel: str, verb: str, via: str, row: bool = True) -> list[dict]:
+    """One header action of a tile. On the More route it is a row of the tile's physical More menu: `tile:<id>:more:<verb>` for Add beside and Close (`row=True`),
+    `tile:<id>:<verb>` for Maximize and Restore (`row=False`), the menu opened first; otherwise the visible control `tile:<id>:<verb>`."""
+    if via == "more":
+        return [{"press": f"@tile[{kind_sel}].more"}, {"wait": 120}, {"press": f"@tile[{kind_sel}].{'more:' if row else ''}{verb}"}]
+    return [{"press": f"@tile[{kind_sel}].{verb}"}]
+
+
+def _add_chain(tile: str, kind: str, side: str | None, via: str) -> list:
+    """The ordered presses of an add: the header route's control (the visible button or its folded row) or the palette's `rail:Commands`, then the page entry."""
+    entry = f"add-beside:{kind}" + (f":{side}" if side else "")
+    if via == "more":
+        return [f"tile:{tile}:more", f"tile:{tile}:more:add-beside", entry]
+    return [["rail:Commands"] if via == "palette" else [f"tile:{tile}:add-beside", f"tile:{tile}:more:add-beside"], entry]
+
+
+def _add_via(presses: dict[str, list[dict]], mark: str) -> str:
+    """How the add of this mark was initiated: `palette` when its first delivered press is the palette's `rail:Commands`, `more` when it is a tile's physical
+    `tile:<id>:more`, else `header` (the visible Add beside button)."""
     evs = presses.get(mark) or []
-    ok = [e.get("id") for e in evs] == expected and all(e.get("found") is True for e in evs)
-    return evs if ok else []
+    first = str(evs[0].get("id") or "") if evs else ""
+    if first == "rail:Commands":
+        return "palette"
+    return "more" if first.startswith("tile:") and first.endswith(":more") else "header"
 
 
-def build_task4_dock_steps(settle_timeout_ms: int = 15000) -> list[dict]:
-    """User-facing Task 4: Gerbers -> Add beside... -> Board in the UI, then close the added tile (one step back).
+def palette_selected_add_beside(parsed_full: dict, mark: str) -> str:
+    """"" when the palette was read OPEN with `add-beside` highlighted before Enter during this mark, else why not (`unproven: ...` when it was not read, or was
+    not open: unavailable; anything else: the wrong item was highlighted, a failure)."""
+    reads = [r for r in (parsed_full.get("palette_reads") or {}).get(mark, []) if r.get("supported")]
+    if not reads:
+        return f"unproven: no palette read for {mark!r} (the highlighted item before Enter is unproven)"
+    snap = reads[-1].get("snapshot") or {}
+    if snap.get("open") is not True:
+        return "unproven: the palette was not open when read before Enter"
+    if snap.get("selected_id") != "add-beside":
+        return f"the palette highlighted {snap.get('selected_id')!r}, not 'add-beside'"
+    return ""
 
-    No direct hub `layout-*` action; tile ids are selectors resolved by the client from the drawn inventory
-    (`@tile[kind=gerbers].add-beside` -> `tile:<real id>:add-beside`). Resets to idle first so `rail:Gerbers` never toggles Gerbers off.
+
+def _exact_chain(presses: dict[str, list[dict]], mark: str, expected: list) -> list[dict]:
+    """The presses of one mark, only when they are EXACTLY `expected`, in order, each delivered (executed). An expected item that is a list is a set of
+    alternative control ids (the visible button or its folded More row).
+
+    An expected item is a control id, or `{"id", "modifier", "button"}` for a physical pointer (the client's `pointer` metric carries both: modifier
+    `none|shift`, button `left|middle`): a pointer without the expected modifier and button is not that route's press."""
+    evs = presses.get(mark) or []
+    if len(evs) != len(expected) or not all(e.get("found") is True for e in evs):
+        return []
+    for ev, want in zip(evs, expected):
+        if isinstance(want, list):  # alternatives: any one of these control ids, pressed as a control (never a pointer)
+            if ev.get("id") not in want or ev.get("pointer"):
+                return []
+        elif isinstance(want, str):
+            if ev.get("id") != want or ev.get("pointer"):
+                return []
+        elif ev.get("id") != want["id"] or ev.get("pointer") is not True or ev.get("modifier") != want["modifier"] or ev.get("button") != want["button"]:
+            return []
+    return evs
+
+
+def _route_chain(route: str, gid: str) -> list:
+    """The ordered presses that open Board beside Gerbers after `rail:Gerbers`, for each route Task 4 can take."""
+    if route == "shift":
+        return [{"id": "rail:Board", "modifier": "shift", "button": "left"}]
+    if route == "middle":
+        return [{"id": "rail:Board", "modifier": "none", "button": "middle"}]
+    if route == "menu":
+        # the tile's Add beside is its visible header button, or its folded row in the More menu when the header is too narrow for the button
+        return [[f"tile:{gid}:add-beside", f"tile:{gid}:more:add-beside"], "add-beside:board"]
+    raise ValueError(f"unknown Task 4 route {route!r}")
+
+
+TASK4_PREFIX = {"shift": "task4-dock", "middle": "task4-dock", "menu": "task4-menu"}
+
+
+def build_task4_dock_steps(settle_timeout_ms: int = 15000, route: str = "shift") -> list[dict]:
+    """User-facing Task 4: Gerbers, then Board beside it, then close the added tile (one step back).
+
+    `shift` / `middle` (the budget-two route, scored as Task 4): `rail:Gerbers`, then ONE physical pointer on the rail's `rail:Board` row, Shift+left-click or
+    middle-click, through the window's own hit-testing (no alias, no hub action). `menu` (a separate measured route, three presses): `rail:Gerbers`, the
+    Gerbers tile's `add-beside` control (`tile:<real id>:add-beside`, a selector the client resolves from the drawn inventory), then `add-beside:board`.
+    The routes use their own marks and shots (`task4-dock-*`, `task4-menu-*`). Each resets to idle first so `rail:Gerbers` never toggles Gerbers off.
     """
+    pre = TASK4_PREFIX[route]
     tmo = min(settle_timeout_ms, 8000)
+    if route == "shift":
+        open_board = [{"pointer": "rail:Board", "modifier": "shift"}, {"wait": 300}]
+    elif route == "middle":
+        open_board = [{"pointer": "rail:Board", "button": "middle"}, {"wait": 300}]
+    else:
+        open_board = _add_beside("kind=gerbers", "board")
     return [
-        *_reset_idle("task4-dock-start-idle", tmo),
-        {"mark": "press:task4-dock-gerbers"},
+        *_reset_idle(f"{pre}-start-idle", tmo),
+        {"mark": f"press:{pre}-gerbers"},
         {"press": "rail:Gerbers"},
-        {"shot": "task4-dock-gerbers", "settle": "gerbers", "timeout_ms": tmo},
-        {"mark": "press:task4-dock-split"},
-        *_add_beside("kind=gerbers", "board"),
-        {"shot": "task4-dock-split", "settle": "board", "timeout_ms": tmo},
-        {"mark": "press:task4-dock-back"},
+        {"shot": f"{pre}-gerbers", "settle": "gerbers", "timeout_ms": tmo},
+        {"mark": f"press:{pre}-split"},
+        *open_board,
+        {"shot": f"{pre}-split", "settle": "board", "timeout_ms": tmo},
+        {"mark": f"press:{pre}-back"},
         {"press": "@tile[kind=board].close"},
         {"wait": 300},
-        {"shot": "task4-dock-back", "settle": "gerbers", "timeout_ms": tmo},
+        {"shot": f"{pre}-back", "settle": "gerbers", "timeout_ms": tmo},
     ]
+
+
+def b7_add_route(minimum: bool, env: dict | None = None) -> str:
+    """How Rule B7 initiates its adds: `more` (the default, at EVERY window width: a tiled layout's header always has its physical More button, and Add beside is
+    its first row), `header` (the visible Add beside button) or `palette` (the command palette's "Add beside…"). `RAIL_B7_VIA=more|header|palette` chooses; the palette
+    run is a separate check of its own, never a substitute for the header result. `minimum` names the window and no longer changes the route."""
+    v = ((os.environ if env is None else env).get("RAIL_B7_VIA") or "").strip()
+    if v not in ("", "more", "header", "palette"):
+        raise ValueError(f"RAIL_B7_VIA must be more, header or palette, not {v!r}")
+    return v or "more"
+
+
+def seed_two_tiles(first_rail: str = "rail:Gerbers", second_rail: str = "rail:Board", mark: str = "b7:seed") -> list[dict]:
+    """Two ACTUAL tiles by the genuine budget-two route (as Task 4): the first page's rail press, then a physical Shift+click on the second page's rail row beside it.
+
+    A single tile's header may lack Add beside (too narrow for the button, no legacy More); a tiled layout's headers always have it, so B7's header adds start from here.
+    Both inputs are real measured presses/pointer events (never a hub action), recorded under `mark`."""
+    # A focused rail row toggles closed. Normalize to a different page before the
+    # measured seed, including when Escape left a single Gerbers tile open.
+    neutral = "rail:Files" if first_rail != "rail:Files" else "rail:Review"
+    return [{"press": neutral}, {"wait": 300}, {"mark": mark}, {"press": first_rail}, {"wait": 300}, {"pointer": second_rail, "modifier": "shift"}, {"wait": 400}]
 
 
 def build_b7_steps(settle_timeout_ms: int = 15000) -> list[dict]:
     """Rule B7 (one split and compare model) steps on `full`, all through the UI controls.
 
-    Idle reset before every trial (never `rail:Board` on a focused Board). Tiles and the splitter are selectors the client resolves
+    Each direction starts on the Board left by the preceding close or refusal. Tiles and the splitter are selectors the client resolves
     from the drawn inventory; the drag is a pointer drag on that splitter (`ok` only if one was dispatched).
     """
     tmo = min(settle_timeout_ms, 8000)
-    steps: list[dict] = []
+    minimum = (os.environ.get("RAIL_WINDOW_SIZE") or os.environ.get("RAIL_B2_SIZE")) == "minimum"
+    via = b7_add_route(minimum)
+    # the directions start from two actual tiles (Gerbers, Board), seeded by the genuine two-input route: a single tile's header may lack Add beside
+    steps = _reset_idle("b7-add-right-idle", tmo) + seed_two_tiles("rail:Gerbers", "rail:Board", "b7:seed")
     for side in ("right", "left", "bottom", "top"):
-        steps += _reset_idle(f"b7-add-{side}-idle", tmo)
         steps += [
-            {"press": "rail:Board"},
-            {"wait_settled": "board", "tag": f"b7-add-{side}-start", "timeout_ms": tmo},
+            {"shot": f"b7-add-{side}-start", "settle": "board", "timeout_ms": tmo},
             {"mark": f"b7:add-{side}"},
-            *_add_beside("kind=board", "schematic", side),
-            {"shot": f"b7-add-{side}", "settle": "schematic", "timeout_ms": tmo},
+            *_add_beside("kind=board", "schematic", side, via=via),
+            {"shot": f"b7-add-{side}", **({} if minimum and side in ("left","right") else {"settle":"schematic"}), "timeout_ms": tmo},
             {"mark": f"b7:close-{side}"},
-            {"press": "@tile[kind=schematic].close"},
+            *_tile_row("kind=schematic", "close", via),
             {"wait": 250},
             {"shot": f"b7-close-{side}", "settle": "board", "timeout_ms": tmo},
         ]
-    steps += _reset_idle("b7-pair-idle", tmo)
     steps += [
-        {"press": "rail:Board"},
-        {"wait_settled": "board", "tag": "b7-pair-start", "timeout_ms": tmo},
-        {"mark": "b7:pair"},
-        *_add_beside("kind=board", "schematic", "right"),
+        # the pair (swap, resize, maximize, restore) is Schematic and Board: the genuine two-input route again (Schematic, then a Shift+click on Board beside it)
+        *_reset_idle("b7-pair-idle", tmo),
+        *seed_two_tiles("rail:Schematic", "rail:Board", "b7:pair"),
         {"shot": "b7-before-swap", "settle": "schematic", "timeout_ms": tmo},
         {"mark": "b7:swap"},
         {"press": "@tile[kind=schematic].swap"},
         {"wait": 300},
         {"shot": "b7-after-swap", "settle": "schematic", "timeout_ms": tmo},
         {"mark": "b7:resize-drag"},
-        {"drag": {"splitter": "@splitter[axis=x]", "dx": -90, "moves": 6}},
+        {"drag": {"splitter": "@splitter[axis=y]" if minimum else "@splitter[axis=x]",
+                  ("dy" if minimum else "dx"): -90, "moves": 6}},
         {"wait": 300},
         {"shot": "b7-after-resize", "settle": "schematic", "timeout_ms": tmo},
         {"mark": "b7:maximize"},
-        {"press": "@tile[kind=schematic].maximize"},
+        *_tile_row("kind=schematic", "maximize", via, row=False),
         {"wait": 250},
         {"shot": "b7-maximized", "settle": "schematic", "timeout_ms": tmo},
         {"mark": "b7:restore"},
-        {"press": "@tile[kind=schematic].restore"},
+        *_tile_row("kind=schematic", "restore", via, row=False),
         {"wait": 250},
         {"shot": "b7-restored", "settle": "schematic", "timeout_ms": tmo},
     ]
@@ -429,7 +581,7 @@ def build_b7_steps(settle_timeout_ms: int = 15000) -> list[dict]:
         {"wait": 300},
         {"shot": "b7-overlay-off", "settle": "board", "timeout_ms": tmo},
         {"mark": "b7:overlay-files"},
-        *_add_beside("kind=board", "files", "right"),
+        *_add_beside("kind=board", "files"),
         {"shot": "b7-overlay-incompat-before", "settle": "files", "timeout_ms": tmo},
         {"mark": "b7:overlay-incompatible"},
         {"press": "@tile[kind=files].overlay-gerbers"},
@@ -439,14 +591,79 @@ def build_b7_steps(settle_timeout_ms: int = 15000) -> list[dict]:
     return steps
 
 
+MIN_TILE_SPAN_PX = 180.0  # the hub's own minimum tile (`present/layout.rs` MIN_TILE_PX): a tile narrower or shorter than this is not usable
+SPAN_TOLERANCE = 0.05
+
+
+def usable_tile_fails(tiles: list[dict], splitters: list[dict], tile_controls: dict | None) -> tuple[list[str], list[str]]:
+    """What makes an accepted tile unusable, from the measured inventory alone: `(fails, missing)`.
+
+    A positive frame count or a body area is not a usable tile: the tile of the original light-minimum capture was a stacked Gerbers tile 8 px wide (rect and body
+    x 406, w 8) beside a 317 px Board tile, with its header controls drawn to the right of it, outside its rect. Every tile of two or more must have:
+    - both outer spans at least `MIN_TILE_SPAN_PX` (along and across the splitter), and, for the tiles of one split, the cross-axis span (the width of tiles stacked
+      by a `y` splitter, the height of tiles side by side by an `x` one) shared: within 5 % of the widest;
+    - a body as wide as its tile (within 5 %), below a header band of positive height measured as `body.y - rect.y`;
+    - a measured header control of its own (`tile:<id>:<verb>`, visible, positive rect; `tile:<id>:more:<verb>` is a menu entry, not a header control) inside that header band and the tile's rect.
+    `missing` names what the capture does not carry (no controls measurement at all): the caller says unavailable, never passed.
+    """
+    fails: list[str] = []
+    missing: list[str] = []
+    if len(tiles) < 2:
+        return fails, missing
+    axes = {str(sp.get("axis") or "") for sp in splitters}
+    cross = "w" if "y" in axes and "x" not in axes else "h" if "x" in axes and "y" not in axes else None
+    rects = {str(t.get("id") or ""): _rect_tuple(t.get("rect")) for t in tiles}
+    bodies = {str(t.get("id") or ""): _rect_tuple(t.get("body")) for t in tiles}
+    idx = {"w": 2, "h": 3}
+    if cross is not None and all(rects.values()):
+        widest = max(r[idx[cross]] for r in rects.values() if r)
+        for tid, r in rects.items():
+            if r and r[idx[cross]] < widest * (1 - SPAN_TOLERANCE):
+                fails.append(f"tile {tid} cross-axis span {r[idx[cross]]:g}px is not the {widest:g}px the split's other tile has")
+    for tid, r in rects.items():
+        b = bodies.get(tid)
+        if r is None or b is None:
+            missing.append(f"tile {tid}: rect or body not measured")
+            continue
+        for name, v in (("width", r[2]), ("height", r[3])):
+            if v < MIN_TILE_SPAN_PX:
+                fails.append(f"tile {tid} {name} {v:g}px is under the {MIN_TILE_SPAN_PX:g}px minimum")
+        if b[2] < r[2] * (1 - SPAN_TOLERANCE):
+            fails.append(f"tile {tid} body width {b[2]:g}px does not cover its tile's {r[2]:g}px")
+        if b[1] - r[1] <= 0:
+            fails.append(f"tile {tid} has no header band (body starts at {b[1]:g}, tile at {r[1]:g})")
+        if tile_controls is None:
+            continue
+        # a header control is `tile:<id>:<verb>` (the visible glyphs, e.g. `add-beside`); `tile:<id>:more:<verb>` is an entry inside the More menu, not a header control
+        mine = {k: c for k, c in tile_controls.items() if k.startswith(f"tile:{tid}:") and ":" not in k[len(f"tile:{tid}:"):]}
+        inside = []
+        for k, c in mine.items():
+            cr = _rect_tuple((c or {}).get("rect"))
+            if cr is None or (c or {}).get("visible") is False or cr[2] <= 0 or cr[3] <= 0:
+                continue
+            if cr[0] >= r[0] - 1 and cr[0] + cr[2] <= r[0] + r[2] + 1 and cr[1] >= r[1] - 1 and cr[1] + cr[3] <= b[1] + 1:
+                inside.append(k)
+        if not inside:
+            fails.append(f"tile {tid}: no measured header control inside its header band and rect")
+    if tile_controls is None:
+        missing.append("header controls were not measured")
+    return fails, missing
+
+
 def evaluate_task4_dock(
     full_dir: Path,
     parsed_full: dict,
     caps_full: dict[str, dict],
     full_client_ok: bool,
     cleared_shots: set[str] | None = None,
+    route: str = "menu",
+    prefix: str = "task4-dock",
 ) -> dict | None:
-    """Evaluate Task 4 via the docking tile inventory (`Gerbers -> Add beside -> Board`, + one step back).
+    """Evaluate Task 4 via the docking tile inventory (Gerbers, then Board beside it, + one step back).
+
+    `route` is how Board is opened beside Gerbers: `shift` (Shift+left-click on the rail's Board row) or `middle` (middle-click on it), each the
+    budget-two route (`rail:Gerbers`, then one physical pointer on `rail:Board`); `menu` is `Gerbers -> Add beside... -> Board` (three presses,
+    a separate measured route). `prefix` names the route's marks and shots (`<prefix>-gerbers|split|back`, mark `press:<prefix>-...`).
 
     Returns `None` when the build does not emit `GPUI_METRIC event=tiles` or did not capture
     `task4-dock-split`, so callers stay `unavailable` / legacy until a build draws tiles.
@@ -454,7 +671,7 @@ def evaluate_task4_dock(
     if not parsed_full.get("tiles_metric_seen"):
         return None
     shots = parsed_full.get("shots") or {}
-    if "task4-dock-split" not in shots:
+    if f"{prefix}-split" not in shots:
         return None
 
     mark_seqs = parsed_full.get("mark_seqs") or {}
@@ -462,19 +679,20 @@ def evaluate_task4_dock(
 
     # The inventory predates the Add beside control. A single painted Gerbers
     # tile and a measured missing control establish that this route is unavailable.
-    start = shots.get("task4-dock-gerbers", {})
+    start = shots.get(f"{prefix}-gerbers", {})
     tiles = start.get("tiles") or []
-    if full_client_ok and start.get("settled") and start.get("controls_captured") and len(tiles) == 1 and tiles[0].get("kind") == "gerbers":
-        control = f"tile:{tiles[0]['id']}:add-beside"
-        attempts = presses.get("press:task4-dock-split", [])
-        if control not in start.get("controls_ids", []) and any(p.get("id") == control and p.get("found") is False for p in attempts):
+    if route == "menu" and full_client_ok and start.get("settled") and start.get("controls_captured") and len(tiles) == 1 and tiles[0].get("kind") == "gerbers":
+        controls = [f"tile:{tiles[0]['id']}:add-beside", f"tile:{tiles[0]['id']}:more:add-beside"]
+        control = controls[0]
+        attempts = presses.get(f"press:{prefix}-split", [])
+        if not any(c in start.get("controls_ids", []) for c in controls) and any(p.get("id") in controls and p.get("found") is False for p in attempts):
             return {"outcome": "unavailable", "note": "Single Gerbers tile has no Add beside control",
                     "one_step_back": False, "found": False, "presses": [],
                     "evidence": {"tile": tiles[0]["id"], "missing_control": control}}
 
-    ok_g, err_g = _shot_cleared(full_dir, "task4-dock-gerbers", caps_full, shots, cleared_shots)
-    ok_s, err_s = _shot_cleared(full_dir, "task4-dock-split", caps_full, shots, cleared_shots)
-    ok_b, err_b = _shot_cleared(full_dir, "task4-dock-back", caps_full, shots, cleared_shots)
+    ok_g, err_g = _shot_cleared(full_dir, f"{prefix}-gerbers", caps_full, shots, cleared_shots)
+    ok_s, err_s = _shot_cleared(full_dir, f"{prefix}-split", caps_full, shots, cleared_shots)
+    ok_b, err_b = _shot_cleared(full_dir, f"{prefix}-back", caps_full, shots, cleared_shots)
 
     if not full_client_ok or not ok_g or not ok_s:
         return {
@@ -487,18 +705,18 @@ def evaluate_task4_dock(
         }
 
     # Require real observed delivery for the user-facing Task 4 route (never fabricated found=True).
-    p_g = [p for p in presses.get("press:task4-dock-gerbers", []) if p.get("found")]
-    p_s = [p for p in presses.get("press:task4-dock-split", []) if p.get("found")]
-    p_b = [p for p in presses.get("press:task4-dock-back", []) if p.get("found")]
+    p_g = [p for p in presses.get(f"press:{prefix}-gerbers", []) if p.get("found")]
+    p_s = [p for p in presses.get(f"press:{prefix}-split", []) if p.get("found")]
+    p_b = [p for p in presses.get(f"press:{prefix}-back", []) if p.get("found")]
     observed_presses = [p["id"] for p in p_g] + [p["id"] for p in p_s]
     found_route = bool(p_g and p_s)
 
-    s_g = shots["task4-dock-gerbers"]
-    s_split = shots["task4-dock-split"]
+    s_g = shots[f"{prefix}-gerbers"]
+    s_split = shots[f"{prefix}-split"]
 
     # Fresh tile inventory for every shot: after the last delivered press of the EXACT ordered route
     # (rail Gerbers by id, the drawn Gerbers tile's `add-beside`, then `add-beside:board`, then the drawn Board tile's `close`).
-    fg_ok, fg_err = _fresh_tiles_after_mark(s_g, mark_seqs, "press:task4-dock-gerbers", _exact_chain(presses, "press:task4-dock-gerbers", ["rail:Gerbers"]))
+    fg_ok, fg_err = _fresh_tiles_after_mark(s_g, mark_seqs, f"press:{prefix}-gerbers", _exact_chain(presses, f"press:{prefix}-gerbers", ["rail:Gerbers"]))
     if not fg_ok:
         return {
             "outcome": "unavailable",
@@ -521,8 +739,8 @@ def evaluate_task4_dock(
         }
     gid = str(g_tiles[0].get("id") or "")
     fs_ok, fs_err = _fresh_tiles_after_mark(
-        s_split, mark_seqs, "press:task4-dock-split",
-        _exact_chain(presses, "press:task4-dock-split", [f"tile:{gid}:add-beside", "add-beside:board"]),
+        s_split, mark_seqs, f"press:{prefix}-split",
+        _exact_chain(presses, f"press:{prefix}-split", _route_chain(route, gid)),
     )
     if not fs_ok:
         return {
@@ -565,6 +783,9 @@ def evaluate_task4_dock(
         }
     if len(rects) == 2 and not _rects_disjoint(rects[0], rects[1]):
         fails.append("tile rects overlap")
+    # an accepted tile is usable: spans, body coverage, a measured header band and header control (frame counts and body area alone prove nothing)
+    span_fails, span_missing = usable_tile_fails(tiles, splitters, s_split.get("tile_controls") if "tile_controls" in s_split else None)
+    fails.extend(span_fails)
     if any(b is None for b in body_rects):
         return {
             "outcome": "unavailable",
@@ -575,9 +796,19 @@ def evaluate_task4_dock(
             "evidence": {"tiles": tiles},
         }
 
-    splitter = _splitter_between(splitters, rects[0], rects[1], "x") if (len(rects) == 2 and all(rects)) else None
+    axis = "y" if init_rect and _default_stacks(init_rect[2], init_rect[3]) else "x"
+    splitter = _splitter_between(splitters, rects[0], rects[1], axis) if (len(rects) == 2 and all(rects)) else None
     if splitter is None:
-        fails.append("no vertical ('x') splitter found between Gerbers and Board tiles")
+        fails.append(f"expected a {axis}-axis splitter between Gerbers and Board")
+
+    if splitter and init_rect:
+        by_kind = {tile.get("kind"): rect for tile, rect in zip(tiles, rects)}
+        g, b = by_kind.get("gerbers"), by_kind.get("board")
+        along = 0 if axis == "x" else 1
+        if not g or not b or b[along] <= g[along]:
+            fails.append("Board did not open after Gerbers along the default axis")
+        if any(r[0] < init_rect[0]-2 or r[0]+r[2] > init_rect[0]+init_rect[2]+2 for r in rects):
+            fails.append("tile extends past the original pane edge")
 
     sources = [_tile_source(t, v_split) for t in tiles]
     if len(sources) == 2:
@@ -586,7 +817,7 @@ def evaluate_task4_dock(
         elif sources[0] == sources[1]:
             fails.append(f"both tiles report identical source ({sources[0]!r})")
 
-    split_png = full_dir / "task4-dock-split.png"
+    split_png = full_dir / f"{prefix}-split.png"
     bodies = [tile_body_non_flat(split_png, t.get("body")) for t in tiles]
     if any(b is not True for b in bodies):
         fails.append(f"tile body flat or unreadable ({bodies})")
@@ -599,8 +830,8 @@ def evaluate_task4_dock(
     back_note = err_b
     back_unavailable = not ok_b  # an uncaptured/uncleared return shot is not a product failure
     if ok_b:
-        s_back = shots["task4-dock-back"]
-        fb_ok, fb_err = _fresh_tiles_after_mark(s_back, mark_seqs, "press:task4-dock-back", _exact_chain(presses, "press:task4-dock-back", [f"tile:{board_ids[0]}:close"] if board_ids else []))
+        s_back = shots[f"{prefix}-back"]
+        fb_ok, fb_err = _fresh_tiles_after_mark(s_back, mark_seqs, f"press:{prefix}-back", _exact_chain(presses, f"press:{prefix}-back", [f"tile:{board_ids[0]}:close"] if board_ids else []))
         if not fb_ok:
             back_note, back_unavailable = fb_err, True
         elif not p_b:
@@ -616,7 +847,7 @@ def evaluate_task4_dock(
             b_rect = _rect_tuple(b_tiles[0].get("rect")) if len(b_tiles) == 1 else None
             b_id = str(b_tiles[0].get("id") or "") if len(b_tiles) == 1 else ""
             b_src = _tile_source(b_tiles[0], v_back) if len(b_tiles) == 1 else ""
-            b_body = tile_body_non_flat(full_dir / "task4-dock-back.png", b_tiles[0].get("body")) if len(b_tiles) == 1 else None
+            b_body = tile_body_non_flat(full_dir / f"{prefix}-back.png", b_tiles[0].get("body")) if len(b_tiles) == 1 else None
             same_survivor = bool(init_id and b_id == init_id and init_src and b_src == init_src)
             width_restored = bool(b_rect and init_rect and b_rect[2] >= 0.95 * init_rect[2])
             if (
@@ -636,6 +867,9 @@ def evaluate_task4_dock(
                     f"src={b_src!r} vs {init_src!r}, width_ok={width_restored}, body={b_body})"
                 )
 
+    if not fails and span_missing:
+        return {"outcome": "unavailable", "note": "; ".join(span_missing), "one_step_back": back_ok, "found": found_route, "presses": observed_presses,
+                "evidence": {"tiles": tiles, "splitters": splitters, "unmeasured": span_missing}}
     if not fails and back_ok:
         outcome = "passed"
     elif not fails and back_unavailable:
@@ -660,6 +894,35 @@ def evaluate_task4_dock(
             "one_step_back_note": back_note,
         },
     }
+
+
+def task4_menu_route_check(full_dir: Path, parsed_full: dict, caps_full: dict[str, dict], full_client_ok: bool, cleared_shots: set[str] | None = None) -> dict | None:
+    """The menu route to the same Task 4 result (`rail:Gerbers`, the Gerbers tile's `add-beside`, `add-beside:board`; three presses), measured on its own as the
+    extra check `full/task4-menu-route`. It is not the budget-two route and does not change Task 4's score. None: the run has no such route (no `task4-menu-split` shot)."""
+    r = evaluate_task4_dock(full_dir, parsed_full, caps_full, full_client_ok, cleared_shots=cleared_shots, route="menu", prefix="task4-menu")
+    if r is None:
+        return None
+    outcome = {"passed": "passed", "task_failed": "failed", "unavailable": "unavailable"}.get(r["outcome"], "failed")
+    return {"id": "full/task4-menu-route", "kind": "full", "name": "Gerbers, Add beside, Board: the menu route to Task 4's result (three presses, measured on its own)",
+            "outcome": outcome, "note": r["note"], "evidence": {**r["evidence"], "presses": r["presses"], "one_step_back": r["one_step_back"], "found": r["found"]}}
+
+
+def add_beside_absent(start_shot: dict | None, attempts: list[dict] | None) -> str:
+    """Why an add could not be initiated, when the capture MEASURED that the board tile's header has no Add beside at this size, else "" (a different failure).
+
+    Measured means: the controls were captured, neither `tile:<id>:add-beside` (the header button) nor `tile:<id>:more:add-beside` (its folded row) is among them, and the
+    press of it was attempted and not found. At the minimum window the header may be too narrow for the button even after the source name is shortened and there is no
+    legacy More: that is a result of the design, so the direction is `unavailable` (never passed, never a product failure), and no palette command adds a tile.
+    """
+    if not start_shot or not start_shot.get("controls_captured"):
+        return ""
+    board = [str(t.get("id") or "") for t in (start_shot.get("tiles") or []) if t.get("kind") == "board"]
+    ids = set(start_shot.get("controls_ids") or [])
+    if len(board) != 1 or any(f"tile:{board[0]}:{v}" in ids for v in ("add-beside", "more:add-beside")):
+        return ""
+    if not any(a.get("found") is False for a in (attempts or [])):
+        return ""
+    return f"Add beside is absent from the Board tile's header at this size (measured: no tile:{board[0]}:add-beside nor tile:{board[0]}:more:add-beside among the drawn controls; the press found nothing)"
 
 
 def evaluate_b7_dock(
@@ -700,8 +963,10 @@ def evaluate_b7_dock(
         f = t.get("frame")
         return f if (isinstance(f, int) and not isinstance(f, bool)) else None
 
+    refused_sides = set()
     # 1. add_beside_directions (right, left, bottom, top)
     dir_results: dict[str, bool | str] = {}
+    absent_sides: list[str] = []  # directions whose add could not start because the header MEASURED no Add beside at this size
     dir_notes: list[str] = []
     for side, axis in (("right", "x"), ("left", "x"), ("bottom", "y"), ("top", "y")):
         sname = f"b7-add-{side}"
@@ -716,19 +981,76 @@ def evaluate_b7_dock(
         fr_ok, fr_err = _fresh_tiles_after_mark(shots[sname], mark_seqs, f"b7:add-{side}", _chain(presses, f"b7:add-{side}"))
         if not fr_ok:
             dir_results[side] = "unavailable"
-            dir_notes.append(f"{side}: {fr_err}")
+            absent = add_beside_absent(shots.get(f"{sname}-start"), presses.get(f"b7:add-{side}"))
+            if absent:
+                absent_sides.append(side)
+            dir_notes.append(f"{side}: {absent or fr_err}")
             continue
         ts = shots[sname].get("tiles") or []
         sps = shots[sname].get("splitters") or []
-        if len(ts) != 2:
+        start = f"{sname}-start"
+        initial = shots.get(start, {})
+        base = initial.get("tiles") or []
+        had_start = bool(base)
+        if not base:  # no start shot: the tiles before the add are what is not the added Schematic (and nothing is known of their rects before it)
+            base = [t for t in ts if t.get("kind") != "schematic"]
+        base_ids = [str(t.get("id") or "") for t in base]
+        base_boards = [t for t in base if t.get("kind") == "board"]
+        tile = str(base_boards[0].get("id") or "") if len(base_boards) == 1 else ""
+        # the target is the Board of the base (one tile, or the Board of the seeded two): its rect decides whether a direction can fit at all
+        rect = _rect_tuple(base_boards[0].get("rect")) if len(base_boards) == 1 and had_start else None
+        if rect and not _direction_fits(axis, rect[2], rect[3]):
+            clear, why = _shot_cleared(full_dir, start, caps_full, shots, cleared_shots)
+            if not clear:
+                dir_results[side] = "unavailable"
+                dir_notes.append(why)
+                continue
+            mark = f"b7:add-{side}"
+            via = _add_via(presses, mark)
+            events = _exact_chain(presses, mark, _add_chain(tile, "schematic", side, via))
+            pal_why = palette_selected_add_beside(parsed_full, mark) if via == "palette" and events else ""
+            before = (initial.get("viewer") or {}).get("layout") or {}
+            after = (shots[sname].get("viewer") or {}).get("layout")
+            if not events or set(layout_leaves(before)) != set(base_ids):
+                dir_results[side] = "unavailable"
+                dir_notes.append(f"{side}: missing initial tree or delivered directional command")
+                continue
+            if pal_why:
+                dir_results[side] = "unavailable" if pal_why.startswith("unproven") else False
+                dir_notes.append(f"{side}: {pal_why}")
+                continue
+            ack = [r for r in refusals.get(mark, []) if events[-1]["seq"] < r["seq"] < shots[sname]["tiles_seq"]]
+            if not ack and not parsed_full.get("refusal_metric_declared"):
+                dir_results[side] = "unavailable"
+                dir_notes.append(f"{side}: refusal metric unavailable")
+                continue
+            human = (ack[-1].get("text") or "").strip() if ack else ""
+            after_board = next((t for t in ts if str(t.get("id") or "") == tile), None)
+            ok = (bool(ack) and ack[-1].get("code") == "tooSmall" and bool(human)
+                  and not RAW_REFUSAL_CODE_RE.search(human) and "toosmall" not in human.lower()
+                  and before == after and [str(t.get("id") or "") for t in ts] == base_ids
+                  and len(sps) == len(initial.get("splitters") or [])
+                  and after_board is not None and after_board.get("kind") == "board"
+                  and _rect_close(rect, _rect_tuple(after_board.get("rect")) or (0, 0, 0, 0)))
+            dir_results[side] = ok
+            if ok:
+                refused_sides.add(side)
+            else:
+                dir_notes.append(f"{side}: expected localized tooSmall and unchanged tiles")
+            continue
+        if not tile:
+            dir_results[side] = "unavailable"
+            dir_notes.append(f"{side}: the start shot does not show exactly one Board tile to add beside")
+            continue
+        added = [t for t in ts if str(t.get("id") or "") not in base_ids]
+        if len(ts) != len(base) + 1 or len(added) != 1 or added[0].get("kind") != "schematic":
             dir_results[side] = False
-            dir_notes.append(f"{side}: expected 2 tiles, got {len(ts)}")
+            dir_notes.append(f"{side}: expected the {len(base)} tile(s) plus one new Schematic, got {len(ts)} tile(s) of kinds {sorted(str(t.get('kind') or '') for t in ts)}")
             continue
         by_kind = {str(t.get("kind") or ""): t for t in ts}
-        if "board" not in by_kind or "schematic" not in by_kind:
-            dir_results[side] = False
-            dir_notes.append(f"{side}: unexpected kinds {sorted(by_kind)}")
-            continue
+        by_kind["board"] = next(t for t in ts if str(t.get("id") or "") == tile)
+        by_kind["schematic"] = added[0]
+        rects_all = [_rect_tuple(t.get("rect")) for t in ts]
         rb = _rect_tuple(by_kind["board"].get("rect"))
         rs = _rect_tuple(by_kind["schematic"].get("rect"))
         bb = _rect_tuple(by_kind["board"].get("body"))
@@ -737,11 +1059,11 @@ def evaluate_b7_dock(
             dir_results[side] = "unavailable"
             dir_notes.append(f"{side}: missing measured body rect")
             continue
-        if rb is None or rs is None:
+        if rb is None or rs is None or any(r is None for r in rects_all):
             dir_results[side] = "unavailable"
             dir_notes.append(f"{side}: missing outer tile rect")
             continue
-        if not _rects_disjoint(rb, rs):
+        if any(not _rects_disjoint(rects_all[i], rects_all[j]) for i in range(len(rects_all)) for j in range(i + 1, len(rects_all))):
             dir_results[side] = False
             dir_notes.append(f"{side}: invalid or overlapping rects")
             continue
@@ -756,21 +1078,33 @@ def evaluate_b7_dock(
         b1 = tile_body_non_flat(png, by_kind["board"].get("body"))
         b2 = tile_body_non_flat(png, by_kind["schematic"].get("body"))
         diff12 = tile_bodies_pixel_diff(png, by_kind["board"].get("body"), png, by_kind["schematic"].get("body"))
-        if pos_ok and sp_ok and b1 is True and b2 is True and (diff12 is not None and diff12 > 0.01):
-            dir_results[side] = True
+        mark_b7 = f"b7:add-{side}"
+        pal_why = palette_selected_add_beside(parsed_full, mark_b7) if _add_via(presses, mark_b7) == "palette" else ""
+        if pal_why:
+            dir_results[side] = "unavailable" if pal_why.startswith("unproven") else False
+            dir_notes.append(f"{side}: {pal_why}")
+            continue
+        usable_fails, usable_missing = usable_tile_fails(ts, shots[sname].get("splitters") or [], shots[sname].get("tile_controls") if "tile_controls" in shots[sname] else None)
+        if pos_ok and sp_ok and b1 is True and b2 is True and (diff12 is not None and diff12 > 0.01) and not usable_fails:
+            if usable_missing:
+                dir_results[side] = "unavailable"
+                dir_notes.append(f"{side}: {'; '.join(usable_missing)}")
+            else:
+                dir_results[side] = True
         else:
             dir_results[side] = False
-            dir_notes.append(f"{side}: pos_ok={pos_ok} sp_ok={sp_ok} bodies=({b1},{b2}) diff={diff12}")
+            dir_notes.append(f"{side}: pos_ok={pos_ok} sp_ok={sp_ok} bodies=({b1},{b2}) diff={diff12}" + (f" unusable: {'; '.join(usable_fails)}" if usable_fails else ""))
 
+    dir_ev = {"directions": dir_results, "add_beside_absent": absent_sides, "add_routes": {sd: _add_via(presses, f"b7:add-{sd}") for sd in dir_results}}
     if any(v is False for v in dir_results.values()):
-        checks["add_beside_directions"] = _rec("measured", False, "; ".join(dir_notes), {"directions": dir_results})
+        checks["add_beside_directions"] = _rec("measured", False, "; ".join(dir_notes), dir_ev)
     elif all(v is True for v in dir_results.values()):
-        checks["add_beside_directions"] = _rec("measured", True, "", {"directions": dir_results})
+        checks["add_beside_directions"] = _rec("measured", True, "", dir_ev)
     else:
-        checks["add_beside_directions"] = _rec("unavailable", None, "; ".join(dir_notes) or "not all 4 directions captured", {"directions": dir_results})
+        checks["add_beside_directions"] = _rec("unavailable", None, "; ".join(dir_notes) or "not all 4 directions captured", dir_ev)
 
     # 2. close (missing pane geometry -> unavailable, never waived)
-    close_side = next((s for s in ("right", "left", "bottom", "top") if f"b7-close-{s}" in shots), None)
+    close_side = next((s for s in ("right", "left", "bottom", "top") if s not in refused_sides and f"b7-close-{s}" in shots), None)
     if close_side is None:
         checks["close"] = _rec("unavailable", None, "no b7-close-* shot captured")
     else:
@@ -789,10 +1123,21 @@ def evaluate_b7_dock(
             else:
                 ts = srec.get("tiles") or []
                 sps = srec.get("splitters") or []
-                tr = _rect_tuple(ts[0].get("rect")) if len(ts) == 1 else None
-                body = tile_body_non_flat(full_dir / f"{close_sname}.png", ts[0].get("body")) if len(ts) == 1 else None
-                width_ok = bool(tr and tr[2] >= 0.95 * pr[2])
-                ok_close = len(ts) == 1 and len(sps) == 0 and width_ok and body is True
+                base0 = (shots.get(f"b7-add-{close_side}-start") or {}).get("tiles") or []
+                if len(base0) >= 2:
+                    # back to the seeded tiles: the same ids, each at its rect before the add, one splitter between them, every body painted
+                    bmap = {str(t.get("id") or ""): _rect_tuple(t.get("rect")) for t in base0}
+                    tmap = {str(t.get("id") or ""): _rect_tuple(t.get("rect")) for t in ts}
+                    bodies = [tile_body_non_flat(full_dir / f"{close_sname}.png", t.get("body")) for t in ts]
+                    same = set(bmap) == set(tmap) and all(bmap[k] and tmap[k] and _rect_close(bmap[k], tmap[k]) for k in bmap)
+                    width_ok = same
+                    body = all(b is True for b in bodies) if bodies else None
+                    ok_close = same and len(sps) == len(shots[f"b7-add-{close_side}-start"].get("splitters") or []) and body is True
+                else:
+                    tr = _rect_tuple(ts[0].get("rect")) if len(ts) == 1 else None
+                    body = tile_body_non_flat(full_dir / f"{close_sname}.png", ts[0].get("body")) if len(ts) == 1 else None
+                    width_ok = bool(tr and tr[2] >= 0.95 * pr[2])
+                    ok_close = len(ts) == 1 and len(sps) == 0 and width_ok and body is True
                 checks["close"] = _rec(
                     "measured",
                     ok_close,
@@ -887,13 +1232,13 @@ def evaluate_b7_dock(
                     if any(x is None for x in (f_pre0, f_pre1, f_post0, f_post1)):
                         checks["resize_drag"] = _rec("unavailable", None, "tile metric missing per-tile `frame` sequence for resize")
                     else:
-                        pre_rs = sorted([_rect_tuple(pre_by_id[i].get("rect")) for i in common], key=lambda r: r[0] if r else 0)
-                        post_rs = sorted([_rect_tuple(post_by_id[i].get("rect")) for i in common], key=lambda r: r[0] if r else 0)
+                        pre_rs = [_rect_tuple(pre_by_id[i].get("rect")) for i in common]
+                        post_rs = [_rect_tuple(post_by_id[i].get("rect")) for i in common]
                         if not (all(pre_rs) and all(post_rs)):
                             checks["resize_drag"] = _rec("measured", False, "missing tile rects across resize")
                         else:
-                            r_pre = pre_rs[0][2] / (pre_rs[0][2] + pre_rs[1][2])
-                            r_post = post_rs[0][2] / (post_rs[0][2] + post_rs[1][2])
+                            r_pre = _resize_fraction(pre_rs, sp_axis)
+                            r_post = _resize_fraction(post_rs, sp_axis)
                             ratio_delta = abs(r_post - r_pre)
                             frames_adv = (f_post0 > f_pre0) and (f_post1 > f_pre1)
                             png_rsz = full_dir / "b7-after-resize.png"

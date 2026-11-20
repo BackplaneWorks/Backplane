@@ -717,6 +717,28 @@ impl SolidCore {
         self.floor = self.latest + 1;
         self.refined.clear();
     }
+    fn mirror_layers(&mut self, source: &Self, panel_wh: (f32, f32)) -> bool {
+        let changed = match (&self.mesh, &source.mesh) {
+            (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
+            (None, None) => false,
+            _ => true,
+        };
+        if changed || self.key != source.key {
+            let board = match (&self.mesh, &source.mesh) {
+                (Some(a), Some(b)) => match (&a.board, &b.board) {
+                    (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
+                    (None, None) => false,
+                    _ => true,
+                },
+                _ => true,
+            };
+            self.apply_scene(source.key.clone(), source.mesh.clone(), board, false,
+                source.born.len(), source.parts.0, source.parts.1, panel_wh);
+            self.born.clone_from(&source.born);
+        }
+        changed
+    }
+
     fn apply_scene(&mut self, key: String, mesh: Option<Arc<Layers>>, board: bool, reset: bool, groups: usize, done: u32, of: u32, panel_wh: (f32, f32)) -> SceneResult {
         if key != self.key { self.switch_source_reset(); }
         // a model brought back stays until the hub's stream of it has caught up (no parts going and fading in again)
@@ -835,6 +857,9 @@ impl SolidCore {
     }
 }
 pub struct SolidPage {
+    source_rev: u64,
+    seen_source: Option<u64>,
+    source_subscription: Option<Subscription>,
     /// the button now held down, whose release ends the drag (the table decides what it does)
     press_btn: Option<MouseButton>,
     /** where the left button went down, until the pointer leaves it by 4 px (a click picks the part under it) */ press: Option<Point<Pixels>>,
@@ -859,10 +884,33 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { press_btn: None, press: None, names_probe: true, core: SolidCore::new(), drag: None, fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, failed: false, retryable: None, last_retry: None, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ inline_controls: true, worker: Worker::spawn(tx),
+        SolidPage { source_rev: 0, seen_source: None, source_subscription: None, press_btn: None, press: None, names_probe: true, core: SolidCore::new(), drag: None, fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, failed: false, retryable: None, last_retry: None, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ inline_controls: true, worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), painted: Arc::new(AtomicU64::new(0)), painted_gen: Arc::new(AtomicU64::new(0)), stats: Stats::default() }
     }
     /// The background to draw on (the setting resolved by the window): a change draws the picture again at once, the camera untouched.
+    /// Each tile renders the source worker's decoded layers at its own size and camera.
+    pub fn for_source(source: &Entity<Self>, cx: &mut Context<Self>) -> Self {
+        let mut page = Self::new(cx);
+        page.source_subscription = Some(cx.observe(source, |tile, source, cx| tile.copy_source(&source, cx)));
+        page.copy_source(source, cx);
+        page
+    }
+
+    fn copy_source(&mut self, source: &Entity<Self>, cx: &mut Context<Self>) {
+        let src = source.read(cx);
+        if self.seen_source == Some(src.source_rev) { return; }
+        self.seen_source = Some(src.source_rev);
+        let [w, h, ..] = *self.size.lock().unwrap();
+        let changed = self.core.mirror_layers(&src.core, (w, h));
+        self.failed = src.failed;
+        self.retryable = src.retryable;
+        self.note.clone_from(&src.note);
+        let stage = src.stage.clone();
+        if self.stage != stage { self.set_stage(stage, cx); }
+        if changed { self.ask_render(self.drag.is_some()); }
+        cx.notify();
+    }
+
     pub fn set_backdrop(&mut self, back: raster::Backdrop) { if self.core.back != back { self.core.back = back; self.core.bump_view(); self.ask_render(false); } }
     /// The part the hub's probe names ("" none): drawn lit on a board's model, the picture made again when it changes.
     pub fn set_probe(&mut self, r: &str) { if self.core.probe != r { self.core.probe = r.to_string(); self.core.bump_view(); self.ask_render(false); } }
@@ -937,6 +985,7 @@ impl SolidPage {
         if peek_key(&bytes).map_or(false, |k| is_solid_key(&k)) { self.worker.submit_frame(bytes); None } else { Some(bytes) }
     }
     fn apply(&mut self, msg: Msg, cx: &mut Context<Self>) {
+        if !matches!(&msg, Msg::Image { .. }) { self.source_rev = self.source_rev.wrapping_add(1); }
         match msg {
             Msg::Scene { key, mesh, board, reset, groups, done, of } => {
                 let [pw, ph, _, _, _] = *self.size.lock().unwrap();
@@ -1819,6 +1868,28 @@ mod tests {
         // 4. Late image for A is rejected even with a fresh ticket.
         assert!(!core.apply_image(2, board.into(), rev, dummy_img(w, h), w, h));
         assert!(core.image.is_none());
+    }
+    #[test]
+    fn tiles_share_streamed_layers_and_keep_independent_orbits() {
+        let mut source = super::SolidCore::new();
+        let mut left = super::SolidCore::new();
+        let mut right = super::SolidCore::new();
+        let size = (400., 300.);
+        source.apply_scene("2|project|".into(), Some(dummy_layers()), true, true, 0, 0, 0, size);
+        assert!(left.mirror_layers(&source, size));
+        assert!(right.mirror_layers(&source, size));
+        assert!(std::sync::Arc::ptr_eq(left.mesh.as_ref().unwrap(), right.mesh.as_ref().unwrap()));
+        left.cam.as_mut().unwrap().orbit(32., 8.);
+        left.touched = true;
+        let eyes = (left.cam.unwrap().eye(), right.cam.unwrap().eye());
+        assert_ne!(eyes.0, eyes.1);
+        assert!(!left.mirror_layers(&source, size));
+        source.apply_scene("2|project|".into(), Some(dummy_layers()), false, false, 1, 1, 2, size);
+        assert!(left.mirror_layers(&source, size));
+        assert!(right.mirror_layers(&source, size));
+        assert_eq!((left.cam.unwrap().eye(), right.cam.unwrap().eye()), eyes);
+        assert_eq!(left.parts, (1,2));
+        assert!(std::sync::Arc::ptr_eq(left.mesh.as_ref().unwrap(), source.mesh.as_ref().unwrap()));
     }
     #[test] fn kept_cache_restores_image_only_when_viewport_size_matches() {
         let board = "2|/proj|";

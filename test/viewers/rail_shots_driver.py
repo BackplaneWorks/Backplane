@@ -365,6 +365,21 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
             {"kicad": {"report": True, "tag": "task8-view"}},
             {"mark": "settled:task8-view"},
             {"shot": "task8-view", "settle": "board", "timeout_ms": settle_timeout_ms},
+        ])
+
+    if kind == "full":
+        # Run before Task 7 opens the native simulation setup dialog.
+        # Docking/tiling (Task 4 user route, Rule B7): scheduled in the normal `full` run, UI controls and drawn-inventory selectors only;
+        # every check stays `unavailable` until a build emits `GPUI_METRIC event=tiles` (docs: rail_dock.py contract table).
+        steps.extend(DOCK.build_task4_dock_steps(settle_timeout_ms))  # the budget-two route (Shift+click on rail:Board)
+        steps.extend(DOCK.build_task4_dock_steps(settle_timeout_ms, route="menu"))  # the menu route, measured separately
+        steps.extend(DOCK.build_b7_steps(settle_timeout_ms))
+
+    if kind == "full" and embed:
+        # Leave the optional overlay trial with a single pane before opening Simulation.
+        for page in ("files", "schematic"):
+            steps.extend([{"press": f"@tile[kind={page}].close"}, {"wait": 300}])
+        steps.extend([
             # Task 7: run a simulation of the schematic (rail:Simulation -> Simulator -> Run)
             {"mark": "press:task7-sim"},
             {"click": "rail:Simulation", "within": 8000},
@@ -410,12 +425,6 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
             {"kicad": {"report": True, "tag": "extra-edit-files-report"}},
             {"shot": "extra-edit-files"},
         ])
-
-    if kind == "full":
-        # Docking/tiling (Task 4 user route, Rule B7): scheduled in the normal `full` run, UI controls and drawn-inventory selectors only;
-        # every check stays `unavailable` until a build emits `GPUI_METRIC event=tiles` (docs: rail_dock.py contract table).
-        steps.extend(DOCK.build_task4_dock_steps(settle_timeout_ms))
-        steps.extend(DOCK.build_b7_steps(settle_timeout_ms))
 
     if kind == "full" and embed:
         # Decision-5 gates (auto-attach): AFTER every existing task and check, so earlier measurements are untouched; see rail_auto.py

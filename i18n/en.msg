@@ -4858,3 +4858,16 @@ web.clone.no.folders = No folders here
 gpui.c.kicad.opening = Opening the {editor}: {job}… {secs} s
 gpui.c.kicad.openingbare = Opening the {editor}… {secs} s
 gpui.c.kicad.openfailed = The {editor} did not open
+
+viewer.tile.rail.add = Shift-click or middle-click to add beside the focused tile.
+viewer.tile.add = Add beside
+viewer.tile.maximize = Maximize tile
+viewer.tile.restore = Restore tile
+viewer.tile.focus = Focus tile
+viewer.tile.embedded = Return to the viewer to add a tile beside this one.
+viewer.tile.simulation.single = Close the other tiles to open Simulation in KiCad.
+viewer.tile.add.tip = Add beside…
+viewer.tile.left = Add on the left
+viewer.tile.right = Add on the right
+viewer.tile.top = Add above
+viewer.tile.bottom = Add below

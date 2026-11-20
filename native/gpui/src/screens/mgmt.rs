@@ -62,6 +62,12 @@ pub fn shows(open: &str) -> bool { matches!(open, "board" | "schematic" | "3d" |
 /// The project file the panels are for: the design the viewer shows, None while the pane shows something else (or a diff is over it).
 pub fn project_for(thread: &Value) -> Option<String> {
     let v = &thread["viewer"];
+    if crate::screens::viewer::is_tiled(v) {
+        let tiles = v["tiles"].as_object()?;
+        let leaf = tiles.values().find(|row| matches!(row["kind"].as_str(), Some("board" | "schematic" | "3d" | "gerbers")))?;
+        return v["designPanels"]["bom"]["project"].as_str().map(str::to_owned)
+            .or_else(|| leaf["key"].as_str().and_then(crate::viewers::kicad_pane::project_of));
+    }
     if thread["diff"].is_object() || !shows(v["open"].as_str().unwrap_or("")) || !super::viewer::has_design(v) { return None }
     if let Some(pro) = v["designPanels"]["bom"]["project"].as_str() { return Some(pro.to_string()) }
     crate::viewers::kicad_pane::project_of(&super::viewer::shown_key(v)).filter(|p| !p.is_empty())
@@ -291,6 +297,10 @@ pub fn host(app: &mut Backplane, page: AnyElement, window: &mut Window, cx: &mut
     let bottom = st["side"] == "bottom";
     // tabs: the panel's name and its badge (the hub's count of what needs doing); the open one underlined
     let mut strip = div().id("mgmt-strip").flex_shrink_0().h(crate::scale::tpx(STRIP_H)).flex().items_center().gap(px(2.)).px_2().bg(c("panel")).border_t_1().border_color(c("rule")).text_size(crate::scale::tpx(11.));
+    let tiled = crate::screens::viewer::is_tiled(&app.data["thread"]["viewer"]);
+    if tiled {
+        strip = crate::ui::with_rect(strip.w_full().min_w_0().overflow_hidden().mt(px(3.)), || "design-strip".into());
+    }
     for (id, label) in &panels {
         let on = *id == open; let data = app.screens.mgmt.data(id); let idc = id.clone();
         let tab = crate::ui::with_rect(div().id(SharedString::from(format!("mgmt-tab-{id}"))), { let id = id.clone(); move || format!("mgmt:{id}") })
