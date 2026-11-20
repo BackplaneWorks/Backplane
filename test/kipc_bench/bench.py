@@ -39,8 +39,41 @@ def usage_acp(log):
             pi, pc, po = PRICE.get(model, PRICE["grok-4.7"])
             o.update(input=inp - cached, cache_write=0, cache_read=cached, output=outp, context=inp, cost=((inp - cached) * pi + cached * pc + outp * po) / 1e6, api_turns=0, models=[model], is_error=r.get("stopReason") not in (None, "end_turn"), stop=r.get("stopReason"))
     return o
+def agy_tool(u):
+    """an Antigravity tool step's name: the MCP tool it called (kicad_ipc with its command), else agy's own tool"""
+    info = u.get("tool_info") or {}; p = info.get("parameters") or {}; n = str(p.get("ToolName") or u.get("tool_name") or info.get("name") or "tool")
+    n = n.rsplit("__", 1)[-1]
+    if n == "kicad_ipc":
+        a = p.get("Arguments") or p.get("arguments") or {}
+        if isinstance(a, str):
+            try: a = json.loads(a)
+            except ValueError: a = {}
+        n = "kicad_ipc:" + str(a.get("type", "")).rsplit(".", 1)[-1]
+    return n[:40]
+def usage_agy(log):
+    """Antigravity's turn from its print-mode lines (the `agy` wrapper's log): a tool call per tool step, tokens from the `result` line (the whole
+    turn's, the sum of its requests; input_tokens are the ones not read from the cache). The person's sign-in is not billed by the token: cost 0."""
+    o = {"tools": {}, "calls": 0, "tool_result_chars": 0}; seen = set()
+    for l in open(log):
+        try: _, j = l.split("\t", 1); j = json.loads(j)
+        except ValueError: continue
+        e = j.get("ev"); e = e if isinstance(e, dict) else {}
+        if j.get("agy") != "from": continue
+        u = e.get("step_update") or {}
+        if e.get("event") == "step_update" and u.get("step_type") == "tool":
+            if u.get("step_index") not in seen and u.get("state") == "ACTIVE":
+                seen.add(u.get("step_index")); n = agy_tool(u); o["tools"][n] = o["tools"].get(n, 0) + 1; o["calls"] += 1
+            if u.get("state") == "DONE": o["tool_result_chars"] += len(json.dumps((u.get("tool_info") or {}).get("result") or u.get("output") or ""))
+        if e.get("event") == "result":
+            r = e.get("result") or {}; us = r.get("usage") or {}; g = lambda k: us.get(k) if isinstance(us.get(k), (int, float)) else 0
+            inp, cached = g("input_tokens"), g("cache_read_tokens")
+            o.update(input=inp, cache_write=0, cache_read=cached, output=g("output_tokens"), thinking=g("thinking_tokens"), context=inp + cached, cost=0, api_turns=0,
+                models=[str(r.get("model") or os.environ.get("KIPC_BENCH_THREAD_MODEL") or "")], is_error=r.get("status") != "SUCCESS", stop=r.get("status"), raw_usage=us)
+    return o
 def usage(log):
-    if '"dir": "' in open(log).readline(): return usage_acp(log)
+    first = open(log).readline()
+    if '"dir": "' in first: return usage_acp(log)
+    if '"agy": "' in first: return usage_agy(log)
     """Tokens, tool calls and time from the CLI's stream: its `result` line's totals, and each tool call by name."""
     o = {"tools": {}, "calls": 0, "tool_result_chars": 0}; seen = set()
     for l in open(log):
