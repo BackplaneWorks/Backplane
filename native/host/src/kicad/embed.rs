@@ -2956,6 +2956,7 @@ async fn show_fork_frame_n(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &s
         if o["ok"].as_bool().unwrap_or(false) { return Ok(o) }
         if o["superseded"] == true { return Err(SUPERSEDED.into()) }
         let st = o["status"].as_str().unwrap_or("");
+        if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("kicad embed: ShowFrame {} refused (try {}): {st} {} (at {})", fk_of(kind), attempt + 1, o["error"].as_str().unwrap_or(""), ipc::now_ms()); }
         if st == "AS_NOT_READY" && attempt < 7 {
             tokio::time::sleep(Duration::from_millis(150)).await;
             continue;
@@ -3518,7 +3519,16 @@ async fn spawn_gui_session(
                 }
             }
         }
-        if let Ok(Some((h2, ev2, f2))) = switch_fork_frame(&me, &sock, &desc, &active, "", "", false, false).await {
+        // #1344: the start's show of the editor asked for, and how it went (an Err here was dropped without a word: a blank pane after Ready)
+        let t_show = std::time::Instant::now();
+        let first = switch_fork_frame(&me, &sock, &desc, &active, "", "", false, false).await;
+        let opened = |f: &Vec<Frame>| f.iter().filter(|x| x.kind == canon_frame(&active)).map(|x| format!("{}{}", x.kind, if x.shown { " shown" } else { "" })).collect::<Vec<_>>();
+        match &first {
+            Ok(Some((_, _, f))) => eprintln!("kicad embed: {pro}: first show of {active}: ok after {} ms, its frames {:?}", t_show.elapsed().as_millis(), opened(f)),
+            Ok(None) => eprintln!("kicad embed: {pro}: first show of {active}: shown after {} ms, frames unknown (GetFrames failed)", t_show.elapsed().as_millis()),
+            Err(e) => eprintln!("kicad embed: {pro}: first show of {active}: FAILED after {} ms: {e}", t_show.elapsed().as_millis()),
+        }
+        if let Ok(Some((h2, ev2, f2))) = first {
             holder = h2;
             if !ev2.is_empty() { events_sock = ev2; }
             frames = f2;
