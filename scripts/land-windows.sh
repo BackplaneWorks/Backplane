@@ -7,7 +7,11 @@
 #      (bp-win 07:00 UTC, bp-winbuild 05:00 America/New_York, 10:00 UTC in winter): it needs the VM's last measured gate time (in LAND_WIN_STATE,
 #      default ~/.cache/bp-land-windows/<vm>.minutes; LAND_WIN_EST_MIN, 45, until one is measured) plus LAND_WIN_MARGIN_MIN (15) before it, and the
 #      run is cut off 5 minutes before the shutdown. The shutdowns are cost guards and are never fought. A deallocated VM is started (az vm start)
-#      and waited for, at most LAND_WIN_START_S (480) seconds.
+#      and waited for, at most LAND_WIN_START_S (480) seconds, and deallocated again when the gate ends. The daily shutdown is normal: no key, no
+#      person. bp-winbuild is reached first at its Azure public address (bpadmin@<bp-winbuild-gate-ip>, the VMs' key, its known host key), with
+#      TCP 22 opened to this machine's public address alone for the run (NSG rule land-gate-ssh in bp-winbuild-gate-nsg, deleted on every exit;
+#      scripts/winvm/winvm-gate-net.sh made the address and the NSG); else over the tailnet; else through bp-win (bp-winbuild-vnet). The gate
+#      holds only when Azure cannot start or reach either VM.
 #   2. the tree: git push over ssh into C:\bp\gate\src on the VM (refs/heads/gate there; nothing goes to GitHub), checked out detached at HEAD and
 #      cleaned (git clean -ffdx), keeping native\host\target: an incremental build between gates. A new VM's repository is seeded once from the public
 #      GitHub repository; Rust (rustup, stable MSVC) and cargo-nextest are installed if they are missing.
@@ -22,7 +26,7 @@
 #      fails; any other failure does, and so does a Windows build that fails. Flaky passes, known failures, and known ones that pass again are named.
 # Exit: 0 passed; 1 the tests (or the Windows build) failed; 75 held: no VM could run it, with one line naming each VM tried and why.
 # A VM lost under a run (ssh drops: deallocated, shut down) or a run cut off is a VM that could not run it, never a pass: the next VM is tried.
-# Env: LAND_WIN_VMS (bp-win bp-winbuild), LAND_WIN_SSH (ssh), LAND_WIN_AZ (az), WINVM_RG (BP-WIN-RG), LAND_WIN_START_S, LAND_WIN_EST_MIN, LAND_WIN_MARGIN_MIN,
+# Env: LAND_WIN_VMS (bp-win bp-winbuild), LAND_WIN_SSH (ssh), LAND_WIN_AZ (az), LAND_WIN_KEY (~/.ssh/bp-win), LAND_WIN_MYIP (asked of api.ipify.org), WINVM_RG (BP-WIN-RG), LAND_WIN_START_S, LAND_WIN_EST_MIN, LAND_WIN_MARGIN_MIN,
 # LAND_WIN_STATE, LAND_WIN_RUN_MAX_S (7200), LAND_WIN_THREADS (bp-winbuild 16), LAND_WIN_HOLD_MIN, LAND_WIN_LOG, BACKPLANE_LOCK_DIR (/tmp: where a held lock is seen).
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
@@ -35,9 +39,12 @@ say() { printf '%s\n' "land: windows: $*" >&2; }
 # vm | ssh hosts | its daily shutdown (tz hour) | its owner's lock, which the gate takes for the run
 vm_row() { case "$1" in
   bp-win) echo "bp-win|UTC 7|bp-win-ui";;
-  bp-winbuild) echo "bp-winbuild bp-winbuild-vnet|America/New_York 5|winbuild-vm";;
+  bp-winbuild) echo "@direct bp-winbuild bp-winbuild-vnet|America/New_York 5|winbuild-vm";;
   *) echo "$1||";; esac; }
-rssh() { "$ssh_prog" -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 "$@"; }
+# a host's own ssh options: the direct Azure address (bpadmin@<ip>) takes the VMs' key and checks the VM's known host key under its name
+key=${LAND_WIN_KEY:-$HOME/.ssh/bp-win}
+xo() { case "$1" in *@*) printf '%s' "-i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o HostKeyAlias=$vm";; esac; }
+rssh() { h=$1; shift; "$ssh_prog" -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 $(xo "$h") "$h" "$@"; }
 # a VM's expected gate time: its last measured one, else LAND_WIN_EST_MIN
 need_min() { n=$(cat "$state/$1.minutes" 2>/dev/null) && [ "$n" -ge 0 ] 2>/dev/null || n=$est_min; echo "$n"; }
 # the shutdown's hour in UTC, for the line (05:00 New York is 10:00 UTC in winter, 09:00 in summer)
@@ -80,6 +87,26 @@ IFS='|' read -r hosts shut extra <<EOF
 $(vm_row "$vm")
 EOF
 unavailable() { printf '%s' "$*" > "${LAND_WIN_WHY:-/dev/null}"; exit 75; }
+# Every exit (passed, failed, unavailable, cut off, a signal) ends here: the VM swept, the direct path's rule closed, a VM the gate started deallocated
+host=; rpid=; done_=; opened=; started=
+finish() {
+  [ -n "$done_" ] && return; done_=1; [ -z "$rpid" ] || kill "$rpid" 2>/dev/null
+  [ -z "$host" ] || [ ! -f "$log" ] || sweep "after the run:"
+  [ -z "$opened" ] || "$az_prog" network nsg rule delete -g "$rg" --nsg-name "$vm-gate-nsg" -n land-gate-ssh -o none 2>/dev/null || say "$vm: could not delete the NSG rule land-gate-ssh (delete it: az network nsg rule delete -g $rg --nsg-name $vm-gate-nsg -n land-gate-ssh)"
+  [ -z "$started" ] || { "$az_prog" vm deallocate -g "$rg" -n "$vm" --no-wait -o none 2>/dev/null && say "$vm: deallocated (the gate started it)" || say "$vm: could not deallocate it (the gate started it)"; }
+}
+trap finish EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+# @direct: the VM's Azure public address (scripts/winvm/winvm-gate-net.sh), opened to this machine's public address alone for this run by the
+# NSG rule land-gate-ssh, closed again at the end. No tailnet: the gate needs nothing but az (LAND_WIN_MYIP overrides the address it asks for).
+direct() {
+  me=${LAND_WIN_MYIP:-$(curl -s -4 --max-time 10 https://api.ipify.org 2>/dev/null)}
+  case "$me" in *[!0-9.]*|'') say "$vm: no public address of this machine (api.ipify.org); the direct path is skipped"; return 1;; esac
+  pub=$("$az_prog" network public-ip show -g "$rg" -n "$vm-gate-ip" --query ipAddress -o tsv 2>/dev/null) && [ -n "$pub" ] || { say "$vm: no public address ($vm-gate-ip; scripts/winvm/winvm-gate-net.sh makes it); the direct path is skipped"; return 1; }
+  "$az_prog" network nsg rule create -g "$rg" --nsg-name "$vm-gate-nsg" -n land-gate-ssh --priority 100 --direction Inbound --access Allow --protocol Tcp \
+    --destination-port-ranges 22 --source-address-prefixes "$me/32" -o none 2>/dev/null || { say "$vm: could not open ssh to $me in $vm-gate-nsg; the direct path is skipped"; return 1; }
+  opened=1; echo "bpadmin@$pub"
+}
+case " $hosts " in *" @direct "*) d=$(direct) && opened=1 || d=; hosts=$(printf '%s' "$hosts" | sed "s/@direct/$d/");; esac
 reach() { for h in $hosts; do rssh "$h" 'exit 0' >/dev/null 2>&1 && { echo "$h"; return 0; }; done; return 1; }
 host=$(reach) || {
   power=$("$az_prog" vm get-instance-view -g "$rg" -n "$vm" --query "instanceView.statuses[?starts_with(code,'PowerState/')].code|[0]" -o tsv 2>/dev/null) ||
@@ -94,6 +121,7 @@ host=$(reach) || {
   say "$vm is $power: starting it (at most ${start_s}s)"
   end=$(( $(date +%s) + start_s ))
   [ "$power" = starting ] || timeout "$start_s" "$az_prog" vm start -g "$rg" -n "$vm" -o none 2>/dev/null || unavailable "$power, and az vm start failed"
+  started=1
   while :; do host=$(reach) && break; [ "$(date +%s)" -lt "$end" ] || unavailable "started, but ssh did not answer within ${start_s}s"; sleep 5; done
 }
 sha=$(git rev-parse HEAD)
@@ -119,12 +147,9 @@ Start-Sleep -Milliseconds 500; Remove-Item -Recurse -Force "$g\tmp", $f
 "sweep: stopped $($gone.Count)$(if ($gone.Count) { ": " + ($gone -join " ") }); C:\bp\gate\tmp removed"'
 sweep_cmd="powershell -NoProfile -NonInteractive -EncodedCommand $(printf '%s' "$sweep_ps" | iconv -f utf-8 -t utf-16le | base64 -w0)"
 sweep() { # sweep WHEN: what it stopped goes to the log, and is said when it found any
-  out=$(timeout 180 "$ssh_prog" -o BatchMode=yes -o ConnectTimeout=15 "$host" "$sweep_cmd" 2>&1 | tr -d '\r' | grep -a '^sweep:') || out="sweep: FAILED (no answer from $host)"
+  out=$(timeout 180 "$ssh_prog" -o BatchMode=yes -o ConnectTimeout=15 $(xo "$host") "$host" "$sweep_cmd" 2>&1 | tr -d '\r' | grep -a '^sweep:') || out="sweep: FAILED (no answer from $host)"
   printf '%s %s\n' "$1" "$out" >> "$log"
   case "$out" in "sweep: stopped 0;"*) ;; *) say "$1 $out";; esac; }
-rpid=; done_=
-finish() { [ -n "$done_" ] && return; done_=1; [ -z "$rpid" ] || kill "$rpid" 2>/dev/null; sweep "after the run:"; }
-trap finish EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 : > "$log"; sweep "before the run (what an earlier gate left):"
 # the repository there (seeded once from GitHub's public main: the push below then sends only what it lacks), and nextest
 rssh "$host" "$bash_ps" >> "$log" 2>&1 <<'EOF'
@@ -138,7 +163,7 @@ command -v cargo >/dev/null || { curl -fsSL -o /c/bp/gate/rustup-init.exe https:
 command -v cargo-nextest >/dev/null || { mkdir -p ~/.cargo/bin && curl -fsSL https://get.nexte.st/latest/windows-tar | tar -xzf - -C ~/.cargo/bin; }
 EOF
 rc=$?; [ $rc = 0 ] || { [ $rc = 255 ] && unavailable "ssh dropped while preparing ($host)"; say "preparing $vm failed:"; tail -n 20 "$log" >&2; unavailable "could not prepare C:\\bp\\gate (see $log)"; }
-git -c core.sshCommand="$ssh_prog -o BatchMode=yes -o ConnectTimeout=15" push -q -f --receive-pack='git receive-pack' "$host:C:/bp/gate/src" "$sha:refs/heads/gate" >> "$log" 2>&1 ||
+git -c core.sshCommand="$ssh_prog -o BatchMode=yes -o ConnectTimeout=15 $(xo "$host")" push -q -f --receive-pack='git receive-pack' "$host:C:/bp/gate/src" "$sha:refs/heads/gate" >> "$log" 2>&1 ||
   unavailable "could not push the tree to $host (see $log)"
 # test threads: nextest's default (one per core) on bp-win's 4, as GitHub's runner; at most 16 on bp-winbuild's 32, where the hub's timing-bound
 # tests (written for 4 cores) failed both tries beside 31 others and passed alone (a_job_holds_its_lock..., checkpoint::stop_while..., 2026-11-20)
@@ -147,7 +172,7 @@ threads=; case "$vm" in bp-winbuild) threads="--test-threads ${LAND_WIN_THREADS:
 max_s=$run_max_s; [ -z "${LAND_WIN_LEFT:-}" ] || { b=$(( (LAND_WIN_LEFT - 5) * 60 - ($(date +%s) - t0) )); [ "$b" -ge "$max_s" ] || max_s=$b; }
 [ "$max_s" -gt 0 ] || unavailable "too close to its auto-shutdown to run"
 # the run; its own exit codes: 0 passed, 1 failed (build or tests). In the background, so a signal here is handled at once (and the sweep runs)
-timeout -s TERM "$max_s" "$ssh_prog" -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 "$host" "$bash_ps" >> "$log" 2>&1 <<EOF &
+timeout -s TERM "$max_s" "$ssh_prog" -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 $(xo "$host") "$host" "$bash_ps" >> "$log" 2>&1 <<EOF &
 set -u
 cat /proc/\$\$/winpid > /c/bp/gate/run.pid 2>/dev/null
 f=/c/ProgramData/bp-watchdog/hold-until.txt; old=; new=\$(date -u -d "+$hold_min minutes" +%FT%TZ)
