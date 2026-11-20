@@ -377,23 +377,34 @@ mod tests {
         let (_, _, specs_split_child) = plan_for(json!({"@view:t": "split", "@view.sheet:t": child}));
         assert_eq!(specs_split_child, live_split_specs(&wp_split_child));
 
-        // 8. History single version & diff forms
+        // 8. History single version & live `viewer::compare_path` diff vs live `viewer_json` key
         let sha_a = "1111aaaa99998888777766665555444433332222";
-        let sha_b = "2222bbbb88889999000011112222333344445555";
         let wa = crate::files::rv::hist_git(&format!("{root}/.git"), sha_a, &root, "main.kicad_pcb");
-        let wb = crate::files::rv::hist_git(&format!("{root}/.git"), sha_b, &root, "main.kicad_pcb");
-        let (_, _, specs_single_ver) = plan_for(json!({"@view:t": "board", "@view.file:t": wa}));
-        assert_eq!(specs_single_ver, vec![layout::WatchSpec { kind: 0, key: crate::files::kicad::watch::key(0, &root, &wa), root: root.clone(), path: wa.clone() }]);
-        let diff_wire = format!("diff\n{wa}\n{wb}\n5");
-        let (_, _, specs_diff) = plan_for(json!({"@view:t": "board", "@view.file:t": diff_wire}));
-        assert_eq!(specs_diff, vec![layout::WatchSpec { kind: 0, key: crate::files::kicad::watch::key(0, &root, &diff_wire), root: root.clone(), path: diff_wire.clone() }]);
+        let (v_sv, _, specs_single_ver) = plan_for(json!({"@view:t": "board", "@view.file:t": wa}));
+        assert_eq!(specs_single_ver, vec![layout::WatchSpec { kind: 0, key: v_sv["key"].as_str().unwrap().into(), root: root.clone(), path: wa.clone() }]);
+        let cmp_live = viewer::compare_path(&format!("{root}/.git"), &root, sha_a, &format!("{root}/main.kicad_pcb"), 5).unwrap();
+        let (v_df, _, specs_diff) = plan_for(json!({"@view:t": "board", "@view.file:t": cmp_live}));
+        assert_eq!(specs_diff, vec![layout::WatchSpec { kind: 0, key: v_df["key"].as_str().unwrap().into(), root: root.clone(), path: cmp_live.clone() }]);
 
-        // 9. Gerbers with `noboard\n` -> empty comparison (0 watches, matching live empty key "")
-        let noboard = format!("noboard\n{root}/mfg/rev1");
-        let (v_nb, l_nb, specs_nb) = plan_for(json!({"@view:t": "board", "@view.gerbers:t": "1", "@view.file:t": noboard}));
+        // 9. Gerbers with `noboard\n` via LIVE `viewer::view_action("gerbers\tboard")` on a boardless project
+        let d_nb = crate::plat::tmp::dir("watch-parity-noboard");
+        let root_nb = d_nb.to_string_lossy().into_owned();
+        std::fs::create_dir_all(d_nb.join("mfg/rev1")).unwrap();
+        std::fs::write(d_nb.join("mfg/rev1/b-F_Cu.gbr"), "%FSLAX46Y46*%M02*").unwrap();
+        let mut st_nb = crate::state::State::new();
+        st_nb.apply_line(&json!({"$":"ProjectCreated","id":"pnb","title":"NoBoard","root":root_nb,"at":1}).to_string());
+        st_nb.apply_line(&json!({"$":"ThreadCreated","id":"tnb","project":"pnb","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+        let mut sess_nb = json!({"sel":"tnb","drafts":{},"panel":false,"info":{}});
+        let out_nb = viewer::view_action(&st_nb, "h", &sess_nb, "gerbers\tboard").unwrap();
+        crate::session::patch::merge(&mut sess_nb, &out_nb.patch);
+        assert!(out_nb.before.is_empty(), "live view_action sends no watch for noboard Gerbers");
+        let v_nb = viewer::viewer_json(&st_nb, &json!({}), &sess_nb).unwrap();
+        let l_nb: layout::Layout = serde_json::from_value(v_nb["layout"].clone()).unwrap();
+        let specs_nb = layout::plan_watches(&l_nb, &layout::WatchContext::from_root(&root_nb), &resolver).unwrap();
         assert_eq!(v_nb["key"].as_str(), Some(""));
         assert_eq!(l_nb.tile("t1").unwrap().source, "");
         assert!(specs_nb.is_empty());
+        let _ = std::fs::remove_dir_all(&d_nb);
 
         let _ = std::fs::remove_dir_all(&d);
     }

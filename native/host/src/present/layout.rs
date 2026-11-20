@@ -239,6 +239,10 @@ pub struct Tile {
     pub explicit: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<TileVersion>,
+    /// True when a historical (`git\t` or `diff\n`) input was malformed or had a non-full object id:
+    /// prevents falling back to the live file and forces watch planning to fail explicitly.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unresolved_version: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overlay: Option<Overlay>,
 }
@@ -274,6 +278,8 @@ impl<'de> Deserialize<'de> for Node {
             #[serde(default)]
             version: Option<TileVersion>,
             #[serde(default)]
+            unresolved_version: bool,
+            #[serde(default)]
             overlay: Option<Overlay>,
             axis: Option<Axis>,
             ratio: Option<f32>,
@@ -288,6 +294,7 @@ impl<'de> Deserialize<'de> for Node {
                 source: w.source,
                 explicit: w.explicit,
                 version: w.version,
+                unresolved_version: w.unresolved_version,
                 overlay: w.overlay,
             })),
             "split" => Ok(Node::Split {
@@ -917,7 +924,7 @@ pub fn close(layout: &Layout, target: &str, locked: Option<&str>) -> Result<Layo
 }
 
 /// Minimum `(width_px, height_px)` required for `node` so every descendant leaf meets `min_for`
-/// at the subtree's current split ratios (e.g. an 80/20 row of two 180 px leaves requires 900 px).
+/// at the subtree's exact stored split ratios (e.g. an 80/20 row of two 180 px leaves requires 900 px).
 pub fn subtree_min<F: Fn(&Tile) -> (f32, f32)>(node: &Node, min_for: &F) -> (f32, f32) {
     match node {
         Node::Tile(t) => {
@@ -927,7 +934,7 @@ pub fn subtree_min<F: Fn(&Tile) -> (f32, f32)>(node: &Node, min_for: &F) -> (f32
         Node::Split { axis, ratio, a, b, .. } => {
             let (aw, ah) = subtree_min(a, min_for);
             let (bw, bh) = subtree_min(b, min_for);
-            let r = ratio.clamp(0.05, 0.95);
+            let r = *ratio;
             match axis {
                 Axis::Row => ((aw / r).max(bw / (1.0 - r)), ah.max(bh)),
                 Axis::Col => (aw.max(bw), (ah / r).max(bh / (1.0 - r))),
@@ -981,13 +988,16 @@ fn resize_node<F: Fn(&Tile) -> (f32, f32)>(
         Node::Tile(_) => Err(Refusal::NotFound),
         Node::Split { id, axis, ratio, a, b } => {
             if id == split_id {
+                if !bounds.0.is_finite() || !bounds.1.is_finite() || bounds.0 <= 0.0 || bounds.1 <= 0.0 {
+                    return Err(Refusal::TooSmall);
+                }
                 let (min_aw, min_ah) = subtree_min(a, min_for);
                 let (min_bw, min_bh) = subtree_min(b, min_for);
-                let (total, min_a, min_b) = match axis {
-                    Axis::Row => (bounds.0, min_aw, min_bw),
-                    Axis::Col => (bounds.1, min_ah, min_bh),
+                let (total, min_a, min_b, cross_total, cross_min) = match axis {
+                    Axis::Row => (bounds.0, min_aw, min_bw, bounds.1, min_ah.max(min_bh)),
+                    Axis::Col => (bounds.1, min_ah, min_bh, bounds.0, min_aw.max(min_bw)),
                 };
-                if !total.is_finite() || total <= 0.0 || min_a + min_b > total {
+                if cross_min > cross_total || min_a + min_b > total {
                     return Err(Refusal::TooSmall);
                 }
                 let lo = min_a / total;
@@ -1123,6 +1133,7 @@ pub fn split_overlay(
         source: ov.source,
         explicit: t.explicit,
         version: ov.version,
+        unresolved_version: false,
         overlay: None,
     };
     let next = add(&cleared, Some(target), side, new_tile, false, locked)?;
@@ -1213,6 +1224,7 @@ pub fn retarget(
         source: source.clone(),
         explicit: false,
         version: None,
+        unresolved_version: false,
         overlay: None,
     })
     .ok_or(Refusal::NotFound)?;
@@ -1282,6 +1294,7 @@ pub fn rail_press<F: Fn(PageKind) -> bool>(
         source: default_source,
         explicit: false,
         version: None,
+        unresolved_version: false,
         overlay: None,
     })
 }
@@ -1322,6 +1335,7 @@ pub fn viewer_show(
         source,
         explicit: false,
         version: None,
+        unresolved_version: false,
         overlay: None,
     })
 }
@@ -1503,6 +1517,7 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
             source: String::new(),
             explicit: false,
             version: None,
+            unresolved_version: false,
             overlay: None,
         })
         .unwrap_or_else(|_| Layout::empty());
@@ -1536,6 +1551,7 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
                 source: board_rel.clone(),
                 explicit: picked,
                 version: None,
+                unresolved_version: false,
                 overlay: None,
             })),
             b: Box::new(Node::Tile(Tile {
@@ -1544,6 +1560,7 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
                 source: board_rel,
                 explicit: picked,
                 version: None,
+                unresolved_version: false,
                 overlay: None,
             })),
         };
@@ -1558,6 +1575,7 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
                     source: sch_rel,
                     explicit: sch_explicit,
                     version: None,
+                    unresolved_version: false,
                     overlay: None,
                 })),
                 b: Box::new(right),
@@ -1605,6 +1623,7 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
                 source: board_rel,
                 explicit: false,
                 version: None,
+                unresolved_version: false,
                 overlay: Some(Overlay {
                     kind: PageKind::Gerbers,
                     source: gerber_rel,
@@ -1621,6 +1640,7 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
             source: gerber_rel,
             explicit: false,
             version: None,
+            unresolved_version: false,
             overlay: None,
         })
         .unwrap_or_else(|_| Layout::empty());
@@ -1630,34 +1650,63 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
         return Layout::empty();
     };
 
-    // History comparison (`diff\n<old>\n<new>[\n<bits>]`)
-    if let Some((new_rel, new_ver, old_rel, old_ver, layer_bits)) = parse_diff_source(inp.root, inp.file) {
-        let ov = Overlay {
-            kind,
-            source: old_rel,
-            version: old_ver,
-            mode: OverlayMode::Diff,
-            layer_bits,
-        };
-        let t = Tile {
-            id: "t1".into(),
-            kind,
-            source: new_rel,
-            explicit: false,
-            version: new_ver,
-            overlay: Some(ov),
-        };
-        return Layout::single(t).unwrap_or_else(|_| Layout::empty());
-    }
-
-    // Single historical version (`git\t<gitdir>\t<commit>\t<top_len>\t<file>`)
-    if let Some((rel, ver)) = parse_git_source(inp.root, inp.file) {
+    // Historical inputs (`diff\n` or `git\t`) NEVER fall back to live content: malformed or
+    // abbreviated-id inputs yield an `unresolved_version` tile instead of the live default PCB/SCH.
+    if inp.file.starts_with("diff\n") {
+        if let Some((new_rel, new_ver, old_rel, old_ver, layer_bits)) = parse_diff_source(inp.root, inp.file) {
+            let ov = Overlay {
+                kind,
+                source: old_rel,
+                version: old_ver,
+                mode: OverlayMode::Diff,
+                layer_bits,
+            };
+            let t = Tile {
+                id: "t1".into(),
+                kind,
+                source: new_rel,
+                explicit: false,
+                version: new_ver,
+                unresolved_version: false,
+                overlay: Some(ov),
+            };
+            if let Ok(l) = Layout::single(t) {
+                return l;
+            }
+        }
         return Layout::single(Tile {
             id: "t1".into(),
             kind,
-            source: rel,
+            source: String::new(),
             explicit: false,
-            version: Some(ver),
+            version: None,
+            unresolved_version: true,
+            overlay: None,
+        })
+        .unwrap_or_else(|_| Layout::empty());
+    }
+
+    if inp.file.starts_with("git\t") {
+        if let Some((rel, ver)) = parse_git_source(inp.root, inp.file) {
+            if let Ok(l) = Layout::single(Tile {
+                id: "t1".into(),
+                kind,
+                source: rel,
+                explicit: false,
+                version: Some(ver),
+                unresolved_version: false,
+                overlay: None,
+            }) {
+                return l;
+            }
+        }
+        return Layout::single(Tile {
+            id: "t1".into(),
+            kind,
+            source: String::new(),
+            explicit: false,
+            version: None,
+            unresolved_version: true,
             overlay: None,
         })
         .unwrap_or_else(|_| Layout::empty());
@@ -1703,6 +1752,7 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
         source,
         explicit,
         version: None,
+        unresolved_version: false,
         overlay: None,
     })
     .unwrap_or_else(|_| Layout::empty())
@@ -1828,6 +1878,13 @@ fn plan_tile_watches(
     ctx: &WatchContext,
     resolver: &dyn VersionResolver,
 ) -> Result<Vec<WatchSpec>, WatchError> {
+    if tile.unresolved_version {
+        return Err(WatchError::UnresolvedVersion {
+            tile_id: tile.id.clone(),
+            source_id: String::new(),
+            id: String::new(),
+        });
+    }
     let root = &ctx.root;
 
     // 1. Handle Board + Gerbers overlay (all modes: Diff, Old, New)
@@ -1875,6 +1932,17 @@ fn plan_tile_watches(
                 let default_abs = if k == 0 { &ctx.default_pcb } else { &ctx.default_sch };
                 let new_rel = if tile.source.is_empty() { sanitize_rel(root, default_abs) } else { tile.source.clone() };
                 let old_rel = if ov.source.is_empty() { new_rel.clone() } else { ov.source.clone() };
+                // Check root before selecting the overlay side so a versioned base with a live Old
+                // overlay never returns Ok([]) on an empty root.
+                if root.is_empty() {
+                    if let Some(v) = &ov.version {
+                        let _ = resolve_version(&tile.id, v, &old_rel, resolver)?;
+                    }
+                    if let Some(v) = &tile.version {
+                        let _ = resolve_version(&tile.id, v, &new_rel, resolver)?;
+                    }
+                    return Err(WatchError::MissingRoot { tile_id: tile.id.clone() });
+                }
                 return match ov.mode {
                     OverlayMode::Diff => {
                         let old_spec = match &ov.version {
@@ -1885,9 +1953,6 @@ fn plan_tile_watches(
                             Some(v) => resolve_version(&tile.id, v, &new_rel, resolver)?,
                             None => join_root(root, &new_rel),
                         };
-                        if root.is_empty() {
-                            return Err(WatchError::MissingRoot { tile_id: tile.id.clone() });
-                        }
                         let mut diff_path = format!("diff\n{old_spec}\n{new_spec}");
                         if let Some(bits) = ov.layer_bits {
                             diff_path.push('\n');
@@ -1899,15 +1964,9 @@ fn plan_tile_watches(
                         match &ov.version {
                             Some(v) => {
                                 let p = resolve_version(&tile.id, v, &old_rel, resolver)?;
-                                if root.is_empty() {
-                                    return Err(WatchError::MissingRoot { tile_id: tile.id.clone() });
-                                }
                                 Ok(vec![WatchSpec { kind: k, key: watch_key(k, root, &p), root: root.clone(), path: p }])
                             }
                             None => {
-                                if root.is_empty() {
-                                    return Ok(Vec::new());
-                                }
                                 let abs = join_root(root, &old_rel);
                                 if abs.is_empty() { return Ok(Vec::new()); }
                                 let req_path = if !tile.explicit && abs == *default_abs { String::new() } else { abs };
@@ -1919,15 +1978,9 @@ fn plan_tile_watches(
                         match &tile.version {
                             Some(v) => {
                                 let p = resolve_version(&tile.id, v, &new_rel, resolver)?;
-                                if root.is_empty() {
-                                    return Err(WatchError::MissingRoot { tile_id: tile.id.clone() });
-                                }
                                 Ok(vec![WatchSpec { kind: k, key: watch_key(k, root, &p), root: root.clone(), path: p }])
                             }
                             None => {
-                                if root.is_empty() {
-                                    return Ok(Vec::new());
-                                }
                                 let abs = join_root(root, &new_rel);
                                 if abs.is_empty() { return Ok(Vec::new()); }
                                 let req_path = if !tile.explicit && abs == *default_abs { String::new() } else { abs };
@@ -2025,7 +2078,7 @@ mod tests {
     const SHA_B: &str = "2222bbbb88889999000011112222333344445555";
 
     fn tile(id: &str, kind: PageKind, source: &str) -> Tile {
-        Tile { id: id.into(), kind, source: source.into(), explicit: false, version: None, overlay: None }
+        Tile { id: id.into(), kind, source: source.into(), explicit: false, version: None, unresolved_version: false, overlay: None }
     }
 
     fn ver(source_id: &str, id: &str) -> TileVersion {
@@ -2090,6 +2143,19 @@ mod tests {
         );
         assert_eq!(Refusal::TooSmall.code(), "tooSmall");
 
+        // Counterexample (c): 1000×100 row with a 380×300 KiCad tile must fail cross-axis check -> TooSmall
+        assert_eq!(
+            resize(&l, "s1", 0.5, (1000.0, 100.0), default_min_for(Some("k")), None),
+            Err(Refusal::TooSmall)
+        );
+
+        // Counterexample (c): ratio below 0.05 stored by resize_node must be used verbatim by subtree_min
+        let wide = resize(&l, "s1", 0.02, (10000.0, 800.0), default_min_for(None), None).unwrap();
+        let Node::Split { ratio: stored_r, .. } = wide.root.as_ref().unwrap() else { panic!() };
+        assert!((*stored_r - 0.02).abs() < 1e-5, "expected stored 0.02, got {stored_r}");
+        let (min_w, _) = subtree_min(wide.root.as_ref().unwrap(), &default_min_for(None));
+        assert!((min_w - 9000.0).abs() < 1.0, "expected 180/0.02 = 9000px, got {min_w}");
+
         // Counterexample: repeated 1e-6 ancestor resizes must NEVER drift a locked tile
         let mut cur = l.clone();
         for i in 1..=100 {
@@ -2138,6 +2204,7 @@ mod tests {
             source: "main.kicad_pcb".into(),
             explicit: false,
             version: Some(TileVersion { source_id: sid.clone(), id: SHA_A.into(), label: "v1".into() }),
+            unresolved_version: false,
             overlay: None,
         })
         .unwrap();
@@ -2195,12 +2262,48 @@ mod tests {
             source: "main.kicad_pcb".into(),
             explicit: false,
             version: Some(ver(&sid_main, SHA_A)),
+            unresolved_version: false,
             overlay: None,
         })
         .unwrap();
         assert!(plan_watches(&v_board, &WatchContext::default(), &VersionSourceMap::new()).is_err());
         assert_eq!(
             plan_watches(&v_board, &WatchContext::default(), &resolver),
+            Err(WatchError::MissingRoot { tile_id: "t1".into() })
+        );
+
+        // Counterexample (a): historical input with abbreviated id NEVER falls back to live default PCB
+        let abbrev = derive_layout(&DeriveInput {
+            root,
+            open: "board",
+            file: "git\t/proj/.git\t1111aaaa\t5\t/proj/main.kicad_pcb",
+            default_pcb: "/proj/main.kicad_pcb",
+            ..Default::default()
+        });
+        let abbrev_t = abbrev.tile("t1").unwrap();
+        assert!(abbrev_t.unresolved_version, "abbreviated git input must yield unresolved_version tile");
+        assert!(abbrev_t.source.is_empty(), "must not fall back to live default PCB");
+        assert!(matches!(plan_watches(&abbrev, &WatchContext { root: root.into(), default_pcb: "/proj/main.kicad_pcb".into(), default_sch: String::new() }, &resolver), Err(WatchError::UnresolvedVersion { .. })));
+
+        // Counterexample (b): versioned base + live Old overlay on empty root MUST error, NEVER Ok([])
+        let ver_base_live_old = Layout::single(Tile {
+            id: "t1".into(),
+            kind: PageKind::Board,
+            source: "main.kicad_pcb".into(),
+            explicit: false,
+            version: Some(ver(&sid_main, SHA_B)),
+            unresolved_version: false,
+            overlay: Some(Overlay {
+                kind: PageKind::Board,
+                source: "main.kicad_pcb".into(),
+                version: None,
+                mode: OverlayMode::Old,
+                layer_bits: None,
+            }),
+        })
+        .unwrap();
+        assert_eq!(
+            plan_watches(&ver_base_live_old, &WatchContext::default(), &resolver),
             Err(WatchError::MissingRoot { tile_id: "t1".into() })
         );
 
@@ -2211,6 +2314,7 @@ mod tests {
             source: "main.kicad_pcb".into(),
             explicit: false,
             version: Some(ver(&sid_main, SHA_A)),
+            unresolved_version: false,
             overlay: None,
         })
         .unwrap();
@@ -2230,6 +2334,7 @@ mod tests {
             source: "main.kicad_pcb".into(),
             explicit: false,
             version: Some(ver(&sid_main, SHA_B)),
+            unresolved_version: false,
             overlay: Some(Overlay {
                 kind: PageKind::Board,
                 source: "main.kicad_pcb".into(),
