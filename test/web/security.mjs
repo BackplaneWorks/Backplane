@@ -8,7 +8,7 @@ export async function checkAccess(page, enabled) {
     const paths = ['/', '/assets/app.js', '/files/get', '/message-image', '/bots/t1/screen.jpg',
       '/auth/web/request', '/auth/web/poll', '/auth/web/logout'];
     return Promise.all(paths.map(async (path, i) => {
-      if (i >= 5 && location.pathname === '/') {
+      if (i >= 5) {
         // Use an invalid name for the request so this check cannot create a pending approval.
         return (await fetch(path, {method:'POST', body:'{}'})).status;
       }
@@ -16,6 +16,25 @@ export async function checkAccess(page, enabled) {
     }));
   });
   assert.deepEqual(statuses, enabled ? [200,401,401,401,401,400,401,401] : Array(8).fill(404));
+}
+
+export async function checkPageHeaders(page) {
+  const result = await page.evaluate(async () => {
+    const headers = (await fetch('/')).headers;
+    return {
+      csp: headers.get('content-security-policy'),
+      sniff: headers.get('x-content-type-options'),
+      referrer: headers.get('referrer-policy'),
+      externalScripts: [...document.scripts].every(s => s.src && new URL(s.src).origin === location.origin),
+    };
+  });
+  const directives = result.csp.split(';').map(part => part.trim());
+  for (const directive of ["default-src 'none'", "script-src 'self'", "object-src 'none'", "frame-ancestors 'none'"]) {
+    assert.ok(directives.includes(directive), directive);
+  }
+  assert.equal(result.sniff, 'nosniff');
+  assert.equal(result.referrer, 'no-referrer');
+  assert.ok(result.externalScripts);
 }
 
 export async function checkSessionCookie(context, origin, siblingOrigin, readRegistry) {

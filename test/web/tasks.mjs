@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { checkAccess, checkProtectedAssets, checkSessionCookie } from './security.mjs';
+import { checkAccess, checkPageHeaders, checkProtectedAssets, checkSessionCookie } from './security.mjs';
 
 // rpc is the synthetic native client's data/1 transport, connected to the
 // same temporary hub. Approval goes through the action shown in Devices.
@@ -18,6 +18,7 @@ export async function browserTasks({ context, origin, rpc, thread, assets, reply
   await page.goto(origin);
   await testId('pair-card').waitFor();
   await checkAccess(page, true);
+  await checkPageHeaders(page);
   await screenshot(page, 'before-pair');
   await testId('pair-name').fill(name);
   await testId('pair-request-btn').click();
@@ -34,6 +35,7 @@ export async function browserTasks({ context, origin, rpc, thread, assets, reply
   await testId('sidebar-list').waitFor();
   assert.ok(performance.now() - approvedAt <= 1000, 'approval to app exceeded one second');
   const socket = await connected;
+  await checkPageHeaders(page);
   await checkSessionCookie(context, origin, 'https://other.example.test', readRegistry);
   await checkProtectedAssets(page, origin, assets, true);
 
