@@ -20,6 +20,11 @@ BIN="$(dirname "$KICAD_BIN")/$WHICH"
 for v in "" 10.0 10.99; do c="${XDG_CONFIG_HOME:-$OUT/fh/.config}/kicad/$v"; mkdir -p "$c"
   printf '(sym_lib_table\n  (version 7)\n)\n' >"$c/sym-lib-table"; printf '(fp_lib_table\n  (version 7)\n)\n' >"$c/fp-lib-table"
   printf '(design_block_lib_table\n  (version 7)\n)\n' >"$c/design-block-lib-table"; done
+# the copy upgraded to the current file format first: an older board opens modified ("converted to the new format when saved"), so
+# every close asked "Save Changes?" and waited (the second loop: all pcbnew cycles, base and fix alike)
+CLI="$(dirname "$KICAD_BIN")/kicad-cli"
+HOME="$OUT/fh" "$CLI" pcb upgrade "$PROJ/ecc83-pp.kicad_pcb" >"$OUT/upgrade.log" 2>&1 || echo "INFO pcb upgrade: $(tail -1 "$OUT/upgrade.log")"
+HOME="$OUT/fh" "$CLI" sch upgrade "$PROJ/ecc83-pp.kicad_sch" >>"$OUT/upgrade.log" 2>&1 || echo "INFO sch upgrade: $(tail -1 "$OUT/upgrade.log")"
 start_xvfb_and_wm
 CLEAN=0; CRASHED=0; HUNG=0; OTHER=0
 for i in $(seq "$CYCLES"); do
