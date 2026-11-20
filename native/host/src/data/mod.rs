@@ -953,7 +953,8 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
                     // from the authenticated connection before dispatching native RPCs.
                     if method == "devices.page" {
                         let page = crate::net::devicespage::browser_page(reg, device_id);
-                        tx.send(pack(&json!({"t":"reply","id":v["id"],"ok":true,"result":page}), json_mode)).await?;
+                        let reply = pack(&json!({"t":"reply","id":v["id"],"ok":true,"result":page}), json_mode);
+                        if !send_frame(&mut tx, &hub, browser.as_ref(), conn.client, reply).await? { return Ok(()) }
                         continue
                     }
                     if !webpolicy::allowed(method, params) {
