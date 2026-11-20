@@ -255,7 +255,8 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
             match r { Ok(_) => thread_now(hub, th).await.map(|t| json!({"thread":t})), Err(e) => Err(e) }
         }
         "mentions.list" => mentions(hub, p).await,
-        "viewer.files" | "viewer.watch" | "viewer.probe" | "viewer.info" | "viewer.layers" | "viewer.refs" | "viewer.compare" | "viewer.rail" | "files.entries" | "mech.list" | "browser" => viewers(hub, c, m, p).await?,
+        "viewer.files" | "viewer.watch" | "viewer.probe" | "viewer.info" | "viewer.layers" | "viewer.refs" | "viewer.compare" | "viewer.rail" | "viewer.follow" | "files.entries" | "mech.list" | "browser" => viewers(hub, c, m, p).await?,
+        "thread.again" => { let th = s(p, "thread"); if th.is_empty() { return Some(Err(err("thread"))) } rpc(hub, c, "thread.again", json!({"thread":th})).await.map(|_| json!({})) }
         "voice.start" | "voice.stop" | "voice.act" | "voice.view" | "voice.key" | "voice.page" | "voice.page.act" | "voice.always" => voice(hub, c, m, p).await,
         "machines.page" | "machines.page.act" | "devices.page" | "devices.page.act" | "notify.page" | "notify.page.act" | "ring.list" | "ring.get" | "ring.search" | "ring.hear" | "ring.send" | "ring.setup" | "ring.page" | "ring.page.act" | "mcp.page" | "mcp.page.act" => {
             rpc(hub, c, m, p.clone()).await.map(|mut r| { if let Some(o) = r.as_object_mut() { for k in ["t", "id", "ok"] { o.remove(k); } } r })
@@ -536,6 +537,11 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
                     rail(RailInput { board: src.board, schematic: src.schematic, mech: src.mech, gerbers: src.gerbers, simulation: false, altium: src.altium, page, diff })
                 };
                 Ok(json!({"rail": items, "mode": "viewer"}))
+            }
+            "viewer.follow" => {
+                let action = s(p, "action");
+                if !action.is_empty() && !crate::files::kicad::follow::act(th, action) { return Err(err("action: on, off, pause or resume")) }
+                Ok(crate::files::kicad::follow::picture(th))
             }
             // the Layers menu and Compare (feature "layers"): the hub's own focus rules and comparison paths, so the phones decide nothing
             "viewer.layers" => {

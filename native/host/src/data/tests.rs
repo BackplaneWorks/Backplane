@@ -65,10 +65,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -955,5 +955,71 @@ async fn viewer_gerbers_files_and_watch() {
     assert_eq!(wf["ok"], false);
     assert_eq!(wf["error"], "Gerbers of a project on another machine are not shown yet");
     assert_eq!(seen.lock().unwrap().len(), 1, "rejected requests must enqueue no extra kicad.watch");
+    drop(hub);
+}
+
+#[tokio::test]
+async fn socket_with_browser_enforces_policy_activity_and_revoke_over_generic_stream() {
+    let (hub, _port) = up_with("socket-with-browser", "{\"$\":\"SettingSet\",\"key\":\"web.enabled\",\"value\":\"1\",\"at\":1700000040}\n").await;
+    let (reg, _routes) = crate::net::start::open(&hub.hub.cfg.home, "127.0.0.1", 0).unwrap();
+    let (req_json, poll_cookie) = reg.browser_request("person@example.com", "Test Browser").unwrap();
+    assert!(reg.browser_decide(req_json["id"].as_str().unwrap(), true));
+    let session_cookie = reg.browser_wait("person@example.com", &poll_cookie).await.unwrap().unwrap();
+    let device_id = reg.browser_verify("person@example.com", &session_cookie, None, false).unwrap();
+
+    let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+    let h2 = hub.hub.clone();
+    let dev2 = device_id.clone();
+    let srv = tokio::spawn(async move { socket_with(h2, server_io, true, Principal::Browser { device_id: dev2 }, "bp.ts.net".into()).await });
+    let (mut ws, _) = tokio_tungstenite::client_async("ws://bp.ts.net/ws?data=1&enc=json", client_io).await.unwrap();
+    let hello: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+    assert_eq!(hello["t"], "hello");
+    ws.send(Message::Text(json!({"id":1,"m":"projects.list","p":{}}).to_string().into())).await.unwrap();
+    let r1: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+    assert_eq!(r1["ok"], true);
+    ws.send(Message::Text(json!({"id":2,"m":"devices.page.act","p":{"action":"device-invite"}}).to_string().into())).await.unwrap();
+    let r2: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+    assert_eq!((r2["id"].clone(), r2["ok"].clone(), r2["error"].clone()), (json!(2), json!(false), json!("not allowed for browser")));
+    let revoked = reg.revoke(&device_id);
+    let clients: Vec<u64> = revoked["clients"].as_array().into_iter().flatten().filter_map(Value::as_u64).collect();
+    assert!(!clients.is_empty(), "browser socket must be bound to registry device");
+    hub.hub.close_clients(&clients);
+    let next = tokio::time::timeout(Duration::from_secs(1), ws.next()).await.unwrap();
+    assert!(matches!(next, None | Some(Ok(Message::Close(_))) | Some(Err(_))), "expected close on revoke, got {next:?}");
+    let _ = tokio::time::timeout(Duration::from_secs(1), srv).await.unwrap();
+}
+
+#[tokio::test]
+async fn viewer_follow_and_hello_theme_and_unanswered_on_data1() {
+    let unans = crate::agents::unanswered::value(&[("m1".into(), "Status?".into(), 100)]);
+    let more = format!(
+        "{}\n{}\n{}\n{}\n",
+        json!({"$":"SettingSet","key":"ui.theme","value":"light","at":1700000040}),
+        json!({"$":"SettingSet","key":"ui.lang","value":"en","at":1700000041}),
+        json!({"$":"TurnChanged","thread":"t1","state":"running","at":1700000042}),
+        json!({"$":"SettingSet","key":crate::agents::unanswered::key("t1"),"value":unans,"at":1700000043}),
+    );
+    let (hub, port) = up_with("viewer-follow-unans", &more).await;
+    let (mut ws, _) = connect_async(format!("ws://127.0.0.1:{port}/ws?data=1&enc=json&token=tok")).await.unwrap();
+    let hello: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+    assert_eq!(hello["theme"], "light");
+    assert_eq!(hello["locale"], "en");
+    let feats: Vec<&str> = hello["features"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    for f in ["follow", "unanswered"] { assert!(feats.contains(&f), "missing feature {f}"); }
+
+    ws.send(Message::Text(json!({"id":1,"m":"thread.entries","p":{"thread":"t1"}}).to_string().into())).await.unwrap();
+    let en: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+    assert_eq!(en["ok"], true);
+    assert_eq!(en["result"]["unanswered"]["text"], "Status?");
+
+    ws.send(Message::Text(json!({"id":2,"m":"viewer.follow","p":{"thread":"t1","action":"on"}}).to_string().into())).await.unwrap();
+    let f1: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+    assert_eq!((f1["ok"].clone(), f1["result"]["on"].clone(), f1["result"]["paused"].clone()), (json!(true), json!(true), json!(false)));
+    ws.send(Message::Text(json!({"id":3,"m":"viewer.follow","p":{"thread":"t1","action":"pause"}}).to_string().into())).await.unwrap();
+    let f2: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+    assert_eq!(f2["result"]["paused"], json!(true));
+    ws.send(Message::Text(json!({"id":4,"m":"viewer.follow","p":{"thread":"t1","action":"bogus"}}).to_string().into())).await.unwrap();
+    let f3: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+    assert_eq!(f3["ok"], false);
     drop(hub);
 }

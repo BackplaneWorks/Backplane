@@ -16,12 +16,13 @@ use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::{collections::{HashMap, HashSet, VecDeque}, sync::{Arc, Mutex}, time::Duration};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -311,12 +312,15 @@ async fn entries(hub: &Hub, p: &Value) -> Result<Value, Value> {
     // older entries exist when the page read more ordinals than it returns (its lookahead) or has rows below it
     let more = page.below > 0 || page.rows.iter().map(|r| r.ord).collect::<HashSet<_>>().len() > ids.len();
     let next = if more { rows.first().map(|r| json!(r.ord.to_string())).unwrap_or(Value::Null) } else { Value::Null };
+    let running = m.threads.get(th).is_some_and(|t| t.turn == "running");
     drop(m);
     if before == 0 {
         out.extend(open_asks(hub, th));
         if let Some((_, text)) = hub.live_snapshot().into_iter().find(|(t, _)| t == th) { out.push(live_entry(th, &text)) }
     }
-    Ok(json!({"thread":thread,"entries":out,"next":next}))
+    let unans_val = hub.setting(&crate::agents::unanswered::key(th)).await.unwrap_or_default();
+    let unanswered = crate::agents::unanswered::picture(&unans_val, running);
+    Ok(json!({"thread":thread,"entries":out,"next":next,"unanswered":unanswered}))
 }
 
 /// The newest rows of a thread, oldest first.
@@ -795,18 +799,49 @@ fn waits_far(v: &Value) -> bool {
     if matches!(m, "subscribe" | "unsubscribe" | "thread.entries" | "link.resolve") { return false }
     machines::is_far(s(p, "thread")) || machines::is_far(s(p, "project")) || matches!(m, "viewer.info" | "viewer.probe" | "viewer.watch")
 }
+/// Who owns a `data/1` WebSocket connection.
+/// `Native`: hub token or paired phone/desktop token, verified via `hub.admit_blocking`.
+/// `Browser`: already-verified browser device session from the dedicated web ingress.
+pub enum Principal {
+    Native(String),
+    Browser { device_id: String },
+}
+
+async fn browser_alive(hub: &Arc<Hub>, device_id: &str, client: u64, activity: bool) -> bool {
+    if hub.setting("web.enabled").await.as_deref() != Some("1") { return false }
+    let (home, dev) = (hub.cfg.home.clone(), device_id.to_string());
+    tokio::task::spawn_blocking(move || {
+        crate::net::start::registry(&home).is_some_and(|r| r.browser_connection(&dev, client, activity))
+    }).await.unwrap_or(false)
+}
+
 pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String, host: String) -> Result<()> {
+    socket_with(hub, s, json_mode, Principal::Native(token), host).await
+}
+
+pub async fn socket_with<S: AsyncRead + AsyncWrite + Unpin + Send>(hub: Arc<Hub>, stream: S, json_mode: bool, principal: Principal, host: String) -> Result<()> {
     let mut cfg = WebSocketConfig::default(); cfg.max_message_size = Some(40 << 20); cfg.max_frame_size = Some(40 << 20); // (images come as base64 in one JSON frame: 4 x 8 MB)
-    let (mut tx, mut rx) = tokio_tungstenite::accept_async_with_config(s, Some(cfg)).await?.split();
+    let (mut tx, mut rx) = tokio_tungstenite::accept_async_with_config(stream, Some(cfg)).await?.split();
     let (mut conn, _) = hub.connect(true);
     let mut outbox = hub.attach(conn.client);
     struct Detach(Arc<Hub>, u64); impl Drop for Detach { fn drop(&mut self) { self.0.detach(self.1) } }
     let _detach = Detach(hub.clone(), conn.client);
-    if !hub.admit_blocking(conn.client, token).await { return Ok(()) }
+    let browser = match principal {
+        Principal::Native(token) => {
+            if !hub.admit_blocking(conn.client, token).await { return Ok(()) }
+            None
+        }
+        Principal::Browser { device_id } => {
+            if !browser_alive(&hub, &device_id, conn.client, false).await { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
+            Some(device_id)
+        }
+    };
     // `name`: the machine's name (BACKPLANE_NAME, else its host name), for the phone's title instead of the address it was paired at
     static NAME: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
     let name = NAME.get_or_init(crate::net::botnet::name).await.clone();
-    tx.send(pack(&json!({"t":"hello","proto":PROTO,"hub":host,"name":name,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"hubOffer":hub.info_now()["hub.offer"].as_str().unwrap_or(""),"commands":crate::session::composer::words(),"notice":crate::guard::notice(&crate::guard::status(&hub.cfg.home)),"migrating":crate::import014::phone_state(&hub).await}), json_mode)).await?;
+    let theme = hub.setting("ui.theme").await.unwrap_or_default();
+    let locale = hub.setting("ui.lang").await.unwrap_or_default();
+    tx.send(pack(&json!({"t":"hello","proto":PROTO,"hub":host,"name":name,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"theme":theme,"locale":locale,"hubOffer":hub.info_now()["hub.offer"].as_str().unwrap_or(""),"commands":crate::session::composer::words(),"notice":crate::guard::notice(&crate::guard::status(&hub.cfg.home)),"migrating":crate::import014::phone_state(&hub).await}), json_mode)).await?;
     let (late_tx, mut late_rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
     let (mut changes, mut frames) = (hub.changed.subscribe(), hub.frames.subscribe());
     let mut seen = hub.store.len(); let mut subs = Subs::default();
@@ -818,6 +853,14 @@ pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String,
                 let Some(m) = m else { return Ok(()) }; let m = m?;
                 if matches!(m, Message::Close(_)) { return Ok(()) }
                 let v = match wire::decode(&m) { None => continue, Some(Err(r)) => { tx.send(pack(&r, json_mode)).await?; continue } Some(Ok(v)) => v };
+                if let Some(ref device_id) = browser {
+                    if !browser_alive(&hub, device_id, conn.client, true).await { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
+                    let (method, params) = (s(&v, "m"), v.get("p").unwrap_or(&Value::Null));
+                    if !webpolicy::allowed(method, params) {
+                        tx.send(pack(&json!({"t":"reply","id":v["id"],"ok":false,"error":"not allowed for browser"}), json_mode)).await?;
+                        continue
+                    }
+                }
                 if waits_far(&v) {
                     let (hub, late, id, m, p) = (hub.clone(), late_tx.clone(), v["id"].clone(), v["m"].as_str().unwrap_or("").to_string(), v.get("p").cloned().unwrap_or(Value::Null));
                     let mut c2 = Conn { local_view_socket: false, sent: vec![], client: conn.client, gen: conn.gen.clone(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
@@ -832,13 +875,14 @@ pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String,
             r = late_rx.recv() => { if let Some(r) = r { tx.send(pack(&r, json_mode)).await?; } }
             n = changes.recv() => {
                 if let Err(tokio::sync::broadcast::error::RecvError::Closed) = n { return Ok(()) }
+                if browser.is_some() && hub.setting("web.enabled").await.as_deref() != Some("1") { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
                 let len = hub.store.len();
                 if len > seen { let lines = hub.store.range(seen, len.min(seen + 2000)).unwrap_or_default(); seen += lines.len(); for f in deltas(&hub, &lines, &mut subs).await { tx.send(pack(&f, json_mode)).await?; } }
                 if len > seen { let _ = hub.changed.send(len as u64); } // (more than one pass: wake again)
             }
             f = frames.recv() => { if let Ok(f) = f { for p in live_pushes(&f, &mut subs) { tx.send(pack(&p, json_mode)).await?; } } }
             o = outbox.recv() => { let Some(o) = o else { return Ok(()) };
-                match o { Out::Close => return Ok(()),
+                match o { Out::Close => { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
                     // a viewer's plot frames (binary CBOR) and its small announcements; anything else the hub pushes is for the other clients
                     Out::Raw(b) => if ext::wants_raw(&b) { tx.send(Message::Binary(b.into())).await?; },
                     // a terminal this socket watches: its bytes and where they start (data/term.rs)
@@ -849,7 +893,12 @@ pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String,
                         // a plot's "none" is binary like the plots (one decoder in the app); a browser frame's announcement is JSON
                         if v["t"] == "plot" { let mut b = Vec::new(); cbor_plain(&v, &mut b); tx.send(Message::Binary(b.into())).await?; } else { tx.send(pack(&v, json_mode)).await?; } } } }
             _ = far_beat.tick() => { if !subs.subs.is_empty() { for f in far_pushes(&hub, &mut subs).await { tx.send(pack(&f, json_mode)).await?; } } }
-            _ = beat.tick() => { tx.send(pack(&json!({"t":"hb"}), json_mode)).await?; }
+            _ = beat.tick() => {
+                if let Some(ref device_id) = browser {
+                    if !browser_alive(&hub, device_id, conn.client, false).await { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
+                }
+                tx.send(pack(&json!({"t":"hb"}), json_mode)).await?;
+            }
         }
     }
 }
