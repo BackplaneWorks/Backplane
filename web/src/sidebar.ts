@@ -120,6 +120,13 @@ export class SidebarView {
     this.filterInput.focus();
   }
 
+  public refreshLocale(): void {
+    const ph = t("gpui.filter.projects.and.threads", "Filter projects and threads");
+    this.filterInput.placeholder = ph;
+    this.filterInput.setAttribute("aria-label", ph);
+    this.render();
+  }
+
   public render(): void {
     const frag = document.createDocumentFragment();
     const q = this.filterText;

@@ -58,7 +58,7 @@ export class ComposerView {
     this.textarea = document.createElement("textarea");
     this.textarea.className = "bp-composer-input";
     this.textarea.rows = 1;
-    this.textarea.placeholder = "Message agent, or type / for commands…";
+    this.textarea.placeholder = t("composer.placeholder", "Ask anything: @bot, >thread, %project, #room, $skill, /btw");
     this.textarea.setAttribute("data-testid", "composer-input");
 
     const btns = document.createElement("div");
@@ -152,6 +152,13 @@ export class ComposerView {
 
   public focus(): void {
     this.textarea.focus();
+  }
+
+  public refreshLocale(): void {
+    // Preserve draft text, selection, and focus while updating translated control labels.
+    this.textarea.placeholder = t("composer.placeholder", "Ask anything: @bot, >thread, %project, #room, $skill, /btw");
+    this.sendBtn.textContent = t("composer.send", "Send");
+    this.stopBtn.textContent = t("composer.stop", "Stop");
   }
 
   private autoGrow(): void {
