@@ -4703,3 +4703,4 @@ viewer.layout.refusal.sameTile = Elige dos paneles distintos
 viewer.layout.refusal.invalidRatio = Proporción de división no válida
 viewer.layout.refusal.duplicateId = El panel ya existe
 viewer.layout.refusal.unknownFrame = Marco de KiCad desconocido
+viewer.layout.refusal.invalidInput = Solicitud de diseño no válida

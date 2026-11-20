@@ -4705,3 +4705,4 @@ viewer.layout.refusal.sameTile = Choose two different tiles
 viewer.layout.refusal.invalidRatio = Invalid split ratio
 viewer.layout.refusal.duplicateId = Tile already exists
 viewer.layout.refusal.unknownFrame = Unknown KiCad frame
+viewer.layout.refusal.invalidInput = Invalid layout request

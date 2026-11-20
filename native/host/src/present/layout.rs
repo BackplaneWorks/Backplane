@@ -1,7 +1,8 @@
 //! Hub-owned docking/tiling layout model for the viewer pane (pure data & operations).
 //!
-//! Currently **diagnostic / inert**: `viewer.layout` is derived and emitted on `thread.viewer`
-//! for inspection and tests, while clients still draw from the existing single-page / Split fields.
+//! Layout state (`@view.layout:<sel>`) is **per session (per client)**, matching today's `@view:<sel>`:
+//! each connected window owns its own tile tree, while per-project memory (`layout:<root>`, PR 2b)
+//! restores the last settled layout when a session opens the viewer for a thread of that project.
 //! Whether a design tile hosts the embedded KiCad editor is a client-session decision (`design_mode`
 //! + `holder`), never a property of `Tile`; [`kicad_tile`] picks the single eligible tile in a fixed,
 //! deterministic order.
@@ -385,6 +386,8 @@ pub enum Refusal {
     InvalidRatio,
     /// Unknown KiCad frame name.
     UnknownFrame,
+    /// Malformed action payload (invalid JSON, kind, side, mode, or missing required field).
+    InvalidInput,
 }
 
 impl Refusal {
@@ -401,6 +404,7 @@ impl Refusal {
             Refusal::DuplicateId => "duplicateId",
             Refusal::InvalidRatio => "invalidRatio",
             Refusal::UnknownFrame => "unknownFrame",
+            Refusal::InvalidInput => "invalidInput",
         }
     }
 
@@ -418,23 +422,61 @@ impl Refusal {
             Refusal::DuplicateId => "viewer.layout.refusal.duplicateId",
             Refusal::InvalidRatio => "viewer.layout.refusal.invalidRatio",
             Refusal::UnknownFrame => "viewer.layout.refusal.unknownFrame",
+            Refusal::InvalidInput => "viewer.layout.refusal.invalidInput",
         }
     }
 
     /// English default copy matching `i18n/en.msg`.
     pub fn text(self) -> &'static str {
-        match self {
-            Refusal::Locked => "KiCad has a dialog open",
-            Refusal::OneKicad => "Only one KiCad tile",
-            Refusal::TooSmall => "Too small for KiCad",
-            Refusal::NotFound => "That tile is no longer open",
-            Refusal::SameTile => "Choose two different tiles",
-            Refusal::NoOverlay => "That tile has no overlay",
-            Refusal::IncompatibleOverlay => "Those views cannot be overlaid",
-            Refusal::InvalidSource => "That file is outside this project",
-            Refusal::DuplicateId => "Tile already exists",
-            Refusal::InvalidRatio => "Invalid split ratio",
-            Refusal::UnknownFrame => "Unknown KiCad frame",
+        self.text_for("en")
+    }
+
+    /// Localized refusal copy matching `i18n/{en,es,ja}.msg` for the session's locale.
+    pub fn text_for(self, locale: &str) -> &'static str {
+        let lang = locale.split(['-', '_']).next().unwrap_or("en");
+        match lang {
+            "ja" => match self {
+                Refusal::Locked => "KiCad でダイアログが開いています",
+                Refusal::OneKicad => "KiCad タイルは 1 つまでです",
+                Refusal::TooSmall => "KiCad の表示領域が小さすぎます",
+                Refusal::NotFound => "そのタイルはもう開いていません",
+                Refusal::SameTile => "異なる 2 つのタイルを選んでください",
+                Refusal::NoOverlay => "そのタイルに重ね合わせはありません",
+                Refusal::IncompatibleOverlay => "これらのビューは重ね合わせできません",
+                Refusal::InvalidSource => "そのファイルはこのプロジェクト外です",
+                Refusal::DuplicateId => "タイルは既に存在します",
+                Refusal::InvalidRatio => "分割比率が無効です",
+                Refusal::UnknownFrame => "不明な KiCad フレームです",
+                Refusal::InvalidInput => "無効なレイアウト要求です",
+            },
+            "es" => match self {
+                Refusal::Locked => "KiCad tiene un diálogo abierto",
+                Refusal::OneKicad => "Solo un panel de KiCad",
+                Refusal::TooSmall => "Demasiado pequeño para KiCad",
+                Refusal::NotFound => "Ese panel ya no está abierto",
+                Refusal::SameTile => "Elige dos paneles distintos",
+                Refusal::NoOverlay => "Ese panel no tiene superposición",
+                Refusal::IncompatibleOverlay => "Esas vistas no se pueden superponer",
+                Refusal::InvalidSource => "Ese archivo está fuera de este proyecto",
+                Refusal::DuplicateId => "El panel ya existe",
+                Refusal::InvalidRatio => "Proporción de división no válida",
+                Refusal::UnknownFrame => "Marco de KiCad desconocido",
+                Refusal::InvalidInput => "Solicitud de diseño no válida",
+            },
+            _ => match self {
+                Refusal::Locked => "KiCad has a dialog open",
+                Refusal::OneKicad => "Only one KiCad tile",
+                Refusal::TooSmall => "Too small for KiCad",
+                Refusal::NotFound => "That tile is no longer open",
+                Refusal::SameTile => "Choose two different tiles",
+                Refusal::NoOverlay => "That tile has no overlay",
+                Refusal::IncompatibleOverlay => "Those views cannot be overlaid",
+                Refusal::InvalidSource => "That file is outside this project",
+                Refusal::DuplicateId => "Tile already exists",
+                Refusal::InvalidRatio => "Invalid split ratio",
+                Refusal::UnknownFrame => "Unknown KiCad frame",
+                Refusal::InvalidInput => "Invalid layout request",
+            },
         }
     }
 }
@@ -1078,38 +1120,50 @@ pub fn focus_tile(layout: &Layout, target: &str, locked: Option<&str>) -> Result
     Ok(next)
 }
 
-/// Resolve the effective locked tile for a layout action (client facts vs hub authority).
+/// Hub-resolved KiCad guard for one client session on a project.
 ///
-/// - **Client-supplied facts** (`client_locked`, `client_kicad_tile`, `client_has_kicad`) describe
-///   ONE client (the desktop holding the embedded KiCad).
-/// - **Hub authority**:
-///   1. `client_locked` is honoured **only** when `client_id` matches the KiCad `holder` in
-///      `session_info` (`editor.kicad.*` `runtime.holder` / `holder`, or `viewer.runtime.holder`).
-///      For every other session (another desktop, a phone, or when no holder matches), a
-///      client-supplied `locked` is ignored.
-///   2. When `session_info` shows an open KiCad modal dialog (`dialogs` non-empty) for the project,
-///      the hub **itself** locks the holder's KiCad tile (`client_kicad_tile` when valid and from
-///      the holder, else [`kicad_tile`]) even if the client forgot to send `locked`.
-pub fn effective_lock(
+/// - `is_holder`: true iff `client_id` matches the hub's KiCad `holder` for this project.
+/// - `kicad_tile`: the tile hosting KiCad in this holder's session (`None` for any non-holder).
+/// - `client_has_kicad`: derived by the hub (`is_holder && kicad_tile.is_some()`), never trusted
+///   from a client payload, so Simulation beside an occupied KiCad pane is refused whatever the
+///   client claims.
+/// - `locked`: non-empty only for the holder (when a KiCad dialog is open in hub/session info,
+///   or when the holder itself reports a lock); ignored for every non-holder session.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct KicadGuard {
+    pub is_holder: bool,
+    pub kicad_tile: Option<TileId>,
+    pub client_has_kicad: bool,
+    pub locked: Option<TileId>,
+}
+
+/// Resolve holder, open dialogs, KiCad tile, `client_has_kicad`, and `locked` together from the
+/// hub's runtime snapshot (`hub_runtime`, `hub_dialog_open`) and `session_info`.
+///
+/// A session that is NOT the holder cannot set `locked`, `kicadTile`, or `clientHasKicad` to any effect.
+pub fn resolve_kicad_guard(
     layout: &Layout,
+    hub_runtime: Option<&Value>,
+    hub_dialog_open: bool,
     session_info: &Value,
     client_id: Option<u64>,
     client_locked: Option<&str>,
     client_kicad_tile: Option<&str>,
-) -> Option<TileId> {
-    let mut holder: Option<u64> = None;
-    let mut dialog_open = false;
+) -> KicadGuard {
+    let mut holder: Option<u64> = hub_runtime
+        .and_then(|rt| rt["holder"].as_u64())
+        .filter(|n| *n > 0);
+    let mut dialog_open = hub_dialog_open;
     if let Some(info) = session_info.as_object() {
         for (k, v) in info {
             if !k.starts_with("editor.kicad.") && k != "viewer.runtime" {
                 continue;
             }
-            let h = v["runtime"]["holder"]
-                .as_u64()
-                .or_else(|| v["holder"].as_u64())
-                .filter(|n| *n > 0);
-            if h.is_some() {
-                holder = h;
+            if holder.is_none() {
+                holder = v["runtime"]["holder"]
+                    .as_u64()
+                    .or_else(|| v["holder"].as_u64())
+                    .filter(|n| *n > 0);
             }
             if v["dialogs"].as_array().is_some_and(|ds| !ds.is_empty()) {
                 dialog_open = true;
@@ -1117,20 +1171,29 @@ pub fn effective_lock(
         }
     }
     let is_holder = client_id.is_some() && holder == client_id;
-    if is_holder {
-        if let Some(lid) = client_locked.filter(|s| !s.is_empty() && layout.contains_tile(s)) {
-            return Some(lid.to_string());
-        }
+    if !is_holder {
+        return KicadGuard::default();
     }
-    if dialog_open {
-        if is_holder {
-            if let Some(kt) = client_kicad_tile.filter(|s| !s.is_empty() && layout.contains_tile(s)) {
-                return Some(kt.to_string());
-            }
-        }
-        return kicad_tile(layout, |_| true);
+    let kt = client_kicad_tile
+        .filter(|s| !s.is_empty())
+        .and_then(|s| layout.tile(s))
+        .filter(|t| t.kind.is_design())
+        .map(|t| t.id.clone())
+        .or_else(|| kicad_tile(layout, |_| true));
+    let client_has_kicad = kt.is_some();
+    let locked = if dialog_open {
+        kt.clone()
+    } else {
+        client_locked
+            .filter(|s| !s.is_empty() && layout.contains_tile(s))
+            .map(str::to_string)
+    };
+    KicadGuard {
+        is_holder: true,
+        kicad_tile: kt,
+        client_has_kicad,
+        locked,
     }
-    None
 }
 
 /// Maximize `target`, covering all other tiles without closing them.
@@ -2561,6 +2624,34 @@ mod tests {
             assert_eq!(unique.len(), specs.len(), "step {step} duplicate watch keys");
             for sp in &specs {
                 assert_eq!(sp.key, watch_key(sp.kind, &sp.root, &sp.path));
+            }
+        }
+    }
+
+    #[test]
+    fn refusal_catalog_text_matches_i18n_files() {
+        let all = [
+            Refusal::Locked,
+            Refusal::OneKicad,
+            Refusal::TooSmall,
+            Refusal::NotFound,
+            Refusal::SameTile,
+            Refusal::NoOverlay,
+            Refusal::IncompatibleOverlay,
+            Refusal::InvalidSource,
+            Refusal::DuplicateId,
+            Refusal::InvalidRatio,
+            Refusal::UnknownFrame,
+            Refusal::InvalidInput,
+        ];
+        for (lang, text) in [
+            ("en", include_str!("../../../../i18n/en.msg")),
+            ("es", include_str!("../../../../i18n/es.msg")),
+            ("ja", include_str!("../../../../i18n/ja.msg")),
+        ] {
+            for r in all {
+                let want = format!("{} = {}", r.i18n_key(), r.text_for(lang));
+                assert!(text.lines().any(|l| l.trim() == want), "missing in {lang}.msg: {want}");
             }
         }
     }
