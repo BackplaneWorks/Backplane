@@ -75,7 +75,7 @@ def check(frame, scen):
     return out
 
 import re
-def norm(t): return re.sub(r'/\S*(?:sm-|sizes)\S*', '<out>', t)[:80]
+def norm(t): return re.sub(r'\S+@\S+:\S*|/\S*(?:sm-|sizes)\S*', '<out>', t)[:80]
 def key(f): return '%s|%s' % (f['rule'], norm(f['text']))
 def split_known(findings, known):
     """known: {"rule|text": "why"}; a finding in it is reported but does not fail the run"""

@@ -1,7 +1,7 @@
 {
  "clip-x|10uF": "linux first run 2026-11-20 (viewer-review 1024x640 t80): a layout defect to fix, baselined",
  "clip-x|680nF": "linux first run 2026-11-20 (viewer-review 1024x640 t80): a layout defect to fix, baselined",
- "clip-x|<out>": "linux first run 2026-11-20 (viewer-diff hidpi-2880x1920 t80): a layout defect to fix, baselined",
+ "clip-x|<out>": "linux 2026-11-20 first run, baselined: terminal prompt (path) cut by its pane",
  "clip-x|<out> is ": "linux first run 2026-11-20 (viewer-diff 1920x1080 t100): a layout defect to fix, baselined",
  "clip-x|<out> is n": "linux first run 2026-11-20 (viewer-diff 1920x1080 t80): a layout defect to fix, baselined",
  "clip-x|<out> is no": "linux first run 2026-11-20 (viewer-diff 1024x640 t80): a layout defect to fix, baselined",
@@ -23,6 +23,7 @@
  "clip-x|Sonnet 5 \u00b7 claude-sonnet-5": "linux first run 2026-11-20 (picker 800x600 t100): a layout defect to fix, baselined",
  "clip-x|Value": "linux first run 2026-11-20 (viewer-review 1024x640 t80): a layout defect to fix, baselined",
  "clip-x|action": "linux first run 2026-11-20 (palette 800x600 t100): a layout defect to fix, baselined",
+ "clip-x|default": "linux 2026-11-20 first run, baselined: composer chip text cut at 800 wide",
  "clip-x|not installed": "linux first run 2026-11-20 (picker 800x600 t100): a layout defect to fix, baselined",
  "clip-x|rows": "linux first run 2026-11-20 (palette 800x600 t100): a layout defect to fix, baselined"
 }
