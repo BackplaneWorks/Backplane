@@ -136,6 +136,21 @@ pub mod proc {
     /// For every program the hub starts (proc.rs): a console program run with no console window.
     pub const NO_WINDOW: u32 = CREATE_NO_WINDOW;
     fn job_name(pid: u32) -> Vec<u16> { wide(&format!("Local\\backplane-group-{pid}")) }
+    /// When each leader `adopt` took started (GetProcessTimes' creation time): Windows hands an ended process's pid to a new process within
+    /// moments on a busy machine, so a pid kept for a later kill (`terminate`'s KILL after its grace, a cancelled work's) can name another
+    /// program by then, a person's or another hub's. A kill by a pid recorded here ends only the process that started then.
+    pub(super) static STARTED: std::sync::Mutex<Option<std::collections::HashMap<u32, u64>>> = std::sync::Mutex::new(None);
+    /// When the process open as `h` started (100 ns since 1601).
+    pub(super) unsafe fn started(h: HANDLE) -> Option<u64> {
+        use windows_sys::Win32::Foundation::FILETIME;
+        let z = || FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 }; let (mut c, mut e, mut k, mut u) = (z(), z(), z(), z());
+        (GetProcessTimes(h, &mut c, &mut e, &mut k, &mut u) != 0).then(|| (c.dwHighDateTime as u64) << 32 | c.dwLowDateTime as u64)
+    }
+    /// Whether the process open as `h` is the one this hub knew by `pid`: true for a pid it never adopted (as before).
+    unsafe fn same(pid: u32, h: HANDLE) -> bool {
+        let Some(want) = STARTED.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&pid).copied()) else { return true };
+        started(h) == Some(want)
+    }
     /// Handles of groups that die with the hub (kill-on-close): the hub holds them until the group is killed, or it exits.
     static KEPT: std::sync::Mutex<Vec<(u32, usize)>> = std::sync::Mutex::new(Vec::new());
 
@@ -155,8 +170,14 @@ pub mod proc {
                 let mut l: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed(); l.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
                 SetInformationJobObject(job, JobObjectExtendedLimitInformation, &l as *const _ as *const _, std::mem::size_of_val(&l) as u32);
             }
-            let p = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
-            if !p.is_null() { AssignProcessToJobObject(job, p); CloseHandle(p); }
+            let p = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if !p.is_null() {
+                if let Some(t) = started(p) { let mut g = STARTED.lock().unwrap_or_else(|e| e.into_inner()); let m = g.get_or_insert_with(Default::default);
+                    // bounded: the leaders that have ended (their pid gone, or another process's now) are forgotten
+                    if m.len() >= 4096 { m.retain(|q, at| { let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, *q); !h.is_null() && { let s = started(h) == Some(*at); CloseHandle(h); s } }); }
+                    m.insert(pid, t); }
+                AssignProcessToJobObject(job, p); CloseHandle(p);
+            }
             if die_with_hub { KEPT.lock().unwrap_or_else(|e| e.into_inner()).push((pid, job as usize)) } else { CloseHandle(job); } // a closed handle leaves the job for as long as a process is in it
         }
     }
@@ -187,11 +208,13 @@ pub mod proc {
     }
     pub fn kill(pid: u32, _sig: i32) -> bool {
         if pid == 0 { return false }
-        unsafe { let h = OpenProcess(PROCESS_TERMINATE, 0, pid); if h.is_null() { return false } let r = TerminateProcess(h, 1) != 0; CloseHandle(h); r }
+        unsafe { let h = OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid); if h.is_null() { return false }
+            // the leader adopted under this pid has ended and another process has the pid now: not ours to end
+            let r = same(pid, h) && TerminateProcess(h, 1) != 0; CloseHandle(h); r }
     }
     pub fn alive(pid: u32) -> bool {
         if pid == 0 { return false }
-        unsafe { let h = OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid); if h.is_null() { return false } let r = WaitForSingleObject(h, 0) == 0x102; CloseHandle(h); r } // WAIT_TIMEOUT: still running
+        unsafe { let h = OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid); if h.is_null() { return false } let r = WaitForSingleObject(h, 0) == 0x102 && same(pid, h); CloseHandle(h); r } // WAIT_TIMEOUT: still running (and the one adopted under this pid)
     }
     /// Whether the group a leader made is still there: its leader (a Job Object has no cheap "anyone left" query here).
     pub fn group_alive(pid: u32) -> bool { alive(pid) }
@@ -460,6 +483,31 @@ mod lock_tests {
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "123 3800 flock\n", "readable while held");
         drop(a); assert!(super::hub::lock(&b), "free once the holder closes it");
         drop(b);
+    }
+}
+
+#[cfg(test)]
+mod stale_pid_tests {
+    use std::process::{Command, Stdio};
+    fn ping() -> std::process::Child { Command::new("ping").args(["-n", "30", "127.0.0.1"]).stdout(Stdio::null()).spawn().unwrap() }
+    /// A pid kept for a later kill (an agent's KILL after its grace) when the process the hub adopted under it has ended and Windows gave the pid
+    /// to another program: the kill ends nothing. On a loaded runner a test's voice helper got such a pid and was ended mid-dictation (always-on
+    /// started it again and the stand-in said its words twice).
+    #[test] fn a_kill_by_the_pid_of_an_adopted_process_that_ended_spares_the_program_that_has_the_pid_now() {
+        let mut other = ping(); let pid = other.id();
+        // as if a leader adopted under this pid had started earlier, ended, and its group gone with it
+        let now = unsafe { let h = windows_sys::Win32::System::Threading::OpenProcess(windows_sys::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION, 0, pid); let t = super::proc::started(h).unwrap(); super::CloseHandle(h); t };
+        super::proc::STARTED.lock().unwrap().get_or_insert_with(Default::default).insert(pid, now - 10_000_000);
+        assert!(!super::proc::kill_group(pid, super::proc::KILL), "nothing of ours to end"); assert!(!super::proc::kill(pid, super::proc::KILL));
+        assert!(!super::proc::alive(pid), "the adopted process is gone, whoever has its pid");
+        assert!(other.try_wait().unwrap().is_none(), "the program that has the pid now still runs");
+        let _ = other.kill(); let _ = other.wait();
+    }
+    /// The adopted process itself, still there: its pid ends it.
+    #[test] fn a_kill_by_the_pid_of_an_adopted_process_still_running_ends_it() {
+        let mut c = ping(); super::proc::adopt(c.id(), false);
+        assert!(super::proc::alive(c.id())); assert!(super::proc::kill(c.id(), super::proc::KILL));
+        assert_eq!(c.wait().unwrap().code(), Some(1));
     }
 }
 
