@@ -6,7 +6,7 @@ import { checkProtectedAssets, checkSessionCookie } from './security.mjs';
 async function deviceButton(rpc, name, action) {
   const { rows } = await rpc('devices.page', {});
   const row = rows.find(row => row.label === name && row.buttons?.some(button => button.action === action));
-  assert.ok(row, 'expected device action is absent');
+  assert.ok(row, 'missing ' + action + '; available actions: ' + rows.flatMap(r => (r.buttons || []).map(b => b.action)).join(', '));
   return { row, button: row.buttons.find(button => button.action === action) };
 }
 
