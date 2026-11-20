@@ -61,6 +61,7 @@ export async function checkSessionCookie(context, origin, siblingOrigin, readReg
   assert.ok(JSON.parse(stored).devices.some(device => device.kind === 'browser' && device.hash === digest));
   const siblings = await context.cookies(siblingOrigin);
   assert.ok(!siblings.some(cookie => cookie.name === session.name));
+  return session.value;
 }
 
 export async function checkProtectedAssets(page, origin, fixtures, paired) {
