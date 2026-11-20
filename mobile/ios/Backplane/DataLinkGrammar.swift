@@ -22,7 +22,9 @@ private func lead(_ s: String, _ r: NSRegularExpression) -> Int? {
     return (s as NSString).substring(to: m.range.length).count
 }
 
-func dIsPathText(_ t: String) -> Bool { !t.hasPrefix("http") && !t.contains("://") && (full(t, rePath) || full(t, reFile)) }
+// a share's address (docs/file-links.md, `/s/<token>/<name>`): its name may have no extension, or be percent-encoded
+private let reShare = rx("^/s/[0-9A-Fa-f]{48}/[^\\s/]+$")
+func dIsPathText(_ t: String) -> Bool { !t.hasPrefix("http") && !t.contains("://") && (full(t, rePath) || full(t, reFile) || full(t, reShare)) }
 
 /// Whether a link may start before s[i]: after a space, a new line or an opening mark, never inside a word.
 private func boundary(_ s: [Character], _ i: Int) -> Bool {

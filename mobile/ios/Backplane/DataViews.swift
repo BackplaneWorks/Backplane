@@ -65,6 +65,7 @@ struct DataRoot: View {
         .fullScreenCover(item: Binding(get: { client.terms.fullscreen }, set: { client.terms.fullscreen = $0 })) { TermFullView(client: client, route: $0) }
         .onChange(of: client.pendingThread, initial: true) { _, id in if let id { path.append(id); client.pendingThread = nil } }
         .onChange(of: client.linkTarget) { _, t in if let t { follow(t); client.linkTarget = nil } }
+        .overlay(alignment: .bottom) { DDownloadStrip() }
         .overlay(alignment: .bottom) { DLinkNote(client: client) }
         .onOpenURL { route($0) }
         // the telemetry notice's Settings link: Settings over what is open

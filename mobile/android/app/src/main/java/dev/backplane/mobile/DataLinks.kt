@@ -39,8 +39,20 @@ private fun linkText(url: String): String? {
     return null
 }
 
+/** A file of the hub's machine a tapped path names, when this phone downloads it rather than asking link.resolve: a share (`/s/<token>/<name>`), or a
+ *  file a reply of [thread] lists (feature `fileLinks`) that Backplane's viewers do not draw. */
+fun DataClient.download(path: String, thread: String): Boolean {
+    val c = MdLinks.ctx ?: return false
+    FileFetch.shareRoute(path)?.let { Downloads.share(c, it); return true }
+    if (!has("fileLinks")) return false
+    val f = FileFetch.find(path, entries[thread].orEmpty().flatMap { it.files }) ?: return false
+    if (f.open == "view") return false
+    Downloads.file(c, f, thread); return true
+}
+
 fun DataClient.openLink(url: String, thread: String) {
     val text = linkText(url) ?: return
+    pathOf(url)?.let { if (download(it, thread)) return }
     scope.launch {
         // a link tapped before the hub has said hello (a cached list, just launched) waits a moment for it: only the hub knows what `desktop~t9` is
         for (i in 0 until 50) { if (conn == DataClient.Conn.ONLINE && has("links")) break; delay(100) }
@@ -57,7 +69,12 @@ fun DataClient.openLink(url: String, thread: String) {
                 "project" -> LinkTarget(LinkTarget.Kind.PROJECT, r.optString("project"))
                 "room" -> LinkTarget(LinkTarget.Kind.ROOM, r.optString("room"))
                 "file" -> LinkTarget(LinkTarget.Kind.FILE, r.optString("thread"), r.optString("path"), r.optInt("line"))
-                else -> { say(Tr.t(r.optString("note").ifEmpty { "That link does not open here." })); null }
+                else -> {
+                    // a file the reply lists that no viewer here opens is downloaded instead
+                    val f = pathOf(url)?.let { p -> FileFetch.find(p, entries[thread].orEmpty().flatMap { it.files }) }
+                    val c = MdLinks.ctx
+                    if (f != null && c != null) Downloads.file(c, f, thread) else say(Tr.t(r.optString("note").ifEmpty { "That link does not open here." })); null
+                }
             }
         } catch (e: Exception) { say(if (conn == DataClient.Conn.ONLINE) (e.message ?: Msg.android_link_failed) else Msg.android_link_offline) }
     }

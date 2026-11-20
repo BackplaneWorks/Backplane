@@ -3915,6 +3915,13 @@ android.clone.phase.adding = Añadiendo el proyecto
 android.clone.phase.cancelled = Cancelado
 android.clone.busy = {path} ya existe y no está vacía. Elige otra carpeta u otro nombre.
 android.clone.file = {path} es un archivo. Elige otra carpeta u otro nombre.
+android.download.saved = Guardado en Descargas
+android.download.of = {have} de {total}
+android.download.share = Compartir
+android.download.retry = Reintentar
+android.download.noapp = Ninguna app aquí abre ese archivo.
+android.download.button = Descargar
+
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number} ejecutándose
 ios.alerts.ask = Bub puede avisarte cuando un hilo te necesite.

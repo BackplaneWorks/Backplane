@@ -81,11 +81,12 @@ struct DEntry: Codable, Equatable, Identifiable {
     var copy: [DCopyPiece]?   // what to copy in it, as the hub lists it (`copy: [{text, cmd}]`, md/copy.rs); nil: the phone's own rules (Copyable)
     var h: String = ""        // content hash for thread.open / sub.d resume (docs/PHONE-DATA.md, Phase 1)
     var queued = false        // queued for an away home machine (docs/PHONE-DATA.md, The home)
+    var files: [DFileLink] = []   // the files a reply names that the hub serves (feature fileLinks): a tap on one downloads it (FileFetch.swift, DataDownloads.swift)
     // phone-only, never on the wire: a message sent and not yet confirmed, or one the hub refused
     var sending = false
     var failed = false
     var localImages: [Data] = []   // the pictures of a message this phone is sending (JPEG), shown before the hub has them
-    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, folds, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, images, replyTo, voice, copy, restore, h, queued }
+    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, folds, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, images, replyTo, voice, copy, restore, h, queued, files }
     init(id: String, kind: String, text: String, at: Int, clientId: String? = nil, live: Bool = false) {
         self.id = id; self.kind = kind; self.text = text; self.at = at; self.clientId = clientId; self.live = live
     }
@@ -108,6 +109,7 @@ struct DEntry: Codable, Equatable, Identifiable {
         restore = try? c.decode(DRestore.self, forKey: .restore)
         h = c.str(.h)
         queued = c.bool(.queued)
+        files = ((try? c.decode([DFileLink].self, forKey: .files)) ?? []).filter { !$0.path.isEmpty }
     }
 }
 

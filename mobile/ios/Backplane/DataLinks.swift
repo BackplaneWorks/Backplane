@@ -29,8 +29,17 @@ extension DataClient {
         return nil
     }
 
+    /// A file of the hub's machine a tapped path names, when this phone downloads it rather than asking link.resolve: a share (`/s/<token>/<name>`),
+    /// or a file a reply of `thread` lists (feature fileLinks) that Backplane's viewers do not draw (`view` ones open in them, as before).
+    func download(_ path: String, thread: String, viewToo: Bool = false) -> Bool {
+        if let s = FileFetch.shareRoute(path) { DDownloads.shared.share(s); return true }
+        guard has("fileLinks"), let f = FileFetch.find(path, in: (entries[thread] ?? []).flatMap(\.files)), viewToo || f.open != "view" else { return false }
+        DDownloads.shared.file(f, thread: thread); return true
+    }
+
     func openLink(_ url: URL, thread: String) {
         guard let text = linkText(url) else { return }
+        if let p = dPathFrom(url), download(p, thread: thread) { return }
         Task {
             // a link tapped before the hub has said hello (a cached list, just launched) waits a moment for it: only the hub knows what `desktop~t9` is
             var waited = 0
@@ -48,7 +57,10 @@ extension DataClient {
                 case "project": linkTarget = DLinkTarget(kind: .project, id: r.project)
                 case "room": linkTarget = DLinkTarget(kind: .room, id: r.room)
                 case "file": linkTarget = DLinkTarget(kind: .file, id: r.thread, path: r.path, line: r.line)
-                default: say(r.note.isEmpty ? "That link does not open here." : r.note)
+                default:
+                    // a file the reply lists that no viewer here opens is downloaded instead
+                    if let p = dPathFrom(url), download(p, thread: thread, viewToo: true) { break }
+                    say(r.note.isEmpty ? "That link does not open here." : r.note)
                 }
             } catch { say(conn == .online ? error.localizedDescription : "Not connected to the hub.") }
         }

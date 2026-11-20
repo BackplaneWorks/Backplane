@@ -4278,6 +4278,12 @@ android.clone.phase.adding	Adding the project	プロジェクトを追加して�
 android.clone.phase.cancelled	Cancelled	キャンセルしました	Cancelado
 android.clone.busy	{path} already exists and isn't empty. Pick another folder or name.	{path} はすでにあり、空ではありません。別のフォルダか名前を選んでください。	{path} ya existe y no está vacía. Elige otra carpeta u otro nombre.
 android.clone.file	{path} is a file. Pick another folder or name.	{path} はファイルです。別のフォルダか名前を選んでください。	{path} es un archivo. Elige otra carpeta u otro nombre.
+android.download.saved	Saved to Downloads	ダウンロードに保存しました	Guardado en Descargas
+android.download.of	{have} of {total}	{have} / {total}	{have} de {total}
+android.download.share	Share	共有	Compartir
+android.download.retry	Retry	再試行	Reintentar
+android.download.noapp	No app here opens that file.	このファイルを開けるアプリがありません。	Ninguna app aquí abre ese archivo.
+android.download.button	Download	ダウンロード	Descargar
 sidebar.sections.needs	Needs you	対応が必要	Te necesita
 sidebar.sections.pinned	Pinned	ピン留め	Fijados
 sidebar.sections.active	Active	進行中	Activos
@@ -7179,6 +7185,9 @@ web.clone.no.folders	No folders here	フォルダがありません	No hay carpe
 
     /// android.clone.file = {path} is a file. Pick another folder or name.
     static func android_clone_file(path: String) -> String { f("android.clone.file", ["path": path]) }
+
+    /// android.download.of = {have} of {total}
+    static func android_download_of(have: String, total: String) -> String { f("android.download.of", ["have": have, "total": total]) }
 
     /// ios.sections.running = {n, number} running
     static func ios_sections_running(n: Int) -> String { f("ios.sections.running", ["n": String(n)]) }
