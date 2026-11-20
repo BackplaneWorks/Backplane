@@ -48,6 +48,11 @@ fn browser_rows(list: &Value, current_id: &str) -> Value {
 }
 
 async fn browser_action(hub: &Hub, action: &str, value: &str) -> Result<(), &'static str> {
+    #[cfg(target_os = "linux")]
+    if action == "device-web-setup" {
+        return super::listener::webprovision::request_setup(&hub.cfg.home, value);
+    }
+    if action == "device-web-setup" { return Err("web setup unavailable on this system"); }
     let reg = super::start::registry(&hub.cfg.home).ok_or("registry unavailable")?;
     if action == "device-web-access" {
         if !matches!(value, "0" | "1") { return Err("invalid access setting") }
@@ -73,7 +78,7 @@ impl RpcHandler for DevicesPage {
                 let action = s("action");
                 if !action.starts_with("device-") { return vec![json!({"t":"reply","id":id,"ok":false,"error":"unknown action"})] }
                 let (a, v) = (action.clone(), s("value"));
-                if matches!(a.as_str(), "device-web-access" | "device-web-approve" | "device-web-deny") {
+                if matches!(a.as_str(), "device-web-setup" | "device-web-access" | "device-web-approve" | "device-web-deny") {
                     let result = browser_action(hub, &a, &v).await;
                     return vec![match result {
                         Ok(()) => { let mut reply = page(&session); reply["t"] = json!("reply"); reply["id"] = id.clone(); reply["ok"] = json!(true); reply }

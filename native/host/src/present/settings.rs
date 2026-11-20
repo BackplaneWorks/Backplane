@@ -307,15 +307,20 @@ pub fn loopback_invite(invite: &str) -> bool {
 fn row_tone(label: &str, note: &str, tone: &str) -> Value { let mut r = row(label, note, vec![]); r["tone"] = json!(tone); r }
 
 fn web_ui(st: &State, info: &Value) -> Vec<Value> {
-    let status = &info["web"];
+    let status: Value = info["web.status"].as_str().and_then(|v| serde_json::from_str(v).ok()).unwrap_or(Value::Null);
     let enabled = set(st, "web.enabled", "") == "1";
     let mut rows = Vec::new();
     let reason = status["reason"].as_str().unwrap_or("Browser access requires a verified Tailscale HTTPS connection.");
     let available = status["available"] == true;
-    let buttons = if enabled || available {
+    let buttons = if enabled || available || status["canEnable"] == true {
         vec![btn(if enabled { "Turn off" } else { "Turn on" }, "device-web-access", if enabled { "0" } else { "1" }, false)]
     } else { vec![] };
     rows.push(row("Browser access", if available { "Pair each browser in Settings › Devices. Paired browsers can use the terminal." } else { reason }, buttons));
+    if enabled && !available {
+        if let Some(command) = status["command"].as_str() {
+            rows.push(row("Set up private HTTPS forwarding", command, vec![btn("Authorize setup", "device-web-setup", command, false)]));
+        }
+    }
     if enabled && available {
         if let Some(address) = status["address"].as_str() {
             let mut link = row("Web address", address, vec![]);
@@ -906,7 +911,7 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
         "board-done" => { send(session, hub, "board.set", json!({"item": {"id": value, "status": "done"}}), &mut cmds, &mut rid); json!({}) }
         "board-drop" => { send(session, hub, "board.drop", json!({"id": value}), &mut cmds, &mut rid); json!({}) }
         // Devices: an invitation made here (the registry is the hub's own, the same one /auth/invitations uses), a device or a link revoked
-        "device-web-access" | "device-web-approve" | "device-web-deny" => {
+        "device-web-setup" | "device-web-access" | "device-web-approve" | "device-web-deny" => {
             send(session, hub, "devices.page.act", json!({"action":action,"value":value}), &mut cmds, &mut rid);
             json!({})
         }
@@ -1168,7 +1173,7 @@ mod tests {
     /// Add a device: Tailscale first, its own link and QR code, the code beside the hub address and the expiry; the link and code copy.
     #[test] fn web_ui_shows_only_the_active_address() {
         let address = "https://bp.example.ts.net";
-        let info = json!({"web":{"available":true,"address":address}});
+        let info = json!({"web.status":json!({"available":true,"address":address}).to_string()});
         assert!(pg_rows("web", &[], json!({}), info.clone()).iter().all(|row| row["label"] != "Web address" && row.get("qr").is_none()));
         let rows = pg_rows("web", &[("web.enabled", "1")], json!({}), info);
         let link = by(&rows, "Web address");
