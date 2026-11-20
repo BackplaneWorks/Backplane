@@ -946,6 +946,12 @@ async fn viewer_gerbers_files_and_watch() {
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0]["kind"], "board");
     assert_eq!(calls[0]["path"], expected_set);
+    assert!(calls[0].get("force").is_none(), "normal watch omits force");
+
+    // Retry with force:true forwards force=true to kicad.watch
+    let w_force = ask(&mut ws, 11, "viewer.watch", json!({"thread":"tg","kind":"board","force":true})).await;
+    assert_eq!(w_force["ok"], true, "{w_force}");
+    assert_eq!(seen.lock().unwrap().last().unwrap()["force"], true);
 
     // Explicit path (even inside project or outside) is refused for kind="gerbers" and enqueues no watch
     let w_exp = ask(&mut ws, 7, "viewer.watch", json!({"thread":"tg","kind":"gerbers","path":"board.kicad_pcb"})).await;
@@ -960,7 +966,7 @@ async fn viewer_gerbers_files_and_watch() {
     let wf = ask(&mut ws, 10, "viewer.watch", json!({"thread":"L~t1","kind":"gerbers"})).await;
     assert_eq!(wf["ok"], false);
     assert_eq!(wf["error"], "Gerbers of a project on another machine are not shown yet");
-    assert_eq!(seen.lock().unwrap().len(), 1, "rejected requests must enqueue no extra kicad.watch");
+    assert_eq!(seen.lock().unwrap().len(), 2, "rejected requests must enqueue no extra kicad.watch");
     drop(hub);
 }
 
