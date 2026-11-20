@@ -1006,7 +1006,17 @@ pub mod focusq {
     /// Who is to have the keyboard: our window (`activate`: also made the foreground, an explicit hand-back) or KiCad's frame (a hand-in,
     /// posted to KiCad on the UI thread as before: it never waits).
     #[derive(Clone, Copy, Debug, PartialEq)]
-    pub enum To { Ours { window: u64, activate: bool }, Kicad }
+    pub enum To { Ours { window: u64, activate: bool }, Kicad { target: u64 } }
+    /// What a worker does after its call returned (`Q::returned`).
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct Returned {
+        /// its hand-back is still the latest request: where the keyboard went is recorded (FOCUS_ESCAPED); a stale one records nothing
+        pub record: bool,
+        /// apply the latest hand-back once more (a hand-in KiCad had queued took the keyboard back meanwhile)
+        pub again: bool,
+        /// a hand-in asked while its call was in flight, which its call then undid (the keyboard ended ours): post it to KiCad again
+        pub hand_in: Option<u64>,
+    }
     #[derive(Default)]
     pub struct Q {
         seq: u64,
@@ -1048,12 +1058,18 @@ pub mod focusq {
         /// The worker's call returned. `focus_ours`: the keyboard is in our window's thread now. Whether to apply the latest hand-back
         /// again: a hand-in KiCad had queued before it (its WM_ACTIVATE, handled after our WM_KILLFOCUS) took the keyboard back meanwhile,
         /// and the person still wants it in Backplane. A hand-in asked after it wins: nothing more.
-        pub fn returned(&mut self, era: u64, focus_ours: bool) -> bool {
-            if era != self.era { self.stuck = self.stuck.saturating_sub(1); return false }
+        /// `seq`: the hand-back it applied. A retired worker (left behind) does nothing here: it is counted off once, when it ends.
+        pub fn returned(&mut self, era: u64, seq: u64, focus_ours: bool) -> Returned {
+            if era != self.era { return Returned::default() }
             self.busy_since = None;
             match self.latest {
-                Some((s, To::Ours { .. })) if s <= self.taken && !focus_ours && self.retried != s => { self.retried = s; self.taken = s.saturating_sub(1); true }
-                _ => false,
+                Some((s, To::Ours { .. })) if s == seq => {
+                    let again = !focus_ours && self.retried != s;
+                    if again { self.retried = s; self.taken = s.saturating_sub(1); }
+                    Returned { record: true, again, hand_in: None }
+                }
+                Some((s, To::Kicad { target })) if s > seq && focus_ours => Returned { record: false, again: false, hand_in: Some(target) },
+                _ => Returned::default(),
             }
         }
         /// The worker of `era` ends (idle): a later hand-back starts another.
@@ -1218,7 +1234,7 @@ mod imp {
         const IDLE: Duration = Duration::from_secs(10);
         fn dbg() -> bool { std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() }
         /// A hand-in to KiCad (posted on the UI thread as before): noted, so a hand-back still in flight does not pull the keyboard out after.
-        pub fn kicad() { let (q, cv) = st(); q.lock().unwrap().ask(To::Kicad, Instant::now()); cv.notify_all(); }
+        pub fn kicad(target: u64) { let (q, cv) = st(); q.lock().unwrap().ask(To::Kicad { target }, Instant::now()); cv.notify_all(); }
         /// The keyboard to our window `w` (`activate`: made the foreground too), from `ui` (Backplane's UI thread id).
         pub fn ours(w: u64, activate: bool, ui: u32) {
             let (q, cv) = st();
@@ -1240,17 +1256,25 @@ mod imp {
                 };
                 let Some((seq, w, activate)) = job else { q.lock().unwrap().ended(era); return };
                 let t0 = Instant::now();
-                let ours = unsafe { apply(w, activate, ui) };
-                let again = q.lock().unwrap().returned(era, ours);
-                if dbg() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_hand_back_done": {"seq": seq, "window": w, "ms": t0.elapsed().as_millis() as u64, "focus_ours": ours, "again": again}})); }
-                if again { cv.notify_all(); }
+                let (ours, escaped) = unsafe { apply(w, activate, ui) };
+                let r = {
+                    let mut g = q.lock().unwrap();
+                    let r = g.returned(era, seq, ours);
+                    // recorded only by the latest request's call, under the lock (a stale one woke after a hand-in and said "escaped")
+                    if r.record { super::FOCUS_ESCAPED.store(escaped, std::sync::atomic::Ordering::SeqCst); }
+                    r
+                };
+                // a hand-in that came while the call was in flight, which the call undid: posted to KiCad again (it never waits)
+                if let Some(t) = r.hand_in { unsafe { super::PostMessageW(t as usize as _, super::WM_ACTIVATE, 1, 0); } }
+                if dbg() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_hand_back_done": {"seq": seq, "window": w, "ms": t0.elapsed().as_millis() as u64, "focus_ours": ours, "again": r.again, "recorded": r.record, "hand_in_again": r.hand_in}})); }
+                if r.again { cv.notify_all(); }
             }
         }
         /// One hand-back: our thread's input joined for the call, SetFocus (and SetForegroundWindow for an explicit one), detached; whether
         /// the keyboard is in our UI thread's windows after. Nothing is held while it waits.
-        unsafe fn apply(w: u64, activate: bool, ui: u32) -> bool {
+        unsafe fn apply(w: u64, activate: bool, ui: u32) -> (bool, bool) {
             let h = super::hwnd(w);
-            if unsafe { super::IsWindow(h) } == 0 { return true }
+            if unsafe { super::IsWindow(h) } == 0 { return (true, false) }
             let me = unsafe { super::GetCurrentThreadId() };
             let joined = unsafe { super::AttachThreadInput(me, ui, 1) } != 0;
             if activate {
@@ -1261,9 +1285,7 @@ mod imp {
             let mut gti = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..unsafe { std::mem::zeroed() } };
             let focus_tid = if unsafe { super::GetGUIThreadInfo(0, &mut gti) } != 0 && !gti.hwndFocus.is_null() { unsafe { super::GetWindowThreadProcessId(gti.hwndFocus, std::ptr::null_mut()) } } else { 0 };
             if joined { unsafe { super::AttachThreadInput(me, ui, 0); } }
-            let ours = focus_tid == 0 || focus_tid == ui;
-            super::FOCUS_ESCAPED.store(focus_tid != 0 && focus_tid != ui, std::sync::atomic::Ordering::SeqCst);
-            ours
+            (focus_tid == 0 || focus_tid == ui, focus_tid != 0 && focus_tid != ui)
         }
     }
     mod placer {
@@ -1967,7 +1989,7 @@ mod imp {
                 AttachThreadInput(cur, target_tid, 1);
                 let target = focus_target_in_frame(h);
                 PostMessageW(target, WM_ACTIVATE, 1, 0);
-                focuser::kicad();
+                focuser::kicad(target as usize as u64);
                 return;
             }
             CHILD_FOCUSED.store(false, Ordering::SeqCst);
@@ -2601,22 +2623,25 @@ mod tests {
         let g = q.ask(ours(1), t0).expect("a worker for the first hand-back");
         assert_eq!(q.take(g, t0), Some((1, 1, false)));
         assert_eq!(q.ask(ours(2), t0), None, "in flight: no second worker"); assert_eq!(q.ask(ours(3), t0), None);
-        assert!(!q.returned(g, true));
+        assert!(!q.returned(g, 1, true).again);
         assert_eq!(q.take(g, t0), Some((3, 3, false)), "the latest only (2 collapsed into 3)");
-        assert!(!q.returned(g, true)); assert_eq!(q.take(g, t0), None);
+        assert!(!q.returned(g, 3, true).again); assert_eq!(q.take(g, t0), None);
         // leave the pane during a DRC (hand-back in flight), click back into it before the DRC ends: KiCad keeps the keyboard
         let mut q = Q::default();
         let g = q.ask(ours(1), t0).unwrap(); q.take(g, t0).unwrap();
-        q.ask(To::Kicad, t0);
-        assert!(!q.returned(g, true), "the stale hand-back pulls nothing out after the hand-in");
+        q.ask(To::Kicad { target: 9 }, t0);
+        let r = q.returned(g, 1, true);
+        assert!(!r.again, "the stale hand-back pulls nothing out after the hand-in");
+        assert!(!r.record, "and records nothing about where the keyboard is (the review's A)");
+        assert_eq!(r.hand_in, Some(9), "its call took the keyboard from the hand-in: posted to KiCad again (the review's B)");
         assert_eq!(q.take(g, t0), None);
         // the reverse: a hand-in KiCad had queued takes the keyboard back after our hand-back: applied once more, then never again
         let mut q = Q::default();
-        q.ask(To::Kicad, t0);
+        q.ask(To::Kicad { target: 9 }, t0);
         let g = q.ask(ours(1), t0).unwrap(); q.take(g, t0).unwrap();
-        assert!(q.returned(g, false), "the keyboard not ours after the call: once more");
+        assert!(q.returned(g, 2, false).again, "the keyboard not ours after the call: once more");
         assert_eq!(q.take(g, t0), Some((2, 1, false)));
-        assert!(!q.returned(g, false), "never a loop");
+        assert!(!q.returned(g, 2, false).again, "never a loop");
         // a KiCad that never answers: after STUCK_AFTER a new request gets a new worker, the old one applies nothing when it returns
         let mut q = Q::default();
         let e1 = q.ask(ours(1), t0).unwrap(); q.take(e1, t0).unwrap();
@@ -2624,13 +2649,22 @@ mod tests {
         let e2 = q.ask(ours(2), later).expect("a new worker past the stuck one");
         assert_ne!(e1, e2); assert_eq!(q.take(e1, later), None, "the old generation takes nothing");
         assert_eq!(q.take(e2, later), Some((2, 2, false)));
-        assert!(!q.returned(e1, true) && q.stuck == 0, "the stuck one returning (KiCad killed) applies nothing and is let go");
+        assert_eq!(q.returned(e1, 1, true), Default::default(), "the stuck one returning (KiCad killed) applies and records nothing");
+        q.ended(e1); assert_eq!(q.stuck, 0, "and is let go");
         // never more than MAX_STUCK left behind
         let mut q = Q::default(); let mut t = t0; let g = q.ask(ours(1), t).unwrap(); q.take(g, t).unwrap();
         for i in 0..MAX_STUCK + 2 { t += STUCK_AFTER + Duration::from_millis(1); if let Some(g) = q.ask(ours(10 + i as u64), t) { q.take(g, t); } }
         assert!(q.stuck <= MAX_STUCK);
+        // the review's C: three left behind, one of them returns and ends: counted off once, not twice
+        let mut q = Q::default(); let mut t = t0; let mut gens = vec![];
+        let g = q.ask(ours(1), t).unwrap(); q.take(g, t).unwrap(); gens.push(g);
+        for i in 0..MAX_STUCK { t += STUCK_AFTER + Duration::from_millis(1); let g = q.ask(ours(10 + i as u64), t).unwrap(); q.take(g, t).unwrap(); gens.push(g); }
+        assert_eq!(q.stuck, MAX_STUCK);
+        let old = gens[0];
+        q.returned(old, 1, true); q.ended(old);
+        assert_eq!(q.stuck, MAX_STUCK - 1, "one left-behind worker ending is one fewer");
         // idle: the worker ends, the next hand-back starts another
-        let mut q = Q::default(); let g = q.ask(ours(1), t0).unwrap(); q.take(g, t0); q.returned(g, true); q.ended(g);
+        let mut q = Q::default(); let g = q.ask(ours(1), t0).unwrap(); q.take(g, t0); q.returned(g, 1, true); q.ended(g);
         assert!(q.ask(ours(2), t0).is_some());
     }
     #[test] fn a_kicad_windows_placements_keep_only_the_latest_and_a_hide_drops_them() {
