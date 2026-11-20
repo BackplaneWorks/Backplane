@@ -4694,3 +4694,14 @@ review.empty.next = Add a schematic to see its parts here.
 
 # ---- viewer: header scope ----
 viewer.diff.threadchanges = Thread changes
+viewer.layout.refusal.locked = KiCad has a dialog open
+viewer.layout.refusal.tooSmall = Too small for KiCad
+viewer.layout.refusal.oneKicad = Only one KiCad tile
+viewer.layout.refusal.incompatibleOverlay = Those views cannot be overlaid
+viewer.layout.refusal.notFound = That tile is no longer open
+viewer.layout.refusal.noOverlay = That tile has no overlay
+viewer.layout.refusal.invalidSource = That file is outside this project
+viewer.layout.refusal.sameTile = Choose two different tiles
+viewer.layout.refusal.invalidRatio = Invalid split ratio
+viewer.layout.refusal.duplicateId = Tile already exists
+viewer.layout.refusal.unknownFrame = Unknown KiCad frame

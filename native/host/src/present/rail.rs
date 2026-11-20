@@ -11,6 +11,9 @@ pub struct RailInput<'a> {
     pub altium: bool,
     pub page: &'a str,
     pub diff: bool,
+    /// Page kinds currently present anywhere in the thread's viewer layout (each entry gets
+    /// `"present": true`, while `"state": "on"` remains only the focused tile's kind).
+    pub present: &'a [&'a str],
 }
 
 pub fn rail(input: RailInput<'_>) -> Value {
@@ -18,7 +21,8 @@ pub fn rail(input: RailInput<'_>) -> Value {
     let page = if input.diff { "diff" } else { input.page };
     let mut add = |id, label, icon, group, key, why: Option<&str>| {
         let state = if page == id { "on" } else if why.is_some() { "disabled" } else { "off" };
-        let mut entry = json!({ "id": id, "label": label, "icon": icon, "group": group, "key": key, "state": state });
+        let present = state == "on" || input.present.contains(&id);
+        let mut entry = json!({ "id": id, "label": label, "icon": icon, "group": group, "key": key, "state": state, "present": present });
         if let Some(why) = why.filter(|_| page != id) { entry["why"] = json!(why); }
         entries.push(entry);
     };

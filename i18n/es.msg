@@ -4692,3 +4692,14 @@ review.empty.next = Añade un esquemático para ver sus componentes aquí.
 
 # ---- viewer: header scope ----
 viewer.diff.threadchanges = Cambios del hilo
+viewer.layout.refusal.locked = KiCad tiene un diálogo abierto
+viewer.layout.refusal.tooSmall = Demasiado pequeño para KiCad
+viewer.layout.refusal.oneKicad = Solo un panel de KiCad
+viewer.layout.refusal.incompatibleOverlay = Esas vistas no se pueden superponer
+viewer.layout.refusal.notFound = Ese panel ya no está abierto
+viewer.layout.refusal.noOverlay = Ese panel no tiene superposición
+viewer.layout.refusal.invalidSource = Ese archivo está fuera de este proyecto
+viewer.layout.refusal.sameTile = Elige dos paneles distintos
+viewer.layout.refusal.invalidRatio = Proporción de división no válida
+viewer.layout.refusal.duplicateId = El panel ya existe
+viewer.layout.refusal.unknownFrame = Marco de KiCad desconocido

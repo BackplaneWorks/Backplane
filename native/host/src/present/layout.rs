@@ -403,6 +403,40 @@ impl Refusal {
             Refusal::UnknownFrame => "unknownFrame",
         }
     }
+
+    /// Catalog key in `i18n/*.msg` for the header refusal banner.
+    pub fn i18n_key(self) -> &'static str {
+        match self {
+            Refusal::Locked => "viewer.layout.refusal.locked",
+            Refusal::OneKicad => "viewer.layout.refusal.oneKicad",
+            Refusal::TooSmall => "viewer.layout.refusal.tooSmall",
+            Refusal::NotFound => "viewer.layout.refusal.notFound",
+            Refusal::SameTile => "viewer.layout.refusal.sameTile",
+            Refusal::NoOverlay => "viewer.layout.refusal.noOverlay",
+            Refusal::IncompatibleOverlay => "viewer.layout.refusal.incompatibleOverlay",
+            Refusal::InvalidSource => "viewer.layout.refusal.invalidSource",
+            Refusal::DuplicateId => "viewer.layout.refusal.duplicateId",
+            Refusal::InvalidRatio => "viewer.layout.refusal.invalidRatio",
+            Refusal::UnknownFrame => "viewer.layout.refusal.unknownFrame",
+        }
+    }
+
+    /// English default copy matching `i18n/en.msg`.
+    pub fn text(self) -> &'static str {
+        match self {
+            Refusal::Locked => "KiCad has a dialog open",
+            Refusal::OneKicad => "Only one KiCad tile",
+            Refusal::TooSmall => "Too small for KiCad",
+            Refusal::NotFound => "That tile is no longer open",
+            Refusal::SameTile => "Choose two different tiles",
+            Refusal::NoOverlay => "That tile has no overlay",
+            Refusal::IncompatibleOverlay => "Those views cannot be overlaid",
+            Refusal::InvalidSource => "That file is outside this project",
+            Refusal::DuplicateId => "Tile already exists",
+            Refusal::InvalidRatio => "Invalid split ratio",
+            Refusal::UnknownFrame => "Unknown KiCad frame",
+        }
+    }
 }
 
 /// Result of [`split_overlay`], preserving `mode`, `layer_bits`, `prev_focus`, and `prev_maximized`
@@ -1028,6 +1062,75 @@ fn resize_node<F: Fn(&Tile) -> (f32, f32)>(
             }
         }
     }
+}
+
+/// Focus `target` (restoring if another tile was maximized, respecting `locked`).
+pub fn focus_tile(layout: &Layout, target: &str, locked: Option<&str>) -> Result<Layout, Refusal> {
+    if !layout.contains_tile(target) {
+        return Err(Refusal::NotFound);
+    }
+    let mut next = layout.clone();
+    next.focus = Some(target.to_string());
+    if next.maximized.as_deref() != Some(target) {
+        next.maximized = None;
+    }
+    check_lock_preserved(layout, &next, locked)?;
+    Ok(next)
+}
+
+/// Resolve the effective locked tile for a layout action (client facts vs hub authority).
+///
+/// - **Client-supplied facts** (`client_locked`, `client_kicad_tile`, `client_has_kicad`) describe
+///   ONE client (the desktop holding the embedded KiCad).
+/// - **Hub authority**:
+///   1. `client_locked` is honoured **only** when `client_id` matches the KiCad `holder` in
+///      `session_info` (`editor.kicad.*` `runtime.holder` / `holder`, or `viewer.runtime.holder`).
+///      For every other session (another desktop, a phone, or when no holder matches), a
+///      client-supplied `locked` is ignored.
+///   2. When `session_info` shows an open KiCad modal dialog (`dialogs` non-empty) for the project,
+///      the hub **itself** locks the holder's KiCad tile (`client_kicad_tile` when valid and from
+///      the holder, else [`kicad_tile`]) even if the client forgot to send `locked`.
+pub fn effective_lock(
+    layout: &Layout,
+    session_info: &Value,
+    client_id: Option<u64>,
+    client_locked: Option<&str>,
+    client_kicad_tile: Option<&str>,
+) -> Option<TileId> {
+    let mut holder: Option<u64> = None;
+    let mut dialog_open = false;
+    if let Some(info) = session_info.as_object() {
+        for (k, v) in info {
+            if !k.starts_with("editor.kicad.") && k != "viewer.runtime" {
+                continue;
+            }
+            let h = v["runtime"]["holder"]
+                .as_u64()
+                .or_else(|| v["holder"].as_u64())
+                .filter(|n| *n > 0);
+            if h.is_some() {
+                holder = h;
+            }
+            if v["dialogs"].as_array().is_some_and(|ds| !ds.is_empty()) {
+                dialog_open = true;
+            }
+        }
+    }
+    let is_holder = client_id.is_some() && holder == client_id;
+    if is_holder {
+        if let Some(lid) = client_locked.filter(|s| !s.is_empty() && layout.contains_tile(s)) {
+            return Some(lid.to_string());
+        }
+    }
+    if dialog_open {
+        if is_holder {
+            if let Some(kt) = client_kicad_tile.filter(|s| !s.is_empty() && layout.contains_tile(s)) {
+                return Some(kt.to_string());
+            }
+        }
+        return kicad_tile(layout, |_| true);
+    }
+    None
 }
 
 /// Maximize `target`, covering all other tiles without closing them.
