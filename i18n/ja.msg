@@ -1605,6 +1605,10 @@ gpui.paste.the.address.the.browser = ブラウザーが開いたアドレスを�
 gpui.paste.the.address.the.browser2 = ブラウザーが開いたアドレスを貼り付け
 gpui.confirm.remove = 削除を確定
 gpui.submit = 送信
+gpui.paste.a.pairing.link.pair = ペアリングリンクを貼り付け (…/pair#invite=…)
+gpui.hub.address.e.g.https = ハブのアドレス（例: https://desktop.tail9e0cf2.ts.net:8451）
+gpui.on.the.hub.s.machine = ハブのマシンで: 設定 → デバイス → デバイスを追加、そのリンクをここに貼り付けます。
+gpui.select.all = すべて選択
 
 # ---- gpui-a: improvements, accounts, bots ----
 gpui.imp.could.not.keep.this.draft = この下書きをこの端末に保存できませんでした。再試行してください。
