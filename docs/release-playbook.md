@@ -29,6 +29,20 @@ This page comes from docs/release-retro-0.16.0.md. Times are relative to the pla
 - **Green platforms are locked.** Once a platform passes on a candidate, it isn't rerun unless code for that platform changed. Say so in the candidate's message.
 - On the Mac mini, GUI rows run only in the isolated test user or VM, never in the person's session. Screenshots are cropped to our windows. *(pending: #9)*
 
+## The full suites: the release-candidate pass
+
+A merge runs only the fast gate (`scripts/land-gate.sh`: `cargo check --all-targets` and the unit tests of the crates a PR touches, no e2e, on Boat). Everything else runs here, once per candidate, before the rows above sign it off. Each failure goes to the lead who owns its area, with the test name and the candidate's commit.
+
+| Suite | How | Where |
+|---|---|---|
+| The hub's Windows tests | `scripts/land-windows.sh` from the candidate's checkout (`ci.yml`'s windows-latest set: `ci-hub-windows-filter.sh`, `--retries 1`; a failure not in `scripts/land-windows-known.txt` blocks) | bp-winbuild (bp-win only while `bp-win-ui` is free) |
+| macOS builds and tests | `scripts/mac-build.sh`, `scripts/mac-hub-build.sh` | hs-mac-mini, under `mac-heavy` |
+| Linux full gate, e2e suites included | `scripts/dev-build.sh --gate --no-cut` (all crates, e2e and smoke) | a Boat box |
+| The screenshot and size matrix | the client's screenshot and size suites (`test/viewers`, the rail scorer) | a Boat box |
+| The KiCad embed suites | the `kicad-embed-e2e` rows (Linux; Windows on bp-win under `bp-win-ui`; macOS on the mini) | as each row says |
+
+A nightly run of the same list on our machines, reporting failures to the owning lead, is the next step (not yet scripted).
+
 ## Candidates
 
 - **Batch fixes. One candidate per build cycle.** A fix found while a candidate builds goes in the next batch. Only a ship-blocker starts a new cycle early.

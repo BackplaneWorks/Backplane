@@ -10,7 +10,7 @@ build.rs; vendor and target left out) and the .rs files outside it that they nam
 Printed relative to the repository root, one per line, sorted, those outside native/host only. A compile-time input that does not exist is an
 error (exit 1): the list would be wrong. A runtime join that does not exist is skipped (a test may make it), and so is the repository root itself.
 
-usage: hub-outside-files.py [REPO_ROOT]   |   hub-outside-files.py --self-test
+usage: hub-outside-files.py [--crate native/gpui] [REPO_ROOT]   |   hub-outside-files.py --self-test     (another crate's the same way: --crate)
 """
 import os, re, sys
 
@@ -35,8 +35,8 @@ def named(path, manifest):
     joins = [os.path.normpath(os.path.join(manifest, p)) for p in MANIFEST_JOIN.findall(text)]
     return built, joins
 
-def outside_files(ROOT):
-    ROOT = os.path.abspath(ROOT); HOST = os.path.join(ROOT, "native", "host")
+def outside_files(ROOT, crate="native/host"):
+    ROOT = os.path.abspath(ROOT); HOST = os.path.join(ROOT, *crate.split("/"))
     todo = []
     for d, dirs, files in os.walk(HOST):
         dirs[:] = [x for x in dirs if x not in ("target", "vendor", ".git")]
@@ -87,7 +87,9 @@ def self_test():
 
 if __name__ == "__main__":
     if sys.argv[1:2] == ["--self-test"]: self_test(); sys.exit(0)
-    root = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-    out, missing = outside_files(root)
+    a = sys.argv[1:]; crate = "native/host"
+    if a[:1] == ["--crate"]: crate = a[1]; a = a[2:]
+    root = a[0] if a else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+    out, missing = outside_files(root, crate)
     if missing: print("hub-outside-files: named but missing:\n  " + "\n  ".join(missing), file=sys.stderr); sys.exit(1)
     print("\n".join(out))
