@@ -21,7 +21,7 @@ pub(crate) fn rail_rows(viewer: &Value, simulation: bool) -> Vec<RailRow<'_>> {
     }
     // Older hubs send choices and simFrame. Keep their existing rail and grouping.
     [("board", "Board", "circuit-board", "design"), ("schematic", "Schematic", "cpu", "design"), // i18n-ok: fallback labels drawn through trs
-     ("3d", "3D", "box", "design"), ("gerbers", "Gerbers", "file-stack", "design"), // i18n-ok: fallback labels drawn through trs
+     ("3d", "3D", "box", "design"), ("gerbers", "Gerbers", "layers", "design"), // i18n-ok: fallback labels drawn through trs
      ("simulation", "Simulation", "gauge", "design"), ("split", "Split", "layout-panel-left", "layout"), // i18n-ok: fallback labels drawn through trs
      ("mech", "Mech", "wrench", "layout"), ("files", "Files", "folder", "work"), ("diff", "Diff", "diff", "work"), // i18n-ok: fallback labels drawn through trs
      ("review", "Review", "circle-check", "work"), ("browser", "Browser", "globe", "work"), // i18n-ok: fallback labels drawn through trs
@@ -234,7 +234,7 @@ fn act_whole(tone: &str) -> bool { tone.contains("error") || tone.contains("rest
         for t in ["info", "", "tool"] { assert!(!super::act_whole(t), "{t}") }
     }
 }
-fn rail_label() -> Pixels { crate::scale::tpx_max(10., 12.5) }
+fn rail_label() -> Pixels { crate::scale::tpx_max(11., 12.5) }
 fn chip(light: bool, label: String) -> Div {
     let c = |name: &str| theme::color(light, name);
     div().px_3().py_1().flex().items_center().justify_center().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).whitespace_nowrap().child(label)
@@ -947,11 +947,12 @@ impl Render for Backplane {
             let icon_resolved = art::icon_name(row.icon);
             let mut button = with_rect(div().id(SharedString::from(format!("rail-{}", row.label))), || format!("rail:{}", row.label))
                 .relative().flex().flex_col().items_center().h(crate::scale::tpx(48.)).flex_shrink_0().justify_center().gap_1().text_size(rail_label())
-                .when(active, |d| d.bg(c("raise")).border_l_2().border_color(c("accent")))
-                .text_color(c(if active { "text" } else { "dim" }))
-                .child(ic(light, icon_resolved.unwrap_or("folder"), 18., if active { "accent" } else { "dim" })).child(trs(row.label));
+                .border_l_2().border_color(gpui::transparent_black())
+                .when(active, |d| d.bg(c("raise")).border_color(c("accent")))
+                .text_color(c(if active { "text" } else if disabled { "rail-disabled" } else { "dim" }))
+                .child(ic(light, icon_resolved.unwrap_or("folder"), 18., if active { "accent" } else if disabled { "faint" } else { "dim" })).child(trs(row.label));
             if disabled {
-                button = button.opacity(0.45).tooltip(crate::keys::tip(row.why, "", light));
+                button = button.tooltip(crate::keys::tip(row.why, "", light));
                 if collect_inv {
                     (if is_tool { &mut inv_tool } else { &mut inv_page }).push(RailInvRow {
                         id: id.into(), label: trs(row.label), group: row.group.into(), state: "disabled".into(), disabled: true,
@@ -1198,7 +1199,7 @@ impl Render for Backplane {
                 .children(crate::perf::mark("viewer"))
                 .children(crate::screens::viewer::is_open(thread).then(|| self.screens.parts.el(Backplane::viewer_part, StyleRefinement::default().flex_1().min_h_0(), cx)).and_then(|page| crate::screens::viewer::pane(cx, light, thread, page)))
                 // right rail
-                .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).children(crate::perf::mark("rail")).border_l_1().border_color(c("rule")).flex().flex_col().py_2().when(kscreen, |d| d.w(px(0.)).border_l_0().py_0().overflow_hidden()).when(!kscreen, |d| d.child(rail_sections(self.screens.rail_scroll.clone(), reveal, rail_pages, rail_tools, c("rule"))))))
+                .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).children(crate::perf::mark("rail")).border_l_1().border_color(c("rule")).flex().flex_col().py_2().when(kscreen, |d| d.w(px(0.)).border_l_0().py_0().overflow_hidden()).when(!kscreen, |d| d.child(rail_sections(self.screens.rail_scroll.clone(), reveal, rail_pages, rail_tools, c("rail-rule"))))))
             // the one-time telemetry notice (screens/tmnotice.rs)
             .children({ let (n, shown) = (self.screens.tm_notice.clone(), self.screens.tm_shown.clone()); crate::screens::tmnotice::strip(cx, n.as_ref(), &shown, light) })
             // the one-time notice that the hub no longer pushes on its own (#1171)
