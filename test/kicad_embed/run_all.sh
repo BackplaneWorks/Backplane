@@ -40,6 +40,8 @@ SUITES=(
   "embed_warm_sch_only_e2e.sh:warm-sch-only"
   # the hub's runtime state for the presenter (viewer.runtime): one project through each state. Fork mode only.
   "embed_runtime_state_e2e.sh:runtime-state"
+  # a Board<->Schematic switch at an unchanged rect: no geometry, no synthetic ConfigureNotify; context menus still at the pointer. Fork, X11.
+  "embed_switch_geometry_e2e.sh:switch-geometry"
   # an agent's footprint exchange while the person's Choose Symbol has KiCad's full footprint load running: kicad_edit waits for each
   # library by its status (bp.13.2 b5/b6 Fix 1). Fork mode only.
   "embed_lib_wait_e2e.sh:lib-wait"

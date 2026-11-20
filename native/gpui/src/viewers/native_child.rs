@@ -452,6 +452,47 @@ mod imp {
         for k in mine { if Some(*k) != show { let _ = c.unmap_window(*k as u32); } }
         let _ = c.flush();
     }
+    /// What each KiCad frame was last told of its place on screen (its root position and size, by synthetic ConfigureNotify): a
+    /// reparented wx frame does not learn its root position by itself, and wxGTK places its popups, context menus, tooltips and combo
+    /// drop-downs from it. A frame is told again whenever that differs from what it was told: the first time it is shown (a new frame,
+    /// one adopted, one of a KiCad started again: `told_reset`), when the pane or Backplane's window moved (`sync_root`, and `place`),
+    /// when it is resized, and when it is shown again after the root position changed while another frame was on show (`show_local`).
+    /// The same place again is not told (rail-round4: one ConfigureNotify per placement, three per Board<->Schematic switch).
+    static TOLD: std::sync::Mutex<Option<std::collections::HashMap<u32, (i32, i32, u32, u32)>>> = std::sync::Mutex::new(None);
+    /// Tell frame `k` it is at `at` (root x, y, width, height) unless that is what it was last told; true when it was told (flushed).
+    fn tell(c: &RustConnection, k: Window, at: (i32, i32, u32, u32), why: &str) -> bool {
+        { let mut t = TOLD.lock().unwrap(); let m = t.get_or_insert_with(Default::default);
+          if m.get(&k) == Some(&at) { return false }
+          if m.len() > 256 { m.clear(); }
+          m.insert(k, at); }
+        // BACKPLANE_KICAD_DEBUG: each synthetic ConfigureNotify sent, with why: placed (a placement whose place differs from the told
+        // one: new, moved, resized), moved / resized (sync_root), shown (a frame shown again at a place it was not told)
+        if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+            eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_place_notify": [at.0, at.1, at.2, at.3], "frame": k, "why": why, "at_ms": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)}));
+        }
+        let ev = ConfigureNotifyEvent { response_type: CONFIGURE_NOTIFY_EVENT, sequence: 0, event: k, window: k, above_sibling: x11rb::NONE,
+            x: at.0 as i16, y: at.1 as i16, width: at.2 as u16, height: at.3 as u16, border_width: 0, override_redirect: false };
+        let _ = c.send_event(false, k, EventMask::STRUCTURE_NOTIFY, ev);
+        let _ = c.flush();
+        true
+    }
+    /// Another KiCad (a restart): every frame is told its place again.
+    pub fn told_reset() { *TOLD.lock().unwrap() = None; }
+    /// A re-place at the rect the container already has (a tab switch, the frames poll, the hub's echo of it): `show` mapped and raised
+    /// over the others (unmapped), as place_local does, with no configure; told its place only if it was not told this one.
+    pub fn show_local(container: u64, show: Option<u64>, mine: &[u64]) {
+        let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
+        if let Some(k) = show.filter(|k| mine.contains(k)) {
+            keep_pixels(c, k as u32, 3);
+            let _ = c.configure_window(k as u32, &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE));
+            let _ = c.map_window(k as u32);
+        }
+        for k in mine { if Some(*k) != show { let _ = c.unmap_window(*k as u32); } }
+        let _ = c.flush();
+        let (Some(k), Some(root)) = (show, root(c)) else { return };
+        let (Some(t), Some(geo)) = (c.translate_coordinates(container as u32, root, 0, 0).ok().and_then(|q| q.reply().ok()), c.get_geometry(container as u32).ok().and_then(|q| q.reply().ok())) else { return };
+        tell(c, k as u32, (t.dst_x as i32, t.dst_y as i32, geo.width as u32, geo.height as u32), "shown");
+    }
     /// `w` and its windows `depth` levels down keep what is on screen under them until they draw (no X background is painted on map or
     /// expose): what the person sees between a map and KiCad's first paint is the last good picture, never a flash of background.
     fn keep_pixels(c: &RustConnection, w: Window, depth: u32) {
@@ -486,18 +527,8 @@ mod imp {
         if show.is_some() { let _ = c.map_window(container); } else { let _ = c.unmap_window(container); }
         if let (Some(k), Some(root)) = (show, root(c)) {
             if let Some(t) = c.translate_coordinates(container, root, 0, 0).ok().and_then(|r| r.reply().ok()) {
-                let at = (t.dst_x as i32, t.dst_y as i32);
-                if managed.is_some() || at != *last_root {
-                    // BACKPLANE_KICAD_DEBUG: the synthetic ConfigureNotify this placement sends the frame (its root position: X does not tell
-                    // a child that its parent moved): `why` managed (every placement of a managed frame) or moved (the pane moved on screen)
-                    if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
-                        eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_place_notify": [t.dst_x, t.dst_y, w, h], "frame": k, "why": if at != *last_root { "moved" } else { "managed" }, "at_ms": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)}));
-                    }
-                    *last_root = at;
-                    let ev = ConfigureNotifyEvent { response_type: CONFIGURE_NOTIFY_EVENT, sequence: 0, event: k, window: k, above_sibling: x11rb::NONE,
-                        x: t.dst_x, y: t.dst_y, width: w as u16, height: h as u16, border_width: 0, override_redirect: false };
-                    let _ = c.send_event(false, k, EventMask::STRUCTURE_NOTIFY, ev);
-                }
+                *last_root = (t.dst_x as i32, t.dst_y as i32);
+                tell(c, k, (t.dst_x as i32, t.dst_y as i32, w, h), "placed");
             }
         }
         let _ = c.flush();
@@ -522,16 +553,8 @@ mod imp {
         let Some(t) = c.translate_coordinates(container, root, 0, 0).ok().and_then(|q| q.reply().ok()) else { if resized { let _ = c.flush(); } return };
         let at = (t.dst_x as i32, t.dst_y as i32);
         if resized || at != *last_root {
-            // BACKPLANE_KICAD_DEBUG: as place's (sync_root: an unchanged placement whose frame was resized or whose pane moved)
-            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
-                eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_place_notify": [t.dst_x, t.dst_y, uw, uh], "frame": show, "why": if resized { "resized" } else { "moved" }, "sync": true, "at_ms": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)}));
-            }
             *last_root = at;
-            let (w, h) = (uw as u16, uh as u16);
-            let ev = ConfigureNotifyEvent { response_type: CONFIGURE_NOTIFY_EVENT, sequence: 0, event: show, window: show, above_sibling: x11rb::NONE,
-                x: t.dst_x, y: t.dst_y, width: w, height: h, border_width: 0, override_redirect: false };
-            let _ = c.send_event(false, show, EventMask::STRUCTURE_NOTIFY, ev);
-            let _ = c.flush();
+            if !tell(c, show, (t.dst_x as i32, t.dst_y as i32, uw, uh), if resized { "resized" } else { "moved" }) && resized { let _ = c.flush(); }
         }
     }
 
