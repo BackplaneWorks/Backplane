@@ -522,6 +522,8 @@ pub fn board_action_for(st: &State, hub: &str, session: &Value, client_id: Optio
                         if let Some(r) = &mut next.root {
                             set_tile_explicit(r, fid, !own);
                         }
+                        // the same preflight as adding a tile: the RESULTING layout's tiles and distinct subscriptions, before anything is recorded or sent
+                        if let Err(r) = limits_ok(&next, &root, linked) { return Some(LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) }) }
                         let mut vo = commit_layout(st, hub, session, sel, &root, &next, false, client_id.unwrap_or(0));
                         if let Some(dm) = vo.patch["drafts"].as_object_mut() {
                             dm.insert(format!("@view.board:{sel}"), json!(if own { "" } else { rel }));
@@ -708,6 +710,7 @@ pub fn sheet_action_for(st: &State, hub: &str, session: &Value, client_id: Optio
                     if let Some(r) = &mut next.root {
                         set_tile_explicit(r, &tid, !file.is_empty());
                     }
+                    if let Err(r) = limits_ok(&next, &root, linked) { return Some(LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) }) }
                     LayoutOut::Ok(commit_layout(st, hub, session, sel, &root, &next, false, client_id.unwrap_or(0)))
                 }
             });
@@ -1785,6 +1788,13 @@ fn commit_layout_force(st: &State, hub: &str, session: &Value, sel: &str, root: 
         &marked
     } else { session };
     let mut vo = commit_layout_core(st, hub, sref, sel, root, next, geometry_only, force && !multi);
+    // the page's own watch (or stop) that lets the set go is marked: the hub clears a connection's set for it and for nothing else
+    if leaving {
+        for c in vo.before.iter_mut() {
+            let Some(mut m) = c["text"].as_str().and_then(|x| serde_json::from_str::<Value>(x).ok()) else { continue };
+            if m["m"] == "kicad.watch" { m["p"]["leave"] = json!(true); c["text"] = json!(m.to_string()); }
+        }
+    }
     if had_stored && !geometry_only && !keep_stored {
         let mut dm = vo.patch.get("drafts").and_then(Value::as_object).cloned().unwrap_or_default();
         for k in ["@view.file", "@view.sheet", "@view.gerbers"] {
@@ -1813,7 +1823,7 @@ fn commit_layout_force(st: &State, hub: &str, session: &Value, sel: &str, root: 
     if !linked && !root.is_empty() {
         let key = memory_key(root);
         let have = st.settings.get(&key).map(String::as_str).unwrap_or("");
-        let want = if multi { Some(memory_value(next).unwrap_or_default()) } else if prev_multi { Some(String::new()) } else { None };
+        let want = if multi { Some(memory_value(next, root).unwrap_or_default()) } else if prev_multi { Some(String::new()) } else { None };
         if let Some(w) = want {
             if w != have {
                 let rid = vo.patch["rid"].as_u64().unwrap_or_else(|| session["rid"].as_u64().unwrap_or(0));
@@ -1852,10 +1862,12 @@ pub fn memory_key(root: &str) -> String { format!("layout:{}", root.trim_end_mat
 
 /// The remembered form of a layout: tiles with root-relative sources (and versioned tiles by source id and commit), an unresolved tile left out; None when
 /// fewer than two tiles would be left.
-fn memory_value(l: &super::layout::Layout) -> Option<String> {
+fn memory_value(l: &super::layout::Layout, root: &str) -> Option<String> {
     let mut out = l.clone();
+    if out.tiles().len() > super::layout::MAX_TILES { return None }
+    let resolver = project_version_resolver(root);
     for t in l.tiles() {
-        if t.unresolved_version {
+        if t.unresolved_version || !tile_resolvable(root, t, &resolver) {
             out = super::layout::close(&out, &t.id, None).ok()?;
         }
     }
@@ -1870,6 +1882,8 @@ fn memory_value(l: &super::layout::Layout) -> Option<String> {
 fn memory_layout(st: &State, root: &str) -> Option<super::layout::Layout> {
     let raw = st.settings.get(&memory_key(root))?;
     let mut l: super::layout::Layout = serde_json::from_str(raw).ok()?;
+    // (the bound first: nothing is resolved, no git is started, for a layout that could not be applied anyway)
+    if l.tiles().len() < 2 || l.tiles().len() > super::layout::MAX_TILES { return None }
     super::layout::check_invariants(&l).ok()?;
     let resolver = project_version_resolver(root);
     // every tile must resolve NOW: a live drawing's file exists (a Gerber set has members, a folder is there), a version's revision holds the file; the rest are left out
@@ -1881,20 +1895,32 @@ fn memory_layout(st: &State, root: &str) -> Option<super::layout::Layout> {
     (l.tiles().len() >= 2 && l.tiles().len() <= super::layout::MAX_TILES).then_some(l)
 }
 
-/// Whether a remembered tile can be drawn now.
+/// Whether a remembered tile can be drawn now. A default source (empty) is the project's actual file for the page, which must exist; a version resolves its
+/// repository first and then the revision must hold the file (the default's name when none is named).
 fn tile_resolvable(root: &str, t: &super::layout::Tile, resolver: &super::layout::VersionSourceMap) -> bool {
     use super::layout::{PageKind, VersionResolver};
     let root_p = std::path::Path::new(root);
+    let own = crate::files::kicad::project::read(root);
+    // the project's own file for a page (relative to the root; "" when it has none)
+    let default_rel = |kind: PageKind| -> String {
+        let abs = match kind { PageKind::Board | PageKind::Solid3d => own.pcb.clone(), PageKind::Schematic | PageKind::Simulation => own.sch.clone(),
+            PageKind::Gerbers => crate::files::kicad::gerber::default_set(root_p).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(), _ => String::new() };
+        if abs.is_empty() { String::new() } else { super::layout::sanitize_rel(root, &abs) }
+    };
+    let needs_default = |kind: PageKind| matches!(kind, PageKind::Board | PageKind::Solid3d | PageKind::Schematic | PageKind::Simulation | PageKind::Gerbers);
     let live = |kind: PageKind, src: &str| -> bool {
-        if src.is_empty() { return true }
-        let Some(p) = crate::files::fm::contained(root_p, src) else { return false };
+        let src = if src.is_empty() && needs_default(kind) { default_rel(kind) } else { src.to_string() };
+        if src.is_empty() { return !needs_default(kind) }
+        let Some(p) = crate::files::fm::contained(root_p, &src) else { return false };
         match kind { PageKind::Files => p.is_dir(), PageKind::Gerbers => !crate::files::kicad::gerber::set_files_in(&p, Some(root_p)).is_empty(), _ => p.is_file() }
     };
-    let version = |v: &super::layout::TileVersion, rel: &str| -> bool {
-        rel.is_empty() || resolver.resolve(&v.source_id).is_some_and(|src| crate::files::rv::version_has_file(&src.git_dir, &v.id, rel))
+    let version = |kind: PageKind, v: &super::layout::TileVersion, rel: &str| -> bool {
+        let Some(src) = resolver.resolve(&v.source_id) else { return false };
+        let rel = if rel.is_empty() { default_rel(kind) } else { rel.to_string() };
+        !rel.is_empty() && crate::files::rv::version_has_file(&src.git_dir, &v.id, &rel)
     };
-    let base = match &t.version { Some(v) => version(v, &t.source), None => live(t.kind, &t.source) };
-    let ov = t.overlay.as_ref().map_or(true, |ov| match &ov.version { Some(v) => version(v, &ov.source), None => live(ov.kind, &ov.source) });
+    let base = match &t.version { Some(v) => version(t.kind, v, &t.source), None => live(t.kind, &t.source) };
+    let ov = t.overlay.as_ref().map_or(true, |ov| match &ov.version { Some(v) => version(ov.kind, v, &ov.source), None => live(ov.kind, &ov.source) });
     base && ov
 }
 
@@ -2494,6 +2520,23 @@ fn parse_overlay_mode(s: &str) -> Option<super::layout::OverlayMode> {
         "new" => Some(super::layout::OverlayMode::New),
         _ => None,
     }
+}
+
+/// The set command for a thread just selected (or returned to) on a connection: the stored layout of several tiles, whole, so the hub's table follows the thread
+/// shown (another thread's page may have replaced it meanwhile). None: no such layout. The session's request id is advanced.
+pub fn selection_set(st: &State, hub: &str, session: &Value) -> Option<(Value, u64)> {
+    let sel = s(session, "sel");
+    if sel.is_empty() || !st.threads.contains_key(sel) { return None }
+    let l = parse_stored_layout(&session["drafts"], sel).filter(|l| l.tiles().len() >= 2)?;
+    let linked = sel.contains('~');
+    let root = if linked {
+        st.threads.get(sel).map(|t| if !t.worktree.is_empty() { t.worktree.clone() } else { st.projects.get(&t.project).map(|p| p.root.clone()).unwrap_or_default() }).unwrap_or_default()
+    } else { root_of(st, sel) };
+    if root.is_empty() { return None }
+    let rid = session["rid"].as_u64().unwrap_or(0);
+    let mut p = json!({"root": root, "sources": watch_sources(&l, &root, linked, false)});
+    if linked { p["on"] = json!(sel.split('~').next().unwrap_or("")); }
+    Some((json!({"type": "send", "hub": hub, "text": json!({"id": rid, "m": "kicad.watch.set", "p": p}).to_string()}), rid + 1))
 }
 
 /// The remembered layout of the session's project, applied through `commit_layout` (every guard, one writer). `explicit`: the person asked (`layout-restore-saved`),

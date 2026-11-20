@@ -1311,6 +1311,90 @@ mod tests {
         assert_eq!(wrote.len(), 1, "{wrote:?}"); assert_eq!(wrote[0]["value"], "", "fewer than two keepable tiles clear the saved layout, not keep the previous one");
     }
 
+    /// The board and sheet pickers run the same preflight as adding a tile, on the RESULTING layout, before anything is recorded or sent.
+    #[test]
+    fn rail_2b_board_and_sheet_pickers_are_limited_like_layout_add() {
+        let d = crate::plat::tmp::dir("rail-2b-picker");
+        let root = d.to_string_lossy().into_owned();
+        for f in ["unit.kicad_pcb", "unit.kicad_sch"] { std::fs::write(d.join(f), "()").unwrap(); }
+        for i in 0..8 { std::fs::write(d.join(format!("b{i}.kicad_pcb")), "()").unwrap(); }
+        for i in 0..3 { std::fs::write(d.join(format!("s{i}.kicad_sch")), "()").unwrap(); }
+        let mut st = crate::state::State::new();
+        st.apply_line(&json!({"$":"ProjectCreated","id":"p","title":"Board","root":root,"at":1}).to_string());
+        st.apply_line(&json!({"$":"ThreadCreated","id":"tk","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+        let tile = |id: &str, kind, src: &str| layout::Tile { id: id.into(), kind, source: src.into(), explicit: true, version: None, unresolved_version: false, overlay: None };
+        // twelve distinct subscriptions: five 3D tiles of distinct boards (ten), one of them shared by a sixth tile, and a schematic (two more would be the 13th and 14th)
+        let mut l = layout::Layout::single(tile("t1", layout::PageKind::Solid3d, "b0.kicad_pcb")).unwrap();
+        for (i, (kind, src)) in [(layout::PageKind::Solid3d, "b1.kicad_pcb"), (layout::PageKind::Solid3d, "b2.kicad_pcb"), (layout::PageKind::Solid3d, "b3.kicad_pcb"), (layout::PageKind::Solid3d, "b4.kicad_pcb"), (layout::PageKind::Solid3d, "b4.kicad_pcb"), (layout::PageKind::Schematic, "s0.kicad_sch"), (layout::PageKind::Schematic, "s1.kicad_sch")].iter().enumerate() {
+            l = layout::add(&l, None, layout::Side::Right, tile(&format!("t{}", i + 2), *kind, src), false, None).unwrap();
+        }
+        l.focus = Some("t6".into()); // the 3D tile that shares b4 with t5
+        let session = json!({"sel":"tk","rid":1,"drafts":{"@view:tk":"3d","@view.layout:tk":serde_json::to_string(&l).unwrap()},"panel":false,
+            "info":{"fab.board:tk":"unit.kicad_pcb","fab.boards:tk":"unit.kicad_pcb\nb5.kicad_pcb\nb6.kicad_pcb"}});
+        // moving the shared tile to a board of its own adds two subscriptions: 12 -> 14, refused with the reason, nothing recorded
+        match viewer::board_action_for(&st, "h", &session, Some(1), "en", "b5.kicad_pcb").unwrap() {
+            viewer::LayoutOut::Refused { code, text, .. } => { assert_eq!(code, "tooManySources"); assert_eq!(text, "Too many sources in one layout"); }
+            viewer::LayoutOut::Ok(_) => panic!("the board picker must run the limits' preflight"),
+        }
+        // a picker that keeps the count (the tile moves to a board another tile already draws) is allowed
+        l.focus = Some("t6".into());
+        let ok = json!({"sel":"tk","rid":1,"drafts":{"@view:tk":"3d","@view.layout:tk":serde_json::to_string(&l).unwrap()},"panel":false,"info":{"fab.board:tk":"unit.kicad_pcb","fab.boards:tk":"unit.kicad_pcb\nb0.kicad_pcb"}});
+        assert!(matches!(viewer::board_action_for(&st, "h", &ok, Some(1), "en", "b0.kicad_pcb").unwrap(), viewer::LayoutOut::Ok(_)));
+        // the sheet picker: a Schematic tile moved to a sheet of its own where it shared one
+        let mut ls = layout::Layout::single(tile("t1", layout::PageKind::Schematic, "s0.kicad_sch")).unwrap();
+        for (i, src) in ["s0.kicad_sch", "s1.kicad_sch"].iter().enumerate() { ls = layout::add(&ls, None, layout::Side::Right, tile(&format!("t{}", i + 2), layout::PageKind::Schematic, src), false, None).unwrap(); }
+        for (i, src) in ["b0.kicad_pcb", "b1.kicad_pcb", "b2.kicad_pcb", "b3.kicad_pcb", "b4.kicad_pcb"].iter().enumerate() { ls = layout::add(&ls, None, layout::Side::Right, tile(&format!("t{}", i + 4), layout::PageKind::Solid3d, src), false, None).unwrap(); }
+        ls.focus = Some("t2".into()); // 2 schematic keys (s0, s1) + 10 = 12; t2 moves to s2: 13
+        let sheet_s = json!({"sel":"tk","rid":1,"drafts":{"@view:tk":"schematic","@view.layout:tk":serde_json::to_string(&ls).unwrap()},"panel":false,"info":{}});
+        match viewer::sheet_action_for(&st, "h", &sheet_s, Some(1), "en", &format!("{root}/s2.kicad_sch")).unwrap() {
+            viewer::LayoutOut::Refused { code, .. } => assert_eq!(code, "tooManySources"),
+            viewer::LayoutOut::Ok(_) => panic!("the sheet picker must run the limits' preflight"),
+        }
+    }
+
+    /// Memory of DEFAULT sources resolves to the project's actual file; versions resolve the repository first; the writer drops every unresolvable tile; the tile bound
+    /// comes before any resolution; the git probe has a deadline.
+    #[test]
+    fn rail_2b_memory_of_default_sources_resolves_and_the_probe_has_a_deadline() {
+        let d = crate::plat::tmp::dir("rail-2b-default");
+        let root = d.to_string_lossy().into_owned();
+        for f in ["unit.kicad_pcb", "unit.kicad_sch"] { std::fs::write(d.join(f), "()").unwrap(); }
+        let mut st = crate::state::State::new();
+        st.apply_line(&json!({"$":"ProjectCreated","id":"p","title":"Board","root":root,"at":1}).to_string());
+        st.apply_line(&json!({"$":"ThreadCreated","id":"td","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+        let key = viewer::memory_key(&root);
+        let tile = |id: &str, kind, v: Option<layout::TileVersion>| layout::Tile { id: id.into(), kind, source: String::new(), explicit: false, version: v, unresolved_version: false, overlay: None };
+        // a saved DEFAULT Board and DEFAULT Schematic (empty sources)
+        let l = layout::add(&layout::Layout::single(tile("t1", layout::PageKind::Board, None)).unwrap(), Some("t1"), layout::Side::Right, tile("t2", layout::PageKind::Schematic, None), false, None).unwrap();
+        st.apply_line(&json!({"$":"SettingSet","key":key,"value":serde_json::to_string(&l).unwrap(),"at":3}).to_string());
+        let fresh = json!({"sel":"td","rid":1,"drafts":{},"panel":false,"info":{}});
+        assert!(viewer::apply_memory(&st, "h", &fresh, Some(2), "en", false).is_some(), "both files are there: it comes back");
+        std::fs::remove_file(d.join("unit.kicad_pcb")).unwrap(); std::fs::remove_file(d.join("unit.kicad_sch")).unwrap();
+        assert!(viewer::apply_memory(&st, "h", &fresh, Some(2), "en", false).is_none(), "a default Board and Schematic whose files are gone are not restored");
+        // a version whose source id does not resolve is unresolved even with an empty source
+        let bad = layout::TileVersion { source_id: "vsrc-unknown00000000".into(), id: "1111aaaa99998888777766665555444433332222".into(), label: "x".into() };
+        let lv = layout::add(&layout::Layout::single(tile("t1", layout::PageKind::Files, None)).unwrap(), Some("t1"), layout::Side::Right, tile("t2", layout::PageKind::Board, Some(bad)), false, None).unwrap();
+        st.apply_line(&json!({"$":"SettingSet","key":key,"value":serde_json::to_string(&lv).unwrap(),"at":4}).to_string());
+        assert!(viewer::apply_memory(&st, "h", &fresh, Some(2), "en", false).is_none(), "an unresolvable version with a default source is dropped, leaving one tile");
+        // the writer drops every unresolvable tile, not only a marked one: the layout on show has a default Board and Schematic with no files: nothing is kept, the saved layout is cleared
+        let s = json!({"sel":"td","rid":1,"drafts":{"@view:td":"board","@view.layout:td":serde_json::to_string(&l).unwrap()},"panel":false,"info":{}});
+        let viewer::LayoutOut::Ok(vo) = viewer::layout_action(&st, "h", &s, Some(1), "en", "layout-focus", r#"{"tile":"t1"}"#).unwrap() else { panic!() };
+        let w: Vec<Value> = vo.before.iter().filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).filter(|x| x["m"] == "setting.set").map(|x| x["p"].clone()).collect();
+        assert_eq!(w.len(), 1); assert_eq!(w[0]["value"], "", "tiles whose files are gone are not remembered");
+        // the tile bound comes first: nine tiles apply nothing (and start no git)
+        let mut big = layout::Layout::single(layout::Tile { kind: layout::PageKind::Files, ..tile("t1", layout::PageKind::Files, None) }).unwrap();
+        for i in 2..=layout::MAX_TILES { big = layout::add(&big, None, layout::Side::Right, tile(&format!("t{i}"), layout::PageKind::Files, None), false, None).unwrap(); }
+        let over = layout::Layout { root: Some(layout::Node::Split { id: "sx".into(), axis: layout::Axis::Row, ratio: 0.5, a: Box::new(big.root.clone().unwrap()), b: Box::new(layout::Node::Tile(tile("t9", layout::PageKind::Files, None))) }), ..big.clone() };
+        st.apply_line(&json!({"$":"SettingSet","key":key,"value":serde_json::to_string(&over).unwrap(),"at":5}).to_string());
+        assert!(viewer::apply_memory(&st, "h", &fresh, Some(2), "en", false).is_none(), "more than eight tiles are never restored");
+        // the probe's deadline: a command that outlives it is killed and counts as unresolved
+        let start = std::time::Instant::now();
+        let mut slow = std::process::Command::new("sleep"); slow.arg("5");
+        assert!(!crate::files::rv::succeeds_within(slow, std::time::Duration::from_millis(100)));
+        assert!(start.elapsed() < std::time::Duration::from_secs(3), "the slow probe was killed, not waited for");
+        assert!(crate::files::rv::succeeds_within(std::process::Command::new("true"), std::time::Duration::from_secs(2)));
+    }
+
     struct Mine; impl Screen for Mine {
         fn name(&self) -> &'static str { "mine" }
         fn view(&self, p: &Value) -> Option<Value> { if p["target"]["kind"] == "thread" { Some(json!({"shown":{"by":"rust"}})) } else { None } }

@@ -53,10 +53,25 @@ async fn kicad_with(argv: &[String], ro: bool) -> Ran {
 // Versions: core/hist
 fn field(p: &str, i: usize) -> &str { p.split('\t').nth(i).unwrap_or("") }
 /// Hist.git
-/// Whether the revision `id` of the repository at `git_dir` holds the file `rel` (a read of the object store, nothing is checked out).
+/// How long the object-store probe may take (a hung or very slow repository leaves a tile unresolved; it does not hang the presenter).
+pub const PROBE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
+/// Run `c` and say whether it exited 0 within `limit`; past it the child is killed and the answer is no.
+pub fn succeeds_within(mut c: std::process::Command, limit: std::time::Duration) -> bool {
+    let Ok(mut child) = c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn() else { return false };
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(st)) => return st.success(),
+            Ok(None) if start.elapsed() < limit => std::thread::sleep(std::time::Duration::from_millis(5)),
+            _ => { let _ = child.kill(); let _ = child.wait(); return false }
+        }
+    }
+}
+/// Whether the revision `id` of the repository at `git_dir` holds the file `rel` (a read of the object store, nothing is checked out), within `PROBE_DEADLINE`.
 pub fn version_has_file(git_dir: &str, id: &str, rel: &str) -> bool {
-    crate::proc::std_cmd(crate::proc::Kind::Local, "git").args(["--git-dir", git_dir, "cat-file", "-e", &format!("{id}:{rel}")])
-        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success())
+    let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, "git");
+    c.args(["--git-dir", git_dir, "cat-file", "-e", &format!("{id}:{rel}")]);
+    succeeds_within(c, PROBE_DEADLINE)
 }
 pub fn hist_git(g: &str, c: &str, top: &str, rel: &str) -> String { format!("git\t{g}\t{c}\t{}\t{top}/{rel}", bj::len(top)) }
 /// Hist.rebase: another live file in the same commit as version p; abs itself when p is live

@@ -777,6 +777,14 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         session["drafts"][format!("@view.mem:{thread}")]=json!("1");
         if let Some(super::viewer::LayoutOut::Ok(o))=applied { crate::session::patch::merge(&mut session,&o.patch); cmds.extend(o.before); }
     }
+    // The connection's watch set follows the thread shown: on a selection (the thread is not the one this session last drew: a first request, a return from
+    // another thread whose page may have replaced the set) a stored layout of several tiles sends its set whole; the hub keeps what stays.
+    if action.is_empty() && !thread.is_empty() {
+        if text(&session["drafts"],"@view.on")!=thread && !cmds.iter().any(|c|c["text"].as_str().is_some_and(|x|x.contains("kicad.watch.set"))) {
+            if let Some((c,rid))=super::viewer::selection_set(st,hub,&session) { cmds.push(c); session["rid"]=json!(rid); }
+        }
+        session["drafts"]["@view.on"]=json!(thread);
+    }
     let shown_thread=if thread.is_empty() { Value::Null }else{
         if !p["window"].is_object() { return refused("window.missing") }
         let mut params=p.clone(); params["session"]=session.clone();
@@ -1622,6 +1630,27 @@ mod thread_binding_tests {
         assert!(kept.is_empty() || serde_json::from_str::<layout::Layout>(kept).unwrap().tiles().len()==1,"a close takes one tile: {kept}");
         assert_eq!(out["session"]["drafts"][format!("@view:{tid}")],"board","the remaining tile is still on show");
     }
+    /// A stored layout of several tiles sends its watch set when its thread is SELECTED (the session last drew another thread, or none), once: not on the requests after.
+    #[test] fn selecting_a_thread_with_a_stored_layout_sends_its_set_once() {
+        use crate::present::layout;
+        let (st,p0,_)=fixture(true);
+        let tid=p0["target"]["id"].as_str().unwrap().to_string();
+        let tile=|id: &str,kind| layout::Tile { id: id.into(), kind, source: String::new(), explicit: false, version: None, unresolved_version: false, overlay: None };
+        let l=layout::add(&layout::Layout::single(tile("t1",layout::PageKind::Board)).unwrap(),Some("t1"),layout::Side::Right,tile("t2",layout::PageKind::Schematic),false,None).unwrap();
+        let mut drafts=json!({}); drafts[format!("@view:{tid}")]=json!("board"); drafts[format!("@view.layout:{tid}")]=json!(serde_json::to_string(&l).unwrap());
+        let req=|session: Value| { let mut q=p0.clone(); q["session"]=session; recent(&st,&q).unwrap() };
+        let sets=|o: &Value| o["cmds"].as_array().into_iter().flatten().filter(|c|c["text"].as_str().is_some_and(|x|x.contains("kicad.watch.set"))).count();
+        // a first request for the thread, or one after another thread was drawn: the set goes out
+        let first=req(json!({"rid":1,"open":{},"drafts":drafts,"panel":false,"info":{}}));
+        assert_eq!(sets(&first),1,"selection alone sends the set");
+        let mut away=drafts.clone(); away["@view.on"]=json!("another-thread");
+        assert_eq!(sets(&req(json!({"rid":1,"open":{},"drafts":away,"panel":false,"info":{}}))),1,"a return from another thread sends it again");
+        // the requests that follow, on the same thread, do not
+        let again=req(first["session"].clone());
+        assert_eq!(sets(&again),0,"no repeat while the thread stays");
+        // a thread with no stored layout sends none
+        assert_eq!(sets(&req(json!({"rid":1,"open":{},"drafts":{},"panel":false,"info":{}}))),0);
+    }
     /// A remembered layout returns by itself only to a client that says it can draw tiles, onto a session with nothing open, once.
     #[test] fn a_remembered_layout_returns_only_to_a_client_that_draws_tiles_with_nothing_open() {
         use crate::present::layout;
@@ -1629,7 +1658,8 @@ mod thread_binding_tests {
         let tid=p0["target"]["id"].as_str().unwrap().to_string();
         let root=st.projects[&st.threads[&tid].project].root.clone();
         let tile=|id: &str,kind,src: &str| layout::Tile { id: id.into(), kind, source: src.into(), explicit: false, version: None, unresolved_version: false, overlay: None };
-        let l=layout::add(&layout::Layout::single(tile("t1",layout::PageKind::Board,"")).unwrap(),Some("t1"),layout::Side::Right,tile("t2",layout::PageKind::Schematic,""),false,None).unwrap();
+        // pages with no project file to resolve (this fixture's folder is not on the disk)
+        let l=layout::add(&layout::Layout::single(tile("t1",layout::PageKind::Files,"")).unwrap(),Some("t1"),layout::Side::Right,tile("t2",layout::PageKind::Browser,""),false,None).unwrap();
         assert!(st.apply(&json!({"$":"SettingSet","key":crate::present::viewer::memory_key(&root),"value":serde_json::to_string(&l).unwrap(),"at":9})));
         let req=|tiles: Option<bool>,drafts: Value| { let mut q=p0.clone(); q["session"]=json!({"rid":1,"open":{},"drafts":drafts,"panel":false,"info":{}}); if let Some(t)=tiles { q["tiles"]=json!(t); } recent(&st,&q).unwrap() };
         let layout_of=|o: &Value| o["session"]["drafts"][format!("@view.layout:{tid}")].as_str().unwrap_or("").to_string();

@@ -104,7 +104,7 @@ fn own_file(kind: u32, root: &str) -> String { let f = project::read(root); if k
 /// `mech_warming`: the projects whose Mech parts are being meshed ahead (warm_mech)
 /// `waiting`: the clients whose view shows "no board/schematic yet", `wait_busy` while their projects are being looked at
 /// `warming`: each board's prewarm converting now, by its file: its stop, set when the board's 3D view starts its own parts (start_parts)
-struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, waiting: HashMap<u64, Wait>, wait_busy: bool, polling: bool, idle: Vec<String>, prewarmed: HashMap<String, String>, took: HashMap<String, u64>, mech_warming: std::collections::HashSet<String>, warming: HashMap<String, Arc<std::sync::atomic::AtomicBool>> }
+struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, sets: HashMap<u64, Option<String>>, waiting: HashMap<u64, Wait>, wait_busy: bool, polling: bool, idle: Vec<String>, prewarmed: HashMap<String, String>, took: HashMap<String, u64>, mech_warming: std::collections::HashSet<String>, warming: HashMap<String, Arc<std::sync::atomic::AtomicBool>> }
 
 /// The most distinct sources one client's `kicad.watch.set` holds.
 pub const MAX_WATCH_SOURCES: usize = 12;
@@ -124,10 +124,14 @@ impl Plots {
     /// Returns the keys of the plots this view shows, so a client can drop what arrives late for the view it left.
     pub fn watch(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, kind: Option<u32>, root: &str, path: &str, tree: &str, kept: (&str, u64), force: bool) -> Vec<String> {
         if !root.is_empty() { crate::present::viewer::refresh_gerber_sets_for_root(root); }
-        let Some(kind) = kind else { self.stop(client); return vec![] };
+        // A connection that holds a layout's set (`watch_set`) keeps it: a plain watch of this thread (the desktop's follow of a Mech key, a page's own) is
+        // folded in as one more member and never drops a sibling, a plain stop is ignored; only the presenter's own leave (`release_set`, before it) clears the set.
+        let fold = self.st.lock().unwrap().sets.contains_key(&client);
+        let Some(kind) = kind else { if !fold { self.stop(client); } return vec![] };
         let board = |k: u32| if path.is_empty() { own_file(k, root) } else { path.to_string() };
         let file = board(kind);
         if file.is_empty() { // Pv.watch.k none: nothing to show yet; the view waits for the project's file
+            if fold { return vec![key(kind, root, path)] }
             self.drop_subs(client);
             { let mut st = self.st.lock().unwrap();
               st.waiting.insert(client, Wait { kind, root: root.to_string(), tree: tree.to_string() });
@@ -148,11 +152,14 @@ impl Plots {
           let carry = if force { Default::default() } else { st.subs.get(&client).and_then(|v| v.iter().find(|s| s.key.starts_with("0|") || s.key.starts_with("1|"))).map(|s| (s.held.clone(), s.base.clone())).unwrap_or_default() };
           // a model this client was already sent for the same source stays sent: a second watch of it (the Mech page's own beside the
           // view's) does not send its frames again; a forced watch (Retry) drops held state and re-reads even with an unchanged stamp
-          let mut had: Vec<(String, Vec<u8>, usize)> = if force { st.subs.remove(&client); vec![] } else { st.subs.remove(&client).unwrap_or_default().into_iter().filter(|s| !s.mesh.is_empty()).map(|s| (s.key, s.mesh, s.parts_at)).collect() };
+          let mut had: Vec<(String, Vec<u8>, usize)> = if fold { vec![] } else if force { st.subs.remove(&client); vec![] } else { st.subs.remove(&client).unwrap_or_default().into_iter().filter(|s| !s.mesh.is_empty()).map(|s| (s.key, s.mesh, s.parts_at)).collect() };
           for (i, (k, ky, f)) in views.into_iter().enumerate() {
               let carries = !force && i == 0 && !solid_kind(k);
               let (mesh, parts_at) = had.iter().position(|h| h.0 == ky).map(|i| { let h = had.swap_remove(i); (h.1, h.2) }).unwrap_or_default();
-              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: if carries { carry.0.clone() } else { vec![] }, mesh, fresh: true, base: if carries { carry.1.clone() } else { String::new() }, kept: if !force && solid_kind(k) && (kept.0.is_empty() || kept.0 == ky) { kept.1 } else { 0 }, parts_at });
+              let held_already = fold && st.subs.get(&client).is_some_and(|v| v.iter().any(|s| s.key == ky));
+              let room = st.subs.get(&client).map_or(0, |v| v.len()) < MAX_WATCH_SOURCES;
+              if !held_already && (!fold || room) { st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: if carries { carry.0.clone() } else { vec![] }, mesh, fresh: true, base: if carries { carry.1.clone() } else { String::new() }, kept: if !force && solid_kind(k) && (kept.0.is_empty() || kept.0 == ky) { kept.1 } else { 0 }, parts_at }); }
+              else if !held_already { continue }
               let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, root: root.to_string(), file: f.clone(), ..Default::default() });
               s.root = root.to_string();
               s.file = f;
@@ -188,8 +195,19 @@ impl Plots {
         { let mut st = self.st.lock().unwrap();
           // a pane whose source stays (another sheet in the schematic pane: the board and the 3D stay) keeps what this client holds of it: nothing is sent again;
           // a forced watch (Retry) re-reads every source of the Split page even when its subscription exists and its stamp is unchanged
-          let mut old = st.subs.remove(&client).unwrap_or_default();
+          let fold = st.sets.contains_key(&client);
+          let mut old = if fold { vec![] } else { st.subs.remove(&client).unwrap_or_default() };
           for (k, ky, file) in views {
+              if fold {
+                  let held = st.subs.get(&client).is_some_and(|v| v.iter().any(|s| s.key == ky));
+                  if held && !force { continue }
+                  if !held && st.subs.get(&client).map_or(0, |v| v.len()) >= MAX_WATCH_SOURCES { continue }
+                  if held { /* a forced re-read of a member: its source is reset below */ } else { st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0, parts_at: 0 }); }
+                  let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, root: root.to_string(), file: file.clone(), ..Default::default() });
+                  s.root = root.to_string(); s.file = file;
+                  if force { s.plot = None; s.stamp = None; }
+                  todo.push(ky); continue
+              }
               if !force {
                   if let Some(i) = old.iter().position(|o| o.key == ky) { let o = old.swap_remove(i); st.subs.entry(client).or_default().push(o); continue }
               }
@@ -231,7 +249,7 @@ impl Plots {
         }
         if planned.len() > MAX_WATCH_SOURCES { return Err("too many sources in one layout") }
         if planned.is_empty() { self.drop_subs(client); return Ok(vec![]) }
-        self.st.lock().unwrap().waiting.remove(&client);
+        { let mut st = self.st.lock().unwrap(); st.waiting.remove(&client); st.sets.insert(client, crate::session::target_thread(client)); }
         let keys: Vec<String> = planned.iter().map(|p| p.1.clone()).collect();
         let mut todo = vec![];
         { let mut st = self.st.lock().unwrap();
@@ -257,13 +275,17 @@ impl Plots {
     /// The keys of the sources this client's watch set holds now (tests, and the hub's accounting).
     pub fn watched_keys(&self, client: u64) -> Vec<String> { self.st.lock().unwrap().subs.get(&client).map(|v| v.iter().map(|s| s.key.clone()).collect()).unwrap_or_default() }
     pub fn stop(&self, client: u64) { self.drop_subs(client) }
+    /// The thread a connection's installed set was made for (None: it holds no set).
+    pub fn set_thread(&self, client: u64) -> Option<Option<String>> { self.st.lock().unwrap().sets.get(&client).cloned() }
+    /// The connection lets its set go (the presenter's leave to one tile, or another thread's page): the next plain watch replaces what it holds as usual.
+    pub fn release_set(&self, client: u64) { self.st.lock().unwrap().sets.remove(&client); }
     /// A watch that starts afresh (`fresh`, the phones'): what this client was sent is not taken as held, so the next watch sends its model
     /// and parts again (`kept` still names a model it has). A phone drops the last view's model and parts when it switches views; the hub
     /// keeping them as sent left Split after 3D (and 3D after Split) on a bare board, or on "Loading 3D" until the board changed.
     /// The sources stay (no gc here): the watch that follows takes them up again.
-    pub fn forget(&self, client: u64) { self.st.lock().unwrap().subs.remove(&client); }
+    pub fn forget(&self, client: u64) { let mut st = self.st.lock().unwrap(); st.subs.remove(&client); st.sets.remove(&client); }
     fn drop_subs(&self, client: u64) {
-        let mut st = self.st.lock().unwrap(); st.subs.remove(&client); st.waiting.remove(&client); self.gc(&mut st);
+        let mut st = self.st.lock().unwrap(); st.subs.remove(&client); st.sets.remove(&client); st.waiting.remove(&client); self.gc(&mut st);
     }
     /// The views waiting for a project's first board or schematic: each whose file is there now is watched as if it had just been opened
     /// (same key, so the client's "none" gives way to the drawing). The folders are read on a blocking thread, one look at a time.
@@ -665,7 +687,7 @@ impl Plots {
             { let mut st = self.st.lock().unwrap();
               // clients that went away
               let gone: Vec<u64> = st.subs.keys().chain(st.waiting.keys()).copied().filter(|c| !hub.is_attached(*c)).collect();
-              for c in gone { st.subs.remove(&c); st.waiting.remove(&c); }
+              for c in gone { st.subs.remove(&c); st.sets.remove(&c); st.waiting.remove(&c); }
               self.gc(&mut st);
               if st.subs.is_empty() && st.waiting.is_empty() { st.polling = false; return }
               let watched: std::collections::HashSet<String> = st.subs.values().flatten().map(|s| s.key.clone()).collect();
@@ -821,6 +843,10 @@ impl RpcHandler for KicadRpc {
                     let board = s("board"); if !board.is_empty() && !((board.ends_with(".kicad_pcb") || is_altium_board(&board)) && !board.contains("..") && board.starts_with(&format!("{root}/"))) { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that board is not in this project"})] }
                     let force = p.get("force").and_then(Value::as_bool) == Some(true);
                     if p.get("fresh").and_then(Value::as_bool) == Some(true) { self.0.forget(who.client) }
+                    // a connection's set is let go by the presenter's leave to one tile, or when the connection shows another thread; any other plain watch is folded into it
+                    if let Some(set_for) = self.0.set_thread(who.client) {
+                        if p.get("leave").and_then(Value::as_bool) == Some(true) || set_for != crate::session::target_thread(who.client) { self.0.release_set(who.client) }
+                    }
                     let ticket = crate::session::begin_watch(who.client);
                     let keys = if kind == "split" { self.0.watch_split(hub, who.client, &root, &path, &s("tree"), &board, force) }
                     else { self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree"), kept_of(&k), force) };
@@ -1024,6 +1050,8 @@ mod tests {
         for e in &events { st.apply_line(&e.to_string()); }
         let _out = hub.attach(9);
         let who = Caller { gen: "1".into(), client: 9 };
+        crate::session::set_target_for_test(9, "ta");
+        std::fs::create_dir_all(proj.join("mech")).unwrap(); std::fs::write(proj.join("mech/case.step"), "ISO-10303-21;").unwrap();
         let (k0, k1, k2) = (key(0, &root, ""), key(1, &root, ""), key(2, &root, ""));
         let table = |plots: &Arc<Plots>| { let mut v = plots.watched_keys(9); v.sort(); v };
         let sorted = |mut v: Vec<String>| { v.sort(); v };
@@ -1052,6 +1080,19 @@ mod tests {
         assert_eq!(sent.len(), 1); assert_eq!(sent[0]["m"], "kicad.watch.set");
         assert!(sent[0]["p"]["sources"].as_array().unwrap().iter().all(|x| (x["force"] == true) == (x["tile"] == "t3")), "only the focused tile's sources are forced: {}", sent[0]);
         assert_eq!(table(&plots), sorted(vec![k0.clone(), k1.clone(), k2.clone()]), "Retry does not replace the set with one tile");
+        // a foreign plain watch (the desktop's follow of a Mech key) never drops a sibling: it is one more member; a stop of it is ignored
+        let mech = format!("{root}/mech/case.step");
+        let r = rpc.call(&hub, &who, &json!(60), "kicad.watch", &json!({"kind": "3d", "root": root, "path": mech})).await;
+        assert_eq!(r[0]["ok"], true, "{r:?}");
+        let mut with_mech = vec![k0.clone(), k1.clone(), k2.clone(), key(2, &root, &mech)]; with_mech.sort();
+        assert_eq!(table(&plots), with_mech, "the set stays and the Mech key joins it");
+        let r = rpc.call(&hub, &who, &json!(61), "kicad.watch", &json!({"kind": "board", "root": root, "path": ""})).await;
+        assert_eq!(r[0]["ok"], true); assert_eq!(table(&plots), with_mech, "a watch of a member leaves the others as they are");
+        let r = rpc.call(&hub, &who, &json!(62), "kicad.watch", &json!({"kind": ""})).await;
+        assert_eq!(r[0]["ok"], true); assert_eq!(table(&plots), with_mech, "a plain stop does not drop an installed set");
+        let vo = ok(viewer::layout_action(&st, "h", &a, Some(9), "en", "layout-focus", r#"{"tile":"t1"}"#).unwrap()); feed(&rpc, &hub, &who, &mut a, &vo).await;
+        assert_eq!(table(&plots), sorted(vec![k0.clone(), k1.clone(), k2.clone()]), "the presenter's next set is authoritative again");
+        let vo = ok(viewer::layout_action(&st, "h", &a, Some(9), "en", "layout-focus", r#"{"tile":"t3"}"#).unwrap()); feed(&rpc, &hub, &who, &mut a, &vo).await;
         // ... and with Files focused beside the Board
         let vo = ok(viewer::layout_action(&st, "h", &a, Some(9), "en", "layout-add", r#"{"kind":"files","side":"right"}"#).unwrap()); feed(&rpc, &hub, &who, &mut a, &vo).await;
         let vo = ok(viewer::view_action_for(&st, "h", &a, Some(9), "en", "retry", 9000).unwrap()); feed(&rpc, &hub, &who, &mut a, &vo).await;
@@ -1067,10 +1108,15 @@ mod tests {
         let vo = ok(viewer::layout_action(&st, "h", &a, Some(9), "en", "layout-add", r#"{"kind":"schematic","side":"right"}"#).unwrap()); feed(&rpc, &hub, &who, &mut a, &vo).await;
         assert_eq!(table(&plots), sorted(vec![k0.clone(), k1.clone()]));
         let mut b = json!({"sel":"tb","rid":1,"drafts":{},"panel":false,"info":{}});
+        crate::session::set_target_for_test(9, "tb");
         let vo = viewer::view_action(&st, "h", &b, "schematic").unwrap(); feed(&rpc, &hub, &who, &mut b, &vo).await;
         assert_eq!(table(&plots), vec![k1.clone()], "the other thread's single page replaced the set");
-        let vo = ok(viewer::layout_action(&st, "h", &a, Some(9), "en", "layout-focus", r#"{"tile":"t1"}"#).unwrap()); feed(&rpc, &hub, &who, &mut a, &vo).await;
-        assert_eq!(table(&plots), sorted(vec![k0.clone(), k1.clone()]), "back on the first thread the set is installed again");
+        // back on the first thread by SELECTION alone (no layout action): the request for the thread carries the set, and the table follows it
+        crate::session::set_target_for_test(9, "ta");
+        let (cmd, _) = viewer::selection_set(&st, "h", &a).expect("a thread with a stored layout sends its set when it is selected");
+        let vo = viewer::ViewOut { patch: json!({}), before: vec![cmd], boards_look: false };
+        feed(&rpc, &hub, &who, &mut a, &vo).await;
+        assert_eq!(table(&plots), sorted(vec![k0.clone(), k1.clone()]), "selection alone reinstalls the set");
         // (2) every tile keeps the complete list of the keys it draws from
         let two3d = json!({"root": root, "sources": [{"tile": "x1", "kind": "3d", "path": ""}, {"tile": "x2", "kind": "3d", "path": ""}, {"tile": "x3", "kind": "board", "path": ""}]});
         let r = rpc.call(&hub, &who, &json!(1), "kicad.watch.set", &two3d).await;
