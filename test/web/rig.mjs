@@ -203,7 +203,11 @@ async function main(binary, output) {
         try {
           await withBrowser(tls, async (context, origin) => {
             const probe = await context.newPage();
+            probe.on("requestfailed", r => console.error("probe", r.method(), new URL(r.url()).pathname, r.failure()?.errorText));
             assert.equal((await probe.goto(origin)).status(), 404);
+            const probeUrl = new URL('/__fixture_probe__', origin).href;
+            await probe.route(probeUrl, route => route.fulfill({contentType:'text/html', body:'<!doctype html>'}));
+            await probe.goto(probeUrl);
             await checkAccess(probe, false);
             await probe.close();
             await rpc('devices.page.act', { action: 'device-web-access', value: '1' });

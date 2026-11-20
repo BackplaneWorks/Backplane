@@ -67,9 +67,8 @@ export async function browserTasks({ context, origin, rpc, thread, canary, advan
   await testId('timeline').waitFor();
   await testId('timeline').getByText('Mask check: ' + '•'.repeat(canary.length), {exact:true}).waitFor({timeout:5000});
   const earliest = testId('timeline').getByText('History entry 0', {exact:true});
-  await testId('load-older-btn').waitFor();
   assert.equal(await earliest.count(), 0);
-  await testId('load-older-btn').click();
+  await testId('timeline').evaluate(el => { el.scrollTop = 0; });
   await earliest.waitFor();
   await testId('composer-input').fill('/');
   await testId('slash-menu').waitFor();
@@ -110,7 +109,9 @@ export async function browserTasks({ context, origin, rpc, thread, canary, advan
       if (view === '3d' || view === 'mech') await page.waitForFunction(() => window.fixtureDraws > 0, null, {timeout:20000});
       let colors = 0;
       do {
-        const png = await canvas.screenshot({timeout:4000});
+        const clip = await canvas.boundingBox();
+        assert.ok(clip, view + ' canvas lost its bounds');
+        const png = await page.screenshot({clip, timeout:15000});
         colors = Number(execFileSync('convert', ['png:-','-resize','240x160','-format','%k','info:'], {input:png}));
         if (colors > 8) break;
         await new Promise(resolve => setTimeout(resolve,100));
@@ -132,6 +133,7 @@ export async function browserTasks({ context, origin, rpc, thread, canary, advan
       await page.setViewportSize({width:1440,height:900});
       await testId('viewer-close-btn').click();
     }
+    if (nativeShot) await nativeShot('native-viewers');
   }
   const revocation = await deviceButton(rpc, name, 'device-revoke');
   const closed = socket.waitForEvent('close', { timeout: 1000 });
