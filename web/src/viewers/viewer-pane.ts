@@ -6,6 +6,7 @@
 import { onLocaleChange, t } from "../i18n";
 import type { ViewerHostApi } from "../app";
 import { decodeCbor, decodePlot2DFrame, isPlotFrame, type CborValue, type PlotChunk } from "./cbor";
+import { mountBrowserPane } from "./browser";
 import { mountDiffPane, mountFilesPane, mountReviewPane, type PaneHandle } from "./panes";
 import { Plot2DViewer, type LayerMasks } from "./plot2d";
 import { Solid3DViewer } from "./solid3d";
@@ -85,6 +86,7 @@ function pageLabel(page: string): string {
     case "files": return t("viewer.files", "Files");
     case "diff": return t("viewer.diff", "Diff");
     case "review": return t("viewer.review", "Review");
+    case "browser": return t("bots.tab.browser", "Browser");
     case "terminal": return t("viewer.terminal", "Terminal");
     default: return page ? page.charAt(0).toUpperCase() + page.slice(1) : "";
   }
