@@ -1,6 +1,6 @@
 //! One measured row for the drawing, change and file pages.
 use super::viewer;
-use crate::{i18n::trs, theme, ui::with_rect};
+use crate::{i18n::{t, trs}, theme, ui::with_rect};
 use crate::{Backplane, pane_tool::PaneTool};
 use gpui::{prelude::*, *};
 use serde_json::Value;
@@ -27,11 +27,11 @@ pub struct Identity {
 impl Identity {
     pub fn new(page: &str, facts: &Value) -> Self {
         let field = |v: &Value, k: &str| v[k].as_str().unwrap_or_default().to_owned();
-        let label = match page {
-            "board" => "Board", "schematic" => "Schematic", "gerbers" => "Gerbers",
-            "split" => "Split", "diff" => "Diff", "review" => "Review", "files" => "Files", _ => page,
+        let fallback_key = match page {
+            "board" => "viewer.board", "schematic" => "viewer.schematic", "gerbers" => "gpui.gerbers",
+            "split" => "gpui.split", "diff" => "viewer.diff", "review" => "viewer.review", "files" => "viewer.files", _ => page,
         };
-        let label = trs(facts["label"].as_str().unwrap_or(label));
+        let label = facts["label"].as_str().map(trs).unwrap_or_else(|| t(fallback_key));
         let source = if page == "split" {
             ["board", "schematic"].iter().find_map(|kind| facts["panes"].as_array()?.iter()
                 .find(|p| p["page"] == *kind && p["source"]["rel"].is_string()).map(|p| &p["source"]))
@@ -42,7 +42,7 @@ impl Identity {
         let scope = field(facts, "scope");
         let mut version = field(facts, "version");
         if rel.is_empty() && name.is_empty() {
-            if facts["missing"] == true { name = trs("Missing"); }
+            if facts["missing"] == true { name = t("history.source.unknown"); }
             else if !scope.is_empty() { name = trs(&scope); }
             else if let Some(crumb) = facts["trail"].as_array().and_then(|a| a.last()) {
                 name = trs(&field(crumb, "label"));
@@ -50,7 +50,7 @@ impl Identity {
         } else if !scope.is_empty() && version.is_empty() {
             version = scope.clone();
         }
-        let detail = facts["set"]["madeAt"].as_u64().map(|stamp| format!("madeAt {stamp}")).unwrap_or_default();
+        let detail = facts["set"]["madeAt"].as_i64().and_then(|stamp| time::OffsetDateTime::from_unix_timestamp(stamp).ok()).map(|stamp| stamp.date().to_string()).unwrap_or_default();
         Self { page: page.into(), label, rel, name, version, detail }
     }
 
@@ -176,7 +176,7 @@ fn face(light: bool, tool: &Tool, entity: &WeakEntity<Backplane>, press: &Press,
             .cursor_pointer().tooltip(crate::keys::tip(&trs("Bring it into view"), "", light)).child(tool.label.clone())
             .on_click(listener(entity, press)))
             .child(div().id("split-probe-clear").flex_none().p(px(2.)).cursor_pointer()
-                .tooltip(crate::keys::tip(&trs("Clear"), "Esc", light)).child(crate::art::icon("x", 12., c("dim")))
+                .tooltip(crate::keys::tip(&trs("Clear"), &t("native.key.esc"), light)).child(crate::art::icon("x", 12., c("dim")))
                 .on_click(listener(entity, &Press::ClearProbe)))
     } else if let Press::Boards { folder } = press {
         d.when(!menu, |d| d.w(px(260.))).cursor_pointer().hover(|s| s.bg(c("panel")))
@@ -190,8 +190,8 @@ fn face(light: bool, tool: &Tool, entity: &WeakEntity<Backplane>, press: &Press,
     };
     match press {
         Press::Hub(action, _) if action == "view" && tool.id == "gerbers-vs-board" =>
-            with_rect(d, || "ui:vs board".into()).into_any_element(),
-        Press::GerbView(_) => with_rect(d, || "ui:Open in GerbView".into()).into_any_element(),
+            with_rect(d, || "ui:vs board".into()).into_any_element(), // i18n-ok: physical probe ID
+        Press::GerbView(_) => with_rect(d, || "ui:Open in GerbView".into()).into_any_element(), // i18n-ok: physical probe ID
         _ => d.into_any_element(),
     }
 }
@@ -314,7 +314,7 @@ mod tests {
         }
         let id = Identity::new("gerbers", &json!({"source":{"rel":"mfg/gerbers","name":"gerbers"}, "set":{"madeAt":123}}));
         assert_eq!(id.text(&id.rel), "Gerbers · mfg/gerbers");
-        assert!(id.detail.contains("123"));
+        assert_eq!(id.detail, "1970-01-01");
     }
     #[test]
     fn split_names_the_available_design() {
