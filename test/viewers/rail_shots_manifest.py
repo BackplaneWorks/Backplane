@@ -81,13 +81,6 @@ B1_EMBED_ENTRIES = [
 
 B1_OMITTED_ENTRIES = ["simulation"]
 
-AUTO_ATTACH_GATES = [
-    "auto-attach/keyboard",
-    "auto-attach/cold-open",
-    "auto-attach/one-attach-per-visit",
-    "auto-attach/warm-return",
-]
-
 # Extra check shots for partial-design kinds (missing document + edit from no-editor pages).
 EXTRA_MISSING_SHOTS = {
     "schematic-only": ["extra-missing-board", "extra-missing-3d"],

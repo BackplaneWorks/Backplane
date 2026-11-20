@@ -113,17 +113,34 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
                 {"mark": f"settled:task3-from-{src_slug}"},
                 {"shot": f"task3-from-{src_slug}", "settle": "schematic", "timeout_ms": settle_timeout_ms},
             ])
-        # Clear the Task 5 R1 probe WHILE Schematic is still open (presenter available; view-probe after close returns PRESENTER_UNAVAILABLE).
-        steps.extend([
-            {"action": ["view-probe", ""]},
-            {"wait": 120},
-        ])
         # Task 10: close the viewer from an open page (Schematic -> press rail:Schematic) and verify idle width
+        # (Task 5's R1 probe is still active in pv.lit when Schematic closes.)
         steps.extend([
             {"mark": "press:task10-closed"},
             {"press": "rail:Schematic"},
             {"mark": "settled:task10-closed"},
             {"shot": "task10-closed", "settle": "", "timeout_ms": settle_timeout_ms},
+            # Extra check (D): swallowed-Escape regression check — with R1 highlighted and viewer closed,
+            # focus composer, send ONE Escape, then bare rail key 'b' and record whether Board opens.
+            {"keys": "ctrl-l"},
+            {"wait": 60},
+            {"mark": "extra:escape-after-closed-probe"},
+            {"keys": "escape"},
+            {"wait": 60},
+            {"keys": "b"},
+            {"wait_settled": "board", "tag": "extra-escape-after-closed-probe", "timeout_ms": min(settle_timeout_ms, 2500)},
+            # Now deterministically clear the Task 5 R1 probe while Schematic is open (works whether Board opened or stayed closed)
+            # and return to idle before B1 probes.
+            {"press": "rail:Schematic"},
+            {"wait_settled": "schematic", "tag": "b1-probe-clear-open", "timeout_ms": min(settle_timeout_ms, 4000)},
+            {"action": ["view-probe", ""]},
+            {"wait": 120},
+            {"press": "rail:Schematic"},
+            {"wait_settled": "", "tag": "b1-probe-clear-close", "timeout_ms": min(settle_timeout_ms, 3000)},
+            {"keys": "ctrl-l"},
+            {"wait": 60},
+            {"keys": "escape"},
+            {"wait": 60},
             {"keys": "escape"},
             {"wait": 60},
         ])
@@ -302,36 +319,6 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
             {"kicad": {"report": True, "tag": "task7-sim-run"}},
             {"mark": "settled:task7-sim-run"},
             {"shot": "task7-sim-run"},
-            # Auto-attach default-embed gates (unavailable until client acts on hub viewer.mode):
-            # (a) keyboard stays in composer across Board auto-attach, (b) cold-open timing,
-            # (c) one attach per visit (runtime.generation stable), (d) warm return within 0.5 s with no Edit press.
-            {"mark": "auto-attach:reset"},
-            {"click": "ui:View"},
-            {"wait": 300},
-            {"keys": "ctrl-l"},
-            {"wait": 80},
-            {"keys": "escape"},
-            {"wait": 120},
-            {"wait_settled": "", "tag": "auto-attach-idle", "timeout_ms": 2000},
-            {"keys": "ctrl-l"},
-            {"wait": 80},
-            {"mark": "auto-attach:cold-open-start"},
-            {"press": "rail:Board"},
-            {"keys": "b p - a u t o - k e y s"},
-            {"wait": 400},
-            {"read": "composer"},
-            {"kicad": {"report": True, "tag": "auto-attach-cold"}},
-            {"mark": "auto-attach:cold-open-end"},
-            {"wait": 600},
-            {"kicad": {"report": True, "tag": "auto-attach-visit2"}},
-            {"mark": "auto-attach:visit2-end"},
-            {"press": "rail:Files"},
-            {"wait_settled": "files", "tag": "auto-attach-away", "timeout_ms": 2500},
-            {"mark": "auto-attach:warm-return-start"},
-            {"press": "rail:Board"},
-            {"wait": 500},
-            {"kicad": {"report": True, "tag": "auto-attach-warm-return"}},
-            {"mark": "auto-attach:warm-return-end"},
         ])
 
     elif kind in M.EXTRA_MISSING_SHOTS:
