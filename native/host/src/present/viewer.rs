@@ -1619,22 +1619,6 @@ mod tests {
         let v_nvs = viewer_json(&st, &json!({}), &sn).unwrap();
         assert_eq!((v_nvs["gerbers"].as_bool(), v_nvs["gerbersVsBoard"].as_bool(), v_nvs["key"].as_str()), (Some(true), Some(true), Some("")));
         assert_eq!(v_nvs["empty"].as_str(), Some("No board to compare these Gerbers against."));
-        // 6. Project directory containing '|' feeds the presenter's actual watch request through plotread::read_in with full root
-        let piped = d.join("proj|pipe");
-        std::fs::create_dir_all(piped.join("mfg")).unwrap();
-        std::fs::write(piped.join("mfg/p-F_Cu.gbr"), "%FSLAX46Y46*%\n%MOMM*%\n%ADD10C,0.25*%\nD10*\nX0Y0D03*\nM02*\n").unwrap();
-        std::fs::write(piped.join("p.kicad_pro"), "{}").unwrap();
-        std::fs::write(piped.join("p.kicad_pcb"), "(kicad_pcb)").unwrap();
-        if let Some(p) = st.projects.get_mut(&proj) { p.root = piped.to_string_lossy().into_owned(); }
-        let mut sp = sess(th, json!({}));
-        let o_pg = view_action(&st, "h", &sp, "gerbers").unwrap(); crate::session::patch::merge(&mut sp, &o_pg.patch);
-        let o_pvs = view_action(&st, "h", &sp, "gerbers\tboard").unwrap();
-        assert_eq!(o_pvs.before.len(), 1, "presenter emits watch for in-root gerbers vs board");
-        let wp = sent(&o_pvs.before[0]);
-        let wkind = crate::files::kicad::watch::kind_of(wp["kind"].as_str().unwrap()).unwrap();
-        let wroot = std::path::Path::new(wp["root"].as_str().unwrap());
-        let wpath = wp["path"].as_str().unwrap();
-        assert!(matches!(crate::files::kicad::plotread::read_in(wkind, wpath, Some(wroot)), crate::files::kicad::plotgen::Read::Plot(_, _)), "presenter watch request with '|' in root must read cleanly");
         let _ = std::fs::remove_dir_all(&d);
     }
 }

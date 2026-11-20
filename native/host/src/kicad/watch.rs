@@ -982,4 +982,39 @@ mod tests {
         assert_eq!(kind_of("3d-full"), Some(4)); assert_eq!(kind_of(""), None); assert_eq!(kind_of("split:sb3"), None);
         assert!(is_version("git\tx") && is_version("diff\na") && !is_version("/p/b.kicad_pcb"));
     }
+    #[tokio::test] async fn presenter_gerber_watch_with_pipe_in_root_preserves_root_through_reader() {
+        let d = crate::plat::tmp::dir("gerb-pipe-watch");
+        let piped = d.join("proj|pipe");
+        std::fs::create_dir_all(piped.join("mfg")).unwrap();
+        std::fs::write(piped.join("mfg/p-F_Cu.gbr"), "%FSLAX46Y46*%\n%MOMM*%\n%ADD10C,0.25*%\nD10*\nX0Y0D03*\nM02*\n").unwrap();
+        std::fs::write(piped.join("p.kicad_pro"), "{}").unwrap();
+        std::fs::write(piped.join("p.kicad_pcb"), "(kicad_pcb)").unwrap();
+        let mut st = crate::state::State::new();
+        for l in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(l); }
+        let th = "t1700000003-8";
+        let proj = st.threads.get(th).map(|t| t.project.clone()).unwrap();
+        if let Some(p) = st.projects.get_mut(&proj) { p.root = piped.to_string_lossy().into_owned(); }
+        let mut s = json!({"selected": th, "drafts": {}, "rid": 0});
+        let o_g = crate::present::viewer::view_action(&st, "h", &s, "gerbers").unwrap();
+        crate::session::patch::merge(&mut s, &o_g.patch);
+        let o_vs = crate::present::viewer::view_action(&st, "h", &s, "gerbers\tboard").unwrap();
+        assert_eq!(o_vs.before.len(), 1, "presenter emits kicad.watch for in-root gerbers vs board");
+        let wp: Value = serde_json::from_str(o_vs.before[0]["p"].as_str().unwrap()).unwrap();
+        let wkind = kind_of(wp["kind"].as_str().unwrap()).unwrap();
+        let wroot = wp["root"].as_str().unwrap();
+        let wpath = wp["path"].as_str().unwrap();
+        assert_eq!(wroot, piped.to_string_lossy());
+        // Feed the presenter's actual watch request into Plots::watch and verify Src.root is preserved intact (not split on '|')
+        let home = crate::plat::tmp::dir("gerb-pipe-home");
+        let hub = Hub::test(&home);
+        let plots = Plots::new(&home);
+        let keys = plots.watch(&hub, 1, Some(wkind), wroot, wpath, "", ("", 0), false);
+        assert_eq!(keys.len(), 1);
+        let stored_root = plots.st.lock().unwrap().srcs.get(&keys[0]).map(|src| src.root.clone()).unwrap_or_default();
+        assert_eq!(stored_root, wroot, "Src.root must keep full path even when project directory contains '|'");
+        assert!(matches!(plotread::read_in(wkind, wpath, Some(std::path::Path::new(&stored_root))), plotgen::Read::Plot(_, _)), "reader succeeds with full carried root");
+        plots.stop(1);
+        let _ = std::fs::remove_dir_all(&home);
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }
