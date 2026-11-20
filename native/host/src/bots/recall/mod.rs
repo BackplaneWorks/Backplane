@@ -15,6 +15,7 @@
 //! first (a recent long message first), and until then the view shows each message cut to a line.
 pub mod tree;
 pub mod kept;
+pub mod progress;
 pub use kept::Kept;
 
 use crate::{agents::{mcp::ToolSet, Agents}, api::Fut, hub::Hub, store::Store};
@@ -105,6 +106,8 @@ pub struct Recall {
     /// nodes a call is writing, the calls a node went unanswered, a thread held after a call failed (until, wait)
     busy: StdMutex<HashSet<(String, Part)>>, tries: StdMutex<HashMap<(String, Part), u32>>, hold: StdMutex<HashMap<String, (u64, u64)>>,
     kick: tokio::sync::Notify,
+    /// what a thread's progress was last measured from (messages, lines written, the kept view's lines, held until): a round measures it again only when one moved
+    measured: StdMutex<HashMap<String, (usize, usize, usize, Option<u64>)>>,
 }
 
 /// Reads a tree's lines and messages from the log for one view, zoom or batch (no lock held, nothing awaited).
@@ -168,7 +171,7 @@ pub fn clean(line: &str) -> String {
 
 impl Recall {
     pub fn new(bots: &Arc<Bots>, writer: Arc<dyn Writer>) -> Arc<Recall> {
-        let r = Arc::new(Recall { hub: bots.hub.clone(), bots: Arc::downgrade(bots), writer, msgs: Default::default(), busy: Default::default(), tries: Default::default(), hold: Default::default(), kick: Default::default() });
+        let r = Arc::new(Recall { hub: bots.hub.clone(), bots: Arc::downgrade(bots), writer, msgs: Default::default(), busy: Default::default(), tries: Default::default(), hold: Default::default(), kick: Default::default(), measured: Default::default() });
         let _ = bots.recall.set(r.clone()); r
     }
     /// Whether the thread runs with infinite context, as last folded.
@@ -229,12 +232,46 @@ impl Recall {
         (leaves.len(), kept.written(), left)
     }
 
+    /// How far the thread's tree is written (progress.rs), read from the log off the runtime's workers.
+    pub async fn measure(&self, th: &str) -> progress::Progress {
+        let leaves = self.leaves(th).await; let kept = self.kept(th).await;
+        let retry = self.hold.lock().unwrap().get(th).map(|(u, _)| *u).filter(|u| *u > now_s());
+        let store = self.hub.store.clone();
+        tokio::task::spawn_blocking(move || measure_of(&store, &kept, &leaves, retry)).await.unwrap_or_default()
+    }
+    /// Measures the thread again (unless `force` is false and nothing it is measured from moved) and keeps its words for every client
+    /// (progress.rs); when they changed, the phones and the web hear the thread again (data/1 `thread`) and the desktop's views are drawn
+    /// again. Answers the words.
+    pub async fn publish(&self, th: &str, force: bool) -> Value {
+        let leaves = self.leaves(th).await.len(); let kept = self.kept(th).await;
+        let retry = self.hold.lock().unwrap().get(th).map(|(u, _)| *u).filter(|u| *u > now_s());
+        let sig = (leaves, kept.written(), kept.parts.len(), retry);
+        let home = self.hub.cfg.home.clone();
+        if !force && self.measured.lock().unwrap().get(th) == Some(&sig) { if let Some(v) = progress::shown(&home, th) { return v } }
+        let p = self.measure(th).await;
+        let zone = match self.bots.upgrade() { Some(b) => { let w = b.world().await; let z = super::clock::Zones { settings: &w.settings }; z.rule(&z.person()) } None => None }.unwrap_or_else(super::clock::TzRule::utc0);
+        let v = progress::json(&p, &|t| { let w = zone.wall(t); format!("{:02}:{:02}", w % 86400 / 3600, w % 3600 / 60) });
+        self.measured.lock().unwrap().insert(th.to_string(), sig);
+        if progress::keep(&home, th, v.clone()) { let _ = self.hub.frames.send(json!({"t":"memory","thread":th})); self.hub.bump_views(); }
+        v
+    }
+    /// Forgets the words of threads that no longer have infinite context, and tells the clients.
+    fn unpublish(&self, on: &HashSet<String>) {
+        let gone = progress::retain(&self.hub.cfg.home, &|t| on.contains(t));
+        { let mut m = self.measured.lock().unwrap(); m.retain(|t, _| on.contains(t)); }
+        for t in &gone { let _ = self.hub.frames.send(json!({"t":"memory","thread":t})); }
+        if !gone.is_empty() { self.hub.bump_views(); }
+    }
+
     /// The compactor's loop: a round every 20 s, or when kicked. Nothing runs on a copy of a log or in safe mode.
     pub fn start(self: &Arc<Self>) {
         if crate::copy::on() || crate::guard::safe() { return }
         let me = Arc::downgrade(self);
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(30)).await; // the hub's start first
+            // the hub's start first; the progress every client shows a few seconds in, before the first round
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            if let Some(r) = me.upgrade() { let ths: Vec<String> = match r.bots.upgrade() { Some(b) => { let _ = b.world().await; b.recall_on.read().unwrap().iter().cloned().collect() } None => return }; for th in &ths { r.publish(th, false).await; } }
+            tokio::time::sleep(Duration::from_secs(25)).await;
             loop {
                 let Some(r) = me.upgrade() else { return };
                 r.round().await;
@@ -250,6 +287,8 @@ impl Recall {
         let jobs = self.hub.setting("recall.jobs").await.and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or(2).clamp(1, 8);
         let mut ths: Vec<String> = match self.bots.upgrade() { Some(b) => { let _ = b.world().await; b.recall_on.read().unwrap().iter().cloned().collect() } None => return 0 };
         ths.sort();
+        self.unpublish(&ths.iter().cloned().collect());
+        for th in &ths { self.publish(th, false).await; }
         let (mut set, mut written) = (tokio::task::JoinSet::new(), 0usize);
         loop {
             loop {
@@ -312,8 +351,21 @@ impl Recall {
         if n > 0 { if let Err(e) = self.hub.commit_many(&[json!({"$":"RecallNoted","thread":th,"nodes":nodes,"at":now_s()})]).await { eprintln!("recall: {th}: lines not kept: {e:#}") } }
         if let Some(b) = self.bots.upgrade() { let _ = b.world().await; } // the lines folded before the nodes are let go, so the next batch sees them written
         { let mut b = self.busy.lock().unwrap(); for (p, _) in &batch { b.remove(&(th.to_string(), *p)); } }
+        self.publish(th, false).await;
         n
     }
+}
+
+/// A thread's progress from its messages, its tree as kept and its hold (progress.rs): the lines there and to write, the messages
+/// whose own line is not written, and the view's bytes as the next turn would read it (a batch merge it would make included).
+fn measure_of(store: &Store, kept: &Kept, leaves: &[Leaf], retry: Option<u64>) -> progress::Progress {
+    let r = Reader::new(store, kept, leaves); let count = leaves.len() as u64;
+    let (mut done, mut behind) = (0u64, 0u64);
+    for l in 0..=40u32 { let n = count >> l; if n == 0 { break } for i in 0..n { if r.built((l, i)) { done += 1 } else if l == 0 { behind += 1 } } }
+    let left = tree::todo(count, &|p| r.built(p)).len() as u64;
+    let mut to = leaves.len(); while to > 0 && matches!(leaves[to - 1].who, 0 | 3) { to -= 1 }
+    let view = if to == 0 { 0 } else { let (parts, _) = tree::fit(&kept.parts, to as u64, &|p| r.size(p), &|p| r.built(p), HIGH); parts.iter().map(|p| r.size(*p) as u64).sum() };
+    progress::Progress { messages: count, done, total: progress::lines(count), left, behind, view, retry }
 }
 
 /// The agents' seam (agents/recall.rs).

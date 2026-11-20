@@ -54,7 +54,7 @@ fn design_desktop(local: bool, client: &Value, id: u64) -> Option<u64> {
     (local && client["kind"] == "desktop").then_some(id)
 }
 
-fn strip_hub_owned(params: &mut Value) { if let Some(o) = params.as_object_mut() { for k in ["designDesktop", "window", "page", "reads", "local", "wants", "botPage", "roomPage", "subLog", "subView", "liveText", "incoming"] { o.remove(k); } } }
+fn strip_hub_owned(params: &mut Value) { if let Some(o) = params.as_object_mut() { for k in ["designDesktop", "window", "page", "reads", "local", "wants", "botPage", "roomPage", "subLog", "subView", "liveText", "incoming", "memory"] { o.remove(k); } } }
 
 /// PRESENTER_UNAVAILABLE is retryable on the wire: a target the Rust presenter has not ported (the helper is not running) or a helper that is restarting answers "not yet", never "no"
 /// (Hub::error has retryable:false for every code).
@@ -153,6 +153,8 @@ impl Hub {
         // and a swarm's page the thread its viewer is drawn for (present::swarmform::viewer_thread): drawn under the page, the viewer beside it
         let shown: Option<String> = match p["target"]["kind"].as_str() { Some("thread") => p["target"]["id"].as_str().map(str::to_string), Some("bot") => bot.as_ref().map(|(_, t)| t.clone()),
             Some("room") => Some(crate::present::swarmform::viewer_thread(&params["roomPage"])).filter(|t| !t.is_empty()), _ => None };
+        // infinite context (bots/recall/progress.rs): how far the shown thread's memory is written, for its context chip
+        if let (Some(th), Some(o)) = (shown.as_deref(), params.as_object_mut()) { if let Some(m) = crate::bots::recall::progress::shown(&self.cfg.home, th) { o.insert("memory".into(), m); } }
         let (window, page) = match self.window_for(&p, before, shown.as_deref()).await { Some((w, pg)) => (Some(w), Some(pg)), None => (None, None) };
         if let (Some(w), Some(o)) = (&window, params.as_object_mut()) { o.insert("window".into(), w.clone()); }
         if let (Some(pg), Some(_)) = (&page, params.as_object_mut()) {

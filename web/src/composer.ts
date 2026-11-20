@@ -29,6 +29,9 @@ export class ComposerView {
   private popupEl: HTMLElement;
   private textarea: HTMLTextAreaElement;
   private modelChipEl: HTMLElement;
+  private memoryEl: HTMLElement;
+  private memoryFill: HTMLElement;
+  private memoryText: HTMLElement;
   private sendBtn: HTMLButtonElement;
   private stopBtn: HTMLButtonElement;
   private errorEl: HTMLElement;
@@ -72,6 +75,18 @@ export class ComposerView {
     this.modelChipEl.className = "bp-composer-model";
     this.modelChipEl.textContent = "default";
 
+    // infinite context: the memory's bar and the hub's words (bots/recall/progress.rs), shown only for a thread that has it
+    this.memoryEl = document.createElement("div");
+    this.memoryEl.className = "bp-composer-memory bp-hidden";
+    this.memoryEl.setAttribute("data-testid", "composer-memory");
+    const meter = document.createElement("div");
+    meter.className = "bp-memory-meter";
+    this.memoryFill = document.createElement("div");
+    this.memoryFill.className = "bp-memory-fill";
+    meter.appendChild(this.memoryFill);
+    this.memoryText = document.createElement("span");
+    this.memoryEl.append(meter, this.memoryText);
+
     const btns = document.createElement("div");
     btns.className = "bp-composer-btns";
 
@@ -90,7 +105,7 @@ export class ComposerView {
     this.sendBtn.addEventListener("click", () => this.submit());
 
     btns.append(this.stopBtn, this.sendBtn);
-    bar.append(this.modelChipEl, btns);
+    bar.append(this.modelChipEl, this.memoryEl, btns);
     inner.append(this.popupEl, this.errorEl, this.textarea, bar);
     wrap.appendChild(inner);
     container.appendChild(wrap);
@@ -140,6 +155,18 @@ export class ComposerView {
 
   public setModelChip(chip: string): void {
     this.modelChipEl.textContent = chip || "default";
+  }
+
+  /** The thread's memory progress as the hub words it (`thread.memory`), or null for a thread without infinite context. */
+  public setMemory(m: MemoryProgress | null | undefined): void {
+    this.memoryEl.classList.toggle("bp-hidden", !m);
+    if (!m) return;
+    const total = m.total ?? 0;
+    const fill = total > 0 ? Math.min(1, (m.done ?? 0) / total) : 1;
+    this.memoryFill.style.width = `${Math.round(fill * 100)}%`;
+    this.memoryFill.dataset.state = m.state ?? "";
+    this.memoryText.textContent = m.line ?? "";
+    this.memoryEl.title = [m.status, m.lines, m.viewLine].filter(Boolean).join("\n");
   }
 
   public setState(enabled: boolean, running: boolean): void {
@@ -324,4 +351,16 @@ export class ComposerView {
     this.autoGrow();
     this.cb.onSend(text);
   }
+}
+
+/** A thread's memory progress (data/1 `thread.memory`, the hub's bots/recall/progress.rs). Every word is the hub's. */
+export interface MemoryProgress {
+  pct?: number;
+  done?: number;
+  total?: number;
+  state?: string; // caught | behind | held
+  status?: string;
+  line?: string;
+  lines?: string;
+  viewLine?: string;
 }

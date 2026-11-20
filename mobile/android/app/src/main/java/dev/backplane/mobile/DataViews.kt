@@ -705,6 +705,7 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
             }
             if (dictate) VoiceStrip(id)
             DField(field, { DataClient.setField(id, it) }, Msg.android_composer_hint, Modifier.testTag("thread.composer"), 6, dcs.primary)
+            thread?.memory?.let { MemoryBar(it) }
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (thread != null && (DataClient.has("picker") || thread.chip.isNotEmpty())) ModelChip(thread.chip.ifEmpty { "${thread.provider} / ${thread.model.ifEmpty { Msg.common_default }}" }, "thread.model", Modifier.weight(1f)) { models = true } else Spacer(Modifier.weight(1f))
                 Box(Modifier.size(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { if (DataClient.canSendImages) attachMenu = true else notice = Msg.android_pictures_old }.testTag("thread.attach"), contentAlignment = Alignment.Center) {
@@ -1247,3 +1248,13 @@ private fun OrderCard(o: DataClient.Order) {
 
 /** A row's kind, with the linked machine it is on when it is another machine's (the hub's `mark.short`) */
 fun onMachine(kind: String, mark: String): String = if (mark.isEmpty()) kind else "$kind · $mark"
+
+/** Infinite context: the thread's memory bar over the composer's chips, in the hub's words (`thread.memory`). */
+@Composable fun MemoryBar(m: DMemory) {
+    val tone = when (m.state) { "held" -> dwarn; "caught" -> dok; else -> dcs.primary }
+    Row(Modifier.fillMaxWidth().testTag("thread.memory"), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(48.dp).height(4.dp).background(dcs.outlineVariant)) { Box(Modifier.fillMaxHeight().fillMaxWidth(m.fill).background(tone)) }
+        DMono(Tr.t(m.line), dcs.onSurfaceVariant, 11, Modifier.weight(1f, fill = false))
+        DMono(Tr.t(m.status), if (m.state == "held") dwarn else dfaint, 11)
+    }
+}

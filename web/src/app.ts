@@ -373,8 +373,10 @@ function mountApp(): void {
       pinLbl.textContent = th.pinned ? t("menu.unpin", "Unpin") : t("menu.pin", "Pin");
       settleLbl.textContent = th.settled ? t("phone.unsettle", "Unsettle") : t("menu.settle", "Settle");
       composer.setModelChip(th.chip || th.model || "default");
+      composer.setMemory(th.memory);
     } else {
       composer.setModelChip("default");
+      composer.setMemory(null);
     }
   }
 

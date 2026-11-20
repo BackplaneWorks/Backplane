@@ -31,6 +31,15 @@ pub fn split(bar_w: f32, combo: &Value, tok: &str, ctx: &str) -> (f32, String) {
     (bar_w - fixed() - words(text), text.to_string())
 }
 
+/// The context chip's memory bar (infinite context): its width and gap, taken from the row before it is split.
+pub const MEM_BAR: f32 = 34.;
+/// The bar: the memory's lines written of the tree's, in the hub's tone (warn while held, ok caught up).
+pub fn mem_bar(light: bool, m: &Value) -> AnyElement {
+    let c = |n: &str| crate::theme::color(light, n);
+    let tone = match m["state"].as_str() { Some("held") => "warn", Some("caught") => "ok", _ => "accent" };
+    let f = super::bots::fill(&m["done"], &m["total"]);
+    div().id("mem-bar").w(px(MEM_BAR - 6.)).h(px(4.)).flex_shrink_0().bg(c("line")).child(div().h_full().w(px(super::halt::meter_w(MEM_BAR - 6., f))).bg(c(tone))).into_any_element()
+}
 /// Chip.words: the longest of the hub's three forms (full, mid, short) that fits `avail` px; the full one while the width is not known yet (0).
 pub fn words(combo: &Value, avail: f32) -> String {
     let forms: Vec<String> = ["full", "mid", "short"].iter().map(|k| string(combo, k)).filter(|s| !s.is_empty()).collect();

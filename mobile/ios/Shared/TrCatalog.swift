@@ -2117,6 +2117,15 @@ gpui.bots.recall.on	On	オン	Activado
 gpui.bots.recall.off	Off	オフ	Desactivado
 gpui.bots.recall.stats	{messages} messages · {lines} lines written · {left} to write	メッセージ {messages}件 · 要約 {lines}行 · 残り {left}	{messages} mensajes · {lines} líneas escritas · {left} por escribir
 gpui.bots.recall.note	Each turn starts fresh with the whole conversation as a tree of one-line summaries, recent messages in full and older ones merged; the bot zooms into any line, down to the original message. A cheaper model writes the summaries in the background.	各ターンは新しいセッションで始まり、会話全体を一行要約の木として受け取ります。最近のメッセージはそのまま、古いものはまとめて。ボットはどの行も元のメッセージまでズームできます。要約はより安価なモデルがバックグラウンドで書きます。	Cada turno empieza limpio con toda la conversación como un árbol de resúmenes de una línea, los mensajes recientes completos y los antiguos fusionados; el bot amplía cualquier línea hasta el mensaje original. Un modelo más barato escribe los resúmenes en segundo plano.
+gpui.bots.recall.mem.line	memory: {pct}% written · view {view}/{max} KB	メモリー: {pct}% 要約済み · ビュー {view}/{max} KB	memoria: {pct}% escrita · vista {view}/{max} KB
+gpui.bots.recall.mem.short	memory {pct}%	メモリー {pct}%	memoria {pct}%
+gpui.bots.recall.mem.lines	{done} of {total} lines written	{total}行中 {done}行 要約済み	{done} de {total} líneas escritas
+gpui.bots.recall.mem.caught	caught up	最新まで要約済み	al día
+gpui.bots.recall.mem.behind	{n, plural, one {# message behind} other {# messages behind}}	{n, plural, other {#件のメッセージが未要約}}	{n, plural, one {# mensaje pendiente} other {# mensajes pendientes}}
+gpui.bots.recall.mem.merge	{n, plural, one {# line to merge} other {# lines to merge}}	{n, plural, other {統合待ち #行}}	{n, plural, one {# línea por fusionar} other {# líneas por fusionar}}
+gpui.bots.recall.mem.held	held: retry at {time}	保留中: {time} に再試行	en espera: reintento a las {time}
+gpui.bots.recall.mem.size	view {view} KB of {max} KB	ビュー {view} KB / {max} KB	vista {view} KB de {max} KB
+gpui.bots.recall.mem.cut	view {view} KB of {max} KB: the oldest lines are left out until the compactor merges them	ビュー {view} KB / {max} KB: 要約が統合されるまで最も古い行は省かれます	vista {view} KB de {max} KB: las líneas más antiguas se omiten hasta que el compactador las fusione
 gpui.bots.newer	Newer	新しい方	Más recientes
 gpui.bots.mem.older	Older ({more} more)	古い方（あと{more}件）	Anteriores ({more} más)
 gpui.bots.when.hint	When: every 15m, daily 09:30, weekdays 08:00, or a one-time time	いつ：every 15m、daily 09:30、weekdays 08:00、または一度きりの日時	Cuándo: every 15m, daily 09:30, weekdays 08:00, o una hora única
@@ -5426,6 +5435,30 @@ viewer.diff.threadchanges	Thread changes	スレッドの変更	Cambios del hilo
 
     /// gpui.bots.recall.stats = {messages} messages · {lines} lines written · {left} to write
     static func gpui_bots_recall_stats(messages: String, lines: String, left: String) -> String { f("gpui.bots.recall.stats", ["messages": messages, "lines": lines, "left": left]) }
+
+    /// gpui.bots.recall.mem.line = memory: {pct}% written · view {view}/{max} KB
+    static func gpui_bots_recall_mem_line(pct: String, view: String, max: String) -> String { f("gpui.bots.recall.mem.line", ["pct": pct, "view": view, "max": max]) }
+
+    /// gpui.bots.recall.mem.short = memory {pct}%
+    static func gpui_bots_recall_mem_short(pct: String) -> String { f("gpui.bots.recall.mem.short", ["pct": pct]) }
+
+    /// gpui.bots.recall.mem.lines = {done} of {total} lines written
+    static func gpui_bots_recall_mem_lines(done: String, total: String) -> String { f("gpui.bots.recall.mem.lines", ["done": done, "total": total]) }
+
+    /// gpui.bots.recall.mem.behind = {n, plural, one {# message behind} other {# messages behind}}
+    static func gpui_bots_recall_mem_behind(n: Int) -> String { f("gpui.bots.recall.mem.behind", ["n": String(n)]) }
+
+    /// gpui.bots.recall.mem.merge = {n, plural, one {# line to merge} other {# lines to merge}}
+    static func gpui_bots_recall_mem_merge(n: Int) -> String { f("gpui.bots.recall.mem.merge", ["n": String(n)]) }
+
+    /// gpui.bots.recall.mem.held = held: retry at {time}
+    static func gpui_bots_recall_mem_held(time: String) -> String { f("gpui.bots.recall.mem.held", ["time": time]) }
+
+    /// gpui.bots.recall.mem.size = view {view} KB of {max} KB
+    static func gpui_bots_recall_mem_size(view: String, max: String) -> String { f("gpui.bots.recall.mem.size", ["view": view, "max": max]) }
+
+    /// gpui.bots.recall.mem.cut = view {view} KB of {max} KB: the oldest lines are left out until the compactor merges them
+    static func gpui_bots_recall_mem_cut(view: String, max: String) -> String { f("gpui.bots.recall.mem.cut", ["view": view, "max": max]) }
 
     /// gpui.bots.mem.older = Older ({more} more)
     static func gpui_bots_mem_older(more: String) -> String { f("gpui.bots.mem.older", ["more": more]) }

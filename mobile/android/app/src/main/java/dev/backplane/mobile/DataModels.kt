@@ -62,7 +62,13 @@ data class DThread(
     val pinOrder: Int = 0, // where a pinned thread stands on its project's Pinned shelf (the hub's order: as pinned, or as dragged)
     val status: String = "", // the sidebar dot's word (feature status): active, waiting, blocked, failed, stalled, finished (the desktop's green dot: done, not yet settled), settled, inactive; "" from an older hub
     val swarm: String = "", // the swarm room this thread is a member of (feature swarm), "" for none: left out of its project's list, which shows the swarm once
+    val memory: DMemory? = null, // infinite context: how far its memory is written (the hub's bots/recall/progress.rs); null for a thread without it
 )
+/** A thread's memory progress, every word the hub's: the bar is [done] of [total], [state] caught | behind | held. */
+data class DMemory(val done: Long, val total: Long, val state: String, val line: String, val status: String, val lines: String, val viewLine: String) {
+    val fill: Float get() = if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else 1f
+}
+fun parseMemory(o: JSONObject?) = o?.takeIf { it.has("total") }?.let { DMemory(it.lng("done"), it.lng("total"), it.str("state"), it.str("line"), it.str("status"), it.str("lines"), it.str("viewLine")) }
 // the picker under the composer (`thread.picker`): sections the hub lists, drawn in order; a press is `thread.pick`
 data class DChoice(val label: String, val value: String, val on: Boolean, val ok: Boolean, val why: String, val cost: String = "") // cost: a speed detent's against Normal
 data class DPickerSection(val title: String, val action: String, val choices: List<DChoice>, val dial: Boolean = false) // dial: the speed dial (issue #1166)
@@ -100,7 +106,7 @@ fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("r
     parseMark(o.optJSONObject("mark")), o.str("also"), o.optJSONArray("newOn").list { DNewOn(it.str("value"), it.str("label"), it.optBoolean("away")) }, o.str("runsOn"), o.str("key"))
 fun parseThread(o: JSONObject) = DThread(
     o.str("id"), o.str("project"), o.str("title"), o.str("state"), o.lng("updatedAt"), o.optBoolean("pinned"), o.optBoolean("settled"), o.optBoolean("archived"),
-    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("parent"), o.str("effort"), o.str("runtime"), o.str("chip"), o.lng("settledAt"), o.optBoolean("history"), parseMark(o.optJSONObject("mark")), o.optInt("pinOrder", 0), o.str("status"), o.str("swarm"),
+    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("parent"), o.str("effort"), o.str("runtime"), o.str("chip"), o.lng("settledAt"), o.optBoolean("history"), parseMark(o.optJSONObject("mark")), o.optInt("pinOrder", 0), o.str("status"), o.str("swarm"), parseMemory(o.optJSONObject("memory")),
 )
 fun parseProjects(a: JSONArray?) = a.list(::parseProject)
 fun parseThreads(a: JSONArray?) = a.list(::parseThread)

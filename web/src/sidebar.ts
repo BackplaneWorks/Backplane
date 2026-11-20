@@ -35,6 +35,7 @@ export interface ThreadItem {
   waiting?: number;
   parent?: string;
   swarm?: string;
+  memory?: import("./composer").MemoryProgress | null;
 }
 
 export interface BotItem {

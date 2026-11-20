@@ -44,6 +44,19 @@ With its flag on, every bot's thread keeps one conversation that never ends, aft
   context (beta)" (`recall.bots` = on). While it is off nothing runs: no
   thread has it, the compactor writes nothing, memory_zoom is not listed.
   With it on, every bot has it unless its Settings tab turns it off
-  (`recall.bot.<id>` = off; the tab also shows how far the tree is
-  written), and `recall.thread.<id>` = on gives any other long-lived
-  thread the same.
+  (`recall.bot.<id>` = off), and `recall.thread.<id>` = on gives any
+  other long-lived thread the same.
+- **Progress.** `progress.rs` measures a thread's tree after each compactor
+  call and each round (only when its messages, lines, kept view or hold
+  moved): the tree's lines that have their line, of all 2n - (roots) of
+  them; the messages whose own line is not written (behind); the view's
+  bytes as the next turn would read it, against 128 KB; and a hold's retry
+  time. Its words are the hub's (`memory: 92% written · view 64/128 KB`,
+  `caught up`, `12 messages behind`, `held: retry at 14:05`) and every
+  client draws them: the bot's Settings tab (two bars: lines, view), the
+  thread's context chip on the desktop (a small bar and the words instead
+  of the session's context), and over the composer on the phones and the
+  web (data/1 `thread.memory`, null for a thread without infinite
+  context). A change is pushed with no log line: a `memory` frame re-sends
+  the thread's row to the phones and the web, and the desktop's views are
+  drawn again.
