@@ -734,6 +734,11 @@ mod imp {
         }
         let _ = c.flush();
     }
+    /// Whether `w` is mapped (viewable), and nothing else: what the pane's own checks need, without `report`'s read of the window's pixels.
+    pub fn mapped(w: u64) -> Option<bool> {
+        let g = conn()?; let c = g.as_ref().unwrap();
+        Some(c.get_window_attributes(w as u32).ok()?.reply().ok()?.map_state == MapState::VIEWABLE)
+    }
     /// Where `w` is in its parent and whether it is mapped, and how many sampled pixels are painted (excluding black and the placeholder background): what the e2e report says.
     pub fn report(w: u64) -> Option<(R, bool, usize)> {
         let w = w as u32;
@@ -867,6 +872,8 @@ mod imp {
     mod probe {
         use std::{cell::Cell, sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Mutex, OnceLock}, time::Instant};
         fn on() -> bool { static O: OnceLock<bool> = OnceLock::new(); *O.get_or_init(|| std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some()) }
+        /// the threshold a returned call is logged at (ms; BP_KICAD_STUCK_MS, default 200; a measurement run uses a lower one, e.g. 30)
+        fn at_ms() -> u64 { static O: OnceLock<u64> = OnceLock::new(); *O.get_or_init(|| std::env::var("BP_KICAD_STUCK_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(200)) }
         pub fn no_attach() -> bool { static O: OnceLock<bool> = OnceLock::new(); *O.get_or_init(|| std::env::var("BP_KICAD_NO_ATTACH").is_ok_and(|v| v == "1")) }
         thread_local! { static DEPTH: Cell<u32> = const { Cell::new(0) }; }
         /// the outermost call in progress
@@ -903,7 +910,7 @@ mod imp {
                 let Some((call, where_, hwnd, flags, seq, at)) = self.0 else { return };
                 let ms = at.elapsed().as_millis() as u64;
                 { let mut c = CUR.lock().unwrap(); c.retain(|x| x.6 != seq); }
-                if ms >= 200 { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_stuck_done": line(call, where_, hwnd, flags, ms, tid())})); }
+                if ms >= at_ms() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_stuck_done": line(call, where_, hwnd, flags, ms, tid())})); }
             }
         }
         fn watchdog() {
@@ -913,7 +920,7 @@ mod imp {
                 REPORTED.lock().unwrap().retain(|s| c.iter().any(|x| x.6 == *s));
                 for (call, where_, hwnd, flags, thread, at, seq) in c {
                     let ms = at.elapsed().as_millis() as u64;
-                    if ms >= 200 && { let mut r = REPORTED.lock().unwrap(); !r.contains(&seq) && { r.push(seq); true } } {
+                    if ms >= at_ms().max(200) && { let mut r = REPORTED.lock().unwrap(); !r.contains(&seq) && { r.push(seq); true } } {
                         eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_stuck": line(call, where_, hwnd, flags, ms, thread)}));
                     }
                 }
@@ -2175,6 +2182,9 @@ mod imp {
         }
     }
 
+    /// Whether `w` (and its ancestors) is visible, and nothing else: what the pane's own checks need, without `report`'s screen read
+    /// (a BitBlt of the screen under the frame, ~200 ms while KiCad is busy: #1403).
+    pub fn mapped(w: u64) -> Option<bool> { geometry(w).map(|(_, v)| v) }
     pub fn report(w: u64) -> Option<(R, bool, usize)> {
         let (r, vis) = geometry(w)?;
         let painted = if vis { sample_painted(hwnd(w)) } else { 0 };
@@ -2275,6 +2285,7 @@ mod imp {
     pub fn poke(_w: u64, _keysym: u32, _mods: u16) {}
     pub fn keep(_holder: u64) {}
     pub fn report(_w: u64) -> Option<(R, bool, usize)> { None }
+    pub fn mapped(_w: u64) -> Option<bool> { None }
     pub fn window_meta(_w: u64, _container: Option<u64>, _toplevel: u64) -> Option<(u8, (i32, i32), usize, bool)> { None }
 }
 
