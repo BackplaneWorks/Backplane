@@ -49,7 +49,7 @@ SUITES=(
   # KiCad's own Close (Ctrl+W) in the editor: the pane follows it back to View; Cancel in KiCad's save prompt keeps the editor (fork)
   "embed_close_e2e.sh:close"
   # KiCad's Simulator as the pane's Simulation tab (bp.13.2 sim-frame; skips itself on a runtime without it), and an older runtime
-  # (the released bp.12.1, when it is installed here) has no Simulation entry (fork)
+  # (SIM_OLD_KICAD, else one installed here; none fails: it never passes without checking) has no Simulation entry (fork)
   "embed_sim_e2e.sh:sim"
   "embed_sim_e2e.sh:sim-old:SIM_OLD=1"
   # a fresh profile's editors in a narrow pane (bp.13 autopanels): the canvas at least 60 % at 611, 480, 1000 px; the panels back at Full
