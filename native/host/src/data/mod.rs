@@ -54,20 +54,32 @@ fn pack(v: &Value, json_mode: bool) -> Message { if json_mode { Message::Text(v.
 /// Open asks per thread: one pass over the log's tail (an ask is open from its AskOpened until its AskClosed).
 /// Every ask still open, for the badge (push).
 pub fn open_ask_total(hub: &Hub) -> u64 { open_ask_counts(hub).values().sum() }
-/// The thread of an ask still open.
-pub fn ask_thread(hub: &Hub, ask: &str) -> Option<String> {
-    let n = hub.store.len(); let lines = hub.store.range(n.saturating_sub(ASK_SCAN), n).ok()?; let mut found = None;
-    for l in lines { if !l.contains("\"Ask") || !l.contains(ask) { continue } let Ok(e) = serde_json::from_str::<Value>(&l) else { continue };
-        if s(&e, "id") != ask { continue } match s(&e, "$") { "AskOpened" => found = Some(s(&e, "thread").to_string()), "AskClosed" => found = None, _ => {} } }
-    found
+/// The asks still open of a log's last ASK_SCAN lines, kept between calls: each call reads only the lines logged since the last one (the lists and the badge asked
+/// for it on every `projects.list`/`threads.list`, each time a pass over 4,000 lines of the log). An ask counts exactly as a pass over that tail would count it:
+/// opened inside the tail and not closed since. One index per log (tests run several hubs in one process); a log that got shorter is read afresh.
+struct AskIndex { upto: usize, open: HashMap<String, (String, usize)> }
+static ASKS: std::sync::LazyLock<Mutex<HashMap<std::path::PathBuf, AskIndex>>> = std::sync::LazyLock::new(Default::default);
+/// The open asks of the tail: (ask, thread, the log line it opened at, 0-based), oldest first.
+fn open_ask_index(hub: &Hub) -> Vec<(String, String, usize)> {
+    let n = hub.store.len(); let floor = n.saturating_sub(ASK_SCAN);
+    let mut all = ASKS.lock().unwrap();
+    let ix = all.entry(hub.store.path().to_path_buf()).or_insert(AskIndex { upto: floor, open: HashMap::new() });
+    if ix.upto > n { *ix = AskIndex { upto: floor, open: HashMap::new() } }
+    let from = ix.upto.max(floor);
+    if from < n {
+        let Ok(lines) = hub.store.range(from, n) else { return vec![] };
+        for (i, l) in lines.iter().enumerate() { if !l.contains("\"Ask") { continue } let Ok(e) = serde_json::from_str::<Value>(l) else { continue };
+            match s(&e, "$") { "AskOpened" => { ix.open.insert(s(&e, "id").into(), (s(&e, "thread").into(), from + i)); } "AskClosed" => { ix.open.remove(s(&e, "id")); } _ => {} } }
+        ix.upto = n;
+    }
+    ix.open.retain(|_, (_, at)| *at >= floor); // fell out of the tail: a pass over it would not see it opened
+    let mut v: Vec<(String, String, usize)> = ix.open.iter().map(|(a, (t, at))| (a.clone(), t.clone(), *at)).collect(); v.sort_by_key(|x| x.2); v
 }
+/// The thread of an ask still open.
+pub fn ask_thread(hub: &Hub, ask: &str) -> Option<String> { open_ask_index(hub).into_iter().find(|(a, ..)| a == ask).map(|(_, t, _)| t) }
 fn open_ask_counts(hub: &Hub) -> HashMap<String, u64> {
-    let n = hub.store.len(); let mut m = HashMap::new();
-    let Ok(lines) = hub.store.range(n.saturating_sub(ASK_SCAN), n) else { return m };
-    let (mut opened, mut closed): (Vec<(String, String)>, HashSet<String>) = (vec![], HashSet::new());
-    for l in lines { if !l.contains("\"Ask") { continue } let Ok(e) = serde_json::from_str::<Value>(&l) else { continue };
-        match s(&e, "$") { "AskOpened" => opened.push((s(&e, "id").into(), s(&e, "thread").into())), "AskClosed" => { closed.insert(s(&e, "id").into()); } _ => {} } }
-    for (id, th) in opened { if !closed.contains(&id) { *m.entry(th).or_insert(0) += 1 } }
+    let mut m = HashMap::new();
+    for (_, th, _) in open_ask_index(hub) { *m.entry(th).or_insert(0) += 1 }
     m
 }
 /// (pinned, on the Settled shelf, when it was settled in unix ms): the desktop's own shelf (shelf.rs: a manual settle or an unsettle wins over the clock, a snooze is not a settle).
@@ -84,12 +96,21 @@ fn flags_of(id: &str) -> (bool, bool, u64) { crate::statehost::policies().and_th
 fn setting_of(k: &str) -> String { crate::statehost::policies().and_then(|p| p.with_state(|st| st.settings.get(k).cloned())).flatten().unwrap_or_default() }
 /// Why `thread.create` refuses the Scratch project: its chats are kept (Conversation history) and open as they were, but no new one starts there.
 pub(crate) const SCRATCH_CLOSED: &str = "New chats start in a project. The chats with no project are kept as they are.";
+/// A thread's row preview, kept with the thread's tip (`Model::tip`): read from the log only when the thread has had an entry since (every list read a page of
+/// every thread's log before). One table per log, bounded.
+static PREVIEWS: std::sync::LazyLock<Mutex<HashMap<(std::path::PathBuf, String), ((usize, u32, usize, u32), String)>>> = std::sync::LazyLock::new(Default::default);
+fn preview_of(hub: &Hub, m: &crate::model::Model, id: &str) -> String {
+    let key = (hub.store.path().to_path_buf(), id.to_string()); let tip = m.tip(id);
+    if let Some((t, p)) = PREVIEWS.lock().unwrap().get(&key) { if *t == tip { return p.clone() } }
+    let p = m.page(&hub.store, id, 0, 8).ok().and_then(|p| p.rows.iter().find(|r| r.kind == "msg" && !r.text.trim().is_empty()).map(|r| clip(&shown_text(&r.text), PREVIEW))).unwrap_or_default();
+    let mut c = PREVIEWS.lock().unwrap(); if c.len() > 20_000 { c.clear() } c.insert(key, (tip, p.clone())); p
+}
 fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) -> Option<Value> {
     let t = m.threads.get(id).filter(|t| !t.deleted)?;
     let waiting = asks.get(id).copied().unwrap_or(0);
     let state = if waiting > 0 { "asking" } else { match t.turn.as_str() { "running" => "working", "failed" => "failed", _ => "idle" } };
     // what was last said, not the last tool call or a design step's record; a thread with only activity shows nothing
-    let preview = m.page(&hub.store, id, 0, 8).ok().and_then(|p| p.rows.iter().find(|r| r.kind == "msg" && !r.text.trim().is_empty()).map(|r| clip(&shown_text(&r.text), PREVIEW))).unwrap_or_default();
+    let preview = preview_of(hub, m, id);
     let (pinned, settled, settled_at) = flags(hub, id);
     // a model chosen within the provider is a ModesSet (the policy state), a switch of provider a ProviderSet (the model's fold)
     // `status`: the sidebar dot's word (signal.rs, children's work included): "finished" is the desktop's green dot, a turn done and not yet settled
@@ -191,14 +212,9 @@ fn ask_entry(e: &Value, answered: Option<&str>) -> Value {
     if let Some(a) = answered { ask["answered"] = json!(a) }
     json!({"id":format!("ask:{}",s(e,"id")),"kind":"ask","text":q,"at":ms(e["at"].as_u64().unwrap_or(0)),"ask":ask})
 }
-/// The thread's asks still open, from the log's tail.
+/// The thread's asks still open, from the log's tail (the kept index: only their own lines are read).
 fn open_asks(hub: &Hub, thread: &str) -> Vec<Value> {
-    let n = hub.store.len();
-    let Ok(lines) = hub.store.range(n.saturating_sub(ASK_SCAN), n) else { return vec![] };
-    let (mut opened, mut closed): (Vec<Value>, HashSet<String>) = (vec![], HashSet::new());
-    for l in lines { if !l.contains("\"Ask") { continue } let Ok(e) = serde_json::from_str::<Value>(&l) else { continue };
-        match s(&e, "$") { "AskOpened" if s(&e, "thread") == thread => opened.push(e), "AskClosed" => { closed.insert(s(&e, "id").to_string()); } _ => {} } }
-    opened.into_iter().filter(|e| !closed.contains(s(e, "id"))).map(|e| ask_entry(&e, None)).collect()
+    open_ask_index(hub).into_iter().filter(|(_, t, _)| t == thread).filter_map(|(_, _, at)| hub.store.get(at).ok()).filter_map(|l| serde_json::from_str::<Value>(&l).ok()).map(|e| ask_entry(&e, None)).collect()
 }
 /// The AskOpened line for `id`, from the log's tail (an AskClosed names only the ask).
 fn ask_opened(hub: &Hub, id: &str) -> Option<Value> {

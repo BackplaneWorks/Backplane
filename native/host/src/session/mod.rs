@@ -27,6 +27,9 @@ pub fn start(hub: &Arc<Hub>) { index::start(&hub.store); hub.register_rpc(Arc::n
 pub const REPLY_BYTES: usize = 262144;
 pub const CONTROL_CHARS: usize = 32768 / 6; // core Part.take(text, 32768): left / 6 characters a part
 pub const CONTROL_ID_FLOOR: u64 = 1 << 47;   // Wire.control.id: view request ids are above 2^47
+/// The bodies a connection's keyed deltas may start from (delta.rs): the newest first, kept across view.open so a thread switch is ops from the last picture, and enough
+/// that a client offering the body it last drew of this target (not just its newest) still finds it.
+pub const SENT_KEEP: usize = 16;
 
 fn empty_window() -> Value { json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderNext":"","hasMore":false,"remaining":0,"newer":0,"total":0}) }
 fn within(s: &str, n: usize) -> bool { s.len() <= n }
@@ -127,8 +130,8 @@ impl Hub {
         strip_hub_owned(&mut params);   // window, page, reads and local are the hub's: whatever the client sent is gone before the hub's own are put in
         if let Some(o) = params.as_object_mut() {
             o.insert("designDesktop".into(), json!(design_desktop(c.local_view_socket, &p["client"], c.client)));
-            // what the presenter needs of the hub: the view's id, the hub's signal revision (SignalRevision: the context's metadataRevision;
-            // saved sidebar pages are kept only while it, the view and the choices stay the same: activity lines and assistant text do not move it), this run's key
+            // what the presenter needs of the hub: the view's id, the hub's signal revision (SignalRevision: activity lines and assistant text do not move it;
+            // the native sidebar's saved pages no longer follow it, only the view, the choices and each list's own rows, present/native_sidebar.rs), this run's key
             o.insert("revision".into(), json!(self.signal_seq())); o.insert("viewId".into(), json!(view_id)); o.insert("nativeKey".into(), json!(self.native_key)); o.insert("now".into(), json!(now_ms()));
         }
         // a thread's window: the page out of the Rust index, the fold/context logic in native
@@ -186,7 +189,7 @@ impl Hub {
         let target = p["target"].clone();
         if m == "view.open" { c.view_id = view_id.clone(); c.target = target.clone(); }
         c.lastrev = rev;
-        if m == "view.open" { c.sent.clear(); }
+        // a view.open keeps the bodies held: the next thread's picture is ops from the last one (the sidebar and chrome are the same), not the whole of it again
         let mut result = self.assemble(&p, &view_id, rev, &pol);
         if let (Some(w), Some(o)) = (window, result.as_object_mut()) { if o.contains_key("window") { o.insert("window".into(), w); } }
         let result = Self::delta_reply(c, &p, result);
@@ -306,7 +309,7 @@ impl Hub {
             None if crate::delta::draft_is_long(&draft) => { let mut o = strip(&result); meta.insert("base".into(), json!("")); meta.insert("token".into(), json!(token)); meta.insert("ops".into(), crate::delta::whole_ops(&body, &draft)); o.insert("viewDelta".into(), Value::Object(meta)); Value::Object(o) }
             None => { let mut o = result.as_object().unwrap().clone(); meta.insert("base".into(), json!("")); meta.insert("token".into(), json!(token)); o.insert("viewDelta".into(), Value::Object(meta)); Value::Object(o) }
         };
-        c.sent.insert(0, (token, body)); c.sent.truncate(3);
+        c.sent.retain(|(t, _)| *t != token); c.sent.insert(0, (token, body)); c.sent.truncate(SENT_KEEP);
         out
     }
 
