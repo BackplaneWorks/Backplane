@@ -193,3 +193,51 @@ What the runs did (tool calls over the three runs of a task):
 
 `buck_ripple`'s reference was recentred after these runs (see "References"): the three runs answered 39.0, 39.8 and
 40.4 mV, the first of them the ripple of one cycle, and pass under the old band and the new.
+
+### `kicad_sim` against raw use, on Antigravity `gemini-4-neon`
+
+The same eight tasks on one model with and without the tool (2026-11-19 and 20): Antigravity's `gemini-4-neon` (the
+CLI's medium level) through the person's own `agy` sign-in (`KIPC_BENCH_PROVIDER=antigravity
+KIPC_BENCH_THREAD_MODEL=gemini-4-neon`, the `agy` wrapper of `test/kipc_bench`), released Backplane KiCad
+10.99.0-bp.13.2 (edfc943200), 3 runs a task, medians, a 30 minute turn cap.
+
+- **sim**: a hub from main with `kicad_sim` (15 runs on d9ecbb5e6d, 9 on 335f784238, which differs in three lines
+  of `ksim_tool.rs`).
+- **base**: a hub from main at 37a271bec, before `kicad_sim`: `kicad_ipc`, `kicad_edit`, the CLI's file and shell
+  tools, the web.
+
+| task | context tok sim | base | output tok sim | base | tool calls sim | base | wall s sim | base | passes sim | base |
+|---|---|---|---|---|---|---|---|---|---|---|
+| lc_corner | 355,767 | 1,963,090 | 8,563 | 21,231 | 13 | 41 | 199 | 324 | 3/3 | 3/3 |
+| opamp_gain_pm | 235,029 | 967,381 | 7,208 | 19,378 | 10 | 30 | 120 | 319 | 3/3 | 3/3 |
+| ldo_transient | 604,525 | 1,463,589 | 16,725 | 24,605 | 19 | 30 | 258 | 268 | 3/3 | 3/3 |
+| buck_ripple | 862,233 | 3,140,602 | 18,179 | 40,611 | 28 | 52 | 507 | 793 | 3/3 | 3/3 |
+| buck_blocked | 97,473 | 255,195 | 3,465 | 3,887 | 8 | 16 | 64 | 75 | 3/3 | 3/3 |
+| divider_tol | 230,551 | 1,252,019 | 5,906 | 14,130 | 7 | 26 | 74 | 197 | 3/3 | 3/3 |
+| tune_corner | 168,177 | 1,671,559 | 4,540 | 16,446 | 7 | 32 | 79 | 272 | 3/3 | 3/3 |
+| noise | 554,279 | 1,368,111 | 10,287 | 20,878 | 22 | 33 | 203 | 281 | 3/3 | 3/3 |
+| **all (sum of medians)** | 3,108,034 | 12,081,546 | 74,873 | 161,166 | 114 | 260 | 1,503 | 2,529 | 24/24 | 24/24 |
+
+With the tool: 74 % fewer context tokens, 54 % fewer output tokens, 56 % fewer tool calls, 41 % less time. Over the
+24 runs the shell commands fell from 345 to 77 and the `kicad_edit` calls from 147 to 55; `kicad_sim` was called 129
+times. From the hub's simulation log (sim only; base has none): 27 simulations, 173 s of ngspice (all but 0.3 s
+`buck_ripple`'s) and 67 model lookups, as sums of the tasks' medians.
+
+What these numbers are and are not:
+
+- Not comparable with the baseline above, which is `claude-fable-5-2`: this is one model against itself. Context is
+  the input tokens not read from the cache plus those read from it, summed over the turn's requests, as `agy`'s
+  `result` line gives them. No cost: the sign-in is not billed by the token (the 48 runs and the discarded ones took
+  the account's weekly Gemini allowance from 89 % to 85 % left).
+- Antigravity does not hold the MCP tools' definitions in its context: it reads a tool's definition from a file
+  when it wants it (`~/.gemini/antigravity-cli/mcp/backplane/<tool>.json`), which is part of why its context is
+  smaller than the Claude CLI's on the same task.
+- Runs left out and made again: nine sim runs (`noise` 2 and all of round 3) ran with no Backplane MCP server
+  ("server name backplane failed to load"), because the hub's program was a main-builder build that was removed
+  while the benchmark ran; they passed all the same, through the shell, at the base's cost (the sum of medians with
+  them in was 4.2 million context tokens). Two base turns that were out when their hub was killed (a restart of the
+  person's Backplane ends the benchmark's jobs) were dropped and the round made again. None of the 48 runs in the
+  table has a failed MCP load. Run the benchmark from a copy of the hub that nothing removes.
+- It ran on the desktop, where the sign-in is; nothing was compiled for it. `agy` runs with the person's HOME: the
+  conversations are kept in their `~/.gemini`, their `pcbparts` MCP server is in the agent's reach, and the tool
+  definitions Antigravity keeps there are rewritten by whichever hub ran last.

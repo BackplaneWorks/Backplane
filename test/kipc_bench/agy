@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""The benchmark's `agy` (docs/kicad-ipc-bench.md): the hub starts it as the person's Antigravity CLI (print mode, JSON lines both ways:
+native/host/src/agents/providers/agy_cli.rs) with the arguments a real thread gets. It runs the real CLI (KIPC_BENCH_AGY) and passes the
+lines both ways, copying them to $KIPC_BENCH_OUT/<cwd name>.jsonl as {"agy": "to"|"from", "ev": ...}. As the other wrappers do,
+KIPC_BENCH_PROMPT's replacements are made in Backplane's instructions (at the head of the one input line). The model is the thread's
+(KIPC_BENCH_PROVIDER=antigravity, KIPC_BENCH_THREAD_MODEL), which the hub passes as --model.
+Sign-in is the person's own: agy runs with their HOME (its keyring, ~/.gemini), so it reads its MCP servers from their
+~/.gemini/config/mcp_config.json. The `backplane` entry the person's hub keeps there starts $BACKPLANE_HUB_EXE --mcp-stdio on $BACKPLANE_MCP_URL,
+which are this benchmark hub's for this turn; nothing in the person's files is written."""
+import json, os, re, subprocess, sys, threading, time
+a = sys.argv[1:]; out = os.environ.get("KIPC_BENCH_OUT", "/tmp"); name = os.path.basename(os.getcwd())
+open(os.path.join(out, name + ".argv.json"), "w").write(json.dumps(a))
+reps = json.load(open(os.environ["KIPC_BENCH_PROMPT"])) if os.environ.get("KIPC_BENCH_PROMPT") else []
+home = os.environ.get("KIPC_BENCH_REALHOME", os.environ.get("HOME", ""))
+env = {k: v for k, v in os.environ.items() if not (k.startswith("CLAUDE") or k in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "BACKPLANE_AGENT_OWNER") or k.startswith("XDG_"))}
+env["HOME"] = home
+# the person's session bus, for the CLI's keyring (the hub runs with a temp XDG_RUNTIME_DIR)
+rt = f"/run/user/{os.getuid()}"
+if os.path.isdir(rt): env["XDG_RUNTIME_DIR"] = rt; env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={rt}/bus"
+p = subprocess.Popen([os.environ["KIPC_BENCH_AGY"]] + a, stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env, text=True, bufsize=1)
+log = open(os.path.join(out, name + ".jsonl"), "w"); t0 = time.time(); lock = threading.Lock()
+def note(d, l):
+    with lock:
+        try: m = json.loads(l)
+        except ValueError: m = l.strip()
+        log.write(json.dumps({"t": round(time.time() - t0, 3)}) + "\t" + json.dumps({"agy": d, "ev": m}) + "\n"); log.flush()
+def change(l):
+    try: m = json.loads(l); text = m["message"]["content"]
+    except (ValueError, KeyError, TypeError): return l
+    if not isinstance(text, str): return l
+    for r in reps:
+        old, new = r[-2:]
+        if len(r) == 3: text, k = re.subn(old, lambda _: new, text, flags=re.S)
+        else: k = text.count(old); text = text.replace(old, new)
+        if not k and "<backplane_instructions>" in text: sys.stderr.write("kipc bench: prompt text to replace not found: %r\n" % old[:60])
+    if "<backplane_instructions>" in text: open(os.path.join(out, name + ".prompt.txt"), "w").write(text)
+    m["message"]["content"] = text
+    return json.dumps(m) + "\n"
+def feed():
+    try:
+        for l in sys.stdin:
+            l = change(l); note("to", l); p.stdin.write(l); p.stdin.flush()
+    except Exception: pass
+    try: p.stdin.close()
+    except Exception: pass
+threading.Thread(target=feed, daemon=True).start()
+for l in p.stdout:
+    note("from", l); sys.stdout.write(l); sys.stdout.flush()
+sys.exit(p.wait())

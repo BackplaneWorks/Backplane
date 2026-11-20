@@ -37,6 +37,38 @@ def answer_of(log):
                 if n in ("WebFetch", "WebSearch") or re.search(r"preview_(open|navigate)$", n) or (n == "Bash" and re.search(r"\b(curl|wget)\b|urllib|requests\.get|https?://", arg)): web += 1
         if j.get("type") == "result": text = j.get("result") or ""; err = bool(j.get("is_error"))
     return text, err, sims, web
+def answer_of_agy(log):
+    """the same of an Antigravity transcript (the `agy` wrapper's lines): the last reply step's text, the result's status, shell commands that
+    ran ngspice, and calls to the web"""
+    steps, err, sims, web, seen = {}, False, 0, 0, set()
+    for l in open(log):
+        try: _, j = l.split("\t", 1); j = json.loads(j)
+        except ValueError: continue
+        e = j.get("ev"); e = e if isinstance(e, dict) else {}
+        if j.get("agy") != "from": continue
+        u = e.get("step_update") or {}
+        if e.get("event") == "step_update" and u.get("step_type") == "agent_response": steps[u.get("step_index")] = steps.get(u.get("step_index"), "") + (u.get("text_delta") or "")
+        if e.get("event") == "step_update" and u.get("step_type") == "tool" and u.get("state") == "ACTIVE" and u.get("step_index") not in seen:
+            seen.add(u.get("step_index")); n = kb.agy_tool(u); arg = json.dumps((u.get("tool_info") or {}).get("parameters") or {})
+            if n == "run_command" and re.search(r"ngspice|ngSpice", arg): sims += 1
+            if re.search(r"web|url|browser|preview_(open|navigate)", n, re.I) or (n == "run_command" and re.search(r"\b(curl|wget)\b|urllib|requests\.get|https?://", arg)): web += 1
+        if e.get("event") == "result":
+            r = e.get("result") or {}; err = r.get("status") != "SUCCESS"
+            if isinstance(r.get("response"), str) and r["response"].strip(): steps[10 ** 9] = r["response"]
+    # the answer is the reply that has the RESULT line when one does (a closing remark may follow it), else the last reply
+    texts = [steps[k] for k in sorted(steps, key=lambda k: (k is None, k))]
+    text = next((t for t in reversed(texts) if "RESULT" in t), texts[-1] if texts else "")
+    return text, err, sims, web
+def who(log):
+    """whose transcript a run's is: "claude" (the CLI's stream-json: a `type` on each line), "agy" (the Antigravity wrapper's lines) or "acp"
+    (another provider's JSON-RPC)"""
+    for l in open(log):
+        try: _, j = l.split("\t", 1); j = json.loads(j)
+        except ValueError: continue
+        if "agy" in j and "ev" in j: return "agy"
+        if "msg" in j and "dir" in j: return "acp"
+    return "claude"
+WANT = "agy" if os.environ.get("KIPC_BENCH_PROVIDER") == "antigravity" else "claude"   # the provider these runs are of
 def is_claude(log):
     """whether a run's transcript is the Claude CLI's (stream-json: a `type` on each line), not another provider's (ACP: `dir` and a JSON-RPC `msg`)"""
     kinds = set()
@@ -70,11 +102,11 @@ def one(work, variant, task, n):
         DEAD.append(name); print(f"{name}: NOT RUN, the turn could not be started: {str(r.get('err'))[-200:]}; the rest is left", flush=True); return None
     # these runs are Claude's: a hub with no Claude login left answers a turn with another provider (its own fallback), and that is not a run
     # of this benchmark, nor would the next be. The transcript says who answered: only the Claude wrapper writes the CLI's stream-json lines.
-    if os.path.exists(log) and not is_claude(log):
-        DEAD.append(name); os.rename(log, log + ".not-claude"); print(f"{name}: NOT RUN, another provider answered (no Claude login was usable); the rest is left", flush=True); return None
+    if os.path.exists(log) and (who(log) != WANT or (WANT == "claude" and not is_claude(log))):
+        DEAD.append(name); os.rename(log, log + ".not-claude"); print(f"{name}: NOT RUN, another provider answered (no login of the provider asked for was usable); the rest is left", flush=True); return None
     o = {"variant": variant, "task": task["id"], "run": n, "state": r.get("state"), "wall_s": round(time.time() - t0, 1), "at": int(t0)}
     text, err = "", False
-    if os.path.exists(log): o.update(kb.usage(log)); text, err, o["shell_sims"], o["web"] = answer_of(log)
+    if os.path.exists(log): o.update(kb.usage(log)); text, err, o["shell_sims"], o["web"] = (answer_of_agy if WANT == "agy" else answer_of)(log)
     o.update(simlog(work, r.get("thread"), t0, time.time())); o["sims_seen"] = o.get("sims", o.get("shell_sims", 0) + sum(v for k, v in o.get("tools", {}).items() if "RunSimulation" in k or "kicad_sim" in k))
     # a run the account's limit or the API cut short is not a failure of the variant: it is marked and left out of the table (and said there)
     o["cut"] = "context" not in o and o["state"] != "timeout" or err or (o["state"] != "completed" and bool(CUT.search(text))) or bool(CUT.search(text[-400:]) and not checks.result(text))

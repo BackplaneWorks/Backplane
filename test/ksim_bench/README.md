@@ -44,6 +44,10 @@ python3 test/ksim_bench/bench.py table $W/a
 The variant knobs are `hub.mjs`'s: `KIPC_BENCH_DISALLOW` (tools kept from the agent), `KIPC_BENCH_PROMPT` (text
 replaced in the hub's prompt), `KIPC_BENCH_NOMCP`, `KIPC_BENCH_MODEL`, `KIPC_BENCH_LOGIN`.
 
+Another provider's cells: `KIPC_BENCH_PROVIDER=antigravity KIPC_BENCH_THREAD_MODEL=gemini-4-neon` on `bench.py run` makes each run an
+Antigravity thread through the person's own `agy` sign-in (`test/kipc_bench/agy`, the wrapper the hub starts; no API key). Start the hub from a
+copy of its program that nothing removes, and give it some twenty seconds to find its agents before the first run.
+
 Measured per run: what `test/kipc_bench` measures (context tokens, output tokens, tool calls, wall seconds, cost, pass)
 plus simulations, ngspice seconds and model lookups from the hub's `<home>/logs/sim.jsonl` when it exists; before it
 does, `simulations` counts the shell commands that ran ngspice and the `RunSimulation` calls. A run the account's limit
