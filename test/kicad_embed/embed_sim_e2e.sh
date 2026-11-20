@@ -7,7 +7,7 @@
 #   L1-L4  the rail entry drawn lit follows the frame on show (the client's own word, GPUI_METRIC "rail"): Simulation while the Simulator is
 #       shown, Schematic after the strip's Schematic tab, Simulation again by the rail, not Simulation once it is closed
 #   S5  Ctrl+W in the Simulator closes it: the pane is back on View (Edit offered); the rail's Simulation opens it again
-#   SIM_OLD=1: a runtime without sim-frame (SIM_OLD_KICAD, default the released bp.12.1): no Simulation on the rail, no tab in the strip,
+#   SIM_OLD=1: a runtime without sim-frame (SIM_OLD_KICAD, else the newest one installed here; none is a failure): no Simulation on the rail, no tab in the strip,
 #   Ctrl+Tab never goes to it, the editors work as before
 # XTest as a person types and clicks. A runtime without sim-frame skips S1-S5 (they need bp.13.2).
 set -euo pipefail
@@ -19,8 +19,15 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 [ "${3:-}" != "" ] && OUT=$(mkdir -p "$3" && cd "$3" && pwd)
 OLD=${SIM_OLD:-0}
 if [ "$OLD" = 1 ]; then
-  KICAD_BIN=${SIM_OLD_KICAD:-$REAL_HOME/.backplane-gpui-fresh/home/kicad/10.99.0-bp.12.1/bin/kicad}
-  [ -x "$KICAD_BIN" ] || { echo "embed_sim_e2e (old runtime): no KiCad at $KICAD_BIN (set SIM_OLD_KICAD): skipped"; exit 0; }
+  # the runtime asked for (SIM_OLD_KICAD), else the newest fork runtime installed here that has no sim-frame. None is a FAILURE, not a skip:
+  # a run that tested nothing once passed for "8/0" (h@backplane has no runtime under ~/.backplane*).
+  KICAD_BIN=${SIM_OLD_KICAD:-}
+  if [ -z "$KICAD_BIN" ]; then
+    for cand in $(ls -1dr "$REAL_HOME"/.backplane*/home/kicad/10.99.0-bp.*/bin/kicad 2>/dev/null || true); do
+      "$(dirname "$cand")/kicad-cli" api-server --describe 2>/dev/null | grep -q '"sim-frame"' || { KICAD_BIN=$cand; break; }
+    done
+  fi
+  [ -n "$KICAD_BIN" ] && [ -x "$KICAD_BIN" ] || { echo "FAIL embed_sim_e2e (old runtime): no KiCad without sim-frame to run it on (${KICAD_BIN:-none under $REAL_HOME/.backplane*/home/kicad}): nothing was checked. Set SIM_OLD_KICAD=<runtime>/bin/kicad (a bp.12.x or bp.13.1; remote.sh ships it)"; exit 1; }
   export KICAD_BIN
 fi
 discover_bins; discover_kicad; init_isolated_dirs
