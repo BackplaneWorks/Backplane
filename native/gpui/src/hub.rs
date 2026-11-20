@@ -86,7 +86,7 @@ fn unnamed(named:bool,keyed:bool,saved:Option<String>,token_here:bool)->Start {
     #[test] fn commands_sent_during_backoff_are_queued_and_switch_hub_interrupts_immediately() {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         rt.block_on(async {
-            let (tx, mut rx) = mpsc::channel(16);
+            let (tx, mut rx) = mpsc::channel(512);
             let mut queued = VecDeque::new();
             tx.send(Command::Send("hello".into())).await.unwrap();
             tx.send(Command::Select("t42".into())).await.unwrap();
@@ -94,6 +94,13 @@ fn unnamed(named:bool,keyed:bool,saved:Option<String>,token_here:bool)->Start {
             /* i18n-ok: test */ assert_eq!(queued.len(), 2, "Send and Select queued during backoff are preserved");
             assert!(matches!(queued.pop_front(), Some(Command::Send(s)) if s == "hello"));
             assert!(matches!(queued.pop_front(), Some(Command::Select(s)) if s == "t42"));
+            // 300 Drafts around a Send: consecutive Drafts coalesce and Send survives
+            tx.send(Command::Send("must-survive".into())).await.unwrap();
+            for i in 0..300 { /* i18n-ok: test */ tx.send(Command::Draft(format!("typing {i}"))).await.unwrap(); }
+            assert!(backoff_wait(Duration::from_millis(40), &mut rx, &mut queued).await.is_none());
+            assert_eq!(queued.len(), 2);
+            assert!(matches!(queued.pop_front(), Some(Command::Send(s)) if s == "must-survive"));
+            /* i18n-ok: test */ assert!(matches!(queued.pop_front(), Some(Command::Draft(s)) if s == "typing 299"));
             // SwitchHub interrupts a long backoff immediately and clears queued old-hub commands
             queued.push_back(Command::Send("old-hub".into()));
             tx.send(Command::SwitchHub("ws://b:3799".into(), PathBuf::from("/tmp/b.token"), true)).await.unwrap();
@@ -200,8 +207,20 @@ async fn backoff_wait(
                     queued.clear();
                     return Some(SessionEnd::Switch(ws, token_file, paired));
                 }
+                Some(Command::Draft(text)) => {
+                    if matches!(queued.back(), Some(Command::Draft(_))) {
+                        *queued.back_mut().unwrap() = Command::Draft(text);
+                    } else {
+                        if queued.len() >= 256 {
+                            if let Some(i) = queued.iter().position(|c| matches!(c, Command::Draft(_))) { queued.remove(i); } else { queued.pop_front(); }
+                        }
+                        queued.push_back(Command::Draft(text));
+                    }
+                }
                 Some(other) => {
-                    if queued.len() >= 256 { queued.pop_front(); }
+                    if queued.len() >= 256 {
+                        if let Some(i) = queued.iter().position(|c| matches!(c, Command::Draft(_))) { queued.remove(i); } else { queued.pop_front(); }
+                    }
                     queued.push_back(other);
                 }
                 None => return Some(SessionEnd::Quit),
