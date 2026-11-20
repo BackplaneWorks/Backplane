@@ -834,6 +834,12 @@ class RailShotsRegressionTests(unittest.TestCase):
             self.assertEqual(_sim(clean_sess, pane={"ok": False, "error": "not editing"})["outcome"], "passed")  # the pane's own "no pane" report
             self.assertEqual(_sim(clean_sess, pane={"ok": False, "error": "boom"})["outcome"], "unavailable")
             self.assertEqual(_sim(clean_sess, pane={"state": "idle", "in_gpui_tree": False, "shown": None})["outcome"], "unavailable")  # no `ok`
+            # through the raw INFO parser: a session that never sent runtime/holder is unavailable, never a pass; an explicit null passes
+            def _info(val):
+                return D._parse_hub_kicad_sessions_output('INFO ' + json.dumps({"key": "editor.kicad.abc", "value": val}) + '\n{"m":"hub.status","ok":true,"result":{"ok":true}}\n')
+            self.assertEqual(_sim(_info({"frames": []}))["outcome"], "unavailable")
+            self.assertEqual(_sim(_info({"runtime": {"session": "parked"}, "frames": []}))["outcome"], "unavailable")
+            self.assertEqual(_sim(_info({"runtime": {"holder": None, "session": "parked"}, "frames": []}))["outcome"], "passed")
             self.assertEqual(_sim({"ok": True, "inventory_complete": True, "sessions": {"e": {"frames": []}}})["outcome"], "unavailable")  # holder unobserved
             holder_parked = {"ok": True, "inventory_complete": True, "sessions": {"e": {"runtime": {"holder": "pane", "session": "parked"}, "frames": []}}}
             self.assertEqual(_sim(holder_parked)["outcome"], "failed")  # any holder, not only a live session
@@ -1185,6 +1191,19 @@ class RailShotsRegressionTests(unittest.TestCase):
             ]) + "\n", encoding="utf-8")
             ps = P.parse_client_log(log)["presses"]["m"]
             self.assertEqual([p["found"] for p in ps], [False, False, False, True, False])
+
+    def test_hub_info_parser_preserves_field_presence(self) -> None:
+        def info(val):
+            return 'INFO ' + json.dumps({"key": "editor.kicad.abc", "value": val}) + '\n{"m":"hub.status","ok":true,"result":{"ok":true}}\n'
+        # no runtime at all: the session carries no `runtime` key (never `holder: null`)
+        r = D._parse_hub_kicad_sessions_output(info({"state": "ready", "frames": []}))
+        self.assertNotIn("runtime", r["sessions"]["editor.kicad.abc"])
+        # a runtime that sent no holder keeps no holder key
+        r = D._parse_hub_kicad_sessions_output(info({"runtime": {"session": "parked"}, "frames": []}))
+        self.assertEqual(r["sessions"]["editor.kicad.abc"]["runtime"], {"session": "parked"})
+        # an explicit null holder is an observation and is kept
+        r = D._parse_hub_kicad_sessions_output(info({"runtime": {"holder": None, "session": "parked"}, "frames": []}))
+        self.assertEqual(r["sessions"]["editor.kicad.abc"]["runtime"], {"holder": None, "session": "parked"})
 
 
 if __name__ == "__main__":
