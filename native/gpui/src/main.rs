@@ -406,10 +406,10 @@ fn main()->anyhow::Result<()> {
     app.on_open_urls(|urls|for u in urls {if pairing::is_link(&u) {let _=OPENED.0.try_send(u);}});
     app.run(move|cx:&mut App|{
         art::load_fonts(cx);bind_all(cx,&local::Local::load());keys::install_menus(cx);
-        cx.on_action(|_:&keys::Quit,cx|quit_later(cx)); // Cmd+Q and Backplane → Quit Backplane: this client only, the hub runs on
+        cx.on_action(|_:&keys::Quit,cx|{#[cfg(target_os="macos")] crate::viewers::native_child::cancel_yield(); quit_later(cx)}); // Cmd+Q and Backplane → Quit Backplane: this client only, the hub runs on
         // Cmd+H, Alt+Cmd+H and Backplane → Hide Backplane / Hide Others / Show All (#1198): KiCad's embedded editor, another app's window, leaves
         // the screen with ours through the pane's watch (kicad_pane mac_watch: our window is no longer visible) and comes back with it
-        cx.on_action(|_:&keys::HideApp,cx|cx.hide());cx.on_action(|_:&keys::HideOthers,cx|cx.hide_other_apps());cx.on_action(|_:&keys::ShowAll,cx|cx.unhide_other_apps());
+        cx.on_action(|_:&keys::HideApp,cx|{#[cfg(target_os="macos")] crate::viewers::native_child::cancel_yield(); cx.hide()});cx.on_action(|_:&keys::HideOthers,cx|cx.hide_other_apps());cx.on_action(|_:&keys::ShowAll,cx|cx.unhide_other_apps());
         cx.on_window_closed(|cx|if cx.windows().is_empty(){quit_later(cx);}).detach();
         // BACKPLANE_GPUI_SIZE=WxH: the window's size in logical px (the size-matrix e2e; docs/e2e/SIZES.md)
         let (ww,wh)=std::env::var("BACKPLANE_GPUI_SIZE").ok().and_then(|v|{let (w,h)=v.split_once('x')?;Some((w.trim().parse::<f32>().ok()?,h.trim().parse::<f32>().ok()?))}).unwrap_or((1400.,900.));

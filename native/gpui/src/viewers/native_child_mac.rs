@@ -223,7 +223,8 @@ unsafe fn send_activate_self(a: *mut c_void) {
 /// said 50 ms on (`kicad_mac_focus_taken`), and once more after one retry 50 ms later when it did not (the consent and the chord can
 /// land in either order). The retry is only for that refused case, KiCad still the active app: never once the person moved on (we are
 /// hidden: Cmd+H replayed as HideApp; another app in front: Cmd+Tab; a new press anywhere since), and never once a hand-in or another
-/// focus of ours has happened since (the yield generation). Nothing at all when the window is no longer ours (closed).
+/// focus of ours has happened since (the yield generation; Cmd+H and Cmd+Q, HideApp and Quit, move it too: no retry once the person
+/// hid or quit Backplane). Nothing at all when the window is no longer ours (closed).
 pub fn hand_back(w: u64) {
     focus(w);
     if ns_window(w).is_null() { return }
