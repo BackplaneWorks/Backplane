@@ -5501,6 +5501,16 @@ mod tests {
         let m: HashMap<String, Session> = [("/p/a.kicad_pro".to_string(), s)].into_iter().collect();
         assert!(idle_victims(&m, 300, 300).is_empty()); assert_eq!(idle_victims(&m, 550, 300), ["/p/a.kicad_pro"]);
     }
+    #[test] fn on_the_default_idle_time_a_kicad_used_10_s_ago_is_kept_and_one_unused_301_s_is_closed() {
+        // the default path (BACKPLANE_KICAD_IDLE_S unset: 300 s), for every KiCad in no pane, left or not: an agent's request 10 s ago is use
+        if std::env::var_os("BACKPLANE_KICAD_IDLE_S").is_none() { assert_eq!(warm_idle_s(), 300); }
+        let idle = WARM.idle_s; let now = 10_000;
+        let mk = |p: &str, cont: u64, left: &str, named: u64| { let mut s = Session::new(p, "/p", "fork", "PCB", 1, 0).ready("/s", "", 0); s.container = cont; s.left = left.into();
+            s.touched_at = last_use(s.touched_at, named, false, now); (p.to_string(), s) };
+        let m: HashMap<String, Session> = [mk("/p/agent.kicad_pro", 0, "", now - 10), mk("/p/old.kicad_pro", 0, "", now - 301),
+            mk("/p/left-agent.kicad_pro", 5, "thread", now - 10), mk("/p/left-old.kicad_pro", 5, "thread", now - 301)].into_iter().collect();
+        assert_eq!(idle_victims(&m, now, idle), ["/p/left-old.kicad_pro", "/p/old.kicad_pro"]);
+    }
     #[test] fn the_cap_evicts_the_left_kicad_used_longest_ago_never_one_with_a_dialog_or_unsaved_work() {
         let mk = |pro: &str, left: &str, dialog: bool, dirty: bool, t: u64| {
             let mut s = Session::new(pro, "/p", "fork", "PCB", 1, t).ready("/s", "10.99.0-bp.13", t); s.container = 55; s.pane_cid = "c1".into(); s.left = left.into();

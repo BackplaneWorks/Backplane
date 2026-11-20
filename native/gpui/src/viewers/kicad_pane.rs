@@ -2050,6 +2050,7 @@ impl KicadPane {
         let (left, why) = match s { LeaveSend::Leave(w) => (true, w), LeaveSend::Back => (false, "") };
         let mut params = json!({"project": self.project, "left": left, "why": why});
         if let Some(g) = self.generation.or_else(|| self.info["runtime"]["generation"].as_u64()) { params["generation"] = json!(g); }
+        // always on, unlike the pane's debug lines: at most one per leave and one per back, and it is what the e2e counts (L2)
         eprintln!("GPUI_LOG {}", json!({"kicad_leave": left, "why": why, "project": self.project, "generation": params["generation"], "at_ms": crate::screens::kcomment::epoch_ms() as u64}));
         self.rpc("editor.kicad.leave", params);
     }

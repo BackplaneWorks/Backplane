@@ -9,6 +9,8 @@
 #   L3  Edit again, an agent's unsaved track, the viewer on Files (a leave, "viewer") past the idle time: the same pid, and the hub
 #       heard the leave (unsaved work is kept). (Not another thread here: once this thread's Board is open again, the other thread of
 #       the same project shows the editor too: on screen, no leave.)
+#   L6  that, as intended: the other thread of the same project on its Board shows the editor (on screen), and no leave is sent; the
+#       leave is sent once the last page showing it goes (its viewer on Files)
 # On main (2b6f5300af) L1, L2, L3 and L5 fail (no leave: nothing closes after a thread switch); L4 passes there too (nothing closes).
 # Fork only; copies (seed_project.py).
 set -euo pipefail
@@ -40,6 +42,7 @@ s = [{"select": 1}, {"wait": 2200}, {"click": "rail:Board"}, {"wait": 2500}, {"c
      {"select": 0}, {"mark": "agentaway"}, {"wait": 40000}, {"mark": "agentdone"}, {"wait": 40000}, {"mark": "idlewait"},
      {"select": 1}, {"wait": 3000}, {"kicad": {"report": True, "tag": "l5"}}, {"mark": "l5"},
      {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit"}, {"kicad": {"wait_painted": 90000, "kind": "PCB", "tag": "edit2"}}, {"mark": "edit2"}, {"wait": 25000},
+     {"mark": "both"}, {"select": 0}, {"wait": 2500}, {"kicad": {"report": True, "tag": "other"}}, {"mark": "other"},
      {"click": "rail:Files"}, {"wait": 2000}, {"kicad": {"report": True, "tag": "uaway"}}, {"mark": "unsavedaway"}, {"wait": 40000}, {"mark": "unsaveddone"}, {"wait": 1000}]
 json.dump(s, open(sys.argv[1], "w"))
 PY
@@ -88,6 +91,12 @@ try: v=json.loads(sys.stdin.read()[5:]).get("value") or {}
 except Exception: v={}
 if isinstance(v, str): v=json.loads(v)
 print(len(v.get("agent_unsaved") or []) + len(v.get("unsaved") or []))' 2>/dev/null || echo 0)
+mark both || true; L_BOTH=$(grep -c "left the pane (" "$OUT/hub.log" || true)
+mark other || true; L_OTHER=$(grep -c "left the pane (" "$OUT/hub.log" || true)
+O=$(last_kicad_report "$OUT/client.log" other); OSHOWN=$(python3 -c 'import json,sys; r=json.loads(sys.argv[1] or "{}"); print(int(bool(r.get("pane")) and bool((r.get("container") or {}).get("shown"))))' "${O:-{\}}")
+mark unsavedaway || true; sleep 1; L_LAST=$(grep -c "left the pane (" "$OUT/hub.log" || true)
+echo "INFO the other thread of the same project shows the editor: on screen $OSHOWN, leaves $L_BOTH -> $L_OTHER; its viewer on Files: -> $L_LAST"
+check "L6 another thread of the same project showing the editor keeps it on screen (no leave); the leave comes when the last one showing it goes" "$([ "$OSHOWN" = 1 ] && [ "$L_OTHER" = "$L_BOTH" ] && [ "$L_LAST" = $((L_BOTH + 1)) ] && echo 1 || echo 0)" "shown $OSHOWN; leaves $L_BOTH/$L_OTHER/$L_LAST"
 mark unsaveddone || true
 PID6=$(kpid)
 echo "INFO Edit again: KiCad $PID5 (unsaved docs in the info: $UNS); away past the idle time: ${PID6:-gone}"
