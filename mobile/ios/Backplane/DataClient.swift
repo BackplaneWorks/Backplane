@@ -76,7 +76,13 @@ final class DataClient {
     enum Conn: String { case offline, connecting, online }
 
     // what is shown
-    private(set) var conn: Conn = .offline
+    private(set) var conn: Conn = .offline { didSet { restartStrip() } }
+    // the hub's restarts (feature `restarting`, HubRestart): what the connection strip shows, kept current by one timer
+    private(set) var restartLine: HubRestart.Line = .usual
+    @ObservationIgnored private var restarting: HubRestart.Note?   // the last hub.restarting since the last hello
+    @ObservationIgnored private var hubBack: HubRestart.Note?      // hello.hubBack, as this connection joined
+    @ObservationIgnored private var backShown = ""                  // the hubBack `at` already shown: once each
+    @ObservationIgnored private var restartTimer: Task<Void, Never>?
     private(set) var needsRepair = false { didSet { if needsRepair { logPair("screen", "re-pair") } } }
     private(set) var failure = ""
     private(set) var projects: [DProject] = []
@@ -295,6 +301,7 @@ final class DataClient {
     private func reset(clearDisk: Bool = false) {
         saveTask?.cancel()
         shellHashes = [:]; threadHashes = [:]; threadIds = [:]; subEntriesById = [:]; subEntryIds = []
+        restarting = nil; hubBack = nil; restartStrip()
         notice = HubNotice(); star = nil; telemetryNotice = nil; migration = DMigration(); migrationOpen = false; migrationError = ""
         dueThreads = []; dueProjects = []
         projects = []; threads = []; entries = [:]; older = [:]; loadedThreads = []; listsLoaded = false; open = nil; queues = [:]; queueError = [:]
@@ -393,6 +400,20 @@ final class DataClient {
         }
     }
 
+    /// The strip's line now, and the one timer for when it changes next (HubRestart.next).
+    private func restartStrip() {
+        let now = Date(), online = conn == .online
+        let l = HubRestart.line(restarting: restarting, back: hubBack, online: online, now: now)
+        if l != restartLine { restartLine = l }
+        restartTimer?.cancel(); restartTimer = nil
+        guard let at = HubRestart.next(restarting: restarting, back: hubBack, online: online, now: now) else { return }
+        restartTimer = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(at.timeIntervalSince(now)))
+            guard !Task.isCancelled else { return }
+            self?.restartStrip()
+        }
+    }
+
     // MARK: the home hub (docs/pairing.md, Home hub): its offer, carried out with no dialog, and failing over to it
     private func setHome(_ k: String) { homeKey = k; UserDefaults.standard.set(k, forKey: "data.home") }
     private func leaveHome() { onHome = false; homeWatch?.cancel(); homeWatch = nil; downSince = nil }
@@ -484,6 +505,8 @@ final class DataClient {
             notice = HubRescue.notice(o["notice"] as? [String: Any])
             heardMigration(o["migrating"])
             commands = ((o["commands"] as? [[String: Any]]) ?? []).map { Word(word: $0["word"] as? String ?? "", label: $0["label"] as? String ?? "", desc: $0["desc"] as? String ?? "") }
+            restarting = nil
+            if let b = HubRestart.back(o["hubBack"]), b.at != backShown { backShown = b.at; hubBack = HubRestart.Note(text: b.text, heard: Date()) } else { hubBack = nil }
             conn = .online; failure = ""; backoff = 0.25; plots.reset(); voice.connected()
             if !onHome { downSince = nil }
             Task { await self.synchronise(g) }
@@ -501,6 +524,7 @@ final class DataClient {
         // a schematic's sheets (kicad/watch.rs `sheets`): the newest tree only (`gen` only grows)
         case "sheets": let g = Int64(o["gen"] as? String ?? "") ?? 0; if g >= sheetsGen { sheetsGen = g; sheets = DSheet.rows(o["rows"] as? String ?? "") }
         case "star": star = DStarOffer.of(o["offer"])
+        case "hub.restarting": if let t = HubRestart.restarting(o) { restarting = HubRestart.Note(text: t, heard: Date()); restartStrip() }
         case "telemetry.notice": telemetryNotice = DTelemetryNotice.of(o["notice"])
         case "migrating": heardMigration(o)
         case "info": if let v = (o["info"] as? [String: Any])?["hub.offer"] as? String { heardOffer(v) }
