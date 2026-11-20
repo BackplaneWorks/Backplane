@@ -81,7 +81,7 @@ fn s(p: &Path) -> String { p.to_string_lossy().into_owned() }
     let data: Vec<u8> = (0..(3 * BUF + 17)).map(|i| (i % 251) as u8).collect(); std::fs::write(&f, &data).unwrap();
     let md = std::fs::metadata(&f).unwrap();
     let get = |hs: Vec<(&str, String)>, method: &str| { let mut r = Req::new(method, "/file?path=x", hs.into_iter().map(|(a, b)| (a.to_string(), b)).collect()); r.peer = None; r };
-    let run = |r: Req| { let (f, md) = (f.clone(), md.clone()); async move { let mut out: Vec<u8> = vec![]; stream(&mut out, &r, &f, &md, "big.bin").await.unwrap(); out } };
+    let run = |r: Req| { let (f, md) = (f.clone(), md.clone()); async move { let mut out: Vec<u8> = vec![]; stream(&mut out, Who::Native, &r, &f, &md, "big.bin").await.unwrap(); out } };
     let split = |v: &[u8]| { let i = v.windows(4).position(|w| w == b"\r\n\r\n").unwrap(); (String::from_utf8_lossy(&v[..i]).into_owned(), v[i + 4..].to_vec()) };
     let (h, b) = split(&run(get(vec![], "GET")).await);
     assert!(h.starts_with("HTTP/1.1 200 OK") && h.contains(&format!("Content-Length: {}", data.len())) && h.contains("Accept-Ranges: bytes") && h.contains("ETag: \"") && h.contains("attachment; filename=\"big.bin\""), "{h}");
@@ -98,10 +98,21 @@ fn s(p: &Path) -> String { p.to_string_lossy().into_owned() }
 
 #[test] fn shares_are_kept_privately_and_listed_newest_first() {
     let d = tmp("store");
-    let sh = |id: &str, at: u64| Share { id: id.into(), token: "t".repeat(48), path: "/p/a.zip".into(), name: "a.zip".into(), size: 1, thread: "t1".into(), created: at, expires: at + 10, tailnet: false, url: String::new(), served_port: 0 };
+    let sh = |id: &str, at: u64| Share { id: id.into(), token: "t".repeat(48), path: "/p/a.zip".into(), name: "a.zip".into(), size: 1, thread: "t1".into(), created: at, expires: at + 10, tailnet: false, url: String::new() };
     save(&d, &[sh("a", 1), sh("b", 2)]).unwrap();
     assert_eq!(load(&d).len(), 2);
     #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; assert_eq!(std::fs::metadata(store_path(&d)).unwrap().permissions().mode() & 0o777, 0o600) }
     let l = listed(&load(&d)); assert_eq!((l[0]["id"].as_str(), l[1]["id"].as_str()), (Some("b"), Some("a")));
     assert_eq!(l[0]["link"], format!("/s/{}/a.zip", "t".repeat(48)));
+}
+
+#[test] fn headers_never_let_a_file_act_with_the_origin_and_never_leak_a_share() {
+    for who in [Who::Native, Who::Browser, Who::Share] {
+        let h = String::from_utf8(head_bytes(who, "200 OK", "text/plain; charset=utf-8", 1, "")).unwrap();
+        for need in ["X-Content-Type-Options: nosniff", "sandbox", "Cross-Origin-Resource-Policy: same-origin", "Referrer-Policy: no-referrer", "default-src 'none'"] { assert!(h.contains(need), "{who:?} {need}") }
+        assert!(h.contains(if who == Who::Native { "Cache-Control: private, no-cache" } else { "Cache-Control: private, no-store" }), "{who:?}");
+    }
+    for t in ["image/png", "application/pdf", "text/plain; charset=utf-8"] { assert!(inline_ok(t)) }
+    for t in ["text/html", "image/svg+xml", "text/csv; charset=utf-8", "application/json", "application/octet-stream", "application/xhtml+xml"] { assert!(!inline_ok(t), "{t}") }
+    for n in ["a.html", "a.htm", "a.svg", "a.xhtml", "a.js"] { assert!(!inline_ok(ctype(n)), "{n}: {}", ctype(n)) }
 }
