@@ -22,9 +22,9 @@ pub mod kicad { pub mod canonical { pub fn design_root(root: &str) -> String { r
         "GERBVIEW" | "FK_GERBVIEW" => "GERBVIEW", "SIMULATOR" | "FK_SIMULATOR" | "SIMULATION" | "SIM" => "SIMULATOR", _ => "OTHER" } }
     pub fn kind_of_fk_val(v: &Value) -> &'static str { if let Some(s) = v.as_str() { return canon_frame(s) }
         match v.as_i64().unwrap_or(0) { 1 => "PCB", 2 => "SCH", 3 => "SYMBOL_EDITOR", 4 => "FOOTPRINT_EDITOR", 5 => "PCB_3D", 7 => "GERBVIEW", 8 => "SIMULATOR", _ => "OTHER" } }
-    pub fn pane_client(_: &str) -> Option<u64> { None } pub fn norm_pro_key(p: &str) -> String { p.to_string() }
+    pub fn pane_key(_: &str) -> Option<String> { None } pub fn norm_pro_key(p: &str) -> String { p.to_string() }
     pub fn gui_route(_: &str) -> Option<GuiRoute> { None } pub async fn gui_call(_: &GuiRoute, _: &str, _: Value) -> Value { Value::Null } pub fn session_state(_: &str) -> Value { Value::Null } }
-#[allow(dead_code)] pub mod watch { pub fn pane_frame_of(_: u64, _: &str) -> Option<String> { None } }
+#[allow(dead_code)] pub mod watch { pub fn pane_frame_of(_: &str, _: &str) -> Option<String> { None } }
 #[allow(dead_code)] pub mod xprobe { pub fn has_select_items(_: &super::embed::GuiRoute) -> bool { false } }
 #[allow(dead_code)] pub mod coedit { pub fn person_selection_at(_: &str, _: &str) -> Option<std::time::Instant> { None } }
 #[path="../kicad/gerber/names.rs"] #[allow(dead_code)] pub mod gerber_names;

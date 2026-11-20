@@ -1354,12 +1354,27 @@ pub fn has_frame(pro: &str, kind: &str) -> bool { open_frames().lock().unwrap().
 /// Whether each project's ready KiCad is in a client's pane (attached to a container, not parked), kept at every publish (put_route).
 fn attached_panes() -> &'static Mutex<HashMap<String, bool>> { static P: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new(); P.get_or_init(Default::default) }
 fn attach_clients() -> &'static Mutex<HashMap<String, u64>> { static C: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new(); C.get_or_init(Default::default) }
-/// The client whose pane the project's ready KiCad is in now (attached to its container, not parked), for Follow agent (kicad/follow.rs):
-/// None when it is in no pane. No round trip.
-pub fn pane_client(pro: &str) -> Option<u64> {
+/// The window whose pane the project's ready KiCad is in now (attached to its container, not parked), for Follow agent (kicad/follow.rs),
+/// by its key (watch::pane_key): the pane's `cid` while that client is connected (on whichever connection: a reconnect keeps it), else the
+/// attaching connection (a client with no cid). None when it is in no pane. No round trip.
+pub fn pane_key(pro: &str) -> Option<String> {
     let k = norm_pro_key(pro);
-    if !attached_panes().lock().unwrap().get(&k).copied().unwrap_or(false) { return None }
-    attach_clients().lock().unwrap().get(&k).copied()
+    let attached = attached_panes().lock().unwrap().get(&k).copied().unwrap_or(false);
+    let (cid, connected) = {
+        let r = rt().lock().unwrap();
+        let cid = r.entries.get(&k).and_then(|e| e.session.as_ref()).map(|s| s.pane_cid.clone()).unwrap_or_default();
+        let a = hub_attached(&r);
+        let connected = holder_of(&r, &cid, &a).is_some();
+        (cid, connected)
+    };
+    pane_key_from(attached, &cid, connected, attach_clients().lock().unwrap().get(&k).copied())
+}
+/// Pure: the pane's window key from what the hub knows (`attached`: its KiCad in a pane; `cid`, `connected`: the pane's cid and whether
+/// that client is on a connection now; `conn`: the connection that attached it).
+pub fn pane_key_from(attached: bool, cid: &str, connected: bool, conn: Option<u64>) -> Option<String> {
+    if !attached { return None }
+    if !cid.is_empty() { return connected.then(|| cid.to_string()) }
+    conn.map(|c| format!("c{c}"))
 }
 /// Projects whose GUI KiCad is starting or closing: the hub starts no headless KiCad for them meanwhile (it would take the project's lock
 /// first, and the GUI KiCad would ask "File Open Warning: already open" outside the pane: the release check's fresh-home stall, Nov 16).
@@ -3973,6 +3988,12 @@ pub fn stand_in_route(pro: &str) -> (GuiRoute, mpsc::UnboundedReceiver<(String, 
 
 #[cfg(test)]
 mod tests {
+    #[test] fn follow_finds_the_pane_by_its_window_across_a_reconnect() {
+        assert_eq!(pane_key_from(true, "gpui-1-2", true, Some(7)).as_deref(), Some("gpui-1-2"), "by the window's cid, whatever its connection now");
+        assert_eq!(pane_key_from(true, "gpui-1-2", false, Some(7)), None, "that window not connected (quit, or between connections): no pane to follow into");
+        assert_eq!(pane_key_from(true, "", false, Some(7)).as_deref(), Some("c7"), "a client with no cid: its attaching connection, as before");
+        assert_eq!(pane_key_from(false, "gpui-1-2", true, Some(7)), None, "KiCad in no pane (parked, detached, not ready)");
+    }
     #[cfg(unix)]
     #[test] fn a_restart_sweep_removes_only_this_hosts_unheld_locks() {
         use std::os::unix::io::AsRawFd;

@@ -169,7 +169,7 @@ const HOLD_EVERY: Duration = Duration::from_millis(300);
 /// The frame shown by the pane that holds the project's embedded KiCad, when that window's page is `thread`'s: the window KiCad is
 /// attached to (embed), never another window's report (two windows on one hub, a phone on the same thread).
 pub fn pane_frame(thread: &str, path: &str) -> Option<String> {
-    super::embed::pane_client(&super::ipc::pro_of(path)).and_then(|c| super::watch::pane_frame_of(c, thread))
+    super::embed::pane_key(&super::ipc::pro_of(path)).and_then(|k| super::watch::pane_frame_of(&k, thread))
 }
 /// Whether `thread`'s page holds the project's embedded KiCad in this hub's window now.
 pub fn in_pane(thread: &str, path: &str) -> bool { pane_frame(thread, path).is_some() }
