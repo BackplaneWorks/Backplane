@@ -371,6 +371,10 @@ impl Backplane {
         if h == Held::Projects && mac() && self.input.focus_handle(cx).contains_focused(window, cx) { return Held::None }
         h
     }
+    /// Only the canvases drawn on this page can spend Escape on a highlight.
+    fn escape_plot_slots(open: &str, split: &[&str]) -> [bool; 3] {
+        [matches!(open, "board" | "schematic" | "gerbers"), open == "split" && split.contains(&"sch"), open == "split" && split.contains(&"pcb")]
+    }
     /// Esc once nothing over the page took it (0.14's WS.esc.next, after the terminal): the plot's tapped piece goes, else the viewer shuts as its lit rail button
     /// does and the keyboard goes back to the message box; with nothing to put away the keyboard leaves the message box, so a bare key may press a rail button
     /// ("/" or Esc again brings it back), and from anywhere else it goes back to it. Never from a field, a shell or a web page, whose Esc it is. True when it acted.
@@ -378,16 +382,30 @@ impl Backplane {
         // the token panel (the Context chip's) shuts first, as 0.14's did
         if self.screens.ctx_open { self.screens.ctx_open = false; return true }
         if window.context_stack().iter().any(|k| ESC_OWNERS.iter().any(|o| k.contains(o))) { return false }
+        let thread = &self.data["thread"];
+        let viewer_open = crate::screens::viewer::is_open(thread);
+        let open = if viewer_open && !thread["diff"].is_object() { thread["viewer"]["open"].as_str().unwrap_or("") } else { "" };
+        let split = if open == "split" { crate::screens::viewer::split_visible() } else { Vec::new() };
+        let slots = Self::escape_plot_slots(open, &split);
+        let solid = matches!(open, "3d" | "mech") || split.contains(&"3d");
+        let kept = thread["viewer"]["probe"].as_str().is_some_and(|p| !p.is_empty());
         let mut put = false;
-        for slot in 0..3 { let pv = self.screens.pv(slot); if pv.picked.is_some() || pv.card.is_some() || !pv.lit.is_empty() { pv.picked = None; pv.card = None; pv.lit.clear(); put = true; } }
-        // (the hub's probe goes with it, as the canvas's own Esc and the chip's x do: the 3D model's lit part too, and no page lights it again)
-        let kept = self.data["thread"]["viewer"]["probe"].as_str().map_or(false, |p| !p.is_empty());
-        if put || (kept && crate::screens::viewer::shows_solid(&self.data["thread"]) && !crate::screens::plotview::probed_part(self).is_empty()) { if kept { crate::screens::plotview::keep_probe(self, None); } return true }
+        for (slot, shown) in slots.into_iter().enumerate() {
+            if !shown { continue }
+            let pv = self.screens.pv(slot);
+            if pv.picked.is_some() || pv.card.is_some() || !pv.lit.is_empty() {
+                pv.picked = None; pv.card = None; pv.lit.clear(); put = true;
+            }
+        }
+        if put || (kept && solid && !crate::screens::plotview::probed_part(self).is_empty()) {
+            if kept { crate::screens::plotview::keep_probe(self, None); }
+            return true
+        }
         // a web page with the keyboard keeps its Esc (the old client gave the bot's page every key)
         let in_viewer = window.context_stack().iter().any(|k| k.contains("Viewer"));
         if in_viewer && crate::screens::viewer::active_kind(&self.data["thread"]["viewer"], None) == "browser" { return false }
         if crate::screens::mgmt::escape(self, cx) { return true }
-        if crate::screens::viewer::is_open(&self.data["thread"]) {
+        if viewer_open {
             self.screens.rail_pending = Some(String::new()); self.screens.rail_at = Some(std::time::Instant::now());
             let _ = self.tx.try_send(crate::screens::viewer::close()); self.want_focus = true; return true
         }
@@ -496,6 +514,18 @@ mod tests {
     }
     fn d(key: &str, ctx: &[&str]) -> String { does(&Local::default(), key, ctx) }
 
+    #[test] fn a_closed_viewers_stale_highlight_leaves_escape_for_composer_blur() {
+        let lit = [true; 3];
+        let consumes_probe = |page, panes: &[&str]| Backplane::escape_plot_slots(page, panes)
+            .into_iter().zip(lit).any(|(shown, lit)| shown && lit);
+        assert!(!consumes_probe("", &[]));
+        assert!(!consumes_probe("files", &[]));
+        assert!(!consumes_probe("split", &["3d"]));
+        assert!(consumes_probe("board", &[]));
+        assert_eq!(Backplane::escape_plot_slots("split", &["pcb"]), [false, false, true]);
+        assert_eq!(d("escape", &["Composer"]), "backplane::ClosePopup");
+        assert_eq!(d("b", &[]), "keys::RailBoard");
+    }
     #[test] fn global_scope_keys_work_everywhere_including_the_composer() {
         for ctx in [&[][..], &["Composer"][..], &["TextInput"][..]] {
             assert_eq!(d("ctrl-k", ctx), "backplane::OpenPaletteKey"); assert_eq!(d("ctrl-shift-p", ctx), "backplane::OpenPaletteKey");
