@@ -143,6 +143,12 @@ pub struct Session {
     /// KiCad answered our Close `exiting` (its saves are written by then: measured, CM_SAVE answers after both files are on disk): the
     /// frames it still tears down do not hold the exit bound's kill; with no answer they do
     pub close_answered: bool,
+    /// the exit bound ended it (a hang): its signal is that, not a crash
+    pub killed_by_hub: bool,
+    /// a Close was sent and KiCad has not answered yet: it may be asking the person something (a save that failed, an editor's own save
+    /// question), so it is not `closing` and never killed; it stays reachable (an Edit attaches to it), the hub listens for the late
+    /// answer (`exiting`: closing, the bound from then; an error or a refusal: live as it was)
+    pub close_pending: bool,
     /// the last use (epoch s): an attach, a show, a warm-up's Have, a leave or back, an agent's or a panel's request to it, a job of its
     /// running (`note_use`); the idle close counts from it
     pub touched_at: u64,
@@ -203,7 +209,7 @@ impl Session {
             container: 0, toplevel: 0, holder: 0, display: String::new(), start_phase: String::new(), start_at: 0, lock_ask: Value::Null,
             sock: String::new(), events_sock: String::new(), sock_dir: String::new(),
             argv: String::new(), cli: String::new(), version: String::new(), desc: String::new(),
-            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], keys: vec![], rss_mb: 0, peak_mb: 0, mem_pub: (0, 0), peak_logged: false, stop_reason: String::new(), stopped_at: 0, closed_frames: vec![], pane_cid: String::new(), active_by: Value::Null, task_wait: String::new(), parked: false, left: String::new(), holder_gone_at: 0, last_pid: 0, busy: false, gone_kinds: vec![], closing_ask: String::new(), close_answered: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None), opening: None, lib_opened: None,
+            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], keys: vec![], rss_mb: 0, peak_mb: 0, mem_pub: (0, 0), peak_logged: false, stop_reason: String::new(), stopped_at: 0, closed_frames: vec![], pane_cid: String::new(), active_by: Value::Null, task_wait: String::new(), parked: false, left: String::new(), holder_gone_at: 0, last_pid: 0, busy: false, gone_kinds: vec![], closing_ask: String::new(), close_answered: false, killed_by_hub: false, close_pending: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None), opening: None, lib_opened: None,
         }
     }
     pub fn spawned(mut self, pid: u32) -> Self { self.pid = pid; self }
@@ -272,7 +278,7 @@ impl Session {
     /// forgotten, and its idle time counted from now (not chosen again at the next tick).
     /// The process `pid` has ended: no start waits on it any more.
     pub fn forget_ended(&mut self, pid: u32) { if self.last_pid == pid { self.last_pid = 0; } }
-    pub fn live_again(&mut self, now: u64) { self.closing = false; self.stop_reason.clear(); self.touched_at = now; }
+    pub fn live_again(&mut self, now: u64) { self.closing = false; self.close_pending = false; self.stop_reason.clear(); self.touched_at = now; }
     pub fn detached(mut self, now: u64) -> Self {
         self.container = 0; self.left.clear(); self.touched_at = now; self
     }
@@ -286,7 +292,7 @@ impl Session {
         self.state = "stopped".into(); self.reason = reason.into(); self.pid = 0; self.holder = 0;
         self.frames.clear(); self.dialogs.clear(); self.ended(); self
     }
-    fn ended(&mut self) { self.stopped_at = ipc::now_s(); self.closed_frames.clear(); self.pane_cid.clear(); self.left.clear(); self.holder_gone_at = 0; self.gone_kinds.clear(); self.closing_ask.clear(); self.close_answered = false; }
+    fn ended(&mut self) { self.stopped_at = ipc::now_s(); self.closed_frames.clear(); self.pane_cid.clear(); self.left.clear(); self.holder_gone_at = 0; self.gone_kinds.clear(); self.closing_ask.clear(); self.close_answered = false; self.killed_by_hub = false; self.close_pending = false; }
     /// KiCad's process ended: `how` its exit ("signal 9 (SIGKILL)", "code 1"; empty: code alone), `tail` its last output lines (kept in
     /// the hub's log only). After it was ready it closed unexpectedly (a crash, a kill): said as that, with how, never its output. Before
     /// it was ready its start failed: the reason is an error line of its output, never start-up noise (Fontconfig, GTK, GLib, Mesa).
@@ -294,6 +300,8 @@ impl Session {
     pub fn exited_how(self, code: i32, how: &str, tail: &str) -> Self {
         // closing: after our Close answered (or went unanswered), or KiCad's own Quit (its socket gone with no frame left: frames_left):
         // however it ends, the close it was. A signal or a code here is an abort at exit, logged, never shown as a crash
+        // (`closing` is set only by KiCad's answer `exiting`, or its own Quit with every frame closed: a crash in the middle of a Close it
+        // has not answered, a save, is not closing here, and is shown as a crash below)
         if self.closing {
             if code != 0 || !how.is_empty() { eprintln!("kicad embed: {} ended after its close ({}): an abort at exit, recorded as the close ({})", self.pro, if how.is_empty() { format!("code {code}") } else { how.to_string() }, self.stop_reason); }
             return self.stopped("")
@@ -357,6 +365,7 @@ impl Session {
             // held "starting" while the project's previous KiCad ends (HELD_REASON): the pane says KiCad is closing, not a hung start
             "waits_previous": self.state == "starting" && self.reason == HELD_REASON,
             "closing_ask": self.closing_ask,
+            "close_pending": self.close_pending,
             "agent_unsaved": json!(agent_unsaved(&self.pro).iter().map(|d| Path::new(d).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect::<Vec<_>>()),
             "dialogs": self.dialogs,
             "notices": self.notices,
@@ -773,7 +782,7 @@ pub fn evict_warm(sessions: &HashMap<String, Session>, keep_pro: &str, max_warm:
     let live = sessions.values().filter(|s| s.pro != keep_pro && s.is_live()).count();
     if live < max_warm { return None }
     sessions.values()
-        .filter(|s| s.pro != keep_pro && s.state == "ready" && out_of_pane(s) && !s.busy && s.unsaved_docs().is_empty())
+        .filter(|s| s.pro != keep_pro && s.state == "ready" && out_of_pane(s) && !s.busy && !s.close_pending && s.unsaved_docs().is_empty())
         .min_by_key(|s| s.touched_at)
         .map(|s| s.pro.clone())
 }
@@ -1152,6 +1161,11 @@ pub fn closing_not_reused(s: &Session) -> bool { s.closing && matches!(s.state.a
 /// How long the hub waits for a KiCad to end after its own idle or eviction Close before it takes it for a hang and ends it (#1470: on
 /// Windows one answered that Close and never exited, and the next Edit waited on it for ever). BACKPLANE_KICAD_IDLE_CLOSE_BOUND_S (tests).
 pub const IDLE_CLOSE_BOUND: Duration = Duration::from_secs(15);
+/// How long the caller of a Close waits for KiCad's answer before it hears "not answered yet" (the hub goes on listening).
+pub const CLOSE_REPLY_MS: u64 = 15_000;
+/// How long the hub listens for KiCad's answer to a Close (a question it asks the person may stay up that long); past it the Close is
+/// taken as lost and the KiCad as live.
+pub const CLOSE_ANSWER_WAIT_MS: u64 = 30 * 60 * 1000;
 fn idle_close_bound() -> Duration { std::env::var("BACKPLANE_KICAD_IDLE_CLOSE_BOUND_S").ok().and_then(|v| v.parse().ok()).map_or(IDLE_CLOSE_BOUND, Duration::from_secs) }
 /// The frames KiCad still has: those in its last picture whose ET_FRAME_CLOSED has not been seen (`gone_kinds`).
 pub fn frames_left(s: &Session) -> usize { s.frames.iter().filter(|f| !s.gone_kinds.iter().any(|k| *k == f.kind)).count() }
@@ -1185,12 +1199,16 @@ pub fn bound_check(s: &Session, job: Option<&str>) -> BoundStep {
     if !hubs_own && !s.close_answered && left > 0 { return BoundStep::Wait(format!("{left} frame(s) not closed yet, and its Close had no answer")) }
     BoundStep::Kill
 }
+/// (B) Whether a closing session's process `pid` has ended (`alive` false) while the session still runs it: its exit was not reported
+/// (ChildExited waits on its output pipes) and is recorded by the hub.
+pub fn exit_unreported(s: &Session, pid: u32, alive: bool) -> bool { !alive && s.closing && s.is_live() && s.pid == pid }
 /// KiCad's socket went (its events stream refused, the process still there): its own Quit when it has no frame left, every frame closed
 /// before (measured: the last question answered, every save written, Local History, the last frame closed, then the refusal). Then it
 /// is closing (the person's close, `kicadQuit`) and the exit bound runs. With a frame still open it is no quit: a crash on its way, shown
 /// as one when it comes (false).
 pub fn socket_gone(s: &mut Session) -> bool {
-    if s.closing || !s.is_live() || frames_left(s) > 0 { return false }
+    // (D) only a KiCad that had frames and closed them all: an empty picture (a start, a ready KiCad listing none) is no quit
+    if s.closing || !matches!(s.state.as_str(), "ready" | "unresponsive") || s.gone_kinds.is_empty() || frames_left(s) > 0 { return false }
     s.closing = true; if s.stop_reason.is_empty() { s.stop_reason = "kicadQuit".into(); }
     true
 }
@@ -1225,7 +1243,7 @@ pub const HOLDER_GONE: &str = "holderGone";
 /// The sessions to close for idleness: up, out of the pane (`out_of_pane`), nothing unsaved, not used for `idle_s` (`touched_at`).
 pub fn idle_victims(sessions: &HashMap<String, Session>, now: u64, idle_s: u64) -> Vec<String> {
     let mut v: Vec<String> = sessions.values()
-        .filter(|s| s.state == "ready" && out_of_pane(s) && !s.closing && s.unsaved_docs().is_empty() && now.saturating_sub(s.touched_at) >= idle_s)
+        .filter(|s| s.state == "ready" && out_of_pane(s) && !s.closing && !s.close_pending && s.unsaved_docs().is_empty() && now.saturating_sub(s.touched_at) >= idle_s)
         .map(|s| s.pro.clone()).collect();
     v.sort(); v
 }
@@ -1910,6 +1928,10 @@ enum Msg {
     CloseBound { pro: String, gen: u64, pid: u32, since: std::time::Instant },
     /// the person's or an agent's Close answered `exiting` (or got no answer): the session is closing and the real exit is waited for
     CloseAnswered { pro: String, gen: u64, pid: u32, answered: bool, reply: Option<oneshot::Sender<Result<Value, String>>> },
+    /// KiCad has not answered a Close within CLOSE_REPLY_MS: its caller is told so (the hub goes on listening)
+    ClosePending { pro: String, gen: u64, reply: oneshot::Sender<Result<Value, String>> },
+    /// a Close got no answer at all (its socket went, or nothing within CLOSE_ANSWER_WAIT_MS): never taken for `exiting`
+    CloseUnanswered { pro: String, gen: u64, why: String, reply: Option<oneshot::Sender<Result<Value, String>>> },
     /// the fork's events stream went (its socket refuses) while the session lived: KiCad's own Quit, or a crash on its way (`socket_gone`)
     EventsGone { pro: String, gen: u64 },
     /// The person closed a board or schematic editor in KiCad (ET_FRAME_CLOSED) while KiCad lives on, or it opened again (ET_FRAME_OPENED)
@@ -2209,9 +2231,10 @@ impl Actor {
     /// Close a KiCad of ours the hub no longer keeps: `why` is its stopReason ("idle", "evicted", "appClosed").
     fn retire(&mut self, victim: &str, why: &str) {
         let Some(vs) = self.sessions.get_mut(victim) else { return };
-        vs.closing = true; vs.stop_reason = why.into();
+        // asked, not closing yet: `closing` comes with KiCad's answer `exiting` (Msg::CloseAnswered); until then it is never killed and
+        // stays reachable, and the idle close and the cap leave it alone (close_pending)
+        vs.close_pending = true; vs.stop_reason = why.into();
         let vs_snap = vs.clone();
-        // the picture says it is closing (`closing`): a pane on it lets it go, an attach waits for its end (closing_not_reused)
         self.publish(&vs_snap, None);
         if vs_snap.mode == "fork" && !vs_snap.sock.is_empty() {
             let me = self.me.clone();
@@ -2219,7 +2242,7 @@ impl Actor {
             // is a hang, ended (Msg::CloseBound); every other close is the close-wait PR's
             let bound = Some((me.clone(), vs_snap.pro.clone(), vs_snap.gen, vs_snap.pid, std::time::Instant::now()));
             tokio::spawn(async move {
-                let o = raw_on(&me, &vs_snap.sock, &vs_snap.desc, "kiapi.backplane.embed.Close", json!({"mode":"CM_FAIL_IF_MODIFIED"}), 10000).await;
+                let o = raw_on(&me, &vs_snap.sock, &vs_snap.desc, "kiapi.backplane.embed.Close", json!({"mode":"CM_FAIL_IF_MODIFIED"}), CLOSE_ANSWER_WAIT_MS).await;
                 // refused by KiCad (a status: it became modified since it was chosen, or its task holds it): it keeps running, and is not
                 // closing any more, or every later Edit would wait on a close that never comes (closing_not_reused). No answer at all (a
                 // KiCad already going, or hung) is no refusal: the bound below takes it
@@ -2228,8 +2251,11 @@ impl Actor {
                     let _ = me.send(Msg::CloseRefused { pro: vs_snap.pro.clone(), gen: vs_snap.gen });
                     return
                 }
-                // answered (or not): its real exit is waited for, the bound counted from here (Msg::CloseAnswered)
-                if let Some((me, pro, gen, pid, _)) = bound { let _ = me.send(Msg::CloseAnswered { pro, gen, pid, answered: o["ok"] == true, reply: None }); }
+                // answered `exiting`: its real exit is waited for, the bound counted from here (Msg::CloseAnswered). No answer at all (its
+                // socket gone: the exit or KiCad's own end says what it was; or nothing in CLOSE_ANSWER_WAIT): never taken for `exiting`
+                if let Some((me, pro, gen, pid, _)) = bound {
+                    let _ = me.send(if o["ok"] == true { Msg::CloseAnswered { pro, gen, pid, answered: true, reply: None } } else { Msg::CloseUnanswered { pro, gen, why: o["error"].as_str().unwrap_or("no answer").to_string(), reply: None } });
+                }
             });
         } else {
             Self::kill_pid(vs_snap.pid);
@@ -2676,20 +2702,33 @@ impl Actor {
         }
         // who asked: a desktop client (a connection that opened a view: the person's Close) or anything else (an agent's tool): the
         // person's close keeps the next automatic open away, an agent's does not (viewer.runtime.session closedByPerson / cold)
-        if let Some(x) = self.sessions.get_mut(&pro) { x.stop_reason = if client_cid(client).is_some() { "closeAsked" } else { "agentClosed" }.into(); }
+        if let Some(x) = self.sessions.get_mut(&pro) {
+            x.stop_reason = if client_cid(client).is_some() { "closeAsked" } else { "agentClosed" }.into();
+            if x.mode == "fork" { x.close_pending = true; let snap = x.clone(); self.publish(&snap, None); } // asked, not closing yet
+        }
         let me = self.me.clone();
         let save_norm = save.trim().to_ascii_lowercase();
         if s.mode == "fork" && !s.sock.is_empty() {
             let cm = close_mode_of(&save_norm);
             let pid = s.pid;
             tokio::spawn(async move {
-                let o = raw_on(&me, &s.sock, &s.desc, "kiapi.backplane.embed.Close", json!({"mode": cm}), 15000).await;
-                // answered `exiting`, or no answer at all (a long save, a KiCad already going or hung): closing, and its real exit is waited
-                // for and recorded (Msg::CloseAnswered; the exit bound ends a hang). Before: a made-up exit 0 at once and a kill 800 ms
-                // later, which hid every abort and hang at exit and could cut a save short. Refused by KiCad (a status): it keeps running
-                if o["ok"].as_bool().unwrap_or(false) || !close_refused(&o) {
-                    let _ = me.send(Msg::CloseAnswered { pro: s.pro.clone(), gen: s.gen, pid, answered: o["ok"] == true, reply: Some(reply) });
-                } else {
+                // the caller is answered at once on KiCad's answer, or after CLOSE_REPLY_MS with "not answered yet" (KiCad may be asking the
+                // person something: a save that failed, an editor's own save question); the hub goes on listening for the late answer
+                let reply = Arc::new(Mutex::new(Some(reply)));
+                { let (me, r, p, g) = (me.clone(), reply.clone(), s.pro.clone(), s.gen); tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(CLOSE_REPLY_MS)).await;
+                    if let Some(r) = r.lock().unwrap().take() { let _ = me.send(Msg::ClosePending { pro: p, gen: g, reply: r }); }
+                }); }
+                let o = raw_on(&me, &s.sock, &s.desc, "kiapi.backplane.embed.Close", json!({"mode": cm}), CLOSE_ANSWER_WAIT_MS).await;
+                let reply = reply.lock().unwrap().take();
+                // answered `exiting`: closing, and its real exit is waited for and recorded (Msg::CloseAnswered; the exit bound ends a hang).
+                // Before: a made-up exit 0 at once and a kill 800 ms later, which hid every abort and hang at exit and could cut a save
+                // short. No answer at all: never taken for `exiting` (Msg::CloseUnanswered). Refused by KiCad (a status): it keeps running
+                if o["ok"].as_bool().unwrap_or(false) {
+                    let _ = me.send(Msg::CloseAnswered { pro: s.pro.clone(), gen: s.gen, pid, answered: true, reply });
+                } else if !close_refused(&o) {
+                    let _ = me.send(Msg::CloseUnanswered { pro: s.pro.clone(), gen: s.gen, why: o["error"].as_str().unwrap_or("no answer").to_string(), reply });
+                } else if let Some(reply) = reply {
                     let err = o["error"].as_str().unwrap_or("KiCad refused to close").to_string();
                     let mut unsaved = s.unsaved_docs();
                     if unsaved.is_empty() {
@@ -2701,6 +2740,9 @@ impl Actor {
                     }
                     let _ = me.send(Msg::CloseRefused { pro: s.pro.clone(), gen: s.gen });
                     let _ = reply.send(Ok(json!({"closed":false,"error":err,"unsaved":unsaved})));
+                } else {
+                    // refused late (after the caller heard "not answered yet"): live as it was
+                    let _ = me.send(Msg::CloseRefused { pro: s.pro.clone(), gen: s.gen });
                 }
             });
             return;
@@ -2865,7 +2907,16 @@ impl Actor {
             Msg::CloseBound { pro, gen, pid, since } => {
                 self.note_use(); // `busy` read now: a request in flight or a job
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.pid == pid && s.is_live()) else { return };
-                if !crate::plat::proc::alive(pid) { return }
+                if !crate::plat::proc::alive(pid) {
+                    // (B) gone, and its exit not recorded yet (a helper it started keeps its output pipes open): recorded now, never a
+                    // `closing` that outlives its process
+                    if exit_unreported(s, pid, false) {
+                        eprintln!("kicad embed: {pro}: pid {pid} has ended but its exit was not reported: recorded now");
+                        let me = self.me.clone();
+                        let _ = me.send(Msg::ChildExited { pro, gen, pid, code: if s.killed_by_hub { -9 } else { 0 }, how: if s.killed_by_hub { "signal 9 (SIGKILL)".into() } else { String::new() }, tail: String::new(), reply: None });
+                    }
+                    return
+                }
                 let ms = since.elapsed().as_millis();
                 let job = super::progress::running_for(&pro);
                 match bound_check(s, job.as_deref()) {
@@ -2877,7 +2928,11 @@ impl Actor {
                     BoundStep::Kill => {
                         let what = if s.stop_reason == "kicadQuit" { "quit" } else { "close" };
                         eprintln!("kicad embed: {pro}: a hang after its {} {what}: pid {pid} still running {ms} ms after it, killed", s.stop_reason);
+                        s.killed_by_hub = true;
                         Self::kill_pid(pid);
+                        // (B) looked at again: its exit recorded even if its output pipes stay open
+                        let me = self.me.clone();
+                        tokio::spawn(async move { tokio::time::sleep(Duration::from_secs(8)).await; let _ = me.send(Msg::CloseBound { pro, gen, pid, since }); });
                     }
                     // never a silent for-ever: each skipped kill said, and looked at again a bound later; a dialog up the whole bound is
                     // published (`closing_ask`): the pane says KiCad waits for an answer
@@ -2892,7 +2947,7 @@ impl Actor {
             }
             Msg::CloseAnswered { pro, gen, pid, answered, reply } => {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.is_live()) else { if let Some(r) = reply { let _ = r.send(Ok(json!({"closed":true}))); } return };
-                s.closing = true; s.close_answered = answered;
+                s.closing = true; s.close_answered = answered; s.close_pending = false;
                 eprintln!("kicad embed: {pro}: its {} close {}: waiting for KiCad (pid {pid}) to end", s.stop_reason, if answered { "answered exiting" } else { "had no answer" });
                 let snap = s.clone();
                 match reply { Some(r) => self.publish_and_reply(&snap, None, r, Ok(json!({"closed": true, "closing": true}))), None => self.publish(&snap, None) }
@@ -2900,6 +2955,21 @@ impl Actor {
                     let me = self.me.clone(); let since = std::time::Instant::now();
                     tokio::spawn(async move { tokio::time::sleep(idle_close_bound()).await; let _ = me.send(Msg::CloseBound { pro, gen, pid, since }); });
                 }
+            }
+            Msg::ClosePending { pro, gen, reply } => {
+                let why = "KiCad has not answered the close: it may be asking a question (its window shows it); it stays open, and the hub goes on listening for its answer";
+                if let Some(s) = self.sessions.get(&pro).filter(|s| s.gen == gen && s.is_live() && s.close_pending) {
+                    eprintln!("kicad embed: {pro}: its {} close has no answer after {} s: {why}", s.stop_reason, CLOSE_REPLY_MS / 1000);
+                }
+                let _ = reply.send(Ok(json!({"closed": false, "pending": true, "error": why})));
+            }
+            Msg::CloseUnanswered { pro, gen, why, reply } => {
+                // its exit (if that is what it was) is recorded by ChildExited; a live KiCad whose Close was lost is live as it was
+                if let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.is_live() && s.close_pending) {
+                    eprintln!("kicad embed: {pro}: its {} close got no answer ({why}): not taken for `exiting`; it is live as it was", s.stop_reason);
+                    s.live_again(ipc::now_s()); let snap = s.clone(); self.publish(&snap, None);
+                }
+                if let Some(r) = reply { let _ = r.send(Ok(json!({"closed": false, "error": format!("KiCad did not answer the close ({why})")}))); }
             }
             Msg::EventsGone { pro, gen } => {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.is_live() && s.pid > 0) else { return };
@@ -3953,7 +4023,9 @@ async fn spawn_gui_session(
                 crate::plat::proc::kill_group(pid, crate::plat::proc::KILL);
             }
             done.store(true, Ordering::SeqCst);
-            let _ = so.await; let _ = se.await;
+            // (B) its output drained, but never waited on past a moment: a helper KiCad started (a viewer, an editor) may keep the pipes
+            // open long after KiCad itself has ended, and its exit must be recorded now
+            let _ = tokio::time::timeout(Duration::from_millis(1500), async { let _ = so.await; let _ = se.await; }).await;
             let joined: Vec<String> = tail.lock().unwrap().iter().cloned().collect();
             let _ = me.send(Msg::ChildExited { pro, gen, pid, code, how, tail: joined.join("\n"), reply: None });
         });
@@ -5849,6 +5921,44 @@ mod tests {
         f.forget_ended(57); assert_eq!(f.last_pid, 41, "another process: kept");
         f.forget_ended(41); assert_eq!(f.last_pid, 0, "it ended: a pid used again later never holds an Edit");
         assert_eq!(previous_alive(&f, |_| true), None);
+    }
+    #[test] fn a_close_kicad_has_not_answered_is_not_closing_and_never_killed() {
+        // (A) asked, no answer yet (KiCad may be asking the person): reachable, never killed, left alone by the idle close and the cap
+        let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0).spawned(41); s.close_pending = true; s.stop_reason = "closeAsked".into();
+        assert!(!s.closing && !closing_not_reused(&s), "an Edit attaches to it (its question is in its window)");
+        assert_eq!(bound_check(&s, None), BoundStep::Stop, "no bound, no kill, on a missing reply");
+        let m: HashMap<String, Session> = [(s.pro.clone(), s.clone())].into_iter().collect();
+        assert!(idle_victims(&m, 10_000, 300).is_empty() && evict_warm(&m, "/p/x.kicad_pro", 1).is_none());
+        assert_eq!(s.info_json()["close_pending"], json!(true));
+        // its late refusal or a lost Close: live as it was
+        s.live_again(50); assert!(!s.close_pending && s.stop_reason.is_empty());
+        assert!(CLOSE_REPLY_MS == 15_000 && CLOSE_ANSWER_WAIT_MS >= 30 * 60 * 1000);
+    }
+    #[test] fn an_ended_kicad_is_recorded_even_if_its_pipes_stay_open() {
+        // (B) the bound finds the process gone while the session still runs it: its exit is recorded by the hub
+        let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0).spawned(41); s.closing = true;
+        assert!(exit_unreported(&s, 41, false));
+        assert!(!exit_unreported(&s, 41, true), "still there: not");
+        assert!(!exit_unreported(&s, 57, false), "another process: not");
+        s.closing = false; assert!(!exit_unreported(&s, 41, false), "not closing: ChildExited's own");
+    }
+    #[test] fn a_crash_in_a_close_kicad_has_not_answered_is_a_crash() {
+        // (C) asked, no answer, frames open (a save in progress), then a signal: shown as a crash, not taken for the close
+        let fr = |k: &str| Frame { kind: k.into(), doc: String::new(), title: String::new(), modified: true, shown: true, realized: true, xid: 1, min_w: 0, min_h: 0 };
+        let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0).spawned(41); s.close_pending = true; s.stop_reason = "closeAsked".into(); s.frames = vec![fr("PCB")];
+        let e = s.exited_how(-11, "signal 11 (SIGSEGV)", "");
+        assert!(e.closed_unexpectedly(), "KiCad closed unexpectedly: {} {}", e.state, e.reason);
+        // answered `exiting` first, then the abort: that close (closing)
+        let mut a = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0).spawned(41); a.closing = true; a.close_answered = true; a.stop_reason = "closeAsked".into(); a.frames = vec![fr("PCB")];
+        let ea = a.exited_how(-6, "signal 6 (SIGABRT)", ""); assert_eq!(runtime_session(&ea.state, &ea.reason, &ea.stop_reason), "closedByPerson");
+    }
+    #[test] fn an_empty_picture_and_a_gone_socket_are_no_quit() {
+        // (D) a socket gone with no frame ever said closed (a start, a ready KiCad listing none) is no quit: not closing, no hold, no kill
+        let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0).spawned(41);
+        assert!(!socket_gone(&mut s) && !s.closing);
+        let mut st = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).spawned(41); st.gone_kinds = vec!["PCB".into()];
+        assert!(!socket_gone(&mut st), "starting: no quit");
+        let e = s.exited_how(-6, "signal 6 (SIGABRT)", ""); assert!(e.closed_unexpectedly(), "a crash, shown");
     }
     #[test] fn a_start_held_for_the_previous_kicad_is_one_session_that_every_attach_joins() {
         let prev = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 7, 0).ready("/s", "", 0).spawned(41).stopped("");
