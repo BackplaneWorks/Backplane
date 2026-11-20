@@ -607,7 +607,7 @@ class RailShotsRegressionTests(unittest.TestCase):
             }
             b1_yes = P.evaluate_b1_kind("full", p_yes, rmap)
             self.assertEqual(b1_yes["status"], "measured_partial")
-            self.assertEqual(b1_yes["omitted_entries"], ["simulation", "terminal", "commands"])
+            self.assertEqual(b1_yes["omitted_entries"], ["simulation"])
             self.assertFalse(b1_yes["disabled_entries_measured"])
             self.assertTrue(b1_yes["entries"]["board"]["passed"])
             self.assertFalse(b1_yes["entries"]["gerbers"]["passed"])
@@ -845,6 +845,145 @@ class RailShotsRegressionTests(unittest.TestCase):
         nothing = D._parse_hub_kicad_sessions_output("")
         self.assertFalse(nothing["ok"])
         self.assertFalse(nothing["inventory_complete"])
+
+    def test_b1_disabled_entries_and_terminal_commands_simulation(self) -> None:
+        rail_map = {
+            "board": {"label": "Board", "state": "disabled", "why": "No board in this project"},
+            "schematic": {"label": "Schematic", "state": "enabled", "why": ""},
+            "simulation": {"label": "Simulation", "state": "enabled", "why": ""},
+        }
+        base_rail = {"lit": [], "entries": ["Board", "Schematic", "Simulation", "Terminal", "Commands"], "disabled": ["Board"]}
+        parsed = {
+            "rail_metric_seen": True,
+            "mark_before_rail": {
+                "b1:disabled-press:board": base_rail,
+                "b1:disabled-key:board": base_rail,
+                "b1:disabled-palette:board": base_rail,
+            },
+            "presses": {
+                # Undelivered disabled press -> unavailable
+                "b1:disabled-press:board": [{"id": "rail:Board", "found": False, "seq": 10}],
+                "b1:terminal-press-open": [{"id": "rail:Terminal", "found": True, "seq": 100}],
+                "b1:terminal-press-close": [{"id": "rail:Terminal", "found": True, "seq": 110}],
+                "b1:commands-press-open": [{"id": "rail:Commands", "found": True, "seq": 140}],
+                "b1:sim-press-open": [{"id": "rail:Simulation", "found": True, "seq": 160}],
+            },
+            "keys": {
+                "b1:disabled-key:board": [{"keys": "b", "seq": 20}],
+                "b1:disabled-palette:board": [{"keys": "escape", "seq": 35}],
+                "b1:terminal-key-open": [{"keys": "`", "seq": 120}],
+                "b1:terminal-key-close": [{"keys": "shift-escape", "seq": 130}],
+            },
+            "palette_reads": {
+                # Target absent (another command 'shortcuts' matched, NO Enter sent) -> target_absent -> passed
+                "b1:disabled-palette:board": [{"supported": True, "seq": 32, "snapshot": {"open": True, "q": "board", "count": 1, "selected_id": "shortcuts"}}],
+                "b1:commands-press-open": [{"supported": True, "seq": 142, "snapshot": {"open": True, "q": "", "count": 5}}],
+                "b1:commands-escape-close": [{"supported": True, "seq": 146, "snapshot": {"open": False, "q": "", "count": 0}}],
+            },
+            "rail_reads": {
+                "b1:disabled-press:board": [{"supported": True, "seq": 12}],
+                "b1:disabled-key:board": [{"supported": True, "seq": 22}],
+                "b1:disabled-palette:board": [{"supported": True, "seq": 36}],
+                "b1:terminal-press-open": [{"supported": True, "seq": 102}],
+                "b1:terminal-press-close": [{"supported": True, "seq": 112}],
+                "b1:terminal-key-open": [{"supported": True, "seq": 122}],
+                "b1:terminal-key-close": [{"supported": True, "seq": 132}],
+                "b1:sim-press-open": [{"supported": True, "seq": 162}],
+            },
+            "rail_events": [
+                (13, base_rail),
+                (23, base_rail),
+                (37, base_rail),
+                (103, {"lit": ["Terminal"], "entries": base_rail["entries"], "disabled": ["Board"]}),
+                (113, base_rail),
+                (123, {"lit": ["Terminal"], "entries": base_rail["entries"], "disabled": ["Board"]}),
+                (133, base_rail),
+                (163, {"lit": ["Simulation"], "entries": base_rail["entries"], "disabled": ["Board"]}),
+            ],
+            "settled_tags": {
+                "b1-disabled-press-board": {"settled": True, "state": "ready", "seq": 15, "viewer": {"open": "", "diff_open": False}},
+                "b1-disabled-key-board": {"settled": True, "state": "ready", "seq": 25, "viewer": {"open": "", "diff_open": False}},
+                "b1-disabled-palette-board": {"settled": True, "state": "ready", "seq": 39, "viewer": {"open": "", "diff_open": False}},
+                "b1-terminal-press-open": {"settled": True, "state": "ready", "seq": 105, "viewer": {"open": ""}},
+                "b1-terminal-press-close": {"settled": True, "state": "ready", "seq": 115, "viewer": {"open": ""}},
+                "b1-terminal-key-open": {"settled": True, "state": "ready", "seq": 125, "viewer": {"open": ""}},
+                "b1-terminal-key-close": {"settled": True, "state": "ready", "seq": 135, "viewer": {"open": ""}},
+                "b1-sim-open": {"settled": True, "state": "ready", "seq": 165, "viewer": {"open": "schematic", "sim_frame": True}},
+            },
+            "kicad_tags": {
+                "b1-sim-open": {"state": "ready", "frames": [{"kind": "SIMULATOR", "painted": 20}]},
+            },
+        }
+        res = P.evaluate_b1_kind("schematic-only", parsed, rail_map, embed=True)
+        self.assertTrue(res["disabled_entries_measured"])
+        self.assertEqual(res["omitted_entries"], [])
+        bd = res["entries"]["board"]
+        self.assertEqual(bd["status"], "measured")
+        self.assertTrue(bd["passed"])
+        self.assertEqual(bd["checks"]["disabled_press"], "unavailable")
+        self.assertTrue(bd["checks"]["disabled_key"])
+        self.assertTrue(bd["checks"]["disabled_palette"])
+        self.assertEqual(bd["checks"]["disabled_palette_status"], "target_absent")
+        self.assertTrue(res["entries"]["terminal"]["passed"])
+        self.assertTrue(res["entries"]["commands"]["passed"])
+        self.assertTrue(res["entries"]["simulation"]["passed"])
+
+        # If Enter WAS sent while another command ('shortcuts') was selected -> unavailable (not a false pass!)
+        parsed["keys"]["b1:disabled-palette:board"] = [{"keys": "enter", "seq": 34}]
+        res2 = P.evaluate_b1_kind("schematic-only", parsed, rail_map, embed=True)
+        self.assertEqual(res2["entries"]["board"]["checks"]["disabled_palette"], "unavailable")
+        self.assertEqual(res2["entries"]["board"]["checks"]["disabled_palette_status"], "another_command_selected_and_run")
+
+        # Delivered disabled press -> measured True
+        parsed["presses"]["b1:disabled-press:board"] = [{"id": "rail:Board", "found": True, "seq": 10}]
+        res3 = P.evaluate_b1_kind("schematic-only", parsed, rail_map, embed=True)
+        self.assertTrue(res3["entries"]["board"]["checks"]["disabled_press"])
+
+    def test_auto_attach_gates_unavailable_passed_and_failed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            outdir = Path(td)
+            # 1. Build without viewer.mode auto-attach -> all 4 gates unavailable
+            g_unavail = {g["id"]: g for g in P.evaluate_auto_attach_gates(outdir, {}, {}, embed=True)}
+            self.assertEqual(set(g_unavail.keys()), set(M.AUTO_ATTACH_GATES))
+            for g in g_unavail.values():
+                self.assertEqual(g["outcome"], "unavailable")
+
+            # 2. Clean auto-attach run -> all 4 gates pass
+            parsed_ok = {
+                "mark_seqs": {"auto-attach:cold-open-start": 10, "auto-attach:cold-open-end": 20, "auto-attach:visit2-end": 30},
+                "mark_times": {"auto-attach:cold-open-start": 1000.0, "auto-attach:cold-open-end": 2200.0, "auto-attach:warm-return-start": 5000.0, "auto-attach:warm-return-end": 5220.0},
+                "composer_reads": {"auto-attach:cold-open-start": [{"supported": True, "text": "bp-auto-keys", "seq": 18}]},
+                "auto_attach_events": [{"seq": 12, "mark": "auto-attach:cold-open-start", "event": {"kicad_attach": "board", "why": "auto"}}],
+                "kicad_tags": {
+                    "auto-attach-cold": {"state": "ready", "why": "auto", "keys": False, "in_gpui_tree": True, "shown": 1, "t_ms": 2200.0, "frames": [{"xid": 1, "kind": "PCB", "painted": 25}]},
+                    "auto-attach-visit2": {"state": "ready", "in_gpui_tree": True, "shown": 1, "frames": [{"xid": 1, "kind": "PCB", "painted": 25}]},
+                    "auto-attach-warm-return": {"state": "ready", "in_gpui_tree": True, "shown": 1, "t_ms": 5220.0, "frames": [{"xid": 1, "kind": "PCB", "painted": 25}]},
+                },
+                "presses": {"auto-attach:warm-return-start": [{"id": "rail:Board", "found": True, "seq": 40}]},
+                "pane_samples": [{"t_ms": 1500.0, "non_flat": True}, {"t_ms": 2000.0, "non_flat": True}],
+            }
+            rt_cap = {"hub_kicad_sessions": {"sessions": {"editor.kicad.abc": {"runtime": {"holder": "pane", "session": "s1", "generation": 1}}}}}
+            caps_ok = {"auto-attach-cold": rt_cap, "auto-attach-visit2": rt_cap}
+            g_ok = {g["id"]: g for g in P.evaluate_auto_attach_gates(outdir, parsed_ok, caps_ok, embed=True)}
+            for gid, g in g_ok.items():
+                self.assertEqual(g["outcome"], "passed", f"{gid} expected passed: {g}")
+
+            # 3. Faults: keyboard steal, blank handoff frame, generation bump, slow warm return > 500ms -> all 4 fail
+            parsed_bad = dict(parsed_ok)
+            parsed_bad["auto_attach_events"] = [
+                {"seq": 12, "mark": "auto-attach:cold-open-start", "event": {"kicad_attach": "board", "why": "auto"}},
+                {"seq": 15, "mark": "auto-attach:cold-open-start", "event": {"kicad_auto_keys_taken": True}},
+            ]
+            parsed_bad["pane_samples"] = [{"t_ms": 1500.0, "non_flat": False}]
+            parsed_bad["kicad_tags"] = dict(parsed_ok["kicad_tags"])
+            parsed_bad["kicad_tags"]["auto-attach-warm-return"] = {"state": "ready", "in_gpui_tree": True, "shown": 1, "t_ms": 5750.0, "frames": [{"xid": 1, "kind": "PCB", "painted": 25}]}
+            caps_bad = {
+                "auto-attach-cold": rt_cap,
+                "auto-attach-visit2": {"hub_kicad_sessions": {"sessions": {"editor.kicad.abc": {"runtime": {"holder": "pane", "session": "s1", "generation": 2}}}}},
+            }
+            g_bad = {g["id"]: g for g in P.evaluate_auto_attach_gates(outdir, parsed_bad, caps_bad, embed=True)}
+            for gid, g in g_bad.items():
+                self.assertEqual(g["outcome"], "failed", f"{gid} expected failed: {g}")
 
 
 if __name__ == "__main__":

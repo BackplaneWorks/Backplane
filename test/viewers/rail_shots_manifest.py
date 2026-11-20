@@ -70,7 +70,23 @@ B1_ENTRIES = [
     ("browser", "Browser", "rail:Browser", "browser", "w", "Browser"),
 ]
 
-B1_OMITTED_ENTRIES = ["simulation", "terminal", "commands"]
+B1_TOOL_ENTRIES = [
+    ("terminal", "Terminal", "rail:Terminal", "`"),
+    ("commands", "Commands", "rail:Commands", ""),
+]
+
+B1_EMBED_ENTRIES = [
+    ("simulation", "Simulation", "rail:Simulation", "i"),
+]
+
+B1_OMITTED_ENTRIES = ["simulation"]
+
+AUTO_ATTACH_GATES = [
+    "auto-attach/keyboard",
+    "auto-attach/cold-open",
+    "auto-attach/one-attach-per-visit",
+    "auto-attach/warm-return",
+]
 
 # Extra check shots for partial-design kinds (missing document + edit from no-editor pages).
 EXTRA_MISSING_SHOTS = {
