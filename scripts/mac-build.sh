@@ -7,6 +7,8 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SSH=${MAC_SSH:-$ROOT/build/gpui/mac-ssh}; [ -x "$SSH" ] || SSH=$(dirname "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)")/build/gpui/mac-ssh
+# MAC_SSH may also be a command name (ssh), and a checkout without build/gpui/mac-ssh falls back to the ssh on PATH
+[ -x "$SSH" ] || SSH=$(command -v "${MAC_SSH:-ssh}" 2>/dev/null || command -v ssh)
 HOST=hs-mac-mini; DEST=${MAC_DEST:-bp-gpui-desktop}; FEAT=${GPUI_FEATURES-cef}
 COLD=0; CHECK=0; [ "${1:-}" = cold ] && { COLD=1; shift; }; [ "${1:-}" = check ] && { CHECK=1; shift; }
 export RSYNC_RSH="$SSH"
@@ -16,9 +18,13 @@ rsync -a --exclude cat-rigs "$ROOT/assets/" $HOST:$DEST/src/assets/   # the clie
 rsync -a --delete "$ROOT/i18n/" $HOST:$DEST/src/i18n/   # the client compiles in the language catalogs (i18n.rs include_str!)
 rsync -a "$ROOT/native/host/src/term/vt.rs" $HOST:$DEST/src/native/host/src/term/   # the client's terminal parser is the hub's (main.rs `mod vt`)
 rsync -a "$ROOT/scripts/cef-mac-helpers.sh" "$ROOT/scripts/cef-runtime-files.sh" $HOST:$DEST/src/scripts/
-$SSH $HOST "lockf -k /tmp/bp-mac-heavy.lockf sh -s" -- "$DEST" "$FEAT" "$COLD" "$CHECK" "$@" <<'REMOTE'
+# ssh joins its arguments into one command line for the remote shell: each one quoted here, so an empty GPUI_FEATURES stays an empty
+# argument (unquoted it vanished and the remote script stopped on "$4: unbound variable") and a cargo argument with a space stays one
+q() { printf "'%s'" "$(printf %s "$1" | sed "s/'/'\\\\''/g")"; }
+ARGS=; for a in "$DEST" "$FEAT" "$COLD" "$CHECK" "$@"; do ARGS="$ARGS $(q "$a")"; done
+$SSH $HOST "lockf -k /tmp/bp-mac-heavy.lockf sh -s --$ARGS" <<'REMOTE'
 set -eu
-DEST=$HOME/$1; FEAT=$2; COLD=$3; CHECK=$4; shift 4
+DEST=$HOME/$1; FEAT=${2-}; COLD=${3:-0}; CHECK=${4:-0}; shift 4
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer PATH="$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"
 cd $DEST/src/native/gpui
 export CARGO_TARGET_DIR=$DEST/target CEF_PATH=$HOME/.cache/backplane/cef-rs
