@@ -10,7 +10,7 @@
 #      and waited for, at most LAND_WIN_START_S (480) seconds.
 #   2. the tree: git push over ssh into C:\bp\gate\src on the VM (refs/heads/gate there; nothing goes to GitHub), checked out detached at HEAD and
 #      cleaned (git clean -ffdx), keeping native\host\target: an incremental build between gates. A new VM's repository is seeded once from the public
-#      GitHub repository, and cargo-nextest is installed if it is missing.
+#      GitHub repository; Rust (rustup, stable MSVC) and cargo-nextest are installed if they are missing.
 #   3. the tests, as ci.yml's hub job runs them on windows-latest: cargo build --locked --bin bp-sh, then cargo nextest run --locked --no-fail-fast
 #      --retries 1 -E "$(sh scripts/ci-hub-windows-filter.sh)", with TMP/TEMP in C:\bp\gate\tmp. While it runs, the VM's watchdog hold
 #      (C:\ProgramData\bp-watchdog\hold-until.txt) is kept at least LAND_WIN_HOLD_MIN (90) minutes ahead (never shortened) and put back at the end.
@@ -132,7 +132,10 @@ set -e
 mkdir -p /c/bp/gate; cd /c/bp/gate
 if [ ! -d src/.git ]; then git init -q src; git -C src config core.autocrlf false; git -C src config receive.denyCurrentBranch ignore
   git -C src fetch -q https://github.com/BackplaneWorks/Backplane main:refs/heads/seed; fi
-command -v cargo-nextest >/dev/null || curl -fsSL https://get.nexte.st/latest/windows-tar | tar -xzf - -C ~/.cargo/bin
+export PATH="$HOME/.cargo/bin:$PATH"
+# a VM that has no Rust yet (bp-winbuild built only KiCad): rustup's stable MSVC toolchain, once (Visual Studio's build tools are there)
+command -v cargo >/dev/null || { curl -fsSL -o /c/bp/gate/rustup-init.exe https://win.rustup.rs/x86_64 && /c/bp/gate/rustup-init.exe -y -q --profile minimal --default-toolchain stable && rm -f /c/bp/gate/rustup-init.exe; }
+command -v cargo-nextest >/dev/null || { mkdir -p ~/.cargo/bin && curl -fsSL https://get.nexte.st/latest/windows-tar | tar -xzf - -C ~/.cargo/bin; }
 EOF
 rc=$?; [ $rc = 0 ] || { [ $rc = 255 ] && unavailable "ssh dropped while preparing ($host)"; say "preparing $vm failed:"; tail -n 20 "$log" >&2; unavailable "could not prepare C:\\bp\\gate (see $log)"; }
 git -c core.sshCommand="$ssh_prog -o BatchMode=yes -o ConnectTimeout=15" push -q -f --receive-pack='git receive-pack' "$host:C:/bp/gate/src" "$sha:refs/heads/gate" >> "$log" 2>&1 ||
@@ -149,6 +152,7 @@ if [ -d /c/ProgramData/bp-watchdog ]; then old=\$(tr -d '\r\n\357\273\277' < "\$
   if [ -z "\$old" ] || [ "\$(printf '%.19s' "\$old")" \< "\$(printf '%.19s' "\$new")" ]; then printf '%s' "\$new" > "\$f" && echo "hold: \$new" || new=; else new=; fi; fi
 put_back() { [ -n "\$new" ] && [ "\$(cat "\$f" 2>/dev/null)" = "\$new" ] || return 0; if [ -n "\$old" ]; then printf '%s' "\$old" > "\$f"; else rm -f "\$f"; fi; }
 trap put_back EXIT
+export PATH="\$HOME/.cargo/bin:\$PATH"
 # TMP/TEMP: a Windows folder, as GitHub's runner has (D:\\a\\_temp); Git bash's /tmp makes the hub's stand-ins report /tmp/... paths
 mkdir -p /c/bp/gate/tmp; export TMP=/c/bp/gate/tmp TEMP=/c/bp/gate/tmp
 cd /c/bp/gate/src && git checkout -q -f --detach $sha && git clean -q -ffdx -e /native/host/target || exit 1
