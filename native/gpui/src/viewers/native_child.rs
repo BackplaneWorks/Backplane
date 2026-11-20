@@ -960,13 +960,18 @@ mod imp {
         }
         fn line(call: &str, at: &std::panic::Location, hwnd: u64, flags: u64, ms: u64, thread: u32) -> serde_json::Value {
             let (pid, wt) = owner(hwnd);
-            serde_json::json!({"call": call, "at": at.to_string(), "hwnd": hwnd, "owner_pid": pid, "owner_thread": wt, "our_pid": std::process::id(), "flags": flags, "ms": ms, "thread": thread, "epoch_ms": crate::screens::kcomment::epoch_ms() as u64})
+            let name = NAMES.lock().unwrap().get(&thread).cloned().unwrap_or_default();
+            serde_json::json!({"call": call, "at": at.to_string(), "hwnd": hwnd, "owner_pid": pid, "owner_thread": wt, "our_pid": std::process::id(), "flags": flags, "ms": ms, "thread": thread, "thread_name": name, "epoch_ms": crate::screens::kcomment::epoch_ms() as u64})
         }
+        /// each calling thread's name ("main" for the UI thread, "kicad-focus", "kicad-placer"), noted at its first probed call
+        static NAMES: std::sync::LazyLock<Mutex<std::collections::HashMap<u32, String>>> = std::sync::LazyLock::new(Default::default);
+        thread_local! { static NAMED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
         pub fn enter(call: &'static str, at: &'static std::panic::Location<'static>, hwnd: u64, flags: u64) -> G {
             if !on() { return G(None) }
             let outer = DEPTH.with(|d| { let n = d.get(); d.set(n + 1); n == 0 });
             if !outer { return G(None) }
             if !DOG.swap(true, Ordering::SeqCst) { std::thread::spawn(watchdog); }
+            if !NAMED.with(|n| n.replace(true)) { NAMES.lock().unwrap().insert(tid(), std::thread::current().name().unwrap_or("?").to_string()); }
             let (seq, at, where_) = (SEQ.fetch_add(1, Ordering::SeqCst) + 1, Instant::now(), at);
             { let mut c = CUR.lock().unwrap(); let me = tid(); c.retain(|x| x.4 != me); c.push((call, where_, hwnd, flags, me, at, seq)); }
             G(Some((call, where_, hwnd, flags, seq, at)))
@@ -1090,6 +1095,12 @@ mod imp {
         unsafe fn apply(w: u64, activate: bool, ui: u32) -> bool {
             let h = super::hwnd(w);
             if unsafe { super::IsWindow(h) } == 0 { return true }
+            // #1403 step 2's measurement only (BP_KICAD_HANDBACK_SKIP=1): no hand-back at all, so a row tells whether the person's own
+            // input to Backplane (a real click's release, typed keys) waits on the hand-back's focus change or on something else
+            if std::env::var("BP_KICAD_HANDBACK_SKIP").is_ok_and(|v| v == "1") {
+                if dbg() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_hand_back_skipped": {"window": w}})); }
+                return true
+            }
             let me = unsafe { super::GetCurrentThreadId() };
             let joined = unsafe { super::AttachThreadInput(me, ui, 1) } != 0;
             if activate {
