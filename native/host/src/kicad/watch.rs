@@ -581,6 +581,8 @@ impl Plots {
     }
     async fn run_child(&self, kind: u32, file: &str, ky: &str) -> Option<(i32, String)> {
         let mut c = if solid_kind(kind) { let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, "nice"); c.args(["-n", "10"]).arg(&self.bin); c } else { crate::proc::tokio_cmd(crate::proc::Kind::Local, &self.bin) };
+        let root = ky.split('|').nth(1).unwrap_or("");
+        if !root.is_empty() { c.env("BACKPLANE_PLOT_ROOT", root); }
         c.arg("--plot").arg(kind.to_string()).arg(file).arg(self.infos(ky)).stdin(std::process::Stdio::null()).kill_on_drop(false);
         let o = c.output().await.ok()?;
         let code = o.status.code().unwrap_or(1);
