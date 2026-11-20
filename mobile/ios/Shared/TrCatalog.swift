@@ -1946,6 +1946,10 @@ gpui.paste.the.address.the.browser	Paste the address the browser landed on.	ブ�
 gpui.paste.the.address.the.browser2	Paste the address the browser landed on	ブラウザーが開いたアドレスを貼り付け	Pega la dirección en la que aterrizó el navegador
 gpui.confirm.remove	Confirm remove	削除を確定	Confirmar quitar
 gpui.submit	Submit	送信	Enviar
+gpui.paste.a.pairing.link.pair	Paste a pairing link (…/pair#invite=…)	ペアリングリンクを貼り付け (…/pair#invite=…)	Pega un enlace de vinculación (…/pair#invite=…)
+gpui.hub.address.e.g.https	Hub address, e.g. https://desktop.tail9e0cf2.ts.net:8451	ハブのアドレス（例: https://desktop.tail9e0cf2.ts.net:8451）	Dirección del hub, p. ej. https://desktop.tail9e0cf2.ts.net:8451
+gpui.on.the.hub.s.machine	On the hub's machine: Settings → Devices → Add a device, then paste its link here.	ハブのマシンで: 設定 → デバイス → デバイスを追加、そのリンクをここに貼り付けます。	En la máquina del hub: Ajustes → Dispositivos → Añadir un dispositivo, y pega aquí su enlace.
+gpui.select.all	Select all	すべて選択	Seleccionar todo
 gpui.imp.could.not.keep.this.draft	Could not keep this draft on this device. Retry.	この下書きをこの端末に保存できませんでした。再試行してください。	No se pudo guardar este borrador en este dispositivo. Reintenta.
 gpui.imp.describe.the.change	Describe the change…	変更内容を書いてください…	Describe el cambio…
 gpui.imp.describe.the.behavior.in.detail	Describe the behavior in detail: what you did and what you saw.	操作した内容と、そのとき見えたことを詳しく書いてください。	Describe el comportamiento en detalle: qué hiciste y qué viste.
@@ -4574,6 +4578,8 @@ viewer.layout.refusal.unknownframe	Unknown KiCad frame	不明な KiCad フレー
 viewer.layout.refusal.invalidinput	Invalid layout request	無効なレイアウト要求です	Solicitud de diseño no válida
 viewer.layout.refusal.toomany	Too many tiles open	タイルが多すぎます	Demasiados mosaicos abiertos
 viewer.layout.refusal.toomanysources	Too many sources in one layout	レイアウトのソースが多すぎます	Demasiadas fuentes en un diseño
+viewer.footprinteditor	Footprint Editor	フットプリントエディター	Editor de huellas
+viewer.symboleditor	Symbol Editor	シンボルエディター	Editor de símbolos
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}

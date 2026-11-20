@@ -257,6 +257,11 @@ fn shorten(identity: &Identity, basename: &str, room: f32, measure: impl Fn(&str
 fn embedded_identity(frame: &str, facts: &Value) -> Identity {
     let page = crate::ui::kicad_rail_id(frame).unwrap_or("kicad");
     let mut identity = Identity::new(page, &Value::Null);
+    match frame {
+        "FOOTPRINT_EDITOR" => { identity.label = t("viewer.footprinteditor"); return identity; }
+        "SYMBOL_EDITOR" => { identity.label = t("viewer.symboleditor"); return identity; }
+        _ => {}
+    }
     if facts["page"] == page {
         if let Some(label) = facts["label"].as_str() { identity.label = trs(label); }
         identity.rel = facts["source"]["rel"].as_str().unwrap_or_default().to_owned();
@@ -420,8 +425,13 @@ mod tests {
     #[test]
     fn embedded_title_only_uses_the_wanted_frames_file() {
         let board = serde_json::json!({"page":"board","source":{"rel":"boards/main.kicad_pcb"}});
-        for frame in ["PCB", "FOOTPRINT_EDITOR"] {
-            assert_eq!(super::embedded_identity(frame, &board).rel, "boards/main.kicad_pcb");
+        assert_eq!(super::embedded_identity("PCB", &board).rel, "boards/main.kicad_pcb");
+        let sheet = serde_json::json!({"page":"schematic","source":{"rel":"main.kicad_sch"}});
+        for (frame, facts, key) in [("FOOTPRINT_EDITOR", &board, "viewer.footprinteditor"),
+                                    ("SYMBOL_EDITOR", &sheet, "viewer.symboleditor")] {
+            let identity = super::embedded_identity(frame, facts);
+            assert!(identity.rel.is_empty());
+            assert_eq!(identity.text(""), super::t(key));
         }
         for (frame, page) in [("SCH","schematic"), ("SIMULATOR","simulation"), ("PCB_3D","3d"), ("unknown","kicad")] {
             let identity = super::embedded_identity(frame, &board);

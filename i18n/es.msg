@@ -4711,3 +4711,5 @@ viewer.layout.refusal.unknownframe = Marco de KiCad desconocido
 viewer.layout.refusal.invalidinput = Solicitud de diseño no válida
 viewer.layout.refusal.toomany = Demasiados mosaicos abiertos
 viewer.layout.refusal.toomanysources = Demasiadas fuentes en un diseño
+viewer.footprinteditor = Editor de huellas
+viewer.symboleditor = Editor de símbolos
