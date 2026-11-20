@@ -109,6 +109,12 @@ impl Registry {
         }
     }
 
+    pub fn browser_owner(&self, client: u64) -> Option<String> {
+        let g = self.inner.lock().unwrap();
+        let id = g.clients.get(&client)?;
+        g.devices.iter().any(|d| d["id"] == id.as_str() && current(d, (self.now)())).then(|| id.clone())
+    }
+
     pub fn browser_clients(&self) -> Vec<u64> {
         let g = self.inner.lock().unwrap();
         g.clients.iter().filter(|(_,id)| g.devices.iter().any(|d| d["kind"] == "browser" && d["id"] == id.as_str())).map(|(client,_)| *client).collect()
