@@ -708,9 +708,32 @@ mod tests {
 
         // 18. Item 9: Unfocused tiles and ALL historical tiles never expose absolute paths, `.git`, or repo top
         let v_no_abs = viewer::viewer_json(&st, &json!({}), &sess_b).unwrap();
-        let unfocus_k = v_no_abs["tiles"]["t2"]["key"].as_str().unwrap_or("");
-        assert!(!unfocus_k.contains(&root) && !unfocus_k.contains(".git"), "unfocused tile key must not expose absolute path or .git: {unfocus_k}");
-
+        let focus_id = v_no_abs["layout"]["focus"].as_str().unwrap().to_string();
+        let mut unfocused = 0;
+        for (id, tile) in v_no_abs["tiles"].as_object().unwrap() {
+            if *id == focus_id { continue }
+            unfocused += 1;
+            let k = tile["key"].as_str().unwrap_or("");
+            assert!(!k.contains(&root) && !k.contains(".git") && !k.starts_with('/'), "unfocused tile {id} key must not expose an absolute path or .git: {k}");
+            let l = tile["layers"].as_str().unwrap_or("");
+            assert!(!l.contains(&root) && !l.contains(".git"), "unfocused tile {id} layers must not expose an absolute path: {l}");
+        }
+        assert!(unfocused >= 1, "the check must cover an unfocused tile");
+        // a resolved historical tile (focused or not) carries an opaque key: never the repo top, the git dir or an absolute path
+        let sid = layout::opaque_source_id(&format!("{root}/.git"), &root);
+        let hist_tile = |id: &str, kind| layout::Tile { id: id.into(), kind, source: "unit.kicad_pcb".into(), explicit: false,
+            version: Some(layout::TileVersion { source_id: sid.clone(), id: "1111aaaa99998888777766665555444433332222".into(), label: "1111aaaa".into() }),
+            unresolved_version: false, overlay: None };
+        for focus in ["t1", "t2"] {
+            let mut hl = layout::add(&layout::Layout::single(hist_tile("t1", layout::PageKind::Board)).unwrap(), Some("t1"), layout::Side::Right,
+                layout::Tile { id: "t2".into(), kind: layout::PageKind::Schematic, source: "unit.kicad_sch".into(), explicit: false, version: None, unresolved_version: false, overlay: None }, false, None).unwrap();
+            hl.focus = Some(focus.into());
+            let sess_h = json!({"sel":"t","rid":1,"drafts":{"@view:t":"board","@view.layout:t":serde_json::to_string(&hl).unwrap()},"panel":false,"info":{}});
+            let vh = viewer::viewer_json(&st, &json!({}), &sess_h).unwrap();
+            let hk = vh["tiles"]["t1"]["key"].as_str().unwrap();
+            assert!(!hk.is_empty() && !hk.contains(&root) && !hk.contains(".git") && !hk.starts_with('/'), "historical tile key (focus {focus}) must be opaque and resolved: {hk}");
+            assert!(vh["tiles"]["t1"].get("error").is_none());
+        }
         let _ = std::fs::remove_dir_all(&d);
     }
     struct Mine; impl Screen for Mine {
