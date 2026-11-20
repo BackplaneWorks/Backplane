@@ -337,10 +337,12 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
     SETUP_REQUESTS.get_or_init(Default::default).lock().unwrap().insert(hub.cfg.home.clone(), sender);
     let directory = hub.cfg.home.join("web");
     let socket = directory.join("browser.sock");
+    let mut cleanup_pending = directory.exists();
     loop {
         let requested = requests.try_recv().ok();
         let mut status_row = serde_json::json!({"canEnable":true});
         if hub.setting("web.enabled").await.as_deref() == Some("1") {
+            cleanup_pending = true;
             let status: Value = serde_json::from_str(&ts.status().await).unwrap_or(Value::Null);
             let config: Value =
                 serde_json::from_str(&ts.serve_status().await).unwrap_or(Value::Null);
@@ -386,20 +388,35 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
                     }
                     task.abort();
                     let _ = std::fs::remove_file(&socket);
-                    if hub.setting("web.enabled").await.as_deref() != Some("1") {
-                        let (host, port) = authority.rsplit_once(':').map_or((authority.as_str(), 443),
-                            |(host, port)| (host, port.parse().unwrap_or(0)));
-                        let scope = (host != node).then_some(service.as_str());
-                        if !remove_private_mapping(scope, host, port, &socket).await {
-                            status_row["reason"] = Value::from("Browser access is off. Tailscale mapping removal could not be confirmed.");
-                        }
-                    }
+
                 }
+            }
+         } else if cleanup_pending {
+            let service = hub.setting("web.service").await.unwrap_or_else(|| "bp".into());
+            cleanup_pending = !cleanup_disabled(ts, &service, &socket, |scope, host, port, path| async move {
+                remove_private_mapping(scope.as_deref(), &host, port, &path).await
+            }).await;
+            if cleanup_pending {
+                status_row["reason"] = Value::from("Browser access is off. Tailscale mapping removal could not be confirmed.");
             }
         }
         hub.set_info("web.status", &status_row.to_string()).await;
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
+}
+
+async fn cleanup_disabled<F, R>(ts: &dyn super::Tailscale, service: &str, socket: &std::path::Path, remove: F) -> bool
+where F: FnOnce(Option<String>, String, u16, std::path::PathBuf) -> R, R: std::future::Future<Output=bool> {
+    let Ok(status) = serde_json::from_str::<Value>(&ts.status().await) else { return false; };
+    let Some(node) = status["Self"]["DNSName"].as_str().map(|s| s.trim_end_matches('.')).filter(|s| !s.is_empty()) else { return false; };
+    let Ok(config) = serde_json::from_str::<Value>(&ts.serve_status().await) else { return false; };
+    if !config.is_object() { return false; }
+    let Some(authority) = configured_authority(&config, service, node, socket) else { return true; };
+    let (host, port) = authority.rsplit_once(':').map_or((authority.as_str(), 443), |(host, port)| (host, port.parse().unwrap_or(0)));
+    let scope = (host != node).then(|| service.to_owned());
+    let _ = remove(scope, host.to_owned(), port, socket.to_owned()).await;
+    // Read back on the next pass. The other address mode may also have a mapping.
+    false
 }
 
 /// An administrator may have reassigned the endpoint since setup. Only
@@ -473,6 +490,26 @@ async fn remove_private_mapping(service: Option<&str>, host: &str, port: u16, so
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn disabling_before_bind_cleans_up_a_mapping_installed_by_the_pending_prompt() {
+        struct AfterPrompt;
+        impl super::super::Tailscale for AfterPrompt {
+            fn ip4(&self) -> super::super::Fut<String> { unreachable!() }
+            fn whois(&self, _: String) -> super::super::Fut<String> { unreachable!() }
+            fn status(&self) -> super::super::Fut<String> { Box::pin(async { json!({"Self":{"DNSName":"node.example.ts.net."}}).to_string() }) }
+            fn serve_status(&self) -> super::super::Fut<String> { Box::pin(async { json!({"TCP":{"8443":{"HTTPS":true}},"Web":{"node.example.ts.net:8443":{"Handlers":{"/":{"Proxy":"unix:/private/browser.sock"}}}}}).to_string() }) }
+        }
+        let mut called = false;
+        let path = std::path::Path::new("/private/browser.sock");
+        let confirmed = cleanup_disabled(&AfterPrompt, "bp", path, |scope, host, port, backend| {
+            called = true;
+            assert_eq!((scope, host.as_str(), port, backend.as_path()), (None, "node.example.ts.net", 8443, path));
+            std::future::ready(true)
+        }).await;
+        assert!(called);
+        assert!(!confirmed, "removal still needs readback");
+    }
 
     #[test]
     fn conditional_removal_preserves_another_authority_on_the_port() {
