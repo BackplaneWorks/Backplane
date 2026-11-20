@@ -38,7 +38,7 @@ pub fn lean_keeps(k: &str) -> bool {
     // the Context panel's readings (present/tokstats.rs): one short string a thread, and the epoch that names the thread totals' key; a provider's day (`.dv.`, Settings › Accounts)
     if ["tok.epoch", "tok.recount"].contains(&k) || ["turn.last.", "turn.speed.", "turn.models.", "turn.live.", "turn.tier."].iter().any(|p| k.starts_with(p)) || (k.starts_with("tok.") && [".t.", ".td.", ".tr.", ".bl.", ".dv."].iter().any(|p| k.starts_with(&format!("tok{p}")) || k.contains(p))) { return true }
     // the Settings pages' values (present/settings.rs): short strings, one per control
-    if ["settle.idle.minutes", "settle.personal.minutes", "settle.done", "restart.continue", "thread.env", "agent.provider", "agent.model", "telemetry.share", "telemetry.usage.asked", "telemetry.asked", "telemetry.usage.generation", "telemetry.choice.revision", "telemetry.reset", "telemetry.notice", "onboard.usage", "update.channel", "text.provider", "text.model", "kicad.path", "freecad.path", "kicad.ipc", "viewer.board3d", "plan.routing", "fallback.chain", "fallback.on", "fallback.add.provider", "fallback.add.model", "recall.bots"].contains(&k) || ["push.webhook.", "notify.", "tz.rule."].iter().any(|p| k.starts_with(p)) { return true }
+    if ["web.enabled", "settle.idle.minutes", "settle.personal.minutes", "settle.done", "restart.continue", "thread.env", "agent.provider", "agent.model", "telemetry.share", "telemetry.usage.asked", "telemetry.asked", "telemetry.usage.generation", "telemetry.choice.revision", "telemetry.reset", "telemetry.notice", "onboard.usage", "update.channel", "text.provider", "text.model", "kicad.path", "freecad.path", "kicad.ipc", "viewer.board3d", "plan.routing", "fallback.chain", "fallback.on", "fallback.add.provider", "fallback.add.model", "recall.bots"].contains(&k) || ["push.webhook.", "notify.", "tz.rule."].iter().any(|p| k.starts_with(p)) { return true }
     // Settings, Voice (voice/page.rs, drawn by present/settings.rs from this copy): the engine, the model and the microphone, and the dictionary's
     // entries and learned fixes (a short line each, a removed one is gone, `blank_gone`). Without them every choice there looked unchosen (matrix S09).
     if k.starts_with("mouse.") { return true }
@@ -275,6 +275,17 @@ mod tests {
         for k in ["tok.t.t1", "tok.1b.t.t1", "turn.last.t1", "turn.speed.t1", "turn.models.t1", "turn.live.t1", "tok.epoch", "tok.recount"] { assert!(lean_keeps(k), "{k}"); }
         for k in ["onboard.step", "onboard.skipped", "onboard.seen", "onboard.done", "onboard.checks", "onboard.usage", "freecad.path"] { assert!(lean_keeps(k), "{k}: setup reads it, and without it every press forgets the last"); }
         for k in ["ride.t1", "tok.basis.t1", "uber.op.u.m.1", "todos.base.t1", "session.t1.claude"] { assert!(!lean_keeps(k), "{k}"); }
+    }
+    #[test] fn lean_devices_page_tracks_browser_approval_switch() {
+        let mut core = Core::new();
+        let info = json!({"devices":{"browserPending":[{"id":"pending","name":"Browser","code":"123456"}]}});
+        for enabled in ["1", "0"] {
+            core.st.apply(&json!({"$":"SettingSet","key":"web.enabled","value":enabled,"at":1}));
+            let rows = crate::present::settings::devices(&core.st, &json!({}), &info);
+            let approve = rows.iter().flat_map(|row| row["buttons"].as_array().into_iter().flatten())
+                .any(|button| button["action"] == "device-web-approve");
+            assert_eq!(approve, enabled == "1");
+        }
     }
     #[test] fn lean_thread_screen_gate_preserves_exact_values_and_only_thread_key_presence() {
         let mut core=Core::new();
