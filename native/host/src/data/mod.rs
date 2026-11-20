@@ -22,7 +22,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -267,7 +267,7 @@ fn row_entry_hid(r: &crate::model::Row, bot: bool, backend: &HashSet<String>) ->
         if kind == "user" { if let Some((to, quote, body)) = crate::bots::reply::of(&r.text) {
             en["text"] = json!(shown_text(&body)); en["replyTo"] = json!({"id": to, "quote": quote.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("")}); } }
         if crate::present::thread::hidden(bot, &r.id, &r.role, &r.text) || (bot && backend.contains(&r.id)) { en["agentOnly"] = json!(true) }
-        if kind == "assistant" { with_images(&mut en, &r.text); with_copy(&mut en) }
+        if kind == "assistant" { with_images(&mut en, &r.text); with_files(&mut en, &r.text); with_copy(&mut en) }
         return Some(en);
     }
     act_entry(&r.thread, &r.id, &r.role, &r.akind, &r.text, at)
@@ -451,6 +451,12 @@ fn with_images(en: &mut Value, text: &str) {
     if !crate::files::mimg::may(text) { return }
     let p = crate::files::mimg::paths(text);
     if !p.is_empty() { en["images"] = json!(p) }
+}
+/// Feature `fileLinks`: the files a reply names that this hub serves (`files::share::linkable`: under a project, no secret), as
+/// `files: [{path, name, size, open}]`; a client draws each `path` in the text as a link and reads it from `/file?path=` (ranged).
+fn with_files(en: &mut Value, text: &str) {
+    let f = crate::files::share::linkable(text);
+    if !f.is_empty() { en["files"] = json!(f) }
 }
 /// `message.image {entry, path}` → `{mime, data}`: an image a reply names, from the snapshot the hub kept of it (the desktop's /message-image:
 /// the message's own text grants the path, a deleted thread's answers nothing), so it reads the same over the relay as on the tailnet.
@@ -664,7 +670,7 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
                 };
                 if crate::present::thread::hidden(bot, id, role, s(&e, "text")) || backend { en["agentOnly"] = json!(true) }
                 if let Some(a) = e.get("attachments") { en["attachments"] = a.clone() }
-                if kind == "assistant" { with_images(&mut en, s(&e, "text")); with_copy(&mut en) }
+                if kind == "assistant" { with_images(&mut en, s(&e, "text")); with_files(&mut en, s(&e, "text")); with_copy(&mut en) }
                 if kind == "user" { if let Some(x) = recalled(id) { if let Some(c) = x.get("clientId") { en["clientId"] = c.clone() } } }
                 let replaced = if kind == "assistant" { subs.live.get_mut(&th).and_then(|l| l.finished()) } else { None };
                 if let Some(n) = replaced { en["replaces"] = json!(Streams::id(&th, n)) }

@@ -374,6 +374,12 @@ pub fn devices(st: &State, session: &Value, info: &Value) -> Vec<Value> {
         let who = if s(i, "deviceName").is_empty() { String::new() } else { format!(" · {}", s(i, "deviceName")) };
         r.push(row(&format!("Pairing link · {state}{who}"), "", vec![btn("Revoke", "device-uninvite", s(i, "id"), false)]));
     }
+    // the files agents shared (files/share.rs, `file_share`): each works without pairing until it expires or is revoked here
+    for sh in info["shares"].as_array().into_iter().flatten() {
+        let until = crate::agents::rules::when(&zone_of(st).0, sh["expires"].as_u64().unwrap_or(0), now / 1000);
+        let tail = if s(sh, "url").is_empty() { String::new() } else { format!(" · also on the tailnet: {}", s(sh, "url")) };
+        r.push(row(&format!("Shared file · {}", s(sh, "name")), &format!("{} · until {until}{tail}", s(sh, "path")), vec![btn("Revoke", "device-share-revoke", s(sh, "id"), false)]));
+    }
     r
 }
 /// What each kind of address is called on the choice.
@@ -458,6 +464,7 @@ pub fn device_act(action: &str, value: &str) -> Option<Value> {
         }
         "device-revoke" => { crate::net::start::revoke("revoke", value); json!({}) }
         "device-uninvite" => { crate::net::start::revoke("uninvite", value); json!({}) }
+        "device-share-revoke" => { crate::files::share::revoke_now(value); json!({}) }
         _ => return None,
     })
 }
@@ -896,7 +903,7 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             send(session, hub, "devices.page.act", json!({"action":action,"value":value}), &mut cmds, &mut rid);
             json!({})
         }
-        "device-invite" | "device-revoke" | "device-uninvite" | "device-addr" | "device-lan-on" | "device-lan-off" => return device_act(action, value).map(|patch| Out { patch, cmds }),
+        "device-invite" | "device-revoke" | "device-uninvite" | "device-share-revoke" | "device-addr" | "device-lan-on" | "device-lan-off" => return device_act(action, value).map(|patch| Out { patch, cmds }),
         "kicad-path" => {
             if !session["drafts"]["@f.kpath"].is_string() { return Some(Out { patch: json!({}), cmds }) }
             let raw = draft(session, "@f.kpath").trim().to_string();
@@ -1028,6 +1035,15 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
 
 #[cfg(test)]
 mod tests {
+    #[test] fn devices_lists_each_live_share_with_its_revoke() {
+        let info = json!({"now": 1_000_000_000_000u64, "shares": [{"id": "sh1", "name": "gerbers.zip", "path": "/p/mfg/gerbers.zip", "expires": 1_000_003_600u64, "url": ""}, {"id": "sh2", "name": "case.step", "path": "/p/mech/case.step", "expires": 1_000_003_600u64, "url": "https://m.t.ts.net:8443/s/x/case.step"}]});
+        let r = devices(&State::default(), &json!({}), &info);
+        let by = |l: &str| r.iter().find(|x| x["label"] == l).cloned().unwrap_or_else(|| panic!("{l}: {r:?}"));
+        let a = by("Shared file · gerbers.zip"); assert_eq!((a["buttons"][0]["action"].as_str(), a["buttons"][0]["value"].as_str()), (Some("device-share-revoke"), Some("sh1")));
+        assert!(a["note"].as_str().unwrap().starts_with("/p/mfg/gerbers.zip · until "));
+        assert!(by("Shared file · case.step")["note"].as_str().unwrap().contains("also on the tailnet: https://m.t.ts.net:8443/s/x/case.step"));
+    }
+
     use super::*;
     fn st(kv: &[(&str, &str)]) -> State { let mut s = State::new(); for (k, v) in kv { s.settings.insert(k.to_string(), v.to_string()); } s }
     fn labels(v: &Value) -> Vec<String> { v["rows"].as_array().unwrap().iter().map(|r| r["label"].as_str().unwrap().to_string()).collect() }

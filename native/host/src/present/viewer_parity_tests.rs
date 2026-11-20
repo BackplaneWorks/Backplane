@@ -47,6 +47,12 @@ fn strip_additive_2a(mut v: Value) -> Value {
         o.remove("layout");
         o.remove("tiles");
         o.remove("showToken");
+        // the downloads (files/share.rs) are additive too: a part's file and the Files page's way to mfg/
+        if let Some(m) = o.get_mut("mech").and_then(Value::as_object_mut) {
+            m.remove("down"); m.remove("downName");
+            for p in m.get_mut("parts").and_then(Value::as_array_mut).into_iter().flatten() { if let Some(po) = p.as_object_mut() { po.remove("down"); po.remove("downName"); } }
+        }
+        if let Some(f) = o.get_mut("files").and_then(Value::as_object_mut) { f.remove("mfg"); }
         if let Some(rail) = o.get_mut("rail").and_then(Value::as_array_mut) {
             for entry in rail {
                 if let Some(eo) = entry.as_object_mut() {

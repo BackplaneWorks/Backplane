@@ -375,6 +375,17 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
             return crate::data::socket_with(hub, stream, true, crate::data::Principal::Browser { device_id }, authority.into()).await;
         }
         json_response("401 Unauthorized", json!({"state":"unpaired"}), "")
+    } else if matches!(req.method.as_str(), "GET" | "HEAD") && (req.route() == "/file" || req.route() == "/files/get" || req.route().starts_with("/s/")) {
+        // a project's file (a paired browser's cookie) or a share (its token): streamed, ranged (files/share.rs)
+        let shared = req.route().starts_with("/s/");
+        let device = crate::net::start::registry(&hub.cfg.home).and_then(|r| crate::auth::browser_device(&r, &req, &login));
+        if !shared && device.is_none() {
+            json_response("401 Unauthorized", json!({"state":"unpaired"}), "")
+        } else {
+            let r = if shared { crate::files::share::serve_share(&hub, &mut writer, &req).await } else if req.route() == "/file" { crate::files::share::serve_file(&hub, &mut writer, &req).await } else { crate::files::share::serve_files_get(&hub, &mut writer, &req).await };
+            if r.is_ok() { writer.shutdown().await.ok(); }
+            return Ok(());
+        }
     } else if req.method == "GET" && (req.target == "/" || req.target.starts_with("/assets/")) {
         let paired = crate::net::start::registry(&hub.cfg.home)
             .and_then(|r| crate::auth::browser_device(&r, &req, &login)).is_some();

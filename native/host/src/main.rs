@@ -204,6 +204,7 @@ async fn run(a: Args) -> Result<()> {
     if let Some(ag) = &agents {
         settings::order::resume(ag.clone()); // Od.resume: follow every order not yet delivered (a copy follows none)
         files::tools::register(&hub, ag);
+        files::share::register(&hub, ag);
         fab::start(&hub, Some(ag)); // fab profiles: fab.profile and the agents' fab_profile
         review::start(&hub, Some(ag)); // the design review: design_review, its runs on save
         plan::start(&hub, Some(ag)); // the routing floorplanner: plan_* tools, plan.approve (the person's)
@@ -455,6 +456,43 @@ mod auth_wire_tests {
         let mut out = Vec::new(); s.read_to_end(&mut out).await.unwrap(); String::from_utf8_lossy(&out).into_owned()
     }
 
+    // files/share.rs over the real listener: a project's file to a held credential only, streamed and ranged; a share by its token alone, until revoked
+    #[tokio::test] async fn project_files_stream_to_paired_clients_and_shares_open_by_their_token() {
+        let top = crate::plat::tmp::canonical("authwire-files"); let (dir, proj) = (top.join("home"), top.join("proj")); std::fs::create_dir_all(proj.join("mfg")).unwrap(); std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("token"), ROOT).unwrap();
+        std::fs::write(dir.join("events.jsonl"), format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"p\",\"root\":{:?},\"at\":1}}\n", proj.to_string_lossy())).unwrap();
+        let data: Vec<u8> = (0..(5u32 << 20)).map(|i| (i % 253) as u8).collect(); std::fs::write(proj.join("mfg/gerbers.zip"), &data).unwrap();
+        std::fs::write(proj.join(".env"), b"KEY=1").unwrap(); std::fs::write(top.join("outside.zip"), b"no").unwrap();
+        let cfg = hub::Cfg { home: dir.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:1".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(presenter::Canned { reply: json!({"remoteReady":false,"cmds":[],"session":{}}) })).await.unwrap();
+        let reg = Arc::new(Reg { revoked: AtomicBool::new(false), last: AtomicU64::new(0) }); hub.set_pairing(reg.clone(), Arc::new(NoRoutes));
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap(); let port = l.local_addr().unwrap().port();
+        { let hub = hub.clone(); tokio::spawn(async move { loop { let (s, _) = l.accept().await.unwrap(); let h = hub.clone(); tokio::spawn(async move { let _ = serve(h, s).await; }); } }); }
+        let raw = |path: String, head: String| async move { let mut s = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            s.write_all(format!("GET {path} HTTP/1.1\r\nHost: x\r\n{head}Connection: close\r\n\r\n").as_bytes()).await.unwrap();
+            let mut out = Vec::new(); s.read_to_end(&mut out).await.unwrap(); let i = out.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+            (String::from_utf8_lossy(&out[..i]).into_owned(), out[i + 4..].to_vec()) };
+        let enc = |p: &std::path::Path| p.to_string_lossy().replace('/', "%2F");
+        let zip = format!("/file?path={}", enc(&proj.join("mfg/gerbers.zip")));
+        assert!(raw(zip.clone(), String::new()).await.0.starts_with("HTTP/1.1 401"), "no credential");
+        let dev = format!("Authorization: Bearer {DEV}\r\n");
+        let (h, b) = raw(zip.clone(), dev.clone()).await; assert!(h.starts_with("HTTP/1.1 200") && b == data, "{h}");
+        let tag = h.lines().find_map(|l| l.strip_prefix("ETag: ")).unwrap().to_string();
+        let (h, b) = raw(zip.clone(), format!("{dev}Range: bytes=3000000-\r\nIf-Range: {tag}\r\n")).await; assert!(h.starts_with("HTTP/1.1 206") && b == data[3000000..], "a download resumes: {h}");
+        assert!(raw(format!("/file?path={}", enc(&proj.join(".env"))), dev.clone()).await.0.starts_with("HTTP/1.1 403"), "a secret");
+        assert!(raw(format!("/file?path={}", enc(&top.join("outside.zip"))), dev.clone()).await.0.starts_with("HTTP/1.1 403"), "outside every project");
+        assert!(raw(format!("/file?path={}", enc(&proj.join("none.zip"))), dev.clone()).await.0.starts_with("HTTP/1.1 404"));
+        let made = crate::files::share::create(&hub, "t1", &json!({"path": proj.join("mfg/gerbers.zip").to_string_lossy(), "expires": "1h"})).await.unwrap();
+        let link = made["link"].as_str().unwrap().to_string();
+        let (h, b) = raw(link.clone(), String::new()).await; assert!(h.starts_with("HTTP/1.1 200") && b == data, "a share needs no other credential: {h}");
+        assert!(raw(format!("/s/{}/x", "0".repeat(48)), String::new()).await.0.starts_with("HTTP/1.1 404"), "an unknown token");
+        assert!(crate::files::share::create(&hub, "t1", &json!({"path": proj.join(".env").to_string_lossy()})).await.is_err(), "no share of a secret");
+        crate::files::share::sweep(&hub, made["id"].as_str()).await;
+        assert!(raw(link, String::new()).await.0.starts_with("HTTP/1.1 404"), "revoked");
+        reg.revoked.store(true, SeqCst);
+        assert!(raw(zip, dev).await.0.starts_with("HTTP/1.1 401"), "a revoked device");
+        drop(hub);
+    }
     // default-deny: a handler that does not opt out is refused without a credential; only an explicit own_auth skips the check
     #[tokio::test] async fn a_handler_without_own_auth_answers_401_with_no_credential() {
         let (_hub, port, _reg) = up("deny").await;

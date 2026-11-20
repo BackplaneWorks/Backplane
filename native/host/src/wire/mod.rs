@@ -121,6 +121,15 @@ pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
         if r.status.starts_with('2') { s.shutdown().await.ok(); } else { drain_refused(&mut s, len.unwrap()).await; }
         return Ok(());
     }
+    // a project's file, and a share's: streamed off the disk, ranged (files/share.rs); never held whole in memory
+    if req.route() == "/file" || req.route() == "/files/get" || req.route().starts_with("/s/") {
+        let shared = req.route().starts_with("/s/");
+        if !shared && !hub.auth.allowed(&req) { s.write_all(&response("401 Unauthorized", "text/plain; charset=utf-8", "", b"this Backplane needs its pairing token")).await.ok(); s.shutdown().await.ok(); return Ok(()) }
+        let h = hub.arc();
+        let r = if shared { crate::files::share::serve_share(&h, &mut s, &req).await } else if req.route() == "/file" { crate::files::share::serve_file(&h, &mut s, &req).await } else { crate::files::share::serve_files_get(&h, &mut s, &req).await };
+        if r.is_ok() { s.shutdown().await.ok(); }
+        return Ok(());
+    }
     if req.method == "POST" && (req.route().starts_with("/auth/") || hub.http_for(req.route()).map_or(false, |h| h.own_auth())) {
         // no Content-Length and no Transfer-Encoding is an empty body; chunked is refused
         let len = if req.header("content-length").trim().is_empty() && req.header("transfer-encoding").is_empty() { Some(0) } else { req.header("content-length").trim().parse::<usize>().ok() };
