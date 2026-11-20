@@ -4735,3 +4735,5 @@ viewer.layout.refusal.unknownframe = 不明な KiCad フレームです
 viewer.layout.refusal.invalidinput = 無効なレイアウト要求です
 viewer.layout.refusal.toomany = タイルが多すぎます
 viewer.layout.refusal.toomanysources = レイアウトのソースが多すぎます
+viewer.footprinteditor = フットプリントエディター
+viewer.symboleditor = シンボルエディター
