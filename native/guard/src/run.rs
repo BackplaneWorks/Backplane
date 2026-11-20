@@ -11,7 +11,7 @@ pub struct Opts { pub home: PathBuf, pub port: u16, pub host: String, pub builds
 struct Times { probe: u64, misses: u32, stable: u64, stall: u64, boot: u64, floor: u64, warn: u64 }
 fn env(n: &str, d: u64) -> u64 { std::env::var(n).ok().and_then(|v| v.parse().ok()).unwrap_or(d) }
 
-struct Guard { o: Opts, d: Dir, b: Option<Builds>, t: Tuning, tm: Times, build: String, mode: Mode, skip: Vec<String>, hist: Vec<Fail>, remote: Vec<u64>, why: String, hub_pid: u32, state: &'static str, stable: bool, last_req: Value, since: u64, probation: Option<String>, low: Vec<String>, space_at: Option<Instant>, swept: Vec<String>, sweep: Option<(Child, Instant)>, down: Vec<String>, down_before: Vec<String> }
+struct Guard { o: Opts, d: Dir, b: Option<Builds>, t: Tuning, tm: Times, build: String, mode: Mode, skip: Vec<String>, hist: Vec<Fail>, remote: Vec<u64>, why: String, hub_pid: u32, state: &'static str, stable: bool, last_req: Value, since: u64, probation: Option<String>, low: Vec<String>, space_at: Option<Instant>, swept: Vec<String>, sweep: Option<(Child, Instant)>, down: Vec<String>, down_before: Vec<String>, /** the hub before this start ended badly (a crash, a hang): it tells its clients so (BACKPLANE_PREV_END) */ crashed: bool }
 
 /// What a request changed.
 enum Move { Nothing, Restart, Exit }
@@ -164,7 +164,7 @@ impl Guard {
         let _ = fs::remove_file(self.d.path("phase"));
         let mut c = Command::new(&exe);
         c.args(["--home", &self.o.home.to_string_lossy(), "--port", &self.o.port.to_string(), "--host", &self.o.host]).args(&self.o.hub_args)
-            .env_remove("BACKPLANE_AGENT_OWNER").env("BACKPLANE_GUARD", "1").env("BACKPLANE_BUILD", &self.build).stdin(Stdio::null()).stdout(self.open_log()).stderr(self.open_log());
+            .env_remove("BACKPLANE_AGENT_OWNER").env("BACKPLANE_GUARD", "1").env("BACKPLANE_BUILD", &self.build).env("BACKPLANE_PREV_END", if self.crashed { "crash" } else { "" }).stdin(Stdio::null()).stdout(self.open_log()).stderr(self.open_log());
         // a turn the crash cut should not start again on a hub that is about to crash: the hub waits for this many seconds of life before it carries on
         c.env("BACKPLANE_CARRY_WAIT", if self.hist.iter().any(|f| now().saturating_sub(f.at) < self.t.window) { self.tm.stable.to_string() } else { "0".into() });
         if self.mode == Mode::Safe { c.env("BACKPLANE_SAFE", "1").env("BACKPLANE_SAFE_SKIP", self.skip.join(",")); } else { c.env_remove("BACKPLANE_SAFE").env_remove("BACKPLANE_SAFE_SKIP"); }
@@ -352,6 +352,7 @@ impl Guard {
         loop {
             let end = self.one_run();
             if sys::stop_asked() { self.quit(None) }
+            self.crashed = matches!(end, End::Failed(_));
             self.fold_failure(&end);
             let (good, bad) = (self.d.good(), self.bad());
             let b = self.build.clone();
@@ -453,7 +454,7 @@ pub fn run(o: Opts) -> i32 {
     let t = Tuning { tries: env("BACKPLANE_GUARD_TRIES", 3) as usize, window: env("BACKPLANE_GUARD_WINDOW", 600), pause: env("BACKPLANE_GUARD_PAUSE", 1), machine_pause: env("BACKPLANE_GUARD_MACHINE_PAUSE", 5), rescue_retry: env("BACKPLANE_GUARD_RESCUE_RETRY", 120) };
     let tm = Times { probe: env("BACKPLANE_GUARD_PROBE", 5), misses: env("BACKPLANE_GUARD_MISSES", 6) as u32, stable: env("BACKPLANE_GUARD_STABLE", 60), stall: env("BACKPLANE_GUARD_STALL", 300), boot: env("BACKPLANE_GUARD_BOOT", 900), floor: env("BACKPLANE_GUARD_MIN_FREE", 1 << 30), warn: env("BACKPLANE_DISK_WARN_GB", 75).saturating_mul(1_000_000_000) };
     let mode = if o.safe { Mode::Safe } else { Mode::Normal };
-    let mut g = Guard { d, b, t, tm, build, mode, skip: vec![], hist: vec![], remote: vec![], why: String::new(), hub_pid: 0, state: "starting", stable: false, last_req: Value::Null, since: now(), probation: None, low: vec![], space_at: None, swept: vec![], sweep: None, down: vec![], down_before: vec![], o };
+    let mut g = Guard { d, b, t, tm, build, mode, skip: vec![], hist: vec![], remote: vec![], why: String::new(), hub_pid: 0, state: "starting", stable: false, last_req: Value::Null, since: now(), probation: None, low: vec![], space_at: None, swept: vec![], sweep: None, down: vec![], down_before: vec![], crashed: false, o };
     // a build already marked bad is not started: the newest one that is not
     if bad.contains(&g.build) { if let Some(to) = g.rollback_to() { say(&format!("{} is marked bad: starting {to}", g.build)); g.build = to; } }
     g.pin(); g.go()

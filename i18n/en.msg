@@ -246,6 +246,12 @@ apierr.say = {kind, select, overloaded {Claude's API was overloaded} rate {Claud
 apierr.details = details
 restart.continuing = Continuing after the restart
 restart.told = what it was told
+restart.interrupted = Interrupted by a restart at {clock}, picking up again
+restart.interrupted.plain = Interrupted by a restart, picking up again
+hub.restarting = Restarting Backplane…
+hub.restarting.build = Restarting Backplane… (new build {build})
+hub.stopped = Backplane stopped
+hub.back.crash = Backplane is back after it stopped unexpectedly
 
 # bot tabs and moods
 bots.tab.chat = Chat

@@ -22,7 +22,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -287,7 +287,10 @@ fn act_entry(thread: &str, id: &str, role: &str, akind: &str, text: &str, at: u6
         r if r == crate::term::emb::TONE && akind == crate::term::emb::KIND => term::entry(thread, id, text, at),
         "step" if pt::step_base(&e) => return None,
         "step" => json!({"id":id,"kind":"step","text":text,"label":pt::step_row(&e),"at":at}),
-        _ => { let a = pt::plain_act(&e); let mut n = json!({"id":id,"kind":"note","text":a["text"],"label":a["label"],"tone":a["tone"],"at":at}); if a.get("copy").is_some() { n["copy"] = a["copy"].clone() } n }
+        _ => { let mut a = pt::plain_act(&e);
+            // a turn the restart cut, carrying on: when, on the person's clock (docs/PHONE-DATA.md, Restarts)
+            if pt::restart_note(&e) { let now = now_ms() / 1000; let c = crate::statehost::policies().and_then(|p| p.with_state(|st| pt::person_zone(st).map(|z| pt::clock(at / 1000, now, &z)))).flatten().unwrap_or_default(); a["text"] = json!(pt::carry_row(&c)) }
+            let mut n = json!({"id":id,"kind":"note","text":a["text"],"label":a["label"],"tone":a["tone"],"at":at}); if a.get("copy").is_some() { n["copy"] = a["copy"].clone() } n }
     })
 }
 /// What of a message there is to copy (feature `copy`, md/copy.rs `spans`): `copy: [{text, cmd}]`, each fenced block and each inline code span with a
@@ -798,7 +801,7 @@ pub fn phone_info_frame(v: &Value) -> Option<Value> {
     let keep: serde_json::Map<String, Value> = v["info"].as_object()?.iter().filter(|(k, _)| phone_info(k)).map(|(k, v)| (k.clone(), v.clone())).collect();
     (!keep.is_empty()).then(|| json!({"t":"info","info":keep}))
 }
-pub fn phone_info(key: &str) -> bool { key == "hub.offer" || key.starts_with("mgmt.") || key.starts_with("kicad.checks.") || key.starts_with("review.") }
+pub fn phone_info(key: &str) -> bool { key == "hub.offer" || key == "hub.back" || key.starts_with("mgmt.") || key.starts_with("kicad.checks.") || key.starts_with("review.") }
 
 async fn handle(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, v: &Value) -> Value {
     handle_for(hub, c, subs, v, false).await
@@ -915,7 +918,7 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
             crate::import014::phone_state(&hub).await,
         )
     };
-    tx.send(pack(&json!({"t":"hello","proto":PROTO,"hub":host,"name":name,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"theme":theme,"locale":locale,"hubOffer":hub_offer,"commands":crate::session::composer::words(),"notice":notice,"migrating":migrating}), json_mode)).await?;
+    tx.send(pack(&json!({"t":"hello","proto":PROTO,"hub":host,"name":name,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"theme":theme,"locale":locale,"hubOffer":hub_offer,"hubBack":hub.info_now()["hub.back"].as_str().unwrap_or(""),"commands":crate::session::composer::words(),"notice":notice,"migrating":migrating}), json_mode)).await?;
     let (late_tx, mut late_rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
     let (mut changes, mut frames) = (hub.changed.subscribe(), hub.frames.subscribe());
     let mut seen = hub.store.len(); let mut subs = Subs::default();

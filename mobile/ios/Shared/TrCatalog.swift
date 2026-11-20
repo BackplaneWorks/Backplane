@@ -687,6 +687,12 @@ apierr.say	{kind, select, overloaded {Claude's API was overloaded} rate {Claude'
 apierr.details	details	詳細	detalles
 restart.continuing	Continuing after the restart	再起動のあと続けています	Continuando tras el reinicio
 restart.told	what it was told	伝えた内容	lo que se le dijo
+restart.interrupted	Interrupted by a restart at {clock}, picking up again	{clock}に再起動で中断、続きから再開します	Interrumpido por un reinicio a las {clock}; se retoma
+restart.interrupted.plain	Interrupted by a restart, picking up again	再起動で中断、続きから再開します	Interrumpido por un reinicio; se retoma
+hub.restarting	Restarting Backplane…	Backplaneを再起動しています…	Reiniciando Backplane…
+hub.restarting.build	Restarting Backplane… (new build {build})	Backplaneを再起動しています…（新しいビルド {build}）	Reiniciando Backplane… (nueva compilación {build})
+hub.stopped	Backplane stopped	Backplaneは停止しました	Backplane se detuvo
+hub.back.crash	Backplane is back after it stopped unexpectedly	予期せず停止したBackplaneが戻りました	Backplane volvió tras detenerse de forma inesperada
 bots.tab.chat	Chat	チャット	Chat
 bots.tab.space	Space	スペース	Space
 bots.tab.browser	Browser	ブラウザ	Navegador
@@ -4704,6 +4710,12 @@ viewer.symboleditor	Symbol Editor	シンボルエディター	Editor de símbolo
 
     /// apierr.say = {kind, select, overloaded {Claude's API was overloaded} rate {Claude's API hit its rate limit} server {Claude's API had an internal error} auth {Claude's API refused the sign-in} other {Claude's API answered with an error}}{code} and ended the turn{why}.
     static func apierr_say(kind: String, code: String, why: String) -> String { f("apierr.say", ["kind": kind, "code": code, "why": why]) }
+
+    /// restart.interrupted = Interrupted by a restart at {clock}, picking up again
+    static func restart_interrupted(clock: String) -> String { f("restart.interrupted", ["clock": clock]) }
+
+    /// hub.restarting.build = Restarting Backplane… (new build {build})
+    static func hub_restarting_build(build: String) -> String { f("hub.restarting.build", ["build": build]) }
 
     /// history.step = Step {step}
     static func history_step(step: String) -> String { f("history.step", ["step": step]) }

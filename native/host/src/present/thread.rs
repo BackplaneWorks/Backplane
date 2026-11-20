@@ -92,6 +92,10 @@ pub(crate) fn clock(at: u64, now: u64, zone: &Rule) -> String {
     let days = (w / 86400) as i64; let (_, m, d) = civil(days);
     format!("{} {} {} {}", DAYS[((days + 3).rem_euclid(7)) as usize], d, MONS[m - 1], hm(w))
 }
+/// Restart.row: the row a turn the restart cut and carried on stands for, with when (the carry's own time, a moment after the hub came back)
+/// The hub's own note that a turn the restart cut carries on (agents::carry_on), its row shown as `carry_row`
+pub(crate) fn restart_note(e: &Ent) -> bool { !e.msg && e.akind == "restart" && e.text == "Continuing after the restart" }
+pub(crate) fn carry_row(clock: &str) -> String { if clock.is_empty() { "Interrupted by a restart, picking up again".into() } else { format!("Interrupted by a restart at {clock}, picking up again") } }
 fn took(s: u64) -> String {
     if s < 60 { format!("{s}s") } else if s < 3600 { format!("{}m {}s", s / 60, s % 60) } else { format!("{}h {}m", s / 3600, (s % 3600) / 60) }
 }
@@ -360,11 +364,11 @@ pub fn entries_w(es: &[Ent], running: bool, waiting: bool, unread: &str, open: &
             if o { for (k, r) in run.iter().enumerate() { let mut a = act(r, id); if live && k + 1 == run.len() && !is_step(r) { a["now"] = json!(true) } out.push(a) } }
             i = j; continue;
         }
-        if !e.msg { out.push(plain_act(e)); i += 1; continue }
         // a zone that cannot be known degrades the time stamps (empty), not the screen
         let c = zone.map(|z| clock(e.at, now, z));
+        if !e.msg { let mut a = plain_act(e); if restart_note(e) { a["text"] = json!(carry_row(c.as_deref().unwrap_or(""))) } out.push(a); i += 1; continue }
         if e.role == "user" && e.text.starts_with(CARRY) {
-            out.push(json!({"id": e.id, "kind": "act", "tone": "info restart", "label": "restart", "text": "Continuing after the restart"}));
+            out.push(json!({"id": e.id, "kind": "act", "tone": "info restart", "label": "restart", "text": carry_row(c.as_deref().unwrap_or(""))}));
         } else if e.role == "user" {
             // Rto.of: a reply's quote block is the agent's; every client shows the body and an "In reply to" line naming the message
             let (reply, shown) = match crate::session::composer::reply_split(&e.text) { Some((id, q, b)) => (Some((id, q)), b), None => (None, e.text.clone()) };

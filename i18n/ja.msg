@@ -259,6 +259,12 @@ apierr.say = {kind, select, overloaded {ClaudeのAPIが過負荷になり} rate 
 apierr.details = 詳細
 restart.continuing = 再起動のあと続けています
 restart.told = 伝えた内容
+restart.interrupted = {clock}に再起動で中断、続きから再開します
+restart.interrupted.plain = 再起動で中断、続きから再開します
+hub.restarting = Backplaneを再起動しています…
+hub.restarting.build = Backplaneを再起動しています…（新しいビルド {build}）
+hub.stopped = Backplaneは停止しました
+hub.back.crash = 予期せず停止したBackplaneが戻りました
 
 # bot tabs and moods
 bots.tab.chat = チャット
