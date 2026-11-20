@@ -1,4 +1,11 @@
 //! Request checks shared by all dedicated HTTPS ingress transports.
+//! Production accepts the proxy's Tailscale-User-Login assertion over a Unix socket in
+//! a 0700 directory reserved for its Tailscale backend. A loopback TCP backend is forbidden.
+//! Same-user processes already have access to the native hub token and fall inside the local
+//! trust boundary. Directory permissions alone cannot identify the proxy among those processes.
+//! Before reading headers, the production transport must check OS peer credentials where available
+//! against the expected proxy child or dedicated system tailscaled identity and reject strangers.
+//! The login still requires a paired device cookie for protected data and native approval for enrollment.
 use crate::auth::Req;
 
 /// The transport supplies its configured public authority and verifies the
