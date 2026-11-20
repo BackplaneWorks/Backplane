@@ -4,30 +4,58 @@ use serde_json::Value;
 const ALLOWED: &[&str] = &[
     "ask.answer",
     "attachment.get",
+    "badge.list",
+    "bot.cat",
+    "bot.delete",
     "bot.say",
     "bots.list",
+    "cat.rig",
     "dirs.list",
     "fab.profile",
     "files.entries",
     "find",
     "history.list",
+    "improvements.project",
+    "improvements.projects",
+    "kicad.checks.fix",
+    "kicad.checks.focus",
+    "kicad.checks.list",
+    "kicad.checks.run",
+    "kicad.checks.watch",
     "link.resolve",
     "locks.list",
     "mech.list",
     "mentions.list",
     "message.image",
     "message.send",
+    "mgmt.bom.alts",
+    "mgmt.bom.edit",
+    "mgmt.life.part",
+    "mgmt.panel",
+    "mgmt.watch",
     "models.list",
+    "plan.approve",
+    "plan.focus",
+    "plan.stop",
+    "project.act",
     "project.add",
     "project.card",
     "projects.list",
+    "queue.act",
+    "review.comment",
     "review.list",
     "review.page",
+    "review.tick",
+    "room.delete",
+    "room.keep",
     "room.post",
     "room.posts",
     "search",
+    "sidebar.act",
     "sidebar.sections",
     "subscribe",
+    "swarm.act",
+    "swarm.create",
     "swarm.get",
     "swarm.list",
     "swarm.post",
@@ -39,10 +67,11 @@ const ALLOWED: &[&str] = &[
     "term.unwatch",
     "term.watch",
     "term.write",
+    "thread.act",
     "thread.create",
     "thread.entries",
+    "thread.model",
     "thread.order",
-    "thread.pick",
     "thread.picker",
     "thread.queue",
     "thread.review",
@@ -60,57 +89,55 @@ const ALLOWED: &[&str] = &[
     "viewer.rail",
     "viewer.refs",
     "viewer.watch",
+    "voice.act",
+    "voice.always",
+    "voice.page",
+    "voice.start",
+    "voice.stop",
+    "voice.view",
+    "work.act",
 ];
 
 #[cfg(test)]
 const RESTRICTED: &[&str] = &[
+    // Native provider account administration.
     "account.act",
     "account.view",
     "accounts.page",
+    // Changes hub software, installation or update channel.
     "app.update",
-    "badge.list",
-    "bot.cat",
-    "bot.delete",
+    "update.channel",
+    "update.check",
+    "update.now",
+    "update.status",
+    // Controls the browser running on the hub machine.
     "browser",
-    "cat.rig",
+    // Requires a native push registration or changes its delivery settings.
     "device.drop",
     "device.prefs",
     "device.register",
-    "devices.page",
-    "devices.page.act",
-    "hub.offer.done",
-    "hub.offer.take",
-    "improvements.project",
-    "improvements.projects",
-    "kicad.checks.fix",
-    "kicad.checks.focus",
-    "kicad.checks.list",
-    "kicad.checks.run",
-    "kicad.checks.watch",
-    "machines.page",
-    "machines.page.act",
-    "mcp.page",
-    "mcp.page.act",
-    "mgmt.bom.alts",
-    "mgmt.bom.edit",
-    "mgmt.life.part",
-    "mgmt.panel",
-    "mgmt.watch",
-    "notify.page",
-    "notify.page.act",
-    "onboard.act",
-    "onboard.view",
-    "order.buy",
-    "plan.approve",
-    "plan.focus",
-    "plan.stop",
-    "project.act",
     "push.prefs",
     "push.seen",
     "push.state",
-    "queue.act",
-    "review.comment",
-    "review.tick",
+    "notify.page",
+    "notify.page.act",
+    // Native Devices can approve, revoke and change ingress; its page also renders pending comparison codes.
+    "devices.page",
+    "devices.page.act",
+    // Controls host discovery, migration or ingress.
+    "hub.offer.done",
+    "hub.offer.take",
+    "machines.page",
+    "machines.page.act",
+    "onboard.act",
+    "onboard.view",
+    // Displays or changes installed MCP service configuration.
+    "mcp.page",
+    "mcp.page.act",
+    // Initiates an order or checkout.
+    "order.buy",
+    "thread.buy",
+    // Native ring transport setup and delivery.
     "ring.get",
     "ring.hear",
     "ring.list",
@@ -119,37 +146,25 @@ const RESTRICTED: &[&str] = &[
     "ring.search",
     "ring.send",
     "ring.setup",
-    "room.delete",
-    "room.keep",
+    // Vault or provider credential management.
     "secret.asks",
     "secret.dismiss",
     "secret.set",
-    "sidebar.act",
+    "voice.key",
+    // Host-wide notification, telemetry or suggestion preferences.
     "star.nudge",
     "star.offer",
-    "swarm.act",
-    "swarm.create",
     "telemetry.notice",
     "telemetry.notice.act",
-    "thread.act",
-    "thread.buy",
-    "thread.model",
-    "update.channel",
-    "update.check",
-    "update.now",
-    "update.status",
-    "voice.act",
-    "voice.always",
-    "voice.key",
-    "voice.page",
+    // Native voice configuration, including model installation and settings writes.
     "voice.page.act",
-    "voice.start",
-    "voice.stop",
-    "voice.view",
-    "work.act",
 ];
 
 pub fn allowed(method: &str, params: &Value) -> bool {
+    // The native picker also supports switching the provider account.
+    if method == "thread.pick" {
+        return matches!(params["action"].as_str(), Some("provider" | "model" | "effort" | "speed" | "runtime"));
+    }
     if method == "composer.run" {
         use crate::session::composer::{word_of, Word};
         return matches!(word_of(params["text"].as_str().unwrap_or("")), Some(Word::Btw(_) | Word::Settle | Word::Intent(_) | Word::Project(_) | Word::Give));
@@ -160,6 +175,17 @@ pub fn allowed(method: &str, params: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_can_manage_threads_without_changing_provider_credentials() {
+        use serde_json::json;
+        assert!(allowed("thread.act", &json!({"action":"rename"})));
+        assert!(allowed("thread.pick", &json!({"action":"model"})));
+        assert!(!allowed("thread.pick", &json!({"action":"account"})));
+        assert!(!allowed("composer.run", &json!({"text":"/secret example"})));
+        assert!(allowed("composer.run", &json!({"text":"/settle"})));
+        for method in RESTRICTED { assert!(!allowed(method, &Value::Null), "{method}"); }
+    }
 
     #[test]
     fn every_dispatched_method_has_a_browser_policy() {
@@ -181,7 +207,7 @@ mod tests {
             let patterns = patterns.split(" if ").next().unwrap();
             for part in patterns.split('|') {
                 let method = part.trim().trim_matches('"');
-                assert!(method == "composer.run" || ALLOWED.contains(&method) || RESTRICTED.contains(&method), "unclassified method {method}");
+                assert!(matches!(method, "composer.run" | "thread.pick") || ALLOWED.contains(&method) || RESTRICTED.contains(&method), "unclassified method {method}");
             }
         }
     }
