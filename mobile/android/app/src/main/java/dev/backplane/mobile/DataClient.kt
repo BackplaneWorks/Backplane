@@ -751,32 +751,41 @@ object DataClient {
     // ---- actions
     val canSendImages get() = "images" in features
     /** `voice`: dictated (what the hub tells the agent of it, voice/mark.rs). The message's client id. */
-    fun send(tid: String, text: String, images: List<ByteArray> = emptyList(), voice: JSONObject? = null): String {
+    /** `reply`: the message this one answers (the composer's strip, feature `reply`); the strip goes once it is sent. */
+    fun send(tid: String, text: String, images: List<ByteArray> = emptyList(), voice: JSONObject? = null, reply: DReplyRef? = null): String {
         val t = text.trim(); if (t.isEmpty() && images.isEmpty()) return ""
         val cid = UUID.randomUUID().toString()
-        sendError = sendError - tid
+        val rp = reply?.takeIf { has("reply") && t.isNotEmpty() }?.let(ReplyDraft::param)
+        sendError = sendError - tid; replying = replying - tid
         // no socket (or older ones still waiting): into the outbox, in order behind them; a turn running is no reason to wait (the hub takes it at once)
         val hub = hubKey()
         if (images.isEmpty() && hub != null && (conn != Conn.ONLINE || outbox.next(hub) != null)) {
-            keepOutbox(outbox.push(hub, tid, t, cid)); setDraft(tid, ""); fields[tid] = TextFieldValue("")
+            keepOutbox(outbox.push(hub, tid, t, cid, rp)); setDraft(tid, ""); fields[tid] = TextFieldValue("")
             if (conn == Conn.ONLINE) { val g = gen; scope.launch { flushOutbox(g) } }
             return cid
         }
-        val local = DEntry("local:$cid", "user", t, System.currentTimeMillis(), clientId = cid, sending = true, localImages = images, voice = voice?.let(::parseVoiceMark))
+        val local = DEntry("local:$cid", "user", t, System.currentTimeMillis(), clientId = cid, sending = true, localImages = images, voice = voice?.let(::parseVoiceMark),
+            replyTo = if (rp != null) reply?.let(ReplyDraft::chip) else null, replyParam = rp)
         entries = entries + (tid to (entries[tid] ?: emptyList()) + local)
         setDraft(tid, ""); fields[tid] = TextFieldValue("")
-        scope.launch { deliver(tid, t, cid, images, voice) }
+        scope.launch { deliver(tid, t, cid, images, voice, rp) }
         return cid
     }
+    /** Reply on a message (feature `reply`): per thread, the message the composer's strip answers, until the send or its ×; `replyFocus` moves when one is picked */
+    var replying by mutableStateOf<Map<String, DReplyRef>>(emptyMap()); private set
+    var replyFocus by mutableStateOf(0); private set
+    fun startReply(tid: String, r: DReplyRef) { replying = replying + (tid to r); replyFocus++ }
+    fun dropReply(tid: String) { replying = replying - tid }
     fun retry(tid: String, e: DEntry) {
         val cid = e.clientId ?: return
         entries = entries + (tid to (entries[tid] ?: emptyList()).map { if (it.id == e.id) it.copy(sending = true, failed = false) else it })
-        scope.launch { deliver(tid, e.text, cid, e.localImages) }
+        scope.launch { deliver(tid, e.text, cid, e.localImages, reply = e.replyParam) }
     }
-    private suspend fun deliver(tid: String, text: String, cid: String, images: List<ByteArray>, voice: JSONObject? = null) {
+    private suspend fun deliver(tid: String, text: String, cid: String, images: List<ByteArray>, voice: JSONObject? = null, reply: Map<String, String>? = null) {
         try {
             val p = JSONObject().put("thread", tid).put("text", text).put("clientId", cid)
             if (voice != null) p.put("voice", voice)
+            if (reply != null) p.put("replyTo", JSONObject(reply))
             if (images.isNotEmpty()) p.put("attachments", JSONArray(images.mapIndexed { i, b ->
                 JSONObject().put("name", "photo-${i + 1}.jpg").put("mime", "image/jpeg").put("data", android.util.Base64.encodeToString(b, android.util.Base64.NO_WRAP)) }))
             val r = call("message.send", p)
@@ -788,13 +797,13 @@ object DataClient {
         } catch (e: Refused) {
             // the hub said no: the words come back to the draft, with why
             entries = entries + (tid to (entries[tid] ?: emptyList()).filter { it.clientId != cid || !it.sending })
-            refused(tid, text, e.message ?: Msg.android_hub_refused)
+            refused(tid, text, e.message ?: Msg.android_hub_refused, reply)
         } catch (e: Exception) {
             // the socket went: a text-only message waits in the outbox (sent again with the same clientId, so it posts once)
             val hub = hubKey()
             if (images.isEmpty() && hub != null) {
                 entries = entries + (tid to (entries[tid] ?: emptyList()).filter { it.clientId != cid || !it.sending })
-                keepOutbox(outbox.push(hub, tid, text, cid)); return
+                keepOutbox(outbox.push(hub, tid, text, cid, reply)); return
             }
             entries = entries + (tid to (entries[tid] ?: emptyList()).map { if (it.clientId == cid && it.sending) it.copy(sending = false, failed = true) else it })
         }
@@ -818,8 +827,11 @@ object DataClient {
         keepOutbox(outbox.remove(b.value))
         return if (b.action == Outbox.EDIT) it.text else ""
     }
-    private fun refused(tid: String, text: String, why: String) {
+    private fun refused(tid: String, text: String, why: String, reply: Map<String, String>? = null) {
         sendError = sendError + (tid to why)
+        // what it answered comes back over the draft too
+        val id = reply?.get("id"); val rt = reply?.get("text")
+        if (id != null && rt != null && tid !in replying) replying = replying + (tid to DReplyRef(id, rt, (entries[tid] ?: emptyList()).firstOrNull { it.id == id }?.kind ?: "assistant"))
         val d = field(tid).text
         val t = if (d.isBlank()) text else d.trimEnd() + "\n\n" + text
         setField(tid, TextFieldValue(t, androidx.compose.ui.text.TextRange(t.length)), typed = false)
@@ -832,12 +844,14 @@ object DataClient {
                 val hub = hubKey() ?: break
                 val it = outbox.next(hub) ?: break
                 try {
-                    val r = call("message.send", JSONObject().put("thread", it.thread).put("text", it.text).put("clientId", it.clientId))
+                    val p = JSONObject().put("thread", it.thread).put("text", it.text).put("clientId", it.clientId)
+                    it.replyTo?.let { r -> p.put("replyTo", JSONObject(r)) }
+                    val r = call("message.send", p)
                     keepOutbox(outbox.sent(it.clientId))
                     r.optJSONObject("entry")?.let(::parseEntry)?.let { e -> put(e, it.thread) }
                     if (has("queue")) runCatching { loadQueue(it.thread) }
                 } catch (e: Refused) {
-                    keepOutbox(outbox.remove(it.clientId)); refused(it.thread, it.text, e.message ?: Msg.android_hub_refused)
+                    keepOutbox(outbox.remove(it.clientId)); refused(it.thread, it.text, e.message ?: Msg.android_hub_refused, it.replyTo)
                 } catch (e: Exception) { break } // the socket went again: the rest waits for the next connect
             }
         } finally { flushing = false }

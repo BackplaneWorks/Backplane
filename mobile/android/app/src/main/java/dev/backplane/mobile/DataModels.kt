@@ -30,6 +30,7 @@ data class DEntry(
     val h: String = "", // content hash for thread.open / sub.d resume (docs/PHONE-DATA.md, Phase 1)
     val queued: Boolean = false, // queued for an away home machine (docs/PHONE-DATA.md, The home)
     val files: List<DFileLink> = emptyList(), // the files a reply names that the hub serves (feature `fileLinks`): a tap on one downloads it (FileFetch.kt)
+    val replyParam: Map<String, String>? = null, // phone-only: the `replyTo {id, text}` a message this phone is sending carries (feature `reply`), for Retry
 )
 /** Restore to before this (data/1 `restore`): the turn (0: a snapshot from before it was named), its short commit, the short info its confirm shows. */
 data class DRestore(val turn: Long, val commit: String, val info: String)

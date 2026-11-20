@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -24,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -693,7 +695,7 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
                 Box(Modifier.background(if (found == r.id) dcs.primary.copy(alpha = .16f) else Color.Transparent)) {
                 when (r) {
                     // a thought: folded to its first line, opened with a tap, kept open or shut as a run of tool calls is
-                    is DRow.Entry -> if (r.entry.folds) ThoughtRow(id, r.entry, r.entry.id in openRuns) { openRuns = if (r.entry.id in openRuns) openRuns - r.entry.id else openRuns + r.entry.id } else EntryRow(id, r.entry) { jump(it, true) }
+                    is DRow.Entry -> if (r.entry.folds) ThoughtRow(id, r.entry, r.entry.id in openRuns) { openRuns = if (r.entry.id in openRuns) openRuns - r.entry.id else openRuns + r.entry.id } else EntryRow(id, r.entry, goTo = { jump(it, true) }, reply = { DataClient.startReply(id, it) })
                     is DRow.Fold -> FoldRow(r.fold, r.fold.id in openRuns) { openRuns = if (r.fold.id in openRuns) openRuns - r.fold.id else openRuns + r.fold.id }
                 }
                 }
@@ -718,7 +720,11 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
                 pending.toList().forEach { b -> Box(Modifier.testTag("thread.pending").clickable { pending.remove(b) }) { Pic(b, 64) }; }
             }
             if (dictate) VoiceStrip(id)
-            DField(field, { DataClient.setField(id, it) }, Msg.android_composer_hint, Modifier.testTag("thread.composer"), 6, dcs.primary)
+            // Reply on a message: the strip over the box (who wrote it, its first line; a tap goes to it, × drops it), and the box takes the keyboard
+            val replyBox = remember { androidx.compose.ui.focus.FocusRequester() }
+            val replyAt = DataClient.replyFocus; LaunchedEffect(replyAt) { if (replyAt > 0 && id in DataClient.replying) runCatching { replyBox.requestFocus() } }
+            DataClient.replying[id]?.let { r -> ReplyStrip(r, go = { jump(r.id, true) }) { DataClient.dropReply(id) } }
+            DField(field, { DataClient.setField(id, it) }, Msg.android_composer_hint, Modifier.focusRequester(replyBox).testTag("thread.composer"), 6, dcs.primary)
             thread?.memory?.let { MemoryBar(it) }
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (thread != null && (DataClient.has("picker") || thread.chip.isNotEmpty())) ModelChip(thread.chip.ifEmpty { "${thread.provider} / ${thread.model.ifEmpty { Msg.common_default }}" }, "thread.model", Modifier.weight(1f)) { models = true } else Spacer(Modifier.weight(1f))
@@ -743,7 +749,7 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
                     notice = ""; existing = null
                     // sent: the keyboard goes away, so the reply has the screen (a tap on the box brings it back)
                     // (focus first: the keyboard's word in progress is committed before the box empties, never after it)
-                    if (word == null) { val text = draft; focus.clearFocus(); val spoken = if (dictate && pending.isEmpty()) DataVoice.dictated(id) else null; if (dictate) DataVoice.sent(id); DataClient.send(id, text, pending.toList(), voice = spoken); pending.clear(); stick = true }
+                    if (word == null) { val text = draft; focus.clearFocus(); val spoken = if (dictate && pending.isEmpty()) DataVoice.dictated(id) else null; if (dictate) DataVoice.sent(id); DataClient.send(id, text, pending.toList(), voice = spoken, reply = DataClient.replying[id]); pending.clear(); stick = true }
                     // a command of the composer: the hub runs it; a refusal leaves the draft and says why
                     else { val text = draft.trim(); scope.launch { try {
                         val r = DataClient.runCommand(id, text)
@@ -855,21 +861,60 @@ private fun SecretBox(tid: String, name0: String, asked: DataClient.SecretAsk?, 
     }
 }
 
+/** Reply's strip over the composer (the desktop's `reply-strip`): who wrote the message and its first line; a tap goes to it, × drops the reply. */
+@Composable
+private fun ReplyStrip(r: DReplyRef, go: () -> Unit, drop: () -> Unit) {
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).testTag("thread.reply.strip"), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(2.dp).fillMaxHeight().background(dcs.primary))
+        Column(Modifier.weight(1f).clickable(onClick = go).padding(horizontal = 8.dp, vertical = 4.dp)) {
+            DMono(if (ReplyDraft.mine(r)) Msg.secret_you else Msg.model_col_agent, dcs.primary, 11, bold = true)
+            DMono(Msg.gpui_b_replying_to(ReplyDraft.firstLine(r.text)), dcs.onSurfaceVariant, 11, lines = 1)
+        }
+        IconButton(onClick = drop, modifier = Modifier.size(36.dp).testTag("thread.reply.drop")) { Icon(Icons.Default.Close, Msg.reply_cancel, tint = dcs.onSurfaceVariant, modifier = Modifier.size(16.dp)) }
+    }
+}
+
+/** Reply by a swipe right, as messaging apps do: the message follows the finger, the arrow shows; let go past it (ReplyDraft.swipe), Reply. The list still scrolls. */
+@Composable
+private fun Modifier.replySwipe(r: DReplyRef?, reply: (DReplyRef) -> Unit): Modifier {
+    if (r == null) return this
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    var pull by remember(r.id) { mutableStateOf(0f) }
+    return this.pointerInput(r.id) {
+        detectHorizontalDragGestures(onDragEnd = { if (ReplyDraft.swipe(with(density) { pull.toDp().value }, 0f)) { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); reply(r) }; pull = 0f },
+            onDragCancel = { pull = 0f }) { ch, dx -> val n = (pull + dx).coerceIn(0f, with(density) { 80.dp.toPx() }); if (n != pull || n > 0f) ch.consume(); pull = n }
+    }.offset { androidx.compose.ui.unit.IntOffset(pull.toInt(), 0) }
+}
+
+/** Long-press on a message: Reply and Copy (the desktop's two under a message), then whatever else it has. */
+@Composable
+private fun ReplyMenuItems(e: DEntry, r: DReplyRef?, close: () -> Unit, reply: (DReplyRef) -> Unit) {
+    val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+    r?.let { DropdownMenuItem({ Text(Msg.reply_action, fontFamily = BpMono) }, { close(); reply(it) }, Modifier.testTag("thread.entry.reply.menu"), leadingIcon = { Icon(Icons.AutoMirrored.Filled.Reply, null) }) }
+    if (e.text.isNotEmpty()) DropdownMenuItem({ Text(Msg.common_copy, fontFamily = BpMono) }, { close(); clip.setText(androidx.compose.ui.text.AnnotatedString(e.text)) }, Modifier.testTag("thread.entry.copy"), leadingIcon = { Icon(Icons.Default.ContentCopy, null) })
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}) {
+private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}, reply: (DReplyRef) -> Unit = {}) {
+    val rr = if (DataClient.has("reply")) ReplyDraft.of(e.id, e.kind, e.text, e.live) else null
+    val replyLink: @Composable () -> Unit = { rr?.let { DMono(Msg.reply_action, dfaint, 11, Modifier.clickable { reply(it) }.testTag("thread.entry.reply")) } }
     when (e.kind) {
-        "user" -> Column(Modifier.fillMaxWidth().padding(start = 32.dp, end = 12.dp, top = 6.dp, bottom = 6.dp), horizontalAlignment = Alignment.End) {
+        "user" -> Column(Modifier.fillMaxWidth().replySwipe(rr, reply).padding(start = 32.dp, end = 12.dp, top = 6.dp, bottom = 6.dp), horizontalAlignment = Alignment.End) {
             // a reply: what it answers, a tap goes there
             e.replyTo?.let { r -> DMono(Msg.gpui_b_in_reply_to(r.quote), dfaint, modifier = Modifier.clickable { goTo(r.id) }.padding(bottom = 3.dp).testTag("thread.entry.replyto")) }
             e.localImages.forEach { Pic(it, 160); Spacer(Modifier.height(4.dp)) }
             e.attachments.filter { e.localImages.isEmpty() }.forEach { PicById(it.id, 160); Spacer(Modifier.height(4.dp)) }
-            // long-press: Restore to before this, when the hub has the snapshot before the turn this message started; asked first, with the snapshot's info
+            // long-press: Reply, Copy, and Restore to before this when the hub has the snapshot before the turn this message started (asked first, with the snapshot's info)
             var menu by remember { mutableStateOf(false) }; var asking by remember { mutableStateOf(false) }
-            val press = if (e.restore != null) Modifier.combinedClickable(onClick = {}, onLongClick = { menu = true }) else Modifier
+            val press = if (e.restore != null || rr != null) Modifier.combinedClickable(onClick = {}, onLongClick = { menu = true }) else Modifier
             if (e.text.isNotEmpty()) Box(press.background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 8.dp)) {
                 LinkText(e.text, tid, color = dcs.onSurface, size = 13, lineHeight = 19)
-                DropdownMenu(menu, { menu = false }) { DropdownMenuItem({ Text(Msg.thread_restore_action, fontFamily = BpMono) }, { menu = false; asking = true }, Modifier.testTag("thread.entry.restore")) }
+                DropdownMenu(menu, { menu = false }) {
+                    ReplyMenuItems(e, rr, { menu = false }, reply)
+                    if (e.restore != null) DropdownMenuItem({ Text(Msg.thread_restore_action, fontFamily = BpMono) }, { menu = false; asking = true }, Modifier.testTag("thread.entry.restore"))
+                }
             }
             e.restore?.takeIf { asking }?.let { r ->
                 AlertDialog(onDismissRequest = { asking = false }, title = { Text(Msg.thread_restore_ask) },
@@ -888,14 +933,19 @@ private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}) {
                 }
                 if (e.sending) DMono(Msg.thread_sending, dfaint)
                 else if (e.failed) DMono(Msg.android_send_retry, dcs.error, modifier = Modifier.clickable { DataClient.retry(tid, e) })
-                else DMono(dStamp(e.at), dfaint)
+                else { replyLink(); DMono(dStamp(e.at), dfaint) }
             }
         }
-        "assistant" -> Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp)) {
+        "assistant" -> Column(Modifier.fillMaxWidth().replySwipe(rr, reply).padding(horizontal = 14.dp, vertical = 6.dp)) {
             MdText(e.text, thread = tid, copy = CopyLookup.of(e.copy, DataClient.has("copy"), e.live))
             // the pictures the reply names (the hub lists them as attachments), tap for the full size
             e.attachments.forEach { Spacer(Modifier.height(6.dp)); PicById(it.id, 240, zoom = true) }
-            if (!e.live) DMono(dStamp(e.at), dfaint, modifier = Modifier.padding(top = 4.dp))
+            // the footer: the time, Reply; a long-press on it (the text keeps its own selection) is Reply and Copy
+            if (!e.live) { var menu by remember { mutableStateOf(false) }
+                Row(Modifier.padding(top = 4.dp).combinedClickable(onClick = {}, onLongClick = { if (rr != null) menu = true }), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    DMono(dStamp(e.at), dfaint); replyLink()
+                    DropdownMenu(menu, { menu = false }) { ReplyMenuItems(e, rr, { menu = false }, reply) }
+                } }
         }
         "tool", "step" -> Box(Modifier.padding(horizontal = 12.dp)) { ToolRow(e) }
         "ask" -> AskCard(tid, e)
