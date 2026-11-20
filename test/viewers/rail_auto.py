@@ -229,6 +229,16 @@ def _only_session(capture: dict | None) -> tuple[dict | None, str]:
     return next(iter(sess.values())), ""
 
 
+def _holder_absent(rt: dict) -> bool:
+    """The hub's contract (kicad/embed.rs: `if let Some(h) = holder_of(..) { v["holder"] = h }`): `holder` is sent ONLY while a window holds the pane, so
+    "no holder" is the key being ABSENT in a complete runtime block (or an explicit null). A present value of any kind, falsy ones included, is a holder."""
+    return "holder" not in rt or rt["holder"] is None
+
+
+def _holder_present(rt: dict) -> bool:
+    return "holder" in rt and rt["holder"] is not None
+
+
 def _runtime(session: dict | None) -> dict | None:
     """The runtime block only when the hub really sent a COMPLETE one (`session` and `generation`): the hub omits `holder` when no
     window holds the pane, which counts as absence only inside a complete block."""
@@ -239,14 +249,17 @@ def _runtime(session: dict | None) -> dict | None:
 
 
 def state_of(session: dict | None) -> dict | None:
-    """A complete, comparable picture of a KiCad session (pid, runtime generation/session/holder, shown frames); None if any part is missing."""
+    """A complete, comparable picture of a KiCad session (pid, runtime generation/session/holder, shown frames); None if ANY part is missing:
+    no `frames` list, or a frame without a boolean `shown`, is missing (never read as `[]` or False)."""
     rt = _runtime(session)
     frames = (session or {}).get("frames")
     pid = (session or {}).get("pid")
     if rt is None or not isinstance(frames, list) or not _is_int(pid) or pid <= 0:
         return None
+    if any(not isinstance(f, dict) or not isinstance(f.get("shown"), bool) or not isinstance(f.get("kind"), str) for f in frames):
+        return None
     return {"pid": pid, "generation": rt["generation"], "session": rt["session"], "holder": rt.get("holder"),
-            "shown_frames": sorted(str(f.get("kind")) for f in frames if isinstance(f, dict) and f.get("shown") is True)}
+            "shown_frames": sorted(f["kind"] for f in frames if f["shown"] is True)}
 
 
 def _report(kicad_tags: dict, tag: str) -> dict | None:
@@ -367,6 +380,9 @@ KEY_LOGS = ("kicad_auto_keys_taken", "kicad_auto_to_deliberate", "kicad_key", "k
 def _gate_a(marks, kt, logs, comp, caps, actions, parsed) -> dict:
     gid = "a-frame-no-keyboard"
     name = "Automatic attach shows KiCad in the pane and never takes the keyboard (pointer away; marker typed before, across the start, after)"
+    kill = _action(actions, "kill")
+    if not kill or kill[-1].get("ok") is not True:
+        return _rec(gid, name, "unavailable", f"the cold-start kill was not delivered ({kill[-1].get('error') if kill else 'no action recorded'}): not a restart, so nothing here is about the start")
     need = {"pre": _action(actions, "type-pre"), "bg-start": _action(actions, "type-bg-start"), "bg-end": _action(actions, "type-bg-end"), "post": _action(actions, "type-post")}
     for t, acts in need.items():
         if not acts or acts[-1].get("ok") is not True:
@@ -403,7 +419,7 @@ def _gate_a(marks, kt, logs, comp, caps, actions, parsed) -> dict:
     for tag, r in (("auto-a-painted", painted), ("auto-a-report", rep)):
         if r.get("keys") is not False:
             fails.append(f"the pane report {tag} says keys={r.get('keys')!r}: KiCad has the keyboard")
-    if not rt.get("holder"):
+    if not _holder_present(rt):
         fails.append("hub runtime.holder is absent: the pane is not held by a client")
     holder_ev = _holder_is_this_client(rt, logs, marks, parsed.get("hub_clients") or {}, rep)
     if holder_ev["verdict"] is False:
@@ -421,10 +437,11 @@ def _gate_a(marks, kt, logs, comp, caps, actions, parsed) -> dict:
         fails.append(f"the client says KiCad took the keyboard ({taken})")
     if kicad_keys:
         fails.append(f"KiCad's container saw key events ({kicad_keys[:2]})")
-    t0, t1 = need["bg-start"][-1].get("t_ms"), need["bg-end"][-1].get("t_ms")
+    # first and last key times were taken BY the typing process (rail_typer.py) when those keys were sent: a later join cannot move them
+    t0, t1 = need["bg-end"][-1].get("first_key_ms"), need["bg-end"][-1].get("last_key_ms")
     t_frame = painted.get("epoch_ms")
-    timing = {"typing_started_ms": t0, "typing_ended_ms": t1, "frame_painted_ms": t_frame,
-              "frame_after_typing_start_ms": None if not (_is_num(t0) and _is_num(t_frame)) else round(t_frame - t0), "typing_ended_after_frame_ms": None if not (_is_num(t1) and _is_num(t_frame)) else round(t1 - t_frame)}
+    timing = {"first_key_ms": t0, "last_key_ms": t1, "frame_first_painted_ms": t_frame,
+              "frame_after_first_key_ms": None if not (_is_num(t0) and _is_num(t_frame)) else round(t_frame - t0), "last_key_after_frame_ms": None if not (_is_num(t1) and _is_num(t_frame)) else round(t1 - t_frame)}
     ev = {"composer": {"start": start, "pre": r_pre, "after_long_marker_len": len(r_bg) - len(exp_pre), "post": r_post}, "long_marker_chars": len(BG_MARKER), "timing": timing,
           "report": {k: rep.get(k) for k in ("ok", "in_gpui_tree", "shown", "keys", "pid", "state")}, "hub_runtime": rt, "rail_lit": lit,
           "kicad_side": "composer received all; KiCad-side: no kicad_key / kicad_key_dispatch log in the interval (those fire for keys KiCad's container receives)",
@@ -432,15 +449,22 @@ def _gate_a(marks, kt, logs, comp, caps, actions, parsed) -> dict:
     if fails:
         return _rec(gid, name, "failed", "; ".join(fails), ev)
     if not (_is_num(t0) and _is_num(t1) and _is_num(t_frame)):
-        return _rec(gid, name, "unavailable", "composer received all of the marker and KiCad took none, but the typing or frame timestamps were not observed", ev)
-    if not t0 <= t_frame <= t1:
-        where = "after the typing ended" if t_frame > t1 else "before the typing began"
-        return _rec(gid, name, "unavailable", f"composer received all of the marker and KiCad took none, but the frame appeared {where} (typing {t0:.0f}-{t1:.0f} ms, frame {t_frame:.0f} ms): typing across the start is not proven", ev)
-    return _rec(gid, name, "passed", f"the frame appeared {timing['frame_after_typing_start_ms']} ms into a {round(t1 - t0)} ms typing window; every character landed in the composer in order", ev)
+        return _rec(gid, name, "unavailable", "composer received all of the marker and KiCad took none, but the first/last key times or the frame's first-paint time were not observed", ev)
+    if not t0 < t_frame < t1:
+        where = "at or after the last key was sent" if t_frame >= t1 else "at or before the first key was sent"
+        return _rec(gid, name, "unavailable", f"composer received all of the marker and KiCad took none, but the frame first painted {where} (keys {t0:.0f}-{t1:.0f} ms, frame {t_frame:.0f} ms): typing across the start is not proven", ev)
+    if holder_ev["verdict"] is None:
+        return _rec(gid, name, "unavailable", "typing across the start is measured and the keyboard stayed with the composer, but 'the holder is this client' was not observed: " + holder_ev["note"], ev)
+    return _rec(gid, name, "passed", f"the frame first painted {timing['frame_after_first_key_ms']} ms after the first key and {timing['last_key_after_frame_ms']} ms before the last key (every character landed in the composer in order)", ev)
 
 
 def _is_num(v: object) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _trace_usable(t: object) -> bool:
+    """A focus-owner sample is usable when the X focus chain was really read (non-empty) without an error."""
+    return isinstance(t, dict) and not t.get("error") and isinstance(t.get("focus_chain"), list) and bool(t["focus_chain"])
 
 
 def _gate_a2(marks, kt, logs, comp, actions) -> dict:
@@ -474,6 +498,14 @@ def _gate_a2(marks, kt, logs, comp, actions) -> dict:
         return _rec(gid, name, "unavailable", "the Automatic attach did not end in a mounted, painted PCB frame: nothing to type into", ev)
     all_in_composer = got == A2_MARKER
     kicad_got = bool(kicad_keys) or rep.get("keys") is True or bool(taken) or not all_in_composer
+    steps = {"after_move_before_attach": (p.get("trace") or {}).get("after_move_before_attach"), "frame_appeared": t.get("trace_frame"),
+             "typing_start": t.get("trace_typing_start"), "typing_end": t.get("trace_typing_end")}
+    unusable = [k for k, v in steps.items() if not _trace_usable(v)]
+    if not kicad_got and (unusable or rep.get("keys") is not False):
+        why = [f"no usable focus-owner sample at {unusable}"] if unusable else []
+        if rep.get("keys") is not False:
+            why.append(f"the pane report's keys is {rep.get('keys')!r}, not an explicit false")
+        return _rec(gid, name, "unavailable", "the whole marker landed in the composer, but a pass needs usable X focus samples at every step and keys=false: " + "; ".join(why), ev)
     if not kicad_got:
         return _rec(gid, name, "passed", f"with focus_follows_mouse={config}, the pointer over the pane and no click, the whole marker landed in the composer and KiCad took none", ev)
     where = "KiCad (or elsewhere): the composer got " + repr(got)
@@ -585,17 +617,24 @@ def _gate_c(marks, kt, logs, caps) -> dict:
     ev["place_counts"] = counts
     ev["rect_before_switch"] = rect_before
     ev["place_notify_note"] = f"counts per switch {counts}: one placement at an unchanged rect is the tab switch's own; the others (the X frames poll, the hub's frames echo) each send KiCad a synthetic ConfigureNotify"
-    seen = all(seq[label] for label, _lo, _hi in switches)
+    seen = any(seq[label] for label, _lo, _hi in switches)
+    repeated = False
     if seen:
         for label, _lo, _hi in switches:
             c = counts[label]
-            if c["placements"] != 1 or not c["same_rect_as_before_switch"] or c["null_placements"]:
-                fails.append(f"{label}: {c['placements']} placement(s) (+{c['null_placements']} off-screen), {c['notifies']} notify line(s), rect unchanged: {c['same_rect_as_before_switch']}; "
-                             "expected exactly one placement at an unchanged rect")
+            rects = [x["place"] for x in seq[label] if isinstance(x["place"], list)]
+            if c["placements"] == 0 and not c["null_placements"]:
+                fails.append(f"{label}: no placement was logged for this switch (the incoming frame must be placed at least once; {c['notifies']} notify line(s))")
+                continue
+            if c["null_placements"]:
+                fails.append(f"{label}: {c['null_placements']} off-screen placement(s) (kicad_place null) on a frame switch")
+            if rects and not c["same_rect_as_before_switch"]:
+                fails.append(f"{label}: the rect changed on a frame switch (before {rect_before[label]}, placed {rects})")
+            elif c["placements"] > 1:
+                repeated = True
+                fails.append(f"known failure, pane re-places more than once at an unchanged rect; owned by the KiCad lead / Climb W: {label}: {c['placements']} placements, {c['notifies']} notify line(s)")
     if fails:
-        known = [f for f in fails if "placement(s)" in f]
-        prefix = "known failure, pane re-places more than once at an unchanged rect; owned by the KiCad lead / Climb W: " if known else ""
-        return _rec(gid, name, "failed", prefix + "; ".join(fails), ev)
+        return _rec(gid, name, "failed", "; ".join(fails), {**ev, "repeated_same_rect_placements": repeated})
     if not seen:
         return _rec(gid, name, "unavailable",
                     "measured: each switch ended in a painted PCB/SCH frame and the hub's pid equals the pane's pid every time (one process, two frames). "
@@ -607,8 +646,8 @@ def _keep_warm_fails(left: dict, rt: dict) -> list[str]:
     fails = []
     if _attached(left) is not False:
         fails.append("the pane is not detached after leaving (mounted, or in the tree with no frame shown)")
-    if rt.get("holder"):
-        fails.append(f"hub runtime.holder is still {rt.get('holder')!r} after leaving")
+    if not _holder_absent(rt):
+        fails.append(f"hub runtime.holder is still {rt.get('holder')!r} after leaving (the hub omits the key when no window holds the pane)")
     if rt.get("session") not in ("live", "parked"):
         fails.append(f"KiCad session is {rt.get('session')!r} after leaving, not live/parked (not kept warm)")
     return fails
@@ -653,34 +692,21 @@ def _gate_d(marks, kt, logs, caps, presses) -> dict:
 
 
 def _gate_d2(marks, kt, logs, caps, presses) -> dict:
-    """Leaving to another page by the rail: detaching an Automatic pane there is the rail reconcile's job. Never a pass unless Files was
-    observed open, `rail:Files` was delivered and the pane really is detached."""
+    """Leaving to another page by the rail. ALWAYS `unavailable`: detaching an Automatic pane on a page change is the rail reconcile's job, and
+    the way back in this run is driven by a scripted Board press plus an explicit Automatic attach, which the rail alone would never issue,
+    so a return observed here proves nothing about the rail. What was seen on the way out is recorded as evidence only."""
     gid, name = "d2-leave-page-detaches", "Leaving the design page by the rail detaches the pane (keep-warm) and coming back is no cold start"
-    if not _delivered(presses, "auto:d:leave", "rail:Files"):
-        return _rec(gid, name, "unavailable", "the `rail:Files` press was not delivered (no executed action) under auto:d:leave")
-    left, back, before = _report(kt, "auto-d-left-report"), _report(kt, "auto-d-back-report"), _report(kt, "auto-d-view-back-report")
-    painted = _report(kt, "auto-d-back-painted")
-    if not isinstance(left, dict) or not isinstance(back, dict) or not isinstance(before, dict) or not isinstance(painted, dict):
-        return _rec(gid, name, "unavailable", "a pane report is missing or not real")
-    if left.get("open") != "files":
-        return _rec(gid, name, "unavailable", f"Files was not observed open after the rail press (pane report open={left.get('open')!r}): nothing was left", {"left_open": left.get("open")})
-    for shot in ("auto-d-left", "auto-d-back"):
-        ok, why = _shot_ok(caps, shot)
-        if not ok:
-            return _rec(gid, name, "unavailable", why)
-    s_left, why = _only_session(caps.get("auto-d-left"))
-    s_back, why2 = _only_session(caps.get("auto-d-back"))
-    if s_left is None or s_back is None:
-        return _rec(gid, name, "unavailable", why or why2)
-    rt = _runtime(s_left)
-    if rt is None:
-        return _rec(gid, name, "unavailable", "the hub reported no complete runtime block while the page was left")
-    ev = {"left_open": left.get("open"), "left_state": _attached(left), "runtime_when_left": rt, "pid_before": _pid(before), "pid_after": _pid(back)}
-    if _attached(left) is not False:
-        return _rec(gid, name, "unavailable", "observed: the pane stayed in the tree over the page the rail went to; detaching on a page change is the reconcile's job, not built yet", ev)
-    starting = [lg for lg in _logs_between(logs, marks.get("auto:d:back"), marks.get("auto:d:done"), "kicad_info") if lg["obj"].get("state") == "starting"]
-    fails = _keep_warm_fails(left, rt) + _return_fails(before, back, painted, s_back, starting)
-    return _rec(gid, name, "failed" if fails else "passed", "; ".join(fails), ev)
+    left = _report(kt, "auto-d-left-report")
+    ev: dict = {"rail_files_delivered": _delivered(presses, "auto:d:leave", "rail:Files")}
+    if isinstance(left, dict):
+        ev.update({"left_open": left.get("open"), "left_pane_state": _attached(left)})
+    s_left, _why = _only_session(caps.get("auto-d-left"))
+    if s_left is not None and _runtime(s_left) is not None:
+        ev["runtime_when_left"] = _runtime(s_left)
+    saw = "the pane stayed in the tree over the page the rail went to" if ev.get("left_pane_state") is not False and isinstance(left, dict) else "no usable observation of the way out"
+    return _rec(gid, name, "unavailable",
+                f"observed on the way out: {saw}. Unavailable by design until the reconcile makes the return observable without the scripted attach "
+                "(the harness presses Board and asks an Automatic attach itself, which the rail alone would never do)", ev)
 
 
 def _gate_e(marks, kt, logs, caps, actions) -> dict:

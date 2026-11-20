@@ -551,19 +551,25 @@ def _parse_hub_kicad_sessions_output(out: str) -> dict:
             if not isinstance(val, dict):
                 return {"ok": False, "inventory_complete": False, "error": f"non-object session value for {key}", "sessions": {}}
             raw_rt = val.get("runtime")
-            frames = [
-                {"kind": f.get("kind"), "shown": bool(f.get("shown"))}
-                for f in (val.get("frames") or [])
-                if isinstance(f, dict)
-            ]
+            # Missing stays missing: no `frames` key means no frame list (never `[]`), and a frame without a boolean `shown` carries no `shown`.
+            frames = None
+            if isinstance(val.get("frames"), list):
+                frames = []
+                for f in val["frames"]:
+                    if isinstance(f, dict):
+                        fr = {"kind": f.get("kind")}
+                        if isinstance(f.get("shown"), bool):
+                            fr["shown"] = f["shown"]
+                        frames.append(fr)
             rt = raw_rt if isinstance(raw_rt, dict) else {}
             entry = {
                 "state": val.get("state"),
                 "active": val.get("active"),
                 "pid": val.get("pid"),
                 "generation": rt.get("generation", val.get("generation")),
-                "frames": frames,
             }
+            if frames is not None:
+                entry["frames"] = frames
             # Field presence is evidence: a session that sent no `runtime`, or a `runtime` with no `holder`, must not
             # arrive as `holder: null` (absent holder). Only keys the hub really sent are carried.
             if isinstance(raw_rt, dict):
@@ -676,8 +682,9 @@ def run_auto_action(name: str, last_kicad: dict, kind_out: Path, disp: str) -> N
             rec.update({"action": "type-bg-start", "text_len": len(AUTO.BG_MARKER)})
             xin("move", str(COMPOSER_POINTER[0]), str(COMPOSER_POINTER[1]), timeout=10)
             time.sleep(0.2)
-            rec["t_ms"] = round(time.time() * 1000)
-            _BG["proc"] = subprocess.Popen([sys.executable, str(xinput), "type", AUTO.BG_MARKER], env=xenv)
+            _BG["out"] = kind_out / "bg-typing.json"
+            _BG["out"].unlink(missing_ok=True)
+            _BG["proc"] = subprocess.Popen([sys.executable, str(Path(__file__).resolve().parent / "rail_typer.py"), AUTO.BG_MARKER, str(_BG["out"])], env=xenv)
             rec["ok"] = True
         elif name == "auto-act-type-bg-end":
             rec.update({"action": "type-bg-end"})
@@ -685,9 +692,10 @@ def run_auto_action(name: str, last_kicad: dict, kind_out: Path, disp: str) -> N
             if proc is None:
                 raise RuntimeError("no background typing was started")
             rc = proc.wait(timeout=180)
-            rec["t_ms"] = round(time.time() * 1000)
-            rec["returncode"] = rc
-            rec["ok"] = rc == 0
+            # the first and last key times were taken BY the typing process when those keys were sent: this join cannot move them
+            typed = json.loads(_BG["out"].read_text(encoding="utf-8")) if _BG["out"].exists() else {}
+            rec.update({"returncode": rc, "first_key_ms": typed.get("first_key_ms"), "last_key_ms": typed.get("last_key_ms"), "chars_sent": typed.get("chars"),
+                        "joined_ms": round(time.time() * 1000), "ok": rc == 0 and typed.get("ok") is True})
         elif name == "auto-act-a2-pointer":
             rec.update({"action": "a2-pointer", "focus_follows_mouse": os.environ.get("RAIL_I3_FFM", "default"), "clicks": 0, "motions": 1})
             rec["trace"] = {"before_move": x_focus_trace(disp)}

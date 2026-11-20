@@ -53,7 +53,7 @@ def good():
     marks = {m: i * 10 for i, m in enumerate(MARKS, start=1)}
     comp = [{"seq": marks["auto:start"] + 1, "text": "x"}, {"seq": marks["auto:a:pre"] + 2, "text": "xqpre"},
             {"seq": marks["auto:a:painted"] + 1, "text": "xqpre" + A.BG_MARKER}, {"seq": marks["auto:a:painted"] + 2, "text": "xqpre" + A.BG_MARKER + "qpost"}]
-    logs = [log(marks["auto:b"] + 1, kicad_auto_to_deliberate="attach"),
+    logs = [log(marks["auto:start"] + 1, hub_connected={"cid": "gpui-1-2", "generation": 1}), log(marks["auto:b"] + 1, kicad_auto_to_deliberate="attach"),
             log(marks["auto:e:close"] + 1, kicad_closed_by_person="p"), log(marks["auto:e:refused"] + 1, kicad_attach="refused", why="closed by the person")]
     tags = {
         "auto-a-report": pane(11, False), "auto-a-painted": pane(11, False, epoch=5000), "auto-b-report": pane(11, True),
@@ -74,12 +74,12 @@ def good():
         "auto-e-refused": cap({"session": "closedByPerson", "generation": 3}), "auto-e-edit": cap(live, pid=5555),
     }
     press = lambda i: [{"id": i, "found": True, "seq": 1}]  # noqa: E731
-    parsed = {"mark_seqs": marks, "kicad_tags": tags, "gpui_logs": logs, "composer_reads": comp,
+    parsed = {"mark_seqs": marks, "kicad_tags": tags, "gpui_logs": logs, "composer_reads": comp, "hub_clients": {"gpui-1-2": 7},
               "presses": {"auto:d:view-leave": press("ui:View"), "auto:d:leave": press("rail:Files")},
               "rail_events": [(marks["auto:a:painted"] + 3, {"lit": ["Board"]})]}
     probe = {"ok": True, "before": dict(STATE), "after": dict(STATE), "stale": True, "control_ok": True, "control_stale": False, "generation": 3}
     actions = [
-        {"action": "type-pre", "ok": True}, {"action": "type-bg-start", "ok": True, "t_ms": 1000}, {"action": "type-bg-end", "ok": True, "t_ms": 20000}, {"action": "type-post", "ok": True},
+        {"action": "type-pre", "ok": True}, {"action": "kill", "ok": True, "pid": 4000}, {"action": "type-bg-start", "ok": True}, {"action": "type-bg-end", "ok": True, "first_key_ms": 1000, "last_key_ms": 20000}, {"action": "type-post", "ok": True},
         {"action": "a2-pointer", "ok": True, "focus_follows_mouse": "no", "clicks": 0, "motions": 1, "pointer_xy": [1060, 470], "trace": {"before_move": {}, "after_move_before_attach": {}}},
         {"action": "a2-type", "ok": True, "trace_frame": {}, "trace_typing_start": {}, "trace_typing_end": {}},
         {"action": "stale-future", "sent_generation": 10, **probe}, {"action": "stale-old", "sent_generation": 3, **probe}, {"action": "close", "ok": True},
@@ -165,7 +165,7 @@ class AutoGateTests(unittest.TestCase):
         r = run(*good())
         self.assertEqual({k: v["outcome"] for k, v in r.items()},
                          {"a-frame-no-keyboard": "passed", "a2-pointer-over-pane": "unavailable", "b-deliberate-promotes": "passed", "c-frame-switch": "unavailable", "d-keep-warm": "passed",
-                          "d2-leave-page-detaches": "passed", "e-person-closed-hold": "passed", "f-stale-generation": "passed", "g-always-viewer": "unavailable"})
+                          "d2-leave-page-detaches": "unavailable", "e-person-closed-hold": "passed", "f-stale-generation": "passed", "g-always-viewer": "unavailable"})
         self.assertIn("placements per switch", r["c-frame-switch"]["note"])
         self.assertIn("reconcile", r["g-always-viewer"]["note"])
 
@@ -196,23 +196,34 @@ class AutoGateTests(unittest.TestCase):
         # rail, frame
         self.assertEqual(a(lambda p, c, x: p.__setitem__("rail_events", [(p["mark_seqs"]["auto:a:painted"] + 3, {"lit": ["Schematic"]})]))["outcome"], "failed")
         self.assertEqual(a(lambda p, c, x: p["kicad_tags"].__setitem__("auto-a-report", GONE))["outcome"], "failed")
-        # typing across the start is measured: the frame must appear INSIDE the observed typing window
+        # typing across the start is measured with the typing process's OWN first/last key times: the frame must first paint strictly between them
         ok = a(lambda p, c, x: None)
         self.assertEqual(ok["outcome"], "passed")
-        self.assertEqual(ok["evidence"]["timing"]["frame_after_typing_start_ms"], 4000)
-        late = a(lambda p, c, x: p["kicad_tags"].__setitem__("auto-a-painted", pane(11, False, epoch=25000)))  # frame after typing ended
+        self.assertEqual(ok["evidence"]["timing"]["frame_after_first_key_ms"], 4000)
+        # the typing ended at 12 s but the paint arrived at 20 s: a later join must not make that "inside"
+        late = a(lambda p, c, x: (x[3].update(first_key_ms=1000, last_key_ms=12000), p["kicad_tags"].__setitem__("auto-a-painted", pane(11, False, epoch=20000))))
         self.assertEqual(late["outcome"], "unavailable")
-        self.assertIn("after the typing ended", late["note"])
-        early = a(lambda p, c, x: p["kicad_tags"].__setitem__("auto-a-painted", pane(11, False, epoch=500)))  # frame before typing began
+        self.assertIn("at or after the last key", late["note"])
+        early = a(lambda p, c, x: p["kicad_tags"].__setitem__("auto-a-painted", pane(11, False, epoch=500)))  # frame before the first key
         self.assertEqual(early["outcome"], "unavailable")
-        self.assertIn("before the typing began", early["note"])
+        self.assertIn("at or before the first key", early["note"])
+        # strictly between: equal to either end is not inside
+        for edge in (1000, 20000):
+            self.assertEqual(a(lambda p, c, x, e=edge: p["kicad_tags"].__setitem__("auto-a-painted", pane(11, False, epoch=e)))["outcome"], "unavailable", edge)
         self.assertEqual(a(lambda p, c, x: p["kicad_tags"]["auto-a-painted"].pop("epoch_ms"))["outcome"], "unavailable")
-        self.assertEqual(a(lambda p, c, x: x[1].pop("t_ms"))["outcome"], "unavailable")
+        self.assertEqual(a(lambda p, c, x: x[3].pop("first_key_ms"))["outcome"], "unavailable")
+        self.assertEqual(a(lambda p, c, x: x[3].pop("last_key_ms"))["outcome"], "unavailable")
+        # the holder's identity is an assertion of (a): missing identity cannot pass
+        for mut in (lambda p, c, x: p.__setitem__("hub_clients", {}), lambda p, c, x: p.__setitem__("gpui_logs", [g for g in p["gpui_logs"] if "hub_connected" not in g["obj"]])):
+            r = a(mut)
+            self.assertEqual(r["outcome"], "unavailable")
+            self.assertIn("holder is this client", r["note"])
         # `pre` typed AFTER the attach request is not "before"
         self.assertEqual(a(lambda p, c, x: p["composer_reads"].__setitem__(1, {"seq": p["mark_seqs"]["auto:a:attach"] + 1, "text": "xqpre"}))["outcome"], "unavailable")
         # unavailable, never passed: typing not delivered (each step), no hub runtime (or an incomplete one), `{}` report, no rail snapshot, missing read
-        for i in range(4):
+        for i in range(5):  # kill, pre, bg-start, bg-end, post
             self.assertEqual(a(lambda p, c, x, k=i: x.__setitem__(k, {"action": x[k]["action"], "ok": False, "error": "xinput"}))["outcome"], "unavailable", i)
+        self.assertEqual(a(lambda p, c, x: x.pop(0))["outcome"], "unavailable")  # no cold-start kill recorded
         self.assertEqual(a(lambda p, c, x: c.__setitem__("auto-a-frame", cap(None)))["outcome"], "unavailable")
         self.assertEqual(a(lambda p, c, x: c.__setitem__("auto-a-frame", cap({"session": "live", "holder": "7"})))["outcome"], "unavailable")
         self.assertEqual(a(lambda p, c, x: p["kicad_tags"].__setitem__("auto-a-report", {}))["outcome"], "failed")  # `{}` is a dict with no frame: not mounted
@@ -250,6 +261,24 @@ class AutoGateTests(unittest.TestCase):
         self.assertIn("known failure, owned by the KiCad lead (pane input on Linux)", bad["note"])
         # partial landing is KiCad getting some of it
         self.assertEqual(a2(ffm="no", composer=A.A2_MARKER[:4])["outcome"], "failed")
+        # a PASS needs usable focus-owner samples at every step and an explicit keys=false
+        def a2_pass_with(trace_override=None, keys=False):
+            actions = [{"action": "a2-pointer", "ok": True, "focus_follows_mouse": "no", "clicks": 0, "motions": 1, "pointer_xy": [1060, 470],
+                        "trace": {"before_move": trace, "after_move_before_attach": (trace_override or {}).get("after_move_before_attach", trace)}},
+                       {"action": "a2-type", "ok": True, "trace_frame": (trace_override or {}).get("frame", trace), "trace_typing_start": (trace_override or {}).get("start", trace),
+                        "trace_typing_end": (trace_override or {}).get("end", trace)}]
+            rep = pane(11, keys)
+            if keys is None:
+                rep.pop("keys")
+            kt = {"auto-a2-report": rep, "auto-a2-painted": pane(11, False)}
+            return A._gate_a2(marks, kt, [], [reads[0], {"seq": 35, "text": "x" + A.A2_MARKER}], actions)
+        self.assertEqual(a2_pass_with()["outcome"], "passed")
+        for k in ("after_move_before_attach", "frame", "start", "end"):
+            self.assertEqual(a2_pass_with({k: {"error": "xlib"}})["outcome"], "unavailable", k)
+            self.assertEqual(a2_pass_with({k: {"focus_chain": []}})["outcome"], "unavailable", k)
+            self.assertEqual(a2_pass_with({k: None})["outcome"], "unavailable", k)
+        self.assertEqual(a2_pass_with(keys=None)["outcome"], "unavailable")
+        self.assertNotEqual(a2_pass_with(keys=True)["outcome"], "passed")
         # a click, a pointer outside the pane, or no mounted painted frame is not the measurement
         self.assertEqual(a2(clicks=1)["outcome"], "unavailable")
         self.assertEqual(a2(xy=(100, 100))["outcome"], "unavailable")
@@ -260,7 +289,7 @@ class AutoGateTests(unittest.TestCase):
     def test_b_and_c_counterexamples(self) -> None:
         b = lambda fn: mutate("b-deliberate-promotes", fn)  # noqa: E731
         self.assertEqual(b(lambda p, c, x: p["kicad_tags"].__setitem__("auto-b-report", pane(11, False)))["outcome"], "failed")
-        self.assertEqual(b(lambda p, c, x: p["gpui_logs"].remove(p["gpui_logs"][0]))["outcome"], "failed")
+        self.assertEqual(b(lambda p, c, x: p["gpui_logs"].remove(next(g for g in p["gpui_logs"] if "kicad_auto_to_deliberate" in g["obj"])))["outcome"], "failed")
         self.assertEqual(b(lambda p, c, x: p["kicad_tags"].__setitem__("auto-b-report", {}))["outcome"], "unavailable")
         c = lambda fn: mutate("c-frame-switch", fn)  # noqa: E731
         # a second KiCad process; the hub's pid is not the pane's pid; two frames that are the same frame; a step that never painted
@@ -298,8 +327,11 @@ class AutoGateTests(unittest.TestCase):
         self.assertEqual(ok["outcome"], "passed")
         self.assertEqual(ok["evidence"]["place_counts"]["board->schematic"]["placements"], 1)
         self.assertEqual(ok["evidence"]["place_counts"]["board->schematic"]["notifies"], 1)
-        # one switch observed and the other not: still unavailable (not earned)
-        self.assertEqual(c_with([one], [])["outcome"], "unavailable")
+        # one switch with placements and the other with none: a failure with its own text (not the known failure, not unavailable)
+        none = c_with([one], [])
+        self.assertEqual(none["outcome"], "failed")
+        self.assertIn("no placement was logged for this switch", none["note"])
+        self.assertNotIn("known failure", none["note"])
         # three same-rect placements (the tab switch, the frames poll, the hub's echo) fail, labelled as the KiCad lead's known failure, with the counts
         three = c_with([one, one, one, notify, notify, notify], [one])
         self.assertEqual(three["outcome"], "failed")
@@ -311,8 +343,19 @@ class AutoGateTests(unittest.TestCase):
         self.assertEqual(c_with([("place", [9, 9, 9, 9], {"visible": True})], [one])["outcome"], "failed")
         # an off-screen (null) placement on a switch is counted and fails it
         self.assertEqual(c_with([one, ("place", None, {"visible": False})], [one])["outcome"], "failed")
-        # zero placements in a window with the other observed is not a pass either
-        self.assertEqual(c_with([notify], [one])["outcome"], "unavailable")
+        # zero placements (notifies only) in a window while the other has one: that failure's own text again
+        zero = c_with([notify], [one])
+        self.assertEqual(zero["outcome"], "failed")
+        self.assertIn("no placement was logged", zero["note"])
+        self.assertNotIn("known failure", zero["note"])
+        # a CHANGED rect is its own failure text, never the repeated-placement label
+        moved = c_with([("place", [9, 9, 9, 9], {"visible": True})], [one])
+        self.assertIn("the rect changed", moved["note"])
+        self.assertNotIn("known failure", moved["note"])
+        # the label is for REPEATED same-rect placements only
+        rep = c_with([one, one], [one])
+        self.assertIn("known failure", rep["note"])
+        self.assertTrue(rep["evidence"]["repeated_same_rect_placements"])
 
     # ---------------------------------------------------------------- d, d2
     def test_d_counterexamples(self) -> None:
@@ -327,6 +370,12 @@ class AutoGateTests(unittest.TestCase):
         r = d(lambda p, c, x: p["kicad_tags"].__setitem__("auto-d-view-left-report", pane(0, False)))
         self.assertEqual(r["outcome"], "failed")
         self.assertIn("not detached", r["note"])
+        # the hub omits `holder` when no window holds the pane (absent or explicit null = none); ANY present value, falsy included, is a holder
+        self.assertEqual(d(lambda p, c, x: c.__setitem__("auto-d-view-left", cap({"session": "parked", "generation": 3, "holder": None})))["outcome"], "passed")
+        for held in (0, "", False, "7", 3):
+            r = d(lambda p, c, x, h=held: c.__setitem__("auto-d-view-left", cap({"session": "parked", "generation": 3, "holder": h})))
+            self.assertEqual(r["outcome"], "failed", repr(held))
+            self.assertIn("omits the key", r["note"])
         # absence of `holder` counts only inside a COMPLETE runtime block (session AND generation)
         self.assertEqual(d(lambda p, c, x: c.__setitem__("auto-d-view-left", cap({"session": "parked"})))["outcome"], "unavailable")
         self.assertEqual(d(lambda p, c, x: c.__setitem__("auto-d-view-left", cap(None)))["outcome"], "unavailable")
@@ -334,25 +383,28 @@ class AutoGateTests(unittest.TestCase):
         self.assertEqual(d(lambda p, c, x: p["presses"].__setitem__("auto:d:view-leave", [{"id": "ui:View", "found": False, "seq": 1}]))["outcome"], "unavailable")
         self.assertEqual(d(lambda p, c, x: p["presses"].pop("auto:d:view-leave"))["outcome"], "unavailable")
 
-    def test_d2_is_unavailable_and_cannot_pass_without_files_observed_open(self) -> None:
+    def test_d2_is_always_unavailable_the_scripted_attach_is_not_the_rail(self) -> None:
         d2 = lambda fn: mutate("d2-leave-page-detaches", fn)  # noqa: E731
-        # a pane still in the tree over Files (shown, or shown=0): observed, the reconcile's job: unavailable
-        for shown in (11, 0):
-            r = d2(lambda p, c, x, s=shown: p["kicad_tags"].__setitem__("auto-d-left-report", {**pane(s, False), "open": "files"}))
-            self.assertEqual(r["outcome"], "unavailable")
-            self.assertIn("reconcile", r["note"])
-        # a detached-looking pane with Files NOT observed open can never pass (the same predicates would otherwise pass)
-        for opened in (None, "board", ""):
-            r = d2(lambda p, c, x, o=opened: p["kicad_tags"].__setitem__("auto-d-left-report", {**GONE, "open": o}))
-            self.assertEqual(r["outcome"], "unavailable", opened)
-            self.assertIn("Files was not observed open", r["note"])
-        self.assertEqual(d2(lambda p, c, x: p["kicad_tags"].__setitem__("auto-d-left-report", GONE))["outcome"], "unavailable")
-        # the rail press must have been delivered
-        self.assertEqual(d2(lambda p, c, x: p["presses"].__setitem__("auto:d:leave", [{"id": "rail:Files", "found": False}]))["outcome"], "unavailable")
-        # with Files observed open and a really detached pane the predicates may fail (held / not warm) ...
-        self.assertEqual(d2(lambda p, c, x: c.__setitem__("auto-d-left", cap({"session": "live", "holder": "7", "generation": 3})))["outcome"], "failed")
-        # ... and an incomplete runtime block never passes by the missing `holder` key
-        self.assertEqual(d2(lambda p, c, x: c.__setitem__("auto-d-left", cap({"session": "parked"})))["outcome"], "unavailable")
+        base = d2(lambda p, c, x: None)
+        self.assertEqual(base["outcome"], "unavailable")
+        self.assertIn("scripted attach", base["note"])
+        # whatever was observed on the way out (a detached pane, a pane still mounted, held or not warm, an incomplete runtime, Files not open,
+        # the rail press undelivered) can never become a pass or a failure: the return is driven by an attach the rail would never send
+        for mut in (
+            lambda p, c, x: p["kicad_tags"].__setitem__("auto-d-left-report", {**GONE, "open": "files"}),
+            lambda p, c, x: p["kicad_tags"].__setitem__("auto-d-left-report", {**pane(11, False), "open": "files"}),
+            lambda p, c, x: p["kicad_tags"].__setitem__("auto-d-left-report", {**pane(0, False), "open": "files"}),
+            lambda p, c, x: p["kicad_tags"].__setitem__("auto-d-left-report", {**GONE, "open": "board"}),
+            lambda p, c, x: c.__setitem__("auto-d-left", cap({"session": "live", "holder": "7", "generation": 3})),
+            lambda p, c, x: c.__setitem__("auto-d-left", cap({"session": "parked"})),
+            lambda p, c, x: p["presses"].__setitem__("auto:d:leave", [{"id": "rail:Files", "found": False}]),
+            lambda p, c, x: p["kicad_tags"].__setitem__("auto-d-back-report", pane(11, False, pid=1)),
+        ):
+            self.assertEqual(d2(mut)["outcome"], "unavailable")
+        # what was seen on the way out is recorded
+        r = d2(lambda p, c, x: p["kicad_tags"].__setitem__("auto-d-left-report", {**pane(11, False), "open": "files"}))
+        self.assertEqual(r["evidence"]["left_open"], "files")
+        self.assertIn("stayed in the tree", r["note"])
 
     # ---------------------------------------------------------------- e
     def test_e_counterexamples(self) -> None:
@@ -362,7 +414,7 @@ class AutoGateTests(unittest.TestCase):
         self.assertEqual(e(lambda p, c, x: p["kicad_tags"].__setitem__("auto-e-edit-report", pane(21, True, pid=4242)))["outcome"], "failed")
         self.assertEqual(e(lambda p, c, x: p["kicad_tags"].__setitem__("auto-e-refused-report", pane(11, False)))["outcome"], "failed")
         self.assertEqual(e(lambda p, c, x: p["kicad_tags"].__setitem__("auto-e-edit-painted", pane(21, True, pid=5555, painted=1)))["outcome"], "failed")
-        self.assertEqual(e(lambda p, c, x: x.__setitem__(8, {"action": "close", "ok": False, "error": "no socket"}))["outcome"], "unavailable")
+        self.assertEqual(e(lambda p, c, x: x.__setitem__(9, {"action": "close", "ok": False, "error": "no socket"}))["outcome"], "unavailable")
         # both interval boundaries and both pids are required
         for m in ("auto:e:close", "auto:e:refused", "auto:e:refused-done", "auto:e:edit", "auto:e:done"):
             self.assertEqual(e(lambda p, c, x, mm=m: p["mark_seqs"].pop(mm))["outcome"], "unavailable", m)
@@ -372,7 +424,7 @@ class AutoGateTests(unittest.TestCase):
     # ---------------------------------------------------------------- f
     def test_f_counterexamples(self) -> None:
         f = lambda fn: mutate("f-stale-generation", fn)  # noqa: E731
-        fut, old = 6, 7
+        fut, old = 7, 8
         self.assertEqual(f(lambda p, c, x: x[fut].update(stale=False))["outcome"], "failed")
         self.assertEqual(f(lambda p, c, x: x[old].update(stale=False))["outcome"], "failed")
         self.assertEqual(f(lambda p, c, x: x[fut].update(control_stale=True))["outcome"], "failed")
@@ -389,7 +441,7 @@ class AutoGateTests(unittest.TestCase):
         self.assertIn("old: not run", r["note"])
         self.assertIn("generation+7", r["evidence"]["note"])
         # nothing run at all
-        self.assertEqual(f(lambda p, c, x: x[:] and [x.pop(6), x.pop(6)])["outcome"], "unavailable")
+        self.assertEqual(f(lambda p, c, x: x[:] and [x.pop(7), x.pop(7)])["outcome"], "unavailable")
 
     def test_holder_is_this_client_turns_on_with_the_cid_lines_and_never_compares_x_window(self) -> None:
         def a_with(clients, logs_extra, holder="7", report_cid=None):
@@ -402,7 +454,8 @@ class AutoGateTests(unittest.TestCase):
         conn = [log(1, hub_connected={"cid": "gpui-1-2", "generation": 1})]
         # no lines: inferred (the pane's own X-window `holder` is never compared)
         r = a_with({}, [])
-        self.assertEqual(r["outcome"], "passed")
+        self.assertEqual(r["outcome"], "unavailable")
+        self.assertIn("holder is this client", r["note"])
         self.assertIn("inferred", r["evidence"]["holder_is_this_client"])
         # cid -> N -> runtime.holder == N: observed
         r = a_with({"gpui-1-2": 7}, conn)
@@ -426,8 +479,51 @@ class AutoGateTests(unittest.TestCase):
     def test_state_of_requires_every_part(self) -> None:
         good_sess = {"pid": 5, "runtime": {"session": "live", "generation": 2}, "frames": [{"kind": "PCB", "shown": True}]}
         self.assertEqual(A.state_of(good_sess), {"pid": 5, "generation": 2, "session": "live", "holder": None, "shown_frames": ["PCB"]})
-        for broken in ({**good_sess, "pid": 0}, {**good_sess, "frames": None}, {**good_sess, "runtime": {"session": "live"}}, {**good_sess, "runtime": None}, {k: v for k, v in good_sess.items() if k != "pid"}):
+        for broken in ({**good_sess, "pid": 0}, {**good_sess, "frames": None}, {**good_sess, "runtime": {"session": "live"}}, {**good_sess, "runtime": None},
+                       {k: v for k, v in good_sess.items() if k != "pid"}, {k: v for k, v in good_sess.items() if k != "frames"},
+                       {**good_sess, "frames": [{"kind": "PCB"}]}, {**good_sess, "frames": [{"kind": "PCB", "shown": "yes"}]}, {**good_sess, "frames": [{"shown": True}]}):
             self.assertIsNone(A.state_of(broken))
+        self.assertEqual(A.state_of({**good_sess, "frames": []})["shown_frames"], [])  # an empty list the hub really sent is a complete picture
+
+    def test_inventory_parser_preserves_missing_frames_and_shown(self) -> None:
+        import json as _json
+
+        def info(val):
+            return "INFO " + _json.dumps({"key": "editor.kicad.abc", "value": val}) + "\n" + '{"m":"hub.status","ok":true,"result":{"ok":true}}\n'
+        rt = {"runtime": {"session": "live", "generation": 1}, "pid": 9}
+        no_frames = D._parse_hub_kicad_sessions_output(info({**rt}))["sessions"]["editor.kicad.abc"]
+        self.assertNotIn("frames", no_frames)  # never `[]`
+        self.assertIsNone(A.state_of(no_frames))
+        no_shown = D._parse_hub_kicad_sessions_output(info({**rt, "frames": [{"kind": "PCB"}]}))["sessions"]["editor.kicad.abc"]
+        self.assertNotIn("shown", no_shown["frames"][0])  # never False
+        self.assertIsNone(A.state_of(no_shown))
+        full = D._parse_hub_kicad_sessions_output(info({**rt, "frames": [{"kind": "PCB", "shown": False}, {"kind": "SCH", "shown": True}]}))["sessions"]["editor.kicad.abc"]
+        self.assertEqual(A.state_of(full)["shown_frames"], ["SCH"])
+        empty = D._parse_hub_kicad_sessions_output(info({**rt, "frames": []}))["sessions"]["editor.kicad.abc"]
+        self.assertEqual(empty["frames"], [])
+        # the stale probe's verdict: an incomplete state is unavailable, never "equal"
+        probe = {"ok": True, "stale": True, "control_ok": True, "control_stale": False, "generation": 3, "before": A.state_of(no_frames), "after": A.state_of(no_frames)}
+        r = A._gate_f([{"action": "stale-future", **probe}, {"action": "stale-old", **probe}])
+        self.assertEqual(r["outcome"], "unavailable")
+
+    def test_typer_records_its_own_key_times_and_failure(self) -> None:
+        import json as _json
+        import os
+        import subprocess
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "t.json"
+            env = {k: v for k, v in os.environ.items() if k != "DISPLAY"}
+            env["DISPLAY"] = ":1999"  # nothing listens here: the record says so, the process neither hangs nor raises
+            r = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "rail_typer.py"), "ab", str(out)], env=env, capture_output=True, text=True, timeout=30)
+            rec = _json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(r.returncode, 1)
+            self.assertFalse(rec["ok"])
+            self.assertIsNone(rec["first_key_ms"])
+            self.assertEqual(rec["chars"], 0)
+        # the watcher takes the times FROM the typing process's record, not from the moment it joins
+        src = Path(D.__file__).read_text(encoding="utf-8")
+        self.assertIn('typed.get("first_key_ms")', src)
+        self.assertIn('typed.get("last_key_ms")', src)
 
     def test_parser_collects_composer_reads_and_kicad_logs_in_order(self) -> None:
         with tempfile.TemporaryDirectory() as td:
