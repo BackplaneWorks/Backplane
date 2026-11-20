@@ -2777,6 +2777,12 @@ impl Actor {
                     return;
                 };
                 if matches!(s.state.as_str(), "stopped" | "failed" | CLOSED) {
+                    // KiCad's real exit after the hub already counted it stopped (its close sends itself a clean exit when KiCad answers
+                    // Close): not shown, but how it really ended is logged when it was not clean (bp.13.3 row 1m: an abort on the way out)
+                    if reply.is_none() && (code != 0 || !how.is_empty()) {
+                        let how = if how.is_empty() { format!("code {code}") } else { how.clone() };
+                        eprintln!("kicad embed: {pro} ended after its close ({how}); its last output:\n{}", tail.trim_end());
+                    }
                     if let Some(tx) = reply { let _ = tx.send(Ok(json!({"closed":true}))); }
                     return;
                 }

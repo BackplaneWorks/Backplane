@@ -34,7 +34,7 @@ info_now() { hub_rpc "[]" | grep '^INFO ' | grep '"key":"editor.kicad.' | tail -
 try: v=json.load(sys.stdin).get("value") or {}; print(v.get("state","-"), len(v.get("frames") or []), (v.get("runtime") or {}).get("session","-"))
 except Exception: print("- 0 -")' 2>/dev/null || echo "- 0 -"; }
 
-CLEAN=0; CRASHED=0; OTHER=0; SUMMARY=()
+CLEAN=0; CRASHED=0; OTHER=0   # OTHER: never came up, still running after the close, or killed by the hub's 800 ms; SUMMARY=()
 : >"$OUT/crashes.txt"
 for i in $(seq "$CYCLES"); do
   # the project's lock: removed (no other KiCad), or left by a KiCad elsewhere (another host), as the default run found it
@@ -68,12 +68,15 @@ for i in $(seq "$CYCLES"); do
   fi
   for _ in $(seq 240); do [ "$KPID" -gt 0 ] && kill -0 "$KPID" 2>/dev/null || break; sleep 0.25; done
   sleep 1.5
-  ENDED=$(tail -n +"$((N0 + 1))" "$OUT/hub.log" | grep -m1 -E " ended (while closing )?\(" || true)
-  if [ -n "$ENDED" ]; then
-    CRASHED=$((CRASHED + 1)); HOW=$(echo "$ENDED" | sed -E 's/.* ended (while closing )?\((.*)\); its last output:.*/\2/')
-    LAST=$(tail -n +"$((N0 + 1))" "$OUT/hub.log" | sed -n -E '/ ended (while closing )?\(/,/^kicad embed: publish/p' | grep -v '^kicad embed' | tail -1)
+  ENDED=$(tail -n +"$((N0 + 1))" "$OUT/hub.log" | grep -m1 -E " ended (while closing |after its close )?\(" || true)
+  if [ -n "$ENDED" ] && echo "$ENDED" | grep -q "after its close (signal 9"; then
+    # the hub's own kill: KiCad still alive 800 ms after it answered Close (not an abort; counted apart)
+    OTHER=$((OTHER + 1)); echo "cycle $i: killed by the hub 800 ms after its Close (a slow exit) frames=$FRAMES"
+  elif [ -n "$ENDED" ]; then
+    CRASHED=$((CRASHED + 1)); HOW=$(echo "$ENDED" | sed -E 's/.* ended (while closing |after its close )?\((.*)\); its last output:.*/\2/')
+    LAST=$(tail -n +"$((N0 + 1))" "$OUT/hub.log" | sed -n -E '/ ended (while closing |after its close )?\(/,/^kicad embed: publish/p' | grep -v '^kicad embed' | tail -1)
     echo "cycle $i: CRASHED ($HOW) frames=$FRAMES; last: $LAST"; SUMMARY+=("$HOW: $LAST")
-    { echo "== cycle $i (frames $FRAMES)"; tail -n +"$((N0 + 1))" "$OUT/hub.log" | sed -n -E '/ ended (while closing )?\(/,/^kicad embed: publish/p' | head -60; } >>"$OUT/crashes.txt"
+    { echo "== cycle $i (frames $FRAMES)"; tail -n +"$((N0 + 1))" "$OUT/hub.log" | sed -n -E '/ ended (while closing |after its close )?\(/,/^kicad embed: publish/p' | head -60; } >>"$OUT/crashes.txt"
   elif kill -0 "$KPID" 2>/dev/null; then
     echo "cycle $i: KiCad still running after the close ($(cat "$OUT/close-$i.out" | tail -c 200))"; OTHER=$((OTHER + 1)); kill -9 "$KPID" 2>/dev/null
   else
