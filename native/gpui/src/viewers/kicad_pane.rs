@@ -2368,9 +2368,9 @@ mod tests {
 
         // review A: an echo ignored while the pane waits for its own show still answers the show it echoes, so a later switch of KiCad's
         // own to that kind is followed (it was swallowed: the remount's (PCB, 5) stayed and 5 < 6)
-        let mut f = Flights::default(); let mut pending = None;
+        let mut f = Flights::default();
         f.send("PCB", 5, Some("PCB_3D"), t);                      // the remount
-        pending = Some("SCH".to_string()); f.send("SCH", 7, Some("PCB_3D"), t); // the person's Schematic (chosen 6), through the hub
+        let mut pending = Some("SCH".to_string()); f.send("SCH", 7, Some("PCB_3D"), t); // the person's Schematic (chosen 6), through the hub
         assert_eq!(on_active(&mut f, &mut pending, "PCB", 6), Echo::Waiting, "the remount's echo while the Schematic is pending");
         assert_eq!(on_active(&mut f, &mut pending, "SCH", 6), Echo::Pending);
         assert!(f.0.is_empty() && pending.is_none(), "both answered: {f:?}");
@@ -2378,10 +2378,10 @@ mod tests {
 
         // review B: Board (chosen 1, sent 2), Schematic (3, 4), Board (5, 6) quicker than the hub; the first Board's echo answers only
         // that show; the Schematic's echo is chosen past; the person's local Schematic (7); the second Board's echo is chosen past too
-        let mut f = Flights::default(); let mut pending = None;
+        let mut f = Flights::default();
         f.send("PCB", 2, Some("SCH"), t); f.send("SCH", 4, Some("SCH"), t); f.send("PCB", 6, Some("SCH"), t);
         assert_eq!(f.0.len(), 3, "a show of the active kind is recorded while others are in flight (their echoes move KiCad off it)");
-        pending = Some("PCB".to_string());
+        let mut pending = Some("PCB".to_string());
         assert_eq!(on_active(&mut f, &mut pending, "PCB", 5), Echo::Pending, "the first Board's echo");
         assert_eq!(f.0.iter().map(|(k, n, _)| (k.as_str(), *n)).collect::<Vec<_>>(), vec![("SCH", 4), ("PCB", 6)], "only the oldest PCB answered");
         assert_eq!(on_active(&mut f, &mut pending, "SCH", 5), Echo::ChosenPast);
