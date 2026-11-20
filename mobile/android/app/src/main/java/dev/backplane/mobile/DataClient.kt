@@ -972,6 +972,10 @@ object DataClient {
     suspend fun viewerFiles(tid: String): ProjectFiles { val r = call("viewer.files", JSONObject().put("thread", tid))
         val boards = r.optJSONArray("boards")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { BoardRow(it.optString("label"), it.optString("value"), it.optBoolean("default"), it.optString("pcb"), it.optString("sch"), it.optString("project")) } }.orEmpty()
         return ProjectFiles(r.optString("root"), r.optString("pcb"), r.optString("sch"), boards) }
+    suspend fun viewerRail(tid: String, page: String = "", diff: Boolean = false): List<ViewerRailEntry> {
+        val r = call("viewer.rail", JSONObject().put("thread", tid).put("page", page).put("diff", diff))
+        return ViewerRail.parse(r.optJSONArray("rail"))
+    }
     fun stopWatch(tid: String) { scope.launch { runCatching { call("viewer.watch", JSONObject().put("thread", tid).put("kind", "")) } } }
     /** A viewer (tab, file, thread) opens: the last one's plots go at once and late ones for it are dropped (PlotStore.begin/shown);
      *  a 3D view shows its own cached model once the hub names that model's file among the view's. A stop changes nothing here. */
