@@ -18,6 +18,7 @@ Every assertion in Task 4 and Rule B7 reads ONLY from the metrics below and clea
 | `tiles[]` | `focused` | `bool` | Whether this tile currently owns focus. |
 | `tiles[]` | `overlay` | `dict \| null` | Explicit overlay state on this tile: `{"kind": "gerbers", ...}` when active, `null` when off (key must be present to observe overlay off). |
 | `GPUI_METRIC {"event":"tiles", ...}` | `splitters` | `list[dict]` | Currently painted splitters between tiles. |
+| `tiles` event | `refusal_metric` | `bool` | `true` when this build emits the `refusal` metric for every hub refusal; without it a missing refusal after a delivered overlay press is `unavailable`, with it a failure. |
 | `splitters[]` | `id` | `str` | Stable hub `SplitId` (matches split node id under `viewer.layout.root`). |
 | `splitters[]` | `rect` | `{"x","y","w","h": float}` | Painted splitter bounds in screenshot coordinates (positive area). |
 | `splitters[]` | `axis` | `"x" \| "y"` | Renderer axis translated from hub `Axis`: hub `"row"` -> `"x"`, hub `"col"` -> `"y"`. |
@@ -584,13 +585,18 @@ def evaluate_task4_dock(
     # One step back: closing the added tile returns the original Gerbers tile (same id & source) to full width
     back_ok = False
     back_note = err_b
+    back_unavailable = not ok_b  # an uncaptured/uncleared return shot is not a product failure
     if ok_b:
         s_back = shots["task4-dock-back"]
         fb_ok, fb_err = _fresh_tiles_after_mark(s_back, mark_seqs, "press:task4-dock-back", _exact_chain(presses, "press:task4-dock-back", [f"tile:{board_ids[0]}:close"] if board_ids else []))
         if not fb_ok:
-            back_note = fb_err
+            back_note, back_unavailable = fb_err, True
         elif not p_b:
-            back_note = "close press not delivered for task4-dock-back"
+            back_note, back_unavailable = "close press not delivered for task4-dock-back", True
+        elif init_rect is None or (len(s_back.get("tiles") or []) == 1 and _rect_tuple(s_back["tiles"][0].get("rect")) is None):
+            # both width observations are required: a missing rect in the initial or return shot is a gap, not width_restored=False
+            back_note = "missing outer rect in the initial or return Gerbers shot (width not observed)"
+            back_unavailable = True
         else:
             b_tiles = s_back.get("tiles") or []
             b_splitters = s_back.get("splitters") or []
@@ -618,7 +624,12 @@ def evaluate_task4_dock(
                     f"src={b_src!r} vs {init_src!r}, width_ok={width_restored}, body={b_body})"
                 )
 
-    outcome = "passed" if (not fails and back_ok) else "task_failed"
+    if not fails and back_ok:
+        outcome = "passed"
+    elif not fails and back_unavailable:
+        outcome = "unavailable"
+    else:
+        outcome = "task_failed"
     return {
         "outcome": outcome,
         "note": "; ".join(fails + ([back_note] if (back_note and not back_ok) else [])),
@@ -1025,15 +1036,23 @@ def evaluate_b7_dock(
                     raw_code = bool(RAW_REFUSAL_CODE_RE.search(msg)) if msg else False
                     layout_eq = lay_pre == lay_post
                     ok_ref = bool(ref_evs and code_ok and msg and not raw_code and layout_eq)
-                    checks["incompatible_overlay_refusal"] = _rec(
-                        "measured",
-                        ok_ref,
-                        "" if ok_ref else (
-                            "no refusal observed after the delivered overlay press" if not ref_evs
-                            else f"code={code!r} (ok={code_ok}) text={msg!r} raw_code={raw_code} layout_eq={layout_eq}"
-                        ),
-                        {"code": code, "refusal_text": msg, "layout_equal": layout_eq, "press_seq": press_seq},
-                    )
+                    # A delivered press with NO refusal event is a failure only where refusal observation is independently confirmed
+                    # in this run (the renderer's `tiles` event declares `refusal_metric: true`); otherwise nothing was observable.
+                    if not ref_evs and not parsed_full.get("refusal_metric_declared"):
+                        checks["incompatible_overlay_refusal"] = _rec(
+                            "unavailable", None,
+                            "no refusal event after the delivered press, and this run never confirmed that refusals are observable (`tiles` event `refusal_metric`)",
+                        )
+                    else:
+                        checks["incompatible_overlay_refusal"] = _rec(
+                            "measured",
+                            ok_ref,
+                            "" if ok_ref else (
+                                "no refusal observed after the delivered overlay press (refusals are observable in this run)" if not ref_evs
+                                else f"code={code!r} (ok={code_ok}) text={msg!r} raw_code={raw_code} layout_eq={layout_eq}"
+                            ),
+                            {"code": code, "refusal_text": msg, "layout_equal": layout_eq, "press_seq": press_seq},
+                        )
 
     measured = [(k, c) for k, c in checks.items() if c["status"] == "measured" and isinstance(c["passed"], bool)]
     if not measured:

@@ -127,6 +127,7 @@ def parse_client_log(log_path: Path) -> dict:
     splitters_current: list[dict] = []
     tiles_seq = 0
     tiles_metric_seen = False
+    refusal_metric_declared = False
     drags_by_mark: dict[str, list[dict]] = {}
     refusals_by_mark: dict[str, list[dict]] = {}
     current_mark = ""
@@ -158,6 +159,7 @@ def parse_client_log(log_path: Path) -> dict:
             "rail_metric_seen": rail_metric_seen,
             "rail_inventory": rail_inventory,
             "tiles_metric_seen": tiles_metric_seen,
+            "refusal_metric_declared": refusal_metric_declared,
             "drags": drags_by_mark,
             "refusals": refusals_by_mark,
         }
@@ -204,6 +206,7 @@ def parse_client_log(log_path: Path) -> dict:
             splitters_current = [s for s in (ev.get("splitters") or []) if isinstance(s, dict)]
             tiles_seq = ev_seq
             tiles_metric_seen = True
+            refusal_metric_declared = refusal_metric_declared or ev.get("refusal_metric") is True
         elif kind == "drag":
             drags_by_mark.setdefault(current_mark, []).append({
                 "ok": ev.get("ok") is True,
@@ -336,6 +339,7 @@ def parse_client_log(log_path: Path) -> dict:
         "rail_metric_seen": rail_metric_seen,
         "rail_inventory": rail_inventory,
         "tiles_metric_seen": tiles_metric_seen,
+        "refusal_metric_declared": refusal_metric_declared,
         "drags": drags_by_mark,
         "refusals": refusals_by_mark,
     }
