@@ -424,9 +424,9 @@ pub fn info_about(a: &Info) -> Value {
 // ---- The driver ----
 /// Agt.go: the runner script with the sign-in the settings name (agy.auth, agy.account, agy.gcp.project, agy.gcp.location), when Backplane's pinned
 /// agent is installed; otherwise the person's own `agy` CLI (agy_cli.rs), signed in as they are in a terminal. `prepare` decides.
-pub struct AgyDriver { turn: AgyTurn, st: Acp, cli: Option<std::path::PathBuf>, cs: super::agy_cli::St, bases: Vec<Base> }
+pub struct AgyDriver { turn: AgyTurn, st: Acp, cli: Option<std::path::PathBuf>, cs: super::agy_cli::St, bases: Vec<Base>, unset: Vec<&'static str> }
 impl AgyDriver {
-    pub fn new() -> AgyDriver { AgyDriver { turn: AgyTurn::default(), st: Acp::default(), cli: None, cs: Default::default(), bases: vec![] } }
+    pub fn new() -> AgyDriver { AgyDriver { turn: AgyTurn::default(), st: Acp::default(), cli: None, cs: Default::default(), bases: vec![], unset: vec![] } }
     pub fn done(&self) -> bool { if self.cli.is_some() { self.cs.done } else { self.st.done } }
     /// Whether this turn runs the person's agy CLI.
     pub fn on_cli(&self) -> bool { self.cli.is_some() }
@@ -441,6 +441,7 @@ impl Driver for AgyDriver {
             let home = std::path::PathBuf::from(crate::plat::dirs::home_or_empty());
             if let super::agy_cli::Mcp::Skipped(why) = super::agy_cli::ensure_mcp(&super::agy_cli::mcp_config(&home), !a.pcbparts_url.is_empty()) { self.cs.note = format!("Backplane's tools are not available to Antigravity this turn: {why}.") }
             self.bases = bases_from(&std::fs::read_to_string(bases_path(&a.home)).unwrap_or_default()); // the probe's folded list: model + effort -> agy's variant
+            self.unset = super::agy_cli::storage_unset_here(&home); // the sign-in's store, as it is at this turn's start
             self.cli = Some(p); return Ok(())
         } }
         // Google's terms forbid other software reaching Antigravity with a Google sign-in ("using OpenClaw with Antigravity OAuth"): the pinned agent's
@@ -456,7 +457,7 @@ impl Driver for AgyDriver {
     fn env(&self, a: &TurnIn) -> Vec<(String, String)> {
         if self.cli.is_none() { return vec![] }
         let exe = std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
-        vec![("BACKPLANE_MCP_URL".into(), a.mcp_url.clone()), ("BACKPLANE_HUB_EXE".into(), exe), ("AGY_CLI_OSC7501".into(), "off".into()), ("NO_COLOR".into(), "1".into())]
+        vec![("BACKPLANE_MCP_URL".into(), a.mcp_url.clone()), ("BACKPLANE_HUB_EXE".into(), exe), ("AGY_CLI_OSC7501".into(), "off".into()), ("NO_COLOR".into(), "1".into()), (super::agy_cli::UNSET_VAR.into(), self.unset.join(" "))]
     }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {
         if self.cli.is_some() { let note = std::mem::take(&mut self.cs.note); self.cs = super::agy_cli::St { session: a.session.clone(), step: -1, note, ..Default::default() }; return vec![super::agy_cli::input(a)] }
