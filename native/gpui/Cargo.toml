@@ -21,6 +21,7 @@ default = []
 cef = ["dep:cef"]
 
 [dependencies]
+time = "0.3"
 cef = { version = "=154.5.0", default-features = false, optional = true }
 # the client window's native handle, the parent of the Browser tab's windowed Chromium (viewers/cef_native.rs); the version gpui implements
 raw-window-handle = "0.6"
