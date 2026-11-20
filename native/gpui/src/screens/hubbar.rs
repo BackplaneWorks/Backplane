@@ -22,7 +22,7 @@ pub struct Act { pub id: String, pub label: String }
 pub struct Bar { pub text: String, pub tone: String, pub acts: Vec<Act> }
 
 #[derive(Default)]
-pub struct State { pub ever: bool, pub well: bool, pub bar: Option<Bar>, pub said: String, pub confirm: Option<(String, Instant)>, pub target: Option<Target>, pub guard: Option<PathBuf> }
+pub struct State { pub ever: bool, pub well: bool, pub bar: Option<Bar>, pub said: String, pub confirm: Option<(String, Instant)>, pub target: Option<Target>, pub guard: Option<PathBuf>, pub epoch: u64 }
 
 /* i18n-ok: English, compared and tested; strip draws it through trs */ fn restart() -> Act { Act { id: "restart".into(), label: "Restart hub".into() } }
 fn acts(v: &Value) -> Vec<Act> { v.as_array().into_iter().flatten().filter_map(|a| Some(Act { id: a["id"].as_str()?.into(), label: a["label"].as_str()?.into() })).collect() }
@@ -85,25 +85,35 @@ fn send(t: Option<&Target>, guard: Option<&Path>, action: &str) -> String {
 }
 
 /// Look now and then. The window is redrawn only when what it shows changes.
+/// Calling `watch` again after an in-process hub switch bumps `gen` so the previous watcher stops cleanly.
 pub fn watch(cx: &mut Context<Backplane>, target: Option<Target>, token_file: &Path) {
     let guard = token_file.parent().map(|h| h.join("guard"));
     let Some(t) = target.clone() else { return };
     cx.spawn(async move |weak, cx| {
         let mut misses = 0u32;
-        let _ = weak.update(cx, |this, _| { this.screens.hubbar.target = target; this.screens.hubbar.guard = guard; });
+        let Ok(my_epoch) = weak.update(cx, |this, _| {
+            let b = &mut this.screens.hubbar;
+            b.epoch = b.epoch.wrapping_add(1);
+            b.ever = false; b.well = false; b.bar = None; b.said.clear(); b.confirm = None;
+            b.target = target; b.guard = guard;
+            b.epoch
+        }) else { return };
         loop {
             let t2 = t.clone();
             let (h, s) = cx.background_executor().spawn(async move { ask(&t2) }).await;
             misses = if h.is_some() { 0 } else { misses + 1 };
-            if weak.update(cx, |this, cx| {
+            let keep = weak.update(cx, |this, cx| {
+                if this.screens.hubbar.epoch != my_epoch { return false; }
                 let live = this.status == "Connected";
                 let b = &mut this.screens.hubbar; b.ever |= live || h.is_some();
                 let now = bar_of(h.as_ref(), s.as_ref(), misses, Sock { live, ever: b.ever });
                 b.well = now.is_none() && (h.is_some() || live); let stale = b.confirm.as_ref().map_or(false, |c| c.1.elapsed() > CONFIRM);
                 if stale { b.confirm = None; }
                 if b.bar != now || stale { if now.is_none() { b.said.clear(); } b.bar = now; cx.notify(); }
-            }).is_err() { break }
-            let well = weak.update(cx, |this, _| this.screens.hubbar.well).unwrap_or(false);
+                true
+            }).unwrap_or(false);
+            if !keep { break; }
+            let well = weak.update(cx, |this, _| this.screens.hubbar.epoch == my_epoch && this.screens.hubbar.well).unwrap_or(false);
             cx.background_executor().timer(if well { WELL } else { ILL }).await;
         }
     }).detach();

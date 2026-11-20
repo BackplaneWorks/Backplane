@@ -2,7 +2,7 @@ use crate::{delta,wire};
 use anyhow::{ensure, Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use std::{collections::HashMap, path::PathBuf, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{collections::{HashMap, VecDeque}, path::PathBuf, time::{Duration, SystemTime, UNIX_EPOCH}};
 use tokio::sync::mpsc::{self, Sender};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 
@@ -83,6 +83,27 @@ fn unnamed(named:bool,keyed:bool,saved:Option<String>,token_here:bool)->Start {
         /* i18n-ok: test */ assert!(refused(true,&e(401)));assert!(!refused(false,&e(401)),"a hub token that fails is a wrong file, not a revoked device");
         /* i18n-ok: test */ assert!(!refused(true,&e(500)));assert!(!refused(true,&anyhow::anyhow!("connection refused")));
     }
+    #[test] fn commands_sent_during_backoff_are_queued_and_switch_hub_interrupts_immediately() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(async {
+            let (tx, mut rx) = mpsc::channel(16);
+            let mut queued = VecDeque::new();
+            tx.send(Command::Send("hello".into())).await.unwrap();
+            tx.send(Command::Select("t42".into())).await.unwrap();
+            assert!(backoff_wait(Duration::from_millis(30), &mut rx, &mut queued).await.is_none());
+            /* i18n-ok: test */ assert_eq!(queued.len(), 2, "Send and Select queued during backoff are preserved");
+            assert!(matches!(queued.pop_front(), Some(Command::Send(s)) if s == "hello"));
+            assert!(matches!(queued.pop_front(), Some(Command::Select(s)) if s == "t42"));
+            // SwitchHub interrupts a long backoff immediately and clears queued old-hub commands
+            queued.push_back(Command::Send("old-hub".into()));
+            tx.send(Command::SwitchHub("ws://b:3799".into(), PathBuf::from("/tmp/b.token"), true)).await.unwrap();
+            let t0 = std::time::Instant::now();
+            let end = backoff_wait(Duration::from_secs(10), &mut rx, &mut queued).await;
+            /* i18n-ok: test */ assert!(t0.elapsed() < Duration::from_secs(1), "SwitchHub wakes backoff immediately");
+            assert!(matches!(end, Some(SessionEnd::Switch(ws, _, true)) if ws == "ws://b:3799"));
+            /* i18n-ok: test */ assert!(queued.is_empty(), "old-hub queued commands are cleared on SwitchHub");
+        });
+    }
 }
 /// The hub said no to this device's credential at the door, as it does once it is revoked (a restart or a lost route is only a reconnect).
 fn refused(paired:bool,e:&anyhow::Error)->bool {
@@ -161,6 +182,33 @@ pub fn licenses_dir()->Option<PathBuf> {
 }
 fn rpc_id()->u64 {static RPC:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(1<<30);RPC.fetch_add(1,std::sync::atomic::Ordering::Relaxed)}
 enum SessionEnd { Quit, Switch(String,PathBuf,bool) }
+/// Wait out a reconnect backoff while listening for commands: `SwitchHub` interrupts the wait
+/// immediately (discarding queued commands from the old hub), while all other commands are held
+/// in `queued` so they execute once the next session connects.
+async fn backoff_wait(
+    delay: Duration,
+    commands: &mut mpsc::Receiver<Command>,
+    queued: &mut VecDeque<Command>,
+) -> Option<SessionEnd> {
+    let sleep = tokio::time::sleep(delay);
+    tokio::pin!(sleep);
+    loop {
+        tokio::select! {
+            _ = &mut sleep => return None,
+            cmd = commands.recv() => match cmd {
+                Some(Command::SwitchHub(ws, token_file, paired)) => {
+                    queued.clear();
+                    return Some(SessionEnd::Switch(ws, token_file, paired));
+                }
+                Some(other) => {
+                    if queued.len() >= 256 { queued.pop_front(); }
+                    queued.push_back(other);
+                }
+                None => return Some(SessionEnd::Quit),
+            }
+        }
+    }
+}
 pub fn connect(mut config:Config)->(Sender<Command>,async_channel::Receiver<Event>) {
     crate::screens::place::open(&config);
     let (tx,mut commands)=mpsc::channel(256);let (events,rx)=async_channel::bounded(64);
@@ -168,6 +216,7 @@ pub fn connect(mut config:Config)->(Sender<Command>,async_channel::Receiver<Even
         let runtime=tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         runtime.block_on(async move {
             let mut saved_targets:HashMap<String,Value>=HashMap::new();
+            let mut queued:VecDeque<Command>=VecDeque::new();
             if config.unpaired {
                 loop {
                     match commands.recv().await {
@@ -182,12 +231,13 @@ pub fn connect(mut config:Config)->(Sender<Command>,async_channel::Receiver<Even
             let mut view=View::new(&config);let mut delay=1;
             // the home failover (docs/pairing.md, Home hub): `cfg` is the hub connected to, `on_home` the home's key while it is not the one chosen
             let mut cfg=config.clone();let mut on_home:Option<String>=None;let mut down:Option<tokio::time::Instant>=None;
-            let apply_switch=|config:&mut Config,cfg:&mut Config,view:&mut View,on_home:&mut Option<String>,down:&mut Option<tokio::time::Instant>,delay:&mut u64,saved_targets:&mut HashMap<String,Value>,ws:String,token_file:PathBuf,paired:bool|{
-                if !cfg.hub.is_empty() { saved_targets.insert(cfg.hub.clone(), view.target.clone()); }
+            let apply_switch=|config:&mut Config,cfg:&mut Config,view:&mut View,on_home:&mut Option<String>,down:&mut Option<tokio::time::Instant>,delay:&mut u64,saved_targets:&mut HashMap<String,Value>,queued:&mut VecDeque<Command>,ws:String,token_file:PathBuf,paired:bool|{
+                if !config.hub.is_empty() { saved_targets.insert(config.hub.clone(), view.target.clone()); }
+                queued.clear();
                 config.hub=ws;config.token_file=token_file;config.paired=paired;config.unpaired=false;config.pending=false;
                 *cfg=config.clone();*on_home=None;*down=None;*delay=1;
                 *view=View::fresh(cfg);
-                if let Some(t)=saved_targets.get(&cfg.hub) {
+                if let Some(t)=saved_targets.get(&config.hub) {
                     view.target=t.clone();
                     if let Some(id)=t["id"].as_str() { view.session["sel"]=json!(id); }
                     view.restored=Restore::First;
@@ -197,7 +247,7 @@ pub fn connect(mut config:Config)->(Sender<Command>,async_channel::Receiver<Even
                 /* i18n-ok: connection status, compared with Connected; drawn through trs */ let _=events.send(Event::Status("Connecting…".into())).await;
                 let began=tokio::time::Instant::now();
                 let back=on_home.as_ref().map(|_|crate::pairing::http_of(&config.hub));
-                let r=session(&cfg,&mut commands,&events,&mut view,back).await;
+                let r=session(&cfg,&mut commands,&mut queued,&events,&mut view,back).await;
                 // a session that stood a while was up: the hub is down from now; quick failures keep the first time it went
                 if r.is_err() && (down.is_none()||began.elapsed()>Duration::from_secs(5)) {down=Some(tokio::time::Instant::now());}
                 if let Err(error)=&r { if let Some(next)=failover(&config,&cfg,on_home.as_deref(),down.map_or(Duration::ZERO,|d|d.elapsed()),format!("{error:#}")=="home:back"||(on_home.is_some()&&refused(true,error))).await {
@@ -207,7 +257,7 @@ pub fn connect(mut config:Config)->(Sender<Command>,async_channel::Receiver<Even
                 match r {
                     Ok(SessionEnd::Quit)=>break,
                     Ok(SessionEnd::Switch(ws,token_file,paired))=>{
-                        apply_switch(&mut config,&mut cfg,&mut view,&mut on_home,&mut down,&mut delay,&mut saved_targets,ws,token_file,paired);
+                        apply_switch(&mut config,&mut cfg,&mut view,&mut on_home,&mut down,&mut delay,&mut saved_targets,&mut queued,ws,token_file,paired);
                         let _=events.send(Event::Using(None)).await;continue;
                     }
                     Err(error) if refused(cfg.paired,&error)=>{let _=events.send(Event::Unpaired).await;break;}
@@ -221,25 +271,14 @@ pub fn connect(mut config:Config)->(Sender<Command>,async_channel::Receiver<Even
                         let token=std::fs::read_to_string(&cfg.token_file).unwrap_or_default();let mut text=format!("{error:#}");if !token.trim().is_empty(){text=text.replace(token.trim(),"<token>");}eprintln!("GPUI_LOG {{\"disconnect\":{}}}",serde_json::Value::String(text));
                         let _=events.send(Event::Error(disconnected_text())).await;
                         view.pending.clear();view.outgoing.clear();view.rpc_names.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;view.paging=None;view.want_page=None;view.older_on=false;view.older_reqs.clear();
-                        let sleep=tokio::time::sleep(Duration::from_secs(delay));
-                        tokio::pin!(sleep);
-                        let mut switched=false;
-                        loop {
-                            tokio::select! {
-                                _=&mut sleep=>{break;}
-                                cmd=commands.recv()=>{
-                                    match cmd {
-                                        Some(Command::SwitchHub(ws,token_file,paired))=>{
-                                            apply_switch(&mut config,&mut cfg,&mut view,&mut on_home,&mut down,&mut delay,&mut saved_targets,ws,token_file,paired);
-                                            let _=events.send(Event::Using(None)).await;switched=true;break;
-                                        }
-                                        Some(_)=>{}
-                                        None=>return,
-                                    }
-                                }
+                        match backoff_wait(Duration::from_secs(delay), &mut commands, &mut queued).await {
+                            Some(SessionEnd::Quit) => return,
+                            Some(SessionEnd::Switch(ws, token_file, paired)) => {
+                                apply_switch(&mut config,&mut cfg,&mut view,&mut on_home,&mut down,&mut delay,&mut saved_targets,&mut queued,ws,token_file,paired);
+                                let _=events.send(Event::Using(None)).await;
                             }
+                            None => { delay=(delay*2).min(10); }
                         }
-                        if !switched { delay=(delay*2).min(10); }
                     }
                 }
             }
@@ -260,7 +299,7 @@ async fn failover(config:&Config,cfg:&Config,on_home:Option<&str>,down:Duration,
     let o=crate::pairing::http_of(&ws);let up=tokio::task::spawn_blocking(move||crate::pairing::answers(&o)).await.unwrap_or(false);
     crate::hubs::on_home(&main,&key,false,down,up,false).then(||Some((key,ws,cred)))
 }
-async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&async_channel::Sender<Event>,v:&mut View,back:Option<String>)->Result<SessionEnd> {
+async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,queued:&mut VecDeque<Command>,events:&async_channel::Sender<Event>,v:&mut View,back:Option<String>)->Result<SessionEnd> {
     let token=std::fs::read_to_string(&config.token_file)?;
     /* i18n-ok: connection errors, logged as GPUI_LOG disconnect */ ensure!(token.trim().chars().all(|c|c.is_ascii_alphanumeric()||c=='-'||c=='_'),"invalid token file");
     let url=format!("{}/ws?view=1&mobile=1&token={}",config.hub.trim_end_matches('/'),token.trim());
@@ -269,7 +308,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
     let (mut sink,mut source)=socket.split();let mut last=tokio::time::Instant::now();
     let mut heartbeat=tokio::time::interval(Duration::from_secs(10));
     loop {tokio::select! {
-        command=commands.recv(), if !v.greeting.is_null()=>{
+        command=async { if let Some(c)=queued.pop_front() { Some(c) } else { commands.recv().await } }, if !v.greeting.is_null()=>{
             let Some(command)=command else{return Ok(SessionEnd::Quit)};
             if let Command::Sleep(s)=&command {anyhow::bail!("net_sleep:{s}");}
             if let Command::SwitchHub(ws,token_file,paired)=command {return Ok(SessionEnd::Switch(ws,token_file,paired));}
