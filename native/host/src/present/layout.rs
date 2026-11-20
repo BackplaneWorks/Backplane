@@ -1,17 +1,15 @@
 //! Hub-owned docking/tiling layout model for the viewer pane (pure data & operations).
 //!
-//! The layout is per thread and drawn by every client (desktop GPUI, iOS, Android, linked machines).
+//! Currently **diagnostic / inert**: `viewer.layout` is derived and emitted on `thread.viewer`
+//! for inspection and tests, while clients still draw from the existing single-page / Split fields.
 //! Whether a design tile hosts the embedded KiCad editor is a client-session decision (`design_mode`
 //! + `holder`), never a property of `Tile`; [`kicad_tile`] picks the single eligible tile in a fixed,
 //! deterministic order.
 
-use crate::files::kicad::{gerber, project};
+use crate::files::{kicad::{gerber, project}, rv};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashSet;
-
-fn watch_key(kind: u32, root: &str, path: &str) -> String {
-    format!("{kind}|{root}|{path}")
-}
 
 pub const LAYOUT_VERSION: u32 = 1;
 pub const MIN_TILE_PX: f32 = 180.0;
@@ -23,6 +21,10 @@ pub type SplitId = String;
 
 fn default_version() -> u32 { LAYOUT_VERSION }
 fn default_overlay_mode() -> OverlayMode { OverlayMode::Diff }
+
+fn watch_key(kind: u32, root: &str, path: &str) -> String {
+    format!("{kind}|{root}|{path}")
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -76,6 +78,22 @@ impl PageKind {
         matches!(self, PageKind::Board | PageKind::Schematic)
     }
 
+    /// Wire / rail identifier string for this page kind.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PageKind::Board => "board",
+            PageKind::Schematic => "schematic",
+            PageKind::Solid3d => "3d",
+            PageKind::Gerbers => "gerbers",
+            PageKind::Mech => "mech",
+            PageKind::Files => "files",
+            PageKind::Diff => "diff",
+            PageKind::Review => "review",
+            PageKind::Browser => "browser",
+            PageKind::Simulation => "simulation",
+        }
+    }
+
     pub fn from_page_str(s: &str) -> Option<Self> {
         match s {
             "board" | "pcb" => Some(PageKind::Board),
@@ -92,25 +110,38 @@ impl PageKind {
         }
     }
 
-    /// Map a KiCad embedded frame name (including KiCad-only editors) to its owning `PageKind`.
+    /// Map a KiCad embedded pane frame name (matching `native/gpui/src/viewers/kicad_pane.rs` `TABS`:
+    /// `PCB`, `SCH`, `PCB_3D`, `SYMBOL_EDITOR`, `FOOTPRINT_EDITOR`, `GERBVIEW`, `SIMULATOR`)
+    /// to its owning `PageKind`.
     pub fn from_kicad_frame(frame: &str) -> Option<Self> {
-        match frame.to_ascii_lowercase().as_str() {
-            "pcb" | "board" | "footprints" | "fp" | "footprint" => Some(PageKind::Board),
-            "sch" | "schematic" | "symbols" | "sym" | "symbol" => Some(PageKind::Schematic),
-            "3d" | "3dview" => Some(PageKind::Solid3d),
-            "simulation" | "sim" | "simulator" => Some(PageKind::Simulation),
-            "gerbview" | "gerbers" | "gerber" => Some(PageKind::Gerbers),
+        match frame.to_ascii_uppercase().as_str() {
+            "PCB" | "BOARD" | "FOOTPRINT_EDITOR" | "FOOTPRINTS" | "FP" => Some(PageKind::Board),
+            "SCH" | "SCHEMATIC" | "SYMBOL_EDITOR" | "SYMBOLS" | "SYM" => Some(PageKind::Schematic),
+            "PCB_3D" | "3D" | "3DVIEW" => Some(PageKind::Solid3d),
+            "SIMULATOR" | "SIMULATION" | "SIM" => Some(PageKind::Simulation),
+            "GERBVIEW" | "GERBERS" | "GERBER" => Some(PageKind::Gerbers),
             _ => None,
         }
     }
 }
 
-/// Opaque version reference for a historical tile or overlay.
+/// Which project-scoped repository holds a historical version (never a filesystem path).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VersionRepo {
+    /// The project's primary git repository.
+    Git,
+    /// Backplane's local history repository (`.backplane/history.git`).
+    History,
+}
+
+/// Project-scoped version reference for a historical tile or overlay.
 ///
-/// `id` is an opaque identifier the hub resolves (e.g. short commit sha `"a1b2c3d4"`),
-/// never a raw `git\t<gitdir>…` wire string.
+/// `repo` identifies which of the project's repositories holds the commit (never a path),
+/// `id` is the full git object id (4..=64 hex chars), and `label` is the short display label.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TileVersion {
+    pub repo: VersionRepo,
     pub id: String,
     pub label: String,
 }
@@ -132,6 +163,9 @@ pub struct Overlay {
     pub version: Option<TileVersion>,
     #[serde(default = "default_overlay_mode")]
     pub mode: OverlayMode,
+    /// Optional layer-diff bitmask preserved from `diff\n<old>\n<new>\n<bits>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer_bits: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -202,26 +236,70 @@ impl<'de> Deserialize<'de> for Node {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Layout {
-    #[serde(default = "default_version")]
     pub version: u32,
-    #[serde(default)]
     pub root: Option<Node>,
-    #[serde(default)]
     pub focus: Option<TileId>,
-    #[serde(default)]
     pub maximized: Option<TileId>,
+}
+
+/// Deserializing a [`Layout`] tolerates unknown fields and validates all structural invariants
+/// (rejecting dangling focus/maximized, invalid sources, duplicate IDs, incompatible overlays, etc.).
+impl<'de> Deserialize<'de> for Layout {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct LayoutWire {
+            #[serde(default = "default_version")]
+            version: u32,
+            #[serde(default)]
+            root: Option<Node>,
+            #[serde(default)]
+            focus: Option<TileId>,
+            #[serde(default)]
+            maximized: Option<TileId>,
+        }
+        let w = LayoutWire::deserialize(deserializer)?;
+        let layout = Layout {
+            version: w.version,
+            root: w.root,
+            focus: w.focus,
+            maximized: w.maximized,
+        };
+        check_invariants(&layout).map_err(serde::de::Error::custom)?;
+        Ok(layout)
+    }
 }
 
 impl Default for Layout {
     fn default() -> Self { Self::empty() }
 }
 
+/// Unit-square rectangle `[0, 1] × [0, 1]` occupied by a visible tile.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+impl Rect {
+    pub fn approx_eq(self, other: Self) -> bool {
+        (self.x - other.x).abs() < 1e-5
+            && (self.y - other.y).abs() < 1e-5
+            && (self.w - other.w).abs() < 1e-5
+            && (self.h - other.h).abs() < 1e-5
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Refusal {
-    /// Operation would hide, move, close, swap, retarget, or cover a locked tile (e.g. KiCad modal open).
+    /// Operation would hide, move, resize, close, swap, retarget, or cover a locked tile (e.g. KiCad modal open).
     Locked,
     /// Cannot open Simulation beside an existing KiCad tile (one KiCad host per process).
     OneKicad,
@@ -231,6 +309,8 @@ pub enum Refusal {
     SameTile,
     /// Target tile has no overlay to split out.
     NoOverlay,
+    /// Overlay pair is not comparable (only Board+Gerbers, or same Board/Schematic source with distinct versions).
+    IncompatibleOverlay,
     /// Source path is not relative to the project root or contains raw internal tokens.
     InvalidSource,
     /// Tile ID already exists in the layout.
@@ -249,12 +329,22 @@ impl Refusal {
             Refusal::NotFound => "notFound",
             Refusal::SameTile => "sameTile",
             Refusal::NoOverlay => "noOverlay",
+            Refusal::IncompatibleOverlay => "incompatibleOverlay",
             Refusal::InvalidSource => "invalidSource",
             Refusal::DuplicateId => "duplicateId",
             Refusal::InvalidRatio => "invalidRatio",
             Refusal::UnknownFrame => "unknownFrame",
         }
     }
+}
+
+/// Result of [`split_overlay`], preserving `mode` and `layer_bits` so [`merge_overlay`] is a true inverse.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SplitOverlayOut {
+    pub layout: Layout,
+    pub overlay_tile_id: TileId,
+    pub mode: OverlayMode,
+    pub layer_bits: Option<u32>,
 }
 
 /// Returns true if `p` is empty (project default) or a clean relative path under the project root.
@@ -282,12 +372,33 @@ pub fn is_relative_source(p: &str) -> bool {
     true
 }
 
+fn is_commit_word(c: &str) -> bool {
+    (4..=64).contains(&c.len()) && c.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 fn is_clean_version(v: &TileVersion) -> bool {
-    !v.id.is_empty()
-        && !v.id.contains('\t')
-        && !v.id.contains('\n')
+    is_commit_word(&v.id)
+        && !v.label.is_empty()
         && !v.label.contains('\t')
         && !v.label.contains('\n')
+        && !v.label.contains('\r')
+        && !v.label.contains('/')
+        && !v.label.contains('\\')
+        && !v.label.contains(':')
+}
+
+/// Whether `ov` is a valid comparable overlay on `tile`:
+/// - Board + Gerbers (fabrication output compared against a board), OR
+/// - Same design kind (`Board` or `Schematic`) and same `source` with distinct versions (at least one versioned).
+pub fn overlay_compatible(tile: &Tile, ov: &Overlay) -> bool {
+    if tile.kind == PageKind::Board && ov.kind == PageKind::Gerbers {
+        return tile.version.is_none() && ov.version.is_none();
+    }
+    matches!(tile.kind, PageKind::Board | PageKind::Schematic)
+        && ov.kind == tile.kind
+        && ov.source == tile.source
+        && ov.version != tile.version
+        && (tile.version.is_some() || ov.version.is_some())
 }
 
 impl Layout {
@@ -332,6 +443,8 @@ impl Layout {
     }
 
     /// Generate a fresh unique tile ID (`t1`, `t2`, ...).
+    ///
+    /// IDs of closed tiles are reusable: the lowest unused `tN` is returned.
     pub fn next_tile_id(&self) -> TileId {
         let mut n = 1usize;
         loop {
@@ -344,6 +457,8 @@ impl Layout {
     }
 
     /// Generate a fresh unique split ID (`s1`, `s2`, ...).
+    ///
+    /// IDs of collapsed splits are reusable: the lowest unused `sN` is returned.
     pub fn next_split_id(&self) -> SplitId {
         let mut n = 1usize;
         loop {
@@ -367,6 +482,9 @@ fn validate_tile(tile: &Tile) -> Result<(), Refusal> {
     }
     if let Some(ov) = &tile.overlay {
         validate_overlay(ov)?;
+        if !overlay_compatible(tile, ov) {
+            return Err(Refusal::IncompatibleOverlay);
+        }
     }
     Ok(())
 }
@@ -407,6 +525,63 @@ fn first_tile_id(node: &Node) -> TileId {
     }
 }
 
+/// Compute the visible unit-square rectangle `[0, 1] × [0, 1]` of `target` in `layout`.
+/// Returns `None` if `target` is absent or covered by another maximized tile.
+pub fn tile_rect(layout: &Layout, target: &str) -> Option<Rect> {
+    if !layout.contains_tile(target) {
+        return None;
+    }
+    if let Some(mid) = &layout.maximized {
+        return if mid == target {
+            Some(Rect { x: 0.0, y: 0.0, w: 1.0, h: 1.0 })
+        } else {
+            None
+        };
+    }
+    let root = layout.root.as_ref()?;
+    node_tile_rect(root, target, Rect { x: 0.0, y: 0.0, w: 1.0, h: 1.0 })
+}
+
+fn node_tile_rect(node: &Node, target: &str, r: Rect) -> Option<Rect> {
+    match node {
+        Node::Tile(t) => (t.id == target).then_some(r),
+        Node::Split { axis, ratio, a, b, .. } => {
+            let (ra, rb) = match axis {
+                Axis::Row => (
+                    Rect { x: r.x, y: r.y, w: r.w * ratio, h: r.h },
+                    Rect { x: r.x + r.w * ratio, y: r.y, w: r.w * (1.0 - ratio), h: r.h },
+                ),
+                Axis::Col => (
+                    Rect { x: r.x, y: r.y, w: r.w, h: r.h * ratio },
+                    Rect { x: r.x, y: r.y + r.h * ratio, w: r.w, h: r.h * (1.0 - ratio) },
+                ),
+            };
+            node_tile_rect(a, target, ra).or_else(|| node_tile_rect(b, target, rb))
+        }
+    }
+}
+
+/// Enforce the tile lock against the resulting layout: if `locked` names a tile present in `before`,
+/// that tile must remain present with identical contents and identical visible unit-square rect in `after`.
+fn check_lock_preserved(before: &Layout, after: &Layout, locked: Option<&str>) -> Result<(), Refusal> {
+    let Some(lid) = locked else {
+        return Ok(());
+    };
+    let Some(before_tile) = before.tile(lid) else {
+        return Ok(());
+    };
+    let Some(after_tile) = after.tile(lid) else {
+        return Err(Refusal::Locked);
+    };
+    if before_tile != after_tile {
+        return Err(Refusal::Locked);
+    }
+    match (tile_rect(before, lid), tile_rect(after, lid)) {
+        (Some(r1), Some(r2)) if r1.approx_eq(r2) => Ok(()),
+        _ => Err(Refusal::Locked),
+    }
+}
+
 /// Pick the single tile that should host the embedded KiCad editor for a client session.
 ///
 /// Order: the focused tile first if it is a design page (`Board` or `Schematic`) and `eligible`
@@ -437,6 +612,16 @@ pub fn can_add(_layout: &Layout, kind: PageKind, client_has_kicad_tile: bool) ->
     Ok(())
 }
 
+/// Whether a rail JSON array (from `present::rail::rail`) allows pressing `kind`
+/// (entry is present and not `"disabled"`).
+pub fn rail_allows(rail_json: &Value, kind: PageKind) -> bool {
+    let want = kind.as_str();
+    rail_json
+        .as_array()
+        .and_then(|rows| rows.iter().find(|r| r["id"].as_str() == Some(want)))
+        .is_some_and(|r| r["state"].as_str() != Some("disabled"))
+}
+
 /// Default per-tile minimum size callback: `380 × 300` for the KiCad tile, `180 × 180` for others.
 pub fn default_min_for(kicad_tile_id: Option<&str>) -> impl Fn(&Tile) -> (f32, f32) + '_ {
     move |tile: &Tile| {
@@ -449,33 +634,46 @@ pub fn default_min_for(kicad_tile_id: Option<&str>) -> impl Fn(&Tile) -> (f32, f
 }
 
 /// Add a new tile beside `target` (or the focused/first tile if `target` is `None`, or as the root
-/// if the layout is empty).
-pub fn add(layout: &Layout, target: Option<&str>, side: Side, tile: Tile) -> Result<Layout, Refusal> {
+/// if the layout is empty). Enforces `can_add` (`oneKicad`) and `locked` (refuses if adding would
+/// move/resize/cover the locked tile).
+pub fn add(
+    layout: &Layout,
+    target: Option<&str>,
+    side: Side,
+    tile: Tile,
+    client_has_kicad_tile: bool,
+    locked: Option<&str>,
+) -> Result<Layout, Refusal> {
+    can_add(layout, tile.kind, client_has_kicad_tile)?;
     validate_tile(&tile)?;
     if layout.contains_tile(&tile.id) {
         return Err(Refusal::DuplicateId);
     }
-    let Some(root) = &layout.root else {
-        return Layout::single(tile);
-    };
-    let anchor = match target {
-        Some(tid) => {
-            if !layout.contains_tile(tid) {
-                return Err(Refusal::NotFound);
+    let next = match &layout.root {
+        None => Layout::single(tile)?,
+        Some(root) => {
+            let anchor = match target {
+                Some(tid) => {
+                    if !layout.contains_tile(tid) {
+                        return Err(Refusal::NotFound);
+                    }
+                    tid.to_string()
+                }
+                None => layout.focus.clone().unwrap_or_else(|| first_tile_id(root)),
+            };
+            let split_id = layout.next_split_id();
+            let new_id = tile.id.clone();
+            let new_root = insert_beside(root, &anchor, side, tile, &split_id).ok_or(Refusal::NotFound)?;
+            Layout {
+                version: layout.version.max(LAYOUT_VERSION),
+                root: Some(new_root),
+                focus: Some(new_id),
+                maximized: None,
             }
-            tid.to_string()
         }
-        None => layout.focus.clone().unwrap_or_else(|| first_tile_id(root)),
     };
-    let split_id = layout.next_split_id();
-    let new_id = tile.id.clone();
-    let new_root = insert_beside(root, &anchor, side, tile, &split_id).ok_or(Refusal::NotFound)?;
-    Ok(Layout {
-        version: layout.version.max(LAYOUT_VERSION),
-        root: Some(new_root),
-        focus: Some(new_id),
-        maximized: None,
-    })
+    check_lock_preserved(layout, &next, locked)?;
+    Ok(next)
 }
 
 fn insert_beside(node: &Node, anchor: &str, side: Side, tile: Tile, split_id: &str) -> Option<Node> {
@@ -534,11 +732,8 @@ fn remove_tile(node: &Node, target: &str) -> Option<(Tile, Option<Node>)> {
     }
 }
 
-/// Move `src` beside `dst` on `side`.
+/// Move `src` beside `dst` on `side`. Enforces `locked` against the resulting tree placement.
 pub fn move_tile(layout: &Layout, src: &str, dst: &str, side: Side, locked: Option<&str>) -> Result<Layout, Refusal> {
-    if locked == Some(src) || locked == Some(dst) {
-        return Err(Refusal::Locked);
-    }
     if src == dst {
         return Err(Refusal::SameTile);
     }
@@ -554,14 +749,13 @@ pub fn move_tile(layout: &Layout, src: &str, dst: &str, side: Side, locked: Opti
         focus: Some(dst.to_string()),
         maximized: None,
     };
-    add(&intermediate, Some(dst), side, tile)
+    let next = add(&intermediate, Some(dst), side, tile, false, None)?;
+    check_lock_preserved(layout, &next, locked)?;
+    Ok(next)
 }
 
-/// Swap two tiles in place.
+/// Swap two tiles in place. Enforces `locked` against the resulting tree placement.
 pub fn swap(layout: &Layout, a_id: &str, b_id: &str, locked: Option<&str>) -> Result<Layout, Refusal> {
-    if locked == Some(a_id) || locked == Some(b_id) {
-        return Err(Refusal::Locked);
-    }
     if a_id == b_id {
         return Err(Refusal::SameTile);
     }
@@ -569,12 +763,14 @@ pub fn swap(layout: &Layout, a_id: &str, b_id: &str, locked: Option<&str>) -> Re
     let ta = layout.tile(a_id).ok_or(Refusal::NotFound)?.clone();
     let tb = layout.tile(b_id).ok_or(Refusal::NotFound)?.clone();
     let new_root = swap_nodes(root, a_id, &tb, b_id, &ta);
-    Ok(Layout {
+    let next = Layout {
         version: layout.version.max(LAYOUT_VERSION),
         root: Some(new_root),
         focus: layout.focus.clone(),
         maximized: layout.maximized.clone(),
-    })
+    };
+    check_lock_preserved(layout, &next, locked)?;
+    Ok(next)
 }
 
 fn swap_nodes(node: &Node, a_id: &str, replacement_a: &Tile, b_id: &str, replacement_b: &Tile) -> Node {
@@ -592,69 +788,77 @@ fn swap_nodes(node: &Node, a_id: &str, replacement_a: &Tile, b_id: &str, replace
     }
 }
 
-/// Close `target` and collapse its parent split.
+/// Close `target` and collapse its parent split. Enforces `locked` against the resulting tree placement.
 pub fn close(layout: &Layout, target: &str, locked: Option<&str>) -> Result<Layout, Refusal> {
-    if locked == Some(target) {
-        return Err(Refusal::Locked);
-    }
     let root = layout.root.as_ref().ok_or(Refusal::NotFound)?;
     let (_, rem) = remove_tile(root, target).ok_or(Refusal::NotFound)?;
-    let Some(new_root) = rem else {
-        return Ok(Layout::empty());
+    let next = match rem {
+        None => Layout::empty(),
+        Some(new_root) => {
+            let focus = match &layout.focus {
+                Some(f) if f != target => Some(f.clone()),
+                _ => Some(first_tile_id(&new_root)),
+            };
+            let maximized = match &layout.maximized {
+                Some(m) if m != target => Some(m.clone()),
+                _ => None,
+            };
+            Layout {
+                version: layout.version.max(LAYOUT_VERSION),
+                root: Some(new_root),
+                focus,
+                maximized,
+            }
+        }
     };
-    let focus = match &layout.focus {
-        Some(f) if f != target => Some(f.clone()),
-        _ => Some(first_tile_id(&new_root)),
-    };
-    let maximized = match &layout.maximized {
-        Some(m) if m != target => Some(m.clone()),
-        _ => None,
-    };
-    Ok(Layout {
-        version: layout.version.max(LAYOUT_VERSION),
-        root: Some(new_root),
-        focus,
-        maximized,
-    })
+    check_lock_preserved(layout, &next, locked)?;
+    Ok(next)
 }
 
-fn subtree_min<F: Fn(&Tile) -> (f32, f32)>(node: &Node, min_for: &F) -> (f32, f32) {
+/// Minimum `(width_px, height_px)` required for `node` so every descendant leaf meets `min_for`
+/// at the subtree's current split ratios (e.g. an 80/20 row of two 180 px leaves requires 900 px).
+pub fn subtree_min<F: Fn(&Tile) -> (f32, f32)>(node: &Node, min_for: &F) -> (f32, f32) {
     match node {
         Node::Tile(t) => {
             let (w, h) = min_for(t);
             (w.max(1.0), h.max(1.0))
         }
-        Node::Split { axis, a, b, .. } => {
+        Node::Split { axis, ratio, a, b, .. } => {
             let (aw, ah) = subtree_min(a, min_for);
             let (bw, bh) = subtree_min(b, min_for);
+            let r = ratio.clamp(0.05, 0.95);
             match axis {
-                Axis::Row => (aw + bw, ah.max(bh)),
-                Axis::Col => (aw.max(bw), ah + bh),
+                Axis::Row => ((aw / r).max(bw / (1.0 - r)), ah.max(bh)),
+                Axis::Col => (aw.max(bw), (ah / r).max(bh / (1.0 - r))),
             }
         }
     }
 }
 
-/// Resize `split_id` to `desired_ratio`, clamped so neither subtree drops below the minimum sizes
-/// returned by `min_for` inside `bounds = (width_px, height_px)`.
+/// Resize `split_id` to `desired_ratio`, clamped so every descendant leaf stays at or above the
+/// minimum size returned by `min_for` inside `bounds = (width_px, height_px)` (accounting for
+/// descendant split ratios). Enforces `locked` against the resulting tree placement.
 pub fn resize<F: Fn(&Tile) -> (f32, f32)>(
     layout: &Layout,
     split_id: &str,
     desired_ratio: f32,
     bounds: (f32, f32),
     min_for: F,
+    locked: Option<&str>,
 ) -> Result<Layout, Refusal> {
     if !desired_ratio.is_finite() {
         return Err(Refusal::InvalidRatio);
     }
     let root = layout.root.as_ref().ok_or(Refusal::NotFound)?;
     let new_root = resize_node(root, split_id, desired_ratio, bounds, &min_for).ok_or(Refusal::NotFound)?;
-    Ok(Layout {
+    let next = Layout {
         version: layout.version.max(LAYOUT_VERSION),
         root: Some(new_root),
         focus: layout.focus.clone(),
         maximized: layout.maximized.clone(),
-    })
+    };
+    check_lock_preserved(layout, &next, locked)?;
+    Ok(next)
 }
 
 fn resize_node<F: Fn(&Tile) -> (f32, f32)>(
@@ -715,34 +919,33 @@ fn resize_node<F: Fn(&Tile) -> (f32, f32)>(
 /// Maximize `target`, covering all other tiles without closing them.
 ///
 /// Covering is **not** leaving: the desktop layout host hides a covered KiCad tile while keeping
-/// its embedded surface attached, whereas closing or swapping is the leave. If `locked` names
-/// another tile currently in the tree (e.g. a KiCad tile with an open modal dialog), maximizing
-/// a different tile is refused with [`Refusal::Locked`].
+/// its embedded surface attached, whereas closing or swapping is the leave. Enforces `locked`
+/// against the resulting placement (if `locked` is present and would be covered or resized, returns
+/// [`Refusal::Locked`]).
 pub fn maximize(layout: &Layout, target: &str, locked: Option<&str>) -> Result<Layout, Refusal> {
     if !layout.contains_tile(target) {
         return Err(Refusal::NotFound);
     }
-    if let Some(lid) = locked {
-        if lid != target && layout.contains_tile(lid) {
-            return Err(Refusal::Locked);
-        }
-    }
-    Ok(Layout {
+    let next = Layout {
         version: layout.version.max(LAYOUT_VERSION),
         root: layout.root.clone(),
         focus: Some(target.to_string()),
         maximized: Some(target.to_string()),
-    })
+    };
+    check_lock_preserved(layout, &next, locked)?;
+    Ok(next)
 }
 
 /// Restore from a maximized tile back to the full split tree.
-pub fn restore(layout: &Layout) -> Layout {
-    Layout {
+pub fn restore(layout: &Layout, locked: Option<&str>) -> Result<Layout, Refusal> {
+    let next = Layout {
         version: layout.version.max(LAYOUT_VERSION),
         root: layout.root.clone(),
         focus: layout.focus.clone(),
         maximized: None,
-    }
+    };
+    check_lock_preserved(layout, &next, locked)?;
+    Ok(next)
 }
 
 fn map_tile(node: &Node, target: &str, f: &dyn Fn(&Tile) -> Tile) -> Option<Node> {
@@ -766,12 +969,16 @@ fn map_tile(node: &Node, target: &str, f: &dyn Fn(&Tile) -> Tile) -> Option<Node
 }
 
 /// Set or clear an overlay on `target`.
+///
+/// Enforces [`overlay_compatible`] (only Board+Gerbers, or same Board/Schematic source with
+/// distinct versions) and `locked`.
 pub fn overlay(layout: &Layout, target: &str, ov: Option<Overlay>, locked: Option<&str>) -> Result<Layout, Refusal> {
-    if locked == Some(target) {
-        return Err(Refusal::Locked);
-    }
+    let existing = layout.tile(target).ok_or(Refusal::NotFound)?;
     if let Some(o) = &ov {
         validate_overlay(o)?;
+        if !overlay_compatible(existing, o) {
+            return Err(Refusal::IncompatibleOverlay);
+        }
     }
     let root = layout.root.as_ref().ok_or(Refusal::NotFound)?;
     let new_root = map_tile(root, target, &|t| {
@@ -780,41 +987,81 @@ pub fn overlay(layout: &Layout, target: &str, ov: Option<Overlay>, locked: Optio
         nt
     })
     .ok_or(Refusal::NotFound)?;
-    Ok(Layout {
+    let next = Layout {
         version: layout.version.max(LAYOUT_VERSION),
         root: Some(new_root),
         focus: layout.focus.clone(),
         maximized: layout.maximized.clone(),
-    })
+    };
+    check_lock_preserved(layout, &next, locked)?;
+    Ok(next)
 }
 
-/// Detach `target`'s overlay into its own tile beside `target` on `side`.
+/// Detach `target`'s overlay into its own tile beside `target` on `side`, preserving `mode` and
+/// `layer_bits` in [`SplitOverlayOut`] so [`merge_overlay`] is a true inverse.
 pub fn split_overlay(
     layout: &Layout,
     target: &str,
     side: Side,
     new_tile_id: Option<TileId>,
     locked: Option<&str>,
-) -> Result<Layout, Refusal> {
-    if locked == Some(target) {
-        return Err(Refusal::Locked);
-    }
+) -> Result<SplitOverlayOut, Refusal> {
     let t = layout.tile(target).ok_or(Refusal::NotFound)?;
     let ov = t.overlay.clone().ok_or(Refusal::NoOverlay)?;
     let id = new_tile_id.unwrap_or_else(|| layout.next_tile_id());
     let cleared = overlay(layout, target, None, locked)?;
     let new_tile = Tile {
-        id,
+        id: id.clone(),
         kind: ov.kind,
         source: ov.source,
         version: ov.version,
         overlay: None,
     };
-    add(&cleared, Some(target), side, new_tile)
+    let next = add(&cleared, Some(target), side, new_tile, false, locked)?;
+    check_lock_preserved(layout, &next, locked)?;
+    Ok(SplitOverlayOut {
+        layout: next,
+        overlay_tile_id: id,
+        mode: ov.mode,
+        layer_bits: ov.layer_bits,
+    })
+}
+
+/// Inverse of [`split_overlay`]: close `overlay_tile_id` and attach it back onto `base_id` as an
+/// [`Overlay`] with `mode` and `layer_bits`, focusing `base_id`.
+pub fn merge_overlay(
+    layout: &Layout,
+    base_id: &str,
+    overlay_tile_id: &str,
+    mode: OverlayMode,
+    layer_bits: Option<u32>,
+    locked: Option<&str>,
+) -> Result<Layout, Refusal> {
+    if base_id == overlay_tile_id {
+        return Err(Refusal::SameTile);
+    }
+    let base = layout.tile(base_id).ok_or(Refusal::NotFound)?;
+    let ov_tile = layout.tile(overlay_tile_id).ok_or(Refusal::NotFound)?.clone();
+    let ov = Overlay {
+        kind: ov_tile.kind,
+        source: ov_tile.source,
+        version: ov_tile.version,
+        mode,
+        layer_bits,
+    };
+    validate_overlay(&ov)?;
+    if !overlay_compatible(base, &ov) {
+        return Err(Refusal::IncompatibleOverlay);
+    }
+    let without = close(layout, overlay_tile_id, None)?;
+    let mut merged = overlay(&without, base_id, Some(ov), None)?;
+    merged.focus = Some(base_id.to_string());
+    check_lock_preserved(layout, &merged, locked)?;
+    Ok(merged)
 }
 
 /// Retarget an existing tile to a new `kind` and `source` (e.g. when the embedded KiCad tile
-/// switches frames on KiCad's strip: Board ↔ Schematic, Symbols, Footprints, 3D, Simulation, GerbView).
+/// switches frames on KiCad's strip).
 pub fn retarget(
     layout: &Layout,
     target: &str,
@@ -822,9 +1069,6 @@ pub fn retarget(
     source: String,
     locked: Option<&str>,
 ) -> Result<Layout, Refusal> {
-    if locked == Some(target) {
-        return Err(Refusal::Locked);
-    }
     if !is_relative_source(&source) {
         return Err(Refusal::InvalidSource);
     }
@@ -837,15 +1081,18 @@ pub fn retarget(
         overlay: None,
     })
     .ok_or(Refusal::NotFound)?;
-    Ok(Layout {
+    let next = Layout {
         version: layout.version.max(LAYOUT_VERSION),
         root: Some(new_root),
         focus: layout.focus.clone(),
         maximized: layout.maximized.clone(),
-    })
+    };
+    check_lock_preserved(layout, &next, locked)?;
+    Ok(next)
 }
 
-/// Retarget a tile from a KiCad frame name (`pcb`, `sch`, `symbols`, `footprints`, `3d`, `simulation`, `gerbview`).
+/// Retarget a tile from a KiCad pane frame name (`PCB`, `SCH`, `PCB_3D`, `SYMBOL_EDITOR`,
+/// `FOOTPRINT_EDITOR`, `GERBVIEW`, `SIMULATOR`).
 pub fn retarget_kicad_frame(
     layout: &Layout,
     target: &str,
@@ -858,15 +1105,20 @@ pub fn retarget_kicad_frame(
 }
 
 /// Pure rail press rule:
+/// - If `available(kind)` is `false` (disabled or omitted in the rail): no-op, returns `layout` unchanged.
 /// - Focused tile has `kind`: close that tile.
-/// - Another tile has `kind`: focus it (and restore if maximized on another tile).
+/// - Another tile has `kind`: focus it (restoring if maximized on another tile).
 /// - Absent `kind`: replace the focused tile, or open a 1-tile layout from idle.
-pub fn rail_press(
+pub fn rail_press<F: Fn(PageKind) -> bool>(
     layout: &Layout,
     kind: PageKind,
     default_source: String,
+    available: F,
     locked: Option<&str>,
 ) -> Result<Layout, Refusal> {
+    if !available(kind) {
+        return Ok(layout.clone());
+    }
     if !is_relative_source(&default_source) {
         return Err(Refusal::InvalidSource);
     }
@@ -883,6 +1135,7 @@ pub fn rail_press(
         if next.maximized.as_deref() != Some(existing.id.as_str()) {
             next.maximized = None;
         }
+        check_lock_preserved(layout, &next, locked)?;
         return Ok(next);
     }
     if let Some(fid) = layout.focus.as_deref() {
@@ -921,6 +1174,7 @@ pub fn viewer_show(
         if next.maximized.as_deref() != Some(id.as_str()) {
             next.maximized = None;
         }
+        check_lock_preserved(layout, &next, locked)?;
         return Ok(next);
     }
     if let Some(fid) = layout.focus.as_deref() {
@@ -992,6 +1246,9 @@ fn check_node(node: &Node, tile_ids: &mut HashSet<String>, split_ids: &mut HashS
                         return Err(format!("tile {:?} overlay has invalid version {:?}", t.id, v));
                     }
                 }
+                if !overlay_compatible(t, ov) {
+                    return Err(format!("tile {:?} has incompatible overlay {:?}", t.id, ov));
+                }
             }
             Ok(())
         }
@@ -1031,29 +1288,48 @@ pub fn sanitize_rel(root: &str, raw: &str) -> String {
     }
 }
 
-/// Parse a hub `git\t<gitdir>\t<commit>\t<len>\t<file>` version string into `(rel_source, TileVersion)`.
+/// Parse a hub `git\t<gitdir>\t<commit>\t<top_len>\t<file>` version string into
+/// `(rel_source, TileVersion)` preserving repository identity and the full commit id.
 pub fn parse_git_source(root: &str, raw: &str) -> Option<(String, TileVersion)> {
     let rest = raw.strip_prefix("git\t")?;
     let mut parts = rest.splitn(4, '\t');
-    let _gitdir = parts.next()?;
+    let gitdir = parts.next()?;
     let commit = parts.next()?;
-    let _len = parts.next()?;
+    let top_len_str = parts.next()?;
     let file = parts.next()?;
-    let short: String = commit.chars().take(8).collect();
-    if short.is_empty() {
+    if !is_commit_word(commit) {
         return None;
     }
-    let rel = sanitize_rel(root, file);
-    Some((rel, TileVersion { id: short.clone(), label: short }))
+    let repo = if gitdir.ends_with("/.backplane/history.git") || gitdir.ends_with("\\.backplane\\history.git") {
+        VersionRepo::History
+    } else {
+        VersionRepo::Git
+    };
+    let label: String = commit.chars().take(8).collect();
+    // Extract relative path using `top_len` (character count of repository top) when valid,
+    // falling back to `sanitize_rel(root, file)`.
+    let rel_from_top = top_len_str.parse::<usize>().ok().and_then(|n| {
+        let byte_idx = file.char_indices().nth(n).map(|(i, _)| i)?;
+        let tail = file.get(byte_idx..)?;
+        let stripped = tail.strip_prefix('/').or_else(|| tail.strip_prefix('\\'))?;
+        let norm = stripped.replace('\\', "/");
+        is_relative_source(&norm).then_some(norm)
+    });
+    let rel = rel_from_top.unwrap_or_else(|| sanitize_rel(root, file));
+    Some((rel, TileVersion { repo, id: commit.to_string(), label }))
 }
 
 /// Parse a hub `diff\n<old>\n<new>[\n<bits>]` comparison string into
-/// `(new_rel, new_ver, old_rel, old_ver)`.
-pub fn parse_diff_source(root: &str, raw: &str) -> Option<(String, Option<TileVersion>, String, Option<TileVersion>)> {
+/// `(new_rel, new_ver, old_rel, old_ver, layer_bits)`.
+pub fn parse_diff_source(
+    root: &str,
+    raw: &str,
+) -> Option<(String, Option<TileVersion>, String, Option<TileVersion>, Option<u32>)> {
     let rest = raw.strip_prefix("diff\n")?;
     let mut lines = rest.split('\n');
     let old_raw = lines.next()?;
     let new_raw = lines.next()?;
+    let layer_bits = lines.next().and_then(|b| b.trim().parse::<u32>().ok());
     let parse_side = |side: &str| -> (String, Option<TileVersion>) {
         if let Some((r, v)) = parse_git_source(root, side) {
             (r, Some(v))
@@ -1063,10 +1339,10 @@ pub fn parse_diff_source(root: &str, raw: &str) -> Option<(String, Option<TileVe
     };
     let (old_rel, old_ver) = parse_side(old_raw);
     let (new_rel, new_ver) = parse_side(new_raw);
-    Some((new_rel, new_ver, old_rel, old_ver))
+    Some((new_rel, new_ver, old_rel, old_ver, layer_bits))
 }
 
-/// Inputs for deriving today's inert `viewer.layout` from the current single-page viewer state.
+/// Inputs for deriving today's diagnostic `viewer.layout` from the current single-page viewer state.
 #[derive(Clone, Debug, Default)]
 pub struct DeriveInput<'a> {
     pub root: &'a str,
@@ -1077,6 +1353,8 @@ pub struct DeriveInput<'a> {
     pub file: &'a str,
     pub sheet: &'a str,
     pub picked_board: &'a str,
+    /// Resolved sibling schematic for `picked_board` (empty if `picked_board` has no schematic).
+    pub picked_sch: &'a str,
     pub mech_rel: &'a str,
     pub files_dir: &'a str,
     pub default_pcb: &'a str,
@@ -1108,22 +1386,34 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
         let sch_rel = if !inp.sheet.is_empty() {
             sanitize_rel(inp.root, inp.sheet)
         } else if !inp.picked_board.is_empty() {
-            let derived = inp
-                .picked_board
-                .strip_suffix(".kicad_pcb")
-                .map(|b| format!("{b}.kicad_sch"))
-                .unwrap_or_default();
-            if !derived.is_empty() {
-                sanitize_rel(inp.root, &derived)
-            } else {
-                sanitize_rel(inp.root, inp.default_sch)
-            }
+            sanitize_rel(inp.root, inp.picked_sch)
         } else {
             sanitize_rel(inp.root, inp.default_sch)
         };
-        return Layout {
-            version: LAYOUT_VERSION,
-            root: Some(Node::Split {
+        // When an alternate board is picked and has no sibling schematic (and no explicit sheet),
+        // do not invent a nonexistent `.kicad_sch` tile: emit Board + 3D only, matching `watch_split`.
+        let include_sch = !sch_rel.is_empty() || (inp.picked_board.is_empty() && inp.default_sch.is_empty());
+        let right = Node::Split {
+            id: if include_sch { "s2".into() } else { "s1".into() },
+            axis: Axis::Col,
+            ratio: 0.5,
+            a: Box::new(Node::Tile(Tile {
+                id: "pcb".into(),
+                kind: PageKind::Board,
+                source: board_rel.clone(),
+                version: None,
+                overlay: None,
+            })),
+            b: Box::new(Node::Tile(Tile {
+                id: "3d".into(),
+                kind: PageKind::Solid3d,
+                source: board_rel,
+                version: None,
+                overlay: None,
+            })),
+        };
+        let root = if include_sch {
+            Node::Split {
                 id: "s1".into(),
                 axis: Axis::Row,
                 ratio: 0.5,
@@ -1134,32 +1424,21 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
                     version: None,
                     overlay: None,
                 })),
-                b: Box::new(Node::Split {
-                    id: "s2".into(),
-                    axis: Axis::Col,
-                    ratio: 0.5,
-                    a: Box::new(Node::Tile(Tile {
-                        id: "pcb".into(),
-                        kind: PageKind::Board,
-                        source: board_rel.clone(),
-                        version: None,
-                        overlay: None,
-                    })),
-                    b: Box::new(Node::Tile(Tile {
-                        id: "3d".into(),
-                        kind: PageKind::Solid3d,
-                        source: board_rel,
-                        version: None,
-                        overlay: None,
-                    })),
-                }),
-            }),
+                b: Box::new(right),
+            }
+        } else {
+            right
+        };
+        return Layout {
+            version: LAYOUT_VERSION,
+            root: Some(root),
             focus: Some("pcb".into()),
             maximized: None,
         };
     }
 
     if inp.gerbers {
+        let no_board = inp.file.starts_with("noboard\n");
         let raw_file = inp.file.strip_prefix("noboard\n").unwrap_or(inp.file);
         let set_raw = gerber::set_of(raw_file);
         let gerber_rel = if !set_raw.is_empty() {
@@ -1168,17 +1447,22 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
             sanitize_rel(inp.root, inp.default_gerber_set)
         };
         if inp.gerbers_vs_board {
-            let board_raw = raw_file
-                .strip_prefix(gerber::CMP)
-                .and_then(|r| r.split_once('\n'))
-                .map(|(_, b)| b)
-                .unwrap_or("");
-            let board_rel = if !board_raw.is_empty() {
-                sanitize_rel(inp.root, board_raw)
-            } else if !inp.picked_board.is_empty() {
-                sanitize_rel(inp.root, inp.picked_board)
+            // `noboard\n` keeps today's empty comparison: no board source (plan_watches emits nothing).
+            let board_rel = if no_board {
+                String::new()
             } else {
-                sanitize_rel(inp.root, inp.default_pcb)
+                let board_raw = raw_file
+                    .strip_prefix(gerber::CMP)
+                    .and_then(|r| r.split_once('\n'))
+                    .map(|(_, b)| b)
+                    .unwrap_or("");
+                if !board_raw.is_empty() {
+                    sanitize_rel(inp.root, board_raw)
+                } else if !inp.picked_board.is_empty() {
+                    sanitize_rel(inp.root, inp.picked_board)
+                } else {
+                    sanitize_rel(inp.root, inp.default_pcb)
+                }
             };
             return Layout::single(Tile {
                 id: "t1".into(),
@@ -1190,6 +1474,7 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
                     source: gerber_rel,
                     version: None,
                     mode: OverlayMode::Diff,
+                    layer_bits: None,
                 }),
             })
             .unwrap_or_else(|_| Layout::empty());
@@ -1209,23 +1494,25 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
     };
 
     // History comparison (`diff\n<old>\n<new>[\n<bits>]`)
-    if let Some((new_rel, new_ver, old_rel, old_ver)) = parse_diff_source(inp.root, inp.file) {
-        return Layout::single(Tile {
+    if let Some((new_rel, new_ver, old_rel, old_ver, layer_bits)) = parse_diff_source(inp.root, inp.file) {
+        let ov = Overlay {
+            kind,
+            source: old_rel,
+            version: old_ver,
+            mode: OverlayMode::Diff,
+            layer_bits,
+        };
+        let t = Tile {
             id: "t1".into(),
             kind,
             source: new_rel,
             version: new_ver,
-            overlay: Some(Overlay {
-                kind,
-                source: old_rel,
-                version: old_ver,
-                mode: OverlayMode::Diff,
-            }),
-        })
-        .unwrap_or_else(|_| Layout::empty());
+            overlay: Some(ov),
+        };
+        return Layout::single(t).unwrap_or_else(|_| Layout::empty());
     }
 
-    // Single historical version (`git\t<gitdir>\t<commit>\t<len>\t<file>`)
+    // Single historical version (`git\t<gitdir>\t<commit>\t<top_len>\t<file>`)
     if let Some((rel, ver)) = parse_git_source(inp.root, inp.file) {
         return Layout::single(Tile {
             id: "t1".into(),
@@ -1253,16 +1540,7 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
             } else if !inp.file.is_empty() {
                 sanitize_rel(inp.root, inp.file)
             } else if !inp.picked_board.is_empty() {
-                let derived = inp
-                    .picked_board
-                    .strip_suffix(".kicad_pcb")
-                    .map(|b| format!("{b}.kicad_sch"))
-                    .unwrap_or_default();
-                if !derived.is_empty() {
-                    sanitize_rel(inp.root, &derived)
-                } else {
-                    sanitize_rel(inp.root, inp.default_sch)
-                }
+                sanitize_rel(inp.root, inp.picked_sch)
             } else {
                 sanitize_rel(inp.root, inp.default_sch)
             }
@@ -1301,8 +1579,12 @@ pub struct WatchContext {
     pub default_pcb: String,
     /// Project default schematic absolute path (from `kicad::project::read`).
     pub default_sch: String,
-    /// Optional git directory for resolving `TileVersion.id` into `git\t…` specs.
+    /// Primary git directory for resolving `VersionRepo::Git` (e.g. `<root>/.git`).
     pub git_dir: String,
+    /// Backplane history git directory for resolving `VersionRepo::History` (`<root>/.backplane/history.git`).
+    pub history_git_dir: String,
+    /// Repository top-level directory passed to `rv::hist_git` (defaults to `root` when empty).
+    pub repo_top: String,
 }
 
 impl WatchContext {
@@ -1316,10 +1598,43 @@ impl WatchContext {
             default_pcb: files.pcb,
             default_sch: files.sch,
             git_dir: String::new(),
+            history_git_dir: String::new(),
+            repo_top: root.to_string(),
         }
+    }
+
+    fn resolve_version(&self, tile_id: &str, ver: &TileVersion, rel: &str) -> Result<String, WatchError> {
+        let gd = match ver.repo {
+            VersionRepo::Git => self.git_dir.as_str(),
+            VersionRepo::History => self.history_git_dir.as_str(),
+        };
+        if gd.is_empty() || rel.is_empty() {
+            return Err(WatchError::UnresolvedVersion {
+                tile_id: tile_id.to_string(),
+                repo: ver.repo,
+                id: ver.id.clone(),
+            });
+        }
+        let top = if self.repo_top.is_empty() { self.root.trim_end_matches('/') } else { self.repo_top.trim_end_matches('/') };
+        Ok(rv::hist_git(gd, &ver.id, top, rel))
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WatchError {
+    /// A versioned tile or overlay could not be resolved against `WatchContext`;
+    /// never falls back silently to watching the live working file.
+    UnresolvedVersion {
+        tile_id: TileId,
+        repo: VersionRepo,
+        id: String,
+    },
+}
+
+/// One `kicad.watch` subscription planned from a layout.
+///
+/// `path` is the exact request path passed to `kicad.watch` (`""` for the project default file,
+/// or an absolute / encoded wire path otherwise), so `watch::key(spec.kind, &spec.root, &spec.path) == spec.key`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WatchSpec {
     pub kind: u32,
@@ -1336,125 +1651,130 @@ fn join_root(root: &str, rel: &str) -> String {
     }
 }
 
-fn git_spec(git_dir: &str, ver: &TileVersion, abs_file: &str) -> String {
-    format!("git\t{git_dir}\t{}\t{}\t{abs_file}", ver.id, abs_file.len())
-}
-
 /// Plan the deduplicated list of `kicad.watch` subscriptions needed to draw all tiles in `layout`.
 ///
 /// Pure function over `layout` and `ctx`: does not touch `kicad.watch` runtime state.
-/// On the Split preset, yields the exact three subscriptions and keys produced by
-/// `kicad::watch::Watch::watch_split` (`1|<root>|<sch_at>`, `0|<root>|<pcb_at>`, `2|<root>|<pcb_at>`).
-pub fn plan_watches(layout: &Layout, ctx: &WatchContext) -> Vec<WatchSpec> {
+/// Returns `Err(WatchError::UnresolvedVersion)` if any versioned tile or overlay cannot be resolved
+/// (never silently watches the live file).
+pub fn plan_watches(layout: &Layout, ctx: &WatchContext) -> Result<Vec<WatchSpec>, WatchError> {
     if ctx.root.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let mut specs = Vec::new();
     let mut seen = HashSet::new();
     for tile in layout.tiles() {
-        let Some(spec) = plan_tile_watch(tile, ctx) else {
-            continue;
-        };
-        if seen.insert(spec.key.clone()) {
-            specs.push(spec);
+        for spec in plan_tile_watches(tile, ctx)? {
+            if seen.insert(spec.key.clone()) {
+                specs.push(spec);
+            }
         }
     }
-    specs
+    Ok(specs)
 }
 
-fn plan_tile_watch(tile: &Tile, ctx: &WatchContext) -> Option<WatchSpec> {
+fn plan_tile_watches(tile: &Tile, ctx: &WatchContext) -> Result<Vec<WatchSpec>, WatchError> {
     let root = &ctx.root;
-    // Board + Gerbers diff overlay -> `gcmp\n<abs_set>\n<abs_board>`
+
+    // Board + Gerbers diff overlay -> `gerbercmp\n<abs_set>\n<abs_board>` (empty when noboard)
     if tile.kind == PageKind::Board {
         if let Some(ov) = &tile.overlay {
             if ov.kind == PageKind::Gerbers && ov.mode == OverlayMode::Diff {
-                let abs_set = join_root(root, &ov.source);
-                let abs_board = if tile.source.is_empty() {
-                    ctx.default_pcb.clone()
-                } else {
-                    join_root(root, &tile.source)
-                };
-                if abs_set.is_empty() || abs_board.is_empty() {
-                    return None;
+                if tile.source.is_empty() || ov.source.is_empty() {
+                    return Ok(Vec::new());
                 }
+                let abs_set = join_root(root, &ov.source);
+                let abs_board = join_root(root, &tile.source);
                 let cmp = gerber::cmp_path(&abs_set, &abs_board);
                 let key = watch_key(0, root, &cmp);
-                return Some(WatchSpec { kind: 0, key, root: root.clone(), path: cmp });
+                return Ok(vec![WatchSpec { kind: 0, key, root: root.clone(), path: cmp }]);
             }
         }
     }
 
-    // History diff overlay on Board or Schematic -> `diff\n<old>\n<new>`
+    // History diff overlay on Board or Schematic -> `diff\n<old>\n<new>[\n<bits>]`
     if matches!(tile.kind, PageKind::Board | PageKind::Schematic) {
         if let Some(ov) = &tile.overlay {
             if ov.kind == tile.kind && ov.mode == OverlayMode::Diff && (tile.version.is_some() || ov.version.is_some()) {
                 let k = if tile.kind == PageKind::Board { 0 } else { 1 };
                 let default_abs = if k == 0 { &ctx.default_pcb } else { &ctx.default_sch };
-                let abs_new = if tile.source.is_empty() { default_abs.clone() } else { join_root(root, &tile.source) };
-                let abs_old = if ov.source.is_empty() { abs_new.clone() } else { join_root(root, &ov.source) };
-                let side_spec = |ver: Option<&TileVersion>, abs: &str| match ver {
-                    Some(v) if !ctx.git_dir.is_empty() => git_spec(&ctx.git_dir, v, abs),
-                    _ => abs.to_string(),
+                let new_rel = if tile.source.is_empty() { sanitize_rel(root, default_abs) } else { tile.source.clone() };
+                let old_rel = if ov.source.is_empty() { new_rel.clone() } else { ov.source.clone() };
+                let old_spec = match &ov.version {
+                    Some(v) => ctx.resolve_version(&tile.id, v, &old_rel)?,
+                    None => join_root(root, &old_rel),
                 };
-                let diff_path = format!("diff\n{}\n{}", side_spec(ov.version.as_ref(), &abs_old), side_spec(tile.version.as_ref(), &abs_new));
+                let new_spec = match &tile.version {
+                    Some(v) => ctx.resolve_version(&tile.id, v, &new_rel)?,
+                    None => join_root(root, &new_rel),
+                };
+                let mut diff_path = format!("diff\n{old_spec}\n{new_spec}");
+                if let Some(bits) = ov.layer_bits {
+                    diff_path.push('\n');
+                    diff_path.push_str(&bits.to_string());
+                }
                 let key = watch_key(k, root, &diff_path);
-                return Some(WatchSpec { kind: k, key, root: root.clone(), path: diff_path });
+                return Ok(vec![WatchSpec { kind: k, key, root: root.clone(), path: diff_path }]);
             }
         }
     }
 
     match tile.kind {
         PageKind::Board => {
+            if let Some(ver) = &tile.version {
+                let rel = if tile.source.is_empty() { sanitize_rel(root, &ctx.default_pcb) } else { tile.source.clone() };
+                let p = ctx.resolve_version(&tile.id, ver, &rel)?;
+                return Ok(vec![WatchSpec { kind: 0, key: watch_key(0, root, &p), root: root.clone(), path: p }]);
+            }
             let abs = if tile.source.is_empty() { ctx.default_pcb.clone() } else { join_root(root, &tile.source) };
             if abs.is_empty() {
-                return None;
+                return Ok(Vec::new());
             }
-            if let Some(ver) = &tile.version {
-                if !ctx.git_dir.is_empty() {
-                    let p = git_spec(&ctx.git_dir, ver, &abs);
-                    return Some(WatchSpec { kind: 0, key: watch_key(0, root, &p), root: root.clone(), path: p });
-                }
-            }
-            let at = if abs == ctx.default_pcb { "" } else { abs.as_str() };
-            Some(WatchSpec { kind: 0, key: watch_key(0, root, at), root: root.clone(), path: abs })
+            let req_path = if abs == ctx.default_pcb { String::new() } else { abs };
+            let key = watch_key(0, root, &req_path);
+            Ok(vec![WatchSpec { kind: 0, key, root: root.clone(), path: req_path }])
         }
         PageKind::Schematic => {
+            if let Some(ver) = &tile.version {
+                let rel = if tile.source.is_empty() { sanitize_rel(root, &ctx.default_sch) } else { tile.source.clone() };
+                let p = ctx.resolve_version(&tile.id, ver, &rel)?;
+                return Ok(vec![WatchSpec { kind: 1, key: watch_key(1, root, &p), root: root.clone(), path: p }]);
+            }
             let abs = if tile.source.is_empty() { ctx.default_sch.clone() } else { join_root(root, &tile.source) };
             if abs.is_empty() {
-                return None;
+                return Ok(Vec::new());
             }
-            if let Some(ver) = &tile.version {
-                if !ctx.git_dir.is_empty() {
-                    let p = git_spec(&ctx.git_dir, ver, &abs);
-                    return Some(WatchSpec { kind: 1, key: watch_key(1, root, &p), root: root.clone(), path: p });
-                }
-            }
-            let at = if abs == ctx.default_sch { "" } else { abs.as_str() };
-            Some(WatchSpec { kind: 1, key: watch_key(1, root, at), root: root.clone(), path: abs })
+            let req_path = if abs == ctx.default_sch { String::new() } else { abs };
+            let key = watch_key(1, root, &req_path);
+            Ok(vec![WatchSpec { kind: 1, key, root: root.clone(), path: req_path }])
         }
         PageKind::Solid3d => {
             let abs = if tile.source.is_empty() { ctx.default_pcb.clone() } else { join_root(root, &tile.source) };
             if abs.is_empty() {
-                return None;
+                return Ok(Vec::new());
             }
-            let at = if abs == ctx.default_pcb { "" } else { abs.as_str() };
-            Some(WatchSpec { kind: 2, key: watch_key(2, root, at), root: root.clone(), path: abs })
+            let req_path = if abs == ctx.default_pcb { String::new() } else { abs.clone() };
+            let mut out = vec![WatchSpec { kind: 2, key: watch_key(2, root, &req_path), root: root.clone(), path: req_path.clone() }];
+            // Matches `watch.rs:129-133`: a board's 3D view also subscribes the board plot (`kind == 0`).
+            if abs.ends_with(".kicad_pcb") {
+                out.push(WatchSpec { kind: 0, key: watch_key(0, root, &req_path), root: root.clone(), path: req_path });
+            }
+            Ok(out)
         }
         PageKind::Gerbers => {
             let abs = join_root(root, &tile.source);
             if abs.is_empty() {
-                return None;
+                return Ok(Vec::new());
             }
-            Some(WatchSpec { kind: 0, key: watch_key(0, root, &abs), root: root.clone(), path: abs })
+            Ok(vec![WatchSpec { kind: 0, key: watch_key(0, root, &abs), root: root.clone(), path: abs }])
         }
         PageKind::Mech => {
             let abs = join_root(root, &tile.source);
             if abs.is_empty() {
-                return None;
+                return Ok(Vec::new());
             }
-            Some(WatchSpec { kind: 2, key: watch_key(2, root, &abs), root: root.clone(), path: abs })
+            Ok(vec![WatchSpec { kind: 2, key: watch_key(2, root, &abs), root: root.clone(), path: abs }])
         }
-        PageKind::Files | PageKind::Diff | PageKind::Review | PageKind::Browser | PageKind::Simulation => None,
+        PageKind::Files | PageKind::Diff | PageKind::Review | PageKind::Browser | PageKind::Simulation => Ok(Vec::new()),
     }
 }
 
@@ -1466,46 +1786,47 @@ mod tests {
         Tile { id: id.into(), kind, source: source.into(), version: None, overlay: None }
     }
 
+    fn ver(repo: VersionRepo, id: &str) -> TileVersion {
+        TileVersion { repo, id: id.into(), label: id.chars().take(8).collect() }
+    }
+
     #[test]
     fn kicad_tile_picks_focused_first_then_depth_first_and_at_most_one() {
         let mut l = Layout::single(tile("t1", PageKind::Schematic, "a.kicad_sch")).unwrap();
-        l = add(&l, Some("t1"), Side::Right, tile("t2", PageKind::Board, "a.kicad_pcb")).unwrap();
-        l = add(&l, Some("t2"), Side::Bottom, tile("t3", PageKind::Solid3d, "a.kicad_pcb")).unwrap();
-        // None eligible -> None
+        l = add(&l, Some("t1"), Side::Right, tile("t2", PageKind::Board, "a.kicad_pcb"), false, None).unwrap();
+        l = add(&l, Some("t2"), Side::Bottom, tile("t3", PageKind::Solid3d, "a.kicad_pcb"), false, None).unwrap();
         assert_eq!(kicad_tile(&l, |_| false), None);
-        // Focused tile ("t3") is 3D (not design); depth-first picks "t1" (a before b)
         assert_eq!(kicad_tile(&l, |_| true).as_deref(), Some("t1"));
-        // Focus "t2" (Board, eligible) -> picks "t2" over "t1"
         l.focus = Some("t2".into());
         assert_eq!(kicad_tile(&l, |_| true).as_deref(), Some("t2"));
-        // Two design tiles, only "t1" eligible -> picks "t1"
         assert_eq!(kicad_tile(&l, |t| t.id == "t1").as_deref(), Some("t1"));
-        // Only non-design tile eligible -> None
         assert_eq!(kicad_tile(&l, |t| t.kind == PageKind::Solid3d), None);
     }
 
     #[test]
-    fn retarget_updates_kind_and_source_and_maps_kicad_frames() {
+    fn retarget_maps_all_real_kicad_pane_tab_names() {
         let l = Layout::single(tile("k1", PageKind::Board, "main.kicad_pcb")).unwrap();
-        let l2 = retarget_kicad_frame(&l, "k1", "symbols", "main.kicad_sch".into(), None).unwrap();
-        assert_eq!(l2.tile("k1").unwrap().kind, PageKind::Schematic);
-        assert_eq!(l2.tile("k1").unwrap().source, "main.kicad_sch");
-
-        let l3 = retarget_kicad_frame(&l2, "k1", "footprints", "main.kicad_pcb".into(), None).unwrap();
-        assert_eq!(l3.tile("k1").unwrap().kind, PageKind::Board);
-
-        let l4 = retarget_kicad_frame(&l3, "k1", "gerbview", "mfg/rev1".into(), None).unwrap();
-        assert_eq!(l4.tile("k1").unwrap().kind, PageKind::Gerbers);
-
-        let l5 = retarget_kicad_frame(&l4, "k1", "simulation", "main.kicad_sch".into(), None).unwrap();
-        assert_eq!(l5.tile("k1").unwrap().kind, PageKind::Simulation);
-
-        // Locked tile cannot be retargeted
+        for (frame, expected) in [
+            ("PCB", PageKind::Board),
+            ("SCH", PageKind::Schematic),
+            ("PCB_3D", PageKind::Solid3d),
+            ("SYMBOL_EDITOR", PageKind::Schematic),
+            ("FOOTPRINT_EDITOR", PageKind::Board),
+            ("GERBVIEW", PageKind::Gerbers),
+            ("SIMULATOR", PageKind::Simulation),
+        ] {
+            let next = retarget_kicad_frame(&l, "k1", frame, "main.kicad_pcb".into(), None)
+                .unwrap_or_else(|e| panic!("frame {frame} failed: {e:?}"));
+            assert_eq!(next.tile("k1").unwrap().kind, expected, "frame={frame}");
+        }
+        assert_eq!(
+            retarget_kicad_frame(&l, "k1", "UNKNOWN_TAB", "main.kicad_pcb".into(), None),
+            Err(Refusal::UnknownFrame)
+        );
         assert_eq!(
             retarget(&l, "k1", PageKind::Schematic, "main.kicad_sch".into(), Some("k1")),
             Err(Refusal::Locked)
         );
-        // Absolute path refused
         assert_eq!(
             retarget(&l, "k1", PageKind::Schematic, "/proj/main.kicad_sch".into(), None),
             Err(Refusal::InvalidSource)
@@ -1513,123 +1834,193 @@ mod tests {
     }
 
     #[test]
-    fn can_add_refuses_simulation_beside_kicad_tile_but_allows_beside_viewer_board() {
+    fn add_enforces_one_kicad_for_simulation_and_allows_beside_viewer_board() {
         let l = Layout::single(tile("t1", PageKind::Board, "main.kicad_pcb")).unwrap();
-        assert_eq!(can_add(&l, PageKind::Simulation, true), Err(Refusal::OneKicad));
+        assert_eq!(
+            add(&l, Some("t1"), Side::Right, tile("t2", PageKind::Simulation, "main.kicad_sch"), true, None),
+            Err(Refusal::OneKicad)
+        );
         assert_eq!(Refusal::OneKicad.code(), "oneKicad");
-        assert_eq!(can_add(&l, PageKind::Simulation, false), Ok(()));
-        assert_eq!(can_add(&l, PageKind::Schematic, true), Ok(()));
+        let ok = add(&l, Some("t1"), Side::Right, tile("t2", PageKind::Simulation, "main.kicad_sch"), false, None).unwrap();
+        assert_eq!(ok.tile("t2").unwrap().kind, PageKind::Simulation);
     }
 
     #[test]
-    fn resize_enforces_kicad_380x300_and_nested_subtree_minimums() {
+    fn resize_enforces_kicad_380x300_and_accounts_for_descendant_ratios() {
         let l = Layout::single(tile("k", PageKind::Board, "main.kicad_pcb")).unwrap();
-        let l = add(&l, Some("k"), Side::Right, tile("v", PageKind::Schematic, "main.kicad_sch")).unwrap();
-        // Split s1 is Row: left="k" (KiCad min 380w), right="v" (min 180w), total width=1000.
-        // Desired 0.1 -> clamped to 380 / 1000 = 0.38
-        let r1 = resize(&l, "s1", 0.1, (1000.0, 800.0), default_min_for(Some("k"))).unwrap();
+        let l = add(&l, Some("k"), Side::Right, tile("v", PageKind::Schematic, "main.kicad_sch"), false, None).unwrap();
+        let r1 = resize(&l, "s1", 0.1, (1000.0, 800.0), default_min_for(Some("k")), None).unwrap();
         let Node::Split { ratio, .. } = r1.root.as_ref().unwrap() else { panic!() };
         assert!((*ratio - 0.38).abs() < 1e-4, "ratio={ratio}");
 
-        // Desired 0.95 -> clamped to 1.0 - 180/1000 = 0.82
-        let r2 = resize(&l, "s1", 0.95, (1000.0, 800.0), default_min_for(Some("k"))).unwrap();
-        let Node::Split { ratio, .. } = r2.root.as_ref().unwrap() else { panic!() };
-        assert!((*ratio - 0.82).abs() < 1e-4, "ratio={ratio}");
-
-        // Vertical split with KiCad min height 300 on top inside 600px height -> min ratio 0.5
-        let lv = Layout::single(tile("k", PageKind::Board, "main.kicad_pcb")).unwrap();
-        let lv = add(&lv, Some("k"), Side::Bottom, tile("v", PageKind::Solid3d, "main.kicad_pcb")).unwrap();
-        let rv = resize(&lv, "s1", 0.2, (1000.0, 600.0), default_min_for(Some("k"))).unwrap();
-        let Node::Split { ratio, .. } = rv.root.as_ref().unwrap() else { panic!() };
-        assert!((*ratio - 0.5).abs() < 1e-4, "ratio={ratio}");
-
-        // Non-finite ratio refused
-        assert_eq!(resize(&l, "s1", f32::NAN, (1000.0, 800.0), default_min_for(None)), Err(Refusal::InvalidRatio));
-    }
-
-    #[test]
-    fn locked_tile_refuses_move_swap_close_overlay_retarget_and_covering_maximize() {
-        let l = Layout::single(tile("k", PageKind::Board, "a.kicad_pcb")).unwrap();
-        let l = add(&l, Some("k"), Side::Right, tile("v", PageKind::Schematic, "a.kicad_sch")).unwrap();
-        assert_eq!(move_tile(&l, "k", "v", Side::Top, Some("k")), Err(Refusal::Locked));
-        assert_eq!(move_tile(&l, "v", "k", Side::Top, Some("k")), Err(Refusal::Locked));
-        assert_eq!(swap(&l, "k", "v", Some("k")), Err(Refusal::Locked));
-        assert_eq!(close(&l, "k", Some("k")), Err(Refusal::Locked));
-        assert_eq!(maximize(&l, "v", Some("k")), Err(Refusal::Locked));
-        // Maximizing the locked tile itself does NOT cover it, so it is allowed.
-        let m = maximize(&l, "k", Some("k")).unwrap();
-        assert_eq!(m.maximized.as_deref(), Some("k"));
-        assert_eq!(restore(&m).maximized, None);
-        assert_eq!(
-            overlay(&l, "k", Some(Overlay { kind: PageKind::Gerbers, source: "mfg/r1".into(), version: None, mode: OverlayMode::Diff }), Some("k")),
-            Err(Refusal::Locked)
+        // Descendant ratio test: child row at 80/20 of two 180px tiles needs 900px total width
+        // so the 20% tile stays >= 180px. Inside 1200px parent, parent split min ratio = 900/1200 = 0.75.
+        let nested = Layout {
+            version: LAYOUT_VERSION,
+            root: Some(Node::Split {
+                id: "parent".into(),
+                axis: Axis::Row,
+                ratio: 0.8,
+                a: Box::new(Node::Split {
+                    id: "child".into(),
+                    axis: Axis::Row,
+                    ratio: 0.8,
+                    a: Box::new(Node::Tile(tile("a", PageKind::Board, "m.kicad_pcb"))),
+                    b: Box::new(Node::Tile(tile("b", PageKind::Schematic, "m.kicad_sch"))),
+                }),
+                b: Box::new(Node::Tile(tile("c", PageKind::Solid3d, "m.kicad_pcb"))),
+            }),
+            focus: Some("a".into()),
+            maximized: None,
+        };
+        let min_child = subtree_min(
+            match nested.root.as_ref().unwrap() { Node::Split { a, .. } => a, _ => unreachable!() },
+            &default_min_for(None),
         );
-        assert_eq!(retarget(&l, "k", PageKind::Schematic, "a.kicad_sch".into(), Some("k")), Err(Refusal::Locked));
-        // Closing the unlocked tile succeeds
-        let c = close(&l, "v", Some("k")).unwrap();
-        assert_eq!(c.tiles().len(), 1);
-        assert_eq!(c.focus.as_deref(), Some("k"));
+        assert!((min_child.0 - 900.0).abs() < 1e-3, "expected 900px, got {}", min_child.0);
+        let resized = resize(&nested, "parent", 0.4, (1200.0, 800.0), default_min_for(None), None).unwrap();
+        let Node::Split { ratio, .. } = resized.root.as_ref().unwrap() else { panic!() };
+        assert!((*ratio - 0.75).abs() < 1e-4, "expected 0.75, got {ratio}");
     }
 
     #[test]
-    fn overlay_and_split_overlay_round_trip() {
-        let l = Layout::single(tile("t1", PageKind::Board, "main.kicad_pcb")).unwrap();
-        assert_eq!(split_overlay(&l, "t1", Side::Right, None, None), Err(Refusal::NoOverlay));
-        let ov = Overlay { kind: PageKind::Gerbers, source: "mfg/rev1".into(), version: None, mode: OverlayMode::Diff };
-        let l = overlay(&l, "t1", Some(ov), None).unwrap();
-        let l = split_overlay(&l, "t1", Side::Right, Some("t2".into()), None).unwrap();
-        check_invariants(&l).unwrap();
-        assert!(l.tile("t1").unwrap().overlay.is_none());
-        let t2 = l.tile("t2").unwrap();
-        assert_eq!(t2.kind, PageKind::Gerbers);
-        assert_eq!(t2.source, "mfg/rev1");
+    fn lock_enforces_unchanged_unit_square_rect_across_all_operations() {
+        // Tree: s1(Row, a=k, b=s2(Col, a=v1, b=v2))
+        let l = Layout::single(tile("k", PageKind::Board, "a.kicad_pcb")).unwrap();
+        let l = add(&l, Some("k"), Side::Right, tile("v1", PageKind::Schematic, "a.kicad_sch"), false, None).unwrap();
+        let l = add(&l, Some("v1"), Side::Bottom, tile("v2", PageKind::Solid3d, "a.kicad_pcb"), false, None).unwrap();
+
+        // Adding beside locked `k` would shrink `k` -> refused
+        assert_eq!(add(&l, Some("k"), Side::Top, tile("x", PageKind::Files, ""), false, Some("k")), Err(Refusal::Locked));
+        // Adding beside `v2` (sibling subtree) leaves `k`'s rect unchanged -> allowed!
+        let l_added = add(&l, Some("v2"), Side::Right, tile("x", PageKind::Files, ""), false, Some("k")).unwrap();
+        assert_eq!(tile_rect(&l, "k"), tile_rect(&l_added, "k"));
+
+        // Resizing ancestor `s1` moves/resizes `k` -> refused
+        assert_eq!(resize(&l, "s1", 0.6, (1000.0, 800.0), default_min_for(Some("k")), Some("k")), Err(Refusal::Locked));
+        // Resizing sibling split `s2` leaves `k`'s rect unchanged -> allowed!
+        let l_res = resize(&l, "s2", 0.6, (1000.0, 800.0), default_min_for(Some("k")), Some("k")).unwrap();
+        assert_eq!(tile_rect(&l, "k"), tile_rect(&l_res, "k"));
+
+        // Closing `k` -> refused; closing `v2` (inside `s2`, leaving `v1` in `b`) keeps `k` unchanged -> allowed!
+        assert_eq!(close(&l, "k", Some("k")), Err(Refusal::Locked));
+        let l_closed = close(&l, "v2", Some("k")).unwrap();
+        assert_eq!(tile_rect(&l, "k"), tile_rect(&l_closed, "k"));
+        // Now closing `v1` would expand `k` from 0.5 to 1.0 -> refused!
+        assert_eq!(close(&l_closed, "v1", Some("k")), Err(Refusal::Locked));
+
+        // Maximizing `v1` covers `k` -> refused; maximizing `k` resizes `k` from 0.5 to 1.0 -> refused
+        assert_eq!(maximize(&l, "v1", Some("k")), Err(Refusal::Locked));
+        assert_eq!(maximize(&l, "k", Some("k")), Err(Refusal::Locked));
+
+        // Swapping or moving `k` -> refused
+        assert_eq!(swap(&l, "k", "v1", Some("k")), Err(Refusal::Locked));
+        assert_eq!(move_tile(&l, "k", "v1", Side::Top, Some("k")), Err(Refusal::Locked));
     }
 
     #[test]
-    fn rail_press_and_viewer_show_follow_contract() {
-        // Idle -> rail press opens 1-tile layout
-        let l = rail_press(&Layout::empty(), PageKind::Board, "main.kicad_pcb".into(), None).unwrap();
-        assert_eq!(l.tiles().len(), 1);
-        assert_eq!(l.focus.as_deref(), Some("t1"));
-        // Press same focused kind -> closes that tile (back to idle)
-        let l = rail_press(&l, PageKind::Board, "main.kicad_pcb".into(), None).unwrap();
-        assert!(l.is_empty());
+    fn overlay_rejects_incompatible_pairs_and_split_merge_is_exact_inverse() {
+        let l = Layout::single(tile("t1", PageKind::Files, "readme.md")).unwrap();
+        let bad = Overlay { kind: PageKind::Browser, source: "".into(), version: None, mode: OverlayMode::Diff, layer_bits: None };
+        assert_eq!(overlay(&l, "t1", Some(bad), None), Err(Refusal::IncompatibleOverlay));
 
-        // Two tiles (Board + Schematic focused): pressing Board focuses Board; pressing Board again closes it
-        let l = Layout::single(tile("t1", PageKind::Board, "main.kicad_pcb")).unwrap();
-        let l = add(&l, Some("t1"), Side::Right, tile("t2", PageKind::Schematic, "main.kicad_sch")).unwrap();
-        assert_eq!(l.focus.as_deref(), Some("t2"));
-        let l = rail_press(&l, PageKind::Board, "main.kicad_pcb".into(), None).unwrap();
-        assert_eq!(l.focus.as_deref(), Some("t1"));
-        // Press absent kind (3D) -> replaces focused tile ("t1")
-        let l = rail_press(&l, PageKind::Solid3d, "main.kicad_pcb".into(), None).unwrap();
-        assert_eq!(l.tile("t1").unwrap().kind, PageKind::Solid3d);
-        assert_eq!(l.tiles().len(), 2);
-
-        // viewer_show updates & focuses existing tile of that kind, else replaces focused
-        let l = viewer_show(&l, PageKind::Schematic, "sub/sheet.kicad_sch".into(), None).unwrap();
-        assert_eq!(l.focus.as_deref(), Some("t2"));
-        assert_eq!(l.tile("t2").unwrap().source, "sub/sheet.kicad_sch");
-        let l = viewer_show(&l, PageKind::Mech, "mech/case.step".into(), None).unwrap();
-        assert_eq!(l.focus.as_deref(), Some("t2"));
-        assert_eq!(l.tile("t2").unwrap().kind, PageKind::Mech);
-        assert_eq!(l.tile("t2").unwrap().source, "mech/case.step");
+        // Valid history comparison with layer_bits and Old mode -> split -> merge -> exact inverse
+        let base = Layout::single(Tile {
+            id: "t1".into(),
+            kind: PageKind::Board,
+            source: "main.kicad_pcb".into(),
+            version: Some(ver(VersionRepo::Git, "2222bbbb88889999000011112222333344445555")),
+            overlay: None,
+        })
+        .unwrap();
+        let ov = Overlay {
+            kind: PageKind::Board,
+            source: "main.kicad_pcb".into(),
+            version: Some(ver(VersionRepo::Git, "1111aaaa99998888777766665555444433332222")),
+            mode: OverlayMode::Old,
+            layer_bits: Some(42),
+        };
+        let with_ov = overlay(&base, "t1", Some(ov), None).unwrap();
+        let split = split_overlay(&with_ov, "t1", Side::Right, Some("t2".into()), None).unwrap();
+        assert_eq!(split.mode, OverlayMode::Old);
+        assert_eq!(split.layer_bits, Some(42));
+        let back = merge_overlay(&split.layout, "t1", &split.overlay_tile_id, split.mode, split.layer_bits, None).unwrap();
+        assert_eq!(back, with_ov);
     }
 
     #[test]
-    fn serde_round_trip_and_unknown_fields_tolerated() {
-        let l = derive_layout(&DeriveInput {
-            root: "/proj",
-            open: "split",
-            default_pcb: "/proj/main.kicad_pcb",
-            default_sch: "/proj/main.kicad_sch",
+    fn rail_press_respects_rail_availability() {
+        let rail_json = super::super::rail::rail(super::super::rail::RailInput {
+            board: true,
+            schematic: false,
+            mech: false,
+            gerbers: false,
+            simulation: false,
+            altium: false,
+            page: "",
+            diff: false,
+        });
+        let idle = Layout::empty();
+        // Disabled (schematic) or omitted (gerbers, simulation) -> no-op
+        assert_eq!(rail_press(&idle, PageKind::Schematic, "a.kicad_sch".into(), |k| rail_allows(&rail_json, k), None).unwrap(), idle);
+        assert_eq!(rail_press(&idle, PageKind::Gerbers, "mfg/r1".into(), |k| rail_allows(&rail_json, k), None).unwrap(), idle);
+        // Enabled (board) -> opens 1-tile layout
+        let open = rail_press(&idle, PageKind::Board, "a.kicad_pcb".into(), |k| rail_allows(&rail_json, k), None).unwrap();
+        assert_eq!(open.tile("t1").unwrap().kind, PageKind::Board);
+        // Press focused kind again -> closes
+        let closed = rail_press(&open, PageKind::Board, "a.kicad_pcb".into(), |k| rail_allows(&rail_json, k), None).unwrap();
+        assert!(closed.is_empty());
+    }
+
+    #[test]
+    fn versions_round_trip_through_rv_hist_git_and_unresolved_is_error() {
+        let root = "/proj";
+        let git_dir = "/proj/.git";
+        let hist_dir = "/proj/.backplane/history.git";
+        let sha_old = "1111aaaa99998888777766665555444433332222";
+        let sha_new = "2222bbbb88889999000011112222333344445555";
+        let old_wire = rv::hist_git(hist_dir, sha_old, root, "sub/main.kicad_pcb");
+        let new_wire = rv::hist_git(git_dir, sha_new, root, "sub/main.kicad_pcb");
+        let diff_wire = format!("diff\n{old_wire}\n{new_wire}\n7");
+
+        let layout = derive_layout(&DeriveInput {
+            root,
+            open: "board",
+            file: &diff_wire,
+            default_pcb: "/proj/sub/main.kicad_pcb",
             ..Default::default()
         });
-        let raw = serde_json::to_string(&l).unwrap();
-        let back: Layout = serde_json::from_str(&raw).unwrap();
-        assert_eq!(l, back);
+        check_invariants(&layout).unwrap();
+        let t = layout.tile("t1").unwrap();
+        assert_eq!(t.version.as_ref().unwrap().repo, VersionRepo::Git);
+        assert_eq!(t.version.as_ref().unwrap().id, sha_new);
+        assert_eq!(t.version.as_ref().unwrap().label, "2222bbbb");
+        let ov = t.overlay.as_ref().unwrap();
+        assert_eq!(ov.version.as_ref().unwrap().repo, VersionRepo::History);
+        assert_eq!(ov.version.as_ref().unwrap().id, sha_old);
+        assert_eq!(ov.layer_bits, Some(7));
 
-        // Unknown fields on Layout, Split, Tile, Overlay, TileVersion are tolerated
+        // Missing repo resolver -> error, NEVER live file
+        let empty_ctx = WatchContext { root: root.into(), default_pcb: "/proj/sub/main.kicad_pcb".into(), ..Default::default() };
+        assert!(matches!(plan_watches(&layout, &empty_ctx), Err(WatchError::UnresolvedVersion { repo: VersionRepo::History, .. })));
+
+        // Complete context -> exact byte-for-byte round-trip of `diff\n<old>\n<new>\n<bits>`
+        let full_ctx = WatchContext {
+            root: root.into(),
+            default_pcb: "/proj/sub/main.kicad_pcb".into(),
+            git_dir: git_dir.into(),
+            history_git_dir: hist_dir.into(),
+            repo_top: root.into(),
+            ..Default::default()
+        };
+        let specs = plan_watches(&layout, &full_ctx).unwrap();
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].path, diff_wire);
+        assert_eq!(specs[0].key, watch_key(0, root, &diff_wire));
+    }
+
+    #[test]
+    fn decoding_validates_invariants_and_tolerates_unknown_fields() {
         let with_extra = r#"{
             "version": 1,
             "futureField": 42,
@@ -1641,19 +2032,27 @@ mod tests {
                 "kind": "board",
                 "source": "main.kicad_pcb",
                 "kicad": true,
-                "version": {"id": "a1b2c3d4", "label": "a1b2c3d4", "extra": "ok"},
                 "overlay": {"kind": "gerbers", "source": "mfg/rev1", "mode": "diff", "opacity": 0.5}
             }
         }"#;
         let parsed: Layout = serde_json::from_str(with_extra).unwrap();
-        check_invariants(&parsed).unwrap();
         assert_eq!(parsed.tile("t1").unwrap().source, "main.kicad_pcb");
-        assert_eq!(parsed.tile("t1").unwrap().version.as_ref().unwrap().id, "a1b2c3d4");
-        assert_eq!(parsed.tile("t1").unwrap().overlay.as_ref().unwrap().kind, PageKind::Gerbers);
+
+        // Dangling focus rejected at decode time
+        let bad_focus = r#"{"version":1,"focus":"missing","maximized":null,"root":{"type":"tile","id":"t1","kind":"board","source":"a.kicad_pcb"}}"#;
+        assert!(serde_json::from_str::<Layout>(bad_focus).is_err());
+
+        // Absolute source rejected at decode time
+        let bad_src = r#"{"version":1,"focus":"t1","maximized":null,"root":{"type":"tile","id":"t1","kind":"board","source":"/etc/passwd"}}"#;
+        assert!(serde_json::from_str::<Layout>(bad_src).is_err());
+
+        // Path-like version label rejected at decode time
+        let bad_ver = r#"{"version":1,"focus":"t1","maximized":null,"root":{"type":"tile","id":"t1","kind":"board","source":"a.kicad_pcb","version":{"repo":"git","id":"1111aaaa","label":"/proj/foo"}}}"#;
+        assert!(serde_json::from_str::<Layout>(bad_ver).is_err());
     }
 
     #[test]
-    fn random_sequence_of_operations_preserves_invariants() {
+    fn random_sequence_checks_invariants_overlays_locks_and_watch_planning() {
         let mut seed: u64 = 0x5EED_1317_CAFE_BABEu64;
         let mut next_u64 = || {
             seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
@@ -1670,24 +2069,33 @@ mod tests {
             PageKind::Browser,
         ];
         let sides = [Side::Left, Side::Right, Side::Top, Side::Bottom];
+        let ctx = WatchContext {
+            root: "/proj".into(),
+            default_pcb: "/proj/dir/file.kicad_pcb".into(),
+            default_sch: "/proj/dir/file.kicad_sch".into(),
+            git_dir: "/proj/.git".into(),
+            history_git_dir: "/proj/.backplane/history.git".into(),
+            repo_top: "/proj".into(),
+        };
         let mut layout = Layout::empty();
         for step in 0..600 {
-            let op = next_u64() % 11;
+            let op = next_u64() % 12;
             let tiles: Vec<TileId> = layout.tiles().iter().map(|t| t.id.clone()).collect();
-            let locked = if !tiles.is_empty() && next_u64() % 5 == 0 {
+            let locked = if !tiles.is_empty() && next_u64() % 4 == 0 {
                 Some(tiles[(next_u64() as usize) % tiles.len()].clone())
             } else {
                 None
             };
             let locked_ref = locked.as_deref();
+            let before = layout.clone();
             let candidate = match op {
                 0 | 1 => {
-                    // add
                     let k = kinds[(next_u64() as usize) % kinds.len()];
                     let s = sides[(next_u64() as usize) % sides.len()];
                     let target = if tiles.is_empty() { None } else { Some(tiles[(next_u64() as usize) % tiles.len()].as_str()) };
                     let id = layout.next_tile_id();
-                    add(&layout, target, s, tile(&id, k, "dir/file.kicad_pcb")).ok()
+                    let src = match k { PageKind::Schematic => "dir/file.kicad_sch", PageKind::Gerbers => "mfg/r1", _ => "dir/file.kicad_pcb" };
+                    add(&layout, target, s, tile(&id, k, src), false, locked_ref).ok()
                 }
                 2 if tiles.len() >= 2 => {
                     let a = &tiles[(next_u64() as usize) % tiles.len()];
@@ -1708,17 +2116,17 @@ mod tests {
                     let sid = format!("s{}", (next_u64() % 6) + 1);
                     let r = ((next_u64() % 100) as f32) / 100.0;
                     let kt = kicad_tile(&layout, |_| true);
-                    resize(&layout, &sid, r, (1400.0, 900.0), default_min_for(kt.as_deref())).ok()
+                    resize(&layout, &sid, r, (1400.0, 900.0), default_min_for(kt.as_deref()), locked_ref).ok()
                 }
                 6 if !tiles.is_empty() => {
                     let t = &tiles[(next_u64() as usize) % tiles.len()];
                     maximize(&layout, t, locked_ref).ok()
                 }
-                7 => Some(restore(&layout)),
+                7 => restore(&layout, locked_ref).ok(),
                 8 if !tiles.is_empty() => {
                     let t = &tiles[(next_u64() as usize) % tiles.len()];
                     let ov = if next_u64() % 2 == 0 {
-                        Some(Overlay { kind: PageKind::Gerbers, source: "mfg/r1".into(), version: None, mode: OverlayMode::Diff })
+                        Some(Overlay { kind: PageKind::Gerbers, source: "mfg/r1".into(), version: None, mode: OverlayMode::Diff, layer_bits: None })
                     } else {
                         None
                     };
@@ -1727,179 +2135,34 @@ mod tests {
                 9 if !tiles.is_empty() => {
                     let t = &tiles[(next_u64() as usize) % tiles.len()];
                     let s = sides[(next_u64() as usize) % sides.len()];
-                    split_overlay(&layout, t, s, None, locked_ref).ok()
+                    split_overlay(&layout, t, s, None, locked_ref).ok().map(|o| o.layout)
                 }
                 10 if !tiles.is_empty() => {
                     let t = &tiles[(next_u64() as usize) % tiles.len()];
                     let k = kinds[(next_u64() as usize) % kinds.len()];
-                    retarget(&layout, t, k, "other/file.kicad_sch".into(), locked_ref).ok()
+                    retarget(&layout, t, k, "dir/file.kicad_sch".into(), locked_ref).ok()
+                }
+                11 if !tiles.is_empty() => {
+                    // Incompatible overlay must always be rejected
+                    let t = &tiles[(next_u64() as usize) % tiles.len()];
+                    let bad = Overlay { kind: PageKind::Browser, source: "".into(), version: None, mode: OverlayMode::Diff, layer_bits: None };
+                    assert_eq!(overlay(&layout, t, Some(bad), locked_ref), Err(Refusal::IncompatibleOverlay));
+                    None
                 }
                 _ => None,
             };
             if let Some(next) = candidate {
+                check_lock_preserved(&before, &next, locked_ref)
+                    .unwrap_or_else(|e| panic!("step {step} broke lock {locked_ref:?}: {e:?}"));
                 layout = next;
             }
             check_invariants(&layout).unwrap_or_else(|e| panic!("step {step} violated invariant: {e}\n{layout:#?}"));
-        }
-    }
-
-    #[test]
-    fn plan_watches_on_split_preset_matches_watch_split_exactly() {
-        let root = "/proj";
-        let ctx = WatchContext {
-            root: root.into(),
-            default_pcb: "/proj/main.kicad_pcb".into(),
-            default_sch: "/proj/main.kicad_sch".into(),
-            git_dir: "/proj/.git".into(),
-        };
-
-        // Case 1: default project board + root schematic
-        let split_default = derive_layout(&DeriveInput {
-            root,
-            open: "split",
-            default_pcb: &ctx.default_pcb,
-            default_sch: &ctx.default_sch,
-            ..Default::default()
-        });
-        check_invariants(&split_default).unwrap();
-        let specs = plan_watches(&split_default, &ctx);
-        assert_eq!(
-            specs,
-            vec![
-                WatchSpec { kind: 1, key: watch_key(1, root, ""), root: root.into(), path: "/proj/main.kicad_sch".into() },
-                WatchSpec { kind: 0, key: watch_key(0, root, ""), root: root.into(), path: "/proj/main.kicad_pcb".into() },
-                WatchSpec { kind: 2, key: watch_key(2, root, ""), root: root.into(), path: "/proj/main.kicad_pcb".into() },
-            ]
-        );
-
-        // Case 2: picked board from Boards menu (`sub/alt.kicad_pcb`)
-        let split_picked = derive_layout(&DeriveInput {
-            root,
-            open: "split",
-            picked_board: "sub/alt.kicad_pcb",
-            default_pcb: &ctx.default_pcb,
-            default_sch: &ctx.default_sch,
-            ..Default::default()
-        });
-        check_invariants(&split_picked).unwrap();
-        let specs_picked = plan_watches(&split_picked, &ctx);
-        assert_eq!(
-            specs_picked,
-            vec![
-                WatchSpec {
-                    kind: 1,
-                    key: watch_key(1, root, "/proj/sub/alt.kicad_sch"),
-                    root: root.into(),
-                    path: "/proj/sub/alt.kicad_sch".into(),
-                },
-                WatchSpec {
-                    kind: 0,
-                    key: watch_key(0, root, "/proj/sub/alt.kicad_pcb"),
-                    root: root.into(),
-                    path: "/proj/sub/alt.kicad_pcb".into(),
-                },
-                WatchSpec {
-                    kind: 2,
-                    key: watch_key(2, root, "/proj/sub/alt.kicad_pcb"),
-                    root: root.into(),
-                    path: "/proj/sub/alt.kicad_pcb".into(),
-                },
-            ]
-        );
-
-        // Case 3: default board + explicit schematic sub-sheet
-        let split_sheet = derive_layout(&DeriveInput {
-            root,
-            open: "split",
-            sheet: "/proj/power.kicad_sch",
-            default_pcb: &ctx.default_pcb,
-            default_sch: &ctx.default_sch,
-            ..Default::default()
-        });
-        let specs_sheet = plan_watches(&split_sheet, &ctx);
-        assert_eq!(
-            specs_sheet,
-            vec![
-                WatchSpec {
-                    kind: 1,
-                    key: watch_key(1, root, "/proj/power.kicad_sch"),
-                    root: root.into(),
-                    path: "/proj/power.kicad_sch".into(),
-                },
-                WatchSpec { kind: 0, key: watch_key(0, root, ""), root: root.into(), path: "/proj/main.kicad_pcb".into() },
-                WatchSpec { kind: 2, key: watch_key(2, root, ""), root: root.into(), path: "/proj/main.kicad_pcb".into() },
-            ]
-        );
-    }
-
-    #[test]
-    fn derive_layout_four_canonical_shapes_have_no_absolute_paths_or_raw_git() {
-        let root = "/proj";
-        // 1. One page
-        let one = derive_layout(&DeriveInput {
-            root,
-            open: "board",
-            default_pcb: "/proj/main.kicad_pcb",
-            ..Default::default()
-        });
-        check_invariants(&one).unwrap();
-        assert_eq!(one.tile("t1").unwrap().kind, PageKind::Board);
-        assert_eq!(one.tile("t1").unwrap().source, "main.kicad_pcb");
-
-        // 2. Split
-        let split = derive_layout(&DeriveInput {
-            root,
-            open: "split",
-            default_pcb: "/proj/main.kicad_pcb",
-            default_sch: "/proj/main.kicad_sch",
-            ..Default::default()
-        });
-        check_invariants(&split).unwrap();
-        assert_eq!(split.tiles().len(), 3);
-
-        // 3. Gerbers vs board
-        let gcmp = gerber::cmp_path("/proj/mfg/rev1", "/proj/main.kicad_pcb");
-        let gvb = derive_layout(&DeriveInput {
-            root,
-            open: "board",
-            gerbers: true,
-            gerbers_vs_board: true,
-            file: &gcmp,
-            default_pcb: "/proj/main.kicad_pcb",
-            ..Default::default()
-        });
-        check_invariants(&gvb).unwrap();
-        let gvb_tile = gvb.tile("t1").unwrap();
-        assert_eq!(gvb_tile.kind, PageKind::Board);
-        assert_eq!(gvb_tile.source, "main.kicad_pcb");
-        assert_eq!(gvb_tile.overlay.as_ref().unwrap().kind, PageKind::Gerbers);
-        assert_eq!(gvb_tile.overlay.as_ref().unwrap().source, "mfg/rev1");
-        assert_eq!(gvb_tile.overlay.as_ref().unwrap().mode, OverlayMode::Diff);
-
-        // 4. History comparison
-        let hist = derive_layout(&DeriveInput {
-            root,
-            open: "board",
-            file: "diff\ngit\t/proj/.git\t1111aaaa9999\t20\t/proj/main.kicad_pcb\ngit\t/proj/.git\t2222bbbb8888\t20\t/proj/main.kicad_pcb\n0",
-            default_pcb: "/proj/main.kicad_pcb",
-            ..Default::default()
-        });
-        check_invariants(&hist).unwrap();
-        let ht = hist.tile("t1").unwrap();
-        assert_eq!(ht.source, "main.kicad_pcb");
-        assert_eq!(ht.version.as_ref().unwrap().id, "2222bbbb");
-        let hov = ht.overlay.as_ref().unwrap();
-        assert_eq!(hov.source, "main.kicad_pcb");
-        assert_eq!(hov.version.as_ref().unwrap().id, "1111aaaa");
-        assert_eq!(hov.mode, OverlayMode::Diff);
-
-        // None of the serialized JSON strings contain `/proj` or `git\t` or `gcmp` or `diff\n`
-        for l in [&one, &split, &gvb, &hist] {
-            let s = serde_json::to_string(l).unwrap();
-            assert!(!s.contains("/proj"), "leaked abs path: {s}");
-            assert!(!s.contains("git\\t"), "leaked git wire: {s}");
-            assert!(!s.contains("gerbercmp"), "leaked gerbercmp wire: {s}");
-            assert!(!s.contains("\"kicad\""), "unexpected kicad flag in tile JSON: {s}");
+            let specs = plan_watches(&layout, &ctx).unwrap_or_else(|e| panic!("step {step} watch plan failed: {e:?}"));
+            let unique: HashSet<&str> = specs.iter().map(|s| s.key.as_str()).collect();
+            assert_eq!(unique.len(), specs.len(), "step {step} duplicate watch keys");
+            for sp in &specs {
+                assert_eq!(sp.key, watch_key(sp.kind, &sp.root, &sp.path));
+            }
         }
     }
 }
