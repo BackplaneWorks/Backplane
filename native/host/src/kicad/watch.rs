@@ -104,7 +104,7 @@ fn own_file(kind: u32, root: &str) -> String { let f = project::read(root); if k
 /// `mech_warming`: the projects whose Mech parts are being meshed ahead (warm_mech)
 /// `waiting`: the clients whose view shows "no board/schematic yet", `wait_busy` while their projects are being looked at
 /// `warming`: each board's prewarm converting now, by its file: its stop, set when the board's 3D view starts its own parts (start_parts)
-struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, sets: HashMap<u64, Option<String>>, waiting: HashMap<u64, Wait>, wait_busy: bool, polling: bool, idle: Vec<String>, prewarmed: HashMap<String, String>, took: HashMap<String, u64>, mech_warming: std::collections::HashSet<String>, warming: HashMap<String, Arc<std::sync::atomic::AtomicBool>> }
+struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, sets: HashMap<u64, Option<String>>, sheet_sent: HashMap<(u64, String), (String, String, Stamp)>, waiting: HashMap<u64, Wait>, wait_busy: bool, polling: bool, idle: Vec<String>, prewarmed: HashMap<String, String>, took: HashMap<String, u64>, mech_warming: std::collections::HashSet<String>, warming: HashMap<String, Arc<std::sync::atomic::AtomicBool>> }
 
 /// The most distinct sources one client's `kicad.watch.set` holds.
 pub const MAX_WATCH_SOURCES: usize = 12;
@@ -238,7 +238,7 @@ impl Plots {
     /// the board's plot). The set is authoritative for the connection: a source that stays keeps what the client holds of it (nothing is sent again: no stop, no
     /// start); one that is gone is dropped. `views`: (kind, path, force) as `kicad.watch` takes them ("" the project's own file; a history source by its wire
     /// path); `force` re-reads that one source (a Retry), the others are left as they are. At most `MAX_WATCH_SOURCES` distinct keys, counted before anything changes.
-    pub fn watch_set(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, root: &str, views: &[(u32, String, bool)]) -> Result<Vec<String>, &'static str> {
+    pub fn watch_set(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, root: &str, views: &[(u32, String, bool)]) -> Result<(Vec<String>, Vec<String>), &'static str> {
         if !root.is_empty() { crate::present::viewer::refresh_gerber_sets_for_root(root); }
         let mut planned: Vec<(u32, String, String, bool)> = vec![];
         for (kind, path, force) in views {
@@ -248,7 +248,7 @@ impl Plots {
             }
         }
         if planned.len() > MAX_WATCH_SOURCES { return Err("too many sources in one layout") }
-        if planned.is_empty() { self.drop_subs(client); return Ok(vec![]) }
+        if planned.is_empty() { self.drop_subs(client); return Ok((vec![], vec![])) }
         { let mut st = self.st.lock().unwrap(); st.waiting.remove(&client); st.sets.insert(client, crate::session::target_thread(client)); }
         let keys: Vec<String> = planned.iter().map(|p| p.1.clone()).collect();
         let mut todo = vec![];
@@ -269,8 +269,28 @@ impl Plots {
           }
           self.gc(&mut st);
           if !st.polling { st.polling = true; let me = self.clone(); let hub = hub.clone(); tokio::spawn(async move { me.poll(hub).await }); } }
+        let fresh = todo.clone();
         for ky in todo { self.fan_one(hub, &ky, Some(client)) }
-        Ok(keys)
+        Ok((keys, fresh))
+    }
+    /// The sheet lists a watch set owes its schematic tiles: each tile SLOT (its opaque tile id) that does not yet hold the current list for its source gets one,
+    /// and only those: a tile new to a schematic another tile already watches, a source whose file changed since its list was sent, a tile forced by a Retry.
+    /// What a slot holds is the source it was made for, the tree root it was read from and the file's stamp; a tile that left the set holds nothing.
+    fn deliver_sheets(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, root: &str, list: &[Value]) {
+        let own_sch = project::read(root).sch;
+        let mut present = std::collections::HashSet::new();
+        for src in list {
+            let (tile, path, tree) = (src["tile"].as_str().unwrap_or(""), src["path"].as_str().unwrap_or(""), src["tree"].as_str().unwrap_or(""));
+            if src["kind"] != "schematic" || is_version(path) || tile.is_empty() { continue }
+            present.insert(tile.to_string());
+            let file = tree_root(&own_sch, path, tree);
+            let stamp = if file.is_empty() { Stamp::default() } else { stamp_in(&file, Some(std::path::Path::new(root))) };
+            let want = (key(1, root, path), tree.to_string(), stamp);
+            let held = self.st.lock().unwrap().sheet_sent.get(&(client, tile.to_string())) == Some(&want);
+            // (what the slot holds is recorded when the frame has been pushed, not before the tree is read)
+            if !held || src["force"] == true { self.sheets_slot(hub, client, root, path, tree, tile.to_string(), Some(((client, tile.to_string()), want))) }
+        }
+        self.st.lock().unwrap().sheet_sent.retain(|(c, tile), _| *c != client || present.contains(tile));
     }
     /// The keys of the sources this client's watch set holds now (tests, and the hub's accounting).
     pub fn watched_keys(&self, client: u64) -> Vec<String> { self.st.lock().unwrap().subs.get(&client).map(|v| v.iter().map(|s| s.key.clone()).collect()).unwrap_or_default() }
@@ -278,14 +298,14 @@ impl Plots {
     /// The thread a connection's installed set was made for (None: it holds no set).
     pub fn set_thread(&self, client: u64) -> Option<Option<String>> { self.st.lock().unwrap().sets.get(&client).cloned() }
     /// The connection lets its set go (the presenter's leave to one tile, or another thread's page): the next plain watch replaces what it holds as usual.
-    pub fn release_set(&self, client: u64) { self.st.lock().unwrap().sets.remove(&client); }
+    pub fn release_set(&self, client: u64) { let mut st = self.st.lock().unwrap(); st.sets.remove(&client); st.sheet_sent.retain(|(c, _), _| *c != client); }
     /// A watch that starts afresh (`fresh`, the phones'): what this client was sent is not taken as held, so the next watch sends its model
     /// and parts again (`kept` still names a model it has). A phone drops the last view's model and parts when it switches views; the hub
     /// keeping them as sent left Split after 3D (and 3D after Split) on a bare board, or on "Loading 3D" until the board changed.
     /// The sources stay (no gc here): the watch that follows takes them up again.
-    pub fn forget(&self, client: u64) { let mut st = self.st.lock().unwrap(); st.subs.remove(&client); st.sets.remove(&client); }
+    pub fn forget(&self, client: u64) { let mut st = self.st.lock().unwrap(); st.subs.remove(&client); st.sets.remove(&client); st.sheet_sent.retain(|(c, _), _| *c != client); }
     fn drop_subs(&self, client: u64) {
-        let mut st = self.st.lock().unwrap(); st.subs.remove(&client); st.sets.remove(&client); st.waiting.remove(&client); self.gc(&mut st);
+        let mut st = self.st.lock().unwrap(); st.subs.remove(&client); st.sets.remove(&client); st.sheet_sent.retain(|(c, _), _| *c != client); st.waiting.remove(&client); self.gc(&mut st);
     }
     /// The views waiting for a project's first board or schematic: each whose file is there now is watched as if it had just been opened
     /// (same key, so the client's "none" gives way to the drawing). The folders are read on a blocking thread, one look at a time.
@@ -687,7 +707,7 @@ impl Plots {
             { let mut st = self.st.lock().unwrap();
               // clients that went away
               let gone: Vec<u64> = st.subs.keys().chain(st.waiting.keys()).copied().filter(|c| !hub.is_attached(*c)).collect();
-              for c in gone { st.subs.remove(&c); st.sets.remove(&c); st.waiting.remove(&c); }
+              for c in gone { st.subs.remove(&c); st.sets.remove(&c); st.sheet_sent.retain(|(cl, _), _| *cl != c); st.waiting.remove(&c); }
               self.gc(&mut st);
               if st.subs.is_empty() && st.waiting.is_empty() { st.polling = false; return }
               let watched: std::collections::HashSet<String> = st.subs.values().flatten().map(|s| s.key.clone()).collect();
@@ -707,16 +727,20 @@ impl Plots {
 
     /// Pv.tree: a schematic's sheets (and the boxes a tap on a sheet symbol opens), read by `--plot-tree FILE` and sent as
     /// `{"t":"sheets", root, slot, gen, rows, boxes, ids, top, refs}`; `gen` only grows (the client takes a reply only if newer).
-    fn sheets(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, root: &str, path: &str, tree: &str) {
+    fn sheets(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, root: &str, path: &str, tree: &str) { self.sheets_slot(hub, client, root, path, tree, tree_slot(path), None) }
+    /// The sheet list of a schematic, pushed as a `sheets` frame whose `slot` the client keys the list by: the single `kicad.watch` keys it by the sheet's path
+    /// (`tree_slot`, as ever); a tile of a layout's watch set keys it by its opaque tile id.
+    /// `mark`: the record of what the slot holds, made only once the frame has been pushed (a list that could not be read or pushed is owed again).
+    fn sheets_slot(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, root: &str, path: &str, tree: &str, slot: String, mark: Option<((u64, String), (String, String, Stamp))>) {
         let gen = self.gen.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         let file = tree_root(&project::read(root).sch, path, tree);
         if file.is_empty() { return }
-        let (me, hub, root, slot) = (self.clone(), hub.clone(), root.to_string(), tree_slot(path));
+        let (me, hub, root) = (self.clone(), hub.clone(), root.to_string());
         tokio::spawn(async move {
             if native() {
                 let f = file.clone();
                 let Ok(Ok(t)) = tokio::task::spawn_blocking(move || std::panic::catch_unwind(|| plotread::tree(&f))).await else { return };
-                hub.push(client, json!({"t":"sheets","root":root,"slot":slot,"gen":gen.to_string(),"rows":t.rows,"boxes":t.boxes,"ids":t.ids,"top":t.top,"refs":t.refs}));
+                if hub.push(client, json!({"t":"sheets","root":root,"slot":slot,"gen":gen.to_string(),"rows":t.rows,"boxes":t.boxes,"ids":t.ids,"top":t.top,"refs":t.refs})) { if let Some((k, v)) = mark { me.st.lock().unwrap().sheet_sent.insert(k, v); } }
                 return
             }
             let Some(o) = crate::proc::tokio_cmd(crate::proc::Kind::Local, &me.bin).arg("--plot-tree").arg(&file).stdin(std::process::Stdio::null()).output().await.ok() else { return };
@@ -724,7 +748,7 @@ impl Plots {
             let text = String::from_utf8_lossy(&o.stdout).trim().to_string();
             let j: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
             let g = |k: &str, d: &str| j.get(k).and_then(Value::as_str).unwrap_or(d).to_string();
-            hub.push(client, json!({"t":"sheets","root":root,"slot":slot,"gen":gen.to_string(),"rows":g("rows", text.trim_end()),"boxes":g("boxes",""),"ids":g("ids",""),"top":g("top",""),"refs":g("refs","")}));
+            if hub.push(client, json!({"t":"sheets","root":root,"slot":slot,"gen":gen.to_string(),"rows":g("rows", text.trim_end()),"boxes":g("boxes",""),"ids":g("ids",""),"top":g("top",""),"refs":g("refs","")})) { if let Some((k, v)) = mark { me.st.lock().unwrap().sheet_sent.insert(k, v); } }
         });
     }
     /// kicad.probe: the pieces of the chunks this client holds for `key` whose info has `name=value` (a net, a part with all its units, a schematic group),
@@ -866,6 +890,8 @@ impl RpcHandler for KicadRpc {
                         let (tile, kind, path) = (src["tile"].as_str().unwrap_or(""), src["kind"].as_str().unwrap_or(""), src["path"].as_str().unwrap_or("").to_string());
                         let Some(k) = kind_of(kind).filter(|k| *k <= 2) else { return vec![json!({"t":"reply","id":id,"ok":false,"error":"a tile watches a board, a schematic or a 3D model"})] };
                         if tile.is_empty() || tile.len() > 32 { return vec![json!({"t":"reply","id":id,"ok":false,"error":"a tile has an id"})] }
+                        let tree = src["tree"].as_str().unwrap_or("");
+                        if !tree.is_empty() && !super::known_root(hub, &root, tree).await { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that folder is not in this project"})] }
                         if !path.is_empty() && !super::known_root(hub, &root, &path).await { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that folder is not in this project"})] }
                         // every tile keeps the COMPLETE list of the keys it draws from (a 3D tile of a board has two; a plot shared by tiles is each one's)
                         let entry = tiles.entry(tile.to_string()).or_insert_with(|| json!([]));
@@ -873,7 +899,11 @@ impl RpcHandler for KicadRpc {
                         views.push((k, path, src["force"].as_bool() == Some(true)));
                     }
                     match self.0.watch_set(hub, who.client, &root, &views) {
-                        Ok(_) => vec![json!({"t":"reply","id":id,"ok":true,"result":{"tiles":tiles}})],
+                        Ok(_) => {
+                            // a schematic tile's sheet list, keyed by its tile id, for each tile slot that does not hold the current one
+                            self.0.deliver_sheets(hub, who.client, &root, list);
+                            vec![json!({"t":"reply","id":id,"ok":true,"result":{"tiles":tiles}})]
+                        }
                         Err(why) => vec![json!({"t":"reply","id":id,"ok":false,"error":why})],
                     }
                 }
@@ -1005,13 +1035,13 @@ mod tests {
         std::fs::write(proj.join("b.kicad_pcb"), "not a valid kicad_pcb").unwrap();
         let mut out = hub.attach(9);
         let views = vec![(1u32, String::new(), false), (0, String::new(), false), (1, String::new(), false), (0, String::new(), false)];
-        let keys = plots.watch_set(&hub, 9, &root, &views).unwrap();
+        let keys = plots.watch_set(&hub, 9, &root, &views).unwrap().0;
         assert_eq!(keys.len(), 2, "two tiles drawing the same two sources: each watched once: {keys:?}");
         assert_eq!(plots.watched_keys(9).len(), 2);
         // the frames of the start arrive; then a focus move (the same set again) sends nothing
         tokio::time::sleep(Duration::from_millis(600)).await;
         while out.try_recv().is_ok() {}
-        let again = plots.watch_set(&hub, 9, &root, &views).unwrap();
+        let again = plots.watch_set(&hub, 9, &root, &views).unwrap().0;
         assert_eq!(again, keys);
         tokio::time::sleep(Duration::from_millis(400)).await;
         let mut frames = 0; while let Ok(o) = out.try_recv() { if let Out::Value(v) = o { if v["t"] == "plot" { frames += 1 } } }
@@ -1124,6 +1154,114 @@ mod tests {
         for tile in ["x1", "x2"] { assert_eq!(sorted(r[0]["result"]["tiles"][tile].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect()), sorted(vec![k0.clone(), k2.clone()]), "a 3D tile of a board names both keys, and each tile of a shared plot has it"); }
         assert_eq!(r[0]["result"]["tiles"]["x3"], json!([k0.clone()]));
     }
+    /// A schematic tile's sheet list comes through `kicad.watch.set`, keyed by the tile's id; an unchanged set sends none; the single `kicad.watch` keeps its own
+    /// (path-keyed) slot.
+    #[tokio::test] async fn a_schematic_tile_gets_its_sheet_list_keyed_by_its_tile_id() {
+        use crate::{api::{Caller, RpcHandler}, hub::{Cfg, Out}, presenter::Canned};
+        let (home, proj) = (crate::plat::tmp::dir("wsheets-home"), crate::plat::tmp::dir("wsheets-proj"));
+        let cfg = Cfg { home: home.to_path_buf(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let plots = Plots::new(&home);
+        let rpc = KicadRpc(plots.clone());
+        let root = proj.to_string_lossy().into_owned();
+        let fx = concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/files/fixtures/plot/ecc83-pp.kicad_sch");
+        std::fs::write(proj.join("b.kicad_pro"), "{}").unwrap();
+        std::fs::copy(fx, proj.join("b.kicad_sch")).unwrap();
+        hub.commit_many(&[json!({"$":"ProjectCreated","id":"p","title":"B","root":root,"at":1})]).await.unwrap();
+        let mut out = hub.attach(9);
+        let who = Caller { gen: "1".into(), client: 9 };
+        let slots = |out: &mut crate::hub::Outbox| { let mut v = vec![]; while let Ok(o) = out.try_recv() { if let Out::Value(f) = o { if f["t"] == "sheets" { v.push(f["slot"].as_str().unwrap_or("?").to_string()) } } } v.sort(); v };
+        let set = json!({"root": root, "sources": [{"tile": "s1", "kind": "schematic", "path": ""}, {"tile": "s2", "kind": "schematic", "path": ""}]});
+        let r = rpc.call(&hub, &who, &json!(1), "kicad.watch.set", &set).await; assert_eq!(r[0]["ok"], true, "{r:?}");
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        assert_eq!(slots(&mut out), vec!["s1".to_string(), "s2".to_string()], "each schematic tile has its own sheet list, keyed by its tile id");
+        // the same set again (a focus move): nothing is sent
+        let r = rpc.call(&hub, &who, &json!(2), "kicad.watch.set", &set).await; assert_eq!(r[0]["ok"], true);
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        assert!(slots(&mut out).is_empty(), "an unchanged set sends no sheet list");
+        // the single watch is as it was: the slot is the path-keyed one (a live file's is empty)
+        rpc.call(&hub, &who, &json!(3), "kicad.watch", &json!({"kind": "", "root": root})).await;
+        crate::session::set_target_for_test(9, "x");
+        let r = rpc.call(&hub, &who, &json!(4), "kicad.watch", &json!({"kind": "schematic", "root": root, "path": ""})).await; assert_eq!(r[0]["ok"], true, "{r:?}");
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        assert_eq!(slots(&mut out), vec![tree_slot("")], "the single watch's sheet list keeps its slot");
+    }
+
+    /// Sheet lists are owed per tile SLOT: a schematic already watched by the single watch, a second tile on a watched schematic, a forced tile, a changed file and
+    /// a tile that left and came back each get a list exactly when their slot does not hold the current one, on one connection.
+    #[tokio::test] async fn sheet_lists_are_delivered_to_every_tile_slot_that_lacks_the_current_one_and_only_those() {
+        use crate::{api::{Caller, RpcHandler}, hub::{Cfg, Out}, presenter::Canned};
+        let (home, proj) = (crate::plat::tmp::dir("wslots-home"), crate::plat::tmp::dir("wslots-proj"));
+        let cfg = Cfg { home: home.to_path_buf(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let plots = Plots::new(&home);
+        let rpc = KicadRpc(plots.clone());
+        let root = proj.to_string_lossy().into_owned();
+        let fx = concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/files/fixtures/plot/ecc83-pp.kicad_sch");
+        std::fs::write(proj.join("b.kicad_pro"), "{}").unwrap();
+        std::fs::copy(fx, proj.join("b.kicad_sch")).unwrap();
+        std::fs::write(proj.join("b.kicad_pcb"), "not a valid kicad_pcb").unwrap();
+        hub.commit_many(&[json!({"$":"ProjectCreated","id":"p","title":"B","root":root,"at":1})]).await.unwrap();
+        let mut out = hub.attach(9);
+        let who = Caller { gen: "1".into(), client: 9 };
+        let slots = |out: &mut crate::hub::Outbox| { let mut v = vec![]; while let Ok(o) = out.try_recv() { if let Out::Value(f) = o { if f["t"] == "sheets" { v.push(f["slot"].as_str().unwrap_or("?").to_string()) } } } v.sort(); v };
+        let sch = |tile: &str, force: bool| { let mut s = json!({"tile": tile, "kind": "schematic", "path": ""}); if force { s["force"] = json!(true) } s };
+        let board = json!({"tile": "b1", "kind": "board", "path": ""});
+        let set = |sources: Vec<Value>| json!({"root": root, "sources": sources});
+        let send = |rid: u64, p: Value| { let (rpc, hub, who) = (&rpc, &hub, &who); async move { let r = rpc.call(hub, who, &json!(rid), "kicad.watch.set", &p).await; assert_eq!(r[0]["ok"], true, "{r:?}"); tokio::time::sleep(Duration::from_millis(1100)).await } };
+        // 1. one schematic watched by the single watch (its list sits in the path slot), then a Board beside it: the schematic tile has no list under its tile id yet
+        crate::session::set_target_for_test(9, "x");
+        let r = rpc.call(&hub, &who, &json!(1), "kicad.watch", &json!({"kind": "schematic", "root": root, "path": ""})).await; assert_eq!(r[0]["ok"], true);
+        tokio::time::sleep(Duration::from_millis(1100)).await; assert_eq!(slots(&mut out), vec![tree_slot("")]);
+        send(2, set(vec![sch("s1", false), board.clone()])).await;
+        assert_eq!(slots(&mut out), vec!["s1".to_string()], "the retained schematic's tile gets its list under its tile id");
+        // 2. a second tile on the already watched schematic: only the new slot
+        send(3, set(vec![sch("s1", false), sch("s2", false), board.clone()])).await;
+        assert_eq!(slots(&mut out), vec!["s2".to_string()], "a new tile on a watched schematic gets a list, its sibling does not");
+        // 3. one of the two forced: its slot only
+        send(4, set(vec![sch("s1", false), sch("s2", true), board.clone()])).await;
+        assert_eq!(slots(&mut out), vec!["s2".to_string()], "forcing one of two tiles sharing a schematic re-sends that tile's list only");
+        // 4. the unchanged set: none
+        send(5, set(vec![sch("s1", false), sch("s2", false), board.clone()])).await;
+        assert!(slots(&mut out).is_empty());
+        // 5. the schematic changed on disk: both tiles' lists are stale, both are re-sent
+        let mut text = std::fs::read_to_string(proj.join("b.kicad_sch")).unwrap(); text.push_str("\n");
+        std::fs::write(proj.join("b.kicad_sch"), text).unwrap();
+        send(6, set(vec![sch("s1", false), sch("s2", false), board.clone()])).await;
+        assert_eq!(slots(&mut out), vec!["s1".to_string(), "s2".to_string()], "a changed source leaves no tile's menu stale");
+        // 6. a tile that left and came back is owed its list again
+        send(7, set(vec![sch("s1", false), board.clone()])).await; assert!(slots(&mut out).is_empty());
+        send(8, set(vec![sch("s1", false), sch("s2", false), board])).await;
+        assert_eq!(slots(&mut out), vec!["s2".to_string()]);
+    }
+
+    /// A tile slot is recorded as holding its list only once the list has been pushed: a push that reaches no client leaves the slot owed.
+    #[tokio::test] async fn a_sheet_list_that_was_not_pushed_is_owed_again() {
+        use crate::{api::{Caller, RpcHandler}, hub::Cfg, presenter::Canned};
+        let (home, proj) = (crate::plat::tmp::dir("wowed-home"), crate::plat::tmp::dir("wowed-proj"));
+        let cfg = Cfg { home: home.to_path_buf(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let plots = Plots::new(&home);
+        let rpc = KicadRpc(plots.clone());
+        let root = proj.to_string_lossy().into_owned();
+        std::fs::write(proj.join("b.kicad_pro"), "{}").unwrap();
+        std::fs::copy(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/files/fixtures/plot/ecc83-pp.kicad_sch"), proj.join("b.kicad_sch")).unwrap();
+        hub.commit_many(&[json!({"$":"ProjectCreated","id":"p","title":"B","root":root,"at":1})]).await.unwrap();
+        let who = Caller { gen: "1".into(), client: 7 };
+        let set = json!({"root": root, "sources": [{"tile": "s1", "kind": "schematic", "path": ""}]});
+        // the connection is not attached: the frame reaches nobody, so nothing is recorded as delivered
+        let r = rpc.call(&hub, &who, &json!(1), "kicad.watch.set", &set).await; assert_eq!(r[0]["ok"], true);
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        assert!(plots.st.lock().unwrap().sheet_sent.is_empty(), "a list that was not pushed is not recorded as delivered");
+        // the connection is there now: the same set owes the list again, it is pushed and then recorded
+        let mut out = hub.attach(7);
+        let r = rpc.call(&hub, &who, &json!(2), "kicad.watch.set", &set).await; assert_eq!(r[0]["ok"], true);
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        let mut got = 0; while let Ok(o) = out.try_recv() { if let crate::hub::Out::Value(f) = o { if f["t"] == "sheets" { got += 1 } } }
+        assert_eq!(got, 1, "the owed list is delivered");
+        assert!(plots.st.lock().unwrap().sheet_sent.contains_key(&(7, "s1".to_string())), "recorded once pushed");
+    }
+
     #[tokio::test] async fn a_forced_split_watch_re_reads_a_failed_unchanged_source_and_keeps_siblings() {
         use crate::{hub::{Cfg, Out}, presenter::Canned};
         let (home, proj) = (crate::plat::tmp::dir("fsplit-home"), crate::plat::tmp::dir("fsplit-proj"));

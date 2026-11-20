@@ -393,6 +393,10 @@ pub enum Refusal {
     TooManyTiles,
     /// The layout would watch more distinct sources than a session's watch set holds (`watch::MAX_WATCH_SOURCES`; a 3D tile of a board is two).
     TooManySources,
+    /// The version does not resolve in this project (an unknown repository id, or a revision that does not hold the file).
+    UnresolvedVersion,
+    /// This page has no history to show a version of.
+    NoHistory,
 }
 
 /// The most tiles one session's layout holds (a bound on the hub's per-session watch subscriptions: at most `MAX_WATCH_SOURCES` distinct sources).
@@ -415,6 +419,8 @@ impl Refusal {
             Refusal::InvalidInput => "invalidInput",
             Refusal::TooManyTiles => "tooManyTiles",
             Refusal::TooManySources => "tooManySources",
+            Refusal::UnresolvedVersion => "unresolvedVersion",
+            Refusal::NoHistory => "noHistory",
         }
     }
 
@@ -435,6 +441,8 @@ impl Refusal {
             Refusal::InvalidInput => "viewer.layout.refusal.invalidinput",
             Refusal::TooManyTiles => "viewer.layout.refusal.toomany",
             Refusal::TooManySources => "viewer.layout.refusal.toomanysources",
+            Refusal::UnresolvedVersion => "viewer.layout.refusal.unresolvedversion",
+            Refusal::NoHistory => "viewer.layout.refusal.nohistory",
         }
     }
 
@@ -1350,6 +1358,21 @@ pub fn retarget(
         focus: layout.focus.clone(),
         maximized: layout.maximized.clone(),
     };
+    check_lock_preserved(layout, &next, locked)?;
+    Ok(next)
+}
+
+/// Show `version` of a tile's source (or, `None`, its live file again): a Board or Schematic tile only; any overlay on it is let go (a Compare is made with
+/// `overlay`). The tile keeps its source; resolving the version is the caller's (the hub's version resolver and the revision's contents).
+pub fn set_version(layout: &Layout, target: &str, version: Option<TileVersion>, locked: Option<&str>) -> Result<Layout, Refusal> {
+    let tile = layout.tile(target).ok_or(Refusal::NotFound)?;
+    if !matches!(tile.kind, PageKind::Board | PageKind::Schematic) { return Err(Refusal::NoHistory) }
+    if let Some(v) = &version {
+        if !is_clean_version(v) { return Err(Refusal::UnresolvedVersion) }
+    }
+    let root = layout.root.as_ref().ok_or(Refusal::NotFound)?;
+    let new_root = map_tile(root, target, &|t| Tile { version: version.clone(), unresolved_version: false, overlay: None, ..t.clone() }).ok_or(Refusal::NotFound)?;
+    let next = Layout { version: layout.version.max(LAYOUT_VERSION), root: Some(new_root), focus: layout.focus.clone(), maximized: layout.maximized.clone() };
     check_lock_preserved(layout, &next, locked)?;
     Ok(next)
 }
@@ -2664,6 +2687,8 @@ mod tests {
             Refusal::InvalidInput,
             Refusal::TooManyTiles,
             Refusal::TooManySources,
+            Refusal::UnresolvedVersion,
+            Refusal::NoHistory,
         ];
         for (lang, text) in [
             ("en", include_str!("../../../../i18n/en.msg")),
