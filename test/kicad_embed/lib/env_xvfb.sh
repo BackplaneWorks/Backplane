@@ -245,7 +245,10 @@ start_xvfb_and_wm() {
     xvb=$(command -v Xvfb)
   fi
   # REAL_HARDWARE=1: a private display the GPU draws (lib/gpu_display.sh); Xvfb has none. KEMBED_XVFB=1 keeps Xvfb.
-  if [ "${REAL_HARDWARE:-0}" = "1" ] && [ "${KEMBED_XVFB:-0}" != "1" ] && gpu_display_available; then
+  # KEMBED_DISPLAY=:N: a display that is already there (a real desktop session, its own window manager: KEMBED_WM=none), not a private one
+  if [ -n "${KEMBED_DISPLAY:-}" ]; then
+    DISP=$KEMBED_DISPLAY; export DISPLAY="$DISP"
+  elif [ "${REAL_HARDWARE:-0}" = "1" ] && [ "${KEMBED_XVFB:-0}" != "1" ] && gpu_display_available; then
     start_gpu_display || return 1
   else
   d=$((520 + $$ % 200))
@@ -269,7 +272,7 @@ EOF
   # KEMBED_WM=openbox|xfwm4: that window manager instead of i3 (click to focus, windows placed where they ask, stacked not tiled), for a
   # suite that must hold under more than one (embed_pointer_keys_e2e); the i3-only commands then do nothing
   case "${KEMBED_WM:-i3}" in
-    mutter) ;;
+    mutter|none) ;;
     openbox) own env DISPLAY="$DISP" XDG_RUNTIME_DIR="$OUT/run" openbox --sm-disable >"$OUT/wm.log" 2>&1; sleep 1 ;;
     # (xfwm4 reads its settings over D-Bus from xfconfd: a session bus of its own)
     xfwm4) own env DISPLAY="$DISP" XDG_RUNTIME_DIR="$OUT/run" dbus-run-session -- xfwm4 --compositor=off --sm-client-disable >"$OUT/wm.log" 2>&1; sleep 2 ;;

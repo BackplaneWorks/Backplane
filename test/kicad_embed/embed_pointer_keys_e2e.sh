@@ -86,11 +86,19 @@ W1=$(kicad_wins)
 # P3 (the race a click opens): KiCad given the keys by a click in the pane, then a click in the composer and at once the pointer back over
 # the pane and a key: RACE times, each "r" must reach the composer
 RACE=${RACE:-20}
+# the X focus through the race, each change with its time (a 2 ms poll), and each key's time window: a key that slips is placed against
+# the focus it met (KiCad's frame: the click's hand-back had not come; Backplane's top-level itself: the redirect had not come)
+python3 "$HERE/lib/focus_trace.py" watch $((RACE * 2 + 5)) >"$OUT/race-focus.log" 2>&1 & FP=$!
+: >"$OUT/race-keys.log"
 for k in $(seq "$RACE"); do
   python3 "$XINPUT_PY" click "$PAX" "$PAY" >/dev/null; sleep 0.6
-  python3 "$XINPUT_PY" click "$CX" "$CY" >/dev/null; python3 "$XINPUT_PY" move "$PAX" "$PAY" >/dev/null; python3 "$XINPUT_PY" key r >/dev/null
+  t0=$(date +%s%3N); python3 "$XINPUT_PY" click "$CX" "$CY" >/dev/null
+  python3 "$XINPUT_PY" move "$PAX" "$PAY" >/dev/null; t2=$(date +%s%3N); python3 "$XINPUT_PY" key r >/dev/null; t3=$(date +%s%3N)
+  echo "$k $t0 $t2 $t3" >>"$OUT/race-keys.log"
   sleep 0.3
 done
+kill "$FP" 2>/dev/null
+python3 "$HERE/lib/focus_trace.py" judge "$OUT/race-focus.log" "$OUT/race-keys.log" "$TOP" | sed 's/^/INFO race /'
 say "after the race"
 W2=$(kicad_wins)
 # P4: another X window takes the focus and gives it back (Backplane inactive, then active again), then keys with the pointer over the pane.
@@ -113,6 +121,8 @@ kill "$XM" 2>/dev/null
 # P6: a dead key over the pane (us intl: ' is dead_acute, then e): the composed letter reaches the composer, nothing of it KiCad
 if [ "${DEADKEY:-1}" = 1 ] && command -v setxkbmap >/dev/null; then
   setxkbmap -layout us -variant intl 2>/dev/null; sleep 1.0
+  # DEADKEY_OVER=composer: the pointer over the composer instead (the same key on a client without the proxy: what main does with it)
+  [ "${DEADKEY_OVER:-pane}" = composer ] && { python3 "$XINPUT_PY" move "$CX" "$CY" >/dev/null; sleep 0.5; }
   python3 "$XINPUT_PY" key dead_acute >/dev/null; sleep 0.2; python3 "$XINPUT_PY" key e >/dev/null; sleep 0.5
   setxkbmap -layout us 2>/dev/null; sleep 0.5
 fi

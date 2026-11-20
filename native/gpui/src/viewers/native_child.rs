@@ -788,9 +788,13 @@ mod imp {
                     let _ = c.allow_events(Allow::REPLAY_POINTER, b.time);
                     out.push(super::Ev::Click);
                 }
-                // the focus put on a top-level of ours itself (the window manager on a click or activation, GPUI's activate): on to its proxy,
-                // unless KiCad has the keyboard (a hand-in in flight). Not when it went into a child (the proxy, KiCad, the Browser's Chromium)
-                x11rb::protocol::Event::FocusIn(f) if !PANE_KEYS.load(std::sync::atomic::Ordering::SeqCst) => {
+                // the focus put on a top-level of ours itself (the window manager on a click or activation, GPUI's activate): on to its proxy at
+                // once, here on the wake thread. Not when it went into a child (the proxy, KiCad, the Browser's Chromium). Also while the pane
+                // still says KiCad has the keys: a click outside the pane that the window manager answers by focusing the top-level (openbox,
+                // xfwm4) comes before GPUI has handled the click, and in that gap (4-40 ms measured) a key over the pane went to KiCad (the race,
+                // 1 of 20 on a real desktop). The pane reads its keys from the X focus (has_focus of its container), and a focus on the
+                // top-level or on its proxy reads the same there; a hand-in that follows focuses KiCad's frame from either.
+                x11rb::protocol::Event::FocusIn(f) => {
                     let proxy = proxies().lock().unwrap().get(&f.event).copied();
                     if let Some(p) = proxy {
                         if c.get_input_focus().ok().and_then(|r| r.reply().ok()).is_some_and(|r| r.focus == f.event) {
