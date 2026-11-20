@@ -57,7 +57,9 @@ pub fn announce() {
     let next = std::fs::read_to_string(hub.cfg.home.join(NEXT)).unwrap_or_default();
     let f = frame(&next, crate::hub::now_ms());
     eprintln!("backplane-hub: telling {} client(s): {}", hub.clients().len(), f["text"].as_str().unwrap_or(""));
-    hub.push_all(&f);
+    // pushed from a thread of its own: a wake from this runtime worker would land in its own LIFO slot, which no other worker takes, and this worker
+    // is about to sleep and exit (a probe hub sent nothing until it was)
+    let _ = std::thread::spawn(move || hub.push_all(&f)).join();
     std::thread::sleep(FLUSH);
 }
 
