@@ -1,4 +1,7 @@
-// Composer: multiline input, slash-command popup (hello.commands), mentions popup, Send/Stop.
+// Composer matching GPUI native-chat.png:
+// Tall bordered input box ("Ask anything: @bot, >thread, %project, #room, $skill, /btw"),
+// slash-command popup (hello.commands), mentions popup, and bottom toolbar row
+// with model chip on the left and accent-blue Send / red Stop on the right.
 import { t } from "./i18n";
 
 export interface SlashCommand {
@@ -25,6 +28,7 @@ export interface ComposerCallbacks {
 export class ComposerView {
   private popupEl: HTMLElement;
   private textarea: HTMLTextAreaElement;
+  private modelChipEl: HTMLElement;
   private sendBtn: HTMLButtonElement;
   private stopBtn: HTMLButtonElement;
   private errorEl: HTMLElement;
@@ -35,7 +39,6 @@ export class ComposerView {
   private filteredSlash: SlashCommand[] = [];
   private mentionItems: MentionItem[] = [];
   private popupIdx = 0;
-  private running = false;
   private enabled = false;
 
   constructor(container: HTMLElement, cb: ComposerCallbacks) {
@@ -45,6 +48,9 @@ export class ComposerView {
     wrap.className = "bp-composer";
     wrap.setAttribute("data-testid", "composer");
 
+    const inner = document.createElement("div");
+    inner.className = "bp-composer-inner";
+
     this.popupEl = document.createElement("div");
     this.popupEl.className = "bp-composer-popup bp-hidden";
     this.popupEl.setAttribute("data-testid", "slash-menu");
@@ -52,14 +58,19 @@ export class ComposerView {
     this.errorEl = document.createElement("div");
     this.errorEl.className = "bp-composer-err bp-hidden";
 
-    const row = document.createElement("div");
-    row.className = "bp-composer-row";
-
     this.textarea = document.createElement("textarea");
     this.textarea.className = "bp-composer-input";
-    this.textarea.rows = 1;
+    this.textarea.rows = 2;
     this.textarea.placeholder = t("composer.placeholder", "Ask anything: @bot, >thread, %project, #room, $skill, /btw");
     this.textarea.setAttribute("data-testid", "composer-input");
+
+    // Toolbar row under the input box (matches GPUI native-chat.png)
+    const bar = document.createElement("div");
+    bar.className = "bp-composer-bar";
+
+    this.modelChipEl = document.createElement("div");
+    this.modelChipEl.className = "bp-composer-model";
+    this.modelChipEl.textContent = "default";
 
     const btns = document.createElement("div");
     btns.className = "bp-composer-btns";
@@ -73,14 +84,15 @@ export class ComposerView {
 
     this.sendBtn = document.createElement("button");
     this.sendBtn.type = "button";
-    this.sendBtn.className = "primary";
+    this.sendBtn.className = "primary bp-send-btn";
     this.sendBtn.textContent = t("composer.send", "Send");
     this.sendBtn.setAttribute("data-testid", "composer-send");
     this.sendBtn.addEventListener("click", () => this.submit());
 
     btns.append(this.stopBtn, this.sendBtn);
-    row.append(this.textarea, btns);
-    wrap.append(this.popupEl, this.errorEl, row);
+    bar.append(this.modelChipEl, btns);
+    inner.append(this.popupEl, this.errorEl, this.textarea, bar);
+    wrap.appendChild(inner);
     container.appendChild(wrap);
 
     this.textarea.addEventListener("input", () => {
@@ -126,9 +138,12 @@ export class ComposerView {
     this.commands = cmds;
   }
 
+  public setModelChip(chip: string): void {
+    this.modelChipEl.textContent = chip || "default";
+  }
+
   public setState(enabled: boolean, running: boolean): void {
     this.enabled = enabled;
-    this.running = running;
     this.textarea.disabled = !enabled;
     this.sendBtn.disabled = !enabled;
     this.stopBtn.classList.toggle("bp-hidden", !running);
@@ -136,6 +151,13 @@ export class ComposerView {
 
   public setDraft(text: string): void {
     this.textarea.value = text;
+    this.autoGrow();
+    this.textarea.focus();
+  }
+
+  public prependDraft(prefix: string): void {
+    const cur = this.textarea.value;
+    this.textarea.value = cur ? `${prefix}\n${cur}` : prefix;
     this.autoGrow();
     this.textarea.focus();
   }
@@ -155,7 +177,6 @@ export class ComposerView {
   }
 
   public refreshLocale(): void {
-    // Preserve draft text, selection, and focus while updating translated control labels.
     this.textarea.placeholder = t("composer.placeholder", "Ask anything: @bot, >thread, %project, #room, $skill, /btw");
     this.sendBtn.textContent = t("composer.send", "Send");
     this.stopBtn.textContent = t("composer.stop", "Stop");
@@ -163,13 +184,12 @@ export class ComposerView {
 
   private autoGrow(): void {
     this.textarea.style.height = "auto";
-    this.textarea.style.height = `${Math.min(180, Math.max(36, this.textarea.scrollHeight))}px`;
+    this.textarea.style.height = `${Math.min(180, Math.max(54, this.textarea.scrollHeight))}px`;
   }
 
   private shouldCompleteOnEnter(): boolean {
     if (this.popupMode === "mention") return true;
     if (this.popupMode === "slash") {
-      // Complete if the user hasn't typed arguments yet and hasn't typed the exact word + space
       const v = this.textarea.value;
       return v.startsWith("/") && !v.includes(" ");
     }
@@ -189,7 +209,6 @@ export class ComposerView {
       }
     }
 
-    // Mentions (@, >, %, #) at end of current token
     const m = /(?:^|\s)([@>%#])([a-zA-Z0-9._-]{1,32})$/.exec(val.slice(0, this.textarea.selectionStart));
     if (m) {
       const sigil = m[1];
