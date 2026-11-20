@@ -97,6 +97,7 @@ export function mountTerminalPane(
 
   let alive = true;
   let activeKey = "";
+  let inputReady = false;
   let knownKeys: string[] = [];
   let lastCols = 0;
   let lastRows = 0;
@@ -181,7 +182,7 @@ export function mountTerminalPane(
     if (cols === lastCols && rows === lastRows) return;
     lastCols = cols;
     lastRows = rows;
-    if (activeKey) {
+    if (activeKey && inputReady) {
       void api.hub.rpc("term.resize", { key: activeKey, cols, rows }).catch(() => {});
     }
   }
@@ -198,31 +199,42 @@ export function mountTerminalPane(
   resizeObs.observe(host);
 
   // Key-by-key input + paste directly to hub `term.write` as base64 bytes.
+  // Gated on `inputReady` so switching shells never routes typing/paste before the
+  // selected shell's snapshot has replaced the screen.
   const dataDisp = term.onData((data) => {
-    if (!alive || !activeKey || !data) return;
+    if (!alive || !inputReady || !activeKey || !data) return;
     void api.hub.rpc("term.write", { key: activeKey, b: encodeBase64Utf8(data) }).catch(() => {});
   });
 
   async function watchKey(key: string): Promise<void> {
+    inputReady = false;
+    term.reset();
     if (activeKey && activeKey !== key) {
       void api.hub.rpc("term.unwatch", { key: activeKey }).catch(() => {});
     }
     activeKey = key;
     if (!knownKeys.includes(key)) knownKeys.push(key);
     syncSessionSelect();
-    statusEl.textContent = key;
+    statusEl.textContent = `${key} · connecting…`;
 
-    const snap = await api.hub.rpc<{ b?: string; reset?: unknown; state?: string }>("term.watch", { key });
-    if (!alive || activeKey !== key) return;
-    term.reset();
-    if (typeof snap?.b === "string" && snap.b.length > 0) {
-      term.write(decodeBase64Bytes(snap.b));
+    try {
+      const snap = await api.hub.rpc<{ b?: string; reset?: unknown; state?: string }>("term.watch", { key });
+      if (!alive || activeKey !== key) return;
+      term.reset();
+      if (typeof snap?.b === "string" && snap.b.length > 0) {
+        term.write(decodeBase64Bytes(snap.b));
+      }
+      inputReady = true;
+      statusEl.textContent = snap?.state ? `${key} · ${snap.state}` : key;
+      lastCols = 0;
+      lastRows = 0;
+      scheduleFit();
+      term.focus();
+    } catch (err) {
+      if (!alive || activeKey !== key) return;
+      inputReady = false;
+      statusEl.textContent = err instanceof Error ? err.message : String(err);
     }
-    statusEl.textContent = snap?.state ? `${key} · ${snap.state}` : key;
-    lastCols = 0;
-    lastRows = 0;
-    scheduleFit();
-    term.focus();
   }
 
   async function openPrimary(): Promise<void> {
@@ -249,6 +261,8 @@ export function mountTerminalPane(
   }
 
   async function createExtraShell(): Promise<void> {
+    inputReady = false;
+    term.reset();
     try {
       fitAddon.fit();
     } catch {}
@@ -289,7 +303,7 @@ export function mountTerminalPane(
   });
 
   const unsub = api.hub.onFrame((f) => {
-    if (!alive || f.t !== "d" || f.k !== "term") return;
+    if (!alive || !inputReady || f.t !== "d" || f.k !== "term") return;
     if (f.key !== activeKey) return;
     if (f.reset) term.reset();
     if (typeof f.b === "string" && f.b.length > 0) {
