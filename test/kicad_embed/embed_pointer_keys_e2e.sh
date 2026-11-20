@@ -66,6 +66,10 @@ type_word() { local w=$1 i; for ((i = 0; i < ${#w}; i++)); do python3 "$XINPUT_P
 kicad_wins() { xwininfo -root -tree 2>/dev/null | grep -cE '"[^"]+"' || true; }
 
 echo "INFO case $CASE; top $TOP container $CONT; pane root ($PAX, $PAY); composer root ($CX, $CY)"
+# every row below rests the pointer on the pane: without its rectangle (the report's pane) or the composer's they prove nothing
+if [ "${PW:-0}" -le 0 ] || [ "${PH:-0}" -le 0 ] || [ -z "$CX" ] || [ "${CX:-0}" -le 0 ]; then
+  check "P0 the pane's and the composer's places are known" 0 "pane ${PW}x${PH} composer ($CX, $CY)"; finish_suite "embed_pointer_keys_e2e ($EMBED_MODE, case $CASE)"; exit 1
+fi
 say "after open"
 # the keyboard back to Backplane: a click in the composer
 python3 "$XINPUT_PY" click "$CX" "$CY" >/dev/null; sleep 1.2
