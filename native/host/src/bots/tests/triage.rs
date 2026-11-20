@@ -569,3 +569,42 @@ const QUIET: [&str; 10] = ["Nothing landed, and your build is unchanged. PR #136
     settle(&bots).await;
     assert!(log(&hub).iter().filter(|e| e["$"] == "MailPosted").count() > mails, "a Bash ask is still mail for the uberbot");
 }
+
+#[tokio::test] async fn an_ask_raised_inside_the_mailroom_is_never_mail_whatever_its_tool() {
+    // the Install Git loop's shape with any ask: a lane's ask filed as mail started a run, whose ask started a lane... Mail is the person's
+    // message or a report meant for the person; an ask of a lane, a run or a bot's own thread stays where it was raised.
+    let (hub, bots, _r, bub, _) = uber("askloop").await;
+    routine(&hub, &bub, "r1").await; until(&hub, |l| l.iter().any(|e| e["$"] == "RunSet")).await; settle(&bots).await;
+    let run = runs(&hub)[0]["thread"].as_str().unwrap().to_string();
+    turn(&hub, &run, "completed").await; until(&hub, |l| l.iter().filter(|e| e["$"] == "RunSet").count() == 2).await; settle(&bots).await;
+    let lane = runs(&hub)[1]["thread"].as_str().unwrap().to_string(); assert!(lane.starts_with(&format!("mailcoord-{bub}-")), "{lane}");
+    let mails = |hub: &Arc<Hub>| log(hub).iter().filter(|e| e["$"] == "MailPosted").count(); let m0 = mails(&hub);
+    hub.commit(&json!({"$":"AskOpened","id":"al","thread":lane,"kind":"approval","tool":"Bash","detail":"rm x","at":3})).await.unwrap();
+    settle(&bots).await;
+    assert_eq!(runs(&hub).len(), 2, "a lane's own Bash ask starts no run: {:?}", runs(&hub));
+    assert_eq!(mails(&hub), m0, "and files no mail");
+    // another bot's own thread: its ask stays there too
+    let r = rpc(&hub, "bots.create", json!({"name":"ada"})).await; let ada = r["bot"].as_str().unwrap().to_string();
+    let ada_th = bots.world().await.bot(&ada).unwrap().thread.clone();
+    hub.commit(&json!({"$":"AskOpened","id":"aa","thread":ada_th,"kind":"approval","tool":"Bash","detail":"rm y","at":4})).await.unwrap();
+    settle(&bots).await;
+    assert_eq!(runs(&hub).len(), 2, "a bot's own ask starts no run"); assert_eq!(mails(&hub), m0, "and files no mail");
+}
+
+#[tokio::test] async fn the_mailroom_starts_at_most_its_cap_of_runs_a_minute_and_keeps_the_rest_queued() {
+    // the loop breaker: whatever the shape of a new loop, a bot's mailroom starts at most RUN_CAP runs in a minute; the rest of the mail waits, filed
+    let cap = crate::bots::mail::route::RUN_CAP;
+    let (hub, bots, _r, bub, _) = uber("cap").await;
+    let n = cap + 5;
+    // each routine is a conversation of its own (an owner runs one input of a conversation at a time), so each could start a run
+    for i in 0..n { routine(&hub, &bub, &format!("r{i}")).await }
+    settle(&bots).await;
+    assert_eq!(runs(&hub).len(), cap, "{n} conversations' inputs in a minute: {cap} runs");
+    let w = (now_s() / 60).to_string(); let tripped = setting_of(&hub, &format!("mail.capped.{bub}"));
+    assert!(tripped == w || tripped == (now_s() / 60 - 1).to_string(), "the trip is recorded once, for its minute: {tripped}");
+    assert_eq!(log(&hub).iter().filter(|e| e["$"] == "SettingSet" && e["key"] == format!("mail.capped.{bub}")).count(), 1, "once a minute");
+    let queued: usize = bots.world().await.settings.iter().filter(|(k, _)| k.starts_with("triage.queue.")).map(|(_, v)| serde_json::from_str::<Vec<String>>(v).map_or(0, |q| q.len())).sum();
+    assert_eq!(queued, n - cap, "the mail over the cap waits in the owner's queues, none lost");
+    bots.queues_due().await; settle(&bots).await;
+    if now_s() / 60 == w.parse::<u64>().unwrap() { assert_eq!(runs(&hub).len(), cap, "within the same minute the tick starts nothing more") }
+}
