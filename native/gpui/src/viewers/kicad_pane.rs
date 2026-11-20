@@ -63,7 +63,10 @@ pub fn frame_for(open: &str) -> &'static str { match open { "schematic" => "SCH"
 /// (`unconfirmed`: no ET_FOCUS_IN since: on bp.13.2 Edit's first show can leave KiCad with no key window, and this re-show is what gets
 /// the keyboard across), KiCad is active now and no press in Backplane is under way (a click into Backplane at that moment kept its
 /// keyboard, the #1198 lane's HIDE_RACE). Another frame KiCad put on show: only while KiCad is active now and no press is under way.
-/// One rule for the tile contract's keys_wanted too.
+/// The hub's `focused` is KiCad's word only from a runtime with `embed-key-on-activate` (its focus event means the frame is key). On a
+/// runtime without it (bp.13.2) the hand-in is never confirmed, so a same-frame re-show hands in whenever KiCad is active and no press in
+/// Backplane is under way: main's repair, plus the guards. With KiCad active at the instant of a click into Backplane the re-show can still
+/// take the keyboard back there, until the pinned runtime has the capability. One rule for the tile contract's keys_wanted too.
 pub fn reshow_focus(person_chose: bool, same_frame: bool, unconfirmed: bool, kicad_active_now: bool, press_in_backplane: bool) -> bool {
     if person_chose { return true }
     if same_frame && !unconfirmed { return false }

@@ -1090,6 +1090,11 @@ fn put_route(s: &Session, tx: &mpsc::UnboundedSender<Msg>) {
     }
 }
 
+/// The window an ET_FOCUS_IN names, as the session's `focused` (#1362): only from a runtime whose focus event means the frame has the
+/// keyboard (`embed-key-on-activate`: macOS, the fork's key-on-activate fix). Without it an ET_FOCUS_IN can come from wx's focus while
+/// the frame is not key (bp.13.2: Edit's first show, traced on the mini), so it is never taken as the keyboard confirmed: 0.
+pub fn trusted_focus(caps: &[String], window: u64) -> u64 { if caps.iter().any(|c| c == "embed-key-on-activate") { window } else { 0 } }
+
 /// The client name of the hub's checks in the open KiCad (kicad/edchecks.rs): their requests are not counted as another client's.
 pub const CHECKS_CLIENT: &str = "hub:checks";
 /// Per GUI socket: the requests in flight from other clients than the checks, and when the last named client's began or ended (ms).
@@ -2344,7 +2349,9 @@ impl Actor {
                 self.publish(&snap, None);
             }
             Msg::Focused { pro, gen, window } => {
-                let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.is_live() && s.focused != window) else { return };
+                let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.is_live()) else { return };
+                let window = trusted_focus(&s.caps, window);
+                if s.focused == window { return }
                 s.focused = window;
                 let snap = s.clone();
                 self.publish(&snap, None);
@@ -3893,6 +3900,15 @@ mod tests {
         assert_eq!(unsaved_name(&f("*rc — Simulator")), "*rc — Simulator"); assert_eq!(unsaved_name(&f("")), "Simulation workbook");
         let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "SCH", 1, 0); s.frames.push(f(""));
         assert_eq!(s.unsaved_docs(), ["Simulation workbook"]);
+    }
+    #[test] fn focused_is_kicads_word_only_from_a_runtime_whose_focus_event_means_the_keyboard() {
+        // #1362: bp.13.2's ET_FOCUS_IN can come with the frame not key (Edit's first show): never the keyboard confirmed there
+        let without = vec!["embed-macos".to_string(), "embed-host-geometry".to_string()];
+        assert_eq!(trusted_focus(&without, 6240), 0, "no capability: focused stays 0 whatever ET_FOCUS_IN says");
+        assert_eq!(trusted_focus(&[], 6240), 0);
+        let with = vec!["embed-macos".to_string(), "embed-key-on-activate".to_string()];
+        assert_eq!(trusted_focus(&with, 6240), 6240, "with it: the frame's window, as before");
+        assert_eq!(trusted_focus(&with, 0), 0, "ET_FOCUS_OUT: 0 either way");
     }
     #[test] fn a_frameless_attach_of_a_project_opens_only_a_document_it_has() {
         // #1326 (c): an agent's or the hub's editor.kicad.attach with no frame, on a .kicad_pro or a project folder
