@@ -809,3 +809,303 @@ html.light .bp-code-block { background: var(--panel); }
   }
 }
 
+
+/* Web viewer pane + 1440 / 820 / 390 px responsive styles.
+   Auto-concatenated into web/dist/assets/style.css by web/build.ts.
+   Square corners, desktop palette tokens from assets/web/style.css. */
+
+.bp-viewer-pane {
+  display: flex;
+  flex-direction: column;
+  width: 48%;
+  min-width: 340px;
+  background: var(--panel);
+  border-left: 1px solid var(--rule);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.bp-vh {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--rule);
+  flex-shrink: 0;
+}
+
+.bp-vh-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.bp-vh-page {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.bp-vh-sep {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.bp-vh-file {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bp-vh-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.bp-v-btn {
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bp-v-btn:hover {
+  background: var(--raise);
+}
+
+.bp-v-btn.is-on,
+.bp-v-btn.is-primary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.bp-v-close {
+  width: 24px;
+  padding: 0;
+  text-align: center;
+}
+
+.bp-v-select {
+  height: 24px;
+  max-width: 140px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.bp-v-banner {
+  padding: 5px 10px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--bg);
+  border-bottom: 1px solid var(--rule);
+  flex-shrink: 0;
+}
+
+.bp-v-banner.is-warn {
+  color: #f59e0b;
+}
+
+.bp-v-stage-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.bp-v-stage {
+  position: absolute;
+  inset: 0;
+}
+
+.bp-v-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(20, 22, 26, 0.72);
+  z-index: 5;
+}
+
+html.light .bp-v-overlay {
+  background: rgba(245, 246, 248, 0.84);
+}
+
+.bp-v-state-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 320px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  text-align: center;
+}
+
+.bp-v-state-msg {
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-word;
+}
+
+.bp-v-info {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  max-width: calc(100% - 16px);
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  z-index: 6;
+}
+
+.bp-v-layers {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 220px;
+  max-height: calc(100% - 16px);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  z-index: 10;
+  overflow: hidden;
+}
+
+.bp-v-layers-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  border-bottom: 1px solid var(--rule);
+}
+
+.bp-v-layers-modes {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.bp-v-layers-list {
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.bp-v-layer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.bp-v-layer-row.is-focus {
+  background: var(--raise);
+}
+
+.bp-v-layer-swatch {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+}
+
+.bp-v-layer-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Tablet (820 px) ---- */
+@media (max-width: 900px) {
+  .bp-viewer-pane {
+    width: 52%;
+    min-width: 260px;
+  }
+  .bp-vh {
+    padding: 0 8px;
+    gap: 6px;
+  }
+  .bp-vh-file {
+    max-width: 110px;
+  }
+}
+
+/* ---- Phone (390 px) ---- */
+@media (max-width: 600px) {
+  .bp-viewer-pane {
+    position: fixed;
+    top: 36px;
+    bottom: 0;
+    left: 0;
+    right: 56px;
+    width: auto;
+    min-width: 0;
+    border-left: 0;
+    z-index: 25;
+  }
+  .bp-vh {
+    min-height: 40px;
+    padding: 4px 8px;
+    flex-wrap: wrap;
+  }
+  .bp-v-btn {
+    height: 30px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+  .bp-v-close {
+    width: 30px;
+  }
+  .bp-v-layers {
+    left: 8px;
+    right: 8px;
+    top: auto;
+    bottom: 8px;
+    width: auto;
+    max-height: 55%;
+  }
+}
+
