@@ -382,7 +382,7 @@ impl Backplane {
         };
         (consume, kept || lit.contains(&true) || consume, open.is_some() && !consume)
     }
-    fn clear_escape_probe(plots: [&mut crate::screens::plotview::PlotView; 3]) -> bool {
+    fn clear_escape_probe<'a>(plots: impl IntoIterator<Item = &'a mut crate::screens::plotview::PlotView>) -> bool {
         let mut cleared = false;
         for plot in plots {
             cleared |= plot.picked.take().is_some();
@@ -403,8 +403,7 @@ impl Backplane {
         let open = crate::screens::viewer::is_open(thread).then(|| thread["viewer"]["open"].as_str().unwrap_or(""));
         let split = if open == Some("split") { crate::screens::viewer::split_visible() } else { Vec::new() };
         let kept = thread["viewer"]["probe"].as_str().is_some_and(|p| !p.is_empty());
-        let [sch, pcb] = &self.screens.split_pv;
-        let lit = [&self.screens.plotview, sch, pcb].map(|p| p.picked.is_some() || p.card.is_some() || !p.lit.is_empty());
+        let lit = [0, 1, 2].map(|id| { let p = &self.screens.plots[id]; p.picked.is_some() || p.card.is_some() || !p.lit.is_empty() });
         let (consume, clear_all, close) = Self::escape_plan(open, thread["diff"].is_object(), &split, lit, kept,
             kept && !crate::screens::plotview::probed_part(self).is_empty());
         if !consume {
@@ -414,8 +413,7 @@ impl Backplane {
             if crate::screens::mgmt::escape(self, cx) { return true }
         }
         if clear_all {
-            let [sch, pcb] = &mut self.screens.split_pv;
-            Self::clear_escape_probe([&mut self.screens.plotview, sch, pcb]);
+            Self::clear_escape_probe(self.screens.plots.mounted());
             crate::screens::plotview::keep_probe(self, None);
         }
         if consume { return true }
