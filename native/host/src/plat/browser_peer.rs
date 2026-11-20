@@ -189,11 +189,26 @@ mod tests {
         let mut source = SocketAddr::from((Ipv4Addr::LOCALHOST, 0));
         let mut stale = None;
         for _ in 0..64 {
-            let socket = TcpSocket::new_v4().unwrap();
-            socket.set_reuseaddr(true).unwrap();
-            socket.set_linger(Some(std::time::Duration::ZERO)).unwrap();
-            socket.bind(source).unwrap();
-            let client = socket.connect(target).await.unwrap();
+            // Under load the kernel may not yet have released the previous tuple
+            // after the reset. Retry only that transient connect failure, always
+            // binding the same endpoint and retaining the previous descriptor.
+            let client = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                loop {
+                    let socket = TcpSocket::new_v4()?;
+                    socket.set_reuseaddr(true)?;
+                    socket.set_linger(Some(std::time::Duration::ZERO))?;
+                    socket.bind(source)?;
+                    match socket.connect(target).await {
+                        Err(e) if e.kind() == io::ErrorKind::AddrNotAvailable => {
+                            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                        }
+                        result => return result,
+                    }
+                }
+            })
+            .await
+            .expect("the exact tuple becomes reusable")
+            .unwrap();
             source = client.local_addr().unwrap();
             let (current, _) = listener.accept().await.unwrap();
             assert_eq!(peer_uid(target, source).unwrap(), unsafe {
