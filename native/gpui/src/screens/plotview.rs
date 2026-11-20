@@ -45,6 +45,7 @@ pub struct PlotView {
     pub boards: crate::viewers::boards::BoardsUi,
     /// The hub's probe this canvas last lit, with the source it was lit on ("<key>\u{1}<info>"): another source or another probe lights it again.
     pub probe_at: String,
+    pub restore_pick: Option<(String, super::plot::Pick)>,
     /// Follow agent: how many times a person's hand moved this canvas (screens::follow), and the focus the camera takes once its plot is drawn.
     pub hands: u32, pub follow_to: Option<([f32; 4], serde_json::Value)>,
     /// Per-window loading elapsed-time clock (scoped to this Backplane entity, never thread-local).
@@ -89,14 +90,17 @@ fn tess_ahead(this: &Entity<Backplane>, cx: &mut App, slot: usize, chunks: &[std
     this.update(cx, |app, cx| {
         let pv = app.screens.pv(slot);
         if pv.tess_ahead { return }
+        let source = pv.key.clone();
         pv.tess_ahead = true;
         let (w, h) = (f32::from(b.size.width), f32::from(b.size.height));
         let pad = tess_pad(w, h); let mut key = TessKey::of(chunks, order, &v, b, pad);
         let (chunks, order) = (chunks.to_vec(), order.to_vec());
+        let owner = app.screens.plots.owner.clone();
         cx.spawn(async move |weak, cx| {
             let (out, whole) = cx.background_executor().spawn(async move { tessellate(&chunks, &order, &v, b.origin, w, h, pad, None) }).await;
             if whole { key.pad = f32::INFINITY; }
             let _ = weak.update(cx, |app, cx| {
+                if app.screens.plots.owner != owner || app.screens.plots[slot].key != source { return }
                 let pv = app.screens.pv(slot); pv.tess_ahead = false;
                 // (a plot, zoom or canvas that changed meanwhile: these paths are of the old one, and the paint on show keeps its own)
                 if pv.tess.as_ref().map_or(true, |t| t.0.same_plot(&key)) { pv.tess = Some((key, std::rc::Rc::new(out))); cx.notify(); }
@@ -590,6 +594,9 @@ pub fn cross_probe(app: &mut Backplane, slot: usize, card: &super::plot::Card) {
 /// hub has none. Called while the page is drawn; the requests go out right after.
 pub fn probe_sync(cx: &mut Context<Backplane>, slot: usize, pv: &mut PlotView, key: &str, probe: &str) {
     let tag = format!("{key}\u{1}{probe}");
+    if let Some((saved, pick)) = pv.restore_pick.take() {
+        if saved == tag && !probe.is_empty() { pv.picked = Some(pick); }
+    }
     if pv.probe_at == tag || key.is_empty() { return }
     // a tap (or a clear) on its way to the hub: what this canvas shows is already that; the hub's older copy waits
     if let Some((sent, at)) = PROBE_SENT.lock().unwrap().clone() {
