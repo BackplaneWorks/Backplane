@@ -14,6 +14,7 @@ case "$1 $2" in
     [ "$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$head")" = "$sha" ] || { echo "head changed" >&2; exit 1; }
     [ "$(cat "$FAKE/mergestate" 2>/dev/null)" = CLEAN ] || { echo "not mergeable" >&2; exit 1; }
     git --git-dir="$ORIGIN" update-ref refs/heads/main "$sha" && touch "$FAKE/merged.$n" && echo "$n" >> "$FAKE/merges" ;;
+  "pr comment") n=$3; while [ $# -gt 0 ]; do [ "$1" = --body ] && printf '%s\n' "$2" >> "$FAKE/comments.$n"; shift; done ;;
   "pr edit") n=$3; while [ $# -gt 0 ]; do [ "$1" = --body ] && printf '%s' "$2" > "$FAKE/body.$n"; shift; done ;;
   *) echo "fake gh: unhandled: $*" >&2; exit 2 ;;
 esac

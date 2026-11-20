@@ -40,6 +40,7 @@ remove_nonce() {
   rmdir "$nonce" 2>/dev/null || :
 }
 holder="pid:$$@$host:${nonce##*/}"
+export BP_LOCK_NAME=$name BP_LOCK_HOLDER=$holder   # the command learns the lock it runs under and this holder's id (in the hub's lock list while held)
 wait=true; [ -z "$try" ] || wait=false
 body="{\"name\":\"$name\",\"holder\":\"$holder\",\"note\":\"bp-lock.sh\",\"wait\":$wait}"
 post() { printf 'Authorization: Bearer %s\n' "$token" | curl -fsS --connect-timeout 2 --max-time 35 -H @- -H 'Content-Type: application/json' -d "$body" "$url/lock/$1"; }
@@ -47,6 +48,7 @@ held() { printf '%s' "$1" | tr -d ' \n\r\t' | grep -q '"held":true'; }
 if ! answer=$(post acquire 2>/dev/null); then
   remove_nonce
   path="${BACKPLANE_LOCK_DIR:-/tmp}/bp-$name.lock"
+  export BP_LOCK_NAME=$name BP_LOCK_HOLDER="flock:$$"   # no hub answered: a local flock, which another machine's or a hub lane's hold cannot see
   if command -v flock >/dev/null 2>&1; then exec flock ${try:+-n -E 75} "$path" "$@"; fi
   # macOS has flock(2), but usually no flock(1).
   exec perl -MFcntl=:flock -e 'my $path = shift; my $nb = shift; open(my $f, ">>", $path) or die "$path: $!"; flock($f, LOCK_EX | ($nb ? LOCK_NB : 0)) or exit 75; $^F = fileno($f); exec @ARGV or die "exec: $!"' "$path" "$try" "$@"

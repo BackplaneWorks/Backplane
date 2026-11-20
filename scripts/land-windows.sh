@@ -89,6 +89,11 @@ IFS='|' read -r hosts shut extra <<EOF
 $(vm_row "$vm")
 EOF
 unavailable() { printf '%s' "$*" > "${LAND_WIN_WHY:-/dev/null}"; exit 75; }
+# A real VM only under a lock the hub granted: a local flock (no hub answered) cannot see a hub lane's hold on bp-win-ui or winbuild-vm, and the
+# gate must never run beside one (Nov 20: a test with a private lock folder ran the real gate on bp-win while Carbon held bp-win-ui).
+if [ "${1:-}" = --vm ] && [ -z "${LAND_WIN_SSH:-}" ] && [ -n "$extra" ]; then
+  case "${BP_LOCK_HOLDER:-}" in pid:*) ;; *) unavailable "its lock $extra is only a local flock (no hub answered), so a hub lane's hold on it cannot be seen; not run";; esac
+fi
 # Every exit (passed, failed, unavailable, cut off, a signal) ends here: the VM swept, the direct path's rule closed, a VM the gate started deallocated
 host=; rpid=; done_=; opened=; started=
 finish() {
