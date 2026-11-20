@@ -280,5 +280,19 @@ fn legacy_single_page_flows_match_origin_main_snapshot() {
     let raw = std::fs::read_to_string(&snap_path)
         .unwrap_or_else(|e| panic!("missing origin/main parity snapshot at {}: {e}", snap_path.display()));
     let expected: Value = serde_json::from_str(&raw).expect("valid snapshot JSON");
-    assert_eq!(actual, expected, "legacy single-page flows must match origin/main snapshot in full");
+    let mut diffs = Vec::new();
+    diff_paths(&expected, &actual, "", &mut diffs);
+    assert!(diffs.is_empty(), "legacy single-page flows must match the origin/main snapshot in full; differences (main vs branch):\n{}", diffs.join("\n"));
+}
+
+/// Every path where `main` and `branch` differ, with both values (the failure message names them, never a whole-document dump).
+fn diff_paths(main: &Value, branch: &Value, at: &str, out: &mut Vec<String>) {
+    match (main, branch) {
+        (Value::Object(a), Value::Object(b)) => {
+            for (k, v) in a { match b.get(k) { Some(w) => diff_paths(v, w, &format!("{at}/{k}"), out), None => out.push(format!("{at}/{k}: main {v} / branch <absent>")) } }
+            for (k, w) in b { if !a.contains_key(k) { out.push(format!("{at}/{k}: main <absent> / branch {w}")) } }
+        }
+        (Value::Array(a), Value::Array(b)) if a.len() == b.len() => { for (i, (v, w)) in a.iter().zip(b).enumerate() { diff_paths(v, w, &format!("{at}/{i}"), out) } }
+        (a, b) => { if a != b { out.push(format!("{at}: main {a} / branch {b}")) } }
+    }
 }

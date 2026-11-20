@@ -681,13 +681,13 @@ mod tests {
 
         let mut s_sp = json!({"sel":"t","rid":1,"drafts":{"@view:t":"split"},"panel":false,"info":{}});
         let mut l_sp = layout::derive_layout(&layout::DeriveInput { root: &root, open: "split", default_pcb: &format!("{root}/board.kicad_pcb"), default_sch: &format!("{root}/board.kicad_sch"), ..Default::default() });
-        l_sp.focus = Some("t2".into()); // Board focused, NOT Schematic!
+        l_sp.focus = Some("pcb".into()); // Board focused, NOT Schematic!
         s_sp["drafts"]["@view.layout:t"] = json!(serde_json::to_string(&l_sp).unwrap());
         let sh_sp = viewer::sheet_action_for(&st, "h", &s_sp, None, "en", &format!("{root}/power.kicad_sch")).unwrap();
         let viewer::LayoutOut::Ok(vo_shsp) = sh_sp else { panic!() };
         crate::session::patch::merge(&mut s_sp, &vo_shsp.patch);
         let v_shsp = viewer::viewer_json(&st, &json!({}), &s_sp).unwrap();
-        assert_eq!(v_shsp["tiles"]["t1"]["source"], "power.kicad_sch", "sheet change in stored Split with Board focused must update Schematic leaf");
+        assert_eq!(v_shsp["tiles"]["sch"]["source"], "power.kicad_sch", "sheet change in stored Split with Board focused must update Schematic leaf");
 
         // 16. Item 7: Old desktop answering hub-pushed agent show with plain `view` is idempotent
         let sess_old_files = json!({"sel":"t","rid":1,"drafts":{"@view:t":"files"},"panel":false,"info":{}});
