@@ -126,7 +126,7 @@ else:
         return [(int(w['number']), int(w['pid']), w['owner'], tuple(round(v) for v in w['bounds'])) for w in helper('windows') or [] if w['layer'] == 0]
 
     # macOS virtual key codes the checks use, to the keysym names the relay types (Screen Sharing: Super is Command)
-    KEYNAME = {1: 's', 0: 'a', 40: 'k', 53: 'escape', 11: 'b', 38: 'j', 8: 'c', 48: 'tab', 51: 'backspace', 3: 'f', 43: ',', 13: 'w', 36: 'return', 117: 'delete'}
+    KEYNAME = {1: 's', 0: 'a', 40: 'k', 53: 'escape', 11: 'b', 38: 'j', 8: 'c', 48: 'tab', 51: 'backspace', 3: 'f', 43: ',', 13: 'w', 36: 'return', 117: 'delete', 4: 'h', 122: 'f1'}
 
     def key(code, flags=0):
         mods = [m for m, bit in (('ctrl', CTRL), ('alt', ALT), ('shift', SHIFT), ('cmd', CMD)) if flags & bit]
@@ -323,7 +323,13 @@ def covering_windows():
     return [w for w in ws if 0 < w[1] < 1000 and w[0] != 'Dock' and w[2][2] >= 1000 and w[2][3] >= 600]
 
 
-# before anything starts: a covered screen fails now, with what covers it, not after a wait and a refused click
+# before anything starts: a system alert (a privacy prompt: KiCad's UI thread waits on its answer) fails the run now, by the Mac mini's
+# own pre-flight (~/bp-preflight.sh, ~/bp-test-setup.md "Privacy prompts (TCC)"); and a covered screen fails now, with what covers it
+_pf = os.path.expanduser('~/bp-preflight.sh')
+if DRIVER == 'vnc' and os.path.exists(_pf):
+    _r = subprocess.run(['sh', _pf], capture_output=True, text=True)
+    if _r.returncode != 0:
+        print(f'FAIL {(_r.stdout.strip() or _r.stderr.strip())[:300]}', flush=True); raise SystemExit(2)
 _cover = covering_windows()
 if _cover:
     os.makedirs(OUT, exist_ok=True)
@@ -336,6 +342,26 @@ hub = subprocess.Popen([HUB, '--home', os.path.join(OUT, 'home'), '--port', str(
                        env=env, stdout=open(os.path.join(OUT, 'hub.log'), 'w'), stderr=subprocess.STDOUT); procs.append(hub)
 wait_for(lambda: subprocess.run(['curl', '-s', '-m1', '-o', '/dev/null', f'http://127.0.0.1:{port}/hello']).returncode == 0, 30)
 script = [{"select": 0}, {"wait": 2500}, {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit"}, {"wait": 5400000 if os.environ.get("MAC_MODE") == "front" else 900000}]
+if os.environ.get('MAC_MODE') == 'auto':
+    # PR A of the default flip (fork embed, feat/kicad-auto-attach): an automatic attach never takes the keyboard. Marks pace the
+    # harness: it types between A_go/A_done and B_go/B_done, does the person's clicks in C, puts another app in front for D, and E is
+    # a deliberate Edit (the control). The first wait leaves the harness time to place the window and focus the composer
+    script = [{"wait": 9000}, {"mark": "base_go"}, {"wait": 3500}, {"read": "composer"}, {"mark": "base_done"},
+              {"select": 0}, {"press": "rail:Board"}, {"kicad": {"attach": "board", "why": "auto", "tag": "A_attach"}}, {"mark": "A_go"},
+              {"wait": 24000}, {"kicad": {"report": True, "tag": "A"}}, {"read": "composer"}, {"mark": "A_done"},
+              {"click": "ui:View"}, {"wait": 3000}, {"kicad": {"attach": "board", "why": "auto", "tag": "B_attach"}}, {"mark": "B_go"},
+              {"wait": 11000}, {"kicad": {"report": True, "tag": "B"}}, {"read": "composer"}, {"mark": "B_done"},
+              {"mark": "C_go"}, {"wait": 14000}, {"mark": "C_done"},
+              {"click": "ui:View"}, {"wait": 2000}, {"mark": "D_ready"}, {"wait": 7000},
+              {"kicad": {"attach": "board", "why": "auto", "tag": "D_attach"}}, {"mark": "D_go"}, {"wait": 8000}, {"mark": "D_done"},
+              {"wait": 9000}, {"mark": "E_go"}, {"wait": 900000}]
+    if os.environ.get('AUTO_E') == 'script':
+        # E-script: the harness's real click on Backplane's title bar at E_go, then the script's own Edit (kicad_edit -> deliberate)
+        script[-1:] = [{"wait": 4000}, {"click": "ui:Edit"}, {"mark": "E_edit"}, {"wait": 900000}]
+    if os.environ.get('AUTO_MAIN') == '1':
+        # the control for row E on a client without the automatic attach: the Board page, another app in front, then Edit
+        script = [{"wait": 9000}, {"select": 0}, {"wait": 2500}, {"press": "rail:Board"}, {"wait": 5000}, {"mark": "D_ready"}, {"wait": 7000},
+                  {"mark": "E_go"}, {"wait": 900000}]
 json.dump(script, open(os.path.join(OUT, 'script.json'), 'w'))
 cenv = dict(os.environ, HOME=os.path.join(OUT, 'fh'), BACKPLANE_GPUI_ASSETS=ASSETS, BACKPLANE_GPUI_RECTS='1', BACKPLANE_KICAD_DEBUG='1')
 client = subprocess.Popen([CLIENT, '--url', f'http://127.0.0.1:{port}', '--token-file', os.path.join(OUT, 'home/token'), '--script', os.path.join(OUT, 'script.json'), '--exit-after', '5400' if os.environ.get('MAC_MODE') in ('bs', 'narrow', 'libs', 'front') else '900'],
@@ -362,7 +388,11 @@ def backing_scale():
     """The client window's pixels per point: its own log says the pane in pixels (pane_px) beside the rect pushed to KiCad in points
     (1 on the e2e-macos runner, 2 on a Retina Mac: the mini's rects were twice their point positions and every rect click missed)."""
     s = 1.0
+    # before KiCad is attached there is no push: the client's own GPUI_RECT lines carry its scale
     for l in client_log().splitlines():
+        if l.startswith('GPUI_RECT ') and '"scale"' in l:
+            try: s = float(json.loads(l.split('GPUI_RECT ', 1)[1]).get('scale') or s)
+            except Exception: pass
         if '"kicad_host_push"' in l:
             try:
                 j = json.loads(l.split('GPUI_LOG ', 1)[1])
@@ -402,6 +432,19 @@ def notices_outside(tag, since_line=0):
     return out
 
 
+def rects_now():
+    """The client's control rects from its latest controls metric only (rects() keeps every id ever seen: a button gone since, such as
+    Edit once the pane is attached, kept its old rect, and a click there hit what is drawn there now), in window points."""
+    last = None
+    for l in client_log().splitlines():
+        if 'GPUI_METRIC ' in l and '"controls"' in l: last = l
+    if not last: return {}
+    k = backing_scale()
+    try: c = json.loads(last.split('GPUI_METRIC ', 1)[1]).get('controls', [])
+    except Exception: return {}
+    return {e['id']: {kk: v / k for kk, v in e['rect'].items()} for e in c if isinstance(e, dict) and e.get('rect') and e.get('visible', True)}
+
+
 def rects():
     """The client's control rects (BACKPLANE_GPUI_RECTS: lists of {id, x, y, w, h} in window pixels, from the content's top-left), latest,
     in window points."""
@@ -425,6 +468,294 @@ try:
     time.sleep(1.5)
     cw = next((w for w in wins() if w[1] == client.pid and w[0] == cw[0]), cw)
     print(f'client window now {cw and cw[3]}', flush=True)
+    # ---- MAC_MODE=auto (PR A of the default flip): an automatic attach of the embedded KiCad never takes the keyboard. A cold at
+    # thread-open, B warm after View; C the person's clicks (the pane gives KiCad the keys, Backplane's window takes them back); D another
+    # app in front when the attach fires; E a deliberate Edit with the Cmd+K palette round trip (controls, unchanged) ----
+    if os.environ.get('MAC_MODE') == 'auto':
+        import threading, re
+        if DRIVER == 'vnc':
+            import importlib
+            globals()['NSRunningApplication'] = importlib.import_module('AppKit').NSRunningApplication
+            globals()['Quartz'] = importlib.import_module('Quartz')
+        def metrics():
+            out = []
+            for l in client_log().splitlines():
+                if 'GPUI_METRIC ' in l and ('"event":"mark"' in l or '"event":"read"' in l or '"event":"click"' in l):
+                    try: out.append(json.loads(l.split('GPUI_METRIC ', 1)[1]))
+                    except Exception: pass
+            return out
+        def marked(name): return any(m.get('event') == 'mark' and m.get('name') == name for m in metrics())
+        def composer_at(name):
+            text = None
+            for m in metrics():
+                if m.get('event') == 'read' and m.get('what') == 'composer': text = m.get('text')
+                if m.get('event') == 'mark' and m.get('name') == name: break
+            return text
+        def between(a, b, pat):
+            on, hits = False, []
+            for l in client_log().splitlines():
+                if 'GPUI_METRIC ' in l and '"event":"mark"' in l:
+                    try: name = json.loads(l.split('GPUI_METRIC ', 1)[1]).get('name')
+                    except Exception: name = None
+                    if name == a: on = True
+                    if name == b and on: break
+                    continue
+                if on and re.search(pat, l): hits.append(l.strip()[:260])
+            return hits
+        _kp = [0, 0.0]
+        def kicad_pid():
+            if time.time() - _kp[1] < 1.0 and _kp[0]: return _kp[0]
+            pid = 0
+            for l in client_log().splitlines():
+                if l.startswith('GPUI_LOG {"kicad_info"'):
+                    try: pid = int(json.loads(l[9:]).get('pid') or 0) or pid
+                    except Exception: pass
+            _kp[0], _kp[1] = pid, time.time()
+            return pid
+        def frame_over_pane():
+            order = wins(); ours = next((i for i, w in enumerate(order) if w[0] == cw[0]), None)
+            if ours is None: return None
+            k = [w for w in order[:ours] if w[1] not in (client.pid, hub.pid) and 'kicad' in w[2].lower()]
+            return k[0] if k and order.index(k[0]) == ours - 1 else None
+        def type_paced(text, gap):
+            for ch in text:
+                if DRIVER == 'vnc': relay(op='text', text=ch)
+                else:
+                    for down in (True, False):
+                        e = Quartz.CGEventCreateKeyboardEvent(None, 0, down); Quartz.CGEventKeyboardSetUnicodeString(e, 1, ch); Quartz.CGEventSetFlags(e, 0)
+                        Quartz.CGEventPost(Quartz.kCGHIDEventTap, e)
+                time.sleep(gap)
+        class Sampler:
+            """Every 100 ms: is Backplane the active app, is KiCad (the pid the client last named), is `other` (D's app)."""
+            def __init__(self, other=None): self.rows, self.stop, self.other = [], threading.Event(), other
+            def run(self):
+                while not self.stop.is_set():
+                    kp = kicad_pid()
+                    self.rows.append((time.time(), active(client.pid), bool(kp) and active(kp), self.other and active(self.other)))
+                    time.sleep(0.1)
+            def __enter__(self): self.t = threading.Thread(target=self.run, daemon=True); self.t.start(); return self
+            def __exit__(self, *a): self.stop.set(); self.t.join(2)
+        def bad_lines(c):
+            out = {}
+            for what, pat in (('kicad_auto_keys_taken', r'kicad_auto_keys_taken'), ('a keys flip to KiCad', r'"kicad_keys_flip":\{"to":true'),
+                              ('a hand-in (yield, the focused show)', r'"kicad_mac_yield"'), ('a focus to a KiCad window', r'"kicad_mac_focus":\{[^}]*"ours":false'),
+                              ('kicad_auto_to_deliberate', r'kicad_auto_to_deliberate')):
+                out[what] = between(f'{c}_go', f'{c}_done', pat)
+            return out
+        class OrderDump:
+            """Every 250 ms (row A, fork embed's ask): each on-screen window at the normal level, front to back, with its owner, alpha and
+            bounds, and where KiCad's windows sit against Backplane's (-1 above it, +1 below it), into <out>/<c>-order.txt."""
+            def __init__(self, c): self.c, self.stop, self.rows = c, threading.Event(), []
+            def run(self):
+                f = open(os.path.join(OUT, f'{self.c}-order.txt'), 'w')
+                while not self.stop.is_set():
+                    ws = [w for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID) or [] if int(w.get('kCGWindowLayer', 0)) == 0]
+                    kp = kicad_pid(); ours = next((i for i, w in enumerate(ws) if int(w.get('kCGWindowNumber', 0)) == cw[0]), None)
+                    ks = [(i, int(w['kCGWindowNumber']), round(float(w.get('kCGWindowAlpha', 1)), 2), tuple(round(w['kCGWindowBounds'][k]) for k in ('X', 'Y', 'Width', 'Height')))
+                          for i, w in enumerate(ws) if kp and int(w.get('kCGWindowOwnerPID', 0)) == kp]
+                    row = (round(time.time() * 1000), ours, [(k[0] - ours if ours is not None else None,) + k[1:] for k in ks])
+                    self.rows.append(row); f.write(json.dumps(row) + '\n'); f.flush()
+                    time.sleep(0.25)
+                f.close()
+            def __enter__(self): self.t = threading.Thread(target=self.run, daemon=True); self.t.start(); return self
+            def __exit__(self, *a): self.stop.set(); self.t.join(2)
+            def summary(self):
+                n = len(self.rows); on = [r for r in self.rows if r[2]]; above = [r for r in on if any(k[0] is not None and k[0] < 0 for k in r[2])]
+                first = next((r for r in on), None); last = self.rows[-1] if self.rows else None
+                return f'{n} samples; KiCad window on screen in {len(on)}, above Backplane\'s window in {len(above)}; first on screen {first}; last {last}'
+        def run_case(c, text, gap):
+            check(bool(wait_for(lambda: marked(f'{c}_go'), 120, 0.1)), f'auto {c}: the case started (mark {c}_go)')
+            with Sampler() as smp, OrderDump(c) as od:
+                type_paced(text, gap)
+                typed_before_done = not marked(f'{c}_done')
+                if typed_before_done: shot(f'auto-{c}-typing')  # before the script's next step (A's is View, which hides the frame)
+                lastk = next((r for r in reversed(od.rows) if r[2]), None)
+                wait_for(lambda: marked(f'{c}_done'), 60, 0.2)
+            push = last_push(); fb = lastk and lastk[2] and lastk[2][0]
+            same = bool(push and fb and fb[0] == -1 and all(abs(a - b) <= 1 for a, b in zip(fb[3], push[0])))
+            check(typed_before_done, f'auto {c}: the typing ended inside the case\'s window (picture auto-{c}-typing.png taken before {c}_done)')
+            if c == 'A':
+                # PR #1400 (fork embed): exactly one geometry push that shows the frame (visible, changed) in A, at the final rect, equal to
+                # the window measured on screen; the settle re-send and the hidden pushes while KiCad starts are listed, not counted
+                pushes = []
+                for l in between('A_go', 'A_done', r'"kicad_host_push"'):
+                    try: pushes.append(json.loads(l.split('GPUI_LOG ', 1)[1]))
+                    except Exception: pass
+                shown = [p for p in pushes if p.get('visible') and p.get('changed')]
+                others = [(p.get('kicad_host_push'), 'visible' if p.get('visible') else 'hidden', 'settle' if p.get('settle') else 'changed' if p.get('changed') else '') for p in pushes if p not in shown]
+                print(f'INFO auto A pushes: shown {[p.get("kicad_host_push") for p in shown]}; others {others}', flush=True)
+                one = len(shown) == 1 and fb and all(abs(a - b) <= 1 for a, b in zip(shown[0]['kicad_host_push'], fb[3]))
+                check(bool(one), f'auto A: exactly one geometry push shows the frame, at the window\'s measured rect within 1 px ({len(shown)} shown pushes {[p.get("kicad_host_push") for p in shown]}; window {fb and fb[3]})')
+            check(same, f'auto {c}: at the typing\'s end KiCad\'s window is directly above Backplane\'s at the pane\'s rect within 1 px (window {fb and fb[3]}, pane {push and push[0]})')
+            print(f'INFO auto {c} window order: {od.summary()}', flush=True)
+            for l in client_log().splitlines():
+                if '"kicad_mac_plan"' in l: print(f'INFO auto {c} {l.strip()[:220]}', flush=True)
+            got = composer_at(f'{c}_done') or ''
+            f = frame_over_pane(); shot(f'auto-{c}')
+            ns = len(smp.rows); bp_off = [r for r in smp.rows if not r[1]]; kc_on = [r for r in smp.rows if r[2]]
+            att = re.findall(r'"kicad_attach":"[^"]*","why":"[^"]*"', client_log())[-1:]
+            print(f'INFO auto {c}: {ns} samples; Backplane not active in {len(bp_off)}, KiCad active in {len(kc_on)}; composer {got[-70:]!r}; attach {att}', flush=True)
+            check(got.endswith(text), f'auto {c}: every key typed landed in the composer ({len(text)} keys)')
+            check(ns >= 30 and not bp_off, f'auto {c}: Backplane is the active app at every 100 ms sample ({ns} samples, {len(bp_off)} not)')
+            check(not kc_on, f'auto {c}: KiCad is never the active app ({len(kc_on)} samples)')
+            for what, hits in bad_lines(c).items():
+                check(not hits, f'auto {c}: no {what} before the typing ends ({len(hits)}{": " + hits[0] if hits else ""})')
+        def do_E():
+            # E (fork embed's ask): another app in front (Calculator, from D), then as a person: a real click on Backplane's title bar, then a
+            # real click on Edit. The time to KiCad active and to keys on the canvas; then Cmd+K -> palette -> Escape -> Cmd+A (Lane M's)
+            check(bool(wait_for(lambda: marked('E_go'), 60, 0.1)), 'auto E: the client script reached E_go')
+            calc_front = any(w[2] == 'Calculator' for w in wins())
+            b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + 120, b[1] + 12)
+            bp = wait_for(lambda: active(client.pid), 4, 0.1)
+            check(bool(bp), f'auto E: a real click on Backplane\'s title bar makes it the active app (Calculator open {calc_front})')
+            n_log = len(client_log().splitlines()); var = os.environ.get('AUTO_E', 'button')
+            if var == 'script':
+                check(bool(wait_for(lambda: marked('E_edit'), 20, 0.05)), 'auto E-script: the script pressed Edit (kicad_edit)'); t0 = time.time()
+            elif var in ('pane', 'mainpane'):
+                if var == 'mainpane':
+                    # main's control (fork embed): a deliberate Edit, then a click in Backplane, then the click in KiCad's frame is the act
+                    r = wait_for(lambda: rects_now().get('ui:Edit'), 10, 0.3)
+                    if not r: check(False, 'auto E-mainpane: no Edit button in the latest controls'); return
+                    b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2)
+                    check(bool(wait_for(lambda: kicad_pid() and active(kicad_pid()), 20, 0.1)), 'auto E-mainpane: Edit gives KiCad the keyboard')
+                    time.sleep(1.0); b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + 200, b[1] + 28 + 300)
+                    check(bool(wait_for(lambda: active(client.pid), 4, 0.1)), 'auto E-mainpane: a click in Backplane takes the keyboard back')
+                    time.sleep(1.0); n_log = len(client_log().splitlines())
+                kp = kicad_pid()
+                ws = [w for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID) or []
+                      if int(w.get('kCGWindowLayer', 0)) == 0 and int(w.get('kCGWindowOwnerPID', 0)) == kp]
+                if not ws: check(False, 'auto E-pane: no KiCad window on screen to click'); return
+                fb = [round(ws[0]['kCGWindowBounds'][k]) for k in ('X', 'Y', 'Width', 'Height')]; t0 = time.time()
+                click(fb[0] + fb[2] * 0.5, fb[1] + fb[3] * 0.5)
+            else:
+                r = wait_for(lambda: rects_now().get('ui:Edit'), 10, 0.3)
+                if not r: check(False, f'auto E: no Edit button in the latest controls ({sorted(k for k in rects_now() if k.startswith("ui:V") or k.startswith("ui:E"))})'); return
+                b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; t0 = time.time()
+                click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2)
+            def first_after(pat):
+                for l in client_log().splitlines()[n_log:]:
+                    if re.search(pat, l): return l.strip()[:200]
+            got = wait_for(lambda: kicad_pid() and active(kicad_pid()), 20, 0.1); t_act = round(time.time() - t0, 1) if got else None
+            print(f'INFO auto E ({var}): first yield after the act: {first_after(r"kicad_mac_yield")}; deliberate: {first_after(r"kicad_auto_to_deliberate")}; '
+                  f'taken: {first_after(r"kicad_auto_keys_taken")}', flush=True)
+            kp = kicad_pid()
+            check(bool(got) and t_act <= 8, f'auto E ({var}): the deliberate act gives KiCad the keyboard within 8 s ({t_act} s)')
+            n0 = hub_log().count('ET_SELECTION_CHANGED'); took = None
+            while time.time() - t0 < 20 and took is None:
+                key(K_A, CMD); time.sleep(0.4)
+                if hub_log().count('ET_SELECTION_CHANGED') > n0: took = round(time.time() - t0, 1)
+            key(K_ESC); time.sleep(0.6)
+            RES['auto_E_active_s'], RES['auto_E_keys_s'] = t_act, took
+            check(took is not None and took <= 9, f'auto E: after Edit, typing reaches the canvas ({took} s after the click on Edit)')
+            k0 = client_log().count('"kicad_key"'); key(K_K, CMD)
+            check(bool(wait_for(lambda: client_log().count('"kicad_key"') > k0, 5)) and bool(wait_for(lambda: active(client.pid), 3)), 'auto E: Cmd+K in KiCad opens the palette in Backplane')
+            key(K_ESC)
+            check(bool(wait_for(lambda: active(kp), 4)), 'auto E: Escape closes the palette and the keyboard is back in KiCad')
+            n0 = hub_log().count('ET_SELECTION_CHANGED'); key(K_A, CMD)
+            check(bool(wait_for(lambda: hub_log().count('ET_SELECTION_CHANGED') > n0, 4)), 'auto E: and KiCad\'s canvas takes keys again (Cmd+A)')
+            key(K_ESC)
+            subprocess.run(['osascript', '-e', 'tell application "Calculator" to quit'])
+        if os.environ.get('AUTO_MAIN') == '1':
+            check(bool(wait_for(lambda: marked('D_ready'), 60, 0.1)), 'auto (main control): the Board page is open')
+            if os.environ.get('AUTO_E') != 'mainpane':
+                subprocess.run(['open', '-a', 'Calculator']); time.sleep(2)
+                calc = next((w for w in wins() if w[2] == 'Calculator'), None)
+                check(bool(calc) and bool(wait_for(lambda: active(calc[1]), 5, 0.1)), 'auto (main control): Calculator is the frontmost app')
+            do_E()
+            raise SystemExit(1 if FAILS else 0)
+        # the window placed: the composer has the keyboard and Backplane is the active app before anything (else the cases prove nothing)
+        r = rects().get('send'); b = next((w for w in wins() if w[0] == cw[0]), cw)[3]
+        if r: click(b[0] + r['x'] - 120, b[1] + 28 + r['y'] - 38); time.sleep(0.6)
+        check(bool(wait_for(lambda: marked('base_go'), 60, 0.1)), 'auto: the client script reached base_go')
+        type_paced('ok ', 0.15); wait_for(lambda: marked('base_done'), 30, 0.2)
+        base = composer_at('base_done')
+        check(base == 'ok ' and active(client.pid), f'auto: the composer has the keyboard and Backplane is active before any attach (control) ({base!r})')
+        A_TEXT = 'the quick brown fox jumps over the lazy dog while kicad starts'
+        B_TEXT = ' and keeps typing while it shows again'
+        run_case('A', A_TEXT, 0.25)
+        starting = between('A_go', 'A_done', r'"kicad_info":"[0-9a-f]*","gone":false,"state":"starting"')
+        first = [l for l in open(os.path.join(OUT, 'kicad-embed-trace.log'), errors='replace') if 'first frame shown' in l] if os.path.exists(os.path.join(OUT, 'kicad-embed-trace.log')) else []
+        check(bool(starting), f'auto A: cold, KiCad started inside the typing window ({len(starting)} starting infos; {first[0].strip()[:90] if first else "no first-frame line"})')
+        if any(r for r in bad_lines('A')['kicad_auto_keys_taken']) or any(r for r in bad_lines('A')['a keys flip to KiCad']):
+            print('INFO auto: the cold case shows KiCad taking the keyboard: stopping here (the fork asked for the trace first)', flush=True)
+            raise SystemExit(1)
+        run_case('B', B_TEXT, 0.22)
+        # C: the person's acts. A click in the pane gives KiCad the keys; a click in Backplane's window gives them back
+        check(bool(wait_for(lambda: marked('C_go'), 60, 0.1)), 'auto C: the case started')
+        if os.environ.get('AUTO_NEG') == '1':
+            # C's negative case (PR #1400, Integrator): a click in Backplane's composer, then within ~0.5 s KiCad made active from outside,
+            # with no click in its frame: kicad_auto_keys_taken, and no kicad_auto_to_deliberate
+            kp = kicad_pid(); app = os.path.join(RT, 'KiCad.app')
+            def kicads(): return [l for l in subprocess.run(['ps', '-axo', 'pid=,command='], capture_output=True, text=True).stdout.splitlines() if OUT in l and 'kicad' in l.lower() and '-cli' not in l]
+            k0 = kicads(); n_log = len(client_log().splitlines())
+            r = rects().get('send'); b = next((w for w in wins() if w[0] == cw[0]), cw)[3]
+            click(b[0] + r['x'] - 120, b[1] + 28 + r['y'] - 38) if r else click(b[0] + 200, b[1] + 28 + 300)
+            time.sleep(0.3); how = None
+            a = NSRunningApplication.runningApplicationWithProcessIdentifier_(kp)
+            if a: a.activateWithOptions_(2)   # NSApplicationActivateIgnoringOtherApps
+            if wait_for(lambda: active(kp), 0.6, 0.05): how = 'NSRunningApplication activate by pid'
+            else:
+                subprocess.run(['open', '-a', app]); time.sleep(0.2)
+                if wait_for(lambda: active(kp), 1.0, 0.05): how = f'open -a {app}'
+            k1 = kicads(); extra = [l for l in k1 if l not in k0]
+            for l in extra:
+                try: os.kill(int(l.split()[0]), 15)
+                except Exception: pass
+            time.sleep(1.0)
+            seq = [l.strip()[:200] for l in client_log().splitlines()[n_log:] if re.search(r'kicad_auto_keys_taken|kicad_auto_to_deliberate|"kicad_keys_flip":\{"to":true', l)]
+            print(f'INFO auto C-negative: KiCad made active by {how}; new KiCad processes {len(extra)}; {seq[:3]}', flush=True)
+            if how is None or extra:
+                print(f'INFO auto C-negative: not stageable ({"no method made KiCad active" if how is None else "open -a started a second KiCad"})', flush=True)
+            else:
+                check(any('kicad_auto_keys_taken' in l for l in seq), f'auto C-negative: KiCad active without a click in its frame logs kicad_auto_keys_taken ({how})')
+                check(not any('kicad_auto_to_deliberate' in l for l in seq), 'auto C-negative: and no kicad_auto_to_deliberate')
+            b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + 120, b[1] + 12); wait_for(lambda: active(client.pid), 4, 0.1)
+        kp = kicad_pid(); f = frame_over_pane()
+        if f:
+            click(f[3][0] + f[3][2] * 0.5, f[3][1] + f[3][3] * 0.5); time.sleep(0.4)
+            check(bool(wait_for(lambda: active(kp), 4, 0.1)), 'auto C: a click in the pane gives KiCad the keyboard (KiCad active)')
+            time.sleep(0.5)
+            seq = between('C_go', 'C_done', r'kicad_auto_to_deliberate|kicad_auto_keys_taken|"kicad_keys_flip":\{"to":true')
+            kinds = ['deliberate' if 'kicad_auto_to_deliberate' in l else 'taken' if 'kicad_auto_keys_taken' in l else 'flip' for l in seq]
+            print(f'INFO auto C: {[l[:160] for l in seq[:3]]}', flush=True)
+            check('taken' not in kinds, f'auto C: the person\'s click is not counted as KiCad taking the keyboard (no kicad_auto_keys_taken; {kinds})')
+            # the keys-flip debug line is printed before the detector runs in the same tick (fork embed): the order does not matter
+            check('deliberate' in kinds, f'auto C: the click is the person\'s (kicad_auto_to_deliberate logged; {kinds})')
+            key(K_ESC); time.sleep(0.6)
+            b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + 200, b[1] + 28 + 300)
+            check(bool(wait_for(lambda: active(client.pid) and not active(kp), 4, 0.1)), 'auto C: a click in Backplane\'s window gives the keyboard back to Backplane')
+        else: check(False, 'auto C: no KiCad frame over the pane to click')
+        # D: another app in front (Calculator: TextEdit opens its file panel) when the automatic attach fires
+        check(bool(wait_for(lambda: marked('D_ready'), 60, 0.1)), 'auto D: the case is ready (View closed)')
+        subprocess.run(['open', '-a', 'Calculator']); time.sleep(2)
+        calc = next((w for w in wins() if w[2] == 'Calculator'), None); cpid = calc and calc[1]
+        check(bool(calc) and bool(wait_for(lambda: active(cpid), 5, 0.1)), f'auto D: Calculator is the frontmost app before the attach ({calc and calc[3]})')
+        over = []
+        def kicad_over_calc():
+            order = wins(); ci = next((i for i, w in enumerate(order) if calc and w[0] == calc[0]), None)
+            if ci is None: return
+            cb = order[ci][3]
+            for w in order[:ci]:
+                if w[1] == kicad_pid() and w[3][0] < cb[0] + cb[2] and cb[0] < w[3][0] + w[3][2] and w[3][1] < cb[1] + cb[3] and cb[1] < w[3][1] + w[3][3]: over.append(w)
+        check(bool(wait_for(lambda: marked('D_go'), 30, 0.05)), 'auto D: the automatic attach fired (mark D_go)')
+        with Sampler(cpid) as smp:
+            end = time.time() + 7
+            while time.time() < end and not marked('D_done'): kicad_over_calc(); time.sleep(0.2)
+        ns = len(smp.rows)
+        pol = None
+        try: a = NSRunningApplication.runningApplicationWithProcessIdentifier_(kicad_pid()); pol = a and int(a.activationPolicy())
+        except Exception as e: pol = f'unread ({e})'
+        print(f'INFO auto D: {ns} samples; Calculator not active in {len([r for r in smp.rows if not r[3]])}, Backplane active in {len([r for r in smp.rows if r[1]])}, KiCad active in {len([r for r in smp.rows if r[2]])}; KiCad activation policy {pol} (0 regular: a Dock icon, 1 accessory, 2 prohibited)', flush=True)
+        check(ns >= 30 and all(r[3] for r in smp.rows), 'auto D: Calculator stays the active app at every sample')
+        check(not any(r[1] for r in smp.rows), 'auto D: Backplane does not become active')
+        check(not any(r[2] for r in smp.rows), 'auto D: KiCad does not become active')
+        check(not over, f'auto D: KiCad\'s frame does not come over Calculator ({len(over)}{": " + str(over[0][3]) if over else ""})')
+        check(pol in (1, 2), f'auto D: no KiCad icon in the Dock (activation policy {pol})')
+        print('INFO auto D: a Dock bounce: unavailable (the harness cannot see the Dock\'s icons)', flush=True)
+        for what, hits in bad_lines('D').items():
+            check(not hits, f'auto D: no {what} ({len(hits)}{": " + hits[0] if hits else ""})')
+        do_E()
+        raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=docs: a project kept in ~/Documents (the lead's OK: exactly ~/Documents/bp-gate-docs-test/, removed after): macOS asks
     # Backplane for the Documents folder; while it waits the pane says so, the hub does not restart KiCad, there is one KiCad; then the
     # answer (DOCS_ANSWER allow|deny): Allow, the editor opens; Don't Allow, the pane says what to do instead of hanging ----
@@ -1000,6 +1331,159 @@ try:
         check(bool(pics) and all(v == 'board' for v in pics), f'swap E: after the reconnect every picture keeps the Board viewer open (#1225; {len(pics)} pictures, not board: {[v for v in pics if v != "board"][:3]})')
         press_rect('kicad:full'); time.sleep(1.0)
         raise SystemExit(1 if FAILS else 0)
+    # ---- MAC_MODE=clicks (bp.13.3 b2's failing embed check, issues lead): with Backplane active and KiCad's frame shown but KiCad not the
+    # active app, (1) a right click on KiCad's canvas opens its context menu above everything (a KiCad window above the normal level)
+    # within 3 s; (2) a left click on a board item selects it (ET_SELECTION_CHANGED), not only activates KiCad. CLICKS_N runs of each.
+    # Each says KiCad's active state before the click, whether TakeFocusForClick was entered (BACKPLANE_KICAD_EMBED_TRACE), the time ----
+    if os.environ.get('MAC_MODE') == 'clicks':
+        if DRIVER == 'vnc':
+            import importlib
+            globals()['NSRunningApplication'] = importlib.import_module('AppKit').NSRunningApplication
+        TR = os.path.join(OUT, 'kicad-embed-trace.log'); N = int(os.environ.get('CLICKS_N', '3'))
+        def trace_since(t):
+            out = []
+            if os.path.exists(TR):
+                for l in open(TR, errors='replace'):
+                    try: ts = float(l.split(' ', 1)[0])
+                    except ValueError: continue
+                    if ts >= t - 0.05 and re.search(r'TakeFocus|key window|did become|did resign|context|menu', l): out.append(l.strip()[:200])
+            return out
+        def menus():
+            ws = helper('windows') if DRIVER == 'vnc' else [{'pid': w.get('kCGWindowOwnerPID'), 'layer': w.get('kCGWindowLayer', 0), 'bounds': [w['kCGWindowBounds'][k] for k in ('X', 'Y', 'Width', 'Height')]}
+                                                              for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID) or []]
+            return [(int(w.get('layer', 0)), [round(v) for v in w['bounds']]) for w in ws or [] if int(w.get('pid', 0)) == kpid and int(w.get('layer', 0)) > 0]
+        def deactivate_kicad():
+            b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + 200, b[1] + 28 + 300)
+            return bool(wait_for(lambda: active(client.pid) and not active(kpid), 4, 0.1))
+        import re
+        P = last_push()[0]; cx, cy = P[0] + P[2] * 0.5, P[1] + P[3] * 0.5
+        rows = []
+        for i in range(1, N + 1):
+            ok_setup = deactivate_kicad(); before = active(kpid); time.sleep(0.5)
+            t0 = time.time(); click(cx + 40, cy + 60, 'right')
+            got = wait_for(lambda: menus(), 3, 0.05); dt = round(time.time() - t0, 2) if got else None
+            tl = trace_since(t0); entered = any('TakeFocusForClick entered' in l for l in tl)
+            rows.append(('right', i, before, entered, bool(got), dt, got))
+            print(f'INFO clicks right #{i}: setup ok {ok_setup}; KiCad active before {before}; TakeFocusForClick entered {entered}; menu {got} after {dt} s', flush=True)
+            for l in tl: print(f'INFO clicks right #{i}   {l}', flush=True)
+            check(bool(got), f'clicks: right click #{i} opens KiCad\'s context menu above everything within 3 s (layer {[g[0] for g in got] if got else []}; KiCad active before {before}; TakeFocusForClick {entered})')
+            key(K_ESC); wait_for(lambda: not menus(), 2, 0.1); time.sleep(0.4)
+        for i in range(1, N + 1):
+            ok_setup = deactivate_kicad(); before = active(kpid); time.sleep(0.5)
+            n0 = hub_log().count('ET_SELECTION_CHANGED'); t0 = time.time(); click(cx, cy)
+            got = wait_for(lambda: hub_log().count('ET_SELECTION_CHANGED') > n0, 3, 0.05); dt = round(time.time() - t0, 2) if got else None
+            tl = trace_since(t0); entered = any('TakeFocusForClick entered' in l for l in tl)
+            rows.append(('left', i, before, entered, bool(got), dt, None))
+            print(f'INFO clicks left #{i}: setup ok {ok_setup}; KiCad active before {before}; TakeFocusForClick entered {entered}; selection {bool(got)} after {dt} s; KiCad active after {active(kpid)}', flush=True)
+            for l in tl: print(f'INFO clicks left #{i}   {l}', flush=True)
+            check(bool(got), f'clicks: left click #{i} on a board item selects it within 3 s (KiCad active before {before}; TakeFocusForClick {entered})')
+            key(K_ESC); time.sleep(0.6)
+        RES['clicks'] = rows
+        raise SystemExit(1 if FAILS else 0)
+    # ---- MAC_MODE=held (KiCad lead's row 1j with the #1198 press hand-in): from KiCad inactive, (R) a right click held 300 ms opens
+    # KiCad's context menu and it stays after the release, Escape closes it, Cmd+A then reaches the canvas; (D) a drag from empty canvas
+    # selects and edits nothing; (L) a left click held 300 ms on a board item selects it and leaves KiCad active. Each from two starts:
+    # plain (a click in Backplane) and after Cmd+H with Backplane focused and the unhide. Every press is said with the client's
+    # kicad_mac_press_hand_in lines it brought (macOS 15: one; 26.5: none, AppKit activates KiCad itself) ----
+    if os.environ.get('MAC_MODE') == 'held':
+        import re
+        if DRIVER == 'vnc':
+            import importlib
+            globals()['NSRunningApplication'] = importlib.import_module('AppKit').NSRunningApplication
+            KEYNAME[4] = 'h'  # Cmd+H through the relay
+        P = last_push()[0]
+        def at(fx, fy): return (P[0] + P[2] * fx, P[1] + P[3] * fy)
+        def menus():
+            ws = helper('windows') if DRIVER == 'vnc' else [{'pid': w.get('kCGWindowOwnerPID'), 'layer': w.get('kCGWindowLayer', 0)} for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID) or []]
+            return [int(w.get('layer', 0)) for w in ws or [] if int(w.get('pid', 0)) == kpid and int(w.get('layer', 0)) > 0]
+        def hold(x, y, button, secs=0.3):
+            _guard(x, y, 'a held click')
+            if DRIVER == 'vnc': relay(op='press', x=x, y=y, button=1 if button == 'left' else 3, seconds=secs); return
+            down, up, b = (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp, Quartz.kCGMouseButtonLeft) if button == 'left' else (Quartz.kCGEventRightMouseDown, Quartz.kCGEventRightMouseUp, Quartz.kCGMouseButtonRight)
+            pt = Quartz.CGPointMake(x, y)
+            for k in (Quartz.kCGEventMouseMoved, down): Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, k, pt, b)); time.sleep(0.03)
+            time.sleep(secs); Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, up, pt, b))
+        def drag(x0, y0, x1, y1, secs=0.6):
+            _guard(x0, y0, 'a drag')
+            if DRIVER == 'vnc': relay(op='drag', x0=x0, y0=y0, x1=x1, y1=y1, seconds=secs); return
+            b = Quartz.kCGMouseButtonLeft
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, Quartz.CGPointMake(x0, y0), b))
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseDown, Quartz.CGPointMake(x0, y0), b))
+            for i in range(1, 13):
+                t = i / 12; Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseDragged, Quartz.CGPointMake(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t), b)); time.sleep(secs / 12)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseUp, Quartz.CGPointMake(x1, y1), b))
+        def ev_since(n, kind):
+            out = []
+            for l in hub_log().splitlines()[n:]:
+                m = re.search(r'kicad embed event: (\{.*\})', l)
+                if m and f'"{kind}"' in l:
+                    try: out.append(json.loads(m.group(1)))
+                    except ValueError: pass
+            return out
+        def handins_since(n): return sum(1 for l in client_log().splitlines()[n:] if '"kicad_mac_press_hand_in"' in l)
+        def backplane_click():
+            b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + 200, b[1] + 28 + 300)
+            return bool(wait_for(lambda: active(client.pid) and not active(kpid), 4, 0.1))
+        def unhide():
+            a = NSRunningApplication.runningApplicationWithProcessIdentifier_(client.pid); a.unhide(); time.sleep(0.4); a.activateWithOptions_(0)
+            if not wait_for(lambda: active(client.pid), 2, 0.1):
+                if DRIVER == 'quartz': osa(f'tell application "System Events" to set frontmost of (first process whose unix id is {client.pid}) to true')
+                else: b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + 120, b[1] + 12)
+            return bool(wait_for(lambda: active(client.pid), 5, 0.1)) and bool(wait_for(kicad_frame, 10, 0.1))
+        def start(how):
+            ok = backplane_click()
+            if how == 'unhide':
+                key(4, CMD); gone = wait_for(lambda: not any(w[0] == cw[0] for w in wins()), 5, 0.1)
+                ok = ok and bool(gone) and unhide()
+            time.sleep(0.6)
+            return ok and active(client.pid) and not active(kpid)
+        # an empty point of the canvas for the drag (a drag that starts on an item moves it): probe clicks with KiCad active
+        key(K_ESC); time.sleep(0.4)
+        empty = None
+        # right of the board's middle first: the drag goes right to left (KiCad's crossing selection takes what it touches; left to right
+        # takes only what it encloses)
+        for fx, fy in ((0.88, 0.92), (0.88, 0.30), (0.70, 0.25), (0.50, 0.95), (0.12, 0.92), (0.12, 0.30), (0.30, 0.25)):
+            x, y = at(fx, fy); n0 = len(hub_log().splitlines()); click(x, y); time.sleep(1.0)
+            sels = ev_since(n0, 'ET_SELECTION_CHANGED')
+            if not any((e.get('selection') or {}).get('references') for e in sels): empty = (fx, fy); break
+            key(K_ESC); time.sleep(0.5)
+        print(f'INFO held: an empty canvas point for the drag {empty}', flush=True)
+        for how in ('plain', 'unhide'):
+            # R: a held right click: the menu opens, stays after the release, Escape closes it, Cmd+A reaches the canvas
+            ok = start(how); n0 = len(client_log().splitlines()); h0 = len(hub_log().splitlines()); x, y = at(0.58, 0.62)
+            hold(x, y, 'right'); t0 = time.time()
+            m = wait_for(lambda: menus(), 3, 0.05); dt = round(time.time() - t0, 2) if m else None; time.sleep(1.0); stays = bool(menus())
+            key(K_ESC); closed = bool(wait_for(lambda: not menus(), 3, 0.05)); time.sleep(0.4)
+            s0 = hub_log().count('ET_SELECTION_CHANGED'); key(K_A, CMD); keys = bool(wait_for(lambda: hub_log().count('ET_SELECTION_CHANGED') > s0, 4, 0.1)); key(K_ESC); time.sleep(0.5)
+            hi = handins_since(n0)
+            print(f'INFO held R ({how}): start ok {ok}; menu {m} after {dt} s, still up a second after the release {stays}; Escape closed it {closed}; Cmd+A reached the canvas {keys}; press hand-ins {hi}', flush=True)
+            check(ok, f'held R ({how}): KiCad inactive and Backplane active before the right click')
+            check(bool(m) and stays, f'held R ({how}): a held right click opens KiCad\'s context menu and it stays after the release (layer {m}, {dt} s)')
+            check(closed and keys, f'held R ({how}): Escape closes the menu and Cmd+A then reaches the canvas')
+            check(hi <= 1, f'held R ({how}): at most one press hand-in for the press ({hi})')
+            # D: a drag from empty canvas: selects, edits nothing
+            if empty:
+                ok = start(how); n0 = len(client_log().splitlines()); h0 = len(hub_log().splitlines())
+                x0, y0 = at(*empty); x1, y1 = at(min(0.35, empty[0] - 0.3), 0.5); drag(x0, y0, x1, y1); time.sleep(1.5)
+                sels = ev_since(h0, 'ET_SELECTION_CHANGED'); edits = ev_since(h0, 'ET_DOCUMENT_EDITED'); hi = handins_since(n0)
+                refs = max((len((e.get('selection') or {}).get('references') or []) for e in sels), default=0)
+                print(f'INFO held D ({how}): start ok {ok}; selection events {len(sels)} (most {refs} refs); edits {len(edits)}; press hand-ins {hi}; KiCad active {active(kpid)}', flush=True)
+                check(ok, f'held D ({how}): KiCad inactive and Backplane active before the drag')
+                check(refs > 0 and not edits, f'held D ({how}): a drag from empty canvas selects ({refs} refs) and edits nothing ({len(edits)} edits)')
+                check(hi <= 1, f'held D ({how}): at most one press hand-in for the press ({hi})')
+                key(K_ESC); time.sleep(0.5)
+            else: check(False, f'held D ({how}): no empty canvas point found for the drag')
+            # L: a held left click on a board item: selects it, KiCad active after
+            ok = start(how); n0 = len(client_log().splitlines()); h0 = len(hub_log().splitlines()); x, y = at(0.5, 0.5)
+            hold(x, y, 'left'); time.sleep(1.0)
+            sels = ev_since(h0, 'ET_SELECTION_CHANGED'); edits = ev_since(h0, 'ET_DOCUMENT_EDITED'); hi = handins_since(n0); act = bool(wait_for(lambda: active(kpid), 2, 0.1))
+            print(f'INFO held L ({how}): start ok {ok}; selection {[(e.get("selection") or {}).get("references") for e in sels][:2]}; edits {len(edits)}; KiCad active {act}; press hand-ins {hi}', flush=True)
+            check(ok, f'held L ({how}): KiCad inactive and Backplane active before the held left click')
+            check(any((e.get('selection') or {}).get('references') for e in sels) and not edits and act, f'held L ({how}): a held left click selects the item, edits nothing, and KiCad has the keyboard')
+            check(hi <= 1, f'held L ({how}): at most one press hand-in for the press ({hi})')
+            key(K_ESC); time.sleep(0.5)
+        print(f'INFO held: press hand-ins in the whole run {sum(1 for l in client_log().splitlines() if chr(34) + "kicad_mac_press_hand_in" + chr(34) in l)}', flush=True)
+        raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=hide (#1198): Cmd+H with KiCad's canvas focused hides Backplane and KiCad's frame (a runtime with comment-key-63: the
     # host reserves Ctrl+H); unhidden, KiCad's frame is directly above Backplane's window again and a click gives KiCad the keyboard; Cmd+H
     # with Backplane focused does the same. A runtime without comment-key-63 keeps Cmd+H KiCad's own (high contrast): nothing hides ----
@@ -1036,6 +1520,51 @@ try:
             check(bool(wait_for(lambda: active(client.pid), 5, 0.1)), 'hide: unhidden, Backplane is the active app again')
             time.sleep(0.5)  # the activation settled: no late activation of ours comes after the click
         def canvas_click(): click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); time.sleep(0.6); key(K_ESC); time.sleep(0.3)
+        def canvas_takes_keys(what):
+            # one Cmd+A, no retry and no second click: KiCad's canvas selects everything and the hub hears ET_SELECTION_CHANGED
+            n0 = hub_log().count('ET_SELECTION_CHANGED'); key(K_A, CMD)
+            took = wait_for(lambda: hub_log().count('ET_SELECTION_CHANGED') > n0, 3, 0.1)
+            key(K_ESC); time.sleep(0.5)
+            check(bool(took), f'hide: {what}, KiCad\'s canvas takes keys with no second click (Cmd+A)')
+        # after Edit, with no click: the focused show activated KiCad (TakeFocus, KiCad inactive) and its makeKeyWindow ran before the
+        # activation landed (#1198, fork fix/1198-key-on-activate). One Cmd+A must reach the canvas
+        # HIDE_RACE=1 (#1347's client race): the keyboard in KiCad from Edit, then a click in Backplane the moment KiCad's background frame
+        # set changes (kicad_info frames 1 -> 2, the schematic's prewarm, ~4 s after Edit). The re-show that change brings used to hand the
+        # keyboard back to KiCad as the click gave it to Backplane. Instead of the after-Edit keys check, which moves the click off the moment
+        def kicad_frames():
+            for l in reversed(client_log().splitlines()):
+                if l.startswith('GPUI_LOG {"kicad_info"'):
+                    try: return int(json.loads(l.split('GPUI_LOG ', 1)[1]).get('frames') or 0)
+                    except ValueError: return 0
+            return 0
+        if os.environ.get('HIDE_PLAIN') == '1':
+            # the hide row as it ran before the first-click and after-Edit steps were added (e2e-macos 44735548017, 44661130991): those
+            # steps left macOS 15 letting KiCad activate by itself after the unhide, so the original failure did not show (#1198 fix's proof)
+            print('INFO hide: HIDE_PLAIN: no after-Edit or first-click steps before Cmd+H', flush=True)
+        elif os.environ.get('HIDE_RACE') == '1':
+            f0 = kicad_frames()
+            if f0 >= 2: print(f'INFO hide (race): KiCad\'s frame set had already changed ({f0} frames) before the run got here: not hit', flush=True)
+            else:
+                changed = wait_for(lambda: kicad_frames() >= 2, 20, 0.02)
+                cwa = next((w for w in wins() if w[0] == cw[0]), cw); click(cwa[3][0] + 200, cwa[3][1] + 28 + 300); time.sleep(1.5)
+                print(f'INFO hide (race): frames {f0} -> {kicad_frames()} (changed {bool(changed)}), Backplane clicked at once; KiCad active {active(kpid)}, Backplane active {active(client.pid)}', flush=True)
+                check(bool(changed) and not active(kpid), 'hide (race): a click in Backplane as KiCad\'s frame set changes keeps the keyboard in Backplane')
+        elif 'embed-key-on-activate' in caps:
+            check(bool(wait_for(lambda: active(kpid), 5, 0.1)), 'hide: after Edit, with no click, KiCad is the active app')
+            canvas_takes_keys('after Edit, with no click')
+        else:
+            # without the fork's key-on-activate, Edit's show leaves KiCad active with no key window; the keyboard comes across only by
+            # the re-show after KiCad's frame set changes (~4 s on), so one Cmd+A at once is lost on main's client too (#1368's rows, Nov 19)
+            print('INFO hide: after-Edit keys check skipped: the runtime lacks embed-key-on-activate', flush=True)
+        if os.environ.get('HIDE_PLAIN') != '1':
+            # the first click into an inactive KiCad (#1198, fork fix/1198-key-on-activate): KiCad's activation lands after the click, and the
+            # frame's makeKeyWindow ran before it and was ignored (KiCad active with no key window, keys going nowhere until a second click).
+            # Backplane is made active first (a click in its message area), then one click on the canvas, then keys
+            cwa = next((w for w in wins() if w[0] == cw[0]), cw); click(cwa[3][0] + 200, cwa[3][1] + 28 + 300); time.sleep(1)
+            check(not active(kpid), f'hide: before the first click KiCad is not the active app (Backplane active {active(client.pid)})')
+            click(P[0] + P[2] * 0.5, P[1] + P[3] * 0.5); time.sleep(0.6)
+            check(bool(wait_for(lambda: active(kpid), 2, 0.1)), 'hide: the first click into an inactive KiCad makes it the active app')
+            canvas_takes_keys('after the first click into an inactive KiCad')
         for who in ('kicad', 'backplane'):
             if who == 'kicad': canvas_click()
             else:
@@ -1051,7 +1580,7 @@ try:
             back = wait_for(kicad_frame, 10, 0.1); shot(f'hide-{who}-back')
             check(bool(back), f'hide: unhidden, KiCad\'s frame is directly above Backplane\'s window over the pane ({who})')
             if back:
-                P = last_push()[0]
+                P = last_push()[0]; n_hi = len(client_log().splitlines())
                 # what is under the click, every layer (wins() keeps layer 0 only): e2e-macos 44540065022, the Backplane-focused case, a
                 # click there left Backplane active and never reached KiCad though KiCad's frame was directly above Backplane's window
                 cx, cy = P[0] + P[2] * 0.5, P[1] + P[3] * 0.5
@@ -1064,8 +1593,9 @@ try:
                       f'Backplane pid {client.pid}, KiCad pid {kpid}', flush=True)
                 canvas_click()
                 got = active(kpid); time.sleep(1.0); kept = active(kpid)
-                print(f'INFO hide: after the click ({who}): KiCad active {got}, a second on {kept}; Backplane active {active(client.pid)}', flush=True)
+                print(f'INFO hide: after the click ({who}): KiCad active {got}, a second on {kept}; Backplane active {active(client.pid)}; press hand-ins {sum(1 for l in client_log().splitlines()[n_hi:] if chr(34) + "kicad_mac_press_hand_in" + chr(34) in l)}', flush=True)
                 check(got and kept, f'hide: after the unhide a click gives KiCad the keyboard, and it keeps it ({who})')
+                canvas_takes_keys(f'after the unhide and a click ({who})')
         raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=textkeys (#1172, #1198): Backplane's own keys on a Mac, with the editor open over the pane. In the message box: Option+Left/Right
     # by word, Cmd+Left/Right to the line's start/end, Cmd+Up/Down to the text's, Shift selecting, Option+Backspace a word, Cmd+Backspace to the
