@@ -15,9 +15,12 @@ const STANDIN: &str = include_str!("../../../test/agents/fixtures/standin-claude
 #[derive(Clone, Copy, Debug)]
 enum Start { SigchldBlocked, SigchldIgnored }
 
-fn tmp(name: &str) -> PathBuf {
+/// A folder of the test's own, removed when it drops (also when an assert fails).
+struct Tmp(PathBuf);
+impl Drop for Tmp { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+fn tmp(name: &str) -> Tmp {
     let d = std::env::temp_dir().join(format!("bp-inhsig-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d
+    let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); Tmp(d)
 }
 fn free_port() -> u16 { std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port() }
 fn events(home: &Path) -> Vec<serde_json::Value> {
@@ -42,7 +45,7 @@ fn wait_for<T>(secs: u64, what: &str, log: &Path, mut f: impl FnMut() -> Option<
 
 fn a_project_turn_reaches_its_agent(start: Start) {
     let name = format!("{start:?}").to_lowercase();
-    let root = tmp(&name); let (home, bin, proj, user) = (root.join("home"), root.join("bin"), root.join("proj"), root.join("user"));
+    let _root = tmp(&name); let root = _root.0.clone(); let (home, bin, proj, user) = (root.join("home"), root.join("bin"), root.join("proj"), root.join("user"));
     for d in [&home, &bin, &user] { std::fs::create_dir_all(d).unwrap(); }
     std::fs::write(home.join("token"), "tok").unwrap();
     let agent_log = root.join("agent.log"); std::fs::write(&agent_log, "").unwrap();
@@ -89,7 +92,6 @@ fn a_project_turn_reaches_its_agent(start: Start) {
     let said = std::fs::read_to_string(&log).unwrap_or_default();
     assert!(said.contains("backplane-hub: started with "), "the hub says what it was started with: {said}");
     drop(_k); let _ = hub.wait();
-    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test] fn a_hub_started_with_sigchld_blocked_reaps_and_its_project_turn_reaches_the_agent() { a_project_turn_reaches_its_agent(Start::SigchldBlocked) }

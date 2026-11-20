@@ -175,7 +175,9 @@ bpadmin@203.0.113.7 sweep" ] && grep -q "bp-win: the run was cut off after" "$T/
 # 27. a gate terminated mid-run (TERM) sweeps the VM on its way out; nothing pushed
 step j; ( VMSLEEP=30 vm > "$T/o27" ) & lp=$!
 for _ in $(seq 100); do grep -q ' run ' "$VMLOG" && break; sleep 0.1; done
-pkill -TERM -f "^sh $LANE/scripts/land-windows.sh --vm bp-win\$"; wait $lp; rc=$?
+# the gate's own process among this run's descendants (never a match over every process: another lane's gate may run here)
+desc() { for c in $(pgrep -P "$1"); do echo "$c"; desc "$c"; done; }
+for p in $(desc $lp); do [ "$(ps -o args= -p "$p")" = "sh $LANE/scripts/land-windows.sh --vm bp-win" ] && kill -TERM "$p"; done; wait $lp; rc=$?
 [ $rc != 0 ] && [ "$(tail -n 1 "$VMLOG")" = "bp-win sweep" ] && [ "$(grep -c sweep "$VMLOG")" = 2 ] && ! pushed && flock -n "$T/locks/bp-bp-win-ui.lock" true; ok $? "terminated mid-run: the VM is swept, bp-win-ui released, nothing pushed (rc $rc)"
 grep -q '^bpadmin@203.0.113.7 tmp$' "$T/sw23" && ! grep -q ' all$' "$T/sw23"; ok $? "bp-winbuild keeps its repository and target dir: only C:\\bp\\gate\\tmp is swept"
 # 28. bp-winbuild straight through Azure: ssh opened to this machine's address alone for the run, closed after; a running VM is left running
