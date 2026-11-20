@@ -99,6 +99,7 @@ async function main(binary, output) {
   const { once } = await import('node:events');
   const { createServer } = await import('node:net');
   const { checkAccess, checkRequestBoundary } = await import('./security.mjs');
+  const canary = 'fixture-mask-' + (await import('node:crypto')).randomUUID();
   const { browserTasks } = await import('./tasks.mjs');
   assert.ok(binary && output && process.env.BP_TMP && process.versions.bun);
   const temp = await fs.mkdtemp(path.join(process.env.BP_TMP, 'web-e2e-'));
@@ -110,6 +111,19 @@ async function main(binary, output) {
   const nativePort = native.address().port;
   await new Promise(resolve => native.close(resolve));
   assert.ok(nativePort >= 3799);
+  const project = path.join(temp, 'project');
+  const models = new URL('../files/fixtures/', import.meta.url);
+  await fs.mkdir(path.join(project, 'mech'), {recursive:true});
+  for (const extension of ['kicad_pcb','kicad_sch','kicad_prl']) {
+    const name = 'ecc83-pp.' + extension;
+    await fs.copyFile(new URL('plot/' + name, models), path.join(project, name));
+  }
+  await fs.writeFile(path.join(project, 'ecc83-pp.kicad_pro'), '{}');
+  await fs.copyFile(new URL('mesh/bracket.step', models), path.join(project, 'mech', 'bracket.step'));
+  const gerbers = path.join(project, 'mfg', 'gerbers');
+  await fs.mkdir(gerbers, {recursive:true});
+  await fs.writeFile(path.join(gerbers, 'ecc83-pp-F_Cu.gbr'),
+    '%FSLAX46Y46*%\n%MOMM*%\n%ADD10C,0.250000*%\nD10*\nX0Y0D02*\nX20000000Y0D01*\nX20000000Y20000000D01*\nM02*\n');
   await fs.mkdir(agents);
   await fs.mkdir(output, { recursive: true });
   const standin = new URL('../tools/claude_standin.ts', import.meta.url).pathname;
@@ -117,7 +131,7 @@ async function main(binary, output) {
   try {
     await withTestTls(path.join(home, 'browser.sock'), async tls => {
       const env = { PATH: process.env.PATH, HOME: temp, TMPDIR: temp, BP_TMP: temp,
-        BP_STREAM_N: "3", BP_STREAM_MS: "600", BP_WEB_STANDIN: standin, BP_WEB_FIXTURE: temp, BACKPLANE_AGENTS: agents,
+        BACKPLANE_VAULT_KEYRING:'file', BP_WEB_MASK_FIXTURE:canary, BP_STREAM_N: "3", BP_STREAM_MS: "600", BP_WEB_STANDIN: standin, BP_WEB_FIXTURE: temp, BACKPLANE_AGENTS: agents,
         BP_WEB_NATIVE_PORT: String(nativePort), BP_WEB_TLS_PORT: String(tls.port),
         BACKPLANE_NO_UPDATE: '1', BACKPLANE_ORDER_SERVER: 'http://127.0.0.1:9' };
       const child = spawn(binary, ['--ignored', '--exact', 'net::listener::webingress::isolated_browser_hub'], {
@@ -163,7 +177,7 @@ async function main(binary, output) {
             await checkAccess(probe, false);
             await probe.close();
             await rpc('devices.page.act', { action: 'device-web-access', value: '1' });
-            await browserTasks({ context, origin, rpc, thread: 't1',
+            await browserTasks({ context, origin, rpc, thread: 't1', canary,
               registeredRoutes: JSON.parse(await fs.readFile(path.join(home, 'fixture-http-routes.json'), 'utf8')),
               checkBoundary: token => checkRequestBoundary(path.join(home, 'browser.sock'), origin, token),
               checkLogs: value => assert.ok(!Buffer.concat(logs).includes(value), 'browser session in hub output'),
