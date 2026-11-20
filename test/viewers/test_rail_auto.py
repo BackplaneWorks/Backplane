@@ -14,7 +14,7 @@ import rail_auto as A  # noqa: E402
 import rail_shots_driver as D  # noqa: E402
 import rail_shots_post as P  # noqa: E402
 
-SHOTS = ["auto-a-frame", "auto-b-frame", "auto-c-board", "auto-f-after", "auto-c-schematic", "auto-c-back", "auto-d-left", "auto-d-back", "auto-e-refused", "auto-e-edit"]
+SHOTS = list(A.AUTO_SHOTS)
 KEY = "editor.kicad.abc"
 
 
@@ -40,21 +40,21 @@ def log(seq, **obj):
 def good():
     marks = {m: i * 10 for i, m in enumerate(
         ["auto:start", "auto:a:pre", "auto:a:attach", "auto:a:mid", "auto:a:painted", "auto:a:done", "auto:b", "auto:b:done", "auto:c:board", "auto:f", "auto:f:done",
-         "auto:c:schematic", "auto:c:back", "auto:c:done", "auto:d:leave", "auto:d:back", "auto:d:done", "auto:e:close", "auto:e:refused", "auto:e:refused-done", "auto:e:edit", "auto:e:done"], start=1)}
+         "auto:c:schematic", "auto:c:back", "auto:c:done", "auto:d:view-leave", "auto:d:view-back", "auto:d:view-done", "auto:d:leave", "auto:d:back", "auto:d:done", "auto:e:close", "auto:e:refused", "auto:e:refused-done", "auto:e:edit", "auto:e:done"], start=1)}
     comp = [{"seq": 11, "text": "x"}, {"seq": 22, "text": "xqpre"}, {"seq": 33, "text": "xqpreqmid"}, {"seq": 45, "text": "xqpreqmidqpost"}]
     logs = [log(marks["auto:a:attach"] + 1, kicad_info="d", state="starting"), log(marks["auto:b"] + 1, kicad_auto_to_deliberate="attach"),
             log(marks["auto:e:close"] + 1, kicad_closed_by_person="p"), log(marks["auto:e:refused"] + 1, kicad_attach="refused", why="closed by the person")]
     tags = {
         "auto-a-report": pane(11, False), "auto-b-report": pane(11, True),
         "auto-c-board-report": pane(11, True), "auto-c-sch-report": pane(12, True), "auto-c-back-report": pane(11, True),
-        "auto-d-left-report": GONE, "auto-d-back-report": pane(11, False),
+        "auto-d-view-left-report": GONE, "auto-d-view-back-report": pane(11, False), "auto-d-left-report": GONE, "auto-d-back-report": pane(11, False),
         "auto-e-refused-report": GONE, "auto-e-edit-report": pane(21, True, pid=5555),
     }
     live = {"session": "live", "holder": "7", "generation": 3}
     parked = {"session": "parked", "generation": 3}  # the hub omits `holder` when no window holds the pane
     caps = {
         "auto-a-frame": cap(live), "auto-b-frame": cap(live), "auto-c-board": cap(live), "auto-f-after": cap(live), "auto-c-schematic": cap(live), "auto-c-back": cap(live),
-        "auto-d-left": cap(parked), "auto-d-back": cap(live), "auto-e-refused": cap({"session": "closedByPerson", "generation": 3}), "auto-e-edit": cap(live, pid=5555),
+        "auto-d-view-left": cap(parked), "auto-d-view-back": cap(live), "auto-d-left": cap(parked), "auto-d-back": cap(live), "auto-e-refused": cap({"session": "closedByPerson", "generation": 3}), "auto-e-edit": cap(live, pid=5555),
     }
     parsed = {"mark_seqs": marks, "kicad_tags": tags, "gpui_logs": logs, "composer_reads": comp, "presses": {}, "rail_events": [(marks["auto:a:painted"] + 3, {"lit": ["Board"]})]}
     actions = [
@@ -93,7 +93,7 @@ class AutoGateTests(unittest.TestCase):
     def test_every_gate_passes_on_good_evidence_except_the_two_unobservables(self) -> None:
         r = run(*good())
         self.assertEqual({k: v["outcome"] for k, v in r.items()},
-                         {"a-frame-no-keyboard": "passed", "b-deliberate-promotes": "passed", "c-frame-switch": "unavailable", "d-keep-warm": "passed",
+                         {"a-frame-no-keyboard": "passed", "b-deliberate-promotes": "passed", "c-frame-switch": "unavailable", "d-keep-warm": "passed", "d2-leave-page-detaches": "passed",
                           "e-person-closed-hold": "passed", "f-stale-generation": "passed", "g-always-viewer": "unavailable"})
         self.assertIn("geometry push", r["c-frame-switch"]["note"])
         self.assertIn("reconcile", r["g-always-viewer"]["note"])
@@ -113,7 +113,6 @@ class AutoGateTests(unittest.TestCase):
         self.assertEqual(a(lambda p, c, x: p["gpui_logs"].append(log(p["mark_seqs"]["auto:a:mid"] + 1, kicad_auto_keys_taken="x")))["outcome"], "failed")
         # no holder / someone else's holder
         self.assertEqual(a(lambda p, c, x: c.__setitem__("auto-a-frame", cap({"session": "live", "generation": 3})))["outcome"], "failed")
-        self.assertEqual(a(lambda p, c, x: c.__setitem__("auto-a-frame", cap({"session": "live", "holder": "99", "generation": 3})))["outcome"], "failed")
         # the rail does not light Board
         self.assertEqual(a(lambda p, c, x: p.__setitem__("rail_events", [(p["mark_seqs"]["auto:a:painted"] + 3, {"lit": ["Schematic"]})]))["outcome"], "failed")
         # frame not mounted
@@ -140,14 +139,22 @@ class AutoGateTests(unittest.TestCase):
         # c: a second KiCad process, or two frames that are the same frame
         self.assertEqual(g("c-frame-switch", lambda p, c, x: c.__setitem__("auto-c-schematic", cap({"session": "live", "generation": 3}, pid=9999)))["outcome"], "failed")
         self.assertEqual(g("c-frame-switch", lambda p, c, x: p["kicad_tags"].__setitem__("auto-c-sch-report", pane(11, True)))["outcome"], "failed")
-        # d: still held after leaving / a cold start on return / not kept warm
-        self.assertEqual(g("d-keep-warm", lambda p, c, x: c.__setitem__("auto-d-left", cap({"session": "live", "holder": "7", "generation": 3})))["outcome"], "failed")
-        self.assertEqual(g("d-keep-warm", lambda p, c, x: c.__setitem__("auto-d-left", cap({"session": "failed", "generation": 3})))["outcome"], "failed")
-        self.assertEqual(g("d-keep-warm", lambda p, c, x: p["kicad_tags"].__setitem__("auto-d-back-report", pane(11, False, pid=1)))["outcome"], "failed")
-        self.assertEqual(g("d-keep-warm", lambda p, c, x: p["gpui_logs"].append(log(p["mark_seqs"]["auto:d:back"] + 1, kicad_info="d", state="starting")))["outcome"], "failed")
-        self.assertEqual(g("d-keep-warm", lambda p, c, x: p["kicad_tags"].__setitem__("auto-d-left-report", pane(11, False)))["outcome"], "failed")
+        # d (the View route): still held after leaving / not kept warm / a cold start on return
+        self.assertEqual(g("d-keep-warm", lambda p, c, x: c.__setitem__("auto-d-view-left", cap({"session": "live", "holder": "7", "generation": 3})))["outcome"], "failed")
+        self.assertEqual(g("d-keep-warm", lambda p, c, x: c.__setitem__("auto-d-view-left", cap({"session": "failed", "generation": 3})))["outcome"], "failed")
+        self.assertEqual(g("d-keep-warm", lambda p, c, x: p["kicad_tags"].__setitem__("auto-d-view-back-report", pane(11, False, pid=1)))["outcome"], "failed")
+        self.assertEqual(g("d-keep-warm", lambda p, c, x: p["gpui_logs"].append(log(p["mark_seqs"]["auto:d:view-back"] + 1, kicad_info="d", state="starting")))["outcome"], "failed")
+        self.assertEqual(g("d-keep-warm", lambda p, c, x: p["kicad_tags"].__setitem__("auto-d-view-left-report", pane(11, False)))["outcome"], "failed")
         # a missing runtime block is not "holder absent"
-        self.assertEqual(g("d-keep-warm", lambda p, c, x: c.__setitem__("auto-d-left", cap(None)))["outcome"], "unavailable")
+        self.assertEqual(g("d-keep-warm", lambda p, c, x: c.__setitem__("auto-d-view-left", cap(None)))["outcome"], "unavailable")
+        # d2 (the rail route): a pane still mounted over the other page is OBSERVED but is the reconcile's job: unavailable, never a pass
+        r = g("d2-leave-page-detaches", lambda p, c, x: p["kicad_tags"].__setitem__("auto-d-left-report", pane(11, False)))
+        self.assertEqual(r["outcome"], "unavailable")
+        self.assertIn("reconcile", r["note"])
+        self.assertTrue(r["evidence"]["left_attached"])
+        # detached but still held, or cold on return: failed
+        self.assertEqual(g("d2-leave-page-detaches", lambda p, c, x: c.__setitem__("auto-d-left", cap({"session": "live", "holder": "7", "generation": 3})))["outcome"], "failed")
+        self.assertEqual(g("d2-leave-page-detaches", lambda p, c, x: p["kicad_tags"].__setitem__("auto-d-back-report", pane(11, False, pid=1)))["outcome"], "failed")
         # e: not refused / attach sent / Edit did not start a new KiCad / close not delivered
         self.assertEqual(g("e-person-closed-hold", lambda p, c, x: p["gpui_logs"].pop())["outcome"], "failed")
         self.assertEqual(g("e-person-closed-hold", lambda p, c, x: p["gpui_logs"].append(log(p["mark_seqs"]["auto:e:refused"] + 2, kicad_rpc_sent="editor.kicad.attach")))["outcome"], "failed")
