@@ -242,10 +242,12 @@ class AutoGateTests(unittest.TestCase):
         bad = a2(ffm="no", composer="", keys=True, logs=[log(25, kicad_key="q")])
         self.assertEqual(bad["outcome"], "failed")
         self.assertIn("PRODUCT FAULT", bad["evidence"]["verdict"])
-        # the same with the default (the pointer follows focus): reported, a window-manager verdict, never a failure and never a pass
+        # the same with i3's default focus: also a known failure (the off run showed it is not the window manager), never a pass
         wm = a2(ffm="default", composer="", keys=True, logs=[log(25, kicad_key="q")])
-        self.assertEqual(wm["outcome"], "unavailable")
-        self.assertIn("window manager", wm["evidence"]["verdict"])
+        self.assertEqual(wm["outcome"], "failed")
+        self.assertIn("known failure, owned by the KiCad lead (pane input on Linux)", wm["note"])
+        self.assertIn("not the window manager", wm["evidence"]["verdict"])
+        self.assertIn("known failure, owned by the KiCad lead (pane input on Linux)", bad["note"])
         # partial landing is KiCad getting some of it
         self.assertEqual(a2(ffm="no", composer=A.A2_MARKER[:4])["outcome"], "failed")
         # a click, a pointer outside the pane, or no mounted painted frame is not the measurement
