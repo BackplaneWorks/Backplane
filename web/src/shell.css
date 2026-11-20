@@ -613,20 +613,48 @@ html.light .bp-code-block { background: var(--panel); }
 .bp-composer-tool:hover:not(:disabled) { color: var(--text); border-color: var(--faint); }
 .bp-composer-tool.recording { color: var(--bad); border-color: var(--bad); }
 
-/* ---- Management Strip (BOM | Checks | Lifecycle | Plan | Fab) ---- */
-.bp-mgmt-host {
+/* ---- Management Strip & Panel (matches GPUI: tabs under viewer area, panel as right column) ---- */
+.bp-right-area {
+  width: 46%;
+  min-width: 340px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--rule);
-  background: var(--panel);
+  background: var(--view);
+  border-left: 1px solid var(--rule);
+  min-height: 0;
+  position: relative;
+}
+.bp-right-area.bp-has-viewer.bp-has-mgmt {
+  width: 60%;
+  min-width: 540px;
+}
+.bp-right-top {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  position: relative;
+  overflow: hidden;
+}
+.bp-right-top > .bp-viewer-pane {
+  position: static;
+  inset: auto;
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  border-left: 0;
+  z-index: auto;
 }
 .bp-mgmt-strip {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   min-height: 28px;
   background: var(--panel);
+  border-top: 1px solid var(--rule);
   font-family: var(--mono);
   font-size: 11px;
 }
@@ -664,12 +692,19 @@ html.light .bp-code-block { background: var(--panel); }
 }
 .bp-mgmt-close { width: 28px; height: 28px; flex-shrink: 0; color: var(--dim); }
 .bp-mgmt-panel {
-  max-height: 300px;
+  width: 370px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg);
-  border-bottom: 1px solid var(--rule);
+  border-left: 1px solid var(--rule);
+  min-height: 0;
   font-size: 12px;
+}
+.bp-right-area:not(.bp-has-viewer) .bp-mgmt-panel {
+  flex: 1;
+  width: auto;
+  border-left: 0;
 }
 .bp-mgmt-body { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .bp-mgmt-head {
@@ -711,7 +746,10 @@ html.light .bp-code-block { background: var(--panel); }
 .bp-mgmt-row-sub { display: flex; align-items: center; gap: 8px; font-size: 11px; min-width: 0; }
 .bp-mgmt-strong { font-family: var(--mono); font-weight: 600; color: var(--text); }
 .bp-mgmt-flex1 { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bp-mgmt-col { width: 78px; flex-shrink: 0; text-align: right; font-family: var(--mono); font-size: 11px; }
+.bp-mgmt-col { width: 68px; flex-shrink: 0; text-align: right; font-family: var(--mono); font-size: 11px; }
+.bp-mgmt-col-read { width: 76px; }
+.bp-mgmt-read-link { color: var(--faint); text-decoration: none; }
+.bp-mgmt-read-link:hover { color: var(--text); text-decoration: underline; }
 .bp-mgmt-faint { color: var(--faint); font-size: 11px; }
 .bp-mgmt-note { padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 11px; }
 .bp-mgmt-pill { font-size: 10px; padding: 1px 5px; border: 1px solid var(--line); color: var(--dim); }
@@ -772,13 +810,12 @@ html.light .bp-code-block { background: var(--panel); }
 
 /* ---- Viewer Host Slot ---- */
 .bp-viewer-pane {
-  width: 46%;
-  min-width: 320px;
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--view);
-  border-left: 1px solid var(--rule);
 }
 .bp-viewer-placeholder { display: flex; flex-direction: column; height: 100%; }
 .bp-viewer-bar {
@@ -1005,7 +1042,15 @@ html.light .bp-code-block { background: var(--panel); }
     box-shadow: 4px 0 24px rgba(0, 0, 0, 0.45);
   }
   .bp-sidebar.bp-sidebar-open { display: flex; }
-  .bp-viewer-pane { width: 52%; min-width: 260px; }
+  .bp-right-area,
+  .bp-right-area.bp-has-viewer.bp-has-mgmt { width: 54%; min-width: 280px; }
+  .bp-right-area.bp-has-viewer .bp-mgmt-panel {
+    position: absolute;
+    inset: 0;
+    width: auto;
+    border-left: 0;
+    z-index: 15;
+  }
 }
 
 @media (max-width: 600px) {
@@ -1079,7 +1124,8 @@ html.light .bp-code-block { background: var(--panel); }
   .bp-rail-btn.active { border-left-color: transparent; border-top-color: var(--accent); }
   .bp-rail-lbl { font-size: 9px; max-width: 44px; }
 
-  .bp-viewer-pane {
+  .bp-right-area,
+  .bp-right-area.bp-has-viewer.bp-has-mgmt {
     position: fixed;
     top: 38px;
     bottom: 46px;
@@ -1087,6 +1133,21 @@ html.light .bp-code-block { background: var(--panel); }
     right: 0;
     width: auto;
     min-width: 0;
+    border-left: 0;
     z-index: 25;
+  }
+  .bp-right-top > .bp-viewer-pane {
+    position: static;
+    inset: auto;
+    width: auto;
+    height: auto;
+    z-index: auto;
+  }
+  .bp-mgmt-panel {
+    position: absolute;
+    inset: 0;
+    width: auto;
+    border-left: 0;
+    z-index: 30;
   }
 }
