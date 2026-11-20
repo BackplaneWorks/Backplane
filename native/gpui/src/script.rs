@@ -663,15 +663,16 @@ impl Backplane {
                 let (key, offs) = if slot == 0 { (self.screens.plot.frame.as_ref().map(|f| f.key.clone()).unwrap_or_default(), self.data["thread"]["viewer"]["off"].as_u64().unwrap_or(0) as u32) }
                     else { let p = panes.get(slot - 1).cloned().unwrap_or_default(); (p["key"].as_str().unwrap_or("").to_string(), p["off"].as_u64().unwrap_or(0) as u32) };
                 let mut at_px = Value::Null;
+                let mut tapped = false; // whether `tap_at` really ran at an in-bounds point (absent geometry or an off-canvas point does not tap)
                 if let (Some(v), Some(b)) = (view, bounds) {
                     let (w, h) = (f32::from(b.size.width), f32::from(b.size.height));
                     let (sx, sy) = v.to_px(x_mm * 1000., y_mm * 1000., w, h);
                     let inside = sx >= 0. && sy >= 0. && sx <= w && sy <= h;
                     at_px = json!({"x": f32::from(b.origin.x) + sx, "y": f32::from(b.origin.y) + sy, "fx": sx / w, "fy": sy / h, "inside": inside});
-                    if inside { crate::screens::plotview::tap_at(self, slot, &key, offs, (f32::from(b.origin.x) + sx, f32::from(b.origin.y) + sy), Some(v), Some(b)); }
+                    if inside { crate::screens::plotview::tap_at(self, slot, &key, offs, (f32::from(b.origin.x) + sx, f32::from(b.origin.y) + sy), Some(v), Some(b)); tapped = true; }
                 }
                 let got = self.screens.pv(slot).picked.is_some();
-                /* i18n-ok: test-mode script metric */ self.m("tap", json!({"mm": [x_mm, y_mm], "slot": slot, "picked": got, "at": at_px}));
+                /* i18n-ok: test-mode script metric */ self.m("tap", json!({"mm": [x_mm, y_mm], "slot": slot, "tapped": tapped, "picked": got && tapped, "at": at_px}));
                 self.ui_epoch += 1; self.begin("tap".into(), Goal::Frame, cx); cx.notify();
             }
             Step::Fit => { self.screens.plotview.view = None; self.ui_epoch += 1; self.begin("fit".into(), Goal::Frame, cx); cx.notify(); }

@@ -485,6 +485,7 @@ class RailShotsRegressionTests(unittest.TestCase):
                     "press:task9-follow-on": [{"id": "follow-agent", "found": True}],
                     "press:task9-follow-off": [{"id": "follow-agent", "found": True}],
                 },
+                "taps": {"press:task5-split-probe": [{"slot": 2, "tapped": True, "picked": True}]},
             }
             caps = {
                 name: {"name": name, "ok": True, "bytes": 1234, "inspect_ok": True, "obstructed": False, "obstructions": []}
@@ -1219,6 +1220,46 @@ class RailShotsRegressionTests(unittest.TestCase):
         at = head[head.rindex("(at "):].split(")")[0].split()
         self.assertEqual((float(at[1]), float(at[2])), (tap["tap_mm"][0], tap["tap_mm"][1]))
         self.assertEqual(tap["tap_mm"][2], 2)
+
+    def test_task5_needs_a_tap_that_really_ran_at_an_in_bounds_point(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            outdir = Path(td)
+            write_non_flat_png(outdir / "full" / "task5-split-probe.png", color_b=(90, 140, 200))
+            lay = {"topbar": {"x": 0, "y": 0, "w": 1440, "h": 36}, "main": {"x": 240, "y": 36, "w": 500, "h": 864}, "rail": {"x": 1368, "y": 36, "w": 72, "h": 864}}
+            viewer = {"open": "split", "panes_count": 3, "split_pcb_ref": "R1", "split_sch_ref": "R1", "split_lit_sch": True, "split_lit_pcb": True}
+            caps = {"task5-split-probe": {"name": "task5-split-probe", "ok": True, "bytes": 1234, "inspect_ok": True, "obstructed": False, "obstructions": []}}
+
+            def t5(taps):
+                parsed = {
+                    "shots": {"task5-split-probe": {"state": "ready", "viewer": viewer, "layout": lay, "controls_ids": []}},
+                    "settled_tags": {}, "kicad_tags": {},
+                    "presses": {"press:split": [{"id": "rail:Split", "found": True}]},
+                    "taps": taps,
+                }
+                return next(t for t in P.evaluate_scorecard(outdir, parsed, caps, True) if t["task"] == 5)
+
+            ok = t5({"press:task5-split-probe": [{"slot": 2, "tapped": True, "picked": True, "seq": 5}]})
+            self.assertEqual(ok["outcome"], "passed")
+            self.assertIn("tap:R1@slot2", ok["presses"])
+            # absent geometry / off-canvas point: the client reports tapped=false and the old `picked` must not be borrowed
+            skipped = t5({"press:task5-split-probe": [{"slot": 2, "tapped": False, "picked": True, "seq": 5}]})
+            self.assertEqual(skipped["outcome"], "unavailable")
+            self.assertNotIn("tap:R1@slot2", skipped["presses"])
+            # no tap event under the mark at all, or one for another slot
+            self.assertEqual(t5({})["outcome"], "unavailable")
+            self.assertEqual(t5({"press:task5-split-probe": [{"slot": 1, "tapped": True, "seq": 5}]})["outcome"], "unavailable")
+
+    def test_tap_event_is_parsed_with_its_delivery_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "c.log"
+            log.write_text("\n".join([
+                'GPUI_METRIC {"event":"mark","name":"press:task5-split-probe"}',
+                'GPUI_METRIC {"event":"tap","mm":[1,2],"slot":2,"tapped":false,"picked":false,"at":null}',
+                'GPUI_METRIC {"event":"tap","mm":[1,2],"slot":2,"picked":true}',
+                'GPUI_METRIC {"event":"tap","mm":[1,2],"slot":2,"tapped":true,"picked":true}',
+            ]) + "\n", encoding="utf-8")
+            taps = P.parse_client_log(log)["taps"]["press:task5-split-probe"]
+            self.assertEqual([t["tapped"] for t in taps], [False, False, True])  # a missing flag is not delivery
 
 
 if __name__ == "__main__":

@@ -134,6 +134,7 @@ def parse_client_log(log_path: Path) -> dict:
     mark_seqs: dict[str, int] = {}
     mark_before_rail: dict[str, dict | None] = {}
     presses_by_mark: dict[str, list[dict]] = {}
+    taps_by_mark: dict[str, list[dict]] = {}
     keys_by_mark: dict[str, list[dict]] = {}
     palette_reads_by_mark: dict[str, list[dict]] = {}
     rail_reads_by_mark: dict[str, list[dict]] = {}
@@ -149,6 +150,7 @@ def parse_client_log(log_path: Path) -> dict:
             "settled_tags": settled_tags,
             "kicad_tags": kicad_tags,
             "presses": presses_by_mark,
+            "taps": taps_by_mark,
             "keys": keys_by_mark,
             "palette_reads": palette_reads_by_mark,
             "rail_reads": rail_reads_by_mark,
@@ -247,6 +249,9 @@ def parse_client_log(log_path: Path) -> dict:
                 "supported": bool(ev.get("supported")),
                 "seq": ev_seq,
             })
+        elif kind == "tap":
+            # `tapped` is true only when the client really ran its hit test at an in-bounds point
+            taps_by_mark.setdefault(current_mark, []).append({"slot": ev.get("slot"), "tapped": ev.get("tapped") is True, "picked": ev.get("picked") is True, "seq": ev_seq})
         elif kind == "pointer":
             # a real pointer press at a drawn rect: delivered only if dispatched into the window at a measured rect
             presses_by_mark.setdefault(current_mark, []).append({
@@ -329,6 +334,7 @@ def parse_client_log(log_path: Path) -> dict:
         "settled_tags": settled_tags,
         "kicad_tags": kicad_tags,
         "presses": presses_by_mark,
+        "taps": taps_by_mark,
         "keys": keys_by_mark,
         "palette_reads": palette_reads_by_mark,
         "rail_reads": rail_reads_by_mark,
@@ -1263,7 +1269,8 @@ def evaluate_scorecard(
     v5 = s5.get("viewer") or {}
     ok5, obs5, oblist5 = shot_ok("task5-split-probe")
     p5_raw = presses.get("press:split", [])
-    p5 = [p["id"] for p in p5_raw] + ["tap:R1@slot2"]
+    t5_taps = [t for t in (full_parsed.get("taps") or {}).get("press:task5-split-probe", []) if t.get("tapped") and t.get("slot") == 2]
+    p5 = [p["id"] for p in p5_raw] + (["tap:R1@slot2"] if t5_taps else [])
     pcb_ref = v5.get("split_pcb_ref") or ""
     sch_ref = v5.get("split_sch_ref") or ""
     t5_closed = check_closed_to_idle("task5-back", "press:task5-back", "rail:Split")
@@ -1293,6 +1300,8 @@ def evaluate_scorecard(
     }
     if not full_client_ok or not ok5 or obs5:
         o5 = "harness_failed"
+    elif not t5_taps:
+        o5 = "unavailable"  # no tap event at an in-bounds point under the Task 5 mark: the probe was never delivered
     elif (
         s5.get("state") == "ready"
         and v5.get("open") == "split"
@@ -1306,7 +1315,7 @@ def evaluate_scorecard(
         o5 = "passed"
     else:
         o5 = "task_failed"
-    note5 = "" if o5 == "passed" else f"expected R1 in both panes; got pcb_ref={pcb_ref!r} sch_ref={sch_ref!r} lit_sch={v5.get('split_lit_sch')} lit_pcb={v5.get('split_lit_pcb')} probe={v5.get('probe')!r}"
+    note5 = "" if o5 == "passed" else ("tap on R1 not delivered (no `tap` event with tapped=true at an in-bounds point under press:task5-split-probe)" if o5 == "unavailable" else f"expected R1 in both panes; got pcb_ref={pcb_ref!r} sch_ref={sch_ref!r} lit_sch={v5.get('split_lit_sch')} lit_pcb={v5.get('split_lit_pcb')} probe={v5.get('probe')!r}")
     tasks.append(make_task(
         5, "See schematic and board together and cross-probe a part", 2, p5, o5,
         {"state": s5.get("state"), "open": v5.get("open"), "panes_count": v5.get("panes_count"), "probe": v5.get("probe"), "split_pcb_ref": pcb_ref, "split_sch_ref": sch_ref, "split_picked_pcb": v5.get("split_picked_pcb"), "split_lit_sch": v5.get("split_lit_sch"), "split_lit_pcb": v5.get("split_lit_pcb"), "capture_ok": ok5, "obstructed": obs5, "obstructions": oblist5, "one_step_back": t5_back},
