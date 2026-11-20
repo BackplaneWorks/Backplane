@@ -86,9 +86,17 @@ pub mod proc {
     /// After the spawn of a child given `own_group` / `agent_group`: nothing to do on Unix (the group is the leader's pid).
     pub fn adopt(_pid: u32, _die_with_hub: bool) {}
     /// Signal the process group a leader made (`kill(-pid, sig)`). True if it was sent.
-    pub fn kill_group(pid: u32, sig: i32) -> bool { unsafe { libc::kill(-(pid as i32), sig) == 0 } }
-    /// Signal one process. True if it was sent.
-    pub fn kill(pid: u32, sig: i32) -> bool { unsafe { libc::kill(pid as i32, sig) == 0 } }
+    /// Never 0 or 1 (`kill(0)`/`kill(-1)`: our own group, every process we may signal), never past i32 (it would wrap), never the hub's own pid or group (under the guard the hub
+    /// leads its group: a stale pid equal to ours would end the hub with the signal, a SIGKILL the guard can only call "killed by signal 9").
+    pub fn kill_group(pid: u32, sig: i32) -> bool { if !signalable(pid) { return false } unsafe { libc::kill(-(pid as i32), sig) == 0 } }
+    /// Signal one process. True if it was sent. The same refusals as `kill_group`.
+    pub fn kill(pid: u32, sig: i32) -> bool { if !signalable(pid) { return false } unsafe { libc::kill(pid as i32, sig) == 0 } }
+    pub(crate) fn signalable(pid: u32) -> bool {
+        let me = std::process::id();
+        let ok = pid > 1 && pid <= i32::MAX as u32 && pid != me && pid as i32 != unsafe { libc::getpgrp() };
+        if !ok && pid > 1 { eprintln!("backplane-hub: refused to signal pid {pid}: it is this hub or its process group"); }
+        ok
+    }
     /// Whether a process is there (kill 0).
     pub fn alive(pid: u32) -> bool { pid > 0 && unsafe { libc::kill(pid as i32, 0) } == 0 }
     /// Whether anything is left in the process group a leader made (kill(-pid, 0)), or the leader itself.
