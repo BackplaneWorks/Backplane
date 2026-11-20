@@ -33,7 +33,7 @@ fn find_text(ui: &BoardsUi, cx: &App) -> String { ui.find.as_ref().map(|f| f.rea
 
 /// Open or shut the menu; opening reads the boards again and puts the keys in the search field.
 pub fn toggle(this: &mut Backplane, window: &mut Window, cx: &mut Context<Backplane>) {
-    let ui = &mut this.screens.plotview.boards;
+    let ui = &mut this.screens.plots[0].boards;
     // the press that ends in this click shut the menu already (a press outside it, on this button): it stays shut
     if !ui.open && crate::screens::popover::just_shut("boards") { cx.notify(); return }
     ui.open = !ui.open;
@@ -44,20 +44,20 @@ pub fn toggle(this: &mut Backplane, window: &mut Window, cx: &mut Context<Backpl
         cx.observe(&f, |_, _, cx| cx.notify()).detach();
         // Enter shows the first board the search keeps
         cx.subscribe(&f, |this, _, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) {
-            let all = list(&this.data["thread"]["viewer"]); let q = find_text(&this.screens.plotview.boards, cx);
+            let all = list(&this.data["thread"]["viewer"]); let q = find_text(&this.screens.plots[0].boards, cx);
             if let Some(b) = matching(&all, &q).first() { pick(this, b.value.clone(), cx); }
         }).detach();
-        this.screens.plotview.boards.find = Some(f);
+        this.screens.plots[0].boards.find = Some(f);
     }
-    if let Some(f) = this.screens.plotview.boards.find.clone() { f.update(cx, |i, cx| i.set(String::new(), cx)); window.focus(&f.read(cx).focus_handle(cx)); }
+    if let Some(f) = this.screens.plots[0].boards.find.clone() { f.update(cx, |i, cx| i.set(String::new(), cx)); window.focus(&f.read(cx).focus_handle(cx)); }
     let _ = this.tx.try_send(Command::Action("view-boards".into(), String::new()));
     cx.notify();
 }
 pub fn pick(this: &mut Backplane, value: String, cx: &mut Context<Backplane>) {
-    this.screens.plotview.boards.open = false;
+    this.screens.plots[0].boards.open = false;
     // KiCad is in the pane (Open in KiCad): it follows to the picked board once the hub shows that board (edit_due)
     let on = list(&this.data["thread"]["viewer"]).iter().any(|b| b.on && b.value == value);
-    this.screens.plotview.boards.edit_next = (this.screens.kicad.is_some() && !on).then(|| (value.clone(), std::time::Instant::now()));
+    this.screens.plots[0].boards.edit_next = (this.screens.kicad.is_some() && !on).then(|| (value.clone(), std::time::Instant::now()));
     let _ = this.tx.try_send(Command::Action("view-board".into(), value));
     cx.notify();
 }
@@ -70,17 +70,17 @@ pub fn editor_follows(picked: &str, age: std::time::Duration, editing: bool, all
 /// After a picture: KiCad in the pane moves to the board picked in the Boards menu (the pane of the old board is let go; its KiCad stays
 /// warm in the hub, as after View).
 pub fn edit_due(this: &mut Backplane, cx: &mut Context<Backplane>) {
-    let Some((picked, at)) = this.screens.plotview.boards.edit_next.clone() else { return };
+    let Some((picked, at)) = this.screens.plots[0].boards.edit_next.clone() else { return };
     match editor_follows(&picked, at.elapsed(), this.screens.kicad.is_some(), &list(&this.data["thread"]["viewer"])) {
-        Some(true) => { this.screens.plotview.boards.edit_next = None; this.kicad_view(cx); this.kicad_edit(cx); }
-        Some(false) => { this.screens.plotview.boards.edit_next = None; }
+        Some(true) => { this.screens.plots[0].boards.edit_next = None; this.kicad_view(cx); this.kicad_edit(cx); }
+        Some(false) => { this.screens.plots[0].boards.edit_next = None; }
         None => {}
     }
 }
 /// Escape while the menu is open shuts it (main.rs's ClosePopup asks here first). True when it took the key.
 pub fn escape(this: &mut Backplane, cx: &mut Context<Backplane>) -> bool {
-    if !this.screens.plotview.boards.open { return false }
-    this.screens.plotview.boards.open = false; cx.notify(); true
+    if !this.screens.plots[0].boards.open { return false }
+    this.screens.plots[0].boards.open = false; cx.notify(); true
 }
 
 /// The button and, while open, its menu; None for a project with one board (the hub lists two or more).
@@ -122,7 +122,7 @@ fn popup(cx: &mut Context<Backplane>, light: bool, viewer: &Value, ui: &BoardsUi
     let rows = matching(all, &q);
     let mut menu = div().id("boards-menu").mt(px(4.)).w(px(420.)).max_h(px(480.)).overflow_y_scroll().flex().flex_col().gap(px(3.)).p(px(7.))
         .bg(c("panel")).border_1().border_color(c("line")).shadow_lg().text_size(crate::scale::tpx(12.)).occlude()
-        .on_mouse_down_out(cx.listener(|this, _, _, cx| { this.screens.plotview.boards.open = false; crate::screens::popover::shut("boards"); cx.notify(); }))
+        .on_mouse_down_out(cx.listener(|this, _, _, cx| { this.screens.plots[0].boards.open = false; crate::screens::popover::shut("boards"); cx.notify(); }))
         .child(div().px_1().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("Find a board")));
     if let Some(f) = ui.find.clone() { menu = menu.child(div().id("boards-find").px_2().py_1().bg(c("bg")).border_1().border_color(c("line")).child(f)); }
     let root = viewer["boardsRoot"].as_str().unwrap_or("");
