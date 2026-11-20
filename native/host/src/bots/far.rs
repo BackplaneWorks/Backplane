@@ -43,6 +43,10 @@ impl Bots {
         self.machines().into_iter().find(|(id, name, _)| id.to_lowercase() == w || name.to_lowercase() == w || (!ww.is_empty() && super::mesh::word(name) == ww)).map(|(id, _, _)| id)
     }
     fn machine_name(&self, link: &str) -> String { self.machines().into_iter().find(|m| m.0 == link).map(|m| m.1).filter(|n| !n.is_empty()).unwrap_or_else(|| link.to_string()) }
+    /// Members as a set, each `name@machine` named by its link (`name@<link>`): two spellings of the same members compare equal
+    fn by_link(&self, members: &[String]) -> std::collections::BTreeSet<String> {
+        members.iter().map(|m| match m.rsplit_once('@') { Some((n, mach)) => self.machine_link(mach).map_or_else(|| m.clone(), |l| format!("{n}@{l}")), None => m.clone() }).collect()
+    }
     /// The one link a room's `name@machine` members are on ("" for none); a second machine is not served
     pub fn remote_link(&self, members: &[String]) -> Vec<String> {
         let mut v: Vec<String> = vec![];
@@ -149,7 +153,8 @@ impl Bots {
         // the room's life as the other machine has it (world.rs `life`: a machine from before the fields sends neither, and the copy keeps its own)
         let was = existing.as_ref().filter(|r| !r.deleted).map_or((false, false), |r| (r.ephemeral, r.closed));
         let life = super::world::life(p, was);
-        if let Some(r) = existing.as_ref().filter(|r| !r.deleted) { let (mut a, mut b) = (r.members.clone(), members.clone()); a.sort(); b.sort(); if a == b && r.name == name && life == was { return (200, "ok".into()) } }
+        // members are compared by the link they are on: a room made here keeps `bob@m1` as typed, the same bot told back by a third machine reads `bob@L01`
+        if let Some(r) = existing.as_ref().filter(|r| !r.deleted) { if self.by_link(&r.members) == self.by_link(&members) && r.name == name && life == was { return (200, "ok".into()) } }
         let text = members.join("\n");
         self.far.applied.lock().unwrap().insert((room.clone(), link.to_string()), text.clone());
         match self.hub.commit(&json!({"$":"RoomSet","id":room,"name":name,"members":text,"ephemeral":life.0,"closed":life.1,"at":now})).await { Ok(_) => (200, "ok".into()), Err(e) => (503, format!("{e:#}")) }
