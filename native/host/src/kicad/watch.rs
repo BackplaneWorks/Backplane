@@ -1003,7 +1003,8 @@ mod tests {
         assert_eq!(kind_of("3d-full"), Some(4)); assert_eq!(kind_of(""), None); assert_eq!(kind_of("split:sb3"), None);
         assert!(is_version("git\tx") && is_version("diff\na") && !is_version("/p/b.kicad_pcb"));
     }
-    #[tokio::test] async fn presenter_gerber_watch_with_pipe_in_root_preserves_root_through_reader() {
+    // '|' is not allowed in a Windows file name, so no project root there has one: the case is Unix's (and the folder cannot be made on Windows)
+    #[cfg(unix)] #[tokio::test] async fn presenter_gerber_watch_with_pipe_in_root_preserves_root_through_reader() {
         let d = crate::plat::tmp::dir("gerb-pipe-watch");
         let piped = d.join("proj|pipe");
         std::fs::create_dir_all(piped.join("mfg")).unwrap();
