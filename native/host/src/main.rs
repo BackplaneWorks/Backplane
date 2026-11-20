@@ -116,6 +116,8 @@ async fn main() {
     if std::env::args().nth(1).as_deref() == Some("--mcp-run") { let a: Vec<String> = std::env::args().skip(2).collect(); std::process::exit(mcpx::run::main(&a)) }
     if std::env::args().nth(1).as_deref() == Some("--mcp-headers") { let a: Vec<String> = std::env::args().skip(2).collect(); std::process::exit(mcpx::run::headers_main(&a)) }
     if std::env::args().nth(1).as_deref() == Some("--render") { std::process::exit(render_cli()) }
+    if std::env::args().nth(1).as_deref() == Some("--tool") { let a: Vec<String> = std::env::args().skip(2).collect(); std::process::exit(agents::attach::tool_main(&a)) }
+    if std::env::args().nth(1).as_deref() == Some("--mcp-attach") { let a: Vec<String> = std::env::args().skip(2).collect(); std::process::exit(agents::attach::mcp_main(&a)) }
     let args = match parse() { Ok(a) => a, Err(code) => std::process::exit(code) };
     plat::hub::exit_on_signals(files::kicad::embed::shutdown_all);
     if let Err(e) = run(args).await { eprintln!("backplane-hub: {e:#}"); std::process::exit(exit_code(&e)) }

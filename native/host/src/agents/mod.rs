@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod account_tools; pub mod halt; pub mod halt_view; pub mod review_mode; pub mod kicadsel; pub mod mcp_stdio; pub mod bundled; pub mod kistack; pub mod speed; pub mod mailroom; pub mod recall; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod iconpick; pub mod groupname; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod snapguard; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod unanswered; pub mod wake; pub mod world;
+pub mod account_tools; pub mod attach; pub mod halt; pub mod halt_view; pub mod review_mode; pub mod kicadsel; pub mod mcp_stdio; pub mod bundled; pub mod kistack; pub mod speed; pub mod mailroom; pub mod recall; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod iconpick; pub mod groupname; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod snapguard; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod unanswered; pub mod wake; pub mod world;
 #[cfg(test)] mod tests;
 #[cfg(test)] mod laws;
 
@@ -154,6 +154,7 @@ impl Agents {
         iconpick::start(&ag, &hub); // project icons picked by Haiku, off to the side
         groupname::start(&ag, &hub, before_recover); // sidebar group names picked by Haiku the same way (present/sections.rs)
         hub.register_http(Arc::new(devturns::DevTurns(ag.clone())));
+        hub.register_http(Arc::new(attach::AttachHttp(ag.clone())));
         hub.register_http(Arc::new(devturns::AccountRetry(ag.clone())));
         hub.register_http(Arc::new(locks::Http(ag.clone())));
         wake::Wakes::start(ag.clone()).await; // wake_on / wake_list / wake_cancel
