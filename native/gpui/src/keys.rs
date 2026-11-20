@@ -371,9 +371,16 @@ impl Backplane {
         if h == Held::Projects && mac() && self.input.focus_handle(cx).contains_focused(window, cx) { return Held::None }
         h
     }
-    /// Only the canvases drawn on this page can spend Escape on a highlight.
-    fn escape_plot_slots(open: &str, split: &[&str]) -> [bool; 3] {
-        [matches!(open, "board" | "schematic" | "gerbers"), open == "split" && split.contains(&"sch"), open == "split" && split.contains(&"pcb")]
+    /// Returns (consume the probe, clear all local and hub highlights, close the viewer).
+    fn escape_plan(open: Option<&str>, diff: bool, split: &[&str], lit: [bool; 3], kept: bool, solid_probe: bool) -> (bool, bool, bool) {
+        let consume = !diff && match open {
+            Some("board" | "schematic" | "gerbers") => lit[0],
+            Some("split") => (split.contains(&"sch") && lit[1]) || (split.contains(&"pcb") && lit[2])
+                || (split.contains(&"3d") && solid_probe),
+            Some("3d" | "mech") => solid_probe,
+            _ => false,
+        };
+        (consume, kept || lit.contains(&true) || consume, open.is_some() && !consume)
     }
     fn clear_escape_probe(plots: [&mut crate::screens::plotview::PlotView; 3]) -> bool {
         let mut cleared = false;
@@ -393,28 +400,26 @@ impl Backplane {
         if self.screens.ctx_open { self.screens.ctx_open = false; return true }
         if window.context_stack().iter().any(|k| ESC_OWNERS.iter().any(|o| k.contains(o))) { return false }
         let thread = &self.data["thread"];
-        let viewer_open = crate::screens::viewer::is_open(thread);
-        let open = if viewer_open && !thread["diff"].is_object() { thread["viewer"]["open"].as_str().unwrap_or("") } else { "" };
-        let split = if open == "split" { crate::screens::viewer::split_visible() } else { Vec::new() };
-        let slots = Self::escape_plot_slots(open, &split);
-        let solid = matches!(open, "3d" | "mech") || split.contains(&"3d");
+        let open = crate::screens::viewer::is_open(thread).then(|| thread["viewer"]["open"].as_str().unwrap_or(""));
+        let split = if open == Some("split") { crate::screens::viewer::split_visible() } else { Vec::new() };
         let kept = thread["viewer"]["probe"].as_str().is_some_and(|p| !p.is_empty());
-        let solid_probe = kept && solid && !crate::screens::plotview::probed_part(self).is_empty();
-        let consume = solid_probe || slots.into_iter().enumerate().any(|(slot, shown)| {
-            let plot = self.screens.pv(slot);
-            shown && (plot.picked.is_some() || plot.card.is_some() || !plot.lit.is_empty())
-        });
+        let [sch, pcb] = &self.screens.split_pv;
+        let lit = [&self.screens.plotview, sch, pcb].map(|p| p.picked.is_some() || p.card.is_some() || !p.lit.is_empty());
+        let (consume, clear_all, close) = Self::escape_plan(open, thread["diff"].is_object(), &split, lit, kept,
+            kept && !crate::screens::plotview::probed_part(self).is_empty());
         if !consume {
             // A focused browser or an open management panel gets Escape before the viewer closes.
             let in_viewer = window.context_stack().iter().any(|k| k.contains("Viewer"));
             if in_viewer && crate::screens::viewer::active_kind(&self.data["thread"]["viewer"], None) == "browser" { return false }
             if crate::screens::mgmt::escape(self, cx) { return true }
         }
-        let [sch, pcb] = &mut self.screens.split_pv;
-        let cleared = Self::clear_escape_probe([&mut self.screens.plotview, sch, pcb]);
-        if cleared || kept { crate::screens::plotview::keep_probe(self, None); }
+        if clear_all {
+            let [sch, pcb] = &mut self.screens.split_pv;
+            Self::clear_escape_probe([&mut self.screens.plotview, sch, pcb]);
+            crate::screens::plotview::keep_probe(self, None);
+        }
         if consume { return true }
-        if viewer_open {
+        if close {
             self.screens.rail_pending = Some(String::new()); self.screens.rail_at = Some(std::time::Instant::now());
             let _ = self.tx.try_send(crate::screens::viewer::close()); self.want_focus = true; return true
         }
@@ -523,6 +528,17 @@ mod tests {
     }
     fn d(key: &str, ctx: &[&str]) -> String { does(&Local::default(), key, ctx) }
 
+    #[test] fn escape_routes_by_the_page_and_split_panes_on_show() {
+        let plan = Backplane::escape_plan;
+        // Main consumes Escape for any lit slot. The first three cases fail there:
+        // focus stays in the composer, Diff stays open, or a hidden board prevents Split closing.
+        assert_eq!(plan(None, false, &[], [true, false, false], false, false), (false, true, false));
+        assert_eq!(plan(Some("board"), true, &[], [true, false, false], true, false), (false, true, true));
+        assert_eq!(plan(Some("split"), false, &["sch"], [false, false, true], true, false), (false, true, true));
+        assert_eq!(plan(Some("split"), false, &["sch"], [false, true, false], true, false), (true, true, false));
+        assert_eq!(plan(Some("3d"), false, &[], [false; 3], true, true), (true, true, false));
+        assert_eq!(plan(None, false, &[], [false; 3], true, false), (false, true, false));
+    }
     #[test] fn a_closed_viewers_stale_highlight_leaves_escape_for_composer_blur() {
         let mut plots: [crate::screens::plotview::PlotView; 3] = Default::default();
         plots[0].lit.push((0, 1));
