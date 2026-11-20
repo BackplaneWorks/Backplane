@@ -144,9 +144,34 @@ mod imp {
         c.create_window(scr.root_depth, id, parent, 0, 0, 1, 1, 0, WindowClass::INPUT_OUTPUT, scr.root_visual,
             &CreateWindowAux::new().background_pixmap(x11rb::NONE).border_pixel(scr.black_pixel).colormap(scr.default_colormap)
                 .event_mask(EventMask::SUBSTRUCTURE_NOTIFY)).ok()?.check().ok()?;
-        let _ = c.flush(); containers().lock().unwrap().insert(id); Some(id as u64)
+        let _ = c.flush(); containers().lock().unwrap().insert(id);
+        focus_proxy(c, parent);
+        Some(id as u64)
     }
     pub fn container_for(parent: u64, _key: &str) -> Option<u64> { container(parent) }
+    /// Per top-level that holds a pane: a window of ours that is not an ancestor of KiCad's frame, holding the X focus while Backplane has
+    /// the keyboard. With the focus on the top-level itself, core X gave every key to the window under the pointer when that was inside it,
+    /// and KiCad's frame is (the top-level > our container > KiCad): typing in the composer with the pointer resting over the pane ran KiCad's
+    /// hotkeys (the right-rail lead's gate a2; as long as the pane has been embedded on Linux). Focused here, the keys go to this window and
+    /// propagate to the top-level (it selects none), where GPUI reads them as before; GPUI's window stays active (a FocusOut with detail
+    /// Inferior is not a deactivation: client.rs). InputOnly, 1x1, outside the window: never under the pointer, never drawn.
+    fn proxies() -> &'static Mutex<std::collections::HashMap<u32, u32>> { static P: OnceLock<Mutex<std::collections::HashMap<u32, u32>>> = OnceLock::new(); P.get_or_init(Default::default) }
+    fn focus_proxy(c: &RustConnection, top: u32) -> Option<u32> {
+        if let Some(p) = proxies().lock().unwrap().get(&top).copied() { return Some(p) }
+        let id = c.generate_id().ok()?;
+        c.create_window(0, id, top, -10, -10, 1, 1, 0, WindowClass::INPUT_ONLY, x11rb::COPY_FROM_PARENT, &CreateWindowAux::new()).ok()?.check().ok()?;
+        let _ = c.map_window(id);
+        // the top-level's focus changes come to our connection too (each client selects its own): a focus put on it (the window manager,
+        // GPUI's activate) moves on to the proxy at once (pump)
+        let mask = c.get_window_attributes(top).ok().and_then(|r| r.reply().ok()).map(|a| u32::from(a.your_event_mask)).unwrap_or(0);
+        let _ = c.change_window_attributes(top, &ChangeWindowAttributesAux::new().event_mask(EventMask::from(mask | u32::from(EventMask::FOCUS_CHANGE))));
+        let _ = c.flush();
+        proxies().lock().unwrap().insert(top, id);
+        if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_focus_proxy": id, "top": top})); }
+        Some(id)
+    }
+    /// The window the keyboard goes to when it is Backplane's in top-level `w`: its focus proxy, else `w` itself
+    fn home_of(w: u32) -> u32 { proxies().lock().unwrap().get(&w).copied().unwrap_or(w) }
     /// Every child of `old` (stock KiCad's frames, or the fork's holder) moved into `new`, unmapped where it was not shown: a pane moved to
     /// another window (popped out, or back in) takes KiCad with it, its state untouched.
     pub fn move_frames(old: u64, new: u64) {
@@ -590,7 +615,9 @@ mod imp {
     /// X11: no activation takes the keys back after a close: hand in at once
     pub fn activated_after_close(_main: u64, _popped: u64) -> bool { true }
     pub fn keep_focus(_top: u64) -> bool { false }
-    pub fn note_pane_keys(_kicad: bool) {}
+    /// Whether KiCad has the keyboard now (the pane's tick): while it has, a focus on the top-level is left where it is (pump)
+    static PANE_KEYS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    pub fn note_pane_keys(kicad: bool) { PANE_KEYS.store(kicad, std::sync::atomic::Ordering::SeqCst); }
     /// Windows only (the F3 input shield): Linux has its button grab (grab_click).
     pub fn shield(_container: u64, _on: bool) {}
     pub fn shield_tick(_container: u64, _shown: Option<u64>) {}
@@ -605,7 +632,7 @@ mod imp {
     #[track_caller]
     pub fn focus(w: u64) {
         if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {{\"kicad_focus\":{w},\"at\":\"{}\"}}", std::panic::Location::caller()); }
-        let w = w as u32;
+        let w = home_of(w as u32);
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let viewable = c.get_window_attributes(w).ok().and_then(|r| r.reply().ok()).map_or(false, |a| a.map_state == MapState::VIEWABLE);
         if viewable { let _ = c.set_input_focus(InputFocus::PARENT, w, x11rb::CURRENT_TIME); let _ = c.flush(); }
@@ -749,6 +776,16 @@ mod imp {
                 x11rb::protocol::Event::ButtonPress(b) => {
                     let _ = c.allow_events(Allow::REPLAY_POINTER, b.time);
                     out.push(super::Ev::Click);
+                }
+                // the focus put on a top-level of ours itself (the window manager on a click or activation, GPUI's activate): on to its proxy,
+                // unless KiCad has the keyboard (a hand-in in flight). Not when it went into a child (the proxy, KiCad, the Browser's Chromium)
+                x11rb::protocol::Event::FocusIn(f) if !PANE_KEYS.load(std::sync::atomic::Ordering::SeqCst) => {
+                    let proxy = proxies().lock().unwrap().get(&f.event).copied();
+                    if let Some(p) = proxy {
+                        if c.get_input_focus().ok().and_then(|r| r.reply().ok()).is_some_and(|r| r.focus == f.event) {
+                            let _ = c.set_input_focus(InputFocus::PARENT, p, x11rb::CURRENT_TIME);
+                        }
+                    }
                 }
                 x11rb::protocol::Event::ClientMessage(m) if m.format == 32 => {
                     let d = m.data.as_data32();
