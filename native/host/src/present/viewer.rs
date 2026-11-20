@@ -1497,6 +1497,9 @@ pub fn show_want(kind: &str, shown: &str, root: &str, d: &ShowDefaults) -> ShowW
 /// the one `want` names: the page, and its source compared whole (a key with no path is the project's own file, resolved to its name first). Already
 /// showing counts. A report with no page, no key or an empty one never matches a page that has a source; only Browser and Review, and Files with no
 /// folder named, match by page alone.
+/// One file named two ways: on Windows the project's own files come with `\` (kicad::project) and a path an agent or the desktop gives often
+/// with `/` (`C:\p/unit.kicad_pcb`); a show of the project's board by its full path is that board.
+fn same_path(a: &str, b: &str) -> bool { a == b || (cfg!(windows) && a.replace('\\', "/") == b.replace('\\', "/")) }
 pub fn show_settled(want: &ShowWant, report: &Value, d: &ShowDefaults) -> bool { show_settled_with(want, report, d, None) }
 /// `show_settled`, with the board and schematic the session resolved a Split show to (else the board asked and its sibling).
 pub fn show_settled_with(want: &ShowWant, report: &Value, d: &ShowDefaults, resolved: Option<&(String, String)>) -> bool {
@@ -1520,7 +1523,7 @@ pub fn show_settled_with(want: &ShowWant, report: &Value, d: &ShowDefaults, reso
     match want.kind.as_str() {
         "board" | "3d" | "schematic" | "gerbers" => {
             if want.source.is_empty() { return false }
-            resolve_path(key_path(), &want.kind).is_some_and(|have| !have.is_empty() && have == want.source)
+            resolve_path(key_path(), &want.kind).is_some_and(|have| !have.is_empty() && same_path(&have, &want.source))
         }
         // Split settles on the board its panes draw: the pane keyed `0|`, not the Split's own key
         "split" => {
@@ -1535,11 +1538,11 @@ pub fn show_settled_with(want: &ShowWant, report: &Value, d: &ShowDefaults, reso
                 return has("board", &board) && has("schematic", &sch);
             }
             let pane = report["panes"].as_array().and_then(|ps| ps.iter().filter_map(Value::as_str).find(|k| k.starts_with("0|")));
-            resolve_path(pane.and_then(path_of), "board").is_some_and(|have| !have.is_empty() && have == want.source)
+            resolve_path(pane.and_then(path_of), "board").is_some_and(|have| !have.is_empty() && same_path(&have, &want.source))
         }
         "mech" => report["part"].as_str().is_some_and(|p| !p.is_empty() && p == want.source),
-        "files" => want.source.is_empty() || report["dir"].as_str().is_some_and(|d| trim_end(d) == want.source),
-        "file" => report["file"].as_str().filter(|u| !u.is_empty()).is_some_and(|u| trim_end(&url_path(u)) == want.source),
+        "files" => want.source.is_empty() || report["dir"].as_str().is_some_and(|d| same_path(&trim_end(d), &want.source)),
+        "file" => report["file"].as_str().filter(|u| !u.is_empty()).is_some_and(|u| same_path(&trim_end(&url_path(u)), &want.source)),
         _ => true,
     }
 }

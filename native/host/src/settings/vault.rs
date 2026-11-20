@@ -494,6 +494,9 @@ mod tests {
     #[cfg(windows)]
     #[test] fn the_windows_credential_manager_keeps_the_key_and_a_copy_never_touches_it() {
         let _l = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // an ssh (network) logon, as the landing gate's VM runs the tests in, has no Credential Manager session: nothing to test there (the
+        // vault then keeps its key in a file, vault.rs `put_any`); GitHub's runner service and a person's desktop have one
+        if crate::plat::creds::no_logon_session() { eprintln!("skipped: this logon has no Credential Manager session (ERROR_NO_SUCH_LOGON_SESSION)"); return }
         let dir = crate::plat::tmp::dir("wincred");
         let v = Vault { home: dir.to_path_buf(), items: vec![], key: None, backend: String::new(), locked: false, why: String::new(), flush: String::new() };
         std::env::remove_var("BACKPLANE_VAULT_KEYRING"); assert_eq!(offer_with(false), "wincred");
