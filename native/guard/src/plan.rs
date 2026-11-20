@@ -148,6 +148,30 @@ pub fn holds_proof(health: &serde_json::Value) -> bool {
     health["folding"].as_u64().unwrap_or(0) > 0 || health["migrating"]["state"] == "running" || health["status"] == "migrating"
 }
 
+/// The machine slept since the last look: the wall clock moved this much more than the monotonic one (`Instant`, which stops in sleep on macOS
+/// and Linux). A clock set by hand or by NTP can look the same; that only costs a short grace.
+pub const SLEEP_JUMP_S: u64 = 10;
+/// How long after a wake a failed health check is not counted: a Mac's DarkWake lasts about 2 s, too short for the hub's 10 s checks to run, and
+/// a full wake gives the hub one round of them to catch up.
+pub const WAKE_GRACE_S: u64 = 30;
+/// Tells a sleep from a hang. `tick` each turn of the guard's loop: true when the machine slept since the last tick.
+pub struct SleepClock { last: Option<(std::time::SystemTime, std::time::Instant)>, woke: Option<std::time::Instant> }
+impl SleepClock {
+    pub fn new() -> SleepClock { SleepClock { last: None, woke: None } }
+    pub fn tick(&mut self, wall: std::time::SystemTime, mono: std::time::Instant) -> bool {
+        let slept = self.last.map_or(false, |(w, m)| {
+            let dw = wall.duration_since(w).map_or(0, |d| d.as_secs());
+            let dm = mono.saturating_duration_since(m).as_secs();
+            dw > dm + SLEEP_JUMP_S
+        });
+        self.last = Some((wall, mono));
+        if slept { self.woke = Some(mono) }
+        slept
+    }
+    /// Whether `mono` is within the grace after the last wake.
+    pub fn waking(&self, mono: std::time::Instant) -> bool { self.woke.map_or(false, |w| mono.saturating_duration_since(w).as_secs() < WAKE_GRACE_S) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,5 +298,21 @@ mod tests {
         assert!(!holds_proof(&json!({"status": "ok", "folding": 0})), "nothing running: the clock runs");
         assert!(!holds_proof(&json!({"status": "ok", "folding": 0, "migrating": null})));
         assert!(!holds_proof(&serde_json::Value::Null), "an old build's /hello says neither");
+    }
+
+    #[test] fn a_sleep_is_told_from_a_hang_by_the_two_clocks() {
+        use std::time::{Duration, Instant, SystemTime};
+        let (w0, m0) = (SystemTime::now(), Instant::now());
+        let mut c = SleepClock::new();
+        assert!(!c.tick(w0, m0), "the first look has nothing to compare");
+        assert!(!c.tick(w0 + Duration::from_secs(5), m0 + Duration::from_secs(5)), "awake: both clocks moved together");
+        assert!(!c.waking(m0 + Duration::from_secs(5)));
+        // 17 minutes asleep: the wall clock jumps, the monotonic one barely moves
+        let (w, m) = (w0 + Duration::from_secs(1057), m0 + Duration::from_secs(6));
+        assert!(c.tick(w, m), "a sleep");
+        assert!(c.waking(m + Duration::from_secs(2)), "a DarkWake's probe is not counted");
+        assert!(!c.waking(m + Duration::from_secs(WAKE_GRACE_S)), "the grace ends");
+        assert!(!c.tick(w + Duration::from_secs(3), m + Duration::from_secs(3)), "awake again");
+        assert!(!c.tick(w, m + Duration::from_secs(4)), "a wall clock set back is no sleep");
     }
 }

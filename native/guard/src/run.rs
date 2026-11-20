@@ -247,7 +247,12 @@ impl Guard {
         let mut child = match self.spawn() { Ok(c) => c, Err(e) => return e };
         self.hub_pid = child.id(); self.pin(); self.publish();
         let (t0, mut ready_at, mut misses, mut last_probe, mut last_said) = (Instant::now(), None::<Instant>, 0u32, Instant::now(), String::new());
+        // the start's progress on the clock the hub's own timers run on (`Instant`, stopped while the machine sleeps): the phase file's age by the wall
+        // clock counts a night's sleep as a stall ("start stalled for 1054 s" at the first wake after 17 minutes asleep)
+        let (mut phase_seen, mut phase_at) = (None::<std::time::SystemTime>, t0);
+        let mut clock = plan::SleepClock::new();
         loop {
+            if clock.tick(std::time::SystemTime::now(), Instant::now()) { misses = 0; say("the machine slept; health checks start counting again"); }
             if sys::stop_asked() { self.quit(Some(&mut child)) }
             match child.try_wait() {
                 Ok(Some(s)) => { self.hub_pid = 0; return self.classify(s) }
@@ -281,11 +286,13 @@ impl Guard {
                     }
                     None if well => { ready_at = Some(Instant::now()); say(&format!("{} answers, {} ms after its start", Self::short(&self.build), t0.elapsed().as_millis())); self.set(if self.mode == Mode::Safe { "safe" } else { "running" }); if control && !self.has_control(&self.build) { let mut c = self.d.lines("control"); c.push(self.build.clone()); let from = c.len().saturating_sub(32); let _ = self.d.put("control", &(c[from..].join("\n") + "\n")); } }
                     None => {
-                        let quiet = fs::metadata(self.d.path("phase")).ok().and_then(|m| m.modified().ok()).and_then(|m| m.elapsed().ok()).map_or(t0.elapsed().as_secs(), |e| e.as_secs());
+                        let m = fs::metadata(self.d.path("phase")).ok().and_then(|m| m.modified().ok());
+                        if m.is_some() && m != phase_seen { phase_seen = m; phase_at = Instant::now(); }
+                        let quiet = phase_at.elapsed().as_secs();
                         if quiet >= self.tm.stall || t0.elapsed().as_secs() >= self.tm.boot { let ph = self.d.text("phase"); return self.kill_hung(&mut child, &format!("start stalled for {quiet} s at {}", if ph.trim().is_empty() { "its first step" } else { ph.trim() })) }
                     }
                     Some(at) => {
-                        if well || answered { misses = 0 } else { misses += 1; last_said = said.clone(); say(&format!("health check {misses} of {} failed: {}", self.tm.misses, said.chars().take(160).collect::<String>())) }
+                        if well || answered { misses = 0 } else if clock.waking(Instant::now()) { say(&format!("health check failed just after a wake, not counted: {}", said.chars().take(160).collect::<String>())) } else { misses += 1; last_said = said.clone(); say(&format!("health check {misses} of {} failed: {}", self.tm.misses, said.chars().take(160).collect::<String>())) }
                         if misses >= self.tm.misses { let why = format!("stopped answering: {}", last_said.chars().take(160).collect::<String>()); return self.kill_hung(&mut child, &why) }
                         // the clock that proves a build starts when its folds and any migration are over: a crash at the end of a long fold or import is the
                         // start failing, while a long import itself is not (plan::holds_proof)
