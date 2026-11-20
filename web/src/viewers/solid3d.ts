@@ -7,6 +7,7 @@
 //   - Smooth vertex normals decoded off-thread by mesh-worker.ts; zero idle repaint loops
 
 import { fnv1a64Hex, type CborValue } from "./cbor.ts";
+import { solidViewAngles, type SolidViewName } from "./viewer-tools.ts";
 
 export interface Solid3DCallbacks {
   onStatus?: (msg: string, streaming?: boolean) => void;
@@ -302,11 +303,12 @@ export class Solid3DViewer {
   private partsDone = 0;
 
   // Orbit camera state
+  private center: [number, number, number] = [0, 0, 0];
   private target: [number, number, number] = [0, 0, 0];
   private radius = 50;
   private dist = 120;
-  private yaw = 0.55;
-  private pitch = 0.65;
+  private yaw = 0.6;
+  private pitch = 0.7;
   private lightTheme = false;
 
   private dirty = false;
@@ -454,7 +456,8 @@ export class Solid3DViewer {
     if (msg.kind === "solid") {
       this.deleteBatch(this.boardBatch);
       this.boardBatch = this.uploadBatch(msg.positions, msg.normals, msg.colors, 0);
-      this.target = msg.center;
+      this.center = [msg.center[0], msg.center[1], msg.center[2]];
+      this.target = [msg.center[0], msg.center[1], msg.center[2]];
       this.radius = msg.radius;
       this.fit();
       this.cbs.onStatus?.("");
@@ -599,11 +602,26 @@ export class Solid3DViewer {
   }
 
   fit(): void {
+    this.setView("fit");
+  }
+
+  /** Named camera view preset matching native/gpui/src/viewers/solid.rs Camera::named. */
+  setView(view: SolidViewName): void {
     const fov = (35 * Math.PI) / 180;
     this.dist = (this.radius / Math.sin(fov * 0.5)) * 1.15;
-    this.yaw = 0.55;
-    this.pitch = 0.65;
+    this.target = [this.center[0], this.center[1], this.center[2]];
+    const { yaw, pitch } = solidViewAngles(view);
+    this.yaw = yaw;
+    this.pitch = pitch;
     this.scheduleDraw();
+  }
+
+  /** Capture the current rendered canvas as a PNG blob (Snap view). */
+  snapPng(): Promise<Blob | null> {
+    this.draw(performance.now());
+    return new Promise((resolve) => {
+      this.canvas.toBlob((blob) => resolve(blob), "image/png");
+    });
   }
 
   private scheduleDraw(): void {
