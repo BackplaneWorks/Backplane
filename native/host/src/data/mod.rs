@@ -5,6 +5,7 @@
 //! pushes (`thread`, `project`, `entry`, `text`, `turn`) for the lists and threads a connection asked for.
 pub(crate) mod ext;
 pub(crate) mod link;
+mod open;
 pub mod term;
 pub mod webpolicy;
 pub mod layout;
@@ -23,7 +24,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -846,6 +847,10 @@ async fn handle_for(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, v: &Value, is
             _ => Err(err("topic: lists, thread or sub")),
         },
         "unsubscribe" => { let n = p["sub"].as_u64().unwrap_or(0); subs.subs.retain(|(i, _)| *i != n); Ok(json!({})) }
+        // feature "open": the thread's page and panels in one reply, by hashed parts (data/open.rs)
+        "thread.open" => open::thread_open(hub, c, subs, &p, is_browser).await,
+        // feature "shell": the sidebar in one reply, by hashed parts per project (data/open.rs)
+        "shell.sync" => open::shell_sync(hub, c, subs, &p, is_browser).await,
         _ => match term::call(hub, c.client, &mut subs.terms, m, &p).await { Some(r) => r, None => call(hub, c, m, &p, is_browser).await },
     };
     match res { Ok(r) => json!({"t":"reply","id":id,"ok":true,"result":r}), Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}) }

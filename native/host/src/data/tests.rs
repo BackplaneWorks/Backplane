@@ -65,10 +65,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -1378,4 +1378,60 @@ async fn viewer_layout_over_a_socket_is_per_device_pushed_and_refuses_in_code_ke
     // no z: as before
     let mut ws = open(port, "&enc=json").await; let hello = next(&mut ws).await; assert!(hello.get("z").is_none());
     let r = ask(&mut ws, 1, "projects.list", json!({})).await; assert_eq!(r["ok"], true);
+}
+
+/// `thread.open` (feature `open`): cold, everything with its hashes; held and unchanged, nothing but the subscription and the hashes; a new message or an ask answered,
+/// only what changed (an entry changed in place, which a sequence cursor would miss).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn thread_open_sends_only_the_parts_a_client_does_not_hold() {
+    let (h, port) = up("threadopen").await;
+    let mut ws = open(port, "&enc=json").await; let _ = next(&mut ws).await;
+    let have_of = |r: &Value, held: &mut serde_json::Map<String, Value>| {
+        for (k, v) in r["h"].as_object().unwrap() { held.insert(k.clone(), v.clone()); }
+        for e in r["entries"].as_array().unwrap() { held.insert(e["id"].as_str().unwrap().into(), e["h"].clone()); }
+    };
+    let cold = ask(&mut ws, 1, "thread.open", json!({"thread":"t1"})).await; let c = &cold["result"];
+    assert_eq!(cold["ok"], true, "{cold}"); assert!(c["sub"].as_u64().unwrap() > 0);
+    for k in ["thread", "ids", "work", "queue", "buy", "rail"] { assert!(c.get(k).is_some(), "a cold open has {k}: {c}") }
+    let ids: Vec<&str> = c["ids"].as_array().unwrap().iter().map(|i| i.as_str().unwrap()).collect();
+    assert_eq!(ids.len(), c["entries"].as_array().unwrap().len(), "every entry of the page, each once");
+    assert!(c["entries"].as_array().unwrap().iter().all(|e| e["h"].as_str().map_or(false, |x| x.len() == 16)), "each entry carries its hash");
+    let plain = ask(&mut ws, 2, "thread.entries", json!({"thread":"t1"})).await;
+    assert_eq!(ids, plain["result"]["entries"].as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect::<Vec<_>>(), "the same page thread.entries reads");
+    let mut held = serde_json::Map::new(); have_of(c, &mut held);
+    let warm = ask(&mut ws, 3, "thread.open", json!({"thread":"t1","have":held})).await; let w = &warm["result"];
+    assert_eq!(w["entries"], json!([]), "{w}"); for k in ["thread", "ids", "work", "queue", "buy", "rail", "next"] { assert!(w.get(k).is_none(), "held and unchanged: no {k}: {w}") }
+    assert!(warm.to_string().len() < 500, "a warm open is small: {} B", warm.to_string().len());
+    // a new message: that entry, the ids, and the thread row (its preview moved); nothing else
+    h.commit(&json!({"$":"MessagePosted","thread":"t1","msg":"m9","role":"assistant","text":"all done","at":1700000100})).await.unwrap();
+    let r = ask(&mut ws, 4, "thread.open", json!({"thread":"t1","have":held})).await; let r = &r["result"];
+    assert_eq!(r["entries"].as_array().unwrap().iter().map(|e| e["id"].clone()).collect::<Vec<_>>(), [json!("m9")], "{r}");
+    assert!(r.get("ids").is_some() && r.get("thread").is_some() && r.get("rail").is_none());
+    have_of(r, &mut held);
+    // the ask answered: its own entry again, changed in place
+    h.commit(&json!({"$":"AskClosed","id":"q1","answer":"yes","at":1700000101})).await.unwrap();
+    let r = ask(&mut ws, 5, "thread.open", json!({"thread":"t1","have":held})).await; let r = &r["result"];
+    let changed: Vec<&str> = r["entries"].as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
+    assert_eq!((changed.len(), r["thread"]["state"].as_str(), r["thread"]["waiting"].as_u64()), (0, Some("idle"), Some(0)), "the thread row again: no longer asking: {r}");
+    assert!(r["ids"].as_array().unwrap().iter().all(|i| i != "ask:q1"), "the answered ask is no entry of the page any more: {r}");
+    assert!(!ask(&mut ws, 6, "thread.open", json!({"thread":"nope"})).await["ok"].as_bool().unwrap());
+}
+
+/// `shell.sync` (feature `shell`): cold, every project with its threads; held and unchanged, only the hashes; a message, only its project again; a project removed, `removed`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn shell_sync_sends_only_the_projects_that_changed() {
+    let (h, port) = up("shellsync").await;
+    let mut ws = open(port, "&enc=json").await; let _ = next(&mut ws).await;
+    let ids = |r: &Value, k: &str| -> Vec<String> { r[k].as_array().map(|a| a.iter().map(|x| x["id"].as_str().unwrap().to_string()).collect()).unwrap_or_default() };
+    let cold = ask(&mut ws, 1, "shell.sync", json!({})).await; let c = cold["result"].clone(); assert_eq!(cold["ok"], true, "{cold}");
+    let mut ps = ids(&c, "projects"); ps.sort(); assert_eq!(ps, ["p1", "p2"]);
+    let mut ts = ids(&c, "threads"); ts.sort(); assert_eq!(ts, ["t1", "t2", "t3"], "every thread under its project");
+    assert!(c["sub"].as_u64().unwrap() > 0 && c["h"]["p:p1"].is_string());
+    let held = c["h"].clone();
+    let warm = ask(&mut ws, 2, "shell.sync", json!({"have":held})).await; let w = &warm["result"];
+    for k in ["projects", "threads", "removed", "sections"] { assert!(w.get(k).is_none(), "nothing changed: no {k}: {w}") }
+    h.commit(&json!({"$":"MessagePosted","thread":"t3","msg":"m9","role":"assistant","text":"news","at":1700000100})).await.unwrap();
+    let r = ask(&mut ws, 3, "shell.sync", json!({"have":held})).await; let r = &r["result"];
+    assert_eq!(ids(r, "projects"), ["p2"], "only t3's project: {r}"); assert_eq!(ids(r, "threads"), ["t3"]);
+    h.commit(&json!({"$":"ProjectRemoved","id":"p2","at":1700000101})).await.unwrap();
+    let r = ask(&mut ws, 4, "shell.sync", json!({"have":held})).await; let r = &r["result"];
+    assert_eq!(r["removed"], json!(["p2"]), "{r}"); assert!(r.get("projects").is_none(), "p1 is as held");
 }
