@@ -228,10 +228,44 @@ pub fn private_route_matches(
         && *handlers == serde_json::json!({"/":{"Proxy":format!("unix:{path}")}})
 }
 
+/// An administrator may have reassigned the endpoint since setup. Only
+/// produce a removal command when the fresh status still names our backend.
+pub fn private_remove_args(
+    config: &Value,
+    service: Option<&str>,
+    hostname: &str,
+    port: u16,
+    socket: &std::path::Path,
+) -> Option<Vec<String>> {
+    let mut args = private_serve_args(service, port, socket)?;
+    let scope = service.map(|name| format!("svc:{name}"));
+    if !private_route_matches(config, scope.as_deref(), hostname, port, socket) {
+        return None;
+    }
+    args.retain(|arg| arg != "--bg");
+    *args.last_mut()? = String::from("off");
+    Some(args)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn disable_preserves_a_reassigned_service_endpoint() {
+        let host = "bp.example.ts.net";
+        let socket = std::path::Path::new("/run/private/browser.sock");
+        let mut state = json!({"Services":{"svc:bp":{"TCP":{"443":{"HTTPS":true}},
+            "Web":{"bp.example.ts.net:443":{"Handlers":{"/":{"Proxy":"unix:/run/private/browser.sock"}}}}}}});
+        assert_eq!(
+            private_remove_args(&state, Some("bp"), host, 443, socket).unwrap(),
+            ["serve", "--service=svc:bp", "--https=443", "off"]
+        );
+        state["Services"]["svc:bp"]["Web"]["bp.example.ts.net:443"]["Handlers"]["/"]["Proxy"] =
+            json!("unix:/run/another/socket");
+        assert!(private_remove_args(&state, Some("bp"), host, 443, socket).is_none());
+    }
 
     #[test]
     fn private_socket_directory_rejects_a_writable_parent() {
