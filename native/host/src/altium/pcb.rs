@@ -55,7 +55,8 @@ fn kp(x: f64, y: f64) -> Pt { Pt { x: x as f32, y: -y as f32 } }
 fn show(x: f64) -> String { let s = format!("{:.4}", x); s.trim_end_matches('0').trim_end_matches('.').to_string() }
 
 /// The streams a board read needs, by storage name ("Tracks6" for "Tracks6/Data").
-pub struct Src(pub HashMap<String, Vec<u8>>);
+/// (and the code page of its 8-bit strings, worked out once when asked)
+pub struct Src(pub HashMap<String, Vec<u8>>, pub std::sync::OnceLock<super::Cp>);
 const STORES: [&str; 15] = ["Rules6", "Board6", "Nets6", "Components6", "Polygons6", "Tracks6", "Arcs6", "Vias6", "Pads6", "Fills6", "Texts6", "Regions6", "ShapeBasedRegions6", "WideStrings6", "ComponentBodies6"];
 impl Src {
     pub fn of(bytes: &[u8]) -> Option<Src> { Src::of_doc(&mut Doc::open(bytes.to_vec())?) }
@@ -63,10 +64,15 @@ impl Src {
         let mut m = HashMap::new();
         for s in STORES { if let Some(b) = d.stream(&format!("{s}/Data")) { m.insert(s.to_string(), b); } }
         if !m.contains_key("Board6") { return None }
-        Some(Src(m))
+        Some(Src(m, Default::default()))
     }
     pub(super) fn get(&self, s: &str) -> &[u8] { self.0.get(s).map(|v| v.as_slice()).unwrap_or(&[]) }
-    pub(super) fn text(&self, s: &str) -> Vec<Props> { pcb_text_records(self.get(s)) }
+    /// a text stream's records, their 8-bit strings in the board's code page
+    pub(super) fn text(&self, s: &str) -> Vec<Props> { let mut v = pcb_text_records(self.get(s)); super::recode(&mut v, self.cp()); v }
+    /// The code page of the board's 8-bit strings (GBK from a Chinese Windows), from its board, net and component records
+    pub(super) fn cp(&self) -> super::Cp {
+        *self.1.get_or_init(|| { let rs: Vec<Props> = ["Board6", "Nets6", "Components6"].iter().flat_map(|s| pcb_text_records(self.get(s))).collect(); super::code_page(rs.iter()) })
+    }
 }
 
 /// A binary stream's records: (index, type, whole record bytes, its sub-records). Stops at the first record that does not fit.
@@ -498,7 +504,7 @@ pub(super) struct PadRec {
 pub(super) fn pad_recs(src: &Src) -> Vec<PadRec> {
     let mut out = vec![];
     for (i, rec, subs) in records(src.get("Pads6"), 2, 6) {
-        let name = { let mut r = Bin::new(subs[0]); let n = r.u8() as usize; super::cp1252(r.bytes(n)) };
+        let name = { let mut r = Bin::new(subs[0]); let n = r.u8() as usize; super::text8(r.bytes(n), src.cp()) };
         let s5 = subs[4];
         if s5.len() < 110 { continue }
         let mut r = Bin::new(s5);
@@ -704,7 +710,7 @@ impl<'a> Ctx<'a> {
                 if rem >= 115 { just_ok = r.u8() != 0 }
             }
             if ft == 2 { continue } // a barcode
-            let text = match self.wide.get(&wide) { Some(s) => s.clone(), None => { let mut q = Bin::new(subs[1]); let n = q.u8() as usize; super::cp1252(q.bytes(n)) } }.replace("\r\n", "\n");
+            let text = match self.wide.get(&wide) { Some(s) => s.clone(), None => { let mut q = Bin::new(subs[1]); let n = q.u8() as usize; super::text8(q.bytes(n), self.src.cp()) } }.replace("\r\n", "\n");
             let m = if offset_border { offset } else { margin };
             let frame = if is_frame { Some((frame_wh.0, frame_wh.1, m, if just_ok { just } else { 3 })) } else { None };
             out.push(Text { rec_i: i, sig: sig(rec), layer: versioned(layer, v7), comp: if comp == NONE { None } else { Some(comp as usize) }, x, y, h, rot, mirror, pen,
@@ -804,6 +810,7 @@ pub(super) fn rules(src: &Src) -> Vec<Props> {
         out.push(Props::parse(&b[i..i + n]));
         i += n;
     }
+    super::recode(&mut out, src.cp());
     out
 }
 /// The board's solder mask expansion, mm: its enabled SolderMaskExpansion rule for All and All of the first priority (as KiCad's
@@ -911,12 +918,25 @@ mod tests {
         let mut m = HashMap::new();
         m.insert("Board6".to_string(), text_rec(board));
         for (k, v) in extra { m.entry(k.to_string()).or_insert_with(Vec::new).extend(v) }
-        Src(m)
+        Src(m, Default::default())
     }
     const TWO: &str = "|LAYER1NAME=Top Layer|LAYER1NEXT=32|LAYER1COPTHICK=1.4mil|LAYER1DIELHEIGHT=60mil|LAYER32NAME=Bottom Layer|LAYER32NEXT=0|LAYER32COPTHICK=1.4mil\
 |KIND0=0|VX0=0mil|VY0=0mil|KIND1=0|VX1=1000mil|VY1=0mil|KIND2=0|VX2=1000mil|VY2=1000mil|KIND3=0|VX3=0mil|VY3=1000mil";
     fn near(a: f32, b: f32) -> bool { (a - b).abs() < 1e-3 }
 
+    #[test] fn chinese_component_strings_read_as_gbk() {
+        // a board from a Chinese Windows: Components6 and Nets6 in GBK, no %UTF8% (issue #1380)
+        let g = |s: &str| encoding_rs::GBK.encode(s).0.into_owned();
+        let rec = |parts: &[&[u8]]| { let b = parts.concat(); let mut v = (b.len() as u32 + 1).to_le_bytes().to_vec(); v.extend(b); v.push(0); v };
+        let comp = rec(&[b"|SOURCEDESIGNATOR=R1|PATTERN=", &g("光耦.PcbLib\\R0402"), b"|COMMENT=", &g("0402 47KΩ 贴片电阻"), b"|X=100mil|Y=100mil|LAYER=TOP"]);
+        let s = src(TWO, vec![("Nets6", rec(&[b"|NAME=", &g("电源")])), ("Components6", comp)]);
+        assert_eq!(s.cp(), super::super::Cp::Gbk);
+        let c = Ctx::new(&s);
+        assert_eq!((c.comps[0].value.as_str(), c.comps[0].footprint.as_str(), c.nets[0].as_str()), ("0402 47KΩ 贴片电阻", "R0402", "电源"));
+        // a Western board's stay Windows-1252
+        let s = src(TWO, vec![("Components6", rec(&[b"|SOURCEDESIGNATOR=C1|COMMENT=10\xb5F|X=0mil|Y=0mil"]))]);
+        assert_eq!((s.cp(), Ctx::new(&s).comps[0].value.as_str()), (super::super::Cp::Western, "10µF"));
+    }
     #[test] fn a_track_lands_in_millimetres_y_down_with_its_net() {
         let s = src(TWO, vec![("Nets6", text_rec("|NAME=GND")), ("Tracks6", track(32, 0, NONE, (0.0, 100.0), (1000.0, 100.0), 10.0))]);
         let (its, _) = build(&s);

@@ -332,7 +332,7 @@ pub fn read(bytes: &[u8]) -> Result<Vec<LibFootprint>, String> {
             m.entry(s.into()).or_default().extend(rec);
         }
         let p = t.get(&format!("{k}/Parameters")).map(|b| if b.len() > 4 { Rec::parse(&b[4..]) } else { Rec::default() }).unwrap_or_default();
-        out.push(LibFootprint { name: n, description: p.get("DESCRIPTION").unwrap_or("").into(), height: super::super::parse_num(p.get("HEIGHT").unwrap_or("0")) * 0.0254, src: super::super::pcb::Src(m) });
+        out.push(LibFootprint { name: n, description: p.get("DESCRIPTION").unwrap_or("").into(), height: super::super::parse_num(p.get("HEIGHT").unwrap_or("0")) * 0.0254, src: super::super::pcb::Src(m, Default::default()) });
     }
     Ok(out)
 }
