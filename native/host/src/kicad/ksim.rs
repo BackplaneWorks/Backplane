@@ -321,7 +321,7 @@ impl Sim<'_> {
         if self.scanned.is_none() {
             let (project, libs) = (self.ctx.project_dir.clone(), self.ctx.libs.clone());
             self.scanned = Some(tokio::task::spawn_blocking(move || { let mut all = vec![];
-                for (p, defs) in kp::scan(&project, 3) { all.push((p.strip_prefix(&project).unwrap_or(&p).to_string_lossy().into_owned(), "project", defs)) }
+                for (p, defs) in kp::scan(&project, 3) { all.push((p.strip_prefix(&project).map(slash_rel).unwrap_or_else(|_| p.to_string_lossy().into_owned()), "project", defs)) }
                 for (dir, what) in &libs { for (p, defs) in kp::scan(dir, 2) { all.push((p.to_string_lossy().into_owned(), *what, defs)) } }
                 all }).await.unwrap_or_default());
         }
@@ -374,7 +374,7 @@ impl Sim<'_> {
     /// The model op's library form: the file checked, the name settled, the pins by name where the names say.
     async fn assign_library(&mut self, refs: &[String], lib: &str, name: Option<&str>, pins: &Value, params: &Value) -> Result<Value, String> {
         let abs = if Path::new(lib).is_absolute() || lib.contains("${") { PathBuf::from(lib) } else { self.ctx.project_dir.join(lib) };
-        let stored = abs.strip_prefix(&self.ctx.project_dir).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| lib.to_string());
+        let stored = abs.strip_prefix(&self.ctx.project_dir).map(slash_rel).unwrap_or_else(|_| lib.to_string());
         let defs = if lib.contains("${") { vec![] } else { let text = std::fs::read(&abs).map_err(|e| format!("cannot read the model file {}: {e}", abs.display()))?; let text = String::from_utf8_lossy(&text).into_owned();
             if let Some(why) = kp::unusable(&text) { return Err(why) } kp::models_in(&text) };
         let name = match name { Some(n) => n.to_string(), None => { let subs: Vec<&kp::ModelDef> = defs.iter().filter(|d| d.subckt).collect();
@@ -752,6 +752,10 @@ async fn open(c: &dyn Call, path: &str) -> Result<Value, String> {
     if let Ok(r) = c.call(&format!("{C}GetOpenDocuments"), json!({"type": "DOCTYPE_SCHEMATIC"})).await { if let Some(d) = r["documents"].get(0) { return Ok(d.clone()) } }
     Ok(c.call(&format!("{C}OpenDocument"), json!({"type": "DOCTYPE_SCHEMATIC", "path": path})).await?["document"].clone())
 }
+
+/// A path under the project as Sim.Library and the agent see it: '/' between its parts on every OS, so a schematic set up on Windows
+/// finds its model on macOS and Linux too (KiCad on Windows reads '/' as well).
+fn slash_rel(p: &Path) -> String { p.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/") }
 
 #[cfg(test)]
 mod tests {

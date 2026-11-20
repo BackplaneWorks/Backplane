@@ -1942,6 +1942,10 @@ fn join_root(root: &str, rel: &str) -> String {
     }
 }
 
+/// Whether a tile's file (`join_root`: `C:\p/main.kicad_pcb` on Windows, as the live view names it) is the project's default one
+/// (`kicad::project`: `C:\p\main.kicad_pcb`): the same file whichever separator each one uses.
+fn is_default(abs: &str, default: &str) -> bool { !default.is_empty() && abs.replace('\\', "/") == default.replace('\\', "/") }
+
 fn resolve_version(
     tile_id: &str,
     ver: &TileVersion,
@@ -2038,7 +2042,7 @@ fn plan_tile_watches(
                             return Ok(Vec::new());
                         }
                         let abs_board = join_root(root, &tile.source);
-                        let req_path = if !tile.explicit && abs_board == ctx.default_pcb { String::new() } else { abs_board };
+                        let req_path = if !tile.explicit && is_default(&abs_board, &ctx.default_pcb) { String::new() } else { abs_board };
                         Ok(vec![WatchSpec { kind: 0, key: watch_key(0, root, &req_path), root: root.clone(), path: req_path }])
                     }
                 };
@@ -2151,7 +2155,7 @@ fn plan_tile_watches(
             if abs.is_empty() {
                 return Ok(Vec::new());
             }
-            let req_path = if !tile.explicit && abs == ctx.default_pcb { String::new() } else { abs };
+            let req_path = if !tile.explicit && is_default(&abs, &ctx.default_pcb) { String::new() } else { abs };
             Ok(vec![WatchSpec { kind: 0, key: watch_key(0, root, &req_path), root: root.clone(), path: req_path }])
         }
         PageKind::Schematic => {
@@ -2159,7 +2163,7 @@ fn plan_tile_watches(
             if abs.is_empty() {
                 return Ok(Vec::new());
             }
-            let req_path = if !tile.explicit && abs == ctx.default_sch { String::new() } else { abs };
+            let req_path = if !tile.explicit && is_default(&abs, &ctx.default_sch) { String::new() } else { abs };
             Ok(vec![WatchSpec { kind: 1, key: watch_key(1, root, &req_path), root: root.clone(), path: req_path }])
         }
         PageKind::Solid3d => {
@@ -2167,7 +2171,7 @@ fn plan_tile_watches(
             if abs.is_empty() {
                 return Ok(Vec::new());
             }
-            let req_path = if !tile.explicit && abs == ctx.default_pcb { String::new() } else { abs.clone() };
+            let req_path = if !tile.explicit && is_default(&abs, &ctx.default_pcb) { String::new() } else { abs.clone() };
             let mut out = vec![WatchSpec { kind: 2, key: watch_key(2, root, &req_path), root: root.clone(), path: req_path.clone() }];
             if abs.ends_with(".kicad_pcb") {
                 out.push(WatchSpec { kind: 0, key: watch_key(0, root, &req_path), root: root.clone(), path: req_path });
@@ -2393,6 +2397,15 @@ mod tests {
             plan_watches(&v_board, &WatchContext::default(), &resolver),
             Err(WatchError::MissingRoot { tile_id: "t1".into() })
         );
+
+        // A Windows root: the default board, named by kicad::project with '\\', is still the default when a tile names it by its path
+        // under the root (no explicit path is watched), as on Unix
+        let win = derive_layout(&DeriveInput { root: "C:\\p", open: "board", file: "", default_pcb: "C:\\p\\main.kicad_pcb", ..Default::default() });
+        let wctx = WatchContext { root: "C:\\p".into(), default_pcb: "C:\\p\\main.kicad_pcb".into(), default_sch: String::new() };
+        assert_eq!(wctx.default_pcb, "C:\\p\\main.kicad_pcb");
+        let ws = plan_watches(&win, &wctx, &VersionSourceMap::new()).unwrap();
+        assert_eq!(ws.iter().map(|w| (w.kind, w.path.as_str())).collect::<Vec<_>>(), vec![(0, "")], "{ws:?}");
+        assert!(is_default("C:\\p/main.kicad_pcb", "C:\\p\\main.kicad_pcb") && !is_default("C:\\p/a.kicad_pcb", "C:\\p\\main.kicad_pcb") && !is_default("", ""));
 
         // Counterexample (a): historical input with abbreviated id NEVER falls back to live default PCB
         let abbrev = derive_layout(&DeriveInput {
