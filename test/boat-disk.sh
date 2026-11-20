@@ -67,4 +67,16 @@ out=$(python3 -I "$G" guard --home "$H" --cap-gb 0.016 --high 80 --low 70)
 out=$(bash -c '. "$1/scripts/lib-boat.sh"; { printf "%s\n" "{\"stdout\":\"one\\n\",\"exitCode\":0}"; printf "%s\n" "{\"type\":\"attached\"}" "{\"type\":\"stdout\",\"data\":\"two\\n\"}" "{\"type\":\"stderr\",\"data\":\"no\\n\"}" "{\"type\":\"exit\",\"exitCode\":0}"; } | bo_out' _ "$HERE")
 [ "$out" = "$(printf 'one\ntwo')" ] && ok "bo_out reads both exec output shapes" || no "bo_out gave: $out"
 
+# 8. h@backplane's lanes (--lanes, scripts/bp-slot.sh): a lane unused for days goes whole; the job's own lane (--keep), a lane a process is in, a freshly built one stay
+L=$T/lanes; rm -rf -- "$L"; mkdir -p "$L/.slot-locks"
+for n in old keep busy; do mb "$L/$n/src/main.rs" 1 "6 days ago"; mb "$L/$n/.target/debug/deps/libx.rlib" 3 "6 days ago"; done
+mb "$L/hot/src/main.rs" 1 "6 days ago"; mb "$L/hot/.target/debug/deps/libx.rlib" 3 "now"
+(cd "$L/busy/src" && exec sleep 30) & sp=$!
+out=$(python3 -I "$G" guard --home "$H" --lanes "$L" --keep keep --cap-gb 0.015 --high 80 --low 70)
+kill "$sp" 2>/dev/null; wait "$sp" 2>/dev/null
+[ ! -e "$L/old" ] && ok "an unused lane goes whole" || no "old lane kept: $out"
+[ -e "$L/keep/.target/debug/deps/libx.rlib" ] && [ -e "$L/busy/.target/debug/deps/libx.rlib" ] && [ -e "$L/hot/.target/debug/deps/libx.rlib" ] && [ -d "$L/.slot-locks" ] \
+  && ok "the job's lane, a busy lane, a fresh lane and dot dirs stay" || no "lanes: $out"
+python3 -I "$G" guard --home "$H" --lanes "$H" > /dev/null 2>&1; [ $? = 2 ] && ok "refuses the home as the lanes dir" || no "accepted home as lanes"
+
 exit "$fail"

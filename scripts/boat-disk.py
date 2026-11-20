@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""boat-disk.py guard|report [--home H] [--high PCT] [--low PCT] [--cap-gb N]: keep a Boat build box's disk from filling (runs ON the box, scripts/lib-boat.sh).
+"""boat-disk.py guard|report [--home H] [--high PCT] [--low PCT] [--cap-gb N] [--lanes DIR --keep LANE]: keep a build machine's disk from filling (runs ON it).
+Boat build boxes (scripts/lib-boat.sh): ~/target/<slug>. h@backplane (scripts/bp-slot.sh): --lanes ~/bp-gpui-build, one tree per lane with its target in .target;
+there a lane unused for two days goes whole first (after stale incremental state), the job's own lane (--keep) and any lane a running process is in never.
 
 The box keeps ~/target/<slug> (cargo target dirs) and the sccache cache between jobs on purpose, so they grow without bound. Before each job (`guard`):
   always       job dirs in ~/.bpjobs older than a day (a job that died before bo_finish removed its own);
@@ -39,7 +41,8 @@ def usage(home, cap_gb):
     if cap_gb:
         return du(home), int(float(cap_gb) * GB)
     r = os.statvfs("/")
-    size, used = r.f_blocks * r.f_frsize, (r.f_blocks - r.f_bfree) * r.f_frsize
+    used = (r.f_blocks - r.f_bfree) * r.f_frsize
+    size = used + r.f_bavail * r.f_frsize   # as df counts it: the blocks kept for root are not ours
     if os.stat(home).st_dev != os.stat("/").st_dev:   # the lazy home: its df counts only what was read back, du counts it all
         real = 0
         try:
@@ -92,6 +95,7 @@ class Pruner:
         self.home, self.used, self.size, self.low, self.now, self.dry = home, used, size, low, now, dry
         self.roots = [os.path.realpath(os.path.join(home, x)) for x in ("target", ".bpjobs")]
         self.removed = []   # (path, bytes)
+        self.gone = set()
 
     def pct(self):
         return 100.0 * self.used / self.size if self.size else 0.0
@@ -106,6 +110,8 @@ class Pruner:
         return any(real == r or real.startswith(r + os.sep) for r in list(self.roots) + list(extra)) and os.path.basename(path) not in ("", ".", "..")
 
     def rm(self, path, extra=()):
+        if path in self.gone:   # a dry run leaves it there for the next step to find again
+            return
         if not self.allowed(path, extra):
             print("boat-disk: refused to remove %r (outside the build dirs)" % path, file=sys.stderr)
             return
@@ -117,6 +123,7 @@ class Pruner:
                 shutil.rmtree(path, ignore_errors=True)
         self.used -= n
         self.removed.append((path, n))
+        self.gone.add(path)
 
 
 def children(d):
@@ -150,28 +157,55 @@ def profiles(tdir):
     return out
 
 
-def guard(home, high, low, cap_gb, dry=False, now=None):
+def busy(units):
+    """the units a running process of ours is inside (its working directory): a job in a slot may write nothing for a long while"""
+    out = set()
+    for pid in os.listdir("/proc") if os.path.isdir("/proc") else []:
+        if not pid.isdigit():
+            continue
+        try:
+            cwd = os.readlink("/proc/%s/cwd" % pid)
+        except OSError:
+            continue
+        out.update(u for u in units if cwd == u or cwd.startswith(u + os.sep))
+    return out
+
+
+def guard(home, high, low, cap_gb, dry=False, now=None, lanes=None, keep=()):
+    """lanes: a dir of lane trees, each with its own target dir in .target (h@backplane's ~/bp-gpui-build, scripts/bp-slot.sh); else the box's ~/target/<slug>"""
     now = time.time() if now is None else now
-    used, size = usage(home, cap_gb)
+    used, size = usage(lanes or home, cap_gb)
     pr = Pruner(home, used, size, low, now, dry)
+    if lanes:
+        pr.roots.append(os.path.realpath(lanes))
     start = pr.pct()
     for j in sorted(children(os.path.join(home, ".bpjobs")), key=mtime):
         if now - mtime(j) > DAY:
             pr.rm(j)
     if start >= high:
-        target = os.path.join(home, "target")
-        tdirs = [p for p in children(target) if os.path.isdir(p) and not os.path.islink(p)]
-        used = {t: target_use(t) for t in tdirs}
-        hot = {t for t in tdirs if now - used[t] < 3600}
-        incr = [e for t in tdirs for p in profiles(t) for e in children(os.path.join(p, "incremental"))]
-        steps = [
-            [e for e in incr if now - mtime(e) > DAY],
-            [e for e in incr if not any(e.startswith(t + os.sep) for t in hot)],
-            [e for t in tdirs for p in profiles(t) for sub in ("deps", "build", ".fingerprint") for e in children(os.path.join(p, sub)) if now - mtime(e) > 3 * DAY],
-            [t for t in tdirs if t not in hot],
-        ]
-        for cands in steps:
-            for p in sorted(cands, key=(lambda t: used[t]) if cands is steps[3] else mtime):
+        base = lanes or os.path.join(home, "target")
+        units = [os.path.realpath(p) for p in children(base) if os.path.isdir(p) and not os.path.islink(p) and not os.path.basename(p).startswith(".")]
+        tgt = (lambda u: os.path.join(u, ".target")) if lanes else (lambda u: u)
+        last = {}
+        for u in units:
+            last[u] = target_use(tgt(u))
+            if lanes and not last[u]:   # never built: its tree's newest file
+                last[u] = last_use(u, 2000)
+        hot = {u for u in units if now - last[u] < 3600 or os.path.basename(u) in keep} | busy(units)
+        incr = [e for u in units for p in profiles(tgt(u)) for e in children(os.path.join(p, "incremental"))]
+        inhot = lambda e: any(e.startswith(u + os.sep) for u in hot)
+        stale_incr = ([e for e in incr if now - mtime(e) > DAY and not inhot(e)] if lanes else [e for e in incr if now - mtime(e) > DAY], mtime)
+        other_incr = ([e for e in incr if not inhot(e)], mtime)
+        old_deps = ([e for u in units if u not in hot for p in profiles(tgt(u)) for sub in ("deps", "build", ".fingerprint") for e in children(os.path.join(p, sub))
+                     if now - mtime(e) > 3 * DAY] if lanes else
+                    [e for u in units for p in profiles(tgt(u)) for sub in ("deps", "build", ".fingerprint") for e in children(os.path.join(p, sub)) if now - mtime(e) > 3 * DAY], mtime)
+        by_use = lambda u: last[u]
+        cold = ([u for u in units if u not in hot], by_use)
+        # a lane tree is a whole copy of a worktree: one unused for two days (its branch landed or was left) goes before any warm build state
+        steps = [stale_incr, ([u for u in units if u not in hot and now - last[u] > 2 * DAY], by_use), other_incr, old_deps, cold] if lanes else \
+                [stale_incr, other_incr, old_deps, cold]
+        for cands, key in steps:
+            for p in sorted(cands, key=key):
                 if pr.under():
                     break
                 if os.path.lexists(p):
@@ -207,18 +241,18 @@ def guard(home, high, low, cap_gb, dry=False, now=None):
     return pr
 
 
-def report(home, cap_gb):
-    used, size = usage(home, cap_gb)
+def report(home, cap_gb, lanes=None):
+    used, size = usage(lanes or home, cap_gb)
     sc = os.environ.get("SCCACHE_DIR") or os.path.join(home, ".cache", "sccache")
     print(json.dumps({"at": int(time.time()), "pct": round(100.0 * used / size, 1) if size else 0, "used_gb": round(used / GB, 1), "size_gb": round(size / GB, 1),
-                      "target_gb": round(du(os.path.join(home, "target")) / GB, 1), "sccache_gb": round(du(sc) / GB, 1)}))
+                      "target_gb": round(du(lanes or os.path.join(home, "target")) / GB, 1), "sccache_gb": round(du(sc) / GB, 1)}))
 
 
 def main(argv):
     if not argv or argv[0] not in ("guard", "report"):
         print(__doc__.split("\n")[0], file=sys.stderr)
         return 2
-    opts = {"--home": os.path.expanduser("~"), "--high": "80", "--low": "70", "--cap-gb": ""}
+    opts = {"--home": os.path.expanduser("~"), "--high": "80", "--low": "70", "--cap-gb": "", "--lanes": "", "--keep": ""}
     dry, rest = False, argv[1:]
     while rest:
         a = rest.pop(0)
@@ -233,10 +267,14 @@ def main(argv):
     if not os.path.isdir(home) or home == "/":
         print("boat-disk: no home %r" % home, file=sys.stderr)
         return 2
+    lanes = os.path.realpath(opts["--lanes"]) if opts["--lanes"] else None
+    if lanes and (not os.path.isdir(lanes) or lanes in ("/", home)):
+        print("boat-disk: no lanes dir %r" % opts["--lanes"], file=sys.stderr)
+        return 2
     if argv[0] == "report":
-        report(home, opts["--cap-gb"])
+        report(home, opts["--cap-gb"], lanes)
     else:
-        guard(home, float(opts["--high"]), float(opts["--low"]), opts["--cap-gb"], dry)
+        guard(home, float(opts["--high"]), float(opts["--low"]), opts["--cap-gb"], dry, lanes=lanes, keep=tuple(k for k in opts["--keep"].split(",") if k))
     return 0
 
 
