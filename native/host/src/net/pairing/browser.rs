@@ -68,7 +68,11 @@ impl Registry {
     pub fn browser_pending(&self) -> Value {
         let g = self.inner.lock().unwrap();
         let at = (self.now)();
-        Value::Array(g.browser.pending.iter().filter(|r| r.until > at && r.decision.is_none()).map(Request::public).collect())
+        Value::Array(g.browser.pending.iter().filter(|r| r.until > at && r.decision.is_none()).map(|r| {
+            let mut row = r.public();
+            row["login"] = json!(r.login);
+            row
+        }).collect())
     }
 
     pub fn browser_clear_pending(&self) { self.inner.lock().unwrap().browser.pending.clear(); }
