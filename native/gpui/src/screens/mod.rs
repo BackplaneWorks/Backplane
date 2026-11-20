@@ -76,6 +76,7 @@ pub mod combo;
 pub mod timeline;
 pub mod xprobe;
 pub mod tools;
+pub mod pane_header;
 pub mod viewer;
 pub mod keysheet;
 pub mod mgmt;
