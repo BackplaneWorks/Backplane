@@ -687,7 +687,7 @@ impl KicadPane {
         }
         if info["pid"] != self.info["pid"] {
             let had_pid = !self.info["pid"].is_null();
-            self.poked = None; self.unmapped_since = None; self.kept = 0; self.placed = None; self.last_show = None; if had_pid || self.override_kind.as_deref() != Some(SIM) { self.override_kind = None; } cause = format!("hub info: KiCad pid {} -> {}", self.info["pid"], info["pid"]); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
+            self.poked = None; self.unmapped_since = None; self.kept = 0; self.placed = None; self.last_show = None; self.handin_unconfirmed = false; if had_pid || self.override_kind.as_deref() != Some(SIM) { self.override_kind = None; } cause = format!("hub info: KiCad pid {} -> {}", self.info["pid"], info["pid"]); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
             if had_pid { self.pending_show = None; }
         }
         if matches!(info["state"].as_str(), Some("failed" | "stopped")) { self.pending_show = None; }
