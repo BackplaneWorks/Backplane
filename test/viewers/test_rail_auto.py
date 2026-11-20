@@ -39,7 +39,7 @@ def log(seq, **obj):
 
 def good():
     marks = {m: i * 10 for i, m in enumerate(
-        ["auto:start", "auto:a:pre", "auto:a:attach", "auto:a:mid", "auto:a:painted", "auto:a:done", "auto:b", "auto:b:done", "auto:c:board", "auto:f", "auto:f:done",
+        ["auto:start", "auto:a:attach", "auto:a:pre", "auto:a:mid", "auto:a:painted", "auto:a:done", "auto:b", "auto:b:done", "auto:c:board", "auto:f", "auto:f:done",
          "auto:c:schematic", "auto:c:back", "auto:c:done", "auto:d:view-leave", "auto:d:view-back", "auto:d:view-done", "auto:d:leave", "auto:d:back", "auto:d:done", "auto:e:close", "auto:e:refused", "auto:e:refused-done", "auto:e:edit", "auto:e:done"], start=1)}
     comp = [{"seq": 11, "text": "x"}, {"seq": 22, "text": "xqpre"}, {"seq": 33, "text": "xqpreqmid"}, {"seq": 45, "text": "xqpreqmidqpost"}]
     logs = [log(marks["auto:a:attach"] + 1, kicad_info="d", state="starting"), log(marks["auto:b"] + 1, kicad_auto_to_deliberate="attach"),
