@@ -121,8 +121,10 @@ async function main(binary, output) {
         BP_WEB_NATIVE_PORT: String(nativePort), BP_WEB_TLS_PORT: String(tls.port),
         BACKPLANE_NO_UPDATE: '1', BACKPLANE_ORDER_SERVER: 'http://127.0.0.1:9' };
       const child = spawn(binary, ['--ignored', '--exact', 'net::listener::webingress::isolated_browser_hub'], {
-        env, stdio: 'ignore', detached: true,
+        env, stdio: ['ignore', 'pipe', 'pipe'], detached: true,
       });
+      const logs = [];
+      for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => logs.push(chunk));
       const exited = once(child, 'exit');
       try {
         for (let i = 0; ; ++i) {
@@ -162,6 +164,7 @@ async function main(binary, output) {
             await probe.close();
             await rpc('devices.page.act', { action: 'device-web-access', value: '1' });
             await browserTasks({ context, origin, rpc, thread: 't1',
+              checkLogs: value => assert.ok(!Buffer.concat(logs).includes(value), 'browser session in hub output'),
               readRegistry: () => fs.readFile(path.join(home, 'devices-v1.json'), 'utf8'),
               assets: [{path:'/files/get?thread=t1&path=sample.txt',body:Buffer.from('Backplane fixture')}],
               replyText:'Browser0 Browser1 Browser2',

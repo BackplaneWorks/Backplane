@@ -10,8 +10,11 @@ async function deviceButton(rpc, name, action) {
   return { row, button: row.buttons.find(button => button.action === action) };
 }
 
-export async function browserTasks({ context, origin, rpc, thread, assets, replyText, screenshot, nativeShot, readRegistry }) {
+export async function browserTasks({ context, origin, rpc, thread, assets, replyText, screenshot, nativeShot, readRegistry, checkLogs }) {
+  const urls = new Set();
+  context.on('request', req => urls.add(req.url()));
   const page = await context.newPage();
+  page.on('websocket', ws => urls.add(ws.url()));
   const name = 'Headless browser';
   const testId = id => page.getByTestId(id);
   await page.setViewportSize({width:1440, height:900});
@@ -38,7 +41,9 @@ export async function browserTasks({ context, origin, rpc, thread, assets, reply
   await testId('composer-input').waitFor();
   const interactiveMs = await page.evaluate(() => performance.now());
   await checkPageHeaders(page);
-  await checkSessionCookie(context, origin, 'https://other.example.test', readRegistry);
+  const session = await checkSessionCookie(context, origin, 'https://other.example.test', readRegistry);
+  const storage = await page.evaluate(() => JSON.stringify([document.cookie, {...localStorage}, {...sessionStorage}]));
+  assert.ok(!storage.includes(session), 'session leaked into script-readable storage');
   await checkProtectedAssets(page, origin, assets, true);
 
   await testId('thread-row-' + thread).click();
@@ -82,4 +87,8 @@ export async function browserTasks({ context, origin, rpc, thread, assets, reply
   await testId('pair-card').waitFor();
   await checkProtectedAssets(page, origin, assets, false);
   await screenshot(page, 'revoked');
+  checkLogs(session);
+  for (const address of urls) {
+    assert.ok(!address.includes(session) && !new URL(address).searchParams.has('token'), 'credential in a browser URL');
+  }
 }
