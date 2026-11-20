@@ -171,7 +171,7 @@ impl LoadingClock {
                 let _ = weak.update(cx, |app, cx| {
                     let now = Instant::now();
                     app.screens.plot.retrying.retain(|_, since| !retry_expired(*since, now));
-                    if app.screens.plotview.loading.fire() {
+                    if app.screens.plots[0].loading.fire() {
                         app.screens.parts.tick(Backplane::viewer_part, Duration::ZERO, cx);
                     }
                 });
