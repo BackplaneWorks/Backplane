@@ -531,24 +531,25 @@ def _parse_hub_kicad_sessions_output(out: str) -> dict:
             val = obj.get("value")
             if not isinstance(val, dict):
                 return {"ok": False, "inventory_complete": False, "error": f"non-object session value for {key}", "sessions": {}}
-            rt = val.get("runtime") if isinstance(val.get("runtime"), dict) else {}
+            raw_rt = val.get("runtime")
             frames = [
                 {"kind": f.get("kind"), "shown": bool(f.get("shown"))}
                 for f in (val.get("frames") or [])
                 if isinstance(f, dict)
             ]
-            sessions[key] = {
+            rt = raw_rt if isinstance(raw_rt, dict) else {}
+            entry = {
                 "state": val.get("state"),
                 "active": val.get("active"),
                 "pid": val.get("pid"),
                 "generation": rt.get("generation", val.get("generation")),
-                "runtime": {
-                    "holder": rt.get("holder"),
-                    "session": rt.get("session"),
-                    "generation": rt.get("generation", val.get("generation")),
-                },
                 "frames": frames,
             }
+            # Field presence is evidence: a session that sent no `runtime`, or a `runtime` with no `holder`, must not
+            # arrive as `holder: null` (absent holder). Only keys the hub really sent are carried.
+            if isinstance(raw_rt, dict):
+                entry["runtime"] = {k: raw_rt[k] for k in ("holder", "session", "generation") if k in raw_rt}
+            sessions[key] = entry
         elif line.startswith("{"):
             try:
                 rep = json.loads(line)
