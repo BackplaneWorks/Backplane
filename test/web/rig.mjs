@@ -105,7 +105,7 @@ export async function withTestTls(socketPath, run, canary) {
 async function main(binary, output) {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
-  const { spawn } = await import('node:child_process');
+  const { spawn, execFileSync } = await import('node:child_process');
   const { once } = await import('node:events');
   const { createServer } = await import('node:net');
   const { checkAccess, checkRequestBoundary } = await import('./security.mjs');
@@ -140,8 +140,19 @@ async function main(binary, output) {
   await fs.copyFile(new URL('mesh/bracket.step', models), path.join(project, 'mech', 'bracket.step'));
   const gerbers = path.join(project, 'mfg', 'gerbers');
   await fs.mkdir(gerbers, {recursive:true});
-  await fs.writeFile(path.join(gerbers, 'ecc83-pp-F_Cu.gbr'),
-    '%FSLAX46Y46*%\n%MOMM*%\n%ADD10C,0.250000*%\nD10*\nX0Y0D02*\nX20000000Y0D01*\nX20000000Y20000000D01*\nM02*\n');
+  const cli = process.env.BACKPLANE_KICAD_CLI;
+  assert.ok(cli, 'set BACKPLANE_KICAD_CLI to the selected KiCad runtime');
+  const board = path.join(project, 'ecc83-pp.kicad_pcb');
+  const exportEnv = { ...process.env, HOME: temp, XDG_CONFIG_HOME: path.join(temp, 'config'),
+    XDG_CACHE_HOME: path.join(temp, 'cache'), XDG_DATA_HOME: path.join(temp, 'data') };
+  delete exportEnv.DISPLAY;
+  delete exportEnv.WAYLAND_DISPLAY;
+  for (const args of [
+    ['gerbers', '--layers', 'F.Cu,B.Cu,F.Mask,B.Mask,F.Silkscreen,B.Silkscreen,Edge.Cuts', '--no-protel-ext'],
+    ['drill', '--format', 'excellon', '--excellon-units', 'mm'],
+  ]) {
+    execFileSync(cli, ['pcb', 'export', ...args, '--output', gerbers, board], {env:exportEnv});
+  }
   await fs.mkdir(agents);
   await fs.mkdir(output, { recursive: true });
   const standin = new URL('../tools/claude_standin.ts', import.meta.url).pathname;
