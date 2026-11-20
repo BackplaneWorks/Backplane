@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { checkProtectedAssets, checkSessionCookie } from './security.mjs';
+import { checkAccess, checkProtectedAssets, checkSessionCookie } from './security.mjs';
 
 // rpc is the synthetic native client's data/1 transport, connected to the
 // same temporary hub. Approval goes through the action shown in Devices.
@@ -10,13 +10,14 @@ async function deviceButton(rpc, name, action) {
   return { row, button: row.buttons.find(button => button.action === action) };
 }
 
-export async function browserTasks({ context, origin, rpc, thread, assets, replyText, screenshot, nativeShot }) {
+export async function browserTasks({ context, origin, rpc, thread, assets, replyText, screenshot, nativeShot, readRegistry }) {
   const page = await context.newPage();
   const name = 'Headless browser';
   const testId = id => page.getByTestId(id);
   await page.setViewportSize({width:1440, height:900});
   await page.goto(origin);
   await testId('pair-card').waitFor();
+  await checkAccess(page, true);
   await screenshot(page, 'before-pair');
   await testId('pair-name').fill(name);
   await testId('pair-request-btn').click();
@@ -33,7 +34,7 @@ export async function browserTasks({ context, origin, rpc, thread, assets, reply
   await testId('sidebar-list').waitFor();
   assert.ok(performance.now() - approvedAt <= 1000, 'approval to app exceeded one second');
   const socket = await connected;
-  await checkSessionCookie(context, origin, 'https://other.example.test');
+  await checkSessionCookie(context, origin, 'https://other.example.test', readRegistry);
   await checkProtectedAssets(page, origin, assets, true);
 
   await testId('thread-row-' + thread).click();
