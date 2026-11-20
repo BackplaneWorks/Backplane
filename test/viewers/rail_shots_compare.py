@@ -577,10 +577,13 @@ def score_consistency(steps: dict) -> dict:
 
     b7_raw = ((kinds.get("full") or {}).get("b7_checks")) or steps.get("b7_checks") or {}
     b7_status = str(b7_raw.get("status") or "unavailable") if isinstance(b7_raw, dict) else "unavailable"
+    b7_total = int(b7_raw.get("total") or 7) if isinstance(b7_raw, dict) else 7
     b7_checked = int(b7_raw.get("checked") or 0) if isinstance(b7_raw, dict) else 0
     b7_clean = int(b7_raw.get("clean") or 0) if isinstance(b7_raw, dict) else 0
+    b7_unavail = max(0, b7_total - b7_checked)
     b7_violations = list(b7_raw.get("violations") or []) if isinstance(b7_raw, dict) else []
-    b7_pts = pts_of(b7_clean, b7_checked, 3.0) if b7_status in ("measured", "measured_partial") else None
+    # Score B7 over ALL 7 checks once any tiles metric exists; unavailable checks are counted as not earned.
+    b7_pts = pts_of(b7_clean, b7_total, 3.0) if b7_status in ("measured", "measured_partial") else None
 
     def rule_status(code: str) -> str:
         if code == "B1":
@@ -657,8 +660,10 @@ def score_consistency(steps: dict) -> dict:
             "status": b7_status if b7_status in ("measured", "measured_partial") else "unavailable",
             "reason": "" if b7_status in ("measured", "measured_partial") else str(b7_raw.get("reason") or "client did not emit GPUI_METRIC event=tiles"),
             "max_points": 3,
+            "total": b7_total,
             "checked": b7_checked,
             "clean": b7_clean,
+            "unavailable_count": b7_unavail,
             "points": b7_pts,
             "violations": b7_violations,
         },
@@ -958,7 +963,10 @@ def main(argv: list[str] | None = None) -> int:
             def fmt_b7(c: dict) -> str:
                 if c.get("status") not in ("measured", "measured_partial"):
                     return "`unavailable`"
-                return f"{fmt_opt_pts(c['points'], 3)} ({c['clean']}/{c['checked']} clean)"
+                tot = int(c.get("total") or 7)
+                unav = int(c.get("unavailable_count") or max(0, tot - int(c.get("checked") or 0)))
+                extra = f", {unav} unavailable (not earned)" if unav else ""
+                return f"{fmt_opt_pts(c['points'], 3)} ({c['clean']}/{tot} clean{extra})"
             note = n_cons["B7"].get("reason") or f"{n_cons['B7']['status']}; {len(n_cons['B7']['violations'])} failing"
             lines.append(f"| **B7** | {text} | {fmt_b7(b_cons['B7'])} | {fmt_b7(n_cons['B7'])} | {note} |")
         else:

@@ -1,15 +1,36 @@
 #!/usr/bin/env python3
 """Docking/tiling measurement helpers for Scorecard Task 4 and Rule B7.
 
-Designed against:
-  - Hub layout model (`native/host/src/present/layout.rs`): `viewer.layout` + `viewer.tiles`
-  - PR #1414 (`rail-x`): `GPUI_METRIC {"event":"tiles","tiles":[...],"splitters":[...]}` and `drag` script step
-  - PR #1417 (`rail-v`): `layout-add`, `layout-close`, `layout-swap`, `layout-resize`,
-    `layout-maximize`, `layout-restore`, `layout-overlay`, and catalog-backed refusals.
+## Required Renderer & Script Contract (for Tile Renderer / Worker A)
+
+Every assertion in Task 4 and Rule B7 reads ONLY from the metrics below and cleared screenshots
+(never guessed header heights, never stale carried-forward inventories):
+
+| Event / Source | Field | Type | Meaning |
+|---|---|---|---|
+| `GPUI_METRIC {"event":"tiles", ...}` | `tiles` | `list[dict]` | Currently painted tiles; emitted on every tile/layout/frame change. |
+| `tiles[]` | `id` | `str` | Stable hub `TileId` (matches leaf `tile.id` under `viewer.layout.root`). |
+| `tiles[]` | `kind` | `str` | Page kind (`board`, `schematic`, `gerbers`, `3d`, `mech`, `files`, `diff`, `review`, `browser`, `simulation`). |
+| `tiles[]` | `source` | `str` | Non-empty tile source/identity shown by this tile (e.g. `mfg/gerbers`, `ecc83-pp.kicad_pcb`). |
+| `tiles[]` | `rect` | `{"x","y","w","h": float}` | Painted outer tile bounds in screenshot coordinates (positive area). |
+| `tiles[]` | `body` | `{"x","y","w","h": float}` | Measured painted body bounds BELOW the tile header in screenshot coordinates (positive area). |
+| `tiles[]` | `frame` | `int` | Monotonic per-tile presented-frame sequence (advances whenever the tile redraws for a new viewport/source/overlay). |
+| `tiles[]` | `focused` | `bool` | Whether this tile currently owns focus. |
+| `tiles[]` | `overlay` | `dict \| null` | Explicit overlay state on this tile: `{"kind": "gerbers", ...}` when active, `null` when off (key must be present to observe overlay off). |
+| `GPUI_METRIC {"event":"tiles", ...}` | `splitters` | `list[dict]` | Currently painted splitters between tiles. |
+| `splitters[]` | `id` | `str` | Stable hub `SplitId` (matches split node id under `viewer.layout.root`). |
+| `splitters[]` | `rect` | `{"x","y","w","h": float}` | Painted splitter bounds in screenshot coordinates (positive area). |
+| `splitters[]` | `axis` | `"x" \| "y"` | Renderer axis translated from hub `Axis`: hub `"row"` -> `"x"`, hub `"col"` -> `"y"`. |
+| `GPUI_METRIC {"event":"drag", ...}` | `ok` | `bool` (strict) | Boolean `true` iff the pointer drag was dispatched (string `"false"` is rejected). |
+| `GPUI_METRIC {"event":"drag", ...}` | `splitter` | `str` | Control / splitter id targeted by the drag. |
+| `GPUI_METRIC {"event":"drag", ...}` | `from`, `to` | `[float, float]` | Start and end pointer coordinates in window pixels (must move along splitter axis). |
+| `GPUI_METRIC {"event":"refusal", ...}` | `code`, `text` | `str`, `str` | Catalog refusal code (e.g. `incompatibleOverlay` / `viewer.layout.refusal.incompatibleOverlay`) and localized human words (no raw internal codes). |
+| `viewer.layout` (hub picture) | `root` | `dict` | Hub `Layout` tree (`native/host/src/present/layout.rs`): recursive `split` (`axis: "row"\|"col"`, `a`, `b`) and `leaf` (`tile: {id, kind, source, overlay}`). |
+| UI controls (for Task 4 user route) | `ui:Add beside`, `add-beside:board`, `tile-close:<id>` | script `press` | User-facing Task 4 route: Gerbers -> `ui:Add beside` -> `add-beside:board`, then close the added tile. |
 
 Every check stays `unavailable` until a build emits `GPUI_METRIC {"event":"tiles", ...}` and
 draws real multi-tile layouts. Every visual assertion enforces per-shot privacy/obstruction
-clearance (fail-closed on missing/failed `inspect_ok` or native dialogs).
+clearance (fail-closed on missing/failed `inspect_ok`, native dialogs, or uncleared shots).
 """
 
 from __future__ import annotations
@@ -30,9 +51,56 @@ DOCK_B7_CHECKS = (
     "incompatible_overlay_refusal",
 )
 
+HUB_AXIS_TO_RENDERER = {
+    "row": "x",
+    "col": "y",
+}
+
+INCOMPATIBLE_OVERLAY_CODES = {
+    "incompatibleOverlay",
+    "viewer.layout.refusal.incompatibleOverlay",
+    "incompatible_overlay",
+}
+
 RAW_REFUSAL_CODE_RE = re.compile(
-    r"\b(ERR_[A-Z0-9_]+|INTERNAL_[A-Z0-9_]+|PRESENTER_[A-Z0-9_]+|ECONNREFUSED|ENOENT|HTTP\s+5\d\d|Refusal::|panic|backtrace)\b"
+    r"\b(ERR_[A-Z0-9_]+|INTERNAL_[A-Z0-9_]+|PRESENTER_[A-Z0-9_]+|ECONNREFUSED|ENOENT|HTTP\s+5\d\d|Refusal::|panic|backtrace|incompatibleOverlay)\b"
 )
+
+
+def axis_from_hub(hub_axis: str | None) -> str | None:
+    """Translate hub `layout::Axis` (`row`/`col`) explicitly to renderer splitter axis (`x`/`y`)."""
+    if not isinstance(hub_axis, str):
+        return None
+    return HUB_AXIS_TO_RENDERER.get(hub_axis.lower())
+
+
+def layout_leaves(layout: dict | None) -> dict[str, dict]:
+    """Walk hub `viewer.layout.root` (`native/host/src/present/layout.rs`) and return `{tile_id: tile_dict}`."""
+    out: dict[str, dict] = {}
+    if not isinstance(layout, dict):
+        return out
+
+    def _walk(node: object) -> None:
+        if not isinstance(node, dict):
+            return
+        # Supports both tagged (`{"leaf": {"tile": ...}}` / `{"split": {"a": ..., "b": ...}}`)
+        # and externally/internally tagged serde shapes (`{"type":"leaf","tile":...}` / `{"a":...,"b":...}`).
+        if isinstance(node.get("leaf"), dict):
+            _walk(node["leaf"])
+            return
+        if isinstance(node.get("split"), dict):
+            _walk(node["split"])
+            return
+        tile = node.get("tile")
+        if isinstance(tile, dict) and tile.get("id"):
+            out[str(tile["id"])] = tile
+            return
+        if "a" in node or "b" in node:
+            _walk(node.get("a"))
+            _walk(node.get("b"))
+
+    _walk(layout.get("root"))
+    return out
 
 
 def _rect_tuple(r: dict | None) -> tuple[float, float, float, float] | None:
@@ -68,19 +136,19 @@ def _flat_pixels(im: Image.Image) -> list[tuple[int, int, int]]:
     return list(im.getdata())
 
 
-def tile_body_non_flat(img_path: Path, rect: dict | None, header_h: float = 34.0) -> bool | None:
-    """Return True if the tile's painted body below its header is non-flat, False if blank/flat, None if unreadable."""
-    rt = _rect_tuple(rect)
+def tile_body_non_flat(img_path: Path, body_rect: dict | None) -> bool | None:
+    """Return True if the measured `body` rect (below header, from metric) is non-flat, False if flat, None if missing/unreadable."""
+    rt = _rect_tuple(body_rect)
     if rt is None or not img_path.exists():
         return None
     x, y, w, h = rt
     with Image.open(img_path) as im:
         im = im.convert("RGB")
         iw, ih = im.size
-        x0 = max(0, min(iw, int(round(x + 4))))
-        y0 = max(0, min(ih, int(round(y + min(header_h, h * 0.25)))))
-        x1 = max(x0, min(iw, int(round(x + w - 4))))
-        y1 = max(y0, min(ih, int(round(y + h - 4))))
+        x0 = max(0, min(iw, int(round(x + 2))))
+        y0 = max(0, min(ih, int(round(y + 2))))
+        x1 = max(x0, min(iw, int(round(x + w - 2))))
+        y1 = max(y0, min(ih, int(round(y + h - 2))))
         if x1 - x0 < 12 or y1 - y0 < 12:
             return None
         crop = im.crop((x0, y0, x1, y1))
@@ -94,24 +162,29 @@ def tile_body_non_flat(img_path: Path, rect: dict | None, header_h: float = 34.0
         return (dominant / total) < 0.992
 
 
-def tile_region_diff(img_a: Path, img_b: Path, rect: dict | None, header_h: float = 34.0) -> float | None:
-    """Return fraction of pixels differing (>12 per channel) inside `rect` between two PNGs."""
-    rt = _rect_tuple(rect)
-    if rt is None or not img_a.exists() or not img_b.exists():
+def tile_bodies_pixel_diff(img_a: Path, rect_a: dict | None, img_b: Path, rect_b: dict | None) -> float | None:
+    """Compare two measured body rects (same or different PNGs) resized to a common grid; return fraction of differing pixels."""
+    ra = _rect_tuple(rect_a)
+    rb = _rect_tuple(rect_b)
+    if ra is None or rb is None or not img_a.exists() or not img_b.exists():
         return None
-    x, y, w, h = rt
     with Image.open(img_a) as ia, Image.open(img_b) as ib:
         ia = ia.convert("RGB")
         ib = ib.convert("RGB")
-        iw, ih = min(ia.width, ib.width), min(ia.height, ib.height)
-        x0 = max(0, min(iw, int(round(x + 4))))
-        y0 = max(0, min(ih, int(round(y + min(header_h, h * 0.25)))))
-        x1 = max(x0, min(iw, int(round(x + w - 4))))
-        y1 = max(y0, min(ih, int(round(y + h - 4))))
-        if x1 - x0 < 12 or y1 - y0 < 12:
+        def _crop(im: Image.Image, r: tuple[float, float, float, float]) -> Image.Image | None:
+            x, y, w, h = r
+            iw, ih = im.size
+            x0 = max(0, min(iw, int(round(x + 2))))
+            y0 = max(0, min(ih, int(round(y + 2))))
+            x1 = max(x0, min(iw, int(round(x + w - 2))))
+            y1 = max(y0, min(ih, int(round(y + h - 2))))
+            if x1 - x0 < 12 or y1 - y0 < 12:
+                return None
+            return im.crop((x0, y0, x1, y1)).resize((160, 160))
+        ca = _crop(ia, ra)
+        cb = _crop(ib, rb)
+        if ca is None or cb is None:
             return None
-        ca = ia.crop((x0, y0, x1, y1)).resize((160, 160))
-        cb = ib.crop((x0, y0, x1, y1)).resize((160, 160))
         pa = _flat_pixels(ca)
         pb = _flat_pixels(cb)
         if not pa:
@@ -124,7 +197,11 @@ def tile_region_diff(img_a: Path, img_b: Path, rect: dict | None, header_h: floa
 
 
 def _tile_source(tile: dict, viewer: dict) -> str:
-    """Extract a tile's own source/identity from `viewer.tiles[id]` or `viewer.layout`."""
+    """Extract a tile's own source from the tile metric, `viewer.tiles[id]`, or `viewer.layout.root` leaf."""
+    for k in ("source", "identity", "file", "key"):
+        val = str(tile.get(k) or "").strip()
+        if val:
+            return val
     tid = str(tile.get("id") or "")
     vtiles = viewer.get("tiles")
     if isinstance(vtiles, dict) and tid and isinstance(vtiles.get(tid), dict):
@@ -133,19 +210,12 @@ def _tile_source(tile: dict, viewer: dict) -> str:
             val = str(tinfo.get(k) or "").strip()
             if val:
                 return val
-    vlay = viewer.get("layout")
-    if isinstance(vlay, dict):
-        ltiles = vlay.get("tiles")
-        if isinstance(ltiles, dict) and tid and isinstance(ltiles.get(tid), dict):
-            tinfo = ltiles[tid]
-            for k in ("source", "identity", "file", "path"):
-                val = str(tinfo.get(k) or "").strip()
-                if val:
-                    return val
-    for k in ("source", "identity", "file", "key"):
-        val = str(tile.get(k) or "").strip()
-        if val:
-            return val
+    leaves = layout_leaves(viewer.get("layout"))
+    if tid and tid in leaves:
+        for k in ("source", "identity", "file", "path"):
+            val = str(leaves[tid].get(k) or "").strip()
+            if val:
+                return val
     return ""
 
 
@@ -156,9 +226,14 @@ def _splitter_between(
     axis: str,
     tol: float = 12.0,
 ) -> dict | None:
-    """Return a splitter with matching `axis` positioned between `a_rect` and `b_rect`, or None."""
+    """Return a splitter with matching renderer `axis` ('x'/'y') positioned between `a_rect` and `b_rect`, or None."""
     for sp in splitters:
-        if not isinstance(sp, dict) or sp.get("axis") != axis:
+        if not isinstance(sp, dict):
+            continue
+        sp_axis = sp.get("axis")
+        if sp_axis in HUB_AXIS_TO_RENDERER:
+            sp_axis = HUB_AXIS_TO_RENDERER[sp_axis]
+        if sp_axis != axis:
             continue
         sr = _rect_tuple(sp.get("rect"))
         if sr is None:
@@ -194,8 +269,16 @@ def _pane_rect_from_layout(layout: dict | None) -> tuple[float, float, float, fl
     return px, py, pw, ph
 
 
-def _shot_cleared(full_dir: Path, sname: str, caps: dict[str, dict], shots: dict[str, dict]) -> tuple[bool, str]:
-    """Fail-closed per-shot capture + obstruction/privacy clearance."""
+def _shot_cleared(
+    full_dir: Path,
+    sname: str,
+    caps: dict[str, dict],
+    shots: dict[str, dict],
+    cleared_shots: set[str] | None = None,
+) -> tuple[bool, str]:
+    """Fail-closed per-shot capture + obstruction/privacy clearance (consulting `cleared_shots` when provided)."""
+    if cleared_shots is not None and sname not in cleared_shots:
+        return False, f"shot not in run's per-shot privacy clearance ({sname})"
     cap = caps.get(sname) or {}
     png = full_dir / f"{sname}.png"
     if not (cap.get("ok") and png.exists() and png.stat().st_size > 0):
@@ -209,30 +292,70 @@ def _shot_cleared(full_dir: Path, sname: str, caps: dict[str, dict], shots: dict
     return True, ""
 
 
+def _fresh_tiles_after_mark(shot: dict, mark_seqs: dict[str, int], mark_name: str) -> tuple[bool, str]:
+    """Require a fresh `GPUI_METRIC event=tiles` strictly after `mark_name` (never a stale carried-forward inventory)."""
+    mseq = mark_seqs.get(mark_name)
+    tseq = shot.get("tiles_seq")
+    if not isinstance(mseq, int) or mseq <= 0:
+        return False, f"mark {mark_name!r} not recorded"
+    if not isinstance(tseq, int) or tseq <= mseq:
+        return False, f"stale tile inventory (tiles_seq={tseq} <= mark_seq={mseq} for {mark_name!r})"
+    return True, ""
+
+
 def build_task4_dock_steps(settle_timeout_ms: int = 15000) -> list[dict]:
-    """Script steps for Task 4 (Gerbers -> Add beside -> Board, then close added tile -> one step back)."""
+    """User-facing Task 4 route: Gerbers -> Add beside... -> Board, then close the added tile (one step back).
+
+    Uses UI controls (`rail:Gerbers`, `ui:Add beside`, `add-beside:board`, `tile-close:board`) rather than
+    direct hub `layout-*` actions, and resets to idle first so `rail:Gerbers` never toggles Gerbers off.
+    """
     tmo = min(settle_timeout_ms, 8000)
     return [
+        {"keys": "ctrl-l"},
+        {"wait": 60},
+        {"keys": "escape"},
+        {"wait": 60},
+        {"keys": "escape"},
+        {"wait": 60},
+        {"wait_settled": "", "tag": "task4-dock-start-idle", "timeout_ms": min(tmo, 3000)},
         {"mark": "press:task4-dock-gerbers"},
         {"press": "rail:Gerbers"},
         {"shot": "task4-dock-gerbers", "settle": "gerbers", "timeout_ms": tmo},
         {"mark": "press:task4-dock-split"},
-        {"action": ["layout-add", json.dumps({"kind": "board", "side": "right"})]},
+        {"press": "ui:Add beside"},
+        {"wait": 120},
+        {"press": "add-beside:board"},
         {"wait": 300},
         {"shot": "task4-dock-split", "settle": "board", "timeout_ms": tmo},
         {"mark": "press:task4-dock-back"},
-        {"action": ["layout-close", json.dumps({"tile": "focused"})]},
+        {"press": "tile-close:board"},
         {"wait": 300},
         {"shot": "task4-dock-back", "settle": "gerbers", "timeout_ms": tmo},
     ]
 
 
 def build_b7_steps(settle_timeout_ms: int = 15000) -> list[dict]:
-    """Script steps for Rule B7 (one split and compare model) on `full`."""
+    """Rule B7 (one split and compare model) steps on `full`.
+
+    Resets to idle before every direction trial so `rail:Board` never closes an already-focused Board,
+    and addresses tiles/splitters via UI controls or live inventory selectors (never literal `t0`/`t1`/`splitter:0`).
+    """
     tmo = min(settle_timeout_ms, 8000)
+    def _reset_idle(tag: str) -> list[dict]:
+        return [
+            {"keys": "ctrl-l"},
+            {"wait": 60},
+            {"keys": "escape"},
+            {"wait": 60},
+            {"keys": "escape"},
+            {"wait": 60},
+            {"wait_settled": "", "tag": tag, "timeout_ms": min(tmo, 3000)},
+        ]
+
     steps: list[dict] = []
-    # 1. Add beside in all 4 directions (starting from Board)
+    # 1. Add beside in all 4 directions (starting from idle -> Board each time)
     for side in ("right", "left", "bottom", "top"):
+        steps.extend(_reset_idle(f"b7-add-{side}-idle"))
         steps.extend([
             {"press": "rail:Board"},
             {"wait_settled": "board", "tag": f"b7-add-{side}-start", "timeout_ms": tmo},
@@ -240,12 +363,13 @@ def build_b7_steps(settle_timeout_ms: int = 15000) -> list[dict]:
             {"action": ["layout-add", json.dumps({"kind": "schematic", "side": side})]},
             {"wait": 300},
             {"shot": f"b7-add-{side}", "settle": "schematic", "timeout_ms": tmo},
-            {"mark": f"b7:close-after-{side}"},
-            {"action": ["layout-close", json.dumps({"tile": "focused"})]},
+            {"mark": f"b7:close-{side}"},
+            {"press": "tile-close:schematic"},
             {"wait": 250},
             {"shot": f"b7-close-{side}", "settle": "board", "timeout_ms": tmo},
         ])
-    # 2. Swap + Resize (drag splitter) + Maximize/Restore (from Board + Schematic side by side)
+    # 2. Swap + Resize (drag active splitter control) + Maximize/Restore
+    steps.extend(_reset_idle("b7-pair-idle"))
     steps.extend([
         {"press": "rail:Board"},
         {"wait_settled": "board", "tag": "b7-pair-start", "timeout_ms": tmo},
@@ -253,41 +377,41 @@ def build_b7_steps(settle_timeout_ms: int = 15000) -> list[dict]:
         {"wait": 300},
         {"shot": "b7-before-swap", "settle": "schematic", "timeout_ms": tmo},
         {"mark": "b7:swap"},
-        {"action": ["layout-swap", json.dumps({"a": "t0", "b": "t1"})]},
+        {"press": "ui:Swap tiles"},
         {"wait": 300},
         {"shot": "b7-after-swap", "settle": "schematic", "timeout_ms": tmo},
         {"mark": "b7:resize-drag"},
-        {"drag": {"from": "splitter:0", "to": [980, 420], "moves": 6}},
+        {"drag": {"from": "tile-splitter:primary", "to": [980, 420], "moves": 6}},
         {"wait": 300},
         {"shot": "b7-after-resize", "settle": "schematic", "timeout_ms": tmo},
         {"mark": "b7:maximize"},
-        {"action": ["layout-maximize", json.dumps({"tile": "focused"})]},
+        {"press": "ui:Maximize tile"},
         {"wait": 250},
         {"shot": "b7-maximized", "settle": "schematic", "timeout_ms": tmo},
         {"mark": "b7:restore"},
-        {"action": ["layout-restore", "{}"]},
+        {"press": "ui:Restore tiles"},
         {"wait": 250},
         {"shot": "b7-restored", "settle": "schematic", "timeout_ms": tmo},
     ])
     # 3. Overlay on/off (Board + Gerbers) + incompatible overlay refusal (Board + Files)
+    steps.extend(_reset_idle("b7-overlay-idle"))
     steps.extend([
         {"press": "rail:Board"},
         {"wait_settled": "board", "tag": "b7-overlay-base", "timeout_ms": tmo},
         {"shot": "b7-overlay-plain", "settle": "board", "timeout_ms": tmo},
         {"mark": "b7:overlay-on"},
-        {"action": ["layout-add", json.dumps({"kind": "gerbers", "side": "right"})]},
-        {"wait": 250},
-        {"action": ["layout-overlay", json.dumps({"base": "t0", "overlay": "t1", "mode": "diff"})]},
+        {"press": "ui:Overlay Gerbers"},
         {"wait": 300},
         {"shot": "b7-overlay-on", "settle": "board", "timeout_ms": tmo},
         {"mark": "b7:overlay-off"},
-        {"action": ["layout-overlay", json.dumps({"base": "t0", "overlay": None})]},
+        {"press": "ui:Overlay Gerbers"},
         {"wait": 300},
         {"shot": "b7-overlay-off", "settle": "board", "timeout_ms": tmo},
-        {"mark": "b7:overlay-incompatible"},
         {"action": ["layout-add", json.dumps({"kind": "files", "side": "right"})]},
         {"wait": 250},
-        {"action": ["layout-overlay", json.dumps({"base": "t0", "overlay": "t1", "mode": "diff"})]},
+        {"shot": "b7-overlay-incompat-before", "settle": "files", "timeout_ms": tmo},
+        {"mark": "b7:overlay-incompatible"},
+        {"press": "ui:Overlay incompatible"},
         {"wait": 250},
         {"shot": "b7-overlay-incompat", "settle": "files", "timeout_ms": tmo},
     ])
@@ -299,11 +423,12 @@ def evaluate_task4_dock(
     parsed_full: dict,
     caps_full: dict[str, dict],
     full_client_ok: bool,
+    cleared_shots: set[str] | None = None,
 ) -> dict | None:
     """Evaluate Task 4 via the docking tile inventory (`Gerbers -> Add beside -> Board`, + one step back).
 
-    Returns `None` when the build does not emit `GPUI_METRIC event=tiles` or did not run the
-    `task4-dock-split` step, so callers fall back cleanly (`unavailable` or legacy check).
+    Returns `None` when the build does not emit `GPUI_METRIC event=tiles` or did not capture
+    `task4-dock-split`, so callers stay `unavailable` / legacy until a build draws tiles.
     """
     if not parsed_full.get("tiles_metric_seen"):
         return None
@@ -311,24 +436,68 @@ def evaluate_task4_dock(
     if "task4-dock-split" not in shots:
         return None
 
-    ok_g, err_g = _shot_cleared(full_dir, "task4-dock-gerbers", caps_full, shots)
-    ok_s, err_s = _shot_cleared(full_dir, "task4-dock-split", caps_full, shots)
-    ok_b, err_b = _shot_cleared(full_dir, "task4-dock-back", caps_full, shots)
+    mark_seqs = parsed_full.get("mark_seqs") or {}
+    presses = parsed_full.get("presses") or {}
 
-    if not full_client_ok or not ok_s:
+    ok_g, err_g = _shot_cleared(full_dir, "task4-dock-gerbers", caps_full, shots, cleared_shots)
+    ok_s, err_s = _shot_cleared(full_dir, "task4-dock-split", caps_full, shots, cleared_shots)
+    ok_b, err_b = _shot_cleared(full_dir, "task4-dock-back", caps_full, shots, cleared_shots)
+
+    if not full_client_ok or not ok_g or not ok_s:
         return {
-            "outcome": "harness_failed",
-            "note": err_s or "client failed or task4-dock-split capture uncleared",
+            "outcome": "unavailable" if (not ok_g and ok_s) else "harness_failed",
+            "note": err_g or err_s or "client failed or Task 4 docking captures uncleared",
             "one_step_back": False,
-            "evidence": {"split_err": err_s, "back_err": err_b},
+            "found": False,
+            "presses": [],
+            "evidence": {"gerbers_err": err_g, "split_err": err_s, "back_err": err_b},
         }
 
+    # Require real observed delivery for the user-facing Task 4 route (never fabricated found=True).
+    p_g = [p for p in presses.get("press:task4-dock-gerbers", []) if p.get("found")]
+    p_s = [p for p in presses.get("press:task4-dock-split", []) if p.get("found")]
+    p_b = [p for p in presses.get("press:task4-dock-back", []) if p.get("found")]
+    observed_presses = [p["id"] for p in p_g] + [p["id"] for p in p_s]
+    found_route = bool(p_g and p_s)
+
+    s_g = shots["task4-dock-gerbers"]
     s_split = shots["task4-dock-split"]
+
+    # Fresh tile inventory required for every shot (strictly after its mark).
+    fg_ok, fg_err = _fresh_tiles_after_mark(s_g, mark_seqs, "press:task4-dock-gerbers")
+    fs_ok, fs_err = _fresh_tiles_after_mark(s_split, mark_seqs, "press:task4-dock-split")
+    if not (fg_ok and fs_ok):
+        return {
+            "outcome": "unavailable",
+            "note": fg_err or fs_err,
+            "one_step_back": False,
+            "found": found_route,
+            "presses": observed_presses,
+            "evidence": {"fresh_gerbers": fg_err, "fresh_split": fs_err},
+        }
+
+    g_tiles = s_g.get("tiles") or []
+    v_g = s_g.get("viewer") or {}
+    if len(g_tiles) != 1 or str(g_tiles[0].get("kind") or "") != "gerbers":
+        return {
+            "outcome": "task_failed",
+            "note": f"starting Gerbers shot did not draw 1 gerbers tile (got {len(g_tiles)})",
+            "one_step_back": False,
+            "found": found_route,
+            "presses": observed_presses,
+            "evidence": {"init_tiles": g_tiles},
+        }
+    init_id = str(g_tiles[0].get("id") or "")
+    init_src = _tile_source(g_tiles[0], v_g)
+    init_rect = _rect_tuple(g_tiles[0].get("rect"))
+
     tiles = s_split.get("tiles") or []
     splitters = s_split.get("splitters") or []
     v_split = s_split.get("viewer") or {}
 
     fails: list[str] = []
+    if not found_route:
+        fails.append("Task 4 user-facing presses not delivered")
     if len(tiles) != 2:
         fails.append(f"expected 2 tiles, got {len(tiles)}")
     kinds = {str(t.get("kind") or "") for t in tiles}
@@ -336,10 +505,20 @@ def evaluate_task4_dock(
         fails.append(f"expected tile kinds {{'gerbers', 'board'}}, got {sorted(kinds)}")
 
     rects = [_rect_tuple(t.get("rect")) for t in tiles]
+    body_rects = [_rect_tuple(t.get("body")) for t in tiles]
     if any(r is None for r in rects):
         fails.append("one or more tiles missing positive-area rect")
     elif len(rects) == 2 and not _rects_disjoint(rects[0], rects[1]):
         fails.append("tile rects overlap")
+    if any(b is None for b in body_rects):
+        return {
+            "outcome": "unavailable",
+            "note": "tile metric missing measured `body` rect",
+            "one_step_back": False,
+            "found": found_route,
+            "presses": observed_presses,
+            "evidence": {"tiles": tiles},
+        }
 
     splitter = _splitter_between(splitters, rects[0], rects[1], "x") if (len(rects) == 2 and all(rects)) else None
     if splitter is None:
@@ -352,57 +531,66 @@ def evaluate_task4_dock(
         elif sources[0] == sources[1]:
             fails.append(f"both tiles report identical source ({sources[0]!r})")
 
-    bodies = [tile_body_non_flat(full_dir / "task4-dock-split.png", t.get("rect")) for t in tiles]
+    split_png = full_dir / "task4-dock-split.png"
+    bodies = [tile_body_non_flat(split_png, t.get("body")) for t in tiles]
     if any(b is not True for b in bodies):
         fails.append(f"tile body flat or unreadable ({bodies})")
+    inter_diff = tile_bodies_pixel_diff(split_png, tiles[0].get("body"), split_png, tiles[1].get("body")) if len(tiles) == 2 else None
+    if inter_diff is None or inter_diff <= 0.01:
+        fails.append(f"the two tile bodies do not differ visually in pixels (diff={inter_diff})")
 
-    # One step back: closing the added tile returns the surviving Gerbers tile to full width
+    # One step back: closing the added tile returns the original Gerbers tile (same id & source) to full width
     back_ok = False
     back_note = err_b
     if ok_b:
         s_back = shots["task4-dock-back"]
-        b_tiles = s_back.get("tiles") or []
-        b_splitters = s_back.get("splitters") or []
-        b_rect = _rect_tuple(b_tiles[0].get("rect")) if len(b_tiles) == 1 else None
-        ref_w: float | None = None
-        if ok_g:
-            g_tiles = shots["task4-dock-gerbers"].get("tiles") or []
-            if len(g_tiles) == 1:
-                gr = _rect_tuple(g_tiles[0].get("rect"))
-                if gr:
-                    ref_w = gr[2]
-        if ref_w is None:
-            pr = _pane_rect_from_layout(s_back.get("layout"))
-            if pr:
-                ref_w = pr[2]
-        b_body = tile_body_non_flat(full_dir / "task4-dock-back.png", b_tiles[0].get("rect")) if len(b_tiles) == 1 else None
-        if (
-            len(b_tiles) == 1
-            and str(b_tiles[0].get("kind") or "") == "gerbers"
-            and len(b_splitters) == 0
-            and b_rect is not None
-            and ref_w is not None
-            and b_rect[2] >= 0.95 * ref_w
-            and b_body is True
-        ):
-            back_ok = True
-            back_note = ""
+        fb_ok, fb_err = _fresh_tiles_after_mark(s_back, mark_seqs, "press:task4-dock-back")
+        if not fb_ok:
+            back_note = fb_err
+        elif not p_b:
+            back_note = "close press not delivered for task4-dock-back"
         else:
-            back_note = (
-                f"close did not restore full-width Gerbers tile "
-                f"(tiles={len(b_tiles)}, splitters={len(b_splitters)}, w={b_rect[2] if b_rect else None}, ref_w={ref_w}, body={b_body})"
-            )
+            b_tiles = s_back.get("tiles") or []
+            b_splitters = s_back.get("splitters") or []
+            v_back = s_back.get("viewer") or {}
+            b_rect = _rect_tuple(b_tiles[0].get("rect")) if len(b_tiles) == 1 else None
+            b_id = str(b_tiles[0].get("id") or "") if len(b_tiles) == 1 else ""
+            b_src = _tile_source(b_tiles[0], v_back) if len(b_tiles) == 1 else ""
+            b_body = tile_body_non_flat(full_dir / "task4-dock-back.png", b_tiles[0].get("body")) if len(b_tiles) == 1 else None
+            same_survivor = bool(init_id and b_id == init_id and init_src and b_src == init_src)
+            width_restored = bool(b_rect and init_rect and b_rect[2] >= 0.95 * init_rect[2])
+            if (
+                len(b_tiles) == 1
+                and str(b_tiles[0].get("kind") or "") == "gerbers"
+                and len(b_splitters) == 0
+                and same_survivor
+                and width_restored
+                and b_body is True
+            ):
+                back_ok = True
+                back_note = ""
+            else:
+                back_note = (
+                    f"close did not restore original full-width Gerbers tile "
+                    f"(tiles={len(b_tiles)}, splitters={len(b_splitters)}, id={b_id!r} vs {init_id!r}, "
+                    f"src={b_src!r} vs {init_src!r}, width_ok={width_restored}, body={b_body})"
+                )
 
     outcome = "passed" if (not fails and back_ok) else "task_failed"
     return {
         "outcome": outcome,
         "note": "; ".join(fails + ([back_note] if (back_note and not back_ok) else [])),
         "one_step_back": back_ok,
+        "found": found_route,
+        "presses": observed_presses,
         "evidence": {
+            "init_tile_id": init_id,
+            "init_source": init_src,
             "tiles": tiles,
             "splitters": splitters,
             "sources": sources,
             "bodies_non_flat": bodies,
+            "inter_tile_pixel_diff": inter_diff,
             "one_step_back_ok": back_ok,
             "one_step_back_note": back_note,
         },
@@ -413,28 +601,38 @@ def evaluate_b7_dock(
     full_dir: Path,
     parsed_full: dict,
     caps_full: dict[str, dict],
+    cleared_shots: set[str] | None = None,
 ) -> dict:
-    """Evaluate Rule B7 (one split and compare model) from tile inventory, drag events, refusals, and PNGs.
+    """Evaluate Rule B7 (one split and compare model) from fresh tile inventories, drag events, refusals, and PNGs.
 
     Returns `status: "unavailable"` until a build emits `GPUI_METRIC event=tiles`.
+    Scoring denominator is ALWAYS all 7 checks (unavailable checks are counted as not earned).
     """
+    total_checks = len(DOCK_B7_CHECKS)
     if not parsed_full.get("tiles_metric_seen"):
         return {
             "status": "unavailable",
             "reason": "client did not emit GPUI_METRIC event=tiles (requires docking PR #1414 + renderer)",
+            "total": total_checks,
             "checked": 0,
             "clean": 0,
+            "unavailable_count": total_checks,
             "violations": [],
             "checks": {k: {"status": "unavailable", "passed": None, "note": "no tiles metric"} for k in DOCK_B7_CHECKS},
         }
 
     shots = parsed_full.get("shots") or {}
+    mark_seqs = parsed_full.get("mark_seqs") or {}
     drags = parsed_full.get("drags") or {}
     refusals = parsed_full.get("refusals") or {}
     checks: dict[str, dict] = {}
 
     def _rec(status: str, passed: bool | None, note: str = "", evidence: dict | None = None) -> dict:
         return {"status": status, "passed": passed, "note": note, "evidence": evidence or {}}
+
+    def _tile_frame(t: dict) -> int | None:
+        f = t.get("frame")
+        return f if (isinstance(f, int) and not isinstance(f, bool)) else None
 
     # 1. add_beside_directions (right, left, bottom, top)
     dir_results: dict[str, bool | str] = {}
@@ -444,10 +642,15 @@ def evaluate_b7_dock(
         if sname not in shots:
             dir_results[side] = "unavailable"
             continue
-        ok, err = _shot_cleared(full_dir, sname, caps_full, shots)
+        ok, err = _shot_cleared(full_dir, sname, caps_full, shots, cleared_shots)
         if not ok:
             dir_results[side] = "unavailable"
             dir_notes.append(f"{side}: {err}")
+            continue
+        fr_ok, fr_err = _fresh_tiles_after_mark(shots[sname], mark_seqs, f"b7:add-{side}")
+        if not fr_ok:
+            dir_results[side] = "unavailable"
+            dir_notes.append(f"{side}: {fr_err}")
             continue
         ts = shots[sname].get("tiles") or []
         sps = shots[sname].get("splitters") or []
@@ -462,6 +665,12 @@ def evaluate_b7_dock(
             continue
         rb = _rect_tuple(by_kind["board"].get("rect"))
         rs = _rect_tuple(by_kind["schematic"].get("rect"))
+        bb = _rect_tuple(by_kind["board"].get("body"))
+        bs = _rect_tuple(by_kind["schematic"].get("body"))
+        if not (bb and bs):
+            dir_results[side] = "unavailable"
+            dir_notes.append(f"{side}: missing measured body rect")
+            continue
         if not (rb and rs and _rects_disjoint(rb, rs)):
             dir_results[side] = False
             dir_notes.append(f"{side}: invalid or overlapping rects")
@@ -473,13 +682,15 @@ def evaluate_b7_dock(
             or (side == "top" and rs[1] < rb[1])
         )
         sp_ok = _splitter_between(sps, rb, rs, axis) is not None
-        b1 = tile_body_non_flat(full_dir / f"{sname}.png", by_kind["board"].get("rect"))
-        b2 = tile_body_non_flat(full_dir / f"{sname}.png", by_kind["schematic"].get("rect"))
-        if pos_ok and sp_ok and b1 is True and b2 is True:
+        png = full_dir / f"{sname}.png"
+        b1 = tile_body_non_flat(png, by_kind["board"].get("body"))
+        b2 = tile_body_non_flat(png, by_kind["schematic"].get("body"))
+        diff12 = tile_bodies_pixel_diff(png, by_kind["board"].get("body"), png, by_kind["schematic"].get("body"))
+        if pos_ok and sp_ok and b1 is True and b2 is True and (diff12 is not None and diff12 > 0.01):
             dir_results[side] = True
         else:
             dir_results[side] = False
-            dir_notes.append(f"{side}: pos_ok={pos_ok} sp_ok={sp_ok} bodies=({b1},{b2})")
+            dir_notes.append(f"{side}: pos_ok={pos_ok} sp_ok={sp_ok} bodies=({b1},{b2}) diff={diff12}")
 
     if any(v is False for v in dir_results.values()):
         checks["add_beside_directions"] = _rec("measured", False, "; ".join(dir_notes), {"directions": dir_results})
@@ -488,185 +699,268 @@ def evaluate_b7_dock(
     else:
         checks["add_beside_directions"] = _rec("unavailable", None, "; ".join(dir_notes) or "not all 4 directions captured", {"directions": dir_results})
 
-    # 2. close (survivor restored to full pane after closing added tile)
-    close_sname = next((f"b7-close-{s}" for s in ("right", "left", "bottom", "top") if f"b7-close-{s}" in shots), None)
-    if close_sname is None:
+    # 2. close (missing pane geometry -> unavailable, never waived)
+    close_side = next((s for s in ("right", "left", "bottom", "top") if f"b7-close-{s}" in shots), None)
+    if close_side is None:
         checks["close"] = _rec("unavailable", None, "no b7-close-* shot captured")
     else:
-        ok, err = _shot_cleared(full_dir, close_sname, caps_full, shots)
+        close_sname = f"b7-close-{close_side}"
+        ok, err = _shot_cleared(full_dir, close_sname, caps_full, shots, cleared_shots)
         if not ok:
             checks["close"] = _rec("unavailable", None, err)
         else:
             srec = shots[close_sname]
-            ts = srec.get("tiles") or []
-            sps = srec.get("splitters") or []
+            fr_ok, fr_err = _fresh_tiles_after_mark(srec, mark_seqs, f"b7:close-{close_side}")
             pr = _pane_rect_from_layout(srec.get("layout"))
-            tr = _rect_tuple(ts[0].get("rect")) if len(ts) == 1 else None
-            body = tile_body_non_flat(full_dir / f"{close_sname}.png", ts[0].get("rect")) if len(ts) == 1 else None
-            width_ok = bool(tr and (pr is None or tr[2] >= 0.95 * pr[2]))
-            ok_close = len(ts) == 1 and len(sps) == 0 and width_ok and body is True
-            checks["close"] = _rec(
-                "measured",
-                ok_close,
-                "" if ok_close else f"tiles={len(ts)} splitters={len(sps)} width_ok={width_ok} body={body}",
-                {"shot": close_sname, "tiles": ts, "splitters": sps},
-            )
+            if not fr_ok:
+                checks["close"] = _rec("unavailable", None, fr_err)
+            elif pr is None:
+                checks["close"] = _rec("unavailable", None, "missing pane layout geometry for close check")
+            else:
+                ts = srec.get("tiles") or []
+                sps = srec.get("splitters") or []
+                tr = _rect_tuple(ts[0].get("rect")) if len(ts) == 1 else None
+                body = tile_body_non_flat(full_dir / f"{close_sname}.png", ts[0].get("body")) if len(ts) == 1 else None
+                width_ok = bool(tr and tr[2] >= 0.95 * pr[2])
+                ok_close = len(ts) == 1 and len(sps) == 0 and width_ok and body is True
+                checks["close"] = _rec(
+                    "measured",
+                    ok_close,
+                    "" if ok_close else f"tiles={len(ts)} splitters={len(sps)} width_ok={width_ok} body={body}",
+                    {"shot": close_sname, "tiles": ts, "splitters": sps},
+                )
 
-    # 3. swap (two tiles exchange rects and pixels change)
+    # 3. swap (per-tile identity, swapped rects, advancing frame seq per tile, non-flat distinct bodies)
     if "b7-before-swap" not in shots or "b7-after-swap" not in shots:
         checks["swap"] = _rec("unavailable", None, "swap shots not captured")
     else:
-        ok1, e1 = _shot_cleared(full_dir, "b7-before-swap", caps_full, shots)
-        ok2, e2 = _shot_cleared(full_dir, "b7-after-swap", caps_full, shots)
+        ok1, e1 = _shot_cleared(full_dir, "b7-before-swap", caps_full, shots, cleared_shots)
+        ok2, e2 = _shot_cleared(full_dir, "b7-after-swap", caps_full, shots, cleared_shots)
         if not (ok1 and ok2):
             checks["swap"] = _rec("unavailable", None, e1 or e2)
         else:
-            t_pre = {str(t.get("kind") or t.get("id")): _rect_tuple(t.get("rect")) for t in (shots["b7-before-swap"].get("tiles") or [])}
-            t_post = {str(t.get("kind") or t.get("id")): _rect_tuple(t.get("rect")) for t in (shots["b7-after-swap"].get("tiles") or [])}
-            common = sorted(k for k in (set(t_pre) & set(t_post)) if t_pre[k] and t_post[k])
-            if len(common) != 2:
-                checks["swap"] = _rec("measured", False, f"expected 2 matching tiles across swap, got {common}")
+            fr_ok, fr_err = _fresh_tiles_after_mark(shots["b7-after-swap"], mark_seqs, "b7:swap")
+            if not fr_ok:
+                checks["swap"] = _rec("unavailable", None, fr_err)
             else:
-                k0, k1 = common
-                swapped = _rect_close(t_pre[k0], t_post[k1]) and _rect_close(t_pre[k1], t_post[k0]) and not _rect_close(t_pre[k0], t_post[k0])
-                diff0 = tile_region_diff(full_dir / "b7-before-swap.png", full_dir / "b7-after-swap.png", shots["b7-after-swap"]["tiles"][0].get("rect"))
-                pix_ok = (diff0 is not None and diff0 > 0.01)
-                ok_swap = bool(swapped and pix_ok)
-                checks["swap"] = _rec(
-                    "measured",
-                    ok_swap,
-                    "" if ok_swap else f"swapped_rects={swapped} pixel_diff={diff0}",
-                    {"before": t_pre, "after": t_post, "pixel_diff": diff0},
-                )
+                pre_by_id = {str(t.get("id") or ""): t for t in (shots["b7-before-swap"].get("tiles") or []) if t.get("id")}
+                post_by_id = {str(t.get("id") or ""): t for t in (shots["b7-after-swap"].get("tiles") or []) if t.get("id")}
+                common = sorted(set(pre_by_id) & set(post_by_id))
+                if len(common) != 2:
+                    checks["swap"] = _rec("measured", False, f"expected 2 matching tile ids across swap, got {common}")
+                else:
+                    id0, id1 = common
+                    r_pre0, r_pre1 = _rect_tuple(pre_by_id[id0].get("rect")), _rect_tuple(pre_by_id[id1].get("rect"))
+                    r_post0, r_post1 = _rect_tuple(post_by_id[id0].get("rect")), _rect_tuple(post_by_id[id1].get("rect"))
+                    f_pre0, f_pre1 = _tile_frame(pre_by_id[id0]), _tile_frame(pre_by_id[id1])
+                    f_post0, f_post1 = _tile_frame(post_by_id[id0]), _tile_frame(post_by_id[id1])
+                    if any(x is None for x in (f_pre0, f_pre1, f_post0, f_post1)):
+                        checks["swap"] = _rec("unavailable", None, "tile metric missing per-tile `frame` sequence for swap")
+                    elif not (r_pre0 and r_pre1 and r_post0 and r_post1):
+                        checks["swap"] = _rec("measured", False, "missing tile rects across swap")
+                    else:
+                        swapped = _rect_close(r_pre0, r_post1) and _rect_close(r_pre1, r_post0) and not _rect_close(r_pre0, r_post0)
+                        frames_adv = (f_post0 > f_pre0) and (f_post1 > f_pre1)
+                        src_kept = (
+                            _tile_source(pre_by_id[id0], shots["b7-before-swap"].get("viewer") or {})
+                            == _tile_source(post_by_id[id0], shots["b7-after-swap"].get("viewer") or {})
+                            and _tile_source(pre_by_id[id1], shots["b7-before-swap"].get("viewer") or {})
+                            == _tile_source(post_by_id[id1], shots["b7-after-swap"].get("viewer") or {})
+                        )
+                        png_post = full_dir / "b7-after-swap.png"
+                        b0 = tile_body_non_flat(png_post, post_by_id[id0].get("body"))
+                        b1 = tile_body_non_flat(png_post, post_by_id[id1].get("body"))
+                        inter = tile_bodies_pixel_diff(png_post, post_by_id[id0].get("body"), png_post, post_by_id[id1].get("body"))
+                        ok_swap = bool(swapped and frames_adv and src_kept and b0 is True and b1 is True and (inter is not None and inter > 0.01))
+                        checks["swap"] = _rec(
+                            "measured",
+                            ok_swap,
+                            "" if ok_swap else f"swapped={swapped} frames_adv={frames_adv} src_kept={src_kept} bodies=({b0},{b1}) inter_diff={inter}",
+                        )
 
-    # 4. resize_drag (drag splitter ok=true, ratio changes >= 0.05, both bodies redraw non-flat at new size)
+    # 4. resize_drag (strict bool ok=True, splitter id + motion, ratio delta >= 0.05, per-tile frame advances + non-flat distinct bodies)
     if "b7-after-swap" not in shots or "b7-after-resize" not in shots:
         checks["resize_drag"] = _rec("unavailable", None, "resize shots not captured")
     else:
-        ok1, e1 = _shot_cleared(full_dir, "b7-after-swap", caps_full, shots)
-        ok2, e2 = _shot_cleared(full_dir, "b7-after-resize", caps_full, shots)
-        drag_evs = [d for d in drags.get("b7:resize-drag", []) if d.get("ok") is True]
+        ok1, e1 = _shot_cleared(full_dir, "b7-after-swap", caps_full, shots, cleared_shots)
+        ok2, e2 = _shot_cleared(full_dir, "b7-after-resize", caps_full, shots, cleared_shots)
+        drag_evs = [
+            d for d in drags.get("b7:resize-drag", [])
+            if d.get("ok") is True and str(d.get("splitter") or "").strip()
+        ]
         if not (ok1 and ok2):
             checks["resize_drag"] = _rec("unavailable", None, e1 or e2)
         elif not drag_evs:
-            checks["resize_drag"] = _rec("unavailable", None, "no delivered drag event (ok=true) recorded for b7:resize-drag")
+            checks["resize_drag"] = _rec("unavailable", None, "no delivered drag event (strict ok=True with splitter id) recorded for b7:resize-drag")
         else:
-            pre_ts = sorted([r for t in (shots["b7-after-swap"].get("tiles") or []) if (r := _rect_tuple(t.get("rect")))], key=lambda r: r[0])
-            post_ts_raw = [t for t in (shots["b7-after-resize"].get("tiles") or []) if _rect_tuple(t.get("rect"))]
-            post_ts = sorted([(_rect_tuple(t.get("rect")), t) for t in post_ts_raw], key=lambda pair: pair[0][0])
-            if len(pre_ts) != 2 or len(post_ts) != 2:
-                checks["resize_drag"] = _rec("measured", False, f"expected 2 tiles before/after resize ({len(pre_ts)} -> {len(post_ts)})")
+            fr_ok, fr_err = _fresh_tiles_after_mark(shots["b7-after-resize"], mark_seqs, "b7:resize-drag")
+            if not fr_ok:
+                checks["resize_drag"] = _rec("unavailable", None, fr_err)
             else:
-                r_pre = pre_ts[0][2] / (pre_ts[0][2] + pre_ts[1][2])
-                r_post = post_ts[0][0][2] / (post_ts[0][0][2] + post_ts[1][0][2])
-                ratio_delta = abs(r_post - r_pre)
-                bodies = [tile_body_non_flat(full_dir / "b7-after-resize.png", t.get("rect")) for _, t in post_ts]
-                diffs = [tile_region_diff(full_dir / "b7-after-swap.png", full_dir / "b7-after-resize.png", t.get("rect")) for _, t in post_ts]
-                redrawn = all(b is True for b in bodies) and all(d is not None and d > 0.005 for d in diffs)
-                ok_rsz = ratio_delta >= 0.05 and redrawn
-                checks["resize_drag"] = _rec(
-                    "measured",
-                    ok_rsz,
-                    "" if ok_rsz else f"ratio {r_pre:.3f}->{r_post:.3f} (delta={ratio_delta:.3f}), bodies={bodies}, diffs={diffs}",
-                    {"ratio_before": round(r_pre, 3), "ratio_after": round(r_post, 3), "bodies": bodies, "diffs": diffs},
+                d0 = drag_evs[-1]
+                d_from, d_to = d0.get("from"), d0.get("to")
+                moved_ok = (
+                    isinstance(d_from, list) and isinstance(d_to, list)
+                    and len(d_from) == 2 and len(d_to) == 2
+                    and (abs(float(d_to[0]) - float(d_from[0])) >= 10.0 or abs(float(d_to[1]) - float(d_from[1])) >= 10.0)
                 )
+                pre_by_id = {str(t.get("id") or ""): t for t in (shots["b7-after-swap"].get("tiles") or []) if t.get("id")}
+                post_by_id = {str(t.get("id") or ""): t for t in (shots["b7-after-resize"].get("tiles") or []) if t.get("id")}
+                common = sorted(set(pre_by_id) & set(post_by_id))
+                if len(common) != 2:
+                    checks["resize_drag"] = _rec("measured", False, f"expected 2 matching tiles across resize, got {common}")
+                else:
+                    id0, id1 = common
+                    f_pre0, f_pre1 = _tile_frame(pre_by_id[id0]), _tile_frame(pre_by_id[id1])
+                    f_post0, f_post1 = _tile_frame(post_by_id[id0]), _tile_frame(post_by_id[id1])
+                    if any(x is None for x in (f_pre0, f_pre1, f_post0, f_post1)):
+                        checks["resize_drag"] = _rec("unavailable", None, "tile metric missing per-tile `frame` sequence for resize")
+                    else:
+                        pre_rs = sorted([_rect_tuple(pre_by_id[i].get("rect")) for i in common], key=lambda r: r[0] if r else 0)
+                        post_rs = sorted([_rect_tuple(post_by_id[i].get("rect")) for i in common], key=lambda r: r[0] if r else 0)
+                        if not (all(pre_rs) and all(post_rs)):
+                            checks["resize_drag"] = _rec("measured", False, "missing tile rects across resize")
+                        else:
+                            r_pre = pre_rs[0][2] / (pre_rs[0][2] + pre_rs[1][2])
+                            r_post = post_rs[0][2] / (post_rs[0][2] + post_rs[1][2])
+                            ratio_delta = abs(r_post - r_pre)
+                            frames_adv = (f_post0 > f_pre0) and (f_post1 > f_pre1)
+                            png_rsz = full_dir / "b7-after-resize.png"
+                            b0 = tile_body_non_flat(png_rsz, post_by_id[id0].get("body"))
+                            b1 = tile_body_non_flat(png_rsz, post_by_id[id1].get("body"))
+                            inter = tile_bodies_pixel_diff(png_rsz, post_by_id[id0].get("body"), png_rsz, post_by_id[id1].get("body"))
+                            ok_rsz = bool(moved_ok and ratio_delta >= 0.05 and frames_adv and b0 is True and b1 is True and (inter is not None and inter > 0.01))
+                            checks["resize_drag"] = _rec(
+                                "measured",
+                                ok_rsz,
+                                "" if ok_rsz else f"moved={moved_ok} ratio {r_pre:.3f}->{r_post:.3f} frames_adv={frames_adv} bodies=({b0},{b1}) inter={inter}",
+                                {"splitter": d0.get("splitter"), "ratio_before": round(r_pre, 3), "ratio_after": round(r_post, 3)},
+                            )
 
-    # 5. maximize_restore (maximize -> 1 full-pane tile, 0 splitters; restore -> 2 tiles + splitter)
+    # 5. maximize_restore (missing pane geometry -> unavailable, never waived)
     if "b7-maximized" not in shots or "b7-restored" not in shots:
         checks["maximize_restore"] = _rec("unavailable", None, "maximize/restore shots not captured")
     else:
-        ok1, e1 = _shot_cleared(full_dir, "b7-maximized", caps_full, shots)
-        ok2, e2 = _shot_cleared(full_dir, "b7-restored", caps_full, shots)
+        ok1, e1 = _shot_cleared(full_dir, "b7-maximized", caps_full, shots, cleared_shots)
+        ok2, e2 = _shot_cleared(full_dir, "b7-restored", caps_full, shots, cleared_shots)
         if not (ok1 and ok2):
             checks["maximize_restore"] = _rec("unavailable", None, e1 or e2)
         else:
             sm, sr = shots["b7-maximized"], shots["b7-restored"]
-            tm, spm = sm.get("tiles") or [], sm.get("splitters") or []
-            tr, spr = sr.get("tiles") or [], sr.get("splitters") or []
+            fm_ok, fm_err = _fresh_tiles_after_mark(sm, mark_seqs, "b7:maximize")
+            fr_ok, fr_err = _fresh_tiles_after_mark(sr, mark_seqs, "b7:restore")
             pm = _pane_rect_from_layout(sm.get("layout"))
-            rm = _rect_tuple(tm[0].get("rect")) if len(tm) == 1 else None
-            max_ok = (
-                len(tm) == 1
-                and len(spm) == 0
-                and rm is not None
-                and (pm is None or (rm[2] >= 0.95 * pm[2] and rm[3] >= 0.95 * pm[3]))
-                and tile_body_non_flat(full_dir / "b7-maximized.png", tm[0].get("rect")) is True
-            )
-            res_rects = [_rect_tuple(t.get("rect")) for t in tr]
-            res_ok = (
-                len(tr) == 2
-                and all(res_rects)
-                and _rects_disjoint(res_rects[0], res_rects[1])
-                and len(spr) >= 1
-                and all(tile_body_non_flat(full_dir / "b7-restored.png", t.get("rect")) is True for t in tr)
-            )
-            ok_mr = bool(max_ok and res_ok)
-            checks["maximize_restore"] = _rec(
-                "measured",
-                ok_mr,
-                "" if ok_mr else f"max_ok={max_ok} (tiles={len(tm)}, splitters={len(spm)}), res_ok={res_ok} (tiles={len(tr)}, splitters={len(spr)})",
-            )
+            if not (fm_ok and fr_ok):
+                checks["maximize_restore"] = _rec("unavailable", None, fm_err or fr_err)
+            elif pm is None:
+                checks["maximize_restore"] = _rec("unavailable", None, "missing pane layout geometry for maximize check")
+            else:
+                tm, spm = sm.get("tiles") or [], sm.get("splitters") or []
+                tr, spr = sr.get("tiles") or [], sr.get("splitters") or []
+                rm = _rect_tuple(tm[0].get("rect")) if len(tm) == 1 else None
+                max_ok = (
+                    len(tm) == 1
+                    and len(spm) == 0
+                    and rm is not None
+                    and rm[2] >= 0.95 * pm[2]
+                    and rm[3] >= 0.95 * pm[3]
+                    and tile_body_non_flat(full_dir / "b7-maximized.png", tm[0].get("body")) is True
+                )
+                res_rects = [_rect_tuple(t.get("rect")) for t in tr]
+                png_res = full_dir / "b7-restored.png"
+                res_ok = (
+                    len(tr) == 2
+                    and all(res_rects)
+                    and _rects_disjoint(res_rects[0], res_rects[1])
+                    and len(spr) >= 1
+                    and all(tile_body_non_flat(png_res, t.get("body")) is True for t in tr)
+                )
+                ok_mr = bool(max_ok and res_ok)
+                checks["maximize_restore"] = _rec(
+                    "measured",
+                    ok_mr,
+                    "" if ok_mr else f"max_ok={max_ok} (tiles={len(tm)}, splitters={len(spm)}), res_ok={res_ok} (tiles={len(tr)}, splitters={len(spr)})",
+                )
 
-    # 6. overlay_on_off (Board + Gerbers overlay on -> overlay present + pixels differ; off -> overlay cleared)
+    # 6. overlay_on_off (explicit overlay field observed on AND observed explicitly off + picture changed back)
     if not all(k in shots for k in ("b7-overlay-plain", "b7-overlay-on", "b7-overlay-off")):
         checks["overlay_on_off"] = _rec("unavailable", None, "overlay shots not captured")
     else:
-        ok0, e0 = _shot_cleared(full_dir, "b7-overlay-plain", caps_full, shots)
-        ok1, e1 = _shot_cleared(full_dir, "b7-overlay-on", caps_full, shots)
-        ok2, e2 = _shot_cleared(full_dir, "b7-overlay-off", caps_full, shots)
+        ok0, e0 = _shot_cleared(full_dir, "b7-overlay-plain", caps_full, shots, cleared_shots)
+        ok1, e1 = _shot_cleared(full_dir, "b7-overlay-on", caps_full, shots, cleared_shots)
+        ok2, e2 = _shot_cleared(full_dir, "b7-overlay-off", caps_full, shots, cleared_shots)
         if not (ok0 and ok1 and ok2):
             checks["overlay_on_off"] = _rec("unavailable", None, e0 or e1 or e2)
         else:
             s_on, s_off = shots["b7-overlay-on"], shots["b7-overlay-off"]
-            t_on, t_off = s_on.get("tiles") or [], s_off.get("tiles") or []
-            v_on, v_off = s_on.get("viewer") or {}, s_off.get("viewer") or {}
+            fon_ok, fon_err = _fresh_tiles_after_mark(s_on, mark_seqs, "b7:overlay-on")
+            foff_ok, foff_err = _fresh_tiles_after_mark(s_off, mark_seqs, "b7:overlay-off")
+            if not (fon_ok and foff_ok):
+                checks["overlay_on_off"] = _rec("unavailable", None, fon_err or foff_err)
+            else:
+                t_on, t_off = s_on.get("tiles") or [], s_off.get("tiles") or []
+                v_on, v_off = s_on.get("viewer") or {}, s_off.get("viewer") or {}
 
-            def _has_gerber_overlay(v: dict, ts: list[dict]) -> bool:
-                if v.get("gerbers_vs_board") is True:
-                    return True
-                vtiles = v.get("tiles") if isinstance(v.get("tiles"), dict) else {}
-                for t in list(vtiles.values()) + ts:
-                    if isinstance(t, dict) and isinstance(t.get("overlay"), dict) and t["overlay"].get("kind") == "gerbers":
-                        return True
-                return False
+                def _overlay_state(v: dict, ts: list[dict]) -> str:
+                    """Return 'on', 'off', or 'unobserved' (missing field is NEVER treated as 'off')."""
+                    if ts and isinstance(ts[0], dict) and "overlay" in ts[0]:
+                        ov = ts[0]["overlay"]
+                        if isinstance(ov, dict) and ov.get("kind") == "gerbers":
+                            return "on"
+                        if ov is None or ov is False:
+                            return "off"
+                    if "gerbers_vs_board" in v and isinstance(v["gerbers_vs_board"], bool):
+                        return "on" if v["gerbers_vs_board"] else "off"
+                    return "unobserved"
 
-            on_flag = _has_gerber_overlay(v_on, t_on)
-            off_cleared = not _has_gerber_overlay(v_off, t_off)
-            on_body = tile_body_non_flat(full_dir / "b7-overlay-on.png", t_on[0].get("rect")) if t_on else None
-            off_body = tile_body_non_flat(full_dir / "b7-overlay-off.png", t_off[0].get("rect")) if t_off else None
-            ov_diff = tile_region_diff(full_dir / "b7-overlay-plain.png", full_dir / "b7-overlay-on.png", t_on[0].get("rect")) if t_on else None
-            ok_ov = bool(on_flag and off_cleared and on_body is True and off_body is True and (ov_diff is not None and ov_diff > 0.005))
-            checks["overlay_on_off"] = _rec(
-                "measured",
-                ok_ov,
-                "" if ok_ov else f"on_flag={on_flag} off_cleared={off_cleared} bodies=({on_body},{off_body}) diff={ov_diff}",
-                {"overlay_diff": ov_diff},
-            )
+                st_on = _overlay_state(v_on, t_on)
+                st_off = _overlay_state(v_off, t_off)
+                if st_on == "unobserved" or st_off == "unobserved":
+                    checks["overlay_on_off"] = _rec("unavailable", None, f"overlay field unobserved (on={st_on}, off={st_off})")
+                else:
+                    on_body = tile_body_non_flat(full_dir / "b7-overlay-on.png", t_on[0].get("body")) if t_on else None
+                    off_body = tile_body_non_flat(full_dir / "b7-overlay-off.png", t_off[0].get("body")) if t_off else None
+                    diff_on = tile_bodies_pixel_diff(full_dir / "b7-overlay-plain.png", (shots["b7-overlay-plain"].get("tiles") or [{}])[0].get("body"), full_dir / "b7-overlay-on.png", t_on[0].get("body")) if t_on else None
+                    diff_back = tile_bodies_pixel_diff(full_dir / "b7-overlay-on.png", t_on[0].get("body"), full_dir / "b7-overlay-off.png", t_off[0].get("body")) if (t_on and t_off) else None
+                    ok_ov = bool(
+                        st_on == "on"
+                        and st_off == "off"
+                        and on_body is True
+                        and off_body is True
+                        and (diff_on is not None and diff_on > 0.005)
+                        and (diff_back is not None and diff_back > 0.005)
+                    )
+                    checks["overlay_on_off"] = _rec(
+                        "measured",
+                        ok_ov,
+                        "" if ok_ov else f"st_on={st_on} st_off={st_off} bodies=({on_body},{off_body}) diff_on={diff_on} diff_back={diff_back}",
+                        {"diff_on": diff_on, "diff_back": diff_back},
+                    )
 
-    # 7. incompatible_overlay_refusal (Board + Files overlay refused in human words, no raw codes, layout unchanged)
-    if "b7-overlay-incompat" not in shots:
-        checks["incompatible_overlay_refusal"] = _rec("unavailable", None, "incompatible overlay shot not captured")
+    # 7. incompatible_overlay_refusal (code + human text with no raw code + before/after layout equal)
+    if "b7-overlay-incompat-before" not in shots or "b7-overlay-incompat" not in shots:
+        checks["incompatible_overlay_refusal"] = _rec("unavailable", None, "incompatible overlay before/after shots not captured")
     else:
-        ok, err = _shot_cleared(full_dir, "b7-overlay-incompat", caps_full, shots)
-        if not ok:
-            checks["incompatible_overlay_refusal"] = _rec("unavailable", None, err)
+        ok0, e0 = _shot_cleared(full_dir, "b7-overlay-incompat-before", caps_full, shots, cleared_shots)
+        ok1, e1 = _shot_cleared(full_dir, "b7-overlay-incompat", caps_full, shots, cleared_shots)
+        if not (ok0 and ok1):
+            checks["incompatible_overlay_refusal"] = _rec("unavailable", None, e0 or e1)
         else:
-            s_inc = shots["b7-overlay-incompat"]
-            v_inc = s_inc.get("viewer") or {}
-            ts_inc = s_inc.get("tiles") or []
-            ref_texts = [str(r.get("text") or "").strip() for r in refusals.get("b7:overlay-incompatible", []) if str(r.get("text") or "").strip()]
-            v_ref = str(v_inc.get("refusal") or v_inc.get("error") or "").strip()
-            if v_ref:
-                ref_texts.append(v_ref)
-            msg = ref_texts[-1] if ref_texts else ""
+            s_pre, s_inc = shots["b7-overlay-incompat-before"], shots["b7-overlay-incompat"]
+            v_pre, v_inc = s_pre.get("viewer") or {}, s_inc.get("viewer") or {}
+            ref_evs = [r for r in refusals.get("b7:overlay-incompatible", []) if str(r.get("text") or "").strip()]
+            code = str((ref_evs[-1].get("code") if ref_evs else None) or v_inc.get("refusal_code") or "").strip()
+            msg = str((ref_evs[-1].get("text") if ref_evs else None) or v_inc.get("refusal") or "").strip()
+            code_ok = code in INCOMPATIBLE_OVERLAY_CODES
             raw_code = bool(RAW_REFUSAL_CODE_RE.search(msg)) if msg else False
-            any_overlay = any(isinstance(t.get("overlay"), dict) for t in ts_inc)
-            ok_ref = bool(msg and not raw_code and len(ts_inc) == 2 and not any_overlay)
+            lay_pre, lay_post = v_pre.get("layout"), v_inc.get("layout")
+            layout_eq = isinstance(lay_pre, dict) and isinstance(lay_post, dict) and lay_pre == lay_post
+            ok_ref = bool(code_ok and msg and not raw_code and layout_eq)
             checks["incompatible_overlay_refusal"] = _rec(
                 "measured",
                 ok_ref,
-                "" if ok_ref else f"refusal_text={msg!r} raw_code={raw_code} tiles={len(ts_inc)} any_overlay={any_overlay}",
-                {"refusal_text": msg, "tiles": len(ts_inc)},
+                "" if ok_ref else f"code={code!r} (ok={code_ok}) text={msg!r} raw_code={raw_code} layout_eq={layout_eq}",
+                {"code": code, "refusal_text": msg, "layout_equal": layout_eq},
             )
 
     measured = [(k, c) for k, c in checks.items() if c["status"] == "measured" and isinstance(c["passed"], bool)]
@@ -674,19 +968,23 @@ def evaluate_b7_dock(
         return {
             "status": "unavailable",
             "reason": "tiles metric seen, but no B7 docking transitions were captured",
+            "total": total_checks,
             "checked": 0,
             "clean": 0,
+            "unavailable_count": total_checks,
             "violations": [],
             "checks": checks,
         }
     clean = sum(1 for _, c in measured if c["passed"] is True)
     violations = [f"{k}: {c['note'] or 'failed'}" for k, c in measured if c["passed"] is False]
-    all_measured = len(measured) == len(DOCK_B7_CHECKS)
+    all_measured = len(measured) == total_checks
     return {
         "status": "measured" if all_measured else "measured_partial",
         "reason": "",
+        "total": total_checks,
         "checked": len(measured),
         "clean": clean,
+        "unavailable_count": total_checks - len(measured),
         "violations": violations,
         "checks": checks,
     }

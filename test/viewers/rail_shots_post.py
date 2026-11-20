@@ -125,6 +125,7 @@ def parse_client_log(log_path: Path) -> dict:
     rail_inventory: list[dict] | None = None
     tiles_current: list[dict] = []
     splitters_current: list[dict] = []
+    tiles_seq = 0
     tiles_metric_seen = False
     drags_by_mark: dict[str, list[dict]] = {}
     refusals_by_mark: dict[str, list[dict]] = {}
@@ -201,10 +202,12 @@ def parse_client_log(log_path: Path) -> dict:
         elif kind == "tiles" and isinstance(ev.get("tiles"), list):
             tiles_current = [t for t in ev["tiles"] if isinstance(t, dict)]
             splitters_current = [s for s in (ev.get("splitters") or []) if isinstance(s, dict)]
+            tiles_seq = ev_seq
             tiles_metric_seen = True
         elif kind == "drag":
             drags_by_mark.setdefault(current_mark, []).append({
-                "ok": bool(ev.get("ok")),
+                "ok": ev.get("ok") is True,
+                "splitter": str(ev.get("splitter") or ev.get("control") or "").strip(),
                 "from": ev.get("from"),
                 "to": ev.get("to"),
                 "moves": ev.get("moves"),
@@ -315,6 +318,7 @@ def parse_client_log(log_path: Path) -> dict:
                     "header_controls": {k: v for k, v in controls.items() if k.startswith("pane-tool:") or k == "ui:vs board"},
                     "tiles": list(tiles_current),
                     "splitters": list(splitters_current),
+                    "tiles_seq": tiles_seq,
                 }
 
     return {
@@ -1214,12 +1218,11 @@ def evaluate_scorecard(
     # Task 4: Compare Gerbers to the board side by side (budget 2)
     t4_dock = DOCK.evaluate_task4_dock(full_dir, full_parsed, full_caps, full_client_ok)
     if t4_dock is not None:
-        p4_dock = ["rail:Gerbers", "layout-add:board:right"]
         tasks.append(make_task(
-            4, "Compare Gerbers to the board side by side", 2, p4_dock, t4_dock["outcome"],
+            4, "Compare Gerbers to the board side by side", 2, t4_dock["presses"], t4_dock["outcome"],
             t4_dock["evidence"],
             note=t4_dock["note"],
-            found=True,
+            found=t4_dock["found"],
             one_step_back=t4_dock["one_step_back"],
         ))
     else:
@@ -2307,7 +2310,7 @@ def main(argv: list[str] | None = None) -> int:
             "rail_metric_seen": bool(p.get("rail_metric_seen")),
             "rail_inventory": p.get("rail_inventory"),
             "b1_checks": evaluate_b1_kind(kind, p, rail_map, embed=embed),
-            "b7_checks": DOCK.evaluate_b7_dock(kdir, p, caps) if kind == "full" else None,
+            "b7_checks": DOCK.evaluate_b7_dock(kdir, p, caps, cleared_shots=cleared_shots) if kind == "full" else None,
             "pages": pages_summary,
         }
 

@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import rail_dock as DOCK
 import rail_shots_manifest as M  # noqa: E402
 
 SHOT_NAME_RE = re.compile(r"^[a-z0-9-]+$")
@@ -369,6 +370,12 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
             {"mark": "settled:task7-sim-run"},
             {"shot": "task7-sim-run"},
         ])
+
+    if kind == "full":
+        # Docking/tiling steps (Task 4 user route + Rule B7): scheduled in the normal `full` run;
+        # evaluated as `unavailable` until a build emits `GPUI_METRIC event=tiles`.
+        steps.extend(DOCK.build_task4_dock_steps(settle_timeout_ms))
+        steps.extend(DOCK.build_b7_steps(settle_timeout_ms))
 
     elif kind in M.EXTRA_MISSING_SHOTS and embed:
         # Scripted Edit from Files/Review/Browser via test-mode `script:kicad-edit` (PR #1353 route: navigates to design page, then edits).
