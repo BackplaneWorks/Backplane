@@ -66,6 +66,8 @@ pub fn step(sel: Option<usize>, len: usize, key: &str) -> Option<usize> {
 /// A name a new file or folder may have here: the hub's `plain_name` rule (one visible component).
 pub fn valid_name(n: &str) -> bool { !n.is_empty() && n != "." && n != ".." && !n.starts_with('.') && !n.contains(['/', '\\', '\0', '\n', '\t', '\r']) && n.len() <= 255 }
 /// The folder on show: the last breadcrumb's path ("" is the project root).
+/// The folder of the project's manufacturing outputs, while the hub offers it (`mfg`: the project has mfg/ and the page is elsewhere).
+pub fn mfg_of(files: &Value) -> Option<&str> { files["mfg"].as_str().filter(|m| !m.is_empty()) }
 pub fn cur_dir(files: &Value) -> String { files["trail"].as_array().and_then(|t| t.last()).and_then(|c| c["value"].as_str()).unwrap_or("").to_string() }
 pub fn join(dir: &str, name: &str) -> String { if dir.is_empty() { name.to_string() } else { format!("{dir}/{name}") } }
 /// The Lucide icon for a row's kind and the colour token it takes.
@@ -99,7 +101,6 @@ pub fn unique(name: &str, taken: &dyn Fn(&str) -> bool) -> String {
 }
 /// A name the saver may write: no path parts.
 pub fn save_name(n: &str) -> String { let n = n.rsplit(['/', '\\']).next().unwrap_or(""); let n = n.trim_start_matches('.'); if n.is_empty() { "download".into() } else { n.replace(['\0', '\n', '\r'], "_") } }
-pub fn downloads_dir() -> PathBuf { std::env::var_os("BACKPLANE_GPUI_DOWNLOADS").map(PathBuf::from).unwrap_or_else(|| crate::plat::user_home().unwrap_or_default().join("Downloads")) }
 
 impl FileRow { pub fn down(&self) -> String { self.down.clone() } }
 
@@ -258,24 +259,20 @@ pub fn act(this: &mut Backplane, d: Do, window: Option<&mut Window>, cx: &mut Co
     cx.notify();
 }
 
-/// Save `url` (a hub path) as a file in the downloads folder (never over a file). The window says where it went.
+/// Save `url` (a hub path) as a file in the downloads folder (never over a file), through the window's downloads (dlbar.rs: streamed, resumed
+/// after errors, any size). The status line says where it went.
 pub fn download(this: &mut Backplane, url: String, name: String, zip: bool, cx: &mut Context<Backplane>) {
-    let Some(t) = this.screens.attacher.target.clone() else { return say(this, trs("No hub address to download from"), cx) };
+    if this.screens.attacher.target.is_none() { return say(this, trs("No hub address to download from"), cx) }
     if url.is_empty() { return say(this, trs("This entry cannot be downloaded"), cx) }
     let mut file = save_name(&name); if zip && !file.to_lowercase().ends_with(".zip") { file.push_str(".zip") }
     say(this, tf("gpui.b.files.downloading", &[("file", (&file).into())]), cx);
-    cx.spawn(async move |weak, cx| {
-        let r = cx.background_executor().spawn(async move {
-            let b = http_get(&t, &url, 260 << 20)?;
-            let dir = downloads_dir(); std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            let name = unique(&file, &|n| dir.join(n).exists()); let p = dir.join(&name);
-            std::fs::write(&p, &b).map_err(|e| e.to_string())?; Ok::<_, String>((p, b.len()))
-        }).await;
-        // the metric keeps the English words (scripts read it); the window says them in the language in force
-        let _ = weak.update(cx, |this, cx| { /* i18n-ok: the metric's English */ let (m, ok) = match &r { Ok((p, n)) => (format!("Saved {} ({} bytes)", p.display(), n), true), Err(e) => (format!("Download failed: {e}"), false) };
-            let said = match &r { Ok((p, n)) => tf("gpui.b.files.saved", &[("path", p.display().to_string().into()), ("n", (*n).into())]), Err(e) => tf("gpui.b.files.download.failed", &[("why", trs(e).into())]) };
-            this.m("files_download", json!({"ok": ok, "message": m, "path": r.as_ref().ok().map(|(p, _)| p.display().to_string()), "bytes": r.as_ref().ok().map(|x| x.1)})); say(this, said, cx); });
-    }).detach();
+    this.download(url, file, super::dlbar::From::Files, cx);
+}
+/// A Files download ended: the status line and the metric scripts read (its English words).
+pub fn download_done(this: &mut Backplane, r: &Result<(PathBuf, u64), String>, cx: &mut Context<Backplane>) {
+    /* i18n-ok: the metric's English */ let (m, ok) = match r { Ok((p, n)) => (format!("Saved {} ({} bytes)", p.display(), n), true), Err(e) => (format!("Download failed: {e}"), false) };
+    let said = match r { Ok((p, n)) => tf("gpui.b.files.saved", &[("path", p.display().to_string().into()), ("n", (*n).into())]), Err(e) => tf("gpui.b.files.download.failed", &[("why", trs(e).into())]) };
+    this.m("files_download", json!({"ok": ok, "message": m, "path": r.as_ref().ok().map(|(p, _)| p.display().to_string()), "bytes": r.as_ref().ok().map(|x| x.1)})); say(this, said, cx);
 }
 
 fn upload(this: &mut Backplane, paths: Vec<PathBuf>, dir: &str, cx: &mut Context<Backplane>) {
@@ -332,6 +329,12 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
     ] {
         let mut tool = button(cx, id, label, Press::File(action));
         tool.icon = Some(icon);
+        tools.push(tool);
+    }
+    // the project's manufacturing outputs (the hub's `mfg`: the folder to go to, given while the project has one)
+    if let Some(m) = mfg_of(files) {
+        let mut tool = command(cx, "fm-mfg".to_string(), t("gpui.dl.manufacturing"), false, "fm-cd", m.to_string());
+        tool.icon = Some("folder");
         tools.push(tool);
     }
     let bar = pane_header(light, actions.identity, tools, actions.controls);
@@ -502,6 +505,9 @@ mod tests {
         for n in ["a", "my file.txt", "x.kicad_pcb"] { assert!(valid_name(n), "{n}") }
         for n in ["", ".", "..", ".env", "a/b", "a\\b", "a\tb", "a\nb"] { assert!(!valid_name(n), "{n:?}") }
         assert!(!valid_name(&"x".repeat(256)));
+    }
+    #[test] fn manufacturing_is_offered_only_while_the_hub_says_so() {
+        assert_eq!(mfg_of(&serde_json::json!({"mfg": "mfg"})), Some("mfg")); assert_eq!(mfg_of(&serde_json::json!({"mfg": ""})), None); assert_eq!(mfg_of(&Value::Null), None);
     }
     #[test] fn the_folder_on_show_is_the_last_crumb() {
         let f: Value = serde_json::from_str(r#"{"trail":[{"label":"p","action":"fm-cd","value":""},{"label":"docs","action":"fm-cd","value":"docs"},{"label":"sub","action":"fm-cd","value":"docs/sub"}]}"#).unwrap();

@@ -1266,6 +1266,8 @@ impl Render for Backplane {
             .children({ let (n, shown) = (self.screens.tm_notice.clone(), self.screens.tm_shown.clone()); crate::screens::tmnotice::strip(cx, n.as_ref(), &shown, light) })
             // the one-time notice that the hub no longer pushes on its own (#1171)
             .children({ let n = self.screens.gp_notice.clone(); crate::screens::tmnotice::gp_strip(cx, n.as_ref(), light) })
+            // downloads from the hub (screens/dlbar.rs)
+            .children({ let l = self.screens.downloads.list.clone(); crate::screens::dlbar::strip(cx, &l, light) })
             .children(crate::perf::mark("over"))
             // Settings over the whole window: its dialog is sized from the window (settings::fit), so it must not sit in the thread column
             .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus, &self.screens.settings_ui, &self.local, &self.screens.acct, crate::screens::settings::fit(f32::from(window.viewport_size().width), f32::from(window.viewport_size().height)),&self.hubs,self.screens.offers.on_home.as_deref()))

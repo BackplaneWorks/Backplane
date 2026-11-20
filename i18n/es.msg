@@ -1989,6 +1989,17 @@ gpui.show.all = Mostrar todo
 gpui.close.window = Cerrar ventana
 gpui.close.the.window.on.a = Cerrar la ventana, en Mac: el hub sigue ejecutándose
 gpui.hide.backplane.on.a.mac = Ocultar Backplane, en Mac: el editor de KiCad se oculta con él y vuelve con él
+gpui.dl.percent = {name} · {pct}%
+gpui.dl.mb = {name} · {mb} MB
+gpui.dl.saved = Guardado {name}
+gpui.dl.failed = {name}: la descarga falló: {why}
+gpui.dl.manufacturing = Fabricación
+gpui.dl.the.download.ended.early = la descarga terminó antes de tiempo
+gpui.dl.the.hub.closed.the.connection = el hub cerró la conexión
+gpui.dl.that.file.is.not.there = ese archivo ya no está
+gpui.dl.the.hub.does.not.share = el hub no comparte ese archivo
+gpui.dl.the.hub.kept.changing.the = el archivo del hub no dejaba de cambiar
+gpui.dl.the.hub.sent.the.file = el hub envió el archivo en una forma que este cliente no lee
 
 # ---- gpui-c: viewers, plots, terminal, drawing pad ----
 gpui.c.commit = Commit

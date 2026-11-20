@@ -629,7 +629,7 @@ impl Backplane {
             // a selection's Copy first, then a link's own items
             let link = self.screens.reg.borrow().link_at(pos).cloned();
             let mut items = super::ctxmenu::selection_items(&self.timeline_selected());
-            if let Some(l) = link { items.extend(super::ctxmenu::link_items(&l.href, l.file)); }
+            if let Some(l) = link { let dl = self.link_download(pos.block, &l); items.extend(super::ctxmenu::link_items(&l.href, l.file, dl)); }
             if !items.is_empty() { self.ctx_open(e.position, items, cx); }
             return;
         }
@@ -683,7 +683,14 @@ impl Backplane {
     pub(crate) fn open_link(&mut self, l: &Link, cx: &mut Context<Self>) {
         if let Some(id) = l.href.strip_prefix('#') { self.jump_to_anchor(id); cx.notify(); return; }
         match super::linkroute::route(&l.href, l.file) {
-            super::linkroute::Route::File(p) => { self.note.clear(); self.link_file(&p, false, cx) }
+            super::linkroute::Route::File(p) => { self.note.clear();
+                // on another computer's hub a file the hub lists as a download comes down to this one (docs/file-links.md)
+                let files = self.link_files(l);
+                match super::linkroute::file_go(&p, &files, self.screens.elsewhere.is_some(), &self.thread_raw_id()) {
+                    super::linkroute::FileGo::Download { url, name } => self.download(url, name, super::dlbar::From::Other, cx),
+                    super::linkroute::FileGo::Open(p) => self.link_file(&p, false, cx),
+                } }
+            super::linkroute::Route::Share(u) => { self.note.clear(); let name = super::linkroute::share_name(&u).unwrap_or_default(); self.download(u, name, super::dlbar::From::Other, cx) }
             super::linkroute::Route::Web(u) => cx.open_url(&u),
             super::linkroute::Route::Hub(u) => { self.note.clear(); self.go("link-open", u, cx); }
             super::linkroute::Route::Note(n) => self.note = n.to_string(),
@@ -691,6 +698,26 @@ impl Backplane {
             // an agent's plan review: the board page, then (screens/mgmt.rs `host`) that board with its Plan panel open
             super::linkroute::Route::Plan(rel) => { self.note.clear(); self.screens.mgmt.plan_next = Some((rel, std::time::Instant::now(), false)); let _ = self.tx.try_send(super::viewer::view_kind("board")); cx.notify(); }
         }
+    }
+    /// The thread on show, by its raw id (`<link>~<id>` for one of another machine).
+    pub(crate) fn thread_raw_id(&self) -> String { let t = self.data["thread"]["id"].as_str().unwrap_or(""); t.rsplit_once('|').map_or(t, |(_, i)| i).to_string() }
+    /// The files the hub lists for the message a link of the timeline is in (its row's `files`); none for a link outside the thread's rows.
+    fn link_files(&self, l: &Link) -> Value {
+        let r = self.screens.reg.borrow();
+        let id = r.blocks.iter().find(|b| b.links.iter().any(|(_, x)| x == l)).map(|b| b.id.clone()).unwrap_or_default();
+        drop(r);
+        self.row_files(&id)
+    }
+    fn row_files(&self, entry: &str) -> Value {
+        if entry.is_empty() { return Value::Null }
+        self.data["thread"]["entries"].as_array().and_then(|rows| rows.iter().find(|e| e["id"].as_str() == Some(entry))).map_or(Value::Null, |e| e["files"].clone())
+    }
+    /// The Download a link's menu offers (a share always; a file on another computer's hub), as (hub address, name).
+    fn link_download(&self, block: usize, l: &Link) -> Option<(String, String)> {
+        if let Some(n) = super::linkroute::share_name(&l.href) { return Some((l.href.trim().to_string(), n)) }
+        if !matches!(super::linkroute::route(&l.href, l.file), super::linkroute::Route::File(_)) { return None }
+        let id = self.screens.reg.borrow().blocks.get(block).map(|b| b.id.clone()).unwrap_or_default();
+        super::linkroute::menu_download(&l.href, &self.row_files(&id), self.screens.elsewhere.is_some(), &self.thread_raw_id())
     }
     /// Scroll the document on screen (the project's README, or a note in the file viewer) so the anchor `id` is at its top.
     fn jump_to_anchor(&mut self, id: &str) {
