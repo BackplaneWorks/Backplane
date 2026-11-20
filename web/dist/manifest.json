@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 41962,
+  "totalAssetGzipBytes": 41961,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -71,7 +71,7 @@
     "web/src/viewers/cbor.ts": "98a300dad42941cef83acf8748b9e8a14e376ae3fbbd4a18178fd56b3ec68af1",
     "web/src/viewers/mesh-worker.ts": "b7a5094d136cdcba42132ab54615a1518b7e6a13eb232e055065d9d00ba1f4ab",
     "web/src/viewers/plot2d.ts": "763bb4cd04b5ef6de0baa911604a68dd5b04be8fc8b896d0c8dd99b6892a9fee",
-    "web/src/viewers/responsive.css": "021db5e963403c9530faadd2cf82273db051de4d75903e7f723cfb05483f4d90",
+    "web/src/viewers/responsive.css": "d9be24ead2ab34f9aa00bdf63ff79942aedfdca6c8ef6ba1f7b5841c5ba9f6c9",
     "web/src/viewers/solid3d.ts": "1db566e722a0621bc0df85d7339fae735d5bc06454f7291b88703906ce5af0dc",
     "web/src/viewers/viewer-pane.ts": "4a0139d40c3448e884e5f9f3425ddd5c90e069cab8cfd0383c864d631d7ebf8e",
     "web/src/ws.ts": "bff5636759f3871df89395c792d5c69aef90a5e1e9ecd8247ac522ebb40badc9",
@@ -107,8 +107,8 @@
     },
     "assets/style.css": {
       "bytes": 27684,
-      "gzipBytes": 6257,
-      "sha256": "5e3381c93969a929ca5af6b1b714c7c63272d6f6684ada8b5f373f9a64b0a2d4"
+      "gzipBytes": 6256,
+      "sha256": "47f135498cf7d2eb1ac15c3c9297b6927dd187f43141dd2dfd7e6c2197256763"
     },
     "index.html": {
       "bytes": 454,
