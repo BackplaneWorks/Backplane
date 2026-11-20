@@ -1142,6 +1142,15 @@ pub fn bound_kill(s: &Session) -> Result<(), String> {
 }
 /// Whether KiCad refused a Close (an answer with its status, not ok), as against no answer at all (closed, timed out: going or hung).
 pub fn close_refused(o: &Value) -> bool { o["ok"] != true && o["status"].as_str().is_some_and(|t| !t.is_empty()) }
+/// Whether a leave or back numbered `seq` by the pane of client `cid` comes after the last one it said for `pro` (kept across sessions
+/// and generations: a re-sent leave after a reattach applies, a leave older than a back never wins). `seq` 0 (a client without it): in order.
+pub fn leave_in_order(last: &mut HashMap<(String, String), u64>, pro: &str, cid: &str, seq: u64) -> bool {
+    if seq == 0 { return true }
+    let k = (norm_pro_key(pro), cid.to_string());
+    if last.get(&k).is_some_and(|l| seq <= *l) { return false }
+    if last.len() > 4096 { last.clear(); }
+    last.insert(k, seq); true
+}
 /// What a leave or back did (`Session::leave`).
 #[derive(Debug, PartialEq, Eq)]
 pub enum LeaveStep { NotHolder, Left, Back(String), Same }
@@ -1854,7 +1863,7 @@ enum Msg {
     /// a start held for the project's previous KiCad (`HELD_REASON`, generation `gen`): `old` is gone, or still there at HELD_WAIT
     StartHeld { pro: String, gen: u64, old: u32, gone: bool },
     /// #1345 `editor.kicad.leave`: the holder's pane left the screen (`left`, with `why`) or came back
-    Leave { client: u64, pro: String, left: bool, why: String, reply: oneshot::Sender<Result<Value, String>> },
+    Leave { client: u64, pro: String, left: bool, why: String, seq: u64, reply: oneshot::Sender<Result<Value, String>> },
     Show {
         client: u64, pro: String, frame: String, doc: String, item: String, remount: bool, focus: bool, by: Value,
         reply: oneshot::Sender<Result<Value, String>>,
@@ -1943,6 +1952,8 @@ struct Actor {
     /// after there was one: the app closed, so its KiCads close too (APP_GONE_S)
     users: HashSet<u64>,
     users_gone: Option<u64>,
+    /// the last leave or back each pane said (its `seq`), per (project, client): `leave_in_order`
+    leave_seqs: HashMap<(String, String), u64>,
 }
 
 /// Whether a failed start is tried once more by itself: only a missed start window (KiCad ran but its socket or its first answer came after
@@ -2307,7 +2318,14 @@ impl Actor {
             // (hostlibs.rs: the runtime's own glibc loads no driver here, so KiCad drew in software and its 3D viewer drew nothing)
             Ok(b) => b.parent().and_then(Path::parent).filter(|_| b.with_file_name("kicad.real").is_file())
                 .and_then(|root| super::hostlibs::gui_program(root, &self.hub.cfg.home.join("kicad-embed-cache").join("hostlibs"))).unwrap_or(b).to_string_lossy().to_string(),
-            Err(why) => { let _ = reply.send(Err(why)); return; }
+            Err(why) => {
+                // never an unanswered attach (a hung Edit): the start's waiters (a held start's included) hear it, and the picture says it
+                let mut f = Session::new(&pro, &root, "fork", &frame, self.sessions.get(&pro).map_or(0, |s| s.gen), now).failed(&why);
+                if let Some(old) = self.sessions.get(&pro) { f.last_pid = old.last_pid; }
+                self.sessions.insert(pro.clone(), f.clone()); self.publish(&f, Some(client));
+                self.finish_attach_waiters(&pro, Err(why.clone()));
+                let _ = reply.send(Err(why)); return;
+            }
         };
         let (mode, desc, described) = self.start_mode(&env);
         // Backplane KiCad reads the person's own KiCad settings (`<config>/kicad/10.99`): its wheel zooms at the pointer (set once; a copy
@@ -2363,7 +2381,8 @@ impl Actor {
             sess.state = "failed".into(); sess.reason = mac_refusal_with(why, to);
             let out = sess.info_json();
             self.sessions.insert(pro.clone(), sess.clone());
-            self.publish_and_reply(&sess, Some(client), reply, Ok(out));
+            self.publish_and_reply(&sess, Some(client), reply, Ok(out.clone()));
+            self.finish_attach_waiters(&pro, Ok(out)); // a held start's waiters too
             return;
         }
 
@@ -2372,7 +2391,8 @@ impl Actor {
             sess.state = "ready".into();
             let out = sess.info_json();
             self.sessions.insert(pro.clone(), sess.clone());
-            self.publish_and_reply(&sess, Some(client), reply, Ok(out));
+            self.publish_and_reply(&sess, Some(client), reply, Ok(out.clone()));
+            self.finish_attach_waiters(&pro, Ok(out)); // a held start's waiters too
             return;
         }
 
@@ -2540,7 +2560,13 @@ impl Actor {
     /// Left, the KiCad counts as out of the pane for the idle close and the cap's eviction (`out_of_pane`) but stays parented and warm:
     /// back within the idle time it is the same process. Only the holder's word counts (`leave_counts`); nothing is asked of KiCad, and
     /// the keyboard and the frames are not touched. The clock starts at the leave (once: a leave on a left session changes nothing).
-    fn leave(&mut self, client: u64, pro: String, left: bool, why: String, reply: oneshot::Sender<Result<Value, String>>) {
+    fn leave(&mut self, client: u64, pro: String, left: bool, why: String, seq: u64, reply: oneshot::Sender<Result<Value, String>>) {
+        // the pane's own order (its `seq`, per project and client, kept across generations): a leave or back older than its last word
+        // changes nothing, so a late leave never marks a pane that is back on screen left
+        if !leave_in_order(&mut self.leave_seqs, &pro, client_cid(client).as_deref().unwrap_or(""), seq) {
+            eprintln!("kicad embed: {pro}: a {} older than the pane's last word (seq {seq}): no change", if left { "leave" } else { "back" });
+            let _ = reply.send(Ok(json!({"stale": true}))); return
+        }
         let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.is_live()) else { let _ = reply.send(Ok(json!({"left": false, "why": "no KiCad"}))); return };
         let holder = leave_counts(&s.pane_cid, client_cid(client).as_deref());
         match s.leave(holder, left, &why, ipc::now_s()) {
@@ -2709,7 +2735,7 @@ impl Actor {
                 self.show(client, pro, frame, doc, item, remount, focus, by, reply)
             }
             Msg::Detach { client, pro, keep, reply } => self.detach(client, pro, keep, reply),
-            Msg::Leave { client, pro, left, why, reply } => self.leave(client, pro, left, why, reply),
+            Msg::Leave { client, pro, left, why, seq, reply } => self.leave(client, pro, left, why, seq, reply),
             Msg::StartHeld { pro, gen, old, gone } => {
                 // the held session as it is now (whatever joined, left or detached it meanwhile); a newer generation, or a session that is
                 // not held any more (failed, closed, already started), is not this start's
@@ -4203,7 +4229,7 @@ pub fn start(hub: &Arc<Hub>) {
     let mut a = Actor {
         hub: hub.clone(), me: tx.clone(), info_tx, helper: None, hgen: 0, next_id: 0, next_gen: 0,
         pend: HashMap::new(), sessions: HashMap::new(), attach_waiters: HashMap::new(), start_env: HashMap::new(), start_retried: Default::default(), lock_waits: HashMap::new(),
-        users: HashSet::new(), users_gone: None,
+        users: HashSet::new(), users_gone: None, leave_seqs: HashMap::new(),
     };
     tokio::spawn(async move { while let Some(m) = rx.recv().await { a.handle(m) } });
     let tick = tx.clone();
@@ -4272,7 +4298,9 @@ impl RpcHandler for EmbedRpc {
             if let Some(t) = p["theme"].as_str().filter(|t| matches!(*t, "light" | "dark")) { themes().lock().unwrap().insert(norm_pro_key(&resolved.pro), t.to_string()); }
             // a request decided on a session the client saw (`generation`, the runtime's): stale once that session has stopped or another
             // runs, so a late automatic attach or show never reopens what the person closed nor drives a KiCad started since. Answered, no change
-            if matches!(method, "editor.kicad.attach" | "editor.kicad.show" | "editor.kicad.leave") {
+            // (a leave or back is not: its holder check and the pane's own order guard it, `leave_in_order`; across a new generation the
+            // pane's re-sent leave must apply)
+            if matches!(method, "editor.kicad.attach" | "editor.kicad.show") {
                 if let Some(g) = p["generation"].as_u64() {
                     let pic = runtime_picture_of(&resolved.pro);
                     if stale_generation(g, &pic) {
@@ -4425,7 +4453,7 @@ impl RpcHandler for EmbedRpc {
                     })
                 }
                 "editor.kicad.leave" => {
-                    actor_tx.send(Msg::Leave { client, pro: resolved.pro, left: p["left"].as_bool().unwrap_or(true), why: p["why"].as_str().unwrap_or("").chars().take(32).collect(), reply: tx })
+                    actor_tx.send(Msg::Leave { client, pro: resolved.pro, left: p["left"].as_bool().unwrap_or(true), why: p["why"].as_str().unwrap_or("").chars().take(32).collect(), seq: p["seq"].as_u64().unwrap_or(0), reply: tx })
                 }
                 "editor.kicad.detach" => {
                     actor_tx.send(Msg::Detach { client, pro: resolved.pro, keep: p["keep"].as_bool().unwrap_or(false), reply: tx })
@@ -5688,6 +5716,32 @@ mod tests {
         assert_eq!(f.last_pid, 77, "failed keeps it too");
         let live = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0).spawned(pid);
         assert_eq!(previous_alive(&live, |_| true), None, "a live session is attached to, not waited on");
+    }
+    #[test] fn a_leave_resent_after_a_reattach_under_a_new_generation_applies() {
+        // Edit on a closing KiCad: the pane waits; the person moves away (leave 1) while the old session is stopping: no live session
+        let mut seqs = HashMap::new();
+        assert!(leave_in_order(&mut seqs, "/p/a.kicad_pro", "c1", 1), "taken in order (it found no KiCad to mark)");
+        // the reattach starts a new session under a new generation, `left` cleared as any attach clears it; the pane says its leave again
+        let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 9, 0).ready("/s", "", 0); s.container = 5; s.pane_cid = "c1".into();
+        assert!(leave_in_order(&mut seqs, "/p/a.kicad_pro", "c1", 2), "the re-sent leave is newer: it applies");
+        assert_eq!(s.leave(leave_counts(&s.pane_cid, Some("c1")), true, "thread", 50), LeaveStep::Left);
+        assert_eq!(s.left, "thread", "out of the pane: the idle close and the cap apply to it again");
+        // and the generation is not what guards it (the old session's generation would have been stale)
+        assert!(stale_generation(8, &json!({"generation": 9, "session": "live"})), "(an attach with the old generation is stale; a leave is not checked by it)");
+    }
+    #[test] fn a_late_leave_never_marks_a_pane_left_that_is_back_on_screen() {
+        let mut seqs = HashMap::new();
+        let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 9, 0).ready("/s", "", 0); s.container = 5; s.pane_cid = "c1".into();
+        // away (leave 1), back (back 2): processed in that order, the pane is on screen
+        assert!(leave_in_order(&mut seqs, "/p/a.kicad_pro", "c1", 1)); s.leave(true, true, "thread", 10);
+        assert!(leave_in_order(&mut seqs, "/p/a.kicad_pro", "c1", 2)); s.leave(true, false, "", 11);
+        assert!(s.left.is_empty());
+        // the earlier leave processed late (after a re-attach): older than the back, it changes nothing
+        assert!(!leave_in_order(&mut seqs, "/p/a.kicad_pro", "c1", 1), "a leave from before the back never overrides it");
+        assert!(s.left.is_empty(), "the session ends not left");
+        // another window's numbers are its own; a client without numbers is taken as it comes
+        assert!(leave_in_order(&mut seqs, "/p/a.kicad_pro", "c2", 1));
+        assert!(leave_in_order(&mut seqs, "/p/a.kicad_pro", "c1", 0));
     }
     #[test] fn a_start_held_for_the_previous_kicad_is_one_session_that_every_attach_joins() {
         let prev = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 7, 0).ready("/s", "", 0).spawned(41).stopped("");
