@@ -540,3 +540,32 @@ const QUIET: [&str; 10] = ["Nothing landed, and your build is unchanged. PR #136
     assert!(r.0 && r.1["told"] == "batched", "a second ask within a minute waits: {}", r.1); settle(&bots).await;
     assert_eq!(shown_lines(&hub, &chat).len(), 1);
 }
+
+#[tokio::test] async fn a_missing_git_ask_is_the_persons_and_never_starts_mailroom_work() {
+    // bare gate on a stock Ubuntu (no git, a44963adbc): every turn opened an Install Git ask (agents/snapguard.rs). The person's thread's ask went to the
+    // uberbot as mail; its run's own ask became a private lane; the lane's own ask was filed as new mail, which started a run, whose ask... 4966 turns in
+    // twenty minutes, the hub at 5.4 GB. The ask is the person's (the thread shows it, Install Git answers it): the mailroom starts nothing for it.
+    let git = crate::agents::snapguard::GIT_TOOL;
+    let (hub, bots, _r, bub, _) = uber("gitask").await;
+    hub.commit(&json!({"$":"ThreadCreated","id":"tg","project":"","title":"Board","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap();
+    hub.commit(&json!({"$":"AskOpened","id":"ag","thread":"tg","kind":"input","tool":git,"detail":"Not started: git is not installed","options":"Install Git\nNot now","at":2})).await.unwrap();
+    settle(&bots).await;
+    assert!(runs(&hub).is_empty(), "the person's Install Git ask starts no run: {:?}", runs(&hub));
+    // a run's and a lane's own Install Git ask: no lane, no new mail, no new run
+    routine(&hub, &bub, "r1").await; until(&hub, |l| l.iter().any(|e| e["$"] == "RunSet")).await; settle(&bots).await;
+    let run = runs(&hub)[0]["thread"].as_str().unwrap().to_string();
+    hub.commit(&json!({"$":"AskOpened","id":"ar","thread":run,"kind":"input","tool":git,"detail":"Not started: git is not installed","options":"Install Git\nNot now","at":3})).await.unwrap();
+    settle(&bots).await;
+    assert_eq!(runs(&hub).len(), 1, "a run's own Install Git ask opens no private lane");
+    turn(&hub, &run, "completed").await; until(&hub, |l| l.iter().filter(|e| e["$"] == "RunSet").count() == 2).await; settle(&bots).await;
+    let lane = runs(&hub)[1]["thread"].as_str().unwrap().to_string(); assert!(lane.starts_with(&format!("mailcoord-{bub}-")), "{lane}");
+    let mails = log(&hub).iter().filter(|e| e["$"] == "MailPosted").count();
+    hub.commit(&json!({"$":"AskOpened","id":"al","thread":lane,"kind":"input","tool":git,"detail":"Not started: git is not installed","options":"Install Git\nNot now","at":4})).await.unwrap();
+    settle(&bots).await;
+    assert_eq!(runs(&hub).len(), 2, "a lane's own Install Git ask starts no run");
+    assert_eq!(log(&hub).iter().filter(|e| e["$"] == "MailPosted").count(), mails, "and files no mail");
+    // any other ask of the person's thread still reaches the uberbot
+    hub.commit(&json!({"$":"AskOpened","id":"ab","thread":"tg","tool":"Bash","detail":"rm x","at":5})).await.unwrap();
+    settle(&bots).await;
+    assert!(log(&hub).iter().filter(|e| e["$"] == "MailPosted").count() > mails, "a Bash ask is still mail for the uberbot");
+}
