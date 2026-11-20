@@ -1782,6 +1782,21 @@ async fn three(tag: &str) -> Three {
     // the room changes did not go round: each machine stored its room's members once or twice (the creation and the one that completed it), never more
     for i in 0..3 { let n = log(&t.h[i]).iter().filter(|e| e["$"] == "RoomSet" && e["id"] == rid.as_str()).count(); assert!(n <= 2, "machine {i} stored the room {n} times"); }
 }
+/// The same members told back by a third machine, named by link where the room has them by machine name, are the state already held: not stored again.
+/// (C may hear B's copy of A's new room before A's own; C then sends A its members, `bob@<B's mid>` that A reads as `bob@L01`, where A has `bob@m1`.)
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_room_told_back_with_its_members_named_by_link_is_not_stored_again() {
+    let t = three("back").await;
+    let (ok, r) = t.b[0].tool_call(&t.th[0], "room_create", &json!({"name":"lab","members":"bob@m1\ncy@m2"})).await; assert!(ok, "{r}");
+    let rid = log(&t.h[0]).iter().find(|e| e["$"] == "RoomSet").unwrap()["id"].as_str().unwrap().to_string();
+    for i in [1, 2] { until(&t.h[i], |l| l.iter().any(|e| e["$"] == "RoomSet" && e["id"] == rid.as_str())).await; }
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let n = log(&t.h[0]).iter().filter(|e| e["$"] == "RoomSet" && e["id"] == rid.as_str()).count();
+    // what C sends A: A's bot bare, C's own as name@<link>, B's by B's machine id
+    let wire = json!(["ada", "cy@L02", format!("bob@{}", t.b[1].my_mid())]);
+    let (c, _) = t.b[0].far_received("L02", "bots.room_sync", &json!({"room":rid,"name":"lab","members":wire,"deleted":false,"ephemeral":true,"closed":false})).await; assert_eq!(c, 200);
+    assert_eq!(log(&t.h[0]).iter().filter(|e| e["$"] == "RoomSet" && e["id"] == rid.as_str()).count(), n, "the same members were stored again");
+    assert_eq!(sorted(&room_members(&t.h[0], &rid).unwrap()), sorted(&format!("{}\nbob@m1\ncy@m2", t.bots[0])), "A keeps them as typed");
+}
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_bot_joining_from_a_third_machine_reaches_both_others_and_a_downed_link_is_routed_around_nowhere() {
     let t = three("join").await;
     // bob makes a room on B with ada; cy joins it from C by naming B; A learns of cy from B without a link of its own having carried cy's name
