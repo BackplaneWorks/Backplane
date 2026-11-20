@@ -201,14 +201,14 @@ fn matching_parts(viewer: &Value, query: &str) -> Vec<Part> {
 }
 
 fn pick_part(app: &mut Backplane, value: String, cx: &mut Context<Backplane>) {
-    app.screens.plotview.part_search = None;
+    app.screens.plots[0].part_search = None;
     let _ = app.tx.try_send(Command::Action("mech-part".into(), value));
     cx.notify();
 }
 
 pub(super) fn toggle_parts(app: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>) {
     use super::composer::{Composer, ComposerEvent};
-    if app.screens.plotview.part_search.take().is_some() || super::popover::just_shut("mech-picker") { cx.notify(); return }
+    if app.screens.plots[0].part_search.take().is_some() || super::popover::just_shut("mech-picker") { cx.notify(); return }
     let field = cx.new(|cx| Composer::with_context(cx, "AskInput"));
     field.update(cx, |f, _| f.set_placeholder(&trs("Name or path")));
     cx.observe(&field, |_, _, cx| cx.notify()).detach();
@@ -220,18 +220,18 @@ pub(super) fn toggle_parts(app: &mut Backplane, w: &mut Window, cx: &mut Context
         }
     }).detach();
     w.focus(&field.read(cx).focus_handle(cx));
-    app.screens.plotview.part_search = Some(field);
+    app.screens.plots[0].part_search = Some(field);
     cx.notify();
 }
 
-fn mech_header(cx: &mut Context<Backplane>, light: bool, viewer: &Value, pv: &super::plotview::PlotView, mut header: Header) -> AnyElement {
+fn mech_header(cx: &mut Context<Backplane>, light: bool, viewer: &Value, pv: &super::plotview::PlotView, mut header: Header, mut camera: Vec<Tool>) -> AnyElement {
     if !mech_parts(viewer).is_empty() {
         let popup = pv.part_search.as_ref().map(|field| {
             let rows = matching_parts(viewer, &field.read(cx).content);
             let mut menu = div().id("mech-menu").occlude().w(px(360.)).max_h(px(400.)).overflow_y_scroll()
                 .p_1().border_1().border_color(theme::color(light, "line")).bg(theme::color(light, "panel"))
                 .on_mouse_down_out(cx.listener(|app, _, _, cx| {
-                    app.screens.plotview.part_search = None; super::popover::shut("mech-picker"); cx.notify();
+                    app.screens.plots[0].part_search = None; super::popover::shut("mech-picker"); cx.notify();
                 })).child(field.clone());
             for part in rows {
                 let value = part.value;
@@ -245,7 +245,8 @@ fn mech_header(cx: &mut Context<Backplane>, light: bool, viewer: &Value, pv: &su
         header.identity.picker = Some((cx.entity().downgrade(), Press::MechParts, popup));
     }
     let refresh = command(cx, "mech-refresh", trs("Refresh"), false, "mech-refresh", String::new());
-    pane_header(light, header.identity, vec![refresh], header.controls)
+    camera.insert(0, refresh);
+    pane_header(light, header.identity, camera, header.controls)
 }
 
 /// A row's icon by what it opens as.
@@ -326,11 +327,15 @@ fn close_button(cx: &mut Context<Backplane>, light: bool) -> AnyElement {
 }
 
 pub(crate) fn browser_header(app: &Backplane, cx: &mut Context<Backplane>, light: bool, tools: Vec<Tool>) -> AnyElement {
-    let thread = &app.data["thread"];
-    let identity = Identity::new("browser", &thread["viewer"]["identity"]);
-    let controls = Controls { tools: header_actions(cx, light, thread, app.screens.attacher.target.as_ref(), false),
-        close: viewer_close(cx, light, Some("browser")).into_any_element() };
-    pane_header(light, identity, tools, controls)
+    let header = make_header(cx, light, &app.data["thread"], app.screens.attacher.target.as_ref(), "browser", false);
+    pane_header(light, header.identity, tools, header.controls)
+}
+
+fn make_header(cx: &mut Context<Backplane>, light: bool, thread: &Value, target: Option<&super::attach::Target>, page: &str, diff: bool) -> Header {
+    let facts = &thread["viewer"]["identity"];
+    let identity = Identity::new(page, if facts["page"] == page { facts } else { &Value::Null });
+    Header { identity, controls: Controls { tools: header_actions(cx, light, thread, target, diff),
+        close: viewer_close(cx, light, Some(page)).into_any_element() } }
 }
 
 fn header_actions(cx: &Context<Backplane>, light: bool, thread: &Value, target: Option<&super::attach::Target>, diff_on: bool) -> Vec<Tool> {
@@ -974,13 +979,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
     let acts = |cx: &mut Context<Backplane>| pane_actions(cx, light, thread, target, diff_on, editing);
     let page_key = if !early && diff_on { "diff" } else if !early && open == "board" && viewer["gerbers"] == true { "gerbers" } else { open };
     let migrated = matches!(page_key, "board" | "schematic" | "gerbers" | "split" | "diff" | "review" | "files" | "browser" | "mech" | "3d");
-    let header = |cx: &mut Context<Backplane>| {
-        let facts = &viewer["identity"];
-        let identity = Identity::new(page_key, if facts["page"] == page_key { facts } else { &Value::Null });
-        let controls = Controls { tools: header_actions(cx, light, thread, target, diff_on),
-            close: viewer_close(cx, light, Some(page_key)).into_any_element() };
-        Header { identity, controls }
-    };
+    let header = |cx: &mut Context<Backplane>| make_header(cx, light, thread, target, page_key, diff_on);
     let body: AnyElement = if editing {
         // the real KiCad, its rail page's editor over the pane (viewers/kicad_pane.rs); the pane's controls in its own row above it, never over KiCad's toolbar
         let pressed_open = editor_press(viewer);
@@ -1017,7 +1016,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         match k {
             "board" | "schematic" | "gerbers" => { let a = header(cx); plot_loading(cx, light, 0, &Value::Null, pv, true, Some(a), &super::panestate::loading_for(k, k == "gerbers"), &lk, false, None) },
             "3d" => { let h = header(cx); div().size_full().flex().flex_col().child(pane_header(light, h.identity, vec![], h.controls)).child(model_loading(&mut pv.loading, &lk, &super::panestate::loading_for(k, false))).into_any_element() }
-            "mech" => { let h = header(cx); div().size_full().flex().flex_col().child(mech_header(cx, light, viewer, pv, h)).child(model_loading(&mut pv.loading, &lk, &super::panestate::loading_for(k, false))).into_any_element() },
+            "mech" => { let h = header(cx); div().size_full().flex().flex_col().child(mech_header(cx, light, viewer, pv, h, Vec::new())).child(model_loading(&mut pv.loading, &lk, &super::panestate::loading_for(k, false))).into_any_element() },
             _ => {
                 let secs = pv.loading.track_now(&lk);
                 let a = if migrated { let h = header(cx); pane_header(light, h.identity, vec![], h.controls) } else { bar(light).child(div().flex_1()).child(acts(cx)).into_any_element() };
@@ -1039,10 +1038,8 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
             if let Some(s) = solid { if !want.is_empty() && s.read(cx).shown_key() != want { s.update(cx, |p, cx| p.want(&want, cx)); } }
             let have = solid.map(|s| s.read(cx).shown_key().to_string()).unwrap_or_default();
             let ready = matches!(solid, Some(_s) if solid_ready(&want, &have));
-            // the 3D page's own tools float top left over the model: they wrap short of the corner the pane's controls take
             if let Some(s) = solid {
-                let inline = open == "mech";
-                if s.read(cx).inline_controls != inline { s.update(cx, |p, cx| { p.inline_controls = inline; cx.notify(); }); }
+                if s.read(cx).inline_controls { s.update(cx, |p, cx| { p.inline_controls = false; cx.notify(); }); }
             }
             let model: AnyElement = if open == "mech" && key_empty {
                 let mech = &viewer["mech"];
@@ -1055,25 +1052,26 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
                     super::panestate::view(light, &super::panestate::mech_empty(&say, &note), None)
                 }
             } else { match solid { Some(s) if ready => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => model_loading(&mut pv.loading, &format!("{open}:{want}"), &super::panestate::loading_for(open, false)) } };
-            if open == "mech" { let h = header(cx); div().size_full().flex().flex_col().child(mech_header(cx, light, viewer, pv, h)).child(model).into_any_element() }
-            else {
-                let h = header(cx);
-                let mut tools: Vec<_> = crate::viewers::boards::pane_tool(cx, light, viewer, &pv.boards).into_iter().collect();
-                if let Some(page) = solid.filter(|_| ready) {
-                    for tool in crate::viewers::solid::solid_tools().into_iter().chain(page.read(cx).probe_tool()) {
-                        tools.push(button(cx, tool.id, tool.label, Press::Camera(page.downgrade(), tool.action)));
-                    }
+            let h = header(cx);
+            let mut tools = Vec::new();
+            if let Some(page) = solid.filter(|_| ready) {
+                for tool in crate::viewers::solid::solid_tools().into_iter().chain(page.read(cx).probe_tool()) {
+                    tools.push(button(cx, tool.id, tool.label, Press::Camera(page.downgrade(), tool.action)));
                 }
-                div().size_full().flex().flex_col().child(pane_header(light, h.identity, tools, h.controls)).child(model).into_any_element()
             }
+            let bar = if open == "mech" { mech_header(cx, light, viewer, pv, h, tools) } else {
+                if let Some(board) = crate::viewers::boards::pane_tool(cx, light, viewer, &pv.boards) { tools.insert(0, board); }
+                pane_header(light, h.identity, tools, h.controls)
+            };
+            div().size_full().flex().flex_col().child(bar).child(measured_body(model)).into_any_element()
         }
         else if open == "browser" { match browser { Some(b) => div().size_full().child(b.clone()).into_any_element(), None => { let h = header(cx); pane_body_state(light, &super::panestate::PaneState::empty(trs("The browser page needs a connected hub."), String::new()), Some(pane_header(light, h.identity, vec![], h.controls)), None) } } }
         else { let a = if migrated { let h = header(cx); pane_header(light, h.identity, vec![], h.controls) } else { bar(light).child(div().flex_1()).child(acts(cx)).into_any_element() }; let secs = pv.loading.track_now(&format!("open:{open}")); pane_body_state(light, &super::panestate::PaneState::loading(super::panestate::loading_line(&trs("Opening…"), secs, 0)), Some(a), None) };
     if editing { pv.loading.clear(); }
     let container = crate::ui::with_rect(div().id("viewer-body").size_full(), || format!("tile-page:{page_key}"));
-    // Keep main's exact scroll parent for the embedded editor (`editing`) and scrollable pages (Review, Diff, Mech);
-    // only 3D (when not editing) joins files/image/pdf/text in omitting overflow_y_scroll so 3D's size_full() does not collapse under mgmt::host.
-    if (matches!(open, "files" | "image" | "pdf" | "text" | "3d" | "mech" | "browser") || (shared_scroll && open == "review")) && !diff_on && !editing { container.child(body).into_any_element() } else { container.overflow_y_scroll().child(body).into_any_element() }
+    // The shared Review panel scrolls its own body. Canvas and Browser pages fill the available height.
+    if shared_scroll && open == "review" && !diff_on && !editing { return container.child(body).into_any_element(); }
+    if matches!(open, "files" | "image" | "pdf" | "text" | "3d" | "mech" | "browser") && !diff_on && !editing { container.child(body).into_any_element() } else { container.overflow_y_scroll().child(body).into_any_element() }
 }
 /// The pane around the page on show: its width, the left edge's drag and border; `page` (the page itself, `page()`, drawn as a part of the
 /// window by ui.rs) fills the rest, so the pane's frame is known without building the page.

@@ -244,7 +244,9 @@ fn layout(room: f32, more: f32, items: &[(u8, f32)]) -> Vec<bool> {
 }
 
 fn priority(id: &str, pane_action: bool) -> u8 {
-    if id == "br-url" || id == "layers-btn" || id.starts_with("plot-fit-") || id.starts_with("rv-")
+    if id == "br-hand" { return 0 }
+    if id == "br-url" { return 1 }
+    if id == "layers-btn" || id.starts_with("plot-fit-") || id.starts_with("rv-")
         || id == "fm-up" || id.starts_with("crumb-") { 0 }
     else if pane_action { 1 } else { 2 }
 }
@@ -326,8 +328,9 @@ pub fn pane_header(light: bool, identity: Identity, tools: Vec<PaneTool<ToolActi
         let full = identity.text(path);
         let short = if path == basename { full.clone() } else { identity.text(&format!("…/{basename}")) };
         let measure = |s: &str| f32::from(w.text_system().shape_line(s.to_owned().into(), crate::scale::tpx(12.), &[w.text_style().to_run(s.len())], None).width).ceil();
-        let title_min = measure(&short).min(f32::from(crate::scale::tpx(150.)));
+        let title_min = measure(&short).min(f32::from(crate::scale::tpx(150.))) + if identity.picker.is_some() { 16. } else { 0. };
         let room = f32::from(bounds.size.width);
+        let address_min = f32::from(crate::scale::tpx(110.));
         let mut widths = vec![];
         let mut items = vec![];
         crate::script::header_present();
@@ -343,7 +346,8 @@ pub fn pane_header(light: bool, identity: Identity, tools: Vec<PaneTool<ToolActi
                 ToolBody::Button(ref entity, ref press) => face(light, &tool, entity, press, false),
                 ToolBody::Status(el) => el,
             };
-            let (width, inline) = measured(with_rect(div().child(inline), || format!("pane-tool:{page}:{id}")).into_any_element(), w, cx);
+            let wrapped = with_rect(div().child(inline), || format!("pane-tool:{page}:{id}")).into_any_element();
+            let (width, inline) = if id == "br-url" { (address_min, wrapped) } else { measured(wrapped, w, cx) };
             widths.push((priority(&id, i >= page_count), width + gap));
             items.push((id, label, tool.active, inline, action, tool.action.popup));
         }
@@ -368,6 +372,10 @@ pub fn pane_header(light: bool, identity: Identity, tools: Vec<PaneTool<ToolActi
         let mut popups = Vec::new();
         for ((id, label, active, inline, action, popup), show) in items.into_iter().zip(visible) {
             crate::script::header_action(&page, &id, &label, !show, action.as_ref().map(|(_, p)| p.clone()));
+            let inline = if id == "br-url" {
+                let width = if show { address_min + (title_room - title_min - gap).max(0.) } else { address_min };
+                div().w(px(width)).child(inline).into_any_element()
+            } else { inline };
             if show {
                 strip = strip.child(div().relative().child(inline).children(popup));
                 continue;
