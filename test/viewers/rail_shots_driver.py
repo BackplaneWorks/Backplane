@@ -600,6 +600,7 @@ def query_hub_kicad_sessions(port: str, token_file: str, bun_bin: str) -> dict:
     return _parse_hub_kicad_sessions_output(out)
 
 
+COMPOSER_POINTER = (440, 790)  # inside the composer of the 1440x900 test window (left of the viewer pane)
 _FIRST_GENERATION: list[int] = []  # the running KiCad's generation seen by the first stale probe (the "old" one after Edit restarts it)
 
 
@@ -633,6 +634,10 @@ def run_auto_action(name: str, last_kicad: dict, kind_out: Path, disp: str) -> N
             if tag == "mid":
                 sess = _single_session(port, token, bun)
                 rec["kicad_state_before"] = (sess or {}).get("state")
+            # a person typing in the composer has the pointer over Backplane's own window (the window manager follows the pointer for
+            # focus): leave it there, not over the embedded KiCad where an earlier click left it (that would hand KiCad the keys)
+            subprocess.run([sys.executable, str(xinput), "move", str(COMPOSER_POINTER[0]), str(COMPOSER_POINTER[1])], env=dict(os.environ, DISPLAY=disp), check=True, timeout=10)
+            time.sleep(0.2)
             subprocess.run([sys.executable, str(xinput), "type", text], env=dict(os.environ, DISPLAY=disp), check=True, timeout=30)
             time.sleep(0.4)
             if tag == "mid":
