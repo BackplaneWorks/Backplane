@@ -36,7 +36,7 @@ export async function withBrowser({ certificate, port }, run) {
 
 // Mimic Serve's authenticated requester on a private backend stream. Keeping
 // the temporary certificate key in memory avoids leaving it in test artifacts.
-export async function withTestTls(socketPath, run) {
+export async function withTestTls(socketPath, run, canary) {
   const { execFileSync } = await import('node:child_process');
   const { createServer } = await import('node:tls');
   const { connect } = await import('node:net');
@@ -49,6 +49,7 @@ export async function withTestTls(socketPath, run) {
     '-addext', 'subjectAltName=DNS:backplane.example.test',
   ], { input: key, stdio: ['pipe', 'pipe', 'ignore'] }).toString();
   const sockets = new Set();
+  let leaked = false;
   const server = createServer({ key, cert: certificate }, socket => {
     let head = Buffer.alloc(0);
     const read = chunk => {
@@ -67,6 +68,13 @@ export async function withTestTls(socketPath, run) {
       upstream.once('connect', () => {
         upstream.write(clean.join('\r\n'), 'latin1');
         upstream.write(head.subarray(end + 4));
+        let tail = Buffer.alloc(0);
+        upstream.on('data', chunk => {
+          if (!canary) return;
+          const bytes = Buffer.concat([tail, chunk]);
+          if (bytes.includes(canary)) leaked = true;
+          tail = bytes.subarray(Math.max(0, bytes.length - canary.length + 1));
+        });
         upstream.pipe(socket);
         socket.pipe(upstream);
       });
@@ -83,7 +91,9 @@ export async function withTestTls(socketPath, run) {
     await once(server, 'listening');
     const port = server.address().port;
     assert.ok(port >= 3799);
-    return await run({ certificate: certificate.toString(), port });
+    const result = await run({ certificate: certificate.toString(), port });
+    assert.ok(!leaked, 'raw masking fixture in proxy response');
+    return result;
   } finally {
     for (const socket of sockets) socket.destroy();
     await new Promise(resolve => server.close(resolve));
@@ -104,6 +114,14 @@ async function main(binary, output) {
   assert.ok(binary && output && process.env.BP_TMP && process.versions.bun);
   const temp = await fs.mkdtemp(path.join(process.env.BP_TMP, 'web-e2e-'));
   const agents = path.join(temp, 'agents');
+  let timestamp = Date.now();
+  const clock = path.join(temp, 'registry-clock');
+  await fs.writeFile(clock, String(timestamp));
+  const advanceDays = async days => {
+    timestamp += days * 86400000;
+    await fs.writeFile(clock + '.next', String(timestamp));
+    await fs.rename(clock + '.next', clock);
+  };
   const home = path.join(temp, 'hub');
   const native = createServer();
   native.listen(0, '127.0.0.1');
@@ -134,6 +152,7 @@ async function main(binary, output) {
         BACKPLANE_VAULT_KEYRING:'file', BP_WEB_MASK_FIXTURE:canary, BP_STREAM_N: "3", BP_STREAM_MS: "600", BP_WEB_STANDIN: standin, BP_WEB_FIXTURE: temp, BACKPLANE_AGENTS: agents,
         BP_WEB_NATIVE_PORT: String(nativePort), BP_WEB_TLS_PORT: String(tls.port),
         BACKPLANE_NO_UPDATE: '1', BACKPLANE_ORDER_SERVER: 'http://127.0.0.1:9' };
+      if (process.env.BACKPLANE_STEP2GLB) env.BACKPLANE_STEP2GLB = process.env.BACKPLANE_STEP2GLB;
       const child = spawn(binary, ['--ignored', '--exact', 'net::listener::webingress::isolated_browser_hub'], {
         env, stdio: ['ignore', 'pipe', 'pipe'], detached: true,
       });
@@ -177,7 +196,12 @@ async function main(binary, output) {
             await checkAccess(probe, false);
             await probe.close();
             await rpc('devices.page.act', { action: 'device-web-access', value: '1' });
-            await browserTasks({ context, origin, rpc, thread: 't1', canary,
+            await browserTasks({ context, origin, rpc, thread: 't1', canary, advanceDays,
+              moveFixtureGerbers: async () => {
+                const archive = path.join(temp, "archived-gerbers");
+                await fs.rename(gerbers, archive);
+                await fs.symlink(archive, gerbers, "dir");
+              },
               registeredRoutes: JSON.parse(await fs.readFile(path.join(home, 'fixture-http-routes.json'), 'utf8')),
               checkBoundary: token => checkRequestBoundary(path.join(home, 'browser.sock'), origin, token),
               checkLogs: value => assert.ok(!Buffer.concat(logs).includes(value), 'browser session in hub output'),
@@ -197,7 +221,7 @@ async function main(binary, output) {
         if (child.pid && child.exitCode === null) process.kill(-child.pid, 'SIGTERM');
         await exited;
       }
-    });
+    }, canary);
   } finally { await fs.rm(temp, {recursive:true, force:true}); }
 }
 
