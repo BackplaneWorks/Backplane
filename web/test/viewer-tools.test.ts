@@ -41,9 +41,9 @@ describe("viewer-tools", () => {
     expect(st.activeRef()?.commit).toBe("aaa222");
     expect(st.compareRequest()).toEqual({ commit: "aaa222", bits: 0 });
 
-    // Toggle highlight edits -> bits = 1
+    // Toggle highlight edits -> remains active on Turn 2 with bits = 0 (all layers)
     expect(st.toggleHighlight()).toBe(true);
-    expect(st.compareRequest()).toEqual({ commit: "aaa222", bits: 1 });
+    expect(st.compareRequest()).toEqual({ commit: "aaa222", bits: 0 });
 
     // Step older -> index 1 (Turn 1), clamped at end
     expect(st.step(1)).toBe(true);
@@ -63,7 +63,7 @@ describe("viewer-tools", () => {
     expect(st.isLive()).toBe(true);
     expect(st.toggleHighlight()).toBe(true);
     expect(st.isLive()).toBe(false);
-    expect(st.compareRequest()).toEqual({ commit: "ccc333", bits: 1 });
+    expect(st.compareRequest()).toEqual({ commit: "ccc333", bits: 0 });
     expect(st.goLive()).toBe(true);
     expect(st.isLive()).toBe(true);
   });
