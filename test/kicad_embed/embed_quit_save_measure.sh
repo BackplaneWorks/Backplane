@@ -6,6 +6,7 @@
 # (kicad-cli), and the agent's track and wire in them. Single run; nothing judged but the save (the timeline is the result).
 #   QUIT_ASK_S=30   how long the question is left before it is answered
 #   QUIT_KEY=Return the key that answers it (Return: its default)
+#   QUIT_HANG_STACK=1  a KiCad still there at the sampler's end gets its stacks taken (gdb -p) before the cleanup
 #   QUIT_VIA=closesave  not the menu's Quit: Close{CM_SAVE} on KiCad's socket (the hub's own save-close), its answer's time in the output
 # Copies only (seed_project.py), fork mode.
 set -uo pipefail
@@ -46,6 +47,13 @@ else
 ( timeout $((ASK + 30)) python3 "$IPC_PY" run-action "$SOCK" common.Control.quit >"$OUT/quit.out" 2>&1; echo "rc=$?" >>"$OUT/quit.out" ) &
 fi
 wait "$SP"
+# QUIT_HANG_STACK=1: KiCad still there when the sampler ends (its last question answered long before): every thread's stack (KiCad
+# started through a launcher that allows the attach, e.g. Fork embed's -ptr runtimes' bin/ptracer-any)
+if [ "${QUIT_HANG_STACK:-0}" = 1 ] && kill -0 "$KPID" 2>/dev/null; then
+  echo "INFO KiCad $KPID still there: taking its stacks"
+  timeout 120 gdb -p "$KPID" -batch -ex "set pagination off" -ex "info threads" -ex "thread apply all bt" > "$OUT/hang-stack.txt" 2>&1 || true
+  echo "INFO stacks: $(grep -c '^Thread' "$OUT/hang-stack.txt" 2>/dev/null) threads in $OUT/hang-stack.txt"
+fi
 echo "INFO the Quit's own answer: $(tr '\n' ' ' <"$OUT/quit.out" | cut -c1-200)"
 echo "INFO timeline (ms from the sampler's start; the Quit at ~300):"; sed 's/^/INFO   /' "$OUT/timeline.jsonl" | cut -c1-260
 SEG1=$(grep -c "(segment" "$PCB" || true); WIRE1=$(grep -c "(wire" "$SCH" || true)

@@ -10,7 +10,8 @@
 #       closed by the person (closedByPerson), not "closed unexpectedly"
 #   e   KiCad's own Quit, stopped once its socket went and never let go: closing, ended at the bound as a hang (logged)
 #   d   the hub's close with a save (save: "save", the board modified) whose save is slow (KiCad stopped from just before the Close for
-#       20 s: no answer within the hub's 15 s): not reported as "refused to close"; KiCad is not killed while it may be writing; once it
+#       20 s: no answer within the hub's 15 s): its caller hears "not answered yet", not "refused to close"; KiCad is not killed (a
+#       missing answer may be KiCad asking); once it
 #       goes on it ends by itself; the board is whole (kicad-cli loads it, the track in it) and the local history repository is sound
 # On #1470's base (a made-up exit and an 800 ms kill after the hub's close; nothing after KiCad's own Quit) a, c1, c2, d and e fail.
 # Copies only (seed_project.py), fork mode.
@@ -84,12 +85,12 @@ I=$(start_kicad d); P=$(f "$I" pid); S=$(f "$I" sock); echo "INFO d: KiCad $P"; 
 SEG0=$(grep -c "(segment" "$PCB" || true); HIST0=$(git -C "$PROJ/.history" rev-list --all --count 2>/dev/null || echo 0)
 python3 "$IPC_PY" agent-add-track "$S" 100 120 104 120 0.25 3 >"$OUT/track-d.out" 2>&1 || true
 kill -STOP "$P"; ( sleep 20; kill -CONT "$P" ) &   # KiCad busy (a long save, as bp.13.1's took 35 s): the Close waits on it
-close_hub save; RC=$?; REFUSED=$(grep -c '"closed":false' "$OUT/close.out" || true)
+close_hub save; RC=$?; REFUSED=$(grep '"closed":false' "$OUT/close.out" | grep -vc '"pending":true' || true); PENDING=$(grep -c '"pending":true' "$OUT/close.out" || true)
 echo "INFO d: the close answered (rc $RC): $(cut -c1-200 "$OUT/close.out" | tr '\n' ' ')"
 wait; gone "$P" 200; KILLED=$(hub_since "$H" | grep -c "a hang after .*pid $P" || true); WAITED=$(hub_since "$H" | grep -c "pid $P still running .* not killed" || true)
 SEG1=$(grep -c "(segment" "$PCB" || true); "${KICAD_CLI:-kicad-cli}" pcb export svg --output "$OUT/pcb-d.svg" --layers F.Cu "$PCB" >"$OUT/cli-d.out" 2>&1; CLI=$?
 if [ -d "$PROJ/.history" ]; then FSCK=$(git -C "$PROJ/.history" fsck --no-progress >/dev/null 2>&1 && echo ok || echo bad); else FSCK=none; fi; HIST1=$(git -C "$PROJ/.history" rev-list --all --count 2>/dev/null || echo 0)
-echo "INFO d: refused $REFUSED, killed $KILLED, kills skipped $WAITED; segments $SEG0 -> $SEG1, kicad-cli $CLI, history $HIST0 -> $HIST1 commits ($FSCK)"
+echo "INFO d: pending (no answer within 15 s) $PENDING, refused $REFUSED, killed $KILLED, kills skipped $WAITED; segments $SEG0 -> $SEG1, kicad-cli $CLI, history $HIST0 -> $HIST1 commits ($FSCK)"
 check "d a slow save-close: not refused, not killed while it may be writing, the board whole with the track, the history sound" "$([ "${REFUSED:-0}" = 0 ] && [ "${KILLED:-0}" = 0 ] && [ "$CLI" = 0 ] && [ "$SEG1" -gt "$SEG0" ] && { [ "$FSCK" = ok ] || [ "$FSCK" = none ]; } && echo 1 || echo 0)" "refused $REFUSED killed $KILLED seg $SEG0->$SEG1 cli $CLI fsck $FSCK"
 
 grep -E "kicad embed: .*(close answered|had no answer|a hang|not killed|abort at exit|socket went|refused)" "$OUT/hub.log" | cut -c1-200 | sed 's/^/INFO   /' || true
