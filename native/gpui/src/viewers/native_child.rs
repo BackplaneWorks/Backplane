@@ -796,10 +796,12 @@ pub mod placeq {
         /// KiCad's process the window belonged to when the placement was asked; `parent`: the container it must still be inside (0: none)
         pub pid: u32, pub parent: u64, pub seq: u64 }
     #[derive(Default)]
-    pub struct Q { jobs: HashMap<u64, Job>, order: VecDeque<u64>, seq: u64 }
+    pub struct Q { jobs: HashMap<u64, Job>, order: VecDeque<u64>, seq: u64,
+        /// the worker is to end once its queue is empty: its pane's container went away, or it was idle for a while (a new placement clears it)
+        pub stop: bool }
     impl Q {
         /// Queue a placement: a newer one for the same window replaces the older, which is never run.
-        pub fn push(&mut self, mut j: Job) { self.seq += 1; j.seq = self.seq; if self.jobs.insert(j.hwnd, j.clone()).is_none() { self.order.push_back(j.hwnd) } }
+        pub fn push(&mut self, mut j: Job) { self.stop = false; self.seq += 1; j.seq = self.seq; if self.jobs.insert(j.hwnd, j.clone()).is_none() { self.order.push_back(j.hwnd) } }
         /// The window was hidden, destroyed or left the pane: what is queued for it is dropped (a placement asked before a hide loses).
         pub fn cancel(&mut self, hwnd: u64) { if self.jobs.remove(&hwnd).is_some() { self.order.retain(|&h| h != hwnd) } }
         /// Every queued placement inside `parent` (a container going away), dropped.
@@ -807,6 +809,23 @@ pub mod placeq {
         /// The next placement to run, oldest window first.
         pub fn take(&mut self) -> Option<Job> { while let Some(h) = self.order.pop_front() { if let Some(j) = self.jobs.remove(&h) { return Some(j) } } None }
         pub fn len(&self) -> usize { self.jobs.len() }
+    }
+    /// A worker's loop: runs placements as they come (`run`), and ends once told to stop (or idle for `idle`) with nothing queued, when
+    /// `try_exit` agrees: it takes its entry out of the workers' map under that map's lock and finds the queue still empty, so a placement
+    /// queued meanwhile (which is pushed under the same lock) is never left to a worker that has gone.
+    pub fn work(w: &(std::sync::Mutex<Q>, std::sync::Condvar), idle: std::time::Duration, mut run: impl FnMut(Job), try_exit: impl Fn() -> bool) {
+        loop {
+            let job = {
+                let (q, cv) = w; let mut g = q.lock().unwrap();
+                loop {
+                    if let Some(j) = g.take() { break Some(j) }
+                    if g.stop { break None }
+                    let (ng, to) = cv.wait_timeout(g, idle).unwrap(); g = ng;
+                    if to.timed_out() && g.len() == 0 { g.stop = true; }
+                }
+            };
+            match job { Some(j) => run(j), None => if try_exit() { return } }
+        }
     }
     /// Whether a queued placement still applies when it runs: the window exists, still belongs to the KiCad process it was asked for
     /// (a recycled handle is never touched), and is still inside its container when it had one.
@@ -959,16 +978,29 @@ mod imp {
         /// the workers, by KiCad's UI thread id
         fn workers() -> &'static Mutex<HashMap<u32, W>> { static M: OnceLock<Mutex<HashMap<u32, W>>> = OnceLock::new(); M.get_or_init(Default::default) }
         fn owner(h: u64) -> (u32, u32) { let mut pid = 0u32; let t = unsafe { super::GetWindowThreadProcessId(super::hwnd(h), &mut pid) }; (pid, t) }
-        fn worker(w: W) {
-            loop {
-                let j = { let (q, cv) = &*w; let mut g = q.lock().unwrap(); loop { if let Some(j) = g.take() { break j } g = cv.wait(g).unwrap(); } };
+        /// how long a worker with nothing to do stays: it ends after, and the next placement for its KiCad starts another
+        const IDLE: std::time::Duration = std::time::Duration::from_secs(10);
+        fn worker(tid: u32, w: W) {
+            let w2 = w.clone();
+            super::super::placeq::work(&w, IDLE, run, move || {
+                // under the map's lock (set_pos pushes under it too): gone only with nothing queued
+                let mut m = workers().lock().unwrap();
+                let mut g = w2.0.lock().unwrap();
+                if g.len() > 0 { g.stop = false; return false }
+                if m.get(&tid).is_some_and(|x| Arc::ptr_eq(x, &w2)) { m.remove(&tid); }
+                if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_placer_ended": {"kicad_thread": tid}})); }
+                true
+            });
+        }
+        fn run(j: Job) {
+            {
                 let h = super::hwnd(j.hwnd);
                 let ok = unsafe { super::IsWindow(h) != 0 };
                 let (pid, _) = if ok { owner(j.hwnd) } else { (0, 0) };
                 let inside = j.parent != 0 && ok && unsafe { super::IsChild(super::hwnd(j.parent), h) != 0 };
                 if !still_ours(&j, ok, pid, inside) {
                     if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_place_dropped": {"window": j.hwnd, "alive": ok, "pid": pid, "want_pid": j.pid, "inside": inside}})); }
-                    continue
+                    return
                 }
                 unsafe { super::SetWindowPos(h, super::hwnd(j.after), j.x, j.y, j.w, j.h, j.flags); }
             }
@@ -979,16 +1011,18 @@ mod imp {
         pub fn set_pos(hwnd: u64, after: u64, x: i32, y: i32, w: i32, h: i32, flags: u32, parent: u64) {
             let (pid, tid) = owner(hwnd);
             if pid == 0 || pid == std::process::id() { unsafe { super::SetWindowPos(super::hwnd(hwnd), super::hwnd(after), x, y, w, h, flags); } return }
-            let wk = { let mut m = workers().lock().unwrap();
-                m.entry(tid).or_insert_with(|| { let w: W = Arc::new((Mutex::new(Q::default()), Condvar::new())); let w2 = w.clone(); std::thread::Builder::new().name("kicad-placer".into()).spawn(move || worker(w2)).ok(); w }).clone() };
-            let (q, cv) = &*wk;
-            q.lock().unwrap().push(Job { hwnd, after, x, y, w, h, flags, pid, parent, seq: 0 });
-            cv.notify_one();
+            // pushed under the map's lock: a worker ending (its exit takes the same lock) never leaves this placement behind
+            let mut m = workers().lock().unwrap();
+            let wk = m.entry(tid).or_insert_with(|| { let w: W = Arc::new((Mutex::new(Q::default()), Condvar::new())); let w2 = w.clone(); std::thread::Builder::new().name("kicad-placer".into()).spawn(move || worker(tid, w2)).ok(); w }).clone();
+            wk.0.lock().unwrap().push(Job { hwnd, after, x, y, w, h, flags, pid, parent, seq: 0 });
+            wk.1.notify_one();
+            drop(m);
         }
         /// A KiCad window hidden or leaving: any placement queued for it is dropped.
         pub fn cancel(hwnd: u64) { for w in workers().lock().unwrap().values() { w.0.lock().unwrap().cancel(hwnd) } }
         /// A container going away (the pane dropped, detached): everything queued inside it is dropped.
-        pub fn cancel_parent(parent: u64) { for w in workers().lock().unwrap().values() { w.0.lock().unwrap().cancel_parent(parent) } }
+        /// The pane's container destroyed: its placements dropped, and a worker left with nothing queued ends now.
+        pub fn cancel_parent(parent: u64) { for w in workers().lock().unwrap().values() { let mut q = w.0.lock().unwrap(); q.cancel_parent(parent); if q.len() == 0 { q.stop = true; w.1.notify_one(); } } }
     }
 
 
@@ -2266,6 +2300,32 @@ mod tests {
         assert!(!still_ours(&k, true, 8, true), "a recycled handle of another process is never touched");
         assert!(!still_ours(&k, true, 7, false), "a window no longer in its container (re-parented away) is left alone");
         assert!(still_ours(&Job { parent: 0, ..k }, true, 7, false), "a dialog (no container) only needs to be alive and KiCad's");
+    }
+    #[test] fn a_placement_worker_runs_its_jobs_and_ends_once_stopped_or_idle_with_nothing_queued() {
+        use super::placeq::{work, Job, Q};
+        use std::{sync::{Arc, Condvar, Mutex}, time::Duration};
+        let j = |h: u64| Job { hwnd: h, after: 0, x: 0, y: 0, w: 1, h: 1, flags: 0, pid: 7, parent: 1, seq: 0 };
+        let w = Arc::new((Mutex::new(Q::default()), Condvar::new()));
+        let ran = Arc::new(Mutex::new(Vec::new()));
+        let (w2, r2) = (w.clone(), ran.clone());
+        let t = std::thread::spawn(move || work(&w2, Duration::from_secs(60), |j| r2.lock().unwrap().push(j.hwnd), || true));
+        w.0.lock().unwrap().push(j(5)); w.1.notify_one();
+        for _ in 0..200 { if !ran.lock().unwrap().is_empty() { break } std::thread::sleep(Duration::from_millis(5)); }
+        assert_eq!(*ran.lock().unwrap(), vec![5], "a queued placement runs");
+        { let mut q = w.0.lock().unwrap(); q.stop = true; } w.1.notify_one();
+        for _ in 0..200 { if t.is_finished() { break } std::thread::sleep(Duration::from_millis(5)); }
+        assert!(t.is_finished(), "stopped with nothing queued: the worker returns (the pane dropped)");
+        // idle: ends by itself; a try_exit that refuses (a placement came meanwhile) keeps it running
+        let w = Arc::new((Mutex::new(Q::default()), Condvar::new()));
+        let w2 = w.clone();
+        let t = std::thread::spawn(move || work(&w2, Duration::from_millis(20), |_| {}, || true));
+        for _ in 0..200 { if t.is_finished() { break } std::thread::sleep(Duration::from_millis(5)); }
+        assert!(t.is_finished(), "idle with nothing queued: the worker returns");
+        let refusals = Arc::new(Mutex::new(0)); let (w, r) = (Arc::new((Mutex::new(Q::default()), Condvar::new())), refusals.clone());
+        let w2 = w.clone();
+        let t = std::thread::spawn(move || work(&w2, Duration::from_millis(10), |_| {}, || { let mut n = r.lock().unwrap(); *n += 1; *n > 2 }));
+        for _ in 0..400 { if t.is_finished() { break } std::thread::sleep(Duration::from_millis(5)); }
+        assert!(t.is_finished() && *refusals.lock().unwrap() == 3, "a refused exit goes on waiting; it ends when the exit is agreed");
     }
     use super::*;
     /// KiCad's right-click menu (WS_POPUP|WS_VISIBLE|WS_CLIPSIBLINGS|WS_BORDER, class #32768) was taken for a dialog and re-centred.
