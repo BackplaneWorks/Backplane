@@ -482,16 +482,23 @@ mod imp {
     /// over the others (unmapped), as place_local does, with no configure; told its place only if it was not told this one.
     pub fn show_local(container: u64, show: Option<u64>, mine: &[u64]) {
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
+        let size = c.get_geometry(container as u32).ok().and_then(|q| q.reply().ok()).map(|g| (g.width as u32, g.height as u32));
         if let Some(k) = show.filter(|k| mine.contains(k)) {
+            // a frame never shown at this size (one shown here for the first time) is sized to the container; one already so is not touched
+            if let (Some((w, h)), Some(fg)) = (size, c.get_geometry(k as u32).ok().and_then(|q| q.reply().ok())) {
+                if (fg.x as i32, fg.y as i32, fg.width as u32, fg.height as u32) != (0, 0, w, h) {
+                    let _ = c.configure_window(k as u32, &ConfigureWindowAux::new().x(0).y(0).width(w).height(h).border_width(0));
+                }
+            }
             keep_pixels(c, k as u32, 3);
             let _ = c.configure_window(k as u32, &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE));
             let _ = c.map_window(k as u32);
         }
         for k in mine { if Some(*k) != show { let _ = c.unmap_window(*k as u32); } }
         let _ = c.flush();
-        let (Some(k), Some(root)) = (show, root(c)) else { return };
-        let (Some(t), Some(geo)) = (c.translate_coordinates(container as u32, root, 0, 0).ok().and_then(|q| q.reply().ok()), c.get_geometry(container as u32).ok().and_then(|q| q.reply().ok())) else { return };
-        tell(c, k as u32, (t.dst_x as i32, t.dst_y as i32, geo.width as u32, geo.height as u32), "shown");
+        let (Some(k), Some(root), Some((w, h))) = (show, root(c), size) else { return };
+        let Some(t) = c.translate_coordinates(container as u32, root, 0, 0).ok().and_then(|q| q.reply().ok()) else { return };
+        tell(c, k as u32, (t.dst_x as i32, t.dst_y as i32, w, h), "shown");
     }
     /// `w` and its windows `depth` levels down keep what is on screen under them until they draw (no X background is painted on map or
     /// expose): what the person sees between a map and KiCad's first paint is the last good picture, never a flash of background.

@@ -173,10 +173,11 @@ pub fn warm_target(project: String, root: String) -> String {
 
 /// Whether the pre-warm may start by itself on an idle pane (2 s after the first editor is placed, with no new placement): everywhere but
 /// Windows, and there only on a runtime whose pre-warm never takes the keyboard from the shown editor (`prewarm-keeps-focus`).
-/// Whether a re-place needs no geometry: a frame to show at exactly the rect last placed in this container (`prev`: that placement's
-/// rect and frame). The pane's re-places after a tab switch, the frames poll and the hub's echo of the switch are such.
+/// Whether a re-place needs no geometry: a frame to show at exactly the rect where the last placement in this container showed one
+/// (`prev`: that placement's rect and frame; one that showed none left the container unmapped, and a full placement maps it). The
+/// pane's re-places after a tab switch, the frames poll and the hub's echo of the switch are such.
 pub fn no_geometry(prev: Option<(Option<nc::R>, Option<u64>)>, at: Option<nc::R>, show: Option<u64>) -> bool {
-    matches!((prev, at, show), (Some((Some(p), _)), Some(a), Some(_)) if p == a)
+    matches!((prev, at, show), (Some((Some(p), Some(_))), Some(a), Some(_)) if p == a)
 }
 pub fn idle_prewarm(windows: bool, keeps_focus: bool) -> bool { !windows || keeps_focus }
 
@@ -2252,6 +2253,7 @@ mod tests {
         assert!(!super::no_geometry(Some((at, Some(1))), Some(r(755, 500)), Some(1)), "resized: placed");
         assert!(!super::no_geometry(None, at, Some(1)), "nothing placed in this container yet (a new container, after leave, a restart)");
         assert!(!super::no_geometry(Some((None, None)), at, Some(1)));
+        assert!(!super::no_geometry(Some((at, None)), at, Some(1)), "the last placement showed no frame (container unmapped): placed");
         assert!(!super::no_geometry(Some((at, Some(1))), None, None), "taken off screen: placed (unmapped)");
         assert!(!super::no_geometry(Some((at, Some(1))), at, None), "no frame to show: placed");
     }
