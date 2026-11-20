@@ -119,9 +119,7 @@ struct DataViewerView: View {
     @State private var tab: String
     @State private var target: (tab: String, path: String)?
     @State private var files: DProjectFiles?
-    @State private var railEntries: [DViewerRailEntry]?
-    @State private var userPressed = false
-    @State private var disabledWhy = ""
+    @State private var railState = ViewerRailState()
     // the project's boards (two or more: the hub's `boards`): a pick shows that board on Board, Schematic, 3D and Split, as the desktop's Boards menu does
     @State private var boardPick = ""
     @State private var sheetPick = ""
@@ -132,36 +130,59 @@ struct DataViewerView: View {
         let e = ext(openFile)
         _tab = State(initialValue: openFile.isEmpty ? "Files" : e == "kicad_pcb" || e == "pcbdoc" ? "Board" : e == "kicad_sch" || e == "schdoc" ? "Schematic" : ["step", "stp", "glb"].contains(e) ? "Mech" : "Files")
         _target = State(initialValue: e == "kicad_pcb" || e == "pcbdoc" ? ("Board", openFile) : e == "kicad_sch" || e == "schdoc" ? ("Schematic", openFile) : ["step", "stp", "glb"].contains(e) ? ("Mech", openFile) : nil)
+        _railState = State(initialValue: ViewerRailState(threadId: thread.id))
     }
     var body: some View {
-        let strip = railEntries.map { ViewerRail.phoneTabs($0, gerbersSupported: client.has("gerbers")) } ?? ViewerRail.fallbackTabs
+        let hasRail = client.has("rail")
+        let hasGerbers = client.has("gerbers")
+        let online = client.conn == .online
+        let liveThread = client.threads.first { $0.id == thread.id }
+        let strip = railState.strip(hasRail: hasRail, gerbersSupported: hasGerbers)
+        let railKey = [
+            thread.id,
+            online ? "1" : "0",
+            hasRail ? "1" : "0",
+            hasGerbers ? "1" : "0",
+            liveThread?.state ?? "",
+            String(liveThread?.updatedAt ?? 0),
+            files?.root ?? "",
+            files?.pcb ?? "",
+            files?.sch ?? "",
+            String(files?.boards.count ?? 0),
+            client.plots.frame?.key ?? "",
+            client.plots.frame?.none ?? "",
+            client.plots.mesh?.none ?? "",
+        ].joined(separator: "|")
         VStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
                     ForEach(strip) { item in
                         let t = item.tab
                         let active = !item.disabled && t == tab
+                        let label = Tr.t(item.label.isEmpty ? t : item.label)
                         Button {
-                            if item.disabled {
-                                disabledWhy = item.why
-                            } else {
-                                disabledWhy = ""
-                                userPressed = true
-                                tab = t
+                            let out = railState.tap(item, currentTab: tab)
+                            railState = out.state
+                            if out.tabChanged {
+                                tab = out.tab
                                 target = nil
                             }
                         } label: {
-                            Text(Tr.t(t)).dmono(12, bold: active)
+                            Text(label).dmono(12, bold: active)
                                 .foregroundStyle(active ? BackplaneDesign.onAccent : item.disabled ? BackplaneDesign.dim : BackplaneDesign.text)
                                 .padding(.horizontal, 14).padding(.vertical, 10)
+                                .frame(minHeight: 44)
                                 .background(active ? BackplaneDesign.accent : BackplaneDesign.panel)
                         }
                         .accessibilityIdentifier("data.vtab." + t)
+                        .accessibilityAddTraits(active ? [.isSelected] : [])
+                        .accessibilityValue(item.disabled ? (item.why.isEmpty ? Tr.t("Disabled") : Tr.t("Disabled") + ": " + Tr.t(item.why)) : "")
+                        .accessibilityHint(item.disabled ? Tr.t(item.why) : "")
                     }
                 }
             }.background(BackplaneDesign.panel)
-            if !disabledWhy.isEmpty {
-                Text(Tr.t(disabledWhy)).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
+            if !railState.disabledWhy.isEmpty {
+                Text(Tr.t(railState.disabledWhy)).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 6)
                     .background(BackplaneDesign.background).accessibilityIdentifier("data.vtab.why")
             }
@@ -189,27 +210,60 @@ struct DataViewerView: View {
                 case "Diff": DataDiffTab(client: client, thread: thread)
                 case "Review": DataReviewTab(client: client, thread: thread)
                 case "Mech": DataMechTab(client: client, thread: thread, open: target?.tab == "Mech" ? target!.path : nil)
-                case "Files": DataFilesTab(client: client, thread: thread, start: ["kicad_pcb", "kicad_sch", "pcbdoc", "schdoc"].contains(ext(openFile)) ? "" : openFile, line: line) { target = $0; tab = $0.tab }
+                case "Files": DataFilesTab(client: client, thread: thread, start: ["kicad_pcb", "kicad_sch", "pcbdoc", "schdoc"].contains(ext(openFile)) ? "" : openFile, line: line) { target = $0; tab = $0.tab; railState = railState.onLocalSelect() }
+                case "Browser": DataBrowserTab(client: client, thread: thread)
+                case "": Color.clear
                 default: DataBrowserTab(client: client, thread: thread)
                 }
             }
         }
         .background(BackplaneDesign.background)
         .dataBar(thread.title.isEmpty ? Tr.t("New thread") : thread.title)
-        .task(id: client.conn == .online) {
-            if client.has("rail"), let got = await client.viewerRail(thread.id, page: ViewerRail.idForTab(tab), diff: tab == "Diff") {
-                railEntries = got
-                let mapped = ViewerRail.phoneTabs(got, gerbersSupported: client.has("gerbers"))
-                tab = ViewerRail.activeTab(mapped, current: tab, userPressed: userPressed, hasFileLink: !openFile.isEmpty)
+        .onChange(of: hasRail) { _, now in
+            railState = railState.onFeatureChanged(hasRail: now)
+        }
+        .task(id: "\(thread.id)|\(online)|\(liveThread?.state ?? "")") {
+            guard online else { return }
+            if files == nil {
+                // a slow or dropped answer is asked again (three tries): without it the picker and the pages' files never came until the viewer was reopened
+                for i in 0..<3 { files = await client.viewerFiles(thread.id); if files != nil { break }; try? await Task.sleep(nanoseconds: UInt64(1_500_000_000 * (i + 1))) }
+            } else if liveThread?.state != "working" {
+                if let updated = await client.viewerFiles(thread.id) { files = updated }
             }
-            guard files == nil else { return }
-            // a slow or dropped answer is asked again (three tries): without it the picker and the pages' files never came until the viewer was reopened
-            for i in 0..<3 { files = await client.viewerFiles(thread.id); if files != nil { break }; try? await Task.sleep(nanoseconds: UInt64(1_500_000_000 * (i + 1))) }
-            if !(files?.pcb ?? "").isEmpty && tab == "Files" && openFile.isEmpty && !userPressed { tab = "Board" }
+            if !client.has("rail") && !(files?.pcb ?? "").isEmpty && tab == "Files" && openFile.isEmpty && railState.localSelectionSeq == 0 { tab = "Board" }
             #if DEBUG || BP_MEASURE
             // a check without hands: BACKPLANE_VTAB opens that tab (BACKPLANE_SELECT=viewer:<thread> opens the viewer)
-            if let t = ProcessInfo.processInfo.environment["BACKPLANE_VTAB"], tabs.contains(t) { tab = t; userPressed = true }
+            if let t = ProcessInfo.processInfo.environment["BACKPLANE_VTAB"], tabs.contains(t) { tab = t; railState = railState.onLocalSelect() }
             #endif
+        }
+        .task(id: railKey) {
+            if !hasRail {
+                railState = railState.onFeatureChanged(hasRail: false)
+                return
+            }
+            guard online else { return }
+            let (nextState, req) = railState.beginRequest(threadId: thread.id, hasRail: true)
+            railState = nextState
+            if let got = await client.viewerRail(thread.id, page: ViewerRail.idForTab(tab), diff: tab == "Diff") {
+                let out = railState.onReply(
+                    req,
+                    entries: got,
+                    hasRail: client.has("rail"),
+                    gerbersSupported: client.has("gerbers"),
+                    currentTab: tab,
+                    hasFileLink: !openFile.isEmpty
+                )
+                if out.accepted {
+                    railState = out.state
+                    if out.stopWatch {
+                        target = nil
+                        Task { try? await client.watch(thread.id, kind: "") }
+                    }
+                    tab = out.tab
+                }
+            } else {
+                railState = railState.onFailure(req, hasRail: client.has("rail"))
+            }
         }
         .onDisappear { Task { try? await client.watch(thread.id, kind: "") } }
         .onChange(of: boardPick) { _, _ in sheetPick = "" }
@@ -348,10 +402,12 @@ struct DataPlotTab: View {
             if !three && !present.isEmpty && client.features.contains("layers"), let l = layers {
                 HStack(spacing: 6) {
                     chip(Tr.t(l.layerHead), id: "data.viewer.layers", on: l.layerMode > 0) { refs = nil; menu.toggle() }
-                    if comparing.isEmpty {
-                        chip(Tr.t("Compare"), id: "data.viewer.compare", on: refs != nil) { menu = false; if refs != nil { refs = nil } else { Task { refs = await client.refs(thread.id) } } }
-                    } else {
-                        chip(Tr.t("Close compare"), id: "data.viewer.compare.close", on: true) { close() }
+                    if kind != "gerbers" {
+                        if comparing.isEmpty {
+                            chip(Tr.t("Compare"), id: "data.viewer.compare", on: refs != nil) { menu = false; if refs != nil { refs = nil } else { Task { refs = await client.refs(thread.id) } } }
+                        } else {
+                            chip(Tr.t("Close compare"), id: "data.viewer.compare.close", on: true) { close() }
+                        }
                     }
                 }.padding(8)
                 if menu { DataLayerMenu(layers: l, present: present) { a, v in act(a, v, bits) }.padding(.top, 44).padding(.leading, 8) }
