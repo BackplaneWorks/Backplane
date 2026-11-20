@@ -96,6 +96,9 @@ fn fixture() -> (crate::plat::tmp::TempDir, String, std::path::PathBuf, State) {
     (td, root, root_p, st)
 }
 
+/// What an agent's show names, as main's desktop sent it (`view <kind>`; a part rides after a tab).
+pub(super) const AGENT_SHOWS: [&str; 9] = ["board", "schematic", "3d", "mech\tmech/case.step", "gerbers", "files", "review", "split", "browser"];
+
 fn record_all_flows() -> Value {
     let (td, root, root_p, st) = fixture();
     let _keep = &td;
@@ -200,24 +203,32 @@ fn record_all_flows() -> Value {
         flows.insert("gerbers_and_vs_board".into(), Value::Array(steps));
     }
 
-    // 7. History single and compare
+    // 7. History single and compare: the page on show is a history source (as the desktop's history play leaves it); what a person does next runs main's real commands
     {
         let mut steps = Vec::new();
-        let hist_single = crate::files::rv::hist_git(&format!("{root}/.git"), "1111111", &root, "board.kicad_pcb");
-        let mut s1 = fresh_sess();
-        s1["drafts"]["@view:t"] = json!("board");
-        s1["drafts"]["@view.file:t"] = json!(hist_single);
-        steps.push(snap_step(&st, &s1, &[], &root));
-
+        let git = format!("{root}/.git");
+        let hist_single = crate::files::rv::hist_git(&git, "1111111", &root, "board.kicad_pcb");
         let hist_cmp = format!(
             "cmp\n{}\n{}",
-            crate::files::rv::hist_git(&format!("{root}/.git"), "1111111", &root, "board.kicad_pcb"),
-            crate::files::rv::hist_git(&format!("{root}/.git"), "2222222", &root, "board.kicad_pcb"),
+            crate::files::rv::hist_git(&git, "1111111", &root, "board.kicad_pcb"),
+            crate::files::rv::hist_git(&git, "2222222", &root, "board.kicad_pcb"),
         );
-        let mut s2 = fresh_sess();
-        s2["drafts"]["@view:t"] = json!("board");
-        s2["drafts"]["@view.file:t"] = json!(hist_cmp);
-        steps.push(snap_step(&st, &s2, &[], &root));
+        for spec in [hist_single, hist_cmp] {
+            let mut s = fresh_sess();
+            s["drafts"]["@view:t"] = json!("board");
+            s["drafts"]["@view.file:t"] = json!(spec);
+            s["drafts"]["@view.at"] = json!(format!("0|{root}|{spec}"));
+            steps.push(snap_step(&st, &s, &[], &root));
+            // Retry, then each press that leaves the history, each from the history on show
+            let o = viewer::view_action_at(&st, "h", &s, "retry", 5000).unwrap_or_else(|| panic!("retry on history returned None"));
+            let mut after = s.clone(); patch::merge(&mut after, &o.patch);
+            steps.push(snap_step(&st, &after, &o.before, &root));
+            for act in ["board", "schematic", ""] {
+                let o = viewer::view_action(&st, "h", &s, act).unwrap_or_else(|| panic!("view {act:?} from history returned None"));
+                let mut after = s.clone(); patch::merge(&mut after, &o.patch);
+                steps.push(snap_step(&st, &after, &o.before, &root));
+            }
+        }
         flows.insert("history_single_and_compare".into(), Value::Array(steps));
     }
 
@@ -266,7 +277,7 @@ fn record_all_flows() -> Value {
     // 11. Agent show of each kind
     {
         let mut steps = Vec::new();
-        for act in ["board", "schematic", "3d", "mech\tmech/case.step", "gerbers", "files", "review"] {
+        for act in AGENT_SHOWS {
             let mut s = fresh_sess();
             let o = viewer::view_action(&st, "h", &s, act)
                 .unwrap_or_else(|| panic!("agent show view_action({act:?}) returned None"));
@@ -279,21 +290,23 @@ fn record_all_flows() -> Value {
     Value::Object(flows)
 }
 
+/// The generator: run ONLY by `scripts/parity-snapshot.sh` on a checkout of origin/main. It refuses on the branch (a branch-only symbol is in the source) and without the main commit it is run at.
 #[test]
-fn legacy_single_page_flows_match_origin_main_snapshot() {
-    let actual = record_all_flows();
+#[ignore = "generator: scripts/parity-snapshot.sh on a main checkout"]
+fn generate_main_snapshot() {
+    assert!(!include_str!("viewer.rs").contains("fn viewer_show_action"), "this tree has branch-only code: the snapshot is generated from origin/main only");
+    let commit = std::env::var("PARITY_MAIN_COMMIT").unwrap_or_default();
+    assert!(commit.len() == 40 && commit.bytes().all(|b| b.is_ascii_hexdigit()), "PARITY_MAIN_COMMIT must be the main checkout's full commit id");
+    let flows = record_all_flows();
+    let snap = json!({"generated_from": commit, "flows_sha256": flows_hash(&flows), "flows": flows});
     let snap_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(SNAPSHOT_REL);
-    if std::env::var("UPDATE_PARITY_SNAPSHOT").ok().as_deref() == Some("1") {
-        std::fs::create_dir_all(snap_path.parent().unwrap()).unwrap();
-        std::fs::write(&snap_path, serde_json::to_string_pretty(&actual).unwrap() + "\n").unwrap();
-        return;
-    }
-    let raw = std::fs::read_to_string(&snap_path)
-        .unwrap_or_else(|e| panic!("missing origin/main parity snapshot at {}: {e}", snap_path.display()));
-    let expected: Value = serde_json::from_str(&raw).expect("valid snapshot JSON");
-    let mut diffs = Vec::new();
-    diff_paths(&expected, &actual, "", &mut diffs);
-    assert!(diffs.is_empty(), "legacy single-page flows must match the origin/main snapshot in full; differences (main vs branch):\n{}", diffs.join("\n"));
+    std::fs::create_dir_all(snap_path.parent().unwrap()).unwrap();
+    std::fs::write(&snap_path, serde_json::to_string_pretty(&snap).unwrap() + "\n").unwrap();
+}
+
+fn flows_hash(flows: &Value) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(serde_json::to_string(flows).unwrap().as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Every path where `main` and `branch` differ, with both values (the failure message names them, never a whole-document dump).
@@ -309,15 +322,35 @@ fn diff_paths(main: &Value, branch: &Value, at: &str, out: &mut Vec<String>) {
 }
 
 // ---- branch-only: everything below needs code origin/main lacks; the generator run on main drops it (`sed '/^\/\/ ---- branch-only/,$d'`) ----
+/// The checked-in snapshot: it names the main commit it came from and carries its content hash; the test never writes it.
+fn load_snapshot() -> Value {
+    let snap_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(SNAPSHOT_REL);
+    let raw = std::fs::read_to_string(&snap_path).unwrap_or_else(|e| panic!("missing origin/main parity snapshot at {}: {e}", snap_path.display()));
+    let snap: Value = serde_json::from_str(&raw).expect("valid snapshot JSON");
+    let from = snap["generated_from"].as_str().unwrap_or("");
+    assert!(from.len() == 40 && from.bytes().all(|b| b.is_ascii_hexdigit()), "the snapshot names no main commit: it was not made by scripts/parity-snapshot.sh");
+    assert_eq!(snap["flows_sha256"].as_str().unwrap_or(""), flows_hash(&snap["flows"]), "the snapshot was edited by hand or from the branch; regenerate it with scripts/parity-snapshot.sh on origin/main");
+    snap
+}
+
+#[test]
+fn legacy_single_page_flows_match_origin_main_snapshot() {
+    let expected = load_snapshot()["flows"].clone();
+    let actual = record_all_flows();
+    let mut diffs = Vec::new();
+    diff_paths(&expected, &actual, "", &mut diffs);
+    assert!(diffs.is_empty(), "legacy single-page flows must match the origin/main snapshot in full; differences (main vs branch):\n{}", diffs.join("\n"));
+}
+
 /// On this branch the desktop's agent show is `view-show` (`viewer_show_action`), main's was `view <kind>`: from a session with nothing open
 /// the pictures, commands and drafts must be main's (the snapshot's `agent_show_each_kind`), except the differences listed here.
 #[test]
 fn agent_show_from_idle_matches_main_view_for_each_kind() {
-    let snap_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(SNAPSHOT_REL);
-    let expected: Value = serde_json::from_str(&std::fs::read_to_string(&snap_path).expect("snapshot")).unwrap();
+    let expected = load_snapshot()["flows"].clone();
     let want = expected["agent_show_each_kind"].as_array().expect("agent_show_each_kind flow");
     let (_td, root, _rp, st) = fixture();
-    let shows = [("board", ""), ("schematic", ""), ("3d", ""), ("mech", "mech/case.step"), ("gerbers", ""), ("files", ""), ("review", "")];
+    // the desktop's show: the kind, and the part only for Mech (a tab-joined wire value, as main's `view`)
+    let shows: Vec<(&str, &str)> = AGENT_SHOWS.iter().map(|w| w.split_once('\t').unwrap_or((w, ""))).collect();
     assert_eq!(want.len(), shows.len(), "the snapshot flow and this list name the same kinds");
     let mut diffs = Vec::new();
     for (i, (k, path)) in shows.iter().enumerate() {
