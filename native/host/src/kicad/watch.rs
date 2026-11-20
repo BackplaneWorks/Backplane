@@ -999,7 +999,7 @@ mod tests {
         crate::session::patch::merge(&mut s, &o_g.patch);
         let o_vs = crate::present::viewer::view_action(&st, "h", &s, "gerbers\tboard").unwrap();
         assert_eq!(o_vs.before.len(), 1, "presenter emits kicad.watch for in-root gerbers vs board");
-        let wp: Value = serde_json::from_str(o_vs.before[0]["p"].as_str().unwrap()).unwrap();
+        let wp = serde_json::from_str::<Value>(o_vs.before[0]["text"].as_str().unwrap()).unwrap()["p"].clone();
         let wkind = kind_of(wp["kind"].as_str().unwrap()).unwrap();
         let wroot = wp["root"].as_str().unwrap();
         let wpath = wp["path"].as_str().unwrap();
