@@ -29,6 +29,24 @@ pub fn page(session: &Value) -> Value {
     json!({"rows": rows, "state": state_of(session)})
 }
 
+/// Browser-only projection. Build rows from the device list so native approval
+/// codes, invitations, action buttons and session drafts never enter the reply.
+pub fn browser_page(reg: &super::pairing::Registry, current_id: &str) -> Value {
+    browser_rows(&reg.list(), current_id)
+}
+
+fn browser_rows(list: &Value, current_id: &str) -> Value {
+    let rows: Vec<Value> = list["devices"].as_array().into_iter().flatten()
+        .filter(|d| !super::pairing::truthy(&d["revoked"]))
+        .map(|d| {
+            let name = d["name"].as_str().filter(|s| !s.is_empty()).unwrap_or("Paired device");
+            let detail = if d["id"] == current_id { "This browser" }
+                else if d["kind"] == "browser" { "Paired browser" } else { "Paired device" };
+            json!({"title":name,"detail":detail})
+        }).collect();
+    json!({"rows":rows})
+}
+
 async fn browser_action(hub: &Hub, action: &str, value: &str) -> Result<(), &'static str> {
     let reg = super::start::registry(&hub.cfg.home).ok_or("registry unavailable")?;
     if action == "device-web-access" {
@@ -77,6 +95,17 @@ impl RpcHandler for DevicesPage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn browser_projection_contains_only_paired_names_and_status() {
+        let list = json!({
+            "devices":[{"id":"me","kind":"browser","name":"Work browser","login":"hidden"},
+                       {"id":"revoked","name":"Old","revoked":true},{"id":"phone","name":"Phone"}],
+            "invitations":[{"link":"private"}],"browserPending":[{"code":"123456"}]
+        });
+        assert_eq!(browser_rows(&list, "me"), json!({"rows":[
+            {"title":"Work browser","detail":"This browser"},{"title":"Phone","detail":"Paired device"}
+        ]}));
+    }
     #[test] fn a_state_carries_only_the_pages_drafts() {
         let s = session_of(r#"{"@invite":"{\"link\":\"x\"}","@pair.url":"http://192.168.1.9:3787","@other":"no","@lan.err":7}"#);
         assert_eq!(s, json!({"drafts": {"@invite": "{\"link\":\"x\"}", "@pair.url": "http://192.168.1.9:3787"}}));
