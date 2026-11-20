@@ -5,10 +5,13 @@
 # For each touched crate of native/{host,gpui,guard,voice}, through scripts/cargo-q on a Boat box (BUILD_SLOTS=0, BQ_OFFLOAD_AFTER=0):
 #   1. cargo check --all-targets --locked
 #   2. cargo test --locked: its unit tests, skipping every test whose name contains "e2e" (and, for the hub, scripts/gate-skip.txt)
+#   3. host and gpui: the Windows cross-compile check (scripts/windows-check.sh: cargo check --target x86_64-pc-windows-gnu --all-targets, with
+#      llvm-mingw; on the Boat box, which fetches it once): a Windows-only compile error (cfg(windows) code, a Windows trait clash) fails here
 # Not here (the release-candidate pass, docs/release-playbook.md): Windows and macOS runs, the e2e suites, the screenshot and size matrix,
 # the KiCad embed suites. A PR touching no crate (docs, scripts, mobile, web sources) compiles nothing and passes.
 # Says what ran and how long each step took. Exit 0 passed, 1 a step failed.
-# Env: LAND_GATE_CARGO (the cargo command; default scripts/cargo-q), LAND_GATE_BASE (origin/main), LAND_GATE_LOCAL=1 (no Boat).
+# Env: LAND_GATE_CARGO (the cargo command; default scripts/cargo-q), LAND_GATE_WINCHECK (default bash scripts/windows-check.sh), LAND_GATE_BASE
+# (origin/main), LAND_GATE_LOCAL=1 (no Boat).
 set -u
 ROOT=$(git rev-parse --show-toplevel); cd "$ROOT"
 cargo=${LAND_GATE_CARGO:-$ROOT/scripts/cargo-q}
@@ -54,6 +57,9 @@ for c in host gpui guard voice; do
   if [ "$c" = host ]; then step "$c: unit tests" "$d" test --locked --offline -- --skip e2e "${skips[@]}" || rc=1
   elif [ "$c" = voice ]; then RUSTC_WRAPPER= step "$c: unit tests" "$d" test --locked --offline -- --skip e2e || rc=1
   else step "$c: unit tests" "$d" test --locked --offline -- --skip e2e || rc=1; fi
+  case "$c" in host|gpui) s=$(date +%s); say "$c: Windows cross-compile check ..."
+    if ${LAND_GATE_WINCHECK:-bash "$ROOT/scripts/windows-check.sh"} "$c"; then say "$c: Windows cross-compile check: ok ($(( $(date +%s) - s ))s)"; ran="${ran:+$ran, }$c: Windows check $(( $(date +%s) - s ))s"
+    else say "$c: Windows cross-compile check: FAILED ($(( $(date +%s) - s ))s)"; ran="${ran:+$ran, }$c: Windows check FAILED"; rc=1; fi;; esac
 done
 dt=$(( $(date +%s) - t0 ))
 if [ -z "$ran" ]; then say "nothing to compile: the PR touches no crate (docs, scripts, mobile, web sources) ($(git diff --name-only "$base" HEAD | wc -l) files); passed in ${dt}s"

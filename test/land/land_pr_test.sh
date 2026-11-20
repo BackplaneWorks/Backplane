@@ -108,18 +108,22 @@ mkdir -p "$LANE/native/host/src"; echo 'fn a() {}' > "$LANE/native/host/src/a.rs
 land > "$T/o17"; rc=$?; [ $rc = 0 ] && [ ! -s "$WINS" ] && grep -q "landed lane" "$T/o17" && ! grep -q -i "windows gate" "$T/o17"; ok $? "a host PR merges without any Windows gate (rc $rc)"
 # 18-22. the real gate (scripts/land-gate.sh) with a stand-in cargo: what each PR compiles and tests
 printf '#!/bin/sh\necho "$(basename "$PWD") $*" >> %s\ncase "$*" in *FAILME*) exit 1;; esac\n[ -f "$PWD/FAIL" ] && exit 1\nexit 0\n' "$T/cargolog" > "$T/cargo"; chmod +x "$T/cargo"
-gland() { : > "$T/cargolog"; (cd "$LANE" && LAND_GATE_CARGO=$T/cargo sh -c 'unset LAND_TEST; sh scripts/land.sh' 2>&1); }
+printf '#!/bin/sh\necho "wincheck $1" >> %s\n[ -f "$PWD/WINFAIL" ] && exit 1\nexit 0\n' "$T/cargolog" > "$T/wincheck"; chmod +x "$T/wincheck"
+gland() { : > "$T/cargolog"; (cd "$LANE" && LAND_GATE_CARGO=$T/cargo LAND_GATE_WINCHECK=$T/wincheck sh -c 'unset LAND_TEST; sh scripts/land.sh' 2>&1); }
 mkdir -p "$LANE/docs" "$LANE/mobile" "$LANE/web/src"; echo d > "$LANE/docs/x.md"; echo m > "$LANE/mobile/m.kt"; echo w > "$LANE/web/src/a.ts"; echo s > "$LANE/scripts/s.sh"; g add -A; g commit -qm "docs, mobile, web sources, scripts"
 gland > "$T/o18"; rc=$?; [ $rc = 0 ] && [ ! -s "$T/cargolog" ] && grep -q "nothing to compile: the PR touches no crate" "$T/o18" && grep -q "gate passed in [0-9]*s" "$T/o18"; ok $? "docs/mobile/web sources/scripts: nothing compiled, landed (rc $rc)"
 echo 'fn b() {}' > "$LANE/native/host/src/b.rs"; g add -A; g commit -qm "host: b"
-gland > "$T/o19"; rc=$?; [ $rc = 0 ] && [ "$(cut -d' ' -f1-3 "$T/cargolog" | tr '\n' '|')" = "host check --all-targets|host test --locked|" ] && grep -q -- "-- --skip e2e" "$T/cargolog" && grep -q "gate: passed in .*host: cargo check --all-targets [0-9]*s, host: unit tests [0-9]*s" "$T/o19"; ok $? "a host PR: cargo check and the unit tests (no e2e) of the host alone, timed (rc $rc)"
+gland > "$T/o19"; rc=$?; [ $rc = 0 ] && [ "$(cut -d' ' -f1-3 "$T/cargolog" | tr '\n' '|')" = "host check --all-targets|host test --locked|wincheck host|" ] && grep -q -- "-- --skip e2e" "$T/cargolog" && grep -q "gate: passed in .*host: cargo check --all-targets [0-9]*s, host: unit tests [0-9]*s, host: Windows check [0-9]*s" "$T/o19"; ok $? "a host PR: cargo check, the unit tests (no e2e) and the Windows cross-compile check of the host alone, timed (rc $rc)"
 mkdir -p "$LANE/web/dist"; echo '<html>1' > "$LANE/web/dist/index.html"; printf '%s\n' 'macro_rules! asset { ($p:literal) => { include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../web/dist/", $p)) } }' > "$LANE/native/host/src/webingress.rs"; g add -A; g commit -qm "host: embeds web/dist"; gland > /dev/null
 echo '<html>2' > "$LANE/web/dist/index.html"; g commit -qam "web/dist only"
 gland > "$T/o20"; rc=$?; [ $rc = 0 ] && [ ! -s "$T/cargolog" ] && grep -q "host: web/dist only: every file it names is there; no build" "$T/o20"; ok $? "a web/dist-only PR builds nothing (the hub embeds web/dist), and lands (rc $rc)"
 mkdir -p "$LANE/native/gpui/src"; echo 'fn g() {}' > "$LANE/native/gpui/src/g.rs"; g add -A; g commit -qm "gpui: g"
-gland > "$T/o21"; rc=$?; [ $rc = 0 ] && [ "$(cut -d' ' -f1 "$T/cargolog" | sort -u)" = gpui ]; ok $? "a gpui PR: the gpui crate alone (rc $rc)"
+gland > "$T/o21"; rc=$?; [ $rc = 0 ] && [ "$(cut -d' ' -f1 "$T/cargolog" | sort -u | tr '\n' ' ')" = "gpui wincheck " ] && grep -q -x "wincheck gpui" "$T/cargolog"; ok $? "a gpui PR: the gpui crate alone, its Windows check too (rc $rc)"
 touch "$LANE/native/host/FAIL"; echo 'fn c() {}' > "$LANE/native/host/src/c.rs"; g add -A; g commit -qm "host: c, failing"; before=$(git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/lane)
 gland > "$T/o22"; rc=$?; [ $rc != 0 ] && grep -q "gate: FAILED" "$T/o22" && grep -q "the gate failed (above); nothing pushed" "$T/o22" && [ "$(git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/lane)" = "$before" ]; ok $? "a failing check: the gate fails, nothing pushed (rc $rc)"
+# 23. a Windows-only compile error (the cross-compile check fails, Linux is fine) stops the landing
+rm -f "$LANE/native/host/FAIL"; touch "$LANE/WINFAIL"; echo 'fn d() {}' > "$LANE/native/host/src/d.rs"; g add -A; g commit -qm "host: d, Windows-only error"; before=$(git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/lane)
+gland > "$T/o23"; rc=$?; [ $rc != 0 ] && grep -q "host: Windows cross-compile check: FAILED" "$T/o23" && [ "$(git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/lane)" = "$before" ]; ok $? "a Windows-only compile error fails the gate, nothing pushed (rc $rc)"
 # 30. the gate outside the land lock, the merge inside it (held for seconds), lanes gating side by side
 echo CLEAN > "$FAKE/mergestate"; echo APPROVED > "$FAKE/review"; export FAKE_LOCKFILE=$T/locks/bp-land.lock; : > "$FAKE/mergelock"
 nl() { git -C "$T/main" fetch -q origin main; git -C "$T/main" worktree add -q -b "$1" "$T/l-$1" origin/main 2>/dev/null; echo "x $1" > "$T/l-$1/$2"; git -C "$T/l-$1" add -A; git -C "$T/l-$1" commit -qm "$1: $2"; }

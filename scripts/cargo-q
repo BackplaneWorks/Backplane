@@ -3,6 +3,8 @@
 #   scripts/cargo-q test --offline          from native/host or native/gpui, in your own worktree, instead of bare cargo
 # Every lane runs its tests and builds this way, so a few heavy builds run at once; when every slot is taken it queues locally, and a test/build/check/clippy/doc goes to a Boat box only after a long wait or with memory low (scripts/lib-boat.sh, BP_NO_BOAT=1 forces local); the queue is said on stderr. An explicit -j/--jobs is kept.
 HERE=$(cd "$(dirname "$0")" && pwd); . "$HERE/lib-buildslot.sh"
+# a Windows-target command on a Boat box (scripts/windows-check.sh's, offloaded): the box's own llvm-mingw and target (scripts/lib-winmingw.sh)
+case " $* " in *" --target x86_64-pc-windows-gnu "*|*" --target=x86_64-pc-windows-gnu "*) [ -z "${BP_ON_BOAT:-}" ] || { . "$HERE/lib-winmingw.sh"; win_mingw_env || exit 2; };; esac
 if [ -z "${BQ_HELD:-}" ]; then export BQ_HELD=1; waiting() { echo "cargo-q: queued behind ${1:-other} local builds (building locally when one ends)" >&2; }
   # every slot taken: a build or test that gives the same result anywhere may run on a Boat box, but only after a long wait or with memory low (lib-buildslot.sh bq_offload_now; BP_NO_BOAT=1 forces local)
   bo_cargo_ok "$@" && bo_ready && export BQ_OFFLOAD=1
