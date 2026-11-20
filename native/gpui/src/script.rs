@@ -588,7 +588,7 @@ impl Backplane {
                         });
                     }
                     _ => {
-                        self.m("pointer", json!({"id": id, "hit_rect": false, "dispatched": false, "error": if rect.is_none() { "no drawn rect" } else { "no window" }}));
+                        /* i18n-ok: test-mode script diagnostic */ self.m("pointer", json!({"id": id, "hit_rect": false, "dispatched": false, "error": if rect.is_none() { "no drawn rect" } else { "no window" }}));
                         cx.defer(move |cx| entity.update(cx, |this, cx| this.pump(cx)));
                     }
                 }
