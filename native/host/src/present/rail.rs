@@ -26,7 +26,7 @@ pub fn rail(input: RailInput<'_>) -> Value {
     add("board", "Board", "circuit-board", "design", "b", no_board);
     add("schematic", "Schematic", "cpu", "design", "s", (!input.schematic).then_some("No schematic in this project"));
     add("3d", "3D", "box", "design", "3", no_board);
-    if input.gerbers || page == "gerbers" { add("gerbers", "Gerbers", "file-stack", "design", "g", None); }
+    if input.gerbers || page == "gerbers" { add("gerbers", "Gerbers", "layers", "design", "g", None); }
     if input.simulation && input.schematic && !input.altium { add("simulation", "Simulation", "gauge", "design", "i", None); }
     add("split", "Split", "layout-panel-left", "layout", "v", (!(input.board && input.schematic)).then_some("Split needs a board and a schematic"));
     add("mech", "Mech", "wrench", "layout", "m", (!input.mech).then_some("No mechanical parts in this project"));
