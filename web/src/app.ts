@@ -6,6 +6,7 @@
 import { ChatView, type EntryItem, type ReviewBar, type UnansweredNotice } from "./chat";
 import { ComposerView, type MentionItem, type SlashCommand } from "./composer";
 import { onLocaleChange, setLocale, t } from "./i18n";
+import { CommandPalette, type PaletteAction, type PaletteSearchResult } from "./palette";
 import { RailView, type RailEntry } from "./rail";
 import { SettingsModal, type SettingsRow } from "./settings";
 import {
@@ -258,6 +259,8 @@ function mountApp(): void {
   let threads: ThreadItem[] = [];
   let bots: BotItem[] = [];
   let rooms: RoomItem[] = [];
+  let railItems: RailEntry[] = [];
+  let helloCommands: SlashCommand[] = [];
   let selectedThreadId = "";
   let threadGen = 0;
   let railGen = 0;
@@ -273,7 +276,13 @@ function mountApp(): void {
   }>();
 
   const sidebar = new SidebarView(sidebarEl, {
-    onSelectThread: (id) => { void openThread(id); },
+    onSelectThread: (id) => {
+      if (id === selectedThreadId && threadSubId !== null) {
+        sidebarEl.classList.remove("bp-sidebar-open");
+        return;
+      }
+      void openThread(id);
+    },
     onNewThread: (projectId) => { void createThread(projectId); },
     onSelectBot: (bot) => { void openThread(bot.thread); },
     onThreadAct: (id, action) => { void runThreadAct(id, action); },
@@ -354,9 +363,90 @@ function mountApp(): void {
     showError: (msg) => composer.showError(msg),
   });
 
+  function executePaletteAction(act: PaletteAction): void {
+    switch (act.type) {
+      case "thread":
+        void openThread(act.id);
+        break;
+      case "rail":
+        if (!selectedThreadId && act.id !== "terminal") break;
+        if (activeRailKind === act.id) closeViewer();
+        else openViewer(act.id);
+        break;
+      case "thread-act":
+        if (selectedThreadId) void runThreadAct(selectedThreadId, act.action);
+        break;
+      case "fork":
+      case "new-thread":
+        void createThread(act.projectId);
+        break;
+      case "rename": {
+        const th = threads.find((x) => x.id === selectedThreadId);
+        if (!th) break;
+        const next = window.prompt("Rename thread", th.title || "");
+        if (next && next.trim()) {
+          void hub.rpc<{ thread?: ThreadItem }>("thread.act", { thread: th.id, action: "rename", title: next.trim() })
+            .then((res) => {
+              if (res.thread) {
+                threads = threads.map((x) => (x.id === res.thread!.id ? res.thread! : x));
+                updateHeader();
+                void refreshSections();
+              }
+            })
+            .catch(() => {});
+        }
+        break;
+      }
+      case "prev-thread":
+      case "next-thread": {
+        const list = threads.filter((x) => !x.archived && !x.swarm);
+        if (list.length < 2) break;
+        const idx = list.findIndex((x) => x.id === selectedThreadId);
+        const step = act.type === "next-thread" ? 1 : -1;
+        const next = list[(idx < 0 ? 0 : idx + step + list.length) % list.length];
+        if (next) void openThread(next.id);
+        break;
+      }
+      case "command":
+        if (act.runDirectly) {
+          void runSlashCommand(act.word);
+        } else {
+          composer.setDraft(`${act.word} `);
+          composer.focus();
+        }
+        break;
+      case "improvements":
+        void openImprovementsModal();
+        break;
+      case "settings":
+        void settings.open();
+        break;
+      case "sidebar":
+        sidebarEl.classList.toggle("bp-sidebar-open");
+        sidebarEl.classList.toggle("bp-sidebar-collapsed");
+        break;
+    }
+  }
+
+  const palette = new CommandPalette(root, {
+    getState: () => ({
+      selectedThreadId,
+      threads,
+      projects,
+      bots,
+      railItems,
+      commands: helloCommands,
+    }),
+    onSearch: async (q) => {
+      if (!hub.hasFeature("search")) return { threads: [], projects: [], messages: [] };
+      return hub.rpc<PaletteSearchResult>("search", { q, limit: 20 });
+    },
+    onExecute: executePaletteAction,
+  });
+
   const rail = new RailView(railEl, (id) => {
     if (id === "commands") {
-      sidebar.focusFilter();
+      palette.open();
       return;
     }
     if (!selectedThreadId) return;
@@ -510,8 +600,8 @@ function mountApp(): void {
   }
 
   impBtn.addEventListener("click", () => { void openImprovementsModal(); });
-  cmdBox.addEventListener("click", () => sidebar.focusFilter());
-  searchBtn.addEventListener("click", () => sidebar.focusFilter());
+  cmdBox.addEventListener("click", () => palette.open());
+  searchBtn.addEventListener("click", () => palette.open());
   settingsBtn.addEventListener("click", () => { void settings.open(); });
   sideToggle.addEventListener("click", () => {
     sidebarEl.classList.toggle("bp-sidebar-open");
@@ -591,7 +681,10 @@ function mountApp(): void {
 
   async function refreshRail(threadId: string, gen: number): Promise<void> {
     if (!threadId || !hub.hasFeature("rail")) {
-      if (gen === threadGen) rail.setItems([]);
+      if (gen === threadGen) {
+        railItems = [];
+        rail.setItems([]);
+      }
       return;
     }
     const rGen = ++railGen;
@@ -603,6 +696,7 @@ function mountApp(): void {
       // PR #1367 rule (2): drop replies older than a newer thread or local rail selection.
       if (gen !== threadGen || rGen !== railGen) return;
       const items = Array.isArray(res.rail) ? res.rail : Array.isArray(res.items) ? res.items : [];
+      railItems = items;
       rail.setItems(items);
       // PR #1367 rule (1): reconcile open page against `has`, never against entry state.
       if (res.has) {
@@ -612,7 +706,10 @@ function mountApp(): void {
         }
       }
     } catch {
-      if (gen === threadGen && rGen === railGen) rail.setItems([]);
+      if (gen === threadGen && rGen === railGen) {
+        railItems = [];
+        rail.setItems([]);
+      }
     }
   }
 
@@ -766,6 +863,7 @@ function mountApp(): void {
       await openThread(targetId);
     } else {
       selectedThreadId = "";
+      railItems = [];
       rail.setItems([]);
       composer.setState(false, false);
       updateHeader();
@@ -810,6 +908,7 @@ function mountApp(): void {
       chat.setLoading(th);
     }
     composer.setState(true, th?.state === "working");
+    railItems = [];
     rail.setItems([]);
 
     let res: {
@@ -1019,7 +1118,12 @@ function mountApp(): void {
       if (hello.name) sidebar.setHostName(hello.name);
       renderConnStatus(state);
       composer.setFeatures(hub.hasFeature("images"), hub.hasFeature("voice"));
-      if (Array.isArray(hello.commands)) composer.setCommands(hello.commands as SlashCommand[]);
+      if (Array.isArray(hello.commands)) {
+        helloCommands = hello.commands as SlashCommand[];
+        composer.setCommands(helloCommands);
+      } else {
+        helloCommands = [];
+      }
       void loadLists();
     } else {
       voice.cancel();
@@ -1111,11 +1215,14 @@ function mountApp(): void {
   });
 
   window.addEventListener("keydown", (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+    const key = e.key.toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && (key === "k" || (e.shiftKey && key === "p"))) {
       e.preventDefault();
-      sidebar.focusFilter();
-    } else if (e.key === "Escape" && settings.isOpen()) {
-      settings.close();
+      if (palette.isOpen()) palette.close();
+      else palette.open();
+    } else if (e.key === "Escape") {
+      if (palette.isOpen()) palette.close();
+      else if (settings.isOpen()) settings.close();
     }
   });
 
