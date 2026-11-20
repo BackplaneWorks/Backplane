@@ -69,6 +69,66 @@ pub fn mapping_status(raw: &str, authority: &str, proxy: &str) -> Mapping {
     }
 }
 
+/// Read the kernel identity of the daemon at the system LocalAPI socket.
+/// No HTTP request, login header, or hub credential is sent to this socket.
+pub async fn system_proxy_identity() -> std::io::Result<super::webtransport::ProxyIdentity> {
+    use std::{io, time::Duration};
+    let stream = tokio::time::timeout(
+        Duration::from_secs(2),
+        tokio::net::UnixStream::connect("/run/tailscale/tailscaled.sock"),
+    )
+    .await??;
+    let peer = stream.peer_cred()?;
+    let pid = peer
+        .pid()
+        .filter(|pid| *pid > 0 && peer.uid() == 0)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "system Tailscale daemon required",
+            )
+        })?;
+    Ok(super::webtransport::ProxyIdentity {
+        uid: peer.uid(),
+        pid,
+    })
+}
+
+/// Pick a spare node HTTPS port from the status snapshot. Recheck before
+/// applying a configuration change; this selection alone grants no ownership.
+pub fn spare_node_port(config: &Value) -> Option<u16> {
+    fn occupied(scope: &Value, ports: &mut std::collections::BTreeSet<u16>) -> Option<()> {
+        let scope = scope.as_object()?;
+        for (key, value) in scope {
+            match key.as_str() {
+                "TCP" => {
+                    for port in value.as_object()?.keys() {
+                        ports.insert(port.parse().ok()?);
+                    }
+                }
+                "Web" | "AllowFunnel" => {
+                    for authority in value.as_object()?.keys() {
+                        ports.insert(authority.rsplit_once(':')?.1.parse().ok()?);
+                    }
+                }
+                "Foreground" | "Services" => {
+                    for child in value.as_object()?.values() {
+                        occupied(child, ports)?;
+                    }
+                }
+                "Tun" => {
+                    value.as_bool()?;
+                }
+                _ => return None,
+            }
+        }
+        Some(())
+    }
+    let mut ports = std::collections::BTreeSet::new();
+    occupied(config, &mut ports)?;
+    (8443..=u16::MAX).find(|p| !ports.contains(p))
+}
+
 /// Arguments for the system-installed Tailscale executable. Pass directly
 /// to the process API so a path containing spaces stays a single argument.
 pub fn private_serve_args(
@@ -136,6 +196,16 @@ pub fn private_route_matches(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn node_port_selection_preserves_existing_and_foreground_routes() {
+        let config = json!({"TCP":{"8443":{"HTTPS":true}},
+            "Foreground":{"test":{"Web":{"hub.example.ts.net:8444":{"Handlers":{}}}}}});
+        assert_eq!(spare_node_port(&config), Some(8445));
+        assert_eq!(spare_node_port(&json!({})), Some(8443));
+        assert_eq!(spare_node_port(&json!({"TCP":null})), None);
+        assert_eq!(spare_node_port(&json!({"FutureConfig":{}})), None);
+    }
 
     #[test]
     fn setup_targets_an_exclusive_unix_socket_in_the_selected_address_mode() {
