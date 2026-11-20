@@ -127,7 +127,7 @@ cat > "$T/vmssh" <<'EOS'
 while [ $# -gt 1 ]; do case "$1" in -o|-i) shift 2;; *) break;; esac; done; h=$1; shift   # the options, then the host
 v=$h; case "$h" in bpadmin@203.0.113.7|bp-winbuild-vnet) v=bp-winbuild;; esac; [ "$(cat "$POWER.$v" 2>/dev/null)" != deallocated ] || exit 255   # a deallocated VM answers nothing
 lk() { if flock -n "$BACKPLANE_LOCK_DIR/bp-$1.lock" true 2>/dev/null; then echo free; else echo held; fi; }
-case "$*" in *receive-pack*) exec git receive-pack "$VMREPO";; 'exit 0') exit 0;; *EncodedCommand*) echo "$h sweep" >> "$VMLOG"; echo "sweep: stopped 0; C:\bp\gate\tmp removed"; exit 0;; esac
+case "$*" in *receive-pack*) exec git receive-pack "$VMREPO";; 'exit 0') exit 0;; *EncodedCommand*) echo "$h sweep" >> "$VMLOG"; for a; do :; done; w=tmp; printf '%s' "${a##* }" | base64 -d 2>/dev/null | iconv -f utf-16le -t utf-8 2>/dev/null | grep -q 'rd /s /q' && w=all; echo "$h $w" >> "$SWEEPS"; echo "sweep: stopped 0; C:\bp\gate\tmp removed"; exit 0;; esac
 grep -q "nextest run" || exit 0   # preparing: nothing to do
 echo "$h run bp-win-ui=$(lk bp-win-ui) winbuild-vm=$(lk winbuild-vm)" >> "$VMLOG"
 [ -z "${VMSLEEP:-}" ] || exec sleep "$VMSLEEP"
@@ -135,7 +135,7 @@ printf '        PASS [   1.0s] (1/3) backplane-hub::bin/backplane-hub a::ok\n   
 for t in $VMFAIL; do printf '  TRY 2 FAIL [   1.0s] (2/3) backplane-hub::bin/backplane-hub %s\n' "$t"; done
 [ -z "$VMFAIL" ]
 EOS
-chmod +x "$T/vmssh"; export VMREPO=$T/vm.git VMLOG=$T/vmlog VMFAIL=
+chmod +x "$T/vmssh"; export VMREPO=$T/vm.git VMLOG=$T/vmlog VMFAIL= SWEEPS=$T/sweeps
 known1=$(sed 's/#.*//' "$ROOT/scripts/land-windows-known.txt" | awk 'NF && $1 != "flaky" { print $1; exit }')
 echo c > "$LANE/native/host/x.rs"; g commit -qam "host: c"
 ( unset LAND_WIN_TEST; LAND_WIN_SSH=$T/vmssh VMFAIL="$known1" land ) > "$T/o21"; rc=$?
@@ -144,15 +144,19 @@ echo d > "$LANE/native/host/x.rs"; g commit -qam "host: d"
 ( unset LAND_WIN_TEST; LAND_WIN_SSH=$T/vmssh VMFAIL="$known1 a::new_fault" land ) > "$T/o21b"; rc=$?
 [ $rc = 1 ] && grep -q "not known to:" "$T/o21b" && grep -q "^    a::new_fault" "$T/o21b" && ! pushed; ok $? "a new Windows failure holds it: named, nothing pushed (rc $rc)"
 vm() { ( unset LAND_WIN_TEST; LAND_WIN_SSH=$T/vmssh land ) ; }
-step() { echo "$1" > "$LANE/native/host/x.rs"; g commit -qam "host: $1"; : > "$VMLOG"; }
+step() { echo "$1" > "$LANE/native/host/x.rs"; g commit -qam "host: $1"; : > "$VMLOG"; : > "$SWEEPS"; }
 # 22. one owner per VM: bp-win only when the gate takes bp-win-ui, held for the whole run and released after; swept before and after
 step e; vm > "$T/o22"; rc=$?
 [ $rc = 3 ] && [ "$(cat "$VMLOG")" = "bp-win sweep
 bp-win run bp-win-ui=held winbuild-vm=free
 bp-win sweep" ] && flock -n "$T/locks/bp-bp-win-ui.lock" true && pushed; ok $? "bp-win runs it holding bp-win-ui, released after; swept before and after (rc $rc)"
+# 22b. bp-win keeps nothing of the gate: its sweeps before and after the run remove all of C:\bp\gate (what any earlier gate left too)
+[ "$(cat "$SWEEPS")" = "bp-win all
+bp-win all" ]; ok $? "bp-win: all of C:\\bp\\gate removed before and after the run"
+: > "$SWEEPS"
 # 23. bp-win-ui held by the UI tests: straight to bp-winbuild under winbuild-vm; bp-win is not touched
 step f; ( flock 9; exec sleep 60 ) 9>"$T/locks/bp-bp-win-ui.lock" & ui=$!; sleep 0.3
-: > "$AZLOG"; vm > "$T/o23"; rc=$?; kill $ui 2>/dev/null; wait $ui 2>/dev/null; cp "$AZLOG" "$T/az23"
+: > "$AZLOG"; vm > "$T/o23"; rc=$?; kill $ui 2>/dev/null; wait $ui 2>/dev/null; cp "$AZLOG" "$T/az23"; cp "$SWEEPS" "$T/sw23"
 [ $rc = 3 ] && ! grep -q '^bp-win ' "$VMLOG" && grep -q '^bpadmin@203.0.113.7 run bp-win-ui=held winbuild-vm=held$' "$VMLOG" && grep -q "bp-win: bp-win-ui is held" "$T/o23" && grep -q "PASSED on bp-winbuild" "$T/o23" && pushed; ok $? "bp-win-ui held: bp-winbuild under winbuild-vm, bp-win untouched (rc $rc)"
 # 24. bp-win's measured time would cross its shutdown: bp-winbuild runs it
 step g; mkdir -p "$T/state"; echo 1500 > "$T/state/bp-win.minutes"; vm > "$T/o24"; rc=$?; rm -f "$T/state/bp-win.minutes"
@@ -173,6 +177,7 @@ step j; ( VMSLEEP=30 vm > "$T/o27" ) & lp=$!
 for _ in $(seq 100); do grep -q ' run ' "$VMLOG" && break; sleep 0.1; done
 pkill -TERM -f "^sh $LANE/scripts/land-windows.sh --vm bp-win\$"; wait $lp; rc=$?
 [ $rc != 0 ] && [ "$(tail -n 1 "$VMLOG")" = "bp-win sweep" ] && [ "$(grep -c sweep "$VMLOG")" = 2 ] && ! pushed && flock -n "$T/locks/bp-bp-win-ui.lock" true; ok $? "terminated mid-run: the VM is swept, bp-win-ui released, nothing pushed (rc $rc)"
+grep -q '^bpadmin@203.0.113.7 tmp$' "$T/sw23" && ! grep -q ' all$' "$T/sw23"; ok $? "bp-winbuild keeps its repository and target dir: only C:\\bp\\gate\\tmp is swept"
 # 28. bp-winbuild straight through Azure: ssh opened to this machine's address alone for the run, closed after; a running VM is left running
 grep -q -x 'network public-ip show -g BP-WIN-RG -n bp-winbuild-gate-ip' "$T/az23" && grep -q 'network nsg rule create -g BP-WIN-RG --nsg-name bp-winbuild-gate-nsg -n land-gate-ssh .*--destination-port-ranges 22 --source-address-prefixes 198.51.100.1/32' "$T/az23" \
   && [ "$(tail -n 1 "$T/az23")" = "network nsg rule delete -g BP-WIN-RG --nsg-name bp-winbuild-gate-nsg -n land-gate-ssh" ] && ! grep -q 'vm start\|vm deallocate' "$T/az23"; ok $? "bp-winbuild through Azure: port 22 opened to this machine alone for the run, closed after, no tailnet"
