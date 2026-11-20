@@ -197,6 +197,21 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   // Board / Schematic bottom history strip state (viewer.refs / viewer.compare)
   const history = new HistoryStripState();
   let playTimer = 0;
+  let compareMenuOpen = false;
+  let compareKeyPrefix = "";
+
+  document.addEventListener("click", (e) => {
+    if (!compareMenuOpen) return;
+    if (e.target instanceof Node && historyBarEl.contains(e.target)) return;
+    compareMenuOpen = false;
+    renderHistoryBar();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (compareMenuOpen && e.key === "Escape") {
+      compareMenuOpen = false;
+      renderHistoryBar();
+    }
+  });
 
   function stopHistoryPlay(): void {
     if (playTimer) {
@@ -248,12 +263,19 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     renderHistoryBar();
     const cmp = history.compareRequest();
     if (!cmp) {
+      compareKeyPrefix = "";
       await startWatch(false);
       return;
     }
-    const gen = watchGen;
+    const gen = ++watchGen;
+    activeKeys.clear();
+    heldChunks.clear();
+    clearPending();
+    watchPending = true;
+    compareKeyPrefix = "";
+    compareKeyPrefix = "";
     try {
-      await api.hub.rpc("viewer.compare", {
+      const res = await api.hub.rpc<{ root?: string }>("viewer.compare", {
         thread: threadId,
         kind: page,
         commit: cmp.commit,
@@ -261,6 +283,16 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
         ...(selectedPath ? { path: selectedPath } : {}),
       });
       if (gen !== watchGen) return;
+      const root = typeof res?.root === "string" ? res.root : "";
+      const kindNum = page === "schematic" ? "1" : "0";
+      compareKeyPrefix = root ? `${kindNum}|${root}|diff\n` : `${kindNum}|`;
+      watchPending = false;
+      const queued = pendingQueue;
+      clearPending();
+      for (const item of queued) {
+        if (item.kind === "bin") handleBinary(item.buf);
+        else handlePlotNone(item.key, item.none, item.retryable);
+      }
       setBanner(
         history.highlightEdits
           ? `Comparing against ${history.activeRef()?.label || cmp.commit.slice(0, 7)} (edits highlighted)`
@@ -269,6 +301,9 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       );
     } catch (err) {
       if (gen !== watchGen) return;
+      watchPending = false;
+      compareKeyPrefix = "";
+      clearPending();
       setBanner(err instanceof Error ? err.message : String(err), true);
     }
   }
@@ -381,31 +416,58 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       void applyHistorySelection();
     });
 
-    const cmpSel = document.createElement("select");
-    cmpSel.className = "bp-v-select";
-    cmpSel.disabled = history.refs.length === 0;
-    cmpSel.setAttribute("data-testid", "history-compare");
-    const liveOpt = document.createElement("option");
-    liveOpt.value = "";
-    liveOpt.textContent = "Compare…";
-    liveOpt.selected = history.isLive();
-    cmpSel.append(liveOpt);
-    for (const r of history.refs) {
-      const opt = document.createElement("option");
-      opt.value = r.commit;
-      opt.textContent = r.label || r.commit.slice(0, 7);
-      opt.selected = active?.commit === r.commit;
-      cmpSel.append(opt);
-    }
-    cmpSel.addEventListener("change", () => {
-      stopHistoryPlay();
-      if (history.selectCommit(cmpSel.value)) {
-        if (history.isLive()) setBanner("", false);
-        void applyHistorySelection();
-      }
-    });
+    const cmpWrap = document.createElement("div");
+    cmpWrap.className = "bp-history-menu-wrap";
 
-    right.append(hlBtn, cmpSel);
+    const cmpBtn = document.createElement("button");
+    cmpBtn.type = "button";
+    cmpBtn.className = "bp-v-btn" + (compareMenuOpen || !history.isLive() ? " is-on" : "");
+    cmpBtn.disabled = history.refs.length === 0;
+    cmpBtn.setAttribute("data-testid", "history-compare");
+    cmpBtn.setAttribute("aria-haspopup", "menu");
+    cmpBtn.setAttribute("aria-expanded", String(compareMenuOpen));
+    cmpBtn.textContent = active ? `Compare: ${active.label || active.commit.slice(0, 7)} ▾` : "Compare ▾";
+    cmpBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      compareMenuOpen = !compareMenuOpen;
+      renderHistoryBar();
+    });
+    cmpWrap.append(cmpBtn);
+
+    if (compareMenuOpen && history.refs.length > 0) {
+      const menu = document.createElement("div");
+      menu.className = "bp-history-menu";
+      menu.setAttribute("role", "menu");
+      menu.setAttribute("data-testid", "history-compare-menu");
+
+      const addItem = (label: string, commit: string, selected: boolean) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "bp-history-menu-item" + (selected ? " is-active" : "");
+        item.setAttribute("role", "menuitem");
+        item.setAttribute("data-commit", commit);
+        item.textContent = label;
+        item.addEventListener("click", () => {
+          compareMenuOpen = false;
+          stopHistoryPlay();
+          if (history.selectCommit(commit)) {
+            if (history.isLive()) setBanner("", false);
+            void applyHistorySelection();
+          } else {
+            renderHistoryBar();
+          }
+        });
+        menu.append(item);
+      };
+
+      addItem("Live (working tree)", "", history.isLive());
+      for (const r of history.refs) {
+        addItem(r.label || r.commit.slice(0, 7), r.commit, active?.commit === r.commit);
+      }
+      cmpWrap.append(menu);
+    }
+
+    right.append(hlBtn, cmpWrap);
     historyBarEl.replaceChildren(left, right);
   }
 
@@ -900,6 +962,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     }
 
     watchPending = true;
+    compareKeyPrefix = "";
     try {
       const res = await api.hub.rpc<{ keys?: string[] }>("viewer.watch", params);
       if (gen !== watchGen) return;
@@ -929,7 +992,14 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       }
       return;
     }
-    if (!activeKeys.has(key)) return;
+    if (!activeKeys.has(key)) {
+      if (compareKeyPrefix && key.startsWith(compareKeyPrefix)) {
+        activeKeys.add(key);
+        compareKeyPrefix = "";
+      } else {
+        return;
+      }
+    }
     setOverlay(retryable ? "error" : "empty", none || "Nothing to display", retryable);
   }
 
@@ -949,7 +1019,15 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     const map = decoded as Record<string, CborValue>;
     if (map.t !== "plot") return;
     const key = typeof map.key === "string" ? map.key : "";
-    if (!key || !activeKeys.has(key)) return;
+    if (!key) return;
+    if (!activeKeys.has(key)) {
+      if (compareKeyPrefix && key.startsWith(compareKeyPrefix)) {
+        activeKeys.add(key);
+        compareKeyPrefix = "";
+      } else {
+        return;
+      }
+    }
 
     if (typeof map.none === "string") {
       handlePlotNone(key, map.none, map.retryable === 1 || (map.retryable as unknown) === true);
@@ -1043,6 +1121,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       watchGen++;
       watchPending = false;
       stopHistoryPlay();
+      compareMenuOpen = false;
       history.goLive();
       solidBarEl.hidden = true;
       historyBarEl.hidden = true;

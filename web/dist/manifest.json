@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 60219,
+  "totalAssetGzipBytes": 60652,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -81,9 +81,9 @@
     "web/src/viewers/mesh-worker.ts": "b7a5094d136cdcba42132ab54615a1518b7e6a13eb232e055065d9d00ba1f4ab",
     "web/src/viewers/panes.ts": "a1b1e4a5f1135ed442f761a7a189053583da653172fc8c6d2a2df17391d16dff",
     "web/src/viewers/plot2d.ts": "d60c911ecb3632ab17005740a865b3420ba0b65964a087784bf478e8144d336b",
-    "web/src/viewers/responsive.css": "1fcd26dcd57f4fd9fb8efff17515a5dbbbdb2875b724f0794fe35881123b6301",
+    "web/src/viewers/responsive.css": "78ce1f2accbc4a920b354e0c388eab02658b8357dde8869ad07832bf9d4e0173",
     "web/src/viewers/solid3d.ts": "dc52f4f172ceedef2315fb154fef1e33047e4db3c93c234f166f3371df21ee45",
-    "web/src/viewers/viewer-pane.ts": "2c33de4117a34fd7ea45abd5fbff305add273c4eb073600c68895275de0124de",
+    "web/src/viewers/viewer-pane.ts": "4897cc63a1b202f6b395af97dafebd84379b3bbaca06146af73eff23b994edb5",
     "web/src/viewers/viewer-tools.ts": "da5c46080f43d7f6cfc0d9f9905ab57414f4646a93b6470767a98ce4a9ec8057",
     "web/src/voice.ts": "f401f1d5bd1685c7d7270fc02a8ff16f54bde7ae98aee21b4e802f0357063345",
     "web/src/ws.ts": "bff5636759f3871df89395c792d5c69aef90a5e1e9ecd8247ac522ebb40badc9",
@@ -93,9 +93,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 148106,
-      "gzipBytes": 43237,
-      "sha256": "10f021dbaa0451df9cb931996f29907f2c0c735067154c4bd99bbdd2de54f968"
+      "bytes": 149271,
+      "gzipBytes": 43577,
+      "sha256": "ba8d19b021f91828beb86997b90b7a86d9162f6955c5368c4d706064da74f4eb"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,
@@ -118,9 +118,9 @@
       "sha256": "c3016c01af10511d1bce4a7cff3c500e8614bad821204543f039d774e28c0eee"
     },
     "assets/style.css": {
-      "bytes": 41903,
-      "gzipBytes": 8191,
-      "sha256": "f85ba2ec38ba645729c18d5b6650aa754556ca8afecb81a7e4b24ac11b8d33af"
+      "bytes": 42802,
+      "gzipBytes": 8284,
+      "sha256": "3f2b8efe5240f03ce055864ce5c72b11736a6686451d188d2da3c4244b5d83b1"
     },
     "index.html": {
       "bytes": 454,
