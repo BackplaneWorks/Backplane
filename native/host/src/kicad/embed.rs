@@ -270,6 +270,8 @@ impl Session {
     }
     /// A close that did not happen (KiCad refused it, or at the bound it was not clean any more or in use): live again, its close
     /// forgotten, and its idle time counted from now (not chosen again at the next tick).
+    /// The process `pid` has ended: no start waits on it any more.
+    pub fn forget_ended(&mut self, pid: u32) { if self.last_pid == pid { self.last_pid = 0; } }
     pub fn live_again(&mut self, now: u64) { self.closing = false; self.stop_reason.clear(); self.touched_at = now; }
     pub fn detached(mut self, now: u64) -> Self {
         self.container = 0; self.left.clear(); self.touched_at = now; self
@@ -1985,7 +1987,8 @@ enum Msg {
     /// ForkSync for the project's current session, whichever generation it is (from outside the actor: the prewarm RPC)
     ForkSyncNow { pro: String },
     HealthResult { pro: String, gen: u64, ok: bool, modified_docs: Option<Vec<String>> },
-    ChildExited { pro: String, gen: u64, code: i32, how: String, tail: String, reply: Option<oneshot::Sender<Result<Value, String>>> },
+    /// `pid`: the process that ended (0 for a made-up exit): whatever the session's generation is now, its `last_pid` is forgotten
+    ChildExited { pro: String, gen: u64, pid: u32, code: i32, how: String, tail: String, reply: Option<oneshot::Sender<Result<Value, String>>> },
     Tick,
 }
 
@@ -2725,7 +2728,7 @@ impl Actor {
                 }
             }
             Actor::kill_pid(s.pid);
-            let _ = me.send(Msg::ChildExited { pro: s.pro.clone(), gen: s.gen, code: 0, how: String::new(), tail: String::new(), reply: Some(reply) });
+            let _ = me.send(Msg::ChildExited { pro: s.pro.clone(), gen: s.gen, pid: 0, code: 0, how: String::new(), tail: String::new(), reply: Some(reply) });
         });
     }
 
@@ -2802,7 +2805,8 @@ impl Actor {
                 let Some(env) = self.start_env.get(&pro).cloned() else { return };
                 // the one real start, from the held session's fields: its waiters are finished when KiCad is ready, as any start's
                 let client = rt().lock().unwrap().client_of.get(&ph.pane_cid).copied().unwrap_or(0);
-                self.sessions.remove(&pro);
+                // stopped "restarting" (not removed): the real start sweeps the project's stale locks, as a start after a failure does
+                if let Some(s) = self.sessions.get_mut(&pro) { s.state = "stopped".into(); s.reason = "restarting".into(); s.last_pid = 0; }
                 let (tx, _rx) = oneshot::channel();
                 let files = project::read(&ph.root);
                 self.attach(client, pro.clone(), ph.root.clone(), files, ph.active.clone(), ph.container, ph.toplevel, ph.display.clone(), true, env, tx);
@@ -3272,7 +3276,10 @@ impl Actor {
                     let _ = self.me.send(Msg::ForkSync { pro, gen });
                 }
             }
-            Msg::ChildExited { pro, gen, code, how, tail, reply } => {
+            Msg::ChildExited { pro, gen, pid, code, how, tail, reply } => {
+                // the process the project's next start may be waiting on (`last_pid`) has ended, whatever generation the session is at now
+                // (a failed held start keeps it; a pid used again later must never hold an Edit)
+                if pid > 0 { if let Some(s) = self.sessions.get_mut(&pro) { s.forget_ended(pid); } }
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen) else {
                     if let Some(tx) = reply { let _ = tx.send(Ok(json!({"closed":true}))); }
                     return;
@@ -3948,7 +3955,7 @@ async fn spawn_gui_session(
             done.store(true, Ordering::SeqCst);
             let _ = so.await; let _ = se.await;
             let joined: Vec<String> = tail.lock().unwrap().iter().cloned().collect();
-            let _ = me.send(Msg::ChildExited { pro, gen, code, how, tail: joined.join("\n"), reply: None });
+            let _ = me.send(Msg::ChildExited { pro, gen, pid, code, how, tail: joined.join("\n"), reply: None });
         });
     }
 
@@ -5833,6 +5840,15 @@ mod tests {
         // another window's numbers are its own; a client without numbers is taken as it comes
         assert!(leave_in_order(&mut seqs, "/p/a.kicad_pro", "c2", 1));
         assert!(leave_in_order(&mut seqs, "/p/a.kicad_pro", "c1", 0));
+    }
+    #[test] fn a_kicad_that_ended_is_never_waited_on_again_whatever_the_generation() {
+        // a failed held start kept the KiCad before it (`last_pid`), and the session's generation moved since: its real exit forgets it
+        let prev = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 7, 0).ready("/s", "", 0).spawned(41).stopped("");
+        let mut f = held_session(&prev, 8, 100, "/p", "PCB", 0, 0, "", "").failed("the KiCad before it is still closing");
+        f.last_pid = 41;
+        f.forget_ended(57); assert_eq!(f.last_pid, 41, "another process: kept");
+        f.forget_ended(41); assert_eq!(f.last_pid, 0, "it ended: a pid used again later never holds an Edit");
+        assert_eq!(previous_alive(&f, |_| true), None);
     }
     #[test] fn a_start_held_for_the_previous_kicad_is_one_session_that_every_attach_joins() {
         let prev = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 7, 0).ready("/s", "", 0).spawned(41).stopped("");
