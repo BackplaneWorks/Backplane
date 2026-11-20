@@ -327,21 +327,20 @@ pub fn request_setup(home: &std::path::Path, plan: &str) -> Result<(), &'static 
     requests.get(home).ok_or("web setup unavailable")?.try_send(plan.to_owned()).map_err(|_| "setup already pending")
 }
 
-fn missing_setup_component(admin: bool) -> Option<&'static str> {
+fn missing_setup_component() -> Option<&'static str> {
     use std::os::unix::fs::{FileTypeExt, PermissionsExt};
     let executable = |path: &str| std::fs::metadata(path).is_ok_and(|file|
         file.is_file() && file.permissions().mode() & 0o111 != 0);
     let socket = std::fs::metadata("/run/tailscale/tailscaled.sock").is_ok_and(|file| file.file_type().is_socket());
-    setup_component_reason(admin, socket, executable)
+    setup_component_reason(socket, executable)
 }
 
-fn setup_component_reason(admin: bool, socket: bool, executable: impl Fn(&str) -> bool) -> Option<&'static str> {
+fn setup_component_reason(socket: bool, executable: impl Fn(&str) -> bool) -> Option<&'static str> {
     if !socket {
         return Some("Start Tailscale. Backplane needs its system socket at /run/tailscale/tailscaled.sock.");
     }
     if !executable("/usr/bin/tailscale") { return Some("HTTPS setup requires the Tailscale command at /usr/bin/tailscale."); }
     if !executable("/usr/bin/curl") { return Some("HTTPS verification requires curl at /usr/bin/curl."); }
-    if admin && !executable("/usr/bin/pkexec") { return Some("Administrator approval requires polkit at /usr/bin/pkexec."); }
     None
 }
 
@@ -362,7 +361,7 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
         let mut status_row = serde_json::json!({"canEnable":true});
         if hub.setting("web.enabled").await.as_deref() == Some("1") {
             cleanup_pending = true;
-            if let Some(reason) = missing_setup_component(false) {
+            if let Some(reason) = missing_setup_component() {
                 status_row["reason"] = Value::from(reason);
                 hub.set_info("web.status", &status_row.to_string()).await;
                 tokio::time::sleep(Duration::from_secs(2)).await;
@@ -384,36 +383,27 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
                 if let Some(args) = spare_node_port(&config).and_then(|port| private_serve_args(None, port, &socket)) {
                     let quoted = args.iter().map(|arg| format!("'{}'", arg.replace('\'', "'\\''"))).collect::<Vec<_>>();
                     let user_plan = format!("/usr/bin/tailscale {}", quoted.join(" "));
-                    let admin = refused_plan.as_ref() == Some(&user_plan);
-                    let mut plan = if admin { format!("sudo {user_plan}") } else { user_plan.clone() };
-                    if requested.as_ref() == Some(&plan) {
+                    if requested.as_ref() == Some(&user_plan) {
                         let _ = std::fs::DirBuilder::new().mode(0o700).create(&directory);
                         if protected_directory(&directory).is_ok() && system_proxy_identity().await.is_ok() {
-                            let mut cmd = if admin {
-                                let mut cmd = crate::proc::tokio_cmd(crate::proc::Kind::Net, "/usr/bin/pkexec");
-                                cmd.arg("--disable-internal-agent").arg("/usr/bin/tailscale");
-                                cmd
-                            } else {
-                                crate::proc::tokio_cmd(crate::proc::Kind::Net, "/usr/bin/tailscale")
-                            };
+                            let mut cmd = crate::proc::tokio_cmd(crate::proc::Kind::Net, "/usr/bin/tailscale");
                             if let Ok(out) = cmd.args(&args).env("LC_ALL", "C").stdin(std::process::Stdio::null()).output().await {
                                 let reason = String::from_utf8_lossy(&out.stderr).to_ascii_lowercase();
                                 if out.status.success() {
                                     refused_plan = None;
-                                } else if !admin && ["permission denied", "access denied", "requires root"].iter().any(|m| reason.contains(m)) {
-                                    plan = format!("sudo {user_plan}");
-                                    refused_plan = Some(user_plan);
+                                } else if ["permission denied", "access denied", "requires root", "permission is denied", "not authorized"].iter().any(|m| reason.contains(m)) {
+                                    refused_plan = Some(user_plan.clone());
                                 } else {
                                     status_row["reason"] = Value::from("Private HTTPS setup did not complete.");
                                 }
                             }
                         }
                     }
-                    if let Some(reason) = missing_setup_component(plan.starts_with("sudo ")) {
-                        status_row["reason"] = Value::from(reason);
-                    } else {
-                        status_row["command"] = Value::from(plan);
+                    if refused_plan.as_ref() == Some(&user_plan) {
+                        status_row["reason"] = Value::from("Tailscale refused setup. This account needs operator permission on this computer.");
+                        status_row["operatorRequired"] = Value::Bool(true);
                     }
+                    status_row["command"] = Value::from(user_plan);
                 }
             }
             if let Some(authority) = configured_authority(&config, &service, node, &socket) {
@@ -548,14 +538,12 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn missing_components_name_the_path_and_only_admin_setup_requires_polkit() {
-        assert!(setup_component_reason(false, false, |_| true).unwrap().contains("/run/tailscale/tailscaled.sock"));
+    fn missing_components_name_the_path() {
+        assert!(setup_component_reason(false, |_| true).unwrap().contains("/run/tailscale/tailscaled.sock"));
         for path in ["/usr/bin/tailscale", "/usr/bin/curl"] {
-            assert!(setup_component_reason(false, true, |candidate| candidate != path).unwrap().contains(path));
+            assert!(setup_component_reason(true, |candidate| candidate != path).unwrap().contains(path));
         }
-        let without_polkit = |candidate: &str| candidate != "/usr/bin/pkexec";
-        assert!(setup_component_reason(false, true, without_polkit).is_none());
-        assert!(setup_component_reason(true, true, without_polkit).unwrap().contains("/usr/bin/pkexec"));
+        assert!(setup_component_reason(true, |_| true).is_none());
     }
 
     #[tokio::test]

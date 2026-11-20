@@ -310,15 +310,20 @@ fn web_ui(st: &State, info: &Value) -> Vec<Value> {
     let status: Value = info["web.status"].as_str().and_then(|v| serde_json::from_str(v).ok()).unwrap_or(Value::Null);
     let enabled = set(st, "web.enabled", "") == "1";
     let mut rows = Vec::new();
-    let reason = status["reason"].as_str().unwrap_or("Browser access requires a verified Tailscale HTTPS connection.");
+    let reason = status["reason"].as_str().unwrap_or(if cfg!(target_os = "linux") { "Browser access requires a verified Tailscale HTTPS connection." } else { "This release supports browser access on Linux hubs only." });
     let available = status["available"] == true;
     let buttons = if enabled || available || status["canEnable"] == true {
         vec![btn(if enabled { "Turn off" } else { "Turn on" }, "device-web-access", if enabled { "0" } else { "1" }, false)]
     } else { vec![] };
     rows.push(row("Browser access", if available { "Pair each browser in Settings › Devices. Paired browsers can use the terminal." } else { reason }, buttons));
+    if status["operatorRequired"] == true {
+        let command = r#"sudo tailscale set --operator="$(id -un)""#;
+        rows.push(row("Run once in your terminal", command, vec![btn("Copy", "copy", command, false)]));
+        rows.push(row("Operator permission", "This user can manage Tailscale on this computer without sudo.", vec![]));
+    }
     if enabled && !available {
         if let Some(command) = status["command"].as_str() {
-            rows.push(row("Set up private HTTPS forwarding", command, vec![btn(if command.starts_with("sudo ") { "Authorize as administrator" } else { "Set up forwarding" }, "device-web-setup", command, false)]));
+            rows.push(row("Set up private HTTPS forwarding", command, vec![btn("Set up forwarding", "device-web-setup", command, false)]));
         }
     }
     if enabled && available {
@@ -1171,6 +1176,14 @@ mod tests {
     }
     fn by<'a>(r: &'a [Value], l: &str) -> &'a Value { r.iter().find(|x| x["label"] == l).unwrap_or_else(|| panic!("no row {l}: {r:?}")) }
     /// Add a device: Tailscale first, its own link and QR code, the code beside the hub address and the expiry; the link and code copy.
+    #[test] fn web_operator_grant_is_copy_only() {
+        let status = json!({"operatorRequired":true, "command":"/usr/bin/tailscale serve"});
+        let rows = pg_rows("web", &[("web.enabled","1")], json!({}), json!({"web.status":status.to_string()}));
+        let grant = by(&rows,"Run once in your terminal");
+        assert_eq!(grant["buttons"][0]["action"], "copy");
+        assert_eq!(grant["buttons"][0]["value"], grant["note"]);
+        assert_eq!(by(&rows,"Set up private HTTPS forwarding")["buttons"][0]["value"], "/usr/bin/tailscale serve");
+    }
     #[test] fn web_ui_shows_only_the_active_address() {
         let address = "https://bp.example.ts.net";
         let info = json!({"web.status":json!({"available":true,"address":address}).to_string()});
