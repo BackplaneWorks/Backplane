@@ -344,6 +344,19 @@ pub(crate) fn sha256_file(f: &Path) -> Result<String, String> {
     Ok(hex::encode(h.finalize()))
 }
 /// One program to its end (through proc.rs, in its own group, its output into the log); Err with its last line when it fails.
+/// Spawn `c`, again for a moment while exec says "Text file busy": a program written a moment ago (a test's stand-in curl, an installer
+/// just fetched) is still open for writing in a child another thread forked meanwhile, which holds the descriptor until its own exec. It
+/// passes in milliseconds (at most 40 x 25 ms here). Unanswered, `length` read no size (the full hub suite, Nov 20: "already downloaded"
+/// not said) and `tool` said "could not start".
+async fn spawn_busy(c: &mut tokio::process::Command) -> std::io::Result<tokio::process::Child> {
+    let mut tries = 0;
+    loop {
+        match c.spawn() {
+            Err(e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) && tries < 40 => { tries += 1; tokio::time::sleep(std::time::Duration::from_millis(25)).await }
+            r => return r,
+        }
+    }
+}
 pub(crate) async fn tool(prog: &Path, args: &[String], log: &Path, mut tick: impl FnMut()) -> Result<String, String> {
     let out = std::fs::OpenOptions::new().create(true).append(true).open(log).map_err(|e| e.to_string())?;
     let err = out.try_clone().map_err(|e| e.to_string())?;
@@ -351,7 +364,7 @@ pub(crate) async fn tool(prog: &Path, args: &[String], log: &Path, mut tick: imp
     c.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::from(err));
     crate::plat::proc::own_group_tokio(&mut c);
     let from = std::fs::metadata(log).map_or(0, |m| m.len());
-    let mut child = c.spawn().map_err(|e| format!("could not start {}: {e}", prog.display()))?;
+    let mut child = spawn_busy(&mut c).await.map_err(|e| format!("could not start {}: {e}", prog.display()))?;
     let mut so = child.stdout.take();
     let read = tokio::spawn(async move { let mut s = String::new(); if let Some(o) = so.as_mut() { let _ = tokio::io::AsyncReadExt::read_to_string(o, &mut s).await; } s });
     let status = loop { match tokio::time::timeout(std::time::Duration::from_secs(1), child.wait()).await { Ok(r) => break r.map_err(|e| e.to_string())?, Err(_) => tick() } };
@@ -416,7 +429,9 @@ pub fn partial(parent: &Path, p: &Package) -> PathBuf { parent.join(".partial").
 async fn length(g: &Getter, url: &str) -> u64 {
     let (prog, args): (&Path, Vec<&str>) = match g { Getter::Curl(x) => (x, vec!["--proto", "=https", "--tlsv1.2", "-fsSIL", "--max-time", "20", url]), Getter::Wget(x) => (x, vec!["--spider", "-S", "--https-only", "--timeout=20", "--tries=1", url]) };
     let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Net, prog); c.args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    let Ok(Ok(o)) = tokio::time::timeout(std::time::Duration::from_secs(25), c.output()).await else { return 0 };
+    c.kill_on_drop(true);
+    let Ok(child) = spawn_busy(&mut c).await else { return 0 };
+    let Ok(Ok(o)) = tokio::time::timeout(std::time::Duration::from_secs(25), child.wait_with_output()).await else { return 0 };
     content_length(&format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)))
 }
 /// The last Content-Length in a run of response headers (after redirects, the file's own).
@@ -683,15 +698,8 @@ pub async fn run(standin: Option<&Path>, parent: &Path, p: &Package, log: &Path,
     let mut c = match standin { Some(s) => crate::proc::tokio_cmd(crate::proc::Kind::Net, s), None => { let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Net, "sh"); c.arg("-c").arg(SCRIPT).arg("sh"); c } };
     c.args(args(parent, p)).current_dir(parent).stdin(Stdio::null()).stdout(Stdio::from(out)).stderr(Stdio::from(err));
     crate::plat::proc::own_group_tokio(&mut c);
-    // "Text file busy": an installer written a moment ago is still open for writing in a child another thread just forked; it passes in a few milliseconds
-    let mut tries = 0;
-    let mut child = loop {
-        match c.spawn() {
-            Ok(c) => break c,
-            Err(e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) && tries < 40 => { tries += 1; tokio::time::sleep(std::time::Duration::from_millis(25)).await }
-            Err(e) => return Err(format!("could not start the installer: {e}")),
-        }
-    };
+    // "Text file busy": an installer written a moment ago is still open for writing in a child another thread just forked (spawn_busy)
+    let mut child = spawn_busy(&mut c).await.map_err(|e| format!("could not start the installer: {e}"))?;
     if let Some(id) = child.id() { crate::plat::proc::adopt(id, false) }
     let mut said = String::new();
     let status = loop {
@@ -1101,6 +1109,18 @@ cp \"$f\" \"$out\"
         assert_eq!(content_length("HTTP/2 200\n"), 0);
     }
     /// A download that stops keeps what it has and says how far it got; the next try continues it; one already whole is not asked for again.
+    /// The full suite's race (Nov 20, a_stopped_download_is_kept_said_and_continued failed once in 4038 beside the rest, passed 3 of 3
+    /// alone): the stand-in curl written just before the size is asked is "busy" while another test thread's fork still holds it open for
+    /// writing. Held open here for 150 ms, deterministically: the size is still read (it was 0 before spawn_busy), and so is a step's run.
+    #[cfg(unix)] #[test] fn a_program_still_open_for_writing_elsewhere_is_waited_for_not_taken_as_no_answer() {
+        let r = tmp("rf-busy"); let (p, bin) = fixture(&r, false);
+        let t = tools_in(false, None, &sysdirs(&bin)).unwrap(); let curl = bin.join("curl");
+        let hold = |ms: u64| { let f = std::fs::OpenOptions::new().append(true).open(&curl).unwrap(); std::thread::spawn(move || { std::thread::sleep(std::time::Duration::from_millis(ms)); drop(f) }) };
+        let size = std::fs::metadata(r.join("serve").join(p.asset)).unwrap().len();
+        let h = hold(150); assert_eq!(rt().block_on(length(&t.get, &format!("https://x/r/{}", p.asset))), size, "the size, once the program is free"); h.join().unwrap();
+        let h = hold(150); let got = rt().block_on(tool(&curl, &["--proto".into(), "=https".into(), "-fsSIL".into(), format!("https://x/r/{}", p.asset)], &r.join("log"), || {}));
+        assert!(got.as_ref().is_ok_and(|o| content_length(o) == size), "{got:?}"); h.join().unwrap();
+    }
     #[cfg(unix)] #[test] fn a_stopped_download_is_kept_said_and_continued() {
         let r = tmp("rf-stop"); let (p, bin) = fixture(&r, false);
         let t = tools_in(false, None, &sysdirs(&bin)).unwrap(); let parent = r.join("home/kicad");
