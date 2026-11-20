@@ -5,6 +5,7 @@
 #   CYCLES=N                 cycles (30)
 #   CLOSE_PREWARM=0          no schematic pre-warm (the hub refuses it: BACKPLANE_KICAD_PREWARM_FREE_MB above any machine's memory)
 #   CLOSE_VIA=kicad          KiCad's own Close on its socket (the person's Quit), not the hub's editor.kicad.close
+#   CLOSE_SAVE=1             (with CLOSE_VIA=kicad) the board modified, then Close{CM_SAVE}; the saved file checked whole (row 1n)
 #   CLOSE_CORES=1            core dumps allowed (a backtrace of each crash)
 #   CLOSE_FOREIGN_LOCK=0     no lock file on the project from another KiCad (removed before each start); 1: one left by a KiCad "elsewhere"
 # Prints a line per cycle and `close loop: N cycles, C clean, X crashed (...)`; each crash's hub log lines are kept in $OUT/crashes.txt.
@@ -41,6 +42,7 @@ info_now() { hub_rpc "[]" | grep '^INFO ' | grep '"key":"editor.kicad.' | tail -
 try: v=json.load(sys.stdin).get("value") or {}; print(v.get("state","-"), len(v.get("frames") or []), (v.get("runtime") or {}).get("session","-"))
 except Exception: print("- 0 -")' 2>/dev/null || echo "- 0 -"; }
 
+SAVED_OK=0; SAVED_BAD=0
 CLEAN=0; CRASHED=0; OTHER=0   # OTHER: never came up, still running after the close, or killed by the hub's 800 ms; SUMMARY=()
 : >"$OUT/crashes.txt"
 for i in $(seq "$CYCLES"); do
@@ -63,7 +65,15 @@ for i in $(seq "$CYCLES"); do
   # CLOSE_VIA=kicad: KiCad's own Close on its socket (the person's Quit as the hub sees it, as embed_attach_gen_e2e G3), not the hub's close
   if [ "${CLOSE_VIA:-hub}" = kicad ]; then
     SOCK=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("sock") or "")' "$R")
-    for _ in $(seq 60); do python3 "$IPC_PY" close "$SOCK" discard >"$OUT/close-$i.out" 2>&1 && grep -q '"exiting": true' "$OUT/close-$i.out" && break; sleep 1; done
+    # CLOSE_SAVE=1 (row 1n, no data loss): the board modified first (an agent's track through KiCad's API, `modified` read true),
+    # then Close{CM_SAVE}; the file is checked after the process ended, however it ended
+    MODE=discard
+    if [ "${CLOSE_SAVE:-0}" = 1 ]; then
+      MODE=save; SEG0=$(grep -c "(segment" "$PROJ/ecc83-pp.kicad_pcb" || true)
+      python3 "$IPC_PY" agent-add-track "$SOCK" 100 $((100 + i)) 104 $((100 + i)) 0.25 3 >"$OUT/track-$i.out" 2>&1 || true
+      MOD=$(python3 "$IPC_PY" modified "$SOCK" pcb 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("modified"))' 2>/dev/null || echo "?")
+    fi
+    for _ in $(seq 60); do python3 "$IPC_PY" close "$SOCK" "$MODE" >"$OUT/close-$i.out" 2>&1 && grep -q '"exiting": true' "$OUT/close-$i.out" && break; sleep 1; done
   else
   # (KiCad refuses a close while one of its tasks runs: the editor's automatic DRC or ERC. Asked again each second, as a person waits)
   for _ in $(seq 60); do
@@ -89,10 +99,21 @@ for i in $(seq "$CYCLES"); do
   else
     CLEAN=$((CLEAN + 1)); echo "cycle $i: clean (frames=$FRAMES)"
   fi
+  if [ "${CLOSE_SAVE:-0}" = 1 ]; then
+    # the saved board: complete and loadable (kicad-cli reads it and exports), the track there, no temp file as its only copy
+    PCB="$PROJ/ecc83-pp.kicad_pcb"; SIZE=$(stat -c %s "$PCB" 2>/dev/null || echo 0)
+    SEG1=$(grep -c "(segment" "$PCB" || true)
+    LOADS=$("$(dirname "$KICAD_BIN")/kicad-cli" pcb export svg --layers F.Cu -o "$OUT/save-$i.svg" "$PCB" >"$OUT/load-$i.out" 2>&1 && [ -s "$OUT/save-$i.svg" ] && echo 1 || echo 0)
+    TEMPS=$(ls -a "$PROJ" | grep -E '^\.?ecc83-pp\.kicad_pcb.+' | grep -v '\.backplane\.json$' | tr '\n' ' ')
+    OK=$([ "$SIZE" -gt 0 ] && [ "$LOADS" = 1 ] && [ "$SEG1" = $((SEG0 + 1)) ] && echo 1 || echo 0)
+    [ "$OK" = 1 ] && SAVED_OK=$((SAVED_OK + 1)) || SAVED_BAD=$((SAVED_BAD + 1))
+    echo "cycle $i save: modified=$MOD size=$SIZE segments $SEG0->$SEG1 loads=$LOADS temps=[${TEMPS}] -> $([ "$OK" = 1 ] && echo intact || echo BAD)"
+  fi
   kill "$CP" 2>/dev/null; wait "$CP" 2>/dev/null
   sleep 1
 done
 echo "close loop: $CYCLES cycles, $CLEAN clean, $CRASHED crashed, $OTHER other (close via ${CLOSE_VIA:-hub}, pre-warm ${CLOSE_PREWARM:-1}, foreign lock ${CLOSE_FOREIGN_LOCK:-as found}; $(basename "$(dirname "$(dirname "$KICAD_BIN")")"))"
 printf '%s\n' "${SUMMARY[@]}" | sort | uniq -c | sed 's/^/  /'
+[ "${CLOSE_SAVE:-0}" = 1 ] && { echo "save loop: $SAVED_OK intact, $SAVED_BAD bad, of $CYCLES saves (crashed after the save: $CRASHED)"; check "save loop: every saved board complete, loadable and holding its edit" "$([ "$SAVED_BAD" = 0 ] && [ "$SAVED_OK" = "$CYCLES" ] && echo 1 || echo 0)" "$SAVED_OK of $CYCLES"; }
 check "close loop: no crash in $CYCLES closes" "$([ "$CRASHED" = 0 ] && echo 1 || echo 0)" "$CRASHED crashed"
 finish_suite "embed_close_loop ($EMBED_MODE)"
