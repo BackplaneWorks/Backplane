@@ -1975,6 +1975,25 @@ async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_
     let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"viewer_show","arguments":{"kind":"mech","path":"mech/a.step"}})).await;
     bad.await.unwrap();
     let t = tool_text(&r); assert_eq!(t["settled"], false, "empty key must NOT count as settled: {t}");
+    // the picture already shows what is asked: settled at once, with no newer report (a repeated identical show)
+    crate::files::kicad::watch::viewer_report(T1, json!({"open": "mech", "part": "mech/a.step", "key": ""}));
+    let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"viewer_show","arguments":{"kind":"mech","path":"mech/a.step"}})).await;
+    let t = tool_text(&r); assert_eq!(t["settled"], true, "already showing settles: {t}");
+    // a desktop that refuses the show (a KiCad dialog is open) gives the agent its reason, not a timeout
+    std::fs::write(std::path::Path::new(&cwd).join("a.kicad_pcb"), "(kicad_pcb)").unwrap();
+    let mut c3 = hub.attach(hub.fresh_client());
+    let refuse = tokio::spawn(async move {
+        while let Some(o) = c3.recv().await {
+            if let crate::hub::Out::Value(f) = o { if f["t"] == "view" && f["thread"] == T1 {
+                assert_eq!(f["kind"], "board"); assert!(f["path"].as_str().unwrap().ends_with("a.kicad_pcb"), "the push names the kind and the whole path: {f}");
+                crate::present::viewer::test_refuse(f["token"].as_str().expect("the push carries a token"), "KiCad has a dialog open"); break } }
+        }
+    });
+    let started = std::time::Instant::now();
+    let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"viewer_show","arguments":{"kind":"board","path":"a.kicad_pcb"}})).await;
+    refuse.await.unwrap();
+    assert!(started.elapsed() < std::time::Duration::from_millis(2500), "a refusal does not wait out the time");
+    assert_eq!(r["result"]["isError"], true, "{r}"); assert!(tool_text(&r).to_string().contains("KiCad has a dialog open"), "{r}");
     // a model that is not there, or a file Mech has no page for, is refused, not acknowledged while another part shows (issue 1102)
     for (k, p) in [("mech", "mech/gone.step"), ("mech", "notes.md"), ("teapot", "")] {
         let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"viewer_show","arguments":{"kind":k,"path":p}})).await;

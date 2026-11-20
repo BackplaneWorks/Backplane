@@ -167,13 +167,6 @@ pub fn view_action_for(
     let sel = s(session, "sel");
     let d = &session["drafts"];
     let force_retry = kind == "retry";
-    // Old desktop clients answer a hub-pushed agent `viewer_show` with plain `view`: treat that
-    // matching reply as an idempotent `view-show` (never toggles Files closed or closes a focused Board).
-    if !force_retry {
-        if let Some((sk, sp)) = matches_pending_show(sel, client_id, kind) {
-            return viewer_show_action(st, hub, session, client_id, locale, &sk, &sp);
-        }
-    }
     let stored = parse_stored_layout(d, sel);
     // Retry on a stored versioned/unresolved focused tile MUST go through commit_layout's version
     // resolver — NEVER fall through to main's live board/schematic watch path.
@@ -1203,6 +1196,7 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
                 default_gerber_set,
             });
         }
+        v["showToken"] = json!(true); // this hub answers an agent show's token (`view-show`): a desktop without it sends plain `view`
         v["layout"] = serde_json::to_value(&active_layout).unwrap_or(Value::Null);
         let src_ref = local.then_some(&*sources);
         v["tiles"] = build_tiles_picture(&active_layout, eff_root, &v, drafts, src_ref, &shown, linked);
@@ -1335,19 +1329,57 @@ pub enum LayoutOut {
     },
 }
 
-/// Pending hub-pushed agent `viewer_show` records so old desktops that answer with plain `view`
-/// are still handled idempotently (never closing an already-focused tile or toggling Files closed).
-struct PendingShow {
-    kind: String,
-    path: String,
-    at: std::time::Instant,
-    consumed: std::collections::HashSet<u64>,
+/// An agent's show (`viewer_show`): the hub issues a token with the push; a desktop that knows the protocol (the picture says `showToken`) answers
+/// `view-show` with the kind, the full source path and the token UNCHANGED, and nothing is inferred for any other answer: a plain `view` is always
+/// main's `view`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ShowOutcome { Pending, Applied, Refused(String) }
+struct ShowRec { thread: String, kind: String, path: String, outcome: ShowOutcome }
+struct Shows { next: u64, recs: std::collections::BTreeMap<u64, ShowRec> }
+fn shows_map() -> &'static std::sync::Mutex<Shows> {
+    static MAP: std::sync::OnceLock<std::sync::Mutex<Shows>> = std::sync::OnceLock::new();
+    MAP.get_or_init(|| std::sync::Mutex::new(Shows { next: 1, recs: Default::default() }))
 }
-fn pending_shows() -> &'static std::sync::Mutex<std::collections::HashMap<String, Vec<PendingShow>>> {
-    static MAP: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, Vec<PendingShow>>>> = std::sync::OnceLock::new();
-    MAP.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+fn token_id(token: &str) -> Option<u64> { token.strip_prefix("show-")?.parse().ok() }
+/// A token for a push of `kind`/`path` to `thread` (the newest 128 are kept).
+pub fn issue_show(thread: &str, kind: &str, path: &str) -> String {
+    let mut m = shows_map().lock().unwrap_or_else(|e| e.into_inner());
+    let n = m.next; m.next += 1;
+    m.recs.insert(n, ShowRec { thread: thread.into(), kind: kind.into(), path: path.into(), outcome: ShowOutcome::Pending });
+    while m.recs.len() > 128 { let first = *m.recs.keys().next().unwrap(); m.recs.remove(&first); }
+    format!("show-{n}")
 }
-fn normalize_show_kind(kind: &str, path: &str) -> String {
+/// What a desktop's `view-show` did with the token (Pending until one answers).
+pub fn show_outcome(token: &str) -> ShowOutcome {
+    let m = shows_map().lock().unwrap_or_else(|e| e.into_inner());
+    token_id(token).and_then(|n| m.recs.get(&n)).map_or(ShowOutcome::Pending, |r| r.outcome.clone())
+}
+fn token_is(token: &str, thread: &str, kind: &str, path: &str) -> bool {
+    let m = shows_map().lock().unwrap_or_else(|e| e.into_inner());
+    token_id(token).and_then(|n| m.recs.get(&n)).is_some_and(|r| r.thread == thread && r.kind == kind && r.path == path)
+}
+fn record_outcome(token: &str, out: ShowOutcome) {
+    let mut m = shows_map().lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(r) = token_id(token).and_then(|n| m.recs.get_mut(&n)) { if r.outcome != ShowOutcome::Applied { r.outcome = out } }
+}
+/// (tests) a desktop's refusal of a token, as `view_show_token` records it.
+#[cfg(test)]
+pub fn test_refuse(token: &str, why: &str) { record_outcome(token, ShowOutcome::Refused(why.into())) }
+/// `view-show` with a token: applies the show only when the token is the hub's, for this thread, with the kind and path it was issued for;
+/// records the outcome for the agent's read-back (a refusal says why).
+pub fn view_show_token(st: &State, hub: &str, session: &Value, client_id: Option<u64>, locale: &str, kind: &str, path: &str, token: &str) -> Option<LayoutOut> {
+    let sel = s(session, "sel");
+    if !token_is(token, sel, kind, path) { return Some(LayoutOut::Ok(ViewOut { patch: json!({}), before: vec![], boards_look: false })) }
+    let out = viewer_show_action(st, hub, session, client_id, locale, kind, path);
+    match &out {
+        Some(LayoutOut::Ok(_)) => record_outcome(token, ShowOutcome::Applied),
+        Some(LayoutOut::Refused { text, .. }) => record_outcome(token, ShowOutcome::Refused(text.to_string())),
+        None => {}
+    }
+    out
+}
+/// The viewer page an agent's show names (`kind` and `path` as the tool took them).
+pub fn show_kind(kind: &str, path: &str) -> String {
     let l = path.to_ascii_lowercase();
     let model = is_model(path);
     match kind {
@@ -1360,35 +1392,55 @@ fn normalize_show_kind(kind: &str, path: &str) -> String {
         k => k,
     }.to_string()
 }
-/// Record an agent `viewer_show` push for `thread` so an old desktop answering with plain `view`
-/// is routed idempotently through `viewer_show_action`.
-pub fn record_pending_show(thread: &str, kind: &str, path: &str) {
-    if thread.is_empty() { return; }
-    let norm = normalize_show_kind(kind, path);
-    let mut map = pending_shows().lock().unwrap_or_else(|e| e.into_inner());
-    let now = std::time::Instant::now();
-    let entry = map.entry(thread.to_string()).or_default();
-    entry.retain(|p| now.duration_since(p.at).as_secs() < 5);
-    entry.push(PendingShow { kind: norm, path: path.to_string(), at: now, consumed: std::collections::HashSet::new() });
+/// The project's own board, schematic and newest Gerber set (absolute; "" for none): what a show or a report with no source stands for.
+#[derive(Clone, Debug, Default)]
+pub struct ShowDefaults { pub pcb: String, pub sch: String, pub set: String }
+/// What a show asks of the viewer: the page and its source (an absolute file; a Mech part's path from the root; "" for a page with no source).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShowWant { pub kind: String, pub source: String }
+fn trim_end(p: &str) -> String { p.trim_end_matches('/').to_string() }
+pub fn show_want(kind: &str, shown: &str, root: &str, d: &ShowDefaults) -> ShowWant {
+    let nk = show_kind(kind, shown);
+    let l = shown.to_ascii_lowercase();
+    let pcb = l.ends_with(".kicad_pcb") || l.ends_with(".pcbdoc");
+    let sch = l.ends_with(".kicad_sch") || l.ends_with(".schdoc");
+    let source = match nk.as_str() {
+        "board" | "3d" | "split" => if pcb { trim_end(&abs_of(root, shown)) } else { d.pcb.clone() },
+        "schematic" => if sch { trim_end(&abs_of(root, shown)) } else { d.sch.clone() },
+        "mech" => rel_in(root, shown),
+        "gerbers" => if shown.is_empty() { d.set.clone() } else { trim_end(&abs_of(root, shown)) },
+        _ => String::new(),
+    };
+    ShowWant { kind: nk, source }
 }
-fn matches_pending_show(thread: &str, client_id: Option<u64>, value: &str) -> Option<(String, String)> {
-    if thread.is_empty() || value.is_empty() { return None; }
-    let (vk, vp) = value.split_once('\t').unwrap_or((value, ""));
-    let norm_vk = normalize_show_kind(vk, vp);
-    let cid = client_id.unwrap_or(0);
-    let mut map = pending_shows().lock().unwrap_or_else(|e| e.into_inner());
-    let now = std::time::Instant::now();
-    let list = map.get_mut(thread)?;
-    list.retain(|p| now.duration_since(p.at).as_secs() < 5);
-    for p in list.iter_mut().rev() {
-        if p.consumed.contains(&cid) { continue; }
-        let path_ok = p.path == vp || (p.kind != "mech" && vp.is_empty());
-        if p.kind == norm_vk && path_ok {
-            p.consumed.insert(cid);
-            return Some((p.kind.clone(), p.path.clone()));
+/// Whether the page a client reports (`viewer.state`: `open`, `key`, `part`, `gerbers`) is exactly the one `want` names: the page, and its source
+/// compared whole (a key with no path is the project's own file, resolved to its name first). Already showing counts. A report with no page, no key
+/// or an empty one never matches a page that has a source.
+pub fn show_settled(want: &ShowWant, report: &Value, d: &ShowDefaults) -> bool {
+    let open = report["open"].as_str().or_else(|| report["kind"].as_str()).unwrap_or("");
+    let gerbers = report["gerbers"] == true;
+    let kind_ok = match want.kind.as_str() {
+        "gerbers" => open == "board" && gerbers,
+        "board" => open == "board" && !gerbers,
+        "files" => matches!(open, "files" | "image" | "pdf" | "text"),
+        k => !open.is_empty() && open == k,
+    };
+    if !kind_ok { return false }
+    let key_path = || -> Option<&str> {
+        let key = report["key"].as_str().filter(|k| !k.is_empty())?;
+        let mut it = key.splitn(3, '|'); it.next()?; it.next()?; it.next()
+    };
+    let default_of = |kind: &str| match kind { "schematic" => d.sch.as_str(), "gerbers" => d.set.as_str(), _ => d.pcb.as_str() };
+    match want.kind.as_str() {
+        "board" | "3d" | "split" | "schematic" | "gerbers" => {
+            if want.source.is_empty() { return false }
+            let Some(p) = key_path() else { return false };
+            let have = if p.is_empty() { default_of(&want.kind).to_string() } else { trim_end(p) };
+            !have.is_empty() && have == want.source
         }
+        "mech" => report["part"].as_str().is_some_and(|p| !p.is_empty() && p == want.source),
+        _ => true,
     }
-    None
 }
 
 /// Cached Gerber-set member availability resolved when layout or watch changes (never during picture rendering).
@@ -2441,6 +2493,13 @@ pub fn layout_action(
     }
 }
 
+/// Under a KiCad holder's dialog a show may only re-show the locked tile: the only tile, the page the show names, and the source it names (an
+/// empty requested source is never "the same": it would stand for whatever the page's default is).
+pub fn show_preserves_locked(cur: &super::layout::Layout, locked_id: &str, pk: Option<super::layout::PageKind>, rel: &str) -> bool {
+    let Some(lt) = cur.tile(locked_id) else { return true };
+    cur.tiles().len() == 1 && Some(lt.kind) == pk && lt.version.is_none() && lt.overlay.is_none() && !rel.is_empty() && rel == lt.source
+}
+
 /// Route an agent's idempotent `viewer_show(kind, path)` (`view-show` action):
 /// - In multi-tile mode: routes through `layout::viewer_show` (focus or retarget, NEVER closes).
 /// - In legacy single-tile/idle mode: idempotently opens/updates the requested page/source (NEVER closes
@@ -2499,18 +2558,9 @@ pub fn viewer_show_action(
             });
             let guard = hub_kicad_guard(&cur_derived, &root, &picked_abs, client_id, None, None, linked);
             if let Some(lid) = guard.locked.as_deref() {
-                if let Some(lt) = cur_derived.tile(lid) {
-                    // exact: the page the show names, with the source it names (an unnamed source is the tile's only when the tile is not one the person picked)
-                    let same_source = rel == lt.source || (rel.is_empty() && !lt.explicit);
-                    let preserves = cur_derived.tiles().len() == 1
-                        && Some(lt.kind) == pk
-                        && lt.version.is_none()
-                        && lt.overlay.is_none()
-                        && same_source;
-                    if !preserves {
-                        let r = layout::Refusal::Locked;
-                        return Some(LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) });
-                    }
+                if !show_preserves_locked(&cur_derived, lid, pk, &rel) {
+                    let r = layout::Refusal::Locked;
+                    return Some(LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) });
                 }
             }
         }

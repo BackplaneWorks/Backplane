@@ -722,8 +722,9 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         // agent's idempotent viewer_show (never closes an already-focused tile)
         "view-show" => {
             let locale=p["locale"].as_str().filter(|s|!s.is_empty()).unwrap_or_else(||st.settings.get("ui.lang").map_or("",String::as_str));
-            let (k, path) = value.split_once('\t').unwrap_or((value, ""));
-            match super::viewer::viewer_show_action(sel_st, hub, &session, p["designDesktop"].as_u64(), locale, k, path) {
+            // "<kind>\t<path>\t<token>": what the hub pushed, unchanged (a value with no token of the hub's applies nothing)
+            let mut parts=value.splitn(3,'\t'); let (k,path,token)=(parts.next().unwrap_or(""),parts.next().unwrap_or(""),parts.next().unwrap_or(""));
+            match super::viewer::view_show_token(sel_st, hub, &session, p["designDesktop"].as_u64(), locale, k, path, token) {
                 // the same tail as `view` (one function): a show is a view that never closes
                 Some(super::viewer::LayoutOut::Ok(o)) => { cmds = applied_view(st, hub, thread, &mut session, &read_cmds, o); }
                 Some(super::viewer::LayoutOut::Refused { code, key, text }) => {

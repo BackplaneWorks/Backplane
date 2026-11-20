@@ -23,7 +23,13 @@ pub const MAX_ROWS: usize = 1000;
 
 /// Open a viewer kind, or close the viewer with "": the phones' idempotent `view` action.
 pub fn view_kind(kind: &str) -> Command { Command::Action("view".into(), kind.to_string()) }
-pub fn view_show_kind(kind: &str) -> Command { Command::Action("view-show".into(), kind.to_string()) }
+/// An agent's show as the hub is told: a hub that says it answers show tokens (`viewer.showToken`) gets `view-show` with the kind, the whole path and
+/// the token exactly as pushed (nothing dropped); any other hub gets plain `view` as before (the page, and the part only for a model).
+pub fn show_command(viewer: &Value, kind: &str, path: &str, token: &str) -> Option<Command> {
+    let (k, part) = shown(kind, path)?;
+    if viewer["showToken"] == true && !token.is_empty() { return Some(Command::Action("view-show".into(), format!("{kind}\t{path}\t{token}"))) }
+    Some(view_kind(&match part { Some(p) => format!("{k}\t{p}"), None => k }))
+}
 pub fn close() -> Command { view_kind("") }
 /// A rail press (or its key) on a viewer kind: the kind the rail shows lit (the hub's page, or the one just pressed) shuts the viewer, as a press
 /// on the web's shown tab did; any other kind opens. Still the idempotent `view` action either way, decided from what is on the screen.
@@ -1140,11 +1146,29 @@ pub fn follow(tx: &tokio::sync::mpsc::Sender<Command>, thread: &Value) {
 
 #[cfg(test)]
 mod tests {
+    /// An agent's show names every kind with its full path and a token; a hub that advertises tokens gets all three back unchanged in `view-show`, any
+    /// other hub (an older one) gets plain `view` exactly as before.
+    #[test] fn an_agents_show_round_trips_kind_path_and_token_or_falls_back_to_plain_view() {
+        use crate::hub::Command; use serde_json::json;
+        let new_hub = json!({"showToken": true}); let old_hub = json!({"open": "board"});
+        let shows = [("board", "/p/a.kicad_pcb"), ("pcb", "/p/a.kicad_pcb"), ("schematic", "/p/sub/b.kicad_sch"), ("3d", "/p/a.kicad_pcb"), ("gerbers", "/p/mfg/rev1"), ("split", "/p/a.kicad_pcb"),
+            ("mech", "/p/mech/case.step"), ("3d", "/p/mech/case.step"), ("files", "/p/docs"), ("browser", ""), ("", "/p/a.kicad_sch")];
+        for (i, (k, p)) in shows.iter().enumerate() {
+            let tok = format!("show-{i}");
+            let c = super::show_command(&new_hub, k, p, &tok).unwrap_or_else(|| panic!("{k} {p}: no page"));
+            assert!(matches!(&c, Command::Action(a, v) if a == "view-show" && *v == format!("{k}\t{p}\t{tok}")), "{k} {p}: {c:?}");
+            // an older hub: plain `view`, as before; a hub that says nothing of tokens, or a push with none
+            let o = super::show_command(&old_hub, k, p, &tok).unwrap();
+            assert!(matches!(&o, Command::Action(a, _) if a == "view"), "{k} {p}: {o:?}");
+            let none = super::show_command(&new_hub, k, p, "").unwrap();
+            assert!(matches!(&none, Command::Action(a, _) if a == "view"));
+        }
+        assert!(matches!(super::show_command(&old_hub, "mech", "/p/mech/case.step", "t"), Some(Command::Action(a, v)) if a == "view" && v == "mech\t/p/mech/case.step"));
+        assert!(super::show_command(&new_hub, "teapot", "", "t").is_none(), "a kind with no page is ignored");
+    }
     /// An agent's `viewer_show` reaches the hub as `view-show` (idempotent: focus or retarget, never close or toggle); a rail press stays `view`.
-    #[test] fn an_agents_show_is_the_view_show_action_and_a_rail_press_stays_view() {
+    #[test] fn a_rail_press_stays_view() {
         use crate::hub::Command;
-        assert!(matches!(super::view_show_kind("files"), Command::Action(a, v) if a == "view-show" && v == "files"));
-        assert!(matches!(super::view_show_kind("mech\tmech/a.step"), Command::Action(a, v) if a == "view-show" && v == "mech\tmech/a.step"));
         assert!(matches!(super::view_kind("files"), Command::Action(a, v) if a == "view" && v == "files"));
     }
     /// #1347: Open in KiCad is offered only on Board, Schematic and 3D, and there only while the page's document is in the project (the

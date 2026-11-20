@@ -74,10 +74,10 @@ fn pager_row(cx:&mut Context<Backplane>,id:String,pager:&Value,light:bool)->Opti
 pub fn string(v:&Value,key:&str)->String {v[key].as_str().unwrap_or("").to_string()}
 impl Backplane {
     /// An agent's viewer_show (or the script's `viewshow` step): open the page its kind or file names on the thread on screen, and a model's part on it.
-    pub(crate) fn view_show(&mut self,thread:&str,kind:&str,path:&str,cx:&mut Context<Self>){
-        let Some((k,part))=screens::viewer::shown(kind,path) else {return};
+    pub(crate) fn view_show(&mut self,thread:&str,kind:&str,path:&str,token:&str,cx:&mut Context<Self>){
         if !(self.selected==thread||self.selected.ends_with(&format!("|{thread}"))||thread.is_empty()) {return}
-        let _=self.tx.try_send(screens::viewer::view_show_kind(&match part {Some(p)=>format!("{k}\t{p}"),None=>k})); cx.notify();
+        let Some(cmd)=screens::viewer::show_command(&self.data["thread"]["viewer"],kind,path,token) else {return};
+        let _=self.tx.try_send(cmd); cx.notify();
     }
     /// An agent's viewer_show named the KiCad frame the embedded pane is to show (the hub saw it show another: the person's strip tab;
     /// issue 1355): the pane shows it as a tab press would (show_kind_as), so it publishes the change itself, but as Automatic: the keyboard
@@ -218,7 +218,7 @@ impl Backplane {
             Event::Sheets(rows,refs)=>{ self.screens.plot.sheets=screens::plot::sheet_rows(&rows); self.screens.plot.sheet_refs=screens::plot::sheet_refs(&refs); cx.notify(); }
             Event::BrowserDownload(owner,id,name,error)=>{if let Some((o,page))=&self.screens.browser {if *o==owner {let page=page.clone();page.update(cx,|p,cx|p.take_download(&id,&name,&error,cx));}}},
             Event::BrowserTabs(owner,text)=>{if let Some((o,page))=&self.screens.browser {if *o==owner {let page=page.clone();page.update(cx,|p,cx|p.set_tabs(&text,cx));}}},
-            Event::ViewShow(thread,kind,path,frame)=>{self.view_show(&thread,&kind,&path,cx);self.kicad_bring(&thread,&frame,cx);},
+            Event::ViewShow(thread,kind,path,frame,token)=>{self.view_show(&thread,&kind,&path,&token,cx);self.kicad_bring(&thread,&frame,cx);},
             Event::Pick(info)=>{ let slot=self.screens.pick_slot.unwrap_or(0); let card=screens::plot::card(&info); let pv=self.screens.pv(slot); if pv.picked.is_some() { pv.card=card.clone(); } if let Some(c)=card { screens::plotview::cross_probe(self,slot,&c); } screens::plotview::report_state(self); cx.notify(); }
             Event::Probe(slot,m) if slot>=3=>{ screens::plotview::frame_on(self,slot-3,&m); cx.notify(); }
             Event::Probe(slot,m)=>{ eprintln!("GPUI_LOG {}",serde_json::json!({"event":"probe_lit","slot":slot,"n":m.len()})); let pv=self.screens.pv(slot); if pv.lit.len()<20000 { pv.lit.extend(m); } cx.notify(); }
