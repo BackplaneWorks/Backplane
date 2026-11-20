@@ -784,6 +784,35 @@ mod imp {
     }
 }
 
+/// #1343: the placements of KiCad's windows that Windows runs off Backplane's UI thread (imp's `placer`). On Windows a KiCad frame is a
+/// child of our container, so the two threads' input queues are joined and even `SWP_ASYNCWINDOWPOS` from the UI thread waits for KiCad's
+/// UI thread (a DRC: 9.5 s of Backplane drawing nothing). The queue is pure: per window only the latest placement is kept, a hide or a
+/// dead window cancels what is queued for it, and a placement is checked against the window's state when it runs (`still_ours`).
+pub mod placeq {
+    use std::collections::{HashMap, VecDeque};
+    /// One SetWindowPos for a KiCad window, as the UI thread would have made it: same rect, insert-after and flags.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Job { pub hwnd: u64, pub after: u64, pub x: i32, pub y: i32, pub w: i32, pub h: i32, pub flags: u32,
+        /// KiCad's process the window belonged to when the placement was asked; `parent`: the container it must still be inside (0: none)
+        pub pid: u32, pub parent: u64, pub seq: u64 }
+    #[derive(Default)]
+    pub struct Q { jobs: HashMap<u64, Job>, order: VecDeque<u64>, seq: u64 }
+    impl Q {
+        /// Queue a placement: a newer one for the same window replaces the older, which is never run.
+        pub fn push(&mut self, mut j: Job) { self.seq += 1; j.seq = self.seq; if self.jobs.insert(j.hwnd, j.clone()).is_none() { self.order.push_back(j.hwnd) } }
+        /// The window was hidden, destroyed or left the pane: what is queued for it is dropped (a placement asked before a hide loses).
+        pub fn cancel(&mut self, hwnd: u64) { if self.jobs.remove(&hwnd).is_some() { self.order.retain(|&h| h != hwnd) } }
+        /// Every queued placement inside `parent` (a container going away), dropped.
+        pub fn cancel_parent(&mut self, parent: u64) { let gone: Vec<u64> = self.jobs.values().filter(|j| j.parent == parent).map(|j| j.hwnd).collect(); for h in gone { self.cancel(h) } }
+        /// The next placement to run, oldest window first.
+        pub fn take(&mut self) -> Option<Job> { while let Some(h) = self.order.pop_front() { if let Some(j) = self.jobs.remove(&h) { return Some(j) } } None }
+        pub fn len(&self) -> usize { self.jobs.len() }
+    }
+    /// Whether a queued placement still applies when it runs: the window exists, still belongs to the KiCad process it was asked for
+    /// (a recycled handle is never touched), and is still inside its container when it had one.
+    pub fn still_ours(j: &Job, is_window: bool, owner_pid: u32, in_parent: bool) -> bool { is_window && owner_pid == j.pid && (j.parent == 0 || in_parent) }
+}
+
 #[cfg(windows)]
 mod imp {
     use super::{Ev, Frame, R};
@@ -823,9 +852,10 @@ mod imp {
         thread_local! { static DEPTH: Cell<u32> = const { Cell::new(0) }; }
         /// the outermost call in progress
         /// (call, where, hwnd, flags, thread, since, sequence)
-        static CUR: Mutex<Option<(&'static str, &'static std::panic::Location<'static>, u64, u64, u32, Instant, u64)>> = Mutex::new(None);
+        /// per thread (the UI thread, #1343's placement workers): the outermost call in progress
+        static CUR: Mutex<Vec<(&'static str, &'static std::panic::Location<'static>, u64, u64, u32, Instant, u64)>> = Mutex::new(Vec::new());
         static SEQ: AtomicU64 = AtomicU64::new(0);
-        static REPORTED: AtomicU64 = AtomicU64::new(0);
+        static REPORTED: Mutex<Vec<u64>> = Mutex::new(Vec::new());
         static DOG: AtomicBool = AtomicBool::new(false);
         fn tid() -> u32 { unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() } }
         pub struct G(Option<(&'static str, &'static std::panic::Location<'static>, u64, u64, u64, Instant)>);
@@ -844,7 +874,7 @@ mod imp {
             if !outer { return G(None) }
             if !DOG.swap(true, Ordering::SeqCst) { std::thread::spawn(watchdog); }
             let (seq, at, where_) = (SEQ.fetch_add(1, Ordering::SeqCst) + 1, Instant::now(), at);
-            *CUR.lock().unwrap() = Some((call, where_, hwnd, flags, tid(), at, seq));
+            { let mut c = CUR.lock().unwrap(); let me = tid(); c.retain(|x| x.4 != me); c.push((call, where_, hwnd, flags, me, at, seq)); }
             G(Some((call, where_, hwnd, flags, seq, at)))
         }
         impl Drop for G {
@@ -853,17 +883,18 @@ mod imp {
                 DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
                 let Some((call, where_, hwnd, flags, seq, at)) = self.0 else { return };
                 let ms = at.elapsed().as_millis() as u64;
-                { let mut c = CUR.lock().unwrap(); if c.is_some_and(|x| x.6 == seq) { *c = None } }
+                { let mut c = CUR.lock().unwrap(); c.retain(|x| x.6 != seq); }
                 if ms >= 200 { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_stuck_done": line(call, where_, hwnd, flags, ms, tid())})); }
             }
         }
         fn watchdog() {
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(50));
-                let c = *CUR.lock().unwrap();
-                if let Some((call, where_, hwnd, flags, thread, at, seq)) = c {
+                let c = CUR.lock().unwrap().clone();
+                REPORTED.lock().unwrap().retain(|s| c.iter().any(|x| x.6 == *s));
+                for (call, where_, hwnd, flags, thread, at, seq) in c {
                     let ms = at.elapsed().as_millis() as u64;
-                    if ms >= 200 && REPORTED.swap(seq, Ordering::SeqCst) != seq {
+                    if ms >= 200 && { let mut r = REPORTED.lock().unwrap(); !r.contains(&seq) && { r.push(seq); true } } {
                         eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_stuck": line(call, where_, hwnd, flags, ms, thread)}));
                     }
                 }
@@ -918,6 +949,48 @@ mod imp {
     #[inline] #[track_caller] pub unsafe fn WindowFromPoint(point: windows_sys::Win32::Foundation::POINT) -> windows_sys::Win32::Foundation::HWND { let _g = super::probe::enter("WindowFromPoint", std::panic::Location::caller(), 0, 0); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::WindowFromPoint(point) } }
     }
     use self::w32p::{AttachThreadInput, BitBlt, ClientToScreen, CreateWindowExW, DefWindowProcW, DestroyWindow, EnumChildWindows, EnumWindows, GetAncestor, GetCapture, GetClassNameW, GetDC, GetDIBits, GetForegroundWindow, GetGUIThreadInfo, GetWindow, GetWindowLongPtrW, GetWindowRect, GetWindowRgn, GetWindowThreadProcessId, InternalGetWindowText, IsChild, IsWindow, IsWindowVisible, PostMessageW, RegisterHotKey, ReleaseCapture, ReleaseDC, ScreenToClient, SetCapture, SetFocus, SetForegroundWindow, SetLayeredWindowAttributes, SetParent, SetWindowLongPtrW, SetWindowPos, SetWindowRgn, ShowWindow, ShowWindowAsync, UnregisterHotKey, ValidateRect, WindowFromPoint};
+    /// #1343: KiCad windows' placements, run by a worker thread per KiCad UI thread (it owns no windows, so its input queue is never
+    /// joined to KiCad's and SWP_ASYNCWINDOWPOS really posts). If one ever waited, only that KiCad's windows wait behind it (they could
+    /// not move before KiCad is free anyway); Backplane's UI thread never does. The probe covers the worker's calls too.
+    mod placer {
+        use super::super::placeq::{still_ours, Job, Q};
+        use std::{collections::HashMap, sync::{Arc, Condvar, Mutex, OnceLock}};
+        type W = Arc<(Mutex<Q>, Condvar)>;
+        /// the workers, by KiCad's UI thread id
+        fn workers() -> &'static Mutex<HashMap<u32, W>> { static M: OnceLock<Mutex<HashMap<u32, W>>> = OnceLock::new(); M.get_or_init(Default::default) }
+        fn owner(h: u64) -> (u32, u32) { let mut pid = 0u32; let t = unsafe { super::GetWindowThreadProcessId(super::hwnd(h), &mut pid) }; (pid, t) }
+        fn worker(w: W) {
+            loop {
+                let j = { let (q, cv) = &*w; let mut g = q.lock().unwrap(); loop { if let Some(j) = g.take() { break j } g = cv.wait(g).unwrap(); } };
+                let h = super::hwnd(j.hwnd);
+                let ok = unsafe { super::IsWindow(h) != 0 };
+                let (pid, _) = if ok { owner(j.hwnd) } else { (0, 0) };
+                let inside = j.parent != 0 && ok && unsafe { super::IsChild(super::hwnd(j.parent), h) != 0 };
+                if !still_ours(&j, ok, pid, inside) {
+                    if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_place_dropped": {"window": j.hwnd, "alive": ok, "pid": pid, "want_pid": j.pid, "inside": inside}})); }
+                    continue
+                }
+                unsafe { super::SetWindowPos(h, super::hwnd(j.after), j.x, j.y, j.w, j.h, j.flags); }
+            }
+        }
+        /// Queue `SetWindowPos(hwnd, after, x, y, w, h, flags)` for a KiCad window (`parent`: the container it must still be in, 0 none).
+        /// A window of our own process is placed here and now, as before.
+        #[track_caller]
+        pub fn set_pos(hwnd: u64, after: u64, x: i32, y: i32, w: i32, h: i32, flags: u32, parent: u64) {
+            let (pid, tid) = owner(hwnd);
+            if pid == 0 || pid == std::process::id() { unsafe { super::SetWindowPos(super::hwnd(hwnd), super::hwnd(after), x, y, w, h, flags); } return }
+            let wk = { let mut m = workers().lock().unwrap();
+                m.entry(tid).or_insert_with(|| { let w: W = Arc::new((Mutex::new(Q::default()), Condvar::new())); let w2 = w.clone(); std::thread::Builder::new().name("kicad-placer".into()).spawn(move || worker(w2)).ok(); w }).clone() };
+            let (q, cv) = &*wk;
+            q.lock().unwrap().push(Job { hwnd, after, x, y, w, h, flags, pid, parent, seq: 0 });
+            cv.notify_one();
+        }
+        /// A KiCad window hidden or leaving: any placement queued for it is dropped.
+        pub fn cancel(hwnd: u64) { for w in workers().lock().unwrap().values() { w.0.lock().unwrap().cancel(hwnd) } }
+        /// A container going away (the pane dropped, detached): everything queued inside it is dropped.
+        pub fn cancel_parent(parent: u64) { for w in workers().lock().unwrap().values() { w.0.lock().unwrap().cancel_parent(parent) } }
+    }
+
 
 
     const WM_BP_FOCUS: u32 = WM_APP + 0x101;
@@ -1126,6 +1199,7 @@ mod imp {
                         if IsWindow(eh) != 0 {
                             if GetAncestor(eh, GA_PARENT) != p {
                                 SetWindowRgn(eh, null_mut(), 0);
+                                placer::cancel(id_of(eh));
                                 ShowWindowAsync(eh, SW_HIDE);
                                 SetParent(eh, p);
                             }
@@ -1176,6 +1250,7 @@ mod imp {
             let oh = hwnd(old);
             if !oh.is_null() && IsWindow(oh) != 0 {
                 SetWindowRgn(oh, null_mut(), 0);
+                placer::cancel(id_of(oh));
                 ShowWindowAsync(oh, SW_HIDE);
                 let park = parking_parent();
                 if !park.is_null() && GetAncestor(oh, GA_PARENT) != park {
@@ -1212,6 +1287,7 @@ mod imp {
             }
             for k in kids {
                 unsafe {
+                    placer::cancel(id_of(k));
                     ShowWindowAsync(k, SW_HIDE);
                     SetParent(k, null_mut());
                 }
@@ -1224,6 +1300,7 @@ mod imp {
 
     /// Hide and park `container` without ever calling `DestroyWindow` or `SetParent(NULL)` on KiCad's cross-process child frames.
     pub fn destroy(container: u64) {
+        placer::cancel_parent(container);
         unregister_escape();
         CHILD_FOCUSED.store(false, Ordering::SeqCst);
         if ACTIVE_CONTAINER.load(Ordering::SeqCst) == container {
@@ -1303,7 +1380,7 @@ mod imp {
                     let (dw, dh) = (dr.right - dr.left, dr.bottom - dr.top);
                     let x = tr.left + ((tr.right - tr.left) - dw) / 2;
                     let y = tr.top + ((tr.bottom - tr.top) - dh) / 2;
-                    unsafe { SetWindowPos(w, null_mut(), x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS); }
+                    placer::set_pos(id_of(w), 0, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS, 0);
                 }
             }
             1
@@ -1353,6 +1430,7 @@ mod imp {
         for &k in mine {
             let kh = hwnd(k);
             if !kh.is_null() && unsafe { IsWindow(kh) } != 0 {
+                if Some(k) != show { placer::cancel(k); }
                 unsafe { ShowWindowAsync(kh, if Some(k) == show { SW_SHOWNA } else { SW_HIDE }); }
             }
         }
@@ -1372,9 +1450,10 @@ mod imp {
                 if managed.map_or(false, |m| !m.contains(&f.window)) { continue }
                 let kh = hwnd(f.window);
                 if Some(f.window) == show {
-                    SetWindowPos(kh, null_mut(), 0, 0, w, h, SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+                    placer::set_pos(f.window, 0, 0, 0, w, h, SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS, container);
                     if managed.is_none() { ShowWindowAsync(kh, SW_SHOWNA); }
                 } else if managed.is_none() {
+                    placer::cancel(f.window);
                     ShowWindowAsync(kh, SW_HIDE);
                 }
             }
@@ -1394,7 +1473,7 @@ mod imp {
             if IsWindowVisible(s) != 0 {
                 if let Some((sr, _)) = geometry(show) {
                     if (sr.x, sr.y, sr.w, sr.h) != (0, 0, w, h) {
-                        SetWindowPos(s, null_mut(), 0, 0, w, h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+                        placer::set_pos(show, 0, 0, 0, w, h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS, container);
                     }
                 }
             }
@@ -2169,6 +2248,25 @@ pub use imp::*;
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_kicad_windows_placements_keep_only_the_latest_and_a_hide_drops_them() {
+        use super::placeq::{still_ours, Job, Q};
+        let j = |h: u64, w: i32| Job { hwnd: h, after: 0, x: 0, y: 0, w, h: 10, flags: 0, pid: 7, parent: 1, seq: 0 };
+        let mut q = Q::default();
+        q.push(j(100, 10)); q.push(j(200, 20)); q.push(j(100, 30));
+        assert_eq!(q.len(), 2, "one per window");
+        assert_eq!(q.take().map(|x| (x.hwnd, x.w)), Some((100, 30)), "the latest rect, the window queued first");
+        q.push(j(100, 40)); q.cancel(100);
+        assert_eq!(q.take().map(|x| x.hwnd), Some(200), "a hide drops what was queued for that window");
+        assert!(q.take().is_none());
+        q.push(j(300, 1)); q.push(Job { parent: 2, ..j(400, 1) }); q.cancel_parent(1);
+        assert_eq!(q.take().map(|x| x.hwnd), Some(400), "a container going away drops only its own");
+        let k = j(500, 1);
+        assert!(still_ours(&k, true, 7, true));
+        assert!(!still_ours(&k, false, 7, true), "a dead window is never touched");
+        assert!(!still_ours(&k, true, 8, true), "a recycled handle of another process is never touched");
+        assert!(!still_ours(&k, true, 7, false), "a window no longer in its container (re-parented away) is left alone");
+        assert!(still_ours(&Job { parent: 0, ..k }, true, 7, false), "a dialog (no container) only needs to be alive and KiCad's");
+    }
     use super::*;
     /// KiCad's right-click menu (WS_POPUP|WS_VISIBLE|WS_CLIPSIBLINGS|WS_BORDER, class #32768) was taken for a dialog and re-centred.
     #[test] fn only_captioned_top_levels_are_dialogs_and_menus_never_are() {
