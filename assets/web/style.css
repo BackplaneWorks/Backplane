@@ -8,6 +8,8 @@
   /* the structural rules (pane edges, the top bar's and the header's bottom, the composer's top): one step over --line, which is left to
      secondary separators and control borders */
   --rule: #353c49;
+  --rail-rule: #495260;
+  --rail-disabled: #798391;
   --text: #d9dde4;
   --dim: #8a93a3;
   --faint: #5c6473;
@@ -35,6 +37,8 @@ html.light, .app.light, .bub-move.light {
   --raise: #e8e7e2;
   --line: #d3d1ca;
   --rule: #bcbab2;
+  --rail-rule: #aaa89f;
+  --rail-disabled: #696f77;
   --text: #1b1d21;
   --dim: #5b6068;
   /* (as dark as needed to read small notes on a panel, still a step under
