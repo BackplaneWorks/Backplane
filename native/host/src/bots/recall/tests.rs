@@ -209,3 +209,30 @@ impl Rig {
     let kept = r2.kept().await; for p in tree::roots(500) { assert!(kept.at(p).is_some()) }
 }
 
+
+#[tokio::test(flavor = "multi_thread")] async fn every_client_hears_how_far_the_memory_is_written_held_behind_and_caught_up() {
+    let r = rig("progress", 40, StandIn { skip: AtomicUsize::new(1), ..Default::default() }).await;
+    let _ = r.bots.world().await;
+    // nothing written: the long messages are behind, the short ones are their own lines already
+    let p = r.rc.measure(TH).await; let long = (0..40).filter(|i| i % 7 == 3 && i % 5 != 4).count() as u64;
+    assert_eq!((p.messages, p.total, p.behind), (40, progress::lines(40), long)); assert_eq!(p.done, 40 - long); assert!(p.left > 0 && p.view > 0 && p.retry.is_none());
+    let mut frames = r.hub.frames.subscribe();
+    // the outage holds the thread: its words say so, with the time it is asked again, and the clients hear it
+    assert_eq!(r.rc.round().await, 0);
+    let v = progress::shown(&r.hub.cfg.home, TH).expect("published");
+    assert_eq!(v["state"], "held", "{v}"); assert!(v["status"].as_str().unwrap().starts_with("held: retry at "), "{v}"); assert!(v["retryAt"].as_u64().unwrap() > 0);
+    let mut heard = false; while let Ok(f) = frames.try_recv() { if f["t"] == "memory" && f["thread"] == TH { heard = true } } assert!(heard, "a memory frame");
+    // the hold passed: the compactor writes everything and the words say caught up, every line there
+    r.rc.hold.lock().unwrap().clear(); r.build().await; r.rc.round().await;
+    let v = progress::shown(&r.hub.cfg.home, TH).unwrap();
+    assert_eq!((v["state"].as_str(), v["pct"].as_u64(), v["status"].as_str()), (Some("caught"), Some(100), Some("caught up")), "{v}");
+    assert_eq!(v["done"], v["total"]); assert!(v["line"].as_str().unwrap().starts_with("memory: 100% written · view "), "{v}");
+    // the phones' and the web's thread row carries it; a thread without infinite context has none
+    { let g = r.hub.model().await; assert_eq!(crate::data::thread_row_memory(&r.hub, &g, TH), v); }
+    // the bot's Settings show it too
+    let pg = crate::bots::bot_page_from(&r.hub, BOT, "settings", 1000, 0).await.unwrap(); assert_eq!(pg["recall"]["progress"], v);
+    // turned off: the words go, and the clients hear it
+    r.hub.commit_many(&[json!({"$":"SettingSet","key":"recall.bots","value":"off","at":1700000001})]).await.unwrap();
+    r.rc.round().await; assert!(progress::shown(&r.hub.cfg.home, TH).is_none());
+    { let g = r.hub.model().await; assert!(crate::data::thread_row_memory(&r.hub, &g, TH).is_null()); }
+}

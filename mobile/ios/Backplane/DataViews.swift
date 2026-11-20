@@ -1001,6 +1001,7 @@ struct DataThreadView: View {
                            font: UIFontMetrics(forTextStyle: .body).scaledFont(for: Mono.uiFont(size: 14)), caret: caret)
                     .padding(.horizontal, 10).padding(.vertical, 9).frame(minHeight: 44, alignment: .topLeading).dbox(BackplaneDesign.accent)
                     .accessibilityLabel(Tr.t("Message"))
+                if let m = thread?.memory { MemoryBar(m: m) }
                 HStack(spacing: 6) {
                     if client.has("picker") || thread?.chip.isEmpty == false {
                         Button { modelSheet = true } label: { Text(chip).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1).padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).dbox(fill: BackplaneDesign.panel) }
@@ -1596,3 +1597,20 @@ struct AskPairView: View {
 
 /// A machine's word with " · away" when it does not answer (the hub's `away`), in the language on show.
 func dAway(_ label: String, _ away: Bool) -> String { away ? Tr.ios_machine_away(label: label) : label }
+
+/// Infinite context: the thread's memory bar over the composer's chips, in the hub's words (`thread.memory`).
+struct MemoryBar: View {
+    let m: DMemory
+    var body: some View {
+        HStack(spacing: 8) {
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(BackplaneDesign.line)
+                    Rectangle().fill(m.state == "held" ? BackplaneDesign.warn : m.state == "caught" ? BackplaneDesign.ok : BackplaneDesign.accent).frame(width: max(m.fill > 0 ? 2 : 0, g.size.width * m.fill))
+                }
+            }.frame(width: 48, height: 4)
+            Text(Tr.t(m.line)).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
+            Text(Tr.t(m.status)).dmono(11).foregroundStyle(m.state == "held" ? BackplaneDesign.warn : BackplaneDesign.faint).lineLimit(1)
+        }.accessibilityElement(children: .combine).accessibilityIdentifier("data.thread.memory")
+    }
+}

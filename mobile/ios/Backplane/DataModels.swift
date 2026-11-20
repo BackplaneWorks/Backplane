@@ -213,13 +213,22 @@ struct DThread: Codable, Equatable, Identifiable, NestedThread {
     var status: String   // the sidebar dot's word (feature status): finished is the desktop's green dot (a turn done, not yet settled); "" from an older hub
     var mark: DMark?     // the machine it runs on when it is another one; nil for this hub's own
     var swarm: String    // the swarm (its room) this thread is a member of, "" for none (feature swarm): left out of its project's list
-    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, pinOrder, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent, history, status, mark, swarm }
+    var memory: DMemory? // infinite context: how far its memory is written (the hub's bots/recall/progress.rs); nil for a thread without it
+    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, pinOrder, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent, history, status, mark, swarm, memory }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); project = c.str(.project); title = c.str(.title); state = c.str(.state); updatedAt = c.int(.updatedAt)
         pinned = c.bool(.pinned); pinOrder = c.int(.pinOrder); settled = c.bool(.settled); settledAt = c.int(.settledAt); archived = c.bool(.archived)
         provider = c.str(.provider); model = c.str(.model); effort = c.str(.effort); runtime = c.str(.runtime); chip = c.str(.chip); preview = c.str(.preview); waiting = c.int(.waiting); parent = c.str(.parent); history = c.bool(.history); status = c.str(.status); mark = try? c.decode(DMark.self, forKey: .mark); swarm = c.str(.swarm)
+        memory = try? c.decode(DMemory.self, forKey: .memory)
     }
+}
+/// A thread's memory progress, every word the hub's: the bar is `done` of `total`, `state` caught | behind | held.
+struct DMemory: Codable, Equatable, Hashable {
+    var done: Int; var total: Int; var state: String; var line: String; var status: String; var lines: String; var viewLine: String
+    enum CodingKeys: String, CodingKey { case done, total, state, line, status, lines, viewLine }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); done = c.int(.done); total = c.int(.total); state = c.str(.state); line = c.str(.line); status = c.str(.status); lines = c.str(.lines); viewLine = c.str(.viewLine) }
+    var fill: Double { total > 0 ? min(1, Double(done) / Double(total)) : 1 }
 }
 
 // replies

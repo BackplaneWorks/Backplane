@@ -72,7 +72,7 @@ pub async fn page_from(hub: &Arc<Hub>, bot: &str, tab: &str, now: u64, from: usi
     if on == "settings" { v["catpick"] = crate::present::onboard_uber::cat_row(&format!("bcn.{bot}"), &format!("bcc.{bot}"), &me.name, "", (!me.auto).then_some(me.look), &me.color, "bot-cat", Some("Save name"), ""); }
     if tab_of_world(&w, bot, on, now, from, &mut v) {
         // Settings: the memory tree's state (its engine reads the world itself)
-        if on == "settings" && v["recall"].is_object() { drop(w); if let Some(rc) = b.recall.get() { let (n, lines, left) = rc.stats(&me.thread).await; v["recall"]["messages"] = json!(n); v["recall"]["lines"] = json!(lines); v["recall"]["left"] = json!(left); } }
+        if on == "settings" && v["recall"].is_object() { drop(w); if let Some(rc) = b.recall.get() { let (n, lines, left) = rc.stats(&me.thread).await; v["recall"]["messages"] = json!(n); v["recall"]["lines"] = json!(lines); v["recall"]["left"] = json!(left); if v["recall"]["on"] == true && rc.on(&me.thread) { v["recall"]["progress"] = rc.publish(&me.thread, false).await; } } }
         return Some(v)
     }
     match on {

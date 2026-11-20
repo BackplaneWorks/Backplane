@@ -400,11 +400,29 @@ fn recall_row(cx: &mut Context<Backplane>, light: bool, r: &Value) -> AnyElement
     let c = |n: &str| theme::color(light, n);
     let on = r["on"] != false;
     let label = if on { t("gpui.bots.recall.on") } else { t("gpui.bots.recall.off") };
-    let stats = match (r["messages"].as_u64(), r["lines"].as_u64(), r["left"].as_u64()) { (Some(m), Some(l), Some(n)) => tf("gpui.bots.recall.stats", &[("messages", m.into()), ("lines", l.into()), ("left", n.into())]), _ => String::new() };
+    // with the hub's progress (its bars say the lines written and what is left) the old words would count the same lines differently
+    let stats = if r["progress"].is_object() { String::new() } else { match (r["messages"].as_u64(), r["lines"].as_u64(), r["left"].as_u64()) { (Some(m), Some(l), Some(n)) => tf("gpui.bots.recall.stats", &[("messages", m.into()), ("lines", l.into()), ("left", n.into())]), _ => String::new() } };
     div().flex().flex_col().gap_1().child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(t("gpui.bots.recall")))
         .child(div().flex().gap_2().items_center().child(btn(cx, light, "recall-toggle".into(), label, on, recall_cmd, (if on { "off" } else { "on" }).to_string()))
             .child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(stats)))
+        .children(recall_progress(light, &r["progress"]))
         .child(div().max_w(px(520.)).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(t("gpui.bots.recall.note"))).into_any_element()
+}
+/// A meter's fill, 0..1, from the hub's numbers (`done` of `total`).
+pub fn fill(done: &Value, total: &Value) -> f64 { match (done.as_f64(), total.as_f64()) { (Some(d), Some(t)) if t > 0. => (d / t).clamp(0., 1.), (Some(_), Some(_)) => 1., _ => 0. } }
+/// The memory tree's progress (the hub's bots/recall/progress.rs): the lines written of the tree's, caught up, behind or held with its retry
+/// time, and the view against its limit. Every word is the hub's.
+fn recall_progress(light: bool, p: &Value) -> Option<AnyElement> {
+    if !p.is_object() { return None }
+    let c = |n: &str| theme::color(light, n);
+    let meter = |f: f64, tone: &str| div().w(px(320.)).h(px(6.)).flex_shrink_0().bg(c("line")).child(div().h_full().w(px(super::halt::meter_w(320., f))).bg(c(tone)));
+    let held = p["state"] == "held";
+    let tone = if held { "warn" } else if p["state"] == "caught" { "ok" } else { "accent" };
+    let words = |a: &str, b: &str| div().flex().gap_2().text_size(crate::scale::tpx(11.)).child(div().text_color(c(if held && a == "status" { "warn" } else { "text" })).child(trs(&string(p, a)))).child(div().text_color(c("faint")).child(trs(&string(p, b))));
+    Some(crate::ui::with_rect(div().id("recall-progress"), || "bot:recall-progress".to_string()).flex().flex_col().gap_1().mt_1()
+        .child(meter(fill(&p["done"], &p["total"]), tone)).child(words("status", "lines"))
+        .child(meter(fill(&p["view"], &p["viewMax"]), if p["over"] == true { "warn" } else { "dim" })).child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(trs(&string(p, "viewLine"))))
+        .into_any_element())
 }
 fn recall_cmd(v: &str) -> Command { act("recall-toggle", v) }
 /// The persona box of one bot: its name carries the bot, so another bot's page never shows this one's text.

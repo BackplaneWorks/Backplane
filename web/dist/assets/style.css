@@ -603,6 +603,23 @@ html.light .bp-code-block { background: var(--panel); }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.bp-composer-memory {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 1;
+  min-width: 0;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bp-memory-meter { width: 40px; height: 4px; flex-shrink: 0; background: var(--line); }
+.bp-memory-fill { height: 100%; background: var(--accent); }
+.bp-memory-fill[data-state="held"] { background: var(--warn); }
+.bp-memory-fill[data-state="caught"] { background: var(--ok); }
 .bp-composer-btns { display: flex; gap: 6px; flex-shrink: 0; }
 .bp-send-btn { padding: 5px 16px; }
 

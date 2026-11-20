@@ -100,7 +100,9 @@ fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<Stri
     // the picker's title says it all)
     let chip = combo["short"].as_str().filter(|c| !c.is_empty()).map(str::to_string).unwrap_or_else(|| ext::chip(&t.provider, &model, &effort));
     Some(json!({"id":id,"project":t.project,"title":t.title,"state":state,"updatedAt":ms(t.activity.max(t.created)),"pinned":pinned,"pinOrder":pin_order,"settled":settled,"settledAt":settled_at,"archived":t.archived,
-        "provider":t.provider,"model":model,"effort":effort,"speed":setting_of(&format!("speed.{id}")),"runtime":runtime,"chip":chip,"preview":preview,"waiting":waiting,"status":status,"parent":setting_of(&format!("thread.parent.{id}")),"history":t.project == crate::sidebar::SCRATCH,"swarm":swarm}))
+        "provider":t.provider,"model":model,"effort":effort,"speed":setting_of(&format!("speed.{id}")),"runtime":runtime,"chip":chip,"preview":preview,"waiting":waiting,"status":status,"parent":setting_of(&format!("thread.parent.{id}")),"history":t.project == crate::sidebar::SCRATCH,"swarm":swarm,
+        // infinite context (bots/recall/progress.rs): how far its memory is written, the composer's bar; null for a thread without it
+        "memory":crate::bots::recall::progress::shown(&hub.cfg.home, id).unwrap_or(Value::Null)}))
 }
 fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) -> Option<Value> {
     let settled = m.threads.iter().filter(|(i, t)| t.project == id && !t.deleted && !t.archived && flags_of(i).1).count();
@@ -741,6 +743,15 @@ fn far_seed(hub: &Hub, subs: &mut Subs, th: &str) {
     let turn = hub.mirrors().shown(|far| machines::holder(far, th).map_or(String::new(), |(_, st)| st.threads.get(th).map_or(String::new(), |t| turn_word(t.turn.word()).to_string())));
     subs.far_rows.insert(th.to_string(), (page.rows.iter().filter(|r| r.thread == th).map(|r| r.id.clone()).collect(), turn));
 }
+#[cfg(test)] pub(crate) fn thread_row_memory(hub: &Hub, m: &crate::model::Model, id: &str) -> Value { thread_json(hub, m, id, &HashMap::new()).map_or(Value::Null, |t| t["memory"].clone()) }
+/// A thread's row again for the lists and the thread's own subscriptions, when its memory progress moved (no log line says so).
+async fn memory_pushes(hub: &Hub, th: &str, subs: &Subs) -> Vec<Value> {
+    let targets: Vec<u64> = subs.lists().into_iter().chain(subs.threads(th)).collect();
+    if targets.is_empty() || th.is_empty() { return vec![] }
+    let g = hub.model().await; let asks = open_ask_counts(hub);
+    let Some(t) = thread_json(hub, &g, th, &asks) else { return vec![] };
+    targets.into_iter().map(|sub| d(sub, "thread", json!({"thread":t}))).collect()
+}
 /// Streamed text of a running turn.
 fn live_pushes(f: &Value, subs: &mut Subs) -> Vec<Value> {
     let th = s(f, "thread").to_string(); let mut out = vec![];
@@ -958,6 +969,10 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
             }
             f = frames.recv() => {
                 if let Ok(f) = f {
+                    // a thread's memory progress moved (bots/recall/progress.rs), with no line in the log: its row again, with `memory`
+                    if f["t"] == "memory" { for p in memory_pushes(&hub, s(&f, "thread"), &subs).await {
+                        if !send_frame(&mut tx, &hub, browser.as_ref(), conn.client, pack(&p, json_mode)).await? { return Ok(()) }
+                    } }
                     for p in live_pushes(&f, &mut subs) {
                         if !send_frame(&mut tx, &hub, browser.as_ref(), conn.client, pack(&p, json_mode)).await? { return Ok(()) }
                     }
