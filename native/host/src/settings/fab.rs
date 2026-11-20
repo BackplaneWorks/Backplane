@@ -525,7 +525,7 @@ mod tests {
         let tick = std::cell::Cell::new(0u64);
         let moved = |p: &Path| {
             let open = |d: &Path| -> Option<std::fs::File> {
-                #[cfg(windows)] { use std::os::windows::fs::OpenOptionsExt; std::fs::OpenOptions::new().access_mode(0x0100).custom_flags(0x0200_0000).open(d).ok() }
+                #[cfg(windows)] { use std::os::windows::fs::OpenOptionsExt as W; let mut o = std::fs::OpenOptions::new(); W::access_mode(&mut o, 0x0100); W::custom_flags(&mut o, 0x0200_0000); o.open(d).ok() } // the std trait by name: plat::windows has a stand-in OpenOptionsExt in scope too
                 #[cfg(not(windows))] { std::fs::File::open(d).ok() }
             };
             tick.set(tick.get() + 1); let t = std::time::SystemTime::now() - std::time::Duration::from_secs(100_000) + std::time::Duration::from_secs(tick.get() * 10);
