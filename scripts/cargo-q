@@ -5,7 +5,11 @@
 HERE=$(cd "$(dirname "$0")" && pwd); . "$HERE/lib-buildslot.sh"
 if [ -z "${BQ_HELD:-}" ]; then export BQ_HELD=1; waiting() { echo "cargo-q: queued behind ${1:-other} local builds (building locally when one ends)" >&2; }
   # every slot taken: a build or test that gives the same result anywhere may run on a Boat box, but only after a long wait or with memory low (lib-buildslot.sh bq_offload_now; BP_NO_BOAT=1 forces local)
-  bo_cargo_ok "$@" && bo_ready && export BQ_OFFLOAD=1; bq_run waiting "$0" "$@"; exit $?; fi
+  bo_cargo_ok "$@" && bo_ready && export BQ_OFFLOAD=1
+  # no local slot at all (BUILD_SLOTS=0: the gate) and this command cannot go to a Boat box (--no-run, --target-dir, ... or Boat down): it would
+  # wait forever; say so instead
+  [ "$(bq_slots)" != 0 ] || [ -n "${BQ_OFFLOAD:-}" ] || [ -n "${BQ_MAIN:-}" ] || { echo "cargo-q: BUILD_SLOTS=0 and this command cannot run on a Boat box ($(bo_ready && echo "its arguments: --no-run, --target-dir, --config, a path outside the worktree" || echo "Boat is down or off")): not waiting forever" >&2; exit 2; }
+  bq_run waiting "$0" "$@"; exit $?; fi
 # started by bq_run under a Boat lease: run there, with the same exit code and the same artifacts in the same places
 if [ -n "${BP_BOAT_IDX:-}" ]; then bo_cargo "$@"; rc=$?; [ "$rc" = 98 ] && exit 98; exit "$rc"; fi
 bq_cc
