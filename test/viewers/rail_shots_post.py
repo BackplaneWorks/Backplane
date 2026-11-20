@@ -77,10 +77,14 @@ def parse_client_log(log_path: Path) -> dict:
     rail_inventory: list[dict] | None = None
     current_mark = ""
     mark_seqs: dict[str, int] = {}
+    mark_times: dict[str, float] = {}
     mark_before_rail: dict[str, dict | None] = {}
     presses_by_mark: dict[str, list[dict]] = {}
     keys_by_mark: dict[str, list[dict]] = {}
     palette_reads_by_mark: dict[str, list[dict]] = {}
+    rail_reads_by_mark: dict[str, list[dict]] = {}
+    composer_reads_by_mark: dict[str, list[dict]] = {}
+    auto_attach_events: list[dict] = []
     shots: dict[str, dict] = {}
     settled_tags: dict[str, dict] = {}
     kicad_tags: dict[str, dict] = {}
@@ -95,9 +99,13 @@ def parse_client_log(log_path: Path) -> dict:
             "presses": presses_by_mark,
             "keys": keys_by_mark,
             "palette_reads": palette_reads_by_mark,
+            "rail_reads": rail_reads_by_mark,
+            "composer_reads": composer_reads_by_mark,
             "mark_seqs": mark_seqs,
+            "mark_times": mark_times,
             "mark_before_rail": mark_before_rail,
             "rail_events": rail_events,
+            "auto_attach_events": auto_attach_events,
             "refused_shots": refused_shots,
             "rail_metric_seen": rail_metric_seen,
             "rail_inventory": rail_inventory,
@@ -135,6 +143,8 @@ def parse_client_log(log_path: Path) -> dict:
             current_mark = ev.get("name") or ""
             if current_mark:
                 mark_seqs[current_mark] = ev_seq
+                if isinstance(ev.get("t_ms"), (int, float)):
+                    mark_times[current_mark] = float(ev["t_ms"])
                 mark_before_rail[current_mark] = dict(rail_drawn) if rail_drawn is not None else None
         elif kind == "keys":
             keys_by_mark.setdefault(current_mark, []).append({
@@ -152,6 +162,25 @@ def parse_client_log(log_path: Path) -> dict:
                 "seq": ev_seq,
                 "snapshot": parsed_pal,
             })
+        elif kind == "read" and ev.get("what") == "rail":
+            rail_reads_by_mark.setdefault(current_mark, []).append({
+                "supported": bool(ev.get("supported")),
+                "seq": ev_seq,
+            })
+        elif kind == "read" and ev.get("what") == "composer":
+            composer_reads_by_mark.setdefault(current_mark, []).append({
+                "supported": bool(ev.get("supported")),
+                "text": str(ev.get("text") or ""),
+                "seq": ev_seq,
+            })
+        elif (
+            "kicad_attach" in ev
+            or "kicad_auto_keys_taken" in ev
+            or "kicad_keys_flip" in ev
+            or "kicad_ev" in ev
+            or "kicad_auto_to_deliberate" in ev
+        ):
+            auto_attach_events.append({"seq": ev_seq, "mark": current_mark, "event": ev})
         elif kind in ("press", "click"):
             if kind == "press":
                 delivered = bool(ev.get("found"))
@@ -215,9 +244,13 @@ def parse_client_log(log_path: Path) -> dict:
         "presses": presses_by_mark,
         "keys": keys_by_mark,
         "palette_reads": palette_reads_by_mark,
+        "rail_reads": rail_reads_by_mark,
+        "composer_reads": composer_reads_by_mark,
         "mark_seqs": mark_seqs,
+        "mark_times": mark_times,
         "mark_before_rail": mark_before_rail,
         "rail_events": rail_events,
+        "auto_attach_events": auto_attach_events,
         "refused_shots": refused_shots,
         "rail_metric_seen": rail_metric_seen,
         "rail_inventory": rail_inventory,
@@ -474,22 +507,21 @@ def build_strips(outdir: Path, kinds: list[str], parsed: dict[str, dict], cleare
         canvas.save(outdir / "rails.png")
 
 
-def evaluate_b1_kind(kind: str, parsed_kind: dict, rail_map: dict[str, dict]) -> dict:
-    """Evaluate Rule B1 (partial: 10 viewer rail entries; omits Simulation, Terminal, Commands) for one project kind.
+def evaluate_b1_kind(kind: str, parsed_kind: dict, rail_map: dict[str, dict], embed: bool = False) -> dict:
+    """Evaluate Rule B1 (viewer rail entries + disabled entries + Terminal, Commands, and Simulation under --embed).
 
     Requires client-drawn rail lighting via `GPUI_METRIC {"event":"rail", ...}` (PR #1359).
-    Every check is strictly bound to:
-      1. a known pre-action starting snapshot (`before_rail`) with the target in `entries` (and `disabled` when disabled),
-      2. observed input delivery (press / bare key / palette read + Enter),
-      3. a successful settle (`settled == True`, `state == "ready"`),
-      4. a FRESH post-input `event == "rail"` snapshot emitted strictly after the input (`after_seq > input_seq`).
-    When `event == "rail"` is absent, returns status="unavailable".
+    Disabled entries use `{"read":"rail"}` (`supported: true`) for a fresh post-input rail snapshot;
+    `disabled_press` records delivery to the drawn disabled row (or `"unavailable"` if undelivered),
+    and `disabled_palette` distinguishes `"target_absent"` from `"another_command_selected_and_run"`.
     """
+    omitted = [] if embed else list(M.B1_OMITTED_ENTRIES)
     if not parsed_kind.get("rail_metric_seen"):
         return {
             "status": "unavailable",
             "reason": "client did not emit GPUI_METRIC event=rail (requires PR #1359)",
-            "omitted_entries": list(M.B1_OMITTED_ENTRIES),
+            "omitted_entries": omitted,
+            "disabled_entries_measured": False,
             "entries": {},
         }
 
@@ -497,6 +529,8 @@ def evaluate_b1_kind(kind: str, parsed_kind: dict, rail_map: dict[str, dict]) ->
     presses_by_mark = parsed_kind.get("presses") or {}
     keys_by_mark = parsed_kind.get("keys") or {}
     pal_reads_by_mark = parsed_kind.get("palette_reads") or {}
+    rail_reads_by_mark = parsed_kind.get("rail_reads") or {}
+    kicad_tags = parsed_kind.get("kicad_tags") or {}
     mark_before_rail = parsed_kind.get("mark_before_rail") or {}
     rail_events: list[tuple[int, dict]] = parsed_kind.get("rail_events") or []
 
@@ -621,30 +655,378 @@ def evaluate_b1_kind(kind: str, parsed_kind: dict, rail_map: dict[str, dict]) ->
                 "failed": failed,
             }
         else:
-            # TODO(https://github.com/BackplaneWorks/Backplane/issues/1317): once PR #1359 lands and a
-            # one-shot on-demand rail snapshot request is wired in the rail paint path, re-enable
-            # disabled press/key/palette assertions. When re-enabling disabled_palette, distinguish
-            # "target absent from the palette" from "another command was selected and run".
-            entries_out[eid] = {
-                "label": label,
-                "disabled": True,
-                "status": "unavailable",
-                "passed": None,
-                "reason": "disabled-entry assertions require a one-shot on-demand rail snapshot after PR #1359 lands",
-                "checks": {
-                    "disabled_press": "unavailable",
-                    "disabled_key": "unavailable",
-                    "disabled_palette": "unavailable",
-                },
-                "failed": [],
-            }
+            def check_disabled_noop(mark_name: str, tag_name: str, input_seq: int | None) -> bool | str:
+                if input_seq is None:
+                    return "unavailable"
+                rreads = [r for r in rail_reads_by_mark.get(mark_name, []) if r.get("supported") and int(r.get("seq") or 0) > input_seq]
+                if not rreads:
+                    return "unavailable"
+                rec = settled_tags.get(tag_name)
+                if not rec or rec.get("settled") is not True or rec.get("state") != "ready":
+                    return False
+                before = rail_lists(mark_before_rail.get(mark_name))
+                if before is None:
+                    return False
+                b_lit, b_entries, b_dis = before
+                if label not in b_entries or label not in b_dis or b_lit != []:
+                    return False
+                after = rail_lists(fresh_rail_between(int(rreads[-1].get("seq") or 0), int(rec.get("seq") or 0)))
+                if after is None:
+                    return "unavailable"
+                a_lit, a_entries, a_dis = after
+                if label not in a_entries or label not in a_dis or a_lit != []:
+                    return False
+                return viewer_closed(rec.get("viewer") or {})
 
+            # 1. disabled_press: delivery to the drawn disabled row recorded (else unavailable) + fresh read:rail no-op
+            m_dp = f"b1:disabled-press:{eid}"
+            p_dp = [p for p in presses_by_mark.get(m_dp, []) if p.get("id") == rail_id and p.get("found")]
+            dp_res: bool | str = check_disabled_noop(m_dp, f"b1-disabled-press-{eid}", p_dp[0].get("seq") if p_dp else None) if p_dp else "unavailable"
+
+            # 2. disabled_key: bare key delivered + fresh read:rail no-op
+            m_dk = f"b1:disabled-key:{eid}"
+            k_dk = [k for k in keys_by_mark.get(m_dk, []) if k.get("keys") == bare_key]
+            dk_res: bool | str = check_disabled_noop(m_dk, f"b1-disabled-key-{eid}", k_dk[0].get("seq") if k_dk else None)
+
+            # 3. disabled_palette: distinguish target_absent from another_command_selected_and_run and target_present
+            m_dpal = f"b1:disabled-palette:{eid}"
+            preads = [r for r in pal_reads_by_mark.get(m_dpal, []) if r.get("supported") and (r.get("snapshot") or {}).get("open") is True]
+            pal_status = "unavailable"
+            dpal_res: bool | str = "unavailable"
+            if preads:
+                snap = preads[-1].get("snapshot") or {}
+                sel_id = str(snap.get("selected_id") or "")
+                cnt = int(snap.get("count") or 0)
+                read_seq = int(preads[-1].get("seq") or 0)
+                enters = [k for k in keys_by_mark.get(m_dpal, []) if k.get("keys") == "enter" and int(k.get("seq") or 0) > read_seq]
+                if sel_id == f"rail:{eid}":
+                    pal_status = "target_present"
+                    dpal_res = check_disabled_noop(m_dpal, f"b1-disabled-palette-{eid}", enters[0].get("seq")) if enters else False
+                elif cnt > 0 and enters:
+                    pal_status = "another_command_selected_and_run"
+                    dpal_res = "unavailable"
+                else:
+                    pal_status = "target_absent"
+                    dpal_res = check_disabled_noop(m_dpal, f"b1-disabled-palette-{eid}", read_seq)
+
+            dis_checks = {
+                "disabled_press": dp_res,
+                "disabled_key": dk_res,
+                "disabled_palette": dpal_res,
+                "disabled_palette_status": pal_status,
+            }
+            measured_bools = [(k, v) for k, v in (("disabled_press", dp_res), ("disabled_key", dk_res), ("disabled_palette", dpal_res)) if isinstance(v, bool)]
+            if not measured_bools:
+                entries_out[eid] = {
+                    "label": label,
+                    "disabled": True,
+                    "status": "unavailable",
+                    "passed": None,
+                    "reason": "no disabled-entry checks had fresh read:rail + delivery evidence",
+                    "checks": dis_checks,
+                    "failed": [],
+                }
+            else:
+                failed = [k for k, v in measured_bools if not v]
+                entries_out[eid] = {
+                    "label": label,
+                    "disabled": True,
+                    "status": "measured",
+                    "passed": len(failed) == 0,
+                    "checks": dis_checks,
+                    "failed": failed,
+                }
+
+    # Tool entries: Terminal (toggles its panel via rail.lit) and Commands (opens the palette via read:palette)
+    def check_terminal_step(mark_name: str, tag_name: str, input_seq: int | None, expect_open: bool) -> bool | str:
+        if input_seq is None:
+            return "unavailable"
+        rreads = [r for r in rail_reads_by_mark.get(mark_name, []) if r.get("supported") and int(r.get("seq") or 0) > input_seq]
+        rec = settled_tags.get(tag_name)
+        if not rreads or not rec:
+            return "unavailable"
+        after = rail_lists(fresh_rail_between(int(rreads[-1].get("seq") or 0), int(rec.get("seq") or 0)))
+        if after is None:
+            return "unavailable"
+        a_lit, a_entries, _ = after
+        if "Terminal" not in a_entries:
+            return False
+        return ("Terminal" in a_lit) if expect_open else ("Terminal" not in a_lit)
+
+    if "b1:terminal-press-open" in presses_by_mark or "b1:terminal-key-open" in keys_by_mark:
+        tp_o = [p for p in presses_by_mark.get("b1:terminal-press-open", []) if p.get("id") == "rail:Terminal" and p.get("found")]
+        tp_c = [p for p in presses_by_mark.get("b1:terminal-press-close", []) if p.get("id") == "rail:Terminal" and p.get("found")]
+        tk_o = [k for k in keys_by_mark.get("b1:terminal-key-open", []) if k.get("keys") == "`"]
+        tk_c = [k for k in keys_by_mark.get("b1:terminal-key-close", []) if k.get("keys") in ("shift-escape", "`")]
+        t_checks = {
+            "press_open": check_terminal_step("b1:terminal-press-open", "b1-terminal-press-open", tp_o[0].get("seq") if tp_o else None, True),
+            "press_close": check_terminal_step("b1:terminal-press-close", "b1-terminal-press-close", tp_c[0].get("seq") if tp_c else None, False),
+            "key_open": check_terminal_step("b1:terminal-key-open", "b1-terminal-key-open", tk_o[0].get("seq") if tk_o else None, True),
+            "key_close": check_terminal_step("b1:terminal-key-close", "b1-terminal-key-close", tk_c[0].get("seq") if tk_c else None, False),
+        }
+        t_measured = [(k, v) for k, v in t_checks.items() if isinstance(v, bool)]
+        if t_measured:
+            t_failed = [k for k, v in t_measured if not v]
+            entries_out["terminal"] = {"label": "Terminal", "disabled": False, "status": "measured", "passed": len(t_failed) == 0, "checks": t_checks, "failed": t_failed}
+
+    if "b1:commands-press-open" in presses_by_mark or "b1:commands-press-open" in pal_reads_by_mark:
+        cp_o = [p for p in presses_by_mark.get("b1:commands-press-open", []) if p.get("id") == "rail:Commands" and p.get("found")]
+        pr_o = [r for r in pal_reads_by_mark.get("b1:commands-press-open", []) if r.get("supported")]
+        pr_c = [r for r in pal_reads_by_mark.get("b1:commands-escape-close", []) if r.get("supported")]
+        c_open = bool(cp_o and pr_o and (pr_o[-1].get("snapshot") or {}).get("open") is True) if (cp_o or pr_o) else "unavailable"
+        c_close = bool(pr_c and (pr_c[-1].get("snapshot") or {}).get("open") is False) if pr_c else "unavailable"
+        c_checks = {"press_open": c_open, "escape_close": c_close}
+        c_measured = [(k, v) for k, v in c_checks.items() if isinstance(v, bool)]
+        if c_measured:
+            c_failed = [k for k, v in c_measured if not v]
+            entries_out["commands"] = {"label": "Commands", "disabled": False, "status": "measured", "passed": len(c_failed) == 0, "checks": c_checks, "failed": c_failed}
+
+    # Simulation under --embed (when Simulation is present in this kind's rail)
+    if embed and "simulation" in rail_map and ("b1:sim-press-open" in presses_by_mark or "b1-sim-open" in kicad_tags):
+        sp_o = [p for p in presses_by_mark.get("b1:sim-press-open", []) if p.get("id") == "rail:Simulation" and p.get("found")]
+        k_sim = kicad_tags.get("b1-sim-open") or {}
+        rec_sim = settled_tags.get("b1-sim-open") or {}
+        rreads_sim = [r for r in rail_reads_by_mark.get("b1:sim-press-open", []) if r.get("supported")]
+        sim_lit_ok = False
+        if rreads_sim and rec_sim:
+            after_s = rail_lists(fresh_rail_between(int(rreads_sim[-1].get("seq") or 0), int(rec_sim.get("seq") or 0)))
+            if after_s is not None:
+                sim_lit_ok = "Simulation" in after_s[0]
+        sim_frame_ok = bool((rec_sim.get("viewer") or {}).get("sim_frame")) or any(
+            isinstance(f, dict) and f.get("kind") == "SIMULATOR" for f in (k_sim.get("frames") or [])
+        )
+        sim_ok = bool(sp_o and (sim_lit_ok or sim_frame_ok))
+        entries_out["simulation"] = {
+            "label": "Simulation",
+            "disabled": False,
+            "status": "measured",
+            "passed": sim_ok,
+            "checks": {"press_open": sim_ok, "sim_lit": sim_lit_ok, "sim_frame": sim_frame_ok},
+            "failed": [] if sim_ok else ["press_open"],
+        }
+
+    dis_measured = any(e.get("disabled") and e.get("status") == "measured" for e in entries_out.values())
+    status = "measured" if (not omitted and dis_measured) else "measured_partial"
     return {
-        "status": "measured_partial",
-        "omitted_entries": list(M.B1_OMITTED_ENTRIES),
-        "disabled_entries_measured": False,
+        "status": status,
+        "omitted_entries": omitted,
+        "disabled_entries_measured": dis_measured,
         "entries": entries_out,
     }
+
+
+def evaluate_auto_attach_gates(
+    outdir: Path,
+    parsed_full: dict,
+    caps_full: dict[str, dict],
+    embed: bool = False,
+    cold_budget_ms: float = 15000.0,
+    warm_budget_ms: float = 500.0,
+    probe_text: str = "bp-auto-keys",
+) -> list[dict]:
+    """Prepare the 4 default-embed auto-attach gates (unavailable until a build acts on hub viewer.mode).
+
+    Reuses the observations from `test/kicad_embed/embed_auto_attach_e2e.sh` without editing anything under test/kicad_embed/:
+      (a) auto-attach/keyboard: composer keeps every typed key during & after Board auto-attach; zero keyboard-steal signals;
+          hub `editor.kicad.<digest>` runtime.{holder, session, generation} recorded.
+      (b) auto-attach/cold-open: KiCad frame painted (>= 15) & in_gpui_tree within cold_budget_ms; pane pixel samples free of post-paint blank frames.
+      (c) auto-attach/one-attach-per-visit: `runtime.generation` unchanged across presenter updates during one Board visit.
+      (d) auto-attach/warm-return: returning to a thread whose KiCad is live attaches within 500 ms with zero ui:Edit presses.
+    """
+    if not embed:
+        return []
+
+    kicad_tags = parsed_full.get("kicad_tags") or {}
+    composer_reads = parsed_full.get("composer_reads") or {}
+    auto_events = parsed_full.get("auto_attach_events") or []
+    mark_seqs = parsed_full.get("mark_seqs") or {}
+    mark_times = parsed_full.get("mark_times") or {}
+    presses = parsed_full.get("presses") or {}
+    pane_samples = parsed_full.get("pane_samples") or []
+
+    k_cold = kicad_tags.get("auto-attach-cold") or {}
+    k_visit2 = kicad_tags.get("auto-attach-visit2") or {}
+    k_warm = kicad_tags.get("auto-attach-warm-return") or {}
+
+    auto_attach_seen = any(
+        (ev.get("event") or {}).get("kicad_attach") and (ev.get("event") or {}).get("why") == "auto"
+        for ev in auto_events
+    ) or (k_cold.get("why") == "auto" and k_cold.get("state") == "ready")
+
+    # Hub session runtime info (editor.kicad.<digest> runtime.{holder, session, generation})
+    cold_cap = caps_full.get("auto-attach-cold") or {}
+    visit2_cap = caps_full.get("auto-attach-visit2") or {}
+    cold_sessions = ((cold_cap.get("hub_kicad_sessions") or {}).get("sessions") or {})
+    visit2_sessions = ((visit2_cap.get("hub_kicad_sessions") or {}).get("sessions") or {})
+    cold_rt = next((s.get("runtime") for s in cold_sessions.values() if isinstance(s, dict) and isinstance(s.get("runtime"), dict)), None)
+    visit2_rt = next((s.get("runtime") for s in visit2_sessions.values() if isinstance(s, dict) and isinstance(s.get("runtime"), dict)), None)
+
+    unavail_reason = "client did not auto-attach KiCad on Board open (viewer.mode default-embed not yet active)"
+
+    gates: list[dict] = []
+
+    # (a) keyboard gate
+    if not auto_attach_seen:
+        gates.append({
+            "id": "auto-attach/keyboard",
+            "kind": "full",
+            "name": "Auto-attach keyboard stays in composer until pane click",
+            "outcome": "unavailable",
+            "note": unavail_reason,
+            "evidence": {"auto_attach_seen": False, "runtime": cold_rt},
+        })
+    else:
+        c_reads = [r for r in composer_reads.get("auto-attach:cold-open-start", []) if r.get("supported")]
+        comp_text = c_reads[-1].get("text", "") if c_reads else None
+        s0 = int(mark_seqs.get("auto-attach:cold-open-start") or 0)
+        s1 = int(mark_seqs.get("auto-attach:cold-open-end") or 10**9)
+        steals = []
+        for ae in auto_events:
+            seq = int(ae.get("seq") or 0)
+            if not (s0 <= seq <= s1):
+                continue
+            e = ae.get("event") or {}
+            if e.get("kicad_auto_keys_taken"):
+                steals.append("kicad_auto_keys_taken")
+            if isinstance(e.get("kicad_keys_flip"), dict) and e["kicad_keys_flip"].get("to") is True:
+                steals.append("kicad_keys_flip:true")
+            if str(e.get("kicad_ev") or "").startswith("focus"):
+                steals.append(f"kicad_ev:{e.get('kicad_ev')}")
+            if e.get("kicad_auto_to_deliberate"):
+                steals.append("kicad_auto_to_deliberate")
+        fails = []
+        if comp_text is None:
+            outcome, note = "unavailable", "composer read not captured"
+        else:
+            if probe_text not in comp_text:
+                fails.append(f"composer missing probe text {probe_text!r} (got {comp_text!r})")
+            if steals:
+                fails.append(f"KiCad took keyboard focus ({', '.join(steals)})")
+            if k_cold.get("keys") is True:
+                fails.append("kicad report shows keys=true before pane click")
+            outcome = "failed" if fails else "passed"
+            note = "; ".join(fails)
+        gates.append({
+            "id": "auto-attach/keyboard",
+            "kind": "full",
+            "name": "Auto-attach keyboard stays in composer until pane click",
+            "outcome": outcome,
+            "note": note,
+            "evidence": {"composer_text": comp_text, "steals": steals, "runtime": cold_rt},
+        })
+
+    # (b) cold-open gate
+    if not auto_attach_seen:
+        gates.append({
+            "id": "auto-attach/cold-open",
+            "kind": "full",
+            "name": "Auto-attach cold open paints frame in pane without blank handoff frames",
+            "outcome": "unavailable",
+            "note": unavail_reason,
+            "evidence": {"auto_attach_seen": False},
+        })
+    else:
+        t0 = mark_times.get("auto-attach:cold-open-start")
+        t1 = k_cold.get("t_ms") if isinstance(k_cold.get("t_ms"), (int, float)) else mark_times.get("auto-attach:cold-open-end")
+        cold_ms = round(float(t1) - float(t0), 1) if (t0 is not None and t1 is not None) else None
+        frames = k_cold.get("frames") or []
+        shown = next((f for f in frames if isinstance(f, dict) and f.get("xid") == k_cold.get("shown")), {})
+        painted = int(shown.get("painted") or 0)
+        in_tree = k_cold.get("in_gpui_tree") is True
+        blank_frames = sum(1 for ps in pane_samples if isinstance(ps, dict) and ps.get("non_flat") is False)
+        fails = []
+        if not in_tree:
+            fails.append("in_gpui_tree is not true")
+        if painted < 15:
+            fails.append(f"shown painted={painted} (< 15)")
+        if cold_ms is not None and cold_ms > cold_budget_ms:
+            fails.append(f"cold_open_ms={cold_ms} > {cold_budget_ms}")
+        if blank_frames > 0:
+            fails.append(f"{blank_frames} blank handoff frame(s) sampled")
+        gates.append({
+            "id": "auto-attach/cold-open",
+            "kind": "full",
+            "name": "Auto-attach cold open paints frame in pane without blank handoff frames",
+            "outcome": "failed" if fails else ("unavailable" if cold_ms is None else "passed"),
+            "note": "; ".join(fails) if fails else ("cold-open timing not recorded" if cold_ms is None else f"cold_open_ms={cold_ms}"),
+            "evidence": {"cold_open_ms": cold_ms, "in_gpui_tree": in_tree, "painted": painted, "blank_frames": blank_frames},
+        })
+
+    # (c) one attach per visit
+    if not auto_attach_seen:
+        gates.append({
+            "id": "auto-attach/one-attach-per-visit",
+            "kind": "full",
+            "name": "One attach per Board visit (runtime.generation stable across updates)",
+            "outcome": "unavailable",
+            "note": unavail_reason,
+            "evidence": {"auto_attach_seen": False},
+        })
+    else:
+        g1 = (cold_rt or {}).get("generation") if cold_rt else k_cold.get("generation")
+        g2 = (visit2_rt or {}).get("generation") if visit2_rt else k_visit2.get("generation")
+        s0 = int(mark_seqs.get("auto-attach:cold-open-start") or 0)
+        s2 = int(mark_seqs.get("auto-attach:visit2-end") or 10**9)
+        attaches = sum(
+            1 for ae in auto_events
+            if s0 <= int(ae.get("seq") or 0) <= s2 and (ae.get("event") or {}).get("kicad_attach")
+        )
+        if g1 is None or g2 is None:
+            outcome, note = "unavailable", "runtime.generation not recorded at both endpoints"
+        elif g1 != g2 or attaches > 1:
+            outcome, note = "failed", f"generation changed ({g1} -> {g2}) or multiple attaches ({attaches})"
+        else:
+            outcome, note = "passed", f"generation={g1} stable (attaches={attaches})"
+        gates.append({
+            "id": "auto-attach/one-attach-per-visit",
+            "kind": "full",
+            "name": "One attach per Board visit (runtime.generation stable across updates)",
+            "outcome": outcome,
+            "note": note,
+            "evidence": {"generation_before": g1, "generation_after": g2, "attaches": attaches, "runtime_before": cold_rt, "runtime_after": visit2_rt},
+        })
+
+    # (d) warm return within 0.5 s with no Edit press
+    if not auto_attach_seen:
+        gates.append({
+            "id": "auto-attach/warm-return",
+            "kind": "full",
+            "name": "Warm return to live KiCad thread attaches within 0.5 s with no Edit press",
+            "outcome": "unavailable",
+            "note": unavail_reason,
+            "evidence": {"auto_attach_seen": False},
+        })
+    else:
+        tw0 = mark_times.get("auto-attach:warm-return-start")
+        tw1 = k_warm.get("t_ms") if isinstance(k_warm.get("t_ms"), (int, float)) else mark_times.get("auto-attach:warm-return-end")
+        warm_ms = round(float(tw1) - float(tw0), 1) if (tw0 is not None and tw1 is not None) else None
+        edit_pressed = any(
+            p.get("id") == "ui:Edit" and p.get("found")
+            for p in presses.get("auto-attach:warm-return-start", [])
+        )
+        frames = k_warm.get("frames") or []
+        shown = next((f for f in frames if isinstance(f, dict) and f.get("xid") == k_warm.get("shown")), {})
+        painted = int(shown.get("painted") or 0)
+        in_tree = k_warm.get("in_gpui_tree") is True
+        fails = []
+        if edit_pressed:
+            fails.append("ui:Edit was pressed during warm return")
+        if not in_tree:
+            fails.append("in_gpui_tree is not true on warm return")
+        if painted <= 0:
+            fails.append(f"shown painted={painted} (<= 0)")
+        if warm_ms is not None and warm_ms > warm_budget_ms:
+            fails.append(f"warm_return_ms={warm_ms} > {warm_budget_ms}")
+        gates.append({
+            "id": "auto-attach/warm-return",
+            "kind": "full",
+            "name": "Warm return to live KiCad thread attaches within 0.5 s with no Edit press",
+            "outcome": "failed" if fails else ("unavailable" if warm_ms is None else "passed"),
+            "note": "; ".join(fails) if fails else ("warm-return timing not recorded" if warm_ms is None else f"warm_return_ms={warm_ms}"),
+            "evidence": {"warm_return_ms": warm_ms, "in_gpui_tree": in_tree, "painted": painted, "edit_pressed": edit_pressed},
+        })
+
+    return gates
 
 
 def evaluate_scorecard(
@@ -1833,7 +2215,7 @@ def main(argv: list[str] | None = None) -> int:
             "rail": rail_map,
             "rail_metric_seen": bool(p.get("rail_metric_seen")),
             "rail_inventory": p.get("rail_inventory"),
-            "b1_checks": evaluate_b1_kind(kind, p, rail_map),
+            "b1_checks": evaluate_b1_kind(kind, p, rail_map, embed=embed),
             "pages": pages_summary,
         }
 
@@ -1848,7 +2230,8 @@ def main(argv: list[str] | None = None) -> int:
         embed_actions=embed_actions_by_kind.get("full"),
     ) if "full" in kinds else []
 
-    extra_checks = evaluate_extra_checks(outdir, kinds, parsed, captures_by_kind, embed=embed)
+    auto_attach_gates = evaluate_auto_attach_gates(outdir, parsed.get("full", {}), captures_by_kind.get("full", {}), embed=embed) if "full" in kinds else []
+    extra_checks = evaluate_extra_checks(outdir, kinds, parsed, captures_by_kind, embed=embed) + auto_attach_gates
 
     if harness_errors or any(t["outcome"] == "harness_failed" for t in scorecard_tasks):
         overall = "harness_failed"
@@ -1881,6 +2264,7 @@ def main(argv: list[str] | None = None) -> int:
         "kinds": kinds_out,
         "scorecard_tasks": scorecard_tasks,
         "extra_checks": extra_checks,
+        "auto_attach_gates": auto_attach_gates,
     }
     (outdir / "steps.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
 
