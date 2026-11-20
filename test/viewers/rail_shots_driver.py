@@ -390,25 +390,14 @@ def trigger_sim_run(disp: str, last_kicad: dict, kind_out: Path) -> None:
         af.write(json.dumps(rec, separators=(",", ":")) + "\n")
 
 
-def query_hub_kicad_sessions(port: str, token_file: str, bun_bin: str) -> dict:
-    """Read `editor.kicad.<digest>` sessions from this run's hub via hub_rpc.mjs.
+def _parse_hub_kicad_sessions_output(out: str) -> dict:
+    """Parse stdout of `hub_rpc.mjs` after a `hub.status` probe on `/ws?view=1`.
 
-    Sends a real RPC (`threads.list`) so we only mark `inventory_complete: True` after a confirmed
-    hub round-trip; any RPC error or malformed `editor.kicad.*` INFO line fails closed (`ok: False`).
+    On `/ws?view=1`, the hub flushes `view_info_frame` (every `editor.kicad.<digest>` entry)
+    before servicing subsequent RPCs, so a confirmed `hub.status` reply (`ok: true`, dict `result`)
+    with zero `INFO editor.kicad.*` lines is a genuinely empty session inventory, distinct from
+    an unconfirmed or broken read (`inventory_complete: False`).
     """
-    if not port or not token_file or not bun_bin:
-        return {"ok": False, "inventory_complete": False, "error": "hub_rpc env missing", "sessions": {}}
-    helper = Path(__file__).resolve().parents[1] / "kicad_embed" / "lib" / "hub_rpc.mjs"
-    if not helper.exists():
-        return {"ok": False, "inventory_complete": False, "error": f"hub_rpc helper missing: {helper}", "sessions": {}}
-    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
-    try:
-        out = subprocess.check_output(
-            [bun_bin, str(helper), str(port), token_file, '[{"m":"threads.list","p":{}}]'],
-            env=env, text=True, stderr=subprocess.PIPE, timeout=10,
-        )
-    except Exception as e:
-        return {"ok": False, "inventory_complete": False, "error": str(e), "sessions": {}}
     rpc_ok = False
     sessions: dict[str, dict] = {}
     for line in out.splitlines():
@@ -439,13 +428,36 @@ def query_hub_kicad_sessions(port: str, token_file: str, bun_bin: str) -> dict:
         elif line.startswith("{"):
             try:
                 rep = json.loads(line)
-                if rep.get("m") == "threads.list" and rep.get("ok") is True:
+                if rep.get("m") == "hub.status" and rep.get("ok") is True and isinstance(rep.get("result"), dict):
                     rpc_ok = True
             except Exception:
                 pass
     if not rpc_ok:
-        return {"ok": False, "inventory_complete": False, "error": "hub_rpc did not confirm threads.list reply", "sessions": {}}
+        return {"ok": False, "inventory_complete": False, "error": "hub_rpc did not confirm hub.status reply on /ws?view=1", "sessions": {}}
     return {"ok": True, "inventory_complete": True, "sessions": sessions}
+
+
+def query_hub_kicad_sessions(port: str, token_file: str, bun_bin: str) -> dict:
+    """Query the hub's authoritative `editor.kicad.*` session inventory via `hub_rpc.mjs` (never /proc).
+
+    Sends `hub.status` (a `/ws?view=1` view-transport RPC) so we only mark `inventory_complete: True`
+    after the hub's initial `view_info_frame` has been flushed and acknowledged; any RPC error or
+    malformed `editor.kicad.*` INFO line fails closed (`ok: False`).
+    """
+    if not port or not token_file or not bun_bin:
+        return {"ok": False, "inventory_complete": False, "error": "hub_rpc env missing", "sessions": {}}
+    helper = Path(__file__).resolve().parents[1] / "kicad_embed" / "lib" / "hub_rpc.mjs"
+    if not helper.exists():
+        return {"ok": False, "inventory_complete": False, "error": f"hub_rpc helper missing: {helper}", "sessions": {}}
+    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+    try:
+        out = subprocess.check_output(
+            [bun_bin, str(helper), str(port), token_file, '[{"m":"hub.status","p":{}}]'],
+            env=env, text=True, stderr=subprocess.PIPE, timeout=10,
+        )
+    except Exception as e:
+        return {"ok": False, "inventory_complete": False, "error": str(e), "sessions": {}}
+    return _parse_hub_kicad_sessions_output(out)
 
 
 def watch_and_capture(disp: str, client_log: Path, shot_dir: Path, kind_out: Path, stop_flag: Path) -> int:

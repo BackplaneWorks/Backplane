@@ -1400,7 +1400,10 @@ def evaluate_extra_checks(
                 controls_captured = bool(srec.get("controls_captured"))
                 v_open = (srec.get("viewer") or {}).get("open", "")
                 rentry = rail_map.get(slug) or {}
-                rail_state = rentry.get("state", "hidden" if slug not in rail_map else "unknown")
+                if not rail_map:
+                    rail_state = "unknown"
+                else:
+                    rail_state = rentry.get("state", "hidden" if slug not in rail_map else "unknown")
                 drawn_edit = [c for c in (srec.get("drawn_controls_ids") or []) if c in ("ui:Edit", "ui:Open in KiCad")]
                 hk = _compare_hub_kicad(prev_cap, cap)
                 unavail = []
@@ -1413,6 +1416,9 @@ def evaluate_extra_checks(
                         outcome = "unavailable"
                         why = rentry.get("why") or "disabled"
                         unavail.append(f"rail entry {slug!r} confirmed disabled ({why}); page never opened")
+                    elif rail_state in ("unknown", "hidden"):
+                        outcome = "unavailable"
+                        unavail.append(f"rail entry {slug!r} state={rail_state!r}; page never opened")
                     else:
                         outcome = "failed"
                         fails.append(f"enabled rail entry {slug!r} failed to open (rail_state={rail_state!r}, viewer.open={v_open!r})")
@@ -1494,8 +1500,20 @@ def evaluate_extra_checks(
                     obstructions = cap.get("obstructions") or []
                     start_tag = settled_tags.get(f"{sname}-start") or {}
                     start_ok = bool(start_tag.get("settled") and start_tag.get("kind") == slug)
+                    start_seq = start_tag.get("seq")
+                    shot_seq = (shots.get(sname) or {}).get("seq")
                     p_evs = presses.get(f"press:{sname}", [])
-                    press_delivered = any(ev.get("id") == "ui:Edit" and ev.get("found") for ev in p_evs)
+                    edit_seqs = [
+                        ev.get("seq")
+                        for ev in p_evs
+                        if ev.get("id") == "ui:Edit" and ev.get("found") and isinstance(ev.get("seq"), int)
+                    ]
+                    press_delivered = bool(edit_seqs)
+                    seq_order_ok = (
+                        isinstance(start_seq, int)
+                        and isinstance(shot_seq, int)
+                        and any(start_seq < es < shot_seq for es in edit_seqs)
+                    )
                     k = kicad_tags.get(f"{sname}-report") or kicad_tags.get(sname)
                     k_frames = (k or {}).get("frames") or []
                     k_shown = next((f for f in k_frames if f.get("xid") == (k or {}).get("shown")), {})
@@ -1512,6 +1530,8 @@ def evaluate_extra_checks(
                         unavail.append(f"starting page tag {sname}-start not verified")
                     if not press_delivered:
                         unavail.append("ui:Edit press not delivered")
+                    elif not seq_order_ok:
+                        unavail.append(f"ui:Edit press order not verified (start_seq={start_seq}, edit_seqs={edit_seqs}, shot_seq={shot_seq})")
                     if k is None:
                         hfail.append("kicad report missing")
                     if not hfail and not unavail:
@@ -1566,8 +1586,20 @@ def evaluate_extra_checks(
             obstructed = bool(cap.get("obstructed"))
             start_tag = settled_tags.get(f"{sname}-start") or {}
             start_ok = bool(start_tag.get("settled") and start_tag.get("kind") == "files")
+            start_seq = start_tag.get("seq")
+            shot_seq = (shots.get(sname) or {}).get("seq")
             p_evs = presses.get(f"press:{sname}", [])
-            press_delivered = any(ev.get("id") == "ui:Edit" and ev.get("found") for ev in p_evs)
+            edit_seqs = [
+                ev.get("seq")
+                for ev in p_evs
+                if ev.get("id") == "ui:Edit" and ev.get("found") and isinstance(ev.get("seq"), int)
+            ]
+            press_delivered = bool(edit_seqs)
+            seq_order_ok = (
+                isinstance(start_seq, int)
+                and isinstance(shot_seq, int)
+                and any(start_seq < es < shot_seq for es in edit_seqs)
+            )
             v_shot = (shots.get(sname) or {}).get("viewer") or {}
             files_status = str(v_shot.get("files_status") or v_shot.get("status") or "").strip()
             hk = _compare_hub_kicad(prev_cap, cap)
@@ -1587,6 +1619,8 @@ def evaluate_extra_checks(
                     unavail.append(f"starting page tag {sname}-start not verified")
                 if not press_delivered:
                     unavail.append("ui:Edit press not delivered")
+                elif not seq_order_ok:
+                    unavail.append(f"ui:Edit press order not verified (start_seq={start_seq}, edit_seqs={edit_seqs}, shot_seq={shot_seq})")
                 if not files_status:
                     unavail.append("Files status line not exposed in client state")
                 if hk["status"] == "unavailable":
