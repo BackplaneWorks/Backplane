@@ -168,6 +168,36 @@ mod tests {
     }
 
     #[test]
+    fn history_watches_preserve_working_document_availability() {
+        let root = crate::plat::tmp::canonical("viewer-history-availability");
+        let mut st = State::new();
+        for line in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).lines() {
+            st.apply_line(line);
+        }
+        let sel = "t1700000003-8";
+        let project = st.threads[sel].project.clone();
+        st.projects.get_mut(&project).unwrap().root = root.to_string_lossy().into_owned();
+        for (page, file) in [("board", "other.kicad_pcb"), ("schematic", "other.kicad_sch")] {
+            let path = root.join(file);
+            std::fs::write(&path, "").unwrap();
+            let git = format!("git\t{}\tabcdef123456\t1\t{}", root.display(), path.display());
+            let diff = format!("diff\n{git}\n{}\n4", path.display());
+            for (watch, label, expected) in [(&git, "version", "abcdef12"), (&diff, "scope", "abcdef12 → Working copy")] {
+                let session = json!({"sel":sel, "drafts":{
+                    format!("@view:{sel}"):page, format!("@view.board:{sel}"):"other.kicad_pcb",
+                    format!("@view.file:{sel}"):watch}});
+                let v = super::super::viewer::viewer_json(&st, &json!({}), &session).unwrap();
+                assert_eq!(v["has"][page], true);
+                assert!(v["rail"].as_array().unwrap().iter().any(|r| r["id"] == page && r["state"] == "on"));
+                assert!(v["designPanels"].is_object());
+                assert_eq!(v["identity"]["source"]["rel"], file);
+                assert_eq!(v["identity"][label], expected);
+            }
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
     fn browser_omits_file_urls_and_private_paths() {
         for (title, url, visible_title, visible_url) in [
             ("Local file", "file:///private/project/file", "", ""),
