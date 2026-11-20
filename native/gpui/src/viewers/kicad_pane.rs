@@ -619,6 +619,12 @@ pub fn opening_wants_keys(why: ShowBy) -> bool { why.takes_keys() }
 pub fn hand_in_now(keys: bool, want_keys: bool, show: Option<u64>, prev_show: Option<u64>, dialog_has_keys: bool) -> bool {
     show.is_some() && if show != prev_show { (keys || want_keys) && !dialog_has_keys } else { want_keys }
 }
+/// macOS: whether the pointer (global points from the top left, `nc::pointer_global`) is over the pane's rect as pushed to KiCad
+/// (`host_sent`, the same coordinates), edges included.
+pub fn pointer_over(p: (f64, f64), r: (i32, i32, i32, i32)) -> bool {
+    let (x, y, w, h) = (r.0 as f64, r.1 as f64, r.2 as f64, r.3 as f64);
+    w > 0. && h > 0. && p.0 >= x && p.0 <= x + w && p.1 >= y && p.1 <= y + h
+}
 /// What `kicad_attach` does with the pane already there.
 #[derive(Debug, PartialEq, Eq)]
 pub enum AttachStep { New, Promote, Again }
@@ -1234,9 +1240,13 @@ impl KicadPane {
         // an automatic pane: KiCad took the keyboard with no click, press or deliberate() of the person's. Said once, always (the rows fail on
         // this line; the trace is for the fork): never patched around here
         // macOS: a click in KiCad's frame goes to KiCad's window, never through ours (button_over has nothing to say there): KiCad
-        // active within a second of a press is the person's click, not KiCad taking the keyboard by itself (#1198 lane's row C)
+        // active within a second of a press, with the pointer over the pane, is the person's click, not KiCad taking the keyboard by
+        // itself (#1198 lane's row C). A press anywhere else (Backplane's own window, another app) does not count.
         #[cfg(target_os = "macos")]
-        if has && !self.keys && self.why == ShowBy::Automatic && nc::secs_since_press() < 1.0 { self.chose("a press, macOS (KiCad's own window)"); } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+        if has && !self.keys && self.why == ShowBy::Automatic && nc::secs_since_press() < 1.0
+            && nc::pointer_global().zip(self.host_sent).is_some_and(|((px, py), (x, y, w, h, _))| pointer_over((px, py), (x, y, w, h))) {
+            self.chose("a press over the pane, macOS (KiCad's own window)"); // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+        }
         if has && !self.keys && self.why == ShowBy::Automatic && !self.auto_taken_said {
             self.auto_taken_said = true;
             eprintln!("GPUI_LOG {}", json!({"kicad_auto_keys_taken": {"frame": self.want(), "in_dialog": in_dialog, "has_focus": nc::has_focus(c), "why": nc::focus_debug(c), "after_ms": self.born.elapsed().as_millis() as u64}}));
@@ -1737,6 +1747,16 @@ mod tests {
     }
     /// The reconcile asks again and again for the design on show: one pane, a deliberate ask makes an automatic pane deliberate, and an
     /// automatic ask never takes a deliberate pane's keyboard state away.
+    /// macOS: a press counts as the person's click on an automatic pane only with the pointer over the pane (#1400 review)
+    #[test] fn only_a_press_over_the_pane_is_the_persons_click() {
+        use super::pointer_over;
+        let pane = (430, 158, 496, 517);
+        assert!(pointer_over((600.0, 400.0), pane));
+        assert!(pointer_over((430.0, 158.0), pane) && pointer_over((926.0, 675.0), pane), "edges count");
+        assert!(!pointer_over((429.0, 400.0), pane) && !pointer_over((600.0, 676.0), pane), "outside");
+        assert!(!pointer_over((200.0, 900.0), pane), "the composer, left and below the pane");
+        assert!(!pointer_over((0.0, 0.0), (0, 0, 0, 0)), "no rect pushed yet");
+    }
     #[test] fn a_repeated_attach_for_the_design_on_show_is_one_pane() {
         use super::{attach_step, ShowBy::*, AttachStep};
         assert_eq!(attach_step(false, Deliberate, Automatic), AttachStep::New, "another design (or none): a pane");
