@@ -684,6 +684,53 @@ html.light .bp-v-overlay {
   text-overflow: ellipsis;
 }
 
+/* ---- 3D/Mech preset toolbar & Board/Schematic bottom history strip ---- */
+.bp-solid-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 5px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--rule);
+  flex-shrink: 0;
+}
+
+.bp-history-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 5px 10px;
+  background: var(--panel);
+  border-top: 1px solid var(--rule);
+  flex-shrink: 0;
+}
+
+.bp-history-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.bp-history-label {
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+  padding: 0 4px;
+}
+
+.bp-solid-bar[hidden],
+.bp-history-bar[hidden] {
+  display: none;
+}
+
 /* ---- Tablet (820 px) ---- */
 @media (max-width: 900px) {
   .bp-viewer-pane {
