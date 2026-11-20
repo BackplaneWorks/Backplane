@@ -645,8 +645,9 @@ impl Backplane {
                     PRESS_SOLID.with(|c| *c.borrow_mut() = (sr.key().to_string(), sr.painted_count()));
                 }
                 let found = self.find_script_control(&id);
+                let hit_rect = crate::art::ctl_rects().get(id.as_str()).is_some_and(|r| r[2] > 0. && r[3] > 0.);
                 let action = found.map(|e| self.do_click(&e.ctl, cx));
-                self.m("press", json!({"id": id, "found": action.is_some(), "action": action}));
+                self.m("press", json!({"id": id, "found": action.is_some(), "action": action, "hit_rect": hit_rect}));
                 self.ui_epoch += 1;
                 cx.notify();
                 // Header dispatch borrows the window after this update. Preserve script
@@ -809,6 +810,9 @@ impl Backplane {
             let on = v["gerbersVsBoard"] == true;
             /* i18n-ok: scripted e2e control id, not drawn */ return Some(CtlEntry { id: id.into(), label: "vs board".into(), ctl: Ctl::Node("view".into(), if on { "gerbers" } else { "gerbers\tboard" }.into()) });
         }
+        // A drawn rail row with no registered control is a disabled one: its button has no click handler,
+        // so a press on it is `none` (the press metric's `hit_rect` says the row was really drawn).
+        if id.starts_with("rail:") && rects.get(id).is_some_and(|r| r[2] > 0. && r[3] > 0.) { return Some(CtlEntry { id: id.into(), label: id.into(), ctl: Ctl::None }); }
         None
     }
     /// Whether the requested viewer page has settled into one of `ready`, `empty`, `error`, `refused`, `disabled`, or `hidden`.

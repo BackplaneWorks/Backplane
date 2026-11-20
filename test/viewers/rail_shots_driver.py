@@ -200,7 +200,7 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
         else:
             steps.extend([
                 {"mark": f"b1:disabled-press:{eid}"},
-                {"click": rail_id},
+                {"press": rail_id},
                 {"wait": 150},
                 {"read": "rail"},
                 {"wait": 60},
