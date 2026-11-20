@@ -89,7 +89,11 @@ fn install(app: &mut Backplane) {
 }
 fn reopen(app: &mut Backplane, cx: &mut Context<Backplane>) {
     app.screens.kicad_update.reopened = true;
-    if let Some(p) = app.screens.kicad.as_ref() {
+    if let Some(p) = app.screens.kicad.clone() {
+        // a pane whose Edit had no KiCad in it (refused: "KiCad was not found", before the install) attaches with its own container: a
+        // restart has no container to start KiCad in and started it in a window of its own (bp.13.3 first install). A pane on a running
+        // KiCad keeps the restart, which keeps that session's container
+        if p.read(cx).is_adrift() { p.update(cx, |p, cx| { p.reattach(); cx.notify(); }); return }
         let project = p.read(cx).project.clone();
         let _ = app.tx.try_send(Command::Rpc("editor.kicad.restart".into(), Secret(json!({"project": project})), "kicad"));
     }
