@@ -1133,8 +1133,9 @@ impl Render for Backplane {
                 let _ = weak.update(cx, |this, cx| if let Some(p) = this.screens.kicad.clone() { p.update(cx, |p, _| p.typed_in_backplane()); });
             }).detach();
         }
-        // a key typed in Backplane: noted, so a KiCad install's reopen hands KiCad the keyboard only if the person did nothing since their
-        // Install press (kicad_update::turned_since). Registered once, for the app's life
+        // a key typed in Backplane (and, below, a press on the window's root): noted, so a KiCad install's reopen hands KiCad the keyboard
+        // only if the person did nothing since their Install press (kicad_update::turned_since). Not seen: presses on surfaces that occlude
+        // (Settings, the palette, menus, the lightbox) and in a popped-out KiCad window; keys are seen everywhere. Registered once
         static ACT_WATCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if !ACT_WATCH.swap(true, std::sync::atomic::Ordering::SeqCst) {
             let weak = cx.entity().downgrade();

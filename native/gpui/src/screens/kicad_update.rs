@@ -110,8 +110,9 @@ fn reopen(app: &mut Backplane, cx: &mut Context<Backplane>) {
             let u = &app.screens.kicad_update;
             let turned = turned_since(u.pressed_at, u.person_at);
             let why = reattach_why(AdriftRoad::InstallReopen, on_screen, turned);
-            // not its project on screen: nothing now (the pane says KiCad could not start, and the person's Edit there works now)
-            app.kicad_adrift(&p, why, cx);
+            // not its project on screen: nothing now, and not asked again (the pane says KiCad could not start; the person's Edit there, or its
+            // Try again, works now)
+            app.kicad_adrift(&p, why, false, cx);
             return
         }
         let project = p.read(cx).project.clone();
