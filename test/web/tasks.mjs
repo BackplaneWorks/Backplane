@@ -37,7 +37,7 @@ export async function browserTasks({ context, origin, rpc, thread, assets, reply
   await testId('timeline').waitFor();
   await testId('composer-input').fill('/');
   await testId('slash-menu').waitFor();
-  await testId('composer-input').fill('Hello from the browser test');
+  await testId('composer-input').fill('echo:Browser stand-in reply:echo');
   await testId('composer-send').click();
   await testId('timeline').getByText(replyText, { exact: true }).waitFor();
   await screenshot(page, 'paired-chat');
