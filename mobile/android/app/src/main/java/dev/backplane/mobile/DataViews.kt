@@ -178,12 +178,17 @@ private fun ConnBanner(hub: () -> Unit, settings: () -> Unit) {
     TelemetryBanner(settings)
     StarBanner()
     AlertsBanner()
-    if (DataClient.conn == DataClient.Conn.ONLINE) return
-    Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        DDot(if (DataClient.conn == DataClient.Conn.CONNECTING) dwarn else dcs.error, 8); Spacer(Modifier.width(8.dp))
-        DMono(if (DataClient.conn == DataClient.Conn.CONNECTING) Msg.android_conn_connecting(DataClient.hubName) else Msg.android_conn_offline, dcs.onSurface, 12, Modifier.weight(1f))
-        Spacer(Modifier.width(8.dp))
-        DMono(Msg.android_hub, dcs.primary, 12, Modifier.testTag("conn.hub").clickable(onClick = hub).padding(horizontal = 4.dp, vertical = 4.dp), bold = true)
+    // the hub's restart (RestartStrip.kt) says itself here in place of the usual look: while it is away, and its crash note as we join
+    val online = DataClient.conn == DataClient.Conn.ONLINE
+    val restart = DataClient.restartText
+    if (online && restart == null) return
+    Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp).testTag("conn.strip"), verticalAlignment = Alignment.CenterVertically) {
+        DDot(if (online) dcs.primary else if (restart != null || DataClient.conn == DataClient.Conn.CONNECTING) dwarn else dcs.error, 8); Spacer(Modifier.width(8.dp))
+        DMono(restart?.let { Tr.t(it) } ?: if (DataClient.conn == DataClient.Conn.CONNECTING) Msg.android_conn_connecting(DataClient.hubName) else Msg.android_conn_offline, dcs.onSurface, 12, Modifier.weight(1f))
+        if (!online) {
+            Spacer(Modifier.width(8.dp))
+            DMono(Msg.android_hub, dcs.primary, 12, Modifier.testTag("conn.hub").clickable(onClick = hub).padding(horizontal = 4.dp, vertical = 4.dp), bold = true)
+        }
     }
 }
 

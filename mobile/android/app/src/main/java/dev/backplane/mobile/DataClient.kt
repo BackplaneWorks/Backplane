@@ -33,6 +33,14 @@ object DataClient {
     var features by mutableStateOf<Set<String>>(emptySet()); private set
     var notice by mutableStateOf(HubNotice()); private set   // hello `notice`, newer from /hub/status: the banner
     var star by mutableStateOf<DStarOffer?>(null); private set
+    // the hub's restart in the connection strip (feature "restarting", RestartStrip.kt): what it said as it went, its crash note as we join
+    var restarting by mutableStateOf<RestartNote?>(null); private set
+    var hubBack by mutableStateOf<RestartNote?>(null); private set
+    private var stripNow by mutableStateOf(0L)
+    private var stripJob: Job? = null
+    private val backShown = HashSet<Long>()
+    /** the strip's words (the hub's English) in place of its usual look, or null */
+    val restartText: String? get() = RestartStrip.text(restarting, hubBack, conn == Conn.ONLINE, stripNow)
     var telemetryNotice by mutableStateOf<DTelemetryNotice?>(null); private set   // the one-time telemetry notice (feature "telemetryNotice"): shown while the hub says so
     /** Alerts not allowed yet (Android 13+): AlertsBanner offers them, with the reason, instead of the system asking at start. Not now hides it until the next launch. */
     var alertsAsk by mutableStateOf(false)
@@ -158,7 +166,7 @@ object DataClient {
     private fun reset(clearDisk: Boolean = false) {
         saveJob?.cancel()
         shellHashes.clear(); threadHashes.clear(); threadIds.clear(); subEntriesById.clear(); subEntryIds = emptyList()
-        Swarms.reset(); notice = HubNotice(); star = null; telemetryNotice = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null
+        Swarms.reset(); restarting = null; hubBack = null; notice = HubNotice(); star = null; telemetryNotice = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null
         if (clearDisk) link?.let { Pairing.key(it) }?.let { cacheFile(it).delete() }
     }
 
@@ -169,7 +177,7 @@ object DataClient {
         close()
         val g = ++gen
         conn = Conn.CONNECTING
-        heard = System.currentTimeMillis()
+        heard = System.currentTimeMillis(); strip()
         val url = base + (if (base.contains("?")) "&" else "?") + "data=1&enc=json&z=deflate"
         ws = http.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
             override fun onMessage(webSocket: WebSocket, text: String) { scope.launch { if (g == gen) { heard = System.currentTimeMillis(); handle(text, g) } } }
@@ -229,7 +237,7 @@ object DataClient {
     fun foreground() { if (link != null && (conn != Conn.ONLINE || System.currentTimeMillis() - heard > 20_000)) connect() else if (link != null) scope.launch { syncPush() } }
     private fun lost(g: Int, why: String) {
         if (g != gen) return
-        failure = why; close(); conn = Conn.OFFLINE
+        failure = why; close(); conn = Conn.OFFLINE; strip()
         if (downSince == 0L) downSince = System.currentTimeMillis()
         if (onHome && needsRepair) { needsRepair = false; leaveHome(); reset(); loadCache(); connect(); return }   // the home refused this phone: back to the hub chosen
         if (link == null || needsRepair) return
@@ -250,6 +258,7 @@ object DataClient {
                 heardMigrating(o.optJSONObject("migrating"))
                 commands = o.optJSONArray("commands")?.let { a -> (0 until a.length()).map { val w = a.getJSONObject(it); Word(w.optString("word"), w.optString("label"), w.optString("desc")) } } ?: emptyList()
                 conn = Conn.ONLINE; failure = ""; backoff = 250; plots.reset(); DataVoice.connected()
+                restarting = null; heardBack(o.optString("hubBack"))
                 if (!onHome) downSince = 0L
                 scope.launch { synchronise(g) }
                 heardOffer(o.optString("hubOffer"))
@@ -265,11 +274,24 @@ object DataClient {
             // a schematic's sheets (kicad/watch.rs `sheets`): the newest tree only (`gen` only grows)
             "sheets" -> { val g2 = o.optString("gen").toLongOrNull() ?: 0L; scope.launch(Dispatchers.Main) { if (g2 >= sheetsGen) { sheetsGen = g2; sheets = parseSheets(o.optString("rows")) } } }
             "star" -> { star = DStarOffer.of(o.optJSONObject("offer")) }
+            "hub.restarting" -> { o.optString("text").takeIf { it.isNotEmpty() }?.let { restarting = RestartNote(it, System.currentTimeMillis()); strip() } }
             "telemetry.notice" -> { telemetryNotice = DTelemetryNotice.of(o.optJSONObject("notice")) }
             "migrating" -> heardMigrating(o)
-            "info" -> o.optJSONObject("info")?.let { if (it.has("hub.offer")) heardOffer(it.optString("hub.offer")); heardMgmt(it) }
+            "info" -> o.optJSONObject("info")?.let { if (it.has("hub.offer")) heardOffer(it.optString("hub.offer")); if (it.has("hub.back")) heardBack(it.optString("hub.back")); heardMgmt(it) }
             "shot" -> { shotBot = o.optString("bot"); shot = o.optLong("n") }
         }
+    }
+
+    /** a hub back from a crash: its note once per note (its `at`), for a few seconds */
+    private fun heardBack(raw: String) {
+        val (at, text) = RestartStrip.back(raw) ?: return strip()
+        if (backShown.add(at)) hubBack = RestartNote(text, System.currentTimeMillis())
+        strip()
+    }
+    /** the strip read now, and again at its next deadline: one delayed post, no loop */
+    private fun strip() {
+        val now = System.currentTimeMillis(); stripNow = now; stripJob?.cancel()
+        stripJob = RestartStrip.next(restarting, hubBack, conn == Conn.ONLINE, now)?.let { at -> scope.launch { delay(at - now); strip() } }
     }
 
     // ---- the home hub (docs/pairing.md, Home hub): its offer, carried out with no dialog, and failing over to it
