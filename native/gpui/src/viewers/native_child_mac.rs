@@ -221,24 +221,30 @@ unsafe fn send_activate_self(a: *mut c_void) {
 /// The keyboard back to Backplane after a reserved chord from KiCad (Cmd+K, the escape chord; the only callers). macOS 14+ honours our
 /// activate only with the active app's consent, which KiCad gives when it hands a reserved chord over (fork, #1399): whether it took is
 /// said 50 ms on (`kicad_mac_focus_taken`), and once more after one retry 50 ms later when it did not (the consent and the chord can
-/// land in either order). No retry once anything else moved the keyboard since (a hand-in, our own focus: the yield generation).
+/// land in either order). The retry is only for that refused case, KiCad still the active app: never once the person moved on (we are
+/// hidden: Cmd+H replayed as HideApp; another app in front: Cmd+Tab; a new press anywhere since), and never once a hand-in or another
+/// focus of ours has happened since (the yield generation). Nothing at all when the window is no longer ours (closed).
 pub fn hand_back(w: u64) {
     focus(w);
-    hand_back_check(w, 0, YIELD_GEN.load(std::sync::atomic::Ordering::SeqCst));
+    if ns_window(w).is_null() { return }
+    hand_back_check(w, 0, YIELD_GEN.load(std::sync::atomic::Ordering::SeqCst), std::time::Instant::now());
 }
-fn hand_back_check(w: u64, attempt: u8, yield_gen: u64) {
+fn hand_back_check(w: u64, attempt: u8, yield_gen: u64, since: std::time::Instant) {
     extern "C" fn check(ctx: *mut c_void) {
-        let (w, attempt, yield_gen) = *unsafe { Box::from_raw(ctx as *mut (u64, u8, u64)) };
+        let (w, attempt, yield_gen, since) = *unsafe { Box::from_raw(ctx as *mut (u64, u8, u64, std::time::Instant)) };
         let taken = unsafe { send_bool(app(), c"isActive") };
+        let hidden = unsafe { send_bool(app(), c"isHidden") };
+        let kicad_active = app_active(KICAD_PID.load(std::sync::atomic::Ordering::Relaxed));
+        let pressed_since = secs_since_press() < since.elapsed().as_secs_f64();
         let unchanged = YIELD_GEN.load(std::sync::atomic::Ordering::SeqCst) == yield_gen;
-        let retry = crate::viewers::kicad_pane::hand_back_retry(attempt, taken, unchanged);
-        eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_focus_taken": {"taken": taken, "attempt": attempt, "retry": retry, "moved_since": !unchanged}}));
+        let retry = crate::viewers::kicad_pane::hand_back_retry(attempt, taken, unchanged, hidden, kicad_active, pressed_since);
+        eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_focus_taken": {"taken": taken, "attempt": attempt, "retry": retry, "moved_since": !unchanged, "hidden": hidden, "kicad_active": kicad_active, "pressed_since": pressed_since}}));
         if retry {
             unsafe { send_activate_self(app()); let nw = ns_window(w); if !nw.is_null() { send0(nw, c"makeKeyWindow"); } }
-            hand_back_check(w, attempt + 1, yield_gen);
+            hand_back_check(w, attempt + 1, yield_gen, since);
         }
     }
-    let ctx = Box::into_raw(Box::new((w, attempt, yield_gen))) as *mut c_void;
+    let ctx = Box::into_raw(Box::new((w, attempt, yield_gen, since))) as *mut c_void;
     unsafe { dispatch_after_f(dispatch_time(0, 50_000_000), std::ptr::addr_of!(_dispatch_main_q) as *const c_void, ctx, check); }
 }
 /// Consent for KiCad to activate itself (macOS 14+), without activating it: the hub's ShowFrame{focus} then has KiCad take the keyboard
