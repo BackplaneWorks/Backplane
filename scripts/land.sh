@@ -5,6 +5,12 @@
 #   2. checks origin/main..HEAD (scripts/check-author.sh); free space: the build and the tests' scratch each need LAND_MIN_FREE_GB (10);
 #   3. the gate: scripts/dev-build.sh --gate --no-cut (LAND_TEST overrides the command), on this rebased tree, BEFORE anything is pushed; skipped only when this exact
 #      tree passed it already (recorded in <git-dir>/land-tested);
+#   3b. the Windows gate, on the same tree, also BEFORE anything is pushed: scripts/land-windows.sh (LAND_WIN_TEST overrides the command) under the bp-win-gate lock
+#      (scripts/bp-lock.sh; landings queue, one gate on the VMs at a time): the hub's tests as ci.yml's windows-latest job runs them (bp-sh, then nextest with
+#      ci-hub-windows-filter.sh and --retries 1), on bp-win, else bp-winbuild; the tree goes by git push over ssh to the VM, never to GitHub. Its time is said.
+#      Run only when what the hub's Windows tests build from or read ($win_paths below) changed against origin/main, and skipped when this tree passed it already
+#      (<git-dir>/land-tested-windows). Failed: "land: FAILED", nothing pushed. No VM up (or each within 45 min of its daily auto-shutdown): one "land: HELD" line
+#      naming each VM tried and why, exit 4, nothing pushed. LAND_WINDOWS=skip skips it, on a person's or lead's word only: said in the output and in the PR body.
 #   4. the branch goes to origin (git push --force-with-lease: it is only ever this lane's gated tip), and its pull request is opened or the open one reused
 #      (gh pr create --fill --base main); gh always runs as i2cjak (GH_TOKEN from `gh auth token --user i2cjak`, never printed or stored), whatever account gh has active;
 #   5. the PR's state decides:
@@ -16,7 +22,7 @@
 #        behind or conflicting (main moved)  back to 1 (rebase, gate again, force-with-lease push), up to LAND_TRIES (3)
 #   --resume   the branch must already have an open PR: the same run, so an approved PR is merged without a new gate when its head is still the tested tree and main has not moved
 #   --dry-merge   (or LAND_DRY_MERGE=1) everything up to the merge, which is only said ("would merge"); nothing is merged or fast-forwarded
-# Env: LAND_GH (the gh program), LAND_REPO (owner/name; default from origin), LAND_TRIES, LAND_TEST, LAND_MIN_FREE_GB, LAND_POLL_S (seconds between PR state reads, 2).
+# Env: LAND_GH (the gh program), LAND_REPO (owner/name; default from origin), LAND_TRIES, LAND_TEST, LAND_WINDOWS, LAND_WIN_TEST (and land-windows.sh's LAND_WIN_*), LAND_MIN_FREE_GB, LAND_POLL_S (seconds between PR state reads, 2).
 # Any step that cannot be done fails loudly with "land: FAILED ..." and a non-zero exit; it never leaves local main ahead of origin.
 set -eu
 # sh reads a script as it runs: an edit, a rebase or this script's own fast-forward of a checkout would change what a running land reads next.
@@ -48,7 +54,11 @@ br=$(git symbolic-ref --short -q HEAD) || die "HEAD is detached; land from your 
 [ "$br" != main ] || die "you are on main; commit on your lane's branch (from origin/main) and land that"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || die "uncommitted changes in $(pwd); commit them first"
 git remote get-url origin > /dev/null 2>&1 || die "no origin remote"
-mark=$(git rev-parse --git-dir)/land-tested
+mark=$(git rev-parse --git-dir)/land-tested; wmark=$(git rev-parse --git-dir)/land-tested-windows
+win=${LAND_WINDOWS:-}; win_note=
+case "$win" in ''|skip) ;; *) die "LAND_WINDOWS=$win: only LAND_WINDOWS=skip (on a person's or lead's word) or unset";; esac
+# what the hub's Windows tests build from or read (native/host, and the files its tests open by path); a change elsewhere does not run the Windows gate
+win_paths='native/host native/gpui/Cargo.toml native/gpui/build.rs native/gpui/src/install.rs native/guard/Cargo.toml native/guard/build.rs skills assets deploy docs/reporting files/scripts test/agents test/bots test/commands test/files test/fixtures test/google test/hub test/mobile scripts/ci-hub-windows-filter.sh scripts/kistack.py scripts/codex-apikey.sh .github/workflows/ci.yml'
 tries=${LAND_TRIES:-3}; n=0; poll=${LAND_POLL_S:-2}
 gh_prog=${LAND_GH:-gh}
 repo=${LAND_REPO:-$(git remote get-url origin | sed -E 's#^.*github\.com[:/]([^/]+/[^/]+)$#\1#; s#\.git$##')}
@@ -90,6 +100,21 @@ fix: git config user.name i2cjak && git config user.email build@amemb.com (this 
     sh -c "${LAND_TEST:-scripts/dev-build.sh --gate --no-cut}" || die "tests failed; nothing pushed"
     printf '%s\n' "$tree" > "$mark"
   fi
+  # the Windows gate: the hub's Windows tests on this same tree on bp-win (else bp-winbuild), under the bp-win-gate lock, before anything is pushed
+  if [ "$win" = skip ]; then win_note=1; say "LAND_WINDOWS=skip: the Windows gate is NOT run on this tree (only on a person's or lead's word); the PR body says so"
+  elif git diff --quiet origin/main HEAD -- $win_paths; then say "Windows gate skipped: nothing the hub's Windows tests build from or read changed against origin/main"
+  elif [ "$(cat "$wmark" 2>/dev/null)" = "$tree" ]; then say "Windows tests already passed on this tree ($(printf %s "$tree" | cut -c1-10))"
+  else
+    say "Windows gate: the hub's Windows tests on $(git rev-parse --short HEAD) (lock bp-win-gate; another landing's gate runs first)"
+    w0=$(date +%s); rc=0
+    "$here/bp-lock.sh" bp-win-gate -- sh -c "${LAND_WIN_TEST:-sh '$here/land-windows.sh'}" || rc=$?
+    w=$(( $(date +%s) - w0 )); took="$((w / 60))m$((w % 60))s"
+    case "$rc" in
+      0) printf '%s\n' "$tree" > "$wmark"; say "Windows gate passed: $took in all, the lock's wait included";;
+      75) say "held after $took: no Windows VM could run the gate (the line above names each); nothing pushed or merged"; exit 4;;
+      *) die "the Windows tests failed ($took; the output: $(git rev-parse --git-dir)/land-windows.log); nothing pushed";;
+    esac
+  fi
   sha=$(git rev-parse HEAD)
   # the branch, only after a green gate: forced with a lease (a rebase rewrote it; nothing else pushes to a lane's branch)
   git fetch -q origin "$br" 2>/dev/null || true
@@ -101,6 +126,12 @@ fix: git config user.name i2cjak && git config user.email build@amemb.com (this 
     num=$(pr_number); [ -n "$num" ] || num=${url##*/}
     say "opened PR #$num $url"
   else say "PR #$num is open for $br"; fi
+  if [ -n "$win_note" ]; then
+    body=$(ghi pr view "$num" -R "$repo" --json body -q .body) || die "could not read PR #$num's body to note LAND_WINDOWS=skip"
+    case "$body" in *"LAND_WINDOWS=skip"*) ;; *) ghi pr edit "$num" -R "$repo" --body "$body
+
+**Windows gate skipped (LAND_WINDOWS=skip)** on $(git rev-parse --short "$sha"): the hub's Windows tests did not run before this landed." >/dev/null || die "could not note LAND_WINDOWS=skip in PR #$num's body";; esac
+  fi
   # its state: GitHub works out mergeability a moment after a push, and its head must be the sha that was gated
   st=; for _ in $(seq 60); do
     st=$(ghi pr view "$num" -R "$repo" --json state,mergeStateStatus,reviewDecision,headRefOid,mergeable -q '[.state,.mergeStateStatus,(if (.reviewDecision // "") == "" then "NONE" else .reviewDecision end),.headRefOid,.mergeable] | join(" ")' 2>/dev/null) || st=

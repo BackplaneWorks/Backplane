@@ -60,6 +60,9 @@ run_case 'fresh confirmed idle can deallocate' stop
 HELD=bp-win-ui
 run_case 'UI lock keeps VM up and extends hold' keep
 [[ -s $T/holds ]] || { echo 'FAIL no hold refresh'; exit 1; }
+HELD=bp-win-gate
+run_case 'Windows gate lock keeps VM up and extends hold' keep
+[[ -s $T/holds ]] || { echo 'FAIL no hold refresh for the gate'; exit 1; }
 HELD=
 dry=1
 run_case 'desktop dry run never deallocates' keep

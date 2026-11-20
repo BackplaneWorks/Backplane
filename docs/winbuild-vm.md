@@ -60,7 +60,7 @@ A stopped VM that is not *deallocated* still bills for compute, so every layer e
 3. **The desktop's watcher** (`scripts/winvm/winvm-watch.sh`, cron every 10 minutes, installed by
    `scripts/winvm/winvm-cron-install.sh` as `~/.local/bin/bp-winvm-watch.sh`; log `~/.cache/bp-winvm/watch.log`).
    A VM that is stopped but not deallocated is deallocated at once. A running VM whose locks have been free for 30
-   minutes is deallocated: bp-winbuild's lock is `winbuild-vm`; bp-win's are `bp-win-ui` and `winbuild`, and its
+   minutes is deallocated: bp-winbuild's locks are `winbuild-vm` and `bp-win-gate`; bp-win's are `bp-win-ui`, `winbuild` and `bp-win-gate` (`scripts/land.sh`'s Windows gate), and its
    watchdog is asked first (through Azure Run Command, not ssh) whether it saw a session or job in those 30 minutes;
    it is left running if so, without a time cap on active work. A stale, unreadable or dry-run watchdog also leaves bp-win running; its 07:00 UTC shutdown remains the backstop. While `bp-win-ui` or `winbuild` is held, the watcher keeps bp-win's watchdog hold at least 60 minutes ahead
    (Run Command; it never shortens a longer hold), since the VM can't see the desktop's locks. A lock is held when its
