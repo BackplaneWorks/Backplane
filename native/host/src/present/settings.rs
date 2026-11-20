@@ -321,6 +321,11 @@ fn web_ui(st: &State, info: &Value) -> Vec<Value> {
             rows.push(row("Set up private HTTPS forwarding", command, vec![btn(if command.starts_with("sudo ") { "Authorize as administrator" } else { "Set up forwarding" }, "device-web-setup", command, false)]));
         }
     }
+    if !enabled {
+        if let Some(plan) = status["cleanup"].as_str() {
+            rows.push(row("Remove private HTTPS forwarding", plan, vec![btn("Authorize removal", "device-web-setup", plan, false)]));
+        }
+    }
     if enabled && available {
         if let Some(address) = status["address"].as_str() {
             let mut link = row("Web address", address, vec![]);
@@ -1171,6 +1176,15 @@ mod tests {
     }
     fn by<'a>(r: &'a [Value], l: &str) -> &'a Value { r.iter().find(|x| x["label"] == l).unwrap_or_else(|| panic!("no row {l}: {r:?}")) }
     /// Add a device: Tailscale first, its own link and QR code, the code beside the hub address and the expiry; the link and code copy.
+    #[test] fn disabled_web_offers_only_the_pending_removal() {
+        let plan = "Remove private HTTPS forwarding for node.example.ts.net:8443";
+        let info = json!({"web.status":json!({"available":true,"cleanup":plan,"address":"https://node.example.ts.net:8443"}).to_string()});
+        let rows = pg_rows("web", &[], json!({}), info);
+        let button = &by(&rows, "Remove private HTTPS forwarding")["buttons"][0];
+        assert_eq!(button["action"], "device-web-setup");
+        assert_eq!(button["value"], plan);
+        assert!(rows.iter().all(|row| row["label"] != "Web address" && row.get("qr").is_none()));
+    }
     #[test] fn web_ui_shows_only_the_active_address() {
         let address = "https://bp.example.ts.net";
         let info = json!({"web.status":json!({"available":true,"address":address}).to_string()});
