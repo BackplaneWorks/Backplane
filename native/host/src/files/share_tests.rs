@@ -1,6 +1,45 @@
 use super::*;
 
 fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::canonical(&format!("share-{n}")) }
+
+#[test] fn the_rule_is_applied_to_the_handle_opened() {
+    let d = tmp("handle"); let (proj, out, home) = (d.join("proj"), d.join("out"), d.join("home"));
+    for x in [&proj, &out, &home] { std::fs::create_dir_all(x).unwrap() }
+    std::fs::write(proj.join("a.zip"), b"in").unwrap(); std::fs::write(out.join("b.zip"), b"out").unwrap();
+    let roots = vec![proj.clone()];
+    let o = open_checked(&roots, &home, &s(&proj.join("a.zip"))).unwrap();
+    assert_eq!((o.real.clone(), o.md.len()), (proj.join("a.zip"), 2), "the handle's own path and size");
+    // a path that is a link when opened is never followed: a swap of the checked file for a link to one outside fails at the open
+    crate::plat::fs::symlink(out.join("b.zip"), proj.join("swapped.zip")).unwrap();
+    assert!(open_real(&roots, &home, &proj.join("swapped.zip")).is_err(), "O_NOFOLLOW");
+    // a file the handle says is outside the roots is refused even when opened by a path inside
+    assert_eq!(open_real(&roots, &home, &out.join("b.zip")).err(), Some("that file is not in a project"));
+    assert!(open_checked(&roots, &home, &s(&proj)).is_err(), "a folder");
+}
+
+#[test] fn the_store_is_private_from_its_first_byte_and_revokes_say_when_they_fail() {
+    let d = tmp("mutate");
+    let sh = Share { id: "a".into(), token: "t".repeat(48), path: "/p/a.zip".into(), name: "a.zip".into(), size: 1, thread: "t1".into(), created: 1, expires: u64::MAX, tailnet: false, url: String::new() };
+    mutate(&d, |v| v.push(sh.clone())).unwrap();
+    assert_eq!(drop_shares(&d, Some("nope")).unwrap_err(), "no such share");
+    let (left, went) = drop_shares(&d, Some("a")).unwrap(); assert!(left.is_empty() && went);
+    assert!(!d.join("shares-v1.json.tmp").exists());
+    // a store that cannot be written: the revoke says so and the share stays
+    mutate(&d, |v| v.push(sh.clone())).unwrap();
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&*d, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let r = drop_shares(&d, Some("a"));
+        std::fs::set_permissions(&*d, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(r.unwrap_err().starts_with("could not save the shares"), "reported");
+        assert_eq!(load(&d).len(), 1, "not revoked on disk, and not said to be");
+    }
+}
+
+#[test] fn refusals_carry_the_same_guards_as_answers() {
+    let r = String::from_utf8(refusal("403 Forbidden", "that file is not shared")).unwrap();
+    for need in ["X-Content-Type-Options: nosniff", "sandbox", "Cross-Origin-Resource-Policy: same-origin", "Referrer-Policy: no-referrer", "no-store", "Content-Length: 23"] { assert!(r.contains(need), "{need}: {r}") }
+}
 fn s(p: &Path) -> String { p.to_string_lossy().into_owned() }
 
 #[test] fn a_file_under_a_root_is_served_and_nothing_else_is() {
@@ -81,7 +120,7 @@ fn s(p: &Path) -> String { p.to_string_lossy().into_owned() }
     let data: Vec<u8> = (0..(3 * BUF + 17)).map(|i| (i % 251) as u8).collect(); std::fs::write(&f, &data).unwrap();
     let md = std::fs::metadata(&f).unwrap();
     let get = |hs: Vec<(&str, String)>, method: &str| { let mut r = Req::new(method, "/file?path=x", hs.into_iter().map(|(a, b)| (a.to_string(), b)).collect()); r.peer = None; r };
-    let run = |r: Req| { let (f, md) = (f.clone(), md.clone()); async move { let mut out: Vec<u8> = vec![]; stream(&mut out, Who::Native, &r, &f, &md, "big.bin").await.unwrap(); out } };
+    let run = |r: Req| { let f = f.clone(); async move { let mut out: Vec<u8> = vec![]; let o = open_real(&[f.parent().unwrap().to_path_buf()], Path::new("/nonexistent-home"), &f).unwrap(); stream(&mut out, Who::Native, &r, o, "big.bin").await.unwrap(); out } };
     let split = |v: &[u8]| { let i = v.windows(4).position(|w| w == b"\r\n\r\n").unwrap(); (String::from_utf8_lossy(&v[..i]).into_owned(), v[i + 4..].to_vec()) };
     let (h, b) = split(&run(get(vec![], "GET")).await);
     assert!(h.starts_with("HTTP/1.1 200 OK") && h.contains(&format!("Content-Length: {}", data.len())) && h.contains("Accept-Ranges: bytes") && h.contains("ETag: \"") && h.contains("attachment; filename=\"big.bin\""), "{h}");

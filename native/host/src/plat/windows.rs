@@ -20,6 +20,16 @@ pub mod fs {
         Ok(())
     }
     /// The full path with links resolved, as Windows writes it for people: without the `\\?\` prefix std gives.
+    /// The real path of an open file, from the handle itself (GetFinalPathNameByHandleW), written as `canonicalize` writes it.
+    pub fn path_of(f: &fs::File) -> io::Result<std::path::PathBuf> {
+        use std::os::windows::{ffi::OsStringExt, io::AsRawHandle};
+        use windows_sys::Win32::Storage::FileSystem::{GetFinalPathNameByHandleW, FILE_NAME_NORMALIZED, VOLUME_NAME_DOS};
+        let mut b = vec![0u16; 32768];
+        let n = unsafe { GetFinalPathNameByHandleW(f.as_raw_handle() as _, b.as_mut_ptr(), b.len() as u32, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS) };
+        if n == 0 || n as usize >= b.len() { return Err(io::Error::last_os_error()) }
+        let s = std::ffi::OsString::from_wide(&b[..n as usize]).to_string_lossy().into_owned();
+        Ok(if let Some(r) = s.strip_prefix(r"\\?\UNC\") { format!(r"\\{r}").into() } else if let Some(r) = s.strip_prefix(r"\\?\") { r.into() } else { s.into() })
+    }
     pub fn canonicalize<P: AsRef<Path>>(p: P) -> io::Result<std::path::PathBuf> {
         let c = fs::canonicalize(p)?; let s = c.to_string_lossy();
         Ok(if let Some(r) = s.strip_prefix(r"\\?\UNC\") { format!(r"\\{r}").into() } else if let Some(r) = s.strip_prefix(r"\\?\") { r.into() } else { c })

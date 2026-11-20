@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 /// The drafts a state may carry (anything else in it is dropped).
-const KEYS: &[&str] = &["@invite", "@pair.url", "@lan.err"];
+const KEYS: &[&str] = &["@invite", "@pair.url", "@lan.err", "@share.err"];
 /// A state string back as a session (`{"drafts": {...}}`): only the page's own drafts, strings of a bounded size.
 pub fn session_of(state: &str) -> Value {
     let v: Value = serde_json::from_str(state).unwrap_or(Value::Null);

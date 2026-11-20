@@ -29,10 +29,13 @@ pub const DEFAULT_LIFE_S: u64 = 86400;
 
 /// The folders files are served from, real paths. Kept fresh by `Fresh` (every project and thread change); read by the presenter, which is synchronous.
 /// By hub home (one hub a process in use; tests run several).
-static ROOTS: LazyLock<RwLock<std::collections::HashMap<PathBuf, Vec<PathBuf>>>> = LazyLock::new(Default::default);
+/// One snapshot each: every root, and the browser's (made together, from the same model, so the two always agree).
+#[derive(Clone, Default)]
+struct Snap { all: Vec<PathBuf>, browser: Vec<PathBuf> }
+static ROOTS: LazyLock<RwLock<std::collections::HashMap<PathBuf, Snap>>> = LazyLock::new(Default::default);
 /// The roots of this process's hub (the presenter's).
 pub fn roots() -> Vec<PathBuf> { roots_at(&HOME.read().unwrap().clone()) }
-pub fn roots_at(home: &Path) -> Vec<PathBuf> { ROOTS.read().unwrap().get(home).cloned().unwrap_or_default() }
+pub fn roots_at(home: &Path) -> Vec<PathBuf> { ROOTS.read().unwrap().get(home).map(|s| s.all.clone()).unwrap_or_default() }
 fn known(home: &Path) -> bool { ROOTS.read().unwrap().contains_key(home) }
 
 /// The live projects' folders and the live threads' worktrees, then the hub's own allowed folders and the setting's, each its real path.
@@ -44,6 +47,13 @@ pub fn roots_of(m: &crate::model::Model, home: &Path, extra: &str) -> Vec<PathBu
     let mut out: Vec<PathBuf> = vec![];
     for r in v { if let Ok(c) = crate::plat::fs::canonicalize(Path::new(&r)) { if c.is_dir() && !out.contains(&c) && !too_wide(&c) { out.push(c) } } }
     out
+}
+/// A paired browser's roots: live projects, live worktrees and the hub's attachments; never the far copies or the setting's extra roots.
+pub fn browser_roots_of(m: &crate::model::Model, home: &Path) -> Vec<PathBuf> {
+    let mut v = roots_of(m, home, "");
+    let far = crate::plat::fs::canonicalize(home.join("far-files")).ok();
+    v.retain(|r| far.as_ref().map_or(true, |f| !r.starts_with(f)));
+    v
 }
 /// A root that would open everything: the filesystem's root or the user's home itself.
 fn too_wide(p: &Path) -> bool {
@@ -78,6 +88,31 @@ pub fn check(roots: &[PathBuf], home: &Path, p: &str) -> Result<(PathBuf, std::f
     let real = crate::plat::fs::canonicalize(&full).map_err(|_| "no such file")?;
     let md = std::fs::metadata(&real).map_err(|_| "no such file")?;
     if !md.is_file() { return Err("not a file") }
+    rule(roots, home, &real)?;
+    Ok((real, md))
+}
+/// A file opened once and checked as opened: the rule is applied to the path the HANDLE has (the OS's own word for the object opened, whatever a
+/// link on the way did between the look and the open), its metadata are the handle's, and it is that handle that is read and streamed.
+pub struct Opened { pub file: std::fs::File, pub real: PathBuf, pub md: std::fs::Metadata }
+pub fn open_checked(roots: &[PathBuf], home: &Path, p: &str) -> Result<Opened, &'static str> {
+    let full = local_path(p).ok_or("not a path on this machine")?;
+    let real = crate::plat::fs::canonicalize(&full).map_err(|_| "no such file")?;
+    rule(roots, home, &real)?; // refused before anything is opened
+    open_real(roots, home, &real)
+}
+/// `real` already canonical: opened without following a last link and without blocking on a FIFO, then checked by its handle.
+pub fn open_real(roots: &[PathBuf], home: &Path, real: &Path) -> Result<Opened, &'static str> {
+    use crate::plat::fs::OpenOptionsExt;
+    let file = std::fs::OpenOptions::new().read(true).custom_flags(crate::plat::fs::O_NOFOLLOW | crate::plat::fs::O_NONBLOCK).open(real).map_err(|_| "no such file")?;
+    let md = file.metadata().map_err(|_| "no such file")?;
+    if !md.is_file() { return Err("not a file") }
+    let real = crate::plat::fs::path_of(&file).map_err(|_| "no such file")?;
+    rule(roots, home, &real)?;
+    Ok(Opened { file, real, md })
+}
+/// The rule on a real path (every link already resolved).
+fn rule(roots: &[PathBuf], home: &Path, real: &Path) -> Result<(), &'static str> {
+    let real = real.to_path_buf();
     let home = crate::plat::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
     let own = [home.join("attachments"), home.join("far-files")];
     if real.starts_with(&home) && !own.iter().any(|o| real.starts_with(o)) { return Err("that file is not shared") }
@@ -89,7 +124,7 @@ pub fn check(roots: &[PathBuf], home: &Path, p: &str) -> Result<(PathBuf, std::f
     if dirs.iter().any(|d| closed_dir(d)) || secret_name(name) { return Err("that file is not shared") }
     // a dotfile at any depth (`.git`, `.ssh` contents are already refused as a folder on the way)
     if name.starts_with('.') && !matches!(name.as_str(), ".backplane.json" | ".gitignore") { return Err("that file is not shared") }
-    Ok((real, md))
+    Ok(())
 }
 
 /// What a client draws for a file an assistant message names: `{path, name, size, open}`; `open` is "view" when Backplane's viewers draw it
@@ -155,9 +190,8 @@ fn refresh_soon(hub: &Arc<Hub>) {
 }
 pub async fn refresh(hub: &Arc<Hub>) {
     let extra = hub.setting("files.share.roots").await.unwrap_or_default();
-    let r = { let m = hub.model().await; roots_of(&m, &hub.cfg.home, &extra) };
-    EXTRA.write().unwrap().insert(hub.cfg.home.clone(), extra.lines().filter_map(|l| crate::plat::fs::canonicalize(Path::new(l.trim())).ok()).collect());
-    ROOTS.write().unwrap().insert(hub.cfg.home.clone(), r);
+    let (all, browser) = { let m = hub.model().await; (roots_of(&m, &hub.cfg.home, &extra), browser_roots_of(&m, &hub.cfg.home)) };
+    ROOTS.write().unwrap().insert(hub.cfg.home.clone(), Snap { all, browser });
 }
 
 // ---- streaming ----
@@ -175,13 +209,9 @@ pub enum Who {
 }
 /// The folders `Who` reaches: a browser not the far copies or the setting's extra roots.
 fn roots_for(who: Who, home: &Path) -> Vec<PathBuf> {
-    let all = roots_at(home);
-    if who != Who::Browser { return all }
-    let canon = crate::plat::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
-    let extra = EXTRA.read().unwrap().get(home).cloned().unwrap_or_default();
-    all.into_iter().filter(|r| !r.starts_with(canon.join("far-files")) && !extra.contains(r)).collect()
+    let g = ROOTS.read().unwrap(); let s = g.get(home).cloned().unwrap_or_default();
+    if who == Who::Browser { s.browser } else { s.all }
 }
-static EXTRA: LazyLock<RwLock<std::collections::HashMap<PathBuf, Vec<PathBuf>>>> = LazyLock::new(Default::default);
 
 /// Content-Type by name: what a browser or phone opens it with. Anything unknown is bytes.
 pub fn ctype(name: &str) -> &'static str {
@@ -220,15 +250,16 @@ pub fn head_bytes(who: Who, status: &str, ctype: &str, len: u64, extra: &str) ->
 /// The types a file may be shown inline as (`inline=1`): pictures, PDF and plain text only; never HTML, SVG or anything a browser runs.
 pub fn inline_ok(ctype: &str) -> bool { matches!(ctype, "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/bmp" | "application/pdf" | "text/plain; charset=utf-8") }
 pub fn refusal(status: &str, why: &str) -> Vec<u8> {
-    let mut v = format!("HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n", why.len()).into_bytes();
+    let mut v = format!("HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: private, no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'none'; sandbox\r\nCross-Origin-Resource-Policy: same-origin\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n\r\n", why.len()).into_bytes();
     v.extend_from_slice(why.as_bytes()); v
 }
 /// The status a refusal of `check` answers with.
 fn status_of(why: &str) -> &'static str { if why == "no such file" || why == "not a file" { "404 Not Found" } else { "403 Forbidden" } }
 
-/// Writes the file (or the range asked) to `w`: the file checked once more as it is opened (the same file the rule allowed, still a regular file).
-pub async fn stream<W: AsyncWrite + Unpin>(w: &mut W, who: Who, req: &Req, real: &Path, md: &std::fs::Metadata, name: &str) -> std::io::Result<()> {
-    let tag = etag(md); let size = md.len();
+/// Writes the opened file (or the range asked) to `w`: the handle `open_checked` allowed, never the path again.
+pub async fn stream<W: AsyncWrite + Unpin>(w: &mut W, who: Who, req: &Req, o: Opened, name: &str) -> std::io::Result<()> {
+    let Opened { file, md, .. } = o;
+    let tag = etag(&md); let size = md.len();
     let Ok((status, a, b)) = plan(req.header("range"), req.header("if-range"), &tag, size) else {
         return w.write_all(&refusal("416 Range Not Satisfiable", "range not satisfiable")).await;
     };
@@ -237,8 +268,7 @@ pub async fn stream<W: AsyncWrite + Unpin>(w: &mut W, who: Who, req: &Req, real:
     if status.starts_with("206") { extra.push_str(&format!("Content-Range: bytes {a}-{b}/{size}\r\n")) }
     let inline = req.param("inline") == "1" && inline_ok(ctype(name));
     extra.push_str(&disposition(name, inline));
-    let mut f = match tokio::fs::File::open(real).await { Ok(f) => f, Err(_) => return w.write_all(&refusal("404 Not Found", "no such file")).await };
-    match f.metadata().await { Ok(m2) if m2.is_file() && m2.len() == size => {}, _ => return w.write_all(&refusal("409 Conflict", "the file changed; try again")).await }
+    let mut f = tokio::fs::File::from_std(file);
     w.write_all(&head_bytes(who, status, ctype(name), len, &extra)).await?;
     if req.method == "HEAD" || len == 0 { return w.flush().await }
     f.seek(std::io::SeekFrom::Start(a)).await?;
@@ -262,10 +292,10 @@ pub async fn serve_file<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, w: &mut W, who: W
     if !known(&hub.cfg.home) { refresh(hub).await }
     let (home, roots) = (hub.cfg.home.clone(), roots_for(who, &hub.cfg.home));
     let p2 = path.clone();
-    match tokio::task::spawn_blocking(move || check(&roots, &home, &p2).and_then(|(real, md)| match within {
-        Some(r) if !crate::plat::fs::canonicalize(&r).map_or(false, |r| real.starts_with(r)) => Err("that file is not in this thread's project"),
-        _ => Ok((real, md)) })).await {
-        Ok(Ok((real, md))) => { let name = name_of(&path); stream(w, who, req, &real, &md, &name).await }
+    match tokio::task::spawn_blocking(move || open_checked(&roots, &home, &p2).and_then(|o| match within {
+        Some(r) if !crate::plat::fs::canonicalize(&r).map_or(false, |r| o.real.starts_with(r)) => Err("that file is not in this thread's project"),
+        _ => Ok(o) })).await {
+        Ok(Ok(o)) => { let name = name_of(&path); stream(w, who, req, o, &name).await }
         Ok(Err(why)) => w.write_all(&refusal(status_of(why), why)).await,
         Err(_) => w.write_all(&refusal("500 Internal Server Error", "cannot read file")).await,
     }
@@ -277,15 +307,19 @@ pub async fn serve_files_get<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, w: &mut W, w
     if rel.is_empty() || !crate::files::fm::files_safe(&rel) { return w.write_all(&refusal("400 Bad Request", "that path is not in this project")).await }
     if thread.contains('~') { return far_file(hub, w, who, req, &thread, &rel).await }
     let Some(root) = crate::files::root_of(hub, &thread).await else { return w.write_all(&refusal("404 Not Found", "no such thread")).await };
-    let r2 = rel.clone();
-    let found = tokio::task::spawn_blocking(move || -> Result<(PathBuf, std::fs::Metadata), &'static str> {
+    if !known(&hub.cfg.home) { refresh(hub).await }
+    let (home, roots, r2) = (hub.cfg.home.clone(), roots_for(who, &hub.cfg.home), rel.clone());
+    // the Files tab's containment, then the same rule as /file (secrets, hidden folders, the caller's roots) on the handle opened
+    let found = tokio::task::spawn_blocking(move || -> Result<Opened, &'static str> {
         let real = crate::files::fm::contained(&root, &r2).ok_or("no such file")?;
-        let md = std::fs::metadata(&real).map_err(|_| "no such file")?;
-        if md.is_file() { Ok((real, md)) } else { Err("not a file") }
+        let o = open_real(&roots, &home, &real)?;
+        let root = crate::plat::fs::canonicalize(&root).map_err(|_| "no such file")?;
+        if !o.real.starts_with(&root) { return Err("that file is not in this thread's project") }
+        Ok(o)
     }).await;
     match found {
-        Ok(Ok((real, md))) => stream(w, who, req, &real, &md, &name_of(&rel)).await,
-        Ok(Err(why)) => w.write_all(&refusal("404 Not Found", why)).await,
+        Ok(Ok(o)) => stream(w, who, req, o, &name_of(&rel)).await,
+        Ok(Err(why)) => w.write_all(&refusal(status_of(why), why)).await,
         Err(_) => w.write_all(&refusal("500 Internal Server Error", "cannot read file")).await,
     }
 }
@@ -310,13 +344,12 @@ impl RpcHandler for Piece {
             let (at, len) = (p["at"].as_u64().unwrap_or(0), p["len"].as_u64().unwrap_or(FAR_PIECE).min(FAR_PIECE));
             let r = tokio::task::spawn_blocking(move || -> Result<Value, &'static str> {
                 use base64::Engine; use std::io::{Read, Seek};
-                let (real, md) = check(&roots, &home, &path)?;
+                let Opened { file: mut f, real, md } = open_checked(&roots, &home, &path)?;
                 let root = crate::plat::fs::canonicalize(&root).map_err(|_| "no such folder")?;
                 if !real.starts_with(&root) { return Err("that file is not in this thread's project") }
-                let mut f = std::fs::File::open(&real).map_err(|_| "no such file")?;
                 let n = len.min(md.len().saturating_sub(at));
                 let mut b = vec![0u8; n as usize];
-                f.seek(std::io::SeekFrom::Start(at)).map_err(|_| "cannot read it")?; f.read_exact(&mut b).map_err(|_| "cannot read it")?;
+                f.seek(std::io::SeekFrom::Start(at)).map_err(|_| "cannot read it")?; f.read_exact(&mut b).map_err(|_| "the file changed; ask again")?;
                 Ok(json!({"b64": base64::engine::general_purpose::STANDARD.encode(b), "size": md.len(), "etag": etag(&md)}))
             }).await;
             match r { Ok(Ok(v)) => vec![json!({"t":"reply","id":id,"ok":true,"result":v})], Ok(Err(e)) => fail(e), Err(_) => fail("cannot read it") }
@@ -365,17 +398,32 @@ pub struct Share { pub id: String, pub token: String, pub path: String, pub name
     pub created: u64, pub expires: u64, #[serde(default)] pub tailnet: bool, #[serde(default)] pub url: String }
 
 fn store_path(home: &Path) -> PathBuf { home.join("shares-v1.json") }
-static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// Every change to the store goes through this (sync: the presenter's Revoke is synchronous; held only for a read and a write of one small file).
+static STORE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Load, change, save under `STORE`; Ok only once the change is on disk.
+fn mutate<T>(home: &Path, f: impl FnOnce(&mut Vec<Share>) -> T) -> Result<T, String> {
+    let _g = STORE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut all = load(home); let before = all.clone();
+    let out = f(&mut all);
+    if all != before { save(home, &all).map_err(|e| format!("could not save the shares: {e}"))? }
+    Ok(out)
+}
 pub fn load(home: &Path) -> Vec<Share> {
     std::fs::read_to_string(store_path(home)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())
         .and_then(|v| serde_json::from_value::<Vec<Share>>(v["shares"].clone()).ok()).unwrap_or_default()
 }
-fn save(home: &Path, v: &[Share]) -> std::io::Result<()> { save_with(home, v) }
-fn save_with(home: &Path, v: &[Share]) -> std::io::Result<()> {
+/// The temp file is made 0600 from its first byte (never readable by others, even for a moment), written, synced, then renamed over the store.
+fn save(home: &Path, v: &[Share]) -> std::io::Result<()> {
+    use std::io::Write;
     let p = store_path(home); let tmp = p.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec_pretty(&json!({"shares": v}))?)?;
-    #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600)); }
-    std::fs::rename(tmp, p)
+    let _ = std::fs::remove_file(&tmp);
+    let mut o = std::fs::OpenOptions::new(); o.write(true).create_new(true);
+    #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; o.mode(0o600); }
+    let mut f = o.open(&tmp)?;
+    f.write_all(&serde_json::to_vec_pretty(&json!({"shares": v}))?)?; f.sync_all()?; drop(f);
+    std::fs::rename(&tmp, &p)?;
+    let _ = crate::plat::fs::sync_dir(home);
+    Ok(())
 }
 fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) }
 fn random_hex(n: usize) -> String { let mut b = vec![0u8; n]; crate::plat::fs::random(&mut b).expect("/dev/urandom"); b.iter().map(|x| format!("{x:02x}")).collect() }
@@ -412,9 +460,10 @@ pub async fn create(hub: &Arc<Hub>, thread: &str, a: &Value) -> Result<Value, St
     if sh.tailnet {
         match tailnet_base(hub).await { Ok(base) => sh.url = format!("{base}{route}"), Err(e) => note = e }
     }
-    let _g = LOCK.lock().await;
-    let mut all = load(&hub.cfg.home); all.retain(|s| s.expires > now); all.push(sh.clone());
-    save(&hub.cfg.home, &all).map_err(|e| format!("could not keep the share: {e}"))?;
+    let keep = sh.clone();
+    let home = hub.cfg.home.clone();
+    tokio::task::spawn_blocking(move || mutate(&home, |all| { all.retain(|s| s.expires > now); all.push(keep) })).await.map_err(|_| "failed".to_string())?
+        .map_err(|e| format!("could not keep the share: {e}"))?;
     hub.bump_views();
     let mut out = json!({"id": sh.id, "link": route, "name": name, "size": sh.size, "expires": sh.expires,
         "note": "Write `link` in your message: every Backplane client (desktop, phone, web) opens it, on this machine or another. It expires; Settings lists and revokes shares."});
@@ -437,38 +486,48 @@ async fn tailnet_base(hub: &Arc<Hub>) -> Result<String, String> {
     Ok(format!("http://{dns}:{port}"))
 }
 
-/// Drops ended (and the revoked) shares. Returns what is left.
-pub async fn sweep(hub: &Arc<Hub>, revoke: Option<&str>) -> Vec<Share> {
-    let _g = LOCK.lock().await;
+/// Drops ended (and the revoked) shares, on disk before it answers. `revoke`: Err when there is no such share. Returns what is left.
+pub async fn sweep(hub: &Arc<Hub>, revoke: Option<&str>) -> Result<Vec<Share>, String> {
+    let (home, rid) = (hub.cfg.home.clone(), revoke.map(str::to_string));
+    let r = tokio::task::spawn_blocking(move || drop_shares(&home, rid.as_deref())).await.map_err(|_| "failed".to_string())?;
+    if matches!(&r, Ok((_, true))) { hub.bump_views() }
+    r.map(|(v, _)| v)
+}
+/// (what is left, whether anything went)
+fn drop_shares(home: &Path, revoke: Option<&str>) -> Result<(Vec<Share>, bool), String> {
     let now = now_s();
-    let all = load(&hub.cfg.home);
-    let (keep, gone): (Vec<Share>, Vec<Share>) = all.into_iter().partition(|s| s.expires > now && Some(s.id.as_str()) != revoke);
-    if !gone.is_empty() { let _ = save(&hub.cfg.home, &keep); hub.bump_views(); }
-    keep
+    mutate(home, |all| {
+        if let Some(id) = revoke { if !all.iter().any(|s| s.id == id) { return Err("no such share".to_string()) } }
+        let n = all.len(); all.retain(|s| s.expires > now && Some(s.id.as_str()) != revoke);
+        Ok((all.clone(), all.len() != n))
+    })?
 }
 
 /// Settings → Devices (the presenter, synchronous): the live shares, and Revoke.
 pub fn listed_now() -> Vec<Value> { let h = HOME.read().unwrap().clone(); if h.as_os_str().is_empty() { return vec![] } let now = now_s(); listed(&load(&h).into_iter().filter(|s| s.expires > now).collect::<Vec<_>>()) }
-pub fn revoke_now(id: &str) {
-    let h = HOME.read().unwrap().clone(); if h.as_os_str().is_empty() { return }
-    let all = load(&h); let keep: Vec<Share> = all.iter().filter(|s| s.id != id).cloned().collect();
-    if keep.len() != all.len() { let _ = save(&h, &keep); }
+/// Ok once the share is gone from disk; Err with the words Settings shows.
+pub fn revoke_now(id: &str) -> Result<(), String> {
+    let h = HOME.read().unwrap().clone(); if h.as_os_str().is_empty() { return Err("the hub is not ready".into()) }
+    drop_shares(&h, Some(id)).map(|_| ())
 }
-/// `/s/<token>/<name>`: no other credential; an unknown, ended or revoked token is 404, and the file is checked again as it is now.
-pub async fn serve_share<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, w: &mut W, req: &Req) -> std::io::Result<()> {
+/// `/s/<token>/<name>`: an unknown, ended or revoked token is 404, and the file is checked again as it is now, against what the caller may reach
+/// (`Who::Share` on the main listener: the token is the credential; `Who::Browser` on the web ingress, already paired: the share's file AND the
+/// browser's roots). `requester`: whose unknown tokens are counted (the peer address; on the ingress, the paired browser).
+pub async fn serve_share<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, w: &mut W, who: Who, requester: &str, req: &Req) -> std::io::Result<()> {
     if req.method != "GET" && req.method != "HEAD" { return w.write_all(&refusal("405 Method Not Allowed", "GET only")).await }
-    let who = req.peer.map(|p| p.ip().to_string()).unwrap_or_default();
-    if misses(&who, false) >= MISSES { return w.write_all(&refusal("429 Too Many Requests", "too many unknown links; wait a minute")).await }
+    let key = requester.to_string();
+    if misses(&key, false) >= MISSES { return w.write_all(&refusal("429 Too Many Requests", "too many unknown links; wait a minute")).await }
     let token = req.route().strip_prefix("/s/").unwrap_or("").split('/').next().unwrap_or("").to_string();
     let now = now_s();
     let found = if token.len() == 48 && token.bytes().all(|b| b.is_ascii_hexdigit()) {
         load(&hub.cfg.home).into_iter().find(|s| s.expires > now && s.token.len() == token.len() && s.token.bytes().zip(token.bytes()).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0)
     } else { None };
-    let Some(sh) = found else { misses(&who, true); return w.write_all(&refusal("404 Not Found", "this link has ended or never was")).await };
+    let Some(sh) = found else { misses(&key, true); return w.write_all(&refusal("404 Not Found", "this link has ended or never was")).await };
     if !known(&hub.cfg.home) { refresh(hub).await }
-    let (home, roots, p) = (hub.cfg.home.clone(), roots_at(&hub.cfg.home), sh.path.clone());
-    match tokio::task::spawn_blocking(move || check(&roots, &home, &p)).await {
-        Ok(Ok((real, md))) => stream(w, Who::Share, req, &real, &md, &sh.name).await,
+    let (home, roots, p) = (hub.cfg.home.clone(), roots_for(who, &hub.cfg.home), sh.path.clone());
+    // the share names its real file: opened by that path, checked by its handle, and it must still be that same file
+    match tokio::task::spawn_blocking(move || open_checked(&roots, &home, &p).and_then(|o| if o.real == Path::new(&p) { Ok(o) } else { Err("that file is not shared") })).await {
+        Ok(Ok(o)) => stream(w, if who == Who::Browser { Who::Browser } else { Who::Share }, req, o, &sh.name).await,
         Ok(Err(why)) => w.write_all(&refusal(status_of(why), why)).await,
         Err(_) => w.write_all(&refusal("500 Internal Server Error", "cannot read file")).await,
     }
@@ -495,9 +554,10 @@ impl RpcHandler for Rpc {
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let rid = p["id"].as_str().unwrap_or("");
-            if m == "shares.revoke" && !load(&hub.cfg.home).iter().any(|s| s.id == rid) { return vec![json!({"t":"reply","id":id,"ok":false,"error":"no such share"})] }
-            let left = sweep(hub, if m == "shares.revoke" { Some(rid) } else { None }).await;
-            vec![json!({"t":"reply","id":id,"ok":true,"result":{"shares": listed(&left)}})]
+            match sweep(hub, if m == "shares.revoke" { Some(rid) } else { None }).await {
+                Ok(left) => vec![json!({"t":"reply","id":id,"ok":true,"result":{"shares": listed(&left)}})],
+                Err(e) => vec![json!({"t":"reply","id":id,"ok":false,"error":e})],
+            }
         })
     }
 }
@@ -508,7 +568,7 @@ pub fn listed(v: &[Share]) -> Vec<Value> {
 
 struct Sweep;
 impl Ticker for Sweep {
-    fn tick<'a>(&'a self, hub: &'a Arc<Hub>, _now: u64) -> Fut<'a, Vec<Value>> { Box::pin(async move { sweep(hub, None).await; refresh(hub).await; vec![] }) }
+    fn tick<'a>(&'a self, hub: &'a Arc<Hub>, _now: u64) -> Fut<'a, Vec<Value>> { Box::pin(async move { let _ = sweep(hub, None).await; refresh(hub).await; vec![] }) }
 }
 
 /// The MCP tool.

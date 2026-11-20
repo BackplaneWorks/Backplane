@@ -186,6 +186,11 @@ mod tests {
         let link = made["link"].as_str().unwrap().to_string();
         assert!(ask(link.clone(), String::new()).await.0.starts_with("HTTP/1.1 401"), "a share's token is no credential on the browser ingress");
         let (h, _) = ask(link.clone(), c.clone()).await; assert!(h.starts_with("HTTP/1.1 200") && h.contains("no-store"), "{h}");
+        std::fs::write(proj.join(".env"), b"K=1").unwrap();
+        assert!(ask("/files/get?thread=project-home-p1&path=.env".into(), c.clone()).await.0.starts_with("HTTP/1.1 403"), "the Files tab's download keeps the secret rule");
+        // a share a native client may open, of a file the browser may not reach: the browser gets the intersection
+        let far = crate::files::share::create(&hub, "t1", &serde_json::json!({"path": home.join("far-files/L/x.zip").to_string_lossy()})).await.unwrap();
+        assert!(ask(far["link"].as_str().unwrap().to_string(), c.clone()).await.0.starts_with("HTTP/1.1 403"), "a share opens to a browser only within the browser's roots");
         let tag = ask(bom.clone(), c.clone()).await.0.lines().find_map(|l| l.strip_prefix("ETag: ").map(str::to_string)).unwrap();
         let device = reg.list()["devices"].as_array().unwrap().iter().find(|d| d["kind"] == "browser").unwrap()["id"].as_str().unwrap().to_string();
         assert_eq!(reg.revoke(&device)["ok"], true);
@@ -434,7 +439,7 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
             json_response("401 Unauthorized", json!({"state":"unpaired"}), "")
         } else {
             use crate::files::share::{serve_file, serve_files_get, serve_share, Who};
-            let r = match req.route() { "/file" => serve_file(&hub, &mut writer, Who::Browser, &req).await, "/files/get" => serve_files_get(&hub, &mut writer, Who::Browser, &req).await, _ => serve_share(&hub, &mut writer, &req).await };
+            let r = match req.route() { "/file" => serve_file(&hub, &mut writer, Who::Browser, &req).await, "/files/get" => serve_files_get(&hub, &mut writer, Who::Browser, &req).await, _ => serve_share(&hub, &mut writer, Who::Browser, &format!("browser:{}", device.as_deref().unwrap_or("")), &req).await };
             if r.is_ok() { writer.shutdown().await.ok(); }
             return Ok(());
         }

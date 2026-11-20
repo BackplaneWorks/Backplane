@@ -4,7 +4,7 @@
 #[path="../files/ops.rs"] pub mod ops;
 #[path="../files/mimg.rs"] pub mod mimg;
 /// The audit serves no files: no message names a file it links.
-pub mod share { pub fn linkable(_: &str) -> Vec<serde_json::Value> { vec![] } pub fn listed_now() -> Vec<serde_json::Value> { vec![] } pub fn revoke_now(_: &str) {} }
+pub mod share { pub fn linkable(_: &str) -> Vec<serde_json::Value> { vec![] } pub fn listed_now() -> Vec<serde_json::Value> { vec![] } pub fn revoke_now(_: &str) -> Result<(), String> { Ok(()) } }
 /// The folder watcher needs the hub; the audit has none, so its calls do nothing.
 pub mod watch_dir { pub fn touch(_root: &str, _dir: &str, _sig: u64) {} pub fn signature(_listing: &str) -> u64 { 0 } }
 /// Pure version wire encoder matching `files/rv.rs` `hist_git`.
