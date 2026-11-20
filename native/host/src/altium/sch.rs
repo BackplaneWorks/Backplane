@@ -40,8 +40,12 @@ fn load(bytes: &[u8]) -> Option<Recs> {
     let fh = d.stream("FileHeader")?;
     let head = sch_records(&fh);
     match head.first() { Some(SchRec::Text(p)) if p.get("HEADER").contains("Schematic") => {} _ => return None }
-    let main = text_records(&fh);
-    let more = d.stream("Additional").map(|b| text_records(&b)).unwrap_or_default();
+    let mut main = text_records(&fh);
+    let mut more = d.stream("Additional").map(|b| text_records(&b)).unwrap_or_default();
+    // the 8-bit strings in the sheet's code page (GBK from a Chinese Windows), decided over both streams
+    let cp = super::code_page(main.iter().chain(more.iter()));
+    super::recode(&mut main, cp);
+    super::recode(&mut more, cp);
     Some(Recs { main, more })
 }
 
@@ -92,11 +96,16 @@ impl Face {
 /// Advance widths in thousandths of the em of printable ASCII (space to '~'): Times New Roman's and Arial's
 const TIMES: [u16; 95] = [250, 333, 408, 500, 500, 833, 778, 180, 333, 333, 500, 564, 250, 333, 250, 278, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 278, 278, 564, 564, 564, 444, 921, 722, 667, 667, 722, 611, 556, 722, 722, 333, 389, 722, 611, 889, 722, 722, 556, 722, 667, 556, 611, 722, 722, 944, 722, 722, 611, 333, 278, 333, 469, 500, 333, 444, 500, 444, 500, 444, 333, 500, 500, 278, 278, 500, 278, 778, 500, 500, 500, 500, 333, 389, 278, 500, 500, 722, 500, 500, 444, 480, 200, 480, 541];
 const ARIAL: [u16; 95] = [278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556, 1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556, 333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584];
+/// A character the font Altium falls back to for it (SimSun, Microsoft YaHei, MS Gothic...) draws a full em wide: CJK ideographs,
+/// kana, hangul, CJK punctuation and full-width forms
+fn wide(c: char) -> bool {
+    matches!(c as u32, 0x1100..=0x115F | 0x2E80..=0x303E | 0x3041..=0x33FF | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xA000..=0xA4CF | 0xAC00..=0xD7A3 | 0xF900..=0xFAFF | 0xFE30..=0xFE4F | 0xFF00..=0xFF60 | 0xFFE0..=0xFFE6)
+}
 /// The widest line of `s` (Altium's text: "~1" breaks a line, a backslash marks a bar) in ems
 fn em_width(s: &str, face: Face) -> f32 {
     s.replace("~1", "\n").replace("~2", "|").split('\n').map(|l| l.chars().filter(|&c| c != '\\').map(|c| {
         let i = c as u32;
-        if face == Face::Mono { 600 } else if (32..127).contains(&i) { (if face == Face::Serif { TIMES } else { ARIAL })[(i - 32) as usize] as u32 } else { 556 }
+        if wide(c) { 1000 } else if face == Face::Mono { 600 } else if (32..127).contains(&i) { (if face == Face::Serif { TIMES } else { ARIAL })[(i - 32) as usize] as u32 } else { 556 }
     }).sum::<u32>()).max().unwrap_or(0) as f32 / 1000.0
 }
 impl Font {
@@ -1123,10 +1132,12 @@ mod tests {
     use std::io::Write;
 
     /// A .SchDoc made of these records (each "|KEY=V|..."), after the header.
-    fn schdoc(recs: &[&str]) -> Vec<u8> {
+    fn schdoc(recs: &[&str]) -> Vec<u8> { schdoc_b(&recs.iter().map(|r| r.as_bytes().to_vec()).collect::<Vec<_>>()) }
+    /// the same from records' bytes (8-bit strings in a code page)
+    fn schdoc_b(recs: &[Vec<u8>]) -> Vec<u8> {
         let mut s = Vec::new();
-        let mut put = |body: &str| { let mut b = body.as_bytes().to_vec(); b.push(0); s.extend_from_slice(&(b.len() as u32).to_le_bytes()); s.extend_from_slice(&b) };
-        put("|HEADER=Protel for Windows - Schematic Capture Binary File Version 5.0|WEIGHT=1");
+        let mut put = |body: &[u8]| { let mut b = body.to_vec(); b.push(0); s.extend_from_slice(&(b.len() as u32).to_le_bytes()); s.extend_from_slice(&b) };
+        put(b"|HEADER=Protel for Windows - Schematic Capture Binary File Version 5.0|WEIGHT=1");
         for r in recs { put(r) }
         let mut cf = cfb::CompoundFile::create(std::io::Cursor::new(Vec::new())).unwrap();
         cf.create_stream("/FileHeader").unwrap().write_all(&s).unwrap();
@@ -1162,6 +1173,41 @@ mod tests {
     }
     fn find<'a>(its: &'a [Item], key: &str) -> &'a Item { its.iter().find(|i| i.key == key).unwrap_or_else(|| panic!("no {key}")) }
 
+    /// A sheet as Altium on a Chinese Windows writes it (issue #1380): a part whose description and comment are GBK with no
+    /// `%UTF8%` twin (as many records are), a note in GBK with its UTF-8 twin, and a label only in UTF-8; and the same part from
+    /// a Western Windows, whose "µ", "°" and "é" stay Windows-1252.
+    fn cjk_sheet(gbk: bool) -> Vec<u8> {
+        let g = |s: &str| encoding_rs::GBK.encode(s).0.into_owned();
+        let cat = |ps: &[&[u8]]| ps.concat();
+        let (desc, comment) = if gbk { (g("贴片电阻"), g("0402 47KΩ (4702) 1%")) } else { (b"R\xe9sistance 25\xb0C".to_vec(), b"10\xb5F".to_vec()) };
+        let mut recs = vec![
+            SHEET.as_bytes().to_vec(),
+            cat(&[b"|RECORD=1|LIBREFERENCE=Res|COMPONENTDESCRIPTION=", &desc, b"|PARTCOUNT=2|CURRENTPARTID=1|LOCATION.X=100|LOCATION.Y=500|UNIQUEID=RRRRRRRR"]),
+            b"|RECORD=34|OWNERINDEX=1|OWNERPARTID=-1|LOCATION.X=100|LOCATION.Y=510|TEXT=R1|NAME=Designator|FONTID=1".to_vec(),
+            cat(&[b"|RECORD=41|OWNERINDEX=1|OWNERPARTID=-1|LOCATION.X=100|LOCATION.Y=485|TEXT=", &comment, b"|NAME=Comment|FONTID=1"]),
+        ];
+        if gbk {
+            recs.push(cat(&[b"|RECORD=4|LOCATION.X=100|LOCATION.Y=300|TEXT=", &g("低压差线性稳压(LDO)"), b"|%UTF8%TEXT=", "低压差线性稳压(LDO)".as_bytes(), b"|FONTID=1"]));
+            recs.push(cat(&[b"|RECORD=4|LOCATION.X=100|LOCATION.Y=200|TEXT=??|%UTF8%TEXT=", "中文：电源".as_bytes(), b"|FONTID=1"]));
+        }
+        schdoc_b(&recs)
+    }
+    #[test] fn chinese_text_reads_and_draws() {
+        let ps = parts(&cjk_sheet(true));
+        assert_eq!((ps[0].description.as_str(), ps[0].value.as_str()), ("贴片电阻", "0402 47KΩ (4702) 1%"));
+        let its = items(&cjk_sheet(true)).unwrap();
+        // the notes are drawn in strokes: 11 ideographs of several strokes each, where boxes (glyphs missing) were one each
+        let n = its.iter().filter(|i| &*i.info == "text").count();
+        assert!(n > 60, "{n} strokes for the notes");
+        if let Some(o) = std::env::var_os("BP_TEST_CJK_OUT") {
+            let o = std::path::PathBuf::from(o);
+            std::fs::write(o.join("cjk.SchDoc"), cjk_sheet(true)).unwrap();
+            super::super::debug_svg(&its, 1, &o.join("cjk-sch.svg").to_string_lossy());
+        }
+        // a Western sheet's 8-bit strings stay Windows-1252
+        let ps = parts(&cjk_sheet(false));
+        assert_eq!((ps[0].description.as_str(), ps[0].value.as_str()), ("Résistance 25°C", "10µF"));
+    }
     #[test] fn units_and_flip() {
         let its = items(&sample()).unwrap();
         // A4 is 760 units high: a pin at (100, 500) pointing left (orientation 2) ends 10 units left of it

@@ -96,6 +96,69 @@ impl Doc {
     }
 }
 
+/// The bytes a `cp1252` string was read from (it maps every byte to a character of its own)
+fn cp1252_bytes(s: &str) -> Vec<u8> {
+    s.chars().map(|c| match c as u32 { u @ (0..=0x7F | 0xA0..=0xFF | 0x81 | 0x8D | 0x8F | 0x90 | 0x9D) => u as u8, _ => cp_hi(c) }).collect()
+}
+fn cp_hi(c: char) -> u8 {
+    const HI: &str = "€\u{81}‚ƒ„…†‡ˆ‰Š‹Œ\u{8d}Ž\u{8f}\u{90}‘’“”•–—˜™š›œ\u{9d}žŸ";
+    HI.chars().position(|h| h == c).map_or(b'?', |i| 0x80 + i as u8)
+}
+/// Characters Chinese text in a GBK document has: CJK ideographs, punctuation and full-width forms, kana, bopomofo, and the
+/// Greek, Cyrillic, pinyin, numbered, box-drawing and other symbols of GB 2312's first rows
+fn gbk_char(c: char) -> bool {
+    matches!(c as u32, 0x4E00..=0x9FFF | 0x3400..=0x4DBF | 0xF900..=0xFAFF | 0x3000..=0x303F | 0xFF00..=0xFFEF | 0x3041..=0x30FF | 0x3105..=0x3129
+        | 0x0391..=0x03C9 | 0x0401..=0x0451 | 0x2010..=0x203B | 0x2100..=0x2199 | 0x2200..=0x2312 | 0x2460..=0x24FF | 0x2500..=0x2642
+        | 0xA4 | 0xA7 | 0xA8 | 0xB0 | 0xB1 | 0xB7 | 0xD7 | 0xE0..=0xFC | 0x101..=0x1DC | 0x251 | 0x261 | 0x2C7..=0x2D9 | 0xE000..=0xE765)
+}
+/// `b` as GBK when it reads as Chinese: every byte above ASCII starts a two-byte character whose second byte is above ASCII
+/// too (so Western "10µF", "25°C", "±5%", "Résistance" never do), it decodes without error, and to characters Chinese text uses.
+pub fn gbk(b: &[u8]) -> Option<String> {
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] < 0x80 { i += 1; continue }
+        if !(0x81..=0xFE).contains(&b[i]) || !b.get(i + 1).is_some_and(|t| (0x80..=0xFE).contains(t)) { return None }
+        i += 2;
+    }
+    let s = encoding_rs::GBK.decode_without_bom_handling_and_without_replacement(b)?;
+    s.chars().all(|c| c.is_ascii() || gbk_char(c)).then(|| s.into_owned())
+}
+/// 8-bit text in a document's code page
+pub fn text8(b: &[u8], cp: Cp) -> String {
+    if cp == Cp::Gbk && !b.is_ascii() { encoding_rs::GBK.decode_without_bom_handling(b).0.into_owned() } else { cp1252(b) }
+}
+/// Whether `b` (read as GBK, `gbk` said so) has one of GB 2312's 3,755 common hanzi (its level 1: first byte B0..D7, second A1..FE)
+fn common_hanzi(b: &[u8]) -> bool {
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] < 0x80 { i += 1; continue }
+        if (0xB0..=0xD7).contains(&b[i]) && b.get(i + 1).is_some_and(|t| (0xA1..=0xFE).contains(t)) { return true }
+        i += 2;
+    }
+    false
+}
+/// The code page of a document's records: what their `%UTF8%` twins say, and with none, GBK when every 8-bit value with bytes
+/// above ASCII reads as Chinese (`gbk`) and one at least has a common hanzi. A Western document's "µF", "°C" or "é" never reads
+/// as Chinese, and its accented pairs ("Größe": F6 DF) are never common hanzi. A GBK character whose second byte is ASCII (the
+/// extension's 镕, E9 46) keeps a document without twins Western: allowing those would let "Über" read as Chinese.
+pub fn code_page<'a>(rs: impl IntoIterator<Item = &'a Props>) -> Cp {
+    let (mut vote, mut common, mut all) = (0, false, true);
+    for r in rs {
+        vote += r.1.vote;
+        for k in &r.1.keys { if let Some(v) = r.0.get(k) { let b = cp1252_bytes(v); all = all && gbk(&b).is_some(); common = common || common_hanzi(&b) } }
+    }
+    if vote > 0 || vote == 0 && common && all { Cp::Gbk } else { Cp::Western }
+}
+/// The records' 8-bit values (those without a `%UTF8%` twin) in the code page `cp`, once: the records forget which they were
+pub fn recode(rs: &mut [Props], cp: Cp) {
+    for r in rs {
+        if cp != Cp::Western { for k in &r.1.keys { if let Some(v) = r.0.get_mut(k) { *v = text8(&cp1252_bytes(v), cp) } } }
+        r.1.keys.clear();
+    }
+}
+/// A document's records with their 8-bit values in its code page (`code_page`), and that code page
+pub fn decode(rs: &mut [Props]) -> Cp { let cp = code_page(rs.iter()); recode(rs, cp); cp }
+
 /// Windows-1252 text as a String (Altium's 8-bit strings; a `%UTF8%KEY` property carries the UTF-8 form when it differs).
 pub fn cp1252(b: &[u8]) -> String {
     const HI: [char; 32] = ['€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8d}', 'Ž', '\u{8f}',
@@ -103,15 +166,27 @@ pub fn cp1252(b: &[u8]) -> String {
     b.iter().map(|&c| if (0x80..0xA0).contains(&c) { HI[(c - 0x80) as usize] } else { c as char }).collect()
 }
 
-/// One record's properties: keys upper-cased; a `%UTF8%KEY` value replaces KEY's 8-bit one.
+/// The code page of a document's 8-bit strings: Altium writes them in Windows' ANSI code page, Windows-1252 on a Western
+/// Windows and GBK (936) on a Chinese one, and adds a `%UTF8%KEY` only for some properties (issue #1380).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Cp { #[default] Western, Gbk }
+/// What one record's 8-bit values say about their code page: the keys whose value has bytes above ASCII and no `%UTF8%` twin
+/// (read as Windows-1252 for now, see `recode`), and +1 for each `%UTF8%` twin whose 8-bit value is its GBK form, -1 for each
+/// that is its Windows-1252 form.
 #[derive(Clone, Debug, Default)]
-pub struct Props(pub HashMap<String, String>);
+pub struct Ansi { keys: Vec<String>, vote: i32 }
+
+/// One record's properties: keys upper-cased; a `%UTF8%KEY` value replaces KEY's 8-bit one. 8-bit values read as Windows-1252
+/// until the document's code page is known (`decode`).
+#[derive(Clone, Debug, Default)]
+pub struct Props(pub HashMap<String, String>, pub Ansi);
 impl Props {
     /// `|KEY=VALUE|KEY=VALUE...` (a trailing NUL and empty fields are ignored)
     pub fn parse(b: &[u8]) -> Props {
         let b = match b.iter().position(|&c| c == 0) { Some(i) => &b[..i], None => b };
         let mut m = HashMap::new();
         let mut utf8 = Vec::new();
+        let mut eight: Vec<(String, &[u8])> = Vec::new();
         for field in b.split(|&c| c == b'|') {
             let Some(eq) = field.iter().position(|&c| c == b'=') else { continue };
             let (k, v) = (&field[..eq], &field[eq + 1..]);
@@ -120,11 +195,21 @@ impl Props {
             if let Some(rest) = key.strip_prefix("%UTF8%") {
                 utf8.push((rest.to_string(), String::from_utf8_lossy(v).into_owned()));
             } else {
+                // a key given again: its last value is the one kept, and only that one counts
+                eight.retain(|(k, _)| *k != key);
+                if !v.is_ascii() { eight.push((key.clone(), v)) }
                 m.insert(key, cp1252(v));
             }
         }
-        for (k, v) in utf8 { m.insert(k, v); }
-        Props(m)
+        let mut vote = 0;
+        for (k, v) in utf8 {
+            if let Some(i) = eight.iter().position(|(e, _)| *e == k) {
+                let b = eight.remove(i).1;
+                if encoding_rs::GBK.decode_without_bom_handling_and_without_replacement(b).is_some_and(|g| g == v) { vote += 1 } else if cp1252(b) == v { vote -= 1 }
+            }
+            m.insert(k, v);
+        }
+        Props(m, Ansi { keys: eight.into_iter().map(|(k, _)| k).collect(), vote })
     }
     pub fn get(&self, k: &str) -> &str { self.0.get(k).map(|s| s.as_str()).unwrap_or("") }
     pub fn has(&self, k: &str) -> bool { self.0.contains_key(k) }
@@ -254,6 +339,49 @@ pub fn corpus_boards() -> Vec<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn code_pages() {
+        let g = |s: &str| encoding_rs::GBK.encode(s).0.into_owned();
+        let rec = |k: &str, v: &[u8]| { let mut b = format!("|RECORD=1|{k}=").into_bytes(); b.extend_from_slice(v); Props::parse(&b) };
+        // GBK without %UTF8% twins: decided from the strings themselves
+        let mut rs = vec![rec("TEXT", &g("贴片电阻")), rec("COMMENT", &g("0402 47KΩ (4702) 1%")), rec("LIB", &g("光耦.PcbLib")), rec("NAME", b"R1")];
+        assert_eq!(rs[0].get("TEXT"), "\u{cc}\u{f9}\u{c6}\u{ac}\u{b5}\u{e7}\u{d7}\u{e8}", "Windows-1252 until the document is decided");
+        assert_eq!(decode(&mut rs), Cp::Gbk);
+        assert_eq!((rs[0].get("TEXT"), rs[1].get("COMMENT"), rs[2].get("LIB"), rs[3].get("NAME")), ("贴片电阻", "0402 47KΩ (4702) 1%", "光耦.PcbLib", "R1"));
+        // Western strings never read as GBK: a lone high byte, or one followed by ASCII
+        for w in [&b"10\xb5F"[..], b"25\xb0C", b"\xb15%", b"R\xe9sistance", b"\x80 5"] {
+            assert_eq!(gbk(w), None, "{w:?}");
+            let mut rs = vec![rec("TEXT", w), rec("COMMENT", &g("贴片电阻"))];
+            assert_eq!(decode(&mut rs), Cp::Western, "{w:?}: one Western string keeps the document Western");
+            assert_eq!(rs[0].get("TEXT"), cp1252(w));
+        }
+        // %UTF8% twins decide it: their 8-bit form is the GBK one, so a string that alone would not read as GBK still does
+        let mut b = b"|RECORD=4|TEXT=".to_vec(); b.extend(g("中文")); b.extend_from_slice("|%UTF8%TEXT=中文".as_bytes());
+        let mut rs = vec![Props::parse(&b), rec("NAME", &g("Ω"))];
+        assert_eq!(decode(&mut rs), Cp::Gbk);
+        assert_eq!((rs[0].get("TEXT"), rs[1].get("NAME")), ("中文", "Ω"));
+        // ... and a Western twin keeps a document Western, whatever its other strings look like
+        let mut rs = vec![Props::parse(b"|TEXT=R\xe9s|%UTF8%TEXT=R\xc3\xa9s"), rec("NAME", &g("贴片"))];
+        assert_eq!(decode(&mut rs), Cp::Western);
+        assert_eq!(rs[0].get("TEXT"), "Rés");
+        // accented lowercase pairs read as GBK characters, but never common hanzi: a Western document (two capitals, "ÄÖ", would)
+        let mut rs = vec![rec("TEXT", b"Gr\xf6\xdfe"), rec("NAME", b"\xe4\xf6")];
+        assert_eq!(decode(&mut rs), Cp::Western);
+        assert_eq!(rs[0].get("TEXT"), "Größe");
+        // recoding twice changes nothing; a key given again counts by its last value
+        let mut rs = vec![rec("TEXT", &g("电阻"))];
+        assert_eq!(decode(&mut rs), Cp::Gbk);
+        recode(&mut rs, Cp::Gbk);
+        assert_eq!(rs[0].get("TEXT"), "电阻");
+        let mut b = b"|TEXT=".to_vec(); b.extend(g("电阻")); b.extend_from_slice(b"|TEXT=R1|NAME=x");
+        let mut rs = vec![Props::parse(&b), rec("NOTE", b"Gr\xf6\xdfe")];
+        assert_eq!(decode(&mut rs), Cp::Western);
+        assert_eq!(rs[0].get("TEXT"), "R1");
+        // the bytes come back from the Windows-1252 reading exactly
+        let all: Vec<u8> = (0..=255).collect();
+        assert_eq!(cp1252_bytes(&cp1252(&all)), all);
+        assert_eq!(text8(&g("电阻"), Cp::Gbk), "电阻");
+        assert_eq!(text8(b"\xb5", Cp::Western), "µ");
+    }
     #[test] fn props_parse_utf8_and_case() {
         let p = Props::parse(b"|RECORD=1|LibReference=R\xe9s|%UTF8%LibReference=R\xc3\xa9s\xe2\x82\xac|Location.X=100|\0junk");
         assert_eq!(p.get("RECORD"), "1");

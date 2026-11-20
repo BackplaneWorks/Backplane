@@ -5,8 +5,48 @@ use super::fl;
 use super::strokefont_data as data;
 
 pub struct Glyph { pub l: u32, pub r: u32, pub strokes: &'static [&'static [(u8, u8)]] }
-/// Stroke.glyph
-fn glyph(cp: u32) -> &'static Glyph { if cp < 256 { data::low(cp) } else if cp == 937 || cp == 8486 { &data::OHM } else { &data::BOX } }
+/// Stroke.glyph; beyond the core font's Latin-1 and Ω: the CJK ideographs from KiCad's newstroke font (strokefont_cjk.z) and CJK punctuation
+/// and full-width forms as their ASCII glyphs a full width wide; anything else is a box
+fn glyph(cp: u32) -> &'static Glyph {
+    if cp < 256 { data::low(cp) } else if cp == 937 || cp == 8486 { &data::OHM }
+    else if (CJK0..CJK1).contains(&cp) { cjk().get((cp - CJK0) as usize).and_then(|g| g.as_ref()).unwrap_or(&data::BOX) }
+    else { full().iter().find(|(c, _)| *c == cp).map(|(_, g)| g).unwrap_or(&data::BOX) }
+}
+const CJK0: u32 = 0x4E00;
+const CJK1: u32 = 0xA000;
+/// The advance of a CJK glyph in glyph units (newstroke's: an ideograph's bounds are 31 apart)
+const FULL: u32 = 31;
+/// KiCad's newstroke glyphs for U+4E00..U+9FFF (scripts/strokefont-cjk.py), read once: their coordinates are characters offset
+/// by 'R' about a centre of 'R' and a baseline of '[', so 18 less is this font's (centre 64, baseline 73); " R" lifts the pen.
+fn cjk() -> &'static [Option<Glyph>] {
+    static T: std::sync::OnceLock<Vec<Option<Glyph>>> = std::sync::OnceLock::new();
+    T.get_or_init(|| {
+        use std::io::Read;
+        let mut text = Vec::new();
+        if flate2::read::ZlibDecoder::new(&include_bytes!("strokefont_cjk.z")[..]).read_to_end(&mut text).is_err() { return vec![] }
+        text.split(|&b| b == b'\n').map(|b| {
+            if b.len() < 4 || b.iter().any(|&c| c < 32) { return None }
+            let mut strokes: Vec<&'static [(u8, u8)]> = vec![];
+            let mut cur: Vec<(u8, u8)> = vec![];
+            for p in b[2..].chunks_exact(2) {
+                if p == b" R" { if !cur.is_empty() { strokes.push(Box::leak(std::mem::take(&mut cur).into_boxed_slice())) } }
+                else { cur.push((p[0] - 18, p[1] - 18)) }
+            }
+            if !cur.is_empty() { strokes.push(Box::leak(cur.into_boxed_slice())) }
+            Some(Glyph { l: (b[0] - 18) as u32, r: (b[1] - 18) as u32, strokes: Box::leak(strokes.into_boxed_slice()) })
+        }).collect()
+    })
+}
+/// CJK punctuation and full-width forms: the ASCII glyph they stand for, centred in a full width (as wide as an ideograph)
+fn full() -> &'static [(u32, Glyph)] {
+    static T: std::sync::OnceLock<Vec<(u32, Glyph)>> = std::sync::OnceLock::new();
+    T.get_or_init(|| {
+        let mut m: Vec<(u32, u32)> = (0xFF01..=0xFF5E).map(|c| (c, c - 0xFEE0)).collect();
+        m.extend([(0x3000, 32), (0x3001, 44), (0x3002, 46), (0x3008, 60), (0x3009, 62), (0x300A, 60), (0x300B, 62), (0x300C, 91), (0x300D, 93), (0x300E, 91), (0x300F, 93),
+            (0x3010, 91), (0x3011, 93), (0x3014, 40), (0x3015, 41), (0x3016, 91), (0x3017, 93), (0xFFE0, 162), (0xFFE1, 163), (0xFFE5, 165), (0x30FB, 183)]);
+        m.into_iter().map(|(c, a)| { let g = data::low(a); let l = ((g.l + g.r) / 2).saturating_sub(FULL / 2); (c, Glyph { l, r: l + FULL, strokes: g.strokes }) }).collect()
+    })
+}
 
 #[derive(Clone, Copy)]
 struct Ch { cp: u32, bar: bool }
@@ -111,4 +151,20 @@ mod tests {
     }
     #[test] fn wraps() { assert_eq!(wrap("aa bb", 1.27, 1000.0), "aa bb"); assert_eq!(wrap("aa bb", 1.27, 1.0), "aa\nbb"); assert_eq!(wrap("", 1.27, 1.0), ""); assert_eq!(wrap("a\nb", 1.27, 100.0), "a\nb"); }
     #[test] fn lines_break() { assert_eq!(lines("a\nb").len(), 2); assert_eq!(lines("").len(), 1); }
+    #[test] fn cjk_glyphs() {
+        // Chinese draws in strokes, not boxes (issue #1380): every ideograph of a schematic note has a glyph of its own, a full width wide
+        let boxed = |c: char| std::ptr::eq(glyph(c as u32), &data::BOX);
+        for c in "贴片电阻低压差线性稳压中文字体".chars() { assert!(!boxed(c), "{c} is a box"); let g = glyph(c as u32); assert_eq!(g.r - g.l, FULL); assert!(!g.strokes.is_empty()) }
+        assert_eq!(cjk().len(), (CJK1 - CJK0) as usize);
+        assert!(!std::ptr::eq(glyph('电' as u32), glyph('阻' as u32)));
+        // full-width punctuation is its ASCII glyph, as wide as an ideograph
+        for c in "：，（）。、【】１Ａ".chars() { assert!(!boxed(c), "{c} is a box"); assert_eq!(glyph(c as u32).r - glyph(c as u32).l, FULL) }
+        assert!(std::ptr::eq(glyph('：' as u32).strokes.as_ptr(), glyph(':' as u32).strokes.as_ptr()));
+        // a line of ideographs is as wide as its glyphs' advances
+        assert!((width("电阻", 21.0) - 2.0 * FULL as f32).abs() < 1e-3);
+        // something with no glyph is still a box
+        assert!(boxed('\u{3400}') && boxed('\u{0E01}'));
+        let ps = text_full("电阻：47KΩ", 0.0, 0.0, 1.0, 1.0, 0.1, 0.0, 0, 0, false, false);
+        assert!(ps.len() > 20);
+    }
 }
