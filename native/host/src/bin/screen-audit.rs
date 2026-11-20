@@ -34,6 +34,8 @@ mod settings { pub mod order { pub use crate::order_view::*; } pub mod models { 
 mod present { pub use crate::ready; }
 // the issue links' repository (present/thread.rs): the audit reads no project's git config, so it links nothing
 mod mirror { pub fn origin_of_root(_: &str) -> String { String::new() } }
+/// kicad/follow.rs keeps the hub to redraw the views after a follow; the audit has none.
+#[allow(dead_code)] mod hub { pub struct Hub; impl Hub { pub fn bump_views(&self) {} } }
 #[path="../agents/bg.rs"] pub mod bg_;
 #[path="../agents/inputs.rs"] pub mod inputs_;
 #[path="../agents/skills.rs"] pub mod skills_;
