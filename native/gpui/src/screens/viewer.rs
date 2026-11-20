@@ -1140,6 +1140,13 @@ pub fn follow(tx: &tokio::sync::mpsc::Sender<Command>, thread: &Value) {
 
 #[cfg(test)]
 mod tests {
+    /// An agent's `viewer_show` reaches the hub as `view-show` (idempotent: focus or retarget, never close or toggle); a rail press stays `view`.
+    #[test] fn an_agents_show_is_the_view_show_action_and_a_rail_press_stays_view() {
+        use crate::data::Command;
+        assert!(matches!(super::view_show_kind("files"), Command::Action(a, v) if a == "view-show" && v == "files"));
+        assert!(matches!(super::view_show_kind("mech\tmech/a.step"), Command::Action(a, v) if a == "view-show" && v == "mech\tmech/a.step"));
+        assert!(matches!(super::view_kind("files"), Command::Action(a, v) if a == "view" && v == "files"));
+    }
     /// #1347: Open in KiCad is offered only on Board, Schematic and 3D, and there only while the page's document is in the project (the
     /// hub's `has`; absent: as before). Files, Review, Mech, Browser and Split never: the pane is not drawn there, and the press did nothing.
     #[test] fn edit_is_offered_only_on_a_design_page_whose_document_exists() {

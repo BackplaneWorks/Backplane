@@ -67,7 +67,7 @@ fn snap_step(st: &State, sess: &Value, cmds: &[Value], root: &str) -> Value {
     })
 }
 
-fn record_all_flows() -> Value {
+fn fixture() -> (crate::plat::tmp::TempDir, String, std::path::PathBuf, State) {
     let td = crate::plat::tmp::dir("viewer-parity-main");
     let root_p = td.path().to_path_buf();
     let root = root_p.to_string_lossy().into_owned();
@@ -93,6 +93,12 @@ fn record_all_flows() -> Value {
     st.apply_line(&json!({"$":"ProjectCreated","id":"p","title":"Proj","root":root,"at":1}).to_string());
     st.apply_line(&json!({"$":"ThreadCreated","id":"t","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
 
+    (td, root, root_p, st)
+}
+
+fn record_all_flows() -> Value {
+    let (td, root, root_p, st) = fixture();
+    let _keep = &td;
     let mut st_far = State::new();
     st_far.apply_line(&json!({"$":"ProjectCreated","id":"peer~p","title":"Remote","root":"/remote/proj","at":1}).to_string());
     st_far.apply_line(&json!({"$":"ThreadCreated","id":"peer~t","project":"peer~p","title":"T","env":"local","branch":"","worktree":"/remote/wt","provider":"claude","model":"","at":2}).to_string());
@@ -300,4 +306,30 @@ fn diff_paths(main: &Value, branch: &Value, at: &str, out: &mut Vec<String>) {
         (Value::Array(a), Value::Array(b)) if a.len() == b.len() => { for (i, (v, w)) in a.iter().zip(b).enumerate() { diff_paths(v, w, &format!("{at}/{i}"), out) } }
         (a, b) => { if a != b { out.push(format!("{at}: main {a} / branch {b}")) } }
     }
+}
+
+// ---- branch-only: everything below needs code origin/main lacks; the generator run on main drops it (`sed '/^\/\/ ---- branch-only/,$d'`) ----
+/// On this branch the desktop's agent show is `view-show` (`viewer_show_action`), main's was `view <kind>`: from a session with nothing open
+/// the pictures, commands and drafts must be main's (the snapshot's `agent_show_each_kind`), except the differences listed here.
+#[test]
+fn agent_show_from_idle_matches_main_view_for_each_kind() {
+    let snap_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(SNAPSHOT_REL);
+    let expected: Value = serde_json::from_str(&std::fs::read_to_string(&snap_path).expect("snapshot")).unwrap();
+    let want = expected["agent_show_each_kind"].as_array().expect("agent_show_each_kind flow");
+    let (_td, root, _rp, st) = fixture();
+    let shows = [("board", ""), ("schematic", ""), ("3d", ""), ("mech", "mech/case.step"), ("gerbers", ""), ("files", ""), ("review", "")];
+    assert_eq!(want.len(), shows.len(), "the snapshot flow and this list name the same kinds");
+    let mut diffs = Vec::new();
+    for (i, (k, path)) in shows.iter().enumerate() {
+        let mut s = json!({"sel":"t","rid":1,"drafts":{},"panel":false,"info":{"fab.board:t":"board.kicad_pcb","fab.boards:t":"board.kicad_pcb\nalt/alt.kicad_pcb"}});
+        let o = match viewer::viewer_show_action(&st, "h", &s, Some(1), "en", k, path).unwrap_or_else(|| panic!("view-show {k} unsupported")) {
+            viewer::LayoutOut::Ok(o) => o,
+            viewer::LayoutOut::Refused { text, .. } => panic!("view-show {k} refused: {text}"),
+        };
+        patch::merge(&mut s, &o.patch);
+        let got = snap_step(&st, &s, &o.before, &root);
+        // a stored layout never exists for one tile: no `@view.layout` and no layout-only picture fields beyond the stripped additive ones
+        diff_paths(&want[i], &got, &format!("/{k}"), &mut diffs);
+    }
+    assert!(diffs.is_empty(), "view-show differs from main's `view` from idle (main vs branch):\n{}", diffs.join("\n"));
 }
