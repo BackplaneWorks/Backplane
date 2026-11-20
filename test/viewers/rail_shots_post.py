@@ -1001,6 +1001,7 @@ def evaluate_scorecard(
     mech_only_parsed: dict | None = None,
     embed: bool = False,
     embed_actions: dict[str, dict] | None = None,
+    cleared_shots: set[str] | None = None,
 ) -> list[dict]:
     full_dir = outdir / "full"
     shots = full_parsed.get("shots", {})
@@ -1216,7 +1217,7 @@ def evaluate_scorecard(
     ))
 
     # Task 4: Compare Gerbers to the board side by side (budget 2)
-    t4_dock = DOCK.evaluate_task4_dock(full_dir, full_parsed, full_caps, full_client_ok)
+    t4_dock = DOCK.evaluate_task4_dock(full_dir, full_parsed, full_caps, full_client_ok, cleared_shots=cleared_shots)
     if t4_dock is not None:
         tasks.append(make_task(
             4, "Compare Gerbers to the board side by side", 2, t4_dock["presses"], t4_dock["outcome"],
@@ -2323,6 +2324,7 @@ def main(argv: list[str] | None = None) -> int:
         parsed.get("mech-only"),
         embed=embed,
         embed_actions=embed_actions_by_kind.get("full"),
+        cleared_shots=cleared_by_kind.get("full"),
     ) if "full" in kinds else []
 
     extra_checks = evaluate_extra_checks(outdir, kinds, parsed, captures_by_kind, embed=embed)
