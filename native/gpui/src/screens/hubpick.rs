@@ -44,13 +44,32 @@ fn switch_hub(this: &mut Backplane, prev_key: &str, cx: &mut Context<Backplane>)
         if let Some((ws, token_file, paired)) = resolve_target(&this.hubs) {
             let new_key = this.hubs.first().map(|h| h.key.clone()).unwrap_or_default();
             if !prev_key.is_empty() && this.data.is_object() {
-                if this.screens.offers.hub_cache.len() >= 8 && !this.screens.offers.hub_cache.contains_key(prev_key) {
-                    if let Some(k) = this.screens.offers.hub_cache.keys().next().cloned() { this.screens.offers.hub_cache.remove(&k); }
+                if !this.screens.offers.hub_cache.contains_key(prev_key) {
+                    if this.screens.offers.hub_cache_order.len() >= 8 {
+                        if let Some(old) = this.screens.offers.hub_cache_order.pop_front() {
+                            this.screens.offers.hub_cache.remove(&old);
+                        }
+                    }
+                    this.screens.offers.hub_cache_order.push_back(prev_key.to_string());
                 }
                 this.screens.offers.hub_cache.insert(prev_key.to_string(), this.data.clone());
             }
             crate::viewers::kicad_pane::release_all();
             this.screens.drafts.flush();
+            // Retarget every per-hub HTTP target, credential-beside file, and watcher so attachments,
+            // images, improvements, drafts, place and hubbar all follow the new hub (no leak to the old hub).
+            let new_target = crate::screens::attach::Target::from(&ws, &token_file);
+            let drafts_path = crate::screens::place::beside_credential(&token_file, "gpui-drafts.json");
+            let saved_drafts = crate::screens::drafts::load(&drafts_path);
+            this.screens.attacher.target = new_target.clone();
+            this.screens.attacher.show("");
+            this.screens.images = Default::default();
+            crate::screens::place::retarget(&token_file);
+            this.screens.drafts.retarget(drafts_path.clone(), saved_drafts.clone());
+            this.drafts = saved_drafts;
+            this.screens.imp.retarget(&drafts_path, new_target.clone());
+            this.screens.unsent = crate::screens::unsent::Unsent::open(drafts_path.with_file_name("gpui-unsent.json"));
+            crate::screens::hubbar::watch(cx, new_target, &token_file);
             this.paired = paired;
             this.screens.elsewhere = hubs::elsewhere(&ws);
             this.screens.offers.on_home = None;
@@ -123,6 +142,8 @@ pub struct Offers {
     pub forget_arm: Option<String>,
     /// last rendered picture per hub key, so switching back to a hub paints at 0 ms while reconnecting
     pub hub_cache: std::collections::HashMap<String, serde_json::Value>,
+    /// FIFO insertion order for bounded `hub_cache` eviction
+    pub hub_cache_order: std::collections::VecDeque<String>,
 }
 /// The device token this client holds for the hub in use: a paired hub's credential; None on this computer's own hub (its home token: the client takes a link).
 fn token_in_use(this: &Backplane) -> Option<String> {

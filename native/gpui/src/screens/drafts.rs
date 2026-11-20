@@ -57,12 +57,12 @@ pub fn save(path: &Path, drafts: &HashMap<String, String>) {
     if ok { let _ = std::fs::rename(tmp, path); }
 }
 
-enum Msg { Set(String, String), Flush(mpsc::Sender<()>) }
+enum Msg { Set(String, String), Flush(mpsc::Sender<()>), Retarget(PathBuf, HashMap<String, String>, mpsc::Sender<()>) }
 
 /// One background writer: `set` is cheap, the file is written after DEBOUNCE of quiet, `flush` writes now.
 pub struct Writer { tx: mpsc::Sender<Msg> }
 impl Writer {
-    pub fn start(path: PathBuf, initial: HashMap<String, String>) -> Self {
+    pub fn start(mut path: PathBuf, initial: HashMap<String, String>) -> Self {
         let (tx, rx) = mpsc::channel::<Msg>();
         std::thread::spawn(move || {
             let mut map = initial; let mut dirty = false;
@@ -70,6 +70,11 @@ impl Writer {
                 match rx.recv_timeout(DEBOUNCE) {
                     Ok(Msg::Set(k, v)) => { if v.is_empty() { map.remove(&k); } else { map.insert(k, v); } dirty = true; }
                     Ok(Msg::Flush(ack)) => { if dirty { save(&path, &map); dirty = false; } let _ = ack.send(()); }
+                    Ok(Msg::Retarget(next_path, next_map, ack)) => {
+                        if dirty { save(&path, &map); dirty = false; }
+                        path = next_path; map = next_map;
+                        let _ = ack.send(());
+                    }
                     Err(mpsc::RecvTimeoutError::Timeout) => { if dirty { save(&path, &map); dirty = false; } }
                     Err(mpsc::RecvTimeoutError::Disconnected) => { if dirty { save(&path, &map); } return; }
                 }
@@ -82,6 +87,11 @@ impl Writer {
     pub fn kick(&self) { let (a, _r) = mpsc::channel(); let _ = self.tx.send(Msg::Flush(a)); }
     /// Block (up to a second) until everything sent so far is on disk.
     pub fn flush(&self) { let (a, r) = mpsc::channel(); if self.tx.send(Msg::Flush(a)).is_ok() { let _ = r.recv_timeout(Duration::from_secs(1)); } }
+    /// Switch to another hub's drafts file (flushing the current hub's pending writes first).
+    pub fn retarget(&self, next_path: PathBuf, next_map: HashMap<String, String>) {
+        let (a, r) = mpsc::channel();
+        if self.tx.send(Msg::Retarget(next_path, next_map, a)).is_ok() { let _ = r.recv_timeout(Duration::from_secs(1)); }
+    }
 }
 
 #[cfg(test)]
@@ -133,6 +143,20 @@ mod tests {
         assert!(!f.exists(), "written before the debounce");
         w.flush(); assert_eq!(load(&f)["t1"], "draft 49");
         w.set("t1", ""); w.flush(); assert!(load(&f).is_empty());
+        let _ = std::fs::remove_dir_all(d);
+    }
+    #[test] fn retarget_flushes_old_hub_and_writes_new_hub_separately() {
+        let d = dir("retarget");
+        let fa = d.join("hub-a.gpui-drafts.json");
+        let fb = d.join("hub-b.gpui-drafts.json");
+        let w = Writer::start(fa.clone(), HashMap::new());
+        w.set("tA", "draft on hub A");
+        w.retarget(fb.clone(), HashMap::new());
+        assert_eq!(load(&fa).get("tA").map(String::as_str), Some("draft on hub A"), "old hub flushed before retarget");
+        w.set("tB", "draft on hub B");
+        w.flush();
+        assert_eq!(load(&fa).get("tB"), None, "hub B draft never leaks into hub A file");
+        assert_eq!(load(&fb).get("tB").map(String::as_str), Some("draft on hub B"));
         let _ = std::fs::remove_dir_all(d);
     }
 }
