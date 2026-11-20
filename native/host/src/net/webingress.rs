@@ -306,6 +306,35 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
             }
             crate::wire::response_for(result.status, &result.ctype, &headers, &result.body)
         }
+    } else if req.method == "POST" && req.target == "/voice/in" {
+        let registry = crate::net::start::registry(&hub.cfg.home);
+        let device = registry.as_ref().and_then(|r| crate::auth::browser_device(r, &req, &login));
+        let size = single_header(&req, "content-length").and_then(|v| v.parse::<usize>().ok());
+        let status = if let (Some(device), Some(reg)) = (device, registry) {
+            if size.is_some_and(|n| n > 1 << 20) { "413 Payload Too Large" }
+            else if let Some(len) = size.filter(|&n| n >= bytes.len() - end
+                && !req.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("transfer-encoding"))) {
+                let mut body = bytes.split_off(end);
+                let buffered = body.len();
+                body.resize(len, 0);
+                tokio::time::timeout(Duration::from_secs(5), reader.read_exact(&mut body[buffered..])).await??;
+                if hub.setting("web.enabled").await.as_deref() != Some("1")
+                    || crate::auth::browser_device(&reg, &req, &login).as_ref() != Some(&device) { "401 Unauthorized" }
+                else if let (Some(service), Some(key)) = (hub.voice_service.get(), single_header(&req, "x-voice-session")) {
+                    let end_audio = single_header(&req, "x-voice-end") == Some("1");
+                    match service.browser_chunk(&device, key, body, end_audio) {
+                        Ok(client) => {
+                            let activity = crate::data::webpolicy::policy("POST /voice/in", &serde_json::Value::Null)
+                                == crate::data::webpolicy::Policy::Activity;
+                            reg.browser_connection(&device, client, activity);
+                            "200 OK"
+                        }
+                        Err(status) => status,
+                    }
+                } else { "403 Forbidden" }
+            } else { "400 Bad Request" }
+        } else { "401 Unauthorized" };
+        json_response(status, json!({}), "")
     } else if req.method == "POST" && req.target == req.route() && req.route().starts_with("/auth/web/") {
         let size = single_header(&req, "content-length").and_then(|v| v.parse::<usize>().ok());
         if let Some(len) = size.filter(|&n| n <= 4096 && n >= bytes.len() - end
