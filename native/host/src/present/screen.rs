@@ -1568,8 +1568,11 @@ mod state_tests {
         for e in [json!({"$":"ProjectCreated","id":"pa","title":"Amp","root":root,"at":1}),
                   json!({"$":"ThreadCreated","id":"ta","project":"pa","title":"A","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":5})] { event(&mut st,e); }
         let map=HashMap::new(); let marks=HashMap::new(); let un=Unified{ far:&map, marks:&marks, here:"desk", rows:&HashMap::new() };
-        let run=|action: &str,value: &str| { let mut q=params(); q["target"]=json!({"kind":"thread","id":"ta"});
-            q["window"]=json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderNext":"","hasMore":false,"remaining":0,"newer":0,"total":0});
+        // the params of a real thread request (the recorded pair), on this project's thread
+        let pair: Value=serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-pair.json"))).unwrap();
+        let run=|action: &str,value: &str| { let mut q=pair["params"].clone(); q["nativeSidebar"]=json!(1); q["nativeKey"]=json!("00112233445566778899aabbccddeeff");
+            q["generation"]=json!("g"); q["epoch"]=json!("e"); q["viewId"]=json!("v"); q["revision"]=json!(st.seq); q["hub"]=json!("h"); q["now"]=json!(1_000_000);
+            q["target"]=json!({"kind":"thread","id":"ta"}); q["session"]=json!({"rid":1,"open":{},"drafts":{},"panel":false,"info":{}}); q["window"]=json!({"remaining":0});
             q["action"]=json!(action); q["value"]=json!(value); recent_unified(&st,&[],&un,&q).unwrap_or_else(|| panic!("{action} {value:?} unanswered")) };
         for kind in ["board","schematic","3d","split","browser","mech\tmech/case.step","files","gerbers"] {
             let (v,s)=(run("view",kind),run("view-show",kind));
