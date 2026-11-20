@@ -87,19 +87,54 @@ impl ShowBy {
 pub fn remount_wait(asked: u32) -> std::time::Duration {
     std::time::Duration::from_millis(match asked { 0 | 1 => 1000, 2 => 2000, 3 => 4000, _ => 10_000 })
 }
-/// #1389: the show the pane waits for after asking the hub for `kind`: none when the hub's active frame is that already (its answer
-/// changes nothing, so nothing would clear the wait, and the next change of the hub's frame, KiCad's own editor request, was then not
-/// followed). Pure.
-/// What a change of KiCad's active frame to `echo` is (the hub's info): an echo of one of the pane's own shows in flight (`in_flight`:
-/// kind and sequence number, oldest first), or KiCad's own switch. Ours is followed only if the person chose no tab after the latest show
-/// of that kind was sent (`chosen_at`: the sequence number of their last choice); KiCad's own is followed as before. Returns whether to
-/// follow it and the in-flight shows it answers (that kind, up to the latest), to drop. Pure.
-pub fn follow_echo(echo: &str, in_flight: &[(String, u64)], chosen_at: u64) -> (bool, Vec<usize>) {
-    let ours: Vec<usize> = in_flight.iter().enumerate().filter(|(_, (k, _))| k == echo).map(|(i, _)| i).collect();
-    match ours.last() {
-        None => (true, vec![]),
-        Some(&i) => (in_flight[i].1 > chosen_at, ours),
+/// The pane's own `editor.kicad.show`s still waiting for their echo (KiCad's active frame becoming that kind), oldest first: kind,
+/// sequence number (`seq`, shared with the person's choices, `chosen_at`) and when it was sent. KiCad changes its active frame once per
+/// show, in the order asked, so an echo answers the OLDEST show of its kind, never a newer one (Board, Schematic, Board sent quicker than
+/// the hub: the first Board's echo must leave the second Board's in flight). A show that gets no echo (the hub's active frame is that
+/// kind already, an error, a KiCad gone) must not stay: shows of the active kind are not recorded, a failed one is dropped, a new KiCad,
+/// a stopped one and a detach clear all, and any older than `FLIGHT_TTL` is dropped on every info and every send.
+#[derive(Default, Debug, Clone, PartialEq)]
+pub struct Flights(pub Vec<(String, u64, std::time::Instant)>);
+pub const FLIGHT_TTL: std::time::Duration = std::time::Duration::from_secs(15);
+impl Flights {
+    /// A show of `kind` sent as `seq` while the hub's active frame is `hub_active`: recorded unless KiCad is on that kind already with
+    /// none of ours in flight (then it changes nothing and no echo comes: macOS's key hand-in re-shows the active kind). With others in
+    /// flight it is recorded: their echoes move KiCad off it, and this show brings it back.
+    pub fn send(&mut self, kind: &str, seq: u64, hub_active: Option<&str>, now: std::time::Instant) {
+        self.prune(now);
+        if kind.is_empty() || (hub_active == Some(kind) && self.0.is_empty()) { return }
+        if self.0.len() >= 16 { self.0.remove(0); }
+        self.0.push((kind.to_string(), seq, now));
     }
+    /// Drops shows older than `FLIGHT_TTL` (no echo will come for them now).
+    pub fn prune(&mut self, now: std::time::Instant) { self.0.retain(|(_, _, t)| now.saturating_duration_since(*t) < FLIGHT_TTL); }
+    /// The echo of `kind`: the oldest show of that kind is answered (removed); its sequence number, or None when none of ours is.
+    pub fn answer(&mut self, kind: &str) -> Option<u64> {
+        let i = self.0.iter().position(|(k, _, _)| k == kind)?;
+        Some(self.0.remove(i).1)
+    }
+    /// A show refused by the hub (an error reply; replies carry no frame): the oldest is dropped, its echo will not come.
+    pub fn failed(&mut self) { if !self.0.is_empty() { self.0.remove(0); } }
+}
+/// What the pane does with a change of KiCad's active frame to `act` (the hub's info), given the show it waits for (`pending`), its
+/// shows in flight and the sequence number of the person's last choice (`chosen_at`). Answers the oldest in-flight show of `act` in every
+/// case. Pure.
+#[derive(Debug, PartialEq)]
+pub enum Echo {
+    /// the show the pane waits for came: the wait ends (the tab is that kind already)
+    Pending,
+    /// another kind while the pane waits for its own show: not followed (#1389)
+    Waiting,
+    /// an echo of a show of ours the person chose past (they chose a tab after it was sent): not followed
+    ChosenPast,
+    /// KiCad's own switch (no show of ours for it in flight), or our show with no choice of the person's since: followed
+    Follow,
+}
+pub fn on_active(flights: &mut Flights, pending: &mut Option<String>, act: &str, chosen_at: u64) -> Echo {
+    let ours = flights.answer(act);
+    if pending.as_deref() == Some(act) { *pending = None; return Echo::Pending }
+    if pending.is_some() { return Echo::Waiting }
+    match ours { Some(n) if n < chosen_at => Echo::ChosenPast, _ => Echo::Follow }
 }
 /// Whether the hub says KiCad has `kind` hidden in wx (its `frames[].shown` false, or no such frame listed: stale or missing info counts
 /// as hidden). The hub's own show of another frame hides the others through wx (HideFrame), and a native map of a wx-hidden frame can be
@@ -108,6 +143,9 @@ pub fn follow_echo(echo: &str, in_flight: &[(String, u64)], chosen_at: u64) -> (
 pub fn kicad_hides(frames: &Value, kind: &str) -> bool {
     !frames.as_array().is_some_and(|a| a.iter().any(|f| f["kind"].as_str() == Some(kind) && f["shown"] == true))
 }
+/// #1389: the show the pane waits for after asking the hub for `kind`: none when the hub's active frame is that already (its answer
+/// changes nothing, so nothing would clear the wait, and the next change of the hub's frame, KiCad's own editor request, was then not
+/// followed). Pure.
 pub fn pending_for(hub_active: Option<&str>, kind: &str) -> Option<String> { (hub_active != Some(kind)).then(|| kind.to_string()) }
 /// #1389: whether a KiCad window that took the foreground is one of KiCad's library editors in this session (its frames as the hub lists
 /// them, kind `SYMBOL_EDITOR` / `FOOTPRINT_EDITOR`): KiCad opening the editor the person asked for (Ctrl+E), never a stray. The F5
@@ -602,10 +640,10 @@ pub struct KicadPane {
     lent_at: Option<std::time::Instant>,
     /// stock KiCad: the editor last asked for with its shortcut, and when; auxiliary frame (Symbol/Footprint/3D) opened from inside KiCad
     poked: Option<(String, std::time::Instant)>, unmapped_since: Option<(u64, std::time::Instant)>, remounts: Option<(u64, u32)>, unshown_since: Option<(String, std::time::Instant)>, override_kind: Option<String>, pending_show: Option<String>,
-    /// The order of the pane's own requests and the person's choices (`follow_echo`): every `editor.kicad.show` the pane sends is recorded
+    /// The order of the pane's own requests and the person's choices (`on_active`): every `editor.kicad.show` the pane sends is recorded
     /// with its sequence number (`in_flight`), every tab the person chooses takes the next one (`chosen_at`). An echo of one of our shows
     /// (KiCad's active frame becoming its kind) is followed only if the person chose nothing after it was sent.
-    seq: u64, in_flight: Vec<(String, u64, std::time::Instant)>, chosen_at: u64,
+    seq: u64, in_flight: Flights, chosen_at: u64,
     /// the theme told to the hub at least once; the main window (its first home), where Pop back in returns it
     theme_sent: bool, home: u64,
     /// files changed on disk that KiCad holds back over the person's unsaved edits (info `kicad.reload.<digest>`)
@@ -795,7 +833,7 @@ impl KicadPane {
             let _ = drained_tx.send(());
         } }).detach();
         KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_press: None, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None, last_place: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, remounts: None, unshown_since: None, override_kind: None, pending_show: None, seq: 0, in_flight: Vec::new(), chosen_at: 0, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, generation: None, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, remounts: None, unshown_since: None, override_kind: None, pending_show: None, seq: 0, in_flight: Flights::default(), chosen_at: 0, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, generation: None, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
     pub fn edit_again(&mut self, cx: &mut Context<Self>) {
@@ -848,24 +886,27 @@ impl KicadPane {
         if info["state"] != self.info["state"] || info["pid"] != self.info["pid"] { self.host_sent = None; }
         #[cfg(target_os = "macos")]
         nc::note_kicad_pid(info["pid"].as_u64().unwrap_or(0) as u32);
+        // shows that got no echo in time, or a KiCad that is another one, stopped or failed: none of its shows is in flight now
+        self.in_flight.prune(std::time::Instant::now());
+        if info["pid"] != self.info["pid"] || matches!(info["state"].as_str(), Some("failed" | "stopped")) { self.in_flight = Flights::default(); }
         if let Some(act) = info["active"].as_str().filter(|a| !a.is_empty()) {
-            if self.pending_show.as_deref() == Some(act) {
-                self.pending_show = None;
-                // answered: no later change to this kind is taken for this show's echo
-                self.in_flight.retain(|(k, _, _)| k != act);
-            } else if Some(act) != self.info["active"].as_str() && self.pending_show.is_some() && std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
-                // #1389's measurement: the hub's active frame changed and the pane does not follow it (a show of its own is pending)
-                eprintln!("GPUI_LOG {}", json!({"kicad_active_not_followed": {"active": act, "prev_active": self.info["active"], "pending_show": self.pending_show, "tab": self.tab(), "override": self.override_kind}}));
-            } else if self.pending_show.is_none() && Some(act) != self.info["active"].as_str() {
-                // an echo of a show of ours the person has chosen past (a remount answered after their next tab) is not KiCad's choice
-                let flights: Vec<(String, u64)> = self.in_flight.iter().map(|(k, n, _)| (k.clone(), *n)).collect();
-                let (follow, answered) = follow_echo(act, &flights, self.chosen_at);
-                for i in answered.into_iter().rev() { self.in_flight.remove(i); }
-                if follow {
-                    self.override_kind = (act != frame_for(&self.open)).then(|| act.to_string());
-                    cause = format!("hub info active {} -> {act} (KiCad's active frame)", self.info["active"]); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
-                } else if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
-                    eprintln!("GPUI_LOG {}", json!({"kicad_active_not_followed": {"active": act, "why": "the echo of a show of ours the person chose past", "tab": self.tab()}}));
+            // a change of KiCad's active frame, or the one the pane waits for: it answers our oldest show of that kind (`on_active`)
+            if self.pending_show.as_deref() == Some(act) || Some(act) != self.info["active"].as_str() {
+                let waited = self.pending_show.clone();
+                match on_active(&mut self.in_flight, &mut self.pending_show, act, self.chosen_at) {
+                    Echo::Pending => {}
+                    Echo::Follow => {
+                        self.override_kind = (act != frame_for(&self.open)).then(|| act.to_string());
+                        cause = format!("hub info active {} -> {act} (KiCad's active frame)", self.info["active"]); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
+                    }
+                    // #1389's measurement: the hub's active frame changed and the pane does not follow it (a show of its own is pending)
+                    Echo::Waiting => if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+                        eprintln!("GPUI_LOG {}", json!({"kicad_active_not_followed": {"active": act, "prev_active": self.info["active"], "pending_show": waited, "tab": self.tab(), "override": self.override_kind}}));
+                    },
+                    // an echo of a show of ours the person has chosen past (a remount answered after their next tab) is not KiCad's choice
+                    Echo::ChosenPast => if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+                        eprintln!("GPUI_LOG {}", json!({"kicad_active_not_followed": {"active": act, "why": "the echo of a show of ours the person chose past", "tab": self.tab()}}));
+                    },
                 }
             }
         }
@@ -1047,16 +1088,14 @@ impl KicadPane {
     /// no-op until the hub's re-show ~0.9 s later).
     /// Not on Windows: there a frame shown only by the client (`ShowWindowAsync`) kept its canvas unpainted, showing the board's pixels
     /// under the Schematic Editor's toolbars (bp.10 and bp.12 alike), so the hub's ShowFrame still switches it.
-    /// Every `editor.kicad.show` the pane sends goes through here: recorded in flight for `follow_echo` (dropped after 15 s unanswered).
+    /// Every `editor.kicad.show` the pane sends goes through here: recorded in flight for `on_active` (`Flights`).
     fn show_rpc(&mut self, params: Value) {
         self.seq += 1;
-        let kind = params["frame"].as_str().unwrap_or("").to_string();
-        self.in_flight.retain(|(_, _, t)| t.elapsed() < std::time::Duration::from_secs(15));
-        if self.in_flight.len() >= 16 { self.in_flight.remove(0); }
-        self.in_flight.push((kind, self.seq, std::time::Instant::now()));
+        let active = self.info["active"].as_str().map(str::to_string);
+        self.in_flight.send(params["frame"].as_str().unwrap_or(""), self.seq, active.as_deref(), std::time::Instant::now());
         self.rpc("editor.kicad.show", params);
     }
-    /// The person chose a tab (the rail's page, a tab, a key): later than every show sent before it (`follow_echo`).
+    /// The person chose a tab (the rail's page, a tab, a key): later than every show sent before it (`on_active`).
     fn chosen(&mut self) { self.seq += 1; self.chosen_at = self.seq; }
     fn locally_shown(&self, kind: &str) -> bool {
         !cfg!(windows) && self.info["mode"] == "fork" && self.info["local_map"] == true
@@ -1787,6 +1826,8 @@ impl KicadPane {
     }
     /// Back to the viewer: the editor's windows leave the pane (KiCad stays warm in the hub).
     pub fn detach(&mut self) {
+        // the pane's shows leave with it: an echo that comes later is not taken for one of them on the next attach
+        self.in_flight = Flights::default();
         // macOS: KiCad's frame leaves the screen with the pane (its windows are its own; nothing of ours to unmap)
         #[cfg(target_os = "macos")]
         nc::cancel_yield(); // the editor leaves the pane: a hand-in still waiting to fall back is void (nc::yield_to)
@@ -2312,21 +2353,64 @@ mod tests {
         assert!(!super::no_geometry(Some((at, Some(1))), at, None), "no frame to show: placed");
     }
     #[test] fn an_echo_of_our_show_never_overrides_a_later_choice_of_the_person() {
-        use super::follow_echo;
-        let f = |k: &str, n: u64| (k.to_string(), n);
-        // the bounce (run 0ec3f8): the remount `show PCB` sent (5), the person's Schematic chosen after it (6), the PCB echo: not followed
-        assert_eq!(follow_echo("PCB", &[f("PCB", 5)], 6), (false, vec![0]), "the remount's echo after the person's Schematic");
-        // KiCad's own switch (nothing of ours in flight for it): followed, as before
-        assert_eq!(follow_echo("SYMBOL_EDITOR", &[f("PCB", 5)], 6), (true, vec![]), "KiCad's own editor request");
-        assert_eq!(follow_echo("PCB", &[], 6), (true, vec![]));
-        // our show and no choice of the person's since: followed
-        assert_eq!(follow_echo("SCH", &[f("SCH", 7)], 6), (true, vec![0]), "our show, nothing chosen after it");
-        // two of ours in flight for different kinds, the person's choice between them: only the later one's echo may be followed
-        let both = [f("PCB", 5), f("SCH", 7)];
-        assert_eq!(follow_echo("PCB", &both, 6), (false, vec![0]), "the earlier show's echo, the person chose after it");
-        assert_eq!(follow_echo("SCH", &both, 6), (true, vec![1]), "the later show's echo, sent after the person's choice");
-        // two of ours for the same kind: the latest decides, both are answered
-        assert_eq!(follow_echo("PCB", &[f("PCB", 3), f("PCB", 8)], 6), (true, vec![0, 1]));
+        use super::{on_active, Echo, Flights};
+        let t = std::time::Instant::now();
+        // the bounce (run 0ec3f8): the remount's `show PCB` sent (5) while KiCad is on the 3D viewer, the person's Schematic chosen after it
+        // (6, a local switch: nothing pending), the PCB echo: not followed
+        let mut f = Flights::default(); let mut pending = None;
+        f.send("PCB", 5, Some("PCB_3D"), t);
+        assert_eq!(on_active(&mut f, &mut pending, "PCB", 6), Echo::ChosenPast, "the remount's echo after the person's Schematic");
+        assert!(f.0.is_empty(), "answered");
+        // KiCad's own switch (nothing of ours in flight for it): followed, as before; our show with no choice since: followed
+        assert_eq!(on_active(&mut f, &mut pending, "SYMBOL_EDITOR", 6), Echo::Follow, "KiCad's own editor request");
+        f.send("SCH", 7, Some("PCB"), t);
+        assert_eq!(on_active(&mut f, &mut pending, "SCH", 6), Echo::Follow, "our show, nothing chosen after it");
+
+        // review A: an echo ignored while the pane waits for its own show still answers the show it echoes, so a later switch of KiCad's
+        // own to that kind is followed (it was swallowed: the remount's (PCB, 5) stayed and 5 < 6)
+        let mut f = Flights::default(); let mut pending = None;
+        f.send("PCB", 5, Some("PCB_3D"), t);                      // the remount
+        pending = Some("SCH".to_string()); f.send("SCH", 7, Some("PCB_3D"), t); // the person's Schematic (chosen 6), through the hub
+        assert_eq!(on_active(&mut f, &mut pending, "PCB", 6), Echo::Waiting, "the remount's echo while the Schematic is pending");
+        assert_eq!(on_active(&mut f, &mut pending, "SCH", 6), Echo::Pending);
+        assert!(f.0.is_empty() && pending.is_none(), "both answered: {f:?}");
+        assert_eq!(on_active(&mut f, &mut pending, "PCB", 6), Echo::Follow, "KiCad's own switch to the board later: followed");
+
+        // review B: Board (chosen 1, sent 2), Schematic (3, 4), Board (5, 6) quicker than the hub; the first Board's echo answers only
+        // that show; the Schematic's echo is chosen past; the person's local Schematic (7); the second Board's echo is chosen past too
+        let mut f = Flights::default(); let mut pending = None;
+        f.send("PCB", 2, Some("SCH"), t); f.send("SCH", 4, Some("SCH"), t); f.send("PCB", 6, Some("SCH"), t);
+        assert_eq!(f.0.len(), 3, "a show of the active kind is recorded while others are in flight (their echoes move KiCad off it)");
+        pending = Some("PCB".to_string());
+        assert_eq!(on_active(&mut f, &mut pending, "PCB", 5), Echo::Pending, "the first Board's echo");
+        assert_eq!(f.0.iter().map(|(k, n, _)| (k.as_str(), *n)).collect::<Vec<_>>(), vec![("SCH", 4), ("PCB", 6)], "only the oldest PCB answered");
+        assert_eq!(on_active(&mut f, &mut pending, "SCH", 5), Echo::ChosenPast);
+        assert_eq!(on_active(&mut f, &mut pending, "PCB", 7), Echo::ChosenPast, "the second Board's echo after the local Schematic");
+        assert!(f.0.is_empty());
+        assert_eq!(on_active(&mut f, &mut pending, "PCB", 7), Echo::Follow, "then KiCad's own switch is followed");
+    }
+    #[test] fn a_show_whose_echo_will_not_come_does_not_stay_in_flight() {
+        use super::{Flights, FLIGHT_TTL};
+        let t = std::time::Instant::now();
+        // a show of the kind KiCad is on, nothing else in flight (macOS's key hand-in): no echo will come, not recorded
+        let mut f = Flights::default();
+        f.send("PCB", 1, Some("PCB"), t);
+        assert!(f.0.is_empty(), "the active kind's show");
+        f.send("", 2, Some("PCB"), t);
+        assert!(f.0.is_empty(), "no frame");
+        // older than FLIGHT_TTL: dropped (on every info and every send)
+        f.send("SCH", 3, Some("PCB"), t);
+        f.prune(t + FLIGHT_TTL / 2); assert_eq!(f.0.len(), 1);
+        f.prune(t + FLIGHT_TTL); assert!(f.0.is_empty(), "too old");
+        f.send("SCH", 4, Some("PCB"), t); f.send("PCB_3D", 5, Some("PCB"), t + FLIGHT_TTL);
+        assert_eq!(f.0.iter().map(|(k, _, _)| k.as_str()).collect::<Vec<_>>(), vec!["PCB_3D"], "a send prunes too");
+        // a refused show: the oldest dropped
+        f.send("SCH", 6, Some("PCB"), t + FLIGHT_TTL); f.failed();
+        assert_eq!(f.0.iter().map(|(_, n, _)| *n).collect::<Vec<_>>(), vec![6]);
+        f.failed(); f.failed(); assert!(f.0.is_empty());
+        // at most 16
+        for n in 0..20 { f.send("SCH", n, Some("PCB"), t + FLIGHT_TTL); }
+        assert_eq!(f.0.len(), 16); assert_eq!(f.0[0].1, 4);
     }
     #[test] fn a_frame_kicad_has_hidden_is_shown_through_kicad_too() {
         use super::kicad_hides;
@@ -2645,6 +2729,8 @@ impl crate::Backplane {
         }
         if reply["ok"] != true {
             let why = crate::hub::rpc_error(&reply);
+            // a show the hub refused: its echo will not come (`Flights::failed`)
+            if method == "editor.kicad.show" { if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| p.in_flight.failed()); } }
             // macOS: KiCad refused a host push (a task running: "SetHostGeometry: a task is running: DRC", e2e-macos 44274808579, the
             // frame then never shown): the latest push is sent again until KiCad takes it or a newer one replaces it (HostSends)
             if method == "editor.kicad.host" {
