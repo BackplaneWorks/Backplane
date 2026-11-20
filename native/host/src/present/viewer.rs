@@ -1499,9 +1499,11 @@ pub fn show_want(kind: &str, shown: &str, root: &str, d: &ShowDefaults) -> ShowW
 /// the one `want` names: the page, and its source compared whole (a key with no path is the project's own file, resolved to its name first). Already
 /// showing counts. A report with no page, no key or an empty one never matches a page that has a source; only Browser and Review, and Files with no
 /// folder named, match by page alone.
-/// One file named two ways: on Windows the project's own files come with `\` (kicad::project) and a path an agent or the desktop gives often
-/// with `/` (`C:\p/unit.kicad_pcb`); a show of the project's board by its full path is that board.
-fn same_path(a: &str, b: &str) -> bool { a == b || (cfg!(windows) && a.replace('\\', "/") == b.replace('\\', "/")) }
+/// A path in one shape for comparing: `/` for `\`, no trailing `/`.
+fn norm_path(p: &str) -> String { p.replace('\\', "/").trim_end_matches('/').to_string() }
+/// Two paths name the same file as the hub compares them: the same text in one separator shape, and on Windows without regard to case (the project's own file
+/// comes from the platform's `Path::join`, a path an agent names or the viewer draws may come with `/`). (From #1473, the agent-show lane's.)
+fn path_eq(a: &str, b: &str) -> bool { let (a, b) = (norm_path(a), norm_path(b)); if cfg!(windows) { a.eq_ignore_ascii_case(&b) } else { a == b } }
 pub fn show_settled(want: &ShowWant, report: &Value, d: &ShowDefaults) -> bool { show_settled_with(want, report, d, None) }
 /// `show_settled`, with the board and schematic the session resolved a Split show to (else the board asked and its sibling).
 pub fn show_settled_with(want: &ShowWant, report: &Value, d: &ShowDefaults, resolved: Option<&(String, String)>) -> bool {
@@ -1525,7 +1527,7 @@ pub fn show_settled_with(want: &ShowWant, report: &Value, d: &ShowDefaults, reso
     match want.kind.as_str() {
         "board" | "3d" | "schematic" | "gerbers" => {
             if want.source.is_empty() { return false }
-            resolve_path(key_path(), &want.kind).is_some_and(|have| !have.is_empty() && same_path(&have, &want.source))
+            resolve_path(key_path(), &want.kind).is_some_and(|have| !have.is_empty() && path_eq(&have, &want.source))
         }
         // Split settles on the board its panes draw: the pane keyed `0|`, not the Split's own key
         "split" => {
@@ -1536,15 +1538,15 @@ pub fn show_settled_with(want: &ShowWant, report: &Value, d: &ShowDefaults, reso
                 let rel = rel_in(&d.root, &want.source);
                 let (board, sch) = resolved.cloned().unwrap_or_else(|| (rel.clone(), if rel.is_empty() { String::new() } else { schematic_for_board(&rel) }));
                 let board = if board.is_empty() { rel } else { board };
-                let has = |kind: &str, src: &str| tiles.iter().filter_map(Value::as_str).any(|t| t.split_once('\t').is_some_and(|(k, s)| k == kind && (src.is_empty() || s == src)));
+                let has = |kind: &str, src: &str| tiles.iter().filter_map(Value::as_str).any(|t| t.split_once('\t').is_some_and(|(k, s)| k == kind && (src.is_empty() || path_eq(s, src))));
                 return has("board", &board) && has("schematic", &sch);
             }
             let pane = report["panes"].as_array().and_then(|ps| ps.iter().filter_map(Value::as_str).find(|k| k.starts_with("0|")));
-            resolve_path(pane.and_then(path_of), "board").is_some_and(|have| !have.is_empty() && same_path(&have, &want.source))
+            resolve_path(pane.and_then(path_of), "board").is_some_and(|have| !have.is_empty() && path_eq(&have, &want.source))
         }
         "mech" => report["part"].as_str().is_some_and(|p| !p.is_empty() && p == want.source),
-        "files" => want.source.is_empty() || report["dir"].as_str().is_some_and(|d| same_path(&trim_end(d), &want.source)),
-        "file" => report["file"].as_str().filter(|u| !u.is_empty()).is_some_and(|u| same_path(&trim_end(&url_path(u)), &want.source)),
+        "files" => want.source.is_empty() || report["dir"].as_str().is_some_and(|d| path_eq(d, &want.source)),
+        "file" => report["file"].as_str().filter(|u| !u.is_empty()).is_some_and(|u| path_eq(&url_path(u), &want.source)),
         _ => true,
     }
 }

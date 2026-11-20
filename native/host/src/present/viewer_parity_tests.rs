@@ -45,7 +45,8 @@ fn normalize(v: &Value, root: &str) -> Value {
     match v {
         Value::String(s) => {
             // the root as written, and as written inside a command's JSON text (a Windows root's `\` doubled there)
-            let s = s.replace(&root.replace('\\', "\\\\"), "<ROOT>").replace(root, "<ROOT>");
+            let esc = { let q = serde_json::to_string(root).unwrap(); q[1..q.len() - 1].to_string() }; // as #1473 does it
+            let s = s.replace(&esc, "<ROOT>").replace(root, "<ROOT>");
             // on Windows a file under the root keeps the OS's `\` (kicad::project's own names): the snapshot is Linux's, so a path under <ROOT> is
             // read with `/`, up to its end (a quote, tab, `|`, space or line end)
             // a preview's url carries the path percent-encoded (Windows' `:` and `\` too): read it decoded, as the snapshot's has nothing to encode
