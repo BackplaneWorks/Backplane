@@ -791,23 +791,18 @@ mod imp {
     use windows_sys::Win32::{
         Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
         Graphics::Gdi::{
-            BitBlt, CombineRgn, CreateCompatibleBitmap, CreateCompatibleDC, CreateRectRgn, CreateSolidBrush,
-            DeleteDC, DeleteObject, GetDC, GetDIBits, GetRegionData, GetWindowRgn, ReleaseDC, ScreenToClient,
-            SelectObject, SetWindowRgn, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, RGNDATA, RGN_OR,
+            CombineRgn, CreateCompatibleBitmap, CreateCompatibleDC, CreateRectRgn, CreateSolidBrush,
+            DeleteDC, DeleteObject, GetRegionData, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, RGNDATA, RGN_OR,
             SRCCOPY,
         },
-        System::Threading::{AttachThreadInput, GetCurrentThreadId},
+        System::Threading::{GetCurrentThreadId},
         UI::{
             Input::KeyboardAndMouse::{
-                GetAsyncKeyState, RegisterHotKey, SetFocus, UnregisterHotKey, VkKeyScanW, MOD_CONTROL,
+                GetAsyncKeyState, VkKeyScanW, MOD_CONTROL,
                 MOD_NOREPEAT, VK_OEM_3,
             },
             WindowsAndMessaging::{
-                CreateWindowExW, DefWindowProcW, EnumChildWindows, EnumWindows, GetAncestor, GetClassNameW,
-                GetCursorPos, GetGUIThreadInfo, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowRect,
-                GetWindowThreadProcessId, InternalGetWindowText, IsChild, IsWindow,
-                IsWindowVisible, LoadCursorW, PostMessageW, RegisterClassExW, SetParent, SetWindowLongPtrW,
-                SetForegroundWindow, SetWindowPos, ShowWindowAsync, WindowFromPoint, GA_PARENT, GA_ROOT, GUITHREADINFO, GWLP_HWNDPARENT,
+                GetCursorPos, GetSystemMetrics, LoadCursorW, RegisterClassExW, GA_PARENT, GA_ROOT, GUITHREADINFO, GWLP_HWNDPARENT,
                 GWL_STYLE, GW_CHILD, IDC_ARROW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
                 SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE,
                 SWP_NOZORDER, SW_HIDE, SW_SHOWNA, WM_ACTIVATE, WM_APP, WM_HOTKEY, WM_LBUTTONDOWN, WM_MBUTTONDOWN,
@@ -816,6 +811,104 @@ mod imp {
             },
         },
     };
+
+    /// #1343's probe (BACKPLANE_KICAD_DEBUG=1 only): every Win32 call this module makes goes through a wrapper (`w32p`) that notes the call
+    /// in progress; a watchdog thread logs a call still running after 200 ms (`kicad_stuck`), and each such call's total when it returns
+    /// (`kicad_stuck_done`), so a freeze of Backplane's window names the call it is in. BP_KICAD_NO_ATTACH=1 (an A/B switch for the same
+    /// runs): AttachThreadInput is never called. Neither is on in normal use.
+    mod probe {
+        use std::{cell::Cell, sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Mutex, OnceLock}, time::Instant};
+        fn on() -> bool { static O: OnceLock<bool> = OnceLock::new(); *O.get_or_init(|| std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some()) }
+        pub fn no_attach() -> bool { static O: OnceLock<bool> = OnceLock::new(); *O.get_or_init(|| std::env::var("BP_KICAD_NO_ATTACH").is_ok_and(|v| v == "1")) }
+        thread_local! { static DEPTH: Cell<u32> = const { Cell::new(0) }; }
+        /// the outermost call in progress: (call, thread, since, sequence)
+        static CUR: Mutex<Option<(&'static str, u32, Instant, u64)>> = Mutex::new(None);
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        static REPORTED: AtomicU64 = AtomicU64::new(0);
+        static DOG: AtomicBool = AtomicBool::new(false);
+        fn tid() -> u32 { unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() } }
+        pub struct G(Option<(&'static str, u64, Instant)>);
+        pub fn enter(call: &'static str) -> G {
+            if !on() { return G(None) }
+            let outer = DEPTH.with(|d| { let n = d.get(); d.set(n + 1); n == 0 });
+            if !outer { return G(None) }
+            if !DOG.swap(true, Ordering::SeqCst) { std::thread::spawn(watchdog); }
+            let seq = SEQ.fetch_add(1, Ordering::SeqCst) + 1; let at = Instant::now();
+            *CUR.lock().unwrap() = Some((call, tid(), at, seq));
+            G(Some((call, seq, at)))
+        }
+        impl Drop for G {
+            fn drop(&mut self) {
+                if !on() { return }
+                DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+                let Some((call, seq, at)) = self.0 else { return };
+                let ms = at.elapsed().as_millis() as u64;
+                { let mut c = CUR.lock().unwrap(); if c.is_some_and(|x| x.3 == seq) { *c = None } }
+                if ms >= 200 { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_stuck_done": {"call": call, "ms": ms, "thread": tid(), "epoch_ms": crate::screens::kcomment::epoch_ms() as u64}})); }
+            }
+        }
+        fn watchdog() {
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let c = *CUR.lock().unwrap();
+                if let Some((call, thread, at, seq)) = c {
+                    let ms = at.elapsed().as_millis() as u64;
+                    if ms >= 200 && REPORTED.swap(seq, Ordering::SeqCst) != seq {
+                        eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_stuck": {"call": call, "ms": ms, "thread": thread, "epoch_ms": crate::screens::kcomment::epoch_ms() as u64}}));
+                    }
+                }
+            }
+        }
+    }
+    /// The Win32 calls of this module, each through #1343's probe (above); same names and signatures as windows-sys's.
+    #[allow(non_snake_case, clippy::too_many_arguments, dead_code)]
+    mod w32p {
+        use windows_sys::Win32::{Foundation::*, Graphics::Gdi::*, UI::WindowsAndMessaging::*, UI::Input::KeyboardAndMouse::*};
+    #[inline] pub unsafe fn AttachThreadInput(idattach: u32, idattachto: u32, fattach: windows_sys::core::BOOL) -> windows_sys::core::BOOL { let _g = super::probe::enter("AttachThreadInput"); if super::probe::no_attach() { return 1 } unsafe { windows_sys::Win32::System::Threading::AttachThreadInput(idattach, idattachto, fattach) } }
+    #[inline] pub unsafe fn BitBlt(hdc: HDC, x: i32, y: i32, cx: i32, cy: i32, hdcsrc: HDC, x1: i32, y1: i32, rop: ROP_CODE) -> windows_sys::core::BOOL { let _g = super::probe::enter("BitBlt"); unsafe { windows_sys::Win32::Graphics::Gdi::BitBlt(hdc, x, y, cx, cy, hdcsrc, x1, y1, rop) } }
+    #[inline] pub unsafe fn ClientToScreen(hwnd: windows_sys::Win32::Foundation::HWND, lppoint: *mut windows_sys::Win32::Foundation::POINT) -> windows_sys::core::BOOL { let _g = super::probe::enter("ClientToScreen"); unsafe { windows_sys::Win32::Graphics::Gdi::ClientToScreen(hwnd, lppoint) } }
+    #[inline] pub unsafe fn CreateWindowExW(dwexstyle: WINDOW_EX_STYLE, lpclassname: windows_sys::core::PCWSTR, lpwindowname: windows_sys::core::PCWSTR, dwstyle: WINDOW_STYLE, x: i32, y: i32, nwidth: i32, nheight: i32, hwndparent: windows_sys::Win32::Foundation::HWND, hmenu: HMENU, hinstance: windows_sys::Win32::Foundation::HINSTANCE, lpparam: *const core::ffi::c_void) -> windows_sys::Win32::Foundation::HWND { let _g = super::probe::enter("CreateWindowExW"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::CreateWindowExW(dwexstyle, lpclassname, lpwindowname, dwstyle, x, y, nwidth, nheight, hwndparent, hmenu, hinstance, lpparam) } }
+    #[inline] pub unsafe fn DefWindowProcW(hwnd: windows_sys::Win32::Foundation::HWND, msg: u32, wparam: windows_sys::Win32::Foundation::WPARAM, lparam: windows_sys::Win32::Foundation::LPARAM) -> windows_sys::Win32::Foundation::LRESULT { let _g = super::probe::enter("DefWindowProcW"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::DefWindowProcW(hwnd, msg, wparam, lparam) } }
+    #[inline] pub unsafe fn DestroyWindow(hwnd: windows_sys::Win32::Foundation::HWND) -> windows_sys::core::BOOL { let _g = super::probe::enter("DestroyWindow"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(hwnd) } }
+    #[inline] pub unsafe fn EnumChildWindows(hwndparent: windows_sys::Win32::Foundation::HWND, lpenumfunc: WNDENUMPROC, lparam: windows_sys::Win32::Foundation::LPARAM) -> windows_sys::core::BOOL { let _g = super::probe::enter("EnumChildWindows"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::EnumChildWindows(hwndparent, lpenumfunc, lparam) } }
+    #[inline] pub unsafe fn EnumWindows(lpenumfunc: WNDENUMPROC, lparam: windows_sys::Win32::Foundation::LPARAM) -> windows_sys::core::BOOL { let _g = super::probe::enter("EnumWindows"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::EnumWindows(lpenumfunc, lparam) } }
+    #[inline] pub unsafe fn GetAncestor(hwnd: windows_sys::Win32::Foundation::HWND, gaflags: GET_ANCESTOR_FLAGS) -> windows_sys::Win32::Foundation::HWND { let _g = super::probe::enter("GetAncestor"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetAncestor(hwnd, gaflags) } }
+    #[inline] pub unsafe fn GetCapture() -> windows_sys::Win32::Foundation::HWND { let _g = super::probe::enter("GetCapture"); unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::GetCapture() } }
+    #[inline] pub unsafe fn GetClassNameW(hwnd: windows_sys::Win32::Foundation::HWND, lpclassname: windows_sys::core::PWSTR, nmaxcount: i32) -> i32 { let _g = super::probe::enter("GetClassNameW"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetClassNameW(hwnd, lpclassname, nmaxcount) } }
+    #[inline] pub unsafe fn GetDC(hwnd: windows_sys::Win32::Foundation::HWND) -> HDC { let _g = super::probe::enter("GetDC"); unsafe { windows_sys::Win32::Graphics::Gdi::GetDC(hwnd) } }
+    #[inline] pub unsafe fn GetDIBits(hdc: HDC, hbm: HBITMAP, start: u32, clines: u32, lpvbits: *mut core::ffi::c_void, lpbmi: *mut BITMAPINFO, usage: DIB_USAGE) -> i32 { let _g = super::probe::enter("GetDIBits"); unsafe { windows_sys::Win32::Graphics::Gdi::GetDIBits(hdc, hbm, start, clines, lpvbits, lpbmi, usage) } }
+    #[inline] pub unsafe fn GetForegroundWindow() -> windows_sys::Win32::Foundation::HWND { let _g = super::probe::enter("GetForegroundWindow"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() } }
+    #[inline] pub unsafe fn GetGUIThreadInfo(idthread: u32, pgui: *mut GUITHREADINFO) -> windows_sys::core::BOOL { let _g = super::probe::enter("GetGUIThreadInfo"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetGUIThreadInfo(idthread, pgui) } }
+    #[inline] pub unsafe fn GetWindow(hwnd: windows_sys::Win32::Foundation::HWND, ucmd: GET_WINDOW_CMD) -> windows_sys::Win32::Foundation::HWND { let _g = super::probe::enter("GetWindow"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetWindow(hwnd, ucmd) } }
+    #[inline] pub unsafe fn GetWindowLongPtrW(hwnd: windows_sys::Win32::Foundation::HWND, nindex: WINDOW_LONG_PTR_INDEX) -> isize { let _g = super::probe::enter("GetWindowLongPtrW"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetWindowLongPtrW(hwnd, nindex) } }
+    #[inline] pub unsafe fn GetWindowRect(hwnd: windows_sys::Win32::Foundation::HWND, lprect: *mut windows_sys::Win32::Foundation::RECT) -> windows_sys::core::BOOL { let _g = super::probe::enter("GetWindowRect"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, lprect) } }
+    #[inline] pub unsafe fn GetWindowRgn(hwnd: windows_sys::Win32::Foundation::HWND, hrgn: HRGN) -> GDI_REGION_TYPE { let _g = super::probe::enter("GetWindowRgn"); unsafe { windows_sys::Win32::Graphics::Gdi::GetWindowRgn(hwnd, hrgn) } }
+    #[inline] pub unsafe fn GetWindowThreadProcessId(hwnd: windows_sys::Win32::Foundation::HWND, lpdwprocessid: *mut u32) -> u32 { let _g = super::probe::enter("GetWindowThreadProcessId"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(hwnd, lpdwprocessid) } }
+    #[inline] pub unsafe fn InternalGetWindowText(hwnd: windows_sys::Win32::Foundation::HWND, pstring: windows_sys::core::PWSTR, cchmaxcount: i32) -> i32 { let _g = super::probe::enter("InternalGetWindowText"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::InternalGetWindowText(hwnd, pstring, cchmaxcount) } }
+    #[inline] pub unsafe fn IsChild(hwndparent: windows_sys::Win32::Foundation::HWND, hwnd: windows_sys::Win32::Foundation::HWND) -> windows_sys::core::BOOL { let _g = super::probe::enter("IsChild"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsChild(hwndparent, hwnd) } }
+    #[inline] pub unsafe fn IsWindow(hwnd: windows_sys::Win32::Foundation::HWND) -> windows_sys::core::BOOL { let _g = super::probe::enter("IsWindow"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(hwnd) } }
+    #[inline] pub unsafe fn IsWindowVisible(hwnd: windows_sys::Win32::Foundation::HWND) -> windows_sys::core::BOOL { let _g = super::probe::enter("IsWindowVisible"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) } }
+    #[inline] pub unsafe fn PostMessageW(hwnd: windows_sys::Win32::Foundation::HWND, msg: u32, wparam: windows_sys::Win32::Foundation::WPARAM, lparam: windows_sys::Win32::Foundation::LPARAM) -> windows_sys::core::BOOL { let _g = super::probe::enter("PostMessageW"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW(hwnd, msg, wparam, lparam) } }
+    #[inline] pub unsafe fn RegisterHotKey(hwnd: windows_sys::Win32::Foundation::HWND, id: i32, fsmodifiers: HOT_KEY_MODIFIERS, vk: u32) -> windows_sys::core::BOOL { let _g = super::probe::enter("RegisterHotKey"); unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::RegisterHotKey(hwnd, id, fsmodifiers, vk) } }
+    #[inline] pub unsafe fn ReleaseCapture() -> windows_sys::core::BOOL { let _g = super::probe::enter("ReleaseCapture"); unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture() } }
+    #[inline] pub unsafe fn ReleaseDC(hwnd: windows_sys::Win32::Foundation::HWND, hdc: HDC) -> i32 { let _g = super::probe::enter("ReleaseDC"); unsafe { windows_sys::Win32::Graphics::Gdi::ReleaseDC(hwnd, hdc) } }
+    #[inline] pub unsafe fn ScreenToClient(hwnd: windows_sys::Win32::Foundation::HWND, lppoint: *mut windows_sys::Win32::Foundation::POINT) -> windows_sys::core::BOOL { let _g = super::probe::enter("ScreenToClient"); unsafe { windows_sys::Win32::Graphics::Gdi::ScreenToClient(hwnd, lppoint) } }
+    #[inline] pub unsafe fn SetCapture(hwnd: windows_sys::Win32::Foundation::HWND) -> windows_sys::Win32::Foundation::HWND { let _g = super::probe::enter("SetCapture"); unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::SetCapture(hwnd) } }
+    #[inline] pub unsafe fn SetFocus(hwnd: windows_sys::Win32::Foundation::HWND) -> windows_sys::Win32::Foundation::HWND { let _g = super::probe::enter("SetFocus"); unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(hwnd) } }
+    #[inline] pub unsafe fn SetForegroundWindow(hwnd: windows_sys::Win32::Foundation::HWND) -> windows_sys::core::BOOL { let _g = super::probe::enter("SetForegroundWindow"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd) } }
+    #[inline] pub unsafe fn SetLayeredWindowAttributes(hwnd: windows_sys::Win32::Foundation::HWND, crkey: windows_sys::Win32::Foundation::COLORREF, balpha: u8, dwflags: LAYERED_WINDOW_ATTRIBUTES_FLAGS) -> windows_sys::core::BOOL { let _g = super::probe::enter("SetLayeredWindowAttributes"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SetLayeredWindowAttributes(hwnd, crkey, balpha, dwflags) } }
+    #[inline] pub unsafe fn SetParent(hwndchild: windows_sys::Win32::Foundation::HWND, hwndnewparent: windows_sys::Win32::Foundation::HWND) -> windows_sys::Win32::Foundation::HWND { let _g = super::probe::enter("SetParent"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SetParent(hwndchild, hwndnewparent) } }
+    #[inline] pub unsafe fn SetWindowLongPtrW(hwnd: windows_sys::Win32::Foundation::HWND, nindex: WINDOW_LONG_PTR_INDEX, dwnewlong: isize) -> isize { let _g = super::probe::enter("SetWindowLongPtrW"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SetWindowLongPtrW(hwnd, nindex, dwnewlong) } }
+    #[inline] pub unsafe fn SetWindowPos(hwnd: windows_sys::Win32::Foundation::HWND, hwndinsertafter: windows_sys::Win32::Foundation::HWND, x: i32, y: i32, cx: i32, cy: i32, uflags: SET_WINDOW_POS_FLAGS) -> windows_sys::core::BOOL { let _g = super::probe::enter("SetWindowPos"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos(hwnd, hwndinsertafter, x, y, cx, cy, uflags) } }
+    #[inline] pub unsafe fn SetWindowRgn(hwnd: windows_sys::Win32::Foundation::HWND, hrgn: HRGN, bredraw: windows_sys::core::BOOL) -> i32 { let _g = super::probe::enter("SetWindowRgn"); unsafe { windows_sys::Win32::Graphics::Gdi::SetWindowRgn(hwnd, hrgn, bredraw) } }
+    #[inline] pub unsafe fn ShowWindow(hwnd: windows_sys::Win32::Foundation::HWND, ncmdshow: SHOW_WINDOW_CMD) -> windows_sys::core::BOOL { let _g = super::probe::enter("ShowWindow"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(hwnd, ncmdshow) } }
+    #[inline] pub unsafe fn ShowWindowAsync(hwnd: windows_sys::Win32::Foundation::HWND, ncmdshow: SHOW_WINDOW_CMD) -> windows_sys::core::BOOL { let _g = super::probe::enter("ShowWindowAsync"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::ShowWindowAsync(hwnd, ncmdshow) } }
+    #[inline] pub unsafe fn UnregisterHotKey(hwnd: windows_sys::Win32::Foundation::HWND, id: i32) -> windows_sys::core::BOOL { let _g = super::probe::enter("UnregisterHotKey"); unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::UnregisterHotKey(hwnd, id) } }
+    #[inline] pub unsafe fn ValidateRect(hwnd: windows_sys::Win32::Foundation::HWND, lprect: *const windows_sys::Win32::Foundation::RECT) -> windows_sys::core::BOOL { let _g = super::probe::enter("ValidateRect"); unsafe { windows_sys::Win32::Graphics::Gdi::ValidateRect(hwnd, lprect) } }
+    #[inline] pub unsafe fn WindowFromPoint(point: windows_sys::Win32::Foundation::POINT) -> windows_sys::Win32::Foundation::HWND { let _g = super::probe::enter("WindowFromPoint"); unsafe { windows_sys::Win32::UI::WindowsAndMessaging::WindowFromPoint(point) } }
+    }
+    use self::w32p::{AttachThreadInput, BitBlt, ClientToScreen, CreateWindowExW, DefWindowProcW, DestroyWindow, EnumChildWindows, EnumWindows, GetAncestor, GetCapture, GetClassNameW, GetDC, GetDIBits, GetForegroundWindow, GetGUIThreadInfo, GetWindow, GetWindowLongPtrW, GetWindowRect, GetWindowRgn, GetWindowThreadProcessId, InternalGetWindowText, IsChild, IsWindow, IsWindowVisible, PostMessageW, RegisterHotKey, ReleaseCapture, ReleaseDC, ScreenToClient, SetCapture, SetFocus, SetForegroundWindow, SetLayeredWindowAttributes, SetParent, SetWindowLongPtrW, SetWindowPos, SetWindowRgn, ShowWindow, ShowWindowAsync, UnregisterHotKey, ValidateRect, WindowFromPoint};
+
 
     const WM_BP_FOCUS: u32 = WM_APP + 0x101;
     const WM_BP_KEY: u32 = WM_APP + 0x102;
@@ -1100,12 +1193,12 @@ mod imp {
             let ch = hwnd(c);
             if ch.is_null() || unsafe { IsWindow(ch) } == 0 { continue }
             let mut kids = vec![];
-            let mut k = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetWindow(ch, windows_sys::Win32::UI::WindowsAndMessaging::GW_CHILD) };
+            let mut k = unsafe { GetWindow(ch, windows_sys::Win32::UI::WindowsAndMessaging::GW_CHILD) };
             while !k.is_null() {
                 let mut pid = 0u32;
                 unsafe { GetWindowThreadProcessId(k, &mut pid); }
                 if pid != 0 && pid != me { kids.push(k) }
-                k = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetWindow(k, windows_sys::Win32::UI::WindowsAndMessaging::GW_HWNDNEXT) };
+                k = unsafe { GetWindow(k, windows_sys::Win32::UI::WindowsAndMessaging::GW_HWNDNEXT) };
             }
             for k in kids {
                 unsafe {
@@ -1377,7 +1470,7 @@ mod imp {
     /// or dialog never matches. Window-state reads only, no message to KiCad.
     pub fn invisible_kicad_foreground(frame: u64) -> Option<(u64, String)> {
         unsafe {
-            let fg = windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
+            let fg = GetForegroundWindow();
             let f = hwnd(frame);
             if fg.is_null() || f.is_null() || fg == f || IsChild(fg, f) != 0 || IsChild(f, fg) != 0 { return None }
             let (mut a, mut b) = (0u32, 0u32);
@@ -1393,7 +1486,7 @@ mod imp {
             // a window owned by the shown editor's window tree (its dialogs: the Footprint Chooser a key opened, before it is
             // on screen) is the editor's, not a stray (steal_key on 6700963e18, Nov 15: the guard took the keys back over it).
             // A pre-warmed frame is never owned by the shown one.
-            use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GetWindow, GA_ROOT, GW_OWNER};
+            use windows_sys::Win32::UI::WindowsAndMessaging::{GA_ROOT, GW_OWNER};
             let owner = GetWindow(fg, GW_OWNER);
             let frame_root = GetAncestor(f, GA_ROOT);
             let owner_root = if owner.is_null() { null_mut() } else { GetAncestor(owner, GA_ROOT) };
@@ -1419,7 +1512,7 @@ mod imp {
     pub fn keep_focus(top: u64) -> bool {
         unsafe {
             let h = hwnd(top);
-            if h.is_null() || windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() != h { return false }
+            if h.is_null() || GetForegroundWindow() != h { return false }
             let mut gti = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..std::mem::zeroed() };
             if GetGUIThreadInfo(GetWindowThreadProcessId(h, null_mut()), &mut gti) == 0 || !gti.hwndFocus.is_null() { return false }
             SetFocus(h);
@@ -1430,7 +1523,7 @@ mod imp {
         }
     }
     pub fn activated_after_close(main: u64, popped: u64) -> bool {
-        unsafe { IsWindow(hwnd(popped)) == 0 && windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() == hwnd(main) }
+        unsafe { IsWindow(hwnd(popped)) == 0 && GetForegroundWindow() == hwnd(main) }
     }
     /// Whether `frame` and `container` are both visible (each with every ancestor): a read of window state, no message to KiCad.
     pub fn frame_visible(container: u64, frame: u64) -> bool {
@@ -1612,7 +1705,7 @@ mod imp {
                 // whole click (and a drag that started here) with the queues already attached, as a click in its own
                 // window would be. The physical release that follows goes to KiCad too.
                 SHIELD_ON.store(false, Ordering::SeqCst);
-                unsafe { windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(h, SW_HIDE); }
+                unsafe { ShowWindow(h, SW_HIDE); }
                 PANE_PRESS_AT.store(mono_ms(), Ordering::SeqCst);
                 let frame = shown_frame(hwnd(ACTIVE_CONTAINER.load(Ordering::SeqCst)));
                 if !frame.is_null() { focus(id_of(frame)); }
@@ -1622,10 +1715,10 @@ mod imp {
                 unsafe { GetCursorPos(&mut pt); }
                 // capture on the shield (our thread, button down over our window): a release that comes before the replay
                 // is routed here, in order, never to KiCad ahead of the replayed down (run SB2: up before down, no menu)
-                unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::SetCapture(h); }
+                unsafe { SetCapture(h); }
                 if let Ok(mut r) = replay_q().lock() { *r = Some(Replay { msg, x: pt.x, y: pt.y, at: mono_ms(), frame: id_of(frame), released: false, capture_lost: false, ready_ticks: 0 }); }
                 if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
-                    let fg = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+                    let fg = unsafe { GetForegroundWindow() };
                     eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_shield_click": {"button": msg, "foreground": id_of(fg), "replay_pending": true, "frame": id_of(frame)}}));
                 }
                 if let Ok(mut q) = events_q().lock() { q.push(Ev::ShieldClick); }
@@ -1665,14 +1758,14 @@ mod imp {
                     let canvas = unsafe { focus_target_in_frame(frame) };
                     let mut pt = POINT { x: (lparam & 0xffff) as i16 as i32, y: ((lparam >> 16) & 0xffff) as i16 as i32 };
                     unsafe {
-                        windows_sys::Win32::Graphics::Gdi::ClientToScreen(h, &mut pt);
-                        windows_sys::Win32::Graphics::Gdi::ScreenToClient(canvas, &mut pt);
+                        ClientToScreen(h, &mut pt);
+                        ScreenToClient(canvas, &mut pt);
                         PostMessageW(canvas, msg, wparam, ((pt.y as u16 as isize) << 16) | (pt.x as u16 as isize));
                     }
                 }
                 0
             }
-            WM_PAINT => { unsafe { windows_sys::Win32::Graphics::Gdi::ValidateRect(h, std::ptr::null()); } 0 }
+            WM_PAINT => { unsafe { ValidateRect(h, std::ptr::null()); } 0 }
             WM_ERASEBKGND => 1,
             _ => unsafe { DefWindowProcW(h, msg, wparam, lparam) },
         }
@@ -1691,12 +1784,12 @@ mod imp {
         let mut rc = RECT::default();
         if unsafe { GetWindowRect(container, &mut rc) } == 0 { return }
         let mut tl = POINT { x: rc.left, y: rc.top };
-        unsafe { windows_sys::Win32::Graphics::Gdi::ScreenToClient(parent, &mut tl); }
+        unsafe { ScreenToClient(parent, &mut tl); }
         let (w, hh) = (rc.right - rc.left, rc.bottom - rc.top);
         unsafe {
             // the container's holes (gpui's overlays drawn over the pane) stay clickable through the shield too
             let rgn = CreateRectRgn(0, 0, 0, 0);
-            let kind = windows_sys::Win32::Graphics::Gdi::GetWindowRgn(container, rgn);
+            let kind = GetWindowRgn(container, rgn);
             if kind == 0 /* ERROR: no region */ { DeleteObject(rgn); SetWindowRgn(s, null_mut(), 0); } else if SetWindowRgn(s, rgn, 0) == 0 { DeleteObject(rgn); }
             // just above the container: inserted after the window above it (or at the top)
             let above = GetWindow(container, 3 /* GW_HWNDPREV */);
@@ -1712,7 +1805,7 @@ mod imp {
             let ok = GetGUIThreadInfo(0, &mut g) != 0;
             let mut cls = [0u16; 64];
             let k = if ok && !g.hwndFocus.is_null() { GetClassNameW(g.hwndFocus, cls.as_mut_ptr(), 64) } else { 0 };
-            serde_json::json!({"foreground": id_of(windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow()),
+            serde_json::json!({"foreground": id_of(GetForegroundWindow()),
                 "focus": if ok { id_of(g.hwndFocus) } else { 0 }, "focus_class": String::from_utf16_lossy(&cls[..k.max(0) as usize]),
                 "in_child": in_child_focus(c), "child_focused": CHILD_FOCUSED.load(Ordering::SeqCst), "escaped": FOCUS_ESCAPED.load(Ordering::SeqCst),
                 "grace_left_ms": CLICK_GRACE_UNTIL.load(Ordering::SeqCst).saturating_sub(mono_ms())})
@@ -1724,7 +1817,7 @@ mod imp {
     pub fn keys_really_backplanes(container: u64) -> bool { keys_really_ours(hwnd(container)) }
     fn keys_really_ours(container: HWND) -> bool {
         unsafe {
-            let fg = windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
+            let fg = GetForegroundWindow();
             if fg.is_null() || GetWindowThreadProcessId(fg, null_mut()) != GetCurrentThreadId() { return false }
             let mut g = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..std::mem::zeroed() };
             if GetGUIThreadInfo(0, &mut g) == 0 { return false }
@@ -1763,8 +1856,8 @@ mod imp {
         let debug = std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some();
         let release_capture = || unsafe {
             let s = hwnd(SHIELD.load(Ordering::SeqCst));
-            if !s.is_null() && windows_sys::Win32::UI::Input::KeyboardAndMouse::GetCapture() == s {
-                windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+            if !s.is_null() && GetCapture() == s {
+                ReleaseCapture();
             }
         };
         // The real state, as the shield reads it: the system foreground is Backplane's own top-level and the foreground
@@ -1772,7 +1865,7 @@ mod imp {
         // which is stale while another application was in front: from Notepad the replay fired 0-2 ms after the press,
         // during Windows' activation, and the click was swallowed (s2-click20 "from other_app", 4 of 20).
         let top = unsafe { GetAncestor(hwnd(ACTIVE_CONTAINER.load(Ordering::SeqCst)), GA_ROOT) };
-        let fg = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+        let fg = unsafe { GetForegroundWindow() };
         let ready_now = !top.is_null() && fg == top && kicad_has_keys(hwnd(r.frame));
         r.ready_ticks = if ready_now { r.ready_ticks.saturating_add(1) } else { 0 };
         if r.ready_ticks < 2 {
@@ -1794,7 +1887,7 @@ mod imp {
         if !in_frame { target = unsafe { focus_target_in_frame(frame) }; }
         let held = !r.released && unsafe { GetAsyncKeyState(vk) } as u16 & 0x8000 != 0;
         let mut pt = POINT { x: r.x, y: r.y };
-        unsafe { windows_sys::Win32::Graphics::Gdi::ScreenToClient(target, &mut pt); }
+        unsafe { ScreenToClient(target, &mut pt); }
         let lp = ((pt.y as u16 as usize) << 16 | pt.x as u16 as usize) as LPARAM;
         unsafe {
             PostMessageW(target, r.msg, mk as WPARAM, lp);
@@ -1802,7 +1895,7 @@ mod imp {
         }
         release_capture();
         if debug {
-            let cls = { let mut b = [0u16; 64]; let n = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetClassNameW(target, b.as_mut_ptr(), 64) }; String::from_utf16_lossy(&b[..n.max(0) as usize]) };
+            let cls = { let mut b = [0u16; 64]; let n = unsafe { GetClassNameW(target, b.as_mut_ptr(), 64) }; String::from_utf16_lossy(&b[..n.max(0) as usize]) };
             eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_replay": {"path": if held { "posted-down" } else { "posted-click" }, "waited_ms": waited, "button": r.msg,
                 "released_while_waiting": r.released, "capture_lost": r.capture_lost, "target": id_of(target), "target_class": cls, "under_in_frame": in_frame}}));
         }
@@ -1832,12 +1925,12 @@ mod imp {
             let parent = GetAncestor(c, GA_PARENT);
             let mut s = hwnd(SHIELD.load(Ordering::SeqCst));
             if on && (s.is_null() || IsWindow(s) == 0 || GetAncestor(s, GA_PARENT) != parent) {
-                if !s.is_null() && IsWindow(s) != 0 { windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(s); }
+                if !s.is_null() && IsWindow(s) != 0 { DestroyWindow(s); }
                 s = CreateWindowExW(windows_sys::Win32::UI::WindowsAndMessaging::WS_EX_LAYERED | WS_EX_NOACTIVATE, shield_class().as_ptr(), null_mut(),
                     WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 1, 1, parent, null_mut(), null_mut(), null_mut());
                 if s.is_null() { SHIELD_ON.store(false, Ordering::SeqCst); return }
                 // alpha 1 of 255: nothing seen, every click still hits it
-                windows_sys::Win32::UI::WindowsAndMessaging::SetLayeredWindowAttributes(s, 0, 1, windows_sys::Win32::UI::WindowsAndMessaging::LWA_ALPHA);
+                SetLayeredWindowAttributes(s, 0, 1, windows_sys::Win32::UI::WindowsAndMessaging::LWA_ALPHA);
                 SHIELD.store(id_of(s), Ordering::SeqCst);
             }
             if on { shield_follow(c); } else if !s.is_null() && was { ShowWindowAsync(s, SW_HIDE); }
