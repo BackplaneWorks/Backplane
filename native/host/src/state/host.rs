@@ -178,7 +178,12 @@ pub fn policies() -> Option<Arc<Policies>> { POLICIES.get().cloned() }
 
 pub fn start(hub: Arc<Hub>) -> Arc<Policies> { start_with(hub, None) }
 /// `start`, with side-by-side mode decided by the caller (`Some(true)` passive, `Some(false)` active); `None` leaves the env (`BACKPLANE_PASSIVE`) to decide
-pub fn start_with(hub: Arc<Hub>, passive: Option<bool>) -> Arc<Policies> {
+pub fn start_with(hub: Arc<Hub>, passive: Option<bool>) -> Arc<Policies> { start_in(hub, passive, true) }
+/// A test's own policies for ITS hub, found by `with_state_of(hub)` (keyed by the hub's home) and NOT claiming the process-wide `policies()` the first start owns: a test that
+/// only reads its hub's state must not decide, by running first, what every other test's `policies()` is (its picker, its thread chip).
+#[cfg(test)]
+pub fn start_unshared(hub: Arc<Hub>) -> Arc<Policies> { start_in(hub, None, false) }
+fn start_in(hub: Arc<Hub>, passive: Option<bool>, claim_global: bool) -> Arc<Policies> {
     let policy = Arc::new(Policy::new());
     if let Some(on) = passive { policy.set_passive(on) }
     policy.set_no_outward(crate::copy::on());
@@ -190,7 +195,7 @@ pub fn start_with(hub: Arc<Hub>, passive: Option<bool>) -> Arc<Policies> {
     hub.register_ticker(host);
     tokio::spawn(boot_task(policy.clone(), hub, crate::guard::Folding::begin()));
     let p = Arc::new(Policies { policy });
-    let _ = POLICIES.set(p.clone());
+    if claim_global { let _ = POLICIES.set(p.clone()); }
     p
 }
 

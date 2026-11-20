@@ -1216,7 +1216,7 @@ async fn viewer_layout_over_a_socket_is_per_device_pushed_and_refuses_in_code_ke
     let plots = crate::files::kicad::watch::Plots::new(&hub.hub.cfg.home);
     hub.register_rpc(Arc::new(crate::files::kicad::watch::KicadRpc(plots.clone())));
     let held = |plots: &Arc<crate::files::kicad::watch::Plots>| -> std::collections::BTreeMap<u64, Vec<String>> { (1..2_000_000u64).filter_map(|c| { let mut k = plots.watched_keys(c); k.sort(); (!k.is_empty()).then_some((c, k)) }).collect() };
-    let _policies = crate::statehost::start(hub.hub.clone());
+    let _policies = crate::statehost::start_unshared(hub.hub.clone()); // this test's hub only: it must not claim the process-wide `policies()` for every other test
     for _ in 0..60 { if crate::statehost::booted(&hub.hub) && crate::statehost::with_state_of(&hub.hub, |st| st.threads.contains_key("tl")).unwrap_or(false) { break } tokio::time::sleep(Duration::from_millis(50)).await }
     let mut a = open(port, "&enc=json").await;
     let hello = next(&mut a).await;
