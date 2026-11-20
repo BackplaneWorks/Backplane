@@ -67,11 +67,25 @@ pub fn succeeds_within(mut c: std::process::Command, limit: std::time::Duration)
         }
     }
 }
-/// Whether the revision `id` of the repository at `git_dir` holds the file `rel` (a read of the object store, nothing is checked out), within `PROBE_DEADLINE`.
-pub fn version_has_file(git_dir: &str, id: &str, rel: &str) -> bool {
+/// One overall time budget for the object-store probes of a restore or a commit: each probe gets at most `PROBE_DEADLINE` and no more than what is left, and
+/// once it is spent every remaining probe counts as unresolved without starting git.
+pub struct ProbeBudget { end: std::time::Instant }
+/// The whole budget of one restore or one commit's version checks.
+pub const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_secs(4);
+impl ProbeBudget {
+    pub fn new(total: std::time::Duration) -> Self { ProbeBudget { end: std::time::Instant::now() + total } }
+    /// Run `c` within what is left of the budget (and `PROBE_DEADLINE`): whether it exited 0.
+    pub fn run(&self, c: std::process::Command) -> bool {
+        let left = self.end.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() { return false }
+        succeeds_within(c, left.min(PROBE_DEADLINE))
+    }
+}
+/// Whether the revision `id` of the repository at `git_dir` holds the file `rel` (a read of the object store, nothing is checked out), within the budget.
+pub fn version_has_file_in(budget: &ProbeBudget, git_dir: &str, id: &str, rel: &str) -> bool {
     let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, "git");
     c.args(["--git-dir", git_dir, "cat-file", "-e", &format!("{id}:{rel}")]);
-    succeeds_within(c, PROBE_DEADLINE)
+    budget.run(c)
 }
 pub fn hist_git(g: &str, c: &str, top: &str, rel: &str) -> String { format!("git\t{g}\t{c}\t{}\t{top}/{rel}", bj::len(top)) }
 /// Hist.rebase: another live file in the same commit as version p; abs itself when p is live
@@ -430,6 +444,17 @@ impl RpcHandler for Rv {
 
 #[cfg(test)]
 mod tests {
+    /// One overall budget for a restore's probes: a probe is cut off at what is left, and once it is spent no probe starts.
+    #[test] fn the_probe_budget_is_one_for_all_the_probes_of_a_restore() {
+        let slow = || { if cfg!(windows) { let mut c = std::process::Command::new("cmd"); c.args(["/C", "ping -n 6 127.0.0.1 >nul"]); c } else { let mut c = std::process::Command::new("sleep"); c.arg("5"); c } };
+        let b = super::ProbeBudget::new(std::time::Duration::from_millis(400));
+        let start = std::time::Instant::now();
+        assert!(!b.run(slow()), "the first probe is cut off at the budget");
+        let first = start.elapsed();
+        assert!(!b.run(slow()) && !b.run(slow()), "once spent, no probe starts");
+        assert!(start.elapsed() < first + std::time::Duration::from_millis(300), "the others cost nothing: eight two-sided tiles cannot wait 32 s ({:?})", start.elapsed());
+        assert!(first < std::time::Duration::from_secs(2));
+    }
     use super::*;
     fn tmp(n: &str) -> crate::plat::tmp::TempStr { crate::plat::tmp::dir_str(&format!("rv-{n}")) }
     #[test] fn versions_rebase_on_their_commit() {

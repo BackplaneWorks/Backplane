@@ -765,7 +765,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         },
         // docking/tiling layout actions (present/viewer.rs `layout_action`)
         "layout-add" | "layout-close" | "layout-focus" | "layout-resize" | "layout-swap"
-        | "layout-move" | "layout-overlay" | "layout-unsplit" | "layout-maximize" | "layout-restore" | "layout-restore-saved" | "layout-forget" => {
+        | "layout-move" | "layout-overlay" | "layout-unsplit" | "layout-maximize" | "layout-restore" | "layout-restore-saved" | "layout-forget" | "layout-version" => {
             let locale=p["locale"].as_str().filter(|s|!s.is_empty()).unwrap_or_else(||st.settings.get("ui.lang").map_or("",String::as_str));
             match super::viewer::layout_action(sel_st, hub, &session, p["designDesktop"].as_u64(), locale, action, value) {
                 Some(super::viewer::LayoutOut::Ok(o)) => {
@@ -1680,6 +1680,37 @@ mod thread_binding_tests {
         assert_eq!(sets(&again),0,"no repeat while the thread stays");
         // a thread with no stored layout sends none
         assert_eq!(sets(&req(json!({"rid":1,"open":{},"drafts":{},"panel":false,"info":{}}))),0);
+    }
+    /// `layout-version` reaches the viewer through the dispatcher (the boundary a client talks to): the tile shows the version and its identity names it; a version
+    /// the hub cannot resolve is refused with a localized reason in the answer's commands.
+    #[test] fn layout_version_is_an_action_a_client_can_send_and_it_answers_with_the_picture_or_a_localized_refusal() {
+        use crate::present::layout;
+        let (mut st,p0,_)=fixture(true);
+        let tid=p0["target"]["id"].as_str().unwrap().to_string();
+        let pid=st.threads[&tid].project.clone();
+        let d=crate::plat::tmp::dir("screen-version"); let root=d.to_string_lossy().into_owned();
+        for f in ["unit.kicad_pcb","unit.kicad_sch"] { std::fs::write(d.join(f),"(x)").unwrap(); }
+        let git=|args: &[&str]| { let o=std::process::Command::new("git").args(["-c","user.name=t","-c","user.email=t@example.com"]).args(args).current_dir(&d).output().unwrap(); assert!(o.status.success(),"git {args:?}"); String::from_utf8_lossy(&o.stdout).trim().to_string() };
+        git(&["init","-q"]); git(&["add","."]); git(&["commit","-q","-m","one"]); let c1=git(&["rev-parse","HEAD"]);
+        assert!(st.apply(&json!({"$":"ProjectCreated","id":pid,"title":"X","root":root,"at":99})));
+        assert_eq!(st.projects[&pid].root,root,"the fixture's project is on the temp folder now");
+        let tile=|id: &str,kind,src: &str| layout::Tile { id: id.into(), kind, source: src.into(), explicit: true, version: None, unresolved_version: false, overlay: None };
+        let l=layout::add(&layout::Layout::single(tile("t1",layout::PageKind::Board,"unit.kicad_pcb")).unwrap(),Some("t1"),layout::Side::Right,tile("t2",layout::PageKind::Schematic,"unit.kicad_sch"),false,None).unwrap();
+        let mut drafts=json!({}); drafts[format!("@view:{tid}")]=json!("board"); drafts[format!("@view.layout:{tid}")]=json!(serde_json::to_string(&l).unwrap());
+        let sid=layout::opaque_source_id(&format!("{root}/.git"),&root);
+        let run=|value: Value,locale: &str| { let mut q=p0.clone(); q["session"]=json!({"rid":1,"open":{},"drafts":drafts,"panel":false,"info":{}}); q["action"]=json!("layout-version"); q["value"]=json!(value.to_string()); q["locale"]=json!(locale); recent(&st,&q).unwrap_or_else(|| panic!("layout-version is not an action of the dispatcher")) };
+        let ver=|source_id: &str| json!({"tile":"t1","version":{"source_id":source_id,"id":c1,"label":"1 commit ago"}});
+        let out=run(ver(&sid),"en");
+        let stored: layout::Layout=serde_json::from_str(out["session"]["drafts"][format!("@view.layout:{tid}")].as_str().expect("the layout is stored")).unwrap();
+        assert_eq!(stored.tile("t1").unwrap().version.as_ref().map(|v| v.label.as_str()),Some("1 commit ago"));
+        let viewer=&out["shown"]["thread"]["viewer"];
+        assert_eq!(viewer["tiled"],true,"{}",out["shown"]["thread"].as_object().map(|o| o.keys().cloned().collect::<Vec<_>>().join(",")).unwrap_or_default());
+        assert_eq!(viewer["tiles"]["t1"]["identity"]["scope"],"1 commit ago","the picture names the version");
+        // a version the hub cannot resolve: refused, localized, nothing stored
+        let bad=run(ver("vsrc-unknown00000000"),"ja");
+        let say=bad["cmds"].as_array().into_iter().flatten().find(|c| c["type"]=="say").expect("a refusal is said");
+        assert_eq!((say["code"].as_str(),say["text"].as_str()),(Some("unresolvedVersion"),Some("このバージョンはこのプロジェクトの履歴にありません")));
+        assert_eq!(serde_json::from_str::<layout::Layout>(bad["session"]["drafts"][format!("@view.layout:{tid}")].as_str().unwrap()).unwrap().tile("t1").unwrap().version,None,"a refused request changes nothing");
     }
     /// A remembered layout returns by itself only to a client that says it can draw tiles, onto a session with nothing open, once.
     #[test] fn a_remembered_layout_returns_only_to_a_client_that_draws_tiles_with_nothing_open() {

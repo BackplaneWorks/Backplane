@@ -1208,6 +1208,8 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         v["layout"] = serde_json::to_value(&active_layout).unwrap_or(Value::Null);
         let src_ref = local.then_some(&*sources);
         v["tiles"] = build_tiles_picture(&active_layout, eff_root, &v, drafts, src_ref, &shown, linked);
+        // the ONE fact for "this session is in multi-tile mode": its stored layout holds two or more tiles (emitted only then: a single-tile picture is main's)
+        if is_tiled(&active_layout, had_stored_layout) { v["tiled"] = json!(true); }
         // If a stored layout's focused tile is versioned/unresolved, never let top-level legacy `key`/`layers`
         // fall back to live default artwork or expose `.git`/repo paths.
         if had_stored_layout {
@@ -1595,7 +1597,10 @@ fn gerber_put(c: &mut GerberCache, root: &str, rel: &str, ok: bool) {
     c.map.insert((root.to_string(), rel.to_string()), (ok, at));
     // a project's own bound, then the whole
     let mine: Vec<(String, String)> = c.map.keys().filter(|(r, _)| r == root).cloned().collect();
-    for k in gerber_victims(c, mine, GERBER_PER_ROOT) { c.map.remove(&k); }
+    // (a project's bound grows with the live layouts that name its sets: each holds at most MAX_TILES of them, so what live layouts need is never over the bound)
+    let owners = c.refs.keys().filter(|(_, r)| r == root).count();
+    let per_root = GERBER_PER_ROOT.max(owners * super::layout::MAX_TILES).min(GERBER_TOTAL);
+    for k in gerber_victims(c, mine, per_root) { c.map.remove(&k); }
     let all: Vec<(String, String)> = c.map.keys().cloned().collect();
     for k in gerber_victims(c, all, GERBER_TOTAL) { c.map.remove(&k); }
 }
@@ -1693,6 +1698,10 @@ fn opaque_tile_key(tile: &super::layout::Tile, root: &str) -> String {
         base
     }
 }
+
+/// Whether a session is in multi-tile mode: its STORED layout holds two or more tiles. Everything in the picture that depends on it (`viewer.tiled`, the split limits,
+/// the design strip's condition) derives from this one predicate.
+pub fn is_tiled(layout: &super::layout::Layout, stored: bool) -> bool { stored && layout.tiles().len() >= 2 }
 
 /// Parse `@view.layout:<sel>` when it holds a multi-tile layout (`>= 2` tiles) OR a single
 /// versioned/unresolved tile (so historical error identity survives handoff and never reverts to live artwork).
@@ -1895,8 +1904,9 @@ fn memory_value(l: &super::layout::Layout, root: &str) -> Option<String> {
     let mut out = l.clone();
     if out.tiles().len() > super::layout::MAX_TILES { return None }
     let resolver = project_version_resolver(root);
+    let budget = probe_budget();
     for t in l.tiles() {
-        if t.unresolved_version || !tile_resolvable(root, t, &resolver) {
+        if t.unresolved_version || !tile_resolvable(root, t, &resolver, &budget) {
             out = super::layout::close(&out, &t.id, None).ok()?;
         }
     }
@@ -1915,9 +1925,10 @@ fn memory_layout(st: &State, root: &str) -> Option<super::layout::Layout> {
     if l.tiles().len() < 2 || l.tiles().len() > super::layout::MAX_TILES { return None }
     super::layout::check_invariants(&l).ok()?;
     let resolver = project_version_resolver(root);
+    let budget = probe_budget(); // the operation's one budget: past it the rest count as unresolved
     // every tile must resolve NOW: a live drawing's file exists (a Gerber set has members, a folder is there), a version's revision holds the file; the rest are left out
     for t in l.tiles().into_iter().cloned().collect::<Vec<_>>() {
-        if t.unresolved_version || !tile_resolvable(root, &t, &resolver) {
+        if t.unresolved_version || !tile_resolvable(root, &t, &resolver, &budget) {
             l = super::layout::close(&l, &t.id, None).ok()?;
         }
     }
@@ -1926,7 +1937,7 @@ fn memory_layout(st: &State, root: &str) -> Option<super::layout::Layout> {
 
 /// Whether a remembered tile can be drawn now. A default source (empty) is the project's actual file for the page, which must exist; a version resolves its
 /// repository first and then the revision must hold the file (the default's name when none is named).
-fn tile_resolvable(root: &str, t: &super::layout::Tile, resolver: &super::layout::VersionSourceMap) -> bool {
+fn tile_resolvable(root: &str, t: &super::layout::Tile, resolver: &super::layout::VersionSourceMap, budget: &crate::files::rv::ProbeBudget) -> bool {
     use super::layout::{PageKind, VersionResolver};
     let root_p = std::path::Path::new(root);
     let own = crate::files::kicad::project::read(root);
@@ -1946,11 +1957,77 @@ fn tile_resolvable(root: &str, t: &super::layout::Tile, resolver: &super::layout
     let version = |kind: PageKind, v: &super::layout::TileVersion, rel: &str| -> bool {
         let Some(src) = resolver.resolve(&v.source_id) else { return false };
         let rel = if rel.is_empty() { default_rel(kind) } else { rel.to_string() };
-        !rel.is_empty() && crate::files::rv::version_has_file(&src.git_dir, &v.id, &rel)
+        !rel.is_empty() && crate::files::rv::version_has_file_in(budget, &src.git_dir, &v.id, &rel)
     };
     let base = match &t.version { Some(v) => version(t.kind, v, &t.source), None => live(t.kind, &t.source) };
     let ov = t.overlay.as_ref().map_or(true, |ov| match &ov.version { Some(v) => version(ov.kind, v, &ov.source), None => live(ov.kind, &ov.source) });
     base && ov
+}
+
+// (sheet owner lookup, below)
+/// The sheet files a schematic's text names (`(property "Sheetfile" "x.kicad_sch"`, or `"Sheet file"` in older files).
+fn sheet_files(text: &str) -> Vec<String> {
+    let mut out = vec![];
+    for key in ["\"Sheetfile\"", "\"Sheet file\""] {
+        let mut rest = text;
+        while let Some(i) = rest.find(key) {
+            rest = &rest[i + key.len()..];
+            let Some(j) = rest.find('"') else { break };
+            let after = &rest[j + 1..];
+            let Some(k) = after.find('"') else { break };
+            out.push(after[..k].to_string());
+            rest = &after[k..];
+        }
+    }
+    out
+}
+/// A path in one shape for comparing: `/`, no `./` steps.
+fn lexical(p: &str) -> String {
+    let mut parts: Vec<&str> = vec![];
+    let slashed = p.replace('\\', "/");
+    for seg in slashed.split('/') { match seg { "." => {} ".." => { parts.pop(); } s => parts.push(s) } }
+    parts.join("/")
+}
+/// Every schematic file in the hierarchy under `top` (itself included) that lies inside the project: at most 64 files and 6 levels, read as text. A child named
+/// outside the project folder (`../x`, a symlink out) is skipped and never read.
+fn hierarchy_of(top: &str, root: &str) -> std::collections::BTreeSet<String> {
+    let mut seen = std::collections::BTreeSet::new();
+    let Ok(root_c) = std::fs::canonicalize(root) else { return seen };
+    let mut todo = vec![(lexical(top), 0usize)];
+    while let Some((f, depth)) = todo.pop() {
+        if seen.len() >= 64 || seen.contains(&f) { continue }
+        if !std::fs::canonicalize(&f).is_ok_and(|c| c.starts_with(&root_c)) { continue }
+        seen.insert(f.clone());
+        if depth >= 6 { continue }
+        let Ok(text) = std::fs::read_to_string(&f) else { continue };
+        let dir = f.rsplit_once('/').map_or("", |x| x.0).to_string();
+        for child in sheet_files(&text) { todo.push((lexical(&format!("{dir}/{child}")), depth + 1)); }
+    }
+    seen
+}
+/// The top-level schematic whose hierarchy holds `rel` (a root-relative sheet): "" when it is the project's own hierarchy (the default sheet menu), else the
+/// absolute top-level file: the sheet itself when a board stands beside it, else another top-level of the project that names it.
+fn owning_top(root: &str, rel: &str) -> String {
+    if rel.is_empty() || root.is_empty() { return String::new() }
+    let abs = lexical(&format!("{}/{rel}", root.trim_end_matches(['/', '\\'])));
+    let own = lexical(&crate::files::kicad::project::read(root).sch);
+    if abs == own || (!own.is_empty() && hierarchy_of(&own, root).contains(&abs)) { return String::new() }
+    let beside = |f: &str| f.strip_suffix(".kicad_sch").is_some_and(|stem| std::path::Path::new(&format!("{stem}.kicad_pcb")).is_file());
+    if beside(&abs) { return abs }
+    // another top-level schematic of the project (one with a board beside it), looked for a few folders deep
+    let mut stack = vec![(root.trim_end_matches(['/', '\\']).to_string(), 0usize)];
+    let mut looked = 0;
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for e in rd.flatten() {
+            looked += 1; if looked > 400 { return String::new() }
+            let name = e.file_name().to_string_lossy().into_owned();
+            let path = lexical(&format!("{dir}/{name}"));
+            if e.file_type().is_ok_and(|t| t.is_dir()) { if depth < 3 && !name.starts_with('.') { stack.push((path, depth + 1)); } continue }
+            if name.ends_with(".kicad_sch") && beside(&path) && path != own && hierarchy_of(&path, root).contains(&abs) { return path }
+        }
+    }
+    String::new()
 }
 
 /// The sources a layout of several tiles watches, every tile's (an unresolved historical tile has none, and never falls back to live artwork), each named by
@@ -1969,6 +2046,11 @@ pub(crate) fn watch_sources(l: &super::layout::Layout, root: &str, linked: bool,
             let kind = match sp.kind { 0 => "board", 1 => "schematic", 2 => "3d", _ => continue };
             let mut e = json!({"tile": t.id, "kind": kind, "path": sp.path});
             if focused { e["force"] = json!(true); }
+            // a schematic tile's sheet menu is read from the hierarchy its sheet belongs to: the owning top-level schematic rides with the source ("" the project's own)
+            if kind == "schematic" && !linked && t.version.is_none() && t.overlay.is_none() {
+                let top = owning_top(root, &t.source);
+                if !top.is_empty() { e["tree"] = json!(top); }
+            }
             out.push(e);
         }
     }
@@ -2348,10 +2430,14 @@ fn tile_identity(
     });
     if let Some(ver) = &tile.version {
         id["version"] = json!(ver.label);
+        // the version a tile shows is named in its identity (the header reads "Board · file · <label>"), a Compare of two versions as the pair, as Review's does
+        id["scope"] = json!(ver.label);
     }
     if let Some(ov) = &tile.overlay {
-        if let (Some(ov_ver), Some(base_ver)) = (&ov.version, &tile.version) {
-            id["scope"] = json!(format!("{} → {}", ov_ver.label, base_ver.label));
+        // a Compare reads as the pair, a side with no version being the live file (as Review's history reads "Working copy")
+        if ov.version.is_some() || tile.version.is_some() {
+            let side = |v: &Option<super::layout::TileVersion>| v.as_ref().map_or("Working copy".to_string(), |v| v.label.clone());
+            id["scope"] = json!(format!("{} → {}", side(&ov.version), side(&tile.version)));
         }
     }
     id
@@ -2551,6 +2637,50 @@ fn parse_overlay_mode(s: &str) -> Option<super::layout::OverlayMode> {
     }
 }
 
+thread_local! { static OP_BUDGET: std::cell::RefCell<Option<std::sync::Arc<crate::files::rv::ProbeBudget>>> = const { std::cell::RefCell::new(None) }; }
+/// The git-probe budget of the operation under way (a restore, a version change): ONE deadline through every check it makes, however many functions make them.
+/// Outside an operation each caller has a budget of its own.
+fn probe_budget() -> std::sync::Arc<crate::files::rv::ProbeBudget> {
+    OP_BUDGET.with(|b| b.borrow().clone()).unwrap_or_else(|| std::sync::Arc::new(crate::files::rv::ProbeBudget::new(crate::files::rv::PROBE_BUDGET)))
+}
+/// Run `f` as one operation with one probe budget (nested, it joins the one already running).
+fn with_probe_budget<R>(f: impl FnOnce() -> R) -> R {
+    let had = OP_BUDGET.with(|b| b.borrow().is_some());
+    if !had { OP_BUDGET.with(|b| *b.borrow_mut() = Some(std::sync::Arc::new(crate::files::rv::ProbeBudget::new(crate::files::rv::PROBE_BUDGET)))); }
+    let r = f();
+    if !had { OP_BUDGET.with(|b| *b.borrow_mut() = None); }
+    r
+}
+
+/// Every version a layout names (a tile's, or an overlay's) resolves in this project: the repository id is the hub's, and the revision holds the source
+/// (the project's own file for a page when none is named). The probe has a deadline; a version it cannot confirm is unresolved.
+fn check_versions(l: &super::layout::Layout, root: &str, linked: bool) -> Result<(), super::layout::Refusal> {
+    use super::layout::{PageKind, Refusal, VersionResolver};
+    let versioned = l.tiles().iter().any(|t| t.version.is_some() || t.overlay.as_ref().is_some_and(|o| o.version.is_some()));
+    // a version the hub cannot check (a thread of another machine, a thread with no folder) is refused, never taken on trust
+    if (linked || root.is_empty()) && versioned { return Err(Refusal::UnresolvedVersion) }
+    if linked || root.is_empty() { return Ok(()) }
+    let resolver = project_version_resolver(root);
+    let budget = probe_budget();
+    let own = crate::files::kicad::project::read(root);
+    let rel_for = |kind: PageKind, src: &str| -> String {
+        if !src.is_empty() { return src.to_string() }
+        let abs = match kind { PageKind::Board | PageKind::Solid3d => own.pcb.clone(), PageKind::Schematic | PageKind::Simulation => own.sch.clone(), _ => String::new() };
+        if abs.is_empty() { String::new() } else { super::layout::sanitize_rel(root, &abs) }
+    };
+    let probe = |v: &super::layout::TileVersion, kind: PageKind, src: &str| -> Result<(), Refusal> {
+        let Some(vs) = resolver.resolve(&v.source_id) else { return Err(Refusal::UnresolvedVersion) };
+        let rel = rel_for(kind, src);
+        if rel.is_empty() || !crate::files::rv::version_has_file_in(&budget, &vs.git_dir, &v.id, &rel) { return Err(Refusal::UnresolvedVersion) }
+        Ok(())
+    };
+    for t in l.tiles() {
+        if let Some(v) = &t.version { probe(v, t.kind, &t.source)? }
+        if let Some(ov) = &t.overlay { if let Some(v) = &ov.version { probe(v, ov.kind, if ov.source.is_empty() { &t.source } else { &ov.source })? } }
+    }
+    Ok(())
+}
+
 /// The set command for a thread just selected (or returned to) on a connection: the stored layout of several tiles, whole, so the hub's table follows the thread
 /// shown (another thread's page may have replaced it meanwhile). None: no such layout. The session's request id is advanced.
 pub fn selection_set(st: &State, hub: &str, session: &Value) -> Option<(Value, u64)> {
@@ -2572,6 +2702,9 @@ pub fn selection_set(st: &State, hub: &str, session: &Value) -> Option<(Value, u
 /// whatever is open; else it is the by-itself return: only for a thread of this machine with nothing open in this session (no page, no stored layout, no Diff or
 /// Review). Never starts KiCad: it only sets the layout and its watches. None: nothing to apply.
 pub fn apply_memory(st: &State, hub: &str, session: &Value, client_id: Option<u64>, locale: &str, explicit: bool) -> Option<LayoutOut> {
+    with_probe_budget(|| apply_memory_inner(st, hub, session, client_id, locale, explicit))
+}
+fn apply_memory_inner(st: &State, hub: &str, session: &Value, client_id: Option<u64>, locale: &str, explicit: bool) -> Option<LayoutOut> {
     let sel = s(session, "sel");
     if sel.is_empty() || sel.contains('~') || !st.threads.contains_key(sel) { return None }
     let root = root_of(st, sel);
@@ -2613,7 +2746,10 @@ fn forget_memory(st: &State, hub: &str, session: &Value) -> Option<LayoutOut> {
 /// Every malformed JSON, kind, side, mode, or field returns `LayoutOut::Refused` (`invalidInput`)
 /// localized for `locale` with layout, drafts, and watches untouched.
 /// `layout-resize` is geometry-only (never changes watches and never dismisses Diff/Review).
-pub fn layout_action(
+pub fn layout_action(st: &State, hub: &str, session: &Value, client_id: Option<u64>, locale: &str, action: &str, value: &str) -> Option<LayoutOut> {
+    with_probe_budget(|| layout_action_inner(st, hub, session, client_id, locale, action, value))
+}
+fn layout_action_inner(
     st: &State,
     hub: &str,
     session: &Value,
@@ -2801,6 +2937,17 @@ pub fn layout_action(
             }
             r
         }
+        // history per tile: the tile shows `version` of its own source (or its live file again, `null`); Compare is `layout-overlay`
+        "layout-version" => {
+            let Some(tile) = payload["tile"].as_str().filter(|s| !s.is_empty()) else { return refuse(Refusal::InvalidInput) };
+            // a request names the version it wants: only an explicit `null` returns the tile to its live file (a missing property is not that)
+            let version: Option<TileVersion> = match payload.get("version") {
+                None => return refuse(Refusal::InvalidInput),
+                Some(Value::Null) => None,
+                Some(v) => match serde_json::from_value(v.clone()) { Ok(ver) => Some(ver), Err(_) => return refuse(Refusal::InvalidInput) },
+            };
+            layout::set_version(&cur, tile, version, locked_ref)
+        }
         "layout-overlay" => {
             let Some(base) = payload["base"].as_str().or_else(|| payload["a"].as_str()).filter(|s| !s.is_empty()) else {
                 return refuse(Refusal::InvalidInput);
@@ -2858,7 +3005,13 @@ pub fn layout_action(
 
     match res {
         Err(r) => refuse(r),
-        Ok(next) => Some(commit_checked(st, hub, session, sel, &root, &next, geometry_only, client_id.unwrap_or(0), locale)),
+        Ok(next) => {
+            // a version (a tile's own, or either side of a Compare) must resolve in this project, and its revision must hold the file, before anything is recorded
+            if matches!(action, "layout-version" | "layout-overlay") {
+                if let Err(r) = check_versions(&next, &root, linked) { return refuse(r) }
+            }
+            Some(commit_checked(st, hub, session, sel, &root, &next, geometry_only, client_id.unwrap_or(0), locale))
+        }
     }
 }
 
@@ -3242,6 +3395,46 @@ mod tests {
         refresh_gerber_sets_for(701, &root, &Layout::empty());
         let c = gerber_set_state().lock().unwrap();
         assert!(!gerber_referenced(&c, &root, "mfg/a") && gerber_referenced(&c, &root, "mfg/b"));
+    }
+    /// Within the 8-tile limit live layouts cannot thrash the cache: four sessions of one project each drawing eight distinct sets (32, past the 16 a project gets
+    /// by default) keep every set they name.
+    #[test] fn live_layouts_of_one_project_never_lose_the_gerber_sets_they_name() {
+        use super::super::layout::{Layout, PageKind, Tile, MAX_TILES};
+        let d = crate::plat::tmp::dir("gthrash");
+        let root = d.to_string_lossy().into_owned();
+        let mut owners = vec![];
+        for o in 0..4u64 {
+            let mut l: Option<Layout> = None;
+            for i in 0..MAX_TILES {
+                let set = format!("mfg/o{o}s{i}");
+                std::fs::create_dir_all(d.join(&set)).unwrap(); std::fs::write(d.join(format!("{set}/x-F_Cu.gbr")), "%FSLAX46Y46*%M02*").unwrap();
+                let tile = Tile { id: format!("t{}", i + 1), kind: PageKind::Gerbers, source: set, explicit: true, version: None, unresolved_version: false, overlay: None };
+                l = Some(match l { None => Layout::single(tile).unwrap(), Some(l) => super::super::layout::add(&l, None, super::super::layout::Side::Right, tile, false, None).unwrap() });
+            }
+            owners.push((700 + o, l.unwrap()));
+        }
+        for (o, l) in &owners { refresh_gerber_sets_for(*o, &root, l); }
+        for o in 0..4u64 { for i in 0..MAX_TILES { assert_eq!(cached_gerber_set_exists(&root, &format!("mfg/o{o}s{i}")), Some(true), "set o{o}s{i} is named by a live layout"); } }
+        // other entries are what goes first when the bound is reached
+        { let mut c = gerber_set_state().lock().unwrap(); for i in 0..40 { gerber_put(&mut c, &root, &format!("mfg/other{i}"), true); } }
+        assert_eq!(cached_gerber_set_exists(&root, "mfg/o0s0"), Some(true));
+        assert_eq!(cached_gerber_set_exists(&root, "mfg/o3s7"), Some(true));
+    }
+    /// A child sheet named outside the project folder is never read; one budget serves a whole operation.
+    #[test] fn the_hierarchy_walk_stays_inside_the_project_and_an_operation_has_one_probe_budget() {
+        let outer = crate::plat::tmp::dir("hier-outer");
+        let (root, outside) = (outer.join("proj"), outer.join("outside"));
+        std::fs::create_dir_all(&root).unwrap(); std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(root.join("top.kicad_sch"), "(kicad_sch (sheet (property \"Sheetfile\" \"in.kicad_sch\")) (sheet (property \"Sheetfile\" \"../outside/out.kicad_sch\")))").unwrap();
+        std::fs::write(root.join("in.kicad_sch"), "(kicad_sch)").unwrap();
+        std::fs::write(outside.join("out.kicad_sch"), "(kicad_sch)").unwrap();
+        let r = root.to_string_lossy().into_owned();
+        let seen = hierarchy_of(&format!("{r}/top.kicad_sch"), &r);
+        assert!(seen.iter().any(|f| f.ends_with("/in.kicad_sch")), "{seen:?}");
+        assert!(seen.iter().all(|f| !f.contains("outside")), "a child outside the project is skipped: {seen:?}");
+        let (a, b) = with_probe_budget(|| (probe_budget(), probe_budget()));
+        assert!(std::sync::Arc::ptr_eq(&a, &b), "the checks of one operation share one deadline");
+        assert!(!std::sync::Arc::ptr_eq(&probe_budget(), &probe_budget()), "outside an operation each caller has its own");
     }
     #[test]
     fn empty_gerbers_page_has_a_lit_rail_entry_until_closed() {

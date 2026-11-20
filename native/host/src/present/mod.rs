@@ -1410,6 +1410,122 @@ mod tests {
         assert!(crate::files::rv::succeeds_within(ok, std::time::Duration::from_secs(2)));
     }
 
+    /// 2c: `viewer.tiled` is the ONE fact for multi-tile mode (a stored layout of two or more tiles); history per tile: `layout-version` shows a version of a tile's
+    /// source, named in its identity; Compare of two versions reads as a pair; refusals are localized; one resize writes the memory at most once.
+    #[test]
+    fn rail_2c_tiled_history_per_tile_and_one_write_per_resize() {
+        let d = crate::plat::tmp::dir("rail-2c");
+        let root = d.to_string_lossy().into_owned();
+        std::fs::write(d.join("unit.kicad_pcb"), "(kicad_pcb 1)").unwrap(); std::fs::write(d.join("unit.kicad_sch"), "(kicad_sch 1)").unwrap();
+        let git = |args: &[&str]| { let o = std::process::Command::new("git").args(["-c", "user.name=t", "-c", "user.email=t@example.com"]).args(args).current_dir(&d).output().unwrap(); assert!(o.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&o.stderr)); String::from_utf8_lossy(&o.stdout).trim().to_string() };
+        git(&["init", "-q"]); git(&["add", "unit.kicad_pcb"]); git(&["commit", "-q", "-m", "one"]);
+        let c1 = git(&["rev-parse", "HEAD"]);
+        std::fs::write(d.join("unit.kicad_pcb"), "(kicad_pcb 2)").unwrap(); git(&["add", "unit.kicad_pcb"]); git(&["commit", "-q", "-m", "two"]);
+        let c2 = git(&["rev-parse", "HEAD"]);
+        let mut st = crate::state::State::new();
+        st.apply_line(&json!({"$":"ProjectCreated","id":"p","title":"Board","root":root,"at":1}).to_string());
+        st.apply_line(&json!({"$":"ThreadCreated","id":"tc","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+        let ok = |o: viewer::LayoutOut| match o { viewer::LayoutOut::Ok(v) => v, viewer::LayoutOut::Refused { text, .. } => panic!("refused: {text}") };
+        let refused = |o: viewer::LayoutOut| match o { viewer::LayoutOut::Refused { code, text, .. } => (code, text), _ => panic!("expected a refusal") };
+        let calls = |vo: &viewer::ViewOut, m: &str| vo.before.iter().filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).filter(|x| x["m"] == m).map(|x| x["p"].clone()).collect::<Vec<_>>();
+        // 1. viewer.tiled: only for a stored layout of two or more tiles
+        let idle = json!({"sel":"tc","rid":1,"drafts":{},"panel":false,"info":{}});
+        let mut s = idle.clone(); crate::session::patch::merge(&mut s, &viewer::view_action(&st, "h", &idle, "board").unwrap().patch);
+        assert!(viewer::viewer_json(&st, &json!({}), &s).unwrap().get("tiled").is_none(), "one page: no `tiled`, the picture is main's");
+        let vo = ok(viewer::layout_action(&st, "h", &s, Some(1), "en", "layout-add", r#"{"kind":"schematic","side":"right"}"#).unwrap());
+        crate::session::patch::merge(&mut s, &vo.patch);
+        assert_eq!(viewer::viewer_json(&st, &json!({}), &s).unwrap()["tiled"], true);
+        // 2. one resize writes the memory at most once, an unchanged arrangement not at all
+        let w = calls(&vo, "setting.set"); assert_eq!(w.len(), 1);
+        st.apply_line(&json!({"$":"SettingSet","key":w[0]["key"],"value":w[0]["value"],"at":3}).to_string());
+        let resize = r#"{"split":"s1","ratio":0.7,"bounds":[1000,800]}"#;
+        let r1 = ok(viewer::layout_action(&st, "h", &s, Some(1), "en", "layout-resize", resize).unwrap());
+        let w1 = calls(&r1, "setting.set"); assert!(w1.len() <= 1, "one resize: at most one memory write");
+        let mut s2 = s.clone(); crate::session::patch::merge(&mut s2, &r1.patch);
+        for x in &w1 { st.apply_line(&json!({"$":"SettingSet","key":x["key"],"value":x["value"],"at":4}).to_string()); }
+        let r2 = ok(viewer::layout_action(&st, "h", &s2, Some(1), "en", "layout-resize", resize).unwrap());
+        assert!(calls(&r2, "setting.set").is_empty(), "the same arrangement writes nothing");
+        // 3. layout-version: the tile shows a version of its own source, named in its identity; its set carries the history source, never the live file
+        let sid = layout::opaque_source_id(&format!("{root}/.git"), &root);
+        let ver = |sid: &str, id: &str, label: &str| json!({"source_id": sid, "id": id, "label": label});
+        let payload = |tile: &str, v: Value| json!({"tile": tile, "version": v}).to_string();
+        let vo = ok(viewer::layout_action(&st, "h", &s, Some(1), "en", "layout-version", &payload("t1", ver(&sid, &c1, "1 commit ago"))).unwrap());
+        let set = calls(&vo, "kicad.watch.set").remove(0);
+        let board = set["sources"].as_array().unwrap().iter().find(|x| x["tile"] == "t1").unwrap().clone();
+        assert!(board["path"].as_str().unwrap().contains(&c1), "a versioned tile watches its history source: {board}");
+        let mut sv = s.clone(); crate::session::patch::merge(&mut sv, &vo.patch);
+        let pic = viewer::viewer_json(&st, &json!({}), &sv).unwrap();
+        assert_eq!(pic["tiles"]["t1"]["identity"]["version"], "1 commit ago");
+        assert_eq!(pic["tiles"]["t1"]["identity"]["scope"], "1 commit ago", "the header names the version");
+        // ... and back to the live file
+        let back = ok(viewer::layout_action(&st, "h", &sv, Some(1), "en", "layout-version", &payload("t1", Value::Null)).unwrap());
+        let mut sb = sv.clone(); crate::session::patch::merge(&mut sb, &back.patch);
+        assert!(viewer::viewer_json(&st, &json!({}), &sb).unwrap()["tiles"]["t1"]["identity"].get("version").is_none());
+        // 4. Compare: two versions of one source as an overlay; the identity reads the pair with the arrow
+        let mut sc = sv.clone();
+        let base_v = ok(viewer::layout_action(&st, "h", &sc, Some(1), "en", "layout-version", &payload("t1", ver(&sid, &c2, "now"))).unwrap());
+        crate::session::patch::merge(&mut sc, &base_v.patch);
+        let ov = json!({"base": "t1", "overlay": {"kind": "board", "source": "unit.kicad_pcb", "version": ver(&sid, &c1, "before"), "mode": "diff"}}).to_string();
+        let cmp = ok(viewer::layout_action(&st, "h", &sc, Some(1), "en", "layout-overlay", &ov).unwrap());
+        crate::session::patch::merge(&mut sc, &cmp.patch);
+        assert_eq!(viewer::viewer_json(&st, &json!({}), &sc).unwrap()["tiles"]["t1"]["identity"]["scope"], "before → now");
+        // 5. refusals, localized: an unknown repository id, a revision without the file, a page with no history
+        let (code, text) = refused(viewer::layout_action(&st, "h", &s, Some(1), "en", "layout-version", &payload("t1", ver("vsrc-unknown00000000", &c1, "x"))).unwrap());
+        assert_eq!((code, text), ("unresolvedVersion", "That version is not in this project's history"));
+        let (_, text) = refused(viewer::layout_action(&st, "h", &s, Some(1), "ja", "layout-version", &payload("t1", ver("vsrc-unknown00000000", &c1, "x"))).unwrap());
+        assert_eq!(text, "このバージョンはこのプロジェクトの履歴にありません");
+        let (code, _) = refused(viewer::layout_action(&st, "h", &s, Some(1), "en", "layout-version", &payload("t2", ver(&sid, &c1, "x"))).unwrap()); // unit.kicad_sch is in no commit
+        assert_eq!(code, "unresolvedVersion");
+        // a request that names no version is invalid (only an explicit null returns the tile to live); a version on a thread the hub cannot check is refused
+        let (code, text) = refused(viewer::layout_action(&st, "h", &s, Some(1), "ja", "layout-version", r#"{"tile":"t1"}"#).unwrap());
+        assert_eq!((code, text), ("invalidInput", "無効なレイアウト要求です"));
+        st.apply_line(&json!({"$":"ProjectCreated","id":"peer~p","title":"Remote","root":"/remote/proj","at":1}).to_string());
+        st.apply_line(&json!({"$":"ThreadCreated","id":"peer~tc","project":"peer~p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+        let far_l = serde_json::to_string(&layout::add(&layout::Layout::single(layout::Tile { id: "t1".into(), kind: layout::PageKind::Board, source: "unit.kicad_pcb".into(), explicit: true, version: None, unresolved_version: false, overlay: None }).unwrap(), Some("t1"), layout::Side::Right,
+            layout::Tile { id: "t2".into(), kind: layout::PageKind::Schematic, source: "unit.kicad_sch".into(), explicit: true, version: None, unresolved_version: false, overlay: None }, false, None).unwrap()).unwrap();
+        let far = json!({"sel":"peer~tc","rid":1,"drafts":{"@view:peer~tc":"board","@view.layout:peer~tc":far_l},"panel":false,"info":{}});
+        let (code, _) = refused(viewer::layout_action(&st, "h", &far, Some(1), "en", "layout-version", &payload("t1", ver(&sid, &c1, "x"))).unwrap());
+        assert_eq!(code, "unresolvedVersion", "a version the hub cannot verify is refused, never taken on trust");
+        // a version compared with the live Board: the pair reads "<version> → Working copy"
+        let live_cmp = json!({"base": "t1", "overlay": {"kind": "board", "source": "unit.kicad_pcb", "version": ver(&sid, &c1, "before"), "mode": "diff"}}).to_string();
+        let lc = ok(viewer::layout_action(&st, "h", &s, Some(1), "en", "layout-overlay", &live_cmp).unwrap());
+        let mut slc = s.clone(); crate::session::patch::merge(&mut slc, &lc.patch);
+        assert_eq!(viewer::viewer_json(&st, &json!({}), &slc).unwrap()["tiles"]["t1"]["identity"]["scope"], "before → Working copy");
+        let files = layout::add(&layout::Layout::single(layout::Tile { id: "t1".into(), kind: layout::PageKind::Board, source: "unit.kicad_pcb".into(), explicit: true, version: None, unresolved_version: false, overlay: None }).unwrap(), Some("t1"), layout::Side::Right,
+            layout::Tile { id: "t2".into(), kind: layout::PageKind::Files, source: String::new(), explicit: false, version: None, unresolved_version: false, overlay: None }, false, None).unwrap();
+        let sf = json!({"sel":"tc","rid":1,"drafts":{"@view:tc":"board","@view.layout:tc":serde_json::to_string(&files).unwrap()},"panel":false,"info":{}});
+        let (code, text) = refused(viewer::layout_action(&st, "h", &sf, Some(1), "en", "layout-version", &payload("t2", ver(&sid, &c1, "x"))).unwrap());
+        assert_eq!((code, text), ("noHistory", "This page has no history"));
+    }
+
+    /// Two hierarchies side by side: a sheet tile carries the top-level schematic that owns it, so its sheet menu is read from its own hierarchy, not the project's.
+    #[test]
+    fn rail_2c_a_sheet_tile_carries_the_top_level_schematic_that_owns_it() {
+        let d = crate::plat::tmp::dir("rail-2c-trees");
+        let root = d.to_string_lossy().into_owned();
+        std::fs::create_dir_all(d.join("alt")).unwrap();
+        let sheet = |child: &str| format!("(kicad_sch (sheet (at 0 0) (property \"Sheetname\" \"c\") (property \"Sheetfile\" \"{child}\")))");
+        std::fs::write(d.join("a_top.kicad_sch"), sheet("z_child.kicad_sch")).unwrap(); std::fs::write(d.join("a_top.kicad_pcb"), "()").unwrap(); std::fs::write(d.join("z_child.kicad_sch"), "(kicad_sch)").unwrap();
+        std::fs::write(d.join("alt/alt.kicad_sch"), sheet("b.kicad_sch")).unwrap(); std::fs::write(d.join("alt/alt.kicad_pcb"), "()").unwrap(); std::fs::write(d.join("alt/b.kicad_sch"), "(kicad_sch)").unwrap();
+        let own = crate::files::kicad::project::read(&root);
+        assert!(own.sch.ends_with("a_top.kicad_sch"), "the project's own schematic is the first top-level: {}", own.sch);
+        let mut st = crate::state::State::new();
+        st.apply_line(&json!({"$":"ProjectCreated","id":"p","title":"Board","root":root,"at":1}).to_string());
+        st.apply_line(&json!({"$":"ThreadCreated","id":"tt","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+        let tile = |id: &str, src: &str| layout::Tile { id: id.into(), kind: layout::PageKind::Schematic, source: src.into(), explicit: true, version: None, unresolved_version: false, overlay: None };
+        let mut l = layout::Layout::single(tile("t1", "z_child.kicad_sch")).unwrap();
+        for t in [tile("t2", "alt/b.kicad_sch"), tile("t3", "alt/alt.kicad_sch"), tile("t4", "a_top.kicad_sch")] { l = layout::add(&l, None, layout::Side::Right, t, false, None).unwrap(); }
+        let s = json!({"sel":"tt","rid":1,"drafts":{"@view:tt":"schematic","@view.layout:tt":serde_json::to_string(&l).unwrap()},"panel":false,"info":{}});
+        let viewer::LayoutOut::Ok(vo) = viewer::layout_action(&st, "h", &s, Some(1), "en", "layout-focus", r#"{"tile":"t1"}"#).unwrap() else { panic!() };
+        let set: Value = vo.before.iter().filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).find(|m| m["m"] == "kicad.watch.set").map(|m| m["p"].clone()).unwrap();
+        let tree_of = |tile: &str| set["sources"].as_array().unwrap().iter().find(|x| x["tile"] == tile).unwrap()["tree"].as_str().unwrap_or("").to_string();
+        assert_eq!(tree_of("t1"), "", "a sheet of the project's own hierarchy: the default menu");
+        assert_eq!(tree_of("t4"), "", "the project's own top-level schematic");
+        let alt = format!("{root}/alt/alt.kicad_sch");
+        assert!(tree_of("t2").ends_with("alt/alt.kicad_sch"), "a child sheet of the alternate hierarchy carries its owning top-level: {}", tree_of("t2"));
+        assert!(tree_of("t3").ends_with("alt/alt.kicad_sch") && tree_of("t3") == tree_of("t2"), "the alternate top-level schematic is its own hierarchy's root ({alt})");
+    }
+
     struct Mine; impl Screen for Mine {
         fn name(&self) -> &'static str { "mine" }
         fn view(&self, p: &Value) -> Option<Value> { if p["target"]["kind"] == "thread" { Some(json!({"shown":{"by":"rust"}})) } else { None } }
