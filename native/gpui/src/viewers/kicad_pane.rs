@@ -102,6 +102,16 @@ pub fn adrift(container: Option<u64>, info: &Value, me: &str) -> bool {
         Some(_) => info["runtime"]["holderCid"].as_str().map_or(true, |h| h.is_empty() || h == me),
     }
 }
+/// What attaches an adrift pane again: the person's Install finishing (`kicad_update::reopen`, after their press) or the pane's own safety
+/// net (a KiCad started outside it, found in `tick`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdriftRoad { InstallReopen, SafetyNet }
+/// Who gets the keyboard when an adrift pane is attached again: the person's own asking (their Install, or the safety net on a pane they
+/// opened with Edit) is Deliberate, KiCad takes the keys; the safety net on a pane something else opened (an automatic open, an agent's
+/// show, an agent's restart pulled into a pane the person only views) is Automatic: KiCad shows, the keys stay with Backplane. Pure.
+pub fn reattach_why(road: AdriftRoad, pane: ShowBy) -> ShowBy {
+    match (road, pane) { (AdriftRoad::InstallReopen, _) | (AdriftRoad::SafetyNet, ShowBy::Deliberate) => ShowBy::Deliberate, _ => ShowBy::Automatic }
+}
 pub fn remount_wait(asked: u32) -> std::time::Duration {
     std::time::Duration::from_millis(match asked { 0 | 1 => 1000, 2 => 2000, 3 => 4000, _ => 10_000 })
 }
@@ -1345,7 +1355,7 @@ impl KicadPane {
                 self.reattached_for = Some(pid);
                 // the person's Edit pane: the attach is theirs (KiCad gets the keyboard); one something else opened: automatic (it shows,
                 // the keys stay with Backplane)
-                let why = if self.why == ShowBy::Deliberate { ShowBy::Deliberate } else { ShowBy::Automatic };
+                let why = reattach_why(AdriftRoad::SafetyNet, self.why);
                 eprintln!("GPUI_LOG {}", json!({"kicad_reattach": {"road": "adrift", "why": format!("{why:?}"), "pid": pid, "its_container": self.info["container"], "pane_container": self.container}}));
                 cx.emit(PaneAdrift(why));
             } else if since.elapsed() >= std::time::Duration::from_millis(1200)
@@ -2396,6 +2406,13 @@ mod tests {
         assert!(adrift(json!({"state": "ready", "container": 777, "runtime": {}})), "its holder gone");
         assert!(adrift(json!({"state": "ready", "container": 777, "runtime": {"holderCid": ""}})));
         assert!(adrift(json!({"state": "ready", "container": 777, "runtime": {"holderCid": "gpui-1-2"}})), "this client's own (another of its containers)");
+    }
+    #[test] fn who_gets_the_keyboard_when_an_adrift_pane_attaches_again() {
+        use super::{reattach_why, AdriftRoad::*, ShowBy::*};
+        assert_eq!(reattach_why(InstallReopen, Deliberate), Deliberate, "the person pressed Edit, was refused, pressed Install: their KiCad, their keys");
+        assert_eq!(reattach_why(InstallReopen, Automatic), Deliberate, "the Install itself is the person's press, whatever opened the pane");
+        assert_eq!(reattach_why(SafetyNet, Deliberate), Deliberate, "the person's Edit pane, its KiCad started outside it: the person asked for KiCad");
+        assert_eq!(reattach_why(SafetyNet, Automatic), Automatic, "an agent's restart pulled into a pane the person is only viewing: shown, keys stay with Backplane");
     }
     #[test] fn the_unshown_re_ask_backs_off() {
         let w: Vec<u64> = (0..6).map(|n| super::remount_wait(n).as_millis() as u64).collect();
