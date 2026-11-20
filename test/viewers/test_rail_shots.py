@@ -540,11 +540,11 @@ class RailShotsRegressionTests(unittest.TestCase):
                 'GPUI_METRIC {"event":"rail","rail":{"lit":[],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
                 # Board (enabled): all 5 pass
                 'GPUI_METRIC {"event":"mark","name":"b1:press-open:board"}',
-                'GPUI_METRIC {"event":"press","id":"rail:Board","found":true}',
+                'GPUI_METRIC {"event":"press","id":"rail:Board","found":true,"action":"view.action view"}',
                 'GPUI_METRIC {"event":"rail","rail":{"lit":["Board"],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
                 'GPUI_METRIC {"event":"settled","tag":"b1-press-open-board","state":"ready","settled":true,"viewer":{"open":"board","diff_open":false}}',
                 'GPUI_METRIC {"event":"mark","name":"b1:press-close:board"}',
-                'GPUI_METRIC {"event":"press","id":"rail:Board","found":true}',
+                'GPUI_METRIC {"event":"press","id":"rail:Board","found":true,"action":"view.action view"}',
                 'GPUI_METRIC {"event":"rail","rail":{"lit":[],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
                 'GPUI_METRIC {"event":"settled","tag":"b1-press-close-board","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
                 'GPUI_METRIC {"event":"mark","name":"b1:key-open:board"}',
@@ -563,11 +563,11 @@ class RailShotsRegressionTests(unittest.TestCase):
                 'GPUI_METRIC {"event":"rail","rail":{"lit":[],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
                 # Gerbers (enabled): press & palette pass, bare key fails to open
                 'GPUI_METRIC {"event":"mark","name":"b1:press-open:gerbers"}',
-                'GPUI_METRIC {"event":"press","id":"rail:Gerbers","found":true}',
+                'GPUI_METRIC {"event":"press","id":"rail:Gerbers","found":true,"action":"view.action view"}',
                 'GPUI_METRIC {"event":"rail","rail":{"lit":["Gerbers"],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
                 'GPUI_METRIC {"event":"settled","tag":"b1-press-open-gerbers","state":"ready","settled":true,"viewer":{"open":"board","gerbers":true,"diff_open":false}}',
                 'GPUI_METRIC {"event":"mark","name":"b1:press-close:gerbers"}',
-                'GPUI_METRIC {"event":"press","id":"rail:Gerbers","found":true}',
+                'GPUI_METRIC {"event":"press","id":"rail:Gerbers","found":true,"action":"view.action view"}',
                 'GPUI_METRIC {"event":"rail","rail":{"lit":[],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
                 'GPUI_METRIC {"event":"settled","tag":"b1-press-close-gerbers","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
                 'GPUI_METRIC {"event":"mark","name":"b1:key-open:gerbers"}',
@@ -766,7 +766,7 @@ class RailShotsRegressionTests(unittest.TestCase):
                         "press:extra-edit-browser": [{"id": "script:kicad-edit", "found": False, "seq": 80}, {"id": "ui:View", "found": True, "seq": 85}],
                     },
                     "kicad_tags": {
-                        "b1-sim-cleanup-report": {"state": "idle", "in_gpui_tree": False, "shown": 0, "frames": []},
+                        "b1-sim-cleanup-report": {"ok": True, "state": "idle", "in_gpui_tree": False, "shown": None, "frames": []},
                         "extra-edit-files-report": {"state": "ready", "in_gpui_tree": True, "shown": 10, "frames": [{"xid": 10, "kind": "SCH", "painted": 20}]},
                         "extra-edit-review-report": {"state": "ready", "in_gpui_tree": True, "shown": 10, "frames": [{"xid": 10, "kind": "SCH", "painted": 0}]},
                         "extra-edit-browser-report": {"state": "ready", "in_gpui_tree": True, "shown": 10, "frames": [{"xid": 10, "kind": "SCH", "painted": 20}]},
@@ -815,6 +815,27 @@ class RailShotsRegressionTests(unittest.TestCase):
             caps_no_sc = {"schematic-only": {k: v for k, v in caps["schematic-only"].items() if k != "b1-sim-cleanup"}}
             res_sim_unavail = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["schematic-only"], parsed_no_sc, caps_no_sc, embed=True)}
             self.assertEqual(res_sim_unavail["schematic-only/sim-cleanup-no-frame"]["outcome"], "unavailable")
+
+            # Half evidence never passes: each single-missing case, `{}` as a pane report, and a holder with a non-live session
+            def _sim(sess, pane=...):
+                kt = dict(parsed["schematic-only"]["kicad_tags"])
+                if pane is None:
+                    kt.pop("b1-sim-cleanup-report", None)
+                elif pane is not ...:
+                    kt["b1-sim-cleanup-report"] = pane
+                pp = {"schematic-only": {**parsed["schematic-only"], "kicad_tags": kt}}
+                cc = {"schematic-only": {**caps["schematic-only"], "b1-sim-cleanup": mk_cap(sess=sess)}}
+                return {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["schematic-only"], pp, cc, embed=True)}["schematic-only/sim-cleanup-no-frame"]
+            clean_sess = {"ok": True, "inventory_complete": True, "sessions": {"e": {"runtime": {"holder": None, "session": "parked"}, "frames": []}}}
+            self.assertEqual(_sim(clean_sess)["outcome"], "passed")
+            self.assertEqual(_sim(clean_sess, pane=None)["outcome"], "unavailable")  # hub inventory without a pane report
+            self.assertEqual(_sim({"ok": False}, pane=...)["outcome"], "unavailable")  # pane report without a hub inventory
+            self.assertEqual(_sim(clean_sess, pane={})["outcome"], "unavailable")  # `{}` is not a pane report
+            self.assertEqual(_sim(clean_sess, pane={"state": "idle", "in_gpui_tree": False, "shown": None})["outcome"], "unavailable")  # no `ok`
+            self.assertEqual(_sim({"ok": True, "inventory_complete": True, "sessions": {"e": {"frames": []}}})["outcome"], "unavailable")  # holder unobserved
+            holder_parked = {"ok": True, "inventory_complete": True, "sessions": {"e": {"runtime": {"holder": "pane", "session": "parked"}, "frames": []}}}
+            self.assertEqual(_sim(holder_parked)["outcome"], "failed")  # any holder, not only a live session
+            self.assertEqual(_sim(clean_sess, pane={"ok": True, "in_gpui_tree": True, "shown": 7})["outcome"], "failed")
 
             # 1. Missing board compares against extra-missing-start-idle (NOT browser) and passes; missing 3d fails
             self.assertEqual(res["schematic-only/missing-board"]["outcome"], "passed")
@@ -973,7 +994,24 @@ class RailShotsRegressionTests(unittest.TestCase):
         self.assertTrue(res["entries"]["simulation"]["passed"])
 
         # C2: full filtered list without target + hit_rect=True -> all 3 measured -> passed
+        # a real pointer press at the drawn rect, calibrated by an enabled row that opened, and the disabled reason from the inventory
+        parsed["presses"]["b1:disabled-press:board"] = [{"id": "rail:Board", "found": True, "pointer": True, "hit_rect": True, "seq": 10}]
+        parsed["rail_inventory"] = [{"id": "board", "state": "disabled", "tooltip_label": "No board in this project"}]
+        res_nocal = P.evaluate_b1_kind("schematic-only", parsed, rail_map, embed=True)
+        self.assertEqual(res_nocal["entries"]["board"]["checks"]["disabled_press"], "unavailable")  # pointer route not calibrated
+        parsed["presses"]["b1:pointer-calibration"] = [{"id": "rail:Files", "found": True, "pointer": True, "hit_rect": True, "seq": 1}]
+        parsed["settled_tags"]["b1-pointer-calibration"] = {"settled": True, "state": "ready", "seq": 3, "viewer": {"open": "files"}}
+        # a manufactured press (not a pointer record) never counts
         parsed["presses"]["b1:disabled-press:board"] = [{"id": "rail:Board", "found": True, "hit_rect": True, "seq": 10}]
+        self.assertEqual(P.evaluate_b1_kind("schematic-only", parsed, rail_map, embed=True)["entries"]["board"]["checks"]["disabled_press"], "unavailable")
+        parsed["presses"]["b1:disabled-press:board"] = [{"id": "rail:Board", "found": True, "pointer": True, "hit_rect": True, "seq": 10}]
+        # reason: empty or different tooltip fails; no inventory is unavailable
+        bad = json.loads(json.dumps(parsed)); bad["rail_inventory"][0]["tooltip_label"] = ""
+        self.assertIs(P.evaluate_b1_kind("schematic-only", bad, rail_map, embed=True)["entries"]["board"]["checks"]["disabled_reason"], False)
+        bad["rail_inventory"][0]["tooltip_label"] = "Something else"
+        self.assertIs(P.evaluate_b1_kind("schematic-only", bad, rail_map, embed=True)["entries"]["board"]["checks"]["disabled_reason"], False)
+        bad["rail_inventory"] = None
+        self.assertEqual(P.evaluate_b1_kind("schematic-only", bad, rail_map, embed=True)["entries"]["board"]["checks"]["disabled_reason"], "unavailable")
         parsed["palette_reads"]["b1:disabled-palette:board"] = [
             {"supported": True, "seq": 32, "snapshot": {"open": True, "q": "board", "count": 1, "selected_id": "shortcuts", "ids": ["shortcuts"]}}
         ]
@@ -1131,6 +1169,20 @@ class RailShotsRegressionTests(unittest.TestCase):
             }
             c_pass = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["full"], {"full": p_pass}, {"full": {}})}
             self.assertEqual(c_pass["full/escape-after-closed-probe"]["outcome"], "passed")
+
+    def test_press_found_true_without_an_executed_action_is_not_delivered(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "c.log"
+            log.write_text("\n".join([
+                'GPUI_METRIC {"event":"mark","name":"m"}',
+                'GPUI_METRIC {"event":"press","id":"rail:Terminal","found":true,"action":"none"}',
+                'GPUI_METRIC {"event":"press","id":"rail:Terminal","found":true,"action":null}',
+                'GPUI_METRIC {"event":"press","id":"rail:Terminal","found":true}',
+                'GPUI_METRIC {"event":"press","id":"rail:Terminal","found":true,"action":"toggle terminal"}',
+                'GPUI_METRIC {"event":"click","id":"rail:Terminal","changed":false,"action":null}',
+            ]) + "\n", encoding="utf-8")
+            ps = P.parse_client_log(log)["presses"]["m"]
+            self.assertEqual([p["found"] for p in ps], [False, False, False, True, False])
 
 
 if __name__ == "__main__":

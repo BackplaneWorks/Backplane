@@ -206,23 +206,29 @@ def parse_client_log(log_path: Path) -> dict:
                 "supported": bool(ev.get("supported")),
                 "seq": ev_seq,
             })
+        elif kind == "pointer":
+            # a real pointer press at a drawn rect: delivered only if dispatched into the window at a measured rect
+            presses_by_mark.setdefault(current_mark, []).append({
+                "id": ev.get("id") or "",
+                "found": bool(ev.get("dispatched")) and bool(ev.get("hit_rect")),
+                "executed": False,
+                "pointer": True,
+                "hit_rect": bool(ev.get("hit_rect")),
+                "action": None,
+                "seq": ev_seq,
+            })
         elif kind in ("press", "click"):
-            if kind == "press":
-                delivered = bool(ev.get("found"))
-            else:
-                # `click` metrics omit `found`; never treat `action: "none"` (unwired Ctl::None) as delivered.
-                act = ev.get("action")
-                delivered = bool(ev.get("found")) or (
-                    not ev.get("error")
-                    and bool(act)
-                    and act != "none"
-                )
-            hit_rect = bool(ev.get("hit_rect") or ev.get("rect_hit"))
+            # Delivered = an action was EXECUTED. `found:true` alone, `action:null` or `action:"none"` (an unwired control) is not delivery.
+            act = ev.get("action")
+            executed = bool(act) and act != "none" and not ev.get("error")
+            delivered = executed if kind == "press" else (executed or bool(ev.get("found")))
             presses_by_mark.setdefault(current_mark, []).append({
                 "id": ev.get("id") or "",
                 "found": delivered,
-                "hit_rect": hit_rect,
-                "action": ev.get("action"),
+                "executed": executed,
+                "selector": ev.get("selector"),
+                "hit_rect": bool(ev.get("hit_rect") or ev.get("rect_hit")),
+                "action": act,
                 "seq": ev_seq,
             })
         elif kind == "kicad":
@@ -567,6 +573,12 @@ def evaluate_b1_kind(kind: str, parsed_kind: dict, rail_map: dict[str, dict], em
     kicad_tags = parsed_kind.get("kicad_tags") or {}
     mark_before_rail = parsed_kind.get("mark_before_rail") or {}
     rail_events: list[tuple[int, dict]] = parsed_kind.get("rail_events") or []
+    # The pointer route is calibrated by a real press on an ENABLED row that must open it; only then is "nothing happened" on a
+    # disabled row a measured no-op rather than a click that missed.
+    _cal = settled_tags.get("b1-pointer-calibration") or {}
+    _cal_press = [p for p in presses_by_mark.get("b1:pointer-calibration", []) if p.get("pointer") and p.get("found")]
+    pointer_calibrated = bool(_cal_press and _cal.get("settled") is True and (_cal.get("viewer") or {}).get("open") == "files")
+    inv_by_id = {str(r.get("id")): r for r in (parsed_kind.get("rail_inventory") or []) if isinstance(r, dict)}
 
     def viewer_matches(eid: str, viewer: dict) -> bool:
         if eid == "diff":
@@ -731,8 +743,19 @@ def evaluate_b1_kind(kind: str, parsed_kind: dict, rail_map: dict[str, dict], em
 
             # 1. disabled_press: delivered ONLY when click landed on the drawn row's hit rect (else unavailable)
             m_dp = f"b1:disabled-press:{eid}"
-            p_dp = [p for p in presses_by_mark.get(m_dp, []) if p.get("id") == rail_id and p.get("found") and p.get("hit_rect")]
-            dp_res: bool | str = check_disabled_noop(m_dp, f"b1-disabled-press-{eid}", p_dp[0].get("seq") if p_dp else None) if p_dp else "unavailable"
+            p_dp = [p for p in presses_by_mark.get(m_dp, []) if p.get("id") == rail_id and p.get("pointer") and p.get("found") and p.get("hit_rect")]
+            dp_res: bool | str = (
+                check_disabled_noop(m_dp, f"b1-disabled-press-{eid}", p_dp[0].get("seq") if p_dp else None)
+                if (p_dp and pointer_calibrated) else "unavailable"
+            )
+            # The disabled reason comes from the hub's `why` and must be what the row draws as its tooltip (non-empty, equal)
+            why_hub = str((rail_map.get(eid) or {}).get("why") or "").strip()
+            inv_row = inv_by_id.get(eid)
+            if inv_row is None or not why_hub:
+                dr_res: bool | str = "unavailable"
+            else:
+                tip = str(inv_row.get("tooltip_label") or "").strip()
+                dr_res = bool(inv_row.get("state") == "disabled" and tip and tip == why_hub)
 
             # 2. disabled_key: bare key delivered + fresh read:rail no-op
             m_dk = f"b1:disabled-key:{eid}"
@@ -776,9 +799,10 @@ def evaluate_b1_kind(kind: str, parsed_kind: dict, rail_map: dict[str, dict], em
                 "disabled_press": dp_res,
                 "disabled_key": dk_res,
                 "disabled_palette": dpal_res,
+                "disabled_reason": dr_res,
                 "disabled_palette_status": pal_status,
             }
-            applicable_dis = (("disabled_press", dp_res), ("disabled_key", dk_res), ("disabled_palette", dpal_res))
+            applicable_dis = (("disabled_press", dp_res), ("disabled_key", dk_res), ("disabled_palette", dpal_res), ("disabled_reason", dr_res))
             failed_dis = [k for k, v in applicable_dis if v is False]
             all_dis_measured = all(isinstance(v, bool) for _, v in applicable_dis)
             if failed_dis:
@@ -1645,37 +1669,50 @@ def evaluate_extra_checks(
             hk_sc = c_sc.get("hub_kicad_sessions") or {}
             hub_complete = bool(hk_sc.get("ok") and hk_sc.get("inventory_complete"))
             shown_hub_frames: list[str] = []
-            live_holders: list[str] = []
+            holders: list[str] = []
             session_actives: dict[str, object] = {}
+            holder_unobserved: list[str] = []
             if hub_complete:
                 for sid, sinfo in (hk_sc.get("sessions") or {}).items():
                     session_actives[sid] = sinfo.get("active")
-                    rt = sinfo.get("runtime") if isinstance(sinfo.get("runtime"), dict) else {}
-                    holder = rt.get("holder")
-                    rt_sess = rt.get("session")
-                    if holder and rt_sess == "live":
-                        live_holders.append(f"{sid}:holder={holder}")
+                    rt = sinfo.get("runtime")
+                    # holder absence must be OBSERVED: a runtime block carrying the `holder` key (null = absent)
+                    if not (isinstance(rt, dict) and "holder" in rt):
+                        holder_unobserved.append(str(sid))
+                    elif rt.get("holder"):
+                        holders.append(f"{sid}:holder={rt.get('holder')}:session={rt.get('session')}")
                     for fr in (sinfo.get("frames") or []):
                         if isinstance(fr, dict) and fr.get("shown") is True:
                             shown_hub_frames.append(f"{sid}:{fr.get('kind', '?')}")
-            has_pane_report = isinstance(k_sc, dict)
+            # A detached-pane observation is the pane's own real report: `ok` true, `in_gpui_tree` a bool and `shown` present (`{}` is none)
+            has_pane_report = (
+                isinstance(k_sc, dict) and k_sc.get("ok") is True
+                and isinstance(k_sc.get("in_gpui_tree"), bool) and "shown" in k_sc
+            )
             obstructed_sc = bool(c_sc.get("obstructed"))
-            if not (has_pane_report or hub_complete):
+            sc_fails: list[str] = []
+            if has_pane_report and k_sc.get("in_gpui_tree") is True:
+                sc_fails.append("KicadPane still mounted in GPUI tree after Simulation cleanup")
+            if has_pane_report and k_sc.get("shown"):
+                sc_fails.append(f"pane kicad report still has shown={k_sc.get('shown')!r}")
+            if holders:
+                sc_fails.append(f"hub KiCad session still has a holder: {', '.join(holders)}")
+            if obstructed_sc:
+                sc_fails.append("native dialog/window obstructing pane after Simulation cleanup")
+            if sc_fails:
+                sc_outcome, sc_note = "failed", "; ".join(sc_fails)
+            elif not has_pane_report or not hub_complete or holder_unobserved:
                 sc_outcome = "unavailable"
-                sc_note = "no b1-sim-cleanup frame report or hub session inventory captured"
+                missing = []
+                if not has_pane_report:
+                    missing.append("no real detached-pane report (ok, in_gpui_tree, shown)")
+                if not hub_complete:
+                    missing.append("no complete hub session inventory")
+                if holder_unobserved:
+                    missing.append(f"holder not observed for {holder_unobserved}")
+                sc_note = "; ".join(missing)
             else:
-                sc_fails: list[str] = []
-                if obstructed_sc:
-                    sc_fails.append("native dialog/window obstructing pane after Simulation cleanup")
-                if has_pane_report:
-                    if k_sc.get("in_gpui_tree") is True:
-                        sc_fails.append("KicadPane still mounted in GPUI tree after Simulation cleanup")
-                    if k_sc.get("shown"):
-                        sc_fails.append(f"pane kicad report still has shown={k_sc.get('shown')!r}")
-                if live_holders:
-                    sc_fails.append(f"hub KiCad session still held live in pane: {', '.join(live_holders)}")
-                sc_outcome = "failed" if sc_fails else "passed"
-                sc_note = "; ".join(sc_fails)
+                sc_outcome, sc_note = "passed", ""
             checks.append({
                 "id": f"{kind}/sim-cleanup-no-frame",
                 "kind": kind,
@@ -1689,7 +1726,7 @@ def evaluate_extra_checks(
                     "viewer_open": (s_sc.get("viewer") or {}).get("open", ""),
                     "obstructed": obstructed_sc,
                     "hub_inventory_complete": hub_complete,
-                    "live_holders": live_holders,
+                    "holders": holders,
                     "hub_frame_shown": shown_hub_frames,
                     "hub_session_active": session_actives,
                     "hub_kicad_sessions": hk_sc if sc_outcome == "failed" else None,
