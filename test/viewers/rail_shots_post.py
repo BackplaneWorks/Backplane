@@ -1633,13 +1633,56 @@ def evaluate_extra_checks(
                 },
             })
 
+        # 0b. After B1 Simulation cleanup, verify no KiCad/Simulator native frame remains shown over the viewer
+        if embed and "schematic" in M.HAS_RESOURCE.get(kind, set()):
+            k_sc = kicad_tags.get("b1-sim-cleanup-report")
+            c_sc = caps.get("b1-sim-cleanup") or {}
+            hk_sc = c_sc.get("hub_kicad_sessions") or {}
+            hub_complete = bool(hk_sc.get("ok") and hk_sc.get("inventory_complete"))
+            shown_hub_frames: list[str] = []
+            if hub_complete:
+                for sid, sinfo in (hk_sc.get("sessions") or {}).items():
+                    for fr in (sinfo.get("frames") or []):
+                        if isinstance(fr, dict) and fr.get("shown") is True:
+                            shown_hub_frames.append(f"{sid}:{fr.get('kind', '?')}")
+            has_pane_report = isinstance(k_sc, dict)
+            if not (has_pane_report or hub_complete):
+                sc_outcome = "unavailable"
+                sc_note = "no b1-sim-cleanup frame report or hub session inventory captured"
+            else:
+                sc_fails: list[str] = []
+                if has_pane_report:
+                    if k_sc.get("in_gpui_tree") is True:
+                        sc_fails.append("KicadPane still mounted in GPUI tree after Simulation cleanup")
+                    if k_sc.get("shown"):
+                        sc_fails.append(f"pane kicad report still has shown={k_sc.get('shown')!r}")
+                if shown_hub_frames:
+                    sc_fails.append(f"hub KiCad session frame(s) still shown: {', '.join(shown_hub_frames)}")
+                sc_outcome = "failed" if sc_fails else "passed"
+                sc_note = "; ".join(sc_fails)
+            checks.append({
+                "id": f"{kind}/sim-cleanup-no-frame",
+                "kind": kind,
+                "name": f"After B1 Simulation cleanup on {kind}, no KiCad/Simulator frame remains shown over the viewer",
+                "outcome": sc_outcome,
+                "note": sc_note,
+                "evidence": {
+                    "has_pane_report": has_pane_report,
+                    "in_gpui_tree": (k_sc or {}).get("in_gpui_tree") if has_pane_report else None,
+                    "pane_shown": (k_sc or {}).get("shown") if has_pane_report else None,
+                    "hub_inventory_complete": hub_complete,
+                    "shown_hub_frames": shown_hub_frames,
+                },
+            })
+
         # A. Missing-document checks via viewshow (schematic-only: board, 3d; board-only: schematic)
+        # Compare the first missing-doc check against the session inventory captured AT the confirmed idle reset.
         if kind in M.EXTRA_MISSING_SHOTS:
             missing_specs = (
-                [("missing-board", "extra-missing-board", "board", "browser"),
+                [("missing-board", "extra-missing-board", "board", "extra-missing-start-idle"),
                  ("missing-3d", "extra-missing-3d", "3d", "extra-missing-board")]
                 if kind == "schematic-only"
-                else [("missing-schematic", "extra-missing-schematic", "schematic", "browser")]
+                else [("missing-schematic", "extra-missing-schematic", "schematic", "extra-missing-start-idle")]
             )
             for cid, sname, expected_open, prev_shot in missing_specs:
                 srec = shots.get(sname) or {}
@@ -1823,7 +1866,7 @@ def evaluate_extra_checks(
                     edit_seqs = [
                         ev.get("seq")
                         for ev in p_evs
-                        if ev.get("id") == "ui:Edit" and ev.get("found") and isinstance(ev.get("seq"), int)
+                        if ev.get("id") in ("script:kicad-edit", "ui:Edit") and ev.get("found") and isinstance(ev.get("seq"), int)
                     ]
                     press_delivered = bool(edit_seqs)
                     seq_order_ok = (
@@ -1891,6 +1934,80 @@ def evaluate_extra_checks(
                             "hub_kicad": hk,
                         },
                     })
+
+        # E. No-design / mech-only scripted Edit on Files: requires verified start tag + delivered script:kicad-edit + no session started
+        elif kind in M.NO_DESIGN_KINDS and embed:
+            sname = "extra-edit-files"
+            cap = caps.get(sname) or {}
+            prev_cap = caps.get("browser")
+            png = kdir / f"{sname}.png"
+            cap_ok = bool(cap.get("ok") and png.exists() and png.stat().st_size > 0)
+            inspect_ok = bool(cap.get("inspect_ok"))
+            obstructed = bool(cap.get("obstructed"))
+            start_tag = settled_tags.get(f"{sname}-start") or {}
+            start_ok = bool(start_tag.get("settled") and start_tag.get("kind") == "files")
+            start_seq = start_tag.get("seq")
+            shot_seq = (shots.get(sname) or {}).get("seq")
+            p_evs = presses.get(f"press:{sname}", [])
+            edit_seqs = [
+                ev.get("seq")
+                for ev in p_evs
+                if ev.get("id") in ("script:kicad-edit", "ui:Edit") and ev.get("found") and isinstance(ev.get("seq"), int)
+            ]
+            press_delivered = bool(edit_seqs)
+            seq_order_ok = (
+                isinstance(start_seq, int)
+                and isinstance(shot_seq, int)
+                and any(start_seq < es < shot_seq for es in edit_seqs)
+            )
+            v_shot = (shots.get(sname) or {}).get("viewer") or {}
+            files_status = str(v_shot.get("files_status") or v_shot.get("status") or "").strip()
+            hk = _compare_hub_kicad(prev_cap, cap)
+            sess_a = hk.get("sessions_after") or {}
+            k = kicad_tags.get(f"{sname}-report") or {}
+            unavail = []
+            fails = []
+            if not cap_ok:
+                outcome = "harness_failed"
+                fails.append("capture missing or failed")
+            else:
+                if not inspect_ok:
+                    unavail.append("obstruction inspection failed/missing")
+                elif obstructed:
+                    fails.append("obstructed by native dialog")
+                if not start_ok:
+                    unavail.append(f"starting page tag {sname}-start not verified")
+                if not press_delivered:
+                    unavail.append("script:kicad-edit press not delivered")
+                elif not seq_order_ok:
+                    unavail.append(f"script:kicad-edit press order not verified (start_seq={start_seq}, edit_seqs={edit_seqs}, shot_seq={shot_seq})")
+                if not files_status:
+                    unavail.append("Files status line not exposed in client state")
+                if hk["status"] == "unavailable":
+                    unavail.append(hk["reason"])
+                elif sess_a:
+                    fails.append(f"unexpected KiCad sessions: {list(sess_a.keys())}")
+                if k.get("in_gpui_tree") is True:
+                    fails.append("KicadPane unexpectedly mounted in GPUI tree")
+                outcome = "failed" if fails else ("unavailable" if unavail else "passed")
+            checks.append({
+                "id": f"{kind}/scripted-edit-files",
+                "kind": kind,
+                "name": f"Scripted Edit from files on {kind} starts no KiCad (no session change observed at the two endpoints)",
+                "outcome": outcome,
+                "note": "; ".join(fails + unavail),
+                "evidence": {
+                    "shot": str(png),
+                    "capture_ok": cap_ok,
+                    "inspect_ok": inspect_ok,
+                    "start_verified": start_ok,
+                    "press_delivered": press_delivered,
+                    "files_status": files_status,
+                    "obstructed": obstructed,
+                    "in_gpui_tree": k.get("in_gpui_tree"),
+                    "hub_kicad": hk,
+                },
+            })
 
     return checks
 

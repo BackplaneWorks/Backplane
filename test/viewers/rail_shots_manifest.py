@@ -87,8 +87,10 @@ EXTRA_MISSING_SHOTS = {
     "board-only": ["extra-missing-schematic"],
 }
 
-# Files and Review no longer register ui:Edit after PR #1412's unified pane header; keep Browser while unmigrated.
+# Scripted kicad_edit route (PR #1353) from Files, Review, Browser via test-mode `script:kicad-edit`.
 EXTRA_EDIT_PAGES = [
+    ("files", "rail:Files", "files"),
+    ("review", "rail:Review", "review"),
     ("browser", "rail:Browser", "browser"),
 ]
 
@@ -154,11 +156,17 @@ def expected_shots(kind: str, embed: bool = False, schema: int = 3) -> list[str]
         for src_slug, _, _ in TASK3_SOURCES:
             shots.append(f"task3-from-{src_slug}")
         if embed:
+            shots.append("b1-sim-cleanup")
             shots.extend(EMBED_SHOTS)
     elif kind in EXTRA_MISSING_SHOTS:
+        shots.append("extra-missing-start-idle")
         shots.extend(EXTRA_MISSING_SHOTS[kind])
         if embed:
+            if "schematic" in HAS_RESOURCE.get(kind, set()):
+                shots.append("b1-sim-cleanup")
             shots.extend(EXTRA_EDIT_SHOTS)
+    elif kind in NO_DESIGN_KINDS and embed:
+        shots.append("extra-edit-files")
     return shots
 
 

@@ -760,12 +760,13 @@ class RailShotsRegressionTests(unittest.TestCase):
                         "extra-edit-browser-start": {"kind": "browser", "settled": True, "seq": 70},
                     },
                     "presses": {
-                        "press:extra-edit-files": [{"id": "ui:Edit", "found": True, "seq": 20}],
-                        "press:extra-edit-review": [{"id": "ui:Edit", "found": True, "seq": 50}],
-                        # Cleanup ui:View delivered under mark does NOT satisfy ui:Edit delivery!
-                        "press:extra-edit-browser": [{"id": "ui:Edit", "found": False, "seq": 80}, {"id": "ui:View", "found": True, "seq": 85}],
+                        "press:extra-edit-files": [{"id": "script:kicad-edit", "found": True, "seq": 20}],
+                        "press:extra-edit-review": [{"id": "script:kicad-edit", "found": True, "seq": 50}],
+                        # Cleanup ui:View delivered under mark does NOT satisfy script:kicad-edit/ui:Edit delivery!
+                        "press:extra-edit-browser": [{"id": "script:kicad-edit", "found": False, "seq": 80}, {"id": "ui:View", "found": True, "seq": 85}],
                     },
                     "kicad_tags": {
+                        "b1-sim-cleanup-report": {"state": "idle", "in_gpui_tree": False, "shown": 0, "frames": []},
                         "extra-edit-files-report": {"state": "ready", "in_gpui_tree": True, "shown": 10, "frames": [{"xid": 10, "kind": "SCH", "painted": 20}]},
                         "extra-edit-review-report": {"state": "ready", "in_gpui_tree": True, "shown": 10, "frames": [{"xid": 10, "kind": "SCH", "painted": 0}]},
                         "extra-edit-browser-report": {"state": "ready", "in_gpui_tree": True, "shown": 10, "frames": [{"xid": 10, "kind": "SCH", "painted": 20}]},
@@ -780,15 +781,33 @@ class RailShotsRegressionTests(unittest.TestCase):
                     "idle": mk_cap(), "board": mk_cap(), "schematic": mk_cap(), "3d": mk_cap(), "gerbers": mk_cap(),
                     "split": mk_cap(), "mech": mk_cap(), "split-after-mech": mk_cap(), "files": mk_cap(), "diff": mk_cap(),
                     "review": mk_cap(), "browser": mk_cap(),
+                    "extra-missing-start-idle": mk_cap(),
                     "extra-missing-board": mk_cap(),
                     "extra-missing-3d": mk_cap(sess=frame_changed_sess),
+                    "b1-sim-cleanup": mk_cap(sess={"ok": True, "inventory_complete": True, "sessions": {"editor.kicad.abc": {"frames": [{"kind": "SIMULATOR", "shown": False}]}}}),
                     "extra-edit-files": mk_cap(),
                     "extra-edit-review": mk_cap(),
                     "extra-edit-browser": mk_cap(),
                 }
             }
             res = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["schematic-only"], parsed, caps, embed=True)}
-            # 1. Missing board passes with warm-up session recorded; missing 3d fails (ready, Edit drawn, frames changed)
+            # 0. B1 sim-cleanup-no-frame passes when no frame is shown, fails when a Simulator frame IS shown, unavailable without evidence
+            self.assertEqual(res["schematic-only/sim-cleanup-no-frame"]["outcome"], "passed")
+            caps_sim_shown = {
+                "schematic-only": {
+                    **caps["schematic-only"],
+                    "b1-sim-cleanup": mk_cap(sess={"ok": True, "inventory_complete": True, "sessions": {"editor.kicad.abc": {"frames": [{"kind": "SIMULATOR", "shown": True}]}}}),
+                }
+            }
+            res_sim_bad = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["schematic-only"], parsed, caps_sim_shown, embed=True)}
+            self.assertEqual(res_sim_bad["schematic-only/sim-cleanup-no-frame"]["outcome"], "failed")
+            self.assertIn("SIMULATOR", res_sim_bad["schematic-only/sim-cleanup-no-frame"]["note"])
+            parsed_no_sc = {"schematic-only": {**parsed["schematic-only"], "kicad_tags": {k: v for k, v in parsed["schematic-only"]["kicad_tags"].items() if k != "b1-sim-cleanup-report"}}}
+            caps_no_sc = {"schematic-only": {k: v for k, v in caps["schematic-only"].items() if k != "b1-sim-cleanup"}}
+            res_sim_unavail = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["schematic-only"], parsed_no_sc, caps_no_sc, embed=True)}
+            self.assertEqual(res_sim_unavail["schematic-only/sim-cleanup-no-frame"]["outcome"], "unavailable")
+
+            # 1. Missing board compares against extra-missing-start-idle (NOT browser) and passes; missing 3d fails
             self.assertEqual(res["schematic-only/missing-board"]["outcome"], "passed")
             self.assertEqual(len(res["schematic-only/missing-board"]["evidence"]["hub_kicad"]["warmup_sessions"]), 1)
             self.assertEqual(res["schematic-only/missing-3d"]["outcome"], "failed")
@@ -805,16 +824,19 @@ class RailShotsRegressionTests(unittest.TestCase):
             self.assertIn("enabled rail entry 'split' failed to open", res["schematic-only/no-edit-split"]["note"])
             self.assertEqual(res["schematic-only/has-edit-schematic"]["outcome"], "passed")
 
-            # 3. Scripted edit: Files/Review dropped after PR #1412 removed ui:Edit there; browser unavailable (only ui:View delivered, not ui:Edit)
-            self.assertNotIn("schematic-only/scripted-edit-files", res)
-            self.assertNotIn("schematic-only/scripted-edit-review", res)
+            # 3. Scripted edit via script:kicad-edit: files passes (SCH, painted=20), review fails (painted=0), browser unavailable
+            self.assertEqual(res["schematic-only/scripted-edit-files"]["outcome"], "passed")
+            self.assertEqual(res["schematic-only/scripted-edit-review"]["outcome"], "failed")
+            self.assertIn("shown_painted=0", res["schematic-only/scripted-edit-review"]["note"])
             self.assertEqual(res["schematic-only/scripted-edit-browser"]["outcome"], "unavailable")
 
-            # Verify extra-missing-board runs BEFORE b1:sim-press-open under --embed so Simulator never leaks into it
+            # Verify extra-missing-start-idle and extra-missing-board run BEFORE b1:sim-press-open under --embed
             steps_sch = D.build_script("schematic-only", 300, 15000, embed=True)
             marks = [s.get("mark") for s in steps_sch if isinstance(s, dict) and "mark" in s]
+            self.assertIn("extra:extra-missing-start-idle", marks)
             self.assertIn("extra:extra-missing-board", marks)
             self.assertIn("b1:sim-press-open", marks)
+            self.assertLess(marks.index("extra:extra-missing-start-idle"), marks.index("extra:extra-missing-board"))
             self.assertLess(marks.index("extra:extra-missing-board"), marks.index("b1:sim-press-open"))
 
             # 4. Incomplete session inventory or failed inspection -> unavailable (never passed)
@@ -826,10 +848,10 @@ class RailShotsRegressionTests(unittest.TestCase):
             self.assertEqual(res3["schematic-only/missing-board"]["outcome"], "unavailable")
 
             # 5. Out-of-order edit sequence (edit_seq not strictly between start_seq and shot_seq) -> unavailable
-            parsed["schematic-only"]["presses"]["press:extra-edit-browser"] = [{"id": "ui:Edit", "found": True, "seq": 5}]
+            parsed["schematic-only"]["presses"]["press:extra-edit-files"] = [{"id": "script:kicad-edit", "found": True, "seq": 5}]
             res4 = {c["id"]: c for c in P.evaluate_extra_checks(outdir, ["schematic-only"], parsed, caps, embed=True)}
-            self.assertEqual(res4["schematic-only/scripted-edit-browser"]["outcome"], "unavailable")
-            self.assertIn("order not verified", res4["schematic-only/scripted-edit-browser"]["note"])
+            self.assertEqual(res4["schematic-only/scripted-edit-files"]["outcome"], "unavailable")
+            self.assertIn("order not verified", res4["schematic-only/scripted-edit-files"]["note"])
 
             # 6. Missing rail evidence when page didn't open -> rail_state='unknown' and outcome='unavailable' (not 'failed')
             parsed["schematic-only"]["shots"]["idle"]["viewer"]["rail"] = []
