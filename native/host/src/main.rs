@@ -223,6 +223,8 @@ async fn run(a: Args) -> Result<()> {
     let (events, torn) = (hub.store.len(), hub.store.torn_bytes);
     eprintln!("presenter: {}; events: {}; torn tail bytes: {}", hub.presenter.name(), events, torn);
     let _ = serving.set(hub.clone());
+    #[cfg(all(test, unix))]
+    net::listener::webingress::start_fixture_proxy(&hub)?;
     guard::ready();
     startup::mark("serving");
     // a log that already had a life is a restart: the uberbot is told, once this start has held
