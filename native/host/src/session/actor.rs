@@ -388,6 +388,13 @@ pub fn shown_thread(client: u64, target: &Value) -> String {
         _ => String::new(),
     }
 }
+/// The thread the connection's view shows now (its target), if it shows one.
+pub fn target_thread(client: u64) -> Option<String> {
+    ACTORS.lock().unwrap().get(&client).and_then(|a| a.target.as_ref()).filter(|t| t["kind"] == "thread").and_then(|t| t["id"].as_str()).map(str::to_string)
+}
+/// (tests) the connection shows `thread`.
+#[cfg(test)]
+pub fn set_target_for_test(client: u64, thread: &str) { ACTORS.lock().unwrap().entry(client).or_default().target = Some(json!({"kind": "thread", "id": thread})); }
 /// Bind a watch to the requesting window before a peer can answer asynchronously.
 pub fn begin_watch(client: u64) -> Option<(u64, String, Value)> {
     let mut actors = ACTORS.lock().unwrap();
