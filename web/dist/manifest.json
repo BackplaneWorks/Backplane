@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 67603,
+  "totalAssetGzipBytes": 67617,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -77,7 +77,7 @@
     "web/src/qr.ts": "04b634557884b8f512a7b03ad9638c1c15a299ffaea0103d1bdeec6338d9b9d3",
     "web/src/rail.ts": "5fb391094992578cb6f54d35d53559951a584c43fcfc2ee6f4f2cc3897acfe46",
     "web/src/settings.ts": "3e56690eddd2fe03f661116121c873499308b3e2233a88177b04173312933a3f",
-    "web/src/shell.css": "eb35a4fe959947f40930a45c2cde2b0edce5a7027fc71a6a37ca44c4095d6dce",
+    "web/src/shell.css": "9df9b1d4509c9b90ff1e2c0c394b1ee5660571c69fbb6369865b0ffac117520a",
     "web/src/sidebar.ts": "289f0171dfd9d2b1fd7a5f651048d38d002090858e8ed50877d0573447b29351",
     "web/src/viewers/cbor.ts": "98a300dad42941cef83acf8748b9e8a14e376ae3fbbd4a18178fd56b3ec68af1",
     "web/src/viewers/mesh-worker.ts": "b7a5094d136cdcba42132ab54615a1518b7e6a13eb232e055065d9d00ba1f4ab",
@@ -119,9 +119,9 @@
       "sha256": "c3016c01af10511d1bce4a7cff3c500e8614bad821204543f039d774e28c0eee"
     },
     "assets/style.css": {
-      "bytes": 46647,
-      "gzipBytes": 8839,
-      "sha256": "af833ac762793410e550eecf8bd35173633bc507f88d1e66ec365920695e7a22"
+      "bytes": 46698,
+      "gzipBytes": 8853,
+      "sha256": "902366f048c365c5760d260453dbcbd9d06d07fb0dc667717dce1cf5d2a754a3"
     },
     "index.html": {
       "bytes": 454,
