@@ -98,7 +98,7 @@ async function main(binary, output) {
   const { spawn } = await import('node:child_process');
   const { once } = await import('node:events');
   const { createServer } = await import('node:net');
-  const { checkAccess } = await import('./security.mjs');
+  const { checkAccess, checkRequestBoundary } = await import('./security.mjs');
   const { browserTasks } = await import('./tasks.mjs');
   assert.ok(binary && output && process.env.BP_TMP && process.versions.bun);
   const temp = await fs.mkdtemp(path.join(process.env.BP_TMP, 'web-e2e-'));
@@ -164,6 +164,8 @@ async function main(binary, output) {
             await probe.close();
             await rpc('devices.page.act', { action: 'device-web-access', value: '1' });
             await browserTasks({ context, origin, rpc, thread: 't1',
+              registeredRoutes: JSON.parse(await fs.readFile(path.join(home, 'fixture-http-routes.json'), 'utf8')),
+              checkBoundary: token => checkRequestBoundary(path.join(home, 'browser.sock'), origin, token),
               checkLogs: value => assert.ok(!Buffer.concat(logs).includes(value), 'browser session in hub output'),
               readRegistry: () => fs.readFile(path.join(home, 'devices-v1.json'), 'utf8'),
               assets: [{path:'/files/get?thread=t1&path=sample.txt',body:Buffer.from('Backplane fixture')}],

@@ -1,7 +1,36 @@
 // Assertions shared by the headless web rig. Call with an isolated Playwright
 // browser context after pairing and with URLs for populated synthetic fixtures.
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { request } from 'node:http';
+
+// Exercise the same private backend stream used by the fixture TLS terminator.
+export async function checkRequestBoundary(socketPath, origin, session) {
+  const authority = new URL(origin).host;
+  async function status(method, path, headers) {
+    return new Promise((resolve, reject) => {
+      const req = request({socketPath, method, path, headers:{Host:authority,
+        'Tailscale-User-Login':'person@example.com', ...headers}}, response => {
+        response.resume();
+        resolve(response.statusCode);
+      });
+      req.on('upgrade', (_, socket) => { socket.destroy(); resolve(101); });
+      req.on('error', reject);
+      req.setTimeout(2500, () => req.destroy(Error('fixture request timed out')));
+      req.end();
+    });
+  }
+  const upgrade = {Upgrade:'websocket', Connection:'Upgrade', 'Sec-WebSocket-Version':'13',
+    'Sec-WebSocket-Key':randomBytes(16).toString('base64')};
+  const ws = '/ws?data=1&enc=json';
+  assert.equal(await status('GET', ws, {...upgrade, Origin:origin}), 401);
+  const Cookie = '__Host-bp_web=' + session;
+  for (const originHeaders of [{}, {Origin:'https://other.example.test'}]) {
+    assert.equal(await status('POST','/auth/web/logout',{Cookie,...originHeaders}), 401);
+    assert.equal(await status('GET',ws,{Cookie,...upgrade,...originHeaders}), 401);
+  }
+  assert.equal(await status('GET','/',{Cookie,Host:'other.example.test'}),401);
+}
 
 export async function checkAccess(page, enabled) {
   const statuses = await page.evaluate(async () => {
@@ -16,6 +45,38 @@ export async function checkAccess(page, enabled) {
     }));
   });
   assert.deepEqual(statuses, enabled ? [200,401,401,401,401,400,401,401] : Array(8).fill(404));
+}
+
+export async function checkRegisteredRoutes(page, routes) {
+  assert.ok(routes.length > 0 && routes.every(path => path.startsWith('/') && !path.startsWith('//')));
+  const refused = await page.evaluate(async paths => {
+    for (const path of paths) {
+      for (const method of ['GET', 'POST']) {
+        const response = await fetch(path, {method});
+        if (![401,404].includes(response.status)) return {path, method, status:response.status};
+      }
+    }
+    return null;
+  }, [...new Set([...routes, '/ws?data=1&enc=json', '/hello'])]);
+  assert.equal(refused, null, JSON.stringify(refused));
+}
+
+export async function checkApprovalRestricted(page) {
+  const result = await page.evaluate(() => new Promise((resolve, reject) => {
+    const socket = new WebSocket('/ws?data=1&enc=json');
+    const timer = setTimeout(() => { socket.close(); reject(Error('browser RPC timeout')); }, 4000);
+    socket.onmessage = event => {
+      const frame = JSON.parse(event.data);
+      if (frame.t === 'hello') socket.send(JSON.stringify({id:1,m:'devices.page.act',p:{action:'device-web-approve',value:'fixture'}}));
+      if (frame.t === 'reply' && frame.id === 1) {
+        clearTimeout(timer);
+        socket.close();
+        resolve({ok:frame.ok, error:frame.error});
+      }
+    };
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'not allowed for browser');
 }
 
 export async function checkPageHeaders(page) {

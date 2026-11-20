@@ -35,6 +35,33 @@ impl BrowserIngress<'_> {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn pairing_limits_and_deadline() {
+        use crate::net::pairing::{Registry, GUESS_ALL, GUESS_CLIENT, urandom};
+        use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
+        let home = crate::plat::tmp::dir("browser-limits");
+        let now = Arc::new(AtomicU64::new(1_000_000));
+        let clock = now.clone();
+        let reg = Registry::with(&home, "fixture", Box::new(move || clock.load(Ordering::SeqCst)), Box::new(urandom)).unwrap();
+        let make = |peer: &str| reg.browser_request(peer, "Browser");
+        let consume = |req: &serde_json::Value| reg.browser_decide(req["id"].as_str().unwrap(), false);
+        for i in 0..GUESS_ALL {
+            let peer = format!("fixture-{}@example.test", i / GUESS_CLIENT);
+            let (req, cookie) = make(&peer).unwrap();
+            assert!(consume(&req));
+            assert_eq!(reg.browser_wait(&peer, &cookie).await.unwrap_err(), "denied");
+            if i + 1 == GUESS_CLIENT { assert_eq!(make(&peer).unwrap_err(), "rate_limited"); }
+        }
+        assert_eq!(make("fresh@example.test").unwrap_err(), "rate_limited");
+        now.fetch_add(60_000, Ordering::SeqCst);
+        let (req, cookie) = make("fresh@example.test").unwrap();
+        let start = now.load(Ordering::SeqCst);
+        assert_eq!(req["expiresAt"].as_u64(), Some(start + 120_000));
+        now.store(start + 120_000, Ordering::SeqCst);
+        assert!(!reg.browser_decide(req["id"].as_str().unwrap(), true));
+        assert_eq!(reg.browser_wait("fresh@example.test", &cookie).await.unwrap_err(), "expired");
+    }
+
     #[test]
     fn dedicated_authority_and_requester_required() {
         let request = Req::new("GET", "/", vec![("Host".into(), "web.example.test".into())]);
@@ -276,6 +303,7 @@ static FIXTURE_AUTHORITY: std::sync::OnceLock<String> = std::sync::OnceLock::new
 #[cfg(all(test, unix))]
 pub(crate) fn start_fixture_proxy(hub: &std::sync::Arc<crate::hub::Hub>) -> anyhow::Result<()> {
     let Some(authority) = FIXTURE_AUTHORITY.get() else { return Ok(()) };
+    std::fs::write(hub.cfg.home.join("fixture-http-routes.json"), serde_json::to_vec(&hub.http_routes())?)?;
     let listener = tokio::net::UnixListener::bind(hub.cfg.home.join("browser.sock"))?;
     let hub = hub.clone();
     tokio::spawn(async move {

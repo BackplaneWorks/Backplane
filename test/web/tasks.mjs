@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { checkAccess, checkPageHeaders, checkProtectedAssets, checkSessionCookie } from './security.mjs';
+import { checkAccess, checkApprovalRestricted, checkRegisteredRoutes, checkPageHeaders, checkProtectedAssets, checkSessionCookie } from './security.mjs';
 
 // rpc is the synthetic native client's data/1 transport, connected to the
 // same temporary hub. Approval goes through the action shown in Devices.
@@ -10,7 +10,7 @@ async function deviceButton(rpc, name, action) {
   return { row, button: row.buttons.find(button => button.action === action) };
 }
 
-export async function browserTasks({ context, origin, rpc, thread, assets, replyText, screenshot, nativeShot, readRegistry, checkLogs }) {
+export async function browserTasks({ context, origin, rpc, thread, assets, replyText, screenshot, nativeShot, readRegistry, checkLogs, checkBoundary, registeredRoutes }) {
   const urls = new Set();
   context.on('request', req => urls.add(req.url()));
   const page = await context.newPage();
@@ -21,6 +21,7 @@ export async function browserTasks({ context, origin, rpc, thread, assets, reply
   await page.goto(origin);
   await testId('pair-card').waitFor();
   await checkAccess(page, true);
+  await checkRegisteredRoutes(page, registeredRoutes);
   await checkPageHeaders(page);
   await screenshot(page, 'before-pair');
   await testId('pair-name').fill(name);
@@ -42,6 +43,8 @@ export async function browserTasks({ context, origin, rpc, thread, assets, reply
   const interactiveMs = await page.evaluate(() => performance.now());
   await checkPageHeaders(page);
   const session = await checkSessionCookie(context, origin, 'https://other.example.test', readRegistry);
+  await checkBoundary(session);
+  await checkApprovalRestricted(page);
   const storage = await page.evaluate(() => JSON.stringify([document.cookie, {...localStorage}, {...sessionStorage}]));
   assert.ok(!storage.includes(session), 'session leaked into script-readable storage');
   await checkProtectedAssets(page, origin, assets, true);
