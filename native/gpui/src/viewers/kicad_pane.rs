@@ -876,6 +876,9 @@ pub fn person_closed_kicad(old: &Value, new: &Value) -> bool {
 /// as at its end (`closed_idle_away`), so coming back never shows a pane on a KiCad whose process is still ending (Linux under load, and
 /// Windows, have kept one for minutes)
 pub fn closing_away(info: &Value, in_page: bool) -> bool { !in_page && info["closing"] == true }
+/// Whether a pane whose attach was answered `closing` waits and attaches again once that KiCad has ended (a fresh start): the person's
+/// own Edit only. A pane Backplane opened by itself (`ShowBy::Automatic`) goes instead: nothing starts a KiCad on its own after a close.
+pub fn waits_on_close(why: ShowBy) -> bool { why == ShowBy::Deliberate }
 /// Whether the hub's picture `info` still has the closing KiCad `pid` live (the pane keeps waiting on it).
 pub fn still_closing(pid: u64, info: &Value) -> bool {
     info["pid"].as_u64() == Some(pid) && matches!(info["state"].as_str(), Some("ready" | "unresponsive" | "starting"))
@@ -2416,6 +2419,8 @@ mod tests {
         assert!(!still_closing(41, &json!({"state": "failed", "pid": null})));
         assert!(!still_closing(41, &json!({"state": "starting", "pid": 57})), "another KiCad started: attach to it");
         assert!(waiting_on(&json!({"state": "closing"}), false, false).is_some_and(|w| w.contains("KiCad")), "the pane says KiCad is closing");
+        assert!(super::waits_on_close(super::ShowBy::Deliberate), "the person's Edit waits and starts fresh");
+        assert!(!super::waits_on_close(super::ShowBy::Automatic), "an automatic pane goes: no KiCad started by itself after a close");
         assert!(super::closing_away(&json!({"state": "ready", "closing": true}), false), "off screen: the pane goes at the close");
         assert!(!super::closing_away(&json!({"state": "ready", "closing": true}), true), "on screen: the pane waits (wait_close)");
         assert!(!super::closing_away(&json!({"state": "ready", "closing": false}), false));
@@ -3169,7 +3174,9 @@ impl crate::Backplane {
             if let Some(p) = self.screens.kicad.clone() {
                 if let Some(pro) = reply["project"].as_str().filter(|s| !s.is_empty()) { let pro = pro.to_string(); p.update(cx, |p, _| p.bound = pro); }
                 let pid = reply["pid"].as_u64().unwrap_or(0);
-                p.update(cx, |p, cx| p.wait_close(pid, cx));
+                // only the person's own Edit waits and starts a fresh KiCad: an automatic pane goes, as for a stale attach
+                if waits_on_close(p.read(cx).why) { p.update(cx, |p, cx| p.wait_close(pid, cx)); }
+                else { eprintln!("GPUI_LOG {}", json!({"kicad_attach_closing": pid, "automatic": true, "project": reply["project"]})); self.kicad_view(cx); }
             }
             return;
         }
