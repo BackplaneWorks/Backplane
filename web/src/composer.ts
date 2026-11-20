@@ -18,20 +18,64 @@ export interface MentionItem {
   word: string;
 }
 
+export interface PendingAttachment {
+  name: string;
+  mime: string;
+  data: string; // raw base64
+  previewUrl: string;
+}
+
 export interface ComposerCallbacks {
-  onSend: (text: string) => void;
+  onSend: (text: string, attachments: Array<{ name: string; mime: string; data: string }>) => void;
   onRunCommand: (text: string) => void;
   onInterrupt: () => void;
   onQueryMentions: (q: string, kind?: string) => Promise<MentionItem[]>;
+  onToggleVoice?: () => void;
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const MAX_ATTACHMENTS = 4;
+const ALLOWED_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+
+function makeComposerIcon(paths: string[]): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "15");
+  svg.setAttribute("height", "15");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.8");
+  svg.setAttribute("aria-hidden", "true");
+  for (const d of paths) {
+    const p = document.createElementNS(SVG_NS, "path");
+    p.setAttribute("d", d);
+    svg.appendChild(p);
+  }
+  return svg;
+}
+
+function providerBadge(provider?: string): { glyph: string; color: string; title: string } {
+  const p = (provider || "").toLowerCase();
+  if (p.includes("claude") || p.includes("anthropic")) return { glyph: "A", color: "#d97706", title: "Claude" };
+  if (p.includes("codex") || p.includes("openai")) return { glyph: "O", color: "#10b981", title: "Codex" };
+  if (p.includes("gemini") || p.includes("antigravity")) return { glyph: "G", color: "#3b82f6", title: "Gemini" };
+  if (p.includes("grok")) return { glyph: "X", color: "#94a3b8", title: "Grok" };
+  return { glyph: "●", color: "var(--accent)", title: provider || "Model" };
 }
 
 export class ComposerView {
   private popupEl: HTMLElement;
+  private attachStripEl: HTMLElement;
+  private fileInput: HTMLInputElement;
   private textarea: HTMLTextAreaElement;
-  private modelChipEl: HTMLElement;
   private memoryEl: HTMLElement;
   private memoryFill: HTMLElement;
   private memoryText: HTMLElement;
+  private providerMarkEl: HTMLElement;
+  private modelTextEl: HTMLElement;
+  private ctxEl: HTMLElement;
+  private attachBtn: HTMLButtonElement;
+  private voiceBtn: HTMLButtonElement;
   private sendBtn: HTMLButtonElement;
   private stopBtn: HTMLButtonElement;
   private errorEl: HTMLElement;
@@ -43,6 +87,7 @@ export class ComposerView {
   private mentionItems: MentionItem[] = [];
   private popupIdx = 0;
   private enabled = false;
+  private attachments: PendingAttachment[] = [];
 
   constructor(container: HTMLElement, cb: ComposerCallbacks) {
     this.cb = cb;
@@ -61,6 +106,21 @@ export class ComposerView {
     this.errorEl = document.createElement("div");
     this.errorEl.className = "bp-composer-err bp-hidden";
 
+    this.attachStripEl = document.createElement("div");
+    this.attachStripEl.className = "bp-attach-strip bp-hidden";
+    this.attachStripEl.setAttribute("data-testid", "composer-attachments");
+
+    this.fileInput = document.createElement("input");
+    this.fileInput.type = "file";
+    this.fileInput.accept = "image/png,image/jpeg,image/webp,image/gif";
+    this.fileInput.multiple = true;
+    this.fileInput.className = "bp-hidden";
+    this.fileInput.setAttribute("data-testid", "composer-file-input");
+    this.fileInput.addEventListener("change", () => {
+      if (this.fileInput.files) void this.addFiles(Array.from(this.fileInput.files));
+      this.fileInput.value = "";
+    });
+
     this.textarea = document.createElement("textarea");
     this.textarea.className = "bp-composer-input";
     this.textarea.rows = 2;
@@ -71,9 +131,18 @@ export class ComposerView {
     const bar = document.createElement("div");
     bar.className = "bp-composer-bar";
 
-    this.modelChipEl = document.createElement("div");
-    this.modelChipEl.className = "bp-composer-model";
-    this.modelChipEl.textContent = "default";
+    const modelWrap = document.createElement("div");
+    modelWrap.className = "bp-composer-model";
+    this.providerMarkEl = document.createElement("span");
+    this.providerMarkEl.className = "bp-provider-mark";
+    this.providerMarkEl.textContent = "●";
+    this.modelTextEl = document.createElement("span");
+    this.modelTextEl.className = "bp-model-text";
+    this.modelTextEl.textContent = "default";
+    this.ctxEl = document.createElement("span");
+    this.ctxEl.className = "bp-ctx-pct bp-hidden";
+    this.ctxEl.setAttribute("data-testid", "composer-ctx");
+    modelWrap.append(this.providerMarkEl, this.modelTextEl, this.ctxEl);
 
     // infinite context: the memory's bar and the hub's words (bots/recall/progress.rs), shown only for a thread that has it
     this.memoryEl = document.createElement("div");
@@ -90,6 +159,31 @@ export class ComposerView {
     const btns = document.createElement("div");
     btns.className = "bp-composer-btns";
 
+    this.attachBtn = document.createElement("button");
+    this.attachBtn.type = "button";
+    this.attachBtn.className = "icon bp-composer-tool";
+    this.attachBtn.title = "Attach image";
+    this.attachBtn.setAttribute("aria-label", "Attach image");
+    this.attachBtn.setAttribute("data-testid", "composer-attach");
+    this.attachBtn.appendChild(makeComposerIcon([
+      "M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48",
+    ]));
+    this.attachBtn.addEventListener("click", () => this.fileInput.click());
+
+    this.voiceBtn = document.createElement("button");
+    this.voiceBtn.type = "button";
+    this.voiceBtn.className = "icon bp-composer-tool";
+    this.voiceBtn.title = "Voice dictation";
+    this.voiceBtn.setAttribute("aria-label", "Voice dictation");
+    this.voiceBtn.setAttribute("data-testid", "composer-voice");
+    this.voiceBtn.appendChild(makeComposerIcon([
+      "M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z",
+      "M19 10v2a7 7 0 0 1-14 0v-2",
+      "M12 19v4",
+      "M8 23h8",
+    ]));
+    this.voiceBtn.addEventListener("click", () => this.cb.onToggleVoice?.());
+
     this.stopBtn = document.createElement("button");
     this.stopBtn.type = "button";
     this.stopBtn.className = "primary stop bp-hidden";
@@ -104,11 +198,27 @@ export class ComposerView {
     this.sendBtn.setAttribute("data-testid", "composer-send");
     this.sendBtn.addEventListener("click", () => this.submit());
 
-    btns.append(this.stopBtn, this.sendBtn);
-    bar.append(this.modelChipEl, this.memoryEl, btns);
-    inner.append(this.popupEl, this.errorEl, this.textarea, bar);
+    btns.append(this.attachBtn, this.voiceBtn, this.stopBtn, this.sendBtn);
+    bar.append(modelWrap, this.memoryEl, btns);
+    inner.append(this.popupEl, this.errorEl, this.attachStripEl, this.fileInput, this.textarea, bar);
     wrap.appendChild(inner);
     container.appendChild(wrap);
+
+    this.textarea.addEventListener("paste", (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const files: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].kind === "file" && ALLOWED_MIMES.has(items[i].type)) {
+          const f = items[i].getAsFile();
+          if (f) files.push(f);
+        }
+      }
+      if (files.length > 0) {
+        e.preventDefault();
+        void this.addFiles(files);
+      }
+    });
 
     this.textarea.addEventListener("input", () => {
       this.autoGrow();
@@ -153,8 +263,41 @@ export class ComposerView {
     this.commands = cmds;
   }
 
-  public setModelChip(chip: string): void {
-    this.modelChipEl.textContent = chip || "default";
+  public setModelChip(chip: string, provider?: string, ctxPct?: number): void {
+    const badge = providerBadge(provider);
+    this.providerMarkEl.textContent = badge.glyph;
+    this.providerMarkEl.style.color = badge.color;
+    this.providerMarkEl.title = badge.title;
+    this.modelTextEl.textContent = chip || "default";
+    if (typeof ctxPct === "number" && Number.isFinite(ctxPct) && ctxPct >= 0) {
+      this.ctxEl.textContent = `ctx ${Math.round(ctxPct)}%`;
+      this.ctxEl.classList.remove("bp-hidden");
+    } else {
+      this.ctxEl.textContent = "";
+      this.ctxEl.classList.add("bp-hidden");
+    }
+  }
+
+  public setFeatures(imagesOn: boolean, voiceOn: boolean): void {
+    this.attachBtn.classList.toggle("bp-hidden", !imagesOn);
+    this.voiceBtn.classList.toggle("bp-hidden", !voiceOn);
+  }
+
+  public setVoiceRecording(active: boolean): void {
+    this.voiceBtn.classList.toggle("recording", active);
+    this.voiceBtn.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+
+  public setVoiceLevel(level: number): void {
+    this.voiceBtn.setAttribute("data-level", String(level));
+  }
+
+  public getDraft(): string {
+    return this.textarea.value;
+  }
+
+  public getCaret(): number {
+    return this.textarea.selectionStart ?? this.textarea.value.length;
   }
 
   /** The thread's memory progress as the hub words it (`thread.memory`), or null for a thread without infinite context. */
@@ -173,6 +316,8 @@ export class ComposerView {
     this.enabled = enabled;
     this.textarea.disabled = !enabled;
     this.sendBtn.disabled = !enabled;
+    this.attachBtn.disabled = !enabled;
+    this.voiceBtn.disabled = !enabled;
     this.stopBtn.classList.toggle("bp-hidden", !running);
   }
 
@@ -330,14 +475,73 @@ export class ComposerView {
     }
   }
 
+  private async addFiles(files: File[]): Promise<void> {
+    this.clearError();
+    for (const file of files) {
+      if (!ALLOWED_MIMES.has(file.type)) {
+        this.showError(`Unsupported image type: ${file.type || file.name}`);
+        continue;
+      }
+      if (this.attachments.length >= MAX_ATTACHMENTS) {
+        this.showError(`At most ${MAX_ATTACHMENTS} images per message.`);
+        break;
+      }
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("read failed"));
+        reader.readAsDataURL(file);
+      }).catch(() => "");
+      const comma = dataUrl.indexOf(",");
+      if (comma < 0) continue;
+      this.attachments.push({
+        name: file.name || `image-${this.attachments.length + 1}.png`,
+        mime: file.type,
+        data: dataUrl.slice(comma + 1),
+        previewUrl: dataUrl,
+      });
+    }
+    this.renderAttachments();
+  }
+
+  private renderAttachments(): void {
+    if (this.attachments.length === 0) {
+      this.attachStripEl.classList.add("bp-hidden");
+      this.attachStripEl.replaceChildren();
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    this.attachments.forEach((att, idx) => {
+      const chip = document.createElement("div");
+      chip.className = "bp-attach-chip";
+      const img = document.createElement("img");
+      img.src = att.previewUrl;
+      img.alt = att.name;
+      img.className = "bp-attach-thumb";
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "icon bp-attach-rm";
+      rm.textContent = "×";
+      rm.title = "Remove";
+      rm.addEventListener("click", () => {
+        this.attachments.splice(idx, 1);
+        this.renderAttachments();
+      });
+      chip.append(img, rm);
+      frag.appendChild(chip);
+    });
+    this.attachStripEl.replaceChildren(frag);
+    this.attachStripEl.classList.remove("bp-hidden");
+  }
+
   private submit(): void {
     if (!this.enabled) return;
     const text = this.textarea.value.trim();
-    if (!text) return;
+    if (!text && this.attachments.length === 0) return;
     this.closePopup();
     this.clearError();
 
-    if (text.startsWith("/")) {
+    if (text.startsWith("/") && this.attachments.length === 0) {
       const firstWord = text.slice(1).split(/\s+/)[0]?.toLowerCase() ?? "";
       if (this.commands.some((c) => c.word.toLowerCase() === firstWord)) {
         this.textarea.value = "";
@@ -347,9 +551,12 @@ export class ComposerView {
       }
     }
 
+    const outAtts = this.attachments.map(({ name, mime, data }) => ({ name, mime, data }));
+    this.attachments = [];
+    this.renderAttachments();
     this.textarea.value = "";
     this.autoGrow();
-    this.cb.onSend(text);
+    this.cb.onSend(text, outAtts);
   }
 }
 

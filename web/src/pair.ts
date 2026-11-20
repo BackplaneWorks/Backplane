@@ -1,6 +1,7 @@
 // Standalone browser pairing page (served at / when unpaired).
 // Strict CSP: zero inline scripts, zero credentials in URL or client storage.
 import { t } from "./i18n";
+import { renderQrSvg } from "./qr";
 
 interface PairRequestResponse {
   id?: string;
@@ -135,7 +136,61 @@ function mount(): void {
   statusEl.setAttribute("role", "status");
   statusEl.setAttribute("data-testid", "pair-status");
 
-  card.append(brand, subtitle, form, pendingBox, statusEl);
+  // Full HTTPS address + scannable QR code sourced from hub GET /auth/web/info ({ address }),
+  // never guessed from window.location.origin and never carrying credentials.
+  const addrBox = document.createElement("div");
+  addrBox.className = "bp-pair-addr bp-hidden";
+
+  const renderHubAddress = (rawAddress: string) => {
+    const trimmed = rawAddress.trim();
+    if (!trimmed) return;
+    const fullUrl = trimmed.startsWith("https://") ? trimmed : `https://${trimmed}`;
+    if (!fullUrl.startsWith("https://") || fullUrl.length <= "https://".length) return;
+    const addrMeta = document.createElement("div");
+    addrMeta.className = "bp-pair-addr-meta";
+    const addrLbl = document.createElement("div");
+    addrLbl.className = "bp-pair-code-label";
+    addrLbl.textContent = "Hub address";
+    const addrUrl = document.createElement("code");
+    addrUrl.className = "bp-pair-addr-url";
+    addrUrl.textContent = fullUrl;
+    addrUrl.setAttribute("data-testid", "pair-address");
+    const copyAddr = document.createElement("button");
+    copyAddr.type = "button";
+    copyAddr.className = "bp-pair-copy";
+    const copyLbl = t("common.copy", "Copy");
+    copyAddr.textContent = copyLbl;
+    copyAddr.addEventListener("click", () => {
+      navigator.clipboard?.writeText(fullUrl).then(() => {
+        copyAddr.textContent = "Copied";
+        window.setTimeout(() => { copyAddr.textContent = copyLbl; }, 1200);
+      }).catch(() => {});
+    });
+    addrMeta.append(addrLbl, addrUrl, copyAddr);
+
+    const frag = document.createDocumentFragment();
+    frag.appendChild(addrMeta);
+    const qrSvg = renderQrSvg(fullUrl);
+    if (qrSvg) {
+      const qrWrap = document.createElement("div");
+      qrWrap.className = "bp-pair-qr";
+      qrWrap.setAttribute("data-testid", "pair-qr");
+      qrWrap.appendChild(qrSvg);
+      frag.appendChild(qrWrap);
+    }
+    addrBox.replaceChildren(frag);
+    addrBox.classList.remove("bp-hidden");
+  };
+
+  void fetch("/auth/web/info", { credentials: "same-origin" })
+    .then(async (res) => {
+      if (!res.ok) return;
+      const data = (await res.json()) as { address?: string };
+      if (typeof data.address === "string") renderHubAddress(data.address);
+    })
+    .catch(() => {});
+
+  card.append(brand, subtitle, form, pendingBox, statusEl, addrBox);
   root.appendChild(card);
 
   let pollTimer: number | null = null;

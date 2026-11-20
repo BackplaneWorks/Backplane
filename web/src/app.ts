@@ -18,6 +18,7 @@ import {
   type SidebarSection,
   type ThreadItem,
 } from "./sidebar";
+import { VoiceController } from "./voice";
 import { HubClient, type DataPush, type HelloFrame } from "./ws";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore resolved by web/build.ts to ./viewers/viewer-pane.ts when present
@@ -146,9 +147,17 @@ function mountApp(): void {
   stateWord.className = "bp-top-state-word";
   stateBox.append(stateLbl, stateDot, stateWord);
 
-  // Thread action buttons in top bar (Pin, Settle with crisp icons)
+  // Thread action buttons in top bar (Fork thread, Pin, Settle, ▾ menu)
   const topActs = document.createElement("div");
   topActs.className = "bp-top-acts bp-hide-phone bp-hidden";
+
+  const forkBtn = document.createElement("button");
+  forkBtn.type = "button";
+  forkBtn.className = "bp-btn-ghost bp-top-act";
+  forkBtn.setAttribute("data-testid", "fork-thread-btn");
+  const forkLbl = document.createElement("span");
+  forkLbl.textContent = t("tools.forkthread", "Fork thread");
+  forkBtn.append(makeMiniIcon(["M6 3v12", "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M18 9a9 9 0 0 1-9 9"]), forkLbl);
 
   const pinBtn = document.createElement("button");
   pinBtn.type = "button";
@@ -164,11 +173,33 @@ function mountApp(): void {
   settleLbl.textContent = t("menu.settle", "Settle");
   settleBtn.append(makeMiniIcon(["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z", "M9 12l2 2 4-4"]), settleLbl);
 
-  topActs.append(pinBtn, settleBtn);
+  const menuWrap = document.createElement("div");
+  menuWrap.className = "bp-menu-wrap";
+  const threadMenuBtn = document.createElement("button");
+  threadMenuBtn.type = "button";
+  threadMenuBtn.className = "bp-btn-ghost bp-top-act";
+  threadMenuBtn.textContent = "▾";
+  threadMenuBtn.title = "Thread menu";
+  threadMenuBtn.setAttribute("aria-label", "Thread menu");
+  threadMenuBtn.setAttribute("data-testid", "thread-menu-btn");
+  const threadMenuPop = document.createElement("div");
+  threadMenuPop.className = "bp-popover bp-hidden";
+  threadMenuPop.setAttribute("data-testid", "thread-menu");
+  menuWrap.append(threadMenuBtn, threadMenuPop);
 
-  // Right controls: command box, search icon, settings gear
+  topActs.append(forkBtn, pinBtn, settleBtn, menuWrap);
+
+  // Right controls: Improvements, command box, search icon, settings gear
   const topRight = document.createElement("div");
   topRight.className = "bp-top-right";
+
+  const impBtn = document.createElement("button");
+  impBtn.type = "button";
+  impBtn.className = "bp-btn-ghost bp-top-act bp-hide-tablet";
+  impBtn.setAttribute("data-testid", "improvements-btn");
+  const impLbl = document.createElement("span");
+  impLbl.textContent = t("gpui.improvements", "Improvements");
+  impBtn.append(makeMiniIcon(["M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"]), impLbl);
 
   const cmdBox = document.createElement("button");
   cmdBox.type = "button";
@@ -193,7 +224,7 @@ function mountApp(): void {
     "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z",
   ]));
 
-  topRight.append(cmdBox, searchBtn, settingsBtn);
+  topRight.append(impBtn, cmdBox, searchBtn, settingsBtn);
   topbar.append(sideToggle, brand, stateBox, topActs, topRight);
 
   const body = document.createElement("div");
@@ -256,6 +287,10 @@ function mountApp(): void {
         .then(() => refreshSections())
         .catch(() => {});
     },
+    onCollapseSidebar: () => {
+      sidebarEl.classList.remove("bp-sidebar-open");
+      sidebarEl.classList.add("bp-sidebar-collapsed");
+    },
   });
 
   const chat = new ChatView(centerEl, {
@@ -291,8 +326,9 @@ function mountApp(): void {
     },
   });
 
+  let voice: VoiceController;
   const composer = new ComposerView(centerEl, {
-    onSend: (text) => { void sendMessage(text); },
+    onSend: (text, attachments) => { void sendMessage(text, attachments); },
     onRunCommand: (text) => { void runSlashCommand(text); },
     onInterrupt: () => {
       if (selectedThreadId) void hub.rpc("turn.interrupt", { thread: selectedThreadId }).catch(() => {});
@@ -305,10 +341,20 @@ function mountApp(): void {
         return [];
       }
     },
+    onToggleVoice: () => { void voice.toggle(); },
+  });
+
+  voice = new VoiceController(hub, {
+    getThreadId: () => selectedThreadId,
+    getDraft: () => composer.getDraft(),
+    getCaret: () => composer.getCaret(),
+    setDraft: (text) => composer.setDraft(text),
+    setRecording: (active) => composer.setVoiceRecording(active),
+    setLevel: (level) => composer.setVoiceLevel(level),
+    showError: (msg) => composer.showError(msg),
   });
 
   const rail = new RailView(railEl, (id) => {
-    if (id === "split") return;
     if (id === "commands") {
       sidebar.focusFilter();
       return;
@@ -341,6 +387,10 @@ function mountApp(): void {
     },
   });
 
+  forkBtn.addEventListener("click", () => {
+    const th = threads.find((x) => x.id === selectedThreadId);
+    if (th?.project) void createThread(th.project);
+  });
   pinBtn.addEventListener("click", () => {
     const th = threads.find((x) => x.id === selectedThreadId);
     if (th) void runThreadAct(th.id, th.pinned ? "unpin" : "pin");
@@ -349,6 +399,117 @@ function mountApp(): void {
     const th = threads.find((x) => x.id === selectedThreadId);
     if (th) void runThreadAct(th.id, th.settled ? "unsettle" : "settle");
   });
+  threadMenuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const th = threads.find((x) => x.id === selectedThreadId);
+    if (!th) return;
+    if (!threadMenuPop.classList.contains("bp-hidden")) {
+      threadMenuPop.classList.add("bp-hidden");
+      return;
+    }
+    const items: Array<{ label: string; danger?: boolean; run: () => void }> = [
+      {
+        label: "Rename…",
+        run: () => {
+          const next = window.prompt("Rename thread", th.title || "");
+          if (next && next.trim()) {
+            void hub.rpc<{ thread?: ThreadItem }>("thread.act", { thread: th.id, action: "rename", title: next.trim() })
+              .then((res) => {
+                if (res.thread) {
+                  threads = threads.map((x) => (x.id === res.thread!.id ? res.thread! : x));
+                  updateHeader();
+                  void refreshSections();
+                }
+              })
+              .catch(() => {});
+          }
+        },
+      },
+      { label: th.pinned ? t("menu.unpin", "Unpin") : t("menu.pin", "Pin"), run: () => { void runThreadAct(th.id, th.pinned ? "unpin" : "pin"); } },
+      { label: th.settled ? t("phone.unsettle", "Unsettle") : t("menu.settle", "Settle"), run: () => { void runThreadAct(th.id, th.settled ? "unsettle" : "settle"); } },
+      { label: th.archived ? "Unarchive" : "Archive", run: () => { void runThreadAct(th.id, th.archived ? "unarchive" : "archive"); } },
+      {
+        label: "Delete",
+        danger: true,
+        run: () => {
+          if (window.confirm("Delete this thread?")) void runThreadAct(th.id, "delete");
+        },
+      },
+    ];
+    const frag = document.createDocumentFragment();
+    for (const it of items) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "bp-popover-item" + (it.danger ? " danger" : "");
+      btn.textContent = it.label;
+      btn.addEventListener("click", () => {
+        threadMenuPop.classList.add("bp-hidden");
+        it.run();
+      });
+      frag.appendChild(btn);
+    }
+    threadMenuPop.replaceChildren(frag);
+    threadMenuPop.classList.remove("bp-hidden");
+  });
+  document.addEventListener("click", () => threadMenuPop.classList.add("bp-hidden"));
+
+  async function openImprovementsModal(): Promise<void> {
+    const backdrop = document.createElement("div");
+    backdrop.className = "bp-modal-backdrop";
+    backdrop.setAttribute("data-testid", "improvements-modal");
+    const modal = document.createElement("div");
+    modal.className = "bp-modal";
+    const head = document.createElement("div");
+    head.className = "bp-modal-head";
+    const h2 = document.createElement("h2");
+    h2.textContent = t("gpui.improvements", "Improvements");
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "icon";
+    closeBtn.textContent = "×";
+    closeBtn.addEventListener("click", () => backdrop.remove());
+    head.append(h2, closeBtn);
+    const bodyEl = document.createElement("div");
+    bodyEl.className = "bp-modal-body";
+    bodyEl.textContent = "Loading…";
+    modal.append(head, bodyEl);
+    backdrop.appendChild(modal);
+    backdrop.addEventListener("click", (e) => { if (e.target === backdrop) backdrop.remove(); });
+    root.appendChild(backdrop);
+
+    try {
+      const res = await hub.rpc<{ project?: string; projects?: Array<{ id: string; title?: string; name?: string }> }>("improvements.projects", {});
+      const list = res.projects ?? [];
+      if (list.length === 0) {
+        bodyEl.textContent = "No projects available for Improvements.";
+        return;
+      }
+      const frag = document.createDocumentFragment();
+      for (const p of list) {
+        const row = document.createElement("div");
+        row.className = "bp-set-row";
+        const info = document.createElement("div");
+        info.className = "bp-set-info";
+        info.textContent = p.title || p.name || p.id;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = p.id === res.project ? "primary" : "";
+        btn.textContent = p.id === res.project ? "Active" : "Select";
+        btn.addEventListener("click", () => {
+          void hub.rpc("improvements.project", { project: p.id })
+            .then(() => backdrop.remove())
+            .catch(() => {});
+        });
+        row.append(info, btn);
+        frag.appendChild(row);
+      }
+      bodyEl.replaceChildren(frag);
+    } catch (e) {
+      bodyEl.textContent = e instanceof Error ? e.message : "Could not load Improvements.";
+    }
+  }
+
+  impBtn.addEventListener("click", () => { void openImprovementsModal(); });
   cmdBox.addEventListener("click", () => sidebar.focusFilter());
   searchBtn.addEventListener("click", () => sidebar.focusFilter());
   settingsBtn.addEventListener("click", () => { void settings.open(); });
@@ -372,7 +533,8 @@ function mountApp(): void {
       stateWord.textContent = th.status || th.state || "idle";
       pinLbl.textContent = th.pinned ? t("menu.unpin", "Unpin") : t("menu.pin", "Pin");
       settleLbl.textContent = th.settled ? t("phone.unsettle", "Unsettle") : t("menu.settle", "Settle");
-      composer.setModelChip(th.chip || th.model || "default");
+      const extra = th as ThreadItem & { ctxPct?: number; contextPct?: number };
+      composer.setModelChip(th.chip || th.model || "default", th.provider, extra.ctxPct ?? extra.contextPct);
       composer.setMemory(th.memory);
     } else {
       composer.setModelChip("default");
@@ -392,7 +554,6 @@ function mountApp(): void {
   }
 
   function openViewer(kind: string): void {
-    if (kind === "split") return;
     railGen++;
     activeRailKind = kind;
     rail.setActive(kind);
@@ -613,6 +774,7 @@ function mountApp(): void {
 
   async function openThread(threadId: string): Promise<void> {
     if (selectedThreadId && selectedThreadId !== threadId) {
+      voice.cancel();
       const held = chat.getEntries();
       if (held.length > 0) {
         const prev = threadCache.get(selectedThreadId);
@@ -743,7 +905,10 @@ function mountApp(): void {
     }
   }
 
-  async function sendMessage(text: string): Promise<void> {
+  async function sendMessage(
+    text: string,
+    attachments: Array<{ name: string; mime: string; data: string }> = [],
+  ): Promise<void> {
     if (!selectedThreadId) return;
     const gen = threadGen;
     const threadId = selectedThreadId;
@@ -755,13 +920,20 @@ function mountApp(): void {
       text,
       at: Date.now(),
       clientId,
+      attachments: attachments.map((a) => ({
+        name: a.name,
+        mime: a.mime,
+        previewUrl: `data:${a.mime};base64,${a.data}`,
+      })),
     });
     try {
-      const res = await hub.rpc<{ entry?: EntryItem }>("message.send", {
+      const params: Record<string, unknown> = {
         thread: threadId,
         text,
         clientId,
-      });
+      };
+      if (attachments.length > 0) params.attachments = attachments;
+      const res = await hub.rpc<{ entry?: EntryItem }>("message.send", params);
       if (gen !== threadGen || selectedThreadId !== threadId) return;
       if (res.entry) chat.upsertEntry(res.entry);
     } catch (e) {
@@ -828,6 +1000,8 @@ function mountApp(): void {
 
   onLocaleChange(() => {
     renderConnStatus(hub.getState());
+    forkLbl.textContent = t("tools.forkthread", "Fork thread");
+    impLbl.textContent = t("gpui.improvements", "Improvements");
     settingsBtn.title = t("palette.settings", "Settings");
     settingsBtn.setAttribute("aria-label", t("palette.settings", "Settings"));
     updateHeader();
@@ -844,14 +1018,20 @@ function mountApp(): void {
       if (hello.theme) applyHubTheme(hello.theme);
       if (hello.name) sidebar.setHostName(hello.name);
       renderConnStatus(state);
+      composer.setFeatures(hub.hasFeature("images"), hub.hasFeature("voice"));
       if (Array.isArray(hello.commands)) composer.setCommands(hello.commands as SlashCommand[]);
       void loadLists();
     } else {
+      voice.cancel();
       renderConnStatus(state);
     }
   });
 
   hub.onFrame((frame) => {
+    if (frame.t === "voice") {
+      voice.handleFrame(frame as Record<string, unknown>);
+      return;
+    }
     if (frame.t !== "d") return;
     const p = frame as DataPush;
     switch (p.k) {

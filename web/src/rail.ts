@@ -67,13 +67,13 @@ export class RailView {
   }
 
   public setItems(items: RailEntry[]): void {
-    // Omit Split pane (rejected for docking tiles, not approved yet).
-    this.items = items.filter((item) => item.id !== "split");
+    // Draw the hub's `viewer.rail` list verbatim without client-side hiding.
+    this.items = items.slice();
     this.render();
   }
 
   public setActive(id: string): void {
-    this.activeId = id === "split" ? "" : id;
+    this.activeId = id;
     this.render();
   }
 
