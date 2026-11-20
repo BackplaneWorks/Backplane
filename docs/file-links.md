@@ -18,7 +18,11 @@ outside it, so it is refused. Refusals: 404 `no such file` or `not a file`, 403 
 not shared`).
 
 Who may ask: the hub token or a live paired device's token (Bearer, cookie or `?token=`, as for every route), and on the web ingress a paired
-browser's cookie. A device that has been revoked is refused on its next request.
+browser's cookie. A device that has been revoked is refused on its next request. The hub never answers 304: a conditional or ranged
+request is checked again like any other, so a revoked device or browser gets 401 even with a valid ETag.
+
+A paired browser (`Who::Browser`) gets less: only files under projects, worktrees and `<home>/attachments` (not `far-files` and not
+`files.share.roots`). With `thread=<id>` the file must also be inside that thread's folder.
 
 ## Routes (streamed, never held whole in memory)
 - `GET|HEAD /file?path=<abs path>` returns the file.
@@ -27,10 +31,16 @@ browser's cookie. A device that has been revoked is refused on its next request.
   streamed on.
 - `GET|HEAD /files/get?thread=<id>&path=<rel>` is the Files tab's Download (and Mech's). It applies the Files tab's containment, and a `<link>~<id>`
   thread works as above.
-- `GET|HEAD /s/<token>/<name>` is a share. The token is the only credential needed. It answers 404 once the share expires or is revoked.
+- `GET|HEAD /s/<token>/<name>` is a share. On the hub's main listener (native clients, and other apps on the tailnet), the token is the only
+  credential needed. On the web ingress a share answers only to a paired browser: an unpaired browser reaches nothing but pairing there.
+  The token is 192 random bits, compared in constant time. It answers 404 once the share is unknown, expired or revoked. An address with 30
+  unknown tokens in a minute gets 429 until the minute ends. A share names one file and can never list or reach another.
 
-Every answer has `Accept-Ranges: bytes`, a strong `ETag` (size and mtime), `Content-Length` and `Content-Disposition: attachment` (`inline=1`
-for images, PDFs and text). It also has `X-Content-Type-Options: nosniff` and a sandboxing CSP. A request may carry one `Range: bytes=a-b`
+Every answer has `Accept-Ranges: bytes`, a strong `ETag` (size and mtime), `Content-Length` and `Content-Disposition: attachment`.
+`inline=1` makes only PNG, JPEG, GIF, WebP, BMP, PDF and plain text inline. HTML and SVG are never served as such: they go out as
+`application/octet-stream` attachments. Every answer also carries `X-Content-Type-Options: nosniff`,
+`Content-Security-Policy: default-src 'none'; …; sandbox`, `Cross-Origin-Resource-Policy: same-origin` and `Referrer-Policy: no-referrer`.
+`Cache-Control` is `private, no-cache` for native clients and `private, no-store` for browsers and shares. A request may carry one `Range: bytes=a-b`
 and `If-Range: <etag>`. When the tag still matches, the answer is a 206 of that range. When the file has changed since, the answer is a 200
 with the whole file.
 
@@ -52,9 +62,10 @@ For a thread of another machine (`<link>~<id>`), the request adds `thread=<that 
 ## Shares (MCP tool `file_share {path, expires?, tailnet?}`)
 A share is for opening a file outside Backplane's clients (another app, a browser on any device of the tailnet). It returns `{id, link, name,
 size, expires}`. `link` is `/s/<token>/<name>`: an agent writes it in a message and every client opens it against its hub. With
-`tailnet: true` the answer also has `url`, an https address on the person's tailnet. It uses the hub's own `tailscale serve` address when
-there is one. Otherwise the hub serves an https port in 8443–8499 for shares. That port is taken down by the minute sweep once no live share
-uses it. `expires` is seconds or `30m`/`12h`/`7d`, default 1 day, at most 30 days. Shares are kept in `<home>/shares-v1.json` (0600). The file
+`tailnet: true` the answer also has `url`, the same path on the hub's own tailnet address: its existing `tailscale serve` https address when
+the person set one up, otherwise `http://<MagicDNS name>:<port>` when the hub listens on the tailnet. When it has neither, the answer gets
+`tailnetError` instead. The hub makes no `tailscale serve` mapping for a share. A share is not a second ingress, only a path on the main
+listener. `expires` is seconds or `30m`/`12h`/`7d`, default 1 day, at most 30 days. Shares are kept in `<home>/shares-v1.json` (0600). The file
 is checked again on every request, so a share of a file that has since become a secret or left its project stops working.
 
 **Settings.** Settings → Devices lists each live share (`Shared file · <name>`, its path and expiry, and its tailnet address) with **Revoke**

@@ -144,6 +144,57 @@ mod tests {
         }
     }
 
+    // the file routes on the browser ingress (files/share.rs): a paired browser only, a share's token alone is not enough, nothing stored,
+    // a revoked browser refused on its next request (a conditional or ranged one too), and only project files, never the far copies or extra roots
+    #[tokio::test]
+    async fn file_routes_answer_a_paired_browser_only() {
+        use crate::{hub::{Cfg, Hub}, presenter};
+        let top = crate::plat::tmp::canonical("ingress-files"); let (home, proj) = (top.join("home"), top.join("proj"));
+        std::fs::create_dir_all(proj.join("mfg")).unwrap(); std::fs::create_dir_all(home.join("far-files/L")).unwrap();
+        std::fs::write(home.join("token"), "roottoken").unwrap();
+        std::fs::write(home.join("events.jsonl"), format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"p\",\"root\":{:?},\"at\":1}}\n{{\"$\":\"SettingSet\",\"key\":\"web.enabled\",\"value\":\"1\",\"at\":1}}\n", proj.to_string_lossy())).unwrap();
+        std::fs::write(proj.join("mfg/bom.csv"), b"a,b\n").unwrap(); std::fs::write(proj.join("page.html"), b"<script>x</script>").unwrap();
+        std::fs::write(home.join("far-files/L/x.zip"), b"far").unwrap();
+        let cfg = Cfg { home: home.clone(), version: "0".into(), commit: "c".into(), listen: "127.0.0.1:1".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, std::sync::Arc::new(presenter::Canned { reply: serde_json::json!({"remoteReady":false,"cmds":[],"session":{}}) })).await.unwrap();
+        let (reg, _routes) = crate::net::start::open(&home, "127.0.0.1", 1).unwrap();
+        let login = "person@example.com";
+        let (req, pair) = reg.browser_request(login, "Browser").unwrap();
+        assert!(reg.browser_decide(req["id"].as_str().unwrap(), true));
+        let cookie = reg.browser_wait(login, &pair).await.unwrap().unwrap();
+        let authority = "web.example.ts.net:8443";
+        let ask = |target: String, extra: String| { let hub = hub.clone(); async move {
+            let (mut a, b) = tokio::io::duplex(1 << 20);
+            let t = tokio::spawn(async move { serve(hub, b, authority).await });
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            a.write_all(format!("GET {target} HTTP/1.1\r\nHost: {authority}\r\nTailscale-User-Login: {login}\r\n{extra}\r\n").as_bytes()).await.unwrap();
+            let mut out = vec![]; a.read_to_end(&mut out).await.unwrap(); let _ = t.await;
+            let i = out.windows(4).position(|w| w == b"\r\n\r\n").unwrap_or(out.len());
+            (String::from_utf8_lossy(&out[..i]).into_owned(), out[(i + 4).min(out.len())..].to_vec()) } };
+        let c = format!("Cookie: __Host-bp_web={cookie}\r\n");
+        let enc = |p: &std::path::Path| p.to_string_lossy().replace('/', "%2F");
+        let bom = format!("/file?path={}", enc(&proj.join("mfg/bom.csv")));
+        assert!(ask(bom.clone(), String::new()).await.0.starts_with("HTTP/1.1 401"), "unpaired");
+        let (h, b) = ask(bom.clone(), c.clone()).await;
+        assert!(h.starts_with("HTTP/1.1 200") && b == b"a,b\n", "{h}");
+        for need in ["Cache-Control: private, no-store", "sandbox", "Cross-Origin-Resource-Policy: same-origin", "Referrer-Policy: no-referrer", "nosniff"] { assert!(h.contains(need), "{need}: {h}") }
+        let (h, _) = ask(format!("/file?path={}&inline=1", enc(&proj.join("page.html"))), c.clone()).await;
+        assert!(h.contains("Content-Disposition: attachment") && h.contains("application/octet-stream"), "html is never inline at our origin: {h}");
+        assert!(ask(format!("/file?path={}", enc(&home.join("far-files/L/x.zip"))), c.clone()).await.0.starts_with("HTTP/1.1 403"), "not the far copies for a browser");
+        assert!(ask(format!("/files/get?thread=project-home-p1&path=mfg%2Fbom.csv"), c.clone()).await.0.starts_with("HTTP/1.1 200"));
+        let made = crate::files::share::create(&hub, "t1", &serde_json::json!({"path": proj.join("mfg/bom.csv").to_string_lossy()})).await.unwrap();
+        let link = made["link"].as_str().unwrap().to_string();
+        assert!(ask(link.clone(), String::new()).await.0.starts_with("HTTP/1.1 401"), "a share's token is no credential on the browser ingress");
+        let (h, _) = ask(link.clone(), c.clone()).await; assert!(h.starts_with("HTTP/1.1 200") && h.contains("no-store"), "{h}");
+        let tag = ask(bom.clone(), c.clone()).await.0.lines().find_map(|l| l.strip_prefix("ETag: ").map(str::to_string)).unwrap();
+        let device = reg.list()["devices"].as_array().unwrap().iter().find(|d| d["kind"] == "browser").unwrap()["id"].as_str().unwrap().to_string();
+        assert_eq!(reg.revoke(&device)["ok"], true);
+        for extra in [String::new(), format!("If-None-Match: {tag}\r\n"), format!("Range: bytes=1-\r\nIf-Range: {tag}\r\n")] {
+            assert!(ask(bom.clone(), format!("{c}{extra}")).await.0.starts_with("HTTP/1.1 401"), "a revoked browser: {extra:?}");
+        }
+        drop(hub);
+    }
+
     #[tokio::test]
     async fn pairing_limits_and_deadline() {
         use crate::net::pairing::{Registry, GUESS_ALL, GUESS_CLIENT, urandom};
@@ -376,13 +427,14 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
         }
         json_response("401 Unauthorized", json!({"state":"unpaired"}), "")
     } else if matches!(req.method.as_str(), "GET" | "HEAD") && (req.route() == "/file" || req.route() == "/files/get" || req.route().starts_with("/s/")) {
-        // a project's file (a paired browser's cookie) or a share (its token): streamed, ranged (files/share.rs)
-        let shared = req.route().starts_with("/s/");
+        // a project's file, and a share: to a paired browser only (a share's token is no credential here; an unpaired browser reaches
+        // nothing but pairing), streamed and ranged, never inline as anything that runs, never stored (files/share.rs `Who::Browser`)
         let device = crate::net::start::registry(&hub.cfg.home).and_then(|r| crate::auth::browser_device(&r, &req, &login));
-        if !shared && device.is_none() {
+        if device.is_none() {
             json_response("401 Unauthorized", json!({"state":"unpaired"}), "")
         } else {
-            let r = if shared { crate::files::share::serve_share(&hub, &mut writer, &req).await } else if req.route() == "/file" { crate::files::share::serve_file(&hub, &mut writer, &req).await } else { crate::files::share::serve_files_get(&hub, &mut writer, &req).await };
+            use crate::files::share::{serve_file, serve_files_get, serve_share, Who};
+            let r = match req.route() { "/file" => serve_file(&hub, &mut writer, Who::Browser, &req).await, "/files/get" => serve_files_get(&hub, &mut writer, Who::Browser, &req).await, _ => serve_share(&hub, &mut writer, &req).await };
             if r.is_ok() { writer.shutdown().await.ok(); }
             return Ok(());
         }

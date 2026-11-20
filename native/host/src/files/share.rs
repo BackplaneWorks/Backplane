@@ -8,8 +8,9 @@
 //!   `bytes=a-b` range, `ETag` and `If-Range`, so a client resumes a big download where it stopped. `HEAD` answers the headers only.
 //!   `thread=<link>~<id>`: a thread of another of the owner's machines; the file is read there in pieces over the link (`file.piece`) and streamed on.
 //! - `/s/<token>/<name>`: a share an agent made with the MCP tool `file_share`: the token is its own credential, it expires, and Settings lists and
-//!   revokes it (`shares.list`, `shares.revoke`). A share with `tailnet` also has an https address on the tailnet (the hub's `tailscale serve`, made
-//!   for it when the hub has none, and taken down when the last such share ends).
+//!   revokes it (`shares.list`, `shares.revoke`). Only the main listener answers a share by its token alone; the web ingress answers it to a
+//!   paired browser only. A share with `tailnet` also gets the hub's own tailnet address (its existing `tailscale serve` https address, or its
+//!   MagicDNS name when it listens on the tailnet); the hub makes no serve mapping for it.
 //! - `files` on an assistant entry (`linkable`): the files its text names that `check` allows, so every client draws them as links.
 use crate::{api::{Caller, Fut, RpcHandler, Ticker}, auth::Req, hub::Hub};
 use serde_json::{json, Value};
@@ -27,8 +28,12 @@ pub const DEFAULT_LIFE_S: u64 = 86400;
 // ---- the access rule ----
 
 /// The folders files are served from, real paths. Kept fresh by `Fresh` (every project and thread change); read by the presenter, which is synchronous.
-static ROOTS: LazyLock<RwLock<Vec<PathBuf>>> = LazyLock::new(Default::default);
-pub fn roots() -> Vec<PathBuf> { ROOTS.read().unwrap().clone() }
+/// By hub home (one hub a process in use; tests run several).
+static ROOTS: LazyLock<RwLock<std::collections::HashMap<PathBuf, Vec<PathBuf>>>> = LazyLock::new(Default::default);
+/// The roots of this process's hub (the presenter's).
+pub fn roots() -> Vec<PathBuf> { roots_at(&HOME.read().unwrap().clone()) }
+pub fn roots_at(home: &Path) -> Vec<PathBuf> { ROOTS.read().unwrap().get(home).cloned().unwrap_or_default() }
+fn known(home: &Path) -> bool { ROOTS.read().unwrap().contains_key(home) }
 
 /// The live projects' folders and the live threads' worktrees, then the hub's own allowed folders and the setting's, each its real path.
 pub fn roots_of(m: &crate::model::Model, home: &Path, extra: &str) -> Vec<PathBuf> {
@@ -141,7 +146,7 @@ pub fn candidates(text: &str) -> Vec<String> {
 struct Fresh;
 impl crate::api::Observer for Fresh {
     fn committed(&self, hub: &Arc<Hub>, events: &[Value], _first: u32) {
-        if events.iter().any(|e| e["$"].as_str().map_or(false, |k| k.starts_with("Project") || k.starts_with("Thread") || k == "SettingChanged" || k == "WorktreeSet")) { refresh_soon(hub) }
+        if events.iter().any(|e| e["$"].as_str().map_or(false, |k| k.starts_with("Project") || k.starts_with("Thread") || k == "SettingSet" || k == "WorktreeSet")) { refresh_soon(hub) }
     }
 }
 fn refresh_soon(hub: &Arc<Hub>) {
@@ -151,10 +156,32 @@ fn refresh_soon(hub: &Arc<Hub>) {
 pub async fn refresh(hub: &Arc<Hub>) {
     let extra = hub.setting("files.share.roots").await.unwrap_or_default();
     let r = { let m = hub.model().await; roots_of(&m, &hub.cfg.home, &extra) };
-    *ROOTS.write().unwrap() = r;
+    EXTRA.write().unwrap().insert(hub.cfg.home.clone(), extra.lines().filter_map(|l| crate::plat::fs::canonicalize(Path::new(l.trim())).ok()).collect());
+    ROOTS.write().unwrap().insert(hub.cfg.home.clone(), r);
 }
 
 // ---- streaming ----
+
+/// Who a file is answered to: the headers and the folders depend on it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Who {
+    /// a native client (the desktop, a phone) with the hub token or a paired device's
+    Native,
+    /// a paired browser on the web ingress: the app's own origin, so a file is never inline unless it is a picture, a PDF or plain text,
+    /// never stored, and only under projects, worktrees and the hub's attachments
+    Browser,
+    /// a share's token on the main listener: no other credential, never stored
+    Share,
+}
+/// The folders `Who` reaches: a browser not the far copies or the setting's extra roots.
+fn roots_for(who: Who, home: &Path) -> Vec<PathBuf> {
+    let all = roots_at(home);
+    if who != Who::Browser { return all }
+    let canon = crate::plat::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
+    let extra = EXTRA.read().unwrap().get(home).cloned().unwrap_or_default();
+    all.into_iter().filter(|r| !r.starts_with(canon.join("far-files")) && !extra.contains(r)).collect()
+}
+static EXTRA: LazyLock<RwLock<std::collections::HashMap<PathBuf, Vec<PathBuf>>>> = LazyLock::new(Default::default);
 
 /// Content-Type by name: what a browser or phone opens it with. Anything unknown is bytes.
 pub fn ctype(name: &str) -> &'static str {
@@ -184,9 +211,14 @@ pub fn plan(range: &str, if_range: &str, tag: &str, size: u64) -> Result<(&'stat
         None => Ok(("200 OK", 0, size.saturating_sub(1))),
     }
 }
-fn head_bytes(status: &str, ctype: &str, len: u64, extra: &str) -> Vec<u8> {
-    format!("HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {len}\r\nCache-Control: private, no-cache\r\nAccept-Ranges: bytes\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n{extra}\r\n").into_bytes()
+/// The headers of every file answer. Never cached by anything but the asking client (a browser's and a share's not at all, so a revoked browser
+/// or an ended share is asked again and refused); sandboxed (no script runs with the origin's cookie even if a browser renders it); no Referer.
+pub fn head_bytes(who: Who, status: &str, ctype: &str, len: u64, extra: &str) -> Vec<u8> {
+    let cache = if who == Who::Native { "private, no-cache" } else { "private, no-store" };
+    format!("HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {len}\r\nCache-Control: {cache}\r\nAccept-Ranges: bytes\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox\r\nCross-Origin-Resource-Policy: same-origin\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n{extra}\r\n").into_bytes()
 }
+/// The types a file may be shown inline as (`inline=1`): pictures, PDF and plain text only; never HTML, SVG or anything a browser runs.
+pub fn inline_ok(ctype: &str) -> bool { matches!(ctype, "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/bmp" | "application/pdf" | "text/plain; charset=utf-8") }
 pub fn refusal(status: &str, why: &str) -> Vec<u8> {
     let mut v = format!("HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n", why.len()).into_bytes();
     v.extend_from_slice(why.as_bytes()); v
@@ -195,7 +227,7 @@ pub fn refusal(status: &str, why: &str) -> Vec<u8> {
 fn status_of(why: &str) -> &'static str { if why == "no such file" || why == "not a file" { "404 Not Found" } else { "403 Forbidden" } }
 
 /// Writes the file (or the range asked) to `w`: the file checked once more as it is opened (the same file the rule allowed, still a regular file).
-pub async fn stream<W: AsyncWrite + Unpin>(w: &mut W, req: &Req, real: &Path, md: &std::fs::Metadata, name: &str) -> std::io::Result<()> {
+pub async fn stream<W: AsyncWrite + Unpin>(w: &mut W, who: Who, req: &Req, real: &Path, md: &std::fs::Metadata, name: &str) -> std::io::Result<()> {
     let tag = etag(md); let size = md.len();
     let Ok((status, a, b)) = plan(req.header("range"), req.header("if-range"), &tag, size) else {
         return w.write_all(&refusal("416 Range Not Satisfiable", "range not satisfiable")).await;
@@ -203,11 +235,11 @@ pub async fn stream<W: AsyncWrite + Unpin>(w: &mut W, req: &Req, real: &Path, md
     let len = if size == 0 { 0 } else { b - a + 1 };
     let mut extra = format!("ETag: {tag}\r\n");
     if status.starts_with("206") { extra.push_str(&format!("Content-Range: bytes {a}-{b}/{size}\r\n")) }
-    let inline = req.param("inline") == "1" && matches!(ctype(name), t if t.starts_with("image/") || t == "application/pdf" || t.starts_with("text/"));
+    let inline = req.param("inline") == "1" && inline_ok(ctype(name));
     extra.push_str(&disposition(name, inline));
     let mut f = match tokio::fs::File::open(real).await { Ok(f) => f, Err(_) => return w.write_all(&refusal("404 Not Found", "no such file")).await };
     match f.metadata().await { Ok(m2) if m2.is_file() && m2.len() == size => {}, _ => return w.write_all(&refusal("409 Conflict", "the file changed; try again")).await }
-    w.write_all(&head_bytes(status, ctype(name), len, &extra)).await?;
+    w.write_all(&head_bytes(who, status, ctype(name), len, &extra)).await?;
     if req.method == "HEAD" || len == 0 { return w.flush().await }
     f.seek(std::io::SeekFrom::Start(a)).await?;
     let mut left = len; let mut buf = vec![0u8; BUF];
@@ -220,26 +252,30 @@ pub async fn stream<W: AsyncWrite + Unpin>(w: &mut W, req: &Req, real: &Path, md
 }
 
 /// `/file`: the credential was checked by the caller. A thread elsewhere is read there.
-pub async fn serve_file<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, w: &mut W, req: &Req) -> std::io::Result<()> {
+/// `thread` (a thread of this machine) narrows it: the file must be inside that thread's folder.
+pub async fn serve_file<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, w: &mut W, who: Who, req: &Req) -> std::io::Result<()> {
     if req.method != "GET" && req.method != "HEAD" { return w.write_all(&refusal("405 Method Not Allowed", "GET only")).await }
     let path = crate::files::fm::from_uri(&req.param("path"));
     let thread = crate::files::fm::from_uri(&req.param("thread"));
-    if thread.contains('~') { return far_file(hub, w, req, &thread, &path).await }
-    if ROOTS.read().unwrap().is_empty() { refresh(hub).await }
-    let (home, roots) = (hub.cfg.home.clone(), roots());
+    if thread.contains('~') { return far_file(hub, w, who, req, &thread, &path).await }
+    let within = if thread.is_empty() { None } else { match crate::files::root_of(hub, &thread).await { Some(r) => Some(r), None => return w.write_all(&refusal("404 Not Found", "no such thread")).await } };
+    if !known(&hub.cfg.home) { refresh(hub).await }
+    let (home, roots) = (hub.cfg.home.clone(), roots_for(who, &hub.cfg.home));
     let p2 = path.clone();
-    match tokio::task::spawn_blocking(move || check(&roots, &home, &p2)).await {
-        Ok(Ok((real, md))) => { let name = name_of(&path); stream(w, req, &real, &md, &name).await }
+    match tokio::task::spawn_blocking(move || check(&roots, &home, &p2).and_then(|(real, md)| match within {
+        Some(r) if !crate::plat::fs::canonicalize(&r).map_or(false, |r| real.starts_with(r)) => Err("that file is not in this thread's project"),
+        _ => Ok((real, md)) })).await {
+        Ok(Ok((real, md))) => { let name = name_of(&path); stream(w, who, req, &real, &md, &name).await }
         Ok(Err(why)) => w.write_all(&refusal(status_of(why), why)).await,
         Err(_) => w.write_all(&refusal("500 Internal Server Error", "cannot read file")).await,
     }
 }
 /// `/files/get?thread=&path=` (the Files tab's Download): a file of the thread's folder by its path from there, under the Files tab's own
 /// containment (`fm::contained`), streamed and ranged like `/file`.
-pub async fn serve_files_get<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, w: &mut W, req: &Req) -> std::io::Result<()> {
+pub async fn serve_files_get<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, w: &mut W, who: Who, req: &Req) -> std::io::Result<()> {
     let (thread, rel) = (crate::files::fm::from_uri(&req.param("thread")), crate::files::fm::from_uri(&req.param("path")));
     if rel.is_empty() || !crate::files::fm::files_safe(&rel) { return w.write_all(&refusal("400 Bad Request", "that path is not in this project")).await }
-    if thread.contains('~') { return far_file(hub, w, req, &thread, &rel).await }
+    if thread.contains('~') { return far_file(hub, w, who, req, &thread, &rel).await }
     let Some(root) = crate::files::root_of(hub, &thread).await else { return w.write_all(&refusal("404 Not Found", "no such thread")).await };
     let r2 = rel.clone();
     let found = tokio::task::spawn_blocking(move || -> Result<(PathBuf, std::fs::Metadata), &'static str> {
@@ -248,7 +284,7 @@ pub async fn serve_files_get<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, w: &mut W, r
         if md.is_file() { Ok((real, md)) } else { Err("not a file") }
     }).await;
     match found {
-        Ok(Ok((real, md))) => stream(w, req, &real, &md, &name_of(&rel)).await,
+        Ok(Ok((real, md))) => stream(w, who, req, &real, &md, &name_of(&rel)).await,
         Ok(Err(why)) => w.write_all(&refusal("404 Not Found", why)).await,
         Err(_) => w.write_all(&refusal("500 Internal Server Error", "cannot read file")).await,
     }
@@ -266,11 +302,11 @@ impl RpcHandler for Piece {
             let fail = |e: &str| vec![json!({"t":"reply","id":id,"ok":false,"error":e})];
             let th = p["thread"].as_str().unwrap_or("");
             let Some(root) = crate::files::root_of(hub, th).await else { return fail("This thread has no project folder.") };
-            if ROOTS.read().unwrap().is_empty() { refresh(hub).await }
+            if !known(&hub.cfg.home) { refresh(hub).await }
             let asked = p["path"].as_str().unwrap_or("").to_string();
             // a path from the thread's folder (the Files tab's) or an absolute one (a message's)
             let path = if crate::plat::fs::is_abs(&asked) || asked.starts_with("~/") { asked } else if !asked.is_empty() && crate::files::fm::files_safe(&asked) { root.join(&asked).to_string_lossy().into_owned() } else { return fail("not a file of the project") };
-            let (home, roots) = (hub.cfg.home.clone(), roots());
+            let (home, roots) = (hub.cfg.home.clone(), roots_at(&hub.cfg.home));
             let (at, len) = (p["at"].as_u64().unwrap_or(0), p["len"].as_u64().unwrap_or(FAR_PIECE).min(FAR_PIECE));
             let r = tokio::task::spawn_blocking(move || -> Result<Value, &'static str> {
                 use base64::Engine; use std::io::{Read, Seek};
@@ -299,7 +335,7 @@ async fn far_piece(hub: &Arc<Hub>, link: &str, thread: &str, path: &str, at: u64
     Ok((b, v["result"]["size"].as_u64().unwrap_or(0), v["result"]["etag"].as_str().unwrap_or("").to_string()))
 }
 /// `/file?thread=<link>~<id>&path=`: the first piece says the size and tag; the range asked is then fetched piece by piece and written as it comes.
-async fn far_file<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, w: &mut W, req: &Req, thread: &str, path: &str) -> std::io::Result<()> {
+async fn far_file<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, w: &mut W, who: Who, req: &Req, thread: &str, path: &str) -> std::io::Result<()> {
     let Some((link, local)) = thread.split_once('~').filter(|(l, t)| !l.is_empty() && !t.is_empty()) else { return w.write_all(&refusal("404 Not Found", "no such thread")).await };
     let first = match far_piece(hub, link, local, path, 0, 1).await { Ok(x) => x, Err(e) => return w.write_all(&refusal("502 Bad Gateway", &e)).await };
     let (size, tag) = (first.1, first.2);
@@ -309,7 +345,7 @@ async fn far_file<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, w: &mut W, req: &Req, t
     let mut extra = format!("ETag: {tag}\r\n");
     if status.starts_with("206") { extra.push_str(&format!("Content-Range: bytes {a}-{b}/{size}\r\n")) }
     extra.push_str(&disposition(&name, false));
-    w.write_all(&head_bytes(status, ctype(&name), len, &extra)).await?;
+    w.write_all(&head_bytes(who, status, ctype(&name), len, &extra)).await?;
     if req.method == "HEAD" { return w.flush().await }
     let mut at = a;
     while at < a + len {
@@ -326,7 +362,7 @@ async fn far_file<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, w: &mut W, req: &Req, t
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Share { pub id: String, pub token: String, pub path: String, pub name: String, pub size: u64, pub thread: String,
-    pub created: u64, pub expires: u64, #[serde(default)] pub tailnet: bool, #[serde(default)] pub url: String, #[serde(default)] pub served_port: u16 }
+    pub created: u64, pub expires: u64, #[serde(default)] pub tailnet: bool, #[serde(default)] pub url: String }
 
 fn store_path(home: &Path) -> PathBuf { home.join("shares-v1.json") }
 static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -334,15 +370,10 @@ pub fn load(home: &Path) -> Vec<Share> {
     std::fs::read_to_string(store_path(home)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())
         .and_then(|v| serde_json::from_value::<Vec<Share>>(v["shares"].clone()).ok()).unwrap_or_default()
 }
-/// The https ports this hub made `tailscale serve` answer on for shares (taken down when no live share uses one).
-fn served(home: &Path) -> Vec<u16> {
-    std::fs::read_to_string(store_path(home)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .and_then(|v| serde_json::from_value::<Vec<u16>>(v["served"].clone()).ok()).unwrap_or_default()
-}
-fn save(home: &Path, v: &[Share]) -> std::io::Result<()> { let mut ports = served(home); for s in v { if s.served_port > 0 && !ports.contains(&s.served_port) { ports.push(s.served_port) } } save_with(home, v, &ports) }
-fn save_with(home: &Path, v: &[Share], ports: &[u16]) -> std::io::Result<()> {
+fn save(home: &Path, v: &[Share]) -> std::io::Result<()> { save_with(home, v) }
+fn save_with(home: &Path, v: &[Share]) -> std::io::Result<()> {
     let p = store_path(home); let tmp = p.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec_pretty(&json!({"shares": v, "served": ports}))?)?;
+    std::fs::write(&tmp, serde_json::to_vec_pretty(&json!({"shares": v}))?)?;
     #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600)); }
     std::fs::rename(tmp, p)
 }
@@ -369,17 +400,17 @@ pub fn share_route(token: &str, name: &str) -> String {
 pub async fn create(hub: &Arc<Hub>, thread: &str, a: &Value) -> Result<Value, String> {
     let path = a["path"].as_str().unwrap_or("").to_string();
     let life = life(&a["expires"])?;
-    if ROOTS.read().unwrap().is_empty() { refresh(hub).await }
-    let (home, roots, p2) = (hub.cfg.home.clone(), roots(), path.clone());
+    if !known(&hub.cfg.home) { refresh(hub).await }
+    let (home, roots, p2) = (hub.cfg.home.clone(), roots_at(&hub.cfg.home), path.clone());
     let (real, md) = tokio::task::spawn_blocking(move || check(&roots, &home, &p2)).await.map_err(|_| "failed".to_string())?.map_err(str::to_string)?;
     let name = name_of(&path);
     let token = random_hex(24);
     let now = now_s();
-    let mut sh = Share { id: format!("sh{}", &random_hex(6)), token: token.clone(), path: real.to_string_lossy().into_owned(), name: name.clone(), size: md.len(), thread: thread.into(), created: now, expires: now + life, tailnet: a["tailnet"].as_bool().unwrap_or(false), url: String::new(), served_port: 0 };
+    let mut sh = Share { id: format!("sh{}", &random_hex(6)), token: token.clone(), path: real.to_string_lossy().into_owned(), name: name.clone(), size: md.len(), thread: thread.into(), created: now, expires: now + life, tailnet: a["tailnet"].as_bool().unwrap_or(false), url: String::new() };
     let route = share_route(&token, &name);
     let mut note = String::new();
     if sh.tailnet {
-        match tailnet_base(hub).await { Ok((base, port)) => { sh.url = format!("{base}{route}"); sh.served_port = port }, Err(e) => note = e }
+        match tailnet_base(hub).await { Ok(base) => sh.url = format!("{base}{route}"), Err(e) => note = e }
     }
     let _g = LOCK.lock().await;
     let mut all = load(&hub.cfg.home); all.retain(|s| s.expires > now); all.push(sh.clone());
@@ -392,67 +423,69 @@ pub async fn create(hub: &Arc<Hub>, thread: &str, a: &Value) -> Result<Value, St
     Ok(out)
 }
 
-/// The tailnet https base for shares: the hub's own `tailscale serve` address, else one made for shares on a free port (8443-8499), recorded so it is
-/// taken down with the last tailnet share. Returns (base, the port this hub made, 0 when it was there already).
-async fn tailnet_base(hub: &Arc<Hub>) -> Result<(String, u16), String> {
-    let port: u16 = hub.cfg.listen.rsplit(':').next().and_then(|p| p.parse().ok()).ok_or("the hub's port is unknown")?;
-    if std::env::var("BACKPLANE_NO_TAILSCALE").is_ok() { return Err("tailscale is off for this hub".into()) }
+/// The tailnet address of a share: the hub's own `tailscale serve` https address when the person set one up for it, else its MagicDNS name when
+/// the hub listens on the tailnet. The hub never makes a serve mapping of its own for a share: a share is no second ingress, only a path on
+/// the hub's main listener (`/s/<token>/<name>`), reached however that listener is.
+async fn tailnet_base(hub: &Arc<Hub>) -> Result<String, String> {
+    let (host, port) = hub.cfg.listen.rsplit_once(':').ok_or("the hub's address is unknown")?;
+    let port: u16 = port.parse().map_err(|_| "the hub's port is unknown")?;
     let have = crate::net::botnet::served_url(port).await;
-    if !have.is_empty() { return Ok((have, 0)) }
+    if !have.is_empty() { return Ok(have) }
     let dns = crate::net::botnet::tailscale_dns().await;
     if dns.is_empty() { return Err("this machine is not on a tailnet".into()) }
-    let taken: Vec<u16> = served(&hub.cfg.home);
-    if let Some(p) = taken.first() { return Ok((format!("https://{dns}:{p}"), *p)) }
-    for p in 8443u16..8500 {
-        let out = tokio::time::timeout(std::time::Duration::from_secs(15), crate::proc::tokio_cmd(crate::proc::Kind::Net, "tailscale")
-            .args(["serve", "--bg", &format!("--https={p}"), &format!("http://127.0.0.1:{port}")]).output()).await;
-        match out { Ok(Ok(o)) if o.status.success() => return Ok((format!("https://{dns}:{p}"), p)), Ok(Ok(o)) if String::from_utf8_lossy(&o.stderr).contains("already") => continue, Ok(Ok(o)) => return Err(format!("tailscale serve failed: {}", String::from_utf8_lossy(&o.stderr).trim())), _ => return Err("tailscale did not answer".into()) }
-    }
-    Err("no free https port for tailscale serve".into())
-}
-async fn unserve(port: u16) {
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(15), crate::proc::tokio_cmd(crate::proc::Kind::Net, "tailscale").args(["serve", &format!("--https={port}"), "off"]).output()).await;
+    if host != "0.0.0.0" && !host.starts_with("100.") { return Err("this hub does not answer on the tailnet (it listens on this computer only)".into()) }
+    Ok(format!("http://{dns}:{port}"))
 }
 
-/// Drops ended shares; a tailnet address this hub made goes when no live share uses it. Returns what is left.
+/// Drops ended (and the revoked) shares. Returns what is left.
 pub async fn sweep(hub: &Arc<Hub>, revoke: Option<&str>) -> Vec<Share> {
     let _g = LOCK.lock().await;
     let now = now_s();
     let all = load(&hub.cfg.home);
     let (keep, gone): (Vec<Share>, Vec<Share>) = all.into_iter().partition(|s| s.expires > now && Some(s.id.as_str()) != revoke);
-    let ports = served(&hub.cfg.home);
-    let (used, idle): (Vec<u16>, Vec<u16>) = ports.iter().partition(|p| keep.iter().any(|s| s.served_port == **p));
-    if !gone.is_empty() || !idle.is_empty() {
-        for p in &idle { unserve(*p).await }
-        let _ = save_with(&hub.cfg.home, &keep, &used);
-        hub.bump_views();
-    }
+    if !gone.is_empty() { let _ = save(&hub.cfg.home, &keep); hub.bump_views(); }
     keep
 }
 
-/// Settings → Devices (the presenter, synchronous): the live shares, and Revoke. A tailnet address left with no share is taken down by the next sweep.
+/// Settings → Devices (the presenter, synchronous): the live shares, and Revoke.
 pub fn listed_now() -> Vec<Value> { let h = HOME.read().unwrap().clone(); if h.as_os_str().is_empty() { return vec![] } let now = now_s(); listed(&load(&h).into_iter().filter(|s| s.expires > now).collect::<Vec<_>>()) }
 pub fn revoke_now(id: &str) {
     let h = HOME.read().unwrap().clone(); if h.as_os_str().is_empty() { return }
     let all = load(&h); let keep: Vec<Share> = all.iter().filter(|s| s.id != id).cloned().collect();
-    if keep.len() != all.len() { let _ = save_with(&h, &keep, &served(&h)); }
+    if keep.len() != all.len() { let _ = save(&h, &keep); }
 }
 /// `/s/<token>/<name>`: no other credential; an unknown, ended or revoked token is 404, and the file is checked again as it is now.
 pub async fn serve_share<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, w: &mut W, req: &Req) -> std::io::Result<()> {
     if req.method != "GET" && req.method != "HEAD" { return w.write_all(&refusal("405 Method Not Allowed", "GET only")).await }
+    let who = req.peer.map(|p| p.ip().to_string()).unwrap_or_default();
+    if misses(&who, false) >= MISSES { return w.write_all(&refusal("429 Too Many Requests", "too many unknown links; wait a minute")).await }
     let token = req.route().strip_prefix("/s/").unwrap_or("").split('/').next().unwrap_or("").to_string();
     let now = now_s();
     let found = if token.len() == 48 && token.bytes().all(|b| b.is_ascii_hexdigit()) {
         load(&hub.cfg.home).into_iter().find(|s| s.expires > now && s.token.len() == token.len() && s.token.bytes().zip(token.bytes()).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0)
     } else { None };
-    let Some(sh) = found else { return w.write_all(&refusal("404 Not Found", "this link has ended or never was")).await };
-    if ROOTS.read().unwrap().is_empty() { refresh(hub).await }
-    let (home, roots, p) = (hub.cfg.home.clone(), roots(), sh.path.clone());
+    let Some(sh) = found else { misses(&who, true); return w.write_all(&refusal("404 Not Found", "this link has ended or never was")).await };
+    if !known(&hub.cfg.home) { refresh(hub).await }
+    let (home, roots, p) = (hub.cfg.home.clone(), roots_at(&hub.cfg.home), sh.path.clone());
     match tokio::task::spawn_blocking(move || check(&roots, &home, &p)).await {
-        Ok(Ok((real, md))) => stream(w, req, &real, &md, &sh.name).await,
+        Ok(Ok((real, md))) => stream(w, Who::Share, req, &real, &md, &sh.name).await,
         Ok(Err(why)) => w.write_all(&refusal(status_of(why), why)).await,
         Err(_) => w.write_all(&refusal("500 Internal Server Error", "cannot read file")).await,
     }
+}
+
+/// Unknown share tokens one address may try a minute (192-bit tokens are not guessed; this only stops a scan from costing the hub).
+const MISSES: u32 = 30;
+/// The misses of `who` in the current minute, one added when `add`.
+fn misses(who: &str, add: bool) -> u32 {
+    use std::{collections::HashMap, sync::Mutex, time::{Duration, Instant}};
+    static M: LazyLock<Mutex<HashMap<String, (Instant, u32)>>> = LazyLock::new(Default::default);
+    let mut g = M.lock().unwrap();
+    if g.len() > 4096 { g.retain(|_, (t, _)| t.elapsed() < Duration::from_secs(60)) }
+    let e = g.entry(who.to_string()).or_insert((Instant::now(), 0));
+    if e.0.elapsed() >= Duration::from_secs(60) { *e = (Instant::now(), 0) }
+    if add { e.1 += 1 }
+    e.1
 }
 
 /// Settings: `shares.list` → `{shares: [{id, name, path, size, created, expires, link, url, thread}]}`; `shares.revoke {id}` → the list after it.
