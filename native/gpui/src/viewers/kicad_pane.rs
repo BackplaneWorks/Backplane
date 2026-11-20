@@ -1153,7 +1153,8 @@ impl KicadPane {
         if by.takes_keys() { self.chose("show_kind"); self.want_keys = true; self.want_keys_at = Some(std::time::Instant::now()); } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
         self.chosen();
         // the person's own choice while KiCad opens a library editor: the hub does not put that editor on show over it when it comes
-        if by.takes_keys() && opening_of(&self.info).is_some() { self.rpc("editor.kicad.chose", json!({"project": self.project, "frame": kind})); }
+        // (another frame than the one on show: a re-click of the tab on show is no choice)
+        if by.takes_keys() && opening_of(&self.info).is_some() && kind != self.tab() { self.rpc("editor.kicad.chose", json!({"project": self.project, "frame": kind})); }
         if kind == frame_for(&self.open) { self.override_kind = None; } else { self.override_kind = Some(kind.to_string()); }
         self.placed = None;
         if self.attached && matches!(self.info["state"].as_str(), Some("stopped" | "failed")) { self.reattach(); }
@@ -3175,8 +3176,10 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
     // selected, and the text beside the tabs says what KiCad is doing
     let opening = if pane.read(cx).info["state"] == "ready" { opening_of(&pane.read(cx).info) } else { None };
     let now_ms = crate::screens::kcomment::epoch_ms() as u64;
-    if opening.is_some() {
-        cx.spawn(async move |v, cx| { cx.background_executor().timer(std::time::Duration::from_millis(500)).await; let _ = v.update(cx, |_, cx| cx.notify()); }).detach();
+    // the seconds count on: one redraw timer at a time, however often the strip is drawn meanwhile
+    static OPENING_TIMER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if opening.is_some() && !OPENING_TIMER.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        cx.spawn(async move |v, cx| { cx.background_executor().timer(std::time::Duration::from_millis(500)).await; OPENING_TIMER.store(false, std::sync::atomic::Ordering::SeqCst); let _ = v.update(cx, |_, cx| cx.notify()); }).detach();
     }
     for (kind, label) in TABS {
         if !shown.contains(kind) { continue }

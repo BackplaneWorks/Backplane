@@ -131,19 +131,25 @@ pub struct Session {
     /// a library editor KiCad is opening itself (Ctrl+E): its show request came, its editor request not yet (Windows' first Symbol Editor
     /// waits 10-29 s on its libraries): the pane says so in its strip (`opening` in the info). None otherwise
     pub opening: Option<Opening>,
+    /// the library editor KiCad last opened (its ET_FRAME_OPENED) and when: only a show request just after it is an opening
+    pub lib_opened: Option<(String, std::time::Instant)>,
 }
+/// How long after KiCad opens a library editor (ET_FRAME_OPENED) its show request counts as that open's (an `Opening`).
+pub const LIB_FRESH: Duration = Duration::from_secs(2);
+/// Whether the session's `opening` is still current: the same KiCad, ready, and the editor not on show yet. Pure.
+pub fn opening_current(o: &Opening, pid: u32, state: &str, active: &str) -> bool { o.pid == pid && state == "ready" && active != o.kind }
 
 /// A library editor KiCad is opening (#1389's follow-up). `last`: KiCad's last sign of work on it (its show request, any progress event);
 /// `person_switched`: the person chose another frame since (a tab, Ctrl+Tab, the rail: `editor.kicad.chose`), so the editor is not put
 /// on show when its request comes, only its tab appears; `failed_at`: no sign of work for OPENING_SILENT, said for OPENING_SAID.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Opening { pub kind: String, pub since_ms: u64, pub last: std::time::Instant, pub person_switched: bool, pub failed_at: Option<std::time::Instant> }
+pub struct Opening { pub kind: String, pub pid: u32, pub since_ms: u64, pub last: std::time::Instant, pub person_switched: bool, pub failed_at: Option<std::time::Instant> }
 /// How long with no progress event and no request from KiCad before the strip says the editor did not open (never while KiCad still works).
 pub const OPENING_SILENT: Duration = Duration::from_secs(30);
 /// How long the strip says the editor did not open before the label goes.
 pub const OPENING_SAID: Duration = Duration::from_secs(6);
 impl Opening {
-    pub fn new(kind: &str, now: std::time::Instant) -> Self { Opening { kind: kind.into(), since_ms: ipc::now_ms() as u64, last: now, person_switched: false, failed_at: None } }
+    pub fn new(kind: &str, pid: u32, now: std::time::Instant) -> Self { Opening { kind: kind.into(), pid, since_ms: ipc::now_ms() as u64, last: now, person_switched: false, failed_at: None } }
     pub fn json(&self) -> Value { json!({"kind": self.kind, "since_ms": self.since_ms, "failed": self.failed_at.is_some()}) }
 }
 /// What the hub's tick does with an `Opening`. Pure.
@@ -166,7 +172,7 @@ impl Session {
             container: 0, toplevel: 0, holder: 0, display: String::new(), start_phase: String::new(), start_at: 0, lock_ask: Value::Null,
             sock: String::new(), events_sock: String::new(), sock_dir: String::new(),
             argv: String::new(), cli: String::new(), version: String::new(), desc: String::new(),
-            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], keys: vec![], rss_mb: 0, peak_mb: 0, mem_pub: (0, 0), peak_logged: false, stop_reason: String::new(), stopped_at: 0, closed_frames: vec![], pane_cid: String::new(), active_by: Value::Null, task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None), opening: None,
+            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], keys: vec![], rss_mb: 0, peak_mb: 0, mem_pub: (0, 0), peak_logged: false, stop_reason: String::new(), stopped_at: 0, closed_frames: vec![], pane_cid: String::new(), active_by: Value::Null, task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None), opening: None, lib_opened: None,
         }
     }
     pub fn spawned(mut self, pid: u32) -> Self { self.pid = pid; self }
@@ -295,7 +301,7 @@ impl Session {
             "runtime": runtime_picture_of(&self.pro),
             "task_wait": self.task_wait,
             // a library editor KiCad is opening (its editor request not come yet): the pane's strip says so
-            "opening": self.opening.as_ref().filter(|_| self.state == "ready").map(Opening::json),
+            "opening": self.opening.as_ref().filter(|o| opening_current(o, self.pid, &self.state, &self.active)).map(Opening::json),
             "start_phase": self.start_phase, "start_at": self.start_at, "lock_ask": self.lock_ask,
             // what the embedded editor can do beyond the basics (embed-gerbview, embed-editor-requested, ...): the client gates on these
             "embed_caps": self.caps.iter().filter(|c| c.starts_with("embed-") || c.starts_with("prewarm-") || *c == SIM_FRAME).collect::<Vec<_>>(),
@@ -2449,7 +2455,7 @@ impl Actor {
             self.next_gen += 1;
             let g = self.next_gen;
             let Some(s) = self.sessions.get_mut(&pro) else { return };
-            s.closing = true; s.gen = g; s.pid = 0; s.state = "starting".into(); s.reason = "restarting".into(); s.stop_reason.clear();
+            s.closing = true; s.gen = g; s.pid = 0; s.state = "starting".into(); s.reason = "restarting".into(); s.stop_reason.clear(); s.opening = None;
             let (root, snap) = (s.root.clone(), s.clone());
             self.publish(&snap, None);
             self.attach_waiters.entry(pro.clone()).or_default().push((client, reply));
@@ -2545,6 +2551,7 @@ impl Actor {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen) else { return };
                 // the library editor being opened closed before it came: nothing is on its way any more
                 if !open && s.opening.as_ref().is_some_and(|o| o.kind == kind) { s.opening = None; let snap = s.clone(); self.publish(&snap, None); }
+                if open && matches!(kind.as_str(), "SYMBOL_EDITOR" | "FOOTPRINT_EDITOR") { if let Some(s) = self.sessions.get_mut(&pro) { s.lib_opened = Some((kind.clone(), std::time::Instant::now())); } }
                 let Some(s) = self.sessions.get_mut(&pro) else { return };
                 if !closed_frames_apply(s, &kind, open) { return }
                 let snap = s.clone();
@@ -2739,8 +2746,11 @@ impl Actor {
                 // unless the person chose another frame meanwhile (then only its tab appears)
                 if lib && !api {
                     let (k, now) = (canon_frame(&kind).to_string(), std::time::Instant::now());
+                    // only a library editor KiCad has just opened itself (its ET_FRAME_OPENED, then this): a stray show request of one already
+                    // open is no opening, and never said as one that did not open
+                    let fresh = s.lib_opened.as_ref().is_some_and(|(o, t)| *o == k && now.saturating_duration_since(*t) <= LIB_FRESH);
                     if !editor && s.active != k && s.caps.iter().any(|c| c == "embed-editor-requested") {
-                        match &mut s.opening { Some(o) if o.kind == k => o.last = now, _ => { s.opening = Some(Opening::new(&k, now)); let snap = s.clone(); self.publish(&snap, None); } }
+                        match &mut s.opening { Some(o) if o.kind == k => o.last = now, _ if fresh => { s.opening = Some(Opening::new(&k, s.pid, now)); let snap = s.clone(); self.publish(&snap, None); } _ => {} }
                     } else if editor && s.opening.as_ref().is_some_and(|o| o.kind == k) {
                         let o = s.opening.take().unwrap();
                         let snap = s.clone(); self.publish(&snap, None);
@@ -2787,8 +2797,10 @@ impl Actor {
                 if let Some(o) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen).and_then(|s| s.opening.as_mut()) { o.last = std::time::Instant::now(); }
             }
             Msg::PersonChose { pro, frame } => {
+                // another frame than the one on show (a re-click of the tab on show is no choice) and than the one opening
+                let active = self.sessions.get(&pro).map(|s| s.active.clone()).unwrap_or_default();
                 let Some(o) = self.sessions.get_mut(&pro).and_then(|s| s.opening.as_mut()) else { return };
-                if canon_frame(&frame) != o.kind && !o.person_switched { o.person_switched = true; eprintln!("kicad embed: {pro}: the person chose {frame} while {} opens: it will not be put on show", o.kind); }
+                if canon_frame(&frame) != o.kind && canon_frame(&frame) != active && !o.person_switched { o.person_switched = true; eprintln!("kicad embed: {pro}: the person chose {frame} while {} opens: it will not be put on show", o.kind); }
             }
             Msg::Dialog { pro, gen, open, title } => {
                 if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("kicad embed: dialog {} {title:?} (gen {gen}, session {:?})", if open { "opened" } else { "closed" }, self.sessions.get(&pro).map(|s| (s.gen, s.state.clone()))); }
@@ -2945,6 +2957,8 @@ impl Actor {
                 let now = std::time::Instant::now();
                 let mut changed = vec![];
                 for s in self.sessions.values_mut() {
+                    // another KiCad (a restart), one stopped, or the editor on show by another road: the label is over
+                    if s.opening.as_ref().is_some_and(|o| !opening_current(o, s.pid, &s.state, &s.active)) { s.opening = None; changed.push(s.pro.clone()); continue }
                     let Some(o) = s.opening.as_mut() else { continue };
                     match opening_step(o, now) {
                         OpeningStep::Keep => {}
@@ -4808,7 +4822,7 @@ mod tests {
     /// The opening label's end rule: kept while KiCad shows signs of work, "did not open" only after OPENING_SILENT with none, then gone.
     #[test] fn a_library_editor_still_loading_is_never_said_to_have_failed() {
         let t0 = std::time::Instant::now();
-        let mut o = Opening::new("SYMBOL_EDITOR", t0);
+        let mut o = Opening::new("SYMBOL_EDITOR", 0, t0);
         let at = |ms: u64| t0 + Duration::from_millis(ms);
         assert_eq!(opening_step(&o, at(29_000)), OpeningStep::Keep);
         o.last = at(25_000); // a progress event: KiCad still loads its libraries
@@ -4841,11 +4855,12 @@ mod tests {
         a.sessions.insert(pro.clone(), s);
         let req = |kind: &str, editor: bool, actor: &str| Msg::ForkShowRequested { pro: pro.clone(), gen: 1, kind: kind.into(), item: if editor { "ecc83-pp:ECC83".into() } else { String::new() }, editor, actor: actor.into() };
         let opening = |a: &Actor| a.sessions[&pro].opening.clone();
+        let opened = |k: &str| Msg::FrameOpen { pro: pro.clone(), gen: 1, kind: k.into(), open: true };
         let info = |a: &Actor| a.sessions[&pro].info_json()["opening"].clone();
 
         // the person's Ctrl+E (no actor), under the pre-warm's hold: labelled; KiCad's request puts it on show
         hold_shows(&pro, Duration::from_secs(60));
-        a.handle(req("FK_SYMBOL_EDITOR", false, ""));
+        a.handle(opened("SYMBOL_EDITOR")); a.handle(req("FK_SYMBOL_EDITOR", false, ""));
         assert_eq!(info(&a)["kind"], "SYMBOL_EDITOR", "labelled at its show request");
         assert_eq!(info(&a)["failed"], false);
         a.handle(Msg::Activity { pro: pro.clone(), gen: 1 });
@@ -4855,7 +4870,7 @@ mod tests {
 
         // the person chose the board meanwhile (a tab, Ctrl+Tab, the rail): its tab appears, nothing is put on show
         { let s = a.sessions.get_mut(&pro).unwrap(); s.active = "SCH".into(); s.editor_req = Default::default(); }
-        a.handle(req("FK_SYMBOL_EDITOR", false, ""));
+        a.handle(opened("SYMBOL_EDITOR")); a.handle(req("FK_SYMBOL_EDITOR", false, ""));
         a.handle(Msg::PersonChose { pro: pro.clone(), frame: "PCB".into() });
         a.sessions.get_mut(&pro).unwrap().active = "PCB".into();
         a.handle(req("FK_SYMBOL_EDITOR", true, ""));
@@ -4863,14 +4878,14 @@ mod tests {
         assert_eq!(a.sessions[&pro].active, "PCB", "the person's choice stays on show");
 
         // the person chose the opening editor itself: still put on show
-        a.handle(req("FK_FOOTPRINT_EDITOR", false, ""));
+        a.handle(opened("FOOTPRINT_EDITOR")); a.handle(req("FK_FOOTPRINT_EDITOR", false, ""));
         a.handle(Msg::PersonChose { pro: pro.clone(), frame: "FOOTPRINT_EDITOR".into() });
         a.handle(req("FK_FOOTPRINT_EDITOR", true, ""));
         assert_eq!(a.sessions[&pro].active, "FOOTPRINT_EDITOR");
 
         // an agent's Follow or viewer_show, or an automatic attach, goes through the hub's show(): never the person's choice
         { let s = a.sessions.get_mut(&pro).unwrap(); s.active = "SCH".into(); s.editor_req = Default::default(); }
-        a.handle(req("FK_SYMBOL_EDITOR", false, ""));
+        a.handle(opened("SYMBOL_EDITOR")); a.handle(req("FK_SYMBOL_EDITOR", false, ""));
         let (rtx, _rrx) = oneshot::channel();
         a.show(0, pro.clone(), "PCB".into(), String::new(), String::new(), false, false, rtx);
         assert_eq!(opening(&a).map(|o| o.person_switched), Some(false), "the hub's own show is not the person's choice");
@@ -4882,11 +4897,31 @@ mod tests {
 
         // an API client's request: no label; the editor's frame closing before it came: the label goes
         a.sessions.get_mut(&pro).unwrap().active = "SCH".into();
-        a.handle(req("FK_SYMBOL_EDITOR", false, "hub:checks"));
+        a.handle(opened("SYMBOL_EDITOR")); a.handle(req("FK_SYMBOL_EDITOR", false, "hub:checks"));
         assert!(opening(&a).is_none(), "an API client's open is not labelled");
-        a.handle(req("FK_SYMBOL_EDITOR", false, ""));
+        a.handle(opened("SYMBOL_EDITOR")); a.handle(req("FK_SYMBOL_EDITOR", false, ""));
         a.handle(Msg::FrameOpen { pro: pro.clone(), gen: 1, kind: "SYMBOL_EDITOR".into(), open: false });
         assert!(opening(&a).is_none(), "closed before it came");
+
+        // the review's B: a show request of a library editor KiCad did not just open (a stray one) is no opening, never "did not open"
+        { let s = a.sessions.get_mut(&pro).unwrap(); s.active = "SCH".into(); s.lib_opened = None; }
+        a.handle(req("FK_SYMBOL_EDITOR", false, ""));
+        assert!(opening(&a).is_none(), "no ET_FRAME_OPENED just before: not labelled");
+        // its editor put on show by another road (the person's click on its tab): the label is not current any more
+        a.handle(opened("SYMBOL_EDITOR")); a.handle(req("FK_SYMBOL_EDITOR", false, ""));
+        a.sessions.get_mut(&pro).unwrap().active = "SYMBOL_EDITOR".into();
+        assert!(a.sessions[&pro].info_json()["opening"].is_null(), "on show: not said as opening");
+        // D: another KiCad (a restart) or a stopped one: the label is over
+        { let s = a.sessions.get_mut(&pro).unwrap(); s.active = "SCH".into(); s.pid = 777; }
+        assert!(a.sessions[&pro].info_json()["opening"].is_null(), "another KiCad's: not said");
+        { let s = a.sessions.get_mut(&pro).unwrap(); s.pid = 0; s.opening = None; }
+        a.handle(opened("SYMBOL_EDITOR")); a.handle(req("FK_SYMBOL_EDITOR", false, ""));
+        a.sessions.get_mut(&pro).unwrap().state = "stopped".into();
+        assert!(a.sessions[&pro].info_json()["opening"].is_null(), "a stopped KiCad's: not said");
+        a.sessions.get_mut(&pro).unwrap().state = "ready".into();
+        // the person re-clicks the tab already on show: no choice of another frame
+        a.handle(Msg::PersonChose { pro: pro.clone(), frame: "SCH".into() });
+        assert_eq!(opening(&a).map(|o| o.person_switched), Some(false), "a re-click of the tab on show is no choice");
     }
 
     #[test] fn a_shown_project_is_kept_warm_within_the_cap_memory_and_locks() {
