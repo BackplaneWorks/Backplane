@@ -786,7 +786,8 @@ pub fn warm_decision(sessions: &HashMap<String, Session>, pro: &str, hardware: b
     if !quiet && !sessions.get(pro).is_some_and(Session::is_live) { return no(Block::Other, "this KiCad shows its own windows while loading (needs Backplane KiCad bp.12)") }
     if sessions.get(pro).is_some_and(Session::is_live) { return Warm::Have }
     // a session that failed or was closed by the person is not started again behind their back; Edit does that
-    if sessions.get(pro).is_some_and(|s| s.state == "failed" || s.state == CLOSED || s.reason == "KiCad was closed") { return no(Block::Other, "KiCad stopped for this project; Edit starts it") }
+    // (an agent's close, an eviction, the idle close: warmed again; the person's own close is theirs)
+    if sessions.get(pro).is_some_and(|s| s.state == "failed" || s.state == CLOSED || runtime_session(&s.state, &s.reason, &s.stop_reason) == "closedByPerson") { return no(Block::Other, "KiCad stopped for this project; Edit starts it") }
     if locked { return no(Block::ExternalLock, WHY_LOCKED) }
     // memory: the machine already waiting for memory (a build growing) refuses whatever the numbers; else the new KiCad's cost and the
     // headroom must fit in what is available (builds and other programs take theirs first). Room made by an eviction is not counted on:
@@ -2420,6 +2421,8 @@ impl Actor {
                     Warm::No(block, why) => {
                         eprintln!("kicad embed: not warming {pro}: {why} (runtime {} {}, api.desc {desc})", env.root, env.version);
                         rt_note_warm(&pro, block, &why);
+                        // the session info carries the picture too (agents, the suites): published again with the decision
+                        if let Some(s) = self.sessions.get(&pro) { let snap = s.clone(); self.publish(&snap, None); }
                         let _ = reply.send(Ok(json!({"warm": false, "why": why, "block": block.word()})));
                     }
                     Warm::Start { evict } => {
@@ -4672,8 +4675,14 @@ mod tests {
         assert_eq!(kind(warm_decision(&full, "/p/a.kicad_pro", true, false, free(100_000), true, cfg)), "capacity");
         let closed: HashMap<String, Session> = [("/p/a.kicad_pro".to_string(), Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0).exited(0, ""))].into_iter().collect();
         assert_eq!(kind(warm_decision(&closed, "/p/a.kicad_pro", true, false, free(100_000), true, cfg)), "none", "closed by the person: session says it");
+        assert!(matches!(warm_decision(&closed, "/p/a.kicad_pro", true, false, free(100_000), true, cfg), Warm::No(..)), "the person quit KiCad: not warmed again");
+        for (why, warmed) in [("closeAsked", false), ("agentClosed", true)] {
+            let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0); s.stop_reason = why.into();
+            let m: HashMap<String, Session> = [("/p/a.kicad_pro".to_string(), s.exited(0, ""))].into_iter().collect();
+            assert_eq!(matches!(warm_decision(&m, "/p/a.kicad_pro", true, false, free(100_000), true, cfg), Warm::Start { .. }), warmed, "{why}: an agent's close does not keep the next warm-up away");
+        }
         // an idle-closed or evicted KiCad is warmed again when its thread is shown (the new visit)
-        for why in ["idle", "evicted"] {
+        for why in ["idle", "evicted", "appClosed"] {
             let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0); s.closing = true; s.stop_reason = why.into();
             let m: HashMap<String, Session> = [("/p/a.kicad_pro".to_string(), s.exited(0, ""))].into_iter().collect();
             assert_eq!(warm_decision(&m, "/p/a.kicad_pro", true, false, free(100_000), true, cfg), Warm::Start { evict: None }, "{why}");
