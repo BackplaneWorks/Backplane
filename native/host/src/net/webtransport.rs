@@ -65,7 +65,7 @@ impl BrowserListener {
             if self.proxy.accepts(&stream) {
                 let hub = hub.clone();
                 let authority = self.authority.clone();
-                tokio::spawn(async move { let _ = super::webingress::serve(hub, stream, &authority).await; });
+                tokio::spawn(async move { let _ = super::webingress::serve_unix(hub, stream, &authority).await; });
             }
         }
     }
