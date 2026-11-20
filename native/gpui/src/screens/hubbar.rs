@@ -22,7 +22,7 @@ pub struct Act { pub id: String, pub label: String }
 pub struct Bar { pub text: String, pub tone: String, pub acts: Vec<Act> }
 
 #[derive(Default)]
-pub struct State { pub ever: bool, pub well: bool, pub bar: Option<Bar>, pub said: String, pub confirm: Option<(String, Instant)>, pub target: Option<Target>, pub guard: Option<PathBuf>, pub epoch: u64 }
+pub struct State { /** the hub said it is restarting (`hub.restarting`): its words, and when */ pub restarting: Option<(String, Instant)>, pub ever: bool, pub well: bool, pub bar: Option<Bar>, pub said: String, pub confirm: Option<(String, Instant)>, pub target: Option<Target>, pub guard: Option<PathBuf>, pub epoch: u64 }
 
 /* i18n-ok: English, compared and tested; strip draws it through trs */ fn restart() -> Act { Act { id: "restart".into(), label: "Restart hub".into() } }
 fn acts(v: &Value) -> Vec<Act> { v.as_array().into_iter().flatten().filter_map(|a| Some(Act { id: a["id"].as_str()?.into(), label: a["label"].as_str()?.into() })).collect() }
@@ -106,7 +106,7 @@ pub fn watch(cx: &mut Context<Backplane>, target: Option<Target>, token_file: &P
                 if this.screens.hubbar.epoch != my_epoch { return false; }
                 let live = this.status == "Connected";
                 let b = &mut this.screens.hubbar; b.ever |= live || h.is_some();
-                let now = bar_of(h.as_ref(), s.as_ref(), misses, Sock { live, ever: b.ever });
+                let now = restart_bar(b.restarting.as_ref(), live, Instant::now()).or_else(|| bar_of(h.as_ref(), s.as_ref(), misses, Sock { live, ever: b.ever }));
                 b.well = now.is_none() && (h.is_some() || live); let stale = b.confirm.as_ref().map_or(false, |c| c.1.elapsed() > CONFIRM);
                 if stale { b.confirm = None; }
                 if b.bar != now || stale { if now.is_none() { b.said.clear(); } b.bar = now; cx.notify(); }
@@ -140,8 +140,16 @@ pub fn strip(cx: &mut Context<Backplane>, s: &State, light: bool) -> Option<AnyE
         .child(div().text_size(crate::scale::tpx(11.)).text_color(c("text")).overflow_hidden().child(crate::i18n::trs(&text))).child(row).into_any_element())
 }
 
+/// How long a restart the hub announced stands for its absence; past it the window says what it says of any hub that does not answer.
+pub const RESTART_FOR: Duration = Duration::from_secs(300);
+/// The strip while the hub is away after it said it was restarting (docs/PHONE-DATA.md, Restarts): its words, calm, nothing to press.
+pub fn restart_bar(r: Option<&(String, Instant)>, live: bool, now: Instant) -> Option<Bar> {
+    let (text, at) = r?; (!live && !text.is_empty() && now.saturating_duration_since(*at) < RESTART_FOR).then(|| Bar { text: text.clone(), tone: "info".into(), acts: vec![] })
+}
+/// The hub said it is going: the strip says so at once.
+pub fn restarting(s: &mut State, text: &str) { s.restarting = Some((text.to_string(), Instant::now())); s.said.clear(); s.bar = restart_bar(s.restarting.as_ref(), false, Instant::now()); }
 /// The socket came up: the hub answers, so a strip that said it did not goes at once (the next ask decides anything else).
-pub fn connected(s: &mut State) -> bool { s.ever = true; if s.bar.as_ref().map_or(false, |b| b.text == NO_ANSWER) { s.bar = None; s.said.clear(); true } else { false } }
+pub fn connected(s: &mut State) -> bool { s.ever = true; let was = s.restarting.take().map(|r| r.0); if s.bar.as_ref().map_or(false, |b| b.text == NO_ANSWER || (b.acts.is_empty() && Some(&b.text) == was.as_ref())) { s.bar = None; s.said.clear(); true } else { false } }
 
 /* i18n-ok: English, compared and tested; strip draws it through trs */ pub fn label_of(action: &str) -> &'static str { match action { "safe" => "Restart in safe mode", "rollback" => "Roll back hub", _ => "Restart hub" } }
 
@@ -184,6 +192,15 @@ mod tests {
         let b = bar_of(Some(&json!({"status": "down", "why": "panic"})), Some(&json!({"guard": {"text": "Hub is down: panic", "actions": [{"id": "rollback", "label": "Roll back to abc"}]}})), 0, UP).unwrap();
         assert_eq!(b.acts[0].id, "rollback"); assert_eq!(b.text, "Hub is down: panic");
         assert_eq!(bar_of(Some(&json!({"status": "down", "why": "panic"})), None, 0, UP).unwrap().acts[0].id, "restart", "no credential for /hub/status: still a way back");
+    }
+    #[test] fn an_announced_restart_is_said_calmly_until_the_hub_is_back() {
+        let t0 = Instant::now(); let r = ("Restarting Backplane… (new build 2c25023cc9)".to_string(), t0);
+        let b = restart_bar(Some(&r), false, t0 + Duration::from_secs(20)).unwrap(); assert_eq!((b.tone.as_str(), b.acts.len()), ("info", 0)); assert_eq!(b.text, r.0);
+        assert_eq!(restart_bar(Some(&r), true, t0), None, "connected: nothing to say");
+        assert_eq!(restart_bar(Some(&r), false, t0 + RESTART_FOR), None, "too long: the usual no-answer strip");
+        assert_eq!(restart_bar(None, false, t0), None, "a drop with no word first keeps the usual look");
+        let mut s = State::default(); restarting(&mut s, &r.0); assert_eq!(s.bar.as_ref().map(|b| b.text.as_str()), Some(r.0.as_str()));
+        assert!(connected(&mut s) && s.bar.is_none() && s.restarting.is_none(), "back: the strip goes at once");
     }
     #[test] fn starting_is_said_and_asks_nothing() { let b = bar_of(Some(&json!({"status": "starting", "phase": "model built"})), None, 0, UP).unwrap(); assert!(b.acts.is_empty()); assert!(b.text.contains("model built")); }
     #[test] fn a_hung_hub_names_what_stopped() { assert!(bar_of(Some(&json!({"status": "hung", "hung": ["writer"]})), None, 0, UP).unwrap().text.contains("writer")); }

@@ -1231,9 +1231,20 @@ function mountApp(): void {
     }
   }
 
+  // While the hub is away after it said it was restarting: its words, for 5 minutes at most (then the usual Reconnecting…)
+  function restartWords(r: { reason: string; build: string; text: string; at: number } | null, now: number): string {
+    if (!r || !r.text || now - r.at >= 300_000) return "";
+    const short = r.build.split("-").pop() ?? "";
+    if (r.reason === "build" && short) return t("hub.restarting.build", r.text, { build: short });
+    if (r.reason === "stop") return t("hub.stopped", r.text);
+    return t("hub.restarting", r.text);
+  }
+
   function renderConnStatus(state: string): void {
     if (state === "connected") {
       sidebar.setConnStatus(t("gpui.acct.connected", "Connected"), "bp-ok");
+    } else if (state === "reconnecting" && restartWords(hub.restarting, Date.now())) {
+      sidebar.setConnStatus(restartWords(hub.restarting, Date.now()), "");
     } else if (state === "reconnecting") {
       sidebar.setConnStatus("Reconnecting…", "bp-warn");
     } else if (state === "revoked") {
@@ -1262,6 +1273,9 @@ function mountApp(): void {
       if (hello.theme) applyHubTheme(hello.theme);
       if (hello.name) sidebar.setHostName(hello.name);
       renderConnStatus(state);
+      // back after a crash (hello.hubBack): said once, for a few seconds
+      const back = typeof (hello as { hubBack?: unknown }).hubBack === "string" ? String((hello as { hubBack?: unknown }).hubBack) : "";
+      if (back) { try { const b = JSON.parse(back) as { reason?: string; text?: string }; if (b.reason === "crash") { sidebar.setConnStatus(t("hub.back.crash", b.text ?? ""), "bp-warn"); window.setTimeout(() => renderConnStatus(hub.getState()), 6000); } } catch { /* nothing to say */ } }
       composer.setFeatures(hub.hasFeature("images"), hub.hasFeature("voice"));
       if (Array.isArray(hello.commands)) {
         helloCommands = hello.commands as SlashCommand[];

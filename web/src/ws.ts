@@ -46,6 +46,8 @@ export class HubClient {
   private textDecoder = new TextDecoder();
 
   public hello: HelloFrame | null = null;
+  /** The hub said it is restarting (`hub.restarting`, docs/PHONE-DATA.md, Restarts): what it said and when; gone at the next hello. */
+  public restarting: { reason: string; build: string; text: string; at: number } | null = null;
   private features = new Set<string>();
 
   private stateListeners = new Set<(s: ConnState, hello: HelloFrame | null) => void>();
@@ -139,7 +141,11 @@ export class HubClient {
       } catch {
         return;
       }
+      if (frame.t === "hub.restarting") {
+        this.restarting = { reason: String(frame.reason ?? ""), build: String(frame.build ?? ""), text: String(frame.text ?? ""), at: Date.now() };
+      }
       if (frame.t === "hello") {
+        this.restarting = null;
         this.hello = frame as HelloFrame;
         this.features = new Set(this.hello.features ?? []);
         this.inflater = this.hello.z === "deflate" ? new RawInflater() : null;
