@@ -21,7 +21,9 @@
 #      The whole output goes to <git-dir>/land-windows.log.
 #   4. nothing of the gate stays on the VM: a sweep stops every process it made (the run's shell and its children, cargo, nextest, rustc, the test
 #      programs and their stand-ins: whatever runs from or names C:\bp\gate) and deletes C:\bp\gate\tmp, before each run (what a killed gate left) and
-#      after it, on every exit: passed, failed, timed out, interrupted or terminated. Other lanes' processes are never touched.
+#      after it, on every exit: passed, failed, timed out, interrupted or terminated. Other lanes' processes are never touched. On bp-win the
+#      sweep removes all of C:\bp\gate, before the run (whatever any earlier gate left there) and after it: the UI test box keeps nothing of
+#      the gate between runs, and a bp-win run builds from scratch. bp-winbuild, the usual VM, keeps its repository and target dir.
 #   5. the verdict: main itself is not green on Windows, so a test listed in scripts/land-windows-known.txt (each with why) does not hold a landing when it
 #      fails; any other failure does, and so does a Windows build that fails. Flaky passes, known failures, and known ones that pass again are named.
 # Exit: 0 passed; 1 the tests (or the Windows build) failed; 75 held: no VM could run it, with one line naming each VM tried and why.
@@ -143,8 +145,17 @@ $f = "$g\run.pid"; if (Test-Path $f) { $r = 0; if ([int]::TryParse((Get-Content 
 do { $n = $hit.Count; foreach ($p in $all) { $pp = [int]$p.ParentProcessId
   if ($hit.ContainsKey($pp) -and -not $hit.ContainsKey([int]$p.ProcessId) -and $p.CreationDate -ge $by[$pp].CreationDate) { $hit[[int]$p.ProcessId] = 1 } } } while ($hit.Count -ne $n)
 $gone = @(); foreach ($id in @($hit.Keys)) { if (-not $mine.ContainsKey($id)) { $gone += "$($by[$id].Name)#$id"; Stop-Process -Id $id -Force } }
-Start-Sleep -Milliseconds 500; Remove-Item -Recurse -Force "$g\tmp", $f
-"sweep: stopped $($gone.Count)$(if ($gone.Count) { ": " + ($gone -join " ") }); C:\bp\gate\tmp removed"'
+Start-Sleep -Milliseconds 500
+@REMOVE@
+"sweep: stopped $($gone.Count)$(if ($gone.Count) { ": " + ($gone -join " ") }); $what"'
+# What goes with them: on bp-winbuild (the gate's usual VM) C:\bp\gate\tmp, keeping the repository and the target dir for an incremental build;
+# on bp-win (the UI test box, the gate's only when bp-win-ui was free) all of C:\bp\gate, before the run (whatever any earlier gate left) and
+# after it: nothing of the gate stays on the UI box between runs, and a bp-win run builds from scratch (rd handles the target dir's long paths).
+case "$vm" in
+  bp-win) remove='cmd /c "rd /s /q \\?\C:\bp\gate" 2>$null; $what = if (Test-Path $g) { "C:\bp\gate NOT fully removed" } else { "C:\bp\gate removed (all of it: this VM keeps nothing of the gate)" }';;
+  *) remove='Remove-Item -Recurse -Force "$g\tmp", $f; $what = "C:\bp\gate\tmp removed"';;
+esac
+sweep_ps=$(printf '%s' "$sweep_ps" | R="$remove" awk '$0 == "@REMOVE@" { print ENVIRON["R"]; next } { print }')
 sweep_cmd="powershell -NoProfile -NonInteractive -EncodedCommand $(printf '%s' "$sweep_ps" | iconv -f utf-8 -t utf-16le | base64 -w0)"
 sweep() { # sweep WHEN: what it stopped goes to the log, and is said when it found any
   out=$(timeout 180 "$ssh_prog" -o BatchMode=yes -o ConnectTimeout=15 $(xo "$host") "$host" "$sweep_cmd" 2>&1 | tr -d '\r' | grep -a '^sweep:') || out="sweep: FAILED (no answer from $host)"
