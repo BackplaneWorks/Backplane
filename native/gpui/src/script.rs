@@ -1042,7 +1042,7 @@ impl Backplane {
             if !want_key.is_empty() && sr.image_key() != want_key { return None; }
             // Each source owns its image and paint counter. A successful paint on
             // this source cannot be compared to the count on the previous source.
-            if sr.stage_text().is_empty() && sr.painted_count() > 0 && sr.stats.last_size.0 > 0 && sr.stats.last_size.1 > 0 {
+            if sr.stage_text().is_empty() && sr.painted_at_canvas_size() {
                 return Some("ready");
             }
             None
