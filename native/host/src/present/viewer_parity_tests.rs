@@ -138,8 +138,8 @@ fn record_all_flows() -> Value {
         let ob = viewer::view_action(&st, "h", &s, "board").expect("board");
         patch::merge(&mut s, &ob.patch);
         steps.push(snap_step(&st, &s, &ob.before, &root));
-        let od = pages::act_for("h", &s, "t", "diff", "", || false).expect("diff");
-        patch::merge(&mut s, &od.patch);
+        let od = pages::act_for("h", &s, "t", "revert", "ask", || false).expect("diff");
+        patch::merge(&mut s, &od.session_patch);
         steps.push(snap_step(&st, &s, &od.cmds, &root));
         flows.insert("diff".into(), Value::Array(steps));
     }

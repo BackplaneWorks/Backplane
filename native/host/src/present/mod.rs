@@ -265,8 +265,10 @@ mod tests {
         let session = json!({"sel":"peer~t","drafts":{"@view:peer~t":"split","@view.board:peer~t":"sub/main.kicad_pcb"},"panel":false,"info":{}});
         let v = viewer::viewer_json(&st, &json!({}), &session).unwrap();
         let l: layout::Layout = serde_json::from_value(v["layout"].clone()).unwrap();
-        assert_eq!(l.tiles().len(), 2, "must not invent a sibling schematic on linked thread");
+        // legacy Split on a picked board watches the schematic beside it, so the migrated layout carries that sibling (no probe of the other machine)
+        assert_eq!(l.tiles().len(), 3, "Split on a picked board keeps its sibling schematic on a linked thread");
         assert_eq!(l.tile("pcb").unwrap().source, "sub/main.kicad_pcb");
+        assert_eq!(l.tile("sch").unwrap().source, "sub/main.kicad_sch");
         assert!(!v["layout"].to_string().contains(remote_root));
         assert!(!v["layout"].to_string().contains(remote_wt));
 
@@ -527,6 +529,7 @@ mod tests {
         assert_eq!(v_og["tiles"]["t2"]["key"], format!("0|{root}|{root}/mfg/older"));
 
         std::fs::remove_dir_all(d.join("mfg")).unwrap();
+        viewer::refresh_gerber_sets_for_root(&root); // what a watch start does: the picture itself touches no file
         let v_vanished = viewer::viewer_json(&st, &json!({}), &sess_a).unwrap();
         assert_eq!(v_vanished["tiles"]["t2"]["key"], "");
         assert_eq!(v_vanished["tiles"]["t2"]["empty"], "No Gerber files in this project yet");
@@ -609,10 +612,9 @@ mod tests {
                 crate::session::patch::merge(&mut s_leg, &orv.patch);
                 continue;
             }
-            if let Some(o) = viewer::view_action(&st, "h", &s_leg, act) {
-                assert!(o.patch["drafts"].get("@view.layout:t").is_none(), "legacy action {act:?} must never write @view.layout");
-                crate::session::patch::merge(&mut s_leg, &o.patch);
-            }
+            let o = viewer::view_action(&st, "h", &s_leg, act).unwrap_or_else(|| panic!("legacy action {act:?} must be supported"));
+            assert!(o.patch["drafts"].get("@view.layout:t").is_none(), "legacy action {act:?} must never write @view.layout");
+            crate::session::patch::merge(&mut s_leg, &o.patch);
         }
 
         // 11. Item 2: Entering multi-tile from legacy Review preserves BOTH Review and Board;
