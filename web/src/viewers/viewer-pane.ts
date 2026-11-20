@@ -6,7 +6,7 @@
 import { onLocaleChange, t } from "../i18n";
 import type { ViewerHostApi } from "../app";
 import { decodeCbor, decodePlot2DFrame, isPlotFrame, type CborValue, type PlotChunk } from "./cbor";
-import { mountDiffPane, mountFilesPane, mountReviewPane, mountTerminalPane, type PaneHandle } from "./panes";
+import { mountDiffPane, mountFilesPane, mountReviewPane, type PaneHandle } from "./panes";
 import { Plot2DViewer, type LayerMasks } from "./plot2d";
 import { Solid3DViewer } from "./solid3d";
 
@@ -95,7 +95,7 @@ function isLayerPage(p: string): boolean {
 }
 
 function isNonPlotPane(p: string): boolean {
-  return p === "files" || p === "diff" || p === "review" || p === "terminal";
+  return p === "files" || p === "diff" || p === "review";
 }
 
 export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
@@ -160,6 +160,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   let filesInfo: ViewerFilesReply = {};
   let mechParts: string[] = [];
   let selectedMech = "";
+  let selectedPath = "";
 
   // Follow agent state
   let followOn = false;
@@ -220,6 +221,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   }
 
   function currentFileName(): string {
+    if (selectedPath) return basename(selectedPath);
     if (page === "board" || page === "3d") return basename(filesInfo.pcb);
     if (page === "schematic") return basename(filesInfo.sch);
     if (page === "mech") return basename(selectedMech);
@@ -551,19 +553,19 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     renderHeader();
 
     if (isNonPlotPane(page)) {
-      // Non-plot panes (Files, Diff, Review, Terminal) use their own data/1 RPCs directly.
+      // Non-plot panes (Files, Diff, Review) use their own data/1 RPCs directly.
       void api.hub.rpc("viewer.watch", { thread: threadId, kind: "" }).catch(() => {});
       if (page === "files") {
-        activePane = mountFilesPane(stage, api, threadId, (kind) => {
+        activePane = mountFilesPane(stage, api, threadId, (kind, relPath) => {
           page = kind;
+          selectedPath = relPath;
+          if (kind === "mech") selectedMech = relPath;
           void startWatch(false);
         });
       } else if (page === "diff") {
         activePane = mountDiffPane(stage, api, threadId);
       } else if (page === "review") {
         activePane = mountReviewPane(stage, api, threadId);
-      } else if (page === "terminal") {
-        activePane = mountTerminalPane(stage, api, threadId);
       }
       return;
     }
@@ -622,7 +624,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
           const ml = await api.hub.rpc<{ parts?: string[]; primary?: string }>("mech.list", { thread: threadId });
           if (gen !== watchGen) return;
           mechParts = Array.isArray(ml.parts) ? ml.parts : [];
-          selectedMech = ml.primary || mechParts[0] || "";
+          if (!selectedMech) selectedMech = ml.primary || mechParts[0] || "";
           renderHeader();
         } catch (err) {
           if (gen !== watchGen) return;
@@ -638,6 +640,9 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       params.path = selectedMech;
     } else {
       params.kind = page; // "board" | "schematic" | "3d" | "gerbers"
+      if (selectedPath && (page === "board" || page === "schematic")) {
+        params.path = selectedPath;
+      }
       if (page === "3d" && !force && solid3d) {
         const kept = solid3d.keptToken();
         if (kept) params.kept = kept;
@@ -774,6 +779,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       }
       // Rule (3): switching pages sends the destination page's viewer.watch directly (no separate stop first).
       page = kind;
+      selectedPath = "";
       void startWatch(false);
     },
     reconcileHas(has: RailHas) {

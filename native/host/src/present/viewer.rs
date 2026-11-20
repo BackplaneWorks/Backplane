@@ -1918,14 +1918,22 @@ mod tests {
 
     #[test]
     fn gerbers_layer_reply_exposes_gerber_layers_and_modes() {
-        let r = layer_reply("gerbers", (1 << 14) | (1 << 12) | (1 << 24), 0, "", "", "").expect("gerbers layer reply");
+        let present = (1 << 14) | (1 << 12) | (1 << 24);
+        let r = layer_reply("gerbers", present, 0, "", "", "").expect("gerbers layer reply");
         assert_eq!(r["layerModes"], json!(true));
         let names: Vec<&str> = r["layerList"].as_array().unwrap().iter().filter_map(|row| row["name"].as_str()).collect();
         assert!(names.contains(&"F.Mask") && names.contains(&"Drills") && names.contains(&"F.Fab"), "{names:?}");
-        let picked = layer_reply("gerbers", (1 << 14) | (1 << 12), 0, "", "pick", "14").unwrap();
+        // `present` controls which layer cycle/mode activates (same as board: absent bits are skipped).
+        let only_mask = 1 << 14;
+        let cycled = layer_reply("gerbers", only_mask, 0, "", "cycle", "").unwrap();
+        assert_eq!(cycled["lift"], json!(14), "cycle picks only a present layer bit");
+        assert_eq!(cycled["layerHead"], json!("Layer: F.Mask"));
+        let picked = layer_reply("gerbers", present, 0, "", "pick", "14").unwrap();
         assert_eq!(picked["layerHead"], json!("Layer: F.Mask"));
         assert_eq!(picked["lift"], json!(14));
-        let toggled = layer_reply("gerbers", (1 << 14) | (1 << 12), 0, "", "toggle", "14").unwrap();
+        let toggled = layer_reply("gerbers", present, 0, "", "toggle", "14").unwrap();
         assert_eq!(toggled["off"], json!(1 << 14));
+        // Existing phones sending kind="board" continue to work unchanged.
+        assert!(layer_reply("board", present, 0, "", "", "").is_some());
     }
 }
