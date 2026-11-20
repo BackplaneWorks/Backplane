@@ -1894,6 +1894,7 @@ gpui.this.thread.orders.the.project = このスレッドでプロジェクトの
 gpui.tokens.cost.and.context.the = トークン・コスト・コンテキスト：スレッドの数値
 gpui.commands = コマンド
 gpui.newer = 新しい方
+viewer.gerbers.older.board = 基板より古い
 gpui.older = 古い方
 gpui.b.replying.to = ↩ 返信中：{line}
 gpui.b.in.reply.to = ↩ 返信先：{quote}

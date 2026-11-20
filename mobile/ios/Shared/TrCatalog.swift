@@ -2231,6 +2231,7 @@ gpui.this.thread.orders.the.project	This thread orders the project's parts	こ�
 gpui.tokens.cost.and.context.the	Tokens, cost and context: the thread's numbers	トークン・コスト・コンテキスト：スレッドの数値	Tokens, coste y contexto: los números del hilo
 gpui.commands	Commands	コマンド	Comandos
 gpui.newer	Newer	新しい方	Más recientes
+viewer.gerbers.older.board	Older than the board	基板より古い	Anterior a la placa
 gpui.older	Older	古い方	Anteriores
 gpui.b.replying.to	↩ Replying to: {line}	↩ 返信中：{line}	↩ Respondiendo a: {line}
 gpui.b.in.reply.to	↩ In reply to: {quote}	↩ 返信先：{quote}	↩ En respuesta a: {quote}

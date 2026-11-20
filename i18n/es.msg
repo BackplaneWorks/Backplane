@@ -1871,6 +1871,7 @@ gpui.this.thread.orders.the.project = Este hilo pide las piezas del proyecto
 gpui.tokens.cost.and.context.the = Tokens, coste y contexto: los números del hilo
 gpui.commands = Comandos
 gpui.newer = Más recientes
+viewer.gerbers.older.board = Anterior a la placa
 gpui.older = Anteriores
 gpui.b.replying.to = ↩ Respondiendo a: {line}
 gpui.b.in.reply.to = ↩ En respuesta a: {quote}

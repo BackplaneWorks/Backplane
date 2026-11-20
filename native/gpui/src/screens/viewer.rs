@@ -456,7 +456,7 @@ fn plot_pane_inner(cx: &mut Context<Backplane>, light: bool, slot: usize, open: 
     if !frame.none.is_empty() {
         if editing {
             let row = if actions.is_some() { bar(light) } else { div().flex().items_center().gap_2().px_3().py_2() };
-            let el = row.child(div().flex_1().min_w_0().text_color(theme::color(light, "dim")).child(trs(&super::histbar::none_words(&frame.none)))).children(actions.map(|a| div().flex().items_center().child(a.controls.actions).child(a.controls.close))).into_any_element();
+            let el = row.child(div().flex_1().min_w_0().text_color(theme::color(light, "dim")).child(trs(&super::histbar::none_words(&frame.none)))).children(actions.map(|a| div().flex().items_center().child(a.controls.close))).into_any_element();
             return super::histbar::under(cx, light, pv, &vkey, hb, el);
         }
         let rk = if frame.key.is_empty() { want.clone() } else { frame.key.clone() };
@@ -546,7 +546,7 @@ fn plot_pane_inner(cx: &mut Context<Backplane>, light: bool, slot: usize, open: 
                 .child(div().size(px(9.)).bg(rgb(0xe5484d))).child(trs("board only"))
                 .child(div().ml_1().w(px(9.)).h(px(9.)).flex().flex_col().justify_between().children((0..3).map(|_| div().h(px(2.)).bg(rgb(0x30a46c))))).child(trs("Gerbers only")))); }
             if frame.warn {
-                let label = t("gpui.older");
+                let label = t("viewer.gerbers.older.board");
                 tools.push(content("gerbers-warning", label.clone(), div().text_size(crate::scale::tpx(11.)).text_color(c("warn")).child(label)));
             }
         }
@@ -907,7 +907,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
     let header = |cx: &mut Context<Backplane>| {
         let facts = &viewer["identity"];
         let identity = Identity::new(page_key, if facts["page"] == page_key { facts } else { &Value::Null });
-        let controls = Controls { actions: Empty.into_any_element(), tools: header_actions(cx, light, thread, target, diff_on),
+        let controls = Controls { tools: header_actions(cx, light, thread, target, diff_on),
             close: viewer_close(cx, light, Some(page_key)).into_any_element() };
         Header { identity, controls }
     };
