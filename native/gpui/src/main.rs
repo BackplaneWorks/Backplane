@@ -108,7 +108,10 @@ impl Backplane {
         screens::place::watch(cx);screens::devbar::watch(cx);screens::hubbar::watch(cx,hub_at,&token_file);
         cx.spawn(async move |weak,cx|{while let Ok(event)=events.recv().await {if weak.update(cx,|this,cx|this.receive(event,cx)).is_err(){break;}}}).detach();
         // the keys held show their hints only in the window in use (keys::hint_mode): its focus coming or going draws them again
-        cx.observe_window_activation(window,|_,_,cx|cx.notify()).detach();
+        cx.observe_window_activation(window,|_,window,cx|{
+            // the window's active state as GPUI keeps it, for the KiCad tests (the Linux focus proxy must leave it right: embed_pointer_keys_e2e P4)
+            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some(){eprintln!("GPUI_LOG {}",serde_json::json!({"window_active":window.is_window_active()}));}
+            cx.notify()}).detach();
         // streamer mode as this device left it (on, or watching for a capture), before anything identifying is drawn twice
         cx.spawn(async move |weak,cx|{let _=weak.update(cx,|this,cx|this.streamer_apply(cx));}).detach();
         cx.observe(&input,|this,_,cx|{

@@ -8,7 +8,8 @@
 #   P1 control: with the pointer over the composer the keys land in it
 #   P2 with the pointer over the pane they land in the composer too (else: which window got them, and whether KiCad opened something)
 #   P3 a click in the pane (KiCad's keys), a click in the composer and at once a key over the pane, RACE (20) times: all in the composer
-#   P4 another X window focused and back: keys over the pane in the composer   P5 the wheel over the pane still zooms KiCad (no click)
+#   P4 another X window focused and back: Backplane inactive then active, keys over the pane in the composer
+#   P6 a dead key (us intl) and a letter over the pane compose in the composer   P5 the wheel over the pane still zooms KiCad (no click)
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=lib/env_xvfb.sh
@@ -29,7 +30,8 @@ cat >"$OUT/script.json" <<JSON
 [$OPEN,{"kicad":{"wait_painted":120000,"kind":"PCB","tag":"up"}},{"wait":3000},{"kicad":{"report":true,"tag":"ready"}},{"mark":"ready"},
  {"wait":${COMPOSER_READ_MS:-90000}},{"read":"composer"},{"mark":"done"},{"wait":600000}]
 JSON
-HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" \
+# a UTF-8 locale for the client, as a person has (its compose table: P6)
+LC_ALL=C.UTF-8 HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" \
   --script "$OUT/script.json" --exit-after 300 >"$OUT/client.log" 2>&1 &
 CP=$!; track_pid "$CP"
 wait_for_log "$OUT/client.log" '"name":"ready","event":"mark"' 600 || { echo "FAIL KiCad never came up"; exit 1; }
@@ -87,19 +89,29 @@ for k in $(seq "$RACE"); do
 done
 say "after the race"
 W2=$(kicad_wins)
-# P4: another X window takes the focus and gives it back (Backplane inactive, then active again), then keys with the pointer over the pane
-xmessage -geometry 300x80+20+20 "other window" & XM=$!
-sleep 1.5
-# floating where it asked (i3 would tile it beside Backplane and move the composer and the pane)
-[ "${KEMBED_WM:-i3}" = mutter ] || i3-msg -s "$OUT/i3.sock" '[class="(?i)xmessage"] floating enable, move position 20 20' >/dev/null 2>&1; sleep 0.5
-OW=$(xwininfo -root -tree 2>/dev/null | grep -m1 '"other window"\|"xmessage"' | awk '{print $1}')
-[ -n "$OW" ] && python3 "$XINPUT_PY" click 60 50 >/dev/null; sleep 0.8
+# P4: another X window takes the focus and gives it back (Backplane inactive, then active again), then keys with the pointer over the pane.
+# A zenity entry (it takes the keyboard), floating where it asked, given the focus as a pager would (_NET_ACTIVE_WINDOW)
+A0=$(grep -c '"window_active":' "$OUT/client.log" || true)
+zenity --entry --title "other window" --text other >/dev/null 2>&1 & XM=$!
+OW=""; for _ in $(seq 40); do OW=$(xwininfo -root -tree 2>/dev/null | grep -m1 '"other window"' | awk '{print $1}'); [ -n "$OW" ] && break; sleep 0.25; done
+[ "${KEMBED_WM:-i3}" = mutter ] || i3-msg -s "$OUT/i3.sock" '[title="other window"] floating enable, move position 20 20' >/dev/null 2>&1; sleep 0.5
+[ -n "$OW" ] && python3 "$KEMBED_LIB/wm_ctl.py" activate "$OW" >/dev/null 2>&1; sleep 1.0
 say "another window focused"
+FOC_OTHER=$(xfocus_chain | grep -q "other window\|zenity" && echo 1 || echo 0)
+INACTIVE=$(tail -n +"$((A0 + 1))" <(grep '"window_active":' "$OUT/client.log") | grep -q '"window_active":false' && echo 1 || echo 0)
+A1=$(grep -c '"window_active":' "$OUT/client.log" || true)
 python3 "$XINPUT_PY" click "$CX" "$CY" >/dev/null; sleep 0.8
+ACTIVE=$(tail -n +"$((A1 + 1))" <(grep '"window_active":' "$OUT/client.log") | tail -1 | grep -q '"window_active":true' && echo 1 || echo 0)
 python3 "$XINPUT_PY" move "$PAX" "$PAY" >/dev/null; sleep 0.5
 type_word back; sleep 0.5
 say "back, typed over the pane"
 kill "$XM" 2>/dev/null
+# P6: a dead key over the pane (us intl: ' is dead_acute, then e): the composed letter reaches the composer, nothing of it KiCad
+if [ "${DEADKEY:-1}" = 1 ] && command -v setxkbmap >/dev/null; then
+  setxkbmap -layout us -variant intl 2>/dev/null; sleep 1.0
+  python3 "$XINPUT_PY" key dead_acute >/dev/null; sleep 0.2; python3 "$XINPUT_PY" key e >/dev/null; sleep 0.5
+  setxkbmap -layout us 2>/dev/null; sleep 0.5
+fi
 # P5: the wheel over the pane still reaches KiCad's canvas with Backplane holding the keys (no click): the pane's picture changes
 shot wheel-before; for _ in 1 2 3; do python3 "$XINPUT_PY" wheel "$PAX" "$PAY" 1 >/dev/null; sleep 0.2; done; sleep 1.5; shot wheel-after
 WHEEL=$(python3 - "$OUT/shots/wheel-before.png" "$OUT/shots/wheel-after.png" "$PAX" "$PAY" <<'PY'
@@ -127,5 +139,9 @@ check "P2 with the pointer over the pane (no click) the keys land in the compose
 RS=$(python3 -c 'import json,sys; t=json.loads(sys.argv[1]) or ""; print(t.count("r"))' "$TEXT")
 check "P3 the race: a click back into Backplane and a key at once over the pane, $RACE times: every key in the composer" "$([ "$RS" -ge "$RACE" ] && echo 1 || echo 0)" "$RS of $RACE"
 check "P4 another window focused and back: keys over the pane land in the composer" "$(echo "$TEXT" | grep -q "back" && echo 1 || echo 0)" "$TEXT"
+check "P4 (precondition) the other window had the keyboard" "$FOC_OTHER"
+check "P4 Backplane went inactive while the other window had the keyboard" "$INACTIVE"
+check "P4 and active again after the click back (the keyboard on the proxy)" "$ACTIVE"
+[ "${DEADKEY:-1}" = 1 ] && check "P6 a dead key and a letter typed over the pane compose in the composer (é)" "$(python3 -c 'import json,sys; print(1 if "\u00e9" in (json.loads(sys.argv[1]) or "") else 0)' "$TEXT")" "$TEXT"
 check "P5 the wheel over the pane still reaches KiCad (its picture changes, no click)" "$(python3 -c 'import sys; print(1 if float(sys.argv[1] or 0) > 0.05 else 0)' "${WHEEL:-0}")" "${WHEEL:-?}"
 finish_suite "embed_pointer_keys_e2e ($EMBED_MODE, case $CASE)"
