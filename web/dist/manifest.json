@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 37759,
+  "totalAssetGzipBytes": 38068,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -70,10 +70,10 @@
     "web/src/sidebar.ts": "2412c1ec3f66be04625d093ec1cc986f1bee222e14bf5306a878b710919dc60a",
     "web/src/viewers/cbor.ts": "98a300dad42941cef83acf8748b9e8a14e376ae3fbbd4a18178fd56b3ec68af1",
     "web/src/viewers/mesh-worker.ts": "b7a5094d136cdcba42132ab54615a1518b7e6a13eb232e055065d9d00ba1f4ab",
-    "web/src/viewers/plot2d.ts": "83e15a35339830ef2714d9c5aa1a323b89e9477a70d62b0896751b98f8fe1f4d",
+    "web/src/viewers/plot2d.ts": "5b5166ad52a1012a8b35f73e113cc397b88361fefde9faacec73b8ddce43826a",
     "web/src/viewers/responsive.css": "33fbd36ada26a717375dbe5b1cd61782f656d73f80fa1173ee7f1ea10a26aa3d",
     "web/src/viewers/solid3d.ts": "3706d9990c4ae9a6100183235aae7b03c4e62f45827829db91647d141843075f",
-    "web/src/viewers/viewer-pane.ts": "7c0c7657cc74de30576afed003a679efc70965e11edafb635e3d9ed8e2a84c8b",
+    "web/src/viewers/viewer-pane.ts": "f1c11fa12d9edb0e1e4a3b3fa0cd10c4cb3e925f0740a80f4b59e12880924dd3",
     "web/src/ws.ts": "bff5636759f3871df89395c792d5c69aef90a5e1e9ecd8247ac522ebb40badc9",
     "web/build.ts": "c32254f4abe4cea4e8e1f65aeced47aae007c0efd292236b2cf65d296651bcca",
     "assets/web/favicon.svg": "5b0f22a3329f59809216aabe58d8dbbedbd46d29e4a2373a727529daa2441a2c",
@@ -81,9 +81,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 85098,
-      "gzipBytes": 25599,
-      "sha256": "2fb058d35f384db339089c32d2e8d80aa714fc615e774156ee7200fa9d0e28eb"
+      "bytes": 85918,
+      "gzipBytes": 25908,
+      "sha256": "295c92fb868890a40806d6242336c11c6e919f1ce56560cd293f8b6361055d69"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,

@@ -10,11 +10,10 @@ import { Plot2DViewer, type LayerMasks } from "./plot2d";
 import { Solid3DViewer } from "./solid3d";
 
 interface LayerRow {
-  id: number;
-  label: string;
-  color?: string;
+  layer: number;
+  name: string;
   on?: boolean;
-  focus?: boolean;
+  active?: boolean;
 }
 
 interface LayersReply {
@@ -24,11 +23,19 @@ interface LayersReply {
   dim: number;
   lift: number;
   layerList?: LayerRow[];
+  layerMarks?: LayerRow[];
   layerHead?: string;
   layerMode?: number;
-  layerModes?: string[];
+  layerModes?: boolean;
   layerReset?: boolean;
 }
+
+type PendingFrame =
+  | { kind: "bin"; buf: ArrayBuffer }
+  | { kind: "none"; key: string; none: string; retryable: boolean };
+
+const MAX_PENDING_FRAMES = 64;
+const MAX_PENDING_BYTES = 16 << 20;
 
 interface ViewerFilesReply {
   root?: string;
@@ -134,8 +141,8 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   let watchGen = 0;
   let watchPending = false;
   let activeKeys = new Set<string>();
-  let pendingBinary: ArrayBuffer[] = [];
-  let pendingNone: Array<{ key: string; none: string; retryable: boolean }> = [];
+  let pendingQueue: PendingFrame[] = [];
+  let pendingBytes = 0;
   let heldChunks = new Map<string, PlotChunk[]>();
   let filesInfo: ViewerFilesReply = {};
   let mechParts: string[] = [];
@@ -308,10 +315,10 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     }
     frag.append(head);
 
-    if (Array.isArray(lastLayers.layerModes) && lastLayers.layerModes.length > 0) {
+    if (lastLayers.layerModes) {
       const modes = document.createElement("div");
       modes.className = "bp-v-layers-modes";
-      lastLayers.layerModes.forEach((lbl, idx) => {
+      ["All", "Dim", "Only"].forEach((lbl, idx) => {
         const b = document.createElement("button");
         b.type = "button";
         b.className = "bp-v-btn" + (lastLayers?.layerMode === idx ? " is-on" : "");
@@ -322,26 +329,33 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       frag.append(modes);
     }
 
+    const presentColors = plot2d?.presentColors() ?? new Map<number, number>();
+    const allRows = (lastLayers.layerList || []).concat(lastLayers.layerMarks || []);
     const list = document.createElement("div");
     list.className = "bp-v-layers-list";
-    for (const row of lastLayers.layerList || []) {
+    for (const row of allRows) {
+      const col = presentColors.get(row.layer);
+      if (col === undefined) continue;
       const item = document.createElement("div");
-      item.className = "bp-v-layer-row" + (row.focus ? " is-focus" : "");
+      item.className = "bp-v-layer-row" + (row.active ? " is-focus" : "");
 
       const chk = document.createElement("input");
       chk.type = "checkbox";
       chk.checked = row.on !== false;
-      chk.addEventListener("change", () => void syncLayers("toggle", String(row.id)));
+      chk.addEventListener("change", () => void syncLayers("toggle", String(row.layer)));
 
       const sw = document.createElement("span");
       sw.className = "bp-v-layer-swatch";
-      if (row.color) sw.style.background = row.color;
+      const r = (col >>> 16) & 0xff;
+      const g = (col >>> 8) & 0xff;
+      const b = col & 0xff;
+      sw.style.background = row.on !== false ? `rgb(${r},${g},${b})` : `rgba(${r},${g},${b},0.2)`;
 
       const lbl = document.createElement("button");
       lbl.type = "button";
       lbl.className = "bp-v-layer-name";
-      lbl.textContent = row.label;
-      lbl.addEventListener("click", () => void syncLayers("pick", String(row.id)));
+      lbl.textContent = row.name;
+      lbl.addEventListener("click", () => void syncLayers("pick", String(row.layer)));
 
       item.append(chk, sw, lbl);
       list.append(item);
@@ -368,9 +382,10 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       const masks: LayerMasks = {
         off: Number(res.off) || 0,
         dim: Number(res.dim) || 0,
-        lift: Number(res.lift) || 0,
+        lift: typeof res.lift === "number" ? res.lift : 255,
       };
       plot2d?.setLayers(masks);
+      renderHeader();
       if (layersOpen) renderLayersPopover();
     } catch {
       // ignore transient layer errors
@@ -448,13 +463,17 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     setOverlay("none");
   }
 
+  function clearPending(): void {
+    pendingQueue = [];
+    pendingBytes = 0;
+  }
+
   async function startWatch(force: boolean): Promise<void> {
     if (!threadId || !page) return;
     const gen = ++watchGen;
     activeKeys.clear();
-    watchPending = true;
-    pendingBinary = [];
-    pendingNone = [];
+    watchPending = false;
+    clearPending();
     clearStage();
     renderHeader();
     setOverlay("loading", "Loading…");
@@ -526,23 +545,23 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       }
     }
 
+    watchPending = true;
     try {
       const res = await api.hub.rpc<{ keys?: string[] }>("viewer.watch", params);
       if (gen !== watchGen) return;
       activeKeys = new Set(Array.isArray(res.keys) ? res.keys : []);
       watchPending = false;
-      const queuedBin = pendingBinary;
-      const queuedNone = pendingNone;
-      pendingBinary = [];
-      pendingNone = [];
-      for (const buf of queuedBin) handleBinary(buf);
-      for (const item of queuedNone) handlePlotNone(item.key, item.none, item.retryable);
+      const queued = pendingQueue;
+      clearPending();
+      for (const item of queued) {
+        if (item.kind === "bin") handleBinary(item.buf);
+        else handlePlotNone(item.key, item.none, item.retryable);
+      }
     } catch (err) {
       if (gen !== watchGen) return;
       watchPending = false;
       activeKeys.clear();
-      pendingBinary = [];
-      pendingNone = [];
+      clearPending();
       const msg = err instanceof Error ? err.message : String(err);
       const permanent = /no gerbers|not in this project|another machine/i.test(msg);
       setOverlay(permanent ? "empty" : "error", msg, !permanent);
@@ -551,7 +570,9 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
 
   function handlePlotNone(key: string, none: string, retryable: boolean): void {
     if (watchPending) {
-      if (pendingNone.length < 32) pendingNone.push({ key, none, retryable });
+      if (pendingQueue.length < MAX_PENDING_FRAMES) {
+        pendingQueue.push({ kind: "none", key, none, retryable });
+      }
       return;
     }
     if (!activeKeys.has(key)) return;
@@ -561,7 +582,10 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   function handleBinary(buf: ArrayBuffer): void {
     if (!page) return;
     if (watchPending) {
-      if (pendingBinary.length < 64) pendingBinary.push(buf);
+      if (pendingQueue.length < MAX_PENDING_FRAMES && pendingBytes + buf.byteLength <= MAX_PENDING_BYTES) {
+        pendingQueue.push({ kind: "bin", buf });
+        pendingBytes += buf.byteLength;
+      }
       return;
     }
     const bytes = new Uint8Array(buf);
@@ -617,14 +641,18 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
         mechParts = [];
         selectedMech = "";
         heldChunks.clear();
+        followOn = false;
+        followPaused = false;
+        followSeq = 0;
         layerOwn = 0;
         layerFocus = "";
         layerPresent = 0;
         lastLayers = null;
         if (api.hub.hasFeature("follow")) {
           void api.hub
-            .rpc<{ on?: boolean; paused?: boolean; seq?: number }>("viewer.follow", { thread: threadId })
+            .rpc<{ on?: boolean; paused?: boolean; seq?: number }>("viewer.follow", { thread: nextThread })
             .then((f) => {
+              if (nextThread !== threadId) return;
               followOn = !!f.on;
               followPaused = !!f.paused;
               followSeq = Number(f.seq) || 0;
@@ -632,6 +660,12 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
             })
             .catch(() => {});
         }
+      }
+      if (kind !== page) {
+        layerOwn = 0;
+        layerFocus = "";
+        layerPresent = 0;
+        lastLayers = null;
       }
       // Rule (3): switching pages sends the destination page's viewer.watch directly (no separate stop first).
       page = kind;
@@ -645,8 +679,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     close() {
       watchGen++;
       watchPending = false;
-      pendingBinary = [];
-      pendingNone = [];
+      clearPending();
       if (threadId) {
         void api.hub.rpc("viewer.watch", { thread: threadId, kind: "" }).catch(() => {});
       }
