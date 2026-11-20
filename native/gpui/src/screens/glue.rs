@@ -260,17 +260,8 @@ impl Backplane {
         let thread = &self.data["thread"];
         let owner = thread["id"].as_str().unwrap_or("");
         let open = super::viewer::is_open(thread);
-        let switched = self.screens.plots.owner != owner;
-        let closed = !open && !self.screens.solids.is_empty();
-        if switched || closed {
-            self.screens.retired_solids.extend(self.screens.solids.drain().map(|(_, page)| page));
-            self.screens.early_solids = Default::default();
-        }
         self.screens.plots.sync(owner, open, thread["viewer"]["open"] == "split");
         self.sync_solid_slot();
-        if let Some((_, key)) = &self.screens.solid_slot {
-            if let Some(frame) = self.screens.early_solids.take(key) { self.plot_received(frame, cx); }
-        }
         self.draft_from_hub(cx);
         // the pressed rail kind gives way when the hub marks it (or after PRESS_WAIT): a streamed picture arriving first does not flicker it back
         if let Some(p) = self.screens.rail_pending.clone() {
@@ -295,29 +286,34 @@ impl Backplane {
     fn sync_solid_slot(&mut self) {
         let thread = &self.data["thread"];
         let viewer = &thread["viewer"];
-        let slot = match (thread["id"].as_str(), viewer["open"].as_str()) {
-            (Some(owner), Some(open @ ("3d" | "mech" | "split"))) if !thread["diff"].is_object() => {
-                let (id, source) = if open == "split" { ("3d", &viewer["panes"][2]["key"]) } else { ("main", &viewer["key"]) };
-                source.as_str().filter(|key| !key.is_empty()).map(|key| ((owner.to_owned(), id.to_owned()), key.to_owned()))
-            }
+        let source = match viewer["open"].as_str() {
+            Some("split") => viewer["panes"][2]["key"].as_str(),
+            Some("3d" | "mech") => viewer["key"].as_str(),
             _ => None,
         };
+        let slot = source.filter(|s| !s.is_empty() && !thread["diff"].is_object()).map(str::to_owned);
         self.screens.solid_slot = slot;
     }
 
     /// A plot-lane frame arrived on the socket: a solid (3D) frame goes to the 3D page, anything else to the plot store.
     pub(crate) fn plot_received(&mut self, bytes: Vec<u8>, cx: &mut Context<Self>) {
         let key = crate::viewers::solid::peek_key(&bytes);
+        if let Some(k) = &key { eprintln!("GPUI_LOG {}", serde_json::json!({"plot_frame":{"key":k,"bytes":bytes.len()}})); }
         if !key.as_deref().is_some_and(crate::viewers::solid::is_solid_key) {
             if let Err(e) = self.screens.plot.receive(&bytes) { eprintln!("GPUI_LOG {{\"plot\":\"{e}\"}}"); }
             return;
         }
-        let key = key.unwrap();
-        let Some((slot, _)) = self.screens.solid_slot.as_ref().filter(|(_, source)| source == &key) else {
-            self.screens.early_solids.hold(key, bytes);
-            return;
-        };
-        let slot = slot.clone();
+        // The socket watch is keyed by source. Split and the standalone 3D page
+        // can share that watch, including frames delivered before the picture.
+        let slot = key.unwrap();
+        self.screens.solid_order.retain(|key| key != &slot);
+        self.screens.solid_order.push_back(slot.clone());
+        if self.screens.solid_order.len() > 4 {
+            if let Some(i) = self.screens.solid_order.iter().position(|key| Some(key) != self.screens.solid_slot.as_ref()) {
+                let old = self.screens.solid_order.remove(i).unwrap();
+                if let Some(page) = self.screens.solids.remove(&old) { self.screens.retired_solids.push(page); }
+            }
+        }
         if !self.screens.solids.contains_key(&slot) {
             let page = cx.new(crate::viewers::solid::SolidPage::new);
             let back = self.local.viewer_backdrop(self.light()); page.update(cx, |p, _| p.set_backdrop(back));

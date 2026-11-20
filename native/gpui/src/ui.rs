@@ -797,7 +797,7 @@ impl Render for Backplane {
         if let Some(s) = self.screens.active_solid().cloned() { let (part, split) = (crate::screens::plotview::probed_part(self), self.data["thread"]["viewer"]["open"] == "split"); s.update(cx, |p, _| { p.set_backdrop(back); p.set_probe(&part); p.names_probe = !split; }); }
         for (slot, page) in &self.screens.solids {
             if page.read(cx).atlas_images() > 0 {
-                let shown = self.screens.solid_slot.as_ref().is_some_and(|(active, _)| active == slot)
+                let shown = self.screens.solid_slot.as_ref().is_some_and(|active| active == slot)
                     && crate::screens::viewer::shows_solid(&self.data["thread"]);
                 page.update(cx, |p, _| { if !shown { p.put_away(); } p.collect(window); });
             }
