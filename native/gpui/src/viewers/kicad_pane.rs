@@ -24,6 +24,24 @@ fn top_of(window: &Window) -> Option<u64> {
     })
 }
 
+/// A library editor KiCad is opening (the hub's `opening`, only while KiCad is ready): its kind, since when (epoch ms), and whether it was
+/// said not to have opened (no sign of work from KiCad for 30 s).
+pub fn opening_of(info: &Value) -> Option<(String, u64, bool)> {
+    let o = &info["opening"];
+    Some((o["kind"].as_str()?.to_string(), o["since_ms"].as_u64().unwrap_or(0), o["failed"].as_bool().unwrap_or(false)))
+}
+/// How long an opening goes unsaid: a quick open (macOS ~0.14 s, a warm second Ctrl+E) never flashes the strip.
+pub const OPENING_DWELL_MS: u64 = 400;
+/// What the strip does with library editor `kind`'s tab and its text, `ms` after its opening began (`failed`: KiCad said nothing for 30 s),
+/// `at` the tab on show. Pure.
+#[derive(Debug, PartialEq, Eq)]
+pub enum OpeningTab { Normal, Hidden, Placeholder }
+pub fn opening_tab(kind: &str, at: &str, opening: Option<&(String, u64, bool)>, now_ms: u64) -> OpeningTab {
+    match opening {
+        Some((k, since, false)) if k == kind && at != kind => if now_ms.saturating_sub(*since) < OPENING_DWELL_MS { OpeningTab::Hidden } else { OpeningTab::Placeholder },
+        _ => OpeningTab::Normal,
+    }
+}
 /// The editor tabs: (kind, label). Board, Schematic and 3D always; the symbol and footprint editors once KiCad has them (or the person asks).
 pub const TABS: &[(&str, &str)] = &[("PCB", "Board"), ("SCH", "Schematic"), ("PCB_3D", "3D"), ("SYMBOL_EDITOR", "Symbols"), ("FOOTPRINT_EDITOR", "Footprints"), ("GERBVIEW", "Gerbers"), ("SIMULATOR", "Simulation")]; // i18n-ok: wire kinds; labels go through trs
 /// The editor tab kinds shown on the pane's strip: Board, Schematic and 3D always;
@@ -1134,6 +1152,8 @@ impl KicadPane {
     fn show_kind_inner(&mut self, kind: &str, by: ShowBy, cx: &mut Context<Self>) {
         if by.takes_keys() { self.chose("show_kind"); self.want_keys = true; self.want_keys_at = Some(std::time::Instant::now()); } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
         self.chosen();
+        // the person's own choice while KiCad opens a library editor: the hub does not put that editor on show over it when it comes
+        if by.takes_keys() && opening_of(&self.info).is_some() { self.rpc("editor.kicad.chose", json!({"project": self.project, "frame": kind})); }
         if kind == frame_for(&self.open) { self.override_kind = None; } else { self.override_kind = Some(kind.to_string()); }
         self.placed = None;
         if self.attached && matches!(self.info["state"].as_str(), Some("stopped" | "failed")) { self.reattach(); }
@@ -2065,6 +2085,19 @@ mod tests {
         // a minute hidden: about ten asks, not sixty
         let (mut t, mut n) = (0u64, 1u32); while t < 60_000 { t += ms(n); n += 1; }
         assert!(n <= 10, "{n} asks in a minute");
+    }
+    #[test] fn a_library_editor_opening_is_a_placeholder_after_the_dwell_and_never_the_selected_tab() {
+        use super::{opening_tab, OpeningTab::*};
+        let o = Some(("SYMBOL_EDITOR".to_string(), 10_000u64, false));
+        assert_eq!(opening_tab("SYMBOL_EDITOR", "SCH", o.as_ref(), 10_100), Hidden, "a quick open (macOS 0.14 s) never flashes");
+        assert_eq!(opening_tab("SYMBOL_EDITOR", "SCH", o.as_ref(), 10_400), Placeholder, "past the dwell: the placeholder");
+        assert_eq!(opening_tab("SYMBOL_EDITOR", "SCH", o.as_ref(), 39_000), Placeholder, "for as long as KiCad works on it");
+        assert_eq!(opening_tab("SCH", "SCH", o.as_ref(), 12_000), Normal, "the frame on show keeps its selected tab");
+        assert_eq!(opening_tab("SYMBOL_EDITOR", "SYMBOL_EDITOR", o.as_ref(), 12_000), Normal, "once on show it is the selected tab");
+        assert_eq!(opening_tab("SYMBOL_EDITOR", "SCH", Some(&("SYMBOL_EDITOR".to_string(), 10_000, true)), 45_000), Normal, "said not opened: its tab as KiCad has it");
+        assert_eq!(opening_tab("SYMBOL_EDITOR", "SCH", None, 12_000), Normal);
+        assert_eq!(super::opening_of(&serde_json::json!({"opening": {"kind": "FOOTPRINT_EDITOR", "since_ms": 5, "failed": false}})), Some(("FOOTPRINT_EDITOR".into(), 5, false)));
+        assert_eq!(super::opening_of(&serde_json::json!({"opening": null})), None);
     }
     #[test] fn a_show_waits_only_when_the_hub_is_on_another_frame() {
         assert_eq!(super::pending_for(Some("PCB"), "PCB"), None, "the hub is on the board already: nothing to wait for (#1389 fp1: the wait never cleared)");
@@ -3138,8 +3171,25 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
     let narrow = pane.read(cx).at_px.is_some_and(|b| f32::from(b.size.width) < 520.);
     let mut row = div().id("kicad-strip").flex().items_center().gap_1().px_2().h(crate::scale::tpx(30.)).flex_shrink_0().bg(c("panel")).border_b_1().border_color(c("rule"));
     let shown = strip_tabs(&at, &have);
+    // a library editor KiCad is opening (Ctrl+E, its libraries loading): after a short dwell, its tab is a placeholder that is never
+    // selected, and the text beside the tabs says what KiCad is doing
+    let opening = if pane.read(cx).info["state"] == "ready" { opening_of(&pane.read(cx).info) } else { None };
+    let now_ms = crate::screens::kcomment::epoch_ms() as u64;
+    if opening.is_some() {
+        cx.spawn(async move |v, cx| { cx.background_executor().timer(std::time::Duration::from_millis(500)).await; let _ = v.update(cx, |_, cx| cx.notify()); }).detach();
+    }
     for (kind, label) in TABS {
         if !shown.contains(kind) { continue }
+        match opening_tab(kind, &at, opening.as_ref(), now_ms) {
+            OpeningTab::Normal => {}
+            OpeningTab::Hidden => continue,
+            OpeningTab::Placeholder => {
+                row = row.child(crate::ui::with_rect(div().id(SharedString::from(format!("kicad-tab-{kind}"))), { let k = kind.to_string(); move || format!("kicad-opening:{k}") }).when(narrow, |d| d.px_1()).when(!narrow, |d| d.px_2()).py(px(3.)).text_size(crate::scale::tpx(12.))
+                    .text_color(c("dim")).opacity(0.6).flex().items_center().gap_1()
+                    .child(crate::i18n::trs(label)).child(div().w(px(5.)).h(px(5.)).rounded_full().bg(c("accent"))));
+                continue
+            }
+        }
         let on = at == *kind; let k = kind.to_string(); let p = pane.clone();
         row = row.child(crate::ui::with_rect(div().id(SharedString::from(format!("kicad-tab-{kind}"))), { let k = kind.to_string(); move || format!("kicad-tab:{k}") }).when(narrow, |d| d.px_1()).when(!narrow, |d| d.px_2()).py(px(3.)).text_size(crate::scale::tpx(12.)).cursor_pointer()
             .text_color(c(if on { "text" } else { "dim" })).when(on, |d| d.border_b_2().border_color(c("accent"))).hover(|s| s.bg(c("raise")))
@@ -3168,7 +3218,22 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
     }
     // KiCad's long job (loading, zone fill, DRC, plot): a slim bar here instead of KiCad's own progress window (bp.12)
     let jobs = if pane.read(cx).info["state"] == "ready" { pane.read(cx).jobs.clone() } else { Vec::new() };
-    if let Some(j) = jobs.first() {
+    // a library editor on its way says so in place of the bar (one line, cut short with an ellipsis: the strip keeps its height)
+    let opening_text = opening.as_ref().filter(|(_, since, failed)| *failed || now_ms.saturating_sub(*since) >= OPENING_DWELL_MS).map(|(k, since, failed)| {
+        let editor = crate::i18n::trs(if k == "SYMBOL_EDITOR" { "Symbol Editor" } else { "Footprint Editor" }); // i18n-ok: wire frame kind
+        if *failed { (crate::i18n::tf("gpui.c.kicad.openfailed", &[("editor", editor.into())]), "warn") }
+        else {
+            let secs = (now_ms.saturating_sub(*since) / 1000).to_string();
+            match jobs.first().and_then(|j| j["title"].as_str()).filter(|t| !t.is_empty()) {
+                Some(job) => (crate::i18n::tf("gpui.c.kicad.opening", &[("editor", editor.into()), ("job", crate::i18n::trs(job).into()), ("secs", secs.into())]), "dim"),
+                None => (crate::i18n::tf("gpui.c.kicad.openingbare", &[("editor", editor.into()), ("secs", secs.into())]), "dim"),
+            }
+        }
+    });
+    if let Some((text, tone)) = opening_text {
+        mid = mid.child(crate::ui::with_rect(div().id("kicad-opening"), || "kicad:opening".to_string()).ml_2().max_w(px(320.)).overflow_hidden().whitespace_nowrap().text_ellipsis()
+            .text_size(crate::scale::tpx(11.)).text_color(c(tone)).child(text));
+    } else if let Some(j) = jobs.first() {
         let (id, f) = (j["id"].as_u64().unwrap_or(0), j["fraction"].as_f64().unwrap_or(-1.0));
         let title = j["title"].as_str().unwrap_or("").to_string(); let detail = j["detail"].as_str().unwrap_or("").to_string();
         let text = if detail.is_empty() { crate::i18n::trs(&title) } else { format!("{} · {detail}", crate::i18n::trs(&title)) };

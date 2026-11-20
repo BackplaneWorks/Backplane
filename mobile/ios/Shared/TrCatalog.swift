@@ -2535,6 +2535,9 @@ gpui.c.kicad.phase.show	KiCad is drawing the editor	KiCad がエディターを�
 gpui.c.kicad.task.wait	KiCad is running {what}; the editor follows when it ends.	KiCadが{what}を実行中です。終わるとエディターに切り替わります。	KiCad está ejecutando {what}; el editor sigue cuando termine.
 gpui.c.kicad.notice	KiCad says: {what}	KiCadからの通知: {what}	KiCad dice: {what}
 gpui.c.kicad.firstshow	{editor} did not open in KiCad ({why}). Its tab above opens it again.	{editor}がKiCadで開きませんでした ({why})。上のタブで開き直せます。	{editor} no se abrió en KiCad ({why}). Su pestaña de arriba lo vuelve a abrir.
+gpui.c.kicad.opening	Opening the {editor}: {job}… {secs} s	{editor}を開いています: {job}… {secs} 秒	Abriendo el {editor}: {job}… {secs} s
+gpui.c.kicad.openingbare	Opening the {editor}… {secs} s	{editor}を開いています… {secs} 秒	Abriendo el {editor}… {secs} s
+gpui.c.kicad.openfailed	The {editor} did not open	{editor}が開きませんでした	El {editor} no se abrió
 gpui.c.kicad.this.window.cannot.hold.another	this window cannot hold another program's (only X11 and XWayland for now)	このウィンドウには他のプログラムのウィンドウを入れられません（今は X11 と XWayland のみ）	esta ventana no puede alojar la de otro programa (solo X11 y XWayland por ahora)
 gpui.c.kicad.no.x11.connection	no X11 connection	X11 に接続できません	sin conexión X11
 gpui.c.kicad.could.not.create.container	could not create container window	コンテナウィンドウを作成できませんでした	no se pudo crear la ventana contenedora
@@ -5919,6 +5922,15 @@ web.clone.no.folders	No folders here	フォルダがありません	No hay carpe
 
     /// gpui.c.kicad.firstshow = {editor} did not open in KiCad ({why}). Its tab above opens it again.
     static func gpui_c_kicad_firstshow(editor: String, why: String) -> String { f("gpui.c.kicad.firstshow", ["editor": editor, "why": why]) }
+
+    /// gpui.c.kicad.opening = Opening the {editor}: {job}… {secs} s
+    static func gpui_c_kicad_opening(editor: String, job: String, secs: String) -> String { f("gpui.c.kicad.opening", ["editor": editor, "job": job, "secs": secs]) }
+
+    /// gpui.c.kicad.openingbare = Opening the {editor}… {secs} s
+    static func gpui_c_kicad_openingbare(editor: String, secs: String) -> String { f("gpui.c.kicad.openingbare", ["editor": editor, "secs": secs]) }
+
+    /// gpui.c.kicad.openfailed = The {editor} did not open
+    static func gpui_c_kicad_openfailed(editor: String) -> String { f("gpui.c.kicad.openfailed", ["editor": editor]) }
 
     /// gpui.c.kicad.changed = Changed on disk: {files}. You have unsaved edits.
     static func gpui_c_kicad_changed(files: String) -> String { f("gpui.c.kicad.changed", ["files": files]) }
